@@ -2,9 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 import 'package:feohledger_mobile/models/contract.dart';
+import 'package:feohledger_mobile/utils/money.dart';
 import 'package:feohledger_mobile/widgets/contract_status_badge.dart';
-
-final _currencyFormat = NumberFormat.currency(symbol: '\$');
 
 class ContractListTile extends StatelessWidget {
   final Contract contract;
@@ -21,8 +20,7 @@ class ContractListTile extends StatelessWidget {
   String get _semanticLabel {
     final parts = <String>[
       contract.title ?? contract.vendorName ?? 'Untitled Contract',
-      if (contract.totalValue != null)
-        _currencyFormat.format(contract.totalValue),
+      if (contract.totalValue != null) _totalValue,
       if (contract.contractNumber != null) 'contract ${contract.contractNumber}'
       else if (contract.vendorName != null) contract.vendorName!,
       contract.status.label,
@@ -31,6 +29,11 @@ class ContractListTile extends StatelessWidget {
     ];
     return parts.join(', ');
   }
+
+  /// The contract's value in the CONTRACT's own currency — its line items and
+  /// spend limit are denominated in it, not in the org's reporting currency.
+  String get _totalValue =>
+      formatMoney(contract.totalValue, currency: contract.currency);
 
   @override
   Widget build(BuildContext context) {
@@ -57,7 +60,7 @@ class ContractListTile extends StatelessWidget {
           ),
           if (contract.totalValue != null)
             Text(
-              _currencyFormat.format(contract.totalValue),
+              _totalValue,
               style: const TextStyle(fontWeight: FontWeight.w600),
             ),
         ],

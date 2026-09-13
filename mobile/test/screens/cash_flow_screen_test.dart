@@ -49,12 +49,18 @@ Map<String, dynamic> _forecastBody() => {
 Map<String, dynamic> _positionBody({
   List<Map<String, dynamic>>? breaches,
   bool below = false,
+  // `resolve_opening_balance` always reports the reporting currency the whole
+  // curve is denominated in, so a fixture omitting it describes a response the
+  // backend cannot produce. `null` here models the ONE case that reaches the
+  // screen without it: a build talking to a backend older than the field.
+  Object? currency = 'USD',
 }) =>
     {
       'granularity': 'week',
       'horizon_days': 90,
       'opening_balance': 10000.0,
       'opening_balance_source': 'settings',
+      'opening_balance_currency': ?currency,
       'threshold': 5000.0,
       'periods': [
         {

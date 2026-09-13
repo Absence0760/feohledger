@@ -1,10 +1,8 @@
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
 
 import 'package:feohledger_mobile/models/exception.dart';
+import 'package:feohledger_mobile/utils/money.dart';
 import 'package:feohledger_mobile/widgets/exception_status_badge.dart';
-
-final _currencyFormat = NumberFormat.currency(symbol: '\$');
 
 /// One row in the exception queue: type, related invoice + vendor + amount,
 /// severity and status. Composes a single screen-reader announcement.
@@ -41,12 +39,17 @@ class ExceptionListTile extends StatelessWidget {
       if (exception.vendorName != null) exception.vendorName!,
       if (exception.invoiceNumber != null)
         'invoice ${exception.invoiceNumber}',
-      if (exception.amount != null) _currencyFormat.format(exception.amount),
+      if (exception.amount != null) _amount,
       exception.status.label,
       if (exception.isOverdue) 'overdue',
     ];
     return parts.join(', ');
   }
+
+  /// The related invoice's amount, in the related invoice's currency —
+  /// `/api/exceptions` joins the code through for this row.
+  String get _amount =>
+      formatMoney(exception.amount, currency: exception.currency);
 
   @override
   Widget build(BuildContext context) {
@@ -74,7 +77,7 @@ class ExceptionListTile extends StatelessWidget {
             ),
             if (exception.amount != null)
               Text(
-                _currencyFormat.format(exception.amount),
+                _amount,
                 style: const TextStyle(fontWeight: FontWeight.w600),
               ),
           ],

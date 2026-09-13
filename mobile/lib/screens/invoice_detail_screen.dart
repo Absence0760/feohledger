@@ -6,6 +6,7 @@ import 'package:feohledger_mobile/api/endpoints.dart';
 import 'package:feohledger_mobile/l10n/gen/app_localizations.dart';
 import 'package:feohledger_mobile/models/audit_entry.dart';
 import 'package:feohledger_mobile/models/invoice.dart';
+import 'package:feohledger_mobile/utils/money.dart';
 import 'package:feohledger_mobile/stores/auth_store.dart';
 import 'package:feohledger_mobile/stores/invoice_store.dart';
 import 'package:feohledger_mobile/utils/a11y.dart';
@@ -16,7 +17,6 @@ import 'package:feohledger_mobile/widgets/invoice_file_viewer.dart';
 import 'package:feohledger_mobile/widgets/invoice_warnings_panel.dart';
 import 'package:feohledger_mobile/widgets/status_badge.dart';
 
-final _currencyFormat = NumberFormat.currency(symbol: '\$');
 final _dateFormat = DateFormat('MMM d, yyyy');
 
 class InvoiceDetailScreen extends StatefulWidget {
@@ -285,7 +285,7 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
           if (inv.amount != null) ...[
             const SizedBox(height: 8),
             Text(
-              _currencyFormat.format(inv.amount),
+              formatMoney(inv.amount, currency: inv.currency),
               style: const TextStyle(
                 fontSize: 28,
                 fontWeight: FontWeight.bold,

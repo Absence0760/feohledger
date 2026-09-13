@@ -8,10 +8,10 @@ import 'package:feohledger_mobile/models/contract.dart';
 import 'package:feohledger_mobile/stores/auth_store.dart';
 import 'package:feohledger_mobile/stores/contract_store.dart';
 import 'package:feohledger_mobile/utils/a11y.dart';
+import 'package:feohledger_mobile/utils/money.dart';
 import 'package:feohledger_mobile/widgets/contract_status_badge.dart';
 import 'package:feohledger_mobile/widgets/kpi_card.dart';
 
-final _currencyFormat = NumberFormat.currency(symbol: '\$');
 final _dateFormat = DateFormat('MMM d, yyyy');
 
 class ContractDetailScreen extends StatefulWidget {
@@ -185,7 +185,7 @@ class _ContractDetailScreenState extends State<ContractDetailScreen> {
           if (c.totalValue != null) ...[
             const SizedBox(height: 8),
             Text(
-              _currencyFormat.format(c.totalValue),
+              formatMoney(c.totalValue, currency: c.currency),
               style: const TextStyle(
                 fontSize: 28,
                 fontWeight: FontWeight.bold,
@@ -203,7 +203,7 @@ class _ContractDetailScreenState extends State<ContractDetailScreen> {
           _detailRow(
             l.contractDetailFieldSpendLimit,
             c.spendLimit != null
-                ? '${_currencyFormat.format(c.spendLimit)}'
+                ? '${formatMoney(c.spendLimit, currency: c.currency)}'
                     '${c.notToExceed ? l.contractDetailNotToExceed : ''}'
                 : null,
           ),
@@ -245,7 +245,7 @@ class _ContractDetailScreenState extends State<ContractDetailScreen> {
             const SizedBox(height: 24),
             _sectionTitle(l.contractDetailSectionSpend),
             const SizedBox(height: 12),
-            _buildSpend(l, c.spend!),
+            _buildSpend(l, c.spend!, currency: c.currency),
           ],
 
           // Line items
@@ -253,14 +253,22 @@ class _ContractDetailScreenState extends State<ContractDetailScreen> {
             const SizedBox(height: 24),
             _sectionTitle(l.contractDetailSectionLineItems),
             const SizedBox(height: 8),
-            ...c.lineItems.map((item) => _buildLineItem(l, item)),
+            ...c.lineItems
+                .map((item) => _buildLineItem(l, item, currency: c.currency)),
           ],
         ],
       ),
     );
   }
 
-  Widget _buildSpend(AppLocalizations l, ContractSpend spend) {
+  /// Every figure in the spend summary is a rollup of invoices booked against
+  /// THIS contract, so it is denominated in the contract's own currency — the
+  /// one the `Currency` detail row above already prints.
+  Widget _buildSpend(
+    AppLocalizations l,
+    ContractSpend spend, {
+    required String? currency,
+  }) {
     return Column(
       children: [
         Row(
@@ -268,7 +276,7 @@ class _ContractDetailScreenState extends State<ContractDetailScreen> {
             Expanded(
               child: KpiCard(
                 title: l.contractDetailSpendInvoiced,
-                value: _currencyFormat.format(spend.invoicedTotal),
+                value: formatMoney(spend.invoicedTotal, currency: currency),
                 subtitle: l.contractDetailSpendInvoiceCount(spend.invoiceCount),
                 icon: Icons.receipt_long,
                 color: Colors.blue,
@@ -280,12 +288,10 @@ class _ContractDetailScreenState extends State<ContractDetailScreen> {
                 title: spend.overLimit
                     ? l.contractDetailSpendOverLimit
                     : l.contractDetailSpendRemaining,
-                value: spend.remaining != null
-                    ? _currencyFormat.format(spend.remaining)
-                    : '—',
+                value: formatMoney(spend.remaining, currency: currency),
                 subtitle: spend.spendLimit != null
                     ? l.contractDetailSpendOfLimit(
-                        _currencyFormat.format(spend.spendLimit))
+                        formatMoney(spend.spendLimit, currency: currency))
                     : l.contractDetailSpendNoLimit,
                 icon: spend.overLimit
                     ? Icons.warning_amber
@@ -299,12 +305,17 @@ class _ContractDetailScreenState extends State<ContractDetailScreen> {
     );
   }
 
-  Widget _buildLineItem(AppLocalizations l, ContractLineItem item) {
+  Widget _buildLineItem(
+    AppLocalizations l,
+    ContractLineItem item, {
+    required String? currency,
+  }) {
     final subtitleParts = <String>[
       if (item.quantity != null)
         l.contractDetailLineQty(item.quantity.toString()),
       if (item.unitPrice != null)
-        l.contractDetailLineUnitPrice(_currencyFormat.format(item.unitPrice)),
+        l.contractDetailLineUnitPrice(
+            formatMoney(item.unitPrice, currency: currency)),
       if (item.glAccount != null) l.contractDetailLineGl(item.glAccount!),
     ];
     return ListTile(
@@ -327,7 +338,7 @@ class _ContractDetailScreenState extends State<ContractDetailScreen> {
           subtitleParts.isNotEmpty ? Text(subtitleParts.join('  ·  ')) : null,
       trailing: item.total != null
           ? Text(
-              _currencyFormat.format(item.total),
+              formatMoney(item.total, currency: currency),
               style: const TextStyle(fontWeight: FontWeight.w600),
             )
           : null,

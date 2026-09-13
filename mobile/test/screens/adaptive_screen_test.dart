@@ -113,9 +113,23 @@ MockClient _adaptiveClient({
   Map<String, dynamic>? patterns,
   Map<String, dynamic>? anomalies,
   List<Map<String, dynamic>>? suggestions,
+  // The reporting currency `OrgCurrencyStore` resolves out of
+  // `GET /api/organization`. `null` serves settings declaring none, which is
+  // what leaves the per-vendor figures bare and the section note on.
+  String? reportingCurrency,
 }) {
   return MockClient((req) async {
     final path = req.url.path;
+    if (path.endsWith('/organization')) {
+      return _json({
+        'id': 'org1',
+        'name': 'Acme Corp',
+        'slug': 'acme',
+        'plan': 'pro',
+        'created_at': '2026-01-01T00:00:00',
+        'settings': {'reporting_currency': ?reportingCurrency},
+      });
+    }
     if (req.method == 'POST' && path.endsWith('/dismiss')) {
       onDismiss?.call(path);
       if (dismissStatus != 200) {
@@ -354,9 +368,11 @@ void main() {
     expect(find.text('12 approved · 1 rejected'), findsWidgets);
     expect(find.text('By vendor'), findsOneWidget);
     expect(find.text('Acme Supplies'), findsOneWidget);
+    // This org declares no usable currency in its settings, so neither the
+    // payload nor `OrgCurrencyStore` can name one: the figures render as the
+    // exact strings the backend sent, and the section note is what says what
+    // they are in.
     expect(find.text('Median 1150.00 · average 1200.00'), findsOneWidget);
-    // The figures carry no symbol — the payload does not name the currency they
-    // are in, so the section says it once instead.
     expect(
       find.textContaining('reporting currency'),
       findsWidgets,
@@ -366,6 +382,31 @@ void main() {
       find.textContaining('2 approvals could not be expressed'),
       findsOneWidget,
     );
+  });
+
+  testWidgets(
+      'per-vendor amounts wear the org reporting currency once it resolves',
+      (tester) async {
+    // The patterns tab is the surface that had to opt out of money formatting:
+    // its figures are in the org's reporting currency and `approval-patterns`
+    // does not name it, so rather than stamp the `\$` the other four screens
+    // asserted, it rendered raw strings under a note. `OrgCurrencyStore`
+    // resolves the same settings rungs the server used to denominate them, so
+    // the figures can now carry the real symbol — and the note, whose only job
+    // was to cover for its absence, goes away.
+    await loginThen(
+      ['cfo'],
+      _adaptiveClient(reportingCurrency: 'ZAR'),
+    );
+
+    await tester.pumpWidget(_localized(const AdaptiveScreen()));
+    await _pumpUntil(tester, find.text('Suggestions'));
+    await tester.tap(find.widgetWithText(Tab, 'Approval patterns'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Median R1,150.00 · average R1,200.00'), findsOneWidget);
+    expect(find.textContaining('reporting currency.'), findsNothing);
+    expect(find.textContaining(r'$'), findsNothing);
   });
 
   testWidgets('the anomalies tab renders the scan count and each flag',

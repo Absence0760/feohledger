@@ -8,18 +8,37 @@ import 'package:feohledger_mobile/models/payment_queue.dart';
 import 'package:feohledger_mobile/stores/auth_store.dart';
 import 'package:feohledger_mobile/stores/payment_queue_store.dart';
 import 'package:feohledger_mobile/utils/a11y.dart';
+import 'package:feohledger_mobile/utils/money.dart';
 import 'package:feohledger_mobile/widgets/kpi_card.dart';
 
-final _currencyFormat = NumberFormat.currency(symbol: '\$');
 final _dateFormat = DateFormat('MMM d, yyyy');
 
-/// Format a server-supplied money display string for the UI. The parse is for
-/// *rendering only* — we never do arithmetic on money on the device (totals are
-/// server-computed). Falls back to the raw string if it isn't numeric.
-String _money(String display) {
-  final n = num.tryParse(display);
-  return n == null ? display : _currencyFormat.format(n);
-}
+/// Format a server-supplied money display string in [currency].
+///
+/// This screen shows figures in three different denominations and they must
+/// not be run together: a queue row is in its own invoice's currency, the KPI
+/// bar is in the org's reporting currency (which `/payments/summary` names
+/// itself), and a run's total is in no single currency at all — see
+/// [_runTotal]. Passing the wrong one relabels a real figure, so the currency
+/// is a required argument rather than a module-level default.
+///
+/// The parse inside [formatMoneyString] is for *rendering only* — money is
+/// never summed on the device — and a figure it cannot format losslessly is
+/// returned verbatim rather than rounded.
+String _money(String display, String? currency) =>
+    formatMoneyString(display, currency: currency);
+
+/// A payment run's total, deliberately bare.
+///
+/// `payment_runs.total_amount` is a plain `SUM(Payment.amount)` and each
+/// payment is denominated in its own invoice's currency, so a run spanning a
+/// USD and a EUR invoice holds a quantity in neither. The org's reporting
+/// currency would be a guess at what a mixed sum "really" is, and a `$` was
+/// simply wrong; the honest rendering is the digits with no symbol until the
+/// endpoint rolls the sum up the way `/payments/queue` already does. Tracked
+/// in `docs/followups.md`.
+String _runTotal(PaymentRun run) =>
+    formatMoneyString(run.totalAmountDisplay, currency: null);
 
 /// Localized label for a payment method (the model's `label` is English-only).
 String _methodLabel(AppLocalizations l, PaymentMethod m) => switch (m) {
@@ -180,13 +199,13 @@ class _PaymentQueueScreenState extends State<PaymentQueueScreen>
             children: [
               KpiCard(
                 title: l.paySummaryTotalPaid,
-                value: _money(s.totalPaidDisplay),
+                value: _money(s.totalPaidDisplay, s.currency),
                 icon: Icons.check_circle,
                 color: Colors.green,
               ),
               KpiCard(
                 title: l.paySummaryPending,
-                value: _money(s.totalPendingDisplay),
+                value: _money(s.totalPendingDisplay, s.currency),
                 icon: Icons.hourglass_bottom,
                 color: Colors.orange,
               ),
@@ -199,7 +218,7 @@ class _PaymentQueueScreenState extends State<PaymentQueueScreen>
               ),
               KpiCard(
                 title: l.paySummaryCardRebates,
-                value: _money(s.totalRebatesDisplay),
+                value: _money(s.totalRebatesDisplay, s.currency),
                 icon: Icons.savings,
                 color: Colors.purple,
               ),
@@ -268,11 +287,12 @@ class _PaymentQueueScreenState extends State<PaymentQueueScreen>
       item.invoiceNumber,
       dueText,
       if (item.discountEligible && item.discountAmountDisplay != null)
-        l.payQueueDiscount(_money(item.discountAmountDisplay!)),
+        l.payQueueDiscount(_money(item.discountAmountDisplay!, item.currency)),
     ];
 
     return Semantics(
-      label: '${item.vendorName}, ${_money(item.amountDisplay)}, '
+      label: '${item.vendorName}, '
+          '${_money(item.amountDisplay, item.currency)}, '
           '${subtitleParts.join(', ')}'
           '${item.isOverdue ? ', ${l.payQueueOverdue}' : ''}'
           // The verdict is spoken, not just coloured — a screen-reader user
@@ -302,7 +322,7 @@ class _PaymentQueueScreenState extends State<PaymentQueueScreen>
               ),
             ),
             Text(
-              _money(item.amountDisplay),
+              _money(item.amountDisplay, item.currency),
               style: const TextStyle(fontWeight: FontWeight.w600),
             ),
           ],
@@ -524,7 +544,7 @@ class _PaymentQueueScreenState extends State<PaymentQueueScreen>
                 : '');
     return Semantics(
       label: l.payRunAnnounce(
-        _money(run.totalAmountDisplay),
+        _runTotal(run),
         _runStatusLabel(l, run.status),
         subtitle,
       ),
@@ -534,7 +554,7 @@ class _PaymentQueueScreenState extends State<PaymentQueueScreen>
           children: [
             Expanded(
               child: Text(
-                _money(run.totalAmountDisplay),
+                _runTotal(run),
                 style: const TextStyle(fontWeight: FontWeight.w600),
               ),
             ),
@@ -594,7 +614,7 @@ class _PaymentQueueScreenState extends State<PaymentQueueScreen>
         l.payRunApproveBody(
           _dateFormat.format(run.createdAt),
           run.paymentCount,
-          _money(run.totalAmountDisplay),
+          _runTotal(run),
         ),
         confirmLabel: l.payRunApproveConfirm,
       );
@@ -616,7 +636,7 @@ class _PaymentQueueScreenState extends State<PaymentQueueScreen>
       }
       final confirmed = await _confirm(
         l.payRunExecuteTitle,
-        l.payRunExecuteBody(_money(run.totalAmountDisplay)),
+        l.payRunExecuteBody(_runTotal(run)),
       );
       if (confirmed != true) return;
       final message = await PaymentQueueStore.instance.executeRun(run.id);
