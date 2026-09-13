@@ -3561,6 +3561,14 @@ export const en = {
 	'admin.roles.col.name': 'Name',
 	'admin.roles.col.description': 'Description',
 	'admin.roles.col.permissions': 'Permissions',
+	// The four built-in roles. Shared by `/admin`'s user rows + role
+	// checkboxes, its system-roles table, and `/profile`'s Account card —
+	// ONE vocabulary, so no surface can name a role differently from the
+	// next. A custom role keeps its stored name (tenant data).
+	'admin.roles.name.admin': 'Admin',
+	'admin.roles.name.apManager': 'AP Manager',
+	'admin.roles.name.apClerk': 'AP Clerk',
+	'admin.roles.name.cfo': 'CFO',
 	'admin.roles.system.heading': 'System roles',
 	'admin.roles.system.hint': 'Built-in roles gate hardcoded routes and cannot be edited or deleted.',
 	'admin.roles.system.empty': 'No system roles configured.',
