@@ -980,8 +980,11 @@ async def _refresh_po_match(
     # vocabulary. When the amount leg already opened one, `_ensure_exception`
     # de-dupes per (invoice, type, open) and this is a no-op — the warning
     # still lands on the invoice, which is where a reviewer reads it.
+    # The PO reference the over-receipt and quality sentences both name. The
+    # matcher's `po_number` when it resolved one, else what the invoice claims.
+    po_ref = match.po_number or invoice.po_number or ""
+
     if match.over_receipt:
-        po_ref = match.po_number or invoice.po_number or ""
         # Read the quantities off the match result rather than scraping the
         # matcher's composed `issues` sentence: a warning built by cutting a
         # substring out of English prose is the shape this catalogue removes.
@@ -1008,7 +1011,6 @@ async def _refresh_po_match(
     #   fail               -> error   (block: goods were rejected)
     #   required + missing -> warning (no inspection on record yet)
     #   partial            -> info    (some quantity accepted)
-    po_ref = match.po_number or invoice.po_number or ""
     if match.inspection_result == "fail":
         # The deviation notes come off the inspection row, not out of the
         # matcher's composed issue string — and the PO reference now survives
