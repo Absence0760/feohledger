@@ -543,26 +543,18 @@ async def run_extraction(
 
         # Self-correction pass — verify arithmetic, date ordering, line-item
         # math.  Lowers confidence on suspect fields and adds warnings.
-        from app.services.extraction_self_correction import (
-            SELF_CORRECTION_CODES,
-            run_self_correction,
-        )
+        from app.services.extraction_self_correction import run_self_correction
 
         correction_report = await run_self_correction(result, org_settings)
         if correction_report.corrected:
             # Re-apply cleaned values after confidence adjustments
             existing_warnings = list(invoice.warnings or [])
             for v in correction_report.violations:
-                existing_warnings.append(
-                    {
-                        **warning(
-                            SELF_CORRECTION_CODES[v["check"]],
-                            v["severity"],
-                            **v["params"],
-                        ),
-                        "check": v["check"],
-                    }
-                )
+                # A violation already IS a catalogue-built warning (see
+                # `extraction_self_correction`), carrying `check` for the modal.
+                # `fields_affected` is confidence-penalty bookkeeping and has
+                # never ridden the warning.
+                existing_warnings.append({k: val for k, val in v.items() if k != "fields_affected"})
             invoice.warnings = existing_warnings
             logger.info(
                 "[extraction] Self-correction: %s violation(s)",

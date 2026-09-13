@@ -27,7 +27,6 @@ import pytest
 
 from app.services import invoice_warning_catalog as cat
 from app.services.contract_compliance import COMPLIANCE_EXCEPTION_TYPE
-from app.services.extraction_self_correction import SELF_CORRECTION_CODES
 from app.services.invoice_warning_catalog import WARNING_SPECS, codes, render, warning
 
 #: Every module that appends to an `invoice.warnings` list. A new one joins the
@@ -38,6 +37,7 @@ PRODUCER_MODULES = (
     "app/services/duplicate_detection.py",
     "app/services/recurring_invoices.py",
     "app/services/extraction.py",
+    "app/services/extraction_self_correction.py",
 )
 
 _BACKEND = Path(__file__).resolve().parent.parent
@@ -86,13 +86,6 @@ def test_every_code_renders_a_complete_sentence(spec):
 def test_every_code_has_a_call_site():
     """A declared code nobody emits is a catalogue entry pretending to work."""
     sources = "\n".join((_BACKEND / rel).read_text(encoding="utf-8") for rel in PRODUCER_MODULES)
-    # `SELF_CORRECTION_CODES` maps the self-correction `check` names onto codes,
-    # so those literals live there rather than at the `warning(...)` call.
-    sources += "\n" + (_BACKEND / "app/services/extraction_self_correction.py").read_text(
-        encoding="utf-8"
-    )
-    # The price-variance / recurring-variance / duplicate codes are selected by
-    # expression, so match on the distinguishing suffix as well as the whole.
     for code in codes():
         assert f'"{code}"' in sources or f"'{code}'" in sources, f"{code} has no call site"
 
@@ -129,11 +122,6 @@ def test_contract_codes_carry_the_registered_exception_type():
     assert contract_codes
     for spec in contract_codes:
         assert spec.type == COMPLIANCE_EXCEPTION_TYPE
-
-
-def test_self_correction_checks_all_map_to_a_code():
-    for check, code in SELF_CORRECTION_CODES.items():
-        assert code in codes(), f"{check} maps to unknown code {code}"
 
 
 def test_unknown_code_and_bad_params_raise():

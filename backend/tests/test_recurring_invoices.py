@@ -178,8 +178,10 @@ def _tmpl(**kw):
     return SimpleNamespace(**base)
 
 
-def _inv(amount):
-    return SimpleNamespace(amount=Decimal(amount))
+def _inv(amount, currency="USD"):
+    # `currency` is read by the variance warning, whose money-bearing sentence
+    # names the invoice's own currency rather than a hardcoded `$` (§157).
+    return SimpleNamespace(amount=Decimal(amount), currency=currency)
 
 
 def test_variance_within_tolerance_returns_none():

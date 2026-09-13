@@ -85,11 +85,14 @@ def _po(*, total: Decimal, vendor_id=None, line_items=None):
     )
 
 
-def _invoice(*, amount: Decimal, vendor_id=None, gl_account=None):
+def _invoice(*, amount: Decimal, vendor_id=None, gl_account=None, currency="USD"):
     return SimpleNamespace(
         id=uuid.uuid4(),
         organization_id=uuid.uuid4(),
         amount=amount,
+        # Read by the money-bearing warning sentences, which name the invoice's
+        # own currency rather than a hardcoded `$` (decisions.md §157).
+        currency=currency,
         po_number="PO-100",
         vendor_id=vendor_id,
         gl_account=gl_account,
