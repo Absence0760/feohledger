@@ -52,6 +52,7 @@ from app.schemas.auth import (
 )
 from app.services import mfa, password_reset, webauthn, webauthn_rp
 from app.services.audit_dispatch import dispatch_auth_audit, queue_auth_audit
+from app.services.credential_upgrade import upgrade_password_hash
 from app.services.email_adapters import (
     EmailMessage,
     get_email_adapter,
@@ -439,6 +440,19 @@ async def login(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="This workspace requires single sign-on. Sign in with your identity provider.",
         )
+
+    # A hash still stored under a scheme we no longer write gets replaced with
+    # one we do — now, while the plaintext that just verified is in scope, which
+    # is the only moment it exists. Placed AFTER the SSO-only refusal, because a
+    # tenant that has closed password login has made this hash unreachable for
+    # signing in and gains nothing from re-encoding it (the upgrade commits
+    # itself, so it would NOT be undone by the 403 — it would simply be work
+    # done for a credential no longer in use). And BEFORE the MFA branch below,
+    # which returns a challenge rather than a token: the password is already
+    # proven, and waiting for the second factor would skip the upgrade for
+    # exactly the accounts that have one. Never fails the login — see
+    # `services/credential_upgrade`.
+    await upgrade_password_hash(db, user, body.password)
 
     org_required = mfa.org_requires_mfa(org.settings if org else None)
 
