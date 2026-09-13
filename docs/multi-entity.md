@@ -106,6 +106,26 @@ route's own "same rule as manual create". New accounts still land shared in the
 consolidated view and entity-specific when an entity is selected. Guards:
 `backend/tests/test_gl_account_entity_uniqueness.py`.
 
+#### The distinction is visible, not just enforced
+
+`/gl-accounts` (the chart-of-accounts list page) renders a **Scope** column
+whenever `entityStore.multiEntity` — the same condition that gates the sidebar
+entity switcher — because every rule above produces pairs of rows that are
+otherwise identical on screen: the consolidated view is every entity's chart at
+once, where two subsidiaries may each hold their own `6000`, and an
+entity-scoped read is `shared ∪ its own`, where an entity row sharing a shared
+row's code is an override of it. `GET /api/gl-accounts` therefore serialises
+`entity_id` per row (NULL rendered as **Shared**, otherwise the entity's name
+resolved from the already-loaded entity list). On a single-entity tenant the
+column is suppressed: there is no second answer for it to give.
+
+`GlAccountModal` states which chart a new account will land in **before** it is
+created — shared when consolidated, the selected entity's own otherwise. That
+is not a courtesy: the backend reads it off `X-Entity-ID` rather than the
+request body, the difference is invisible in the form, and there is no PATCH on
+that router to correct it afterwards, so a silent sidebar selection would
+decide whether the account reaches one subsidiary or all of them.
+
 ### Vendor matching: entity ∪ NULL, for a different reason
 
 `services/vendor_matching.match_vendor` is the second consumer of
