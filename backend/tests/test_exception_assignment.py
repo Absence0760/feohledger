@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import uuid
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -313,7 +314,9 @@ def test_get_exception_returns_full_dict_for_found_row():
         time_to_resolution_seconds=None,
         created_at=datetime.now(UTC),
     )
-    inv = SimpleNamespace(invoice_number="INV-100", vendor_name="Acme", amount=250)
+    # `currency` too: a real `Invoice` always carries one, and it is what the
+    # queue formats the amount against.
+    inv = SimpleNamespace(invoice_number="INV-100", vendor_name="Acme", amount=250, currency="USD")
 
     db = AsyncMock()
     db.execute = AsyncMock(return_value=MagicMock(first=MagicMock(return_value=(exc, inv))))
@@ -343,3 +346,62 @@ def test_get_exception_404_when_missing():
     with pytest.raises(HTTPException) as exc_info:
         asyncio.run(get_exception(uuid.uuid4(), db=db, user=user, entity_id=None))
     assert exc_info.value.status_code == 404
+
+
+# ---------- _exception_dict: the amount's currency -----------------------
+
+
+def _exc_row():
+    """A minimal exception row for the serializer's pure edges."""
+    return SimpleNamespace(
+        id=uuid.uuid4(),
+        invoice_id=uuid.uuid4(),
+        exception_type="po_mismatch",
+        severity="warning",
+        description="x",
+        status="open",
+        resolution=None,
+        resolved_by=None,
+        resolved_at=None,
+        assigned_to=None,
+        assigned_to_user_id=None,
+        due_at=None,
+        time_to_resolution_seconds=None,
+        created_at=datetime.now(UTC),
+    )
+
+
+def test_exception_dict_names_the_invoice_currency_beside_the_amount():
+    """`amount` IS the joined invoice's amount, so it only means something
+    beside the code that invoice carries.
+
+    Without this field every client had to pick a currency for the figure
+    itself: the mobile exception list and detail screens stamped a `$` on it,
+    and the org's REPORTING currency would have been no better — a
+    GBP-reporting tenant holds USD invoices, so that is a different wrong
+    answer rather than a fix.
+    """
+    from app.api.exceptions import _exception_dict
+
+    inv = SimpleNamespace(
+        invoice_number="INV-1",
+        vendor_name="Acme",
+        amount=Decimal("250.00"),
+        currency="EUR",
+    )
+    body = _exception_dict(_exc_row(), inv)
+
+    assert body["amount"] == 250.0
+    assert body["currency"] == "EUR"
+
+
+def test_exception_dict_currency_is_none_when_no_invoice_is_joined():
+    """An exception can outlive / precede its invoice join, and `None` is not
+    a licence to substitute a default (`docs/decisions.md` §79/§82) — the
+    client renders the bare figure instead."""
+    from app.api.exceptions import _exception_dict
+
+    body = _exception_dict(_exc_row(), None)
+
+    assert body["amount"] is None
+    assert body["currency"] is None
