@@ -178,6 +178,40 @@ test.describe('/gl-accounts', () => {
 		await expect(page).not.toHaveURL(/inactive=1/);
 	});
 
+	test('a failed RE-load drops the stale rows instead of relabelling them', async ({ page }) => {
+		// `errored` only reaches the reader through the composed `empty`
+		// message, and `DataTable` renders that on `isEmpty` alone. So a second
+		// failed load — a chip click or a search after one good fetch — used to
+		// leave the PREVIOUS filter's rows on screen with nothing but a toast
+		// that fades, while the count footer kept reporting that stale number
+		// as the answer to filters it never ran. The first-load case is in the
+		// parameterized `reactivity/list-load-failure.spec.ts`; only the
+		// second-load one can go stale, which is why it is pinned here.
+		await expect(page.locator('table tbody tr').first()).toBeVisible();
+		await expect(page.locator('.count-line')).toBeVisible();
+
+		await page.route('**/api/gl-accounts*', async (route) => {
+			if (new URL(route.request().url()).pathname !== '/api/gl-accounts') {
+				await route.continue();
+				return;
+			}
+			await route.fulfill({
+				status: 500,
+				contentType: 'application/json',
+				body: JSON.stringify({ detail: 'boom' })
+			});
+		});
+
+		await page.getByRole('button', { name: 'Asset', exact: true }).click();
+
+		await expect(page.getByTestId('table-empty')).toHaveText(
+			/Couldn.t load the chart of accounts/
+		);
+		await expect(page.locator('table tbody td.mono')).toHaveCount(0);
+		// …and the footer stops asserting a count it no longer has.
+		await expect(page.locator('.count-line')).toHaveCount(0);
+	});
+
 	test('an admin gets both writes; the create dialog opens and cancels clean', async ({ page }) => {
 		await expect(page.getByRole('button', { name: '+ New Account' })).toBeVisible();
 		await expect(page.getByRole('button', { name: 'Sync from ERP' })).toBeVisible();

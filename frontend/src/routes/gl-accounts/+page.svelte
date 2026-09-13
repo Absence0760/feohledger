@@ -182,10 +182,20 @@
 			accounts = rows;
 			errored = false;
 		} catch (err) {
-			// `isCurrentRequest`, not `canCommit`: only the newest request
-			// reports, but a superseded failure must not clear `errored`.
+			// `isCurrentRequest`, not `canCommit`: a superseded request's failure
+			// is not this table's news — the newer one owns the error state, and
+			// blanking the rows here would discard what it is about to publish.
 			if (!fetchSequence.isCurrentRequest(token)) return;
 			errored = true;
+			// **Clear the rows.** `errored` only reaches the reader through
+			// `emptyMessage`, which `DataTable` renders on `isEmpty` alone — so
+			// a SECOND failed load (a chip click or a search after one good
+			// fetch) would otherwise leave the previous filter's rows on screen
+			// with nothing but a toast that fades, and the count footer below
+			// would keep reporting that stale number as the answer to filters
+			// it never ran. `/exceptions` sets the same precedent for the same
+			// reason.
+			accounts = [];
 			toast(err instanceof Error ? err.message : m('glAccounts.toast.loadFailed'), 'error');
 		} finally {
 			if (fetchSequence.isCurrentRequest(token)) {
