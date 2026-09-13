@@ -15,11 +15,13 @@
 // translated at all (`decisions.md` §149 is the same defect on the screening
 // verdict), so the taxonomy needed a real label map.
 //
-// The lifecycle `status` vocabulary deliberately does NOT live here yet: the
-// queue's own badge and this panel both render the raw wire value, and keying
-// one without the other is how two surfaces end up naming one status
-// differently. That is filed as its own slice in `docs/followups.md`.
+// The lifecycle `status` vocabulary lives here too, and landed in ONE change
+// with every surface that renders it — the queue's badge, the AI-agents
+// runnable-queue cell and that panel's run dialog. Keying one without the
+// others is how two surfaces come to name a single status differently, which
+// is the defect above with a different column name.
 
+import type { BadgeTone } from '$lib/components/ui/Badge.svelte';
 import type { MessageKey } from '$lib/i18n/messages';
 
 /**
@@ -92,4 +94,75 @@ export function exceptionTypeLabelKey(type: string): MessageKey | null {
 /** Readable stand-in for an unrecognised type: the raw key, de-underscored. */
 export function exceptionTypeFallback(type: string): string {
 	return type.replace(/_/g, ' ');
+}
+
+/**
+ * Every `Exception.status` the lifecycle produces.
+ *
+ * `open` is the column default (`models/exception.py`); the other three are the
+ * whole image of `exception_lifecycle.RESOLUTION_STATUSES` (the queue verbs
+ * `resolve` / `escalate` / `dismiss`), and `GET /api/exceptions/summary`
+ * enumerates exactly these four as the chip counts. The order is the chips'
+ * order, which is also the lifecycle's: actionable first, terminal after.
+ *
+ * `escalated` is in BOTH halves — `ACTIONABLE_STATUSES` and the resolution
+ * map — because escalating is not a resolution: it records why a human is
+ * needed and leaves the row open with its SLA clock running.
+ */
+export const EXCEPTION_STATUSES = ['open', 'escalated', 'resolved', 'dismissed'] as const;
+
+export type ExceptionStatus = (typeof EXCEPTION_STATUSES)[number];
+
+/**
+ * The i18n key carrying each status' label — never the English string itself.
+ *
+ * These are the SAME four keys the queue's own status `FilterChips` already
+ * read, deliberately rather than a second `exceptions.status.*` set: the chip
+ * and the badges it filters name one status, and two key sets is how they come
+ * to name it two ways once a translator revises one of them. A chip reading
+ * `Gelöst` above rows badged `resolved` was the shipped state.
+ */
+export const EXCEPTION_STATUS_LABEL_KEYS: Record<ExceptionStatus, MessageKey> = {
+	open: 'exceptions.filter.open',
+	escalated: 'exceptions.filter.escalated',
+	resolved: 'exceptions.filter.resolved',
+	dismissed: 'exceptions.filter.dismissed'
+};
+
+/**
+ * Badge tone per status. Total over {@link ExceptionStatus}, so a status with a
+ * tone but no label — a coloured pill printing a raw wire value — is a compile
+ * error. Read it through {@link exceptionStatusTone}.
+ *
+ * `open` (amber) and `escalated` (red) keep separate tones on purpose —
+ * escalation is what says a human deadline has already passed, and folding
+ * both onto `warning` would erase the only scannable difference between an
+ * exception in the queue and one that has run out of time. `dismissed` keeps
+ * the flat `neutral` chip: a dismissal is the absence of a finding, not a
+ * state to hunt for.
+ */
+export const EXCEPTION_STATUS_TONES: Record<ExceptionStatus, BadgeTone> = {
+	open: 'warning',
+	escalated: 'danger',
+	resolved: 'success',
+	dismissed: 'neutral'
+};
+
+/** An unknown status gets the flat chip rather than none. */
+export function exceptionStatusTone(status: string): BadgeTone {
+	return EXCEPTION_STATUS_TONES[status as ExceptionStatus] ?? 'neutral';
+}
+
+/**
+ * The message key for a lifecycle status, or `null` for one this build has no
+ * wording for.
+ *
+ * Tolerant for the same reason {@link exceptionTypeLabelKey} is: `status` is a
+ * plain `String(30)` with no DB enum behind it, so a row written by a future
+ * build can carry a status this one predates. The caller then prints the raw
+ * value — which is what every surface printed before this map existed, and is
+ * honest — rather than an empty badge.
+ */
+export function exceptionStatusLabelKey(status: string): MessageKey | null {
+	return EXCEPTION_STATUS_LABEL_KEYS[status as ExceptionStatus] ?? null;
 }
