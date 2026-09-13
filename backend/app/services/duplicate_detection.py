@@ -54,6 +54,7 @@ from app.config import settings
 from app.models.invoice import Invoice
 from app.models.invoice_embedding import InvoiceEmbedding
 from app.services.embedding_adapters import get_embedding_adapter
+from app.services.invoice_warning_catalog import warning
 
 logger = logging.getLogger(__name__)
 
@@ -187,29 +188,37 @@ def matches_to_warning(matches: list[DuplicateMatch]) -> dict[str, Any] | None:
 
     if same_entity:
         top = same_entity[0]
-        message = (
-            f"Potential duplicate: {top.similarity:.0%} match to "
-            f"{top.invoice_number or 'another invoice'}"
-            + (f" from {top.vendor_name}" if top.vendor_name else "")
-        )
-        if cross_entity_count:
-            message += (
-                f" (plus {cross_entity_count} near-identical "
-                f"{'invoice' if cross_entity_count == 1 else 'invoices'} under "
-                "another entity)"
-            )
+        # Four base codes rather than one with optional clauses: whether the
+        # match's invoice number and vendor name are known are two independent
+        # halves of the sentence, and a client cannot concatenate localized
+        # fragments. The cross-entity tail is NOT a fifth dimension — it is an
+        # ICU plural with a `=0` arm, so one template covers "no siblings" too.
+        params: dict = {
+            "similarity": f"{top.similarity * 100:.0f}",
+            "crossEntityCount": cross_entity_count,
+        }
+        if top.invoice_number:
+            params["invoiceNumber"] = top.invoice_number
+        if top.vendor_name:
+            params["vendorName"] = top.vendor_name
+        code = {
+            (True, True): "duplicate_similar",
+            (True, False): "duplicate_similar_unnamed_vendor",
+            (False, True): "duplicate_similar_unnumbered",
+            (False, False): "duplicate_similar_unnumbered_unnamed_vendor",
+        }[(bool(top.invoice_number), bool(top.vendor_name))]
+        flag = warning(code, "warning", **params)
     else:
         # Cross-entity only — say what it is and nothing more.
         top = matches[0]
-        message = (
-            f"Potential duplicate: {top.similarity:.0%} match to a near-identical "
-            "invoice under another entity"
+        flag = warning(
+            "duplicate_similar_cross_entity",
+            "warning",
+            similarity=f"{top.similarity * 100:.0f}",
         )
 
     return {
-        "type": "duplicate_similar",
-        "severity": "warning",
-        "message": message,
+        **flag,
         "related_invoices": [
             {
                 # The id too: an entity-scoped GET would 404 on it anyway, so

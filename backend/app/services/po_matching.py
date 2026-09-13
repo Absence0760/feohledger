@@ -44,7 +44,7 @@ def _to_decimal(value, default: Decimal = Decimal("0")) -> Decimal:
         return default
 
 
-def _qty(value: Decimal) -> str:
+def format_quantity(value: Decimal) -> str:
     """Render a quantity for a human-readable issue string.
 
     ``normalize()`` drops the ``Numeric(12, 4)`` trailing zeros (``12.0000`` →
@@ -97,6 +97,10 @@ class MatchResult:
     inspection_result: str | None = None  # 'pass' | 'fail' | 'partial' or None
     inspection_accepted_quantity: float | None = None
     inspection_required: bool = False
+    #: The inspection's own deviation notes, when it failed. Carried on the
+    #: result so `invoice_warnings` can parameterize the quality-hold sentence
+    #: from the record instead of cutting a substring out of `issues`.
+    inspection_deviation_notes: str | None = None
 
     # 3-way: received quantity EXCEEDS what was ordered. Additive to the
     # persisted `invoice.po_match` shape — `status` deliberately keeps its four
@@ -105,6 +109,13 @@ class MatchResult:
     # amount is a receiving discrepancy, not a billing one. It rides `issues`,
     # which the invoice modal renders verbatim.
     over_receipt: bool = False
+    #: 3-way quantities, aggregated across every live goods receipt for the PO.
+    #: Populated only when the PO carries line items AND at least one receipt
+    #: carries received lines — the same condition that computes the partial /
+    #: over-receipt legs. Exact `Decimal`, rendered to numbers by
+    #: `to_json_dict()` like every other figure here.
+    ordered_quantity: Decimal | None = None
+    received_quantity: Decimal | None = None
 
     issues: list[str] = field(default_factory=list)
     details: dict = field(default_factory=dict)
@@ -264,6 +275,9 @@ async def match_invoice_to_po(
                 Decimal("0"),
             )
 
+            result.ordered_quantity = po_qty_total
+            result.received_quantity = gr_qty_total
+
             if po_qty_total > 0 and gr_qty_total < po_qty_total:
                 pct_received = (gr_qty_total / po_qty_total) * Decimal(100)
                 result.issues.append(
@@ -283,8 +297,8 @@ async def match_invoice_to_po(
                 result.over_receipt = True
                 over_qty = gr_qty_total - po_qty_total
                 result.issues.append(
-                    f"Over-receipt: {_qty(gr_qty_total)} received against "
-                    f"{_qty(po_qty_total)} ordered (+{_qty(over_qty)})"
+                    f"Over-receipt: {format_quantity(gr_qty_total)} received against "
+                    f"{format_quantity(po_qty_total)} ordered (+{format_quantity(over_qty)})"
                 )
 
     # 4-way match: check for a quality inspection. Prefer one tied to the
@@ -330,6 +344,8 @@ async def match_invoice_to_po(
         result.inspection_result = inspection.result
         if inspection.accepted_quantity is not None:
             result.inspection_accepted_quantity = float(inspection.accepted_quantity)
+
+        result.inspection_deviation_notes = inspection.deviation_notes
 
         if inspection.result == "fail":
             result.status = "mismatch"

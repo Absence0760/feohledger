@@ -18,6 +18,17 @@ from app.services.decimal_convention import AmountConvention
 from app.services.extraction_adapters.base import ExtractionResult
 
 # Tolerances for "approximately equal" checks.
+#: ``violation["check"]`` → the `invoice_warning_catalog` code that states it.
+#: The check name is this module's own vocabulary (it also keys the confidence
+#: penalties), so the mapping lives here rather than in the caller — a new
+#: check with no code fails `tests/test_invoice_warning_catalog.py`.
+SELF_CORRECTION_CODES = {
+    "total_reconciliation": "self_correction_total_reconciliation",
+    "date_ordering": "self_correction_date_ordering",
+    "line_items_sum": "self_correction_line_items_sum",
+    "line_item_math": "self_correction_line_item_math",
+}
+
 TOTAL_TOLERANCE = Decimal("0.02")  # 2 %
 LINE_ITEM_TOLERANCE = Decimal("0.01")  # 1 %
 
@@ -112,11 +123,14 @@ def _check_total_reconciliation(
             {
                 "check": "total_reconciliation",
                 "severity": "warning",
-                "message": (
-                    f"Amounts don't add up: subtotal ({subtotal}) + tax ({tax})"
-                    f" + shipping ({shipping}) − discount ({discount})"
-                    f" = {expected}, but total is {amount}."
-                ),
+                "params": {
+                    "subtotal": subtotal,
+                    "tax": tax,
+                    "shipping": shipping,
+                    "discount": discount,
+                    "expected": expected,
+                    "amount": amount,
+                },
                 "fields_affected": [
                     "amount",
                     "subtotal",
@@ -146,7 +160,7 @@ def _check_date_ordering(
             {
                 "check": "date_ordering",
                 "severity": "warning",
-                "message": (f"Due date ({due}) is before invoice date ({inv_date})."),
+                "params": {"dueDate": due, "invoiceDate": inv_date},
                 "fields_affected": ["due_date", "invoice_date"],
             }
         )
@@ -179,9 +193,7 @@ def _check_line_items_sum(
             {
                 "check": "line_items_sum",
                 "severity": "warning",
-                "message": (
-                    f"Line items total ({li_sum}) doesn't match invoice amount ({amount})."
-                ),
+                "params": {"lineItemsTotal": li_sum, "amount": amount},
                 "fields_affected": ["amount"],
             }
         )
@@ -207,9 +219,13 @@ def _check_line_item_math(
                 {
                     "check": "line_item_math",
                     "severity": "info",
-                    "message": (
-                        f"Line {i + 1}: {qty} × {price} = {expected}, but total is {total}."
-                    ),
+                    "params": {
+                        "lineNumber": i + 1,
+                        "quantity": qty,
+                        "unitPrice": price,
+                        "expected": expected,
+                        "total": total,
+                    },
                     "fields_affected": [f"line_items[{i}].total"],
                 }
             )
