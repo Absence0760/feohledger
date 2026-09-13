@@ -189,38 +189,6 @@
 	let cardsExpiryDays = $state(30);
 	let cardsSandbox = $state(true);
 	let savingCards = $state(false);
-	// Data sync
-	let syncingGL = $state(false);
-	let syncingPOs = $state(false);
-	let glSyncResult = $state('');
-	let poSyncResult = $state('');
-
-	async function syncGLAccounts() {
-		syncingGL = true;
-		glSyncResult = '';
-		try {
-			const result = await api.post<{ message: string }>('/api/gl-accounts/sync-erp', {});
-			glSyncResult = result.message;
-		} catch (err) {
-			glSyncResult = err instanceof Error ? err.message : 'Sync failed';
-		} finally {
-			syncingGL = false;
-		}
-	}
-
-	async function syncPurchaseOrders() {
-		syncingPOs = true;
-		poSyncResult = '';
-		try {
-			const result = await api.post<{ message: string }>('/api/purchase-orders/sync-erp', {});
-			poSyncResult = result.message;
-		} catch (err) {
-			poSyncResult = err instanceof Error ? err.message : 'Sync failed';
-		} finally {
-			syncingPOs = false;
-		}
-	}
-
 	const CARD_REGIONS = [
 		{ value: 'US', label: 'United States', default_provider: 'lithic' },
 		{ value: 'UK', label: 'United Kingdom', default_provider: 'lithic' },
@@ -2557,6 +2525,20 @@
 				</section>
 			{/if}
 
+			<!-- Data Sync is a SIGNPOST, not a second set of sync buttons.
+			     Each of the three ERP-synced data sets now has its own page
+			     carrying its own Sync-from-ERP action gated on `auth.isManager`
+			     — `/gl-accounts` (new), `/purchase-orders`, `/vendors` — which
+			     matches every one of those endpoints' real gate
+			     (admin | ap_manager). The two buttons that used to live here
+			     were admin-only by virtue of this route's nav gate, said nothing
+			     about which entity's chart they would write into, and reported
+			     into a bare <span> with no list to refresh; the vendors row had
+			     already been a link for exactly that reason. Three links is one
+			     vocabulary for one fact (decisions §153's objection to a panel
+			     growing a second shape, and §163 for the call).
+			     It keeps its place because this is where the ERP connection is
+			     configured, so "now where do I pull it?" is asked here. -->
 			<section class="card">
 				<h2>{m('org.section.dataSync')}</h2>
 				<p class="card-hint">{m('org.dataSync.hint')}</p>
@@ -2567,12 +2549,7 @@
 							<span class="sync-name">{m('org.dataSync.coa')}</span>
 							<span class="sync-desc">{m('org.dataSync.coaDesc')}</span>
 						</div>
-						<button class="btn-outline" disabled={syncingGL} onclick={syncGLAccounts}>
-							{syncingGL ? m('org.dataSync.syncing') : m('org.dataSync.syncGl')}
-						</button>
-						{#if glSyncResult}
-							<span class="sync-result">{glSyncResult}</span>
-						{/if}
+						<a href="/gl-accounts" class="btn-outline">{m('org.dataSync.manageCoa')}</a>
 					</div>
 
 					<div class="sync-item">
@@ -2580,12 +2557,7 @@
 							<span class="sync-name">{m('org.dataSync.pos')}</span>
 							<span class="sync-desc">{m('org.dataSync.posDesc')}</span>
 						</div>
-						<button class="btn-outline" disabled={syncingPOs} onclick={syncPurchaseOrders}>
-							{syncingPOs ? m('org.dataSync.syncing') : m('org.dataSync.syncPos')}
-						</button>
-						{#if poSyncResult}
-							<span class="sync-result">{poSyncResult}</span>
-						{/if}
+						<a href="/purchase-orders" class="btn-outline">{m('org.dataSync.managePos')}</a>
 					</div>
 
 					<div class="sync-item">
@@ -3169,12 +3141,6 @@
 	.sync-desc {
 		font-size: 0.78rem;
 		color: var(--text-muted);
-	}
-
-	.sync-result {
-		font-size: 0.82rem;
-		color: var(--text-muted);
-		white-space: nowrap;
 	}
 
 	.btn-outline {
