@@ -9,12 +9,15 @@
 ///   boundary. They are carried as strings and rendered verbatim; the device
 ///   never parses or recomputes one. (The web page does the same.)
 /// * **Per-vendor money figures carry no currency code.** They are denominated
-///   in the org's reporting currency, which this payload does not name, so the
-///   screen labels the section rather than stamping a symbol on each figure —
-///   printing `$` on a ZAR org's averages would be a lie the API never told.
+///   in the org's reporting currency, which this payload does not name. The
+///   screen therefore formats them against `OrgCurrencyStore`, which resolves
+///   the SAME three settings rungs the backend used to denominate them, and
+///   falls back to naming the denomination in a section note when the org
+///   declares none usable — never to a `$`, which on a ZAR org's averages
+///   would be a lie the API never told.
 ///   The anomaly rows are the exception: they carry their own `amount_currency`,
 ///   because `detect_invoice_anomaly` falls back to the BILLED figure when an
-///   invoice has no usable rate lock.
+///   invoice has no usable rate lock, so each row labels itself.
 /// * **Everything is advisory and deterministic** — statistics over the
 ///   tenant's own approval history, no model, recomputed on read. A suggestion
 ///   is a proposal; nothing here has changed a workflow.

@@ -1,3 +1,5 @@
+import 'package:feohledger_mobile/utils/money.dart';
+
 /// The safe, editable subset of organization settings the mobile app exposes —
 /// the company profile and invoice defaults (mirrors the web Org Settings page's
 /// least-sensitive tabs). ERP credentials, payment/webhook secrets, extraction
@@ -18,8 +20,29 @@ class OrgSettings {
   // save doesn't drop the white-label logo the web app set.
   final String companyLogoUrl;
 
+  /// The org's REPORTING (base) currency — `settings.reporting_currency`, a
+  /// bare top-level string rather than a block. Every cross-currency rollup
+  /// the API serves is denominated in the code
+  /// `currency_conversion.resolve_reporting_currency` picks, and this is its
+  /// first candidate. `null` when the org has not set one.
+  final String? reportingCurrency;
+
+  /// `settings.payments.home_currency` — the SECOND candidate in that same
+  /// order, and the one the follow-up this work closed omitted. The whole
+  /// `payments` block is admin-only credentials EXCEPT this key, which
+  /// `org_settings_view.NON_ADMIN_SETTINGS` admits by name for exactly this
+  /// read. `null` when unset.
+  final String? paymentsHomeCurrency;
+
   // invoice_defaults.*
-  final String defaultCurrency;
+
+  /// `settings.invoice_defaults.currency` as the org actually set it — `null`
+  /// when it did not. Distinct from [defaultCurrency], which substitutes a
+  /// platform default for the edit form. The distinction is the whole point:
+  /// a rung that always answers makes the rungs after it unreachable
+  /// (`docs/decisions.md` §119), and rung 3 is the last one a client can see.
+  final String? configuredInvoiceCurrency;
+
   final String defaultPaymentTerms;
   final String invoiceNumberPrefix;
   final String defaultGlAccount;
@@ -35,18 +58,47 @@ class OrgSettings {
     required this.companyWebsite,
     required this.companyTaxId,
     required this.companyLogoUrl,
-    required this.defaultCurrency,
+    this.reportingCurrency,
+    this.paymentsHomeCurrency,
+    this.configuredInvoiceCurrency,
     required this.defaultPaymentTerms,
     required this.invoiceNumberPrefix,
     required this.defaultGlAccount,
     required this.defaultCostCenter,
   });
 
+  /// What the org's aggregate figures are denominated in, or `null` when it
+  /// declares nothing usable.
+  ///
+  /// The first three rungs of
+  /// `backend/app/services/currency_conversion.py::resolve_reporting_currency`,
+  /// in its order — and the direct mirror of the web
+  /// `utils/reportingCurrency.ts::resolveReportingCurrency`, which exists so
+  /// the two surfaces cannot drift. The fourth rung is the server-side
+  /// `settings.reporting_currency_default`, which no client can read; a client
+  /// that substituted `USD` in its place would be guessing at a value the
+  /// operator may have changed.
+  ///
+  /// Returns `null` rather than a default for the reason §119 records: this is
+  /// the layer that must be able to abstain. The caller decides what an
+  /// unproven currency renders as — and in this app it renders as no symbol
+  /// at all, never as a dollar sign.
+  String? get resolvedReportingCurrency =>
+      normalizeCurrencyCode(reportingCurrency) ??
+      normalizeCurrencyCode(paymentsHomeCurrency) ??
+      normalizeCurrencyCode(configuredInvoiceCurrency);
+
+  /// The invoice-default currency for the EDIT FORM, which needs a value in
+  /// its field. Never use it to label a figure — see
+  /// [resolvedReportingCurrency].
+  String get defaultCurrency => configuredInvoiceCurrency ?? 'USD';
+
   factory OrgSettings.fromJson(Map<String, dynamic> json) {
     final settings = (json['settings'] as Map<String, dynamic>?) ?? const {};
     final company = (settings['company'] as Map<String, dynamic>?) ?? const {};
     final defaults =
         (settings['invoice_defaults'] as Map<String, dynamic>?) ?? const {};
+    final payments = (settings['payments'] as Map<String, dynamic>?) ?? const {};
 
     String s(Map<String, dynamic> m, String k) => (m[k] as String?) ?? '';
 
@@ -60,7 +112,9 @@ class OrgSettings {
       companyWebsite: s(company, 'website'),
       companyTaxId: s(company, 'tax_id'),
       companyLogoUrl: s(company, 'logo_url'),
-      defaultCurrency: (defaults['currency'] as String?) ?? 'USD',
+      reportingCurrency: settings['reporting_currency'] as String?,
+      paymentsHomeCurrency: payments['home_currency'] as String?,
+      configuredInvoiceCurrency: defaults['currency'] as String?,
       defaultPaymentTerms: (defaults['payment_terms'] as String?) ?? 'Net 30',
       invoiceNumberPrefix: (defaults['number_prefix'] as String?) ?? 'INV-',
       defaultGlAccount: s(defaults, 'default_gl_account'),

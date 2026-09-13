@@ -114,14 +114,19 @@ void main() {
       expect(contract.spend!.overLimit, isFalse);
     });
 
-    test('defaults currency to USD and bool flags to false when absent', () {
+    test('leaves an absent currency NULL and defaults bool flags to false', () {
       final contract = Contract.fromJson({
         'id': 'c1',
         'contract_type': 'service',
         'status': 'draft',
         'created_at': '2026-01-01T12:00:00',
       });
-      expect(contract.currency, 'USD');
+      // It used to substitute 'USD'. A contract whose currency the payload
+      // never named would then have every figure on its detail screen — value,
+      // spend limit, line-item prices — labelled in a currency nobody
+      // established. `null` renders those bare instead; see
+      // `utils/money.dart` and `docs/decisions.md` §161.
+      expect(contract.currency, isNull);
       expect(contract.notToExceed, isFalse);
       expect(contract.autoRenew, isFalse);
     });

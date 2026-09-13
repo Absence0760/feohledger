@@ -240,7 +240,7 @@ class Invoice {
       invoiceNumber: json['invoice_number'] as String?,
       vendorName: (json['vendor_name'] ?? json['vendor']) as String?,
       amount: (json['amount'] as num?)?.toDouble(),
-      currency: json['currency'] as String? ?? 'USD',
+      currency: json['currency'] as String?,
       status: InvoiceStatus.fromString(json['status'] as String),
       invoiceDate: json['invoice_date'] != null
           ? DateTime.parse(json['invoice_date'] as String)
