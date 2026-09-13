@@ -33,7 +33,8 @@ Plain `$2b$...` hashes written before commit c6a91396 also still verify — the
 legacy arm reproduces bcrypt 4.0's 72-byte truncation deliberately, since bcrypt
 4.1+ raises on a long secret and that would lock those accounts out of their own
 password. `pwd_context.needs_update(hash)` reports which stored hashes are on an
-older scheme.
+older scheme, and a successful login acts on it — see **A legacy hash is
+upgraded on its owner's next login** below.
 
 **This is our code, not passlib's.** passlib 1.7.4 has been the last release
 since 2020 and cannot import against bcrypt 4.1+ (it reads a deleted
@@ -61,6 +62,64 @@ than worked around: contorting the dataflow to satisfy the query would change
 the digest, and the digest matching passlib's byte-for-byte is the only thing
 keeping every stored credential verifiable. If they reappear on a later run,
 re-dismiss them — do not "fix" them.
+
+### A legacy hash is upgraded on its owner's next login
+
+`needs_update` is consulted, and acted on, by
+`backend/app/services/credential_upgrade.py`. Both login handlers call it one
+line after `verify_password` returns True — `api/auth.py::login` for the
+control-plane `User`, `api/portal_auth.py::portal_login` for the tenant-scoped
+`VendorUser` — and it re-hashes the just-verified plaintext onto the current
+scheme when the stored hash is on one we no longer write. **A login is the only
+moment a stored password's plaintext exists**, so there is no other place this
+can happen: a password column cannot be migrated offline, and the alternative is
+a forced reset for every account, which is the user-visible cost
+[decisions.md](decisions.md) §151 was written to avoid. Before this, a user who
+had not changed their password since c6a91396 kept authenticating against a raw
+`$2b$` hash — 72-byte truncation and all — indefinitely.
+
+What is worth knowing about it:
+
+- **It runs before the MFA branch**, which returns a challenge token rather than
+  an access token. The password is already proven at that point; waiting for the
+  second factor would skip the upgrade for exactly the accounts that have one.
+- **It runs after the SSO-only refusal.** A tenant with `sso_only` has closed
+  password login, so that hash is unreachable for signing in and re-encoding it
+  buys nothing. (The upgrade commits itself, so placing it earlier would not
+  have been undone by the 403 — it would just have been work done for a
+  credential no longer in use.) Consequence: a legacy hash in an SSO-only
+  tenant is never upgraded by signing in, because signing in with it is not
+  possible — while it does remain a valid MFA step-up proof, which
+  [followups.md](followups.md) tracks.
+- **It never fails a login.** A re-hash that raises (reachable: `LoginRequest.password`
+  has no maximum, and a legacy hash matches on its first 72 bytes, so an
+  over-`MAX_SECRET_BYTES` secret can verify and then be refused by `hash`) or a
+  write that the server rejects is logged and skipped, and the sign-in continues
+  on the hash that already verified. The write runs inside a SAVEPOINT so a
+  rejected statement cannot poison the handler's own commit.
+- **The write is a compare-and-swap, not an assignment** — `WHERE id = … AND
+  hashed_password = <the hash we verified>`. The handler holds no row lock
+  across its bcrypt, so a password change committed in that window would
+  otherwise be overwritten by a re-hash of the *old* plaintext.
+- **A hash `identify` cannot name is left alone**, even though `needs_update`
+  is true for it. In production it is unreachable (a string `verify` cannot
+  match never gets here), and acting on it would write a working credential over
+  a row that had none.
+- **An upgraded login costs two hashes where a current-scheme login costs one**,
+  once per account, ever. It is deliberately not equalised — see
+  [decisions.md](decisions.md) §165 — and the enumeration parity that matters
+  (unknown address vs wrong password) is untouched: no rejection path reaches
+  the upgrade.
+- **No audit row.** The credential is unchanged — same secret, same owner, same
+  validity — only its storage encoding moved, and the sign-in that triggered it
+  is already on the trail as `auth.login.success` / `portal.login.success` in
+  the same request. An INFO log line records the scheme transition for the
+  operator question the follow-up actually posed ("do pre-c6a91396 hashes exist
+  in a deployed database?"); it carries an account id and two scheme names,
+  never a secret or a digest.
+
+Covered by `backend/tests/test_password_hash_upgrade.py` (real Postgres, both
+surfaces, through the HTTP login route).
 
 ## Auth Flow
 
