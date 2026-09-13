@@ -117,6 +117,40 @@ test.describe('/gl-accounts', () => {
 		);
 	});
 
+	test('a chip click issues exactly one list request, not two', async ({ page }) => {
+		// The page has TWO effects that call `load()` synchronously — the type
+		// chip's and the inactive toggle's — and Svelte tracks reads
+		// transitively through the functions an effect calls. A tracked filter
+		// read inside `buildParams()` therefore lands in both dependency sets,
+		// so one chip click re-runs both and fires two identical requests. The
+		// request sequencer keeps the later from clobbering the earlier, which
+		// is precisely what makes the duplicate invisible without a count — so
+		// this counts. (`fill()` cannot catch the search half of the same
+		// family; `reactivity/search-debounce-race.spec.ts` types for that.)
+		await expect(page.locator('table tbody tr').first()).toBeVisible();
+
+		let listCalls = 0;
+		page.on('request', (r) => {
+			if (new URL(r.url()).pathname.endsWith('/api/gl-accounts') && r.method() === 'GET') {
+				listCalls++;
+			}
+		});
+
+		const filtered = page.waitForResponse(
+			(r) =>
+				new URL(r.url()).pathname.endsWith('/api/gl-accounts') &&
+				r.url().includes('account_type=expense')
+		);
+		await page.getByRole('button', { name: 'Expense', exact: true }).click();
+		await filtered;
+		// Settle: a duplicate would be issued in the same microtask flush as the
+		// first, so it is already counted by the time the response lands — but
+		// assert on the request the click produced rather than on a quiet
+		// network, and give a second effect nothing to hide behind.
+		await expect(page).toHaveURL(/type=expense/);
+		expect(listCalls).toBe(1);
+	});
+
 	test('the inactive toggle is URL-backed and adds the Status column', async ({ page }) => {
 		await expect(page.locator('table tbody tr').first()).toBeVisible();
 		// Status earns a column only once an inactive row can appear at all.

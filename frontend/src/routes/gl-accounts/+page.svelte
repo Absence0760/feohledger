@@ -114,17 +114,31 @@
 	);
 
 	/**
-	 * Read `search` through `untrack` — this is called from the chip / toggle
-	 * `$effect`s, and Svelte tracks reads transitively through the functions an
-	 * effect calls, so a plain read would make those effects depend on the term
-	 * and fire an immediate, un-debounced request on every keystroke racing the
-	 * 300ms timer (issue #168). `untrack` still reads the live value.
+	 * EVERY read here is untracked, and that is load-bearing rather than
+	 * defensive. Svelte tracks reads transitively through the functions an
+	 * effect calls, and **two** of this page's effects call `load()` — and so
+	 * `buildParams()` — synchronously: the type chip's and the inactive
+	 * toggle's. A tracked read of either filter therefore lands in BOTH
+	 * effects' dependency sets, so one chip click re-runs both and issues two
+	 * identical requests; the sequencer keeps the later one from clobbering the
+	 * earlier, which is exactly what makes the duplicate invisible. A tracked
+	 * `search` read is the same defect in its louder form — an immediate,
+	 * un-debounced request per keystroke racing the 300ms timer (issue #168).
+	 *
+	 * Each effect declares the one filter it actually depends on by reading it
+	 * directly, so nothing in here needs to be a dependency. `untrack` still
+	 * reads the live value — the request always carries current state.
+	 *
+	 * (`/budgets` leaves `dimensionFilter` tracked here and gets away with it
+	 * because only one of its effects calls `load()` synchronously. Don't copy
+	 * that half of the pattern onto a page with two.)
 	 */
 	function buildParams() {
 		const term = untrack(() => search).trim();
+		const type = untrack(() => typeFilter);
 		return {
 			...(term ? { search: term } : {}),
-			...(typeFilter !== 'all' ? { account_type: typeFilter } : {}),
+			...(type !== 'all' ? { account_type: type } : {}),
 			// Always sent: omitting it is not the same as `false` — the backend
 			// defaults `active_only` to true.
 			active_only: !untrack(() => includeInactive)
