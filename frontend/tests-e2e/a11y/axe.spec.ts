@@ -84,7 +84,13 @@ const AUTHED_ROUTES: { path: string; name: string; ready?: string }[] = [
 	{ path: '/adaptive', name: 'adaptive workflows', ready: 'Adaptive Workflows' },
 	{ path: '/goods-receipts', name: 'goods receipts', ready: 'Goods Receipts' },
 	{ path: '/admin/entities', name: 'admin entities', ready: 'Entities' },
-	{ path: '/admin/health', name: 'admin sweep health', ready: 'Sweep Health' }
+	{ path: '/admin/health', name: 'admin sweep health', ready: 'Sweep Health' },
+	// `/gl-accounts` — a new route in this round, scanned from the day it
+	// landed rather than "when someone widens the list". Its own controls are
+	// the ones this suite exists for: a checkbox filter whose only label is the
+	// text beside it, a column set that changes shape with that checkbox, and
+	// two `<Badge>` tint pairs in the Scope / Status cells.
+	{ path: '/gl-accounts', name: 'chart of accounts', ready: 'Chart of Accounts' }
 ];
 
 test.describe('accessibility — authenticated app (WCAG 2.2 AA)', () => {
