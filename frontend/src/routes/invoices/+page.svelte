@@ -16,6 +16,7 @@
 	import RowLink from '$lib/components/ui/RowLink.svelte';
 	import { isRowOpenClick } from '$lib/utils/rowNav';
 	import { formatList } from '$lib/utils/list';
+	import { invoiceWarningText } from '$lib/api/invoiceWarnings';
 	import { pruneSelection } from '$lib/utils/selection';
 	import type { MatchingIdsResponse } from '$lib/utils/pagination';
 	import SearchBox from '$lib/components/ui/SearchBox.svelte';
@@ -892,17 +893,16 @@
 							{invoice.invoice_number || '—'}
 						</RowLink>
 						{#if invoice.warnings?.length}
-							<!-- The frame is translated; the findings inside it are the server's
-							     own English prose (`services/invoice_warnings.py` composes each
-							     from the row's data - a PO number, an amount, a variance), so this
-							     aria-label promises a localized sentence AROUND server-English
-							     findings, not a translated finding. Keying the findings needs a
-							     warning-code -> message-key catalogue like the e-invoice one
-							     (`pnpm gen:einvoice-messages`) and is its own slice. `formatList`
-							     moves WITH the frame rather than before it: a locale separator
-							     spliced into a hardcoded English sentence is the half-fix
-							     `decisions.md` §148 refused. -->
-							{@const warningText = formatList(invoice.warnings.map((w) => w.message))}
+							<!-- Frame AND findings are localized now: each warning carries a
+							     stable `code` + typed `params`, and `invoiceWarningText` resolves
+							     them through the generated catalogue
+							     (`pnpm gen:warning-messages`), falling back to the server's own
+							     `message` for a code this build predates — which is every
+							     warning persisted before the catalogue shipped. `formatList`
+							     joins them so the separator is the reader's too (§148). -->
+							{@const warningText = formatList(
+								invoice.warnings.map((w) => invoiceWarningText(w, m))
+							)}
 							<span
 								class="warning-icon"
 								role="img"

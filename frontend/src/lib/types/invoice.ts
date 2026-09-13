@@ -164,7 +164,22 @@ export const EMPTY_ADVANCED_FILTERS: AdvancedSearchFilters = {
 export interface InvoiceWarning {
 	type: string;
 	severity: 'error' | 'warning' | 'info';
+	/**
+	 * The backend's own English sentence. It is the FALLBACK rendering, not the
+	 * thing to render: prefer `invoiceWarningText` (`$lib/api/invoiceWarnings`),
+	 * which resolves `code` + `params` into the reader's language and falls back
+	 * to this when it cannot.
+	 */
 	message: string;
+	/**
+	 * Stable identity for the SENTENCE, not the category — one `type` is up to
+	 * five of them (`backend/app/services/invoice_warning_catalog.py`). Absent
+	 * on any warning persisted before that catalogue shipped; `refresh_warnings`
+	 * re-derives it on the invoice's next write and nothing backfills.
+	 */
+	code?: string | null;
+	/** The figures the sentence embeds, typed by the generated kind map. */
+	params?: Record<string, string | number> | null;
 }
 
 export interface PoMatch {
