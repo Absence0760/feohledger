@@ -14,7 +14,12 @@
 	import Modal from '$lib/components/ui/Modal.svelte';
 	import Tabs from '$lib/components/ui/Tabs.svelte';
 	import Badge from '$lib/components/ui/Badge.svelte';
-	import { exceptionStatusLabelKey, exceptionStatusTone } from '$lib/types/exception';
+	import {
+		exceptionStatusLabelKey,
+		exceptionStatusTone,
+		exceptionTypeFallback,
+		exceptionTypeLabelKey
+	} from '$lib/types/exception';
 	import AgentDashboard from '$lib/components/exceptions/AgentDashboard.svelte';
 	import { formatMoney } from '$lib/utils/money';
 	import { timeAgo } from '$lib/utils/time';
@@ -145,6 +150,26 @@
 	function statusLabel(status: string): string {
 		const key = exceptionStatusLabelKey(status);
 		return key ? m(key) : status;
+	}
+
+	/**
+	 * An exception type's label, for the row badge AND the type-filter chips.
+	 *
+	 * Those two disagreed in English on this page: the chip derived its text as
+	 * `exception_type.replace(/_/g, ' ')` (`po mismatch`) while the rows it
+	 * filters carried the server's `type_label` (`PO Mismatch`) — §149's defect,
+	 * and the same de-underscored derivation `EXCEPTION_TYPE_LABEL_KEYS` was
+	 * added to remove from the agent decision log. Both read that map now, so
+	 * the chip cannot name a type differently from the rows behind it.
+	 *
+	 * The chip has no `type_label` to fall back on (`summary.by_type` is keyed by
+	 * the raw type), which is why the fallback is the module's own rather than a
+	 * required argument.
+	 */
+	function typeLabel(type: string, serverLabel?: string | null): string {
+		const key = exceptionTypeLabelKey(type);
+		if (key) return m(key);
+		return serverLabel || exceptionTypeFallback(type);
 	}
 
 	// Two INDEPENDENT request streams — the queue itself and the chip-count
@@ -476,7 +501,7 @@
 						onclick={() => (typeFilter = typeFilter === type ? null : type)}
 					>
 						<span class="type-dot"></span>
-						{type.replace(/_/g, ' ')} <span class="count">{count}</span>
+						{typeLabel(type)} <span class="count">{count}</span>
 					</button>
 				{/each}
 			</nav>
@@ -549,7 +574,7 @@
 							style="background:{TYPE_COLORS[exc.exception_type] ?? '#888'}1f;color:{TYPE_COLORS[exc.exception_type] ?? '#888'}"
 							title={exc.description ?? ''}
 						>
-							{exc.type_label}
+							{typeLabel(exc.exception_type, exc.type_label)}
 						</span>
 					</td>
 					<td>
