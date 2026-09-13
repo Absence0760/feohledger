@@ -23,13 +23,11 @@ export interface CatalogListParams {
 	page_size?: number;
 }
 
-/** GL account option from `GET /api/gl-accounts` — picker value is the uuid `id`. */
-export interface GlAccountOption {
-	id: string;
-	code: string;
-	name: string;
-	account_type?: string;
-}
+// The GL picker's option type + loader are owned by `api/glAccounts.ts` /
+// `types/glAccount.ts` (the chart-of-accounts surface), re-exported here so the
+// catalog pages keep one import. They used to be declared here AND in
+// `api/expenses.ts` — two hand-written guesses at one endpoint's payload.
+export type { GlAccountOption } from '$lib/types/glAccount';
 
 // The vendor picker's option type + loader live with the rest of the vendor
 // surface in `api/vendors.ts`, and `ui/VendorPicker.svelte` is now the only
@@ -122,7 +120,5 @@ export function convertPunchoutSession(sessionId: string): Promise<PunchoutConve
 
 // --- Lookups reused from existing endpoints ---
 
-export function listGlAccounts(): Promise<GlAccountOption[]> {
-	return api.get<GlAccountOption[]>('/api/gl-accounts');
-}
+export { listGlAccounts } from '$lib/api/glAccounts';
 
