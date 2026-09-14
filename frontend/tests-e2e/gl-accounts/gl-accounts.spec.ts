@@ -10,7 +10,7 @@ import { expect, signInAndWait, test } from '../fixtures/helpers';
  * existed, `POST /api/gl-accounts/sync-erp` — deliberately widened to
  * `ap_manager` on the backend — was callable from nowhere but the
  * `/organization` Data Sync panel, which the nav shows to `admin` alone inside
- * a blanket read-only `<fieldset>`. See `docs/decisions.md` §163.
+ * a blanket read-only `<fieldset>`. See `docs/decisions.md` §161.
  *
  * **This spec creates no rows.** The lean seed gives each worker tenant exactly
  * one GL account (`6000` / "Operating Expenses" / expense), and there is no

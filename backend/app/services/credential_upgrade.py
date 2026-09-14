@@ -18,7 +18,7 @@ password is already proven at that point, and deferring the upgrade until a
 second factor completes would skip it for exactly the accounts that have one.
 
 Four properties, each a decision rather than an implementation detail
-(`docs/decisions.md` §165 and §166):
+(`docs/decisions.md` §163 and §164):
 
 * **A hash we cannot classify is left alone.** `needs_update` is true for an
   unrecognised string too — correctly, since "replace it" is the right answer

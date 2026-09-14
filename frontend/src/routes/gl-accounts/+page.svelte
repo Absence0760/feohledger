@@ -10,7 +10,7 @@
 	 * panel, a route the nav shows to `admin` alone, inside the blanket
 	 * read-only `<fieldset>`. So the one role the write was widened to had no
 	 * way to perform it, and `POST /api/gl-accounts` (create) had no caller at
-	 * all. See `docs/decisions.md` §163.
+	 * all. See `docs/decisions.md` §161.
 	 *
 	 * Shape copied from `/purchase-orders` + `/budgets` rather than invented:
 	 * PageHeader shell, SearchBox + FilterChips, DataTable, URL-backed filter

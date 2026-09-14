@@ -254,7 +254,7 @@ test('an ap_clerk sees exactly the Procurement links their backend reads allow',
 	//                       gated in-page on `auth.isManager`. Gating the ROW on
 	//                       the write instead is what left `sync-erp` reachable
 	//                       from nowhere but admin-only `/organization`
-	//                       (decisions §163).
+	//                       (decisions §161).
 	// /budgets is the one genuine exclusion: `require_roles(ADMIN, AP_MANAGER,
 	// CFO)` on every read, so a clerk's FIRST page load would 403 — the nav must
 	// keep hiding it. A group-level gate cannot express both halves, which is

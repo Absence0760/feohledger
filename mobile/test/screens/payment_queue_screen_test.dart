@@ -447,7 +447,7 @@ void main() {
       // payments denominated in their own invoices' currencies — so a run
       // spanning a USD and a EUR invoice held a figure in neither, and the
       // `\$` was an assertion nothing supported on the one dialog that
-      // authorizes execution. See `docs/decisions.md` §161.
+      // authorizes execution. See `docs/decisions.md` §160.
       expect(find.text('Approve payment run?'), findsOneWidget);
       expect(
         find.text(

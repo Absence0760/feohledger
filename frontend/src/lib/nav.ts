@@ -168,7 +168,7 @@ export const NAV: NavEntry[] = [
 			// for a clerk. Gating the ROW on the write instead would have hidden a
 			// page whose every read succeeds — the dead end nav.ts has now fixed
 			// five times — while leaving `sync-erp` unreachable for the one role
-			// the backend deliberately widened it to (docs/decisions.md §163).
+			// the backend deliberately widened it to (docs/decisions.md §161).
 			{ label: 'Chart of Accounts', labelKey: 'nav.glAccounts', href: '/gl-accounts', roles: ['admin', 'ap_manager', 'ap_clerk', 'cfo'] },
 			// ap_clerk EXCLUDED deliberately, unlike its four siblings: every
 			// `/api/budgets` read is `require_roles(ADMIN, AP_MANAGER, CFO)` and

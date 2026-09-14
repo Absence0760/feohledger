@@ -351,7 +351,7 @@ that exists and never reach past it**:
 4. **Nothing — pass `null` and let the figure render bare.** Not a degraded
    mode, the answer: a mixed-currency sum (`payment_runs.total_amount`) is in no
    currency, and a `null` per-row code "is NOT a licence to substitute a
-   default" (`docs/decisions.md` §79/§82, §161). A missing symbol is a visible
+   default" (`docs/decisions.md` §79/§82, §160). A missing symbol is a visible
    gap; a wrong one is a wrong number that looks right.
 
 A model's `fromJson` must **not** default a currency to `'USD'` — that is the

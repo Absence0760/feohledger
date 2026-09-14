@@ -125,7 +125,7 @@ void main() {
       // never named would then have every figure on its detail screen — value,
       // spend limit, line-item prices — labelled in a currency nobody
       // established. `null` renders those bare instead; see
-      // `utils/money.dart` and `docs/decisions.md` §161.
+      // `utils/money.dart` and `docs/decisions.md` §160.
       expect(contract.currency, isNull);
       expect(contract.notToExceed, isFalse);
       expect(contract.autoRenew, isFalse);

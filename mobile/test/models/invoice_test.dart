@@ -183,7 +183,7 @@ void main() {
       // It used to substitute 'USD', which put a `$` on the amount of an
       // invoice whose currency the payload never named — on the same screen
       // that prints the currency code as its own detail row. `null` renders
-      // the figure bare; see `docs/decisions.md` §161.
+      // the figure bare; see `docs/decisions.md` §160.
       expect(invoice.currency, isNull);
       expect(invoice.amount, 100.0);
       expect(invoice.amount, isA<double>());

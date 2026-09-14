@@ -107,7 +107,7 @@ What is worth knowing about it:
   a row that had none.
 - **An upgraded login costs two hashes where a current-scheme login costs one**,
   once per account, ever. It is deliberately not equalised — see
-  [decisions.md](decisions.md) §165 — and the enumeration parity that matters
+  [decisions.md](decisions.md) §163 — and the enumeration parity that matters
   (unknown address vs wrong password) is untouched: no rejection path reaches
   the upgrade.
 - **No audit row.** The credential is unchanged — same secret, same owner, same

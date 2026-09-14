@@ -2536,7 +2536,7 @@
 			     into a bare <span> with no list to refresh; the vendors row had
 			     already been a link for exactly that reason. Three links is one
 			     vocabulary for one fact (decisions §153's objection to a panel
-			     growing a second shape, and §163 for the call).
+			     growing a second shape, and §161 for the call).
 			     It keeps its place because this is where the ERP connection is
 			     configured, so "now where do I pull it?" is asked here. -->
 			<section class="card">

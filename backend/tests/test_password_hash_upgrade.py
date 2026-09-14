@@ -6,7 +6,7 @@ raw `$2b$` bcrypt hash forever — the 72-byte truncation `bcrypt_sha256` was
 adopted to close, still open, for as long as that user never reset. The module
 docstring had claimed passlib's `deprecated="auto"` policy handled it; nothing
 ever called `needs_update` or `verify_and_update`, so the claim was false for
-two years (`docs/decisions.md` §151, §165).
+two years (`docs/decisions.md` §151, §163).
 
 Exercised through the real HTTP surface + real Postgres via the `realdb`
 harness, because the thing under test is that a **row actually changes and the
