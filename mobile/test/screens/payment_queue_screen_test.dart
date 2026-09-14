@@ -37,13 +37,14 @@ Map<String, dynamic> _queueItem(
   bool blocked = false,
   String? blockedReason,
   String? requiredMethod,
+  String currency = 'USD',
 }) =>
     {
       'id': id,
       'invoice_number': 'INV-$id',
       'vendor_name': 'Vendor $id',
       'amount': amount,
-      'currency': 'USD',
+      'currency': currency,
       'due_date': '2026-02-01',
       'status': 'approved',
       'is_overdue': false,
@@ -53,13 +54,18 @@ Map<String, dynamic> _queueItem(
       'required_method': requiredMethod,
     };
 
-const _summary = {
-  'total_paid': 1000.0,
-  'total_pending': 200.0,
-  'payment_count': 5,
-  'total_rebates': 12.0,
-  'queue_count': 2,
-};
+/// `GET /api/payments/summary`. Its money keys are in the org's REPORTING
+/// currency, which the response names itself (`"currency": reporting_currency`)
+/// because none of these totals belongs to a single row — unlike a queue row,
+/// which is in its own invoice's currency. One screen, two denominations.
+Map<String, dynamic> _summaryJson({String currency = 'USD'}) => {
+      'total_paid': '1000.00',
+      'total_pending': '200.00',
+      'payment_count': 5,
+      'total_rebates': '12.00',
+      'queue_count': 2,
+      'currency': currency,
+    };
 
 Map<String, dynamic> _me(List<String> roles) => {
       'id': 'u1',
@@ -91,7 +97,10 @@ Map<String, dynamic> _runResponse({
     {
       'id': id,
       'status': status,
-      'total_amount': totalAmount,
+      // A STRING, like the endpoint sends (`str(run.total_amount)`) — the
+      // backend never floats money across the boundary, and a numeric fixture
+      // here renders `5000.0` where production renders `5000.00`.
+      'total_amount': totalAmount.toStringAsFixed(2),
       'initiated_by': 'u1',
       'executed_at': null,
       'created_at': '2026-01-10T12:00:00',
@@ -108,6 +117,7 @@ MockClient _screenClient({
   List<Map<String, dynamic>>? queue,
   List<Map<String, dynamic>>? runs,
   http.Response Function(http.Request req)? onPost,
+  String summaryCurrency = 'USD',
 }) {
   return MockClient((req) async {
     if (req.method == 'POST') {
@@ -117,7 +127,9 @@ MockClient _screenClient({
     if (path.endsWith('/payments/queue')) {
       return _queueResponse(queue ?? [_queueItem('1')]);
     }
-    if (path.endsWith('/payments/summary')) return _json(_summary);
+    if (path.endsWith('/payments/summary')) {
+      return _json(_summaryJson(currency: summaryCurrency));
+    }
     if (path.contains('/payments/runs')) {
       final items = runs ?? <Map<String, dynamic>>[];
       return _json({'items': items, 'total': items.length});
@@ -428,11 +440,19 @@ void main() {
 
       // Money-path authorization: confirm-then-act, and the dialog names the
       // run (created date + payment count) and its total.
+      //
+      // The total wears NO currency symbol, deliberately. It used to read
+      // `\$5,000.00` from a module-level dollar formatter, but
+      // `payment_runs.total_amount` is a plain `SUM(Payment.amount)` over
+      // payments denominated in their own invoices' currencies — so a run
+      // spanning a USD and a EUR invoice held a figure in neither, and the
+      // `\$` was an assertion nothing supported on the one dialog that
+      // authorizes execution. See `docs/decisions.md` §160.
       expect(find.text('Approve payment run?'), findsOneWidget);
       expect(
         find.text(
           'Sign off the run created Jan 10, 2026 — 2 payments totalling '
-          '\$5,000.00. This authorizes execution; it moves no money.',
+          '5000.00. This authorizes execution; it moves no money.',
         ),
         findsOneWidget,
       );
@@ -719,5 +739,40 @@ void main() {
     expect(find.text('Pay by Virtual Card'), findsOneWidget);
     expect(find.textContaining('null'), findsNothing);
     expect(find.bySemanticsLabel(RegExp('null')), findsNothing);
+  });
+
+  testWidgets('the three money denominations on this screen stay separate',
+      (tester) async {
+    // One screen, three answers to "what currency is this in", and a single
+    // module-level `NumberFormat.currency(symbol: '\$')` used to give all
+    // three the same wrong one:
+    //   * the KPI bar is in the org's REPORTING currency, named by
+    //     `/payments/summary` itself;
+    //   * a queue row is in its own INVOICE's currency;
+    //   * a run total is in NO single currency — `SUM(Payment.amount)` over
+    //     payments denominated in their own invoices' currencies.
+    await loginThen(
+      ['cfo'],
+      _screenClient(
+        summaryCurrency: 'ZAR',
+        queue: [_queueItem('1', amount: 100, currency: 'EUR')],
+        runs: [_runResponse(totalAmount: 5000)],
+      ),
+    );
+
+    await tester.pumpWidget(_localized(const PaymentQueueScreen()));
+    await _pumpUntil(tester, find.text('Total paid'));
+
+    // Reporting currency on the KPI bar…
+    expect(find.text('R1,000.00'), findsOneWidget);
+    expect(find.text('R200.00'), findsOneWidget);
+    // …the row's own currency on the row…
+    expect(find.text('€100.00'), findsOneWidget);
+    // …and no symbol at all on the run total.
+    await tester.tap(find.widgetWithText(Tab, 'Runs'));
+    await tester.pumpAndSettle();
+    expect(find.text('5000.00'), findsWidgets);
+
+    expect(find.textContaining(r'$'), findsNothing);
   });
 }

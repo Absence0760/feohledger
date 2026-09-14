@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import asdict
+from decimal import Decimal
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
@@ -56,13 +57,18 @@ def test_match_result_serialises_to_jsonb_friendly_dict():
 # ---------- _refresh_po_match integration ---------------------------------
 
 
-def _fake_invoice(*, po_number="PO-001", amount=100.0, status_value="ready_for_review"):
+def _fake_invoice(
+    *, po_number="PO-001", amount=100.0, status_value="ready_for_review", currency="USD"
+):
     """Minimal Invoice stand-in — only the attrs the PO-match code touches."""
     return SimpleNamespace(
         id=uuid.uuid4(),
         organization_id=uuid.uuid4(),
         po_number=po_number,
         amount=amount,
+        # The warning sentences are money-bearing, so they name the invoice's
+        # own currency rather than a hardcoded `$` (decisions.md §157).
+        currency=currency,
         po_match=None,
         contract_id=None,
         # _refresh_po_match resolves the per-vendor/commodity match rule, which
@@ -215,6 +221,8 @@ async def test_refresh_po_match_raises_on_over_receipt():
         po_total=100.0,
         within_tolerance=True,
         over_receipt=True,
+        ordered_quantity=Decimal("10"),
+        received_quantity=Decimal("14"),
         issues=["Over-receipt: 14 received against 10 ordered (+4)"],
     )
 
@@ -259,6 +267,8 @@ async def test_refresh_po_match_over_receipt_rides_alongside_an_amount_mismatch(
         amount_variance_pct=50.0,
         within_tolerance=False,
         over_receipt=True,
+        ordered_quantity=Decimal("10"),
+        received_quantity=Decimal("14"),
         issues=[
             "Amount mismatch: invoice $150.00 vs PO $100.00 (+50.0%)",
             "Over-receipt: 14 received against 10 ordered (+4)",

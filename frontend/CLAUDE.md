@@ -252,6 +252,15 @@ The rule: **no user-facing string is ever a hardcoded literal** — everything g
 through `t()`, and every number, date and currency renders through the
 locale-aware helpers rather than a raw `toLocaleString`. A new string ships with
 its catalogue entry in the same change.
+
+That applies to a sentence the BACKEND composed too. A server-rendered finding
+is not exempt from i18n just because it arrived over the wire: the backend emits
+a stable code plus typed params and the client keys on the code, with the
+server's prose as the fallback for a code this build predates. The two worked
+examples are `api/einvoiceIssues.ts` (e-invoice refusals) and
+`api/invoiceWarnings.ts` (invoice warnings); both read a GENERATED map, so the
+catalogue cannot drift from the backend. Reach for that shape rather than
+rendering server English inside a translated frame.
 ### Tenant — `src/lib/tenant.ts` + `src/lib/hostRouting.ts`
 
 `hostRouting.ts` owns the pure rules ("what does this hostname mean") and is

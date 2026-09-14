@@ -318,6 +318,49 @@ label + contrast).
 (it caught the 4.38:1 and 2.55:1 muted-grey defects during this pass), so add a
 contrast check when introducing new coloured text.
 
+## Money formatting — the currency comes from the payload, never from the screen
+
+**Every money figure goes through `lib/utils/money.dart`, and the currency is an
+argument.** `formatMoney` for a `num`, `formatMoneyString` for an exact decimal
+string off the wire, `formatMoneyCompact` for a KPI tile. Nine screens and
+widgets each declared their own `NumberFormat.currency(symbol: '\$')` at module
+level, so every figure on them read as dollars whatever the row or the org said
+— on the two detail screens, directly above a `Currency` row printing the real
+code.
+
+Where a call site gets the currency, in order — **take the most specific one
+that exists and never reach past it**:
+
+1. **The row's own `currency`** for a per-row figure (invoice, contract,
+   payment, payment-queue row). A multi-currency tenant holds rows in several,
+   so the org's reporting currency is a *different* wrong answer here, not a
+   fallback.
+2. **The payload's own code** for an aggregate that names one —
+   `/payments/summary`'s `currency`, `cash_position`'s
+   `opening_balance_currency`, the dashboard's `reporting.reporting_currency`.
+   The server resolved it to denominate those figures, so there is nothing to
+   disagree with.
+3. **`OrgCurrencyStore.instance.currency`** for an aggregate the server
+   denominates in the reporting currency *without* naming it — today the
+   adaptive per-vendor averages and the cash-flow forecast leg. It mirrors the
+   web `orgCurrency` store and resolves the same three settings rungs
+   (`reporting_currency` → `payments.home_currency` →
+   `invoice_defaults.currency`); call `ensureLoaded()` in `initState` and put the
+   store in the screen's `ListenableBuilder` (`Listenable.merge`) so a figure
+   picks up its symbol when the code lands.
+4. **Nothing — pass `null` and let the figure render bare.** Not a degraded
+   mode, the answer: a mixed-currency sum (`payment_runs.total_amount`) is in no
+   currency, and a `null` per-row code "is NOT a licence to substitute a
+   default" (`docs/decisions.md` §79/§82, §160). A missing symbol is a visible
+   gap; a wrong one is a wrong number that looks right.
+
+A model's `fromJson` must **not** default a currency to `'USD'` — that is the
+rung-that-always-answers trap `docs/decisions.md` §119 records, and it makes
+rung 4 unreachable. The one sanctioned default is
+`OrgSettings.defaultCurrency`, which exists because the org-settings *form*
+field needs a value; `resolvedReportingCurrency` is the abstaining accessor
+beside it.
+
 ## Internationalization (i18n)
 
 **Full reference: `mobile/docs/i18n.md`** (ARB catalogues, the generated

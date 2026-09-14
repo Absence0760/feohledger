@@ -29,11 +29,16 @@ Map<String, dynamic> _paymentJson(
   String method = 'ach',
   String status = 'completed',
   String? reference = 'REF-001',
+  // `PaymentResponse.currency` joins the invoice's code through, so a fixture
+  // omitting it describes a payment whose invoice carries none. `null` models
+  // exactly that (a legacy row), which is the case that must render bare.
+  Object? currency = 'USD',
 }) =>
     {
       'id': id,
       'invoice_id': 'inv-$id',
       'amount': amount,
+      'currency': ?currency,
       'method': method,
       'status': status,
       'reference': reference,
@@ -112,6 +117,45 @@ void main() {
     expect(find.byType(ListTile), findsNWidgets(2));
     expect(find.text(r'$1,250.50'), findsOneWidget);
     expect(find.text(r'$99.00'), findsOneWidget);
+  });
+
+  testWidgets('renders each payment in the currency its own invoice carries',
+      (tester) async {
+    // A payment is denominated in its invoice's currency, and one tenant's
+    // history mixes them. The screen used to run every row through a
+    // module-level `NumberFormat.currency(symbol: '\$')`, so a EUR payment
+    // and a JPY payment both read as dollars — and JPY additionally grew two
+    // decimal places the currency does not have.
+    ApiClient().debugConfigure(
+      client: MockClient((req) async => _list([
+            _paymentJson('1', amount: 1250.50, currency: 'EUR'),
+            _paymentJson('2', amount: 1250, currency: 'JPY', reference: 'R2'),
+          ])),
+    );
+
+    await tester.pumpWidget(_localized(const PaymentsScreen()));
+    await _pumpUntil(tester, find.byType(ListTile));
+
+    expect(find.text('€1,250.50'), findsOneWidget);
+    expect(find.text('¥1,250'), findsOneWidget);
+    expect(find.textContaining(r'$'), findsNothing);
+  });
+
+  testWidgets('renders the bare figure when no currency was joined',
+      (tester) async {
+    // `PaymentResponse.currency` is explicit that `None` "is NOT a licence to
+    // substitute a default". The digits still render; the symbol does not.
+    ApiClient().debugConfigure(
+      client: MockClient((req) async => _list([
+            _paymentJson('1', amount: 1250.50, currency: null),
+          ])),
+    );
+
+    await tester.pumpWidget(_localized(const PaymentsScreen()));
+    await _pumpUntil(tester, find.byType(ListTile));
+
+    expect(find.text('1,250.50'), findsOneWidget);
+    expect(find.textContaining(r'$'), findsNothing);
   });
 
   testWidgets('subtitle shows the method label and reference', (tester) async {

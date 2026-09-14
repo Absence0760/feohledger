@@ -16,6 +16,7 @@ from decimal import Decimal
 
 from app.services.decimal_convention import AmountConvention
 from app.services.extraction_adapters.base import ExtractionResult
+from app.services.invoice_warning_catalog import warning
 
 # Tolerances for "approximately equal" checks.
 TOTAL_TOLERANCE = Decimal("0.02")  # 2 %
@@ -110,13 +111,23 @@ def _check_total_reconciliation(
     if not _approx_eq(expected, amount, TOTAL_TOLERANCE):
         report.violations.append(
             {
-                "check": "total_reconciliation",
-                "severity": "warning",
-                "message": (
-                    f"Amounts don't add up: subtotal ({subtotal}) + tax ({tax})"
-                    f" + shipping ({shipping}) − discount ({discount})"
-                    f" = {expected}, but total is {amount}."
+                # The violation IS the warning payload — `run_extraction` forwards
+                # it onto `invoice.warnings` verbatim, and it is ALSO persisted into
+                # the `priors_metadata` JSONB, so every value has to be
+                # JSON-serialisable. Building it through the catalogue is what makes
+                # that true: `warning()` coerces each param by its declared kind, so
+                # no raw `Decimal` or `date` reaches the column.
+                **warning(
+                    "self_correction_total_reconciliation",
+                    "warning",
+                    subtotal=subtotal,
+                    tax=tax,
+                    shipping=shipping,
+                    discount=discount,
+                    expected=expected,
+                    amount=amount,
                 ),
+                "check": "total_reconciliation",
                 "fields_affected": [
                     "amount",
                     "subtotal",
@@ -144,9 +155,13 @@ def _check_date_ordering(
     if due < inv_date:
         report.violations.append(
             {
+                **warning(
+                    "self_correction_date_ordering",
+                    "warning",
+                    dueDate=due,
+                    invoiceDate=inv_date,
+                ),
                 "check": "date_ordering",
-                "severity": "warning",
-                "message": (f"Due date ({due}) is before invoice date ({inv_date})."),
                 "fields_affected": ["due_date", "invoice_date"],
             }
         )
@@ -177,11 +192,13 @@ def _check_line_items_sum(
     if not _approx_eq(li_sum, amount, TOTAL_TOLERANCE):
         report.violations.append(
             {
-                "check": "line_items_sum",
-                "severity": "warning",
-                "message": (
-                    f"Line items total ({li_sum}) doesn't match invoice amount ({amount})."
+                **warning(
+                    "self_correction_line_items_sum",
+                    "warning",
+                    lineItemsTotal=li_sum,
+                    amount=amount,
                 ),
+                "check": "line_items_sum",
                 "fields_affected": ["amount"],
             }
         )
@@ -205,11 +222,16 @@ def _check_line_item_math(
         if not _approx_eq(expected, total, LINE_ITEM_TOLERANCE):
             report.violations.append(
                 {
-                    "check": "line_item_math",
-                    "severity": "info",
-                    "message": (
-                        f"Line {i + 1}: {qty} × {price} = {expected}, but total is {total}."
+                    **warning(
+                        "self_correction_line_item_math",
+                        "info",
+                        lineNumber=i + 1,
+                        quantity=qty,
+                        unitPrice=price,
+                        expected=expected,
+                        total=total,
                     ),
+                    "check": "line_item_math",
                     "fields_affected": [f"line_items[{i}].total"],
                 }
             )

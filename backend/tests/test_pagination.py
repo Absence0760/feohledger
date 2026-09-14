@@ -4,8 +4,8 @@ Every paginated list endpoint shares one envelope — ``items`` / ``total`` /
 ``page`` / ``page_size`` — one default page size, and one upper bound. These
 tests pin that contract against representative endpoints so a future endpoint
 can't quietly drift onto a different default or cap, and assert the deliberate
-exception: ``/gl-accounts`` is a bounded reference collection (its only
-consumer is the invoice GL dropdown) and stays unpaginated.
+exception: ``/gl-accounts`` is a bounded reference collection whose consumers
+all need every row, and stays unpaginated.
 """
 
 from datetime import UTC, datetime
@@ -158,9 +158,16 @@ async def test_workflows_list_is_paginated_envelope(realdb):
 
 
 async def test_gl_accounts_stays_unpaginated(realdb):
-    """The chart of accounts feeds the invoice GL dropdown, which needs every
-    row — so it is a bounded reference list, returned in full as a bare array
-    with no page/page_size and no truncation at DEFAULT_PAGE_SIZE."""
+    """The chart of accounts is a bounded reference list, returned in full as a
+    bare array with no page/page_size and no truncation at DEFAULT_PAGE_SIZE.
+
+    Both of its consumers need every row, so this is not an oversight waiting
+    to be normalised onto the envelope. The invoice / expense / requisition /
+    catalog GL pickers could otherwise not offer a code living past page 1,
+    which is a coding defect rather than a paging one; and the `/gl-accounts`
+    list page states the count it actually holds instead of a server total it
+    only partly fetched. Changing the shape breaks five call sites at once.
+    """
     org_id = realdb.info("b").org_id
     await _add_gl_accounts(realdb.sessionmaker("b"), org_id, DEFAULT_PAGE_SIZE + 7, prefix="PG")
 

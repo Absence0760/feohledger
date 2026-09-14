@@ -1,6 +1,6 @@
 <script lang="ts">
 	import type { AdminUser } from '$lib/types/admin';
-	import { ROLE_LABELS } from '$lib/types/admin';
+	import { roleLabelKey } from '$lib/types/admin';
 	import { adminStore } from '$lib/stores/admin.svelte';
 	import { auth } from '$lib/stores/auth.svelte';
 	import BulkBar from '$lib/components/ui/BulkBar.svelte';
@@ -245,6 +245,19 @@
 		return list.includes(role) ? list.filter((r) => r !== role) : [...list, role];
 	}
 
+	/**
+	 * A role's display name: the translated label for one of the four built-in
+	 * roles, the stored name verbatim for a tenant's own custom role.
+	 *
+	 * The resolution rule lives in `types/admin.ts::roleLabelKey` so this panel,
+	 * `RolesPanel` and `/profile` cannot each invent their own — printing the
+	 * raw `ap_manager` on one of them is how this started.
+	 */
+	function roleLabel(name: string): string {
+		const key = roleLabelKey(name);
+		return key ? m(key) : name;
+	}
+
 	function handleWindowClick(e: MouseEvent) {
 		if (confirmDeleteId && !(e.target as HTMLElement).closest('.row-action')) {
 			confirmDeleteId = null;
@@ -339,7 +352,7 @@
 				<td>
 					<div class="role-badges">
 						{#each user.roles as role}
-							<span class="role-badge">{ROLE_LABELS[role.name] ?? role.name}</span>
+							<span class="role-badge">{roleLabel(role.name)}</span>
 						{:else}
 							<span class="no-roles">{m('admin.users.noRoles')}</span>
 						{/each}
@@ -413,7 +426,7 @@
 							checked={newRoles.includes(role.name)}
 							onchange={() => (newRoles = toggleRole(role.name, newRoles))}
 						/>
-						{ROLE_LABELS[role.name] ?? role.name}
+						{roleLabel(role.name)}
 					</label>
 				{/each}
 			</div>
@@ -480,7 +493,7 @@
 								checked={editRoles.includes(role.name)}
 								onchange={() => (editRoles = toggleRole(role.name, editRoles))}
 							/>
-							{ROLE_LABELS[role.name] ?? role.name}
+							{roleLabel(role.name)}
 						</label>
 					{/each}
 				</div>

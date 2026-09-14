@@ -34,59 +34,66 @@ its `**Open:**` line or moves to the archive.
 Mirrored as GitHub issue [#321](https://github.com/Absence0760/project-account-payables/issues/321)
 for the tracker view. Keep the two reconciled when either moves.
 
-**Last reconciled:** 2026-09-11 (round 30) — five agents, each in its own git
+**Last reconciled:** 2026-09-14 (round 31) — five agents, each in its own git
 worktree, plus integrator verification of the merged branch. **Six** entries
-closed, **eight** opened. **27 → 29** — by category, **19 (c)** · **7 (a)** ·
+closed, **eighteen** opened. **29 → 41** — by category, **31 (c)** · **7 (a)** ·
 **3 (b)**.
 
-**The total went up, and that is the file working rather than failing.** Three of
-the five slices returned a defect their entry had not named, and the honest
-destination for one that cannot be fixed in the slice that found it is a new
-entry, not a closed one. Six of the eight new entries are of that kind; the other
-two are deliberate scope calls recorded so they don't read as oversights.
+**The total went up, and the reason is the same one round 30 recorded.** All six
+entries turned out to be wrong about their own work rather than merely
+incomplete, and in three cases implementing the entry as written would have
+shipped a defect. Each slice's corrections are findings in their own right, and
+the honest destination for one that cannot be fixed where it was found is a new
+entry.
 
-**A docstring asserting a mechanism is not evidence of one** — the same lesson
-the `networkidle` comment taught round 29, now on the login path. The password
-module claimed passlib's `deprecated="auto"` policy re-hashed a legacy credential
-when its owner next logged in. Nothing has ever called `needs_update` or
-`verify_and_update`, so the claim was false for the two years it stood, and a
-pre-`bcrypt_sha256` row is still verifying against a raw `$2b$` hash with no
-pre-hash. The rewrite implemented the signal and deliberately left it unwired
-(§151); wiring it is now its own entry, with the DB-write-on-login cost stated.
+**A docstring asserting a mechanism is not evidence of one, and neither is a
+follow-up entry.** Round 30 recorded the first half on the login path. Round 31
+found the second: the `needs_update` entry's own durable fix ("re-hash the
+just-verified plaintext and assign it") was a lost update and a 500-on-correct-
+password waiting to happen, the mobile entry skipped a rung of the
+reporting-currency chain it claimed to mirror, and the GL entry instructed a nav
+row be gated on a write when gating it on the write is what had hidden the page.
+All three were caught by writing the test before trusting the prescription
+(§160, §161, §164).
 
-**An allowlist fails in the wrong direction, so it ships with its complement.**
-`MATERIAL_EDIT_FIELDS` decides who is implicated in a payable raised from a
-recurring template, and a money-shaped field added to the PATCH schema later
-would have defaulted to "not material" and silently widened the exemption. It
-ships with a declared `COSMETIC_EDIT_FIELDS` and a guard that fails until every
-new field lands in exactly one of them — the omission-reads-as-oversight shape
-§141 and the uploader-stamping guard already exist to prevent (§152).
+**An entry's file list and its counts are the least reliable part of it, for the
+seventh round running.** "four screens" was eleven call sites across ten files.
+"both surfaces that render it" was three. "three assertions move with it" was
+two — and two of the tree's four status assertions turned out to be
+case-insensitive regexes that passed against the raw value either way, i.e. not
+assertions about this at all. `po_mismatch` carries five sentences, not four,
+and `quality_hold` five, not three. The durable habit is to re-derive the site
+list from the column or the vocabulary, never from the note (§157, §158).
 
-**Auditing the whole surface beat auditing the named defect, twice.** The
-`/organization` entry named one admin-only read whose 403 reached a clerk as a
-live alert. Checking every mount read found a second, `…/fraud-rules/defaults`,
-firing unconditionally with its refusal swallowed in a bare `catch {}` — the
-identical defect with the symptom suppressed, which is why it had never been
-reported. The same pass found `docs/authentication.md`'s permission matrix
-drifted on the exact point the entry was about: it called the organization reads
-admin-only when four of them are open to any authenticated role (§153).
+**A deferral conditioned on "whenever someone owns that file" belongs in this
+file, not in `decisions.md`.** §155 deferred widening the exception type-label
+map to `/exceptions` on exactly that condition and recorded it only in
+append-only history, where the person who eventually owned the file would never
+look. It shipped `po mismatch` beside the server's `PO Mismatch` for a further
+round as a result. Owning the file is what closed it (§158).
 
-**An entry's count is still the least reliable part of it, for the sixth round
-running.** "`/profile` ('Full name', 'Email', 'Roles', 'Saving...')" held eighty
-strings. The same entry's claim that exactly two `discounts.bulk.*` keys had gone
-dead was right — established by grepping all thirty, not by trusting it (§155).
+**A guard that cannot fail reads as coverage.** Two tightened e2e assertions and
+one vacuous inset check, on top of round 26's finding of the same shape. Where a
+tolerant accessor is safe *because* of a guarantee elsewhere — `api/admin.py`
+refusing a custom role named after a built-in, which is the only thing keeping
+`ROLE_LABEL_KEYS` from translating tenant data — the guard belongs on the
+guarantee, not on the accessor (§159).
 
-**Bringing a surface to mobile is deciding which of its controls do not travel.**
-Inspections shipped whole, write included, because a receiving dock is the
-strongest case in the backlog for recording an outcome on a handset. Adaptive
-shipped read-first as a finished state: both apply paths reassign a live approval
-or raise the org-wide auto-approve threshold, and a phone-sized copy of a control
-with its explanation cut off is worse than its absence (§156). Opting out of the
-mobile money formatter to avoid stamping dollars on a ZAR org's averages is what
-exposed four existing screens doing exactly that.
+**A maintenance write riding a user-facing request must be unable to change that
+request's outcome.** The credential upgrade may fail, and it then has to be
+silent, contained in a SAVEPOINT, and honest in a log line — never a 401, never
+a 500, and never a rollback reaching past the statement it was cleaning up after
+(§164).
+
+**Where nothing can be proven, render nothing rather than a default.** A missing
+currency symbol is a visible gap a reader can ask about; a substituted `$` is a
+wrong number that looks right. The same call §79/§82 made for
+`PaymentResponse.currency`, now general on mobile — and it immediately surfaced
+that the web `resolveCurrency` still substitutes USD, so the two surfaces
+currently disagree about the same row (§160).
 
 **Exception resolution stays held.** It remains the only segregation-of-duties
-item in the file and was deliberately untouched for the seventh round running,
+item in the file and was deliberately untouched for the eighth round running,
 pending the standing "loop in the CISO / Security Analyst" gate on that section.
 
 ## (c) Feature work — sized and unstarted
@@ -1461,33 +1468,32 @@ Five agents closed six entries and opened these eight. Six of them are findings
 that could not honestly be folded into the slice that surfaced them; the last two
 are deliberate scope calls, recorded so an absence does not read as an oversight.
 
-- [ ] **(c) A legacy password hash is never upgraded, and the module claimed it
-      was.** `app/utils/passwords.py` carried a docstring asserting that passlib's
-      `deprecated="auto"` policy would re-hash a credential onto the current scheme
-      when its owner next logged in. It never happened: nothing in the codebase has
-      ever called `pwd_context.needs_update` or `verify_and_update`, so the claim was
-      false for the two years it stood. A user who has not changed their password
-      since commit c6a91396 (2026-05-10) is therefore still authenticating against a
-      raw `$2b$` bcrypt hash with no SHA-256 pre-hash — which, for a password longer
-      than 72 bytes, is the exact truncation weakness `bcrypt_sha256` was adopted to
-      close, and which stays open for as long as that user never resets. Round 30
-      corrected the docstring and implemented `needs_update` (total over
-      `bcrypt_sha256` / `bcrypt_sha256_v1` / `bcrypt`, tested in
-      `tests/test_bcrypt_sha256_compat.py`), but deliberately did not wire it:
-      consulting it means a DB write on the login path, on BOTH the employee
-      (`api/auth.py::login`) and the supplier-portal (`api/portal_auth.py`) surfaces,
-      inside a slice whose whole value was that nothing about verification changed.
-      **Durable fix:** after a successful `verify_password` in each login handler, when
-      `pwd_context.needs_update(user.hashed_password)` is true, re-hash the
-      just-verified plaintext and assign it. Both handlers already run under
-      `commit_before_response`, so no new commit plumbing is needed; the MFA branch
-      returns a challenge before the token is minted but AFTER the password verified,
-      so the upgrade belongs before that branch. Needs a test per surface proving a
-      `$2b$` row becomes `$bcrypt-sha256$` on one successful login and that a wrong
-      password leaves it alone.
-      **Trigger:** the next auth slice, or any evidence that pre-c6a91396 hashes
-      actually exist in a deployed database (no deployment has happened yet, so
-      today this is latent rather than live).
+- [x] **DONE (round 31).** **(c) A legacy password hash is never upgraded, and
+      the module claimed it was.** `services/credential_upgrade.py` is the one
+      owner: both login handlers call it a line after `verify_password`, and a row
+      on a deprecated scheme is re-hashed onto the current one before either
+      handler reaches its MFA branch (which mints a challenge, not a token — the
+      password is already proven, and gating on the second factor would skip
+      exactly the accounts that have one). **Three things the durable fix did not
+      say.** (1) Acting on `needs_update` alone is wrong: it is also true for a
+      string `identify` cannot name, and this is the only place that would act on
+      that — by writing a *working* credential over a row that had none. The
+      trigger is `identify(...) is not None` AND `needs_update(...)`. (2) "Assign
+      it" is a lost update. The handler holds no row lock across its ~400 ms of
+      bcrypt, so a password change committed inside that window would be
+      overwritten by a re-hash of the OLD plaintext — the leaked credential its
+      owner had just retired, revived. The write is a compare-and-swap on the hash
+      that verified, and a zero-row result is a normal outcome, not an error.
+      (3) `commit_before_response` is true but not sufficient: catching a rejected
+      UPDATE and rolling the caller's transaction back EXPIRES the loaded `User`,
+      after which the handler's next attribute read is a synchronous lazy SELECT —
+      `MissingGreenlet`, a 500 on a correct password, produced by the error
+      handling itself. The write runs in a SAVEPOINT and the log lines read their
+      identity into locals first; a test that provokes a real Postgres rejection is
+      what found it. The second bcrypt and the timing signal it creates are paid
+      openly rather than equalised away, and no audit row is written — the encoding
+      moved, the credential did not, and the sign-in is already on the trail in the
+      same request. See [decisions.md](decisions.md) §163, §164.
 
 - [ ] **(c) The inter-company mirror does not inherit the source payable's
       implicated-actor set.** §152 made segregation key on
@@ -1512,73 +1518,128 @@ are deliberate scope calls, recorded so an absence does not read as an oversight
       **Trigger:** the next multi-entity slice, or the first tenant that routes
       recurring spend inter-company.
 
-- [ ] **(c) An `ap_manager` cannot reach the chart-of-accounts ERP sync from
-      anywhere.** `POST /api/gl-accounts/sync-erp` is
-      `require_roles(ROLE_ADMIN, ROLE_AP_MANAGER)`, and its ONLY caller in the app is
-      the Data Sync panel on `/organization` — a route the nav shows to `admin`
-      alone, inside the blanket read-only `<fieldset>` that disables every control
-      for a non-admin. Its two siblings are reachable (`/purchase-orders` and
-      `/vendors` each carry their own Sync-from-ERP button gated on
-      `auth.isManager`, matching the same backend gate); GL accounts have no list
-      page at all, only picker options behind `GET /api/gl-accounts`. So the one
-      role the backend deliberately widened this write to is the one role with no
-      way to perform it. Surfaced while making the read-only mode honest (§153) and
-      left alone there on purpose: §153 is about a non-admin being told the truth,
-      and carving a control OUT of that fieldset is the opposite change — it cannot
-      be done by nesting either (a disabled `<fieldset>` cannot be re-enabled from
-      within), so the panel would have to move out of the stack.
-      **Durable fix:** give GL accounts the surface its two 3-way-match siblings
-      have — a `/gl-accounts` list page with the sync action gated on
-      `auth.isManager` — and then decide whether the `/organization` Data Sync panel
-      is still earning its place or is a duplicate of three per-entity buttons.
-      **Trigger:** the next procurement/GL slice, or the first tenant whose AP
-      manager is asked to refresh the chart of accounts.
+- [x] **DONE (round 31).** **(c) An `ap_manager` cannot reach the chart-of-accounts
+      ERP sync from anywhere.** GL accounts got the surface, and the entry's second
+      question is answered against the panel. `/gl-accounts` is a list page shaped
+      after `/purchase-orders` + `/budgets` rather than invented — PageHeader shell,
+      `SearchBox` + `FilterChips`, `DataTable`, URL-backed `search`/`type`/`inactive`
+      state, one request sequencer, four distinct empty states — and it carries
+      **both** of that router's writes behind `auth.isManager`: the sync the entry
+      named, and `POST /api/gl-accounts` (create), which turned out to have no caller
+      in the app either — the same root cause, one endpoint over.
+      **The nav row is gated on the READ, not the write**, which is where the entry's
+      own durable fix would have gone wrong if followed literally. `GET
+      /api/gl-accounts` is `get_current_user`, so `admin | ap_manager` on the row
+      would have hidden a page whose every read succeeds — the dead end `nav.ts` has
+      now fixed five times — while leaving `sync-erp` exactly as unreachable. It sits
+      in Procurement beside the other two 3-way-match feeders, and `nav.test.ts`
+      asserts the exact per-role set so the clerk row cannot be quietly narrowed
+      later.
+      **Data Sync is not earning its buttons, and does keep its place.** Both were
+      the worse copy of an action that now exists on the page that owns it: admin-only
+      purely by virtue of `/organization`'s nav gate (against a backend gate of
+      admin | ap_manager), silent about which entity's chart or PO set they would
+      write into, and reporting into a bare `<span>` with no list to refresh. The
+      vendors row had already been a link for that reason, leaving one panel carrying
+      two vocabularies for one fact. It is three links now; deleting the section was
+      rejected because this is where the ERP connection is configured, so "now where
+      do I pull it?" is asked here — and §153's criterion still holds, the panel
+      asserts no tenant fact and so needs no admin-only hint.
+      Two things the entry had wrong rather than merely incomplete. **"Only picker
+      options" understates the read** — it already filtered server-side and was
+      already entity-scoped; what it did *not* do was serialize `entity_id`, and on
+      this one table NULL means SHARED across every entity rather than unstamped. So
+      the consolidated view was handing back every subsidiary's chart at once with two
+      legitimate `6000` rows indistinguishable, and an entity-scoped read could not
+      separate a shared account from an entity's override of it. The field is in the
+      payload now (additive — the picker call sites ignore it) and the page renders it
+      as a **Scope** column, only on a multi-entity tenant. **And the read is
+      unpaginated on purpose**, which `test_pagination.py` already pinned: both
+      consumers need every row, and a paginated picker could not offer a code past
+      page 1 — a coding defect, not a paging nicety. The footer therefore states a
+      plain count; a `showingAll` + `loadMore` pair would have been the page claiming
+      that rows it never fetched do not exist. That exception's recorded rationale
+      ("its only consumer is the invoice GL dropdown") is updated rather than left to
+      rot. See [decisions.md](decisions.md) §161, §162.
 
-- [ ] **(c) Invoice warnings reach the browser as server English, so a localized
-      label frames un-localized prose.** Round 30 keyed the `/invoices` warning-icon
-      frame and moved its join to `formatList`, but each finding itself is composed by
-      `services/invoice_warnings.py` from the row's data — `PO 4412 not found`,
-      `Round amount: 5000.00`, a variance percentage — and is rendered verbatim both
-      there and in `InvoiceModal`'s warnings list. A non-English user gets a
-      translated frame and English findings.
-      **Durable fix:** a parameterized warning-code → message-key catalogue, the shape
-      `pnpm gen:einvoice-messages` already generates from the backend e-invoice rule
-      set (`frontend` reads the generated map, a drift guard fails on a new code).
-      `InvoiceWarning.type` is the code to key on, but a label per code is NOT enough:
-      `po_mismatch` carries four distinct messages and `quality_hold` three, each
-      embedding a PO number, an amount or a variance, so the backend must emit
-      `{code, params}` beside `message` and keep `message` as the fallback for an
-      un-keyed code.
-      **Trigger:** the next i18n slice, or the next change to `invoice_warnings.py`'s
-      message set — whichever comes first.
+- [x] **DONE (round 31).** **(c) Invoice warnings reach the browser as server
+      English.** A parameterized warning-code catalogue, the shape the entry named:
+      `backend/app/services/invoice_warning_catalog.py` declares **48 codes**, one
+      per distinct SENTENCE, each with its `type` bucket, its English template and
+      every placeholder's kind; `warning(code, severity, **params)` is now the only
+      way a warning is built and renders `message` from the same template, so the
+      fallback and the params cannot disagree. `pnpm gen:warning-messages` derives
+      the frontend map, `pnpm check:warning-messages` guards it in CI's Backend lint
+      job beside `check:einvoice-messages`, and `api/invoiceWarnings.ts` resolves
+      `{code, params}` at BOTH render sites — one resolver, because keying one
+      without the other is how a finding comes to read as German in the list and
+      English in the tooltip. 48 keys × six locales, real translations.
+      **The entry's counts were the unreliable part, as flagged: `po_mismatch` is
+      five sentences and `quality_hold` five, not four and three** — and
+      `InvoiceWarning.type` is NOT the code, it stays the category several codes
+      share. Three things the entry could not see cost more than the keying. Two
+      sentences were assembled by cutting a substring out of the matcher's English
+      `issues` list, so `MatchResult` gained `ordered_quantity` /
+      `received_quantity` / `inspection_deviation_notes` and they parameterize from
+      the record. Several money-bearing sentences hardcoded `$` — a wrong figure on
+      a ZAR invoice, §156's call again — so the templates name the invoice's own
+      currency and the client formats the exact digits with it. And `run_extraction`
+      persists the self-correction violations into the `priors_metadata` JSONB, so a
+      `params` dict of raw `Decimal`s broke the save outright (`Object of type
+      Decimal is not JSON serializable`, surfacing as an invoice stuck at `new`);
+      each check now builds its violation through the catalogue, which makes
+      JSON-safety a property of construction. The guard a registry needs is an AST
+      scan that fails on a hand-rolled warning dict in any producing module, plus
+      its mirror — a declared code with no call site. `po_match.issues`, the
+      `Exception.description` the queue renders and the mobile panel stay English
+      via the fallback, each re-filed below. See [decisions.md](decisions.md) §157.
 
-- [ ] **(c) The exception lifecycle `status` is still the raw wire value on both
-      surfaces that render it.** `/exceptions`' queue badge prints `exc.status`
-      (`open`, `escalated`, `resolved`, `dismissed`) and the AI-agents run dialog
-      prints `runOutcome.exception.status`; the round-30 slice keyed everything around
-      them but left both raw, because keying one without the other is how one status
-      comes to wear two names in one page.
-      **Durable fix:** `EXCEPTION_STATUS_LABEL_KEYS` pointed at the `exceptions.filter.*`
-      keys the queue's own chips already use (NOT a second set of keys), a tolerant
-      accessor beside `exceptionTypeLabelKey`, and both call sites in the same change.
-      It was deliberately not added as an unused export this round.
-      **Trigger:** the next /exceptions slice. Note it is not a one-line swap —
-      `tests-e2e/exceptions/agent-resolve.spec.ts` asserts
-      `toContainText('resolved')` / `('escalated')` on `agent-run-status`, and
-      `toContainText` is case-sensitive, so three assertions move with it.
+- [x] **DONE (round 31).** **(c) The exception lifecycle `status` is still the raw
+      wire value on both surfaces that render it.** There were **three** call sites,
+      not two: besides the queue badge and the run dialog, `AgentDashboard`'s
+      runnable-queue table prints the same column under a header that was already
+      keyed — so fixing the two the entry named would have reproduced the split
+      inside the panel being fixed. All three read
+      `types/exception.ts::EXCEPTION_STATUS_LABEL_KEYS`, which points at the four
+      `exceptions.filter.*` keys the queue's own chips already use, so no new
+      catalogue entries were needed in any of the six locales and a chip cannot name
+      a status differently from the rows it filters. The accessor is tolerant like
+      its siblings (`status` is a plain `String(30)` with no DB enum, so a row from a
+      later build prints raw rather than blank), the roster is drift-guarded against
+      `ACTIONABLE_STATUSES` ∪ the image of `RESOLUTION_STATUSES` with its order
+      pinned to the four counts `/summary` returns, and the route's local
+      `STATUS_TONES` moved into the same module beside the label map — total over the
+      union, so a status that gains a colour without a label is now a compile error.
+      The e2e count was wrong too: **two** assertions, not three, both on
+      `agent-run-status`; while in there, `exceptions/filter.spec.ts`' two row-badge
+      assertions were tightened from `/open/i` and `/resolved/i` to the exact labels,
+      because a case-insensitive regex would have gone on passing against the raw
+      value this replaced. The same pass closed a live instance of §155's own
+      deferral in that file: the type-filter chips derived `po mismatch` from
+      `exception_type.replace(/_/g, ' ')` while the rows they filter carried the
+      server's `PO Mismatch`, so both now read `EXCEPTION_TYPE_LABEL_KEYS`.
+      See [decisions.md](decisions.md) §158.
 
-- [ ] **(c) `/profile` shows raw role slugs where `/admin` shows labels.** The Account
-      card renders `auth.user.roles.join(', ')` — `admin, ap_manager` — while
-      `UsersPanel` renders the same roles through `types/admin.ts::ROLE_LABELS` as
-      `Admin, AP Manager`. The join is correctly classified family 2 in
-      `listJoinAudit.test.ts` *because* they are slugs, so the two defects are one.
-      **Durable fix:** `ROLE_LABEL_KEYS` over the four system roles with a tolerant
-      accessor (custom roles keep falling back to their stored name, which is tenant
-      data and must not be translated), then use it on both surfaces and migrate
-      /profile's join to `formatList` — at which point the route leaves `ALLOWED`
-      entirely. `ROLE_LABELS` is currently documented as staying data-driven English,
-      so that note in `frontend/docs/i18n.md` moves with it.
-      **Trigger:** the next i18n slice, or the next /profile or user-management pass.
+- [x] **DONE (round 31).** **(c) `/profile` shows raw role slugs where `/admin`
+      shows labels.** The premise was half true — `/admin`'s own `RolesPanel`
+      system-roles table printed `ap_manager` one tab from the user rows that printed
+      `AP Manager`, so it was three surfaces and two vocabularies, and all three read
+      `types/admin.ts::ROLE_LABEL_KEYS` now. Real translations in all six locales
+      over the four `api/deps.py::ALL_ROLES` built-ins (`CFO` stays verbatim, the
+      convention the catalogue already applies to it); a **custom** role is exactly
+      the value the tolerant accessor has no key for, and falls back to its stored
+      name because that name is text an admin typed into their own tenant.
+      `/profile`'s join moved to `formatList` in the same change, so the route left
+      `listJoinAudit`'s `ALLOWED` table for its `MIGRATED` list — the family-2
+      exemption was downstream of there being no label at all, and expired with the
+      map. Role slugs stop being a family-2 exemplar there: `/admin/access-review`,
+      the one entry still citing them, is reclassified family 3, since that whole
+      route is hardcoded English down to its column headers. `types/admin.test.ts`
+      pins the roster against the Python and also pins `api/admin.py`'s refusal of a
+      custom role named after a built-in — that check is the only thing making the
+      fall-back-to-tenant-data sound, and losing it would break nothing visibly. The
+      `ROLE_LABELS`-stays-English note in `frontend/docs/i18n.md` moved with it.
+      See [decisions.md](decisions.md) §159.
 
 - [ ] **(c) The adaptive APPLY paths and the Feedback tab have no mobile
       counterpart, by design — but "by design" is a decision with an expiry.**
@@ -1598,30 +1659,444 @@ are deliberate scope calls, recorded so an absence does not read as an oversight
       threshold apply should stay web-only until its refusal has somewhere to
       live. **Trigger:** a request for either control on mobile.
 
-- [ ] **(c) Mobile renders money with a hardcoded `$`, and the new adaptive
-      screen had to opt out of it.** `NumberFormat.currency(symbol: '\$')` is
-      declared at the top of `payments_screen.dart`, `cash_flow_screen.dart`,
-      `contract_detail_screen.dart` and `exception_detail_screen.dart`, so every
-      figure on those screens reads as dollars regardless of the org's currency.
-      The adaptive patterns tab could not join that: its per-vendor amounts are
-      in the org's **reporting** currency, which the `approval-patterns` payload
-      does not name, so it renders the exact server strings under a section note
-      instead (decisions §156). That is correct for that screen and makes the
-      inconsistency visible: four screens assert a currency they were never told.
-      **Durable fix:** the data is already there — `GET /api/organization` is
-      `get_current_user` and `services/org_settings_view.NON_ADMIN_SETTINGS`
-      projects the top-level `reporting_currency` (plus
-      `invoice_defaults.currency`) to every role *for exactly this reason*; the
-      web `orgCurrency` store consumes it. So: a small mobile `OrgCurrencyStore`
-      mirroring it (resolution order `reporting_currency` →
-      `invoice_defaults.currency`, the first two rungs of
-      `currency_conversion.resolve_reporting_currency`), plus one shared
-      `formatMoney(amount, currency)` helper that the four `$` screens and the
-      adaptive patterns tab call. Note the mobile `OrgSettings` model does not
-      parse `reporting_currency` yet. **Trigger:** the first non-USD tenant on
-      mobile, or any new mobile screen that renders money.
+- [x] **DONE (round 31).** **(c) Mobile renders money with a hardcoded `$`, and the
+      new adaptive screen had to opt out of it.** The entry named four screens; there
+      were **eleven call sites across ten files** — add `dashboard_screen.dart`
+      (`compactCurrency`), `payment_queue_screen.dart`, `invoice_detail_screen.dart`
+      and all three list tiles (`invoice_list_tile`, `contract_list_tile`,
+      `exception_list_tile`). It also had the resolution order wrong in a way that
+      would have shipped a bug: `invoice_defaults.currency` is
+      `resolve_reporting_currency`'s **third** rung, not its second — rung 2 is
+      `payments.home_currency`, which `NON_ADMIN_SETTINGS` admits *by name* and the
+      web `reportingCurrency.ts` mirror reads — so an org whose only signal is that
+      key would have resolved to nothing on mobile while the server denominated its
+      figures in it. `OrgCurrencyStore` resolves all three and returns `null` when
+      none is usable (§119: the fourth rung is a server-side config no client can
+      read).
+      The larger correction is that **a store alone was the wrong fix for most of
+      these surfaces**. An invoice, contract, payment and payment-queue row carry
+      their OWN `currency`, so labelling them with the org's reporting currency is a
+      different wrong answer, not a fix — the two detail screens already printed the
+      real code as a `Currency` row directly under a `$` amount. `utils/money.dart`
+      therefore takes the currency as an argument (`formatMoney` for a `num`,
+      `formatMoneyString` for an exact decimal string, `formatMoneyCompact` for a KPI
+      tile), and each call site passes the most specific code it has: the row's own;
+      else the payload's (`/payments/summary`'s `currency`, `cash_position`'s
+      `opening_balance_currency`, the dashboard's `reporting.reporting_currency`);
+      else `OrgCurrencyStore`, whose only consumers turn out to be the adaptive
+      patterns tab and the cash-flow forecast fallback; else **nothing**, and the
+      figure renders bare — the contract `PaymentResponse.currency` already stated
+      (§79/§82), now §160.
+      Three things the entry could not have known: `PaymentResponse` already ships
+      `currency` and mobile simply wasn't parsing it; `/api/exceptions` shipped no
+      currency at all, so `_exception_dict` now joins `inv.currency` through; and
+      `DashboardData` was reading naive cross-currency sums, so it moved to the
+      `reporting.*` / `aging_reporting` / `upcoming_total_amount_reporting`
+      counterparts — which is what makes naming a currency possible there at all. The
+      adaptive section note now renders only when no code resolves. Guards:
+      `mobile/test/utils/money_test.dart` (symbol, placement, JPY's zero minor units,
+      the >15-digit pass-through), `mobile/test/stores/org_currency_store_test.dart`
+      (every rung incl. all-unset), widget coverage on the invoice tile / payments /
+      exception detail / contract detail / dashboard / payment queue (three
+      denominations on one screen) / adaptive, and
+      `backend/tests/test_exception_assignment.py`. See `mobile/CLAUDE.md`
+      § Money formatting and [decisions.md](decisions.md) §160.
 
 
+
+### Surfaced by the round-31 batch (2026-09-14)
+
+Five agents, each in its own git worktree, closed six entries and opened these
+eighteen (sixteen from the slices, two from the round's own CI run). **Every one of the six entries was wrong about its own work** — not
+merely incomplete — and in three cases implementing the entry as written would
+have shipped a defect: a rung skipped in the reporting-currency chain, a nav row
+gated on a write instead of its read, and a credential write with no
+compare-and-swap. That is the pattern worth carrying forward, six rounds running:
+an entry's file list and its counts are the least reliable part of it, and a
+durable fix stated in one sentence has usually not been tried.
+
+#### Opened by the invoice-warning catalogue
+
+- [ ] **(c) `Invoice.po_match.issues` is still server English rendered verbatim.** The PO-match
+      panel in `InvoiceModal` prints the matcher's own composed sentences ("Partial receipt: 60% of
+      ordered quantity received", "Amount mismatch: invoice $150.00 vs PO $100.00 (+50.0%)") one per
+      row. Round 31 keyed the `po_mismatch` *warnings* beside them, so the same dialog now shows a
+      German finding above an English issue list — a narrower version of the §155 mismatch, one
+      panel down. The `$` in the amount-mismatch issue is the same hardcoded-currency defect §157
+      removed from the warnings.
+      **Durable fix:** `po_matching.py` already carries every figure those sentences embed as a
+      structured field (round 31 added `ordered_quantity` / `received_quantity` /
+      `inspection_deviation_notes` for exactly this reason), so the issues become
+      `{code, params}` entries in `invoice_warning_catalog` — a `po_match.issue.*` key namespace
+      reusing the generator and drift guard already wired. `issues` is `list[str]` on the persisted
+      JSONB and the frontend `PoMatch` type, so the wire shape changes and the modal's renderer
+      moves with it.
+      **Trigger:** the next change that touches the PO-match panel or `MatchResult.issues`.
+
+- [ ] **(c) `Exception.description` reaches the exception queue as server English.** `_ensure_exception`
+      is handed composed prose at every call site — often the warning's own `message`, sometimes a
+      different sentence for the same finding ("Suspicious round amount: $5000.00" against the
+      warning's "Round amount: 5000.00 ZAR"), and for `price_variance` a `"; "`-joined summary over
+      every flagged line. `/exceptions` renders it raw, so the queue and the invoice modal can
+      describe one finding in two languages and two wordings. The hardcoded `$` survives here too.
+      **Durable fix:** give the exception description the same `{code, params}` treatment — a
+      `description_code` / `description_params` pair on the `Exception` row (a migration that must
+      fan out to every tenant DB) with `description` kept as the fallback, and the per-line
+      `price_variance` summary decomposed rather than joined server-side. The exception-type LABEL is
+      already keyed (`EXCEPTION_TYPE_LABEL_KEYS`, §155); this is the sentence beneath it.
+      **Trigger:** the next slice that touches `_ensure_exception` or the `/exceptions` detail panel —
+      or sooner, since it is the surface an auditor reads.
+
+- [ ] **(c) Mobile renders `warning.message`, so the app is English for a German user.** `mobile/lib/
+      widgets/invoice_warnings_panel.dart` reads `InvoiceWarning.message` and `mobile/lib/models/
+      invoice.dart` does not parse `code` / `params` at all. That is not a regression — it is exactly
+      what shipped before round 31, via the fallback that exists for it — but the web app now reads
+      the same payload in six languages and mobile reads it in one.
+      **Durable fix:** parse `code` + `params` on the model and resolve them through the ARB
+      catalogue, which needs the generator to emit a Dart/ARB half beside the TypeScript one so the
+      two cannot drift (the same "generated, not hand-written" constraint, a second target). The
+      per-kind formatting has a mobile home now — `utils/money.dart` (§160) — so the money params
+      land in the row's own currency rather than reintroducing the `$` §157 just removed.
+      **Trigger:** the next mobile invoice-detail slice.
+
+#### Opened by the label-map slice
+
+- [ ] **(c) The "Select all N matching" bulk affordance is hardcoded English on five
+      routes, on pages `frontend/docs/i18n.md` lists as fully extracted.**
+      `/exceptions`, `/invoices`, `/vendors`, `/contracts` and `/expenses` each carry
+      `` `Select all ${total} matching` `` and `All matching selected` as literals in
+      their `BulkBar` actions snippet. `/payments` is the only one keyed
+      (`payments.queue.selectAllMatching` / `.allMatchingSelected`), so the strings
+      already exist in all six locales — under a namespace the other five must not
+      borrow, since `pagedListFooter.test.ts`' per-namespace pairing is the precedent
+      against reaching into a sibling's keys (decisions §155).
+      **Durable fix:** decide the owner first, because there are five copies of one
+      string and a sixth already keyed: either `common.selectAllMatching` /
+      `common.allMatchingSelected` (the `common.all` / `common.loading` precedent —
+      the wording is identical on every surface and the only variable is `{total}`),
+      or move both strings into `ui/BulkBar.svelte` itself so the affordance carries
+      its own copy and no route can forget. Then migrate all six call sites, including
+      `/payments` off its private pair, and add a source-scan guard in the
+      `listJoinAudit` / `pagedListFooter` shape so a seventh `BulkBar` cannot ship a
+      literal. Correct the "bulk-bar" claims in `frontend/docs/i18n.md` for each of
+      the five routes in the same change.
+      **Trigger:** the next i18n slice, or the next change to `ui/BulkBar.svelte` or
+      any of the five routes' bulk paths — whichever comes first. Do it as one commit
+      across all six, not per route: five of them drifting from a sixth is how this
+      started.
+
+- [ ] **(c) `/exceptions`' `severity` cell is the last data-driven badge on the row
+      still printing its raw wire value.** With the lifecycle status and the type
+      label keyed (round 31), `<span class="severity">{exc.severity}</span>` prints
+      `error` / `warning` / `info` in lowercase Latin beside cells that are now
+      translated in all six locales. There is no label map for severity anywhere in
+      the tree, on either surface — the `SEVERITY_COLORS` map in the route is the only
+      place the vocabulary is written down, and it is a colour map, so nothing catches
+      a fourth severity arriving unlabelled.
+      **Durable fix:** `EXCEPTION_SEVERITIES` / `EXCEPTION_SEVERITY_LABEL_KEYS` in
+      `types/exception.ts` beside the status pair, with `SEVERITY_COLORS` moved in and
+      retyped over the union so a tinted-but-unlabelled severity is a compile error
+      (the `EXCEPTION_STATUS_TONES` pairing), a tolerant accessor, three new keys in
+      each of the six locales, and a roster drift guard against the backend —
+      `models/exception.py` declares the three in a comment on the column only, so the
+      guard should pin whatever constant the backend grows, or the backend should grow
+      one (`exception_lifecycle.py` is where the type roster and the status maps
+      already live).
+      **Trigger:** the next /exceptions slice, or the next time a severity is added or
+      renamed backend-side.
+
+#### Opened by the mobile-currency slice
+
+- [ ] **(c) A payment run's total is a cross-currency `SUM` with no currency, so
+      it now renders bare — including on the dialog that authorizes execution.**
+      `payment_runs.total_amount` is `SUM(Payment.amount)` and each payment is
+      denominated in its own invoice's currency, so a run spanning a USD and a
+      EUR invoice holds a quantity in neither. Round 31 stopped stamping a `$`
+      on it (decisions §160) and the figure is now honest but unlabelled, on
+      `/payments/runs/` rows, the CFO sign-off dialog and the execute
+      confirmation — the three places an operator authorizes money.
+      **Durable fix:** roll the run total up server-side the way
+      `GET /api/payments/queue` already does — `payment_reporting_amount_sql`
+      per run, returning `total_amount` in the reporting currency plus
+      `currency` and `unconverted_count`, which is the same triple
+      `/payments/summary` returns — then have the mobile `PaymentRun` model and
+      the web run views read it. A `by_currency` breakdown per run would let a
+      mixed run say so explicitly instead of reporting one number.
+      **Trigger:** the first multi-currency payment run, or any change to the
+      runs list/detail payload.
+
+- [ ] **(c) Mobile number, date and currency formatting ignores the in-app
+      locale picker.** `mobile/docs/i18n.md` claims "every number, date and
+      currency renders through the locale-aware helpers". The strings are
+      localized in all six locales, but no call site passes a `locale`:
+      `utils/money.dart` accepts one and nothing supplies it, every `DateFormat`
+      is constructed without one, and `Intl.defaultLocale` is never set — so a
+      German user reads German copy with `1,234.50` and `Mar 4, 2026`. The web
+      counterpart solves this with `i18n/formatLocale.ts::getActiveFormatLocale`,
+      which `formatMoney` reads by default.
+      **Durable fix:** the mobile mirror of that — a helper resolving
+      `LocaleStore.instance.locale` (falling back to the platform locale) that
+      `formatMoney` / `formatMoneyString` / `formatMoneyCompact` and every
+      `DateFormat` construction default to, set once so a picker change
+      re-formats live. Note it changes the expected string in every widget test
+      that asserts a formatted figure or date, so it is its own change rather
+      than a rider.
+      **Trigger:** the first non-English tenant on mobile, or a bug report that
+      the picker changes words but not numbers.
+
+- [ ] **(c) `frontend/utils/money.ts::resolveCurrency` substitutes
+      `DEFAULT_CURRENCY` for a code the backend deliberately declined to
+      supply.** `formatMoney` funnels every web figure through
+      `resolveCurrency(options.currency)`, which returns `'USD'` for a null /
+      malformed code. That directly contradicts `PaymentResponse.currency`'s own
+      contract — "`None` is deliberate and is NOT a licence to substitute a
+      default … Render the bare figure rather than a code that cannot be
+      proven" (decisions §79/§82) — so a payment whose invoice carries no
+      currency renders as dollars on the web while round 31 made mobile render
+      it bare (§160). Several call sites additionally write
+      `p.currency ?? orgCurrency.currency`, labelling a per-row figure with the
+      org's reporting currency, which is the mislabel §160 removed.
+      **Durable fix:** let `formatMoney` render a bare grouped figure for an
+      unprovable code (a `Money` component prop, not a new helper), audit the
+      `?? orgCurrency.currency` call sites — `bank-reconciliation/+page.svelte`,
+      `PositivePayModal.svelte`, `RunDetailModal.svelte` — and keep
+      `DEFAULT_CURRENCY` only for the picker defaults and form initial values
+      that genuinely need a value. Web-only; the two surfaces currently disagree
+      about the same row.
+      **One site is a backend gap, not a formatter one, and is the next one to
+      do:** `routes/purchase-orders/+page.svelte`'s `formatCurrency` labels every
+      PO with `orgCurrency.currency` because `GET /api/purchase-orders` serves no
+      per-row `currency` at all — `PurchaseOrder` carries the column, so this is
+      one serializer field plus the type, the same one-line shape
+      `_exception_dict` took this round, and it must land before the formatter
+      change or the bare-figure rendering would replace a wrong label with no
+      label on every PO row. **Not** a site:
+      `bank-reconciliation/StatementDetailModal.svelte`'s Uncleared bucket, which
+      falls back deliberately and says so in a comment —
+      `UnclearedPaymentResponse` genuinely has no per-row currency where its
+      `unmatched_debits` sibling does, so that one is a payload question filed
+      with the reconciliation work, not this entry.
+      `routes/exceptions/+page.svelte` **was** on this list and is now fixed: the
+      round-31 `_exception_dict` change gave that row a currency, and the queue
+      reads it (§160).
+      **Trigger:** the first legacy invoice with no currency, or the next change
+      to `utils/money.ts`.
+
+- [ ] **(c) The mobile dashboard and cash-flow screens hide their
+      `unconverted_count`, so a part-converted rollup reads as a single-currency
+      figure.** Round 31 pointed both screens at the reporting-currency
+      counterparts and labelled them with the code the payload names, but
+      `GET /dashboard` also returns `reporting.unconverted_count`,
+      `aging_reporting.unconverted_count` and a per-bar count on
+      `monthly_trend`, and `cashflow_forecast` / `cash_position` return
+      `unconverted_count` — rows folded in at FACE value because no rate lock
+      bridged them. Non-zero means the labelled total mixes currencies, and the
+      cash-position curve carries the balance forward so one unconvertible row
+      poisons the tail. "A fallback nobody reports is just a wrong number"
+      (decisions §35), and the adaptive patterns tab and the vendor-spend tile
+      already disclose theirs.
+      **Durable fix:** parse the counts into `DashboardData` / `CashFlowData`
+      and render the same disclosure line the adaptive tab uses
+      (`adaptivePatternsUnconverted`'s shape — an ARB plural naming the count
+      and what it excludes), on the aging band set, the whole-book KPI and the
+      cash-position section. Needs new ARB entries in all six locales.
+      **Trigger:** the first tenant booking invoices in more than one currency,
+      or any change to the dashboard/cash-flow payload parsing.
+
+- [ ] **(c) `_exception_dict` serves money as a `float` across the API boundary.**
+      `api/exceptions.py` sends `float(inv.amount)` for the related invoice's amount,
+      where `schemas/money.py::MoneyAmount` exists precisely so a `Decimal` crosses
+      the wire as its exact digits. Pre-existing rather than introduced by round 31 —
+      which only added the `currency` beside it (§160) — and the reason it was not
+      fixed there is that the mobile `Exception` model types the field `double` and
+      the web consumers read a number, so the model, both clients and this serializer
+      have to move together.
+      **Durable fix:** `MoneyAmount` on the serializer, `String`-parsed-to-`Decimal`
+      on the clients (the payment-queue and cash-flow payloads already ship money as
+      strings for exactly this reason, and `formatMoneyString` on mobile already takes
+      the exact-decimal path), then a test that a cent-precise amount survives the
+      round trip. Note the amount is display-only on both surfaces — nothing computes
+      with it — so this is an invariant repair, not a live money defect.
+      **Trigger:** the next change to the exception serializer or either exception
+      client, or the next money-precision sweep.
+
+#### Opened by the GL-accounts slice
+
+- [ ] **(c) A GL account can be created but never corrected or retired.** `app/api/gl_accounts.py`
+      has `GET ""`, `POST ""` and `POST /sync-erp` and **no PATCH and no DELETE**, which is why
+      `/gl-accounts` ships with no row actions. An account created with the wrong name, type or
+      parent — or, worse, into the wrong chart, since scope is taken from `X-Entity-ID` at create
+      time — is permanent. And nothing under `app/` ever writes `GLAccount.is_active`: the ERP sync
+      updates `name` / `account_type` / `erp_account_id` only, so `is_active = false` is reachable
+      solely by direct SQL or an imported chart. The page's *Include inactive* filter is still
+      correct (the endpoint defaults to hiding those rows, and a migrated chart can carry them, so
+      without the toggle they are invisible with no explanation) — but the state it reveals is one
+      the product cannot produce.
+      **Durable fix:** `PATCH /api/gl-accounts/{id}` over `name` / `account_type` / `parent_code` /
+      `is_active`, with a `gl_account.updated` audit row, surfaced as a `RowAction` gated on the
+      same `auth.isManager` the two existing writes use. Two fields must stay immutable and the
+      reason belongs in the route: `code`, because an invoice records its GL as a **string** and
+      renaming the code orphans every line already coded to it; and `entity_id`, because moving an
+      account between charts either steals it from every other entity or hands it to all of them,
+      and the effective-chart uniqueness guard would have to be re-run against both the old and the
+      new scope. A genuine "move between charts" is a create + deactivate, not a PATCH.
+      **Trigger:** the first tenant that mistypes a GL name, or retires an account and finds the
+      only way to do it is `psql`.
+
+- [ ] **(c) Two invoice modals still fetch the chart of accounts by hand.**
+      `lib/components/modals/CreateInvoiceModal.svelte` and `lib/components/modals/InvoiceModal.svelte`
+      each declare their own inline `GLAccountOption` (the second one narrower still — `{code, name}`)
+      and call `api.get('/api/gl-accounts')` directly, bypassing `lib/api/glAccounts.ts`. Round 31
+      made `types/glAccount.ts` the single owner and collapsed the two `api/` copies
+      (`catalogs.ts`, `expenses.ts`) onto a `Pick` of it; these two were left declared because four
+      sibling agents were live in the same tree that round and both files are heavily e2e-covered,
+      so the import churn was not worth the merge surface. It is a two-line edit per file, and while
+      it stands the endpoint's shape is described in three places instead of one.
+      **Durable fix:** replace both inline interfaces with `import type { GlAccountOption } from
+      '$lib/types/glAccount'` and both fetches with `listGlAccounts()`.
+      **Trigger:** the next change to either invoice modal, or the next change to the
+      `/api/gl-accounts` response shape — whichever comes first, since the second one is when the
+      drift starts costing something.
+
+- [ ] **(c) The GL pickers cannot tell two subsidiaries' identical codes apart.** `/gl-accounts`
+      now renders a **Scope** column because the consolidated view returns every entity's chart at
+      once and two subsidiaries may each legitimately hold their own `6000` — but the four pickers
+      reading the same endpoint (invoice line coding, expense coding, requisition lines, catalog
+      items) still render only `code — name`, so in the consolidated view they offer two
+      indistinguishable options that code to different accounts. The picker value is the uuid `id`,
+      so the *write* is unambiguous; what the user cannot do is choose deliberately between them.
+      They already receive `entity_id` (round 31 added it to the payload), so the data is in hand.
+      **Durable fix:** when `entityStore.multiEntity`, append the resolved entity name to an
+      entity-scoped option's label and leave a shared one bare — the same shared-vs-owned
+      distinction the Scope column draws, expressed in an option label; extract it as one helper
+      beside `GlAccountOption` rather than writing the same conditional in four pickers.
+      **Trigger:** the first multi-entity tenant whose subsidiaries define overlapping GL codes.
+
+- [ ] **(c) `/vendors/change-requests` leaves stale rows on screen after a failed
+      re-load.** Its `catch` sets `errored` but never clears the row array, so a
+      second failed load relabels the *previous* filter's rows as the answer to
+      filters it never ran — the identical gap round 31 fixed on `/gl-accounts`
+      after the reviewer caught it there, and the shape `/exceptions` already
+      handles correctly by clearing. On a bank-detail dual-control queue, showing
+      the wrong set of pending change requests is the worst place in the app for
+      it. It was left because the file was another agent's likely territory that
+      round and nobody ended up owning it.
+      **Durable fix:** clear the rows in the `catch` the way `/gl-accounts` and
+      `/exceptions` do, and add the route to the parameterized
+      `tests-e2e/reactivity/list-load-failure.spec.ts` sweep, which is where the
+      first-load half is already covered for every other list.
+      **Trigger:** the next change to that route — it is a one-line fix plus a
+      sweep entry, so it should ride the next thing that touches the file.
+
+#### Opened by the round-31 CI run
+
+- [ ] **(c) The nav role matrix is pinned twice, by hand, and only one of the two
+      pins is visible before CI.** Adding a single child row to a nav group in
+      round 31 turned a Playwright shard red: `tests-e2e/auth/rbac.spec.ts`
+      hardcodes the expected `sectionTabHrefs` set per role, and
+      `src/lib/nav.test.ts` hardcodes the same sets independently — the spec's own
+      comment says "`nav.test.ts` pins the same set", which is the tell. The unit
+      pin was updated with the change; the e2e twin was not, and could not be
+      caught locally: `pnpm check` does not typecheck `tests-e2e/`, `--list` only
+      proves a spec parses, and running the suite needs the whole stack up. So the
+      first signal was a red shard on an unrelated PR, which is the same failure
+      mode as [[e2e-spec-syntax-not-typechecked]] one layer up — a guard that only
+      speaks in CI.
+      **Durable fix:** derive one of the two from the other instead of restating
+      it. `nav.ts` already carries `roles` per entry, so the expected set for a
+      role is computable: export the filter `Sidebar`/`SectionTabs` already apply
+      (or a thin `navFor(role)` beside it), have `nav.test.ts` assert the *policy*
+      (which role may see which href, and that each row's roles match its
+      backend gate), and have `rbac.spec.ts` assert that the rendered DOM equals
+      `navFor(role)` rather than a literal array. Then a new row is a one-line
+      change and the e2e proves the wiring rather than re-typing the answer. Keep
+      one literal list somewhere deliberate — a computed expectation that reads
+      its answer from the code under test proves nothing — so pin the
+      href→roles table itself in `nav.test.ts` and let the e2e compare rendering
+      against it.
+      **Trigger:** the next nav row added, moved, or re-gated — it will cost a red
+      shard again otherwise.
+
+- [ ] **(c) Every container image the local stack and CI pull is a floating tag,
+      and one of them silently stopped being pullable.** Round 31's CI run failed
+      on two backend shards with `pull access denied for minio/minio, repository
+      does not exist or may require 'docker login'` — not a code defect and not
+      rate limiting: a manifest GET with a valid anonymous Docker Hub pull token
+      returns `401` for `minio/minio` while `library/alpine`, `postgres`, `redis`
+      and the other eight images the repo pulls all return `200`. MinIO's Docker
+      Hub distribution is gated; `quay.io/minio/minio` serves it. Fixed in that
+      round by moving all three references (the compose file and CI's two
+      `docker run` invocations) to quay.io.
+      **What is still open is the class, not that instance.** `minio/minio:latest`,
+      `axllent/mailpit:latest`, `ollama/ollama:latest`, `stripe/stripe-mock:latest`
+      and `caddy:2-alpine` are all floating tags, so the stack a contributor gets
+      depends on the day they pull, and an upstream retag or a registry change
+      lands as a red CI run on an unrelated PR — exactly how this one surfaced.
+      The images CI depends on for a *green* run are the ones that matter.
+      **Durable fix:** pin each to a digest (`image@sha256:…`) or at minimum a
+      dated release tag, with Dependabot's `docker` ecosystem enabled so the bumps
+      arrive as reviewable PRs rather than as drift (the repo already groups
+      `pip`/`npm`/`github-actions`; `docker` is the one ecosystem not covered —
+      `.github/dependabot.yml`). Do it in one change across `backend/docker-compose.yml`
+      and both CI call sites, and note that pinning MinIO means choosing a
+      `RELEASE.*` tag deliberately rather than inheriting whatever `latest` was,
+      which is a behaviour decision and the reason round 31 did not fold it in.
+      **Trigger:** the next time a floating-tag pull breaks a run, or the next
+      Dependabot configuration change — whichever comes first.
+
+#### Opened by the password-hash slice
+
+- [ ] **(c) `needs_update` is blind to the bcrypt cost, so a raised
+      `DEFAULT_ROUNDS` would migrate nothing.** Round 31 wired
+      `pwd_context.needs_update` into both login handlers
+      (`services/credential_upgrade.py`), so a row on a deprecated *scheme* now
+      re-hashes on its owner's next sign-in. But `needs_update` is exactly
+      `identify(h) != scheme`, and `identify` reports only the scheme — never
+      the `r=` cost baked into the hash. passlib's own `needs_update` compared
+      rounds as well. Today this is inert: `DEFAULT_ROUNDS = 12` is what passlib
+      defaulted to and what every row in the column carries, so scheme and cost
+      happen to move together. The moment somebody raises the cost (the normal
+      response to faster hardware, and the only knob the scheme exposes), every
+      existing credential silently stays at 12 while new ones get the higher
+      value, and the upgrade path that exists will not notice — a weaker-by-default
+      population with no signal that it exists.
+      **Durable fix:** have `needs_update` return True when the parsed `r=` of a
+      v2 hash is below `DEFAULT_ROUNDS`, and pin it with a test that a hash
+      written at a lower cost is flagged while one at the configured cost is
+      not. The existing wiring then migrates costs for free. Note
+      `tests/test_bcrypt_sha256_compat.py::test_needs_update_flags_exactly_the_schemes_we_no_longer_write`
+      asserts the current narrower contract and would need to widen with it; the
+      passlib-generated fixtures are at `r=4` and must NOT be regenerated, so the
+      test has to construct its own low-cost hash rather than reuse them.
+      **Trigger:** the first time anyone proposes raising `DEFAULT_ROUNDS` — and
+      the fix must land in the same change, or the bump quietly applies to new
+      passwords only.
+
+- [ ] **(c) An SSO-only tenant's legacy hash never upgrades, yet the password is
+      still a valid MFA step-up proof.** The round-31 upgrade is wired into the
+      two login handlers, and on the employee surface it deliberately sits after
+      the `sso_only` refusal: a tenant that has closed password login has made
+      that hash unreachable for signing in, so re-encoding it buys nothing
+      ([decisions.md](decisions.md) §163). The gap is that password login is not
+      the only consumer of `User.hashed_password`.
+      `services/mfa.step_up_verified` accepts the shared-context password as
+      proof for every factor-management step-up (enroll-start, passkey
+      register/delete, `/mfa/disable`), and `api/auth.py::login`'s own comment is
+      explicit that `sso_only` is "closed even for users who still carry a
+      password hash". So a pre-c6a91396 hash in an SSO-only tenant keeps
+      authenticating a security-sensitive operation, on raw bcrypt, forever — the
+      truncation weakness surviving in the one place nobody is looking at it.
+      **Durable fix:** either upgrade from the step-up path too, or stop
+      accepting a password as step-up proof in an `sso_only` tenant. The second
+      is the smaller and probably better change — a tenant that has closed
+      password login has said the password is not an authenticator there, and
+      passkey assertion plus TOTP already cover the SSO-only account the
+      assertion door was built for — but it is a policy change with its own
+      lockout question (an SSO-only account with neither a passkey nor TOTP), so
+      it is not a drive-by. The first needs the step-up helper, which is pure and
+      shared by four endpoints on two surfaces, to reach a session and a write.
+      **Trigger:** the next MFA/step-up slice, or any decision to enable
+      `sso_only` for a real tenant.
 
 ## (a) Blocked on external credentials, accounts, or hardware
 

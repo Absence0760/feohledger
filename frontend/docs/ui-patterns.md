@@ -294,6 +294,17 @@ items, then a centred Load More button below the table:
 - Stores expose `total`, `page`, `hasMore`, and any mutating actions
   (create / delete / bulk-delete) keep `total` in sync without a
   refetch.
+- **A list page over an unpaginated endpoint gets a plain count, not this
+  footer.** `GET /api/gl-accounts` is the one deliberate exception to the
+  envelope (a bounded reference collection whose pickers need every row — see
+  its docstring and `backend/tests/test_pagination.py::test_gl_accounts_stays_unpaginated`),
+  so `/gl-accounts` renders `m('glAccounts.count', { n })` in a `.count-row` /
+  `.count-line` and has no Load-more control at all. That is not the defect the
+  `showingAll` rule is about: the rows on screen ARE every row matching the
+  active filters, so no claim is being made about rows that were never fetched.
+  Note what follows for the message keys — such a page must NOT mint a
+  `<list>.showingAll`, since `pagedListFooter.test.ts` would then (correctly)
+  demand a `<list>.loadMore` for a page that has nothing more to load.
 
 ### Sequencing list fetches (`createRequestSequencer`)
 

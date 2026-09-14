@@ -30,6 +30,10 @@ Map<String, dynamic> _detailJson({
   String? assignedTo,
   String? assignedToUserId,
   String? dueAt = '2026-01-05T12:00:00',
+  // `_exception_dict` joins the related INVOICE's currency through beside its
+  // amount, because the figure IS that invoice's amount. `null` models the
+  // no-invoice-joined case the endpoint also produces.
+  Object? currency = 'USD',
 }) =>
     {
       'id': '1',
@@ -37,6 +41,7 @@ Map<String, dynamic> _detailJson({
       'invoice_number': 'INV-1',
       'vendor_name': 'Acme Corp',
       'amount': 250,
+      'currency': ?currency,
       'exception_type': 'po_mismatch',
       'type_label': 'PO Mismatch',
       'severity': 'warning',
@@ -112,6 +117,9 @@ void main() {
 
     expect(find.text('PO Mismatch'), findsOneWidget);
     expect(find.text('Amount differs from PO'), findsOneWidget);
+    // The amount wears the related invoice's currency, not this screen's old
+    // module-level `\$`.
+    expect(find.text(r'$250.00'), findsOneWidget);
     expect(find.text('INV-1'), findsOneWidget);
     expect(find.text('Acme Corp'), findsOneWidget);
     // Actionable → the three action buttons are present.
@@ -250,5 +258,36 @@ void main() {
     // ap_manager can still act, but cannot reassign (no org-user list access).
     expect(find.text('Assign'), findsNothing);
     expect(find.widgetWithText(FilledButton, 'Resolve'), findsOneWidget);
+  });
+
+  testWidgets('the amount follows the related invoice\'s currency',
+      (tester) async {
+    // The exception queue's figure is the invoice's amount, so the invoice's
+    // code is the only honest label for it — the org's reporting currency
+    // would be a different wrong answer, since a GBP-reporting tenant holds
+    // USD invoices. `/api/exceptions` did not send a currency at all before
+    // this change, which is why the screen asserted dollars.
+    ApiClient().debugConfigure(
+      client: MockClient((req) async => _json(_detailJson(currency: 'EUR'))),
+    );
+
+    await tester.pumpWidget(_host(const ExceptionDetailScreen(exceptionId: '1')));
+    await _pumpUntil(tester, find.text('PO Mismatch'));
+
+    expect(find.text('€250.00'), findsOneWidget);
+    expect(find.textContaining(r'$'), findsNothing);
+  });
+
+  testWidgets('an exception with no joined invoice currency renders bare',
+      (tester) async {
+    ApiClient().debugConfigure(
+      client: MockClient((req) async => _json(_detailJson(currency: null))),
+    );
+
+    await tester.pumpWidget(_host(const ExceptionDetailScreen(exceptionId: '1')));
+    await _pumpUntil(tester, find.text('PO Mismatch'));
+
+    expect(find.text('250.00'), findsOneWidget);
+    expect(find.textContaining(r'$'), findsNothing);
   });
 }

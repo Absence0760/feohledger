@@ -1,8 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { en } from '$lib/i18n/locales/en';
 import {
+	EXCEPTION_STATUS_LABEL_KEYS,
+	EXCEPTION_STATUS_TONES,
+	EXCEPTION_STATUSES,
 	EXCEPTION_TYPES,
 	EXCEPTION_TYPE_LABEL_KEYS,
+	exceptionStatusLabelKey,
+	exceptionStatusTone,
 	exceptionTypeFallback,
 	exceptionTypeLabelKey
 } from './exception';
@@ -63,6 +68,41 @@ function backendLabels(): Record<string, string> {
 	return out;
 }
 
+/**
+ * The lifecycle status vocabulary, rebuilt from the two backend constants that
+ * between them produce every value the column can hold: `ACTIONABLE_STATUSES`
+ * (the states a queue verb can still be applied from — which includes the
+ * `open` column default) and `RESOLUTION_STATUSES` (verb → the status it
+ * writes). A fifth queue verb, or a new actionable state, fails here.
+ */
+function backendStatuses(): Set<string> {
+	const py = source('exception_lifecycle.py');
+	const res = /RESOLUTION_STATUSES:\s*dict\[str, str\]\s*=\s*\{([\s\S]*?)\n\}/.exec(py);
+	expect(res, 'RESOLUTION_STATUSES map not found — did it move or change shape?').not.toBeNull();
+	const produced = [...res![1].matchAll(/:\s*"([a-z0-9_]+)"/g)].map((m) => m[1]);
+	const actionable = /ACTIONABLE_STATUSES\s*=\s*\(([^)]*)\)/.exec(py);
+	expect(
+		actionable,
+		'ACTIONABLE_STATUSES tuple not found — did it move or change shape?'
+	).not.toBeNull();
+	const open = [...actionable![1].matchAll(/"([a-z0-9_]+)"/g)].map((m) => m[1]);
+	return new Set([...open, ...produced]);
+}
+
+/**
+ * The statuses `GET /api/exceptions/summary` counts, in its own order — which
+ * IS the queue's chip order, because the chips render one per count.
+ */
+function summaryStatuses(): string[] {
+	const py = source('api/exceptions.py');
+	const rows = [...py.matchAll(/"([a-z0-9_]+)":\s*by_status\.get\("([a-z0-9_]+)", 0\)/g)];
+	expect(rows.length, 'the /summary by_status block stopped matching').toBeGreaterThan(3);
+	for (const row of rows) {
+		expect(row[1], 'a /summary key disagrees with the status it counts').toBe(row[2]);
+	}
+	return rows.map((row) => row[1]);
+}
+
 describe('exception-type taxonomy', () => {
 	it('carries the backend roster, in the backend order', () => {
 		const roster = backendRoster();
@@ -103,5 +143,50 @@ describe('exception-type taxonomy', () => {
 		expect(exceptionTypeLabelKey('duplicate')).toBe('exceptions.type.duplicate');
 		expect(exceptionTypeLabelKey('some_future_type')).toBeNull();
 		expect(exceptionTypeFallback('some_future_type')).toBe('some future type');
+	});
+});
+
+describe('exception lifecycle status vocabulary', () => {
+	it('carries the backend roster, in the order /summary counts it', () => {
+		// `/summary`'s order is the chip order, and the chips are what these
+		// labels are shared with — so the roster is pinned against that block
+		// rather than against a sorted set.
+		expect([...EXCEPTION_STATUSES]).toEqual(summaryStatuses());
+		expect(new Set(EXCEPTION_STATUSES)).toEqual(backendStatuses());
+	});
+
+	it('reuses the queue filter-chip keys rather than a second key set', () => {
+		// The load-bearing property. A chip and the badges it filters name ONE
+		// status; two key sets is how they come to name it two ways the first
+		// time a translator revises one of them. There must be no
+		// `exceptions.status.*` namespace at all.
+		for (const status of EXCEPTION_STATUSES) {
+			expect(EXCEPTION_STATUS_LABEL_KEYS[status]).toBe(`exceptions.filter.${status}`);
+		}
+	});
+
+	it('resolves every key in the English catalogue', () => {
+		for (const key of Object.values(EXCEPTION_STATUS_LABEL_KEYS)) {
+			expect(en, `${key} is missing from en.ts`).toHaveProperty(key);
+		}
+	});
+
+	it('tones exactly the statuses it labels', () => {
+		// Both records are total over the union, so a status that gains a colour
+		// without a label — a tinted pill printing a raw wire value — cannot
+		// compile. Asserted too, so a widened `Record<string, …>` is caught.
+		expect(Object.keys(EXCEPTION_STATUS_TONES).sort()).toEqual(
+			Object.keys(EXCEPTION_STATUS_LABEL_KEYS).sort()
+		);
+	});
+
+	it('is tolerant: an unknown status keeps its raw value and the flat chip', () => {
+		// `status` is a plain `String(30)` with no DB enum, so a row written by a
+		// later build can carry a status this one predates. The caller then
+		// prints what every surface printed before this map existed.
+		expect(exceptionStatusLabelKey('escalated')).toBe('exceptions.filter.escalated');
+		expect(exceptionStatusLabelKey('awaiting_vendor')).toBeNull();
+		expect(exceptionStatusTone('escalated')).toBe('danger');
+		expect(exceptionStatusTone('awaiting_vendor')).toBe('neutral');
 	});
 });

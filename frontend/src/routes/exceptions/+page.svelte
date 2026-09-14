@@ -13,7 +13,13 @@
 	import DataTable from '$lib/components/ui/DataTable.svelte';
 	import Modal from '$lib/components/ui/Modal.svelte';
 	import Tabs from '$lib/components/ui/Tabs.svelte';
-	import Badge, { type BadgeTone } from '$lib/components/ui/Badge.svelte';
+	import Badge from '$lib/components/ui/Badge.svelte';
+	import {
+		exceptionStatusLabelKey,
+		exceptionStatusTone,
+		exceptionTypeFallback,
+		exceptionTypeLabelKey
+	} from '$lib/types/exception';
 	import AgentDashboard from '$lib/components/exceptions/AgentDashboard.svelte';
 	import { formatMoney } from '$lib/utils/money';
 	import { timeAgo } from '$lib/utils/time';
@@ -27,6 +33,12 @@
 		invoice_number: string | null;
 		vendor_name: string | null;
 		amount: number | null;
+		// What `amount` is denominated in — the joined invoice's own code, not the
+		// org's reporting currency (a GBP-reporting tenant holds USD invoices, so
+		// labelling the row with the rollup code is a different wrong answer).
+		// Null exactly when `amount` is: both are gated on the invoice having been
+		// joined. See `docs/decisions.md` §160.
+		currency: string | null;
 		exception_type: string;
 		type_label: string;
 		severity: string;
@@ -132,21 +144,39 @@
 	};
 
 	/**
-	 * Badge tone per exception status.
+	 * A status' label. The badge printed the raw wire value (`open`,
+	 * `escalated`) in a row whose every other translated cell sat beside a
+	 * filter chip already reading `Offen` — the same status, named twice, a
+	 * few pixels apart. It reads the chips' OWN keys, so the two cannot drift.
+	 * An unrecognised status still prints raw rather than blank.
 	 *
-	 * `open` (amber) and `escalated` (red) keep separate tones on purpose —
-	 * escalation is what says a human deadline has already passed, and folding
-	 * both onto `warning` would erase the only scannable difference between an
-	 * exception in the queue and one that has run out of time. `dismissed`
-	 * keeps the flat `neutral` chip it already had: a dismissal is the absence
-	 * of a finding, not a state to hunt for.
+	 * The tone map moved to `$lib/types/exception` alongside those keys, so a
+	 * status that gains a colour without a label is a compile error.
 	 */
-	const STATUS_TONES: Record<string, BadgeTone> = {
-		open: 'warning',
-		escalated: 'danger',
-		resolved: 'success',
-		dismissed: 'neutral',
-	};
+	function statusLabel(status: string): string {
+		const key = exceptionStatusLabelKey(status);
+		return key ? m(key) : status;
+	}
+
+	/**
+	 * An exception type's label, for the row badge AND the type-filter chips.
+	 *
+	 * Those two disagreed in English on this page: the chip derived its text as
+	 * `exception_type.replace(/_/g, ' ')` (`po mismatch`) while the rows it
+	 * filters carried the server's `type_label` (`PO Mismatch`) — §149's defect,
+	 * and the same de-underscored derivation `EXCEPTION_TYPE_LABEL_KEYS` was
+	 * added to remove from the agent decision log. Both read that map now, so
+	 * the chip cannot name a type differently from the rows behind it.
+	 *
+	 * The chip has no `type_label` to fall back on (`summary.by_type` is keyed by
+	 * the raw type), which is why the fallback is the module's own rather than a
+	 * required argument.
+	 */
+	function typeLabel(type: string, serverLabel?: string | null): string {
+		const key = exceptionTypeLabelKey(type);
+		if (key) return m(key);
+		return serverLabel || exceptionTypeFallback(type);
+	}
 
 	// Two INDEPENDENT request streams — the queue itself and the chip-count
 	// summary — so each gets its own sequencer. One shared counter would let a
@@ -383,8 +413,12 @@
 		}
 	}
 
-	function formatCurrency(n: number | null): string {
-		return formatMoney(n, { currency: orgCurrency.currency });
+	// The row's own currency, never the org's. `formatMoney` returns its `—`
+	// placeholder for a null amount before it looks at the code, and the payload
+	// nulls both together, so the unprovable-currency case this cannot label is
+	// exactly the case with no figure to label.
+	function formatCurrency(n: number | null, currency: string | null): string {
+		return formatMoney(n, { currency: currency ?? undefined });
 	}
 
 	function dueLabel(exc: ExceptionItem): string {
@@ -477,7 +511,7 @@
 						onclick={() => (typeFilter = typeFilter === type ? null : type)}
 					>
 						<span class="type-dot"></span>
-						{type.replace(/_/g, ' ')} <span class="count">{count}</span>
+						{typeLabel(type)} <span class="count">{count}</span>
 					</button>
 				{/each}
 			</nav>
@@ -550,7 +584,7 @@
 							style="background:{TYPE_COLORS[exc.exception_type] ?? '#888'}1f;color:{TYPE_COLORS[exc.exception_type] ?? '#888'}"
 							title={exc.description ?? ''}
 						>
-							{exc.type_label}
+							{typeLabel(exc.exception_type, exc.type_label)}
 						</span>
 					</td>
 					<td>
@@ -563,7 +597,7 @@
 					</td>
 					<td class="mono">{exc.invoice_number ?? '—'}</td>
 					<td class="muted-cell">{exc.vendor_name ?? '—'}</td>
-					<td class="mono right">{formatCurrency(exc.amount)}</td>
+					<td class="mono right">{formatCurrency(exc.amount, exc.currency)}</td>
 					<td class="muted-cell">{exc.assigned_to ?? '—'}</td>
 					<td class="muted-cell" title={exc.created_at}>{timeAgo(exc.created_at)}</td>
 					<td class="muted-cell" class:overdue={exc.is_overdue}>
@@ -571,10 +605,10 @@
 					</td>
 					<td>
 						<Badge
-							tone={STATUS_TONES[exc.status] ?? 'neutral'}
+							tone={exceptionStatusTone(exc.status)}
 							variant="status-badge badge-{exc.status}"
 						>
-							{exc.status}
+							{statusLabel(exc.status)}
 						</Badge>
 					</td>
 					<td class="actions">

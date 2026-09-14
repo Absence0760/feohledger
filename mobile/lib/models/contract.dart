@@ -186,7 +186,7 @@ class Contract {
       status: ContractStatus.fromString(json['status'] as String),
       vendorId: json['vendor_id'] as String?,
       vendorName: json['vendor_name'] as String?,
-      currency: json['currency'] as String? ?? 'USD',
+      currency: json['currency'] as String?,
       totalValue: (json['total_value'] as num?)?.toDouble(),
       spendLimit: (json['spend_limit'] as num?)?.toDouble(),
       notToExceed: json['not_to_exceed'] as bool? ?? false,

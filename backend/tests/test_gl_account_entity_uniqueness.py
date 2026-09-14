@@ -175,6 +175,50 @@ async def test_two_entities_may_each_hold_the_same_code(realdb, entities):
             assert [r["name"] for r in listed if r["code"] == "6200"] == [name]
 
 
+async def test_list_names_the_chart_each_row_belongs_to(realdb, entities):
+    """`entity_id` on a listed row is what makes the two views unambiguous.
+
+    The consolidated response is every entity's chart at once — two
+    subsidiaries each holding their own "6400" arrive as two rows that are
+    otherwise identical — and an entity-scoped response is `shared ∪ own`,
+    where a shared account and an entity's override of it read the same while
+    meaning something different for whoever edits one. Without the field the
+    `/gl-accounts` page could only present both cases as duplicates.
+    """
+    default_id, sub_id = entities
+    async with realdb.client(key=TENANT, role="ap_manager") as c:
+        shared = await c.post("/api/gl-accounts", json={"code": "6400", "name": "Shared Travel"})
+        owned = await c.post(
+            "/api/gl-accounts",
+            json={"code": "6401", "name": "Sub Travel"},
+            headers={"X-Entity-ID": sub_id},
+        )
+        assert shared.status_code == 201, shared.text
+        assert owned.status_code == 201, owned.text
+
+        consolidated = {r["code"]: r["entity_id"] for r in (await c.get("/api/gl-accounts")).json()}
+        in_sub = {
+            r["code"]: r["entity_id"]
+            for r in (await c.get("/api/gl-accounts", headers={"X-Entity-ID": sub_id})).json()
+        }
+        in_default = {
+            r["code"]: r["entity_id"]
+            for r in (await c.get("/api/gl-accounts", headers={"X-Entity-ID": default_id})).json()
+        }
+
+    assert consolidated["6400"] is None
+    assert consolidated["6401"] == sub_id
+
+    # The subsidiary's effective chart is shared ∪ its own, and each row says
+    # which of the two it is.
+    assert in_sub["6400"] is None
+    assert in_sub["6401"] == sub_id
+
+    # The default entity sees the shared row and NOT the subsidiary's own.
+    assert in_default["6400"] is None
+    assert "6401" not in in_default
+
+
 async def test_create_refuses_a_shared_code_an_entity_already_holds(realdb, entities):
     """A SHARED row lands in every entity's effective chart, including the one
     that already defines the code — so the consolidated view must refuse it."""
