@@ -1,21 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
-import 'package:intl/intl.dart';
 
 import 'package:feohledger_mobile/l10n/gen/app_localizations.dart';
 import 'package:feohledger_mobile/models/cash_flow.dart';
 import 'package:feohledger_mobile/stores/cash_flow_store.dart';
+import 'package:feohledger_mobile/stores/org_currency_store.dart';
+import 'package:feohledger_mobile/utils/money.dart';
 import 'package:feohledger_mobile/widgets/kpi_card.dart';
-
-final _currencyFormat = NumberFormat.currency(symbol: '\$');
-
-/// Format a server-supplied money display string for the UI. The parse is for
-/// *rendering only* — we never do arithmetic on money on the device (every
-/// total is server-computed). Falls back to the raw string if it isn't numeric.
-String _money(String display) {
-  final n = num.tryParse(display);
-  return n == null ? display : _currencyFormat.format(n);
-}
 
 /// Predictive cash-flow forecast (CFO / admin). Shows a KPI summary (opening +
 /// projected end balance, total committed / pending outflow over the horizon),
@@ -24,6 +15,13 @@ String _money(String display) {
 /// the running cash-position balance per period. Pull-to-refresh; 30/60/90-day
 /// horizon chips. Reached from the Dashboard app-bar (gated to CFO / admin,
 /// matching the backend `_CFO_ROLES` gate on the analytics endpoints).
+/// Format a server-supplied money display string. The string is the exact
+/// figure the backend computed — we never do arithmetic on money on the device
+/// — and [formatMoneyString] keeps every digit of it, returning it verbatim
+/// rather than rounding when it cannot be formatted losslessly.
+String _money(String display, String? currency) =>
+    formatMoneyString(display, currency: currency);
+
 class CashFlowScreen extends StatefulWidget {
   const CashFlowScreen({super.key});
 
@@ -37,6 +35,10 @@ class _CashFlowScreenState extends State<CashFlowScreen> {
     super.initState();
     SchedulerBinding.instance.addPostFrameCallback((_) {
       CashFlowStore.instance.fetch();
+      // The forecast leg's amounts are in the reporting currency and its
+      // payload does not name one; this is the fallback for a request whose
+      // cash-position sibling landed nothing to read it from.
+      OrgCurrencyStore.instance.ensureLoaded();
     });
   }
 
@@ -46,7 +48,11 @@ class _CashFlowScreenState extends State<CashFlowScreen> {
     return Scaffold(
       appBar: AppBar(title: Text(l.cashFlowTitle)),
       body: ListenableBuilder(
-        listenable: CashFlowStore.instance,
+        // Both stores: the currency can land after the figures, and a figure
+        // must pick up its symbol when it does rather than stay bare.
+        listenable: Listenable.merge(
+          [CashFlowStore.instance, OrgCurrencyStore.instance],
+        ),
         builder: (context, _) {
           final store = CashFlowStore.instance;
 
@@ -73,6 +79,13 @@ class _CashFlowScreenState extends State<CashFlowScreen> {
           final data = store.data;
           if (data == null) return const SizedBox.shrink();
 
+          // One currency for the whole screen — the server denominated both
+          // legs of this request in it. `null` (unnamed payload and an
+          // unresolved org setting) renders every figure bare rather than
+          // stamping a symbol nothing established.
+          final currency =
+              data.openingBalanceCurrency ?? OrgCurrencyStore.instance.currency;
+
           return RefreshIndicator(
             onRefresh: store.fetch,
             child: ListView(
@@ -81,14 +94,14 @@ class _CashFlowScreenState extends State<CashFlowScreen> {
                 _horizonChips(l, store),
                 const SizedBox(height: 16),
                 if (data.hasBreach) ...[
-                  _lowBalanceAlert(l, data),
+                  _lowBalanceAlert(l, data, currency),
                   const SizedBox(height: 16),
                 ],
-                _kpiSummary(l, data),
+                _kpiSummary(l, data, currency),
                 const SizedBox(height: 24),
-                _forecastSection(context, l, data),
+                _forecastSection(context, l, data, currency),
                 const SizedBox(height: 24),
-                _positionSection(context, l, data),
+                _positionSection(context, l, data, currency),
               ],
             ),
           );
@@ -112,7 +125,8 @@ class _CashFlowScreenState extends State<CashFlowScreen> {
     );
   }
 
-  Widget _lowBalanceAlert(AppLocalizations l, CashFlowData data) {
+  Widget _lowBalanceAlert(
+      AppLocalizations l, CashFlowData data, String? currency) {
     final count = data.breaches.length;
     final worst = data.breaches.reduce((a, b) {
       final av = num.tryParse(a.shortfallDisplay) ?? 0;
@@ -122,15 +136,15 @@ class _CashFlowScreenState extends State<CashFlowScreen> {
     final message = count == 1
         ? l.cashFlowBreachSingle(
             data.thresholdDisplay != null
-                ? _money(data.thresholdDisplay!)
+                ? _money(data.thresholdDisplay!, currency)
                 : l.cashFlowMinimum,
             worst.period,
-            _money(worst.shortfallDisplay),
+            _money(worst.shortfallDisplay, currency),
           )
         : l.cashFlowBreachMultiple(
             count,
             worst.period,
-            _money(worst.shortfallDisplay),
+            _money(worst.shortfallDisplay, currency),
           );
     return Semantics(
       label: l.cashFlowLowBalanceAlertLabel(message),
@@ -174,7 +188,8 @@ class _CashFlowScreenState extends State<CashFlowScreen> {
     );
   }
 
-  Widget _kpiSummary(AppLocalizations l, CashFlowData data) {
+  Widget _kpiSummary(
+      AppLocalizations l, CashFlowData data, String? currency) {
     final endColor = data.hasBreach ? Colors.red : Colors.green;
     return Column(
       children: [
@@ -183,7 +198,7 @@ class _CashFlowScreenState extends State<CashFlowScreen> {
             Expanded(
               child: KpiCard(
                 title: l.cashFlowOpeningBalance,
-                value: _money(data.openingBalanceDisplay),
+                value: _money(data.openingBalanceDisplay, currency),
                 subtitle: _openingSourceLabel(l, data.openingBalanceSource),
                 icon: Icons.account_balance,
                 color: Colors.blue,
@@ -193,7 +208,7 @@ class _CashFlowScreenState extends State<CashFlowScreen> {
             Expanded(
               child: KpiCard(
                 title: l.cashFlowProjectedEnd,
-                value: _money(data.projectedEndBalanceDisplay),
+                value: _money(data.projectedEndBalanceDisplay, currency),
                 subtitle: l.cashFlowProjectedEndSubtitle(data.horizonDays),
                 icon: Icons.trending_up,
                 color: endColor,
@@ -207,7 +222,7 @@ class _CashFlowScreenState extends State<CashFlowScreen> {
             Expanded(
               child: KpiCard(
                 title: l.cashFlowCommittedOut,
-                value: _money(data.totals.committedAmountDisplay),
+                value: _money(data.totals.committedAmountDisplay, currency),
                 subtitle: l.cashFlowCommittedSubtitle,
                 icon: Icons.lock_clock,
                 color: Colors.deepOrange,
@@ -217,7 +232,7 @@ class _CashFlowScreenState extends State<CashFlowScreen> {
             Expanded(
               child: KpiCard(
                 title: l.cashFlowPendingOut,
-                value: _money(data.totals.pendingAmountDisplay),
+                value: _money(data.totals.pendingAmountDisplay, currency),
                 subtitle: l.cashFlowPendingSubtitle,
                 icon: Icons.pending_actions,
                 color: Colors.amber.shade700,
@@ -237,8 +252,8 @@ class _CashFlowScreenState extends State<CashFlowScreen> {
         _ => l.cashFlowOpeningSourceUnset,
       };
 
-  Widget _forecastSection(
-      BuildContext context, AppLocalizations l, CashFlowData data) {
+  Widget _forecastSection(BuildContext context, AppLocalizations l,
+      CashFlowData data, String? currency) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -250,19 +265,20 @@ class _CashFlowScreenState extends State<CashFlowScreen> {
         if (data.forecastPeriods.isEmpty)
           _emptyCard(l.cashFlowNoOutflows)
         else
-          ...data.forecastPeriods.map((p) => _forecastRow(l, p)),
+          ...data.forecastPeriods.map((p) => _forecastRow(l, p, currency)),
       ],
     );
   }
 
-  Widget _forecastRow(AppLocalizations l, CashFlowForecastPeriod p) {
+  Widget _forecastRow(
+      AppLocalizations l, CashFlowForecastPeriod p, String? currency) {
     // One announcement per row instead of period + four money fragments.
     return Semantics(
       label: l.cashFlowForecastRowLabel(
         p.period,
-        _money(p.scheduledAmountDisplay),
-        _money(p.committedAmountDisplay),
-        _money(p.pendingAmountDisplay),
+        _money(p.scheduledAmountDisplay, currency),
+        _money(p.committedAmountDisplay, currency),
+        _money(p.pendingAmountDisplay, currency),
         p.count,
       ),
       excludeSemantics: true,
@@ -298,17 +314,17 @@ class _CashFlowScreenState extends State<CashFlowScreen> {
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
                   Text(
-                    _money(p.scheduledAmountDisplay),
+                    _money(p.scheduledAmountDisplay, currency),
                     style: const TextStyle(fontWeight: FontWeight.w700),
                   ),
                   const SizedBox(height: 2),
                   Text(
-                    l.cashFlowCommittedAmount(_money(p.committedAmountDisplay)),
+                    l.cashFlowCommittedAmount(_money(p.committedAmountDisplay, currency)),
                     style:
                         TextStyle(color: Colors.grey.shade700, fontSize: 11),
                   ),
                   Text(
-                    l.cashFlowPendingAmount(_money(p.pendingAmountDisplay)),
+                    l.cashFlowPendingAmount(_money(p.pendingAmountDisplay, currency)),
                     style:
                         TextStyle(color: Colors.grey.shade700, fontSize: 11),
                   ),
@@ -321,8 +337,8 @@ class _CashFlowScreenState extends State<CashFlowScreen> {
     );
   }
 
-  Widget _positionSection(
-      BuildContext context, AppLocalizations l, CashFlowData data) {
+  Widget _positionSection(BuildContext context, AppLocalizations l,
+      CashFlowData data, String? currency) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -334,21 +350,22 @@ class _CashFlowScreenState extends State<CashFlowScreen> {
         if (data.positionPeriods.isEmpty)
           _emptyCard(l.cashFlowNoPosition)
         else
-          ...data.positionPeriods.map((p) => _positionRow(l, p)),
+          ...data.positionPeriods.map((p) => _positionRow(l, p, currency)),
       ],
     );
   }
 
-  Widget _positionRow(AppLocalizations l, CashPositionPeriod p) {
+  Widget _positionRow(
+      AppLocalizations l, CashPositionPeriod p, String? currency) {
     final breach = p.belowThreshold;
     // shade900 keeps the red closing balance legible at AA on white.
     final closingColor = breach ? Colors.red.shade900 : Colors.black87;
     return Semantics(
       label: l.cashFlowPositionRowLabel(
             p.period,
-            _money(p.openingDisplay),
-            _money(p.outflowDisplay),
-            _money(p.closingDisplay),
+            _money(p.openingDisplay, currency),
+            _money(p.outflowDisplay, currency),
+            _money(p.closingDisplay, currency),
           ) +
           (breach ? l.cashFlowBelowThresholdSuffix : ''),
       excludeSemantics: true,
@@ -380,7 +397,7 @@ class _CashFlowScreenState extends State<CashFlowScreen> {
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      l.cashFlowOutAmount(_money(p.outflowDisplay)),
+                      l.cashFlowOutAmount(_money(p.outflowDisplay, currency)),
                       style:
                           TextStyle(color: Colors.grey.shade700, fontSize: 12),
                     ),
@@ -388,7 +405,7 @@ class _CashFlowScreenState extends State<CashFlowScreen> {
                 ),
               ),
               Text(
-                _money(p.closingDisplay),
+                _money(p.closingDisplay, currency),
                 style: TextStyle(
                   fontWeight: FontWeight.w700,
                   color: closingColor,

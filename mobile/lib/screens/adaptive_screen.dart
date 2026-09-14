@@ -5,7 +5,9 @@ import 'package:feohledger_mobile/l10n/gen/app_localizations.dart';
 import 'package:feohledger_mobile/models/adaptive.dart';
 import 'package:feohledger_mobile/stores/adaptive_store.dart';
 import 'package:feohledger_mobile/stores/auth_store.dart';
+import 'package:feohledger_mobile/stores/org_currency_store.dart';
 import 'package:feohledger_mobile/utils/a11y.dart';
+import 'package:feohledger_mobile/utils/money.dart';
 
 /// Adaptive AI workflows — advisory suggestions, approval patterns and baseline
 /// anomalies, over `/api/adaptive`.
@@ -54,6 +56,10 @@ class _AdaptiveScreenState extends State<AdaptiveScreen>
       store.fetchSuggestions();
       store.fetchPatterns();
       store.fetchAnomalies();
+      // The patterns tab's per-vendor averages are in the org's reporting
+      // currency and `approval-patterns` does not name it, so the code comes
+      // from the settings rungs the server resolved to denominate them.
+      OrgCurrencyStore.instance.ensureLoaded();
     });
   }
 
@@ -267,11 +273,17 @@ class _AdaptiveScreenState extends State<AdaptiveScreen>
   // ── Approval patterns ──────────────────────────────────────────────
   Widget _patternsTab() {
     return ListenableBuilder(
-      listenable: AdaptiveStore.instance,
+      // Both stores: the reporting currency is a separate request and can land
+      // after the patterns do, at which point the bare figures must pick up
+      // their symbol instead of staying bare for the life of the screen.
+      listenable: Listenable.merge(
+        [AdaptiveStore.instance, OrgCurrencyStore.instance],
+      ),
       builder: (context, _) {
         final l = AppLocalizations.of(context);
         final store = AdaptiveStore.instance;
         final data = store.patterns;
+        final currency = OrgCurrencyStore.instance.currency;
 
         if (store.patternsLoading && data == null) {
           return const Center(child: CircularProgressIndicator());
@@ -305,14 +317,19 @@ class _AdaptiveScreenState extends State<AdaptiveScreen>
                 for (final a in data.approvers) _approverRow(l, a),
               const SizedBox(height: 20),
               _sectionHeader(l.adaptivePatternsSectionVendors),
-              // The four money figures are in the org's reporting currency,
-              // which this payload does not name — so the section says so once
-              // rather than each row stamping a symbol the API never sent.
-              _emptyLine(l.adaptivePatternsCurrencyNote),
+              // The money figures are in the org's reporting currency, which
+              // this payload does not name. With a resolved code each figure
+              // carries its own symbol and the note is redundant; with none
+              // the figures stay bare and the note is the only thing that says
+              // what they are in — so it renders exactly when it is load-
+              // bearing, rather than permanently apologising for a `\$` that
+              // is no longer there.
+              if (currency == null)
+                _emptyLine(l.adaptivePatternsCurrencyNote),
               if (data.vendors.isEmpty)
                 _emptyLine(l.adaptivePatternsEmptyVendors)
               else
-                for (final v in data.vendors) _vendorRow(l, v),
+                for (final v in data.vendors) _vendorRow(l, v, currency),
             ],
           ),
         );
@@ -354,11 +371,11 @@ class _AdaptiveScreenState extends State<AdaptiveScreen>
     );
   }
 
-  Widget _vendorRow(AppLocalizations l, VendorPattern v) {
+  Widget _vendorRow(AppLocalizations l, VendorPattern v, String? currency) {
     final consistency = l.adaptivePatternsVendorConsistency(v.consistencyPct);
     final money = l.adaptivePatternsVendorMoney(
-      v.medianApprovedAmount,
-      v.avgApprovedAmount,
+      formatMoneyString(v.medianApprovedAmount, currency: currency),
+      formatMoneyString(v.avgApprovedAmount, currency: currency),
     );
     final summary = l.adaptivePatternsApproverSummary(
       v.approvedCount,

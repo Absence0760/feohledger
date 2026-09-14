@@ -8,9 +8,9 @@ import 'package:feohledger_mobile/models/exception.dart';
 import 'package:feohledger_mobile/stores/auth_store.dart';
 import 'package:feohledger_mobile/stores/exception_store.dart';
 import 'package:feohledger_mobile/utils/a11y.dart';
+import 'package:feohledger_mobile/utils/money.dart';
 import 'package:feohledger_mobile/widgets/exception_status_badge.dart';
 
-final _currencyFormat = NumberFormat.currency(symbol: '\$');
 final _dateFormat = DateFormat('MMM d, yyyy · h:mm a');
 
 /// Single-exception detail — full fields, the linked invoice, SLA / due /
@@ -216,7 +216,7 @@ class _ExceptionDetailScreenState extends State<ExceptionDetailScreen> {
             _row(l.exceptionDetailFieldVendor, exc.vendorName!),
           if (exc.amount != null)
             _row(l.exceptionDetailFieldAmount,
-                _currencyFormat.format(exc.amount)),
+                formatMoney(exc.amount, currency: exc.currency)),
         ],
         _row(l.exceptionDetailFieldSeverity, exc.severity.label),
       ],

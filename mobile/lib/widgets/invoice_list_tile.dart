@@ -2,9 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 import 'package:feohledger_mobile/models/invoice.dart';
+import 'package:feohledger_mobile/utils/money.dart';
 import 'package:feohledger_mobile/widgets/status_badge.dart';
-
-final _currencyFormat = NumberFormat.currency(symbol: '\$');
 
 class InvoiceListTile extends StatelessWidget {
   final Invoice invoice;
@@ -32,7 +31,7 @@ class InvoiceListTile extends StatelessWidget {
     final parts = <String>[
       if (selectionMode) selected ? 'Selected' : 'Not selected',
       invoice.vendorName ?? 'Unknown Vendor',
-      if (invoice.amount != null) _currencyFormat.format(invoice.amount),
+      if (invoice.amount != null) _amount,
       if (invoice.invoiceNumber != null) 'invoice ${invoice.invoiceNumber}',
       invoice.status.label,
       if (invoice.dueDate != null)
@@ -41,6 +40,12 @@ class InvoiceListTile extends StatelessWidget {
     ];
     return parts.join(', ');
   }
+
+  /// The row's amount in the INVOICE's own currency — a multi-currency tenant
+  /// has rows in several, so the org's reporting currency is not the answer
+  /// here. A row carrying no code renders its digits with no symbol.
+  String get _amount =>
+      formatMoney(invoice.amount, currency: invoice.currency);
 
   @override
   Widget build(BuildContext context) {
@@ -83,7 +88,7 @@ class InvoiceListTile extends StatelessWidget {
           ),
           if (invoice.amount != null)
             Text(
-              _currencyFormat.format(invoice.amount),
+              _amount,
               style: const TextStyle(fontWeight: FontWeight.w600),
             ),
         ],

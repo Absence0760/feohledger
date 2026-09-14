@@ -27,8 +27,8 @@ mobile/
 │   │   ├── mfa_challenge.dart    # MFAChallenge (login MFA-challenge response) — challengeToken + offered methods (totp/email) + mustEnroll
 │   │   ├── exception.dart       # ApException, ApExceptionStatus + ApExceptionSeverity enums
 │   │   ├── notification.dart    # AppNotification (in-app notification center row); eventLabel + linksToInvoice helper; copyMarkedRead for optimistic mark-read
-│   │   ├── payment.dart         # Payment, PaymentMethod, DashboardData, aging, trends
-│   │   ├── payment_queue.dart   # PaymentQueueItem, PaymentSummary, PaymentRun, PaymentRunSelection (money as display strings — no client float math)
+│   │   ├── payment.dart         # Payment (+ its invoice's `currency`), PaymentMethod, DashboardData (reads the `reporting` block's rollups + `reporting_currency` — the face-value keys are cross-currency sums), aging, trends
+│   │   ├── payment_queue.dart   # PaymentQueueItem (own invoice currency), PaymentSummary (+ the reporting `currency` it names), PaymentRun (total is a cross-currency SUM — no currency exists for it), PaymentRunSelection (money as display strings — no client float math)
 │   │   ├── vendor.dart          # Vendor, VendorStatus enum (active/unverified/inactive/rejected)
 │   │   └── workflow.dart        # WorkflowDefinition + WorkflowStepConfig (read-only; parses steps_config.steps; typeLabel helper)
 │   ├── services/
@@ -44,6 +44,7 @@ mobile/
 │   │   ├── auth_store.dart      # Auth state — login, logout, role checks (incl. canBulkEditInvoices + isOrgAdmin gates); binds the session scope on login/restore
 │   │   ├── admin_user_store.dart # Admin user management — users + roles, set-roles / activate-deactivate (admin-only, not offline-cached)
 │   │   ├── org_settings_store.dart # Organization settings — load + save the safe subset (company + invoice defaults; admin-only, not offline-cached)
+│   │   ├── org_currency_store.dart # The org's REPORTING currency for aggregates no payload names (adaptive per-vendor averages, the cash-flow forecast leg) — three settings rungs, `null` when none is usable; NOT for per-row amounts, which carry their own
 │   │   ├── invoice_store.dart   # Invoice list, filter, approve/reject + multi-select bulk delete/status (offline cached)
 │   │   ├── exception_store.dart # Exception list, filter, resolve/escalate/dismiss + getById (detail) + assign (in-place row patch) + multi-select state + bulkResolve (offline cached)
 │   │   ├── notification_store.dart # In-app notification center — list (All/Unread filter), unread badge count, optimistic mark-read + read-all (offline cached)
@@ -54,6 +55,11 @@ mobile/
 │   │   ├── vendor_store.dart    # Vendor list, filter/search, verify/reject, ERP sync (offline cached)
 │   │   ├── workflow_store.dart  # Workflow-definition list (read-only) — load + loading/error; NOT offline-cached (privileged admin read, no mutators)
 │   │   └── payment_queue_store.dart # Payment queue + summary + runs; per-row method selection; create/execute/cancel runs
+│   ├── utils/
+│   │   ├── money.dart           # THE money formatter — formatMoney (num) / formatMoneyString (exact decimal) / formatMoneyCompact + normalizeCurrencyCode; a figure is formatted with the currency its own payload names, and renders BARE when none can be proven (never a substituted `$`)
+│   │   ├── a11y.dart            # A11y.announce — screen-reader live-region announcements (SemanticsService, Directionality-aware)
+│   │   ├── debouncer.dart       # Trailing-edge debounce for search-as-you-type
+│   │   └── sequenced_fetch.dart # SequencedFetch mixin — per-store request sequence so a slow response can't overwrite a newer one
 │   ├── screens/
 │   │   ├── login_screen.dart    # Tenant + email/password login (routes to MfaScreen on an MFA challenge)
 │   │   ├── mfa_screen.dart      # MFA second-factor code entry (TOTP + email-OTP backup); POST /auth/mfa/verify → JWT

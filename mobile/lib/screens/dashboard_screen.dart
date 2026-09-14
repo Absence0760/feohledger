@@ -1,14 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
-import 'package:intl/intl.dart';
 
 import 'package:feohledger_mobile/l10n/gen/app_localizations.dart';
 import 'package:feohledger_mobile/stores/dashboard_store.dart';
+import 'package:feohledger_mobile/utils/money.dart';
 import 'package:feohledger_mobile/widgets/cash_flow_button.dart';
 import 'package:feohledger_mobile/widgets/kpi_card.dart';
 import 'package:feohledger_mobile/widgets/notification_bell.dart';
-
-final _currencyFormat = NumberFormat.compactCurrency(symbol: '\$');
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -81,7 +79,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       child: KpiCard(
                         title: l.dashboardTotalInvoices,
                         value: data.totalInvoices.toString(),
-                        subtitle: _currencyFormat.format(data.totalAmount),
+                        subtitle: formatMoneyCompact(
+                          data.totalAmount,
+                          currency: data.reportingCurrency,
+                        ),
                         icon: Icons.receipt_long,
                         color: Colors.blue,
                       ),
@@ -91,8 +92,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       child: KpiCard(
                         title: l.dashboardUpcoming,
                         value: data.upcoming.count.toString(),
-                        subtitle: _currencyFormat
-                            .format(data.upcoming.totalAmount),
+                        subtitle: formatMoneyCompact(
+                          data.upcoming.totalAmount,
+                          currency: data.reportingCurrency,
+                        ),
                         icon: Icons.schedule,
                         color: Colors.orange,
                       ),
@@ -144,21 +147,25 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           l.dashboardAgingCurrent,
                           data.aging.current,
                           Colors.green,
+                          currency: data.reportingCurrency,
                         ),
                         _agingBucket(
                           l.dashboardAgingDays30,
                           data.aging.thirtyDays,
                           Colors.amber,
+                          currency: data.reportingCurrency,
                         ),
                         _agingBucket(
                           l.dashboardAgingDays60,
                           data.aging.sixtyDays,
                           Colors.orange,
+                          currency: data.reportingCurrency,
                         ),
                         _agingBucket(
                           l.dashboardAgingDays90plus,
                           data.aging.ninetyPlus,
                           Colors.red,
+                          currency: data.reportingCurrency,
                         ),
                       ],
                     ),
@@ -177,7 +184,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         dense: true,
                         title: Text(v.vendorName),
                         trailing: Text(
-                          _currencyFormat.format(v.totalAmount),
+                          formatMoneyCompact(
+                            v.totalAmount,
+                            currency: data.reportingCurrency,
+                          ),
                           style: const TextStyle(fontWeight: FontWeight.w600),
                         ),
                         subtitle: Text(l.dashboardInvoiceCount(v.invoiceCount)),
@@ -214,12 +224,18 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  Widget _agingBucket(String label, double amount, Color color) {
+  Widget _agingBucket(
+    String label,
+    double amount,
+    Color color, {
+    required String? currency,
+  }) {
+    final figure = formatMoneyCompact(amount, currency: currency);
     // One announcement per bucket ("Current: $1,234") rather than the dot +
     // amount + label read as three fragments (WCAG 1.3.1).
     return Expanded(
       child: Semantics(
-        label: '$label: ${_currencyFormat.format(amount)}',
+        label: '$label: $figure',
         excludeSemantics: true,
         child: Column(
           children: [
@@ -230,7 +246,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
             ),
             const SizedBox(height: 4),
             Text(
-              _currencyFormat.format(amount),
+              figure,
               style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
             ),
             Text(

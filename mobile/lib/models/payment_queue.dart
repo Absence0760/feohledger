@@ -21,7 +21,12 @@ class PaymentQueueItem {
 
   /// Display string for the invoice amount. Never used in arithmetic.
   final String amountDisplay;
-  final String currency;
+
+  /// What [amountDisplay] is denominated in — this invoice's OWN currency, not
+  /// the org's reporting currency (the queue rollup below carries that one).
+  /// `null` when the row carries no usable code, in which case the figure
+  /// renders bare rather than wearing a substituted symbol.
+  final String? currency;
   final DateTime? dueDate;
   final String? paymentTerms;
   final String status;
@@ -61,7 +66,7 @@ class PaymentQueueItem {
     required this.invoiceNumber,
     required this.vendorName,
     required this.amountDisplay,
-    required this.currency,
+    this.currency,
     this.dueDate,
     this.paymentTerms,
     required this.status,
@@ -112,7 +117,7 @@ class PaymentQueueItem {
       invoiceNumber: json['invoice_number'] as String? ?? '',
       vendorName: json['vendor_name'] as String? ?? 'Unknown',
       amountDisplay: moneyToDisplay(json['amount']),
-      currency: json['currency'] as String? ?? 'USD',
+      currency: json['currency'] as String?,
       dueDate: parseDate(json['due_date']),
       paymentTerms: json['payment_terms'] as String?,
       status: json['status'] as String? ?? 'approved',
@@ -141,12 +146,21 @@ class PaymentSummary {
   final String totalRebatesDisplay;
   final int queueCount;
 
+  /// What the three money figures above are denominated in — the org's
+  /// REPORTING currency, which `/payments/summary` resolves and then names in
+  /// its own response (`"currency": reporting_currency`) because none of these
+  /// totals belongs to a single row. This is the authoritative answer for this
+  /// KPI bar and outranks `OrgCurrencyStore`, which resolves the same rungs
+  /// client-side for the payloads that do NOT name one.
+  final String? currency;
+
   PaymentSummary({
     required this.totalPaidDisplay,
     required this.totalPendingDisplay,
     required this.paymentCount,
     required this.totalRebatesDisplay,
     required this.queueCount,
+    this.currency,
   });
 
   factory PaymentSummary.fromJson(Map<String, dynamic> json) {
@@ -156,11 +170,22 @@ class PaymentSummary {
       paymentCount: json['payment_count'] as int? ?? 0,
       totalRebatesDisplay: moneyToDisplay(json['total_rebates']),
       queueCount: json['queue_count'] as int? ?? 0,
+      currency: json['currency'] as String?,
     );
   }
 }
 
 /// A batch from `GET /api/payments/runs/`.
+///
+/// **[totalAmountDisplay] has no currency, and that is a property of the data,
+/// not an omission here.** `payment_runs.total_amount` is a plain
+/// `SUM(Payment.amount)` and each payment is denominated in its own invoice's
+/// currency, so a run spanning a USD and a EUR invoice holds a figure in no
+/// currency at all. It therefore renders bare. Naming the org's reporting
+/// currency over it would be the very mislabel this pass removed — the
+/// endpoint would have to roll the sum up the way `/payments/queue` already
+/// does (`rollup["currency"]` + `unconverted_count`) before there is a code to
+/// print. Tracked in `docs/followups.md`.
 class PaymentRun {
   final String id;
   final String status;

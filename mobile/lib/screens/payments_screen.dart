@@ -1,12 +1,10 @@
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
 
 import 'package:feohledger_mobile/api/api_client.dart';
 import 'package:feohledger_mobile/api/endpoints.dart';
 import 'package:feohledger_mobile/l10n/gen/app_localizations.dart';
 import 'package:feohledger_mobile/models/payment.dart';
-
-final _currencyFormat = NumberFormat.currency(symbol: '\$');
+import 'package:feohledger_mobile/utils/money.dart';
 
 class PaymentsScreen extends StatefulWidget {
   const PaymentsScreen({super.key});
@@ -68,17 +66,26 @@ class _PaymentsScreenState extends State<PaymentsScreen> {
                             final p = _payments[index];
                             final reference =
                                 p.reference ?? p.id.substring(0, 8);
+                            // The AUTHORIZED figure, in the currency the
+                            // joined invoice carries. `payments` has no
+                            // currency column of its own, and a null code
+                            // renders the bare figure — the org's reporting
+                            // currency is not what this payment moved.
+                            final amount = formatMoney(
+                              p.amount,
+                              currency: p.currency,
+                            );
                             // One merged announcement for the whole payment row.
                             return Semantics(
                               label:
-                                  '${_currencyFormat.format(p.amount)}, '
+                                  '$amount, '
                                   '${p.method.label}, $reference, '
                                   '${_statusLabel(l, p.status)}',
                               excludeSemantics: true,
                               child: ListTile(
                                 leading: _methodIcon(p.method),
                                 title: Text(
-                                  _currencyFormat.format(p.amount),
+                                  amount,
                                   style: const TextStyle(
                                     fontWeight: FontWeight.w600,
                                   ),

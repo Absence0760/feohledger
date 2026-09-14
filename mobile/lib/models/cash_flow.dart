@@ -131,6 +131,18 @@ class CashFlowData {
   // Cash-position leg.
   final String openingBalanceDisplay;
   final String openingBalanceSource;
+
+  /// What EVERY figure on this screen is denominated in — the org's reporting
+  /// currency, straight from `cash_position.opening_balance_currency`.
+  ///
+  /// The cash-position endpoint names it because the whole running curve has
+  /// to be in one currency to mean anything (it REFUSES a provider balance in
+  /// another, on exactly this ground), and `cashflow_forecast` resolves the
+  /// same code for the same request without naming it — so this one field
+  /// labels both legs. `null` when the position leg landed nothing, in which
+  /// case the screen falls back to `OrgCurrencyStore`, which resolves the same
+  /// settings rungs the server did.
+  final String? openingBalanceCurrency;
   final String? thresholdDisplay;
   final List<CashPositionPeriod> positionPeriods;
   final List<CashPositionBreach> breaches;
@@ -142,6 +154,7 @@ class CashFlowData {
     required this.totals,
     required this.openingBalanceDisplay,
     required this.openingBalanceSource,
+    this.openingBalanceCurrency,
     this.thresholdDisplay,
     required this.positionPeriods,
     required this.breaches,
@@ -185,6 +198,7 @@ class CashFlowData {
       openingBalanceDisplay: moneyToDisplay(position['opening_balance']),
       openingBalanceSource:
           position['opening_balance_source'] as String? ?? 'none',
+      openingBalanceCurrency: position['opening_balance_currency'] as String?,
       thresholdDisplay: position['threshold'] == null
           ? null
           : moneyToDisplay(position['threshold']),

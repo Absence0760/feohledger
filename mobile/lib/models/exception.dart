@@ -61,6 +61,12 @@ class ApException {
   final String? invoiceNumber;
   final String? vendorName;
   final double? amount;
+
+  /// What [amount] is denominated in — the related INVOICE's currency, since
+  /// the figure is that invoice's amount. `null` when no invoice is joined, or
+  /// against a backend predating the field: the amount then renders with no
+  /// symbol, because the org's reporting currency is not what it is in.
+  final String? currency;
   final String exceptionType;
 
   /// Human-readable label resolved server-side (e.g. "Duplicate Invoice").
@@ -93,6 +99,7 @@ class ApException {
     this.invoiceNumber,
     this.vendorName,
     this.amount,
+    this.currency,
     required this.exceptionType,
     required this.typeLabel,
     required this.severity,
@@ -122,6 +129,7 @@ class ApException {
       invoiceNumber: json['invoice_number'] as String?,
       vendorName: json['vendor_name'] as String?,
       amount: (json['amount'] as num?)?.toDouble(),
+      currency: json['currency'] as String?,
       exceptionType: type,
       typeLabel: json['type_label'] as String? ?? type,
       severity: ApExceptionSeverity.fromString(json['severity'] as String?),
