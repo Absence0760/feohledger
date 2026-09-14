@@ -102,6 +102,10 @@ mutates state itself.
    untouched), commit, return.
 3. `resolver.evaluate(...)` → `AgentEvaluation`.
 4. `can_resolve = recommended == auto_resolved AND confidence >= threshold`.
+   - **Before any mutation**, if `can_resolve`: refuse when the triggering human
+     is barred from *clearing* this exception by segregation of duties
+     (`exception_lifecycle.segregation_refusal`) → escalate with a recorded
+     decision. See § The agent inherits the queue's segregation rule.
    - If yes: `resolver.apply(...)` (writes audit rows), then resolve the
      exception through the **shared** queue chokepoint
      `services/exception_lifecycle.record_decision` — the same one
@@ -157,6 +161,42 @@ under asyncio raises `MissingGreenlet` — turning a handled refusal back into a
 500. The realdb half of `tests/test_exception_agent_approval_refusal.py` is what
 pins both halves: the refused amount change does not persist, and the escalation
 that follows does.
+
+### The agent inherits the queue's segregation rule
+
+Clearing a payment-**blocking** exception (`duplicate` / `fraud_flag` /
+`line_total_mismatch` / `payment_reconciliation`) is what lets a payment run pay
+the invoice, and it is refused for an actor implicated in that payable or
+recorded as having raised the flag — see
+[`docs/authentication.md`](../../docs/authentication.md) § Segregation of duties
+on the exception queue.
+
+That rule binds on the agent door too, and `via="agent"` is **not** an
+exemption. The agent holds no authority of its own: `actor_id` is the human who
+pressed the button, the fail-closed branch above refuses to act without that
+human's real roles, and `apply` approves on those roles — which is why the
+`HTTPException` handler above already exists for the *approval* path's own
+segregation refusal. Exempting agents would hand a barred actor a one-click
+route to the outcome the HTTP door refuses them.
+
+It is checked **before** `apply` rather than caught after it, because the answer
+needs no mutation and because `record_decision` runs *after* the SAVEPOINT
+closes — a raise from there would reach the route as a bare 403 with the
+exception left `open` and no `AgentDecision` row, the exact regression the
+handler above was written to fix. The outcome is therefore the same escalation
+every other refusal produces, with the refusal sentence as the rationale a human
+reads in the queue. The org opt-out
+(`settings.exceptions.require_segregation: false`) is read from the same place,
+so an org that disabled the control does not find the agent still refusing.
+
+**Nothing in the shipped registry can reach the gate today**: `duplicate` and
+`fraud_flag` are escalate-only stubs (§ Deferred) and `line_total_mismatch` /
+`payment_reconciliation` have no resolver at all, so no payment-blocking type
+has an auto-resolving agent. That is why
+`tests/test_exception_agent_queue_segregation.py` registers a probe resolver to
+test it — a gate written *after* the first such resolver lands, lands as a
+bypass — and why a companion test fails the moment a real auto-resolving
+resolver appears for a blocking type.
 
 ## Autonomy → threshold
 
@@ -568,6 +608,12 @@ the API maps to **409** (no second `AgentDecision` row, no status clobber).
 
 Default (key absent) → `conservative` → everything escalates. No new env var:
 the optional rationale LLM reuses `FEOH_ANTHROPIC_API_KEY` + `FEOH_EXTRACTION_MODEL`.
+
+One setting outside this block also governs an agent run:
+`settings.exceptions.require_segregation` (default `true`, disabled only by an
+explicit `false`) is read by both the human queue and the coordinator, so the
+segregation refusal above is turned off in one place for both doors rather than
+two.
 
 ## Deferred
 

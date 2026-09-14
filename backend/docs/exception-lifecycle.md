@@ -89,10 +89,10 @@ groups that exception's raise / assign / resolve rows together.
   text that can name a vendor, the row already holds it, and the trail gains
   nothing by duplicating it.
 
-## One chokepoint, three callers
+## One chokepoint, four callers
 
 `exception_lifecycle.record_decision` both applies the bookkeeping and writes
-the row. Every decider goes through it:
+the row — **and enforces segregation of duties**. Every decider goes through it:
 
 - `api/exceptions.py` — `POST /{id}/resolve` and `POST /bulk/resolve`
 - `services/exception_agents/coordinator.py` — auto-resolve and every escalate
@@ -102,12 +102,41 @@ the row. Every decider goes through it:
   or `/dismiss`. It keeps the `resolve` verb in both cases: a dismissed
   *payment* still means a human cleared the hold, and `resolution`
   (`released` vs `dismissed: <reason>`) is what distinguishes them.
+- `api/portal.py` — a supplier re-uploading a rejected invoice clears the
+  `review_rejected` exception it supersedes, with `actor_id=None` (the actor is
+  a tenant-scoped `VendorUser`, who holds no control-plane identity).
 
-Previously these were three copies (the coordinator's helper carried a comment
-saying it was mirroring the API's; the payments one said the same), and none
-wrote an audit row.
-`correlation_ids_for` resolves a whole batch's correlations in one query so a
-bulk action doesn't fire one lookup per row.
+Previously these were copies (the coordinator's helper carried a comment saying
+it was mirroring the API's; the payments one said the same), and none wrote an
+audit row.
+`invoices_for` resolves a whole batch's invoices in one query so a bulk action
+doesn't fire one lookup per row — the audit row files under the invoice's
+`correlation_id` and the segregation check reads the invoice's implicated
+actors, so one batch read serves both.
+
+### Segregation of duties on a clearing verb
+
+Clearing a payment-**blocking** exception is a money-path authorisation, so
+`record_decision` refuses an actor implicated in the linked invoice
+(`Invoice.uploaded_by_id` ∪ `Invoice.segregation_actor_ids`, through
+`approval_chain.violates_segregation`) **or** recorded as the flag's raiser
+(`exceptions.raised_by_user_id`, migration `0098`). `resolve` and `dismiss`
+only — `escalate` is the refused actor's exit and an escalated row still blocks
+the run. NULL on both axes is permissive; `settings.exceptions
+.require_segregation: false` is the explicit per-org opt-out. Full rules,
+including what each refusal says and why a refusal is logged rather than
+audited: [`docs/authentication.md`](../../docs/authentication.md) § Segregation
+of duties on the exception queue, and `docs/decisions.md` §165–§166.
+
+**Being the chokepoint is what makes it safe to put the check here**, and it is
+also why the two non-queue callers above need no exemption: neither
+`payment_compliance_hold` nor `review_rejected` is payment-blocking, and the
+portal's actor is NULL, so both early-return. A refusal there would strand a
+supplier resubmission or desynchronise the queue from a released hold — neither
+is a control. `record_decision` also **loads the invoice itself** when a caller
+omits it, so the check cannot be switched off by leaving an optional argument
+out, and `org_settings` defaults to enforcing so a forgetful caller fails
+closed.
 
 ## Escalation is not a resolution
 
@@ -124,7 +153,8 @@ genuinely terminal state (`resolve` / `dismiss`).
 ## Scoping and RBAC
 
 Every `/api/exceptions` route is `require_roles(ROLE_ADMIN, ROLE_AP_MANAGER)`
-and **entity-scoped** — reads and mutations alike. An exception belonging to
+and **entity-scoped** — reads and mutations alike. Roles are no longer the only
+gate on a clearing verb: see § Segregation of duties on a clearing verb above. An exception belonging to
 another subsidiary is the same opaque 404 the detail read gives; a bulk call
 folds an out-of-scope id into its existing `not_found` skip, so it can't
 enumerate either. This matters for the same reason the audit row does: a
@@ -175,3 +205,13 @@ endpoint. `backend/tests/test_exception_assignment.py` pins
 `apply_resolution`'s pure bookkeeping.
 `backend/tests/test_exception_type_labels.py` is the roster/label drift guard
 described above (pure — an AST walk over `app/`, no DB).
+`backend/tests/test_exception_resolve_segregation.py` covers the segregation
+refusal on both routes and both axes, the NULL-permissive and invoice-less
+branches, the type scope, the opt-out's "explicit false only" reading,
+`escalate` staying open, `/bulk/resolve`'s per-row refusal, and the two
+non-queue callers staying unaffected.
+`backend/tests/test_exception_agent_queue_segregation.py` covers the agent
+inheriting it (and fails when a real auto-resolving resolver lands for a
+blocking type). `backend/tests/test_exception_raiser_stamping.py` is the
+`raised_by_user_id` drift guard — every `create_exception` site must state its
+raiser, and a literal `None` must be declared with its reason.
