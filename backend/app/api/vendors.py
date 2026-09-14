@@ -305,10 +305,24 @@ _BANK_CHANGE_PAYABLE_STATUSES = (
 )
 
 
-async def _flag_payable_invoices_for_bank_change(db: AsyncSession, *, vendor: Vendor) -> None:
+async def _flag_payable_invoices_for_bank_change(
+    db: AsyncSession, *, vendor: Vendor, actor_id: uuid.UUID
+) -> None:
     """Raise a de-duped ``fraud_flag`` exception on every in-queue invoice for a
     vendor whose bank details just changed, forcing a human second look before
-    the next payment run pays into the new account. Description is PII-free."""
+    the next payment run pays into the new account. Description is PII-free.
+
+    ``actor_id`` is the approver, stamped as the exception's
+    ``raised_by_user_id``. This is the ONE raise site in the codebase where the
+    signed-in actor is genuinely the person the flag asks someone else to check:
+    approving a bank-detail change is what re-points the money, and the flag
+    exists to get a second pair of eyes on that act. Without the stamp the same
+    actor could clear every flag they just raised and execute the run — which is
+    precisely what `docs/authentication.md` recorded as the open end of the BEC
+    chain ("not a second control against the same actor"). The payable's own
+    implicated-actor set cannot reach this case: the approver is not the
+    uploader of the invoices the change re-points.
+    """
     from app.models.exception import Exception as APException
     from app.services.exception_service import create_exception
 
@@ -345,6 +359,7 @@ async def _flag_payable_invoices_for_bank_change(db: AsyncSession, *, vendor: Ve
             status="open",
             organization_id=inv.organization_id,
             invoice=inv,
+            raised_by_user_id=actor_id,
         )
 
 
@@ -2059,7 +2074,7 @@ async def approve_change_request(
             check_type="bank_change",
             actor_id=user.id,
         )
-        await _flag_payable_invoices_for_bank_change(db, vendor=vendor)
+        await _flag_payable_invoices_for_bank_change(db, vendor=vendor, actor_id=user.id)
 
     await db.commit()
     await db.refresh(req)

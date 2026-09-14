@@ -521,6 +521,13 @@ async def reject_invoice(
         status="open",
         organization_id=invoice.organization_id,
         invoice=invoice,  # exception follows its invoice (P2)
+        # `actor_id` (the rejecter) IS in scope here and is deliberately not
+        # stamped. This row notifies AP of a decision the reviewer already made
+        # and already audited (`invoice.rejected`); it is not a second look at
+        # their act, so there is nothing for a different person to check.
+        # Recording them would make finishing your own rework queue item a
+        # segregation breach.
+        raised_by_user_id=None,
     )
 
     instance = await get_workflow_instance(db, invoice.id)

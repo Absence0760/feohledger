@@ -19,15 +19,17 @@ from app.api.pagination import (
 from app.database import get_control_db
 from app.models.exception import Exception as APException
 from app.models.invoice import Invoice
+from app.models.organization import Organization
 from app.models.user import User
 from app.services.exception_lifecycle import (
     ACTIONABLE_STATUSES,
     RESOLUTION_ACTIONS,
-    correlation_ids_for,
+    invoices_for,
     record_assignment,
     record_decision,
+    segregation_refusal,
 )
-from app.tenant import apply_entity_scope, get_entity_id, get_tenant_db
+from app.tenant import apply_entity_scope, get_entity_id, get_tenant, get_tenant_db
 
 router = APIRouter(prefix="/exceptions", tags=["exceptions"])
 
@@ -293,6 +295,7 @@ class BulkResolveResponse(BaseModel):
 async def bulk_resolve(
     body: BulkResolveRequest,
     db: AsyncSession = Depends(get_tenant_db),
+    org: Organization = Depends(get_tenant),
     user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER)),
     entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
@@ -304,9 +307,13 @@ async def bulk_resolve(
     entity is indistinguishable from an id that doesn't exist, so a bulk
     call can't be used to enumerate — or clear — another subsidiary's queue.
 
-    Per-row failures (already resolved, unknown id) come back in
-    `skipped` with a reason — same partial-success contract as the
-    invoice bulk endpoints."""
+    Per-row failures (already resolved, unknown id, a segregation refusal)
+    come back in `skipped` with a reason — same partial-success contract as
+    the invoice bulk endpoints. A segregation refusal is deliberately a
+    per-ROW outcome and not a 409 for the batch: the queue is worked by
+    selecting a filtered page, so one refused row would otherwise take down
+    an operator's whole sweep and give them no way to tell which row did it.
+    """
     if body.action not in RESOLUTION_ACTIONS:
         raise HTTPException(status_code=400, detail=f"Unknown action: {body.action}")
 
@@ -334,13 +341,25 @@ async def bulk_resolve(
         if missing not in seen_ids:
             skipped.append({"id": str(missing), "reason": "not_found"})
 
-    # One correlation lookup for the whole batch — a 200-row bulk action must
-    # not fire 200 extra queries just to file its audit rows.
-    correlations = await correlation_ids_for(db, rows)
+    # One invoice lookup for the whole batch — a 200-row bulk action must not
+    # fire 200 extra queries to file its audit rows (the row files under the
+    # invoice's correlation) or to run the segregation check (which reads the
+    # invoice's implicated actors).
+    invoices = await invoices_for(db, rows)
 
     for exc in rows:
         if exc.status not in ACTIONABLE_STATUSES:
             skipped.append({"id": str(exc.id), "reason": f"already_{exc.status}"})
+            continue
+        inv = invoices.get(exc.id)
+        # Pre-check rather than catching `record_decision`'s 403: this endpoint
+        # owes a per-row reason, and a raise mid-loop would also abandon the
+        # rows already mutated in this transaction.
+        refusal = segregation_refusal(
+            exc, inv, user.id, action=body.action, org_settings=org.settings
+        )
+        if refusal is not None:
+            skipped.append({"id": str(exc.id), "reason": refusal})
             continue
         await record_decision(
             db,
@@ -349,7 +368,8 @@ async def bulk_resolve(
             resolution=body.resolution,
             actor_id=user.id,
             actor_name=user.full_name,
-            correlation_id=correlations.get(exc.id),
+            invoice=inv,
+            org_settings=org.settings,
         )
         updated += 1
 
@@ -362,6 +382,7 @@ async def resolve_exception(
     exception_id: uuid.UUID,
     body: ResolveRequest,
     db: AsyncSession = Depends(get_tenant_db),
+    org: Organization = Depends(get_tenant),
     user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER)),
     entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
@@ -370,7 +391,9 @@ async def resolve_exception(
     Entity-scoped like the detail read — an out-of-scope id is the same opaque
     404. This is a payment-integrity control (`duplicate` / `fraud_flag` /
     `line_total_mismatch` block a payment run), so it must not be reachable
-    across subsidiaries by id alone."""
+    across subsidiaries by id alone — nor stood down by an actor the flag was
+    raised against (`exception_lifecycle.segregation_refusal` → 403; `escalate`
+    is always open, and is the exit for a refused caller)."""
     # Join the invoice in the SAME query the detail read uses: the audit row
     # files under the invoice's correlation, so fetching it here costs nothing
     # extra and saves `record_decision` a second round-trip.
@@ -392,6 +415,10 @@ async def resolve_exception(
     if exc.status not in ACTIONABLE_STATUSES:
         raise HTTPException(status_code=409, detail=f"Cannot resolve from '{exc.status}' status")
 
+    # The segregation 403 is raised by `record_decision` — the chokepoint all
+    # three doors share — and propagates untouched (it is an HTTPException, not
+    # the ValueError this catches, and the row is checked before it is mutated).
+    # Only `/bulk/resolve` pre-checks, because only it owes a per-row reason.
     try:
         await record_decision(
             db,
@@ -401,6 +428,7 @@ async def resolve_exception(
             actor_id=user.id,
             actor_name=user.full_name,
             invoice=inv,
+            org_settings=org.settings,
         )
     except ValueError as exc_:
         raise HTTPException(status_code=400, detail=str(exc_)) from exc_

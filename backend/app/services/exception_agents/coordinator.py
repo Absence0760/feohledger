@@ -23,7 +23,7 @@ from app.services.exception_agents.base import (
 )
 from app.services.exception_agents.registry import get_resolver
 from app.services.exception_agents.resolvers.amount_mismatch import NotApprovable
-from app.services.exception_lifecycle import record_decision
+from app.services.exception_lifecycle import record_decision, refusal_message, segregation_refusal
 
 logger = logging.getLogger(__name__)
 
@@ -82,6 +82,10 @@ async def run_agent(
       1. Resolve org autonomy_level → confidence threshold.
       2. Find the resolver for this exception_type (none → no_action).
       3. resolver.evaluate(...) → AgentEvaluation (no mutation).
+      3b. Refuse the run outright when the triggering human is barred from
+          CLEARING this exception by segregation of duties
+          (``exception_lifecycle.segregation_refusal``) — the agent acts on
+          their authority, so it inherits their refusal and escalates.
       4. If recommended==auto_resolved AND confidence >= threshold:
            resolver.apply(...) mutates + writes audit_log rows;
            resolve the exception through the SHARED queue chokepoint
@@ -172,6 +176,53 @@ async def run_agent(
                 "unknown, so the agent cannot approve on their behalf without "
                 "fabricating authority. Escalated to a human."
             ),
+            changes=None,
+            level=level,
+            agent_type=resolver.agent_type,
+        )
+        await db.commit()
+        return AgentRunResult(decision=decision, exception=exception)
+
+    # Segregation of duties on the queue, inherited rather than exempted.
+    #
+    # An agent holds NO authority of its own: `actor_id` is the human who
+    # pressed the button, the fail-closed branch above refuses to act without
+    # that human's real roles, and `resolver.apply` approves through
+    # `review.approve_invoice` on those roles — which is why the `HTTPException`
+    # handler below already exists to catch that path's OWN segregation refusal.
+    # Exempting `via="agent"` would therefore not "let a machine decide": it
+    # would hand an implicated actor a laundering route to the exact outcome the
+    # HTTP door refuses them, which is strictly worse than the gap being closed.
+    #
+    # Checked BEFORE `apply` rather than caught after it, for two reasons: the
+    # refusal is knowable without mutating anything, and `record_decision` is
+    # called *after* the SAVEPOINT closes, so a raise from there would reach the
+    # route as a bare 403 with the exception left open and NO `AgentDecision`
+    # row — the precise regression the `HTTPException` handler below was written
+    # to fix. Every other way an apply can fail records a decision and
+    # escalates; so does this.
+    #
+    # Nothing today can reach it: `duplicate` and `fraud_flag` are escalate-only
+    # stubs, and `line_total_mismatch` / `payment_reconciliation` have no
+    # resolver at all, so no payment-blocking type has an auto-resolving agent.
+    # It is the gate a future one arrives behind, and it is tested as such.
+    refusal = (
+        segregation_refusal(
+            exception, invoice, actor_id, action="resolve", org_settings=org_settings
+        )
+        if can_resolve
+        else None
+    )
+    if refusal is not None:
+        reason = f"Could not auto-resolve: {refusal_message(refusal)} Escalated to a human."
+        await _escalate(db, exception, invoice, actor_id, reason)
+        decision = _record(
+            db,
+            exception,
+            invoice,
+            action=ACTION_ESCALATED,
+            confidence=evaluation.confidence,
+            rationale=reason,
             changes=None,
             level=level,
             agent_type=resolver.agent_type,
@@ -277,6 +328,7 @@ async def run_agent(
             actor_name=AGENT_ACTOR_NAME,
             invoice=invoice,
             via="agent",
+            org_settings=org_settings,
         )
         action = ACTION_AUTO_RESOLVED
     else:
