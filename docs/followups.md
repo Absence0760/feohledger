@@ -1863,6 +1863,22 @@ durable fix stated in one sentence has usually not been tried.
       `DEFAULT_CURRENCY` only for the picker defaults and form initial values
       that genuinely need a value. Web-only; the two surfaces currently disagree
       about the same row.
+      **One site is a backend gap, not a formatter one, and is the next one to
+      do:** `routes/purchase-orders/+page.svelte`'s `formatCurrency` labels every
+      PO with `orgCurrency.currency` because `GET /api/purchase-orders` serves no
+      per-row `currency` at all — `PurchaseOrder` carries the column, so this is
+      one serializer field plus the type, the same one-line shape
+      `_exception_dict` took this round, and it must land before the formatter
+      change or the bare-figure rendering would replace a wrong label with no
+      label on every PO row. **Not** a site:
+      `bank-reconciliation/StatementDetailModal.svelte`'s Uncleared bucket, which
+      falls back deliberately and says so in a comment —
+      `UnclearedPaymentResponse` genuinely has no per-row currency where its
+      `unmatched_debits` sibling does, so that one is a payload question filed
+      with the reconciliation work, not this entry.
+      `routes/exceptions/+page.svelte` **was** on this list and is now fixed: the
+      round-31 `_exception_dict` change gave that row a currency, and the queue
+      reads it (§160).
       **Trigger:** the first legacy invoice with no currency, or the next change
       to `utils/money.ts`.
 

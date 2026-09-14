@@ -33,6 +33,12 @@
 		invoice_number: string | null;
 		vendor_name: string | null;
 		amount: number | null;
+		// What `amount` is denominated in — the joined invoice's own code, not the
+		// org's reporting currency (a GBP-reporting tenant holds USD invoices, so
+		// labelling the row with the rollup code is a different wrong answer).
+		// Null exactly when `amount` is: both are gated on the invoice having been
+		// joined. See `docs/decisions.md` §160.
+		currency: string | null;
 		exception_type: string;
 		type_label: string;
 		severity: string;
@@ -407,8 +413,12 @@
 		}
 	}
 
-	function formatCurrency(n: number | null): string {
-		return formatMoney(n, { currency: orgCurrency.currency });
+	// The row's own currency, never the org's. `formatMoney` returns its `—`
+	// placeholder for a null amount before it looks at the code, and the payload
+	// nulls both together, so the unprovable-currency case this cannot label is
+	// exactly the case with no figure to label.
+	function formatCurrency(n: number | null, currency: string | null): string {
+		return formatMoney(n, { currency: currency ?? undefined });
 	}
 
 	function dueLabel(exc: ExceptionItem): string {
@@ -587,7 +597,7 @@
 					</td>
 					<td class="mono">{exc.invoice_number ?? '—'}</td>
 					<td class="muted-cell">{exc.vendor_name ?? '—'}</td>
-					<td class="mono right">{formatCurrency(exc.amount)}</td>
+					<td class="mono right">{formatCurrency(exc.amount, exc.currency)}</td>
 					<td class="muted-cell">{exc.assigned_to ?? '—'}</td>
 					<td class="muted-cell" title={exc.created_at}>{timeAgo(exc.created_at)}</td>
 					<td class="muted-cell" class:overdue={exc.is_overdue}>
