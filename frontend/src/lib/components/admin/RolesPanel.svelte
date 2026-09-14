@@ -5,6 +5,7 @@
 	import DataTable from '$lib/components/ui/DataTable.svelte';
 	import Modal from '$lib/components/ui/Modal.svelte';
 	import { m } from '$lib/i18n/store.svelte';
+	import { roleLabelKey } from '$lib/types/admin';
 	import type { Role } from '$lib/types/admin';
 
 	// $derived so the column headers re-render when the locale changes.
@@ -34,6 +35,22 @@
 		adminStore.fetchRoles().catch(() => {});
 		adminStore.fetchPermissionCatalog().catch(() => {});
 	});
+
+	/**
+	 * A role's display name — the same resolver `UsersPanel` and `/profile` use
+	 * (`types/admin.ts::roleLabelKey`).
+	 *
+	 * Both tables read it, and that is deliberate rather than only the system
+	 * one: a custom role is never in the key map (the backend reserves the four
+	 * built-in names), so the call states the rule — built-in roles are copy,
+	 * a tenant's own role name is data — instead of encoding it in which table
+	 * calls which. The system table printed `ap_manager` while the user rows one
+	 * tab away printed `AP Manager`.
+	 */
+	function roleLabel(name: string): string {
+		const key = roleLabelKey(name);
+		return key ? m(key) : name;
+	}
 
 	function togglePermission(set: Set<string>, key: string): Set<string> {
 		const next = new Set(set);
@@ -150,7 +167,7 @@
 			{#each systemRoles as role (role.id)}
 				<tr>
 					<td>
-						<span class="role-badge system">{role.name}</span>
+						<span class="role-badge system">{roleLabel(role.name)}</span>
 					</td>
 					<td class="muted-cell">{role.description ?? '—'}</td>
 				</tr>
@@ -177,7 +194,7 @@
 			{#each customRoles as role (role.id)}
 				<tr>
 					<td>
-						<span class="role-badge">{role.name}</span>
+						<span class="role-badge">{roleLabel(role.name)}</span>
 					</td>
 					<td class="muted-cell">{role.description ?? '—'}</td>
 					<td>

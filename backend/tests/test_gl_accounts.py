@@ -108,7 +108,11 @@ async def test_list_returns_ordered_by_code(realdb):
         "parent_code",
         "is_active",
         "erp_account_id",
+        # NULL here means SHARED across every entity, not "unstamped" — see
+        # test_gl_account_entity_uniqueness.py for the multi-entity cases.
+        "entity_id",
     }
+    assert cash["entity_id"] is None
 
 
 async def test_list_active_only_default_hides_inactive(realdb):

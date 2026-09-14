@@ -42,9 +42,17 @@ e.g. Workflows is reachable under the **Settings** group, not a top-level row.
 | Bulk: export | Yes | Yes | Yes | Yes |
 
 ¹ A clerk sees a reduced set of section tabs inside each group (e.g. Billing →
-Contracts + Expenses only; Insights → AI Assistant only). ² A CFO's Settings
-group shows only the Audit Trail tab, so the section bar is suppressed (a lone
-tab would just duplicate the page title).
+Contracts + Expenses only; Insights → AI Assistant only). Procurement is the
+group where per-item gating does the most work: a clerk sees six of its seven
+tabs — Purchase Orders, Goods Receipts, Requisitions, Intake, Catalogs and
+**Chart of Accounts** (`GET /api/gl-accounts` is auth-gated but role-open, and a
+clerk coding an invoice has to be able to look a GL code up) — and not Budgets,
+whose every read is `require_roles(ADMIN, AP_MANAGER, CFO)`. On Chart of
+Accounts both write controls (New Account, Sync from ERP) are gated on
+`auth.isManager`, matching `require_roles(ADMIN, AP_MANAGER)` on the two write
+endpoints; `frontend/src/lib/nav.test.ts` asserts the exact per-role set.
+² A CFO's Settings group shows only the Audit Trail tab, so the section bar is
+suppressed (a lone tab would just duplicate the page title).
 
 Backend API endpoints are role-gated via `Depends(require_roles(...))` in `backend/app/api/deps.py`. The frontend matrix above mirrors what the backend allows. A coverage gate in `backend/tests/test_rbac.py` fails CI if a new endpoint ships without an auth dependency. Full permission matrix in `authentication.md` § RBAC.
 

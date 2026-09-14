@@ -117,6 +117,14 @@ jobs:
       - name: E-invoice message catalogue is in sync with the validators
         run: python scripts/gen_einvoice_rule_messages.py --check
 
+      # Same arrangement, one step down the same reasoning: the invoice-warning
+      # code → message-key catalogue is GENERATED from
+      # `app/services/invoice_warning_catalog.py` (decisions.md §157), so a new
+      # warning sentence with no key fails here rather than reaching a
+      # non-English reviewer as server English.
+      - name: Invoice-warning message catalogue is in sync with the catalogue
+        run: python scripts/gen_invoice_warning_messages.py --check
+
   # The backend pytest suite (~3900 tests against a real Postgres/Redis/MinIO)
   # ran ~27 min as one serial job — the longest job in CI. It's sharded the same
   # way the Playwright e2e job below is: a matrix of runners, each booting its

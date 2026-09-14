@@ -3,6 +3,12 @@ import { API_BASE, authedTenantHeaders, expect, test } from '../fixtures/helpers
 /**
  * /exceptions status-chip filtering. Seed has 3 open + 1 resolved
  * exception per tenant. Read-only — no mutations, no cleanup.
+ *
+ * The row badges assert the LABEL exactly (`Open` / `Resolved`), not a
+ * case-insensitive regex: the badge and the chip above it now read one key set
+ * (`types/exception.ts::EXCEPTION_STATUS_LABEL_KEYS`), and a `/open/i` would
+ * have gone on passing against the raw wire value this replaced — which is the
+ * regression the pairing exists to catch.
  */
 
 test.describe('/exceptions status filter', () => {
@@ -17,7 +23,7 @@ test.describe('/exceptions status filter', () => {
 		expect(await rows.count()).toBeGreaterThan(0);
 		const total = await rows.count();
 		for (let i = 0; i < total; i++) {
-			await expect(rows.nth(i).locator('.status-badge')).toHaveText(/open/i);
+			await expect(rows.nth(i).locator('.status-badge')).toHaveText('Open');
 		}
 	});
 
@@ -33,7 +39,7 @@ test.describe('/exceptions status filter', () => {
 		const total = await rows.count();
 		expect(total).toBeGreaterThan(0);
 		for (let i = 0; i < total; i++) {
-			await expect(rows.nth(i).locator('.status-badge')).toHaveText(/resolved/i);
+			await expect(rows.nth(i).locator('.status-badge')).toHaveText('Resolved');
 		}
 	});
 

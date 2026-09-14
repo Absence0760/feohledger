@@ -69,6 +69,8 @@ pnpm lint                     # ruff + svelte-check + tsc over tests-e2e/ + flut
 pnpm test                     # pytest + Playwright + flutter test
 pnpm gen:einvoice-messages    # regenerate the e-invoice rule-code → message-key catalogue from the backend rule set
 pnpm check:einvoice-messages  # its drift guard (CI's Backend lint job runs this)
+pnpm gen:warning-messages     # regenerate the invoice-warning code → message-key catalogue from the backend catalogue
+pnpm check:warning-messages   # its drift guard (same CI job; see backend/docs/invoice-warnings.md)
 pnpm migrate:all              # alembic upgrade head + migrate_all_tenants.py
 
 # Frontend (from frontend/)
@@ -203,7 +205,7 @@ worth knowing before you touch anything money-adjacent:
 - `review.py` — approve/reject with field corrections; segregation of duties and the CFO gate.
 - `payment_runs.py` / `payment_erp_sync.py` / `payment_settlement.py` — run creation, the ERP sync-back that flips to `paid`, and settlement-amount verification.
 - `payment_methods.py` — the single source of truth for what a payment rail means (tax-reportable? international?). Adding a rail means editing one frozenset.
-- `invoice_warnings.py` — duplicates, fraud flags, line-total reconciliation. The header `amount` is never recomputed from line items.
+- `invoice_warnings.py` — duplicates, fraud flags, line-total reconciliation. The header `amount` is never recomputed from line items. Every finding is built by `invoice_warning_catalog.warning(code, severity, **params)`, never a dict literal, so it carries the `{code, params}` the browser localizes on (`backend/docs/invoice-warnings.md`).
 - `po_matching.py` + `matching_rules.py` — 2/3/4-way matching and the per-vendor/per-commodity rule resolver.
 - `vendor_matching.py` — fuzzy vendor resolution, scoped to the invoice's own entity.
 - `post_commit.py` — best-effort side effects run **after** the caller's transaction commits, so no third party's latency is charged to an open transaction holding row locks.
@@ -314,6 +316,7 @@ Prefer reading docs over guessing. Update them when behavior changes.
 | Positive Pay / payment-fraud file | `backend/docs/positive-pay.md` |
 | PO matching | `backend/docs/po-matching.md` |
 | Line-total reconciliation | `backend/docs/line-total-reconciliation.md` |
+| Invoice warnings (payload, code catalogue) | `backend/docs/invoice-warnings.md` |
 | Vendor mgmt | `backend/docs/vendor-management.md` |
 | Local AI testing | `backend/docs/local-ai-testing.md` |
 | API reference | `backend/docs/api-reference.md` |
@@ -491,6 +494,17 @@ Worktree notes:
   concurrent runs no longer truncate and disconnect each other (backend
   `CLAUDE.md` § Test databases). Sharing the DB with a *running dev backend* is
   still unsafe — see `docs/known-issues.md`.
+- A worktree isolates **files, not ports**, either — and that one is quieter,
+  because `playwright.config.ts` sets `reuseExistingServer`: a second session
+  keeping the default `:7777` finds the *primary checkout's* dev server already
+  listening and tests **that** build, green, against code it never changed. Give
+  the second session its own stack rather than borrowing the first's:
+  ```bash
+  E2E_WEB_ORIGIN=http://localhost:7801 PUBLIC_API_URL=http://localhost:8001 E2E_TENANT_OFFSET=1 pnpm test:e2e
+  ```
+  `frontend/tests-e2e/fixtures/env.ts` resolves both and derives every other
+  origin from them; nothing else may read a port. Full detail, including what
+  those variables do **not** reach, is `frontend/tests-e2e/README.md` § Ports.
 - **All work must end up on `main`.** A worktree commits on its own branch, and
   git won't let a worktree check out `main`, so that work only reaches `main`
   via an explicit merge from the **primary checkout**. Before retiring a
@@ -562,5 +576,5 @@ These are the rules the `.claude/agents/code-reviewer.md` agent cites. A diff th
 - **PII / banking data stays out of logs and error responses.** Bank account numbers, tax IDs, full vendor addresses, and full payment-method numbers must not appear in `logger` output, in HTTP error bodies, or in URL query strings. A `print` / `logger.info(...)` containing one of those fields is `Critical`.
 - **Migrations are idempotent and run on every tenant DB.** New Alembic revisions use safe DDL (`IF NOT EXISTS` / `IF EXISTS` where applicable). A schema change that lands as control-plane-only when the change should fan out to every tenant is `Critical` — see `Don't modify tenant DBs outside of Alembic migrations` in `## What not to do`.
 - **Webhook handlers verify signatures and dedupe by event id.** A new handler that doesn't verify the provider's HMAC, or doesn't dedupe by `event.id`, is `Critical` — webhook providers retry on any non-2xx and dedup is the only thing keeping a one-time effect one-time. The shared helpers live in `backend/app/services/webhook_security.py` (`verify_hmac_sha256`, `is_event_already_processed`, `extract_signature_header`); every webhook also returns 204 silently on every rejection path so the response doesn't enumerate.
-- **Passwords use the shared `bcrypt_sha256` context, through its awaitable wrappers.** `backend/app/utils/passwords.py::pwd_context` is the single hash context across the codebase, and since `docs/decisions.md` §151 it *implements* `bcrypt_sha256` (HMAC-SHA256 pre-hash → bcrypt) directly rather than via passlib, which could not import against bcrypt 4.1+ and so froze the hashing library on the login path at 4.0.1. That makes `app/utils/passwords.py` the ONLY module allowed to `import bcrypt` — a second import, or any `bcrypt.hashpw` / `bcrypt.checkpw` call outside it, is `Critical`, as is a fresh `CryptContext(schemes=["bcrypt"], ...)` should passlib ever return; both shapes are caught by `.claude/hooks/security-patterns.sh` rule `bcrypt-truncation` and by `tests/test_password_hashing_offloaded.py`. Application code calls `verify_password` / `hash_password` / `dummy_verify` (coroutines that run the hash via `asyncio.to_thread`), never `pwd_context.verify` / `.hash` inline: bcrypt is ~200 ms of CPU by design, so an inline call from a coroutine stalls the whole worker for that window on the most concurrent endpoint in the app. A direct call under `app/` is `Improvement` at minimum and fails the same test. Digest compatibility with every hash already in the column — v2, legacy v1, and pre-upgrade plain `$2b$` — is pinned against passlib-generated literals in `tests/test_bcrypt_sha256_compat.py`; do not regenerate those fixtures.
+- **Passwords use the shared `bcrypt_sha256` context, through its awaitable wrappers.** `backend/app/utils/passwords.py::pwd_context` is the single hash context across the codebase, and since `docs/decisions.md` §151 it *implements* `bcrypt_sha256` (HMAC-SHA256 pre-hash → bcrypt) directly rather than via passlib, which could not import against bcrypt 4.1+ and so froze the hashing library on the login path at 4.0.1. That makes `app/utils/passwords.py` the ONLY module allowed to `import bcrypt` — a second import, or any `bcrypt.hashpw` / `bcrypt.checkpw` call outside it, is `Critical`, as is a fresh `CryptContext(schemes=["bcrypt"], ...)` should passlib ever return; both shapes are caught by `.claude/hooks/security-patterns.sh` rule `bcrypt-truncation` and by `tests/test_password_hashing_offloaded.py`. Application code calls `verify_password` / `hash_password` / `dummy_verify` (coroutines that run the hash via `asyncio.to_thread`), never `pwd_context.verify` / `.hash` inline: bcrypt is ~200 ms of CPU by design, so an inline call from a coroutine stalls the whole worker for that window on the most concurrent endpoint in the app. A direct call under `app/` is `Improvement` at minimum and fails the same test. Digest compatibility with every hash already in the column — v2, legacy v1, and pre-upgrade plain `$2b$` — is pinned against passlib-generated literals in `tests/test_bcrypt_sha256_compat.py`; do not regenerate those fixtures. **A row still on a deprecated scheme is re-hashed on its owner's next successful login, by `services/credential_upgrade.py` and nowhere else** — one call per login surface, compare-and-swap, and it never fails a sign-in (`docs/authentication.md` § A legacy hash is upgraded on its owner's next login; `docs/decisions.md` §163–§164).
 - **Blocking work does not run on the event loop.** The backend is async throughout, so a synchronous call that waits — a boto3 S3 round trip, `socket.getaddrinfo`, a sync `httpx.Client`, bcrypt, a ReportLab layout — occupies the loop for its full duration and every other in-flight request on that worker waits behind it. Each such case has a single owner that offloads it: `services/storage`'s `_put_object` / `_get_object` / `_delete_object` for object storage, `utils/url_safety`'s `*_async` pair for SSRF DNS, `utils/passwords`' wrappers for hashing, `await asyncio.to_thread(render_x, ctx)` at every PDF export route, and `await asyncio.to_thread(_send_to_sqs, ...)` in the three `*_dispatch` modules when the mode is `lambda` (boto3 SQS is a synchronous round trip, and `dispatch_auth_audit` is on the login path). A new blocking call reached from an `async def` is `Improvement`, or `Critical` on a public webhook / auth path. Drift guards: `tests/test_storage_nonblocking.py`, `tests/test_pdf_render_offloaded.py`, `tests/test_password_hashing_offloaded.py`, `tests/test_url_safety.py`, `tests/test_sqs_dispatch_nonblocking.py`.

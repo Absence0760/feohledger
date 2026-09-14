@@ -13,6 +13,8 @@
 		type ChannelPrefs,
 		type NotificationEventType,
 	} from '$lib/types/notification';
+	import { roleLabelKey } from '$lib/types/admin';
+	import { formatList } from '$lib/utils/list';
 
 	interface EnrollResponse {
 		secret: string;
@@ -374,6 +376,29 @@
 		}
 	}
 
+	/**
+	 * The signed-in user's roles, as a sentence they can read.
+	 *
+	 * This card printed `admin, ap_manager` — the raw slugs, ASCII-joined —
+	 * while `/admin`'s user rows rendered the same roles as `Admin, AP Manager`.
+	 * The join was correctly classified as identifiers in
+	 * `listJoinAudit.test.ts`, and that classification was the OTHER half of the
+	 * same defect: once the roles are labelled they are prose, so the separator
+	 * has to be the locale's (Japanese enumerates with `、`) and the route leaves
+	 * that file's `ALLOWED` table.
+	 *
+	 * A custom role falls back to its stored name — tenant data, never
+	 * translated (`types/admin.ts::roleLabelKey`).
+	 */
+	function roleLabels(roles: string[] | undefined): string {
+		return formatList(
+			(roles ?? []).map((role) => {
+				const key = roleLabelKey(role);
+				return key ? m(key) : role;
+			})
+		);
+	}
+
 	function sessionLabel(s: ActiveSession): string {
 		return s.device ?? m('profile.sessions.unknownDevice');
 	}
@@ -444,7 +469,7 @@
 					<dt>{m('profile.account.email')}</dt>
 					<dd>{auth.user?.email ?? '—'}</dd>
 					<dt>{m('profile.account.roles')}</dt>
-					<dd>{auth.user?.roles.join(', ') || '—'}</dd>
+					<dd data-testid="profile-roles">{roleLabels(auth.user?.roles) || '—'}</dd>
 				</dl>
 				<div class="actions">
 					<button

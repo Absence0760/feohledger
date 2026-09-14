@@ -205,11 +205,18 @@ test.describe('/api/admin/roles — per-org custom roles', () => {
 
 		await expect(page.getByRole('heading', { name: 'System roles' })).toBeVisible();
 		await expect(page.getByRole('heading', { name: 'Custom roles' })).toBeVisible();
-		// All four system roles render.
-		for (const name of ['admin', 'ap_manager', 'ap_clerk', 'cfo']) {
-			await expect(page.getByRole('cell', { name })).toBeVisible();
+		// All four system roles render, by their LABEL rather than their slug:
+		// the table reads `types/admin.ts::ROLE_LABEL_KEYS` through
+		// `roleLabelKey()` (`docs/decisions.md` §159), so the cell says
+		// "AP Manager" where it used to say `ap_manager`. Exact matching, because
+		// the default substring match would let "Admin" satisfy the assertion for
+		// three of the four.
+		for (const label of ['Admin', 'AP Manager', 'AP Clerk', 'CFO']) {
+			await expect(page.getByRole('cell', { name: label, exact: true })).toBeVisible();
 		}
-		// Seeded custom role surfaces.
+		// Seeded custom role surfaces — and still by its stored name, which is the
+		// point of the accessor's `null`: a name an admin typed into their own
+		// tenant is data, and is never translated.
 		await expect(page.getByRole('cell', { name: seedName })).toBeVisible();
 
 		// Create modal opens.

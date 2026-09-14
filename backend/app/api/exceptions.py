@@ -74,6 +74,21 @@ def _exception_dict(exc: APException, inv: Invoice | None) -> dict:
         "invoice_number": inv.invoice_number if inv else None,
         "vendor_name": inv.vendor_name if inv else None,
         "amount": float(inv.amount) if inv else None,
+        # What `amount` above is DENOMINATED in. `ap_exceptions` has no money
+        # column of its own — the figure IS the invoice's `amount` — so it only
+        # means something beside the code the invoice carries. The invoice row is
+        # already loaded for `invoice_number` / `vendor_name`; this rides along it.
+        #
+        # Without it the queue had nothing to format against and every client fell
+        # back to its own default: the mobile exception list and detail screens
+        # stamped `$` on a ZAR invoice's amount, and the org's REPORTING currency
+        # would have been no better — a GBP-reporting tenant holds USD invoices, so
+        # that is a different wrong answer, not a fix.
+        #
+        # `None` is not a licence to substitute a default (`docs/decisions.md`
+        # §79/§82, and the same contract `PaymentResponse.currency` states): no
+        # invoice was joined, so render the bare figure.
+        "currency": inv.currency if inv else None,
         "exception_type": exc.exception_type,
         "type_label": EXCEPTION_TYPE_LABELS.get(exc.exception_type, exc.exception_type),
         "severity": exc.severity,

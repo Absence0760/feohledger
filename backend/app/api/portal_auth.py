@@ -35,6 +35,7 @@ from app.schemas.portal import (
 )
 from app.services import mfa
 from app.services.audit_dispatch import dispatch_auth_audit, queue_auth_audit
+from app.services.credential_upgrade import upgrade_password_hash
 from app.services.email_adapters import EmailMessage, get_email_adapter, is_supported_locale
 from app.services.rate_limit import (
     EMAIL_OTP_PER_ACCOUNT_PER_HOUR,
@@ -264,6 +265,15 @@ async def portal_login(
         raise await _reject_portal_login(identity, vu, ip=ip, reason="bad_password")
 
     await clear_auth_failures("portal_login", identity)
+
+    # Replace a hash still stored under a scheme we no longer write, while the
+    # plaintext that just verified is in scope — the only moment it exists. It
+    # goes BEFORE the `last_login_at` stamp because it commits the session
+    # itself, and before the MFA branch below, which returns a challenge rather
+    # than a token: the password is already proven, and waiting for the second
+    # factor would skip the upgrade for exactly the suppliers that have one.
+    # Never fails the login — see `services/credential_upgrade`.
+    await upgrade_password_hash(db, vu, body.password)
 
     vu.last_login_at = datetime.now(UTC)
     await db.commit()

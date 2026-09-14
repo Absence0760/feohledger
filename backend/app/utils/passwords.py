@@ -8,7 +8,10 @@ who picks a 100-char password is fully protected by the suffix, where raw
 bcrypt would let any two passwords sharing the first 72 bytes verify against
 each other's hash. Legacy `$2b$...` hashes (written before the upgrade in
 c6a91396) still verify, so nobody is locked out; `needs_update` reports which
-stored hashes are on an older scheme.
+stored hashes are on an older scheme, and `services/credential_upgrade` acts on
+it — the two login handlers re-hash such a row onto the current scheme the next
+time its owner signs in successfully, which is the only moment the plaintext
+needed to do so exists.
 
 **We implement `bcrypt_sha256` directly rather than through passlib.** passlib
 owned this module until 2026-09 and pinned us to bcrypt 4.0.1: it reads
@@ -237,9 +240,11 @@ class _BcryptSha256Context:
 
         Only meaningful after a successful `verify` — the answer for an
         unrecognised string is "replace it", but nothing can verify against one
-        to get there. No call site consults this yet: re-hashing a legacy
-        credential on its owner's next successful login is tracked in
-        `docs/followups.md`.
+        to get there, so in production the unrecognised case never reaches a
+        caller. `services/credential_upgrade` is the one consumer and pairs this
+        with an `identify(...) is not None` check anyway, because it is the one
+        place that would act on the answer: rewriting a row whose contents we
+        cannot name would mint a working credential where there was none.
         """
         return self.identify(hashed) != self.scheme
 

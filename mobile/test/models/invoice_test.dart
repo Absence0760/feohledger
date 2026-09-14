@@ -172,14 +172,19 @@ void main() {
       expect(invoice.vendorName, 'Legacy Vendor');
     });
 
-    test('defaults currency to USD and coerces integer amount to double', () {
+    test('leaves an absent currency NULL and coerces integer amount to double',
+        () {
       final invoice = Invoice.fromJson({
         'id': 'inv1',
         'amount': 100, // integer from JSON
         'status': 'pending',
         'created_at': '2026-01-01T12:00:00',
       });
-      expect(invoice.currency, 'USD');
+      // It used to substitute 'USD', which put a `$` on the amount of an
+      // invoice whose currency the payload never named — on the same screen
+      // that prints the currency code as its own detail row. `null` renders
+      // the figure bare; see `docs/decisions.md` §160.
+      expect(invoice.currency, isNull);
       expect(invoice.amount, 100.0);
       expect(invoice.amount, isA<double>());
     });

@@ -10,6 +10,7 @@ Invoice _invoice({
   String? vendorName = 'Acme Supplies',
   String? invoiceNumber = 'INV-001',
   double? amount = 1500,
+  String? currency = 'USD',
   DateTime? dueDate,
 }) =>
     Invoice(
@@ -17,7 +18,7 @@ Invoice _invoice({
       invoiceNumber: invoiceNumber,
       vendorName: vendorName,
       amount: amount,
-      currency: 'USD',
+      currency: currency,
       status: InvoiceStatus.readyForReview,
       dueDate: dueDate,
       createdAt: DateTime(2026, 1, 1),
@@ -33,6 +34,41 @@ void main() {
     expect(find.text('\$1,500.00'), findsOneWidget);
     // StatusBadge label
     expect(find.text('Ready for Review'), findsOneWidget);
+  });
+
+  testWidgets('formats the amount in the INVOICE\'s own currency',
+      (tester) async {
+    // A multi-currency tenant's list holds rows in several currencies, so the
+    // org's reporting currency is not the answer for a row — the row's own
+    // code is. This tile used to hold a module-level dollar formatter, so
+    // every row read as dollars whatever the invoice said.
+    await tester.pumpWidget(
+      _host(InvoiceListTile(invoice: _invoice(currency: 'EUR'))),
+    );
+
+    expect(find.text('€1,500.00'), findsOneWidget);
+    expect(find.textContaining(r'$'), findsNothing);
+  });
+
+  testWidgets('a zero-decimal currency loses its decimal places',
+      (tester) async {
+    // JPY has no minor unit. `¥1,500.00` is a figure that cannot exist, and it
+    // is what a two-decimal formatter prints.
+    await tester.pumpWidget(
+      _host(InvoiceListTile(invoice: _invoice(currency: 'JPY'))),
+    );
+
+    expect(find.text('¥1,500'), findsOneWidget);
+  });
+
+  testWidgets('an invoice with no currency renders the bare figure',
+      (tester) async {
+    await tester.pumpWidget(
+      _host(InvoiceListTile(invoice: _invoice(currency: null))),
+    );
+
+    expect(find.text('1,500.00'), findsOneWidget);
+    expect(find.textContaining(r'$'), findsNothing);
   });
 
   testWidgets('falls back to "Unknown Vendor" when vendor name is null',

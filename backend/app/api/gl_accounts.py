@@ -104,6 +104,23 @@ async def list_gl_accounts(
     user: User = Depends(get_current_user),
     entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
+    """The chart of accounts, whole, as a bare array — deliberately unpaginated.
+
+    Auth-gated but role-open, like the `/purchase-orders` and `/goods-receipts`
+    reads: every role codes or reads GL codes, and a clerk entering an invoice
+    has to be able to look one up. Only the two writes on this router
+    (`POST ""` and `POST /sync-erp`) are admin / ap_manager.
+
+    It is a bounded reference collection and both of its consumers need every
+    row, so it does not take the canonical `{items, total, page, page_size}`
+    envelope: the invoice / expense / requisition / catalog GL pickers would
+    otherwise be unable to offer a code past the first page — which is a coding
+    defect, not a paging nicety — and `/gl-accounts` (the list page) states the
+    count it actually holds rather than a server total it only partly fetched.
+    `tests/test_pagination.py::test_gl_accounts_stays_unpaginated` pins that.
+    Filtering is therefore server-side here (`search` / `account_type` /
+    `active_only`) and never re-done in the browser.
+    """
     # A scoped chart is the shared accounts (NULL entity_id) ∪ the entity's own
     # (include_shared=True); the consolidated view (None) returns everything.
     query = apply_entity_scope(select(GLAccount), GLAccount, entity_id, include_shared=True)
@@ -129,6 +146,19 @@ async def list_gl_accounts(
             "parent_code": a.parent_code,
             "is_active": a.is_active,
             "erp_account_id": a.erp_account_id,
+            # Which chart the row belongs to: NULL = SHARED across every
+            # entity, otherwise the entity that owns it. Unlike every other
+            # business table this is not an incidental scoping column, it is
+            # the row's meaning (`models/gl_account`), and without it the two
+            # views this endpoint serves are both ambiguous: in the
+            # CONSOLIDATED view the response is every entity's chart at once,
+            # where two subsidiaries legitimately hold their own "6000" and
+            # the rows are otherwise indistinguishable; with an entity
+            # selected it is `shared ∪ that entity's own`, where a shared row
+            # and an entity's override of it read identically while deciding
+            # whether an edit reaches one subsidiary or all of them. Additive:
+            # the picker callers read `id` / `code` / `name` and ignore it.
+            "entity_id": str(a.entity_id) if a.entity_id else None,
         }
         for a in accounts
     ]

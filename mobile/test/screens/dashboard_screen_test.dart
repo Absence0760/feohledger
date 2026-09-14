@@ -37,10 +37,38 @@ Map<String, dynamic> _dashboardJson({
   Map<String, dynamic>? aging,
   List<Map<String, dynamic>>? upcomingPayments,
   num upcomingTotalAmount = 3000,
+  // The endpoint serves a face-value figure AND a reporting-currency
+  // counterpart for each money key, plus the code the latter set is in. The
+  // screen reads the counterparts, because only those are in one currency —
+  // `total_amount` / `aging` / `upcoming_total_amount` are naive sums across
+  // currencies and no single code describes them. `null` models a backend
+  // predating the `reporting` block, where the figures render bare.
+  Object? reportingCurrency = 'USD',
 }) =>
     {
       'total_invoices': totalInvoices,
       'total_amount': totalAmount,
+      if (reportingCurrency != null)
+        'reporting': {
+          'reporting_currency': reportingCurrency,
+          'total_amount': totalAmount,
+          'total_count': totalInvoices,
+          'unconverted_count': 0,
+          'by_currency': <Map<String, dynamic>>[],
+        },
+      if (reportingCurrency != null)
+        'aging_reporting': {
+          ...(aging ??
+              {
+                'current': 10000,
+                'days_30': 8000,
+                'days_60': 5000,
+                'days_90_plus': 2000,
+              }),
+          'unconverted_count': 0,
+        },
+      if (reportingCurrency != null)
+        'upcoming_total_amount_reporting': upcomingTotalAmount,
       'pipeline': pipeline ?? {'ready_for_review': 3, 'approved': 5},
       'vendor_spend': vendorSpend ??
           [
@@ -183,6 +211,12 @@ void main() {
     expect(find.text('12'), findsOneWidget); // total invoices
     expect(find.text('3'), findsOneWidget); // ready_for_review
     expect(find.text('5'), findsOneWidget); // approved
+
+    // And the money figures wear the code the payload named — a US tenant's
+    // `$`, from `reporting.reporting_currency`, not from a hardcoded symbol.
+    expect(find.text(r'$45K'), findsOneWidget); // whole-book rollup
+    expect(find.text(r'$3K'), findsOneWidget); // upcoming total
+    expect(find.text(r'$10K'), findsOneWidget); // current aging band
     expect(find.text('2'), findsOneWidget); // upcoming count (2 entries)
 
     // Section headers + aging bucket labels.
@@ -291,5 +325,49 @@ void main() {
     await _pumpUntil(tester, find.byType(KpiCard));
 
     expect(find.textContaining('Showing cached data'), findsNothing);
+  });
+
+  testWidgets('money figures follow the org reporting currency, not a `\$`',
+      (tester) async {
+    // The dashboard's figures are rollups with no row to read a currency
+    // from, so the payload names the one it denominated them in. This screen
+    // used to declare `NumberFormat.compactCurrency(symbol: '\$')` at module
+    // level, so a ZAR-reporting tenant read its whole book in dollars.
+    ApiClient().debugConfigure(
+      client: MockClient((req) async {
+        if (req.url.path == '/api/dashboard') {
+          return _json(_dashboardJson(reportingCurrency: 'ZAR'));
+        }
+        return http.Response('not found', 404);
+      }),
+    );
+
+    await tester.pumpWidget(_localized(const DashboardScreen()));
+    await _pumpUntil(tester, find.byType(KpiCard));
+
+    expect(find.text('R45K'), findsOneWidget);
+    expect(find.text('R3K'), findsOneWidget);
+    expect(find.textContaining(r'$'), findsNothing);
+  });
+
+  testWidgets('a payload with no reporting block renders figures bare',
+      (tester) async {
+    // Degradation, not a fallback: without `reporting` the only figures on
+    // offer are naive cross-currency sums, and there is no code that honestly
+    // describes them.
+    ApiClient().debugConfigure(
+      client: MockClient((req) async {
+        if (req.url.path == '/api/dashboard') {
+          return _json(_dashboardJson(reportingCurrency: null));
+        }
+        return http.Response('not found', 404);
+      }),
+    );
+
+    await tester.pumpWidget(_localized(const DashboardScreen()));
+    await _pumpUntil(tester, find.byType(KpiCard));
+
+    expect(find.text('45K'), findsOneWidget);
+    expect(find.textContaining(r'$'), findsNothing);
   });
 }

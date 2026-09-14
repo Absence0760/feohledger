@@ -56,6 +56,14 @@ class Payment {
   final String id;
   final String invoiceId;
   final double amount;
+
+  /// What [amount] — the AUTHORIZED figure — is denominated in. `payments` has
+  /// no currency column; a payment settles in its invoice's currency, and
+  /// `PaymentResponse.currency` joins it through for exactly this reason.
+  /// `null` means the invoice carries no code or none was joined, and is NOT
+  /// a licence to substitute a default (`docs/decisions.md` §79/§82).
+  final String? currency;
+
   final PaymentMethod method;
   final PaymentStatus status;
   final String? reference;
@@ -65,6 +73,7 @@ class Payment {
     required this.id,
     required this.invoiceId,
     required this.amount,
+    this.currency,
     required this.method,
     required this.status,
     this.reference,
@@ -76,6 +85,7 @@ class Payment {
       id: json['id'] as String,
       invoiceId: json['invoice_id'] as String,
       amount: (json['amount'] as num).toDouble(),
+      currency: json['currency'] as String?,
       method: PaymentMethod.fromString(json['method'] as String),
       status: PaymentStatus.fromString(json['status'] as String),
       reference: json['reference'] as String?,
@@ -86,12 +96,30 @@ class Payment {
 
 class DashboardData {
   final int totalInvoices;
+
+  /// The whole book, rolled up into the org's reporting currency — the
+  /// `reporting.total_amount` the backend computes from each row's rate-locked
+  /// `reporting_amount`, NOT the sibling top-level `total_amount`, which is a
+  /// naive `SUM(Invoice.amount)` across currencies.
+  ///
+  /// That distinction is what makes [reportingCurrency] sayable at all: a
+  /// mixed-currency sum is a quantity in no currency, so labelling the naive
+  /// figure with any code — a `$`, or the org's resolved one — would be a
+  /// wrong number wearing a right-looking symbol. Falls back to the naive key
+  /// only for a backend predating the `reporting` block, in which case
+  /// [reportingCurrency] is null and the figure renders with no symbol.
   final double totalAmount;
   final Map<String, int> pipeline;
   final List<VendorSpend> topVendors;
   final AgingReport aging;
   final List<MonthlyTrend> trends;
   final UpcomingPayments upcoming;
+
+  /// What every money figure on this payload is denominated in, straight from
+  /// `reporting.reporting_currency` — the server's own answer, so no client
+  /// resolution is involved and there is nothing to disagree with it about.
+  /// `null` against a backend with no `reporting` block.
+  final String? reportingCurrency;
 
   DashboardData({
     required this.totalInvoices,
@@ -101,6 +129,7 @@ class DashboardData {
     required this.aging,
     required this.trends,
     required this.upcoming,
+    this.reportingCurrency,
   });
 
   factory DashboardData.fromJson(Map<String, dynamic> json) {
@@ -115,10 +144,17 @@ class DashboardData {
     // convention.
     final upcomingRaw = json['upcoming_payments'];
     final upcomingList = upcomingRaw is List ? upcomingRaw : [];
+    // Every money figure below comes from the reporting-currency counterpart
+    // the backend serves beside the face-value one, because only those are in
+    // the single currency `reporting_currency` names. `vendor_spend[].amount`
+    // is already rolled up at source and needs no `_reporting` sibling.
+    final reporting = (json['reporting'] as Map<String, dynamic>?) ?? const {};
 
     return DashboardData(
       totalInvoices: json['total_invoices'] as int? ?? 0,
-      totalAmount: (json['total_amount'] as num?)?.toDouble() ?? 0,
+      totalAmount: ((reporting['total_amount'] ?? json['total_amount']) as num?)
+              ?.toDouble() ??
+          0,
       pipeline: (json['pipeline'] as Map<String, dynamic>?)
               ?.map((k, v) => MapEntry(k, v as int)) ??
           {},
@@ -127,7 +163,8 @@ class DashboardData {
               .toList() ??
           [],
       aging: AgingReport.fromJson(
-        json['aging'] as Map<String, dynamic>? ?? {},
+        (json['aging_reporting'] ?? json['aging']) as Map<String, dynamic>? ??
+            {},
       ),
       trends: (json['monthly_trend'] as List<dynamic>?)
               ?.map((t) => MonthlyTrend.fromJson(t as Map<String, dynamic>))
@@ -135,8 +172,12 @@ class DashboardData {
           [],
       upcoming: UpcomingPayments(
         count: upcomingList.length,
-        totalAmount: (json['upcoming_total_amount'] as num?)?.toDouble() ?? 0,
+        totalAmount: ((json['upcoming_total_amount_reporting'] ??
+                    json['upcoming_total_amount']) as num?)
+                ?.toDouble() ??
+            0,
       ),
+      reportingCurrency: reporting['reporting_currency'] as String?,
     );
   }
 }
@@ -199,7 +240,13 @@ class MonthlyTrend {
     return MonthlyTrend(
       month: json['month'] as String? ?? '',
       count: json['count'] as int? ?? 0,
-      amount: (json['amount'] as num?)?.toDouble() ?? 0,
+      // Reporting-currency counterpart, for the reason `DashboardData.
+      // totalAmount` records: the bare `amount` is a per-month naive sum
+      // across currencies, so the trend's own bars would not be comparable
+      // with each other, let alone with the `reporting_currency` label.
+      amount: ((json['reporting_amount'] ?? json['amount']) as num?)
+              ?.toDouble() ??
+          0,
     );
   }
 }
