@@ -22,7 +22,11 @@
 		type AgentCandidateException,
 		type AgentResolveResult
 	} from '$lib/types/exceptionAgents';
-	import { exceptionTypeFallback, exceptionTypeLabelKey } from '$lib/types/exception';
+	import {
+		exceptionStatusLabelKey,
+		exceptionTypeFallback,
+		exceptionTypeLabelKey
+	} from '$lib/types/exception';
 	import { appendUnique } from '$lib/utils/pagination';
 	import { createRequestSequencer } from '$lib/utils/requestSequence';
 	import { formatDate } from '$lib/utils/time';
@@ -228,6 +232,20 @@
 		return serverLabel || exceptionTypeFallback(type);
 	}
 
+	/**
+	 * A lifecycle status' label — the runnable-queue cell and the run dialog's
+	 * outcome line, which both printed the raw wire value.
+	 *
+	 * Reads the SAME keys the /exceptions queue's status chips and badge read
+	 * (`types/exception.ts::EXCEPTION_STATUS_LABEL_KEYS`), which is the point:
+	 * this panel is a tab of that page, so a second wording here would name one
+	 * status two ways in one page. Unknown status prints raw, not blank.
+	 */
+	function statusLabel(status: string): string {
+		const key = exceptionStatusLabelKey(status);
+		return key ? m(key) : status;
+	}
+
 	// `$derived`, not `const`: these read `m()`, so a locale switch has to rebuild
 	// them or the headers stay in the language the panel happened to mount in.
 	const COLUMNS = $derived([
@@ -355,7 +373,7 @@
 						<td>{typeLabel(exc.exception_type, exc.type_label)}</td>
 						<td class="mono">{exc.invoice_number ?? '—'}</td>
 						<td class="muted-cell">{exc.vendor_name ?? '—'}</td>
-						<td class="muted-cell">{exc.status}</td>
+						<td class="muted-cell">{statusLabel(exc.status)}</td>
 						<td class="right">
 							{#if isRunnable(exc)}
 								<RowAction
@@ -485,12 +503,11 @@
 				>
 					{actionLabel(runOutcome.decision.action_taken)}
 				</span>
-				<!-- The status stays the raw wire value, the same call the /exceptions
-				     queue's own badge makes: it is data, not copy, and keying the
-				     lifecycle vocabulary is one slice together with that badge (it is
-				     filed in docs/followups.md). Only the frame is translated. -->
+				<!-- The status reads the queue's own status keys, so the outcome line
+				     and the badge the run just changed name it identically. -->
 				<span class="run-outcome-status" data-testid="agent-run-status">
-					{m('exceptions.agents.modal.nowStatus')} <strong>{runOutcome.exception.status}</strong>
+					{m('exceptions.agents.modal.nowStatus')}
+					<strong>{statusLabel(runOutcome.exception.status)}</strong>
 				</span>
 			</div>
 

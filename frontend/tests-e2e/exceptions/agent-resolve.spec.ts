@@ -19,6 +19,13 @@ import { API_BASE, authedTenantHeaders, expect, signInAndWait, test } from '../f
  * stub of the page's own state — because which resolver fires, and at what
  * confidence, depends on the invoice/PO rows the shared e2e tenant happens to
  * hold. The role gate is asserted against the REAL backend at the bottom.
+ *
+ * The mocks send the WIRE status (`resolved` / `escalated`) and the assertions
+ * read the rendered LABEL (`Resolved` / `Escalated`) — the outcome line reads
+ * `types/exception.ts::EXCEPTION_STATUS_LABEL_KEYS`, the same keys the queue's
+ * status chips read, so asserting the raw value here would be asserting the
+ * defect. `toContainText` is case-sensitive, which is what makes the pair a
+ * real check rather than a coincidence.
  */
 
 const EXC_ID = '55555555-5555-5555-5555-555555555555';
@@ -122,7 +129,7 @@ test.describe('/exceptions AI Agents — running an agent', () => {
 		await page.getByTestId('agent-run-confirm').click();
 
 		await expect(page.getByTestId('agent-run-action')).toContainText('Auto-resolved');
-		await expect(page.getByTestId('agent-run-status')).toContainText('resolved');
+		await expect(page.getByTestId('agent-run-status')).toContainText('Resolved');
 		await expect(page.getByTestId('agent-run-changes')).toContainText('101.00');
 		await expect(page.getByTestId('agent-run-facts')).toContainText('amount_mismatch_v1');
 	});
@@ -142,7 +149,7 @@ test.describe('/exceptions AI Agents — running an agent', () => {
 		const outcome = page.getByTestId('agent-run-outcome');
 		await expect(outcome).toBeVisible();
 		await expect(page.getByTestId('agent-run-action')).toContainText('Escalated');
-		await expect(page.getByTestId('agent-run-status')).toContainText('escalated');
+		await expect(page.getByTestId('agent-run-status')).toContainText('Escalated');
 		await expect(page.getByTestId('agent-run-escalated-note')).toContainText(
 			/autonomy threshold/i
 		);

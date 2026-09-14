@@ -3444,6 +3444,14 @@ export const messages = {
 	'admin.roles.col.name': 'Nom',
 	'admin.roles.col.description': 'Description',
 	'admin.roles.col.permissions': 'Autorisations',
+	// The four built-in roles. Shared by `/admin`'s user rows + role
+	// checkboxes, its system-roles table, and `/profile`'s Account card —
+	// ONE vocabulary, so no surface can name a role differently from the
+	// next. A custom role keeps its stored name (tenant data).
+	'admin.roles.name.admin': 'Administrateur',
+	'admin.roles.name.apManager': 'Responsable comptes fournisseurs',
+	'admin.roles.name.apClerk': 'Comptable fournisseurs',
+	'admin.roles.name.cfo': 'CFO',
 	'admin.roles.system.heading': 'Rôles système',
 	'admin.roles.system.hint': 'Les rôles intégrés protègent des routes codées en dur et ne peuvent être ni modifiés ni supprimés.',
 	'admin.roles.system.empty': 'Aucun rôle système configuré.',
