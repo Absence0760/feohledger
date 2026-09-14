@@ -67,11 +67,22 @@ test.describe('RBAC — non-admin roles (one fresh sign-in each)', () => {
 		// `get_current_user`, as does the Inspections tab's `GET /api/inspections`,
 		// and each page gates its own mutations on `auth.isManager`. Budgets stays
 		// out — every `/api/budgets` read is `require_roles(ADMIN, AP_MANAGER, CFO)`,
-		// so a clerk's first paint would 403. Purchase Orders being first in nav
-		// order is also why the group's sidebar row now lands there, not on
+		// so a clerk's first paint would 403. Chart of Accounts is in for the same
+		// reason the other five are: `GET /api/gl-accounts` is `get_current_user`,
+		// and a clerk coding an invoice already reads that exact list through the
+		// line-item GL picker — the page's two writes gate themselves on
+		// `auth.isManager` (`docs/decisions.md` §161). Purchase Orders being first
+		// in nav order is also why the group's sidebar row now lands there, not on
 		// Requisitions. `frontend/src/lib/nav.test.ts` pins the same set.
 		expect(await sectionTabHrefs(page, '/purchase-orders')).toEqual(
-			['/purchase-orders', '/goods-receipts', '/requisitions', '/intake', '/catalogs'].sort()
+			[
+				'/purchase-orders',
+				'/goods-receipts',
+				'/requisitions',
+				'/intake',
+				'/catalogs',
+				'/gl-accounts'
+			].sort()
 		);
 		// Billing tabs: every child whose LIST endpoint admits a clerk. Credit
 		// Memos and Recurring joined this set when the nav stopped hiding pages
@@ -109,7 +120,15 @@ test.describe('RBAC — non-admin roles (one fresh sign-in each)', () => {
 			['/', '/invoices', '/payments', '/vendors', '/vendors/screening', '/vendors/change-requests', '/exceptions', '/purchase-orders', '/contracts', '/assistant', '/experiments'].sort()
 		);
 		expect(await sectionTabHrefs(page, '/purchase-orders')).toEqual(
-			['/purchase-orders', '/goods-receipts', '/requisitions', '/intake', '/catalogs', '/budgets'].sort()
+			[
+				'/purchase-orders',
+				'/goods-receipts',
+				'/requisitions',
+				'/intake',
+				'/catalogs',
+				'/gl-accounts',
+				'/budgets'
+			].sort()
 		);
 		// Two Settings tabs now, so the section bar renders instead of being
 		// suppressed as it was when Experiments stood alone. The group landing

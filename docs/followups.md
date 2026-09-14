@@ -36,7 +36,7 @@ for the tracker view. Keep the two reconciled when either moves.
 
 **Last reconciled:** 2026-09-14 (round 31) — five agents, each in its own git
 worktree, plus integrator verification of the merged branch. **Six** entries
-closed, **seventeen** opened. **29 → 40** — by category, **30 (c)** · **7 (a)** ·
+closed, **eighteen** opened. **29 → 41** — by category, **31 (c)** · **7 (a)** ·
 **3 (b)**.
 
 **The total went up, and the reason is the same one round 30 recorded.** All six
@@ -1707,7 +1707,7 @@ are deliberate scope calls, recorded so an absence does not read as an oversight
 ### Surfaced by the round-31 batch (2026-09-14)
 
 Five agents, each in its own git worktree, closed six entries and opened these
-seventeen (sixteen from the slices, one from the round's own CI run). **Every one of the six entries was wrong about its own work** — not
+eighteen (sixteen from the slices, two from the round's own CI run). **Every one of the six entries was wrong about its own work** — not
 merely incomplete — and in three cases implementing the entry as written would
 have shipped a defect: a rung skipped in the reporting-currency chain, a nav row
 gated on a write instead of its read, and a credential write with no
@@ -1989,6 +1989,33 @@ durable fix stated in one sentence has usually not been tried.
       sweep entry, so it should ride the next thing that touches the file.
 
 #### Opened by the round-31 CI run
+
+- [ ] **(c) The nav role matrix is pinned twice, by hand, and only one of the two
+      pins is visible before CI.** Adding a single child row to a nav group in
+      round 31 turned a Playwright shard red: `tests-e2e/auth/rbac.spec.ts`
+      hardcodes the expected `sectionTabHrefs` set per role, and
+      `src/lib/nav.test.ts` hardcodes the same sets independently — the spec's own
+      comment says "`nav.test.ts` pins the same set", which is the tell. The unit
+      pin was updated with the change; the e2e twin was not, and could not be
+      caught locally: `pnpm check` does not typecheck `tests-e2e/`, `--list` only
+      proves a spec parses, and running the suite needs the whole stack up. So the
+      first signal was a red shard on an unrelated PR, which is the same failure
+      mode as [[e2e-spec-syntax-not-typechecked]] one layer up — a guard that only
+      speaks in CI.
+      **Durable fix:** derive one of the two from the other instead of restating
+      it. `nav.ts` already carries `roles` per entry, so the expected set for a
+      role is computable: export the filter `Sidebar`/`SectionTabs` already apply
+      (or a thin `navFor(role)` beside it), have `nav.test.ts` assert the *policy*
+      (which role may see which href, and that each row's roles match its
+      backend gate), and have `rbac.spec.ts` assert that the rendered DOM equals
+      `navFor(role)` rather than a literal array. Then a new row is a one-line
+      change and the e2e proves the wiring rather than re-typing the answer. Keep
+      one literal list somewhere deliberate — a computed expectation that reads
+      its answer from the code under test proves nothing — so pin the
+      href→roles table itself in `nav.test.ts` and let the e2e compare rendering
+      against it.
+      **Trigger:** the next nav row added, moved, or re-gated — it will cost a red
+      shard again otherwise.
 
 - [ ] **(c) Every container image the local stack and CI pull is a floating tag,
       and one of them silently stopped being pullable.** Round 31's CI run failed
