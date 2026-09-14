@@ -74,14 +74,10 @@ interface Paginated<T> {
 	page_size: number;
 }
 
-/** GL account option from `GET /api/gl-accounts` — the picker value is the uuid
- *  `id` (matches `Expense.gl_account_id` + the `bulk-gl-code` body). */
-export interface GlAccountOption {
-	id: string;
-	code: string;
-	name: string;
-	account_type?: string;
-}
+// The GL picker's option type + loader are owned by `api/glAccounts.ts` /
+// `types/glAccount.ts` (the chart-of-accounts surface), re-exported here so the
+// expense / requisition pages keep one import.
+export type { GlAccountOption } from '$lib/types/glAccount';
 
 function expenseQuery(params: ExpenseListParams): URLSearchParams {
 	const qs = new URLSearchParams();
@@ -228,9 +224,7 @@ export function bulkGlCode(
 
 // --- GL accounts (reused from the existing chart-of-accounts endpoint) ---
 
-export function listGlAccounts(): Promise<GlAccountOption[]> {
-	return api.get<GlAccountOption[]>('/api/gl-accounts');
-}
+export { listGlAccounts } from '$lib/api/glAccounts';
 
 // --- CSV export ---
 

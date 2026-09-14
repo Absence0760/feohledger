@@ -148,6 +148,28 @@ export const NAV: NavEntry[] = [
 			{ label: 'Requisitions', labelKey: 'nav.requisitions', href: '/requisitions', roles: ['admin', 'ap_manager', 'ap_clerk', 'cfo'] },
 			{ label: 'Intake', labelKey: 'nav.intake', href: '/intake', roles: ['admin', 'ap_manager', 'ap_clerk', 'cfo'] },
 			{ label: 'Catalogs', labelKey: 'nav.catalogs', href: '/catalogs', roles: ['admin', 'ap_manager', 'ap_clerk', 'cfo'] },
+			// Chart of accounts — the third ERP-synced master data set behind
+			// 3-way matching, beside the two that already had a page
+			// (`/purchase-orders` here, `/vendors` as a top-level row). It sits in
+			// Procurement rather than Settings because the chart is the CODING
+			// TARGET of every document in this group (requisition → PO → invoice
+			// line) and of `/budgets` below it, whose `gl_account` dimension keys
+			// on it; and because a clerk-visible row is the only child a clerk can
+			// see in Settings, which would make "Settings" a group containing one
+			// reference table they cannot change.
+			//
+			// ap_clerk included deliberately, for the reason the four rows above
+			// state: `GET /api/gl-accounts` is `get_current_user` — auth-gated,
+			// role-open — because a clerk coding an invoice has to be able to look
+			// a code up, and the invoice/expense/requisition GL pickers already
+			// serve them that same list. Both writes (`POST ""` create and
+			// `POST /sync-erp`) are admin | ap_manager and are gated in-page on
+			// `auth.isManager`, matching the backend, so the page renders read-only
+			// for a clerk. Gating the ROW on the write instead would have hidden a
+			// page whose every read succeeds — the dead end nav.ts has now fixed
+			// five times — while leaving `sync-erp` unreachable for the one role
+			// the backend deliberately widened it to (docs/decisions.md §163).
+			{ label: 'Chart of Accounts', labelKey: 'nav.glAccounts', href: '/gl-accounts', roles: ['admin', 'ap_manager', 'ap_clerk', 'cfo'] },
 			// ap_clerk EXCLUDED deliberately, unlike its four siblings: every
 			// `/api/budgets` read is `require_roles(ADMIN, AP_MANAGER, CFO)` and
 			// mutation is admin | cfo (the CFO owns budgets), so a clerk's first

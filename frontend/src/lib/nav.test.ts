@@ -235,7 +235,7 @@ function procurementFor(role: string): string[] {
 }
 
 test('an ap_clerk sees exactly the Procurement links their backend reads allow', () => {
-	// The whole point of gating this group per item. Five of the six routes have
+	// The whole point of gating this group per item. Six of the seven routes have
 	// list/detail reads open to any authenticated user or to all four roles:
 	//   - /purchase-orders  api/purchase_orders.py — list, /counts, detail are
 	//                       all `get_current_user`; only POST /sync-erp is
@@ -246,6 +246,15 @@ test('an ap_clerk sees exactly the Procurement links their backend reads allow',
 	//                       `GET /api/inspections` likewise.
 	//   - /requisitions, /intake, /catalogs — `require_roles(ADMIN, AP_MANAGER,
 	//                       AP_CLERK, CFO)` on every read.
+	//   - /gl-accounts      api/gl_accounts.py — `GET ""` is `get_current_user`
+	//                       (a clerk coding an invoice has to be able to look a
+	//                       code up, and the GL pickers already serve them the
+	//                       same list); both writes — `POST ""` and
+	//                       `POST /sync-erp` — are admin | ap_manager and are
+	//                       gated in-page on `auth.isManager`. Gating the ROW on
+	//                       the write instead is what left `sync-erp` reachable
+	//                       from nowhere but admin-only `/organization`
+	//                       (decisions §163).
 	// /budgets is the one genuine exclusion: `require_roles(ADMIN, AP_MANAGER,
 	// CFO)` on every read, so a clerk's FIRST page load would 403 — the nav must
 	// keep hiding it. A group-level gate cannot express both halves, which is
@@ -255,12 +264,13 @@ test('an ap_clerk sees exactly the Procurement links their backend reads allow',
 		'/goods-receipts',
 		'/requisitions',
 		'/intake',
-		'/catalogs'
+		'/catalogs',
+		'/gl-accounts'
 	]);
 });
 
 test('the other three system roles see every Procurement link', () => {
-	// admin / ap_manager / cfo are on every one of the six gates, so a
+	// admin / ap_manager / cfo are on every one of the seven gates, so a
 	// per-item split must not have narrowed anyone by accident.
 	const all = procurement.children.map((c) => c.href);
 	expect(procurementFor('admin')).toEqual(all);
@@ -278,6 +288,7 @@ test('Procurement nav entries carry their own gate, not the group\'s', () => {
 	expect(child('/requisitions').roles).toEqual(openToAll);
 	expect(child('/intake').roles).toEqual(openToAll);
 	expect(child('/catalogs').roles).toEqual(openToAll);
+	expect(child('/gl-accounts').roles).toEqual(openToAll);
 	expect(child('/budgets').roles).toEqual(['admin', 'ap_manager', 'cfo']);
 });
 

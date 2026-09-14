@@ -66,6 +66,16 @@ const CASES: Case[] = [
 		apiPathname: '/api/payments/queue',
 		notShown: /No invoices ready for payment/,
 		shown: /Could not load the payment queue/
+	},
+	{
+		// The chart of accounts joins the sweep with its page rather than after
+		// it: "No accounts in this chart." is a claim a clerk acts on by asking
+		// someone to sync the ERP, and it must not be what an outage looks like.
+		name: 'gl accounts',
+		route: '/gl-accounts',
+		apiPathname: '/api/gl-accounts',
+		notShown: /No accounts in this chart/,
+		shown: /Couldn.t load the chart of accounts/
 	}
 ];
 
