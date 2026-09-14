@@ -13,6 +13,7 @@
 	import Money from '$lib/components/ui/Money.svelte';
 	import Badge, { type BadgeTone } from '$lib/components/ui/Badge.svelte';
 	import { m } from '$lib/i18n/store.svelte';
+	import { invoiceWarningText } from '$lib/api/invoiceWarnings';
 	import { formatDate } from '$lib/utils/time';
 	import { formatList } from '$lib/utils/list';
 	import type { MessageKey } from '$lib/i18n/messages';
@@ -2000,7 +2001,9 @@
 									<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
 										<path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
 								</svg>
-								{w.message}
+								<!-- Same resolver as the `/invoices` row icon, so a finding cannot
+								     read as German in the list and English in the tooltip. -->
+								{invoiceWarningText(w, m)}
 							</div>
 							{/each}
 						</div>

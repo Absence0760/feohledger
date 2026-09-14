@@ -82,6 +82,7 @@ from app.models.recurring_invoice import (
     RecurringInvoiceTemplate,
 )
 from app.services.audit_dispatch import dispatch_audit
+from app.services.invoice_warning_catalog import warning
 from app.services.sweep_health import SWEEP_RECURRING_INVOICES, run_sweep_loop
 from app.services.workflow_engine import create_workflow_instance
 from app.utils.dates import utc_today
@@ -665,15 +666,17 @@ def flag_template_variance(
     delta_pct = (delta / expected * _HUNDRED).quantize(Decimal("0.1"))
     if abs(delta_pct) < tolerance:
         return None
-    direction = "over" if delta > 0 else "under"
-    return {
-        "type": "recurring_variance",
-        "severity": "warning",
-        "message": (
-            f"Amount {actual} is {delta_pct:+}% vs the recurring template "
-            f"'{template.name}' expected amount {expected} ({direction} by tolerance)"
-        ),
-    }
+    return warning(
+        # The direction is a word in the sentence, so it selects the code
+        # rather than riding as a param — see `invoice_warning_catalog`.
+        "recurring_variance_over" if delta > 0 else "recurring_variance_under",
+        "warning",
+        amount=actual,
+        deltaPct=f"{delta_pct:+}",
+        templateName=template.name,
+        expectedAmount=expected,
+        currency=invoice.currency,
+    )
 
 
 # --------------------------------------------------------------------------- #

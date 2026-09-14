@@ -203,7 +203,7 @@ worth knowing before you touch anything money-adjacent:
 - `review.py` — approve/reject with field corrections; segregation of duties and the CFO gate.
 - `payment_runs.py` / `payment_erp_sync.py` / `payment_settlement.py` — run creation, the ERP sync-back that flips to `paid`, and settlement-amount verification.
 - `payment_methods.py` — the single source of truth for what a payment rail means (tax-reportable? international?). Adding a rail means editing one frozenset.
-- `invoice_warnings.py` — duplicates, fraud flags, line-total reconciliation. The header `amount` is never recomputed from line items.
+- `invoice_warnings.py` — duplicates, fraud flags, line-total reconciliation. The header `amount` is never recomputed from line items. Every finding is built by `invoice_warning_catalog.warning(code, severity, **params)`, never a dict literal, so it carries the `{code, params}` the browser localizes on (`backend/docs/invoice-warnings.md`).
 - `po_matching.py` + `matching_rules.py` — 2/3/4-way matching and the per-vendor/per-commodity rule resolver.
 - `vendor_matching.py` — fuzzy vendor resolution, scoped to the invoice's own entity.
 - `post_commit.py` — best-effort side effects run **after** the caller's transaction commits, so no third party's latency is charged to an open transaction holding row locks.
@@ -312,6 +312,7 @@ Prefer reading docs over guessing. Update them when behavior changes.
 | Positive Pay / payment-fraud file | `backend/docs/positive-pay.md` |
 | PO matching | `backend/docs/po-matching.md` |
 | Line-total reconciliation | `backend/docs/line-total-reconciliation.md` |
+| Invoice warnings (payload, code catalogue) | `backend/docs/invoice-warnings.md` |
 | Vendor mgmt | `backend/docs/vendor-management.md` |
 | Local AI testing | `backend/docs/local-ai-testing.md` |
 | API reference | `backend/docs/api-reference.md` |

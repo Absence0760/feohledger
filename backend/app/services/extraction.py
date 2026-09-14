@@ -23,6 +23,7 @@ from app.services.decimal_convention import (
     detect_convention,
 )
 from app.services.extraction_adapters.base import ExtractionResult
+from app.services.invoice_warning_catalog import warning
 from app.services.workflow_engine import (
     advance_workflow,
     get_workflow_instance,
@@ -549,14 +550,11 @@ async def run_extraction(
             # Re-apply cleaned values after confidence adjustments
             existing_warnings = list(invoice.warnings or [])
             for v in correction_report.violations:
-                existing_warnings.append(
-                    {
-                        "type": "extraction_self_correction",
-                        "severity": v["severity"],
-                        "message": v["message"],
-                        "check": v["check"],
-                    }
-                )
+                # A violation already IS a catalogue-built warning (see
+                # `extraction_self_correction`), carrying `check` for the modal.
+                # `fields_affected` is confidence-penalty bookkeeping and has
+                # never ridden the warning.
+                existing_warnings.append({k: val for k, val in v.items() if k != "fields_affected"})
             invoice.warnings = existing_warnings
             logger.info(
                 "[extraction] Self-correction: %s violation(s)",
@@ -638,11 +636,13 @@ async def run_extraction(
             existing_warnings = list(invoice.warnings or [])
             existing_warnings.append(
                 {
-                    "type": "gl_account_invalid",
-                    "severity": "warning",
-                    "message": (
-                        "AI suggested GL code(s) not in active chart: "
-                        + ", ".join(sorted(set(invalid_gl_codes)))
+                    # GL codes are identifiers, not prose, so the join stays an
+                    # ASCII `", "` on this side (`decisions.md` §148) and the
+                    # whole list travels as one opaque `text` param.
+                    **warning(
+                        "gl_codes_not_in_chart",
+                        "warning",
+                        codes=", ".join(sorted(set(invalid_gl_codes))),
                     ),
                     "codes": sorted(set(invalid_gl_codes)),
                 }
@@ -702,12 +702,7 @@ async def run_extraction(
             existing_warnings = list(invoice.warnings or [])
             existing_warnings.append(
                 {
-                    "type": "gl_account_invalid",
-                    "severity": "warning",
-                    "message": (
-                        f"Cached vendor GL code '{stale_code}' is no longer "
-                        "in the active chart of accounts."
-                    ),
+                    **warning("gl_code_stale_prior", "warning", code=stale_code),
                     "codes": [stale_code],
                 }
             )

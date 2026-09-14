@@ -364,3 +364,44 @@ async def test_overall_confidence_recompute_never_raises():
 
     assert report.corrected  # a violation fired
     assert result.overall_confidence <= original_overall  # never raised
+
+
+@pytest.mark.asyncio
+async def test_every_violation_is_json_safe():
+    """A violation rides `invoice.warnings` AND the `priors_metadata` JSONB.
+
+    It is built through `invoice_warning_catalog.warning(...)`, which coerces
+    every parameter by its declared kind — so no raw `Decimal` or `date` can
+    reach the column. A raw one is not cosmetic: it made the whole extraction
+    save fail with `Object of type Decimal is not JSON serializable`, which
+    surfaced as the invoice stuck at `new` and a 409 on the `failed`
+    transition.
+    """
+    import json
+
+    # One result that trips all four checks at once: the header doesn't add up,
+    # the dates are inverted, the lines don't sum to the header, and the one
+    # line's own quantity x price doesn't make its total.
+    result = _result(
+        amount=_field("100.00"),
+        subtotal=_field("50.00"),
+        tax_amount=_field("1.00"),
+        invoice_date=_field("2026-02-10"),
+        due_date=_field("2026-02-01"),
+        line_items=[_line_item("2", "10.00", "30.00")],
+    )
+    report = await run_self_correction(result)
+    checks = {v["check"] for v in report.violations}
+    assert checks == {
+        "total_reconciliation",
+        "date_ordering",
+        "line_items_sum",
+        "line_item_math",
+    }, checks
+    for violation in report.violations:
+        # Raises TypeError if anything unserialisable slipped through.
+        json.dumps(violation)
+        assert violation["code"].startswith("self_correction_")
+        assert violation["type"] == "extraction_self_correction"
+        for value in violation["params"].values():
+            assert isinstance(value, (str, int)), (violation["code"], value)

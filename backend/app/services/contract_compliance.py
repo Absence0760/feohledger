@@ -29,6 +29,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.contract import Contract, ContractStatus
 from app.models.invoice import Invoice, InvoiceStatus
+from app.services.invoice_warning_catalog import warning
 from app.utils.dates import utc_today
 
 COMPLIANCE_EXCEPTION_TYPE = "contract_noncompliant"
@@ -60,49 +61,46 @@ async def evaluate_contract_compliance(
     # --- term window -------------------------------------------------------
     if contract.end_date and ref_date > contract.end_date:
         findings.append(
-            {
-                "type": COMPLIANCE_EXCEPTION_TYPE,
-                "severity": "warning",
-                "message": (
-                    f"Invoice dated {ref_date.isoformat()} is after contract "
-                    f"{contract.contract_number} expired ({contract.end_date.isoformat()})"
-                ),
-            }
+            warning(
+                "contract_expired",
+                "warning",
+                invoiceDate=ref_date,
+                contractNumber=contract.contract_number,
+                endDate=contract.end_date,
+            )
         )
     if contract.start_date and ref_date < contract.start_date:
         findings.append(
-            {
-                "type": COMPLIANCE_EXCEPTION_TYPE,
-                "severity": "warning",
-                "message": (
-                    f"Invoice dated {ref_date.isoformat()} predates contract "
-                    f"{contract.contract_number} start ({contract.start_date.isoformat()})"
-                ),
-            }
+            warning(
+                "contract_not_started",
+                "warning",
+                invoiceDate=ref_date,
+                contractNumber=contract.contract_number,
+                startDate=contract.start_date,
+            )
         )
 
     # --- terminated / cancelled contract -----------------------------------
     if contract.status in (ContractStatus.terminated, ContractStatus.cancelled):
         findings.append(
-            {
-                "type": COMPLIANCE_EXCEPTION_TYPE,
-                "severity": "warning",
-                "message": (
-                    f"Spend recorded against {contract.status} contract {contract.contract_number}"
-                ),
-            }
+            warning(
+                # The status is a word in the sentence, so it selects the code.
+                "contract_terminated"
+                if contract.status == ContractStatus.terminated
+                else "contract_cancelled",
+                "warning",
+                contractNumber=contract.contract_number,
+            )
         )
 
     # --- vendor mismatch ---------------------------------------------------
     if invoice.vendor_id and contract.vendor_id and invoice.vendor_id != contract.vendor_id:
         findings.append(
-            {
-                "type": COMPLIANCE_EXCEPTION_TYPE,
-                "severity": "warning",
-                "message": (
-                    f"Invoice vendor does not match contract {contract.contract_number} vendor"
-                ),
-            }
+            warning(
+                "contract_vendor_mismatch",
+                "warning",
+                contractNumber=contract.contract_number,
+            )
         )
 
     # --- cumulative spend over limit --------------------------------------
@@ -127,29 +125,28 @@ async def evaluate_contract_compliance(
         cumulative = Decimal(prior or 0) + invoice.amount
         if cumulative > contract.spend_limit:
             findings.append(
-                {
-                    "type": COMPLIANCE_EXCEPTION_TYPE,
-                    "severity": "error" if contract.not_to_exceed else "warning",
-                    "message": (
-                        f"Cumulative spend {cumulative} exceeds contract "
-                        f"{contract.contract_number} limit {contract.spend_limit}"
-                        + (" (not-to-exceed)" if contract.not_to_exceed else "")
-                    ),
-                }
+                warning(
+                    "contract_spend_limit_exceeded_not_to_exceed"
+                    if contract.not_to_exceed
+                    else "contract_spend_limit_exceeded",
+                    "error" if contract.not_to_exceed else "warning",
+                    cumulativeSpend=cumulative,
+                    contractNumber=contract.contract_number,
+                    spendLimit=contract.spend_limit,
+                    currency=contract.currency,
+                )
             )
 
     # --- GL outside contract terms ----------------------------------------
     allowed_gl = (contract.terms or {}).get("allowed_gl_accounts")
     if allowed_gl and invoice.gl_account and invoice.gl_account not in allowed_gl:
         findings.append(
-            {
-                "type": COMPLIANCE_EXCEPTION_TYPE,
-                "severity": "warning",
-                "message": (
-                    f"GL account {invoice.gl_account} is outside contract "
-                    f"{contract.contract_number} allowed accounts"
-                ),
-            }
+            warning(
+                "contract_gl_not_allowed",
+                "warning",
+                glAccount=invoice.gl_account,
+                contractNumber=contract.contract_number,
+            )
         )
 
     return findings

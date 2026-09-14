@@ -48,6 +48,9 @@ def _invoice(**overrides):
         invoice_date=date(2026, 5, 1),
         due_date=date(2026, 6, 1),
         amount=Decimal("250.00"),
+        # Read by every money-bearing warning sentence, which names the
+        # invoice's own currency rather than a hardcoded `$` (decisions.md §157).
+        currency="USD",
         status=InvoiceStatus.new,
         po_number=None,
         po_match=None,
