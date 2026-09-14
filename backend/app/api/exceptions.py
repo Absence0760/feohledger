@@ -415,9 +415,9 @@ async def resolve_exception(
     if exc.status not in ACTIONABLE_STATUSES:
         raise HTTPException(status_code=409, detail=f"Cannot resolve from '{exc.status}' status")
 
-    # The segregation 403 is raised by `record_decision` — the chokepoint all
-    # three doors share — and propagates untouched (it is an HTTPException, not
-    # the ValueError this catches, and the row is checked before it is mutated).
+    # The segregation 403 is raised by `record_decision` — the chokepoint every
+    # caller shares — and propagates untouched (it is an HTTPException, not the
+    # ValueError this catches, and the row is checked before it is mutated).
     # Only `/bulk/resolve` pre-checks, because only it owes a per-row reason.
     try:
         await record_decision(
