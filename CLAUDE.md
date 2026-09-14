@@ -489,6 +489,17 @@ Worktree notes:
   concurrent runs no longer truncate and disconnect each other (backend
   `CLAUDE.md` § Test databases). Sharing the DB with a *running dev backend* is
   still unsafe — see `docs/known-issues.md`.
+- A worktree isolates **files, not ports**, either — and that one is quieter,
+  because `playwright.config.ts` sets `reuseExistingServer`: a second session
+  keeping the default `:7777` finds the *primary checkout's* dev server already
+  listening and tests **that** build, green, against code it never changed. Give
+  the second session its own stack rather than borrowing the first's:
+  ```bash
+  E2E_WEB_ORIGIN=http://localhost:7801 PUBLIC_API_URL=http://localhost:8001 E2E_TENANT_OFFSET=1 pnpm test:e2e
+  ```
+  `frontend/tests-e2e/fixtures/env.ts` resolves both and derives every other
+  origin from them; nothing else may read a port. Full detail, including what
+  those variables do **not** reach, is `frontend/tests-e2e/README.md` § Ports.
 - **All work must end up on `main`.** A worktree commits on its own branch, and
   git won't let a worktree check out `main`, so that work only reaches `main`
   via an explicit merge from the **primary checkout**. Before retiring a
