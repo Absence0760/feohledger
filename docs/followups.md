@@ -36,7 +36,7 @@ for the tracker view. Keep the two reconciled when either moves.
 
 **Last reconciled:** 2026-09-14 (round 31) — five agents, each in its own git
 worktree, plus integrator verification of the merged branch. **Six** entries
-closed, **sixteen** opened. **29 → 39** — by category, **29 (c)** · **7 (a)** ·
+closed, **seventeen** opened. **29 → 40** — by category, **30 (c)** · **7 (a)** ·
 **3 (b)**.
 
 **The total went up, and the reason is the same one round 30 recorded.** All six
@@ -1707,7 +1707,7 @@ are deliberate scope calls, recorded so an absence does not read as an oversight
 ### Surfaced by the round-31 batch (2026-09-14)
 
 Five agents, each in its own git worktree, closed six entries and opened these
-sixteen. **Every one of the six entries was wrong about its own work** — not
+seventeen (sixteen from the slices, one from the round's own CI run). **Every one of the six entries was wrong about its own work** — not
 merely incomplete — and in three cases implementing the entry as written would
 have shipped a defect: a rung skipped in the reporting-currency chain, a nav row
 gated on a write instead of its read, and a credential write with no
@@ -1971,6 +1971,35 @@ durable fix stated in one sentence has usually not been tried.
       first-load half is already covered for every other list.
       **Trigger:** the next change to that route — it is a one-line fix plus a
       sweep entry, so it should ride the next thing that touches the file.
+
+#### Opened by the round-31 CI run
+
+- [ ] **(c) Every container image the local stack and CI pull is a floating tag,
+      and one of them silently stopped being pullable.** Round 31's CI run failed
+      on two backend shards with `pull access denied for minio/minio, repository
+      does not exist or may require 'docker login'` — not a code defect and not
+      rate limiting: a manifest GET with a valid anonymous Docker Hub pull token
+      returns `401` for `minio/minio` while `library/alpine`, `postgres`, `redis`
+      and the other eight images the repo pulls all return `200`. MinIO's Docker
+      Hub distribution is gated; `quay.io/minio/minio` serves it. Fixed in that
+      round by moving all three references (the compose file and CI's two
+      `docker run` invocations) to quay.io.
+      **What is still open is the class, not that instance.** `minio/minio:latest`,
+      `axllent/mailpit:latest`, `ollama/ollama:latest`, `stripe/stripe-mock:latest`
+      and `caddy:2-alpine` are all floating tags, so the stack a contributor gets
+      depends on the day they pull, and an upstream retag or a registry change
+      lands as a red CI run on an unrelated PR — exactly how this one surfaced.
+      The images CI depends on for a *green* run are the ones that matter.
+      **Durable fix:** pin each to a digest (`image@sha256:…`) or at minimum a
+      dated release tag, with Dependabot's `docker` ecosystem enabled so the bumps
+      arrive as reviewable PRs rather than as drift (the repo already groups
+      `pip`/`npm`/`github-actions`; `docker` is the one ecosystem not covered —
+      `.github/dependabot.yml`). Do it in one change across `backend/docker-compose.yml`
+      and both CI call sites, and note that pinning MinIO means choosing a
+      `RELEASE.*` tag deliberately rather than inheriting whatever `latest` was,
+      which is a behaviour decision and the reason round 31 did not fold it in.
+      **Trigger:** the next time a floating-tag pull breaks a run, or the next
+      Dependabot configuration change — whichever comes first.
 
 #### Opened by the password-hash slice
 
