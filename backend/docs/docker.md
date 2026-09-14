@@ -145,7 +145,7 @@ The `FEOH_ERP_*_BASE` env vars point the adapters at it (the committed
 |------------|-----------------------------|-----------------|---------|---------------------------------------------------|
 | PostgreSQL | `pgvector/pgvector:pg16`    | `5432`          | (core)  | Primary database (multi-DB) + pgvector extension  |
 | Redis      | `redis:7-alpine`            | `6379`          | (core)  | JWT blocklist + rate-limit counters               |
-| MinIO      | `minio/minio:latest`        | `9000`, `9001`  | (core)  | S3-compatible storage                             |
+| MinIO      | `quay.io/minio/minio:latest` | `9000`, `9001` | (core)  | S3-compatible storage. **quay.io, not Docker Hub** — see below |
 | Keycloak   | `quay.io/keycloak/keycloak` | `8088`          | `idp`   | Local OIDC IdP for SSO testing (opt-in)           |
 | Authentik server | `ghcr.io/goauthentik/server` | `9002` | `idp` | Local SCIM IdP — pushes users into `/api/scim/v2` (opt-in) |
 | Authentik worker | `ghcr.io/goauthentik/server` | —      | `idp` | Runs the SCIM sync jobs (opt-in)                  |
@@ -156,6 +156,23 @@ The `FEOH_ERP_*_BASE` env vars point the adapters at it (the committed
 | stripe-mock | `stripe/stripe-mock:latest`  | `12111`| `payments` | Stripe API mock for the `stripe_treasury` payment adapter (opt-in) |
 | Mailpit    | `axllent/mailpit:latest`      | `1025`, `8025` | `mail` | Local SMTP sink + web inbox for the `smtp` email adapter (opt-in) |
 | fake-erp   | (built from `tools/fake-erp/`) | `12112` | `erp` | Fake Merge.dev / NetSuite / Dynamics 365 BC server for real-ERP-adapter e2e (opt-in) |
+
+### Why MinIO comes from quay.io
+
+`minio/minio` on Docker Hub stopped serving anonymous pulls: a manifest request
+with a valid anonymous pull token returns `401`, and `docker run` reports it as
+the misleading `repository does not exist or may require 'docker login'`. Every
+other image in the table above still pulls fine from Docker Hub — this one does
+not, so a `pnpm db:up` or CI failure naming MinIO is a registry problem, not a
+slow-start problem. Do not respond to it by adding retries or lengthening a
+health-check loop.
+
+`quay.io/minio/minio` is MinIO's own registry and serves the same image
+anonymously. The reference appears in three places that must stay in step:
+`backend/docker-compose.yml` and the two `docker run` invocations in
+`.github/workflows/ci.yml` (the backend-shard job and the e2e job) — MinIO can't
+be a GitHub Actions `services:` container because it needs a `server /data`
+command argument.
 
 The PostgreSQL image is `pgvector/pgvector:pg16` (official Postgres 16 + the [pgvector](https://github.com/pgvector/pgvector) extension) because the RAG-based extraction priors use a `vector(1536)` column. The image is binary-compatible with the vanilla `postgres:16` data directory, so switching from plain Postgres doesn't require a volume wipe — just `docker compose down && up -d`. If you do swap images on an existing volume, run `REINDEX DATABASE <name>` on each DB once to rebuild any text-column indexes affected by a collation-version change.
 
