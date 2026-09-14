@@ -69,6 +69,8 @@ pnpm lint                     # ruff + svelte-check + tsc over tests-e2e/ + flut
 pnpm test                     # pytest + Playwright + flutter test
 pnpm gen:einvoice-messages    # regenerate the e-invoice rule-code → message-key catalogue from the backend rule set
 pnpm check:einvoice-messages  # its drift guard (CI's Backend lint job runs this)
+pnpm gen:warning-messages     # regenerate the invoice-warning code → message-key catalogue from the backend catalogue
+pnpm check:warning-messages   # its drift guard (same CI job; see backend/docs/invoice-warnings.md)
 pnpm migrate:all              # alembic upgrade head + migrate_all_tenants.py
 
 # Frontend (from frontend/)
