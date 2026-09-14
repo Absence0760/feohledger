@@ -9,7 +9,7 @@ Triage `$ARGUMENTS` with FeohLedger' `flake-doctor` agent and fix it at the sour
 
 - `/flake-doctor frontend/tests-e2e/invoices/invoices.spec.ts` — a specific spec.
 - `/flake-doctor frontend/tests-e2e/invoices/invoices.spec.ts:42` — a single test by line.
-- `/flake-doctor https://github.com/<org>/project-account-payables/actions/runs/<id>` — pull the failing test(s) from a CI run.
+- `/flake-doctor https://github.com/<org>/feohledger/actions/runs/<id>` — pull the failing test(s) from a CI run.
 - `/flake-doctor` — auto-detect: read the latest CI run's red e2e job, fall back to the working tree if CI is green.
 
 ## Procedure
