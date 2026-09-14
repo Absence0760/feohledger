@@ -887,7 +887,8 @@ export const messages = {
 	'exceptions.resolveModal.escalate': 'Escalar',
 	'exceptions.resolveModal.resolve': 'Resolver',
 	'exceptions.bulkModal.title': '{n, plural, one {Resolver # exceção} other {Resolver # exceções}}',
-	'exceptions.bulkModal.hint': 'Todas as linhas selecionadas receberão a mesma nota de resolução. Linhas já em estado terminal são ignoradas silenciosamente no servidor.',
+	'exceptions.bulkModal.hint': 'Todas as linhas selecionadas receberão a mesma nota de resolução. Linhas já em estado terminal são ignoradas no servidor, assim como qualquer linha cujo alerta registre a sua participação — escale essas em vez disso.',
+	'exceptions.bulk.segregationSkipped': '{n, plural, one {# linha continua aberta: segregação de funções — consta a sua participação nesse pagamento ou no alerta que o marcou. Escale-a ou peça a outro usuário para decidir.} other {# linhas continuam abertas: segregação de funções — consta a sua participação nesses pagamentos ou nos alertas que os marcaram. Escale-as ou peça a outro usuário para decidir.}}',
 	'exceptions.bulkModal.notePlaceholder': 'Aplicada a cada linha selecionada',
 
 	'exceptions.type.duplicate': 'Nota fiscal duplicada',

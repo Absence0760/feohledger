@@ -883,7 +883,8 @@ export const messages = {
 	'exceptions.resolveModal.escalate': 'Escalar',
 	'exceptions.resolveModal.resolve': 'Resolver',
 	'exceptions.bulkModal.title': '{n, plural, one {Resolver # excepción} other {Resolver # excepciones}}',
-	'exceptions.bulkModal.hint': 'Todas las filas seleccionadas recibirán la misma nota de resolución. Las filas que ya están en un estado terminal se omiten silenciosamente en el servidor.',
+	'exceptions.bulkModal.hint': 'Todas las filas seleccionadas recibirán la misma nota de resolución. Las filas que ya están en un estado terminal se omiten en el servidor, igual que cualquier fila en cuya alerta consta tu participación: escala esas en su lugar.',
+	'exceptions.bulk.segregationSkipped': '{n, plural, one {# fila sigue abierta: segregación de funciones; consta tu participación en ese pago o en la alerta que lo marcó. Escálala o pide a otro usuario que decida.} other {# filas siguen abiertas: segregación de funciones; consta tu participación en esos pagos o en las alertas que los marcaron. Escálalas o pide a otro usuario que decida.}}',
 	'exceptions.bulkModal.notePlaceholder': 'Aplicada a cada fila seleccionada',
 
 	'exceptions.type.duplicate': 'Factura duplicada',

@@ -886,7 +886,8 @@ export const messages = {
 	'exceptions.resolveModal.escalate': 'Escalader',
 	'exceptions.resolveModal.resolve': 'Résoudre',
 	'exceptions.bulkModal.title': '{n, plural, one {Résoudre # exception} other {Résoudre # exceptions}}',
-	'exceptions.bulkModal.hint': 'Toutes les lignes sélectionnées recevront la même note de résolution. Les lignes déjà dans un état terminal sont ignorées en silence côté serveur.',
+	'exceptions.bulkModal.hint': 'Toutes les lignes sélectionnées recevront la même note de résolution. Les lignes déjà dans un état terminal sont ignorées côté serveur, ainsi que toute ligne dont le signalement vous désigne comme partie prenante : escaladez celles-là plutôt.',
+	'exceptions.bulk.segregationSkipped': '{n, plural, one {# ligne reste ouverte : séparation des tâches — vous êtes enregistré comme partie prenante de ce paiement ou de son signalement. Escaladez-la, ou demandez à un autre utilisateur de décider.} other {# lignes restent ouvertes : séparation des tâches — vous êtes enregistré comme partie prenante de ces paiements ou de leurs signalements. Escaladez-les, ou demandez à un autre utilisateur de décider.}}',
 	'exceptions.bulkModal.notePlaceholder': 'Appliquée à chaque ligne sélectionnée',
 
 	'exceptions.type.duplicate': 'Facture en doublon',

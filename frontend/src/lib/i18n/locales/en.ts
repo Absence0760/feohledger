@@ -956,7 +956,8 @@ export const en = {
 	'exceptions.resolveModal.escalate': 'Escalate',
 	'exceptions.resolveModal.resolve': 'Resolve',
 	'exceptions.bulkModal.title': '{n, plural, one {Resolve # exception} other {Resolve # exceptions}}',
-	'exceptions.bulkModal.hint': 'All selected rows will receive the same resolution note. Rows already in a terminal state are silently skipped server-side.',
+	'exceptions.bulkModal.hint': 'All selected rows will receive the same resolution note. Rows already in a terminal state are skipped server-side, and so is any row whose flag you are recorded as involved in — escalate those instead.',
+	'exceptions.bulk.segregationSkipped': '{n, plural, one {# row was left open: segregation of duties — you are recorded as involved in that payable, or in raising its flag. Escalate it, or ask a different user to decide.} other {# rows were left open: segregation of duties — you are recorded as involved in those payables, or in raising their flags. Escalate them, or ask a different user to decide.}}',
 	'exceptions.bulkModal.notePlaceholder': 'Applied to every selected row',
 
 	// Exception-type labels ($lib/types/exception.ts::EXCEPTION_TYPE_LABEL_KEYS).
