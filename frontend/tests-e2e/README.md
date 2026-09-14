@@ -81,7 +81,7 @@ tests-e2e/
 │   ├── services.ts                  reachability gates for the opt-in compose services
 │   └── globalSetup.ts               pre-run guard — see "Workflow shape guard" below
 ├── a11y/                            axe-core accessibility regression guard (WCAG 2.2 AA)
-├── meta/                            source guards over the specs themselves — see "Row teardown" below
+├── meta/                            source guards over the specs themselves — see "Row teardown" and "Ports" below
 ├── auth/                            login, signup, RBAC, tenant isolation
 ├── admin/                           user lifecycle, bulk-delete, custom roles
 ├── invoices/                        list, detail, edit, bulk recode, status transitions
@@ -263,6 +263,18 @@ the per-tenant subdomain origins (`tenantOrigin(slug)`, and the `ACME_BASE` /
 `TECHFLOW_BASE` / `NO_TENANT_BASE` constants), the post-login landing pattern
 (`TENANT_ROOT_URL`), and the `--port` the `webServer` block passes to
 `vite dev` / `vite preview`. Nothing else should read a port.
+
+`meta/origin-guard.spec.ts` is what keeps that true. It scans every `.ts` file
+under `tests-e2e/` (comments stripped, `fixtures/env.ts` exempt as the owner)
+and fails on four shapes: a literal `:7777`, a literal `:8000`, a hand-built
+``http://${slug}.localhost``, and a direct read of `E2E_WEB_ORIGIN` /
+`PUBLIC_API_URL`. One re-introduced literal is enough to pin a single spec to
+the wrong port and have it cross servers mid-suite, which is a green run against
+a tree you did not edit — so the guard treats all four as the same defect. It
+also pins the behaviour the derivation depends on: that `TENANT_ROOT_URL` is
+anchored to the tenant root rather than matching any page below it, and that
+`escapeRegExp` escapes backslashes, so one tenant's pattern can never be
+satisfied by another tenant's origin.
 
 Two things stay shared and are NOT covered by these variables:
 
