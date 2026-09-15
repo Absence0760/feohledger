@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { portalAuth } from '$lib/stores/portalAuth.svelte';
 	import { portalBrand } from '$lib/stores/portalBrand.svelte';
+	import BrandMark from '$lib/components/ui/BrandMark.svelte';
 	import { goto } from '$app/navigation';
 	import { m } from '$lib/i18n/store.svelte';
 
@@ -97,6 +98,11 @@
 <div class="login-page">
 	{#if mfaChallenge}
 		<form class="login-card" onsubmit={handleMfaSubmit}>
+			{#if portalBrand.mark.kind === 'logo'}
+				<img class="brand-logo" src={portalBrand.logoUrl} alt={portalBrand.productName} />
+			{:else if portalBrand.mark.kind === 'platform'}
+				<BrandMark size={36} />
+			{/if}
 			<h1>{m('portal.login.mfa.title')}</h1>
 			<p class="subtitle">
 				{#if mfaMethod === 'email'}
@@ -147,8 +153,12 @@
 		</form>
 	{:else}
 		<form class="login-card" onsubmit={handleSubmit}>
-			{#if portalBrand.logoUrl}
+			{#if portalBrand.mark.kind === 'logo'}
 				<img class="brand-logo" src={portalBrand.logoUrl} alt={portalBrand.productName} />
+			{:else if portalBrand.mark.kind === 'platform'}
+				<!-- Unbranded tenant: the platform's mark beside the platform's name. A
+				     tenant that renamed the product without a logo gets neither (§171). -->
+				<BrandMark size={36} />
 			{/if}
 			<h1>{portalBrand.productName}</h1>
 			<p class="subtitle">{m('portal.login.subtitle')}</p>

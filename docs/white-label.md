@@ -185,10 +185,12 @@ resolved (gated only on the tenant, not on auth, so it runs on the login page).
 `applyTheme()` writes `--accent` / `--accent-strong` onto
 `document.documentElement` only for valid configured colors (an unset/malformed
 color leaves the AA-passing `app.css` token standing). The portal header renders
-the tenant logo (when set) + product name; the `<title>` is
+the tenant logo (when set) + product name, falling back to the FeohLedger mark
+only while the product keeps the platform's name (`portalBrand.mark`, the same
+`brandMark` fork as the employee sidebar); the `<title>` is
 `{productName} — Supplier Portal`; and the login card
-(`frontend/src/routes/portal/login/+page.svelte`) shows the logo + product-name
-heading. Fail-soft: any fetch failure degrades to the platform default theme.
+(`frontend/src/routes/portal/login/+page.svelte`) shows the same logo-or-mark + product-name
+heading, on both the password and the MFA step. Fail-soft: any fetch failure degrades to the platform default theme.
 
 The brand is keyed to the **tenant** (subdomain/Host), not the session, so
 logout does not reset it — the login page the supplier lands on keeps the
