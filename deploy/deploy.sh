@@ -86,13 +86,18 @@ esac
 # ── Frontend ─────────────────────────────────────────────────────────────────
 if [ "$DO_FRONTEND" = 1 ]; then
 	# PUBLIC_API_URL is baked into the static build ($env/static/public).
+	# PUBLIC_SITE_URL prefixes the absolute og:image URL in src/app.html (link
+	# previews); SvelteKit would substitute an empty string for it silently, which
+	# is why it comes from APP_DOMAIN, which the preflight above refuses empty.
 	API_DOMAIN=$(grep -E '^API_DOMAIN=' .env | tail -1 | cut -d= -f2- || true)
-	echo "==> building frontend (PUBLIC_API_URL=https://${API_DOMAIN})"
+	APP_DOMAIN=$(grep -E '^APP_DOMAIN=' .env | tail -1 | cut -d= -f2- || true)
+	echo "==> building frontend (PUBLIC_API_URL=https://${API_DOMAIN}, PUBLIC_SITE_URL=https://${APP_DOMAIN})"
 	docker run --rm \
 		-v "$REPO_ROOT":/repo -w /repo/frontend \
 		-v feoh-prod-pnpm-store:/pnpm-store \
 		-e npm_config_store_dir=/pnpm-store \
 		-e PUBLIC_API_URL="https://${API_DOMAIN}" \
+		-e PUBLIC_SITE_URL="https://${APP_DOMAIN}" \
 		"$NODE_IMAGE" sh -ec "npm i -g ${PNPM_SPEC} >/dev/null 2>&1 && pnpm install --frozen-lockfile && pnpm build"
 fi
 
