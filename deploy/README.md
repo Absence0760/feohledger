@@ -39,8 +39,8 @@ The whole flow is four commands on a fresh VM:
   invoice-files, audit-logs, and backup buckets; `ses:SendEmail` if using
   SES; ideally `ec2:ModifyInstanceMetadataOptions` so bootstrap can fix the
   IMDS hop limit itself.
-- DNS: three records → this VM: `app.feohledger.com`, `api.feohledger.com`, and a
-  **wildcard** `*.app.feohledger.com` (the wildcard makes tenant onboarding
+- DNS: three records → this VM: `feohledger.com`, `api.feohledger.com`, and a
+  **wildcard** `*.feohledger.com` (the wildcard makes tenant onboarding
   DNS-free; it needs no wildcard certificate — Caddy issues per-host certs).
 - Secrets: author a real-valued copy of `env.example`, encrypt with sops into
   the **private** `infra-secrets` repo (per-project subdir + KMS key — see

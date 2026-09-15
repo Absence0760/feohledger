@@ -13,9 +13,12 @@ on fire.
 
 ## Current state
 
-`infra/` holds the security substrate (KMS key + S3 buckets); the VPC,
-ECS, RDS and CloudFront stack is not written yet, and **nothing is
-deployed**. No deployed secret has been authored yet — they will live
+`infra/` holds the account substrate — the app KMS key, the S3 buckets, the
+`feohledger.com` certificate, a cost budget and the domain's registration
+settings — and it was **applied to the FeohLedger account on 2026-09-15**. The
+workload stack (the single VM in `docs/minimal-deployment.md`, or VPC, ECS, RDS
+and CloudFront) is not built yet, so **the app itself is not deployed**. No
+deployed secret has been authored yet — they will live
 sops-encrypted in the private `infra-secrets` repo (`feohledger/`),
 never in this public repo.
 
@@ -30,9 +33,9 @@ never in this public repo.
 **The account exists (2026-09-14).** The estate bootstrap
 (`new-project-account.sh feohledger`) created **FeohLedger** inside the estate
 AWS Organization, with the Terraform state bucket, the sops KMS key, a GitHub
-OIDC deploy role and a delegated `feohledger.jaredhoward.com` zone the platform
-does not use — it lives on `feohledger.com` (Step 2), and retiring that zone is
-an operator step in `docs/followups.md`. Operators sign in through IAM Identity
+OIDC deploy role. It also delegated a `feohledger.jaredhoward.com` zone to the
+account, retired on 2026-09-15 once the platform moved to `feohledger.com`
+(Step 2). Operators sign in through IAM Identity
 Center (`aws sso login --profile feohledger`), not IAM users or root keys. That
 covers items 1, 2 and 5 below; 3 and 4 are still open.
 
@@ -152,7 +155,7 @@ From your laptop, against the production URL:
 1. Hit `GET /api/health` — should return `{"status": "ok"}`
 2. Create a test tenant via `scripts/create_tenant.py`
 3. Log in to the test tenant at
-   `https://<tenant-slug>.app.feohledger.com`
+   `https://<tenant-slug>.feohledger.com`
 4. Upload a test invoice → watch extraction complete in the UI
 5. Check CloudWatch Logs for the backend service — errors should be
    zero
@@ -169,10 +172,11 @@ From your laptop, against the production URL:
 
 ## Checklist
 
-- [ ] AWS prod account created
-- [ ] Domain in Route53, ACM cert validated
+- [x] AWS prod account created
+- [x] Domain in Route53, ACM cert validated (2026-09-15)
 - [ ] SOPS secrets populated
-- [ ] `terraform apply` clean
+- [x] `terraform apply` of the `infra/` substrate clean (2026-09-15)
+- [ ] Workload stack built and applied
 - [ ] GitHub Actions deploy workflow green
 - [ ] First tenant provisioned
 - [ ] Smoke test passes

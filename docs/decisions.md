@@ -6503,3 +6503,38 @@ The delegated zone and its NS record in `jaredhoward.com` are retired as an oper
 servers someone else can try to claim, and the estate bootstrap cannot express that order: the zone's
 `prevent_destroy` fails the plan, and the stage that owns the NS record does not run once
 `create_subdomain` is false.
+
+## 168. Tenants live on `<slug>.feohledger.com` on every deployment shape, so every provisioning path checks the slug
+
+**Decided:** 2026-09-15 · `deploy/env.example`, `deploy/README.md`, `deploy/tenants.caddy.example`, `docs/minimal-deployment.md`, `docs/production-deployment.md`, `docs/founder-runbooks/`, `infra/acm.tf`, `backend/app/services/tenant_provisioning.py`, `backend/scripts/create_tenant.py`
+
+The two deployment shapes disagreed about where a tenant lives. The Terraform certificate (§167)
+covers `feohledger.com` and `*.feohledger.com`, so the AWS path puts `acme` on `acme.feohledger.com`.
+The single-VM path — `deploy/env.example`, its Caddy host list and `docs/minimal-deployment.md` — put
+it one label deeper, on `acme.app.feohledger.com`, with the relying party, CORS domain and tenant URL
+template all on `app.feohledger.com`. Moving a pilot from the VM to AWS would have changed every
+tenant's URL, which is the move §167 says gets more expensive with every signup: passkeys are bound to
+their relying party, and customers register SSO callbacks under the host.
+
+Both shapes now use the apex. `FEOH_TENANT_URL_TEMPLATE` is `https://{slug}.feohledger.com`; the
+relying party and CORS domain are `feohledger.com`, with `https://*.feohledger.com` as the tenant
+origin; the marketing and signup surface is the apex itself (Caddy's `APP_DOMAIN` block, which
+`hostRouting.ts` classifies as the platform apex); and the API stays on `api.feohledger.com`. One
+certificate and one wildcard DNS record serve either shape, and the VM-to-AWS move changes no tenant
+URL.
+
+What it costs is that every first label under `feohledger.com` is now a candidate tenant slug, so a
+slug must never be able to claim an infrastructure host. `RESERVED_SLUGS` in `app/utils/slug.py`
+already holds `api`, `app`, `www`, `mail`, `docs`, `status` and the rest, and the email-intake host
+`ap` is out of reach because a slug needs at least three characters. But a reserved list protects
+hosts only if every path that creates a tenant checks it. Signup and partner provisioning called
+`validate_slug_format` before `provision_tenant`; the operator CLI, `scripts/create_tenant.py`, did
+not, so `create_tenant.py --slug api` would have provisioned a tenant whose URL is the API host.
+`provision_tenant` now validates the slug before any database work, so no caller can skip it, and the
+CLI turns the rejection into a plain error and exit code 2. `deploy/add-tenant.sh` keeps its own,
+looser pre-check; the backend is the authority, and the script stops under `set -euo pipefail` before
+it touches Caddy.
+
+Rejected: keeping `app.` for tenants. It leaves the apex free for a separate marketing site, but the
+SPA already serves marketing at the platform apex, and it costs every tenant URL an extra label and
+every certificate an extra `*.app.` SAN, for a separation nothing uses.

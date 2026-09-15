@@ -25,6 +25,7 @@ from app.models.organization import Organization
 from app.models.user import Role, User, UserRole
 from app.services.billing.plan_catalog import ensure_plan_catalog, ensure_subscription
 from app.utils.passwords import hash_password
+from app.utils.slug import validate_slug_format
 
 logger = logging.getLogger(__name__)
 
@@ -32,9 +33,9 @@ logger = logging.getLogger(__name__)
 # value that has to be interpolated into CREATE/DROP DATABASE DDL. Guard the
 # sink with a strict allowlist: every legitimate name is "<prefix><slug>" where
 # the prefix is lowercase ASCII and the slug already passed utils.slug
-# (^[a-z][a-z0-9-]{2,29}$). This is defense-in-depth — the API callers validate
-# the slug, but scripts/create_tenant.py forwards --slug straight through, so
-# the guard lives at the DDL sink where it can never be bypassed. Capped at
+# (^[a-z][a-z0-9-]{2,29}$). This is defense-in-depth: provision_tenant validates
+# the slug before any DB work, whichever caller it came from, and this guard
+# stays at the DDL sink so no future path to it can bypass that. Capped at
 # Postgres's 63-char identifier limit.
 _SAFE_DB_NAME = re.compile(r"^[a-z][a-z0-9_-]{2,62}$")
 
@@ -278,7 +279,16 @@ async def provision_tenant(
     On success, the admin can log in immediately at the tenant subdomain
     and will be forced to change their password on first login (unless
     must_change_password is disabled for internal tenants).
+
+    Raises ``SlugError`` before any database work when ``slug`` fails
+    ``utils.slug.validate_slug_format``. The API callers validate first to
+    return a 422, but the check lives here so every caller gets it — the
+    ``scripts/create_tenant.py`` CLI (and ``deploy/add-tenant.sh`` behind it)
+    passes an operator-typed slug straight through, and with tenants on
+    ``<slug>.<platform domain>`` a reserved one such as ``api`` would claim an
+    infrastructure host.
     """
+    validate_slug_format(slug)
     db_name = f"{settings.tenant_db_prefix}{slug}"
 
     created_db = await _create_postgres_database(db_name)

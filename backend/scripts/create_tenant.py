@@ -27,6 +27,7 @@ if str(Path(__file__).resolve().parent.parent) not in sys.path:
 
 from app.database import control_engine
 from app.services.tenant_provisioning import organization_slug_exists, provision_tenant
+from app.utils.slug import SlugError
 
 
 async def main():
@@ -67,15 +68,23 @@ async def main():
         return
 
     print(f"Provisioning tenant: {args.name} (slug={args.slug})")
-    result = await provision_tenant(
-        company_name=args.name,
-        slug=args.slug,
-        admin_email=args.admin_email,
-        admin_name=admin_name,
-        admin_password=args.admin_password,
-        plan=args.plan,
-        must_change_password=args.force_password_change,
-    )
+    try:
+        result = await provision_tenant(
+            company_name=args.name,
+            slug=args.slug,
+            admin_email=args.admin_email,
+            admin_name=admin_name,
+            admin_password=args.admin_password,
+            plan=args.plan,
+            must_change_password=args.force_password_change,
+        )
+    except SlugError as exc:
+        # Rejected before any database work — nothing to roll back. Exit 2,
+        # argparse's own code for bad arguments, so wrappers such as
+        # deploy/add-tenant.sh stop before touching Caddy.
+        print(f"error: invalid slug '{args.slug}': {exc}", file=sys.stderr)
+        await control_engine.dispose()
+        raise SystemExit(2) from None
 
     print(f"\nTenant '{args.slug}' is ready!")
     print(f"  Database:    {result.db_name}")
