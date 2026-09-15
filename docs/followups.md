@@ -31,7 +31,7 @@ matching entry here carries the category, durable fix, and trigger. Keep the
 pair consistent — if an item leaves this file, its roadmap section either loses
 its `**Open:**` line or moves to the archive.
 
-Mirrored as GitHub issue [#321](https://github.com/Absence0760/project-account-payables/issues/321)
+Mirrored as GitHub issue [#321](https://github.com/Absence0760/feohledger/issues/321)
 for the tracker view. Keep the two reconciled when either moves.
 
 **Last reconciled:** 2026-09-14 (round 31) — five agents, each in its own git

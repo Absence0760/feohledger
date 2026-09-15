@@ -34,7 +34,7 @@ Full-stack accounts payable management app. SvelteKit frontend + FastAPI backend
 - **backend/** — FastAPI, Python 3.12+, SQLAlchemy 2 async, Alembic, PostgreSQL 16, Redis 7, MinIO (S3). Dev port `8000`.
 - **mobile/** — Flutter 3.41+, Dart 3.11+, iOS + Android. Material 3, ChangeNotifier stores.
 - **infra/** — Terraform for the FeohLedger AWS account (security substrate today). See `infra/README.md`.
-- **Local infra** — Docker Compose for Postgres/Redis/MinIO. GitHub Pages for frontend deploy.
+- **Local infra** — Docker Compose for Postgres/Redis/MinIO. The frontend deploys to S3 + CloudFront on a published release (`.github/workflows/aws-deploy.yml`).
 - **Secrets** — deployed secrets are sops-encrypted under the project's AWS KMS key (`alias/feohledger-sops`, in the FeohLedger account) and live in the **private** estate repo `Absence0760/infra-secrets`, under `feohledger/`. **This repo is PUBLIC: never commit a `*.sops` file here** — ciphertext in public history is permanent (the mistake meryl-green-designs made). `.gitignore` ignores them and CI's env-isolation guard fails on a tracked one; the old in-repo scaffold is gone (`docs/decisions.md` §165). Pattern + onboarding: `~/github/project-mgmt/docs/secrets-management.md`. See `backend/CLAUDE.md` → Secrets management for the local-dev flow.
 
 ## Commands
@@ -557,7 +557,7 @@ If you spot a candidate fix that fits one of those patterns: stop, surface the u
 
 - Don't add a test framework other than pytest (backend) or vitest (frontend).
 - Don't replace pnpm with npm/yarn.
-- Don't add SSR adapters to the frontend; it must stay static for GitHub Pages.
+- Don't add SSR adapters to the frontend; it must stay static — it ships as files in an S3 bucket behind CloudFront, with no server to render on.
 - Don't call secret-bearing services from the frontend — go through the backend.
 - Don't modify tenant DBs outside of Alembic migrations.
 - Don't add `dotenv` imports to modules reachable from Lambda entry points.

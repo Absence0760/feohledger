@@ -126,9 +126,10 @@ First deploy will fail until:
 The frontend is static (SvelteKit adapter-static) and goes to S3 +
 CloudFront. Two options:
 
-- **GitHub Pages** (cheapest, what the repo is set up for today).
-  Point your custom subdomain (e.g. `app.feohledger.com`) at Pages.
-  Fine for pre-revenue.
+- **Caddy on the pilot VM** (cheapest). It already serves the static
+  `frontend/build` alongside the backend — see `docs/minimal-deployment.md`.
+  Fine for pre-revenue, and it handles wildcard tenant subdomains, which
+  GitHub Pages cannot.
 - **S3 + CloudFront via Terraform** (production-appropriate). The
   Terraform already provisions the bucket + distribution; update the
   deploy workflow to `aws s3 sync ./build s3://<bucket>` instead of

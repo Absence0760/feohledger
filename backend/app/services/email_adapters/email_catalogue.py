@@ -155,7 +155,7 @@ _DE: dict[str, str] = {
     "chat.portal_link.greeting": "Hallo {name},",
     "chat.portal_link.body": "{org} hat eine neue Nachricht zu Rechnung {ref} gepostet.",
     "chat.portal_link.cta": "Konversation ansehen und antworten:",
-    "signup.verify.subject": "Bestätigen Sie Ihren Account-Payables-Arbeitsbereich",
+    "signup.verify.subject": "Bestätigen Sie Ihren FeohLedger-Arbeitsbereich",
     "signup.verify.greeting": "Hallo {name},",
     "signup.verify.body": (
         "Jemand (hoffentlich Sie) hat die Erstellung des Arbeitsbereichs '{slug}' "
@@ -166,7 +166,7 @@ _DE: dict[str, str] = {
         "Dieser Link läuft in 24 Stunden ab. Falls Sie dies nicht angefordert "
         "haben, können Sie diese E-Mail ignorieren."
     ),
-    "signup.welcome.subject": "Ihr Account-Payables-Arbeitsbereich '{slug}' ist bereit",
+    "signup.welcome.subject": "Ihr FeohLedger-Arbeitsbereich '{slug}' ist bereit",
     "signup.welcome.greeting": "Hallo {name},",
     "signup.welcome.body": "Ihr Arbeitsbereich ist aktiv.",
     "signup.welcome.url_label": "URL",

@@ -13,7 +13,7 @@ elsewhere in the codebase — e.g. `positive_pay._READ_ROLES` includes `cfo`,
 e2e `pan-reveal-pii.spec.ts` already pins that case; this test adds the
 role-matrix coverage across all four roles at the API layer.
 
-See https://github.com/Absence0760/project-account-payables/issues/278
+See https://github.com/Absence0760/feohledger/issues/278
 """
 
 from __future__ import annotations

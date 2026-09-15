@@ -251,8 +251,9 @@ jobs:
         run: pnpm install
 
       - name: Build
-        # Served from the bucket/CDN root on AWS, so no BASE_PATH (the Pages
-        # build in deploy.yml sets one because Pages serves under /<repo>).
+        # Served from the bucket/CDN root, so no BASE_PATH. (A GitHub Pages
+        # deploy.yml used to set one for /<repo>; it was removed in 2996908c
+        # when this release-gated AWS deploy replaced it.)
         env:
           PUBLIC_API_URL: ${{ vars.PUBLIC_API_URL }}
         run: pnpm build

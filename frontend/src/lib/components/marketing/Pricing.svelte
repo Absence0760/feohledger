@@ -26,7 +26,7 @@
 			priceAnnual: 0,
 			unit: 'on your infrastructure',
 			ctaLabel: 'View on GitHub',
-			ctaHref: 'https://github.com/jaredhoward/project-account-payables',
+			ctaHref: 'https://github.com/Absence0760/feohledger',
 			features: [
 				'Full source — backend, frontend, mobile',
 				'Unlimited invoices + seats',
@@ -83,7 +83,7 @@
 			priceAnnual: null,
 			unit: 'contact sales',
 			ctaLabel: 'Talk to us',
-			ctaHref: 'mailto:sales@betterap.example',
+			ctaHref: 'mailto:sales@feohledger.example',
 			features: [
 				'Everything in Pro',
 				'SSO (SAML + OIDC) with SCIM provisioning',
@@ -171,7 +171,7 @@
 	</div>
 
 	<div class="compare-note">
-		Need usage-based? Hitting 10k+ invoices a month? <a href="mailto:sales@betterap.example"
+		Need usage-based? Hitting 10k+ invoices a month? <a href="mailto:sales@feohledger.example"
 			>Ask about volume pricing</a
 		>.
 	</div>

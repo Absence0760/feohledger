@@ -5,8 +5,8 @@
 // locale rune + message lookup) lives in store.svelte.ts; the message
 // catalogues live in locales/.
 //
-// The frontend is statically prerendered (adapter-static, GitHub Pages —
-// no per-request SSR), so locale is negotiated client-side from
+// The frontend is statically prerendered (adapter-static, served from S3
+// behind CloudFront — no per-request SSR), so locale is negotiated client-side from
 // navigator.languages + a stored preference rather than from an
 // Accept-Language header on the server. The negotiation here is still
 // written to accept a full Accept-Language-style q-list so the same parser

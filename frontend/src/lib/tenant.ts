@@ -10,10 +10,11 @@
  * Configuration: `PUBLIC_PLATFORM_DOMAINS` — a comma-separated list of the
  * registrable domains the PLATFORM serves (e.g. `feohledger.com,localhost`).
  * Read through `$env/dynamic/public` rather than `$env/static/public` on
- * purpose: a `$env/static/public` import of an unset variable is a hard build
- * error, and every existing build (CI, `deploy/deploy.sh`, GitHub Pages) sets
- * only `PUBLIC_API_URL`. Unset therefore has to be legal, and it means
- * "replay the pre-change rule" — see `$lib/hostRouting.ts`.
+ * purpose: a `$env/static/public` import of an unset variable is a hard
+ * build error, and every existing build (CI, `deploy/deploy.sh`, the S3 +
+ * CloudFront release deploy) sets only `PUBLIC_API_URL`. Unset therefore has
+ * to be legal, and it means "replay the pre-change rule" — see
+ * `$lib/hostRouting.ts`.
  */
 import { PUBLIC_API_URL } from '$env/static/public';
 import { env as publicEnv } from '$env/dynamic/public';

@@ -1,8 +1,8 @@
 name: Web bundle budget
 
 # Hard ceilings on the shipped frontend bundle. The app is adapter-static and
-# served from GitHub Pages, so every kilobyte here is downloaded by every user
-# on a cold visit — and nothing else in CI notices weight. A PR that pushes
+# served from S3 behind CloudFront, so every kilobyte here is downloaded by
+# every user on a cold visit — and nothing else in CI notices weight. A PR that pushes
 # either metric over its budget fails, so a reviewer has to acknowledge the
 # increase instead of it landing unremarked.
 #
