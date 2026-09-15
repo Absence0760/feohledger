@@ -25,8 +25,10 @@ The app was designed local-first, and that carries straight into a cheap deploy:
 - `FEOH_EXTRACTION_MODE` / `FEOH_ERP_MODE` / `FEOH_AUDIT_MODE` default to `local` —
   in-process worker threads, **no SQS, no Lambda**.
 - Every provider integration defaults to its `mock` adapter; real providers
-  (Claude Vision, a payment rail, Lithic) are per-org config flips later, not
-  infrastructure.
+  (a payment rail, Lithic) are per-org config flips later, not infrastructure.
+  **Invoice extraction is the exception:** a deployed env never falls back to
+  its mock, which would invent fields on a real document, so it needs a
+  decision before first boot (§ 3).
 - All background sweeps are asyncio tasks inside the API process, each behind
   an `FEOH_*_ENABLED` flag.
 - The frontend is a static SPA; the only build-time input is `PUBLIC_API_URL`.
@@ -195,10 +197,11 @@ Beyond the committed defaults, the deployed env sets at minimum:
 | `FEOH_CORS_PRODUCTION_DOMAIN` | `feohledger.com` |
 | `FEOH_DEPLOYED_REGION` | the region this VM runs in (`us`/`eu`/`uk`/`ca`/`au`) — advisory only, but empty makes every tenant's data-residency `alignment` report `unknown` / `aligned: null` ("cannot attest") |
 | `FEOH_EMAIL_PROVIDER` / `FEOH_EMAIL_FROM` | `ses` / verified sender |
+| `FEOH_ANTHROPIC_API_KEY` **or** `FEOH_EXTRACTION_PROVIDER` | **Decide before first boot.** A real key (Claude Vision; Anthropic becomes a sub-processor of tenant invoices), `mock` (fabricated fields — a demo box only), or neither (invoices keyed in by hand; every upload's extraction fails and `deploy.sh` warns). Extraction is the one adapter that does not fall back to `mock` in a deployed env — `backend/docs/ai-extraction.md` § Platform provider precedence |
 | `FEOH_APPROVAL_SIGNING_KEY` + the other HMAC signing keys | real values (each key's presence is its feature's on-switch; leave unset = feature off) |
 
-Everything else keeps its safe default: mock adapters, `local` modes, sweeps
-off. Flip individual `FEOH_*_ENABLED` sweeps on once there's a reason
+Everything else keeps its safe default: mock adapters (extraction excepted,
+above), `local` modes, sweeps off. Flip individual `FEOH_*_ENABLED` sweeps on once there's a reason
 (`FEOH_PAYMENT_RECONCILE_ENABLED` and `FEOH_AUDIT_SHIPPING_ENABLED` are the two
 worth enabling first when real payments/compliance start).
 

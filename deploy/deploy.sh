@@ -79,6 +79,15 @@ esac
 [ "${#SECRET_KEY_VALUE}" -ge 32 ] ||
 	die "FEOH_SECRET_KEY is ${#SECRET_KEY_VALUE} chars; the app refuses to boot below 32 (openssl rand -hex 32)."
 
+# Invoice extraction is the one adapter with no mock fallback in a deployed env
+# (services/extraction.py resolve_platform_provider): with neither var set,
+# every upload's extraction fails. Keying invoices in by hand is a legitimate
+# choice, so this warns rather than refuses — deploy/env.example § Invoice
+# extraction.
+if ! grep -Eq '^(FEOH_ANTHROPIC_API_KEY|FEOH_EXTRACTION_PROVIDER)=.+' .env; then
+	echo "WARN: neither FEOH_ANTHROPIC_API_KEY nor FEOH_EXTRACTION_PROVIDER is set — every invoice upload's extraction will fail (manual entry only). See deploy/env.example § Invoice extraction." >&2
+fi
+
 # Per-VM tenant host list for Caddy (gitignored) — seed from the example so
 # the Caddyfile's `import tenants.caddy` always resolves.
 [ -f tenants.caddy ] || cp tenants.caddy.example tenants.caddy
