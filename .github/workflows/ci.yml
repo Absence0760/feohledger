@@ -355,6 +355,20 @@ jobs:
       - name: Run tests
         run: flutter test
 
+  brand-assets:
+    # The committed icon set (decisions.md §171). SVG masters must match
+    # assets/logo-render/gen_svg.py, every raster must exist at its platform's
+    # size, and nothing iOS or maskable may carry alpha (App Store Connect
+    # rejects it). Standard-library Python only: the renderer (Inkscape +
+    # ImageMagick) runs on a laptop via `pnpm gen:icons`, never here. It takes
+    # seconds, so it runs on every push rather than behind a paths filter.
+    name: Brand assets
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Icons match their masters
+        run: python3 assets/check_icons.py
+
   shellcheck:
     name: ShellCheck (deploy/)
     runs-on: ubuntu-latest
@@ -365,8 +379,9 @@ jobs:
       - name: Lint
         # deploy/*.sh are the production single-VM scripts (bootstrap,
         # deploy, backup, restore, add-tenant) — the ones where an unquoted
-        # variable eats a database.
-        run: shellcheck deploy/*.sh
+        # variable eats a database. assets/gen-icons.sh renders the icon set
+        # (decisions.md §171); the job name stays as branch protection knows it.
+        run: shellcheck deploy/*.sh assets/*.sh
 
   e2e:
     # Shard the Playwright suite across 14 parallel GitHub runners with
@@ -1130,6 +1145,7 @@ jobs:
       - backend-test
       - frontend
       - mobile
+      - brand-assets
       - shellcheck
       - e2e
       - service-e2e
