@@ -74,14 +74,15 @@ Or, if Claude Code is available: `/check` runs the relevant gates against the wo
 
 ### Guard workflows that only run in CI
 
-Three checks have no local equivalent in the list above, because each needs
-either a production build or the PR diff. You can still run them by hand:
+Four checks have no local equivalent in the list above, because each needs a
+production build, the PR diff, or a Mac. You can still run them by hand:
 
 | Guard | What it protects | Run locally |
 |---|---|---|
 | **Web bundle budget** (`web-bundle-budget.yml`) | The frontend is static and served from S3 behind CloudFront, so bundle weight is paid by every cold visit and nothing else in CI notices it. Fails on a total or per-chunk ceiling. | `cd frontend && PUBLIC_API_URL=http://localhost:8000 pnpm build`, then measure `build/**/*.{js,css}` gzipped |
 | **Compliance drift** (`compliance-drift.yml`) | A migration adding personal data without the matching DSAR-export / erasure / RoPA update. Nothing fails today — it is only wrong the day a data-subject right is exercised. **Advisory (`warn`) — never fails the build.** | `pnpm check:compliance-drift` (detector) / `pnpm test:compliance` (its tests) |
 | **Env isolation** (`env-isolation.yml`) | This repo is public and commits `*.env.development`. Asserts those files still point at the local stack, keep their placeholder secrets, and that no other env file is tracked. | Read the workflow — it is three self-contained shell steps |
+| **Mobile iOS build** (`ci.yml` job `mobile-ios-build`) | `flutter analyze` and `flutter test` never touch Xcode, and the only other iOS build is `mobile-release.yml`, which runs after a release is published. Compiles the app, asset catalogs (the AppIcon set) and storyboards on a macOS runner for any PR that touches `mobile/`, with no signing and no secrets. | On a Mac with Xcode: `cd mobile && flutter build ios --release --no-codesign`. There is no Linux equivalent. |
 
 Raising a bundle ceiling is a legitimate outcome; the rule is that you append a
 dated entry to the change log inside `web-bundle-budget.yml` saying what you

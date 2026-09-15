@@ -327,6 +327,9 @@ jobs:
       - name: Build
         env:
           PUBLIC_API_URL: http://localhost:8000
+          # Same shape as a deploy build: app.html's og:image is absolute only
+          # when this is set (docs/environment.md).
+          PUBLIC_SITE_URL: http://localhost:7777
         run: pnpm build
 
   mobile:
@@ -354,6 +357,63 @@ jobs:
 
       - name: Run tests
         run: flutter test
+
+  # The iOS half of the Mobile job above, which runs on Linux and never touches
+  # Xcode. Without this, the only iOS build is mobile-release.yml's, which runs
+  # once a release is published: after the merge, too late to block it. So an
+  # iOS change (the AppIcon set, the launch storyboard, a plugin bump) merged
+  # unproven. This runs that job's exact build on the same runner image, so a
+  # green PR means the release build compiles.
+  #
+  # `--release --no-codesign`, not a debug or `--simulator` build. None of the
+  # three needs signing, and all three compile the asset catalogs (actool) and
+  # storyboards (ibtool). Only release also runs the Dart AOT compile and icon
+  # tree-shaking, which is where release-only failures live, and it costs a
+  # minute or two more.
+  #
+  # No secrets, so a fork's PR builds the same way. Nothing in Runner.xcodeproj
+  # copies or reads GoogleService-Info.plist (its only script phases are
+  # Flutter's own xcode_backend.sh), and the app never calls
+  # Firebase.initializeApp; push_service.dart treats a missing config as a
+  # no-op. Do not add the file here: a build that passes only with it present
+  # stops proving what the release builds.
+  #
+  # Deliberately NOT done: signing, archiving an IPA, uploading an artifact,
+  # running a simulator, or pinning Xcode. The runner label and the build
+  # command must match mobile-release.yml's `mobile-ios` job; change both
+  # together. No Pods/SwiftPM cache: nothing committed (no Podfile.lock or
+  # Package.resolved) pins those resolutions to key one on. Gated on the mobile
+  # paths filter because a macOS build is the slowest thing a mobile PR runs.
+  mobile-ios-build:
+    name: Mobile iOS build
+    runs-on: macos-latest
+    needs: changes
+    if: needs.changes.outputs.mobile == 'true'
+    # An estimate, not a measured median (the job has not run yet). Flutter
+    # setup, Swift package and CocoaPods resolution (Firebase is large) and a
+    # release xcodebuild should take about 15 minutes. 45 gives about 3x
+    # headroom, the same margin as the backend shards. Re-derive it from this
+    # job's own median once it has one.
+    timeout-minutes: 45
+
+    defaults:
+      run:
+        working-directory: mobile
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.21.1
+        with:
+          channel: stable
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Build iOS (release, no codesign)
+        run: flutter build ios --release --no-codesign
 
   brand-assets:
     # The committed icon set (decisions.md §171). SVG masters must match
@@ -1149,6 +1209,7 @@ jobs:
       - backend-test
       - frontend
       - mobile
+      - mobile-ios-build
       - brand-assets
       - shellcheck
       - e2e
