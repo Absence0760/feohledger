@@ -188,6 +188,7 @@ Beyond the committed defaults, the deployed env sets at minimum:
 |---|---|
 | `FEOH_ENVIRONMENT` | `production` (arms hCaptcha enforcement on signup) |
 | `FEOH_SECRET_KEY` | `openssl rand -hex 32` |
+| `FEOH_HCAPTCHA_SECRET` / `FEOH_HCAPTCHA_SITEKEY` | **The secret is required whether or not you want signup** — the API refuses to boot in production with it empty, and `deploy.sh` refuses first. There is no signup off switch; to keep signup closed, set the secret and leave the sitekey empty: `/signup` renders, but every submit is refused with "Captcha is required." |
 | `POSTGRES_PASSWORD` | `openssl rand -hex 24` (compose derives `FEOH_DATABASE_URL` / `FEOH_REDIS_URL` from it — don't set those) |
 | `FEOH_S3_BUCKET` | invoice-files bucket; set `FEOH_S3_ENDPOINT_URL` / `FEOH_S3_ACCESS_KEY` / `FEOH_S3_SECRET_KEY` **empty** → real S3 via the instance-profile credential chain |
 | `FEOH_MFA_ENABLED` / `FEOH_HSTS_ENABLED` | `true` / `true` |
@@ -206,9 +207,9 @@ above), `local` modes, sweeps off. Flip individual `FEOH_*_ENABLED` sweeps on on
 worth enabling first when real payments/compliance start).
 
 SES note: a fresh SES account is sandboxed (verified recipients only). Either
-request production access, or skip self-service signup at first and provision
-tenants by CLI (`python scripts/create_tenant.py …`), leaving email on
-`console` until SES clears.
+request production access, or keep self-service signup closed at first (empty
+`FEOH_HCAPTCHA_SITEKEY`, above) and provision tenants with
+`deploy/add-tenant.sh`, leaving email on `console` until SES clears.
 
 ### 4. First boot + deploys (`deploy/deploy.sh` — built)
 
