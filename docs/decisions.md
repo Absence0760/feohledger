@@ -6774,3 +6774,52 @@ monogram of the tenant's own name on its own accent. The static assets
 (favicon, touch icon, manifest, launcher icons) stay platform-branded, exactly
 as the "AP" favicon already was; a per-tenant favicon would need a runtime
 `<link>` swap, which nothing has asked for.
+
+**The iOS build is proven on the pull request, not at release.** CI's
+`mobile-ios-build` job runs `mobile-release.yml`'s exact
+`flutter build ios --release --no-codesign` on a macOS runner whenever `mobile/`
+changes, because the Linux Mobile job never runs Xcode's asset-catalog or
+storyboard compilers and the release workflow only runs after a merge. It needs
+no signing and no `GoogleService-Info.plist` (nothing in the build reads one), so
+a fork's pull request proves the same build. Writing it surfaced a build that
+could never have succeeded: the locked `firebase_core` and `firebase_messaging`
+require iOS 15.0 while the Xcode project targeted 13.0, and Swift Package Manager
+and CocoaPods both refuse that. The deployment target is now 15.0. Pinning
+Firebase back was rejected as a workaround that only postpones the same raise;
+it drops iOS 13 and 14, both from 2019–2020.
+
+**The native launch screens copy the first Flutter frame rather than design
+their own.** The 64dp mark sits 26dp above centre, where the `SplashScreen`
+column places it, on `#F8F9FF`, the Material 3 surface of the blue seed theme,
+so the hand-off from the OS to Flutter neither moves nor recolours anything.
+They stay light in dark mode: the app has no `darkTheme`, so a dark launch screen
+would flash before a light first frame. `values-night/styles.xml` is kept but
+empty, so `flutter create .` cannot restore the template's black theme. On
+Android 12+ only the system splash background is matched and the launcher icon
+is left in place, because the platform scales and masks that icon itself and a
+64dp mark cannot be pinned to Flutter's size and position there. Because the
+colour and the offset are copies, `test/screens/launch_screen_parity_test.dart`
+reads the native files and fails when they drift from the theme or the splash
+layout.
+
+**The link-preview card is template markup, not `<svelte:head>`.** Unfurl
+crawlers run no JavaScript and this static SPA serves one `index.html`
+everywhere, so the Open Graph and Twitter tags live in `app.html`, with the image
+rendered by the same generator as the icons. The image URL must be absolute, so
+its origin comes from `PUBLIC_SITE_URL`, which each deploy derives from a site
+origin it already knows (`APP_URL`, `APP_DOMAIN`) and refuses when empty. There
+is deliberately no hardcoded `https://feohledger.com` fallback, which would
+quietly point a QA or self-hosted build's card at the platform; a bare local build
+renders a root-relative path instead.
+
+**Generated PDFs and outbound emails take the same fork on the backend,**
+through `BrandContext.mark` in `backend/app/services/branding.py`: the tenant
+logo, else the platform mark while the product keeps the platform's name, else
+the product name alone (a renamed tenant gets plain text where the web app draws
+a monogram). PDFs embed a bundled `backend/app/assets/brand/logo-mark.png`, read
+once and never fetched, beside the product name, since the glyph carries no name.
+Emails cannot carry a bundled file inline, so the header references
+`/email-mark.png` on `FEOH_PUBLIC_URL` as a remote image with empty alt text,
+emitted only for an absolute http(s) origin. Email headers previously carried no
+image at all, not even a configured tenant logo; they now show the tenant logo
+too, so an unbranded tenant's email is never richer than a branded one's.
