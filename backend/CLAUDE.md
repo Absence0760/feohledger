@@ -852,7 +852,7 @@ The welcome email contains the tenant URL (`FEOH_TENANT_URL_TEMPLATE`, e.g. `htt
 - `services/email_adapters/` — `console` (local dev, logs to stdout) and `ses` (AWS SES) via `FEOH_EMAIL_PROVIDER`. Same registry pattern as extraction/ERP adapters.
 - `services/tenant_provisioning.py` — reusable async `provision_tenant()` used by both the CLI and the API.
 - `services/rate_limit.py` — Redis sliding-window limiter, keyed on `(endpoint, subject)` where `subject` defaults to client IP but can be an explicit value (e.g. email). Signup uses three limits: per-IP `/start` + `/complete` (`FEOH_SIGNUP_RATE_LIMIT_PER_HOUR`, default 5), per-email `/start` (`FEOH_SIGNUP_EMAIL_RATE_LIMIT_PER_HOUR`, default 3, anti email-bombing), and per-IP `/slug-check` (`FEOH_SLUG_CHECK_RATE_LIMIT_PER_HOUR`, default 120, anti-enumeration).
-- `utils/slug.py` — regex + reserved-word blocklist + DB uniqueness check.
+- `utils/slug.py` — regex + reserved-word blocklist + DB uniqueness check. `provision_tenant` runs `validate_slug_format` itself, before any DB work, so every provisioning path gets it — including `scripts/create_tenant.py` / `deploy/add-tenant.sh`, which pass an operator-typed slug straight through.
 - `utils/hcaptcha.py` — server-side siteverify. Skips when `FEOH_HCAPTCHA_SECRET` is empty (local dev).
 - `utils/passwords.py` — `generate_temp_password()` + `validate_password_complexity()` (min 12 chars, upper/lower/digit).
 
