@@ -6470,3 +6470,36 @@ destination's encryption, not the key's grants. Rejected too: shipping the logs 
 instead, which adds an ingestion bill and a second log store for records whose only job is to exist
 when an auditor asks. Dropping access logging was never an option: SOC 2 CC7.2 and AWS-0089 both
 expect it.
+
+## 167. The platform lives on feohledger.com — bought by hand, kept by Terraform
+
+**Decided:** 2026-09-15 · `infra/variables.tf`, `infra/domain.tf`, `infra/acm.tf`, `infra/tests/guardrails.tftest.hcl`, `docs/founder-runbooks/production-deployment.md`
+
+The account bootstrap gave FeohLedger a delegated `feohledger.jaredhoward.com` zone, and `infra/`
+issued its certificate there. That suits an internal tool and not this one, because the platform
+domain is not cosmetic here. Tenants live on `<slug>.<platform domain>`; the platform domain is
+derived from `FEOH_TENANT_URL_TEMPLATE` (§91); the passkeys users register are bound to their relying
+party's domain (§87); and customers register SSO redirect URIs under it at their own IdPs. Each of
+those breaks, or makes every customer redo something, when the domain changes after tenants exist.
+Nothing is deployed yet, so the move costs nothing today and more with every signup.
+
+The domain is bought by hand, not through `aws_route53domains_domain`. That resource needs the
+registrant's name, address and phone number as configuration — which would have to live in this
+public repo, or be threaded in from a private one, for a one-time purchase — and it owns the
+registration, so a destroy, or a refactor that renames the resource, can deregister the product's
+domain. Terraform owns the part that must not drift once the domain exists:
+`aws_route53domains_registered_domain` adopts the registration, keeps it auto-renewing,
+transfer-locked and private in WHOIS, and points its name servers at the zone the certificate
+validates in. Destroying that resource removes it from state and leaves the registration alone.
+
+`domain_name` now accepts only a name directly under a TLD, because a registration exists only for the
+apex; pointing it back at the estate subdomain fails at plan instead of at the Route 53 Domains API. A
+nested platform domain (`app.feohledger.com`, the shape `docs/minimal-deployment.md` uses on its
+single VM) would need that guard relaxed and the zone lookup split from the registered domain; nothing
+on AWS uses one today.
+
+The delegated zone and its NS record in `jaredhoward.com` are retired as an operator step, recorded in
+`docs/followups.md`. The delegation has to go before the zone, or the name is left delegated to name
+servers someone else can try to claim, and the estate bootstrap cannot express that order: the zone's
+`prevent_destroy` fails the plan, and the stage that owns the NS record does not run once
+`create_subdomain` is false.

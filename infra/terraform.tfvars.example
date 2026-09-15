@@ -35,9 +35,9 @@ backups_bucket_name       = "feohledger-backups-prod-REPLACE"
 # backup_retention_days = 90
 
 # --- Platform domain ------------------------------------------------------------
-# The Route 53 zone the ACM certificate is issued and DNS-validated in. Defaults
-# to the zone the account bootstrap delegated to this account.
-# domain_name = "feohledger.jaredhoward.com"
+# The registered apex the ACM certificate covers and domain.tf manages. Register
+# it through Route 53 in this account first — that creates its hosted zone.
+# domain_name = "feohledger.com"
 
 # --- Cost alerts ----------------------------------------------------------------
 # Every budget notification (50 % / 100 % actual, 100 % forecast) goes to these
