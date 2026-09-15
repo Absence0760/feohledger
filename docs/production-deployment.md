@@ -250,6 +250,12 @@ task), `iam:PassRole` for the task + execution roles, `lambda:UpdateFunctionCode
 on the worker functions, S3 sync, and CloudFront invalidation. Store its ARN as
 the `AWS_DEPLOY_ROLE_ARN` **environment secret** on `production`.
 
+**Status:** the role exists. The estate account bootstrap created
+`feohledger-deploy` in the FeohLedger AWS account with exactly that trust policy
+(this repo + the `production` environment) and **no permissions**. Its
+least-privilege policy lands with the workload stack it has to name — tracked in
+`docs/followups.md`.
+
 ### Required configuration
 
 | Name | Kind | Scope | Purpose |
@@ -283,7 +289,8 @@ a release won't turn it red before the infrastructure exists. To go live:
 2. Provision each worker function with its `ImageConfig` — entrypoint
    `python -m awslambdaric`, command its handler (see *Lambda workers* above).
    The RIC is already bundled in the image, so nothing else is needed here.
-3. Create the OIDC deploy role and store `AWS_DEPLOY_ROLE_ARN`.
+3. Attach the deploy role's least-privilege policy (the role itself already
+   exists — see *Credentials*) and store `AWS_DEPLOY_ROLE_ARN`.
 4. Set the environment variables above on the `production` environment and the
    protection rules (reviewer / wait timer).
 5. Set the repository variable `AWS_DEPLOY_ENABLED=true`.
