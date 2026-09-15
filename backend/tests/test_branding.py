@@ -316,7 +316,7 @@ def test_brand_context_falls_back_on_malformed_fields():
 
 
 # ---------------------------------------------------------------------------
-# BrandContext.mark — the white-label fallback fork (decisions §171)
+# BrandContext.mark — the white-label fallback fork (decisions §172)
 # ---------------------------------------------------------------------------
 
 

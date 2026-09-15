@@ -76,7 +76,7 @@
 		"//-- build --": "Production builds. Frontend is adapter-static (S3 + CloudFront) — no SSR.",
 		"build:frontend": "cd frontend && pnpm build",
 
-		"//-- gen --": "Derived, committed source. The message catalogues need the backend venv; gen:icons re-renders every web + mobile icon from assets/logo-render/gen_svg.py and needs Inkscape + ImageMagick 7 (docs/decisions.md §171). gen:einvoice-messages rewrites frontend/src/lib/api/einvoiceRuleMessages.generated.ts from the backend's e-invoice rule set; gen:warning-messages rewrites frontend/src/lib/api/invoiceWarningMessages.generated.ts from app/services/invoice_warning_catalog.py. check:einvoice-messages / check:warning-messages are their drift guards and both run in CI's Backend lint job; check:icons is gen:icons' guard (stdlib python3 only) and runs in CI's Brand assets job.",
+		"//-- gen --": "Derived, committed source. The message catalogues need the backend venv; gen:icons re-renders every web + mobile icon from assets/logo-render/gen_svg.py and needs Inkscape + ImageMagick 7 (docs/decisions.md §172). gen:einvoice-messages rewrites frontend/src/lib/api/einvoiceRuleMessages.generated.ts from the backend's e-invoice rule set; gen:warning-messages rewrites frontend/src/lib/api/invoiceWarningMessages.generated.ts from app/services/invoice_warning_catalog.py. check:einvoice-messages / check:warning-messages are their drift guards and both run in CI's Backend lint job; check:icons is gen:icons' guard (stdlib python3 only) and runs in CI's Brand assets job.",
 		"gen:einvoice-messages": "cd backend && python scripts/gen_einvoice_rule_messages.py",
 		"gen:warning-messages": "cd backend && python scripts/gen_invoice_warning_messages.py",
 		"gen:icons": "bash assets/gen-icons.sh",

@@ -416,7 +416,7 @@ jobs:
         run: flutter build ios --release --no-codesign
 
   brand-assets:
-    # The committed icon set (decisions.md §171). SVG masters must match
+    # The committed icon set (decisions.md §172). SVG masters must match
     # assets/logo-render/gen_svg.py, every raster must exist at its platform's
     # size, and nothing iOS or maskable may carry alpha (App Store Connect
     # rejects it). Standard-library Python only: the renderer (Inkscape +
@@ -444,7 +444,7 @@ jobs:
         # deploy/*.sh are the production single-VM scripts (bootstrap,
         # deploy, backup, restore, add-tenant) — the ones where an unquoted
         # variable eats a database. assets/gen-icons.sh renders the icon set
-        # (decisions.md §171); the job name stays as branch protection knows it.
+        # (decisions.md §172); the job name stays as branch protection knows it.
         run: shellcheck deploy/*.sh assets/*.sh
 
   e2e:

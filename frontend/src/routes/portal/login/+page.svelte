@@ -157,7 +157,7 @@
 				<img class="brand-logo" src={portalBrand.logoUrl} alt={portalBrand.productName} />
 			{:else if portalBrand.mark.kind === 'platform'}
 				<!-- Unbranded tenant: the platform's mark beside the platform's name. A
-				     tenant that renamed the product without a logo gets neither (§171). -->
+				     tenant that renamed the product without a logo gets neither (§172). -->
 				<BrandMark size={36} />
 			{/if}
 			<h1>{portalBrand.productName}</h1>

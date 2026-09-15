@@ -66,7 +66,7 @@
 				<BrandMark size={24} label={collapsed ? brand.productName : ''} />
 			{:else}
 				<!-- Renamed without a logo: their initial, never FeohLedger's mark beside
-				     someone else's product name (docs/decisions.md §171). -->
+				     someone else's product name (docs/decisions.md §172). -->
 				<span
 					class="logo-monogram"
 					role={collapsed ? 'img' : undefined}

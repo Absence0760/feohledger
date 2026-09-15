@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Verify the committed brand icons without Inkscape or ImageMagick.
 
-CI's guard for assets/gen-icons.sh (docs/decisions.md §171). It fails when:
+CI's guard for assets/gen-icons.sh (docs/decisions.md §172). It fails when:
   - an SVG master or web SVG copy differs from what logo-render/gen_svg.py
     produces now, i.e. the geometry, the palette or a copy was edited by hand;
   - a raster target (icons, launch images, the social card, the email and PDF

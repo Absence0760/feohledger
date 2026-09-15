@@ -2,7 +2,7 @@
 """Generate the FeohLedger brand mark: the shipped masters and the exploration.
 
 The mark is feoh (ᚠ), the first rune of the Old English rune-row and the root
-of "fee", written as a split Exchequer tally stick (docs/decisions.md §171).
+of "fee", written as a split Exchequer tally stick (docs/decisions.md §172).
 Every concept from the exploration is kept here as geometry so the choice can
 be revisited without re-deriving it; CHOSEN names the one that ships.
 

@@ -3,7 +3,7 @@ import { expect, NO_TENANT_BASE, test } from '../fixtures/helpers';
 
 /**
  * The FeohLedger mark in the app chrome, and its white-label fork
- * (docs/decisions.md §171).
+ * (docs/decisions.md §172).
  *
  * The fallback used to be the letters "AP", which named nobody. The FeohLedger
  * mark does name somebody, so `brandMark` shows it only while the tenant's

@@ -3,7 +3,7 @@
 
 	/**
 	 * The FeohLedger mark: feoh (ᚠ) written as a split tally stick on its navy
-	 * tile (docs/decisions.md §171). Served from `static/logo-mark.svg`, which
+	 * tile (docs/decisions.md §172). Served from `static/logo-mark.svg`, which
 	 * `assets/gen-icons.sh` writes from the generator; never edit it by hand.
 	 *
 	 * Decorative by default (`alt=""`). Beside the product name the name carries

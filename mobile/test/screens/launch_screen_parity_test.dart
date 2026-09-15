@@ -1,5 +1,5 @@
 // The native launch screens copy the first Flutter frame (docs/decisions.md
-// §171): the Android res and the iOS storyboard duplicate the theme's scaffold
+// §172): the Android res and the iOS storyboard duplicate the theme's scaffold
 // background and the brand mark's lift above centre, so the hand-off from the OS
 // to Flutter neither moves nor recolours anything. Copies drift silently, so
 // these read the native files and compare them with the real theme and the real
