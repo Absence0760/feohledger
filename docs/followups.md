@@ -2098,6 +2098,28 @@ durable fix stated in one sentence has usually not been tried.
       **Trigger:** the next MFA/step-up slice, or any decision to enable
       `sso_only` for a real tenant.
 
+### Surfaced by wiring the FeohLedger AWS account (2026-09-14)
+
+- [ ] **(c) The GitHub deploy role exists but can do nothing.** The estate
+      account bootstrap created `feohledger-deploy` in the FeohLedger account,
+      trusted only from this repo's `production` environment, and attached no
+      policy — on purpose. `aws-deploy.yml` needs ECR push, ECS
+      register/update + `run-task`/`describe-tasks`, `iam:PassRole` on the task
+      and execution roles, `lambda:UpdateFunctionCode`, S3 sync and CloudFront
+      invalidation (`docs/production-deployment.md` § Credentials), and every
+      one of those targets a resource `infra/` does not define yet. A policy
+      written today would either be `*`-wide or name ARNs that do not exist, so
+      nothing was written. **Durable fix:** an `aws_iam_role_policy` on the
+      bootstrap role — looked up with `data "aws_iam_role"`, never managed from
+      here — in the same change that adds the ECR repository, ECS service,
+      frontend bucket + distribution and worker Lambdas, scoped to exactly those
+      ARNs. That change also reads its first real secret (the RDS master
+      password) through the `carlpett/sops` data source `infra/README.md`
+      § Secrets sketches, likewise unwired until something needs it.
+      `AWS_DEPLOY_ENABLED` stays unset until both land. **Trigger:** the
+      workload-stack build-out — step 1 of `docs/production-deployment.md`
+      § Arming the AWS pipeline.
+
 ## (a) Blocked on external credentials, accounts, or hardware
 
 None of these are startable from the editor. They are listed so they don't read

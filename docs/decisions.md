@@ -6409,3 +6409,32 @@ statement it was cleaning up after. `tests/test_password_hash_upgrade.py` provok
 real (an over-long digest hitting `hashed_password`'s own `VARCHAR(255)`; a second session changing
 the row mid-hash) rather than mocking them, which is the only reason the expired-instance trap was
 found before a deployment rather than after one.
+
+## 165. The in-repo sops scaffold is deleted, not left dormant behind a warning
+
+**Decided:** 2026-09-14 · `.sops.yaml` + `bin/sops-init.sh` (removed), `.gitignore`, `.github/workflows/env-isolation.yml`, `backend/CLAUDE.md`, `infra/README.md`
+
+§12 moved production secrets to the private `infra-secrets` repo but left the older template
+generation's scaffold standing: a root `.sops.yaml` with placeholder ARNs, `bin/sops-init.sh`,
+`.gitignore` negations that re-included `.env.sops` and `*.tfvars.sops`, and a dozen docs telling an
+operator to run the script and commit what it produced. The only thing between that scaffold and
+ciphertext in public history was one sentence in the root `CLAUDE.md`.
+
+That sentence stopped being enough the day the FeohLedger AWS account was bootstrapped. Until then
+the script could not have succeeded — there was no account to create `alias/feohledger-sops` in.
+Now the alias exists and resolves, so the script would find it, write its ARN, seed
+`backend/.env.sops` and `infra/terraform.tfvars.sops`, and print the `git add` for both.
+
+So the scaffold goes, and the rule gets an enforcement instead of a warning. `.gitignore` ignores
+`*.sops` and `*.sops.yaml` rather than re-including them, and `env-isolation.yml` fails on any
+tracked sops payload, any `.env.sops`, and an in-repo `.sops.yaml` — the creation rule belongs to the
+repo that holds the ciphertext. Every doc now describes the one real path: `sops
+feohledger/prod.sops.yaml` from the `infra-secrets` clone.
+
+Rejected: repointing the script at `infra-secrets`, because that repo already ships its own
+`bin/sops-init.sh --project <slug>` and `.sops.yaml` rule, and two bootstraps for one key is how an
+operator ends up with a second key in the wrong region (the estate script defaults to
+`ap-southeast-2`). Rejected too: wiring the `carlpett/sops` provider into `infra/` now. Nothing it
+would read exists yet — `prod.sops.yaml` is created with the first real secret — and a `sops_file`
+data source on a missing file fails every plan. `infra/README.md` § Secrets carries the snippet for
+when it is needed.

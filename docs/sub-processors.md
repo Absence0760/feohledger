@@ -42,9 +42,9 @@ local in-process default. With the shipped defaults:
 A provider only becomes an **active sub-processor** when an operator (or an
 individual tenant, via `Organization.settings`) explicitly configures it with a
 live credential. The platform refuses to silently activate a real provider:
-secrets live only in `*.sops` files (AWS KMS-encrypted) or deployed env, and
-adapters with no key **fail closed** to their local default rather than calling
-out.
+secrets live only in sops-encrypted files in the private `infra-secrets` repo
+(AWS KMS) or the deployed environment, and adapters with no key **fail closed**
+to their local default rather than calling out.
 
 The **"Active when configured"** column below makes this explicit. A row marked
 "Configured only" is *latent* — present in the codebase, dormant until someone
