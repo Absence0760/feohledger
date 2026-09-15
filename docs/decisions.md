@@ -6462,8 +6462,8 @@ them and a real plan accepts the broken shape without complaint.
 
 The exception is narrow on purpose. The sink holds signal-of-access, not the audit trail — that is
 the Compliance-locked audit-logs bucket, still under the app key — and SSE-S3 still encrypts every
-log object at rest. Trivy's customer-managed-key rule (AWS-0132) is suppressed inline on that one
-bucket, beside the existing AWS-0089 suppression, with the reason written above both.
+log object at rest. It needs no Trivy suppression: the customer-managed-key rule (AWS-0132) passes
+on the SSE-S3 sink under both the version CI pins (0.70.0) and the current release.
 
 Rejected: keeping SSE-KMS and widening the key policy further, because the problem is the
 destination's encryption, not the key's grants. Rejected too: shipping the logs to CloudWatch Logs

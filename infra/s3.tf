@@ -1,7 +1,8 @@
 # S3 buckets used by the backend.
 #
-# Every bucket defined in this module is configured with the four SOC 2
-# baseline controls (docs/soc2-readiness.md § Encryption + Backup/Recovery):
+# The buckets defined in this module carry the SOC 2 baseline controls
+# (docs/soc2-readiness.md § Encryption + Backup/Recovery), with the exceptions
+# noted against each:
 #
 #   1. Server-side encryption (SSE-KMS, customer-managed key from kms.tf) —
 #      except the access-logs sink, which S3 log delivery can only write
@@ -9,7 +10,9 @@
 #   2. Versioning enabled (required for Object Lock, also gives us a safety
 #      net against accidental overwrites / deletes)
 #   3. Public access blocked at the bucket level
-#   4. Object Lock enabled with a default retention rule
+#   4. Object Lock with a default retention rule — on the invoice-files and
+#      audit-logs buckets only: the backups bucket's lifecycle rule is its
+#      retention policy, and S3 refuses Object Lock on a log destination
 #
 # IMPORTANT: `object_lock_enabled` on an `aws_s3_bucket` is immutable — once
 # the bucket exists, you cannot turn Object Lock on. Migration path for
@@ -302,11 +305,8 @@ resource "aws_s3_bucket_policy" "audit_logs_tls" {
 # log-write loop AWS rejects at apply time. The upstream Trivy rule
 # has no exception for "logging-target" buckets, so we suppress it
 # inline rather than per-resource. Trivy parses `#trivy:ignore:<id>`
-# (no space after `#`, on its own line above the resource). AWS-0132
-# ("encrypt with a customer-managed key") is suppressed for the reason in the
-# block above: S3 log delivery cannot write under SSE-KMS.
+# (no space after `#`, on its own line above the resource).
 #trivy:ignore:AWS-0089
-#trivy:ignore:AWS-0132
 resource "aws_s3_bucket" "access_logs" {
   bucket = var.access_logs_bucket_name
 

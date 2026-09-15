@@ -44,6 +44,33 @@ override_resource {
   }
 }
 
+# Give the source buckets known ARNs at plan time, so the access-log delivery
+# policy's SourceArn condition can be compared exactly instead of staying
+# unknown.
+override_resource {
+  target          = aws_s3_bucket.invoice_files
+  override_during = plan
+  values = {
+    arn = "arn:aws:s3:::feohledger-invoices-test"
+  }
+}
+
+override_resource {
+  target          = aws_s3_bucket.audit_logs
+  override_during = plan
+  values = {
+    arn = "arn:aws:s3:::feohledger-audit-logs-test"
+  }
+}
+
+override_resource {
+  target          = aws_s3_bucket.backups
+  override_during = plan
+  values = {
+    arn = "arn:aws:s3:::feohledger-backups-test"
+  }
+}
+
 variables {
   invoice_files_bucket_name = "feohledger-invoices-test"
   audit_logs_bucket_name    = "feohledger-audit-logs-test"
@@ -160,6 +187,20 @@ run "access_log_sink_accepts_s3_log_delivery" {
       contains([for c in s.condition : c.variable], "aws:SourceAccount")
     ])
     error_message = "The delivery grant must be pinned to this account, or another account's bucket could log into this one."
+  }
+
+  assert {
+    condition = alltrue([
+      for s in data.aws_iam_policy_document.access_logs_delivery.statement :
+      toset(flatten([
+        for c in s.condition : tolist(c.values) if c.test == "ArnLike" && c.variable == "aws:SourceArn"
+        ])) == toset([
+        aws_s3_bucket.invoice_files.arn,
+        aws_s3_bucket.audit_logs.arn,
+        aws_s3_bucket.backups.arn,
+      ])
+    ])
+    error_message = "The delivery grant must name exactly the three source buckets, or any bucket in the account could log into the sink."
   }
 }
 
