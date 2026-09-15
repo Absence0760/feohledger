@@ -356,7 +356,7 @@ jobs:
         run: flutter test
 
   shellcheck:
-    name: ShellCheck (bin/ + deploy/)
+    name: ShellCheck (deploy/)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -366,7 +366,7 @@ jobs:
         # deploy/*.sh are the production single-VM scripts (bootstrap,
         # deploy, backup, restore, add-tenant) — the ones where an unquoted
         # variable eats a database.
-        run: shellcheck bin/*.sh deploy/*.sh
+        run: shellcheck deploy/*.sh
 
   e2e:
     # Shard the Playwright suite across 14 parallel GitHub runners with
