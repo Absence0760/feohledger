@@ -19,6 +19,7 @@ matches what this script produces:
   assets/icon-background.svg  Android adaptive background
   assets/icon-monochrome.svg  Android 13+ themed icon
   assets/icon-notification.svg  Android notification small icon (white silhouette)
+  assets/og-image.svg         1200x630 link-preview card (og:image)
   frontend/static/logo-mark.svg, frontend/static/favicon.svg  (copies)
 
 Exploration output is gitignored: assets/logo-render/svg/<concept>_<palette>.svg
@@ -258,6 +259,40 @@ def notification_svg(name, px=1024, uid="n"):
     return _svg(px, _glyph(name, SILHOUETTE, uid, scale))
 
 
+OG_WIDTH, OG_HEIGHT = 1200, 630
+OG_TEXT = "#F4EFE3"
+OG_MUTED = "#B4C0DA"
+OG_QUIET = "#8795B6"
+# Noto Sans is Fedora's default sans; fontconfig substitutes if it is missing,
+# so the card still renders, just not byte-identically.
+OG_FONT = "'Noto Sans', 'Liberation Sans', Arial, sans-serif"
+
+
+def og_card_svg(name, pal, uid="og"):
+    """The 1200x630 social preview card: the glyph large on the brand ground,
+    the wordmark and the product line beside it."""
+    glyph = _glyph(name, pal, uid, 0.95)
+    return (
+        f'<svg xmlns="http://www.w3.org/2000/svg" width="{OG_WIDTH}" height="{OG_HEIGHT}" '
+        f'viewBox="0 0 {OG_WIDTH} {OG_HEIGHT}">\n'
+        f'<defs>\n<linearGradient id="bg-{uid}" x1="0" y1="0" x2="{OG_WIDTH}" y2="{OG_HEIGHT}" '
+        f'gradientUnits="userSpaceOnUse">\n'
+        f'  <stop offset="0" stop-color="{pal["bg1"]}"/>\n'
+        f'  <stop offset="1" stop-color="{pal["bg2"]}"/>\n'
+        f'</linearGradient>\n</defs>\n'
+        f'<rect width="{OG_WIDTH}" height="{OG_HEIGHT}" fill="url(#bg-{uid})"/>\n'
+        f'<svg x="70" y="95" width="440" height="440" viewBox="0 0 100 100">\n{glyph}</svg>\n'
+        f'<text x="560" y="292" font-family="{OG_FONT}" font-size="96" font-weight="700" '
+        f'letter-spacing="-1" fill="{OG_TEXT}">FeohLedger</text>\n'
+        f'<rect x="564" y="324" width="112" height="6" fill="{pal["fg"]}"/>\n'
+        f'<text x="562" y="402" font-family="{OG_FONT}" font-size="40" '
+        f'fill="{OG_MUTED}">Accounts payable, automated.</text>\n'
+        f'<text x="562" y="454" font-family="{OG_FONT}" font-size="28" '
+        f'fill="{OG_QUIET}">Invoice to payment, every bill matched.</text>\n'
+        f'</svg>\n'
+    )
+
+
 def masters():
     """Relative path -> content for every committed master."""
     name, pname = CHOSEN
@@ -273,6 +308,7 @@ def masters():
         "assets/icon-background.svg": background_svg(pal),
         "assets/icon-monochrome.svg": foreground_svg(name, MONOCHROME, uid="mono"),
         "assets/icon-notification.svg": notification_svg(name, uid="note"),
+        "assets/og-image.svg": og_card_svg(name, pal),
         "frontend/static/logo-mark.svg": mark,
         "frontend/static/favicon.svg": mark,
     }

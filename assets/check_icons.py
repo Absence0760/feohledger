@@ -4,7 +4,8 @@
 CI's guard for assets/gen-icons.sh (docs/decisions.md §171). It fails when:
   - an SVG master or web SVG copy differs from what logo-render/gen_svg.py
     produces now, i.e. the geometry, the palette or a copy was edited by hand;
-  - a raster target is missing or not the pixel size its platform expects;
+  - a raster target (icons, launch images, the social card, the email and PDF
+    marks) is missing or not the pixel size its platform expects;
   - an icon that must be opaque carries alpha (App Store Connect rejects an iOS
     icon with any alpha channel, an indexed palette's tRNS chunk included);
   - the Android notification icon has no alpha (Android draws a status-bar icon
@@ -35,6 +36,7 @@ ANDROID_MAIN = "mobile/android/app/src/main"
 ANDROID_RES = f"{ANDROID_MAIN}/res"
 DENSITY = {"mdpi": 1.0, "hdpi": 1.5, "xhdpi": 2.0, "xxhdpi": 3.0, "xxxhdpi": 4.0}
 IOS_SET = "mobile/ios/Runner/Assets.xcassets/AppIcon.appiconset"
+LAUNCH_SET = "mobile/ios/Runner/Assets.xcassets/LaunchImage.imageset"
 WEB = "frontend/static"
 
 # PNG colour types that cannot carry alpha, provided there is no tRNS chunk.
@@ -100,12 +102,18 @@ def ios_targets():
 
 
 def raster_targets():
-    """(relative path, side in px, alpha rule) for every committed PNG."""
+    """(relative path, px side or (width, height), alpha rule) for every committed PNG."""
     targets = [
         (f"{WEB}/apple-touch-icon.png", 180, OPAQUE),
         (f"{WEB}/icon-192.png", 192, ANY),
         (f"{WEB}/icon-512.png", 512, ANY),
         (f"{WEB}/icon-maskable-512.png", 512, OPAQUE),
+        (f"{WEB}/email-mark.png", 96, ANY),
+        (f"{WEB}/og-image.png", (1200, 630), OPAQUE),
+        ("backend/app/assets/brand/logo-mark.png", 256, ANY),
+        (f"{LAUNCH_SET}/LaunchImage.png", 64, ANY),
+        (f"{LAUNCH_SET}/LaunchImage@2x.png", 128, ANY),
+        (f"{LAUNCH_SET}/LaunchImage@3x.png", 192, ANY),
         ("mobile/assets/brand/logo_mark.png", 64, ANY),
         ("mobile/assets/brand/2.0x/logo_mark.png", 128, ANY),
         ("mobile/assets/brand/3.0x/logo_mark.png", 192, ANY),
@@ -118,6 +126,7 @@ def raster_targets():
             (f"{mipmap}/ic_launcher_background.png", round(108 * scale), OPAQUE),
             (f"{mipmap}/ic_launcher_monochrome.png", round(108 * scale), ANY),
             (f"{ANDROID_RES}/drawable-{density}/ic_notification.png", round(24 * scale), SILHOUETTE),
+            (f"{ANDROID_RES}/drawable-{density}/launch_mark.png", round(64 * scale), ANY),
         ]
     return targets + ios_targets()
 
@@ -173,6 +182,7 @@ def main():
 
     sizes = {}
     for rel, side, rule in raster_targets():
+        expected = (side, side) if isinstance(side, int) else side
         checked += 1
         path = os.path.join(REPO, rel)
         if not os.path.exists(path):
@@ -184,8 +194,8 @@ def main():
             errors.append(f"{rel}: {exc}")
             continue
         sizes[rel] = (width, height)
-        if (width, height) != (side, side):
-            errors.append(f"{rel}: {width}x{height}, expected {side}x{side}")
+        if (width, height) != expected:
+            errors.append(f"{rel}: {width}x{height}, expected {expected[0]}x{expected[1]}")
         has_alpha = colour_type in ALPHA_COLOUR_TYPES or has_trns
         if rule == OPAQUE and (colour_type not in OPAQUE_COLOUR_TYPES or has_trns):
             errors.append(f"{rel}: has an alpha channel; it must be opaque")

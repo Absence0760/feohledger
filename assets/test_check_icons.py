@@ -39,6 +39,8 @@ COPIED_DIRS = [
     "mobile/assets/brand",
     "mobile/android/app/src/main",
     "mobile/ios/Runner/Assets.xcassets/AppIcon.appiconset",
+    "mobile/ios/Runner/Assets.xcassets/LaunchImage.imageset",
+    "backend/app/assets/brand",
     "mobile/lib",
 ]
 
@@ -117,6 +119,11 @@ class CheckIconsFailsWhenItShould(unittest.TestCase):
     def test_a_raster_at_the_wrong_size_fails(self):
         write_png(self.path("frontend/static/icon-192.png"), 190, 190, 6)
         self.assertFailsNaming("icon-192.png: 190x190, expected 192x192")
+
+    def test_a_social_card_at_the_wrong_size_fails(self):
+        # The card is the one non-square target: a square render must not pass.
+        write_png(self.path("frontend/static/og-image.png"), 1200, 1200, 2)
+        self.assertFailsNaming("og-image.png: 1200x1200, expected 1200x630")
 
     def test_an_ios_icon_with_an_alpha_channel_fails(self):
         target = f"{check_icons.IOS_SET}/Icon-App-1024x1024@1x.png"

@@ -23,10 +23,11 @@ Nothing downstream is edited by hand.
 | Master | Used for |
 |---|---|
 | `assets/icon.svg` | Full-bleed tile: every iOS AppIcon size, `apple-touch-icon.png`, `icon-maskable-512.png` |
-| `assets/logo-mark.svg` | Rounded tile: the in-app mark (web + mobile), `favicon.svg`/`.ico`, web manifest `any` icons, Android legacy `ic_launcher.png` |
+| `assets/logo-mark.svg` | Rounded tile: the in-app mark (web + mobile), `favicon.svg`/`.ico`, web manifest `any` icons, Android legacy `ic_launcher.png`, the email header mark (`frontend/static/email-mark.png`), the PDF mark (`backend/app/assets/brand/logo-mark.png`), and the native launch-screen images (Android `launch_mark`, iOS `LaunchImage`) |
 | `assets/icon-foreground.svg` | Android adaptive foreground, glyph shrunk into the 66 dp safe zone |
 | `assets/icon-background.svg` | Android adaptive background |
 | `assets/icon-monochrome.svg` | Android 13+ themed icon |
+| `assets/og-image.svg` | The 1200x630 link-preview card, `frontend/static/og-image.png` (text in Noto Sans; fontconfig substitutes if it is missing) |
 | `assets/icon-notification.svg` | Android notification small icon, a white silhouette (Android draws it from alpha alone, so the tile would be a solid square) |
 
 ```bash
