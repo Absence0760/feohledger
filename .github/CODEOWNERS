@@ -19,7 +19,6 @@
 # Security-sensitive scaffolding
 /SECURITY.md                            @<owner>
 /.pre-commit-config.yaml                @<owner>
-/.sops.yaml                             @<owner>
 
 # Claude tooling
 /.claude/                               @<owner>

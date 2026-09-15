@@ -40,9 +40,9 @@ Redis holds the JWT blocklist, MFA OTPs, SSO state, and signup rate-limit counte
 
 ### Secrets (SOPS + KMS)
 
-- **Encrypted at rest in the repo** — `backend/.env.sops`, `infra/terraform.tfvars.sops`. Loss of the repo = no loss of confidentiality.
+- **Encrypted at rest in the private `infra-secrets` repo** (`feohledger/`), never in this public one. Every value is KMS-encrypted, so loss of that repo = no loss of confidentiality; GitHub plus each operator's clone are the copies.
 - **KMS key backup** — AWS KMS keys are durable by definition (eleven nines). Loss requires AWS-side disaster.
-- **Recovery** — clone repo + decrypt with KMS access. See `backend/CLAUDE.md` § Secrets management.
+- **Recovery** — clone `infra-secrets` + decrypt with `kms:Decrypt` on `alias/feohledger-sops`. See `backend/CLAUDE.md` § Secrets management.
 
 ### Application code + infrastructure
 

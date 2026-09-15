@@ -59,3 +59,40 @@ variable "backup_retention_days" {
   type        = number
   default     = 90
 }
+
+variable "domain_name" {
+  description = "Platform domain the ACM certificate covers (the apex plus a one-level wildcard for tenant subdomains). Must be a public Route 53 zone in this account — today the feohledger.jaredhoward.com child zone the estate account bootstrap delegated here. Moving to a product apex means hosting that zone in this account and changing this value."
+  type        = string
+  default     = "feohledger.jaredhoward.com"
+}
+
+variable "monthly_budget_limit_usd" {
+  description = "Monthly AWS spend ceiling (USD) for the account-wide budget. Pre-launch the account runs two KMS keys, a hosted zone and near-empty S3 buckets — a few dollars a month — so 25 leaves headroom for early experiments while still flagging a runaway within days. Raise it deliberately when the ECS/RDS stack lands."
+  type        = number
+  default     = 25
+
+  validation {
+    condition     = var.monthly_budget_limit_usd > 0
+    error_message = "monthly_budget_limit_usd must be positive — a zero budget alerts on the first cent and trains everyone to ignore it."
+  }
+}
+
+variable "budget_alert_emails" {
+  description = "Addresses that receive every budget notification. Deliberately no default: this repo is public, so the real address lives only in the operator's tfvars (canonical copy in the private infra-secrets repo)."
+  type        = list(string)
+
+  validation {
+    condition     = length(var.budget_alert_emails) > 0
+    error_message = "Provide at least one address in budget_alert_emails — a budget with no subscribers alerts no one."
+  }
+
+  validation {
+    condition     = alltrue([for e in var.budget_alert_emails : can(regex("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$", e))])
+    error_message = "Every entry in budget_alert_emails must be an email address."
+  }
+
+  validation {
+    condition     = alltrue([for e in var.budget_alert_emails : !can(regex("(?i)@example\\.(com|org|net)$", e))])
+    error_message = "budget_alert_emails still holds the example placeholder — replace it with a real address."
+  }
+}

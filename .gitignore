@@ -73,15 +73,18 @@ web_modules/
 # adapters, the `change-me` JWT key, MinIO's minioadmin/minioadmin). It is
 # committed on purpose so a fresh clone runs with zero env setup. Personal
 # overrides go in a gitignored .env / .env.local / .env.development.local and
-# win over the committed defaults. Real deployed secrets live ONLY in the SOPS
-# variants (*.sops), encrypted under the project's AWS KMS key — decryption
-# requires kms:Decrypt via IAM, not a key file.
+# win over the committed defaults. Real deployed secrets live ONLY in the
+# private Absence0760/infra-secrets repo (feohledger/), sops-encrypted under the
+# project's AWS KMS key. This repo is PUBLIC, so sops payloads are ignored too:
+# ciphertext in public history is permanent (docs/decisions.md §12, §165), and
+# CI's env-isolation guard fails on a tracked one.
 #
-# See .sops.yaml + backend/CLAUDE.md § Secrets management for the workflow.
+# See backend/CLAUDE.md § Secrets management for the workflow.
 .env
 .env.*
 !.env.development
-!.env.sops
+*.sops
+*.sops.yaml
 
 # parcel-bundler cache (https://parceljs.org/)
 .cache
@@ -163,12 +166,12 @@ __pycache__/
 # ---------------------------------------------------------------------------
 # Terraform
 # ---------------------------------------------------------------------------
-# Plaintext terraform.tfvars is secret; the SOPS-encrypted
-# terraform.tfvars.sops is committed. Example is a template, safe to commit.
-# Keep .terraform.lock.hcl committed — it pins provider versions.
+# A filled terraform.tfvars is operator config and never committed — its
+# canonical copy lives in the private infra-secrets repo (infra/README.md).
+# Example is a template, safe to commit. Keep .terraform.lock.hcl committed —
+# it pins provider versions.
 *.tfvars
 !*.tfvars.example
-!*.tfvars.sops
 
 # ---------------------------------------------------------------------------
 # Local agent / AI tooling state

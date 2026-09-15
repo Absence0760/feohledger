@@ -101,8 +101,8 @@ resize is a stop → change-type → start. Add 2 GB of swap either way.
   instead if this is customer-facing).
 - Bootstrap the project's subdir in the private `infra-secrets` repo
   (`bin/sops-init.sh --project <slug> --region <r>` there — see
-  `~/github/project-mgmt/docs/secrets-management.md`). Do **not** run this
-  repo's in-repo `./bin/sops-init.sh`.
+  `~/github/project-mgmt/docs/secrets-management.md`). This repo has no sops
+  config of its own (`docs/decisions.md` §165).
 - `terraform apply` the existing `infra/` module for the S3 buckets + app KMS
   key.
 

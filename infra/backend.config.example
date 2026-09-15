@@ -1,0 +1,12 @@
+# Partial backend config for `terraform init -backend-config=backend.config`.
+# Copy to backend.config (gitignored) and fill in the bucket.
+#
+# The bucket was created by the estate account bootstrap
+# (~/github/templates/infra/bootstrap/2-baseline) as
+# `feohledger-tfstate-<account-id>`. Only the bucket lives here — key, region,
+# locking and encryption are committed in main.tf — so the AWS account ID stays
+# out of this public repo. Generate the file rather than typing the ID:
+#
+#   printf 'bucket = "feohledger-tfstate-%s"\n' "$(aws sts get-caller-identity --profile feohledger --query Account --output text)" > backend.config
+
+bucket = "feohledger-tfstate-PLACEHOLDER_ACCOUNT_ID"

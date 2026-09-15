@@ -20,6 +20,9 @@ on:
     branches: [main]
     paths:
       - '**/.env*'
+      - '**/*.sops'
+      - '**/*.sops.*'
+      - '**/.sops.yaml'
       - '.github/workflows/env-isolation.yml'
       - '.gitignore'
   push:
@@ -40,17 +43,37 @@ jobs:
         run: |
           set -euo pipefail
           # The invariant (root CLAUDE.md § Secrets): the ONLY committed env
-          # files are `*.env.development` (safe local defaults) and the
-          # KMS-encrypted `*.sops` files. Anything else — .env, .env.local,
-          # .env.production — is a real-secret carrier by convention.
-          bad=$(git ls-files | grep -E '(^|/)\.env($|\.)' | grep -vE '\.env\.development$|\.env\.example$|\.sops$' || true)
+          # files are `*.env.development` (safe local defaults) and
+          # `*.env.example` templates. Anything else — .env, .env.local,
+          # .env.production — is a real-secret carrier by convention, and a
+          # sops-encrypted .env.sops is refused by the next step.
+          bad=$(git ls-files | grep -E '(^|/)\.env($|\.)' | grep -vE '\.env\.development$|\.env\.example$' || true)
           if [ -n "$bad" ]; then
             echo "::error::Tracked env file(s) outside the allowlist:"
             echo "$bad"
-            echo "Only *.env.development (safe local defaults) and *.sops (KMS-encrypted) may be committed."
+            echo "Only *.env.development (safe local defaults) and *.env.example templates may be committed."
             exit 1
           fi
           echo "OK — no disallowed env files tracked."
+
+      - name: No sops payload or sops config is tracked
+        shell: bash
+        run: |
+          set -euo pipefail
+          # This repo is PUBLIC. A sops file is KMS-encrypted, but ciphertext in
+          # public history is archived and scraped forever and hands an attacker
+          # an offline target (docs/decisions.md §12). The project's encrypted
+          # secrets live in the private infra-secrets repo, which also owns the
+          # `.sops.yaml` creation rule — an in-repo one is how the old scaffold
+          # invited a commit here (docs/decisions.md §165). File names only.
+          bad=$(git ls-files | grep -E '(^|/)\.sops\.ya?ml$|\.sops$|\.sops\.(ya?ml|json|env|ini)$' || true)
+          if [ -n "$bad" ]; then
+            echo "::error::Tracked sops file(s) in a public repo:"
+            echo "$bad"
+            echo "Move encrypted secrets to the private infra-secrets repo (feohledger/) — see backend/CLAUDE.md § Secrets management."
+            exit 1
+          fi
+          echo "OK — no sops files tracked."
 
       - name: Committed dev defaults must point at the local stack
         shell: bash

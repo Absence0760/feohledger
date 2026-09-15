@@ -13,10 +13,11 @@ on fire.
 
 ## Current state
 
-`infra/` contains Terraform skeleton: VPC, ECS stack, RDS, KMS, S3,
-CloudFront. Most modules are written, but **nothing is deployed**.
-The `backend/.env.sops` file exists but hasn't been filled in with
-real values.
+`infra/` holds the security substrate (KMS key + S3 buckets); the VPC,
+ECS, RDS and CloudFront stack is not written yet, and **nothing is
+deployed**. No deployed secret has been authored yet — they will live
+sops-encrypted in the private `infra-secrets` repo (`feohledger/`),
+never in this public repo.
 
 ## What you need
 
@@ -25,6 +26,14 @@ real values.
 - A few hours of focused DevOps work
 
 ## Step 1 — AWS account setup
+
+**The account exists (2026-09-14).** The estate bootstrap
+(`new-project-account.sh feohledger`) created **FeohLedger** inside the estate
+AWS Organization, with the Terraform state bucket, the sops KMS key, a GitHub
+OIDC deploy role and the delegated `feohledger.jaredhoward.com` zone. Operators
+sign in through IAM Identity Center (`aws sso login --profile feohledger`), not
+IAM users or root keys. That covers items 1, 2 and 5 below; 3 and 4 are still
+open.
 
 1. Create a dedicated AWS account for production. Don't mix with
    personal/sandbox.
@@ -38,19 +47,25 @@ real values.
 
 ## Step 2 — Domain + ACM certificate
 
-1. Register or transfer your domain into Route53 (cleanest DNS
-   management; ~$12/yr for `.com`).
-2. Request an ACM cert for `*.feohledger.com` in `us-east-1`
-   (CloudFront requires this region).
-3. Validate via DNS record (Terraform automates this if the domain is
-   in Route53).
+**Handled by Terraform (`infra/acm.tf`).** The platform domain today is
+`feohledger.jaredhoward.com`, a Route 53 zone the account bootstrap
+delegated to the FeohLedger account. The first `terraform apply` issues
+the `us-east-1` certificate (CloudFront requires that region) for the
+apex plus `*.feohledger.jaredhoward.com` — the wildcard is what serves
+tenant subdomains — and DNS-validates it in that zone.
+
+To move to a product apex (e.g. `feohledger.com`): register it, host its
+zone in the FeohLedger account, and set `domain_name`.
 
 ## Step 3 — Populate SOPS secrets
 
+Secrets live encrypted in the private `infra-secrets` repo, never here
+(this repo is public). From that clone, authenticated to the FeohLedger
+account:
+
 ```bash
-cd backend
-./bin/sops-init.sh   # if you haven't already
-sops backend/.env.sops
+cd ~/github/infra-secrets
+AWS_PROFILE=feohledger sops feohledger/prod.sops.yaml
 ```
 
 Required values for prod:
@@ -73,11 +88,10 @@ Required values for prod:
 
 ```bash
 cd infra
-sops -d terraform.tfvars.sops > terraform.tfvars
-terraform init
-terraform plan      # read this carefully — nothing surprising should appear
-terraform apply
-rm terraform.tfvars  # never check in plaintext
+# backend.config names the state bucket — see infra/README.md § Applying
+AWS_PROFILE=feohledger terraform init -backend-config=backend.config
+AWS_PROFILE=feohledger terraform plan -var-file=../../infra-secrets/feohledger/prod.tfvars -out=tfplan   # read this carefully
+AWS_PROFILE=feohledger terraform apply tfplan
 ```
 
 Expect errors on the first run. Common ones:
