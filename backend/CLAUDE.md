@@ -885,7 +885,7 @@ aws sso login --profile feohledger
 AWS_PROFILE=feohledger sops feohledger/prod.sops.yaml   # decrypts → $EDITOR → re-encrypts on save
 ```
 
-**The deployed VM** (`deploy/`, `docs/minimal-deployment.md`) gets its env as an encrypted file authored from `deploy/env.example`, encrypted into `infra-secrets` and copied onto the box as `deploy/.env.sops` — never committed here. `deploy/deploy.sh` decrypts it host-side to the gitignored `deploy/.env` using the instance profile's `kms:Decrypt`.
+**The deployed VM** (`deploy/`, `docs/minimal-deployment.md`) reads `infra-secrets/feohledger/prod.sops.yaml` — flat YAML keyed by env var name, authored from `deploy/prod.sops.yaml.example` — copied onto the box as `deploy/prod.sops.yaml`, never committed here. `deploy/decrypt-env.sh` (run by `deploy.sh`) decrypts it host-side to the gitignored `deploy/.env` with the instance profile's `kms:Decrypt`, and refuses a file missing a required key or holding a value compose's `env_file` would silently rewrite (`docs/decisions.md` §171).
 
 **Terraform** reads no secret yet. When the first one lands it is read in place with the `carlpett/sops` provider, never through a committed or decrypted tfvars — `infra/README.md` § Secrets.
 

@@ -17,6 +17,11 @@ This is a SOC 2 prerequisite (`docs/soc2-readiness.md` § Secrets management).
 | `FEOH_LITHIC_API_KEY` (virtual cards — platform) | sops — `infra-secrets` (`feohledger/`) | **180 days** | Issue cards on our account |
 | `FEOH_NIUM_CLIENT_*` (virtual cards — platform) | sops — `infra-secrets` (`feohledger/`) | **180 days** | Issue cards on our account |
 | `FEOH_HCAPTCHA_SECRET` (signup) | sops — `infra-secrets` (`feohledger/`) | **365 days** (or on suspected leak) | Bypass signup captcha |
+| `POSTGRES_PASSWORD` (single-VM Postgres superuser) | sops — `infra-secrets` (`feohledger/prod.sops.yaml`) | **365 days** (or on suspected leak) | Full read/write of the control plane and every tenant DB — reachable only on the compose network, which publishes no host port |
+| `FEOH_APPROVAL_SIGNING_KEY` (invoice approval signatures) | sops — `infra-secrets` (`feohledger/prod.sops.yaml`) | **On suspected leak only** — rotating breaks verification of every signature made under the old key | Forge an approval signature that verifies |
+| `FEOH_EMAIL_ACTION_SIGNING_KEY` (approve-by-email links, Slack / Teams buttons) | sops — `infra-secrets` (`feohledger/prod.sops.yaml`) | **180 days** | Mint an approve/reject link for any reviewer (the action still runs that reviewer's segregation, threshold and CFO checks) |
+| `FEOH_PARTNER_LINK_SIGNING_KEY` (partner / reseller link codes) | sops — `infra-secrets` (`feohledger/prod.sops.yaml`) | **180 days** | Forge a link code that attaches a tenant to a partner without its admin's consent |
+| `FEOH_EMAIL_INTAKE_SIGNING_SECRET` (inbound email-to-invoice webhook) | sops — `infra-secrets` (`feohledger/prod.sops.yaml`) | **365 days**, changed at the email provider in the same step | Post forged inbound mail, creating invoices in any tenant whose intake address is known |
 | AWS SES credentials (transactional email) | IAM role (preferred) or sops — `infra-secrets` | **365 days** if static | Send email from our domain |
 | GitHub Actions OIDC role | AWS IAM role (no static keys) | n/a — short-lived | n/a |
 | Per-tenant SCIM bearer tokens | `Organization.settings.sso.scim_bearer_hash` (sha256) | **On request** by tenant admin via `POST /api/organization/sso/scim-token` | Read/write users on that one tenant |
@@ -137,6 +142,40 @@ Nothing is "shown once" either — we don't mint this value, the provider does, 
 Audited as `organization.chat_webhook_rotated` on both set/replace and removal (flagged `removed`), recording the previous and new **hostnames** only — never the URL. One action name covers the credential's whole lifecycle so an incident can be reconstructed with a single grep. Mechanics: [notifications.md](../backend/docs/notifications.md) § Rotating the webhook URL.
 
 ---
+
+### `POSTGRES_PASSWORD` (single-VM deploy)
+
+The Postgres image reads `POSTGRES_PASSWORD` only when it initialises an empty
+data volume. Changing the value in sops alone therefore changes nothing in the
+database — and the API's DSN, which `compose.prod.yml` derives from the same
+variable, stops matching the role on the next deploy. Change the role first:
+
+1. On the VM, from `deploy/`: `docker compose -f compose.prod.yml exec postgres psql -U postgres`,
+   then `\password postgres` and type the new value at the prompt (it never reaches shell history).
+2. In `infra-secrets`: `AWS_PROFILE=feohledger sops feohledger/prod.sops.yaml`, set
+   `POSTGRES_PASSWORD`, save and commit; copy the file onto the VM as `deploy/prod.sops.yaml`.
+3. `./deploy.sh --no-pull --backend-only` — recreates the api (new DSN) and the postgres
+   container (the data volume and its initialised cluster are kept).
+
+`backup.sh` and `restore.sh` connect over the container's local socket and are
+unaffected.
+
+### HMAC signing keys (`FEOH_APPROVAL_SIGNING_KEY`, `FEOH_EMAIL_ACTION_SIGNING_KEY`, `FEOH_PARTNER_LINK_SIGNING_KEY`, `FEOH_EMAIL_INTAKE_SIGNING_SECRET`)
+
+Generate the new value with `openssl rand -hex 32` in your own terminal, set it in
+`feohledger/prod.sops.yaml`, copy the file onto the VM, and run
+`./deploy.sh --no-pull --backend-only`. None of these keys supports an overlap
+window, so know what each rotation breaks:
+
+- **Approval signing** — verification of every signature made under the old key
+  (`backend/docs/approval-signatures.md`). Treat it as a key ceremony: rotate
+  only on a suspected leak, and record when.
+- **Email action** — every approval link and chat button already sent, for up to
+  `FEOH_EMAIL_ACTION_TTL_HOURS` (default 7 days). Reviewers approve in the app
+  instead.
+- **Partner link** — codes not yet redeemed (valid for 30 minutes).
+- **Email intake** — every inbound message until the email provider's webhook
+  signs with the new secret, so change both together.
 
 ## Logging + audit
 

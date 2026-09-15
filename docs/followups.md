@@ -39,6 +39,10 @@ worktree, plus integrator verification of the merged branch. **Six** entries
 closed, **eighteen** opened. **29 → 41** — by category, **31 (c)** · **7 (a)** ·
 **3 (b)**.
 
+**Since:** two (c) entries added outside a round — the GitHub deploy role
+(2026-09-14) and the missing self-service-signup switch (2026-09-15) — so
+**43** open: **33 (c)** · **7 (a)** · **3 (b)**.
+
 **The total went up, and the reason is the same one round 30 recorded.** All six
 entries turned out to be wrong about their own work rather than merely
 incomplete, and in three cases implementing the entry as written would have
@@ -2190,6 +2194,27 @@ durable fix stated in one sentence has usually not been tried.
       `AWS_DEPLOY_ENABLED` stays unset until both land. **Trigger:** the
       workload-stack build-out — step 1 of `docs/production-deployment.md`
       § Arming the AWS pipeline.
+
+### Surfaced by the minimal-deploy readiness review (2026-09-15)
+
+- [ ] **(c) Self-service signup has no off switch.** A deployed env refuses to
+      boot without `FEOH_HCAPTCHA_SECRET` (`config.py`
+      `_require_captcha_in_deployed_envs`), and nothing else gates `/signup` —
+      no setting, no plan flag. An operator who wants an invite-only pilot,
+      with tenants provisioned by `deploy/add-tenant.sh`, can only leave
+      `FEOH_HCAPTCHA_SITEKEY` empty. That fails closed — no widget loads and
+      `POST /api/signup/start` answers 400 "Captcha is required." — but the
+      page still renders a complete form that a visitor fills in only to be
+      refused, and the operator has to hold a captcha secret for a feature
+      they turned off. **Durable fix:** a `FEOH_SIGNUP_ENABLED` setting
+      (default `true`, today's behaviour) that the three `/api/signup/*`
+      routes refuse on, published through `/api/public-config` so the SPA
+      drops the route and its links rather than rendering a dead form; the
+      captcha boot check then applies only while signup is on. Documented
+      workaround meanwhile: `deploy/prod.sops.yaml.example` § hCaptcha,
+      `docs/minimal-deployment.md` § 3. **Trigger:** the first deploy whose
+      tenants are all provisioned by hand, or the first report of a refused
+      signup.
 
 ## (a) Blocked on external credentials, accounts, or hardware
 

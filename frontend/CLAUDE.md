@@ -94,8 +94,9 @@ session owned it. Never add a file there to turn a red check green.
 `package.json` declares `"packageManager": "pnpm@10.12.4"` — in **both** the
 repo root and here — and no `pnpm/action-setup` step in `.github/workflows/`
 passes a `version:` input any more. The action reads the manifest, so one edit
-moves CI, `sso-e2e`, `web-bundle-budget`, `aws-deploy`, `audit` and every
-contributor together. Before this, four different pnpm versions wrote one
+moves CI, `sso-e2e`, `web-bundle-budget`, `aws-deploy`, `audit`, the VM's
+`deploy/deploy.sh` (which reads the same field) and every contributor
+together. Before this, four different pnpm versions wrote one
 lockfile (CI on 9, `audit.yml` on 10, laptops on whatever, Dependabot on its
 own default), which shows up as unrelated `libc:` lines churning in and out of
 `pnpm-lock.yaml` depending on who ran the install. **Bump pnpm by editing

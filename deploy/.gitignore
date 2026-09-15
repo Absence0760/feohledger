@@ -2,8 +2,9 @@
 # in-flight decrypt target, removed on exit).
 .env
 .env.tmp
-# The VM's copy of the sops-encrypted env. The canonical encrypted file lives
-# in the private infra-secrets repo, never in this (public) repo.
-.env.sops
+# The VM's copy of the sops-encrypted secrets file. The canonical encrypted
+# file is infra-secrets/feohledger/prod.sops.yaml, in the private repo — never
+# in this (public) one.
+prod.sops.yaml
 # Per-VM tenant host list — seeded from tenants.caddy.example.
 tenants.caddy

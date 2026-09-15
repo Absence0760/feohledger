@@ -117,8 +117,8 @@ cat <<-EOF
 
 	bootstrap complete. Next steps:
 	  1. Log out and back in (docker group membership).
-	  2. Copy the sops-encrypted env here as deploy/.env.sops
-	     (contract: deploy/env.example; source: the private infra-secrets repo).
+	  2. Copy infra-secrets' feohledger/prod.sops.yaml here as deploy/prod.sops.yaml
+	     (template: deploy/prod.sops.yaml.example), then check it: ./decrypt-env.sh
 	  3. ./deploy.sh
 	  4. ./add-tenant.sh <slug> --name "Company" --admin-email admin@company.com
 	EOF
