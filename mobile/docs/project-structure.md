@@ -1,7 +1,8 @@
 # Project structure
 
-The `mobile/lib/` tree — screens, stores, widgets, models and services.
-Extracted from `mobile/CLAUDE.md` to keep that file cheap to load.
+The `mobile/lib/` tree — screens, stores, widgets, models and services — and
+where the native launch screens live. Extracted from `mobile/CLAUDE.md` to keep
+that file cheap to load.
 
 
 ```
@@ -116,4 +117,50 @@ mobile/
 ├── pubspec.yaml                 # Dependencies
 └── analysis_options.yaml        # Lint rules
 ```
+
+## Launch screens
+
+The native launch screens are what the OS shows before Flutter draws. They
+reproduce the first Flutter frame, `SplashScreen` in `lib/main.dart`, so the
+hand-off can't be seen: the same 64-logical-pixel mark, in the same place, on
+the same colour.
+
+| Platform | Files | Shows |
+|----------|-------|-------|
+| Android 11 and below | `LaunchTheme` in `android/app/src/main/res/values/styles.xml` → `drawable{,-v21}/launch_background.xml` | `drawable-<density>/launch_mark.png` on `@color/window_background` |
+| Android 12+ | `LaunchTheme` in `android/app/src/main/res/values-v31/styles.xml` | the system splash: the launcher icon on `windowSplashScreenBackground` = `@color/window_background` |
+| iOS | `ios/Runner/Base.lproj/LaunchScreen.storyboard` | `Assets.xcassets/LaunchImage.imageset` on the same colour |
+
+- **A test holds the copies to their source.**
+  `test/screens/launch_screen_parity_test.dart` reads `values/colors.xml`, both
+  `launch_background.xml` files and the storyboard, and fails naming the file
+  when the colour, the lift or the image size stops matching `buildAppTheme()`
+  and the rendered `SplashScreen`.
+- **The images are generated.** `launch_mark.png` (64dp at each density) and
+  the `LaunchImage` set (64pt at @1x/@2x/@3x) are rendered from
+  `assets/logo-mark.svg` by `assets/gen-icons.sh` (`pnpm gen:icons`) and checked
+  by `pnpm check:icons`. Never edit them by hand.
+- **The colour is copied from the Flutter theme.** `#F8F9FF` is the
+  `scaffoldBackgroundColor` (= `colorScheme.surface`) of `buildAppTheme()` in
+  `lib/main.dart` (`ColorScheme.fromSeed(seedColor: Colors.blue)`, Material 3).
+  It lives in `values/colors.xml` as `window_background`, which `NormalTheme`
+  also uses behind the Flutter view, and in the storyboard's `backgroundColor`.
+  Change the seed colour and you change both.
+- **The offset is copied from the splash layout.** `SplashScreen` centres one
+  column holding the mark, a 16px gap and a 36px `CircularProgressIndicator`, so
+  the mark's centre sits (16 + 36) / 2 = 26px above the screen centre. Android
+  insets the bitmap layer's bottom by 52dp; iOS gives the image's `centerY`
+  constraint a constant of -26. Change that column and you change both.
+- **It stays light in dark mode.** The app has no `darkTheme`, so Flutter's
+  first frame is light whatever the system setting, and a dark launch screen
+  would flash dark then light. `values-night/styles.xml` is intentionally empty.
+  It is kept rather than deleted so `flutter create .` can't restore the
+  template's `Theme.Black` launch theme. The storyboard colour is a fixed sRGB
+  value, not a system colour.
+- **Android 12+ shows the launcher icon, not the mark.** The system splash
+  scales and masks its icon into a fixed circular slot, so a 64dp tile can't be
+  pinned to Flutter's size and position there. Only the background is matched:
+  at the hand-off the adaptive icon gives way to the mark on an unchanged colour.
+- **iOS caches launch screens.** After changing the storyboard or its image,
+  delete the app (and restart a simulator) before judging the result.
 

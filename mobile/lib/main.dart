@@ -18,6 +18,20 @@ Future<void> main() async {
   runApp(const APApp());
 }
 
+/// The app's one theme.
+///
+/// A function rather than an inline literal so the native launch screens'
+/// copies of its background colour can be checked against it
+/// (test/screens/launch_screen_parity_test.dart).
+ThemeData buildAppTheme() => ThemeData(
+      colorScheme: ColorScheme.fromSeed(seedColor: Colors.blue),
+      useMaterial3: true,
+      appBarTheme: const AppBarTheme(
+        centerTitle: false,
+        elevation: 0,
+      ),
+    );
+
 class APApp extends StatelessWidget {
   const APApp({super.key});
 
@@ -36,14 +50,7 @@ class APApp extends StatelessWidget {
           locale: LocaleStore.instance.locale,
           localizationsDelegates: AppLocalizations.localizationsDelegates,
           supportedLocales: AppLocalizations.supportedLocales,
-          theme: ThemeData(
-            colorScheme: ColorScheme.fromSeed(seedColor: Colors.blue),
-            useMaterial3: true,
-            appBarTheme: const AppBarTheme(
-              centerTitle: false,
-              elevation: 0,
-            ),
-          ),
+          theme: buildAppTheme(),
           home: const AuthGate(),
         );
       },
