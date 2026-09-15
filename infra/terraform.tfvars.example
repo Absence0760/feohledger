@@ -38,6 +38,13 @@ backups_bucket_name       = "feohledger-backups-prod-REPLACE"
 # to the zone the account bootstrap delegated to this account.
 # domain_name = "feohledger.jaredhoward.com"
 
+# --- Cost alerts ----------------------------------------------------------------
+# Every budget notification (50 % / 100 % actual, 100 % forecast) goes to these
+# addresses. Required, with no default, so the real address never lands in this
+# public repo — and the example.com placeholder is rejected on plan.
+budget_alert_emails = ["alerts@example.com"]
+# monthly_budget_limit_usd = 25
+
 # --- Secrets ------------------------------------------------------------------
 # None, and a secret never goes in a tfvars. When the ECS/ALB/RDS stack lands,
 # its secrets (rds_master_password, …) are read from the sops-encrypted

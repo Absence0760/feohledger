@@ -14,6 +14,7 @@ infra/
 ├── s3.tf                        # invoice-files + audit-logs buckets (versioning + Object Lock)
 │                                #   + access-logs sink + backups bucket (lifecycle-expired, no lock)
 ├── acm.tf                       # us-east-1 certificate for the platform domain + wildcard
+├── budgets.tf                   # account-wide monthly cost budget + email alerts
 ├── outputs.tf                   # exports for downstream modules
 ├── backend.config.example       # state-bucket shape for `terraform init` (real one gitignored)
 ├── terraform.tfvars.example     # committed template
@@ -51,6 +52,14 @@ This migration path is also tracked under "Pending — needs a code change" in `
 
 The wildcard is what makes tenant subdomains work — the SPA takes the tenant slug from the first label under the platform domain (`frontend/src/lib/hostRouting.ts`), so every `<slug>.<domain>` is covered without a certificate change per signup. A nested platform domain (`<slug>.app.<domain>`) or a tenant's own vanity domain would each need another certificate; see the comment at the top of `acm.tf`.
 
+## Cost guardrail
+
+`budgets.tf` puts an account-wide monthly budget on the FeohLedger account — `monthly_budget_limit_usd`, default **25 USD**, sized for a pre-launch account whose real spend is a few dollars — with email alerts at 50 % and 100 % of actual spend and at 100 % of forecast. The forecast alert is the early warning; the actual ones only fire after spend lands on the bill.
+
+`budget_alert_emails` has **no default** and must be set in the operator's tfvars: this repo is public, so the address lives only in the private `infra-secrets` copy (see § Applying). Plan rejects an empty list and the `example.com` placeholder.
+
+If AWS refuses the budget with "ask the payer account to enable budgets", enable *IAM user and role access to billing information* in the account's root settings. Don't remove the budget instead.
+
 ## Local usage
 
 ```bash
@@ -80,7 +89,7 @@ AWS_PROFILE=feohledger terraform plan -var-file=../../infra-secrets/feohledger/p
 AWS_PROFILE=feohledger terraform apply tfplan
 ```
 
-The filled tfvars is operator config rather than a secret, but it is not public either, so its canonical copy lives in the private `infra-secrets` repo as `feohledger/prod.tfvars` (plaintext, beside the encrypted secrets) — the estate convention for non-secret env config. Start it from `terraform.tfvars.example`. The path above assumes `infra-secrets` is cloned beside this repo under `~/github/`.
+The filled tfvars is operator config rather than a secret — bucket names, the budget alert address — but it is not public either, so its canonical copy lives in the private `infra-secrets` repo as `feohledger/prod.tfvars` (plaintext, beside the encrypted secrets) — the estate convention for non-secret env config. Start it from `terraform.tfvars.example`. The path above assumes `infra-secrets` is cloned beside this repo under `~/github/`.
 
 ## Secrets
 

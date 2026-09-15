@@ -16,7 +16,8 @@ name: Terraform
 # Doesn't run on docs-only edits — the path filter below scopes it.
 #
 # The stack today is a single flat module at `infra/` (KMS key + S3
-# buckets for invoices + audit-log Object Lock + variables). When the
+# buckets for invoices + audit-log Object Lock, the platform ACM
+# certificate, the account budget). When the
 # rest of `docs/production-deployment.md` lands (ECS, ALB, CloudFront,
 # RDS), break those into per-env stacks (`infra/envs/{dev,staging,prod}`)
 # and convert the single-step below into a matrix.
