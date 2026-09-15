@@ -6712,3 +6712,60 @@ resolver lands, lands as a bypass. `test_exception_agent_queue_segregation.py`
 registers an auto-resolving `fraud_flag` probe and asserts the escalation, and a
 companion test fails the moment a *real* auto-resolving resolver appears for a
 blocking type, pointing its author at the gate it now runs behind.
+
+## 171. The brand mark is feoh written as a split tally stick, and every icon is generated from it
+
+Until this change the product shipped placeholders: an "AP" SVG favicon, the
+letters "AP" as the sidebar mark, a CSS gradient square on the landing page, and
+a stock document-with-a-tick launcher icon left over from the "Better AP" name.
+Threkir, the sibling estate product, ships a designed mark: the thorn rune þ.
+
+**The glyph is the name.** Feoh (ᚠ) is Old English for wealth, originally
+cattle, and the root of *fee*; it is also the first rune of the Old English
+rune-row, which makes it a natural sibling to Threkir's þ. Nine treatments of it
+were compared at 132, 64, 32 and 16 px in three palettes, inside the app's real
+surfaces, and all nine are kept as geometry in `assets/logo-render/gen_svg.py`
+so the choice can be revisited without re-deriving it. The table of what each
+one meant and why it lost is in `assets/logo-render/README.md`.
+
+**Tally won on two counts.** It carries the product rather than only the name:
+the Exchequer recorded a debt as notches across a hazel stick, split it so each
+party held half, and treated the debt as settled when the halves matched, which
+is the act this application exists to perform. And it still reads as ᚠ at
+16 px, where a mark spends most of its life. The strongest launcher icon, the
+runic coin, turned into a plain gold disc in a browser tab; the double-rule
+"total" went soft below 32 px; the T-account read as a T to anyone but an
+accountant.
+
+**The palette is not the UI accent.** Gold on a navy tile was chosen over the
+product's own blue-violet. The tile carries its own ground, so it reads on light
+and dark hosts alike, and a mark tied to `--accent` would be tied to the one
+token a white-label tenant is allowed to override (§ white-label.md).
+
+**Generated, not drawn.** The geometry and palette live in one Python file,
+which writes the SVG masters (`assets/icon.svg` full-bleed, `assets/logo-mark.svg`
+rounded, and the three Android adaptive layers). `assets/gen-icons.sh` renders
+every platform size from them with Inkscape and ImageMagick, and
+`assets/check_icons.py` runs in CI with the standard library alone: masters must
+match the generator, every raster must exist at its platform's size, and nothing
+iOS or `maskable` may carry alpha, because App Store Connect rejects an icon with
+any alpha channel, an indexed palette's tRNS included. The limit is stated in the
+checker rather than hidden: it cannot prove a PNG was rendered from the *current*
+master. Editing the geometry without re-rendering still fails, because the
+committed master goes stale first.
+
+**Android gets an adaptive icon.** The old launcher shipped legacy PNGs only,
+which Android 8+ shrinks onto a white plate. The foreground layer shrinks the
+glyph into the guaranteed 66 dp circle, and a monochrome layer serves Android
+13's themed icons.
+
+**The white-label fallback forks.** The "AP" placeholder was neutral, so a
+tenant that renamed the product but configured no logo never displayed platform
+branding. The rune is FeohLedger's identity, so swapping it in unconditionally
+would have put FeohLedger's mark beside a partner's product name.
+`brandTheme.ts::brandMark` shows the tenant logo when one is set, the platform
+mark only while the product still carries the platform's name, and otherwise a
+monogram of the tenant's own name on its own accent. The static assets
+(favicon, touch icon, manifest, launcher icons) stay platform-branded, exactly
+as the "AP" favicon already was; a per-tenant favicon would need a runtime
+`<link>` swap, which nothing has asked for.
