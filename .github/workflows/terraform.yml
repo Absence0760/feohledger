@@ -1,12 +1,14 @@
 name: Terraform
 
-# Guards the `infra/` stack against three classes of regression:
+# Guards the `infra/` stack against four classes of regression:
 #   1. `terraform fmt` drift — keeps the formatter idempotent so the
 #      PR diff is the real change, not whitespace churn.
 #   2. `terraform validate` — syntax + provider-version + ref-shape
 #      checks. Doesn't touch state (we pass `-backend=false`), so the
 #      check can run without AWS credentials.
-#   3. Trivy IaC mode — known-bad patterns (public S3 buckets, IAM
+#   3. `terraform test` — plan-only assertions against mocked providers
+#      (infra/tests/), also credential-free.
+#   4. Trivy IaC mode — known-bad patterns (public S3 buckets, IAM
 #      `Action: *`, security-group 0.0.0.0/0 ingress, etc.). Cheaper
 #      to surface in CI than discover after `terraform apply`. Trivy
 #      is reused from the security workflow so we don't introduce a
@@ -78,6 +80,14 @@ jobs:
       - name: terraform validate
         working-directory: infra
         run: terraform validate -no-color
+
+      - name: terraform test
+        working-directory: infra
+        # Plan-only runs against mocked AWS providers (infra/tests/) — no
+        # credentials, no state. They pin what validate can't see: the
+        # budget's alert wiring and input guards, and the certificate's
+        # tenant wildcard + validation-record wiring.
+        run: terraform test -no-color
 
   trivy-iac:
     name: Trivy IaC scan

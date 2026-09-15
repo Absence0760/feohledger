@@ -1,6 +1,6 @@
 # infra/
 
-Infrastructure-as-code for this project. Scoped today to the **security substrate** needed as a SOC 2 engineering prerequisite (see `../docs/soc2-readiness.md`). Real AWS workload resources (ECS, ALB, RDS, CloudFront) are not yet defined here; they live on the roadmap under `docs/production-deployment.md`.
+Infrastructure-as-code for the FeohLedger AWS account. Scoped today to the **security substrate** needed as a SOC 2 engineering prerequisite (see `../docs/soc2-readiness.md`), plus two account-level pieces the workload stack will lean on: the platform TLS certificate and a monthly cost budget. Real AWS workload resources (ECS, ALB, RDS, CloudFront) are not yet defined here; they live on the roadmap under `docs/production-deployment.md`.
 
 ## Layout
 
@@ -18,6 +18,7 @@ infra/
 ├── outputs.tf                   # exports for downstream modules
 ├── backend.config.example       # state-bucket shape for `terraform init` (real one gitignored)
 ├── terraform.tfvars.example     # committed template
+├── tests/                       # plan-only `terraform test` runs against mocked providers
 └── README.md                    # this file
 ```
 
@@ -64,13 +65,14 @@ If AWS refuses the budget with "ask the payer account to enable budgets", enable
 
 ```bash
 cd infra
-# Terraform 1.15+ validates the (intentionally empty) partial-backend block,
-# so point validate at the local backend first. The override file is
-# gitignored — never commit it.
+# Terraform 1.15+ validates the partial-backend block (its bucket is passed
+# at init time), so point validate at the local backend first. The override
+# file is gitignored — never commit it.
 printf 'terraform {\n  backend "local" {}\n}\n' > backend_override.tf
 terraform init -backend=false    # skip the S3 backend for local validation
 terraform fmt -recursive .       # format
 terraform validate               # syntactic + type-check (no AWS creds needed)
+terraform test                   # tests/ — mocked providers, no creds, no state
 rm backend_override.tf           # remove before any real plan/apply
 ```
 
