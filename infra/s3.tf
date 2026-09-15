@@ -3,7 +3,9 @@
 # Every bucket defined in this module is configured with the four SOC 2
 # baseline controls (docs/soc2-readiness.md § Encryption + Backup/Recovery):
 #
-#   1. Server-side encryption (SSE-KMS, customer-managed key from kms.tf)
+#   1. Server-side encryption (SSE-KMS, customer-managed key from kms.tf) —
+#      except the access-logs sink, which S3 log delivery can only write
+#      under SSE-S3 (docs/decisions.md §166)
 #   2. Versioning enabled (required for Object Lock, also gives us a safety
 #      net against accidental overwrites / deletes)
 #   3. Public access blocked at the bucket level
@@ -82,6 +84,12 @@ resource "aws_s3_bucket_logging" "invoice_files" {
   bucket        = aws_s3_bucket.invoice_files.id
   target_bucket = aws_s3_bucket.access_logs.id
   target_prefix = "invoice-files/"
+
+  # Delivery needs the sink's grant and encryption in place first.
+  depends_on = [
+    aws_s3_bucket_policy.access_logs_delivery,
+    aws_s3_bucket_server_side_encryption_configuration.access_logs,
+  ]
 }
 
 # Object Lock doesn't stop a lifecycle rule from being defined or evaluated —
@@ -201,6 +209,12 @@ resource "aws_s3_bucket_logging" "audit_logs" {
   bucket        = aws_s3_bucket.audit_logs.id
   target_bucket = aws_s3_bucket.access_logs.id
   target_prefix = "audit-logs/"
+
+  # Delivery needs the sink's grant and encryption in place first.
+  depends_on = [
+    aws_s3_bucket_policy.access_logs_delivery,
+    aws_s3_bucket_server_side_encryption_configuration.access_logs,
+  ]
 }
 
 # Object Lock doesn't stop a lifecycle rule from being defined or evaluated —
@@ -266,8 +280,16 @@ resource "aws_s3_bucket_policy" "audit_logs_tls" {
 # CC7.2 (audit evidence of access) + AWS-0089 (Trivy IaC: "Bucket has logging
 # disabled") both require it. The logs themselves are signal-of-access, not
 # the system-of-record audit trail (that lives in the COMPLIANCE-mode bucket
-# above), so we keep them at SSE-KMS + 365-day lifecycle expiry rather than
-# Object Lock.
+# above), so we keep them at a 365-day lifecycle expiry rather than Object
+# Lock — which S3 would refuse anyway: a bucket with Object Lock cannot be a
+# log destination.
+#
+# Two AWS requirements make it the one bucket not under the app KMS key, and
+# log delivery fails without either (docs/decisions.md §166):
+#   - default encryption must be SSE-S3 — AWS does not support SSE-KMS on a
+#     server-access-log destination, whatever the key policy grants;
+#   - the logging.s3.amazonaws.com service principal needs s3:PutObject in
+#     the bucket policy, because ACLs are disabled.
 #
 # IMPORTANT: this bucket MUST NOT have its own logging enabled — pointing a
 # logging bucket at itself produces an infinite-loop of log objects (each
@@ -280,8 +302,11 @@ resource "aws_s3_bucket_policy" "audit_logs_tls" {
 # log-write loop AWS rejects at apply time. The upstream Trivy rule
 # has no exception for "logging-target" buckets, so we suppress it
 # inline rather than per-resource. Trivy parses `#trivy:ignore:<id>`
-# (no space after `#`, on its own line above the resource).
+# (no space after `#`, on its own line above the resource). AWS-0132
+# ("encrypt with a customer-managed key") is suppressed for the reason in the
+# block above: S3 log delivery cannot write under SSE-KMS.
 #trivy:ignore:AWS-0089
+#trivy:ignore:AWS-0132
 resource "aws_s3_bucket" "access_logs" {
   bucket = var.access_logs_bucket_name
 
@@ -303,10 +328,8 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "access_logs" {
 
   rule {
     apply_server_side_encryption_by_default {
-      sse_algorithm     = "aws:kms"
-      kms_master_key_id = aws_kms_key.app.arn
+      sse_algorithm = "AES256"
     }
-    bucket_key_enabled = true
   }
 }
 
@@ -318,16 +341,53 @@ resource "aws_s3_bucket_public_access_block" "access_logs" {
   restrict_public_buckets = true
 }
 
-# S3 access-log delivery uses the legacy "log delivery group" canned ACL,
-# which requires the bucket-owner-preferred ownership controls — without
-# this the logging.target_bucket reference fails at apply time with
-# "AccessControlListNotSupported".
+# ACLs off: delivery is granted by the bucket policy below — the path AWS
+# recommends — so nothing depends on the legacy log-delivery-group ACL, and
+# every log object is owned by this account.
 resource "aws_s3_bucket_ownership_controls" "access_logs" {
   bucket = aws_s3_bucket.access_logs.id
 
   rule {
-    object_ownership = "BucketOwnerPreferred"
+    object_ownership = "BucketOwnerEnforced"
   }
+}
+
+# The S3 logging service principal writes the log objects. Pinned to this
+# account and to the three source buckets, so no other bucket can use this one
+# as its log destination.
+data "aws_iam_policy_document" "access_logs_delivery" {
+  statement {
+    sid       = "S3ServerAccessLogsPolicy"
+    effect    = "Allow"
+    actions   = ["s3:PutObject"]
+    resources = ["${aws_s3_bucket.access_logs.arn}/*"]
+
+    principals {
+      type        = "Service"
+      identifiers = ["logging.s3.amazonaws.com"]
+    }
+
+    condition {
+      test     = "ArnLike"
+      variable = "aws:SourceArn"
+      values = [
+        aws_s3_bucket.invoice_files.arn,
+        aws_s3_bucket.audit_logs.arn,
+        aws_s3_bucket.backups.arn,
+      ]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "aws:SourceAccount"
+      values   = [data.aws_caller_identity.current.account_id]
+    }
+  }
+}
+
+resource "aws_s3_bucket_policy" "access_logs_delivery" {
+  bucket = aws_s3_bucket.access_logs.id
+  policy = data.aws_iam_policy_document.access_logs_delivery.json
 }
 
 resource "aws_s3_bucket_lifecycle_configuration" "access_logs" {
@@ -409,6 +469,12 @@ resource "aws_s3_bucket_logging" "backups" {
   bucket        = aws_s3_bucket.backups.id
   target_bucket = aws_s3_bucket.access_logs.id
   target_prefix = "backups/"
+
+  # Delivery needs the sink's grant and encryption in place first.
+  depends_on = [
+    aws_s3_bucket_policy.access_logs_delivery,
+    aws_s3_bucket_server_side_encryption_configuration.access_logs,
+  ]
 }
 
 resource "aws_s3_bucket_lifecycle_configuration" "backups" {

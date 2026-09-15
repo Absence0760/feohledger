@@ -6438,3 +6438,35 @@ operator ends up with a second key in the wrong region (the estate script defaul
 would read exists yet — `prod.sops.yaml` is created with the first real secret — and a `sops_file`
 data source on a missing file fails every plan. `infra/README.md` § Secrets carries the snippet for
 when it is needed.
+
+## 166. The access-log sink is SSE-S3, the one bucket not under the app key
+
+**Decided:** 2026-09-15 · `infra/s3.tf`, `infra/kms.tf`, `infra/tests/guardrails.tftest.hcl`
+
+Every bucket in `infra/s3.tf` was SSE-KMS under the app key — including the bucket the other three
+send their server-access logs to — and the access-logging control read as done. It could never have
+delivered a log. AWS's documentation for server-access logging says the destination must use SSE-S3,
+and that a destination using SSE-KMS may receive log objects encrypted with a key the owner cannot
+access. And nothing granted the delivery service a write in the first place: the sink had no bucket
+policy for `logging.s3.amazonaws.com` and no log-delivery ACL, whatever its ownership-controls
+comment said. The statement in the app key's policy that let the logging principal use the key
+addressed neither problem, and its comment claimed it was the fix.
+
+It was caught reading the module before its first apply, so no real bucket ever went unlogged. The
+fix follows AWS's documented setup: the sink is SSE-S3, ACLs are disabled (`BucketOwnerEnforced`),
+and a bucket policy grants `s3:PutObject` to the logging principal, pinned to this account and to the
+three source buckets so no other bucket can use this one as its log destination. The logging
+configurations depend on both, and the key-policy statement is gone. `guardrails.tftest.hcl` pins
+the encryption, the ownership setting and the grant, because `terraform validate` cannot see any of
+them and a real plan accepts the broken shape without complaint.
+
+The exception is narrow on purpose. The sink holds signal-of-access, not the audit trail — that is
+the Compliance-locked audit-logs bucket, still under the app key — and SSE-S3 still encrypts every
+log object at rest. Trivy's customer-managed-key rule (AWS-0132) is suppressed inline on that one
+bucket, beside the existing AWS-0089 suppression, with the reason written above both.
+
+Rejected: keeping SSE-KMS and widening the key policy further, because the problem is the
+destination's encryption, not the key's grants. Rejected too: shipping the logs to CloudWatch Logs
+instead, which adds an ingestion bill and a second log store for records whose only job is to exist
+when an auditor asks. Dropping access logging was never an option: SOC 2 CC7.2 and AWS-0089 both
+expect it.

@@ -32,7 +32,8 @@ Every resource in this module follows the SOC 2 baseline:
 | S3 versioning on every bucket | `s3.tf` — `aws_s3_bucket_versioning` = Enabled |
 | S3 Object Lock — governance mode, 365d | `s3.tf` — invoice-files bucket |
 | S3 Object Lock — compliance mode, 7y | `s3.tf` — audit-logs bucket |
-| SSE-KMS on every bucket | `s3.tf` — references `aws_kms_key.app` |
+| SSE-KMS on every data bucket; SSE-S3 on the access-logs sink | `s3.tf` — the invoice-files, audit-logs and backups buckets reference `aws_kms_key.app`. AWS does not support SSE-KMS on a server-access-log destination, so the sink uses S3-managed keys (`../docs/decisions.md` §166) |
+| Server-access logging on every data bucket | `s3.tf` — delivered to the access-logs sink, whose bucket policy grants `logging.s3.amazonaws.com` `s3:PutObject`, pinned to this account and the three source buckets; ACLs disabled |
 | Public access block on every bucket | `s3.tf` — all four flags true |
 | Lifecycle cost guards | `s3.tf` — backups bucket expires dumps after `backup_retention_days` (90d default; deliberately NO Object Lock — the lifecycle IS the retention policy), and every lifecycle rule reaps incomplete multipart uploads after 7 days |
 

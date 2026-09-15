@@ -15,13 +15,9 @@
 
 data "aws_caller_identity" "current" {}
 
-# S3 server-access-log delivery (aws_s3_bucket_logging.invoice_files /
-# .audit_logs in s3.tf) ships into the access_logs bucket, which is
-# SSE-KMS-encrypted with this key. The logging.s3.amazonaws.com service
-# principal has no implicit grant on a customer-managed key (unlike the
-# AWS-managed aws/s3 key) — without the statement below, Terraform applies
-# cleanly but log delivery fails silently forever and no objects ever land
-# in that bucket.
+# No statement for S3 server-access-log delivery: the access_logs bucket in
+# s3.tf is SSE-S3, because log delivery cannot write to a bucket whose default
+# encryption is SSE-KMS whatever this key policy grants (docs/decisions.md §166).
 data "aws_iam_policy_document" "app_key" {
   statement {
     sid    = "AllowAccountRootFullAccess"
@@ -32,22 +28,6 @@ data "aws_iam_policy_document" "app_key" {
     }
     actions   = ["kms:*"]
     resources = ["*"]
-  }
-
-  statement {
-    sid    = "AllowS3LogDeliveryToUseKey"
-    effect = "Allow"
-    principals {
-      type        = "Service"
-      identifiers = ["logging.s3.amazonaws.com"]
-    }
-    actions   = ["kms:GenerateDataKey*", "kms:Decrypt"]
-    resources = ["*"]
-    condition {
-      test     = "StringEquals"
-      variable = "aws:SourceAccount"
-      values   = [data.aws_caller_identity.current.account_id]
-    }
   }
 }
 

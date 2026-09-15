@@ -1,8 +1,8 @@
 # Plan-only tests against mocked AWS providers — no credentials, no state, so CI
 # runs them beside `terraform validate`. They pin what validate cannot see and a
 # real plan would only reveal against the live account: the budget's alert
-# wiring and its input guards, and the certificate's tenant-wildcard coverage
-# and validation-record wiring.
+# wiring and its input guards, the certificate's tenant-wildcard coverage and
+# validation-record wiring, and the access-log sink's delivery prerequisites.
 
 mock_provider "aws" {
   # A mocked policy document renders a random string, which the KMS key and
@@ -104,6 +104,37 @@ run "certificate_covers_tenant_subdomains" {
       for r in aws_route53_record.certificate_validation : r.allow_overwrite
     ])
     error_message = "The apex and wildcard share one CNAME; without allow_overwrite the second record fails to create."
+  }
+}
+
+run "access_log_sink_accepts_s3_log_delivery" {
+  command = plan
+
+  assert {
+    condition     = one(one(aws_s3_bucket_server_side_encryption_configuration.access_logs.rule).apply_server_side_encryption_by_default).sse_algorithm == "AES256"
+    error_message = "AWS does not support SSE-KMS on a server-access-log destination; the sink must be SSE-S3 (decisions §166)."
+  }
+
+  assert {
+    condition     = one(aws_s3_bucket_ownership_controls.access_logs.rule).object_ownership == "BucketOwnerEnforced"
+    error_message = "Delivery is granted by the bucket policy, so ACLs stay disabled on the sink."
+  }
+
+  assert {
+    condition = contains(flatten([
+      for s in data.aws_iam_policy_document.access_logs_delivery.statement : [
+        for p in s.principals : tolist(p.identifiers)
+      ] if s.effect == "Allow" && contains(s.actions, "s3:PutObject")
+    ]), "logging.s3.amazonaws.com")
+    error_message = "Without an s3:PutObject grant to logging.s3.amazonaws.com, S3 delivers no log object at all."
+  }
+
+  assert {
+    condition = alltrue([
+      for s in data.aws_iam_policy_document.access_logs_delivery.statement :
+      contains([for c in s.condition : c.variable], "aws:SourceAccount")
+    ])
+    error_message = "The delivery grant must be pinned to this account, or another account's bucket could log into this one."
   }
 }
 

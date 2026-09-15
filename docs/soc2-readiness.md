@@ -81,7 +81,7 @@ Things an auditor expects to see *in code or config*, not just in a policy doc. 
 | TLS in transit (frontend + API) | Done | CloudFront/ALB (`infra/`) + HSTS middleware (`backend/app/main.py` `SecurityHeadersMiddleware`). Post-deploy smoke test: `backend/scripts/verify_tls.py` |
 | HSTS + security response headers | Done | `backend/app/main.py` `SecurityHeadersMiddleware` — HSTS gated on `FEOH_HSTS_ENABLED`; `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy` always set. Tests: `backend/tests/test_security_headers.py` |
 | Encryption at rest — RDS | Done in prod | RDS storage encryption flag (Terraform) |
-| Encryption at rest — S3 | Done | `infra/s3.tf` — SSE-KMS via the customer-managed key from `infra/kms.tf` |
+| Encryption at rest — S3 | Done | `infra/s3.tf` — SSE-KMS via the customer-managed key from `infra/kms.tf` on every data bucket; the server-access-log sink is SSE-S3, because AWS does not support SSE-KMS on a log destination (`docs/decisions.md` §166) |
 | Encryption at rest — secrets | Done | SOPS + AWS KMS, in the private `infra-secrets` repo (`feohledger/`) — never this public one |
 | KMS key rotation procedure | Done | `docs/secrets-rotation.md` |
 | Plaintext secrets in CI | None | All secrets via GitHub Actions `secrets:` context |
