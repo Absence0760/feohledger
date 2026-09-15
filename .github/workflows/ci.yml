@@ -368,6 +368,10 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Icons match their masters
         run: python3 assets/check_icons.py
+      # A guard only ever run against correct assets proves nothing: this
+      # breaks a copy of the set one way at a time and requires a failure.
+      - name: The icon check fails on a broken set
+        run: python3 -m unittest assets/test_check_icons.py
 
   shellcheck:
     name: ShellCheck (deploy/)

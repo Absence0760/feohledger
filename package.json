@@ -96,7 +96,7 @@
 		"check:warning-messages": "cd backend && python scripts/gen_invoice_warning_messages.py --check",
 		"check:icons": "python3 assets/check_icons.py",
 
-		"//-- test --": "Test suites per surface: pytest (backend — venv + core services required), Playwright e2e (frontend), flutter test (mobile). test:scim/test:saml need the local IdPs up + seeded (idp:up then scim:seed/saml:seed); test:erp needs fake-erp up (erp:up). test:scripts validates this file's script targets; test:compliance covers the compliance-drift detector (scripts/check_compliance_drift.mjs), which the compliance-drift CI workflow runs against a PR diff.",
+		"//-- test --": "Test suites per surface: pytest (backend — venv + core services required), Playwright e2e (frontend), flutter test (mobile). test:scim/test:saml need the local IdPs up + seeded (idp:up then scim:seed/saml:seed); test:erp needs fake-erp up (erp:up). test:scripts validates this file's script targets; test:compliance covers the compliance-drift detector (scripts/check_compliance_drift.mjs), which the compliance-drift CI workflow runs against a PR diff; test:icons proves check:icons fails on a broken icon set (stdlib python3, CI's Brand assets job).",
 		"test:backend": "cd backend && pytest",
 		"test:frontend": "cd frontend && pnpm test:e2e",
 		"test:scim": "cd frontend && pnpm exec playwright test --config=tests-e2e/playwright.config.ts scim/",
@@ -105,6 +105,7 @@
 		"test:mobile": "cd mobile && flutter test",
 		"test:scripts": "node scripts/check_root_scripts.mjs",
 		"test:compliance": "node --test scripts/check_compliance_drift.test.mjs",
+		"test:icons": "python3 -m unittest assets/test_check_icons.py",
 		"test": "pnpm run test:backend && pnpm run test:frontend && pnpm run test:mobile"
 	}
 }

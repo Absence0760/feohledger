@@ -27,6 +27,7 @@ Nothing downstream is edited by hand.
 | `assets/icon-foreground.svg` | Android adaptive foreground, glyph shrunk into the 66 dp safe zone |
 | `assets/icon-background.svg` | Android adaptive background |
 | `assets/icon-monochrome.svg` | Android 13+ themed icon |
+| `assets/icon-notification.svg` | Android notification small icon, a white silhouette (Android draws it from alpha alone, so the tile would be a solid square) |
 
 ```bash
 # After changing gen_svg.py: rewrite the masters and re-render every icon.
@@ -36,6 +37,11 @@ pnpm gen:icons
 # What CI runs: masters match the generator, every raster exists at the right
 # size, and nothing that must be opaque has alpha. Pure stdlib Python.
 pnpm check:icons
+
+# Proves that check can fail: breaks a temporary copy of the set one way at a
+# time (hand-edited master, wrong size, alpha on iOS, opaque notification
+# icon, dangling @drawable reference...) and requires a non-zero exit.
+pnpm test:icons
 
 # The exploration tiles (gitignored) -> assets/logo-render/svg/
 python3 assets/logo-render/gen_svg.py
