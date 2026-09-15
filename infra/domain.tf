@@ -28,8 +28,13 @@ resource "aws_route53domains_registered_domain" "platform" {
   tech_privacy       = true
   billing_privacy    = true
 
+  # Sorted, because Route 53 Domains reports a domain's name servers in
+  # alphabetical order while the hosted zone lists them in its own. Passed in
+  # the zone's order, the list never matches what the registrar reports back,
+  # so every plan would show a change and every apply would re-set the same
+  # four servers.
   dynamic "name_server" {
-    for_each = data.aws_route53_zone.platform.name_servers
+    for_each = sort(data.aws_route53_zone.platform.name_servers)
     content {
       name = name_server.value
     }
