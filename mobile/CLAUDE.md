@@ -253,7 +253,7 @@ Follow these conventions on every new screen/widget:
   *darkened* variant (`.shade700`/`.shade800`/`.shade900`) of the accent over
   the 0.15-alpha tint — the full-saturation hue fails AA. Muted greys use
   `grey.shade700` (not `shade500`/`shade600`, which fail at 11-14px).
-- **Decorative icons** (brand mark, placeholder camera glyph, aging dots) are
+- **Decorative icons** (the `BrandMark` widget, placeholder camera glyph, aging dots) are
   wrapped in `ExcludeSemantics` so they aren't announced.
 - **Tap targets ≥48dp** — use `IconButton` defaults; don't shrink hit areas.
 - **Don't disable text scaling / reduce-motion.** The app uses default Material

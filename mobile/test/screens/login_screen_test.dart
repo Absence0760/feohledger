@@ -7,6 +7,7 @@ import 'package:http/testing.dart';
 import 'package:feohledger_mobile/api/api_client.dart';
 import 'package:feohledger_mobile/l10n/gen/app_localizations.dart';
 import 'package:feohledger_mobile/screens/login_screen.dart';
+import 'package:feohledger_mobile/widgets/brand_mark.dart';
 
 /// Wraps the screen in a localized MaterialApp (defaults to `en`) so
 /// `AppLocalizations.of(context)` resolves and the English assertions hold.
@@ -30,6 +31,7 @@ void main() {
     expect(find.widgetWithText(TextFormField, 'Email'), findsOneWidget);
     expect(find.widgetWithText(TextFormField, 'Password'), findsOneWidget);
     expect(find.widgetWithText(FilledButton, 'Sign In'), findsOneWidget);
+    expect(find.byType(BrandMark), findsOneWidget);
     // tenant defaults to 'acme' (value + hint both read "acme")
     expect(find.text('acme'), findsWidgets);
   });

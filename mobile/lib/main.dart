@@ -8,6 +8,7 @@ import 'package:feohledger_mobile/services/biometric_service.dart';
 import 'package:feohledger_mobile/services/push_service.dart';
 import 'package:feohledger_mobile/stores/auth_store.dart';
 import 'package:feohledger_mobile/stores/locale_store.dart';
+import 'package:feohledger_mobile/widgets/brand_mark.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -162,7 +163,7 @@ class SplashScreen extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.receipt_long, size: 64, color: Colors.blue),
+            BrandMark(),
             SizedBox(height: 16),
             CircularProgressIndicator(),
           ],
