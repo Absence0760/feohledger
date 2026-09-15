@@ -83,7 +83,8 @@ resize is a stop → change-type → start. Add 2 GB of swap either way.
 4. **Secrets follow the estate pattern.** This repo is public — `*.sops` files
    go in the private `Absence0760/infra-secrets` repo (per-project subdir +
    per-project KMS key), never committed here. The EC2 instance profile gets
-   `kms:Decrypt` + scoped S3 access, so no static AWS keys live on the box;
+   KMS access to both the sops key and the app key, plus scoped S3 access
+   (§ 1 below), so no static AWS keys live on the box;
    `deploy/deploy.sh` decrypts the VM's copy (`deploy/.env.sops`) host-side to
    the gitignored `deploy/.env` on every deploy — the compose file reads it
    via `env_file` + interpolation. The contract is `deploy/env.example`.
@@ -112,14 +113,29 @@ resize is a stop → change-type → start. Add 2 GB of swap either way.
   from anywhere (TCP, plus UDP 443 — Caddy serves HTTP/3; without the UDP
   rule browsers silently fall back to HTTP/2), 22 from your IP (or SSM
   Session Manager and no 22 at all).
-- Instance profile: `kms:Decrypt` on the sops key; `s3:GetObject/PutObject/
-  AbortMultipartUpload/ListBucket` on the invoice-files, audit-logs, and
-  backups buckets (Abort because `backup.sh` streams multipart — a failed
-  upload must be abortable, and the lifecycle reaper handles stragglers);
-  `ses:SendEmail` if using SES; ideally `ec2:ModifyInstanceMetadataOptions`
-  so bootstrap can fix the IMDSv2 hop limit itself (containers can't reach
-  instance-profile credentials through Docker's NAT at the default limit
-  of 1).
+- Instance profile — the box holds no static AWS keys, so this role is every
+  AWS permission it has:
+  - `kms:Decrypt` on the **sops** key (`deploy.sh` decrypts `.env.sops` with it).
+  - `kms:GenerateDataKey` + `kms:Decrypt` on the **app** key — the
+    `app_kms_key_arn` output of `infra/`. The invoice-files, audit-logs and
+    backups buckets default to SSE-KMS under that key, and S3 checks the
+    *caller's* access to it on every encrypted write and read: without these
+    two, every invoice upload and every nightly `backup.sh` run is refused even
+    with the S3 actions below granted. The key policy delegates to IAM
+    (`infra/kms.tf`), so the role policy is all it takes.
+  - `s3:GetObject/PutObject/DeleteObject/AbortMultipartUpload/ListBucket` on the
+    invoice-files, audit-logs, and backups buckets (Delete because replacing or
+    removing a stored document deletes its object — under Object Lock that
+    writes a delete marker and the locked version survives; Abort because
+    `backup.sh` streams multipart — a failed upload must be abortable, and the
+    lifecycle reaper handles stragglers).
+  - `s3:GetBucketObjectLockConfiguration` on the audit-logs bucket, once S3
+    audit shipping is turned on: its adapter reads the lock at boot and refuses
+    to start without it.
+  - `ses:SendEmail` if using SES; ideally `ec2:ModifyInstanceMetadataOptions`
+    so bootstrap can fix the IMDSv2 hop limit itself (containers can't reach
+    instance-profile credentials through Docker's NAT at the default limit
+    of 1).
 - Run **`deploy/bootstrap-vm.sh`** — one idempotent script: docker + compose
   plugin + sops + cronie (AL2023 ships **no cron daemon** — without it the
   backup cron is a file nothing reads) + AWS CLI, automatic security updates

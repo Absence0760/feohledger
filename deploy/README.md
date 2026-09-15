@@ -34,9 +34,13 @@ The whole flow is four commands on a fresh VM:
 - EC2 `t4g.small` (Amazon Linux 2023 arm64 recommended), 30 GB gp3, ports
   80/443 open (TCP, plus UDP 443 — Caddy serves HTTP/3; without the UDP rule
   browsers silently fall back to HTTP/2). Instance profile: `kms:Decrypt` on
-  the sops key; S3 read/write
-  (`s3:GetObject/PutObject/AbortMultipartUpload/ListBucket`) on the
-  invoice-files, audit-logs, and backup buckets; `ses:SendEmail` if using
+  the sops key; `kms:GenerateDataKey` + `kms:Decrypt` on the `infra/` **app**
+  key (`app_kms_key_arn` output) — all three buckets encrypt under it, so S3
+  refuses every upload and every backup without it; S3 read/write
+  (`s3:GetObject/PutObject/DeleteObject/AbortMultipartUpload/ListBucket`) on the
+  invoice-files, audit-logs, and backup buckets (plus
+  `s3:GetBucketObjectLockConfiguration` on audit-logs once S3 audit shipping is
+  on — full list with reasons: `docs/minimal-deployment.md` § 1); `ses:SendEmail` if using
   SES; ideally `ec2:ModifyInstanceMetadataOptions` so bootstrap can fix the
   IMDS hop limit itself.
 - DNS: three records → this VM: `feohledger.com`, `api.feohledger.com`, and a
