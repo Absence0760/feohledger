@@ -29,8 +29,8 @@ clone runs immediately. The backend loads them via `main.py` (its local-dev
 entrypoint); the frontend loads `.env.development` natively in Vite dev mode;
 the mobile app hardcodes its localhost API URL. Personal overrides go in a
 gitignored `backend/.env` / `frontend/.env.local` and win over the committed
-defaults. Real deployed secrets never live in any `.env*`; they're in the
-SOPS-encrypted `*.sops` files (see
+defaults. Real deployed secrets never live in any `.env*` or anywhere in this
+public repo; they're sops-encrypted in the private `infra-secrets` repo (see
 [`backend/CLAUDE.md` § Secrets management](backend/CLAUDE.md)).
 
 The `pnpm` commands above are thin wrappers that `cd` into the right workspace and call its native toolchain (pip / pnpm / flutter). See [Root scripts](#root-scripts) for the full list, or run `pnpm run` to print them.

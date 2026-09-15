@@ -1,12 +1,14 @@
 name: Terraform
 
-# Guards the `infra/` stack against three classes of regression:
+# Guards the `infra/` stack against four classes of regression:
 #   1. `terraform fmt` drift — keeps the formatter idempotent so the
 #      PR diff is the real change, not whitespace churn.
 #   2. `terraform validate` — syntax + provider-version + ref-shape
 #      checks. Doesn't touch state (we pass `-backend=false`), so the
 #      check can run without AWS credentials.
-#   3. Trivy IaC mode — known-bad patterns (public S3 buckets, IAM
+#   3. `terraform test` — plan-only assertions against mocked providers
+#      (infra/tests/), also credential-free.
+#   4. Trivy IaC mode — known-bad patterns (public S3 buckets, IAM
 #      `Action: *`, security-group 0.0.0.0/0 ingress, etc.). Cheaper
 #      to surface in CI than discover after `terraform apply`. Trivy
 #      is reused from the security workflow so we don't introduce a
@@ -16,7 +18,8 @@ name: Terraform
 # Doesn't run on docs-only edits — the path filter below scopes it.
 #
 # The stack today is a single flat module at `infra/` (KMS key + S3
-# buckets for invoices + audit-log Object Lock + variables). When the
+# buckets for invoices + audit-log Object Lock, the platform ACM
+# certificate, the account budget). When the
 # rest of `docs/production-deployment.md` lands (ECS, ALB, CloudFront,
 # RDS), break those into per-env stacks (`infra/envs/{dev,staging,prod}`)
 # and convert the single-step below into a matrix.
@@ -49,7 +52,7 @@ jobs:
       - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
         with:
           # The version this stack is validated against (satisfies the
-          # `>= 1.6` floor in `infra/main.tf`). terraform_wrapper=false
+          # `>= 1.11` floor in `infra/main.tf`). terraform_wrapper=false
           # so the raw exit codes propagate to the job status.
           terraform_version: '1.15.0'
           terraform_wrapper: false
@@ -61,10 +64,11 @@ jobs:
       - name: backend override for validate
         working-directory: infra
         # Terraform 1.15+ `validate` checks the backend block's required
-        # arguments, so the empty partial-config `backend "s3" {}` fails
-        # without state access. Overriding to the `local` backend for this
-        # job keeps validate credential-free. The file is gitignored —
-        # committing it would switch real applies to local state.
+        # arguments, so the partial-config `backend "s3"` (its `bucket` is
+        # passed at init time, never committed) fails without state access.
+        # Overriding to the `local` backend for this job keeps validate
+        # credential-free. The file is gitignored — committing it would
+        # switch real applies to local state.
         run: printf 'terraform {\n  backend "local" {}\n}\n' > backend_override.tf
 
       - name: terraform init (backend=false)
@@ -77,6 +81,14 @@ jobs:
       - name: terraform validate
         working-directory: infra
         run: terraform validate -no-color
+
+      - name: terraform test
+        working-directory: infra
+        # Plan-only runs against mocked AWS providers (infra/tests/) — no
+        # credentials, no state. They pin what validate can't see: the
+        # budget's alert wiring and input guards, and the certificate's
+        # tenant wildcard + validation-record wiring.
+        run: terraform test -no-color
 
   trivy-iac:
     name: Trivy IaC scan

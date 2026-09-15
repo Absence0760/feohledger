@@ -852,7 +852,7 @@ The welcome email contains the tenant URL (`FEOH_TENANT_URL_TEMPLATE`, e.g. `htt
 - `services/email_adapters/` — `console` (local dev, logs to stdout) and `ses` (AWS SES) via `FEOH_EMAIL_PROVIDER`. Same registry pattern as extraction/ERP adapters.
 - `services/tenant_provisioning.py` — reusable async `provision_tenant()` used by both the CLI and the API.
 - `services/rate_limit.py` — Redis sliding-window limiter, keyed on `(endpoint, subject)` where `subject` defaults to client IP but can be an explicit value (e.g. email). Signup uses three limits: per-IP `/start` + `/complete` (`FEOH_SIGNUP_RATE_LIMIT_PER_HOUR`, default 5), per-email `/start` (`FEOH_SIGNUP_EMAIL_RATE_LIMIT_PER_HOUR`, default 3, anti email-bombing), and per-IP `/slug-check` (`FEOH_SLUG_CHECK_RATE_LIMIT_PER_HOUR`, default 120, anti-enumeration).
-- `utils/slug.py` — regex + reserved-word blocklist + DB uniqueness check.
+- `utils/slug.py` — regex + reserved-word blocklist + DB uniqueness check. `provision_tenant` runs `validate_slug_format` itself, before any DB work, so every provisioning path gets it — including `scripts/create_tenant.py` / `deploy/add-tenant.sh`, which pass an operator-typed slug straight through.
 - `utils/hcaptcha.py` — server-side siteverify. Skips when `FEOH_HCAPTCHA_SECRET` is empty (local dev).
 - `utils/passwords.py` — `generate_temp_password()` + `validate_password_complexity()` (min 12 chars, upper/lower/digit).
 
@@ -860,63 +860,38 @@ The captcha sitekey is exposed to the frontend via `GET /api/public-config` so t
 
 Relevant env vars: `FEOH_ENVIRONMENT` (deployed envs refuse to boot with an empty `FEOH_HCAPTCHA_SECRET`), `FEOH_EMAIL_PROVIDER`, `FEOH_EMAIL_FROM`, `FEOH_AWS_SES_REGION`, `FEOH_PUBLIC_URL`, `FEOH_TENANT_URL_TEMPLATE`, `FEOH_HCAPTCHA_SECRET`, `FEOH_HCAPTCHA_SITEKEY`, `FEOH_SIGNUP_RATE_LIMIT_PER_HOUR`, `FEOH_SIGNUP_EMAIL_RATE_LIMIT_PER_HOUR`, `FEOH_SLUG_CHECK_RATE_LIMIT_PER_HOUR`.
 
-## Secrets management (SOPS + AWS KMS)
+## Secrets management (SOPS + AWS KMS, in the private infra-secrets repo)
 
-Deployed-environment secrets are encrypted at rest with [SOPS](https://github.com/getsops/sops) backed by an AWS KMS key. Local dev needs no secret setup: `backend/.env.development` is **committed** with safe, no-risk local defaults and is loaded by `main.py` (the local-dev entrypoint) via `python-dotenv`, so a fresh clone runs immediately. A gitignored `backend/.env` holds personal overrides and wins over the committed defaults. The backend also runs straight off `app/config.py` defaults even with neither file present.
+Local dev needs no secret setup: `backend/.env.development` is **committed** with safe, no-risk local defaults and is loaded by `main.py` (the local-dev entrypoint) via `python-dotenv`, so a fresh clone runs immediately. A gitignored `backend/.env` holds personal overrides and wins over the committed defaults. The backend also runs straight off `app/config.py` defaults even with neither file present.
+
+Deployed-environment secrets are encrypted with [SOPS](https://github.com/getsops/sops) under the project's AWS KMS key — `alias/feohledger-sops`, created in the FeohLedger AWS account by the estate account bootstrap — and live in the **private** estate repo `Absence0760/infra-secrets`, under `feohledger/`. **Never in this repo, not even encrypted:** it is public, and ciphertext in public history is archived and scraped forever (`docs/decisions.md` §12, §165). The root `.gitignore` ignores `*.sops` / `*.sops.yaml`, and CI's `env-isolation.yml` fails on a tracked one. The estate pattern and onboarding are `~/github/project-mgmt/docs/secrets-management.md`.
 
 **File layout:**
 
 ```
 backend/
 ├── .env.development     # local dev defaults — committed (safe, no-risk only); loaded by main.py
-├── .env                 # personal local overrides — gitignored; wins over .env.development
-└── .env.sops            # deployed secrets, AWS KMS-encrypted — committed
+└── .env                 # personal local overrides — gitignored; wins over .env.development
 
-infra/
-├── terraform.tfvars.example   # committed template
-└── terraform.tfvars.sops      # encrypted TF vars — committed
+~/github/infra-secrets/feohledger/   # PRIVATE sibling clone — not part of this repo
+├── prod.sops.yaml.example           # plaintext template: key names only, never values
+└── prod.sops.yaml                   # the encrypted prod secrets (created with the first real one)
 ```
 
-**One-time bootstrap per clone** (creates the KMS key, populates `.sops.yaml`, seeds the `.sops` files):
+**Edit the encrypted file** from the `infra-secrets` clone, authenticated to the FeohLedger account (that repo's `.sops.yaml` picks the key):
 
 ```bash
-brew install sops awscli jq    # or apt/yum equivalent
-aws configure                   # must be authenticated with an IAM principal
-                                # that has kms:CreateKey + kms:CreateAlias
-./bin/sops-init.sh
+aws sso login --profile feohledger
+AWS_PROFILE=feohledger sops feohledger/prod.sops.yaml   # decrypts → $EDITOR → re-encrypts on save
 ```
 
-The script is idempotent; re-runs reuse the existing KMS key.
+**The deployed VM** (`deploy/`, `docs/minimal-deployment.md`) gets its env as an encrypted file authored from `deploy/env.example`, encrypted into `infra-secrets` and copied onto the box as `deploy/.env.sops` — never committed here. `deploy/deploy.sh` decrypts it host-side to the gitignored `deploy/.env` using the instance profile's `kms:Decrypt`.
 
-**Edit an encrypted file:**
+**Terraform** reads no secret yet. When the first one lands it is read in place with the `carlpett/sops` provider, never through a committed or decrypted tfvars — `infra/README.md` § Secrets.
 
-```bash
-sops backend/.env.sops             # decrypts → $EDITOR → re-encrypts on save
-sops infra/terraform.tfvars.sops
-```
+**Adding a collaborator:** grant them `kms:Decrypt` (and usually `kms:Encrypt`, `kms:GenerateDataKey`) on `alias/feohledger-sops` via IAM, plus read access to the private repo. No re-encryption needed — IAM is the source of truth.
 
-**Decrypt to a plaintext .env (e.g. to run the deployed backend locally against prod-like config):**
-
-```bash
-sops -d backend/.env.sops > backend/.env
-```
-
-`backend/.env` is gitignored, so the plaintext copy stays on your laptop.
-
-**Load into a container entrypoint:**
-
-```bash
-set -a
-. <(sops -d backend/.env.sops)
-set +a
-exec python main.py
-```
-
-**Adding a collaborator:** grant them `kms:Decrypt` (and usually `kms:Encrypt`, `kms:GenerateDataKey`) on the project's KMS key via an IAM policy. No changes to `.sops.yaml` and no re-encryption needed — IAM is the source of truth.
-
-**Rotating the KMS key:** run `aws kms update-alias` to point the alias at a new key, then `sops updatekeys backend/.env.sops` (and the same for tfvars) to re-encrypt under the new key material.
-
-See `infra/README.md` and the comments at the top of `.sops.yaml` for full context.
+**Rotation** (the KMS key and every secret it protects): `docs/secrets-rotation.md`.
 
 ## Conventions
 

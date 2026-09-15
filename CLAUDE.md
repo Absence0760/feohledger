@@ -33,9 +33,9 @@ Full-stack accounts payable management app. SvelteKit frontend + FastAPI backend
 - **frontend/** — SvelteKit 2, Svelte 5 (runes), adapter-static, TypeScript, pnpm. Dev port `7777`.
 - **backend/** — FastAPI, Python 3.12+, SQLAlchemy 2 async, Alembic, PostgreSQL 16, Redis 7, MinIO (S3). Dev port `8000`.
 - **mobile/** — Flutter 3.41+, Dart 3.11+, iOS + Android. Material 3, ChangeNotifier stores.
-- **infra/** — Terraform skeleton for future AWS resources; SOPS-encrypted tfvars. See `infra/README.md`.
-- **Local infra** — Docker Compose for Postgres/Redis/MinIO. GitHub Pages for frontend deploy.
-- **Secrets** — `backend/.env.sops` + `infra/terraform.tfvars.sops`, both AWS KMS-encrypted via SOPS. **This repo is PUBLIC and no encrypted payload is committed yet.** Do NOT bootstrap the in-repo sops (`./bin/sops-init.sh`) and commit `*.sops` here — that would put ciphertext in public history (the mistake meryl-green-designs made). Instead adopt the private estate secrets repo: `Absence0760/infra-secrets` (per-project subdir + KMS). Pattern + onboarding: `~/github/project-mgmt/docs/secrets-management.md`. See `backend/CLAUDE.md` → Secrets management for the local-dev flow.
+- **infra/** — Terraform for the FeohLedger AWS account (security substrate today). See `infra/README.md`.
+- **Local infra** — Docker Compose for Postgres/Redis/MinIO. The frontend deploys to S3 + CloudFront on a published release (`.github/workflows/aws-deploy.yml`).
+- **Secrets** — deployed secrets are sops-encrypted under the project's AWS KMS key (`alias/feohledger-sops`, in the FeohLedger account) and live in the **private** estate repo `Absence0760/infra-secrets`, under `feohledger/`. **This repo is PUBLIC: never commit a `*.sops` file here** — ciphertext in public history is permanent (the mistake meryl-green-designs made). `.gitignore` ignores them and CI's env-isolation guard fails on a tracked one; the old in-repo scaffold is gone (`docs/decisions.md` §165). Pattern + onboarding: `~/github/project-mgmt/docs/secrets-management.md`. See `backend/CLAUDE.md` → Secrets management for the local-dev flow.
 
 ## Commands
 
@@ -135,7 +135,8 @@ minioadmin/minioadmin), so a fresh clone runs immediately. The backend loads
 them via `main.py` (local-dev entrypoint only); the frontend loads
 `.env.development` natively in Vite dev mode. Personal overrides go in a
 gitignored `backend/.env` / `frontend/.env.local` and win over the committed
-defaults. Deployed secrets stay in the `*.sops` files — never in any `.env*`.
+defaults. Deployed secrets live sops-encrypted in the private `infra-secrets`
+repo — never in any `.env*`, and never in this repo.
 
 ## Multi-tenancy
 
@@ -263,7 +264,7 @@ The void-payment path (`POST /api/payments/{id}/void`) takes `payment_scheduled`
 
 **Approver ≠ creator keys on a SET: `Invoice.uploaded_by_id` ∪ `Invoice.segregation_actor_ids`.** `approval_chain.violates_segregation` refuses the uploader **or** anyone in that set, and returns False — no breach — only when the column is NULL *and* the set is empty, which it reads as "no employee created this row". That is only sound because **every path under `app/` that creates an invoice for a signed-in employee stamps the uploader**: manual create, file upload, CSV import (`POST /api/invoices/import-csv`), recurring `generate-now`, and the inter-company mirror (stamped with the routing actor). **The recurring *sweep* stamps too** — nobody runs it, but an employee authored the template, so `recurring_invoice_templates.created_by_user_id` (migration 0096) records that author and `generate_one` falls back to it. **One column names one person, and a template can be shaped by several**: whoever materially PATCHes it (vendor, amount, currency, GL coding, schedule — `models/recurring_invoice.MATERIAL_EDIT_FIELDS`, the single classification) joins `material_editor_ids`, and `generate_one` stamps author ∪ editors onto `segregation_actor_ids` (migration 0097) — stamping the editor *instead* would only have moved the exemption to the author (`docs/decisions.md` §141, §152). Nothing written before either migration is backfilled: no honest author or editor exists to recover and every proxy manufactures either a refusal or an absolution. The remaining NULLs are the paths with no control-plane user at all — email intake and inbound PEPPOL (system), and supplier-portal submit / PO flip (a tenant-scoped `VendorUser`, who holds no employee JWT and can never reach an approval endpoint). Failing CLOSED on NULL was rejected: it would make those three ingestion channels permanently unapprovable. `backend/tests/test_invoice_uploader_stamping.py` is the enforcement — a new `Invoice(...)` site must pass `uploaded_by_id` explicitly and a literal `None` must be declared with its reason; `segregation_actor_ids` is pinned only at the one site that has a template behind it, since nowhere else has a second actor to name.
 
-**The same set also gates CLEARING a payment-blocking exception**, which is the other money-path sign-off an implicated actor could give themselves: `duplicate`/`fraud_flag`/`line_total_mismatch`/`payment_reconciliation` stop a payment run while open *or* escalated, and approval gates on none of them. `services/exception_lifecycle.segregation_refusal` — enforced in `record_decision`, the one chokepoint the single resolve, `/bulk/resolve` and the agent coordinator share — refuses the linked invoice's implicated set **plus** the flag's recorded raiser (`exceptions.raised_by_user_id`, migration 0098; the bank-change approval is the only site that fills it, and it is the only case the invoice-side set cannot reach). `resolve`/`dismiss` only — `escalate` is the refused actor's exit and still blocks the run — payment-blocking types only, NULL permissive, agents inherit the triggering human's refusal and escalate rather than 403, and `settings.exceptions.require_segregation: false` is the explicit per-org opt-out. `backend/tests/test_exception_raiser_stamping.py` keeps the column honest the way the uploader guard does. Reasoning: `docs/decisions.md` §165–§166.
+**The same set also gates CLEARING a payment-blocking exception**, which is the other money-path sign-off an implicated actor could give themselves: `duplicate`/`fraud_flag`/`line_total_mismatch`/`payment_reconciliation` stop a payment run while open *or* escalated, and approval gates on none of them. `services/exception_lifecycle.segregation_refusal` — enforced in `record_decision`, the one chokepoint the single resolve, `/bulk/resolve` and the agent coordinator share — refuses the linked invoice's implicated set **plus** the flag's recorded raiser (`exceptions.raised_by_user_id`, migration 0098; the bank-change approval is the only site that fills it, and it is the only case the invoice-side set cannot reach). `resolve`/`dismiss` only — `escalate` is the refused actor's exit and still blocks the run — payment-blocking types only, NULL permissive, agents inherit the triggering human's refusal and escalate rather than 403, and `settings.exceptions.require_segregation: false` is the explicit per-org opt-out. `backend/tests/test_exception_raiser_stamping.py` keeps the column honest the way the uploader guard does. Reasoning: `docs/decisions.md` §169–§170.
 
 ## Key environment variables (`FEOH_` prefix)
 
@@ -428,7 +429,8 @@ below or in `## Project invariants` — this is the index.)
     responsibility. Read the per-area `CLAUDE.md` before editing.
 11. **Honour the project invariants.** Money is `Decimal`/`Numeric`; writes that
     move money are idempotent; status changes write audit rows; tenant isolation
-    is enforced at the data layer; auth before everything; secrets via sops+KMS;
+    is enforced at the data layer; auth before everything; secrets via sops+KMS
+    in the private infra-secrets repo;
     PII/banking data stays out of logs; migrations fan out to every tenant;
     webhooks verify signatures + dedupe. Full enumeration with severities in
     [Project invariants](#project-invariants).
@@ -547,7 +549,7 @@ If you spot a candidate fix that fits one of those patterns: stop, surface the u
 - **API client** — all frontend fetches go through `frontend/src/lib/api.ts` (auto-adds JWT + tenant header).
 - **Python style** — ruff for lint/format. Line length 100. Python 3.12+ features allowed.
 - **Migrations** — Alembic for all schema changes. Must run on every tenant DB, not just control plane.
-- **Secrets** — never commit a secret-bearing `.env`. The only committed env files are `*.env.development` (safe local-dev defaults only) and the KMS-encrypted `*.sops` files.
+- **Secrets** — never commit a secret-bearing `.env`, and never commit a `*.sops` file — encrypted or not, this repo is public. The only committed env files are `*.env.development` (safe local-dev defaults only).
 - **Two backend entry points** — `main.py` for local dev (auto-reload), `app/main.py:app` for production (uvicorn).
 - **Async everywhere** — all DB operations use SQLAlchemy 2 async. Don't mix sync/async.
 - **Workflow snapshots** — `WorkflowInstance.steps_config_snapshot` is frozen at invoice creation. Read the snapshot, not the live definition, for in-flight invoices.
@@ -557,7 +559,7 @@ If you spot a candidate fix that fits one of those patterns: stop, surface the u
 
 - Don't add a test framework other than pytest (backend) or vitest (frontend).
 - Don't replace pnpm with npm/yarn.
-- Don't add SSR adapters to the frontend; it must stay static for GitHub Pages.
+- Don't add SSR adapters to the frontend; it must stay static — it ships as files in an S3 bucket behind CloudFront, with no server to render on.
 - Don't call secret-bearing services from the frontend — go through the backend.
 - Don't modify tenant DBs outside of Alembic migrations.
 - Don't add `dotenv` imports to modules reachable from Lambda entry points.
@@ -572,7 +574,7 @@ These are the rules the `.claude/agents/code-reviewer.md` agent cites. A diff th
 - **Audit trail is append-only.** Status transitions on invoices, payments, approvals, and vendors write a log row through the audit-shipping infrastructure (`services/audit_shipping/` — see `## Architecture overview`), not just mutate state. A status change that overwrites without producing an audit row is `Improvement` at minimum, `Critical` if the field is regulated (`paid_at`, `approved_at`, `void_at`).
 - **Tenant isolation is enforced at the data layer, not just by application code.** Every read / write resolves the tenant DB via the `X-Tenant-Slug` header → `feoh_<slug>` mapping (see `## Multi-tenancy`). `backend/app/tenant.py::get_tenant` is the chokepoint and cross-checks the JWT's `org` claim against the resolved tenant — so a leaked / spoofed header alone can't widen access. A new query that runs against the control-plane DB while reading tenant data, hardcodes a tenant DB name, or constructs a tenant engine outside `get_tenant_db` is `Critical`.
 - **Auth before everything.** Every route under `/api` is behind the auth middleware unless it is documented public-by-design. A new route mounted before the auth dependency, or one that references the user's identity without the auth dependency injected, is `Critical`. Approval / payment endpoints also check role / RBAC, not just authentication.
-- **Secrets via sops + AWS KMS, no hardcoded fallback.** Long-lived secrets live only in `*.sops` files, decrypted via the project's KMS key. A new `os.environ["X"]` with a fallback like `or "some-default"` for a secret is `Critical`. The only committed env files are `*.env.development` (safe local-dev defaults only — loopback URLs, mock adapters, the `change-me` JWT key) and the encrypted `*.sops` files; a committed `.env` / `.env.local` / `.env.production` carrying a real secret is `Critical`.
+- **Secrets via sops + AWS KMS, no hardcoded fallback.** Long-lived secrets live only in sops-encrypted files in the private `infra-secrets` repo, decrypted via the project's KMS key — never in this public repo, not even encrypted. A new `os.environ["X"]` with a fallback like `or "some-default"` for a secret is `Critical`. The only committed env files are `*.env.development` (safe local-dev defaults only — loopback URLs, mock adapters, the `change-me` JWT key); a committed `.env` / `.env.local` / `.env.production` carrying a real secret, or any committed `*.sops` file, is `Critical`.
 - **PII / banking data stays out of logs and error responses.** Bank account numbers, tax IDs, full vendor addresses, and full payment-method numbers must not appear in `logger` output, in HTTP error bodies, or in URL query strings. A `print` / `logger.info(...)` containing one of those fields is `Critical`.
 - **Migrations are idempotent and run on every tenant DB.** New Alembic revisions use safe DDL (`IF NOT EXISTS` / `IF EXISTS` where applicable). A schema change that lands as control-plane-only when the change should fan out to every tenant is `Critical` — see `Don't modify tenant DBs outside of Alembic migrations` in `## What not to do`.
 - **Webhook handlers verify signatures and dedupe by event id.** A new handler that doesn't verify the provider's HMAC, or doesn't dedupe by `event.id`, is `Critical` — webhook providers retry on any non-2xx and dedup is the only thing keeping a one-time effect one-time. The shared helpers live in `backend/app/services/webhook_security.py` (`verify_hmac_sha256`, `is_event_already_processed`, `extract_signature_header`); every webhook also returns 204 silently on every rejection path so the response doesn't enumerate.

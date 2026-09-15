@@ -73,7 +73,7 @@
 		"migrate:tenants": "cd backend && python scripts/migrate_all_tenants.py",
 		"migrate:all": "pnpm run migrate && pnpm run migrate:tenants",
 
-		"//-- build --": "Production builds. Frontend is adapter-static (GitHub Pages) — no SSR.",
+		"//-- build --": "Production builds. Frontend is adapter-static (S3 + CloudFront) — no SSR.",
 		"build:frontend": "cd frontend && pnpm build",
 
 		"//-- gen --": "Derived, committed source (backend venv required for both). gen:einvoice-messages rewrites frontend/src/lib/api/einvoiceRuleMessages.generated.ts from the backend's e-invoice rule set; gen:warning-messages rewrites frontend/src/lib/api/invoiceWarningMessages.generated.ts from app/services/invoice_warning_catalog.py. check:einvoice-messages / check:warning-messages are their drift guards and both run in CI's Backend lint job.",

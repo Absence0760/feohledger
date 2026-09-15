@@ -18,7 +18,11 @@ crash.*.log
 # committed override would silently switch real applies to local state.
 backend_override.tf
 
+# Partial backend config naming the state bucket, whose name embeds the AWS
+# account ID — kept out of this public repo. Shape: backend.config.example.
+backend.config
+
 # NOTE: .terraform.lock.hcl IS committed. It pins provider versions for
 # reproducible builds (like package-lock.json for npm). Do not ignore it.
 # NOTE: *.tfvars is handled by the root .gitignore with an exclusion for
-# *.tfvars.example and *.tfvars.sops.
+# *.tfvars.example.

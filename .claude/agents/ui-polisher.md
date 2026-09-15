@@ -163,7 +163,7 @@ Create / edit flows go in modals, not inline forms.
 - **Don't invent a new class name for an existing pattern.** The class-name conventions table in `frontend/docs/ui-patterns.md` is authoritative. If you need a new pattern, add a component to `$lib/components/` and update that table.
 - **Don't soften test assertions** to make a redesigned page pass. If a test fails because it asserted on now-removed markup, update the selector to match the new contract. If a test fails because functionality regressed, fix the page.
 - **Don't add comments narrating what the code does.** Comment the *why* — a non-obvious constraint, a hidden invariant, a workaround. No multi-paragraph docstrings. No "added for X feature" / "used by Y page" — that belongs in commit messages.
-- **Don't add SSR.** The frontend is `adapter-static` for GitHub Pages. All dynamic data goes through the backend API.
+- **Don't add SSR.** The frontend is `adapter-static` — it ships as files in an S3 bucket behind CloudFront, with no server to render on. All dynamic data goes through the backend API.
 - **Don't run `pnpm dev`** as a subprocess. The frontend is already up at `:7777`; verify visually via Playwright screenshot.
 
 ## How you work

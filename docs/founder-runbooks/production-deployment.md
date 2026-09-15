@@ -13,10 +13,14 @@ on fire.
 
 ## Current state
 
-`infra/` contains Terraform skeleton: VPC, ECS stack, RDS, KMS, S3,
-CloudFront. Most modules are written, but **nothing is deployed**.
-The `backend/.env.sops` file exists but hasn't been filled in with
-real values.
+`infra/` holds the account substrate — the app KMS key, the S3 buckets, the
+`feohledger.com` certificate, a cost budget and the domain's registration
+settings — and it was **applied to the FeohLedger account on 2026-09-15**. The
+workload stack (the single VM in `docs/minimal-deployment.md`, or VPC, ECS, RDS
+and CloudFront) is not built yet, so **the app itself is not deployed**. No
+deployed secret has been authored yet — they will live
+sops-encrypted in the private `infra-secrets` repo (`feohledger/`),
+never in this public repo.
 
 ## What you need
 
@@ -25,6 +29,15 @@ real values.
 - A few hours of focused DevOps work
 
 ## Step 1 — AWS account setup
+
+**The account exists (2026-09-14).** The estate bootstrap
+(`new-project-account.sh feohledger`) created **FeohLedger** inside the estate
+AWS Organization, with the Terraform state bucket, the sops KMS key, a GitHub
+OIDC deploy role. It also delegated a `feohledger.jaredhoward.com` zone to the
+account, retired on 2026-09-15 once the platform moved to `feohledger.com`
+(Step 2). Operators sign in through IAM Identity
+Center (`aws sso login --profile feohledger`), not IAM users or root keys. That
+covers items 1, 2 and 5 below; 3 and 4 are still open.
 
 1. Create a dedicated AWS account for production. Don't mix with
    personal/sandbox.
@@ -38,19 +51,32 @@ real values.
 
 ## Step 2 — Domain + ACM certificate
 
-1. Register or transfer your domain into Route53 (cleanest DNS
-   management; ~$12/yr for `.com`).
-2. Request an ACM cert for `*.feohledger.com` in `us-east-1`
-   (CloudFront requires this region).
-3. Validate via DNS record (Terraform automates this if the domain is
-   in Route53).
+**Buy the domain by hand; Terraform (`infra/acm.tf`, `infra/domain.tf`) does
+the rest.** The platform domain is `feohledger.com`. Register it in the Route 53
+console while signed in to the FeohLedger account — one year, auto-renew on,
+privacy protection on — and click the link in the contact-verification email,
+or the registration is suspended. Route 53 creates the `feohledger.com` hosted
+zone in the account as part of the registration. Terraform deliberately does not
+buy the domain: that needs the registrant's contact details in configuration,
+and a registration Terraform owns can be deregistered by a destroy
+(`docs/decisions.md` §167).
+
+Then the first `terraform apply` issues the `us-east-1` certificate (CloudFront
+requires that region) for `feohledger.com` plus `*.feohledger.com` — the
+wildcard is what serves tenant subdomains — DNS-validates it in that zone, and
+adopts the registration so it stays auto-renewing, transfer-locked, private in
+WHOIS and delegated to that zone. Until the registration has created the zone,
+`terraform plan` fails on the zone lookup.
 
 ## Step 3 — Populate SOPS secrets
 
+Secrets live encrypted in the private `infra-secrets` repo, never here
+(this repo is public). From that clone, authenticated to the FeohLedger
+account:
+
 ```bash
-cd backend
-./bin/sops-init.sh   # if you haven't already
-sops backend/.env.sops
+cd ~/github/infra-secrets
+AWS_PROFILE=feohledger sops feohledger/prod.sops.yaml
 ```
 
 Required values for prod:
@@ -73,11 +99,10 @@ Required values for prod:
 
 ```bash
 cd infra
-sops -d terraform.tfvars.sops > terraform.tfvars
-terraform init
-terraform plan      # read this carefully — nothing surprising should appear
-terraform apply
-rm terraform.tfvars  # never check in plaintext
+# backend.config names the state bucket — see infra/README.md § Applying
+AWS_PROFILE=feohledger terraform init -backend-config=backend.config
+AWS_PROFILE=feohledger terraform plan -var-file=../../infra-secrets/feohledger/prod.tfvars -out=tfplan   # read this carefully
+AWS_PROFILE=feohledger terraform apply tfplan
 ```
 
 Expect errors on the first run. Common ones:
@@ -112,9 +137,10 @@ First deploy will fail until:
 The frontend is static (SvelteKit adapter-static) and goes to S3 +
 CloudFront. Two options:
 
-- **GitHub Pages** (cheapest, what the repo is set up for today).
-  Point your custom subdomain (e.g. `app.feohledger.com`) at Pages.
-  Fine for pre-revenue.
+- **Caddy on the pilot VM** (cheapest). It already serves the static
+  `frontend/build` alongside the backend — see `docs/minimal-deployment.md`.
+  Fine for pre-revenue, and it handles wildcard tenant subdomains, which
+  GitHub Pages cannot.
 - **S3 + CloudFront via Terraform** (production-appropriate). The
   Terraform already provisions the bucket + distribution; update the
   deploy workflow to `aws s3 sync ./build s3://<bucket>` instead of
@@ -129,7 +155,7 @@ From your laptop, against the production URL:
 1. Hit `GET /api/health` — should return `{"status": "ok"}`
 2. Create a test tenant via `scripts/create_tenant.py`
 3. Log in to the test tenant at
-   `https://<tenant-slug>.app.feohledger.com`
+   `https://<tenant-slug>.feohledger.com`
 4. Upload a test invoice → watch extraction complete in the UI
 5. Check CloudWatch Logs for the backend service — errors should be
    zero
@@ -146,10 +172,11 @@ From your laptop, against the production URL:
 
 ## Checklist
 
-- [ ] AWS prod account created
-- [ ] Domain in Route53, ACM cert validated
+- [x] AWS prod account created
+- [x] Domain in Route53, ACM cert validated (2026-09-15)
 - [ ] SOPS secrets populated
-- [ ] `terraform apply` clean
+- [x] `terraform apply` of the `infra/` substrate clean (2026-09-15)
+- [ ] Workload stack built and applied
 - [ ] GitHub Actions deploy workflow green
 - [ ] First tenant provisioned
 - [ ] Smoke test passes

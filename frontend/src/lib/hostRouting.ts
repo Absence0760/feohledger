@@ -32,13 +32,13 @@
  * ## The unconfigured default is the OLD behaviour, on purpose
  *
  * `PUBLIC_PLATFORM_DOMAINS` is baked into a static build, and every existing
- * deployment (CI, `deploy/deploy.sh`, GitHub Pages) builds without it. If an
- * empty list meant "every host is a vanity host", every one of those builds
- * would stop sending `X-Tenant-Slug` overnight and fall back to a `Host` map
- * that has no entries — i.e. total breakage on upgrade. So an empty list
- * replays {@link legacyClassify}, byte-for-byte the pre-change rule, and
- * vanity-domain support switches on only when an operator declares which
- * domains are theirs.
+ * deployment (CI, `deploy/deploy.sh`, the S3 + CloudFront release deploy)
+ * builds without it. If an empty list meant "every host is a vanity host",
+ * every one of those builds would stop sending `X-Tenant-Slug` overnight and
+ * fall back to a `Host` map that has no entries — i.e. total breakage on
+ * upgrade. So an empty list replays {@link legacyClassify}, byte-for-byte
+ * the pre-change rule, and vanity-domain support switches on only when an
+ * operator declares which domains are theirs.
  */
 
 /** What a hostname is, from the SPA's point of view. */

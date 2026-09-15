@@ -11,9 +11,9 @@ GitHub's private vulnerability reporting workflow instead.
 ### How to report
 
 1. Open the project's Security tab:
-   https://github.com/Absence0760/project-account-payables/security
+   https://github.com/Absence0760/feohledger/security
 2. Click **Report a vulnerability** (or follow the direct link:
-   https://github.com/Absence0760/project-account-payables/security/advisories/new).
+   https://github.com/Absence0760/feohledger/security/advisories/new).
 3. Fill in the form. Steps-to-reproduce and a minimal proof-of-concept
    make triage faster; speculation about impact is welcome but not
    required.

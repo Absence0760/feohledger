@@ -20,7 +20,10 @@ the control-plane org/user rows and the Postgres database they make.
 
 from __future__ import annotations
 
+import importlib.util
+import sys
 import uuid
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -32,6 +35,7 @@ from app.models import Base
 from app.models.billing import Subscription
 from app.models.organization import Organization
 from app.models.user import Role, User, UserRole
+from app.services import tenant_provisioning
 from app.services.tenant_provisioning import (
     CONTROL_TABLES,
     _create_postgres_database,
@@ -39,6 +43,7 @@ from app.services.tenant_provisioning import (
     provision_tenant,
 )
 from app.utils.passwords import pwd_context
+from app.utils.slug import SlugError
 
 # ---------------------------------------------------------------------------
 # Pure / structural — slug mapping + the control/tenant table split
@@ -237,6 +242,89 @@ async def test_create_postgres_database_url_parse_defaults_port_5432():
 
     assert captured["host"] == "localhost"
     assert captured["port"] == 5432
+
+
+# ---------------------------------------------------------------------------
+# Slug validation happens inside provision_tenant, before any database work
+# ---------------------------------------------------------------------------
+
+_CREATE_TENANT_CLI = Path(__file__).resolve().parent.parent / "scripts" / "create_tenant.py"
+
+
+def _forbid_database_work(monkeypatch):
+    """Fail the test if provisioning reaches its first database-touching step."""
+    create_db = AsyncMock(side_effect=AssertionError("created a database for an invalid slug"))
+    monkeypatch.setattr(tenant_provisioning, "_create_postgres_database", create_db)
+
+    def _no_control_session(*_args, **_kwargs):
+        raise AssertionError("opened a control-plane session for an invalid slug")
+
+    monkeypatch.setattr(tenant_provisioning, "control_session_factory", _no_control_session)
+    return create_db
+
+
+@pytest.mark.parametrize(
+    "bad_slug",
+    [
+        "api",  # reserved — with tenants on <slug>.<platform domain>, the API host
+        "www",  # reserved
+        "1acme",  # must start with a letter
+        "Acme",  # upper-case
+        "ac--me",  # consecutive hyphens
+        "a" * 31,  # too long
+    ],
+)
+async def test_provision_tenant_rejects_invalid_slug_before_any_database_work(
+    monkeypatch, bad_slug
+):
+    # The API callers validate first, but scripts/create_tenant.py passes an
+    # operator-typed slug straight through, so the check has to live here.
+    create_db = _forbid_database_work(monkeypatch)
+
+    with pytest.raises(SlugError):
+        await provision_tenant(
+            company_name="Nope Co",
+            slug=bad_slug,
+            admin_email="admin@nope.test",
+            admin_name="Nope Admin",
+            admin_password="Aa1-not-used-000000",
+        )
+
+    create_db.assert_not_awaited()
+
+
+async def test_create_tenant_cli_exits_2_on_a_reserved_slug(monkeypatch, capsys):
+    """A reserved slug stops the CLI with a readable error, not a traceback."""
+    create_db = _forbid_database_work(monkeypatch)
+    spec = importlib.util.spec_from_file_location("_create_tenant_cli", _CREATE_TENANT_CLI)
+    cli = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(cli)
+    engine = MagicMock()
+    engine.dispose = AsyncMock()
+    monkeypatch.setattr(cli, "control_engine", engine)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "create_tenant.py",
+            "--name",
+            "Api Co",
+            "--slug",
+            "api",
+            "--admin-email",
+            "admin@api.test",
+            "--admin-password",
+            "Aa1-not-used-000000",
+        ],
+    )
+
+    with pytest.raises(SystemExit) as exc_info:
+        await cli.main()
+
+    assert exc_info.value.code == 2
+    assert "invalid slug 'api'" in capsys.readouterr().err
+    create_db.assert_not_awaited()
+    engine.dispose.assert_awaited_once()
 
 
 # ---------------------------------------------------------------------------

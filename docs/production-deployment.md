@@ -152,8 +152,8 @@ FEOH_REDIS_URL=redis://elasticache-host:6379
 # Email + signup
 FEOH_EMAIL_PROVIDER=ses
 FEOH_EMAIL_FROM=no-reply@feohledger.com
-FEOH_PUBLIC_URL=https://app.feohledger.com
-FEOH_TENANT_URL_TEMPLATE=https://{slug}.app.feohledger.com
+FEOH_PUBLIC_URL=https://feohledger.com
+FEOH_TENANT_URL_TEMPLATE=https://{slug}.feohledger.com
 FEOH_HCAPTCHA_SECRET=<from hCaptcha dashboard>
 FEOH_HCAPTCHA_SITEKEY=<from hCaptcha dashboard>
 ```
@@ -250,6 +250,12 @@ task), `iam:PassRole` for the task + execution roles, `lambda:UpdateFunctionCode
 on the worker functions, S3 sync, and CloudFront invalidation. Store its ARN as
 the `AWS_DEPLOY_ROLE_ARN` **environment secret** on `production`.
 
+**Status:** the role exists. The estate account bootstrap created
+`feohledger-deploy` in the FeohLedger AWS account with exactly that trust policy
+(this repo + the `production` environment) and **no permissions**. Its
+least-privilege policy lands with the workload stack it has to name — tracked in
+`docs/followups.md`.
+
 ### Required configuration
 
 | Name | Kind | Scope | Purpose |
@@ -276,11 +282,15 @@ a release won't turn it red before the infrastructure exists. To go live:
 
 1. Build the AWS infra in `infra/` (ECR, ECS cluster/service/task family,
    frontend S3 bucket, CloudFront distribution, the three worker Lambda
-   functions + their SQS triggers) — the stack today is KMS + S3 buckets only.
+   functions + their SQS triggers) — the stack today is the KMS key, the S3
+   buckets and the us-east-1 ACM certificate for the platform domain
+   (`infra/acm.tf`, output `platform_certificate_arn`), which the distribution
+   attaches.
 2. Provision each worker function with its `ImageConfig` — entrypoint
    `python -m awslambdaric`, command its handler (see *Lambda workers* above).
    The RIC is already bundled in the image, so nothing else is needed here.
-3. Create the OIDC deploy role and store `AWS_DEPLOY_ROLE_ARN`.
+3. Attach the deploy role's least-privilege policy (the role itself already
+   exists — see *Credentials*) and store `AWS_DEPLOY_ROLE_ARN`.
 4. Set the environment variables above on the `production` environment and the
    protection rules (reviewer / wait timer).
 5. Set the repository variable `AWS_DEPLOY_ENABLED=true`.

@@ -1,11 +1,7 @@
-# Copy this file to terraform.tfvars and fill in the values, OR use SOPS:
-#   cp terraform.tfvars.example terraform.tfvars
-#   # edit values...
-#   sops -e terraform.tfvars > terraform.tfvars.sops && rm terraform.tfvars
-#
-# Plaintext terraform.tfvars is gitignored. The encrypted terraform.tfvars.sops
-# is what gets committed. See .sops.yaml and backend/CLAUDE.md § Secrets
-# management.
+# Template for this module's variables. Nothing in here is secret, but a
+# filled copy is operator config (bucket names, alert addresses), so it is never
+# committed to this public repo: keep the canonical copy in the private
+# infra-secrets repo and pass it with -var-file — see README.md.
 
 # Primary AWS region.
 aws_region = "us-east-1"
@@ -22,6 +18,7 @@ environment = "prod"
 # names reserved briefly to prevent takeover).
 invoice_files_bucket_name = "feohledger-invoices-prod-REPLACE"
 audit_logs_bucket_name    = "feohledger-audit-logs-prod-REPLACE"
+access_logs_bucket_name   = "feohledger-access-logs-prod-REPLACE"
 backups_bucket_name       = "feohledger-backups-prod-REPLACE"
 
 # --- Object Lock retention --------------------------------------------------
@@ -37,14 +34,20 @@ backups_bucket_name       = "feohledger-backups-prod-REPLACE"
 # Lock — this lifecycle window is the whole retention/cost story.
 # backup_retention_days = 90
 
-# --- Placeholders for future real resources ---
-#
-# When the ECS/ALB/RDS/CloudFront stack lands, put its secrets here:
-#   - rds_master_password
-#   - anthropic_api_key
-#   - lithic_api_key / nium_client_secret
-#   - github_repo (for OIDC role trust policy)
-#   - domain_name / route53_zone_id
-#
-# Mirror the FEOH_* env vars in backend/.env.example — anything in there that
-# is a real secret belongs in this file once deployed to AWS.
+# --- Platform domain ------------------------------------------------------------
+# The registered apex the ACM certificate covers and domain.tf manages. Register
+# it through Route 53 in this account first — that creates its hosted zone.
+# domain_name = "feohledger.com"
+
+# --- Cost alerts ----------------------------------------------------------------
+# Every budget notification (50 % / 100 % actual, 100 % forecast) goes to these
+# addresses. Required, with no default, so the real address never lands in this
+# public repo — and the example.com placeholder is rejected on plan.
+budget_alert_emails = ["alerts@example.com"]
+# monthly_budget_limit_usd = 25
+
+# --- Secrets ------------------------------------------------------------------
+# None, and a secret never goes in a tfvars. When the ECS/ALB/RDS stack lands,
+# its secrets (rds_master_password, …) are read from the sops-encrypted
+# infra-secrets/feohledger/prod.sops.yaml via the carlpett/sops provider —
+# README.md § Secrets.

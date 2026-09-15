@@ -3,7 +3,7 @@
 **Why this matters**: The white-label sale is "our AP portal, on our
 domain". A partner reselling FeohLedger, or a direct customer with a
 brand team, will ask for `acme.acmecorp.com` instead of
-`acme.app.feohledger.com`. The app code for this ships — the tenant
+`acme.feohledger.com`. The app code for this ships — the tenant
 resolver maps an inbound `Host` back to a tenant, and the Custom
 Domains panel registers it. What does **not** ship is the DNS record
 and the TLS certificate. Those are yours, and they are different work
@@ -130,11 +130,11 @@ The record's target depends on your shape.
 
 | Shape | Record the customer creates |
 |---|---|
-| **Minimal (Caddy on one VM)** | `acme.acmecorp.com` → `CNAME` to your app host (`app.feohledger.com`), or an `A` record to the VM's IP. Either is fine — Caddy follows DNS for the HTTP-01 challenge. |
+| **Minimal (Caddy on one VM)** | `acme.acmecorp.com` → `CNAME` to your app host (`feohledger.com`), or an `A` record to the VM's IP. Either is fine — Caddy follows DNS for the HTTP-01 challenge. |
 | **AWS (CloudFront)** | `acme.acmecorp.com` → `CNAME` to the CloudFront distribution's domain name (`dxxxxxxxxxxxxx.cloudfront.net`, from the distribution's General tab). **CONFIRM ON FIRST RUN** — the distribution does not exist yet; nothing in `infra/` creates it. |
 
 Because the vanity host lives in the *customer's* zone, your own
-wildcard record (`*.app.feohledger.com`, the one that makes
+wildcard record (`*.feohledger.com`, the one that makes
 `deploy/add-tenant.sh` need no DNS work) does **not** cover it. Every
 vanity domain is a per-customer DNS step.
 
@@ -183,7 +183,7 @@ Constraints worth knowing:
 - **One certificate per hostname.** Let's Encrypt's headline rate limit
   is per *registered domain* — and each customer's vanity domain is its
   own registered domain, so the "~50 certs/week" ceiling
-  `docs/minimal-deployment.md` cites for your own `*.app.feohledger.com`
+  `docs/minimal-deployment.md` cites for your own `*.feohledger.com`
   hosts effectively never binds here. The limit that *can* bite is
   repeated **failed** validations for one hostname (typically while DNS
   is still wrong). Fix DNS, then retry — don't loop the reload.
@@ -299,7 +299,7 @@ Add the **registrable domain** to `FEOH_CORS_PRODUCTION_DOMAIN` — it is
 comma-separated (`backend/app/main.py::_build_cors_origin_regex`):
 
 ```
-FEOH_CORS_PRODUCTION_DOMAIN=app.feohledger.com,acmecorp.com
+FEOH_CORS_PRODUCTION_DOMAIN=feohledger.com,acmecorp.com
 ```
 
 The regex built from this allows `https?://([\w-]+\.)?<domain>`, i.e.
@@ -366,7 +366,7 @@ curl -sS https://acme.acmecorp.com/ | grep -i '<title'
    → Network, confirm requests carry `X-Tenant-Slug: acme`. If they
    carry something else, the hostname violates the naming rule.
 8. **Confirm the platform subdomain still works.**
-   `https://acme.app.feohledger.com` must keep working — a custom
+   `https://acme.feohledger.com` must keep working — a custom
    domain is *additive*, not a move, and it is your fallback when the
    customer's DNS breaks.
 9. **Cross-tenant negative check.** Log in to a *different* tenant and
@@ -387,7 +387,7 @@ resolves the tenant from the `Host` header. What does *not* follow
 automatically is where the IdP sends the user **back**: the OIDC `redirect_uri`
 and the SAML bridge URL are values registered inside the customer's own Okta /
 Entra / Keycloak app, so until this step the login round-trips through
-`acme.app.feohledger.com` and lands the user there. It works; it just isn't
+`acme.feohledger.com` and lands the user there. It works; it just isn't
 white-label.
 
 This is an **operator-sequenced migration, not a config flip**, and the order
@@ -447,7 +447,7 @@ login for that tenant with an `invalid redirect_uri` from the IdP.
 
 5. **Only then, customer removes the old callback URI** from the IdP app — and
    only if they want to. Leaving it registered costs nothing and keeps
-   `acme.app.feohledger.com` working as a fallback, which is the same posture
+   `acme.feohledger.com` working as a fallback, which is the same posture
    Step 6.8 takes for the rest of the app.
 
 Reference: [`../authentication.md`](../authentication.md) § SSO on a white-label
@@ -464,7 +464,7 @@ procedure. Say them during the sale, not after go-live.
   supplier-portal links, approval deep links and virtual-card reveal links are
   built from `settings.brand.tenant_url_template` when the tenant sets it and
   the global `FEOH_TENANT_URL_TEMPLATE` when it does not — so they keep saying
-  `acme.app.feohledger.com` until an admin sets that field (the
+  `acme.feohledger.com` until an admin sets that field (the
   `/organization` Branding panel). Left unset, that is a supported end state,
   not a bug.
 - **SSO callbacks need the IdP re-registration in Step 7.** Same shape, a
@@ -475,7 +475,7 @@ procedure. Say them during the sale, not after go-live.
 - **A passkey is bound to the host it was registered on.** WebAuthn binds a
   credential to a Relying Party ID, and the RP is now resolved per request from
   the tenant's own registered custom domains — so passkeys *do* work on
-  `acme.acmecorp.com`, but one registered on `acme.app.feohledger.com` is a
+  `acme.acmecorp.com`, but one registered on `acme.feohledger.com` is a
   different RP and will not work here (and vice versa). Users on both hosts
   register once per host, or use **TOTP**.
 - **The API is not served under the vanity host.** `PUBLIC_API_URL` is

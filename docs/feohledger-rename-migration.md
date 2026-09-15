@@ -30,10 +30,11 @@ here: `AP_SECRET_KEY` left as-is doesn't crash, it quietly falls back to the
 sed -E 's/\bAP_([A-Z0-9_]+)=/FEOH_\1=/' backend/.env | diff backend/.env - | head
 ```
 
-For SOPS-managed environments, edit in place and re-encrypt:
+For SOPS-managed environments, edit the encrypted env in place (it lives in the
+private `infra-secrets` repo, never in this one) and re-encrypt:
 
 ```bash
-sops backend/.env.sops     # rename every AP_* key to FEOH_* in $EDITOR, save
+sops <encrypted env file>  # rename every AP_* key to FEOH_* in $EDITOR, save
 ```
 
 Do the same for any CI secrets, container env, and `deploy/.env` on the VM.
@@ -87,8 +88,7 @@ file has recorded:
 aws kms create-alias --alias-name alias/feohledger-sops \
   --target-key-id "$(aws kms describe-key --key-id alias/account-payables-sops \
                        --query KeyMetadata.KeyId --output text)"
-sops updatekeys backend/.env.sops            # rewrite the embedded alias ARN
-sops updatekeys infra/terraform.tfvars.sops
+sops updatekeys <each encrypted file>        # rewrite the embedded alias ARN
 aws kms delete-alias --alias-name alias/account-payables-sops   # optional, LAST
 ```
 
@@ -97,8 +97,9 @@ under and decryption resolves that recorded ARN, so deleting the old alias
 before `updatekeys` has rewritten it leaves the files undecryptable until
 the alias is restored.
 
-If no encrypted payload exists yet, skip this and run `./bin/sops-init.sh`,
-which now creates the alias under the new name.
+If no encrypted payload exists yet, skip this: the FeohLedger AWS account was
+bootstrapped with `alias/feohledger-sops` directly (the estate
+`new-project-account.sh`), so there is no old alias to move.
 
 ## 4. Local Keycloak / Authentik
 

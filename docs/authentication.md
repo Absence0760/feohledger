@@ -1016,7 +1016,7 @@ an auditor needs is stronger than a refusal row anyway: every **successful**
 `exception.resolved` / `exception.dismissed` row names its `actor_id` and its
 `invoice_id`, and the invoice carries the implicated set, so the control's
 *outcome* can be re-derived for every historical decision rather than only for
-the ones that tripped. See [decisions.md](decisions.md) §165.
+the ones that tripped. See [decisions.md](decisions.md) §169.
 
 ### Segregation of duties on a workflow's approval step
 

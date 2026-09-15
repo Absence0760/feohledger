@@ -9,7 +9,7 @@ scale-up target; this one is the pilot / first-customers footprint.
 everything else in-process.**
 
 ```
-        *.app.feohledger.com  ──────► one VM (EC2 t4g.small)
+        *.feohledger.com  ──────────► one VM (EC2 t4g.small)
                                  ├── Caddy         — TLS, static frontend, /api reverse-proxy
                                  ├── FastAPI       — backend container (uvicorn)
                                  ├── Postgres 16   — pgvector/pgvector:pg16 (control + tenant DBs)
@@ -51,8 +51,8 @@ see [Upgrade triggers](#upgrade-triggers) for when each piece graduates.
 | S3 (files + backups, pilot volume) + SES | ~$1 |
 | **Total** | **~$22** |
 
-Domain registration (~$12/yr) extra if you buy a product apex instead of using
-a delegated `<project>.jaredhoward.com` zone.
+The domain is extra: `feohledger.com` is registered through Route 53 at
+$16/year (`docs/decisions.md` §167).
 
 **Cheaper still:** a Hetzner CAX11 (2 vCPU ARM, 4 GB, ~€3.79) replaces the
 EC2+EBS+IPv4 rows → **~$7/month total** (keep KMS + Route 53 + S3 on AWS).
@@ -101,8 +101,8 @@ resize is a stop → change-type → start. Add 2 GB of swap either way.
   instead if this is customer-facing).
 - Bootstrap the project's subdir in the private `infra-secrets` repo
   (`bin/sops-init.sh --project <slug> --region <r>` there — see
-  `~/github/project-mgmt/docs/secrets-management.md`). Do **not** run this
-  repo's in-repo `./bin/sops-init.sh`.
+  `~/github/project-mgmt/docs/secrets-management.md`). This repo has no sops
+  config of its own (`docs/decisions.md` §165).
 - `terraform apply` the existing `infra/` module for the S3 buckets + app KMS
   key.
 
@@ -128,8 +128,8 @@ resize is a stop → change-type → start. Add 2 GB of swap either way.
   deploy window), 2 GB swap, the nightly backup cron, and the IMDS hop-limit
   fix. Node/pnpm are *not* needed on the VM — the frontend builds inside a
   `node:24` container.
-- DNS: three records → the instance IP: `app.feohledger.com`, `api.feohledger.com`, and a
-  **wildcard `*.app.feohledger.com`** so tenant onboarding never touches DNS again.
+- DNS: three records → the instance IP: `feohledger.com`, `api.feohledger.com`, and a
+  **wildcard `*.feohledger.com`** so tenant onboarding never touches DNS again.
   (A DNS wildcard needs no wildcard *certificate* — Caddy still issues
   ordinary per-host HTTP-01 certs.)
 
@@ -156,7 +156,7 @@ Four services (see [`deploy/README.md`](../deploy/README.md) for operations):
   `deploy/tenants.caddy` host list (one block per tenant subdomain —
   per-host HTTP-01 certs, no DNS plugin; maintained by `add-tenant.sh`, not
   by hand):
-  - `app.feohledger.com` + each tenant host → SPA (`try_files {path} /index.html`)
+  - `feohledger.com` + each tenant host → SPA (`try_files {path} /index.html`)
   - `api.feohledger.com` → `reverse_proxy api:8000`
 
 The frontend is built by the deploy script with
@@ -173,10 +173,10 @@ Beyond the committed defaults, the deployed env sets at minimum:
 | `POSTGRES_PASSWORD` | `openssl rand -hex 24` (compose derives `FEOH_DATABASE_URL` / `FEOH_REDIS_URL` from it — don't set those) |
 | `FEOH_S3_BUCKET` | invoice-files bucket; set `FEOH_S3_ENDPOINT_URL` / `FEOH_S3_ACCESS_KEY` / `FEOH_S3_SECRET_KEY` **empty** → real S3 via the instance-profile credential chain |
 | `FEOH_MFA_ENABLED` / `FEOH_HSTS_ENABLED` | `true` / `true` |
-| `FEOH_WEBAUTHN_RP_ID` / `FEOH_WEBAUTHN_ORIGINS` | `app.feohledger.com` / `https://app.feohledger.com,https://*.app.feohledger.com` — with MFA on, the localhost dev defaults reject every prod origin and passkeys silently fail; the wildcard entry covers each tenant subdomain |
-| `FEOH_PUBLIC_URL` / `FEOH_API_PUBLIC_URL` | `https://app.feohledger.com` / `https://api.feohledger.com` |
-| `FEOH_TENANT_URL_TEMPLATE` | `https://{slug}.app.feohledger.com` |
-| `FEOH_CORS_PRODUCTION_DOMAIN` | `app.feohledger.com` |
+| `FEOH_WEBAUTHN_RP_ID` / `FEOH_WEBAUTHN_ORIGINS` | `feohledger.com` / `https://feohledger.com,https://*.feohledger.com` — with MFA on, the localhost dev defaults reject every prod origin and passkeys silently fail; the wildcard entry covers each tenant subdomain |
+| `FEOH_PUBLIC_URL` / `FEOH_API_PUBLIC_URL` | `https://feohledger.com` / `https://api.feohledger.com` |
+| `FEOH_TENANT_URL_TEMPLATE` | `https://{slug}.feohledger.com` |
+| `FEOH_CORS_PRODUCTION_DOMAIN` | `feohledger.com` |
 | `FEOH_DEPLOYED_REGION` | the region this VM runs in (`us`/`eu`/`uk`/`ca`/`au`) — advisory only, but empty makes every tenant's data-residency `alignment` report `unknown` / `aligned: null` ("cannot attest") |
 | `FEOH_EMAIL_PROVIDER` / `FEOH_EMAIL_FROM` | `ses` / verified sender |
 | `FEOH_APPROVAL_SIGNING_KEY` + the other HMAC signing keys | real values (each key's presence is its feature's on-switch; leave unset = feature off) |
@@ -245,7 +245,7 @@ rebuilding the stack:
 | Managed Redis (ElastiCache) | Same HA push | Same seam: set `FEOH_REDIS_URL` in the sops env, redeploy. Redis holds only ephemeral state (blocklist / MFA / rate limits) — no data migration. |
 | SQS + Lambda async workers | Extraction/OCR saturates the VM | Already implemented and bundled in the same image (`awslambdaric`). Provision queues + functions (production-deployment.md § Lambda workers), flip `FEOH_EXTRACTION_MODE=lambda` + `FEOH_SQS_*_QUEUE_URL` in the sops env, redeploy. Same pattern for the ERP and audit modes. |
 | CloudFront + S3 frontend | Global latency / offloading the VM | The build artifact is identical. Arm the committed `aws-deploy.yml` pipeline (its § Arming checklist), then drop the SPA hosts from Caddy. |
-| Wildcard TLS certificate | Tenant count makes per-host certs noisy (Let's Encrypt ~50 certs/week limit) | DNS already wildcards; swap the Caddy image for an xcaddy build with the Route 53 DNS plugin and replace `tenants.caddy` with one `*.app.feohledger.com` site block. |
+| Wildcard TLS certificate | Tenant count makes per-host certs noisy (Let's Encrypt ~50 certs/week limit) | DNS already wildcards; swap the Caddy image for an xcaddy build with the Route 53 DNS plugin and replace `tenants.caddy` with one `*.feohledger.com` site block. |
 | Real provider adapters (payments, cards, AI extraction, ERP, sanctions…) | Going live with real money / real data | Per-org `Organization.settings.*` flips + sops keys — zero infrastructure. |
 | Background sweeps (payment reconciler, audit shipping, renewals, dunning…) | First real payments / compliance needs | `FEOH_*_ENABLED=true` in the sops env, redeploy. |
 | SES production access | Emailing unverified recipients (self-service signup) | AWS console request; until it clears, `FEOH_EMAIL_PROVIDER=console` + CLI-provisioned tenants. |

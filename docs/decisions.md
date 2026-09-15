@@ -6409,7 +6409,137 @@ statement it was cleaning up after. `tests/test_password_hash_upgrade.py` provok
 real (an over-long digest hitting `hashed_password`'s own `VARCHAR(255)`; a second session changing
 the row mid-hash) rather than mocking them, which is the only reason the expired-instance trap was
 found before a deployment rather than after one.
-## 165. An exception's segregation subject is the payable it blocks, not whoever raised the flag
+
+## 165. The in-repo sops scaffold is deleted, not left dormant behind a warning
+
+**Decided:** 2026-09-14 · `.sops.yaml` + `bin/sops-init.sh` (removed), `.gitignore`, `.github/workflows/env-isolation.yml`, `backend/CLAUDE.md`, `infra/README.md`
+
+§12 moved production secrets to the private `infra-secrets` repo but left the older template
+generation's scaffold standing: a root `.sops.yaml` with placeholder ARNs, `bin/sops-init.sh`,
+`.gitignore` negations that re-included `.env.sops` and `*.tfvars.sops`, and a dozen docs telling an
+operator to run the script and commit what it produced. The only thing between that scaffold and
+ciphertext in public history was one sentence in the root `CLAUDE.md`.
+
+That sentence stopped being enough the day the FeohLedger AWS account was bootstrapped. Until then
+the script could not have succeeded — there was no account to create `alias/feohledger-sops` in.
+Now the alias exists and resolves, so the script would find it, write its ARN, seed
+`backend/.env.sops` and `infra/terraform.tfvars.sops`, and print the `git add` for both.
+
+So the scaffold goes, and the rule gets an enforcement instead of a warning. `.gitignore` ignores
+`*.sops` and `*.sops.yaml` rather than re-including them, and `env-isolation.yml` fails on any
+tracked sops payload, any `.env.sops`, and an in-repo `.sops.yaml` — the creation rule belongs to the
+repo that holds the ciphertext. Every doc now describes the one real path: `sops
+feohledger/prod.sops.yaml` from the `infra-secrets` clone.
+
+Rejected: repointing the script at `infra-secrets`, because that repo already ships its own
+`bin/sops-init.sh --project <slug>` and `.sops.yaml` rule, and two bootstraps for one key is how an
+operator ends up with a second key in the wrong region (the estate script defaults to
+`ap-southeast-2`). Rejected too: wiring the `carlpett/sops` provider into `infra/` now. Nothing it
+would read exists yet — `prod.sops.yaml` is created with the first real secret — and a `sops_file`
+data source on a missing file fails every plan. `infra/README.md` § Secrets carries the snippet for
+when it is needed.
+
+## 166. The access-log sink is SSE-S3, the one bucket not under the app key
+
+**Decided:** 2026-09-15 · `infra/s3.tf`, `infra/kms.tf`, `infra/tests/guardrails.tftest.hcl`
+
+Every bucket in `infra/s3.tf` was SSE-KMS under the app key — including the bucket the other three
+send their server-access logs to — and the access-logging control read as done. It could never have
+delivered a log. AWS's documentation for server-access logging says the destination must use SSE-S3,
+and that a destination using SSE-KMS may receive log objects encrypted with a key the owner cannot
+access. And nothing granted the delivery service a write in the first place: the sink had no bucket
+policy for `logging.s3.amazonaws.com` and no log-delivery ACL, whatever its ownership-controls
+comment said. The statement in the app key's policy that let the logging principal use the key
+addressed neither problem, and its comment claimed it was the fix.
+
+It was caught reading the module before its first apply, so no real bucket ever went unlogged. The
+fix follows AWS's documented setup: the sink is SSE-S3, ACLs are disabled (`BucketOwnerEnforced`),
+and a bucket policy grants `s3:PutObject` to the logging principal, pinned to this account and to the
+three source buckets so no other bucket can use this one as its log destination. The logging
+configurations depend on both, and the key-policy statement is gone. `guardrails.tftest.hcl` pins
+the encryption, the ownership setting and the grant, because `terraform validate` cannot see any of
+them and a real plan accepts the broken shape without complaint.
+
+The exception is narrow on purpose. The sink holds signal-of-access, not the audit trail — that is
+the Compliance-locked audit-logs bucket, still under the app key — and SSE-S3 still encrypts every
+log object at rest. It needs no Trivy suppression: the customer-managed-key rule (AWS-0132) passes
+on the SSE-S3 sink under both the version CI pins (0.70.0) and the current release.
+
+Rejected: keeping SSE-KMS and widening the key policy further, because the problem is the
+destination's encryption, not the key's grants. Rejected too: shipping the logs to CloudWatch Logs
+instead, which adds an ingestion bill and a second log store for records whose only job is to exist
+when an auditor asks. Dropping access logging was never an option: SOC 2 CC7.2 and AWS-0089 both
+expect it.
+
+## 167. The platform lives on feohledger.com — bought by hand, kept by Terraform
+
+**Decided:** 2026-09-15 · `infra/variables.tf`, `infra/domain.tf`, `infra/acm.tf`, `infra/tests/guardrails.tftest.hcl`, `docs/founder-runbooks/production-deployment.md`
+
+The account bootstrap gave FeohLedger a delegated `feohledger.jaredhoward.com` zone, and `infra/`
+issued its certificate there. That suits an internal tool and not this one, because the platform
+domain is not cosmetic here. Tenants live on `<slug>.<platform domain>`; the platform domain is
+derived from `FEOH_TENANT_URL_TEMPLATE` (§91); the passkeys users register are bound to their relying
+party's domain (§87); and customers register SSO redirect URIs under it at their own IdPs. Each of
+those breaks, or makes every customer redo something, when the domain changes after tenants exist.
+Nothing is deployed yet, so the move costs nothing today and more with every signup.
+
+The domain is bought by hand, not through `aws_route53domains_domain`. That resource needs the
+registrant's name, address and phone number as configuration — which would have to live in this
+public repo, or be threaded in from a private one, for a one-time purchase — and it owns the
+registration, so a destroy, or a refactor that renames the resource, can deregister the product's
+domain. Terraform owns the part that must not drift once the domain exists:
+`aws_route53domains_registered_domain` adopts the registration, keeps it auto-renewing,
+transfer-locked and private in WHOIS, and points its name servers at the zone the certificate
+validates in. Destroying that resource removes it from state and leaves the registration alone.
+
+`domain_name` now accepts only a name directly under a TLD, because a registration exists only for the
+apex; pointing it back at the estate subdomain fails at plan instead of at the Route 53 Domains API. A
+nested platform domain (`app.feohledger.com`, the shape `docs/minimal-deployment.md` uses on its
+single VM) would need that guard relaxed and the zone lookup split from the registered domain; nothing
+on AWS uses one today.
+
+The delegated zone and its NS record in `jaredhoward.com` are retired as an operator step, recorded in
+`docs/followups.md`. The delegation has to go before the zone, or the name is left delegated to name
+servers someone else can try to claim, and the estate bootstrap cannot express that order: the zone's
+`prevent_destroy` fails the plan, and the stage that owns the NS record does not run once
+`create_subdomain` is false.
+
+## 168. Tenants live on `<slug>.feohledger.com` on every deployment shape, so every provisioning path checks the slug
+
+**Decided:** 2026-09-15 · `deploy/env.example`, `deploy/README.md`, `deploy/tenants.caddy.example`, `docs/minimal-deployment.md`, `docs/production-deployment.md`, `docs/founder-runbooks/`, `infra/acm.tf`, `backend/app/services/tenant_provisioning.py`, `backend/scripts/create_tenant.py`
+
+The two deployment shapes disagreed about where a tenant lives. The Terraform certificate (§167)
+covers `feohledger.com` and `*.feohledger.com`, so the AWS path puts `acme` on `acme.feohledger.com`.
+The single-VM path — `deploy/env.example`, its Caddy host list and `docs/minimal-deployment.md` — put
+it one label deeper, on `acme.app.feohledger.com`, with the relying party, CORS domain and tenant URL
+template all on `app.feohledger.com`. Moving a pilot from the VM to AWS would have changed every
+tenant's URL, which is the move §167 says gets more expensive with every signup: passkeys are bound to
+their relying party, and customers register SSO callbacks under the host.
+
+Both shapes now use the apex. `FEOH_TENANT_URL_TEMPLATE` is `https://{slug}.feohledger.com`; the
+relying party and CORS domain are `feohledger.com`, with `https://*.feohledger.com` as the tenant
+origin; the marketing and signup surface is the apex itself (Caddy's `APP_DOMAIN` block, which
+`hostRouting.ts` classifies as the platform apex); and the API stays on `api.feohledger.com`. One
+certificate and one wildcard DNS record serve either shape, and the VM-to-AWS move changes no tenant
+URL.
+
+What it costs is that every first label under `feohledger.com` is now a candidate tenant slug, so a
+slug must never be able to claim an infrastructure host. `RESERVED_SLUGS` in `app/utils/slug.py`
+already holds `api`, `app`, `www`, `mail`, `docs`, `status` and the rest, and the email-intake host
+`ap` is out of reach because a slug needs at least three characters. But a reserved list protects
+hosts only if every path that creates a tenant checks it. Signup and partner provisioning called
+`validate_slug_format` before `provision_tenant`; the operator CLI, `scripts/create_tenant.py`, did
+not, so `create_tenant.py --slug api` would have provisioned a tenant whose URL is the API host.
+`provision_tenant` now validates the slug before any database work, so no caller can skip it, and the
+CLI turns the rejection into a plain error and exit code 2. `deploy/add-tenant.sh` keeps its own,
+looser pre-check; the backend is the authority, and the script stops under `set -euo pipefail` before
+it touches Caddy.
+
+Rejected: keeping `app.` for tenants. It leaves the apex free for a separate marketing site, but the
+SPA already serves marketing at the platform apex, and it costs every tenant URL an extra label and
+every certificate an extra `*.app.` SAN, for a separation nothing uses.
+
+## 169. An exception's segregation subject is the payable it blocks, not whoever raised the flag
 
 `docs/followups.md` carried this as *"exception resolution has no
 segregation-of-duties check"* with a prescribed fix: add
@@ -6545,7 +6675,7 @@ the uploader, the vendor or the amount. Each names the exit (escalate, or ask
 someone else), because a refusal with no next step is where an operator reaches
 for the opt-out.
 
-## 166. A machine that acts on a human's authority inherits that human's refusals
+## 170. A machine that acts on a human's authority inherits that human's refusals
 
 `run_agent` resolves exceptions too, and the obvious reading is that an
 autonomous agent is not a human actor and should not be caught by a human's

@@ -387,7 +387,7 @@ The rules that hold everywhere, so you know when you need to go read the detail:
 - **Svelte 5 runes** — `$state`, `$derived`, `$effect`, `$props`. No legacy options API.
 - **TypeScript** — `lang="ts"` on all `<script>` blocks.
 - **API access** — always through `src/lib/api.ts`, never raw `fetch()`.
-- **BASE_PATH** — set to `/<repo-name>` during CI builds for GitHub Pages asset paths.
+- **BASE_PATH** — URL prefix for serving under a sub-path. Unset everywhere today (the deploy serves from the CDN root); kept as an escape hatch.
 - **No SSR** — static adapter only. Dynamic data comes from the backend API.
 
 ### `networkidle` is not a readiness signal (tests-e2e/)
@@ -463,5 +463,5 @@ biometric login, swipe-to-approve.
 
 ## Deployment
 
-- **GitHub Pages**: publishing a GitHub release triggers `.github/workflows/deploy.yml`, whose `frontend` job builds and publishes to Pages. The workflow no-ops on push to `main` by design — the release tag is the gate so the deployed artifact matches a named version.
-- `build/.nojekyll` created at build time to bypass Jekyll processing
+- **S3 + CloudFront**: publishing a GitHub release triggers `.github/workflows/aws-deploy.yml`, whose `Deploy Frontend (S3 + CloudFront)` job builds, `aws s3 sync`s to the bucket with `--delete`, and invalidates the distribution. A published **release** is the only trigger — never a push to `main` and never an ad-hoc manual run — so the deployed artifact always matches a named version, and the job runs in the `production` environment behind its required reviewer.
+- Served from the bucket root, so the build sets no `BASE_PATH`.

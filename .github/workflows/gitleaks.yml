@@ -10,9 +10,10 @@ name: gitleaks
 #     vulns, not secrets.
 #   - Trivy backend-image scan (same workflow) — scans the built Docker
 #     image, not the source tree.
-#   - sops + AWS KMS for runtime secrets in `backend/.env.sops` and
-#     `infra/terraform.tfvars.sops` — defends correctly-stored secrets,
-#     doesn't catch a stray paste in a test file or a forgotten branch.
+#   - sops + AWS KMS for runtime secrets, kept in the private
+#     `infra-secrets` repo rather than this public one — defends
+#     correctly-stored secrets, doesn't catch a stray paste in a test
+#     file or a forgotten branch.
 #
 # What gitleaks adds: regex-matching against the entire working tree
 # AND git history, with a built-in rule set tuned for common token

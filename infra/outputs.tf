@@ -22,3 +22,13 @@ output "backups_bucket" {
   description = "Name of the S3 bucket that receives the nightly database dumps (deploy/backup.sh) — set it as BACKUP_S3_BUCKET in the deploy env."
   value       = aws_s3_bucket.backups.bucket
 }
+
+output "platform_certificate_arn" {
+  description = "ARN of the validated us-east-1 ACM certificate for the platform domain and its wildcard — for the CloudFront distribution (or an ALB listener) when the workload stack lands. Taken from the validation resource, so it only resolves once the certificate is ISSUED."
+  value       = aws_acm_certificate_validation.platform.certificate_arn
+}
+
+output "platform_zone_id" {
+  description = "Route 53 hosted zone ID of the platform domain, for the alias records the workload stack will add."
+  value       = data.aws_route53_zone.platform.zone_id
+}

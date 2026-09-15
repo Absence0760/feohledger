@@ -31,7 +31,7 @@ matching entry here carries the category, durable fix, and trigger. Keep the
 pair consistent — if an item leaves this file, its roadmap section either loses
 its `**Open:**` line or moves to the archive.
 
-Mirrored as GitHub issue [#321](https://github.com/Absence0760/project-account-payables/issues/321)
+Mirrored as GitHub issue [#321](https://github.com/Absence0760/feohledger/issues/321)
 for the tracker view. Keep the two reconciled when either moves.
 
 **Last reconciled:** 2026-09-14 (round 31) — five agents, each in its own git
@@ -863,7 +863,7 @@ control-design question.
       `tests/test_exception_raiser_stamping.py` is the enforcement that keeps the
       column honest — every `create_exception` site must pass the kwarg, and a
       literal `None` must be declared with its reason. See
-      [decisions.md](decisions.md) §165 (the subject inversion) and §166 (why the
+      [decisions.md](decisions.md) §169 (the subject inversion) and §170 (why the
       agent inherits).
 
 - [x] **DONE (round 28), under the repo owner's explicit authorisation** — which
@@ -2169,6 +2169,28 @@ durable fix stated in one sentence has usually not been tried.
       **Trigger:** the next MFA/step-up slice, or any decision to enable
       `sso_only` for a real tenant.
 
+### Surfaced by wiring the FeohLedger AWS account (2026-09-14)
+
+- [ ] **(c) The GitHub deploy role exists but can do nothing.** The estate
+      account bootstrap created `feohledger-deploy` in the FeohLedger account,
+      trusted only from this repo's `production` environment, and attached no
+      policy — on purpose. `aws-deploy.yml` needs ECR push, ECS
+      register/update + `run-task`/`describe-tasks`, `iam:PassRole` on the task
+      and execution roles, `lambda:UpdateFunctionCode`, S3 sync and CloudFront
+      invalidation (`docs/production-deployment.md` § Credentials), and every
+      one of those targets a resource `infra/` does not define yet. A policy
+      written today would either be `*`-wide or name ARNs that do not exist, so
+      nothing was written. **Durable fix:** an `aws_iam_role_policy` on the
+      bootstrap role — looked up with `data "aws_iam_role"`, never managed from
+      here — in the same change that adds the ECR repository, ECS service,
+      frontend bucket + distribution and worker Lambdas, scoped to exactly those
+      ARNs. That change also reads its first real secret (the RDS master
+      password) through the `carlpett/sops` data source `infra/README.md`
+      § Secrets sketches, likewise unwired until something needs it.
+      `AWS_DEPLOY_ENABLED` stays unset until both land. **Trigger:** the
+      workload-stack build-out — step 1 of `docs/production-deployment.md`
+      § Arming the AWS pipeline.
+
 ## (a) Blocked on external credentials, accounts, or hardware
 
 None of these are startable from the editor. They are listed so they don't read
@@ -2236,8 +2258,9 @@ env change, end-to-end verification through the public branding endpoint,
 rollback, and the failure modes this code path actually has.
 
 The whole AWS branch and every quota figure are marked confirm-on-first-run:
-`infra/` is KMS + S3 only, so no distribution or certificate exists yet, and no
-ARN or resource name was invented.
+`infra/` defines no CloudFront distribution yet (the platform certificate has
+existed since 2026-09-15, but nothing serves with it), and no ARN or resource
+name was invented.
 
 **Restored, without the credential that made it inert — CLOSED (round 20).**
 `.github/workflows/dependabot-lockfile.yml` is back. The reason it was removed

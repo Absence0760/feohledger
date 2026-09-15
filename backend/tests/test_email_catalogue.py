@@ -78,6 +78,30 @@ def test_catalogue_parity_no_empty_no_placeholder_drift(locale: str):
         )
 
 
+# Product names the FeohLedger rename retired. "accounts payable" is the domain,
+# not the brand, and stays legitimate copy — the pattern cannot match it.
+_RETIRED_BRAND = re.compile(r"account[-_ ]payables|betterap", re.IGNORECASE)
+
+
+@pytest.mark.parametrize("locale", SUPPORTED_EMAIL_LOCALES)
+def test_no_retired_brand_name_in_any_locale(locale: str):
+    """A translation is a second copy of the brand, and a rename can miss it.
+
+    German shipped "Account-Payables-Arbeitsbereich" in both signup subjects
+    long after every other locale said FeohLedger — the first email a new
+    German-speaking tenant ever receives. The parity test above can't see it:
+    the placeholders were faithful, only the product name was stale.
+    """
+    offenders = {
+        key: translate(key, locale)
+        for key in all_keys()
+        if _RETIRED_BRAND.search(translate(key, locale))
+    }
+    assert offenders == {}
+    for key in ("signup.verify.subject", "signup.welcome.subject"):
+        assert "FeohLedger" in translate(key, locale), f"{locale}:{key}"
+
+
 def test_translate_fills_placeholders():
     out = translate("notif.invoice_paid.title", "en", ref="Invoice X (Acme)")
     assert "Invoice X (Acme)" in out

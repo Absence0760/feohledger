@@ -126,7 +126,7 @@ the run. NULL on both axes is permissive; `settings.exceptions
 .require_segregation: false` is the explicit per-org opt-out. Full rules,
 including what each refusal says and why a refusal is logged rather than
 audited: [`docs/authentication.md`](../../docs/authentication.md) § Segregation
-of duties on the exception queue, and `docs/decisions.md` §165–§166.
+of duties on the exception queue, and `docs/decisions.md` §169–§170.
 
 **Being the chokepoint is what makes it safe to put the check here**, and it is
 also why the two non-queue callers above need no exemption: neither
