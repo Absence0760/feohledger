@@ -584,7 +584,7 @@ class Settings(BaseSettings):
     billing_provider: str = "mock"  # "mock" (dev default) | "stripe_billing"
     # Live Stripe Billing credentials — NO hardcoded fallback. Empty by default;
     # the stripe_billing adapter fails closed without them. Real values arrive
-    # via sops (backend/.env.sops) in deployed envs, never committed plaintext.
+    # via sops (the private infra-secrets repo) in deployed envs, never committed.
     billing_stripe_api_key: str = ""
     billing_stripe_webhook_secret: str = ""
     # Reject a Stripe billing webhook whose `Stripe-Signature` `t=` is more than
@@ -627,7 +627,7 @@ class Settings(BaseSettings):
     # by the bridge page within a single redirect hop.
     saml_handoff_ttl_seconds: int = 120
     # Optional SP signing keypair, used ONLY when a tenant requires SP-signed
-    # AuthnRequests. Real secret -> backend/.env.sops (KMS) in deployed envs;
+    # AuthnRequests. Real secret -> sops (KMS, private infra-secrets) in deployed envs;
     # empty by default (local Keycloak runs with client-signature off, so no SP
     # key is needed to run locally). NEVER given a hardcoded non-empty fallback.
     saml_sp_private_key: str = ""

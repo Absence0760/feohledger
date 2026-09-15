@@ -13,10 +13,11 @@ on fire.
 
 ## Current state
 
-`infra/` contains Terraform skeleton: VPC, ECS stack, RDS, KMS, S3,
-CloudFront. Most modules are written, but **nothing is deployed**.
-The `backend/.env.sops` file exists but hasn't been filled in with
-real values.
+`infra/` holds the security substrate (KMS key + S3 buckets); the VPC,
+ECS, RDS and CloudFront stack is not written yet, and **nothing is
+deployed**. No deployed secret has been authored yet — they will live
+sops-encrypted in the private `infra-secrets` repo (`feohledger/`),
+never in this public repo.
 
 ## What you need
 
@@ -47,10 +48,13 @@ real values.
 
 ## Step 3 — Populate SOPS secrets
 
+Secrets live encrypted in the private `infra-secrets` repo, never here
+(this repo is public). From that clone, authenticated to the FeohLedger
+account:
+
 ```bash
-cd backend
-./bin/sops-init.sh   # if you haven't already
-sops backend/.env.sops
+cd ~/github/infra-secrets
+AWS_PROFILE=feohledger sops feohledger/prod.sops.yaml
 ```
 
 Required values for prod:
@@ -73,11 +77,9 @@ Required values for prod:
 
 ```bash
 cd infra
-sops -d terraform.tfvars.sops > terraform.tfvars
 terraform init
 terraform plan      # read this carefully — nothing surprising should appear
 terraform apply
-rm terraform.tfvars  # never check in plaintext
 ```
 
 Expect errors on the first run. Common ones:

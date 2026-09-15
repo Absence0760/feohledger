@@ -9,9 +9,6 @@
 #               versioning + Object Lock
 #
 # The `terraform` block pins versions and declares an S3 remote state backend.
-# Backend config values live in terraform.tfvars.sops (SOPS-encrypted) so the
-# root module can be re-initialised without each operator typing the bucket
-# name by hand.
 
 terraform {
   required_version = ">= 1.6"

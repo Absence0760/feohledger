@@ -15,7 +15,6 @@ infra/
 │                                #   + access-logs sink + backups bucket (lifecycle-expired, no lock)
 ├── outputs.tf                   # exports for downstream modules
 ├── terraform.tfvars.example     # committed template
-├── terraform.tfvars.sops        # encrypted, committed (created by bin/sops-init.sh)
 └── README.md                    # this file
 ```
 
@@ -61,54 +60,30 @@ rm backend_override.tf           # remove before any real plan/apply
 Real `apply` / `plan` runs target the S3 backend; pass the bucket + DynamoDB
 table via `terraform init -backend-config=…` once they exist.
 
-## SOPS + KMS bootstrap
+## Secrets
 
-The SOPS KMS key is **not** provisioned by the Terraform module above. It's created out-of-band by `bin/sops-init.sh` so the key exists before Terraform has a way to read its own secrets (chicken-and-egg avoidance). The script is idempotent: re-runs reuse the existing key.
+This repo is **public**, so it holds no secret — not even an encrypted one (`../docs/decisions.md` §12, §165). The project's secrets live sops-encrypted in the private `Absence0760/infra-secrets` repo under `feohledger/`, keyed by `alias/feohledger-sops`. The estate account bootstrap (`~/github/templates/scripts/new-project-account.sh`) created that key in the FeohLedger account, alongside the state bucket and the deploy role; this module neither creates nor manages it.
 
-```bash
-./bin/sops-init.sh
+Nothing this module reads is secret today — every variable is operator config, not a credential. When the first real secret lands (the RDS master password, with the workload stack), read it in place with the `carlpett/sops` provider, never through a committed or decrypted tfvars:
+
+```hcl
+data "sops_file" "secrets" {
+  source_file = "${path.module}/../../infra-secrets/feohledger/prod.sops.yaml"
+}
+# ... = data.sops_file.secrets.data["rds_master_password"]
 ```
 
-That single command:
-1. Checks prereqs (`sops`, `aws`, `jq`, authenticated AWS CLI)
-2. Creates or discovers the KMS key + alias (`alias/feohledger-sops`)
-3. Replaces placeholders in `.sops.yaml` with the real ARN
-4. Seeds `infra/terraform.tfvars.sops` and `backend/.env.sops` from their `.example` siblings
-
-After the script finishes, edit the two encrypted files with `sops <file>.sops` and commit the results.
-
-Rotation for the SOPS key is documented in `../docs/secrets-rotation.md` — the key created by `sops-init.sh` is enrolled in AWS's annual auto-rotation at creation time, same as the app KMS key in `kms.tf`.
-
-## Editing secrets
-
-```bash
-sops infra/terraform.tfvars.sops      # decrypt → $EDITOR → re-encrypt on save
-sops backend/.env.sops
-```
-
-## Adding a new operator
-
-Grant the operator `kms:Decrypt` (and usually `kms:Encrypt`, `kms:GenerateDataKey`) on the KMS key via an IAM policy. No changes to `.sops.yaml` or re-encryption are needed — IAM is the source of truth.
+The path assumes `infra-secrets` is cloned beside this repo under `~/github/`. It is deliberately not wired yet: `prod.sops.yaml` is created with the first real secret, and a `sops_file` data source on a missing file fails every plan. Access is IAM — an operator needs `kms:Decrypt` on the key plus read access to the private repo; nothing in this repo changes. Rotation: `../docs/secrets-rotation.md`.
 
 ## Tearing everything down
 
-```bash
-# Find the key ID behind the alias
-aws kms describe-key --region us-east-1 --key-id alias/feohledger-sops \
-  --query 'KeyMetadata.KeyId' --output text
-
-# Schedule deletion (minimum 7-day pending window)
-aws kms schedule-key-deletion --region us-east-1 \
-  --key-id <KEY_ID> --pending-window-in-days 7
-```
-
-Cost of leaving the key in place: ~$1/month.
+The sops key (`alias/feohledger-sops`), the state bucket and the GitHub deploy role belong to the account bootstrap, not this module — a `terraform destroy` here never touches them, and they are not to be deleted from here.
 
 Note: audit-logs bucket uses Object Lock in **Compliance** mode — you cannot delete that bucket until every object has aged past its 7-year retention. Factor that into any teardown plan.
 
 ## See also
 
-- `../.sops.yaml` — creation rules binding the encrypted files to this KMS key
-- `../bin/sops-init.sh` — the bootstrap script
+- `~/github/infra-secrets/feohledger/` (private) — the encrypted secrets and their plaintext template
+- `~/github/project-mgmt/docs/secrets-management.md` — the estate secrets pattern
 - `../backend/CLAUDE.md` § Secrets management — day-to-day encrypt/decrypt workflow
 - `../docs/soc2-readiness.md` — control-by-control status + pending items

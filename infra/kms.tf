@@ -3,10 +3,10 @@
 #   - S3 objects in the invoice-files and audit-log buckets
 #   - SQS queues that carry audit events
 #
-# SOPS uses a separate KMS key provisioned by `bin/sops-init.sh` out-of-band
-# (chicken-and-egg: Terraform can't read its own encrypted tfvars before the
-# key exists). That script flips `key_rotation_enabled` on at creation too —
-# any new key spun up in-repo follows the same rule via this resource.
+# SOPS uses a separate KMS key, `alias/feohledger-sops`, which the estate
+# account bootstrap (templates/scripts/new-project-account.sh) creates in this
+# account with rotation enabled — it has to exist before any encrypted secret
+# does, so it is not managed here. The key below follows the same rotation rule.
 #
 # `enable_key_rotation = true` is a SOC 2 engineering prereq
 # (docs/soc2-readiness.md § Secrets management). Rotation is automatic and
