@@ -12,10 +12,10 @@ cd "$(dirname "$0")"
 REPO_ROOT=$(cd .. && pwd)
 
 COMPOSE=(docker compose -f compose.prod.yml)
-# Matches CI (ci.yml pins pnpm 9 on Node 20). The named volume caches the
+# Node matches CI's setup-node (24). pnpm is deliberately not pinned here — the
+# frontend build reads it from package.json (below). The named volume caches the
 # pnpm store across deploys so rebuilds don't re-download the world.
 NODE_IMAGE=node:24-alpine
-PNPM_SPEC=pnpm@9
 
 die() {
 	echo "deploy.sh: $*" >&2
@@ -96,7 +96,14 @@ fi
 if [ "$DO_FRONTEND" = 1 ]; then
 	# PUBLIC_API_URL is baked into the static build ($env/static/public).
 	API_DOMAIN=$(grep -E '^API_DOMAIN=' .env | tail -1 | cut -d= -f2- || true)
-	echo "==> building frontend (PUBLIC_API_URL=https://${API_DOMAIN})"
+	# pnpm's version is declared once, as `packageManager` in package.json
+	# (frontend/CLAUDE.md § The lockfile) — the field CI's pnpm/action-setup
+	# reads, so this builds with the pnpm that wrote the lockfile. Read after the
+	# pull so a bump lands on the next deploy. `npm i -g` rejects corepack's
+	# `+sha512.<hash>` integrity suffix, so the pattern stops before it.
+	PNPM_SPEC=$(sed -nE 's/^[[:space:]]*"packageManager":[[:space:]]*"(pnpm@[^"+]+).*/\1/p' "$REPO_ROOT/frontend/package.json")
+	[ -n "$PNPM_SPEC" ] || die "frontend/package.json declares no pnpm packageManager, so there is no pnpm version to build with."
+	echo "==> building frontend (${PNPM_SPEC}, PUBLIC_API_URL=https://${API_DOMAIN})"
 	docker run --rm \
 		-v "$REPO_ROOT":/repo -w /repo/frontend \
 		-v feoh-prod-pnpm-store:/pnpm-store \
