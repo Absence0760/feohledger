@@ -13,9 +13,12 @@ on fire.
 
 ## Current state
 
-`infra/` holds the security substrate (KMS key + S3 buckets); the VPC,
-ECS, RDS and CloudFront stack is not written yet, and **nothing is
-deployed**. No deployed secret has been authored yet — they will live
+`infra/` holds the account substrate — the app KMS key, the S3 buckets, the
+`feohledger.com` certificate, a cost budget and the domain's registration
+settings — and it was **applied to the FeohLedger account on 2026-09-15**. The
+workload stack (the single VM in `docs/minimal-deployment.md`, or VPC, ECS, RDS
+and CloudFront) is not built yet, so **the app itself is not deployed**. No
+deployed secret has been authored yet — they will live
 sops-encrypted in the private `infra-secrets` repo (`feohledger/`),
 never in this public repo.
 
@@ -169,10 +172,11 @@ From your laptop, against the production URL:
 
 ## Checklist
 
-- [ ] AWS prod account created
-- [ ] Domain in Route53, ACM cert validated
+- [x] AWS prod account created
+- [x] Domain in Route53, ACM cert validated (2026-09-15)
 - [ ] SOPS secrets populated
-- [ ] `terraform apply` clean
+- [x] `terraform apply` of the `infra/` substrate clean (2026-09-15)
+- [ ] Workload stack built and applied
 - [ ] GitHub Actions deploy workflow green
 - [ ] First tenant provisioned
 - [ ] Smoke test passes

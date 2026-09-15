@@ -2207,8 +2207,9 @@ env change, end-to-end verification through the public branding endpoint,
 rollback, and the failure modes this code path actually has.
 
 The whole AWS branch and every quota figure are marked confirm-on-first-run:
-`infra/` is KMS + S3 only, so no distribution or certificate exists yet, and no
-ARN or resource name was invented.
+`infra/` defines no CloudFront distribution yet (the platform certificate has
+existed since 2026-09-15, but nothing serves with it), and no ARN or resource
+name was invented.
 
 **Restored, without the credential that made it inert — CLOSED (round 20).**
 `.github/workflows/dependabot-lockfile.yml` is back. The reason it was removed
