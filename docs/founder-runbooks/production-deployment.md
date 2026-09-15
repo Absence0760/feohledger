@@ -33,9 +33,9 @@ never in this public repo.
 **The account exists (2026-09-14).** The estate bootstrap
 (`new-project-account.sh feohledger`) created **FeohLedger** inside the estate
 AWS Organization, with the Terraform state bucket, the sops KMS key, a GitHub
-OIDC deploy role and a delegated `feohledger.jaredhoward.com` zone the platform
-does not use — it lives on `feohledger.com` (Step 2), and retiring that zone is
-an operator step in `docs/followups.md`. Operators sign in through IAM Identity
+OIDC deploy role. It also delegated a `feohledger.jaredhoward.com` zone to the
+account, retired on 2026-09-15 once the platform moved to `feohledger.com`
+(Step 2). Operators sign in through IAM Identity
 Center (`aws sso login --profile feohledger`), not IAM users or root keys. That
 covers items 1, 2 and 5 below; 3 and 4 are still open.
 

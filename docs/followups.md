@@ -2176,26 +2176,6 @@ as oversights.
       rather than the whole string.
       Ref: [teams-approval.md](../backend/docs/teams-approval.md).
 
-- [ ] **Retire the estate's delegated `feohledger.jaredhoward.com` zone —
-      delegation first.** The account bootstrap created that child zone in the
-      FeohLedger account and an NS record delegating it in the `jaredhoward.com`
-      parent zone. The platform now lives on `feohledger.com`
-      ([decisions §167](decisions.md)), so the pair does nothing and costs
-      $0.50/month. The order is the whole risk: a zone deleted while the
-      parent's NS record still names its name servers is a dangling delegation,
-      a known subdomain-takeover path. Flipping `create_subdomain = false` and
-      re-running the bootstrap cannot do it — `prevent_destroy` on the zone
-      fails that plan, and stage 3 is skipped when the flag is false, so the NS
-      record would outlive the zone.
-      **Durable fix** (needs the `mgmt`, `dns-parent` and `feohledger` SSO
-      profiles): destroy stage `3-delegation` in workspace `feohledger` first;
-      then, in stage `2-baseline` (same workspace), run
-      `terraform state rm 'module.baseline.aws_route53_zone.subdomain[0]'` and
-      delete the zone; then set `create_subdomain = false` in
-      `infra-secrets/feohledger/bootstrap.tfvars` and drop the subdomain from
-      `project-mgmt/docs/architecture.md` and `templates/docs/estate-map.md`.
-      Nothing in this repo waits on it.
-
 **Written — CLOSED (round 20).**
 [`docs/founder-runbooks/custom-domain-provisioning.md`](founder-runbooks/custom-domain-provisioning.md)
 covers both deployment shapes, because the certificate story differs between
