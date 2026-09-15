@@ -66,8 +66,25 @@ const STATIC_PNGS = import.meta.glob('/static/*.png', {
 const SITE_URL_VAR = 'PUBLIC_SITE_URL';
 const PLACEHOLDER = `%sveltekit.env.${SITE_URL_VAR}%`;
 
-/** The template with HTML comments removed, so a commented-out tag never counts. */
-const MARKUP = TEMPLATE.replace(/<!--[\s\S]*?-->/g, '');
+/**
+ * `html` with its comments removed, so a commented-out tag never counts.
+ *
+ * One pass is not enough: removing a comment can join the text around it into
+ * a new `<!--`. So removal repeats until nothing changes, and an unterminated
+ * comment runs to the end, as it does in HTML. The result never contains `<!--`.
+ */
+function withoutComments(html: string): string {
+	let out = html;
+	let previous: string;
+	do {
+		previous = out;
+		out = out.replace(/<!--[\s\S]*?-->/g, '');
+	} while (out !== previous);
+	const unterminated = out.indexOf('<!--');
+	return unterminated === -1 ? out : out.slice(0, unterminated);
+}
+
+const MARKUP = withoutComments(TEMPLATE);
 
 type Meta = { key: string; content: string };
 
