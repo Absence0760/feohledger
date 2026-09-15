@@ -6712,3 +6712,36 @@ resolver lands, lands as a bypass. `test_exception_agent_queue_segregation.py`
 registers an auto-resolving `fraud_flag` probe and asserts the escalation, and a
 companion test fails the moment a *real* auto-resolving resolver appears for a
 blocking type, pointing its author at the gate it now runs behind.
+
+## 171. The VM reads the estate's `prod.sops.yaml`, converted to dotenv — not a dotenv blob
+
+**Decided:** 2026-09-15 · `deploy/decrypt-env.sh`, `deploy/deploy.sh`, `deploy/prod.sops.yaml.example`, `backend/tests/test_deploy_decrypt_env.py`
+
+The VM's deploy decrypted `deploy/.env.sops` and grepped it as dotenv, but nothing said how to make
+that file, and the estate could not make it: `infra-secrets/.sops.yaml` matches only
+`feohledger/*.sops.yaml`, so encrypting a `feohledger/.env.sops` was refused, and the template beside
+that rule was lowercase YAML for a Terraform `sops_file` read. The two ways out were a per-file rule
+for a dotenv blob in sops binary format — how `meryl-green-designs` keeps its `.env.sops` — or one
+flat-YAML `feohledger/prod.sops.yaml` whose keys are the env var names, turned into dotenv on the VM
+by `sops -d --input-type yaml --output-type dotenv`.
+
+YAML won on three counts. It leaves one secrets file for both deployment shapes: the ECS stack's
+Terraform can read the same file under the same names (`data.sops_file.secrets.data["FEOH_SECRET_KEY"]`),
+where a VM-only blob would have to be copied into a second file, and every secret rotated in two
+places, the day that stack lands. sops encrypts a YAML file value by value and leaves the keys
+readable, so a diff names the secret that changed and a missing key can be found without decrypting
+anything; a binary blob is one opaque value. And the infra-secrets README records meryl's format as
+kept verbatim for meryl's existing flow — an exception, not the estate pattern.
+
+The conversion has edges, and the script refuses them rather than trusting the operator to know them.
+Checked with a throwaway key and `docker compose config`: sops emits every value unquoted, compose's
+`env_file` parser then cuts an unquoted value at ` #` and interpolates `$` (`x$yz` became `x`), and a
+multi-line value arrives as a literal `\n`. `decrypt-env.sh` rejects all three, naming the key and
+never the value. It also checks the decrypted file *before* moving it over the existing `.env`, where
+the old inline block moved first — so a bad edit can no longer replace the file `backup.sh` and
+`add-tenant.sh` read between deploys. The checks live in their own script so they can be run against
+a new secrets file without deploying, and tested against a stub `sops` with no key at all.
+
+Rejected: keeping the VM file named `deploy/.env.sops` with YAML inside. sops infers the format from
+the extension, so the name would contradict the content and every command would need explicit types;
+the VM copy now carries the canonical file's own name.

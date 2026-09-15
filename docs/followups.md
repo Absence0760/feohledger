@@ -2211,7 +2211,7 @@ durable fix stated in one sentence has usually not been tried.
       routes refuse on, published through `/api/public-config` so the SPA
       drops the route and its links rather than rendering a dead form; the
       captcha boot check then applies only while signup is on. Documented
-      workaround meanwhile: `deploy/env.example` § hCaptcha,
+      workaround meanwhile: `deploy/prod.sops.yaml.example` § hCaptcha,
       `docs/minimal-deployment.md` § 3. **Trigger:** the first deploy whose
       tenants are all provisioned by hand, or the first report of a refused
       signup.

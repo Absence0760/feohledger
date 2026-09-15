@@ -9,7 +9,7 @@ The whole flow is four commands on a fresh VM:
 
 ```
 ./bootstrap-vm.sh                     # once: docker, compose, sops, swap, cron, IMDS fix
-# copy the sops env in as deploy/.env.sops, log out/in (docker group), then:
+# copy infra-secrets' feohledger/prod.sops.yaml in as deploy/prod.sops.yaml, log out/in (docker group), then:
 ./deploy.sh                           # every deploy: build, migrate, roll, verify
 ./add-tenant.sh acme --name "Acme" --admin-email admin@acme.com
 ```
@@ -24,7 +24,8 @@ The whole flow is four commands on a fresh VM:
 | `add-tenant.sh` | Tenant DB + org + admin user (same `provision_tenant` path as signup) + Caddy host block + reload, in one shot. Generates a temp password (first-login change forced) unless `--admin-password` given. |
 | `backup.sh` | Nightly pg dumps (globals + control plane + every `feoh_*` DB) streamed to S3. Cron installed by bootstrap. Optional `BACKUP_PING_URL` heartbeat (healthchecks.io-style) so silent failures get noticed. |
 | `restore.sh` | The other half of the DR story: streams a night's dumps back from S3 — globals via psql, each DB via `pg_restore --create` (skips existing DBs unless `--force`). Stops the api for the duration, rolls the stack back up after. Test it once against a scratch stack. |
-| `env.example` | Contract for the sops-encrypted env — `deploy.sh` validates the required keys against it. |
+| `decrypt-env.sh` | Decrypts `prod.sops.yaml` to `.env` and checks it — required keys, JWT key strength, values compose's `env_file` would silently rewrite — before it replaces the current `.env`. `deploy.sh` runs it; run it on its own to check a new secrets file without deploying. |
+| `prod.sops.yaml.example` | Template for the VM's secrets file: flat YAML keyed by env var name, every value quoted. The encrypted original lives in `infra-secrets` (`docs/decisions.md` §171). |
 
 ## Before the VM (once per project)
 
@@ -46,11 +47,14 @@ The whole flow is four commands on a fresh VM:
 - DNS: three records → this VM: `feohledger.com`, `api.feohledger.com`, and a
   **wildcard** `*.feohledger.com` (the wildcard makes tenant onboarding
   DNS-free; it needs no wildcard certificate — Caddy issues per-host certs).
-- Secrets: author a real-valued copy of `env.example`, encrypt with sops into
-  the **private** `infra-secrets` repo (per-project subdir + KMS key — see
-  `~/github/project-mgmt/docs/secrets-management.md`), copy the encrypted
-  file onto the VM as `deploy/.env.sops`. Never commit either file here —
-  this repo is public.
+- Secrets: in the **private** `infra-secrets` repo, create
+  `feohledger/prod.sops.yaml` from `prod.sops.yaml.example` —
+  `aws sso login --profile feohledger`, then
+  `AWS_PROFILE=feohledger sops feohledger/prod.sops.yaml` (paste, fill, save;
+  sops writes it encrypted) — and commit it there. Copy it onto the VM as
+  `deploy/prod.sops.yaml`; `./decrypt-env.sh` checks it without deploying.
+  Generate keys in your own terminal. Never commit either file here — this
+  repo is public. Pattern: `~/github/project-mgmt/docs/secrets-management.md`.
 
 ## Deploys
 

@@ -87,9 +87,11 @@ resize is a stop → change-type → start. Add 2 GB of swap either way.
    per-project KMS key), never committed here. The EC2 instance profile gets
    KMS access to both the sops key and the app key, plus scoped S3 access
    (§ 1 below), so no static AWS keys live on the box;
-   `deploy/deploy.sh` decrypts the VM's copy (`deploy/.env.sops`) host-side to
-   the gitignored `deploy/.env` on every deploy — the compose file reads it
-   via `env_file` + interpolation. The contract is `deploy/env.example`.
+   the VM keeps a copy of `infra-secrets/feohledger/prod.sops.yaml` as
+   `deploy/prod.sops.yaml`, and `deploy/decrypt-env.sh` decrypts it host-side
+   to the gitignored `deploy/.env` on every deploy — the compose file reads it
+   via `env_file` + interpolation. The contract is
+   `deploy/prod.sops.yaml.example` (`docs/decisions.md` §171).
 5. **Manual deploys.** SSH in: `git pull`, rebuild, migrate, restart (script
    below). `aws-deploy.yml` stays disarmed (`AWS_DEPLOY_ENABLED` unset) until
    the ECS build-out exists.
@@ -117,7 +119,7 @@ resize is a stop → change-type → start. Add 2 GB of swap either way.
   Session Manager and no 22 at all).
 - Instance profile — the box holds no static AWS keys, so this role is every
   AWS permission it has:
-  - `kms:Decrypt` on the **sops** key (`deploy.sh` decrypts `.env.sops` with it).
+  - `kms:Decrypt` on the **sops** key (`decrypt-env.sh` decrypts `prod.sops.yaml` with it).
   - `kms:GenerateDataKey` + `kms:Decrypt` on the **app** key — the
     `app_kms_key_arn` output of `infra/`. The invoice-files, audit-logs and
     backups buckets default to SSE-KMS under that key, and S3 checks the
@@ -180,7 +182,15 @@ Four services (see [`deploy/README.md`](../deploy/README.md) for operations):
 The frontend is built by the deploy script with
 `PUBLIC_API_URL=https://<API_DOMAIN>` baked in.
 
-### 3. Backend env (the sops-managed env — contract: `deploy/env.example`)
+### 3. Backend env (`prod.sops.yaml` — contract: `deploy/prod.sops.yaml.example`)
+
+The whole env lives in one sops file, `infra-secrets/feohledger/prod.sops.yaml`:
+flat YAML whose keys are the variable names below, every value double-quoted.
+Create it from the template — `aws sso login --profile feohledger`, then
+`AWS_PROFILE=feohledger sops feohledger/prod.sops.yaml` inside `infra-secrets`
+(paste, fill, save; sops writes it encrypted) — and commit it there. Generate
+keys in your own terminal. The same file is what the ECS stack's Terraform will
+read later, under the same names.
 
 Beyond the committed defaults, the deployed env sets at minimum:
 
@@ -213,7 +223,8 @@ request production access, or keep self-service signup closed at first (empty
 
 ### 4. First boot + deploys (`deploy/deploy.sh` — built)
 
-Copy the sops env onto the VM as `deploy/.env.sops`, then run
+Copy `prod.sops.yaml` onto the VM as `deploy/prod.sops.yaml` (`deploy/decrypt-env.sh`
+checks it without deploying), then run
 `deploy/deploy.sh`: it preflights its own prerequisites and the required env
 keys (clear errors before any work happens), pulls main, decrypts secrets,
 builds the frontend in a `node:24` container (`PUBLIC_API_URL` baked from
@@ -279,8 +290,8 @@ healthcheck + the RDS/ElastiCache override seams), `Caddyfile`
 (+ `tenants.caddy.example`), `deploy.sh` (preflight → build → migrate → roll
 → verify), `add-tenant.sh` (tenant + Caddy + reload in one command,
 re-runnable via `--skip-existing`), `backup.sh`, `restore.sh` (streamed
-restore of any night's dumps), and `env.example` (the sops env contract,
-validated by deploy.sh). Also shipped: the S3 client factory now falls back to real AWS +
+restore of any night's dumps), and `decrypt-env.sh` + `prod.sops.yaml.example`
+(the secrets file and the contract it is checked against). Also shipped: the S3 client factory now falls back to real AWS +
 the instance-profile credential chain when `FEOH_S3_ENDPOINT_URL` and the
 static keys are set empty (previously it always passed the MinIO dev
 defaults, so the "omit the endpoint for real S3" story couldn't work).
