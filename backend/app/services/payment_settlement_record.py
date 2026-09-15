@@ -265,6 +265,10 @@ async def open_settlement_mismatch_exception(
         organization_id=org.id,
         severity="error",
         invoice=invoice,
+        # The rail settled for an amount that does not match what we booked.
+        # The discrepancy is the processor's, arriving on a webhook — no human
+        # act to have a second person look at.
+        raised_by_user_id=None,
     )
 
 

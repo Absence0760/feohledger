@@ -330,10 +330,24 @@
 				{ ids, action, resolution: note || `bulk ${action}` }
 			);
 			const skipped = body.skipped.length;
+			// A segregation refusal is a per-row `skipped` reason, exactly like
+			// `already_resolved` and `not_found` (the endpoint must never 409 a
+			// whole batch over one refused row). But folding it into a bare
+			// "N skipped" count leaves the operator unable to tell a row that was
+			// already closed from one they are personally barred from clearing —
+			// and only the second has something to do about it.
+			const refused = body.skipped.filter((row) =>
+				row.reason.startsWith('segregation_')
+			).length;
 			toast(
-				skipped === 0
-					? `${body.updated} ${action}d`
-					: `${body.updated} ${action}d, ${skipped} skipped`,
+				[
+					skipped === 0
+						? `${body.updated} ${action}d`
+						: `${body.updated} ${action}d, ${skipped} skipped`,
+					refused > 0 ? m('exceptions.bulk.segregationSkipped', { n: refused }) : ''
+				]
+					.filter(Boolean)
+					.join(' '),
 				skipped === 0 ? 'success' : 'info'
 			);
 			bulkResolveOpen = false;

@@ -723,6 +723,11 @@ async def process_return(
             organization_id=org_id,
             invoice_id=invoice_id,
             entity_id=entity_id,
+            # The BANK raised this: the return file says a cheque was altered,
+            # stale-dated or never issued. The operator who imports the file is
+            # not the actor the flag asks about, and stamping them would bar the
+            # one person who runs Positive Pay from ever clearing its returns.
+            raised_by_user_id=None,
         )
         exceptions_created += 1
 

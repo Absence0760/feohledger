@@ -409,6 +409,9 @@ async def _open_erp_reconciliation_exception(
         status="open",
         organization_id=org_id,
         invoice=invoice,
+        # Raised from an inbound ERP webhook — the caller is the tenant's ERP,
+        # authenticated by HMAC, not a control-plane user.
+        raised_by_user_id=None,
     )
 
 

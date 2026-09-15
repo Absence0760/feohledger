@@ -1176,6 +1176,16 @@ async def _ensure_exception(
         invoice=invoice,  # exception follows its invoice (P2)
         assigned_to_user_id=assigned_to_user_id,
         due_at=due_at,
+        # Every finding here is a DETECTOR's, attributable to the invoice's own
+        # contents rather than to whoever most recently saved the row. There is
+        # no actor to thread: `refresh_warnings` takes none, and it is reached
+        # from fifteen doors including the extraction worker, the QMS sync sweep
+        # and two agent resolvers. Naming the caller would bar the AP manager
+        # who merely PATCHed a field from clearing a duplicate flag they had no
+        # hand in, while leaving the uploader who created the duplicate free —
+        # a refusal and an absolution from one wrong guess. The invoice's own
+        # `uploaded_by_id` / `segregation_actor_ids` is the axis that binds here.
+        raised_by_user_id=None,
     )
 
 

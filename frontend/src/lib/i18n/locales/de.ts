@@ -937,7 +937,8 @@ export const messages = {
 	'exceptions.resolveModal.escalate': 'Eskalieren',
 	'exceptions.resolveModal.resolve': 'Lösen',
 	'exceptions.bulkModal.title': '{n, plural, one {# Ausnahme lösen} other {# Ausnahmen lösen}}',
-	'exceptions.bulkModal.hint': 'Alle ausgewählten Zeilen erhalten dieselbe Lösungsnotiz. Zeilen, die sich bereits in einem Endzustand befinden, werden serverseitig stillschweigend übersprungen.',
+	'exceptions.bulkModal.hint': 'Alle ausgewählten Zeilen erhalten dieselbe Lösungsnotiz. Zeilen, die sich bereits in einem Endzustand befinden, werden serverseitig übersprungen — ebenso jede Zeile, bei deren Markierung Sie als beteiligt erfasst sind; eskalieren Sie diese stattdessen.',
+	'exceptions.bulk.segregationSkipped': '{n, plural, one {# Zeile bleibt offen: Funktionstrennung — Sie sind als an dieser Zahlung oder an ihrer Markierung beteiligt erfasst. Eskalieren Sie sie oder lassen Sie einen anderen Benutzer entscheiden.} other {# Zeilen bleiben offen: Funktionstrennung — Sie sind als an diesen Zahlungen oder an ihren Markierungen beteiligt erfasst. Eskalieren Sie sie oder lassen Sie einen anderen Benutzer entscheiden.}}',
 	'exceptions.bulkModal.notePlaceholder': 'Auf jede ausgewählte Zeile angewendet',
 
 	'exceptions.type.duplicate': 'Doppelte Rechnung',
