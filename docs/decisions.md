@@ -6757,7 +6757,12 @@ committed master goes stale first.
 **Android gets an adaptive icon.** The old launcher shipped legacy PNGs only,
 which Android 8+ shrinks onto a white plate. The foreground layer shrinks the
 glyph into the guaranteed 66 dp circle, and a monochrome layer serves Android
-13's themed icons.
+13's themed icons. Push notifications had been initialised with the launcher
+icon, which Android draws from its alpha channel alone, so it rendered as a
+solid white square; they now use a white silhouette drawable, both for the
+foreground notifications the app shows and as Firebase's default for the ones
+it posts while the app is in the background. `check_icons.py` fails if that
+icon loses its alpha, or if any `@drawable`/`@mipmap` the app names is absent.
 
 **The white-label fallback forks.** The "AP" placeholder was neutral, so a
 tenant that renamed the product but configured no logo never displayed platform

@@ -7,6 +7,10 @@ CI's guard for assets/gen-icons.sh (docs/decisions.md §171). It fails when:
   - a raster target is missing or not the pixel size its platform expects;
   - an icon that must be opaque carries alpha (App Store Connect rejects an iOS
     icon with any alpha channel, an indexed palette's tRNS chunk included);
+  - the Android notification icon has no alpha (Android draws a status-bar icon
+    from alpha alone, so an opaque one is a solid white square);
+  - an Android `@drawable/` or `@mipmap/` reference in the manifest, the
+    resource XML or the Dart sources names a resource that does not exist;
   - favicon.ico is missing its 16, 32 or 48 px entry;
   - the Android adaptive icon definition is missing;
   - the web manifest names an icon that is not there at the size it declares.
@@ -20,19 +24,27 @@ Run: python3 assets/check_icons.py   (pnpm check:icons)
 import importlib.util
 import json
 import os
+import re
 import struct
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
 
-ANDROID_RES = "mobile/android/app/src/main/res"
+ANDROID_MAIN = "mobile/android/app/src/main"
+ANDROID_RES = f"{ANDROID_MAIN}/res"
 DENSITY = {"mdpi": 1.0, "hdpi": 1.5, "xhdpi": 2.0, "xxhdpi": 3.0, "xxxhdpi": 4.0}
 IOS_SET = "mobile/ios/Runner/Assets.xcassets/AppIcon.appiconset"
 WEB = "frontend/static"
 
 # PNG colour types that cannot carry alpha, provided there is no tRNS chunk.
 OPAQUE_COLOUR_TYPES = {0, 2, 3}
+# Colour types with a real alpha channel (grey + alpha, RGBA).
+ALPHA_COLOUR_TYPES = {4, 6}
+
+ANY, OPAQUE, SILHOUETTE = "any", "opaque", "silhouette"
+
+RESOURCE_REF = re.compile(r"@(drawable|mipmap)/([A-Za-z0-9_]+)")
 
 
 def load_generator():
@@ -83,30 +95,66 @@ def ios_targets():
         # Only a bare file name is honoured, so an entry carrying a separator
         # cannot point the check outside the icon set.
         bare = os.path.basename(image["filename"])
-        targets.append((IOS_SET + "/" + bare, round(side), True))
+        targets.append((IOS_SET + "/" + bare, round(side), OPAQUE))
     return targets
 
 
 def raster_targets():
-    """(relative path, side in px, must be opaque) for every committed PNG."""
+    """(relative path, side in px, alpha rule) for every committed PNG."""
     targets = [
-        (f"{WEB}/apple-touch-icon.png", 180, True),
-        (f"{WEB}/icon-192.png", 192, False),
-        (f"{WEB}/icon-512.png", 512, False),
-        (f"{WEB}/icon-maskable-512.png", 512, True),
-        ("mobile/assets/brand/logo_mark.png", 64, False),
-        ("mobile/assets/brand/2.0x/logo_mark.png", 128, False),
-        ("mobile/assets/brand/3.0x/logo_mark.png", 192, False),
+        (f"{WEB}/apple-touch-icon.png", 180, OPAQUE),
+        (f"{WEB}/icon-192.png", 192, ANY),
+        (f"{WEB}/icon-512.png", 512, ANY),
+        (f"{WEB}/icon-maskable-512.png", 512, OPAQUE),
+        ("mobile/assets/brand/logo_mark.png", 64, ANY),
+        ("mobile/assets/brand/2.0x/logo_mark.png", 128, ANY),
+        ("mobile/assets/brand/3.0x/logo_mark.png", 192, ANY),
     ]
     for density, scale in DENSITY.items():
-        base = f"{ANDROID_RES}/mipmap-{density}"
+        mipmap = f"{ANDROID_RES}/mipmap-{density}"
         targets += [
-            (f"{base}/ic_launcher.png", round(48 * scale), False),
-            (f"{base}/ic_launcher_foreground.png", round(108 * scale), False),
-            (f"{base}/ic_launcher_background.png", round(108 * scale), True),
-            (f"{base}/ic_launcher_monochrome.png", round(108 * scale), False),
+            (f"{mipmap}/ic_launcher.png", round(48 * scale), ANY),
+            (f"{mipmap}/ic_launcher_foreground.png", round(108 * scale), ANY),
+            (f"{mipmap}/ic_launcher_background.png", round(108 * scale), OPAQUE),
+            (f"{mipmap}/ic_launcher_monochrome.png", round(108 * scale), ANY),
+            (f"{ANDROID_RES}/drawable-{density}/ic_notification.png", round(24 * scale), SILHOUETTE),
         ]
     return targets + ios_targets()
+
+
+def android_resource_refs():
+    """{(type, name): first file naming it} across the manifest, res XML and Dart.
+
+    Comments are stripped first: Flutter's own launch_background.xml ships a
+    commented-out `@mipmap/launch_image`, and a reference nobody compiles is not
+    a reference. Dart loses block comments and whole-line `//` comments only, so
+    a `//` inside a string literal (a URL) never swallows real code after it.
+    """
+    xml_comment = re.compile(r"<!--.*?-->", re.S)
+    dart_comment = re.compile(r"/\*.*?\*/|^[ \t]*//[^\n]*", re.S | re.M)
+    sources = [os.path.join(REPO, ANDROID_MAIN, "AndroidManifest.xml")]
+    for root, suffix in ((ANDROID_RES, ".xml"), ("mobile/lib", ".dart")):
+        for dirpath, _, files in os.walk(os.path.join(REPO, root)):
+            sources += [os.path.join(dirpath, f) for f in sorted(files) if f.endswith(suffix)]
+    refs = {}
+    for path in sources:
+        with open(path, encoding="utf-8") as fh:
+            text = fh.read()
+        text = (xml_comment if path.endswith(".xml") else dart_comment).sub("", text)
+        for kind, name in RESOURCE_REF.findall(text):
+            refs.setdefault((kind, name), os.path.relpath(path, REPO))
+    return refs
+
+
+def android_resource_exists(kind, name):
+    res = os.path.join(REPO, ANDROID_RES)
+    for entry in os.listdir(res):
+        if entry != kind and not entry.startswith(kind + "-"):
+            continue
+        for ext in (".png", ".webp", ".xml"):
+            if os.path.exists(os.path.join(res, entry, name + ext)):
+                return True
+    return False
 
 
 def main():
@@ -124,7 +172,7 @@ def main():
                 errors.append(f"{rel}: differs from logo-render/gen_svg.py; run pnpm gen:icons")
 
     sizes = {}
-    for rel, side, opaque in raster_targets():
+    for rel, side, rule in raster_targets():
         checked += 1
         path = os.path.join(REPO, rel)
         if not os.path.exists(path):
@@ -138,8 +186,16 @@ def main():
         sizes[rel] = (width, height)
         if (width, height) != (side, side):
             errors.append(f"{rel}: {width}x{height}, expected {side}x{side}")
-        if opaque and (colour_type not in OPAQUE_COLOUR_TYPES or has_trns):
+        has_alpha = colour_type in ALPHA_COLOUR_TYPES or has_trns
+        if rule == OPAQUE and (colour_type not in OPAQUE_COLOUR_TYPES or has_trns):
             errors.append(f"{rel}: has an alpha channel; it must be opaque")
+        if rule == SILHOUETTE and not has_alpha:
+            errors.append(f"{rel}: no alpha channel; Android draws it as a solid square")
+
+    for (kind, name), source in sorted(android_resource_refs().items()):
+        checked += 1
+        if not android_resource_exists(kind, name):
+            errors.append(f"{source}: references @{kind}/{name}, which no {kind}* directory holds")
 
     checked += 1
     ico = f"{WEB}/favicon.ico"

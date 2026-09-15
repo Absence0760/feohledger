@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Tints the notification small icon and app name: the brand tile's navy
+         (docs/decisions.md §171). -->
+    <color name="notification_accent">#24345C</color>
+</resources>

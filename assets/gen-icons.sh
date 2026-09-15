@@ -88,6 +88,14 @@ for density in mdpi hdpi xhdpi xxhdpi xxxhdpi; do
   render "$MONOCHROME" "${ADAPTIVE[$density]}" "$RES/mipmap-$density/ic_launcher_monochrome.png"
 done
 
+echo "[mobile: android notification]"
+# Status-bar icons are drawn from alpha alone, so this is the white silhouette,
+# never the tile (which would render as a solid square). 24dp per density.
+declare -A NOTIFICATION=([mdpi]=24 [hdpi]=36 [xhdpi]=48 [xxhdpi]=72 [xxxhdpi]=96)
+for density in mdpi hdpi xhdpi xxhdpi xxxhdpi; do
+  render "$SCRIPT_DIR/icon-notification.svg" "${NOTIFICATION[$density]}" "$RES/drawable-$density/ic_notification.png"
+done
+
 echo "[mobile: ios]"
 IOS="$REPO_ROOT/mobile/ios/Runner/Assets.xcassets/AppIcon.appiconset"
 # Sizes come from Contents.json, the file Xcode reads, not from whatever PNGs

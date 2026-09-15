@@ -18,6 +18,7 @@ matches what this script produces:
   assets/icon-foreground.svg  Android adaptive foreground (66dp safe zone)
   assets/icon-background.svg  Android adaptive background
   assets/icon-monochrome.svg  Android 13+ themed icon
+  assets/icon-notification.svg  Android notification small icon (white silhouette)
   frontend/static/logo-mark.svg, frontend/static/favicon.svg  (copies)
 
 Exploration output is gitignored: assets/logo-render/svg/<concept>_<palette>.svg
@@ -243,6 +244,20 @@ def foreground_svg(name, pal, px=1024, uid="f"):
     return _svg(px, _glyph(name, pal, uid, ADAPTIVE_SAFE_RADIUS / CONCEPTS[name]["reach"]))
 
 
+# Android draws a notification's small icon from its alpha channel alone, so the
+# colour tile renders as a solid white square. The icon is a white silhouette on
+# a 24dp canvas with 2dp of padding: the glyph must fit the 20dp inside, a half
+# side of 50 * 20 / 24 units.
+SILHOUETTE = dict(fg="#FFFFFF", fg2="#FFFFFF", cut="#FFFFFF")
+NOTIFICATION_LIVE_HALF = 50 * 20 / 24
+
+
+def notification_svg(name, px=1024, uid="n"):
+    """White glyph sized so its farthest point stays inside the live area."""
+    scale = NOTIFICATION_LIVE_HALF / CONCEPTS[name]["reach"]
+    return _svg(px, _glyph(name, SILHOUETTE, uid, scale))
+
+
 def masters():
     """Relative path -> content for every committed master."""
     name, pname = CHOSEN
@@ -257,6 +272,7 @@ def masters():
         "assets/icon-foreground.svg": foreground_svg(name, pal, uid="fg"),
         "assets/icon-background.svg": background_svg(pal),
         "assets/icon-monochrome.svg": foreground_svg(name, MONOCHROME, uid="mono"),
+        "assets/icon-notification.svg": notification_svg(name, uid="note"),
         "frontend/static/logo-mark.svg": mark,
         "frontend/static/favicon.svg": mark,
     }
