@@ -276,7 +276,10 @@ a release won't turn it red before the infrastructure exists. To go live:
 
 1. Build the AWS infra in `infra/` (ECR, ECS cluster/service/task family,
    frontend S3 bucket, CloudFront distribution, the three worker Lambda
-   functions + their SQS triggers) — the stack today is KMS + S3 buckets only.
+   functions + their SQS triggers) — the stack today is the KMS key, the S3
+   buckets and the us-east-1 ACM certificate for the platform domain
+   (`infra/acm.tf`, output `platform_certificate_arn`), which the distribution
+   attaches.
 2. Provision each worker function with its `ImageConfig` — entrypoint
    `python -m awslambdaric`, command its handler (see *Lambda workers* above).
    The RIC is already bundled in the image, so nothing else is needed here.

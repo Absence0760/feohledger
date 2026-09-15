@@ -59,3 +59,9 @@ variable "backup_retention_days" {
   type        = number
   default     = 90
 }
+
+variable "domain_name" {
+  description = "Platform domain the ACM certificate covers (the apex plus a one-level wildcard for tenant subdomains). Must be a public Route 53 zone in this account — today the feohledger.jaredhoward.com child zone the estate account bootstrap delegated here. Moving to a product apex means hosting that zone in this account and changing this value."
+  type        = string
+  default     = "feohledger.jaredhoward.com"
+}

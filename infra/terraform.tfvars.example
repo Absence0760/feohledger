@@ -33,6 +33,11 @@ backups_bucket_name       = "feohledger-backups-prod-REPLACE"
 # Lock — this lifecycle window is the whole retention/cost story.
 # backup_retention_days = 90
 
+# --- Platform domain ------------------------------------------------------------
+# The Route 53 zone the ACM certificate is issued and DNS-validated in. Defaults
+# to the zone the account bootstrap delegated to this account.
+# domain_name = "feohledger.jaredhoward.com"
+
 # --- Secrets ------------------------------------------------------------------
 # None, and a secret never goes in a tfvars. When the ECS/ALB/RDS stack lands,
 # its secrets (rds_master_password, …) are read from the sops-encrypted

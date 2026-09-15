@@ -13,6 +13,7 @@ infra/
 ├── kms.tf                       # customer-managed KMS key (rotation ON)
 ├── s3.tf                        # invoice-files + audit-logs buckets (versioning + Object Lock)
 │                                #   + access-logs sink + backups bucket (lifecycle-expired, no lock)
+├── acm.tf                       # us-east-1 certificate for the platform domain + wildcard
 ├── outputs.tf                   # exports for downstream modules
 ├── backend.config.example       # state-bucket shape for `terraform init` (real one gitignored)
 ├── terraform.tfvars.example     # committed template
@@ -43,6 +44,12 @@ Every resource in this module follows the SOC 2 baseline:
 4. Once retention on the new bucket is verified, schedule deletion of the old bucket.
 
 This migration path is also tracked under "Pending — needs a code change" in `../docs/soc2-readiness.md`.
+
+## Platform domain + certificate
+
+`acm.tf` issues the TLS certificate the workload stack's CloudFront distribution will use: `var.domain_name` (default `feohledger.jaredhoward.com`, the child zone the account bootstrap delegated to this account) plus `*.<domain>`, requested in **us-east-1** through the `aws.us_east_1` provider alias because CloudFront accepts no other region. It is DNS-validated in that same zone during the apply, and `platform_certificate_arn` only resolves once it is issued.
+
+The wildcard is what makes tenant subdomains work — the SPA takes the tenant slug from the first label under the platform domain (`frontend/src/lib/hostRouting.ts`), so every `<slug>.<domain>` is covered without a certificate change per signup. A nested platform domain (`<slug>.app.<domain>`) or a tenant's own vanity domain would each need another certificate; see the comment at the top of `acm.tf`.
 
 ## Local usage
 

@@ -47,12 +47,15 @@ open.
 
 ## Step 2 — Domain + ACM certificate
 
-1. Register or transfer your domain into Route53 (cleanest DNS
-   management; ~$12/yr for `.com`).
-2. Request an ACM cert for `*.feohledger.com` in `us-east-1`
-   (CloudFront requires this region).
-3. Validate via DNS record (Terraform automates this if the domain is
-   in Route53).
+**Handled by Terraform (`infra/acm.tf`).** The platform domain today is
+`feohledger.jaredhoward.com`, a Route 53 zone the account bootstrap
+delegated to the FeohLedger account. The first `terraform apply` issues
+the `us-east-1` certificate (CloudFront requires that region) for the
+apex plus `*.feohledger.jaredhoward.com` — the wildcard is what serves
+tenant subdomains — and DNS-validates it in that zone.
+
+To move to a product apex (e.g. `feohledger.com`): register it, host its
+zone in the FeohLedger account, and set `domain_name`.
 
 ## Step 3 — Populate SOPS secrets
 

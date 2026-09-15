@@ -58,3 +58,18 @@ provider "aws" {
     }
   }
 }
+
+# CloudFront only accepts ACM certificates issued in us-east-1, so the platform
+# certificate (acm.tf) is pinned there regardless of var.aws_region.
+provider "aws" {
+  alias  = "us_east_1"
+  region = "us-east-1"
+
+  default_tags {
+    tags = {
+      project     = var.project
+      managed_by  = "terraform"
+      environment = var.environment
+    }
+  }
+}
