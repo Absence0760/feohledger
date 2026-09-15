@@ -19,7 +19,7 @@ dependencies = [
     # symlinks outside secrets_dir).
     "pydantic-settings>=2.15.0,<3",
     "python-multipart>=0.0.32,<1",
-    "boto3>=1.43.89,<2",
+    "boto3>=1.43.92,<2",
     # Password hashing, called directly — there is no passlib here any more.
     # passlib 1.7.4 (its last release, 2020) held this floor at 4.0.1 for two
     # years: it reads `bcrypt.__about__.__version__`, deleted in bcrypt 5.0, and
@@ -69,7 +69,7 @@ dependencies = [
     # manylinux wheel, so no compiler is added to the slim image. The RIC is
     # imported only by the Lambda runtime, never on the ECS/API path. See
     # docs/production-deployment.md → Lambda workers.
-    "awslambdaric>=4.0.2,<5",
+    "awslambdaric>=4.0.3,<5",
 ]
 
 [project.optional-dependencies]
@@ -88,7 +88,7 @@ dev = [
     # to a single minor keeps CI's `pip install` from quietly picking
     # up stricter rules than the local venv runs. Bump intentionally
     # via dependabot or a manual upgrade pass.
-    "ruff>=0.16.6,<0.17",
+    "ruff>=0.16.7,<0.17",
 ]
 # Optional: auto-rotation of scanned invoice pages via Tesseract OSD.
 # Install with `pip install -e ".[ocr]"` and ensure the `tesseract` binary
