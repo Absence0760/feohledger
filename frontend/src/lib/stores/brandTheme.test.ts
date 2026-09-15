@@ -119,7 +119,7 @@ describe('accentStrongContrast / accentStrongMeetsAA', () => {
  * The fallback used to be a neutral "AP" placeholder, so a tenant that renamed
  * the product but set no logo never displayed platform branding. The platform
  * mark is FeohLedger's identity, so it may only stand in for the platform's own
- * name (docs/decisions.md §172).
+ * name (docs/decisions.md §173).
  */
 describe('brandMark', () => {
 	it('shows the platform mark when the org has configured nothing', () => {

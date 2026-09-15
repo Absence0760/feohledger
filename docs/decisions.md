@@ -6746,7 +6746,7 @@ Rejected: keeping the VM file named `deploy/.env.sops` with YAML inside. sops in
 the extension, so the name would contradict the content and every command would need explicit types;
 the VM copy now carries the canonical file's own name.
 
-## 172. The brand mark is feoh written as a split tally stick, and every icon is generated from it
+## 173. The brand mark is feoh written as a split tally stick, and every icon is generated from it
 
 Until this change the product shipped placeholders: an "AP" SVG favicon, the
 letters "AP" as the sidebar mark, a CSS gradient square on the landing page, and

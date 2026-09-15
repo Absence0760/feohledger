@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Prove assets/check_icons.py fails when it should (docs/decisions.md §172).
+"""Prove assets/check_icons.py fails when it should (docs/decisions.md §173).
 
 A guard that has only ever run against correct assets proves nothing. Each test
 copies the committed icon set into a temporary tree, breaks exactly one thing,

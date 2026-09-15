@@ -101,7 +101,7 @@ store reactively. `reset()` clears both the cache and the inline `<html>`
 overrides (logout / tenant switch).
 
 **The fallback mark** — `brand.mark` (`brandTheme.ts::brandMark`,
-`docs/decisions.md` §172). A configured logo always wins. Without one, the
+`docs/decisions.md` §173). A configured logo always wins. Without one, the
 sidebar shows the FeohLedger mark only while the product still carries the
 platform's name; a tenant that renamed the product gets a monogram of its own
 name on its own `--accent-strong` instead, because the platform mark beside a

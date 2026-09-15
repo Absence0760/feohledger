@@ -1,7 +1,7 @@
 import 'package:flutter/widgets.dart';
 
 /// The FeohLedger mark: feoh (ᚠ) written as a split tally stick on its navy
-/// tile (docs/decisions.md §172).
+/// tile (docs/decisions.md §173).
 ///
 /// Always decorative, so it is excluded from semantics. On the login screen the
 /// app name is spelled out right below it and announcing both would say it

@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <!-- Tints the notification small icon and app name: the brand tile's navy
-         (docs/decisions.md §172). -->
+         (docs/decisions.md §173). -->
     <color name="notification_accent">#24345C</color>
     <!-- The colour Flutter paints behind every screen: scaffoldBackgroundColor
          of the MaterialApp theme in lib/main.dart (ColorScheme.fromSeed(

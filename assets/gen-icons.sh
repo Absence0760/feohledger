@@ -11,7 +11,7 @@
 #
 # Requires python3, inkscape and ImageMagick 7 (magick). None of that runs in
 # CI: assets/check_icons.py (pnpm check:icons) verifies the committed result
-# with the standard library alone. Rationale: docs/decisions.md §172.
+# with the standard library alone. Rationale: docs/decisions.md §173.
 #
 set -euo pipefail
 

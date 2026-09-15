@@ -81,7 +81,7 @@
 					<img class="brand-logo" src={portalBrand.logoUrl} alt={portalBrand.productName} />
 				{:else if portalBrand.mark.kind === 'platform'}
 					<!-- Same fork as the employee sidebar: FeohLedger's mark only beside
-					     FeohLedger's own name (docs/decisions.md §172). -->
+					     FeohLedger's own name (docs/decisions.md §173). -->
 					<BrandMark size={28} />
 				{/if}
 				<div class="brand-text">

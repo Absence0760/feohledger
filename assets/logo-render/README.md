@@ -12,7 +12,7 @@ FeohLedger's mark is **feoh (ᚠ) written as a split tally stick**.
   Matching a bill against its record is the product's core act.
 
 The rationale, the alternatives and the white-label rule are in
-[`docs/decisions.md` §172](../../docs/decisions.md).
+[`docs/decisions.md` §173](../../docs/decisions.md).
 
 ## What is generated from what
 

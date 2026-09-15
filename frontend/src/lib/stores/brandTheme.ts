@@ -36,7 +36,7 @@ export const DEFAULT_PRODUCT_NAME = 'FeohLedger';
  * - `monogram`: the tenant renamed the product but set no logo. The platform
  *   mark would put FeohLedger's identity beside someone else's product name,
  *   so show the first character of their name instead, the neutral role the
- *   old "AP" placeholder played (docs/decisions.md §172).
+ *   old "AP" placeholder played (docs/decisions.md §173).
  */
 export type BrandMarkChoice =
 	| { kind: 'logo'; src: string }

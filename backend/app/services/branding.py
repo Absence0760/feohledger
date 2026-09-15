@@ -8,7 +8,7 @@ platform defaults baked in — so the remittance / 1099 / audit PDFs and every
 transactional email read brand from one helper instead of each re-deriving it.
 
 Which mark a surface draws is one decision, ``BrandContext.mark`` — the backend
-twin of the web app's ``brandTheme.ts::brandMark`` (docs/decisions.md §172): the
+twin of the web app's ``brandTheme.ts::brandMark`` (docs/decisions.md §173): the
 tenant logo when configured, FeohLedger's own mark only while the product still
 carries the platform's name, and nothing but the product-name text for a tenant
 that renamed the product without a logo.
