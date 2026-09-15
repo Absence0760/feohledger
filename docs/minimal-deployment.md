@@ -25,8 +25,10 @@ The app was designed local-first, and that carries straight into a cheap deploy:
 - `FEOH_EXTRACTION_MODE` / `FEOH_ERP_MODE` / `FEOH_AUDIT_MODE` default to `local` —
   in-process worker threads, **no SQS, no Lambda**.
 - Every provider integration defaults to its `mock` adapter; real providers
-  (Claude Vision, a payment rail, Lithic) are per-org config flips later, not
-  infrastructure.
+  (a payment rail, Lithic) are per-org config flips later, not infrastructure.
+  **Invoice extraction is the exception:** a deployed env never falls back to
+  its mock, which would invent fields on a real document, so it needs a
+  decision before first boot (§ 3).
 - All background sweeps are asyncio tasks inside the API process, each behind
   an `FEOH_*_ENABLED` flag.
 - The frontend is a static SPA; the only build-time input is `PUBLIC_API_URL`.
@@ -83,10 +85,13 @@ resize is a stop → change-type → start. Add 2 GB of swap either way.
 4. **Secrets follow the estate pattern.** This repo is public — `*.sops` files
    go in the private `Absence0760/infra-secrets` repo (per-project subdir +
    per-project KMS key), never committed here. The EC2 instance profile gets
-   `kms:Decrypt` + scoped S3 access, so no static AWS keys live on the box;
-   `deploy/deploy.sh` decrypts the VM's copy (`deploy/.env.sops`) host-side to
-   the gitignored `deploy/.env` on every deploy — the compose file reads it
-   via `env_file` + interpolation. The contract is `deploy/env.example`.
+   KMS access to both the sops key and the app key, plus scoped S3 access
+   (§ 1 below), so no static AWS keys live on the box;
+   the VM keeps a copy of `infra-secrets/feohledger/prod.sops.yaml` as
+   `deploy/prod.sops.yaml`, and `deploy/decrypt-env.sh` decrypts it host-side
+   to the gitignored `deploy/.env` on every deploy — the compose file reads it
+   via `env_file` + interpolation. The contract is
+   `deploy/prod.sops.yaml.example` (`docs/decisions.md` §171).
 5. **Manual deploys.** SSH in: `git pull`, rebuild, migrate, restart (script
    below). `aws-deploy.yml` stays disarmed (`AWS_DEPLOY_ENABLED` unset) until
    the ECS build-out exists.
@@ -112,14 +117,29 @@ resize is a stop → change-type → start. Add 2 GB of swap either way.
   from anywhere (TCP, plus UDP 443 — Caddy serves HTTP/3; without the UDP
   rule browsers silently fall back to HTTP/2), 22 from your IP (or SSM
   Session Manager and no 22 at all).
-- Instance profile: `kms:Decrypt` on the sops key; `s3:GetObject/PutObject/
-  AbortMultipartUpload/ListBucket` on the invoice-files, audit-logs, and
-  backups buckets (Abort because `backup.sh` streams multipart — a failed
-  upload must be abortable, and the lifecycle reaper handles stragglers);
-  `ses:SendEmail` if using SES; ideally `ec2:ModifyInstanceMetadataOptions`
-  so bootstrap can fix the IMDSv2 hop limit itself (containers can't reach
-  instance-profile credentials through Docker's NAT at the default limit
-  of 1).
+- Instance profile — the box holds no static AWS keys, so this role is every
+  AWS permission it has:
+  - `kms:Decrypt` on the **sops** key (`decrypt-env.sh` decrypts `prod.sops.yaml` with it).
+  - `kms:GenerateDataKey` + `kms:Decrypt` on the **app** key — the
+    `app_kms_key_arn` output of `infra/`. The invoice-files, audit-logs and
+    backups buckets default to SSE-KMS under that key, and S3 checks the
+    *caller's* access to it on every encrypted write and read: without these
+    two, every invoice upload and every nightly `backup.sh` run is refused even
+    with the S3 actions below granted. The key policy delegates to IAM
+    (`infra/kms.tf`), so the role policy is all it takes.
+  - `s3:GetObject/PutObject/DeleteObject/AbortMultipartUpload/ListBucket` on the
+    invoice-files, audit-logs, and backups buckets (Delete because replacing or
+    removing a stored document deletes its object — under Object Lock that
+    writes a delete marker and the locked version survives; Abort because
+    `backup.sh` streams multipart — a failed upload must be abortable, and the
+    lifecycle reaper handles stragglers).
+  - `s3:GetBucketObjectLockConfiguration` on the audit-logs bucket, once S3
+    audit shipping is turned on: its adapter reads the lock at boot and refuses
+    to start without it.
+  - `ses:SendEmail` if using SES; ideally `ec2:ModifyInstanceMetadataOptions`
+    so bootstrap can fix the IMDSv2 hop limit itself (containers can't reach
+    instance-profile credentials through Docker's NAT at the default limit
+    of 1).
 - Run **`deploy/bootstrap-vm.sh`** — one idempotent script: docker + compose
   plugin + sops + cronie (AL2023 ships **no cron daemon** — without it the
   backup cron is a file nothing reads) + AWS CLI, automatic security updates
@@ -162,7 +182,15 @@ Four services (see [`deploy/README.md`](../deploy/README.md) for operations):
 The frontend is built by the deploy script with
 `PUBLIC_API_URL=https://<API_DOMAIN>` baked in.
 
-### 3. Backend env (the sops-managed env — contract: `deploy/env.example`)
+### 3. Backend env (`prod.sops.yaml` — contract: `deploy/prod.sops.yaml.example`)
+
+The whole env lives in one sops file, `infra-secrets/feohledger/prod.sops.yaml`:
+flat YAML whose keys are the variable names below, every value double-quoted.
+Create it from the template — `aws sso login --profile feohledger`, then
+`AWS_PROFILE=feohledger sops feohledger/prod.sops.yaml` inside `infra-secrets`
+(paste, fill, save; sops writes it encrypted) — and commit it there. Generate
+keys in your own terminal. The same file is what the ECS stack's Terraform will
+read later, under the same names.
 
 Beyond the committed defaults, the deployed env sets at minimum:
 
@@ -170,6 +198,7 @@ Beyond the committed defaults, the deployed env sets at minimum:
 |---|---|
 | `FEOH_ENVIRONMENT` | `production` (arms hCaptcha enforcement on signup) |
 | `FEOH_SECRET_KEY` | `openssl rand -hex 32` |
+| `FEOH_HCAPTCHA_SECRET` / `FEOH_HCAPTCHA_SITEKEY` | **The secret is required whether or not you want signup** — the API refuses to boot in production with it empty, and `deploy.sh` refuses first. There is no signup off switch; to keep signup closed, set the secret and leave the sitekey empty: `/signup` renders, but every submit is refused with "Captcha is required." |
 | `POSTGRES_PASSWORD` | `openssl rand -hex 24` (compose derives `FEOH_DATABASE_URL` / `FEOH_REDIS_URL` from it — don't set those) |
 | `FEOH_S3_BUCKET` | invoice-files bucket; set `FEOH_S3_ENDPOINT_URL` / `FEOH_S3_ACCESS_KEY` / `FEOH_S3_SECRET_KEY` **empty** → real S3 via the instance-profile credential chain |
 | `FEOH_MFA_ENABLED` / `FEOH_HSTS_ENABLED` | `true` / `true` |
@@ -179,21 +208,23 @@ Beyond the committed defaults, the deployed env sets at minimum:
 | `FEOH_CORS_PRODUCTION_DOMAIN` | `feohledger.com` |
 | `FEOH_DEPLOYED_REGION` | the region this VM runs in (`us`/`eu`/`uk`/`ca`/`au`) — advisory only, but empty makes every tenant's data-residency `alignment` report `unknown` / `aligned: null` ("cannot attest") |
 | `FEOH_EMAIL_PROVIDER` / `FEOH_EMAIL_FROM` | `ses` / verified sender |
+| `FEOH_ANTHROPIC_API_KEY` **or** `FEOH_EXTRACTION_PROVIDER` | **Decide before first boot.** A real key (Claude Vision; Anthropic becomes a sub-processor of tenant invoices), `mock` (fabricated fields — a demo box only), or neither (invoices keyed in by hand; every upload's extraction fails and `deploy.sh` warns). Extraction is the one adapter that does not fall back to `mock` in a deployed env — `backend/docs/ai-extraction.md` § Platform provider precedence |
 | `FEOH_APPROVAL_SIGNING_KEY` + the other HMAC signing keys | real values (each key's presence is its feature's on-switch; leave unset = feature off) |
 
-Everything else keeps its safe default: mock adapters, `local` modes, sweeps
-off. Flip individual `FEOH_*_ENABLED` sweeps on once there's a reason
+Everything else keeps its safe default: mock adapters (extraction excepted,
+above), `local` modes, sweeps off. Flip individual `FEOH_*_ENABLED` sweeps on once there's a reason
 (`FEOH_PAYMENT_RECONCILE_ENABLED` and `FEOH_AUDIT_SHIPPING_ENABLED` are the two
 worth enabling first when real payments/compliance start).
 
 SES note: a fresh SES account is sandboxed (verified recipients only). Either
-request production access, or skip self-service signup at first and provision
-tenants by CLI (`python scripts/create_tenant.py …`), leaving email on
-`console` until SES clears.
+request production access, or keep self-service signup closed at first (empty
+`FEOH_HCAPTCHA_SITEKEY`, above) and provision tenants with
+`deploy/add-tenant.sh`, leaving email on `console` until SES clears.
 
 ### 4. First boot + deploys (`deploy/deploy.sh` — built)
 
-Copy the sops env onto the VM as `deploy/.env.sops`, then run
+Copy `prod.sops.yaml` onto the VM as `deploy/prod.sops.yaml` (`deploy/decrypt-env.sh`
+checks it without deploying), then run
 `deploy/deploy.sh`: it preflights its own prerequisites and the required env
 keys (clear errors before any work happens), pulls main, decrypts secrets,
 builds the frontend in a `node:24` container (`PUBLIC_API_URL` baked from
@@ -259,8 +290,8 @@ healthcheck + the RDS/ElastiCache override seams), `Caddyfile`
 (+ `tenants.caddy.example`), `deploy.sh` (preflight → build → migrate → roll
 → verify), `add-tenant.sh` (tenant + Caddy + reload in one command,
 re-runnable via `--skip-existing`), `backup.sh`, `restore.sh` (streamed
-restore of any night's dumps), and `env.example` (the sops env contract,
-validated by deploy.sh). Also shipped: the S3 client factory now falls back to real AWS +
+restore of any night's dumps), and `decrypt-env.sh` + `prod.sops.yaml.example`
+(the secrets file and the contract it is checked against). Also shipped: the S3 client factory now falls back to real AWS +
 the instance-profile credential chain when `FEOH_S3_ENDPOINT_URL` and the
 static keys are set empty (previously it always passed the MinIO dev
 defaults, so the "omit the endpoint for real S3" story couldn't work).

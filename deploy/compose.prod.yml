@@ -1,8 +1,8 @@
 # Production compose stack for the minimal single-VM deployment.
 # See docs/minimal-deployment.md for the full plan and deploy/README.md for
 # day-to-day operations. Interpolation values (${...}) come from deploy/.env,
-# which deploy.sh decrypts from the sops-encrypted deploy/.env.sops — never
-# create deploy/.env by hand and never commit it.
+# which deploy.sh (via decrypt-env.sh) decrypts from the sops-encrypted
+# deploy/prod.sops.yaml — never create deploy/.env by hand and never commit it.
 #
 # Postgres and Redis publish NO host ports: they are reachable only on the
 # compose network. S3 is real AWS S3 (no MinIO here — FEOH_S3_ENDPOINT_URL and
