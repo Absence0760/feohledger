@@ -24,7 +24,7 @@ product name, logo, and accent colors. Shipped so far:
 | Field | Stored as | Effect |
 |-------|-----------|--------|
 | `product_name` | `settings.brand.product_name` | Sidebar product name + document `<title>`. Fallback: **"FeohLedger"**. |
-| `logo_url` | `settings.brand.logo_url` | Sidebar logo `<img>`. Fallback: the FeohLedger mark while the product keeps the platform name, otherwise a monogram of `product_name` (see **The fallback mark** below). |
+| `logo_url` | `settings.brand.logo_url` | Sidebar logo `<img>`, and the mark in PDF and email headers. Fallback: the FeohLedger mark while the product keeps the platform name, otherwise a monogram of `product_name` in the app and the product name alone on PDFs and emails (see **The fallback mark** below). |
 | `accent_color` | `settings.brand.accent_color` | Overrides the `--accent` CSS token (borders, focus rings, accent text). |
 | `accent_strong_color` | `settings.brand.accent_strong_color` | Overrides the `--accent-strong` token (text-bearing accent backgrounds — buttons, active chips). |
 | `support_url` | `settings.brand.support_url` | Reserved for support links (exposed via the brand store). |
@@ -110,7 +110,12 @@ placeholder was neutral, which is why this never needed a rule before. The
 collapsed rail names the mark or monogram with the product name. The static
 assets (favicon, touch icon, web manifest, mobile launcher icons) and the mark
 on the pre-auth login pages stay platform-branded, as the "AP" favicon was:
-they are served before any tenant branding is known.
+they are served before any tenant branding is known. Generated PDFs and outbound
+emails follow the same fork through `BrandContext.mark`
+(`backend/app/services/branding.py`): the tenant logo, else the platform mark
+beside the product name, else the product name alone. A renamed tenant gets
+plain text there, where the web app draws a monogram (see **Branded outbound
+surfaces** below).
 
 **Admin UI** — the **Branding** section on `/organization`
 (`frontend/src/routes/organization/+page.svelte`): product name, logo URL,
@@ -226,9 +231,22 @@ empty for URLs), and never touches the network. Platform defaults: product name
 `remittance_pdf.py`, `tax_1099_forms.py`, `audit_report_pdf.py`, and
 `analytics_report_pdf.py` each take a resolved `BrandContext` on their render
 context (defaulting to the platform brand so an old call site still renders) and
-draw a branded header — the tenant **logo** when one is configured and
-embeddable, otherwise the tenant **product name** in the **accent color**. The
-remittance footer also appends the tenant's support URL when set.
+draw a branded header through `build_logo_flowable`, which follows
+`BrandContext.mark`:
+
+- **Tenant logo configured** — the logo, fetched and embedded best-effort (see
+  below); a failed fetch falls back to the product-name text, as it always has.
+- **No logo, product still named "FeohLedger"** — the bundled platform mark
+  (`backend/app/assets/brand/logo-mark.png`, 256 px, rendered from
+  `assets/logo-mark.svg`) beside the product name in the accent color. The mark
+  is a glyph with no name of its own, hence the caption, set in the renderer's
+  own header style. The bytes are read from disk once per process and never
+  fetched, so this path has no network touch. `backend/.dockerignore` must keep
+  `app/assets/`; `test_branding.py` fails if a pattern would drop the file.
+- **Renamed without a logo** — the tenant **product name** in the **accent
+  color** alone, exactly as before the mark existed.
+
+The remittance footer also appends the tenant's support URL when set.
 
 ### Analytics report exports (CSV + PDF)
 
@@ -268,9 +286,11 @@ The analytics export surface — `GET /api/analytics/export/{report}` for
 `Content-Length` header and a hard cap on the streamed bytes), only `http(s)`
 URLs are fetched, and **any** failure (no URL, bad scheme, timeout, oversized,
 non-2xx, undecodable image) returns `None` so the renderer falls back to the
-product-name text. Logo embedding can never break PDF generation, and a dev box
-with no network renders fine. Money stays exact and no PII enters the header /
-footer (brand chrome only).
+product-name text. Only the tenant logo is ever fetched: the platform mark is
+bundled, and a build that lost the file degrades to the same text header.
+Logo embedding can never break PDF generation, and a dev box with no network
+renders fine. Money stays exact and no PII enters the header / footer (brand
+chrome only).
 
 ### Emails
 
@@ -282,8 +302,18 @@ email adapters (`console` / `smtp` / `ses`) apply it uniformly via shared
   (`Acme Pay <no-reply@platform.com>` — the deliverable address is unchanged;
   an address that already has a display name, or is empty, is left alone; the
   name is sanitized of quotes / CR / LF so it can't break the header);
-- the **HTML** body is wrapped with a small brand header line (product name in
-  the accent color) and a support-link footer (only when a support URL is set);
+- the **HTML** body is wrapped with a small brand header line (the mark
+  `BrandContext.mark` picks, then the product name in the accent color) and a
+  support-link footer (only when a support URL is set). The mark is a remote
+  `<img>`, not an attachment. A tenant logo loads from its `logo_url`. The
+  platform mark loads from `FEOH_PUBLIC_URL` + `/email-mark.png`, a 96 px PNG in
+  `frontend/static/` drawn at 32 px, and is emitted only when `FEOH_PUBLIC_URL`
+  is an absolute http(s) URL. A deployed env still on the loopback default would
+  show recipients a broken image, just as its links already go nowhere. A tenant
+  that renamed the product without a logo gets the name alone, byte-for-byte
+  the header from before the mark existed. `alt` is empty because the name sits
+  beside the image, so a screen reader doesn't announce it twice and a client
+  that blocks remote images still shows the name;
 - the **plaintext** body gets the same support-link footer.
 
 A message with no `brand` set uses the **platform-default** brand, so every
@@ -292,8 +322,9 @@ pass the brand: `notification_dispatch.notify_event` (invoice-lifecycle emails),
 `vendor_notifications.notify_vendor_of_invoice_event` (supplier paid / rejected),
 and `supplier_chat.notify_supplier_of_ap_message` (portal chat link). The
 control-plane signup / MFA emails fire before a tenant brand exists, so they use
-the platform default. Brand resolution for emails is best-effort — a load
-failure degrades to the platform brand, never breaking the send.
+the platform default, and with it the platform mark. Brand resolution for emails
+is best-effort — a load failure degrades to the platform brand, never breaking
+the send.
 
 ## Tests
 
@@ -303,7 +334,15 @@ failure degrades to the platform brand, never breaking the send.
   `get_brand_context` resolution + platform-default + malformed-field fallback,
   the remittance / 1099 / audit PDFs rendering the product name (+ logo-fetch
   failure falling back to text), and the email adapters branding the From /
-  HTML header / support footer. **Analytics exports**:
+  HTML header / support footer. **The mark fork**: `BrandContext.mark` for a
+  tenant logo, the platform default and a renamed tenant; the bundled
+  `logo-mark.png` being a 256 px RGBA PNG that `backend/.dockerignore` keeps;
+  each of the four PDF renderers embedding the bundled mark without calling
+  `fetch_logo_bytes`, drawing no image for a renamed tenant, and embedding the
+  tenant's own image when a logo is set; the email header carrying the platform
+  mark `<img>` from `FEOH_PUBLIC_URL`, none for a renamed tenant (byte-for-byte
+  the old header), the tenant logo when set, and none when `FEOH_PUBLIC_URL` is
+  not http(s). **Analytics exports**:
   `backend/tests/test_report_export.py` (the `brand_provenance_header` block —
   product name + metadata, `None`-brand no-op, the data grid still parsing
   column-positionally below the comment block, org-name newline-injection
