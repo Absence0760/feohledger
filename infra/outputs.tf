@@ -32,3 +32,13 @@ output "platform_zone_id" {
   description = "Route 53 hosted zone ID of the platform domain, for the alias records the workload stack will add."
   value       = data.aws_route53_zone.platform.zone_id
 }
+
+output "ses_identity_arn" {
+  description = "ARN of the SES domain identity the app sends as. Scope the VM instance profile's ses:SendEmail to it (docs/minimal-deployment.md § 1)."
+  value       = aws_sesv2_email_identity.platform.arn
+}
+
+output "ses_mail_from_domain" {
+  description = "The envelope-sender (MAIL FROM) subdomain SES addresses bounces to — its MX and SPF live there, apart from the apex records Migadu owns."
+  value       = aws_sesv2_email_identity_mail_from_attributes.platform.mail_from_domain
+}

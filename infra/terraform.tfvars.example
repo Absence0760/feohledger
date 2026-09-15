@@ -46,6 +46,15 @@ backups_bucket_name       = "feohledger-backups-prod-REPLACE"
 budget_alert_emails = ["alerts@example.com"]
 # monthly_budget_limit_usd = 25
 
+# --- Email ------------------------------------------------------------------------
+# Mailboxes on Migadu, app mail through SES (email.tf, README.md § Email). The
+# token is shown at admin.migadu.com → Domains → <domain> after adding the
+# domain there; leave it unset until then. The DMARC address is published in
+# DNS and must be a mailbox on the platform domain.
+# migadu_verification_token = "REPLACE"
+# dmarc_report_email        = "ops@feohledger.com"
+# dmarc_policy              = "none"   # raise to "quarantine" once reports align
+
 # --- Secrets ------------------------------------------------------------------
 # None, and a secret never goes in a tfvars. When the ECS/ALB/RDS stack lands,
 # its secrets (rds_master_password, …) are read from the sops-encrypted

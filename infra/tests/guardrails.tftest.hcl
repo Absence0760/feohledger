@@ -3,7 +3,9 @@
 # real plan would only reveal against the live account: the budget's alert
 # wiring and its input guards, the certificate's tenant-wildcard coverage and
 # validation-record wiring, the platform domain's registration settings and
-# apex-only guard, and the access-log sink's delivery prerequisites.
+# apex-only guard, the access-log sink's delivery prerequisites, and the platform
+# domain's mail records (SES identity, DKIM, MAIL FROM, Migadu, DMARC) with their
+# input guards.
 
 mock_provider "aws" {
   # A mocked policy document renders a random string, which the KMS key and
@@ -68,6 +70,21 @@ override_resource {
   override_during = plan
   values = {
     arn = "arn:aws:s3:::feohledger-backups-test"
+  }
+}
+
+# SES only publishes an identity's DKIM tokens once the identity exists, so a
+# mocked one would leave the three DKIM record names unknown at plan time.
+# Supply the shape Easy DKIM returns: three tokens.
+override_resource {
+  target          = aws_sesv2_email_identity.platform
+  override_during = plan
+  values = {
+    arn = "arn:aws:ses:us-east-1:000000000000:identity/feohledger.com"
+    dkim_signing_attributes = {
+      next_signing_key_length = "RSA_2048_BIT"
+      tokens                  = ["tokenone", "tokentwo", "tokenthree"]
+    }
   }
 }
 
@@ -252,4 +269,145 @@ run "rejects_a_subdomain_as_the_platform_domain" {
   }
 
   expect_failures = [var.domain_name]
+}
+
+run "ses_sends_as_the_platform_domain_with_every_dkim_key_published" {
+  command = plan
+
+  assert {
+    condition     = aws_sesv2_email_identity.platform.email_identity == "feohledger.com"
+    error_message = "The SES identity must be the platform domain, so the app can send as any address on it."
+  }
+
+  assert {
+    condition     = length(aws_route53_record.ses_dkim) == 3
+    error_message = "Easy DKIM issues three tokens; a missing CNAME leaves the identity unverified."
+  }
+
+  assert {
+    condition = alltrue([
+      for i, token in ["tokenone", "tokentwo", "tokenthree"] :
+      aws_route53_record.ses_dkim[i].name == "${token}._domainkey.feohledger.com" &&
+      aws_route53_record.ses_dkim[i].type == "CNAME" &&
+      aws_route53_record.ses_dkim[i].records == toset(["${token}.dkim.amazonses.com"])
+    ])
+    error_message = "Each SES DKIM token must be published as <token>._domainkey pointing at <token>.dkim.amazonses.com."
+  }
+}
+
+run "ses_bounces_go_to_the_send_subdomain_not_the_apex" {
+  command = plan
+
+  assert {
+    condition     = aws_sesv2_email_identity_mail_from_attributes.platform.mail_from_domain == "send.feohledger.com"
+    error_message = "SES's envelope sender must be send.<domain>, so its MX and SPF stay off the apex records Migadu owns."
+  }
+
+  assert {
+    condition     = aws_sesv2_email_identity_mail_from_attributes.platform.behavior_on_mx_failure == "USE_DEFAULT_VALUE"
+    error_message = "If the send. MX goes missing, SES must fall back to its own envelope rather than reject app mail."
+  }
+
+  assert {
+    condition     = aws_route53_record.ses_mail_from_mx.name == "send.feohledger.com" && aws_route53_record.ses_mail_from_mx.records == toset(["10 feedback-smtp.us-east-1.amazonses.com"])
+    error_message = "The MAIL FROM subdomain needs the bounce MX of the region the identity lives in."
+  }
+
+  assert {
+    condition     = aws_route53_record.ses_mail_from_spf.name == "send.feohledger.com" && aws_route53_record.ses_mail_from_spf.records == toset(["v=spf1 include:amazonses.com ~all"])
+    error_message = "The MAIL FROM subdomain's SPF must authorize SES."
+  }
+}
+
+run "migadu_receives_mail_for_the_apex" {
+  command = plan
+
+  assert {
+    condition     = aws_route53_record.migadu_mx.name == "feohledger.com" && aws_route53_record.migadu_mx.records == toset(["10 aspmx1.migadu.com", "20 aspmx2.migadu.com"])
+    error_message = "The apex MX must point at Migadu's two inbound hosts."
+  }
+
+  assert {
+    condition = alltrue([
+      for key in ["key1", "key2", "key3"] :
+      aws_route53_record.migadu_dkim[key].name == "${key}._domainkey.feohledger.com" &&
+      aws_route53_record.migadu_dkim[key].records == toset(["${key}.feohledger.com._domainkey.migadu.com."])
+    ])
+    error_message = "Migadu signs with three rotating DKIM keys; each selector must CNAME to its Migadu-hosted key."
+  }
+}
+
+run "apex_spf_authorizes_migadu_alone_until_a_token_is_set" {
+  command = plan
+
+  assert {
+    condition     = aws_route53_record.apex_txt.records == toset(["v=spf1 include:spf.migadu.com -all"])
+    error_message = "SES mail's envelope is on send., so the apex SPF must authorize Migadu alone and fail hard; with no token there is nothing else to publish."
+  }
+}
+
+run "apex_txt_carries_the_migadu_token_beside_spf" {
+  command = plan
+
+  variables {
+    migadu_verification_token = "p8dxwnab"
+  }
+
+  assert {
+    condition     = aws_route53_record.apex_txt.records == toset(["v=spf1 include:spf.migadu.com -all", "hosted-email-verify=p8dxwnab"])
+    error_message = "Route 53 keys a record set by name and type, so SPF and Migadu's ownership token must share the one apex TXT record."
+  }
+}
+
+run "dmarc_starts_at_monitor_in_one_record" {
+  command = plan
+
+  assert {
+    condition     = aws_route53_record.dmarc.name == "_dmarc.feohledger.com" && aws_route53_record.dmarc.records == toset(["v=DMARC1; p=none;"])
+    error_message = "One _dmarc record governs both senders, and it starts at p=none."
+  }
+}
+
+run "dmarc_reports_go_to_a_mailbox_on_the_domain" {
+  command = plan
+
+  variables {
+    dmarc_policy       = "quarantine"
+    dmarc_report_email = "ops@feohledger.com"
+  }
+
+  assert {
+    condition     = aws_route53_record.dmarc.records == toset(["v=DMARC1; p=quarantine; rua=mailto:ops@feohledger.com;"])
+    error_message = "The DMARC record must carry the chosen policy and the aggregate-report address."
+  }
+}
+
+run "rejects_an_unknown_dmarc_policy" {
+  command = plan
+
+  variables {
+    dmarc_policy = "monitor"
+  }
+
+  expect_failures = [var.dmarc_policy]
+}
+
+run "rejects_the_whole_migadu_verify_string" {
+  command = plan
+
+  variables {
+    migadu_verification_token = "hosted-email-verify=p8dxwnab"
+  }
+
+  expect_failures = [var.migadu_verification_token]
+}
+
+run "rejects_a_dmarc_address_off_the_platform_domain" {
+  command = plan
+
+  variables {
+    dmarc_report_email = "dmarc@reports.example.org"
+  }
+
+  expect_failures = [var.dmarc_report_email]
 }
