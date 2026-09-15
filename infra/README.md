@@ -14,6 +14,7 @@ infra/
 ├── s3.tf                        # invoice-files + audit-logs buckets (versioning + Object Lock)
 │                                #   + access-logs sink + backups bucket (lifecycle-expired, no lock)
 ├── outputs.tf                   # exports for downstream modules
+├── backend.config.example       # state-bucket shape for `terraform init` (real one gitignored)
 ├── terraform.tfvars.example     # committed template
 └── README.md                    # this file
 ```
@@ -57,8 +58,22 @@ terraform validate               # syntactic + type-check (no AWS creds needed)
 rm backend_override.tf           # remove before any real plan/apply
 ```
 
-Real `apply` / `plan` runs target the S3 backend; pass the bucket + DynamoDB
-table via `terraform init -backend-config=…` once they exist.
+## Applying
+
+State lives in `feohledger-tfstate-<account-id>`, the bucket the estate account bootstrap (`~/github/templates/scripts/new-project-account.sh`) created in the FeohLedger AWS account. Locking is S3-native (`use_lockfile`), so there is no DynamoDB table. Key (`envs/prod/terraform.tfstate`), region, locking and encryption are committed in `main.tf`; only the bucket name — which embeds the account ID — is passed at init time, from a gitignored `backend.config`.
+
+Run from `infra/` with Terraform 1.15 (what CI validates against) and the `feohledger` SSO profile (`AdministratorAccess` in the FeohLedger account):
+
+```bash
+aws sso login --profile feohledger
+printf 'bucket = "feohledger-tfstate-%s"\n' "$(aws sts get-caller-identity --profile feohledger --query Account --output text)" > backend.config
+rm -f backend_override.tf   # a leftover validate override would keep state on your laptop
+AWS_PROFILE=feohledger terraform init -backend-config=backend.config
+AWS_PROFILE=feohledger terraform plan -var-file=../../infra-secrets/feohledger/prod.tfvars -out=tfplan
+AWS_PROFILE=feohledger terraform apply tfplan
+```
+
+The filled tfvars is operator config rather than a secret, but it is not public either, so its canonical copy lives in the private `infra-secrets` repo as `feohledger/prod.tfvars` (plaintext, beside the encrypted secrets) — the estate convention for non-secret env config. Start it from `terraform.tfvars.example`. The path above assumes `infra-secrets` is cloned beside this repo under `~/github/`.
 
 ## Secrets
 

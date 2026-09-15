@@ -49,7 +49,7 @@ jobs:
       - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
         with:
           # The version this stack is validated against (satisfies the
-          # `>= 1.6` floor in `infra/main.tf`). terraform_wrapper=false
+          # `>= 1.11` floor in `infra/main.tf`). terraform_wrapper=false
           # so the raw exit codes propagate to the job status.
           terraform_version: '1.15.0'
           terraform_wrapper: false
@@ -61,8 +61,8 @@ jobs:
       - name: backend override for validate
         working-directory: infra
         # Terraform 1.15+ `validate` checks the backend block's required
-        # arguments, so the empty partial-config `backend "s3" {}` fails
-        # without state access. Overriding to the `local` backend for this
+        # arguments, so the partial-config `backend "s3"` (its `bucket` is
+        # passed at init time, never committed) fails without state access. Overriding to the `local` backend for this
         # job keeps validate credential-free. The file is gitignored —
         # committing it would switch real applies to local state.
         run: printf 'terraform {\n  backend "local" {}\n}\n' > backend_override.tf

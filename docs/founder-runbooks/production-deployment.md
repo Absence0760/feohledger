@@ -27,6 +27,14 @@ never in this public repo.
 
 ## Step 1 — AWS account setup
 
+**The account exists (2026-09-14).** The estate bootstrap
+(`new-project-account.sh feohledger`) created **FeohLedger** inside the estate
+AWS Organization, with the Terraform state bucket, the sops KMS key, a GitHub
+OIDC deploy role and the delegated `feohledger.jaredhoward.com` zone. Operators
+sign in through IAM Identity Center (`aws sso login --profile feohledger`), not
+IAM users or root keys. That covers items 1, 2 and 5 below; 3 and 4 are still
+open.
+
 1. Create a dedicated AWS account for production. Don't mix with
    personal/sandbox.
 2. Enable **AWS Organizations** and add the account under it (makes
@@ -77,9 +85,10 @@ Required values for prod:
 
 ```bash
 cd infra
-terraform init
-terraform plan      # read this carefully — nothing surprising should appear
-terraform apply
+# backend.config names the state bucket — see infra/README.md § Applying
+AWS_PROFILE=feohledger terraform init -backend-config=backend.config
+AWS_PROFILE=feohledger terraform plan -var-file=../../infra-secrets/feohledger/prod.tfvars -out=tfplan   # read this carefully
+AWS_PROFILE=feohledger terraform apply tfplan
 ```
 
 Expect errors on the first run. Common ones:
