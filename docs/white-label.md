@@ -24,7 +24,7 @@ product name, logo, and accent colors. Shipped so far:
 | Field | Stored as | Effect |
 |-------|-----------|--------|
 | `product_name` | `settings.brand.product_name` | Sidebar product name + document `<title>`. Fallback: **"FeohLedger"**. |
-| `logo_url` | `settings.brand.logo_url` | Sidebar logo `<img>`. Fallback: the bundled "AP" mark. |
+| `logo_url` | `settings.brand.logo_url` | Sidebar logo `<img>`. Fallback: the FeohLedger mark while the product keeps the platform name, otherwise a monogram of `product_name` (see **The fallback mark** below). |
 | `accent_color` | `settings.brand.accent_color` | Overrides the `--accent` CSS token (borders, focus rings, accent text). |
 | `accent_strong_color` | `settings.brand.accent_strong_color` | Overrides the `--accent-strong` token (text-bearing accent backgrounds — buttons, active chips). |
 | `support_url` | `settings.brand.support_url` | Reserved for support links (exposed via the brand store). |
@@ -99,6 +99,18 @@ accent tokens onto `document.documentElement.style` (or removes them when
 unset). The document `<title>` and the sidebar logo + product name read the
 store reactively. `reset()` clears both the cache and the inline `<html>`
 overrides (logout / tenant switch).
+
+**The fallback mark** — `brand.mark` (`brandTheme.ts::brandMark`,
+`docs/decisions.md` §171). A configured logo always wins. Without one, the
+sidebar shows the FeohLedger mark only while the product still carries the
+platform's name; a tenant that renamed the product gets a monogram of its own
+name on its own `--accent-strong` instead, because the platform mark beside a
+partner's product name is FeohLedger branding they never chose. The old "AP"
+placeholder was neutral, which is why this never needed a rule before. The
+collapsed rail names the mark or monogram with the product name. The static
+assets (favicon, touch icon, web manifest, mobile launcher icons) and the mark
+on the pre-auth login pages stay platform-branded, as the "AP" favicon was:
+they are served before any tenant branding is known.
 
 **Admin UI** — the **Branding** section on `/organization`
 (`frontend/src/routes/organization/+page.svelte`): product name, logo URL,
@@ -299,7 +311,8 @@ failure degrades to the platform brand, never breaking the send.
   `format=pdf` content-type + filename, the branded CSV provenance block,
   `format=xlsx` → 422).
 - Frontend: `frontend/src/lib/stores/brandTheme.test.ts` — the pure
-  color-application / fallback logic (`isValidHexColor`, `brandThemeVars`).
+  color-application / fallback logic (`isValidHexColor`, `brandThemeVars`),
+  and the fallback-mark fork (`brandMark`: logo, platform mark, monogram).
 
 ## Custom domains (vanity hostnames)
 

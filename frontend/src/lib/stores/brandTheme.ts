@@ -28,6 +28,39 @@ export const EMPTY_BRAND: Brand = {
 export const DEFAULT_PRODUCT_NAME = 'FeohLedger';
 
 /**
+ * Which mark the app chrome shows for a brand.
+ *
+ * - `logo`: the tenant configured a logo URL.
+ * - `platform`: no logo, and the product still carries the platform's name, so
+ *   the FeohLedger mark (`static/logo-mark.svg`) is the honest choice.
+ * - `monogram`: the tenant renamed the product but set no logo. The platform
+ *   mark would put FeohLedger's identity beside someone else's product name,
+ *   so show the first character of their name instead, the neutral role the
+ *   old "AP" placeholder played (docs/decisions.md §171).
+ */
+export type BrandMarkChoice =
+	| { kind: 'logo'; src: string }
+	| { kind: 'platform' }
+	| { kind: 'monogram'; letter: string };
+
+export function brandMark(brand: Brand): BrandMarkChoice {
+	const src = brand.logo_url?.trim();
+	if (src) return { kind: 'logo', src };
+	const name = brand.product_name?.trim();
+	if (!name || name === DEFAULT_PRODUCT_NAME) return { kind: 'platform' };
+	return { kind: 'monogram', letter: firstGrapheme(name).toLocaleUpperCase() };
+}
+
+/** First user-perceived character, so a combining accent or an emoji isn't split. */
+function firstGrapheme(text: string): string {
+	const first = new Intl.Segmenter(undefined, { granularity: 'grapheme' })
+		.segment(text)
+		[Symbol.iterator]()
+		.next();
+	return first.done ? '' : first.value.segment;
+}
+
+/**
  * Strict guard mirroring the backend — a 3- or 6-digit hex literal. The value
  * is written into a CSS custom property, so anything that isn't a plain color
  * is rejected to keep the cascade clean.

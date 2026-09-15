@@ -4,6 +4,7 @@ import {
 	accentStrongMeetsAA,
 	isValidHexColor,
 	brandThemeVars,
+	brandMark,
 	type Brand
 } from './brandTheme';
 
@@ -111,5 +112,53 @@ describe('accentStrongContrast / accentStrongMeetsAA', () => {
 			expect(accentStrongContrast(value), String(value)).toBeNull();
 			expect(accentStrongMeetsAA(value), String(value)).toBeNull();
 		}
+	});
+});
+
+/**
+ * The fallback used to be a neutral "AP" placeholder, so a tenant that renamed
+ * the product but set no logo never displayed platform branding. The platform
+ * mark is FeohLedger's identity, so it may only stand in for the platform's own
+ * name (docs/decisions.md §171).
+ */
+describe('brandMark', () => {
+	it('shows the platform mark when the org has configured nothing', () => {
+		expect(brandMark(makeBrand())).toEqual({ kind: 'platform' });
+		expect(brandMark(makeBrand({ product_name: '   ' }))).toEqual({ kind: 'platform' });
+	});
+
+	it('keeps the platform mark while the product name is the platform default', () => {
+		expect(brandMark(makeBrand({ product_name: 'FeohLedger' }))).toEqual({ kind: 'platform' });
+	});
+
+	it('prefers a configured logo over everything, trimmed', () => {
+		const brand = makeBrand({
+			product_name: 'Acme Payables',
+			logo_url: '  https://cdn.acme.test/logo.svg '
+		});
+		expect(brandMark(brand)).toEqual({ kind: 'logo', src: 'https://cdn.acme.test/logo.svg' });
+	});
+
+	it("gives a renamed tenant without a logo its own initial, never the platform's mark", () => {
+		expect(brandMark(makeBrand({ product_name: 'acme payables' }))).toEqual({
+			kind: 'monogram',
+			letter: 'A'
+		});
+		expect(brandMark(makeBrand({ product_name: '  Östgöta AP' }))).toEqual({
+			kind: 'monogram',
+			letter: 'Ö'
+		});
+	});
+
+	it('takes a whole character, not half of one', () => {
+		// "é" typed as e + a combining acute is two code points and one character.
+		expect(brandMark(makeBrand({ product_name: 'e\u0301tude' }))).toEqual({
+			kind: 'monogram',
+			letter: 'E\u0301'
+		});
+		expect(brandMark(makeBrand({ product_name: '👩‍💼 Payables' }))).toEqual({
+			kind: 'monogram',
+			letter: '👩‍💼'
+		});
 	});
 });

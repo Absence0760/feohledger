@@ -1,4 +1,5 @@
 <script lang="ts">
+	import BrandMark from '$lib/components/ui/BrandMark.svelte';
 	import { auth } from '$lib/stores/auth.svelte';
 	import { goto } from '$app/navigation';
 	import { onMount } from 'svelte';
@@ -110,7 +111,10 @@
 
 <div class="login-page">
 	<form class="login-card" onsubmit={handleSubmit}>
-		<h1>{m('auth.login.heading')}</h1>
+		<div class="brand-head">
+			<BrandMark size={36} />
+			<h1>{m('auth.login.heading')}</h1>
+		</div>
 		<p class="subtitle">{m('auth.login.subtitle')}</p>
 
 		<div role="alert" aria-live="assertive">
@@ -177,6 +181,12 @@
 		font-size: 1.3rem;
 		font-weight: 700;
 		color: var(--text);
+	}
+
+	.brand-head {
+		display: flex;
+		align-items: center;
+		gap: 12px;
 	}
 
 	.subtitle {

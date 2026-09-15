@@ -327,7 +327,7 @@ Grouped into subfolders by role; import with the full path
 **Guard rail 9: build UI from these, never copy-pasted markup. Extract a new
 component the second time you would duplicate one.**
 
-- `ui/` — primitives: `PageHeader` `DataTable` `FilterChips` `Modal` `KpiCard` `Badge` `EmptyState` `Money` `SectionTabs` `Tabs` `FieldWarning` `SecretReveal`
+- `ui/` — primitives: `PageHeader` `DataTable` `FilterChips` `Modal` `KpiCard` `Badge` `EmptyState` `Money` `SectionTabs` `Tabs` `FieldWarning` `SecretReveal` `BrandMark`
 - domain: `InvoiceModal` `VendorModal` `VendorPicker` `RunDetailModal` `ApprovalMatrixEditor` `BulkRecodeGLModal` `AdvancedSearchModal` `ScreeningBadge` `SubscriptionBadge` `SpendBarChart` `UsageMeter` `PortalListFilters`
 - chrome: `Sidebar` `NotificationBell` `EntitySwitcher`
 - chat/assistant: `SupplierChatThread` `ChatMessage` `ExamplePrompts` `ToolResultView`
