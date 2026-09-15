@@ -302,6 +302,9 @@ async def _flag_aged_out_payment(
                 f"a new payment run until this is resolved."
             ),
             status="open",
+            # The reconciler sweep aged this payment out. No human is in scope,
+            # and nobody's act is what the flag asks to be reviewed.
+            raised_by_user_id=None,
             organization_id=org.id,
             invoice=invoice,
             invoice_id=payment.invoice_id,

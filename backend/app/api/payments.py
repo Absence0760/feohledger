@@ -2792,6 +2792,12 @@ async def _open_compliance_hold_exception(
         organization_id=org.id,
         severity="error",
         invoice=invoice,
+        # The sanctions/KYC screening verdict raised this, not the operator who
+        # dispatched the payment — and the four call sites include the
+        # unattended `/resume` and retry paths. Holding the executor responsible
+        # for a screening result would bar whoever runs payments from clearing
+        # holds they did not cause.
+        raised_by_user_id=None,
     )
 
 

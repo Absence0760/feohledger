@@ -496,6 +496,9 @@ async def _flag_sync_failure(
             organization_id=org_id,
             invoice=invoice,
             invoice_id=invoice_id,
+            # The sync-back leg failed under a sweep / post-commit hook. Nobody
+            # acted; the ERP did not answer.
+            raised_by_user_id=None,
         )
         await db.commit()
     except Exception as exc:

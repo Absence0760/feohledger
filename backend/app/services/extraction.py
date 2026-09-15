@@ -742,6 +742,9 @@ async def run_extraction(
                 status="open",
                 organization_id=invoice_org_id,
                 invoice=invoice,  # exception follows its invoice (P2)
+                # Semantic duplicate detection runs inside the extraction
+                # worker (a pool thread, or a Lambda) — no request, no user.
+                raised_by_user_id=None,
             )
             logger.info(
                 "[extraction] Duplicate detection: %s near-match(es)", len(duplicate_matches)
@@ -927,6 +930,9 @@ async def run_extraction(
             status="open",
             organization_id=invoice_org_id,
             invoice=invoice,  # exception follows its invoice (P2)
+            # The extraction worker raised this; a provider/parse failure is
+            # nobody's act.
+            raised_by_user_id=None,
         )
 
         # Transition pending → failed

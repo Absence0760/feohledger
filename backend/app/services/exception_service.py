@@ -24,6 +24,11 @@ Callers keep their own dedupe-precheck (each has a different uniqueness rule —
 ``_ensure_exception`` dedupes on ``(invoice, type, open/escalated)``; Positive
 Pay dedupes on ``(type, invoice|description)``); this helper only owns the
 construct → flush → emit tail, so it never double-creates.
+
+Being the ONE construction site is also what makes ``raised_by_user_id`` — the
+segregation-of-duties input on the queue — enforceable: every caller has to
+answer the question here, and ``tests/test_exception_raiser_stamping.py`` scans
+this module's call sites to keep it that way. See :func:`create_exception`.
 """
 
 from __future__ import annotations
@@ -52,6 +57,7 @@ async def create_exception(
     entity_id: uuid.UUID | None = None,
     assigned_to_user_id: uuid.UUID | None = None,
     due_at: datetime | None = None,
+    raised_by_user_id: uuid.UUID | None = None,
 ) -> APException:
     """Create + persist an ``Exception`` and best-effort emit ``exception.raised``.
 
@@ -60,6 +66,18 @@ async def create_exception(
     Positive Pay return where no Invoice is loaded, or ``None`` for an
     invoice-less fraud flag). ``entity_id`` defaults to the invoice's entity
     when an ``invoice`` is supplied.
+
+    ``raised_by_user_id`` is the control-plane user **whose own act this
+    exception exists to have a second person look at** — not whoever happened to
+    be signed in. It is a fraud-control input (``exception_lifecycle``
+    .``segregation_refusal`` refuses that actor the clearing verbs), so a
+    detector's finding must pass ``None``: the actor who triggered the recompute
+    did not author the invoice's contents, and naming them would bar a bystander
+    while absolving whoever really caused the flag. The keyword has a default so
+    this helper stays callable from tests and scripts; every call site under
+    ``app/`` is required to state it by
+    ``tests/test_exception_raiser_stamping.py``, and a literal ``None`` there
+    must be declared with its reason.
     """
     resolved_invoice_id = invoice_id if invoice_id is not None else getattr(invoice, "id", None)
     resolved_entity_id = entity_id if entity_id is not None else getattr(invoice, "entity_id", None)
@@ -74,6 +92,7 @@ async def create_exception(
         entity_id=resolved_entity_id,
         assigned_to_user_id=assigned_to_user_id,
         due_at=due_at,
+        raised_by_user_id=raised_by_user_id,
     )
     db.add(exc)
     # Flush so the row gets its id before we emit (the id is the webhook
@@ -86,7 +105,7 @@ async def create_exception(
     # exception that never existed would be worse than none.
     from app.services.exception_lifecycle import record_raised
 
-    await record_raised(db, exception=exc, invoice=invoice)
+    await record_raised(db, exception=exc, invoice=invoice, actor_id=raised_by_user_id)
 
     try:
         from app.services.webhooks import emit_exception_raised

@@ -6538,3 +6538,177 @@ it touches Caddy.
 Rejected: keeping `app.` for tenants. It leaves the apex free for a separate marketing site, but the
 SPA already serves marketing at the platform apex, and it costs every tenant URL an extra label and
 every certificate an extra `*.app.` SAN, for a separation nothing uses.
+
+## 169. An exception's segregation subject is the payable it blocks, not whoever raised the flag
+
+`docs/followups.md` carried this as *"exception resolution has no
+segregation-of-duties check"* with a prescribed fix: add
+`exceptions.raised_by_user_id`, thread it through `create_exception`, refuse the
+raiser in `record_decision`, NULL permissive. The premise was checked before the
+code was written, by enumerating every raise site, and it does not hold on its
+own.
+
+`services/exception_service.create_exception` is the only place an `Exception`
+row is constructed, so the enumeration is exhaustive: **eleven call sites, and
+at exactly one of them is the signed-in actor the person the flag exists to ask
+about.** Five have no user in scope at all (the extraction worker's semantic
+duplicate and extraction-failure rows, `payment_erp_sync`'s sync-back failure,
+the `payment_reconciler` sweep, the settlement-mismatch check, the inbound ERP
+webhook). Three more run from a door that *does* have a user who did not cause
+the finding: `invoice_warnings._ensure_exception` raises nine of the fifteen
+types and is reached from fifteen callers including two sweeps and two agent
+resolvers, so a `duplicate` flag would be attributed to whoever next PATCHed the
+invoice rather than to whoever created the duplicate; `api/positive_pay` records
+what the *bank* said about a cheque, imported by an operator who did not alter
+it; `api/payments` opens a compliance hold from a screening verdict, twice from
+unattended retry paths. `services/review._reject` has the actor and is still
+wrong to stamp — that row notifies AP of a decision the reviewer already made
+and audited, not a second look at their act. Only
+`api/vendors._flag_payable_invoices_for_bank_change` qualifies.
+
+So the raiser axis alone would be close to inert, and — worse — the way to make
+it *look* busy is to stamp whoever was signed in, which manufactures a refusal
+against a bystander and an absolution for whoever really caused the flag. That
+is the same error §141 and §152 declined to make by backfilling, committed
+forward instead of backward.
+
+**The control's real subject is the payable.** A flag is a detector's finding
+about an invoice's contents, so the person with a motive to clear it is whoever
+created or shaped that invoice — and `approval_chain.violates_segregation`
+already refuses that exact set (`Invoice.uploaded_by_id` ∪
+`Invoice.segregation_actor_ids`, §152) the *approval* of the same invoice. The
+gap was never "no raiser column"; it was an **asymmetry**: the uploader of a
+flagged payable could not approve it, but could clear the `fraud_flag` standing
+between it and a payment run. `exception_lifecycle.segregation_refusal` reads
+that set through the same predicate, so the queue and the approval path cannot
+drift on who is implicated in a payable, and the axis binds on every
+invoice-linked exception rather than on the handful with a recorded human.
+
+**The raiser column ships anyway, and it is not decoration.** The
+implicated-actor set cannot reach the one case the estate had already written
+down as open: the approver of a vendor bank-detail change is not the uploader of
+the invoices that change re-points, so `docs/authentication.md` recorded the
+compensating `fraud_flag` as *"not a second control against the same actor:
+exception resolution has no segregation check either"*. Migration `0098` adds
+the column, the bank-change approval is the one site that fills it, and the BEC
+chain's last link closes. Dropping the column would have left the highest-value
+fraud surface in the app uncovered by either axis.
+
+The column's contract is therefore narrower than "who was signed in": *the
+control-plane user whose own act this exception exists to have a second person
+look at*. Because that is a judgement rather than a lookup, omission cannot be
+allowed to read as an oversight — `tests/test_exception_raiser_stamping.py`
+walks the syntax tree of every `create_exception` call, requires the kwarg, and
+requires a literal `None` to be declared with its reason, exactly as
+`test_invoice_uploader_stamping.py` does one table over. It also pins that the
+model constructor still has one caller, since the scan is only exhaustive while
+that holds.
+
+Four scoping calls inside it:
+
+1. **Only the verbs that release money, and the scope is borrowed rather than
+   re-declared.** `escalate` is not refused: an `escalated` row still blocks a
+   payment run (`blocking_exception_types` excludes only `resolved` and
+   `dismissed`), so handing the decision on is the behaviour the control wants,
+   and refusing it would trap the row with no exit but a role change. Nor are
+   non-blocking types: clearing a `po_mismatch` or a `missing_data` releases
+   nothing, and a refusal there is friction with no control behind it. Scope is
+   `is_payment_blocking`, which reads `api/payments`'
+   `PAYMENT_BLOCKING_EXCEPTION_TYPES` — the same tuple the audit row already
+   advertises as `payment_blocking` — so adding a type to it extends this
+   control for free and there is no second classification to keep in step.
+
+2. **One chokepoint, because there are three doors.** The check is in
+   `record_decision`, not in the routes: the single-row resolve, `/bulk/resolve`
+   and the agent coordinator all pass through it, and a per-route check would be
+   written three times and missing from the fourth door somebody adds. The
+   function also **loads the invoice itself** when a caller omitted it, because
+   a control that switches off when an optional argument is absent is the
+   omission-reads-as-oversight failure again; `org_settings` defaults to
+   enforcing for the same reason, so a forgetful caller gets an unwanted refusal
+   rather than a silent bypass. `/bulk/resolve` pre-checks with the pure
+   predicate because it owes a per-**row** reason — a refusal is another
+   `skipped` entry beside `not_found` and `already_resolved`, never a 409 for
+   the batch, since the queue is worked a filtered page at a time and one
+   refused row must not take down the sweep. It batch-loads the invoices it
+   needs through `invoices_for`, which replaced `correlation_ids_for`: the
+   correlation was already being fetched per batch, the check needs the same
+   rows, and two batch queries over one id set would have been a fork waiting to
+   drift.
+
+3. **Default-on with a per-org opt-out, in the settings block the queue already
+   reads.** `settings.exceptions.require_segregation`, next to
+   `auto_assign_by_type` and `sla_hours_by_type`, mirroring
+   `payment_controls.run_segregation_enabled`'s
+   `settings.payments.require_run_segregation` so the three identity-level money
+   controls are configured alike. Only a literal `false` disables it — the
+   string `"false"` (how a boolean arrives from a form) keeps the control, which
+   is pinned. Reusing the workflow approval step's own `require_segregation` was
+   rejected: an exception need not have an invoice at all (an invoice-less
+   Positive Pay `fraud_flag`), reading a per-invoice snapshot would make the
+   control's presence depend on a bookkeeping row — the defect
+   `review.resolve_approval_config` exists to have fixed — and an org that
+   permits self-approval has not thereby decided to permit self-clearing. The
+   hatch is the reason this sat as a control-*design* call: a two-person AP team
+   can have nobody else to work the queue, and a control that strands a payable
+   is an outage.
+
+4. **The refusal is logged, not audited, and the successful row is the better
+   evidence.** A refusal changes no state, and the append-only invariant is
+   about status changes; the sibling control on the approval path
+   (`check_segregation`) audits none either, and a second convention on one
+   control is drift. `audit_log` also carries a DB-level append-only trigger
+   (0022) and is shipped to a WORM store, so a refusal row is an unprunable
+   write at a caller's chosen rate — an implicated `ap_manager` could post 200
+   ids and mint 200 immutable rows per request. What CC6.3 actually needs is
+   already present and stronger: every **successful** `exception.resolved` /
+   `exception.dismissed` row names its `actor_id` and its `invoice_id`, and the
+   invoice carries `uploaded_by_id` + `segregation_actor_ids`, so an auditor can
+   re-derive the control's *outcome* for every historical decision rather than
+   seeing only the attempts that tripped. The refusal gets a PII-free `WARNING`
+   with ids only.
+
+Both refusal sentences are about the **caller** — an implicated actor already
+learns they are in the set from the identical 403 on the approval path, and a
+raiser is being told about their own act — so neither names the other actors,
+the uploader, the vendor or the amount. Each names the exit (escalate, or ask
+someone else), because a refusal with no next step is where an operator reaches
+for the opt-out.
+
+## 170. A machine that acts on a human's authority inherits that human's refusals
+
+`run_agent` resolves exceptions too, and the obvious reading is that an
+autonomous agent is not a human actor and should not be caught by a human's
+segregation rule. That was rejected, because it mistakes what the agent is.
+
+The agent has **no authority of its own** by deliberate design, established
+twice already in that file: `actor_id` is the human who pressed the button; the
+fail-closed branch refuses to auto-resolve at all when that human's real roles
+are unknown, rather than self-approving on a fabricated set; and
+`resolver.apply` approves through `review.approve_invoice` on those roles —
+which is precisely why the coordinator already carries an `HTTPException`
+handler for *that* path's segregation refusal. Exempting `via="agent"` from the
+queue rule would not have let a machine decide. It would have handed an
+implicated actor a one-click laundering route to the outcome the HTTP door
+refuses them, which is strictly worse than the gap being closed.
+
+So the refusal binds on `actor_id` regardless of `via`, and the interesting half
+is *how* it binds. It is checked **before** `resolver.apply` rather than caught
+after it, for two reasons: the answer is knowable without mutating anything, and
+`record_decision` runs *after* the apply's `SAVEPOINT` closes — so a raise from
+there would reach the route as a bare 403 with the exception left `open` and no
+`AgentDecision` row, which is the exact regression the `HTTPException` handler
+below it was written to fix. Every other way an apply can fail records a
+decision and escalates; so does this. The org opt-out is read from the same
+setting, so an org that disabled the control does not find the agent still
+refusing.
+
+Nothing in the shipped registry can reach the gate: `duplicate` and `fraud_flag`
+are escalate-only stubs, `line_total_mismatch` and `payment_reconciliation` have
+no resolver at all, so no payment-blocking type has an auto-resolving agent
+today. That is the argument for testing it with one registered rather than
+deferring the gate until such a resolver exists — a control written after the
+resolver lands, lands as a bypass. `test_exception_agent_queue_segregation.py`
+registers an auto-resolving `fraud_flag` probe and asserts the escalation, and a
+companion test fails the moment a *real* auto-resolving resolver appears for a
+blocking type, pointing its author at the gate it now runs behind.

@@ -57,6 +57,19 @@ class Exception(Base, EntityMixin, TimestampMixin):
     # by `PATCH /api/exceptions/{id}/assign`. Lives alongside the
     # `assigned_to` string for backward compat — the API exposes both.
     assigned_to_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), index=True)
+    # The control-plane user whose OWN act this exception exists to have a
+    # second person look at — not whoever was signed in when a detector fired.
+    # Segregation of duties on the queue refuses this actor the clearing verbs
+    # (`exception_lifecycle.segregation_refusal`), so a fabricated value would
+    # manufacture a refusal and an honest-looking absolution for whoever really
+    # caused the flag. Almost every raise site is a detector or a sweep with no
+    # such actor and correctly stores NULL — which is permissive, for the same
+    # reason `Invoice.uploaded_by_id` is (decisions §131, §152). No FK: `users`
+    # is control-plane and this table is tenant-scoped, same placement as
+    # `assigned_to_user_id` above and as migrations 0095-0097.
+    # `tests/test_exception_raiser_stamping.py` is the guard that keeps every
+    # `create_exception` call site answering the question explicitly.
+    raised_by_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     # SLA: deadline derived from org settings at creation time. NULL =
     # no SLA configured for this exception type.
     due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

@@ -802,24 +802,69 @@ decision, not a bug fix, so an item here is recorded rather than patched. **Loop
 in the CISO / Security Analyst before acting.**
 
 **Both original entries were closed in round 28** under the repo owner's explicit
-authorisation, recorded on each. One new item opened in their place and is held on
-the same terms.
+authorisation, recorded on each. The one item opened in their place — exception
+resolution — is now closed on the same terms, so **nothing in this section is
+outstanding**; a new entry here is still held for review rather than patched.
+One *non*-control gap surfaced while closing it and is tracked below, outside
+this section's gate, because it is a localisation defect rather than a
+control-design question.
 
-- [ ] **(c) Exception resolution has no segregation-of-duties check.**
-      `POST /api/exceptions/{id}/resolve` and `/bulk/resolve` gate on roles and
-      nothing else — no route, nor `record_decision`, nor the agent coordinator
-      consults a raiser identity, and `exceptions` has no column to consult. With
-      the bank-redirect entry closed this is no longer load-bearing for that
-      chain (the approval is refused before the `fraud_flag` matters), but it
-      holds for every other payment-blocking exception type: the actor who causes
-      a flag can clear it.
-      **Durable fix:** `exceptions.raised_by_user_id` threaded through
-      `create_exception`, plus a refusal in `record_decision`, NULL permissive —
-      the same shape as the uploader stamp ([decisions.md](decisions.md) §131).
-      **Why held rather than patched:** a small AP team may have nobody else to
-      clear the queue, so this is a control-*design* call, not a bug fix. Also
-      documented in [authentication.md](authentication.md) as an explicit open gap.
-      **Trigger:** security review.
+- [x] **DONE, under the repo owner's explicit authorisation** — which is what
+      satisfies this section's standing "loop in the CISO" gate, and it covers
+      this entry only. **The entry's premise was checked first and does not hold
+      on its own, so the prescribed fix was not the fix.** `create_exception` is
+      the only constructor of an `Exception` row, so the call sites enumerate
+      exhaustively: **eleven, and at exactly one is the signed-in actor the
+      person the flag exists to ask about.** Five have no user at all (the
+      extraction worker ×2, the ERP sync-back, the reconciler sweep, the
+      settlement-mismatch check, the inbound ERP webhook); three more run from a
+      door that *does* have a user who did not cause the finding —
+      `invoice_warnings._ensure_exception` raises nine types and is reached from
+      fifteen callers including two sweeps and two agent resolvers, so a
+      `duplicate` would have been pinned on whoever next PATCHed the invoice
+      rather than on whoever created the duplicate; Positive Pay records what the
+      *bank* said, imported by an operator who did not alter the cheque; the
+      compliance hold comes from a screening verdict, twice from unattended retry
+      paths. `review._reject` has the actor and is still wrong to stamp. So a
+      raiser-only rule would have been near-inert, and the way to make it look
+      busy — stamp whoever was signed in — manufactures a refusal against a
+      bystander and an absolution for whoever really caused the flag: §141/§152's
+      error committed forward instead of backward.
+      **The gap was an asymmetry, not a missing column.** A flag is a detector's
+      finding about an invoice's *contents*, so the motive to clear it belongs to
+      whoever created or shaped that invoice — and `violates_segregation` already
+      refused that same set (`uploaded_by_id` ∪ `segregation_actor_ids`, §152)
+      the **approval** of the same invoice, while leaving them the `fraud_flag`
+      standing between it and a payment run.
+      `exception_lifecycle.segregation_refusal` now reads that set through the
+      same predicate, so the queue and the approval path cannot drift, **plus**
+      `exceptions.raised_by_user_id` (migration `0098`, tenant DBs, no backfill)
+      — which ships because the invoice-side axis cannot reach the one case
+      [authentication.md](authentication.md) had already written down as open:
+      the bank-change approver is not the uploader of the invoices their approval
+      re-points, so the compensating `fraud_flag` was "not a second control
+      against the same actor". That link is now closed.
+      Scoped to `is_payment_blocking` (the payment-run gate's own tuple, so a new
+      blocking type is covered for free) and to `resolve`/`dismiss` — `escalate`
+      stays open because an escalated row still blocks the run and is the refused
+      actor's exit. Enforced in `record_decision`, the one chokepoint all three
+      doors share; `/bulk/resolve` pre-checks so a refusal is a per-**row**
+      `skipped` reason rather than a 409 for the batch. **Agents inherit rather
+      than bypass**: the coordinator escalates with a recorded `AgentDecision`,
+      because `actor_id` is the triggering human and an exemption would be a
+      laundering route to what the HTTP door refuses. Default-ON with
+      `settings.exceptions.require_segregation: false` as the explicit per-org
+      opt-out — the entry's own "small AP team" objection, answered the way
+      `require_run_segregation` answers it. A refusal is logged, not audited
+      (it changes no state, the sibling control audits none, and `audit_log` is
+      WORM + append-only); the successful row plus the invoice's columns let an
+      auditor re-derive the outcome of every historical decision, which is
+      stronger evidence than a refusal row.
+      `tests/test_exception_raiser_stamping.py` is the enforcement that keeps the
+      column honest — every `create_exception` site must pass the kwarg, and a
+      literal `None` must be declared with its reason. See
+      [decisions.md](decisions.md) §169 (the subject inversion) and §170 (why the
+      agent inherits).
 
 - [x] **DONE (round 28), under the repo owner's explicit authorisation** — which
       is what satisfies this section's standing "loop in the CISO" gate, and it
@@ -1701,6 +1746,32 @@ are deliberate scope calls, recorded so an absence does not read as an oversight
       denominations on one screen) / adaptive, and
       `backend/tests/test_exception_assignment.py`. See `mobile/CLAUDE.md`
       § Money formatting and [decisions.md](decisions.md) §160.
+
+### Surfaced while closing the exception-queue segregation entry (2026-09-14)
+
+- [ ] **(c) A backend refusal sentence reaches a localized page in English.**
+      The new segregation refusal on `POST /api/exceptions/{id}/resolve` returns a
+      403 whose `detail` the queue renders through `extractError(err)` verbatim —
+      so a `de` / `es` / `fr` / `ja` / `pt-BR` operator gets one English sentence
+      inside an otherwise-translated page. This is **not** new with that change:
+      it is how `approval_chain.check_segregation`'s identical 403 has always
+      surfaced on the approval path, and how every other backend `detail` reaches
+      every page. The bulk half *is* localized, because `/bulk/resolve` returns a
+      machine code per row (`segregation_raiser` / `segregation_implicated`) that
+      `exceptions.bulk.segregationSkipped` renders in all six locales — which is
+      the shape the fix wants, and the proof it is affordable.
+      **Durable fix:** a stable machine `code` alongside `detail` on the refusals
+      a user is expected to *act* on (the two SoD paths, the CFO / max-amount
+      gates, the named-approver gate), plus a frontend code→`MessageKey` map that
+      degrades to the server's sentence for an unknown code — the same tolerant
+      pattern `exceptionTypeLabelKey` and `screeningCategoryLabelKey` already
+      use, and the same conclusion §149 and §138 reached about rendering a raw
+      server string. Deliberately **not** done inside the segregation slice: it
+      is a cross-cutting error-contract change touching every refusal on the
+      money path, and doing only the one new refusal would have left the page
+      inconsistent with the older identical one beside it.
+      **Trigger:** the next change to any approval-path refusal message, or the
+      first non-English tenant on the approval queue.
 
 
 

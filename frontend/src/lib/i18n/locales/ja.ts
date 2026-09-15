@@ -920,7 +920,8 @@ export const messages = {
 	'exceptions.resolveModal.escalate': 'エスカレーション',
 	'exceptions.resolveModal.resolve': '解決',
 	'exceptions.bulkModal.title': '{n, plural, other {#件の例外を解決}}',
-	'exceptions.bulkModal.hint': '選択したすべての行に同じ解決メモが適用されます。すでに最終状態にある行はサーバー側で自動的にスキップされます。',
+	'exceptions.bulkModal.hint': '選択したすべての行に同じ解決メモが適用されます。すでに最終状態にある行はサーバー側でスキップされます。あなたが関与者として記録されているフラグの行も同様にスキップされるため、それらはエスカレーションしてください。',
+	'exceptions.bulk.segregationSkipped': '{n, plural, other {# 件の行は未処理のままです: 職務分掌 — あなたはその支払い、またはそのフラグの起票に関与したと記録されています。エスカレーションするか、別のユーザーに判断を依頼してください。}}',
 	'exceptions.bulkModal.notePlaceholder': '選択したすべての行に適用',
 
 	'exceptions.type.duplicate': '請求書の重複',
