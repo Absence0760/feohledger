@@ -6438,3 +6438,68 @@ operator ends up with a second key in the wrong region (the estate script defaul
 would read exists yet — `prod.sops.yaml` is created with the first real secret — and a `sops_file`
 data source on a missing file fails every plan. `infra/README.md` § Secrets carries the snippet for
 when it is needed.
+
+## 166. The access-log sink is SSE-S3, the one bucket not under the app key
+
+**Decided:** 2026-09-15 · `infra/s3.tf`, `infra/kms.tf`, `infra/tests/guardrails.tftest.hcl`
+
+Every bucket in `infra/s3.tf` was SSE-KMS under the app key — including the bucket the other three
+send their server-access logs to — and the access-logging control read as done. It could never have
+delivered a log. AWS's documentation for server-access logging says the destination must use SSE-S3,
+and that a destination using SSE-KMS may receive log objects encrypted with a key the owner cannot
+access. And nothing granted the delivery service a write in the first place: the sink had no bucket
+policy for `logging.s3.amazonaws.com` and no log-delivery ACL, whatever its ownership-controls
+comment said. The statement in the app key's policy that let the logging principal use the key
+addressed neither problem, and its comment claimed it was the fix.
+
+It was caught reading the module before its first apply, so no real bucket ever went unlogged. The
+fix follows AWS's documented setup: the sink is SSE-S3, ACLs are disabled (`BucketOwnerEnforced`),
+and a bucket policy grants `s3:PutObject` to the logging principal, pinned to this account and to the
+three source buckets so no other bucket can use this one as its log destination. The logging
+configurations depend on both, and the key-policy statement is gone. `guardrails.tftest.hcl` pins
+the encryption, the ownership setting and the grant, because `terraform validate` cannot see any of
+them and a real plan accepts the broken shape without complaint.
+
+The exception is narrow on purpose. The sink holds signal-of-access, not the audit trail — that is
+the Compliance-locked audit-logs bucket, still under the app key — and SSE-S3 still encrypts every
+log object at rest. It needs no Trivy suppression: the customer-managed-key rule (AWS-0132) passes
+on the SSE-S3 sink under both the version CI pins (0.70.0) and the current release.
+
+Rejected: keeping SSE-KMS and widening the key policy further, because the problem is the
+destination's encryption, not the key's grants. Rejected too: shipping the logs to CloudWatch Logs
+instead, which adds an ingestion bill and a second log store for records whose only job is to exist
+when an auditor asks. Dropping access logging was never an option: SOC 2 CC7.2 and AWS-0089 both
+expect it.
+
+## 167. The platform lives on feohledger.com — bought by hand, kept by Terraform
+
+**Decided:** 2026-09-15 · `infra/variables.tf`, `infra/domain.tf`, `infra/acm.tf`, `infra/tests/guardrails.tftest.hcl`, `docs/founder-runbooks/production-deployment.md`
+
+The account bootstrap gave FeohLedger a delegated `feohledger.jaredhoward.com` zone, and `infra/`
+issued its certificate there. That suits an internal tool and not this one, because the platform
+domain is not cosmetic here. Tenants live on `<slug>.<platform domain>`; the platform domain is
+derived from `FEOH_TENANT_URL_TEMPLATE` (§91); the passkeys users register are bound to their relying
+party's domain (§87); and customers register SSO redirect URIs under it at their own IdPs. Each of
+those breaks, or makes every customer redo something, when the domain changes after tenants exist.
+Nothing is deployed yet, so the move costs nothing today and more with every signup.
+
+The domain is bought by hand, not through `aws_route53domains_domain`. That resource needs the
+registrant's name, address and phone number as configuration — which would have to live in this
+public repo, or be threaded in from a private one, for a one-time purchase — and it owns the
+registration, so a destroy, or a refactor that renames the resource, can deregister the product's
+domain. Terraform owns the part that must not drift once the domain exists:
+`aws_route53domains_registered_domain` adopts the registration, keeps it auto-renewing,
+transfer-locked and private in WHOIS, and points its name servers at the zone the certificate
+validates in. Destroying that resource removes it from state and leaves the registration alone.
+
+`domain_name` now accepts only a name directly under a TLD, because a registration exists only for the
+apex; pointing it back at the estate subdomain fails at plan instead of at the Route 53 Domains API. A
+nested platform domain (`app.feohledger.com`, the shape `docs/minimal-deployment.md` uses on its
+single VM) would need that guard relaxed and the zone lookup split from the registered domain; nothing
+on AWS uses one today.
+
+The delegated zone and its NS record in `jaredhoward.com` are retired as an operator step, recorded in
+`docs/followups.md`. The delegation has to go before the zone, or the name is left delegated to name
+servers someone else can try to claim, and the estate bootstrap cannot express that order: the zone's
+`prevent_destroy` fails the plan, and the stage that owns the NS record does not run once
+`create_subdomain` is false.

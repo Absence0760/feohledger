@@ -30,10 +30,11 @@ never in this public repo.
 **The account exists (2026-09-14).** The estate bootstrap
 (`new-project-account.sh feohledger`) created **FeohLedger** inside the estate
 AWS Organization, with the Terraform state bucket, the sops KMS key, a GitHub
-OIDC deploy role and the delegated `feohledger.jaredhoward.com` zone. Operators
-sign in through IAM Identity Center (`aws sso login --profile feohledger`), not
-IAM users or root keys. That covers items 1, 2 and 5 below; 3 and 4 are still
-open.
+OIDC deploy role and a delegated `feohledger.jaredhoward.com` zone the platform
+does not use — it lives on `feohledger.com` (Step 2), and retiring that zone is
+an operator step in `docs/followups.md`. Operators sign in through IAM Identity
+Center (`aws sso login --profile feohledger`), not IAM users or root keys. That
+covers items 1, 2 and 5 below; 3 and 4 are still open.
 
 1. Create a dedicated AWS account for production. Don't mix with
    personal/sandbox.
@@ -47,15 +48,22 @@ open.
 
 ## Step 2 — Domain + ACM certificate
 
-**Handled by Terraform (`infra/acm.tf`).** The platform domain today is
-`feohledger.jaredhoward.com`, a Route 53 zone the account bootstrap
-delegated to the FeohLedger account. The first `terraform apply` issues
-the `us-east-1` certificate (CloudFront requires that region) for the
-apex plus `*.feohledger.jaredhoward.com` — the wildcard is what serves
-tenant subdomains — and DNS-validates it in that zone.
+**Buy the domain by hand; Terraform (`infra/acm.tf`, `infra/domain.tf`) does
+the rest.** The platform domain is `feohledger.com`. Register it in the Route 53
+console while signed in to the FeohLedger account — one year, auto-renew on,
+privacy protection on — and click the link in the contact-verification email,
+or the registration is suspended. Route 53 creates the `feohledger.com` hosted
+zone in the account as part of the registration. Terraform deliberately does not
+buy the domain: that needs the registrant's contact details in configuration,
+and a registration Terraform owns can be deregistered by a destroy
+(`docs/decisions.md` §167).
 
-To move to a product apex (e.g. `feohledger.com`): register it, host its
-zone in the FeohLedger account, and set `domain_name`.
+Then the first `terraform apply` issues the `us-east-1` certificate (CloudFront
+requires that region) for `feohledger.com` plus `*.feohledger.com` — the
+wildcard is what serves tenant subdomains — DNS-validates it in that zone, and
+adopts the registration so it stays auto-renewing, transfer-locked, private in
+WHOIS and delegated to that zone. Until the registration has created the zone,
+`terraform plan` fails on the zone lookup.
 
 ## Step 3 — Populate SOPS secrets
 

@@ -61,9 +61,14 @@ variable "backup_retention_days" {
 }
 
 variable "domain_name" {
-  description = "Platform domain the ACM certificate covers (the apex plus a one-level wildcard for tenant subdomains). Must be a public Route 53 zone in this account — today the feohledger.jaredhoward.com child zone the estate account bootstrap delegated here. Moving to a product apex means hosting that zone in this account and changing this value."
+  description = "The platform's registered apex domain. acm.tf issues the certificate for it plus a one-level wildcard (tenants live on <slug>.<domain>), and domain.tf manages its registration settings. It must be registered through Route 53 in this account, which is what creates the public hosted zone of the same name that both files look up (README.md § Platform domain + certificate)."
   type        = string
-  default     = "feohledger.jaredhoward.com"
+  default     = "feohledger.com"
+
+  validation {
+    condition     = can(regex("^[a-z0-9]([a-z0-9-]*[a-z0-9])?\\.[a-z]{2,}$", var.domain_name))
+    error_message = "domain_name must be a registered apex such as feohledger.com, not a subdomain: domain.tf manages the domain's registration, and only the apex has one."
+  }
 }
 
 variable "monthly_budget_limit_usd" {

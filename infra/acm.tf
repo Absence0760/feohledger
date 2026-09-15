@@ -5,10 +5,11 @@
 # production home is S3 + CloudFront (docs/production-deployment.md). An ALB in
 # us-east-1 can use the same certificate.
 #
-# The domain is the child zone the estate account bootstrap delegated to this
-# account (`feohledger.jaredhoward.com`, NS records in the jaredhoward.com parent
-# zone). The zone is looked up by name rather than hardcoded, and because it
-# lives in this same account, DNS validation completes within one apply.
+# The domain is the registered apex `feohledger.com`. Route 53's registrar
+# created its public hosted zone in this account when the domain was bought, and
+# domain.tf keeps the registration pointed at that zone. The zone is looked up by
+# name rather than hardcoded, and because it lives in this same account, DNS
+# validation completes within one apply.
 #
 # The wildcard SAN is load-bearing: tenants are routed by subdomain —
 # `frontend/src/lib/hostRouting.ts` takes the slug from the first label under a

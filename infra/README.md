@@ -14,6 +14,7 @@ infra/
 ├── s3.tf                        # invoice-files + audit-logs buckets (versioning + Object Lock)
 │                                #   + access-logs sink + backups bucket (lifecycle-expired, no lock)
 ├── acm.tf                       # us-east-1 certificate for the platform domain + wildcard
+├── domain.tf                    # registration settings for the platform domain (renewal, lock, WHOIS privacy, name servers)
 ├── budgets.tf                   # account-wide monthly cost budget + email alerts
 ├── outputs.tf                   # exports for downstream modules
 ├── backend.config.example       # state-bucket shape for `terraform init` (real one gitignored)
@@ -32,7 +33,8 @@ Every resource in this module follows the SOC 2 baseline:
 | S3 versioning on every bucket | `s3.tf` — `aws_s3_bucket_versioning` = Enabled |
 | S3 Object Lock — governance mode, 365d | `s3.tf` — invoice-files bucket |
 | S3 Object Lock — compliance mode, 7y | `s3.tf` — audit-logs bucket |
-| SSE-KMS on every bucket | `s3.tf` — references `aws_kms_key.app` |
+| SSE-KMS on every data bucket; SSE-S3 on the access-logs sink | `s3.tf` — the invoice-files, audit-logs and backups buckets reference `aws_kms_key.app`. AWS does not support SSE-KMS on a server-access-log destination, so the sink uses S3-managed keys (`../docs/decisions.md` §166) |
+| Server-access logging on every data bucket | `s3.tf` — delivered to the access-logs sink, whose bucket policy grants `logging.s3.amazonaws.com` `s3:PutObject`, pinned to this account and the three source buckets; ACLs disabled |
 | Public access block on every bucket | `s3.tf` — all four flags true |
 | Lifecycle cost guards | `s3.tf` — backups bucket expires dumps after `backup_retention_days` (90d default; deliberately NO Object Lock — the lifecycle IS the retention policy), and every lifecycle rule reaps incomplete multipart uploads after 7 days |
 
@@ -49,7 +51,9 @@ This migration path is also tracked under "Pending — needs a code change" in `
 
 ## Platform domain + certificate
 
-`acm.tf` issues the TLS certificate the workload stack's CloudFront distribution will use: `var.domain_name` (default `feohledger.jaredhoward.com`, the child zone the account bootstrap delegated to this account) plus `*.<domain>`, requested in **us-east-1** through the `aws.us_east_1` provider alias because CloudFront accepts no other region. It is DNS-validated in that same zone during the apply, and `platform_certificate_arn` only resolves once it is issued.
+The platform domain is `feohledger.com` (`var.domain_name`, which accepts only a registered apex). It is **bought by hand** in the Route 53 console while signed in to the FeohLedger account — one year, auto-renew and privacy protection on — and the registration creates the `feohledger.com` public hosted zone in the account. Terraform does not register it: that would need the registrant's name, address and phone number as configuration, and a registration Terraform owns can be deregistered by a destroy (`../docs/decisions.md` §167). What Terraform owns is what must not drift afterwards: `domain.tf` adopts the registration and keeps it auto-renewing, transfer-locked, private in WHOIS and delegated to that zone, and `terraform destroy` only drops it from state. The `feohledger.jaredhoward.com` zone the account bootstrap delegated here is unused; retiring it is an operator step in `../docs/followups.md`.
+
+`acm.tf` issues the TLS certificate the workload stack's CloudFront distribution will use: the domain plus `*.<domain>`, requested in **us-east-1** through the `aws.us_east_1` provider alias because CloudFront accepts no other region (Route 53 Domains is served only from us-east-1 too). It is DNS-validated in the same zone during the apply, and `platform_certificate_arn` only resolves once it is issued.
 
 The wildcard is what makes tenant subdomains work — the SPA takes the tenant slug from the first label under the platform domain (`frontend/src/lib/hostRouting.ts`), so every `<slug>.<domain>` is covered without a certificate change per signup. A nested platform domain (`<slug>.app.<domain>`) or a tenant's own vanity domain would each need another certificate; see the comment at the top of `acm.tf`.
 
@@ -79,6 +83,8 @@ rm backend_override.tf           # remove before any real plan/apply
 ## Applying
 
 State lives in `feohledger-tfstate-<account-id>`, the bucket the estate account bootstrap (`~/github/templates/scripts/new-project-account.sh`) created in the FeohLedger AWS account. Locking is S3-native (`use_lockfile`), so there is no DynamoDB table. Key (`envs/prod/terraform.tfstate`), region, locking and encryption are committed in `main.tf`; only the bucket name — which embeds the account ID — is passed at init time, from a gitignored `backend.config`.
+
+**Register `feohledger.com` first** (§ Platform domain + certificate). Until the registration has created its hosted zone, `plan` fails on the zone lookup in `acm.tf`, and `domain.tf` has no registration to adopt.
 
 Run from `infra/` with Terraform 1.15 (what CI validates against) and the `feohledger` SSO profile (`AdministratorAccess` in the FeohLedger account):
 
