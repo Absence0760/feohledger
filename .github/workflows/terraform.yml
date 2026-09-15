@@ -65,9 +65,10 @@ jobs:
         working-directory: infra
         # Terraform 1.15+ `validate` checks the backend block's required
         # arguments, so the partial-config `backend "s3"` (its `bucket` is
-        # passed at init time, never committed) fails without state access. Overriding to the `local` backend for this
-        # job keeps validate credential-free. The file is gitignored —
-        # committing it would switch real applies to local state.
+        # passed at init time, never committed) fails without state access.
+        # Overriding to the `local` backend for this job keeps validate
+        # credential-free. The file is gitignored — committing it would
+        # switch real applies to local state.
         run: printf 'terraform {\n  backend "local" {}\n}\n' > backend_override.tf
 
       - name: terraform init (backend=false)

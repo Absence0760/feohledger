@@ -18,6 +18,7 @@ environment = "prod"
 # names reserved briefly to prevent takeover).
 invoice_files_bucket_name = "feohledger-invoices-prod-REPLACE"
 audit_logs_bucket_name    = "feohledger-audit-logs-prod-REPLACE"
+access_logs_bucket_name   = "feohledger-access-logs-prod-REPLACE"
 backups_bucket_name       = "feohledger-backups-prod-REPLACE"
 
 # --- Object Lock retention --------------------------------------------------
