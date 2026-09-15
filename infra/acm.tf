@@ -15,11 +15,10 @@
 # `frontend/src/lib/hostRouting.ts` takes the slug from the first label under a
 # `PUBLIC_PLATFORM_DOMAINS` entry — so the SPA answers on `<slug>.<domain>` and
 # the API on a sibling such as `api.<domain>`. One `*.<domain>` covers every
-# tenant without a certificate change per signup. It does NOT cover a nested
-# platform domain (`<slug>.app.<domain>`, the shape docs/minimal-deployment.md
-# uses for its Caddy host); serving the platform there means adding
-# `*.app.<domain>` to the SANs. A tenant's white-label vanity domain needs its
-# own certificate (docs/white-label.md) and is out of scope here.
+# tenant without a certificate change per signup. Tenants live directly under
+# the platform domain on every deployment shape, so no nested `*.app.<domain>`
+# SAN is needed. A tenant's white-label vanity domain needs its own
+# certificate (docs/white-label.md) and is out of scope here.
 
 data "aws_route53_zone" "platform" {
   name         = var.domain_name

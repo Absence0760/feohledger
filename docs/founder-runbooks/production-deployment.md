@@ -155,7 +155,7 @@ From your laptop, against the production URL:
 1. Hit `GET /api/health` — should return `{"status": "ok"}`
 2. Create a test tenant via `scripts/create_tenant.py`
 3. Log in to the test tenant at
-   `https://<tenant-slug>.app.feohledger.com`
+   `https://<tenant-slug>.feohledger.com`
 4. Upload a test invoice → watch extraction complete in the UI
 5. Check CloudWatch Logs for the backend service — errors should be
    zero

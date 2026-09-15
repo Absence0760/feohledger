@@ -5,8 +5,8 @@
 # After editing, apply without downtime:
 #   docker compose -f compose.prod.yml exec caddy caddy reload --config /etc/caddy/Caddyfile
 #
-# Example — the `acme` tenant on app.feohledger.com:
+# Example — the `acme` tenant on feohledger.com:
 #
-# acme.app.feohledger.com {
+# acme.feohledger.com {
 # 	import spa
 # }
