@@ -41,9 +41,9 @@ closed, **eighteen** opened. **29 → 41** — by category, **31 (c)** · **7 (a
 
 **Since:** two (c) entries added outside a round — the GitHub deploy role
 (2026-09-14) and the missing self-service-signup switch (2026-09-15) — then
-**eight** from publishing the legal document set (2026-09-15,
-[decisions.md](decisions.md) §175): five (c), two (b) and one (a). So **51**
-open: **38 (c)** · **8 (a)** · **5 (b)**.
+**ten** from publishing the legal document set and reviewing it (2026-09-15,
+[decisions.md](decisions.md) §175): seven (c), two (b) and one (a). So **53**
+open: **40 (c)** · **8 (a)** · **5 (b)**.
 
 The legal-set entries are worth reading as a group rather than as seven chores:
 five of them are the same shape — a document now makes a **published commitment**
@@ -153,6 +153,29 @@ pending the standing "loop in the CISO / Security Analyst" gate on that section.
       **Durable fix:** add `portal.shell.footerPrivacy` / `footerCookies` and
       an `auth.signup.legalConsent` entry (with embedded links) to all six
       catalogues, and swap the literals.
+
+- [ ] **No accessibility statement, although the project holds the material for
+      one.** `docs/accessibility-vpat.md` exists, the conformance target is WCAG
+      2.2 AA, and `tests-e2e/a11y/axe.spec.ts` now covers all six legal routes —
+      so the substance is there and evidenced. The EU Accessibility Act makes a
+      published, dated accessibility statement an obligation for an in-scope
+      service, and a B2B buyer's procurement asks for one by name.
+      **Durable fix:** a sixth document at `/legal/accessibility`, derived from
+      the VPAT rather than written fresh, naming the standard, the known gaps
+      (the manual screen-reader pass is still outstanding), the feedback route,
+      and the date it was last reviewed. Adding it is one entry in
+      `lib/legal/pages.ts` plus the page — the index, the marketing footer and
+      the cross-document nav all pick it up automatically.
+      **Trigger:** before selling into the EU, or at the next accessibility pass.
+
+- [ ] **The Privacy Policy names the transfer safeguards but not how to get a
+      copy.** Art 13(1)(f) requires the means to obtain a copy of the safeguards
+      relied on, not merely their name. `/legal/privacy` §9 names the SCCs and
+      the UK Addendum correctly; it does not say how to ask for them.
+      **Durable fix:** one sentence pointing at the privacy address — and then
+      actually being able to answer it, which means executing the SCCs with the
+      providers involved (see the `(a)` entry on representatives; both wait on
+      incorporation).
 
 ### The pricing page and the billing code describe different products
 

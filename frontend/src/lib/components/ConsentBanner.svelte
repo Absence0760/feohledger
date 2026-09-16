@@ -122,10 +122,19 @@
 				<button type="button" class="btn-link" onclick={() => (showDetails = !showDetails)}>
 					{showDetails ? 'Hide details' : 'Manage'}
 				</button>
-				<button type="button" class="btn-secondary" onclick={() => record('rejected')}>
+				<!--
+					Both choices carry the SAME class, and that is the point. Accept was
+					a filled, bold, accent-coloured button and Reject a plain outline —
+					same size and same place, but EDPB Guidelines 03/2022 treat exactly
+					that visual-prominence asymmetry as a deceptive-design nudge, and
+					the Cookie Notice claims neither option is styled to stand out.
+					Either the sentence or the styling had to give; the styling is the
+					thing a regulator actually looks at.
+				-->
+				<button type="button" class="btn-choice" onclick={() => record('rejected')}>
 					Reject non-essential
 				</button>
-				<button type="button" class="btn-accent" onclick={() => record('accepted')}>
+				<button type="button" class="btn-choice" onclick={() => record('accepted')}>
 					Accept all
 				</button>
 			</div>
@@ -234,24 +243,14 @@
 		padding-right: 4px;
 	}
 
-	.btn-secondary {
-		background: transparent;
-		border-color: var(--border);
-		color: var(--text);
-	}
-
-	.btn-secondary:hover {
-		border-color: var(--text-muted);
-	}
-
-	.btn-accent {
+	.btn-choice {
 		background: var(--accent-strong);
 		border-color: var(--accent-strong);
 		color: #fff;
 		font-weight: 600;
 	}
 
-	.btn-accent:hover {
+	.btn-choice:hover {
 		filter: brightness(1.08);
 	}
 
