@@ -19,6 +19,8 @@ export const messages = {
 	'nav.group.procurement': '調達',
 	'nav.group.billing': '請求',
 	'nav.group.insights': '分析',
+	'nav.group.automation': '自動化',
+	'nav.group.governance': 'ガバナンス',
 	'nav.group.settings': '設定',
 
 	// Primary navigation — group children
@@ -71,6 +73,8 @@ export const messages = {
 	'shell.skipToMain': 'メインコンテンツへスキップ',
 	'shell.primaryNav': 'メインナビゲーション',
 	'shell.sectionNav': 'セクション：{group}',
+	'shell.sectionMore': 'その他',
+	'shell.sectionMoreAria': '他 {count} セクション',
 	'shell.profileMenu': 'プロフィールとアカウントメニュー',
 	'shell.profile': 'プロフィール',
 	'shell.profileAndSecurity': 'プロフィールとセキュリティ',

@@ -1,12 +1,18 @@
-import { expect, test } from '../fixtures/helpers';
+import { clickSectionTab, expect, sectionTabHrefs, test } from '../fixtures/helpers';
 
 /**
  * Grouped sidebar navigation + the per-page section sub-tab bar.
  *
  * Lower-traffic routes are folded behind group rows (Procurement / Billing /
- * Insights / Settings — see `$lib/nav`). A group row lands on its first child;
- * the page then shows the group's children as a section tab bar that round-trips
- * navigation and tracks the active route. Run as admin (sees every group).
+ * Insights / Automation / Governance / Settings — see `$lib/nav`). A group row
+ * lands on its first child; the page then shows the group's children as a
+ * section tab bar that round-trips navigation and tracks the active route. Run
+ * as admin (sees every group).
+ *
+ * The bar folds whatever does not fit into a More menu (`decisions §174`), and
+ * Billing's 9 children overflow the default 1280px viewport — so a "which tabs
+ * does this group have" assertion goes through `sectionTabHrefs`, which reads
+ * the row AND the menu. Asserting the row alone would only pin what fits.
  */
 test.describe('grouped sidebar navigation', () => {
 	test('admin sidebar shows the expected top-level entries', async ({ page }) => {
@@ -28,6 +34,8 @@ test.describe('grouped sidebar navigation', () => {
 			'Procurement',
 			'Billing',
 			'Insights',
+			'Automation',
+			'Governance',
 			'Settings'
 		]);
 	});
@@ -38,17 +46,18 @@ test.describe('grouped sidebar navigation', () => {
 
 		// Billing → Contracts (first child).
 		await expect(page).toHaveURL(/\/contracts$/);
-		const tabs = page.locator('.section-tabs a.section-tab');
-		await expect(tabs).toHaveText([
-			'Contracts',
-			'Expenses',
-			'Credit Memos',
-			'Discounts',
-			'Recurring',
-			'Statements',
-			'Positive Pay',
-			'Bank Reconciliation',
-			'Subscription'
+		// Row + More menu, in nav order — all nine are offered whether or not
+		// they fit (Billing is the widest group and does not, at 1280px).
+		expect(await sectionTabHrefs(page)).toEqual([
+			'/contracts',
+			'/expenses',
+			'/credit-memos',
+			'/discounts',
+			'/recurring',
+			'/vendor-statements',
+			'/positive-pay',
+			'/bank-reconciliation',
+			'/billing'
 		]);
 		// The landing tab is the active one.
 		await expect(page.locator('.section-tab.active')).toHaveText('Contracts');
@@ -58,7 +67,7 @@ test.describe('grouped sidebar navigation', () => {
 
 	test('section tabs navigate and the active tab + group follow the route', async ({ page }) => {
 		await page.goto('/contracts');
-		await page.locator('.section-tab', { hasText: 'Discounts' }).click();
+		await clickSectionTab(page, 'Discounts');
 
 		await expect(page).toHaveURL(/\/discounts$/);
 		await expect(page.locator('.section-tab.active')).toHaveText('Discounts');

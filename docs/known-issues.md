@@ -5,7 +5,8 @@ names the root cause, the evidence, blast radius, and a recommended fix
 approach — this is a staging area for real problems, not a place to let them
 go stale. See root `CLAUDE.md` guard rail 6 (no dangling deferred findings).
 
-**One entry is open** — the `queue-blocked` e2e cases at the bottom. The other
+**Two entries are open** — the `/organization` 320px reflow defect below, and
+the `queue-blocked` e2e cases at the bottom. The other
 nine are `~~struck-through~~` resolved stubs, kept because the *diagnosis* is
 the expensive part and is worth not re-deriving. Add a new entry at the top when
 a defect is diagnosed but can't be fixed in the same session.
@@ -21,6 +22,41 @@ goes to [followups.md](followups.md). Reasoning behind a deliberate design call
 goes to [decisions.md](decisions.md).
 
 ---
+
+## Organization settings overflows horizontally at 320px (WCAG 1.4.10)
+
+**Found:** 2026-09-15, while extending the 320px reflow guard to a route that
+renders `SectionTabs` (`docs/decisions.md` §174).
+
+`/organization` scrolls the document sideways by **137px** at a 320px viewport,
+independently of the section tab bar. Measured with the tab bar's own
+measurement row excluded, after the page's content has loaded:
+
+| element | left | right | width |
+|---|---|---|---|
+| `a.btn-outline` | 191 | 457 | 266 |
+| `a.btn-outline` | 191 | 449 | 259 |
+| `a.btn-outline` | 184 | 389 | 204 |
+| `button.btn-test` | 289 | 431 | 142 |
+
+Same defect class as the tab bar: flex rows whose children are wide and
+`white-space: nowrap`, in a container with no `flex-wrap`, so the row cannot
+shrink and pushes the page instead. `.erp-test-row` was fixed in that change
+(it now wraps); the `.btn-outline` rows were left, because they are a different
+set of containers on the same page and fixing them properly is a responsive
+pass over the whole settings page rather than a one-line rule.
+
+**Blast radius:** the settings page only, and only below roughly 460px. No data
+is wrong and nothing is unreachable — the page scrolls — but it fails WCAG
+1.4.10 Reflow, which this project claims conformance to
+(`docs/accessibility.md`), so it is a compliance defect rather than a cosmetic
+one.
+
+**Fix approach:** give each offending row `flex-wrap: wrap` (or make the
+`.btn-outline` group a wrapping grid) and re-add `/organization` to the reflow
+loop in `tests-e2e/a11y/screen-reader.spec.ts`, which is deliberately scoped to
+`/contracts` today and carries a comment pointing here.
+
 
 ## ~~A named-but-unregistered CARD provider still falls back to `mock`~~ — FIXED 2026-08-21
 
