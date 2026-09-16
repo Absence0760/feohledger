@@ -231,8 +231,15 @@ jobs:
       # returns 401, and `docker run` reports it as the misleading "repository
       # does not exist or may require 'docker login'"); quay.io/minio/minio is
       # MinIO's own registry and serves it. Every other image this repo pulls is
-      # still fine on Docker Hub — this one is not, so do not "fix" a failure
-      # here by adding retries or extending the health-check loop. Start it via
+      # still fine on Docker Hub — this one is not. That failure is
+      # DETERMINISTIC: a 401 or "repository does not exist" means the registry
+      # or image path is wrong, so never answer one by extending the
+      # health-check loop or by looping on `docker run` — that only buries the
+      # cause. The pull below retries for TRANSIENT registry failures only:
+      # quay.io returned a 502 on 1 of 14 shards on 2026-09-15, killing that
+      # shard before a single test ran. Each attempt prints its own error, so
+      # a deterministic failure still reads as itself — three times — and then
+      # fails closed. Start it via
       # `docker run` instead so the storage-roundtrip tests (receipts, contract
       # docs, chat attachments, PEPPOL inbound) hit a real S3 backend rather
       # than failing with connection-refused — same local-first parity as the
@@ -241,6 +248,17 @@ jobs:
       # runner, so the fixed `--name minio` never collides across shards.
       - name: Start MinIO (S3)
         run: |
+          # Pull as its own step so a registry failure is distinguishable from
+          # a container that started but never became healthy.
+          for attempt in 1 2 3; do
+            if docker pull quay.io/minio/minio:latest; then break; fi
+            if [ "$attempt" = 3 ]; then
+              echo "::error::could not pull quay.io/minio/minio after 3 attempts - see each error above; a 401 or 'repository does not exist' is NOT transient and means the registry or image path is wrong"
+              exit 1
+            fi
+            echo "::warning::MinIO pull attempt $attempt failed; retrying in $((attempt * 5))s"
+            sleep $((attempt * 5))
+          done
           docker run -d --name minio -p 9000:9000 \
             -e MINIO_ROOT_USER=minioadmin \
             -e MINIO_ROOT_PASSWORD=minioadmin \
@@ -532,8 +550,15 @@ jobs:
       # returns 401, and `docker run` reports it as the misleading "repository
       # does not exist or may require 'docker login'"); quay.io/minio/minio is
       # MinIO's own registry and serves it. Every other image this repo pulls is
-      # still fine on Docker Hub — this one is not, so do not "fix" a failure
-      # here by adding retries or extending the health-check loop. Start it via
+      # still fine on Docker Hub — this one is not. That failure is
+      # DETERMINISTIC: a 401 or "repository does not exist" means the registry
+      # or image path is wrong, so never answer one by extending the
+      # health-check loop or by looping on `docker run` — that only buries the
+      # cause. The pull below retries for TRANSIENT registry failures only:
+      # quay.io returned a 502 on 1 of 14 shards on 2026-09-15, killing that
+      # shard before a single test ran. Each attempt prints its own error, so
+      # a deterministic failure still reads as itself — three times — and then
+      # fails closed. Start it via
       # `docker run` instead. The storage layer (positive-pay file upload,
       # invoice receipts, contract docs, chat attachments) hits a real S3
       # backend rather than failing with connection-refused. The `invoices`
@@ -542,6 +567,17 @@ jobs:
       # never collides across shards.
       - name: Start MinIO (S3)
         run: |
+          # Pull as its own step so a registry failure is distinguishable from
+          # a container that started but never became healthy.
+          for attempt in 1 2 3; do
+            if docker pull quay.io/minio/minio:latest; then break; fi
+            if [ "$attempt" = 3 ]; then
+              echo "::error::could not pull quay.io/minio/minio after 3 attempts - see each error above; a 401 or 'repository does not exist' is NOT transient and means the registry or image path is wrong"
+              exit 1
+            fi
+            echo "::warning::MinIO pull attempt $attempt failed; retrying in $((attempt * 5))s"
+            sleep $((attempt * 5))
+          done
           docker run -d --name minio -p 9000:9000 \
             -e MINIO_ROOT_USER=minioadmin \
             -e MINIO_ROOT_PASSWORD=minioadmin \
