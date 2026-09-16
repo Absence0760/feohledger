@@ -500,9 +500,10 @@
 		features — the list, report and audit exports, the data-subject export, and the
 		developer API. We strongly recommend exporting before terminating, because export
 		depends on access. We will not delete Customer Data without giving the Customer a
-		reasonable opportunity to export it, and we will provide a reasonable export on
-		request made before deletion, except where suspension for a security or legal reason
-		makes that impossible or where law forbids it.
+		reasonable opportunity to export it — in practice, the same 30-day election window the
+		<a href="/legal/dpa#deletion">Data Processing Addendum's deletion section</a> describes —
+		and we will provide a reasonable export on request made before deletion, except where
+		suspension for a security or legal reason makes that impossible or where law forbids it.
 	</p>
 
 	<h3>10.5 Deletion</h3>
@@ -513,7 +514,10 @@
 		manner of that deletion. We may retain data where a law requires us to, and backups
 		are deleted on their ordinary cycle; anything so retained remains subject to these
 		Terms and to the DPA for as long as we hold it. Records the Service keeps as an
-		append-only audit trail are deleted with the workspace, not edited out of it.
+		append-only audit trail are deleted with the workspace, not edited out of it. Where a
+		copy of that trail has been shipped to a write-once archive, the
+		<a href="/legal/dpa#deletion">DPA's deletion section</a> explains why that copy can
+		outlast the workspace until its own retention period ends.
 	</p>
 
 	<h2 id="confidentiality">11. Confidentiality</h2>
@@ -845,8 +849,9 @@
 
 	<h3>20.7 Survival</h3>
 	<p>
-		Sections 2, 4 (as to ownership), 7, 10.3 to 10.5, 11, 12.3, 12.4, 13, 14, 15, 19 and
-		20, and any accrued payment obligation, survive termination or expiry.
+		Sections 2, 4 (as to ownership), 7, 10.3 to 10.5, 11, 12.3, 12.4, 13, 14, 15, 16, 19
+		and 20, and any accrued payment obligation and the tax gross-up obligation in clause
+		5.7, survive termination or expiry.
 	</p>
 
 	<h3>20.8 Language and interpretation</h3>

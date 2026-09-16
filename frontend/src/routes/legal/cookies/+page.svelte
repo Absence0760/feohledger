@@ -1,6 +1,29 @@
 <script lang="ts">
 	import LegalPage from '$lib/legal/LegalPage.svelte';
+	import { resetConsent } from '$lib/components/ConsentBanner.svelte';
 	import { CONTACT, OPERATOR } from '$lib/legal/operator';
+
+	// Withdrawal has to be as easy as consent. Describing "clear your browser's
+	// site data" as the mechanism was accurate but not equivalent — so the
+	// notice now carries the control instead of instructions for one.
+	let reopened = $state(false);
+
+	// The button is inert until the component has mounted: its whole job is to
+	// touch localStorage and reopen the banner, neither of which exists before
+	// hydration. This page's markup renders ahead of that (the legal routes are
+	// deliberately served without waiting on the tenant probe), so without the
+	// gate there is a real window where the control looks ready, takes a click,
+	// and silently does nothing. Disabling it until `ready` closes that window
+	// and gives the e2e spec a truthful signal to wait on rather than a sleep.
+	let ready = $state(false);
+	$effect(() => {
+		ready = true;
+	});
+
+	function changeChoice() {
+		resetConsent();
+		reopened = true;
+	}
 </script>
 
 <LegalPage
@@ -178,12 +201,26 @@
 		<code>feoh_consent_choice</code>, and the banner does not ask again until that record is gone.
 	</p>
 	<p>
-		To withdraw a choice you already made, clear this site's browser data — through your browser's
-		site-settings screen, or by using a private/incognito window, which never picks up a stored
-		choice in the first place. That deletes <code>feoh_consent_choice</code> along with everything
-		else in the table above, and the banner reappears on your next visit so you can choose again.
-		There is no separate "manage preferences" page outside the banner today, because there is only
-		one optional category to manage, and clearing the stored choice is how it is withdrawn.
+		<strong>To withdraw or change a choice you already made, use the button below.</strong> It
+		forgets the stored choice and brings the banner straight back, so changing your mind costs
+		the same single click that recording it did. Nothing else in the table above is touched —
+		you stay signed in.
+	</p>
+	<p>
+		<button type="button" class="consent-reset" disabled={!ready} onclick={changeChoice}>
+			Change your privacy choice
+		</button>
+		{#if reopened}
+			<span class="consent-reset-note" role="status">
+				Your stored choice has been cleared — the banner is showing again.
+			</span>
+		{/if}
+	</p>
+	<p>
+		Clearing this site's browser data does the same thing, if you would rather: it deletes
+		<code>feoh_consent_choice</code> along with everything else in the table above, and the banner
+		reappears on your next visit. A private or incognito window never picks up a stored choice in
+		the first place.
 	</p>
 
 	<h2 id="refuse">6. What happens if you refuse</h2>
@@ -244,3 +281,35 @@
 		>.
 	</p>
 </LegalPage>
+
+<style>
+	/* The withdrawal control. Styled as a real button rather than a text link,
+	   because a control that withdraws consent should not be less prominent
+	   than the ones that give it. */
+	.consent-reset {
+		font: inherit;
+		font-size: 0.9375rem;
+		padding: 8px 16px;
+		border: 1px solid var(--accent-strong);
+		border-radius: 6px;
+		background: var(--accent-strong);
+		color: #fff;
+		font-weight: 600;
+		cursor: pointer;
+	}
+
+	.consent-reset:hover:not(:disabled) {
+		filter: brightness(1.08);
+	}
+
+	.consent-reset:disabled {
+		opacity: 0.6;
+		cursor: default;
+	}
+
+	.consent-reset-note {
+		margin-left: 12px;
+		font-size: 0.9375rem;
+		color: var(--success-on-tint);
+	}
+</style>

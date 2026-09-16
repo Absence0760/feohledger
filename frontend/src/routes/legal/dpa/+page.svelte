@@ -333,13 +333,14 @@
 	<p>
 		<strong>An important structural point.</strong> Nearly every integration in the
 		Service is a pluggable adapter that ships with a local, non-networked default, and an
-		adapter with no credential fails closed to that default rather than calling out. A
-		deployment that has enabled nothing shares personal data with <em>no</em> third party
-		other than the infrastructure provider that hosts it. Most rows on the sub-processor
-		register are therefore <em>available</em> rather than <em>engaged</em>: the honest
-		answer to "who are your sub-processors" is the infrastructure provider plus whichever
-		adapters your tenant or the deployment has actually turned on. The register marks
-		which is which.
+		adapter with no credential fails closed to that default rather than calling out. Most
+		rows on the sub-processor register are therefore <em>available</em> rather than
+		<em>engaged</em>: the honest answer to "who are your sub-processors" is the three that
+		are engaged in every deployed environment — the infrastructure provider, Anthropic for
+		invoice extraction, and hCaptcha on the public signup form — plus whichever adapters
+		your tenant or the deployment has actually turned on. The register marks which is
+		which, and <a href="#ai-processing">Artificial intelligence and machine learning</a>
+		explains why extraction is not on the opt-in side of that line.
 	</p>
 
 	<h3 id="sub-processor-changes">Notice of change, and your right to object</h3>
@@ -348,11 +349,14 @@
 		<li>
 			We will give you at least <strong>30 days' notice</strong> before a new
 			sub-processor begins processing your personal data, or before we replace an
-			existing one. Notice is given by updating
-			<a href="/legal/sub-processors">/legal/sub-processors</a> and by email to the
-			notification contact you have given us. You can ask to be added to that
-			notification list at <a href="mailto:{CONTACT.privacy}">{CONTACT.privacy}</a>;
-			keeping the address current is your responsibility.
+			existing one. <strong>Notice is given by updating
+			<a href="/legal/sub-processors">/legal/sub-processors</a>, which carries a dated
+			change log</strong> — that page is the notice, and checking it is how you receive
+			it. There is no automatic mailing list yet; building one is committed work, and
+			until it exists you may ask at
+			<a href="mailto:{CONTACT.privacy}">{CONTACT.privacy}</a> to be told directly, and
+			we will do so manually. We would rather describe the mechanism we have than
+			promise one we do not.
 		</li>
 		<li>
 			You may <strong>object</strong> on reasonable data-protection grounds within
@@ -390,13 +394,28 @@
 	<h3 id="ai-processing">Artificial intelligence and machine learning</h3>
 
 	<p>
-		Some optional features use AI models: extraction of fields from an uploaded invoice,
-		the conversational assistant, the cash-flow copilot, exception-handling agents and
-		duplicate-detection embeddings. Each defaults to a local or in-process implementation
-		with no third-party call. If you enable a hosted model provider, you instruct us to
-		transmit the relevant content — which for extraction means the document image and
-		everything on it — to that provider, and that provider becomes a sub-processor for
-		your tenant.
+		Some features use AI models: extraction of fields from an uploaded invoice, the
+		conversational assistant, the cash-flow copilot, exception-handling agents and
+		duplicate-detection embeddings. All but one default to a local or in-process
+		implementation with no third-party call.
+	</p>
+
+	<p>
+		<strong>Invoice extraction is the exception, and the Controller should read this
+		before relying on the rest of this section.</strong> In any deployed environment it
+		transmits the uploaded document — the image and everything printed on it — to
+		Anthropic, whether or not the Controller or the operator has configured a model
+		provider. The offline stand-in returns fabricated invoice values, so defaulting to it
+		would post invented figures against a real supplier's document; the Service therefore
+		fails loudly against the real provider instead. Anthropic is accordingly a
+		sub-processor for every tenant from the moment the Service is deployed, and is listed
+		as engaged on the register rather than as available.
+	</p>
+
+	<p>
+		For the remaining AI features, if you enable a hosted model provider you instruct us to
+		transmit the relevant content to that provider, and that provider becomes a
+		sub-processor for your tenant.
 	</p>
 
 	<p>
@@ -450,7 +469,7 @@
 			<strong>Erasure.</strong> An administrator can irreversibly redact a subject's
 			personal data in place. Contact details, tax identifiers, bank details,
 			beneficial-owner data, authentication secrets and supplier-authored chat bodies are
-			replaced with non-identifying tombstones. Please read the two limits in the next
+			replaced with non-identifying tombstones. Please read the three limits in the next
 			paragraph, because they are the ones that matter.
 		</li>
 		<li>
@@ -476,7 +495,7 @@
 	</ul>
 
 	<p>
-		<strong>Two limits on erasure, stated plainly.</strong> First, the money trail
+		<strong>Three limits on erasure, stated plainly.</strong> First, the money trail
 		survives: amounts, currencies, statuses and dates on invoices and payments are never
 		mutated, the supplier's legal name is preserved where it is the payee denormalised
 		onto a financial record, and the append-only audit log is never edited or deleted.
@@ -487,9 +506,14 @@
 		not today delete the documents you have uploaded from object storage</strong>. Where a
 		request requires a stored invoice, receipt, contract or tax form to be deleted, raise
 		it at <a href="mailto:{CONTACT.privacy}">{CONTACT.privacy}</a> and we will perform that
-		deletion for you within the timeframe in <a href="#deletion">section 13</a>. We would
-		rather tell you where the seam is than let you discover it in the middle of a
-		regulator's deadline.
+		deletion for you within the timeframe in <a href="#deletion">section 13</a>. Third,
+		<strong>the automated path does not clear a registered passkey or the record of a
+		session already issued.</strong> Access itself stops at once — every request re-reads
+		the account and refuses a deactivated one — but the stored authenticator credential
+		survives, and the session record persists until it expires (at most the access-token
+		lifetime, thirty minutes by default). Raise it with us at the same address if a
+		request requires the credential itself to be destroyed. We would rather tell you where
+		each seam is than let you discover one in the middle of a regulator's deadline.
 	</p>
 
 	<p>
@@ -660,9 +684,13 @@
 		<strong>Making the choice.</strong> Tell us which you want at
 		<a href="mailto:{CONTACT.privacy}">{CONTACT.privacy}</a> within <strong>30 days</strong>
 		of termination. During those 30 days your data remains available for you to export and
-		we take no deletion action. If you tell us nothing, we proceed to deletion at the end of
-		that window — we will not hold your data indefinitely on the theory that you might come
-		back, and we will not delete it before you have had a fair chance to retrieve it.
+		we take no deletion action — those 30 days <strong>are</strong> the reasonable
+		opportunity to export that clause 10.4 of the
+		<a href="/legal/terms#termination">Terms</a> promises, stated here as a definite number
+		rather than left as a second, vaguer undertaking. If you tell us nothing, we proceed to
+		deletion at the end of that window — we will not hold your data indefinitely on the
+		theory that you might come back, and we will not delete it before you have had a fair
+		chance to retrieve it.
 	</p>
 
 	<p>
@@ -687,22 +715,35 @@
 
 	<ul>
 		<li>
-			<strong>Backups.</strong> Backup copies are taken as whole-system snapshots and are
-			not selectively edited — surgically excising one tenant from an encrypted backup is
-			not a thing anyone can reliably do, and a processor who claims otherwise is guessing.
-			Your data persists in backups until they age out on the ordinary backup retention
-			cycle, which is currently configured at 90 days. Until then it remains subject to
-			this DPA, is not restored or accessed except to recover the Service as a whole, and
-			is deleted when the backup expires.
+			<strong>Backups.</strong> The nightly backup is a <strong>per-database dump, not a
+			whole-system snapshot</strong>. Because each tenant has its own database, each
+			tenant's backup is its own object in an encrypted, versioned backup store — so
+			removing your data from it is an ordinary object deletion rather than surgery on an
+			encrypted image, and we will not tell you it cannot be done. We delete your backup
+			objects as part of the deletion described above, within the same 60 days. Two
+			residues we will not pretend away: the store retains a superseded version of an
+			object until the versioning cleanup expires it, currently configured at 30 days, and
+			any copy that deletion does not reach ages out on the ordinary backup retention
+			cycle, currently configured at 90 days. Where a deployment also keeps a
+			volume-level snapshot as a coarse fallback, that copy is not selectively editable
+			and persists until the snapshot expires. Until each expires, anything still held
+			remains subject to this DPA, is not restored or accessed except to recover the
+			Service, and is deleted when it expires. These describe the backup design as our
+			infrastructure code defines it; the note on the workload stack in
+			<a href="#annex-ii">Annex II</a> applies here too.
 		</li>
 		<li>
-			<strong>Audit records.</strong> The append-only audit log is immutable by design —
-			the database itself refuses to delete or alter a row — and where it has been shipped
-			to a write-once archive it cannot be deleted before its retention period expires.
-			Audit rows carry the actor, the action, the record and what changed, with tax
-			identifiers and bank details reduced to last-four form — so no full account number,
-			tax identifier or card number is in them. They are retained as evidence of the integrity of the
-			financial record.
+			<strong>Audit records.</strong> The append-only audit log is immutable by design:
+			the database refuses to delete or alter a row, so it is never edited. It is still
+			<strong>destroyed with your tenant database</strong> when we delete that database,
+			which is the same thing clause 10.5 of the
+			<a href="/legal/terms#termination">Terms</a> says — deleted with the workspace, not
+			edited out of it. What survives is the separate copy: where the deployment has
+			enabled write-once archival, an audit event already shipped to that archive cannot
+			be deleted before its retention period expires. Audit rows carry the actor, the
+			action, the record and what changed, with tax identifiers and bank details reduced to
+			last-four form — so no full account number, tax identifier or card number is in them.
+			They are retained as evidence of the integrity of the financial record.
 		</li>
 		<li>
 			<strong>Data held with a third party you enabled.</strong> Where you instructed us
@@ -1130,11 +1171,16 @@
 					<td><strong>Duration of processing</strong></td>
 					<td>
 						The term of the Agreement, plus the deletion or return period in
-						<a href="#deletion">section 13</a>. Within the term, retention is governed by
-						per-record-class windows the Customer configures, defaulting to 84 months (7
-						years) for financial records — the common tax and SOX baseline. Records past
-						their window are archived by an audited sweep, never hard-deleted. Audit
-						records are append-only and are not deleted at all.
+						<a href="#deletion">section 13</a>. Within the term there is <strong>no
+						automatic expiry</strong>: a configurable retention sweep exists but is
+						<strong>off unless a deployment enables it</strong>, and it covers only two
+						record classes — invoices and the audit log. Enabled, it <em>archives</em>
+						overdue terminal invoices by stamping a marker; it hard-deletes nothing, and
+						it never touches an audit row, which is append-only. The configurable window
+						defaults to 84 months (7 years), the common tax and SOX baseline, but that
+						window only bites once the sweep is turned on. Everything else persists until
+						the Customer deletes it or this Addendum's deletion-on-termination clause
+						applies.
 					</td>
 				</tr>
 				<tr>
@@ -1232,21 +1278,31 @@
 					<td>
 						Status transitions on invoices, payments, approvals and suppliers write audit
 						rows, and the audit table is <strong>append-only enforced in the database
-						itself</strong>: a trigger rejects every delete and every update other than the
-						shipper's dispatch stamp. Neither the application, nor an administrator, nor we
-						can rewrite history without the database refusing. Approval actions are recorded
+						itself</strong>: a row-level trigger rejects every delete and every update other
+						than the shipper's dispatch stamp, so no path through the application — and no
+						administrator acting through it — can rewrite history without the database
+						refusing. We would rather state the control's edge than overstate it: being a
+						row trigger, it does not fire on a table-level <code>TRUNCATE</code>, and a role
+						holding ownership of the database could disable it. That is the gap the
+						write-once archival below exists to close. Approval actions are recorded
 						against an identity for non-repudiation.
 					</td>
 				</tr>
 				<tr>
 					<td><strong>Write-once archival of audit events</strong></td>
 					<td>
-						A shipper can copy audit events to write-once sinks — S3 Object Lock in
-						compliance mode, or CloudWatch Logs. <strong>This is available and
-						configurable, not always on</strong>: shipping is disabled by default and the
-						default adapter is an in-process mock, so it is enabled per deployment. We
-						describe it this way deliberately rather than implying every deployment ships
-						to WORM storage today.
+						A shipper can copy audit events to write-once sinks — an S3 bucket with Object
+						Lock, or CloudWatch Logs. Our infrastructure code provisions that bucket with
+						Object Lock in <strong>compliance mode</strong> and a seven-year default
+						retention. The shipper relies on that bucket default rather than stamping a
+						retention period onto each object, and at start-up it verifies the bucket has
+						Object Lock enabled and refuses to start if it does not — a check that confirms
+						the lock is on, not that the bucket is in compliance mode. Pointed at a bucket
+						built some other way, the archive is only as strong as that bucket.
+						<strong>The capability is available and configurable, not always on</strong>:
+						shipping is disabled by default and the default adapter is an in-process mock,
+						so it is enabled per deployment. We describe it this way deliberately rather
+						than implying every deployment ships to WORM storage today.
 					</td>
 				</tr>
 				<tr>
@@ -1322,26 +1378,31 @@
 						Subject-access export and erasure are built into the product, restricted to
 						administrators in your own tenant, scoped so a subject in another tenant is
 						neither visible nor erasable, and audited. See
-						<a href="#data-subject-rights">section 9</a>, including its two stated limits.
+						<a href="#data-subject-rights">section 9</a>, including its three stated limits.
 					</td>
 				</tr>
 				<tr>
 					<td><strong>Retention enforcement</strong></td>
 					<td>
-						Per-record-class retention windows are configurable per organisation, enforced
-						by an audited sweep that <strong>archives rather than deletes</strong>, never
-						touches an audit row, and records a manifest of what it did. The default window
-						is 84 months.
+						Per-record-class retention windows are configurable per organisation and
+						enforced by an audited sweep that <strong>archives rather than deletes</strong>,
+						never touches an audit row, and records a manifest of what it did. The default
+						window is 84 months. <strong>The sweep is off by default</strong> and covers
+						invoices and the audit log only — we list it here as an available control, not
+						as one running on your tenant unless it has been enabled.
 					</td>
 				</tr>
 				<tr>
 					<td><strong>Availability and restoration</strong></td>
 					<td>
-						Backups are versioned, encrypted with a managed key, and lifecycle-expired on a
-						defined cycle (90 days as configured). A written backup and disaster-recovery
-						procedure exists and is maintained alongside the code. Restoration is a
-						whole-system operation — see the backup caveat in
-						<a href="#deletion">section 13</a>.
+						Backups are nightly per-database dumps — the control plane and every tenant
+						database separately — versioned, encrypted with a managed key, and
+						lifecycle-expired on a defined cycle (90 days as configured). Restoration is
+						per-database and scripted: a single tenant can be restored from its own dump
+						without replaying the whole estate, though the Service is out of use while a
+						restore runs. A written backup and disaster-recovery procedure exists and is
+						maintained alongside the code. For what that granularity means when you ask us
+						to delete, see <a href="#deletion">section 13</a>.
 					</td>
 				</tr>
 				<tr>
@@ -1421,6 +1482,13 @@
 			<a href="#data-subject-rights">section 9</a>.
 		</li>
 		<li>
+			<strong>In-product erasure does not revoke a registered passkey or an issued
+			session record.</strong> Access itself stops on the next request, but the stored
+			authenticator credential survives the automated path, and the record of a session
+			already issued persists until it expires. Destroying the credential is done by us
+			on request. See <a href="#data-subject-rights">section 9</a>.
+		</li>
+		<li>
 			<strong>Write-once audit archival is off by default.</strong> The capability exists
 			and is configurable per deployment; it is not on everywhere.
 		</li>
@@ -1438,10 +1506,14 @@
 	</p>
 
 	<p>
-		The infrastructure provider that hosts the Service is a sub-processor in every deployed
-		environment, by design; local development runs entirely on a contributor's own machine
-		with no third party at all. Every other entry becomes active only when a credential is
-		configured.
+		<strong>Three sub-processors are engaged in every deployed environment, by design, before
+		the Controller configures anything</strong>: the infrastructure provider that hosts the
+		Service; <strong>Anthropic</strong>, which receives uploaded invoice documents for
+		extraction (see <a href="#ai-processing">Artificial intelligence and machine learning</a>);
+		and <strong>hCaptcha</strong>, which receives the IP address of anyone using the public
+		signup form and without which the Service refuses to start. Every other entry becomes
+		active only when a credential is configured. Local development runs entirely on a
+		contributor's own machine with no third party at all.
 	</p>
 
 	<p>

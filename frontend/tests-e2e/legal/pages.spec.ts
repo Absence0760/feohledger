@@ -302,6 +302,43 @@ test.describe('legal pages', () => {
 		}
 	});
 
+	test('the Cookie Notice can withdraw a consent choice, not just describe how', async ({
+		page
+	}) => {
+		// ePrivacy requires withdrawal to be as easy as giving consent. Until the
+		// control existed the only route was clearing site data through browser
+		// settings — accurate, but not equivalent, and the notice had to say so
+		// because it was the truth.
+		const CONSENT_KEY = 'feoh_consent_choice';
+		const banner = page.getByRole('region', { name: 'Cookie and privacy consent' });
+
+		// Seed the choice BEFORE the document loads, rather than setting it and
+		// reloading. Two reasons, and the second is the one that bit: a reload
+		// means the assertions below race hydration, and `toBeHidden()` passes
+		// vacuously against the pre-hydration document (the banner is rendered by
+		// Svelte, so "not there yet" and "correctly hidden" look identical). The
+		// click then landed in the window after the button painted but before its
+		// handler was attached, and was silently lost.
+		await page.addInitScript((key) => localStorage.setItem(key, 'rejected'), CONSENT_KEY);
+		await page.goto('/legal/cookies');
+
+		// Wait on the control's OWN readiness, not on the heading: the legal
+		// routes render ahead of the tenant probe, so their markup (heading
+		// included) exists before hydration and proves nothing about handlers.
+		// The button disables itself until the component mounts, which is both
+		// honest UX and the only truthful signal here.
+		const withdraw = page.getByRole('button', { name: 'Change your privacy choice' });
+		await expect(withdraw).toBeEnabled();
+		await expect(banner).toBeHidden();
+
+		await withdraw.click();
+
+		// The banner comes back in the same page view — not on the next load —
+		// and the stored choice is gone.
+		await expect(banner).toBeVisible();
+		expect(await page.evaluate((key) => localStorage.getItem(key), CONSENT_KEY)).toBeNull();
+	});
+
 	test('the route set and lib/legal/pages.ts have not drifted apart', async () => {
 		// The hardcoded PAGES list above is the guard; this keeps it honest
 		// against the source of truth the app actually renders from, so adding a

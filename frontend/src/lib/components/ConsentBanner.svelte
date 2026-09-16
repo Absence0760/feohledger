@@ -23,6 +23,34 @@
 		const v = localStorage.getItem(CONSENT_KEY);
 		return v === 'accepted' || v === 'rejected' ? v : null;
 	}
+
+	/** Event the banner listens for, so any page can reopen it. */
+	export const CONSENT_RESET_EVENT = 'feoh:consent-reset';
+
+	/**
+	 * Forget the recorded choice and show the banner again.
+	 *
+	 * Withdrawal has to be as easy as giving consent — that is the ePrivacy
+	 * requirement, and it is also the thing a consent banner most often gets
+	 * wrong. Until this existed the only route was clearing site data in browser
+	 * settings, which is neither as easy nor discoverable, and the Cookie Notice
+	 * had to describe that as the mechanism because it was the truth.
+	 *
+	 * The event is what makes it work from anywhere: the banner is mounted once
+	 * in the root layout, outside the routed slot, so a page cannot reach its
+	 * state directly. Clearing the key alone would take effect only on the next
+	 * full load.
+	 */
+	export function resetConsent(): void {
+		try {
+			localStorage.removeItem(CONSENT_KEY);
+		} catch {
+			// Storage blocked — the banner still reopens for this session below.
+		}
+		if (typeof window !== 'undefined') {
+			window.dispatchEvent(new CustomEvent(CONSENT_RESET_EVENT));
+		}
+	}
 </script>
 
 <script lang="ts">
@@ -37,6 +65,16 @@
 
 	$effect(() => {
 		if (browser) choice = getConsent();
+	});
+
+	// Reopen when any page asks (the Cookie Notice's "Change your choice"
+	// control). Listening here rather than polling localStorage keeps the
+	// banner the single owner of its own visibility.
+	$effect(() => {
+		if (!browser) return;
+		const reopen = () => (choice = null);
+		window.addEventListener(CONSENT_RESET_EVENT, reopen);
+		return () => window.removeEventListener(CONSENT_RESET_EVENT, reopen);
 	});
 
 	const visible = $derived(browser && choice === null);

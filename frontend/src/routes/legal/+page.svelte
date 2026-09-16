@@ -20,8 +20,10 @@
 	<header>
 		<h1>Legal</h1>
 		<p class="lede">
-			The agreements and notices that govern {OPERATOR.serviceName}. Each was last
-			revised on {LAST_UPDATED}.
+			The agreements and notices that govern {OPERATOR.serviceName}.
+			{LAST_UPDATED} is the date this set was most recently reviewed and republished
+			together — it does not mean every document's text changed that day, only that
+			each is current as of it.
 		</p>
 	</header>
 
@@ -35,6 +37,18 @@
 			</li>
 		{/each}
 	</ul>
+
+	<section class="cross-ref" aria-labelledby="cross-ref-heading">
+		<h2 id="cross-ref-heading">Looking for refunds or cancellation terms?</h2>
+		<p>
+			There is no separate refunds or cancellation policy — this index lists every
+			document we publish, and that isn't one of them. Those terms live inside the
+			<a href="/legal/terms#fees">Terms of Service's fees section</a> (clauses 5.7–5.8,
+			covering payment, taxes and non-payment) and its
+			<a href="/legal/terms#termination">termination section</a> (clause 10, covering
+			cancellation, data export and deletion).
+		</p>
+	</section>
 
 	<section class="contact" aria-labelledby="contact-heading">
 		<h2 id="contact-heading">Getting in touch</h2>
@@ -113,8 +127,30 @@
 		line-height: 1.5;
 	}
 
-	.contact {
+	.cross-ref {
 		margin-top: 48px;
+		padding-top: 24px;
+		border-top: 1px solid var(--border);
+	}
+
+	.cross-ref h2 {
+		margin: 0 0 12px;
+		font-size: 1.125rem;
+	}
+
+	.cross-ref p {
+		margin: 0;
+		color: var(--text-muted);
+		font-size: 0.9375rem;
+		line-height: 1.7;
+	}
+
+	.cross-ref a {
+		color: var(--accent-on-tint);
+	}
+
+	.contact {
+		margin-top: 40px;
 		padding-top: 24px;
 		border-top: 1px solid var(--border);
 	}
