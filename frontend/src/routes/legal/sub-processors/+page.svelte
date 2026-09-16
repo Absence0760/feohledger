@@ -458,6 +458,15 @@
 		the supplier is transmitted.
 	</p>
 
+	<p>
+		That last sentence is enforced rather than asserted: an automated test pins
+		the exact field set each of the three providers receives, so a change that
+		began sending a tax identifier or a beneficial owner's details would fail
+		before it shipped — and would have to be disclosed here in the same change.
+		We mention the mechanism because a promise about data minimisation is only
+		as good as whatever keeps it true after the page is written.
+	</p>
+
 	<div class="table-scroll" tabindex="0">
 		<table>
 			<caption class="visually-hidden">Sanctions screening providers</caption>

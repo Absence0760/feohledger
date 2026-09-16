@@ -160,17 +160,6 @@ pending the standing "loop in the CISO / Security Analyst" gate on that section.
       the provider set from the registries and fail when a provider is registered
       that neither register names.
 
-- [ ] **Nothing guards the sanctions adapters' data minimisation.**
-      `/legal/sub-processors` publishes a specific promise: only the vendor's
-      name and country reach ComplyAdvantage, Dow Jones or Refinitiv. That is
-      true today — `vendor_screening.screen_vendor_record` accepts `vendor_tax_id`
-      and `beneficial_owners` and all three real adapters drop them — but it is
-      true by accident of what each adapter serialises, with no test pinning it.
-      An edit that started sending a tax ID would leave a published page
-      asserting otherwise.
-      **Durable fix:** a test per real adapter asserting the outbound payload's
-      field set exactly, in the shape of `tests/test_erp_adapter_error_pii.py`.
-
 ### The pricing page and the billing code describe different products
 
 - [ ] **Marketing prices do not match the plan catalogue.** ([#426](https://github.com/Absence0760/feohledger/issues/426))

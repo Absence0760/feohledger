@@ -222,12 +222,16 @@ unrelated purpose that no setting disclosed.
 > any outbound body. Only the name and country go on the wire, which is what
 > `/legal/sub-processors` § 3.5 publishes.
 >
-> **That minimisation is currently unguarded.** It is true by accident of what
-> each adapter happens to serialise, with no test pinning the outbound field set,
-> so an edit that started sending a tax ID would leave a published page asserting
-> otherwise. Tracked in `docs/followups.md` (§ (c), "Nothing guards the sanctions
-> adapters' data minimisation"); the durable fix is a per-adapter payload
-> assertion in the shape of `tests/test_erp_adapter_error_pii.py`.
+> **That minimisation is now guarded.**
+> `backend/tests/test_sanctions_adapter_minimisation.py` pins each adapter's
+> outbound body **exactly** — the whole field set, not "no tax ID in it", because
+> a new field carrying a beneficial owner's date of birth would pass a substring
+> check and still be an undisclosed flow to a sub-processor. Adding a field is
+> not forbidden; it is a decision that has to update this table and
+> `/legal/sub-processors` § 3.5 in the same change, which is what an exact
+> assertion forces someone to notice. The guard was verified red — adding
+> `body["tax_id"]` to the ComplyAdvantage adapter fails two of its cases — not
+> merely asserted to work.
 
 ## 7. Email — outbound (`services/email_adapters/`)
 
