@@ -1,8 +1,10 @@
 <script lang="ts">
 	import BrandMark from '$lib/components/ui/BrandMark.svelte';
+	import LinkedMessage from '$lib/components/ui/LinkedMessage.svelte';
 	import { api } from '$lib/api';
 	import { onMount } from 'svelte';
 	import { m } from '$lib/i18n/store.svelte';
+	import { legalTitle } from '$lib/legal/pages';
 
 	interface PublicConfig {
 		hcaptcha_sitekey: string;
@@ -221,17 +223,23 @@
 				page's primary target, and above the existing footer note so the
 				last thing read before submitting is what submitting agrees to.
 
-				English literals rather than `t()`: see the i18n exception in
-				`frontend/CLAUDE.md`. The two labels want catalogue entries (the
-				surrounding copy has them) — tracked in `docs/followups.md` with
-				the supplier-portal footer's equivalent.
+				The sentence is translated; the three link LABELS are the document
+				titles from `lib/legal/pages.ts`, which are English on purpose —
+				the documents themselves are (`frontend/CLAUDE.md` § i18n,
+				`docs/decisions.md` §174), and naming one in French would promise a
+				French text that does not exist. Taking the titles from the
+				registry rather than typing them keeps the link text and the page's
+				own `<h1>` the same string.
 			-->
 			<p class="legal-consent">
-				By creating a workspace you agree to the
-				<a href="/legal/terms">Terms of Service</a> and the
-				<a href="/legal/privacy">Privacy Policy</a>, including the
-				<a href="/legal/dpa">Data Processing Addendum</a> that governs supplier
-				and invoice data you load into it.
+				<LinkedMessage
+					text={m('auth.signup.legalConsent')}
+					links={{
+						terms: { href: '/legal/terms', label: legalTitle('/legal/terms') },
+						privacy: { href: '/legal/privacy', label: legalTitle('/legal/privacy') },
+						dpa: { href: '/legal/dpa', label: legalTitle('/legal/dpa') }
+					}}
+				/>
 			</p>
 
 			<p class="footer">

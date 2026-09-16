@@ -171,30 +171,6 @@ pending the standing "loop in the CISO / Security Analyst" gate on that section.
       **Durable fix:** a test per real adapter asserting the outbound payload's
       field set exactly, in the shape of `tests/test_erp_adapter_error_pii.py`.
 
-- [ ] **Two link surfaces around the legal set are hardcoded English.**
-      `frontend/src/routes/portal/+layout.svelte` renders "Privacy Policy" and
-      "Cookie Notice" as literals beside `m('portal.shell.footerSupport')`, and
-      `frontend/src/routes/signup/+page.svelte` carries the "By creating a
-      workspace you agree to…" consent line as a literal among translated copy. The
-      legal *text* is deliberately English-only ([decisions.md](decisions.md)
-      §175), but a nav label pointing at it is ordinary UI and should go through
-      `t()`.
-      **Why deferred:** the six locale catalogues were held by a concurrent
-      session at the time, and adding keys would have captured that session's
-      uncommitted work in a path-scoped commit.
-      **Durable fix:** add `portal.shell.footerPrivacy` / `footerCookies` and
-      an `auth.signup.legalConsent` entry (with embedded links) to all six
-      catalogues, and swap the literals.
-
-- [ ] **The Privacy Policy names the transfer safeguards but not how to get a
-      copy.** Art 13(1)(f) requires the means to obtain a copy of the safeguards
-      relied on, not merely their name. `/legal/privacy` §9 names the SCCs and
-      the UK Addendum correctly; it does not say how to ask for them.
-      **Durable fix:** one sentence pointing at the privacy address — and then
-      actually being able to answer it, which means executing the SCCs with the
-      providers involved (see the `(a)` entry on representatives; both wait on
-      incorporation).
-
 ### The pricing page and the billing code describe different products
 
 - [ ] **Marketing prices do not match the plan catalogue.** ([#426](https://github.com/Absence0760/feohledger/issues/426))
@@ -2370,6 +2346,22 @@ durable fix stated in one sentence has usually not been tried.
       **Durable fix:** incorporate, engage both, then set `euRepresentative` and
       `ukRepresentative`.
       **Trigger:** before marketing to, or onboarding, an EU or UK customer.
+      Ref: [decisions.md](decisions.md) §175.
+
+- [ ] **Execute the transfer safeguards the Privacy Policy and the DPA name.**
+      `/legal/privacy` §9 now names the SCCs (Decision 2021/914), the UK
+      Addendum and the Swiss amendments, **and** tells a reader to write to the
+      privacy address for a copy — which means we have to be able to produce
+      one. Naming a safeguard is the drafting half; the contractual half is
+      signing the Clauses with each sub-processor that receives personal data
+      outside the EEA/UK (`/legal/sub-processors` is the list) and completing
+      their annexes, plus the transfer-impact assessment *Schrems II* requires.
+      **Why blocked:** a contract needs a party, so this waits on incorporation
+      exactly as the representatives above do.
+      **Durable fix:** incorporate, execute the Clauses provider by provider,
+      and keep the signed set where the privacy mailbox can answer from it.
+      **Trigger:** before the first EEA or UK customer, and before anyone acts
+      on the copy offer in §9.
       Ref: [decisions.md](decisions.md) §175.
 
 None of these are startable from the editor. They are listed so they don't read

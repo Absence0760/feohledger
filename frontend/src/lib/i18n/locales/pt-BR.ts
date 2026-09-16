@@ -72,6 +72,7 @@ export const messages = {
 	'shell.profileMenu': 'Menu de perfil e conta',
 	'shell.profile': 'Perfil',
 	'shell.profileAndSecurity': 'Perfil e segurança',
+	'shell.legalAndPrivacy': 'Jurídico e privacidade',
 	'shell.logOut': 'Sair',
 	'shell.expandSidebar': 'Expandir barra lateral',
 	'shell.collapseSidebar': 'Recolher barra lateral',
@@ -2999,6 +3000,7 @@ export const messages = {
 	'portal.shell.logOut': 'Sair',
 	'portal.shell.footerSupport': 'Suporte',
 	'portal.shell.footerLegal': 'Jurídico',
+	'portal.shell.footerPlatformLegal': 'Privacidade e termos',
 
 	// Login do portal + MFA (routes/portal/login/+page.svelte)
 	'portal.login.subtitle': 'Faça login para enviar faturas e ver pagamentos',
@@ -3407,6 +3409,7 @@ export const messages = {
 	'auth.signup.email': 'E-mail',
 	'auth.signup.submit': 'Enviar e-mail de verificação',
 	'auth.signup.submitting': 'Enviando verificação…',
+	'auth.signup.legalConsent': 'Ao criar um espaço de trabalho, você concorda com os {terms} e a {privacy}, incluindo o {dpa} que rege os dados de fornecedores e faturas que você carregar nele.',
 	'auth.signup.footerPre': 'Já tem um espaço de trabalho? Acesse ',
 	'auth.signup.footerPost': ' para entrar.',
 

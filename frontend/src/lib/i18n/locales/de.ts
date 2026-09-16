@@ -70,6 +70,7 @@ export const messages = {
 	'shell.profileMenu': 'Profil- und Kontomenü',
 	'shell.profile': 'Profil',
 	'shell.profileAndSecurity': 'Profil & Sicherheit',
+	'shell.legalAndPrivacy': 'Recht & Datenschutz',
 	'shell.logOut': 'Abmelden',
 	'shell.expandSidebar': 'Seitenleiste ausklappen',
 	'shell.collapseSidebar': 'Seitenleiste einklappen',
@@ -2998,6 +2999,7 @@ export const messages = {
 	'portal.shell.logOut': 'Abmelden',
 	'portal.shell.footerSupport': 'Support',
 	'portal.shell.footerLegal': 'Rechtliches',
+	'portal.shell.footerPlatformLegal': 'Datenschutz & Bedingungen',
 	'portal.login.subtitle': 'Melden Sie sich an, um Rechnungen einzureichen und Zahlungen einzusehen',
 	'portal.login.email': 'E-Mail',
 	'portal.login.password': 'Passwort',
@@ -3379,6 +3381,7 @@ export const messages = {
 	'auth.signup.email': 'E-Mail',
 	'auth.signup.submit': 'Bestätigungs-E-Mail senden',
 	'auth.signup.submitting': 'Bestätigung wird gesendet…',
+	'auth.signup.legalConsent': 'Mit dem Erstellen eines Arbeitsbereichs stimmen Sie den {terms} und der {privacy} zu, einschließlich des {dpa}, der die von Ihnen geladenen Lieferanten- und Rechnungsdaten regelt.',
 	'auth.signup.footerPre': 'Haben Sie bereits einen Arbeitsbereich? Besuchen Sie ',
 	'auth.signup.footerPost': ', um sich anzumelden.',
 

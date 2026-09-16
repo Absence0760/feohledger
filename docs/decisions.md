@@ -6991,3 +6991,44 @@ Anthropic is a **default** sub-processor for extraction, and the register says s
 rather than pretending it is opt-in. The distinction that matters is between a
 default that is the feature's own declared purpose and a default that quietly
 annexes a credential for a different one.
+
+## 177. The legal set is reachable from every surface, and a footer links the index rather than a chosen subset
+
+The published documents were linked from the marketing footer, the supplier
+portal, the signup form and each other. They were not linked from the signed-in
+application at all — the surface people spend a working day in, and the one both
+`privacy` §19 and `terms` §18 promise to give notice of a change "in the
+application" on. A promise of an in-app notice needs an in-app surface for it to
+appear on, so the profile popover carries one entry to `/legal`.
+
+The popover rather than a sidebar row: this is a reference people reach for
+occasionally, not a destination, and a nav row costs a slot in the collapsed
+icon rail where it would have been an unlabelled icon nobody can identify.
+
+**The supplier portal's footer named two documents and now names none.** It
+linked the Privacy Policy and the Cookie Notice, which left a Supplier User with
+no route to the Terms that bind them — §3.4 binds everyone the Customer gives
+access, and §2 makes them a party to the acceptable-use rules — or to the DPA,
+the document that actually describes what happens to the bank details they
+typed in. A hand-picked subset is also the thing that drifts: the set grew to
+six documents and the footer stayed at two. It now carries one link to the
+index, which lists whatever the set currently is.
+
+That costs a supplier one click to the Privacy Policy, and the e2e assertion
+changed shape to match: it follows the link and asserts the whole set is
+reachable, rather than pinning an `href`. The old assertion passed against a
+footer that named two of six documents, which is precisely the failure it was
+supposed to catch.
+
+**It also resolved the last mixed-language surface around the set.** The
+document titles are English by design (§174), so rendering two of them beside
+`m('portal.shell.footerSupport')` gave a French-locale supplier "Support ·
+Légal · Privacy Policy · Cookie Notice". One translated pointer at an English
+document set is honest; a half-translated footer is just untranslated. The
+signup consent line went the same way, and needed a mechanism to get there:
+a sentence with three links inside it cannot be split into `…Pre`/`…Post`
+catalogue entries without fixing the order the links appear in, which German
+and Japanese both move. So the message stays one entry carrying `{token}`
+markers and `ui/LinkedMessage.svelte` splits it — the translation decides where
+each link lands, and `messages_parity.test.ts`'s existing placeholder check is
+what stops a locale silently dropping the Terms link out of a consent line.

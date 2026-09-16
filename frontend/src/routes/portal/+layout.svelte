@@ -84,8 +84,24 @@
 			here; they need `portalBrand`, and they answer a different question.
 		-->
 		<footer class="portal-footer">
-			<a href="/legal/privacy">Privacy Policy</a>
-			<a href="/legal/cookies">Cookie Notice</a>
+			<!--
+				One link to the index, not a hand-picked pair of documents.
+
+				This footer named the Privacy Policy and the Cookie Notice and
+				stopped there, which left a Supplier User with no route to the
+				Terms that bind them (§3.4 binds everyone the Customer gives
+				access) or to the DPA — the document that actually describes what
+				happens to the bank details they typed in. A subset also drifts:
+				the set grew to six documents and this stayed at two.
+
+				It is also the only legal label here that can be translated. The
+				document TITLES are English by design (`frontend/CLAUDE.md` § i18n),
+				so rendering two of them beside `{m('portal.shell.footerSupport')}`
+				gave a French-locale supplier "Support · Légal · Privacy Policy ·
+				Cookie Notice". A translated pointer at an English document set is
+				honest; a half-translated footer is just untranslated.
+			-->
+			<a href="/legal">{m('portal.shell.footerPlatformLegal')}</a>
 		</footer>
 	</div>
 {:else if portalAuth.loggedIn && portalAuth.user && !portalAuth.user.must_change_password}
@@ -170,8 +186,8 @@
 					{m('portal.shell.footerLegal')}
 				</a>
 			{/if}
-			<a href="/legal/privacy">Privacy Policy</a>
-			<a href="/legal/cookies">Cookie Notice</a>
+			<!-- Same call as the signed-out footer above, same reasons. -->
+			<a href="/legal">{m('portal.shell.footerPlatformLegal')}</a>
 		</footer>
 	</div>
 {/if}

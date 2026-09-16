@@ -71,6 +71,7 @@ export const messages = {
 	'shell.profileMenu': 'Menu profil et compte',
 	'shell.profile': 'Profil',
 	'shell.profileAndSecurity': 'Profil et sécurité',
+	'shell.legalAndPrivacy': 'Mentions légales et confidentialité',
 	'shell.logOut': 'Se déconnecter',
 	'shell.expandSidebar': 'Déplier la barre latérale',
 	'shell.collapseSidebar': 'Replier la barre latérale',
@@ -2997,6 +2998,7 @@ export const messages = {
 	'portal.shell.logOut': 'Se déconnecter',
 	'portal.shell.footerSupport': 'Assistance',
 	'portal.shell.footerLegal': 'Mentions légales',
+	'portal.shell.footerPlatformLegal': 'Confidentialité et conditions',
 	'portal.login.subtitle': 'Connectez-vous pour soumettre des factures et consulter les paiements',
 	'portal.login.email': 'E-mail',
 	'portal.login.password': 'Mot de passe',
@@ -3379,6 +3381,7 @@ export const messages = {
 	'auth.signup.email': 'E-mail',
 	'auth.signup.submit': 'Envoyer l\'e-mail de vérification',
 	'auth.signup.submitting': 'Envoi de la vérification…',
+	'auth.signup.legalConsent': 'En créant un espace de travail, vous acceptez les {terms} et la {privacy}, ainsi que le {dpa} qui régit les données fournisseurs et factures que vous y importez.',
 	'auth.signup.footerPre': 'Vous avez déjà un espace de travail ? Rendez-vous sur ',
 	'auth.signup.footerPost': ' pour vous connecter.',
 

@@ -16,7 +16,7 @@ export interface LegalPageMeta {
 	blurb: string;
 }
 
-export const LEGAL_PAGES: readonly LegalPageMeta[] = [
+export const LEGAL_PAGES = [
 	{
 		path: '/legal/privacy',
 		title: 'Privacy Policy',
@@ -53,9 +53,31 @@ export const LEGAL_PAGES: readonly LegalPageMeta[] = [
 		blurb:
 			'Every piece of storage the app sets in your browser, what each one is for, and which are optional.',
 	},
-] as const;
+] as const satisfies readonly LegalPageMeta[];
+
+/**
+ * A path in the set, as a literal union.
+ *
+ * `satisfies` above rather than a type annotation is what makes this possible:
+ * an annotation would widen every `path` to `string` and this would be no
+ * stronger than `string`, which is exactly how a caller ends up writing its own
+ * fallback title beside the lookup and letting the two drift.
+ */
+export type LegalPath = (typeof LEGAL_PAGES)[number]['path'];
 
 /** Look up a page's metadata by path — `undefined` if it is not in the set. */
 export function legalPage(path: string): LegalPageMeta | undefined {
 	return LEGAL_PAGES.find((p) => p.path === path);
+}
+
+/**
+ * The title of a document that is definitely in the set.
+ *
+ * Total by construction — `LegalPath` is derived from the list, so an unknown
+ * path is a compile error rather than a runtime gap. Use this wherever prose
+ * links to a document by name: the link text and the page's own `<h1>` are then
+ * the same string, and a retitled document renames every link to it at once.
+ */
+export function legalTitle(path: LegalPath): string {
+	return LEGAL_PAGES.find((p) => p.path === path)!.title;
 }

@@ -280,7 +280,7 @@ test.describe('legal pages', () => {
 		);
 	});
 
-	test('the supplier portal gives a vendor a route to our privacy terms', async ({
+	test('the supplier portal gives a vendor a route to the whole document set', async ({
 		page,
 		tenantSlug
 	}) => {
@@ -288,11 +288,20 @@ test.describe('legal pages', () => {
 		// the portal is the only surface they ever see. The footer used to render
 		// only when the TENANT had configured its own URLs, so an unconfigured
 		// tenant's suppliers had no route to us at all.
+		//
+		// It then linked two of the documents by name, which left a Supplier User
+		// — bound by Terms §3.4, and the subject of the DPA — unable to reach
+		// either. So the assertion follows the link rather than pinning an href:
+		// what matters is that the route ARRIVES at the documents, and a footer
+		// naming a subset passed the old shape of this test while failing the
+		// reader.
 		await page.goto(`${tenantOrigin(tenantSlug)}/portal/login`);
-		await expect(page.getByRole('link', { name: 'Privacy Policy' })).toHaveAttribute(
-			'href',
-			'/legal/privacy'
-		);
+		await page.getByRole('link', { name: 'Privacy & terms' }).click();
+
+		await expect(page.getByRole('heading', { level: 1, name: 'Legal' })).toBeVisible();
+		for (const { path, title } of PAGES) {
+			await expect(page.getByRole('link', { name: title }).first()).toHaveAttribute('href', path);
+		}
 	});
 
 	test('no document scrolls the page sideways at 320px (WCAG 1.4.10)', async ({ page }) => {
@@ -387,5 +396,26 @@ test.describe('legal pages', () => {
 		const declared = [...source.matchAll(/path:\s*'([^']+)'/g)].map((m) => m[1]);
 
 		expect(declared.sort()).toEqual(PAGES.map((p) => p.path).sort());
+	});
+});
+
+test.describe('the legal set from inside the app', () => {
+	// Signed IN, unlike everything above: this is the surface the other tests
+	// deliberately exclude, and the one the documents themselves promise to give
+	// change notices on (`privacy` §19, `terms` §18). The set was reachable from
+	// the marketing footer, the supplier portal and the signup form — every
+	// surface except the one people work in all day.
+	test('a signed-in user can reach it from the app chrome', async ({ page }) => {
+		await page.goto('/');
+		await expect(page.locator('aside.sidebar').first()).toBeVisible();
+
+		await page.getByRole('button', { name: 'Profile and account menu' }).click();
+		await page.getByRole('link', { name: 'Legal & privacy' }).click();
+
+		await expect(page.getByRole('heading', { level: 1, name: 'Legal' })).toBeVisible();
+		await expect(page.getByRole('link', { name: 'Privacy Policy' }).first()).toHaveAttribute(
+			'href',
+			'/legal/privacy'
+		);
 	});
 });

@@ -272,10 +272,13 @@ and the surrounding chrome a reader navigates by is minimal on purpose. If these
 are ever translated it is a legal exercise with counsel sign-off per locale, not
 a catalogue backfill; see `docs/decisions.md` §174. **This exception covers only
 those two directories**, plus the document titles `pages.ts` exports for the
-links that reach them. A nav item or banner elsewhere that merely *points at* a
-legal page is ordinary UI and goes through `t()` like anything else — the
-supplier-portal footer's two links are the known exception, hardcoded and
-tracked in `docs/followups.md`.
+links that reach them — take those from `legalTitle(path)`, never by typing the
+title again. A nav item, footer or banner elsewhere that merely *points at* a
+legal page is ordinary UI and goes through `t()` like anything else. A sentence
+with a link inside it stays ONE catalogue entry with `{token}` markers, rendered
+through `ui/LinkedMessage.svelte`; fragmenting it into `…Pre`/`…Post` entries
+fixes the link order and cannot be translated (`frontend/docs/i18n.md` § A
+sentence with a link inside it).
 
 ### Tenant — `src/lib/tenant.ts` + `src/lib/hostRouting.ts`
 

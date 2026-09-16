@@ -135,6 +135,24 @@
 				<a class="profile-action" href="/profile" onclick={() => (showProfile = false)}>
 					{m('shell.profileAndSecurity')}
 				</a>
+				<!--
+					The signed-in app's only route to the published legal set.
+
+					It had none: the documents were linked from the marketing
+					footer, the supplier portal and the signup form — every surface
+					EXCEPT the one people spend their working day in — while the
+					Privacy Policy and the Terms both promise to give notice of a
+					change "in the application". A promise of an in-app notice needs
+					an in-app surface for it to appear on.
+
+					The popover rather than a nav row: this is a reference people
+					reach for occasionally, not a destination, and it costs no space
+					in the collapsed rail — where a row would have been an unlabelled
+					icon nobody could identify.
+				-->
+				<a class="profile-action" href="/legal" onclick={() => (showProfile = false)}>
+					{m('shell.legalAndPrivacy')}
+				</a>
 				<button class="profile-logout" onclick={() => auth.logout()}>{m('shell.logOut')}</button>
 			</div>
 		{/if}
