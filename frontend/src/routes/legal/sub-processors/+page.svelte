@@ -101,6 +101,16 @@
 		invoices, and the bot-protection control on the public sign-up form.
 	</p>
 
+	<p>
+		<strong>One row is a qualified entry.</strong> Amazon SES is listed here
+		rather than in § 3 because outbound mail is our own path and not one you
+		select — but it is engaged only where an operator has configured the
+		deployment to send through it. The shipped default is a console adapter
+		that writes the message to our own log and sends nothing at all. So SES
+		is available to every customer rather than engaged for every customer,
+		and the rest of the table is unconditional.
+	</p>
+
 	<div class="table-scroll">
 		<table>
 			<caption class="visually-hidden">Sub-processors engaged for every customer</caption>
@@ -134,7 +144,7 @@
 				<tr>
 					<th scope="row">Amazon Web Services — CloudWatch Logs</th>
 					<td>Application logs, and the audit-event archive when that sink is selected.</td>
-					<td>Audit events: who acted, what action, on which record, and the <em>names</em> of the fields that changed — never their values. Application logs deliberately carry no bank numbers, tax identifiers or card numbers.</td>
+					<td>Audit events: who acted, what action, on which record, and what changed — the before and after values for ordinary business fields, and only the last four digits for bank details and tax identifiers. Application logs deliberately carry no bank numbers, tax identifiers or card numbers.</td>
 					<td>United States (us-east-1)</td>
 				</tr>
 				<tr>
@@ -145,14 +155,14 @@
 				</tr>
 				<tr>
 					<th scope="row">Amazon Web Services — SES</th>
-					<td>Sending transactional email, where the deployment is configured to send through SES rather than to the console.</td>
+					<td>Sending transactional email out of the service, where the deployment is configured to send through SES rather than to the console. This row is the outbound direction only; SES in the <em>inbound</em> role — receiving mail at an invoice-intake address — is a separate, opt-in integration described in § 3.7.</td>
 					<td>Recipient name and email address, and the message itself — sign-in and multi-factor codes, approval requests, notifications, and any invoice reference the message quotes.</td>
 					<td>United States (us-east-1)</td>
 				</tr>
 				<tr>
 					<th scope="row">Anthropic</th>
-					<td>Reading uploaded invoices. Unless your organisation supplies its own key, or an operator selects one of the alternatives in § 3.1, an invoice that is not a structured e-invoice is read by Claude. The written rationale an exception agent records for a decision uses the same connection.</td>
-					<td>The invoice file itself — the whole document, exactly as uploaded, including anything a supplier chose to put on the page — together with the context that guides the reading: your chart of accounts, and fields from earlier invoices used as worked examples. For an exception rationale, the amounts, variances, purchase-order numbers and general-ledger codes of the exception concerned.</td>
+					<td>Reading uploaded invoices. Unless your organisation supplies its own key, or an operator selects one of the alternatives in § 3.1, an invoice that is not a structured e-invoice is read by Claude. Several further features run over the same connection, each behind a switch of its own and each off until it is turned on — they are listed below the table.</td>
+					<td>The invoice file itself — the whole document, exactly as uploaded, including anything a supplier chose to put on the page — together with the context that guides the reading: your chart of accounts, and fields from earlier invoices used as worked examples. Each of the separately-switched features below adds to that, and what each one adds is set out there.</td>
 					<td>United States</td>
 				</tr>
 				<tr>
@@ -180,13 +190,48 @@
 	</p>
 
 	<p>
-		Several further features run over that same Anthropic connection and are
-		switched on separately: the conversational AP assistant, audit-log
-		summaries, and the anomaly and fraud commentary on an invoice. That last
-		one is the only feature on this page whose prompt carries a supplier's
-		remit-to address, alongside amounts and dates drawn from recently approved
-		invoices for the same supplier. Enabling any of them widens what Anthropic
-		receives; none of them adds a sub-processor you did not already have.
+		Four further features run over that same Anthropic connection. Each is
+		off until it is switched on separately, each has its own switch rather
+		than riding the invoice reader's, and each widens what Anthropic
+		receives:
+	</p>
+
+	<ul>
+		<li>
+			<strong>The conversational AP assistant</strong> — the natural-language
+			question your user types, and the invoice, supplier and payment figures
+			the tools it calls return.
+		</li>
+		<li>
+			<strong>Audit-log summaries</strong> — the audit timeline of one invoice:
+			what happened, when, the <strong>full name of each employee who acted</strong>,
+			and any free text one of them typed as the reason for a rejection or the
+			resolution of an exception. This is the only feature here that sends your
+			own staff's names.
+		</li>
+		<li>
+			<strong>Anomaly and fraud commentary on an invoice</strong> — the only
+			feature on this page whose prompt carries a supplier's remit-to address,
+			alongside amounts and dates drawn from recently approved invoices for the
+			same supplier.
+		</li>
+		<li>
+			<strong>The written rationale an exception agent records for a decision</strong>
+			— the amounts, variances, purchase-order numbers and general-ledger codes
+			of the exception concerned. The agent's decision itself is computed by
+			rules and does not depend on the model; only the sentence explaining it is
+			reworded.
+		</li>
+	</ul>
+
+	<p>
+		None of the four adds a sub-processor you did not already have, and
+		leaving all four off does not affect invoice reading. The converse is the
+		easier thing to assume wrongly, so it is worth saying plainly: each of the
+		four addresses Anthropic directly. Choosing a different invoice reader in
+		§ 3.1, or pointing the instance at a self-hosted model server, changes who
+		reads your invoices and nothing else — a feature in this list keeps going
+		to Anthropic until its own switch is turned off.
 	</p>
 
 	<p>
@@ -270,12 +315,21 @@
 				<tr>
 					<th scope="row">Merge.dev</th>
 					<td>A unified API that brokers the connection to your accounting system, so one integration reaches many ERPs.</td>
-					<td>The invoice as posted: its number, issue and due dates, currency, total, subtotal, tax and discount, the memo or description, the purchase-order number, and every line item with its description, quantity, unit price and general-ledger account. The supplier's tax identifier and address are not sent.</td>
+					<td>The invoice as posted: its number, issue and due dates, currency, total, subtotal, tax and discount, the memo or description, the purchase-order number, and every line item with its description, quantity, unit price, line total and general-ledger account. It also carries our own internal reference for the invoice — an opaque identifier, which doubles as the key that stops a retry posting the invoice twice. The supplier's tax identifier and address are not sent.</td>
 					<td>United States</td>
 				</tr>
 			</tbody>
 		</table>
 	</div>
+
+	<p>
+		<strong>This connection also runs the other way.</strong> A supplier sync
+		pulls vendor records out of your accounting system and into
+		{OPERATOR.serviceName}, and those records can carry a supplier's tax
+		identifier and postal address. That is your own data coming back to you
+		from a system you control, not data we send — but a register with only an
+		outbound column cannot show it, and your own Article 30 record should.
+	</p>
 
 	<p>
 		Direct connections to <strong>NetSuite</strong> and
@@ -388,8 +442,20 @@
 		The transmitted field list here is deliberately short, and it is smaller
 		than the screening function's own inputs: our internal screening call also
 		accepts a supplier tax identifier and beneficial-owner details, and every
-		one of the three adapters below drops them. Only the name and country
-		reach the provider.
+		one of the three adapters below drops them. Only the name and a country
+		code reach the provider.
+	</p>
+
+	<p>
+		Two precisions about that country code, because it is not what the label
+		suggests. It is the country of the <strong>destination bank account</strong>
+		we hold for the supplier, not the supplier's own country — we do not record
+		a country for a supplier at all — and a supplier with no bank details on
+		file is therefore screened on its name alone. Each request also carries a
+		small amount of non-personal tuning that tells the provider how to search:
+		a fuzzy-match threshold, which watchlists and content sets to search, and
+		our own account or group identifier with that provider. Nothing else about
+		the supplier is transmitted.
 	</p>
 
 	<div class="table-scroll">
@@ -407,19 +473,19 @@
 				<tr>
 					<th scope="row">ComplyAdvantage</th>
 					<td>Screening a supplier against sanctions, politically-exposed-person and adverse-media lists.</td>
-					<td>The supplier's name as the search term, and its two-letter country code as a filter. Nothing else.</td>
+					<td>The supplier's name as the search term, and the destination bank's two-letter country code as a filter where we hold one. No other supplier data.</td>
 					<td>United Kingdom, EU and United States</td>
 				</tr>
 				<tr>
 					<th scope="row">Dow Jones Risk &amp; Compliance</th>
 					<td>Screening a supplier against sanctions and watchlists.</td>
-					<td>The supplier's name and its country code. Nothing else.</td>
+					<td>The supplier's name, and the destination bank's country code where we hold one. No other supplier data.</td>
 					<td>United States and EU</td>
 				</tr>
 				<tr>
 					<th scope="row">LSEG / Refinitiv World-Check</th>
 					<td>Screening a supplier against sanctions and watchlists.</td>
-					<td>The supplier's name and its country code as a nationality filter. Nothing else.</td>
+					<td>The supplier's name, and the destination bank's country code as a nationality filter where we hold one. No other supplier data.</td>
 					<td>United States and EU</td>
 				</tr>
 			</tbody>
@@ -431,8 +497,19 @@
 	<p>
 		This is the one opt-in integration that receives a raw tax identifier, so
 		it deserves a heading of its own rather than a line in a longer table.
-		Without a credential both uses fall back to an offline structural check
-		and a local filing record, and no identifier leaves the service.
+		With no provider configured, both uses are served entirely on our own
+		machines and no identifier leaves the service: identifier matching runs an
+		offline structural check of the number, and filing is recorded against a
+		local, in-process filer.
+	</p>
+
+	<p>
+		The two behave differently if Tax1099 is named but no credential is
+		entered, and the difference is worth stating rather than blurring.
+		Identifier matching degrades quietly to that same offline structural
+		check. Filing does not degrade — it refuses outright, the claimed filing
+		is released, and nothing is filed anywhere. In neither case does an
+		identifier leave the service.
 	</p>
 
 	<div class="table-scroll">
@@ -493,6 +570,20 @@
 		console adapter that writes the message to our own log and sends nothing.
 	</p>
 
+	<p>
+		<strong>Amazon SES appears on this page twice, and the two entries are
+		different things.</strong> In § 2 it is the <em>outbound</em> path — the
+		service sending mail to your users, such as sign-in codes, approval
+		requests and notifications — selected by an operator for the whole
+		deployment. The second row above is the <em>inbound</em> path: mail your
+		suppliers send to your organisation's invoice-intake address, which we
+		receive and turn into invoices. They are configured separately and carry
+		different data in opposite directions, so turning one on does not turn the
+		other on, and a deployment can run either, both or neither. Mailgun and a
+		relay you nominate appear only in this section, and only in one direction
+		each.
+	</p>
+
 	<h3 id="chat">3.8 Chat notifications</h3>
 
 	<div class="table-scroll">
@@ -510,7 +601,7 @@
 				<tr>
 					<th scope="row">Slack (Salesforce)</th>
 					<td>Posting an approval request into your own workspace, with buttons that approve or reject from the message.</td>
-					<td>The invoice number, the supplier's name, the amount and currency, the status, and a deep link back into the application. No line-item descriptions, no contact details, and no names of the people approving. The approve and reject buttons carry a single-use signed token and nothing readable.</td>
+					<td>The invoice number, the supplier's name, the amount and currency, the status, and a deep link back into the application. No line-item descriptions and no contact details. The approve and reject buttons carry a single-use token, which is signed rather than encrypted: anyone able to read the button's data can decode it, and it decodes to three identifiers — your organisation, the invoice, and the person the button was issued to. Identifiers, not names: no name of an approver is sent.</td>
 					<td>Your workspace's region</td>
 				</tr>
 				<tr>
@@ -540,7 +631,7 @@
 				<tr>
 					<th scope="row">Dun &amp; Bradstreet</th>
 					<td>Matching a supplier to a D-U-N-S record and returning firmographics as a suggestion.</td>
-					<td>The supplier's legal name and country, as the match query. The supplier's tax identifier is masked to its last four digits before enrichment runs and is never transmitted.</td>
+					<td>The supplier's legal name, as the match query — that is the whole request. No country is sent either: we hold no country field for a supplier, so the lookup goes out on the name alone. The supplier's tax identifier is not part of it and is never transmitted; it is not redacted on the way out, it is simply never included. (A last-four form of it appears in the stored result so a reviewer can tell which supplier a match refers to, which is a different thing and happens after the call.)</td>
 					<td>United States and global</td>
 				</tr>
 				<tr>
@@ -652,14 +743,28 @@
 
 	<p>
 		Separate from everything above, because it is not your data being
-		processed on your behalf. <strong>Stripe</strong> handles our billing of
-		you: subscriptions, plan changes, usage reporting, invoices and receipts.
-		It receives your organisation's name, your billing administrator's email
-		address, the plan you are on, and metering events that carry a quantity
-		and nothing else. Card details are collected by Stripe directly and never
-		reach us — we hold only the brand, last four digits and expiry. No
-		supplier, invoice, banking or tax data is sent to Stripe for this
-		purpose.
+		processed on your behalf. <strong>Stripe is the billing provider the
+		platform is built against, and it is not engaged yet</strong> — billing
+		currently runs on the same local mock every other integration defaults to,
+		so nothing has been sent to Stripe at all. The same engaged-versus-available
+		distinction as section 1, applied to our own billing rather than yours.
+	</p>
+
+	<p>
+		What would reach Stripe once it is switched on is narrower than the word
+		"billing" suggests, so it is worth stating as fields rather than as a
+		function. On a plan change we would register your organisation with Stripe
+		as a customer — its name, a billing contact email address, and our own
+		internal identifier for it — and register the selected plan's monthly
+		price under that plan's code. Beyond that we would ask Stripe for the
+		invoices and receipts it has issued you, and for the payment method held
+		against that customer. <strong>Your subscription record and your usage
+		metering stay on our side</strong>: both are computed and held here, and
+		no metering event is reported to Stripe. Card details would be collected
+		by Stripe directly and never reach us — the brand, last four digits and
+		expiry a billing page shows you are read back from Stripe at the moment
+		you ask for them and are not stored by us. No supplier, invoice, banking
+		or tax data is sent to Stripe for this purpose.
 	</p>
 
 	<p>
