@@ -323,6 +323,17 @@ class Settings(BaseSettings):
     audit_summary_enabled: bool = False
     audit_summary_model: str = ""  # falls back to extraction_model when empty
 
+    # Exception-agent rationale polish (services/exception_agents/llm_rationale).
+    # Same shape and the same reason as `audit_summary_enabled` above: it reuses
+    # the extraction Anthropic key, so it has no credential of its own to act as
+    # its gate, and without this flag an extraction key silently enrolled the
+    # deployment in a second purpose — a resolver's deterministic rationale,
+    # which carries the PO number and invoice amount in prose, POSTed to
+    # Anthropic to be reworded. Off by default; the deterministic template is
+    # the off-state and the agent's DECISION never depended on the LLM either
+    # way. See docs/decisions.md §176.
+    exception_agent_rationale_enabled: bool = False
+
     # Conversational AP Assistant (see backend/docs/conversational-assistant.md).
     # Local-first: the default `mock` adapter routes a natural-language query to
     # one of the five fixed tools via deterministic keyword/intent heuristics —

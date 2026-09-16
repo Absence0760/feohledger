@@ -1,9 +1,14 @@
 """Optional LLM polish for an exception-agent's decision rationale.
 
 Mirrors ``services.audit_summary``'s fail-soft contract: a deterministic
-``template`` is ALWAYS the fallback, an LLM is consulted only when a key is
-configured, and there is zero network call in the no-key/local-dev default. The
-``http_post`` argument is an injection point for tests.
+``template`` is ALWAYS the fallback, an LLM is consulted only when
+``FEOH_EXCEPTION_AGENT_RATIONALE_ENABLED`` is on *and* a key is configured, and
+there is zero network call in the default. The ``http_post`` argument is an
+injection point for tests.
+
+That master switch is the half this module used to be missing while claiming to
+mirror the contract: it gated on key-presence alone, and the key belongs to
+extraction.
 
 Invariant: the *decision* (action + confidence + the actual amount change) is
 100% rules-derived in the resolver. The LLM only rewords the rationale string —
@@ -25,6 +30,15 @@ logger = logging.getLogger(__name__)
 def _resolve_config(org_settings: dict | None) -> dict:
     """Reuse the extraction key/model (same pattern as audit_summary).
     Empty api_key → template path (the local-dev default)."""
+    # The master switch, and the reason it has to exist: sharing the extraction
+    # key means the key cannot serve as this feature's gate. Defaulted on, an
+    # operator who configured Anthropic for extraction also started sending
+    # resolver rationales — PO number and invoice amount included — for a second
+    # purpose nobody chose. Same defect the sibling `audit_summary_enabled`
+    # closes; docs/decisions.md §176.
+    if not settings.exception_agent_rationale_enabled:
+        return {"api_key": "", "model": ""}
+
     extraction = (org_settings or {}).get("extraction", {})
     if extraction.get("program_type") == "byok":
         return {
