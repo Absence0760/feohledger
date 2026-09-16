@@ -239,7 +239,14 @@
 
 	/* WCAG 1.4.10 Reflow: a wide table must not push the page wider than the
 	   viewport. Wrapping it in a scroller keeps the document itself at 320px
-	   without horizontal page scroll. */
+	   without horizontal page scroll.
+
+	   Every `.table-scroll` in a page file carries `tabindex="0"`, and must.
+	   Solving reflow this way creates a region only a mouse can pan, which is
+	   WCAG 2.1.1 Keyboard — axe reports it as `scrollable-region-focusable`.
+	   It surfaced in CI rather than locally because the rule only fires once the
+	   table actually overflows its container, which depends on how wide the
+	   font renders. Making the region a tab stop lets arrow keys scroll it. */
 	.legal-page :global(.table-scroll) {
 		overflow-x: auto;
 		margin: 0 0 16px;

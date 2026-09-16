@@ -772,7 +772,7 @@
 		into this DPA by reference, completed as follows:
 	</p>
 
-	<div class="table-scroll">
+	<div class="table-scroll" tabindex="0">
 		<table>
 			<thead>
 				<tr><th>Clause</th><th>Selection</th></tr>
@@ -1010,7 +1010,7 @@
 
 	<h3 id="annex-i-parties">A. List of parties</h3>
 
-	<div class="table-scroll">
+	<div class="table-scroll" tabindex="0">
 		<table>
 			<thead>
 				<tr><th>Role</th><th>Details</th></tr>
@@ -1043,7 +1043,7 @@
 
 	<h3 id="annex-i-description">B. Description of the processing</h3>
 
-	<div class="table-scroll">
+	<div class="table-scroll" tabindex="0">
 		<table>
 			<thead>
 				<tr><th>Item</th><th>Detail</th></tr>
@@ -1215,7 +1215,7 @@
 		commitment about how we will operate rather than a running fact, the entry says so.
 	</p>
 
-	<div class="table-scroll">
+	<div class="table-scroll" tabindex="0">
 		<table>
 			<thead>
 				<tr><th>Measure</th><th>What is implemented</th></tr>

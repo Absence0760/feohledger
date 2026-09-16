@@ -339,6 +339,28 @@ test.describe('legal pages', () => {
 		expect(await page.evaluate((key) => localStorage.getItem(key), CONSENT_KEY)).toBeNull();
 	});
 
+	test('every table scroller is reachable by keyboard (WCAG 2.1.1)', async ({ page }) => {
+		// Solving reflow by wrapping a wide table in an `overflow-x: auto` div
+		// creates a region only a mouse can pan. axe reports it as
+		// `scrollable-region-focusable`, but ONLY once the table actually
+		// overflows — which depends on how wide the font renders, so it passed
+		// locally and failed in CI. Asserting the attribute directly does not
+		// depend on rendering at all.
+		for (const { path } of PAGES) {
+			await page.goto(path);
+			await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
+
+			const scrollers = page.locator('.legal-page .table-scroll');
+			const count = await scrollers.count();
+			for (let i = 0; i < count; i++) {
+				await expect(
+					scrollers.nth(i),
+					`${path}: table scroller ${i} is not keyboard-reachable`
+				).toHaveAttribute('tabindex', '0');
+			}
+		}
+	});
+
 	test('the route set and lib/legal/pages.ts have not drifted apart', async () => {
 		// The hardcoded PAGES list above is the guard; this keeps it honest
 		// against the source of truth the app actually renders from, so adding a

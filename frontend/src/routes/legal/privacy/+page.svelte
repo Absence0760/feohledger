@@ -193,7 +193,7 @@
 
 	<h3>Held by us, as controller</h3>
 
-	<div class="table-scroll">
+	<div class="table-scroll" tabindex="0">
 		<table>
 			<thead>
 				<tr>
@@ -350,7 +350,7 @@
 		only the processing where <strong>we</strong> are the controller.
 	</p>
 
-	<div class="table-scroll">
+	<div class="table-scroll" tabindex="0">
 		<table>
 			<thead>
 				<tr>

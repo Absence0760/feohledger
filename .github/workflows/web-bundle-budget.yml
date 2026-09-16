@@ -95,7 +95,26 @@ env:
   # ~10% headroom on 714, the same margin as the entry above. The four
   # uncounted catalogues are still bounded one by one by MAX_LARGEST_CHUNK_KB,
   # and the locale key-parity test keeps them growing with the counted one.
-  MAX_TOTAL_KB: 785
+  # 2026-09-16 — total 785 → 875. The published legal documents (PR #421) took
+  # the total to 796 on CI, 11 KB over. The weight is real and it is prose:
+  # five complete legal documents — privacy policy, terms, DPA with three
+  # annexes, sub-processor register, cookie notice — about 4,300 lines of
+  # markup. There is nothing to trim that is not text a reader needs.
+  #
+  # What makes it cheap in practice, and why the per-chunk ceiling is the one
+  # to watch here: SvelteKit route-splits each document into its own node
+  # chunk (the DPA is the largest at 24 KB gzipped), so the app shell loads
+  # none of them and a visitor who opens one downloads exactly that one. The
+  # largest chunk is unchanged at 81 KB — still the ja catalogue, not a legal
+  # page — so MAX_LARGEST_CHUNK_KB stays at 100.
+  #
+  # 875 is ~10% headroom on the new 796 baseline, the same margin the last two
+  # entries used. Trigger for the next look: if this binds again from route
+  # chunks rather than shared weight, consider whether the total should count
+  # the app shell plus the heaviest route instead of every chunk — the same
+  # distortion the 2026-09-15 entry corrected for locale catalogues applies to
+  # route-split documents nobody loads together.
+  MAX_TOTAL_KB: 875
   MAX_LARGEST_CHUNK_KB: 100
 
 jobs:

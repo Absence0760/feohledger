@@ -71,7 +71,7 @@
 		<code>sessionStorage</code>
 		by the {OPERATOR.serviceName} application, and the application sets no cookies at all.
 	</p>
-	<div class="table-scroll">
+	<div class="table-scroll" tabindex="0">
 		<table>
 			<thead>
 				<tr>
