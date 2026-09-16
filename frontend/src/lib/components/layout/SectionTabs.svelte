@@ -213,16 +213,24 @@
 	/* Secondary nav strip above the page content. Full-width border, inner
 	   content aligned to the same 1800px / 20px gutter as `.workspace` so the
 	   tabs line up with the page title below. */
+	/* Not sticky, on purpose. A pinned strip covers whatever the browser (or
+	   Playwright) scrolls into view just beneath it — an intercepted click in
+	   every grouped page's specs, and a focused control hidden under it
+	   (WCAG 2.4.11), the defect the marketing header needed scroll padding for. */
 	.section-tabs {
 		border-bottom: 1px solid var(--border);
+		/* Opaque --surface for the same reason as the sidebar: the tab labels'
+		   contrast is calibrated on it, and a translucent strip would hand that
+		   decision to whatever scrolls underneath. */
 		background: var(--surface);
 		position: relative;
+		box-shadow: 0 10px 24px -20px rgba(0, 0, 0, 0.9);
 	}
 
 	.section-tabs-inner {
 		max-width: 1800px;
 		margin: 0 auto;
-		padding: 0 20px;
+		padding: 0 28px;
 		display: flex;
 		align-items: stretch;
 	}
@@ -240,14 +248,31 @@
 	}
 
 	.section-tab {
-		padding: 12px 16px;
+		position: relative;
+		padding: 13px 14px;
 		color: var(--text-muted);
-		font-size: 0.9rem;
+		font-size: 0.88rem;
 		font-weight: 500;
 		text-decoration: none;
-		border-bottom: 2px solid transparent;
-		margin-bottom: -1px;
 		white-space: nowrap;
+		transition: color 0.15s;
+	}
+	/* The indicator is a pseudo-element that grows from the centre, so the
+	   active tab reads as selected at a glance and the change of tab has a
+	   moment of motion; it never moves layout. It sits at `bottom: 0`, inside the
+	   tab, because `.section-tabs-row` is `overflow: hidden` and would clip
+	   anything hung below it over the strip's border. */
+	.section-tab::after {
+		content: '';
+		position: absolute;
+		left: 14px;
+		right: 14px;
+		bottom: 0;
+		height: 2px;
+		border-radius: 2px 2px 0 0;
+		background: var(--accent);
+		transform: scaleX(0);
+		transition: transform 0.25s var(--ease-out);
 	}
 
 	.section-tab:hover {
@@ -255,8 +280,17 @@
 	}
 
 	.section-tab.active {
-		color: var(--accent);
-		border-bottom-color: var(--accent);
+		color: var(--text);
+	}
+	.section-tab.active::after {
+		transform: scaleX(1);
+		box-shadow: 0 0 10px var(--accent-glow);
+	}
+
+	@media (max-width: 700px) {
+		.section-tabs-inner {
+			padding: 0 14px;
+		}
 	}
 
 	.section-more {
@@ -270,7 +304,6 @@
 		gap: 4px;
 		background: none;
 		border: none;
-		border-bottom: 2px solid transparent;
 		font-family: inherit;
 		cursor: pointer;
 	}
