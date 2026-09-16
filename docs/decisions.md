@@ -7177,7 +7177,7 @@ would have dropped them back into the old look two clicks later.
    `data-motion="paused"` on its root pauses every animation beneath it through
    one `app.css` rule, so a new animation is covered the day it is written. The
    auth pages take the other honest answer — no continuous motion
-   (`<Backdrop still>`) — because a pause button on a sign-in form is clutter.
+   (`<Atmosphere still>`) — because a pause button on a sign-in form is clutter.
 5. *Fade with colour, not `opacity`, at rest.* The old landing carried three
    `opacityAudit` exemptions for decorative fades; the rebuild spells them as
    `rgba()` colours and the exemptions are gone rather than re-argued.

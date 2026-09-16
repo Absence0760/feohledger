@@ -724,7 +724,7 @@ inherit it for free. Reuse these; don't re-solve them per page.
      moves on its own for more than five seconds lives under a root carrying
      `data-motion`, driven by `marketing/MotionToggle.svelte`; `app.css` pauses
      every animation beneath it. A page that won't carry the control doesn't
-     get continuous motion — the auth pages use `<Backdrop still>` and short
+     get continuous motion — the auth pages use `<Atmosphere still>` and short
      entrances instead. The OS preference does not discharge 2.2.2.
   5. **Fade with colour, not `opacity`, at rest.** A decorative watermark takes
      an `rgba()` colour; `opacity` composites a whole subtree

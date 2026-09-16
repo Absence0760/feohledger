@@ -350,7 +350,7 @@ component the second time you would duplicate one.**
 - domain: `InvoiceModal` `VendorModal` `VendorPicker` `RunDetailModal` `ApprovalMatrixEditor` `BulkRecodeGLModal` `AdvancedSearchModal` `ScreeningBadge` `SubscriptionBadge` `SpendBarChart` `UsageMeter` `PortalListFilters`
 - chrome: `Sidebar` `NotificationBell` `EntitySwitcher`
 - chat/assistant: `SupplierChatThread` `ChatMessage` `ExamplePrompts` `ToolResultView`
-- marketing: `Landing` `Pricing` `Backdrop` `HeroPipeline` `AdapterRail` `MotionToggle`
+- marketing: `Landing` `Pricing` `Atmosphere` `HeroPipeline` `AdapterRail` `MotionToggle`
 - auth: `AuthShell` (every pre-auth employee page) `AuthCard`
 
 Two invariants the library enforces, worth knowing before you call anything:

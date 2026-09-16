@@ -12,7 +12,7 @@
 	import IconArrow from '~icons/material-symbols/arrow-forward';
 	import Pricing from '$lib/components/marketing/Pricing.svelte';
 	import AdapterRail from '$lib/components/marketing/AdapterRail.svelte';
-	import Backdrop from '$lib/components/marketing/Backdrop.svelte';
+	import Atmosphere from '$lib/components/marketing/Atmosphere.svelte';
 	import HeroPipeline from '$lib/components/marketing/HeroPipeline.svelte';
 	import MotionToggle from '$lib/components/marketing/MotionToggle.svelte';
 	import { LEGAL_PAGES } from '$lib/legal/pages';
@@ -112,7 +112,7 @@
 <svelte:window onscroll={() => (scrolled = window.scrollY > 12)} />
 
 <div class="landing" data-motion={motionPaused ? 'paused' : 'running'}>
-	<Backdrop fixed />
+	<Atmosphere fixed />
 
 	<header class="nav" class:scrolled>
 		<a href="/" class="brand">
@@ -370,7 +370,7 @@
 		color: var(--text);
 		overflow-x: clip;
 	}
-	/* Everything except the Backdrop sits above it. One rule rather than a
+	/* Everything except the Atmosphere sits above it. One rule rather than a
 	   z-index on each section. */
 	.content,
 	.nav,

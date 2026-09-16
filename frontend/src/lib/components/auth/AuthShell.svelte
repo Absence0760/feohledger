@@ -1,7 +1,7 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
 	import { asset } from '$app/paths';
-	import Backdrop from '$lib/components/marketing/Backdrop.svelte';
+	import Atmosphere from '$lib/components/marketing/Atmosphere.svelte';
 	import BrandMark from '$lib/components/ui/BrandMark.svelte';
 	import { m } from '$lib/i18n/store.svelte';
 
@@ -64,7 +64,7 @@
 	</div>
 
 	<aside class="panel" aria-labelledby={panelHeadingId}>
-		<Backdrop dense still />
+		<Atmosphere dense still />
 		<div class="panel-inner">
 			<div class="panel-brand">
 				<BrandMark size={30} />
