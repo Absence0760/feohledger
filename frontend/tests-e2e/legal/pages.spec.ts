@@ -281,6 +281,27 @@ test.describe('legal pages', () => {
 		);
 	});
 
+	test('no document scrolls the page sideways at 320px (WCAG 1.4.10)', async ({ page }) => {
+		// These pages are the most table-heavy in the app — the sub-processor
+		// register alone carries twelve. A wide table in normal flow widens the
+		// DOCUMENT, so the reader scrolls the whole page horizontally to read one
+		// column, which is exactly what 1.4.10 Reflow prohibits. Each is wrapped
+		// in `.table-scroll` so the overflow belongs to the table instead.
+		await page.setViewportSize({ width: 320, height: 720 });
+
+		for (const { path } of PAGES) {
+			await page.goto(path);
+			await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
+
+			const overflow = await page.evaluate(
+				() => document.documentElement.scrollWidth - document.documentElement.clientWidth
+			);
+			expect(overflow, `${path} overflows the viewport by ${overflow}px at 320px`).toBeLessThanOrEqual(
+				0
+			);
+		}
+	});
+
 	test('the route set and lib/legal/pages.ts have not drifted apart', async () => {
 		// The hardcoded PAGES list above is the guard; this keeps it honest
 		// against the source of truth the app actually renders from, so adding a

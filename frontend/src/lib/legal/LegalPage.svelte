@@ -149,14 +149,21 @@
 
 	/* The inline marker a page renders where a pending fact would go. Defined
 	   here (and applied via :global, since the markup lives in the page files)
-	   so all five documents mark a gap identically. */
+	   so all five documents mark a gap identically.
+
+	   Deliberately NOT `white-space: nowrap`, which is the instinctive choice
+	   for keeping a marker visually intact. These labels are whole phrases —
+	   "[a postal address for the controller to be confirmed]" is 46 characters —
+	   so refusing to wrap pushed the DOCUMENT 163px wider than a 320px viewport,
+	   making a reader scroll the page sideways to read a privacy policy
+	   (WCAG 1.4.10 Reflow). The brackets already delimit the marker; it does not
+	   also need to sit on one line. */
 	.pending .fact-pending,
 	.legal-page :global(.fact-pending) {
 		padding: 0 4px;
 		border-radius: 3px;
 		color: var(--warning-on-tint);
 		font-style: italic;
-		white-space: nowrap;
 	}
 
 	/* The tint goes on ONLY in the document body, where the marker sits on the
