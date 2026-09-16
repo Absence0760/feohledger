@@ -7032,3 +7032,46 @@ and Japanese both move. So the message stays one entry carrying `{token}`
 markers and `ui/LinkedMessage.svelte` splits it — the translation decides where
 each link lands, and `messages_parity.test.ts`'s existing placeholder check is
 what stops a locale silently dropping the Terms link out of a consent line.
+
+## 178. A published claim gets a guard that fails, and the guard's subject is not configurable
+
+Three of the published pages' commitments were true when they were written and
+true by nothing afterwards. Each now has a check, and the three share a shape
+worth stating once.
+
+**The sanctions payload.** `/legal/sub-processors` §3.5 says only a supplier's
+name and a country code reach ComplyAdvantage, Dow Jones or Refinitiv. The
+interface *accepts* a tax identifier and beneficial owners, both callers
+populate them unmasked, and the adapters happened not to serialise them. The
+guard asserts the **exact** field set per adapter rather than the absence of a
+tax ID, because a new field carrying a beneficial owner's date of birth passes
+an absence check and is still an undisclosed flow. Adding a field stays allowed;
+it becomes a decision that has to update the register in the same change.
+
+**The registers themselves.** Neither `/legal/sub-processors` nor
+`docs/sub-processors.md` is derived from anything, so the next adapter added
+makes both wrong silently — which is how the version that shipped with the pages
+listed AWS services that do not exist.
+`scripts/check_subprocessor_registry.mjs` compares the adapter registries
+against both. It **fails** rather than warns, unlike `check_compliance_drift.mjs`
+beside it: that one is a heuristic over a diff, where a finding is a prompt to go
+and look; this is an exact comparison of two lists, where a finding is a fact.
+The distinction is worth keeping — an advisory check that is really exact trains
+people to skim exact checks.
+
+**The Object Lock mode**, and the general point. The DPA's Annex II says the
+audit archive is Object Lock in *compliance* mode; the boot check read only the
+`ObjectLockEnabled` flag, and the adapter's own docstring said *Governance*. The
+fix could have added `FEOH_AUDIT_SHIPPING_S3_OBJECT_LOCK_MODE` with COMPLIANCE
+as the default, which is the reflex. It does not, and that is the decision:
+**a knob whose wrong setting makes a published page false is not a knob, it is a
+trap.** An operator who set GOVERNANCE would not have changed a preference, they
+would have falsified a customer-facing claim about data they cannot delete. The
+retention *period* is configurable precisely because it is not like that — it
+has to track `infra/variables.tf`, and the DPA names the figure as configured
+rather than as a constant.
+
+The three together generalise the guard rail the repo already applies to money:
+a claim with a reader outside the project is an invariant, not a comment, and
+invariants get a test. The cost is that a future change has to argue with a
+failing check. That is the point of it.
