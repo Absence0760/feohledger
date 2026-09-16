@@ -308,7 +308,19 @@ class Settings(BaseSettings):
     # `/api/invoices/{id}/summary` endpoint returns the deterministic template
     # summary without any LLM call. `audit_summary_model` defaults to the
     # extraction model when empty.
-    audit_summary_enabled: bool = True
+    #
+    # Defaults OFF, and the "no new secret" convenience is exactly why it has
+    # to. Sharing the extraction key means this feature has no credential of
+    # its own to gate it: defaulted True, an operator who configured Anthropic
+    # for invoice EXTRACTION silently also began sending invoice numbers,
+    # vendor names, amounts and audit timelines to Anthropic for a second,
+    # unrelated purpose — a sub-processor engagement the customer never chose
+    # and no setting disclosed. Local dev never noticed because an empty key
+    # short-circuits either way, so the usual local-first check could not see
+    # it. Every integration defaults to its safe local value (root CLAUDE.md,
+    # `## Key environment variables`); the template summary is that value here,
+    # and it is a genuine feature, not a degraded one.
+    audit_summary_enabled: bool = False
     audit_summary_model: str = ""  # falls back to extraction_model when empty
 
     # Conversational AP Assistant (see backend/docs/conversational-assistant.md).
