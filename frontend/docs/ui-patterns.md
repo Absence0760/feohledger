@@ -614,6 +614,46 @@ accessible:
   memos, payments history/cards) keep their existing conditional
   `RowAction` buttons — there's no single "open" destination to wire.
 
+### App surfaces — depth, accent and motion (decisions §181)
+
+The signed-in app shares one visual layer, set in `src/app.css` and the shell
+components. A page inherits it by using the shared classes and primitives; a
+page that restyles locally should reach for these tokens rather than literals.
+
+| Token | Use |
+|---|---|
+| `--radius-sm` / `--radius` / `--radius-lg` | 8 / 12 / 16px: controls / cards and tables / dialogs and popovers |
+| `--hairline` | a divider *inside* a card (row rules, footers) — quieter than `--border`, which outlines |
+| `--shadow-card` / `--shadow-float` | resting cards and tables / dialogs and popovers |
+| `--accent-glow` / `--accent-wash` | glows and hover washes derived from the tenant accent |
+| `--ease-out` | the one easing curve for entrances and hovers |
+
+Rules, each one a constraint this layer had to satisfy:
+
+- **Accent effects derive from `var(--accent)`**, written as
+  `color-mix(in srgb, var(--accent) N%, transparent)` or the two tokens above.
+  `--accent` / `--accent-strong` are the tokens a white-label tenant overrides,
+  so a glow typed as `rgba(99, 140, 255, …)` stays blue under a red brand.
+- **Fills behind badges stay `--surface`.** Tables, modals and KPI cards keep
+  it even where glass would look nicer, because every `<Badge>` tint pair is
+  calibrated composited over `--surface`.
+- **Accent never carries small text on the rail.** The sidebar's current page
+  keeps its label on `--text` and puts the accent on the icon, an edge bar and a
+  wash: a tenant's brand colour is chosen for a button, not for 4.5:1 as 14px
+  text.
+- **Primary buttons lift and glow on hover; they never lighten.** White on
+  `--accent-strong` is calibrated at rest, and a brighter fill spends that
+  margin. Chips change border and text on hover, never fill — a tint plus a text
+  colour in one rule is `<Badge>`'s recipe and `badgeAudit` counts it.
+- **Nothing in the shell is sticky or continuously animated.** A sticky strip
+  intercepts the clicks Playwright scrolls to and hides focused controls (2.4.11);
+  continuous motion would owe a 2.2.2 pause control. The ambient background is a
+  still, fixed pseudo-element; entrances are one-shot (modal rise, popover rise,
+  tab indicator, empty-state illustration) and follow § Motion.
+- **axe scans run at rest.** `tests-e2e/a11y/axe-helper.ts` emulates reduced
+  motion before every scan, so a dialog caught mid-entrance cannot report (or
+  hide) a contrast result.
+
 ### Class-name conventions
 
 The class names below are the shared contract (e2e specs select on

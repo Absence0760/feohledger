@@ -7303,3 +7303,46 @@ reduced-motion, focus-obscured and axe guards were run red against the unfixed
 code, as was the captcha-retry case (hCaptcha stubbed, since local dev has no
 sitekey); the try-again, CTA-colour and 320px guards encode a failure first
 reproduced by a throwaway probe against the unfixed page.
+
+## 181. The signed-in app gets one shared visual layer before any page is restyled
+
+Following §180, the signed-in pages were modernised too. Forty-six routes were
+restyled by five parallel workers, which made the order the decision: **the
+shared layer landed first, alone**, and the page work was written against it.
+Most of what a page looks like was never on the page — 43 routes render through
+`PageHeader`, every table through `DataTable`'s `.grid-container`, 53 dialogs
+through `.backdrop` / `.modal`, 26 lists through `.filter-chip`, 24 through
+`.kpi` — so restyling those once in `app.css`, plus the sidebar and section
+tabs, moved the whole app before any worker opened a route file. Five workers
+each inventing a card, a table header and a hover on their own pages would have
+produced five design languages; they instead inherited one and were barred
+from editing it (proposals came back as report items, not diffs).
+
+**Four constraints shaped that layer, all learned from what already existed.**
+- *The tenant owns the accent.* Only `--accent` and `--accent-strong` are
+  white-label overridable, so every accent-coloured effect is derived from them
+  with `color-mix()` (`--accent-glow`, `--accent-wash`). The demo tenant's own
+  gold-and-red brand was the check.
+- *Badges are calibrated on `--surface`.* Tables, dialogs and KPI cards keep it
+  as their fill; depth comes from radius and shadow, not from a glass tint that
+  would move every badge's contrast.
+- *The audits encode past mistakes.* Chips don't tint on hover (`badgeAudit`),
+  buttons don't brighten (white-on-strong margin), decoration fades in colour
+  (`opacityAudit`), and the nav keeps its label on `--text` because a brand
+  accent is not chosen for small-text contrast.
+- *The test suite is a user.* Nothing in the shell is sticky — a pinned tab
+  strip intercepts the clicks Playwright scrolls into place and hides focused
+  controls (2.4.11) — and nothing loops, which would owe a 2.2.2 control the
+  shell does not carry. axe now scans every page under emulated reduced motion
+  (`axe-helper.ts`), because a dialog's new entrance would otherwise let a scan
+  measure a half-faded frame.
+
+**Empty states are illustrated from generated geometry.** Eight line
+illustrations replace the emoji. They are emitted as a typed data module by
+`assets/illustrations/gen_empty_states.py` and rendered as inline SVG, for the
+same two reasons the tally ornament in §180 could not be a flat file here: the
+accent has to follow the tenant at runtime (an `<img>` cannot read a custom
+property), and the frontend has no `{@html}` by design, so markup cannot arrive
+as a string. Inkscape renders a contact sheet for review; CI checks only that
+the module matches its generator, with a unittest proving that check fails on
+an edited copy — the same shape as the icon guard (§173).
