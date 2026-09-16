@@ -71,16 +71,12 @@ const NON_TEXT_ALLOWLIST: Record<string, string> = {
 	'routes/+page.svelte {.vendor-bar}':
 		'An empty <div> chart bar; the figure it depicts is rendered as adjacent text.',
 	'routes/+page.svelte {.trend-bar}':
-		'An empty <div> chart bar; the figure it depicts is in an adjacent title + label.',
-	'lib/components/marketing/Landing.svelte {.mock-bg-1, .mock-bg-2}':
-		'Empty <div> background blobs in the hero mock.',
-	'lib/components/marketing/Landing.svelte {.mock-bg-2}':
-		'The same two blobs; second rule adjusts one of them.',
-	'lib/components/marketing/Landing.svelte {.step-num}':
-		'A watermark ordinal behind a "how it works" card, faded to 12% — and ' +
-		'carrying aria-hidden, so the decoration claim is made in the markup ' +
-		'rather than assumed here. The ordinal is already in the cards\' reading ' +
-		'order, so the numeral conveys nothing the fade could cost.'
+		'An empty <div> chart bar; the figure it depicts is in an adjacent title + label.'
+	// The marketing Landing's three entries (`.mock-bg-1`, `.mock-bg-2`,
+	// `.step-num`) were retired by its redesign rather than re-argued: the hero
+	// mock's background cards and the watermark ordinal now carry their fade in
+	// an rgba COLOUR instead of an element `opacity`, which is the answer this
+	// guard recommends and needs no exemption at all.
 };
 
 /**
