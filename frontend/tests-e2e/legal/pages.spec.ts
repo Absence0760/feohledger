@@ -278,6 +278,23 @@ test.describe('legal pages', () => {
 			'href',
 			'/legal/privacy'
 		);
+		await expect(consent.getByRole('link', { name: 'Data Processing Addendum' })).toHaveAttribute(
+			'href',
+			'/legal/dpa'
+		);
+
+		// The sentence is assembled from segments — the catalogue entry's text
+		// either side of each `{token}` marker, with an anchor rendered between
+		// them (`lib/i18n/segments.ts`). A splitter that dropped the space before
+		// a link, or an `{#each}` whose whitespace handling ate one, would render
+		// "agree to theTerms of Service": still three correct links, so the
+		// assertions above would pass, and still a mangled consent line.
+		const sentence = (await consent.innerText()).replace(/\s+/g, ' ').trim();
+		expect(sentence).toBe(
+			'By creating a workspace you agree to the Terms of Service and the Privacy Policy, ' +
+				'including the Data Processing Addendum that governs supplier and invoice data you ' +
+				'load into it.'
+		);
 	});
 
 	test('the supplier portal gives a vendor a route to the whole document set', async ({
