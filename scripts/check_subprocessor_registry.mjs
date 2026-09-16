@@ -152,12 +152,16 @@ export function candidateNames(processor) {
  * Bradstreet`) and can be split across lines or wrapped in a `<strong>`. All
  * three defeat a naive `includes`, and each would have produced a false
  * "undisclosed processor" finding against a page that names it perfectly well.
+ *
+ * Entities decode in ONE pass. Chained replaces decode twice: undoing `&amp;`
+ * first turns the literal text `&amp;quot;` into `&quot;`, which the next
+ * replace then turns into `"` — a character the page never contained.
  */
+const ENTITIES = { amp: '&', '#39': "'", apos: "'", quot: '"' };
+
 export function searchableText(markup) {
 	return markup
-		.replace(/&amp;/g, '&')
-		.replace(/&#39;|&apos;/g, "'")
-		.replace(/&quot;/g, '"')
+		.replace(/&(amp|#39|apos|quot);/g, (_, name) => ENTITIES[name])
 		.replace(/<[^>]+>/g, ' ')
 		.replace(/\s+/g, ' ')
 		.toLowerCase();

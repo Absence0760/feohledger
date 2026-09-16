@@ -132,6 +132,15 @@ test('an HTML-escaped or tag-split name on the published page still counts', () 
 	assert.deepEqual(findings, []);
 });
 
+test('an escaped entity is decoded once, never twice', () => {
+	// `&amp;quot;` is the markup for the literal text `&quot;`. Undoing `&amp;`
+	// before `&quot;` would decode it again, to a `"` the page never showed.
+	assert.equal(searchableText('A &amp;quot; B'), 'a &quot; b');
+	assert.equal(searchableText('A &amp;amp; B'), 'a &amp; b');
+	assert.equal(searchableText('A &amp;#39; B'), 'a &#39; b');
+	assert.equal(searchableText('O&#39;Brien &apos;n&apos; &quot;Co&quot;'), `o'brien 'n' "co"`);
+});
+
 test('a section whose heading names no source directory documents no adapter', () => {
 	// Infrastructure and hCaptcha have rows but no adapter registry. Their rows
 	// take part in the disclosure check and must not silently satisfy a slug.
