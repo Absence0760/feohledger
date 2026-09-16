@@ -164,8 +164,17 @@ with a valid anonymous pull token returns `401`, and `docker run` reports it as
 the misleading `repository does not exist or may require 'docker login'`. Every
 other image in the table above still pulls fine from Docker Hub — this one does
 not, so a `pnpm db:up` or CI failure naming MinIO is a registry problem, not a
-slow-start problem. Do not respond to it by adding retries or lengthening a
-health-check loop.
+slow-start problem. That failure is **deterministic** — do not respond to it by
+adding retries or lengthening a health-check loop.
+
+A **transient** registry failure is a different thing, and CI tells them apart.
+Each `docker run` invocation in `.github/workflows/ci.yml` is preceded by a
+bounded `docker pull` loop — 3 attempts, backing off 5s then 10s — because
+quay.io returned a `502 Bad Gateway` on 1 of 14 e2e shards on 2026-09-15,
+killing that shard before a single test ran. Every attempt prints its own error,
+so a deterministic `401` still reads as itself, three times, and then fails
+closed; nothing is buried. The health-check loop is deliberately untouched, and
+a container that starts but never goes healthy still fails exactly as before.
 
 `quay.io/minio/minio` is MinIO's own registry and serves the same image
 anonymously. The reference appears in three places that must stay in step:
