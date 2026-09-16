@@ -41,9 +41,9 @@ closed, **eighteen** opened. **29 → 41** — by category, **31 (c)** · **7 (a
 
 **Since:** two (c) entries added outside a round — the GitHub deploy role
 (2026-09-14) and the missing self-service-signup switch (2026-09-15) — then
-**ten** from publishing the legal document set and reviewing it (2026-09-15,
-[decisions.md](decisions.md) §175): seven (c), two (b) and one (a). So **53**
-open: **40 (c)** · **8 (a)** · **5 (b)**.
+**twelve** from publishing the legal document set and reviewing it
+(2026-09-15/16, [decisions.md](decisions.md) §175): nine (c), two (b) and one
+(a). So **55** open: **42 (c)** · **8 (a)** · **5 (b)**.
 
 The legal-set entries are worth reading as a group rather than as seven chores:
 five of them are the same shape — a document now makes a **published commitment**
@@ -127,6 +127,38 @@ pending the standing "loop in the CISO / Security Analyst" gate on that section.
       `docs/compliance/sub-processor-changelog.md` is the shape to copy for the
       dated-entry half.
       **Trigger:** before adding or changing any sub-processor.
+
+- [ ] **Nothing implements the 60-day backup deletion the DPA promises.**
+      `/legal/dpa` §13 now commits to deleting a tenant's backup objects within
+      60 days of termination, which the per-database `pg_dump` layout makes
+      genuinely possible — one tenant is one object per nightly run. But no
+      script or backend path touches the backups bucket except `deploy/backup.sh`
+      and `deploy/restore.sh`; `deploy/` has an `add-tenant.sh` and no remove
+      path at all. It is a manual operator step today, and the command is written
+      down in `docs/backup-disaster-recovery.md` rather than automated.
+      Two things complicate it, both recorded in that doc: the control-plane dump
+      is shared across tenants and carries every employee's name, email and
+      password hash, so it is **not** selectively editable the way a tenant dump
+      is; and a delete leaves a delete-marker residue until the 30-day
+      noncurrent-version expiry.
+      **Durable fix:** a `deploy/remove-tenant.sh` that drops the tenant database,
+      removes its Caddy block, and deletes its backup objects and their
+      noncurrent versions — the same traversal the erasure object-storage leg
+      needs (`docs/known-issues.md`), triggered by termination rather than by a
+      data-subject request.
+      **Trigger:** before the first customer terminates, and before anyone relies
+      on the §13 clause.
+
+- [ ] **Nothing guards the published register against drifting from the code.**
+      `/legal/sub-processors` is now a customer-facing commitment about which
+      third parties can receive personal data, and `docs/sub-processors.md` is
+      the internal copy it must agree with. Nothing checks either against the
+      adapter registries, so the next adapter added silently makes both wrong —
+      which is exactly how the version this change corrected came to list seven
+      AWS services that do not exist and to claim extraction defaults to `mock`.
+      **Durable fix:** extend `.github/workflows/compliance-drift.yml` to derive
+      the provider set from the registries and fail when a provider is registered
+      that neither register names.
 
 - [ ] **Nothing guards the sanctions adapters' data minimisation.**
       `/legal/sub-processors` publishes a specific promise: only the vendor's
