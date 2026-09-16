@@ -27,6 +27,7 @@ const PATHS = [
 	'/legal/terms',
 	'/legal/dpa',
 	'/legal/sub-processors',
+	'/legal/accessibility',
 	'/legal/cookies'
 ];
 

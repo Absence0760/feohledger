@@ -42,6 +42,12 @@ export const LEGAL_PAGES: readonly LegalPageMeta[] = [
 			'Every third party that can receive customer personal data, which are engaged today, and how changes are notified.',
 	},
 	{
+		path: '/legal/accessibility',
+		title: 'Accessibility Statement',
+		blurb:
+			'The conformance target for the web app, the supplier portal and the mobile app, what is verified today, what is not yet, and how to report a barrier.',
+	},
+	{
 		path: '/legal/cookies',
 		title: 'Cookie Notice',
 		blurb:

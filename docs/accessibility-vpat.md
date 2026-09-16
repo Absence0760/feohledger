@@ -2,7 +2,7 @@
 
 **Product:** FeohLedger — accounts-payable platform (web app,
 supplier portal, Flutter mobile app)
-**Report date:** 2026-06-19
+**Report date:** 2026-09-16
 **Edition basis:** [VPAT® 2.5](https://www.itic.org/policy/accessibility/vpat)
 (WCAG edition)
 **Standards evaluated:** [WCAG 2.2](https://www.w3.org/TR/WCAG22/) Level A and
@@ -11,7 +11,9 @@ Level AA
 e2e suite (`frontend/tests-e2e/a11y/axe.spec.ts`), Flutter semantics tests
 (mobile), and in-progress manual keyboard + screen-reader review (VoiceOver,
 NVDA, TalkBack).
-**Companion:** [Accessibility conformance statement](./accessibility.md).
+**Companion:** [Accessibility conformance statement](./accessibility.md) (internal),
+published as [`/legal/accessibility`](../frontend/src/routes/legal/accessibility/+page.svelte)
+in the app. **A conformance claim that changes here changes in all three.**
 
 This Accessibility Conformance Report (ACR) follows the VPAT format used in
 procurement. It is a **self-assessment**. The conformance column reflects the
@@ -57,7 +59,7 @@ and the manual audit is the tracked outstanding work.
 | 2.4.2 Page Titled | A | Supports | Each route sets a descriptive document title. |
 | 2.4.3 Focus Order | A | Partially Supports | DOM order is logical; focus order through the full set of complex widgets (workflow builder, multi-step modals) is pending a manual keyboard pass. |
 | 2.4.4 Link Purpose (In Context) | A | Partially Supports | Row links carry row-specific `aria-label`s; a full audit of link text in context is part of the manual pass. |
-| 2.5.1 Pointer Gestures | A | Partially Supports | Most interactions are single taps/clicks. The workflow-builder canvas uses drag — a non-path-based alternative is the tracked follow-up (see 2.5.7). |
+| 2.5.1 Pointer Gestures | A | Supports | Interactions are single taps/clicks. The one drag surface — the workflow-builder canvas — carries a per-node single-pointer alternative (Move ↑ / Move ↓ on every step), so no path-based or multipoint gesture is required anywhere. |
 | 2.5.2 Pointer Cancellation | A | Supports | Actions fire on the up-event; no down-event commits. |
 | 2.5.3 Label in Name | A | Supports | Visible labels are contained in each control's accessible name; verified by axe. |
 | 2.5.4 Motion Actuation | A | Not Applicable | No motion/device-orientation-actuated functions (mobile camera OCR is an explicit button, not motion-triggered). |
@@ -89,7 +91,7 @@ and the manual audit is the tracked outstanding work.
 | 2.4.7 Focus Visible | AA | Supports | `:focus-visible` indicator on every interactive element. |
 | 2.4.11 Focus Not Obscured (Minimum) | AA | Partially Supports | **New in 2.2.** The shared `Modal` and sticky headers are designed not to fully hide the focused element; this is inherently a manual check and is part of the outstanding screen-reader/keyboard pass. |
 | 2.4.12 Focus Not Obscured (Enhanced) | AAA | Not Applicable | AAA criterion — outside the Level AA target (listed for completeness re: the 2.2 additions). |
-| 2.5.7 Dragging Movements | AA | Partially Supports | **New in 2.2.** Most interactions need no dragging. The workflow-builder canvas uses native HTML5 drag-and-drop; a single-pointer (click-to-add / keyboard-reorder) alternative is the tracked follow-up. |
+| 2.5.7 Dragging Movements | AA | Supports | **New in 2.2.** Most interactions need no dragging. The workflow-builder canvas uses native HTML5 drag-and-drop **and** a per-node keyboard / single-pointer alternative — Move ↑ / Move ↓ on every step and in the step config panel (`components/workflow-builder/StepNode.svelte`), covered by `tests-e2e/workflow-builder.spec.ts`. |
 | 2.5.8 Target Size (Minimum) | AA | Supports | **New in 2.2.** Interactive targets meet the 24×24 CSS-px minimum (buttons, chips, row controls). The row-select checkbox is the case worth stating: it is *painted* 16×16 to fit a dense table row, so it used to conform only through the criterion's spacing exception — which each page's checkbox-column padding decided rather than the design system. Its own box is now 24×24 (a transparent border, returned to the layout as a negative margin, so nothing moves and no row grows), meeting the size minimum outright. Guarded by the axe `target-size` rule, by `tests-e2e/a11y/target-size.spec.ts` on a *selectable* row, and by the stylesheet scan `src/lib/a11y/targetSizeAudit.test.ts`. |
 | 3.1.2 Language of Parts | AA | Not Applicable | Content is single-language (en-US); no inline foreign-language passages requiring `lang`. |
 | 3.2.3 Consistent Navigation | AA | Supports | Sidebar nav and section tabs appear in the same relative order across routes (driven by the single `$lib/nav.ts` source). |

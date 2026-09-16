@@ -50,6 +50,7 @@ const PAGES = [
 	{ path: '/legal/terms', title: 'Terms of Service' },
 	{ path: '/legal/dpa', title: 'Data Processing Addendum' },
 	{ path: '/legal/sub-processors', title: 'Sub-processors' },
+	{ path: '/legal/accessibility', title: 'Accessibility Statement' },
 	{ path: '/legal/cookies', title: 'Cookie Notice' },
 ] as const;
 
@@ -171,7 +172,20 @@ test.describe('legal pages', () => {
 				/annex/i
 			],
 			'/legal/sub-processors': [/change/i, /object/i, /transfer/i],
-			'/legal/cookies': [/strictly necessary/i, /withdraw/i, /localStorage/i]
+			'/legal/cookies': [/strictly necessary/i, /withdraw/i, /localStorage/i],
+			// The accessibility statement's whole value is that it admits what is
+			// not verified. A revision that quietly dropped the limitations section
+			// would leave a statement claiming more than the evidence supports —
+			// which is the same failure as claiming a certification, one document over.
+			'/legal/accessibility': [
+				/WCAG 2\.2/,
+				/Level AA/,
+				/partially conformant/i,
+				/self-assessment/i,
+				/screen reader|screen-reader/i,
+				/not yet verified|have not yet verified/i,
+				/feedback|report a barrier|tell us/i
+			]
 		};
 
 		for (const [path, clauses] of Object.entries(required)) {

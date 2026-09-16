@@ -112,7 +112,7 @@ pending the standing "loop in the CISO / Security Analyst" gate on that section.
 
 ## (c) Feature work — sized and unstarted
 
-### The published legal set has three loose ends
+### The published legal set has loose ends
 
 - [ ] **No mechanism backs the 30-day sub-processor notice.** ([#427](https://github.com/Absence0760/feohledger/issues/427)) `/legal/sub-processors`
       and the DPA both commit to 30 days' advance notice of a new sub-processor
@@ -185,20 +185,6 @@ pending the standing "loop in the CISO / Security Analyst" gate on that section.
       **Durable fix:** add `portal.shell.footerPrivacy` / `footerCookies` and
       an `auth.signup.legalConsent` entry (with embedded links) to all six
       catalogues, and swap the literals.
-
-- [ ] **No accessibility statement, although the project holds the material for
-      one.** `docs/accessibility-vpat.md` exists, the conformance target is WCAG
-      2.2 AA, and `tests-e2e/a11y/axe.spec.ts` now covers all six legal routes —
-      so the substance is there and evidenced. The EU Accessibility Act makes a
-      published, dated accessibility statement an obligation for an in-scope
-      service, and a B2B buyer's procurement asks for one by name.
-      **Durable fix:** a sixth document at `/legal/accessibility`, derived from
-      the VPAT rather than written fresh, naming the standard, the known gaps
-      (the manual screen-reader pass is still outstanding), the feedback route,
-      and the date it was last reviewed. Adding it is one entry in
-      `lib/legal/pages.ts` plus the page — the index, the marketing footer and
-      the cross-document nav all pick it up automatically.
-      **Trigger:** before selling into the EU, or at the next accessibility pass.
 
 - [ ] **The Privacy Policy names the transfer safeguards but not how to get a
       copy.** Art 13(1)(f) requires the means to obtain a copy of the safeguards

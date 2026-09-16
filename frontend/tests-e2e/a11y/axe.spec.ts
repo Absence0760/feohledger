@@ -180,6 +180,7 @@ test.describe('accessibility — unauthenticated surfaces (WCAG 2.2 AA)', () => 
 		'/legal/terms',
 		'/legal/dpa',
 		'/legal/sub-processors',
+		'/legal/accessibility',
 		'/legal/cookies'
 	]) {
 		test(`${path} has no axe violations`, async ({ page }) => {
