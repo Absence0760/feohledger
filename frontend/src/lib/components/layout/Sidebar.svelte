@@ -192,13 +192,18 @@
 		left: 0;
 		bottom: 0;
 		width: 220px;
-		background: var(--surface);
+		/* Opaque, not glass: the nav's muted labels are calibrated against
+		   --surface (5.38:1), and a translucent rail would let whatever scrolls
+		   beneath it decide their contrast. The depth is a gradient within the
+		   surface's own range plus an edge highlight. */
+		background: linear-gradient(180deg, #1a1c26 0%, var(--surface) 38%, #15171f 100%);
 		border-right: 1px solid var(--border);
+		box-shadow: inset -1px 0 0 rgba(255, 255, 255, 0.02);
 		display: flex;
 		flex-direction: column;
 		padding: 12px 8px;
 		z-index: 50;
-		transition: width 0.2s ease;
+		transition: width 0.2s var(--ease-out);
 	}
 
 	.sidebar.collapsed {
@@ -303,7 +308,7 @@
 	}
 
 	.profile-btn:hover {
-		background: rgba(99, 140, 255, 0.08);
+		background: rgba(226, 228, 234, 0.05);
 		color: var(--text);
 	}
 
@@ -328,14 +333,20 @@
 		margin-bottom: 8px;
 		background: var(--surface);
 		border: 1px solid var(--border);
-		border-radius: 8px;
-		box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+		border-radius: var(--radius);
+		box-shadow: var(--shadow-float);
 		padding: 12px;
 		min-width: 200px;
+		animation: popover-in 0.16s var(--ease-out);
 		z-index: 61;
 		display: flex;
 		flex-direction: column;
 		gap: 6px;
+	}
+
+	@keyframes popover-in {
+		from { opacity: 0; transform: translate3d(0, 6px, 0); }
+		to { opacity: 1; transform: none; }
 	}
 
 	.profile-info {
@@ -404,28 +415,48 @@
 	}
 
 	.nav-item {
+		position: relative;
 		display: flex;
 		align-items: center;
 		gap: 10px;
 		padding: 9px 10px;
-		border-radius: 6px;
+		border-radius: 10px;
 		color: var(--text-muted);
 		text-decoration: none;
 		font-size: 0.88rem;
 		font-weight: 500;
 		white-space: nowrap;
 		overflow: hidden;
-		transition: all 0.12s;
+		transition: color 0.15s, background-color 0.15s;
 	}
 
 	.nav-item:hover {
-		background: rgba(99, 140, 255, 0.08);
+		background: rgba(226, 228, 234, 0.05);
 		color: var(--text);
 	}
 
+	/* The current page: its label at full --text on a wash of the tenant's own
+	   accent, with the accent carried by the icon and an edge bar rather than
+	   by the label. A branded accent is chosen for how it looks on a button,
+	   not for 4.5:1 as small text on this rail, so the words stay on the token
+	   that is calibrated for it. */
 	.nav-item.active {
-		background: rgba(99, 140, 255, 0.12);
+		background: color-mix(in srgb, var(--accent) 14%, transparent);
+		color: var(--text);
+	}
+	.nav-item.active .nav-icon {
 		color: var(--accent);
+	}
+	.nav-item.active::before {
+		content: '';
+		position: absolute;
+		left: 0;
+		top: 9px;
+		bottom: 9px;
+		width: 3px;
+		border-radius: 0 3px 3px 0;
+		background: var(--accent);
+		box-shadow: 0 0 10px var(--accent-glow);
 	}
 
 	.nav-icon {
@@ -464,7 +495,7 @@
 	}
 
 	.collapse-btn:hover {
-		background: rgba(99, 140, 255, 0.08);
+		background: rgba(226, 228, 234, 0.05);
 		color: var(--text);
 	}
 

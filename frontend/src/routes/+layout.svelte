@@ -193,6 +193,26 @@
 	.app-shell {
 		display: flex;
 		min-height: 100vh;
+		isolation: isolate;
+	}
+	/* The shell's ambient light: a faint wash of the tenant's accent from the
+	   top of the page and a ruled grid that fades out below the header — the
+	   same ledger ground the public pages stand on, held still. Fixed, and on a
+	   pseudo-element, so it is composited once and never repaints on scroll;
+	   `z-index: -1` inside the isolated shell keeps it under every page without
+	   a page having to know it exists. No continuous motion, so the app shell
+	   owes no WCAG 2.2.2 control. */
+	.app-shell::before {
+		content: '';
+		position: fixed;
+		inset: 0;
+		z-index: -1;
+		pointer-events: none;
+		background:
+			radial-gradient(1100px 480px at 72% -14%, var(--accent-wash), transparent 70%),
+			linear-gradient(to right, rgba(226, 228, 234, 0.02) 1px, transparent 1px) 0 0 / 64px 64px,
+			linear-gradient(to bottom, rgba(226, 228, 234, 0.02) 1px, transparent 1px) 0 0 / 64px 64px;
+		mask-image: linear-gradient(to bottom, #000 0, #000 360px, transparent 720px);
 	}
 
 	.main-content {
