@@ -474,7 +474,7 @@ backend/
 │       ├── erp_adapters/          # ERP connectors (pluggable)
 │       └── card_adapters/         # Virtual card providers (pluggable)
 ├── alembic/                 # Migration config + versions
-├── scripts/                 # seed.py, create_tenant.py, migrate_all_tenants.py
+├── scripts/                 # seed.py, create_tenant.py, delete_tenant.py, migrate_all_tenants.py
 ├── docker-compose.yml       # Postgres, Redis, MinIO
 └── pyproject.toml           # Dependencies, ruff config, pytest config
 ```
@@ -832,6 +832,7 @@ Severity: `error`, `warning`, `info`. Auto-detected by `invoice_warnings.py`. `e
 | `scripts/seed_extras.py` | Additive, idempotent per-tenant seed for the contract (`/contracts`), credit-memo (`/credit-memos`), discounting (`/discounts`) and expense (`/expenses`) pages. `seed_extras(session, org_id)` is reused in-line by `seed_tenant`; the CLI (`--tenant feoh_acme`) tops up an already-seeded tenant without a wipe. Skips if the tenant already has contracts. |
 | `scripts/seed_payable_invoices.py` | Tops up a tenant's payment queue with N approved invoices (`--tenant`, `--count`) — re-run after executing a payment run drains the queue. |
 | `scripts/create_tenant.py` | CLI wrapper around `services.tenant_provisioning.provision_tenant` — provisions a single tenant (org + admin user + DB + tables) |
+| `scripts/delete_tenant.py` | CLI wrapper around `services.tenant_deletion.delete_tenant` — deletes one tenant completely (object-storage prefix, tenant DB, control-plane rows), in that order. `--dry-run` inventories; otherwise it needs `--confirm <slug>` or `--yes`. Driven by `deploy/remove-tenant.sh`, which adds the Caddy and backup legs. The deletion `/legal/dpa` § 13 promises. |
 | `scripts/migrate_all_tenants.py` | Runs `alembic upgrade head` on every tenant DB |
 
 ## Self-service tenant signup
