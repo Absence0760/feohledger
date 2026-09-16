@@ -162,7 +162,7 @@ test.describe('/signup — form', () => {
 		const submissions: Array<{ captcha_token: string | null }> = [];
 		await page.route('**/api/public-config', (route) =>
 			route.fulfill({
-				json: { hcaptcha_sitekey: 'e2e-sitekey', tenant_url_template: 'http://{slug}.localhost:7777' }
+				json: { hcaptcha_sitekey: 'e2e-sitekey', tenant_url_template: tenantBase('{slug}') }
 			})
 		);
 		await page.route('**/api/signup/slug-check**', (route) =>
