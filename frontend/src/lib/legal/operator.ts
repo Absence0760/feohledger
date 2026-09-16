@@ -110,7 +110,7 @@ export const CONTACT = {
  * commit as any substantive change to the text — a stale effective date on a
  * changed policy defeats the Art 12 transparency the date exists to provide.
  */
-export const LAST_UPDATED = '2026-09-15';
+export const LAST_UPDATED = '2026-09-16';
 
 /**
  * The live operator facts.
@@ -179,7 +179,14 @@ const PENDING_FACT_KEYS: readonly PendingFactKey[] = [
  * false` (considered, not appointed) never renders as an unfinished page.
  */
 export function isPending(facts: OperatorFacts, key: PendingFactKey): boolean {
-	return facts[key] === null;
+	const value = facts[key];
+	// A blank string is pending too. `Fact.svelte` renders its gap marker for
+	// any falsy value, so without this a fact set to `''` would show the reader
+	// a visible "to be confirmed" marker while `operatorFactsComplete()` reported
+	// the set finished and the page's pending notice listed nothing. The two
+	// have to agree, and they agree in the direction that admits the gap.
+	if (typeof value === 'string') return value.trim() === '';
+	return value === null;
 }
 
 /** Every pending fact, in declaration order, for the pending notice. */

@@ -13,9 +13,14 @@
 	<p>
 		{OPERATOR.serviceName} is a business-to-business accounts-payable platform. Companies use it to
 		receive supplier invoices, code and approve them, and pay them. It is operated by
-		{OPERATOR.controllerDescription}, trading as
-		<Fact value={OPERATOR.legalEntity} label="the registered legal entity" />, at
+		{OPERATOR.controllerDescription}, at
 		<Fact value={OPERATOR.postalAddress} label="a postal address for the controller" />.
+		{#if OPERATOR.legalEntity}
+			The registered legal entity is {OPERATOR.legalEntity}.
+		{:else}
+			Once the business has a registered legal entity, it is named here:
+			<Fact value={OPERATOR.legalEntity} label="the registered legal entity" />.
+		{/if}
 	</p>
 
 	<p>
@@ -275,9 +280,11 @@
 		<li>Supplier-portal logins: name, email, password hash and multi-factor enrolment.</li>
 		<li>Supplier chat messages and their attachments.</li>
 		<li>
-			The audit log: who did what, when, and to which record. It records the <em>names</em> of the
-			fields that changed and never their values, and it is append-only — a database trigger
-			rejects every attempt to delete a row.
+			The audit log: who did what, when, and to which record. For ordinary business fields it
+			records the before and after values — that is what makes the trail useful — and for the
+			restricted ones, bank details and tax identifiers, only the last four digits. It is
+			append-only: a database trigger rejects every row delete, and every edit except the stamp
+			recording that a row has been copied to write-once storage.
 		</li>
 		<li>
 			Documents in object storage: invoice PDFs, expense receipts, contract documents, W-9 and W-8
@@ -290,7 +297,7 @@
 	<p>
 		A supplier's payment instructions — account number, routing number or IBAN — are stored in the
 		vendor record inside the customer's tenant database, because the platform has to be able to pay
-		that supplier. Three things constrain them, and we would rather state them precisely than
+		that supplier. Four things are true of them, and we would rather state each precisely than
 		imply a protection we do not have:
 	</p>
 
@@ -308,9 +315,23 @@
 			impersonates a supplier to redirect a payment.
 		</li>
 		<li>
-			Positive Pay records — the fraud-control files sent to a bank — keep only the last four
-			digits of the originating account. The full number is assembled into the generated file at
-			the moment it is produced rather than being kept in that record.
+			<strong>Positive Pay files hold full numbers, and the files are kept.</strong> A Positive
+			Pay file is a fraud-control file handed to a bank, so writing full numbers into it is the
+			point of it. The database record of the file keeps only the last four digits of the
+			customer's own account, but the file itself is stored in the customer's object storage and
+			stays there until someone deletes it by hand — no retention timer covers it. One of the two
+			kinds, the ACH debit-authorization file, lists every active supplier's full routing and
+			account number, not only the customer's own account.
+		</li>
+		<li>
+			<strong>Two screens return the full value, and both are deliberate.</strong> The first is
+			the dual-control review above: the second person has to be able to read the account number
+			they are approving, so the detail view shows it. The second is the data-subject export in
+			section 12 — run by a customer's administrator, it carries the supplier's bank details and
+			beneficial-ownership data unmasked, because Article 15 is a right to the data and not to a
+			masked copy of it; the bundle goes to whoever requested it and is neither stored nor logged.
+			Everywhere else — every list, every other screen, every API response and the audit trail —
+			shows the last four digits only.
 		</li>
 	</ul>
 
@@ -398,6 +419,16 @@
 		</table>
 	</div>
 
+		<p>
+		<strong>Whether you have to give us this data.</strong> For an account, the requirement is
+		contractual rather than statutory: a name, an email address and a means of signing in — a
+		password, or the identity your employer's single sign-on asserts — are what an account is made
+		of, and without them we cannot create one. That is the whole consequence of declining: no
+		account, and nothing else follows from it. If you are a supplier, the requirement is your
+		customer's rather than ours — they need your payment and tax details to pay you and to meet
+		their own tax obligations — and section 3 explains who to ask about it.
+	</p>
+
 	<p>
 		Where we are a processor, the lawful basis is the customer's to identify and to be able to
 		demonstrate. In practice AP data is processed on the customer's performance of its contract
@@ -449,8 +480,15 @@
 		The platform applies AI to customer documents in four places: extracting fields from an
 		uploaded invoice, a conversational assistant that answers questions about a customer's own AP
 		data, a cash-flow copilot that drafts plans and payment runs, and autonomous agents that triage
-		the exception queue. Every one of these runs against a <em>local, offline default</em>; sending
-		a document to an external AI provider only happens if the customer switches one on. See
+		the exception queue. Three of those four run against a <em>local, offline default</em> and reach
+		an external provider only if the customer switches one on. <strong
+			>Invoice extraction is the exception, and it is the one that handles whole documents.</strong
+		>
+		On any deployed instance it sends the uploaded invoice — every field on it, including anything
+		personal a supplier printed there — to Anthropic, whether or not anyone configured a provider.
+		That is deliberate: the offline stand-in returns a fabricated invoice, and putting invented
+		figures against a real supplier's document is worse than calling out. So Anthropic is a
+		sub-processor by default, not by choice, and we say so here rather than in a footnote. See
 		section 8 and the <a href="/legal/sub-processors">sub-processor register</a>.
 	</p>
 
@@ -482,7 +520,8 @@
 			"conservative", implemented as a confidence threshold no evaluation can ever clear — so
 			every exception escalates to a person. A customer who raises the level lets an agent
 			resolve a narrow set of cases (a small purchase-order amount variance, linking a missing
-			purchase order, correcting a GL code from vendor history). Each agent decision is written to
+			purchase order, matching a consolidated invoice to the set of purchase orders that sums to
+			its total, correcting a GL code from vendor history). Each agent decision is written to
 			an append-only decision log with the confidence and a rationale, alongside the ordinary
 			audit row for whatever it changed, and the agent inherits the same segregation-of-duties
 			refusal a human would face and escalates rather than acting.
@@ -506,17 +545,35 @@
 		you in our own controller capacity.
 	</p>
 
+	<p>
+		<strong>The EU AI Act.</strong> Regulation (EU) 2024/1689 is the other instrument that bears
+		on this section, so we will say where we stand rather than leave it unmentioned. We do not
+		train or fine-tune a model: the AI here is a general-purpose model called through an API, with
+		deterministic code around it. The transparency the Act asks for is what this section is — where
+		AI is applied, what it reads, and what a person still decides. A customer who turns on
+		auto-approval or raises an agent's autonomy is the deployer of that behaviour and carries a
+		deployer's obligations; we are the provider of the software they deploy. We are not aware of a
+		use here that falls into the Act's high-risk categories, and if that assessment changes we will
+		say so on this page rather than quietly.
+	</p>
+
 	<h2 id="recipients">8. Who else can receive personal data</h2>
 
 	<p>
-		A default installation of {OPERATOR.serviceName} shares personal data with <strong
-			>no external provider at all</strong
-		>. Every external integration — AI extraction, ERP sync, payment rails, card issuing, sanctions
-		screening, e-invoicing, email delivery, chat notifications, audit-log shipping, FX rates, data
-		enrichment, platform billing — sits behind a pluggable adapter whose default is a local mock or
-		console implementation. A third party receives data only when a customer deliberately
+		<strong>Three third parties are involved before anyone configures anything</strong>: the
+		infrastructure provider that hosts the service (AWS), <strong>Anthropic</strong>, which
+		receives uploaded invoice documents for extraction on any deployed instance (section 7
+		explains why), and <strong>hCaptcha</strong>, which receives the IP address of anyone using the
+		public signup form — the service refuses to start without it.
+	</p>
+
+	<p>
+		Beyond those three, every external integration — ERP sync, payment rails, card issuing,
+		sanctions screening, e-invoicing, email delivery, chat notifications, audit-log shipping, FX
+		rates, data enrichment, platform billing — sits behind a pluggable adapter whose default is a
+		local mock or console implementation. Those receive data only when a customer deliberately
 		configures a real provider, which means <strong
-			>which recipients apply to your data depends on what your customer switched on.</strong
+			>which of them apply to your data depends on what your customer switched on.</strong
 		>
 	</p>
 
@@ -524,9 +581,12 @@
 		Rather than list providers here, where the list would go stale, we keep one register:
 		<a href="/legal/sub-processors">the sub-processor register</a>. It names every third party that
 		can receive customer personal data, what each receives, which are engaged today, and how
-		changes are notified. Two recipients exist on our own controller side: an anti-abuse captcha
-		provider, which sees your IP address and a challenge token when you submit the public signup
-		form, and our email provider for account and service mail. Both are in the register.
+		changes are notified. On our own controller side the recipients are the infrastructure provider
+		that hosts the service; the anti-abuse captcha provider, which sees your IP address and a
+		challenge token when you submit the public signup form; whichever provider a deployment sends
+		account and service email through; and, once we bill through a payment provider rather than
+		our own records, that provider, which receives the customer organisation's name, a billing
+		contact email address and the plan. Every one of them is in the register.
 	</p>
 
 	<p>
@@ -547,19 +607,35 @@
 		EEA or the UK by our holding it there, and the transfer relies on the European Commission's
 		Standard Contractual Clauses (Decision 2021/914), with the UK Information Commissioner's
 		International Data Transfer Addendum applied for UK transfers, or on an adequacy decision
-		where one covers the destination. The equivalent terms for customer data are in the
-		<a href="/legal/dpa">Data Processing Addendum</a>. The same mechanisms are flowed down to
-		every sub-processor in the <a href="/legal/sub-processors">register</a>, together with the
-		transfer-impact assessment obligations that follow from <em>Schrems II</em>.
+		where one covers the destination. A transfer out of Switzerland relies on the same Clauses
+		with the amendments the Swiss Federal Data Protection and Information Commissioner
+		recognises. The equivalent terms for customer data, those Swiss amendments included, are in
+		the <a href="/legal/dpa">Data Processing Addendum</a>. The same
+		mechanisms are flowed down to every sub-processor in the
+		<a href="/legal/sub-processors">register</a>, together with the transfer-impact assessment
+		obligations that follow from <em>Schrems II</em>.
+	</p>
+
+	<p>
+		<strong>How to get a copy of the safeguards.</strong> Naming a safeguard is not the same as
+		giving you access to it, and Article 13(1)(f) asks for both: the safeguard, and the means of
+		obtaining a copy of it. Write to <a href="mailto:{CONTACT.privacy}">{CONTACT.privacy}</a> and
+		we will send you the clauses relied on for the transfer that affects you. They are also
+		published independently of us — the Standard Contractual Clauses by the European Commission
+		as the annex to Decision 2021/914, and the International Data Transfer Addendum by the UK
+		Information Commissioner's Office — and the modules, options and completed annexes we have
+		selected are in the <a href="/legal/dpa">Data Processing Addendum</a>.
 	</p>
 
 	<p>
 		<strong>About the residency setting.</strong> The application exposes a per-organisation data-residency
 		option (US, EU, UK, Canada, Australia). We want to be exact about what it does today: it is
 		<strong>advisory only</strong>. Nothing in the code routes a database or an object-storage
-		bucket on the strength of it, the platform reports whether a tenant's configured region matches
-		the region actually deployed rather than enforcing it, and all data currently lives in the one
-		region named above. Setting it does not create a residency guarantee and you should not rely
+		bucket on the strength of it. What the platform does is compare the region a tenant has
+		configured against the region the operator has <em>declared</em> in its own configuration —
+		a declaration, not an observation of where the servers are — and report that comparison as
+		aligned, misaligned, or unknown where nothing has been declared. All data currently lives in
+		the one region named above. Setting it does not create a residency guarantee and you should not rely
 		on it as one. If you need a genuine regional commitment, ask us at
 		<a href="mailto:{CONTACT.legal}">{CONTACT.legal}</a> before you sign, and do not infer one from
 		the setting existing.
@@ -589,9 +665,14 @@
 		<li>
 			For the audit log, "retention" means verifying that rows past the window have been shipped
 			to write-once storage and recording a manifest of counts. <strong
-				>Audit rows are never deletable by design</strong
-			> — a database trigger rejects every delete — because an audit trail that can be pruned is not
-			an audit trail.
+				>Audit rows are not deletable through the product</strong
+			> — a row-level trigger in each customer's database rejects every delete, and every edit except
+			the stamp recording that a row has been shipped — because an audit trail that can be pruned
+			is not an audit trail. One limit, stated because a trigger is not magic: it fires row by row,
+			so a single statement that empties the whole table at once falls outside it, and an account
+			holding database-owner rights could switch the trigger off in any case. It stops every path
+			the application has and every ordinary query; it does not stop the owner of the database it
+			runs in.
 		</li>
 	</ul>
 
@@ -632,7 +713,9 @@
 		</li>
 		<li>
 			<strong>Append-only audit logging</strong>, enforced by a database trigger rather than by
-			convention, recording which fields changed without recording their values.
+			convention. For ordinary business fields an entry records the before and after values,
+			because that is what makes the trail useful to an auditor; for the restricted ones — bank
+			details and tax identifiers — it records only the last four digits.
 		</li>
 		<li>
 			<strong>Tenant isolation at the data layer.</strong> Each customer has its own database, and
@@ -704,23 +787,45 @@
 	<h3>What the automated tools do, and what they do not yet do</h3>
 
 	<p>
-		The platform gives a customer's administrator two tools: an export that assembles what is held
-		about a data subject, and an erasure that redacts identifying fields. They work across both the
-		customer's tenant database and the control-plane database, for three kinds of subject — an
-		employee user, a supplier-portal user, and a vendor contact. Erasure redacts contact details,
-		tax identifiers, bank details and beneficial-ownership data, nulls credentials and deactivates
-		the account, and redacts the supplier's own chat message bodies. It deliberately
-		<strong>preserves the money trail and the audit log</strong> — amounts, currencies, statuses,
-		dates and the vendor's legal name on each invoice — because those are records the customer is
-		legally required to keep, and because an audit trail with the actor removed would defeat its
-		purpose.
+		The platform gives a customer's administrator two tools: an export that assembles the record
+		held about a data subject, and an erasure that redacts identifying fields. Both cover three
+		kinds of subject — an employee user, a supplier-portal user, and a vendor contact. Only the
+		employee user exists in both databases, so only that subject's export and erasure reach the
+		control-plane database as well as the customer's tenant; a supplier-portal user and a vendor
+		contact live entirely inside the tenant.
 	</p>
 
 	<p>
-		Three gaps exist today and we are not going to describe around them:
+		Erasure redacts contact details, tax identifiers, bank details and beneficial-ownership data,
+		nulls credentials and deactivates the account, and redacts the supplier's own chat message
+		bodies. It deliberately
+		<strong>preserves the money trail and the audit log</strong> — amounts, currencies, statuses,
+		dates and the vendor's legal name on each invoice — because those are records the customer is
+		legally required to keep, and because an audit trail with the actor removed would defeat its
+		purpose. It also leaves the supplier company's own business identity alone: its legal name and
+		the public company website recorded against it describe the company rather than a person, and
+		erasing a contact is not the same as erasing the company they work for.
+	</p>
+
+	<p>
+		Four gaps exist today and we are not going to describe around them:
 	</p>
 
 	<ul>
+		<li>
+			<strong
+				>The export is the subject's own record plus a summary of what is attached to it, not a
+				copy of every record that mentions them.</strong
+			> For an employee user it returns the profile, the roles held, and a <em>count</em> of the audit
+			actions they authored and of the in-app notifications they received rather than the content of
+			either; the passkeys registered to the account, and any expense report or expense they submitted,
+			are not in it. For a vendor contact it returns the contact details, tax identifier, bank details
+			and beneficial-ownership data, one line for each related invoice and payment, the supplier-portal
+			logins, and a count of chat messages rather than their text; contracts and virtual cards tied
+			to that vendor are not in it at all. Article 15 is a right to the data and not to a tally of
+			it, so where you want a category the automated bundle does not carry, ask for it and we will
+			assemble it by hand.
+		</li>
 		<li>
 			<strong>The export does not include uploaded documents.</strong> Invoice PDFs, receipts,
 			contract documents, W-9 and W-8 forms and chat attachments live in object storage, and the
@@ -733,7 +838,10 @@
 		<li>
 			<strong>Erasure does not revoke passkeys or terminate active sessions.</strong> It nulls the
 			password and the multi-factor secret and deactivates the account, but a registered passkey
-			and any session already issued are not cleared by the automated path.
+			and any session already issued are not cleared by the automated path. Access itself stops
+			at once — every request re-reads the account and refuses a deactivated one — so what
+			survives is the stored authenticator credential and the session record until it expires,
+			not working access to the service.
 		</li>
 	</ul>
 
@@ -877,7 +985,45 @@
 		a complaint.
 	</p>
 
-	<h2 id="changes">18. Changes to this policy</h2>
+	<h2 id="other-jurisdictions">18. South Africa and other jurisdictions</h2>
+
+	<p>
+		This policy is written against the GDPR, the UK GDPR and the US state statutes in section 17,
+		because those are the regimes the product was built to serve. Nothing in the product confines
+		a customer to those countries — the only country restrictions we operate are the
+		export-control and sanctions limits in the <a href="/legal/terms">Terms</a> — so it is worth
+		saying plainly where this document stops rather than leaving it to be assumed.
+	</p>
+
+	<p>
+		<strong>South Africa.</strong> POPIA uses different words for the same split section 2 of this
+		policy describes: a customer is the <em>responsible party</em> for the data in its tenant and we
+		are its <em>operator</em>. Sections 20 and 21 of POPIA require that relationship to be in writing,
+		with the operator processing only with the responsible party's authorisation and keeping what it
+		processes confidential and secure — obligations the <a href="/legal/dpa">DPA</a> already
+		carries, whatever law is named in it. Two things follow that a South African customer should
+		settle before loading data rather than after. First, <strong
+			>there is no South African hosting region.</strong
+		> The residency options are the United States, the EU, the UK, Canada and Australia, and section
+		9 says where data actually sits — so putting supplier data here is a transfer out of South Africa,
+		and POPIA's section 72 makes the basis for that transfer the responsible party's to establish and
+		record.
+		Second, whether POPIA also reaches <em>our own</em> processing, where we are the responsible party
+		rather than the operator, turns on where this business is established — one of the facts still
+		to be confirmed at the top of this page. We would rather answer that when the entity is registered
+		than guess at it now, and in the meantime we make no claim to have registered an information officer
+		with the Regulator, because we have not. A South African data subject may complain to the Information
+		Regulator, and nothing in this policy affects that.
+	</p>
+
+	<p>
+		<strong>Anywhere else.</strong> If you think a law we have not named applies to the data you are
+		about to load, raise it at <a href="mailto:{CONTACT.legal}">{CONTACT.legal}</a> before you sign
+		rather than afterwards. We would rather negotiate a term we can keep than have you discover, at
+		a regulator's deadline, that you were relying on one we never made.
+	</p>
+
+	<h2 id="changes">19. Changes to this policy</h2>
 
 	<p>
 		When we change this policy we update the "Last updated" date at the top of this page, which is
@@ -893,7 +1039,7 @@
 		reliable route.
 	</p>
 
-	<h2 id="contact">19. How to contact us</h2>
+	<h2 id="contact">20. How to contact us</h2>
 
 	<p>
 		Write to <a href="mailto:{CONTACT.privacy}">{CONTACT.privacy}</a> for anything in this policy:

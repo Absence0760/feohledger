@@ -67,6 +67,17 @@ describe('operator facts', () => {
 		}
 	});
 
+	test('a blank string is pending, so the seam agrees with what Fact.svelte draws', () => {
+		// `Fact.svelte` shows its gap marker for any falsy value. If `isPending`
+		// counted only `null`, a fact set to '' would render a visible gap while
+		// the page reported nothing outstanding — the two disagreeing is the bug.
+		for (const blank of ['', '   ', '\n']) {
+			const facts = { ...complete, postalAddress: blank } as OperatorFacts;
+			expect(isPending(facts, 'postalAddress'), JSON.stringify(blank)).toBe(true);
+			expect(operatorFactsComplete(facts), JSON.stringify(blank)).toBe(false);
+		}
+	});
+
 	test('a DPO that was considered and declined is decided, not pending', () => {
 		// `false` is a real answer the page publishes ("no DPO is appointed,
 		// because the Art 37(1) thresholds are unmet"). Treating it as pending

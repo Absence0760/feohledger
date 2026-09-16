@@ -15,4 +15,4 @@
 	let { value, label } = $props<{ value: string | null; label: string }>();
 </script>
 
-{#if value}{value}{:else}<span class="fact-pending">[{label} to be confirmed]</span>{/if}
+{#if value && value.trim()}{value}{:else}<span class="fact-pending">[{label} to be confirmed]</span>{/if}
