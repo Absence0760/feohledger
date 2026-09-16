@@ -1295,10 +1295,11 @@
 						Lock, or CloudWatch Logs. Our infrastructure code provisions that bucket with
 						Object Lock in <strong>compliance mode</strong> and a seven-year default
 						retention. The shipper relies on that bucket default rather than stamping a
-						retention period onto each object, and at start-up it verifies the bucket has
-						Object Lock enabled and refuses to start if it does not — a check that confirms
-						the lock is on, not that the bucket is in compliance mode. Pointed at a bucket
-						built some other way, the archive is only as strong as that bucket.
+						retention period onto each object, and at start-up it verifies that the bucket
+						has Object Lock enabled, that its default retention rule is compliance mode
+						rather than governance mode, and that the period is at least seven years. It
+						refuses to start if any of the three is not true, so a bucket built some other
+						way stops the deployment rather than quietly weakening the archive.
 						<strong>The capability is available and configurable, not always on</strong>:
 						shipping is disabled by default and the default adapter is an in-process mock,
 						so it is enabled per deployment. We describe it this way deliberately rather

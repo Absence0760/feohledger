@@ -274,11 +274,19 @@ class Settings(BaseSettings):
     # CloudWatch Logs group name. Tenant log streams are created under this
     # group as `<tenant_db>/<YYYY-MM-DD>`.
     audit_shipping_cloudwatch_group: str = "/ap/audit"
-    # S3 bucket must have Object Lock enabled (Governance or Compliance
-    # mode) with a default retention period set on the bucket. The shipper
-    # verifies the bucket exists on startup but does not configure Object
-    # Lock itself — that's a bucket-provisioning concern (Terraform).
+    # S3 bucket must have Object Lock enabled in COMPLIANCE mode with a
+    # default retention rule on the bucket. The shipper verifies all three at
+    # startup and refuses to boot otherwise, but does not configure Object
+    # Lock itself — that's a bucket-provisioning concern (Terraform). Mode is
+    # not configurable: `/legal/dpa` Annex II publishes compliance mode, and
+    # GOVERNANCE lets a principal with s3:BypassGovernanceRetention delete
+    # audit evidence.
     audit_shipping_s3_bucket: str | None = None
+    # The floor the bucket's default retention must meet. 2555 days ≈ seven
+    # years, matching `infra/variables.tf` `audit_retention_days` and the
+    # figure the DPA names. Lowering it is a deployment's call, but it makes
+    # that published figure wrong for that deployment.
+    audit_shipping_s3_min_retention_days: int = 2555
 
     # Periodic access reviews (SOX). The dormancy window for the elevated-access
     # review: a user holding an elevated role (admin / ap_manager / cfo) whose
