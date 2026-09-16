@@ -1,0 +1,8 @@
+# The full-resolution Cycles render is an intermediate, not an artifact: the
+# committed result is frontend/static/marketing/tally-split.webp, which
+# gen-marketing.sh derives from it. Committing both would mean a 480 KB file
+# that nothing reads and that goes stale the moment the scene changes.
+render/
+
+# Python bytecode from importing the scene module for diagnostics.
+__pycache__/
