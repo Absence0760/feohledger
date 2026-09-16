@@ -121,10 +121,13 @@ def render_remittance_pdf(ctx: RemittanceContext) -> bytes:
 
     story = []
 
-    # Branded header: the tenant logo when one is configured + embeddable,
-    # otherwise the tenant product name in the accent color. Logo embed is
-    # best-effort and never breaks the PDF (falls back to the text header).
-    logo = build_logo_flowable(brand, max_width_pt=2.4 * inch, max_height_pt=0.6 * inch)
+    # Branded header (`BrandContext.mark`): the tenant logo when one is configured
+    # + embeddable, the bundled platform mark beside the name while the product
+    # keeps the platform's name, otherwise the product name in the accent color.
+    # Logo embed is best-effort and never breaks the PDF (falls back to the text).
+    logo = build_logo_flowable(
+        brand, max_width_pt=2.4 * inch, max_height_pt=0.6 * inch, name_style=h_brand
+    )
     if logo is not None:
         story.append(logo)
         story.append(Spacer(1, 0.08 * inch))

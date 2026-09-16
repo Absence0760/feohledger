@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
+	import BrandMark from '$lib/components/ui/BrandMark.svelte';
 
 	/**
 	 * Shared unauthenticated-page chrome for the auth flows that live outside
@@ -25,6 +26,7 @@
 
 <div class="auth-page">
 	<div class="auth-card">
+		<BrandMark size={32} />
 		<h1>{heading}</h1>
 		{#if subtitle}
 			<p class="subtitle">{subtitle}</p>

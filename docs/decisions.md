@@ -6778,3 +6778,114 @@ Not done here: SES production access, which is a console request rather than a r
 configuration set for bounce and complaint events. SES's account-level suppression list already stops
 repeat sends to addresses that bounced or complained, and a configuration set can come with the first
 reason to act on those events.
+
+## 173. The brand mark is feoh written as a split tally stick, and every icon is generated from it
+
+Until this change the product shipped placeholders: an "AP" SVG favicon, the
+letters "AP" as the sidebar mark, a CSS gradient square on the landing page, and
+a stock document-with-a-tick launcher icon left over from the "Better AP" name.
+Threkir, the sibling estate product, ships a designed mark: the thorn rune þ.
+
+**The glyph is the name.** Feoh (ᚠ) is Old English for wealth, originally
+cattle, and the root of *fee*; it is also the first rune of the Old English
+rune-row, which makes it a natural sibling to Threkir's þ. Nine treatments of it
+were compared at 132, 64, 32 and 16 px in three palettes, inside the app's real
+surfaces, and all nine are kept as geometry in `assets/logo-render/gen_svg.py`
+so the choice can be revisited without re-deriving it. The table of what each
+one meant and why it lost is in `assets/logo-render/README.md`.
+
+**Tally won on two counts.** It carries the product rather than only the name:
+the Exchequer recorded a debt as notches across a hazel stick, split it so each
+party held half, and treated the debt as settled when the halves matched, which
+is the act this application exists to perform. And it still reads as ᚠ at
+16 px, where a mark spends most of its life. The strongest launcher icon, the
+runic coin, turned into a plain gold disc in a browser tab; the double-rule
+"total" went soft below 32 px; the T-account read as a T to anyone but an
+accountant.
+
+**The palette is not the UI accent.** Gold on a navy tile was chosen over the
+product's own blue-violet. The tile carries its own ground, so it reads on light
+and dark hosts alike, and a mark tied to `--accent` would be tied to the one
+token a white-label tenant is allowed to override (§ white-label.md).
+
+**Generated, not drawn.** The geometry and palette live in one Python file,
+which writes the SVG masters (`assets/icon.svg` full-bleed, `assets/logo-mark.svg`
+rounded, and the three Android adaptive layers). `assets/gen-icons.sh` renders
+every platform size from them with Inkscape and ImageMagick, and
+`assets/check_icons.py` runs in CI with the standard library alone: masters must
+match the generator, every raster must exist at its platform's size, and nothing
+iOS or `maskable` may carry alpha, because App Store Connect rejects an icon with
+any alpha channel, an indexed palette's tRNS included. The limit is stated in the
+checker rather than hidden: it cannot prove a PNG was rendered from the *current*
+master. Editing the geometry without re-rendering still fails, because the
+committed master goes stale first.
+
+**Android gets an adaptive icon.** The old launcher shipped legacy PNGs only,
+which Android 8+ shrinks onto a white plate. The foreground layer shrinks the
+glyph into the guaranteed 66 dp circle, and a monochrome layer serves Android
+13's themed icons. Push notifications had been initialised with the launcher
+icon, which Android draws from its alpha channel alone, so it rendered as a
+solid white square; they now use a white silhouette drawable, both for the
+foreground notifications the app shows and as Firebase's default for the ones
+it posts while the app is in the background. `check_icons.py` fails if that
+icon loses its alpha, or if any `@drawable`/`@mipmap` the app names is absent.
+
+**The white-label fallback forks.** The "AP" placeholder was neutral, so a
+tenant that renamed the product but configured no logo never displayed platform
+branding. The rune is FeohLedger's identity, so swapping it in unconditionally
+would have put FeohLedger's mark beside a partner's product name.
+`brandTheme.ts::brandMark` shows the tenant logo when one is set, the platform
+mark only while the product still carries the platform's name, and otherwise a
+monogram of the tenant's own name on its own accent. The static assets
+(favicon, touch icon, manifest, launcher icons) stay platform-branded, exactly
+as the "AP" favicon already was; a per-tenant favicon would need a runtime
+`<link>` swap, which nothing has asked for.
+
+**The iOS build is proven on the pull request, not at release.** CI's
+`mobile-ios-build` job runs `mobile-release.yml`'s exact
+`flutter build ios --release --no-codesign` on a macOS runner whenever `mobile/`
+changes, because the Linux Mobile job never runs Xcode's asset-catalog or
+storyboard compilers and the release workflow only runs after a merge. It needs
+no signing and no `GoogleService-Info.plist` (nothing in the build reads one), so
+a fork's pull request proves the same build. Writing it surfaced a build that
+could never have succeeded: the locked `firebase_core` and `firebase_messaging`
+require iOS 15.0 while the Xcode project targeted 13.0, and Swift Package Manager
+and CocoaPods both refuse that. The deployment target is now 15.0. Pinning
+Firebase back was rejected as a workaround that only postpones the same raise;
+it drops iOS 13 and 14, both from 2019–2020.
+
+**The native launch screens copy the first Flutter frame rather than design
+their own.** The 64dp mark sits 26dp above centre, where the `SplashScreen`
+column places it, on `#F8F9FF`, the Material 3 surface of the blue seed theme,
+so the hand-off from the OS to Flutter neither moves nor recolours anything.
+They stay light in dark mode: the app has no `darkTheme`, so a dark launch screen
+would flash before a light first frame. `values-night/styles.xml` is kept but
+empty, so `flutter create .` cannot restore the template's black theme. On
+Android 12+ only the system splash background is matched and the launcher icon
+is left in place, because the platform scales and masks that icon itself and a
+64dp mark cannot be pinned to Flutter's size and position there. Because the
+colour and the offset are copies, `test/screens/launch_screen_parity_test.dart`
+reads the native files and fails when they drift from the theme or the splash
+layout.
+
+**The link-preview card is template markup, not `<svelte:head>`.** Unfurl
+crawlers run no JavaScript and this static SPA serves one `index.html`
+everywhere, so the Open Graph and Twitter tags live in `app.html`, with the image
+rendered by the same generator as the icons. The image URL must be absolute, so
+its origin comes from `PUBLIC_SITE_URL`, which each deploy derives from a site
+origin it already knows (`APP_URL`, `APP_DOMAIN`) and refuses when empty. There
+is deliberately no hardcoded `https://feohledger.com` fallback, which would
+quietly point a QA or self-hosted build's card at the platform; a bare local build
+renders a root-relative path instead.
+
+**Generated PDFs and outbound emails take the same fork on the backend,**
+through `BrandContext.mark` in `backend/app/services/branding.py`: the tenant
+logo, else the platform mark while the product keeps the platform's name, else
+the product name alone (a renamed tenant gets plain text where the web app draws
+a monogram). PDFs embed a bundled `backend/app/assets/brand/logo-mark.png`, read
+once and never fetched, beside the product name, since the glyph carries no name.
+Emails cannot carry a bundled file inline, so the header references
+`/email-mark.png` on `FEOH_PUBLIC_URL` as a remote image with empty alt text,
+emitted only for an absolute http(s) origin. Email headers previously carried no
+image at all, not even a configured tenant logo; they now show the tenant logo
+too, so an unbranded tenant's email is never richer than a branded one's.

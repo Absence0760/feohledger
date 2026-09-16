@@ -271,8 +271,11 @@ def render_1099_pdf(ctx: Form1099Context) -> bytes:
     )
 
     story = []
-    # Branded header (logo when embeddable, else product name in accent).
-    logo = build_logo_flowable(brand, max_width_pt=2.4 * inch, max_height_pt=0.6 * inch)
+    # Branded header (`BrandContext.mark`: logo, platform mark + name, or the name
+    # alone in the accent color).
+    logo = build_logo_flowable(
+        brand, max_width_pt=2.4 * inch, max_height_pt=0.6 * inch, name_style=h_brand
+    )
     if logo is not None:
         story.append(logo)
         story.append(Spacer(1, 0.08 * inch))

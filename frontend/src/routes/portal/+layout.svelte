@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { portalAuth } from '$lib/stores/portalAuth.svelte';
 	import { portalBrand } from '$lib/stores/portalBrand.svelte';
+	import BrandMark from '$lib/components/ui/BrandMark.svelte';
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
 	import { browser } from '$app/environment';
@@ -76,8 +77,12 @@
 		<a href="#main-content" class="skip-link">{m('portal.shell.skipToMain')}</a>
 		<header class="portal-header">
 			<div class="brand">
-				{#if portalBrand.logoUrl}
+				{#if portalBrand.mark.kind === 'logo'}
 					<img class="brand-logo" src={portalBrand.logoUrl} alt={portalBrand.productName} />
+				{:else if portalBrand.mark.kind === 'platform'}
+					<!-- Same fork as the employee sidebar: FeohLedger's mark only beside
+					     FeohLedger's own name (docs/decisions.md §173). -->
+					<BrandMark size={28} />
 				{/if}
 				<div class="brand-text">
 					<strong>{portalBrand.productName}</strong>

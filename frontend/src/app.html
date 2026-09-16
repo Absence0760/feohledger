@@ -5,6 +5,27 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 		<link rel="icon" href="%sveltekit.assets%/favicon.ico" sizes="32x32" />
 		<link rel="icon" href="%sveltekit.assets%/favicon.svg" type="image/svg+xml" />
+		<link rel="apple-touch-icon" href="%sveltekit.assets%/apple-touch-icon.png" />
+		<link rel="manifest" href="%sveltekit.assets%/manifest.webmanifest" />
+		<meta name="theme-color" content="#0F1117" />
+		<!--
+			Link-preview card. It lives here, not in svelte:head, because unfurl
+			crawlers run no JavaScript. Platform-branded on every host, like the
+			favicon. The image URL must be absolute, so PUBLIC_SITE_URL prefixes it
+			(docs/environment.md). No title element here: routes set the title.
+		-->
+		<meta name="description" content="From invoice to payment in minutes, not days. AI-powered extraction, configurable approval workflows, and real ERP sync — in one place, with rebates on every card payment." />
+		<meta property="og:type" content="website" />
+		<meta property="og:site_name" content="FeohLedger" />
+		<meta property="og:title" content="FeohLedger — Accounts payable, automated" />
+		<meta property="og:description" content="From invoice to payment in minutes, not days. AI-powered extraction, configurable approval workflows, and real ERP sync — in one place, with rebates on every card payment." />
+		<meta property="og:image" content="%sveltekit.env.PUBLIC_SITE_URL%/og-image.png" />
+		<meta property="og:image:width" content="1200" />
+		<meta property="og:image:height" content="630" />
+		<meta property="og:image:alt" content="The FeohLedger mark, a gold feoh rune drawn as a split tally stick on navy, beside the words: FeohLedger. Accounts payable, automated. Invoice to payment, every bill matched." />
+		<meta name="twitter:card" content="summary_large_image" />
+		<meta name="twitter:image" content="%sveltekit.env.PUBLIC_SITE_URL%/og-image.png" />
+		<meta name="twitter:image:alt" content="The FeohLedger mark, a gold feoh rune drawn as a split tally stick on navy, beside the words: FeohLedger. Accounts payable, automated. Invoice to payment, every bill matched." />
 		%sveltekit.head%
 	</head>
 	<body data-sveltekit-preload-data="hover">

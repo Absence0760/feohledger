@@ -1,12 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Modify this file to customize your launch splash screen -->
+<!-- The launch window drawn before Flutter's first frame on Android 11 and
+     below (Android 12+ shows the system splash from values-v31/styles.xml
+     instead). It reproduces SplashScreen in lib/main.dart so the hand-off can't
+     be seen: the 64dp brand mark on the Flutter window colour, its centre 26dp
+     above the screen centre. Flutter centres the mark, a 16dp gap and a 36dp
+     progress indicator as one column, which lifts the mark by
+     (16 + 36) / 2 = 26dp; insetting this item's bottom edge by 52dp lifts the
+     bitmap's centre by the same amount. launch_mark.png is rendered by
+     assets/gen-icons.sh; never edit it by hand. -->
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
-    <item android:drawable="?android:colorBackground" />
-
-    <!-- You can insert your own image assets here -->
-    <!-- <item>
+    <item android:drawable="@color/window_background" />
+    <item android:bottom="52dp">
         <bitmap
             android:gravity="center"
-            android:src="@mipmap/launch_image" />
-    </item> -->
+            android:src="@drawable/launch_mark" />
+    </item>
 </layer-list>

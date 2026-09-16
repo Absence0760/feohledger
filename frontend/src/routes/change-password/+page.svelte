@@ -1,4 +1,5 @@
 <script lang="ts">
+	import BrandMark from '$lib/components/ui/BrandMark.svelte';
 	import { api } from '$lib/api';
 	import { auth } from '$lib/stores/auth.svelte';
 	import { goto } from '$app/navigation';
@@ -66,6 +67,7 @@
 
 <div class="page">
 	<form class="card" onsubmit={onSubmit}>
+		<BrandMark size={32} />
 		<h1>{m('auth.changePassword.heading')}</h1>
 		<p class="sub">
 			{#if auth.user?.must_change_password}

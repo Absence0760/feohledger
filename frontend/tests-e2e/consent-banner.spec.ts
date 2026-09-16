@@ -71,4 +71,30 @@ test.describe('consent banner', () => {
 		await page.reload();
 		await expect(banner(page)).toHaveCount(0);
 	});
+
+	test('a control the banner lands on can be focused clear of it', async ({ page }) => {
+		// The banner is fixed to the bottom of the viewport. At 1280×720 it lands
+		// on the reset-password card's submit button, on a page exactly one
+		// viewport tall. Until the banner reserved its own height there was
+		// nothing to scroll, so the focused button stayed behind it (WCAG 2.4.11).
+		await page.setViewportSize({ width: 1280, height: 720 });
+		await page.goto('/login/reset-password?token=not-a-real-token');
+		await expect(banner(page)).toBeVisible();
+		// The room it reserves, measured from the rendered banner.
+		await expect(page.locator('html')).toHaveCSS('scroll-padding-bottom', /^[1-9]\d*(\.\d+)?px$/);
+
+		const passwords = page.locator('input[type="password"]');
+		await passwords.first().fill('BrandNewPassw0rd!42');
+		await passwords.nth(1).fill('BrandNewPassw0rd!42');
+		// The keyboard path: Tab from the last field lands on the enabled submit.
+		await passwords.nth(1).press('Tab');
+		const submit = page.getByRole('button', { name: /Reset password/i });
+		await expect(submit).toBeFocused();
+
+		const submitBox = await submit.boundingBox();
+		const bannerBox = await banner(page).boundingBox();
+		expect(submitBox).not.toBeNull();
+		expect(bannerBox).not.toBeNull();
+		expect(submitBox!.y + submitBox!.height).toBeLessThanOrEqual(bannerBox!.y);
+	});
 });

@@ -32,12 +32,34 @@
 	// during that window so the banner never flashes for a user who already chose.
 	let choice = $state<ConsentChoice | null | undefined>(undefined);
 	let showDetails = $state(false);
+	// The banner's rendered height, for the room it reserves below.
+	let height = $state(0);
 
 	$effect(() => {
 		if (browser) choice = getConsent();
 	});
 
 	const visible = $derived(browser && choice === null);
+
+	// Matches the banner's `bottom: 16px` in the styles below.
+	const EDGE_PX = 16;
+
+	// The banner is `position: fixed`, so on a short viewport it lands on a page's
+	// own controls: at 1280×720 it covers the reset-password submit button, on a
+	// page exactly one viewport tall with nothing to scroll. While it shows, it
+	// reserves its footprint instead. The spacer after it makes the document tall
+	// enough to scroll anything out from under it, and `scroll-padding-bottom`
+	// makes keyboard focus and scrollIntoView stop above it rather than behind it
+	// (WCAG 2.4.11 Focus Not Obscured). The edge offset counts twice: once below
+	// the banner, once as a gap above it.
+	const inset = $derived(visible && height > 0 ? height + EDGE_PX * 2 : 0);
+
+	$effect(() => {
+		if (inset === 0) return;
+		const root = document.documentElement;
+		root.style.scrollPaddingBottom = `${inset}px`;
+		return () => root.style.removeProperty('scroll-padding-bottom');
+	});
 
 	function record(value: ConsentChoice) {
 		try {
@@ -57,6 +79,7 @@
 		role="region"
 		aria-live="polite"
 		aria-label="Cookie and privacy consent"
+		bind:offsetHeight={height}
 	>
 		<div class="consent-body">
 			<div class="consent-copy">
@@ -96,6 +119,7 @@
 			</div>
 		</div>
 	</section>
+	<div aria-hidden="true" style:height="{inset}px"></div>
 {/if}
 
 <style>

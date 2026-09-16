@@ -62,10 +62,12 @@ class PushService {
         unawaited(_registerToken(token));
       });
 
-      // Initialize local notifications for foreground display
+      // Initialize local notifications for foreground display. The small icon
+      // is a white silhouette: Android draws it from alpha alone, so the
+      // launcher tile would show as a solid white square.
       await _localNotifications.initialize(
         settings: const InitializationSettings(
-          android: AndroidInitializationSettings('@mipmap/ic_launcher'),
+          android: AndroidInitializationSettings('@drawable/ic_notification'),
           iOS: DarwinInitializationSettings(),
         ),
       );

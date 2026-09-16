@@ -198,6 +198,12 @@ The current build implements:
 - **Focus management in dialogs** — the shared `Modal` traps focus, returns it
   to the trigger on close, and closes on `Esc`; dialogs carry `role="dialog"`
   + an `aria-label`.
+- **Focus not obscured by the consent banner** (SC 2.4.11) — the banner is fixed
+  to the bottom of the viewport, so while it shows it reserves its own height: a
+  spacer lets any page scroll clear of it, and `scroll-padding-bottom` stops
+  keyboard focus above it rather than behind it. Without that, at 1280×720 it
+  hid the reset-password submit button on a page with nothing to scroll.
+  Guarded by `frontend/tests-e2e/consent-banner.spec.ts`.
 - **Live-region announcements** for toasts and async status (`aria-live`).
 - **Labelled form fields** — every input has an associated `<label>`;
   required fields are marked.

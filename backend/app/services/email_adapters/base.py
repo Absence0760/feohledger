@@ -58,6 +58,7 @@ class EmailAdapter:
         """
         if not message.body_html:
             return None
+        from app.config import settings
         from app.services.branding import (
             brand_email_footer_html,
             brand_email_html_header,
@@ -65,7 +66,10 @@ class EmailAdapter:
         )
 
         brand = message.brand or get_brand_context(None)
-        return brand_email_html_header(brand) + message.body_html + brand_email_footer_html(brand)
+        # The platform mark is an image the frontend serves, so the header needs
+        # its origin; a tenant logo is already an absolute URL.
+        header = brand_email_html_header(brand, public_url=settings.public_url)
+        return header + message.body_html + brand_email_footer_html(brand)
 
     def _branded_text(self, message: EmailMessage) -> str:
         """The plaintext body with the support-link footer appended (if any)."""

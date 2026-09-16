@@ -125,8 +125,12 @@ def render_analytics_report_pdf(ctx: AnalyticsReportContext) -> bytes:
     story = []
 
     # ---- Branded cover / header ----------------------------------------
-    # Logo when configured + embeddable, else product name in the accent color.
-    logo = build_logo_flowable(brand, max_width_pt=2.2 * inch, max_height_pt=0.55 * inch)
+    # `BrandContext.mark`: logo when configured + embeddable, the platform mark
+    # beside the name while the product keeps the platform's name, else the name
+    # alone in the accent color.
+    logo = build_logo_flowable(
+        brand, max_width_pt=2.2 * inch, max_height_pt=0.55 * inch, name_style=h_brand
+    )
     if logo is not None:
         story.append(logo)
         story.append(Spacer(1, 0.06 * inch))

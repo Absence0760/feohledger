@@ -254,9 +254,24 @@ jobs:
         # Served from the bucket/CDN root, so no BASE_PATH. (A GitHub Pages
         # deploy.yml used to set one for /<repo>; it was removed in 2996908c
         # when this release-gated AWS deploy replaced it.)
+        #
+        # PUBLIC_SITE_URL prefixes the absolute og:image URL in src/app.html,
+        # which link-preview crawlers need. It is the public site origin this
+        # job already deploys to, so it is derived from APP_URL rather than
+        # kept as a second variable that could disagree with it. An empty
+        # APP_URL fails here, because SvelteKit substitutes an empty string for
+        # an unset placeholder and would ship a root-relative image URL
+        # without complaint. The trailing slash is stripped so the image path
+        # can never become `//og-image.png`.
         env:
           PUBLIC_API_URL: ${{ vars.PUBLIC_API_URL }}
-        run: pnpm build
+          APP_URL: ${{ vars.APP_URL }}
+        run: |
+          if [ -z "$APP_URL" ]; then
+            echo "::error::APP_URL is empty — set it on the production environment; it becomes PUBLIC_SITE_URL."
+            exit 1
+          fi
+          PUBLIC_SITE_URL="${APP_URL%/}" pnpm build
 
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6.2.4

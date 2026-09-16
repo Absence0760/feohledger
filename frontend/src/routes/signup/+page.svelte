@@ -1,4 +1,5 @@
 <script lang="ts">
+	import BrandMark from '$lib/components/ui/BrandMark.svelte';
 	import { api } from '$lib/api';
 	import { onMount } from 'svelte';
 	import { m } from '$lib/i18n/store.svelte';
@@ -132,6 +133,7 @@
 <div class="page">
 	{#if successMessage}
 		<div class="card success">
+			<BrandMark size={32} />
 			<h1>{m('auth.signup.successHeading')}</h1>
 			<p>{successMessage}</p>
 			<p class="sub next">
@@ -141,6 +143,7 @@
 		</div>
 	{:else}
 		<form class="card" onsubmit={onSubmit}>
+			<BrandMark size={32} />
 			<h1>{m('auth.signup.heading')}</h1>
 			<p class="sub">{m('auth.signup.subtitle')}</p>
 

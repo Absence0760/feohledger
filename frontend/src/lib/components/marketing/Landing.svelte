@@ -11,6 +11,7 @@
 	import IconArrow from '~icons/material-symbols/arrow-forward';
 	import Pricing from '$lib/components/marketing/Pricing.svelte';
 	import Badge from '$lib/components/ui/Badge.svelte';
+	import BrandMark from '$lib/components/ui/BrandMark.svelte';
 
 	const features = [
 		{
@@ -74,7 +75,7 @@
 <div class="landing">
 	<header class="nav">
 		<a href="/" class="brand">
-			<span class="brand-dot"></span>
+			<BrandMark size={28} />
 			<span class="brand-name">FeohLedger</span>
 		</a>
 		<nav class="nav-links">
@@ -247,7 +248,7 @@
 	<footer class="footer">
 		<div class="footer-inner">
 			<div class="footer-brand">
-				<span class="brand-dot"></span>
+				<BrandMark size={22} />
 				<span class="brand-name">FeohLedger</span>
 			</div>
 			<div class="footer-links">
@@ -287,13 +288,6 @@
 		gap: 10px;
 		text-decoration: none;
 		color: var(--text);
-	}
-	.brand-dot {
-		width: 14px;
-		height: 14px;
-		border-radius: 4px;
-		background: linear-gradient(135deg, var(--accent), #a37dff);
-		box-shadow: 0 0 20px rgba(99, 140, 255, 0.5);
 	}
 	.brand-name {
 		font-weight: 700;

@@ -6,10 +6,12 @@
 	import { entityStore } from '$lib/stores/entity.svelte';
 	import EntitySwitcher from '$lib/components/layout/EntitySwitcher.svelte';
 	import NotificationBell from '$lib/components/layout/NotificationBell.svelte';
+	import BrandMark from '$lib/components/ui/BrandMark.svelte';
 	import { NAV, groupHref, isEntryActive, isEntryVisible, type NavEntry } from '$lib/nav';
 	import { m } from '$lib/i18n/store.svelte';
 
 	let collapsed = $derived(sidebar.collapsed);
+	let mark = $derived(brand.mark);
 
 	// Load the tenant's entities once so the switcher can render (it hides
 	// itself for single-entity tenants — see EntitySwitcher).
@@ -56,12 +58,21 @@
 <aside class="sidebar" class:collapsed>
 	<div class="sidebar-header" class:collapsed>
 		<div class="logo">
-			{#if brand.logoUrl}
-				<!-- White-label logo. Falls back to the bundled "AP" mark when the
-				     org configured none; alt is the (branded) product name. -->
-				<img class="logo-img" src={brand.logoUrl} alt={brand.productName} />
+			{#if mark.kind === 'logo'}
+				<!-- White-label logo; alt is the (branded) product name. -->
+				<img class="logo-img" src={mark.src} alt={brand.productName} />
+			{:else if mark.kind === 'platform'}
+				<!-- Named only when it stands alone; expanded, the product name follows. -->
+				<BrandMark size={24} label={collapsed ? brand.productName : ''} />
 			{:else}
-				<span class="logo-mark">AP</span>
+				<!-- Renamed without a logo: their initial, never FeohLedger's mark beside
+				     someone else's product name (docs/decisions.md §173). -->
+				<span
+					class="logo-monogram"
+					role={collapsed ? 'img' : undefined}
+					aria-label={collapsed ? brand.productName : undefined}
+					aria-hidden={collapsed ? undefined : 'true'}>{mark.letter}</span
+				>
 			{/if}
 			{#if !collapsed}<span class="logo-text">{brand.productName}</span>{/if}
 		</div>
@@ -184,7 +195,7 @@
 		padding: 8px 4px 20px 8px;
 	}
 
-	/* Collapsed rail (60px) — stack the AP mark over the bell so both fit. */
+	/* Collapsed rail (60px) — stack the mark over the bell so both fit. */
 	.sidebar-header.collapsed {
 		flex-direction: column;
 		gap: 12px;
@@ -200,10 +211,18 @@
 		overflow: hidden;
 	}
 
-	.logo-mark {
-		font-size: 1.1rem;
+	/* A renamed tenant's initial, on the mark's 24px footprint and the tenant's
+	   own accent. --accent-strong's one contract is that white text sits on it. */
+	.logo-monogram {
+		display: grid;
+		place-items: center;
+		width: 24px;
+		height: 24px;
+		border-radius: 6px;
+		background: var(--accent-strong);
+		color: #fff;
+		font-size: 0.8rem;
 		font-weight: 800;
-		color: var(--accent);
 		flex-shrink: 0;
 	}
 

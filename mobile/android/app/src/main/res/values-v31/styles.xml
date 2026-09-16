@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Android 12+ replaces the launch window with a system splash screen. It
+         ignores windowBackground's bitmap and draws the launcher icon (the
+         adaptive icon in mipmap-anydpi-v26/) on windowSplashScreenBackground,
+         and it stays up until Flutter's first frame, because FlutterActivity
+         holds back the first Android draw until then. The background is the
+         Flutter window colour, so at the hand-off only the icon changes. The
+         icon is left to the platform: the system scales and masks it into a
+         fixed circular slot, so a 64dp mark can't be pinned to Flutter's size
+         and position there. NormalTheme needs no v31 variant; it comes from
+         values/styles.xml. -->
+    <style name="LaunchTheme" parent="@android:style/Theme.Light.NoTitleBar">
+        <item name="android:windowBackground">@drawable/launch_background</item>
+        <item name="android:windowSplashScreenBackground">@color/window_background</item>
+    </style>
+</resources>

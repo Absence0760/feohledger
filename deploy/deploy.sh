@@ -57,7 +57,11 @@ umask 077
 # ── Frontend ─────────────────────────────────────────────────────────────────
 if [ "$DO_FRONTEND" = 1 ]; then
 	# PUBLIC_API_URL is baked into the static build ($env/static/public).
+	# PUBLIC_SITE_URL prefixes the absolute og:image URL in src/app.html (link
+	# previews); SvelteKit would substitute an empty string for it silently, which
+	# is why it comes from APP_DOMAIN, which decrypt-env.sh refuses empty.
 	API_DOMAIN=$(grep -E '^API_DOMAIN=' .env | tail -1 | cut -d= -f2- || true)
+	APP_DOMAIN=$(grep -E '^APP_DOMAIN=' .env | tail -1 | cut -d= -f2- || true)
 	# pnpm's version is declared once, as `packageManager` in package.json
 	# (frontend/CLAUDE.md § The lockfile) — the field CI's pnpm/action-setup
 	# reads, so this builds with the pnpm that wrote the lockfile. Read after the
@@ -65,12 +69,13 @@ if [ "$DO_FRONTEND" = 1 ]; then
 	# `+sha512.<hash>` integrity suffix, so the pattern stops before it.
 	PNPM_SPEC=$(sed -nE 's/^[[:space:]]*"packageManager":[[:space:]]*"(pnpm@[^"+]+).*/\1/p' "$REPO_ROOT/frontend/package.json")
 	[ -n "$PNPM_SPEC" ] || die "frontend/package.json declares no pnpm packageManager, so there is no pnpm version to build with."
-	echo "==> building frontend (${PNPM_SPEC}, PUBLIC_API_URL=https://${API_DOMAIN})"
+	echo "==> building frontend (${PNPM_SPEC}, PUBLIC_API_URL=https://${API_DOMAIN}, PUBLIC_SITE_URL=https://${APP_DOMAIN})"
 	docker run --rm \
 		-v "$REPO_ROOT":/repo -w /repo/frontend \
 		-v feoh-prod-pnpm-store:/pnpm-store \
 		-e npm_config_store_dir=/pnpm-store \
 		-e PUBLIC_API_URL="https://${API_DOMAIN}" \
+		-e PUBLIC_SITE_URL="https://${APP_DOMAIN}" \
 		"$NODE_IMAGE" sh -ec "npm i -g ${PNPM_SPEC} >/dev/null 2>&1 && pnpm install --frozen-lockfile && pnpm build"
 fi
 
