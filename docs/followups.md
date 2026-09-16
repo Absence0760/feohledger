@@ -126,6 +126,12 @@ pending the standing "loop in the CISO / Security Analyst" gate on that section.
       register row and notifying are one action rather than two. `~/github/threkir`'s
       `docs/compliance/sub-processor-changelog.md` is the shape to copy for the
       dated-entry half.
+      **The other half of #427 has landed:** `pnpm check:subprocessors`
+      (`scripts/check_subprocessor_registry.mjs`, CI's Frontend job) now fails
+      when a registered adapter is missing from `docs/sub-processors.md` or a
+      third-party processor it names never reaches the published page. So the
+      registers can no longer drift from the code silently — what is still
+      missing is telling customers when they change.
       **Trigger:** before adding or changing any sub-processor.
 
 - [ ] **Nothing implements the 60-day backup deletion the DPA promises.** (see [#424](https://github.com/Absence0760/feohledger/issues/424) — same object-storage traversal)
@@ -148,17 +154,6 @@ pending the standing "loop in the CISO / Security Analyst" gate on that section.
       data-subject request.
       **Trigger:** before the first customer terminates, and before anyone relies
       on the §13 clause.
-
-- [ ] **Nothing guards the published register against drifting from the code.** ([#427](https://github.com/Absence0760/feohledger/issues/427))
-      `/legal/sub-processors` is now a customer-facing commitment about which
-      third parties can receive personal data, and `docs/sub-processors.md` is
-      the internal copy it must agree with. Nothing checks either against the
-      adapter registries, so the next adapter added silently makes both wrong —
-      which is exactly how the version this change corrected came to list seven
-      AWS services that do not exist and to claim extraction defaults to `mock`.
-      **Durable fix:** extend `.github/workflows/compliance-drift.yml` to derive
-      the provider set from the registries and fail when a provider is registered
-      that neither register names.
 
 ### The pricing page and the billing code describe different products
 

@@ -154,17 +154,32 @@ unrelated purpose that no setting disclosed.
 | Conversational AP assistant | `services/assistant/` | `FEOH_ASSISTANT_PROVIDER` — default `mock`; `.env.development` uses local `ollama`; `claude` auto-downgrades to `mock` with no key | The user's question and the structured tool results the answer is composed from — vendor spend, cash-flow forecasts, invoice lists, pending approvals |
 | Audit-log summarization | `services/audit_summary.py` | `FEOH_AUDIT_SUMMARY_ENABLED` — **default `False`** | Invoice number, vendor name, amounts and the invoice's audit timeline. Deliberately no remit-to bank details, no PANs, no full addresses |
 | LLM anomaly / fraud analysis | `services/llm_fraud_detection.py` | per-org `settings.invoice_warnings.llm_anomaly_enabled` — **default `False`** | The candidate invoice plus the vendor's last 8 approved invoices: amounts, currencies, descriptions, payment methods, PO numbers and the **supplier's remit-to address**. The widest personal-data set of the four |
-| Exception-agent decision rationale | `services/exception_agents/llm_rationale.py` | **none of its own** — fires wherever the extraction key resolves | The deterministic draft rationale plus the exception's facts: amounts, variances, PO numbers, GL codes |
+| Exception-agent decision rationale | `services/exception_agents/llm_rationale.py` | `FEOH_EXCEPTION_AGENT_RATIONALE_ENABLED` — **default `False`** | The deterministic draft rationale plus the exception's facts: amounts, variances, PO numbers, GL codes |
 
 > `audit_summary_enabled` flipped from `True` to `False` on 2026-09-15 for exactly
 > this reason — see the comment on it in `backend/app/config.py`, which is the
 > long-form version of the paragraph above.
 >
-> **The rationale polish is the one to watch**: it has no feature flag, so
-> enabling extraction enables it. The *decision* stays 100% rules-derived (the
-> model only rewords the sentence, and the agent behaves identically offline), but
-> the facts still leave the process. If that ever needs to be switchable, it needs
-> a flag of its own rather than a docstring.
+> **The rationale polish used to be the one to watch**: it had no flag of its
+> own, so configuring extraction enabled it — a second purpose riding the first
+> one's credential, which is the shape `docs/decisions.md` §176 generalises.
+> `FEOH_EXCEPTION_AGENT_RATIONALE_ENABLED` now gates it and defaults off. The
+> *decision* was always 100% rules-derived (the model only rewords the sentence,
+> and the agent behaves identically offline), but the facts left the process
+> whether or not anyone asked for that.
+
+### 1.2 Assistant adapters (`services/assistant/`)
+
+The row above describes what the assistant *sends*; this is the adapter table
+behind it, in the same shape as every other family. It is a separate provider
+registry, so it is listed separately even though `claude` reuses the extraction
+key and adds no sub-processor the extraction row has not already named.
+
+| Adapter | Processor | Service | Data categories | Processing location | Active when configured | DPA / sub-processing status |
+|---------|-----------|---------|-----------------|---------------------|------------------------|------------------------------|
+| `mock` | — (in-process) | Deterministic canned answers | none leaves process | Local | **Default — always** | n/a (no third party) |
+| `ollama` | — (self-hosted) | Local model server (`pnpm ollama:up`) | USER, INV, VEND — the question and the tool results | Local / operator-run | Configured only | n/a (no third party; the operator runs the server) |
+| `claude` | **Anthropic** | Conversational AP assistant | USER, INV, VEND — the question and the structured tool results the answer is composed from | US (Anthropic API) | Configured only; **auto-downgrades to `mock` with no key** | See § 1 — same connection and key as extraction |
 
 ## 2. ERP integration (`services/erp_adapters/`)
 
@@ -505,6 +520,20 @@ to them, not appointing someone to process it on our behalf. These belong in the
   provider is configured for an operator-managed deployment, a processing
   region changes, or a DPA status is confirmed. Per the project's docs-as-code
   rule, the same change that wires up a provider updates this register.
+- **CI enforces the adapter half of that** (`pnpm check:subprocessors`,
+  `scripts/check_subprocessor_registry.mjs`, run in the Frontend job). It reads
+  every `@register_*_adapter("slug")` under `backend/app/services/`, every row
+  in this file, and the prose of `/legal/sub-processors`, and **fails** when a
+  registered adapter has no row in a section documenting its own directory, or
+  when a third-party processor named here is never mentioned on the published
+  page. A section's heading has to name its source directory
+  (`` `services/card_adapters/` ``) for its rows to count — that is what makes
+  the match family-aware, since `mock` appears in a dozen families and `ses` in
+  two. It is exact rather than heuristic, which is why it fails where
+  `check_compliance_drift.mjs` only warns. It found two things on its first
+  run: `services/assistant/` had no adapter table at all (§ 1.2 now), and the
+  exception-agent rationale row still said it had no switch of its own months
+  after `FEOH_EXCEPTION_AGENT_RATIONALE_ENABLED` shipped.
 - **"To be confirmed"** entries are placeholders for the founder/legal to fill
   as DPAs are countersigned — they are not "no DPA", just "not yet recorded
   here". Drive each to a real status (`docs/founder-runbooks/soc2-vendor.md`

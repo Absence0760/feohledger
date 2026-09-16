@@ -76,7 +76,7 @@
 		"//-- build --": "Production builds. Frontend is adapter-static (S3 + CloudFront) — no SSR.",
 		"build:frontend": "cd frontend && pnpm build",
 
-		"//-- gen --": "Derived, committed source. The message catalogues need the backend venv; gen:icons re-renders every web + mobile icon from assets/logo-render/gen_svg.py and needs Inkscape + ImageMagick 7 (docs/decisions.md §173). gen:einvoice-messages rewrites frontend/src/lib/api/einvoiceRuleMessages.generated.ts from the backend's e-invoice rule set; gen:warning-messages rewrites frontend/src/lib/api/invoiceWarningMessages.generated.ts from app/services/invoice_warning_catalog.py. check:einvoice-messages / check:warning-messages are their drift guards and both run in CI's Backend lint job; check:icons is gen:icons' guard (stdlib python3 only) and runs in CI's Brand assets job.",
+		"//-- gen --": "Derived, committed source. The message catalogues need the backend venv; gen:icons re-renders every web + mobile icon from assets/logo-render/gen_svg.py and needs Inkscape + ImageMagick 7 (docs/decisions.md §173). gen:einvoice-messages rewrites frontend/src/lib/api/einvoiceRuleMessages.generated.ts from the backend's e-invoice rule set; gen:warning-messages rewrites frontend/src/lib/api/invoiceWarningMessages.generated.ts from app/services/invoice_warning_catalog.py. check:einvoice-messages / check:warning-messages are their drift guards and both run in CI's Backend lint job; check:icons is gen:icons' guard (stdlib python3 only) and runs in CI's Brand assets job. check:subprocessors is not a generator guard — it compares the adapter registries against both sub-processor registers (docs/sub-processors.md and the published /legal/sub-processors page) and FAILS on a mismatch; it runs in CI's Backend lint job too.",
 		"gen:einvoice-messages": "cd backend && python scripts/gen_einvoice_rule_messages.py",
 		"gen:warning-messages": "cd backend && python scripts/gen_invoice_warning_messages.py",
 		"gen:icons": "bash assets/gen-icons.sh",
@@ -92,11 +92,12 @@
 		"format": "pnpm run format:backend",
 		"check": "pnpm run lint",
 		"check:compliance-drift": "node scripts/check_compliance_drift.mjs",
+		"check:subprocessors": "node scripts/check_subprocessor_registry.mjs",
 		"check:einvoice-messages": "cd backend && python scripts/gen_einvoice_rule_messages.py --check",
 		"check:warning-messages": "cd backend && python scripts/gen_invoice_warning_messages.py --check",
 		"check:icons": "python3 assets/check_icons.py",
 
-		"//-- test --": "Test suites per surface: pytest (backend — venv + core services required), Playwright e2e (frontend), flutter test (mobile). test:scim/test:saml need the local IdPs up + seeded (idp:up then scim:seed/saml:seed); test:erp needs fake-erp up (erp:up). test:scripts validates this file's script targets; test:compliance covers the compliance-drift detector (scripts/check_compliance_drift.mjs), which the compliance-drift CI workflow runs against a PR diff; test:icons proves check:icons fails on a broken icon set (stdlib python3, CI's Brand assets job).",
+		"//-- test --": "Test suites per surface: pytest (backend — venv + core services required), Playwright e2e (frontend), flutter test (mobile). test:scim/test:saml need the local IdPs up + seeded (idp:up then scim:seed/saml:seed); test:erp needs fake-erp up (erp:up). test:scripts validates this file's script targets; test:compliance covers the compliance-drift detector (scripts/check_compliance_drift.mjs), which the compliance-drift CI workflow runs against a PR diff; test:subprocessors covers the register guard behind check:subprocessors; test:icons proves check:icons fails on a broken icon set (stdlib python3, CI's Brand assets job).",
 		"test:backend": "cd backend && pytest",
 		"test:frontend": "cd frontend && pnpm test:e2e",
 		"test:scim": "cd frontend && pnpm exec playwright test --config=tests-e2e/playwright.config.ts scim/",
@@ -105,6 +106,7 @@
 		"test:mobile": "cd mobile && flutter test",
 		"test:scripts": "node scripts/check_root_scripts.mjs",
 		"test:compliance": "node --test scripts/check_compliance_drift.test.mjs",
+		"test:subprocessors": "node --test scripts/check_subprocessor_registry.test.mjs",
 		"test:icons": "python3 -m unittest assets/test_check_icons.py",
 		"test": "pnpm run test:backend && pnpm run test:frontend && pnpm run test:mobile"
 	}
