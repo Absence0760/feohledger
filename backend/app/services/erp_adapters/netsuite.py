@@ -4,6 +4,7 @@ import hashlib
 import hmac
 import time
 import uuid
+from decimal import Decimal
 from urllib.parse import quote
 
 import httpx
@@ -18,6 +19,7 @@ from app.services.erp_adapters.base import (
     erp_failure_message,
 )
 from app.services.erp_adapters.dispatcher import register_adapter
+from app.utils.json_money import dumps_exact_json
 
 
 @register_adapter("netsuite")
@@ -126,12 +128,17 @@ class NetSuiteAdapter(ErpAdapter):
             "currency": {"refName": payload.currency},
             "memo": payload.description,
             "externalId": payload.correlation_id,
+            # Money stays Decimal all the way to the encoder — `float()` here
+            # would post a rounded rate into the customer's ledger (see
+            # `utils/json_money`). NetSuite types `rate`/`quantity` as JSON
+            # numbers, and `dumps_exact_json` still emits numbers, so the wire
+            # contract is unchanged.
             "item": {
                 "items": [
                     {
                         "description": li.description or "",
-                        "quantity": float(li.quantity) if li.quantity else 1,
-                        "rate": float(li.unit_price) if li.unit_price else float(li.total or 0),
+                        "quantity": li.quantity if li.quantity else 1,
+                        "rate": li.unit_price if li.unit_price else (li.total or Decimal(0)),
                         "account": {"refName": li.gl_account} if li.gl_account else None,
                     }
                     for li in payload.line_items
@@ -141,7 +148,7 @@ class NetSuiteAdapter(ErpAdapter):
                     {
                         "description": payload.description or "",
                         "quantity": 1,
-                        "rate": float(payload.amount),
+                        "rate": payload.amount,
                         "account": {"refName": payload.gl_account} if payload.gl_account else None,
                     }
                 ],
@@ -155,7 +162,7 @@ class NetSuiteAdapter(ErpAdapter):
         }
 
         async with httpx.AsyncClient(timeout=30) as client:
-            resp = await client.post(url, json=body, headers=headers)
+            resp = await client.post(url, content=dumps_exact_json(body), headers=headers)
 
         if resp.status_code in (200, 201, 204):
             # NetSuite returns the record ID in the Location header

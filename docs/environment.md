@@ -141,6 +141,7 @@ in `frontend/tests-e2e/README.md` § Running from a worktree.
 | `FEOH_AUDIT_SHIPPING_PROVIDERS` | `mock`                                                          | Comma-separated adapter names — typical prod value `cloudwatch,s3_objectlock`. |
 | `FEOH_AUDIT_SHIPPING_CLOUDWATCH_GROUP` | `/ap/audit`                                              | CloudWatch Logs group for the shipped events. |
 | `FEOH_AUDIT_SHIPPING_S3_BUCKET` | (empty)                                                         | Object-Lock-enabled S3 bucket. Required when the `s3_objectlock` provider is enabled. |
+| `FEOH_AUDIT_SHIPPING_S3_MIN_RETENTION_DAYS` | `2555`                                            | Floor (in days, ≈ 7 years) the bucket's default Object Lock retention must meet. Boot refuses a bucket under it, in GOVERNANCE mode, or with no default rule at all. |
 | `FEOH_ANTHROPIC_API_KEY` | (empty)                                                                 | Platform Claude Vision key (used when org chooses "Platform" extraction) |
 | `FEOH_EXTRACTION_MODEL` | `claude-sonnet-4-20250514`                                               | Default extraction model for the platform program |
 | `FEOH_EXTRACTION_PROVIDER` | (empty) / `mock` in `.env.development`                                | Operator override for the adapter **platform**-mode extraction runs on. Empty = derive: a set `FEOH_ANTHROPIC_API_KEY` → `claude_vision`; keyless + non-deployed → the offline `mock` reader (so `pnpm dev` never calls out with an empty key); keyless + **deployed** → still `claude_vision`, which fails loudly, because `mock.extract` returns a fixture and fabricating invoice fields is worse than a provider error. A BYOK org's own `settings.extraction` is unaffected. An unregistered name is refused at boot. Precedence table + rationale: `backend/docs/ai-extraction.md` § Platform provider precedence. |
@@ -229,7 +230,7 @@ always `backend/app/config.py`.
 | `FEOH_CASHFLOW_SHORTFALL_ALERTS_INTERVAL_SECONDS` | `86400` | Shortfall-alert sweep tick interval (daily — a cash forecast doesn't move hour to hour). |
 | `FEOH_CASHFLOW_SHORTFALL_ALERTS_HORIZON_DAYS` | `90` | How far ahead the alerting forecast looks. Independent of the copilot's interactive default so an operator can alert on a shorter, more actionable window. |
 | `FEOH_EXTRACTION_AUTO_ROTATE` | `true` | Run Tesseract OSD on rendered PDF pages before sending to vision adapters. No-ops if `pytesseract` / `tesseract` missing. |
-| `FEOH_AUDIT_SUMMARY_ENABLED` | `true` | Master switch for the invoice audit-log summary. When `false`, `GET /api/invoices/{id}/summary` returns the deterministic template summary with no LLM call. Reuses the extraction key/model — no new secret. |
+| `FEOH_AUDIT_SUMMARY_ENABLED` | `false` | Master switch for the invoice audit-log summary. Left off (the default), `GET /api/invoices/{id}/summary` returns the deterministic template summary with no LLM call. Reuses the extraction key/model — no new secret, which is why it must be opted into rather than defaulted on: with no credential of its own, a `true` default turned an extraction key into an undisclosed second Anthropic data flow. |
 | `FEOH_AUDIT_SUMMARY_MODEL` | (empty) | Model for the audit summary; falls back to `FEOH_EXTRACTION_MODEL` when empty. |
 | `FEOH_REDIS_URL` | `redis://localhost:6379` | Token blocklist |
 | `FEOH_LITHIC_API_KEY` | (empty) | Lithic virtual cards |
@@ -247,6 +248,7 @@ always `backend/app/config.py`.
 | `FEOH_AUDIT_SHIPPING_ENABLED` | `false` | Master switch for the centralized audit-log shipper — keep `false` in local dev, flip on in deployed envs |
 | `FEOH_AUDIT_SHIPPING_PROVIDERS` | `mock` | Comma-separated adapter names (e.g. `cloudwatch,s3_objectlock`). All must succeed before rows are marked shipped. |
 | `FEOH_AUDIT_SHIPPING_S3_BUCKET` | (empty) | Object-Lock-enabled S3 bucket for the WORM copy; required when the `s3_objectlock` provider is enabled |
+| `FEOH_AUDIT_SHIPPING_S3_MIN_RETENTION_DAYS` | `2555` | Minimum default Object Lock retention (days) the bucket must carry; the boot check also requires COMPLIANCE mode (`backend/docs/audit-log-shipping.md`) |
 | `FEOH_AUDIT_SHIPPING_CLOUDWATCH_GROUP` | `/ap/audit` | CloudWatch Logs group for shipped audit events |
 | `FEOH_AUDIT_MODE` | `local` | `local` or `lambda` — same shape as `FEOH_EXTRACTION_MODE` |
 | `FEOH_EMAIL_INTAKE_DOMAIN` | (empty) | Hostname for inbound intake addresses (`invoices+<token>@<domain>`). Empty disables email intake. |

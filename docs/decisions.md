@@ -6956,3 +6956,259 @@ rendered a blank 20x20 box — silently, on one row. That is how `Screening`,
 icon for the first two, and no gate stopping them borrowing a third's. The union
 catches a typo at typecheck; `nav.test.ts` catches a valid key with no branch by
 reading the component.
+
+## 175. The legal pages are published in the app, in English, and admit what is not yet decided
+
+**Decided:** 2026-09-15 · `frontend/src/routes/legal/` ·
+`frontend/src/lib/legal/`
+
+The app shipped with no published legal documents at all. The only route with
+"privacy" in its name was `/admin/privacy`, the DSAR console — an internal tool,
+not a notice. `docs/ropa.md`, `docs/sub-processors.md` and
+`docs/founder-runbooks/dpa-template.md` held real substance but were repo
+markdown nobody outside the project could open, and the consent banner asked for
+consent while linking to nothing. A platform that holds other companies'
+suppliers' bank details and tax IDs, runs a supplier portal for data subjects
+who have no account, and offers a self-service signup that forms a contract, was
+asking people to trust it with no published terms on any of it.
+
+Five documents now live under `/legal`: Privacy Policy, Terms of Service, Data
+Processing Addendum, sub-processor register, Cookie Notice. The DPA and the
+register are in that set deliberately — for a B2B processor they are what
+procurement asks for first, and leaving them out would have published the half
+of the story that is easiest to write.
+
+**They render ahead of both the auth gate and the tenant probe.** Everyone with
+the strongest reason to read them arrives without an account: a supplier
+chasing their own data, a DPO evaluating the product, a regulator. On a tenant
+subdomain the auth effect would have bounced them to a sign-in form; on the
+apex, where `hasTenant` is false, the layout would have served the marketing
+Landing page instead of the document. Both are silent — the link looks live and
+returns the wrong thing — so `/legal/*` is matched as a prefix before either
+branch.
+
+**English only, and that is a deliberate exception to the frontend's own rule.**
+Every other user-facing string in this app goes through `t()` across six
+locales. A translated privacy policy is not a localized UI string; it is a
+second binding text, and a mistranslated clause in a DPA is a misrepresentation
+rather than a cosmetic bug. Translating them is a legal exercise with counsel
+sign-off per locale, not a catalogue backfill. The exception is scoped to
+`routes/legal/` and `lib/legal/` and written down in `frontend/CLAUDE.md`.
+
+**An unknown fact renders as a marked gap, never as an invented one.**
+`lib/legal/operator.ts` holds the facts only the operator can supply — the
+registered entity, a postal address, the governing law, the Art 27
+representatives, the hosting region — and every one may be `null`. `null` means
+pending, and `Fact.svelte` renders it as `[… to be confirmed]` with a notice at
+the top of the page listing what is outstanding. The alternative was to invent a
+plausible entity and address, which would make the page false; an inaccurate
+privacy policy is an Art 5(1)(a) transparency problem and a deceptive-practice
+exposure, not merely an unfinished one. Filling a fact is a one-line edit that
+removes the marker everywhere at once. A DPO is modelled as three states rather
+than two, because "considered and not appointed" is a real disclosure and must
+not read as "still deciding".
+
+**The documents describe what the code does, not what a template says.** Drafting
+them against the source turned up several places where the obvious boilerplate
+would have been a lie: full bank account, routing and IBAN values *are* stored
+in `Vendor.bank_details` (only the audit trail masks to last-4); the retention
+sweep is off by default, covers two record classes and soft-archives rather than
+deletes; erasure never reaches uploaded documents in object storage, nor
+passkeys, nor live sessions; the DSAR export omits those documents too; data
+residency is an advisory setting nothing routes on; and no SOC 2 or ISO 27001
+certification exists. Each of those is stated plainly rather than papered over,
+and the ones that are defects are tracked in `docs/known-issues.md` rather than
+being described as features. `tests-e2e/legal/pages.spec.ts` bans the bare
+certification-claim shapes outright, so the most dangerous sentence in the set
+cannot be reintroduced by a later edit.
+
+The same pass corrected the pricing page, which advertised a "SOC 2 attestation"
+and a "99.9% uptime SLA" that do not exist, and a `sales@feohledger.example`
+call-to-action on the reserved `.example` TLD that could never have delivered a
+message.
+
+## 176. A feature that reuses another feature's credential must carry its own switch
+
+**Decided:** 2026-09-15 · `backend/app/config.py` ·
+`backend/tests/test_audit_summary_local_first.py`
+
+`audit_summary_enabled` defaulted to `True`. Audit-log summarization has no API
+key of its own — reusing the extraction Anthropic key is the point, "no new
+secret" — so on that default, an operator who configured Anthropic for invoice
+*extraction* silently also began sending invoice numbers, vendor names, amounts
+and audit timelines to Anthropic for a second, unrelated purpose. No per-org
+setting named it and no sub-processor disclosure covered it.
+
+Writing the sub-processor register is what surfaced it: the page either had to
+disclose a default outbound flow the customer never chose, or the default had to
+change. The default changed.
+
+The local-first check could not have caught this. With no key at all the
+resolver short-circuits, so `pnpm dev` behaved identically either way — the flag
+only misbehaved on precisely the deployments where it mattered. That is the same
+shape as the card family's default (§29/§56): harmless on a laptop, wrong in
+production. The generalization is the heading — **sharing a credential is exactly
+why a feature needs its own gate**, because the credential can no longer serve as
+one.
+
+Note what did *not* change. Invoice extraction resolves to `claude_vision` on any
+deployed instance even with no key, and that stays: falling back to the mock
+adapter would return a fabricated invoice ("Extracted Vendor Inc", 1500.00)
+against a real tenant's document, which is worse than a loud provider error. So
+Anthropic is a **default** sub-processor for extraction, and the register says so
+rather than pretending it is opt-in. The distinction that matters is between a
+default that is the feature's own declared purpose and a default that quietly
+annexes a credential for a different one.
+
+## 177. The legal set is reachable from every surface, and a footer links the index rather than a chosen subset
+
+The published documents were linked from the marketing footer, the supplier
+portal, the signup form and each other. They were not linked from the signed-in
+application at all — the surface people spend a working day in, and the one both
+`privacy` §19 and `terms` §18 promise to give notice of a change "in the
+application" on. A promise of an in-app notice needs an in-app surface for it to
+appear on, so the profile popover carries one entry to `/legal`.
+
+The popover rather than a sidebar row: this is a reference people reach for
+occasionally, not a destination, and a nav row costs a slot in the collapsed
+icon rail where it would have been an unlabelled icon nobody can identify.
+
+**The supplier portal's footer named two documents and now names none.** It
+linked the Privacy Policy and the Cookie Notice, which left a Supplier User with
+no route to the Terms that bind them — §3.4 binds everyone the Customer gives
+access, and §2 makes them a party to the acceptable-use rules — or to the DPA,
+the document that actually describes what happens to the bank details they
+typed in. A hand-picked subset is also the thing that drifts: the set grew to
+six documents and the footer stayed at two. It now carries one link to the
+index, which lists whatever the set currently is.
+
+That costs a supplier one click to the Privacy Policy, and the e2e assertion
+changed shape to match: it follows the link and asserts the whole set is
+reachable, rather than pinning an `href`. The old assertion passed against a
+footer that named two of six documents, which is precisely the failure it was
+supposed to catch.
+
+**It also resolved the last mixed-language surface around the set.** The
+document titles are English by design (§174), so rendering two of them beside
+`m('portal.shell.footerSupport')` gave a French-locale supplier "Support ·
+Légal · Privacy Policy · Cookie Notice". One translated pointer at an English
+document set is honest; a half-translated footer is just untranslated. The
+signup consent line went the same way, and needed a mechanism to get there:
+a sentence with three links inside it cannot be split into `…Pre`/`…Post`
+catalogue entries without fixing the order the links appear in, which German
+and Japanese both move. So the message stays one entry carrying `{token}`
+markers and `ui/LinkedMessage.svelte` splits it — the translation decides where
+each link lands, and `messages_parity.test.ts`'s existing placeholder check is
+what stops a locale silently dropping the Terms link out of a consent line.
+
+## 178. A published claim gets a guard that fails, and the guard's subject is not configurable
+
+Three of the published pages' commitments were true when they were written and
+true by nothing afterwards. Each now has a check, and the three share a shape
+worth stating once.
+
+**The sanctions payload.** `/legal/sub-processors` §3.5 says only a supplier's
+name and a country code reach ComplyAdvantage, Dow Jones or Refinitiv. The
+interface *accepts* a tax identifier and beneficial owners, both callers
+populate them unmasked, and the adapters happened not to serialise them. The
+guard asserts the **exact** field set per adapter rather than the absence of a
+tax ID, because a new field carrying a beneficial owner's date of birth passes
+an absence check and is still an undisclosed flow. Adding a field stays allowed;
+it becomes a decision that has to update the register in the same change.
+
+**The registers themselves.** Neither `/legal/sub-processors` nor
+`docs/sub-processors.md` is derived from anything, so the next adapter added
+makes both wrong silently — which is how the version that shipped with the pages
+listed AWS services that do not exist.
+`scripts/check_subprocessor_registry.mjs` compares the adapter registries
+against both. It **fails** rather than warns, unlike `check_compliance_drift.mjs`
+beside it: that one is a heuristic over a diff, where a finding is a prompt to go
+and look; this is an exact comparison of two lists, where a finding is a fact.
+The distinction is worth keeping — an advisory check that is really exact trains
+people to skim exact checks.
+
+**The Object Lock mode**, and the general point. The DPA's Annex II says the
+audit archive is Object Lock in *compliance* mode; the boot check read only the
+`ObjectLockEnabled` flag, and the adapter's own docstring said *Governance*. The
+fix could have added `FEOH_AUDIT_SHIPPING_S3_OBJECT_LOCK_MODE` with COMPLIANCE
+as the default, which is the reflex. It does not, and that is the decision:
+**a knob whose wrong setting makes a published page false is not a knob, it is a
+trap.** An operator who set GOVERNANCE would not have changed a preference, they
+would have falsified a customer-facing claim about data they cannot delete. The
+retention *period* is configurable precisely because it is not like that — it
+has to track `infra/variables.tf`, and the DPA names the figure as configured
+rather than as a constant.
+
+The three together generalise the guard rail the repo already applies to money:
+a claim with a reader outside the project is an invariant, not a comment, and
+invariants get a test. The cost is that a future change has to argue with a
+failing check. That is the point of it.
+
+## 179. Deleting a tenant goes documents → database → control plane, and the order is the recoverable one
+
+`deploy/remove-tenant.sh` and `services/tenant_deletion` implement the deletion
+`/legal/dpa` § 13 and clause 10 of the Terms promise within 60 days of
+termination. Until now that promise had no mechanism: `deploy/` had an
+`add-tenant.sh` and no inverse, and `docs/backup-disaster-recovery.md` recorded
+the 60-day clause as "a calendar obligation, not a system behaviour".
+
+**The ordering is the decision.** The instinct is to delete the control-plane
+organisation row first — it is what makes a tenant reachable, so removing it
+looks like the safe opening move. It is the one irreversible mistake available
+here. Every object key in the bucket is `{org_id}/…` and the organisation row is
+the only place that id is written down, so deleting it and then failing on the
+storage sweep leaves documents nobody can find again. Ordered documents →
+database → control plane, every step is idempotent and a partial failure is
+re-run: the sweep finds nothing, `DROP DATABASE IF EXISTS` is a no-op, and the
+control-plane transaction finishes the job.
+
+The trade is a window where the organisation row points at a database that is
+gone, so a request on that host errors. The deploy script removes the Caddy host
+block and reloads *before* calling the backend, so nothing is serving that host
+by then.
+
+**Completeness is enforced against `CONTROL_TABLES`, not remembered.**
+`CONTROL_DELETIONS` is held against the same frozenset that decides which tables
+a tenant DB must never receive: every control-plane table is either swept or
+named in `CONTROL_TABLES_EXEMPT` with a reason (only `plans` is — one catalogue
+shared by every org). The check runs at import and in CI, so the next
+control-plane table cannot be added without someone deciding which it is. This
+is the same drift a sub-processor register has (§178) and the same answer.
+
+Two refusals, both because the database would otherwise accept the operation
+quietly. A partner organisation with children is refused, because
+`parent_org_id` is `ON DELETE SET NULL` and Postgres would silently promote a
+reseller's customers to standalone tenants. And the `roles` sweep is
+`organization_id = :org` precisely because `=` never matches NULL, which is what
+keeps the four system roles — shared by every tenant on the platform — out of
+reach; a Python-side filter or `IS NOT DISTINCT FROM` would put them back in it.
+
+**Two verification notes worth keeping.** The S3 version query was written first
+as `[Versions, DeleteMarkers][][?ends_with(Key, …)]`, which parses, runs, and
+matches nothing — the filter binds to the flattened projection rather than its
+elements. It would have reported "removed 0 version(s)" while leaving every
+backup in place, under a confirmation telling the customer they were deleted.
+Caught by running it against real S3 semantics rather than reading it. And the
+suffix is `/`-anchored, so deleting `acme` cannot match `not-acme` or the shared
+`feohledger.dump`.
+
+**The backup confirmation rests on a re-list, not on a loop having run.** A
+review of the first version found the listing's `2>/dev/null | … || true` made an
+AWS failure — throttling, a wrong region, a missing permission — indistinguishable
+from "no backups exist": the delete loop iterated zero times and the confirmation
+still said the backups were removed. Now stderr stays visible, a failed listing
+stops the script, and after deleting it lists again and refuses to print the
+confirmation unless that second listing is empty. The re-list also catches a real
+race the first version missed: the nightly backup cron writing a fresh dump
+between the inventory and the delete. Both were verified against real S3
+semantics, and a re-run finishes the job — which is why the inventory step
+tolerates an organisation that is already gone rather than refusing, so the one
+leg most likely to need a retry can have one.
+
+**What deletion does not reach is printed, not assumed.** The confirmation the
+operator sends names the two residues the DPA already discloses — the shared
+control-plane dump, which is not selectively editable and ages out on the
+retention cycle, and any audit event already in write-once archival. A
+confirmation that overstates is worse than none, because it is the customer's
+evidence.
+

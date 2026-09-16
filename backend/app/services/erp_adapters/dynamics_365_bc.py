@@ -1,5 +1,7 @@
 """Microsoft Dynamics 365 Business Central adapter — direct OAuth2 REST integration."""
 
+from decimal import Decimal
+
 import httpx
 
 from app.config import settings
@@ -12,6 +14,7 @@ from app.services.erp_adapters.base import (
     erp_failure_message,
 )
 from app.services.erp_adapters.dispatcher import register_adapter
+from app.utils.json_money import dumps_exact_json
 
 
 @register_adapter("dynamics_365_bc")
@@ -121,13 +124,18 @@ class BusinessCentralAdapter(ErpAdapter):
             "vendorInvoiceNumber": payload.invoice_number,
             "externalDocumentNumber": payload.correlation_id,
             "currencyCode": payload.currency,
+            # Money stays Decimal all the way to the encoder — `float()` here
+            # would post a rounded unit cost into the customer's ledger (see
+            # `utils/json_money`). BC types `unitCost`/`quantity` as OData
+            # Edm.Decimal rendered as JSON numbers, and `dumps_exact_json`
+            # still emits numbers, so the wire contract is unchanged.
             "purchaseInvoiceLines": [
                 {
                     "lineType": "Account",
                     "lineObjectNumber": li.gl_account or "",
                     "description": li.description or "",
-                    "quantity": float(li.quantity) if li.quantity else 1,
-                    "unitCost": float(li.unit_price) if li.unit_price else float(li.total or 0),
+                    "quantity": li.quantity if li.quantity else 1,
+                    "unitCost": li.unit_price if li.unit_price else (li.total or Decimal(0)),
                 }
                 for li in payload.line_items
             ]
@@ -138,7 +146,7 @@ class BusinessCentralAdapter(ErpAdapter):
                     "lineObjectNumber": payload.gl_account or "",
                     "description": payload.description or "",
                     "quantity": 1,
-                    "unitCost": float(payload.amount),
+                    "unitCost": payload.amount,
                 }
             ],
         }
@@ -146,7 +154,7 @@ class BusinessCentralAdapter(ErpAdapter):
         async with httpx.AsyncClient(timeout=30) as client:
             resp = await client.post(
                 await self._api_url("purchaseInvoices"),
-                json=body,
+                content=dumps_exact_json(body),
                 headers=headers,
             )
 

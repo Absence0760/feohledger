@@ -262,6 +262,24 @@ examples are `api/einvoiceIssues.ts` (e-invoice refusals) and
 `api/invoiceWarnings.ts` (invoice warnings); both read a GENERATED map, so the
 catalogue cannot drift from the backend. Reach for that shape rather than
 rendering server English inside a translated frame.
+
+**The one exception is the published legal text** under `src/routes/legal/` and
+`src/lib/legal/`, which is deliberately English-only and carries no catalogue
+entries. A translated privacy policy, DPA or set of Terms is not a localized UI
+string — it is a second binding text, and a mistranslated clause is a
+misrepresentation rather than a cosmetic bug. The documents say so themselves,
+and the surrounding chrome a reader navigates by is minimal on purpose. If these
+are ever translated it is a legal exercise with counsel sign-off per locale, not
+a catalogue backfill; see `docs/decisions.md` §174. **This exception covers only
+those two directories**, plus the document titles `pages.ts` exports for the
+links that reach them — take those from `legalTitle(path)`, never by typing the
+title again. A nav item, footer or banner elsewhere that merely *points at* a
+legal page is ordinary UI and goes through `t()` like anything else. A sentence
+with a link inside it stays ONE catalogue entry with `{token}` markers, rendered
+through `ui/LinkedMessage.svelte`; fragmenting it into `…Pre`/`…Post` entries
+fixes the link order and cannot be translated (`frontend/docs/i18n.md` § A
+sentence with a link inside it).
+
 ### Tenant — `src/lib/tenant.ts` + `src/lib/hostRouting.ts`
 
 `hostRouting.ts` owns the pure rules ("what does this hostname mean") and is

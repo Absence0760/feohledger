@@ -1,6 +1,6 @@
 # Accessibility conformance statement
 
-**Last reviewed:** 2026-06-19
+**Last reviewed:** 2026-09-16
 **Conformance target:** [WCAG 2.2](https://www.w3.org/TR/WCAG22/) **Level AA**
 **Self-assessment status:** Partial — automated coverage in CI; manual
 screen-reader audit in progress (see [Known limitations](#known-limitations)).
@@ -22,8 +22,9 @@ This statement covers the three end-user surfaces of the product:
 | Supplier portal | SvelteKit (same app, `/portal/*`) | Vendor self-service: invoice submission, payment history, virtual-card reveal, supplier chat. |
 | Mobile app | Flutter 3.41+ (iOS + Android) | Core approval workflow, camera OCR, push notifications. |
 
-Marketing / signup pages (`/`, `/signup`, `/verify`) are in scope as part of
-the web surface. Third-party embedded surfaces we do not control (an external
+Marketing / signup pages (`/`, `/signup`, `/verify`) and the published legal
+documents (`/legal/*`, including the statement this file backs) are in scope as
+part of the web surface; all six legal routes are axe-scanned at two widths. Third-party embedded surfaces we do not control (an external
 IdP's hosted SSO login, a payment processor's hosted card-capture page) are out
 of scope for this statement; where we hand off to them we note it.
 
@@ -236,15 +237,23 @@ We are honest about where we are not yet fully conformant:
   / TalkBack pass over each core flow is signed off, criteria that depend on
   it are marked **Partially Supports** in the VPAT. This is the single largest
   piece of outstanding work.
-- **Workflow-builder drag-and-drop** (`/workflows/[id]`). The no-code builder
-  uses native HTML5 drag-and-drop. WCAG 2.2 **2.5.7 Dragging Movements**
-  requires a single-pointer (non-drag) alternative for every drag operation;
-  a click-to-add / keyboard-reorder alternative is the tracked follow-up.
+- **A customer's own brand colours.** An org on a plan that allows custom
+  branding can set an `accent_strong_color` that does not clear 1.4.3. Both
+  editing surfaces show the real white-on-colour ratio inline as it is typed,
+  but the backend accepts any valid hex on purpose — the brand is the tenant's
+  call, and a hard refusal would make the API the arbiter of a design decision
+  ([white-label.md](white-label.md), [decisions.md](decisions.md) §28). The
+  published statement discloses this as content we do not control.
 - **PDF invoice previews.** Uploaded invoice PDFs are third-party documents
   whose internal tagging we don't control; the extracted invoice data is
   always available as accessible HTML alongside the preview.
 - **Third-party hosted pages** (external IdP SSO login, payment-processor card
   capture) are governed by those vendors' own conformance.
+
+Resolved since the first pass, and no longer limitations: the
+workflow-builder's drag-to-reorder now carries a per-node keyboard /
+single-pointer alternative (Move ↑ / Move ↓ on every step), so **2.5.7 Dragging
+Movements** and **2.5.1 Pointer Gestures** both read *Supports* in the VPAT.
 
 None of the above blocks completing the core invoice → approve → pay workflow
 with a keyboard and a screen reader.
@@ -268,13 +277,23 @@ This statement is written against the following frameworks:
 ## Feedback and contact
 
 If you encounter an accessibility barrier, or need information in an alternative
-format, contact us at **accessibility@jaredhoward.com**. Please include the
-page or screen, what you were trying to do, and the assistive technology and
-browser/OS you were using. We aim to acknowledge accessibility reports within
-five business days.
+format, contact us at **support@feohledger.com** with *accessibility* in the
+subject line. Please include the page or screen, what you were trying to do, and
+the assistive technology and browser/OS you were using. We aim to acknowledge
+accessibility reports within five working days.
+
+This was `accessibility@jaredhoward.com` — an address on a different domain,
+outside the five aliases the published pages commit to monitoring
+(`frontend/src/lib/legal/operator.ts` → `CONTACT`). Two documents naming
+different escalation routes is how a report reaches nobody, and the one with a
+reader wins.
 
 ## See also
 
+- `frontend/src/routes/legal/accessibility/+page.svelte` — the **published**
+  accessibility statement at `/legal/accessibility`, which is the customer-facing
+  rendering of this file and the VPAT. A conformance claim that changes in one
+  changes in all three.
 - [Accessibility Conformance Report (VPAT / ACR)](./accessibility-vpat.md) —
   the criterion-by-criterion WCAG 2.2 AA edition table.
 - [Screen-reader test checklist](./accessibility-screen-reader-checklist.md) —

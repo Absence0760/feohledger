@@ -78,6 +78,7 @@ export const messages = {
 	'shell.profileMenu': 'プロフィールとアカウントメニュー',
 	'shell.profile': 'プロフィール',
 	'shell.profileAndSecurity': 'プロフィールとセキュリティ',
+	'shell.legalAndPrivacy': '法務・プライバシー',
 	'shell.logOut': 'ログアウト',
 	'shell.expandSidebar': 'サイドバーを展開',
 	'shell.collapseSidebar': 'サイドバーを折りたたむ',
@@ -2951,6 +2952,7 @@ export const messages = {
 	'portal.shell.logOut': 'ログアウト',
 	'portal.shell.footerSupport': 'サポート',
 	'portal.shell.footerLegal': '法的情報',
+	'portal.shell.footerPlatformLegal': 'プライバシーと利用規約',
 
 	// ポータルのログイン + MFA (routes/portal/login/+page.svelte)
 	'portal.login.subtitle': 'サインインして請求書を送信し、支払いを確認します',
@@ -3354,6 +3356,7 @@ export const messages = {
 	'auth.signup.email': 'メールアドレス',
 	'auth.signup.submit': '確認メールを送信',
 	'auth.signup.submitting': '確認メールを送信しています…',
+	'auth.signup.legalConsent': 'ワークスペースを作成すると、{terms}および{privacy}に同意したものとみなされます。これには、読み込む取引先データおよび請求書データを規定する{dpa}が含まれます。',
 	'auth.signup.footerPre': 'すでにワークスペースをお持ちですか？',
 	'auth.signup.footerPost': 'にアクセスしてサインインしてください。',
 

@@ -40,6 +40,7 @@ network latency or real backoff sleeps inside a unit test.
 
 from __future__ import annotations
 
+import json
 import uuid
 from decimal import Decimal
 from types import SimpleNamespace
@@ -444,7 +445,9 @@ async def test_call_erp_includes_line_items_in_payload():
             {"integration_method": "merge_dev", "api_key": "k", "account_token": "t"},
         )
 
-    posted_body = client.post.await_args.kwargs["json"]
+    # The adapter serialises the body itself (`content=`, not `json=`) so the
+    # Decimal amounts reach the wire exactly — see `utils/json_money`.
+    posted_body = json.loads(client.post.await_args.kwargs["content"])
     posted_lines = posted_body["model"]["line_items"]
     assert len(posted_lines) == 2
     assert posted_lines[0]["account"] == "6000"

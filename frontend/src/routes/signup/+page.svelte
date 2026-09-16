@@ -1,8 +1,10 @@
 <script lang="ts">
 	import BrandMark from '$lib/components/ui/BrandMark.svelte';
+	import LinkedMessage from '$lib/components/ui/LinkedMessage.svelte';
 	import { api } from '$lib/api';
 	import { onMount } from 'svelte';
 	import { m } from '$lib/i18n/store.svelte';
+	import { legalTitle } from '$lib/legal/pages';
 
 	interface PublicConfig {
 		hcaptcha_sitekey: string;
@@ -213,6 +215,33 @@
 				{submitting ? m('auth.signup.submitting') : m('auth.signup.submit')}
 			</button>
 
+			<!--
+				Contract formation happens here — this button creates a tenant and
+				binds the signer's organisation — so the terms it forms under have
+				to be presented at the point of assent rather than only from a
+				footer elsewhere. It sits below the button so the button stays the
+				page's primary target, and above the existing footer note so the
+				last thing read before submitting is what submitting agrees to.
+
+				The sentence is translated; the three link LABELS are the document
+				titles from `lib/legal/pages.ts`, which are English on purpose —
+				the documents themselves are (`frontend/CLAUDE.md` § i18n,
+				`docs/decisions.md` §174), and naming one in French would promise a
+				French text that does not exist. Taking the titles from the
+				registry rather than typing them keeps the link text and the page's
+				own `<h1>` the same string.
+			-->
+			<p class="legal-consent">
+				<LinkedMessage
+					text={m('auth.signup.legalConsent')}
+					links={{
+						terms: { href: '/legal/terms', label: legalTitle('/legal/terms') },
+						privacy: { href: '/legal/privacy', label: legalTitle('/legal/privacy') },
+						dpa: { href: '/legal/dpa', label: legalTitle('/legal/dpa') }
+					}}
+				/>
+			</p>
+
 			<p class="footer">
 				{m('auth.signup.footerPre')}<code>{tenantExampleHost}</code>{m('auth.signup.footerPost')}
 			</p>
@@ -332,6 +361,17 @@
 		opacity: 0.6;
 		cursor: not-allowed;
 	}
+	.legal-consent {
+		margin: 16px 0 0;
+		font-size: 0.8rem;
+		line-height: 1.5;
+		color: var(--text-muted);
+		text-align: center;
+	}
+	.legal-consent a {
+		color: var(--accent-on-tint);
+	}
+
 	.footer {
 		margin: 16px 0 0;
 		font-size: 0.8rem;

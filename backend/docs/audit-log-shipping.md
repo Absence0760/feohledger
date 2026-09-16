@@ -114,6 +114,7 @@ All env vars have the `FEOH_` prefix.
 | `FEOH_AUDIT_SHIPPING_PROVIDERS` | `mock` | Comma-separated adapter names. Typical prod value: `cloudwatch,s3_objectlock`. |
 | `FEOH_AUDIT_SHIPPING_CLOUDWATCH_GROUP` | `/ap/audit` | CloudWatch Logs group name. |
 | `FEOH_AUDIT_SHIPPING_S3_BUCKET` | (empty) | Object-Lock-enabled S3 bucket for the WORM copy. Required when `s3_objectlock` is enabled. |
+| `FEOH_AUDIT_SHIPPING_S3_MIN_RETENTION_DAYS` | `2555` | Floor the bucket's default Object Lock retention must meet (≈ 7 years). The boot check refuses a shorter one. |
 
 ## Adapters
 
@@ -200,7 +201,7 @@ retention period: raise the retention on `FEOH_AUDIT_SHIPPING_CLOUDWATCH_GROUP`
 (or ship the backlog to `s3_objectlock`, which has no age limit) and the next
 tick drains it.
 
-### `s3_objectlock` — S3 with Object Lock (Governance or Compliance mode)
+### `s3_objectlock` — S3 with Object Lock (Compliance mode)
 
 Each batch becomes a single gzip-compressed JSONL object:
 
@@ -208,26 +209,46 @@ Each batch becomes a single gzip-compressed JSONL object:
 s3://<bucket>/audit/<tenant_db>/<YYYY>/<MM>/<DD>/<ISO-stamp>-<uuid>.jsonl.gz
 ```
 
-**S3 Object Lock caveats:**
+**What the boot check requires.** `test_connection()` reads
+`get_object_lock_configuration` and returns `False` — which refuses the boot,
+see § Startup probe below — unless all three of these hold:
 
-- Object Lock **must** be enabled at bucket creation time — it cannot
-  be turned on later. The adapter's `test_connection()` checks this
-  via `get_object_lock_configuration` and returns `False` if the bucket
-  isn't configured. **`app/main.py`'s lifespan is what calls it** (see
-  § Startup probe below) and refuses to boot on a `False`. `ship()`
-  itself does not re-check: the bucket property can't change after
-  creation, so re-probing per batch would be an S3 round-trip per tick
-  for an answer the boot probe already has.
-- The bucket **must** have a default retention period set (Governance
-  or Compliance mode). Without one, objects are written normally and
-  can be deleted — defeating the WORM guarantee.
+| Property | Required | Why it is checked |
+| --- | --- | --- |
+| `ObjectLockEnabled` | `Enabled` | Only settable at bucket creation; cannot be turned on later. |
+| Default retention `Mode` | `COMPLIANCE` | GOVERNANCE lets a principal holding `s3:BypassGovernanceRetention` delete audit evidence early. COMPLIANCE locks even root until retention expires. `/legal/dpa` Annex II publishes compliance mode, so GOVERNANCE would make a published page false. |
+| Default retention period | ≥ `FEOH_AUDIT_SHIPPING_S3_MIN_RETENTION_DAYS` (2555, ≈ 7 years) | Matches `infra/variables.tf` `audit_retention_days` and the figure the DPA names. S3 reports `Days` or `Years`; a `Years` value converts at 365/year so the check can only under-state the period. |
+
+The mode is **not configurable**. A knob that let a deployment run GOVERNANCE
+would make the DPA wrong for whoever turned it, and the point of the check is
+that the published claim is true by construction.
+
+**Other caveats:**
+
+- A bucket with Object Lock enabled and **no default retention rule** is the
+  quiet failure this check exists for: every PUT lands deletable while
+  `get_object_lock_configuration` still reports `Enabled`. This adapter
+  deliberately does not stamp `ObjectLockMode` / `ObjectLockRetainUntilDate`
+  onto each object — the retention policy has one owner and it is the
+  infrastructure — so without the bucket default there is no lock at all.
 - Retention period + mode are provisioned by infra (Terraform), not by
-  this adapter. See `infra/` for the bucket definition.
-- SOC 2 auditors typically want **≥ 365 days** retention in
-  **Compliance mode** for audit logs. Governance mode lets privileged
-  IAM principals delete early; Compliance mode locks even root.
+  this adapter. See `infra/s3.tf`
+  (`aws_s3_bucket_object_lock_configuration.audit_logs`).
+- Object Lock cannot be turned off after bucket creation, but the default
+  retention **rule** can be edited afterwards, so this is a start-up assertion
+  rather than a standing guarantee. `ship()` does not re-check per batch: that
+  would be an S3 round-trip per tick.
 - Versioning must also be enabled — S3 Object Lock is implemented on
   top of object versions.
+
+**Before this check existed**, `test_connection()` read only the
+`ObjectLockEnabled` flag, and this module's own docstring said the bucket was
+expected in *Governance* mode while the DPA said compliance. A hand-created
+GOVERNANCE bucket, or one with no default rule, passed the boot probe and
+shipped audit evidence an administrator could remove. Guarded by
+`tests/test_audit_shipping.py` (`…refuses_governance_mode`,
+`…refuses_missing_default_retention`, `…refuses_retention_under_the_floor`,
+`…reads_a_years_retention`).
 
 ## Startup probe — a sink that can't hold the evidence stops the boot
 

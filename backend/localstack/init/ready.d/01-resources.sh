@@ -30,5 +30,17 @@ echo "[init] creating object-lock S3 bucket feoh-audit-worm..."
 awslocal s3api create-bucket --bucket feoh-audit-worm --object-lock-enabled-for-bucket >/dev/null 2>&1 || true
 awslocal s3api put-bucket-versioning --bucket feoh-audit-worm \
   --versioning-configuration Status=Enabled >/dev/null 2>&1 || true
+# The DEFAULT RETENTION RULE, matching infra/s3.tf's audit_logs bucket
+# (COMPLIANCE, var.audit_retention_days = 2555 ≈ 7 years).
+#
+# Object Lock "enabled" with no default rule is the quiet failure mode: the
+# bucket reports Enabled, every PUT lands deletable, and the emulator looks
+# like production while guaranteeing nothing. `s3_objectlock_adapter`'s boot
+# check refuses exactly that shape, so without this the local emulator would
+# be the one configuration the adapter rejects — which is backwards for the
+# thing that exists to let the sink be exercised on a laptop.
+awslocal s3api put-object-lock-configuration --bucket feoh-audit-worm \
+  --object-lock-configuration \
+  'ObjectLockEnabled=Enabled,Rule={DefaultRetention={Mode=COMPLIANCE,Days=2555}}' >/dev/null 2>&1 || true
 
 echo "[init] done. resources ready."

@@ -274,11 +274,19 @@ class Settings(BaseSettings):
     # CloudWatch Logs group name. Tenant log streams are created under this
     # group as `<tenant_db>/<YYYY-MM-DD>`.
     audit_shipping_cloudwatch_group: str = "/ap/audit"
-    # S3 bucket must have Object Lock enabled (Governance or Compliance
-    # mode) with a default retention period set on the bucket. The shipper
-    # verifies the bucket exists on startup but does not configure Object
-    # Lock itself — that's a bucket-provisioning concern (Terraform).
+    # S3 bucket must have Object Lock enabled in COMPLIANCE mode with a
+    # default retention rule on the bucket. The shipper verifies all three at
+    # startup and refuses to boot otherwise, but does not configure Object
+    # Lock itself — that's a bucket-provisioning concern (Terraform). Mode is
+    # not configurable: `/legal/dpa` Annex II publishes compliance mode, and
+    # GOVERNANCE lets a principal with s3:BypassGovernanceRetention delete
+    # audit evidence.
     audit_shipping_s3_bucket: str | None = None
+    # The floor the bucket's default retention must meet. 2555 days ≈ seven
+    # years, matching `infra/variables.tf` `audit_retention_days` and the
+    # figure the DPA names. Lowering it is a deployment's call, but it makes
+    # that published figure wrong for that deployment.
+    audit_shipping_s3_min_retention_days: int = 2555
 
     # Periodic access reviews (SOX). The dormancy window for the elevated-access
     # review: a user holding an elevated role (admin / ap_manager / cfo) whose
@@ -308,8 +316,31 @@ class Settings(BaseSettings):
     # `/api/invoices/{id}/summary` endpoint returns the deterministic template
     # summary without any LLM call. `audit_summary_model` defaults to the
     # extraction model when empty.
-    audit_summary_enabled: bool = True
+    #
+    # Defaults OFF, and the "no new secret" convenience is exactly why it has
+    # to. Sharing the extraction key means this feature has no credential of
+    # its own to gate it: defaulted True, an operator who configured Anthropic
+    # for invoice EXTRACTION silently also began sending invoice numbers,
+    # vendor names, amounts and audit timelines to Anthropic for a second,
+    # unrelated purpose — a sub-processor engagement the customer never chose
+    # and no setting disclosed. Local dev never noticed because an empty key
+    # short-circuits either way, so the usual local-first check could not see
+    # it. Every integration defaults to its safe local value (root CLAUDE.md,
+    # `## Key environment variables`); the template summary is that value here,
+    # and it is a genuine feature, not a degraded one.
+    audit_summary_enabled: bool = False
     audit_summary_model: str = ""  # falls back to extraction_model when empty
+
+    # Exception-agent rationale polish (services/exception_agents/llm_rationale).
+    # Same shape and the same reason as `audit_summary_enabled` above: it reuses
+    # the extraction Anthropic key, so it has no credential of its own to act as
+    # its gate, and without this flag an extraction key silently enrolled the
+    # deployment in a second purpose — a resolver's deterministic rationale,
+    # which carries the PO number and invoice amount in prose, POSTed to
+    # Anthropic to be reworded. Off by default; the deterministic template is
+    # the off-state and the agent's DECISION never depended on the LLM either
+    # way. See docs/decisions.md §176.
+    exception_agent_rationale_enabled: bool = False
 
     # Conversational AP Assistant (see backend/docs/conversational-assistant.md).
     # Local-first: the default `mock` adapter routes a natural-language query to

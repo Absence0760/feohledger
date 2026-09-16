@@ -125,6 +125,65 @@ async def _delete_object(file_key: str) -> None:
     await asyncio.to_thread(_delete)
 
 
+async def delete_prefix(prefix: str) -> int:
+    """Delete every object under ``prefix``. Returns how many were removed.
+
+    The bulk counterpart of ``_delete_object``, and the only traversal in the
+    app: everything else addresses one known key. It exists because deleting a
+    tenant has to reach objects nobody holds a row for any more — an upload
+    whose invoice was already deleted, a key written by a path that has since
+    changed shape — and the only way to be sure is to enumerate what is
+    actually there.
+
+    **This is safe to express as a prefix only because every key in this bucket
+    begins with the owning organisation's id.** Invoice files, contract
+    documents, expense receipts, W-8/W-9 tax forms, chat attachments, vendor
+    statements, Positive Pay files, inbound PEPPOL XML and email-intake
+    attachments are all written as ``{org_id}/...`` — see the ``file_key =``
+    lines throughout this module, ``api/tax.py``, ``services/email_intake.py``
+    and ``services/peppol_receive.py``. ``tests/test_storage_prefix_ownership.py``
+    is what keeps that true.
+
+    Two guards on the argument, because the failure here is unbounded:
+    an empty prefix would enumerate and delete the whole bucket, and a prefix
+    not ending in ``/`` would match a sibling whose id merely starts with the
+    same characters. Both raise rather than doing anything.
+
+    A missing bucket counts as nothing to delete. On a fresh dev machine the
+    bucket is created lazily by the first upload (``_ensure_bucket``), so a
+    tenant that never uploaded a file has no bucket to sweep, and that is not
+    an error.
+    """
+    if not prefix or not prefix.strip():
+        raise ValueError("delete_prefix() refuses an empty prefix — that is the whole bucket")
+    if not prefix.endswith("/"):
+        raise ValueError(
+            f"delete_prefix() requires a trailing slash, got {prefix!r} — without one "
+            "the prefix also matches a sibling whose key merely starts with it"
+        )
+
+    def _delete_all() -> int:
+        client = _get_client()
+        removed = 0
+        try:
+            paginator = client.get_paginator("list_objects_v2")
+            for page in paginator.paginate(Bucket=settings.s3_bucket, Prefix=prefix):
+                keys = [{"Key": obj["Key"]} for obj in page.get("Contents", [])]
+                if not keys:
+                    continue
+                # S3 caps a bulk delete at 1000 keys; the paginator already
+                # yields at most that many per page, so one call per page.
+                client.delete_objects(Bucket=settings.s3_bucket, Delete={"Objects": keys})
+                removed += len(keys)
+        except ClientError as exc:
+            if exc.response.get("Error", {}).get("Code") in {"NoSuchBucket", "404"}:
+                return 0
+            raise
+        return removed
+
+    return await asyncio.to_thread(_delete_all)
+
+
 async def upload_invoice_file(
     org_id: uuid.UUID,
     invoice_id: uuid.UUID,

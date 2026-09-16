@@ -658,6 +658,92 @@ def test_s3_objectlock_requires_bucket():
             s3_mod.S3ObjectLockAdapter({})
 
 
+def _lock_config(mode: str = "COMPLIANCE", *, days: int | None = 2555, years: int | None = None):
+    """A `get_object_lock_configuration` response, shaped like S3's."""
+    retention: dict = {"Mode": mode}
+    if days is not None:
+        retention["Days"] = days
+    if years is not None:
+        retention["Years"] = years
+    return {
+        "ObjectLockConfiguration": {
+            "ObjectLockEnabled": "Enabled",
+            "Rule": {"DefaultRetention": retention},
+        }
+    }
+
+
+def _adapter_with(lock_config):
+    from app.services.audit_shipping import s3_objectlock_adapter as s3_mod
+
+    fake_client = MagicMock()
+    fake_client.get_object_lock_configuration.return_value = lock_config
+    with patch("boto3.client", return_value=fake_client):
+        return s3_mod.S3ObjectLockAdapter({"bucket_name": "audit-bucket"})
+
+
+@pytest.mark.asyncio
+async def test_s3_objectlock_test_connection_accepts_compliance_mode():
+    adapter = _adapter_with(_lock_config("COMPLIANCE", days=2555))
+    assert await adapter.test_connection() is True
+
+
+@pytest.mark.asyncio
+async def test_s3_objectlock_test_connection_refuses_governance_mode():
+    """GOVERNANCE is a weaker promise than the one `/legal/dpa` publishes.
+
+    A principal holding `s3:BypassGovernanceRetention` can delete a
+    GOVERNANCE-locked object; under COMPLIANCE nobody can until retention
+    expires. The check previously read only the `ObjectLockEnabled` flag, so a
+    hand-created GOVERNANCE bucket booted and shipped audit evidence an
+    administrator could remove — while the module docstring said Governance and
+    the DPA said compliance.
+    """
+    adapter = _adapter_with(_lock_config("GOVERNANCE", days=2555))
+    assert await adapter.test_connection() is False
+
+
+@pytest.mark.asyncio
+async def test_s3_objectlock_test_connection_refuses_missing_default_retention():
+    """Object Lock on with no default rule protects nothing.
+
+    This adapter deliberately does not stamp a retention onto each PUT — the
+    policy lives in the bucket — so without a default rule every shipped object
+    lands deletable while the bucket still reports Object Lock enabled.
+    """
+    adapter = _adapter_with(
+        {"ObjectLockConfiguration": {"ObjectLockEnabled": "Enabled", "Rule": {}}}
+    )
+    assert await adapter.test_connection() is False
+
+
+@pytest.mark.asyncio
+async def test_s3_objectlock_test_connection_refuses_retention_under_the_floor():
+    from app.services.audit_shipping import s3_objectlock_adapter as s3_mod
+
+    adapter = _adapter_with(_lock_config("COMPLIANCE", days=30))
+    with patch.object(s3_mod.settings, "audit_shipping_s3_min_retention_days", 2555):
+        assert await adapter.test_connection() is False
+
+
+@pytest.mark.asyncio
+async def test_s3_objectlock_test_connection_reads_a_years_retention():
+    """S3 reports `Days` or `Years`, never both.
+
+    Seven years clears a 2555-day floor; six does not. The conversion is 365
+    days per year so it can only under-state the period — a check that rounds
+    in the generous direction would pass a bucket that is short of the floor.
+    """
+    from app.services.audit_shipping import s3_objectlock_adapter as s3_mod
+
+    with patch.object(s3_mod.settings, "audit_shipping_s3_min_retention_days", 2555):
+        seven = _adapter_with(_lock_config("COMPLIANCE", days=None, years=7))
+        assert await seven.test_connection() is True
+
+        six = _adapter_with(_lock_config("COMPLIANCE", days=None, years=6))
+        assert await six.test_connection() is False
+
+
 @pytest.mark.asyncio
 async def test_s3_objectlock_test_connection_fails_without_object_lock():
     """Object Lock must be enabled at bucket creation. An ordinary bucket

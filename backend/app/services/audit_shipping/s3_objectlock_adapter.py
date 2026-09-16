@@ -2,18 +2,35 @@
 
 Each `ship(rows)` call writes a single gzip-compressed JSONL file to S3
 under `audit/<tenant>/<YYYY>/<MM>/<DD>/<timestamp>-<uuid>.jsonl.gz`. The
-bucket is expected to have Object Lock enabled in Governance mode with a
-default retention period configured by infra (see docs) — the adapter
-does NOT configure Object Lock itself.
+bucket is expected to have Object Lock enabled in **COMPLIANCE** mode with
+a default retention period configured by infra (`infra/s3.tf`
+`aws_s3_bucket_object_lock_configuration.audit_logs`) — the adapter does
+NOT configure Object Lock itself, and deliberately does not stamp
+`ObjectLockMode` / `ObjectLockRetainUntilDate` onto each PUT either. The
+retention policy has one owner, and it is the infrastructure; duplicating
+it here would give two places to change it and one of them would be wrong.
 
-`__init__` does no network I/O: it only resolves the bucket name (raising
-if none is configured) and builds the boto3 client. The bucket check lives
-in `test_connection()`, which `head_bucket`s AND reads
-`get_object_lock_configuration`; `app/main.py`'s lifespan calls it for
-every configured adapter and REFUSES TO BOOT on a False, so a bucket
-without Object Lock can never be shipped to. `ship()` deliberately does
-not re-check per batch — that would be an extra S3 round-trip on every
-tick for a bucket property that cannot change after creation.
+What the adapter owes in return is a check that the bucket it was pointed
+at is the bucket the DPA describes. `test_connection()` `head_bucket`s,
+reads `get_object_lock_configuration`, and requires the default retention
+rule to be COMPLIANCE for at least `audit_shipping_s3_min_retention_days`.
+`app/main.py`'s lifespan calls it for every configured adapter and REFUSES
+TO BOOT on a False.
+
+**Mode is checked because COMPLIANCE and GOVERNANCE are different
+promises.** Under GOVERNANCE a principal holding
+`s3:BypassGovernanceRetention` can delete a locked object; under COMPLIANCE
+no one can, including the root account, until retention expires. The
+published DPA (Annex II, *Write-once archival of audit events*) says
+compliance mode, so a GOVERNANCE bucket makes that page false — and it
+would have passed, since the check previously read only the
+`ObjectLockEnabled` flag and this module's own docstring said "Governance".
+A hand-created bucket is exactly how that happens.
+
+`ship()` deliberately does not re-check per batch — that would be an extra
+S3 round-trip on every tick. Object Lock cannot be turned off after
+creation, though the default retention RULE can be edited afterwards, so
+the boot check is a start-up assertion rather than a standing guarantee.
 
 One object per batch is intentional: it keeps the ship atomic (either
 the PUT succeeded or it didn't), preserves the natural batch boundary
@@ -39,6 +56,27 @@ from app.services.audit_shipping.base import AuditLogRow, AuditShippingAdapter
 from app.services.audit_shipping.dispatcher import register_audit_shipping_adapter
 
 logger = logging.getLogger(__name__)
+
+
+#: The only Object Lock mode this sink accepts. Not configurable on purpose:
+#: the DPA publishes compliance mode, so a knob that let a deployment run
+#: GOVERNANCE would make a published page false for whoever turned it.
+REQUIRED_OBJECT_LOCK_MODE = "COMPLIANCE"
+
+
+def _retention_days(retention: dict) -> int:
+    """Default-retention period in days, from whichever unit S3 reports.
+
+    A rule carries `Days` or `Years`, never both. `Years` is converted at
+    365 rather than 365.25 so the conversion can only UNDER-state the
+    period — rounding up could pass a bucket that is a day short of the
+    floor, and a check that rounds in the generous direction is not a check.
+    """
+    if "Days" in retention:
+        return int(retention["Days"])
+    if "Years" in retention:
+        return int(retention["Years"]) * 365
+    return 0
 
 
 @register_audit_shipping_adapter("s3_objectlock")
@@ -127,11 +165,18 @@ class S3ObjectLockAdapter(AuditShippingAdapter):
             raise
 
     async def test_connection(self) -> bool:
-        """Verify the bucket exists and Object Lock is configured on it.
+        """Verify the bucket is the write-once bucket the DPA describes.
 
-        Object Lock must be configured at bucket-creation time and cannot
-        be turned on later, so a missing Object Lock config here is a
-        hard failure rather than something the adapter can fix.
+        Three things, each a hard failure the adapter cannot fix at
+        runtime: Object Lock is enabled (only possible at bucket creation),
+        the default retention rule is COMPLIANCE (GOVERNANCE is a weaker
+        promise than the one published), and its period is at least the
+        configured floor.
+
+        Returning False here refuses the boot — see `app/main.py`'s
+        lifespan. That is the intended outcome: shipping audit evidence to
+        a bucket someone can empty is worse than not shipping it, because
+        the archive exists and cannot be relied on.
         """
 
         def _check() -> bool:
@@ -148,8 +193,66 @@ class S3ObjectLockAdapter(AuditShippingAdapter):
                     )
                     return False
                 raise
-            status = resp.get("ObjectLockConfiguration", {}).get("ObjectLockEnabled")
-            return status == "Enabled"
+
+            config = resp.get("ObjectLockConfiguration", {})
+            if config.get("ObjectLockEnabled") != "Enabled":
+                logger.error(
+                    "[audit-shipping:s3] bucket %s reports Object Lock status "
+                    "%r rather than 'Enabled'; refusing to ship.",
+                    self.bucket,
+                    config.get("ObjectLockEnabled"),
+                )
+                return False
+
+            retention = config.get("Rule", {}).get("DefaultRetention", {})
+            if not retention:
+                # Object Lock on with no default rule means every PUT lands
+                # unlocked unless the caller stamps a retention itself — and
+                # this adapter deliberately does not. The bucket looks
+                # compliant and protects nothing.
+                logger.error(
+                    "[audit-shipping:s3] bucket %s has Object Lock enabled but "
+                    "no default retention rule, so shipped objects would be "
+                    "deletable; refusing to ship.",
+                    self.bucket,
+                )
+                return False
+
+            mode = retention.get("Mode")
+            if mode != REQUIRED_OBJECT_LOCK_MODE:
+                logger.error(
+                    "[audit-shipping:s3] bucket %s is in Object Lock mode %r, "
+                    "not %s. Under GOVERNANCE a principal with "
+                    "s3:BypassGovernanceRetention can delete audit evidence, "
+                    "which is not the guarantee this sink is documented to "
+                    "give; refusing to ship.",
+                    self.bucket,
+                    mode,
+                    REQUIRED_OBJECT_LOCK_MODE,
+                )
+                return False
+
+            days = _retention_days(retention)
+            floor = settings.audit_shipping_s3_min_retention_days
+            if days < floor:
+                logger.error(
+                    "[audit-shipping:s3] bucket %s locks objects for %d day(s), "
+                    "under the %d-day floor "
+                    "(FEOH_AUDIT_SHIPPING_S3_MIN_RETENTION_DAYS); refusing to "
+                    "ship.",
+                    self.bucket,
+                    days,
+                    floor,
+                )
+                return False
+
+            logger.info(
+                "[audit-shipping:s3] bucket %s verified: Object Lock %s, %d day(s).",
+                self.bucket,
+                mode,
+                days,
+            )
+            return True
 
         try:
             return await asyncio.to_thread(_check)

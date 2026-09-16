@@ -325,6 +325,26 @@ jobs:
       - name: Unit tests
         run: pnpm test:unit
 
+      # The sub-processor registers must not drift from the adapters that
+      # exist. `/legal/sub-processors` is a customer-facing commitment about
+      # which third parties can receive personal data and `docs/sub-processors.md`
+      # is the Article 30 record behind it, and NEITHER is derived from
+      # anything — both are prose written by reading the code once. So the next
+      # adapter added silently makes both wrong, which is how the version that
+      # shipped with the pages came to list AWS services that do not exist.
+      #
+      # It FAILS rather than warns, unlike the compliance-drift workflow: that
+      # one is a heuristic over a diff, this is an exact comparison of two
+      # lists. It lives in the frontend job only because that is where Node
+      # already is — it reads backend source, the internal register and the
+      # published page, so it belongs to no one workspace. Its own tests come
+      # first, because a guard nobody trusts gets switched off.
+      - name: Sub-processor registers match the adapter registries
+        working-directory: .
+        run: |
+          node --test scripts/check_subprocessor_registry.test.mjs
+          node scripts/check_subprocessor_registry.mjs
+
       - name: Typecheck
         env:
           PUBLIC_API_URL: http://localhost:8000

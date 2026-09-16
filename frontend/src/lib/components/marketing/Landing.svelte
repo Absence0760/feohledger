@@ -10,6 +10,7 @@
 	import IconCheck from '~icons/material-symbols/check-circle-outline';
 	import IconArrow from '~icons/material-symbols/arrow-forward';
 	import Pricing from '$lib/components/marketing/Pricing.svelte';
+	import { LEGAL_PAGES } from '$lib/legal/pages';
 	import Badge from '$lib/components/ui/Badge.svelte';
 	import BrandMark from '$lib/components/ui/BrandMark.svelte';
 
@@ -64,11 +65,27 @@
 		},
 	];
 
+	// Every figure here must be checkable against the product by anyone who
+	// bothers. A specific performance number is an objectively verifiable factual
+	// claim, not puffery, so it needs substantiation we can produce on request.
+	//
+	// Two of these used to be inventions: "3.2s avg. extraction time" and "97%
+	// field accuracy on typed invoices" had no benchmark, eval or fixture behind
+	// them anywhere in the repo — and the only 97% in the tree is Basware's
+	// published *touchless processing rate* quoted in docs/competitive-analysis.md,
+	// a different metric belonging to a competitor. "12 workflow step types" was
+	// 9 counted honestly (4 canonical + 5 builder; reaching 12 needed the three
+	// backwards-compatible aliases counted as types of their own).
+	//
+	// These four are countable from the source: PAYMENT_METHODS, the locale
+	// catalogues, CANONICAL_STEP_TYPES + BUILDER_STEP_TYPES, and the rebate rate
+	// in api/cards.py (1% default, org-negotiated). If a number here stops
+	// matching, change the number.
 	const stats = [
-		{ value: '3.2s', label: 'avg. extraction time' },
-		{ value: '97%', label: 'field accuracy on typed invoices' },
-		{ value: '1–2%', label: 'rebate on card payments' },
-		{ value: '12', label: 'workflow step types' },
+		{ value: '7', label: 'payment rails, ACH to CHAPS' },
+		{ value: '9', label: 'workflow step types' },
+		{ value: '6', label: 'languages, fully localized' },
+		{ value: '1–2%', label: 'typical rebate on card payments' },
 	];
 </script>
 
@@ -220,6 +237,14 @@
 					shop doing $500k/month in invoices, that's $60–120k/yr straight
 					back to your budget.
 				</p>
+				<!-- A large, vivid dollar figure reads as a projection unless the
+				     variability sits next to it. Pricing.svelte carries the same
+				     qualifier, but it is a different component and a reader may
+				     never scroll that far. -->
+				<p class="diff-note">
+					Illustrative. Rebates depend on your negotiated rate, how much spend
+					moves to card, and which vendors accept it.
+				</p>
 			</div>
 			<div class="diff">
 				<h3>Mobile without compromise</h3>
@@ -255,6 +280,17 @@
 				<a href="/signup">Sign up</a>
 				<a href="#features">Features</a>
 				<a href="#how">How it works</a>
+				<!--
+					The legal set, reached from the marketing page because that is
+					where an evaluating buyer, a supplier chasing their own data and a
+					procurement reviewer all land first — and on the apex domain this
+					footer is the only navigation that exists. Rendered from
+					`LEGAL_PAGES` rather than hand-listed so a new document appears
+					here without anyone remembering to add it.
+				-->
+				{#each LEGAL_PAGES as page (page.path)}
+					<a href={page.path}>{page.title}</a>
+				{/each}
 			</div>
 			<div class="footer-copy">
 				© {new Date().getFullYear()} FeohLedger.
@@ -677,6 +713,12 @@
 		border-radius: 10px;
 		padding: 28px;
 	}
+	.diff-note {
+		margin-top: 8px;
+		font-size: 0.8rem;
+		color: var(--text-muted);
+	}
+
 	.diff h3 {
 		margin: 0 0 10px;
 		font-size: 1.05rem;

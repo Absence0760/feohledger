@@ -23,6 +23,34 @@
 		const v = localStorage.getItem(CONSENT_KEY);
 		return v === 'accepted' || v === 'rejected' ? v : null;
 	}
+
+	/** Event the banner listens for, so any page can reopen it. */
+	export const CONSENT_RESET_EVENT = 'feoh:consent-reset';
+
+	/**
+	 * Forget the recorded choice and show the banner again.
+	 *
+	 * Withdrawal has to be as easy as giving consent — that is the ePrivacy
+	 * requirement, and it is also the thing a consent banner most often gets
+	 * wrong. Until this existed the only route was clearing site data in browser
+	 * settings, which is neither as easy nor discoverable, and the Cookie Notice
+	 * had to describe that as the mechanism because it was the truth.
+	 *
+	 * The event is what makes it work from anywhere: the banner is mounted once
+	 * in the root layout, outside the routed slot, so a page cannot reach its
+	 * state directly. Clearing the key alone would take effect only on the next
+	 * full load.
+	 */
+	export function resetConsent(): void {
+		try {
+			localStorage.removeItem(CONSENT_KEY);
+		} catch {
+			// Storage blocked — the banner still reopens for this session below.
+		}
+		if (typeof window !== 'undefined') {
+			window.dispatchEvent(new CustomEvent(CONSENT_RESET_EVENT));
+		}
+	}
 </script>
 
 <script lang="ts">
@@ -37,6 +65,16 @@
 
 	$effect(() => {
 		if (browser) choice = getConsent();
+	});
+
+	// Reopen when any page asks (the Cookie Notice's "Change your choice"
+	// control). Listening here rather than polling localStorage keeps the
+	// banner the single owner of its own visibility.
+	$effect(() => {
+		if (!browser) return;
+		const reopen = () => (choice = null);
+		window.addEventListener(CONSENT_RESET_EVENT, reopen);
+		return () => window.removeEventListener(CONSENT_RESET_EVENT, reopen);
 	});
 
 	const visible = $derived(browser && choice === null);
@@ -87,9 +125,10 @@
 				<p>
 					We use storage that is strictly necessary to run the app — signing
 					you in and keeping your session — which works regardless of your
-					choice here. We would also like to use <strong>non-essential</strong>
-					storage for product analytics. You can accept it, reject it, or review
-					the details first.
+					choice here. We load <strong>no analytics or tracking</strong> storage
+					today. Your choice is recorded now and governs any optional storage we
+					introduce later. Full detail is in the
+					<a href="/legal/cookies">Cookie Notice</a>.
 				</p>
 				{#if showDetails}
 					<dl class="consent-details">
@@ -100,8 +139,19 @@
 						</dd>
 						<dt>Analytics (optional)</dt>
 						<dd>
-							Aggregate product-usage measurement to improve the app. Off
-							until you accept.
+							<!--
+								This category is empty, and saying so is the point. The copy
+								previously read "Aggregate product-usage measurement to improve
+								the app", which described a thing the frontend does not do:
+								there is no analytics script anywhere in it, and `getConsent()`
+								has no caller. Soliciting consent for processing that isn't
+								happening is an accuracy problem in its own right, so the
+								category stays — the mechanism should exist before it is
+								needed — but it states what is true today.
+							-->
+							Nothing is loaded under this category today. If product analytics
+							is added, it stays off unless you have accepted it, and the Cookie
+							Notice is updated before anything is set.
 						</dd>
 					</dl>
 				{/if}
@@ -110,10 +160,19 @@
 				<button type="button" class="btn-link" onclick={() => (showDetails = !showDetails)}>
 					{showDetails ? 'Hide details' : 'Manage'}
 				</button>
-				<button type="button" class="btn-secondary" onclick={() => record('rejected')}>
+				<!--
+					Both choices carry the SAME class, and that is the point. Accept was
+					a filled, bold, accent-coloured button and Reject a plain outline —
+					same size and same place, but EDPB Guidelines 03/2022 treat exactly
+					that visual-prominence asymmetry as a deceptive-design nudge, and
+					the Cookie Notice claims neither option is styled to stand out.
+					Either the sentence or the styling had to give; the styling is the
+					thing a regulator actually looks at.
+				-->
+				<button type="button" class="btn-choice" onclick={() => record('rejected')}>
 					Reject non-essential
 				</button>
-				<button type="button" class="btn-accent" onclick={() => record('accepted')}>
+				<button type="button" class="btn-choice" onclick={() => record('accepted')}>
 					Accept all
 				</button>
 			</div>
@@ -169,6 +228,10 @@
 		color: var(--text);
 	}
 
+	.consent-copy a {
+		color: var(--accent-on-tint);
+	}
+
 	.consent-details {
 		margin: 12px 0 0;
 		padding: 12px 14px;
@@ -218,24 +281,14 @@
 		padding-right: 4px;
 	}
 
-	.btn-secondary {
-		background: transparent;
-		border-color: var(--border);
-		color: var(--text);
-	}
-
-	.btn-secondary:hover {
-		border-color: var(--text-muted);
-	}
-
-	.btn-accent {
+	.btn-choice {
 		background: var(--accent-strong);
 		border-color: var(--accent-strong);
 		color: #fff;
 		font-weight: 600;
 	}
 
-	.btn-accent:hover {
+	.btn-choice:hover {
 		filter: brightness(1.08);
 	}
 

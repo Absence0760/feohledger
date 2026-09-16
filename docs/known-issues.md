@@ -5,8 +5,13 @@ names the root cause, the evidence, blast radius, and a recommended fix
 approach — this is a staging area for real problems, not a place to let them
 go stale. See root `CLAUDE.md` guard rail 6 (no dangling deferred findings).
 
-**Two entries are open** — the `/organization` 320px reflow defect below, and
-the `queue-blocked` e2e cases at the bottom. The other
+**Seven entries are open** — three privacy defects surfaced by publishing the
+legal pages (the DSAR-export bank-detail exposure, the Positive Pay file's
+unexpiring account numbers, and the erasure/export completeness gap), the
+`/organization` 320px reflow defect, and the three local-e2e entries at the
+bottom. The header previously said "one" while
+those three e2e entries sat beneath it; a known-issues file that under-reports
+itself is the failure this note already warned about once. The other
 nine are `~~struck-through~~` resolved stubs, kept because the *diagnosis* is
 the expensive part and is worth not re-deriving. Add a new entry at the top when
 a defect is diagnosed but can't be fixed in the same session.
@@ -22,6 +27,138 @@ goes to [followups.md](followups.md). Reasoning behind a deliberate design call
 goes to [decisions.md](decisions.md).
 
 ---
+
+## The DSAR export is the one surface that returns unmasked bank details
+
+**Issue:** [#423](https://github.com/Absence0760/feohledger/issues/423)
+
+**Found:** 2026-09-15, in the pre-counsel legal review of the published pages
+(`reviews/saas-legal-review-legal-pages.md`, H12).
+
+`app/services/privacy_export.py:298-299` puts `vendor.bank_details` and
+`vendor.beneficial_owner_data` into the export bundle verbatim:
+
+```python
+"bank_details": vendor.bank_details,
+"beneficial_owner_data": vendor.beneficial_owner_data,
+```
+
+`Vendor.bank_details` is JSONB holding the real `account_number`,
+`routing_number`, `wire_routing_number` and `iban` (`app/api/vendors.py:150`
+names them as `_BANK_SECRET_KEYS`). **Every other surface in the product reduces
+them to the last four digits** — the audit trail via
+`_bank_details_audit_summary`, the change-request queue via
+`maskedProposalSummary`, the UI, the logs, the error bodies. This one does not.
+
+**Why it is not simply correct-by-Art-15.** A data subject is entitled to their
+own personal data, so exporting a supplier's own bank details *to that supplier*
+is defensible. The problem is who can pull it: `POST /api/privacy/dsar` is
+`require_roles(ROLE_ADMIN)` and takes a subject identifier, so **any org admin
+can generate, for any vendor contact in the tenant, a downloadable file
+containing that supplier's full banking credentials** — with no dual control, no
+step-up, and no `vendor.bank_change.approve` permission required. The dual-control
+gate on *changing* bank details (`VendorChangeRequest`) exists precisely because
+those values are the BEC-fraud target; reading them out in bulk is the same asset
+with none of the ceremony.
+
+**Blast radius.** Privilege-escalation-shaped rather than a GDPR failure: the
+export is audited (`dispatch_audit` at `app/api/privacy.py:127-140`), so it is
+traceable after the fact, but nothing prevents it. It is also the one path that
+puts full account numbers into a file that then leaves the system by whatever
+route the admin chooses.
+
+**Recommended fix.** Not "mask it and move on" — that would break the Art 15
+right the endpoint exists to serve. The shape that keeps both: mask by default in
+the bundle, and gate the unmasked variant behind the same dual-control the change
+path uses (or a step-up plus an explicit `include_banking` flag that is separately
+audited), so producing one is a deliberate, attributable act rather than a side
+effect of a routine DSAR. That is a design decision about the DSAR contract, which
+is why this is an entry rather than a same-session patch.
+
+---
+
+## The Positive Pay file holds every vendor's full account number, with no expiry
+
+**Issue:** [#425](https://github.com/Absence0760/feohledger/issues/425)
+
+**Found:** 2026-09-15, same review (H10).
+
+The generated ACH-authorization / check-issue file is the one artefact that
+legitimately needs full account and routing numbers — `positive_pay_adapters`
+assembles them at generation time, which is why `PositivePayItem` stores only
+`account_last4` (`app/models/positive_pay.py:125`). The file itself lands in
+object storage.
+
+Two things follow that nothing currently handles: the object is **not covered by
+the retention sweep** (which reaches invoices and the audit log only, and is off
+by default anyway), and it is **not reachable by the erasure path** (which never
+touches object storage at all — see the entry below). So a file containing every
+vendor's full banking credentials for a given run persists indefinitely, and a
+supplier's erasure request cannot reach it.
+
+**Recommended fix.** A lifecycle rule on the Positive Pay prefix is the cheap
+half and worth doing on its own — these files have a short operational life, a
+bank consumes them within days. The durable half is the same object-storage leg
+the erasure entry below needs; do them together, because a retention rule that
+deletes on a timer and an erasure path that deletes on request are the same
+traversal with different triggers.
+
+## Erasure and the DSAR export never reach object storage, passkeys or live sessions
+
+**Issue:** [#424](https://github.com/Absence0760/feohledger/issues/424)
+
+**Found:** 2026-09-15, while drafting the published Privacy Policy and DPA
+(`docs/decisions.md` §175) — the pages could not honestly describe the erasure
+and access paths as complete, which is what exposed the gap.
+
+`app/services/privacy_erasure.py` and `app/services/privacy_export.py` both
+operate purely on database rows. Neither module references
+`app/services/storage.py`, `WebAuthnCredential`, or the Redis session registry —
+verified by grep: zero hits for `storage`, `_delete_object`, `webauthn`,
+`session` or `revoke` in either file.
+
+Three concrete consequences:
+
+| Request | What the code does | What the subject is owed |
+|---|---|---|
+| Erasure of a vendor contact | Redacts `email`, `phone`, `address`, `tax_id`, `bank_details`, `beneficial_owner_data`; cascades to portal users and chat bodies | `Vendor.w9_file_key` is left set and the **W-9/W-8 document itself stays in object storage**, as do invoice PDFs, expense receipts, contract documents and chat attachments referencing the subject |
+| Erasure of a user | Tombstones email, nulls `full_name`, SSO ids, `hashed_password`, `mfa_secret`; sets `is_active=False` | Their `WebAuthnCredential` rows survive erasure intact — `credential_id`, `public_key`, `rp_id` — and no session is revoked: no `block_token`, no session purge. **Access itself does stop**, because `get_current_user` re-loads the row and 401s on `not user.is_active` (`app/api/deps.py:134`, and the portal at `app/api/portal_deps.py:49`). What survives is the credential material and the Redis session record until its TTL (≤ `access_token_expire_minutes`, 30 by default), with an un-blocklisted JTI |
+| DSAR export | Profile fields, related invoice/payment summaries, and **counts** of audit and notification activity | No uploaded documents or even references to them; no `Contract`, `Expense`, `VirtualCard`; for a user subject, no `WebAuthnCredential` or `ApiKey` detail. Art 15 is a right to the data, not to a tally of it |
+
+**Blast radius.** Both are GDPR completeness failures — Art 17 for the erasure
+legs, Art 15/20 for the export — and the object-storage leg is the sharp one,
+because a W-9 carries a taxpayer identification number and the retention sweep
+will never remove it either (it only soft-archives invoices). It is not a
+regression: these paths have never covered storage. `backend/docs/privacy.md`'s
+"what is redacted vs preserved" table is **silent** on object storage and
+auth material rather than stating the limitation, so the gap is currently
+invisible to anyone reading the docs.
+
+**Recommended fix.** Erasure needs a storage leg that collects every `*_file_key`
+reachable from the subject and deletes each through
+`storage._delete_object`, plus a call into the existing session-revocation and
+WebAuthn-credential paths; export needs the same collection step to enumerate
+(and ideally bundle) those objects. The subtlety is that an invoice PDF is
+*shared* evidence — it belongs to the money trail the erasure path deliberately
+preserves — so deleting it wholesale is wrong. The likely split is: documents
+whose sole subject is the erased party (W-9/W-8, their portal chat attachments)
+are deleted; documents that are transaction evidence are retained under the same
+justification as the invoice rows, and the policy says so. That judgment is why
+this is an entry rather than a same-session fix.
+
+**Interim honesty.** `/legal/privacy` §12 and the DPA's deletion clause both
+state these limitations explicitly rather than claiming completeness, so nothing
+published is untrue while the gap stands.
+
+**Not closed by tenant deletion, and worth saying so.**
+`services/tenant_deletion` (2026-09-16) sweeps a whole tenant's object-storage
+prefix via the new `storage.delete_prefix`, which is the traversal this entry's
+fix also needs — but it is deliberately NOT the tool for this one. Deleting a
+*tenant* is unconditional: the customer is gone, so every object under
+`{org_id}/` goes. Erasing a *subject* inside a live tenant is the selective case
+this entry describes, where an invoice PDF is shared transaction evidence the
+money trail keeps and a W-9 is not. The per-key collection step is still the
+work; what exists now is a worked example of talking to the bucket at all.
 
 ## Organization settings overflows horizontally at 320px (WCAG 1.4.10)
 

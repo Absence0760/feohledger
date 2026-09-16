@@ -18,6 +18,7 @@ from app.services.erp_adapters.base import (
     erp_failure_message,
 )
 from app.services.erp_adapters.dispatcher import register_adapter
+from app.utils.json_money import dumps_exact_json
 
 
 def _to_decimal(v) -> Decimal | None:
@@ -128,20 +129,23 @@ class MergeDevAdapter(ErpAdapter):
                 "issue_date": payload.invoice_date.isoformat() if payload.invoice_date else None,
                 "due_date": payload.due_date.isoformat() if payload.due_date else None,
                 "currency": payload.currency,
-                "total_amount": float(payload.amount),
-                "sub_total": float(payload.subtotal) if payload.subtotal else None,
-                "total_tax_amount": float(payload.tax_amount) if payload.tax_amount else None,
-                "total_discount": float(payload.discount_amount)
-                if payload.discount_amount
-                else None,
+                # Money stays Decimal all the way to the encoder — `float()`
+                # here would post a rounded amount into the customer's ledger
+                # (see `utils/json_money`). Merge types these as JSON numbers,
+                # and `dumps_exact_json` still emits numbers, so the wire
+                # contract is unchanged.
+                "total_amount": payload.amount,
+                "sub_total": payload.subtotal if payload.subtotal else None,
+                "total_tax_amount": payload.tax_amount if payload.tax_amount else None,
+                "total_discount": payload.discount_amount if payload.discount_amount else None,
                 "memo": payload.description,
                 "purchase_order_number": payload.po_number,
                 "line_items": [
                     {
                         "description": li.description,
-                        "quantity": float(li.quantity) if li.quantity else None,
-                        "unit_price": float(li.unit_price) if li.unit_price else None,
-                        "total_line_amount": float(li.total) if li.total else None,
+                        "quantity": li.quantity if li.quantity else None,
+                        "unit_price": li.unit_price if li.unit_price else None,
+                        "total_line_amount": li.total if li.total else None,
                         "account": li.gl_account,
                     }
                     for li in payload.line_items
@@ -155,7 +159,7 @@ class MergeDevAdapter(ErpAdapter):
         async with httpx.AsyncClient(timeout=30) as client:
             resp = await client.post(
                 f"{_api_base()}/invoices",
-                json=body,
+                content=dumps_exact_json(body),
                 headers=self._headers(idempotency_key=payload.correlation_id),
             )
 

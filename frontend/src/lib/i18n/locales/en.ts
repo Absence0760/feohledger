@@ -83,6 +83,7 @@ export const en = {
 	'shell.profileMenu': 'Profile and account menu',
 	'shell.profile': 'Profile',
 	'shell.profileAndSecurity': 'Profile & Security',
+	'shell.legalAndPrivacy': 'Legal & privacy',
 	'shell.logOut': 'Log Out',
 	'shell.expandSidebar': 'Expand sidebar',
 	'shell.collapseSidebar': 'Collapse sidebar',
@@ -3137,6 +3138,7 @@ export const en = {
 	'portal.shell.logOut': 'Log out',
 	'portal.shell.footerSupport': 'Support',
 	'portal.shell.footerLegal': 'Legal',
+	'portal.shell.footerPlatformLegal': 'Privacy & terms',
 
 	// Portal login + MFA (routes/portal/login/+page.svelte)
 	'portal.login.subtitle': 'Sign in to submit invoices and view payments',
@@ -3548,6 +3550,7 @@ export const en = {
 	'auth.signup.email': 'Email',
 	'auth.signup.submit': 'Send verification email',
 	'auth.signup.submitting': 'Sending verification…',
+	'auth.signup.legalConsent': 'By creating a workspace you agree to the {terms} and the {privacy}, including the {dpa} that governs supplier and invoice data you load into it.',
 	'auth.signup.footerPre': 'Already have a workspace? Visit ',
 	'auth.signup.footerPost': ' to sign in.',
 

@@ -8,9 +8,10 @@ a full S3 round trip (up to `MAX_FILE_SIZE` of body) to the event loop, and for
 that whole window the worker serves no other request.
 
 `services/storage` is the single chokepoint: `_put_object` / `_get_object` /
-`_delete_object` are the only places boto3 is touched, and each hands the
-blocking call to `asyncio.to_thread`. These tests pin both halves — the calls
-really do leave the loop thread, and no module under `app/` reaches around them.
+`_delete_object` / `delete_prefix` are the only places boto3 is touched, and
+each hands the blocking call to `asyncio.to_thread`. These tests pin both
+halves — the calls really do leave the loop thread, and no module under `app/`
+reaches around them.
 """
 
 from __future__ import annotations
@@ -29,8 +30,17 @@ from app.services import storage
 APP_DIR = pathlib.Path(__file__).resolve().parents[1] / "app"
 
 # The boto3 operations that must only ever be issued from inside storage's
-# thread-offloaded primitives.
-BLOCKING_S3_OPS = {"put_object", "get_object", "delete_object"}
+# thread-offloaded primitives. `list_objects_v2` / `delete_objects` are the
+# bulk pair `delete_prefix` uses to sweep a deleted tenant's documents: a
+# traversal is the LONGEST blocking call in the module (many round trips, not
+# one), so it is the last thing that should run on the loop.
+BLOCKING_S3_OPS = {
+    "put_object",
+    "get_object",
+    "delete_object",
+    "delete_objects",
+    "list_objects_v2",
+}
 
 # `storage.py` owns the document bucket. The audit-shipping WORM adapter talks
 # to its OWN Object-Lock bucket and already wraps every call in
@@ -55,7 +65,14 @@ def _recording_client(calls: list[int | None]) -> MagicMock:
     client.put_object = MagicMock(side_effect=_note)
     client.get_object = MagicMock(side_effect=_note)
     client.delete_object = MagicMock(side_effect=_note)
+    client.delete_objects = MagicMock(side_effect=_note)
     client.head_bucket = MagicMock(side_effect=_note)
+
+    paginator = MagicMock()
+    paginator.paginate = MagicMock(
+        side_effect=lambda **_kw: iter([{"Contents": [{"Key": "org/one.pdf"}]}])
+    )
+    client.get_paginator = MagicMock(return_value=paginator)
     return client
 
 
@@ -69,6 +86,7 @@ async def test_put_get_delete_all_run_off_the_event_loop_thread():
         await storage._put_object(key, b"BYTES", "application/pdf")
         content, content_type = await storage._get_object(key)
         await storage._delete_object(key)
+        await storage.delete_prefix("org/")
 
     assert content == b"BYTES"
     assert content_type == "application/pdf"
