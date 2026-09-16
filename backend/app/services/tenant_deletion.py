@@ -41,7 +41,6 @@ from dataclasses import dataclass, field
 
 from sqlalchemy import text
 
-from app.config import settings
 from app.database import control_session_factory
 from app.services import storage
 from app.services.tenant_provisioning import (
@@ -145,10 +144,6 @@ class TenantDeletionResult:
     database_dropped: bool
     control_rows_deleted: dict[str, int] = field(default_factory=dict)
     dry_run: bool = False
-
-
-def tenant_db_name(slug: str) -> str:
-    return f"{settings.tenant_db_prefix}{slug}"
 
 
 async def _load_plan(session, slug: str) -> TenantDeletionPlan:

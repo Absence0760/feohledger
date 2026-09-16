@@ -7124,6 +7124,19 @@ Caught by running it against real S3 semantics rather than reading it. And the
 suffix is `/`-anchored, so deleting `acme` cannot match `not-acme` or the shared
 `feohledger.dump`.
 
+**The backup confirmation rests on a re-list, not on a loop having run.** A
+review of the first version found the listing's `2>/dev/null | … || true` made an
+AWS failure — throttling, a wrong region, a missing permission — indistinguishable
+from "no backups exist": the delete loop iterated zero times and the confirmation
+still said the backups were removed. Now stderr stays visible, a failed listing
+stops the script, and after deleting it lists again and refuses to print the
+confirmation unless that second listing is empty. The re-list also catches a real
+race the first version missed: the nightly backup cron writing a fresh dump
+between the inventory and the delete. Both were verified against real S3
+semantics, and a re-run finishes the job — which is why the inventory step
+tolerates an organisation that is already gone rather than refusing, so the one
+leg most likely to need a retry can have one.
+
 **What deletion does not reach is printed, not assumed.** The confirmation the
 operator sends names the two residues the DPA already discloses — the shared
 control-plane dump, which is not selectively editable and ages out on the

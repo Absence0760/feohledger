@@ -66,14 +66,28 @@ fi
 
 # --- 0. Show what is about to go, from the application's own inventory -------
 
+# A missing organisation is not necessarily a typo: the backup and Caddy legs
+# below depend only on the SLUG, so a run that destroyed the tenant and then
+# failed on backups has to be re-runnable to finish the job. Refusing here would
+# make the one leg most likely to need a retry the one that cannot have it.
+# A genuine typo is caught at the end of this section, where nothing at all is
+# found to remove.
 echo "==> inventory"
-"${COMPOSE[@]}" exec -T api python scripts/delete_tenant.py --slug "$SLUG" --dry-run
+TENANT_PRESENT=1
+if ! "${COMPOSE[@]}" exec -T api python scripts/delete_tenant.py --slug "$SLUG" --dry-run; then
+	TENANT_PRESENT=0
+	echo "    No organisation with that slug — already deleted, or never existed."
+	echo "    Continuing: the Caddy and backup legs below key off the slug alone."
+fi
 
-backup_keys() {
-	# Every version and delete marker of this tenant's nightly dumps, across
-	# every date prefix. `--output text` keeps jq out of the dependency list —
-	# the VM installs docker, git, cronie, awscli and sops, and nothing else.
-	[ -n "$BUCKET" ] || return 0
+# Every version and delete marker of this tenant's nightly dumps, across every
+# date prefix. Listed ONCE, here, at the top level — not from inside the delete
+# loop's process substitution, where `die` would exit only the subshell and the
+# script would sail on reporting a success it had not verified.
+#
+# `--output text` keeps jq out of the dependency list: the VM installs docker,
+# git, cronie, awscli and sops, and nothing else.
+list_backup_versions() {
 	# Each list is filtered SEPARATELY and the results flattened after. The
 	# obvious shape — `[Versions, DeleteMarkers][][?ends_with(...)]` — parses
 	# fine, runs fine, and matches NOTHING: the filter binds to the flattened
@@ -83,19 +97,39 @@ backup_keys() {
 	# saying the backups were deleted.
 	#
 	# The `/` in the suffix is load-bearing too: without it `feoh_acme.dump`
-	# would also match a tenant named `not-acme`.
-	aws s3api list-object-versions --bucket "$BUCKET" --prefix "pg/" \
+	# would also match a tenant named `not-acme`, and `feohledger.dump` — the
+	# shared control-plane dump — must never match at all.
+	#
+	# stderr is NOT swallowed. An AWS failure (throttling, wrong region, a
+	# missing permission) has to look different from "no backups exist",
+	# because this script's whole output is evidence that a legal deletion
+	# obligation was met.
+	local listing
+	if ! listing=$(aws s3api list-object-versions --bucket "$BUCKET" --prefix "pg/" \
 		--query "[Versions[?ends_with(Key, '/${DB_NAME}.dump')], DeleteMarkers[?ends_with(Key, '/${DB_NAME}.dump')]][][].[Key,VersionId]" \
-		--output text 2>/dev/null | grep -v '^None' || true
+		--output text); then
+		die "listing backup objects in s3://${BUCKET} failed (see the AWS error above). Refusing to report the backups as deleted. Fix the cause and re-run — this script is re-runnable."
+	fi
+	printf '%s\n' "$listing" | grep -v '^None' | grep . || true
 }
 
+BACKUP_VERSIONS=""
+BACKUP_COUNT=0
 if [ -n "$BUCKET" ]; then
-	BACKUP_COUNT=$(backup_keys | grep -c . || true)
+	BACKUP_VERSIONS=$(list_backup_versions)
+	BACKUP_COUNT=$(printf '%s\n' "$BACKUP_VERSIONS" | grep -c . || true)
 	echo "Backup objects:    ${BACKUP_COUNT} version(s) of pg/*/${DB_NAME}.dump in s3://${BUCKET}"
 else
 	echo "Backup objects:    BACKUP_S3_BUCKET is not set — no backup store to clean."
 fi
-echo "Caddy host:        ${HOST}"
+
+CADDY_PRESENT=0
+grep -q "^${HOST} {" tenants.caddy 2>/dev/null && CADDY_PRESENT=1
+echo "Caddy host:        ${HOST} $([ "$CADDY_PRESENT" -eq 1 ] && echo "(serving)" || echo "(no block)")"
+
+if [ "$TENANT_PRESENT" -eq 0 ] && [ "$BACKUP_COUNT" -eq 0 ] && [ "$CADDY_PRESENT" -eq 0 ]; then
+	die "nothing found for slug '$SLUG' — no organisation, no backups, no Caddy block. Check the spelling."
+fi
 
 if [ "$DRY_RUN" -eq 1 ]; then
 	echo
@@ -116,7 +150,7 @@ fi
 
 # --- 2. Stop serving the host ----------------------------------------------
 
-if grep -q "^${HOST} {" tenants.caddy 2>/dev/null; then
+if [ "$CADDY_PRESENT" -eq 1 ]; then
 	echo "==> removing the Caddy host block for ${HOST}"
 	# Drop the block from its host line to its closing brace. add-tenant.sh
 	# writes a fixed three-line shape, and awk tracks the brace rather than
@@ -136,11 +170,16 @@ fi
 
 # --- 3. Documents, database, control plane ---------------------------------
 
-echo "==> deleting tenant data"
-"${COMPOSE[@]}" exec -T api python scripts/delete_tenant.py --slug "$SLUG" --yes
+if [ "$TENANT_PRESENT" -eq 1 ]; then
+	echo "==> deleting tenant data"
+	"${COMPOSE[@]}" exec -T api python scripts/delete_tenant.py --slug "$SLUG" --yes
+else
+	echo "==> tenant data already deleted — skipping"
+fi
 
 # --- 4. Backups -------------------------------------------------------------
 
+BACKUP_RESULT="no backup store configured"
 if [ -n "$BUCKET" ]; then
 	echo "==> deleting backup objects from s3://${BUCKET}"
 	REMOVED=0
@@ -148,8 +187,19 @@ if [ -n "$BUCKET" ]; then
 		[ -n "$KEY" ] || continue
 		aws s3api delete-object --bucket "$BUCKET" --key "$KEY" --version-id "$VERSION" >/dev/null
 		REMOVED=$((REMOVED + 1))
-	done < <(backup_keys)
+	done < <(printf '%s\n' "$BACKUP_VERSIONS")
 	echo "    removed ${REMOVED} object version(s)"
+
+	# Re-list and require it to be empty. The confirmation this script prints is
+	# the customer's evidence under DPA § 13, so it must rest on a verification
+	# rather than on a loop having run — a loop that iterated zero times looks
+	# exactly like a loop that had nothing to do.
+	LEFTOVER=$(list_backup_versions)
+	if [ -n "$LEFTOVER" ]; then
+		echo "$LEFTOVER" >&2
+		die "backup objects for ${DB_NAME} still present after deletion (listed above). The confirmation has NOT been printed; re-run once the cause is fixed."
+	fi
+	BACKUP_RESULT="${REMOVED} version(s) of pg/*/${DB_NAME}.dump removed from s3://${BUCKET}, verified empty"
 fi
 
 # --- 5. The written confirmation, and what it does not cover ----------------
@@ -160,7 +210,7 @@ cat <<-EOF
 
 	  host stopped:     ${HOST}
 	  tenant database:  ${DB_NAME}
-	  backups:          $([ -n "$BUCKET" ] && echo "pg/*/${DB_NAME}.dump removed from s3://${BUCKET}" || echo "no backup store configured")
+	  backups:          ${BACKUP_RESULT}
 
 	Two residues remain, exactly as /legal/dpa § 13 discloses:
 
