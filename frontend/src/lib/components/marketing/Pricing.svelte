@@ -1,6 +1,7 @@
 <script lang="ts">
 	import IconArrow from '~icons/material-symbols/arrow-forward';
 	import IconCheck from '~icons/material-symbols/check-small';
+	import { CONTACT } from '$lib/legal/operator';
 
 	type Billing = 'monthly' | 'annual';
 	let billing = $state<Billing>('annual');
@@ -60,7 +61,14 @@
 			priceMonthly: 29,
 			priceAnnual: 24,
 			unit: 'per seat / month',
-			ctaLabel: 'Start 14-day trial',
+			// Was 'Start 14-day trial'. It routes to the same `/signup` the free
+			// plan uses, and `tenant_provisioning._provision_into` binds EVERY new
+			// org to the `free` plan regardless — there is no plan selection in
+			// signup and no trial-flagged Subscription. The button could not do
+			// what it said, which is a present-tense false statement rather than a
+			// price that might change. Restore the trial wording when signup can
+			// actually provision one.
+			ctaLabel: 'Start free, upgrade any time',
 			ctaHref: '/signup',
 			featured: true,
 			features: [
@@ -72,9 +80,9 @@
 				'2/3-way PO matching + exception queue',
 				'Virtual card payments with rebates',
 				'Mobile app (iOS + Android)',
-				'Priority email + chat support',
+				'Priority email support',
 			],
-			footnote: 'Rebates on card payments typically offset the subscription.',
+			footnote: 'Virtual-card rebates vary by issuer, card spend and vendor acceptance.',
 		},
 		{
 			name: 'Enterprise',
@@ -83,15 +91,15 @@
 			priceAnnual: null,
 			unit: 'contact sales',
 			ctaLabel: 'Talk to us',
-			ctaHref: 'mailto:sales@feohledger.example',
+			ctaHref: `mailto:${CONTACT.sales}`,
 			features: [
 				'Everything in Pro',
 				'SSO (SAML + OIDC) with SCIM provisioning',
 				'BYOK for all providers — your data, your keys',
 				'Dedicated tenant cluster option',
-				'99.9% uptime SLA',
+				'Uptime commitment by agreement',
 				'Named customer success manager',
-				'Security review + SOC 2 attestation',
+				'Support for your security review',
 				'Custom data retention policy',
 			],
 		},
@@ -110,7 +118,7 @@
 		<span class="eyebrow">Pricing</span>
 		<h2>Simple plans. No sales call required.</h2>
 		<p>
-			Start free, upgrade when the rebates start covering the bill. Every plan
+			Start free and upgrade when the volume justifies it. Every plan
 			includes the full AI extraction, approval workflow, and mobile app —
 			you're paying for scale and integrations, not basic features.
 		</p>
@@ -171,7 +179,7 @@
 	</div>
 
 	<div class="compare-note">
-		Need usage-based? Hitting 10k+ invoices a month? <a href="mailto:sales@feohledger.example"
+		Need usage-based? Hitting 10k+ invoices a month? <a href="mailto:{CONTACT.sales}"
 			>Ask about volume pricing</a
 		>.
 	</div>
