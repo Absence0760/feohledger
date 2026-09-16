@@ -36,10 +36,12 @@ env:
   # avoid that, so the current 43 KB max has room to grow naturally before the
   # gate has anything to say.
   #
-  # IMPORTANT: the total sums ALL emitted chunks, including lazily-imported
-  # ones. Code-splitting a dependency therefore does NOT lower this number —
-  # only removing weight does. (The i18n locale catalogues are lazy chunks and
-  # are counted here in full.)
+  # IMPORTANT: the total counts lazily-imported chunks too. Code-splitting a
+  # dependency therefore does NOT lower this number — only removing weight
+  # does. The one exception is the lazy locale catalogues: a visitor fetches at
+  # most one, so only the largest is counted (see the 2026-09-15 entry). The
+  # total is summed in bytes and rounded once, so the number of chunks has no
+  # effect on it.
   #
   # ── Ceiling change log — append a dated entry with the measurement + reason ──
   # 2026-08-06 — initial: total 850, largest 100. Baseline 747 / 43.
@@ -76,7 +78,24 @@ env:
   # ~10% headroom on the new 1046 baseline — tighter than the last bump's 14%,
   # because this round's growth is understood and attributable rather than
   # diffuse.
-  MAX_TOTAL_KB: 1150
+  # 2026-09-15 — the metric changed, so the ceiling was re-derived: total
+  # 1150 → 785. The entry above named its own trigger, and it fired: the brand
+  # mark (PR #416) measured 1152 on CI against main's 1149, over the ceiling by
+  # two new chunks rather than by any real weight. The old total had two
+  # distortions:
+  #   - It rounded every file up to a whole KB before summing. Across 239 files
+  #     that added about 125 KB, and splitting code into more chunks raised the
+  #     total with no new weight.
+  #   - It counted all five lazy locale catalogues (76-81 KB each), when a
+  #     visitor fetches at most one.
+  # The total is now summed in bytes, rounded once, and counts every chunk but
+  # only the largest catalogue, the most any one visitor downloads. Measured on
+  # that branch: 714 KB (1025 KB shipped with every catalogue, 239 files).
+  # The largest chunk is 81 KB, the ja catalogue, so that ceiling is unchanged.
+  # ~10% headroom on 714, the same margin as the entry above. The four
+  # uncounted catalogues are still bounded one by one by MAX_LARGEST_CHUNK_KB,
+  # and the locale key-parity test keeps them growing with the counted one.
+  MAX_TOTAL_KB: 785
   MAX_LARGEST_CHUNK_KB: 100
 
 jobs:
@@ -114,29 +133,78 @@ jobs:
         run: |
           set -euo pipefail
           BUILD_DIR=frontend/build
+          # Vite's client manifest maps each hashed chunk back to its source. It
+          # is the only reliable way to tell a locale catalogue from any other
+          # chunk.
+          MANIFEST=frontend/.svelte-kit/output/client/.vite/manifest.json
           if [ ! -d "$BUILD_DIR" ]; then
             echo "::error::No build output at $BUILD_DIR"
             exit 1
           fi
+          if [ ! -f "$MANIFEST" ]; then
+            echo "::error::No Vite manifest at $MANIFEST. The total needs it to find the lazy locale catalogues; if SvelteKit moved it, update MANIFEST in this step."
+            exit 1
+          fi
 
-          total_kb=0
-          largest_kb=0
+          # The lazily imported locale catalogues (src/lib/i18n/catalogues.ts).
+          # English is a static import, so it sits in the entry chunks and is
+          # counted like any other code.
+          declare -A catalogue=()
+          while IFS= read -r file; do
+            if [ ! -f "$BUILD_DIR/$file" ]; then
+              echo "::error::$MANIFEST names $file, which is not in $BUILD_DIR: the manifest and the build disagree."
+              exit 1
+            fi
+            catalogue["$BUILD_DIR/$file"]=1
+          done < <(jq -r 'to_entries[]
+            | select(.value.isDynamicEntry == true)
+            | select((.value.src // .key) | test("^src/lib/i18n/locales/[^/]+\\.ts$"))
+            | .value.file' "$MANIFEST")
+          if [ "${#catalogue[@]}" -eq 0 ]; then
+            echo "::error::No lazy locale catalogue found in $MANIFEST. If the catalogues moved or stopped being lazy, the one-catalogue rule below no longer describes a visitor; update this step."
+            exit 1
+          fi
+
+          shipped_bytes=0    # every JS + CSS file the build emits
+          counted_bytes=0    # every file except the catalogues...
+          catalogue_bytes=0  # ...plus the largest catalogue, added after the loop
+          catalogue_path=""
+          largest_bytes=0
           largest_path=""
           file_count=0
 
           while IFS= read -r -d '' f; do
-            gz_size=$(gzip -c "$f" | wc -c)
-            kb=$(( (gz_size + 1023) / 1024 ))
-            total_kb=$(( total_kb + kb ))
+            gz_bytes=$(gzip -c "$f" | wc -c)
+            shipped_bytes=$(( shipped_bytes + gz_bytes ))
             file_count=$(( file_count + 1 ))
-            if [ "$kb" -gt "$largest_kb" ]; then
-              largest_kb="$kb"
+            if [ "$gz_bytes" -gt "$largest_bytes" ]; then
+              largest_bytes="$gz_bytes"
               largest_path="$f"
             fi
+            if [ -n "${catalogue[$f]:-}" ]; then
+              if [ "$gz_bytes" -gt "$catalogue_bytes" ]; then
+                catalogue_bytes="$gz_bytes"
+                catalogue_path="$f"
+              fi
+            else
+              counted_bytes=$(( counted_bytes + gz_bytes ))
+            fi
           done < <(find "$BUILD_DIR" \( -name '*.js' -o -name '*.css' \) -print0)
+          counted_bytes=$(( counted_bytes + catalogue_bytes ))
 
-          echo "Files measured:       ${file_count}"
-          echo "Total gzipped JS+CSS: ${total_kb} KB (budget ${MAX_TOTAL_KB} KB)"
+          # Summed in bytes, rounded up once. Rounding each file up first added
+          # up to 1 KB per file, so splitting code into more chunks raised the
+          # total without adding any weight.
+          kb() { echo $(( ($1 + 1023) / 1024 )); }
+          total_kb=$(kb "$counted_bytes")
+          shipped_kb=$(kb "$shipped_bytes")
+          catalogue_kb=$(kb "$catalogue_bytes")
+          largest_kb=$(kb "$largest_bytes")
+
+          echo "Files measured:       ${file_count}, ${#catalogue[@]} of them lazy locale catalogues"
+          echo "Total gzipped JS+CSS: ${total_kb} KB (budget ${MAX_TOTAL_KB} KB): every chunk, one catalogue"
+          echo "Shipped, not gated:   ${shipped_kb} KB: every chunk, every catalogue"
+          echo "Largest catalogue:    ${catalogue_kb} KB — ${catalogue_path}"
           echo "Largest chunk:        ${largest_kb} KB — ${largest_path} (budget ${MAX_LARGEST_CHUNK_KB} KB)"
 
           {
@@ -144,12 +212,13 @@ jobs:
             echo ""
             echo "| Metric | Size | Budget |"
             echo "|---|---|---|"
-            echo "| Total gzipped JS+CSS | ${total_kb} KB | ${MAX_TOTAL_KB} KB |"
+            echo "| Total gzipped JS+CSS (every chunk, one locale catalogue) | ${total_kb} KB | ${MAX_TOTAL_KB} KB |"
             echo "| Largest single chunk | ${largest_kb} KB | ${MAX_LARGEST_CHUNK_KB} KB |"
-            echo "| Files measured | ${file_count} | — |"
+            echo "| Shipped (every catalogue) | ${shipped_kb} KB | not gated |"
+            echo "| Files measured | ${file_count} (${#catalogue[@]} lazy catalogues) | — |"
             echo ""
             echo "Largest chunk: \`${largest_path#"$BUILD_DIR"/}\`"
-          } >> "$GITHUB_STEP_SUMMARY"
+          } >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
 
           failed=0
           if [ "$total_kb" -gt "$MAX_TOTAL_KB" ]; then

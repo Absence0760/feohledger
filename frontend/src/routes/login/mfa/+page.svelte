@@ -1,4 +1,5 @@
 <script lang="ts">
+	import BrandMark from '$lib/components/ui/BrandMark.svelte';
 	import { auth, type MFAChallenge } from '$lib/stores/auth.svelte';
 	import { goto } from '$app/navigation';
 	import { onMount } from 'svelte';
@@ -91,6 +92,7 @@
 
 <div class="login-page">
 	<form class="login-card" onsubmit={handleSubmit}>
+		<BrandMark size={32} />
 		<h1>{m('auth.mfa.heading')}</h1>
 		<p class="subtitle">
 			{#if method === 'passkey'}

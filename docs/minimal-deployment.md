@@ -31,7 +31,9 @@ The app was designed local-first, and that carries straight into a cheap deploy:
   decision before first boot (§ 3).
 - All background sweeps are asyncio tasks inside the API process, each behind
   an `FEOH_*_ENABLED` flag.
-- The frontend is a static SPA; the only build-time input is `PUBLIC_API_URL`.
+- The frontend is a static SPA; its build-time inputs are `PUBLIC_API_URL` and
+  `PUBLIC_SITE_URL` (the link-preview card's image origin), both derived by
+  `deploy.sh` from domains the env already declares.
 - Tenant routing is subdomain → `X-Tenant-Slug`; CORS for that is already
   solved by `FEOH_CORS_PRODUCTION_DOMAIN` (wildcard subdomain regex).
 
@@ -180,7 +182,10 @@ Four services (see [`deploy/README.md`](../deploy/README.md) for operations):
   - `api.feohledger.com` → `reverse_proxy api:8000`
 
 The frontend is built by the deploy script with
-`PUBLIC_API_URL=https://<API_DOMAIN>` baked in.
+`PUBLIC_API_URL=https://<API_DOMAIN>` and `PUBLIC_SITE_URL=https://<APP_DOMAIN>`
+baked in. The second is the origin of the absolute `og:image` URL in the
+link-preview card (`frontend/src/app.html`); see
+[environment.md](environment.md) § Frontend.
 
 ### 3. Backend env (`prod.sops.yaml` — contract: `deploy/prod.sops.yaml.example`)
 
@@ -228,7 +233,8 @@ checks it without deploying), then run
 `deploy/deploy.sh`: it preflights its own prerequisites and the required env
 keys (clear errors before any work happens), pulls main, decrypts secrets,
 builds the frontend in a `node:24` container (`PUBLIC_API_URL` baked from
-`API_DOMAIN`; pnpm store cached in a volume) and the backend image, runs
+`API_DOMAIN`, `PUBLIC_SITE_URL` from `APP_DOMAIN`; pnpm store cached in a
+volume) and the backend image, runs
 `alembic upgrade head && python scripts/migrate_all_tenants.py` **before**
 the new API serves traffic (same ordering contract as the future ECS
 pipeline), then rolls the containers with `up -d --wait` — the deploy fails

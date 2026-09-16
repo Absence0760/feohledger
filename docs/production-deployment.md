@@ -273,7 +273,7 @@ least-privilege policy lands with the workload stack it has to name — tracked 
 | `CLOUDFRONT_DISTRIBUTION_ID` | variable | environment | Distribution to invalidate. |
 | `LAMBDA_FUNCTIONS` | variable | environment | Comma/space-separated Lambda function names for the async workers (extraction / ERP / audit). Each is updated to the new image. |
 | `PUBLIC_API_URL` | variable | environment | API base URL — baked into the frontend build; also the backend job's deploy URL. |
-| `APP_URL` | variable | environment | Public site URL — the frontend job's deploy URL. |
+| `APP_URL` | variable | environment | Public site origin (e.g. `https://feohledger.com`) — the frontend job's deploy URL, and baked into the frontend build as `PUBLIC_SITE_URL` (trailing slash stripped), the origin of the link-preview card's absolute `og:image` URL. **Required**: the Build step fails when it is empty, because SvelteKit would otherwise ship a root-relative image URL silently. See [environment.md](environment.md) § Frontend. |
 
 ### Arming the AWS pipeline
 

@@ -3,7 +3,9 @@ import {
 	EMPTY_BRAND,
 	DEFAULT_PRODUCT_NAME,
 	brandThemeVars,
-	type Brand
+	brandMark,
+	type Brand,
+	type BrandMarkChoice
 } from '$lib/stores/brandTheme';
 
 /**
@@ -13,7 +15,7 @@ import {
  * shape (cache + single in-flight request + resilient fallback).
  *
  * Every field is optional. An empty field means "use the platform default":
- * the bundled "AP" logo + "FeohLedger" product name, and the AA-passing
+ * the FeohLedger mark + "FeohLedger" product name, and the AA-passing
  * accent tokens already in `src/app.css`. The custom accent colors are applied
  * by writing CSS custom properties on `document.documentElement` ONLY when the
  * org actually configured them (see {@link brandThemeVars}) — so an org that
@@ -27,8 +29,8 @@ import {
  * runtime-free `brandTheme.ts` so they're unit-testable; re-exported here.
  */
 
-export type { Brand };
-export { isValidHexColor, brandThemeVars } from '$lib/stores/brandTheme';
+export type { Brand, BrandMarkChoice };
+export { isValidHexColor, brandThemeVars, brandMark } from '$lib/stores/brandTheme';
 
 class BrandStore {
 	brand = $state<Brand>({ ...EMPTY_BRAND });
@@ -43,6 +45,11 @@ class BrandStore {
 	/** Configured logo URL, or '' when the org uses the bundled mark. */
 	get logoUrl(): string {
 		return this.brand.logo_url?.trim() || '';
+	}
+
+	/** Which mark the chrome shows: the logo, the platform mark, or a monogram. */
+	get mark(): BrandMarkChoice {
+		return brandMark(this.brand);
 	}
 
 	get supportUrl(): string {

@@ -40,3 +40,6 @@ dev_dependencies:
 flutter:
   generate: true
   uses-material-design: true
+  # The in-app brand mark, rendered by assets/gen-icons.sh (1x, 2.0x, 3.0x).
+  assets:
+    - assets/brand/

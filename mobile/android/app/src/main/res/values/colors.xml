@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Tints the notification small icon and app name: the brand tile's navy
+         (docs/decisions.md §173). -->
+    <color name="notification_accent">#24345C</color>
+    <!-- The colour Flutter paints behind every screen: scaffoldBackgroundColor
+         of the MaterialApp theme in lib/main.dart (ColorScheme.fromSeed(
+         seedColor: Colors.blue), Material 3, light only). The launch window,
+         the Android 12+ system splash and the window behind the Flutter view
+         all use it, so Flutter's first frame lands on the colour already on
+         screen. It is a copy: change it with the seed colour, together with the
+         backgroundColor in ios/Runner/Base.lproj/LaunchScreen.storyboard. -->
+    <color name="window_background">#F8F9FF</color>
+</resources>

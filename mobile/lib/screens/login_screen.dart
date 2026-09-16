@@ -4,6 +4,7 @@ import 'package:feohledger_mobile/l10n/gen/app_localizations.dart';
 import 'package:feohledger_mobile/screens/mfa_screen.dart';
 import 'package:feohledger_mobile/stores/auth_store.dart';
 import 'package:feohledger_mobile/utils/a11y.dart';
+import 'package:feohledger_mobile/widgets/brand_mark.dart';
 
 class LoginScreen extends StatefulWidget {
   /// Called once the user is fully signed in (password-only or after the MFA
@@ -89,14 +90,8 @@ class _LoginScreenState extends State<LoginScreen> {
                     mainAxisAlignment: MainAxisAlignment.center,
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      // Brand mark — decorative; hidden from assistive tech.
-                      const ExcludeSemantics(
-                        child: Icon(
-                          Icons.receipt_long,
-                          size: 64,
-                          color: Colors.blue,
-                        ),
-                      ),
+                      // Decorative: the app name is spelled out right below.
+                      const Center(child: BrandMark()),
                       const SizedBox(height: 16),
                       Text(
                         l.loginAppName,

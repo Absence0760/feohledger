@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 100 100">
+<g transform="translate(50 50) scale(0.5889) translate(-50.5 -52.5)">
+<mask id="tm-mono" maskUnits="userSpaceOnUse" x="-100" y="-100" width="300" height="300"><rect x="-100" y="-100" width="300" height="300" fill="#fff"/><polygon points="18.00,62.41 38.00,45.62 38.00,50.82 18.00,67.61" fill="#000"/><polygon points="18.00,93.41 38.00,76.62 38.00,81.82 18.00,98.61" fill="#000"/></mask><rect x="24.00" y="18.00" width="9.00" height="79.00" fill="#000000" mask="url(#tm-mono)"/><rect x="36.00" y="8.00" width="9.00" height="78.00" fill="#000000"/><polygon points="43.00,36.53 77.00,8.00 77.00,23.00 43.00,51.53" fill="#000000"/><polygon points="43.00,67.53 77.00,39.00 77.00,54.00 43.00,82.53" fill="#000000"/>
+</g>
+</svg>

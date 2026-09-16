@@ -3,7 +3,9 @@ import {
 	EMPTY_BRAND,
 	DEFAULT_PRODUCT_NAME,
 	brandThemeVars,
-	type Brand
+	brandMark,
+	type Brand,
+	type BrandMarkChoice
 } from '$lib/stores/brandTheme';
 
 /**
@@ -39,6 +41,11 @@ class PortalBrandStore {
 	/** Configured logo URL, or '' when the org uses the bundled mark. */
 	get logoUrl(): string {
 		return this.brand.logo_url?.trim() || '';
+	}
+
+	/** Which mark the portal shows: the logo, the platform mark, or a monogram. */
+	get mark(): BrandMarkChoice {
+		return brandMark(this.brand);
 	}
 
 	get supportUrl(): string {

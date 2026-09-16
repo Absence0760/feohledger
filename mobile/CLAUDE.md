@@ -9,7 +9,7 @@ This file holds the rules. The reference material lives in `mobile/docs/`:
 | Topic | File |
 |-------|------|
 | What mobile ships vs web-only vs out of scope | `docs/feature-status.md` |
-| The `lib/` tree — screens, stores, widgets, models, services | `docs/project-structure.md` |
+| The `lib/` tree — screens, stores, widgets, models, services; the native launch screens | `docs/project-structure.md` |
 | i18n — ARB catalogues, delegate, locale-aware formatting | `docs/i18n.md` |
 
 ## Stack
@@ -32,6 +32,11 @@ flutter analyze              # lint/analyze
 flutter test                 # run tests
 flutter gen-l10n             # regenerate AppLocalizations from lib/l10n/*.arb
 ```
+
+`flutter build ios` needs macOS and Xcode. On Linux, rely on CI's **Mobile iOS
+build** job (`ci.yml` → `mobile-ios-build`), which runs the release workflow's
+exact `flutter build ios --release --no-codesign` on every PR touching
+`mobile/`, with no signing and no Firebase config.
 
 ## Project structure
 
@@ -253,7 +258,7 @@ Follow these conventions on every new screen/widget:
   *darkened* variant (`.shade700`/`.shade800`/`.shade900`) of the accent over
   the 0.15-alpha tint — the full-saturation hue fails AA. Muted greys use
   `grey.shade700` (not `shade500`/`shade600`, which fail at 11-14px).
-- **Decorative icons** (brand mark, placeholder camera glyph, aging dots) are
+- **Decorative icons** (the `BrandMark` widget, placeholder camera glyph, aging dots) are
   wrapped in `ExcludeSemantics` so they aren't announced.
 - **Tap targets ≥48dp** — use `IconButton` defaults; don't shrink hit areas.
 - **Don't disable text scaling / reduce-motion.** The app uses default Material
@@ -378,3 +383,4 @@ helpers. A new string ships with its ARB entry in the same change.
 - **Material 3** with `useMaterial3: true`
 - **iOS + Android** — no web/desktop targets
 - **Lint rules** (`analysis_options.yaml`): `prefer_single_quotes`, `require_trailing_commas`, `sort_pub_dependencies`, `always_use_package_imports`
+- **Native launch screens copy `SplashScreen`** — its background colour (`#F8F9FF`, the theme's scaffold background) and the mark's 26px lift above centre are duplicated in the Android res and the iOS storyboard, so a change to the seed colour or the splash column changes them too. Their images come from `assets/gen-icons.sh`. Details: `docs/project-structure.md` § Launch screens.
