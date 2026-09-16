@@ -702,8 +702,39 @@ inherit it for free. Reuse these; don't re-solve them per page.
   `:focus-visible` (RowLink) layers on top.
 - **Reduced motion** (app.css end; WCAG 2.3.3) — a global
   `@media (prefers-reduced-motion: reduce)` block near-zeroes all
-  animation/transition durations. Don't gate functionality on a
-  transition finishing.
+  animation/transition durations **and zeroes their delays**. Don't gate
+  functionality on a transition finishing. See **Motion** below for what
+  that implies about how an animation must be written.
+- **Motion** (the marketing page + auth shell; decisions §180). Five rules,
+  each one learned from a defect:
+  1. **The last keyframe is the resting state.** Under reduced motion the
+     final frame is the whole experience, so an entrance ends visible and a
+     loop ends on its finished picture — never on the blank frame it starts
+     from, never off-screen.
+  2. **A hidden starting state is set by script, never by a stylesheet.**
+     `use:reveal` (`$lib/actions/reveal.ts`) adds `.reveal` only once it has
+     attached, and not at all under reduced motion or without
+     `IntersectionObserver` — so a failed bundle is a normal page, not a blank
+     one. `use:countUp` likewise leaves the real figure in the markup.
+  3. **Delays count.** An entrance with a delay and `backwards` fill sits on its
+     first frame (usually opacity 0) for the whole delay; that is why the
+     reduced-motion rule zeroes delays. Guard:
+     `tests-e2e/a11y/reduced-motion.spec.ts`.
+  4. **Continuous motion needs an in-page stop (WCAG 2.2.2).** Anything that
+     moves on its own for more than five seconds lives under a root carrying
+     `data-motion`, driven by `marketing/MotionToggle.svelte`; `app.css` pauses
+     every animation beneath it. A page that won't carry the control doesn't
+     get continuous motion — the auth pages use `<Backdrop still>` and short
+     entrances instead. The OS preference does not discharge 2.2.2.
+  5. **Fade with colour, not `opacity`, at rest.** A decorative watermark takes
+     an `rgba()` colour; `opacity` composites a whole subtree
+     (`opacityAudit.test.ts`). `opacity: 0` / `1` in a reveal or keyframe is fine.
+
+  Playwright's `toBeVisible()` does **not** treat opacity 0 as hidden, so a
+  motion test reads computed opacity up the ancestor chain
+  (`tests-e2e/marketing/landing.spec.ts`), and the axe scans of these pages run
+  under `emulateMedia({ reducedMotion: 'reduce' })` so contrast is measured at
+  rest rather than mid-fade.
 - **Modal / focus trap** (`ui/Modal.svelte` + `$lib/actions/focusTrap.ts`;
   WCAG 2.1.2 / 2.4.3) — `use:focusTrap={{ onEscape }}` on a dialog box
   (with `tabindex="-1"`) moves focus in on open, traps Tab / Shift+Tab

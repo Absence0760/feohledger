@@ -7212,3 +7212,94 @@ retention cycle, and any audit event already in write-once archival. A
 confirmation that overstates is worse than none, because it is the customer's
 evidence.
 
+## 180. The public pages move, but only in ways that end, stop, and never hide content
+
+The marketing landing page and the signup page read as a decade out of date:
+flat cards on a flat ground, no depth, nothing that moved. They were rebuilt, and
+sign-in, MFA, verify, change-password and forgot/reset password came with them —
+a new user walks all of them in one sitting (signup → verification link →
+first sign-in → forced password change), and a restyle that stopped at signup
+would have dropped them back into the old look two clicks later.
+
+**Motion is held to five rules, each written down because it bit.**
+(`frontend/docs/ui-patterns.md` § Motion has the working form.)
+
+1. *The last keyframe is the resting state.* `app.css` collapses durations under
+   `prefers-reduced-motion`, so the final frame is everything that visitor sees.
+   The hero's invoice card is therefore written to END assembled and paid, not
+   blank.
+2. *A hidden starting state is set by script, never by stylesheet.* `use:reveal`
+   adds `.reveal` only after it attaches, and not at all under reduced motion or
+   without `IntersectionObserver`. A CSS-first reveal fails as a blank marketing
+   site when the bundle fails — the one outcome that page cannot have.
+3. *Delays count.* A staggered entrance with `backwards` fill sits on its first
+   frame, opacity 0, for its whole delay; collapsing durations does nothing about
+   that. The hero's "Approved · Paid" stamp was invisible for 3.6s to exactly the
+   visitors who asked for less motion, and the auth pages' error text and links
+   popped in late. The reduced-motion rule now zeroes `animation-delay` and
+   `transition-delay` too. The chat typing indicator, the only other delayed
+   animation, already opts out with `animation: none`.
+4. *Continuous motion needs an in-page stop.* WCAG 2.2.2 applies to anything
+   moving on its own for over five seconds, and the OS preference does not
+   discharge it. The landing page carries a **Pause animation** button;
+   `data-motion="paused"` on its root pauses every animation beneath it through
+   one `app.css` rule, so a new animation is covered the day it is written. The
+   auth pages take the other honest answer — no continuous motion
+   (`<Backdrop still>`) — because a pause button on a sign-in form is clutter.
+5. *Fade with colour, not `opacity`, at rest.* The old landing carried three
+   `opacityAudit` exemptions for decorative fades; the rebuild spells them as
+   `rgba()` colours and the exemptions are gone rather than re-argued.
+
+**The ornament is rendered, and it is the brand's argument.** The mark is feoh
+as a split Exchequer tally (§173): a debt notched on a stick, the stick split,
+settled when the halves match — which is what matching an invoice against its
+record is. `assets/marketing/tally_scene.py` builds that object in Blender from
+constants and renders it with Cycles on the GPU; `gen-marketing.sh` trims it to
+a 32 KB WebP (the same pixels are 243 KB as PNG). A flat illustration was the
+alternative; a lit object with depth says "handled with care" in a way the flat
+shape does not, on the one page where that is the claim. It is not run in CI —
+there is no GPU there — so, like the icons, the committed file is what ships.
+The grain overlay is an SVG `feTurbulence` filter rather than a noise bitmap:
+456 bytes against ~50 KB, and no tile seam.
+
+**One auth shell, zero-specificity defaults.** `auth/AuthShell.svelte` owns the
+field, button and error styling that six pages had each copied (~80 lines
+apiece), exposed under `:global(:where(…))`. `:where()` adds no specificity, so a
+page overriding one control — signup's composite slug field, MFA's code input —
+wins on its own scoped rule. The first cut used plain `:global()` and signup
+needed `.slug-input.slug-input.slug-input` to beat it, which is the smell that
+prompted the change. The shell is platform-branded by the same policy as the
+favicon (`docs/white-label.md`); the supplier portal's sign-in is deliberately
+not on it, because it resolves tenant branding first.
+
+**Defects the rebuild surfaced, fixed where found:**
+- signup's "try again" was `<a href="/signup">` on `/signup` — a same-route
+  navigation the SPA router resolved without remounting, so the click did
+  nothing and a user whose email never came was stuck. It is a button that
+  returns to the filled form and focuses the email field. Review of that fix
+  caught what it newly made reachable: with hCaptcha configured, the remounted
+  widget container was never drawn into (implicit mode renders only what exists
+  at script load) and the spent token was kept, so a retry would have failed
+  server-side with no captcha in view. The retry clears the token and renders
+  the widget explicitly;
+- the confirmation replaced the form that held focus, dropping focus to `<body>`;
+  focus now moves to its heading;
+- the pricing section's "save 17%" chip was white on a lightened blue (3.72:1)
+  and its volume-pricing link was distinguishable from its sentence by colour
+  alone (1.03:1). Neither had ever been scanned: no public no-tenant page was in
+  the axe guard. The landing page and signup now are, under reduced motion so
+  contrast is measured at rest rather than mid-fade;
+- the new sticky header parked a keyboard-focused control entirely beneath
+  itself (2.4.11); `scroll-padding-top` on the document fixes focus and anchor
+  jumps together;
+- at the 320px reflow width the header CTA ran past the viewport, hidden by the
+  page's horizontal clip rather than scrollable; the wordmark collapses to the
+  mark there, its text kept as the home link's accessible name.
+
+Each has a guard: `tests-e2e/marketing/landing.spec.ts`,
+`tests-e2e/a11y/reduced-motion.spec.ts`, and the new cases in
+`tests-e2e/signup/flow.spec.ts` and `tests-e2e/a11y/axe.spec.ts`. The
+reduced-motion, focus-obscured and axe guards were run red against the unfixed
+code, as was the captcha-retry case (hCaptcha stubbed, since local dev has no
+sitekey); the try-again, CTA-colour and 320px guards encode a failure first
+reproduced by a throwaway probe against the unfixed page.
