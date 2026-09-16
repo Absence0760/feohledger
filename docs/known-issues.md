@@ -5,8 +5,9 @@ names the root cause, the evidence, blast radius, and a recommended fix
 approach — this is a staging area for real problems, not a place to let them
 go stale. See root `CLAUDE.md` guard rail 6 (no dangling deferred findings).
 
-**Two entries are open** — the `/organization` 320px reflow defect below, and
-the `queue-blocked` e2e cases at the bottom. The other
+**Three entries are open** — the erasure/export completeness gap below, the
+`/organization` 320px reflow defect, and the `queue-blocked` e2e cases at the
+bottom. The other
 nine are `~~struck-through~~` resolved stubs, kept because the *diagnosis* is
 the expensive part and is worth not re-deriving. Add a new entry at the top when
 a defect is diagnosed but can't be fixed in the same session.
@@ -22,6 +23,51 @@ goes to [followups.md](followups.md). Reasoning behind a deliberate design call
 goes to [decisions.md](decisions.md).
 
 ---
+
+## Erasure and the DSAR export never reach object storage, passkeys or live sessions
+
+**Found:** 2026-09-15, while drafting the published Privacy Policy and DPA
+(`docs/decisions.md` §175) — the pages could not honestly describe the erasure
+and access paths as complete, which is what exposed the gap.
+
+`app/services/privacy_erasure.py` and `app/services/privacy_export.py` both
+operate purely on database rows. Neither module references
+`app/services/storage.py`, `WebAuthnCredential`, or the Redis session registry —
+verified by grep: zero hits for `storage`, `_delete_object`, `webauthn`,
+`session` or `revoke` in either file.
+
+Three concrete consequences:
+
+| Request | What the code does | What the subject is owed |
+|---|---|---|
+| Erasure of a vendor contact | Redacts `email`, `phone`, `address`, `tax_id`, `bank_details`, `beneficial_owner_data`; cascades to portal users and chat bodies | `Vendor.w9_file_key` is left set and the **W-9/W-8 document itself stays in object storage**, as do invoice PDFs, expense receipts, contract documents and chat attachments referencing the subject |
+| Erasure of a user | Tombstones email, nulls `full_name`, SSO ids, `hashed_password`, `mfa_secret`; sets `is_active=False` | Their `WebAuthnCredential` rows survive, and their **live JWT sessions are never revoked** — an erased user with a valid token keeps working until it expires |
+| DSAR export | Profile fields, related invoice/payment summaries, and **counts** of audit and notification activity | No uploaded documents or even references to them; no `Contract`, `Expense`, `VirtualCard`; for a user subject, no `WebAuthnCredential` or `ApiKey` detail. Art 15 is a right to the data, not to a tally of it |
+
+**Blast radius.** Both are GDPR completeness failures — Art 17 for the erasure
+legs, Art 15/20 for the export — and the object-storage leg is the sharp one,
+because a W-9 carries a taxpayer identification number and the retention sweep
+will never remove it either (it only soft-archives invoices). It is not a
+regression: these paths have never covered storage. `backend/docs/privacy.md`'s
+"what is redacted vs preserved" table is **silent** on object storage and
+auth material rather than stating the limitation, so the gap is currently
+invisible to anyone reading the docs.
+
+**Recommended fix.** Erasure needs a storage leg that collects every `*_file_key`
+reachable from the subject and deletes each through
+`storage._delete_object`, plus a call into the existing session-revocation and
+WebAuthn-credential paths; export needs the same collection step to enumerate
+(and ideally bundle) those objects. The subtlety is that an invoice PDF is
+*shared* evidence — it belongs to the money trail the erasure path deliberately
+preserves — so deleting it wholesale is wrong. The likely split is: documents
+whose sole subject is the erased party (W-9/W-8, their portal chat attachments)
+are deleted; documents that are transaction evidence are retained under the same
+justification as the invoice rows, and the policy says so. That judgment is why
+this is an entry rather than a same-session fix.
+
+**Interim honesty.** `/legal/privacy` §12 and the DPA's deletion clause both
+state these limitations explicitly rather than claiming completeness, so nothing
+published is untrue while the gap stands.
 
 ## Organization settings overflows horizontally at 320px (WCAG 1.4.10)
 
