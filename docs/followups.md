@@ -114,7 +114,7 @@ pending the standing "loop in the CISO / Security Analyst" gate on that section.
 
 ### The published legal set has three loose ends
 
-- [ ] **No mechanism backs the 30-day sub-processor notice.** `/legal/sub-processors`
+- [ ] **No mechanism backs the 30-day sub-processor notice.** ([#427](https://github.com/Absence0760/feohledger/issues/427)) `/legal/sub-processors`
       and the DPA both commit to 30 days' advance notice of a new sub-processor
       and a right to object. The mechanism today is "this page is updated and a
       dated change-log row is added" — there is no notification list, no
@@ -128,7 +128,7 @@ pending the standing "loop in the CISO / Security Analyst" gate on that section.
       dated-entry half.
       **Trigger:** before adding or changing any sub-processor.
 
-- [ ] **Nothing implements the 60-day backup deletion the DPA promises.**
+- [ ] **Nothing implements the 60-day backup deletion the DPA promises.** (see [#424](https://github.com/Absence0760/feohledger/issues/424) — same object-storage traversal)
       `/legal/dpa` §13 now commits to deleting a tenant's backup objects within
       60 days of termination, which the per-database `pg_dump` layout makes
       genuinely possible — one tenant is one object per nightly run. But no
@@ -149,7 +149,7 @@ pending the standing "loop in the CISO / Security Analyst" gate on that section.
       **Trigger:** before the first customer terminates, and before anyone relies
       on the §13 clause.
 
-- [ ] **Nothing guards the published register against drifting from the code.**
+- [ ] **Nothing guards the published register against drifting from the code.** ([#427](https://github.com/Absence0760/feohledger/issues/427))
       `/legal/sub-processors` is now a customer-facing commitment about which
       third parties can receive personal data, and `docs/sub-processors.md` is
       the internal copy it must agree with. Nothing checks either against the
@@ -211,7 +211,7 @@ pending the standing "loop in the CISO / Security Analyst" gate on that section.
 
 ### The pricing page and the billing code describe different products
 
-- [ ] **Marketing prices do not match the plan catalogue.**
+- [ ] **Marketing prices do not match the plan catalogue.** ([#426](https://github.com/Absence0760/feohledger/issues/426))
       `frontend/src/lib/components/marketing/Pricing.svelte` sells "Pro" at
       $29/seat/month ($24 annual, 5-seat minimum) with a monthly/annual toggle.
       `backend/app/services/billing/plan_catalog.py` has flat monthly plans —
@@ -2372,7 +2372,7 @@ durable fix stated in one sentence has usually not been tried.
 
 ## (a) Blocked on external credentials, accounts, or hardware
 
-- [ ] **Appoint EU and UK Art 27 representatives.** A controller established
+- [ ] **Appoint EU and UK Art 27 representatives.** ([#428](https://github.com/Absence0760/feohledger/issues/428)) A controller established
       outside the EU/UK that offers services to people there must appoint a
       representative in each, named and addressable in the privacy notice. The
       product targets both (PEPPOL e-invoicing, EU VAT, UK VAT/HMRC features,
@@ -2425,7 +2425,7 @@ as oversights.
 
 ## (b) Operator steps on merged code
 
-- [ ] **Create the five published contact aliases.** `/legal/*` tells readers to
+- [ ] **Create the five published contact aliases.** ([#428](https://github.com/Absence0760/feohledger/issues/428)) `/legal/*` tells readers to
       write to `privacy@`, `security@`, `legal@`, `support@` and `sales@` on
       `feohledger.com` (`frontend/src/lib/legal/operator.ts` → `CONTACT`). None
       of them exists yet; the mail DNS itself is on the unmerged
@@ -2438,7 +2438,7 @@ as oversights.
       project.
       Ref: [decisions.md](decisions.md) §175.
 
-- [ ] **Fill the operator facts and get counsel to review the legal set.** Eight
+- [ ] **Fill the operator facts and get counsel to review the legal set.** ([#428](https://github.com/Absence0760/feohledger/issues/428)) Eight
       facts in `frontend/src/lib/legal/operator.ts` are `null` and render as
       `[… to be confirmed]` on every page: the registered legal entity, a postal
       address, the governing law and venue, the lead supervisory authority, EU

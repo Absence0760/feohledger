@@ -29,6 +29,8 @@ goes to [decisions.md](decisions.md).
 
 ## The DSAR export is the one surface that returns unmasked bank details
 
+**Issue:** [#423](https://github.com/Absence0760/feohledger/issues/423)
+
 **Found:** 2026-09-15, in the pre-counsel legal review of the published pages
 (`reviews/saas-legal-review-legal-pages.md`, H12).
 
@@ -76,6 +78,8 @@ is why this is an entry rather than a same-session patch.
 
 ## The Positive Pay file holds every vendor's full account number, with no expiry
 
+**Issue:** [#425](https://github.com/Absence0760/feohledger/issues/425)
+
 **Found:** 2026-09-15, same review (H10).
 
 The generated ACH-authorization / check-issue file is the one artefact that
@@ -99,6 +103,8 @@ deletes on a timer and an erasure path that deletes on request are the same
 traversal with different triggers.
 
 ## Erasure and the DSAR export never reach object storage, passkeys or live sessions
+
+**Issue:** [#424](https://github.com/Absence0760/feohledger/issues/424)
 
 **Found:** 2026-09-15, while drafting the published Privacy Policy and DPA
 (`docs/decisions.md` §175) — the pages could not honestly describe the erasure
