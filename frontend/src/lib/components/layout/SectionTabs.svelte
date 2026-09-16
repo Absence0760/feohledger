@@ -37,8 +37,17 @@
 	 * changed) everything renders inline; `.section-tabs-row` is `overflow:
 	 * hidden`, so that pre-measure frame clips instead of widening the document.
 	 */
+	/**
+	 * True once the off-screen row has been measured for THIS tab set, so the
+	 * split below is real rather than the pre-measure "render everything" pass.
+	 * Exposed as `data-tabs-ready` because it is the only honest signal that the
+	 * bar has settled: until it flips, a tab may be in the row one frame and in
+	 * the More menu the next.
+	 */
+	let measured = $derived(widths.length === tabs.length && availW > 0);
+
 	let split = $derived.by((): { visible: NavChild[]; overflow: NavChild[] } => {
-		if (widths.length !== tabs.length || availW <= 0) {
+		if (!measured) {
 			return { visible: tabs, overflow: [] };
 		}
 		const total = widths.reduce((a, b) => a + b, 0) + GAP * Math.max(0, tabs.length - 1);
@@ -116,7 +125,11 @@
      accessible tab (e.g. a CFO's Settings = just Organization) would just
      duplicate the page title, so we suppress it. -->
 {#if group && tabs.length > 1}
-	<nav class="section-tabs" aria-label={m('shell.sectionNav', { group: m(group.labelKey) })}>
+	<nav
+		class="section-tabs"
+		aria-label={m('shell.sectionNav', { group: m(group.labelKey) })}
+		data-tabs-ready={measured ? 'true' : 'false'}
+	>
 		<div class="section-tabs-inner">
 			<div class="section-tabs-row" bind:this={rowEl}>
 				{#each split.visible as tab (tab.href)}
