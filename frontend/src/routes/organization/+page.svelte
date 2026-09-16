@@ -3067,6 +3067,12 @@
 	.erp-test-row {
 		display: flex;
 		align-items: center;
+		/* Wraps because `.btn-test` is `white-space: nowrap` (142px) and sits
+		   beside a result message: without this the row could not shrink and
+		   pushed the whole page into a horizontal scrollbar at 320px — WCAG
+		   1.4.10, the same failure the section tab bar had. Caught when the
+		   reflow guard started visiting a grouped route. */
+		flex-wrap: wrap;
 		gap: 12px;
 		margin-top: 16px;
 		padding-top: 14px;

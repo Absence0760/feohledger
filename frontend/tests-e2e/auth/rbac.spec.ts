@@ -1,4 +1,4 @@
-import { expect, signInAndWait, test } from '../fixtures/helpers';
+import { expect, sectionTabHrefs, signInAndWait, test } from '../fixtures/helpers';
 import type { Page } from '@playwright/test';
 
 /**
@@ -6,7 +6,8 @@ import type { Page } from '@playwright/test';
  *
  * The primary nav (`frontend/src/lib/nav.ts`) keeps high-traffic destinations as
  * top-level links and folds the rest into groups (Procurement / Billing /
- * Insights / Settings). The sidebar shows ONE row per group, pointing at the
+ * Insights / Automation / Governance / Settings). The sidebar shows ONE row per
+ * group, pointing at the
  * first child the role can see; each grouped page then renders the group's
  * children as a section sub-tab bar — again RBAC-filtered. Both layers read the
  * same per-route `roles` gate, so each test asserts both:
@@ -26,8 +27,11 @@ import type { Page } from '@playwright/test';
  *                PurchaseOrders·GoodsReceipts·Requisitions·Intake·Catalogs(all)
  *   Billing: Contracts·Expenses·VendorStatements(all); CreditMemos·Discounts(adm/mgr/cfo)
  *   Insights: AIAssistant(all); CashFlow(adm/cfo); 1099(adm/mgr/cfo)
- *   Settings: Organization·Users·Roles·Workflows·APIKeys·Webhooks·Partner(admin);
- *             AuditTrail(adm/cfo); Experiments(adm/mgr/cfo)
+ *   Settings: Organization·Users·Roles·Entities·Partner·APIKeys·Webhooks·
+ *             SweepHealth(admin) — every child is admin-only, so a CFO sees NO
+ *             Settings row at all since the Governance/Automation split
+ *   Governance: Retention·Privacy(admin); AuditTrail·AccessReview(adm/cfo)
+ *   Automation: Workflows(admin); Experiments·Adaptive(adm/mgr/cfo)
  */
 
 async function sidebarHrefs(page: Page): Promise<string[]> {
@@ -39,14 +43,15 @@ async function sidebarHrefs(page: Page): Promise<string[]> {
 	).sort();
 }
 
-async function sectionTabHrefs(page: Page, route: string): Promise<string[]> {
+/**
+ * Every section tab a role is offered at `route` — the row plus the More menu,
+ * via the shared helper. Reading the row alone would answer "which tabs fit at
+ * 1280px" rather than "which tabs does this role have" (`decisions §174`).
+ */
+async function sectionTabHrefsAt(page: Page, route: string): Promise<string[]> {
 	await page.goto(route);
 	await expect(page.locator('aside.sidebar')).toBeVisible();
-	return (
-		await page
-			.locator('.section-tabs a.section-tab')
-			.evaluateAll((els) => els.map((e) => (e as HTMLAnchorElement).getAttribute('href') ?? ''))
-	).sort();
+	return (await sectionTabHrefs(page)).sort();
 }
 
 test.describe('RBAC — non-admin roles (one fresh sign-in each)', () => {
@@ -74,7 +79,7 @@ test.describe('RBAC — non-admin roles (one fresh sign-in each)', () => {
 		// `auth.isManager` (`docs/decisions.md` §161). Purchase Orders being first
 		// in nav order is also why the group's sidebar row now lands there, not on
 		// Requisitions. `frontend/src/lib/nav.test.ts` pins the same set.
-		expect(await sectionTabHrefs(page, '/purchase-orders')).toEqual(
+		expect(await sectionTabHrefsAt(page, '/purchase-orders')).toEqual(
 			[
 				'/purchase-orders',
 				'/goods-receipts',
@@ -92,7 +97,7 @@ test.describe('RBAC — non-admin roles (one fresh sign-in each)', () => {
 		// admin/cfo respectively). Bank Reconciliation is in for the same reason
 		// as Credit Memos and Recurring — `api/bank_reconciliation.py::_READ_ROLES`
 		// admits a clerk, and the page gates its own writes on `auth.isManager`.
-		expect(await sectionTabHrefs(page, '/contracts')).toEqual(
+		expect(await sectionTabHrefsAt(page, '/contracts')).toEqual(
 			[
 				'/contracts',
 				'/expenses',
@@ -119,7 +124,7 @@ test.describe('RBAC — non-admin roles (one fresh sign-in each)', () => {
 		expect(await sidebarHrefs(page)).toEqual(
 			['/', '/invoices', '/payments', '/vendors', '/vendors/screening', '/vendors/change-requests', '/exceptions', '/purchase-orders', '/contracts', '/assistant', '/experiments'].sort()
 		);
-		expect(await sectionTabHrefs(page, '/purchase-orders')).toEqual(
+		expect(await sectionTabHrefsAt(page, '/purchase-orders')).toEqual(
 			[
 				'/purchase-orders',
 				'/goods-receipts',
@@ -133,52 +138,63 @@ test.describe('RBAC — non-admin roles (one fresh sign-in each)', () => {
 		// Two Settings tabs now, so the section bar renders instead of being
 		// suppressed as it was when Experiments stood alone. The group landing
 		// is still /experiments — the first child a manager can see in nav order.
-		expect(await sectionTabHrefs(page, '/experiments')).toEqual(
+		expect(await sectionTabHrefsAt(page, '/experiments')).toEqual(
 			['/adaptive', '/experiments'].sort()
 		);
 	});
 
-	test('cfo: gains Settings (Audit landing); Audit + Experiments tabs', async ({
+	test('cfo: no Settings row at all; Governance + Automation landings', async ({
 		page,
 		tenantCfo
 	}) => {
 		await signInAndWait(page, tenantCfo);
+		// The Governance/Automation split changed what a CFO sees, and correctly:
+		// every remaining Settings child is admin-only, so the group is hidden
+		// rather than rendering a "Settings" row whose only destination was the
+		// audit trail. The two surfaces a CFO actually holds are now named.
 		expect(await sidebarHrefs(page)).toEqual(
-			['/', '/invoices', '/payments', '/vendors', '/vendors/screening', '/purchase-orders', '/contracts', '/assistant', '/audit'].sort()
+			['/', '/invoices', '/payments', '/vendors', '/vendors/screening', '/purchase-orders', '/contracts', '/assistant', '/audit', '/experiments'].sort()
 		);
-		// cfo sees Audit Trail + Experiments + Adaptive Workflows in Settings,
-		// plus Access Review (roles: ['admin', 'cfo']) → the bar renders all four.
-		expect(await sectionTabHrefs(page, '/audit')).toEqual(
-			['/audit', '/experiments', '/adaptive', '/admin/access-review'].sort()
+		// Governance: Audit Trail + Access Review are (admin|cfo); Retention and
+		// Privacy are admin-only and stay out.
+		expect(await sectionTabHrefsAt(page, '/audit')).toEqual(
+			['/audit', '/admin/access-review'].sort()
+		);
+		// Automation: Experiments + Adaptive are (admin|mgr|cfo); Workflows is
+		// admin-only.
+		expect(await sectionTabHrefsAt(page, '/experiments')).toEqual(
+			['/experiments', '/adaptive'].sort()
 		);
 	});
 });
 
 test.describe('RBAC — admin (cached session, no extra login)', () => {
-	test('full sidebar set + Settings tabs; no bar on a top-level route', async ({ page }) => {
+	test('full sidebar set + the three admin group bars; no bar on a top-level route', async ({
+		page
+	}) => {
 		await page.goto('/');
 		await expect(page.locator('aside.sidebar')).toBeVisible();
 		expect(await sidebarHrefs(page)).toEqual(
-			['/', '/invoices', '/payments', '/vendors', '/vendors/screening', '/vendors/change-requests', '/exceptions', '/purchase-orders', '/contracts', '/assistant', '/organization'].sort()
+			['/', '/invoices', '/payments', '/vendors', '/vendors/screening', '/vendors/change-requests', '/exceptions', '/purchase-orders', '/contracts', '/assistant', '/workflows', '/audit', '/organization'].sort()
 		);
-		expect(await sectionTabHrefs(page, '/organization')).toEqual(
+		// The 15 tabs that made this bar overflow the page are now three groups.
+		expect(await sectionTabHrefsAt(page, '/organization')).toEqual(
 			[
 				'/organization',
 				'/admin?tab=users',
 				'/admin?tab=roles',
-				'/audit',
-				'/workflows',
-				'/experiments',
-				'/adaptive',
 				'/admin/entities',
-				'/admin/health',
+				'/admin/partner',
 				'/admin/api-keys',
 				'/admin/webhooks',
-				'/admin/partner',
-				'/admin/retention',
-				'/admin/access-review',
-				'/admin/privacy'
+				'/admin/health'
 			].sort()
+		);
+		expect(await sectionTabHrefsAt(page, '/audit')).toEqual(
+			['/audit', '/admin/access-review', '/admin/retention', '/admin/privacy'].sort()
+		);
+		expect(await sectionTabHrefsAt(page, '/workflows')).toEqual(
+			['/workflows', '/experiments', '/adaptive'].sort()
 		);
 		// Direct (non-grouped) routes have no section bar.
 		await page.goto('/invoices');

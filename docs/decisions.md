@@ -6889,6 +6889,74 @@ Emails cannot carry a bundled file inline, so the header references
 emitted only for an absolute http(s) origin. Email headers previously carried no
 image at all, not even a configured tenant logo; they now show the tenant logo
 too, so an unbranded tenant's email is never richer than a branded one's.
+
+---
+
+## 174. Settings split into three sections, and the tab bar overflows into a menu rather than the page
+
+**Decided:** 2026-09-15 · `frontend/src/lib/nav.ts` ·
+`frontend/src/lib/components/layout/SectionTabs.svelte`
+
+`SectionTabs` renders a nav group's children as one horizontal row. It was a
+flex container of `white-space: nowrap` anchors with neither `flex-wrap` nor
+`overflow-x`, so a group wider than the viewport widened the **document**: the
+whole page scrolled sideways, clipping the sidebar and the page content, and
+failing WCAG 1.4.10 (Reflow). Settings carried 15 tabs and overflowed every
+screen; Billing carries 9 and needs ~1380px including the sidebar, so an
+ordinary 1280px laptop hit it too.
+
+**Two different problems, so two fixes.** Splitting the group is an
+information-architecture call and does nothing for Billing; containing the row
+is a rendering fix and does nothing for findability. Doing only one would have
+left the other defect in place, and doing only the split would have left the
+WCAG failure open on a narrower window.
+
+**Settings became Settings + Governance + Automation.** Fifteen items in one
+group was not only too many to render, it was miscategorised: `Workflows`,
+`Experiments` and `Adaptive Workflows` are operational surfaces an AP manager
+works in, not org configuration, and `Audit Trail`, `Access Review`,
+`Retention Policy` and `Privacy & DSAR` are the SOX/GDPR evidence surfaces an
+auditor reads. Nobody looking for the audit trail thinks "Settings". Two new
+groups rather than four: the sidebar already carries ten top-level rows and
+vertical space is finite. A fourth `Developer` group for API Keys + Webhooks
+was rejected on that ground; they stay in Settings.
+
+**Overflow goes to a `More` menu, not a scroll strip or a wrapped row.**
+Scrolling hides tabs behind a gesture with no affordance that they exist;
+wrapping turns the bar into two or three rows that read as broken. The menu
+keeps one row, states how many are hidden, and leaves nothing unreachable. The
+**active** tab is always pulled back into the visible row — a section whose
+current page is only reachable by opening a menu reads as having nothing
+selected. `.section-tabs-row` is additionally `overflow: hidden`
+unconditionally, so the row cannot widen the page even in the frame before the
+first measurement, or if the measurement logic is ever wrong.
+
+**The measurer was the trap.** Widths are read from an off-screen copy of the
+row, because once a tab is moved into the menu its width can no longer be
+measured from the DOM. The first version positioned that copy `absolute` +
+`visibility: hidden` and reintroduced the exact bug being fixed — 372px of
+horizontal scroll at a 1000px viewport — because neither property removes an
+element from the document's scrollable area. It now sits inside a zero-height
+`overflow: hidden` wrapper; clipping affects painting, not layout, so children
+still report true widths. It renders `<span>`s rather than `<a>`s: focusable
+content inside `aria-hidden` is reachable by keyboard while hidden from
+assistive tech.
+
+**Why this went unnoticed.** The 320px reflow guard
+(`tests-e2e/a11y/screen-reader.spec.ts`) only visited `/`, `/invoices`,
+`/vendors` and `/payments` — every one a top-level link, where `groupForPath`
+returns null and the tab bar never mounts. The one check that would have caught
+a horizontally-scrolling page had no coverage of the component causing it. It
+now visits two grouped routes as well.
+
+**`NavIcon` replaced `icon: string` in the same change.** `Sidebar.svelte`
+resolves icons through an if/else chain with no `else`, so an unknown key
+rendered a blank 20x20 box — silently, on one row. That is how `Screening`,
+`Bank Changes` and `Exceptions` came to share the warning triangle: there was no
+icon for the first two, and no gate stopping them borrowing a third's. The union
+catches a typo at typecheck; `nav.test.ts` catches a valid key with no branch by
+reading the component.
+
 ## 175. The legal pages are published in the app, in English, and admit what is not yet decided
 
 **Decided:** 2026-09-15 · `frontend/src/routes/legal/` ·
@@ -7143,3 +7211,4 @@ control-plane dump, which is not selectively editable and ages out on the
 retention cycle, and any audit event already in write-once archival. A
 confirmation that overstates is worse than none, because it is the customer's
 evidence.
+

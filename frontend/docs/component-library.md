@@ -182,7 +182,8 @@ a definition as JSON). All wrap the shared `ui/Modal.svelte` and call the
 - `Sidebar.svelte` — collapsed/expanded nav + profile popover. The nav is
   driven by **`$lib/nav.ts`** (the single source of truth, also read by
   `SectionTabs`): high-traffic destinations are top-level `link`s; the rest are
-  folded into `group`s (Procurement / Billing / Insights / Settings) that show
+  folded into `group`s (Procurement / Billing / Insights / Automation /
+  Governance / Settings) that show
   ONE sidebar row and open a sub-tabbed page. A group's row links to the first
   child the current role can see; a group hides when the role can see none.
   Add/move a route by editing `$lib/nav.ts` (with its `roles` gate) — don't
@@ -207,6 +208,27 @@ a definition as JSON). All wrap the shared `ui/Modal.svelte` and call the
   `routes/+layout.svelte` above the page slot. For a grouped route it renders
   the group's RBAC-visible children as tabs (suppressed when ≤1 is visible);
   top-level routes get no bar.
+  **The row can never widen the page.** It was a flex row of `nowrap` children
+  with no `flex-wrap` and no `overflow-x`, so a group with more tabs than fit
+  pushed the DOCUMENT wider and the whole page scrolled sideways — clipping the
+  sidebar, and failing WCAG 1.4.10 (Reflow). Settings carried 15 tabs; Billing
+  still carries 9, which overflows a 1280px laptop. Now: `.section-tabs-row` is
+  `overflow: hidden` as an unconditional backstop, and whatever does not fit
+  moves into a **More** menu measured off an off-screen copy of the row.
+  Two traps if you touch it:
+  - The measurer is wider than the viewport by design, and `position: absolute`
+    + `visibility: hidden` does **not** remove an element from the document's
+    scrollable area. It lives inside a zero-height `overflow: hidden` wrapper
+    for exactly that reason — dropping the wrapper reintroduces the scrollbar
+    (372px of it at 1000px), which is a bug the component's own e2e caught.
+  - The measurer renders `<span>`s, not `<a>`s: focusable content inside
+    `aria-hidden` is reachable by keyboard while hidden from assistive tech.
+  The **active** tab is always pulled into the visible row, so a section never
+  renders with nothing selected. Guards: `tests-e2e/a11y/section-tabs.spec.ts`
+  (overflow, the menu, Escape/focus return) and the 320px reflow case in
+  `tests-e2e/a11y/screen-reader.spec.ts`, which now visits two GROUPED routes —
+  every path it checked before was a top-level link, where this bar never
+  mounts at all.
 - `NotificationBell.svelte` — bell + unread badge in the sidebar header with a
   recent-notifications popover (replaced the old Notifications nav row; the full
   `/notifications` page is the "View all" target). Closes on Esc / backdrop.
