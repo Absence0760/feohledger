@@ -88,6 +88,7 @@
 				height="460"
 				alt=""
 				decoding="async"
+				draggable="false"
 			/>
 		</div>
 	</aside>
@@ -156,6 +157,17 @@
 		animation: panel-in 0.7s cubic-bezier(0.22, 1, 0.36, 1) 0.22s backwards;
 	}
 	.panel-art {
+		/* Chrome, not content: this is decoration the tagline already describes,
+		   so dragging it produces a ghost image of a file the reader has no
+		   reason to want. `draggable="false"` stops the drag itself; the two
+		   below stop the selection highlight and WebKit's own image-drag, which
+		   the attribute does not cover. Deliberately NOT `pointer-events: none`
+		   — that would also swallow hit-testing, which is more than is needed
+		   and surprising on an element that may later gain a caption or link.
+		   The invoice preview in `InvoiceModal` is the opposite case and is
+		   left draggable on purpose: that one IS the user's own document. */
+		-webkit-user-drag: none;
+		user-select: none;
 		display: block;
 		width: 112%;
 		max-width: none;

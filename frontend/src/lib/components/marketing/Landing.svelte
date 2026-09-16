@@ -253,6 +253,7 @@
 						height="460"
 						loading="lazy"
 						decoding="async"
+						draggable="false"
 						alt="A notched gold tally stick split lengthwise into two halves, the notches on each half lining up with the other."
 					/>
 				</div>
@@ -821,6 +822,11 @@
 		position: relative;
 	}
 	.tally-art img {
+		/* Same reasoning as `AuthShell`'s `.panel-art`: illustration, not a file
+		   the reader wants. The attribute stops the drag; these two stop the
+		   selection highlight and WebKit's own image-drag, which it does not. */
+		-webkit-user-drag: none;
+		user-select: none;
 		display: block;
 		width: 100%;
 		height: auto;
