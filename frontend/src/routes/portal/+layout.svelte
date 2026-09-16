@@ -70,7 +70,24 @@
 		<p>{m('portal.shell.noTenant')}</p>
 	</div>
 {:else if $page.url.pathname === '/portal/login' || $page.url.pathname === '/portal/change-password' || $page.url.pathname.startsWith('/portal/cards/')}
-	<slot />
+	<div class="portal-shell">
+		<div class="portal-standalone">
+			<slot />
+		</div>
+		<!--
+			The legal links belong on the SIGNED-OUT surfaces too, and this is the
+			one that matters most: a supplier reading the privacy terms covering
+			their own bank details and tax ID is, by definition, someone who may
+			have no account. The single-use card-reveal page is here as well —
+			that visitor is holding a link from an email and nothing else.
+			The tenant's own support/legal URLs are deliberately NOT repeated
+			here; they need `portalBrand`, and they answer a different question.
+		-->
+		<footer class="portal-footer">
+			<a href="/legal/privacy">Privacy Policy</a>
+			<a href="/legal/cookies">Cookie Notice</a>
+		</footer>
+	</div>
 {:else if portalAuth.loggedIn && portalAuth.user && !portalAuth.user.must_change_password}
 	<div class="portal-shell">
 		<!-- WCAG 2.4.1 Bypass Blocks. -->
@@ -126,27 +143,36 @@
 		<main id="main-content" tabindex="-1" class="portal-main">
 			<slot />
 		</main>
-		{#if portalBrand.supportUrl || portalBrand.legalUrl}
-			<!-- A stuck vendor has no AP login and no colleague to ask — the
-			     branding fetch (GET /api/portal/branding) already carries the
-			     tenant's support/legal URLs, but nothing rendered them, leaving
-			     no "who do I contact" affordance anywhere in the portal
-			     (persona-supplier audit finding, issue #328). Fail-soft like the
-			     rest of white-labeling: an empty URL renders nothing, never a
-			     dead link. -->
-			<footer class="portal-footer">
-				{#if portalBrand.supportUrl}
-					<a href={portalBrand.supportUrl} target="_blank" rel="noopener noreferrer">
-						{m('portal.shell.footerSupport')}
-					</a>
-				{/if}
-				{#if portalBrand.legalUrl}
-					<a href={portalBrand.legalUrl} target="_blank" rel="noopener noreferrer">
-						{m('portal.shell.footerLegal')}
-					</a>
-				{/if}
-			</footer>
-		{/if}
+		<!--
+			The footer now always renders, because two of its links are ours and
+			are not conditional on the tenant configuring anything. A supplier is
+			a data subject whose bank details and tax ID we process, and until
+			these links existed the portal gave them no route to our privacy
+			terms at all — the tenant's own URLs, when set, answer a different
+			question (who to chase about an invoice) than "what does the platform
+			holding my bank details do with it".
+		-->
+		<!-- A stuck vendor has no AP login and no colleague to ask — the
+		     branding fetch (GET /api/portal/branding) already carries the
+		     tenant's support/legal URLs, but nothing rendered them, leaving
+		     no "who do I contact" affordance anywhere in the portal
+		     (persona-supplier audit finding, issue #328). Fail-soft like the
+		     rest of white-labeling: an empty URL renders nothing, never a
+		     dead link. -->
+		<footer class="portal-footer">
+			{#if portalBrand.supportUrl}
+				<a href={portalBrand.supportUrl} target="_blank" rel="noopener noreferrer">
+					{m('portal.shell.footerSupport')}
+				</a>
+			{/if}
+			{#if portalBrand.legalUrl}
+				<a href={portalBrand.legalUrl} target="_blank" rel="noopener noreferrer">
+					{m('portal.shell.footerLegal')}
+				</a>
+			{/if}
+			<a href="/legal/privacy">Privacy Policy</a>
+			<a href="/legal/cookies">Cookie Notice</a>
+		</footer>
 	</div>
 {/if}
 
@@ -162,6 +188,12 @@
 		min-height: 100vh;
 		display: flex;
 		flex-direction: column;
+	}
+
+	/* The signed-out branch has no header or nav, so its slot takes the space
+	   the shell would otherwise give the app chrome and pushes the footer down. */
+	.portal-standalone {
+		flex: 1;
 	}
 
 	.portal-header {

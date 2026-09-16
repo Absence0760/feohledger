@@ -33,6 +33,15 @@
 	// Routes that render without a tenant context (signup flow).
 	const PUBLIC_PATHS = ['/signup', '/verify'];
 
+	// The published legal documents (/legal, /legal/privacy, …). Public by
+	// design and by necessity: a data subject exercising a GDPR right, a
+	// procurement reviewer reading the DPA, and a supplier checking what we do
+	// with their bank details all arrive without an account, and often on the
+	// apex domain where there is no tenant at all. A prefix, not a
+	// PUBLIC_PATHS entry, because that list is matched exactly and these are a
+	// subtree.
+	const LEGAL_PREFIX = '/legal';
+
 	// The supplier portal runs on the tenant subdomain but uses a separate
 	// auth surface (VendorUser, not User). Bypass the root-layout's
 	// employee-auth logic for any /portal path — `/portal/+layout.svelte`
@@ -52,6 +61,12 @@
 
 		// Portal has its own auth tree — don't interleave the two.
 		if (path.startsWith(PORTAL_PREFIX)) return;
+
+		// Never bounce a legal page to /login. On a tenant subdomain hasTenant
+		// is true, so without this an anonymous reader following a link to the
+		// privacy policy would land on a sign-in form instead — which for a
+		// data subject with no account is a dead end, not a detour.
+		if (path.startsWith(LEGAL_PREFIX)) return;
 
 		if (!auth.loggedIn && !path.startsWith('/login')) {
 			goto('/login');
@@ -126,7 +141,16 @@
 	<title>{brand.productName}</title>
 </svelte:head>
 
-{#if hasTenant === undefined}
+{#if $page.url.pathname.startsWith(LEGAL_PREFIX)}
+	<!--
+		Legal documents render standalone and first — ahead of the tenant probe,
+		because they are identical on the apex and on every tenant subdomain and
+		need no tenant to be resolved. Gating them on `hasTenant` would blank
+		them for a beat on load, and on the apex would hand the reader the
+		marketing Landing page instead of the document they asked for.
+	-->
+	<slot />
+{:else if hasTenant === undefined}
 	<!-- SSR / hydration: tenant not resolved yet, render nothing to avoid flash -->
 {:else if $page.url.pathname.startsWith(PORTAL_PREFIX)}
 	<slot />

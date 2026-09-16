@@ -167,4 +167,25 @@ test.describe('accessibility — unauthenticated surfaces (WCAG 2.2 AA)', () => 
 		await expect(page.locator('input[type="email"]')).toBeVisible();
 		await expectNoA11yViolations(page);
 	});
+
+	// The published legal documents. Unauthenticated by design and long-form,
+	// so they carry the two things this sweep catches most often in prose:
+	// heading order (every section is an h2 under one h1) and link/text
+	// contrast against the page background. They are also the surfaces a
+	// screen-reader user is most likely to arrive at cold, from an external
+	// link, with no app chrome to orient them.
+	for (const path of [
+		'/legal',
+		'/legal/privacy',
+		'/legal/terms',
+		'/legal/dpa',
+		'/legal/sub-processors',
+		'/legal/cookies'
+	]) {
+		test(`${path} has no axe violations`, async ({ page }) => {
+			await page.goto(path);
+			await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
+			await expectNoA11yViolations(page);
+		});
+	}
 });
