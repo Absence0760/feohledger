@@ -120,6 +120,110 @@ test.describe('/signup — form', () => {
 		await expect(page.getByText(/click the link in that email/i)).toBeVisible();
 	});
 
+	test('the confirmation takes focus, and "try again" returns to the filled form', async ({
+		page
+	}) => {
+		const slug = `e2eretry${Date.now().toString().slice(-9)}`;
+		const email = `${slug}@example.com`;
+		await page.goto('/signup');
+
+		await fillForm(page, { company: 'Retry Co', slug, name: 'Retry Admin', email });
+		await expect(page.locator('small.hint.ok')).toBeVisible({ timeout: 5_000 });
+		await page.getByRole('button', { name: 'Send verification email' }).click();
+
+		// The submit button that held focus is removed with the form. Focus must
+		// land on the confirmation's heading rather than falling to <body>.
+		const confirmation = page.getByRole('heading', { name: 'Check your email' });
+		await expect(confirmation).toBeFocused({ timeout: 10_000 });
+
+		// Regression: this was `<a href="/signup">` on /signup — a same-route
+		// navigation the SPA router resolved without remounting, so the click did
+		// nothing and the user was stuck on the confirmation.
+		await page.getByRole('button', { name: 'try again' }).click();
+
+		await expect(page.getByRole('button', { name: 'Send verification email' })).toBeVisible();
+		await expect(page.getByLabel('Company name')).toHaveValue('Retry Co');
+		await expect(page.getByPlaceholder('acme')).toHaveValue(slug);
+		// Focus goes to the field most likely to be why no email arrived.
+		const emailField = page.getByLabel('Email');
+		await expect(emailField).toHaveValue(email);
+		await expect(emailField).toBeFocused();
+	});
+
+	test('with captcha enabled, "try again" re-renders the widget and demands a fresh token', async ({
+		page
+	}) => {
+		// Local dev and CI run with no hCaptcha sitekey (local-first default), so
+		// this path is otherwise never exercised. Everything external is stubbed:
+		// the sitekey, the submit endpoint (so the test can read what each
+		// attempt sent), and hCaptcha's script — faked with the one behaviour
+		// that matters here, IMPLICIT rendering: it draws a widget into each
+		// `.h-captcha` present when it loads, and nothing added later.
+		const submissions: Array<{ captcha_token: string | null }> = [];
+		await page.route('**/api/public-config', (route) =>
+			route.fulfill({
+				json: { hcaptcha_sitekey: 'e2e-sitekey', tenant_url_template: 'http://{slug}.localhost:7777' }
+			})
+		);
+		await page.route('**/api/signup/slug-check**', (route) =>
+			route.fulfill({ json: { slug: 'x', available: true, reason: null } })
+		);
+		await page.route('**/api/signup/start', async (route) => {
+			submissions.push(route.request().postDataJSON());
+			await route.fulfill({ json: { status: 'pending', message: 'We sent a verification link.' } });
+		});
+		await page.route('https://hcaptcha.com/1/api.js', (route) =>
+			route.fulfill({
+				contentType: 'application/javascript',
+				body: `(() => {
+					let widgets = 0;
+					window.hcaptcha = {
+						render(el, opts) {
+							el.dataset.widget = String(++widgets);
+							window.__solveCaptcha = opts && opts.callback;
+						}
+					};
+					document.querySelectorAll('.h-captcha').forEach((el) => window.hcaptcha.render(el, {}));
+				})();`
+			})
+		);
+
+		await page.goto('/signup');
+		const widget = page.locator('.h-captcha');
+		await expect(widget).toHaveAttribute('data-widget', '1');
+
+		await fillForm(page, {
+			company: 'Captcha Co',
+			slug: 'captchaco',
+			name: 'Captcha Admin',
+			email: 'captcha@example.com'
+		});
+		await expect(page.locator('small.hint.ok')).toBeVisible();
+		// Implicit mode reports a solve through the named global callback.
+		await page.evaluate(() => (window as unknown as { hcaptchaCallback: (t: string) => void }).hcaptchaCallback('token-1'));
+		await page.getByRole('button', { name: 'Send verification email' }).click();
+		await expect(page.getByRole('heading', { name: 'Check your email' })).toBeFocused();
+		expect(submissions.map((b) => b.captcha_token)).toEqual(['token-1']);
+
+		await page.getByRole('button', { name: 'try again' }).click();
+
+		// A NEW container was mounted, long after the script loaded: only an
+		// explicit render puts a widget in it.
+		await expect(widget).toHaveAttribute('data-widget', '2');
+
+		// The spent token must not ride along: submitting unsolved is refused
+		// client-side and never reaches the endpoint.
+		await page.getByRole('button', { name: 'Send verification email' }).click();
+		await expect(page.locator('.error')).toHaveText('Please complete the captcha.');
+		expect(submissions).toHaveLength(1);
+
+		// Solving the re-rendered widget is what the retry then carries.
+		await page.evaluate(() => (window as unknown as { __solveCaptcha: (t: string) => void }).__solveCaptcha('token-2'));
+		await page.getByRole('button', { name: 'Send verification email' }).click();
+		await expect(page.getByRole('heading', { name: 'Check your email' })).toBeVisible();
+		expect(submissions.map((b) => b.captcha_token)).toEqual(['token-1', 'token-2']);
+	});
+
 	test('a taken slug blocks submission with an inline reason', async ({ page }) => {
 		await page.goto('/signup');
 		await page.getByPlaceholder('acme').fill('acme'); // seeded tenant

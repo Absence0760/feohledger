@@ -1,6 +1,11 @@
 <script lang="ts">
+	import AuthShell from '$lib/components/auth/AuthShell.svelte';
 	import BrandMark from '$lib/components/ui/BrandMark.svelte';
 	import LinkedMessage from '$lib/components/ui/LinkedMessage.svelte';
+	import IconMail from '~icons/material-symbols/mark-email-unread-outline';
+	import IconCheck from '~icons/material-symbols/check-circle';
+	import IconClose from '~icons/material-symbols/cancel';
+	import { tick } from 'svelte';
 	import { api } from '$lib/api';
 	import { onMount } from 'svelte';
 	import { m } from '$lib/i18n/store.svelte';
@@ -41,6 +46,10 @@
 	let successMessage = $state<string | null>(null);
 
 	let slugCheckTimer: ReturnType<typeof setTimeout> | null = null;
+
+	let emailInput = $state<HTMLInputElement | null>(null);
+	let captchaEl = $state<HTMLDivElement | null>(null);
+	let successHeading = $state<HTMLHeadingElement | null>(null);
 
 	onMount(async () => {
 		try {
@@ -104,6 +113,52 @@
 		}
 	}
 
+	/**
+	 * Back from "Check your email" to the form, with everything still filled in.
+	 *
+	 * This used to be `<a href="/signup">` — a link to the page already showing.
+	 * A client-routed SPA reuses the mounted component for a same-route
+	 * navigation, so `successMessage` survived and the click did nothing: a user
+	 * whose verification email never arrived had no way back to the form short
+	 * of a hard reload. Resetting the state is the navigation that link was
+	 * trying to be. The values are kept and focus lands on the email field,
+	 * because a mistyped address is the likeliest reason nothing arrived.
+	 */
+	async function backToForm() {
+		successMessage = null;
+		error = '';
+		// The token the first submission carried has been spent server-side.
+		// Kept, it would satisfy the client-side "captcha required" check and
+		// ride along on the retry, which the backend then rejects with no widget
+		// in view to solve again.
+		captchaToken = null;
+		await tick();
+		renderCaptcha();
+		emailInput?.focus();
+		emailInput?.select();
+	}
+
+	/**
+	 * Render the hCaptcha widget into the form's container, when there is one.
+	 *
+	 * hCaptcha's implicit mode renders the `.h-captcha` elements present when its
+	 * script LOADS. That covers first paint — the container exists before the
+	 * async script arrives — but not the form coming back from the confirmation
+	 * screen: that is a fresh `.h-captcha` element mounted long after the
+	 * script ran, and nothing would ever draw a widget into it. So a remount
+	 * renders explicitly. If the script has not loaded yet, implicit mode will
+	 * still find the element when it does.
+	 */
+	function renderCaptcha() {
+		const hcaptcha = (window as any).hcaptcha;
+		if (!captchaSitekey || !captchaEl || typeof hcaptcha?.render !== 'function') return;
+		hcaptcha.render(captchaEl, {
+			sitekey: captchaSitekey,
+			callback: (token: string) => (captchaToken = token),
+			'expired-callback': () => (captchaToken = null)
+		});
+	}
+
 	async function onSubmit(e: Event) {
 		e.preventDefault();
 		error = '';
@@ -120,6 +175,13 @@
 				captcha_token: captchaToken,
 			});
 			successMessage = res.message;
+			// The submit button had focus, and it has just been removed from the
+			// DOM along with the form — which drops focus to <body> and leaves a
+			// screen reader with nothing to say. Land it on the confirmation's
+			// heading instead: that is announced, and it puts keyboard users at
+			// the top of the new content (WCAG 2.4.3, 4.1.3).
+			await tick();
+			successHeading?.focus();
 		} catch (err) {
 			error = err instanceof Error ? err.message : m('auth.signup.failed');
 		} finally {
@@ -132,22 +194,29 @@
 	<title>{m('auth.signup.pageTitle')}</title>
 </svelte:head>
 
-<div class="page">
+<AuthShell panelOnMobile>
 	{#if successMessage}
-		<div class="card success">
-			<BrandMark size={32} />
-			<h1>{m('auth.signup.successHeading')}</h1>
-			<p>{successMessage}</p>
-			<p class="sub next">
-				{m('auth.signup.successNext')}
+		<!-- Focus is moved to this heading on arrival (see onSubmit): the form it
+		     replaces took the focused button with it. `tabindex="-1"` makes it a
+		     programmatic focus target without adding a tab stop. -->
+		<div class="auth-stack success">
+			<div class="success-icon" aria-hidden="true"><IconMail /></div>
+			<h1 tabindex="-1" bind:this={successHeading}>{m('auth.signup.successHeading')}</h1>
+			<p class="lead">{successMessage}</p>
+			<p class="sub next">{m('auth.signup.successNext')}</p>
+			<p class="sub">
+				{m('auth.signup.successSpamPre')}<button type="button" class="link-btn" onclick={backToForm}
+					>{m('auth.signup.successSpamLink')}</button
+				>.
 			</p>
-			<p class="sub">{m('auth.signup.successSpamPre')}<a href="/signup">{m('auth.signup.successSpamLink')}</a>.</p>
 		</div>
 	{:else}
-		<form class="card" onsubmit={onSubmit}>
-			<BrandMark size={32} />
-			<h1>{m('auth.signup.heading')}</h1>
-			<p class="sub">{m('auth.signup.subtitle')}</p>
+		<form class="signup-form" onsubmit={onSubmit}>
+			<div class="head">
+				<BrandMark size={40} />
+				<h1>{m('auth.signup.heading')}</h1>
+				<p class="sub">{m('auth.signup.subtitle')}</p>
+			</div>
 
 			<div role="alert" aria-live="assertive">
 				{#if error}
@@ -162,7 +231,11 @@
 
 			<label>
 				<span>{m('auth.signup.workspaceUrl')}</span>
-				<div class="slug-row">
+				<!-- The input and its host suffix read as ONE field: the row takes
+				     the field chrome (border, focus ring) and the input inside it
+				     drops its own, so the ring wraps the whole address the user is
+				     composing rather than half of it. -->
+				<div class="slug-row" class:ok={slugStatus === 'ok'} class:bad={slugStatus === 'bad'}>
 					<input
 						class="slug-input"
 						bind:value={slug}
@@ -178,6 +251,15 @@
 						aria-invalid={slugStatus === 'bad'}
 					/>
 					<span class="slug-suffix">{tenantUrlSuffix}</span>
+					<span class="slug-state" aria-hidden="true">
+						{#if slugStatus === 'checking'}
+							<span class="spinner"></span>
+						{:else if slugStatus === 'ok'}
+							<IconCheck />
+						{:else if slugStatus === 'bad'}
+							<IconClose />
+						{/if}
+					</span>
 				</div>
 				<div id="slug-hint" aria-live="polite">
 					{#if slugStatus === 'checking'}
@@ -199,12 +281,20 @@
 
 			<label>
 				<span>{m('auth.signup.email')}</span>
-				<input type="email" bind:value={adminEmail} required maxlength="320" autocomplete="email" />
+				<input
+					type="email"
+					bind:this={emailInput}
+					bind:value={adminEmail}
+					required
+					maxlength="320"
+					autocomplete="email"
+				/>
 			</label>
 
 			{#if captchaSitekey}
 				<div
 					class="h-captcha"
+					bind:this={captchaEl}
 					data-sitekey={captchaSitekey}
 					data-callback="hcaptchaCallback"
 					data-expired-callback="hcaptchaExpired"
@@ -247,143 +337,284 @@
 			</p>
 		</form>
 	{/if}
-</div>
+
+	{#snippet panel()}
+		<!-- What pressing the button starts. Worth saying before the press: the
+		     flow crosses an inbox twice, and a user who does not expect the
+		     second email (the temporary password) is a support ticket. -->
+		<h3 class="next-heading">{m('auth.signup.nextHeading')}</h3>
+		<ol class="next-steps">
+			<li>
+				<span class="step-dot" aria-hidden="true">1</span>
+				<span class="step-text">
+					<strong>{m('auth.signup.step1Title')}</strong>
+					<span>{m('auth.signup.step1Body')}</span>
+				</span>
+			</li>
+			<li>
+				<span class="step-dot" aria-hidden="true">2</span>
+				<span class="step-text">
+					<strong>{m('auth.signup.step2Title')}</strong>
+					<span>{m('auth.signup.step2Body')}</span>
+				</span>
+			</li>
+			<li>
+				<span class="step-dot" aria-hidden="true">3</span>
+				<span class="step-text">
+					<strong>{m('auth.signup.step3Title')}</strong>
+					<span>{m('auth.signup.step3Body')}</span>
+				</span>
+			</li>
+		</ol>
+	{/snippet}
+</AuthShell>
 
 <style>
-	.page {
-		min-height: 100vh;
-		display: grid;
-		place-items: center;
-		background: var(--bg);
-		padding: 40px 20px;
-	}
-	.card {
-		background: var(--surface);
-		border: 1px solid var(--border);
-		border-radius: 8px;
-		padding: 40px 36px;
-		width: min(480px, 92vw);
+	/* Field chrome, the entrance stagger, the submit button and the error
+	   banner all come from AuthShell. What is here is only what this page has
+	   that the others do not: the composite slug field, its live availability
+	   state, the consent line, and the confirmation screen. */
+	.signup-form,
+	.auth-stack {
 		display: flex;
 		flex-direction: column;
-		gap: 16px;
+		gap: 18px;
 	}
-	h1 {
-		margin: 0;
-		font-size: 1.3rem;
-		font-weight: 700;
-		color: var(--text);
+	.head {
+		display: flex;
+		flex-direction: column;
+		align-items: flex-start;
+		gap: 10px;
+		margin-bottom: 6px;
 	}
 	.sub {
-		margin: -8px 0 8px;
-		font-size: 0.88rem;
+		margin: 0;
+		font-size: 0.93rem;
+		line-height: 1.55;
 		color: var(--text-muted);
 	}
-	.error {
-		background: rgba(224, 64, 64, 0.1);
-		border: 1px solid rgba(224, 64, 64, 0.3);
-		color: var(--danger);
-		padding: 10px 14px;
-		border-radius: 4px;
-		font-size: 0.85rem;
-	}
-	label {
-		display: flex;
-		flex-direction: column;
-		gap: 4px;
-	}
-	label span {
-		font-size: 0.78rem;
-		font-weight: 500;
-		color: var(--text-muted);
-		text-transform: uppercase;
-		letter-spacing: 0.03em;
-	}
-	input {
-		background: var(--bg);
-		border: 1px solid var(--border);
-		border-radius: 4px;
-		padding: 10px 12px;
-		font-size: 0.9rem;
-		color: var(--text);
-		font-family: inherit;
-	}
-	input:focus {
-		outline: none;
-		border-color: var(--accent);
-		box-shadow: 0 0 0 2px rgba(99, 140, 255, 0.15);
-	}
+
+	/* ------------------------------ slug field ----------------------------- */
 	.slug-row {
 		display: flex;
 		align-items: center;
+		min-height: 46px;
+		border-radius: 10px;
 		border: 1px solid var(--border);
-		border-radius: 4px;
-		background: var(--bg);
+		background: var(--surface);
+		transition: border-color 0.15s, box-shadow 0.15s;
 	}
-	.slug-input {
+	.slug-row:hover {
+		border-color: #3a3e4f;
+	}
+	.slug-row:focus-within {
+		border-color: var(--accent);
+		box-shadow: 0 0 0 4px rgba(99, 140, 255, 0.22);
+	}
+	.slug-row.ok {
+		border-color: rgba(38, 185, 119, 0.55);
+	}
+	.slug-row.bad {
+		border-color: var(--danger);
+	}
+	/* The row carries the chrome, so the input inside it carries none — the
+	   focus ring above is on the row. Wins over AuthShell's field defaults on
+	   plain specificity, because the shell writes those under `:where()`. */
+	.slug-row .slug-input {
+		flex: 1;
+		min-width: 0;
+		min-height: 44px;
 		border: none;
 		background: transparent;
-		flex: 1;
-	}
-	.slug-input:focus {
 		box-shadow: none;
 	}
 	.slug-suffix {
-		padding: 0 12px;
+		padding-right: 6px;
 		color: var(--text-muted);
-		font-size: 0.85rem;
+		font-size: 0.88rem;
+		white-space: nowrap;
 	}
+	.slug-state {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: 34px;
+		font-size: 19px;
+		flex: none;
+	}
+	.slug-row.ok .slug-state {
+		color: var(--success);
+	}
+	.slug-row.bad .slug-state {
+		color: var(--danger);
+	}
+	.spinner {
+		width: 14px;
+		height: 14px;
+		border-radius: 50%;
+		border: 2px solid var(--border);
+		border-top-color: var(--accent);
+		animation: spin 0.7s linear infinite;
+	}
+	@keyframes spin {
+		to { transform: rotate(360deg); }
+	}
+
 	.hint {
-		font-size: 0.75rem;
+		display: block;
+		margin-top: 2px;
+		font-size: 0.78rem;
 		color: var(--text-muted);
 	}
 	.hint.ok {
-		color: #2e9960;
+		color: var(--success);
 	}
 	.hint.bad {
 		color: var(--danger);
 	}
-	button {
-		margin-top: 8px;
-		padding: 10px;
-		border-radius: 4px;
-		border: none;
-		background: var(--accent-strong);
-		color: #fff;
-		font-size: 0.9rem;
-		font-weight: 500;
-		cursor: pointer;
-		font-family: inherit;
-	}
-	button:hover:not(:disabled) {
-		opacity: 0.9;
-	}
-	button:disabled {
-		opacity: 0.6;
-		cursor: not-allowed;
-	}
+
+	/* ------------------------------ fine print ----------------------------- */
 	.legal-consent {
-		margin: 16px 0 0;
+		margin: 2px 0 0;
 		font-size: 0.8rem;
-		line-height: 1.5;
+		line-height: 1.55;
 		color: var(--text-muted);
 		text-align: center;
 	}
-	.legal-consent a {
+	.legal-consent :global(a) {
 		color: var(--accent-on-tint);
 	}
-
 	.footer {
-		margin: 16px 0 0;
+		margin: 0;
+		padding-top: 16px;
+		border-top: 1px solid var(--border);
 		font-size: 0.8rem;
 		color: var(--text-muted);
 		text-align: center;
 	}
 	.footer code {
-		background: var(--bg);
+		background: var(--surface);
+		border: 1px solid var(--border);
 		padding: 2px 6px;
-		border-radius: 3px;
+		border-radius: 5px;
+		font-family: var(--font-mono);
+		font-size: 0.78rem;
+		color: var(--text);
 	}
-	.success h1 {
-		color: var(--accent);
+
+	/* ---------------------------- confirmation ----------------------------- */
+	.success-icon {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: 60px;
+		height: 60px;
+		border-radius: 18px;
+		border: 1px solid rgba(99, 140, 255, 0.3);
+		background: linear-gradient(140deg, rgba(99, 140, 255, 0.24), rgba(163, 125, 255, 0.14));
+		color: var(--accent-on-tint);
+		font-size: 30px;
+		animation: pop 0.6s cubic-bezier(0.34, 1.56, 0.64, 1) backwards;
+	}
+	@keyframes pop {
+		from { transform: scale(0.6); opacity: 0; }
+		to { transform: scale(1); opacity: 1; }
+	}
+	.success h1:focus {
+		outline: none;
+	}
+	.lead {
+		margin: 0;
+		font-size: 1rem;
+		line-height: 1.55;
+		color: var(--text);
+	}
+	.next {
+		padding: 14px 16px;
+		border-radius: 12px;
+		border: 1px solid var(--border);
+		background: var(--surface);
+	}
+	.link-btn {
+		display: inline;
+		padding: 0;
+		border: none;
+		background: none;
+		color: var(--accent-on-tint);
+		font: inherit;
+		text-decoration: underline;
+		text-underline-offset: 2px;
+		cursor: pointer;
+	}
+	.link-btn:focus-visible {
+		outline: 2px solid var(--accent);
+		outline-offset: 2px;
+		border-radius: 2px;
+	}
+
+	/* ------------------------------- panel --------------------------------- */
+	.next-heading {
+		margin: 0 0 16px;
+		font-size: 0.74rem;
+		font-weight: 600;
+		letter-spacing: 0.12em;
+		text-transform: uppercase;
+		color: var(--text-muted);
+	}
+	.next-steps {
+		position: relative;
+		display: flex;
+		flex-direction: column;
+		gap: 18px;
+		margin: 0;
+		padding: 0;
+		list-style: none;
+	}
+	/* The rail joining the three dots: the steps are one sequence, not three
+	   separate facts, and the line is what says so. */
+	.next-steps::before {
+		content: '';
+		position: absolute;
+		left: 13px;
+		top: 14px;
+		bottom: 14px;
+		width: 1px;
+		background: linear-gradient(180deg, rgba(99, 140, 255, 0.55), rgba(231, 185, 94, 0.35));
+	}
+	.next-steps li {
+		position: relative;
+		display: flex;
+		gap: 14px;
+		align-items: flex-start;
+	}
+	.step-dot {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		flex: none;
+		width: 27px;
+		height: 27px;
+		border-radius: 50%;
+		border: 1px solid rgba(99, 140, 255, 0.45);
+		background: #151a2b;
+		color: var(--text);
+		font-size: 0.78rem;
+		font-weight: 700;
+	}
+	.step-text {
+		display: flex;
+		flex-direction: column;
+		gap: 2px;
+		padding-top: 3px;
+	}
+	.step-text strong {
+		font-size: 0.92rem;
+		font-weight: 600;
+		color: var(--text);
+	}
+	.step-text span {
+		font-size: 0.85rem;
+		line-height: 1.5;
+		color: var(--text-muted);
 	}
 </style>

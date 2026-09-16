@@ -1,4 +1,4 @@
-import { expect, test, vendorPicker } from '../fixtures/helpers';
+import { expect, NO_TENANT_BASE, test, vendorPicker } from '../fixtures/helpers';
 import { expectNoA11yViolations } from './axe-helper';
 
 /**
@@ -151,13 +151,62 @@ test.describe('accessibility — authenticated app (WCAG 2.2 AA)', () => {
 	});
 });
 
+test.describe('accessibility — public surfaces on the no-tenant origin (WCAG 2.2 AA)', () => {
+	test.use({ storageState: { cookies: [], origins: [] }, baseURL: NO_TENANT_BASE });
+
+	// Scanned under `prefers-reduced-motion: reduce`, deliberately. Both pages
+	// animate text in — the landing's scroll reveals and hero sequence, the
+	// auth shell's entrance stagger — and axe's colour-contrast rule measures
+	// whatever alpha a node has at the instant it runs, so a scan mid-fade
+	// reports a failure no reader ever sees at rest, or passes on a frame
+	// before the text is drawn. Reduced motion puts every element in its final
+	// state before the scan (the reveal action never hides anything; app.css
+	// collapses every animation to its last frame), which is the state the
+	// contrast criterion is about. The moving states themselves are covered
+	// by tests-e2e/marketing/landing.spec.ts.
+	test.beforeEach(async ({ page }) => {
+		await page.emulateMedia({ reducedMotion: 'reduce' });
+		await page.addInitScript(() => {
+			try {
+				localStorage.setItem('feoh_consent_choice', 'accepted');
+			} catch {
+				// about:blank — ignore
+			}
+		});
+	});
+
+	test('marketing landing (/) has no axe violations', async ({ page }) => {
+		await page.goto('/');
+		await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
+		await expect(page.locator('.stat-value').first()).toHaveText('7');
+		await expectNoA11yViolations(page);
+	});
+
+	test('self-service signup (/signup) has no axe violations', async ({ page }) => {
+		await page.goto('/signup');
+		await expect(page.getByRole('heading', { name: 'Create your workspace' })).toBeVisible();
+		await expectNoA11yViolations(page);
+	});
+});
+
 test.describe('accessibility — unauthenticated surfaces (WCAG 2.2 AA)', () => {
 	// These surfaces have no signed-in user: drop the default admin storage
 	// state so the page renders its real unauthenticated UI.
 	test.use({ storageState: { cookies: [], origins: [] } });
 
 	test('AP login page (/login) has no axe violations', async ({ page }) => {
+		// Reduced motion for the same reason as the no-tenant block above: the
+		// auth shell staggers its fields in, and a scan mid-fade measures a
+		// transient alpha rather than the resting contrast.
+		await page.emulateMedia({ reducedMotion: 'reduce' });
 		await page.goto('/login');
+		await expect(page.locator('input[type="email"]')).toBeVisible();
+		await expectNoA11yViolations(page);
+	});
+
+	test('forgot password (/login/forgot-password) has no axe violations', async ({ page }) => {
+		await page.emulateMedia({ reducedMotion: 'reduce' });
+		await page.goto('/login/forgot-password');
 		await expect(page.locator('input[type="email"]')).toBeVisible();
 		await expectNoA11yViolations(page);
 	});
