@@ -8,7 +8,16 @@ latest extraction's confidence + priors metadata.
 - Service: `app/services/audit_summary.py`
 - Endpoints: `GET /api/invoices/{id}/summary`, `POST /api/invoices/{id}/summary/regenerate`
 - Cache: `invoices.meta["audit_summary"]` (JSONB)
-- Config: `FEOH_AUDIT_SUMMARY_ENABLED` (default `true`), `FEOH_AUDIT_SUMMARY_MODEL` (defaults to `FEOH_EXTRACTION_MODEL`)
+- Config: `FEOH_AUDIT_SUMMARY_ENABLED` (default `false`), `FEOH_AUDIT_SUMMARY_MODEL` (defaults to `FEOH_EXTRACTION_MODEL`)
+
+**The LLM path is opt-in.** Left off, the endpoints return the deterministic
+template summary and no request leaves the process. It defaults off because it
+reuses the extraction Anthropic key rather than holding one of its own: on the
+old `true` default, configuring Anthropic for *extraction* silently started a
+second, unrelated flow of invoice numbers, vendor names, amounts and audit
+timelines to Anthropic that no per-org setting disclosed. Turn it on
+deliberately, and disclose it — it is a sub-processor engagement
+(`/legal/sub-processors`).
 
 ## Cache-freshness mechanism
 

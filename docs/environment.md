@@ -229,7 +229,7 @@ always `backend/app/config.py`.
 | `FEOH_CASHFLOW_SHORTFALL_ALERTS_INTERVAL_SECONDS` | `86400` | Shortfall-alert sweep tick interval (daily — a cash forecast doesn't move hour to hour). |
 | `FEOH_CASHFLOW_SHORTFALL_ALERTS_HORIZON_DAYS` | `90` | How far ahead the alerting forecast looks. Independent of the copilot's interactive default so an operator can alert on a shorter, more actionable window. |
 | `FEOH_EXTRACTION_AUTO_ROTATE` | `true` | Run Tesseract OSD on rendered PDF pages before sending to vision adapters. No-ops if `pytesseract` / `tesseract` missing. |
-| `FEOH_AUDIT_SUMMARY_ENABLED` | `true` | Master switch for the invoice audit-log summary. When `false`, `GET /api/invoices/{id}/summary` returns the deterministic template summary with no LLM call. Reuses the extraction key/model — no new secret. |
+| `FEOH_AUDIT_SUMMARY_ENABLED` | `false` | Master switch for the invoice audit-log summary. Left off (the default), `GET /api/invoices/{id}/summary` returns the deterministic template summary with no LLM call. Reuses the extraction key/model — no new secret, which is why it must be opted into rather than defaulted on: with no credential of its own, a `true` default turned an extraction key into an undisclosed second Anthropic data flow. |
 | `FEOH_AUDIT_SUMMARY_MODEL` | (empty) | Model for the audit summary; falls back to `FEOH_EXTRACTION_MODEL` when empty. |
 | `FEOH_REDIS_URL` | `redis://localhost:6379` | Token blocklist |
 | `FEOH_LITHIC_API_KEY` | (empty) | Lithic virtual cards |
