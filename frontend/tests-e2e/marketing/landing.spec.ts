@@ -152,6 +152,29 @@ test.describe('landing — atmosphere layer', () => {
 	});
 });
 
+test.describe('landing — decorative art', () => {
+	test('the tally render cannot be dragged off the page', async ({ page }) => {
+		// Every `<img>` is draggable by default, so the illustration peeled away
+		// under the cursor trailing a ghost image — on the first screen a visitor
+		// sees. The attribute stops the drag; `-webkit-user-drag` covers
+		// WebKit/Blink's own image-drag path, which the attribute does not, and
+		// `user-select: none` stops the highlight that makes a half-started drag
+		// read as a misclick.
+		//
+		// Deliberately NOT asserting `pointer-events: none`: that would also
+		// prevent the drag, but by swallowing hit-testing entirely — more than is
+		// needed, and it would silently break the art the day it gains a link.
+		//
+		// The invoice preview in `InvoiceModal` is the opposite case and stays
+		// draggable on purpose: that image IS the user's own document.
+		await gotoLanding(page);
+		const art = page.locator('.tally-art img');
+		await expect(art).toHaveAttribute('draggable', 'false');
+		await expect(art).toHaveCSS('user-select', 'none');
+		expect(await art.evaluate((el: HTMLImageElement) => el.draggable)).toBe(false);
+	});
+});
+
 test.describe('landing — navigation', () => {
 	test('an in-page nav link parks its section below the sticky header', async ({ page }) => {
 		// Reduced motion makes the jump instant (app.css forces
