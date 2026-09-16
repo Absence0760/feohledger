@@ -109,6 +109,30 @@
 	   without hunting for the sites that spelled it the other way. */
 	--danger-tint: rgba(240, 70, 70, 0.15);
 	--danger-on-tint: #f87171;
+
+	/* ---------------------------------------------------------------
+	   Shape, depth and motion — the app-surface layer (decisions §181).
+
+	   None of these carries text, so none enters the contrast pairing
+	   above. The accent-derived ones use `color-mix()` on `var(--accent)`
+	   rather than a literal of today's blue, because `--accent` and
+	   `--accent-strong` are the two tokens a white-label tenant may
+	   override (`stores/brand.svelte.ts`): a glow spelled as
+	   rgba(99, 140, 255, …) would stay blue under a tenant's red brand.
+	   A custom property that references another is resolved per element,
+	   so the brand's inline override on <html> flows straight through.
+	   --------------------------------------------------------------- */
+	--radius-sm: 8px;
+	--radius: 12px;
+	--radius-lg: 16px;
+	/* A 1px line quieter than --border, for dividing within a card rather
+	   than outlining one. */
+	--hairline: rgba(226, 228, 234, 0.06);
+	--shadow-card: inset 0 1px 0 rgba(255, 255, 255, 0.03), 0 14px 34px -22px rgba(0, 0, 0, 0.75);
+	--shadow-float: inset 0 1px 0 rgba(255, 255, 255, 0.05), 0 30px 80px -24px rgba(0, 0, 0, 0.8);
+	--accent-glow: color-mix(in srgb, var(--accent) 55%, transparent);
+	--accent-wash: color-mix(in srgb, var(--accent) 8%, transparent);
+	--ease-out: cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 *,
@@ -511,11 +535,16 @@ input[type='week']:hover::-webkit-calendar-picker-indicator {
 .workspace {
 	max-width: 1800px;
 	margin: 0 auto;
-	padding: 24px 20px;
+	padding: 28px 28px 40px;
 	display: flex;
 	flex-direction: column;
-	gap: 16px;
+	gap: 18px;
 	min-height: 100vh;
+}
+@media (max-width: 700px) {
+	.workspace {
+		padding: 20px 14px 32px;
+	}
 }
 .toolbar {
 	display: flex;
@@ -525,8 +554,10 @@ input[type='week']:hover::-webkit-calendar-picker-indicator {
 	flex-wrap: wrap;
 }
 .toolbar h1 {
-	font-size: 1.3rem;
-	font-weight: 700;
+	font-size: 1.6rem;
+	font-weight: 800;
+	letter-spacing: -0.025em;
+	line-height: 1.15;
 	margin: 0;
 }
 .toolbar-actions {
@@ -538,23 +569,35 @@ input[type='week']:hover::-webkit-calendar-picker-indicator {
 
 /* --- Primary / cancel buttons --- */
 .btn-primary {
-	padding: 8px 18px;
-	border-radius: 6px;
+	padding: 9px 18px;
+	border-radius: var(--radius-sm);
 	border: none;
 	background: var(--accent-strong);
 	color: #fff;
 	font-size: 0.85rem;
-	font-weight: 500;
+	font-weight: 600;
 	cursor: pointer;
 	font-family: inherit;
+	/* A lift and a glow on hover, never a lighter fill: white on
+	   --accent-strong is calibrated at rest (4.92:1), and brightening the
+	   fill is the one hover that spends that margin. */
+	box-shadow: 0 10px 22px -14px var(--accent-glow);
+	transition: transform 0.15s var(--ease-out), box-shadow 0.15s var(--ease-out);
+}
+.btn-primary:hover:not(:disabled) {
+	transform: translateY(-1px);
+	box-shadow: 0 14px 26px -14px var(--accent-glow);
+}
+.btn-primary:active:not(:disabled) {
+	transform: translateY(0);
 }
 .btn-primary:disabled {
 	opacity: 0.5;
 	cursor: not-allowed;
 }
 .btn-cancel {
-	padding: 8px 18px;
-	border-radius: 4px;
+	padding: 9px 18px;
+	border-radius: var(--radius-sm);
 	border: 1px solid var(--border);
 	background: var(--surface);
 	color: var(--text-muted);
@@ -564,6 +607,7 @@ input[type='week']:hover::-webkit-calendar-picker-indicator {
 }
 .btn-cancel:hover {
 	color: var(--text);
+	border-color: #3a3e4f;
 }
 
 /* --- Filter chips (FilterChips) --- */
@@ -584,24 +628,28 @@ input[type='week']:hover::-webkit-calendar-picker-indicator {
 	align-items: center;
 	gap: 6px;
 	padding: 6px 14px;
-	border-radius: 20px;
+	border-radius: 999px;
 	border: 1px solid var(--border);
 	background: var(--surface);
 	color: var(--text-muted);
 	font-size: 0.82rem;
 	font-weight: 500;
 	cursor: pointer;
-	transition: all 0.15s;
+	transition: border-color 0.15s, color 0.15s, box-shadow 0.2s var(--ease-out);
 	font-family: inherit;
 }
+/* Hover changes the BORDER and the text, never the fill: a tinted fill with
+   a text colour in the same rule is the badge recipe `badgeAudit` reserves
+   for <Badge>, and a chip is not a badge. */
 .filter-chip:hover {
-	border-color: var(--accent);
+	border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
 	color: var(--text);
 }
 .filter-chip.active {
 	background: var(--accent-strong);
 	color: #fff;
 	border-color: var(--accent-strong);
+	box-shadow: 0 8px 18px -12px var(--accent-glow);
 }
 .filter-chip .count {
 	/* The smaller font de-emphasizes the count; an opacity dim is avoided
@@ -622,9 +670,13 @@ input[type='week']:hover::-webkit-calendar-picker-indicator {
 
 /* --- Data table (DataTable) --- */
 .grid-container {
+	/* --surface, deliberately, and not a glass tint: every <Badge> tint pair
+	   is calibrated composited over --surface, and a table is where most of
+	   them sit. Depth comes from the radius and the shadow instead. */
 	background: var(--surface);
 	border: 1px solid var(--border);
-	border-radius: 8px;
+	border-radius: var(--radius);
+	box-shadow: var(--shadow-card);
 	overflow-x: auto;
 	/* .workspace is flex-column; without these a wide table grows the card
 	   past the viewport and the page scrolls horizontally instead of the
@@ -640,22 +692,34 @@ input[type='week']:hover::-webkit-calendar-picker-indicator {
 .grid-container th {
 	background: var(--bg);
 	text-align: left;
-	padding: 10px 14px;
-	font-size: 0.75rem;
+	padding: 11px 14px;
+	font-size: 0.72rem;
 	font-weight: 600;
 	text-transform: uppercase;
-	letter-spacing: 0.04em;
+	letter-spacing: 0.06em;
 	color: var(--text-muted);
 	border-bottom: 1px solid var(--border);
 	white-space: nowrap;
 }
 .grid-container td {
-	padding: 10px 14px;
-	border-bottom: 1px solid var(--border);
+	padding: 11px 14px;
+	border-bottom: 1px solid var(--hairline);
 	color: var(--text);
 }
+.grid-container tbody tr {
+	transition: background-color 0.12s;
+}
+.grid-container tbody tr:last-child td {
+	border-bottom: none;
+}
 .grid-container tbody tr:hover {
-	background: rgba(99, 140, 255, 0.04);
+	background: var(--accent-wash);
+}
+/* The row under the pointer gets an accent edge on its first cell: a
+   position marker in a wide table, where a 4% wash alone is easy to lose
+   between two columns of numbers. An inset shadow, so it moves nothing. */
+.grid-container tbody tr:hover > td:first-child {
+	box-shadow: inset 2px 0 0 var(--accent);
 }
 .grid-container tr.row-selected {
 	background: rgba(99, 140, 255, 0.08);
@@ -733,7 +797,7 @@ input[type='week']:hover::-webkit-calendar-picker-indicator {
 }
 .btn-load-more {
 	padding: 8px 18px;
-	border-radius: 6px;
+	border-radius: 999px;
 	border: 1px solid var(--border);
 	background: var(--surface);
 	color: var(--text);
@@ -758,22 +822,36 @@ input[type='week']:hover::-webkit-calendar-picker-indicator {
 .backdrop {
 	position: fixed;
 	inset: 0;
-	background: rgba(0, 0, 0, 0.5);
+	background: rgba(6, 8, 12, 0.62);
 	display: grid;
 	place-items: center;
 	z-index: 100;
-	backdrop-filter: blur(2px);
+	backdrop-filter: blur(6px);
 	padding: 20px;
+	animation: fl-fade-in 0.16s ease-out;
 }
+/* --surface stays the dialog's fill for the same reason as the table's: the
+   Badge tints inside a modal are calibrated over it. The entrance is a short
+   rise-and-settle; under reduced motion app.css collapses it to its end
+   frame, which is the dialog at rest. */
 .modal {
 	background: var(--surface);
-	border: 1px solid var(--border);
-	border-radius: 8px;
+	border: 1px solid rgba(226, 228, 234, 0.09);
+	border-radius: var(--radius-lg);
 	width: min(480px, 92vw);
 	max-height: 90vh;
 	overflow-y: auto;
 	padding: 24px;
-	box-shadow: 0 16px 48px rgba(0, 0, 0, 0.3);
+	box-shadow: var(--shadow-float);
+	animation: fl-modal-in 0.22s var(--ease-out);
+}
+@keyframes fl-fade-in {
+	from { opacity: 0; }
+	to { opacity: 1; }
+}
+@keyframes fl-modal-in {
+	from { opacity: 0; transform: translate3d(0, 10px, 0) scale(0.98); }
+	to { opacity: 1; transform: none; }
 }
 .modal.modal-sm {
 	width: min(440px, 92vw);
@@ -783,8 +861,9 @@ input[type='week']:hover::-webkit-calendar-picker-indicator {
 }
 .modal h2 {
 	margin: 0 0 4px;
-	font-size: 1.1rem;
-	font-weight: 600;
+	font-size: 1.2rem;
+	font-weight: 700;
+	letter-spacing: -0.015em;
 }
 .modal-hint {
 	font-size: 0.82rem;
@@ -823,11 +902,12 @@ input[type='week']:hover::-webkit-calendar-picker-indicator {
 	   shorthand would reset the global select chevron's background-image. */
 	background-color: var(--bg);
 	border: 1px solid var(--border);
-	border-radius: 4px;
-	padding: 8px 10px;
+	border-radius: var(--radius-sm);
+	padding: 9px 11px;
 	font-size: 0.88rem;
 	color: var(--text);
 	font-family: inherit;
+	transition: border-color 0.15s, box-shadow 0.15s;
 }
 /* Reserve the chevron gutter on modal selects (the shared `padding: 8px 10px`
    above only leaves 10px on the right). */
@@ -839,7 +919,7 @@ input[type='week']:hover::-webkit-calendar-picker-indicator {
 .modal textarea:focus {
 	outline: none;
 	border-color: var(--accent);
-	box-shadow: 0 0 0 2px rgba(99, 140, 255, 0.15);
+	box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
 }
 .modal input::placeholder,
 .modal textarea::placeholder {
@@ -849,8 +929,8 @@ input[type='week']:hover::-webkit-calendar-picker-indicator {
 	display: flex;
 	justify-content: flex-end;
 	gap: 8px;
-	padding-top: 8px;
-	border-top: 1px solid var(--border);
+	padding-top: 14px;
+	border-top: 1px solid var(--hairline);
 }
 .required {
 	color: #f06464;
@@ -860,23 +940,45 @@ input[type='week']:hover::-webkit-calendar-picker-indicator {
 /* --- KPI cards (KpiCard) --- */
 .kpi-row {
 	display: flex;
-	gap: 12px;
+	gap: 14px;
 	flex-wrap: wrap;
 }
 .kpi {
 	flex: 1;
-	min-width: 130px;
+	min-width: 140px;
+	position: relative;
+	overflow: hidden;
 	background: var(--surface);
 	border: 1px solid var(--border);
-	border-radius: 8px;
-	padding: 16px 18px;
+	border-radius: var(--radius);
+	box-shadow: var(--shadow-card);
+	padding: 18px 20px 16px;
 	display: flex;
 	flex-direction: column;
 	gap: 4px;
+	transition: border-color 0.2s;
+}
+/* A hairline of the card's tone along its top edge. A pseudo-element, not a
+   border, so it can fade at the ends and carry no layout. The tone is the
+   accent by default and follows the highlight when there is one. */
+.kpi::before {
+	content: '';
+	position: absolute;
+	top: 0;
+	left: 12%;
+	right: 12%;
+	height: 1px;
+	background: linear-gradient(90deg, transparent, var(--kpi-tone, var(--accent-glow)), transparent);
+}
+.kpi:hover {
+	border-color: #353949;
 }
 .kpi-value {
-	font-size: 1.4rem;
-	font-weight: 700;
+	font-size: 1.65rem;
+	font-weight: 800;
+	letter-spacing: -0.025em;
+	line-height: 1.15;
+	font-variant-numeric: tabular-nums;
 }
 .kpi-label {
 	font-size: 0.78rem;
@@ -892,6 +994,7 @@ input[type='week']:hover::-webkit-calendar-picker-indicator {
 	color: var(--text-muted);
 }
 .kpi.highlight-green {
+	--kpi-tone: rgba(31, 168, 106, 0.9);
 	border-color: rgba(31, 168, 106, 0.3);
 	background: rgba(31, 168, 106, 0.04);
 }
@@ -899,6 +1002,7 @@ input[type='week']:hover::-webkit-calendar-picker-indicator {
 	color: #1fa86a;
 }
 .kpi.highlight-red {
+	--kpi-tone: rgba(240, 100, 100, 0.9);
 	border-color: rgba(224, 64, 64, 0.3);
 	background: rgba(224, 64, 64, 0.04);
 }

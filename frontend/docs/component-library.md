@@ -77,7 +77,9 @@ Grouped into subfolders by role. Import with the full path, e.g.
   the server rejected). First use: the brand strong-accent contrast advisory on
   `/organization` + `/admin/partner`.
 - `Money.svelte` — locale-aware currency display. `<Money amount={row.amount} currency={row.currency} />`. Opt-in `whole` (no decimals), `accounting` (parenthesised negatives), `mono` (tabular-nums). Over `utils/money.ts::formatMoney`; see *Money formatting* above. Use this (or `formatMoney` in script) for every currency value — don't write `Intl.NumberFormat` inline.
-- `EmptyState.svelte` — the first-run / zero-data affordance: an optional emoji
+- `EmptyState.svelte` — the first-run / zero-data affordance: an optional
+  generated illustration `art` (`invoices` · `vendors` · `payments` · `inbox` ·
+  `chart` · `shield` · `workflow` · `documents` — preferred) or the older emoji
   `icon`, a `heading`, a `description`, and an optional primary action rendered
   as a `<button>` (`onaction`) or `<a>` (`actionHref`). i18n-agnostic (strings
   passed in already-localized, like `FieldWarning`). **Render it ONLY for the
@@ -87,6 +89,11 @@ Grouped into subfolders by role. Import with the full path, e.g.
   invoices → link to `/invoices`), `/invoices` (zero rows, no filter → the
   upload action, role-gated), and `/portal/invoices` (vendor submitted nothing
   → the submit action). The page keeps its `DataTable` for every other state.
+  The illustrations are data, not files: `assets/illustrations/gen_empty_states.py`
+  writes `ui/emptyStateArt.generated.ts` (`pnpm gen:illustrations`, guarded by
+  `pnpm check:illustrations` in CI), and the component renders each shape as
+  inline SVG whose tone classes take the palette's muted stroke and the tenant's
+  `--accent`. Add a new illustration in the generator, never in the module.
 
 The visual styling for all of the above lives **globally in `src/app.css`** (class-scoped: `.workspace`, `.grid-container td`, `.filter-chip`, `.modal`, `.kpi`, …) so route pages carry no duplicated `<style>`. Feature components below keep their own scoped CSS (Svelte's `.svelte-<hash>` outranks the bare-class globals).
 

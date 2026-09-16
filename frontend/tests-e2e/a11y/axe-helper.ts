@@ -61,6 +61,20 @@ export async function expectNoA11yViolations(
 	page: Page,
 	opts: { exclude?: string[] } = {}
 ): Promise<void> {
+	// Measure the page AT REST. Modals rise in, the landing page reveals on
+	// scroll, the auth shell staggers its fields — and axe's colour-contrast
+	// rule reads whatever alpha a node has at the instant it runs, so a scan
+	// that lands mid-entrance reports a contrast failure no reader ever sees
+	// (or passes on a frame before the text is drawn). Emulating reduced motion
+	// here collapses every animation, delay included, to its final frame
+	// (app.css § Reduced motion), which is the state 1.4.3 is about.
+	//
+	// Set centrally so a spec cannot forget it, and after the caller's own
+	// setup so it does not change what they asserted before scanning. It
+	// persists for the rest of the test; nothing after a scan depends on
+	// motion. The moving states have their own guards
+	// (tests-e2e/a11y/reduced-motion.spec.ts, tests-e2e/marketing/).
+	await page.emulateMedia({ reducedMotion: 'reduce' });
 	let builder = new AxeBuilder({ page }).withTags([...WCAG_AA_TAGS]);
 	for (const selector of opts.exclude ?? []) {
 		builder = builder.exclude(selector);
