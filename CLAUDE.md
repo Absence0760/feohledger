@@ -342,7 +342,8 @@ Prefer reading docs over guessing. Update them when behavior changes.
 | Data privacy (GDPR/CCPA) | `backend/docs/privacy.md` + `docs/data-residency.md` + `docs/ropa.md` |
 | Platform billing & metering (plans / subscriptions / entitlements) | `backend/docs/billing.md` |
 | White-label / partner branding | `docs/white-label.md` |
-| Founder runbooks (non-code) |  |
+| Founder runbooks (non-code) | `docs/founder-runbooks/` — incorporation, insurance, payment-rail and SOC 2 vendor onboarding, breach notification, custom-domain provisioning |
+| **Published legal pages** | `frontend/src/routes/legal/` (Privacy, Terms, DPA, sub-processors, Cookie Notice) + `frontend/src/lib/legal/` — **`operator.ts` is the fail-closed seam: a `null` fact renders a marked gap, never an invented one.** Reasoning: `docs/decisions.md` §175 |
 | Accessibility (WCAG 2.2 AA) | `docs/accessibility.md` + `docs/accessibility-vpat.md` + `frontend/docs/ui-patterns.md` |
 | CSV data import | `backend/docs/csv-import.md` |
 | Email-to-invoice intake | `backend/docs/email-intake.md` |

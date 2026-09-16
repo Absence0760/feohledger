@@ -6889,3 +6889,105 @@ Emails cannot carry a bundled file inline, so the header references
 emitted only for an absolute http(s) origin. Email headers previously carried no
 image at all, not even a configured tenant logo; they now show the tenant logo
 too, so an unbranded tenant's email is never richer than a branded one's.
+## 175. The legal pages are published in the app, in English, and admit what is not yet decided
+
+**Decided:** 2026-09-15 · `frontend/src/routes/legal/` ·
+`frontend/src/lib/legal/`
+
+The app shipped with no published legal documents at all. The only route with
+"privacy" in its name was `/admin/privacy`, the DSAR console — an internal tool,
+not a notice. `docs/ropa.md`, `docs/sub-processors.md` and
+`docs/founder-runbooks/dpa-template.md` held real substance but were repo
+markdown nobody outside the project could open, and the consent banner asked for
+consent while linking to nothing. A platform that holds other companies'
+suppliers' bank details and tax IDs, runs a supplier portal for data subjects
+who have no account, and offers a self-service signup that forms a contract, was
+asking people to trust it with no published terms on any of it.
+
+Five documents now live under `/legal`: Privacy Policy, Terms of Service, Data
+Processing Addendum, sub-processor register, Cookie Notice. The DPA and the
+register are in that set deliberately — for a B2B processor they are what
+procurement asks for first, and leaving them out would have published the half
+of the story that is easiest to write.
+
+**They render ahead of both the auth gate and the tenant probe.** Everyone with
+the strongest reason to read them arrives without an account: a supplier
+chasing their own data, a DPO evaluating the product, a regulator. On a tenant
+subdomain the auth effect would have bounced them to a sign-in form; on the
+apex, where `hasTenant` is false, the layout would have served the marketing
+Landing page instead of the document. Both are silent — the link looks live and
+returns the wrong thing — so `/legal/*` is matched as a prefix before either
+branch.
+
+**English only, and that is a deliberate exception to the frontend's own rule.**
+Every other user-facing string in this app goes through `t()` across six
+locales. A translated privacy policy is not a localized UI string; it is a
+second binding text, and a mistranslated clause in a DPA is a misrepresentation
+rather than a cosmetic bug. Translating them is a legal exercise with counsel
+sign-off per locale, not a catalogue backfill. The exception is scoped to
+`routes/legal/` and `lib/legal/` and written down in `frontend/CLAUDE.md`.
+
+**An unknown fact renders as a marked gap, never as an invented one.**
+`lib/legal/operator.ts` holds the facts only the operator can supply — the
+registered entity, a postal address, the governing law, the Art 27
+representatives, the hosting region — and every one may be `null`. `null` means
+pending, and `Fact.svelte` renders it as `[… to be confirmed]` with a notice at
+the top of the page listing what is outstanding. The alternative was to invent a
+plausible entity and address, which would make the page false; an inaccurate
+privacy policy is an Art 5(1)(a) transparency problem and a deceptive-practice
+exposure, not merely an unfinished one. Filling a fact is a one-line edit that
+removes the marker everywhere at once. A DPO is modelled as three states rather
+than two, because "considered and not appointed" is a real disclosure and must
+not read as "still deciding".
+
+**The documents describe what the code does, not what a template says.** Drafting
+them against the source turned up several places where the obvious boilerplate
+would have been a lie: full bank account, routing and IBAN values *are* stored
+in `Vendor.bank_details` (only the audit trail masks to last-4); the retention
+sweep is off by default, covers two record classes and soft-archives rather than
+deletes; erasure never reaches uploaded documents in object storage, nor
+passkeys, nor live sessions; the DSAR export omits those documents too; data
+residency is an advisory setting nothing routes on; and no SOC 2 or ISO 27001
+certification exists. Each of those is stated plainly rather than papered over,
+and the ones that are defects are tracked in `docs/known-issues.md` rather than
+being described as features. `tests-e2e/legal/pages.spec.ts` bans the bare
+certification-claim shapes outright, so the most dangerous sentence in the set
+cannot be reintroduced by a later edit.
+
+The same pass corrected the pricing page, which advertised a "SOC 2 attestation"
+and a "99.9% uptime SLA" that do not exist, and a `sales@feohledger.example`
+call-to-action on the reserved `.example` TLD that could never have delivered a
+message.
+
+## 176. A feature that reuses another feature's credential must carry its own switch
+
+**Decided:** 2026-09-15 · `backend/app/config.py` ·
+`backend/tests/test_audit_summary_local_first.py`
+
+`audit_summary_enabled` defaulted to `True`. Audit-log summarization has no API
+key of its own — reusing the extraction Anthropic key is the point, "no new
+secret" — so on that default, an operator who configured Anthropic for invoice
+*extraction* silently also began sending invoice numbers, vendor names, amounts
+and audit timelines to Anthropic for a second, unrelated purpose. No per-org
+setting named it and no sub-processor disclosure covered it.
+
+Writing the sub-processor register is what surfaced it: the page either had to
+disclose a default outbound flow the customer never chose, or the default had to
+change. The default changed.
+
+The local-first check could not have caught this. With no key at all the
+resolver short-circuits, so `pnpm dev` behaved identically either way — the flag
+only misbehaved on precisely the deployments where it mattered. That is the same
+shape as the card family's default (§29/§56): harmless on a laptop, wrong in
+production. The generalization is the heading — **sharing a credential is exactly
+why a feature needs its own gate**, because the credential can no longer serve as
+one.
+
+Note what did *not* change. Invoice extraction resolves to `claude_vision` on any
+deployed instance even with no key, and that stays: falling back to the mock
+adapter would return a fabricated invoice ("Extracted Vendor Inc", 1500.00)
+against a real tenant's document, which is worse than a loud provider error. So
+Anthropic is a **default** sub-processor for extraction, and the register says so
+rather than pretending it is opt-in. The distinction that matters is between a
+default that is the feature's own declared purpose and a default that quietly
+annexes a credential for a different one.

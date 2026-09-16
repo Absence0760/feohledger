@@ -40,8 +40,18 @@ closed, **eighteen** opened. **29 → 41** — by category, **31 (c)** · **7 (a
 **3 (b)**.
 
 **Since:** two (c) entries added outside a round — the GitHub deploy role
-(2026-09-14) and the missing self-service-signup switch (2026-09-15) — so
-**43** open: **33 (c)** · **7 (a)** · **3 (b)**.
+(2026-09-14) and the missing self-service-signup switch (2026-09-15) — then
+**eight** from publishing the legal document set (2026-09-15,
+[decisions.md](decisions.md) §175): five (c), two (b) and one (a). So **51**
+open: **38 (c)** · **8 (a)** · **5 (b)**.
+
+The legal-set entries are worth reading as a group rather than as seven chores:
+five of them are the same shape — a document now makes a **published commitment**
+(a monitored mailbox, 30 days' sub-processor notice, a minimised screening
+payload) that the code does not yet fully back. That is a deliberate trade, not
+an oversight: the alternative was to publish nothing, or to publish something
+weaker than what we intend to do. It does mean each one is now a promise with a
+reader, which is a higher bar than an internal TODO.
 
 **The total went up, and the reason is the same one round 30 recorded.** All six
 entries turned out to be wrong about their own work rather than merely
@@ -101,6 +111,95 @@ item in the file and was deliberately untouched for the eighth round running,
 pending the standing "loop in the CISO / Security Analyst" gate on that section.
 
 ## (c) Feature work — sized and unstarted
+
+### The published legal set has three loose ends
+
+- [ ] **No mechanism backs the 30-day sub-processor notice.** `/legal/sub-processors`
+      and the DPA both commit to 30 days' advance notice of a new sub-processor
+      and a right to object. The mechanism today is "this page is updated and a
+      dated change-log row is added" — there is no notification list, no
+      subscribe endpoint, and no email template that reaches a customer's DPO.
+      The commitment is contractual, so the gap is a promise we cannot currently
+      keep on the notification half.
+      **Durable fix:** a per-org notification (the admin contact already exists,
+      and `email_adapters` can send) fired from a changelog entry, so adding a
+      register row and notifying are one action rather than two. `~/github/threkir`'s
+      `docs/compliance/sub-processor-changelog.md` is the shape to copy for the
+      dated-entry half.
+      **Trigger:** before adding or changing any sub-processor.
+
+- [ ] **Nothing guards the sanctions adapters' data minimisation.**
+      `/legal/sub-processors` publishes a specific promise: only the vendor's
+      name and country reach ComplyAdvantage, Dow Jones or Refinitiv. That is
+      true today — `vendor_screening.screen_vendor_record` accepts `vendor_tax_id`
+      and `beneficial_owners` and all three real adapters drop them — but it is
+      true by accident of what each adapter serialises, with no test pinning it.
+      An edit that started sending a tax ID would leave a published page
+      asserting otherwise.
+      **Durable fix:** a test per real adapter asserting the outbound payload's
+      field set exactly, in the shape of `tests/test_erp_adapter_error_pii.py`.
+
+- [ ] **Two link surfaces around the legal set are hardcoded English.**
+      `frontend/src/routes/portal/+layout.svelte` renders "Privacy Policy" and
+      "Cookie Notice" as literals beside `m('portal.shell.footerSupport')`, and
+      `frontend/src/routes/signup/+page.svelte` carries the "By creating a
+      workspace you agree to…" consent line as a literal among translated copy. The
+      legal *text* is deliberately English-only ([decisions.md](decisions.md)
+      §175), but a nav label pointing at it is ordinary UI and should go through
+      `t()`.
+      **Why deferred:** the six locale catalogues were held by a concurrent
+      session at the time, and adding keys would have captured that session's
+      uncommitted work in a path-scoped commit.
+      **Durable fix:** add `portal.shell.footerPrivacy` / `footerCookies` and
+      an `auth.signup.legalConsent` entry (with embedded links) to all six
+      catalogues, and swap the literals.
+
+### The pricing page and the billing code describe different products
+
+- [ ] **Marketing prices do not match the plan catalogue.**
+      `frontend/src/lib/components/marketing/Pricing.svelte` sells "Pro" at
+      $29/seat/month ($24 annual, 5-seat minimum) with a monthly/annual toggle.
+      `backend/app/services/billing/plan_catalog.py` has flat monthly plans —
+      `free` $0, `growth` $49, `scale` $199 — with no seat pricing and no annual
+      interval (`services/billing/period.py` is months-only). The free tier's
+      advertised "50 invoices/month, 2 seats" caps are not enforced anywhere
+      (`free` carries `entitlements: {}`).
+      The claims that were outright false were corrected in the legal-pages change
+      — a "SOC 2 attestation" and a "99.9% uptime SLA" that do not exist, a
+      `sales@feohledger.example` CTA on the reserved `.example` TLD, a
+      "Start 14-day trial" button that routes to the same signup as the free plan
+      (`tenant_provisioning._provision_into` binds every new org to `free`, and
+      there is no plan selection anywhere in signup), and two fabricated landing
+      statistics ("3.2s avg. extraction time", "97% field accuracy" — the latter
+      traceable to Basware's published *touchless processing rate* quoted in
+      `docs/competitive-analysis.md`, i.e. a competitor's number for a different
+      metric).
+      **What remains is the pricing model itself, which is a product decision.**
+      Two halves: the prices and interval above, and the fact that **no
+      plan-differentiation claim on that page is enforced anywhere in the
+      backend.** `require_entitlement` gates exactly one thing (`public_api`);
+      SSO, SAML and SCIM carry no entitlement check at all, so a Free tenant can
+      turn on the feature the page sells as Enterprise-only, and the advertised
+      "50 invoices / month" and seat counts are not enforced either (`free`
+      carries `entitlements: {}`). Selling a premium feature everyone already has
+      is the sharper half — a paying customer has a claim.
+      **Durable fix:** decide the real pricing, make one of the two sides match
+      (rendering the grid from `plan_catalog` would stop it drifting again), and
+      implement the entitlement checks the page implies — or describe only what
+      `Plan.entitlements` actually gates.
+      **Trigger:** before billing is switched off the `mock` adapter, or before
+      any real traffic reaches the pricing page — whichever is first.
+
+- [ ] **No substantiation file backs the remaining marketing numbers.** The two
+      invented statistics are gone and the rest are now countable from source
+      (7 payment rails, 9 workflow step types, 6 locales, the 1% default rebate
+      rate in `api/cards.py`), with a comment in `Landing.svelte` saying so. But
+      a specific numeric claim is an objectively verifiable factual claim, and
+      the durable habit is a file that records how each was derived, so a
+      challenge is answered from a record rather than a re-derivation.
+      **Durable fix:** a short substantiation note per public number, refreshed
+      whenever the underlying count moves — and a real extraction-accuracy
+      benchmark before any accuracy figure is published again.
 
 ### One adapter family still ships code no caller reaches
 
@@ -2218,6 +2317,20 @@ durable fix stated in one sentence has usually not been tried.
 
 ## (a) Blocked on external credentials, accounts, or hardware
 
+- [ ] **Appoint EU and UK Art 27 representatives.** A controller established
+      outside the EU/UK that offers services to people there must appoint a
+      representative in each, named and addressable in the privacy notice. The
+      product targets both (PEPPOL e-invoicing, EU VAT, UK VAT/HMRC features,
+      and six shipped locales), so this is not hypothetical. `operator.ts`
+      models both as pending and the Privacy Policy renders all branches, so
+      filling them is a one-line edit per representative.
+      **Why blocked:** it needs a paid engagement with a representative firm in
+      each jurisdiction, which needs an entity to contract as.
+      **Durable fix:** incorporate, engage both, then set `euRepresentative` and
+      `ukRepresentative`.
+      **Trigger:** before marketing to, or onboarding, an EU or UK customer.
+      Ref: [decisions.md](decisions.md) §175.
+
 None of these are startable from the editor. They are listed so they don't read
 as oversights.
 
@@ -2256,6 +2369,36 @@ as oversights.
 ---
 
 ## (b) Operator steps on merged code
+
+- [ ] **Create the five published contact aliases.** `/legal/*` tells readers to
+      write to `privacy@`, `security@`, `legal@`, `support@` and `sales@` on
+      `feohledger.com` (`frontend/src/lib/legal/operator.ts` → `CONTACT`). None
+      of them exists yet; the mail DNS itself is on the unmerged
+      `feat/infra-email-dns` branch. A published `mailto:` that bounces is worse
+      than none at all, because a data subject who writes to it reasonably
+      believes the request is made and the Art 12(3) one-month clock has started.
+      **Durable fix:** land the mail DNS branch, create the five aliases, and
+      send a test to each before the pages are linked from anywhere public.
+      **Trigger:** before `feohledger.com` serves the app to anyone outside the
+      project.
+      Ref: [decisions.md](decisions.md) §175.
+
+- [ ] **Fill the operator facts and get counsel to review the legal set.** Eight
+      facts in `frontend/src/lib/legal/operator.ts` are `null` and render as
+      `[… to be confirmed]` on every page: the registered legal entity, a postal
+      address, the governing law and venue, the lead supervisory authority, EU
+      and UK Art 27 representatives, whether a DPO is appointed, and the hosting
+      region. The documents are complete and operative as written — these are
+      the facts only the operator can supply.
+      **Durable fix:** set each value in that one file (the pending notice and
+      every inline marker disappear with no other edit), then have a lawyer read
+      the set. The per-document counsel questions are recorded in
+      `reviews/saas-legal-review-legal-pages.md` and
+      `reviews/us-legal-review-legal-pages.md`; the liability cap figure, the
+      arbitration-vs-courts call, and the SCC module and governing-law selections
+      in the DPA are the ones that genuinely need advice rather than a decision.
+      **Trigger:** before the first customer who is not the operator signs up.
+      Ref: [decisions.md](decisions.md) §175.
 
 - [ ] **Confirm Teams posts the approval card's action body byte-for-byte.**
       The outbound card stamps each Approve/Reject `HttpPOST` action with the
