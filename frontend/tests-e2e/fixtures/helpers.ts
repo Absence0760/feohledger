@@ -924,3 +924,59 @@ export async function selectVendorInPicker(input: Locator, name: string): Promis
  *  in `fixtures/env.ts` alongside the web origin, so a worktree configures both
  *  halves from one place. */
 export { _API_BASE as API_BASE };
+
+/**
+ * Wait until `SectionTabs` has measured itself and the row/menu split is final.
+ *
+ * Both helpers below read with a bare `.count()`, which has no auto-wait: on a
+ * fresh navigation that reads 0 while the component is still mounting, and the
+ * caller then looks for the tab in the wrong place. `data-tabs-ready` is the
+ * component's own signal that the split is real rather than its pre-measure
+ * "render everything inline" pass — waiting on a real state flag, never a sleep.
+ */
+async function settledSectionTabs(page: Page) {
+	await expect(page.locator('.section-tabs[data-tabs-ready="true"]')).toBeVisible();
+}
+
+/**
+ * Every section sub-tab's href for the current route — the visible row PLUS
+ * whatever `SectionTabs` moved into its **More** menu.
+ *
+ * The bar shows as many tabs as fit and folds the rest behind a disclosure
+ * (`docs/decisions.md` §174), so `.section-tabs a.section-tab` alone answers
+ * "which tabs fit in 1280px", not "which tabs does this role have" — and a
+ * group like Billing (9 children, ~1380px with the sidebar) overflows at the
+ * default `Desktop Chrome` viewport. An RBAC or navigation assertion wants the
+ * whole set, so this opens the menu when there is one and closes it again.
+ */
+export async function sectionTabHrefs(page: Page): Promise<string[]> {
+	const hrefs = (loc: ReturnType<Page['locator']>) =>
+		loc.evaluateAll((els) => els.map((e) => (e as HTMLAnchorElement).getAttribute('href') ?? ''));
+
+	await settledSectionTabs(page);
+	const inRow = await hrefs(page.locator('.section-tabs a.section-tab'));
+
+	const more = page.getByRole('button', { name: /more sections/i });
+	if ((await more.count()) === 0) return inRow;
+
+	await more.click();
+	const inMenu = await hrefs(page.locator('#section-more-menu a'));
+	await page.keyboard.press('Escape');
+	return [...inRow, ...inMenu];
+}
+
+/**
+ * Click a section sub-tab by its visible label, opening the More menu first if
+ * the tab overflowed out of the row. Use instead of clicking `.section-tab`
+ * directly whenever the group can be wide (Billing, Settings).
+ */
+export async function clickSectionTab(page: Page, label: string) {
+	await settledSectionTabs(page);
+	const inRow = page.locator('.section-tabs a.section-tab', { hasText: label });
+	if (await inRow.count()) {
+		await inRow.first().click();
+		return;
+	}
+	await page.getByRole('button', { name: /more sections/i }).click();
+	await page.locator('#section-more-menu a', { hasText: label }).first().click();
+}
