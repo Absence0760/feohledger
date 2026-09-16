@@ -43,15 +43,27 @@ closed, **eighteen** opened. **29 → 41** — by category, **31 (c)** · **7 (a
 (2026-09-14) and the missing self-service-signup switch (2026-09-15) — then
 **twelve** from publishing the legal document set and reviewing it
 (2026-09-15/16, [decisions.md](decisions.md) §175): nine (c), two (b) and one
-(a). So **55** open: **42 (c)** · **8 (a)** · **5 (b)**.
+(a). Five of those twelve closed on 2026-09-16 (the accessibility statement, the
+i18n link surfaces, the sanctions-minimisation guard, the register drift guard,
+and the transfer-safeguards sentence — whose contractual half moved to (a)).
 
-The legal-set entries are worth reading as a group rather than as seven chores:
-five of them are the same shape — a document now makes a **published commitment**
-(a monitored mailbox, 30 days' sub-processor notice, a minimised screening
-payload) that the code does not yet fully back. That is a deliberate trade, not
-an oversight: the alternative was to publish nothing, or to publish something
-weaker than what we intend to do. It does mean each one is now a promise with a
-reader, which is a higher bar than an internal TODO.
+**51 open: 39 (c) · 9 (a) · 3 (b)** — counted from the file rather than carried
+forward. The previous line claimed 55 · 42 · 8 · 5, and the (b) count had been
+wrong since before the legal set: three entries, described as five. A follow-up
+file that miscounts itself is the same failure `known-issues.md` fixed in its
+own header, so the count here is now something to re-derive rather than
+increment:
+`grep -c '^- \[ \]' docs/followups.md`.
+
+The legal-set entries are worth reading as a group rather than as separate
+chores: several are the same shape — a document now makes a **published
+commitment** (a monitored mailbox, 30 days' sub-processor notice, a minimised
+screening payload) that the code does not yet fully back. That is a deliberate
+trade, not an oversight: the alternative was to publish nothing, or to publish
+something weaker than what we intend to do. It does mean each one is now a
+promise with a reader, which is a higher bar than an internal TODO. Two of them
+are now backed by a CI guard rather than by intent — see the sanctions and
+register entries' replacements in the same commits that closed them.
 
 **The total went up, and the reason is the same one round 30 recorded.** All six
 entries turned out to be wrong about their own work rather than merely
