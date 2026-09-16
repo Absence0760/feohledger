@@ -452,6 +452,12 @@ jobs:
       # breaks a copy of the set one way at a time and requires a failure.
       - name: The icon check fails on a broken set
         run: python3 -m unittest assets/test_check_icons.py
+      # The empty-state illustrations (decisions.md §181): geometry lives in a
+      # generator, the frontend imports the data module it writes.
+      - name: Empty-state illustrations match their generator
+        run: python3 assets/illustrations/gen_empty_states.py --check
+      - name: The illustration check fails on a stale module
+        run: python3 -m unittest assets/illustrations/test_gen_empty_states.py
 
   shellcheck:
     name: ShellCheck (deploy/)
