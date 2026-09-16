@@ -69,10 +69,10 @@
 
 	<h2 id="standard">3. The standard we hold ourselves to</h2>
 	<p>
-		Our conformance target is the
+		Our conformance target is <strong>WCAG 2.2 Level AA</strong> — the W3C's
 		<a href="https://www.w3.org/TR/WCAG22/" rel="noopener noreferrer"
-			>Web Content Accessibility Guidelines (WCAG) 2.2, Level AA</a
-		>, across all three surfaces.
+			>Web Content Accessibility Guidelines, version 2.2</a
+		>, at Level AA — across all three surfaces.
 	</p>
 	<p>
 		That target was chosen because it satisfies the instruments a customer is most likely
