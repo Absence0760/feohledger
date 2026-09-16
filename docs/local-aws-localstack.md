@@ -35,7 +35,7 @@ pnpm aws:down      # stop it when done
 | SQS queue | `feoh-audit` | `FEOH_AUDIT_MODE=lambda` |
 | SES identity | `no-reply@localhost` | `ses` email adapter |
 | CloudWatch log group | `/ap/audit` | `cloudwatch` audit sink |
-| S3 bucket (Object Lock) | `feoh-audit-worm` | `s3_objectlock` audit sink |
+| S3 bucket (Object Lock) | `feoh-audit-worm` | `s3_objectlock` audit sink — versioned, **COMPLIANCE mode, 2555-day default retention**, matching `infra/s3.tf`'s audit-logs bucket. The adapter's boot check requires all three, so a bucket created with Object Lock merely *enabled* is refused (`backend/docs/audit-log-shipping.md`). |
 
 The single knob is **`FEOH_AWS_ENDPOINT_URL`** (`app/config.py`). When set, the SQS
 dispatch clients, the `ses` email adapter, and the `cloudwatch` / `s3_objectlock`
