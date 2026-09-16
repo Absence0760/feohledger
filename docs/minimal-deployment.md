@@ -138,7 +138,8 @@ resize is a stop → change-type → start. Add 2 GB of swap either way.
   - `s3:GetBucketObjectLockConfiguration` on the audit-logs bucket, once S3
     audit shipping is turned on: its adapter reads the lock at boot and refuses
     to start without it.
-  - `ses:SendEmail` if using SES; ideally `ec2:ModifyInstanceMetadataOptions`
+  - `ses:SendEmail` on the SES identity (the `ses_identity_arn` output of
+    `infra/`) if using SES; ideally `ec2:ModifyInstanceMetadataOptions`
     so bootstrap can fix the IMDSv2 hop limit itself (containers can't reach
     instance-profile credentials through Docker's NAT at the default limit
     of 1).
@@ -221,10 +222,13 @@ above), `local` modes, sweeps off. Flip individual `FEOH_*_ENABLED` sweeps on on
 (`FEOH_PAYMENT_RECONCILE_ENABLED` and `FEOH_AUDIT_SHIPPING_ENABLED` are the two
 worth enabling first when real payments/compliance start).
 
-SES note: a fresh SES account is sandboxed (verified recipients only). Either
-request production access, or keep self-service signup closed at first (empty
-`FEOH_HCAPTCHA_SITEKEY`, above) and provision tenants with
-`deploy/add-tenant.sh`, leaving email on `console` until SES clears.
+SES note: `infra/email.tf` creates the SES identity for the platform domain, its
+DKIM and MAIL FROM records, and the Migadu mailbox records beside them — the
+bring-up order is `infra/README.md` § Email. A fresh SES account is still
+sandboxed (verified recipients only). Either request production access, or keep
+self-service signup closed at first (empty `FEOH_HCAPTCHA_SITEKEY`, above) and
+provision tenants with `deploy/add-tenant.sh`, leaving email on `console` until
+SES clears.
 
 ### 4. First boot + deploys (`deploy/deploy.sh` — built)
 

@@ -6746,6 +6746,39 @@ Rejected: keeping the VM file named `deploy/.env.sops` with YAML inside. sops in
 the extension, so the name would contradict the content and every command would need explicit types;
 the VM copy now carries the canonical file's own name.
 
+## 172. The platform domain's mail: Migadu mailboxes on the apex, SES app mail on `send.`, records in code
+
+**Decided:** 2026-09-15 · `infra/email.tf`, `infra/variables.tf`, `infra/outputs.tf`, `infra/tests/guardrails.tftest.hcl`
+
+FeohLedger needs two kinds of mail on `feohledger.com`: human mailboxes — the ACME account address,
+DMARC reports, anything a vendor replies to — and the app's transactional mail. The estate already
+answers both for `threkir.com`: mailboxes on Migadu, in the same account as `jaredhoward.com`, with
+records on the apex; app mail through an SES-backed sender on the `send.` subdomain; one `_dmarc`
+record for the pair. FeohLedger follows that shape rather than inventing a second one, with SES in its
+own account as the sender, because the backend already ships an `ses` email adapter and the VM's
+instance profile gives it credentials with no static key.
+
+Two things differ from threkir, both on purpose. SES sends with a custom MAIL FROM domain,
+`send.feohledger.com`, so bounces and SPF for app mail live entirely on that subdomain and the apex SPF
+authorizes Migadu alone, failing hard. threkir's apex SPF also includes `amazonses.com` because its
+relay sends with an apex envelope; SES with a custom MAIL FROM does not, and both senders DKIM-sign as
+the apex, so DMARC aligns for each without widening the apex record. And the records are resources, not
+a map pasted into tfvars: SES's DKIM tokens only exist once the identity does, so they cannot be pasted
+in advance, and Migadu's targets are the same for every domain. Writing them out leaves exactly one
+external value, the Migadu ownership token, and lets `terraform test` pin every record's name and target.
+
+DMARC starts at `p=none`, set by a variable, because both senders are new and a wrong record under
+`quarantine` silently loses real mail. The report address is validated to be on the platform domain:
+receivers ignore a report address on another domain unless that domain publishes an authorization
+record, which would leave `none` with nothing to monitor and nothing to say so.
+`behavior_on_mx_failure` is `USE_DEFAULT_VALUE`, so if the `send.` MX ever goes missing SES falls back
+to its own envelope instead of rejecting app mail, and DKIM alignment keeps DMARC passing meanwhile.
+
+Not done here: SES production access, which is a console request rather than a resource, and an SES
+configuration set for bounce and complaint events. SES's account-level suppression list already stops
+repeat sends to addresses that bounced or complained, and a configuration set can come with the first
+reason to act on those events.
+
 ## 173. The brand mark is feoh written as a split tally stick, and every icon is generated from it
 
 Until this change the product shipped placeholders: an "AP" SVG favicon, the

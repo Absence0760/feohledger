@@ -1,6 +1,6 @@
 # infra/
 
-Infrastructure-as-code for the FeohLedger AWS account. Scoped today to the **security substrate** needed as a SOC 2 engineering prerequisite (see `../docs/soc2-readiness.md`), plus two account-level pieces the workload stack will lean on: the platform TLS certificate and a monthly cost budget. Real AWS workload resources (ECS, ALB, RDS, CloudFront) are not yet defined here; they live on the roadmap under `docs/production-deployment.md`.
+Infrastructure-as-code for the FeohLedger AWS account. Scoped today to the **security substrate** needed as a SOC 2 engineering prerequisite (see `../docs/soc2-readiness.md`), plus the account-level pieces the workload stack will lean on: the platform domain's registration settings and TLS certificate, its mail DNS (Migadu mailboxes and the SES sending identity), and a monthly cost budget. Real AWS workload resources (ECS, ALB, RDS, CloudFront) are not yet defined here; they live on the roadmap under `docs/production-deployment.md`.
 
 ## Layout
 
@@ -15,6 +15,7 @@ infra/
 │                                #   + access-logs sink + backups bucket (lifecycle-expired, no lock)
 ├── acm.tf                       # us-east-1 certificate for the platform domain + wildcard
 ├── domain.tf                    # registration settings for the platform domain (renewal, lock, WHOIS privacy, name servers)
+├── email.tf                     # mail DNS: Migadu mailboxes on the apex, SES identity + DKIM + MAIL FROM on send., DMARC
 ├── budgets.tf                   # account-wide monthly cost budget + email alerts
 ├── outputs.tf                   # exports for downstream modules
 ├── backend.config.example       # state-bucket shape for `terraform init` (real one gitignored)
@@ -56,6 +57,37 @@ The platform domain is `feohledger.com` (`var.domain_name`, which accepts only a
 `acm.tf` issues the TLS certificate the workload stack's CloudFront distribution will use: the domain plus `*.<domain>`, requested in **us-east-1** through the `aws.us_east_1` provider alias because CloudFront accepts no other region (Route 53 Domains is served only from us-east-1 too). It is DNS-validated in the same zone during the apply, and `platform_certificate_arn` only resolves once it is issued.
 
 The wildcard is what makes tenant subdomains work — the SPA takes the tenant slug from the first label under the platform domain (`frontend/src/lib/hostRouting.ts`), so every `<slug>.<domain>` is covered without a certificate change per signup. Tenants live directly under the platform domain on every deployment shape, so no nested SAN is needed; a tenant's own vanity domain would need its own certificate — see the comment at the top of `acm.tf`.
+
+## Email — Migadu mailboxes + SES app mail
+
+`email.tf` puts two independent mail systems in the platform zone (`../docs/decisions.md` §172):
+
+| For | What it creates | Names |
+|---|---|---|
+| Mailboxes (`ops@`, aliases such as `noreply@`) on Migadu, the estate's mail host | MX, the SPF + ownership TXT, three DKIM CNAMEs, the `autoconfig` CNAME and three SRV client hints | the apex, `key1`–`key3._domainkey`, `autoconfig`, `_imaps._tcp` … |
+| App mail through SES in this account (`FEOH_EMAIL_PROVIDER=ses`) | the SES domain identity, its three Easy DKIM CNAMEs, and the `send.<domain>` MAIL FROM domain with its bounce MX and SPF | `<token>._domainkey`, `send` |
+| Both | one DMARC record, `p=none` until reports show alignment | `_dmarc` |
+
+The apex SPF authorizes Migadu alone: SES mail's envelope sender is on `send.`, and both systems DKIM-sign as the apex domain, so DMARC aligns for each.
+
+Bring it up in this order:
+
+1. **Add the domain in Migadu** (admin.migadu.com → Domains, in the estate's existing account) and copy the token from its DNS page — the part after `hosted-email-verify=`. Put it, and the DMARC report mailbox, in `infra-secrets/feohledger/prod.tfvars`:
+   ```hcl
+   migadu_verification_token = "<token>"
+   dmarc_report_email        = "ops@feohledger.com"
+   ```
+   Neither is secret; both end up in public DNS.
+2. **Plan and apply** (§ Applying). Everything else can go in before the token is known; the token only adds a second string to the apex TXT record.
+3. **Finish in Migadu:** run its DNS check, then create the `ops@` mailbox, plus a `noreply@` alias if replies to app mail should land somewhere.
+4. **Wait for SES to verify the identity.** It checks the DKIM CNAMEs itself — up to 72 hours, usually far less. It is ready when this reports `sending: true`, `dkim: SUCCESS` and `mailFrom: SUCCESS`:
+   ```bash
+   aws sesv2 get-email-identity --email-identity feohledger.com --profile feohledger --query '{sending:VerifiedForSendingStatus,dkim:DkimAttributes.Status,mailFrom:MailFromAttributes.MailFromDomainStatus}'
+   ```
+5. **Request SES production access** (SES console → Account dashboard). A new account is sandboxed and delivers only to verified addresses; until access is granted, keep `FEOH_EMAIL_PROVIDER=console` in the deploy env.
+6. **Tighten DMARC** once a few days of reports show both senders passing: `dmarc_policy = "quarantine"`, later `"reject"`.
+
+The VM sends with its instance profile, so grant it `ses:SendEmail` on the `ses_identity_arn` output (`../docs/minimal-deployment.md` § 1).
 
 ## Cost guardrail
 

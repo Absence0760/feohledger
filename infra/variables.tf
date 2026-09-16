@@ -101,3 +101,41 @@ variable "budget_alert_emails" {
     error_message = "budget_alert_emails still holds the example placeholder — replace it with a real address."
   }
 }
+
+variable "migadu_verification_token" {
+  description = "Migadu's ownership token for the platform domain: the value after `hosted-email-verify=` at admin.migadu.com → Domains → <domain> → DNS Configuration. Account-specific but not secret (it is published in DNS), so it lives in the operator's tfvars. Null until the domain has been added in Migadu; every other mail record is created anyway, and Migadu verifies the domain once the token is published (README.md § Email)."
+  type        = string
+  default     = null
+
+  validation {
+    condition     = var.migadu_verification_token == null || can(regex("^[A-Za-z0-9]+$", var.migadu_verification_token))
+    error_message = "migadu_verification_token is the bare token, such as p8dxwnab, not the whole hosted-email-verify=... string."
+  }
+}
+
+variable "dmarc_policy" {
+  description = "What receivers do with mail that fails DMARC for the platform domain. Starts at `none` (monitor only) because both senders are new; raise it to `quarantine`, then `reject`, once the aggregate reports show SES and Migadu mail aligning."
+  type        = string
+  default     = "none"
+
+  validation {
+    condition     = contains(["none", "quarantine", "reject"], var.dmarc_policy)
+    error_message = "dmarc_policy must be none, quarantine or reject."
+  }
+}
+
+variable "dmarc_report_email" {
+  description = "Mailbox that receives DMARC aggregate reports (rua) for the platform domain, such as ops@<domain> on Migadu. Unlike budget_alert_emails it is published in public DNS. It must be on the platform domain: a reporting address on another domain is ignored unless that domain publishes an external-reporting authorization. Null publishes the policy with no reporting address, which leaves `none` with nothing to monitor."
+  type        = string
+  default     = null
+
+  validation {
+    condition     = var.dmarc_report_email == null || can(regex("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$", var.dmarc_report_email))
+    error_message = "dmarc_report_email must be an email address."
+  }
+
+  validation {
+    condition     = var.dmarc_report_email == null || can(regex("@${replace(lower(var.domain_name), ".", "\\.")}$", lower(var.dmarc_report_email)))
+    error_message = "dmarc_report_email must be a mailbox on the platform domain; receivers drop reports addressed to another domain that has not authorized them."
+  }
+}
