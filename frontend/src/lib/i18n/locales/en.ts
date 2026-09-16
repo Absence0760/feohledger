@@ -24,6 +24,8 @@ export const en = {
 	'nav.group.procurement': 'Procurement',
 	'nav.group.billing': 'Billing',
 	'nav.group.insights': 'Insights',
+	'nav.group.automation': 'Automation',
+	'nav.group.governance': 'Governance',
 	'nav.group.settings': 'Settings',
 
 	// Primary navigation — group children ($lib/nav.ts)
@@ -76,6 +78,8 @@ export const en = {
 	'shell.skipToMain': 'Skip to main content',
 	'shell.primaryNav': 'Primary',
 	'shell.sectionNav': '{group} sections',
+	'shell.sectionMore': 'More',
+	'shell.sectionMoreAria': '{count} more sections',
 	'shell.profileMenu': 'Profile and account menu',
 	'shell.profile': 'Profile',
 	'shell.profileAndSecurity': 'Profile & Security',

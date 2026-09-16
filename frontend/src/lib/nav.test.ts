@@ -14,11 +14,18 @@ import { PERM_PAYMENT_EXECUTE, PERM_PAYMENT_VOID, PERM_USER_MANAGE } from './typ
 const links = NAV.filter((e): e is NavLink => e.kind === 'link');
 const link = (href: string): NavLink => links.find((l) => l.href === href)!;
 
-const settings = NAV.find(
-	(e): e is NavGroup => e.kind === 'group' && e.label === 'Settings'
-)!;
+const groups = NAV.filter((e): e is NavGroup => e.kind === 'group');
+const group = (label: string) => groups.find((g) => g.label === label)!;
+
+const settings = group('Settings');
 const kids = settings.children;
 const kid = (href: string) => kids.find((c) => c.href === href)!;
+/**
+ * A child of ANY group, by href. RBAC assertions use this rather than `kid` so
+ * that moving an entry between groups can't turn a real gate regression into a
+ * `undefined.roles` crash — which is exactly what the Governance split did.
+ */
+const anyKid = (href: string) => groups.flatMap((g) => g.children).find((c) => c.href === href)!;
 const url = (p: string) => new URL(`http://acme.localhost:7777${p}`);
 
 test('isEntryActive: a plain link is active on its path and sub-paths', () => {
@@ -201,9 +208,9 @@ test('retention, access-review, and privacy nav entries match their backend RBAC
 	// GET/PUT /api/retention-policy and the /api/privacy surface are admin-only;
 	// /api/access-reviews is require_roles(ADMIN, CFO) — see nav.ts's own
 	// comments beside each entry.
-	const retention = kid('/admin/retention');
-	const accessReview = kid('/admin/access-review');
-	const privacy = kid('/admin/privacy');
+	const retention = anyKid('/admin/retention');
+	const accessReview = anyKid('/admin/access-review');
+	const privacy = anyKid('/admin/privacy');
 	expect(retention.roles).toEqual(['admin']);
 	expect(accessReview.roles).toEqual(['admin', 'cfo']);
 	expect(privacy.roles).toEqual(['admin']);
@@ -307,4 +314,88 @@ test('the Payments nav row admits a permission-only role its backend now serves'
 	const noRoles = () => false;
 	const onlyVoid = (perm: string) => perm === PERM_PAYMENT_VOID;
 	expect(canSee(payments.roles, noRoles, payments.permissions, onlyVoid)).toBe(true);
+});
+
+// ---------------------------------------------------------------------------
+// Section grouping + icons
+//
+// `SectionTabs` lays a group's children out as one horizontal row. Before the
+// Governance/Automation split, Settings carried 15 of them, and the row — a
+// flex container with no wrap and no overflow — widened the DOCUMENT into a
+// horizontal scrollbar (a WCAG 1.4.10 reflow failure) rather than clipping.
+// The overflow menu is the structural fix; these guard the grouping itself.
+// ---------------------------------------------------------------------------
+
+test('the Settings split preserves every destination exactly once', () => {
+	// The three groups Settings was split into must between them still offer
+	// every href the single group did — a split is a re-grouping, not a cull.
+	const split = ['Settings', 'Governance', 'Automation'].flatMap((g) =>
+		group(g).children.map((c) => c.href)
+	);
+	expect(new Set(split).size, 'a destination is listed in two groups').toBe(split.length);
+	expect(split).toEqual(
+		expect.arrayContaining([
+			'/organization',
+			'/admin?tab=users',
+			'/admin?tab=roles',
+			'/admin/entities',
+			'/admin/partner',
+			'/admin/api-keys',
+			'/admin/webhooks',
+			'/admin/health',
+			'/audit',
+			'/admin/access-review',
+			'/admin/retention',
+			'/admin/privacy',
+			'/workflows',
+			'/experiments',
+			'/adaptive',
+		])
+	);
+	expect(split).toHaveLength(15);
+});
+
+test('no section grows back to a tab count the row cannot hold', () => {
+	// Not a style rule — a long row is what produced the reflow failure. The
+	// overflow menu keeps any count SAFE, but a section past ~10 is a sign the
+	// grouping wants splitting again rather than more tabs hidden behind More.
+	for (const g of groups) {
+		expect(
+			g.children.length,
+			`nav group "${g.label}" has ${g.children.length} tabs — split it rather than growing the row`
+		).toBeLessThanOrEqual(10);
+		// SectionTabs suppresses the bar below 2, so a 1-child group is a group
+		// that should have been a plain link.
+		expect(g.children.length, `nav group "${g.label}" needs at least 2 children`).toBeGreaterThan(1);
+	}
+});
+
+test('sibling nav rows are visually distinguishable by icon', () => {
+	// Screening, Bank Changes and Exceptions sat adjacent in the sidebar and all
+	// three declared `icon: 'exceptions'`, so they rendered as three identical
+	// warning triangles.
+	const icons = ['/vendors/screening', '/vendors/change-requests', '/exceptions'].map(
+		(href) => link(href).icon
+	);
+	expect(new Set(icons).size, `adjacent rows share an icon: ${icons.join(', ')}`).toBe(3);
+});
+
+test('every icon the nav names has a branch that can draw it', async () => {
+	// `Sidebar.svelte` resolves icons through an if/else chain with no `else`,
+	// so a key with no branch renders an empty 20x20 box — silently, and only
+	// on the one row that uses it. The NavIcon union stops a typo; this stops a
+	// valid-but-undrawn key.
+	const { readFileSync } = await import('node:fs');
+	const sidebar = readFileSync(
+		new URL('./components/layout/Sidebar.svelte', import.meta.url),
+		'utf-8'
+	);
+	const drawable = new Set(
+		[...sidebar.matchAll(/entry\.icon === '([A-Za-z]+)'/g)].map((mt) => mt[1])
+	);
+	for (const entry of NAV) {
+		expect(drawable, `no <svg> branch in Sidebar.svelte for icon '${entry.icon}'`).toContain(
+			entry.icon
+		);
+	}
 });
