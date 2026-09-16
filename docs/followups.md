@@ -43,11 +43,12 @@ closed, **eighteen** opened. **29 → 41** — by category, **31 (c)** · **7 (a
 (2026-09-14) and the missing self-service-signup switch (2026-09-15) — then
 **twelve** from publishing the legal document set and reviewing it
 (2026-09-15/16, [decisions.md](decisions.md) §175): nine (c), two (b) and one
-(a). Five of those twelve closed on 2026-09-16 (the accessibility statement, the
+(a). Six of those twelve closed on 2026-09-16 (the accessibility statement, the
 i18n link surfaces, the sanctions-minimisation guard, the register drift guard,
-and the transfer-safeguards sentence — whose contractual half moved to (a)).
+the transfer-safeguards sentence — whose contractual half moved to (a) — and the
+60-day backup deletion, now `deploy/remove-tenant.sh`).
 
-**51 open: 39 (c) · 9 (a) · 3 (b)** — counted from the file rather than carried
+**50 open: 38 (c) · 9 (a) · 3 (b)** — counted from the file rather than carried
 forward. The previous line claimed 55 · 42 · 8 · 5, and the (b) count had been
 wrong since before the legal set: three entries, described as five. A follow-up
 file that miscounts itself is the same failure `known-issues.md` fixed in its
@@ -145,27 +146,6 @@ pending the standing "loop in the CISO / Security Analyst" gate on that section.
       registers can no longer drift from the code silently — what is still
       missing is telling customers when they change.
       **Trigger:** before adding or changing any sub-processor.
-
-- [ ] **Nothing implements the 60-day backup deletion the DPA promises.** (see [#424](https://github.com/Absence0760/feohledger/issues/424) — same object-storage traversal)
-      `/legal/dpa` §13 now commits to deleting a tenant's backup objects within
-      60 days of termination, which the per-database `pg_dump` layout makes
-      genuinely possible — one tenant is one object per nightly run. But no
-      script or backend path touches the backups bucket except `deploy/backup.sh`
-      and `deploy/restore.sh`; `deploy/` has an `add-tenant.sh` and no remove
-      path at all. It is a manual operator step today, and the command is written
-      down in `docs/backup-disaster-recovery.md` rather than automated.
-      Two things complicate it, both recorded in that doc: the control-plane dump
-      is shared across tenants and carries every employee's name, email and
-      password hash, so it is **not** selectively editable the way a tenant dump
-      is; and a delete leaves a delete-marker residue until the 30-day
-      noncurrent-version expiry.
-      **Durable fix:** a `deploy/remove-tenant.sh` that drops the tenant database,
-      removes its Caddy block, and deletes its backup objects and their
-      noncurrent versions — the same traversal the erasure object-storage leg
-      needs (`docs/known-issues.md`), triggered by termination rather than by a
-      data-subject request.
-      **Trigger:** before the first customer terminates, and before anyone relies
-      on the §13 clause.
 
 ### The pricing page and the billing code describe different products
 

@@ -7075,3 +7075,58 @@ The three together generalise the guard rail the repo already applies to money:
 a claim with a reader outside the project is an invariant, not a comment, and
 invariants get a test. The cost is that a future change has to argue with a
 failing check. That is the point of it.
+
+## 179. Deleting a tenant goes documents → database → control plane, and the order is the recoverable one
+
+`deploy/remove-tenant.sh` and `services/tenant_deletion` implement the deletion
+`/legal/dpa` § 13 and clause 10 of the Terms promise within 60 days of
+termination. Until now that promise had no mechanism: `deploy/` had an
+`add-tenant.sh` and no inverse, and `docs/backup-disaster-recovery.md` recorded
+the 60-day clause as "a calendar obligation, not a system behaviour".
+
+**The ordering is the decision.** The instinct is to delete the control-plane
+organisation row first — it is what makes a tenant reachable, so removing it
+looks like the safe opening move. It is the one irreversible mistake available
+here. Every object key in the bucket is `{org_id}/…` and the organisation row is
+the only place that id is written down, so deleting it and then failing on the
+storage sweep leaves documents nobody can find again. Ordered documents →
+database → control plane, every step is idempotent and a partial failure is
+re-run: the sweep finds nothing, `DROP DATABASE IF EXISTS` is a no-op, and the
+control-plane transaction finishes the job.
+
+The trade is a window where the organisation row points at a database that is
+gone, so a request on that host errors. The deploy script removes the Caddy host
+block and reloads *before* calling the backend, so nothing is serving that host
+by then.
+
+**Completeness is enforced against `CONTROL_TABLES`, not remembered.**
+`CONTROL_DELETIONS` is held against the same frozenset that decides which tables
+a tenant DB must never receive: every control-plane table is either swept or
+named in `CONTROL_TABLES_EXEMPT` with a reason (only `plans` is — one catalogue
+shared by every org). The check runs at import and in CI, so the next
+control-plane table cannot be added without someone deciding which it is. This
+is the same drift a sub-processor register has (§178) and the same answer.
+
+Two refusals, both because the database would otherwise accept the operation
+quietly. A partner organisation with children is refused, because
+`parent_org_id` is `ON DELETE SET NULL` and Postgres would silently promote a
+reseller's customers to standalone tenants. And the `roles` sweep is
+`organization_id = :org` precisely because `=` never matches NULL, which is what
+keeps the four system roles — shared by every tenant on the platform — out of
+reach; a Python-side filter or `IS NOT DISTINCT FROM` would put them back in it.
+
+**Two verification notes worth keeping.** The S3 version query was written first
+as `[Versions, DeleteMarkers][][?ends_with(Key, …)]`, which parses, runs, and
+matches nothing — the filter binds to the flattened projection rather than its
+elements. It would have reported "removed 0 version(s)" while leaving every
+backup in place, under a confirmation telling the customer they were deleted.
+Caught by running it against real S3 semantics rather than reading it. And the
+suffix is `/`-anchored, so deleting `acme` cannot match `not-acme` or the shared
+`feohledger.dump`.
+
+**What deletion does not reach is printed, not assumed.** The confirmation the
+operator sends names the two residues the DPA already discloses — the shared
+control-plane dump, which is not selectively editable and ages out on the
+retention cycle, and any audit event already in write-once archival. A
+confirmation that overstates is worse than none, because it is the customer's
+evidence.

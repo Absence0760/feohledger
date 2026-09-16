@@ -149,6 +149,16 @@ this is an entry rather than a same-session fix.
 state these limitations explicitly rather than claiming completeness, so nothing
 published is untrue while the gap stands.
 
+**Not closed by tenant deletion, and worth saying so.**
+`services/tenant_deletion` (2026-09-16) sweeps a whole tenant's object-storage
+prefix via the new `storage.delete_prefix`, which is the traversal this entry's
+fix also needs — but it is deliberately NOT the tool for this one. Deleting a
+*tenant* is unconditional: the customer is gone, so every object under
+`{org_id}/` goes. Erasing a *subject* inside a live tenant is the selective case
+this entry describes, where an invoice PDF is shared transaction evidence the
+money trail keeps and a W-9 is not. The per-key collection step is still the
+work; what exists now is a worked example of talking to the bucket at all.
+
 ## ~~A named-but-unregistered CARD provider still falls back to `mock`~~ — FIXED 2026-08-21
 
 **Resolved.** `card_adapters/dispatcher.get_card_adapter` now raises
