@@ -34,12 +34,33 @@
 import type { MessageKey } from '$lib/i18n/messages';
 import { PERM_PAYMENT_EXECUTE, PERM_PAYMENT_VOID, PERM_USER_MANAGE } from '$lib/types/admin';
 
+/**
+ * Every icon key `Sidebar.svelte` can draw. A union rather than `string` so a
+ * typo or a key with no matching branch fails typecheck instead of rendering a
+ * blank 20x20 box — the if/else chain there has no `else`, so an unknown key
+ * was silently invisible.
+ */
+export type NavIcon =
+	| 'dashboard'
+	| 'invoices'
+	| 'payments'
+	| 'vendors'
+	| 'screening'
+	| 'bankChange'
+	| 'exceptions'
+	| 'cart'
+	| 'receipt'
+	| 'assistant'
+	| 'automation'
+	| 'governance'
+	| 'settings';
+
 export interface NavLink {
 	kind: 'link';
 	label: string;
 	labelKey: MessageKey;
 	href: string;
-	icon: string;
+	icon: NavIcon;
 	roles?: string[];
 	/**
 	 * OR'd with `roles` — visible if the user holds ANY of these granular
@@ -66,7 +87,7 @@ export interface NavGroup {
 	kind: 'group';
 	label: string;
 	labelKey: MessageKey;
-	icon: string;
+	icon: NavIcon;
 	children: NavChild[];
 }
 
@@ -108,7 +129,7 @@ export const NAV: NavEntry[] = [
 	// control on it is gated further (re-screen on `auth.isManager`,
 	// block/unblock on the `vendor.block` permission), so it renders read-only
 	// for a clerk and hiding the row was a dead end, not a gate.
-	{ kind: 'link', label: 'Screening', labelKey: 'vendors.col.screening', href: '/vendors/screening', icon: 'exceptions', roles: ['admin', 'ap_manager', 'ap_clerk', 'cfo'] },
+	{ kind: 'link', label: 'Screening', labelKey: 'vendors.col.screening', href: '/vendors/screening', icon: 'screening', roles: ['admin', 'ap_manager', 'ap_clerk', 'cfo'] },
 	// Vendor bank / tax change-approval queue (a second sub-route of /vendors).
 	// The dual-control BEC gate's only UI: a staged change never applies until
 	// a SECOND user signs it off, so without a nav row the queue — and with it
@@ -117,7 +138,7 @@ export const NAV: NavEntry[] = [
 	// (`require_roles(ROLE_ADMIN, ROLE_AP_MANAGER)`); note CFO is deliberately
 	// absent, matching the API. The *approve* action inside the page is gated
 	// further, on the granular `vendor.bank_change.approve` permission.
-	{ kind: 'link', label: 'Bank Changes', labelKey: 'vendors.changeRequests.navLabel', href: '/vendors/change-requests', icon: 'exceptions', roles: ['admin', 'ap_manager'] },
+	{ kind: 'link', label: 'Bank Changes', labelKey: 'vendors.changeRequests.navLabel', href: '/vendors/change-requests', icon: 'bankChange', roles: ['admin', 'ap_manager'] },
 	{ kind: 'link', label: 'Exceptions', labelKey: 'nav.exceptions', href: '/exceptions', icon: 'exceptions', roles: ['admin', 'ap_manager'] },
 	{
 		kind: 'group',
@@ -237,6 +258,52 @@ export const NAV: NavEntry[] = [
 			{ label: 'Report Builder', labelKey: 'nav.reports', href: '/reports', roles: ['admin', 'ap_manager', 'ap_clerk', 'cfo'] },
 		],
 	},
+	// Workflow authoring + the AI that tunes it. Split out of Settings: these
+	// are operational surfaces an AP manager works in, not org configuration,
+	// and burying them under a 15-tab Settings bar hid them.
+	{
+		kind: 'group',
+		label: 'Automation',
+		labelKey: 'nav.group.automation',
+		icon: 'automation',
+		children: [
+			{ label: 'Workflows', labelKey: 'nav.workflows', href: '/workflows', roles: ['admin'] },
+			// A/B testing of workflow rules — compare two configs on objective
+			// metrics. Read for managers/CFO; mutate is admin (backend RBAC).
+			{ label: 'Experiments', labelKey: 'nav.experiments', href: '/experiments', roles: ['admin', 'ap_manager', 'cfo'] },
+			// Adaptive AI workflows — approval-pattern learning, baseline
+			// anomalies, advisory suggestions, smart routing, the auto-approve
+			// threshold recommendation and the feedback loop. Read is
+			// admin/ap_manager/cfo (the backend's `_READ_ROLES`); the two acts are
+			// gated further inside the page (dismiss/route-apply ap_manager+,
+			// threshold apply admin-only — it edits a workflow definition).
+			{ label: 'Adaptive Workflows', labelKey: 'nav.adaptive', href: '/adaptive', roles: ['admin', 'ap_manager', 'cfo'] },
+		],
+	},
+	// The SOX / GDPR evidence surfaces. Split out of Settings because an
+	// auditor or CFO comes here to READ a record, not to change a setting —
+	// and `Audit Trail` is the single most-looked-for page in the section.
+	{
+		kind: 'group',
+		label: 'Governance',
+		labelKey: 'nav.group.governance',
+		icon: 'governance',
+		children: [
+			{ label: 'Audit Trail', labelKey: 'nav.auditTrail', href: '/audit', roles: ['admin', 'cfo'] },
+			// Periodic SOX access review — flags dormant elevated-role users.
+			// Admin | CFO (the reviewer privilege), matching the backend's
+			// require_roles(ADMIN, CFO) on both /api/access-reviews routes.
+			{ label: 'Access Review', labelKey: 'nav.accessReview', href: '/admin/access-review', roles: ['admin', 'cfo'] },
+			// SOX records-management config — per-record-class retention windows.
+			// Admin only (the backend GET/PUT /api/retention-policy 403s the rest).
+			{ label: 'Retention Policy', labelKey: 'nav.retention', href: '/admin/retention', roles: ['admin'] },
+			// GDPR/CCPA data-subject rights — DSAR export + right-to-erasure.
+			// Admin only (the backend /api/privacy surface 403s the rest).
+			{ label: 'Privacy & DSAR', labelKey: 'nav.privacy', href: '/admin/privacy', roles: ['admin'] },
+		],
+	},
+	// Org configuration proper: who the tenant is, who works in it, and the
+	// integration surfaces it exposes.
 	{
 		kind: 'group',
 		label: 'Settings',
@@ -260,42 +327,20 @@ export const NAV: NavEntry[] = [
 			// Roles: role CRUD (defining what a role can grant) stays
 			// admin-only on the backend — no `permissions` here on purpose.
 			{ label: 'Roles', labelKey: 'nav.roles', href: '/admin?tab=roles', roles: ['admin'] },
-			{ label: 'Audit Trail', labelKey: 'nav.auditTrail', href: '/audit', roles: ['admin', 'cfo'] },
-			{ label: 'Workflows', labelKey: 'nav.workflows', href: '/workflows', roles: ['admin'] },
-			// A/B testing of workflow rules — compare two configs on objective
-			// metrics. Read for managers/CFO; mutate is admin (backend RBAC).
-			{ label: 'Experiments', labelKey: 'nav.experiments', href: '/experiments', roles: ['admin', 'ap_manager', 'cfo'] },
-			// Adaptive AI workflows — approval-pattern learning, baseline
-			// anomalies, advisory suggestions, smart routing, the auto-approve
-			// threshold recommendation and the feedback loop. Read is
-			// admin/ap_manager/cfo (the backend's `_READ_ROLES`); the two acts are
-			// gated further inside the page (dismiss/route-apply ap_manager+,
-			// threshold apply admin-only — it edits a workflow definition).
-			{ label: 'Adaptive Workflows', labelKey: 'nav.adaptive', href: '/adaptive', roles: ['admin', 'ap_manager', 'cfo'] },
 			// Legal entities / subsidiaries — the `entity_id` scope target the
 			// sidebar switcher selects. `GET /api/entities` is open to any authed
 			// user, but this page is a mutation surface (POST / PATCH /
 			// set-default are all `require_roles(ROLE_ADMIN)`), so admin only.
 			{ label: 'Entities', labelKey: 'nav.entities', href: '/admin/entities', roles: ['admin'] },
+			// Partner / reseller multi-tenant admin — manage branded child tenants.
+			// Admin only (the backend /api/partner surface 403s the rest). A
+			// standalone org sees an empty "not a partner" state.
+			{ label: 'Partner Admin', labelKey: 'nav.partner', href: '/admin/partner', roles: ['admin'] },
 			// Developer-API key management — admin only (the backend 403s the rest).
 			{ label: 'API Keys', labelKey: 'nav.apiKeys', href: '/admin/api-keys', roles: ['admin'] },
 			// Outbound-webhook subscriptions + delivery log / redelivery — admin
 			// only (the backend /api/webhooks surface 403s the rest).
 			{ label: 'Webhooks', labelKey: 'nav.webhooks', href: '/admin/webhooks', roles: ['admin'] },
-			// Partner / reseller multi-tenant admin — manage branded child tenants.
-			// Admin only (the backend /api/partner surface 403s the rest). A
-			// standalone org sees an empty "not a partner" state.
-			{ label: 'Partner Admin', labelKey: 'nav.partner', href: '/admin/partner', roles: ['admin'] },
-			// SOX records-management config — per-record-class retention windows.
-			// Admin only (the backend GET/PUT /api/retention-policy 403s the rest).
-			{ label: 'Retention Policy', labelKey: 'nav.retention', href: '/admin/retention', roles: ['admin'] },
-			// Periodic SOX access review — flags dormant elevated-role users.
-			// Admin | CFO (the reviewer privilege), matching the backend's
-			// require_roles(ADMIN, CFO) on both /api/access-reviews routes.
-			{ label: 'Access Review', labelKey: 'nav.accessReview', href: '/admin/access-review', roles: ['admin', 'cfo'] },
-			// GDPR/CCPA data-subject rights — DSAR export + right-to-erasure.
-			// Admin only (the backend /api/privacy surface 403s the rest).
-			{ label: 'Privacy & DSAR', labelKey: 'nav.privacy', href: '/admin/privacy', roles: ['admin'] },
 			// Background-sweep health — per-sweep last run / outcome / failure
 			// streak. Admin only, matching `require_roles(ROLE_ADMIN)` on
 			// GET /api/health/sweeps. The public /api/health probe deliberately
