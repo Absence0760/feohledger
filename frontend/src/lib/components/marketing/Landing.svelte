@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { asset } from '$app/paths';
 	import IconExtract from '~icons/material-symbols/document-scanner-outline';
 	import IconApprove from '~icons/material-symbols/fact-check-outline';
 	import IconMatch from '~icons/material-symbols/join-inner';
@@ -10,9 +11,13 @@
 	import IconCheck from '~icons/material-symbols/check-circle-outline';
 	import IconArrow from '~icons/material-symbols/arrow-forward';
 	import Pricing from '$lib/components/marketing/Pricing.svelte';
+	import AdapterRail from '$lib/components/marketing/AdapterRail.svelte';
+	import Atmosphere from '$lib/components/marketing/Atmosphere.svelte';
+	import HeroPipeline from '$lib/components/marketing/HeroPipeline.svelte';
+	import MotionToggle from '$lib/components/marketing/MotionToggle.svelte';
 	import { LEGAL_PAGES } from '$lib/legal/pages';
-	import Badge from '$lib/components/ui/Badge.svelte';
 	import BrandMark from '$lib/components/ui/BrandMark.svelte';
+	import { countUp, reveal } from '$lib/actions/reveal';
 
 	const features = [
 		{
@@ -81,16 +86,35 @@
 	// catalogues, CANONICAL_STEP_TYPES + BUILDER_STEP_TYPES, and the rebate rate
 	// in api/cards.py (1% default, org-negotiated). If a number here stops
 	// matching, change the number.
+	//
+	// `countUp` animates the leading integer and leaves anything else alone, so
+	// `1–2%` is rendered, not counted to. The final value is what is written in
+	// the markup — the animation replaces it and puts it back — so a visitor with
+	// reduced motion, a crawler and a failed bundle all read the real figure.
 	const stats = [
 		{ value: '7', label: 'payment rails, ACH to CHAPS' },
 		{ value: '9', label: 'workflow step types' },
 		{ value: '6', label: 'languages, fully localized' },
 		{ value: '1–2%', label: 'typical rebate on card payments' },
 	];
+
+	// Set by the in-page pause control (WCAG 2.2.2). `app.css` turns the
+	// attribute into `animation-play-state: paused` for this whole subtree, so
+	// the hero loop, the aurora and the adapter rail stop together.
+	let motionPaused = $state(false);
+
+	// Whether the page has scrolled past the hero's top edge, which is the only
+	// thing the sticky header changes about itself. Kept as a boolean rather
+	// than a scroll offset so the class flips once instead of on every frame.
+	let scrolled = $state(false);
 </script>
 
-<div class="landing">
-	<header class="nav">
+<svelte:window onscroll={() => (scrolled = window.scrollY > 12)} />
+
+<div class="landing" data-motion={motionPaused ? 'paused' : 'running'}>
+	<Atmosphere fixed />
+
+	<header class="nav" class:scrolled>
 		<a href="/" class="brand">
 			<BrandMark size={28} />
 			<span class="brand-name">FeohLedger</span>
@@ -99,176 +123,199 @@
 			<a href="#features">Features</a>
 			<a href="#how">How it works</a>
 			<a href="#pricing">Pricing</a>
-			<a href="/signup" class="nav-cta">Create workspace <IconArrow /></a>
+			<MotionToggle bind:paused={motionPaused} />
+			<a href="/signup" class="nav-cta">
+				<!-- Two labels, one shown per breakpoint. `display: none` on the
+				     hidden one takes it out of the accessibility tree too, so the
+				     link's name is always exactly the label in view. -->
+				<span class="cta-long">Create workspace</span><span class="cta-short">Start free</span>
+				<IconArrow aria-hidden="true" />
+			</a>
 		</nav>
 	</header>
 
-	<section class="hero">
-		<div class="hero-text">
-			<span class="eyebrow">Accounts payable, automated</span>
-			<h1>
-				AP automation<br />
-				your finance team<br />
-				<span class="accent">will actually use.</span>
-			</h1>
-			<p class="lede">
-				From invoice to payment in minutes, not days. AI-powered extraction,
-				configurable approval workflows, and real ERP sync — in one place,
-				with rebates on every card payment.
-			</p>
-			<div class="cta-row">
-				<a href="/signup" class="primary">Start free workspace<IconArrow /></a>
-				<a href="#how" class="secondary">See how it works</a>
-			</div>
-			<p class="sub-note">
-				Free to start · No credit card · Provision in 30 seconds
-			</p>
-		</div>
-
-		<div class="hero-visual" aria-hidden="true">
-			<div class="mock-card">
-				<div class="mock-header">
-					<Badge tone="success">Ready for review</Badge>
-					<div class="mock-conf">Confidence <strong>96%</strong></div>
+	<main class="content">
+		<section class="hero">
+			<div class="hero-text">
+				<span class="eyebrow">Accounts payable, automated</span>
+				<h1>
+					AP automation<br />
+					your finance team<br />
+					<span class="accent">will actually use.</span>
+				</h1>
+				<p class="lede">
+					From invoice to payment in minutes, not days. AI-powered extraction,
+					configurable approval workflows, and real ERP sync — in one place,
+					with rebates on every card payment.
+				</p>
+				<div class="cta-row">
+					<a href="/signup" class="primary">Start free workspace<IconArrow /></a>
+					<a href="#how" class="secondary">See how it works</a>
 				</div>
-				<div class="mock-title">INV-2026-00418</div>
-				<div class="mock-vendor">Northwind Suppliers Ltd</div>
-				<div class="mock-rows">
-					<div class="mock-row"><span>Amount</span><strong>$12,480.00</strong></div>
-					<div class="mock-row"><span>Due</span><strong>Apr 29, 2026</strong></div>
-					<div class="mock-row"><span>PO match</span><strong class="ok">3-way · 100%</strong></div>
-					<div class="mock-row"><span>GL suggestion</span><strong>5200 · Cost of goods</strong></div>
-				</div>
-				<div class="mock-actions">
-					<button class="mock-approve">Approve</button>
-					<button class="mock-reject">Reject</button>
-				</div>
+				<p class="sub-note">
+					Free to start · No credit card · Provision in 30 seconds
+				</p>
 			</div>
-			<div class="mock-bg-1"></div>
-			<div class="mock-bg-2"></div>
-		</div>
-	</section>
 
-	<section class="stats">
-		{#each stats as stat}
-			<div class="stat">
-				<div class="stat-value">{stat.value}</div>
-				<div class="stat-label">{stat.label}</div>
+			<div class="hero-visual">
+				<HeroPipeline />
 			</div>
-		{/each}
-	</section>
+		</section>
 
-	<section id="features" class="features">
-		<div class="section-head">
-			<span class="eyebrow">Everything you need</span>
-			<h2>One platform, from capture to payment.</h2>
-			<p>
-				Most teams stitch together extraction, approvals, matching, and ERP
-				sync across four tools. FeohLedger is one tool that does all of it —
-				with the pluggable pieces you'd expect.
-			</p>
-		</div>
+		<section class="rail-section" use:reveal>
+			<AdapterRail />
+		</section>
 
-		<div class="feature-grid">
-			{#each features as feature}
-				<div class="feature">
-					<div class="feature-icon">
-						<feature.icon />
+		<section class="stats" use:reveal>
+			{#each stats as stat, i}
+				<div class="stat" use:reveal={{ delay: i * 70 }}>
+					<div class="stat-value" use:countUp={{ value: stat.value }}>{stat.value}</div>
+					<div class="stat-label">{stat.label}</div>
+				</div>
+			{/each}
+		</section>
+
+		<section id="features" class="features">
+			<div class="section-head" use:reveal>
+				<span class="eyebrow">Everything you need</span>
+				<h2>One platform, from capture to payment.</h2>
+				<p>
+					Most teams stitch together extraction, approvals, matching, and ERP
+					sync across four tools. FeohLedger is one tool that does all of it —
+					with the pluggable pieces you'd expect.
+				</p>
+			</div>
+
+			<div class="feature-grid">
+				{#each features as feature, i}
+					<div class="feature" use:reveal={{ delay: (i % 3) * 80, amount: 0.15 }}>
+						<div class="feature-icon">
+							<feature.icon />
+						</div>
+						<h3>{feature.title}</h3>
+						<p>{feature.body}</p>
 					</div>
-					<h3>{feature.title}</h3>
-					<p>{feature.body}</p>
+				{/each}
+			</div>
+		</section>
+
+		<section id="how" class="how">
+			<div class="section-head" use:reveal>
+				<span class="eyebrow">How it works</span>
+				<h2>Invoice to ledger, in three steps.</h2>
+			</div>
+
+			<div class="steps">
+				{#each steps as step, i}
+					<div class="step" use:reveal={{ delay: i * 90, amount: 0.15 }}>
+						<!-- A watermark ordinal behind the card. `aria-hidden` because
+						     that is only defensible if this really is decoration: the
+						     ordinal is already carried by the cards' reading order, so
+						     nothing is lost by hiding it. The fade is in the COLOUR
+						     (an rgba), not an `opacity` on the element — group opacity
+						     would composite the card's real text down with it, which
+						     is the idiom src/lib/a11y/opacityAudit.test.ts exists to
+						     keep out of this tree. -->
+						<div class="step-num" aria-hidden="true">{i + 1}</div>
+						<div class="step-icon"><step.icon /></div>
+						<h3>{step.title}</h3>
+						<p>{step.body}</p>
+					</div>
+				{/each}
+			</div>
+		</section>
+
+		<!--
+			The brand's own argument, made once and with the object in the room.
+			The mark is feoh written as a split Exchequer tally (docs/decisions.md
+			§173); this is a render of the thing it abstracts, generated by
+			assets/marketing/gen-marketing.sh. It earns its place because the
+			section's claim IS the tally's mechanism — two records that have to
+			agree — rather than being a picture next to unrelated copy.
+		-->
+		<section class="tally">
+			<div class="tally-intro">
+				<div class="tally-copy" use:reveal>
+					<span class="eyebrow">Why teams switch</span>
+					<h2>Built for finance, not marketed at them.</h2>
+					<p class="tally-lede">
+						The Exchequer settled a debt by notching a stick, splitting it, and
+						giving each party half — the debt was paid when the halves matched.
+						That is still the job: an invoice against a purchase order, a payment
+						against a statement. Everything here exists to make the halves meet.
+					</p>
 				</div>
-			{/each}
-		</div>
-	</section>
 
-	<section id="how" class="how">
-		<div class="section-head">
-			<span class="eyebrow">How it works</span>
-			<h2>Invoice to ledger, in three steps.</h2>
-		</div>
-
-		<div class="steps">
-			{#each steps as step, i}
-				<div class="step">
-					<!-- A watermark ordinal behind the card, faded to 12%.
-					     `aria-hidden` because that fade is only defensible if this
-					     really is decoration: the ordinal is already carried by the
-					     cards' reading order, so nothing is lost by hiding it — and
-					     hiding it turns the WCAG 1.4.3 decoration exemption into a
-					     statement rather than an assumption. Guard:
-					     src/lib/a11y/opacityAudit.test.ts -->
-					<div class="step-num" aria-hidden="true">{i + 1}</div>
-					<div class="step-icon"><step.icon /></div>
-					<h3>{step.title}</h3>
-					<p>{step.body}</p>
+				<div class="tally-art" use:reveal={{ delay: 120 }}>
+					<img
+						src={asset('/marketing/tally-split.webp')}
+						width="1100"
+						height="460"
+						loading="lazy"
+						decoding="async"
+						draggable="false"
+						alt="A notched gold tally stick split lengthwise into two halves, the notches on each half lining up with the other."
+					/>
 				</div>
-			{/each}
-		</div>
-	</section>
-
-	<section class="differentiators">
-		<div class="section-head">
-			<span class="eyebrow">Why teams switch</span>
-			<h2>Built for finance, not marketed at them.</h2>
-		</div>
-
-		<div class="diff-grid">
-			<div class="diff">
-				<h3>AI you control</h3>
-				<p>
-					Use our platform key or bring your own — Claude, OpenAI, or Textract.
-					Your prompt, your model, your data-retention policy. Self-host with
-					Ollama if you need to.
-				</p>
 			</div>
-			<div class="diff">
-				<h3>Pluggable everything</h3>
-				<p>
-					Adapter pattern for extraction, ERP, cards, and email. Swap providers
-					without touching business logic. Ship a new ERP integration in a
-					day, not a quarter.
-				</p>
-			</div>
-			<div class="diff">
-				<h3>Cards that pay you back</h3>
-				<p>
-					Virtual card payments via Lithic or Nium earn 1–2% rebate. On a
-					shop doing $500k/month in invoices, that's $60–120k/yr straight
-					back to your budget.
-				</p>
-				<!-- A large, vivid dollar figure reads as a projection unless the
-				     variability sits next to it. Pricing.svelte carries the same
-				     qualifier, but it is a different component and a reader may
-				     never scroll that far. -->
-				<p class="diff-note">
-					Illustrative. Rebates depend on your negotiated rate, how much spend
-					moves to card, and which vendors accept it.
-				</p>
-			</div>
-			<div class="diff">
-				<h3>Mobile without compromise</h3>
-				<p>
-					Native iOS and Android with camera OCR, biometric login,
-					swipe-to-approve, and offline mode. Approvers unblock AP from
-					an airport Wi-Fi.
-				</p>
-			</div>
-		</div>
-	</section>
 
-	<Pricing />
+			<div class="diff-grid">
+				<div class="diff" use:reveal={{ delay: 60 }}>
+					<h3>AI you control</h3>
+					<p>
+						Use our platform key or bring your own — Claude, OpenAI, or Textract.
+						Your prompt, your model, your data-retention policy. Self-host with
+						Ollama if you need to.
+					</p>
+				</div>
+				<div class="diff" use:reveal={{ delay: 120 }}>
+					<h3>Pluggable everything</h3>
+					<p>
+						Adapter pattern for extraction, ERP, cards, and email. Swap providers
+						without touching business logic. Ship a new ERP integration in a
+						day, not a quarter.
+					</p>
+				</div>
+				<div class="diff" use:reveal={{ delay: 180 }}>
+					<h3>Cards that pay you back</h3>
+					<p>
+						Virtual card payments via Lithic or Nium earn 1–2% rebate. On a
+						shop doing $500k/month in invoices, that's $60–120k/yr straight
+						back to your budget.
+					</p>
+					<!-- A large, vivid dollar figure reads as a projection unless the
+					     variability sits next to it. Pricing.svelte carries the same
+					     qualifier, but it is a different component and a reader may
+					     never scroll that far. -->
+					<p class="diff-note">
+						Illustrative. Rebates depend on your negotiated rate, how much spend
+						moves to card, and which vendors accept it.
+					</p>
+				</div>
+				<div class="diff" use:reveal={{ delay: 240 }}>
+					<h3>Mobile without compromise</h3>
+					<p>
+						Native iOS and Android with camera OCR, biometric login,
+						swipe-to-approve, and offline mode. Approvers unblock AP from
+						an airport Wi-Fi.
+					</p>
+				</div>
+			</div>
+		</section>
 
-	<section class="cta-section">
-		<div class="cta-inner">
-			<h2>Spin up your workspace in 30 seconds.</h2>
-			<p>
-				Pick a slug, verify your email, and you're in. Free plan — no card,
-				no contract, no sales call.
-			</p>
-			<a href="/signup" class="primary large">Create your workspace<IconArrow /></a>
-		</div>
-	</section>
+		<Pricing />
+
+		<section class="cta-section" use:reveal>
+			<div class="cta-inner">
+				<h2>Spin up your workspace in 30 seconds.</h2>
+				<p>
+					Pick a slug, verify your email, and you're in. Free plan — no card,
+					no contract, no sales call.
+				</p>
+				<a href="/signup" class="primary large">Create your workspace<IconArrow /></a>
+			</div>
+		</section>
+	</main>
 
 	<footer class="footer">
 		<div class="footer-inner">
@@ -300,23 +347,60 @@
 </div>
 
 <style>
+	/* Smooth anchor scrolling for the nav's in-page links — scoped to while this
+	   page is mounted, so it never leaks into the app shell, where a smooth
+	   scroll on every route change would feel sluggish. The global
+	   reduced-motion rule in app.css sets `scroll-behavior: auto !important` on
+	   every element, which overrides this for anyone who asked for less motion. */
+	:global(html:has(.landing)) {
+		scroll-behavior: smooth;
+		/* The sticky header's height plus breathing room, declared on the SCROLL
+		   CONTAINER rather than as a margin on chosen sections. It governs every
+		   scroll the browser makes to reveal something — anchor jumps from the nav
+		   AND keyboard focus moving onto a control. Without it, Shift+Tab onto a
+		   pricing button parked it at y=20, entirely under a 74px header: WCAG
+		   2.4.11 Focus Not Obscured. Per-section `scroll-margin-top` fixed only
+		   the two anchors it was written on. */
+		scroll-padding-top: 88px;
+	}
+
 	.landing {
+		position: relative;
 		min-height: 100vh;
-		background:
-			radial-gradient(1200px 600px at 80% -10%, rgba(99, 140, 255, 0.18), transparent 60%),
-			radial-gradient(900px 500px at -10% 30%, rgba(129, 99, 255, 0.12), transparent 60%),
-			var(--bg);
+		background: var(--bg);
 		color: var(--text);
+		overflow-x: clip;
+	}
+	/* Everything except the Atmosphere sits above it. One rule rather than a
+	   z-index on each section. */
+	.content,
+	.nav,
+	.footer {
+		position: relative;
+		z-index: 1;
 	}
 
 	/* -------------------------------- nav -------------------------------- */
 	.nav {
+		position: sticky;
+		top: 0;
+		z-index: 40;
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
-		max-width: 1180px;
-		margin: 0 auto;
-		padding: 24px 32px;
+		gap: 16px;
+		padding: 18px 32px;
+		/* The header spans the viewport; only its contents are held to the
+		   page's measure, so the blur reaches the window edges on wide screens
+		   instead of ending mid-air. */
+		max-width: none;
+		border-bottom: 1px solid transparent;
+		transition: background 0.25s, border-color 0.25s, backdrop-filter 0.25s;
+	}
+	.nav.scrolled {
+		background: rgba(15, 17, 23, 0.72);
+		backdrop-filter: blur(14px) saturate(140%);
+		border-bottom-color: var(--border);
 	}
 	.brand {
 		display: inline-flex;
@@ -333,7 +417,7 @@
 	.nav-links {
 		display: flex;
 		align-items: center;
-		gap: 28px;
+		gap: 22px;
 	}
 	.nav-links a {
 		color: var(--text-muted);
@@ -344,61 +428,131 @@
 	.nav-links a:hover {
 		color: var(--text);
 	}
-	.nav-cta {
+	/* Scoped under `.nav-links` on purpose. As a bare `.nav-cta` (0,1,0) this lost
+	   to `.nav-links a` (0,1,1) above and rendered --text-muted on --accent-strong
+	   — about 1.5:1. The previous version papered over the same tie with
+	   `color: #fff !important`; matching the specificity is the fix, and it keeps
+	   `!important` free for the reduced-motion and motion-toggle overrides that
+	   genuinely need it. */
+	.nav-links .nav-cta {
 		display: inline-flex;
 		align-items: center;
 		gap: 6px;
 		background: var(--accent-strong);
-		color: #fff !important;
-		padding: 8px 16px;
-		border-radius: 6px;
+		color: #fff;
+		padding: 9px 17px;
+		border-radius: 8px;
 		font-weight: 500;
+		box-shadow: 0 8px 22px -12px rgba(99, 140, 255, 0.9);
+		transition: transform 0.15s, box-shadow 0.15s;
 	}
-	.nav-cta:hover {
-		opacity: 0.92;
+	.nav-links .nav-cta:hover {
+		color: #fff;
+		transform: translateY(-1px);
+		box-shadow: 0 12px 26px -12px rgba(99, 140, 255, 1);
 	}
-	@media (max-width: 720px) {
+	.cta-short {
+		display: none;
+	}
+	@media (max-width: 760px) {
+		.nav {
+			padding: 14px 20px;
+		}
+		.nav-links {
+			gap: 12px;
+		}
 		.nav-links a:not(.nav-cta) { display: none; }
+		.nav-links .nav-cta {
+			padding: 8px 14px;
+			white-space: nowrap;
+		}
+		.cta-long { display: none; }
+		.cta-short { display: inline; }
+	}
+	/* WCAG 1.4.10 Reflow, at the criterion's own 320px. The mark, the motion
+	   toggle and the short CTA are 13px wider than that viewport with the
+	   wordmark beside them, and `.landing` clips horizontal overflow — so the
+	   button's edge was cut off rather than scrollable. The wordmark goes, and
+	   the mark alone carries the brand; its TEXT stays in the accessibility tree
+	   (clipped, not `display: none`), because the mark image is decorative and
+	   that text is the home link's only accessible name. */
+	@media (max-width: 400px) {
+		.nav {
+			padding: 12px 14px;
+		}
+		.nav .brand-name {
+			position: absolute;
+			width: 1px;
+			height: 1px;
+			margin: -1px;
+			overflow: hidden;
+			clip-path: inset(50%);
+			white-space: nowrap;
+		}
 	}
 
 	/* ------------------------------- hero -------------------------------- */
 	.hero {
 		max-width: 1180px;
-		margin: 40px auto 80px;
-		padding: 40px 32px;
+		margin: 26px auto 88px;
+		padding: 36px 32px;
 		display: grid;
-		grid-template-columns: 1.1fr 1fr;
-		gap: 60px;
+		grid-template-columns: 1.05fr 0.95fr;
+		gap: 64px;
 		align-items: center;
 	}
 	@media (max-width: 960px) {
-		.hero { grid-template-columns: 1fr; gap: 40px; }
+		.hero { grid-template-columns: 1fr; gap: 48px; margin-bottom: 64px; }
+	}
+	@media (max-width: 600px) {
+		.hero { padding: 24px 20px; }
 	}
 	.eyebrow {
-		display: inline-block;
-		font-size: 0.78rem;
+		display: inline-flex;
+		align-items: center;
+		gap: 8px;
+		padding: 5px 13px 5px 11px;
+		margin-bottom: 20px;
+		border-radius: 999px;
+		border: 1px solid rgba(99, 140, 255, 0.28);
+		background: rgba(99, 140, 255, 0.10);
+		font-size: 0.75rem;
 		font-weight: 600;
 		letter-spacing: 0.08em;
 		text-transform: uppercase;
-		color: var(--accent);
-		margin-bottom: 16px;
+		color: var(--accent-on-tint);
+	}
+	.eyebrow::before {
+		content: '';
+		width: 6px;
+		height: 6px;
+		border-radius: 50%;
+		background: var(--accent);
 	}
 	h1 {
 		margin: 0 0 24px;
-		font-size: clamp(2.4rem, 5vw, 3.6rem);
-		line-height: 1.05;
-		letter-spacing: -0.02em;
+		font-size: clamp(2.5rem, 5.4vw, 3.9rem);
+		line-height: 1.04;
+		letter-spacing: -0.03em;
 		font-weight: 800;
 	}
 	h1 .accent {
-		background: linear-gradient(135deg, var(--accent), #a37dff);
+		background: linear-gradient(100deg, #7d9bff 0%, #a37dff 42%, #e7b95e 100%);
+		background-size: 220% 100%;
 		-webkit-background-clip: text;
 		background-clip: text;
 		color: transparent;
+		/* A slow pass of the gradient across the words. It ends where it starts,
+		   so the resting frame under reduced motion is the intended one. */
+		animation: sheen 9s ease-in-out infinite;
+	}
+	@keyframes sheen {
+		0%, 100% { background-position: 0% 50%; }
+		50% { background-position: 100% 50%; }
 	}
 	.lede {
-		font-size: 1.05rem;
-		line-height: 1.6;
+		font-size: 1.08rem;
+		line-height: 1.62;
 		color: var(--text-muted);
 		max-width: 540px;
 		margin: 0 0 32px;
@@ -413,151 +567,72 @@
 		display: inline-flex;
 		align-items: center;
 		gap: 8px;
-		padding: 12px 22px;
-		border-radius: 8px;
-		font-weight: 500;
+		padding: 13px 24px;
+		border-radius: 10px;
+		font-weight: 600;
 		font-size: 0.95rem;
 		text-decoration: none;
-		transition: transform 0.1s, opacity 0.15s;
+		transition: transform 0.15s, box-shadow 0.15s, border-color 0.15s;
 	}
 	.primary {
 		background: var(--accent-strong);
 		color: #fff;
-		box-shadow: 0 8px 28px -8px rgba(99, 140, 255, 0.6);
+		box-shadow: 0 14px 34px -14px rgba(99, 140, 255, 0.95);
 	}
-	.primary:hover { opacity: 0.92; transform: translateY(-1px); }
-	.primary.large { padding: 14px 28px; font-size: 1rem; }
+	.primary:hover {
+		transform: translateY(-2px);
+		box-shadow: 0 20px 42px -16px rgba(99, 140, 255, 1);
+	}
+	.primary.large { padding: 15px 30px; font-size: 1rem; }
 	.secondary {
-		background: transparent;
+		background: rgba(24, 26, 35, 0.6);
 		color: var(--text);
 		border: 1px solid var(--border);
 	}
-	.secondary:hover { border-color: var(--text-muted); }
+	.secondary:hover { border-color: var(--accent); transform: translateY(-2px); }
 	.sub-note {
-		margin: 16px 0 0;
+		margin: 18px 0 0;
 		color: var(--text-muted);
 		font-size: 0.82rem;
 	}
 
-	/* --------------------------- hero visual ----------------------------- */
 	.hero-visual {
 		position: relative;
-		min-height: 380px;
-	}
-	.mock-card {
-		position: relative;
-		z-index: 2;
-		background: var(--surface);
-		border: 1px solid var(--border);
-		border-radius: 12px;
-		padding: 20px;
-		box-shadow: 0 40px 80px -20px rgba(0, 0, 0, 0.5);
-	}
-	.mock-header {
-		display: flex;
-		justify-content: space-between;
-		align-items: center;
-		margin-bottom: 14px;
-	}
-	.mock-conf {
-		font-size: 0.78rem;
-		color: var(--text-muted);
-	}
-	.mock-conf strong {
-		color: var(--text);
-	}
-	.mock-title {
-		font-size: 1.05rem;
-		font-weight: 700;
-		margin-bottom: 4px;
-	}
-	.mock-vendor {
-		color: var(--text-muted);
-		font-size: 0.88rem;
-		margin-bottom: 16px;
-	}
-	.mock-rows {
-		display: flex;
-		flex-direction: column;
-		gap: 8px;
-		padding: 12px 0;
-		border-top: 1px solid var(--border);
-		border-bottom: 1px solid var(--border);
-		margin-bottom: 14px;
-	}
-	.mock-row {
-		display: flex;
-		justify-content: space-between;
-		font-size: 0.85rem;
-	}
-	.mock-row span { color: var(--text-muted); }
-	.mock-row strong.ok { color: #5bd798; }
-	.mock-actions {
-		display: flex;
-		gap: 8px;
-	}
-	.mock-approve,
-	.mock-reject {
-		flex: 1;
-		padding: 8px;
-		border-radius: 6px;
-		border: none;
-		font-weight: 500;
-		font-size: 0.85rem;
-		cursor: pointer;
-		font-family: inherit;
-	}
-	.mock-approve {
-		background: var(--accent-strong);
-		color: #fff;
-	}
-	.mock-reject {
-		background: transparent;
-		color: var(--text-muted);
-		border: 1px solid var(--border);
-	}
-	.mock-bg-1,
-	.mock-bg-2 {
-		position: absolute;
-		inset: 0;
-		border-radius: 12px;
-		background: var(--surface);
-		border: 1px solid var(--border);
-		opacity: 0.5;
-	}
-	.mock-bg-1 {
-		z-index: 1;
-		transform: translate(16px, 20px) rotate(3deg);
-	}
-	.mock-bg-2 {
-		z-index: 0;
-		transform: translate(32px, 40px) rotate(6deg);
-		opacity: 0.3;
 	}
 
-	/* ------------------------------- stats ------------------------------- */
+	/* ------------------------------ sections ----------------------------- */
+	.rail-section {
+		margin: 0 auto 88px;
+	}
+
 	.stats {
-		max-width: 1180px;
-		margin: 0 auto 100px;
-		padding: 32px;
+		/* `width: min(…)` rather than `max-width` + `margin: auto`: the panel is
+		   bordered, so unlike the unbordered sections it needs a gutter OUTSIDE
+		   itself, and without one it ran edge to edge on a phone with its border
+		   cut off by the viewport. */
+		width: min(1116px, calc(100% - 40px));
+		margin: 0 auto 110px;
+		padding: 30px 32px;
 		display: grid;
 		grid-template-columns: repeat(4, 1fr);
-		gap: 24px;
-		border-top: 1px solid var(--border);
-		border-bottom: 1px solid var(--border);
+		gap: 20px;
+		border-radius: 18px;
+		border: 1px solid var(--border);
+		background: rgba(24, 26, 35, 0.4);
 	}
-	@media (max-width: 720px) {
-		.stats { grid-template-columns: repeat(2, 1fr); }
+	@media (max-width: 760px) {
+		.stats { grid-template-columns: repeat(2, 1fr); margin-bottom: 80px; }
 	}
 	.stat {
 		text-align: center;
-		padding: 16px 8px;
+		padding: 14px 8px;
 	}
 	.stat-value {
-		font-size: 2rem;
+		font-size: clamp(2rem, 3.4vw, 2.5rem);
 		font-weight: 800;
-		letter-spacing: -0.02em;
-		background: linear-gradient(135deg, var(--accent), #a37dff);
+		letter-spacing: -0.03em;
+		font-variant-numeric: tabular-nums;
+		background: linear-gradient(135deg, #7d9bff, #a37dff);
 		-webkit-background-clip: text;
 		background-clip: text;
 		color: transparent;
@@ -565,119 +640,141 @@
 	.stat-label {
 		font-size: 0.8rem;
 		color: var(--text-muted);
-		margin-top: 4px;
+		margin-top: 6px;
 	}
 
-	/* --------------------------- sections head --------------------------- */
 	.section-head {
 		max-width: 720px;
-		margin: 0 auto 48px;
+		margin: 0 auto 52px;
 		text-align: center;
 		padding: 0 24px;
 	}
 	.section-head h2 {
-		font-size: clamp(1.6rem, 3.5vw, 2.2rem);
+		font-size: clamp(1.7rem, 3.6vw, 2.4rem);
 		font-weight: 700;
-		letter-spacing: -0.02em;
+		letter-spacing: -0.025em;
 		margin: 0 0 14px;
 	}
 	.section-head p {
 		color: var(--text-muted);
-		line-height: 1.6;
+		line-height: 1.62;
 		margin: 0;
 	}
 
 	/* ------------------------------ features ----------------------------- */
 	.features {
 		max-width: 1180px;
-		margin: 0 auto 100px;
-		padding: 40px 32px;
+		margin: 0 auto 110px;
+		padding: 20px 32px;
 	}
 	.feature-grid {
 		display: grid;
 		grid-template-columns: repeat(3, 1fr);
-		gap: 20px;
+		gap: 18px;
 	}
 	@media (max-width: 960px) {
 		.feature-grid { grid-template-columns: repeat(2, 1fr); }
 	}
-	@media (max-width: 600px) {
+	@media (max-width: 620px) {
 		.feature-grid { grid-template-columns: 1fr; }
 	}
 	.feature {
-		background: var(--surface);
-		border: 1px solid var(--border);
-		border-radius: 10px;
+		position: relative;
+		border-radius: 14px;
 		padding: 24px;
-		transition: border-color 0.15s, transform 0.15s;
+		background: rgba(24, 26, 35, 0.62);
+		border: 1px solid var(--border);
+		transition: border-color 0.2s, transform 0.2s, background 0.2s;
+	}
+	/* A hairline of accent along the top edge, brightening on hover. A
+	   pseudo-element rather than a border so it can be inset from the corners
+	   and not fight the card's own radius. */
+	.feature::before {
+		content: '';
+		position: absolute;
+		top: -1px;
+		left: 18%;
+		right: 18%;
+		height: 1px;
+		background: linear-gradient(90deg, transparent, rgba(99, 140, 255, 0.55), transparent);
+		transition: left 0.3s, right 0.3s;
 	}
 	.feature:hover {
-		border-color: var(--accent);
-		transform: translateY(-2px);
+		border-color: rgba(99, 140, 255, 0.4);
+		background: rgba(30, 33, 45, 0.75);
+		transform: translateY(-3px);
+	}
+	.feature:hover::before {
+		left: 4%;
+		right: 4%;
 	}
 	.feature-icon {
 		display: inline-flex;
 		align-items: center;
 		justify-content: center;
-		width: 40px;
-		height: 40px;
-		border-radius: 8px;
-		background: rgba(99, 140, 255, 0.12);
-		color: var(--accent);
+		width: 44px;
+		height: 44px;
+		border-radius: 12px;
+		background: linear-gradient(140deg, rgba(99, 140, 255, 0.22), rgba(163, 125, 255, 0.14));
+		border: 1px solid rgba(99, 140, 255, 0.22);
+		color: var(--accent-on-tint);
 		font-size: 22px;
-		margin-bottom: 14px;
+		margin-bottom: 16px;
 	}
 	.feature h3 {
-		font-size: 1rem;
+		font-size: 1.02rem;
 		font-weight: 700;
 		margin: 0 0 8px;
 	}
 	.feature p {
 		color: var(--text-muted);
 		font-size: 0.88rem;
-		line-height: 1.55;
+		line-height: 1.6;
 		margin: 0;
 	}
 
 	/* ------------------------------- how --------------------------------- */
 	.how {
 		max-width: 1180px;
-		margin: 0 auto 100px;
-		padding: 40px 32px;
+		margin: 0 auto 110px;
+		padding: 20px 32px;
 	}
 	.steps {
 		display: grid;
 		grid-template-columns: repeat(3, 1fr);
-		gap: 24px;
+		gap: 20px;
 	}
-	@media (max-width: 760px) {
+	@media (max-width: 800px) {
 		.steps { grid-template-columns: 1fr; }
 	}
 	.step {
 		position: relative;
-		background: var(--surface);
-		border: 1px solid var(--border);
-		border-radius: 10px;
+		overflow: hidden;
+		border-radius: 14px;
 		padding: 28px 24px;
+		background: rgba(24, 26, 35, 0.62);
+		border: 1px solid var(--border);
 	}
 	.step-num {
 		position: absolute;
-		top: 20px;
+		top: 12px;
 		right: 20px;
-		font-size: 2.4rem;
+		font-size: 4.2rem;
 		font-weight: 800;
-		opacity: 0.12;
 		line-height: 1;
+		/* The fade lives in the colour, not in `opacity` — see the markup. */
+		color: rgba(226, 228, 234, 0.07);
 	}
 	.step-icon {
 		display: inline-flex;
 		align-items: center;
 		justify-content: center;
-		width: 44px;
-		height: 44px;
-		border-radius: 10px;
-		background: linear-gradient(135deg, rgba(99, 140, 255, 0.2), rgba(163, 125, 255, 0.2));
-		color: var(--accent);
+		width: 46px;
+		height: 46px;
+		border-radius: 12px;
+		background: linear-gradient(135deg, rgba(99, 140, 255, 0.22), rgba(163, 125, 255, 0.18));
+		border: 1px solid rgba(99, 140, 255, 0.22);
+		color: var(--accent-on-tint);
 		font-size: 24px;
 		margin-bottom: 16px;
 	}
@@ -689,36 +786,74 @@
 	.step p {
 		color: var(--text-muted);
 		font-size: 0.88rem;
-		line-height: 1.55;
+		line-height: 1.6;
 		margin: 0;
 	}
 
-	/* -------------------------- differentiators -------------------------- */
-	.differentiators {
+	/* ------------------------------- tally ------------------------------- */
+	.tally {
 		max-width: 1180px;
-		margin: 0 auto 100px;
-		padding: 40px 32px;
+		margin: 0 auto 110px;
+		padding: 20px 32px;
+	}
+	.tally-intro {
+		display: grid;
+		grid-template-columns: 0.9fr 1.1fr;
+		gap: 48px;
+		align-items: center;
+		margin-bottom: 48px;
+	}
+	@media (max-width: 900px) {
+		.tally-intro { grid-template-columns: 1fr; gap: 28px; }
+	}
+	.tally-copy h2 {
+		font-size: clamp(1.7rem, 3.6vw, 2.4rem);
+		font-weight: 700;
+		letter-spacing: -0.025em;
+		margin: 0 0 16px;
+	}
+	.tally-lede {
+		color: var(--text-muted);
+		line-height: 1.7;
+		font-size: 1rem;
+		margin: 0;
+	}
+	.tally-art {
+		position: relative;
+	}
+	.tally-art img {
+		/* Same reasoning as `AuthShell`'s `.panel-art`: illustration, not a file
+		   the reader wants. The attribute stops the drag; these two stop the
+		   selection highlight and WebKit's own image-drag, which it does not. */
+		-webkit-user-drag: none;
+		user-select: none;
+		display: block;
+		width: 100%;
+		height: auto;
+		/* The render is lit from above-left on a transparent film, so a warm
+		   bloom under it reads as the object's own light on the page rather
+		   than as a box around a picture. */
+		filter: drop-shadow(0 26px 46px rgba(231, 185, 94, 0.14))
+			drop-shadow(0 8px 18px rgba(0, 0, 0, 0.55));
 	}
 	.diff-grid {
 		display: grid;
 		grid-template-columns: repeat(2, 1fr);
-		gap: 20px;
+		gap: 18px;
 	}
-	@media (max-width: 720px) {
+	@media (max-width: 760px) {
 		.diff-grid { grid-template-columns: 1fr; }
 	}
 	.diff {
-		background: var(--surface);
+		border-radius: 14px;
+		padding: 26px;
+		background: rgba(24, 26, 35, 0.62);
 		border: 1px solid var(--border);
-		border-radius: 10px;
-		padding: 28px;
+		transition: border-color 0.2s;
 	}
-	.diff-note {
-		margin-top: 8px;
-		font-size: 0.8rem;
-		color: var(--text-muted);
+	.diff:hover {
+		border-color: rgba(99, 140, 255, 0.32);
 	}
-
 	.diff h3 {
 		margin: 0 0 10px;
 		font-size: 1.05rem;
@@ -726,9 +861,13 @@
 	}
 	.diff p {
 		color: var(--text-muted);
-		line-height: 1.55;
+		line-height: 1.6;
 		margin: 0;
 		font-size: 0.9rem;
+	}
+	.diff .diff-note {
+		margin-top: 12px;
+		font-size: 0.8rem;
 	}
 
 	/* ---------------------------- cta-section ---------------------------- */
@@ -738,32 +877,33 @@
 		padding: 0 32px;
 	}
 	.cta-inner {
-		background:
-			radial-gradient(600px 300px at 50% 0%, rgba(99, 140, 255, 0.22), transparent 70%),
-			var(--surface);
-		border: 1px solid var(--border);
-		border-radius: 16px;
-		padding: 60px 40px;
+		position: relative;
+		overflow: hidden;
+		border-radius: 22px;
+		padding: 64px 40px;
 		text-align: center;
+		background:
+			radial-gradient(640px 320px at 50% 0%, rgba(99, 140, 255, 0.26), transparent 70%),
+			linear-gradient(180deg, rgba(31, 35, 48, 0.9), rgba(20, 22, 31, 0.9));
+		border: 1px solid rgba(99, 140, 255, 0.22);
 	}
 	.cta-inner h2 {
-		font-size: clamp(1.6rem, 3.5vw, 2.2rem);
+		font-size: clamp(1.7rem, 3.6vw, 2.4rem);
 		font-weight: 700;
-		letter-spacing: -0.02em;
+		letter-spacing: -0.025em;
 		margin: 0 0 14px;
 	}
 	.cta-inner p {
 		color: var(--text-muted);
-		line-height: 1.6;
-		margin: 0 0 24px;
+		line-height: 1.62;
+		margin: 0 auto 26px;
 		max-width: 520px;
-		margin-left: auto;
-		margin-right: auto;
 	}
 
 	/* ------------------------------ footer ------------------------------- */
 	.footer {
 		border-top: 1px solid var(--border);
+		background: rgba(15, 17, 23, 0.6);
 	}
 	.footer-inner {
 		max-width: 1180px;
@@ -784,6 +924,7 @@
 	.footer-links {
 		display: flex;
 		gap: 20px;
+		flex-wrap: wrap;
 	}
 	.footer-links a {
 		color: var(--text-muted);

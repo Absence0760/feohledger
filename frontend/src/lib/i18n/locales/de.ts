@@ -3388,6 +3388,17 @@ export const messages = {
 	'auth.signup.legalConsent': 'Mit dem Erstellen eines Arbeitsbereichs stimmen Sie den {terms} und der {privacy} zu, einschließlich des {dpa}, der die von Ihnen geladenen Lieferanten- und Rechnungsdaten regelt.',
 	'auth.signup.footerPre': 'Haben Sie bereits einen Arbeitsbereich? Besuchen Sie ',
 	'auth.signup.footerPost': ', um sich anzumelden.',
+	// Auth shell brand panel (lib/components/auth/AuthShell.svelte) — signup's
+	// "what happens next" steps and the login panel line.
+	'auth.shell.tagline': 'Von der Rechnung bis zur Zahlung – jede Rechnung abgeglichen.',
+	'auth.login.panelBody': 'Erfassung, Freigaben, Abgleich und Zahlungen – an einem Ort.',
+	'auth.signup.nextHeading': 'So geht es weiter',
+	'auth.signup.step1Title': 'Erzählen Sie uns von Ihrem Unternehmen',
+	'auth.signup.step1Body': 'Wählen Sie die Adresse, unter der sich Ihr Team anmeldet.',
+	'auth.signup.step2Title': 'Bestätigen Sie Ihre E-Mail-Adresse',
+	'auth.signup.step2Body': 'Wir senden einen Link, mit dem Sie bestätigen, dass die Adresse Ihnen gehört.',
+	'auth.signup.step3Title': 'Anmelden und Passwort festlegen',
+	'auth.signup.step3Body': 'Ihre Willkommens-E-Mail enthält ein vorläufiges Passwort für den Start.',
 
 	// Auth — change password (routes/change-password/+page.svelte)
 	'auth.changePassword.pageTitle': 'Passwort ändern — FeohLedger',

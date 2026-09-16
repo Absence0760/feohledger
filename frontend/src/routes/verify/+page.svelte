@@ -1,4 +1,7 @@
 <script lang="ts">
+	import AuthShell from '$lib/components/auth/AuthShell.svelte';
+	import BrandMark from '$lib/components/ui/BrandMark.svelte';
+	import IconCheck from '~icons/material-symbols/check-circle-outline';
 	import { api } from '$lib/api';
 	import { page } from '$app/stores';
 	import { onMount } from 'svelte';
@@ -36,104 +39,127 @@
 	<title>{m('auth.verify.pageTitle')}</title>
 </svelte:head>
 
-<div class="page">
-	<div class="card" aria-live="polite">
+<AuthShell>
+	<!-- The live region is the persistent wrapper, not a node that appears with
+	     its content: it exists from first paint in the `pending` phase, so the
+	     switch to success or error is a CHANGE inside it and is announced. -->
+	<div class="auth-stack verify" aria-live="polite">
+		<div class="head">
+			{#if phase === 'success' && result}
+				<div class="done-icon" aria-hidden="true"><IconCheck /></div>
+			{:else}
+				<BrandMark size={40} />
+			{/if}
+			{#if phase === 'pending'}
+				<h1>{m('auth.verify.pendingHeading')}</h1>
+				<p class="sub">{m('auth.verify.pendingSub')}</p>
+			{:else if phase === 'success' && result}
+				<h1>{m('auth.verify.successHeading')}</h1>
+				<p class="sub">
+					{m('auth.verify.successSubPre')}<strong>{result.admin_email}</strong>{m('auth.verify.successSubPost')}
+				</p>
+			{:else}
+				<h1>{m('auth.verify.errorHeading')}</h1>
+			{/if}
+		</div>
+
 		{#if phase === 'pending'}
-			<h1>{m('auth.verify.pendingHeading')}</h1>
-			<p class="sub">
-				{m('auth.verify.pendingSub')}
-			</p>
-			<div class="spinner"></div>
+			<div class="spinner" aria-hidden="true"></div>
 		{:else if phase === 'success' && result}
-			<h1>{m('auth.verify.successHeading')}</h1>
-			<p class="sub">
-				{m('auth.verify.successSubPre')}<strong>{result.admin_email}</strong>{m('auth.verify.successSubPost')}
-			</p>
 			<ol class="steps">
 				<li>{m('auth.verify.step1')}</li>
 				<li>{m('auth.verify.step2')}</li>
 				<li>{m('auth.verify.step3')}</li>
 			</ol>
-			<div class="next">
-				<a class="primary" href={result.tenant_url}>{m('auth.verify.continueTo', { slug: result.slug })}</a>
-			</div>
+			<a class="primary" href={result.tenant_url}>{m('auth.verify.continueTo', { slug: result.slug })}</a>
 		{:else}
-			<h1>{m('auth.verify.errorHeading')}</h1>
 			<p class="error">{errorMessage}</p>
-			<a href="/signup">{m('auth.verify.startOver')}</a>
+			<a class="start-over" href="/signup">{m('auth.verify.startOver')}</a>
 		{/if}
 	</div>
-</div>
+</AuthShell>
 
 <style>
-	.page {
-		min-height: 100vh;
-		display: grid;
-		place-items: center;
-		background: var(--bg);
-		padding: 40px 20px;
+	/* Heading, error banner and entrance come from AuthShell. */
+	.verify {
+		display: flex;
+		flex-direction: column;
+		gap: 18px;
 	}
-	.card {
-		background: var(--surface);
-		border: 1px solid var(--border);
-		border-radius: 8px;
-		padding: 40px 36px;
-		width: min(480px, 92vw);
-		text-align: center;
-		color: var(--text);
-	}
-	h1 {
-		margin: 0 0 12px;
-		font-size: 1.3rem;
-		font-weight: 700;
+	.head {
+		display: flex;
+		flex-direction: column;
+		align-items: flex-start;
+		gap: 10px;
 	}
 	.sub {
+		margin: 0;
+		font-size: 0.93rem;
+		line-height: 1.55;
 		color: var(--text-muted);
-		font-size: 0.9rem;
-		margin: 0 0 16px;
 	}
-	.error {
-		color: var(--danger);
-		font-size: 0.9rem;
-		margin: 0 0 16px;
+	.sub strong {
+		color: var(--text);
+	}
+	.done-icon {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: 56px;
+		height: 56px;
+		border-radius: 16px;
+		border: 1px solid rgba(38, 185, 119, 0.4);
+		background: var(--success-tint);
+		color: var(--success-on-tint);
+		font-size: 30px;
+		animation: pop 0.6s cubic-bezier(0.34, 1.56, 0.64, 1) backwards;
+	}
+	@keyframes pop {
+		from { transform: scale(0.6); opacity: 0; }
+		to { transform: scale(1); opacity: 1; }
 	}
 	.steps {
-		text-align: left;
-		margin: 0 auto 4px;
-		max-width: 320px;
-		padding-left: 20px;
+		margin: 0;
+		padding: 14px 16px 14px 34px;
+		border-radius: 12px;
+		border: 1px solid var(--border);
+		background: var(--surface);
 		color: var(--text-muted);
-		font-size: 0.85rem;
-		line-height: 1.6;
+		font-size: 0.88rem;
+		line-height: 1.7;
 	}
-	.next {
-		margin-top: 20px;
-	}
-	.next .primary {
-		display: inline-block;
+	.primary {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		min-height: 48px;
+		padding: 12px 18px;
+		border-radius: 10px;
 		background: var(--accent-strong);
 		color: #fff;
-		padding: 12px 28px;
-		border-radius: 6px;
+		font-weight: 600;
 		text-decoration: none;
-		font-weight: 500;
+		box-shadow: 0 14px 30px -14px rgba(99, 140, 255, 0.95);
+		transition: transform 0.15s, box-shadow 0.15s;
+	}
+	.primary:hover {
+		transform: translateY(-1px);
+	}
+	.start-over {
+		align-self: flex-start;
+		color: var(--accent-on-tint);
+		text-decoration: underline;
+		text-underline-offset: 2px;
 	}
 	.spinner {
-		width: 24px;
-		height: 24px;
+		width: 26px;
+		height: 26px;
 		border: 3px solid var(--border);
 		border-top-color: var(--accent);
 		border-radius: 50%;
-		margin: 16px auto 0;
 		animation: spin 0.8s linear infinite;
 	}
 	@keyframes spin {
 		to { transform: rotate(360deg); }
-	}
-	@media (prefers-reduced-motion: reduce) {
-		.spinner {
-			animation-duration: 0.01ms;
-			animation-iteration-count: 1;
-		}
 	}
 </style>

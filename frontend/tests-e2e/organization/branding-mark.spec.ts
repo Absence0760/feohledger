@@ -131,10 +131,14 @@ test.describe('sign-in brand mark', () => {
 	test('the sign-in card pairs the mark with the product name', async ({ page }) => {
 		await page.goto('/login');
 
-		const mark = page.locator('.login-card img.brand-mark');
+		// Scoped to the FORM, not the page: the split-screen shell draws a second
+		// mark in its brand panel, and the claim here is about the one beside
+		// the sign-in heading — the one a phone user sees, where the panel is
+		// hidden.
+		const mark = page.locator('form.login-form img.brand-mark');
 		await expect(mark).toBeVisible();
 		await expect(page.getByRole('heading', { level: 1, name: 'FeohLedger' })).toBeVisible();
-		await expect.poll(() => naturalWidth(page, '.login-card img.brand-mark')).toBeGreaterThan(0);
+		await expect.poll(() => naturalWidth(page, 'form.login-form img.brand-mark')).toBeGreaterThan(0);
 	});
 
 	for (const path of ['/login/forgot-password', '/login/reset-password']) {
@@ -163,7 +167,8 @@ test.describe('sign-in brand mark', () => {
 		await page.goto('/login/mfa');
 
 		await expect(page.getByRole('heading', { name: 'Two-factor verification' })).toBeVisible();
-		await expect(page.locator('.login-card img.brand-mark')).toBeVisible();
+		// The form's own mark, as on sign-in: the shell's panel draws a second.
+		await expect(page.locator('form.mfa-form img.brand-mark')).toBeVisible();
 	});
 });
 
@@ -173,7 +178,8 @@ test.describe('signup brand mark', () => {
 	test('the self-service signup card carries the mark', async ({ page }) => {
 		await page.goto('/signup');
 
-		await expect(page.locator('form.card img.brand-mark')).toBeVisible();
+		// The form's own mark, for the same reason as the sign-in case above.
+		await expect(page.locator('form.signup-form img.brand-mark')).toBeVisible();
 	});
 });
 

@@ -12,6 +12,22 @@ test.use({ storageState: { cookies: [], origins: [] } });
  * not the login form.
  */
 
+test.describe('/login — decorative art', () => {
+	test('the sign-in panel art cannot be dragged off the page', async ({ page }) => {
+		// Same defect and same reasoning as the landing page's copy of this
+		// render (see `marketing/landing.spec.ts`): an `<img>` is draggable by
+		// default, so the illustration peeled away under the cursor on the first
+		// screen a customer sees. Pinned on BOTH surfaces because they are two
+		// separate components that happen to share one asset — fixing one says
+		// nothing about the other.
+		await page.goto('/login');
+		const art = page.locator('.panel-art');
+		await expect(art).toHaveAttribute('draggable', 'false');
+		await expect(art).toHaveCSS('user-select', 'none');
+		expect(await art.evaluate((el: HTMLImageElement) => el.draggable)).toBe(false);
+	});
+});
+
 test.describe('/login', () => {
 	test('renders the sign-in form for an anon visitor', async ({ page }) => {
 		await page.goto('/login');

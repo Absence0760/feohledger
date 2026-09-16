@@ -3388,6 +3388,17 @@ export const messages = {
 	'auth.signup.legalConsent': 'En créant un espace de travail, vous acceptez les {terms} et la {privacy}, ainsi que le {dpa} qui régit les données fournisseurs et factures que vous y importez.',
 	'auth.signup.footerPre': 'Vous avez déjà un espace de travail ? Rendez-vous sur ',
 	'auth.signup.footerPost': ' pour vous connecter.',
+	// Auth shell brand panel (lib/components/auth/AuthShell.svelte) — signup's
+	// "what happens next" steps and the login panel line.
+	'auth.shell.tagline': 'De la facture au paiement, chaque facture rapprochée.',
+	'auth.login.panelBody': 'Extraction, validations, rapprochement et paiements — au même endroit.',
+	'auth.signup.nextHeading': 'Et ensuite ?',
+	'auth.signup.step1Title': 'Présentez votre entreprise',
+	'auth.signup.step1Body': 'Choisissez l\'adresse à laquelle votre équipe se connectera.',
+	'auth.signup.step2Title': 'Confirmez votre e-mail',
+	'auth.signup.step2Body': 'Nous envoyons un lien pour vérifier que l\'adresse vous appartient.',
+	'auth.signup.step3Title': 'Connectez-vous et définissez un mot de passe',
+	'auth.signup.step3Body': 'Votre e-mail de bienvenue contient un mot de passe temporaire pour commencer.',
 
 	// Auth — change password (routes/change-password/+page.svelte)
 	'auth.changePassword.pageTitle': 'Changer le mot de passe — FeohLedger',

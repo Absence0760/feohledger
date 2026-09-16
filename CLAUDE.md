@@ -73,6 +73,7 @@ pnpm gen:warning-messages     # regenerate the invoice-warning code → message-
 pnpm check:warning-messages   # its drift guard (same CI job; see backend/docs/invoice-warnings.md)
 pnpm gen:icons                # re-render every web + mobile icon from the brand-mark masters (Inkscape + ImageMagick 7; docs/decisions.md §173)
 pnpm check:icons              # its guard: masters match assets/logo-render/gen_svg.py, every raster sized + opaque (CI's Brand assets job)
+pnpm gen:marketing            # re-render the landing page's Blender tally ornament + grain overlay into frontend/static/marketing/ (docs/decisions.md §180)
 pnpm test:icons               # proves check:icons fails on a deliberately broken copy of the icon set (same CI job)
 pnpm migrate:all              # alembic upgrade head + migrate_all_tenants.py
 

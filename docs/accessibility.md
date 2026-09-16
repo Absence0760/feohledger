@@ -215,7 +215,16 @@ The current build implements:
   opacity scan on the one thing neither can see — a fade applied to an
   ancestor, whose cost lands on descendants' colours.
 - **Reduced-motion support** — animations respect
-  `prefers-reduced-motion: reduce`.
+  `prefers-reduced-motion: reduce`: durations and delays both collapse, so a
+  page is complete on its first frame rather than waiting on staggered
+  entrances. Scroll reveals never hide anything under that preference.
+  Guarded by `frontend/tests-e2e/a11y/reduced-motion.spec.ts`.
+- **Pause, Stop, Hide (SC 2.2.2)** — the marketing page's continuous decorative
+  motion (the hero sequence, the background, the adapter rail) has an in-page
+  **Pause animation** button in its header, independent of any OS setting,
+  which halts every animation on the page. The auth pages carry no continuous
+  motion, so they need none. Guarded by
+  `frontend/tests-e2e/marketing/landing.spec.ts`.
 - **Semantic structure** — landmarks (`header`, `nav`, `main`), a single `h1`
   per page, and ordered headings; native controls (checkbox, radio, select,
   file, range) are restyled with `appearance: none` while preserving their

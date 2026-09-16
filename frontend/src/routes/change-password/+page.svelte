@@ -1,4 +1,5 @@
 <script lang="ts">
+	import AuthShell from '$lib/components/auth/AuthShell.svelte';
 	import BrandMark from '$lib/components/ui/BrandMark.svelte';
 	import { api } from '$lib/api';
 	import { auth } from '$lib/stores/auth.svelte';
@@ -65,17 +66,19 @@
 	<title>{m('auth.changePassword.pageTitle')}</title>
 </svelte:head>
 
-<div class="page">
-	<form class="card" onsubmit={onSubmit}>
-		<BrandMark size={32} />
-		<h1>{m('auth.changePassword.heading')}</h1>
-		<p class="sub">
-			{#if auth.user?.must_change_password}
-				{m('auth.changePassword.subForced')}
-			{:else}
-				{m('auth.changePassword.subVoluntary')}
-			{/if}
-		</p>
+<AuthShell>
+	<form class="change-form" onsubmit={onSubmit}>
+		<div class="head">
+			<BrandMark size={40} />
+			<h1>{m('auth.changePassword.heading')}</h1>
+			<p class="sub">
+				{#if auth.user?.must_change_password}
+					{m('auth.changePassword.subForced')}
+				{:else}
+					{m('auth.changePassword.subVoluntary')}
+				{/if}
+			</p>
+		</div>
 
 		<div role="alert" aria-live="assertive">
 			{#if error}
@@ -127,102 +130,68 @@
 
 		<button type="button" class="secondary" onclick={onLogout}>{m('auth.changePassword.signOut')}</button>
 	</form>
-</div>
+</AuthShell>
 
 <style>
-	.page {
-		min-height: 100vh;
-		display: grid;
-		place-items: center;
-		background: var(--bg);
-		padding: 40px 20px;
-	}
-	.card {
-		background: var(--surface);
-		border: 1px solid var(--border);
-		border-radius: 8px;
-		padding: 40px 36px;
-		width: min(440px, 92vw);
+	/* Field chrome, the submit button, the error banner and the entrance come
+	   from AuthShell; this is only the strength checklist and the sign-out
+	   escape hatch. */
+	.change-form {
 		display: flex;
 		flex-direction: column;
-		gap: 14px;
+		gap: 18px;
 	}
-	h1 {
-		margin: 0;
-		font-size: 1.25rem;
-		font-weight: 700;
-		color: var(--text);
+	.head {
+		display: flex;
+		flex-direction: column;
+		align-items: flex-start;
+		gap: 10px;
+		margin-bottom: 4px;
 	}
 	.sub {
-		margin: -4px 0 4px;
-		font-size: 0.88rem;
+		margin: 0;
+		font-size: 0.93rem;
+		line-height: 1.55;
 		color: var(--text-muted);
-	}
-	.error {
-		background: rgba(224, 64, 64, 0.1);
-		border: 1px solid rgba(224, 64, 64, 0.3);
-		color: var(--danger);
-		padding: 10px 14px;
-		border-radius: 4px;
-		font-size: 0.85rem;
-	}
-	label {
-		display: flex;
-		flex-direction: column;
-		gap: 4px;
-	}
-	label span {
-		font-size: 0.78rem;
-		font-weight: 500;
-		color: var(--text-muted);
-		text-transform: uppercase;
-		letter-spacing: 0.03em;
-	}
-	input {
-		background: var(--bg);
-		border: 1px solid var(--border);
-		border-radius: 4px;
-		padding: 10px 12px;
-		font-size: 0.9rem;
-		color: var(--text);
-		font-family: inherit;
-	}
-	input:focus {
-		outline: none;
-		border-color: var(--accent);
-		box-shadow: 0 0 0 2px rgba(99, 140, 255, 0.15);
 	}
 	.strength {
-		margin: -4px 0 4px;
-		padding: 0 0 0 4px;
+		display: grid;
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+		gap: 6px 12px;
+		margin: -6px 0 0;
+		padding: 0;
 		list-style: none;
-		font-size: 0.78rem;
+		font-size: 0.8rem;
 		color: var(--text-muted);
 	}
+	.strength li {
+		transition: color 0.2s;
+	}
+	/* --success, not the old literal #2e9960: a hint turning green is the one
+	   state change on this page, and the token is what is calibrated against
+	   --bg (6.17:1). */
 	.strength li.ok {
-		color: #2e9960;
+		color: var(--success);
 	}
-	button {
-		padding: 10px;
-		border-radius: 4px;
-		border: none;
-		background: var(--accent-strong);
-		color: #fff;
-		font-size: 0.9rem;
-		font-weight: 500;
-		cursor: pointer;
-		font-family: inherit;
+	@media (max-width: 420px) {
+		.strength {
+			grid-template-columns: 1fr;
+		}
 	}
-	button:hover:not(:disabled) {
-		opacity: 0.9;
-	}
-	button:disabled {
-		opacity: 0.5;
-		cursor: not-allowed;
-	}
-	button.secondary {
-		background: transparent;
+	.secondary {
+		min-height: 46px;
+		padding: 11px 16px;
+		border-radius: 10px;
 		border: 1px solid var(--border);
+		background: transparent;
 		color: var(--text-muted);
+		font-family: inherit;
+		font-size: 0.93rem;
+		cursor: pointer;
+		transition: border-color 0.15s, color 0.15s;
+	}
+	.secondary:hover {
+		border-color: var(--text-muted);
+		color: var(--text);
 	}
 </style>

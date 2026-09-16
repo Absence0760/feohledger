@@ -350,7 +350,8 @@ component the second time you would duplicate one.**
 - domain: `InvoiceModal` `VendorModal` `VendorPicker` `RunDetailModal` `ApprovalMatrixEditor` `BulkRecodeGLModal` `AdvancedSearchModal` `ScreeningBadge` `SubscriptionBadge` `SpendBarChart` `UsageMeter` `PortalListFilters`
 - chrome: `Sidebar` `NotificationBell` `EntitySwitcher`
 - chat/assistant: `SupplierChatThread` `ChatMessage` `ExamplePrompts` `ToolResultView`
-- marketing: `Landing` `Pricing`
+- marketing: `Landing` `Pricing` `Atmosphere` `HeroPipeline` `AdapterRail` `MotionToggle`
+- auth: `AuthShell` (every pre-auth employee page) `AuthCard`
 
 Two invariants the library enforces, worth knowing before you call anything:
 
@@ -400,6 +401,7 @@ The rules that hold everywhere, so you know when you need to go read the detail:
 - **User-facing strings go through `t()`** — never a hardcoded literal. See `### Internationalization`.
 - **Accessibility is WCAG 2.2 AA and it is tested.** Focus management, keyboard reachability, target size, and reflow at 320 px are guarded by `frontend/tests-e2e/a11y/` (axe-core). Never loosen those specs — fix the markup.
 - **Colour comes from the tokens in `app.css`**, never a literal hex in a component. Contrast ratios are computed and asserted; a new token pair must pass 1.4.3.
+- **Motion ends on its resting frame, hides nothing by stylesheet, and stops on request.** Continuous animation lives under a `data-motion` root with `MotionToggle` (WCAG 2.2.2); reduced motion collapses durations *and* delays. The five rules are `docs/ui-patterns.md` § Motion.
 - **Class names follow the documented convention** rather than utility soup; the conventions section is the reference.
 ## Conventions
 
