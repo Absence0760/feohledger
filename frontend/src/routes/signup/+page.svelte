@@ -213,6 +213,27 @@
 				{submitting ? m('auth.signup.submitting') : m('auth.signup.submit')}
 			</button>
 
+			<!--
+				Contract formation happens here — this button creates a tenant and
+				binds the signer's organisation — so the terms it forms under have
+				to be presented at the point of assent rather than only from a
+				footer elsewhere. It sits below the button so the button stays the
+				page's primary target, and above the existing footer note so the
+				last thing read before submitting is what submitting agrees to.
+
+				English literals rather than `t()`: see the i18n exception in
+				`frontend/CLAUDE.md`. The two labels want catalogue entries (the
+				surrounding copy has them) — tracked in `docs/followups.md` with
+				the supplier-portal footer's equivalent.
+			-->
+			<p class="legal-consent">
+				By creating a workspace you agree to the
+				<a href="/legal/terms">Terms of Service</a> and the
+				<a href="/legal/privacy">Privacy Policy</a>, including the
+				<a href="/legal/dpa">Data Processing Addendum</a> that governs supplier
+				and invoice data you load into it.
+			</p>
+
 			<p class="footer">
 				{m('auth.signup.footerPre')}<code>{tenantExampleHost}</code>{m('auth.signup.footerPost')}
 			</p>
@@ -332,6 +353,17 @@
 		opacity: 0.6;
 		cursor: not-allowed;
 	}
+	.legal-consent {
+		margin: 16px 0 0;
+		font-size: 0.8rem;
+		line-height: 1.5;
+		color: var(--text-muted);
+		text-align: center;
+	}
+	.legal-consent a {
+		color: var(--accent-on-tint);
+	}
+
 	.footer {
 		margin: 16px 0 0;
 		font-size: 0.8rem;

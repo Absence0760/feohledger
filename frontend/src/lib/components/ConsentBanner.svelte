@@ -87,9 +87,10 @@
 				<p>
 					We use storage that is strictly necessary to run the app — signing
 					you in and keeping your session — which works regardless of your
-					choice here. We would also like to use <strong>non-essential</strong>
-					storage for product analytics. You can accept it, reject it, or review
-					the details first.
+					choice here. We load <strong>no analytics or tracking</strong> storage
+					today. Your choice is recorded now and governs any optional storage we
+					introduce later. Full detail is in the
+					<a href="/legal/cookies">Cookie Notice</a>.
 				</p>
 				{#if showDetails}
 					<dl class="consent-details">
@@ -100,8 +101,19 @@
 						</dd>
 						<dt>Analytics (optional)</dt>
 						<dd>
-							Aggregate product-usage measurement to improve the app. Off
-							until you accept.
+							<!--
+								This category is empty, and saying so is the point. The copy
+								previously read "Aggregate product-usage measurement to improve
+								the app", which described a thing the frontend does not do:
+								there is no analytics script anywhere in it, and `getConsent()`
+								has no caller. Soliciting consent for processing that isn't
+								happening is an accuracy problem in its own right, so the
+								category stays — the mechanism should exist before it is
+								needed — but it states what is true today.
+							-->
+							Nothing is loaded under this category today. If product analytics
+							is added, it stays off unless you have accepted it, and the Cookie
+							Notice is updated before anything is set.
 						</dd>
 					</dl>
 				{/if}
@@ -167,6 +179,10 @@
 
 	.consent-copy strong {
 		color: var(--text);
+	}
+
+	.consent-copy a {
+		color: var(--accent-on-tint);
 	}
 
 	.consent-details {
