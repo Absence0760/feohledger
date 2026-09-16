@@ -907,6 +907,62 @@ input[type='week']:hover::-webkit-calendar-picker-indicator {
 }
 
 /* ===================================================================
+   Scroll reveal (lib/actions/reveal.ts)
+   -------------------------------------------------------------------
+   The resting and revealed states for `use:reveal`. Both classes are
+   added at RUNTIME by the action, never written in markup — which is
+   what makes the hidden state safe: an element only ever carries
+   `.reveal` if the script ran, so a failed bundle, a missing
+   IntersectionObserver or a reduced-motion preference all leave a
+   normal, fully visible page rather than a blank one.
+
+   `opacity: 0` and `opacity: 1` are outside the range
+   `src/lib/a11y/opacityAudit.test.ts` scans for (it looks for an
+   at-rest FADE, `0 < opacity < 1`), so this needs no allowlist entry —
+   and should not acquire one. A reveal that rests at 0.8 would be a
+   de-emphasis, which is the thing that guard exists to stop.
+
+   `translate3d` rather than `translateY` so the transform gets its own
+   compositor layer: the reveal fires on scroll, which is exactly when
+   a layout-triggering property is most expensive.
+   =================================================================== */
+.reveal {
+	opacity: 0;
+	transform: translate3d(0, 14px, 0);
+	transition: opacity 0.55s cubic-bezier(0.22, 1, 0.36, 1),
+		transform 0.55s cubic-bezier(0.22, 1, 0.36, 1);
+	will-change: opacity, transform;
+}
+.reveal-in {
+	opacity: 1;
+	transform: translate3d(0, 0, 0);
+	/* Drop the layer promotion once the element has landed — a page with
+	   forty permanently-promoted layers scrolls worse than one with none. */
+	will-change: auto;
+}
+
+/* ===================================================================
+   Motion toggle (WCAG 2.2.2 Pause, Stop, Hide)
+   -------------------------------------------------------------------
+   The marketing surfaces run looping decorative animation — a hero
+   sequence and an auto-scrolling adapter rail — which SC 2.2.2 requires
+   a user be able to stop, independently of any OS-level preference.
+   Their shell carries `data-motion="paused"` when the visitor asks for
+   that, and this halts every animation beneath it in one rule rather
+   than each component remembering to honour the flag.
+
+   `animation-play-state` freezes an animation WHERE IT IS, which is
+   the honest reading of "pause": a stopped hero holds the frame the
+   reader was looking at instead of jumping to the end of the loop.
+   =================================================================== */
+[data-motion='paused'],
+[data-motion='paused'] *,
+[data-motion='paused'] *::before,
+[data-motion='paused'] *::after {
+	animation-play-state: paused !important;
+}
+
+/* ===================================================================
    Reduced motion (WCAG 2.3.3 Animation from Interactions)
    -------------------------------------------------------------------
    Honour the OS "reduce motion" preference globally: near-instant
@@ -922,7 +978,16 @@ input[type='week']:hover::-webkit-calendar-picker-indicator {
 	*::after {
 		animation-duration: 0.001ms !important;
 		animation-iteration-count: 1 !important;
+		/* Delays too, not only durations. An entrance with a stagger delay
+		   and `backwards` fill holds its FIRST frame — usually opacity 0 —
+		   for the whole delay, so collapsing the duration alone left a
+		   reduced-motion visitor looking at a page whose error message,
+		   links and panel popped in a quarter-second late: the auth shell's
+		   staggered fields were missing from a capture taken as soon as the
+		   heading rendered. Zero delay makes the final frame the first one. */
+		animation-delay: 0s !important;
 		transition-duration: 0.001ms !important;
+		transition-delay: 0s !important;
 		scroll-behavior: auto !important;
 	}
 }
