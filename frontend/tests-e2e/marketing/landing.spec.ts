@@ -113,7 +113,7 @@ test.describe('landing — motion control (WCAG 2.2.2)', () => {
 		await expect(page.locator('.landing')).toHaveAttribute('data-motion', 'paused');
 		// The hero card, the adapter rail and the backdrop aurora are three
 		// different components; the rule has to reach all of them.
-		for (const selector of ['.hero-visual .card', '.rail .track', '.backdrop .aurora-a']) {
+		for (const selector of ['.hero-visual .card', '.rail .track', '.atmosphere .aurora-a']) {
 			await expect
 				.poll(
 					() =>
@@ -134,6 +134,21 @@ test.describe('landing — motion control (WCAG 2.2.2)', () => {
 		await expect.poll(() => card.evaluate((el) => getComputedStyle(el).animationPlayState)).toBe(
 			'running'
 		);
+	});
+});
+
+test.describe('landing — atmosphere layer', () => {
+	test('inherits nothing from the global modal overlay', async ({ page }) => {
+		// Regression: the layer's root class was `backdrop`, which app.css also
+		// defines globally as the modal overlay — so it silently took a 50% black
+		// fill and a backdrop-filter on a fixed full-viewport element. A global
+		// class reaches scoped components, so the rename is the fix and this is
+		// its pin.
+		await gotoLanding(page);
+		const layer = page.locator('.atmosphere');
+		await expect(layer).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
+		await expect(layer).toHaveCSS('backdrop-filter', 'none');
+		await expect(layer).toHaveCSS('padding-top', '0px');
 	});
 });
 

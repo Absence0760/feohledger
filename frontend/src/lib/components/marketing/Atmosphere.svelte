@@ -2,6 +2,15 @@
 	import { asset } from '$app/paths';
 
 	/**
+	 * Named `Atmosphere`, with a root class of `.atmosphere`, and NOT `backdrop`:
+	 * `app.css` owns a global `.backdrop` — the modal overlay — and a global
+	 * class selector reaches any element carrying that class, scoped component
+	 * or not. As `.backdrop` this layer silently inherited the overlay's 50%
+	 * black fill (darkening every page it sat under), a `backdrop-filter` blur on
+	 * a fixed full-viewport element (a repaint cost on every scroll), and grid
+	 * layout with padding. Scoped rules only out-voted the two properties they
+	 * happened to redeclare.
+	 *
 	 * The atmosphere behind every public-facing surface — the marketing page and
 	 * the two auth shells. One component rather than three copies of the same
 	 * four gradients, because the three pages have to look like the same product
@@ -45,7 +54,7 @@
 	const grain = `url(${asset('/marketing/grain.svg')})`;
 </script>
 
-<div class="backdrop" class:dense class:still class:fixed aria-hidden="true" style="--grain-url: {grain}">
+<div class="atmosphere" class:dense class:still class:fixed aria-hidden="true" style="--grain-url: {grain}">
 	<div class="aurora aurora-a"></div>
 	<div class="aurora aurora-b"></div>
 	<div class="aurora aurora-c"></div>
@@ -55,14 +64,14 @@
 </div>
 
 <style>
-	.backdrop {
+	.atmosphere {
 		position: absolute;
 		inset: 0;
 		overflow: hidden;
 		pointer-events: none;
 		z-index: 0;
 	}
-	.backdrop.fixed {
+	.atmosphere.fixed {
 		position: fixed;
 	}
 
