@@ -1,4 +1,5 @@
 <script lang="ts">
+	import AuthShell from '$lib/components/auth/AuthShell.svelte';
 	import BrandMark from '$lib/components/ui/BrandMark.svelte';
 	import { auth } from '$lib/stores/auth.svelte';
 	import { goto } from '$app/navigation';
@@ -109,13 +110,13 @@
 	}
 </script>
 
-<div class="login-page">
-	<form class="login-card" onsubmit={handleSubmit}>
-		<div class="brand-head">
-			<BrandMark size={36} />
+<AuthShell>
+	<form class="login-form" onsubmit={handleSubmit}>
+		<div class="head">
+			<BrandMark size={40} />
 			<h1>{m('auth.login.heading')}</h1>
+			<p class="subtitle">{m('auth.login.subtitle')}</p>
 		</div>
-		<p class="subtitle">{m('auth.login.subtitle')}</p>
 
 		<div role="alert" aria-live="assertive">
 			{#if error}
@@ -155,43 +156,30 @@
 			</button>
 		{/if}
 	</form>
-</div>
+
+	{#snippet panel()}
+		<p class="panel-line">{m('auth.login.panelBody')}</p>
+	{/snippet}
+</AuthShell>
 
 <style>
-	.login-page {
-		min-height: 100vh;
-		display: grid;
-		place-items: center;
-		background: var(--bg);
-	}
-
-	.login-card {
-		background: var(--surface);
-		border: 1px solid var(--border);
-		border-radius: 8px;
-		padding: 40px 36px;
-		width: min(400px, 90vw);
+	/* Field chrome, the submit button, the error banner and the entrance come
+	   from AuthShell; this is only what sign-in has that the others do not. */
+	.login-form {
 		display: flex;
 		flex-direction: column;
-		gap: 16px;
+		gap: 18px;
 	}
-
-	h1 {
-		margin: 0;
-		font-size: 1.3rem;
-		font-weight: 700;
-		color: var(--text);
-	}
-
-	.brand-head {
+	.head {
 		display: flex;
-		align-items: center;
-		gap: 12px;
+		flex-direction: column;
+		align-items: flex-start;
+		gap: 10px;
+		margin-bottom: 6px;
 	}
-
 	.subtitle {
-		margin: -8px 0 8px;
-		font-size: 0.88rem;
+		margin: 0;
+		font-size: 0.93rem;
 		color: var(--text-muted);
 	}
 
@@ -203,83 +191,26 @@
 	}
 
 	.forgot-link {
+		align-self: center;
 		margin-top: -4px;
-		font-size: 0.82rem;
-		color: var(--accent);
-		text-align: center;
-		text-decoration: underline;
-	}
-
-	.error {
-		background: rgba(224, 64, 64, 0.1);
-		border: 1px solid rgba(224, 64, 64, 0.3);
-		color: var(--danger);
-		padding: 10px 14px;
-		border-radius: 4px;
 		font-size: 0.85rem;
+		color: var(--accent-on-tint);
+		text-decoration: underline;
+		text-underline-offset: 2px;
 	}
-
-	label {
-		display: flex;
-		flex-direction: column;
-		gap: 4px;
-	}
-
-	label span {
-		font-size: 0.78rem;
-		font-weight: 500;
-		color: var(--text-muted);
-		text-transform: uppercase;
-		letter-spacing: 0.03em;
-	}
-
-	input {
-		background: var(--bg);
-		border: 1px solid var(--border);
-		border-radius: 4px;
-		padding: 10px 12px;
-		font-size: 0.9rem;
+	.forgot-link:hover {
 		color: var(--text);
-		font-family: inherit;
-	}
-
-	input:focus {
-		outline: none;
-		border-color: var(--accent);
-		box-shadow: 0 0 0 2px rgba(99, 140, 255, 0.15);
-	}
-
-	button {
-		margin-top: 8px;
-		padding: 10px;
-		border-radius: 4px;
-		border: none;
-		background: var(--accent-strong);
-		color: #fff;
-		font-size: 0.9rem;
-		font-weight: 500;
-		cursor: pointer;
-		font-family: inherit;
-	}
-
-	button:hover:not(:disabled) {
-		opacity: 0.9;
-	}
-
-	button:disabled {
-		opacity: 0.6;
-		cursor: not-allowed;
 	}
 
 	.divider {
 		display: flex;
 		align-items: center;
-		gap: 10px;
+		gap: 12px;
 		color: var(--text-muted);
 		font-size: 0.72rem;
 		text-transform: uppercase;
-		letter-spacing: 0.08em;
-		margin: 4px 0;
+		letter-spacing: 0.1em;
+		margin: 2px 0;
 	}
 	.divider::before,
 	.divider::after {
@@ -290,12 +221,27 @@
 	}
 
 	.sso-btn {
-		background: transparent;
+		min-height: 46px;
+		padding: 11px 16px;
+		border-radius: 10px;
 		border: 1px solid var(--border);
+		background: var(--surface);
 		color: var(--text);
+		font-family: inherit;
+		font-size: 0.93rem;
+		font-weight: 500;
+		cursor: pointer;
+		transition: border-color 0.15s, background 0.15s;
 	}
-	.sso-btn:hover:not(:disabled) {
-		border-color: var(--text-muted);
-		opacity: 1;
+	.sso-btn:hover {
+		border-color: var(--accent);
+	}
+
+	.panel-line {
+		margin: 0;
+		max-width: 38ch;
+		font-size: 1rem;
+		line-height: 1.6;
+		color: var(--text-muted);
 	}
 </style>

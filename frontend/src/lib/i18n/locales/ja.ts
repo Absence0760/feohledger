@@ -3355,6 +3355,17 @@ export const messages = {
 	'auth.signup.legalConsent': 'ワークスペースを作成すると、{terms}および{privacy}に同意したものとみなされます。これには、読み込む取引先データおよび請求書データを規定する{dpa}が含まれます。',
 	'auth.signup.footerPre': 'すでにワークスペースをお持ちですか？',
 	'auth.signup.footerPost': 'にアクセスしてサインインしてください。',
+	// Auth shell brand panel (lib/components/auth/AuthShell.svelte) — signup's
+	// "what happens next" steps and the login panel line.
+	'auth.shell.tagline': '請求書から支払いまで、すべての請求を照合。',
+	'auth.login.panelBody': 'データ抽出、承認、照合、支払いをひとつの場所で。',
+	'auth.signup.nextHeading': '次のステップ',
+	'auth.signup.step1Title': '会社情報を入力',
+	'auth.signup.step1Body': 'チームがサインインするアドレスを選びます。',
+	'auth.signup.step2Title': 'メールアドレスを確認',
+	'auth.signup.step2Body': 'アドレスがご本人のものか確認するリンクをお送りします。',
+	'auth.signup.step3Title': 'サインインしてパスワードを設定',
+	'auth.signup.step3Body': 'ウェルカムメールに記載された仮パスワードで始められます。',
 
 	// Auth — change password (routes/change-password/+page.svelte)
 	'auth.changePassword.pageTitle': 'パスワード変更 — FeohLedger',

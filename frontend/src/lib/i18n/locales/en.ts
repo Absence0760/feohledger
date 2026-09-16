@@ -3549,6 +3549,17 @@ export const en = {
 	'auth.signup.legalConsent': 'By creating a workspace you agree to the {terms} and the {privacy}, including the {dpa} that governs supplier and invoice data you load into it.',
 	'auth.signup.footerPre': 'Already have a workspace? Visit ',
 	'auth.signup.footerPost': ' to sign in.',
+	// Auth shell brand panel (lib/components/auth/AuthShell.svelte) — signup's
+	// "what happens next" steps and the login panel line.
+	'auth.shell.tagline': 'Invoice to payment, every bill matched.',
+	'auth.login.panelBody': 'Extraction, approvals, matching and payments — in one place.',
+	'auth.signup.nextHeading': 'What happens next',
+	'auth.signup.step1Title': 'Tell us about your company',
+	'auth.signup.step1Body': 'Pick the address your team will sign in at.',
+	'auth.signup.step2Title': 'Confirm your email',
+	'auth.signup.step2Body': 'We send a link to prove the address is yours.',
+	'auth.signup.step3Title': 'Sign in and set a password',
+	'auth.signup.step3Body': 'Your welcome email carries a temporary one to start with.',
 
 	// Auth — change password (routes/change-password/+page.svelte)
 	'auth.changePassword.pageTitle': 'Change password — FeohLedger',
