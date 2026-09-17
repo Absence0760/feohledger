@@ -40,11 +40,77 @@ export interface GlAccount {
 
 /**
  * The narrow view a GL **picker** needs — a `Pick` of the row above, not a
- * second declaration of it, so the two cannot drift. The value bound by every
- * picker is the uuid `id` (it matches `Expense.gl_account_id` and the
- * `bulk-gl-code` body); `InvoiceLineItem.gl_account` stores the `code` string.
+ * second declaration of it, so the two cannot drift.
+ *
+ * **The bound value differs by picker, and that is the data model, not an
+ * inconsistency.** `ExpenseModal`, `RequisitionModal` and `CatalogModal` bind
+ * the uuid `id`, because `Expense.gl_account_id`, `RequisitionLineItem.
+ * gl_account_id` and `CatalogItem.gl_account_id` are real
+ * `ForeignKey("gl_accounts.id")` columns. `InvoiceModal` and
+ * `CreateInvoiceModal` bind the `code`, because `Invoice.gl_account` and
+ * `InvoiceLineItem.gl_account` are `String(100)` columns holding the code —
+ * and a long list of backend readers treat that string AS the code: budget
+ * dimension matching (`services/budget_service`), the ad-hoc report builder,
+ * the PO-matching commodity resolver (`services/matching_rules`, keyed
+ * `commodity_rules["<code>"]`), approval routing rules (`RoutingField`), the
+ * 1099 box map (`services/tax_1099`, with glob patterns over the code), the
+ * vendor GL priors behind bulk recode (`services/gl_recode`), and the AI
+ * extraction catalog. Binding the uuid on the invoice side would write a uuid
+ * into that column and silently break every one of them.
+ *
+ * `entity_id` is carried so a picker can say WHICH chart an option belongs to
+ * — see {@link glAccountOptionLabel}.
  */
-export type GlAccountOption = Pick<GlAccount, 'id' | 'code' | 'name' | 'account_type'>;
+export type GlAccountOption = Pick<
+	GlAccount,
+	'id' | 'code' | 'name' | 'account_type' | 'entity_id'
+>;
+
+/**
+ * The entity context a picker label needs — structurally satisfied by
+ * `entityStore` (`$lib/stores/entity.svelte`), which is where every caller
+ * gets it from. Declared structurally rather than importing the store so this
+ * module stays a pure, unit-testable types module with no rune dependency.
+ */
+export interface GlAccountScope {
+	/** `entityStore.multiEntity` — true once the tenant has more than one entity. */
+	multiEntity: boolean;
+	/** `entityStore.entities` — the names behind `entity_id`. */
+	entities: readonly { id: string; name: string }[];
+}
+
+/**
+ * The label one GL option renders with — the single owner of that decision,
+ * rather than the same conditional copied into all five picker sites.
+ *
+ * On a **single-entity** tenant, and for any **shared** account (`entity_id`
+ * NULL), the label is bare: the scope distinction has no consequence there,
+ * and the `/gl-accounts` Scope column is gated on exactly the same condition.
+ *
+ * On a multi-entity tenant an **entity-scoped** account gets its owning
+ * entity's name appended, because the consolidated view (`X-Entity-ID` absent)
+ * returns every subsidiary's chart at once and two subsidiaries may each
+ * legitimately hold their own `6000` — two options that read identically and
+ * code to different accounts. Note the backend guarantees a code is unique
+ * within one *effective* chart (`api/gl_accounts._code_in_effective_chart`:
+ * shared ∪ the selected entity), so this only ever fires in the consolidated
+ * view, which is precisely where the reader has no other signal.
+ *
+ * `unknownEntity` is passed in (the caller supplies
+ * `m('glAccounts.scope.unknownEntity')`) rather than resolved here, for the
+ * same reason `entities` is structural: no i18n store import in a types module.
+ */
+export function glAccountOptionLabel(
+	account: GlAccountOption,
+	scope: GlAccountScope,
+	opts: { withName?: boolean; unknownEntity: string }
+): string {
+	const base = opts.withName ? `${account.code} — ${account.name}` : account.code;
+	if (!scope.multiEntity || !account.entity_id) return base;
+	const entityId = account.entity_id;
+	const name = scope.entities.find((e) => e.id === entityId)?.name ?? opts.unknownEntity;
+	return `${base} (${name})`;
+}
 
 /**
  * The four account types the domain documents (`models/gl_account.py`), used
