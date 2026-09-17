@@ -1,23 +1,21 @@
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
 
 import 'package:feohledger_mobile/api/api_client.dart';
 import 'package:feohledger_mobile/api/endpoints.dart';
 import 'package:feohledger_mobile/l10n/gen/app_localizations.dart';
 import 'package:feohledger_mobile/models/audit_entry.dart';
 import 'package:feohledger_mobile/models/invoice.dart';
-import 'package:feohledger_mobile/utils/money.dart';
 import 'package:feohledger_mobile/stores/auth_store.dart';
 import 'package:feohledger_mobile/stores/invoice_store.dart';
 import 'package:feohledger_mobile/utils/a11y.dart';
+import 'package:feohledger_mobile/utils/dates.dart';
+import 'package:feohledger_mobile/utils/money.dart';
 import 'package:feohledger_mobile/widgets/activity_timeline.dart';
 import 'package:feohledger_mobile/widgets/erp_status_panel.dart';
 import 'package:feohledger_mobile/widgets/invoice_edit_sheet.dart';
 import 'package:feohledger_mobile/widgets/invoice_file_viewer.dart';
 import 'package:feohledger_mobile/widgets/invoice_warnings_panel.dart';
 import 'package:feohledger_mobile/widgets/status_badge.dart';
-
-final _dateFormat = DateFormat('MMM d, yyyy');
 
 class InvoiceDetailScreen extends StatefulWidget {
   final String invoiceId;
@@ -318,18 +316,18 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
           _detailRow(
             l.invoiceDetailFieldInvoiceDate,
             inv.invoiceDate != null
-                ? _dateFormat.format(inv.invoiceDate!)
+                ? formatDate(inv.invoiceDate!)
                 : null,
           ),
           _detailRow(
             l.invoiceDetailFieldDueDate,
-            inv.dueDate != null ? _dateFormat.format(inv.dueDate!) : null,
+            inv.dueDate != null ? formatDate(inv.dueDate!) : null,
           ),
           _detailRow(l.invoiceDetailFieldDescription, inv.description),
           _detailRow(l.invoiceDetailFieldGlAccount, inv.glAccount),
           _detailRow(
             l.invoiceDetailFieldCreated,
-            _dateFormat.format(inv.createdAt),
+            formatDate(inv.createdAt),
           ),
 
           // ERP status — derived from the loaded audit log (the activity is

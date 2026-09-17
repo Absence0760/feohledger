@@ -380,6 +380,15 @@ counterpart is `frontend/docs/i18n.md`.
 The rule is the same on both surfaces: **no user-facing string is a hardcoded
 literal**, and every number, date and currency renders through the locale-aware
 helpers. A new string ships with its ARB entry in the same change.
+
+Those helpers are `lib/utils/money.dart` and `lib/utils/dates.dart`, and they
+are the ONLY modules that may construct a `NumberFormat` / `DateFormat` —
+`test/utils/dates_test.dart` fails on a third. Both default to
+`lib/utils/format_locale.dart`'s `activeFormatLocale`, which
+`FormatLocaleScope` (in `MaterialApp.builder`) keeps equal to the locale
+MaterialApp resolved, so the picker moves the figures as well as the words. A
+date pattern is a **skeleton** (`DateFormat.yMMMd`), never a literal like
+`'MMM d, yyyy'`: a literal pins *en* word order onto every other language.
 ## Conventions
 
 - **StatefulWidget + setState** for local state, **ChangeNotifier** for shared state

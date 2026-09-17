@@ -8,6 +8,7 @@ import 'package:feohledger_mobile/services/biometric_service.dart';
 import 'package:feohledger_mobile/services/push_service.dart';
 import 'package:feohledger_mobile/stores/auth_store.dart';
 import 'package:feohledger_mobile/stores/locale_store.dart';
+import 'package:feohledger_mobile/utils/format_locale.dart';
 import 'package:feohledger_mobile/widgets/brand_mark.dart';
 
 Future<void> main() async {
@@ -50,6 +51,13 @@ class APApp extends StatelessWidget {
           locale: LocaleStore.instance.locale,
           localizationsDelegates: AppLocalizations.localizationsDelegates,
           supportedLocales: AppLocalizations.supportedLocales,
+          // Words and figures move together: this points `utils/money.dart`
+          // and `utils/dates.dart` at the locale MaterialApp just resolved, so
+          // the picker changes `1,234.50` / `Mar 4, 2026` as well as the copy
+          // around them. Under `Localizations`, and above everything that
+          // formats.
+          builder: (context, child) =>
+              FormatLocaleScope(child: child ?? const SizedBox.shrink()),
           theme: buildAppTheme(),
           home: const AuthGate(),
         );

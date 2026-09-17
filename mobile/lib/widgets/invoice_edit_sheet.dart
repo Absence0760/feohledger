@@ -1,11 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:intl/intl.dart';
 
 import 'package:feohledger_mobile/l10n/gen/app_localizations.dart';
 import 'package:feohledger_mobile/models/invoice.dart';
-
-final _editDateFormat = DateFormat('MMM d, yyyy');
+import 'package:feohledger_mobile/utils/dates.dart';
 
 /// The partial PATCH body the edit sheet hands back on Save. Keys match the
 /// backend `InvoiceUpdate` schema (`vendor` maps to `vendor_name` server-side).
@@ -121,7 +119,7 @@ class _InvoiceEditSheetState extends State<InvoiceEditSheet> {
     if (_dueDate?.toIso8601String() != originalDue?.toIso8601String()) {
       // Backend wants a YYYY-MM-DD date string.
       changes['due_date'] =
-          _dueDate == null ? null : DateFormat('yyyy-MM-dd').format(_dueDate!);
+          _dueDate == null ? null : formatIsoDate(_dueDate!);
     }
 
     // An approved (or later) invoice is financially frozen server-side: the
@@ -319,7 +317,7 @@ class _InvoiceEditSheetState extends State<InvoiceEditSheet> {
   Widget _dueDateField() {
     final l = AppLocalizations.of(context);
     final label = _dueDate != null
-        ? _editDateFormat.format(_dueDate!)
+        ? formatDate(_dueDate!)
         : l.invoiceEditNotSet;
     return Semantics(
       label: l.invoiceEditDueDateHint(label),

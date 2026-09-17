@@ -1,13 +1,10 @@
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
 
 import 'package:feohledger_mobile/l10n/gen/app_localizations.dart';
 import 'package:feohledger_mobile/models/inspection.dart';
 import 'package:feohledger_mobile/stores/inspection_store.dart';
+import 'package:feohledger_mobile/utils/dates.dart';
 import 'package:feohledger_mobile/widgets/inspection_result_badge.dart';
-
-final _dateFormat = DateFormat('MMM d, yyyy');
-final _dateTimeFormat = DateFormat('MMM d, yyyy h:mm a');
 
 /// One quality inspection, read-only (`GET /api/inspections/{id}`, role-open).
 ///
@@ -139,7 +136,7 @@ class _InspectionDetailScreenState extends State<InspectionDetailScreen> {
             l.inspectionDetailFieldInspectedDate,
             qi.inspectedDate == null
                 ? null
-                : _dateFormat.format(qi.inspectedDate!),
+                : formatDate(qi.inspectedDate!),
           ),
           _detailRow(l.inspectionDetailFieldInspector, qi.inspector),
           _detailRow(
@@ -153,7 +150,7 @@ class _InspectionDetailScreenState extends State<InspectionDetailScreen> {
           _detailRow(l.inspectionDetailFieldStatus, qi.status),
           _detailRow(
             l.inspectionDetailFieldCreated,
-            qi.createdAt == null ? null : _dateTimeFormat.format(qi.createdAt!),
+            qi.createdAt == null ? null : formatDateTime(qi.createdAt!),
           ),
           if (qi.deviationNotes != null && qi.deviationNotes!.isNotEmpty) ...[
             const SizedBox(height: 16),

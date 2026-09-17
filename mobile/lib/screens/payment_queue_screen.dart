@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
-import 'package:intl/intl.dart';
 
 import 'package:feohledger_mobile/l10n/gen/app_localizations.dart';
 import 'package:feohledger_mobile/models/payment.dart';
@@ -8,10 +7,9 @@ import 'package:feohledger_mobile/models/payment_queue.dart';
 import 'package:feohledger_mobile/stores/auth_store.dart';
 import 'package:feohledger_mobile/stores/payment_queue_store.dart';
 import 'package:feohledger_mobile/utils/a11y.dart';
+import 'package:feohledger_mobile/utils/dates.dart';
 import 'package:feohledger_mobile/utils/money.dart';
 import 'package:feohledger_mobile/widgets/kpi_card.dart';
-
-final _dateFormat = DateFormat('MMM d, yyyy');
 
 /// Format a server-supplied money display string in [currency].
 ///
@@ -286,7 +284,7 @@ class _PaymentQueueScreenState extends State<PaymentQueueScreen>
     final pinnedMethod = item.requiredMethod;
     final reason = _verdictReason(l, item);
     final dueText = item.dueDate != null
-        ? l.payQueueDue(_dateFormat.format(item.dueDate!))
+        ? l.payQueueDue(formatDate(item.dueDate!))
         : l.payQueueNoDueDate;
 
     final subtitleParts = <String>[
@@ -544,7 +542,7 @@ class _PaymentQueueScreenState extends State<PaymentQueueScreen>
   Widget _runRow(PaymentRun run) {
     final l = AppLocalizations.of(context);
     final subtitle =
-        l.payRunSubtitle(run.paymentCount, _dateFormat.format(run.createdAt)) +
+        l.payRunSubtitle(run.paymentCount, formatDate(run.createdAt)) +
             (run.requiresCfoApproval && !run.cfoApproved
                 ? l.payRunCfoRequiredSuffix
                 : '');
@@ -618,7 +616,7 @@ class _PaymentQueueScreenState extends State<PaymentQueueScreen>
       final confirmed = await _confirm(
         l.payRunApproveTitle,
         l.payRunApproveBody(
-          _dateFormat.format(run.createdAt),
+          formatDate(run.createdAt),
           run.paymentCount,
           _runTotal(run),
         ),
