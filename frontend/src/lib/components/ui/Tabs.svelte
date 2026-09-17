@@ -82,6 +82,12 @@
 	   /expenses, /payments, /audit so new pages share one source. */
 	.tab-row {
 		display: flex;
+		/* Tabs drop onto a second line rather than pushing the document sideways
+		   at a narrow viewport (WCAG 1.4.10 Reflow). Wrapping, not
+		   `overflow-x: auto`: 1.4.10 only excuses two-dimensional content from
+		   reflowing, and a row of navigation controls is not that — a hidden
+		   tab behind a sideways scroll is a destination the reader never finds. */
+		flex-wrap: wrap;
 		gap: 4px;
 		border-bottom: 1px solid var(--border);
 	}

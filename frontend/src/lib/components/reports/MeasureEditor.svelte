@@ -89,6 +89,9 @@
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
+		/* The heading and its <select> drop onto separate lines rather than
+		   pushing the document sideways at a narrow viewport (WCAG 1.4.10). */
+		flex-wrap: wrap;
 		gap: 12px;
 		margin-bottom: 10px;
 	}
@@ -119,6 +122,11 @@
 		flex: 1;
 	}
 	select {
+		/* A <select> sizes to its widest option and `min-width: auto` keeps it
+		   there, which is how a long option label pushed the page sideways at
+		   320px. */
+		min-width: 0;
+		max-width: 100%;
 		padding: 6px 10px;
 		border: 1px solid var(--border);
 		border-radius: 6px;
