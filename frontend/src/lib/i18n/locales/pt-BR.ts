@@ -92,6 +92,29 @@ export const messages = {
 	'common.loadFailed': 'Não foi possível carregar esta lista. Atualize para tentar novamente.',
 	'common.amountInvalid': 'Informe o valor como um número simples, por exemplo 1200 ou 1200.50',
 
+	// Cookie / consent banner (lib/components/ConsentBanner.svelte) — see en.ts.
+
+	'consent.ariaLabel': 'Consentimento de cookies e privacidade',
+	'consent.title': 'Suas escolhas de privacidade',
+	'consent.bodyNecessary':
+		'Usamos armazenamento estritamente necessário para o funcionamento do app — conectar você e manter sua sessão — e ele funciona independentemente da sua escolha aqui.',
+	'consent.bodyNoAnalytics':
+		'Hoje não carregamos nenhum armazenamento de análise ou rastreamento.',
+	'consent.bodyRecorded':
+		'Sua escolha é registrada agora e vale para qualquer armazenamento opcional que venhamos a introduzir depois.',
+	'consent.bodyNotice': 'Todos os detalhes estão no {cookieNotice}.',
+	'consent.cookieNotice': 'Aviso de Cookies',
+	'consent.manage': 'Gerenciar',
+	'consent.hideDetails': 'Ocultar detalhes',
+	'consent.necessaryTerm': 'Estritamente necessários (sempre ativos)',
+	'consent.necessaryDesc':
+		'Token de autenticação e estado da sessão. Necessários para entrar e usar o app; não podem ser desativados.',
+	'consent.analyticsTerm': 'Análise (opcional)',
+	'consent.analyticsDesc':
+		'Nada é carregado nesta categoria hoje. Se análise de produto for adicionada, ela permanece desativada a menos que você tenha aceitado, e o Aviso de Cookies é atualizado antes de qualquer coisa ser gravada.',
+	'consent.reject': 'Recusar os não essenciais',
+	'consent.accept': 'Aceitar todos',
+
 	// Profile → Language picker
 	'profile.language.heading': 'Idioma',
 	'profile.language.hint':
@@ -214,6 +237,13 @@ export const messages = {
 	'common.search': 'Pesquisar',
 	'common.clear': 'Limpar',
 	'common.apply': 'Aplicar',
+
+	// Bulk selection, shared by every list that offers it — see en.ts.
+
+	'common.bulkActions': 'Ações em massa',
+	'common.nSelected': '{n, plural, one {# selecionado} other {# selecionados}}',
+	'common.selectAllMatching': 'Selecionar os {total} itens correspondentes',
+	'common.allMatchingSelected': 'Todos os itens correspondentes selecionados',
 	'common.contrastWarning':
 		'Texto branco sobre esta cor atinge apenas {ratio}. O WCAG AA exige 4,5:1, então botões e chips que a usarem ficarão difíceis de ler.',
 
@@ -435,8 +465,6 @@ export const messages = {
 	'payments.queue.loadMore': 'Carregar mais ({shown} de {total})',
 	'payments.queue.showingAll':
 		'{total, plural, one {Mostrando # fatura} other {Mostrando todas as # faturas}}',
-	'payments.queue.selectAllMatching': 'Selecionar todas as {total} correspondentes',
-	'payments.queue.allMatchingSelected': 'Todas as correspondentes selecionadas',
 	'payments.queue.selectedAllMatching':
 		'{n, plural, one {# fatura correspondente selecionada} other {# faturas correspondentes selecionadas}}',
 	'payments.queue.selectAllTruncated':
@@ -918,6 +946,11 @@ export const messages = {
 	'exceptions.filter.allTypes': 'Todos os tipos',
 	'exceptions.col.type': 'Tipo',
 	'exceptions.col.severity': 'Grav.',
+
+	// Exception-severity labels — see en.ts.
+	'exceptions.severity.error': 'Erro',
+	'exceptions.severity.warning': 'Aviso',
+	'exceptions.severity.info': 'Info',
 	'exceptions.col.invoice': 'Fatura',
 	'exceptions.col.vendor': 'Fornecedor',
 	'exceptions.col.amount': 'Valor',

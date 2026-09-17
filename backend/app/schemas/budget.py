@@ -2,7 +2,9 @@
 
 Money convention (mirrors ``schemas/expense.py`` / ``schemas/contract.py``):
 request fields are typed ``Decimal`` for exactness on the way in; response /
-rollup fields serialise money as ``float`` (the router does ``float(...)``).
+rollup fields are ``MoneyAmount`` / ``OptionalMoneyAmount``, which keep the
+value a ``Decimal`` in Python and convert to a JSON number once, at
+JSON-write time — the same wire shape the old ``float(...)`` produced.
 Never ``float`` on a column or in an in-memory total.
 """
 
@@ -13,6 +15,7 @@ from pydantic import BaseModel, Field
 
 from app.api.pagination import PageMeta
 from app.models.procurement import BudgetDimension
+from app.schemas.money import MoneyAmount
 
 # ---------------------------------------------------------------------------
 # Budgets
@@ -59,7 +62,7 @@ class BudgetResponse(BaseModel):
     period: str | None
     period_start: str | None
     period_end: str | None
-    amount: float
+    amount: MoneyAmount
     currency: str
     notes: str | None
     created_at: str
@@ -72,8 +75,8 @@ class BudgetListResponse(PageMeta):
 
 
 class BudgetSpendResponse(BaseModel):
-    """Computed spend rollup for one budget. Money serialised as ``float`` for
-    display — the exact ``Decimal`` stays in the DB / service layer.
+    """Computed spend rollup for one budget. Money stays ``Decimal`` in Python
+    and serialises to a JSON number at the boundary (``MoneyAmount``).
 
     ``committed`` = open requisitions + their converted POs; ``actual`` =
     realised invoice spend matched to the dimension; ``remaining`` =
@@ -84,10 +87,10 @@ class BudgetSpendResponse(BaseModel):
     dimension: str
     dimension_value: str
     currency: str
-    allocated: float
-    committed: float
-    actual: float
-    remaining: float
+    allocated: MoneyAmount
+    committed: MoneyAmount
+    actual: MoneyAmount
+    remaining: MoneyAmount
     utilization_pct: float
     # A COUNT, not money: requisitions / POs / invoices that matched this budget
     # but are denominated in another currency (or none), so the legs refused
@@ -124,9 +127,9 @@ class BudgetSummaryResponse(BaseModel):
 class BudgetCurrencyRollupEntry(BaseModel):
     """One currency's slice of the org-wide budget-vs-actual rollup.
 
-    Money is an **exact decimal string**, never ``float`` — unlike the
-    per-budget ``BudgetSpendResponse``, which predates the string convention and
-    stays ``float`` for API back-compat. These are org-wide totals a CFO reads
+    Money is an **exact decimal string** — unlike the per-budget
+    ``BudgetSpendResponse``, which predates the string convention and stays a
+    JSON number for API back-compat. These are org-wide totals a CFO reads
     off a dashboard, so they never round-trip through a binary float, and they
     are never added across currencies or FX-converted on a read.
     """
@@ -172,12 +175,12 @@ class BudgetCheckResponse(BaseModel):
     amount were committed."""
 
     budget_id: str
-    amount: float
-    allocated: float
-    committed: float
-    actual: float
-    remaining: float
-    remaining_after: float
+    amount: MoneyAmount
+    allocated: MoneyAmount
+    committed: MoneyAmount
+    actual: MoneyAmount
+    remaining: MoneyAmount
+    remaining_after: MoneyAmount
     would_overspend: bool
     currency: str
 

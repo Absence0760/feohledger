@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
 
 import 'package:feohledger_mobile/api/api_client.dart';
 import 'package:feohledger_mobile/api/endpoints.dart';
@@ -8,11 +7,10 @@ import 'package:feohledger_mobile/models/contract.dart';
 import 'package:feohledger_mobile/stores/auth_store.dart';
 import 'package:feohledger_mobile/stores/contract_store.dart';
 import 'package:feohledger_mobile/utils/a11y.dart';
+import 'package:feohledger_mobile/utils/dates.dart';
 import 'package:feohledger_mobile/utils/money.dart';
 import 'package:feohledger_mobile/widgets/contract_status_badge.dart';
 import 'package:feohledger_mobile/widgets/kpi_card.dart';
-
-final _dateFormat = DateFormat('MMM d, yyyy');
 
 class ContractDetailScreen extends StatefulWidget {
   final String contractId;
@@ -209,15 +207,15 @@ class _ContractDetailScreenState extends State<ContractDetailScreen> {
           ),
           _detailRow(
             l.contractDetailFieldStartDate,
-            c.startDate != null ? _dateFormat.format(c.startDate!) : null,
+            c.startDate != null ? formatDate(c.startDate!) : null,
           ),
           _detailRow(
             l.contractDetailFieldEndDate,
-            c.endDate != null ? _dateFormat.format(c.endDate!) : null,
+            c.endDate != null ? formatDate(c.endDate!) : null,
           ),
           _detailRow(
             l.contractDetailFieldSigned,
-            c.signedDate != null ? _dateFormat.format(c.signedDate!) : null,
+            c.signedDate != null ? formatDate(c.signedDate!) : null,
           ),
           _detailRow(
             l.contractDetailFieldAutoRenew,
@@ -238,7 +236,7 @@ class _ContractDetailScreenState extends State<ContractDetailScreen> {
           _detailRow(l.contractDetailFieldPaymentTerms, c.paymentTerms),
           _detailRow(l.contractDetailFieldDescription, c.description),
           _detailRow(
-              l.contractDetailFieldCreated, _dateFormat.format(c.createdAt)),
+              l.contractDetailFieldCreated, formatDate(c.createdAt)),
 
           // Spend summary
           if (c.spend != null) ...[

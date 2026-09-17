@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'package:feohledger_mobile/l10n/gen/app_localizations.dart';
+import 'package:feohledger_mobile/l10n/invoice_warning_messages.dart';
 import 'package:feohledger_mobile/models/invoice.dart';
 
 /// Detail-screen panel that surfaces an invoice's warnings / fraud flags and
@@ -98,10 +99,14 @@ class _WarningTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final l = AppLocalizations.of(context);
     final style = _severityStyle(warning.severity);
+    // The finding in the reader's language, or the backend's English sentence
+    // when this build cannot state it — resolved ONCE, so the announcement and
+    // the visible text can never end up in two different languages.
+    final text = invoiceWarningText(l, warning);
     // One merged announcement per warning ("Error: Missing vendor name")
     // instead of an icon glyph + two disjoint text spans (WCAG 1.3.1 / 4.1.2).
     return Semantics(
-      label: '${_severityLabel(l, warning.severity)}: ${warning.message}',
+      label: '${_severityLabel(l, warning.severity)}: $text',
       excludeSemantics: true,
       child: Container(
         width: double.infinity,
@@ -118,7 +123,7 @@ class _WarningTile extends StatelessWidget {
             const SizedBox(width: 8),
             Expanded(
               child: Text(
-                warning.message,
+                text,
                 style: TextStyle(
                   color: style.fg,
                   fontSize: 13,

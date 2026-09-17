@@ -67,6 +67,7 @@ from app.schemas.expense import (
     ExpenseSummaryResponse,
     ExpenseUpdate,
 )
+from app.schemas.money import json_money
 from app.services.approval_chain import check_segregation
 from app.services.audit_dispatch import dispatch_audit
 from app.services.currency_conversion import resolve_reporting_currency
@@ -141,10 +142,10 @@ def _to_response(e: Expense) -> ExpenseResponse:
         merchant=e.merchant,
         category=e.category,
         description=e.description,
-        amount=float(e.amount),
+        amount=e.amount,
         currency=e.currency,
         # Rate-locked expression of `amount` in the owning report's currency —
-        # exact decimal strings (the legacy `amount` stays float for back-compat).
+        # exact decimal strings.
         converted_amount=str(e.converted_amount) if e.converted_amount is not None else None,
         converted_currency=e.converted_currency,
         converted_fx_rate=str(e.converted_fx_rate) if e.converted_fx_rate is not None else None,
@@ -175,7 +176,7 @@ def _report_to_response(r: ExpenseReport) -> ExpenseReportResponse:
         submitted_at=r.submitted_at.isoformat() if r.submitted_at else None,
         approved_at=r.approved_at.isoformat() if r.approved_at else None,
         approved_by=str(r.approved_by) if r.approved_by else None,
-        total_amount=float(r.total_amount),
+        total_amount=r.total_amount,
         total_amount_exact=str(r.total_amount),
         currency=r.currency,
         # Total expressed in the org reporting currency at the rate locked on
@@ -1234,8 +1235,8 @@ async def report_summary(
     excluded and surfaced via ``unconverted_count`` /
     ``by_currency[].unconverted_count`` so the UI can say "N lines pending
     conversion" instead of showing a number that quietly mixes dollars and
-    euros. All arithmetic is ``Decimal``; the legacy ``total`` field stays
-    ``float`` for back-compat while the new fields carry exact decimal strings."""
+    euros. All arithmetic is ``Decimal``: the ``total`` fields stay ``Decimal``
+    to the JSON boundary and the ``*_exact`` fields carry decimal strings."""
     report = await _get_report_or_404(db, report_id)
     rows = (
         await db.execute(
@@ -1272,7 +1273,7 @@ async def report_summary(
     overall = rollup_report_lines([_line(r) for r in rows], report_currency=report.currency)
 
     return ExpenseReportSummary(
-        total=float(overall.total),
+        total=overall.total,
         total_exact=str(overall.total),
         currency=overall.currency,
         count=overall.count,
@@ -1281,7 +1282,7 @@ async def report_summary(
             {
                 "category": cat,
                 "count": roll.count,
-                "total": float(roll.total),
+                "total": json_money(roll.total),
                 "total_exact": str(roll.total),
                 "unconverted_count": roll.unconverted_count,
             }
@@ -1291,7 +1292,7 @@ async def report_summary(
             {
                 "status": str(st),
                 "count": roll.count,
-                "total": float(roll.total),
+                "total": json_money(roll.total),
                 "total_exact": str(roll.total),
                 "unconverted_count": roll.unconverted_count,
             }

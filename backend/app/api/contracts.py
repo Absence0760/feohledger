@@ -55,6 +55,7 @@ from app.schemas.contract import (
     ContractSpendSummary,
     ContractUpdate,
 )
+from app.schemas.money import json_money
 from app.services.audit_dispatch import dispatch_audit
 from app.services.contract_spend import compute_spend_summary
 from app.services.report_export import csv_safe_cell
@@ -101,8 +102,8 @@ def _to_response(
         vendor_id=str(contract.vendor_id),
         vendor_name=vendor_name,
         currency=contract.currency,
-        total_value=float(contract.total_value) if contract.total_value is not None else None,
-        spend_limit=float(contract.spend_limit) if contract.spend_limit is not None else None,
+        total_value=contract.total_value,
+        spend_limit=contract.spend_limit,
         not_to_exceed=contract.not_to_exceed,
         start_date=contract.start_date.isoformat() if contract.start_date else None,
         end_date=contract.end_date.isoformat() if contract.end_date else None,
@@ -803,7 +804,7 @@ async def create_po_from_contract(
         "id": str(po.id),
         "po_number": po.po_number,
         "vendor_id": str(po.vendor_id) if po.vendor_id else None,
-        "total": float(po.total),
+        "total": json_money(po.total),
         "status": po.status,
         "contract_id": str(contract.id),
         "line_items": [
@@ -811,8 +812,8 @@ async def create_po_from_contract(
                 "id": str(li.id),
                 "description": li.description,
                 "quantity": float(li.quantity) if li.quantity is not None else None,
-                "unit_price": float(li.unit_price) if li.unit_price is not None else None,
-                "total": float(li.total) if li.total is not None else None,
+                "unit_price": json_money(li.unit_price),
+                "total": json_money(li.total),
             }
             for li in po.line_items
         ],

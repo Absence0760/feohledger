@@ -460,8 +460,22 @@ below or in `## Project invariants` — this is the index.)
 
 ## Every change must update docs and tests
 
-1. **Update tests** — add or adjust coverage for behavior you touched. No tests exist yet — create them when adding new features.
+1. **Update tests** — add or adjust coverage for behavior you touched. The suites
+   are substantial (backend pytest, frontend vitest + Playwright, `flutter test`);
+   extend the module that already owns the behaviour rather than starting a new file.
 2. **Update docs** — if the change affects architecture, commands, env vars, deployment, or features, update the relevant doc (and this CLAUDE.md if setup or workflows changed).
+3. **Run what your change reaches — let CI run the rest.** Every long suite here
+   is sharded in CI and will run on the PR regardless: backend pytest is
+   `--splits 4` (~27 min serial, ~7 min/shard) and Playwright is 14 shards. A
+   serial local `pytest tests/` or full `pnpm test:e2e` therefore buys a slower
+   copy of an answer you get for free, on the critical path, against a local
+   Postgres that may be behind `alembic head` — so its failures need triaging
+   before they can be trusted. Run the test files covering your diff, plus a
+   grep-driven sweep of the callers of anything shared you touched (that sweep
+   is the part a narrow selection misses, and it is what makes the narrow
+   selection safe). Reach for a full local suite only when you are changing
+   something with no bounded caller set — a conftest, a base model, a
+   cross-cutting serializer — and say so when you do.
 
 ## Git workflow
 

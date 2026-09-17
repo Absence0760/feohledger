@@ -166,3 +166,50 @@ export function exceptionStatusTone(status: string): BadgeTone {
 export function exceptionStatusLabelKey(status: string): MessageKey | null {
 	return EXCEPTION_STATUS_LABEL_KEYS[status as ExceptionStatus] ?? null;
 }
+
+/**
+ * Every `Exception.severity` the platform raises.
+ *
+ * The third vocabulary on the row, and the last one that printed raw. The
+ * backend declares it in a COMMENT on the column
+ * (`models/exception.py`: `# error, warning, info`) and nowhere else — there is
+ * no `EXCEPTION_SEVERITIES` tuple to read the way `exception_lifecycle.py`
+ * gives one for the type roster and the status maps. `exception.test.ts` pins
+ * this against both halves of what the backend does have: that comment, and
+ * every `severity="…"` literal a raising site actually writes. A fourth
+ * severity fails there whichever way it arrives, and if the backend later grows
+ * a real constant the guard should move onto it.
+ *
+ * Order is worst-first, which is the order a triager scans.
+ */
+export const EXCEPTION_SEVERITIES = ['error', 'warning', 'info'] as const;
+
+export type ExceptionSeverity = (typeof EXCEPTION_SEVERITIES)[number];
+
+/**
+ * The i18n key carrying each severity's label — never the English string
+ * itself.
+ *
+ * A fresh `exceptions.severity.*` namespace rather than a reuse, unlike
+ * {@link EXCEPTION_STATUS_LABEL_KEYS}, which deliberately borrows the queue's
+ * filter-chip keys: there is no severity chip to agree with. Nothing else in
+ * the app names a severity, so there is no second surface to drift from.
+ */
+export const EXCEPTION_SEVERITY_LABEL_KEYS: Record<ExceptionSeverity, MessageKey> = {
+	error: 'exceptions.severity.error',
+	warning: 'exceptions.severity.warning',
+	info: 'exceptions.severity.info'
+};
+
+/**
+ * The message key for a severity, or `null` for one this build has no wording
+ * for.
+ *
+ * Tolerant for the reason {@link exceptionStatusLabelKey} is: `severity` is a
+ * plain `String(20)` with no DB enum, so a row written by a later build can
+ * carry a severity this one predates. The caller then prints the raw value —
+ * what every row printed before this map existed.
+ */
+export function exceptionSeverityLabelKey(severity: string): MessageKey | null {
+	return EXCEPTION_SEVERITY_LABEL_KEYS[severity as ExceptionSeverity] ?? null;
+}

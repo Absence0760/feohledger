@@ -40,6 +40,7 @@ from app.models.supplier_chat import ChatAuthorRole, ChatThreadStatus, SupplierC
 from app.models.vendor import Vendor
 from app.models.vendor_change_request import VendorChangeRequest
 from app.models.vendor_user import VendorUser
+from app.schemas.money import json_money
 from app.schemas.organization import BrandConfig
 from app.schemas.portal import (
     TAX_FORM_TYPES,
@@ -2093,7 +2094,7 @@ async def reveal_card(
     def _fallback(message: str) -> dict:
         return {
             "last_four": card.last_four,
-            "amount_limit": float(card.amount_limit),
+            "amount_limit": json_money(card.amount_limit),
             "currency": card.currency,
             "expires_at": card.expires_at.isoformat() if card.expires_at else None,
             "pan": None,
@@ -2130,7 +2131,7 @@ async def reveal_card(
 
     return {
         "last_four": card.last_four,
-        "amount_limit": float(card.amount_limit),
+        "amount_limit": json_money(card.amount_limit),
         "currency": card.currency,
         "expires_at": card.expires_at.isoformat() if card.expires_at else None,
         # CardDetails exposes the PAN as `card_number` (matches the admin

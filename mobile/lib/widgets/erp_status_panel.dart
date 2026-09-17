@@ -1,11 +1,9 @@
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
 
 import 'package:feohledger_mobile/l10n/gen/app_localizations.dart';
 import 'package:feohledger_mobile/models/audit_entry.dart';
 import 'package:feohledger_mobile/models/invoice.dart';
-
-final _dateTimeFormat = DateFormat('MMM d, yyyy h:mm a');
+import 'package:feohledger_mobile/utils/dates.dart';
 
 /// ERP-sync facts derived from an invoice's audit log, mirroring the web
 /// modal's `erpInfo`: the latest `invoice.erp_*` / `invoice.completed` entry
@@ -97,7 +95,7 @@ class ErpStatusPanel extends StatelessWidget {
     if (info != null) {
       final by = info.actor != null ? ' by ${info.actor}' : '';
       rows.add(_kv(l.erpStatusLastUpdate,
-          '${info.actionLabel}$by · ${_dateTimeFormat.format(info.time)}'));
+          '${info.actionLabel}$by · ${formatDateTime(info.time)}'));
     }
     if (rows.isEmpty) {
       // ERP-bound status but no audit detail yet (e.g. sending in flight).

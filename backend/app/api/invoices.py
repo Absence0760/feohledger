@@ -80,6 +80,7 @@ from app.schemas.invoice import (
     InvoiceUpdate,
     RouteIntercompanyRequest,
 )
+from app.schemas.money import json_money
 from app.services import audit_summary
 from app.services.audit_access import build_field_diff
 from app.services.audit_dispatch import dispatch_audit
@@ -964,9 +965,9 @@ async def get_invoice_line_items(
             "item_code": li.item_code,
             "description": li.description,
             "quantity": float(li.quantity) if li.quantity else None,
-            "unit_price": float(li.unit_price) if li.unit_price else None,
-            "tax": float(li.tax) if li.tax else None,
-            "total": float(li.total) if li.total else None,
+            "unit_price": json_money(li.unit_price) if li.unit_price else None,
+            "tax": json_money(li.tax) if li.tax else None,
+            "total": json_money(li.total) if li.total else None,
             "gl_account": li.gl_account,
         }
         for li in items

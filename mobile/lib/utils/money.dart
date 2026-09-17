@@ -1,5 +1,7 @@
 import 'package:intl/intl.dart';
 
+import 'package:feohledger_mobile/utils/format_locale.dart';
+
 /// Money formatting for the whole app.
 ///
 /// **A figure is formatted with the currency its own payload names.** Nine
@@ -36,6 +38,16 @@ import 'package:intl/intl.dart';
 /// cash-flow and adaptive payloads send and never lets a digit of it go
 /// missing — an amount too large to survive a `double` is passed through
 /// verbatim rather than rounded.
+///
+/// **The code and the locale are different questions**, and only the code is a
+/// parameter. The ISO code says WHAT the figure is in (its symbol, its
+/// minor-unit count) and belongs to the payload; the locale says how a reader
+/// writes a number (grouping, separators, symbol placement) and belongs to the
+/// device — so it defaults to `utils/format_locale.dart`'s
+/// [activeFormatLocale] rather than being threaded through every call site.
+/// The same EUR figure is `€1,234.50` to an `en` reader and `1.234,50 €` to a
+/// `de` one. The [locale] argument overrides it, which is for tests and for a
+/// figure that must be pinned, not for call sites.
 
 /// What a money slot reads when there is no figure at all — distinct from a
 /// figure whose currency is unknown, which still renders its digits.
@@ -69,8 +81,10 @@ String formatMoney(
   if (amount == null) return placeholder;
   final code = normalizeCurrencyCode(currency);
   if (code == null) {
-    return NumberFormat.decimalPatternDigits(locale: locale, decimalDigits: 2)
-        .format(amount);
+    return NumberFormat.decimalPatternDigits(
+      locale: locale ?? activeFormatLocale,
+      decimalDigits: 2,
+    ).format(amount);
   }
   return _currencyFormat(code, locale).format(amount);
 }
@@ -85,9 +99,14 @@ String formatMoneyCompact(
 }) {
   if (amount == null) return placeholder;
   final code = normalizeCurrencyCode(currency);
-  if (code == null) return NumberFormat.compact(locale: locale).format(amount);
-  return NumberFormat.compactSimpleCurrency(locale: locale, name: code)
-      .format(amount);
+  if (code == null) {
+    return NumberFormat.compact(locale: locale ?? activeFormatLocale)
+        .format(amount);
+  }
+  return NumberFormat.compactSimpleCurrency(
+    locale: locale ?? activeFormatLocale,
+    name: code,
+  ).format(amount);
 }
 
 /// Format an **exact decimal money string** — the shape the payment-queue,
@@ -125,7 +144,7 @@ String formatMoneyString(
 /// itself as the symbol (`XYZ1,234.56`), which still names what the figure is
 /// in.
 NumberFormat _currencyFormat(String code, String? locale) =>
-    NumberFormat.simpleCurrency(locale: locale, name: code);
+    NumberFormat.simpleCurrency(locale: locale ?? activeFormatLocale, name: code);
 
 /// A `double` carries 15 decimal significant digits losslessly. Past that a
 /// money string cannot be formatted without changing it.

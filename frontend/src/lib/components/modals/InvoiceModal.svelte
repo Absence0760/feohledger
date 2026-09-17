@@ -26,6 +26,8 @@
 		type FieldSuggestion,
 	} from '$lib/api/enrichment';
 	import { routeIntercompany } from '$lib/api/invoices';
+	import { listGlAccounts } from '$lib/api/glAccounts';
+	import { glAccountOptionLabel, type GlAccountOption } from '$lib/types/glAccount';
 	import { entityStore } from '$lib/stores/entity.svelte';
 
 	/**
@@ -221,17 +223,38 @@
 	let department = $state(invoice.department ?? '');
 	let project = $state(invoice.project ?? '');
 
-	interface GLAccountOption { code: string; name: string; }
-	let glAccounts = $state<GLAccountOption[]>([]);
+	let glAccounts = $state<GlAccountOption[]>([]);
 
 	$effect(() => {
 		loadGLAccounts();
+		// The entity names behind each option's `entity_id`, for the scope
+		// suffix `glAccountOptionLabel` appends in the consolidated view.
+		entityStore.ensureLoaded();
 	});
 
 	async function loadGLAccounts() {
 		try {
-			glAccounts = await api.get<GLAccountOption[]>('/api/gl-accounts');
+			glAccounts = await listGlAccounts();
 		} catch { /* non-critical */ }
+	}
+
+	/**
+	 * One option's label. The bound VALUE stays `acct.code` at both GL sites
+	 * below, and must: `Invoice.gl_account` / `InvoiceLineItem.gl_account` are
+	 * `String(100)` columns holding the code, not FKs — unlike
+	 * `Expense.gl_account_id` and the two procurement `gl_account_id` columns,
+	 * which is why the expense / requisition / catalog pickers bind `g.id` and
+	 * these two do not. Budget matching, the report builder, the PO-match
+	 * commodity resolver, approval routing, the 1099 box map and the vendor GL
+	 * priors all read that string as the code (`types/glAccount.ts` has the
+	 * list). What the code cannot say on its own is WHICH subsidiary's `6000`
+	 * it is when the consolidated view offers several — so the label says it.
+	 */
+	function glLabel(acct: GlAccountOption, withName: boolean): string {
+		return glAccountOptionLabel(acct, entityStore, {
+			withName,
+			unknownEntity: m('glAccounts.scope.unknownEntity')
+		});
 	}
 
 	/* ---------------------------------------------------------------------
@@ -1811,8 +1834,10 @@
 									{#if gl_account && !glAccounts.some((a) => a.code === gl_account)}
 										<option value={gl_account}>{gl_account}</option>
 									{/if}
-									{#each glAccounts as acct}
-										<option value={acct.code}>{acct.code} — {acct.name}</option>
+									<!-- Keyed by `id`, not `code`: two subsidiaries may each
+									     hold their own `6000` in the consolidated view. -->
+									{#each glAccounts as acct (acct.id)}
+										<option value={acct.code}>{glLabel(acct, true)}</option>
 									{/each}
 								</select>
 							{:else}
@@ -1917,8 +1942,8 @@
 											{#if glAccounts.length > 0}
 												<select class="li-input li-gl" aria-label={m('invoices.modal.lineItems.glAria', { n: idx + 1 })} value={li.gl_account ?? ''} onchange={(e) => updateLineItem(idx, 'gl_account', e.currentTarget.value)}>
 													<option value="">—</option>
-													{#each glAccounts as acct}
-														<option value={acct.code}>{acct.code}</option>
+													{#each glAccounts as acct (acct.id)}
+														<option value={acct.code}>{glLabel(acct, false)}</option>
 													{/each}
 												</select>
 											{:else}

@@ -80,7 +80,7 @@ def _to_response(b: Budget) -> BudgetResponse:
         period=b.period,
         period_start=b.period_start.isoformat() if b.period_start else None,
         period_end=b.period_end.isoformat() if b.period_end else None,
-        amount=float(b.amount),
+        amount=b.amount,
         currency=b.currency,
         notes=b.notes,
         created_at=b.created_at.isoformat() if b.created_at else "",
@@ -357,12 +357,12 @@ async def check_budget(
     remaining_after = spend.remaining - amount
     return BudgetCheckResponse(
         budget_id=str(budget.id),
-        amount=float(amount),
-        allocated=float(spend.allocated),
-        committed=float(spend.committed),
-        actual=float(spend.actual),
-        remaining=float(spend.remaining),
-        remaining_after=float(remaining_after),
+        amount=amount,
+        allocated=spend.allocated,
+        committed=spend.committed,
+        actual=spend.actual,
+        remaining=spend.remaining,
+        remaining_after=remaining_after,
         would_overspend=remaining_after < 0,
         currency=spend.currency,
     )
@@ -391,7 +391,8 @@ async def get_budget_spend(
     """Computed allocated vs committed vs actual vs remaining for this budget.
 
     Read-only display rollup: the SUMs run in Postgres over ``Numeric`` columns
-    (exact); the response serialises money as ``float``."""
+    (exact) and stay ``Decimal`` through the response model, which converts to a
+    JSON number only at JSON-write time."""
     budget = await _get_budget_or_404(db, budget_id)
     spend = await compute_budget_spend(db, budget)
     return BudgetSpendResponse(
@@ -400,10 +401,10 @@ async def get_budget_spend(
         dimension=str(budget.dimension),
         dimension_value=budget.dimension_value,
         currency=spend.currency,
-        allocated=float(spend.allocated),
-        committed=float(spend.committed),
-        actual=float(spend.actual),
-        remaining=float(spend.remaining),
+        allocated=spend.allocated,
+        committed=spend.committed,
+        actual=spend.actual,
+        remaining=spend.remaining,
         utilization_pct=float(spend.utilization_pct),
         excluded_row_count=spend.excluded_row_count,
     )

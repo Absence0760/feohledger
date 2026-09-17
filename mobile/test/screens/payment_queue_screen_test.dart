@@ -90,6 +90,7 @@ Map<String, dynamic> _runResponse({
   String id = 'run1',
   String status = 'draft',
   double totalAmount = 5000.0,
+  String? currency = 'USD',
   int paymentCount = 2,
   bool requiresCfoApproval = false,
   String? cfoApprovedAt,
@@ -101,6 +102,9 @@ Map<String, dynamic> _runResponse({
       // backend never floats money across the boundary, and a numeric fixture
       // here renders `5000.0` where production renders `5000.00`.
       'total_amount': totalAmount.toStringAsFixed(2),
+      // `_one_currency` over the run's legs. `null` is the server saying it
+      // could not PROVE one, not that it omitted the field.
+      'currency': currency,
       'initiated_by': 'u1',
       'executed_at': null,
       'created_at': '2026-01-10T12:00:00',
@@ -441,18 +445,17 @@ void main() {
       // Money-path authorization: confirm-then-act, and the dialog names the
       // run (created date + payment count) and its total.
       //
-      // The total wears NO currency symbol, deliberately. It used to read
-      // `\$5,000.00` from a module-level dollar formatter, but
-      // `payment_runs.total_amount` is a plain `SUM(Payment.amount)` over
-      // payments denominated in their own invoices' currencies — so a run
-      // spanning a USD and a EUR invoice held a figure in neither, and the
-      // `\$` was an assertion nothing supported on the one dialog that
-      // authorizes execution. See `docs/decisions.md` §160.
+      // The total wears the run's OWN currency, the one `_one_currency`
+      // derived from its legs and the response names. It used to read
+      // `\$5,000.00` from a module-level dollar formatter — a `\$` nothing
+      // supported on the one dialog that authorizes execution — and then
+      // nothing at all, because the model dropped the field. Both are wrong
+      // for a run the server can denominate. See `docs/decisions.md` §160.
       expect(find.text('Approve payment run?'), findsOneWidget);
       expect(
         find.text(
           'Sign off the run created Jan 10, 2026 — 2 payments totalling '
-          '5000.00. This authorizes execution; it moves no money.',
+          '\$5,000.00. This authorizes execution; it moves no money.',
         ),
         findsOneWidget,
       );
@@ -749,14 +752,14 @@ void main() {
     //   * the KPI bar is in the org's REPORTING currency, named by
     //     `/payments/summary` itself;
     //   * a queue row is in its own INVOICE's currency;
-    //   * a run total is in NO single currency — `SUM(Payment.amount)` over
-    //     payments denominated in their own invoices' currencies.
+    //   * a run total is in the ONE currency its legs agree on, which
+    //     `_one_currency` derives and the run response names.
     await loginThen(
       ['cfo'],
       _screenClient(
         summaryCurrency: 'ZAR',
         queue: [_queueItem('1', amount: 100, currency: 'EUR')],
-        runs: [_runResponse(totalAmount: 5000)],
+        runs: [_runResponse(totalAmount: 5000, currency: 'GBP')],
       ),
     );
 
@@ -768,11 +771,44 @@ void main() {
     expect(find.text('R200.00'), findsOneWidget);
     // …the row's own currency on the row…
     expect(find.text('€100.00'), findsOneWidget);
-    // …and no symbol at all on the run total.
+    // …and the run's own on the run total.
     await tester.tap(find.widgetWithText(Tab, 'Runs'));
     await tester.pumpAndSettle();
-    expect(find.text('5000.00'), findsWidgets);
+    expect(find.text('£5,000.00'), findsWidgets);
 
     expect(find.textContaining(r'$'), findsNothing);
+  });
+
+  testWidgets('a run whose currency the server could not prove renders bare, '
+      'including on the execute confirmation', (tester) async {
+    // `_one_currency` returns `null` for a run with no payments, one whose
+    // invoices carry no currency, and a legacy run whose legs disagree. That
+    // total is denominated in nothing real, so the digits stand alone — a
+    // substituted symbol would be a wrong number that looks right
+    // (`docs/decisions.md` §79/§82, §160).
+    await loginThen(
+      ['admin'],
+      _screenClient(
+        queue: [],
+        runs: [_runResponse(totalAmount: 5000, currency: null)],
+      ),
+    );
+
+    await tester.pumpWidget(_localized(const PaymentQueueScreen()));
+    await _pumpUntil(tester, find.text('Runs'));
+    await tester.tap(find.text('Runs'));
+    await tester.pumpAndSettle();
+
+    // `find.text` is an exact match, so a `$5,000.00` would not satisfy it.
+    expect(find.text('5000.00'), findsWidgets);
+
+    await tester.tap(find.byType(PopupMenuButton<String>));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Execute'));
+    await tester.pumpAndSettle();
+    expect(
+      find.text('This sends 5000.00 via the configured payment processor.'),
+      findsOneWidget,
+    );
   });
 }

@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 
 from app.api.pagination import PageMeta
 from app.models.contract import ContractType
+from app.schemas.money import MoneyAmount, OptionalMoneyAmount
 
 # Bulk lifecycle actions a human may legitimately drive over a hand-picked
 # set of contracts — the same three the single-row `POST /{contract_id}/
@@ -107,10 +108,10 @@ class ContractCreatePORequest(BaseModel):
 class ContractSpendSummary(BaseModel):
     """Spend rolled up against the contract from its linked invoices."""
 
-    invoiced_total: float
+    invoiced_total: MoneyAmount
     invoice_count: int
-    spend_limit: float | None
-    remaining: float | None
+    spend_limit: OptionalMoneyAmount
+    remaining: OptionalMoneyAmount
     over_limit: bool
 
 
@@ -124,8 +125,8 @@ class ContractResponse(BaseModel):
     vendor_id: str
     vendor_name: str | None
     currency: str
-    total_value: float | None
-    spend_limit: float | None
+    total_value: OptionalMoneyAmount
+    spend_limit: OptionalMoneyAmount
     not_to_exceed: bool
     start_date: str | None
     end_date: str | None

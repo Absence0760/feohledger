@@ -323,6 +323,7 @@ See [`access-reviews.md`](access-reviews.md).
 |--------|-------------------------------|-------|-------------|
 | `GET`  | `/api/gl-accounts`            | * | List Chart of Accounts (filterable, `active_only=true` default) |
 | `POST` | `/api/gl-accounts`            | admin/manager | Create a GL account |
+| `PATCH`| `/api/gl-accounts/{id}`       | admin/manager | Correct (`name` / `account_type` / `parent_code`) or retire (`is_active`) an account. `code` + `entity_id` are immutable; there is no DELETE — see `api-surface.md` |
 | `POST` | `/api/gl-accounts/sync-erp`   | admin/manager | Pull Chart of Accounts from ERP |
 
 ## Payments

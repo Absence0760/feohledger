@@ -91,6 +91,29 @@ export const messages = {
 	'common.loadFailed': 'Impossible de charger cette liste. Actualisez pour réessayer.',
 	'common.amountInvalid': 'Saisissez le montant sous forme de nombre simple, p. ex. 1200 ou 1200.50',
 
+	// Cookie / consent banner (lib/components/ConsentBanner.svelte) — see en.ts.
+
+	'consent.ariaLabel': 'Consentement aux cookies et à la confidentialité',
+	'consent.title': 'Vos choix de confidentialité',
+	'consent.bodyNecessary':
+		'Nous utilisons un stockage strictement nécessaire au fonctionnement de l’application — vous connecter et maintenir votre session — qui fonctionne quel que soit votre choix ici.',
+	'consent.bodyNoAnalytics':
+		'Nous ne chargeons aujourd’hui aucun stockage de mesure d’audience ni de suivi.',
+	'consent.bodyRecorded':
+		'Votre choix est enregistré dès maintenant et s’appliquera à tout stockage facultatif que nous introduirions plus tard.',
+	'consent.bodyNotice': 'Tous les détails figurent dans l’{cookieNotice}.',
+	'consent.cookieNotice': 'Avis relatif aux cookies',
+	'consent.manage': 'Gérer',
+	'consent.hideDetails': 'Masquer les détails',
+	'consent.necessaryTerm': 'Strictement nécessaires (toujours actifs)',
+	'consent.necessaryDesc':
+		'Jeton d’authentification et état de session. Nécessaires pour se connecter et utiliser l’application ; ils ne peuvent pas être désactivés.',
+	'consent.analyticsTerm': 'Mesure d’audience (facultative)',
+	'consent.analyticsDesc':
+		'Rien n’est chargé dans cette catégorie aujourd’hui. Si une mesure d’audience produit est ajoutée, elle restera désactivée sauf si vous l’avez acceptée, et l’avis relatif aux cookies sera mis à jour avant que quoi que ce soit ne soit déposé.',
+	'consent.reject': 'Refuser les non essentiels',
+	'consent.accept': 'Tout accepter',
+
 	// Profile → Language picker
 	'profile.language.heading': 'Langue',
 	'profile.language.hint':
@@ -213,6 +236,13 @@ export const messages = {
 	'common.search': 'Rechercher',
 	'common.clear': 'Effacer',
 	'common.apply': 'Appliquer',
+
+	// Bulk selection, shared by every list that offers it — see en.ts.
+
+	'common.bulkActions': 'Actions groupées',
+	'common.nSelected': '{n, plural, one {# sélectionné} other {# sélectionnés}}',
+	'common.selectAllMatching': 'Sélectionner les {total} éléments correspondants',
+	'common.allMatchingSelected': 'Tous les éléments correspondants sélectionnés',
 	'common.contrastWarning':
 		"Le texte blanc sur cette couleur n'atteint que {ratio}. WCAG AA exige 4,5:1 : les boutons et puces qui l'utilisent seront difficiles à lire.",
 
@@ -434,8 +464,6 @@ export const messages = {
 	'payments.queue.loadMore': 'Charger plus ({shown} sur {total})',
 	'payments.queue.showingAll':
 		'{total, plural, one {Affichage de la # facture} other {Affichage des # factures}}',
-	'payments.queue.selectAllMatching': 'Tout sélectionner ({total} correspondantes)',
-	'payments.queue.allMatchingSelected': 'Toutes les correspondances sélectionnées',
 	'payments.queue.selectedAllMatching':
 		'{n, plural, one {# facture correspondante sélectionnée} other {# factures correspondantes sélectionnées}}',
 	'payments.queue.selectAllTruncated':
@@ -917,6 +945,11 @@ export const messages = {
 	'exceptions.filter.allTypes': 'Tous les types',
 	'exceptions.col.type': 'Type',
 	'exceptions.col.severity': 'Grav.',
+
+	// Exception-severity labels — see en.ts.
+	'exceptions.severity.error': 'Erreur',
+	'exceptions.severity.warning': 'Avertissement',
+	'exceptions.severity.info': 'Info',
 	'exceptions.col.invoice': 'Facture',
 	'exceptions.col.vendor': 'Fournisseur',
 	'exceptions.col.amount': 'Montant',

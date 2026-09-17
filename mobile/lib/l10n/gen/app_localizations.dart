@@ -3709,6 +3709,391 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Not enough history for this supplier yet.'**
   String get adaptiveAnomaliesInsufficient;
+
+  /// No description provided for @invoiceWarningMissingVendorName.
+  ///
+  /// In en, this message translates to:
+  /// **'Missing vendor name'**
+  String get invoiceWarningMissingVendorName;
+
+  /// No description provided for @invoiceWarningMissingInvoiceNumber.
+  ///
+  /// In en, this message translates to:
+  /// **'Missing invoice number'**
+  String get invoiceWarningMissingInvoiceNumber;
+
+  /// No description provided for @invoiceWarningMissingAmount.
+  ///
+  /// In en, this message translates to:
+  /// **'Missing or zero amount'**
+  String get invoiceWarningMissingAmount;
+
+  /// No description provided for @invoiceWarningDuplicateInvoiceNumber.
+  ///
+  /// In en, this message translates to:
+  /// **'Duplicate invoice number for this vendor'**
+  String get invoiceWarningDuplicateInvoiceNumber;
+
+  /// No description provided for @invoiceWarningDuplicateSimilar.
+  ///
+  /// In en, this message translates to:
+  /// **'Potential duplicate: {similarity} match to {invoiceNumber} from {vendorName}{crossEntityCount, plural, =0 {} one { (plus {crossEntityCount} near-identical invoice under another entity)} other { (plus {crossEntityCount} near-identical invoices under another entity)}}'**
+  String invoiceWarningDuplicateSimilar(
+    String similarity,
+    String invoiceNumber,
+    String vendorName,
+    int crossEntityCount,
+  );
+
+  /// No description provided for @invoiceWarningDuplicateSimilarUnnamedVendor.
+  ///
+  /// In en, this message translates to:
+  /// **'Potential duplicate: {similarity} match to {invoiceNumber}{crossEntityCount, plural, =0 {} one { (plus {crossEntityCount} near-identical invoice under another entity)} other { (plus {crossEntityCount} near-identical invoices under another entity)}}'**
+  String invoiceWarningDuplicateSimilarUnnamedVendor(
+    String similarity,
+    String invoiceNumber,
+    int crossEntityCount,
+  );
+
+  /// No description provided for @invoiceWarningDuplicateSimilarUnnumbered.
+  ///
+  /// In en, this message translates to:
+  /// **'Potential duplicate: {similarity} match to another invoice from {vendorName}{crossEntityCount, plural, =0 {} one { (plus {crossEntityCount} near-identical invoice under another entity)} other { (plus {crossEntityCount} near-identical invoices under another entity)}}'**
+  String invoiceWarningDuplicateSimilarUnnumbered(
+    String similarity,
+    String vendorName,
+    int crossEntityCount,
+  );
+
+  /// No description provided for @invoiceWarningDuplicateSimilarUnnumberedUnnamedVendor.
+  ///
+  /// In en, this message translates to:
+  /// **'Potential duplicate: {similarity} match to another invoice{crossEntityCount, plural, =0 {} one { (plus {crossEntityCount} near-identical invoice under another entity)} other { (plus {crossEntityCount} near-identical invoices under another entity)}}'**
+  String invoiceWarningDuplicateSimilarUnnumberedUnnamedVendor(
+    String similarity,
+    int crossEntityCount,
+  );
+
+  /// No description provided for @invoiceWarningDuplicateSimilarCrossEntity.
+  ///
+  /// In en, this message translates to:
+  /// **'Potential duplicate: {similarity} match to a near-identical invoice under another entity'**
+  String invoiceWarningDuplicateSimilarCrossEntity(String similarity);
+
+  /// No description provided for @invoiceWarningRoundAmount.
+  ///
+  /// In en, this message translates to:
+  /// **'Round amount: {amount}'**
+  String invoiceWarningRoundAmount(String amount);
+
+  /// No description provided for @invoiceWarningFutureInvoiceDate.
+  ///
+  /// In en, this message translates to:
+  /// **'Invoice date is in the future'**
+  String get invoiceWarningFutureInvoiceDate;
+
+  /// No description provided for @invoiceWarningRushPayment.
+  ///
+  /// In en, this message translates to:
+  /// **'Rush payment: due within {days, plural, one {{days} day} other {{days} days}} of the invoice date'**
+  String invoiceWarningRushPayment(int days);
+
+  /// No description provided for @invoiceWarningPastDue.
+  ///
+  /// In en, this message translates to:
+  /// **'Invoice is past due'**
+  String get invoiceWarningPastDue;
+
+  /// No description provided for @invoiceWarningUnverifiedVendor.
+  ///
+  /// In en, this message translates to:
+  /// **'Vendor is unverified'**
+  String get invoiceWarningUnverifiedVendor;
+
+  /// No description provided for @invoiceWarningPersonalEmailDomain.
+  ///
+  /// In en, this message translates to:
+  /// **'Vendor email uses personal domain: {domain}'**
+  String invoiceWarningPersonalEmailDomain(String domain);
+
+  /// No description provided for @invoiceWarningNewVendorLargeAmount.
+  ///
+  /// In en, this message translates to:
+  /// **'New vendor (created {days, plural, one {{days} day} other {{days} days}} ago) submitting large invoice {amount}'**
+  String invoiceWarningNewVendorLargeAmount(int days, String amount);
+
+  /// No description provided for @invoiceWarningRemitToChanged.
+  ///
+  /// In en, this message translates to:
+  /// **'Remit-to address changed since the last approved invoice for this vendor'**
+  String get invoiceWarningRemitToChanged;
+
+  /// No description provided for @invoiceWarningAmountAboveVendorMean.
+  ///
+  /// In en, this message translates to:
+  /// **'Amount {amount} is {sigma}σ above this vendor\'s historical mean ({mean})'**
+  String invoiceWarningAmountAboveVendorMean(
+    String amount,
+    String sigma,
+    String mean,
+  );
+
+  /// No description provided for @invoiceWarningLlmAnomaly.
+  ///
+  /// In en, this message translates to:
+  /// **'AI-flagged anomaly: {reason}'**
+  String invoiceWarningLlmAnomaly(String reason);
+
+  /// No description provided for @invoiceWarningLineTotalMismatch.
+  ///
+  /// In en, this message translates to:
+  /// **'Line items total {lineItemsTotal} but the invoice amount is {headerAmount}'**
+  String invoiceWarningLineTotalMismatch(
+    String lineItemsTotal,
+    String headerAmount,
+  );
+
+  /// No description provided for @invoiceWarningPriceVarianceOver.
+  ///
+  /// In en, this message translates to:
+  /// **'Unit price {deltaPct} over this vendor\'s baseline for {item} ({unitPrice} vs {baselineUnitPrice})'**
+  String invoiceWarningPriceVarianceOver(
+    String deltaPct,
+    String item,
+    String unitPrice,
+    String baselineUnitPrice,
+  );
+
+  /// No description provided for @invoiceWarningPriceVarianceUnder.
+  ///
+  /// In en, this message translates to:
+  /// **'Unit price {deltaPct} under this vendor\'s baseline for {item} ({unitPrice} vs {baselineUnitPrice})'**
+  String invoiceWarningPriceVarianceUnder(
+    String deltaPct,
+    String item,
+    String unitPrice,
+    String baselineUnitPrice,
+  );
+
+  /// No description provided for @invoiceWarningPoNotFound.
+  ///
+  /// In en, this message translates to:
+  /// **'PO {poNumber} not found'**
+  String invoiceWarningPoNotFound(String poNumber);
+
+  /// No description provided for @invoiceWarningPoAmountVariance.
+  ///
+  /// In en, this message translates to:
+  /// **'Amount variance {variancePct} vs PO {poNumber} (invoice {invoiceAmount} vs PO {poTotal})'**
+  String invoiceWarningPoAmountVariance(
+    String variancePct,
+    String poNumber,
+    String invoiceAmount,
+    String poTotal,
+  );
+
+  /// No description provided for @invoiceWarningPoPartialReceipt.
+  ///
+  /// In en, this message translates to:
+  /// **'Partial 3-way match — {matchType} match against PO {poNumber}, but only part of the ordered quantity has been received'**
+  String invoiceWarningPoPartialReceipt(String matchType, String poNumber);
+
+  /// No description provided for @invoiceWarningPoOverReceipt.
+  ///
+  /// In en, this message translates to:
+  /// **'Over-receipt: {receivedQuantity} received against {orderedQuantity} ordered (+{excessQuantity}) on PO {poNumber}'**
+  String invoiceWarningPoOverReceipt(
+    String receivedQuantity,
+    String orderedQuantity,
+    String excessQuantity,
+    String poNumber,
+  );
+
+  /// No description provided for @invoiceWarningPoOverReceiptUnquantified.
+  ///
+  /// In en, this message translates to:
+  /// **'More goods received than ordered on PO {poNumber}'**
+  String invoiceWarningPoOverReceiptUnquantified(String poNumber);
+
+  /// No description provided for @invoiceWarningQualityInspectionFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Failed quality inspection for PO {poNumber}'**
+  String invoiceWarningQualityInspectionFailed(String poNumber);
+
+  /// No description provided for @invoiceWarningQualityInspectionFailedNotes.
+  ///
+  /// In en, this message translates to:
+  /// **'Failed quality inspection for PO {poNumber}: {notes}'**
+  String invoiceWarningQualityInspectionFailedNotes(
+    String poNumber,
+    String notes,
+  );
+
+  /// No description provided for @invoiceWarningQualityInspectionMissing.
+  ///
+  /// In en, this message translates to:
+  /// **'Quality inspection required but missing for PO {poNumber}'**
+  String invoiceWarningQualityInspectionMissing(String poNumber);
+
+  /// No description provided for @invoiceWarningQualityPartialAcceptance.
+  ///
+  /// In en, this message translates to:
+  /// **'Partial acceptance: {acceptedQuantity} of the ordered quantity accepted on PO {poNumber}'**
+  String invoiceWarningQualityPartialAcceptance(
+    String acceptedQuantity,
+    String poNumber,
+  );
+
+  /// No description provided for @invoiceWarningQualityPartialAcceptanceUnquantified.
+  ///
+  /// In en, this message translates to:
+  /// **'Partial quality acceptance on inspection for PO {poNumber}'**
+  String invoiceWarningQualityPartialAcceptanceUnquantified(String poNumber);
+
+  /// No description provided for @invoiceWarningRecurringVarianceOver.
+  ///
+  /// In en, this message translates to:
+  /// **'Amount {amount} is {deltaPct} over the recurring template “{templateName}” expected amount {expectedAmount}'**
+  String invoiceWarningRecurringVarianceOver(
+    String amount,
+    String deltaPct,
+    String templateName,
+    String expectedAmount,
+  );
+
+  /// No description provided for @invoiceWarningRecurringVarianceUnder.
+  ///
+  /// In en, this message translates to:
+  /// **'Amount {amount} is {deltaPct} under the recurring template “{templateName}” expected amount {expectedAmount}'**
+  String invoiceWarningRecurringVarianceUnder(
+    String amount,
+    String deltaPct,
+    String templateName,
+    String expectedAmount,
+  );
+
+  /// No description provided for @invoiceWarningContractExpired.
+  ///
+  /// In en, this message translates to:
+  /// **'Invoice dated {invoiceDate} is after contract {contractNumber} expired ({endDate})'**
+  String invoiceWarningContractExpired(
+    String invoiceDate,
+    String contractNumber,
+    String endDate,
+  );
+
+  /// No description provided for @invoiceWarningContractNotStarted.
+  ///
+  /// In en, this message translates to:
+  /// **'Invoice dated {invoiceDate} predates contract {contractNumber} start ({startDate})'**
+  String invoiceWarningContractNotStarted(
+    String invoiceDate,
+    String contractNumber,
+    String startDate,
+  );
+
+  /// No description provided for @invoiceWarningContractTerminated.
+  ///
+  /// In en, this message translates to:
+  /// **'Spend recorded against terminated contract {contractNumber}'**
+  String invoiceWarningContractTerminated(String contractNumber);
+
+  /// No description provided for @invoiceWarningContractCancelled.
+  ///
+  /// In en, this message translates to:
+  /// **'Spend recorded against cancelled contract {contractNumber}'**
+  String invoiceWarningContractCancelled(String contractNumber);
+
+  /// No description provided for @invoiceWarningContractVendorMismatch.
+  ///
+  /// In en, this message translates to:
+  /// **'Invoice vendor does not match contract {contractNumber} vendor'**
+  String invoiceWarningContractVendorMismatch(String contractNumber);
+
+  /// No description provided for @invoiceWarningContractSpendLimitExceeded.
+  ///
+  /// In en, this message translates to:
+  /// **'Cumulative spend {cumulativeSpend} exceeds contract {contractNumber} limit {spendLimit}'**
+  String invoiceWarningContractSpendLimitExceeded(
+    String cumulativeSpend,
+    String contractNumber,
+    String spendLimit,
+  );
+
+  /// No description provided for @invoiceWarningContractSpendLimitExceededNotToExceed.
+  ///
+  /// In en, this message translates to:
+  /// **'Cumulative spend {cumulativeSpend} exceeds contract {contractNumber} limit {spendLimit} (not-to-exceed)'**
+  String invoiceWarningContractSpendLimitExceededNotToExceed(
+    String cumulativeSpend,
+    String contractNumber,
+    String spendLimit,
+  );
+
+  /// No description provided for @invoiceWarningContractGlNotAllowed.
+  ///
+  /// In en, this message translates to:
+  /// **'GL account {glAccount} is outside contract {contractNumber} allowed accounts'**
+  String invoiceWarningContractGlNotAllowed(
+    String glAccount,
+    String contractNumber,
+  );
+
+  /// No description provided for @invoiceWarningSelfCorrectionTotalReconciliation.
+  ///
+  /// In en, this message translates to:
+  /// **'Amounts don\'t add up: subtotal ({subtotal}) + tax ({tax}) + shipping ({shipping}) − discount ({discount}) = {expected}, but total is {amount}.'**
+  String invoiceWarningSelfCorrectionTotalReconciliation(
+    String subtotal,
+    String tax,
+    String shipping,
+    String discount,
+    String expected,
+    String amount,
+  );
+
+  /// No description provided for @invoiceWarningSelfCorrectionDateOrdering.
+  ///
+  /// In en, this message translates to:
+  /// **'Due date ({dueDate}) is before invoice date ({invoiceDate}).'**
+  String invoiceWarningSelfCorrectionDateOrdering(
+    String dueDate,
+    String invoiceDate,
+  );
+
+  /// No description provided for @invoiceWarningSelfCorrectionLineItemsSum.
+  ///
+  /// In en, this message translates to:
+  /// **'Line items total ({lineItemsTotal}) doesn\'t match invoice amount ({amount}).'**
+  String invoiceWarningSelfCorrectionLineItemsSum(
+    String lineItemsTotal,
+    String amount,
+  );
+
+  /// No description provided for @invoiceWarningSelfCorrectionLineItemMath.
+  ///
+  /// In en, this message translates to:
+  /// **'Line {lineNumber}: {quantity} × {unitPrice} = {expected}, but total is {total}.'**
+  String invoiceWarningSelfCorrectionLineItemMath(
+    String lineNumber,
+    String quantity,
+    String unitPrice,
+    String expected,
+    String total,
+  );
+
+  /// No description provided for @invoiceWarningGlCodesNotInChart.
+  ///
+  /// In en, this message translates to:
+  /// **'AI suggested GL code(s) not in active chart: {codes}'**
+  String invoiceWarningGlCodesNotInChart(String codes);
+
+  /// No description provided for @invoiceWarningGlCodeStalePrior.
+  ///
+  /// In en, this message translates to:
+  /// **'Cached vendor GL code “{code}” is no longer in the active chart of accounts.'**
+  String invoiceWarningGlCodeStalePrior(String code);
 }
 
 class _AppLocalizationsDelegate

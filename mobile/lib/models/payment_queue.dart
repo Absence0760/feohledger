@@ -177,19 +177,27 @@ class PaymentSummary {
 
 /// A batch from `GET /api/payments/runs/`.
 ///
-/// **[totalAmountDisplay] has no currency, and that is a property of the data,
-/// not an omission here.** `payment_runs.total_amount` is a plain
-/// `SUM(Payment.amount)` and each payment is denominated in its own invoice's
-/// currency, so a run spanning a USD and a EUR invoice holds a figure in no
-/// currency at all. It therefore renders bare. Naming the org's reporting
-/// currency over it would be the very mislabel this pass removed — the
-/// endpoint would have to roll the sum up the way `/payments/queue` already
-/// does (`rollup["currency"]` + `unconverted_count`) before there is a code to
-/// print. Tracked in `docs/followups.md`.
+/// **[totalAmountDisplay] is denominated in [currency], and the server is what
+/// proves it.** `payment_runs.total_amount` is a plain `SUM(Payment.amount)`
+/// with no currency column beside it — but `services/payment_runs` refuses to
+/// create a run spanning more than one currency, so the legs agree, and
+/// `api/payments.py::_one_currency` derives the code from them for the runs
+/// list and the run detail alike.
+///
+/// A `null` therefore means the code could not be PROVEN — a run with no
+/// payments, one whose invoices carry no currency, or a legacy run predating
+/// that guard whose legs disagree — never that the client did not ask. Such a
+/// total is denominated in nothing real, so it renders bare rather than
+/// wearing the org's reporting currency, which would dress a mixed sum up as a
+/// genuine figure (`docs/decisions.md` §79/§82, §160).
 class PaymentRun {
   final String id;
   final String status;
   final String totalAmountDisplay;
+
+  /// The ISO code [totalAmountDisplay] is in, or `null` when the server could
+  /// not prove one — see the class note. Not a licence to substitute a default.
+  final String? currency;
   final int paymentCount;
   final bool requiresCfoApproval;
   final bool cfoApproved;
@@ -200,6 +208,7 @@ class PaymentRun {
     required this.id,
     required this.status,
     required this.totalAmountDisplay,
+    this.currency,
     required this.paymentCount,
     required this.requiresCfoApproval,
     required this.cfoApproved,
@@ -217,6 +226,7 @@ class PaymentRun {
       id: json['id'] as String,
       status: json['status'] as String? ?? 'draft',
       totalAmountDisplay: moneyToDisplay(json['total_amount']),
+      currency: json['currency'] as String?,
       paymentCount: (json['payment_count'] as int?) ??
           (json['payment_count'] as num?)?.toInt() ??
           0,

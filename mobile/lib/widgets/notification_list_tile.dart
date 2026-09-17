@@ -1,9 +1,7 @@
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
 
 import 'package:feohledger_mobile/models/notification.dart';
-
-final _absoluteFormat = DateFormat('MMM d, yyyy');
+import 'package:feohledger_mobile/utils/dates.dart';
 
 /// One row in the notification center: event label, title, optional body and a
 /// short relative time. Unread rows carry a leading dot + bolder title.
@@ -26,7 +24,7 @@ class NotificationListTile extends StatelessWidget {
     if (delta.inMinutes < 60) return '${delta.inMinutes}m ago';
     if (delta.inHours < 24) return '${delta.inHours}h ago';
     if (delta.inDays < 7) return '${delta.inDays}d ago';
-    return _absoluteFormat.format(notification.createdAt.toLocal());
+    return formatDate(notification.createdAt.toLocal());
   }
 
   String get _semanticLabel {

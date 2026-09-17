@@ -18,6 +18,8 @@
 	import { m } from '$lib/i18n/store.svelte';
 	import { createRequisition, updateRequisition } from '$lib/api/requisitions';
 	import type { GlAccountOption } from '$lib/api/expenses';
+	import { glAccountOptionLabel } from '$lib/types/glAccount';
+	import { entityStore } from '$lib/stores/entity.svelte';
 
 	let {
 		requisition,
@@ -114,9 +116,22 @@
 		lines = lines.filter((_, i) => i !== idx);
 	}
 
+	/**
+	 * A line's GL account, by the uuid it stores
+	 * (`RequisitionLineItem.gl_account_id` is a real FK). Routed through the
+	 * shared label helper so the read-only view names the owning subsidiary on
+	 * a multi-entity tenant exactly as the editable `<select>` beside it does.
+	 */
 	function glLabel(id: string): string {
 		const g = glAccounts.find((a) => a.id === id);
-		return g ? `${g.code} — ${g.name}` : '—';
+		return g ? optionLabel(g, true) : '—';
+	}
+
+	function optionLabel(g: GlAccountOption, withName = false): string {
+		return glAccountOptionLabel(g, entityStore, {
+			withName,
+			unknownEntity: m('glAccounts.scope.unknownEntity')
+		});
 	}
 
 	function handleError(err: unknown, fallback: string) {
@@ -324,7 +339,7 @@
 										<select bind:value={l.gl_account_id} aria-label={m('requisitions.modal.line.glAria', { n: i + 1 })}>
 											<option value="">—</option>
 											{#each glAccounts as g (g.id)}
-												<option value={g.id}>{g.code}</option>
+												<option value={g.id}>{optionLabel(g)}</option>
 											{/each}
 										</select>
 									{:else}

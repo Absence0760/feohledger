@@ -76,6 +76,17 @@ const CASES: Case[] = [
 		apiPathname: '/api/gl-accounts',
 		notShown: /No accounts in this chart/,
 		shown: /Couldn.t load the chart of accounts/
+	},
+	{
+		// The dual-control bank-change queue. It is the highest-stakes list in
+		// the sweep: "Nothing is waiting for approval." is a claim that no
+		// supplier's payment details are pending a second signature, and an
+		// approver who believes it stops looking.
+		name: 'vendor change requests',
+		route: '/vendors/change-requests',
+		apiPathname: '/api/vendors/change-requests',
+		notShown: /Nothing is waiting for approval/,
+		shown: /Could not load the change-request queue/
 	}
 ];
 
@@ -105,3 +116,106 @@ for (const c of CASES) {
 		await expect(page.getByText(c.notShown)).toHaveCount(0);
 	});
 }
+
+/**
+ * The other half of the same bug: a load that fails AFTER a good one.
+ *
+ * The sweep above only exercises the first load, where an empty list and a
+ * cleared list look identical. The failure that actually ships is the second
+ * one — a chip click whose fetch 500s — because `errored` reaches the reader
+ * only through `DataTable`'s `empty` message, which renders on `isEmpty`
+ * alone. A route that sets `errored` without clearing its rows therefore shows
+ * the PREVIOUS filter's rows as the answer to a filter it never ran, with
+ * nothing but a toast that fades.
+ *
+ * `/vendors/change-requests` is the dual-control bank-change queue, so the
+ * stale rows are proposed changes to where a supplier's money goes, labelled
+ * with a status they do not have. That is why this one gets its own test
+ * rather than only a sweep row.
+ */
+test('vendor change requests: a failed RE-load clears the previous filter\'s rows', async ({
+	page
+}) => {
+	const PATHNAME = '/api/vendors/change-requests';
+	const STALE_VENDOR = 'Stale Queue Vendor';
+
+	// One good response, then failures.
+	//
+	// Deliberately NOT `satisfies VendorChangeRequestPage`, which is the house
+	// rule for a stub whose shape has a `$lib/types` counterpart: importing it
+	// pulls `$lib/types/vendor.ts` into the `tsconfig.e2e.json` program, and
+	// that module does `import type { BadgeTone } from '…/ui/Badge.svelte'`.
+	// Plain `tsc` resolves a `.svelte` path through the ambient `*.svelte`
+	// module shim, which declares no named exports, so `pnpm check:e2e` fails
+	// with TS2614 on a file this spec never edits. (Durable fix: `BadgeTone`
+	// belongs in a `.ts` module — 28 files import it, so that is its own change.)
+	//
+	// The omission is affordable HERE in a way it was not for the dashboard
+	// stub that motivated the rule. That one's missing field made an assertion
+	// pass vacuously; this one's assertions are `toHaveCount(1)` then
+	// `toHaveCount(0)`, so a payload the page can no longer render fails the
+	// first one loudly rather than quietly weakening the second.
+	const pendingPage = {
+		items: [
+			{
+				id: '00000000-0000-4000-8000-0000000000aa',
+				vendor_id: '00000000-0000-4000-8000-0000000000bb',
+				vendor_name: STALE_VENDOR,
+				change_type: 'bank_details',
+				status: 'pending',
+				proposed_value: { bank_account_last4: '4321' },
+				requested_by_vendor_user_id: null,
+				requested_by_user_id: null,
+				reviewed_by_user_id: null,
+				reviewed_at: null,
+				review_note: null,
+				created_at: new Date().toISOString()
+			}
+		],
+		total: 1,
+		page: 1,
+		page_size: 25
+	};
+
+	let served = 0;
+	await page.route(`**${PATHNAME}*`, async (route) => {
+		// Exact pathname only — `/counts` hangs off the same prefix and the
+		// page's chip tallies must keep loading normally.
+		if (new URL(route.request().url()).pathname !== PATHNAME) {
+			await route.continue();
+			return;
+		}
+		served += 1;
+		if (served === 1) {
+			await route.fulfill({
+				status: 200,
+				contentType: 'application/json',
+				body: JSON.stringify(pendingPage)
+			});
+			return;
+		}
+		await route.fulfill({
+			status: 500,
+			contentType: 'application/json',
+			body: JSON.stringify({ detail: 'boom' })
+		});
+	});
+
+	await page.goto('/vendors/change-requests');
+
+	// The good load landed — this is the row that must not survive the next one.
+	await expect(page.getByTestId('change-request-row')).toHaveCount(1);
+	await expect(page.getByText(STALE_VENDOR)).toBeVisible();
+
+	// A chip click re-queries the server, and that query fails.
+	// Non-exact: the chip's accessible name carries its tally once
+	// `/counts` lands ("Rejected 3").
+	await page.getByRole('button', { name: /^Rejected/ }).click();
+
+	await expect(page.getByText(/Could not load the change-request queue/)).toBeVisible();
+	await expect(page.getByTestId('change-request-row')).toHaveCount(0);
+	await expect(page.getByText(STALE_VENDOR)).toHaveCount(0);
+	// ...and the footer must not keep reporting the stale tally as this
+	// filter's answer either.
+	await expect(page.getByText(/Showing all 1/)).toHaveCount(0);
+});

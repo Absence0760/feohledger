@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
 
 import 'package:feohledger_mobile/models/invoice.dart';
+import 'package:feohledger_mobile/utils/dates.dart';
 import 'package:feohledger_mobile/utils/money.dart';
 import 'package:feohledger_mobile/widgets/status_badge.dart';
 
@@ -36,7 +36,7 @@ class InvoiceListTile extends StatelessWidget {
       invoice.status.label,
       if (invoice.dueDate != null)
         '${invoice.dueDate!.isBefore(DateTime.now()) ? 'past due' : 'due'} '
-            '${DateFormat('MMMM d').format(invoice.dueDate!)}',
+            '${formatLongDayMonth(invoice.dueDate!)}',
     ];
     return parts.join(', ');
   }
@@ -111,7 +111,7 @@ class InvoiceListTile extends StatelessWidget {
             const Spacer(),
             if (invoice.dueDate != null)
               Text(
-                DateFormat('MMM d').format(invoice.dueDate!),
+                formatDayMonth(invoice.dueDate!),
                 style: TextStyle(
                   // Darkened so the due-date label clears AA contrast at 12px
                   // against white (plain Colors.red / grey.shade500 fail).

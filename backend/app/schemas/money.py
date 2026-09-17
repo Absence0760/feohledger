@@ -55,6 +55,34 @@ OptionalMoneyAmount = Annotated[
 ]
 
 
+def json_money(value: Decimal | None) -> float | None:
+    """The ``Decimal`` → JSON-number hop for a HAND-BUILT response ``dict``.
+
+    ``MoneyAmount`` above is the same contract expressed as a pydantic
+    annotation, and it is the better of the two: a schema field keeps the
+    in-Python value a ``Decimal``, so anything that later reads the model gets
+    an exact number. Prefer it. This exists for the handlers that return a bare
+    ``dict`` rather than a response model, where there is no annotation to hang
+    a serializer on and the alternative is a bare ``float(...)`` sprinkled
+    through the router.
+
+    Why a named function rather than ``float(...)`` at each site: the project
+    invariant is that money is ``Decimal`` everywhere and the float hop happens
+    **once, at JSON-write time** (see this module's docstring). A bare
+    ``float(amount)`` in a router is indistinguishable — to a reader and to a
+    grep — from a float that is about to be summed, compared, or stored, which
+    is the shape the invariant actually forbids. Routing every boundary
+    conversion through one name makes the legitimate hop searchable and makes
+    any *other* ``float()`` on a money value a defect by construction.
+    ``tests/test_money_serialization_exact.py`` is the guard that enforces it.
+
+    Do NOT call this on a value that is still being computed with. It is the
+    last thing that happens to an amount before it is handed to the JSON
+    encoder, never an intermediate step.
+    """
+    return _decimal_to_json_number(value)
+
+
 # --------------------------------------------------------------------------- #
 # Inbound money — the request side
 # --------------------------------------------------------------------------- #

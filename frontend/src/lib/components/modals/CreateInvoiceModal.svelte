@@ -1,15 +1,13 @@
 <script lang="ts">
 	import type { Invoice } from '$lib/types/invoice';
 	import { api } from '$lib/api';
+	import { listGlAccounts } from '$lib/api/glAccounts';
+	import { glAccountOptionLabel, type GlAccountOption } from '$lib/types/glAccount';
 	import Modal from '$lib/components/ui/Modal.svelte';
 	import { toast } from '$lib/components/ui/Toast.svelte';
 	import { m } from '$lib/i18n/store.svelte';
+	import { entityStore } from '$lib/stores/entity.svelte';
 	import { orgCurrency } from '$lib/stores/orgSettings.svelte';
-
-	interface GLAccountOption {
-		code: string;
-		name: string;
-	}
 
 	let { onclose, onsaved }: { onclose: () => void; onsaved: (invoice: Invoice) => void } =
 		$props();
@@ -30,17 +28,20 @@
 	let cost_center = $state('');
 	let file = $state<File | null>(null);
 
-	let glAccounts = $state<GLAccountOption[]>([]);
+	let glAccounts = $state<GlAccountOption[]>([]);
 	let saving = $state(false);
 
 	$effect(() => {
 		(async () => {
 			try {
-				glAccounts = await api.get<GLAccountOption[]>('/api/gl-accounts');
+				glAccounts = await listGlAccounts();
 			} catch {
 				// GL catalog is a convenience dropdown — fall back to free text.
 			}
 		})();
+		// The entity names behind each option's `entity_id`, for the scope
+		// suffix `glAccountOptionLabel` appends in the consolidated view.
+		entityStore.ensureLoaded();
 	});
 
 	const canSubmit = $derived(vendor.trim() !== '' && invoice_number.trim() !== '' && !!amount && amount > 0);
@@ -156,8 +157,18 @@
 				{#if glAccounts.length > 0}
 					<select bind:value={gl_account}>
 						<option value="">{m('invoices.modal.field.glSelect')}</option>
-						{#each glAccounts as acct (acct.code)}
-							<option value={acct.code}>{acct.code} — {acct.name}</option>
+						<!-- Keyed by `id`, not `code`: the consolidated view returns
+						     every subsidiary's chart, and two of them may each hold
+						     their own `6000` — a `code` key would collide. The bound
+						     VALUE stays the code, which is what `Invoice.gl_account`
+						     (a String(100)) records; see `types/glAccount.ts`. -->
+						{#each glAccounts as acct (acct.id)}
+							<option value={acct.code}>
+								{glAccountOptionLabel(acct, entityStore, {
+									withName: true,
+									unknownEntity: m('glAccounts.scope.unknownEntity')
+								})}
+							</option>
 						{/each}
 					</select>
 				{:else}

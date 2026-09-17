@@ -1698,10 +1698,12 @@
 		{#snippet actions()}
 			{#if allSelected && !selectedAllMatching && expenseStore.total > expenseStore.all.length}
 				<button class="bulk-action-btn secondary" disabled={selectingAllMatching} onclick={selectAllMatching}>
-					{selectingAllMatching ? m('common.loading') : `Select all ${expenseStore.total} matching`}
+					{selectingAllMatching
+						? m('common.loading')
+						: m('common.selectAllMatching', { total: expenseStore.total })}
 				</button>
 			{:else if selectedAllMatching}
-				<span class="bulk-all-matching-note">All matching selected</span>
+				<span class="bulk-all-matching-note">{m('common.allMatchingSelected')}</span>
 			{/if}
 			<select class="bulk-gl-select" bind:value={bulkGl} aria-label={m('expenses.bulk.glAria')} disabled={bulkBusy}>
 				<option value="">{m('expenses.bulk.clearGl')}</option>
@@ -1826,6 +1828,10 @@
 <style>
 	.tab-row {
 		display: flex;
+		/* Wraps for the same reason as the shared `ui/Tabs.svelte` tab bar this
+		   is a local copy of — a nowrap row of tabs pushes the whole document
+		   sideways at 320px (WCAG 1.4.10). */
+		flex-wrap: wrap;
 		gap: 4px;
 		border-bottom: 1px solid var(--border);
 	}

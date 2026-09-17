@@ -733,10 +733,12 @@
 			{#snippet actions()}
 				{#if allSelected && !selectedAllMatching && total > vendors.length}
 					<button class="bulk-action-btn secondary" disabled={selectingAllMatching} onclick={selectAllMatching}>
-						{selectingAllMatching ? m('common.loading') : `Select all ${total} matching`}
+						{selectingAllMatching
+							? m('common.loading')
+							: m('common.selectAllMatching', { total })}
 					</button>
 				{:else if selectedAllMatching}
-					<span class="bulk-all-matching-note">All matching selected</span>
+					<span class="bulk-all-matching-note">{m('common.allMatchingSelected')}</span>
 				{/if}
 				<RowAction variant="success" disabled={bulkBusy} onclick={bulkVerify}>{m('vendors.row.verify')}</RowAction>
 				<RowAction variant="danger" disabled={bulkBusy} onclick={bulkReject}>{m('vendors.row.reject')}</RowAction>

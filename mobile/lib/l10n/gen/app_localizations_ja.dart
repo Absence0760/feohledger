@@ -2064,4 +2064,359 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get adaptiveAnomaliesInsufficient => 'この取引先の履歴はまだ十分ではありません。';
+
+  @override
+  String get invoiceWarningMissingVendorName => '仕入先名がありません';
+
+  @override
+  String get invoiceWarningMissingInvoiceNumber => '請求書番号がありません';
+
+  @override
+  String get invoiceWarningMissingAmount => '金額が未入力またはゼロです';
+
+  @override
+  String get invoiceWarningDuplicateInvoiceNumber => 'この仕入先で請求書番号が重複しています';
+
+  @override
+  String invoiceWarningDuplicateSimilar(
+    String similarity,
+    String invoiceNumber,
+    String vendorName,
+    int crossEntityCount,
+  ) {
+    String _temp0 = intl.Intl.pluralLogic(
+      crossEntityCount,
+      locale: localeName,
+      other: '（別エンティティにほぼ同一の請求書が$crossEntityCount件あります）',
+      zero: '',
+    );
+    return '重複の可能性: $invoiceNumber（$vendorName）と$similarity一致$_temp0';
+  }
+
+  @override
+  String invoiceWarningDuplicateSimilarUnnamedVendor(
+    String similarity,
+    String invoiceNumber,
+    int crossEntityCount,
+  ) {
+    String _temp0 = intl.Intl.pluralLogic(
+      crossEntityCount,
+      locale: localeName,
+      other: '（別エンティティにほぼ同一の請求書が$crossEntityCount件あります）',
+      zero: '',
+    );
+    return '重複の可能性: $invoiceNumberと$similarity一致$_temp0';
+  }
+
+  @override
+  String invoiceWarningDuplicateSimilarUnnumbered(
+    String similarity,
+    String vendorName,
+    int crossEntityCount,
+  ) {
+    String _temp0 = intl.Intl.pluralLogic(
+      crossEntityCount,
+      locale: localeName,
+      other: '（別エンティティにほぼ同一の請求書が$crossEntityCount件あります）',
+      zero: '',
+    );
+    return '重複の可能性: $vendorNameの別の請求書と$similarity一致$_temp0';
+  }
+
+  @override
+  String invoiceWarningDuplicateSimilarUnnumberedUnnamedVendor(
+    String similarity,
+    int crossEntityCount,
+  ) {
+    String _temp0 = intl.Intl.pluralLogic(
+      crossEntityCount,
+      locale: localeName,
+      other: '（別エンティティにほぼ同一の請求書が$crossEntityCount件あります）',
+      zero: '',
+    );
+    return '重複の可能性: 別の請求書と$similarity一致$_temp0';
+  }
+
+  @override
+  String invoiceWarningDuplicateSimilarCrossEntity(String similarity) {
+    return '重複の可能性: 別エンティティのほぼ同一の請求書と$similarity一致';
+  }
+
+  @override
+  String invoiceWarningRoundAmount(String amount) {
+    return '端数のない金額: $amount';
+  }
+
+  @override
+  String get invoiceWarningFutureInvoiceDate => '請求日が未来の日付です';
+
+  @override
+  String invoiceWarningRushPayment(int days) {
+    String _temp0 = intl.Intl.pluralLogic(
+      days,
+      locale: localeName,
+      other: '$days日',
+    );
+    return '至急支払い: 請求日から$_temp0以内に支払期限が到来します';
+  }
+
+  @override
+  String get invoiceWarningPastDue => '請求書が支払期限を過ぎています';
+
+  @override
+  String get invoiceWarningUnverifiedVendor => '仕入先が未検証です';
+
+  @override
+  String invoiceWarningPersonalEmailDomain(String domain) {
+    return '仕入先のメールアドレスが個人向けドメインです: $domain';
+  }
+
+  @override
+  String invoiceWarningNewVendorLargeAmount(int days, String amount) {
+    String _temp0 = intl.Intl.pluralLogic(
+      days,
+      locale: localeName,
+      other: '$days日',
+    );
+    return '新規仕入先（$_temp0前に登録）が高額請求 $amount を提出しています';
+  }
+
+  @override
+  String get invoiceWarningRemitToChanged => 'この仕入先の前回承認済み請求書から送金先住所が変更されています';
+
+  @override
+  String invoiceWarningAmountAboveVendorMean(
+    String amount,
+    String sigma,
+    String mean,
+  ) {
+    return '金額 $amount はこの仕入先の過去平均（$mean）を$sigmaσ上回っています';
+  }
+
+  @override
+  String invoiceWarningLlmAnomaly(String reason) {
+    return 'AI が検知した異常: $reason';
+  }
+
+  @override
+  String invoiceWarningLineTotalMismatch(
+    String lineItemsTotal,
+    String headerAmount,
+  ) {
+    return '明細合計は $lineItemsTotal ですが、請求金額は $headerAmount です';
+  }
+
+  @override
+  String invoiceWarningPriceVarianceOver(
+    String deltaPct,
+    String item,
+    String unitPrice,
+    String baselineUnitPrice,
+  ) {
+    return '単価が$itemにおけるこの仕入先の基準を$deltaPct上回っています（$unitPrice / 基準 $baselineUnitPrice）';
+  }
+
+  @override
+  String invoiceWarningPriceVarianceUnder(
+    String deltaPct,
+    String item,
+    String unitPrice,
+    String baselineUnitPrice,
+  ) {
+    return '単価が$itemにおけるこの仕入先の基準を$deltaPct下回っています（$unitPrice / 基準 $baselineUnitPrice）';
+  }
+
+  @override
+  String invoiceWarningPoNotFound(String poNumber) {
+    return '発注 $poNumber が見つかりません';
+  }
+
+  @override
+  String invoiceWarningPoAmountVariance(
+    String variancePct,
+    String poNumber,
+    String invoiceAmount,
+    String poTotal,
+  ) {
+    return '発注 $poNumber との金額差異 $variancePct（請求 $invoiceAmount / 発注 $poTotal）';
+  }
+
+  @override
+  String invoiceWarningPoPartialReceipt(String matchType, String poNumber) {
+    return '3 ウェイ照合が部分一致 — 発注 $poNumber に対する$matchType照合ですが、発注数量の一部のみ入荷しています';
+  }
+
+  @override
+  String invoiceWarningPoOverReceipt(
+    String receivedQuantity,
+    String orderedQuantity,
+    String excessQuantity,
+    String poNumber,
+  ) {
+    return '過剰入荷: 発注 $poNumber で発注 $orderedQuantity に対し $receivedQuantity 入荷（+$excessQuantity）';
+  }
+
+  @override
+  String invoiceWarningPoOverReceiptUnquantified(String poNumber) {
+    return '発注 $poNumber の発注数量を超える入荷があります';
+  }
+
+  @override
+  String invoiceWarningQualityInspectionFailed(String poNumber) {
+    return '発注 $poNumber の品質検査が不合格です';
+  }
+
+  @override
+  String invoiceWarningQualityInspectionFailedNotes(
+    String poNumber,
+    String notes,
+  ) {
+    return '発注 $poNumber の品質検査が不合格です: $notes';
+  }
+
+  @override
+  String invoiceWarningQualityInspectionMissing(String poNumber) {
+    return '発注 $poNumber に品質検査が必要ですが記録がありません';
+  }
+
+  @override
+  String invoiceWarningQualityPartialAcceptance(
+    String acceptedQuantity,
+    String poNumber,
+  ) {
+    return '一部受入: 発注 $poNumber で発注数量のうち $acceptedQuantity を受入';
+  }
+
+  @override
+  String invoiceWarningQualityPartialAcceptanceUnquantified(String poNumber) {
+    return '発注 $poNumber の検査で品質を一部受入しました';
+  }
+
+  @override
+  String invoiceWarningRecurringVarianceOver(
+    String amount,
+    String deltaPct,
+    String templateName,
+    String expectedAmount,
+  ) {
+    return '金額 $amount は定期テンプレート「$templateName」の予定金額 $expectedAmount を$deltaPct上回っています';
+  }
+
+  @override
+  String invoiceWarningRecurringVarianceUnder(
+    String amount,
+    String deltaPct,
+    String templateName,
+    String expectedAmount,
+  ) {
+    return '金額 $amount は定期テンプレート「$templateName」の予定金額 $expectedAmount を$deltaPct下回っています';
+  }
+
+  @override
+  String invoiceWarningContractExpired(
+    String invoiceDate,
+    String contractNumber,
+    String endDate,
+  ) {
+    return '請求日 $invoiceDate は契約 $contractNumber の満了日（$endDate）より後です';
+  }
+
+  @override
+  String invoiceWarningContractNotStarted(
+    String invoiceDate,
+    String contractNumber,
+    String startDate,
+  ) {
+    return '請求日 $invoiceDate は契約 $contractNumber の開始日（$startDate）より前です';
+  }
+
+  @override
+  String invoiceWarningContractTerminated(String contractNumber) {
+    return '解約済み契約 $contractNumber に対する支出が記録されています';
+  }
+
+  @override
+  String invoiceWarningContractCancelled(String contractNumber) {
+    return 'キャンセル済み契約 $contractNumber に対する支出が記録されています';
+  }
+
+  @override
+  String invoiceWarningContractVendorMismatch(String contractNumber) {
+    return '請求書の仕入先が契約 $contractNumber の仕入先と一致しません';
+  }
+
+  @override
+  String invoiceWarningContractSpendLimitExceeded(
+    String cumulativeSpend,
+    String contractNumber,
+    String spendLimit,
+  ) {
+    return '累計支出 $cumulativeSpend が契約 $contractNumber の上限 $spendLimit を超えています';
+  }
+
+  @override
+  String invoiceWarningContractSpendLimitExceededNotToExceed(
+    String cumulativeSpend,
+    String contractNumber,
+    String spendLimit,
+  ) {
+    return '累計支出 $cumulativeSpend が契約 $contractNumber の上限 $spendLimit を超えています（超過不可）';
+  }
+
+  @override
+  String invoiceWarningContractGlNotAllowed(
+    String glAccount,
+    String contractNumber,
+  ) {
+    return '勘定科目 $glAccount は契約 $contractNumber で許可された科目の範囲外です';
+  }
+
+  @override
+  String invoiceWarningSelfCorrectionTotalReconciliation(
+    String subtotal,
+    String tax,
+    String shipping,
+    String discount,
+    String expected,
+    String amount,
+  ) {
+    return '金額が一致しません: 小計（$subtotal）+ 税（$tax）+ 送料（$shipping）− 割引（$discount）= $expected ですが、合計は $amount です。';
+  }
+
+  @override
+  String invoiceWarningSelfCorrectionDateOrdering(
+    String dueDate,
+    String invoiceDate,
+  ) {
+    return '支払期限（$dueDate）が請求日（$invoiceDate）より前です。';
+  }
+
+  @override
+  String invoiceWarningSelfCorrectionLineItemsSum(
+    String lineItemsTotal,
+    String amount,
+  ) {
+    return '明細合計（$lineItemsTotal）が請求金額（$amount）と一致しません。';
+  }
+
+  @override
+  String invoiceWarningSelfCorrectionLineItemMath(
+    String lineNumber,
+    String quantity,
+    String unitPrice,
+    String expected,
+    String total,
+  ) {
+    return '明細 $lineNumber: $quantity × $unitPrice = $expected ですが、合計は $total です。';
+  }
+
+  @override
+  String invoiceWarningGlCodesNotInChart(String codes) {
+    return 'AI が提案した勘定科目が有効な勘定科目表にありません: $codes';
+  }
+
+  @override
+  String invoiceWarningGlCodeStalePrior(String code) {
+    return 'この仕入先のキャッシュされた勘定科目「$code」は有効な勘定科目表にありません。';
+  }
 }

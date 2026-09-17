@@ -1,11 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:intl/intl.dart';
 
 import 'package:feohledger_mobile/l10n/gen/app_localizations.dart';
 import 'package:feohledger_mobile/stores/invoice_store.dart';
-
-final _searchDateFormat = DateFormat('MMM d, yyyy');
+import 'package:feohledger_mobile/utils/dates.dart';
 
 /// Modal bottom-sheet form for the invoice advanced search — vendor, PO number,
 /// amount range and due-date range (parity with the web `AdvancedSearchModal`).
@@ -275,7 +273,7 @@ class _AdvancedSearchSheetState extends State<AdvancedSearchSheet> {
   }) {
     final l = AppLocalizations.of(context);
     final text =
-        value != null ? _searchDateFormat.format(value) : l.advSearchAny;
+        value != null ? formatDate(value) : l.advSearchAny;
     return Semantics(
       label: l.advSearchDateFieldHint(label, text),
       button: true,

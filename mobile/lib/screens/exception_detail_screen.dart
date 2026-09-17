@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
 
 import 'package:feohledger_mobile/api/endpoints.dart';
 import 'package:feohledger_mobile/l10n/gen/app_localizations.dart';
@@ -8,10 +7,9 @@ import 'package:feohledger_mobile/models/exception.dart';
 import 'package:feohledger_mobile/stores/auth_store.dart';
 import 'package:feohledger_mobile/stores/exception_store.dart';
 import 'package:feohledger_mobile/utils/a11y.dart';
+import 'package:feohledger_mobile/utils/dates.dart';
 import 'package:feohledger_mobile/utils/money.dart';
 import 'package:feohledger_mobile/widgets/exception_status_badge.dart';
-
-final _dateFormat = DateFormat('MMM d, yyyy · h:mm a');
 
 /// Single-exception detail — full fields, the linked invoice, SLA / due /
 /// overdue, the current assignee, and the three actions (resolve / escalate /
@@ -229,12 +227,12 @@ class _ExceptionDetailScreenState extends State<ExceptionDetailScreen> {
       title: l.exceptionDetailSectionSla,
       children: [
         _row(l.exceptionDetailFieldCreated,
-            _dateFormat.format(exc.createdAt.toLocal())),
+            formatDateTime(exc.createdAt.toLocal(), separator: ' · ')),
         _row(
           l.exceptionDetailFieldDue,
           due == null
               ? l.exceptionDetailNoSla
-              : _dateFormat.format(due.toLocal()),
+              : formatDateTime(due.toLocal(), separator: ' · '),
         ),
         if (exc.isOverdue)
           _row(l.exceptionDetailFieldStatus, l.exceptionDetailOverdue)
@@ -295,7 +293,7 @@ class _ExceptionDetailScreenState extends State<ExceptionDetailScreen> {
           _row(l.exceptionDetailResolutionBy, exc.resolvedBy!),
         if (exc.resolvedAt != null)
           _row(l.exceptionDetailResolutionAt,
-              _dateFormat.format(exc.resolvedAt!.toLocal())),
+              formatDateTime(exc.resolvedAt!.toLocal(), separator: ' · ')),
       ],
     );
   }

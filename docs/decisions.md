@@ -7589,3 +7589,76 @@ comparison in the product is still UTC, and a genuine business-date semantics
 would need a timezone for each counterparty. That is a product decision with a
 migration behind it, not a bug fix, and the safe direction — paying face value —
 is the one the current behaviour already errs toward.
+
+## 186. An invoice's GL account is a code, so the pickers label rather than re-key
+
+`docs/followups.md` carried an entry asking that `InvoiceModal`'s GL picker be
+moved onto the uuid `id` "like its three siblings", on the reasoning that the
+write would then be unambiguous when two subsidiaries each hold their own
+`6000`.
+
+**Implementing that would have corrupted data.** The three siblings bind `id`
+because their columns are real foreign keys — `Expense.gl_account_id`,
+`RequisitionLineItem.gl_account_id`, `CatalogItem.gl_account_id`, each
+`ForeignKey("gl_accounts.id")`. `Invoice.gl_account` and
+`InvoiceLineItem.gl_account` are `String(100)` holding the **code**, and eight
+services read them as one: `budget_service` matches `Invoice.gl_account ==
+dimension_value`, `matching_rules` keys commodity rules by the code,
+`tax_1099` globs box maps over it (`{"6010": …, "64*": …}`), `gl_recode`
+compares vendor priors, workflow `RoutingField` routes approvals on it,
+`report_builder` filters on it, `vendor_enrichment` autofills it, and the
+extraction prompt ships it as the GL catalog. `RecurringInvoiceTemplate`,
+`ContractLineItem` and the org-level `settings.invoice_defaults` share the
+shape. Binding `id` would have written UUIDs into all of it, and nothing would
+have raised — the column accepts any 100 characters.
+
+So the picker **labels** instead: `GlAccountOption` was widened to carry
+`entity_id` (it had been dropped by a `Pick<…>`), and one shared helper appends
+the owning entity's name to an entity-scoped option while leaving a shared one
+bare — the same shared-vs-owned distinction `/gl-accounts` already draws in its
+Scope column. Both `{#each}` blocks are keyed on `acct.id`, because a `code` key
+collides the moment two subsidiaries define the same one.
+
+This makes the ambiguity visible without pretending it is resolved. **It is
+not:** the server still accepts subsidiary B's `6000` on a subsidiary-A
+invoice. Refusing needs `InvoiceResponse` to expose the invoice's own
+`entity_id` and validation on manual write, and the real repair is an FK
+alongside the string. Both are tracked in `docs/followups.md`.
+
+The general rule: **before changing what a picker binds, read what the column
+is.** Two pickers that look identical in the markup can be writing into a
+foreign key and into a free-text code.
+
+## 187. Local test runs are scoped to the diff; CI owns the full suites
+
+Every long suite here is sharded in CI and runs on every PR: backend pytest is
+`--splits 4` (~27 minutes serial, ~7 per shard) and Playwright is 14 shards. A
+serial local `pytest tests/` therefore buys a slower copy of an answer that
+arrives for free, and it sits on the critical path while it does.
+
+It is also less trustworthy than CI's. Local runs go against a shared Postgres
+that is routinely behind `alembic head` — on 2026-09-17 five databases sat at
+`0093` against a head of `0098` — and a stale schema surfaces as a 500 from the
+first request touching a new column, which reads as an application bug. So the
+local failures need triaging before they can be believed, while CI's shards
+create and migrate their own databases and cannot have the problem.
+
+What a local run is for is the diff: the test files covering it, plus a
+grep-driven sweep of the callers of anything shared it touched. That sweep is
+the part a narrow selection misses, and it is what makes the narrow selection
+safe — round 26's money-serialisation change collapsed three duplicated helpers,
+and the callers of the new shared one were the only meaningful question.
+
+A full local suite is still right when the change has no bounded caller set — a
+conftest, a base model, a cross-cutting serialiser — and that should be said
+out loud when it happens.
+
+Two things landed with this. Root `CLAUDE.md` § Every change must update docs
+and tests carries the rule (and stopped claiming "no tests exist yet", which had
+been false for a long time). And `tests-e2e/fixtures/globalSetup.ts` now refuses
+to start a run against a database behind head, naming each stale one and
+`pnpm migrate:all` — the guard `docs/known-issues.md` had been asking for since
+2026-09-08, built after the same trap cost three parallel sessions an afternoon.
+The delay is its own lesson: that entry named its own durable fix, sized it
+correctly, and still sat for nine days because it was filed as a note rather
+than as work.

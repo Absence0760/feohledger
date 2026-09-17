@@ -5,6 +5,9 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:feohledger_mobile/l10n/gen/app_localizations.dart';
 import 'package:feohledger_mobile/stores/locale_store.dart';
+import 'package:feohledger_mobile/utils/dates.dart';
+import 'package:feohledger_mobile/utils/format_locale.dart';
+import 'package:feohledger_mobile/utils/money.dart';
 
 // End-to-end proof that the localeNotifier → MaterialApp.locale plumbing is
 // real: switching the device locale through LocaleStore must re-localize a
@@ -47,6 +50,10 @@ void main() {
           locale: LocaleStore.instance.locale,
           localizationsDelegates: AppLocalizations.localizationsDelegates,
           supportedLocales: AppLocalizations.supportedLocales,
+          // APApp's own wiring: the formatters follow the resolved locale, so
+          // the figures move with the words.
+          builder: (context, child) =>
+              FormatLocaleScope(child: child ?? const SizedBox.shrink()),
           home: home,
         ),
       );
@@ -85,6 +92,53 @@ void main() {
     await tester.pump();
 
     expect(find.text('設定'), findsOneWidget);
+  });
+
+  testWidgets('the figures switch with the words, not just the copy',
+      (tester) async {
+    // The gap this closes: the picker re-localized every string in the app and
+    // left `$1,234.50` / `Mar 4, 2026` exactly as they were, because no call
+    // site passed a locale and every `DateFormat` was a module-level `final`
+    // frozen at import. A German reader read German prose around en-US
+    // figures.
+    //
+    // The probe reads a localized string beside the two figures because that
+    // is what every screen in the app does, and it is what makes the rebuild
+    // happen: `AppLocalizations.of(context)` registers a dependency on
+    // `Localizations`, so a locale change marks the screen dirty and its
+    // children are rebuilt — at which point the formatters read the locale
+    // just installed. The figures ride the same rebuild as the words.
+    final probe = Builder(
+      builder: (context) => Scaffold(
+        body: Column(
+          children: [
+            Text(AppLocalizations.of(context).settingsTitle),
+            Text(formatMoney(1234.5, currency: 'EUR')),
+            Text(formatDate(DateTime(2026, 3, 4))),
+          ],
+        ),
+      ),
+    );
+
+    await LocaleStore.instance.setLocale(const Locale('en'));
+    await tester.pumpWidget(host(probe));
+    await tester.pump();
+    expect(find.text('€1,234.50'), findsOneWidget);
+    expect(find.text('Mar 4, 2026'), findsOneWidget);
+
+    await LocaleStore.instance.setLocale(const Locale('de'));
+    await tester.pump();
+    // German groups with dots, writes the decimal comma, puts the symbol last
+    // (behind a no-break space CLDR chooses, hence the loose match) and the
+    // day before the month.
+    expect(find.textContaining('1.234,50'), findsOneWidget);
+    expect(find.textContaining('€'), findsOneWidget);
+    expect(find.text('4. März 2026'), findsOneWidget);
+    expect(find.text('€1,234.50'), findsNothing);
+
+    await LocaleStore.instance.setLocale(const Locale('ja'));
+    await tester.pump();
+    expect(find.text('2026年3月4日'), findsOneWidget);
   });
 
   testWidgets(

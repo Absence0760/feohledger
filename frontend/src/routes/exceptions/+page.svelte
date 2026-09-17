@@ -15,11 +15,13 @@
 	import Tabs from '$lib/components/ui/Tabs.svelte';
 	import Badge from '$lib/components/ui/Badge.svelte';
 	import {
+		exceptionSeverityLabelKey,
 		exceptionStatusLabelKey,
 		exceptionStatusTone,
 		exceptionTypeFallback,
 		exceptionTypeLabelKey
 	} from '$lib/types/exception';
+	import type { ExceptionSeverity } from '$lib/types/exception';
 	import AgentDashboard from '$lib/components/exceptions/AgentDashboard.svelte';
 	import { formatMoney } from '$lib/utils/money';
 	import { timeAgo } from '$lib/utils/time';
@@ -137,7 +139,14 @@
 		payment_compliance_hold: '#f06464',
 	};
 
-	const SEVERITY_COLORS: Record<string, string> = {
+	// Total over `ExceptionSeverity`, the same pairing `EXCEPTION_STATUS_TONES`
+	// has with its label map: a severity that gains a colour without a label —
+	// a tinted cell printing a raw wire value — is a compile error. It stays
+	// HERE rather than moving next to the label keys because it is the sibling
+	// of `TYPE_COLORS` above, and the contrast reasoning written there governs
+	// both; `$lib/types/` carries vocabularies and tone NAMES
+	// (`EXCEPTION_STATUS_TONES` is `BadgeTone`), not measured hexes.
+	const SEVERITY_COLORS: Record<ExceptionSeverity, string> = {
 		error: '#f06464',
 		warning: '#d4940a',
 		info: '#638cff',
@@ -153,6 +162,18 @@
 	 * The tone map moved to `$lib/types/exception` alongside those keys, so a
 	 * status that gains a colour without a label is a compile error.
 	 */
+	/**
+	 * A severity's label. The cell printed `error` / `warning` / `info` in
+	 * lowercase Latin beside a type badge and a status badge that were both
+	 * already translated — the last data-driven value on the row still reading
+	 * off the wire. An unrecognised severity still prints raw, and takes the
+	 * grey the colour map already falls back to.
+	 */
+	function severityLabel(severity: string): string {
+		const key = exceptionSeverityLabelKey(severity);
+		return key ? m(key) : severity;
+	}
+
 	function statusLabel(status: string): string {
 		const key = exceptionStatusLabelKey(status);
 		return key ? m(key) : status;
@@ -542,10 +563,12 @@
 		{#snippet actions()}
 			{#if allSelected && !selectedAllMatching && total > selectableIds.size}
 				<button class="bulk-action-btn" disabled={selectingAllMatching} onclick={selectAllMatching}>
-					{selectingAllMatching ? m('common.loading') : `Select all ${total} matching`}
+					{selectingAllMatching
+						? m('common.loading')
+						: m('common.selectAllMatching', { total })}
 				</button>
 			{:else if selectedAllMatching}
-				<span class="bulk-all-matching-note">All matching selected</span>
+				<span class="bulk-all-matching-note">{m('common.allMatchingSelected')}</span>
 			{/if}
 			<button class="bulk-action-btn" onclick={openBulkResolve}>
 				{m('exceptions.bulk.resolve', { n: selectedIds.size })}
@@ -604,9 +627,9 @@
 					<td>
 						<span
 							class="severity"
-							style="color:{SEVERITY_COLORS[exc.severity] ?? '#888'}"
+							style="color:{SEVERITY_COLORS[exc.severity as ExceptionSeverity] ?? '#888'}"
 						>
-							{exc.severity}
+							{severityLabel(exc.severity)}
 						</span>
 					</td>
 					<td class="mono">{exc.invoice_number ?? '—'}</td>

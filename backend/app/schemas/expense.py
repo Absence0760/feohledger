@@ -1,9 +1,12 @@
 """Pydantic request/response schemas for the expenses + expense-reports routers.
 
 Money convention (mirrors ``schemas/contract.py``): request fields are typed
-``Decimal | None`` for exactness on the way in; response/list fields serialise
-money as ``float | None`` (the router does ``float(...)``). Never ``float`` on a
-column or in-memory total.
+``Decimal | None`` for exactness on the way in; response/list fields are
+``MoneyAmount`` / ``OptionalMoneyAmount`` (``schemas/money``), which keep the
+value a ``Decimal`` in Python and serialise to the same JSON number. Never
+``float`` on a column or in-memory total. A response field that is *not* money —
+``mileage_miles`` (a distance), ``mileage_rate`` (a rate per mile), a match
+``score`` — stays ``float``.
 
 Every request-side ``Decimal`` is digit-bounded to the ``Numeric(precision,
 scale)`` of the column it lands in, via ``max_digits`` / ``decimal_places`` on
@@ -31,6 +34,7 @@ from app.models.expense import (
     PreapprovalStatus,
     ReconciliationStatus,
 )
+from app.schemas.money import MoneyAmount, OptionalMoneyAmount
 
 # ---------------------------------------------------------------------------
 # Currency codes
@@ -149,11 +153,11 @@ class ExpenseResponse(BaseModel):
     merchant: str | None
     category: str | None
     description: str | None
-    amount: float
+    amount: MoneyAmount
     currency: str
     # Rate-locked expression of `amount` in the owning report's currency (issue
-    # #157). Exact decimal strings — new money fields never serialise as float;
-    # `amount` above stays float only for back-compat. NULL when unattached.
+    # #157). Exact decimal strings — the stronger contract, since a client can
+    # do arithmetic on them. NULL when unattached.
     converted_amount: str | None = None
     converted_currency: str | None = None
     converted_fx_rate: str | None = None
@@ -283,12 +287,15 @@ class ExpenseReportSummary(BaseModel):
     report's own ``currency`` via each line's rate-locked conversion — never a
     naive cross-currency sum (issue #157).
 
-    ``total`` stays ``float`` for back-compat with the existing client; the
-    exact value is in ``total_exact``. ``unconverted_count`` counts lines with
+    ``total`` serialises as a JSON number for the existing client; the exact
+    value is also in ``total_exact``. ``unconverted_count`` counts lines with
     no usable rate lock: they are EXCLUDED from the totals (they also block
-    submission), so a non-zero value means the displayed figure is partial."""
+    submission), so a non-zero value means the displayed figure is partial.
 
-    total: float
+    ``by_category`` / ``by_status`` are hand-built dicts, so their ``total`` goes
+    through ``schemas/money.json_money`` at the construction site instead."""
+
+    total: MoneyAmount
     total_exact: str = "0.00"
     currency: str = "USD"
     count: int
@@ -307,7 +314,7 @@ class ExpenseReportResponse(BaseModel):
     submitted_at: str | None
     approved_at: str | None
     approved_by: str | None
-    total_amount: float
+    total_amount: MoneyAmount
     # Exact `total_amount`, in the report's own `currency`.
     total_amount_exact: str = "0.00"
     currency: str
@@ -422,12 +429,13 @@ class ExpensePolicyResponse(BaseModel):
     active: bool
     category: str | None
     threshold_currency: str | None
-    per_diem_amount: float | None
+    per_diem_amount: OptionalMoneyAmount
     per_diem_currency: str
+    # A rate per mile, not an amount of money — stays a plain float.
     mileage_rate: float | None
-    category_limit: float | None
-    requires_preapproval_above: float | None
-    requires_receipt_above: float | None
+    category_limit: OptionalMoneyAmount
+    requires_preapproval_above: OptionalMoneyAmount
+    requires_receipt_above: OptionalMoneyAmount
     rules: dict | None
     created_at: str
     updated_at: str
@@ -486,7 +494,7 @@ class CorporateCardTransactionResponse(BaseModel):
     txn_date: str
     posted_date: str | None
     merchant: str | None
-    amount: float
+    amount: MoneyAmount
     currency: str
     external_txn_id: str | None
     matched_expense_id: str | None
@@ -523,7 +531,7 @@ class ExpensePreapprovalResponse(BaseModel):
     id: str
     requester_user_id: str
     title: str
-    estimated_amount: float
+    estimated_amount: MoneyAmount
     currency: str
     category: str | None
     justification: str | None

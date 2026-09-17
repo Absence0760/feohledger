@@ -55,6 +55,8 @@
 
 <script lang="ts">
 	import { browser } from '$app/environment';
+	import { m } from '$lib/i18n/store.svelte';
+	import LinkedMessage from '$lib/components/ui/LinkedMessage.svelte';
 
 	// `undefined` until we've read localStorage on the client — render nothing
 	// during that window so the banner never flashes for a user who already chose.
@@ -116,28 +118,37 @@
 		class="consent"
 		role="region"
 		aria-live="polite"
-		aria-label="Cookie and privacy consent"
+		aria-label={m('consent.ariaLabel')}
 		bind:offsetHeight={height}
 	>
 		<div class="consent-body">
 			<div class="consent-copy">
-				<h2 class="consent-title">Your privacy choices</h2>
+				<h2 class="consent-title">{m('consent.title')}</h2>
+				<!--
+					Four sentences, four keys. The emphasis and the link are the reason:
+					`bodyNoAnalytics` is the claim the `<strong>` is making, so it is a
+					whole sentence inside the element rather than three words spliced out
+					of one, and `bodyNotice` carries its anchor as a `{cookieNotice}`
+					token through `LinkedMessage` so the translation decides where the
+					link falls. Nothing here is a `…Pre`/`…Post` fragment pair — see
+					`i18n/segments.ts` for why that shape cannot be translated.
+				-->
 				<p>
-					We use storage that is strictly necessary to run the app — signing
-					you in and keeping your session — which works regardless of your
-					choice here. We load <strong>no analytics or tracking</strong> storage
-					today. Your choice is recorded now and governs any optional storage we
-					introduce later. Full detail is in the
-					<a href="/legal/cookies">Cookie Notice</a>.
+					{m('consent.bodyNecessary')}
+					<strong>{m('consent.bodyNoAnalytics')}</strong>
+					{m('consent.bodyRecorded')}
+					<LinkedMessage
+						text={m('consent.bodyNotice')}
+						links={{
+							cookieNotice: { href: '/legal/cookies', label: m('consent.cookieNotice') }
+						}}
+					/>
 				</p>
 				{#if showDetails}
 					<dl class="consent-details">
-						<dt>Strictly necessary (always on)</dt>
-						<dd>
-							Authentication token and session state. Required to log in and
-							use the app; cannot be turned off.
-						</dd>
-						<dt>Analytics (optional)</dt>
+						<dt>{m('consent.necessaryTerm')}</dt>
+						<dd>{m('consent.necessaryDesc')}</dd>
+						<dt>{m('consent.analyticsTerm')}</dt>
 						<dd>
 							<!--
 								This category is empty, and saying so is the point. The copy
@@ -149,16 +160,14 @@
 								category stays — the mechanism should exist before it is
 								needed — but it states what is true today.
 							-->
-							Nothing is loaded under this category today. If product analytics
-							is added, it stays off unless you have accepted it, and the Cookie
-							Notice is updated before anything is set.
+							{m('consent.analyticsDesc')}
 						</dd>
 					</dl>
 				{/if}
 			</div>
 			<div class="consent-actions">
 				<button type="button" class="btn-link" onclick={() => (showDetails = !showDetails)}>
-					{showDetails ? 'Hide details' : 'Manage'}
+					{showDetails ? m('consent.hideDetails') : m('consent.manage')}
 				</button>
 				<!--
 					Both choices carry the SAME class, and that is the point. Accept was
@@ -170,10 +179,10 @@
 					thing a regulator actually looks at.
 				-->
 				<button type="button" class="btn-choice" onclick={() => record('rejected')}>
-					Reject non-essential
+					{m('consent.reject')}
 				</button>
 				<button type="button" class="btn-choice" onclick={() => record('accepted')}>
-					Accept all
+					{m('consent.accept')}
 				</button>
 			</div>
 		</div>
@@ -228,7 +237,10 @@
 		color: var(--text);
 	}
 
-	.consent-copy a {
+	/* `:global` because the Cookie Notice anchor is rendered by
+	   `LinkedMessage`, a child component Svelte's scoped styles do not reach.
+	   Same treatment as the signup page's `.legal-consent`. */
+	.consent-copy :global(a) {
 		color: var(--accent-on-tint);
 	}
 
