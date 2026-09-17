@@ -1,3 +1,4 @@
+import { WEB_ORIGIN } from './env';
 import { E2E_TENANT_COUNT, tenantPsql } from './helpers';
 
 /**
@@ -115,7 +116,61 @@ function verifyTenantWorkflowShape(slug: string): string[] {
 	return problems;
 }
 
-export default function globalSetup(): void {
+/**
+ * Confirms the origin under test is actually THIS app.
+ *
+ * `reuseExistingServer` is on locally, so Playwright attaches to whatever
+ * already answers on `E2E_WEB_ORIGIN` instead of starting its own server. The
+ * config comments anticipate a sibling *worktree* holding the port — but
+ * nothing checked that the listener belongs to this project at all, and
+ * another project on this machine (`~/github/threkir`) also serves vite on
+ * 7777. A run that attached to it navigated a foreign app, found none of the
+ * app shell, and reported failures that looked like this suite's own.
+ *
+ * The worse shape is the quiet one: a spec whose assertions are absence-based
+ * can pass against a foreign document, so the suite goes GREEN without ever
+ * loading the code under test.
+ *
+ * `og:site_name` is rendered from `src/app.html`, so it is in the served
+ * document under both `vite dev` and `vite preview`, before any JavaScript
+ * runs — which matters, because this app renders nothing until hydration and
+ * so has no other server-visible marker.
+ */
+async function verifyOriginServesThisApp(): Promise<string[]> {
+	let html: string;
+	try {
+		const response = await fetch(WEB_ORIGIN, { redirect: 'follow' });
+		if (!response.ok) {
+			return [`${WEB_ORIGIN} answered HTTP ${response.status}, so the app under test is not being served.`];
+		}
+		html = await response.text();
+	} catch (error) {
+		return [`${WEB_ORIGIN} could not be reached (${(error as Error).message}).`];
+	}
+
+	if (/og:site_name/i.test(html) && /FeohLedger/i.test(html)) return [];
+
+	return [
+		`${WEB_ORIGIN} is serving a DIFFERENT application — its document carries no ` +
+			'FeohLedger `og:site_name`, which `src/app.html` puts in every response.\n' +
+			'    Playwright reuses an existing server locally, so it attached to whatever ' +
+			'already held that port rather than starting this app.\n' +
+			'    Either stop the other process, or give this run its own stack:\n' +
+			'      E2E_WEB_ORIGIN=http://localhost:7801 PUBLIC_API_URL=http://localhost:8001 ' +
+			'E2E_TENANT_OFFSET=1 pnpm test:e2e'
+	];
+}
+
+export default async function globalSetup(): Promise<void> {
+	// Identity first: every check below reads the DATABASE, so all of them pass
+	// happily while Playwright is pointed at someone else's web server. Naming
+	// the wrong-origin case here is what stops that from reading as a pile of
+	// unrelated spec failures.
+	const wrongOrigin = await verifyOriginServesThisApp();
+	if (wrongOrigin.length > 0) {
+		throw new Error(`\nThe e2e suite is pointed at the wrong server:\n\n  - ${wrongOrigin[0]}\n`);
+	}
+
 	// Escape hatch for a run that deliberately doesn't have the e2e tenants
 	// seeded yet (e.g. exercising a single non-tenant spec by hand).
 	if (process.env.FEOH_E2E_SKIP_WORKFLOW_SHAPE_CHECK === 'true') return;
