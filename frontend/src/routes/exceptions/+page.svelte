@@ -542,10 +542,12 @@
 		{#snippet actions()}
 			{#if allSelected && !selectedAllMatching && total > selectableIds.size}
 				<button class="bulk-action-btn" disabled={selectingAllMatching} onclick={selectAllMatching}>
-					{selectingAllMatching ? m('common.loading') : `Select all ${total} matching`}
+					{selectingAllMatching
+						? m('common.loading')
+						: m('common.selectAllMatching', { total })}
 				</button>
 			{:else if selectedAllMatching}
-				<span class="bulk-all-matching-note">All matching selected</span>
+				<span class="bulk-all-matching-note">{m('common.allMatchingSelected')}</span>
 			{/if}
 			<button class="bulk-action-btn" onclick={openBulkResolve}>
 				{m('exceptions.bulk.resolve', { n: selectedIds.size })}

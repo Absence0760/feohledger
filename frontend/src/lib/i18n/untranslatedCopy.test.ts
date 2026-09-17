@@ -39,7 +39,10 @@ const RAW = import.meta.glob('/src/**/*.svelte', {
  * Routes are welcome here too — the split is not "components only", it is
  * "surfaces someone has finished".
  */
-const TRANSLATED = ['/src/lib/components/ConsentBanner.svelte'];
+const TRANSLATED = [
+	'/src/lib/components/ConsentBanner.svelte',
+	'/src/lib/components/ui/BulkBar.svelte'
+];
 
 /** Attributes a human reads. `class` / `role` / `type` are not copy. */
 const COPY_ATTRS = /\s(?:aria-label|aria-description|title|placeholder|alt)="([^"]*)"/g;
@@ -192,5 +195,101 @@ describe('consent banner key roster', () => {
 		const used = [...RAW[BANNER].matchAll(/m\(\s*'(consent\.[A-Za-z0-9.]+)'/g)].map((x) => x[1]);
 		expect(used.length, 'the banner stopped calling m() with consent keys').toBeGreaterThan(8);
 		for (const key of used) expect(en, `${key} is missing from en.ts`).toHaveProperty(key);
+	});
+});
+
+describe('the "Select all N matching" bulk affordance', () => {
+	/**
+	 * One string, six call sites, and five of them were literals.
+	 *
+	 * `/exceptions`, `/invoices`, `/vendors`, `/contracts` and `/expenses` each
+	 * inlined `` `Select all ${total} matching` `` and `All matching selected`,
+	 * on pages `frontend/docs/i18n.md` listed as fully extracted, while
+	 * `/payments` kept the only keyed copy under a PRIVATE `payments.queue.*`
+	 * pair the other five could not borrow — `pagedListFooter.test.ts`'
+	 * per-namespace pairing is the precedent against reaching into a sibling's
+	 * keys (`docs/decisions.md` §155).
+	 *
+	 * The owner is `common.*`, not `ui/BulkBar.svelte`: two of the six
+	 * (`/invoices`, `/payments`) render their own bar and never import that
+	 * component, so moving the copy into it would have reached four of six and
+	 * left the split that started this. The wording is identical everywhere and
+	 * the only variable is `{total}` — the `common.all` / `common.loading` case.
+	 *
+	 * So the guard is on the STRING, not on the component: a seventh caller that
+	 * inlines the English, or re-privatises the key under its own namespace,
+	 * fails here wherever it lives.
+	 */
+
+	/** The English literal, in the two shapes it shipped in. */
+	const LITERALS = [/`Select all \$\{[^`]*\} matching`/, /All matching selected/];
+
+	/** A `…​.selectAllMatching` / `…​.allMatchingSelected` key that is not common.*. */
+	const PRIVATE_KEY = /'(?!common\.)[A-Za-z0-9.]+\.(?:selectAllMatching|allMatchingSelected)'/;
+
+	/** Every surface that offers the affordance. All six migrated together. */
+	const CALL_SITES = [
+		'/src/routes/contracts/+page.svelte',
+		'/src/routes/exceptions/+page.svelte',
+		'/src/routes/expenses/+page.svelte',
+		'/src/routes/invoices/+page.svelte',
+		'/src/routes/payments/+page.svelte',
+		'/src/routes/vendors/+page.svelte'
+	];
+
+	it('has the shared pair in the English catalogue', () => {
+		expect(en).toHaveProperty('common.selectAllMatching');
+		expect(en).toHaveProperty('common.allMatchingSelected');
+		expect((en as Record<string, string>)['common.selectAllMatching']).toContain('{total}');
+	});
+
+	it('is nowhere written as an English literal', () => {
+		const offenders = Object.entries(RAW)
+			.filter(([, source]) => LITERALS.some((re) => re.test(source)))
+			.map(([path]) => path)
+			.sort();
+		expect(
+			offenders,
+			'render m(\'common.selectAllMatching\', { total }) / m(\'common.allMatchingSelected\') instead'
+		).toEqual([]);
+	});
+
+	it('is nowhere re-privatised under a route namespace', () => {
+		const offenders = Object.entries(RAW)
+			.filter(([, source]) => PRIVATE_KEY.test(source))
+			.map(([path]) => path)
+			.sort();
+		expect(
+			offenders,
+			'the affordance is shared copy — it belongs to common.*, not to one route'
+		).toEqual([]);
+	});
+
+	it('pairs the two halves in every file that offers it', () => {
+		// The pagedListFooter rule, applied to this pair: a bar that can resolve
+		// the whole filtered set must also be able to say it did, or the button
+		// stays on screen over a selection that already reaches past the page.
+		const unpaired = Object.entries(RAW)
+			.filter(([, s]) => s.includes("'common.selectAllMatching'"))
+			.filter(([, s]) => !s.includes("'common.allMatchingSelected'"))
+			.map(([path]) => path)
+			.sort();
+		expect(unpaired, 'these offer "Select all N matching" with no "All matching selected"').toEqual(
+			[]
+		);
+	});
+
+	it('keeps all six call sites on the shared pair', () => {
+		// Named explicitly so a revert on any ONE of them is a failure. Five
+		// drifting from a sixth is how this started.
+		for (const path of CALL_SITES) {
+			expect(RAW[path], `${path} not found through import.meta.glob`).toBeTypeOf('string');
+			expect(RAW[path], `${path} lost common.selectAllMatching`).toContain(
+				"'common.selectAllMatching'"
+			);
+			expect(RAW[path], `${path} lost common.allMatchingSelected`).toContain(
+				"'common.allMatchingSelected'"
+			);
+		}
 	});
 });

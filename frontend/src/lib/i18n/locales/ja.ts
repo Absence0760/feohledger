@@ -233,6 +233,13 @@ export const messages = {
 	'common.search': '検索',
 	'common.clear': 'クリア',
 	'common.apply': '適用',
+
+	// Bulk selection, shared by every list that offers it — see en.ts.
+
+	'common.bulkActions': '一括操作',
+	'common.nSelected': '{n, plural, other {#件を選択中}}',
+	'common.selectAllMatching': '一致する {total} 件すべてを選択',
+	'common.allMatchingSelected': '一致するものをすべて選択しました',
 	'common.contrastWarning':
 		'この色に白文字を載せるとコントラスト比は {ratio} です。WCAG AA は 4.5:1 を求めるため、これを使うボタンやチップは読みにくくなります。',
 
@@ -453,8 +460,6 @@ export const messages = {
 	'payments.queue.discountBy': '{date}までに{percent}%',
 	'payments.queue.loadMore': 'さらに読み込む（{total} 件中 {shown} 件）',
 	'payments.queue.showingAll': '{total, plural, other {# 件すべてを表示中}}',
-	'payments.queue.selectAllMatching': '一致する {total} 件すべてを選択',
-	'payments.queue.allMatchingSelected': '一致するものをすべて選択しました',
 	'payments.queue.selectedAllMatching': '{n, plural, other {一致する請求書 # 件すべてを選択しました}}',
 	'payments.queue.selectAllTruncated':
 		'一致する {total} 件のうち最初の {shown} 件を選択しました — 残りを選択するには行をいくつか外してください。',

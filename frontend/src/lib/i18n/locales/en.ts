@@ -260,6 +260,28 @@ export const en = {
 	'common.search': 'Search',
 	'common.clear': 'Clear',
 	'common.apply': 'Apply',
+
+	// Bulk selection, shared by EVERY list that offers it (ui/BulkBar.svelte and
+	// the two lists — /invoices and /payments — that render their own bar).
+	//
+	// `common.*` and not a per-route namespace: the wording is identical on all
+	// six surfaces and the only variable is `{total}`, which is the
+	// `common.all` / `common.loading` case exactly. Five routes inlined
+	// `` `Select all ${total} matching` `` as a literal while /payments kept a
+	// private `payments.queue.*` pair, and the other five could not borrow it
+	// without reaching into a sibling's namespace (decisions §155). The
+	// alternative — moving the copy into `ui/BulkBar.svelte` — reaches only four
+	// of the six, because /invoices and /payments never import that component.
+	//
+	// The five non-English values name the thing counted ("items", "Einträge",
+	// "éléments") rather than agreeing with an implied noun: the payments-only
+	// wording they replace was feminine, because it was written when invoices
+	// were the only rows it counted, and it read wrong over vendors.
+
+	'common.bulkActions': 'Bulk actions',
+	'common.nSelected': '{n, plural, one {# selected} other {# selected}}',
+	'common.selectAllMatching': 'Select all {total} matching',
+	'common.allMatchingSelected': 'All matching selected',
 	// Advisory shown under a brand "strong accent" colour field. Shared by the
 	// org Branding panel and the partner child-branding modal so the two can't
 	// give a tenant different advice about the same setting.
@@ -505,8 +527,6 @@ export const en = {
 	'payments.queue.loadMore': 'Load more ({shown} of {total})',
 	'payments.queue.showingAll':
 		'{total, plural, one {Showing all # invoice} other {Showing all # invoices}}',
-	'payments.queue.selectAllMatching': 'Select all {total} matching',
-	'payments.queue.allMatchingSelected': 'All matching selected',
 	'payments.queue.selectedAllMatching':
 		'{n, plural, one {Selected all # matching invoice} other {Selected all # matching invoices}}',
 	'payments.queue.selectAllTruncated':

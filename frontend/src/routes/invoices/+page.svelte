@@ -781,10 +781,12 @@
 			<span class="bulk-count">{m('invoices.bulk.selected', { n: selected.size })}</span>
 			{#if allSelected && !selectedAllMatching && invoiceStore.total > selectableInvoices.length}
 				<button class="bulk-select-all-matching" disabled={selectingAllMatching} onclick={selectAllMatching}>
-					{selectingAllMatching ? m('common.loading') : `Select all ${invoiceStore.total} matching`}
+					{selectingAllMatching
+						? m('common.loading')
+						: m('common.selectAllMatching', { total: invoiceStore.total })}
 				</button>
 			{:else if selectedAllMatching}
-				<span class="bulk-all-matching-note">All matching selected</span>
+				<span class="bulk-all-matching-note">{m('common.allMatchingSelected')}</span>
 			{/if}
 			<button class="bulk-clear" onclick={() => { selected = new Set(); selectedAllMatching = false; }}>{m('common.clear')}</button>
 			<div class="bulk-divider"></div>

@@ -237,6 +237,13 @@ export const messages = {
 	'common.search': 'Pesquisar',
 	'common.clear': 'Limpar',
 	'common.apply': 'Aplicar',
+
+	// Bulk selection, shared by every list that offers it — see en.ts.
+
+	'common.bulkActions': 'Ações em massa',
+	'common.nSelected': '{n, plural, one {# selecionado} other {# selecionados}}',
+	'common.selectAllMatching': 'Selecionar os {total} itens correspondentes',
+	'common.allMatchingSelected': 'Todos os itens correspondentes selecionados',
 	'common.contrastWarning':
 		'Texto branco sobre esta cor atinge apenas {ratio}. O WCAG AA exige 4,5:1, então botões e chips que a usarem ficarão difíceis de ler.',
 
@@ -458,8 +465,6 @@ export const messages = {
 	'payments.queue.loadMore': 'Carregar mais ({shown} de {total})',
 	'payments.queue.showingAll':
 		'{total, plural, one {Mostrando # fatura} other {Mostrando todas as # faturas}}',
-	'payments.queue.selectAllMatching': 'Selecionar todas as {total} correspondentes',
-	'payments.queue.allMatchingSelected': 'Todas as correspondentes selecionadas',
 	'payments.queue.selectedAllMatching':
 		'{n, plural, one {# fatura correspondente selecionada} other {# faturas correspondentes selecionadas}}',
 	'payments.queue.selectAllTruncated':
