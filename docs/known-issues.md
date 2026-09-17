@@ -878,9 +878,29 @@ sites and the overwhelming majority are the benign kind. When triaging the next
 
 ---
 
-## Local e2e tenant databases drift behind `alembic head`, and the suite blames the app
+## ~~Local e2e tenant databases drift behind `alembic head`, and the suite blames the app~~ — FIXED 2026-09-17
 
 **Diagnosed 2026-09-08 (round 26). Local only — CI is unaffected.**
+
+**The guard this entry asked for is built.** `tests-e2e/fixtures/globalSetup.ts` now
+compares the control plane's and every e2e tenant's `alembic_version` against the
+newest revision in `backend/alembic/versions/` and refuses to start the run,
+naming each stale database, its revision, the head, and `pnpm migrate:all`. It runs
+before the workflow-shape check, because a stale schema makes that check unreliable
+too. Every migration names its revision after its own filename stem
+(`revision = "0098_exception_raiser"` in `0098_exception_raiser.py`) and the `NNNN_`
+prefix is monotonic, so the last filename in sort order is the head with no need to
+walk the `down_revision` chain.
+
+Verified against the live drift on 2026-09-17, which is what prompted building it:
+five databases sat at `0093_migration_only_indexes` against a head of
+`0098_exception_raiser` and were all named, while the one tenant that had been
+migrated to head passed. Three parallel sessions had independently tripped over it
+that afternoon, each spending time before reaching the database as the cause.
+
+**Drift itself still happens** — pulling a migration still requires `pnpm migrate:all`.
+What is fixed is the misdirection in this entry's title: the suite no longer blames
+the app. It fails in one line, before any spec runs, and says what to do.
 
 A local full-suite run reported 37 failures. Repairing an unrelated stranded
 workflow (above) and re-running serially cleared ten; the rest were not code.
@@ -906,12 +926,12 @@ the feature rather than at the database.
 **Workaround:** run `pnpm migrate:all` after pulling anything that adds a
 migration.
 
-**A pre-run guard would be worth more than this note.** `globalSetup` already
-opens the control plane, so comparing each tenant's `alembic_version` against the
-newest file in `backend/alembic/versions/` and failing fast with both numbers
-would turn a confusing afternoon into one line. Recorded rather than built
-because `globalSetup` is shared by every worker and the change wants its own
-review.
+**A pre-run guard would be worth more than this note** — written on 2026-09-08,
+acted on 2026-09-17 after the same trap cost three more sessions in one
+afternoon. The delay is the lesson worth keeping: this entry named its own
+durable fix, sized it correctly ("one line" of output), and still sat for nine
+days because it was filed as a note rather than as work. A diagnosed defect that
+names its own fix should be built the next time it bites, not the third.
 
 CI is unaffected: each shard creates a fresh database and migrates it, so the
 drift cannot exist there.

@@ -1,3 +1,7 @@
+import { execFileSync } from 'node:child_process';
+import { readdirSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, resolve } from 'node:path';
 import { WEB_ORIGIN } from './env';
 import { E2E_TENANT_COUNT, tenantPsql } from './helpers';
 
@@ -161,6 +165,75 @@ async function verifyOriginServesThisApp(): Promise<string[]> {
 	];
 }
 
+/**
+ * The newest Alembic revision on disk.
+ *
+ * Every migration in this repo names its revision after its own filename stem
+ * (`revision = "0098_exception_raiser"` in `0098_exception_raiser.py`), and the
+ * `NNNN_` prefix is monotonic — so the last filename in sort order IS the head
+ * revision string, with no need to walk the `down_revision` chain.
+ */
+function headRevisionOnDisk(): string | null {
+	const here = dirname(fileURLToPath(import.meta.url));
+	const versions = resolve(here, '../../../backend/alembic/versions');
+	let files: string[];
+	try {
+		files = readdirSync(versions).filter((f) => /^\d{4}_.*\.py$/.test(f));
+	} catch {
+		return null; // no backend checkout beside this one; not this guard's problem
+	}
+	const newest = files.sort().at(-1);
+	return newest ? newest.replace(/\.py$/, '') : null;
+}
+
+function currentRevision(db: string): string | null {
+	try {
+		const out = execFileSync(
+			'psql',
+			['-h', 'localhost', '-U', 'postgres', '-p', '5432', '-d', db, '-tAc',
+				'SELECT version_num FROM alembic_version'],
+			{ env: { ...process.env, PGPASSWORD: 'postgres' }, stdio: ['ignore', 'pipe', 'pipe'] }
+		);
+		return out.toString().trim() || null;
+	} catch {
+		return null; // database absent or unreadable — the workflow-shape guard reports that
+	}
+}
+
+/**
+ * Fail fast when a local database is behind `alembic head`.
+ *
+ * `docs/known-issues.md` § "Local e2e tenant databases drift behind `alembic
+ * head`" is the whole reasoning. The short version: SQLAlchemy never checks the
+ * live schema at import, so the backend boots clean against a stale database and
+ * the first request touching a missing column returns a 500. The spec then
+ * reports `expected 201, received 500`, which reads exactly like an application
+ * bug — the failure points at the feature instead of at the database, and that
+ * misdirection is the expensive part. It has cost multiple sessions an afternoon.
+ *
+ * CI cannot hit this (each shard creates and migrates its own database), so this
+ * guard is purely for local runs.
+ */
+function verifyMigrationsCurrent(slugs: string[]): string[] {
+	const head = headRevisionOnDisk();
+	if (head === null) return [];
+
+	const behind: string[] = [];
+	for (const db of ['feohledger', ...slugs.map((s) => `feoh_${s}`)]) {
+		const at = currentRevision(db);
+		if (at !== null && at !== head) behind.push(`${db} is at ${at}`);
+	}
+	if (behind.length === 0) return [];
+
+	return [
+		`${behind.length} local database(s) are not at the head revision ${head}:\n` +
+			behind.map((b) => `      ${b}`).join('\n') +
+			'\n    A stale schema surfaces as a 500 from the first request touching a new ' +
+			'column, which reads as an application bug rather than a migration gap.\n' +
+			'    Fix: pnpm migrate:all'
+	];
+}
+
 export default async function globalSetup(): Promise<void> {
 	// Identity first: every check below reads the DATABASE, so all of them pass
 	// happily while Playwright is pointed at someone else's web server. Naming
@@ -180,6 +253,17 @@ export default async function globalSetup(): Promise<void> {
 		'techflow',
 		...Array.from({ length: Math.max(E2E_TENANT_COUNT, 1) }, (_, i) => `e2e${i + 1}`)
 	];
+
+	// Schema before shape: a database behind `alembic head` makes every check
+	// below unreliable, and its failures impersonate application bugs.
+	const stale = verifyMigrationsCurrent(slugs);
+	if (stale.length > 0) {
+		throw new Error(
+			'\nLocal databases are behind the migrations in this checkout ' +
+				'(see docs/known-issues.md § "Local e2e tenant databases drift behind `alembic head`"):' +
+				`\n\n  - ${stale[0]}\n`
+		);
+	}
 
 	const problems = slugs.flatMap(verifyTenantWorkflowShape);
 	if (problems.length === 0) return;
