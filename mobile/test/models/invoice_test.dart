@@ -252,6 +252,44 @@ void main() {
       );
     });
 
+    test('parses the localization pair — code + params as exact strings', () {
+      // `message` is the English fallback; `code` + `params` is what makes the
+      // finding translatable. Every value is kept as the string the wire
+      // carried: money is `Decimal` server-side, and a JSON number that went
+      // through a `double` here would be a rounded cent inside a warning.
+      final w = InvoiceWarning.fromJson({
+        'type': 'fraud_flag',
+        'severity': 'warning',
+        'message': 'Round amount: 5000.00 EUR',
+        'code': 'round_amount',
+        'params': {'amount': '5000.00', 'currency': 'EUR', 'days': 3},
+      });
+      expect(w.code, 'round_amount');
+      expect(w.params,
+          {'amount': '5000.00', 'currency': 'EUR', 'days': '3'});
+    });
+
+    test('a warning with no code parses to the English-only shape', () {
+      // The normal path for every row persisted before the backend catalogue
+      // existed — nothing backfills them.
+      final w = InvoiceWarning.fromJson(
+        {'type': 'duplicate', 'severity': 'error', 'message': 'Dup'},
+      );
+      expect(w.code, isNull);
+      expect(w.params, isEmpty);
+      // A null-valued param is dropped rather than rendered as "null".
+      expect(
+        InvoiceWarning.fromJson({
+          'type': 'x',
+          'severity': 'info',
+          'message': 'm',
+          'code': 'po_not_found',
+          'params': {'poNumber': null},
+        }).params,
+        isEmpty,
+      );
+    });
+
     test('warning severity falls back to info on an unknown value', () {
       final w = InvoiceWarning.fromJson(
         {'type': 'x', 'severity': 'bogus', 'message': 'm'},

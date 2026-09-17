@@ -100,12 +100,15 @@ void main() {
     expect(formatDate(march4), 'Mar 4, 2026');
   });
 
-  test('no module outside utils/dates.dart constructs a DateFormat', () {
+  test('only the three formatting utils construct a DateFormat / NumberFormat',
+      () {
     // The drift guard for the whole arrangement. A `DateFormat` built anywhere
     // else is either frozen at import time (a module-level `final`, which
     // survives a picker change) or locale-less (which formats en_US at a
-    // German reader) — the two halves of the bug this file closes. Same shape
-    // for `NumberFormat` and `utils/money.dart`.
+    // German reader) — the two halves of the bug this file closes. A
+    // `NumberFormat` outside `utils/money.dart` (currency) and
+    // `utils/numbers.dart` (everything else) is the same defect for figures.
+    const numberOwners = {'lib/utils/money.dart', 'lib/utils/numbers.dart'};
     final offenders = <String>[];
     for (final entity in Directory('lib').listSync(recursive: true)) {
       if (entity is! File || !entity.path.endsWith('.dart')) continue;
@@ -119,12 +122,12 @@ void main() {
           RegExp(r'DateFormat(\(|\.(?!localeExists)\w+\()').hasMatch(source)) {
         offenders.add('${entity.path}: DateFormat');
       }
-      if (entity.path != 'lib/utils/money.dart' &&
+      if (!numberOwners.contains(entity.path) &&
           RegExp(r'NumberFormat(\(|\.\w+\()').hasMatch(source)) {
         offenders.add('${entity.path}: NumberFormat');
       }
     }
     expect(offenders, isEmpty,
-        reason: 'format through utils/dates.dart / utils/money.dart instead');
+        reason: 'format through utils/dates.dart, money.dart or numbers.dart');
   });
 }

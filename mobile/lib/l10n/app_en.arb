@@ -1136,5 +1136,492 @@
       }
     }
   },
-  "adaptiveAnomaliesInsufficient": "Not enough history for this supplier yet."
+  "adaptiveAnomaliesInsufficient": "Not enough history for this supplier yet.",
+  "invoiceWarningMissingVendorName": "Missing vendor name",
+  "invoiceWarningMissingInvoiceNumber": "Missing invoice number",
+  "invoiceWarningMissingAmount": "Missing or zero amount",
+  "invoiceWarningDuplicateInvoiceNumber": "Duplicate invoice number for this vendor",
+  "invoiceWarningDuplicateSimilar": "Potential duplicate: {similarity} match to {invoiceNumber} from {vendorName}{crossEntityCount, plural, =0 {} one { (plus {crossEntityCount} near-identical invoice under another entity)} other { (plus {crossEntityCount} near-identical invoices under another entity)}}",
+  "@invoiceWarningDuplicateSimilar": {
+    "placeholders": {
+      "similarity": {
+        "type": "String"
+      },
+      "invoiceNumber": {
+        "type": "String"
+      },
+      "vendorName": {
+        "type": "String"
+      },
+      "crossEntityCount": {
+        "type": "int"
+      }
+    }
+  },
+  "invoiceWarningDuplicateSimilarUnnamedVendor": "Potential duplicate: {similarity} match to {invoiceNumber}{crossEntityCount, plural, =0 {} one { (plus {crossEntityCount} near-identical invoice under another entity)} other { (plus {crossEntityCount} near-identical invoices under another entity)}}",
+  "@invoiceWarningDuplicateSimilarUnnamedVendor": {
+    "placeholders": {
+      "similarity": {
+        "type": "String"
+      },
+      "invoiceNumber": {
+        "type": "String"
+      },
+      "crossEntityCount": {
+        "type": "int"
+      }
+    }
+  },
+  "invoiceWarningDuplicateSimilarUnnumbered": "Potential duplicate: {similarity} match to another invoice from {vendorName}{crossEntityCount, plural, =0 {} one { (plus {crossEntityCount} near-identical invoice under another entity)} other { (plus {crossEntityCount} near-identical invoices under another entity)}}",
+  "@invoiceWarningDuplicateSimilarUnnumbered": {
+    "placeholders": {
+      "similarity": {
+        "type": "String"
+      },
+      "vendorName": {
+        "type": "String"
+      },
+      "crossEntityCount": {
+        "type": "int"
+      }
+    }
+  },
+  "invoiceWarningDuplicateSimilarUnnumberedUnnamedVendor": "Potential duplicate: {similarity} match to another invoice{crossEntityCount, plural, =0 {} one { (plus {crossEntityCount} near-identical invoice under another entity)} other { (plus {crossEntityCount} near-identical invoices under another entity)}}",
+  "@invoiceWarningDuplicateSimilarUnnumberedUnnamedVendor": {
+    "placeholders": {
+      "similarity": {
+        "type": "String"
+      },
+      "crossEntityCount": {
+        "type": "int"
+      }
+    }
+  },
+  "invoiceWarningDuplicateSimilarCrossEntity": "Potential duplicate: {similarity} match to a near-identical invoice under another entity",
+  "@invoiceWarningDuplicateSimilarCrossEntity": {
+    "placeholders": {
+      "similarity": {
+        "type": "String"
+      }
+    }
+  },
+  "invoiceWarningRoundAmount": "Round amount: {amount}",
+  "@invoiceWarningRoundAmount": {
+    "placeholders": {
+      "amount": {
+        "type": "String"
+      }
+    }
+  },
+  "invoiceWarningFutureInvoiceDate": "Invoice date is in the future",
+  "invoiceWarningRushPayment": "Rush payment: due within {days, plural, one {{days} day} other {{days} days}} of the invoice date",
+  "@invoiceWarningRushPayment": {
+    "placeholders": {
+      "days": {
+        "type": "int"
+      }
+    }
+  },
+  "invoiceWarningPastDue": "Invoice is past due",
+  "invoiceWarningUnverifiedVendor": "Vendor is unverified",
+  "invoiceWarningPersonalEmailDomain": "Vendor email uses personal domain: {domain}",
+  "@invoiceWarningPersonalEmailDomain": {
+    "placeholders": {
+      "domain": {
+        "type": "String"
+      }
+    }
+  },
+  "invoiceWarningNewVendorLargeAmount": "New vendor (created {days, plural, one {{days} day} other {{days} days}} ago) submitting large invoice {amount}",
+  "@invoiceWarningNewVendorLargeAmount": {
+    "placeholders": {
+      "days": {
+        "type": "int"
+      },
+      "amount": {
+        "type": "String"
+      }
+    }
+  },
+  "invoiceWarningRemitToChanged": "Remit-to address changed since the last approved invoice for this vendor",
+  "invoiceWarningAmountAboveVendorMean": "Amount {amount} is {sigma}σ above this vendor's historical mean ({mean})",
+  "@invoiceWarningAmountAboveVendorMean": {
+    "placeholders": {
+      "amount": {
+        "type": "String"
+      },
+      "sigma": {
+        "type": "String"
+      },
+      "mean": {
+        "type": "String"
+      }
+    }
+  },
+  "invoiceWarningLlmAnomaly": "AI-flagged anomaly: {reason}",
+  "@invoiceWarningLlmAnomaly": {
+    "placeholders": {
+      "reason": {
+        "type": "String"
+      }
+    }
+  },
+  "invoiceWarningLineTotalMismatch": "Line items total {lineItemsTotal} but the invoice amount is {headerAmount}",
+  "@invoiceWarningLineTotalMismatch": {
+    "placeholders": {
+      "lineItemsTotal": {
+        "type": "String"
+      },
+      "headerAmount": {
+        "type": "String"
+      }
+    }
+  },
+  "invoiceWarningPriceVarianceOver": "Unit price {deltaPct} over this vendor's baseline for {item} ({unitPrice} vs {baselineUnitPrice})",
+  "@invoiceWarningPriceVarianceOver": {
+    "placeholders": {
+      "deltaPct": {
+        "type": "String"
+      },
+      "item": {
+        "type": "String"
+      },
+      "unitPrice": {
+        "type": "String"
+      },
+      "baselineUnitPrice": {
+        "type": "String"
+      }
+    }
+  },
+  "invoiceWarningPriceVarianceUnder": "Unit price {deltaPct} under this vendor's baseline for {item} ({unitPrice} vs {baselineUnitPrice})",
+  "@invoiceWarningPriceVarianceUnder": {
+    "placeholders": {
+      "deltaPct": {
+        "type": "String"
+      },
+      "item": {
+        "type": "String"
+      },
+      "unitPrice": {
+        "type": "String"
+      },
+      "baselineUnitPrice": {
+        "type": "String"
+      }
+    }
+  },
+  "invoiceWarningPoNotFound": "PO {poNumber} not found",
+  "@invoiceWarningPoNotFound": {
+    "placeholders": {
+      "poNumber": {
+        "type": "String"
+      }
+    }
+  },
+  "invoiceWarningPoAmountVariance": "Amount variance {variancePct} vs PO {poNumber} (invoice {invoiceAmount} vs PO {poTotal})",
+  "@invoiceWarningPoAmountVariance": {
+    "placeholders": {
+      "variancePct": {
+        "type": "String"
+      },
+      "poNumber": {
+        "type": "String"
+      },
+      "invoiceAmount": {
+        "type": "String"
+      },
+      "poTotal": {
+        "type": "String"
+      }
+    }
+  },
+  "invoiceWarningPoPartialReceipt": "Partial 3-way match — {matchType} match against PO {poNumber}, but only part of the ordered quantity has been received",
+  "@invoiceWarningPoPartialReceipt": {
+    "placeholders": {
+      "matchType": {
+        "type": "String"
+      },
+      "poNumber": {
+        "type": "String"
+      }
+    }
+  },
+  "invoiceWarningPoOverReceipt": "Over-receipt: {receivedQuantity} received against {orderedQuantity} ordered (+{excessQuantity}) on PO {poNumber}",
+  "@invoiceWarningPoOverReceipt": {
+    "placeholders": {
+      "receivedQuantity": {
+        "type": "String"
+      },
+      "orderedQuantity": {
+        "type": "String"
+      },
+      "excessQuantity": {
+        "type": "String"
+      },
+      "poNumber": {
+        "type": "String"
+      }
+    }
+  },
+  "invoiceWarningPoOverReceiptUnquantified": "More goods received than ordered on PO {poNumber}",
+  "@invoiceWarningPoOverReceiptUnquantified": {
+    "placeholders": {
+      "poNumber": {
+        "type": "String"
+      }
+    }
+  },
+  "invoiceWarningQualityInspectionFailed": "Failed quality inspection for PO {poNumber}",
+  "@invoiceWarningQualityInspectionFailed": {
+    "placeholders": {
+      "poNumber": {
+        "type": "String"
+      }
+    }
+  },
+  "invoiceWarningQualityInspectionFailedNotes": "Failed quality inspection for PO {poNumber}: {notes}",
+  "@invoiceWarningQualityInspectionFailedNotes": {
+    "placeholders": {
+      "poNumber": {
+        "type": "String"
+      },
+      "notes": {
+        "type": "String"
+      }
+    }
+  },
+  "invoiceWarningQualityInspectionMissing": "Quality inspection required but missing for PO {poNumber}",
+  "@invoiceWarningQualityInspectionMissing": {
+    "placeholders": {
+      "poNumber": {
+        "type": "String"
+      }
+    }
+  },
+  "invoiceWarningQualityPartialAcceptance": "Partial acceptance: {acceptedQuantity} of the ordered quantity accepted on PO {poNumber}",
+  "@invoiceWarningQualityPartialAcceptance": {
+    "placeholders": {
+      "acceptedQuantity": {
+        "type": "String"
+      },
+      "poNumber": {
+        "type": "String"
+      }
+    }
+  },
+  "invoiceWarningQualityPartialAcceptanceUnquantified": "Partial quality acceptance on inspection for PO {poNumber}",
+  "@invoiceWarningQualityPartialAcceptanceUnquantified": {
+    "placeholders": {
+      "poNumber": {
+        "type": "String"
+      }
+    }
+  },
+  "invoiceWarningRecurringVarianceOver": "Amount {amount} is {deltaPct} over the recurring template “{templateName}” expected amount {expectedAmount}",
+  "@invoiceWarningRecurringVarianceOver": {
+    "placeholders": {
+      "amount": {
+        "type": "String"
+      },
+      "deltaPct": {
+        "type": "String"
+      },
+      "templateName": {
+        "type": "String"
+      },
+      "expectedAmount": {
+        "type": "String"
+      }
+    }
+  },
+  "invoiceWarningRecurringVarianceUnder": "Amount {amount} is {deltaPct} under the recurring template “{templateName}” expected amount {expectedAmount}",
+  "@invoiceWarningRecurringVarianceUnder": {
+    "placeholders": {
+      "amount": {
+        "type": "String"
+      },
+      "deltaPct": {
+        "type": "String"
+      },
+      "templateName": {
+        "type": "String"
+      },
+      "expectedAmount": {
+        "type": "String"
+      }
+    }
+  },
+  "invoiceWarningContractExpired": "Invoice dated {invoiceDate} is after contract {contractNumber} expired ({endDate})",
+  "@invoiceWarningContractExpired": {
+    "placeholders": {
+      "invoiceDate": {
+        "type": "String"
+      },
+      "contractNumber": {
+        "type": "String"
+      },
+      "endDate": {
+        "type": "String"
+      }
+    }
+  },
+  "invoiceWarningContractNotStarted": "Invoice dated {invoiceDate} predates contract {contractNumber} start ({startDate})",
+  "@invoiceWarningContractNotStarted": {
+    "placeholders": {
+      "invoiceDate": {
+        "type": "String"
+      },
+      "contractNumber": {
+        "type": "String"
+      },
+      "startDate": {
+        "type": "String"
+      }
+    }
+  },
+  "invoiceWarningContractTerminated": "Spend recorded against terminated contract {contractNumber}",
+  "@invoiceWarningContractTerminated": {
+    "placeholders": {
+      "contractNumber": {
+        "type": "String"
+      }
+    }
+  },
+  "invoiceWarningContractCancelled": "Spend recorded against cancelled contract {contractNumber}",
+  "@invoiceWarningContractCancelled": {
+    "placeholders": {
+      "contractNumber": {
+        "type": "String"
+      }
+    }
+  },
+  "invoiceWarningContractVendorMismatch": "Invoice vendor does not match contract {contractNumber} vendor",
+  "@invoiceWarningContractVendorMismatch": {
+    "placeholders": {
+      "contractNumber": {
+        "type": "String"
+      }
+    }
+  },
+  "invoiceWarningContractSpendLimitExceeded": "Cumulative spend {cumulativeSpend} exceeds contract {contractNumber} limit {spendLimit}",
+  "@invoiceWarningContractSpendLimitExceeded": {
+    "placeholders": {
+      "cumulativeSpend": {
+        "type": "String"
+      },
+      "contractNumber": {
+        "type": "String"
+      },
+      "spendLimit": {
+        "type": "String"
+      }
+    }
+  },
+  "invoiceWarningContractSpendLimitExceededNotToExceed": "Cumulative spend {cumulativeSpend} exceeds contract {contractNumber} limit {spendLimit} (not-to-exceed)",
+  "@invoiceWarningContractSpendLimitExceededNotToExceed": {
+    "placeholders": {
+      "cumulativeSpend": {
+        "type": "String"
+      },
+      "contractNumber": {
+        "type": "String"
+      },
+      "spendLimit": {
+        "type": "String"
+      }
+    }
+  },
+  "invoiceWarningContractGlNotAllowed": "GL account {glAccount} is outside contract {contractNumber} allowed accounts",
+  "@invoiceWarningContractGlNotAllowed": {
+    "placeholders": {
+      "glAccount": {
+        "type": "String"
+      },
+      "contractNumber": {
+        "type": "String"
+      }
+    }
+  },
+  "invoiceWarningSelfCorrectionTotalReconciliation": "Amounts don't add up: subtotal ({subtotal}) + tax ({tax}) + shipping ({shipping}) − discount ({discount}) = {expected}, but total is {amount}.",
+  "@invoiceWarningSelfCorrectionTotalReconciliation": {
+    "placeholders": {
+      "subtotal": {
+        "type": "String"
+      },
+      "tax": {
+        "type": "String"
+      },
+      "shipping": {
+        "type": "String"
+      },
+      "discount": {
+        "type": "String"
+      },
+      "expected": {
+        "type": "String"
+      },
+      "amount": {
+        "type": "String"
+      }
+    }
+  },
+  "invoiceWarningSelfCorrectionDateOrdering": "Due date ({dueDate}) is before invoice date ({invoiceDate}).",
+  "@invoiceWarningSelfCorrectionDateOrdering": {
+    "placeholders": {
+      "dueDate": {
+        "type": "String"
+      },
+      "invoiceDate": {
+        "type": "String"
+      }
+    }
+  },
+  "invoiceWarningSelfCorrectionLineItemsSum": "Line items total ({lineItemsTotal}) doesn't match invoice amount ({amount}).",
+  "@invoiceWarningSelfCorrectionLineItemsSum": {
+    "placeholders": {
+      "lineItemsTotal": {
+        "type": "String"
+      },
+      "amount": {
+        "type": "String"
+      }
+    }
+  },
+  "invoiceWarningSelfCorrectionLineItemMath": "Line {lineNumber}: {quantity} × {unitPrice} = {expected}, but total is {total}.",
+  "@invoiceWarningSelfCorrectionLineItemMath": {
+    "placeholders": {
+      "lineNumber": {
+        "type": "String"
+      },
+      "quantity": {
+        "type": "String"
+      },
+      "unitPrice": {
+        "type": "String"
+      },
+      "expected": {
+        "type": "String"
+      },
+      "total": {
+        "type": "String"
+      }
+    }
+  },
+  "invoiceWarningGlCodesNotInChart": "AI suggested GL code(s) not in active chart: {codes}",
+  "@invoiceWarningGlCodesNotInChart": {
+    "placeholders": {
+      "codes": {
+        "type": "String"
+      }
+    }
+  },
+  "invoiceWarningGlCodeStalePrior": "Cached vendor GL code “{code}” is no longer in the active chart of accounts.",
+  "@invoiceWarningGlCodeStalePrior": {
+    "placeholders": {
+      "code": {
+        "type": "String"
+      }
+    }
+  }
 }

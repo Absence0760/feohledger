@@ -2138,4 +2138,369 @@ class AppLocalizationsEs extends AppLocalizations {
   @override
   String get adaptiveAnomaliesInsufficient =>
       'Todavía no hay suficiente historial para este proveedor.';
+
+  @override
+  String get invoiceWarningMissingVendorName => 'Falta el nombre del proveedor';
+
+  @override
+  String get invoiceWarningMissingInvoiceNumber => 'Falta el número de factura';
+
+  @override
+  String get invoiceWarningMissingAmount => 'Importe ausente o cero';
+
+  @override
+  String get invoiceWarningDuplicateInvoiceNumber =>
+      'Número de factura duplicado para este proveedor';
+
+  @override
+  String invoiceWarningDuplicateSimilar(
+    String similarity,
+    String invoiceNumber,
+    String vendorName,
+    int crossEntityCount,
+  ) {
+    String _temp0 = intl.Intl.pluralLogic(
+      crossEntityCount,
+      locale: localeName,
+      other: ' (más $crossEntityCount facturas casi idénticas en otra entidad)',
+      one: ' (más $crossEntityCount factura casi idéntica en otra entidad)',
+      zero: '',
+    );
+    return 'Posible duplicado: $similarity de coincidencia con $invoiceNumber de $vendorName$_temp0';
+  }
+
+  @override
+  String invoiceWarningDuplicateSimilarUnnamedVendor(
+    String similarity,
+    String invoiceNumber,
+    int crossEntityCount,
+  ) {
+    String _temp0 = intl.Intl.pluralLogic(
+      crossEntityCount,
+      locale: localeName,
+      other: ' (más $crossEntityCount facturas casi idénticas en otra entidad)',
+      one: ' (más $crossEntityCount factura casi idéntica en otra entidad)',
+      zero: '',
+    );
+    return 'Posible duplicado: $similarity de coincidencia con $invoiceNumber$_temp0';
+  }
+
+  @override
+  String invoiceWarningDuplicateSimilarUnnumbered(
+    String similarity,
+    String vendorName,
+    int crossEntityCount,
+  ) {
+    String _temp0 = intl.Intl.pluralLogic(
+      crossEntityCount,
+      locale: localeName,
+      other: ' (más $crossEntityCount facturas casi idénticas en otra entidad)',
+      one: ' (más $crossEntityCount factura casi idéntica en otra entidad)',
+      zero: '',
+    );
+    return 'Posible duplicado: $similarity de coincidencia con otra factura de $vendorName$_temp0';
+  }
+
+  @override
+  String invoiceWarningDuplicateSimilarUnnumberedUnnamedVendor(
+    String similarity,
+    int crossEntityCount,
+  ) {
+    String _temp0 = intl.Intl.pluralLogic(
+      crossEntityCount,
+      locale: localeName,
+      other: ' (más $crossEntityCount facturas casi idénticas en otra entidad)',
+      one: ' (más $crossEntityCount factura casi idéntica en otra entidad)',
+      zero: '',
+    );
+    return 'Posible duplicado: $similarity de coincidencia con otra factura$_temp0';
+  }
+
+  @override
+  String invoiceWarningDuplicateSimilarCrossEntity(String similarity) {
+    return 'Posible duplicado: $similarity de coincidencia con una factura casi idéntica en otra entidad';
+  }
+
+  @override
+  String invoiceWarningRoundAmount(String amount) {
+    return 'Importe redondo: $amount';
+  }
+
+  @override
+  String get invoiceWarningFutureInvoiceDate =>
+      'La fecha de la factura está en el futuro';
+
+  @override
+  String invoiceWarningRushPayment(int days) {
+    String _temp0 = intl.Intl.pluralLogic(
+      days,
+      locale: localeName,
+      other: '$days días',
+      one: '$days día',
+    );
+    return 'Pago urgente: vence en $_temp0 desde la fecha de la factura';
+  }
+
+  @override
+  String get invoiceWarningPastDue => 'La factura está vencida';
+
+  @override
+  String get invoiceWarningUnverifiedVendor =>
+      'El proveedor no está verificado';
+
+  @override
+  String invoiceWarningPersonalEmailDomain(String domain) {
+    return 'El correo del proveedor usa un dominio personal: $domain';
+  }
+
+  @override
+  String invoiceWarningNewVendorLargeAmount(int days, String amount) {
+    String _temp0 = intl.Intl.pluralLogic(
+      days,
+      locale: localeName,
+      other: '$days días',
+      one: '$days día',
+    );
+    return 'Proveedor nuevo (creado hace $_temp0) que presenta una factura elevada de $amount';
+  }
+
+  @override
+  String get invoiceWarningRemitToChanged =>
+      'La dirección de pago ha cambiado desde la última factura aprobada de este proveedor';
+
+  @override
+  String invoiceWarningAmountAboveVendorMean(
+    String amount,
+    String sigma,
+    String mean,
+  ) {
+    return 'El importe $amount está $sigmaσ por encima de la media histórica de este proveedor ($mean)';
+  }
+
+  @override
+  String invoiceWarningLlmAnomaly(String reason) {
+    return 'Anomalía detectada por la IA: $reason';
+  }
+
+  @override
+  String invoiceWarningLineTotalMismatch(
+    String lineItemsTotal,
+    String headerAmount,
+  ) {
+    return 'El total de las líneas es $lineItemsTotal, pero el importe de la factura es $headerAmount';
+  }
+
+  @override
+  String invoiceWarningPriceVarianceOver(
+    String deltaPct,
+    String item,
+    String unitPrice,
+    String baselineUnitPrice,
+  ) {
+    return 'Precio unitario $deltaPct por encima de la referencia de este proveedor para $item ($unitPrice frente a $baselineUnitPrice)';
+  }
+
+  @override
+  String invoiceWarningPriceVarianceUnder(
+    String deltaPct,
+    String item,
+    String unitPrice,
+    String baselineUnitPrice,
+  ) {
+    return 'Precio unitario $deltaPct por debajo de la referencia de este proveedor para $item ($unitPrice frente a $baselineUnitPrice)';
+  }
+
+  @override
+  String invoiceWarningPoNotFound(String poNumber) {
+    return 'No se encontró el pedido $poNumber';
+  }
+
+  @override
+  String invoiceWarningPoAmountVariance(
+    String variancePct,
+    String poNumber,
+    String invoiceAmount,
+    String poTotal,
+  ) {
+    return 'Variación de importe $variancePct frente al pedido $poNumber (factura $invoiceAmount frente a pedido $poTotal)';
+  }
+
+  @override
+  String invoiceWarningPoPartialReceipt(String matchType, String poNumber) {
+    return 'Coincidencia parcial de 3 vías — coincidencia $matchType con el pedido $poNumber, pero solo se ha recibido parte de la cantidad pedida';
+  }
+
+  @override
+  String invoiceWarningPoOverReceipt(
+    String receivedQuantity,
+    String orderedQuantity,
+    String excessQuantity,
+    String poNumber,
+  ) {
+    return 'Exceso de recepción: $receivedQuantity recibidas frente a $orderedQuantity pedidas (+$excessQuantity) en el pedido $poNumber';
+  }
+
+  @override
+  String invoiceWarningPoOverReceiptUnquantified(String poNumber) {
+    return 'Se han recibido más mercancías de las pedidas en el pedido $poNumber';
+  }
+
+  @override
+  String invoiceWarningQualityInspectionFailed(String poNumber) {
+    return 'Inspección de calidad no superada para el pedido $poNumber';
+  }
+
+  @override
+  String invoiceWarningQualityInspectionFailedNotes(
+    String poNumber,
+    String notes,
+  ) {
+    return 'Inspección de calidad no superada para el pedido $poNumber: $notes';
+  }
+
+  @override
+  String invoiceWarningQualityInspectionMissing(String poNumber) {
+    return 'Se requiere inspección de calidad para el pedido $poNumber, pero no existe';
+  }
+
+  @override
+  String invoiceWarningQualityPartialAcceptance(
+    String acceptedQuantity,
+    String poNumber,
+  ) {
+    return 'Aceptación parcial: $acceptedQuantity de la cantidad pedida aceptada en el pedido $poNumber';
+  }
+
+  @override
+  String invoiceWarningQualityPartialAcceptanceUnquantified(String poNumber) {
+    return 'Aceptación parcial de calidad en la inspección del pedido $poNumber';
+  }
+
+  @override
+  String invoiceWarningRecurringVarianceOver(
+    String amount,
+    String deltaPct,
+    String templateName,
+    String expectedAmount,
+  ) {
+    return 'El importe $amount está $deltaPct por encima del importe previsto $expectedAmount de la plantilla recurrente «$templateName»';
+  }
+
+  @override
+  String invoiceWarningRecurringVarianceUnder(
+    String amount,
+    String deltaPct,
+    String templateName,
+    String expectedAmount,
+  ) {
+    return 'El importe $amount está $deltaPct por debajo del importe previsto $expectedAmount de la plantilla recurrente «$templateName»';
+  }
+
+  @override
+  String invoiceWarningContractExpired(
+    String invoiceDate,
+    String contractNumber,
+    String endDate,
+  ) {
+    return 'La factura con fecha $invoiceDate es posterior al vencimiento del contrato $contractNumber ($endDate)';
+  }
+
+  @override
+  String invoiceWarningContractNotStarted(
+    String invoiceDate,
+    String contractNumber,
+    String startDate,
+  ) {
+    return 'La factura con fecha $invoiceDate es anterior al inicio del contrato $contractNumber ($startDate)';
+  }
+
+  @override
+  String invoiceWarningContractTerminated(String contractNumber) {
+    return 'Gasto registrado contra el contrato rescindido $contractNumber';
+  }
+
+  @override
+  String invoiceWarningContractCancelled(String contractNumber) {
+    return 'Gasto registrado contra el contrato cancelado $contractNumber';
+  }
+
+  @override
+  String invoiceWarningContractVendorMismatch(String contractNumber) {
+    return 'El proveedor de la factura no coincide con el del contrato $contractNumber';
+  }
+
+  @override
+  String invoiceWarningContractSpendLimitExceeded(
+    String cumulativeSpend,
+    String contractNumber,
+    String spendLimit,
+  ) {
+    return 'El gasto acumulado $cumulativeSpend supera el límite $spendLimit del contrato $contractNumber';
+  }
+
+  @override
+  String invoiceWarningContractSpendLimitExceededNotToExceed(
+    String cumulativeSpend,
+    String contractNumber,
+    String spendLimit,
+  ) {
+    return 'El gasto acumulado $cumulativeSpend supera el límite $spendLimit del contrato $contractNumber (no superable)';
+  }
+
+  @override
+  String invoiceWarningContractGlNotAllowed(
+    String glAccount,
+    String contractNumber,
+  ) {
+    return 'La cuenta contable $glAccount está fuera de las cuentas permitidas del contrato $contractNumber';
+  }
+
+  @override
+  String invoiceWarningSelfCorrectionTotalReconciliation(
+    String subtotal,
+    String tax,
+    String shipping,
+    String discount,
+    String expected,
+    String amount,
+  ) {
+    return 'Los importes no cuadran: subtotal ($subtotal) + impuestos ($tax) + envío ($shipping) − descuento ($discount) = $expected, pero el total es $amount.';
+  }
+
+  @override
+  String invoiceWarningSelfCorrectionDateOrdering(
+    String dueDate,
+    String invoiceDate,
+  ) {
+    return 'La fecha de vencimiento ($dueDate) es anterior a la fecha de la factura ($invoiceDate).';
+  }
+
+  @override
+  String invoiceWarningSelfCorrectionLineItemsSum(
+    String lineItemsTotal,
+    String amount,
+  ) {
+    return 'El total de las líneas ($lineItemsTotal) no coincide con el importe de la factura ($amount).';
+  }
+
+  @override
+  String invoiceWarningSelfCorrectionLineItemMath(
+    String lineNumber,
+    String quantity,
+    String unitPrice,
+    String expected,
+    String total,
+  ) {
+    return 'Línea $lineNumber: $quantity × $unitPrice = $expected, pero el total es $total.';
+  }
+
+  @override
+  String invoiceWarningGlCodesNotInChart(String codes) {
+    return 'Cuentas contables sugeridas por la IA que no están en el plan activo: $codes';
+  }
+
+  @override
+  String invoiceWarningGlCodeStalePrior(String code) {
+    return 'La cuenta contable «$code» guardada para el proveedor ya no está en el plan de cuentas activo.';
+  }
 }

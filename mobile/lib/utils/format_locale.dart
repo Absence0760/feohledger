@@ -68,7 +68,16 @@ bool setActiveFormatLocale(String? locale) {
 String? dateFormatLocale([String? override]) {
   final locale = override ?? _activeFormatLocale;
   if (locale == null) return null;
-  return DateFormat.localeExists(locale) ? locale : null;
+  try {
+    return DateFormat.localeExists(locale) ? locale : null;
+  } on Exception {
+    // `LocaleDataException`, which `package:intl` does not export, so it
+    // cannot be named here. It means no date symbols have been loaded AT ALL
+    // — a plain Dart test, or a formatter reached before the localizations
+    // delegate ran. That is the same answer as "none for this locale", and
+    // the check throwing is not a reason to fail a render.
+    return null;
+  }
 }
 
 /// Keeps [activeFormatLocale] equal to the locale `MaterialApp` resolved.
