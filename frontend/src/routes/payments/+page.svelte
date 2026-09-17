@@ -1860,11 +1860,11 @@
 						>
 							{selectingAllQueue
 								? m('common.loading')
-								: m('payments.queue.selectAllMatching', { total: queueSelectableTotal })}
+								: m('common.selectAllMatching', { total: queueSelectableTotal })}
 						</button>
 					{:else if selectedAllQueueMatching}
 						<span class="pay-bar-all-matching" data-testid="queue-all-matching-note"
-							>{m('payments.queue.allMatchingSelected')}</span
+							>{m('common.allMatchingSelected')}</span
 						>
 					{/if}
 					{#if !showReview}

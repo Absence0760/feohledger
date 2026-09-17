@@ -94,6 +94,27 @@ export const messages = {
 	'common.loadFailed': 'このリストを読み込めませんでした。更新して再試行してください。',
 	'common.amountInvalid': '金額は 1200 や 1200.50 のような数値で入力してください',
 
+	// Cookie / consent banner (lib/components/ConsentBanner.svelte) — see en.ts.
+
+	'consent.ariaLabel': 'Cookie とプライバシーに関する同意',
+	'consent.title': 'プライバシーの選択',
+	'consent.bodyNecessary':
+		'当社は、アプリの動作に必須のストレージ（ログインとセッションの保持）を使用します。これはここでの選択にかかわらず機能します。',
+	'consent.bodyNoAnalytics': '現在、分析や追跡のためのストレージは一切読み込んでいません。',
+	'consent.bodyRecorded': '選択内容はここで記録され、今後導入する任意のストレージにも適用されます。',
+	'consent.bodyNotice': '詳細は{cookieNotice}をご覧ください。',
+	'consent.cookieNotice': 'Cookie に関するお知らせ',
+	'consent.manage': '管理',
+	'consent.hideDetails': '詳細を隠す',
+	'consent.necessaryTerm': '必須（常に有効）',
+	'consent.necessaryDesc':
+		'認証トークンとセッション状態です。ログインとアプリの利用に必要で、無効にはできません。',
+	'consent.analyticsTerm': '分析（任意）',
+	'consent.analyticsDesc':
+		'このカテゴリでは現在何も読み込んでいません。製品分析を追加する場合は、同意いただくまで無効のままとし、何かを保存する前に Cookie に関するお知らせを更新します。',
+	'consent.reject': '必須以外を拒否',
+	'consent.accept': 'すべて受け入れる',
+
 	// Profile → Language picker
 	'profile.language.heading': '言語',
 	'profile.language.hint':
@@ -212,6 +233,13 @@ export const messages = {
 	'common.search': '検索',
 	'common.clear': 'クリア',
 	'common.apply': '適用',
+
+	// Bulk selection, shared by every list that offers it — see en.ts.
+
+	'common.bulkActions': '一括操作',
+	'common.nSelected': '{n, plural, other {#件を選択中}}',
+	'common.selectAllMatching': '一致する {total} 件すべてを選択',
+	'common.allMatchingSelected': '一致するものをすべて選択しました',
 	'common.contrastWarning':
 		'この色に白文字を載せるとコントラスト比は {ratio} です。WCAG AA は 4.5:1 を求めるため、これを使うボタンやチップは読みにくくなります。',
 
@@ -432,8 +460,6 @@ export const messages = {
 	'payments.queue.discountBy': '{date}までに{percent}%',
 	'payments.queue.loadMore': 'さらに読み込む（{total} 件中 {shown} 件）',
 	'payments.queue.showingAll': '{total, plural, other {# 件すべてを表示中}}',
-	'payments.queue.selectAllMatching': '一致する {total} 件すべてを選択',
-	'payments.queue.allMatchingSelected': '一致するものをすべて選択しました',
 	'payments.queue.selectedAllMatching': '{n, plural, other {一致する請求書 # 件すべてを選択しました}}',
 	'payments.queue.selectAllTruncated':
 		'一致する {total} 件のうち最初の {shown} 件を選択しました — 残りを選択するには行をいくつか外してください。',
@@ -901,6 +927,11 @@ export const messages = {
 	'exceptions.filter.allTypes': 'すべてのタイプ',
 	'exceptions.col.type': 'タイプ',
 	'exceptions.col.severity': '重大度',
+
+	// Exception-severity labels — see en.ts.
+	'exceptions.severity.error': 'エラー',
+	'exceptions.severity.warning': '警告',
+	'exceptions.severity.info': '情報',
 	'exceptions.col.invoice': '請求書',
 	'exceptions.col.vendor': '取引先',
 	'exceptions.col.amount': '金額',

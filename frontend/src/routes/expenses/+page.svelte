@@ -1698,10 +1698,12 @@
 		{#snippet actions()}
 			{#if allSelected && !selectedAllMatching && expenseStore.total > expenseStore.all.length}
 				<button class="bulk-action-btn secondary" disabled={selectingAllMatching} onclick={selectAllMatching}>
-					{selectingAllMatching ? m('common.loading') : `Select all ${expenseStore.total} matching`}
+					{selectingAllMatching
+						? m('common.loading')
+						: m('common.selectAllMatching', { total: expenseStore.total })}
 				</button>
 			{:else if selectedAllMatching}
-				<span class="bulk-all-matching-note">All matching selected</span>
+				<span class="bulk-all-matching-note">{m('common.allMatchingSelected')}</span>
 			{/if}
 			<select class="bulk-gl-select" bind:value={bulkGl} aria-label={m('expenses.bulk.glAria')} disabled={bulkBusy}>
 				<option value="">{m('expenses.bulk.clearGl')}</option>

@@ -428,10 +428,12 @@
 			{#snippet actions()}
 				{#if allSelected && !selectedAllMatching && contractStore.total > contractStore.all.length}
 					<button class="bulk-action-btn secondary" disabled={selectingAllMatching} onclick={selectAllMatching}>
-						{selectingAllMatching ? m('common.loading') : `Select all ${contractStore.total} matching`}
+						{selectingAllMatching
+							? m('common.loading')
+							: m('common.selectAllMatching', { total: contractStore.total })}
 					</button>
 				{:else if selectedAllMatching}
-					<span class="bulk-all-matching-note">All matching selected</span>
+					<span class="bulk-all-matching-note">{m('common.allMatchingSelected')}</span>
 				{/if}
 				<select class="bulk-status-select" bind:value={bulkAction} aria-label={m('contracts.bulk.newStatusAria')} disabled={bulkBusy}>
 					<option value="activate">{m('contracts.modal.lifecycle.activate')}</option>

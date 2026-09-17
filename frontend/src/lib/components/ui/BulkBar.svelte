@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
+	import { m } from '$lib/i18n/store.svelte';
 
 	let {
 		count,
@@ -18,9 +19,9 @@
 </script>
 
 {#if count > 0}
-	<div class="bulk-bar" role="toolbar" aria-label="Bulk actions">
-		<span class="bulk-count">{count} selected</span>
-		<button class="bulk-clear" type="button" onclick={onclear}>Clear</button>
+	<div class="bulk-bar" role="toolbar" aria-label={m('common.bulkActions')}>
+		<span class="bulk-count">{m('common.nSelected', { n: count })}</span>
+		<button class="bulk-clear" type="button" onclick={onclear}>{m('common.clear')}</button>
 		<div class="bulk-divider"></div>
 		{@render actions()}
 	</div>

@@ -1,11 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import { en } from '$lib/i18n/locales/en';
 import {
+	EXCEPTION_SEVERITIES,
+	EXCEPTION_SEVERITY_LABEL_KEYS,
 	EXCEPTION_STATUS_LABEL_KEYS,
 	EXCEPTION_STATUS_TONES,
 	EXCEPTION_STATUSES,
 	EXCEPTION_TYPES,
 	EXCEPTION_TYPE_LABEL_KEYS,
+	exceptionSeverityLabelKey,
 	exceptionStatusLabelKey,
 	exceptionStatusTone,
 	exceptionTypeFallback,
@@ -39,8 +42,23 @@ import {
 const RAW = import.meta.glob(
 	[
 		'../../../../backend/app/api/exceptions.py',
+		'../../../../backend/app/models/exception.py',
 		'../../../../backend/app/services/exception_lifecycle.py'
 	],
+	{ query: '?raw', import: 'default', eager: true }
+) as Record<string, string>;
+
+/**
+ * Every module that can construct an `Exception(...)`, for the severity roster.
+ *
+ * Wider than the three files above on purpose: the severity vocabulary has no
+ * backend constant to read, so the only complete statement of it is the set of
+ * literals the raising sites write. A narrower, hand-listed glob would go stale
+ * the first time a new service raises one — which is precisely the drift this
+ * guard exists to catch.
+ */
+const BACKEND_SOURCES = import.meta.glob(
+	['../../../../backend/app/api/*.py', '../../../../backend/app/services/**/*.py'],
 	{ query: '?raw', import: 'default', eager: true }
 ) as Record<string, string>;
 
@@ -188,5 +206,80 @@ describe('exception lifecycle status vocabulary', () => {
 		expect(exceptionStatusLabelKey('awaiting_vendor')).toBeNull();
 		expect(exceptionStatusTone('escalated')).toBe('danger');
 		expect(exceptionStatusTone('awaiting_vendor')).toBe('neutral');
+	});
+});
+
+describe('exception severity vocabulary', () => {
+	/**
+	 * The backend declares the severity roster in a COMMENT on the column and
+	 * nowhere else:
+	 *
+	 *     severity: Mapped[str] = mapped_column(String(20), default="warning")  # error, warning, info
+	 *
+	 * There is no `EXCEPTION_SEVERITIES` tuple to import the way there is for
+	 * the type roster. So the guard reads both halves of what does exist — that
+	 * comment, and every `severity="…"` a raising site actually writes — and a
+	 * fourth severity fails here whichever way it arrives. If the backend grows
+	 * a real constant, move this onto it.
+	 */
+	function modelComment(): string[] {
+		const py = source('models/exception.py');
+		const line = /severity:\s*Mapped\[str\][^\n]*?#\s*([a-z0-9_, ]+)/.exec(py);
+		expect(line, 'the severity column comment stopped matching — did it move or change shape?')
+			.not.toBeNull();
+		return line![1]
+			.split(',')
+			.map((s) => s.trim())
+			.filter(Boolean);
+	}
+
+	/** The column default, which must itself be a severity we can label. */
+	function modelDefault(): string {
+		const py = source('models/exception.py');
+		const hit = /severity:\s*Mapped\[str\]\s*=\s*mapped_column\([^\n]*?default="([a-z_]+)"/.exec(py);
+		expect(hit, 'the severity column default stopped matching').not.toBeNull();
+		return hit![1];
+	}
+
+	/** Every `severity="…"` literal anywhere a backend module raises one. */
+	function raisedSeverities(): Set<string> {
+		const found = new Set<string>();
+		for (const py of Object.values(BACKEND_SOURCES)) {
+			for (const hit of py.matchAll(/\bseverity="([a-z_]+)"/g)) found.add(hit[1]);
+		}
+		expect(found.size, 'no severity literals found — the scan stopped matching').toBeGreaterThan(
+			1
+		);
+		return found;
+	}
+
+	it('carries the roster the column comment declares', () => {
+		expect([...EXCEPTION_SEVERITIES]).toEqual(modelComment());
+	});
+
+	it('labels the column default', () => {
+		// A row that never had a severity set still renders one.
+		expect(EXCEPTION_SEVERITY_LABEL_KEYS).toHaveProperty(modelDefault());
+	});
+
+	it('labels every severity a backend module actually raises', () => {
+		// The half that catches a real fourth value: a new service can write
+		// `severity="critical"` without anyone touching the column's comment,
+		// and the cell would silently print `critical` in lowercase Latin.
+		const unlabelled = [...raisedSeverities()]
+			.filter((s) => !(s in EXCEPTION_SEVERITY_LABEL_KEYS))
+			.sort();
+		expect(unlabelled, 'these severities are raised but have no label').toEqual([]);
+	});
+
+	it('resolves every key in the English catalogue', () => {
+		for (const key of Object.values(EXCEPTION_SEVERITY_LABEL_KEYS)) {
+			expect(en, `${key} is missing from en.ts`).toHaveProperty(key);
+		}
+	});
+
+	it('is tolerant: an unknown severity keeps its raw value', () => {
+		expect(exceptionSeverityLabelKey('error')).toBe('exceptions.severity.error');
+		expect(exceptionSeverityLabelKey('critical')).toBeNull();
 	});
 });

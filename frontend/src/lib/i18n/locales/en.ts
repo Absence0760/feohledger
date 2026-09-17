@@ -99,6 +99,41 @@ export const en = {
 	'common.loadFailed': 'Couldn’t load this list. Refresh to try again.',
 	'common.amountInvalid': 'Enter the amount as a plain number, e.g. 1200 or 1200.50',
 
+	// Cookie / consent banner (lib/components/ConsentBanner.svelte). It mounts
+	// from the root layout, so it is the FIRST thing a non-English visitor sees
+	// and the one surface they must interact with to dismiss. It is also the
+	// ePrivacy Art 5(3) consent gate, and consent has to be *informed* — a
+	// dialog the reader cannot read is weak evidence that consent was given, so
+	// these keys are a compliance requirement and not only an i18n one.
+	//
+	// The body is FOUR whole sentences rather than one string, because the two
+	// bits of inline markup in it want different treatment: `bodyNoAnalytics` is
+	// a complete sentence carried inside `<strong>` (the emphasis is the claim),
+	// and `bodyNotice` carries its link as a `{cookieNotice}` token rendered
+	// through `ui/LinkedMessage.svelte`. No sentence is cut around an insert —
+	// that is the `…Pre`/`…Post` shape `i18n/segments.ts` exists to avoid — so a
+	// translator still controls word order everywhere it matters.
+
+	'consent.ariaLabel': 'Cookie and privacy consent',
+	'consent.title': 'Your privacy choices',
+	'consent.bodyNecessary':
+		'We use storage that is strictly necessary to run the app — signing you in and keeping your session — which works regardless of your choice here.',
+	'consent.bodyNoAnalytics': 'We load no analytics or tracking storage today.',
+	'consent.bodyRecorded':
+		'Your choice is recorded now and governs any optional storage we introduce later.',
+	'consent.bodyNotice': 'Full detail is in the {cookieNotice}.',
+	'consent.cookieNotice': 'Cookie Notice',
+	'consent.manage': 'Manage',
+	'consent.hideDetails': 'Hide details',
+	'consent.necessaryTerm': 'Strictly necessary (always on)',
+	'consent.necessaryDesc':
+		'Authentication token and session state. Required to log in and use the app; cannot be turned off.',
+	'consent.analyticsTerm': 'Analytics (optional)',
+	'consent.analyticsDesc':
+		'Nothing is loaded under this category today. If product analytics is added, it stays off unless you have accepted it, and the Cookie Notice is updated before anything is set.',
+	'consent.reject': 'Reject non-essential',
+	'consent.accept': 'Accept all',
+
 	// Profile → Language picker (profile/+page.svelte)
 	'profile.language.heading': 'Language',
 	'profile.language.hint':
@@ -225,6 +260,28 @@ export const en = {
 	'common.search': 'Search',
 	'common.clear': 'Clear',
 	'common.apply': 'Apply',
+
+	// Bulk selection, shared by EVERY list that offers it (ui/BulkBar.svelte and
+	// the two lists — /invoices and /payments — that render their own bar).
+	//
+	// `common.*` and not a per-route namespace: the wording is identical on all
+	// six surfaces and the only variable is `{total}`, which is the
+	// `common.all` / `common.loading` case exactly. Five routes inlined
+	// `` `Select all ${total} matching` `` as a literal while /payments kept a
+	// private `payments.queue.*` pair, and the other five could not borrow it
+	// without reaching into a sibling's namespace (decisions §155). The
+	// alternative — moving the copy into `ui/BulkBar.svelte` — reaches only four
+	// of the six, because /invoices and /payments never import that component.
+	//
+	// The five non-English values name the thing counted ("items", "Einträge",
+	// "éléments") rather than agreeing with an implied noun: the payments-only
+	// wording they replace was feminine, because it was written when invoices
+	// were the only rows it counted, and it read wrong over vendors.
+
+	'common.bulkActions': 'Bulk actions',
+	'common.nSelected': '{n, plural, one {# selected} other {# selected}}',
+	'common.selectAllMatching': 'Select all {total} matching',
+	'common.allMatchingSelected': 'All matching selected',
 	// Advisory shown under a brand "strong accent" colour field. Shared by the
 	// org Branding panel and the partner child-branding modal so the two can't
 	// give a tenant different advice about the same setting.
@@ -470,8 +527,6 @@ export const en = {
 	'payments.queue.loadMore': 'Load more ({shown} of {total})',
 	'payments.queue.showingAll':
 		'{total, plural, one {Showing all # invoice} other {Showing all # invoices}}',
-	'payments.queue.selectAllMatching': 'Select all {total} matching',
-	'payments.queue.allMatchingSelected': 'All matching selected',
 	'payments.queue.selectedAllMatching':
 		'{n, plural, one {Selected all # matching invoice} other {Selected all # matching invoices}}',
 	'payments.queue.selectAllTruncated':
@@ -993,6 +1048,17 @@ export const en = {
 	'exceptions.filter.allTypes': 'All types',
 	'exceptions.col.type': 'Type',
 	'exceptions.col.severity': 'Sev',
+
+	// Exception-severity labels ($lib/types/exception.ts::EXCEPTION_SEVERITY_LABEL_KEYS).
+	// The queue's `severity` cell printed the raw wire value (`error` / `warning`
+	// / `info`, lowercase Latin) beside a type and a status that were already
+	// translated. The backend declares the roster in a comment on
+	// `models/exception.py`'s column and nowhere else, so `exception.test.ts`
+	// pins these three against that comment AND against every `severity="…"` a
+	// raising site actually writes.
+	'exceptions.severity.error': 'Error',
+	'exceptions.severity.warning': 'Warning',
+	'exceptions.severity.info': 'Info',
 	'exceptions.col.invoice': 'Invoice',
 	'exceptions.col.vendor': 'Vendor',
 	'exceptions.col.amount': 'Amount',
