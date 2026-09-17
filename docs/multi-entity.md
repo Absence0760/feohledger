@@ -317,6 +317,38 @@ previously filtered by `organization_id` only:
 
 Single-entity tenants are a no-op (every account is shared or under the one entity).
 
+#### The pickers say which chart an option comes from
+
+The five GL pickers in the web app (invoice header coding, invoice line items,
+expense coding, requisition lines, catalog items) read the same list, and in the
+**consolidated** view (`X-Entity-ID` absent) that list is every subsidiary's
+chart at once — so two subsidiaries' legitimate `6000` rows arrive together. They
+render through one helper, `types/glAccount.ts::glAccountOptionLabel`, which
+appends the owning entity's name to an **entity-scoped** option and leaves a
+**shared** one (NULL `entity_id`) bare — the same shared-vs-owned distinction the
+`/gl-accounts` Scope column draws, gated on the same `entityStore.multiEntity`,
+so a single-entity tenant sees no change. It never fires with an entity selected,
+because a code is unique within one effective chart.
+
+**What a picker binds differs by surface, and that is the data model.** The
+expense / requisition / catalog pickers bind the uuid `id`, because
+`Expense.gl_account_id`, `RequisitionLineItem.gl_account_id` and
+`CatalogItem.gl_account_id` are real FKs to `gl_accounts.id`. The two invoice
+modals bind the **code**, because `Invoice.gl_account` and
+`InvoiceLineItem.gl_account` are `String(100)` columns holding the code — and
+budget-dimension matching, the report builder, the PO-match commodity resolver,
+approval routing rules, the 1099 box map, the vendor GL priors and the extraction
+catalog all read that string as the code. Moving the invoice pickers to the uuid
+would write a uuid into that column and break every one of them.
+
+That leaves one gap the label makes visible rather than closes: in the
+consolidated view a user can still pick subsidiary B's `6000` for a subsidiary-A
+invoice, and the stored string `"6000"` then resolves against A's chart. Closing
+it means scoping the picker to the invoice's own effective chart, which the
+client cannot do today — `InvoiceResponse` does not carry the invoice's
+`entity_id` (only `counterparty_entity_id`), and no manual write validates
+`gl_account` against the chart the way `gl_recode` does for a bulk re-code.
+
 ### Per-entity workflow selection
 
 `workflow_engine.get_or_create_workflow_definition(db, organization_id, entity_id=None)`
