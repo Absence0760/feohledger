@@ -53,33 +53,11 @@ test.describe('screen-reader navigability — core flow', () => {
 		}
 	});
 
-	test('key pages reflow without horizontal scroll at 320px (WCAG 1.4.10)', async ({ page }) => {
-		// At a 320px viewport the sidebar auto-collapses to its icon rail and the
-		// content must reflow — no page-level horizontal scrollbar. Data tables
-		// are exempt (they scroll inside their own overflow-x container).
-		//
-		// `/contracts` is here deliberately: it is the only path in this list
-		// that sits inside a NAV *group*, so it is the only one that renders
-		// `SectionTabs` at all. Every route this test checked before was a
-		// top-level link, where `groupForPath` returns null and the tab bar
-		// never mounts — which is why a tab row that scrolled the whole document
-		// (Billing 9 tabs, Settings 15 before the Governance / Automation split)
-		// went unnoticed here. Billing's 9 tabs make it the widest surviving
-		// group, so it is the right one to pin.
-		//
-		// `/organization` is NOT in this list, and that is a known gap rather
-		// than an oversight: its own content overflows 320px independently of
-		// the tab bar (docs/known-issues.md § Organization settings).
-		await page.setViewportSize({ width: 320, height: 720 });
-		for (const path of ['/', '/invoices', '/vendors', '/payments', '/contracts']) {
-			await page.goto(path);
-			await expect(page.locator('aside.sidebar').first()).toBeVisible();
-			const overflow = await page.evaluate(
-				() => document.documentElement.scrollWidth - document.documentElement.clientWidth
-			);
-			expect(overflow, `horizontal page overflow on ${path} at 320px`).toBeLessThanOrEqual(1);
-		}
-	});
+	// The 320px reflow guard (WCAG 1.4.10) used to live here, checking five
+	// hand-listed paths. It is now `a11y/reflow.spec.ts`, which enumerates
+	// `src/routes` instead so a new page is covered the day it lands — the five
+	// it named were green while six other routes, `/organization` among them,
+	// were failing the same criterion.
 
 	test('invoice dialog moves focus in on open and restores it to the trigger on Esc', async ({
 		page,

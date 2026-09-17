@@ -465,11 +465,21 @@
 					<span>{m('profile.account.fullName')}</span>
 					<input type="text" bind:value={fullName} required autocomplete="name" />
 				</label>
+				<!-- Each term/definition pair is its own wrapping row (a <div> inside
+				     a <dl> is valid and keeps the dt→dd association intact). A
+				     two-column grid could not collapse at a 320px viewport: an
+				     address like `someone@a-long-tenant.example` is one unbreakable
+				     token, so the value column's min-content pushed the whole
+				     document sideways — WCAG 1.4.10. -->
 				<dl class="readonly">
-					<dt>{m('profile.account.email')}</dt>
-					<dd>{auth.user?.email ?? '—'}</dd>
-					<dt>{m('profile.account.roles')}</dt>
-					<dd data-testid="profile-roles">{roleLabels(auth.user?.roles) || '—'}</dd>
+					<div class="pair">
+						<dt>{m('profile.account.email')}</dt>
+						<dd>{auth.user?.email ?? '—'}</dd>
+					</div>
+					<div class="pair">
+						<dt>{m('profile.account.roles')}</dt>
+						<dd data-testid="profile-roles">{roleLabels(auth.user?.roles) || '—'}</dd>
+					</div>
 				</dl>
 				<div class="actions">
 					<button
@@ -909,10 +919,31 @@
 	}
 
 	dl {
-		display: grid;
-		grid-template-columns: 120px 1fr;
-		gap: 8px 16px;
+		display: flex;
+		flex-direction: column;
+		gap: 8px;
 		margin: 0;
+	}
+
+	/* One term/definition row. Above ~300px the pair sits side by side exactly
+	   as the old `120px 1fr` grid did; below it the value drops onto its own
+	   full-width line instead of overflowing (WCAG 1.4.10). No media query:
+	   the flex basis is the breakpoint. */
+	.pair {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 2px 16px;
+	}
+
+	.pair dt {
+		flex: 0 1 120px;
+	}
+
+	.pair dd {
+		flex: 1 1 12rem;
+		min-width: 0;
+		/* An email address is a single unbreakable token. */
+		overflow-wrap: anywhere;
 	}
 
 	dl.readonly {

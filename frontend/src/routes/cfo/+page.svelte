@@ -405,30 +405,36 @@
 						{m('cfo.position.breach', { n: position.breaches.length })}
 					</p>
 				{/if}
-				<table class="cf-table">
-					<thead>
-						<tr>
-							<th>{m('cfo.position.colPeriod')}</th>
-							<th class="num">{m('cfo.position.colOpening')}</th>
-							<th class="num">{m('cfo.position.colOutflow')}</th>
-							<th class="num">{m('cfo.position.colClosing')}</th>
-						</tr>
-					</thead>
-					<tbody>
-						{#each position.periods as p (p.period)}
-							{@const ccy = position.opening_balance_currency}
-							<tr class:breach={p.below_threshold} data-breach={p.below_threshold}>
-								<td>{formatPeriod(p.period)}</td>
-								<td class="num">{fmtIn(p.opening, ccy)}</td>
-								<td class="num">-{fmtIn(p.outflow, ccy)}</td>
-								<td class="num closing">{fmtIn(p.closing, ccy)}</td>
+				<!-- A data table legitimately scrolls inside its own container when it
+				     cannot reflow (WCAG 1.4.10); without this wrapper the table pushed
+				     the whole document sideways at 320px. Same role `.grid-container`
+				     plays for the shared <DataTable>. -->
+				<div class="cf-table-scroll" tabindex="0">
+					<table class="cf-table">
+						<thead>
+							<tr>
+								<th>{m('cfo.position.colPeriod')}</th>
+								<th class="num">{m('cfo.position.colOpening')}</th>
+								<th class="num">{m('cfo.position.colOutflow')}</th>
+								<th class="num">{m('cfo.position.colClosing')}</th>
 							</tr>
-						{/each}
-						{#if position.periods.length === 0}
-							<tr><td colspan="4" class="empty">{m('cfo.position.empty')}</td></tr>
-						{/if}
-					</tbody>
-				</table>
+						</thead>
+						<tbody>
+							{#each position.periods as p (p.period)}
+								{@const ccy = position.opening_balance_currency}
+								<tr class:breach={p.below_threshold} data-breach={p.below_threshold}>
+									<td>{formatPeriod(p.period)}</td>
+									<td class="num">{fmtIn(p.opening, ccy)}</td>
+									<td class="num">-{fmtIn(p.outflow, ccy)}</td>
+									<td class="num closing">{fmtIn(p.closing, ccy)}</td>
+								</tr>
+							{/each}
+							{#if position.periods.length === 0}
+								<tr><td colspan="4" class="empty">{m('cfo.position.empty')}</td></tr>
+							{/if}
+						</tbody>
+					</table>
+				</div>
 			</div>
 		{/if}
 
@@ -476,40 +482,46 @@
 						{m('cfo.budgets.overBudget', { n: budgetsOverCount })}
 					</p>
 				{/if}
-				<table class="cf-table">
-					<thead>
-						<tr>
-							<th>{m('cfo.budgets.colCurrency')}</th>
-							<th class="num">{m('cfo.budgets.colAllocated')}</th>
-							<th class="num">{m('cfo.budgets.colCommitted')}</th>
-							<th class="num">{m('cfo.budgets.colActual')}</th>
-							<th class="num">{m('cfo.budgets.colRemaining')}</th>
-							<th class="num">{m('cfo.budgets.colUtilization')}</th>
-						</tr>
-					</thead>
-					<tbody>
-						{#each budgetRollup.by_currency as row (row.currency)}
-							{@const utilization = formatUtilization(row.utilization_pct)}
+				<!-- A data table legitimately scrolls inside its own container when it
+				     cannot reflow (WCAG 1.4.10); without this wrapper the table pushed
+				     the whole document sideways at 320px. Same role `.grid-container`
+				     plays for the shared <DataTable>. -->
+				<div class="cf-table-scroll" tabindex="0">
+					<table class="cf-table">
+						<thead>
 							<tr>
-								<td>
-									{row.currency}
-									<span class="cf-row-sub"
-										>{m('cfo.budgets.budgetCount', { n: row.budget_count })}</span
-									>
-								</td>
-								<td class="num">{fmtIn(row.allocated, row.currency)}</td>
-								<td class="num">{fmtIn(row.committed, row.currency)}</td>
-								<td class="num">{fmtIn(row.actual, row.currency)}</td>
-								<!-- `remaining` is the BACKEND's subtraction, in Decimal; the
-								     predicate only decides whether to tint it. -->
-								<td class="num" class:over={isNegativeAmount(row.remaining)}
-									>{fmtIn(row.remaining, row.currency)}</td
-								>
-								<td class="num">{utilization ?? m('cfo.budgets.noUtilization')}</td>
+								<th>{m('cfo.budgets.colCurrency')}</th>
+								<th class="num">{m('cfo.budgets.colAllocated')}</th>
+								<th class="num">{m('cfo.budgets.colCommitted')}</th>
+								<th class="num">{m('cfo.budgets.colActual')}</th>
+								<th class="num">{m('cfo.budgets.colRemaining')}</th>
+								<th class="num">{m('cfo.budgets.colUtilization')}</th>
 							</tr>
-						{/each}
-					</tbody>
-				</table>
+						</thead>
+						<tbody>
+							{#each budgetRollup.by_currency as row (row.currency)}
+								{@const utilization = formatUtilization(row.utilization_pct)}
+								<tr>
+									<td>
+										{row.currency}
+										<span class="cf-row-sub"
+											>{m('cfo.budgets.budgetCount', { n: row.budget_count })}</span
+										>
+									</td>
+									<td class="num">{fmtIn(row.allocated, row.currency)}</td>
+									<td class="num">{fmtIn(row.committed, row.currency)}</td>
+									<td class="num">{fmtIn(row.actual, row.currency)}</td>
+									<!-- `remaining` is the BACKEND's subtraction, in Decimal; the
+									     predicate only decides whether to tint it. -->
+									<td class="num" class:over={isNegativeAmount(row.remaining)}
+										>{fmtIn(row.remaining, row.currency)}</td
+									>
+									<td class="num">{utilization ?? m('cfo.budgets.noUtilization')}</td>
+								</tr>
+							{/each}
+						</tbody>
+					</table>
+				</div>
 			{/if}
 		</div>
 	{/if}
@@ -724,6 +736,14 @@
 	.cf-table td.num.over {
 		color: var(--danger);
 		font-weight: 600;
+	}
+	/* The table's own scroll container. `.chart-card` is a plain block with
+	   `overflow: visible`, so a four/six-column money table wider than the card
+	   used to push the DOCUMENT sideways rather than scroll inside the card —
+	   WCAG 1.4.10 Reflow. A table that cannot reflow is allowed to scroll in
+	   one direction; the page is not. */
+	.cf-table-scroll {
+		overflow-x: auto;
 	}
 	.cf-table {
 		width: 100%;

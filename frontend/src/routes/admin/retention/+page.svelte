@@ -200,7 +200,11 @@
 
 	.policy-row {
 		display: grid;
-		grid-template-columns: 1fr auto;
+		/* Both tracks are allowed to shrink below their content. A bare
+		   `1fr auto` floors each track at its own min-content, so the label
+		   column plus a 90px number input and its unit could not fit a 320px
+		   viewport and pushed the document sideways — WCAG 1.4.10. */
+		grid-template-columns: minmax(0, 1fr) minmax(0, auto);
 		gap: 0.25rem 1rem;
 		align-items: start;
 		padding-bottom: 1rem;
@@ -226,11 +230,15 @@
 	.policy-row-input {
 		display: flex;
 		align-items: center;
+		/* The unit drops under the field instead of widening the row when the
+		   grid track is squeezed (WCAG 1.4.10). */
+		flex-wrap: wrap;
 		gap: 0.5rem;
 	}
 
 	.policy-row-input input {
 		width: 90px;
+		max-width: 100%;
 	}
 
 	.unit {

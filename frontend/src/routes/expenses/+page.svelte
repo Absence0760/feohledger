@@ -1828,6 +1828,10 @@
 <style>
 	.tab-row {
 		display: flex;
+		/* Wraps for the same reason as the shared `ui/Tabs.svelte` tab bar this
+		   is a local copy of — a nowrap row of tabs pushes the whole document
+		   sideways at 320px (WCAG 1.4.10). */
+		flex-wrap: wrap;
 		gap: 4px;
 		border-bottom: 1px solid var(--border);
 	}

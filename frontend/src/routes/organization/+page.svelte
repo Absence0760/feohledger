@@ -3036,7 +3036,15 @@
 
 	.section-footer {
 		display: flex;
+		/* Same reason as `.erp-test-row` below: this row carries a Save button, an
+		   optional Test button and an optional result message, all of them
+		   `white-space: nowrap`. Without a wrap the row cannot shrink below its
+		   own max-content width and pushes the whole document sideways at 320px
+		   — WCAG 1.4.10. The `gap` replaces the spacing the buttons used to get
+		   for free from sitting on one line. */
+		flex-wrap: wrap;
 		justify-content: flex-start;
+		gap: 12px;
 		margin-top: 16px;
 		padding-top: 14px;
 		border-top: 1px solid var(--border);
@@ -3125,6 +3133,10 @@
 	.sync-item {
 		display: flex;
 		align-items: center;
+		/* The description and its action cannot share a line at 320px, so the
+		   action drops below the description instead of pushing the document
+		   sideways (WCAG 1.4.10). */
+		flex-wrap: wrap;
 		gap: 12px;
 		padding: 10px 12px;
 		background: var(--bg);
@@ -3133,6 +3145,10 @@
 
 	.sync-info {
 		flex: 1;
+		/* `flex: 1` leaves `min-width: auto`, so this column refuses to shrink
+		   below its longest word plus the action beside it. Zero lets it give
+		   way and the text wrap. */
+		min-width: 0;
 		display: flex;
 		flex-direction: column;
 		gap: 2px;
@@ -3159,7 +3175,14 @@
 		font-weight: 500;
 		cursor: pointer;
 		font-family: inherit;
-		white-space: nowrap;
+		/* Deliberately NOT `white-space: nowrap` (unlike `.btn-test`, whose label
+		   is two short words). These labels name their destination — "Manage on
+		   Chart of Accounts page" is 265px — so a nowrap label is wider than a
+		   320px viewport's whole content column and no amount of wrapping the
+		   ROW can rescue it: the item would still overflow on its own line.
+		   Letting the label wrap is what makes the page reflow (WCAG 1.4.10).
+		   At every width where the label fits, shrink-to-fit keeps it on one
+		   line, so nothing changes above ~460px. */
 		text-decoration: none;
 		display: inline-block;
 		text-align: center;
