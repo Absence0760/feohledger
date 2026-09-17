@@ -286,15 +286,38 @@ early. No money moves either way — a missed discount is a payment at face valu
 which is the safe direction — so this is a correctness and fairness defect, not
 a financial one.
 
-**Fix approach:** resolve `as_of` from the **organisation's** timezone rather
-than UTC at the route layer, and thread it through the same explicit `as_of`
-parameter `decline_offer` already demands (its docstring argues exactly this
-point about a default hiding the check). The org already carries a timezone for
-scheduled reports; using it here makes the business date mean what the supplier
-reads. Failing that, comparing against `valid_until + 1 day` in UTC buys the
-whole world its last day at the cost of giving some of it an extra few hours —
-worse-defined, but strictly kinder than today. Whichever lands, the test above
-becomes clock-independent by seeding an explicit date instead of `date.today()`.
+**The test half is fixed; the product defect is not.** The spec above was also
+simply non-deterministic — its docstring shows it was pinning the comparison
+operator (`valid_until < today`, so the last day is still live), not timezone
+fairness, yet it seeded from the local date and asserted against a UTC-resolving
+route, so it passed on UTC CI and failed on any host west of UTC after 20:00.
+It now anchors on `utc_today()` like `test_discounts_api.py`, and
+`test_portal_discount_offers.py` joined `UTC_TODAY_TEST_MODULES` in
+`tests/test_utc_today.py` so the pairing is enforced rather than remembered —
+the AP and portal surfaces of this feature share the boundary, exactly as
+`test_tax.py` and `test_portal_tax_forms.py` do. Verified under
+`TZ=Pacific/Kiritimati` (UTC+14) as well as EDT. **That makes the suite honest
+about the current behaviour; it does not make the behaviour right.**
+
+**Fix approach — both candidates need a decision, and the obvious one rests on
+a false premise.** An earlier draft of this entry proposed resolving `as_of`
+from the organisation's timezone, on the grounds that "the org already carries a
+timezone for scheduled reports". **It does not.** There is no timezone field on
+`Organization`, none in its settings schema, and none in `services/scheduled_reports.py`,
+which resolves its own "today" in UTC for the same reason everything else does.
+That route therefore means adding a per-org timezone — a new setting, its UI, and
+a migration — not threading an existing one.
+
+The cheap alternative, comparing against `valid_until + 1 day` in UTC, is **not
+the strictly-kinder change it looks like.** `as_of` gates `accept` as well as
+`decline`. Declining late is harmless, but *accepting* late captures a discount
+the vendor may already consider expired, which underpays them against an invoice
+they expect at face value — so a blanket day of grace trades a fairness defect
+for a payment-dispute one, in the direction the money actually moves. If it is
+taken anyway, it belongs on the decline path alone, where nothing is captured.
+
+Until one is chosen, the current UTC behaviour stands and errs toward paying
+face value, which is the safe direction.
 
 ## Organization settings overflows horizontally at 320px (WCAG 1.4.10)
 

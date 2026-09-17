@@ -14,7 +14,7 @@ sessionmaker per test, a vendor JWT client over the realdb ASGI app.
 from __future__ import annotations
 
 import uuid
-from datetime import date, timedelta
+from datetime import timedelta
 from decimal import Decimal
 
 import pytest
@@ -33,6 +33,7 @@ from app.models.payment import Payment, PaymentRun
 from app.models.vendor import Vendor
 from app.models.vendor_user import VendorUser
 from app.models.workflow import AuditLog
+from app.utils.dates import utc_today
 
 TENANT = "a"
 
@@ -94,9 +95,9 @@ async def _seed_vendor_offer(
                 tiers=tiers if tiers is not None else _TIERS,
                 base_amount=Decimal(base_amount),
                 currency="USD",
-                valid_from=(date.today() if valid_from is _UNSET else valid_from),
+                valid_from=(utc_today() if valid_from is _UNSET else valid_from),
                 valid_until=(
-                    date.today() + timedelta(days=30) if valid_until is _UNSET else valid_until
+                    utc_today() + timedelta(days=30) if valid_until is _UNSET else valid_until
                 ),
             )
         )
@@ -137,8 +138,8 @@ async def _seed_invoice_offer(
                 tiers=_TIERS,
                 base_amount=Decimal(base_amount),
                 currency="USD",
-                valid_from=date.today(),
-                valid_until=date.today() + timedelta(days=30),
+                valid_from=utc_today(),
+                valid_until=utc_today() + timedelta(days=30),
             )
         )
         await s.commit()
@@ -307,8 +308,8 @@ async def test_accept_refuses_a_tier_whose_window_has_closed(realdb):
                 tiers=_TIERS,
                 base_amount=Decimal("10000.00"),
                 currency="USD",
-                valid_from=date.today() - timedelta(days=20),
-                valid_until=date.today() + timedelta(days=10),
+                valid_from=utc_today() - timedelta(days=20),
+                valid_until=utc_today() + timedelta(days=10),
             )
         )
         await s.commit()
@@ -448,8 +449,8 @@ async def test_decline_foreign_offer_404(realdb):
 
 
 def _lapsed(**kw):
-    kw.setdefault("valid_from", date.today() - timedelta(days=60))
-    kw.setdefault("valid_until", date.today() - timedelta(days=1))
+    kw.setdefault("valid_from", utc_today() - timedelta(days=60))
+    kw.setdefault("valid_until", utc_today() - timedelta(days=1))
     return kw
 
 
@@ -575,7 +576,7 @@ async def test_decline_still_works_on_the_last_day_of_the_window(realdb):
     org_id = realdb.info(TENANT).org_id
     mk = realdb.sessionmaker(TENANT)
     vendor_id, vu_id = await _seed_vendor_and_user(mk, org_id)
-    offer_id = await _seed_vendor_offer(mk, org_id, vendor_id, valid_until=date.today())
+    offer_id = await _seed_vendor_offer(mk, org_id, vendor_id, valid_until=utc_today())
 
     async with _portal_client(realdb, vu_id, vendor_id) as client:
         resp = await client.post(f"/api/portal/discount-offers/{offer_id}/decline")
