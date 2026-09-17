@@ -521,19 +521,44 @@ to them, not appointing someone to process it on our behalf. These belong in the
   region changes, or a DPA status is confirmed. Per the project's docs-as-code
   rule, the same change that wires up a provider updates this register.
 - **CI enforces the adapter half of that** (`pnpm check:subprocessors`,
-  `scripts/check_subprocessor_registry.mjs`, run in the Frontend job). It reads
-  every `@register_*_adapter("slug")` under `backend/app/services/`, every row
-  in this file, and the prose of `/legal/sub-processors`, and **fails** when a
-  registered adapter has no row in a section documenting its own directory, or
-  when a third-party processor named here is never mentioned on the published
-  page. A section's heading has to name its source directory
-  (`` `services/card_adapters/` ``) for its rows to count — that is what makes
-  the match family-aware, since `mock` appears in a dozen families and `ses` in
-  two. It is exact rather than heuristic, which is why it fails where
-  `check_compliance_drift.mjs` only warns. It found two things on its first
-  run: `services/assistant/` had no adapter table at all (§ 1.2 now), and the
-  exception-agent rationale row still said it had no switch of its own months
-  after `FEOH_EXCEPTION_AGENT_RATIONALE_ENABLED` shipped.
+  `scripts/check_subprocessor_registry.mjs`, run in the Frontend job — which is
+  unconditional and gates merges through `ci-gate`; the Compliance-drift
+  workflow's summary points at it, because that workflow only warns and a
+  reader should not mistake this one for advisory too). It reads every provider
+  registered under `backend/app/services/`, every row in this file, and the
+  prose of `/legal/sub-processors`, and **fails** when a registered adapter has
+  no row in a section documenting its own directory, or when a third-party
+  processor named here is never mentioned on the published page. A section's
+  heading has to name its source directory (`` `services/card_adapters/` ``)
+  for its rows to count — that is what makes the match family-aware, since
+  `mock` appears in a dozen families and `ses` in two. It is exact rather than
+  heuristic, which is why it fails where `check_compliance_drift.mjs` only
+  warns. It found two things on its first run: `services/assistant/` had no
+  adapter table at all (§ 1.2 now), and the exception-agent rationale row still
+  said it had no switch of its own months after
+  `FEOH_EXCEPTION_AGENT_RATIONALE_ENABLED` shipped.
+- **"Every provider registered" means two shapes, and a check that a third
+  shape has not appeared.** Most families use a `@register_*_adapter("slug")`
+  decorator; `email_intake_adapters/` (§ 8) instead declares its providers as a
+  module-level registry dict, and while the check read only decorators **that
+  entire family was invisible to it** — `ses` and `mailgun` receive every
+  inbound invoice attachment, and a fourth provider added beside them would
+  have kept CI green. Both shapes are read now. The durable half is the third
+  rule: a directory that is a provider family (it carries the `_adapters`
+  suffix, or a heading here names it as a source directory — which is how
+  `services/assistant/` and `services/audit_shipping/` are found) and yields no
+  provider **and** no registration decorator at all is reported as
+  `unreadable-registry`. Reporting zero providers and passing is
+  indistinguishable from having nothing to declare, so the check has to say
+  which of the two it is. A family it read and found nothing third-party in is
+  fine: `positive_pay_adapters/` registers file *layouts* that render a file
+  the operator uploads to their own bank and call nobody, so zero is the right
+  answer there.
+- **The guard's own negative test** (`pnpm test:subprocessors`) runs the real
+  command against a fixture register that is deliberately wrong and asserts it
+  exits 1 — the `--services-root` / `--internal` / `--published` flags exist for
+  that, and for pointing the check at a worktree. A guard nobody has seen fail
+  is not a guard.
 - **"To be confirmed"** entries are placeholders for the founder/legal to fill
   as DPAs are countersigned — they are not "no DPA", just "not yet recorded
   here". Drive each to a real status (`docs/founder-runbooks/soc2-vendor.md`

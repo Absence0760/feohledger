@@ -79,4 +79,20 @@ jobs:
             echo '```'
             echo ""
             echo "Reference: \`docs/ropa.md\`, \`docs/sub-processors.md\`, \`backend/docs/privacy.md\`."
+            echo ""
+            # This workflow is advisory, and a reader who only sees it could
+            # reasonably conclude the sub-processor register is advisory too.
+            # It is not: `check_subprocessor_registry.mjs` is an exact
+            # comparison that FAILS, and it is a required check. Naming it here
+            # — rather than running it a second time — keeps one enforcement
+            # point while making the compliance workflow the place a reviewer
+            # can see every compliance guard from.
+            echo "### Enforced elsewhere, not advisory"
+            echo ""
+            echo "The sub-processor registers are checked against the adapter registries by"
+            echo "\`pnpm check:subprocessors\` (\`scripts/check_subprocessor_registry.mjs\`), which"
+            echo "**fails** rather than warns — an exact comparison of two lists, not a heuristic"
+            echo "over a diff. It runs in CI's **Frontend** job, unconditionally, and that job"
+            echo "gates merges via \`ci-gate\`. If a sub-processor changed in this PR, that is the"
+            echo "check that had to agree; see \`docs/sub-processors.md\` § Maintenance."
           } >> "$GITHUB_STEP_SUMMARY"

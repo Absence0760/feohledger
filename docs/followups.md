@@ -140,11 +140,17 @@ pending the standing "loop in the CISO / Security Analyst" gate on that section.
       `docs/compliance/sub-processor-changelog.md` is the shape to copy for the
       dated-entry half.
       **The other half of #427 has landed:** `pnpm check:subprocessors`
-      (`scripts/check_subprocessor_registry.mjs`, CI's Frontend job) now fails
-      when a registered adapter is missing from `docs/sub-processors.md` or a
-      third-party processor it names never reaches the published page. So the
-      registers can no longer drift from the code silently — what is still
-      missing is telling customers when they change.
+      (`scripts/check_subprocessor_registry.mjs`, CI's Frontend job — the
+      Compliance-drift workflow's summary points at it rather than running it
+      twice) now fails when a registered adapter is missing from
+      `docs/sub-processors.md` or a third-party processor it names never
+      reaches the published page. It reads both registration shapes — the
+      `@register_*_adapter` decorator and a module-level registry dict — and
+      reports any provider family whose registrations it cannot read at all, so
+      a family cannot again be silently invisible the way
+      `email_intake_adapters/` was. So the registers can no longer drift from
+      the code silently — what is still missing is telling customers when they
+      change.
       **Trigger:** before adding or changing any sub-processor.
 
 ### The pricing page and the billing code describe different products
