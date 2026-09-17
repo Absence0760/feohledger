@@ -20,6 +20,8 @@
 		receiptUrl,
 		type GlAccountOption
 	} from '$lib/api/expenses';
+	import { glAccountOptionLabel } from '$lib/types/glAccount';
+	import { entityStore } from '$lib/stores/entity.svelte';
 
 	let {
 		expense,
@@ -256,7 +258,12 @@
 				<select bind:value={gl_account_id} disabled={!canEdit}>
 					<option value="">{m('expenseModal.field.glSelect')}</option>
 					{#each glAccounts as g (g.id)}
-						<option value={g.id}>{g.code} — {g.name}</option>
+						<option value={g.id}>
+							{glAccountOptionLabel(g, entityStore, {
+								withName: true,
+								unknownEntity: m('glAccounts.scope.unknownEntity')
+							})}
+						</option>
 					{/each}
 				</select>
 			</label>

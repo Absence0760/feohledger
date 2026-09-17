@@ -16,6 +16,8 @@
 		deleteCatalogItem,
 		type GlAccountOption
 	} from '$lib/api/catalogs';
+	import { glAccountOptionLabel } from '$lib/types/glAccount';
+	import { entityStore } from '$lib/stores/entity.svelte';
 
 	let {
 		catalog,
@@ -321,7 +323,11 @@
 					<select bind:value={newGlId} aria-label={m('catalogs.modal.add.glAria')}>
 						<option value="">{m('catalogs.modal.add.glPlaceholder')}</option>
 						{#each glAccounts as g (g.id)}
-							<option value={g.id}>{g.code}</option>
+							<option value={g.id}>
+								{glAccountOptionLabel(g, entityStore, {
+									unknownEntity: m('glAccounts.scope.unknownEntity')
+								})}
+							</option>
 						{/each}
 					</select>
 					<button

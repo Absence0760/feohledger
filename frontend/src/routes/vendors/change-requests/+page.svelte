@@ -226,6 +226,24 @@
 			// decision still failed, and no newer load is coming to report it.
 			if (!fetchSequence.isCurrentRequest(token)) return;
 			errored = true;
+			// **Clear the rows on a fresh load.** `errored` only reaches the
+			// reader through `DataTable`'s `empty` message, which renders on
+			// `isEmpty` alone — so a SECOND failed load (a chip click after one
+			// good fetch) would otherwise leave the previous filter's rows on
+			// screen as the answer to a filter that never ran, with nothing but
+			// a toast that fades. On a bank-detail dual-control queue that is
+			// the worst possible lie: the reader is deciding whether to approve
+			// a change of where money goes. `total` goes with them, or the
+			// "Showing all N" footer keeps reporting the stale count.
+			//
+			// An APPEND failure is the opposite case and must not clear: the
+			// rows already loaded ARE the current filter's answer, and only the
+			// next page failed to arrive. `/gl-accounts` and `/exceptions` set
+			// the clearing precedent; neither of them paginates.
+			if (!opts.append) {
+				items = [];
+				total = 0;
+			}
 			toast(
 				err instanceof Error ? err.message : m('vendors.changeRequests.toast.loadFailed'),
 				'error'
