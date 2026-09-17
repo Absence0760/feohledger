@@ -256,11 +256,64 @@ def test_decline_offer_refuses_a_lapsed_offer():
     """An offer whose window has closed is EXPIRED, and declining it would
     record a refusal that never happened onto an append-only audit row. Accept
     already refuses one (no tier is capturable past `valid_until`); decline was
-    the one path that could still write a decision onto a dead offer."""
+    the one path that could still write a decision onto a dead offer.
+
+    Three days past `valid_until`, not one: `DECLINE_GRACE_DAYS` buys a payee
+    west of UTC their own last day (`docs/decisions.md` §185)."""
     offer = _offer(valid_until=date(2026, 1, 1))
     with pytest.raises(ValueError, match="window has closed"):
-        do.decline_offer(offer, now=datetime.now(UTC), as_of=date(2026, 1, 2))
+        do.decline_offer(offer, now=datetime.now(UTC), as_of=date(2026, 1, 3))
     assert offer.status == OFFER_STATUS_OFFERED  # unchanged
+
+
+# --- The decline path's timezone grace (docs/decisions.md §185) -------------
+#
+# `valid_until` is a business date compared against a UTC "today", so the last
+# day is shortened by the reader's offset from UTC. These pin the fix AND its
+# deliberate limits: the slack reaches decline and nothing else. Fixed dates,
+# no clock — the boundary is the subject, so nothing here should depend on when
+# it runs.
+
+
+def test_decline_is_allowed_one_day_past_the_window():
+    """A payee west of UTC is still on their last day when UTC has ticked over."""
+    offer = _offer(valid_until=date(2026, 1, 1))
+    assert do.decline_window_closed(offer, as_of=date(2026, 1, 2)) is False
+    do.decline_offer(offer, now=datetime.now(UTC), as_of=date(2026, 1, 2))
+    assert offer.status == do.OFFER_STATUS_DECLINED
+
+
+def test_the_grace_is_one_day_and_then_the_guard_returns():
+    """It is moved by a day, not removed."""
+    offer = _offer(valid_until=date(2026, 1, 1))
+    assert do.decline_window_closed(offer, as_of=date(2026, 1, 3)) is True
+
+
+def test_the_grace_does_not_reach_the_read_surfaces():
+    """`has_lapsed` must NOT move: it drives `effective_status`, every read
+    surface, and the captured/missed denominator. An offer one day past its
+    window reads `expired` exactly as it always did — only its decline is
+    still accepted."""
+    offer = _offer(valid_until=date(2026, 1, 1))
+    assert do.has_lapsed(offer, as_of=date(2026, 1, 2)) is True
+    assert do.effective_status(offer, as_of=date(2026, 1, 2)) == do.OFFER_STATUS_EXPIRED
+    assert do.decline_window_closed(offer, as_of=date(2026, 1, 2)) is False
+
+
+def test_the_grace_does_not_reach_a_capturable_tier():
+    """Accept is gated by tier selection against `valid_until`, not by the
+    decline guard. Granting slack there would let a buyer short-pay a vendor
+    who already considers the offer dead, so no tier is capturable past the
+    window even while a decline is still accepted."""
+    assert (
+        do.best_tier_for_date(
+            [{"days": 10, "percent": "2.0"}],
+            date(2026, 1, 2),
+            date(2026, 1, 1),
+            reference_date=date(2025, 12, 1),
+        )
+        is None
+    )
 
 
 def test_decline_offer_allows_the_last_day_of_the_window():
