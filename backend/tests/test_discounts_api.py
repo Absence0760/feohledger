@@ -9,9 +9,11 @@ tenants — plus RBAC, tenant isolation, audit rows, and exact ``Numeric`` money
 from __future__ import annotations
 
 import uuid
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+from types import SimpleNamespace
 
+import pytest
 from sqlalchemy import select
 
 from app.models.discount import (
@@ -25,6 +27,7 @@ from app.models.entity import Entity
 from app.models.invoice import Invoice, InvoiceStatus
 from app.models.vendor import Vendor
 from app.models.workflow import AuditLog
+from app.services import discount_offers as offers_svc
 from app.utils.dates import utc_today
 
 # `utc_today()`, never `date.today()`. `effective_status_sql` is evaluated against
@@ -1165,11 +1168,16 @@ async def test_ap_decline_refuses_a_lapsed_offer(realdb):
     `discount_offers.decline_offer`, so the buyer and the supplier can't diverge
     on whether a dead offer is still refusable. A lapsed offer already reads
     `expired` here; flipping it to `declined` would assert a refusal nobody made
-    on an append-only audit row."""
+    on an append-only audit row.
+
+    Two days past `valid_until`, because `decline_offer` allows
+    `DECLINE_GRACE_DAYS` of slack for a payee whose own last day has not ended
+    yet. One day past still reads `expired` on every read surface — that
+    asymmetry is pinned directly in `test_the_grace_does_not_reach_the_read_surfaces`."""
     mk = realdb.sessionmaker("a")
     org_id = realdb.info("a").org_id
     offer_id = await _add_offer_row(
-        mk, org_id, status=OFFER_STATUS_OFFERED, valid_until=utc_today() - timedelta(days=1)
+        mk, org_id, status=OFFER_STATUS_OFFERED, valid_until=utc_today() - timedelta(days=2)
     )
 
     async with realdb.client(key="a", role="ap_manager") as c:
@@ -1230,3 +1238,63 @@ async def test_offer_not_visible_cross_tenant(realdb):
     async with realdb.client(key="b", role="ap_manager") as c:
         resp = await c.get(f"/api/discounts/offers/{offer_id}")
     assert resp.status_code == 404
+
+
+# --- The decline path's timezone grace (docs/known-issues.md, decisions §185) ---
+#
+# `valid_until` is a business date compared against a UTC "today", so the last
+# day is shortened by the reader's offset from UTC. These pin the fix AND its
+# deliberate limits: the slack reaches decline and nothing else.
+
+
+def _offer_stub(valid_until):
+    """Minimal duck-typed offer — these predicates read attributes, not rows."""
+
+    return SimpleNamespace(
+        status=offers_svc.OFFER_STATUS_OFFERED,
+        valid_until=valid_until,
+        tiers=[],
+    )
+
+
+def test_decline_is_allowed_on_the_day_after_valid_until():
+    """A payee west of UTC is still on their last day when UTC has ticked over."""
+    offer = _offer_stub(utc_today() - timedelta(days=1))
+    assert offers_svc.decline_window_closed(offer, as_of=utc_today()) is False
+    # And the decline actually lands rather than raising.
+    offers_svc.decline_offer(offer, now=datetime.now(UTC), as_of=utc_today())
+    assert offer.status == offers_svc.OFFER_STATUS_DECLINED
+
+
+def test_decline_is_refused_once_the_grace_is_spent():
+    """The guard still exists — it is moved by a day, not removed."""
+    offer = _offer_stub(utc_today() - timedelta(days=2))
+    assert offers_svc.decline_window_closed(offer, as_of=utc_today()) is True
+    with pytest.raises(ValueError, match="validity window has closed"):
+        offers_svc.decline_offer(offer, now=datetime.now(UTC), as_of=utc_today())
+
+
+def test_the_grace_does_not_reach_the_read_surfaces():
+    """`has_lapsed` must NOT move: it drives `effective_status`, every read
+    surface, and the captured/missed denominator. An offer one day past its
+    window reads `expired` exactly as it always did — only its decline is
+    still accepted."""
+    offer = _offer_stub(utc_today() - timedelta(days=1))
+    assert offers_svc.has_lapsed(offer, as_of=utc_today()) is True
+    assert offers_svc.effective_status(offer, as_of=utc_today()) == offers_svc.OFFER_STATUS_EXPIRED
+    assert offers_svc.decline_window_closed(offer, as_of=utc_today()) is False
+
+
+def test_the_grace_does_not_reach_a_capturable_tier():
+    """Accept is gated by tier selection against `valid_until`, not by the
+    decline guard. Granting slack there would let a buyer short-pay a vendor
+    who already considers the offer dead, so no tier is capturable past the
+    window even while a decline is still accepted."""
+    valid_until = utc_today() - timedelta(days=1)
+    tiers = [{"days": 10, "percent": "2.0"}]
+    assert (
+        offers_svc.best_tier_for_date(
+            tiers, utc_today(), valid_until, reference_date=utc_today() - timedelta(days=30)
+        )
+        is None
+    )

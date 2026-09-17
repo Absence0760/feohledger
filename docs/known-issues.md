@@ -5,12 +5,11 @@ names the root cause, the evidence, blast radius, and a recommended fix
 approach — this is a staging area for real problems, not a place to let them
 go stale. See root `CLAUDE.md` guard rail 6 (no dangling deferred findings).
 
-**Five entries are open** — the discount-offer UTC boundary defect, the
-`/organization` 320px reflow defect, and the three local-e2e entries at the
-bottom. The header previously said "one" while
+**Four entries are open** — the `/organization` 320px reflow defect and the
+three local-e2e entries at the bottom. The header previously said "one" while
 those three e2e entries sat beneath it; a known-issues file that under-reports
 itself is the failure this note already warned about once. The other
-twelve are `~~struck-through~~` resolved stubs, kept because the *diagnosis* is
+thirteen are `~~struck-through~~` resolved stubs, kept because the *diagnosis* is
 the expensive part and is worth not re-deriving. Add a new entry at the top when
 a defect is diagnosed but can't be fixed in the same session.
 
@@ -253,7 +252,7 @@ this entry describes, where an invoice PDF is shared transaction evidence the
 money trail keeps and a W-9 is not. The per-key collection step is still the
 work; what exists now is a worked example of talking to the bucket at all.
 
-## A discount offer's last day ends at UTC midnight, not the payee's
+## ~~A discount offer's last day ends at UTC midnight, not the payee's~~ — RESOLVED
 
 **Found:** 2026-09-16, incidentally — `pytest` on a machine in EDT after 20:00
 local, while landing the privacy fixes (#423/#424/#425). Unrelated to that work
@@ -316,8 +315,15 @@ they expect at face value — so a blanket day of grace trades a fairness defect
 for a payment-dispute one, in the direction the money actually moves. If it is
 taken anyway, it belongs on the decline path alone, where nothing is captured.
 
-Until one is chosen, the current UTC behaviour stands and errs toward paying
-face value, which is the safe direction.
+**Resolved** by `docs/decisions.md` §185: the decline path now allows
+`discount_offers.DECLINE_GRACE_DAYS` (one day) past `valid_until`, which covers
+every timezone's own last day. The slack stops there — `has_lapsed`,
+`effective_status`, the read surfaces, the captured/missed denominator and the
+capturable-tier check are all unchanged, because granting the same grace to
+`accept` would let a buyer short-pay a vendor who already considers the offer
+dead. The per-counterparty business-date question is left open and argued in
+§185; the wider UTC semantics still err toward paying face value, which is the
+safe direction.
 
 ## Organization settings overflows horizontally at 320px (WCAG 1.4.10)
 

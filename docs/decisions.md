@@ -7537,3 +7537,55 @@ The standing caveat is that the sweep is off by default
 so removing the exposure is now a deployment step rather than a missing
 capability. Deleting the object is the part that needed building.
 
+
+## 185. A discount offer's last day gets a day of grace, on decline only
+
+`DiscountOffer.valid_until` is a business date — "you have until the 30th" — but
+every guard compares it against `utc_today()`. So the final day is silently
+shortened by the reader's offset from UTC: a supplier declining at 20:00 Eastern
+on the last day was told `cannot decline an offer whose validity window has
+closed`. East of UTC the error runs the other way, as a day of grace nobody
+asked for. CI runners are UTC, so nothing ever went red over it — it surfaced
+only because a laptop in EDT ran the suite after 20:00.
+
+**The obvious fix was rejected because its premise was false.** The tracked
+diagnosis proposed resolving `as_of` from the organisation's timezone, "since
+the org already carries one for scheduled reports". It does not. There is no
+timezone field on `Organization`, none in its settings schema, and
+`services/scheduled_reports.py` resolves its own today in UTC like everything
+else. That route is a new per-org setting with its UI and a migration — and it
+would still only describe the *buyer*, while the party being refused here is the
+*supplier*, who has their own offset and whom we store no timezone for at all.
+One org timezone cannot answer a question about two counterparties.
+
+**So the slack goes on the decline path and nowhere else.** `DECLINE_GRACE_DAYS`
+(one day — real offsets span UTC-12..UTC+14, so a full day covers every
+timezone's own last day) is applied by a new `decline_window_closed`, and
+`decline_offer` is its only caller.
+
+The asymmetry is the whole design, and it follows the money:
+
+- **Declining moves nothing.** The offer simply is not taken, and `declined` and
+  `expired` both land in the dashboard's `missed` bucket, so a decline recorded
+  inside the grace changes no figure. It records, accurately, that somebody
+  refused — which they did, on their own last day.
+- **Accepting captures a discount.** The same slack there would let a buyer
+  short-pay a vendor who already considers the offer dead: a payment-dispute
+  defect traded for a fairness one, in the direction the money actually moves.
+  Accept is gated separately anyway — by tier selection against `valid_until`
+  (`best_tier_for_date` / `select_tier_for_date`) — and this change deliberately
+  does not touch it.
+
+`has_lapsed` is likewise untouched, because it feeds `effective_status` and
+therefore every read surface and the captured/missed denominator. An offer one
+day past its window still reads `expired` everywhere it always did; only its
+decline is still accepted. That gap is pinned directly, by
+`test_the_grace_does_not_reach_the_read_surfaces` and
+`test_the_grace_does_not_reach_a_capturable_tier`, so a later reader cannot
+"tidy" the two predicates back into one without a test naming what breaks.
+
+What remains open is the wider question this does not answer: every other date
+comparison in the product is still UTC, and a genuine business-date semantics
+would need a timezone for each counterparty. That is a product decision with a
+migration behind it, not a bug fix, and the safe direction — paying face value —
+is the one the current behaviour already errs toward.

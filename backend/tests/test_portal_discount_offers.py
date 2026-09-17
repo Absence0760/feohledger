@@ -550,11 +550,19 @@ async def test_decline_refuses_a_lapsed_offer(realdb):
     """Decline was the one path that could still write a decision onto a dead
     offer: it checked only the stored status, so a lapsed offer became
     `declined` — asserting a supplier refusal that never happened, on an
-    append-only audit row. It now 409s, and the row is untouched."""
+    append-only audit row. It now 409s, and the row is untouched.
+
+    Two days past `valid_until`, not the one `_lapsed()` defaults to:
+    `decline_offer` allows `DECLINE_GRACE_DAYS` of slack so a supplier west of
+    UTC is not refused on their own last day. The helper's default still reads
+    `expired` — `test_lapsed_offer_reads_expired_to_the_supplier` depends on
+    that, and the gap between the two is the point, not a drift."""
     org_id = realdb.info(TENANT).org_id
     mk = realdb.sessionmaker(TENANT)
     vendor_id, vu_id = await _seed_vendor_and_user(mk, org_id)
-    offer_id = await _seed_vendor_offer(mk, org_id, vendor_id, **_lapsed())
+    offer_id = await _seed_vendor_offer(
+        mk, org_id, vendor_id, **_lapsed(valid_until=utc_today() - timedelta(days=2))
+    )
 
     async with _portal_client(realdb, vu_id, vendor_id) as client:
         resp = await client.post(f"/api/portal/discount-offers/{offer_id}/decline")
