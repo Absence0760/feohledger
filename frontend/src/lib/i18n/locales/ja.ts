@@ -94,6 +94,27 @@ export const messages = {
 	'common.loadFailed': 'このリストを読み込めませんでした。更新して再試行してください。',
 	'common.amountInvalid': '金額は 1200 や 1200.50 のような数値で入力してください',
 
+	// Cookie / consent banner (lib/components/ConsentBanner.svelte) — see en.ts.
+
+	'consent.ariaLabel': 'Cookie とプライバシーに関する同意',
+	'consent.title': 'プライバシーの選択',
+	'consent.bodyNecessary':
+		'当社は、アプリの動作に必須のストレージ（ログインとセッションの保持）を使用します。これはここでの選択にかかわらず機能します。',
+	'consent.bodyNoAnalytics': '現在、分析や追跡のためのストレージは一切読み込んでいません。',
+	'consent.bodyRecorded': '選択内容はここで記録され、今後導入する任意のストレージにも適用されます。',
+	'consent.bodyNotice': '詳細は{cookieNotice}をご覧ください。',
+	'consent.cookieNotice': 'Cookie に関するお知らせ',
+	'consent.manage': '管理',
+	'consent.hideDetails': '詳細を隠す',
+	'consent.necessaryTerm': '必須（常に有効）',
+	'consent.necessaryDesc':
+		'認証トークンとセッション状態です。ログインとアプリの利用に必要で、無効にはできません。',
+	'consent.analyticsTerm': '分析（任意）',
+	'consent.analyticsDesc':
+		'このカテゴリでは現在何も読み込んでいません。製品分析を追加する場合は、同意いただくまで無効のままとし、何かを保存する前に Cookie に関するお知らせを更新します。',
+	'consent.reject': '必須以外を拒否',
+	'consent.accept': 'すべて受け入れる',
+
 	// Profile → Language picker
 	'profile.language.heading': '言語',
 	'profile.language.hint':

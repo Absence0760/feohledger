@@ -90,6 +90,28 @@ export const messages = {
 	'common.loadFailed': 'Diese Liste konnte nicht geladen werden. Zum erneuten Versuch aktualisieren.',
 	'common.amountInvalid': 'Geben Sie den Betrag als einfache Zahl ein, z. B. 1200 oder 1200.50',
 
+	// Cookie / consent banner (lib/components/ConsentBanner.svelte) — see en.ts.
+
+	'consent.ariaLabel': 'Cookie- und Datenschutzeinwilligung',
+	'consent.title': 'Ihre Datenschutz-Einstellungen',
+	'consent.bodyNecessary':
+		'Wir verwenden Speicher, der für den Betrieb der App unbedingt erforderlich ist — für die Anmeldung und Ihre Sitzung — und der unabhängig von Ihrer Wahl hier funktioniert.',
+	'consent.bodyNoAnalytics': 'Wir laden heute keinen Analyse- oder Tracking-Speicher.',
+	'consent.bodyRecorded':
+		'Ihre Wahl wird jetzt gespeichert und gilt für jeden optionalen Speicher, den wir später einführen.',
+	'consent.bodyNotice': 'Alle Einzelheiten stehen im {cookieNotice}.',
+	'consent.cookieNotice': 'Cookie-Hinweis',
+	'consent.manage': 'Verwalten',
+	'consent.hideDetails': 'Details ausblenden',
+	'consent.necessaryTerm': 'Unbedingt erforderlich (immer aktiv)',
+	'consent.necessaryDesc':
+		'Authentifizierungs-Token und Sitzungsstatus. Für die Anmeldung und die Nutzung der App erforderlich; kann nicht deaktiviert werden.',
+	'consent.analyticsTerm': 'Analyse (optional)',
+	'consent.analyticsDesc':
+		'In dieser Kategorie wird heute nichts geladen. Falls Produktanalyse hinzukommt, bleibt sie deaktiviert, sofern Sie ihr nicht zugestimmt haben, und der Cookie-Hinweis wird aktualisiert, bevor etwas gesetzt wird.',
+	'consent.reject': 'Nicht erforderliche ablehnen',
+	'consent.accept': 'Alle akzeptieren',
+
 	// Profile → Language picker
 	'profile.language.heading': 'Sprache',
 	'profile.language.hint':

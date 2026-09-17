@@ -99,6 +99,41 @@ export const en = {
 	'common.loadFailed': 'Couldn’t load this list. Refresh to try again.',
 	'common.amountInvalid': 'Enter the amount as a plain number, e.g. 1200 or 1200.50',
 
+	// Cookie / consent banner (lib/components/ConsentBanner.svelte). It mounts
+	// from the root layout, so it is the FIRST thing a non-English visitor sees
+	// and the one surface they must interact with to dismiss. It is also the
+	// ePrivacy Art 5(3) consent gate, and consent has to be *informed* — a
+	// dialog the reader cannot read is weak evidence that consent was given, so
+	// these keys are a compliance requirement and not only an i18n one.
+	//
+	// The body is FOUR whole sentences rather than one string, because the two
+	// bits of inline markup in it want different treatment: `bodyNoAnalytics` is
+	// a complete sentence carried inside `<strong>` (the emphasis is the claim),
+	// and `bodyNotice` carries its link as a `{cookieNotice}` token rendered
+	// through `ui/LinkedMessage.svelte`. No sentence is cut around an insert —
+	// that is the `…Pre`/`…Post` shape `i18n/segments.ts` exists to avoid — so a
+	// translator still controls word order everywhere it matters.
+
+	'consent.ariaLabel': 'Cookie and privacy consent',
+	'consent.title': 'Your privacy choices',
+	'consent.bodyNecessary':
+		'We use storage that is strictly necessary to run the app — signing you in and keeping your session — which works regardless of your choice here.',
+	'consent.bodyNoAnalytics': 'We load no analytics or tracking storage today.',
+	'consent.bodyRecorded':
+		'Your choice is recorded now and governs any optional storage we introduce later.',
+	'consent.bodyNotice': 'Full detail is in the {cookieNotice}.',
+	'consent.cookieNotice': 'Cookie Notice',
+	'consent.manage': 'Manage',
+	'consent.hideDetails': 'Hide details',
+	'consent.necessaryTerm': 'Strictly necessary (always on)',
+	'consent.necessaryDesc':
+		'Authentication token and session state. Required to log in and use the app; cannot be turned off.',
+	'consent.analyticsTerm': 'Analytics (optional)',
+	'consent.analyticsDesc':
+		'Nothing is loaded under this category today. If product analytics is added, it stays off unless you have accepted it, and the Cookie Notice is updated before anything is set.',
+	'consent.reject': 'Reject non-essential',
+	'consent.accept': 'Accept all',
+
 	// Profile → Language picker (profile/+page.svelte)
 	'profile.language.heading': 'Language',
 	'profile.language.hint':

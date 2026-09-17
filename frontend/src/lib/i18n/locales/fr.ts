@@ -91,6 +91,29 @@ export const messages = {
 	'common.loadFailed': 'Impossible de charger cette liste. Actualisez pour réessayer.',
 	'common.amountInvalid': 'Saisissez le montant sous forme de nombre simple, p. ex. 1200 ou 1200.50',
 
+	// Cookie / consent banner (lib/components/ConsentBanner.svelte) — see en.ts.
+
+	'consent.ariaLabel': 'Consentement aux cookies et à la confidentialité',
+	'consent.title': 'Vos choix de confidentialité',
+	'consent.bodyNecessary':
+		'Nous utilisons un stockage strictement nécessaire au fonctionnement de l’application — vous connecter et maintenir votre session — qui fonctionne quel que soit votre choix ici.',
+	'consent.bodyNoAnalytics':
+		'Nous ne chargeons aujourd’hui aucun stockage de mesure d’audience ni de suivi.',
+	'consent.bodyRecorded':
+		'Votre choix est enregistré dès maintenant et s’appliquera à tout stockage facultatif que nous introduirions plus tard.',
+	'consent.bodyNotice': 'Tous les détails figurent dans l’{cookieNotice}.',
+	'consent.cookieNotice': 'Avis relatif aux cookies',
+	'consent.manage': 'Gérer',
+	'consent.hideDetails': 'Masquer les détails',
+	'consent.necessaryTerm': 'Strictement nécessaires (toujours actifs)',
+	'consent.necessaryDesc':
+		'Jeton d’authentification et état de session. Nécessaires pour se connecter et utiliser l’application ; ils ne peuvent pas être désactivés.',
+	'consent.analyticsTerm': 'Mesure d’audience (facultative)',
+	'consent.analyticsDesc':
+		'Rien n’est chargé dans cette catégorie aujourd’hui. Si une mesure d’audience produit est ajoutée, elle restera désactivée sauf si vous l’avez acceptée, et l’avis relatif aux cookies sera mis à jour avant que quoi que ce soit ne soit déposé.',
+	'consent.reject': 'Refuser les non essentiels',
+	'consent.accept': 'Tout accepter',
+
 	// Profile → Language picker
 	'profile.language.heading': 'Langue',
 	'profile.language.hint':
