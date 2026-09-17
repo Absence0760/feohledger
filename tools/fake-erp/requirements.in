@@ -13,4 +13,4 @@
 # Keep this list minimal: fake-erp is a deterministic in-memory fixture and
 # every dependency it grows is one more thing to pin and scan.
 fastapi>=0.141.1,<1
-uvicorn>=0.52.4,<1
+uvicorn>=0.53.0,<1
