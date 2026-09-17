@@ -354,10 +354,15 @@ that exists and never reach past it**:
    store in the screen's `ListenableBuilder` (`Listenable.merge`) so a figure
    picks up its symbol when the code lands.
 4. **Nothing — pass `null` and let the figure render bare.** Not a degraded
-   mode, the answer: a mixed-currency sum (`payment_runs.total_amount`) is in no
-   currency, and a `null` per-row code "is NOT a licence to substitute a
-   default" (`docs/decisions.md` §79/§82, §160). A missing symbol is a visible
-   gap; a wrong one is a wrong number that looks right.
+   mode, the answer: a code the server declined to prove "is NOT a licence to
+   substitute a default" (`docs/decisions.md` §79/§82, §160). A missing symbol
+   is a visible gap; a wrong one is a wrong number that looks right. A payment
+   run's total is the worked example in both directions — `PaymentRunResponse`
+   *does* name a currency, derived from the legs a run cannot span two of
+   (`api/payments.py::_one_currency`), so rung 2 applies and `PaymentRun.currency`
+   carries it; `null` there means a run with no payments, invoices carrying no
+   code, or a legacy run whose legs disagree, and only then does the figure go
+   bare.
 
 A model's `fromJson` must **not** default a currency to `'USD'` — that is the
 rung-that-always-answers trap `docs/decisions.md` §119 records, and it makes
