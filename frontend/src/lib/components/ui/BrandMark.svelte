@@ -24,10 +24,23 @@
 	let { size = 24, label = '' }: Props = $props();
 </script>
 
-<img class="brand-mark" src={asset('/logo-mark.svg')} width={size} height={size} alt={label} />
+<img
+	class="brand-mark"
+	src={asset('/logo-mark.svg')}
+	width={size}
+	height={size}
+	alt={label}
+	draggable="false"
+/>
 
 <style>
 	.brand-mark {
+		/* Chrome, not content: same reasoning as `AuthShell`'s `.panel-art`
+		   (#429/#435) — `draggable="false"` stops the drag itself, and these
+		   two stop the selection highlight and WebKit's own image-drag, which
+		   the attribute does not cover. */
+		-webkit-user-drag: none;
+		user-select: none;
 		display: block;
 		flex-shrink: 0;
 	}
