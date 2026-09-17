@@ -946,6 +946,11 @@ export const messages = {
 	'exceptions.filter.allTypes': 'Todos os tipos',
 	'exceptions.col.type': 'Tipo',
 	'exceptions.col.severity': 'Grav.',
+
+	// Exception-severity labels — see en.ts.
+	'exceptions.severity.error': 'Erro',
+	'exceptions.severity.warning': 'Aviso',
+	'exceptions.severity.info': 'Info',
 	'exceptions.col.invoice': 'Fatura',
 	'exceptions.col.vendor': 'Fornecedor',
 	'exceptions.col.amount': 'Valor',

@@ -927,6 +927,11 @@ export const messages = {
 	'exceptions.filter.allTypes': 'すべてのタイプ',
 	'exceptions.col.type': 'タイプ',
 	'exceptions.col.severity': '重大度',
+
+	// Exception-severity labels — see en.ts.
+	'exceptions.severity.error': 'エラー',
+	'exceptions.severity.warning': '警告',
+	'exceptions.severity.info': '情報',
 	'exceptions.col.invoice': '請求書',
 	'exceptions.col.vendor': '取引先',
 	'exceptions.col.amount': '金額',

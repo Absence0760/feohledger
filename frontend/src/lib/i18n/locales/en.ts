@@ -1048,6 +1048,17 @@ export const en = {
 	'exceptions.filter.allTypes': 'All types',
 	'exceptions.col.type': 'Type',
 	'exceptions.col.severity': 'Sev',
+
+	// Exception-severity labels ($lib/types/exception.ts::EXCEPTION_SEVERITY_LABEL_KEYS).
+	// The queue's `severity` cell printed the raw wire value (`error` / `warning`
+	// / `info`, lowercase Latin) beside a type and a status that were already
+	// translated. The backend declares the roster in a comment on
+	// `models/exception.py`'s column and nowhere else, so `exception.test.ts`
+	// pins these three against that comment AND against every `severity="…"` a
+	// raising site actually writes.
+	'exceptions.severity.error': 'Error',
+	'exceptions.severity.warning': 'Warning',
+	'exceptions.severity.info': 'Info',
 	'exceptions.col.invoice': 'Invoice',
 	'exceptions.col.vendor': 'Vendor',
 	'exceptions.col.amount': 'Amount',
