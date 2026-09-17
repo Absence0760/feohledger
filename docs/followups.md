@@ -955,6 +955,8 @@ reliable part of it.
 
 ### Surfaced by the /polish-ui pass on /exceptions and /credit-memos (2026-09-17)
 
+Mirrored as GitHub issue [#443](https://github.com/Absence0760/feohledger/issues/443).
+
 Two `ui-polisher` runs against the refreshed agent definition. Both pages landed
 their visual and correctness work; everything below is what the polish could not
 reach because it needs a router change, a six-locale catalogue tranche, or a
