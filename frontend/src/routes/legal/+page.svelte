@@ -69,10 +69,12 @@
 </div>
 
 <style>
+	/* The measure and the side gutter belong to `routes/legal/+layout.svelte`,
+	   which applies them to the index and the six documents alike — this file
+	   and `lib/legal/LegalPage.svelte` each used to declare their own
+	   `max-width: 46rem` (#433). Vertical rhythm stays here. */
 	.legal-index {
-		max-width: 46rem;
-		margin: 0 auto;
-		padding: 48px 16px 64px;
+		padding: 40px 0 64px;
 		color: var(--text);
 	}
 

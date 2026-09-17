@@ -29,10 +29,33 @@ class DSARRequest(BaseModel):
     ``identifier`` is an email for ``user`` / ``vendor_user`` subjects, or a
     Vendor UUID (string) for ``vendor_contact``. The resolver in
     ``services.privacy_export`` interprets it per ``subject_type``.
+
+    ``include_banking`` opts a ``vendor_contact`` bundle out of the default
+    masking of ``bank_details`` / ``beneficial_owner_data``. It is not a
+    convenience flag: it needs the ``vendor.bank_change.approve`` permission, a
+    written ``banking_justification``, and it writes its own audit row. See
+    ``backend/docs/privacy.md`` § Banking data in a DSAR bundle.
     """
 
     subject_type: str = Field(..., description=f"One of {SUBJECT_TYPE_VALUES}")
     identifier: str = Field(..., min_length=1, max_length=320)
+    include_banking: bool = Field(
+        default=False,
+        description=(
+            "Return bank_details / beneficial_owner_data unmasked. "
+            "vendor_contact only; requires the vendor.bank_change.approve "
+            "permission and a banking_justification."
+        ),
+    )
+    banking_justification: str | None = Field(
+        default=None,
+        max_length=500,
+        description=(
+            "Why an unmasked bundle is needed (legal basis / ticket reference). "
+            "Required when include_banking is true. PII-free — it is recorded "
+            "in the audit trail."
+        ),
+    )
 
 
 class DSARResponse(BaseModel):
@@ -42,6 +65,9 @@ class DSARResponse(BaseModel):
     subject_type: str
     subject_id: str
     generated_at: str
+    # Whether this bundle's banking fields are masked. Surfaced so a consumer
+    # never has to infer it from the shape of the values.
+    banking_disclosure: str = "masked"
     # The portable bundle: every PII field + related-record summary held about
     # the subject, grouped by source. Loosely typed by design.
     data: dict
@@ -71,6 +97,15 @@ class ErasureResponse(BaseModel):
     # Non-identifying breakdown: which record kinds were touched + counts.
     record_counts: dict
     completed_at: str
+    # Storage leg. `documents_failed > 0` means the erasure is INCOMPLETE and the
+    # request should be re-run — surfaced rather than folded into the status, so
+    # an operator sees it without reading the audit trail.
+    documents_deleted: int = 0
+    documents_retained: int = 0
+    documents_failed: int = 0
+    # Auth material (the `user` subject type only).
+    passkeys_deleted: int = 0
+    sessions_revoked: int = 0
 
 
 class DataSubjectRequestSummary(BaseModel):

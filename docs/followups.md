@@ -48,7 +48,7 @@ i18n link surfaces, the sanctions-minimisation guard, the register drift guard,
 the transfer-safeguards sentence — whose contractual half moved to (a) — and the
 60-day backup deletion, now `deploy/remove-tenant.sh`).
 
-**50 open: 38 (c) · 9 (a) · 3 (b)** — counted from the file rather than carried
+**53 open: 40 (c) · 9 (a) · 4 (b)** — counted from the file rather than carried
 forward. The previous line claimed 55 · 42 · 8 · 5, and the (b) count had been
 wrong since before the legal set: three entries, described as five. A follow-up
 file that miscounts itself is the same failure `known-issues.md` fixed in its
@@ -140,11 +140,17 @@ pending the standing "loop in the CISO / Security Analyst" gate on that section.
       `docs/compliance/sub-processor-changelog.md` is the shape to copy for the
       dated-entry half.
       **The other half of #427 has landed:** `pnpm check:subprocessors`
-      (`scripts/check_subprocessor_registry.mjs`, CI's Frontend job) now fails
-      when a registered adapter is missing from `docs/sub-processors.md` or a
-      third-party processor it names never reaches the published page. So the
-      registers can no longer drift from the code silently — what is still
-      missing is telling customers when they change.
+      (`scripts/check_subprocessor_registry.mjs`, CI's Frontend job — the
+      Compliance-drift workflow's summary points at it rather than running it
+      twice) now fails when a registered adapter is missing from
+      `docs/sub-processors.md` or a third-party processor it names never
+      reaches the published page. It reads both registration shapes — the
+      `@register_*_adapter` decorator and a module-level registry dict — and
+      reports any provider family whose registrations it cannot read at all, so
+      a family cannot again be silently invisible the way
+      `email_intake_adapters/` was. So the registers can no longer drift from
+      the code silently — what is still missing is telling customers when they
+      change.
       **Trigger:** before adding or changing any sub-processor.
 
 ### The pricing page and the billing code describe different products
@@ -2307,6 +2313,70 @@ durable fix stated in one sentence has usually not been tried.
       `docs/minimal-deployment.md` § 3. **Trigger:** the first deploy whose
       tenants are all provisioned by hand, or the first report of a refused
       signup.
+
+### Surfaced by fixing the three privacy defects (2026-09-16, issues #423/#424/#425)
+
+- [ ] **(c) The unmasked-DSAR gate does not bite on a stock admin.**
+      `POST /api/privacy/dsar` now masks banking by default and gates
+      `include_banking` on the `vendor.bank_change.approve` permission plus a
+      written justification, with its own `privacy.dsar_export.unmasked` audit
+      row (`docs/decisions.md` §182). But `ROLE_ADMIN` resolves to the entire
+      permission catalogue, so on the four stock system roles that gate admits
+      exactly the callers `require_roles(ROLE_ADMIN)` already admits — it only
+      becomes a real refusal once an org defines an admin-equivalent **custom**
+      role without that permission. The routine path is fixed (no admin gets a
+      full account number by accident any more); what is not yet true is that
+      producing one requires proving who you are. **Durable fix:** require a
+      **step-up MFA proof** on the request when `include_banking` is set —
+      `api/auth._require_mfa_step_up` / `_step_up_satisfied` already implement
+      TOTP, email-OTP and WebAuthn proofs for exactly this shape, so the backend
+      half is a dependency and a schema field. It is deferred because the other
+      half is the SPA collecting that proof before it posts the DSAR, which is a
+      frontend change this backend-scoped batch could not make, and a
+      half-landed gate that 403s every unmasked export until the UI catches up
+      would be worse than the one that ships. **Trigger:** the next change that
+      touches `frontend/src/routes/organization` privacy surfaces, or the first
+      org that asks to split the privacy-officer duty from vendor bank-change
+      approval.
+
+- [ ] **(c) `/legal/privacy` §12 now understates what erasure and export do.**
+      That section lists "four gaps we are not going to describe around": the
+      export returns counts rather than content and omits passkeys / expense
+      reports / contracts / virtual cards; it does not include uploaded
+      documents; erasure does not delete stored documents; erasure does not
+      revoke passkeys or terminate sessions. **Three and a half of the four are
+      no longer true** as of 2026-09-16 — the export returns the content and all
+      of those categories plus a document manifest, erasure deletes the
+      sole-subject documents, and it deletes passkey rows and revokes sessions.
+      What remains true is narrower and worth saying precisely: erasure
+      deliberately RETAINS transaction evidence (invoice PDFs, contract
+      documents, expense receipts, vendor statements) on the same basis as the
+      invoice rows, and each collection in the export is capped at 1000 rows. The
+      page is more conservative than the product, so nothing published is
+      untrue — but a privacy page that understates the automated path sends data
+      subjects to a manual process that no longer needs to exist, and the DPA's
+      deletion clause (`docs/founder-runbooks/dpa-template.md` § Annex II, already
+      corrected) now disagrees with it. **Durable fix:** rewrite §12 to state the
+      retain-vs-delete split (`backend/docs/privacy.md` § Stored documents) and
+      the row cap, and re-check the DPA page's deletion clause against it.
+      Deferred only because it lives under `frontend/`, which the backend batch
+      that made it stale was scoped out of. **Trigger:** the next change that
+      touches `frontend/src/routes/legal/`, or a customer DPA review — whichever
+      comes first.
+
+- [ ] **(b) Enable the retention sweep to expire Positive Pay files in a
+      deployed environment.** `positive_pay` is now a retention record class and
+      the sweep deletes the stored file past the window (default 1 month,
+      per-org configurable), which is what closes issue #425 — but
+      `FEOH_RETENTION_ENABLED` is off by default, like every sweep in this
+      project (guard rail 7). Until an operator turns it on, a deployed
+      environment still accumulates files carrying full account and routing
+      numbers; the erasure path reaches them on request, but nothing reaches
+      them on a timer. **Durable fix:** set `FEOH_RETENTION_ENABLED=true` in the
+      deployed env and confirm the first `retention.archived` manifest reports
+      `positive_pay_files_expired`. **Trigger:** the first deployment that
+      generates a Positive Pay file, and the SOC 2 records-management evidence
+      request either way.
 
 ## (a) Blocked on external credentials, accounts, or hardware
 

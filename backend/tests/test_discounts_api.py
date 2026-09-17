@@ -1165,11 +1165,16 @@ async def test_ap_decline_refuses_a_lapsed_offer(realdb):
     `discount_offers.decline_offer`, so the buyer and the supplier can't diverge
     on whether a dead offer is still refusable. A lapsed offer already reads
     `expired` here; flipping it to `declined` would assert a refusal nobody made
-    on an append-only audit row."""
+    on an append-only audit row.
+
+    Two days past `valid_until`, because `decline_offer` allows
+    `DECLINE_GRACE_DAYS` of slack for a payee whose own last day has not ended
+    yet. One day past still reads `expired` on every read surface — that
+    asymmetry is pinned directly in `test_the_grace_does_not_reach_the_read_surfaces`."""
     mk = realdb.sessionmaker("a")
     org_id = realdb.info("a").org_id
     offer_id = await _add_offer_row(
-        mk, org_id, status=OFFER_STATUS_OFFERED, valid_until=utc_today() - timedelta(days=1)
+        mk, org_id, status=OFFER_STATUS_OFFERED, valid_until=utc_today() - timedelta(days=2)
     )
 
     async with realdb.client(key="a", role="ap_manager") as c:

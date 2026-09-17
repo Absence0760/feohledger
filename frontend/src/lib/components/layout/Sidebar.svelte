@@ -60,7 +60,7 @@
 		<div class="logo">
 			{#if mark.kind === 'logo'}
 				<!-- White-label logo; alt is the (branded) product name. -->
-				<img class="logo-img" src={mark.src} alt={brand.productName} />
+				<img class="logo-img" src={mark.src} alt={brand.productName} draggable="false" />
 			{:else if mark.kind === 'platform'}
 				<!-- Named only when it stands alone; expanded, the product name follows. -->
 				<BrandMark size={24} label={collapsed ? brand.productName : ''} />
@@ -258,8 +258,14 @@
 	}
 
 	/* White-label logo image — capped to the rail height so a tall logo can't
-	   blow out the header; object-fit keeps the aspect ratio. */
+	   blow out the header; object-fit keeps the aspect ratio. Chrome, not
+	   content, and sitting inside a clickable header — same reasoning as
+	   `AuthShell`'s `.panel-art` (#429/#435): `draggable="false"` on the
+	   element stops the drag, and these two stop the selection highlight and
+	   WebKit's own image-drag, which the attribute does not cover. */
 	.logo-img {
+		-webkit-user-drag: none;
+		user-select: none;
 		height: 24px;
 		max-width: 130px;
 		object-fit: contain;

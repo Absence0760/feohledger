@@ -29,6 +29,10 @@ This feature is squarely in PII scope. The rule:
 A `logger.info(...)` or audit `details` containing a full account / routing
 number is a `Critical` PII-invariant violation.
 
+**The file does not live forever.** It used to: nothing expired it and no erasure
+request could reach it (issue #425). Two triggers now delete it — see
+[File expiry and erasure](#file-expiry-and-erasure) below.
+
 ## Data model
 
 One tenant-scoped table in `app/models/positive_pay.py`
@@ -435,6 +439,39 @@ is capped at `MAX_FILE_SIZE` defensively even though the content is
 system-generated. The download route re-checks the key's org segment before
 streaming.
 
+## File expiry and erasure
+
+The rendered file is the one artefact in this system carrying every payee's full
+account and routing number in the clear, so two paths delete it. Both delete the
+**object** and keep the **row**: `file_key` is nulled, a PII-free marker is
+stamped into `meta`, and `item_count` / `total_amount` / `content_hash` /
+`account_last4` — the audit-grade evidence the row exists to carry — stay.
+
+| Trigger | Path | Marker written |
+|---|---|---|
+| A timer | The `positive_pay` retention class (`services/retention_sweep`), default **1 month** | `meta.file_expired_at`, `meta.file_expired_reason = "retention_policy"` |
+| A request | A `vendor_contact` erasure whose invoices were paid by this run (`services/privacy_documents`) | `meta.file_erased_at`, `meta.file_erased_reason = "data_subject_erasure"` |
+
+The default window is one month rather than the platform-wide 84 because the
+bank consumes the file within days; it is per-org configurable as
+`settings.retention.positive_pay_months` (PUT `/api/retention-policy`). The
+retention sweep is off by default (`FEOH_RETENTION_ENABLED`) like every other
+sweep here, so enabling it is a deployment step.
+
+**Why the erasure path deletes a file that looks like transaction evidence:** it
+is an *instruction* to a bank, not a record of what happened. The money trail is
+`payments` plus this row; nothing evidential is lost. It is multi-subject (one
+file covers a whole run), so an erasure removes other payees' coordinates too —
+a reduction in their exposure, not a loss. Full reasoning:
+`backend/docs/privacy.md` § Stored documents and `docs/decisions.md` §183–§184.
+
+**Why not an S3 lifecycle rule**, which is the obvious instrument: every key
+starts with the owning org's id (`{org_id}/positive-pay/...`) and an S3 prefix
+filter is literal with no wildcard, so no single rule names these across
+tenants; and the bucket carries a GOVERNANCE-mode Object Lock default retention
+(`infra/s3.tf`) that defers any expiration until the lock elapses, so a rule
+measured in weeks would never fire. `docs/decisions.md` §184.
+
 ## Frontend
 
 Route `/positive-pay` (`frontend/src/routes/positive-pay/+page.svelte`), under
@@ -489,9 +526,10 @@ Typed client `$lib/api/positivePay.ts` over the shared `api` object; types in
 ## Local-first
 
 No new external dependency and no new `pnpm` script — generation, download, and
-return processing all run in-process against MinIO. There's no background sweep
-(generation is user-triggered), so `pnpm dev` runs the whole feature with no
-cloud credential and nothing to enable.
+return processing all run in-process against MinIO. Generation is user-triggered;
+the only background involvement is the shared retention sweep's `positive_pay`
+class, which is off by default like every other sweep, so `pnpm dev` runs the
+whole feature with no cloud credential and nothing to enable.
 
 ## Deferred / future work
 

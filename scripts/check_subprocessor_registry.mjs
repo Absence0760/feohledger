@@ -12,10 +12,16 @@
 //
 // The check is deliberately not clever. It reads the adapter registrations out
 // of the source, the rows out of the internal register, and the prose out of
-// the published page, and asks two questions:
+// the published page, and asks three questions:
 //
-//   1. Is every registered adapter named in the internal register?
-//   2. Is every third-party PROCESSOR the internal register names also named
+//   1. Could every provider family's registrations be READ at all? A family
+//      whose shape this file does not know reports zero providers and passes,
+//      which is indistinguishable from a family with nothing to declare —
+//      exactly what `email_intake_adapters/` did until the dict shape was
+//      read. That one is asked first, because the other two are worthless if
+//      the answer is no.
+//   2. Is every registered adapter named in the internal register?
+//   3. Is every third-party PROCESSOR the internal register names also named
 //      on the published page?
 //
 // A `mock`, `console` or in-process adapter answers (2) trivially — the
@@ -54,6 +60,31 @@ const SERVICES_ROOT = 'backend/app/services';
 // files carry — is not mistaken for a provider that exists.
 const REGISTRATION = /^@register(?:_[a-z_]+)?_adapter\(\s*["']([a-z0-9_]+)["']/gm;
 
+// Not every family registers through a decorator. `email_intake_adapters`
+// declares its providers as a literal module-level dict — and because the
+// decorator regex above is the only thing the check read, that entire family
+// was INVISIBLE to it: `ses` and `mailgun`, which receive every inbound
+// invoice attachment, were compared against nothing, and a fourth provider
+// added beside them would have kept the check green. That is the exact drift
+// this file exists to stop, so the dict shape is read too.
+//
+// Anchored at column 0 (module level, not a local) and matched only on a name
+// that says registry, so an unrelated module constant is not mistaken for a
+// provider list. `[^}]*` is safe because a provider registry's values are
+// dotted references, never nested literals.
+const DICT_REGISTRY = /^_[A-Z_]*(?:REGISTRY|ADAPTERS|PARSERS|PROVIDERS)[A-Z_]*\s*(?::[^=\n]+)?=\s*\{([^}]*)\}/gm;
+const DICT_KEY = /["']([a-z0-9_]+)["']\s*:/g;
+
+// Any registration decorator at all, whatever it registers. This is NOT used
+// to find providers — `REGISTRATION` does that, and deliberately ignores
+// `@register_country_format`, `@register_exception_agent` and
+// `@register_positive_pay_formatter`, none of which reach a third party. It is
+// used only to tell the two reasons a family can yield no providers apart:
+// "we read its registrations and none are third-party adapters" (fine) from
+// "we could not read its registrations at all" (a blind spot — see
+// `unreadable-registry`).
+const ANY_REGISTRATION = /^@register[a-z_]*\(/gm;
+
 /** Every `.py` under a directory, recursively. */
 function pythonFiles(dir) {
 	const out = [];
@@ -71,14 +102,58 @@ export function registeredAdapters(root = SERVICES_ROOT, read = readFileSync) {
 	const found = new Map();
 	for (const file of pythonFiles(root)) {
 		const source = read(file, 'utf8');
+		// The family is the directory, which is what a reader needs in order to
+		// find the row: `mock` exists in a dozen of them.
+		const family = file.slice(root.length + 1).split('/')[0];
 		for (const match of source.matchAll(REGISTRATION)) {
-			// The family is the directory, which is what a reader needs in order
-			// to find the row: `mock` exists in a dozen of them.
-			const family = file.slice(root.length + 1).split('/')[0];
 			found.set(`${family}:${match[1]}`, { family, slug: match[1], file });
+		}
+		for (const table of source.matchAll(DICT_REGISTRY)) {
+			for (const key of table[1].matchAll(DICT_KEY)) {
+				found.set(`${family}:${key[1]}`, { family, slug: key[1], file });
+			}
 		}
 	}
 	return found;
+}
+
+/**
+ * The provider families that must be readable, and whether they were.
+ *
+ * A family is a directory under `services/` that either carries the
+ * `_adapters` suffix its siblings established, or is named as a source
+ * directory by a section heading of the internal register — which is how
+ * `services/assistant/` and `services/audit_shipping/`, the two families
+ * without the suffix, are picked up. Both halves are derived: a new
+ * `*_adapters/` directory is covered the day it exists, and a family that
+ * departs from the naming is covered the moment it is written down.
+ *
+ * `decorators` is what separates a family we read and found nothing
+ * third-party in — `positive_pay_adapters/`, whose formatters render a file
+ * layout and call nobody — from one whose registrations we could not read at
+ * all. Only the second is a blind spot.
+ */
+export function familyScan(internal, root = SERVICES_ROOT, adapters = new Map(), read = readFileSync) {
+	const documented = new Set();
+	for (const line of internal.split('\n')) {
+		if (!line.startsWith('#')) continue;
+		for (const m of line.matchAll(/`services\/([a-z0-9_]+)\//g)) documented.add(m[1]);
+	}
+
+	const scan = [];
+	for (const entry of readdirSync(root)) {
+		if (entry === '__pycache__') continue;
+		if (!statSync(join(root, entry)).isDirectory()) continue;
+		if (!entry.endsWith('_adapters') && !documented.has(entry)) continue;
+
+		let decorators = 0;
+		for (const file of pythonFiles(join(root, entry))) {
+			decorators += [...read(file, 'utf8').matchAll(ANY_REGISTRATION)].length;
+		}
+		const derived = [...adapters.values()].filter((a) => a.family === entry).length;
+		scan.push({ family: entry, derived, decorators });
+	}
+	return scan;
 }
 
 /**
@@ -167,9 +242,29 @@ export function searchableText(markup) {
 		.toLowerCase();
 }
 
-export function analyze({ adapters, internal, published }) {
+export function analyze({ adapters, internal, published, families = [] }) {
 	const findings = [];
 	const rows = registerRows(internal);
+
+	// Before asking whether every provider is registered, ask whether the
+	// provider list was readable at all. A family whose registrations this
+	// check cannot parse reports zero providers and passes silently, which
+	// looks exactly like a family with nothing to declare.
+	for (const { family, derived, decorators } of families) {
+		if (derived > 0 || decorators > 0) continue;
+		findings.push({
+			rule: 'unreadable-registry',
+			detail:
+				`services/${family}/ is a provider family, but no provider could be read ` +
+				`out of it — no \`@register_*_adapter("slug")\` decorator and no module-level ` +
+				`registry dict. Either it registers its providers some third way, in which ` +
+				`case this check has to learn that shape before the family can drift ` +
+				`unnoticed, or it has no providers and the directory should go. A family the ` +
+				`check cannot read is worse than one it does not know about: it reports zero ` +
+				`and passes.`,
+		});
+	}
+
 	const documented = new Set();
 	for (const row of rows) {
 		for (const family of row.families) documented.add(`${family}:${row.slug}`);
@@ -210,17 +305,45 @@ export function analyze({ adapters, internal, published }) {
 	return findings;
 }
 
-function main() {
-	const adapters = registeredAdapters();
+/**
+ * `--services-root`, `--internal` and `--published` point the check at another
+ * tree. That is not test scaffolding: it is what lets the check be run against
+ * a worktree, and it is the only way the negative test can watch the real
+ * command exit non-zero on a register it knows is broken. A guard nobody has
+ * seen fail is not a guard.
+ */
+function parseArgs(argv) {
+	const opts = {
+		servicesRoot: SERVICES_ROOT,
+		internal: INTERNAL_REGISTER,
+		published: PUBLISHED_REGISTER,
+	};
+	const keys = { '--services-root': 'servicesRoot', '--internal': 'internal', '--published': 'published' };
+	for (let i = 0; i < argv.length; i += 1) {
+		const key = keys[argv[i]];
+		if (!key) throw new Error(`Unknown argument: ${argv[i]}`);
+		if (!argv[i + 1]) throw new Error(`${argv[i]} needs a path`);
+		opts[key] = argv[(i += 1)];
+	}
+	return opts;
+}
+
+function main(argv = process.argv.slice(2)) {
+	const opts = parseArgs(argv);
+	const adapters = registeredAdapters(opts.servicesRoot);
+	const internal = readFileSync(opts.internal, 'utf8');
+	const families = familyScan(internal, opts.servicesRoot, adapters);
 	const findings = analyze({
 		adapters,
-		internal: readFileSync(INTERNAL_REGISTER, 'utf8'),
-		published: readFileSync(PUBLISHED_REGISTER, 'utf8'),
+		internal,
+		published: readFileSync(opts.published, 'utf8'),
+		families,
 	});
 
 	if (findings.length === 0) {
 		console.log(
-			`Sub-processor registers agree with ${adapters.size} registered adapter(s).`
+			`Sub-processor registers agree with ${adapters.size} registered adapter(s) ` +
+				`across ${families.length} provider families.`
 		);
 		return 0;
 	}

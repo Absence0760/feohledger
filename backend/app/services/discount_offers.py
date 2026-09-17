@@ -56,7 +56,7 @@ helper (an expression, not a query), this module does no DB or network work. See
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 
 from sqlalchemy import and_, case
@@ -369,11 +369,49 @@ def accept_offer(offer, *, tier: dict, actor_id, now: datetime) -> None:
     offer.status = OFFER_STATUS_ACCEPTED
 
 
+#: Days of slack the DECLINE path allows past ``valid_until``.
+#:
+#: ``valid_until`` is a business date — "you have until the 30th" — but it is
+#: compared against a UTC "today", so the final day is silently shortened by
+#: the reader's offset from UTC. A supplier declining at 20:00 Eastern on the
+#: last day was told the window had closed (``docs/known-issues.md``). Real
+#: offsets span UTC-12..UTC+14, so one full day covers every timezone's own
+#: last day.
+#:
+#: **Decline only, and that asymmetry is the whole design.** Declining moves no
+#: money: the offer simply is not taken, and ``declined`` and ``expired`` both
+#: land in the dashboard's ``missed`` bucket, so a decline recorded inside the
+#: grace changes no figure — it only records, accurately, that somebody did
+#: refuse. Accepting is the opposite: it captures a discount, and granting the
+#: same slack there would let a buyer short-pay a vendor who already considers
+#: the offer dead. Accept is gated separately anyway, by tier selection against
+#: ``valid_until`` (``best_tier_for_date`` / ``select_tier_for_date``), which
+#: this constant deliberately does not touch.
+#:
+#: :func:`has_lapsed` is likewise untouched, so ``effective_status``, the read
+#: surfaces and the captured/missed denominator all keep reading the offer as
+#: expired on the same day they always did.
+DECLINE_GRACE_DAYS = 1
+
+
+def decline_window_closed(offer, *, as_of: date) -> bool:
+    """True when ``offer`` is too far past its window to accept a decline.
+
+    :func:`has_lapsed` plus :data:`DECLINE_GRACE_DAYS`. Separate from
+    ``has_lapsed`` on purpose: that predicate answers "is this offer expired",
+    which every read surface asks and which must not move.
+    """
+    if getattr(offer, "status", None) != OFFER_STATUS_OFFERED:
+        return False
+    valid_until = getattr(offer, "valid_until", None)
+    return valid_until is not None and valid_until < as_of - timedelta(days=DECLINE_GRACE_DAYS)
+
+
 def decline_offer(offer, *, now: datetime, as_of: date) -> None:
     """Transition ``offered`` → ``declined``. Raises if it is not declinable.
 
     ``as_of`` is required, not defaulted, because the guard it feeds is the
-    point: an offer whose window has already closed is EXPIRED
+    point: an offer whose window closed long ago is EXPIRED
     (:func:`effective_status`), and letting it be declined records a supplier
     (or AP) decision that never happened. Both land in the dashboard's
     ``missed`` bucket, so nothing is double-counted — but ``declined`` asserts
@@ -381,8 +419,13 @@ def decline_offer(offer, *, now: datetime, as_of: date) -> None:
     cannot be corrected afterwards. Every caller is a route with a clock; a
     default would let a future one silently skip the check, which is the
     completeness obligation ``docs/decisions.md`` §41 argues against.
+
+    The guard runs through :func:`decline_window_closed`, which allows
+    :data:`DECLINE_GRACE_DAYS` past ``valid_until`` so a payee west of UTC is
+    not refused on their own last day. Read that constant for why the slack
+    stops here and never reaches accept.
     """
-    if has_lapsed(offer, as_of=as_of):
+    if decline_window_closed(offer, as_of=as_of):
         raise ValueError("cannot decline an offer whose validity window has closed (expired)")
     if offer.status != OFFER_STATUS_OFFERED:
         raise ValueError(f"cannot decline an offer in status {offer.status!r} (must be 'offered')")

@@ -111,7 +111,12 @@
 		<header class="portal-header">
 			<div class="brand">
 				{#if portalBrand.mark.kind === 'logo'}
-					<img class="brand-logo" src={portalBrand.logoUrl} alt={portalBrand.productName} />
+					<img
+						class="brand-logo"
+						src={portalBrand.logoUrl}
+						alt={portalBrand.productName}
+						draggable="false"
+					/>
 				{:else if portalBrand.mark.kind === 'platform'}
 					<!-- Same fork as the employee sidebar: FeohLedger's mark only beside
 					     FeohLedger's own name (docs/decisions.md §173). -->
@@ -228,7 +233,14 @@
 		line-height: 1.2;
 	}
 
+	/* Chrome, not content, and sitting in the clickable header — same
+	   reasoning as `AuthShell`'s `.panel-art` (#429/#435): `draggable="false"`
+	   on the element stops the drag, and these two stop the selection
+	   highlight and WebKit's own image-drag, which the attribute does not
+	   cover. */
 	.brand-logo {
+		-webkit-user-drag: none;
+		user-select: none;
 		height: 28px;
 		width: auto;
 		max-width: 140px;

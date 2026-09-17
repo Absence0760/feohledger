@@ -9,6 +9,9 @@ Coverage:
     double-archive), composes with the audit-immutability trigger (NEVER
     deletes audit rows; verifies WORM shipment + writes a manifest),
     master-switch-off is a no-op for the background loop.
+  * `positive_pay` class (#425) — expires the STORED FILE past a deliberately
+    short window while keeping the PII-free row, idempotent, and a failed
+    object delete leaves the key for the next tick.
 """
 
 from __future__ import annotations
@@ -430,3 +433,167 @@ async def test_manifest_records_counts_not_an_unbounded_id_list(realdb, monkeypa
     assert details["invoices_archived"] == 2
     assert details["invoices_archive_batch_size"] == 2
     assert details["invoices_archive_batch_capped"] is True
+
+
+# ---------------------------------------------------------------------------
+# positive_pay class (issue #425) — expire the FILE, keep the PII-free row
+# ---------------------------------------------------------------------------
+
+
+def test_positive_pay_defaults_to_a_short_window_not_the_platform_default():
+    """A seven-year retention on a file of full account numbers is the opposite
+    of what this class wants, so it carries its own default."""
+    from app.config import settings as cfg
+    from app.services.retention_sweep import RECORD_CLASS_DEFAULT_MONTHS
+
+    assert RECORD_CLASS_DEFAULT_MONTHS["positive_pay"] == 1
+    assert resolve_retention_months({}, "positive_pay") == 1
+    assert resolve_retention_months({}, "positive_pay") < cfg.retention_default_months
+    # A per-org override still wins — a bank with a long dispute window can
+    # raise it.
+    assert resolve_retention_months({"retention": {"positive_pay_months": 6}}, "positive_pay") == 6
+
+
+async def _add_positive_pay_file(mk, org_id, *, created_at, file_key="org/positive-pay/f/x.csv"):
+    from sqlalchemy import update
+
+    from app.models.positive_pay import PositivePayFile
+
+    pp_id = uuid.uuid4()
+    async with mk() as s:
+        s.add(
+            PositivePayFile(
+                id=pp_id,
+                organization_id=org_id,
+                file_type="ach_authorization",
+                bank_format="csv",
+                status="generated",
+                item_count=3,
+                total_amount=Decimal("300.00"),
+                content_hash="b" * 64,
+                file_key=file_key,
+                account_last4="9876",
+            )
+        )
+        await s.commit()
+        # created_at is server-defaulted; force it past the window.
+        await s.execute(
+            update(PositivePayFile).where(PositivePayFile.id == pp_id).values(created_at=created_at)
+        )
+        await s.commit()
+    return pp_id
+
+
+@pytest.mark.asyncio
+async def test_sweep_expires_overdue_positive_pay_files_and_keeps_the_row(realdb, monkeypatch):
+    from app.models.positive_pay import PositivePayFile
+    from app.services import storage
+
+    org_id = realdb.info("a").org_id
+    mk = realdb.sessionmaker("a")
+    old = datetime.now(UTC) - timedelta(days=120)
+    recent = datetime.now(UTC) - timedelta(days=2)
+
+    overdue = await _add_positive_pay_file(
+        mk, org_id, created_at=old, file_key="org/positive-pay/old/x.csv"
+    )
+    fresh = await _add_positive_pay_file(
+        mk, org_id, created_at=recent, file_key="org/positive-pay/new/x.csv"
+    )
+
+    deleted: list[str] = []
+
+    async def _fake_delete(key: str) -> None:
+        deleted.append(key)
+
+    monkeypatch.setattr(storage, "_delete_object", _fake_delete)
+
+    tmk = realdb.sessionmaker("a")
+    async with tmk() as db:
+        result = await sweep_tenant(db, organization_id=org_id, settings_dict={})
+        await db.commit()
+
+    assert result.positive_pay_files_expired == 1
+    assert deleted == ["org/positive-pay/old/x.csv"]
+
+    async with mk() as s:
+        gone = await s.get(PositivePayFile, overdue)
+        assert gone.file_key is None
+        assert gone.meta["file_expired_reason"] == "retention_policy"
+        # The PII-free evidence the row exists to carry survives.
+        assert gone.content_hash == "b" * 64
+        assert gone.account_last4 == "9876"
+        assert gone.item_count == 3
+        assert gone.total_amount == Decimal("300.00")
+
+        kept = await s.get(PositivePayFile, fresh)
+        assert kept.file_key == "org/positive-pay/new/x.csv"
+
+
+@pytest.mark.asyncio
+async def test_positive_pay_expiry_is_idempotent(realdb, monkeypatch):
+    from app.services import storage
+
+    org_id = realdb.info("a").org_id
+    mk = realdb.sessionmaker("a")
+    await _add_positive_pay_file(mk, org_id, created_at=datetime.now(UTC) - timedelta(days=120))
+
+    calls: list[str] = []
+
+    async def _fake_delete(key: str) -> None:
+        calls.append(key)
+
+    monkeypatch.setattr(storage, "_delete_object", _fake_delete)
+
+    tmk = realdb.sessionmaker("a")
+    async with tmk() as db:
+        first = await sweep_tenant(db, organization_id=org_id, settings_dict={})
+        await db.commit()
+    async with tmk() as db:
+        second = await sweep_tenant(db, organization_id=org_id, settings_dict={})
+        await db.commit()
+
+    assert first.positive_pay_files_expired == 1
+    assert second.positive_pay_files_expired == 0
+    assert len(calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_failed_positive_pay_delete_keeps_the_key_for_the_next_tick(realdb, monkeypatch):
+    from app.models.positive_pay import PositivePayFile
+    from app.services import storage
+
+    org_id = realdb.info("a").org_id
+    mk = realdb.sessionmaker("a")
+    pp_id = await _add_positive_pay_file(
+        mk, org_id, created_at=datetime.now(UTC) - timedelta(days=120)
+    )
+
+    async def _boom(key: str) -> None:
+        raise RuntimeError("bucket unreachable")
+
+    monkeypatch.setattr(storage, "_delete_object", _boom)
+
+    tmk = realdb.sessionmaker("a")
+    async with tmk() as db:
+        result = await sweep_tenant(db, organization_id=org_id, settings_dict={})
+        await db.commit()
+
+    assert result.positive_pay_files_expired == 0
+    assert result.positive_pay_files_failed == 1
+
+    async with mk() as s:
+        row = await s.get(PositivePayFile, pp_id)
+        assert row.file_key is not None  # still there, so the next tick retries
+
+
+@pytest.mark.asyncio
+async def test_policy_endpoint_exposes_and_accepts_positive_pay(realdb):
+    async with realdb.client(key="a", role="admin") as c:
+        got = await c.get("/api/retention-policy")
+        assert got.status_code == 200
+        assert got.json()["policy"]["positive_pay"] == 1
+
+        put = await c.put("/api/retention-policy", json={"policy": {"positive_pay": 3}})
+    assert put.status_code == 200
+    assert put.json()["policy"]["positive_pay"] == 3

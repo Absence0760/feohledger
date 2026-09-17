@@ -5,16 +5,19 @@ names the root cause, the evidence, blast radius, and a recommended fix
 approach — this is a staging area for real problems, not a place to let them
 go stale. See root `CLAUDE.md` guard rail 6 (no dangling deferred findings).
 
-**Seven entries are open** — three privacy defects surfaced by publishing the
-legal pages (the DSAR-export bank-detail exposure, the Positive Pay file's
-unexpiring account numbers, and the erasure/export completeness gap), the
-`/organization` 320px reflow defect, and the three local-e2e entries at the
-bottom. The header previously said "one" while
+**Four entries are open** — the `/organization` 320px reflow defect and the
+three local-e2e entries at the bottom. The header previously said "one" while
 those three e2e entries sat beneath it; a known-issues file that under-reports
 itself is the failure this note already warned about once. The other
-nine are `~~struck-through~~` resolved stubs, kept because the *diagnosis* is
+thirteen are `~~struck-through~~` resolved stubs, kept because the *diagnosis* is
 the expensive part and is worth not re-deriving. Add a new entry at the top when
 a defect is diagnosed but can't be fixed in the same session.
+
+The three privacy defects surfaced by publishing the legal pages — the
+DSAR-export bank-detail exposure, the Positive Pay file's unexpiring account
+numbers, and the erasure/export completeness gap — were **fixed together on
+2026-09-16**; they are struck through below, and the reasoning behind the
+retain-vs-delete split they forced is `docs/decisions.md` §182–§184.
 
 (This header said "no entries are currently open" while the file carried ten
 `##` headings and only nine struck. Root `CLAUDE.md` repeated the claim. Both
@@ -28,7 +31,33 @@ goes to [decisions.md](decisions.md).
 
 ---
 
-## The DSAR export is the one surface that returns unmasked bank details
+## ~~The DSAR export is the one surface that returns unmasked bank details~~ — FIXED 2026-09-16
+
+**Resolved.** Every DSAR bundle now reduces `bank_details` and
+`beneficial_owner_data` through `app/utils/bank_masking.py` — the single home for
+what a banking secret is, which `api/vendors.py` now re-exports rather than
+owns. The masker is an **allowlist**, so a key nobody anticipated is masked
+rather than published (the denylist the audit summary uses would have shipped a
+newly-added secret verbatim). Beneficial owners are reduced to the ownership
+relationship, because a vendor's UBO is a different natural person who did not
+ask for this export.
+
+The unmasked variant survives, because masking alone would have broken the Art 15
+right the endpoint exists to serve. It is `include_banking: true` on
+`POST /api/privacy/dsar` and it needs three things: the
+`vendor.bank_change.approve` permission, a written `banking_justification`, and a
+`vendor_contact` subject. It writes its own `privacy.dsar_export.unmasked` audit
+row — a separate ACTION, not a field on the routine one, so "who pulled a
+supplier's full account number" is a grep rather than a JSONB filter — and the
+justification also rides the `data_subject_requests` row.
+
+*One honest limit,* recorded because the gate reads stronger than it is:
+`ROLE_ADMIN` resolves to every permission in the catalogue, so on the four stock
+system roles this admits exactly the callers the route already admits. What it
+adds is configurability — an org that splits duties with a custom
+admin-equivalent role can now deny it. The stronger gate (a step-up MFA proof on
+the request) needs the SPA to collect that proof and is tracked in
+`docs/followups.md`.
 
 **Issue:** [#423](https://github.com/Absence0760/feohledger/issues/423)
 
@@ -77,7 +106,31 @@ is why this is an entry rather than a same-session patch.
 
 ---
 
-## The Positive Pay file holds every vendor's full account number, with no expiry
+## ~~The Positive Pay file holds every vendor's full account number, with no expiry~~ — FIXED 2026-09-16
+
+**Resolved.** `positive_pay` is now a retention record class
+(`api/retention.py::RECORD_CLASSES`), and the sweep expires the stored FILE while
+keeping the PII-free row: past the window the object is deleted, `file_key` is
+nulled and `meta.file_expired_at` is stamped, while `item_count`,
+`total_amount`, `content_hash` and `account_last4` — the audit-grade evidence the
+row exists to carry — are untouched. The default window is **one month**
+(`retention_sweep.RECORD_CLASS_DEFAULT_MONTHS`), not the platform-wide 84, because
+the bank consumes the file within days; an org can raise it. The erasure path
+reaches the same files through the shared traversal (entry below).
+
+**It is implemented in the sweep rather than as an S3 lifecycle rule**, which
+was the issue's first suggestion. Two reasons, both structural: every key in the
+bucket begins with the owning organisation's id (`{org_id}/positive-pay/...`) and
+an S3 lifecycle prefix filter is a literal prefix with no wildcard, so no single
+rule names these objects across tenants; and the bucket carries a
+GOVERNANCE-mode Object Lock default retention (`infra/s3.tf`), which defers any
+expiration until the lock elapses — a rule measured in weeks would have sat there
+looking like a control while never firing. `docs/decisions.md` §184.
+
+*Caveat that stands:* the sweep is off by default (`FEOH_RETENTION_ENABLED`), so
+a deployment that has not enabled it still accumulates these files. That is the
+same posture every sweep in this project has (guard rail 7) and is now a
+deployment step rather than a missing capability.
 
 **Issue:** [#425](https://github.com/Absence0760/feohledger/issues/425)
 
@@ -103,7 +156,46 @@ the erasure entry below needs; do them together, because a retention rule that
 deletes on a timer and an erasure path that deletes on request are the same
 traversal with different triggers.
 
-## Erasure and the DSAR export never reach object storage, passkeys or live sessions
+## ~~Erasure and the DSAR export never reach object storage, passkeys or live sessions~~ — FIXED 2026-09-16
+
+**Resolved.** `app/services/privacy_documents.py` is the one walk from a subject
+to the objects held about them, and both legs read it: the export enumerates,
+the erasure deletes. Writing it twice was the thing to avoid — an export that
+lists a document the erasure leg cannot reach is the failure this whole entry
+describes.
+
+*The split it encodes,* which is the part that needed deciding rather than
+coding. **Deleted** — the document's sole subject is the erased party and it is
+not evidence of a transaction: the W-9/W-8, supplier-authored chat attachments,
+and the Positive Pay file (an instruction to a bank, not a record of what
+happened — the row keeps the evidence). **Retained** — the document is the
+evidence behind a booked payable and the row it supports is itself retained: the
+invoice PDF, the contract document, the expense receipt, the archived vendor
+statement, and AP-authored chat attachments (company correspondence, not the
+employee's own data). Published in `backend/docs/privacy.md`; reasoned in
+`docs/decisions.md` §183.
+
+Objects are deleted BEFORE the caller commits, and a pointer is nulled only for a
+key that actually went — so a storage failure is re-runnable rather than an
+orphan nobody can find again (the ordering argument `services/tenant_deletion`
+already makes for the whole-tenant case). `documents_failed` is surfaced on the
+response and in the audit row, so an incomplete erasure reads as incomplete.
+
+Erasure also **deletes** every `WebAuthnCredential` row (authenticator material,
+not a financial record) and revokes live sessions through the existing
+`session_management.revoke_user_sessions` — the same path admin deactivation and
+password reset use, not a second one. Both legs run before the idempotency
+tombstone check, so a subject erased before this existed is reached by asking
+again rather than answered with `noop`.
+
+The export now returns the CONTENT of the audit and notification activity rather
+than a tally (with `details` withheld from audit rows — Art 15(4): an audit row
+an admin authored about someone else carries that person's identifiers), plus
+contracts, virtual cards, expense reports and expenses, passkey metadata
+(`credential_id` / `public_key` withheld), and the document manifest. Every
+collection is capped with a `truncated` flag and its true total. Documents are
+enumerated as references, not inlined as base64 — inlining would have put a
+W-9's TIN into the body of a routine export.
 
 **Issue:** [#424](https://github.com/Absence0760/feohledger/issues/424)
 
@@ -159,6 +251,79 @@ fix also needs — but it is deliberately NOT the tool for this one. Deleting a
 this entry describes, where an invoice PDF is shared transaction evidence the
 money trail keeps and a W-9 is not. The per-key collection step is still the
 work; what exists now is a worked example of talking to the bucket at all.
+
+## ~~A discount offer's last day ends at UTC midnight, not the payee's~~ — RESOLVED
+
+**Found:** 2026-09-16, incidentally — `pytest` on a machine in EDT after 20:00
+local, while landing the privacy fixes (#423/#424/#425). Unrelated to that work
+and not a regression from it.
+
+`tests/test_portal_discount_offers.py::test_decline_still_works_on_the_last_day_of_the_window`
+seeds `valid_until=date.today()` (the **local** date) and then declines through
+`POST /api/portal/discount-offers/{id}/decline`, which resolves its `as_of` from
+UTC. Between 20:00 EDT and midnight UTC those are different days, so
+`discount_offers.has_lapsed` reads the window as closed and the route answers
+`409 cannot decline an offer whose validity window has closed (expired)`.
+
+```
+local today 2026-09-16 | utc today 2026-09-17
+```
+
+**The test is encoding the right intent and the app is making the wrong call.**
+`DiscountOffer.valid_until` is a *business date* — "you have until the 30th" —
+and evaluating it in UTC silently shortens the final day by the payee's offset
+from UTC. A US supplier declining at 8pm Eastern on the last day is told the
+window closed; it also means `effective_status` flips an offer to `expired`
+while the vendor still legitimately has hours left, and the dashboard's `missed`
+bucket picks it up early. Every western-hemisphere tenant is affected, for
+19:00–23:59 local on the boundary day; east of UTC the error runs the other way
+(a day of grace rather than a day lost), which is why it has gone unnoticed in a
+UTC-clocked CI.
+
+**Blast radius:** the decline path 409s, and offers read `expired` up to a day
+early. No money moves either way — a missed discount is a payment at face value,
+which is the safe direction — so this is a correctness and fairness defect, not
+a financial one.
+
+**The test half is fixed; the product defect is not.** The spec above was also
+simply non-deterministic — its docstring shows it was pinning the comparison
+operator (`valid_until < today`, so the last day is still live), not timezone
+fairness, yet it seeded from the local date and asserted against a UTC-resolving
+route, so it passed on UTC CI and failed on any host west of UTC after 20:00.
+It now anchors on `utc_today()` like `test_discounts_api.py`, and
+`test_portal_discount_offers.py` joined `UTC_TODAY_TEST_MODULES` in
+`tests/test_utc_today.py` so the pairing is enforced rather than remembered —
+the AP and portal surfaces of this feature share the boundary, exactly as
+`test_tax.py` and `test_portal_tax_forms.py` do. Verified under
+`TZ=Pacific/Kiritimati` (UTC+14) as well as EDT. **That makes the suite honest
+about the current behaviour; it does not make the behaviour right.**
+
+**Fix approach — both candidates need a decision, and the obvious one rests on
+a false premise.** An earlier draft of this entry proposed resolving `as_of`
+from the organisation's timezone, on the grounds that "the org already carries a
+timezone for scheduled reports". **It does not.** There is no timezone field on
+`Organization`, none in its settings schema, and none in `services/scheduled_reports.py`,
+which resolves its own "today" in UTC for the same reason everything else does.
+That route therefore means adding a per-org timezone — a new setting, its UI, and
+a migration — not threading an existing one.
+
+The cheap alternative, comparing against `valid_until + 1 day` in UTC, is **not
+the strictly-kinder change it looks like.** `as_of` gates `accept` as well as
+`decline`. Declining late is harmless, but *accepting* late captures a discount
+the vendor may already consider expired, which underpays them against an invoice
+they expect at face value — so a blanket day of grace trades a fairness defect
+for a payment-dispute one, in the direction the money actually moves. If it is
+taken anyway, it belongs on the decline path alone, where nothing is captured.
+
+**Resolved** by `docs/decisions.md` §185: the decline path now allows
+`discount_offers.DECLINE_GRACE_DAYS` (one day) past `valid_until`, which covers
+every timezone's own last day. The slack stops there — `has_lapsed`,
+`effective_status`, the read surfaces, the captured/missed denominator and the
+capturable-tier check are all unchanged, because granting the same grace to
+`accept` would let a buyer short-pay a vendor who already considers the offer
+dead. The per-counterparty business-date question is left open and argued in
+§185; the wider UTC semantics still err toward paying face value, which is the
+safe direction.
 
 ## Organization settings overflows horizontally at 320px (WCAG 1.4.10)
 

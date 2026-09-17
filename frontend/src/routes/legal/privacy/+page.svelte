@@ -808,50 +808,45 @@
 	</p>
 
 	<p>
-		Four gaps exist today and we are not going to describe around them:
+		Two limits remain, and we are not going to describe around them:
 	</p>
 
 	<ul>
 		<li>
-			<strong
-				>The export is the subject's own record plus a summary of what is attached to it, not a
-				copy of every record that mentions them.</strong
-			> For an employee user it returns the profile, the roles held, and a <em>count</em> of the audit
-			actions they authored and of the in-app notifications they received rather than the content of
-			either; the passkeys registered to the account, and any expense report or expense they submitted,
-			are not in it. For a vendor contact it returns the contact details, tax identifier, bank details
-			and beneficial-ownership data, one line for each related invoice and payment, the supplier-portal
-			logins, and a count of chat messages rather than their text; contracts and virtual cards tied
-			to that vendor are not in it at all. Article 15 is a right to the data and not to a tally of
-			it, so where you want a category the automated bundle does not carry, ask for it and we will
-			assemble it by hand.
+			<strong>The export lists your documents rather than attaching them.</strong> Invoice PDFs,
+			receipts, contract documents, W-9 and W-8 forms and chat attachments are enumerated in the
+			bundle — each one named, with the record it belongs to and what an erasure would do to it —
+			but the bundle carries references, not the files. Putting the bytes inline would write a
+			scanned W-9 bearing your taxpayer identifier into the body of a routine export. Each
+			document stays retrievable through the download route that already checks who is asking.
 		</li>
 		<li>
-			<strong>The export does not include uploaded documents.</strong> Invoice PDFs, receipts,
-			contract documents, W-9 and W-8 forms and chat attachments live in object storage, and the
-			automated export does not reach into it.
-		</li>
-		<li>
-			<strong>Erasure does not delete those stored documents.</strong> It redacts database fields.
-			A scanned W-9 bearing your tax identifier is not removed by it.
-		</li>
-		<li>
-			<strong>Erasure does not revoke passkeys or terminate active sessions.</strong> It nulls the
-			password and the multi-factor secret and deactivates the account, but a registered passkey
-			and any session already issued are not cleared by the automated path. Access itself stops
-			at once — every request re-reads the account and refuses a deactivated one — so what
-			survives is the stored authenticator credential and the session record until it expires,
-			not working access to the service.
+			<strong>Two things are deliberately withheld or capped.</strong> Where an audit entry was
+			written by someone else about their own activity, the entry is listed without its detail,
+			because that detail carries another person's identifiers and Article 15(4) does not let
+			your copy override their rights. And a very large collection is cut at one thousand entries,
+			with the true total stated beside it, so you can see what was trimmed and ask for the rest.
 		</li>
 	</ul>
 
 	<p>
-		Where a request needs any of those, we carry them out by hand, and we are extending the
-		automated path to cover them. Say so in your request and we will confirm what was done for each
-		one.
+		Erasure also keeps some documents on purpose, which is not a gap but a choice worth stating
+		plainly. It deletes the ones that are yours alone — your signed W-9 or W-8, the attachments you
+		sent through the supplier portal, and the payment-instruction files that carry account numbers
+		in the clear. It keeps the ones that are evidence behind a financial record it is already
+		required to preserve: the invoice PDF, which <em>is</em> the invoice; the contract that
+		authorised the spend; the receipt behind a reimbursement that was paid. Destroying those would
+		leave a preserved money trail with its supporting evidence gone, which is the outcome the
+		record-keeping rule exists to prevent. Erasure of a user account also removes any registered
+		passkey and ends every live session.
 	</p>
 
-	<h2 id="complaints">13. Complaining to a supervisory authority</h2>
+	<p>
+		If a request needs something outside that, say so and we will confirm what was done for each
+		part of it.
+	</p>
+
+<h2 id="complaints">13. Complaining to a supervisory authority</h2>
 
 	<p>
 		If you think we have handled your personal data unlawfully, you can complain to a data

@@ -258,6 +258,24 @@ the port from whoever owns it, which is worse: two round-24 agents hit this and
 one stopped and restarted a server it did not own. Worktrees isolate files, not
 ports.
 
+**It is not only a worktree that can hold the port.** Another *project* on the
+same machine can serve vite on 7777 too — `~/github/threkir` does — and then
+`reuseExistingServer` attaches Playwright to a completely different
+application. The failures that produces look like this suite's own, and the
+quiet case is worse: a spec whose assertions are absence-based passes against a
+foreign document, so the run goes green without ever loading the code under
+test.
+
+`fixtures/globalSetup.ts` refuses that run. Before any spec executes it fetches
+`E2E_WEB_ORIGIN` and requires the FeohLedger `og:site_name` that `src/app.html`
+puts in every response — server-rendered, so it is present under both
+`vite dev` and `vite preview` and before any JavaScript runs, which matters
+because this app renders nothing until hydration and has no other
+server-visible marker. A mismatch fails immediately, names the origin, and
+prints the two-origin command above. The identity check runs **first**, ahead
+of the workflow-shape check, because those read the database and so pass
+happily while the browser is pointed somewhere else entirely.
+
 `fixtures/env.ts` resolves both values and derives everything else from them —
 the per-tenant subdomain origins (`tenantOrigin(slug)`, and the `ACME_BASE` /
 `TECHFLOW_BASE` / `NO_TENANT_BASE` constants), the post-login landing pattern

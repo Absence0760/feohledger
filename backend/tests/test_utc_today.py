@@ -121,6 +121,14 @@ UTC_TODAY_TEST_MODULES = (
     # already failing locally after 20:00 EDT, hours before anyone would have
     # called it a timezone bug.
     "test_discounts_api.py",
+    # The supplier-portal surface of those same offers — same column, same
+    # `utc_today()` boundary, other router, exactly as `test_tax.py` and
+    # `test_portal_tax_forms.py` pair up above. Listing only the AP side left
+    # `test_decline_still_works_on_the_last_day_of_the_window` seeding
+    # `valid_until` from the LOCAL date and asserting the decline succeeds, so
+    # it failed on any host west of UTC after 20:00 — which is how it was
+    # found.
+    "test_portal_discount_offers.py",
 )
 
 

@@ -27,7 +27,13 @@ router = APIRouter(prefix="/retention-policy", tags=["retention"])
 
 # Record classes the retention engine understands. Each maps to a
 # ``<class>_months`` key under ``Organization.settings.retention``.
-RECORD_CLASSES = ["invoices", "audit_log"]
+#
+# ``positive_pay`` expires the generated check-issue / ACH-authorization FILE
+# from object storage — the one artefact that legitimately carries full account
+# and routing numbers — while keeping its PII-free row. It defaults to a much
+# shorter window than the rest (``retention_sweep.RECORD_CLASS_DEFAULT_MONTHS``)
+# because the bank consumes the file within days.
+RECORD_CLASSES = ["invoices", "audit_log", "positive_pay"]
 
 
 class RetentionPolicyResponse(BaseModel):
