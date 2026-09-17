@@ -28,7 +28,7 @@ const EMPTY_SUMMARY = {
 
 test.describe('/exceptions load states', () => {
 	test('a FAILED load says so — never "Everything looks good!"', async ({ page }) => {
-		await page.route('**/api/exceptions/summary', (route) =>
+		await page.route('**/api/exceptions/summary*', (route) =>
 			route.fulfill({
 				status: 200,
 				contentType: 'application/json',
@@ -54,7 +54,7 @@ test.describe('/exceptions load states', () => {
 	});
 
 	test('a SLOW load shows the loading state, not the clean-queue message', async ({ page }) => {
-		await page.route('**/api/exceptions/summary', (route) =>
+		await page.route('**/api/exceptions/summary*', (route) =>
 			route.fulfill({
 				status: 200,
 				contentType: 'application/json',
@@ -95,7 +95,7 @@ test.describe('/exceptions load states', () => {
 	});
 
 	test('a successful load with rows renders them, not an empty state', async ({ page }) => {
-		await page.route('**/api/exceptions/summary', (route) =>
+		await page.route('**/api/exceptions/summary*', (route) =>
 			route.fulfill({
 				status: 200,
 				contentType: 'application/json',
