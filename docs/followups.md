@@ -955,6 +955,13 @@ reliable part of it.
 
 ## (a) Blocked on external credentials, accounts, or hardware
 
+Categories (a) and (b) are operator work, not engineering work. Both are
+mirrored — alongside the founder critical path — as GitHub issue
+[#446](https://github.com/Absence0760/feohledger/issues/446), the running
+checklist for everything only the operator can do; the in-repo half of that pair
+is [founder-runbooks/status.md](founder-runbooks/status.md). Keep all three
+reconciled when an item closes.
+
 - [ ] **Appoint EU and UK Art 27 representatives.** ([#428](https://github.com/Absence0760/feohledger/issues/428)) A controller established
       outside the EU/UK that offers services to people there must appoint a
       representative in each, named and addressable in the privacy notice. The
@@ -1026,20 +1033,26 @@ as oversights.
 
 - [ ] **Create the five published contact aliases.** ([#428](https://github.com/Absence0760/feohledger/issues/428)) `/legal/*` tells readers to
       write to `privacy@`, `security@`, `legal@`, `support@` and `sales@` on
-      `feohledger.com` (`frontend/src/lib/legal/operator.ts` → `CONTACT`). None
-      of them exists yet. A published `mailto:` that bounces is worse
-      than none at all, because a data subject who writes to it reasonably
-      believes the request is made and the Art 12(3) one-month clock has started.
-      *Corrected 2026-09-17: the mail DNS is no longer a blocker.* The entry said
-      it sat on the unmerged `feat/infra-email-dns` branch; that branch merged as
-      **#417** (`98fd5ff0`, Migadu mailboxes + SES app mail), so what is left is
-      the operator step alone. The stale `origin/feat/infra-email-dns` remote
-      branch can go with it.
-      **Durable fix:** create the five aliases and send a test to each before the
-      pages are linked from anywhere public.
+      `feohledger.com` (`frontend/src/lib/legal/operator.ts` → `CONTACT`).
+      **All five now exist.** `infra/email.tf` — merged as **#417** (`98fd5ff0`)
+      and unapplied until then — was applied 2026-09-17: 17 mail records, SES
+      reporting `sending`/`dkim`/`mailFrom` all verified, and the five created in
+      Migadu as aliases onto the `ops@` mailbox. (The stale
+      `origin/feat/infra-email-dns` remote branch can go; #417 superseded it.)
+      **What is still open is proof of delivery**, and no check from the
+      workstation can supply it: Migadu refuses SMTP from an IP with no reverse
+      DNS, so a probe returns the same refusal for a real alias as for an invented
+      one — it reads as a pass to anyone who does not compare the two. A published
+      `mailto:` that bounces is worse than none at all, because a data subject who
+      writes to it reasonably believes the request is made and the Art 12(3)
+      one-month clock has started.
+      **Durable fix:** send a real message to each of the five from an outside
+      provider and confirm all five land in `ops@`, before the pages are linked
+      from anywhere public.
       **Trigger:** before `feohledger.com` serves the app to anyone outside the
       project.
-      Ref: [decisions.md](decisions.md) §175.
+      Ref: [decisions.md](decisions.md) §175. Tracker:
+      [#446](https://github.com/Absence0760/feohledger/issues/446) § 3.
 
 - [ ] **Fill the operator facts and get counsel to review the legal set.** ([#428](https://github.com/Absence0760/feohledger/issues/428)) Eight
       facts in `frontend/src/lib/legal/operator.ts` are `null` and render as

@@ -3,6 +3,13 @@
 Tracking sheet for the founder critical-path. Update the checkboxes
 inline as you complete each step. Target: first paying customer.
 
+Mirrored as GitHub issue
+[#446](https://github.com/Absence0760/feohledger/issues/446) for the tracker
+view, which carries the same checklist plus the credential-blocked items from
+[followups.md](../followups.md) § (a)/(b). Keep the two reconciled when either
+moves — the runbooks in this directory stay the authoritative *procedure* for
+each step.
+
 ## Critical path
 
 - [ ] **Legal foundation** — `legal-entity.md`
@@ -39,7 +46,10 @@ inline as you complete each step. Target: first paying customer.
 ## Parallel workstream
 
 - [ ] **Support + status** — `support-and-status.md`
-  - [ ] support@ email live
+  - [x] support@ email live — created 2026-09-17 as a Migadu alias onto `ops@`,
+        alongside `privacy@`, `security@`, `legal@` and `sales@`. Mail DNS applied
+        the same day; SES verified but still sandboxed. **Delivery not yet proven
+        by a real inbound send** — see [#446](https://github.com/Absence0760/feohledger/issues/446) § 3
   - [ ] Status page live
   - [ ] Uptime monitoring to phone
   - [ ] Incident runbook written
