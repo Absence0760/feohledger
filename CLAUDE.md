@@ -527,8 +527,16 @@ Worktree notes:
   changes) — but removal does **not** merge; consolidate first.
 - This is backed by a safety net: the `SessionStart` hook
   `.claude/hooks/unmerged-worktree-check.sh` warns at the start of every session
-  if any branch holds commits not on `main`, so stranded worktree work surfaces
-  and gets merged instead of forgotten.
+  if any branch holds work not on `main`, so stranded worktree work surfaces
+  and gets merged instead of forgotten. **It filters branches that were
+  squash-merged.** `git branch --no-merged` is ancestry-based and this repo
+  squashes every PR, so a merged branch's tip never becomes an ancestor of
+  `main` and stays "unmerged" forever — the hook once reported 99 stranded
+  commits across three branches that had all landed as #361, #362 and #376. A
+  warning that fires every session for work already on `main` is how a real one
+  gets ignored, so each candidate also gets a content test (`commit-tree` the
+  branch's tree onto its merge-base, then `git cherry main`) and only a branch
+  `main` has no equivalent patch for is reported.
 
 ## Fix bugs at the source — never adjust the test to hide them
 
