@@ -1,3 +1,4 @@
+import { parse } from 'svelte/compiler';
 import { describe, expect, it } from 'vitest';
 import { en } from './locales/en';
 
@@ -45,91 +46,105 @@ const TRANSLATED = [
 ];
 
 /** Attributes a human reads. `class` / `role` / `type` are not copy. */
-const COPY_ATTRS = /\s(?:aria-label|aria-description|title|placeholder|alt)="([^"]*)"/g;
+const COPY_ATTRS = new Set(['aria-label', 'aria-description', 'title', 'placeholder', 'alt']);
 
-/** Strip `<script>`, `<style>` and HTML comments — only the template is copy. */
-function template(source: string): string {
-	return source
-		.replace(/<script[\s\S]*?<\/script>/g, '')
-		.replace(/<style[\s\S]*?<\/style>/g, '')
-		.replace(/<!--[\s\S]*?-->/g, '');
+/**
+ * Two or more Latin letters in a row is the test for "a word". It lets through
+ * punctuation, whitespace, dashes and digits, which are not copy a translator
+ * would touch.
+ */
+const IS_COPY = /[A-Za-z]{2,}/;
+
+/**
+ * Parse the component and walk its TEMPLATE only.
+ *
+ * This used to strip `<script>`, `<style>` and comments with regexes and then
+ * hand-scan the remainder. CodeQL was right to reject that
+ * (`js/bad-tag-filter`, `js/incomplete-multi-character-sanitization`): an
+ * anchor on `</script>` does not match `</script >`, and a scanner that can be
+ * confused about what is markup is exactly the wrong thing to build a guard on.
+ * Not exploitable here — this reads our own sources at test time, it is not a
+ * sanitizer over untrusted input — but the correctness complaint behind the
+ * alert is real, and `a11y/imageDragging.test.ts` had already settled the
+ * answer for this repo: parse it.
+ *
+ * Parsing removes the class of bug rather than patching the pattern. Script and
+ * style bodies live on `ast.instance` / `ast.module` / `ast.css`, so walking
+ * `ast.fragment` puts them structurally out of reach — a `<script>` holding the
+ * string `'</script >'`, or a comment that merely quotes markup, cannot leak
+ * into the text this returns. The walk recurses over every own property rather
+ * than enumerating block types, so copy inside `{#if}`, `{#each}`, `{#await}`
+ * or `{#snippet}` is found without the guard knowing those blocks exist.
+ */
+function walkFragment(source: string, visit: (node: Record<string, unknown>) => void): void {
+	const ast = parse(source, { modern: true }) as unknown as { fragment: unknown };
+	const seen = new Set<unknown>();
+	(function walk(node: unknown): void {
+		if (node === null || typeof node !== 'object' || seen.has(node)) return;
+		seen.add(node);
+		if (Array.isArray(node)) {
+			for (const child of node) walk(child);
+			return;
+		}
+		const record = node as Record<string, unknown>;
+		visit(record);
+		for (const [key, value] of Object.entries(record)) {
+			// `attributes` is NOT descended into. An attribute's value is itself
+			// a list of `Text` nodes (`class="bulk-bar"` parses to exactly the
+			// same node type as visible copy), so a generic recursion reports
+			// every class name and role as untranslated text. Attributes are a
+			// different question with a different answer — `literalCopyAttrs`
+			// reads this key directly, and only for the five attributes a human
+			// actually hears or reads.
+			if (key === 'attributes') continue;
+			walk(value);
+		}
+	})(ast.fragment);
 }
 
 /**
- * Every literal text node in a Svelte template — what a reader sees that did
- * not come from `m()`.
+ * Every literal text node in the template — what a reader sees that did not
+ * come from `m()`.
  *
- * Hand-rolled rather than regexed because the two things being skipped nest:
- * a tag can hold `{…}` expressions containing `>` and quotes, and a `{…}`
- * expression can hold `<` inside a string. A brace/quote-aware scan is the only
- * way to tell a tag from a comparison operator.
+ * An `{expression}` is an `ExpressionTag` node, never `Text`, so a keyed string
+ * is skipped by the node type alone rather than by brace counting.
  */
 function textNodes(source: string): string[] {
-	const s = template(source);
 	const out: string[] = [];
-	let buf = '';
-	let i = 0;
-
-	while (i < s.length) {
-		if (s[i] === '<') {
-			if (buf.trim()) out.push(buf.trim());
-			buf = '';
-			let depth = 0;
-			let quote = '';
-			while (i < s.length) {
-				const c = s[i];
-				if (quote) {
-					if (c === quote) quote = '';
-				} else if (c === '"' || c === "'") {
-					quote = c;
-				} else if (c === '{') {
-					depth++;
-				} else if (c === '}') {
-					depth--;
-				} else if (c === '>' && depth === 0) {
-					i++;
-					break;
-				}
-				i++;
-			}
-			continue;
-		}
-
-		if (s[i] === '{') {
-			if (buf.trim()) out.push(buf.trim());
-			buf = '';
-			let depth = 0;
-			while (i < s.length) {
-				if (s[i] === '{') depth++;
-				else if (s[i] === '}') {
-					depth--;
-					if (depth === 0) {
-						i++;
-						break;
-					}
-				}
-				i++;
-			}
-			continue;
-		}
-
-		buf += s[i];
-		i++;
-	}
-	if (buf.trim()) out.push(buf.trim());
-
-	// Two or more Latin letters in a row is the test for "a word". It lets
-	// through punctuation, `&nbsp;`-free whitespace, dashes and digits, which
-	// are not copy a translator would touch.
-	return out.filter((t) => /[A-Za-z]{2,}/.test(t));
+	walkFragment(source, (node) => {
+		if (node.type !== 'Text') return;
+		const raw = typeof node.data === 'string' ? node.data : '';
+		const text = raw.trim();
+		if (text && IS_COPY.test(text)) out.push(text);
+	});
+	return out;
 }
 
-/** Human-readable attribute values that are literals rather than `{m(…)}`. */
+/**
+ * Human-readable attribute values that are literals rather than `{m(…)}`.
+ *
+ * A literal attribute parses as a single `Text` value; `title={m('k')}` gives an
+ * `ExpressionTag` and `title="a {b}"` gives a mixed array — neither is a bare
+ * literal, and both are correctly ignored.
+ */
 function literalCopyAttrs(source: string): string[] {
 	const out: string[] = [];
-	for (const match of template(source).matchAll(COPY_ATTRS)) {
-		if (/[A-Za-z]{2,}/.test(match[1])) out.push(match[0].trim());
-	}
+	walkFragment(source, (node) => {
+		const attrs = node.attributes;
+		if (!Array.isArray(attrs)) return;
+		for (const raw of attrs) {
+			const attr = raw as Record<string, unknown>;
+			if (attr.type !== 'Attribute') continue;
+			const name = typeof attr.name === 'string' ? attr.name : '';
+			if (!COPY_ATTRS.has(name)) continue;
+			const value = attr.value;
+			if (!Array.isArray(value) || value.length !== 1) continue;
+			const only = value[0] as Record<string, unknown> | undefined;
+			if (!only || only.type !== 'Text') continue;
+			const text = typeof only.data === 'string' ? only.data : '';
+			if (IS_COPY.test(text)) out.push(`${name}="${text}"`);
+		}
+	});
 	return out;
 }
 
@@ -143,17 +158,29 @@ describe('translated surfaces carry no literal copy', () => {
 		// nothing. This is the shape the banner shipped in: a bare heading, a
 		// bare button label, a hardcoded aria-label — beside the `{…}` blocks,
 		// `=>` arrows and quoted attributes that must NOT be mistaken for copy.
+		//
+		// Three of these lines exist to pin what the old regex scanner got
+		// wrong, and each one fails against it:
+		//   - `</script >` (trailing space) — the strip anchored on `</script>`
+		//     and missed it, leaking a script body into the scanned template.
+		//   - a script string containing markup and English words — reachable
+		//     only if script bodies are not structurally excluded.
+		//   - copy nested in `{#if}` — the flat scan never knew blocks existed.
 		const sample = [
-			'<script lang="ts">const label = \'not copy, this is script\';</script>',
+			'<script lang="ts">const leak = \'</div> Not copy, this is script\';</script >',
 			'{#if visible}',
 			'<section role="region" aria-label="Cookie and privacy consent">',
 			'<h2>Your privacy choices</h2>',
 			'<p>{m(\'consent.bodyNecessary\')}</p>',
-			'<button onclick={() => (open = !open)}>Accept all</button>',
+			'<button onclick={() => (open = !open)} title={m(\'consent.manage\')}>Accept all</button>',
+			'</section>',
 			'{/if}',
 			'<style>.consent { color: red; }</style>'
 		].join('\n');
+		// `Not copy, this is script` is absent: the script body is a different
+		// branch of the AST, not a region this scanner had to strip.
 		expect(textNodes(sample)).toEqual(['Your privacy choices', 'Accept all']);
+		// `title={m(…)}` is an ExpressionTag, so only the bare literal is named.
 		expect(literalCopyAttrs(sample)).toEqual(['aria-label="Cookie and privacy consent"']);
 	});
 
