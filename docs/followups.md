@@ -34,10 +34,12 @@ its `**Open:**` line or moves to the archive.
 Mirrored as GitHub issue [#321](https://github.com/Absence0760/feohledger/issues/321)
 for the tracker view. Keep the two reconciled when either moves.
 
-**Last reconciled:** 2026-09-17 — a housekeeping pass that pruned completed
-work rather than closing open work. **54 checked entries went, 21 of the 41
-sections emptied out with them, and two prose-only CLOSED narratives were
-pruned**, taking the file from 2570 lines to 1215. Nothing open was removed.
+**Last reconciled:** 2026-09-17 (round 26) — five agents, each in its own
+worktree. **Eleven entries closed** plus the engineering half of
+[#432](https://github.com/Absence0760/feohledger/issues/432), **nine opened**.
+Earlier the same day a housekeeping pass pruned 54 checked entries, 21 emptied
+sections and two prose-only CLOSED narratives, taking the file from 2570 lines
+to 1215; nothing open was removed by it.
 
 **This file had stopped obeying its own first rule.** "Open items only" is the
 line at the top, and 54 `[x]` entries plus their surrounding CLOSED narrative
@@ -48,10 +50,20 @@ section carried its own `decisions.md` § reference, so nothing was lost by
 deleting it; that cross-reference is what makes the pruning safe, and writing
 one is what earns a future entry the right to be deleted.
 
-**54 open: 39 (c) · 9 (a) · 6 (b)** — re-derived from the file, never carried
+**52 open: 37 (c) · 9 (a) · 6 (b)** — re-derived from the file, never carried
 forward. The section heading is authoritative; where an entry also carries a
-`(c)`/`(a)`/`(b)` marker, the two now agree.
+`(c)`/`(a)`/`(b)` marker, the two agree.
 `grep -c '^- \[ \]' docs/followups.md`.
+
+Round 26 closed eleven and opened nine, so the file shrank by two. **Three of
+the eleven were wrong about their own code**, and twice in the direction that
+would have caused damage if implemented as written: the GL-picker entry
+prescribed binding the uuid `id` in `InvoiceModal`, which would have written
+UUIDs into a `String(100)` column that eight services parse as a code; and the
+money entry prescribed a fix contradicting its own helper's contract
+(`MoneyAmount` emits a JSON number, not the string the entry asked clients to
+parse) while undercounting the defect 51 sites to one. The habit that caught
+both was verifying the entry against the code before implementing it.
 
 The previous line said 53 · 40 · 9 · 4. The total moved by one, and both halves
 of that are worth stating: one entry **closed** — the Dependabot pip-grouping
@@ -518,134 +530,9 @@ and re-derive before implementing.
       **Trigger:** the next slice that touches `_ensure_exception` or the `/exceptions` detail panel —
       or sooner, since it is the surface an auditor reads.
 
-- [ ] **(c) Mobile renders `warning.message`, so the app is English for a German user.** `mobile/lib/
-      widgets/invoice_warnings_panel.dart` reads `InvoiceWarning.message` and `mobile/lib/models/
-      invoice.dart` does not parse `code` / `params` at all. That is not a regression — it is exactly
-      what shipped before round 31, via the fallback that exists for it — but the web app now reads
-      the same payload in six languages and mobile reads it in one.
-      **Durable fix:** parse `code` + `params` on the model and resolve them through the ARB
-      catalogue, which needs the generator to emit a Dart/ARB half beside the TypeScript one so the
-      two cannot drift (the same "generated, not hand-written" constraint, a second target). The
-      per-kind formatting has a mobile home now — `utils/money.dart` (§160) — so the money params
-      land in the row's own currency rather than reintroducing the `$` §157 just removed.
-      **Trigger:** the next mobile invoice-detail slice.
-
 #### Opened by the label-map slice
 
-- [ ] **(c) The "Select all N matching" bulk affordance is hardcoded English on five
-      routes, on pages `frontend/docs/i18n.md` lists as fully extracted.**
-      `/exceptions`, `/invoices`, `/vendors`, `/contracts` and `/expenses` each carry
-      `` `Select all ${total} matching` `` and `All matching selected` as literals in
-      their `BulkBar` actions snippet. `/payments` is the only one keyed
-      (`payments.queue.selectAllMatching` / `.allMatchingSelected`), so the strings
-      already exist in all six locales — under a namespace the other five must not
-      borrow, since `pagedListFooter.test.ts`' per-namespace pairing is the precedent
-      against reaching into a sibling's keys (decisions §155).
-      **Durable fix:** decide the owner first, because there are five copies of one
-      string and a sixth already keyed: either `common.selectAllMatching` /
-      `common.allMatchingSelected` (the `common.all` / `common.loading` precedent —
-      the wording is identical on every surface and the only variable is `{total}`),
-      or move both strings into `ui/BulkBar.svelte` itself so the affordance carries
-      its own copy and no route can forget. Then migrate all six call sites, including
-      `/payments` off its private pair, and add a source-scan guard in the
-      `listJoinAudit` / `pagedListFooter` shape so a seventh `BulkBar` cannot ship a
-      literal. Correct the "bulk-bar" claims in `frontend/docs/i18n.md` for each of
-      the five routes in the same change.
-      **Trigger:** the next i18n slice, or the next change to `ui/BulkBar.svelte` or
-      any of the five routes' bulk paths — whichever comes first. Do it as one commit
-      across all six, not per route: five of them drifting from a sixth is how this
-      started.
-
-- [ ] **(c) The cookie-consent banner is entirely hardcoded English, on every
-      page of the app.** `lib/components/ConsentBanner.svelte` contains **no
-      `m()` call at all** — "Your privacy choices", "Strictly necessary (always
-      on)", "Analytics (optional)", both button labels, the `aria-label` and the
-      "Cookie Notice" link text are literals. It mounts from the root
-      `routes/+layout.svelte`, so it is the **first** thing a `de` / `es` / `fr`
-      / `ja` / `pt-BR` visitor sees, before any localized surface, and it is the
-      one surface they must interact with to dismiss.
-      This is not only an i18n defect. The banner is the ePrivacy Art 5(3)
-      consent gate, and consent has to be *informed* — a consent dialog a reader
-      cannot read is weak evidence that consent was given, which is the same
-      standard `/legal/cookies` is written to. It is the same class as the two
-      legal link surfaces closed on 2026-09-16, and the reason it was missed is
-      that it is a component rather than a route, so a per-route i18n audit never
-      reached it.
-      **Untracked until 2026-09-17** — noted in issue #321's correction pass and
-      filed here, which is the destination guard rail 6 requires.
-      **Durable fix:** key every string under a `consent.*` namespace with real
-      translations in all six catalogues (`messages_parity.test.ts` enforces the
-      parity once the keys exist), and extend whichever source-scan guard the
-      `listJoinAudit` / `pagedListFooter` shape establishes to cover
-      `lib/components/*.svelte`, not just routes — a component-shaped blind spot
-      is what let this sit.
-      **Trigger:** the next i18n slice, or any change to the consent banner or
-      the cookie notice — whichever comes first.
-
-- [ ] **(c) `/exceptions`' `severity` cell is the last data-driven badge on the row
-      still printing its raw wire value.** With the lifecycle status and the type
-      label keyed (round 31), `<span class="severity">{exc.severity}</span>` prints
-      `error` / `warning` / `info` in lowercase Latin beside cells that are now
-      translated in all six locales. There is no label map for severity anywhere in
-      the tree, on either surface — the `SEVERITY_COLORS` map in the route is the only
-      place the vocabulary is written down, and it is a colour map, so nothing catches
-      a fourth severity arriving unlabelled.
-      **Durable fix:** `EXCEPTION_SEVERITIES` / `EXCEPTION_SEVERITY_LABEL_KEYS` in
-      `types/exception.ts` beside the status pair, with `SEVERITY_COLORS` moved in and
-      retyped over the union so a tinted-but-unlabelled severity is a compile error
-      (the `EXCEPTION_STATUS_TONES` pairing), a tolerant accessor, three new keys in
-      each of the six locales, and a roster drift guard against the backend —
-      `models/exception.py` declares the three in a comment on the column only, so the
-      guard should pin whatever constant the backend grows, or the backend should grow
-      one (`exception_lifecycle.py` is where the type roster and the status maps
-      already live).
-      **Trigger:** the next /exceptions slice, or the next time a severity is added or
-      renamed backend-side.
-
 #### Opened by the mobile-currency slice
-
-- [ ] **(c) Mobile renders a payment run's total bare, including on the dialog
-      that authorizes execution — the server now supplies the currency it needs.**
-      *Corrected 2026-09-17: the server half of this entry is done.* The entry
-      was written when `payment_runs.total_amount` was an unlabelled
-      `SUM(Payment.amount)` with no way to say what it was denominated in. Since
-      then the run builder refuses a mixed-currency run outright and
-      `PaymentRunResponse.currency` derives the code from the legs
-      (`api/payments.py::_one_currency`, plus its list-endpoint counterpart), so
-      **both** the runs list and the run detail serve a currency — `None` only
-      where it genuinely cannot be proven. The web app reads it.
-      **What is left is mobile, and it is one field.**
-      `mobile/lib/models/payment_queue.dart::PaymentRun` declares no `currency`
-      and `fromJson` never parses it, so `_runTotal` passes `currency: null`
-      unconditionally and four call sites in `payment_queue_screen.dart` render
-      the figure bare — the runs list, the sign-off row, the detail sheet and
-      `payRunExecuteBody`, the execute confirmation. The class docstring and
-      `_runTotal`'s comment both still explain the absence as a property of the
-      data, which was true when written and is now stale.
-      **Durable fix:** parse `currency` in `PaymentRun.fromJson`, pass it to
-      `_runTotal`, and rewrite both comments to say the code is served and
-      `null` means unprovable. `formatMoneyString` already renders bare on
-      `null`, so the mixed-run case keeps the behaviour §160 chose.
-      **Trigger:** the next change to the mobile payment-queue screen.
-
-- [ ] **(c) Mobile number, date and currency formatting ignores the in-app
-      locale picker.** `mobile/docs/i18n.md` claims "every number, date and
-      currency renders through the locale-aware helpers". The strings are
-      localized in all six locales, but no call site passes a `locale`:
-      `utils/money.dart` accepts one and nothing supplies it, every `DateFormat`
-      is constructed without one, and `Intl.defaultLocale` is never set — so a
-      German user reads German copy with `1,234.50` and `Mar 4, 2026`. The web
-      counterpart solves this with `i18n/formatLocale.ts::getActiveFormatLocale`,
-      which `formatMoney` reads by default.
-      **Durable fix:** the mobile mirror of that — a helper resolving
-      `LocaleStore.instance.locale` (falling back to the platform locale) that
-      `formatMoney` / `formatMoneyString` / `formatMoneyCompact` and every
-      `DateFormat` construction default to, set once so a picker change
-      re-formats live. Note it changes the expected string in every widget test
-      that asserts a formatted figure or date, so it is its own change rather
-      than a rider.
-      **Trigger:** the first non-English tenant on mobile, or a bug report that
-      the picker changes words but not numbers.
 
 - [ ] **(c) `frontend/utils/money.ts::resolveCurrency` substitutes
       `DEFAULT_CURRENCY` for a code the backend deliberately declined to
@@ -717,103 +604,7 @@ and re-derive before implementing.
       **Trigger:** the first tenant booking invoices in more than one currency,
       or any change to the dashboard/cash-flow payload parsing.
 
-- [ ] **(c) `_exception_dict` serves money as a `float` across the API boundary.**
-      `api/exceptions.py` sends `float(inv.amount)` for the related invoice's amount,
-      where `schemas/money.py::MoneyAmount` exists precisely so a `Decimal` crosses
-      the wire as its exact digits. Pre-existing rather than introduced by round 31 —
-      which only added the `currency` beside it (§160) — and the reason it was not
-      fixed there is that the mobile `Exception` model types the field `double` and
-      the web consumers read a number, so the model, both clients and this serializer
-      have to move together.
-      **Durable fix:** `MoneyAmount` on the serializer, `String`-parsed-to-`Decimal`
-      on the clients (the payment-queue and cash-flow payloads already ship money as
-      strings for exactly this reason, and `formatMoneyString` on mobile already takes
-      the exact-decimal path), then a test that a cent-precise amount survives the
-      round trip. Note the amount is display-only on both surfaces — nothing computes
-      with it — so this is an invariant repair, not a live money defect.
-      **Trigger:** the next change to the exception serializer or either exception
-      client, or the next money-precision sweep.
-
 #### Opened by the GL-accounts slice
-
-- [ ] **(c) A GL account can be created but never corrected or retired.** `app/api/gl_accounts.py`
-      has `GET ""`, `POST ""` and `POST /sync-erp` and **no PATCH and no DELETE**, which is why
-      `/gl-accounts` ships with no row actions. An account created with the wrong name, type or
-      parent — or, worse, into the wrong chart, since scope is taken from `X-Entity-ID` at create
-      time — is permanent. And nothing under `app/` ever writes `GLAccount.is_active`: the ERP sync
-      updates `name` / `account_type` / `erp_account_id` only, so `is_active = false` is reachable
-      solely by direct SQL or an imported chart. The page's *Include inactive* filter is still
-      correct (the endpoint defaults to hiding those rows, and a migrated chart can carry them, so
-      without the toggle they are invisible with no explanation) — but the state it reveals is one
-      the product cannot produce.
-      **Durable fix:** `PATCH /api/gl-accounts/{id}` over `name` / `account_type` / `parent_code` /
-      `is_active`, with a `gl_account.updated` audit row, surfaced as a `RowAction` gated on the
-      same `auth.isManager` the two existing writes use. Two fields must stay immutable and the
-      reason belongs in the route: `code`, because an invoice records its GL as a **string** and
-      renaming the code orphans every line already coded to it; and `entity_id`, because moving an
-      account between charts either steals it from every other entity or hands it to all of them,
-      and the effective-chart uniqueness guard would have to be re-run against both the old and the
-      new scope. A genuine "move between charts" is a create + deactivate, not a PATCH.
-      **Trigger:** the first tenant that mistypes a GL name, or retires an account and finds the
-      only way to do it is `psql`.
-
-- [ ] **(c) Two invoice modals still fetch the chart of accounts by hand.**
-      `lib/components/modals/CreateInvoiceModal.svelte` and `lib/components/modals/InvoiceModal.svelte`
-      each declare their own inline `GLAccountOption` (the second one narrower still — `{code, name}`)
-      and call `api.get('/api/gl-accounts')` directly, bypassing `lib/api/glAccounts.ts`. Round 31
-      made `types/glAccount.ts` the single owner and collapsed the two `api/` copies
-      (`catalogs.ts`, `expenses.ts`) onto a `Pick` of it; these two were left declared because four
-      sibling agents were live in the same tree that round and both files are heavily e2e-covered,
-      so the import churn was not worth the merge surface. It is a two-line edit per file, and while
-      it stands the endpoint's shape is described in three places instead of one.
-      **Durable fix:** replace both inline interfaces with `import type { GlAccountOption } from
-      '$lib/types/glAccount'` and both fetches with `listGlAccounts()`.
-      **Trigger:** the next change to either invoice modal, or the next change to the
-      `/api/gl-accounts` response shape — whichever comes first, since the second one is when the
-      drift starts costing something.
-
-- [ ] **(c) The GL pickers cannot tell two subsidiaries' identical codes apart.** `/gl-accounts`
-      now renders a **Scope** column because the consolidated view returns every entity's chart at
-      once and two subsidiaries may each legitimately hold their own `6000` — but the four pickers
-      reading the same endpoint (invoice line coding, expense coding, requisition lines, catalog
-      items) still render only `code — name`, so in the consolidated view they offer two
-      indistinguishable options that code to different accounts.
-      **Corrected 2026-09-17 — this is worse than the entry said, in two ways.**
-      The entry claimed "the picker value is the uuid `id`, so the *write* is
-      unambiguous". That holds for three of the four pickers — `ExpenseModal`,
-      `RequisitionModal` and `CatalogModal` all bind `value={g.id}` — but **not
-      for invoice line coding**, the highest-volume of them:
-      `InvoiceModal.svelte` binds `value={acct.code}` at both its line-coding and
-      its split sites, so two subsidiaries' `6000` are the *same* value and the
-      write is ambiguous, not merely the choice. It also claimed the pickers
-      "already receive `entity_id`, so the data is in hand" — the endpoint serves
-      it, but `types/glAccount.ts::GlAccountOption` is
-      `Pick<GlAccount, 'id' | 'code' | 'name' | 'account_type'>` and drops
-      `entity_id` before any picker sees it.
-      **Durable fix, in order:** widen `GlAccountOption` to carry `entity_id`;
-      move `InvoiceModal` onto the uuid `id` like its three siblings (a write
-      change — check what reads `gl_account` as a code first); then, when
-      `entityStore.multiEntity`, append the resolved entity name to an
-      entity-scoped option's label and leave a shared one bare — the same
-      shared-vs-owned distinction the Scope column draws, extracted as one helper
-      beside `GlAccountOption` rather than the same conditional in four pickers.
-      **Trigger:** the first multi-entity tenant whose subsidiaries define overlapping GL codes.
-
-- [ ] **(c) `/vendors/change-requests` leaves stale rows on screen after a failed
-      re-load.** Its `catch` sets `errored` but never clears the row array, so a
-      second failed load relabels the *previous* filter's rows as the answer to
-      filters it never ran — the identical gap round 31 fixed on `/gl-accounts`
-      after the reviewer caught it there, and the shape `/exceptions` already
-      handles correctly by clearing. On a bank-detail dual-control queue, showing
-      the wrong set of pending change requests is the worst place in the app for
-      it. It was left because the file was another agent's likely territory that
-      round and nobody ended up owning it.
-      **Durable fix:** clear the rows in the `catch` the way `/gl-accounts` and
-      `/exceptions` do, and add the route to the parameterized
-      `tests-e2e/reactivity/list-load-failure.spec.ts` sweep, which is where the
-      first-load half is already covered for every other list.
-      **Trigger:** the next change to that route — it is a one-line fix plus a
-      sweep entry, so it should ride the next thing that touches the file.
 
 #### Opened by the round-31 CI run
 
@@ -1035,6 +826,132 @@ and re-derive before implementing.
       that made it stale was scoped out of. **Trigger:** the next change that
       touches `frontend/src/routes/legal/`, or a customer DPA review — whichever
       comes first.
+
+### Surfaced by the round-26 parallel batch (2026-09-17)
+
+Five agents, each in its own worktree, closed eleven entries and issue #432's
+engineering half. Every one of these was found by doing the work rather than by
+reading the entry — and **three entries were materially wrong about their own
+code**, twice in the direction that would have caused damage. That is now the
+seventh round running where an entry's own account of its scope was the least
+reliable part of it.
+
+- [ ] **(c) A consolidated-view GL pick is still not validated against the invoice's own entity.**
+      Round 26 made the ambiguity *visible* — entity-scoped options now carry the owning
+      entity's name — but the picker still offers, and the server still accepts, subsidiary
+      B's `6000` for a subsidiary-A invoice. The stored string then resolves against A's
+      chart. Labelling was the half that fit in the frontend; refusing is the half that does
+      not.
+      **Durable fix:** expose the invoice's own `entity_id` on `InvoiceResponse` (it carries
+      only `counterparty_entity_id` today) so the picker can scope to that invoice's
+      effective chart, and validate on manual write — `gl_account_invalid` is raised today
+      only by `services/extraction.py` and `gl_recode`, never by a PATCH, so a hand-typed or
+      cross-entity code is accepted silently.
+      **Trigger:** the first multi-entity tenant whose subsidiaries define overlapping codes.
+
+- [ ] **(c) `Invoice.gl_account` stores a code, so a renamed or retired account cannot be traced.**
+      Round 26 confirmed the shape while auditing the picker: `Invoice.gl_account` and
+      `InvoiceLineItem.gl_account` are `String(100)` **codes**, while `Expense`,
+      `RequisitionLine` and `CatalogItem` hold real `ForeignKey("gl_accounts.id")`. Eight
+      services read the invoice column as a code (`budget_service`, `matching_rules`,
+      `tax_1099` glob patterns, `gl_recode`, workflow `RoutingField`, `report_builder`,
+      `vendor_enrichment`, the extraction prompt catalog), plus `RecurringInvoiceTemplate`,
+      `ContractLineItem` and the org default. `api/gl_accounts._code_in_effective_chart`
+      states the consequence itself: *"an invoice records the code as a STRING, so which
+      account it was coded to becomes unanswerable."* It is also why the new PATCH refuses
+      to make `code` mutable, and why hard-deleting an account orphans posted lines
+      **silently** — no constraint fires.
+      **Durable fix:** a real FK alongside the string, backfilled by code within each
+      entity's chart, with the string kept as the historical record. Large: a tenant
+      migration, a backfill with an unresolvable-code policy, and eight read sites.
+      **Do NOT** meanwhile "fix" the pickers by binding the uuid — round 26's entry
+      prescribed exactly that and it would have written UUIDs into a column eight services
+      parse as a code.
+      **Trigger:** the first request to rename or merge a GL account, or any work on
+      cross-entity coding.
+
+- [ ] **(c) The new `PATCH /api/gl-accounts/{id}` has no caller.** The endpoint (correct /
+      retire, with a `parent_code` cycle guard and an audit row per changed field) landed in
+      round 26; `/gl-accounts` still renders no row actions, so an account is still
+      create-only from the UI. The backend agent's boundary stopped at `backend/`.
+      **Durable fix:** row actions on `/gl-accounts` for edit + deactivate/reactivate, and
+      show retired rows under a filter rather than hiding them — the list endpoint already
+      filters on `is_active`.
+      **Trigger:** the next change to `/gl-accounts`.
+
+- [ ] **(c) The exception `amount` still crosses the wire as a JSON number.** Round 26 made
+      every money serializer exact (51 sites) but deliberately preserved the wire shape.
+      Moving `amount` to an exact string is blocked on the clients:
+      `mobile/lib/models/exception.dart:131` parses `(json['amount'] as num?)?.toDouble()`
+      and would throw at runtime on a string.
+      **Durable fix:** a coordinated backend + web + mobile change, one field at a time,
+      each client tolerant of both shapes before the server switches.
+      **Trigger:** the next deliberate wire-format slice — not a drive-by.
+
+- [ ] **(c) The invoice-warning message catalogue is generated for the web only.**
+      `backend/scripts/gen_invoice_warning_messages.py` emits
+      `frontend/src/lib/api/invoiceWarningMessages.generated.ts`; round 26 hand-transcribed
+      the same 48 codes into mobile's ARB files. A parity test
+      (`mobile/test/l10n/invoice_warning_messages_test.dart`) reads the generated TypeScript
+      and reddens mobile CI when the codes or parameter kinds diverge, so the duplication is
+      guarded rather than silent — but it is still duplication.
+      **Durable fix:** teach the generator to emit the Dart/ARB half beside the TypeScript
+      one, and drop the parity test to a generated-file drift check like the others.
+      `backend/docs/invoice-warnings.md` describes only the web client and understates this.
+      **Trigger:** the next new warning code, which is the moment the duplication costs
+      something.
+
+- [ ] **(c) `BadgeTone` lives in a `.svelte` module, so `tests-e2e/` cannot import the types
+      that reference it.** `$lib/types/vendor.ts` does `import type { BadgeTone } from
+      '…/ui/Badge.svelte'`, and plain `tsc` resolves `*.svelte` through an ambient shim with
+      no named exports — `TS2614` under `pnpm check:e2e`. So an e2e fixture cannot
+      `satisfies` any type that transitively touches it, against the house rule that
+      fixtures are type-pinned; round 26 had to skip that on one new fixture and say why
+      inline.
+      **Durable fix:** move `BadgeTone` into a `.ts` module and re-export it from
+      `Badge.svelte`. 28 files import it, so it is its own mechanical change and a poor
+      passenger on anything else.
+      **Trigger:** the next e2e fixture blocked by it, or any refactor already touching
+      `ui/Badge.svelte`.
+
+- [ ] **(c) `DataTable`'s scroll container is not keyboard-pannable.** `.grid-container`
+      scrolls horizontally but carries no `tabindex="0"`, so a table whose cells hold
+      nothing focusable cannot be panned by keyboard at narrow widths. Round 26 gave its
+      two new `/cfo` scrollers the attribute rather than change the shared component while
+      four agents were in that tree. Not a 1.4.10 failure — the table scrolls rather than
+      overflowing the document — but it is adjacent to 2.1.1.
+      **Durable fix:** `tabindex="0"` plus an accessible name on `.grid-container` in
+      `ui/DataTable.svelte`, and a check in the a11y suite that a horizontally-scrollable
+      region is reachable.
+      **Trigger:** the next change to `ui/DataTable.svelte`.
+
+- [ ] **(c) Breakpoints are ad hoc — the deferred half of [#432](https://github.com/Absence0760/feohledger/issues/432).**
+      Round 26 closed #432's two engineering parts (the `/organization` 320px failure and a
+      reflow guard widened from 5 routes to 45) and deliberately did **not** make the
+      viewport-floor call, which is a product decision. Measured while there, correcting the
+      issue's own premise that there are "zero width breakpoints": **30 width-based `@media`
+      queries across 15 distinct values** (`400, 420, 520, 600, 620, 640, 700, 720, 760,
+      768, 800, 900, 960, 1100px` and `52rem`), zero container queries, zero shared tokens.
+      **Product call first:** what viewport floor do we support, and what are the two or
+      three named steps? Then: declare them once (CSS custom properties cannot be used in
+      `@media`, so this is documented literals plus a stylesheet guard rejecting unlisted
+      values — the `targetSizeAudit.test.ts` shape — or a preprocessor), migrate 30 call
+      sites, and decide sidebar behaviour below the floor and whether `/exceptions`' 11
+      columns drop or keep scrolling.
+      Worth weighing: five of round 26's seven reflow fixes needed **no breakpoint at all**
+      — `flex-wrap`, `min-width: 0`, a flex basis, an intrinsic scroller. Tokens are for
+      the cases intrinsic reflow genuinely cannot reach.
+      **The 320px reflow guard does not depend on this** and must not be folded into it:
+      320px is WCAG's own number. A floor decision adds steps above it.
+      **Trigger:** the product call.
+
+- [ ] **(c) `frontend/CLAUDE.md` documents a `t()` that does not exist.** It tells
+      contributors to put user-facing strings through `t()`; the runtime function is `m()`,
+      which is what every call site uses. A binding instruction file naming the wrong
+      function is the kind of error that costs a newcomer an hour.
+      **Durable fix:** correct the reference, and grep the per-area `CLAUDE.md` files for
+      other stale API names while there.
+      **Trigger:** the next edit to `frontend/CLAUDE.md`.
 
 ## (a) Blocked on external credentials, accounts, or hardware
 
