@@ -2,26 +2,12 @@
 
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Annotated
 
-from pydantic import BaseModel, Field, PlainSerializer
+from pydantic import BaseModel, Field
 
 from app.api.pagination import PageMeta
 from app.schemas.money import MoneyAmount, OptionalMoneyAmount
-
-
-def _decimal_to_number(value: Decimal | None) -> float | None:
-    return None if value is None else float(value)
-
-
-# A non-money Decimal (a percentage) that serialises to a JSON *number*, matching
-# the dynamic-discounting wire contract (and the frontend's `number`-typed
-# discount types) while staying exact in Python. Mirrors the AP-side
-# `schemas/discount.PercentNumber`.
-PercentNumber = Annotated[
-    Decimal,
-    PlainSerializer(_decimal_to_number, return_type=float, when_used="json"),
-]
+from app.schemas.percent import PercentNumber
 
 
 class PortalLoginRequest(BaseModel):

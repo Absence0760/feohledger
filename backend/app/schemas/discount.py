@@ -11,32 +11,12 @@ from __future__ import annotations
 from datetime import date
 from decimal import Decimal
 from enum import StrEnum
-from typing import Annotated
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, PlainSerializer
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.schemas.money import MoneyAmount, OptionalExactMoneyInput, OptionalMoneyAmount
-
-
-def _decimal_to_number(value: Decimal | None) -> float | None:
-    return None if value is None else float(value)
-
-
-# A non-money Decimal (a percentage / rate) that serialises to a JSON *number*,
-# matching the frontend's `number`-typed contract while staying exact in Python.
-PercentNumber = Annotated[
-    Decimal,
-    PlainSerializer(_decimal_to_number, return_type=float, when_used="json"),
-]
-
-# The same, but nullable — a percentage that may be genuinely UNKNOWN rather
-# than zero. `None` on the wire is `null`, which a client can tell apart from
-# `0`; a fabricated `0.00` reads as a measurement.
-OptionalPercentNumber = Annotated[
-    Decimal | None,
-    PlainSerializer(_decimal_to_number, return_type=float | None, when_used="json"),
-]
+from app.schemas.percent import OptionalPercentNumber, PercentNumber
 
 
 class OfferScope(StrEnum):

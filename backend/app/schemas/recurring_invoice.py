@@ -10,23 +10,12 @@ See ``backend/docs/recurring-invoices.md``.
 from __future__ import annotations
 
 from datetime import date
-from decimal import Decimal
 from enum import StrEnum
-from typing import Annotated
 
-from pydantic import BaseModel, Field, PlainSerializer
+from pydantic import BaseModel, Field
 
 from app.schemas.money import MoneyAmount, OptionalMoneyAmount
-
-
-def _decimal_to_number(value: Decimal | None) -> float | None:
-    return None if value is None else float(value)
-
-
-PercentNumber = Annotated[
-    Decimal,
-    PlainSerializer(_decimal_to_number, return_type=float, when_used="json"),
-]
+from app.schemas.percent import PercentNumber
 
 
 class Cadence(StrEnum):
