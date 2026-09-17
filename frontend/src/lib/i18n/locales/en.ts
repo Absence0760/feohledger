@@ -4690,8 +4690,12 @@ export const en = {
 	'creditMemos.createModal.title': 'New Credit Memo',
 	'creditMemos.createModal.vendor': 'Vendor',
 	'creditMemos.empty': 'No credit memos.',
+	'creditMemos.empty.filtered': 'No credit memos match this filter.',
 	'creditMemos.loadMore': 'Load more ({shown} of {total})',
 	'creditMemos.new': '+ New Credit Memo',
+	'creditMemos.onboarding.description':
+		'A credit memo records money a supplier owes back — a return, an overcharge, a rebate. Create one, then apply it to that supplier’s invoice before the invoice is paid.',
+	'creditMemos.onboarding.heading': 'No credit memos yet',
 	'creditMemos.row.apply': 'Apply',
 	'creditMemos.row.void': 'Void',
 	'creditMemos.row.confirm': 'Confirm',

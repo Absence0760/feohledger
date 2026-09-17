@@ -4491,8 +4491,12 @@ export const messages = {
 	'creditMemos.createModal.title': 'Neue Gutschrift',
 	'creditMemos.createModal.vendor': 'Lieferant',
 	'creditMemos.empty': 'Keine Gutschriften.',
+	'creditMemos.empty.filtered': 'Keine Gutschriften für diesen Filter.',
 	'creditMemos.loadMore': 'Mehr laden ({shown} von {total})',
 	'creditMemos.new': '+ Neue Gutschrift',
+	'creditMemos.onboarding.description':
+		'Eine Gutschrift erfasst Geld, das ein Lieferant zurückerstattet – eine Rücksendung, eine Überzahlung, einen Rabatt. Legen Sie eine an und buchen Sie sie vor der Zahlung auf eine Rechnung dieses Lieferanten.',
+	'creditMemos.onboarding.heading': 'Noch keine Gutschriften',
 	'creditMemos.row.apply': 'Anwenden',
 	'creditMemos.row.void': 'Stornieren',
 	'creditMemos.row.confirm': 'Bestätigen',

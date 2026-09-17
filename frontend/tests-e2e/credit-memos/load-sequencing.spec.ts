@@ -134,16 +134,20 @@ test.describe('/credit-memos — list request sequencing', () => {
 		});
 
 		await page.goto('/credit-memos');
-		const empty = page.getByTestId('table-empty');
-		await expect(empty).toHaveText('No credit memos.');
+		// Zero memos and no active filter is the genuine zero-data case, which
+		// renders the onboarding block rather than a table row.
+		await expect(page.getByTestId('credit-memos-empty-state')).toBeVisible();
 
 		// Switch filter — the answer is unknown until the held response lands, so
 		// the table must say so rather than repeat the previous verdict.
 		await page.getByRole('button', { name: /^Applied/ }).click();
+		const empty = page.getByTestId('table-empty');
 		await expect(empty).toHaveText('Loading…');
 
 		releaseSecond();
-		await expect(empty).toHaveText('No credit memos.');
+		// And once it lands: "the Applied filter matched nothing", never the
+		// global "there are no credit memos" claim.
+		await expect(empty).toHaveText('No credit memos match this filter.');
 	});
 
 	test('a held page-2 append cannot clobber a newer status-filtered page 1', async ({ page }) => {

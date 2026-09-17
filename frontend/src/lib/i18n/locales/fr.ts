@@ -4492,8 +4492,12 @@ export const messages = {
 	'creditMemos.createModal.title': 'Nouvel avoir',
 	'creditMemos.createModal.vendor': 'Fournisseur',
 	'creditMemos.empty': 'Aucun avoir.',
+	'creditMemos.empty.filtered': 'Aucun avoir ne correspond à ce filtre.',
 	'creditMemos.loadMore': 'Charger plus ({shown} sur {total})',
 	'creditMemos.new': '+ Nouvel avoir',
+	'creditMemos.onboarding.description':
+		'Un avoir enregistre une somme qu’un fournisseur doit rembourser — un retour, une surfacturation, une remise. Créez-en un, puis imputez-le sur une facture de ce fournisseur avant son paiement.',
+	'creditMemos.onboarding.heading': 'Aucun avoir pour le moment',
 	'creditMemos.row.apply': 'Appliquer',
 	'creditMemos.row.void': 'Annuler',
 	'creditMemos.row.confirm': 'Confirmer',

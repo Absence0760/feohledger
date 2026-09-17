@@ -3,10 +3,13 @@
 	import { appendUnique, fetchAllPages, type PagedResponse } from '$lib/utils/pagination';
 	import { createRequestSequencer } from '$lib/utils/requestSequence';
 	import { untrack } from 'svelte';
+	import { page as urlStore } from '$app/stores';
+	import { replaceState } from '$app/navigation';
 	import RowAction from '$lib/components/ui/RowAction.svelte';
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 	import FilterChips from '$lib/components/ui/FilterChips.svelte';
 	import DataTable from '$lib/components/ui/DataTable.svelte';
+	import EmptyState from '$lib/components/ui/EmptyState.svelte';
 	import Modal from '$lib/components/ui/Modal.svelte';
 	import Money from '$lib/components/ui/Money.svelte';
 	import VendorPicker from '$lib/components/ui/VendorPicker.svelte';
@@ -14,6 +17,7 @@
 	import { toast } from '$lib/components/ui/Toast.svelte';
 	import { auth } from '$lib/stores/auth.svelte';
 	import { m } from '$lib/i18n/store.svelte';
+	import type { MessageKey } from '$lib/i18n/messages';
 	import { formatDate } from '$lib/utils/time';
 	import { currencyOptions } from '$lib/utils/money';
 	import { orgCurrency } from '$lib/stores/orgSettings.svelte';
@@ -39,6 +43,22 @@
 		void: 'neutral'
 	};
 
+	/**
+	 * The badge used to print `memo.status` verbatim — the column VALUE, not a
+	 * label — so every locale rendered the English enum (`open` / `applied` /
+	 * `void`) inside an otherwise translated page. The chips have always keyed
+	 * off these three; the badge now shares them. An unknown status (a future
+	 * backend state this build predates) falls back to the raw value rather
+	 * than rendering a missing key.
+	 */
+	const STATUS_LABEL_KEYS: Record<string, MessageKey> = {
+		open: 'creditMemos.status.open',
+		applied: 'creditMemos.status.applied',
+		void: 'creditMemos.status.void'
+	};
+
+	/** The statuses `?status=` may carry — anything else falls back to `all`. */
+	const STATUSES = ['open', 'applied', 'void'];
 
 	const STATUS_CHIPS = $derived([
 		{ key: 'all', label: m('common.all') },
@@ -53,6 +73,13 @@
 		{ label: m('creditMemos.col.amount'), class: 'right' },
 		{ label: m('creditMemos.col.issued') },
 		{ label: m('creditMemos.col.appliedTo') },
+		// The create form captures a reason and nothing in the product ever
+		// showed it again — the one field that says WHY a supplier owes this
+		// credit. Reuses the form's own label rather than minting a second
+		// catalogue entry for the same word. It sits AFTER the money columns
+		// deliberately: the table scrolls horizontally on a narrow viewport, and
+		// putting free text ahead of the amount pushed the figure off a phone.
+		{ label: m('creditMemos.createModal.reason') },
 		{ label: m('creditMemos.col.status') },
 		{ class: 'actions-col' }
 	]);
@@ -84,7 +111,22 @@
 	let memos = $state<CreditMemo[]>([]);
 	let invoices = $state<Invoice[]>([]);
 	let loading = $state(true);
-	let statusFilter = $state<string>('all');
+	// Distinguishes "the list is empty" from "we never found out" — without it
+	// a failed fetch left the table asserting there are no credit memos, which
+	// on a payables surface reads as "this vendor owes you nothing".
+	let errored = $state(false);
+	// The invoice select is the Apply dialog's whole set of valid targets, so a
+	// failed load has to say so: an empty select otherwise claims the vendor has
+	// no creditable invoice.
+	let invoicesErrored = $state(false);
+	// Round-trips through `?status=` like the other ~24 list routes, so back /
+	// forward / reload / a pasted link reproduce the view. An unrecognised value
+	// falls back to `all` rather than silently filtering to nothing.
+	let statusFilter = $state<string>(
+		STATUSES.includes($urlStore.url.searchParams.get('status') ?? '')
+			? ($urlStore.url.searchParams.get('status') as string)
+			: 'all'
+	);
 	let showCreate = $state(false);
 	let applyTargetId = $state<string | null>(null);
 
@@ -160,8 +202,22 @@
 			statusEffectRan = true;
 			return;
 		}
+		syncUrl();
 		loadMemos();
 	});
+
+	// A WRITER of URL state, never a dependency source — every read inside is
+	// untracked so calling it from the status effect can't make that effect
+	// depend on `$urlStore` and re-fire itself (the pattern `/vendors` and
+	// `/expenses` settled; see ui-patterns.md § Sequencing list fetches).
+	function syncUrl() {
+		untrack(() => {
+			const url = new URL($urlStore.url);
+			if (statusFilter !== 'all') url.searchParams.set('status', statusFilter);
+			else url.searchParams.delete('status');
+			replaceState(`${url.pathname}${url.search}`, {});
+		});
+	}
 
 	async function loadAll() {
 		await Promise.all([loadMemos(), loadInvoices()]);
@@ -190,9 +246,11 @@
 			memos = opts.append ? appendUnique(memos, data.items) : data.items;
 			total = data.total;
 			page = nextPage;
+			errored = false;
 		} catch {
 			// `isCurrentRequest`, not `canCommit`: only the newest request reports.
 			if (!fetchSequence.isCurrentRequest(token)) return;
+			errored = true;
 			toast(m('creditMemos.toast.loadFailed'), 'error');
 		} finally {
 			if (fetchSequence.isCurrentRequest(token)) {
@@ -226,8 +284,11 @@
 			invoices = await fetchAllPages<Invoice>((page, pageSize) =>
 				api.get<PagedResponse<Invoice>>(`/api/invoices?page=${page}&page_size=${pageSize}`)
 			);
+			invoicesErrored = false;
 		} catch {
-			/* non-critical */
+			// Not fatal to the list, but the Apply dialog must not present an
+			// empty select as "this vendor has no creditable invoice".
+			invoicesErrored = true;
 		}
 	}
 
@@ -308,15 +369,46 @@
 		}
 	}
 
+	// The memo the Apply dialog is acting on. Named in the dialog so the
+	// operator can see WHICH credit they are about to consume — the amount and
+	// the vendor are the two facts that decide whether the invoice they pick is
+	// the right one, and neither was on screen once the dialog covered the row.
+	let applyMemo = $derived(memos.find((cm) => cm.id === applyTargetId) ?? null);
+
 	// Only this memo's own vendor's invoices are valid targets. An invoice with
 	// no resolved `vendor_id` is NOT a wildcard — its vendor can't be proven, so
 	// the backend refuses the apply (409) and offering it here would only invite
 	// the error. Resolve the invoice's vendor first (re-save it on the invoice).
 	let invoicesForVendor = $derived.by(() => {
-		const memo = memos.find((m) => m.id === applyTargetId);
+		const memo = applyMemo;
 		if (!memo) return [];
 		return invoices.filter((i) => i.vendor_id === memo.vendor_id);
 	});
+
+	/**
+	 * Four distinct answers, never one message doing duty for all of them:
+	 * still loading, the fetch failed, a filter matched nothing, or this tenant
+	 * genuinely has no credit memos. The third is the one this page used to get
+	 * wrong — "No credit memos." under an active Void chip is false whenever
+	 * the tenant has open ones.
+	 */
+	let emptyMessage = $derived(
+		loading
+			? m('common.loading')
+			: errored
+				? m('common.loadFailed')
+				: statusFilter !== 'all'
+					? m('creditMemos.empty.filtered')
+					: m('creditMemos.empty')
+	);
+
+	// Only the true zero-data case gets the illustrated onboarding block: a
+	// filter that matched nothing keeps the plain in-table line, since "create
+	// your first credit memo" is a non-sequitur when the tenant already has
+	// some and the chip is simply narrow.
+	let showOnboarding = $derived(
+		!loading && !errored && total === 0 && memos.length === 0 && statusFilter === 'all'
+	);
 </script>
 
 <svelte:window
@@ -337,41 +429,60 @@
 
 	<FilterChips chips={STATUS_CHIPS} bind:active={statusFilter} />
 
-	<DataTable
-		columns={COLUMNS}
-		isEmpty={memos.length === 0}
-		empty={loading ? m('common.loading') : m('creditMemos.empty')}
-	>
-		{#snippet body()}
-			{#each memos as memo (memo.id)}
-				<tr
-					class:applied={memo.status === 'applied'}
-					class:void={memo.status === 'void'}
-					class:row-muted={memo.status === 'applied' || memo.status === 'void'}
-				>
-					<td class="mono">{memo.memo_number}</td>
-					<td>{memo.vendor_name ?? '—'}</td>
-					<td class="right mono"><Money amount={memo.amount} currency={memo.currency} /></td>
-					<td class="muted">{formatDate(memo.issued_date)}</td>
-					<td class="mono muted">{memo.invoice_number ?? '—'}</td>
-					<td><Badge tone={STATUS_TONES[memo.status] ?? 'neutral'} variant={memo.status}>{memo.status}</Badge></td>
-					<td class="actions">
-						{#if canMutate && memo.status === 'open'}
-							<RowAction onclick={() => { applyTargetId = memo.id; applyInvoiceId = ''; }}>{m('creditMemos.row.apply')}</RowAction>
-							<RowAction
-								variant="danger"
-								armed={confirmVoidId === memo.id}
-								disabled={voidingId === memo.id}
-								onclick={() => handleVoid(memo.id)}
-							>
-								{confirmVoidId === memo.id ? m('creditMemos.row.confirm') : m('creditMemos.row.void')}
-							</RowAction>
-						{/if}
-					</td>
-				</tr>
-			{/each}
-		{/snippet}
-	</DataTable>
+	{#if showOnboarding}
+		<EmptyState
+			art="documents"
+			testId="credit-memos-empty-state"
+			heading={m('creditMemos.onboarding.heading')}
+			description={m('creditMemos.onboarding.description')}
+			actionLabel={canMutate ? m('creditMemos.new') : undefined}
+			onaction={canMutate ? () => (showCreate = true) : undefined}
+		/>
+	{:else}
+		<DataTable columns={COLUMNS} isEmpty={memos.length === 0} empty={emptyMessage}>
+			{#snippet body()}
+				{#each memos as memo (memo.id)}
+					<tr
+						class:applied={memo.status === 'applied'}
+						class:void={memo.status === 'void'}
+						class:row-muted={memo.status === 'applied' || memo.status === 'void'}
+					>
+						<td class="mono">{memo.memo_number}</td>
+						<td>{memo.vendor_name ?? '—'}</td>
+						<td class="right mono"><Money amount={memo.amount} currency={memo.currency} /></td>
+						<td class="muted">{formatDate(memo.issued_date)}</td>
+						<!-- When the credit was consumed is recorded and was shown
+						     nowhere; the applied date rides along with the invoice it
+						     was applied to. -->
+						<td class="mono muted" title={memo.applied_at ? formatDate(memo.applied_at) : undefined}>
+							{memo.invoice_number ?? '—'}
+						</td>
+						<!-- `title` carries the untruncated reason; it is the memo's own
+						     text, not copy, so it needs no catalogue entry. -->
+						<td class="reason muted" title={memo.reason ?? undefined}>{memo.reason ?? '—'}</td>
+						<td>
+							<Badge tone={STATUS_TONES[memo.status] ?? 'neutral'} variant={memo.status}>
+								{STATUS_LABEL_KEYS[memo.status] ? m(STATUS_LABEL_KEYS[memo.status]) : memo.status}
+							</Badge>
+						</td>
+						<td class="actions">
+							{#if canMutate && memo.status === 'open'}
+								<RowAction onclick={() => { applyTargetId = memo.id; applyInvoiceId = ''; }}>{m('creditMemos.row.apply')}</RowAction>
+								<RowAction
+									variant="danger"
+									armed={confirmVoidId === memo.id}
+									disabled={voidingId === memo.id}
+									onclick={() => handleVoid(memo.id)}
+								>
+									{confirmVoidId === memo.id ? m('creditMemos.row.confirm') : m('creditMemos.row.void')}
+								</RowAction>
+							{/if}
+						</td>
+					</tr>
+				{/each}
+			{/snippet}
+		</DataTable>
+	{/if}
 
 	{#if hasMore}
 		<div class="load-more-row">
@@ -452,6 +563,16 @@
 	width="sm"
 	onclose={() => (applyTargetId = null)}
 >
+	{#if applyMemo}
+		<!-- The subject of the action, kept on screen while the dialog covers the
+		     row it came from: which credit, how much, and whose. All three are
+		     memo data, so none of it is copy. -->
+		<p class="modal-subject">
+			<span class="mono">{applyMemo.memo_number}</span>
+			<Money amount={applyMemo.amount} currency={applyMemo.currency} />
+			<span class="modal-subject-vendor">{applyMemo.vendor_name ?? '—'}</span>
+		</p>
+	{/if}
 	<p class="modal-hint">{m('creditMemos.applyModal.hint')}</p>
 	<form onsubmit={(e) => { e.preventDefault(); handleApply(); }}>
 		<label>
@@ -464,7 +585,13 @@
 			</select>
 		</label>
 		{#if invoicesForVendor.length === 0}
-			<p class="modal-hint warn">{m('creditMemos.applyModal.noEligible')}</p>
+			<!-- An empty select has two causes and only one of them is "there is
+			     nothing to credit". Saying the vendor has no eligible invoice when
+			     the invoice fetch simply failed sends the operator off to re-save
+			     a vendor link that was never the problem. -->
+			<p class="modal-hint warn">
+				{invoicesErrored ? m('common.loadFailed') : m('creditMemos.applyModal.noEligible')}
+			</p>
 		{/if}
 		<div class="modal-footer">
 			<button type="button" class="btn-cancel" onclick={() => (applyTargetId = null)}>{m('common.cancel')}</button>
@@ -498,5 +625,36 @@
 	.modal-hint.warn {
 		color: #d4940a;
 		margin: -6px 0 0;
+	}
+
+	/* Free-text, so it is the one cell that can be arbitrarily long. Capped and
+	   ellipsised (the full text is on the `title`) so one verbose reason can't
+	   set the column width and push the money/status columns off the row —
+	   ragged columns cost more scanability than the reason buys. No colour of
+	   its own: `.muted` in app.css owns that, and `.row-muted` overrides it on
+	   an applied/voided row. */
+	.reason {
+		max-width: 22rem;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	/* The Apply dialog's subject line — memo number, amount, vendor. `--text`
+	   rather than a muted token: this is the fact the operator is checking, not
+	   a caption. */
+	.modal-subject {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: baseline;
+		gap: 4px 10px;
+		margin: 0 0 10px;
+		font-size: 0.92rem;
+		font-weight: 600;
+		color: var(--text);
+	}
+	.modal-subject-vendor {
+		font-weight: 400;
+		color: var(--text-muted);
 	}
 </style>
