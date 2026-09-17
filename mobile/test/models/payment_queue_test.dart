@@ -202,6 +202,7 @@ void main() {
     String id = 'run1',
     String status = 'draft',
     double totalAmount = 5000.0,
+    String? currency = 'USD',
     int paymentCount = 3,
     bool requiresCfoApproval = false,
     String? cfoApprovedAt,
@@ -212,6 +213,9 @@ void main() {
         'status': status,
         // OptionalMoneyAmount serialises as a JSON number.
         'total_amount': totalAmount,
+        // `_one_currency` over the run's legs — a run cannot span two
+        // currencies, so the code is derivable and the response carries it.
+        'currency': currency,
         'initiated_by': 'u1',
         'executed_at': executedAt,
         'created_at': '2026-01-10T12:00:00',
@@ -231,6 +235,7 @@ void main() {
       );
       expect(run.status, 'draft');
       expect(run.totalAmountDisplay, '5000.0');
+      expect(run.currency, 'USD');
       expect(run.paymentCount, 3);
       expect(run.requiresCfoApproval, isTrue);
       expect(run.cfoApproved, isFalse);
@@ -257,6 +262,18 @@ void main() {
       expect(run.isExecutable, isFalse);
       expect(run.cfoApproved, isTrue);
       expect(run.executedAt, DateTime(2026, 1, 11, 10));
+    });
+
+    test('a run the server cannot denominate carries a null currency', () {
+      // `_one_currency` refuses to guess: no payments, invoices carrying no
+      // code, or a legacy run whose legs disagree all come back `null`, and
+      // the figure must then render bare rather than borrow a default
+      // (`docs/decisions.md` §79/§82, §160).
+      expect(PaymentRun.fromJson(runResponse(currency: null)).currency, isNull);
+      // An older server that has no such field is the same answer for a
+      // different reason — and must not throw.
+      final legacy = runResponse()..remove('currency');
+      expect(PaymentRun.fromJson(legacy).currency, isNull);
     });
 
     test('an older server that omits the CFO fields parses without throwing',

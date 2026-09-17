@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
-import 'package:intl/intl.dart';
 
 import 'package:feohledger_mobile/l10n/gen/app_localizations.dart';
 import 'package:feohledger_mobile/models/payment.dart';
@@ -8,19 +7,19 @@ import 'package:feohledger_mobile/models/payment_queue.dart';
 import 'package:feohledger_mobile/stores/auth_store.dart';
 import 'package:feohledger_mobile/stores/payment_queue_store.dart';
 import 'package:feohledger_mobile/utils/a11y.dart';
+import 'package:feohledger_mobile/utils/dates.dart';
 import 'package:feohledger_mobile/utils/money.dart';
 import 'package:feohledger_mobile/widgets/kpi_card.dart';
-
-final _dateFormat = DateFormat('MMM d, yyyy');
 
 /// Format a server-supplied money display string in [currency].
 ///
 /// This screen shows figures in three different denominations and they must
 /// not be run together: a queue row is in its own invoice's currency, the KPI
 /// bar is in the org's reporting currency (which `/payments/summary` names
-/// itself), and a run's total is in no single currency at all — see
-/// [_runTotal]. Passing the wrong one relabels a real figure, so the currency
-/// is a required argument rather than a module-level default.
+/// itself), and a run's total is in the one currency its legs agree on, which
+/// the run response names — see [_runTotal]. Passing the wrong one relabels a
+/// real figure, so the currency is a required argument rather than a
+/// module-level default.
 ///
 /// The parse inside [formatMoneyString] is for *rendering only* — money is
 /// never summed on the device — and a figure it cannot format losslessly is
@@ -28,17 +27,22 @@ final _dateFormat = DateFormat('MMM d, yyyy');
 String _money(String display, String? currency) =>
     formatMoneyString(display, currency: currency);
 
-/// A payment run's total, deliberately bare.
+/// A payment run's total, in the currency the run response names.
 ///
-/// `payment_runs.total_amount` is a plain `SUM(Payment.amount)` and each
-/// payment is denominated in its own invoice's currency, so a run spanning a
-/// USD and a EUR invoice holds a quantity in neither. The org's reporting
-/// currency would be a guess at what a mixed sum "really" is, and a `$` was
-/// simply wrong; the honest rendering is the digits with no symbol until the
-/// endpoint rolls the sum up the way `/payments/queue` already does. Tracked
-/// in `docs/followups.md`.
+/// `payment_runs.total_amount` is a plain `SUM(Payment.amount)` with no
+/// currency column, but a run cannot span two currencies — the builder 422s
+/// that — so `api/payments.py::_one_currency` derives the code from the legs
+/// and serves it on both the list and the detail. `PaymentRun.currency` is
+/// `null` only where that proof fails (no payments, no invoice currency, a
+/// legacy run whose legs disagree); [formatMoneyString] then renders the
+/// digits bare, which for a sum denominated in nothing real is the honest
+/// answer rather than a fallback (`docs/decisions.md` §160).
+///
+/// All four run figures go through here — the runs list, the sign-off row, the
+/// detail sheet, and the execute confirmation — so none can end up labelled
+/// differently from the others.
 String _runTotal(PaymentRun run) =>
-    formatMoneyString(run.totalAmountDisplay, currency: null);
+    formatMoneyString(run.totalAmountDisplay, currency: run.currency);
 
 /// Localized label for a payment method (the model's `label` is English-only).
 String _methodLabel(AppLocalizations l, PaymentMethod m) => switch (m) {
@@ -280,7 +284,7 @@ class _PaymentQueueScreenState extends State<PaymentQueueScreen>
     final pinnedMethod = item.requiredMethod;
     final reason = _verdictReason(l, item);
     final dueText = item.dueDate != null
-        ? l.payQueueDue(_dateFormat.format(item.dueDate!))
+        ? l.payQueueDue(formatDate(item.dueDate!))
         : l.payQueueNoDueDate;
 
     final subtitleParts = <String>[
@@ -538,7 +542,7 @@ class _PaymentQueueScreenState extends State<PaymentQueueScreen>
   Widget _runRow(PaymentRun run) {
     final l = AppLocalizations.of(context);
     final subtitle =
-        l.payRunSubtitle(run.paymentCount, _dateFormat.format(run.createdAt)) +
+        l.payRunSubtitle(run.paymentCount, formatDate(run.createdAt)) +
             (run.requiresCfoApproval && !run.cfoApproved
                 ? l.payRunCfoRequiredSuffix
                 : '');
@@ -612,7 +616,7 @@ class _PaymentQueueScreenState extends State<PaymentQueueScreen>
       final confirmed = await _confirm(
         l.payRunApproveTitle,
         l.payRunApproveBody(
-          _dateFormat.format(run.createdAt),
+          formatDate(run.createdAt),
           run.paymentCount,
           _runTotal(run),
         ),

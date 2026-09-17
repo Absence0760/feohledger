@@ -1,11 +1,9 @@
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
 
 import 'package:feohledger_mobile/l10n/gen/app_localizations.dart';
 import 'package:feohledger_mobile/models/inspection.dart';
+import 'package:feohledger_mobile/utils/dates.dart';
 import 'package:feohledger_mobile/widgets/inspection_result_badge.dart';
-
-final _dateFormat = DateFormat('MMM d, yyyy');
 
 /// One quality-inspection row: inspection number + outcome badge, with the
 /// goods receipt it covers and when it was inspected underneath.
@@ -37,7 +35,7 @@ class InspectionListTile extends StatelessWidget {
       inspectionResultLabel(l, inspection.result),
       _receiptLabel(l),
       if (inspection.inspectedDate != null)
-        _dateFormat.format(inspection.inspectedDate!),
+        formatDate(inspection.inspectedDate!),
       if (inspection.inspector != null && inspection.inspector!.isNotEmpty)
         inspection.inspector!,
     ];
@@ -81,7 +79,7 @@ class InspectionListTile extends StatelessWidget {
               const Spacer(),
               if (date != null)
                 Text(
-                  _dateFormat.format(date),
+                  formatDate(date),
                   style: TextStyle(color: Colors.grey.shade700, fontSize: 12),
                 ),
             ],

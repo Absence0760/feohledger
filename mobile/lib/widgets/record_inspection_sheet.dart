@@ -1,13 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:intl/intl.dart';
 
 import 'package:feohledger_mobile/l10n/gen/app_localizations.dart';
 import 'package:feohledger_mobile/models/goods_receipt.dart';
 import 'package:feohledger_mobile/models/inspection.dart';
+import 'package:feohledger_mobile/utils/dates.dart';
 import 'package:feohledger_mobile/widgets/inspection_result_badge.dart';
-
-final _dateFormat = DateFormat('MMM d, yyyy');
 
 /// A quantity is kept as the RAW TEXT the inspector typed and validated by
 /// shape, never round-tripped through a `double`: the column is
@@ -391,7 +389,7 @@ class _RecordInspectionSheetState extends State<RecordInspectionSheet> {
               child: Text(
                 date == null
                     ? l.inspectionRecordDateNotSet
-                    : _dateFormat.format(date),
+                    : formatDate(date),
               ),
             ),
           ),

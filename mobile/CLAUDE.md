@@ -354,10 +354,15 @@ that exists and never reach past it**:
    store in the screen's `ListenableBuilder` (`Listenable.merge`) so a figure
    picks up its symbol when the code lands.
 4. **Nothing — pass `null` and let the figure render bare.** Not a degraded
-   mode, the answer: a mixed-currency sum (`payment_runs.total_amount`) is in no
-   currency, and a `null` per-row code "is NOT a licence to substitute a
-   default" (`docs/decisions.md` §79/§82, §160). A missing symbol is a visible
-   gap; a wrong one is a wrong number that looks right.
+   mode, the answer: a code the server declined to prove "is NOT a licence to
+   substitute a default" (`docs/decisions.md` §79/§82, §160). A missing symbol
+   is a visible gap; a wrong one is a wrong number that looks right. A payment
+   run's total is the worked example in both directions — `PaymentRunResponse`
+   *does* name a currency, derived from the legs a run cannot span two of
+   (`api/payments.py::_one_currency`), so rung 2 applies and `PaymentRun.currency`
+   carries it; `null` there means a run with no payments, invoices carrying no
+   code, or a legacy run whose legs disagree, and only then does the figure go
+   bare.
 
 A model's `fromJson` must **not** default a currency to `'USD'` — that is the
 rung-that-always-answers trap `docs/decisions.md` §119 records, and it makes
@@ -375,6 +380,20 @@ counterpart is `frontend/docs/i18n.md`.
 The rule is the same on both surfaces: **no user-facing string is a hardcoded
 literal**, and every number, date and currency renders through the locale-aware
 helpers. A new string ships with its ARB entry in the same change.
+
+Those helpers are `lib/utils/money.dart` and `lib/utils/dates.dart`, and they
+are the ONLY modules that may construct a `NumberFormat` / `DateFormat` —
+`test/utils/dates_test.dart` fails on a third. Both default to
+`lib/utils/format_locale.dart`'s `activeFormatLocale`, which
+`FormatLocaleScope` (in `MaterialApp.builder`) keeps equal to the locale
+MaterialApp resolved, so the picker moves the figures as well as the words. A
+date pattern is a **skeleton** (`DateFormat.yMMMd`), never a literal like
+`'MMM d, yyyy'`: a literal pins *en* word order onto every other language.
+
+Server-composed text is localized from its **code**, never rendered raw: an
+invoice warning goes through `invoiceWarningText(l, warning)`
+(`lib/l10n/invoice_warning_messages.dart`), never `warning.message`, which is
+the English fallback for a finding this build cannot state.
 ## Conventions
 
 - **StatefulWidget + setState** for local state, **ChangeNotifier** for shared state

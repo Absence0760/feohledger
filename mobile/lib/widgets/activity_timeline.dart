@@ -1,10 +1,8 @@
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
 
 import 'package:feohledger_mobile/l10n/gen/app_localizations.dart';
 import 'package:feohledger_mobile/models/audit_entry.dart';
-
-final _timelineDateFormat = DateFormat('MMM d, yyyy • h:mm a');
+import 'package:feohledger_mobile/utils/dates.dart';
 
 /// Vertical activity timeline rendering an invoice's audit-log entries
 /// (`GET /api/invoices/{id}/audit-log`). Each entry shows the action label, the
@@ -61,7 +59,7 @@ class _TimelineRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final when = _timelineDateFormat.format(entry.createdAt.toLocal());
+    final when = formatDateTime(entry.createdAt.toLocal(), separator: ' • ');
     final actor = entry.actorName;
     final changes = entry.changes;
     final note = entry.detailNote;

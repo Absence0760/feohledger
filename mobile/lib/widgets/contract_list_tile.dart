@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
 
 import 'package:feohledger_mobile/models/contract.dart';
+import 'package:feohledger_mobile/utils/dates.dart';
 import 'package:feohledger_mobile/utils/money.dart';
 import 'package:feohledger_mobile/widgets/contract_status_badge.dart';
 
@@ -25,7 +25,7 @@ class ContractListTile extends StatelessWidget {
       else if (contract.vendorName != null) contract.vendorName!,
       contract.status.label,
       if (contract.endDate != null)
-        'ends ${DateFormat('MMMM d, yyyy').format(contract.endDate!)}',
+        'ends ${formatLongDate(contract.endDate!)}',
     ];
     return parts.join(', ');
   }
@@ -95,7 +95,7 @@ class ContractListTile extends StatelessWidget {
             const Spacer(),
             if (contract.endDate != null)
               Text(
-                DateFormat('MMM d, yyyy').format(contract.endDate!),
+                formatDate(contract.endDate!),
                 style: TextStyle(
                   // Darkened for AA contrast at 12px against white.
                   color: contract.endDate!.isBefore(DateTime.now())

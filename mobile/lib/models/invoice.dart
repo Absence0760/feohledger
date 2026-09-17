@@ -128,25 +128,54 @@ enum WarningSeverity {
 
 /// One invoice warning / fraud flag, as produced by
 /// `services.invoice_warnings.refresh_warnings` and carried on the invoice
-/// JSON as `warnings: [{type, severity, message}]`. The detail screen renders
-/// these so a reviewer sees the same fraud/duplicate/past-due signals the web
-/// modal shows.
+/// JSON as `warnings: [{type, severity, message, code, params}]`. The detail
+/// screen renders these so a reviewer sees the same fraud/duplicate/past-due
+/// signals the web modal shows.
+///
+/// **[message] is English, and it is the FALLBACK.** The backend composes each
+/// finding from the row's own data, so a label per [type] could never state
+/// one — a single type is up to five different sentences. [code] plus [params]
+/// is what makes it translatable: `l10n/invoice_warning_messages.dart` resolves
+/// the pair to an ARB key and locale-formatted parameters, and falls back to
+/// [message] when it cannot (`backend/docs/invoice-warnings.md`).
 class InvoiceWarning {
   final String type;
   final WarningSeverity severity;
   final String message;
 
+  /// Stable identifier for the finding (`po_not_found`, `duplicate_similar`)
+  /// from the backend's fixed catalogue. `null` for a row persisted before the
+  /// catalogue existed — nothing backfills those, so the English [message] is
+  /// the normal path for them rather than an edge case.
+  final String? code;
+
+  /// The finding's parameters, keyed as its message names them. Kept as the
+  /// exact STRINGS the wire carried: money is `Decimal` server-side and must
+  /// not round-trip through a `double`. What each one holds — money, a
+  /// percentage, a date — is `invoiceWarningParamKinds[code]`.
+  final Map<String, String> params;
+
   const InvoiceWarning({
     required this.type,
     required this.severity,
     required this.message,
+    this.code,
+    this.params = const {},
   });
 
   factory InvoiceWarning.fromJson(Map<String, dynamic> json) {
+    final params = json['params'];
     return InvoiceWarning(
       type: json['type'] as String? ?? 'warning',
       severity: WarningSeverity.fromString(json['severity'] as String?),
       message: json['message'] as String? ?? '',
+      code: json['code'] as String?,
+      params: params is Map
+          ? {
+              for (final e in params.entries)
+                if (e.value != null) '${e.key}': '${e.value}',
+            }
+          : const {},
     );
   }
 }

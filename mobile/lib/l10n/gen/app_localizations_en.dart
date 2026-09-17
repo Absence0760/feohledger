@@ -2112,4 +2112,375 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get adaptiveAnomaliesInsufficient =>
       'Not enough history for this supplier yet.';
+
+  @override
+  String get invoiceWarningMissingVendorName => 'Missing vendor name';
+
+  @override
+  String get invoiceWarningMissingInvoiceNumber => 'Missing invoice number';
+
+  @override
+  String get invoiceWarningMissingAmount => 'Missing or zero amount';
+
+  @override
+  String get invoiceWarningDuplicateInvoiceNumber =>
+      'Duplicate invoice number for this vendor';
+
+  @override
+  String invoiceWarningDuplicateSimilar(
+    String similarity,
+    String invoiceNumber,
+    String vendorName,
+    int crossEntityCount,
+  ) {
+    String _temp0 = intl.Intl.pluralLogic(
+      crossEntityCount,
+      locale: localeName,
+      other:
+          ' (plus $crossEntityCount near-identical invoices under another entity)',
+      one:
+          ' (plus $crossEntityCount near-identical invoice under another entity)',
+      zero: '',
+    );
+    return 'Potential duplicate: $similarity match to $invoiceNumber from $vendorName$_temp0';
+  }
+
+  @override
+  String invoiceWarningDuplicateSimilarUnnamedVendor(
+    String similarity,
+    String invoiceNumber,
+    int crossEntityCount,
+  ) {
+    String _temp0 = intl.Intl.pluralLogic(
+      crossEntityCount,
+      locale: localeName,
+      other:
+          ' (plus $crossEntityCount near-identical invoices under another entity)',
+      one:
+          ' (plus $crossEntityCount near-identical invoice under another entity)',
+      zero: '',
+    );
+    return 'Potential duplicate: $similarity match to $invoiceNumber$_temp0';
+  }
+
+  @override
+  String invoiceWarningDuplicateSimilarUnnumbered(
+    String similarity,
+    String vendorName,
+    int crossEntityCount,
+  ) {
+    String _temp0 = intl.Intl.pluralLogic(
+      crossEntityCount,
+      locale: localeName,
+      other:
+          ' (plus $crossEntityCount near-identical invoices under another entity)',
+      one:
+          ' (plus $crossEntityCount near-identical invoice under another entity)',
+      zero: '',
+    );
+    return 'Potential duplicate: $similarity match to another invoice from $vendorName$_temp0';
+  }
+
+  @override
+  String invoiceWarningDuplicateSimilarUnnumberedUnnamedVendor(
+    String similarity,
+    int crossEntityCount,
+  ) {
+    String _temp0 = intl.Intl.pluralLogic(
+      crossEntityCount,
+      locale: localeName,
+      other:
+          ' (plus $crossEntityCount near-identical invoices under another entity)',
+      one:
+          ' (plus $crossEntityCount near-identical invoice under another entity)',
+      zero: '',
+    );
+    return 'Potential duplicate: $similarity match to another invoice$_temp0';
+  }
+
+  @override
+  String invoiceWarningDuplicateSimilarCrossEntity(String similarity) {
+    return 'Potential duplicate: $similarity match to a near-identical invoice under another entity';
+  }
+
+  @override
+  String invoiceWarningRoundAmount(String amount) {
+    return 'Round amount: $amount';
+  }
+
+  @override
+  String get invoiceWarningFutureInvoiceDate => 'Invoice date is in the future';
+
+  @override
+  String invoiceWarningRushPayment(int days) {
+    String _temp0 = intl.Intl.pluralLogic(
+      days,
+      locale: localeName,
+      other: '$days days',
+      one: '$days day',
+    );
+    return 'Rush payment: due within $_temp0 of the invoice date';
+  }
+
+  @override
+  String get invoiceWarningPastDue => 'Invoice is past due';
+
+  @override
+  String get invoiceWarningUnverifiedVendor => 'Vendor is unverified';
+
+  @override
+  String invoiceWarningPersonalEmailDomain(String domain) {
+    return 'Vendor email uses personal domain: $domain';
+  }
+
+  @override
+  String invoiceWarningNewVendorLargeAmount(int days, String amount) {
+    String _temp0 = intl.Intl.pluralLogic(
+      days,
+      locale: localeName,
+      other: '$days days',
+      one: '$days day',
+    );
+    return 'New vendor (created $_temp0 ago) submitting large invoice $amount';
+  }
+
+  @override
+  String get invoiceWarningRemitToChanged =>
+      'Remit-to address changed since the last approved invoice for this vendor';
+
+  @override
+  String invoiceWarningAmountAboveVendorMean(
+    String amount,
+    String sigma,
+    String mean,
+  ) {
+    return 'Amount $amount is $sigmaσ above this vendor\'s historical mean ($mean)';
+  }
+
+  @override
+  String invoiceWarningLlmAnomaly(String reason) {
+    return 'AI-flagged anomaly: $reason';
+  }
+
+  @override
+  String invoiceWarningLineTotalMismatch(
+    String lineItemsTotal,
+    String headerAmount,
+  ) {
+    return 'Line items total $lineItemsTotal but the invoice amount is $headerAmount';
+  }
+
+  @override
+  String invoiceWarningPriceVarianceOver(
+    String deltaPct,
+    String item,
+    String unitPrice,
+    String baselineUnitPrice,
+  ) {
+    return 'Unit price $deltaPct over this vendor\'s baseline for $item ($unitPrice vs $baselineUnitPrice)';
+  }
+
+  @override
+  String invoiceWarningPriceVarianceUnder(
+    String deltaPct,
+    String item,
+    String unitPrice,
+    String baselineUnitPrice,
+  ) {
+    return 'Unit price $deltaPct under this vendor\'s baseline for $item ($unitPrice vs $baselineUnitPrice)';
+  }
+
+  @override
+  String invoiceWarningPoNotFound(String poNumber) {
+    return 'PO $poNumber not found';
+  }
+
+  @override
+  String invoiceWarningPoAmountVariance(
+    String variancePct,
+    String poNumber,
+    String invoiceAmount,
+    String poTotal,
+  ) {
+    return 'Amount variance $variancePct vs PO $poNumber (invoice $invoiceAmount vs PO $poTotal)';
+  }
+
+  @override
+  String invoiceWarningPoPartialReceipt(String matchType, String poNumber) {
+    return 'Partial 3-way match — $matchType match against PO $poNumber, but only part of the ordered quantity has been received';
+  }
+
+  @override
+  String invoiceWarningPoOverReceipt(
+    String receivedQuantity,
+    String orderedQuantity,
+    String excessQuantity,
+    String poNumber,
+  ) {
+    return 'Over-receipt: $receivedQuantity received against $orderedQuantity ordered (+$excessQuantity) on PO $poNumber';
+  }
+
+  @override
+  String invoiceWarningPoOverReceiptUnquantified(String poNumber) {
+    return 'More goods received than ordered on PO $poNumber';
+  }
+
+  @override
+  String invoiceWarningQualityInspectionFailed(String poNumber) {
+    return 'Failed quality inspection for PO $poNumber';
+  }
+
+  @override
+  String invoiceWarningQualityInspectionFailedNotes(
+    String poNumber,
+    String notes,
+  ) {
+    return 'Failed quality inspection for PO $poNumber: $notes';
+  }
+
+  @override
+  String invoiceWarningQualityInspectionMissing(String poNumber) {
+    return 'Quality inspection required but missing for PO $poNumber';
+  }
+
+  @override
+  String invoiceWarningQualityPartialAcceptance(
+    String acceptedQuantity,
+    String poNumber,
+  ) {
+    return 'Partial acceptance: $acceptedQuantity of the ordered quantity accepted on PO $poNumber';
+  }
+
+  @override
+  String invoiceWarningQualityPartialAcceptanceUnquantified(String poNumber) {
+    return 'Partial quality acceptance on inspection for PO $poNumber';
+  }
+
+  @override
+  String invoiceWarningRecurringVarianceOver(
+    String amount,
+    String deltaPct,
+    String templateName,
+    String expectedAmount,
+  ) {
+    return 'Amount $amount is $deltaPct over the recurring template “$templateName” expected amount $expectedAmount';
+  }
+
+  @override
+  String invoiceWarningRecurringVarianceUnder(
+    String amount,
+    String deltaPct,
+    String templateName,
+    String expectedAmount,
+  ) {
+    return 'Amount $amount is $deltaPct under the recurring template “$templateName” expected amount $expectedAmount';
+  }
+
+  @override
+  String invoiceWarningContractExpired(
+    String invoiceDate,
+    String contractNumber,
+    String endDate,
+  ) {
+    return 'Invoice dated $invoiceDate is after contract $contractNumber expired ($endDate)';
+  }
+
+  @override
+  String invoiceWarningContractNotStarted(
+    String invoiceDate,
+    String contractNumber,
+    String startDate,
+  ) {
+    return 'Invoice dated $invoiceDate predates contract $contractNumber start ($startDate)';
+  }
+
+  @override
+  String invoiceWarningContractTerminated(String contractNumber) {
+    return 'Spend recorded against terminated contract $contractNumber';
+  }
+
+  @override
+  String invoiceWarningContractCancelled(String contractNumber) {
+    return 'Spend recorded against cancelled contract $contractNumber';
+  }
+
+  @override
+  String invoiceWarningContractVendorMismatch(String contractNumber) {
+    return 'Invoice vendor does not match contract $contractNumber vendor';
+  }
+
+  @override
+  String invoiceWarningContractSpendLimitExceeded(
+    String cumulativeSpend,
+    String contractNumber,
+    String spendLimit,
+  ) {
+    return 'Cumulative spend $cumulativeSpend exceeds contract $contractNumber limit $spendLimit';
+  }
+
+  @override
+  String invoiceWarningContractSpendLimitExceededNotToExceed(
+    String cumulativeSpend,
+    String contractNumber,
+    String spendLimit,
+  ) {
+    return 'Cumulative spend $cumulativeSpend exceeds contract $contractNumber limit $spendLimit (not-to-exceed)';
+  }
+
+  @override
+  String invoiceWarningContractGlNotAllowed(
+    String glAccount,
+    String contractNumber,
+  ) {
+    return 'GL account $glAccount is outside contract $contractNumber allowed accounts';
+  }
+
+  @override
+  String invoiceWarningSelfCorrectionTotalReconciliation(
+    String subtotal,
+    String tax,
+    String shipping,
+    String discount,
+    String expected,
+    String amount,
+  ) {
+    return 'Amounts don\'t add up: subtotal ($subtotal) + tax ($tax) + shipping ($shipping) − discount ($discount) = $expected, but total is $amount.';
+  }
+
+  @override
+  String invoiceWarningSelfCorrectionDateOrdering(
+    String dueDate,
+    String invoiceDate,
+  ) {
+    return 'Due date ($dueDate) is before invoice date ($invoiceDate).';
+  }
+
+  @override
+  String invoiceWarningSelfCorrectionLineItemsSum(
+    String lineItemsTotal,
+    String amount,
+  ) {
+    return 'Line items total ($lineItemsTotal) doesn\'t match invoice amount ($amount).';
+  }
+
+  @override
+  String invoiceWarningSelfCorrectionLineItemMath(
+    String lineNumber,
+    String quantity,
+    String unitPrice,
+    String expected,
+    String total,
+  ) {
+    return 'Line $lineNumber: $quantity × $unitPrice = $expected, but total is $total.';
+  }
+
+  @override
+  String invoiceWarningGlCodesNotInChart(String codes) {
+    return 'AI suggested GL code(s) not in active chart: $codes';
+  }
+
+  @override
+  String invoiceWarningGlCodeStalePrior(String code) {
+    return 'Cached vendor GL code “$code” is no longer in the active chart of accounts.';
+  }
 }
