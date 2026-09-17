@@ -53,7 +53,7 @@ def _to_response(p: ExpensePreapproval) -> ExpensePreapprovalResponse:
         id=str(p.id),
         requester_user_id=str(p.requester_user_id),
         title=p.title,
-        estimated_amount=float(p.estimated_amount),
+        estimated_amount=p.estimated_amount,
         currency=p.currency,
         category=p.category,
         justification=p.justification,

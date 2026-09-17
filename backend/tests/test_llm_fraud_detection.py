@@ -13,6 +13,7 @@ shape what the LLM sees and how the response gets parsed:
 from __future__ import annotations
 
 import asyncio
+from decimal import Decimal
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -33,7 +34,7 @@ def _candidate(**overrides) -> CandidateInvoice:
     base = dict(
         invoice_number="INV-99",
         invoice_date="2026-05-10",
-        amount=4200.0,
+        amount=Decimal("4200.00"),
         currency="USD",
         description="Website hosting — May",
         payment_method="ach",
@@ -49,7 +50,7 @@ def _history_item(**overrides) -> HistoricalInvoice:
     base = dict(
         invoice_number="INV-1",
         invoice_date="2026-04-10",
-        amount=4200.0,
+        amount=Decimal("4200.00"),
         currency="USD",
         description="Website hosting — April",
         payment_method="ach",
@@ -78,10 +79,11 @@ def test_build_prompt_includes_vendor_and_both_payloads():
 
 
 def test_build_prompt_serialises_amounts_as_numbers_not_strings():
-    """Amounts are floats so the model can reason about magnitude
-    instead of treating them as opaque strings."""
-    candidate = _candidate(amount=4200.0)
-    prompt = build_prompt(candidate, [_history_item(amount=4200.0)])
+    """The amount stays an exact `Decimal` in Python and becomes a JSON number
+    only in the prompt payload, so the model reasons about magnitude instead of
+    treating it as an opaque string."""
+    candidate = _candidate(amount=Decimal("4200.00"))
+    prompt = build_prompt(candidate, [_history_item(amount=Decimal("4200.00"))])
     # Look for the JSON form `"amount": 4200.0` (no surrounding quotes).
     assert '"amount": 4200' in prompt
     # And NOT the string-quoted form.
@@ -284,14 +286,14 @@ def test_invoice_to_candidate_handles_none_optionals():
     candidate = invoice_to_candidate(inv)
     assert candidate.invoice_number == ""
     assert candidate.invoice_date is None
-    assert candidate.amount == 0.0
+    assert candidate.amount == Decimal("0")
     assert candidate.currency == "USD"
     assert candidate.vendor_name == ""
 
     inv2 = SimpleNamespace(
         invoice_number="INV-X",
         invoice_date=date_cls(2026, 5, 10),
-        amount=1234.56,
+        amount=Decimal("1234.56"),
         currency="EUR",
         description="x",
         payment_method="ach",
@@ -301,7 +303,7 @@ def test_invoice_to_candidate_handles_none_optionals():
     )
     c2 = invoice_to_candidate(inv2)
     assert c2.invoice_date == "2026-05-10"
-    assert c2.amount == pytest.approx(1234.56)
+    assert c2.amount == Decimal("1234.56")
     assert c2.currency == "EUR"
 
 
@@ -313,7 +315,7 @@ def test_invoice_to_history_isolates_only_the_fields_the_llm_needs():
     inv = SimpleNamespace(
         invoice_number="INV-Y",
         invoice_date=date_cls(2026, 4, 10),
-        amount=999.0,
+        amount=Decimal("999.00"),
         currency="USD",
         description="d",
         payment_method="wire",
@@ -326,7 +328,7 @@ def test_invoice_to_history_isolates_only_the_fields_the_llm_needs():
     h = invoice_to_history(inv)
     # Spot-check what's there.
     assert h.invoice_number == "INV-Y"
-    assert h.amount == pytest.approx(999.0)
+    assert h.amount == Decimal("999.00")
     # And what's not — fields not on HistoricalInvoice are dropped by
     # construction. Verifying the dataclass shape is enough.
     assert not hasattr(h, "file_url")

@@ -374,9 +374,13 @@ class InvoiceLineItemResponse(BaseModel):
     item_code: str | None
     description: str | None
     quantity: float | None
-    unit_price: float | None
-    tax: float | None
-    total: float | None
+    # Money stays `Decimal` in Python and serialises to the same JSON number —
+    # matching what `GET /api/invoices/{id}/line-items` actually emits, which
+    # builds its dict through `schemas.money.json_money`. `quantity` above is a
+    # count, not money, so it is honestly a float.
+    unit_price: OptionalMoneyAmount
+    tax: OptionalMoneyAmount
+    total: OptionalMoneyAmount
     gl_account: str | None
 
     model_config = {"from_attributes": True}

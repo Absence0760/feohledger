@@ -21,6 +21,7 @@ from app.models.exception import Exception as APException
 from app.models.invoice import Invoice
 from app.models.organization import Organization
 from app.models.user import User
+from app.schemas.money import json_money
 from app.services.exception_lifecycle import (
     ACTIONABLE_STATUSES,
     RESOLUTION_ACTIONS,
@@ -73,7 +74,14 @@ def _exception_dict(exc: APException, inv: Invoice | None) -> dict:
         "invoice_id": str(exc.invoice_id) if exc.invoice_id else None,
         "invoice_number": inv.invoice_number if inv else None,
         "vendor_name": inv.vendor_name if inv else None,
-        "amount": float(inv.amount) if inv else None,
+        # `json_money`, not `float(...)`: the amount stays an exact `Decimal`
+        # right up to the JSON encoder (project invariant — money is exact).
+        # The wire shape is unchanged, deliberately. A JSON *string* would be
+        # the stronger contract, but `mobile/lib/models/exception.dart` types
+        # this `double?` and parses it `json['amount'] as num?`, which throws on
+        # a string — so moving to strings is a coordinated client change, not a
+        # serializer change. See `docs/followups.md`.
+        "amount": json_money(inv.amount) if inv else None,
         # What `amount` above is DENOMINATED in. `ap_exceptions` has no money
         # column of its own — the figure IS the invoice's `amount` — so it only
         # means something beside the code the invoice carries. The invoice row is

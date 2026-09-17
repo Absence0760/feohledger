@@ -7,9 +7,10 @@ approve / reject / convert are the reviewers' (admin / ap_manager) actions.
 
 Mirrors ``app/api/expenses.py``: ``get_tenant_db`` for tenant isolation,
 ``apply_entity_scope`` for multi-entity scoping, ``require_roles`` on every
-route, ``dispatch_audit`` on every mutation, money ``Decimal`` in / ``float``
-out, and literal path segments declared before ``/{id}`` so they aren't captured
-as a UUID. Convert-to-requisition is idempotent. See
+route, ``dispatch_audit`` on every mutation, money ``Decimal`` end to end (the
+response schema's ``MoneyAmount`` annotation makes the JSON-number hop at
+serialisation time), and literal path segments declared before ``/{id}`` so they
+aren't captured as a UUID. Convert-to-requisition is idempotent. See
 ``backend/docs/procurement-intake.md``.
 """
 
@@ -86,7 +87,7 @@ def _to_response(r: IntakeRequest) -> IntakeRequestResponse:
         request_type=str(r.request_type),
         requester_user_id=str(r.requester_user_id),
         description=r.description,
-        estimated_amount=float(r.estimated_amount) if r.estimated_amount is not None else None,
+        estimated_amount=r.estimated_amount,
         currency=r.currency,
         vendor_name=r.vendor_name,
         vendor_id=str(r.vendor_id) if r.vendor_id else None,

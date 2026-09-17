@@ -21,6 +21,7 @@ from app.models.organization import Organization
 from app.models.procurement import POLineItem, PurchaseOrder
 from app.models.user import User
 from app.models.vendor import Vendor
+from app.schemas.money import json_money
 from app.services.audit_dispatch import dispatch_audit
 from app.tenant import (
     apply_entity_scope,
@@ -41,8 +42,8 @@ def _line_item_dict(li: POLineItem) -> dict:
         "id": str(li.id),
         "description": li.description,
         "quantity": float(li.quantity) if li.quantity else None,
-        "unit_price": float(li.unit_price) if li.unit_price else None,
-        "total": float(li.total) if li.total else None,
+        "unit_price": json_money(li.unit_price) if li.unit_price else None,
+        "total": json_money(li.total) if li.total else None,
     }
 
 
@@ -124,7 +125,7 @@ async def list_purchase_orders(
                 "po_number": po.po_number,
                 "vendor_id": str(po.vendor_id) if po.vendor_id else None,
                 "vendor_name": vendor_names.get(str(po.vendor_id)) if po.vendor_id else None,
-                "total": float(po.total),
+                "total": json_money(po.total),
                 "status": po.status,
                 "line_items": [_line_item_dict(li) for li in po.line_items],
                 "created_at": po.created_at.isoformat() if po.created_at else "",
@@ -280,7 +281,7 @@ async def get_purchase_order(
             "id": str(inv.id),
             "invoice_number": inv.invoice_number,
             "vendor_name": inv.vendor_name,
-            "amount": float(inv.amount) if inv.amount else 0.0,
+            "amount": json_money(inv.amount) if inv.amount else 0.0,
             "status": inv.status.value if hasattr(inv.status, "value") else inv.status,
         }
         for inv in inv_q.scalars().all()
@@ -291,7 +292,7 @@ async def get_purchase_order(
         "po_number": po.po_number,
         "vendor_id": str(po.vendor_id) if po.vendor_id else None,
         "vendor_name": vendor_name,
-        "total": float(po.total),
+        "total": json_money(po.total),
         "status": po.status,
         "line_items": [_line_item_dict(li) for li in po.line_items],
         "linked_invoices": linked_invoices,

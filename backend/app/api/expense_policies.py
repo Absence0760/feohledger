@@ -70,18 +70,12 @@ def _to_response(p: ExpensePolicy) -> ExpensePolicyResponse:
         active=p.active,
         category=p.category,
         threshold_currency=p.threshold_currency,
-        per_diem_amount=float(p.per_diem_amount) if p.per_diem_amount is not None else None,
+        per_diem_amount=p.per_diem_amount,
         per_diem_currency=p.per_diem_currency,
         mileage_rate=float(p.mileage_rate) if p.mileage_rate is not None else None,
-        category_limit=float(p.category_limit) if p.category_limit is not None else None,
-        requires_preapproval_above=(
-            float(p.requires_preapproval_above)
-            if p.requires_preapproval_above is not None
-            else None
-        ),
-        requires_receipt_above=(
-            float(p.requires_receipt_above) if p.requires_receipt_above is not None else None
-        ),
+        category_limit=p.category_limit,
+        requires_preapproval_above=p.requires_preapproval_above,
+        requires_receipt_above=p.requires_receipt_above,
         rules=p.rules,
         created_at=p.created_at.isoformat() if p.created_at else "",
         updated_at=p.updated_at.isoformat() if p.updated_at else "",

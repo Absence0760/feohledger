@@ -2,8 +2,9 @@
 
 Money convention (mirrors ``schemas/expense.py`` / ``schemas/contract.py``):
 request fields are typed ``Decimal | None`` for exactness on the way in;
-response/list fields serialise money as ``float | None`` (the router does
-``float(...)``). Never ``float`` on a column or in-memory total.
+response/list fields use ``MoneyAmount`` / ``OptionalMoneyAmount``, which keep
+the value a ``Decimal`` in Python and take the single ``float`` hop at
+JSON-write time. Never ``float`` on a column, an in-memory total, or a handler.
 
 Catalogs are configuration-like (supplier / internal catalogs + their items);
 ``is_preferred`` steers guided buying. ``GuidedBuyingSuggestion`` is the
@@ -18,6 +19,7 @@ from pydantic import BaseModel, Field
 
 from app.api.pagination import PageMeta
 from app.models.procurement import CatalogType
+from app.schemas.money import MoneyAmount, OptionalMoneyAmount
 
 # ---------------------------------------------------------------------------
 # Catalog items
@@ -64,7 +66,7 @@ class CatalogItemResponse(BaseModel):
     sku: str | None
     name: str
     description: str | None
-    unit_price: float | None
+    unit_price: OptionalMoneyAmount
     currency: str
     uom: str | None
     vendor_id: str | None
@@ -167,7 +169,7 @@ class GuidedBuyingItem(BaseModel):
     catalog_name: str
     sku: str | None
     name: str
-    unit_price: float | None
+    unit_price: OptionalMoneyAmount
     currency: str
     uom: str | None
     vendor_id: str | None
@@ -206,13 +208,15 @@ class PunchoutStartResponse(BaseModel):
 
 
 class PunchoutCartItemResponse(BaseModel):
-    """One returned cart line. Money serialises as ``float`` (out) per the file
-    convention; the persisted value is exact ``Numeric``/``Decimal``."""
+    """One returned cart line, read back from the session's JSONB cart blob.
+
+    ``quantity`` is a count, not money. ``unit_price`` is money and stays a
+    ``Decimal`` until the response is encoded."""
 
     description: str
     sku: str | None = None
     quantity: float | None = None
-    unit_price: float | None = None
+    unit_price: OptionalMoneyAmount = None
     uom: str | None = None
     currency: str = "USD"
 
@@ -228,7 +232,7 @@ class PunchoutSessionResponse(BaseModel):
     start_url: str | None
     provider: str | None
     cart_items: list[PunchoutCartItemResponse] = Field(default_factory=list)
-    cart_total: float | None
+    cart_total: OptionalMoneyAmount
     currency: str
     returned_at: str | None
     converted_requisition_id: str | None
@@ -245,7 +249,7 @@ class PunchoutConvertResponse(BaseModel):
     session_id: str
     requisition_id: str
     requisition_number: str
-    total: float
+    total: MoneyAmount
     created: bool
 
 

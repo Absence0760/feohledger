@@ -25,8 +25,11 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass
+from decimal import Decimal
 
 import httpx
+
+from app.schemas.money import json_money
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +55,7 @@ class HistoricalInvoice:
 
     invoice_number: str
     invoice_date: str | None
-    amount: float
+    amount: Decimal
     currency: str
     description: str | None
     payment_method: str | None
@@ -66,7 +69,7 @@ class CandidateInvoice:
 
     invoice_number: str
     invoice_date: str | None
-    amount: float
+    amount: Decimal
     currency: str
     description: str | None
     payment_method: str | None
@@ -107,7 +110,7 @@ def _serialise_history(history: list[HistoricalInvoice]) -> str:
             {
                 "invoice_number": h.invoice_number,
                 "invoice_date": h.invoice_date,
-                "amount": h.amount,
+                "amount": json_money(h.amount),
                 "currency": h.currency,
                 "description": h.description,
                 "payment_method": h.payment_method,
@@ -125,7 +128,7 @@ def _serialise_candidate(candidate: CandidateInvoice) -> str:
         {
             "invoice_number": candidate.invoice_number,
             "invoice_date": candidate.invoice_date,
-            "amount": candidate.amount,
+            "amount": json_money(candidate.amount),
             "currency": candidate.currency,
             "description": candidate.description,
             "payment_method": candidate.payment_method,
@@ -257,7 +260,7 @@ def invoice_to_candidate(invoice) -> CandidateInvoice:
     return CandidateInvoice(
         invoice_number=invoice.invoice_number or "",
         invoice_date=invoice.invoice_date.isoformat() if invoice.invoice_date else None,
-        amount=float(invoice.amount) if invoice.amount is not None else 0.0,
+        amount=invoice.amount if invoice.amount is not None else Decimal("0"),
         currency=invoice.currency or "USD",
         description=invoice.description,
         payment_method=invoice.payment_method,
@@ -272,7 +275,7 @@ def invoice_to_history(invoice) -> HistoricalInvoice:
     return HistoricalInvoice(
         invoice_number=invoice.invoice_number or "",
         invoice_date=invoice.invoice_date.isoformat() if invoice.invoice_date else None,
-        amount=float(invoice.amount) if invoice.amount is not None else 0.0,
+        amount=invoice.amount if invoice.amount is not None else Decimal("0"),
         currency=invoice.currency or "USD",
         description=invoice.description,
         payment_method=invoice.payment_method,

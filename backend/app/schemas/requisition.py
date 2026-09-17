@@ -1,9 +1,12 @@
 """Pydantic request/response schemas for the purchase-requisitions router.
 
 Money convention (mirrors ``schemas/expense.py`` / ``schemas/contract.py``):
-request fields are typed ``Decimal | None`` for exactness on the way in;
-response/list fields serialise money as ``float | None`` (the router does
-``float(...)``). Never ``float`` on a column or in-memory total.
+money stays ``Decimal`` on both sides. Request fields are typed
+``Decimal | None`` for exactness on the way in; response/list fields are
+``MoneyAmount`` / ``OptionalMoneyAmount``, which hold a ``Decimal`` in Python
+and make the JSON-number hop once, at serialisation time. The router never
+calls ``float(...)`` on an amount, and nothing money-valued is ever typed
+``float``.
 
 The requisition ``total`` is always recomputed server-side from the line items
 (``sum(quantity * unit_price)``) — a client-sent total is ignored, so the header
@@ -17,6 +20,7 @@ from pydantic import BaseModel, Field
 
 from app.api.pagination import PageMeta
 from app.models.procurement import RequisitionStatus
+from app.schemas.money import MoneyAmount, OptionalMoneyAmount
 
 # ---------------------------------------------------------------------------
 # Line items
@@ -48,8 +52,8 @@ class RequisitionLineItemResponse(BaseModel):
     item_code: str | None
     description: str | None
     quantity: float | None
-    unit_price: float | None
-    total: float | None
+    unit_price: OptionalMoneyAmount
+    total: OptionalMoneyAmount
     gl_account_id: str | None
     uom: str | None
 
@@ -108,7 +112,7 @@ class RequisitionResponse(BaseModel):
     vendor_id: str | None
     contract_id: str | None
     budget_id: str | None
-    total: float
+    total: MoneyAmount
     currency: str
     notes: str | None
     submitted_at: str | None
@@ -173,13 +177,12 @@ class ConvertToPoResponse(BaseModel):
     """Result of ``POST /requisitions/{id}/convert-to-po``.
 
     ``created`` is ``False`` on the idempotent replay path (the requisition was
-    already converted) so the caller can tell a fresh conversion from a no-op.
-    Money serialises as ``float`` to match the rest of the surface."""
+    already converted) so the caller can tell a fresh conversion from a no-op."""
 
     requisition_id: str
     po_id: str
     po_number: str
-    total: float
+    total: MoneyAmount
     created: bool
 
 

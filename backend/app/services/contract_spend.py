@@ -3,8 +3,9 @@
 Aggregates the invoices linked to a contract (``Invoice.contract_id``) into a
 spend summary: invoiced total, count, and how that sits against the contract's
 ``spend_limit``. Money stays exact — the sum runs in the DB over the
-``Numeric`` ``amount`` column and is handled as ``Decimal`` here; only the API
-response coerces to float (matching every other money field on the wire).
+``Numeric`` ``amount`` column and stays ``Decimal`` all the way into
+``ContractSpendSummary``, whose ``MoneyAmount`` fields do the float hop once, at
+JSON-write time.
 
 Rejected invoices are excluded — a rejected bill never became real spend. The
 sum is also scoped to the contract's own ``currency`` — same as
@@ -42,9 +43,9 @@ async def compute_spend_summary(db: AsyncSession, contract: Contract) -> Contrac
     over_limit = limit is not None and invoiced > limit
 
     return ContractSpendSummary(
-        invoiced_total=float(invoiced),
+        invoiced_total=invoiced,
         invoice_count=int(count or 0),
-        spend_limit=float(limit) if limit is not None else None,
-        remaining=float(remaining) if remaining is not None else None,
+        spend_limit=limit,
+        remaining=remaining,
         over_limit=over_limit,
     )

@@ -227,7 +227,7 @@ async def _matching_items(
             catalog_name=catalog_name,
             sku=item.sku,
             name=item.name,
-            unit_price=float(item.unit_price) if item.unit_price is not None else None,
+            unit_price=item.unit_price,
             currency=item.currency,
             uom=item.uom,
             vendor_id=str(item.vendor_id) if item.vendor_id else None,

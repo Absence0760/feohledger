@@ -9,7 +9,9 @@ vertical on top of them.
 RBAC: catalogs are configuration-like (mirrors vendors). Read =
 admin/ap_manager/ap_clerk/cfo; mutate = admin/ap_manager. Guided-buying
 suggestions: read = admin/ap_manager/ap_clerk/cfo. Every mutation writes a
-``dispatch_audit`` row; money is ``Decimal`` in / ``float`` out.
+``dispatch_audit`` row; money is ``Decimal`` end to end — the response schemas
+carry ``MoneyAmount`` / ``OptionalMoneyAmount``, which take the single ``float``
+hop at JSON-write time.
 
 Punch-out (live cXML/OCI round-trips) is implemented: a ``punchout`` catalog
 starts a :class:`~app.models.procurement.PunchoutSession` via a pluggable
@@ -20,6 +22,7 @@ endpoint, and the buyer converts the returned cart into a requisition. See
 
 import logging
 import uuid
+from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from sqlalchemy import func, select
@@ -126,7 +129,7 @@ def _item_to_response(i: CatalogItem) -> CatalogItemResponse:
         sku=i.sku,
         name=i.name,
         description=i.description,
-        unit_price=float(i.unit_price) if i.unit_price is not None else None,
+        unit_price=i.unit_price,
         currency=i.currency,
         uom=i.uom,
         vendor_id=str(i.vendor_id) if i.vendor_id else None,
@@ -362,13 +365,15 @@ async def guided_buying(
 def _punchout_session_to_response(s: PunchoutSession) -> PunchoutSessionResponse:
     items: list[dict] = []
     for raw in s.cart_items or []:
+        raw_price = raw.get("unit_price")
         items.append(
             {
                 "description": raw.get("description") or "",
                 "sku": raw.get("sku"),
-                # JSON blob carries string-Decimal; out as float per convention.
+                # The JSON blob carries string-Decimal. Quantity is a count;
+                # unit_price is money and is rebuilt exactly.
                 "quantity": float(raw["quantity"]) if raw.get("quantity") else None,
-                "unit_price": float(raw["unit_price"]) if raw.get("unit_price") else None,
+                "unit_price": Decimal(str(raw_price)) if raw_price else None,
                 "uom": raw.get("uom"),
                 "currency": raw.get("currency") or s.currency,
             }
@@ -382,7 +387,7 @@ def _punchout_session_to_response(s: PunchoutSession) -> PunchoutSessionResponse
         start_url=s.start_url,
         provider=s.provider,
         cart_items=items,
-        cart_total=float(s.cart_total) if s.cart_total is not None else None,
+        cart_total=s.cart_total,
         currency=s.currency,
         returned_at=s.returned_at.isoformat() if s.returned_at else None,
         converted_requisition_id=(
@@ -516,7 +521,7 @@ async def convert_punchout_session(
                 session_id=str(session.id),
                 requisition_id=str(req.id),
                 requisition_number=req.requisition_number,
-                total=float(req.total),
+                total=req.total,
                 created=False,
             )
 
@@ -575,7 +580,7 @@ async def convert_punchout_session(
         session_id=str(session.id),
         requisition_id=str(req.id),
         requisition_number=req.requisition_number,
-        total=float(req.total),
+        total=req.total,
         created=True,
     )
 

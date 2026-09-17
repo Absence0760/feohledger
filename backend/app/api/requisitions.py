@@ -100,8 +100,8 @@ def _line_to_response(li) -> RequisitionLineItemResponse:
         item_code=li.item_code,
         description=li.description,
         quantity=float(li.quantity) if li.quantity is not None else None,
-        unit_price=float(li.unit_price) if li.unit_price is not None else None,
-        total=float(li.total) if li.total is not None else None,
+        unit_price=li.unit_price,
+        total=li.total,
         gl_account_id=str(li.gl_account_id) if li.gl_account_id else None,
         uom=li.uom,
     )
@@ -120,7 +120,7 @@ def _to_response(r: PurchaseRequisition) -> RequisitionResponse:
         vendor_id=str(r.vendor_id) if r.vendor_id else None,
         contract_id=str(r.contract_id) if r.contract_id else None,
         budget_id=str(r.budget_id) if r.budget_id else None,
-        total=float(r.total),
+        total=r.total,
         currency=r.currency,
         notes=r.notes,
         submitted_at=r.submitted_at.isoformat() if r.submitted_at else None,
@@ -674,7 +674,7 @@ async def convert_to_po(
                 requisition_id=str(req.id),
                 po_id=str(po.id),
                 po_number=po.po_number,
-                total=float(po.total),
+                total=po.total,
                 created=False,
             )
 
@@ -705,7 +705,7 @@ async def convert_to_po(
         requisition_id=str(req.id),
         po_id=str(po.id),
         po_number=po.po_number,
-        total=float(po.total),
+        total=po.total,
         created=True,
     )
 
