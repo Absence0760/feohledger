@@ -29,6 +29,28 @@ double-archives and never re-reads the archive). Each tick archives at most
 backlog drains over several ticks instead of one unbounded one; the manifest
 records only counts, never the archived ids.
 
+For the ``positive_pay`` class the sweep expires the STORED FILE, not the row.
+The generated check-issue / ACH-authorization file is the one artefact in this
+system that legitimately carries full account and routing numbers — that is its
+purpose — and it lands in object storage. Its operational life is days: the bank
+consumes it and the exposure after that is pure downside. So past the window the
+object is deleted and ``positive_pay_files.file_key`` is nulled, while the row
+itself (item count, total, ``content_hash``, ``account_last4`` — all PII-free)
+is kept as the audit-grade evidence that the file existed and what was in it.
+The window defaults to the ``positive_pay`` entry in
+:data:`RECORD_CLASS_DEFAULT_MONTHS`
+rather than the platform-wide default, because a seven-year retention on a
+file-of-account-numbers is the opposite of what this class wants.
+
+**Why this and not an S3 lifecycle rule**, which is the obvious instrument: every
+object key in this bucket begins with the owning organisation's id
+(``{org_id}/positive-pay/...``), and an S3 lifecycle prefix filter is a literal
+prefix with no wildcard — there is no single prefix that names the Positive Pay
+objects across tenants. The bucket also carries a GOVERNANCE-mode Object Lock
+default retention (``infra/s3.tf``), which defers any expiration until the lock
+elapses, so a rule measured in weeks would silently not fire. See
+``docs/decisions.md`` § 184.
+
 Mirrors ``contract_renewal`` / ``qms_sync``: a long-lived asyncio loop started
 in ``main.lifespan``, fresh per-tenant engine, one tenant's failure logged but
 never halting the sweep. Disabled by default (``FEOH_RETENTION_ENABLED``).
@@ -49,7 +71,9 @@ from app.config import settings
 from app.database import _make_tenant_url, control_session_factory
 from app.models.invoice import Invoice, InvoiceStatus
 from app.models.organization import Organization
+from app.models.positive_pay import PositivePayFile
 from app.models.workflow import AuditLog
+from app.services import storage
 from app.services.audit_dispatch import dispatch_audit
 from app.services.sweep_health import SWEEP_RETENTION, run_sweep_loop
 
@@ -64,6 +88,16 @@ _ARCHIVABLE_INVOICE_STATES = (InvoiceStatus.done, InvoiceStatus.paid)
 # calendar-arithmetic dependency.
 _DAYS_PER_MONTH = 30.44
 
+#: Per-class default windows that differ from the platform-wide default. A class
+#: absent from this map falls back to ``FEOH_RETENTION_DEFAULT_MONTHS``.
+#:
+#: ``positive_pay`` is one month because the file is a short-lived instruction to
+#: a bank, not a record: the bank consumes it within days and every day it lives
+#: past that is a file of full account numbers sitting at rest for no reason. An
+#: org can still raise it (``settings.retention.positive_pay_months``) if their
+#: bank's dispute window demands it.
+RECORD_CLASS_DEFAULT_MONTHS: dict[str, int] = {"positive_pay": 1}
+
 
 @dataclass
 class RetentionResult:
@@ -73,6 +107,8 @@ class RetentionResult:
     invoices_archived: int = 0
     audit_rows_overdue: int = 0
     audit_rows_overdue_unshipped: int = 0
+    positive_pay_files_expired: int = 0
+    positive_pay_files_failed: int = 0
     failures: int = 0
 
 
@@ -92,7 +128,7 @@ def resolve_retention_months(settings_dict: dict | None, record_class: str) -> i
             return months
     except (TypeError, ValueError):
         pass
-    return settings.retention_default_months
+    return RECORD_CLASS_DEFAULT_MONTHS.get(record_class, settings.retention_default_months)
 
 
 async def sweep_tenant(
@@ -155,6 +191,54 @@ async def sweep_tenant(
     # an operator to infer it from a suspiciously round number.
     batch_capped = len(candidates) >= cap
 
+    # --- Positive Pay: expire the stored FILE, keep the row -----------------
+    pp_months = resolve_retention_months(settings_dict, "positive_pay")
+    pp_cutoff = ref_now - timedelta(days=pp_months * _DAYS_PER_MONTH)
+    pp_candidates = (
+        (
+            await db.execute(
+                select(PositivePayFile)
+                .where(
+                    PositivePayFile.organization_id == organization_id,
+                    PositivePayFile.created_at < pp_cutoff,
+                    # Already-expired rows are excluded IN SQL for the same
+                    # reason the invoice leg excludes archived ones: a nulled
+                    # key is the idempotency marker, and re-reading the whole
+                    # history every tick is the bug that fix was written for.
+                    PositivePayFile.file_key.is_not(None),
+                )
+                .order_by(PositivePayFile.created_at.asc(), PositivePayFile.id.asc())
+                .limit(cap)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    pp_expired = 0
+    pp_failed = 0
+    for row in pp_candidates:
+        try:
+            # Offloaded to a worker thread inside `storage` — a bare boto3 call
+            # here would block the event loop this sweep shares with the API.
+            await storage._delete_object(row.file_key)
+        except Exception as exc:  # noqa: BLE001 — one object must not halt the sweep
+            pp_failed += 1
+            # PII-free: a storage key embeds org + record ids, so only the class.
+            logger.warning(
+                "[retention] positive-pay object delete failed: %s", exc.__class__.__name__
+            )
+            continue
+        row.file_key = None
+        meta = dict(row.meta or {})
+        meta["file_expired_at"] = ref_now.isoformat()
+        meta["file_expired_reason"] = "retention_policy"
+        row.meta = meta
+        flag_modified(row, "meta")
+        pp_expired += 1
+
+    result.positive_pay_files_expired = pp_expired
+    result.positive_pay_files_failed = pp_failed
+
     # --- Audit class: verify WORM-shipment, never delete --------------------
     audit_months = resolve_retention_months(settings_dict, "audit_log")
     audit_cutoff = ref_now - timedelta(days=audit_months * _DAYS_PER_MONTH)
@@ -201,7 +285,7 @@ async def sweep_tenant(
     #
     # The details are a PII-free retention manifest — counts + window months
     # ONLY, never the archived ids (see the note on the details dict below).
-    if archived or overdue_unshipped:
+    if archived or overdue_unshipped or pp_expired or pp_failed:
         await dispatch_audit(
             db,
             correlation_id=uuid.uuid4(),
@@ -223,6 +307,9 @@ async def sweep_tenant(
                 "invoices_archive_batch_capped": batch_capped,
                 "audit_rows_overdue": int(overdue_total),
                 "audit_rows_overdue_unshipped": int(overdue_unshipped),
+                "positive_pay_months": pp_months,
+                "positive_pay_files_expired": pp_expired,
+                "positive_pay_files_failed": pp_failed,
                 "audit_log_note": (
                     "audit_log rows are WORM/immutable and never deleted; "
                     "retention verifies shipment only"
@@ -261,6 +348,8 @@ async def run_retention_once(*, now: datetime | None = None) -> RetentionResult:
             total.invoices_archived += tenant_result.invoices_archived
             total.audit_rows_overdue += tenant_result.audit_rows_overdue
             total.audit_rows_overdue_unshipped += tenant_result.audit_rows_overdue_unshipped
+            total.positive_pay_files_expired += tenant_result.positive_pay_files_expired
+            total.positive_pay_files_failed += tenant_result.positive_pay_files_failed
         except Exception as exc:  # noqa: BLE001 — one tenant must not halt the sweep
             logger.warning("[retention] failed sweeping %s: %s", db_name, exc.__class__.__name__)
             total.failures += 1
@@ -268,14 +357,20 @@ async def run_retention_once(*, now: datetime | None = None) -> RetentionResult:
             if engine is not None:
                 await engine.dispose()
 
-    if total.invoices_archived or total.audit_rows_overdue or total.failures:
+    if (
+        total.invoices_archived
+        or total.audit_rows_overdue
+        or total.positive_pay_files_expired
+        or total.failures
+    ):
         logger.info(
             "[retention] swept %d tenant(s); archived=%d audit_overdue=%d "
-            "audit_overdue_unshipped=%d failed=%d",
+            "audit_overdue_unshipped=%d positive_pay_expired=%d failed=%d",
             total.tenants_scanned,
             total.invoices_archived,
             total.audit_rows_overdue,
             total.audit_rows_overdue_unshipped,
+            total.positive_pay_files_expired,
             total.failures,
         )
     return total

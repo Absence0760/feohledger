@@ -277,11 +277,19 @@ tax forms, and is completed within **60 days**, confirmed in writing.
 "and delete existing copies".** Four things deletion does not reach, and a signed
 promise that it does would be unperformable:
 
-1. **Uploaded documents are not reached by the in-product erasure function.**
-   `services/privacy_erasure.py` redacts the databases and touches object storage
-   not at all — no stored invoice, receipt, contract or tax form is deleted by it.
-   Deleting those is a manual operator action on request. (`/legal/dpa` § 9 states
-   this to customers; it is also in `docs/known-issues.md`.)
+1. **In-product erasure reaches uploaded documents SELECTIVELY, by design.**
+   As of 2026-09-16 (`docs/decisions.md` §183) `services/privacy_erasure` walks
+   object storage through `services/privacy_documents` and deletes the documents
+   whose sole subject is the erased party — the W-9/W-8, their supplier-portal
+   chat attachments, and the Positive Pay file naming their account. It
+   deliberately does NOT delete transaction evidence: the invoice PDF, the
+   contract document, the expense receipt and the archived vendor statement stay,
+   on the same legal basis as the invoice and payment ROWS the same clause
+   retains. Deleting them would leave a retained payable with its supporting
+   evidence destroyed. Where a Controller needs one of those removed, it is a
+   manual operator action on request, and end-of-contract tenant deletion removes
+   the whole prefix regardless. (`backend/docs/privacy.md` § Stored documents is
+   the published policy.)
 2. **There is no tenant-deprovisioning routine.** The only `DROP DATABASE` in the
    codebase is `tenant_provisioning._drop_postgres_database`, which rolls back a
    *failed provisioning attempt* so a partial failure does not leak an orphan
@@ -373,8 +381,10 @@ a measures annex is only useful if its omissions are visible: no SOC 2 and no IS
 27001 certification, and no report of either to produce under Section 9; no
 third-party penetration test; no 24/7 security operations centre and no
 continuous security monitoring; no data-residency guarantee (Section 8);
-in-product erasure does not reach uploaded documents (Section 11); write-once
-audit archival is off by default.
+in-product erasure reaches only the documents whose sole subject is the erased
+party and deliberately retains transaction evidence (Section 11); Positive Pay
+file expiry depends on the retention sweep being enabled, which is off by
+default; write-once audit archival is off by default.
 
 ## Annex III — Sub-processors and transfer mechanisms
 

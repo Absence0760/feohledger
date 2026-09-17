@@ -495,25 +495,25 @@
 	</ul>
 
 	<p>
-		<strong>Three limits on erasure, stated plainly.</strong> First, the money trail
+		<strong>Two limits on erasure, stated plainly.</strong> First, the money trail
 		survives: amounts, currencies, statuses and dates on invoices and payments are never
 		mutated, the supplier's legal name is preserved where it is the payee denormalised
 		onto a financial record, and the append-only audit log is never edited or deleted.
 		That is a deliberate choice — Article 17(3)(b) and (e) allow retention where processing
 		is necessary for compliance with a legal obligation and for the establishment or
 		defence of legal claims, and an AP ledger you can erase retrospectively is not an AP
-		ledger. Second, <strong>the in-product erasure function redacts the databases but does
-		not today delete the documents you have uploaded from object storage</strong>. Where a
-		request requires a stored invoice, receipt, contract or tax form to be deleted, raise
-		it at <a href="mailto:{CONTACT.privacy}">{CONTACT.privacy}</a> and we will perform that
-		deletion for you within the timeframe in <a href="#deletion">section 13</a>. Third,
-		<strong>the automated path does not clear a registered passkey or the record of a
-		session already issued.</strong> Access itself stops at once — every request re-reads
-		the account and refuses a deactivated one — but the stored authenticator credential
-		survives, and the session record persists until it expires (at most the access-token
-		lifetime, thirty minutes by default). Raise it with us at the same address if a
-		request requires the credential itself to be destroyed. We would rather tell you where
-		each seam is than let you discover one in the middle of a regulator's deadline.
+		ledger. Second, and for the same reason, <strong>erasure applies that rule to stored
+		documents rather than deleting all of them</strong>: it removes the objects belonging
+		to the data subject alone — their signed W-9 or W-8, the attachments they sent through
+		the supplier portal, and the payment-instruction files carrying account numbers in the
+		clear — and retains the invoice PDF, the contract and the receipt behind a paid
+		reimbursement, which are the evidence for financial records the same erasure preserves.
+		Where a request requires one of those retained documents to be deleted anyway, raise it
+		at <a href="mailto:{CONTACT.privacy}">{CONTACT.privacy}</a> and we will perform that
+		deletion for you within the timeframe in <a href="#deletion">section 13</a>. Erasure of
+		a user account clears every registered passkey and ends every live session. We would
+		rather tell you where each seam is than let you discover one in the middle of a
+		regulator's deadline.
 	</p>
 
 	<p>
@@ -1477,17 +1477,15 @@
 			<a href="#residency">section 14</a>. The setting exists; the routing does not.
 		</li>
 		<li>
-			<strong>In-product erasure does not reach uploaded documents.</strong> The erasure
-			function redacts the databases; deleting a stored invoice, receipt, contract or tax
-			form from object storage is done by us on request. See
-			<a href="#data-subject-rights">section 9</a>.
-		</li>
-		<li>
-			<strong>In-product erasure does not revoke a registered passkey or an issued
-			session record.</strong> Access itself stops on the next request, but the stored
-			authenticator credential survives the automated path, and the record of a session
-			already issued persists until it expires. Destroying the credential is done by us
-			on request. See <a href="#data-subject-rights">section 9</a>.
+			<strong>In-product erasure reaches uploaded documents selectively, by design.</strong>
+			It deletes the objects belonging to the data subject alone — their signed W-9 or W-8,
+			the attachments they sent through the supplier portal, and the payment-instruction
+			files carrying account numbers in the clear. It retains the objects that are evidence
+			behind a financial record the same erasure preserves: the invoice PDF, the contract,
+			the receipt behind a paid reimbursement. Deleting one of those on request is a
+			controller instruction we carry out under
+			<a href="#instructions">section 5</a>, not something the automated function
+			does on its own. See <a href="#data-subject-rights">section 9</a>.
 		</li>
 		<li>
 			<strong>Write-once audit archival is off by default.</strong> The capability exists

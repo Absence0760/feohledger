@@ -95,6 +95,17 @@ from app.tenant import (
     get_tenant_db,
     get_write_entity_id,
 )
+
+# What a banking secret IS, and how it is reduced, lives in
+# `app/utils/bank_masking.py` — the DSAR export needs the same answer, and a
+# service importing a router to get it would be the wrong dependency
+# direction. These aliases keep this module's long-standing private names
+# (and every existing call site + test) pointing at that one definition.
+# `_BANK_SECRET_KEYS` has no caller left here since the summary moved, but
+# it is re-exported because tests and docs name it at this path.
+from app.utils.bank_masking import BANK_SECRET_KEYS as _BANK_SECRET_KEYS  # noqa: F401
+from app.utils.bank_masking import bank_details_audit_summary as _bank_details_audit_summary
+from app.utils.bank_masking import last4 as _last4
 from app.utils.passwords import generate_temp_password, hash_password
 from app.utils.search import ilike_contains
 from app.utils.tenant_urls import tenant_base_url
@@ -138,21 +149,6 @@ _AUDITABLE_SCALAR_FIELDS = (
     "accepts_virtual_cards",
     "status",
 )
-
-# Keys inside `bank_details` JSONB that hold raw banking secrets and must
-# NEVER appear in an audit row. We record only THAT they changed plus a
-# last-4 (PII-out-of-logs invariant). Every other key (counterparty_id,
-# *_last4, bank_name, swift_bic, country) is non-secret display metadata.
-# NOTE `wire_routing_number` is here for the same reason `routing_number` is:
-# this project treats a payee's routing coordinates as banking data that stays
-# out of the trail, and a NEW secret-shaped key that isn't listed would be
-# recorded verbatim by `_bank_details_audit_summary`'s else-branch.
-_BANK_SECRET_KEYS = frozenset({"account_number", "routing_number", "wire_routing_number", "iban"})
-
-
-def _last4(value: object) -> str | None:
-    s = str(value or "")
-    return s[-4:] if len(s) >= 4 else None
 
 
 async def _stage_ap_bank_change(
@@ -239,35 +235,6 @@ async def _stage_ap_bank_change(
         details=details,
     )
     return req
-
-
-def _bank_details_audit_summary(before: dict | None, after: dict | None) -> dict | None:
-    """PII-safe description of a `bank_details` change for the audit trail.
-
-    Records the SET of keys that changed and, for the raw banking secrets
-    (account/routing number, IBAN), only a masked last-4 of the old/new
-    value — never the full number (PII / banking data must stay out of the
-    audit trail). Non-secret display keys (counterparty_id, *_last4,
-    bank_name, swift_bic, country) record their literal old/new values.
-    Returns ``None`` when nothing changed.
-    """
-    before = before or {}
-    after = after or {}
-    all_keys = before.keys() | after.keys()
-    changed_keys = sorted(k for k in all_keys if before.get(k) != after.get(k))
-    if not changed_keys:
-        return None
-
-    field_changes: dict[str, dict] = {}
-    for k in changed_keys:
-        if k in _BANK_SECRET_KEYS:
-            field_changes[k] = {
-                "old_last4": _last4(before.get(k)),
-                "new_last4": _last4(after.get(k)),
-            }
-        else:
-            field_changes[k] = {"old": before.get(k), "new": after.get(k)}
-    return {"changed_fields": changed_keys, "fields": field_changes}
 
 
 async def _screen_best_effort(

@@ -5,12 +5,18 @@ privilege) and both audited into the tenant's append-only trail:
 
 - ``POST /privacy/dsar`` — assemble everything held about a data subject into a
   portable JSON bundle (GDPR Art. 15 / CCPA right-to-know). Audited
-  ``privacy.dsar_export``.
+  ``privacy.dsar_export``. **Banking fields are masked by default**; an
+  unmasked bundle needs ``include_banking`` + the
+  ``vendor.bank_change.approve`` permission + a written justification, and
+  writes its OWN audit row (``privacy.dsar_export.unmasked``).
 - ``POST /privacy/erasure`` — irreversibly redact the subject's PII while
   PRESERVING the immutable financial + audit record (GDPR Art. 17 / CCPA
   right-to-delete). Legally-required retention wins for transactional rows: we
   redact PII text fields and keep the money trail. Audited ``privacy.erasure``.
-  Idempotent — re-running on an already-erased subject is a safe no-op.
+  Idempotent — re-running on an already-erased subject is a safe no-op. It also
+  deletes the subject's sole-subject documents from object storage, their
+  passkey rows, and their live sessions; what is deleted vs retained is decided
+  in ``services/privacy_documents`` and published in ``backend/docs/privacy.md``.
 - ``GET /privacy/requests`` — the privacy officer's request history (PII-free).
 
 Subjects span the control plane (``User``) and the tenant DB (``VendorUser``,
@@ -35,6 +41,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import ROLE_ADMIN, require_roles
+from app.api.permissions import PERM_VENDOR_BANK_CHANGE_APPROVE
 from app.database import get_control_db
 from app.models.data_subject_request import (
     REQUEST_DSAR_EXPORT,
@@ -42,6 +49,7 @@ from app.models.data_subject_request import (
     STATUS_COMPLETED,
     STATUS_NOOP,
     SUBJECT_TYPES,
+    SUBJECT_VENDOR_CONTACT,
     DataSubjectRequest,
 )
 from app.models.organization import Organization
@@ -57,6 +65,7 @@ from app.schemas.privacy import (
 from app.services.audit_dispatch import dispatch_audit
 from app.services.privacy_erasure import erase_subject
 from app.services.privacy_export import (
+    BankingDisclosureNotPermitted,
     SubjectNotFound,
     build_dsar_bundle,
     resolve_subject_id,
@@ -69,8 +78,57 @@ router = APIRouter(prefix="/privacy", tags=["privacy"])
 def _validate_subject_type(subject_type: str) -> None:
     if subject_type not in SUBJECT_TYPES:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=f"Unknown subject_type '{subject_type}'; valid: {list(SUBJECT_TYPES)}",
+        )
+
+
+def _authorize_banking_disclosure(body: DSARRequest, user: User) -> None:
+    """Gate the unmasked-banking variant of a DSAR bundle.
+
+    Three conditions, all checked before any data is read:
+
+    * the caller holds ``vendor.bank_change.approve`` — the granular permission
+      that already gates APPROVING a bank-detail change. Reading every payee
+      coordinate out into a file is the same asset as redirecting where the money
+      goes, so it answers to the same duty. ``require_permission`` is not used as
+      a route dependency here because the flag, not the route, is what needs
+      gating: a routine masked DSAR must stay available to any admin;
+    * a written ``banking_justification``, because an unmasked bundle is meant to
+      be a deliberate act with a reason attached, not a default;
+    * the subject is a ``vendor_contact`` — nothing else has bank details, and a
+      silently-ignored flag would leave the operator unable to tell a masked
+      bundle from an unmasked one.
+
+    NOTE ON REACH: ``ROLE_ADMIN`` resolves to every permission in the catalogue,
+    so on the four stock system roles this gate admits exactly the callers the
+    route already admits. That is not a no-op — it is what makes the control
+    configurable: an org that splits duties with a custom admin-equivalent role
+    can now deny this without denying DSARs. The stronger gate (a step-up MFA
+    proof on the request) needs the SPA to collect that proof and is tracked in
+    ``docs/followups.md``.
+    """
+    if not body.include_banking:
+        return
+    if body.subject_type != SUBJECT_VENDOR_CONTACT:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="include_banking applies to vendor_contact subjects only",
+        )
+    if not (body.banking_justification or "").strip():
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="banking_justification is required when include_banking is true",
+        )
+    held = getattr(user, "effective_permissions", frozenset())
+    if PERM_VENDOR_BANK_CHANGE_APPROVE not in held:
+        # PII-free, and it names the permission so the caller can ask for it.
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=(
+                "An unmasked banking disclosure requires the "
+                f"'{PERM_VENDOR_BANK_CHANGE_APPROVE}' permission"
+            ),
         )
 
 
@@ -87,8 +145,13 @@ async def dsar_export(
     Admin only. The request itself is audited (``privacy.dsar_export``) and
     recorded in ``data_subject_requests`` — both PII-free (subject UUID + type +
     counts only). The bundle is returned in the body, never logged or stored.
+
+    Banking fields are MASKED unless ``include_banking`` is set and the caller
+    clears ``_authorize_banking_disclosure`` — in which case a second,
+    separately-actioned audit row records the disclosure and its justification.
     """
     _validate_subject_type(body.subject_type)
+    _authorize_banking_disclosure(body, user)
     now = datetime.now(UTC)
 
     try:
@@ -105,7 +168,12 @@ async def dsar_export(
             organization_id=org.id,
             control_db=control_db,
             tenant_db=db,
+            include_banking=body.include_banking,
         )
+    except BankingDisclosureNotPermitted as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
+        ) from exc
     except SubjectNotFound as exc:
         # Same shape regardless of WHY (wrong tenant vs. truly absent) so the
         # response can't be used to probe which subjects exist in other tenants.
@@ -123,6 +191,14 @@ async def dsar_export(
         requested_by=user.id,
         completed_at=now,
         record_counts=bundle.get("counts"),
+        # The justification rides the request row too, so the privacy officer's
+        # own history (`GET /privacy/requests`) shows which exports were
+        # unmasked and why without cross-referencing the audit trail.
+        note=(
+            f"unmasked banking disclosure: {(body.banking_justification or '').strip()[:400]}"
+            if body.include_banking
+            else None
+        ),
     )
     db.add(request_row)
 
@@ -139,8 +215,31 @@ async def dsar_export(
         details={
             "subject_type": body.subject_type,
             "subject_id": str(subject_id),
+            "banking_disclosure": "unmasked" if body.include_banking else "masked",
         },
     )
+
+    # A SEPARATE, separately-named audit row for the unmasked variant. Folding it
+    # into a field of the row above would make "who pulled a supplier's full
+    # account number" a JSONB filter rather than an action anyone can grep for,
+    # and this is the row an incident review goes looking for. PII-free: the
+    # justification is an operator note, never subject data.
+    if body.include_banking:
+        await dispatch_audit(
+            db,
+            correlation_id=uuid.uuid4(),
+            organization_id=org.id,
+            actor_id=user.id,
+            action="privacy.dsar_export.unmasked",
+            entity_type="data_subject_request",
+            entity_id=request_row.id,
+            details={
+                "subject_type": body.subject_type,
+                "subject_id": str(subject_id),
+                "disclosed": ["bank_details", "beneficial_owner_data"],
+                "justification": (body.banking_justification or "").strip()[:500],
+            },
+        )
     await db.commit()
 
     return DSARResponse(
@@ -148,6 +247,7 @@ async def dsar_export(
         subject_type=body.subject_type,
         subject_id=str(subject_id),
         generated_at=now.isoformat(),
+        banking_disclosure="unmasked" if body.include_banking else "masked",
         data=bundle,
     )
 
@@ -170,7 +270,7 @@ async def erasure(
     _validate_subject_type(body.subject_type)
     if not body.confirm:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="confirm must be true to perform an erasure",
         )
     now = datetime.now(UTC)
@@ -213,7 +313,10 @@ async def erasure(
     )
     db.add(request_row)
 
-    # Append-only audit row. PII-free: subject UUID + type + counts only.
+    # Append-only audit row. PII-free: subject UUID + type + counts only. The
+    # storage + auth legs are recorded here too — "we deleted N documents and
+    # revoked M sessions" is the evidence that an Art. 17 request was honoured
+    # beyond the database, and `documents_failed` is what says it was not.
     await dispatch_audit(
         db,
         correlation_id=uuid.uuid4(),
@@ -227,6 +330,11 @@ async def erasure(
             "subject_id": str(subject_id),
             "status": req_status,
             "fields_redacted": result.fields_redacted,
+            "documents_deleted": result.documents_deleted,
+            "documents_retained": result.documents_retained,
+            "documents_failed": result.documents_failed,
+            "passkeys_deleted": result.passkeys_deleted,
+            "sessions_revoked": result.sessions_revoked,
         },
     )
     # Cross-DB write without 2PC (control plane + tenant DB). Commit the
@@ -251,6 +359,11 @@ async def erasure(
         fields_redacted=result.fields_redacted,
         record_counts=result.record_counts,
         completed_at=now.isoformat(),
+        documents_deleted=result.documents_deleted,
+        documents_retained=result.documents_retained,
+        documents_failed=result.documents_failed,
+        passkeys_deleted=result.passkeys_deleted,
+        sessions_revoked=result.sessions_revoked,
     )
 
 

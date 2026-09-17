@@ -7346,3 +7346,194 @@ property), and the frontend has no `{@html}` by design, so markup cannot arrive
 as a string. Inkscape renders a contact sheet for review; CI checks only that
 the module matches its generator, with a unittest proving that check fails on
 an edited copy — the same shape as the icon guard (§173).
+
+## 182. A routine DSAR masks banking; the unmasked bundle is a second, gated act
+
+`POST /api/privacy/dsar` returned `Vendor.bank_details` and
+`beneficial_owner_data` verbatim. Every other surface in the product reduces a
+payee's account / routing / IBAN to a last-4 — the audit trail, the dual-control
+change queue, the UI, the logs, the error bodies — so this was the one path that
+put full banking credentials into a file, and it was reachable by any org admin
+for any vendor with no dual control and without holding
+`vendor.bank_change.approve` (issue #423).
+
+**Masking it and stopping there was the obvious fix and the wrong one.** A data
+subject is entitled to their own personal data; returning a supplier's bank
+details *to that supplier* is the Art 15 right the endpoint exists to serve.
+Deleting the capability to answer that request would have traded a
+privilege-escalation shape for a compliance failure. So the bundle masks by
+default and the unmasked variant survives behind `include_banking`, which needs
+three things that a routine export does not: the `vendor.bank_change.approve`
+permission, a written `banking_justification`, and a `vendor_contact` subject.
+The flag is refused — not ignored — on a subject type that has no bank details,
+because a silently-masked 200 would leave the operator unable to tell which
+bundle they were holding.
+
+**The unmasked disclosure gets its own audit ACTION**, not a field on the routine
+row. `privacy.dsar_export.unmasked` is what an incident review greps for; folding
+it into `privacy.dsar_export.details.banking_disclosure` would have made "who
+pulled a supplier's full account number" a JSONB filter over every export ever
+run. The justification rides that row and the `data_subject_requests` row, so
+the privacy officer's own history shows it too.
+
+**The gate is honest about its reach, and this is why it is still worth having.**
+`ROLE_ADMIN` resolves to the entire permission catalogue, so on the four stock
+system roles `require_permission(vendor.bank_change.approve)` admits exactly the
+callers `require_roles(ROLE_ADMIN)` already admits. What it adds is
+*configurability*: the granular SoD layer exists so an org can split duties that
+one system role conflates, and an org that defines an admin-equivalent custom
+role can now withhold this without withholding DSARs. The control that would
+bite on a stock admin is a step-up MFA proof on the request, and that needs the
+SPA to collect the proof — a frontend change, tracked in `docs/followups.md`
+rather than half-landed here.
+
+**What a banking secret *is* moved out of the router.** `_BANK_SECRET_KEYS` and
+`_bank_details_audit_summary` lived in `api/vendors.py`; a service importing a
+router to reuse them is the wrong dependency direction, and reimplementing them
+would have given the audit trail and the export two answers to the same
+question. They now live in `app/utils/bank_masking.py` and `vendors.py`
+re-exports the private names, so every existing call site and test is unchanged.
+
+The two reducers there have **deliberately opposite failure directions**, which
+is the part worth remembering. The audit summary is a *denylist*: an audit row's
+job is to say exactly what moved, and the keys it sees are the ones an AP user
+just sent, so an unlisted key records verbatim. The disclosure masker is an
+*allowlist*: only known display keys pass, and the named secrets **plus every key
+this module has never heard of** are masked. A future display key therefore
+renders as `****` in an export until someone lists it — visible and harmless —
+where the denylist default would have quietly published a future secret. That
+asymmetry is not an inconsistency; a file that leaves the system and a row that
+stays in it do not want the same default.
+
+Beneficial owners are reduced rather than masked: the blob is
+`{"owners": [...]}` describing *other* natural persons, who did not ask for this
+export. The ownership relationship (`name`, `role`, `ownership_percentage`,
+`country`, `is_pep`) is disclosed and every identity-document field is dropped,
+because a last-4 of someone else's passport number is still someone else's
+passport number. An unrecognised shape is withheld whole — we cannot tell which
+of its keys are third-party identity documents.
+
+## 183. Erasure reaches object storage, and the retain/delete line is the money-trail line
+
+`privacy_erasure` and `privacy_export` operated purely on database rows: no
+stored document, no `WebAuthnCredential`, no session revocation, and an export
+that returned *counts* of the subject's audit and notification activity rather
+than the activity (issue #424). The fix needed a decision before it needed code,
+because the obvious version — delete every document reachable from the subject —
+destroys the invoice PDFs the erasure path deliberately preserves the rows for.
+
+**One traversal, two lenses.** `app/services/privacy_documents.py` walks from a
+subject to every object held about them, and both legs read the same list: the
+export enumerates it, the erasure deletes the part it is entitled to. Writing
+that walk twice would guarantee drift, and the drift would be invisible in the
+worst direction — an export that lists a document the erasure leg cannot reach is
+exactly the failure being fixed.
+
+**The split follows the money trail, not "is it about the subject".** Erasure
+keeps amounts, statuses, dates and the append-only `audit_log` because tax and
+SOX record-keeping outrank erasure for transactional rows. A document is deleted
+when its sole subject is the erased party *and it is not evidence of a
+transaction* — a W-9/W-8 carrying their TIN, a supplier-authored chat attachment.
+A document is retained when it is the evidence behind a payable whose row is
+retained — the invoice PDF, the contract document, the expense receipt, the
+archived vendor statement. Deleting one of those would leave a preserved money
+row with its supporting evidence destroyed, which is what the retention argument
+exists to prevent.
+
+Two cases resolve against their appearance and are the ones worth stating.
+**An AP-authored chat attachment is retained** where a supplier-authored one is
+deleted: what an employee attaches to a supplier thread is company
+correspondence about an invoice, and the personal data in that row is the
+authorship, which `privacy_erasure` already redacts. **An expense receipt is
+retained** even though it is unambiguously the employee's own document: it is the
+proof behind a reimbursement that was paid, which makes it the same class of
+object as an invoice PDF. The `user` erasure leg therefore deletes no documents
+at all — what it deletes is the passkey material.
+
+**Passkeys are deleted, not redacted.** A `WebAuthnCredential` is authenticator
+material, not a financial record: nothing in it serves the money trail and every
+byte is a handle to the erased person's device. Sessions are revoked through the
+existing `session_management.revoke_user_sessions` — admin deactivation and
+password reset already call it — rather than a second implementation.
+Revocation is best-effort, because Redis being unreachable must not fail an
+erasure whose database half is the regulated part, and access had already
+stopped anyway (`get_current_user` 401s on `not user.is_active`); what this
+closes is the un-blocklisted JTI living out its TTL.
+
+**Both new legs run BEFORE the idempotency tombstone check**, which makes the fix
+retroactive: a subject erased before this existed still has their documents and
+passkeys, and asking again now removes them instead of returning `noop` over the
+gap. "Work was done" therefore includes a deleted document or a revoked session,
+not only a redacted field.
+
+**Objects go before the commit, and a failure is re-runnable.** The DB row is the
+only thing that knows a document's storage key, so committing the null first and
+then failing the delete orphans the object beyond any future reach — the same
+argument `services/tenant_deletion` makes for the whole-tenant case, resolved the
+same way (documents → database). A pointer is nulled only for a key that actually
+went, so a partial failure retries cleanly, and `documents_failed` is surfaced on
+the response and in the audit row rather than folded into `status`: an erasure
+that could not reach an object is not complete and must not read as though it
+were.
+
+**The export returns data, not a tally** — Art 15 is a right to the data. Audit
+rows the subject authored come back with action, target and timestamp but
+**without `details`**: an audit row an admin wrote *about another subject*
+carries that subject's identifiers, and Art 15(4) says an access right must not
+adversely affect the rights of others. Documents are enumerated as references
+rather than inlined as base64, for the same reason in a different key: inlining
+would put a W-9's taxpayer identification number into the body of a routine
+export, and would build up to 25 MB per document into a synchronous JSON
+response. Every collection is capped at 1000 rows with a `truncated` flag and its
+true total, because a user with three years of audit rows would otherwise
+assemble an unbounded document on the event loop.
+
+## 184. Positive Pay files expire through the retention sweep, not an S3 lifecycle rule
+
+The generated check-issue / ACH-authorization file legitimately holds every
+payee's full account and routing number — that is its purpose, and it is why
+`PositivePayItem` stores only `account_last4`. Nothing expired it: the retention
+sweep reached invoices and the audit log only, and the erasure path never touched
+object storage (issue #425).
+
+Both triggers now reach it. `positive_pay` is a retention record class, and the
+same shared traversal from §183 reaches the file on an erasure — a rule that
+deletes on a timer and a request that deletes on demand are the same walk.
+
+**The file expires; the row does not.** Past the window the object is deleted,
+`file_key` is nulled and `meta.file_expired_at` is stamped, while `item_count`,
+`total_amount`, `content_hash` and `account_last4` stay — those are the
+audit-grade evidence the row exists to carry, and all of them are PII-free. The
+default window is **one month** rather than the platform-wide 84, via a per-class
+override (`retention_sweep.RECORD_CLASS_DEFAULT_MONTHS`): a bank consumes the
+file within days, and a seven-year retention on a file of account numbers is the
+opposite of what this class wants. An org whose bank has a long dispute window
+can raise it.
+
+**Why not the S3 lifecycle rule the issue asked for first**, which would have been
+cheaper and is the right instrument for this shape in general. Two structural
+reasons, and the second is the one that matters:
+
+- Every object key in this bucket begins with the owning organisation's id
+  (`{org_id}/positive-pay/...`), and an S3 lifecycle prefix filter is a *literal*
+  prefix with no wildcard. There is no single prefix naming these objects across
+  tenants, so it would take one rule per tenant, created at provisioning time,
+  in a bucket Terraform owns — a lifecycle rule set that drifts with the customer
+  list.
+- The bucket carries a GOVERNANCE-mode Object Lock default retention
+  (`infra/s3.tf`, `invoice_retention_days`, 365 by default). Object Lock does not
+  stop a lifecycle rule from being *defined* — it defers the deletion of any
+  version still inside its lock window. An expiry measured in weeks would sit in
+  the Terraform looking like a control and never fire.
+
+A rule that cannot fire is worse than no rule, because it answers the question.
+The sweep can express what the bucket cannot: per-org configurability, a window
+shorter than the bucket's lock, and a stamped row saying what happened. Tagging
+objects at upload and filtering the lifecycle rule by tag would solve the first
+problem but not the second, which is why it is not the answer either.
+
+The standing caveat is that the sweep is off by default
+(`FEOH_RETENTION_ENABLED`) like every other sweep in this project (guard rail 7),
+so removing the exposure is now a deployment step rather than a missing
+capability. Deleting the object is the part that needed building.
+
