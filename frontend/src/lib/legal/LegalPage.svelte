@@ -14,6 +14,9 @@
 	 * These pages render standalone: no sidebar, no tenant chrome, readable on
 	 * the apex domain to a visitor who has never signed in. `routes/+layout.svelte`
 	 * routes `/legal/*` past its auth gate for exactly that reason.
+	 * `routes/legal/+layout.svelte` is what puts a minimal, static way back into
+	 * the product inside that branch, and owns the backdrop and the 46rem
+	 * measure this component no longer declares.
 	 */
 	let { title, intro, children } = $props<{
 		title: string;
@@ -76,11 +79,13 @@
 </div>
 
 <style>
+	/* No measure and no side gutter of its own: `routes/legal/+layout.svelte`
+	   owns both, once, for the index and the six documents together (#433).
+	   This file and the index each used to declare `max-width: 46rem`, which is
+	   two places for one typographic decision. Only the vertical rhythm is the
+	   document's own. */
 	.legal-shell {
-		max-width: 46rem;
-		/* 16px side gutter at phone width; centred with room to breathe above. */
-		margin: 0 auto;
-		padding: 32px 16px 64px;
+		padding: 32px 0 64px;
 		color: var(--text);
 	}
 

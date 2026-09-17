@@ -107,6 +107,98 @@ test.describe('legal pages', () => {
 		}
 	});
 
+	test('every legal route offers a way back into the product (#434)', async ({ page }) => {
+		// The dead end this catches is invisible to a component test: each page
+		// rendered correctly, and the trap was a property of the set in its
+		// layout. `routes/+layout.svelte` branches `/legal/*` past the tenant
+		// probe — right, and necessary — but that branch stripped the sidebar,
+		// the header and every route out of the document set, and put nothing
+		// back. The index's outbound links were three deeper into `/legal` and
+		// three `mailto:`; the six documents had one link to the index. So a
+		// signed-in user opening the Cookie Notice from the consent banner, and a
+		// procurement reviewer sent the DPA, both had the Back button or the URL
+		// bar and nothing else.
+		//
+		// Asserted as a PROPERTY of every route rather than as "the header is
+		// present", so a future redesign that moves the escape hatch somewhere
+		// else still passes, and one that drops it cannot.
+		for (const { path } of [{ path: '/legal' }, ...PAGES]) {
+			await page.goto(path);
+			await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
+
+			const escapes = await page.locator('a[href]').evaluateAll((els) =>
+				(els as HTMLAnchorElement[])
+					// `mailto:` reaches a person, not the product, and an in-page
+					// anchor resolves to the path it is already on — neither is a
+					// way out. `a.pathname` resolves a relative href against the
+					// document, so both fall out on the prefix test below.
+					.filter((a) => a.protocol === 'http:' || a.protocol === 'https:')
+					.map((a) => a.pathname)
+					.filter((pathname) => !pathname.startsWith('/legal'))
+			);
+
+			expect(
+				escapes,
+				`${path} has no link out of /legal — it is a navigational dead end`
+			).not.toHaveLength(0);
+		}
+	});
+
+	test('the legal header carries the mark and a sign-in link on every route', async ({ page }) => {
+		// The specific affordances #434 asks for, asserted once the property
+		// above is satisfied: the mark goes to `/`, which already resolves
+		// correctly on both host shapes (the marketing Landing on the apex, the
+		// app on a tenant subdomain), and sign-in goes to the one sign-in route.
+		for (const { path } of [{ path: '/legal' }, ...PAGES]) {
+			await page.goto(path);
+			const header = page.getByRole('banner');
+			// Exactly one. Both the index and every document open with a
+			// `<header>` of their own, which is a `banner` outside a landmark —
+			// so the top bar is wrapped around a `<main>` that demotes them. Two
+			// banners is not a WCAG A/AA failure (axe files it under
+			// best-practice, which this suite does not run), so nothing else
+			// here would catch it.
+			await expect(header).toHaveCount(1);
+			await expect(header.getByRole('link', { name: 'FeohLedger' })).toHaveAttribute('href', '/');
+			await expect(header.getByRole('link', { name: 'Sign in' })).toHaveAttribute(
+				'href',
+				'/login'
+			);
+		}
+	});
+
+	test('the header renders on the apex too, where no tenant resolves', async ({ page }) => {
+		// The header must not have reintroduced what the standalone branch in
+		// `routes/+layout.svelte` exists to avoid. On the apex `hasTenant` is
+		// FALSE, so anything reading tenant state renders its no-tenant branch
+		// (the marketing Landing) or nothing at all. A header that still draws
+		// here is a header that waits on nothing — which is the property, since
+		// no assertion can observe a pre-hydration document in a client-rendered
+		// app.
+		await page.goto(`${WEB_ORIGIN}/legal/dpa`);
+		const header = page.getByRole('banner');
+		await expect(header.getByRole('link', { name: 'FeohLedger' })).toBeVisible();
+		await expect(header.getByRole('link', { name: 'Sign in' })).toBeVisible();
+	});
+
+	test('the reading measure is still 46rem after the backdrop work', async ({ page }) => {
+		// 46rem is the right line length for a document someone has to read end
+		// to end, and the instinctive way to answer "63% of the screen is empty"
+		// is to stretch the text into it — which would make these worse, not
+		// better (#433 says so explicitly). Measured on the RENDERED column
+		// rather than on the CSS, so a second `max-width` reintroduced anywhere,
+		// or a sheet gutter eating into the measure, fails here.
+		await page.setViewportSize({ width: 1600, height: 900 });
+		await page.goto('/legal/privacy');
+
+		const article = page.locator('.legal-page');
+		const width = (await article.boundingBox())?.width ?? 0;
+		// 46rem at the 16px root = 736px. The sheet's gutter is outside the
+		// measure, so the text column is the measure itself.
+		expect(width).toBeGreaterThan(700);
+		expect(width, 'the legal measure was widened — see #433').toBeLessThanOrEqual(736);
+	});
+
 	test('a pending operator fact renders as a marked gap, never as a bare blank', async ({
 		page
 	}) => {
