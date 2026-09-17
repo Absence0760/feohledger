@@ -18,8 +18,8 @@ One router (``/corporate-card-transactions``) covering the card-feed lifecycle:
 Reconciliation links **both** sides of the circular FK
 (``expenses.card_transaction_id`` ↔ ``corporate_card_transactions.matched_expense_id``)
 and sets ``Expense.payment_method`` to ``virtual_card`` when the txn carries a
-``virtual_card_id`` else ``corporate_card``. Money is ``Decimal`` everywhere;
-only the response serialiser does ``float(...)``. Every mutation is audited and
+``virtual_card_id`` else ``corporate_card``. Money is ``Decimal`` everywhere,
+including on the response schema (``MoneyAmount``). Every mutation is audited and
 entity-scoped. PII: only ``card_last_four`` is ever stored / surfaced — never a
 full PAN. See ``backend/docs/expense-management.md``.
 """
@@ -85,7 +85,7 @@ def _to_response(t: CorporateCardTransaction) -> CorporateCardTransactionRespons
         txn_date=t.txn_date.isoformat() if t.txn_date else "",
         posted_date=t.posted_date.isoformat() if t.posted_date else None,
         merchant=t.merchant,
-        amount=float(t.amount),
+        amount=t.amount,
         currency=t.currency,
         external_txn_id=t.external_txn_id,
         matched_expense_id=str(t.matched_expense_id) if t.matched_expense_id else None,

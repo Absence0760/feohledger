@@ -17,7 +17,7 @@ from app.api.deps import (
 from app.models.gl_account import GLAccount
 from app.models.organization import Organization
 from app.models.user import User
-from app.schemas.gl_account import GLAccountCreate
+from app.schemas.gl_account import GLAccountCreate, GLAccountUpdate
 from app.services.audit_dispatch import dispatch_audit
 from app.tenant import apply_entity_scope, get_entity_id, get_tenant, get_tenant_db
 from app.utils.search import ilike_contains
@@ -55,6 +55,35 @@ def _code_in_effective_chart(code: str, org_id: uuid.UUID, entity_id: uuid.UUID 
         entity_id,
         include_shared=True,
     )
+
+
+def _serialize(a: GLAccount) -> dict:
+    """One chart row, as every consumer of this router reads it.
+
+    Shared by the list and the PATCH so a corrected account comes back in
+    exactly the shape the picker that is about to re-render it expects.
+    """
+    return {
+        "id": str(a.id),
+        "code": a.code,
+        "name": a.name,
+        "account_type": a.account_type,
+        "parent_code": a.parent_code,
+        "is_active": a.is_active,
+        "erp_account_id": a.erp_account_id,
+        # Which chart the row belongs to: NULL = SHARED across every entity,
+        # otherwise the entity that owns it. Unlike every other business table
+        # this is not an incidental scoping column, it is the row's meaning
+        # (`models/gl_account`), and without it the two views the list serves
+        # are both ambiguous: in the CONSOLIDATED view the response is every
+        # entity's chart at once, where two subsidiaries legitimately hold
+        # their own "6000" and the rows are otherwise indistinguishable; with
+        # an entity selected it is `shared ∪ that entity's own`, where a shared
+        # row and an entity's override of it read identically while deciding
+        # whether an edit reaches one subsidiary or all of them. Additive: the
+        # picker callers read `id` / `code` / `name` and ignore it.
+        "entity_id": str(a.entity_id) if a.entity_id else None,
+    }
 
 
 def _duplicate_detail(code: str, entity_id: uuid.UUID | None) -> str:
@@ -108,8 +137,8 @@ async def list_gl_accounts(
 
     Auth-gated but role-open, like the `/purchase-orders` and `/goods-receipts`
     reads: every role codes or reads GL codes, and a clerk entering an invoice
-    has to be able to look one up. Only the two writes on this router
-    (`POST ""` and `POST /sync-erp`) are admin / ap_manager.
+    has to be able to look one up. Only the three writes on this router
+    (`POST ""`, `PATCH /{id}` and `POST /sync-erp`) are admin / ap_manager.
 
     It is a bounded reference collection and both of its consumers need every
     row, so it does not take the canonical `{items, total, page, page_size}`
@@ -137,31 +166,7 @@ async def list_gl_accounts(
     result = await db.execute(query)
     accounts = result.scalars().all()
 
-    return [
-        {
-            "id": str(a.id),
-            "code": a.code,
-            "name": a.name,
-            "account_type": a.account_type,
-            "parent_code": a.parent_code,
-            "is_active": a.is_active,
-            "erp_account_id": a.erp_account_id,
-            # Which chart the row belongs to: NULL = SHARED across every
-            # entity, otherwise the entity that owns it. Unlike every other
-            # business table this is not an incidental scoping column, it is
-            # the row's meaning (`models/gl_account`), and without it the two
-            # views this endpoint serves are both ambiguous: in the
-            # CONSOLIDATED view the response is every entity's chart at once,
-            # where two subsidiaries legitimately hold their own "6000" and
-            # the rows are otherwise indistinguishable; with an entity
-            # selected it is `shared ∪ that entity's own`, where a shared row
-            # and an entity's override of it read identically while deciding
-            # whether an edit reaches one subsidiary or all of them. Additive:
-            # the picker callers read `id` / `code` / `name` and ignore it.
-            "entity_id": str(a.entity_id) if a.entity_id else None,
-        }
-        for a in accounts
-    ]
+    return [_serialize(a) for a in accounts]
 
 
 @router.post("", status_code=201)
@@ -228,6 +233,212 @@ async def create_gl_account(
         "code": account.code,
         "name": account.name,
     }
+
+
+async def _parent_chain_would_cycle(
+    db: AsyncSession,
+    account: GLAccount,
+    parent_code: str,
+    org_id: uuid.UUID,
+) -> bool:
+    """Would setting ``account.parent_code = parent_code`` close a loop?
+
+    Cycles were UNREACHABLE before this router had a PATCH: ``parent_code`` was
+    fixed at create time, and a row can only point at an account that already
+    existed, so the graph was acyclic by construction. Editing the field is
+    what makes ``A → B → A`` expressible, which is why the check lives here and
+    not on create.
+
+    It matters because the parent chain is what a hierarchical chart-of-accounts
+    rollup walks. A loop is not a wrong number, it is a non-terminating walk.
+
+    Resolution happens within the chart the account itself lives in, because
+    that is the set in which its ``parent_code`` string is looked up (the same
+    effective-chart rule ``_code_in_effective_chart`` and
+    ``gl_recode._ActiveChart`` use) — ``shared ∪ its own entity`` for an
+    entity-owned row, and the **shared chart alone** for a shared one.
+    """
+    query = select(GLAccount.code, GLAccount.parent_code).where(GLAccount.organization_id == org_id)
+    if account.entity_id is None:
+        # A SHARED account is visible to every entity, so its parent must be too
+        # — resolve against the shared chart alone. `apply_entity_scope(None)` is
+        # the CONSOLIDATED view (every entity's chart at once), which is wrong
+        # here: two subsidiaries may each hold their own "6000", and collapsing
+        # them into one `code → parent` mapping would let an arbitrary entity's
+        # row decide whether a shared account's parent chain loops.
+        query = query.where(GLAccount.entity_id.is_(None))
+    else:
+        # Shared first, so that when a code exists in BOTH scopes the entity's
+        # own row overwrites it in the mapping below — the same override
+        # precedence `_sync_match_query` applies.
+        query = apply_entity_scope(
+            query, GLAccount, account.entity_id, include_shared=True
+        ).order_by(GLAccount.entity_id.is_(None).desc())
+
+    rows = (await db.execute(query)).all()
+    parent_of = {code: parent for code, parent in rows}
+    # Walk up from the PROPOSED parent. Reaching this account's own code means
+    # the edit closes a loop. Bounded by the chart size, so a pre-existing cycle
+    # in imported data cannot hang the request.
+    seen: set[str] = set()
+    cursor: str | None = parent_code
+    for _ in range(len(parent_of) + 1):
+        if cursor is None or cursor in seen:
+            return False
+        if cursor == account.code:
+            return True
+        seen.add(cursor)
+        cursor = parent_of.get(cursor)
+    return False
+
+
+@router.patch("/{account_id}")
+async def update_gl_account(
+    account_id: uuid.UUID,
+    body: GLAccountUpdate,
+    db: AsyncSession = Depends(get_tenant_db),
+    user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER)),
+    org_id: uuid.UUID = Depends(get_org_id),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
+):
+    """Correct or retire one GL account.
+
+    **Retire, never delete — and there is deliberately no DELETE on this
+    router.** A GL account cannot be hard-deleted without orphaning the money
+    trail, in two independent ways:
+
+    * ``Invoice.gl_account`` and ``InvoiceLineItem.gl_account`` record the GL as
+      a ``String(100)`` *code*, not a foreign key. Deleting the row removes the
+      account from the chart while every posted line keeps the string, so "which
+      account was this invoice coded to?" becomes unanswerable — and nothing
+      raises, because there is no constraint to violate.
+    * ``Expense``, ``RequisitionLine`` and ``CatalogItem`` DO hold a real
+      ``ForeignKey("gl_accounts.id")``, with no ``ON DELETE`` clause — so
+      Postgres defaults to ``NO ACTION`` and a delete against a referenced
+      account raises a ``ForeignKeyViolation``, i.e. a 500 rather than a clean
+      refusal.
+
+    So retirement is ``is_active = false``. The column already existed and the
+    list endpoint already filters on it (``active_only``, default true) — until
+    now nothing under ``app/`` ever wrote it, so an inactive row was reachable
+    only by direct SQL or an imported chart. A retired account disappears from
+    every picker and from ``gl_recode._ActiveChart``, so nothing new can be
+    coded to it, while every historical line still resolves.
+
+    **Which rows an editor may touch follows the create rule, not the read
+    rule.** The read is ``shared ∪ the selected entity``, but a shared row
+    (``entity_id IS NULL``) belongs to *every* entity: retiring one from inside
+    subsidiary B's context would silently pull the account out of subsidiary A's
+    chart too. So with an entity selected only that entity's OWN rows are
+    editable, and a shared row must be edited from the consolidated view — the
+    same view that created it (``get_entity_id``, not ``get_write_entity_id``).
+    The consolidated view may edit any row in the tenant, so a typo in a
+    subsidiary's chart is fixable without switching entity first.
+
+    **Gate: admin | ap_manager**, matching ``POST ""`` and ``POST /sync-erp`` on
+    this router. It is not a `require_permission` case: the granular SoD catalog
+    covers duties that can be *split* to stop one person completing a fraud
+    (approve vs. execute a payment, request vs. approve a bank change), and the
+    chart of accounts is not one of those — it cannot move money. It is also
+    strictly less reach than the sync an ap_manager already has, which rewrites
+    ``name`` and ``account_type`` across the whole chart in one call; gating the
+    single-row edit more tightly than the bulk one would be incoherent.
+    """
+    data = body.model_dump(exclude_unset=True)
+    if not data:
+        raise HTTPException(status_code=422, detail="No fields to update.")
+
+    account = (
+        await db.execute(
+            select(GLAccount).where(
+                GLAccount.id == account_id,
+                GLAccount.organization_id == org_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if account is None:
+        raise HTTPException(status_code=404, detail="GL account not found")
+
+    if entity_id is not None and account.entity_id != entity_id:
+        # Visible in this chart (shared rows are), but not this entity's to
+        # change. 403 rather than 404: the caller can already see the row in
+        # `GET ""`, so hiding it would only be confusing, and the message names
+        # the fix.
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "This account belongs to the shared chart or another entity. "
+                "Switch to the consolidated view to edit it."
+            ),
+        )
+
+    changed: dict[str, object] = {}
+
+    if "name" in data and data["name"] is not None:
+        new_name = data["name"].strip()
+        if not new_name:
+            raise HTTPException(status_code=422, detail="Name cannot be blank.")
+        if new_name != account.name:
+            changed["name"] = new_name
+            account.name = new_name
+
+    if "account_type" in data and data["account_type"] != account.account_type:
+        changed["account_type"] = data["account_type"]
+        account.account_type = data["account_type"]
+
+    if "parent_code" in data and data["parent_code"] != account.parent_code:
+        new_parent = data["parent_code"]
+        if new_parent is not None:
+            if new_parent == account.code:
+                raise HTTPException(status_code=422, detail="An account cannot be its own parent.")
+            if await _parent_chain_would_cycle(db, account, new_parent, org_id):
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"'{new_parent}' is below this account in the chart — that would "
+                    "make the parent chain a loop.",
+                )
+        changed["parent_code"] = new_parent
+        account.parent_code = new_parent
+
+    if "is_active" in data and data["is_active"] is not None:
+        if data["is_active"] != account.is_active:
+            changed["is_active"] = data["is_active"]
+            account.is_active = data["is_active"]
+
+    await db.flush()
+
+    if changed:
+        # The chart of accounts is what invoice lines are coded to, so an edit
+        # to it belongs on the append-only trail — and retiring an account
+        # changes what every picker and `_ActiveChart` will accept from here on,
+        # which is a status change on a regulated record. PII-free: code, name,
+        # type and active flag are org configuration.
+        #
+        # The action name distinguishes a retirement from a correction so an
+        # auditor can find every retirement without parsing `changed`; the full
+        # before-less `changed` map rides along either way.
+        if changed.get("is_active") is False:
+            action = "gl_account.deactivated"
+        elif changed.get("is_active") is True:
+            action = "gl_account.reactivated"
+        else:
+            action = "gl_account.updated"
+        await dispatch_audit(
+            db,
+            correlation_id=uuid.uuid4(),
+            organization_id=org_id,
+            actor_id=user.id,
+            action=action,
+            entity_type="gl_account",
+            entity_id=account.id,
+            details={
+                "code": account.code,
+                "changed": changed,
+                "entity_id": str(account.entity_id) if account.entity_id else None,
+            },
+        )
+
+    return _serialize(account)
 
 
 @router.post("/sync-erp")

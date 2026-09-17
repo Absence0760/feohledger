@@ -5,10 +5,13 @@ Intake captures a non-PO spend ask (software, services, hardware, other)
 converts it into a ``PurchaseRequisition``.
 
 Money convention (mirrors ``schemas/expense.py`` / ``schemas/contract.py``):
-request fields are typed ``Decimal | None`` for exactness on the way in;
-response/list fields serialise money as ``float | None`` (the router does
-``float(...)``). Never ``float`` on a column or in-memory total. The flexible
-questionnaire payload (``form_data``) is a free-form ``dict | None`` JSONB blob.
+money stays ``Decimal`` on both sides. Request fields are typed
+``Decimal | None`` for exactness on the way in; response/list fields are
+``OptionalMoneyAmount``, which holds a ``Decimal`` in Python and makes the
+JSON-number hop once, at serialisation time. The router never calls
+``float(...)`` on an amount, and nothing money-valued is ever typed ``float``.
+The flexible questionnaire payload (``form_data``) is a free-form
+``dict | None`` JSONB blob.
 """
 
 from datetime import date
@@ -18,6 +21,7 @@ from pydantic import BaseModel, Field
 
 from app.api.pagination import PageMeta
 from app.models.procurement import IntakeStatus, IntakeType
+from app.schemas.money import OptionalMoneyAmount
 
 # ---------------------------------------------------------------------------
 # Intake requests
@@ -74,7 +78,7 @@ class IntakeRequestResponse(BaseModel):
     request_type: str
     requester_user_id: str
     description: str | None
-    estimated_amount: float | None
+    estimated_amount: OptionalMoneyAmount
     currency: str
     vendor_name: str | None
     vendor_id: str | None

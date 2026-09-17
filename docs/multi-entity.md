@@ -211,7 +211,7 @@ Three primitives back this (all in `app/tenant.py`):
 | Goods receipts | `GET /goods-receipts` | (no API create path) |
 | Credit memos | `GET /credit-memos` | create → the vendor's entity |
 | Exceptions | `GET /exceptions`, `/exceptions/summary` | all 4 creation sites (warnings, extraction dup/fail, review reject) → the invoice's entity |
-| GL accounts | `GET /gl-accounts` — **shared (NULL) ∪ entity's own** (`include_shared=True`) | create + ERP sync use `get_entity_id`: consolidated view → NULL (shared), entity selected → entity-specific |
+| GL accounts | `GET /gl-accounts` — **shared (NULL) ∪ entity's own** (`include_shared=True`) | create + ERP sync use `get_entity_id`: consolidated view → NULL (shared), entity selected → entity-specific. **`PATCH /gl-accounts/{id}` follows the CREATE rule, not the read rule**: entity selected → only that entity's OWN rows (a shared row is visible in its chart but belongs to every entity, so editing it there would reach every subsidiary — 403, edit it from the consolidated view that created it); consolidated → any row. `entity_id` itself is not patchable — a move between charts is a create + deactivate |
 | Virtual cards | `GET /cards`, `/cards/dashboard` (active + spend) | generate → the invoice's entity |
 | Dashboard | `GET /dashboard` — every Invoice/Payment/Exception query | n/a |
 | CFO analytics (2b) | `GET /analytics/{cashflow_forecast,cashflow_whatif,cash_position,cfo,drill/spend_concentration,drill/dpo,export/{report}}` + `POST /analytics/forecast_variance` — every Invoice/Payment/PaymentSchedule(via Invoice)/PurchaseOrder/Exception query | n/a |
