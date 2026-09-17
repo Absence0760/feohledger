@@ -7,15 +7,27 @@
 /// `params` beside the English `message`. This maps that pair onto an ARB key
 /// and a set of locale-formatted parameters.
 ///
-/// Two properties make it safe to render:
+/// Three properties make it safe to render, and they are the web module's
+/// three:
 ///
 /// * **Unknown or absent code → `null`**, and the caller renders
 ///   `warning.message`, the backend's own sentence. Every warning persisted
 ///   before the catalogue existed carries no code at all (`refresh_warnings`
 ///   re-derives one on the invoice's next write, and nothing backfills), so
 ///   the fallback is the NORMAL path for an untouched row, not an edge case.
-/// * **A known code with a missing or malformed parameter → `null` too.** A
-///   half-filled translated sentence is worse than the server's complete one.
+/// * **A known code with a MISSING parameter → `null` too.** The sentence
+///   would render a bare `{poNumber}` at a reviewer; the server's complete
+///   English one is strictly better than a half-filled translated one.
+/// * **A parameter that is present but not the shape its kind expects renders
+///   VERBATIM**, inside the localized sentence — it is not a fallback trigger.
+///   The value is the server's own characters either way, so the choice is
+///   only which language surrounds them, and the fallback path would print the
+///   identical fragment inside the English sentence. It is the same rule
+///   `formatMoneyString` and `utils/numbers.dart` already follow for a figure
+///   they cannot format: the server's own text beats a blank.
+///   **The one exception is a plural selector**, which must be an integer
+///   because it chooses an ARM of the message rather than filling a slot —
+///   `_count` returns `null` and the whole finding falls back.
 ///
 /// **The code→key map is not hand-authored.** It is transcribed from
 /// `frontend/src/lib/api/invoiceWarningMessages.generated.ts`, which

@@ -193,8 +193,43 @@ void main() {
     });
 
     test('a plural parameter that is not an integer falls back', () {
+      // A selector chooses an ARM of the message rather than filling a slot,
+      // so there is no sentence to render at all without it.
       final w = warning('rush_payment', params: {'days': 'soon'});
       expect(localizeInvoiceWarning(en, w), isNull);
+    });
+
+    test('a non-selector parameter of the wrong shape renders verbatim', () {
+      // NOT a fallback trigger, deliberately: the value is the server's own
+      // characters either way, so the only question is which language
+      // surrounds them — and the English fallback would print the identical
+      // fragment. Same rule `formatMoneyString` and `utils/numbers.dart`
+      // follow for a figure they cannot format. Matches the web module.
+      setActiveFormatLocale('en');
+      expect(
+        invoiceWarningText(
+            en,
+            warning('duplicate_similar_cross_entity',
+                params: {'similarity': 'n/a'})),
+        'Potential duplicate: n/a match to a near-identical invoice '
+        'under another entity',
+      );
+      expect(
+        invoiceWarningText(
+            en,
+            warning('round_amount',
+                params: {'amount': 'lots', 'currency': 'EUR'})),
+        'Round amount: lots',
+      );
+      expect(
+        invoiceWarningText(
+            en,
+            warning('self_correction_date_ordering', params: {
+              'dueDate': 'yesterday',
+              'invoiceDate': '2026-03-04',
+            })),
+        'Due date (yesterday) is before invoice date (Mar 4, 2026).',
+      );
     });
   });
 
