@@ -5,8 +5,8 @@ automation can't fully assert (announcement quality, reading order as heard,
 focus feedback). Run it before a release that touches the core flow, navigation,
 modals, or forms. The **programmatic** semantics this pass depends on (accessible
 names, landmarks, heading levels, focus trap/restore, no positive tabindex,
-reflow) are locked by `frontend/tests-e2e/a11y/axe.spec.ts` +
-`screen-reader.spec.ts` and `mobile/test/a11y/` — this checklist covers the
+reflow) are locked by `frontend/tests-e2e/a11y/axe.spec.ts`,
+`screen-reader.spec.ts`, `reflow.spec.ts` and `mobile/test/a11y/` — this checklist covers the
 human-judgement layer on top.
 
 ## Tooling

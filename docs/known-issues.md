@@ -5,11 +5,13 @@ names the root cause, the evidence, blast radius, and a recommended fix
 approach — this is a staging area for real problems, not a place to let them
 go stale. See root `CLAUDE.md` guard rail 6 (no dangling deferred findings).
 
-**Four entries are open** — the `/organization` 320px reflow defect and the
-three local-e2e entries at the bottom. The header previously said "one" while
-those three e2e entries sat beneath it; a known-issues file that under-reports
-itself is the failure this note already warned about once. The other
-thirteen are `~~struck-through~~` resolved stubs, kept because the *diagnosis* is
+**Three entries are open** — the three local-e2e entries at the bottom. The
+header once said "one" while those three sat beneath it; a known-issues file
+that under-reports itself is the failure this note already warned about once.
+The `/organization` 320px reflow defect was **fixed on 2026-09-17** (issue
+#432), along with six more routes that failed the same criterion and had no
+entry at all because nothing measured them. The other
+fourteen are `~~struck-through~~` resolved stubs, kept because the *diagnosis* is
 the expensive part and is worth not re-deriving. Add a new entry at the top when
 a defect is diagnosed but can't be fixed in the same session.
 
@@ -325,14 +327,35 @@ dead. The per-counterparty business-date question is left open and argued in
 §185; the wider UTC semantics still err toward paying face value, which is the
 safe direction.
 
-## Organization settings overflows horizontally at 320px (WCAG 1.4.10)
+## ~~Organization settings overflows horizontally at 320px (WCAG 1.4.10)~~ — FIXED 2026-09-17
 
-**Found:** 2026-09-15, while extending the 320px reflow guard to a route that
-renders `SectionTabs` (`docs/decisions.md` §174).
+**Resolved.** `/organization` reflows at 320px, and so does every other route in
+the app: the guard that missed this one now enumerates `frontend/src/routes`
+off disk instead of naming five paths by hand
+(`frontend/tests-e2e/a11y/reflow.spec.ts`, one test per route). Issue #432 is
+the write-up.
 
-`/organization` scrolls the document sideways by **137px** at a 320px viewport,
-independently of the section tab bar. Measured with the tab bar's own
-measurement row excluded, after the page's content has loaded:
+The fix on this page was three rules, all root-cause rather than masking: the
+`.sync-item` rows and the `.section-footer` button rows gained `flex-wrap: wrap`
+(the same rule `.erp-test-row` had already been given), and `.btn-outline` lost
+its `white-space: nowrap`. That last one is the part wrapping alone could not
+have fixed — "Manage on Chart of Accounts page" is a 265px label, wider than a
+320px viewport's whole content column, so the link overflowed on its own line
+too. Shrink-to-fit keeps it on one line at every width where it fits, so
+nothing changes above roughly 460px.
+
+Widening the guard immediately turned up the same class of defect on six more
+routes, all fixed in the same change: `/adaptive` (359px) and `/expenses`
+(206px) — a tab strip with no `flex-wrap`, the shared `ui/Tabs.svelte` and a
+local copy of it; `/profile` (131px) — a two-column `dl` grid whose value
+column held an unbreakable email address; `/cfo` (81px) — two hand-rolled
+`.cf-table`s with no `overflow-x` scroller around them, unlike the shared
+`DataTable`; `/admin/retention` (9px) — a `1fr auto` grid where neither track
+could shrink; `/reports` (7px) — a `<select>` sized to its widest option.
+
+*The defect.* `/organization` scrolled the document sideways by **137px** at a
+320px viewport, independently of the section tab bar. Measured with the tab
+bar's own measurement row excluded, after the page's content had loaded:
 
 | element | left | right | width |
 |---|---|---|---|
@@ -343,22 +366,16 @@ measurement row excluded, after the page's content has loaded:
 
 Same defect class as the tab bar: flex rows whose children are wide and
 `white-space: nowrap`, in a container with no `flex-wrap`, so the row cannot
-shrink and pushes the page instead. `.erp-test-row` was fixed in that change
-(it now wraps); the `.btn-outline` rows were left, because they are a different
-set of containers on the same page and fixing them properly is a responsive
-pass over the whole settings page rather than a one-line rule.
+shrink and pushes the page instead. `.erp-test-row` was fixed when the tab bar
+was; the `.btn-outline` rows were left, because they are a different set of
+containers on the same page and fixing them properly is a responsive pass over
+the whole settings page rather than a one-line rule.
 
-**Blast radius:** the settings page only, and only below roughly 460px. No data
-is wrong and nothing is unreachable — the page scrolls — but it fails WCAG
-1.4.10 Reflow, which this project claims conformance to
-(`docs/accessibility.md`), so it is a compliance defect rather than a cosmetic
-one.
-
-**Fix approach:** give each offending row `flex-wrap: wrap` (or make the
-`.btn-outline` group a wrapping grid) and re-add `/organization` to the reflow
-loop in `tests-e2e/a11y/screen-reader.spec.ts`, which is deliberately scoped to
-`/contracts` today and carries a comment pointing here.
-
+**Blast radius (while it stood):** the settings page only, and only below
+roughly 460px. No data was wrong and nothing was unreachable — the page
+scrolled — but it failed WCAG 1.4.10 Reflow, which this project claims
+conformance to (`docs/accessibility.md`), so it was a compliance defect rather
+than a cosmetic one.
 
 ## ~~A named-but-unregistered CARD provider still falls back to `mock`~~ — FIXED 2026-08-21
 

@@ -242,10 +242,10 @@ a definition as JSON). All wrap the shared `ui/Modal.svelte` and call the
     `aria-hidden` is reachable by keyboard while hidden from assistive tech.
   The **active** tab is always pulled into the visible row, so a section never
   renders with nothing selected. Guards: `tests-e2e/a11y/section-tabs.spec.ts`
-  (overflow, the menu, Escape/focus return) and the 320px reflow case in
-  `tests-e2e/a11y/screen-reader.spec.ts`, which now visits two GROUPED routes —
-  every path it checked before was a top-level link, where this bar never
-  mounts at all.
+  (overflow, the menu, Escape/focus return) and `tests-e2e/a11y/reflow.spec.ts`,
+  which walks every route under `src/routes` — so every grouped route renders
+  this bar under the 320px measurement, rather than the two a hand-kept list
+  happened to name.
 - `NotificationBell.svelte` — bell + unread badge in the sidebar header with a
   recent-notifications popover (replaced the old Notifications nav row; the full
   `/notifications` page is the "View all" target). Closes on Esc / backdrop.

@@ -160,14 +160,33 @@ CI plus two kinds of human review:
    control rather than around the invisible target.
 5. **Navigability tests (web).** `frontend/tests-e2e/a11y/screen-reader.spec.ts`
    asserts the structural semantics a screen-reader/keyboard user relies on:
-   skip link + named landmarks + a single `<h1>`, no positive tabindex, 320px
-   reflow with no horizontal scroll, and dialog focus-trap + focus-restore on
-   Esc. `workflow-builder.spec.ts` covers the keyboard step-reorder path.
-6. **Flutter semantics tests (mobile).** The mobile app uses Flutter's
+   skip link + named landmarks + a single `<h1>`, no positive tabindex, and
+   dialog focus-trap + focus-restore on Esc. `workflow-builder.spec.ts` covers
+   the keyboard step-reorder path.
+6. **Automated (320px reflow scan, every CI run).**
+   `frontend/tests-e2e/a11y/reflow.spec.ts` sets a 320px viewport — the width
+   SC 1.4.10 names — and asserts that no page scrolls the document sideways
+   (`documentElement.scrollWidth - clientWidth <= 1`). Content that genuinely
+   cannot reflow scrolls **inside its own container**, which does not count
+   toward that measurement; the page does not.
+   **It enumerates `frontend/src/routes` off disk rather than naming paths**,
+   so a route is covered the day it lands. That is the whole point of the file:
+   the guard previously named five paths by hand (`/`, `/invoices`, `/vendors`,
+   `/payments`, `/contracts`) and was green while seven other routes failed the
+   same criterion — `/organization` (137px, a diagnosed entry in
+   `known-issues.md` that nothing re-tested), `/adaptive` (359px), `/expenses`
+   (206px), `/profile` (131px), `/cfo` (81px), `/admin/retention` (9px) and
+   `/reports` (7px). All seven are fixed; issue #432 is the write-up. The only
+   entries it skips are routes outside the signed-in app shell (the legal
+   documents, the pre-auth `AuthShell` pages and the supplier portal), each
+   listed with its reason in the spec, and the list is itself asserted to still
+   match real routes. **Never add an app route to that list to turn a red run
+   green** — fix the layout.
+7. **Flutter semantics tests (mobile).** The mobile app uses Flutter's
    `Semantics` tree and `meetsGuideline` widget tests (`mobile/test/a11y/`) to
    assert that interactive widgets expose labels, roles, and state to TalkBack /
    VoiceOver, plus tap-target size and contrast.
-7. **Manual screen-reader passes.** Keyboard-only and screen-reader walkthroughs
+8. **Manual screen-reader passes.** Keyboard-only and screen-reader walkthroughs
    of the core flows — **VoiceOver** (macOS Safari + iOS), **NVDA** (Windows
    Firefox/Chrome), **TalkBack** (Android) — run from the repeatable
    [screen-reader checklist](./accessibility-screen-reader-checklist.md) before a
