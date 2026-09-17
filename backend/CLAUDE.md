@@ -903,6 +903,17 @@ AWS_PROFILE=feohledger sops feohledger/prod.sops.yaml   # decrypts → $EDITOR �
   snippets are illustrative (elided `...` bodies, comment alignment used for
   emphasis) rather than runnable. Lint rules are unaffected.
 - **Schemas** — Pydantic v2 models in `app/schemas/` for all request/response types.
+- **Money leaves Python as a `Decimal`, never a `float()`.** On a response field
+  use `schemas/money.MoneyAmount` / `OptionalMoneyAmount`; in a handler that
+  returns a bare `dict` use `schemas/money.json_money`. Both emit the same JSON
+  number a bare `float(...)` did, so neither moves the wire shape — the point is
+  that the Python value stays exact, and that the one legitimate hop is
+  greppable. A money-named field annotated `float` is the same defect written
+  differently (pydantic fills it from a `Decimal` silently) and fails the same
+  guard: `tests/test_money_serialization_exact.py`. Percentages are **not** money
+  — they have their own pair in `schemas/percent.py`. Inbound money that decides
+  where money goes uses `ExactMoneyInput` (a JSON number is already a float by
+  the time pydantic sees it).
 - **No dotenv in Lambda paths** — `main.py` imports dotenv for local dev; Lambda entry points must not.
 - **Tenant isolation** — always resolve tenant via dependency injection (`get_tenant_db()`), never hardcode DB names.
 - **Row locking** — use `get_invoice_for_update()` for any status transition to prevent race conditions.
