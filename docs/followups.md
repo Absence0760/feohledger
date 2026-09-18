@@ -50,10 +50,21 @@ section carried its own `decisions.md` § reference, so nothing was lost by
 deleting it; that cross-reference is what makes the pruning safe, and writing
 one is what earns a future entry the right to be deleted.
 
-**52 open: 37 (c) · 9 (a) · 6 (b)** — re-derived from the file, never carried
+**61 open: 46 (c) · 9 (a) · 6 (b)** — re-derived from the file, never carried
 forward. The section heading is authoritative; where an entry also carries a
 `(c)`/`(a)`/`(b)` marker, the two agree.
 `grep -c '^- \[ \]' docs/followups.md`.
+
+That line said `52 open: 37 (c)` while the file held 59, because "re-derived,
+never carried forward" describes an intention and nothing enforced it: the seven
+`/polish-ui` entries were appended without it being touched. Two shapes made the
+drift invisible and are worth not repeating — an entry written as prose under a
+heading with **no `- [ ]` checkbox** is an open item the count command cannot
+see, and an entry whose `(c)`/`(a)`/`(b)` marker disagrees with the section it
+physically sits under (the shard-baseline entry was labelled `(c)` beneath
+`## (b)`) breaks the "section heading is authoritative" rule that makes one
+count possible. Re-derive with the command above, per section, and check the
+three sum to the total.
 
 Round 26 closed eleven and opened nine, so the file shrank by two. **Three of
 the eleven were wrong about their own code**, and twice in the direction that
@@ -1047,6 +1058,54 @@ backend parameter does not.
       **Trigger:** the next time anyone runs the credit-memos e2e locally — or sooner, since
       the cost of a standing local red is paid by every contributor.
 
+### Surfaced by widening the backend shard matrix (2026-09-17, issue #444)
+
+- [ ] **(c) The `pytest-split` baseline is stale, and regenerating it is the half
+      that is still unbuilt.** `backend/.test_durations` has exactly one commit in
+      its history (`aa3d47bd`, 2026-09-04): 8,143 entries against 10,123 collected
+      tests, so **20.1% of the suite is partitioned at the *mean* test duration**
+      rather than its own, 58 entries name tests that no longer exist, and its
+      absolute figures (1,628s) understate the real ~60 min of CI pytest by ~2.2x.
+      **The drift now has a voice** — `scripts/check_test_durations.py`
+      (`pnpm check:test-durations`) fails past a ratcheted ceiling and runs in CI's
+      `Backend lint` job, which is the "cheap guard" half of this entry's original
+      durable fix. What is left is the baseline itself.
+      **This is balance, not breakage.** Two independent 8-shard runs measured
+      7m58s–10m36s, a **1.33x spread** with ~3.8x headroom under the 40-minute cap;
+      the 4-shard layout it replaced was **1.12x** (16m16s–18m17s) and failed only
+      because ~17 min against a 40-minute cap leaves nothing for a slow runner. The
+      one 16m46s outlier on #447's own run was a degraded runner, not slice
+      composition — every other shard on that run matches main within ~40s.
+      Coverage also overstates the risk on its own: the uncovered tests are
+      overwhelmingly cheap parametrized meta-tests (`test_migration_model_index_parity.py`
+      alone is 229 of them), for which the ~0.2s mean is about right. The dangerous
+      shape is a contiguous block of *slow* tests going uncovered, because
+      pytest-split cuts contiguous slices — that is what put the realdb hot zone
+      (`test_e*`–`test_i*`) on a single shard.
+      **Durable fix:** regenerate with `pytest --store-durations`, ideally on a CI
+      runner rather than a laptop (balance is only meaningful against the hardware
+      that runs it) — a `workflow_dispatch` job that stores durations and uploads
+      the file. Then lower `MAX_MISSING_FRACTION` to match. **Never raise it.**
+      **Trigger:** the guard firing, or a shard's median approaching ~15 min (where
+      the documented 3x runner headroom runs out under a 40-minute cap).
+
+- [ ] **(c) A genuinely hung backend test produces zero diagnostic output.** There is
+      no `pytest-timeout`, no `faulthandler` configuration and no `-p no:randomly` in
+      the backend suite — `[tool.pytest.ini_options]` in `backend/pyproject.toml`
+      carries only `asyncio_mode`, and there is no `pytest.ini`/`setup.cfg`/`tox.ini`.
+      So `timeout-minutes: 40` in `ci.yml` is the only backstop, and when it fires the
+      runner reaps the process: the log ends at `Terminate orphan process: pid (…)
+      (pytest)` with no traceback and no indication of which test was executing.
+      This is **not** the #444 symptom — that was a slow runner, and its author
+      retracted the hang reading — but it is why that run cost two days to diagnose,
+      and PR #366 did hang for real (still `in_progress` at 40 min).
+      **Durable fix:** add `pytest-timeout` and set a per-test ceiling generous enough
+      never to fire on the slowest legitimate `realdb` test (the cap is a debugging
+      aid, not a performance gate — a too-tight timeout becomes exactly the
+      masking-by-retry guard rail 4 forbids), plus `faulthandler_timeout` so a wedged
+      test dumps every thread's stack before it dies.
+      **Trigger:** the next shard that is cancelled rather than failed.
+
 ## (a) Blocked on external credentials, accounts, or hardware
 
 Categories (a) and (b) are operator work, not engineering work. Both are
@@ -1160,15 +1219,24 @@ as oversights.
       the set. The liability cap figure, the arbitration-vs-courts call, and the
       SCC module and governing-law selections in the DPA are the ones that
       genuinely need advice rather than a decision.
-      **Corrected 2026-09-17 — the counsel questions are not where this entry
-      says.** It points at `reviews/saas-legal-review-legal-pages.md` and
-      `reviews/us-legal-review-legal-pages.md`. `/reviews/*` is gitignored
-      (`.gitignore:211`) so neither is in the repo for anyone but their author,
-      the second was never written at all, and neither exists on the working
-      machine today — the directory holds only its `README.md`. Whoever picks
-      this up re-derives the questions from the documents themselves. If those
-      questions are worth citing, they belong in a tracked file; a pointer into
-      an ignored directory is a pointer to nothing.
+      **Corrected 2026-09-17, and the correction was itself half wrong — see
+      below.** This entry and #446 §4 cite `reviews/saas-legal-review-legal-pages.md`
+      and `reviews/us-legal-review-legal-pages.md`. `/reviews/*` is gitignored
+      (`.gitignore:211`), so neither is in the repo for anyone but their author,
+      and the **us-legal one was never written at all** — #428's own pointer,
+      which names only the saas file, is the accurate one.
+      **Re-corrected 2026-09-18.** The first correction went on to claim neither
+      file "exists on the working machine today — the directory holds only its
+      `README.md`". That is false in the primary checkout, where `reviews/` holds
+      43 files including the saas review (72 KB, written 2026-09-15 against HEAD
+      `4a8048fb`). It was written from inside a worktree, where `/reviews/*`
+      being gitignored and `.worktreeinclude` copying only the `.env` overrides
+      means every worktree sees exactly one file there — a worktree artifact
+      generalised to the machine. Worth remembering as a shape: **"I looked and
+      it wasn't there" is not portable evidence from inside a worktree.**
+      The load-bearing point survives both corrections: a pointer into an
+      ignored directory is a pointer to nothing for anyone but its author, so
+      questions worth citing belong in a tracked file.
       **Trigger:** before the first customer who is not the operator signs up.
       Ref: [decisions.md](decisions.md) §175.
 
@@ -1236,35 +1304,3 @@ from that work is the one entry below.
       `positive_pay_files_expired`. **Trigger:** the first deployment that
       generates a Positive Pay file, and the SOC 2 records-management evidence
       request either way.
-
-
-### The backend shard baseline drifts silently as the suite grows (2026-09-17)
-
-**Category (c) — sized and unstarted.** `backend/.test_durations`, the baseline
-`pytest-split` partitions the backend shards by, was last regenerated on
-2026-09-04 (commit `aa3d47bd`). It holds 8,143 entries against ~10,100 collected
-tests, so roughly a fifth of the suite is partitioned at the *mean* test
-duration rather than its own — and its absolute figures (1,628s) now understate
-the real ~60 min of CI pytest by ~2.2x.
-
-This is not currently breaking anything: the 8-way split measured against real
-CI per-file timings lands at 5.9–8.7 min per shard, well inside the 40-minute
-cap even on the ~3.2x-degraded runner that cancelled PRs #441 and #445. The
-mis-weighted fifth costs about 1.3 min on the worst shard, no more.
-
-The problem is that nothing *reports* the drift. The baseline decays with every
-test added, the split quietly loses balance, and the first signal is a shard
-being cancelled at the cap — which is exactly how the 4-shard layout failed,
-four runs in two days, before it was widened to 8.
-
-**Durable fix:** regenerate the baseline (`pytest --store-durations` against a
-full local stack, ~60 min) and give the decay a voice — either a scheduled
-`workflow_dispatch` job that stores durations on a CI runner and uploads the
-file, or a cheap guard that fails when the fraction of collected tests missing
-from `.test_durations` crosses a threshold. The measured-on-CI variant is worth
-more than a laptop-measured one, since balance is only meaningful against the
-hardware that runs it.
-
-**Trigger:** the next time a backend shard's median approaches ~15 min (the
-point at which the documented 3x runner headroom runs out under a 40-minute
-cap), or any change that adds a large block of tests at once.

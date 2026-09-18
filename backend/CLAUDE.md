@@ -314,6 +314,18 @@ shard count means editing the `matrix.shard` list, the `--splits N` flag, and
 both `name:` occurrences (the job's `shard N/8` and the test step's) together in
 `ci.yml`.
 
+**The baseline's decay is guarded, not trusted.** Nobody regenerates it as a
+matter of course — it has one commit in its whole history — so
+`scripts/check_test_durations.py` (`pnpm check:test-durations`, run in CI's
+`Backend lint` job) fails when the fraction of collected tests carrying no
+duration entry passes `MAX_MISSING_FRACTION`. A test the baseline has never seen
+is split at the *mean*, so the partition stays exhaustive while quietly ceasing
+to be weighted by anything real; the guard is what makes that visible before a
+shard is reaped. It lives in the lint job because collection needs no services
+(~15s). **That ceiling is a ratchet — only ever lower it.** Raising it to get
+green is the one change the guard exists to prevent; the fix is
+`pytest --store-durations`.
+
 ## Test databases (the `realdb` harness)
 
 Most of the suite is mock-based. Tests that request the `realdb` fixture
