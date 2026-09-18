@@ -31,11 +31,20 @@ each step.
   - [ ] Webhook live
   - [ ] First test charge works
 - [ ] **Payment rails** — `payment-rails-onboarding.md` _(start early — 4–8 week lead time)_
-  - [ ] MT intro call done
+  - [ ] MT intro call done — **the only box here that is startable today**;
+        everything below it needs formation docs, an EIN and beneficial owners,
+        so this section and **Legal foundation** above are one serial chain, not
+        two parallel ones. Book the call anyway: the KYB packet tells you what
+        the incorporation has to produce
   - [ ] KYB submitted
-  - [ ] Partner bank account open
+  - [ ] Partner bank account open — confirm the bank is *currently* accepting
+        fintech programs before investing weeks in its KYB
   - [ ] NACHA origination signed
   - [ ] First real payment executed
+  - Carried in the runbook, not mirrored here: provider choice (a direct bank
+    like Column/Increase collapses MT's two-step), Third-Party Sender
+    registration, the annual Rules Compliance Audit, ACH fraud monitoring
+    (mandatory since 2026-06-22) and a live sanctions key
 - [ ] **SOC 2 kickoff** — `soc2-vendor.md`
   - [ ] Vendor signed (Vanta / Drata)
   - [ ] Integrations connected
