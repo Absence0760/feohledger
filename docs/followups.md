@@ -50,7 +50,7 @@ section carried its own `decisions.md` § reference, so nothing was lost by
 deleting it; that cross-reference is what makes the pruning safe, and writing
 one is what earns a future entry the right to be deleted.
 
-**60 open: 45 (c) · 9 (a) · 6 (b)** — re-derived from the file, never carried
+**61 open: 46 (c) · 9 (a) · 6 (b)** — re-derived from the file, never carried
 forward. The section heading is authoritative; where an entry also carries a
 `(c)`/`(a)`/`(b)` marker, the two agree.
 `grep -c '^- \[ \]' docs/followups.md`.
@@ -1088,6 +1088,23 @@ backend parameter does not.
       the file. Then lower `MAX_MISSING_FRACTION` to match. **Never raise it.**
       **Trigger:** the guard firing, or a shard's median approaching ~15 min (where
       the documented 3x runner headroom runs out under a 40-minute cap).
+
+- [ ] **(c) A genuinely hung backend test produces zero diagnostic output.** There is
+      no `pytest-timeout`, no `faulthandler` configuration and no `-p no:randomly` in
+      the backend suite — `[tool.pytest.ini_options]` in `backend/pyproject.toml`
+      carries only `asyncio_mode`, and there is no `pytest.ini`/`setup.cfg`/`tox.ini`.
+      So `timeout-minutes: 40` in `ci.yml` is the only backstop, and when it fires the
+      runner reaps the process: the log ends at `Terminate orphan process: pid (…)
+      (pytest)` with no traceback and no indication of which test was executing.
+      This is **not** the #444 symptom — that was a slow runner, and its author
+      retracted the hang reading — but it is why that run cost two days to diagnose,
+      and PR #366 did hang for real (still `in_progress` at 40 min).
+      **Durable fix:** add `pytest-timeout` and set a per-test ceiling generous enough
+      never to fire on the slowest legitimate `realdb` test (the cap is a debugging
+      aid, not a performance gate — a too-tight timeout becomes exactly the
+      masking-by-retry guard rail 4 forbids), plus `faulthandler_timeout` so a wedged
+      test dumps every thread's stack before it dies.
+      **Trigger:** the next shard that is cancelled rather than failed.
 
 ## (a) Blocked on external credentials, accounts, or hardware
 
