@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import { page as pageStore } from '$app/stores';
 	import { replaceState } from '$app/navigation';
 	import { api } from '$lib/api';
@@ -24,7 +25,8 @@
 	import type { ExceptionSeverity } from '$lib/types/exception';
 	import AgentDashboard from '$lib/components/exceptions/AgentDashboard.svelte';
 	import { formatMoney } from '$lib/utils/money';
-	import { timeAgo } from '$lib/utils/time';
+	import { formatDate, timeAgo } from '$lib/utils/time';
+	import { getActiveFormatLocale } from '$lib/i18n/formatLocale';
 	import { pruneSelection } from '$lib/utils/selection';
 	import { orgCurrency } from '$lib/stores/orgSettings.svelte';
 	import { m } from '$lib/i18n/store.svelte';
@@ -80,8 +82,23 @@
 	let loading = $state(true);
 	let errored = $state(false);
 	let summary = $state<Summary | null>(null);
-	let statusFilter = $state('open');
-	let typeFilter = $state<string | null>(null);
+	// Queue filters round-trip through the query string (`?status=`, `?type=`),
+	// the convention every other list route follows. They used to live only in
+	// `$state`, so reload / back / a pasted link all dropped the operator back
+	// on the default Open view — on a triage queue that is the difference
+	// between "here is the fraud flag I am asking you to look at" and "here is
+	// the exceptions page, go find it". `syncUrl()` below is the single writer.
+	//
+	// Clamped to the keys the chips render: an unrecognised `?status=` would
+	// leave every chip unpressed over an empty table, so the page would show a
+	// queue state that no control on it can explain or undo.
+	const STATUS_KEYS = ['all', 'open', 'escalated', 'resolved', 'dismissed'];
+	let statusFilter = $state(
+		STATUS_KEYS.includes($pageStore.url.searchParams.get('status') ?? '')
+			? ($pageStore.url.searchParams.get('status') as string)
+			: 'open'
+	);
+	let typeFilter = $state<string | null>($pageStore.url.searchParams.get('type'));
 	let selectedIds = $state<Set<string>>(new Set());
 	// True once "Select all N matching" (below) has resolved the WHOLE
 	// filtered set of open/escalated exceptions — not just the loaded page —
@@ -101,11 +118,31 @@
 		$pageStore.url.searchParams.get('view') === 'agents' ? 'agents' : 'queue'
 	);
 
-	function syncViewToUrl(key: string) {
-		const url = new URL($pageStore.url);
-		if (key === 'agents') url.searchParams.set('view', 'agents');
-		else url.searchParams.delete('view');
-		replaceState(`${url.pathname}${url.search}`, {});
+	/**
+	 * The ONE writer of this route's query string — `view`, `status`, `type`.
+	 *
+	 * It must be the only one, for the reason `routes/invoices/+page.svelte`
+	 * documents at length: SvelteKit's shallow `replaceState` writes `history`
+	 * but never `$page.url`, so a second writer rebuilding from `$page.url`
+	 * reads a frozen snapshot and deterministically drops whatever the first
+	 * writer added. The previous `syncViewToUrl` mutated a copy of `$page.url`,
+	 * which worked only while `view` was the sole param on the route.
+	 *
+	 * Built from scratch rather than by mutation so "one owner" stays
+	 * checkable: a param not listed here does not survive.
+	 *
+	 * Every read is untracked — this is a writer called from the filter
+	 * `$effect`, and a tracked read would re-trigger the effect that calls it.
+	 */
+	function syncUrl() {
+		untrack(() => {
+			const params = new URLSearchParams();
+			if (view === 'agents') params.set('view', 'agents');
+			if (statusFilter !== 'open') params.set('status', statusFilter);
+			if (typeFilter) params.set('type', typeFilter);
+			const qs = params.toString();
+			replaceState(`${$pageStore.url.pathname}${qs ? `?${qs}` : ''}`, {});
+		});
 	}
 
 	let resolveTarget = $state<ExceptionItem | null>(null); // single-row resolve modal
@@ -218,12 +255,20 @@
 		// synchronously, before `loadExceptions()` — see the identical note on
 		// the invoices list page.
 		selectedAllMatching = false;
+		syncUrl();
 		loadExceptions();
+	});
+
+	// The type-chip tallies are scoped to the STATUS the queue is showing, so
+	// they re-read when the status chip moves. Separate from the list effect:
+	// the type chip narrows the list without changing what the tallies count.
+	$effect(() => {
+		statusFilter;
+		loadSummary();
 	});
 
 	$effect(() => {
 		orgCurrency.ensureLoaded();
-		loadSummary();
 	});
 
 	async function loadExceptions(opts: { append?: boolean; nextPage?: number } = {}) {
@@ -292,7 +337,15 @@
 	async function loadSummary() {
 		const token = summarySequence.start();
 		try {
-			const data = await api.get<Summary>('/api/exceptions/summary');
+			// `status` is what makes `by_type` describe the rows on screen. The
+			// endpoint has taken it from the day it was written — see its
+			// docstring — and this page, its only caller, never sent it: so the
+			// type chips carried OPEN-only tallies while the operator was looking
+			// at Escalated / Resolved / All (a chip reading `Duplicate Invoice 1`
+			// above zero matching rows), and a type occurring only among resolved
+			// exceptions got no chip at all and so could not be filtered to.
+			const params = new URLSearchParams({ status: untrack(() => statusFilter) });
+			const data = await api.get<Summary>(`/api/exceptions/summary?${params}`);
 			// The chip counts drive the filter UI — an older summary landing
 			// last would relabel the chips with pre-resolve tallies.
 			if (!summarySequence.canCommit(token)) return;
@@ -456,13 +509,42 @@
 		return formatMoney(n, { currency: currency ?? undefined });
 	}
 
+	/**
+	 * The due cell, in the reader's own language.
+	 *
+	 * It used to compose English by hand — `3h overdue`, `in 2d` — inside a page
+	 * whose every other data-driven cell is translated, so five of the six
+	 * shipped locales read a German type badge beside an English deadline. The
+	 * buckets are unchanged (hours under a day, then days); only the rendering
+	 * moved to `Intl.RelativeTimeFormat` on the active in-app locale.
+	 *
+	 * `Intl` rather than catalogue keys for the same reason `utils/time.ts`
+	 * gives: it brings every locale's plural rules with it and needs no new
+	 * message keys to stay correct. A past deadline formats as the negative of
+	 * the same unit ("3 hr. ago"), which is what overdue means — the `.overdue`
+	 * colour and weight carry the urgency on top.
+	 */
+	/** Date + time parts for the exact-instant tooltips on Age / Due. */
+	const DATETIME_OPTS: Intl.DateTimeFormatOptions = {
+		month: 'short',
+		day: 'numeric',
+		year: 'numeric',
+		hour: 'numeric',
+		minute: '2-digit'
+	};
+
 	function dueLabel(exc: ExceptionItem): string {
 		if (!exc.due_at) return '—';
-		const diff = new Date(exc.due_at).getTime() - Date.now();
-		const hours = Math.round(diff / 3600000);
-		if (hours <= 0) return `${Math.abs(hours)}h overdue`;
-		if (hours < 24) return `in ${hours}h`;
-		return `in ${Math.round(hours / 24)}d`;
+		const due = new Date(exc.due_at).getTime();
+		if (Number.isNaN(due)) return '—';
+		const hours = Math.round((due - Date.now()) / 3600000);
+		const fmt = new Intl.RelativeTimeFormat(getActiveFormatLocale(), {
+			numeric: 'always',
+			style: 'short'
+		});
+		return Math.abs(hours) < 24
+			? fmt.format(hours, 'hour')
+			: fmt.format(Math.round(hours / 24), 'day');
 	}
 
 	let COLUMNS = $derived([
@@ -497,12 +579,20 @@
 
 	// Order matters: "still loading" and "we failed to look" both outrank any
 	// claim about what the queue contains.
+	//
+	// And a FILTER matching nothing is not an empty queue. "No open exceptions.
+	// Everything looks good!" is a statement about every open duplicate, fraud
+	// flag and compliance hold in the tenant; with a type chip active it was
+	// being printed over a set of one type, so narrowing to `Fraud Flag` and
+	// finding none read as an all-clear on the whole queue. Only the
+	// unfiltered Open view has earned that sentence — everything else falls
+	// back to the neutral "No exceptions found."
 	let emptyMessage = $derived(
 		loading
 			? m('common.loading')
 			: errored
 				? m('exceptions.empty.errored')
-				: statusFilter === 'open'
+				: statusFilter === 'open' && !typeFilter
 					? m('exceptions.empty.open')
 					: m('exceptions.empty.other')
 	);
@@ -515,7 +605,7 @@
 			{ key: 'agents', label: m('exceptions.tab.agents') }
 		]}
 		bind:active={view}
-		onchange={syncViewToUrl}
+		onchange={() => syncUrl()}
 		ariaLabel="Exceptions views"
 		idPrefix="exc"
 	/>
@@ -530,10 +620,16 @@
 		<FilterChips chips={statusChips} bind:active={statusFilter} />
 
 		{#if Object.keys(summary.by_type).length > 0}
+			<!-- `aria-pressed` mirrors `ui/FilterChips`: the status row announces
+			     which chip is on, and this row — the same control, one line
+			     below — announced nothing, so a screen-reader user could not tell
+			     a narrowed queue from the whole one. -->
 			<nav class="type-filters">
 				<button
 					class="type-chip"
 					class:active={typeFilter === null}
+					type="button"
+					aria-pressed={typeFilter === null}
 					onclick={() => (typeFilter = null)}
 				>
 					{m('exceptions.filter.allTypes')}
@@ -542,6 +638,8 @@
 					<button
 						class="type-chip"
 						class:active={typeFilter === type}
+						type="button"
+						aria-pressed={typeFilter === type}
 						style="--type-color:{TYPE_COLORS[type] ?? '#888'}"
 						onclick={() => (typeFilter = typeFilter === type ? null : type)}
 					>
@@ -579,7 +677,10 @@
 	<DataTable columns={COLUMNS} isEmpty={exceptions.length === 0} empty={emptyMessage} colspan={11}>
 		{#snippet header()}
 			<tr>
-				<th class="checkbox-col">
+				<!-- This page passes its own `header` snippet, so it owns `scope`
+				     on every `<th>` (DataTable adds it only to the headers it
+				     generates itself) — WCAG 1.3.1. -->
+				<th class="checkbox-col" scope="col">
 					<input
 						type="checkbox"
 						checked={allSelected}
@@ -587,16 +688,16 @@
 						aria-label={m('exceptions.selectAllAria')}
 					/>
 				</th>
-				<th>{m('exceptions.col.type')}</th>
-				<th>{m('exceptions.col.severity')}</th>
-				<th>{m('exceptions.col.invoice')}</th>
-				<th>{m('exceptions.col.vendor')}</th>
-				<th class="right">{m('exceptions.col.amount')}</th>
-				<th>{m('exceptions.col.assignee')}</th>
-				<th>{m('exceptions.col.age')}</th>
-				<th>{m('exceptions.col.due')}</th>
-				<th>{m('exceptions.col.status')}</th>
-				<th class="actions-col"></th>
+				<th scope="col">{m('exceptions.col.type')}</th>
+				<th scope="col">{m('exceptions.col.severity')}</th>
+				<th scope="col">{m('exceptions.col.invoice')}</th>
+				<th scope="col">{m('exceptions.col.vendor')}</th>
+				<th class="right" scope="col">{m('exceptions.col.amount')}</th>
+				<th scope="col">{m('exceptions.col.assignee')}</th>
+				<th scope="col">{m('exceptions.col.age')}</th>
+				<th scope="col">{m('exceptions.col.due')}</th>
+				<th scope="col">{m('exceptions.col.status')}</th>
+				<th class="actions-col" scope="col"></th>
 			</tr>
 		{/snippet}
 		{#snippet body()}
@@ -615,14 +716,23 @@
 							/>
 						{/if}
 					</td>
-					<td>
+					<td class="type-cell">
 						<span
 							class="type-badge"
 							style="background:{TYPE_COLORS[exc.exception_type] ?? '#888'}1f;color:{TYPE_COLORS[exc.exception_type] ?? '#888'}"
-							title={exc.description ?? ''}
 						>
 							{typeLabel(exc.exception_type, exc.type_label)}
 						</span>
+						<!-- The description IS the triage datum — which invoice
+						     it duplicates, which PO line the price missed. It was
+						     reachable only by hovering the badge, so it existed
+						     for neither a keyboard nor a touch operator, and a
+						     queue could not be scanned without pointing at every
+						     row in turn. Clamped to two lines with the full text
+						     still in `title`. -->
+						{#if exc.description}
+							<span class="type-detail" title={exc.description}>{exc.description}</span>
+						{/if}
 					</td>
 					<td>
 						<span
@@ -636,8 +746,16 @@
 					<td class="muted-cell">{exc.vendor_name ?? '—'}</td>
 					<td class="mono right">{formatCurrency(exc.amount, exc.currency)}</td>
 					<td class="muted-cell">{exc.assigned_to ?? '—'}</td>
-					<td class="muted-cell" title={exc.created_at}>{timeAgo(exc.created_at)}</td>
-					<td class="muted-cell" class:overdue={exc.is_overdue}>
+					<!-- The precise instant belongs in `title`, formatted — the raw
+					     ISO string was leaking into the tooltip of every row. -->
+					<td class="muted-cell" title={formatDate(exc.created_at, '', DATETIME_OPTS)}>
+						{timeAgo(exc.created_at)}
+					</td>
+					<td
+						class="muted-cell"
+						class:overdue={exc.is_overdue}
+						title={formatDate(exc.due_at, '', DATETIME_OPTS)}
+					>
 						{dueLabel(exc)}
 					</td>
 					<td>
@@ -686,7 +804,10 @@
 	{#if resolveTarget}
 		<h2>{m('exceptions.resolveModal.title')}</h2>
 		<p class="modal-hint">
-			<strong>{resolveTarget.type_label}</strong>
+			<!-- `typeLabel`, not the server's `type_label`: the row badge one
+			     click away is translated, and naming the same type two ways
+			     across a confirm step is §149's defect in its last hiding place. -->
+			<strong>{typeLabel(resolveTarget.exception_type, resolveTarget.type_label)}</strong>
 			{#if resolveTarget.invoice_number}— {resolveTarget.invoice_number}{/if}
 			{#if resolveTarget.vendor_name}· {resolveTarget.vendor_name}{/if}
 		</p>
@@ -877,8 +998,10 @@
 		color: var(--text-muted);
 	}
 
+	/* `--danger`, not a literal: a hand-measured hex here was a second source
+	   of truth for the one colour the palette already names for this job. */
 	.muted-cell.overdue {
-		color: #f06464;
+		color: var(--danger);
 		font-weight: 600;
 	}
 
@@ -891,6 +1014,26 @@
 		font-size: 0.75rem;
 		font-weight: 600;
 		white-space: nowrap;
+	}
+
+	/* The type cell carries the badge plus the finding itself, so it is the
+	   one column allowed to wrap. The width cap keeps the rest of the row on
+	   its existing grid — a free-running description would push Amount and
+	   Status off the scan line the queue is read down. */
+	.type-cell {
+		max-width: 320px;
+	}
+
+	.type-detail {
+		display: -webkit-box;
+		-webkit-box-orient: vertical;
+		-webkit-line-clamp: 2;
+		line-clamp: 2;
+		overflow: hidden;
+		margin-top: 3px;
+		color: var(--text-muted);
+		font-size: 0.78rem;
+		line-height: 1.35;
 	}
 
 	.severity {

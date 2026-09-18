@@ -209,7 +209,10 @@ test.describe('accessibility — de-emphasised rows (WCAG 1.4.3)', () => {
 		await expect(muted.first()).toBeVisible();
 		// The status badge is the cell that explains the de-emphasis, and the
 		// one the fade dimmed hardest (2.59:1 applied / 2.91:1 void).
-		await expect(muted.first().locator('.badge')).toHaveText(/applied|void/);
+		// Case-insensitive: the badge prints the TRANSLATED status label
+		// ("Applied" / "Void"), not the raw `applied` / `void` column value it
+		// used to leak into every locale.
+		await expect(muted.first().locator('.badge')).toHaveText(/applied|void/i);
 
 		await expectNoA11yViolations(page);
 	});

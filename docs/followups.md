@@ -953,6 +953,100 @@ reliable part of it.
       other stale API names while there.
       **Trigger:** the next edit to `frontend/CLAUDE.md`.
 
+### Surfaced by the /polish-ui pass on /exceptions and /credit-memos (2026-09-17)
+
+Mirrored as GitHub issue [#443](https://github.com/Absence0760/feohledger/issues/443).
+
+Two `ui-polisher` runs against the refreshed agent definition. Both pages landed
+their visual and correctness work; everything below is what the polish could not
+reach because it needs a router change, a six-locale catalogue tranche, or a
+call on test infrastructure. The pattern worth noting: **both pages were missing
+the same two primitives for the same reason** — the shared component exists, the
+backend parameter does not.
+
+- [ ] **(c) Neither `/exceptions` nor `/credit-memos` can be searched or sorted — the backend has no parameters for it.**
+      `GET /api/exceptions` and `GET /api/credit-memos` accept status/severity plus
+      pagination and nothing else. That is why both pages ship with zero `SearchBox` and
+      zero `SortableHeader` while five sibling list routes have both, and why neither
+      polish pass added them: approximating search with a client-side `.filter()` over the
+      one loaded page is the anti-pattern `frontend/docs/ui-patterns.md` § Search forbids,
+      because it silently searches a page instead of the set.
+      **Durable fix:** add `search` plus a sort allowlist to both routers — exceptions over
+      invoice number + vendor with sorts on `created_at` / `severity` / due, credit memos
+      over `memo_number` + `vendor_name` with sorts on `issued_date` / `amount` /
+      `memo_number`. Both pages then take the shared primitives with no new UI patterns.
+      **Trigger:** the first tenant whose exception queue or credit-memo list exceeds one
+      page of 20 — a triage queue that cannot be sorted by due date is the first thing an
+      AP manager asks for.
+
+- [ ] **(c) The exception `severity` filter exists on the backend and nothing in the UI exposes it.**
+      `GET /api/exceptions?severity=` has always worked; the queue offers status and type
+      chips only. Cheap on its own, but it needs a third chip row and catalogue keys in six
+      locales, which is more than a polish pass should mint.
+      **Durable fix:** a third `FilterChips` row bound to `?severity=`, with the keys added
+      to all six catalogues in the same change.
+      **Trigger:** bundle it with the search/sort work above — same file, same tranche.
+
+- [ ] **(c) `/credit-memos` filter chips carry no counts, because there is no per-status count endpoint.**
+      `/exceptions` has `GET /api/exceptions/summary` feeding its chip tallies; credit memos
+      has no equivalent, so its chips are bare labels and the operator cannot see how many
+      open memos exist without clicking through.
+      **Durable fix:** a `GET /api/credit-memos/summary` mirroring the exceptions one —
+      including taking `?status=`, which is the defect the exceptions summary just had to be
+      fixed for (see the same-day commit scoping `by_type` to the viewed status).
+      **Trigger:** same tranche as the two above.
+
+- [ ] **(c) The exceptions toasts assemble English grammar from a verb stem, so they cannot be translated.**
+      `commitResolve` builds `` `Exception ${action}d` `` and
+      `` `${body.updated} ${action}d, ${skipped} skipped` `` — English morphology in a
+      template literal, which no catalogue key can express. Alongside them sit hardcoded
+      `'Failed to load exceptions'`, `'Resolution note is required'`, `'Action failed'`,
+      `` `Selected all N matching exception(s)` `` and three `ariaLabel`s on `Tabs` / `Modal`.
+      **Durable fix:** one message key per action outcome rather than stem assembly, added
+      to all six catalogues. **Sequencing matters:** `tests-e2e/exceptions/resolve.spec.ts`
+      and `load-sequencing.spec.ts` select on the modal's exact English `ariaLabel`, so
+      those specs must move to a stable selector *before* the strings are translated, or
+      they break on the locale that isn't English.
+      **Trigger:** the next i18n tranche that touches the exceptions surface.
+
+- [ ] **(c) `extractError()` on `/exceptions` bypasses `$lib/utils/apiError.ts`, so a 422 renders as `[object Object]`.**
+      It hand-rolls `e?.detail ?? e?.message`. FastAPI returns a *list* of validation objects
+      for a 422, which stringifies to `[object Object]` — precisely the bug `formatApiDetail`
+      was written to fix.
+      **Durable fix:** swap `extractError` for `formatApiDetail`. One line, but it changes
+      what a refused segregation-of-duties resolve tells the operator, which is a money-path
+      message — so it ships with a test that asserts the refusal text, not on its own.
+      **Trigger:** the next change to the exception resolution path.
+
+- [ ] **(c) A credit memo cannot be linked to an invoice at creation, and cannot be edited afterwards.**
+      `POST /api/credit-memos` accepts `invoice_id`, but the create modal never sends one;
+      and there is no `PATCH` on the resource at all. Because apply is currency fail-closed,
+      a memo created with the wrong currency is permanently unfixable *and* unappliable —
+      the only exit is Void and re-create, which leaves a void row in the audit trail for
+      what was a typo.
+      **Durable fix:** expose the invoice link in the create modal, and add a `PATCH`
+      restricted to memos in `open` (never one already applied — that would rewrite a
+      settled money record).
+      **Trigger:** the first support request about a mis-keyed credit memo.
+
+- [ ] **(c) Four `/credit-memos` e2e specs fail against a local dev server while CI is green — root cause unknown.**
+      `tests-e2e/credit-memos/load-sequencing.spec.ts` (×3) and `void-confirm.spec.ts` fail
+      locally with the row absent (`getByRole('table').getByRole('button', {name: 'Void'})`
+      not found) even though the spec **mocks** the list response, so tenant data cannot be
+      the cause. Established: they fail identically **at HEAD on a clean tree** (stash-tested,
+      15 passed / 4 failed both with and without the polish changes), a fresh dev server with
+      a rebuilt `.svelte-kit/generated` does not clear it, and the most recent `main` CI run
+      passed including all 14 Playwright shards. So it is neither the polish work nor a
+      product defect CI can see. Not yet in `known-issues.md` because there is no root cause
+      to record there — only a localisation.
+      **Durable fix:** determine whether this is a dev-server-versus-preview-build difference
+      (CI serves a preview build; these runs used `vite dev`) or a local harness/tenant-slot
+      issue, then fix the real cause. If it proves to be dev-only, the specs should say so
+      or the local runner should serve a preview build, because four permanently-red specs
+      locally is how a genuinely red one gets ignored.
+      **Trigger:** the next time anyone runs the credit-memos e2e locally — or sooner, since
+      the cost of a standing local red is paid by every contributor.
+
 ## (a) Blocked on external credentials, accounts, or hardware
 
 - [ ] **Appoint EU and UK Art 27 representatives.** ([#428](https://github.com/Absence0760/feohledger/issues/428)) A controller established

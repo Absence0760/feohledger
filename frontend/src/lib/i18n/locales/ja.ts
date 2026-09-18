@@ -4461,8 +4461,12 @@ export const messages = {
 	'creditMemos.createModal.title': '新しいクレジットメモ',
 	'creditMemos.createModal.vendor': 'ベンダー',
 	'creditMemos.empty': 'クレジットメモはありません。',
+	'creditMemos.empty.filtered': 'このフィルターに一致するクレジットメモはありません。',
 	'creditMemos.loadMore': 'さらに読み込む（{total} 件中 {shown} 件）',
 	'creditMemos.new': '+ 新しいクレジットメモ',
+	'creditMemos.onboarding.description':
+		'クレジットメモは、返品・過大請求・リベートなど、仕入先から返還される金額を記録します。作成したうえで、支払い前にその仕入先の請求書へ適用してください。',
+	'creditMemos.onboarding.heading': 'クレジットメモはまだありません',
 	'creditMemos.row.apply': '適用',
 	'creditMemos.row.void': '無効化',
 	'creditMemos.row.confirm': '確認',

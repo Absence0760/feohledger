@@ -88,11 +88,13 @@ test.describe('/credit-memos', () => {
 
 	test('renders the empty-state placeholder when no memos exist', async ({ page }) => {
 		await expect(page.getByRole('heading', { name: 'Credit Memos' })).toBeVisible();
-		// With a fresh tenant there are no seeded memos, so the empty
-		// state should render — unless prior tests in this run have
-		// already created some that haven't been cleaned up. Either is
-		// acceptable; the table itself must be present.
-		await expect(page.locator('table')).toBeVisible();
+		// A fresh tenant has no seeded memos and gets the zero-data onboarding
+		// block INSTEAD of the table; a run where earlier tests left memos
+		// behind gets the table. Either is acceptable — what must not happen is
+		// neither, which is what a load failure or a stuck spinner looks like.
+		await expect(
+			page.locator('table, [data-testid="credit-memos-empty-state"]').first()
+		).toBeVisible();
 	});
 
 	test('Create modal validates and creates a memo via the API', async ({ page }) => {

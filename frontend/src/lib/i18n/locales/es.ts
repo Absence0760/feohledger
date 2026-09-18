@@ -4517,8 +4517,12 @@ export const messages = {
 	'creditMemos.createModal.title': 'Nueva nota de crédito',
 	'creditMemos.createModal.vendor': 'Proveedor',
 	'creditMemos.empty': 'No hay notas de crédito.',
+	'creditMemos.empty.filtered': 'Ninguna nota de crédito coincide con este filtro.',
 	'creditMemos.loadMore': 'Cargar más ({shown} de {total})',
 	'creditMemos.new': '+ Nueva nota de crédito',
+	'creditMemos.onboarding.description':
+		'Una nota de crédito registra el dinero que un proveedor debe devolver: una devolución, un cobro de más, un descuento. Cree una y aplíquela a una factura de ese proveedor antes de pagarla.',
+	'creditMemos.onboarding.heading': 'Aún no hay notas de crédito',
 	'creditMemos.row.apply': 'Aplicar',
 	'creditMemos.row.void': 'Anular',
 	'creditMemos.row.confirm': 'Confirmar',
