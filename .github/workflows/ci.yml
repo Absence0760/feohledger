@@ -125,20 +125,20 @@ jobs:
       - name: Invoice-warning message catalogue is in sync with the catalogue
         run: python scripts/gen_invoice_warning_messages.py --check
 
-  # The backend pytest suite (~3900 tests against a real Postgres/Redis/MinIO)
-  # ran ~27 min as one serial job — the longest job in CI. It's sharded the same
-  # way the Playwright e2e job below is: a matrix of runners, each booting its
-  # OWN Postgres + Redis + MinIO and running a deterministic slice via
-  # pytest-split (`--splits 4 --group G`). Each shard is its own process + DB,
+  # The backend pytest suite (~10,100 tests against a real Postgres/Redis/MinIO)
+  # would run ~60 min as one serial job — the longest job in CI. It's sharded the
+  # same way the Playwright e2e job below is: a matrix of runners, each booting
+  # its OWN Postgres + Redis + MinIO and running a deterministic slice via
+  # pytest-split (`--splits 8 --group G`). Each shard is its own process + DB,
   # which sidesteps the realdb event-loop-per-worker hazards that make in-process
-  # `pytest -n auto` parallelism unsafe in this suite. ~27 min ÷ 4 ≈ ~7 min/shard.
+  # `pytest -n auto` parallelism unsafe in this suite. ~60 min ÷ 8 ≈ ~7 min/shard.
   #
   # Balance: pytest-split partitions by the committed `backend/.test_durations`
   # baseline when present; absent, it falls back to an even split by test count
   # (still correct + deterministic, just less wall-clock-balanced). Regenerate
   # the baseline with `pytest --store-durations` — see backend/CLAUDE.md.
   backend-test:
-    name: Backend (shard ${{ matrix.shard }}/4)
+    name: Backend (shard ${{ matrix.shard }}/8)
     runs-on: ubuntu-latest
     # This job had no timeout, so it inherited GitHub's 360-minute default and a
     # hung shard sat on a runner for six hours instead of failing (PR #366:
@@ -151,9 +151,19 @@ jobs:
     # the e2e shards next door run ~4 min against a 20-minute cap (~5x).
     #
     # 40 restores roughly 3x headroom: a degraded runner still finishes, a real
-    # hang still dies in 40 minutes instead of six hours. Raise this if the
-    # SHARD's own median approaches ~20 min; do not raise it for a one-off slow
-    # run, which is what it is meant to survive.
+    # hang still dies in 40 minutes instead of six hours. Do not raise it for a
+    # one-off slow run, which is what it is meant to survive.
+    #
+    # 2026-09-17: that headroom had quietly eroded. The suite grew to ~60 min of
+    # pytest, so a 4-way split sat at ~15 min/shard and a slow runner ate the
+    # whole margin — four runs in two days died here (main 35132042678 and
+    # 35227926301, PRs #441 and #445), a DIFFERENT shard each time and none of
+    # them hung. Comparing #445's cancelled shard 2 against the same shard green
+    # on main shows a flat ~3.2x on every DB-bound file and no slowdown at all on
+    # the pure-unit ones: a degraded runner, precisely what this cap exists to
+    # survive. So the split moved, not the cap — 8 shards put the median back
+    # near ~7 min, where the same 3.2x runner lands at ~25 min. Fix the split
+    # before you touch this number.
     timeout-minutes: 40
 
     strategy:
@@ -161,7 +171,7 @@ jobs:
       # so a single-shard failure reads as shard-specific, not systemic.
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4]
+        shard: [1, 2, 3, 4, 5, 6, 7, 8]
 
     services:
       postgres:
@@ -271,7 +281,7 @@ jobs:
           done
           echo "::error::MinIO did not become healthy in time"; exit 1
 
-      - name: Run tests (shard ${{ matrix.shard }}/4)
+      - name: Run tests (shard ${{ matrix.shard }}/8)
         env:
           FEOH_DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/feohledger
           FEOH_REDIS_URL: redis://localhost:6379
@@ -287,9 +297,9 @@ jobs:
           # unreachable DB hard-fails instead of dropping the tenant-isolation /
           # token-rotation coverage while the job stays green.
           FEOH_REQUIRE_REALDB: "1"
-        # pytest-split partitions the suite into 4 deterministic slices; this
+        # pytest-split partitions the suite into 8 deterministic slices; this
         # shard runs slice `matrix.shard`. See the job-level comment for balance.
-        run: pytest --splits 4 --group ${{ matrix.shard }}
+        run: pytest --splits 8 --group ${{ matrix.shard }}
 
   frontend:
     name: Frontend

@@ -1224,3 +1224,34 @@ from that work is the one entry below.
       generates a Positive Pay file, and the SOC 2 records-management evidence
       request either way.
 
+
+### The backend shard baseline drifts silently as the suite grows (2026-09-17)
+
+**Category (c) — sized and unstarted.** `backend/.test_durations`, the baseline
+`pytest-split` partitions the backend shards by, was last regenerated on
+2026-09-04 (commit `aa3d47bd`). It holds 8,143 entries against ~10,100 collected
+tests, so roughly a fifth of the suite is partitioned at the *mean* test
+duration rather than its own — and its absolute figures (1,628s) now understate
+the real ~60 min of CI pytest by ~2.2x.
+
+This is not currently breaking anything: the 8-way split measured against real
+CI per-file timings lands at 5.9–8.7 min per shard, well inside the 40-minute
+cap even on the ~3.2x-degraded runner that cancelled PRs #441 and #445. The
+mis-weighted fifth costs about 1.3 min on the worst shard, no more.
+
+The problem is that nothing *reports* the drift. The baseline decays with every
+test added, the split quietly loses balance, and the first signal is a shard
+being cancelled at the cap — which is exactly how the 4-shard layout failed,
+four runs in two days, before it was widened to 8.
+
+**Durable fix:** regenerate the baseline (`pytest --store-durations` against a
+full local stack, ~60 min) and give the decay a voice — either a scheduled
+`workflow_dispatch` job that stores durations on a CI runner and uploads the
+file, or a cheap guard that fails when the fraction of collected tests missing
+from `.test_durations` crosses a threshold. The measured-on-CI variant is worth
+more than a laptop-measured one, since balance is only meaningful against the
+hardware that runs it.
+
+**Trigger:** the next time a backend shard's median approaches ~15 min (the
+point at which the documented 3x runner headroom runs out under a 40-minute
+cap), or any change that adds a large block of tests at once.

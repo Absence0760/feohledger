@@ -277,17 +277,26 @@ guards the removal.
 
 ## CI test sharding
 
-The full suite (~3900 tests against a real Postgres/Redis/MinIO) ran ~27 min as
-a single serial job — the longest job in CI. In `ci.yml` it's split into:
+The full suite (~10,100 tests against a real Postgres/Redis/MinIO) would run
+~60 min as a single serial job — the longest job in CI. In `ci.yml` it's split
+into:
 
 - **`backend-lint`** — `ruff check` + `ruff format --check` only. No services,
   ~30s, fails fast on a formatting/lint miss.
-- **`backend-test`** — a `strategy.matrix` of 4 shards, each on its own runner
+- **`backend-test`** — a `strategy.matrix` of 8 shards, each on its own runner
   booting its OWN Postgres + Redis + MinIO and running a deterministic slice via
-  [`pytest-split`](https://pypi.org/project/pytest-split/): `pytest --splits 4
+  [`pytest-split`](https://pypi.org/project/pytest-split/): `pytest --splits 8
   --group ${{ matrix.shard }}`. Each shard is a separate process + DB, which is
   why this is safe where in-process `pytest -n auto` is not — the suite's realdb
-  fixtures hit event-loop-per-worker hazards under xdist. ~27 min ÷ 4 ≈ ~7 min/shard.
+  fixtures hit event-loop-per-worker hazards under xdist. ~60 min ÷ 8 ≈ ~7 min/shard.
+
+**Shard count tracks the suite's growth, and the 40-minute `timeout-minutes` is
+not the dial.** A GitHub runner can degrade to ~3x slow without hanging — that
+is what the cap's headroom is for — so the per-shard median has to stay near
+~7 min for a bad runner to still finish. It was 4 shards until 2026-09-17, by
+which point the suite had grown to ~15 min/shard and four runs in two days were
+cancelled at 40 min on a slow runner, a different shard each time. When the
+median creeps toward ~15 min again, double the shards; don't raise the cap.
 
 `pytest-split` partitions by a committed `backend/.test_durations` baseline when
 present; absent, it falls back to an even split by **test count** (still correct
@@ -301,8 +310,9 @@ pytest --store-durations          # writes backend/.test_durations
 ```
 
 Commit the updated `.test_durations` alongside the test changes. Bumping the
-shard count means editing the `matrix.shard` list, the `--splits N` flag, and the
-`name:` (`shard N/4`) together in `ci.yml`.
+shard count means editing the `matrix.shard` list, the `--splits N` flag, and
+both `name:` occurrences (the job's `shard N/8` and the test step's) together in
+`ci.yml`.
 
 ## Test databases (the `realdb` harness)
 
