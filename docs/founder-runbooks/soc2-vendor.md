@@ -123,11 +123,15 @@ Report issued → you can answer "yes" on Type I questionnaires.
 
 ## Step 8 — Open the Type II window
 
-Type II is an observation period, not a separate audit. The day
-Type I reports, the clock starts. Minimum 6 months; 12 months is
-more credible for enterprise deals. Keep the vendor dashboard green
-the whole time — the auditor samples evidence from the window
-retroactively.
+Type II is an observation period, not a separate audit. The day Type I
+reports, the clock starts. Minimum 6 months; 12 months is more credible
+for enterprise deals. Keep the vendor dashboard green the whole time —
+the auditor samples evidence from the window retroactively.
+
+The timeline block above used to open this window at T+12wk against a
+Type I report at T+12–16wk, and put the Type II report at T+9–12mo —
+a window opening before the report that starts it, and a report landing
+without time for the closing engagement. Corrected 2026-09-17.
 
 After 6+ months, the auditor does a new engagement to issue the
 Type II report. Cost: $10–20K.
@@ -151,8 +155,11 @@ T+2wk     Policies adopted, onboarding flows done
 T+6wk     Dashboard 95%+ green
 T+8wk     Type I kickoff
 T+12–16wk Type I report issued  ← answer "yes" on questionnaires
-T+12wk    Type II observation window starts
-T+9–12mo  Type II report issued  ← the one buyers really want
+          └─ the Type II observation window opens on THIS date
+T+10–12mo Type II report issued ← the one buyers really want
+          (Type I at ~3–4mo + a 6mo minimum window + a 4–8wk engagement.
+           A 12-month window, which reads better to enterprise buyers,
+           pushes this to ~T+16–18mo.)
 ```
 
 ## Checklist
@@ -166,6 +173,9 @@ T+9–12mo  Type II report issued  ← the one buyers really want
 - [ ] Type I report issued
 - [ ] Type II observation window open
 - [ ] Calendar reminder at T+6mo to start Type II audit
+- [ ] Annual penetration test scheduled — it is $8–15K in the cost table
+      above and was in no step or checkbox until 2026-09-17. Auditors ask
+      for it; budgeting for it is not the same as booking it
 
 Related reading: [`docs/soc2-readiness.md`](../soc2-readiness.md) for
 the engineering-side control inventory.
