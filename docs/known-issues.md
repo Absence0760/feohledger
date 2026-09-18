@@ -5,15 +5,17 @@ names the root cause, the evidence, blast radius, and a recommended fix
 approach — this is a staging area for real problems, not a place to let them
 go stale. See root `CLAUDE.md` guard rail 6 (no dangling deferred findings).
 
-**Three entries are open** — the three local-e2e entries at the bottom. The
-header once said "one" while those three sat beneath it; a known-issues file
-that under-reports itself is the failure this note already warned about once.
-The `/organization` 320px reflow defect was **fixed on 2026-09-17** (issue
-#432), along with six more routes that failed the same criterion and had no
-entry at all because nothing measured them. The other
-fourteen are `~~struck-through~~` resolved stubs, kept because the *diagnosis* is
-the expensive part and is worth not re-deriving. Add a new entry at the top when
-a defect is diagnosed but can't be fixed in the same session.
+**Two entries are open** — the two local-e2e entries at the bottom. The header
+once said "one" while three sat beneath it, then "three" in the same change
+that struck the third; a known-issues file that miscounts itself is the failure
+this note has now warned about twice. Two defects were **fixed on 2026-09-17**:
+the `/organization` 320px reflow defect (issue #432), along with six more routes
+that failed the same criterion and had no entry at all because nothing measured
+them; and the local-e2e `alembic` drift, which now has a pre-run guard that
+refuses to start against a stale database. The other fifteen are
+`~~struck-through~~` resolved stubs, kept because the *diagnosis* is the
+expensive part and is worth not re-deriving. Add a new entry at the top when a
+defect is diagnosed but can't be fixed in the same session.
 
 The three privacy defects surfaced by publishing the legal pages — the
 DSAR-export bank-detail exposure, the Positive Pay file's unexpiring account
