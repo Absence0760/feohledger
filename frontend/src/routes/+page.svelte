@@ -17,7 +17,18 @@
 	import { partialLabels, totalUnconverted } from '$lib/utils/dashboardPartials';
 	import type { DashboardData } from '$lib/types/analytics';
 	import { orgCurrency } from '$lib/stores/orgSettings.svelte';
-	import { m } from '$lib/i18n/store.svelte';
+	import { auth } from '$lib/stores/auth.svelte';
+	import { currentLocale, m } from '$lib/i18n/store.svelte';
+	import type { MessageKey } from '$lib/i18n/messages';
+	// Decorative card-header glyphs (aria-hidden at the call site): the card's
+	// <h2> is what names it.
+	import IconPipeline from '~icons/material-symbols/account-tree-outline';
+	import IconVendors from '~icons/material-symbols/storefront-outline';
+	import IconAging from '~icons/material-symbols/hourglass-top-outline';
+	import IconUpcoming from '~icons/material-symbols/event-upcoming-outline';
+	import IconDiscount from '~icons/material-symbols/savings-outline';
+	import IconTrend from '~icons/material-symbols/bar-chart';
+	import IconArrow from '~icons/material-symbols/arrow-forward';
 
 	// The response shape lives in `$lib/types/analytics.ts` (`DashboardData`,
 	// `ReportingAgingBuckets`, `AgingBuckets`) rather than here. Declared
@@ -176,6 +187,25 @@
 	let vendorSpendPartialNames = $derived(partialLabels(data?.vendor_spend, (v) => v.vendor));
 	let trendUnconverted = $derived(totalUnconverted(data?.monthly_trend));
 	let trendPartialMonths = $derived(partialLabels(data?.monthly_trend, (t) => t.month));
+
+	// The page intro: a greeting keyed on the reader's own clock and today's
+	// date in the active locale. Presentation only — it reads nothing the
+	// figures below depend on, and with no name on the profile it is just the
+	// date rather than a greeting addressed to nobody.
+	const now = new Date();
+	const greetingKey: MessageKey =
+		now.getHours() < 12
+			? 'dashboard.greeting.morning'
+			: now.getHours() < 18
+				? 'dashboard.greeting.afternoon'
+				: 'dashboard.greeting.evening';
+	const userName = $derived(auth.user?.full_name?.trim() ?? '');
+	// Re-read on a locale switch: `formatDate` takes its locale from the i18n
+	// store, which only the `currentLocale()` read makes this derivation track.
+	const todayLabel = $derived.by(() => {
+		void currentLocale();
+		return formatDate(now.toISOString(), '', { weekday: 'long', month: 'long', day: 'numeric' });
+	});
 </script>
 
 <PageHeader title={m('dashboard.title')}>
