@@ -73,4 +73,7 @@ mid-year; a pure limit increase is a pro-rata premium bump.
 - [ ] Renewal calendar reminder at T-30d
 
 Time: ~1 day (mostly waiting for underwriting).
-Cost: ~$250/mo for cyber + E&O bundle.
+Cost: **$3–13K/yr (~$250–1100/mo)** for a cyber + E&O bundle, from the
+table at the top of this page. This footer read "~$250/mo" until
+2026-09-17 — that is the floor of the range, not the midpoint, and it is
+the number that ended up in `support-and-status.md` too.

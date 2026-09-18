@@ -22,8 +22,12 @@ CRITICAL PATH
 ├── 3. Stripe billing         ← can't charge without it
 │     └── stripe-billing.md
 │
-├── 4. Payment rails          ← can't pay vendors without it (long lead time — start early)
+├── 4. Payment rails          ← can't pay vendors without it (longest lead time)
 │     └── payment-rails-onboarding.md
+│        NOTE: numbered 4, but only its intro call is startable now. KYB
+│        needs formation docs + an EIN, so 1 gates the rest of it. Book
+│        the call in week 1 anyway — the KYB packet tells you what the
+│        incorporation has to produce.
 │
 └── 5. SOC 2 kickoff          ← can't pass security review without it
       └── soc2-vendor.md
@@ -56,8 +60,16 @@ go/no-go checklist for your first paying customer.
 ## When to pull the trigger
 
 The critical path (1–5) is roughly 4–8 weeks of calendar time. The
-payment-rails step has the longest lead time (bank KYC can take 3+
-weeks) — start that on week 1 and do everything else in parallel.
+payment-rails step has the longest lead time (bank **KYB** can take 3+
+weeks) — book its intro call in week 1 and do everything else in
+parallel. It is KYB, know-your-*business*, not the KYC this line said
+until 2026-09-17; they are different packets and the bank asks for the
+business one.
+
+"Start it week 1" has a limit worth stating plainly: payment rails
+cannot actually *progress* past the intro call until step 1 produces an
+entity, an EIN and beneficial owners. Steps 1 and 4 are one serial
+chain. Everything else here really is parallel.
 
 Don't wait until all five are "done" to talk to prospects. A signed LOI
 from a pilot customer is what calibrates whether you need (say) SAML or

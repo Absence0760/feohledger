@@ -75,8 +75,12 @@ For our backend, point Better Stack at:
 - Core dependency checks — if RDS or S3 is down, acknowledge it
 
 See the
-[`/api/health` endpoint](../../backend/app/api/deps.py) — it's already
-wired up.
+[`/api/health` endpoint](../../backend/app/api/health.py) — it's already
+wired up. (`GET /api/health` is the public liveness probe; there is also an
+admin-gated `GET /api/health/sweeps`, which is the one that tells you a
+background sweep has stopped running. Point the monitor at the former and
+read the latter yourself.) This link pointed at `deps.py`, which has no
+health route, until 2026-09-17.
 
 ## On-call
 
@@ -103,9 +107,11 @@ Don't improvise when the site is down. Write a one-page runbook:
    to affected customers within 24h with: what happened, what we did,
    what we're doing to prevent it.
 
-Template for the email lives in `docs/founder-runbooks/templates/`
-(add one when you have a real incident to respond to — don't write
-it speculatively).
+There is no template yet and `docs/founder-runbooks/templates/` does not
+exist — this pointed at it as though it did until 2026-09-17. Write one
+from a real incident rather than speculatively, and create the directory
+then. The regulatory-notification path, which is a different and harder
+deadline, is `breach-notification.md`.
 
 ## Insurance
 
@@ -114,7 +120,11 @@ Insurance is its own pre-customer checklist — see
 
 ## Checklist
 
-- [ ] `support@feohledger.com` active, routed to shared inbox
+- [x] `support@feohledger.com` active — created 2026-09-17 as a Migadu alias
+      onto `ops@`. **Delivery is not yet proven by a real inbound send**, and
+      that test is still open in `status.md` and issue #446 § 3
+- [ ] Shared inbox chosen and `support@` routed into it — the alias currently
+      lands in `ops@`, which is a mailbox, not a support queue
 - [ ] First-response SLA published on marketing site (or in MSA)
 - [ ] Status page live at `status.feohledger.com`
 - [ ] Uptime monitoring alerts to your phone
@@ -122,4 +132,6 @@ Insurance is its own pre-customer checklist — see
 - [ ] Cyber + E&O insurance quoted + bound
 
 Time: ~1 day of clicking through SaaS signups.
-Cost: ~$100/mo support + status, ~$250/mo insurance.
+Cost: ~$100/mo support + status. Insurance is ~$250–1100/mo — see
+`insurance.md`; this line quoted only the bottom of that range until
+2026-09-17.

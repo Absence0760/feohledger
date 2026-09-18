@@ -28,12 +28,13 @@ account, real price ids, and the secrets in sops — tracked in
 `docs/followups.md` § (a). See `backend/docs/billing.md` for the engineering
 detail.
 
-Three endpoint/module names elsewhere in this file do not exist and are kept
-only as historical sketch: `POST /api/billing/subscribe`,
-`POST /api/billing/portal`, and `services/billing_gate.py` (the real entitlement
-gate is `app/services/billing/entitlements.py::require_entitlement`).
+**Corrected again 2026-09-17.** The 2026-09-06 pass fixed this header and
+left the body below it intact, so Step 3 went on instructing the reader to
+build all of the above from scratch. Step 3 is now the operator procedure
+it should always have been, and carries the old-instruction-to-reality
+table.
 
-## What to decide first (before writing code)
+## What to decide first
 
 ### Pricing model
 
@@ -88,80 +89,68 @@ In Stripe Dashboard → Products:
    `last_during_period`).
 4. Copy the `price_id`s — you'll reference these in code.
 
-## Step 3 — Add billing to the backend
+## Step 3 — Wire the live account into the shipped code
 
-This is the next engineering task. Rough shape:
+**There is no engineering work in this step.** Until 2026-09-17 this
+section read "This is the next engineering task" and specified a data
+model, an adapter tree and three endpoints to build. All of it already
+exists — the 2026-09-06 correction at the top of this file fixed the
+header and left the body, so the runbook spent eleven days contradicting
+itself one screen apart and telling its reader to rebuild shipped code.
+For the record, what the old body specified and what is actually there:
 
-### Data model
+| Old instruction | Reality |
+|---|---|
+| Add `Organization.stripe_customer_id` / `stripe_subscription_id` columns | Neither column exists, and neither should. Billing is the control-plane `Plan` / `Subscription` models (`app/models/billing.py`, migration 0056) |
+| Build `services/billing_adapters/` with `stripe_adapter.py` | Ships as `mock_adapter.py` + `stripe_billing.py` behind `base.py` / `dispatcher.py` |
+| Build `POST /api/billing/subscribe` and `/portal` | Neither exists. The real surface is `/subscription`, `/plans`, `/change-plan`, `/invoices`, `/payment-method/setup-intent`, `/payment-methods` |
+| Build `services/billing_gate.py` | It is `app/services/billing/entitlements.py::require_entitlement` |
+| Build `POST /api/billing/webhook/stripe` | It is `POST /api/billing/webhook/{provider}` (`app/api/billing_webhook.py`), HMAC-verified, deduped by `event_id`, with a `Stripe-Signature` replay window |
 
-Two new columns on `Organization`:
-- `stripe_customer_id VARCHAR(255) NULL`
-- `stripe_subscription_id VARCHAR(255) NULL`
+The adapter interface, if you need to read it, is `billing_adapters/base.py`:
+`ensure_customer`, `ensure_price`, `create_subscription`, `get_subscription`,
+`list_invoices`, `report_usage`, `create_setup_intent`, `list_payment_methods`,
+`parse_webhook`, `test_connection`.
 
-Plus a new `Organization.settings.billing` dict with:
-```json
-{
-  "plan_code": "growth",
-  "billing_email": "billing@customer.com",
-  "status": "active",  // or "trialing", "past_due", "cancelled"
-  "current_period_end": "2026-05-23T00:00:00Z",
-  "trial_end": null
-}
-```
+What the operator actually does here:
 
-### Adapter pattern
+1. **Copy the price ids** from Step 2 into the plan catalog. The code
+   self-heals if you don't: `services/billing/provisioning.py` calls
+   `ensure_price` and caches the result at
+   `Organization.settings.billing.plan_price_ids[<plan_code>]`, alongside
+   the `stripe_customer_id` it creates on first use. Seeding them
+   explicitly is still better — it keeps the ids you see in the Stripe
+   dashboard the ones the app uses.
+2. **Put the secrets in sops**, in the private `infra-secrets` repo under
+   `feohledger/` — never in this repo, and never in a `.env`.
+   `FEOH_BILLING_STRIPE_API_KEY` is the one that matters;
+   `stripe_billing` fails closed without it rather than falling back to
+   mock.
+3. **Enable the webhook** with `FEOH_BILLING_WEBHOOK_ENABLED` and register
+   the endpoint URL in the Stripe dashboard.
+4. **Leave the provider on `mock` until all three are done.** That is the
+   local-first default and it is the safe state.
 
-> **Status: not yet implemented.** `services/billing_adapters/` does
-> not exist in the code today — this section describes the shape the
-> engineering work should take. Follow the existing adapter pattern
-> used by `services/payment_adapters/` and `services/extraction_adapters/`:
-
-```
-services/billing_adapters/
-├── __init__.py         # registry
-├── base.py             # abstract adapter
-├── mock_adapter.py     # for local dev
-└── stripe_adapter.py   # real Stripe integration
-```
-
-Methods the adapter exposes:
-- `create_customer(org) -> customer_id`
-- `start_subscription(customer_id, price_id, trial_days) -> subscription_id`
-- `cancel_subscription(subscription_id, at_period_end: bool)`
-- `report_usage(subscription_id, metric, quantity)` (for metered)
-- `parse_webhook(headers, body) -> BillingEvent | None`
-
-### Endpoints
-
-- `POST /api/billing/subscribe` — create + start subscription
-  (called from the signup flow)
-- `POST /api/billing/portal` — returns a Stripe billing portal URL
-  the customer can use to update payment method, download invoices
-- `POST /api/billing/webhook/stripe` — HMAC-verified webhook; drives
-  `status` transitions on the Organization
-
-### Gating access
-
-New module `services/billing_gate.py` with a `require_active_subscription()`
-dependency. Add it to high-value endpoints (invoice upload,
-extraction, payment execute) so a past-due tenant is read-only.
-
-Don't block auth/login — past-due tenants need to log in to fix
-their billing.
+See `backend/docs/billing.md` for the engineering detail.
 
 ## Step 4 — Usage metering (if metered plan)
 
-The bit most teams underestimate. Approach:
+**Also already built**, and this section was stale in a second way: it
+told you to push aggregates through `billing.SubscriptionItem.create_usage_record`,
+which is Stripe's legacy usage-record API. `stripe_billing.py` uses
+**Billing Meter Events**, one event per meter, which is the current one.
 
-- Instrument the events you want to bill on (e.g. each successful
-  extraction, each payment executed).
-- Push daily aggregate counts to Stripe via
-  `billing.SubscriptionItem.create_usage_record`.
-- Keep a local mirror in `Organization.settings.billing.usage` so
-  customers see the same number in your UI that Stripe sees.
+What ships: `services/billing/usage_rollup.py` folds the per-tenant
+`extraction_usage` and `card_rebates` tables into a `UsageRollup` per
+org/period — read-only, no side effects, every amount an exact `Decimal` —
+and the adapter's `report_usage` iterates that map generically, so adding
+a meter needs no adapter change. The `extractions` meter is the billable
+one today; card rebates are surfaced but not billed.
 
-Don't bill on per-request in real time — if Stripe is down, you drop
-billing events. Batch + idempotency key + retry.
+The operator decision here is only **which meters your pricing charges
+on**, and creating the matching metered Prices in Step 2. If you picked a
+flat monthly bundle for pilot #1 — the recommendation above — you can skip
+this section entirely.
 
 ## Step 5 — Invoice + dunning
 
@@ -174,15 +163,28 @@ Dashboard → Settings → Billing → Subscriptions:
 
 ## Checklist
 
+All engineering boxes here are already closed; what remains is operator work.
+
 - [ ] Pricing model decided + documented
 - [ ] Stripe account activated
 - [ ] Products + prices created
-- [ ] `billing_adapters/` written + wired into signup
-- [ ] Webhook endpoint live, HMAC-verified
-- [ ] Past-due state gates access
-- [ ] Stripe billing portal linked from app settings
+- [ ] Price ids seeded into the plan catalog (or left to `ensure_price`)
+- [ ] `FEOH_BILLING_STRIPE_API_KEY` in sops (`infra-secrets/feohledger/`)
+- [ ] `FEOH_BILLING_WEBHOOK_ENABLED` on, endpoint registered in Stripe
+- [ ] Provider flipped off `mock`
 - [ ] First test charge works end-to-end (use a
       [Stripe test card](https://stripe.com/docs/testing))
+- [x] ~~`billing_adapters/` written + wired into signup~~ — shipped
+- [x] ~~Webhook endpoint live, HMAC-verified~~ — shipped
+- [x] ~~Past-due state gates access~~ — shipped (`billing/entitlements.py`,
+      `billing/dunning_sweep.py`)
 
-Time: ~1 week (Stripe onboarding is 2 days, integration is 3–5 days).
-Cost: Stripe is 2.9% + 30¢ per successful card charge, or 0.8% for ACH.
+Time: ~2 days. The old estimate of "~1 week (integration is 3–5 days)"
+assumed you were building the integration; it ships.
+
+Cost (verified 2026-09-17): Stripe is 2.9% + 30¢ per successful card
+charge, or 0.8% for ACH **capped at $5**. Two fees this runbook used to
+omit and that Step 1 tells you to switch on: **Stripe Billing itself is
++0.7%**, and **Stripe Tax is +0.5%**. On a $500/mo plan paid by card
+that is roughly $19/mo of the $500, not the $15 the headline rate
+implies.
