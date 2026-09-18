@@ -846,7 +846,7 @@
 		part of it.
 	</p>
 
-<h2 id="complaints">13. Complaining to a supervisory authority</h2>
+	<h2 id="complaints">13. Complaining to a supervisory authority</h2>
 
 	<p>
 		If you think we have handled your personal data unlawfully, you can complain to a data
