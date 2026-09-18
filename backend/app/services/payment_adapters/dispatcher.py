@@ -44,16 +44,22 @@ def register_payment_adapter(provider: str):
 def get_payment_adapter(payment_config: dict | None) -> PaymentAdapter:
     """Build the adapter for the configured provider.
 
-    Config shape (lives in `Organization.settings.payments`):
+    Config shape (lives in `Organization.settings.payments`). This function
+    reads exactly one key — `provider` — and hands the whole dict to the
+    adapter, so the remaining keys are per-adapter and only that adapter's
+    module defines them:
 
         {
-            "program_type": "platform" | "byok",
-            "provider": "modern_treasury" | "mock",
-            "api_key": "...",            # BYOK only
-            "ledger_account_id": "...",  # Modern Treasury BYOK
-            "originating_account_id": "...",
-            "sandbox": true              # default true
+            "provider": "modern_treasury" | "column" | ... | "mock",
+            ...                          # whatever that adapter's __init__ reads
         }
+
+    For Modern Treasury that is `org_id`, `api_key`, `originating_account_id`
+    and `webhook_secret` (`modern_treasury.py`); `backend/docs/payments.md`
+    carries the per-provider tables. Note `program_type` and `sandbox` are
+    NOT read anywhere on the payments path — they are card/extraction keys,
+    and this docstring listed them until 2026-09-17, which is how they
+    reached the founder runbook as though they did something here.
 
     **No config → `mock`** (unchanged): that is the local-first default, and
     an org that has never configured a processor is a normal state.

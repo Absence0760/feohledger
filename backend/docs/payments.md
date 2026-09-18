@@ -819,10 +819,10 @@ Registered providers:
 
 | Provider | Methods | Use case |
 |---|---|---|
-| `mock` | ach, wire, check, rtp, virtual_card | Local dev — settles instantly with deterministic fake references. Default when `Organization.settings.payments` is empty. |
+| `mock` | ach, bacs, chaps, check, faster_payments, international_ach, international_wire, rtp, sepa, virtual_card, wire | Local dev — settles instantly with deterministic fake references. Default when `Organization.settings.payments` is empty. |
 | `modern_treasury` | ach, wire, rtp, check | Production. Real bank rails via Modern Treasury's REST API. Idempotent on `correlation_id`. |
 | `stripe_treasury` | ach, wire | Production. Stripe Treasury for orgs already on Stripe; settles via Treasury FinancialAccount. |
-| `increase` | ach, wire, check, rtp | Production. Increase API; same correlation-id idempotency story. |
+| `increase` | ach, wire, check | Production. Increase API; same correlation-id idempotency story. |
 | `column` | ach, wire | Production. Column.com bank-as-a-service. |
 | `dwolla` | ach | Production. ACH-only. Use when the org doesn't want a full Treasury account. |
 | `checkeeper` | check | Production. Outsourced check printing + mailing. Pairs with one of the ACH/wire adapters. |
@@ -832,14 +832,23 @@ Per-org config lives at `Organization.settings.payments`:
 ```json
 {
   "provider": "modern_treasury" | "mock",
-  "program_type": "byok",
   "org_id": "org_...",                // Modern Treasury org ID
   "api_key": "...",
   "originating_account_id": "internal_account_...",
-  "webhook_secret": "...",            // HMAC-SHA256 secret for signature verification
-  "sandbox": true
+  "webhook_secret": "..."             // HMAC-SHA256 secret for signature verification
 }
 ```
+
+Only `provider` is read by the dispatcher; the rest are per-adapter, and the
+block above is Modern Treasury's set. **`program_type` and `sandbox` are not
+read by any payment adapter** — they belong to the card and extraction
+families. Both appeared here until 2026-09-17 and had propagated into
+`docs/founder-runbooks/payment-rails-onboarding.md` as live settings. Modern
+Treasury selects sandbox by credential set, not by flag.
+
+`tests/test_payment_adapter_doc_drift.py` pins the Methods column of the table
+above to each adapter's `supported_methods`, so a rail added or dropped in code
+fails until this table follows.
 
 #### Lifecycle
 
