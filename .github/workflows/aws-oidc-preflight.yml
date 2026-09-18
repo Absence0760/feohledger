@@ -1,0 +1,112 @@
+name: AWS OIDC preflight
+
+# Proves the GitHub → STS handshake works, and nothing else.
+#
+# `aws-deploy.yml` is release-only and gated on the `AWS_DEPLOY_ENABLED`
+# variable, and the stack it deploys to does not exist yet — so the first time
+# anyone would learn the deploy role's trust policy is wrong is the first real
+# production release, which is the worst possible moment to find out.
+#
+# This runs on demand, assumes the same role through the same `production`
+# environment, calls `sts get-caller-identity`, and stops. No build, no push, no
+# infrastructure required. Deliberately NOT gated by `AWS_DEPLOY_ENABLED`: its
+# whole purpose is to be runnable *before* the deploy pipeline is armed.
+#
+# Why it exists (issue #449): the deploy role trusted
+# `repo:Absence0760/feohledger:environment:production`, but this repo is on
+# GitHub's IMMUTABLE SUBJECT CLAIMS, so the subject it actually presents carries
+# numeric org and repo IDs. Under `StringEquals` the slug form can never match.
+# The same latent break shipped to every account minted from the shared
+# baseline, and in `threkir` it cost four days — because the failure names
+# nothing: `configure-aws-credentials` retries twelve times and reports only
+# "Not authorized to perform sts:AssumeRoleWithWebIdentity", without printing
+# the subject it presented, and CloudTrail redacts `requestParameters` on an
+# AccessDenied so the role ARN is not there either.
+#
+# Hence the diagnostic step below. Failing loudly is the point; failing
+# *legibly* is what this workflow adds over the deploy job.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  assume:
+    name: Assume the deploy role
+    runs-on: ubuntu-latest
+
+    # MUST match the trust policy's `:environment:<name>` suffix. The subject
+    # GitHub mints is scoped to the environment, so running this job without the
+    # environment — or with a different one — presents a subject the role does
+    # not trust, and the failure looks identical to a wrong prefix.
+    environment: production
+
+    permissions:
+      id-token: write # OIDC: mint the token STS exchanges for credentials
+      contents: read
+
+    steps:
+      - name: Configure AWS credentials (OIDC)
+        id: creds
+        uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6.2.4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
+
+      - name: Confirm the assumed identity
+        run: |
+          set -euo pipefail
+          aws sts get-caller-identity --output json
+          echo "OIDC assume succeeded — the trust policy matches the subject GitHub issues."
+
+      # Only on failure, and only facts the log above cannot give you. Comparing
+      # the subject against the trust policy by eye is the whole diagnosis, and
+      # it is the step that was missing when this cost four days elsewhere.
+      #
+      # Both candidate forms are built from the `github` context rather than read
+      # from `repos/.../actions/oidc/customization/sub`, because that endpoint
+      # needs repo-admin rights and the default GITHUB_TOKEN does not have them —
+      # it would 403 at exactly the moment this step matters. `repository_id` and
+      # `repository_owner_id` are always present, so this cannot fail to print.
+      - name: Why it failed
+        if: failure()
+        env:
+          SLUG_FORM: "repo:${{ github.repository }}:environment:production"
+          ID_FORM: "repo:${{ github.repository_owner }}@${{ github.repository_owner_id }}/${{ github.event.repository.name }}@${{ github.repository_id }}:environment:production"
+        run: |
+          set -euo pipefail
+          {
+            echo '### OIDC preflight failed'
+            echo
+            echo 'The role must trust the subject GitHub actually issues. It is one of:'
+            echo
+            echo '| form | subject |'
+            echo '|---|---|'
+            echo "| slug | \`${SLUG_FORM}\` |"
+            echo "| immutable | \`${ID_FORM}\` |"
+            echo
+            echo 'Which one applies is a per-repo setting. Read it — do not guess:'
+            echo
+            echo '```bash'
+            echo "gh api repos/${GITHUB_REPOSITORY}/actions/oidc/customization/sub --jq .sub_claim_prefix"
+            echo '```'
+            echo
+            echo "Then compare against the role's trust policy:"
+            echo
+            echo '```bash'
+            echo 'aws iam get-role --role-name feohledger-deploy --profile feohledger \'
+            echo "  --query 'Role.AssumeRolePolicyDocument.Statement[0].Condition.StringEquals'"
+            echo '```'
+            echo
+            echo 'If the policy holds the slug form while this repo is on immutable subjects,'
+            echo 'that is issue #449. The fix belongs in the shared baseline module, NOT in'
+            echo 'this repo — see `infra/README.md` → "The deploy role is not owned here".'
+            echo
+            echo 'A non-subject cause worth ruling out: this job must run with'
+            echo '`environment: production`, because the subject is scoped to the environment'
+            echo 'and the failure looks identical when it is missing.'
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "slug form     : ${SLUG_FORM}"
+          echo "immutable form: ${ID_FORM}"

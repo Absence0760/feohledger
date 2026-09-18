@@ -39,6 +39,43 @@ Every resource in this module follows the SOC 2 baseline:
 | Public access block on every bucket | `s3.tf` — all four flags true |
 | Lifecycle cost guards | `s3.tf` — backups bucket expires dumps after `backup_retention_days` (90d default; deliberately NO Object Lock — the lifecycle IS the retention policy), and every lifecycle rule reaps incomplete multipart uploads after 7 days |
 
+### The deploy role is not owned here
+
+`feohledger-deploy` — the role `.github/workflows/aws-deploy.yml` assumes through
+OIDC, whose ARN is the `AWS_DEPLOY_ROLE_ARN` environment secret — is **not in
+this module and must not be added to it.** It is minted by the estate account
+bootstrap (`~/github/templates/infra/modules/project-baseline`, driven by
+`~/github/templates/scripts/new-project-account.sh`), its inputs live in
+`Absence0760/infra-secrets` → `feohledger/bootstrap.tfvars`, and its state is in
+the mgmt account's bucket. Change the trust policy there, never here — the
+module is shared by every project account, so fixing it locally would fix this
+account and leave the next one broken.
+
+**The gotcha that makes this worth its own section (issue #449):** the trust
+policy pins `token.actions.githubusercontent.com:sub` with `StringEquals`, and
+this repo is on GitHub's **immutable subject claims** — the subject it presents
+carries numeric org and repo IDs, not the slug:
+
+```
+repo:Absence0760@21693150/feohledger@1180437106:environment:production
+```
+
+Whether a repo has immutable subjects is not derivable from anything Terraform
+can see, and across this org some do and some do not. So read it, never build it
+from the slug:
+
+```bash
+gh api repos/Absence0760/feohledger/actions/oidc/customization/sub --jq .sub_claim_prefix
+```
+
+Getting it wrong is silent: the role mints fine, the plan is clean, and the first
+deploy fails `AssumeRoleWithWebIdentity` with "Not authorized" — naming neither
+the expected nor the received subject, while CloudTrail redacts
+`requestParameters` on an AccessDenied so the role ARN is not there either. Run
+**`AWS OIDC preflight`** (`.github/workflows/aws-oidc-preflight.yml`,
+`workflow_dispatch`) to exercise the handshake on its own; it prints the subject
+this repo presents when it fails.
+
 ### Caveat: Object Lock is immutable
 
 `object_lock_enabled` on `aws_s3_bucket` is **set at creation and cannot be toggled afterwards**. The buckets defined in `s3.tf` are net-new. For any pre-existing bucket (e.g. one that predated this module):
