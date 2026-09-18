@@ -83,7 +83,7 @@
 		"gen:marketing": "bash assets/marketing/gen-marketing.sh",
 		"gen:illustrations": "python3 assets/illustrations/gen_empty_states.py",
 
-		"//-- check --": "Static analysis + formatting per workspace: ruff (backend — venv required), svelte-check (frontend), flutter analyze (mobile). lint:frontend:e2e typechecks tests-e2e/, which svelte-check skips (its tsconfig include covers src/ only) — see frontend/tsconfig.e2e.json. check = lint.",
+		"//-- check --": "Static analysis + formatting per workspace: ruff (backend — venv required), svelte-check (frontend), flutter analyze (mobile). lint:frontend:e2e typechecks tests-e2e/, which svelte-check skips (its tsconfig include covers src/ only) — see frontend/tsconfig.e2e.json. check = lint. check:test-durations guards the pytest-split baseline the CI shard matrix is partitioned by (backend venv required; collects the suite in ~15s and needs NO services, which is why it runs in CI's Backend lint job rather than the shards) — its own coverage rides test:backend as tests/test_check_test_durations.py.",
 		"lint:backend": "cd backend && ruff check .",
 		"lint:frontend": "cd frontend && pnpm check",
 		"lint:frontend:e2e": "cd frontend && pnpm check:e2e",
@@ -99,6 +99,7 @@
 		"check:warning-messages": "cd backend && python scripts/gen_invoice_warning_messages.py --check",
 		"check:icons": "python3 assets/check_icons.py",
 		"check:illustrations": "python3 assets/illustrations/gen_empty_states.py --check",
+		"check:test-durations": "cd backend && python scripts/check_test_durations.py",
 
 		"//-- test --": "Test suites per surface: pytest (backend — venv + core services required), Playwright e2e (frontend), flutter test (mobile). test:scim/test:saml need the local IdPs up + seeded (idp:up then scim:seed/saml:seed); test:erp needs fake-erp up (erp:up). test:scripts validates this file's script targets; test:compliance covers the compliance-drift detector (scripts/check_compliance_drift.mjs), which the compliance-drift CI workflow runs against a PR diff; test:subprocessors covers the register guard behind check:subprocessors; test:icons proves check:icons fails on a broken icon set (stdlib python3, CI's Brand assets job); test:illustrations does the same for check:illustrations.",
 		"test:backend": "cd backend && pytest",

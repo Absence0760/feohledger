@@ -125,6 +125,19 @@ jobs:
       - name: Invoice-warning message catalogue is in sync with the catalogue
         run: python scripts/gen_invoice_warning_messages.py --check
 
+      # The `backend-test` matrix below is partitioned by the committed
+      # `backend/.test_durations`, and nothing regenerates that file — it decays
+      # with every test added until a shard is reaped at the 40-minute cap, which
+      # is how the 4-shard layout failed before #447 widened it to 8. This gives
+      # the decay a voice while it is still cheap to fix.
+      #
+      # It lives HERE rather than in the shard matrix because collection needs no
+      # Postgres/Redis/MinIO (the harness builds engines lazily inside fixtures),
+      # so it costs ~15s in a job with no service containers instead of being
+      # paid for eight times over in jobs that have them.
+      - name: pytest-split baseline still describes the suite
+        run: python scripts/check_test_durations.py
+
   # The backend pytest suite (~10,100 tests against a real Postgres/Redis/MinIO)
   # would run ~60 min as one serial job — the longest job in CI. It's sharded the
   # same way the Playwright e2e job below is: a matrix of runners, each booting
