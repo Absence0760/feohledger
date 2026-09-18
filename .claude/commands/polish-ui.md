@@ -17,7 +17,7 @@ Polish the UI/UX of `$ARGUMENTS` using the appropriate polisher agent.
 
 - A purely-functional Settings / Login / change-password / profile / MFA page or screen with no real-estate or scanability problem.
 - A detail page / screen that already has rich UI (`/workflows/[id]`, `invoice_detail_screen.dart`, etc.) — polish on detail surfaces has a worse cost/value ratio than on index surfaces.
-- A request that's really a feature, not a polish — "add a chart of invoice volume over time", "add bookmarkable filter URLs", "add a push-notification settings panel". Surface as a feature plan, not a polish.
+- A request that's really a feature, not a polish — "add a chart of invoice volume over time", "add a push-notification settings panel". Surface as a feature plan, not a polish. (Bookmarkable filter/sort URLs are *not* in this category any more — URL-backed list state is the established convention on ~24 routes, so closing that gap on a route that still keeps filters in local `$state` is ordinary polish.)
 - An asks-for-everything sweep ("polish all pages / all screens"). Pick one and tell the user to invoke this command again for the next.
 
 ## Resolving the target — and choosing the polisher
