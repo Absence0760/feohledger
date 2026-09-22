@@ -1101,8 +1101,20 @@ who authored the standing instruction, and anyone who later repointed its vendor
 or amount. Migration 0097 added the set; see § *A recurring template's editor is
 implicated too* below.
 
+One other path writes the set: **the inter-company mirror**. Its vendor, amount
+and currency are the source payable's, copied verbatim, so everyone implicated in
+the source — its `uploaded_by_id` **and** its own `segregation_actor_ids`, read
+through the same `approval_chain.implicated_actors` the predicate refuses on — is
+implicated in the mirror, and the routing actor is the mirror's uploader. Both
+source columns travel together: carrying only one would bar a source *editor*
+from the mirror while leaving the source *uploader* free, or the reverse.
+Entities subdivide a tenant's books; they are not a boundary at which a payable's
+authors stop being its authors ([decisions.md](decisions.md) §193).
+
 Nothing else writes the set. Every other creation path has a single actor, so the
 column stays NULL and the reading below is unchanged.
+`backend/tests/test_invoice_uploader_stamping.py` pins both writers and fails if
+a third starts writing the set without being declared.
 
 #### The other way SoD can be silently off: a NULL uploader
 
@@ -1121,7 +1133,7 @@ signed-in employee stamps the column —
 | `POST /api/workflow/upload` (file upload) | the caller |
 | `POST /api/invoices/import-csv` (CSV import) | the caller |
 | `POST /api/recurring/{id}/generate-now` | the caller |
-| `POST /api/invoices/{id}/route-intercompany` (the mirror payable) | the routing actor |
+| `POST /api/invoices/{id}/route-intercompany` (the mirror payable) | the routing actor — and the source payable's whole implicated set on `segregation_actor_ids` |
 | the recurring-invoice background sweep | `RecurringInvoiceTemplate.created_by_user_id` — the employee who authored the template (NULL only for a template predating migration 0096) |
 | email intake, inbound PEPPOL | NULL — system ingestion, no human |
 | supplier-portal submit, portal PO flip | NULL — the actor is a tenant-scoped `VendorUser`, who holds no employee JWT and can never reach an approval endpoint |

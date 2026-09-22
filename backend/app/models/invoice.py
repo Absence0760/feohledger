@@ -117,9 +117,11 @@ class Invoice(Base, EntityMixin, TimestampMixin):
     # more than one: a recurring template's author writes the standing
     # instruction, and anyone who later repoints its vendor or amount shapes the
     # payable just as much (see `recurring_invoice_templates.material_editor_ids`
-    # and `recurring_invoices.implicated_actor_ids`). `generate_one` is the only
-    # writer today; every other creation path has no second actor to name and
-    # leaves this NULL.
+    # and `recurring_invoices.implicated_actor_ids`). Two writers:
+    # `recurring_invoices.generate_one` (the template's author ∪ material
+    # editors) and `intercompany.route_intercompany_invoice` (the source
+    # payable's whole implicated set, carried onto its mirror). Every other
+    # creation path has no second actor to name and leaves this NULL.
     #
     # NULL / empty means "nobody beyond the uploader", which is why it does not
     # disturb the fail-open NULL-uploader reading the three actor-less ingestion

@@ -254,6 +254,36 @@ def test_violates_segregation_opt_out_beats_the_implicated_set_too():
     assert violates_segregation(invoice, editor, {"require_segregation": False}) is False
 
 
+def test_implicated_actors_is_the_uploader_plus_the_set_stringified():
+    """The single definition of "who is implicated in this payable". The
+    inter-company mirror inherits exactly this set from its source, so it has to
+    be the same set the predicate refuses — uploader and set together, in one
+    comparable shape whichever form the ids arrive in."""
+    from app.services.approval_chain import implicated_actors
+
+    uploader, author, editor = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    invoice = _make_invoice(uploaded_by_id=uploader, segregation_actor_ids=[str(author), editor])
+    assert implicated_actors(invoice) == {str(uploader), str(author), str(editor)}
+
+    # Nobody created it and nobody shaped it: the empty set, not {"None"}.
+    assert implicated_actors(_make_invoice()) == set()
+    # A subject without the attribute (an expense-report shim that forgot it)
+    # still answers with its uploader rather than raising.
+    assert implicated_actors(SimpleNamespace(uploaded_by_id=uploader)) == {str(uploader)}
+
+
+def test_violates_segregation_is_membership_in_implicated_actors():
+    """The predicate and the set cannot drift: every implicated actor is
+    refused, nobody else is, and a ``None`` actor is never a breach."""
+    from app.services.approval_chain import implicated_actors, violates_segregation
+
+    invoice = _make_invoice(uploaded_by_id=uuid.uuid4(), segregation_actor_ids=[str(uuid.uuid4())])
+    for actor in implicated_actors(invoice):
+        assert violates_segregation(invoice, uuid.UUID(actor), {}) is True
+    assert violates_segregation(invoice, uuid.uuid4(), {}) is False
+    assert violates_segregation(_make_invoice(), None, {}) is False
+
+
 def test_check_segregation_raises_403_for_an_implicated_actor():
     """The raising half must refuse the set, not just the column."""
     from app.services.approval_chain import check_segregation

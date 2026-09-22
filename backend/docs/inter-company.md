@@ -70,6 +70,16 @@ freshly provisioned tenants (`create_all`, not Alembic) get it as well.
    as its uploader (`approval_chain.violates_segregation` reads a NULL there as
    "no employee created this row"). Without the stamp, the one person who caused
    a live liability to appear under another entity could also sign it off.
+   **Everyone implicated in the source is implicated in the mirror, too.** The
+   mirror's terms are the source's, copied verbatim, so its
+   `segregation_actor_ids` is the source's whole implicated set —
+   `approval_chain.implicated_actors(source)`, i.e. the source's uploader plus
+   its own `segregation_actor_ids` (a recurring template's author and material
+   editors) — minus the routing actor, who is already the uploader. Snapshotted
+   at routing time like every implicated set, and NULL (never `[]`) when nobody
+   is left. So the employee who uploaded or shaped the source payable cannot
+   approve its mirror under the counterparty entity, while anyone with no hand in
+   either still can. Reasoning: `docs/decisions.md` §193.
 4. **Audit** — a PII-free `invoice.intercompany_routed` row on **both** invoices
    (ids + entity ids only) via `dispatch_audit`.
 
@@ -163,3 +173,7 @@ a direct repeat POST still yields exactly one mirror; plus a clerk 403).
   `counterparty_entity_id`
 - the partial unique index is declared on the model, so `create_all`-provisioned
   tenants get it too
+- segregation of duties crosses the entity boundary: the source's uploader is
+  refused the mirror's approval (403) while an uninvolved approver succeeds; a
+  source's own `segregation_actor_ids` member is refused too; a router who
+  uploaded the source is named once, as the mirror's uploader

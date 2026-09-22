@@ -7734,3 +7734,72 @@ Four calls inside it:
 
 The supplier portal is untouched: a `VendorUser` signs in with a password and no
 SSO can close it, so there the password remains the step-up proof it always was.
+
+## 193. Segregation of duties is not scoped by entity: a mirror inherits its source's implicated set
+
+**Decided:** 2026-09-21 · `backend/app/services/intercompany.py` ·
+`backend/app/services/approval_chain.py` · `backend/tests/test_intercompany.py`
+
+§152 made segregation key on a set — `Invoice.uploaded_by_id` ∪
+`Invoice.segregation_actor_ids` — and left the inter-company mirror out of it on
+purpose, stamping `segregation_actor_ids=None` with the reasoning in place: the
+mirror's segregation subject had always been its own creator, the routing actor,
+and propagating the set while still not propagating the source's uploader would
+bar a source *editor* from the mirror while leaving the source *uploader* free.
+It called the real question an entity-scope one — should shaping a payable
+under one entity bar you from signing its mirror under another? — and filed it.
+The effect of the deferral was that the employee who uploaded a payable, or a
+recurring template's author or material editor, could approve that payable's
+mirror under the counterparty entity as long as someone else pressed "route".
+
+**The answer is yes, and it follows from what segregation is about rather than
+from anything entity-specific.** The subject of the control is the payable's
+terms (§152, §169): whoever caused them to be what they are must not also sign
+them off. The mirror has no terms of its own — `route_intercompany_invoice`
+copies vendor, amount and currency verbatim and only chooses the counterparty.
+So the people who shaped the source shaped the mirror, and an entity is the
+wrong place for that to stop being true: entities subdivide one tenant's books
+(`docs/multi-entity.md`), the approvers on both sides are the same
+control-plane users, and an inter-company charge is one economic transaction
+recorded twice. Scoping the rule by entity would turn "route it through a
+sibling subsidiary" into a way for a payable's author to approve it.
+
+So **both** of the source's columns travel, which is the consistency §152 asked
+for: the mirror's `segregation_actor_ids` is the source's uploader ∪ the
+source's own set, minus the routing actor, who is the mirror's uploader. Three
+calls inside it:
+
+1. **One definition of "implicated", shared by the gate and the mirror.**
+   `approval_chain.implicated_actors(invoice)` is the uploader ∪ the set,
+   stringified; `violates_segregation` is now membership in it, and the mirror
+   copies it. The predicate had been reading the two columns separately, so a
+   third input added to one place would have silently not reached the other —
+   now it reaches both. The refactor preserves the predicate's answers: a `None`
+   actor still never reads as a breach, and ids compare as strings on both
+   columns (the uploader was compared as a `UUID`, which was equivalent for
+   every caller, since all of them pass `UUID`s).
+
+2. **Snapshotted at routing, like every implicated set.** §152 rejected
+   resolving the set live because a payable's terms are frozen when it is
+   raised; the mirror's are frozen when it is routed, so its implicated set is
+   too. A later edit to the source (which records no editor today anyway)
+   cannot retroactively bar or un-bar anyone on the mirror.
+
+3. **The routing actor is named once.** They land in `uploaded_by_id` and are
+   dropped from the set, the same subtraction `recurring_invoices.
+   implicated_actor_ids` makes, so the two columns never appear to disagree. An
+   empty result is NULL, not `[]`, the shape every creation path writes for
+   "nobody beyond the uploader".
+
+What this does **not** do: implicate the source's *approver*. Approving is not
+shaping, and the same reviewer signing both halves of an inter-company charge
+is ordinary practice; segregation separates the maker from the checker, not one
+checker from another. A tenant with nobody left to approve a mirror (a
+two-person team where one uploaded and the other routed) has the same
+`require_segregation: false` step opt-out every other approval has.
+
+`test_invoice_uploader_stamping.py` now declares the set's writers in
+`_SEGREGATION_SET_WRITERS` — the recurring generator and the mirror — pins that
+each passes a real value, and fails if a third site starts writing the set
+without being declared, so "two writers" cannot quietly go stale the way the
+old "`generate_one` is the only writer" comment would have.
