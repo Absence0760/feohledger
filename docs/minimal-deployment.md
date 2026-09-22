@@ -158,13 +158,13 @@ resize is a stop → change-type → start. Add 2 GB of swap either way.
 
 ### 2. Production compose stack (`deploy/compose.prod.yml` — built)
 
-Four services (see [`deploy/README.md`](../deploy/README.md) for operations).
-Every image is pinned to a release tag plus its index digest
-(`repo:tag@sha256:…`), the same refs `backend/docker-compose.yml` uses for
-Postgres and Redis, so a redeploy can never pick up an upstream retag; bumps
-arrive as Dependabot `docker-compose` PRs
+Four long-running services, plus a one-shot build (see
+[`deploy/README.md`](../deploy/README.md) for operations). Every image is pinned
+to a release tag plus its index digest (`repo:tag@sha256:…`), the same refs
+`backend/docker-compose.yml` uses — and CI tests — for Postgres and Redis, so a
+redeploy can never pick up an upstream retag; bumps arrive as Dependabot
+`docker-compose` PRs
 ([`backend/docs/docker.md` § Image pinning](../backend/docs/docker.md#image-pinning)).
-`deploy.sh`'s frontend-build `NODE_IMAGE` is pinned the same way, by hand.
 
 - `postgres` — `pgvector/pgvector` on its `-pg16` line (Postgres 16),
   volume-backed, **no host port** (compose-network only); password from the
@@ -188,6 +188,11 @@ arrive as Dependabot `docker-compose` PRs
   by hand):
   - `feohledger.com` + each tenant host → SPA (`try_files {path} /index.html`)
   - `api.feohledger.com` → `reverse_proxy api:8000`
+- `frontend-build` — the Node 24 alpine container `deploy.sh` builds the SPA
+  in (`docker compose run --rm frontend-build`), with the repo bind-mounted and
+  the pnpm store cached in a volume. A `build` profile keeps `up` from ever
+  starting it. It lives in the compose file, not as a `docker run` in
+  `deploy.sh`, so Dependabot reads its image (`docs/decisions.md` §203).
 
 The frontend is built by the deploy script with
 `PUBLIC_API_URL=https://<API_DOMAIN>` and `PUBLIC_SITE_URL=https://<APP_DOMAIN>`
@@ -244,9 +249,9 @@ Copy `prod.sops.yaml` onto the VM as `deploy/prod.sops.yaml` (`deploy/decrypt-en
 checks it without deploying), then run
 `deploy/deploy.sh`: it preflights its own prerequisites and the required env
 keys (clear errors before any work happens), pulls main, decrypts secrets,
-builds the frontend in a `node:24` container (`PUBLIC_API_URL` baked from
-`API_DOMAIN`, `PUBLIC_SITE_URL` from `APP_DOMAIN`; pnpm store cached in a
-volume) and the backend image, runs
+builds the frontend in the `frontend-build` service's `node:24` container
+(`PUBLIC_API_URL` baked from `API_DOMAIN`, `PUBLIC_SITE_URL` from `APP_DOMAIN`;
+pnpm store cached in a volume) and the backend image, runs
 `alembic upgrade head && python scripts/migrate_all_tenants.py` **before**
 the new API serves traffic (same ordering contract as the future ECS
 pipeline), then rolls the containers with `up -d --wait` — the deploy fails

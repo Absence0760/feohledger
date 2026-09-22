@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Deploy / update the minimal single-VM stack (docs/minimal-deployment.md).
 # Run ON the VM from anywhere: preflight → pull main → decrypt secrets →
-# build frontend (in a node:24 container — no Node/pnpm needed on the VM) →
+# build frontend (compose.prod.yml's one-shot `frontend-build` service, a
+# node:24 container — no Node/pnpm needed on the VM) →
 # build backend → run migrations BEFORE the new code serves traffic (control
 # plane + every tenant DB — same ordering contract as the future ECS
 # pipeline) → roll containers and wait for the API healthcheck.
@@ -12,14 +13,6 @@ cd "$(dirname "$0")"
 REPO_ROOT=$(cd .. && pwd)
 
 COMPOSE=(docker compose -f compose.prod.yml)
-# Node matches CI's setup-node (24). pnpm is deliberately not pinned here — the
-# frontend build reads it from package.json (below). The named volume caches the
-# pnpm store across deploys so rebuilds don't re-download the world.
-# Pinned to a release tag AND its index digest like every compose image, so a
-# production deploy can't build with whatever `24-alpine` meant that morning.
-# No Dependabot ecosystem reads a shell variable: bump it by hand when CI's
-# setup-node line moves (`docker buildx imagetools inspect node:<tag>`).
-NODE_IMAGE=node:24.21.0-alpine@sha256:ebfe2f90462722a7a4de65e91990e97fe0d401c70e0e762c5b53302f905ec1c1
 
 die() {
 	echo "deploy.sh: $*" >&2
@@ -74,13 +67,16 @@ if [ "$DO_FRONTEND" = 1 ]; then
 	PNPM_SPEC=$(sed -nE 's/^[[:space:]]*"packageManager":[[:space:]]*"(pnpm@[^"+]+).*/\1/p' "$REPO_ROOT/frontend/package.json")
 	[ -n "$PNPM_SPEC" ] || die "frontend/package.json declares no pnpm packageManager, so there is no pnpm version to build with."
 	echo "==> building frontend (${PNPM_SPEC}, PUBLIC_API_URL=https://${API_DOMAIN}, PUBLIC_SITE_URL=https://${APP_DOMAIN})"
-	docker run --rm \
-		-v "$REPO_ROOT":/repo -w /repo/frontend \
-		-v feoh-prod-pnpm-store:/pnpm-store \
-		-e npm_config_store_dir=/pnpm-store \
+	# The container, its pinned Node image, the repo mount and the pnpm-store
+	# cache are the `frontend-build` service in compose.prod.yml, where the
+	# docker-compose Dependabot entry keeps the image current — nothing here
+	# restates an image ref (docs/decisions.md §203). Naming the service
+	# activates its `build` profile.
+	"${COMPOSE[@]}" run --rm -T \
+		-e PNPM_SPEC="$PNPM_SPEC" \
 		-e PUBLIC_API_URL="https://${API_DOMAIN}" \
 		-e PUBLIC_SITE_URL="https://${APP_DOMAIN}" \
-		"$NODE_IMAGE" sh -ec "npm i -g ${PNPM_SPEC} >/dev/null 2>&1 && pnpm install --frozen-lockfile && pnpm build"
+		frontend-build
 fi
 
 # ── Backend ──────────────────────────────────────────────────────────────────
