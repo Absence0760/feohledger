@@ -305,7 +305,7 @@ void main() {
         'po_match': {
           'match_type': '3-way',
           'status': 'mismatch',
-          'variance_pct': 12.5,
+          'amount_variance_pct': 12.5,
           'within_tolerance': false,
           'issues': ['Amount variance', 'Quantity mismatch'],
         },
@@ -318,6 +318,44 @@ void main() {
       expect(m.withinTolerance, isFalse);
       expect(m.issues, ['Amount variance', 'Quantity mismatch']);
       expect(m.isNoPo, isFalse);
+    });
+
+    test('reads the variance off the key the matcher writes', () {
+      // `MatchResult.to_json_dict` writes `amount_variance_pct` at the top
+      // level; `variance_pct` exists only inside `details`. Reading the latter
+      // left the variance permanently blank.
+      final m = Invoice.fromJson({
+        'id': 'inv1',
+        'status': 'ready_for_review',
+        'created_at': '2026-01-01T12:00:00',
+        'po_match': {
+          'match_type': '2-way',
+          'status': 'mismatch',
+          'amount_variance_pct': 20.0,
+          'details': {'variance_pct': 20.0},
+        },
+      }).poMatch!;
+      expect(m.variancePct, 20.0);
+    });
+
+    test('a currency mismatch carries no variance', () {
+      // Invoice and PO in different currencies: the matcher compares nothing
+      // and sends `amount_variance_pct: null` (decisions §197).
+      final m = Invoice.fromJson({
+        'id': 'inv1',
+        'status': 'ready_for_review',
+        'created_at': '2026-01-01T12:00:00',
+        'po_match': {
+          'match_type': '2-way',
+          'status': 'mismatch',
+          'amount_variance_pct': null,
+          'currency_check': 'different',
+          'po_currency': 'USD',
+          'issues': ['Currency mismatch: invoice in EUR, PO in USD — amounts not compared'],
+        },
+      }).poMatch!;
+      expect(m.status, 'mismatch');
+      expect(m.variancePct, isNull);
     });
 
     test('po_match is null when absent, isNoPo when status=no_po', () {

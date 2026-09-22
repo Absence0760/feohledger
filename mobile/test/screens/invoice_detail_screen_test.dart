@@ -825,7 +825,7 @@ void main() {
       poMatch: {
         'match_type': '3-way',
         'status': 'mismatch',
-        'variance_pct': 8.0,
+        'amount_variance_pct': 8.0,
         'within_tolerance': false,
         'issues': ['Amount variance of 8.0%'],
       },
@@ -839,6 +839,8 @@ void main() {
     expect(find.text('PO Match'), findsOneWidget);
     expect(find.text('3-way match'), findsOneWidget);
     expect(find.text('Mismatch'), findsOneWidget);
+    // Read off `amount_variance_pct`, the key the matcher actually writes.
+    expect(find.text('+8.0% variance'), findsOneWidget);
   });
 
   testWidgets('shows ERP status derived from the audit log', (tester) async {
