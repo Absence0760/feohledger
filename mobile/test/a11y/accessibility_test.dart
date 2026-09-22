@@ -54,6 +54,7 @@ import 'package:feohledger_mobile/widgets/invoice_warnings_panel.dart';
 import 'package:feohledger_mobile/widgets/kpi_card.dart';
 import 'package:feohledger_mobile/widgets/notification_bell.dart';
 import 'package:feohledger_mobile/widgets/notification_list_tile.dart';
+import 'package:feohledger_mobile/widgets/partial_conversion_note.dart';
 import 'package:feohledger_mobile/widgets/status_badge.dart';
 import 'package:feohledger_mobile/widgets/vendor_list_tile.dart';
 import 'package:feohledger_mobile/widgets/vendor_status_badge.dart';
@@ -268,6 +269,25 @@ void main() {
 
       await expectLater(tester, meetsGuideline(textContrastGuideline));
       expect(find.bySemanticsLabel('For Review: 7, 3 overdue'), findsOneWidget);
+      handle.dispose();
+    });
+  });
+
+  group('PartialConversionNote', () {
+    testWidgets('clears contrast and is announced as its sentence alone',
+        (tester) async {
+      // The dashboard and cash-flow part-conversion disclosures. Amber-reading
+      // brown.shade800 on the scaffold, like the adaptive tab's note — a true
+      // orange fails here — and the info glyph is decorative, so the
+      // sentence is the whole announcement.
+      final handle = tester.ensureSemantics();
+      const message = 'Partial: 2 invoices with no exchange rate into EUR, '
+          'counted at face value — the bands below mix currencies by that '
+          'much.';
+      await tester.pumpWidget(_host(const PartialConversionNote(message)));
+
+      await expectLater(tester, meetsGuideline(textContrastGuideline));
+      expect(find.bySemanticsLabel(message), findsOneWidget);
       handle.dispose();
     });
   });
@@ -904,6 +924,9 @@ void main() {
                   'pending_amount': 1000.0,
                   'discount_eligible_amount': 0.0,
                   'count': 4,
+                  // Non-zero, so the part-conversion note renders in the
+                  // sweep below too.
+                  'unconverted_count': 1,
                 },
               }),
               200,
@@ -917,6 +940,7 @@ void main() {
               'horizon_days': 90,
               'opening_balance': 6000.0,
               'opening_balance_source': 'settings',
+              'unconverted_count': 1,
               'threshold': 5000.0,
               'periods': [
                 {
@@ -950,6 +974,7 @@ void main() {
       // The low-balance alert exposes one merged announcement (WCAG 1.3.1).
       expect(find.bySemanticsLabel(RegExp('^Low balance alert')),
           findsOneWidget);
+      expect(find.byType(PartialConversionNote), findsWidgets);
       handle.dispose();
     });
   });

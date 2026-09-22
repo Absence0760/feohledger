@@ -48,6 +48,11 @@
   "dashboardCachedBanner": "Données en cache — serveur injoignable",
   "dashboardErrorPrefix": "Erreur : {error}",
   "dashboardInvoiceCount": "{count, plural, one {{count} facture} other {{count} factures}}",
+  "partialConversionCurrencyFallback": "la devise de reporting",
+  "dashboardKpiUnconverted": "{label} : partiel — {count, plural, one {{count} facture} other {{count} factures}} sans taux de change vers {currency}, comptabilisées à leur valeur faciale ; le total mélange donc les devises d’autant.",
+  "dashboardAgingUnconverted": "Partiel : {count, plural, one {{count} facture} other {{count} factures}} sans taux de change vers {currency}, comptabilisées à leur valeur faciale — les tranches ci-dessous mélangent les devises d’autant.",
+  "dashboardTopVendorsUnconverted": "Partiel : {count, plural, one {{count} facture} other {{count} factures}} sans taux de change vers {currency}, comptabilisées à leur valeur faciale — ces fournisseurs ne sont donc pas tous classés dans la même devise. Enregistrez le taux manquant avant de vous fier au classement.",
+  "dashboardVendorFaceValueCount": "{count, plural, one {{count} à valeur faciale} other {{count} à valeur faciale}}",
 
   "invoicesTitle": "Factures",
   "invoicesSearchHint": "Rechercher des factures…",
@@ -432,6 +437,8 @@
   "cashFlowPositionRowLabel": "{period} : ouverture {opening}, sortie {outflow}, clôture {closing}",
   "cashFlowBelowThresholdSuffix": ", sous le seuil",
   "cashFlowLowBalanceAlertLabel": "Alerte de solde faible. {message}",
+  "cashFlowForecastUnconverted": "Partiel : {count, plural, one {{count} facture} other {{count} factures}} sans taux de change vers {currency}, comptabilisées à leur valeur faciale — ces sorties, ainsi que les totaux engagés et en attente ci-dessus, mélangent les devises d’autant.",
+  "cashFlowPositionUnconverted": "Non converti : {count, plural, one {{count} facture} other {{count} factures}} sans taux de change vers {currency}, comptabilisées à leur valeur faciale — le solde courant ci-dessous et la fin prévue ci-dessus mélangent donc des devises. Enregistrez le taux manquant avant d’agir sur ces chiffres.",
 
   "contractsTitle": "Contrats",
   "contractsSearchHint": "Rechercher des contrats…",

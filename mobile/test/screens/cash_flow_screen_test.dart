@@ -11,6 +11,7 @@ import 'package:feohledger_mobile/l10n/gen/app_localizations.dart';
 import 'package:feohledger_mobile/screens/cash_flow_screen.dart';
 import 'package:feohledger_mobile/stores/cash_flow_store.dart';
 import 'package:feohledger_mobile/widgets/kpi_card.dart';
+import 'package:feohledger_mobile/widgets/partial_conversion_note.dart';
 
 Widget _localized(Widget home) => MaterialApp(
       localizationsDelegates: AppLocalizations.localizationsDelegates,
@@ -24,7 +25,7 @@ http.Response _json(Object body, [int status = 200]) => http.Response(
       headers: {'content-type': 'application/json'},
     );
 
-Map<String, dynamic> _forecastBody() => {
+Map<String, dynamic> _forecastBody({int unconverted = 0}) => {
       'granularity': 'week',
       'horizon_days': 90,
       'periods': [
@@ -43,6 +44,8 @@ Map<String, dynamic> _forecastBody() => {
         'pending_amount': 1000.0,
         'discount_eligible_amount': 0.0,
         'count': 4,
+        // Commitments added at FACE value for want of a rate lock.
+        'unconverted_count': unconverted,
       },
     };
 
@@ -54,6 +57,7 @@ Map<String, dynamic> _positionBody({
   // backend cannot produce. `null` here models the ONE case that reaches the
   // screen without it: a build talking to a backend older than the field.
   Object? currency = 'USD',
+  int unconverted = 0,
 }) =>
     {
       'granularity': 'week',
@@ -61,6 +65,7 @@ Map<String, dynamic> _positionBody({
       'opening_balance': 10000.0,
       'opening_balance_source': 'settings',
       'opening_balance_currency': ?currency,
+      'unconverted_count': unconverted,
       'threshold': 5000.0,
       'periods': [
         {
@@ -75,9 +80,13 @@ Map<String, dynamic> _positionBody({
       'breaches': breaches ?? [],
     };
 
-MockClient _client({Map<String, dynamic>? position}) => MockClient((req) async {
+MockClient _client({
+  Map<String, dynamic>? forecast,
+  Map<String, dynamic>? position,
+}) =>
+    MockClient((req) async {
       if (req.url.path.endsWith('/analytics/cashflow_forecast')) {
-        return _json(_forecastBody());
+        return _json(forecast ?? _forecastBody());
       }
       if (req.url.path.endsWith('/analytics/cash_position')) {
         return _json(position ?? _positionBody());
@@ -239,5 +248,75 @@ void main() {
 
     expect(horizons, contains('30'));
     expect(CashFlowStore.instance.horizonDays, 30);
+  });
+
+  group('part-converted legs are disclosed beside their figures', () {
+    // Both legs keep a commitment with no rate into the reporting currency in
+    // at FACE value and count it — dropping it would understate the outflow.
+    // Each count is said in the section whose figures it touches, and names
+    // the KPI totals above that are the same rollup.
+    testWidgets('the forecast and the running balance each say how many rows '
+        'went in at face value', (tester) async {
+      ApiClient().debugConfigure(
+        client: _client(
+          forecast: _forecastBody(unconverted: 2),
+          position: _positionBody(unconverted: 1),
+        ),
+      );
+
+      await tester.pumpWidget(_localized(const CashFlowScreen()));
+      await _pumpUntil(tester, find.byType(KpiCard));
+
+      final forecastNote = find.text(
+        'Partial: 2 invoices with no exchange rate into USD, counted at face '
+        'value — these outflows, and the committed and pending totals above, '
+        'mix currencies by that much.',
+      );
+      await tester.scrollUntilVisible(forecastNote, 200);
+      expect(forecastNote, findsOneWidget);
+
+      final positionNote = find.text(
+        'Unconverted: 1 invoice with no exchange rate into USD, counted at '
+        'face value — so the running balance below, and the projected end '
+        'balance above, mix currencies. Book the missing rate before acting '
+        'on these figures.',
+      );
+      await tester.scrollUntilVisible(positionNote, 200);
+      expect(positionNote, findsOneWidget);
+      expect(find.byType(PartialConversionNote), findsNWidgets(2));
+    });
+
+    testWidgets('a fully converted horizon says nothing', (tester) async {
+      ApiClient().debugConfigure(client: _client());
+
+      await tester.pumpWidget(_localized(const CashFlowScreen()));
+      await _pumpUntil(tester, find.byType(KpiCard));
+      await tester.scrollUntilVisible(find.text('Cash Position'), 200);
+
+      expect(find.byType(PartialConversionNote), findsNothing);
+      expect(find.textContaining('face value'), findsNothing);
+    });
+
+    testWidgets('with no provable currency the note names the reporting '
+        'currency in words rather than inventing a code', (tester) async {
+      // The payload named no code and the org store resolves none (its fetch
+      // 404s here), so every figure renders bare — and the note must not be
+      // the one place a symbol appears.
+      ApiClient().debugConfigure(
+        client: _client(
+          position: _positionBody(currency: null, unconverted: 1),
+        ),
+      );
+
+      await tester.pumpWidget(_localized(const CashFlowScreen()));
+      await _pumpUntil(tester, find.byType(KpiCard));
+
+      final positionNote = find.textContaining(
+        '1 invoice with no exchange rate into the reporting currency',
+      );
+      await tester.scrollUntilVisible(positionNote, 200);
+      expect(positionNote, findsOneWidget);
+      expect(find.textContaining('USD'), findsNothing);
+    });
   });
 }

@@ -121,6 +121,14 @@ class DashboardData {
   /// `null` against a backend with no `reporting` block.
   final String? reportingCurrency;
 
+  /// How many invoices behind [totalAmount] had no exchange rate into
+  /// [reportingCurrency] and were added at FACE value instead —
+  /// `reporting.unconverted_count`. Non-zero means the total mixes currencies
+  /// by that many rows, and the screen has to say so beside it: a fallback
+  /// nobody reports is just a wrong number (`docs/decisions.md` §35). `0`
+  /// against a backend with no `reporting` block, whose figures render bare.
+  final int unconvertedCount;
+
   DashboardData({
     required this.totalInvoices,
     required this.totalAmount,
@@ -130,6 +138,7 @@ class DashboardData {
     required this.trends,
     required this.upcoming,
     this.reportingCurrency,
+    this.unconvertedCount = 0,
   });
 
   factory DashboardData.fromJson(Map<String, dynamic> json) {
@@ -176,8 +185,10 @@ class DashboardData {
                     json['upcoming_total_amount']) as num?)
                 ?.toDouble() ??
             0,
+        unconvertedCount: unconvertedCountOf(json['upcoming_unconverted_count']),
       ),
       reportingCurrency: reporting['reporting_currency'] as String?,
+      unconvertedCount: unconvertedCountOf(reporting['unconverted_count']),
     );
   }
 }
@@ -187,10 +198,17 @@ class VendorSpend {
   final double totalAmount;
   final int invoiceCount;
 
+  /// This vendor's invoices that had no exchange rate into the reporting
+  /// currency and were added to [totalAmount] at FACE value
+  /// (`vendor_spend[].unconverted_count`). Non-zero means this row is ranked
+  /// on a figure that is not in the same currency as its neighbours'.
+  final int unconvertedCount;
+
   VendorSpend({
     required this.vendorName,
     required this.totalAmount,
     required this.invoiceCount,
+    this.unconvertedCount = 0,
   });
 
   factory VendorSpend.fromJson(Map<String, dynamic> json) {
@@ -198,6 +216,7 @@ class VendorSpend {
       vendorName: (json['vendor'] ?? json['vendor_name']) as String? ?? 'Unknown',
       totalAmount: ((json['amount'] ?? json['total_amount']) as num?)?.toDouble() ?? 0,
       invoiceCount: json['invoice_count'] as int? ?? 0,
+      unconvertedCount: unconvertedCountOf(json['unconverted_count']),
     );
   }
 }
@@ -208,11 +227,20 @@ class AgingReport {
   final double sixtyDays;
   final double ninetyPlus;
 
+  /// ONE count for the whole band set (`aging_reporting.unconverted_count`):
+  /// open invoices with no exchange rate into the reporting currency, added to
+  /// whichever band they fell in at FACE value. The backend deliberately
+  /// serves one figure rather than five — "some of these bands mix currencies"
+  /// is the actionable fact either way. The legacy face-value `aging` carries
+  /// none (it is a cross-currency sum in its entirety), so it parses as `0`.
+  final int unconvertedCount;
+
   AgingReport({
     required this.current,
     required this.thirtyDays,
     required this.sixtyDays,
     required this.ninetyPlus,
+    this.unconvertedCount = 0,
   });
 
   factory AgingReport.fromJson(Map<String, dynamic> json) {
@@ -221,6 +249,7 @@ class AgingReport {
       thirtyDays: ((json['days_30'] ?? json['30_days']) as num?)?.toDouble() ?? 0,
       sixtyDays: ((json['days_60'] ?? json['60_days']) as num?)?.toDouble() ?? 0,
       ninetyPlus: ((json['days_90_plus'] ?? json['90_plus']) as num?)?.toDouble() ?? 0,
+      unconvertedCount: unconvertedCountOf(json['unconverted_count']),
     );
   }
 }
@@ -255,12 +284,31 @@ class UpcomingPayments {
   final int count;
   final double totalAmount;
 
-  UpcomingPayments({required this.count, required this.totalAmount});
+  /// Of the invoices behind [totalAmount], how many had no exchange rate into
+  /// the reporting currency and were added at FACE value
+  /// (`upcoming_unconverted_count`) — dropping them would understate what is
+  /// due, so the backend keeps them in and counts them instead.
+  final int unconvertedCount;
+
+  UpcomingPayments({
+    required this.count,
+    required this.totalAmount,
+    this.unconvertedCount = 0,
+  });
 
   factory UpcomingPayments.fromJson(Map<String, dynamic> json) {
     return UpcomingPayments(
       count: json['count'] as int? ?? 0,
       totalAmount: (json['total_amount'] as num?)?.toDouble() ?? 0,
+      unconvertedCount: unconvertedCountOf(json['unconverted_count']),
     );
   }
 }
+
+/// A row COUNT off a rollup payload's `unconverted_count`, never money.
+///
+/// Absent or `null` reads as `0` — a backend predating the field has nothing
+/// to disclose, and a disclosure that renders on a missing key would claim a
+/// part-converted figure nobody reported. A JSON number of either width is
+/// accepted; anything else is not a count and also reads as `0`.
+int unconvertedCountOf(Object? raw) => raw is num ? raw.toInt() : 0;

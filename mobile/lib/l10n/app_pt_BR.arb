@@ -44,6 +44,11 @@
   "dashboardCachedBanner": "Dados em cache — não foi possível conectar ao servidor",
   "dashboardErrorPrefix": "Erro: {error}",
   "dashboardInvoiceCount": "{count, plural, one {{count} fatura} other {{count} faturas}}",
+  "partialConversionCurrencyFallback": "a moeda de relatório",
+  "dashboardKpiUnconverted": "{label}: parcial — {count, plural, one {{count} fatura} other {{count} faturas}} sem taxa de câmbio para {currency}, contabilizadas pelo valor de face, então o total mistura moedas nessa medida.",
+  "dashboardAgingUnconverted": "Parcial: {count, plural, one {{count} fatura} other {{count} faturas}} sem taxa de câmbio para {currency}, contabilizadas pelo valor de face — nessa medida as faixas abaixo misturam moedas.",
+  "dashboardTopVendorsUnconverted": "Parcial: {count, plural, one {{count} fatura} other {{count} faturas}} sem taxa de câmbio para {currency}, contabilizadas pelo valor de face — por isso estes fornecedores não estão todos classificados na mesma moeda. Registre a taxa que falta antes de agir com base na ordem.",
+  "dashboardVendorFaceValueCount": "{count, plural, one {{count} pelo valor de face} other {{count} pelo valor de face}}",
   "invoicesTitle": "Faturas",
   "invoicesSearchHint": "Pesquisar faturas…",
   "invoicesSearchAria": "Pesquisar faturas",
@@ -517,6 +522,8 @@
   },
   "cashFlowBelowThresholdSuffix": ", abaixo do limite",
   "cashFlowLowBalanceAlertLabel": "Alerta de saldo baixo. {message}",
+  "cashFlowForecastUnconverted": "Parcial: {count, plural, one {{count} fatura} other {{count} faturas}} sem taxa de câmbio para {currency}, contabilizadas pelo valor de face — nessa medida estas saídas, e os totais confirmado e pendente acima, misturam moedas.",
+  "cashFlowPositionUnconverted": "Não convertido: {count, plural, one {{count} fatura} other {{count} faturas}} sem taxa de câmbio para {currency}, contabilizadas pelo valor de face — então o saldo corrente abaixo e o saldo final previsto acima misturam moedas. Registre a taxa que falta antes de agir com base nestes números.",
   "@cashFlowLowBalanceAlertLabel": {
     "placeholders": {
       "message": {
