@@ -371,6 +371,36 @@ abstract class AppLocalizations {
   /// **'{count, plural, one {{count} invoice} other {{count} invoices}}'**
   String dashboardInvoiceCount(int count);
 
+  /// No description provided for @partialConversionCurrencyFallback.
+  ///
+  /// In en, this message translates to:
+  /// **'the reporting currency'**
+  String get partialConversionCurrencyFallback;
+
+  /// No description provided for @dashboardKpiUnconverted.
+  ///
+  /// In en, this message translates to:
+  /// **'{label}: partial — {count, plural, one {{count} invoice} other {{count} invoices}} with no exchange rate into {currency}, counted at face value, so the total mixes currencies by that much.'**
+  String dashboardKpiUnconverted(String label, int count, String currency);
+
+  /// No description provided for @dashboardAgingUnconverted.
+  ///
+  /// In en, this message translates to:
+  /// **'Partial: {count, plural, one {{count} invoice} other {{count} invoices}} with no exchange rate into {currency}, counted at face value — the bands below mix currencies by that much.'**
+  String dashboardAgingUnconverted(int count, String currency);
+
+  /// No description provided for @dashboardTopVendorsUnconverted.
+  ///
+  /// In en, this message translates to:
+  /// **'Partial: {count, plural, one {{count} invoice} other {{count} invoices}} with no exchange rate into {currency}, counted at face value — so these vendors are not all ranked in the same currency. Book the missing rate before acting on the order.'**
+  String dashboardTopVendorsUnconverted(int count, String currency);
+
+  /// No description provided for @dashboardVendorFaceValueCount.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, one {{count} at face value} other {{count} at face value}}'**
+  String dashboardVendorFaceValueCount(int count);
+
   /// No description provided for @invoicesTitle.
   ///
   /// In en, this message translates to:
@@ -2563,6 +2593,18 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Low balance alert. {message}'**
   String cashFlowLowBalanceAlertLabel(String message);
+
+  /// No description provided for @cashFlowForecastUnconverted.
+  ///
+  /// In en, this message translates to:
+  /// **'Partial: {count, plural, one {{count} invoice} other {{count} invoices}} with no exchange rate into {currency}, counted at face value — these outflows, and the committed and pending totals above, mix currencies by that much.'**
+  String cashFlowForecastUnconverted(int count, String currency);
+
+  /// No description provided for @cashFlowPositionUnconverted.
+  ///
+  /// In en, this message translates to:
+  /// **'Unconverted: {count, plural, one {{count} invoice} other {{count} invoices}} with no exchange rate into {currency}, counted at face value — so the running balance below, and the projected end balance above, mix currencies. Book the missing rate before acting on these figures.'**
+  String cashFlowPositionUnconverted(int count, String currency);
 
   /// No description provided for @contractsTitle.
   ///

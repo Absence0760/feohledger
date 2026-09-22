@@ -42,7 +42,9 @@ const RAW = import.meta.glob('/src/**/*.svelte', {
  */
 const TRANSLATED = [
 	'/src/lib/components/ConsentBanner.svelte',
-	'/src/lib/components/ui/BulkBar.svelte'
+	'/src/lib/components/ui/BulkBar.svelte',
+	'/src/routes/credit-memos/+page.svelte',
+	'/src/routes/exceptions/+page.svelte'
 ];
 
 /** Attributes a human reads. `class` / `role` / `type` are not copy. */

@@ -1,10 +1,22 @@
+# Every image below is pinned to an exact release tag AND its multi-arch index
+# digest (`repo:tag@sha256:…`). A floating tag (`latest`, `pg16`, `7-alpine`)
+# made the stack a contributor got depend on the day they pulled, and an
+# upstream retag landed as a red CI run on an unrelated PR — which is how the
+# Docker Hub MinIO outage surfaced. Bumps arrive as reviewable Dependabot PRs
+# (the `docker-compose` entry in .github/dependabot.yml, which rewrites the tag
+# and the digest together). The CI jobs that run these images outside compose
+# (`services:` containers and the MinIO `docker run`) carry the SAME refs by
+# hand, because no Dependabot ecosystem reads a workflow's service images —
+# bump them in the same PR. See backend/docs/docker.md § Image pinning.
 services:
   postgres:
     # pgvector/pgvector image = official Postgres 16 + the pgvector extension,
     # used by the RAG extraction priors (see backend/docs/ai-extraction.md).
     # If you were running plain postgres:16 and have existing data, this upgrade
     # is safe — the image is binary-compatible with the same data directory.
-    image: pgvector/pgvector:pg16
+    # The `-pg16` suffix is what holds the Postgres major: Dependabot only
+    # proposes tags of the same shape, and a major is a data-directory upgrade.
+    image: pgvector/pgvector:0.8.6-pg16@sha256:ccc6e83d6e35e931dc7c5def2022729d5a6c370318d099181995567ff1fb4d6b
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
@@ -21,7 +33,7 @@ services:
       retries: 5
 
   redis:
-    image: redis:7-alpine
+    image: redis:7.4.11-alpine@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499
     ports:
       - "6379:6379"
     healthcheck:
@@ -35,7 +47,15 @@ services:
     # pulls, so a fresh clone's `pnpm db:up` failed with "repository does not
     # exist or may require 'docker login'". quay.io/minio/minio is MinIO's own
     # registry. Keep the two CI copies in `.github/workflows/ci.yml` in step.
-    image: quay.io/minio/minio:latest
+    #
+    # RELEASE.2025-09-07T16-13-09Z is exactly what `latest` resolved to when this
+    # was pinned (same index digest), so pinning changed nothing that runs.
+    # It is also the LAST community image MinIO published: upstream moved the
+    # community edition to source-only distribution after it, so `latest` has
+    # not moved since and Dependabot has nothing newer to offer. The
+    # `…Z.hotfix.<sha>` tags on quay are MinIO's hotfix line, not a successor
+    # release; adopting one is a deliberate behaviour change, not a bump.
+    image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: minioadmin
@@ -58,7 +78,7 @@ services:
   # (feohledger-app) and two test users (demo@acme.com, newhire@acme.com),
   # both password `demo`.
   keycloak:
-    image: quay.io/keycloak/keycloak:26.0
+    image: quay.io/keycloak/keycloak:26.0.8@sha256:09a381c715ab0b111835b70f2905955274843a219c6f27efb348e4d9f4086858
     profiles: ["idp"]
     command: ["start-dev", "--import-realm"]
     environment:
@@ -88,7 +108,7 @@ services:
   # up with `pnpm idp:up`, then `pnpm scim:seed` sets the matching token on the
   # acme tenant. Full walkthrough: ../../docs/local-sso-keycloak.md § Authentik.
   authentik-postgres:
-    image: postgres:16-alpine
+    image: postgres:16.15-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
     profiles: ["idp"]
     environment:
       POSTGRES_USER: authentik
@@ -103,7 +123,7 @@ services:
       retries: 10
 
   authentik-redis:
-    image: redis:7-alpine
+    image: redis:7.4.11-alpine@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499
     profiles: ["idp"]
     command: ["redis-server", "--save", "60", "1", "--loglevel", "warning"]
     healthcheck:
@@ -113,7 +133,7 @@ services:
       retries: 10
 
   authentik-server:
-    image: ghcr.io/goauthentik/server:2026.5.2
+    image: ghcr.io/goauthentik/server:2026.5.2@sha256:3ddf09bbf69ded6a9634ecd753a01608d477f811e99bb5ffe9fc2ef7ad1c6581
     profiles: ["idp"]
     command: server
     environment:
@@ -150,7 +170,7 @@ services:
       start_period: 60s
 
   authentik-worker:
-    image: ghcr.io/goauthentik/server:2026.5.2
+    image: ghcr.io/goauthentik/server:2026.5.2@sha256:3ddf09bbf69ded6a9634ecd753a01608d477f811e99bb5ffe9fc2ef7ad1c6581
     profiles: ["idp"]
     command: worker
     environment:
@@ -188,7 +208,12 @@ services:
   # group, and object-lock bucket on boot. Point the app at it by setting
   # FEOH_AWS_ENDPOINT_URL=http://localhost:4566 (see docs/local-aws-localstack.md).
   localstack:
-    image: localstack/localstack:3
+    # 3.8.1 is the final 3.x release — `:3` already resolved to it. The 3.x line
+    # is held on purpose (Dependabot ignores its majors): from 2026.03.0 the
+    # image moved to calendar versions and refuses to start without a
+    # LOCALSTACK_AUTH_TOKEN, and guard rail 7 plus CI's service-e2e job both run
+    # this container with no LocalStack account.
+    image: localstack/localstack:3.8.1@sha256:b279c01f4cfb8f985a482e4014cabc1e2697b9d7a6c8c8db2e40f4d9f93687c7
     profiles: ["aws"]
     environment:
       SERVICES: s3,sqs,ses,logs
@@ -214,7 +239,7 @@ services:
   # the deploy block for NVIDIA GPU (needs nvidia-container-toolkit).
   # See backend/docs/local-ai-testing.md.
   ollama:
-    image: ollama/ollama:latest
+    image: ollama/ollama:0.34.2@sha256:da6e0dc5651df159e45686fd663c4dbe1624a52c44d7280eeac1551d8f865532
     profiles: ["ai"]
     ports:
       - "11435:11434"
@@ -240,7 +265,7 @@ services:
   # it validates request shape + response parsing, not stateful flows. Point the
   # adapter at it with FEOH_STRIPE_API_BASE=http://localhost:12111/v1.
   stripe-mock:
-    image: stripe/stripe-mock:latest
+    image: stripe/stripe-mock:v0.203.0@sha256:90e2cb49557449a5da30d19f08780667b97a292862b017d56e1276adc5c63587
     profiles: ["payments"]
     ports:
       - "12111:12111"
@@ -271,7 +296,7 @@ services:
   # instead of the real internet — view rendered HTML at http://localhost:8025.
   # Opt-in under the `mail` profile (`pnpm mail:up`). Captures only; never relays.
   mailpit:
-    image: axllent/mailpit:latest
+    image: axllent/mailpit:v1.31.2@sha256:74d609a42ec279aa63c6b4622a6fa9b5408d1ad5b1d76a1c4be40a265ce0863d
     profiles: ["mail"]
     ports:
       - "1025:1025"   # SMTP — FEOH_SMTP_PORT

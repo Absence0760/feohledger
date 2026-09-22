@@ -1,4 +1,4 @@
-import type { BadgeTone } from '$lib/components/ui/Badge.svelte';
+import type { BadgeTone } from '$lib/components/ui/badgeTone';
 import type { MoneyAmount } from '$lib/utils/money';
 
 /**

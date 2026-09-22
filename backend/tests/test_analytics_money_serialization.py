@@ -67,6 +67,7 @@ NUMERIC_FIELDS: frozenset[str] = frozenset(
         "open_exceptions",
         "reporting_avg_daily_outflow_unconverted_count",
         "reporting_outstanding_unconverted_count",
+        "reporting_total_spend_unconverted_count",
         # Rebates excluded from the rebate-yield NUMERATOR for being
         # denominated in another currency (decisions §62). A count, not money —
         # it exists so a 10x-understated yield says so rather than looking

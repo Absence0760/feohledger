@@ -48,6 +48,11 @@
   "dashboardCachedBanner": "Zwischengespeicherte Daten — Server nicht erreichbar",
   "dashboardErrorPrefix": "Fehler: {error}",
   "dashboardInvoiceCount": "{count, plural, one {{count} Rechnung} other {{count} Rechnungen}}",
+  "partialConversionCurrencyFallback": "die Berichtswährung",
+  "dashboardKpiUnconverted": "{label}: teilweise – {count, plural, one {{count} Rechnung} other {{count} Rechnungen}} ohne Wechselkurs in {currency}, zum Nennwert erfasst; in diesem Umfang mischt die Summe Währungen.",
+  "dashboardAgingUnconverted": "Teilweise: {count, plural, one {{count} Rechnung} other {{count} Rechnungen}} ohne Wechselkurs in {currency}, zum Nennwert erfasst – in diesem Umfang mischen die Bänder unten Währungen.",
+  "dashboardTopVendorsUnconverted": "Teilweise: {count, plural, one {{count} Rechnung} other {{count} Rechnungen}} ohne Wechselkurs in {currency}, zum Nennwert erfasst – diese Lieferanten sind daher nicht alle in derselben Währung gereiht. Erfassen Sie den fehlenden Kurs, bevor Sie sich auf die Reihenfolge stützen.",
+  "dashboardVendorFaceValueCount": "{count, plural, one {{count} zum Nennwert} other {{count} zum Nennwert}}",
 
   "invoicesTitle": "Rechnungen",
   "invoicesSearchHint": "Rechnungen suchen …",
@@ -432,6 +437,8 @@
   "cashFlowPositionRowLabel": "{period}: Anfang {opening}, Abfluss {outflow}, Ende {closing}",
   "cashFlowBelowThresholdSuffix": ", unter dem Schwellenwert",
   "cashFlowLowBalanceAlertLabel": "Warnung: niedriger Kontostand. {message}",
+  "cashFlowForecastUnconverted": "Teilweise: {count, plural, one {{count} Rechnung} other {{count} Rechnungen}} ohne Wechselkurs in {currency}, zum Nennwert erfasst – in diesem Umfang mischen diese Abflüsse und die fest zugesagten und ausstehenden Summen oben Währungen.",
+  "cashFlowPositionUnconverted": "Nicht umgerechnet: {count, plural, one {{count} Rechnung} other {{count} Rechnungen}} ohne Wechselkurs in {currency}, zum Nennwert gezählt — der laufende Saldo unten und das prognostizierte Ende oben vermischen dadurch Währungen. Erfassen Sie den fehlenden Kurs, bevor Sie auf Basis dieser Zahlen handeln.",
 
   "contractsTitle": "Verträge",
   "contractsSearchHint": "Verträge suchen …",

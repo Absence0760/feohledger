@@ -140,7 +140,7 @@ Tenant tables have an `organization_id` column (plain UUID, no foreign key) for 
 
 ### pgvector
 
-`invoice_embeddings.embedding` uses the `vector` data type from the [pgvector](https://github.com/pgvector/pgvector) Postgres extension. Both the local `docker-compose.yml` (`pgvector/pgvector:pg16` image) and `services.tenant_provisioning._create_tenant_tables` / `scripts.seed.create_tenant_tables` run `CREATE EXTENSION IF NOT EXISTS vector` before creating tenant tables so the column type resolves.
+`invoice_embeddings.embedding` uses the `vector` data type from the [pgvector](https://github.com/pgvector/pgvector) Postgres extension. Both the local `docker-compose.yml` (the `pgvector/pgvector` image on its `-pg16` line, pinned by digest — see [docker.md § Image pinning](docker.md#image-pinning)) and `services.tenant_provisioning._create_tenant_tables` / `scripts.seed.create_tenant_tables` run `CREATE EXTENSION IF NOT EXISTS vector` before creating tenant tables so the column type resolves.
 
 ## Migrations (Alembic)
 

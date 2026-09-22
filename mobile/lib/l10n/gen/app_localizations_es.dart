@@ -153,6 +153,53 @@ class AppLocalizationsEs extends AppLocalizations {
   }
 
   @override
+  String get partialConversionCurrencyFallback => 'la moneda de reporte';
+
+  @override
+  String dashboardKpiUnconverted(String label, int count, String currency) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count facturas',
+      one: '$count factura',
+    );
+    return '$label: parcial — $_temp0 sin tipo de cambio a $currency, contabilizadas por su valor nominal, así que el total mezcla monedas en esa medida.';
+  }
+
+  @override
+  String dashboardAgingUnconverted(int count, String currency) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count facturas',
+      one: '$count factura',
+    );
+    return 'Parcial: $_temp0 sin tipo de cambio a $currency, contabilizadas por su valor nominal: en esa medida los tramos de abajo mezclan monedas.';
+  }
+
+  @override
+  String dashboardTopVendorsUnconverted(int count, String currency) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count facturas',
+      one: '$count factura',
+    );
+    return 'Parcial: $_temp0 sin tipo de cambio a $currency, contabilizadas por su valor nominal, por lo que estos proveedores no están todos clasificados en la misma moneda. Registre el tipo que falta antes de actuar según el orden.';
+  }
+
+  @override
+  String dashboardVendorFaceValueCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count por su valor nominal',
+      one: '$count por su valor nominal',
+    );
+    return '$_temp0';
+  }
+
+  @override
   String get invoicesTitle => 'Facturas';
 
   @override
@@ -1454,6 +1501,28 @@ class AppLocalizationsEs extends AppLocalizations {
   @override
   String cashFlowLowBalanceAlertLabel(String message) {
     return 'Alerta de saldo bajo. $message';
+  }
+
+  @override
+  String cashFlowForecastUnconverted(int count, String currency) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count facturas',
+      one: '$count factura',
+    );
+    return 'Parcial: $_temp0 sin tipo de cambio a $currency, contabilizadas por su valor nominal: en esa medida estas salidas, y los totales comprometido y pendiente de arriba, mezclan monedas.';
+  }
+
+  @override
+  String cashFlowPositionUnconverted(int count, String currency) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count facturas',
+      one: '$count factura',
+    );
+    return 'Sin convertir: $_temp0 sin tipo de cambio a $currency, contabilizadas por su valor nominal: el saldo corriente de abajo y el final previsto de arriba mezclan monedas. Registre el tipo de cambio que falta antes de actuar sobre estas cifras.';
   }
 
   @override

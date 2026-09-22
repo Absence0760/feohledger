@@ -92,6 +92,8 @@ grid page instead of hand-rolling `<div class="grid-container"><table>`:
 - Opt-in `fixed` (`table-layout: fixed`, pair with `<th>` widths) and
   `stickyHeader`. These two MUST be props (they target DataTable-owned
   `<table>`/`<thead>`, which a page-scoped selector can't reach).
+- `ariaLabel` names the scroll region (see § Accessibility patterns →
+  DataTable); omit it and the generic `common.tableRegion` applies.
 
 ### Column sort (`SortableHeader`)
 
@@ -131,7 +133,15 @@ one again to flip direction:
   is persisted (mirror `/expenses`' `syncUrl()`, or a page-local
   `syncSortUrl()` when the page has no existing filter→URL sync).
 - Shipped on `/invoices`, `/vendors`, `/payments` (History tab), `/expenses`,
-  and `/contracts` — the five primary list pages.
+  and `/contracts` — the five primary list pages — and on `/exceptions`
+  (Sev, Age, Due).
+- Also on `/credit-memos` (`memo_number` / `amount` / `issued_date`, issue #443).
+- **`aria-sort` states the order of the values the column SHOWS**, which is not
+  always the order of the key sent. `/exceptions`' Age column sorts
+  `created_at`, but the oldest row has the largest age, so ascending age is
+  `created_at desc`: the page passes `SortableHeader` the flipped order and
+  maps its clicks back (`handleAgeSort`). Any column rendered as elapsed time
+  over a timestamp key needs the same flip.
 
 ### Search (`SearchBox`)
 
@@ -486,6 +496,17 @@ pill-shaped status filter above the table:
   in the modal is appended to the rendered chips so an active filter is never
   invisible (`chipStatuses` = quick subset ∪ active). See
   `routes/invoices/+page.svelte` and `tests-e2e/invoices/advanced-status.spec.ts`.
+- **Several chip rows over one table are faceted.** `/exceptions` stacks status,
+  type and severity rows above a search box. Each row's counts honour every
+  OTHER selected filter and the search term, but never their own row's
+  selection — so every chip reads what the table would show if it were
+  clicked, and the pressed chip in each row equals the table's total. The
+  tallies come from one endpoint taking the list's filters
+  (`GET /api/exceptions/summary`, `docs/decisions.md` §188); the page builds
+  the list, summary and select-all params in one `filterParams()` so the three
+  cannot describe different sets. A row whose roster is small and fixed
+  (severity) renders every chip, zeros included — a chip that disappeared at 0
+  would take its pressed state with it.
 
 ### Modals
 
@@ -801,7 +822,21 @@ inherit it for free. Reuse these; don't re-solve them per page.
   reflects the active chip.
 - **DataTable** (`ui/DataTable.svelte`) — auto-rendered `<th>` get
   `scope="col"`. A page that passes its own `{#snippet header()}` owns
-  adding `scope` to its `<th>`s.
+  adding `scope` to its `<th>`s. The `.grid-container` scroller is a
+  **named, focusable region** (`role="region"` + `aria-label` +
+  `tabindex="0"`; WCAG 2.1.1): once a table is wider than its card it scrolls
+  inside the card (the 1.4.10 remedy), and a table whose cells hold nothing
+  focusable would otherwise be pannable only by mouse. Focused, the arrow keys
+  pan it. The name defaults to `common.tableRegion` ("Data table"); pass
+  `ariaLabel` when a page shows more than one table or "which table" is not
+  obvious. The attribute is unconditional rather than applied on overflow,
+  because axe's `scrollable-region-focusable` only fires while the table
+  actually overflows — which depends on viewport and font width, and is how
+  the legal pages' `.table-scroll` passed locally and failed in CI. Guards:
+  `src/lib/a11y/tableScrollRegion.test.ts` (static — the attributes, and no
+  hand-rolled `.grid-container`), `tests-e2e/a11y/reflow.spec.ts` (runs that
+  axe rule on every route at 320px, where every such region is live) and
+  `tests-e2e/a11y/table-scroll-region.spec.ts` (the arrow key really pans).
 - **Icon-only controls** — every icon-only `<button>` needs an
   `aria-label` (NotificationBell reflects the unread count; the sidebar
   collapse toggle + profile button carry `aria-label` + `aria-expanded`).

@@ -525,3 +525,150 @@ async def test_signup_complete_token_too_short_422(realdb):
     async with realdb.client(key="a", role=None) as c:
         resp = await c.post("/api/signup/complete", json={"token": "short"})
     assert resp.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# FEOH_SIGNUP_ENABLED — the off switch
+#
+# Before it, nothing but a captcha misconfiguration could close signup: an
+# invite-only deployment left the sitekey empty, so `/signup` still rendered a
+# complete form that every submit was refused on, and the operator still had to
+# hold a captcha secret for a feature they did not want.
+# ---------------------------------------------------------------------------
+
+
+def _asgi_client():
+    import httpx
+
+    from app.main import app
+
+    return httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test")
+
+
+_SIGNUP_ROUTES = [
+    ("GET", "/api/signup/slug-check?slug=closedslug", None),
+    ("POST", "/api/signup/start", _start_body("closedslug", "closed@example.com")),
+    ("POST", "/api/signup/complete", {"token": "x" * 40}),
+    # Malformed bodies too: the switch answers before validation, so a closed
+    # deployment's 404 cannot be told apart from a 422 by what was posted.
+    ("POST", "/api/signup/start", {}),
+    ("POST", "/api/signup/complete", {}),
+]
+
+
+async def test_every_signup_route_is_gone_when_signup_is_disabled(monkeypatch):
+    """Off means the surface is simply not there: the same bare 404 an
+    unmounted route returns, on every route, whatever was posted — and no rate
+    limit is spent, so a probe cannot even burn a real visitor's budget."""
+    from unittest.mock import AsyncMock
+
+    from app.api import signup as signup_mod
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "signup_enabled", False)
+    rate_limit = AsyncMock()
+    monkeypatch.setattr(signup_mod, "check_rate_limit", rate_limit)
+
+    async with _asgi_client() as c:
+        for method, path, body in _SIGNUP_ROUTES:
+            resp = await c.request(method, path, json=body)
+            assert resp.status_code == 404, (method, path, resp.text)
+            assert resp.json() == {"detail": "Not Found"}, (method, path)
+        unmounted = await c.get("/api/signup/no-such-route")
+
+    # Indistinguishable from a route that was never mounted.
+    assert unmounted.json() == {"detail": "Not Found"}
+    rate_limit.assert_not_awaited()
+
+
+async def test_a_disabled_signup_creates_nothing_and_consumes_nothing(
+    realdb, monkeypatch, cleanup_signup
+):
+    """The real database, both halves of the flow: a closed deployment writes no
+    `EmailVerification` row for a well-formed start, and leaves a verification
+    token minted while signup was open unconsumed — so re-opening signup lets
+    that visitor finish rather than stranding them."""
+    from app.api import signup as signup_mod
+    from app.config import settings
+
+    slugs, emails = cleanup_signup
+    slug = _unique_slug()
+    email = f"{slug}@example.com"
+    slugs.append(slug)
+    emails.append(email)
+    pending_slug = _unique_slug()
+    pending_email = f"{pending_slug}@example.com"
+    slugs.append(pending_slug)
+    emails.append(pending_email)
+    token = await _seed_verification(realdb, slug=pending_slug, email=pending_email)
+
+    provision = AsyncMock()
+    monkeypatch.setattr(signup_mod, "provision_tenant", provision)
+    monkeypatch.setattr(settings, "signup_enabled", False)
+
+    async with realdb.client(key="a", role=None) as c:
+        started = await c.post("/api/signup/start", json=_start_body(slug, email))
+        completed = await c.post("/api/signup/complete", json={"token": token})
+
+    assert started.status_code == 404, started.text
+    assert completed.status_code == 404, completed.text
+    provision.assert_not_awaited()
+
+    mk = realdb.control_sessionmaker()
+    async with mk() as s:
+        assert (
+            await s.execute(select(EmailVerification).where(EmailVerification.email == email))
+        ).first() is None
+        pending = (
+            await s.execute(select(EmailVerification).where(EmailVerification.token == token))
+        ).scalar_one()
+        assert pending.consumed_at is None
+
+
+async def test_public_config_publishes_whether_signup_is_open(monkeypatch):
+    """The SPA's only way to know — so `/signup` can say "closed" instead of
+    rendering a form every submit of which would 404."""
+    from app.config import settings
+
+    async with _asgi_client() as c:
+        monkeypatch.setattr(settings, "signup_enabled", True)
+        opened = (await c.get("/api/public-config")).json()
+        monkeypatch.setattr(settings, "signup_enabled", False)
+        closed = (await c.get("/api/public-config")).json()
+
+    assert opened["signup_enabled"] is True
+    assert closed["signup_enabled"] is False
+
+
+def test_signup_is_open_by_default():
+    """Local-first (guard rail 7): a fresh clone's `pnpm dev`, the signup e2e
+    and every existing deployment keep today's behaviour until an operator
+    deliberately closes it."""
+    from app.config import Settings
+
+    # The declared default, not `Settings()`: a developer's own gitignored env
+    # may close signup locally, and that is not what this pins.
+    assert Settings.model_fields["signup_enabled"].default is True
+
+
+def test_a_deployed_env_with_signup_closed_needs_no_captcha_secret():
+    """The captcha boot check protects a public, tenant-creating endpoint; with
+    signup closed there is none, so it must not make an operator hold a
+    credential for a feature they turned off. While signup is open it still
+    refuses to boot, exactly as before."""
+    import pytest
+    from pydantic import ValidationError
+
+    from app.config import Settings
+
+    strong_key = "x" * 32
+    closed = Settings(
+        environment="production", hcaptcha_secret="", secret_key=strong_key, signup_enabled=False
+    )
+    assert closed.is_deployed is True
+    assert closed.signup_enabled is False
+
+    with pytest.raises(ValidationError, match="FEOH_SIGNUP_ENABLED"):
+        Settings(
+            environment="production", hcaptcha_secret="", secret_key=strong_key, signup_enabled=True
+        )

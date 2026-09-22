@@ -15,6 +15,11 @@ export interface GlAccountListParams {
 	 * either way — omitting it is not the same as `false`.
 	 */
 	active_only?: boolean;
+	/**
+	 * Ask for ONE entity's chart — the shared accounts plus that entity's own —
+	 * whatever the sidebar has selected. See {@link listInvoiceChart}.
+	 */
+	chart_entity_id?: string;
 }
 
 /**
@@ -29,8 +34,30 @@ export function listGlAccounts(params: GlAccountListParams = {}): Promise<GlAcco
 	if (params.search) qs.set('search', params.search);
 	if (params.account_type) qs.set('account_type', params.account_type);
 	if (params.active_only !== undefined) qs.set('active_only', String(params.active_only));
+	if (params.chart_entity_id) qs.set('chart_entity_id', params.chart_entity_id);
 	const suffix = qs.toString() ? `?${qs}` : '';
 	return api.get<GlAccount[]>(`/api/gl-accounts${suffix}`);
+}
+
+/**
+ * The chart an invoice filed under `entityId` may be coded against — the
+ * codes the backend will accept on every invoice GL write
+ * (`backend/app/services/gl_chart.py`), and so the only ones the two invoice
+ * pickers offer.
+ *
+ * An invoice's GL code resolves in the chart of the entity the INVOICE belongs
+ * to, which is not the sidebar's view: the consolidated view returns every
+ * subsidiary's chart at once (so subsidiary B's `6000` used to be offered for
+ * a subsidiary-A invoice), and a deep link can open another entity's invoice
+ * while one is selected. So the chart is asked for by entity, not by header.
+ *
+ * `null` is an invoice no entity was ever stamped on, which resolves against
+ * the shared chart alone — the list is fetched in whatever view is current
+ * and narrowed to its shared rows, since `chart_entity_id` names an entity.
+ */
+export async function listInvoiceChart(entityId: string | null): Promise<GlAccount[]> {
+	if (entityId) return listGlAccounts({ chart_entity_id: entityId });
+	return (await listGlAccounts()).filter((a) => !a.entity_id);
 }
 
 export interface GlAccountCreate {
@@ -54,6 +81,35 @@ export function createGlAccount(
 	body: GlAccountCreate
 ): Promise<Pick<GlAccount, 'id' | 'code' | 'name'>> {
 	return api.post<Pick<GlAccount, 'id' | 'code' | 'name'>>('/api/gl-accounts', body);
+}
+
+/**
+ * The fields `PATCH /api/gl-accounts/{id}` accepts. `code` and `entity_id` are
+ * deliberately absent — the backend refuses to change either (an invoice
+ * records the code as TEXT, and the chart a row sits in is its meaning); a
+ * move between charts is a create plus a retire. Send only what changed:
+ * unset fields are left alone.
+ */
+export interface GlAccountUpdate {
+	name?: string;
+	account_type?: string | null;
+	parent_code?: string | null;
+	/** `false` retires the account (there is no DELETE); `true` reactivates it. */
+	is_active?: boolean;
+}
+
+/**
+ * `PATCH /api/gl-accounts/{id}` — admin / ap_manager. Correct or retire one
+ * account; returns the row in the list's shape.
+ *
+ * With an entity selected only that entity's OWN rows are editable — a shared
+ * row belongs to every entity, so the backend 403s and names the fix (switch to
+ * the consolidated view). `/gl-accounts` mirrors that rule before offering the
+ * actions (`types/glAccount.ts::canEditGlAccount`), but the server stays the
+ * authority.
+ */
+export function updateGlAccount(id: string, body: GlAccountUpdate): Promise<GlAccount> {
+	return api.patch<GlAccount>(`/api/gl-accounts/${id}`, body);
 }
 
 export interface GlAccountSyncResult {

@@ -112,6 +112,25 @@ EXCEPTION_TYPES: tuple[str, ...] = (
 #: (a typo, or a raise site deleted without its roster entry).
 LEGACY_EXCEPTION_TYPES: frozenset[str] = frozenset({"amount_exceeded"})
 
+#: Every ``Exception.severity`` the platform raises, mapped to its RANK — higher
+#: is worse. Declared worst-first, which is the order a triager scans and the
+#: order the queue's severity chips render in.
+#:
+#: The rank exists because the queue sorts on it: ``severity`` is a plain
+#: ``String(20)``, and sorting the column itself is alphabetical — ``error`` <
+#: ``info`` < ``warning`` — which puts the informational rows between the two
+#: that need attention. ``api/exceptions.EXCEPTION_SORTABLE_COLUMNS`` sorts a
+#: ``CASE`` over this map instead; a severity missing from it ranks 0, below
+#: ``info``, so an unknown value sinks rather than masquerading as urgent.
+#: ``tests/test_exception_type_labels`` fails if a raise site writes a severity
+#: that is not here, and the web client's ``types/exception.test.ts`` reads this
+#: map to keep its label roster in step.
+EXCEPTION_SEVERITY_RANK: dict[str, int] = {
+    "error": 3,
+    "warning": 2,
+    "info": 1,
+}
+
 #: Queue verb → terminal/queue status the verb produces.
 RESOLUTION_STATUSES: dict[str, str] = {
     "resolve": "resolved",

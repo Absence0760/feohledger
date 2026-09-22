@@ -21,18 +21,28 @@ Roles are enforced in the frontend UI. The `/api/auth/me` endpoint returns the u
 
 The sidebar (driven by `frontend/src/lib/nav.ts`) keeps high-traffic routes as
 direct rows and folds the rest into groups (Procurement / Billing / Insights /
-Settings) that open a sub-tabbed page. A group row appears when the role can see
-≥1 of its children; the per-page section tabs are filtered by the same per-route
-`roles` gate. So the table below is about route *access*, not literal rows —
-e.g. Workflows is reachable under the **Settings** group, not a top-level row.
+Automation / Governance / Settings) that open a sub-tabbed page. A group row
+appears when the role can see ≥1 of its children and lands on the first of
+them; the per-page section tabs are filtered by the same per-route `roles` gate
+(and suppressed when only one is visible).
+
+**Which role sees which nav row is not restated here.** It is pinned exactly
+once, as the literal `NAV_GATES` table in `frontend/src/lib/nav.test.ts`, with
+the backend reasoning beside each row in `nav.ts`; `tests-e2e/auth/rbac.spec.ts`
+checks the rendered sidebar and section bars against it for each system role.
+Earlier copies of that matrix — in this file and in the e2e spec — went stale
+independently of the code, which is why there is only one now. The gates follow
+each route's backend READ gate per item: Procurement is where that does the most
+work — a clerk sees Purchase Orders, Goods Receipts, Requisitions, Intake,
+Catalogs and **Chart of Accounts** (`GET /api/gl-accounts` is auth-gated but
+role-open, because a clerk coding an invoice has to be able to look a GL code
+up) but not Budgets, whose every read is `require_roles(ADMIN, AP_MANAGER,
+CFO)`. On Chart of Accounts the write controls (New Account, Sync from ERP, and
+the Edit / Retire / Reactivate row actions) are gated on `auth.isManager`,
+matching `require_roles(ADMIN, AP_MANAGER)` on the write endpoints.
 
 | Feature | Admin | AP Manager | AP Clerk | CFO |
 |---|---|---|---|---|
-| Nav (direct): Dashboard, Invoices | Yes | Yes | Yes | Yes |
-| Nav (direct): Payments, Vendors | Yes | Yes | No | Yes |
-| Nav (direct): Exceptions | Yes | Yes | No | No |
-| Nav group: Procurement / Billing / Insights | Yes | Yes | Yes¹ | Yes |
-| Nav group: Settings (Org · Users · Roles · Audit Trail · Workflows) | Yes | No | No | Yes² |
 | Invoice: edit fields | Yes | Yes | Yes | Yes |
 | Invoice: change status dropdown | Yes | Yes | No | Yes |
 | Invoice: submit for review (new) | Yes | Yes | Yes | Yes |
@@ -40,19 +50,6 @@ e.g. Workflows is reachable under the **Settings** group, not a top-level row.
 | Invoice: delete | Yes | Yes | No | Yes |
 | Bulk: delete, status change | Yes | Yes | No | Yes |
 | Bulk: export | Yes | Yes | Yes | Yes |
-
-¹ A clerk sees a reduced set of section tabs inside each group (e.g. Billing →
-Contracts + Expenses only; Insights → AI Assistant only). Procurement is the
-group where per-item gating does the most work: a clerk sees six of its seven
-tabs — Purchase Orders, Goods Receipts, Requisitions, Intake, Catalogs and
-**Chart of Accounts** (`GET /api/gl-accounts` is auth-gated but role-open, and a
-clerk coding an invoice has to be able to look a GL code up) — and not Budgets,
-whose every read is `require_roles(ADMIN, AP_MANAGER, CFO)`. On Chart of
-Accounts both write controls (New Account, Sync from ERP) are gated on
-`auth.isManager`, matching `require_roles(ADMIN, AP_MANAGER)` on the two write
-endpoints; `frontend/src/lib/nav.test.ts` asserts the exact per-role set.
-² A CFO's Settings group shows only the Audit Trail tab, so the section bar is
-suppressed (a lone tab would just duplicate the page title).
 
 Backend API endpoints are role-gated via `Depends(require_roles(...))` in `backend/app/api/deps.py`. The frontend matrix above mirrors what the backend allows. A coverage gate in `backend/tests/test_rbac.py` fails CI if a new endpoint ships without an auth dependency. Full permission matrix in `authentication.md` § RBAC.
 

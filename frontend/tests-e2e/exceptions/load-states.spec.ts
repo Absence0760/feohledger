@@ -1,4 +1,5 @@
 import { expect, test } from '../fixtures/helpers';
+import { exceptionSummary } from './summary';
 
 /**
  * /exceptions — loading + error states for the queue table.
@@ -18,13 +19,7 @@ import { expect, test } from '../fixtures/helpers';
  * and never fails on demand.
  */
 
-const EMPTY_SUMMARY = {
-	open: 0,
-	escalated: 0,
-	resolved: 0,
-	dismissed: 0,
-	by_type: {}
-};
+const EMPTY_SUMMARY = exceptionSummary();
 
 test.describe('/exceptions load states', () => {
 	test('a FAILED load says so — never "Everything looks good!"', async ({ page }) => {
@@ -99,7 +94,9 @@ test.describe('/exceptions load states', () => {
 			route.fulfill({
 				status: 200,
 				contentType: 'application/json',
-				body: JSON.stringify({ ...EMPTY_SUMMARY, open: 1, by_type: { duplicate: 1 } })
+				body: JSON.stringify(
+					exceptionSummary({ open: 1, by_type: { duplicate: 1 }, by_severity: { error: 1 } })
+				)
 			})
 		);
 		await page.route('**/api/exceptions?**', (route) =>

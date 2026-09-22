@@ -115,7 +115,7 @@ TOTP-based two-factor with email-OTP backup. Master switch `FEOH_MFA_ENABLED` (d
 | `POST` | `/api/auth/mfa/verify`            | (challenge token) | Body `{challenge_token, code, method}` (`method` ∈ `totp`/`email`). Returns `TokenResponse`. |
 | `POST` | `/api/auth/mfa/enroll`            | * | Optional body `{password?, code?, assertion?}`. Mints a CANDIDATE TOTP secret + QR (parked in Redis, not on the account). Returns `{secret, provisioning_uri, qr_code_data_url}`. 400 without a valid step-up when the account already has a live factor. |
 | `POST` | `/api/auth/mfa/enroll/verify`     | * | Body `{code}`. Promotes the pending candidate onto the account and flips `mfa_enabled` true — the only writer of `mfa_secret`. |
-| `POST` | `/api/auth/mfa/disable`           | * | Optional body `{password?, code?, assertion?}` — the same three-proof step-up as every other factor change (an SSO-only account has no password, so its passkey assertion is the proof). Turns MFA off. Blocked when org enforces MFA. |
+| `POST` | `/api/auth/mfa/disable`           | * | Optional body `{password?, code?, assertion?}` — the same three-proof step-up as every other factor change (an SSO-only account has no password, so its passkey assertion is the proof). Turns MFA off. Blocked when org enforces MFA. In a tenant with `sso_only` on, a `password` is never a proof on any step-up (it cannot sign in there either) — 400 naming the code / passkey proofs instead. |
 | `POST` | `/api/auth/mfa/passkey/register`  | * | Optional body `{password?, code?, assertion?}`. Mints WebAuthn registration options. 400 without a valid step-up when a factor is already live (TOTP or an existing passkey). |
 | `DELETE` | `/api/auth/mfa/passkey/{id}`    | * | Body `{password?, code?, assertion?}` — step-up ALWAYS required (the passkey is itself a live factor). Opaque 404 for an id that isn't the caller's. Blocked when it's the last factor under org enforcement. |
 | `POST` | `/api/auth/mfa/step-up/passkey`   | * | Body `{operation}` (`totp_enroll`\|`totp_disable`\|`passkey_register`\|`passkey_delete`). Mints WebAuthn assertion options for a factor-management step-up; the signed response goes back as `assertion` on the matching call. Challenge is single-use and bound to (user, step-up, operation), so it can't be replayed as a login or against a different operation. 400 when the account has no registered passkey. |
@@ -174,13 +174,13 @@ Groups map to RBAC roles via `settings.sso.scim_group_role_map` (`{displayName: 
 | `POST`  | `/api/signup/start`       | Rate-limited + captcha-verified. Creates `email_verifications` row and sends verification email. |
 | `POST`  | `/api/signup/complete`    | Consumes token, provisions tenant (DB + org + admin user), sends welcome email. |
 
-See [`docs/self-service-signup.md`](../../docs/self-service-signup.md) for the full flow.
+All three answer a bare `404` when `FEOH_SIGNUP_ENABLED` is off — before validating the body, opening a session or spending a rate limit. See [`docs/self-service-signup.md`](../../docs/self-service-signup.md) for the full flow.
 
 ## Public config
 
 | Method | Path                  | Description |
 |--------|-----------------------|-------------|
-| `GET`  | `/api/public-config`  | Non-secret config (hcaptcha sitekey, tenant URL template) for the signup form |
+| `GET`  | `/api/public-config`  | Non-secret config for the pre-session SPA: `hcaptcha_sitekey`, `tenant_url_template`, `signup_enabled` (`FEOH_SIGNUP_ENABLED` — `/signup` renders "closed" on false) |
 
 ## Organization
 
@@ -365,8 +365,9 @@ All exception endpoints require `admin/manager`.
 
 | Method | Path                              | Description |
 |--------|-----------------------------------|-------------|
-| `GET`  | `/api/exceptions`                 | List flagged invoices (filter by `status`, `type`, `severity`) |
-| `GET`  | `/api/exceptions/summary`         | Counts by status + open-by-type breakdown |
+| `GET`  | `/api/exceptions`                 | List flagged invoices (filter by `status` — comma list, `all` = every status — `type`, `severity`, `assigned_to_user_id`, `search` over invoice number + vendor name; `sort=created_at\|severity\|due_at`, `order=asc\|desc`) |
+| `GET`  | `/api/exceptions/ids`             | Every id matching the same filters ("select all N matching") |
+| `GET`  | `/api/exceptions/summary`         | Chip tallies — counts by status, `by_type`, `by_severity` — over the same filters, each tally ignoring only its own dimension |
 | `POST` | `/api/exceptions/{id}/resolve`    | Body `{resolution, action}` (`resolve`/`escalate`/`dismiss`) |
 
 ## Notifications
@@ -423,34 +424,62 @@ Used by 3-way matching. `admin` / `ap_manager` / `ap_clerk`.
 
 | Method | Path                              | Roles | Description |
 |--------|-----------------------------------|-------|-------------|
-| `GET`  | `/api/credit-memos`                | admin, ap_manager, ap_clerk, cfo | List credit memos (paginated, entity-scoped, `?status=`) |
+| `GET`  | `/api/credit-memos`                | admin, ap_manager, ap_clerk, cfo | List credit memos (paginated, entity-scoped). `?status=`, `?search=` (substring of the memo number or the vendor name), `?sort=` ∈ `issued_date` / `amount` / `memo_number` with `?order=asc\|desc` — any other sort key is a 422 |
+| `GET`  | `/api/credit-memos/counts`        | admin, ap_manager, ap_clerk, cfo | Per-status tallies for the filter chips: `{total, by_status: {open, applied, void}}`, over the list's own population filters (entity scope + `?search=`), never `status` |
 | `POST` | `/api/credit-memos`                | admin, ap_manager | Create a credit memo. With no `invoice_id` it lands `open`; with one it is applied on the spot and runs the same guards as `/apply` |
+| `PATCH` | `/api/credit-memos/{id}`          | admin, ap_manager | Correct an `open`, never-applied memo — see § Editing a memo. 409 on anything else |
 | `POST` | `/api/credit-memos/{id}/apply`     | admin, ap_manager | Apply an `open` credit memo against a payable |
 | `POST` | `/api/credit-memos/{id}/void`      | admin, ap_manager | Void an `open` memo (409 once `applied` — applied memos are immutable for audit) |
+
+### Search, sort and the chip counts
+
+`GET /api/credit-memos` and `GET /api/credit-memos/counts` share ONE filter
+builder (`_credit_memo_list_query`), so each chip's count is exactly the `total`
+the list would return under that chip — a search for one vendor narrows the
+chips with the table instead of leaving them on the tenant's whole count.
+`search` is a literal-substring match (`utils/search.ilike_contains`, so `%` and
+`_` are text, not wildcards) over `memo_number` and the vendor's name; the
+vendor join is many-to-one, so it can never fan the count out.
+
+The summary deliberately takes no `status`. `GET /api/exceptions/summary` does,
+but there `status` scopes a *second* dimension (the type chips); here status is
+the only dimension and the one being counted, so filtering on it would zero
+every chip but the active one. `by_status` always carries all three known
+statuses (a zero is an answer, not a missing key).
+
+`sort` follows `api/sorting.py`: an allowlist of `issued_date`, `amount` and
+`memo_number`, `.id` appended as the final tie-break, and any other key refused
+with a 422 naming the accepted ones rather than silently falling back to the
+default (`created_at` desc). `amount` orders the raw figure across currencies,
+as `/payments` does — it orders rows, it never sums them.
 
 ### `currency` is resolved, never defaulted to USD
 
 `CreditMemoCreate.currency` is **optional**. The create endpoint resolves it in
 three rungs:
 
-1. what the caller asserted (normalised to upper case);
+1. what the caller asserted — shape-checked as a 3-letter ISO 4217 code and
+   upper-cased (a blank value counts as not asserted; `"US"` / `"EURO"` are a
+   422, since a code no invoice carries makes a memo that can never be applied);
 2. the named invoice's own `currency`, when `invoice_id` is supplied — the memo
    *inherits* rather than asserting;
 3. the org's reporting currency (`services/currency_conversion.resolve_reporting_currency`,
    which itself falls back to `FEOH_REPORTING_CURRENCY_DEFAULT`).
 
 The schema used to default to a hardcoded `"USD"`, which dead-ended every
-non-USD tenant: the memo was stamped USD, guard 2 below then 409'd it against
-the EUR invoice on the very same request, and — because there is **no PATCH on
-credit memos** — the row could never be applied or corrected. An explicitly
+non-USD tenant: the memo was stamped USD, guard 3 below then 409'd it against
+the EUR invoice on the very same request, and — because there was then no PATCH
+on credit memos — the row could never be applied or corrected. An explicitly
 asserted currency is still checked against the invoice, so inheriting is not a
-way to launder a real mismatch.
+way to launder a real mismatch. `vendor_id` and `invoice_id` are typed as UUIDs
+in the request, so a malformed id is a 422 (it used to be parsed by hand and
+surfaced as a 500).
 
 ### Applying a credit — the guards
 
 Both application paths (`POST /api/credit-memos` with an `invoice_id`, and
-`POST /api/credit-memos/{id}/apply`) row-lock the target invoice and then
-enforce, in order, three 409s:
+`POST /api/credit-memos/{id}/apply`) row-lock the target invoice (and `/apply`
+the memo itself — see § Editing a memo) and then enforce, in order, four 409s:
 
 1. **Vendor must match, and must be PROVEN to match** — the memo's `vendor_id`
    has to equal the invoice's `vendor_id`. A NULL `Invoice.vendor_id` is
@@ -460,12 +489,56 @@ enforce, in order, three 409s:
    on NULL, which let one vendor's memo be applied to another vendor's invoice
    for any invoice created without extraction — see
    `_assert_vendor_matches` in `app/api/credit_memos.py`.)
-2. **Currency must match** — the remaining-balance math subtracts the amounts
+2. **Entity must match** — a memo lives in its vendor's entity, and it may not
+   reduce another subsidiary's payable. `X-Entity-ID` already confines both
+   sides to the selected entity, but the consolidated view selects none, so the
+   memo's entity is compared with the invoice's explicitly
+   (`_assert_entity_matches`). A NULL on either side is an unstamped legacy row
+   and is admitted, for the reason `vendor_matching` admits it
+   (`docs/multi-entity.md` § Vendor matching).
+3. **Currency must match** — the remaining-balance math subtracts the amounts
    directly, so a EUR memo on a USD invoice would corrupt it. This fires only
-   on a currency the caller actually asserted (see below).
-3. **No over-application** — the sum of `applied` memos on an invoice may never
+   on a currency the caller actually asserted (see above), and compares case-
+   insensitively, since the invoice schemas never normalised case.
+4. **No over-application** — the sum of `applied` memos on an invoice may never
    exceed the invoice amount (a credit past the balance would mint a negative
    payable).
+
+### Editing a memo — `PATCH /api/credit-memos/{id}`
+
+A memo keyed with the wrong currency (or vendor, amount, number…) used to be
+unfixable: both application paths refuse a currency mismatch, and the only exit
+was Void and re-create — a void row in the audit trail for what was a typo. The
+`PATCH` corrects it, under four rules (`docs/decisions.md` §189):
+
+- **Only a memo that has never moved money.** `status == "open"` with no
+  `invoice_id` and no `applied_at`; anything else is a 409 naming the status.
+  Application is all-or-nothing (one memo credits its whole amount to one
+  invoice, in one transaction, and nothing reverts it), so there is no
+  "partially applied" state — the extra checks exist so that a future path that
+  reopens a memo cannot make a settled record editable by flipping the status
+  alone. Only `applied` memos are netted off a payable, so editing an open one
+  changes no amount anyone is about to pay.
+- **The same validation as create.** Same RBAC (admin / ap_manager), same
+  entity-scoped vendor lookup (another subsidiary's vendor is a 404), a
+  Decimal `amount` bounded to `Numeric(15, 2)` and `> 0`, an ISO-shaped
+  `currency`, a non-blank `memo_number`. The memo's `entity_id` follows its
+  vendor, exactly as on create. `issued_date` and `reason` may be cleared with
+  `null`; the four NOT NULL fields may not (422). `invoice_id` and `status` are
+  **rejected** (`extra="forbid"`), not ignored: linking a memo IS applying it,
+  which has its own endpoint, guards and audit action.
+- **Serialised on the memo row.** The edit reads the memo `FOR UPDATE` before
+  checking it, and `/apply` and `/void` now take the same lock. Without it an
+  edit could read `open`, pass, and have its write land on a memo an apply had
+  just committed — rewriting a settled credit — or an apply could check the
+  invoice balance against an amount an edit was about to raise. The same lock
+  also stops two concurrent applies of one memo to two different invoices from
+  both passing. Pinned by `test_edit_cannot_interleave_with_a_concurrent_apply`
+  and `test_apply_reads_the_amount_a_concurrent_edit_committed`.
+- **One append-only audit row per effective edit.** `credit_memo.updated`, with
+  `details.changes` = `{field: {old, new}}` for exactly the fields that changed
+  (`services/audit_access.build_field_diff`, money as string-Decimal; a vendor
+  move also records `entity_id`). A PATCH that changes nothing writes nothing.
 
 **Where the vendor link comes from.** `Invoice.vendor_id` is resolved by
 `services/vendor_matching.match_and_link_vendor` — on the AI-extraction path, on

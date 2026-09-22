@@ -122,6 +122,42 @@ const CASES: RouteCase[] = [
 			})
 	},
 	{
+		// Search arrived with issue #443 and carries the same `appliedSearch`
+		// shape as /requisitions and /expenses (see the header), which is why
+		// (a) types rather than fills here too.
+		name: 'credit-memos',
+		route: '/credit-memos',
+		apiPathname: '/api/credit-memos',
+		searchPlaceholder: 'Search memo # or vendor',
+		settle: async (page) => {
+			await expect(page.locator('table tbody tr')).toHaveCount(1);
+		},
+		buildBody: (searchTerm, marker) =>
+			JSON.stringify({
+				items: [
+					{
+						id: '00000000-0000-4000-b000-00000000c0de',
+						memo_number: marker,
+						vendor_id: '00000000-0000-4000-b001-000000000001',
+						vendor_name: `vendor for "${searchTerm}"`,
+						invoice_id: null,
+						invoice_number: null,
+						amount: 25,
+						currency: 'USD',
+						issued_date: '2026-01-01',
+						reason: null,
+						status: 'open',
+						applied_at: null,
+						applied_by: null,
+						created_at: '2026-01-01T00:00:00Z'
+					}
+				],
+				total: 1,
+				page: 1,
+				page_size: 20
+			})
+	},
+	{
 		// The #168 fix was originally applied to /invoices, /payments and
 		// /vendors only. /recurring (and its siblings /contracts, /budgets,
 		// /intake) carried the identical bug — their filter `$effect` called
@@ -259,6 +295,50 @@ const CASES: RouteCase[] = [
 						mileage_miles: null,
 						created_at: '2026-03-01T00:00:00Z',
 						updated_at: '2026-03-01T00:00:00Z'
+					}
+				],
+				total: 1,
+				page: 1,
+				page_size: 20
+			})
+	},
+	{
+		// The exceptions queue gained its search box in GitHub #443. Its chip
+		// effect calls `reload()`, which reaches `loadExceptions` AND
+		// `loadSummary` synchronously — two functions deep, where a tracked
+		// `search` read is easiest to reintroduce — and it keeps the
+		// `appliedSearch` guard, so this has to type rather than `fill()`.
+		name: 'exceptions',
+		route: '/exceptions',
+		apiPathname: '/api/exceptions',
+		searchPlaceholder: 'Search invoice # or vendor...',
+		settle: async (page) => {
+			await expect(page.getByRole('cell', { name: 'ROW', exact: true })).toBeVisible();
+		},
+		buildBody: (searchTerm, marker) =>
+			JSON.stringify({
+				items: [
+					{
+						id: `${marker}-id`,
+						invoice_id: null,
+						invoice_number: marker,
+						vendor_name: `vendor for "${searchTerm}"`,
+						amount: 100,
+						currency: 'USD',
+						exception_type: 'duplicate',
+						type_label: 'Duplicate Invoice',
+						severity: 'warning',
+						description: null,
+						status: 'open',
+						resolution: null,
+						resolved_by: null,
+						resolved_at: null,
+						assigned_to: null,
+						assigned_to_user_id: null,
+						due_at: null,
+						is_overdue: false,
+						time_to_resolution_hours: null,
+						created_at: '2026-03-01T00:00:00Z'
 					}
 				],
 				total: 1,

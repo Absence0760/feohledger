@@ -22,10 +22,17 @@ import { API_BASE, authedTenantHeaders, expect, tenantPsql, test } from '../fixt
  * PATCH.
  */
 
-function todayLocalIso(): string {
-	const now = new Date();
-	const local = new Date(now.getTime() - now.getTimezoneOffset() * 60_000);
-	return local.toISOString().slice(0, 10);
+/** Today as `YYYY-MM-DD` in the BROWSER's timezone, which is the one the
+ *  modal computes its default in. `playwright.config.ts` pins the browser to
+ *  `timezoneId: 'UTC'`; computing this in the Node runner used the machine's
+ *  zone instead, so the spec failed every evening west of UTC locally while CI
+ *  (UTC throughout) stayed green. */
+function todayLocalIso(page: import('@playwright/test').Page): Promise<string> {
+	return page.evaluate(() => {
+		const now = new Date();
+		const local = new Date(now.getTime() - now.getTimezoneOffset() * 60_000);
+		return local.toISOString().slice(0, 10);
+	});
 }
 
 test.describe('/expenses expense-date handling', () => {
@@ -40,7 +47,7 @@ test.describe('/expenses expense-date handling', () => {
 
 		const dateInput = dialog.locator('input[type="date"]');
 		// Prefilled, so the common path can never post a null.
-		await expect(dateInput).toHaveValue(todayLocalIso());
+		await expect(dateInput).toHaveValue(await todayLocalIso(page));
 		// …and marked required, so clearing it is caught by native validation
 		// before any request leaves the browser.
 		await expect(dateInput).toHaveAttribute('required', '');

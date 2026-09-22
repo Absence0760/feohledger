@@ -558,12 +558,9 @@
 									<td class="right">
 										<!-- The row's own currency (the invoice's — the same side of
 										     the settlement pair the matcher compares against), so a
-										     multi-currency tenant never sees the wrong symbol here. -->
-										<Money
-											amount={p.amount}
-											currency={p.currency ?? orgCurrency.currency}
-											mono
-										/>
+										     multi-currency tenant never sees the wrong symbol here.
+										     `null` renders bare, never the org's code (decisions §196). -->
+										<Money amount={p.amount} currency={p.currency} mono />
 									</td>
 									<td class="muted">{p.method ?? '—'}</td>
 									<td class="muted">{p.status}</td>

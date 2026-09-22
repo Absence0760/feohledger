@@ -1,4 +1,6 @@
 import { expect, test } from '../fixtures/helpers';
+import { resolveDialog } from './dialogs';
+import { exceptionSummary } from './summary';
 
 /**
  * `/exceptions` — list-load sequencing.
@@ -42,13 +44,7 @@ function exceptionRow(n: number, status: 'open' | 'escalated' = 'open') {
 	};
 }
 
-const SUMMARY = {
-	open: 2,
-	escalated: 1,
-	resolved: 0,
-	dismissed: 0,
-	by_type: {}
-};
+const SUMMARY = exceptionSummary({ open: 2, escalated: 1 });
 
 test.describe('/exceptions — list request sequencing', () => {
 	test('a held page-2 append cannot clobber a newer status-filtered page 1', async ({ page }) => {
@@ -185,7 +181,7 @@ test.describe('/exceptions — list request sequencing', () => {
 		await expect(row).toBeVisible();
 
 		await row.getByRole('button', { name: 'Resolve' }).click();
-		const modal = page.getByRole('dialog', { name: 'Resolve exception' });
+		const modal = resolveDialog(page);
 		await modal.locator('input[type="text"]').fill('e2e: sequencer guard');
 		await modal.getByRole('button', { name: 'Resolve', exact: true }).click();
 

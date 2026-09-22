@@ -36,7 +36,7 @@ from app.models.user import User
 from app.models.vendor import Vendor
 from app.models.vendor_user import VendorUser
 from app.services import credential_upgrade
-from app.utils.passwords import pwd_context
+from app.utils.passwords import DEFAULT_ROUNDS, _BcryptSha256Context, pwd_context
 from tests.test_bcrypt_sha256_compat import PASSLIB_LEGACY_BCRYPT, PASSLIB_V1
 from tests.test_session_management import FakeRedis
 
@@ -158,6 +158,34 @@ async def test_employee_login_upgrades_a_v1_wrapper_row(realdb, fake_redis):
     stored = await _stored_user_hash(realdb, user_id)
     assert stored.startswith(CURRENT_SCHEME_PREFIX), stored
     assert pwd_context.verify(V1_PASSWORD, stored) is True
+
+
+@pytest.mark.asyncio
+async def test_employee_login_raises_a_current_scheme_hash_to_the_configured_cost(
+    realdb, fake_redis
+):
+    """The cost axis rides the same wiring. A `bcrypt_sha256` v2 row written at
+    a lower cost than `DEFAULT_ROUNDS` — every row in the column, the day
+    somebody raises the cost — is re-hashed at the configured cost on its
+    owner's next sign-in. Before `needs_update` read the cost, `identify` said
+    "current scheme" and the row stayed at its old cost forever.
+
+    The low-cost hash is built with a cheap context rather than taken from the
+    passlib fixtures, which are evidence and are never regenerated.
+    """
+    low_cost = _BcryptSha256Context(rounds=4).hash(LEGACY_PASSWORD)
+    assert pwd_context.identify(low_cost) == pwd_context.scheme
+    email, user_id = await _create_user(realdb, hashed=low_cost)
+
+    async with realdb.client(key=TENANT, role=None) as c:
+        resp = await _login(c, email, LEGACY_PASSWORD)
+    assert resp.status_code == 200, resp.text
+
+    stored = await _stored_user_hash(realdb, user_id)
+    assert stored != low_cost
+    assert pwd_context.rounds_of(stored) == DEFAULT_ROUNDS
+    assert pwd_context.needs_update(stored) is False
+    assert pwd_context.verify(LEGACY_PASSWORD, stored) is True
 
 
 @pytest.mark.asyncio

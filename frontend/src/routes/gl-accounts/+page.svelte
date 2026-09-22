@@ -21,11 +21,12 @@
 	 * why the footer states a plain count and there is no Load-more control to
 	 * pair with a "Showing all N" claim.
 	 */
-	import { listGlAccounts, syncGlAccountsFromErp } from '$lib/api/glAccounts';
+	import { listGlAccounts, syncGlAccountsFromErp, updateGlAccount } from '$lib/api/glAccounts';
 	import type { GlAccount } from '$lib/types/glAccount';
 	import {
 		GL_ACCOUNT_TYPES,
 		GL_ACCOUNT_TYPE_LABEL_KEYS,
+		canEditGlAccount,
 		glAccountTypeLabelKey
 	} from '$lib/types/glAccount';
 	import { auth } from '$lib/stores/auth.svelte';
@@ -36,6 +37,7 @@
 	import DataTable from '$lib/components/ui/DataTable.svelte';
 	import EmptyState from '$lib/components/ui/EmptyState.svelte';
 	import Badge from '$lib/components/ui/Badge.svelte';
+	import RowAction from '$lib/components/ui/RowAction.svelte';
 	import GlAccountModal from '$lib/components/modals/GlAccountModal.svelte';
 	import { toast } from '$lib/components/ui/Toast.svelte';
 	import { createRequestSequencer } from '$lib/utils/requestSequence';
@@ -44,10 +46,11 @@
 	import { replaceState } from '$app/navigation';
 	import { untrack } from 'svelte';
 
-	// Both writes on this router are require_roles(ADMIN, AP_MANAGER); the read
-	// is role-open. A CFO reaches this page for the read (nav.ts) but holds
-	// neither role, so a button shown to them could only 403 — the same gate
-	// `/purchase-orders` and `/vendors` put on their own sync buttons.
+	// All three writes on this router (create, PATCH, sync) are
+	// require_roles(ADMIN, AP_MANAGER); the read is role-open. A CFO reaches
+	// this page for the read (nav.ts) but holds neither role, so a button shown
+	// to them could only 403 — the same gate `/purchase-orders` and `/vendors`
+	// put on their own sync buttons. The row actions ride the same gate.
 	const canManage = $derived(auth.isManager);
 
 	// --- Filter state (URL-backed) ---
@@ -68,6 +71,13 @@
 
 	let syncing = $state(false);
 	let showCreate = $state(false);
+	/** The row whose Edit dialog is open. */
+	let editingAccount = $state<GlAccount | null>(null);
+	/** Retire is armed two-click (the api-keys revoke shape): first click arms
+	 *  the row, the second commits, a click anywhere else disarms. */
+	let confirmRetireId = $state<string | null>(null);
+	/** The row whose status write is in flight — its actions disable. */
+	let busyId = $state<string | null>(null);
 
 	const TYPE_CHIPS = $derived([
 		{ key: 'all', label: m('common.all') },
@@ -91,7 +101,8 @@
 		{ label: m('glAccounts.col.parent') },
 		...(showScope ? [{ label: m('glAccounts.col.scope') }] : []),
 		{ label: m('glAccounts.col.erpId') },
-		...(showStatus ? [{ label: m('glAccounts.col.status') }] : [])
+		...(showStatus ? [{ label: m('glAccounts.col.status') }] : []),
+		...(canManage ? [{ class: 'actions-col' }] : [])
 	]);
 
 	const filtersActive = $derived(search.trim() !== '' || typeFilter !== 'all');
@@ -205,6 +216,48 @@
 		}
 	}
 
+	/**
+	 * Retire (`is_active: false`) or reactivate one account. There is no DELETE
+	 * on this router, by design: invoices record the code as TEXT and three
+	 * other tables hold a real FK to the row, so a delete would orphan the
+	 * money trail silently or 500 (`api/gl_accounts.py::update_gl_account`).
+	 * Retiring takes the account out of every picker and `_ActiveChart` while
+	 * every historical line still resolves — and it stays reachable here under
+	 * "Include inactive", which is where Reactivate lives.
+	 */
+	async function setActive(acct: GlAccount, active: boolean) {
+		confirmRetireId = null;
+		busyId = acct.id;
+		try {
+			await updateGlAccount(acct.id, { is_active: active });
+			toast(
+				m(active ? 'glAccounts.row.toast.reactivated' : 'glAccounts.row.toast.retired', {
+					code: acct.code
+				}),
+				'success'
+			);
+			await load();
+		} catch (err) {
+			// The backend's text is the useful one: its 403 names the view to
+			// retire a shared row from.
+			toast(err instanceof Error ? err.message : m('glAccounts.row.toast.failed'), 'error');
+		} finally {
+			busyId = null;
+		}
+	}
+
+	function handleWindowClick(e: MouseEvent) {
+		if (confirmRetireId && !(e.target as HTMLElement).closest('.row-action')) {
+			confirmRetireId = null;
+		}
+	}
+
+	/** Can the current view edit this row? The PATCH follows the CREATE rule —
+	 *  see `canEditGlAccount`. */
+	function editable(acct: GlAccount): boolean {
+		return canEditGlAccount(acct, entityStore.selected?.id ?? null);
+	}
+
 	async function syncFromErp() {
 		syncing = true;
 		try {
@@ -299,6 +352,8 @@
 	}
 </script>
 
+<svelte:window onclick={handleWindowClick} />
+
 <PageHeader title={m('glAccounts.title')}>
 	{#snippet actions()}
 		{#if canManage}
@@ -367,6 +422,52 @@
 								{/if}
 							</td>
 						{/if}
+						{#if canManage}
+							<td class="actions">
+								{#if editable(acct)}
+									<RowAction
+										ariaLabel={m('glAccounts.row.editAria', { code: acct.code })}
+										disabled={busyId === acct.id}
+										onclick={() => (editingAccount = acct)}
+									>
+										{m('glAccounts.row.edit')}
+									</RowAction>
+									{#if acct.is_active}
+										<RowAction
+											variant="danger"
+											armed={confirmRetireId === acct.id}
+											ariaLabel={confirmRetireId === acct.id
+												? undefined
+												: m('glAccounts.row.retireAria', { code: acct.code })}
+											disabled={busyId === acct.id}
+											onclick={(e) => {
+												e.stopPropagation();
+												if (confirmRetireId === acct.id) void setActive(acct, false);
+												else confirmRetireId = acct.id;
+											}}
+										>
+											{confirmRetireId === acct.id
+												? m('glAccounts.row.confirm')
+												: m('glAccounts.row.retire')}
+										</RowAction>
+									{:else}
+										<RowAction
+											ariaLabel={m('glAccounts.row.reactivateAria', { code: acct.code })}
+											disabled={busyId === acct.id}
+											onclick={() => void setActive(acct, true)}
+										>
+											{m('glAccounts.row.reactivate')}
+										</RowAction>
+									{/if}
+								{:else}
+									<!-- With an entity selected, a shared (or another entity's) row
+									     is visible but not this view's to change — the PATCH 403s.
+									     Say where it can be changed instead of offering a button that
+									     can only fail. -->
+									<span class="row-hint">{m('glAccounts.row.otherChart')}</span>
+								{/if}
+							</td>
+						{/if}
 					</tr>
 				{/each}
 			{/snippet}
@@ -388,6 +489,17 @@
 	<GlAccountModal onclose={() => (showCreate = false)} onsaved={() => void load()} />
 {/if}
 
+{#if editingAccount}
+	<!-- Keyed so a second Edit opens a fresh form seeded from THAT row. -->
+	{#key editingAccount.id}
+		<GlAccountModal
+			account={editingAccount}
+			onclose={() => (editingAccount = null)}
+			onsaved={() => void load()}
+		/>
+	{/key}
+{/if}
+
 <style>
 	.filter-row {
 		display: flex;
@@ -402,6 +514,10 @@
 		font-size: 0.85rem;
 		color: var(--text-muted);
 		white-space: nowrap;
+	}
+	.row-hint {
+		font-size: 0.8rem;
+		color: var(--text-muted);
 	}
 	.count-row {
 		display: flex;

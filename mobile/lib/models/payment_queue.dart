@@ -181,7 +181,7 @@ class PaymentSummary {
 /// proves it.** `payment_runs.total_amount` is a plain `SUM(Payment.amount)`
 /// with no currency column beside it — but `services/payment_runs` refuses to
 /// create a run spanning more than one currency, so the legs agree, and
-/// `api/payments.py::_one_currency` derives the code from them for the runs
+/// `services/payment_runs.py::one_currency` derives the code from them for the runs
 /// list and the run detail alike.
 ///
 /// A `null` therefore means the code could not be PROVEN — a run with no

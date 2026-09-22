@@ -7662,3 +7662,482 @@ to start a run against a database behind head, naming each stale one and
 The delay is its own lesson: that entry named its own durable fix, sized it
 correctly, and still sat for nine days because it was filed as a note rather
 than as work.
+
+## 188. The exception queue's chip tallies are faceted, not whole-set
+
+**Decided:** 2026-09-21 · `backend/app/api/exceptions.py`, `backend/app/api/sorting.py`
+
+`GET /api/exceptions/summary` feeds three chip rows beside the queue — status,
+type and (new) severity. Until now it was listed in
+`tests/test_whole_set_kpi_rollups.py::_DELIBERATELY_WHOLE_SET`: its status
+counts took no filter at all, and `by_type` took only `status`. That was
+defensible while the queue had no search box. Once it gained one (issue #443),
+a whole-set tally is the defect §48 describes: search for one vendor and the
+chips go on counting the tenant above a one-row table.
+
+§48's rule is that a counts endpoint takes every filter except the dimension it
+tallies. With three chip rows there are three dimensions, so the rule applies
+**per row**: the status counts honour type, severity, assignee and search; the
+type counts honour status, severity, assignee and search; the severity counts
+honour status, type, assignee and search. Every chip then reads what the table
+would show if that chip were clicked, given everything else selected — and the
+selected chip in each row equals the table's `total`. All three tallies, the
+list and the `/ids` resolver go through the one `_exception_list_filters`, so
+none of them can mean something different by a filter; the exemption is
+retired and the module joins `_SHARED_BUILDER_MODULES`.
+
+The considered alternative was to keep every row whole-set and add search only
+to the list. Rejected because the rows would then contradict the table the
+moment any chip in another row was on — `Open 12` above the 3 open fraud flags
+a type chip had narrowed to — which the old `by_type`-follows-`status` rule had
+already conceded for one pair of rows.
+
+Two smaller calls rode along:
+
+- **An omitted `status` means every status on all three endpoints.** The summary
+  used to count its types within `open` when no status was sent, so a bare call
+  described a different set from a bare list call; and `status=all` on the list
+  was passed into the `IN` clause, where it matched nothing. The queue always
+  sends the status it is showing, so nothing observed either difference — which
+  is why they were worth removing before something did.
+- **A sort key whose NULL means "no value" trails in both directions.**
+  `resolve_order_by` takes a `nulls_last` set. `due_at` is NULL when no SLA is
+  configured for the type, and Postgres ranks NULL above every value, so a
+  descending "Due" click would have led with every exception that has no
+  deadline. Opt-in per key, because on other columns the default was not wrong,
+  just unconsidered. Severity sorts by `exception_lifecycle.EXCEPTION_SEVERITY_RANK`
+  rather than by the text column, whose alphabetical order puts `info` between
+  `error` and `warning`; an unranked value ranks 0 so it sinks instead of posing
+  as urgent.
+
+## 189. An open credit memo can be edited; an applied one never — and edit, apply and void share one row lock
+
+`POST /api/credit-memos` had no counterpart for correcting what it wrote. Both
+application paths refuse a currency mismatch, so a memo keyed in the wrong
+currency was permanently unappliable, and the only way out was Void and
+re-create — a void row in the audit trail for what was a typo (issue #443).
+
+`PATCH /api/credit-memos/{id}` now corrects it, and the boundary it draws is the
+money boundary: **only a memo that has never been applied**. That is the whole
+of "never rewrite a settled money record" here, because application is
+all-or-nothing — status, invoice link, `applied_at` and `applied_by` are written
+together in one transaction and nothing reverts them — and because only
+`applied` rows are netted off a payable, so an open memo's amount is not yet
+anything a payment run reads. The guard checks the link and the timestamp as
+well as the status anyway: a future "reopen" path must not make a settled record
+editable just by flipping one column.
+
+Considered and rejected:
+
+- **Editing an applied memo, with the invoice balance re-checked.** It would
+  restate a credit a payment may already have been booked net of
+  (`payment_runs.net_payable_amount`); the executor's stale-amount refusal would
+  catch the overpayment, but the ledger would already say something different
+  from what was approved. Void (for an open memo) and a new memo remain the
+  audit-honest path once money has moved.
+- **Letting the PATCH set `invoice_id`.** Linking a memo is applying it, with its
+  own guards and its own `credit_memo.applied` audit action. The schema forbids
+  the field (`extra="forbid"`) rather than ignoring it, so a caller can never
+  believe it applied a credit that it did not.
+- **Optimistic concurrency (an `updated_at` token) instead of a lock.** A token
+  protects an editor from another editor; the race that matters here is an edit
+  against an *apply*, which carries no token. So the edit reads the memo
+  `FOR UPDATE` before its checks, and `/apply` and `/void` now lock it too. The
+  apply side was a real gap before any PATCH existed: two applies of one open
+  memo to two different invoices both read `open`, both passed, and left one
+  `credit_memo.applied` row per invoice for a credit that reduced only the
+  second. The UI sends only the fields that changed, which keeps an edit from
+  re-asserting untouched fields over a concurrent one without needing a token.
+
+Every effective edit writes one `credit_memo.updated` row carrying the old and
+new value of each changed field (money as string-Decimal); an edit that changes
+nothing writes nothing.
+
+## 190. A `page.route` stub that answers a dev-server module fails the test by name
+
+Four `/credit-memos` e2e specs failed on every laptop and passed in every CI
+run. They stubbed the vendor list with `**/api/vendors*` and
+`/\/api\/vendors/`, and under `vite dev` the app's own source is served over
+HTTP: `$lib/api/vendors.ts`, imported by `VendorPicker`, is the URL
+`/src/lib/api/vendors.ts`. The stub answered that module with JSON, the route's
+code never loaded, SvelteKit rendered its 500 page, and the specs timed out
+looking for a row. CI serves a preview build of hashed `/_app/immutable/`
+chunks, which no API pattern can match — so the difference was the server, and
+nothing in the failure pointed at it.
+
+The specs now match the exact API pathname, the pattern `adaptive/` and
+`experiments/` had already adopted after hitting the same trap. What was missing
+was a way for the NEXT such stub to announce itself, so the `page` fixture now
+records every module script the page receives a JSON body for and fails the test
+at teardown naming the module. Only a stub can produce that — Vite serves every
+module, JSON imports included, as JavaScript — so the check has no false
+positives, costs one passive listener, and never fires in CI's preview build,
+which is the one place the bug cannot occur.
+
+Considered and rejected:
+
+- **Serving a preview build locally.** It would hide the defect rather than fix
+  it, and the local loop needs `vite dev`'s on-demand transforms for source
+  edits to show up without a rebuild.
+- **A static source guard over `page.route` patterns.** Eleven other specs use
+  a broad glob and dispatch on the pathname inside the handler, which is
+  correct; a pattern scan cannot see that, so it would flag them all and push
+  the guard towards being switched off. The runtime check keys on the effect,
+  not the spelling.
+
+## 191. A password that cannot sign in cannot authorize a factor change either
+
+**Decided:** 2026-09-21 · `backend/app/api/auth.py` · `backend/tests/test_sso_only.py`
+
+§163 placed the login-time hash upgrade after the SSO-only refusal, on the
+reasoning that a tenant which has closed password login has made the hash
+unreachable for signing in. It named the residue in the same breath: signing in
+is not the only consumer of `User.hashed_password`. Every change to a second
+factor — TOTP enroll and disable, passkey register and delete — demands a
+step-up, and the account password was one of its three proofs. So in an
+SSO-only tenant the hash went on authenticating the one security-sensitive
+operation it still could, and for a row written before c6a91396 it did so on raw
+bcrypt that no sign-in would ever upgrade.
+
+The follow-up offered two fixes: upgrade from the step-up path too, or stop
+accepting the password as a step-up proof there. **The second was taken, and
+the first turned out to be unnecessary once it was.** A tenant that turns
+`sso_only` on has said the password is not an authenticator in that tenant, and
+a step-up *is* an authentication. So `_step_up_satisfied` drops an offered
+password before `mfa.step_up_verified` sees it, through one predicate —
+`_password_sign_in_closed`, which is `services/sso.is_sso_only`, the same call
+the login refusal makes. The two doors therefore cannot disagree about whether
+the password authenticates: it proves a step-up exactly when it would prove a
+sign-in, and `is_sso_only`'s requirement that `sso.enabled` be true (a broken
+IdP config keeps the password open as the escape hatch) reopens both together.
+With the step-up closed, the legacy hash authenticates nothing that matters
+while the tenant stays SSO-only, and the day the tenant leaves SSO-only the
+owner's first password sign-in upgrades it through the path that already
+exists. Wiring an upgrade into the step-up would have meant a write from a pure
+helper shared by four endpoints on two surfaces, for a credential the tenant has
+retired.
+
+Four calls inside it:
+
+1. **The rule lives in `_step_up_satisfied`, not at each caller.** Every route
+   that asks "is the step-up satisfied?" goes through it, so a fifth factor
+   operation added later inherits the rule rather than having to remember it.
+   `mfa.step_up_verified` stays pure — no org, no DB — and is told
+   `password=None`; its docstring says the admissibility call is the caller's.
+
+2. **The password is never verified there, so the refusal cannot enumerate.**
+   A right password, a wrong one and an account with no password at all get the
+   byte-identical `400`. The sentence names the proofs that do work (an
+   authenticator code, a registered passkey) instead of the generic "confirm
+   your password", which in that tenant would be asking for the one proof it
+   refuses. It reveals only that the tenant is SSO-only, which
+   `/auth/{sso,saml}/config` already publishes to anyone, to a caller who is
+   already signed in to the account. It stays a `400` — the status every other
+   step-up refusal uses — and it is throttled and audited as an
+   `auth.mfa.step_up.failure` exactly like a wrong password, because a stolen
+   session trying the password is the signal that row exists to carry.
+
+3. **The org is loaded only when a password was offered.** Code and assertion
+   step-ups pay no extra query for a rule that cannot bind them; the refusal
+   path reads the org once more to pick its sentence, which is a failure path
+   and cheaper than threading a verdict out of a predicate that returns a bool.
+
+4. **The lockout question has a bounded answer.** A step-up is only demanded of
+   an account that has a live factor, and a live factor is itself a proof the
+   owner holds — the authenticator for TOTP, the passkey for a passkey — so no
+   account is left with nothing to offer. What goes is the password as a
+   *fallback*: a member who lost their authenticator, or whose only passkey is
+   bound to another host, cannot use it to step up here. That is accepted
+   because, in an SSO-only tenant, those factors gate nothing: OIDC and SAML
+   sign-in never consult them. A stuck factor there is an inconvenience with a
+   route out (the passkey's own host, or the tenant leaving SSO-only), not a
+   lockout, and keeping the password as a fallback would have kept exactly the
+   door this closes.
+
+The supplier portal is untouched: a `VendorUser` signs in with a password and no
+SSO can close it, so there the password remains the step-up proof it always was.
+
+## 192. Segregation of duties is not scoped by entity: a mirror inherits its source's implicated set
+
+**Decided:** 2026-09-21 · `backend/app/services/intercompany.py` ·
+`backend/app/services/approval_chain.py` · `backend/tests/test_intercompany.py`
+
+§152 made segregation key on a set — `Invoice.uploaded_by_id` ∪
+`Invoice.segregation_actor_ids` — and left the inter-company mirror out of it on
+purpose, stamping `segregation_actor_ids=None` with the reasoning in place: the
+mirror's segregation subject had always been its own creator, the routing actor,
+and propagating the set while still not propagating the source's uploader would
+bar a source *editor* from the mirror while leaving the source *uploader* free.
+It called the real question an entity-scope one — should shaping a payable
+under one entity bar you from signing its mirror under another? — and filed it.
+The effect of the deferral was that the employee who uploaded a payable, or a
+recurring template's author or material editor, could approve that payable's
+mirror under the counterparty entity as long as someone else pressed "route".
+
+**The answer is yes, and it follows from what segregation is about rather than
+from anything entity-specific.** The subject of the control is the payable's
+terms (§152, §169): whoever caused them to be what they are must not also sign
+them off. The mirror has no terms of its own — `route_intercompany_invoice`
+copies vendor, amount and currency verbatim and only chooses the counterparty.
+So the people who shaped the source shaped the mirror, and an entity is the
+wrong place for that to stop being true: entities subdivide one tenant's books
+(`docs/multi-entity.md`), the approvers on both sides are the same
+control-plane users, and an inter-company charge is one economic transaction
+recorded twice. Scoping the rule by entity would turn "route it through a
+sibling subsidiary" into a way for a payable's author to approve it.
+
+So **both** of the source's columns travel, which is the consistency §152 asked
+for: the mirror's `segregation_actor_ids` is the source's uploader ∪ the
+source's own set, minus the routing actor, who is the mirror's uploader. Three
+calls inside it:
+
+1. **One definition of "implicated", shared by the gate and the mirror.**
+   `approval_chain.implicated_actors(invoice)` is the uploader ∪ the set,
+   stringified; `violates_segregation` is now membership in it, and the mirror
+   copies it. The predicate had been reading the two columns separately, so a
+   third input added to one place would have silently not reached the other —
+   now it reaches both. The refactor preserves the predicate's answers: a `None`
+   actor still never reads as a breach, and ids compare as strings on both
+   columns (the uploader was compared as a `UUID`, which was equivalent for
+   every caller, since all of them pass `UUID`s).
+
+2. **Snapshotted at routing, like every implicated set.** §152 rejected
+   resolving the set live because a payable's terms are frozen when it is
+   raised; the mirror's are frozen when it is routed, so its implicated set is
+   too. A later edit to the source (which records no editor today anyway)
+   cannot retroactively bar or un-bar anyone on the mirror.
+
+3. **The routing actor is named once.** They land in `uploaded_by_id` and are
+   dropped from the set, the same subtraction `recurring_invoices.
+   implicated_actor_ids` makes, so the two columns never appear to disagree. An
+   empty result is NULL, not `[]`, the shape every creation path writes for
+   "nobody beyond the uploader".
+
+What this does **not** do: implicate the source's *approver*. Approving is not
+shaping, and the same reviewer signing both halves of an inter-company charge
+is ordinary practice; segregation separates the maker from the checker, not one
+checker from another. A tenant with nobody left to approve a mirror (a
+two-person team where one uploaded and the other routed) has the same
+`require_segregation: false` step opt-out every other approval has.
+
+`test_invoice_uploader_stamping.py` now declares the set's writers in
+`_SEGREGATION_SET_WRITERS` — the recurring generator and the mirror — pins that
+each passes a real value, and fails if a third site starts writing the set
+without being declared, so "two writers" cannot quietly go stale the way the
+old "`generate_one` is the only writer" comment would have.
+
+## 193. Self-service signup gets its own off switch, and a closed signup is a 404 and a sentence, not a starved captcha
+
+**Decided:** 2026-09-21 · `backend/app/config.py` · `backend/app/api/signup.py` ·
+`frontend/src/routes/signup/+page.svelte` · `deploy/decrypt-env.sh`
+
+Until now the only way to close self-service signup was to misconfigure its
+abuse control: a deployed env refused to boot without `FEOH_HCAPTCHA_SECRET`, so
+an operator running an invite-only pilot set the secret and left the *sitekey*
+empty. That failed closed — no widget loaded, and `POST /api/signup/start`
+answered 400 "Captcha is required." — but it was a closed door painted to look
+open: `/signup` rendered a complete form that a visitor filled in only to be
+refused, and the operator held a captcha credential for a feature they had
+turned off. §176's rule applies in the other direction: a feature needs its own
+gate, and borrowing another control's failure mode as one means the two can no
+longer be reasoned about separately.
+
+`FEOH_SIGNUP_ENABLED` (default `true`) is that gate. Four calls inside it:
+
+1. **Default on.** Guard rail 7 and every existing deployment: `pnpm dev`, the
+   signup e2e and any box already taking signups behave exactly as before, and
+   closing signup is the deliberate act. `deploy/prod.sops.yaml.example` — the
+   invite-only minimal deployment's contract, which already told operators to
+   keep signup closed — now says `"false"` instead of describing the
+   empty-sitekey workaround.
+
+2. **Off is a bare 404 on all three routes, decided before anything else runs.**
+   It is a router-level dependency, so it fires before the body is validated,
+   before a session is opened, and before a rate limit is spent: a closed
+   deployment creates no `EmailVerification` row, consumes no pending token, and
+   a probe cannot burn a real visitor's per-IP budget or read slug availability.
+   404 with `{"detail": "Not Found"}` — the body an unmounted route returns —
+   rather than a 403 or 400 naming the feature, because that is what the
+   codebase's two other whole-surface kill switches already answer
+   (`cash_flow._require_enabled`, `v1_openapi._ensure_enabled`) and it says
+   nothing more than a route that does not exist. Publishing the state through
+   `/api/public-config` does not undercut that: the SPA needs it to render
+   honestly, and the 404 already told anyone who asked.
+
+3. **The captcha boot check follows the switch.** `_require_captcha_in_deployed_envs`
+   exists to stop a public, tenant-creating endpoint shipping without its abuse
+   control; with signup off there is no such endpoint, so the secret is required
+   only while `signup_enabled` is true. `deploy/decrypt-env.sh` mirrors the rule
+   — including every spelling pydantic reads as false, so the script and the app
+   cannot disagree about whether a deploy needs the secret — and a near-miss
+   spelling keeps the requirement rather than loosening it.
+
+4. **The SPA says "closed"; the marketing page's links still lead there.**
+   `/signup` reads `signup_enabled` from the public-config call it already made
+   and, on an explicit `false`, renders a heading and one sentence (new
+   workspaces are by invitation; an existing customer signs in at their
+   workspace's address) — no form, no captcha script, no slug check, and no
+   "what happens next" panel describing a flow that is not on offer. Until the
+   config arrives, or if it cannot be fetched, the page stays the form it always
+   was and the server remains the authority. The landing page's "Create your
+   workspace" calls to action are **not** hidden: they land on that notice,
+   which is an honest answer, whereas removing or rewording them is marketing
+   copy for a deployment shape the landing page was not written for — an apex
+   marketing page is a public-SaaS artefact, and an invite-only deployment
+   choosing what to say there instead is a product call, not a consequence of
+   the switch.
+
+A verification link emailed while signup was open survives the switch
+unconsumed, so re-opening signup lets that visitor finish rather than
+stranding them.
+
+## 194. An invoice's GL code must resolve in its own entity's chart — refused only when it belongs to another
+
+§186 made the cross-entity ambiguity visible: in the consolidated view the
+invoice pickers offered subsidiary B's `6000` for a subsidiary-A invoice, now
+labelled as B's. Every manual write still accepted it, and the stored string
+then resolved against A's chart — a different account, or none — while budgets,
+matching rules, the 1099 box map, approval routing and the report builder all
+read it as A's. `services/gl_chart.refuse_foreign_gl_codes` now closes that, on
+every path that writes the column: create, `PATCH`, the line-items replace,
+approve-with-corrections (and through it the GL-coding exception agent), CSV
+import and recurring-template writes.
+
+Four calls shape it.
+
+**The chart is the invoice's entity's, never the sidebar's.** Create checks the
+entity the row will be filed under (`get_write_entity_id`: the selection, else
+the default); every other path checks `invoice.entity_id` (or the template's).
+The picker follows the same rule rather than the `X-Entity-ID` view: the
+consolidated view is every subsidiary's chart, and a deep link can open another
+entity's invoice while one is selected. So `GET /api/gl-accounts` took a
+`chart_entity_id` parameter and `InvoiceResponse` exposes `entity_id`; filtering
+the header-scoped list in the browser would have been silently incomplete in
+exactly the deep-link case. The parameter widens nothing — the consolidated read
+already returns every entity's rows to every role.
+
+**What is refused is "another entity's", not "not in my chart".** A code in no
+chart at all — hand-typed, or on a retired account — still writes. Refusing it
+too is the stricter rule `gl_recode` and extraction apply to *automated* codes,
+and it may well be right for manual ones; but it is a different decision with
+costs this one does not have: CSV import is a historical-migration path whose
+rows legitimately carry codes whose accounts are long gone, a tenant's chart may
+be partial (a few hand-made accounts awaiting the first ERP sync), and every e2e
+fixture that codes to a literal would have to create its account first. The refusal
+chosen here is never correct for the invoice it is written to; the stricter one
+sometimes is. It is filed separately rather than smuggled in.
+
+**Ownership is read over retired rows too.** A code A holds only as a retired
+account, and B holds live, still resolves to A's retired account on an A
+invoice — that is a retirement question, not a cross-entity one, and calling it
+"another entity's" would be both wrong and misleading.
+
+**Only a code NEW to the row is checked.** An invoice coded across entities
+before this existed must stay editable: a `PATCH` that echoes the stored code,
+or a line carried over through the delete-and-reinsert line-items `PUT`, is not
+a coding decision, and refusing it would freeze the invoice the day its account
+moved. The same rule `recurring`'s material-edit tracking applies — a re-sent
+unchanged field is not an edit.
+
+## 195. A generated Dart catalogue takes its call signature from the ARB, and the parity test it replaces is retired, not kept
+
+Round 26 localized invoice warnings on mobile by transcribing all 48 codes into
+`invoice_warning_messages.dart` by hand — a parameter-kind map and a 360-line
+`switch` — and backstopped the transcription with a flutter test that parsed the
+web's generated TypeScript. §157's generator now writes the Dart half as well,
+into `invoice_warning_messages.generated.dart` (a `part` of the hand-written
+library, which keeps only the per-kind formatters and the fallback rules). The
+generated `switch` is byte-identical to the transcribed one, which is the proof
+the transcription was mechanical enough to generate.
+
+**Where the web generator emits a key, this one has to emit a call.** A gen-l10n
+class exposes each message as its own typed method, so each code needs an arm
+that calls `l.invoiceWarningX(a, b, …)` with its arguments in order. Taking that
+order from the catalogue's `params` would have been the obvious choice and a
+latent defect: `flutter gen-l10n` builds the signature from the ARB's
+placeholder metadata, the two orders agree today only because round 26 typed
+them that way, and every warning placeholder but a plural selector is a
+`String` — so a swap compiles and renders a PO number where the amount belongs.
+The generator therefore reads order and type from `app_en.arb`, refuses outright
+when the ARB's placeholders are not the catalogue's (a missing or extra name, an
+`int` on anything but a `count`), and treats an ARB-only reorder as drift: the
+check names the mobile file stale even though the catalogue did not move. A code
+the ARB does not state yet still gets an arm, in catalogue order, which fails
+`flutter analyze` — the mobile counterpart of the web map's
+`satisfies Record<string, MessageKey>`, and the second link of the same
+three-guard chain.
+
+**The cross-surface parity test was deleted rather than kept beside the drift
+check.** It existed to catch a hand transcription drifting from the TypeScript;
+with both files written by one run from one source, the only divergence left for
+it to find is a hand edit to a generated file, which `--check` already refuses
+in the same CI job that would have run it. Keeping it would have been a second
+guard with no failure of its own to detect — and one that reads another
+workspace's source file by relative path, so it breaks when that file moves
+without anything having gone wrong. What a generated file cannot prove about
+itself is that every arm it emits reaches a real sentence; the mobile test now
+asserts that for every code in every locale, plus that dropping any one
+parameter falls the finding back to the server's English.
+
+## 196. The web formatter renders an unprovable currency bare by default, and the servers send the code they know
+
+§160 made mobile render a figure with no provable currency bare and noted, in
+passing, that the web still disagreed: `utils/money.ts::resolveCurrency`
+returned `USD` for any null or malformed code, so the same payment row read as
+dollars on the web and bare on a phone. The follow-up proposed an opt-in — a
+`<Money>` prop a call site could set to get the honest rendering.
+
+**The default flipped instead.** An opt-in keeps the substitution as what
+happens when a caller forgets, and forgetting was the whole history of this
+bug: `/payments` grew a second helper (`formatRowMoney`) solely to opt its
+per-row cells out of its own fallback, and `RunDetailModal` and `/discounts`
+each re-derived the same escape. The audit that decided it was cheap: across
+`src/`, exactly one call site omits a currency entirely (the report builder's
+`ResultTable`, whose measures can sum across currencies and so have none to
+give), and every other call passes a code — so every render the flip changes is
+one where the code really was absent. `formatMoney` now renders grouped
+figures with two decimals and no symbol for a `null`, empty or malformed code,
+and for one `Intl` rejects; `accounting` keeps its parentheses, which `Intl` only
+offers beside a symbol. `DEFAULT_CURRENCY` survives for what needs a value — a
+picker default, a form's initial value — and `formatAmountWithoutCurrency` is
+now just `formatMoney` with no code, one primitive rather than two that could
+round differently.
+
+**A bare figure is only honest if the servers stop sending `null` where they
+know the answer**, so the three fallback sites the entry named were each traced
+to what the payload could have said:
+
+- **Positive Pay** stamped the org's reporting currency on a check-issue file
+  whose total sums `Payment.amount`. The model comment said that column was
+  "already home-currency"; it is the **invoice's** currency (the home debit is
+  `source_amount`). A USD cheque run for a EUR-reporting org was filed as EUR.
+  The file now stamps `services/payment_runs.one_currency` over its cheques'
+  invoices — the rule the run endpoints already used, moved out of
+  `api/payments.py` so a service can call it — and `null` when they disagree.
+- **`/analytics/by-entity`** rendered each entity row's naive `total_spend` /
+  `outstanding_amount` — sums across whatever currencies that entity's invoices
+  are in — under the entity's configured currency, or the org's when it had
+  none. The endpoint already served `reporting_outstanding_amount`; it now
+  serves `reporting_total_spend` too (the population and rollup of `/cfo`'s
+  `reporting_spend`, so the consolidated row equals that tile), and every row
+  renders both in the `reporting_currency` the payload names. That also makes
+  the consolidated row the cross-check it claimed to be: a column in one
+  currency can be summed by eye. The face-value disclosure under it said
+  unconverted invoices were *excluded*; the rollup counts them at face value,
+  and the sentence now says so.
+- **`/payments`**' own `formatCurrency` wrote `currency ?? orgCurrency.currency`.
+  It is now `formatMoney` with the payload's code, and `formatRowMoney` is gone.
+- **`/bank-reconciliation`**'s statement dialog labelled every match candidate
+  with the org's currency, under a comment saying `UnclearedPaymentResponse`
+  carried none. It has carried the invoice's currency since the Uncleared
+  bucket was fixed; the comment outlived the fact by a release.
+
+**`PurchaseOrder` is the one figure no payload can label**, because the model
+has no currency column. By-entity's Open POs column therefore renders bare,
+with a note saying why, while `/purchase-orders` and `/cfo`'s accruals card
+keep the org label they had: changing those is the tenant migration the entry
+sized separately, and bare-rendering the PO list before POs record a currency
+would replace a probably-right label with none on every row. The difference
+between the two is deliberate and temporary — by-entity sums POs *across
+entities that may report in different currencies*, where the org label is not
+even probably right.

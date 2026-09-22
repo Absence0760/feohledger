@@ -70,12 +70,18 @@ into the **Frontend** CI job beside the typecheck, and into root `pnpm lint` as
   dashboard's `discount_capture` money was typed `MoneyString` while the wire
   sends JSON numbers, and the five `AgingBuckets` bands were typed `number` and
   were being summed and divided as raw currency in the route.
-- **`$lib` imports under `tests-e2e/` must be `import type`.** `tsc` resolves the
-  alias through `.svelte-kit/tsconfig.json`'s `paths`; Playwright's own esbuild
-  transform does not read that file, so a VALUE import from `$lib` typechecks
-  and then fails to resolve when Playwright loads the spec. Types are erased
-  before the runtime sees them, which is why the contract costs nothing at test
-  time.
+- **`$lib` imports under `tests-e2e/` are `import type`, with one narrow
+  exception.** Types are erased before the runtime sees them, which is why the
+  contract costs nothing at test time. A VALUE import is different: Playwright
+  does resolve the `$lib` alias itself, but not SvelteKit's virtual modules, so
+  a value import typechecks and then fails to load (`Cannot find package
+  '$env'`) the moment its module graph reaches `$env/*`, `$app/*` or a
+  `.svelte` file — `$lib/api` does, through `$lib/tenant`. The exception is a
+  module that is **pure by design and says so**: `tests-e2e/auth/rbac.spec.ts`
+  imports `$lib/nav`'s functions so it can compare the rendered sidebar with
+  what the nav policy computes instead of re-typing the answer (the
+  round-31 red shard). If such a module ever gains a `$env`/`$app` import, the
+  spec fails to load loudly, not silently.
 
 `@types/node` is a devDependency for this config alone — the Playwright tree
 genuinely runs in Node (`process.env`, `Buffer`, `node:crypto`), and
@@ -243,6 +249,12 @@ call at a call site. The backend serializes money as an **exact decimal string**
 number to format it is how precision gets lost, so pass the string straight
 through. An absent figure formats as a dash, never `0.00`, and absence is keyed
 on nullish rather than falsiness so a genuine `0` still renders.
+
+**A figure is labelled by the currency its own payload names, and renders bare
+when there is none** — `formatMoney` shows grouped figures with no symbol for a
+`null` / malformed code instead of substituting `USD`. So never write
+`row.currency ?? orgCurrency.currency` for a per-row figure: pass the row's
+code, `null` included (`docs/decisions.md` §160, §196).
 ### Internationalization (i18n) — `src/lib/i18n/`
 
 **Full reference: `frontend/docs/i18n.md`** (catalogue layout, locale
@@ -250,7 +262,8 @@ negotiation, pluralization, and the locale-aware number/date/currency helpers).
 Mobile has a parallel setup in `mobile/CLAUDE.md` § Internationalization.
 
 The rule: **no user-facing string is ever a hardcoded literal** — everything goes
-through `t()`, and every number, date and currency renders through the
+through `m()` (`$lib/i18n/store.svelte`, keyed by a typed `MessageKey`; there is
+no `t()`), and every number, date and currency renders through the
 locale-aware helpers rather than a raw `toLocaleString`. A new string ships with
 its catalogue entry in the same change.
 
@@ -274,7 +287,7 @@ a catalogue backfill; see `docs/decisions.md` §174. **This exception covers onl
 those two directories**, plus the document titles `pages.ts` exports for the
 links that reach them — take those from `legalTitle(path)`, never by typing the
 title again. A nav item, footer or banner elsewhere that merely *points at* a
-legal page is ordinary UI and goes through `t()` like anything else. A sentence
+legal page is ordinary UI and goes through `m()` like anything else. A sentence
 with a link inside it stays ONE catalogue entry with `{token}` markers, rendered
 through `ui/LinkedMessage.svelte`; fragmenting it into `…Pre`/`…Post` entries
 fixes the link order and cannot be translated (`frontend/docs/i18n.md` § A
@@ -398,7 +411,7 @@ The rules that hold everywhere, so you know when you need to go read the detail:
 - **Filter, sort, search and selection state is URL-backed**, so back/forward and a pasted link reproduce the view. State that lives only in a `$state` rune is a bug.
 - **List fetches go through `createRequestSequencer`** — a late response from a superseded request must never overwrite a newer one.
 - **Money renders through `<Money>`**, never a hand-rolled `toFixed` or `Intl` call. See `### Money formatting`.
-- **User-facing strings go through `t()`** — never a hardcoded literal. See `### Internationalization`.
+- **User-facing strings go through `m()`** — never a hardcoded literal. See `### Internationalization`.
 - **Accessibility is WCAG 2.2 AA and it is tested.** Focus management, keyboard reachability, target size, and reflow at 320 px are guarded by `frontend/tests-e2e/a11y/` (axe-core). `reflow.spec.ts` enumerates `src/routes` off disk, so a NEW route is measured at 320px the day it lands and there is no list to add it to. Never loosen those specs — fix the markup.
 - **Colour comes from the tokens in `app.css`**, never a literal hex in a component. Contrast ratios are computed and asserted; a new token pair must pass 1.4.3.
 - **Motion ends on its resting frame, hides nothing by stylesheet, and stops on request.** Continuous animation lives under a `data-motion` root with `MotionToggle` (WCAG 2.2.2); reduced motion collapses durations *and* delays. The five rules are `docs/ui-patterns.md` § Motion.
@@ -449,6 +462,15 @@ Three shapes need a real substitute rather than a deletion, and one keeps it:
 
 Never substitute `waitForTimeout`, and never raise the 30s timeout to absorb it
 (both are masking, see the root `CLAUDE.md` § Fix bugs at the source).
+
+### A `page.route` stub matches the exact API pathname (tests-e2e/)
+
+Under `vite dev`, `$lib/api/vendors.ts` is the URL `/src/lib/api/vendors.ts`,
+so a stub pattern like `**/api/vendors*` also answers the MODULE request and the
+route never loads — red locally, green in CI's preview build. Match with a URL
+predicate on the exact pathname (or dispatch on it inside and `fallback()` the
+rest); the `page` fixture fails any test whose stub hands a module JSON.
+Reference: `tests-e2e/README.md` § Stubbing an API route.
 
 **`pnpm check` does NOT typecheck `tests-e2e/`.** A syntax error there silently
 zeroes the whole Playwright suite. After any bulk edit run

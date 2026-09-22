@@ -1275,7 +1275,7 @@ one currency. Both responses now carry the code off rows they already joined:
 (`docs/decisions.md` §79/§82). The mixed-legacy-run case is the sharp one: that
 run's `total_amount` is a sum across currencies, denominated in nothing real, so
 stamping a code on it would dress a meaningless figure up as a genuine one. The
-shared rule is the pure `api/payments._one_currency`, so the list, the detail
+shared rule is the pure `services/payment_runs.one_currency`, so the list, the detail
 and the create response cannot disagree about it. `POST /runs`' confirmation
 message also stopped hardcoding a `$` in front of the total.
 
@@ -1290,13 +1290,15 @@ had the same class one screen earlier, dropping the `currency` the queue row
 directly above it renders.
 
 The client renders an unprovable currency as a **bare grouped figure** — no
-symbol, no code — rather than borrowing the org default
-(`routes/payments/+page.svelte::formatRowMoney`, which falls back to the shared
-`utils/discountRecommendation::formatAmountWithoutCurrency` — the same primitive
-`/discounts` uses for its own unprovable-currency case).
+symbol, no code — rather than borrowing the org default. Since
+`docs/decisions.md` §196 that is `utils/money.ts::formatMoney`'s own behaviour
+for a `null` code, so every `/payments` cell goes through the one
+`formatCurrency` with its payload's code and there is no per-row opt-out left
+to forget (the page's old `formatCurrency` fell back to the org currency, and
+`formatRowMoney` existed only to avoid it).
 
 **Tests:** `tests/test_payment_response_currency.py` (DB-backed, plus the pure
-`_one_currency` refusal cases). The e2e assertions deliberately match the
+`one_currency` refusal cases). The e2e assertions deliberately match the
 currency **symbol**, not just the digits — `$500.00` and `€500.00` are
 indistinguishable to a digits-only check, which is why the suite could not see
 this: `tests-e2e/payments/recovery-exits.spec.ts` (whose fixture is EUR on

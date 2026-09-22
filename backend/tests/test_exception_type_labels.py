@@ -30,7 +30,11 @@ import ast
 from pathlib import Path
 
 from app.api.exceptions import EXCEPTION_TYPE_LABELS
-from app.services.exception_lifecycle import EXCEPTION_TYPES, LEGACY_EXCEPTION_TYPES
+from app.services.exception_lifecycle import (
+    EXCEPTION_SEVERITY_RANK,
+    EXCEPTION_TYPES,
+    LEGACY_EXCEPTION_TYPES,
+)
 
 APP_DIR = Path(__file__).resolve().parents[1] / "app"
 
@@ -159,6 +163,61 @@ def test_payment_blocking_types_are_on_the_roster():
 
     off_roster = sorted(set(PAYMENT_BLOCKING_EXCEPTION_TYPES) - set(EXCEPTION_TYPES))
     assert not off_roster, f"payment-blocking types missing from the roster: {off_roster}"
+
+
+#: Positional severity arguments, same idea as `_POSITIONAL_TYPE_ARGS`.
+_POSITIONAL_SEVERITY_ARGS = {"_ensure_exception": 3}
+
+
+def _severities_used_in_source() -> dict[str, set[str]]:
+    """``{severity: {"relative/path.py:line", …}}`` for every literal severity
+    handed to the exception machinery — the ``severity="…"`` keyword and the
+    positional argument of a known helper.
+
+    Wider than exception raise sites on purpose: invoice-warning and enrichment
+    findings carry a ``severity=`` keyword too, from the same three-value
+    vocabulary. A literal outside it anywhere is worth a look, and the
+    alternative — deciding per call site whether it reaches an ``Exception`` —
+    is the hand-maintained list this file exists to avoid.
+    """
+    used: dict[str, set[str]] = {}
+    for path in sorted(APP_DIR.rglob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            values: set[str] = set()
+            for keyword in node.keywords:
+                if keyword.arg == "severity":
+                    values |= _string_constants(keyword.value)
+            index = _POSITIONAL_SEVERITY_ARGS.get(_callee_name(node.func) or "")
+            if index is not None and len(node.args) > index:
+                values |= _string_constants(node.args[index])
+            for value in values:
+                where = f"{path.relative_to(APP_DIR.parent)}:{node.lineno}"
+                used.setdefault(value, set()).add(where)
+    return used
+
+
+def test_every_raised_severity_has_a_sort_rank():
+    """The queue sorts severity by `EXCEPTION_SEVERITY_RANK`, and a severity
+    missing from it ranks 0 — below `info`. A new `severity="critical"` raised
+    without joining the map would therefore sort as the LEAST urgent row in
+    the queue, silently."""
+    used = _severities_used_in_source()
+    # Sanity: the scanner matched both shapes.
+    assert {"error", "warning", "info"} <= used.keys(), used.keys()
+    unranked = {s: sorted(where) for s, where in used.items() if s not in EXCEPTION_SEVERITY_RANK}
+    assert not unranked, f"severities raised in app/ with no sort rank: {unranked}"
+
+
+def test_severity_rank_is_strictly_ordered_worst_first():
+    """Declared worst-first (the chip order), with distinct ranks — two
+    severities sharing a rank would sort as one."""
+    ranks = list(EXCEPTION_SEVERITY_RANK.values())
+    assert ranks == sorted(ranks, reverse=True)
+    assert len(set(ranks)) == len(ranks)
+    assert min(ranks) > 0, "0 is reserved for a severity the map does not know"
 
 
 def test_labels_are_non_empty_human_readable_strings():

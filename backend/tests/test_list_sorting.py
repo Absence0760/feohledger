@@ -1,5 +1,5 @@
-"""Real-DB coverage for `sort=`/`order=` on the five primary list endpoints
-(invoices, vendors, payments, expenses, contracts).
+"""Real-DB coverage for `sort=`/`order=` on the sortable list endpoints
+(invoices, vendors, payments, expenses, contracts, and the exceptions queue).
 
 Each endpoint's `sort=` value is validated against a per-endpoint allowlist
 (`api/sorting.py::resolve_order_by`) — never interpolated into SQL — and the
@@ -13,9 +13,11 @@ every row ties on the chosen column.
 """
 
 import uuid
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 from app.models.contract import Contract
+from app.models.exception import Exception as APException
 from app.models.invoice import Invoice, InvoiceStatus
 from app.models.payment import Payment
 from app.models.vendor import Vendor
@@ -261,3 +263,115 @@ async def test_contracts_sort_id_tiebreak_no_duplicates(realdb):
             seen.extend(item["id"] for item in resp.json()["items"])
     assert len(seen) == len(set(seen))
     assert set(seen) == set(created_ids)
+
+
+# ---------------------------------------------------------------------------
+# Exceptions
+# ---------------------------------------------------------------------------
+
+
+async def _add_exception(mk, org_id, **fields) -> str:
+    async with mk() as s:
+        exc = APException(
+            organization_id=org_id,
+            exception_type=fields.pop("exception_type", "duplicate"),
+            status=fields.pop("status", "open"),
+            **fields,
+        )
+        s.add(exc)
+        await s.commit()
+        return str(exc.id)
+
+
+async def test_exceptions_sort_by_severity_is_by_rank_not_alphabet(realdb):
+    """`severity` is text, and alphabetical order is `error` < `info` <
+    `warning` — the informational rows between the two that need attention.
+    The sort ranks it instead: descending is worst-first, and a severity the
+    rank map does not know sinks below `info` rather than posing as urgent."""
+    mk = realdb.sessionmaker("a")
+    org_id = realdb.info("a").org_id
+    for severity in ("info", "error", "not_a_known_severity", "warning"):
+        await _add_exception(mk, org_id, severity=severity)
+
+    async with realdb.client(key="a", role="ap_manager") as c:
+        desc = await c.get("/api/exceptions", params={"sort": "severity", "order": "desc"})
+        asc = await c.get("/api/exceptions", params={"sort": "severity", "order": "asc"})
+    assert desc.status_code == 200, desc.text
+    assert [i["severity"] for i in desc.json()["items"]] == [
+        "error",
+        "warning",
+        "info",
+        "not_a_known_severity",
+    ]
+    assert [i["severity"] for i in asc.json()["items"]] == [
+        "not_a_known_severity",
+        "info",
+        "warning",
+        "error",
+    ]
+
+
+async def test_exceptions_sort_by_due_keeps_no_sla_rows_last_both_ways(realdb):
+    """`due_at` is NULL when no SLA is configured — no deadline, not the
+    latest one. Postgres ranks NULL above every value, so a plain descending
+    sort would put every no-SLA row above the ones actually running out of
+    time; they trail in both directions instead."""
+    mk = realdb.sessionmaker("a")
+    org_id = realdb.info("a").org_id
+    now = datetime.now(UTC)
+    soon = await _add_exception(mk, org_id, due_at=now + timedelta(hours=2))
+    no_sla = await _add_exception(mk, org_id, due_at=None)
+    late = await _add_exception(mk, org_id, due_at=now + timedelta(days=3))
+    overdue = await _add_exception(mk, org_id, due_at=now - timedelta(hours=5))
+
+    async with realdb.client(key="a", role="ap_manager") as c:
+        asc = await c.get("/api/exceptions", params={"sort": "due_at", "order": "asc"})
+        desc = await c.get("/api/exceptions", params={"sort": "due_at", "order": "desc"})
+    assert asc.status_code == 200, asc.text
+    assert [i["id"] for i in asc.json()["items"]] == [overdue, soon, late, no_sla]
+    assert [i["id"] for i in desc.json()["items"]] == [late, soon, overdue, no_sla]
+
+
+async def test_exceptions_sort_by_created_at_ascending(realdb):
+    mk = realdb.sessionmaker("a")
+    org_id = realdb.info("a").org_id
+    base = datetime.now(UTC)
+    ids = [await _add_exception(mk, org_id, created_at=base - timedelta(days=d)) for d in (1, 3, 2)]
+
+    async with realdb.client(key="a", role="ap_manager") as c:
+        resp = await c.get("/api/exceptions", params={"sort": "created_at", "order": "asc"})
+    assert resp.status_code == 200, resp.text
+    assert [i["id"] for i in resp.json()["items"]] == [ids[1], ids[2], ids[0]]
+
+
+async def test_exceptions_sort_unknown_field_422_names_the_allowlist(realdb):
+    """Refused, not silently ignored — including a REAL column that is simply
+    not offered for sorting."""
+    async with realdb.client(key="a", role="ap_manager") as c:
+        unknown = await c.get("/api/exceptions", params={"sort": "not_a_real_column"})
+        unlisted = await c.get("/api/exceptions", params={"sort": "raised_by_user_id"})
+    assert unknown.status_code == 422, unknown.text
+    assert unlisted.status_code == 422, unlisted.text
+    detail = unknown.json()["detail"]
+    for key in ("created_at", "due_at", "severity"):
+        assert key in detail
+
+
+async def test_exceptions_sort_id_tiebreak_keeps_pagination_stable(realdb):
+    """Every row ties on severity; the `.id` tie-break is what keeps OFFSET
+    pagination from handing one row to two pages."""
+    mk = realdb.sessionmaker("a")
+    org_id = realdb.info("a").org_id
+    created = {await _add_exception(mk, org_id, severity="warning") for _ in range(6)}
+
+    seen: list[str] = []
+    async with realdb.client(key="a", role="ap_manager") as c:
+        for page in (1, 2, 3):
+            resp = await c.get(
+                "/api/exceptions",
+                params={"sort": "severity", "order": "desc", "page": page, "page_size": 2},
+            )
+            assert resp.status_code == 200, resp.text
+            seen.extend(item["id"] for item in resp.json()["items"])
+    assert len(seen) == len(set(seen)), "a row was duplicated across pages"
+    assert set(seen) == created

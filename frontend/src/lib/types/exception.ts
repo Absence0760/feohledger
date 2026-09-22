@@ -21,7 +21,7 @@
 // others is how two surfaces come to name a single status differently, which
 // is the defect above with a different column name.
 
-import type { BadgeTone } from '$lib/components/ui/Badge.svelte';
+import type { BadgeTone } from '$lib/components/ui/badgeTone';
 import type { MessageKey } from '$lib/i18n/messages';
 
 /**
@@ -171,16 +171,15 @@ export function exceptionStatusLabelKey(status: string): MessageKey | null {
  * Every `Exception.severity` the platform raises.
  *
  * The third vocabulary on the row, and the last one that printed raw. The
- * backend declares it in a COMMENT on the column
- * (`models/exception.py`: `# error, warning, info`) and nowhere else — there is
- * no `EXCEPTION_SEVERITIES` tuple to read the way `exception_lifecycle.py`
- * gives one for the type roster and the status maps. `exception.test.ts` pins
- * this against both halves of what the backend does have: that comment, and
- * every `severity="…"` literal a raising site actually writes. A fourth
- * severity fails there whichever way it arrives, and if the backend later grows
- * a real constant the guard should move onto it.
+ * backend declares it as `exception_lifecycle.EXCEPTION_SEVERITY_RANK` — the
+ * rank the queue's severity sort uses — as well as in a comment on the column
+ * (`models/exception.py`: `# error, warning, info`). `exception.test.ts` pins
+ * this against the rank map (members and order), that comment, and every
+ * `severity="…"` literal a raising site actually writes, so a fourth severity
+ * fails there whichever way it arrives.
  *
- * Order is worst-first, which is the order a triager scans.
+ * Order is worst-first, which is the order a triager scans and the order the
+ * rank map declares — the severity chips render in it.
  */
 export const EXCEPTION_SEVERITIES = ['error', 'warning', 'info'] as const;
 
@@ -190,10 +189,11 @@ export type ExceptionSeverity = (typeof EXCEPTION_SEVERITIES)[number];
  * The i18n key carrying each severity's label — never the English string
  * itself.
  *
- * A fresh `exceptions.severity.*` namespace rather than a reuse, unlike
- * {@link EXCEPTION_STATUS_LABEL_KEYS}, which deliberately borrows the queue's
- * filter-chip keys: there is no severity chip to agree with. Nothing else in
- * the app names a severity, so there is no second surface to drift from.
+ * A fresh `exceptions.severity.*` namespace, minted when the Sev cell was the
+ * only surface naming a severity. The queue's severity FILTER CHIPS now read
+ * these same keys — the {@link EXCEPTION_STATUS_LABEL_KEYS} arrangement, one
+ * key set for a chip and the badges it filters — so the two cannot come to
+ * name one severity two ways.
  */
 export const EXCEPTION_SEVERITY_LABEL_KEYS: Record<ExceptionSeverity, MessageKey> = {
 	error: 'exceptions.severity.error',

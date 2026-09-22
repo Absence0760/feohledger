@@ -91,15 +91,24 @@ def fake_redis(monkeypatch):
 
 class _CredDB:
     """Control-plane stand-in: serves the account's passkeys to `_user_passkeys`
-    and the single matching row to the assertion lookup."""
+    and the single matching row to the assertion lookup.
 
-    def __init__(self, creds=None):
+    A password step-up also loads the account's organization (a password is no
+    proof in an SSO-only tenant — `api/auth._password_sign_in_closed`), so an
+    `organizations` select is answered with `org`: by default one that has not
+    closed password sign-in."""
+
+    def __init__(self, creds=None, org=None):
         self.creds = list(creds or [])
         self.added = []
         self.commits = 0
+        self.org = org if org is not None else SimpleNamespace(settings={})
 
-    async def execute(self, *_a, **_k):
+    async def execute(self, stmt, *_a, **_k):
         result = MagicMock()
+        if stmt.get_final_froms()[0].name == "organizations":
+            result.scalar_one_or_none.return_value = self.org
+            return result
         result.scalars.return_value.all.return_value = self.creds
         result.scalar_one_or_none.return_value = self.creds[0] if self.creds else None
         return result

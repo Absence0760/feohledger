@@ -141,6 +141,74 @@ void main() {
     });
   });
 
+  group('DashboardData unconverted counts', () {
+    // Every reporting-currency rollup on `GET /dashboard` keeps a row it could
+    // not convert in at FACE value and COUNTS it. The screen can only disclose
+    // what the model parsed, so each count is pinned at its own key.
+    Map<String, dynamic> payload({Object? counts = true}) => {
+          'reporting': {
+            'reporting_currency': 'USD',
+            'total_amount': 100,
+            if (counts == true) 'unconverted_count': 3,
+            if (counts == null) 'unconverted_count': null,
+          },
+          'aging_reporting': {
+            'current': 1,
+            if (counts == true) 'unconverted_count': 2,
+            if (counts == null) 'unconverted_count': null,
+          },
+          'vendor_spend': [
+            {
+              'vendor': 'Acme',
+              'amount': 10,
+              'invoice_count': 4,
+              if (counts == true) 'unconverted_count': 1,
+              if (counts == null) 'unconverted_count': null,
+            },
+          ],
+          'upcoming_total_amount_reporting': 5,
+          if (counts == true) 'upcoming_unconverted_count': 4,
+          if (counts == null) 'upcoming_unconverted_count': null,
+        };
+
+    test('each rollup reads its own count', () {
+      final data = DashboardData.fromJson(payload());
+      expect(data.unconvertedCount, 3); // reporting.unconverted_count
+      expect(data.aging.unconvertedCount, 2); // aging_reporting.unconverted_count
+      expect(data.topVendors.single.unconvertedCount, 1);
+      expect(data.upcoming.unconvertedCount, 4); // upcoming_unconverted_count
+    });
+
+    test('an older backend without the counts reads as nothing to disclose',
+        () {
+      final data = DashboardData.fromJson(payload(counts: false));
+      expect(data.unconvertedCount, 0);
+      expect(data.aging.unconvertedCount, 0);
+      expect(data.topVendors.single.unconvertedCount, 0);
+      expect(data.upcoming.unconvertedCount, 0);
+    });
+
+    test('an explicit null is also zero, not a crash', () {
+      final data = DashboardData.fromJson(payload(counts: null));
+      expect(data.unconvertedCount, 0);
+      expect(data.aging.unconvertedCount, 0);
+      expect(data.topVendors.single.unconvertedCount, 0);
+      expect(data.upcoming.unconvertedCount, 0);
+    });
+
+    test('the aging count travels with the bands it describes', () {
+      // The screen renders `aging_reporting` whenever the payload has it, so
+      // the count must come from that same object — the face-value `aging`
+      // beside it is a cross-currency sum in its entirety and carries none.
+      final data = DashboardData.fromJson({
+        'aging': {'current': 999},
+        'aging_reporting': {'current': 1, 'unconverted_count': 2},
+      });
+      expect(data.aging.current, 1.0);
+      expect(data.aging.unconvertedCount, 2);
+    });
+  });
+
   group('upcoming.totalAmount is server-supplied, never folded on-device', () {
     // Regression for #189: the model used to `.fold<double>` the per-item
     // `amount` values in `upcoming_payments` itself, which can accumulate

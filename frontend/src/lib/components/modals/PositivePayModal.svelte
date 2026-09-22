@@ -16,7 +16,6 @@
 	import { runStatusLabelKey } from '$lib/types/payment';
 	import { auth } from '$lib/stores/auth.svelte';
 	import { m } from '$lib/i18n/store.svelte';
-	import { orgCurrency } from '$lib/stores/orgSettings.svelte';
 	import { api } from '$lib/api';
 	import Badge from '$lib/components/ui/Badge.svelte';
 	import Modal from '$lib/components/ui/Modal.svelte';
@@ -339,7 +338,7 @@
 			</div>
 			<div class="total-box">
 				<span class="total-label">{m('positivePay.modal.totalAmount')}</span>
-				<span class="total-value"><Money amount={detail.total_amount} currency={detail.currency ?? orgCurrency.currency} mono /></span>
+				<span class="total-value"><Money amount={detail.total_amount} currency={detail.currency} mono /></span>
 			</div>
 			<div class="total-box">
 				<span class="total-label">{m('positivePay.modal.account')}</span>

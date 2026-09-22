@@ -30,7 +30,7 @@
 	import Modal from '$lib/components/ui/Modal.svelte';
 	import RowLink from '$lib/components/ui/RowLink.svelte';
 	import Badge from '$lib/components/ui/Badge.svelte';
-	import type { BadgeTone } from '$lib/components/ui/Badge.svelte';
+	import type { BadgeTone } from '$lib/components/ui/badgeTone';
 	import Tabs from '$lib/components/ui/Tabs.svelte';
 	import { isRowOpenClick } from '$lib/utils/rowNav';
 	import { toast } from '$lib/components/ui/Toast.svelte';

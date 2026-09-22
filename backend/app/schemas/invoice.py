@@ -186,6 +186,12 @@ class InvoiceResponse(BaseModel):
     # Spend-to-contract link (services.contract_spend / contract_compliance).
     # Null = off-contract spend. Set via POST /api/invoices/{id}/link-contract.
     contract_id: str | None = None
+    # The subsidiary this invoice belongs to (multi-entity). It decides which
+    # chart its GL code resolves against — shared accounts ∪ this entity's own
+    # (`services/gl_chart`) — so the GL pickers scope to it rather than to the
+    # sidebar selection, which can differ (a deep link, the consolidated view).
+    # NULL only on an invoice no entity was ever stamped on.
+    entity_id: str | None = None
     # Inter-company routing (multi-entity). `counterparty_entity_id` names the
     # other subsidiary on an inter-company charge; `intercompany_mirror_id` links
     # an origin invoice to its generated mirror payable (and vice-versa). Both
@@ -251,6 +257,7 @@ class InvoiceResponse(BaseModel):
             department=inv.department,
             project=inv.project,
             contract_id=str(inv.contract_id) if inv.contract_id else None,
+            entity_id=str(inv.entity_id) if inv.entity_id else None,
             counterparty_entity_id=(
                 str(inv.counterparty_entity_id) if inv.counterparty_entity_id else None
             ),

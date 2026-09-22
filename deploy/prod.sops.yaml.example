@@ -111,14 +111,15 @@ FEOH_APPROVAL_SIGNING_KEY: ""
 # FEOH_EMAIL_ACTION_SIGNING_KEY: ""
 # FEOH_PARTNER_LINK_SIGNING_KEY: ""
 
-# ── hCaptcha — the secret is REQUIRED in production, signup or not ──
-# FEOH_ENVIRONMENT=production refuses to boot with an empty FEOH_HCAPTCHA_SECRET
+# ── Self-service signup + hCaptcha ──
+# FEOH_SIGNUP_ENABLED is the switch. "false" closes signup: every /api/signup/*
+# route answers 404, /signup says signup is closed, and neither hCaptcha key is
+# needed — the right setting for a pilot whose tenants come from add-tenant.sh.
+# Delete the line (or set "true") to open public signup; then the hCaptcha
+# SECRET is REQUIRED — FEOH_ENVIRONMENT=production refuses to boot without it
 # (config.py _require_captcha_in_deployed_envs), and decrypt-env.sh refuses
-# before it gets that far. Nothing else turns self-service signup off
-# (docs/followups.md). To keep signup closed on a pilot, set the secret and
-# leave the SITEKEY empty: /signup still renders, but no captcha widget loads,
-# so every submit is refused with "Captcha is required." and no tenant is
-# created. A real secret matters once the sitekey is set; until then the server
-# never calls hCaptcha.
-FEOH_HCAPTCHA_SECRET: ""
-FEOH_HCAPTCHA_SITEKEY: ""
+# before it gets that far — and the SITEKEY must be set for the widget to render.
+# docs/self-service-signup.md § Turning signup off.
+FEOH_SIGNUP_ENABLED: "false"
+# FEOH_HCAPTCHA_SECRET: ""
+# FEOH_HCAPTCHA_SITEKEY: ""

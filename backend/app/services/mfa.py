@@ -290,6 +290,12 @@ async def step_up_verified(
     a control-plane `users.id`, and `VendorUser` is tenant-scoped), so there this
     function is still the whole story.
 
+    Whether a password is *admissible* at all is the caller's to decide, and the
+    employee surface decides it before calling: in a tenant that has closed
+    password sign-in (`sso_only`) the route passes `password=None`, because a
+    password that cannot sign in must not authenticate a factor change either
+    (`api/auth._step_up_satisfied`). This helper stays pure — no org, no DB.
+
     Shared by the employee and supplier-portal surfaces so the two can't drift.
     Returns a plain bool; the caller decides the status code. Password
     comparison goes through the shared `verify_password` (the `pwd_context`

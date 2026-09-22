@@ -20,17 +20,13 @@
 	import { pruneSelection } from '$lib/utils/selection';
 	import SearchBox from '$lib/components/ui/SearchBox.svelte';
 	import StatusBadge from '$lib/components/ui/StatusBadge.svelte';
-	import Badge, { type BadgeTone } from '$lib/components/ui/Badge.svelte';
+	import Badge from '$lib/components/ui/Badge.svelte';
+	import type { BadgeTone } from '$lib/components/ui/badgeTone';
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 	import FilterChips from '$lib/components/ui/FilterChips.svelte';
 	import DataTable from '$lib/components/ui/DataTable.svelte';
 	import Modal from '$lib/components/ui/Modal.svelte';
 	import { formatMoney, isPositiveAmount, type MoneyAmount } from '$lib/utils/money';
-	// The bare (no-symbol) rendering `formatRowMoney` falls back to when the
-	// server could not establish a figure's currency. Shared with `/discounts`,
-	// which has the same unprovable-currency case — one primitive, so a tweak to
-	// rounding or locale can't land in one and not the other.
-	import { formatAmountWithoutCurrency } from '$lib/utils/discountRecommendation';
 	import type { MessageKey } from '$lib/i18n/messages';
 	import { compareCorridorQuotes } from '$lib/api/corridorQuotes';
 	import {
@@ -477,7 +473,9 @@
 	 *  side by side, separated (never added). Empty → a zero in the org
 	 *  currency, which is what "nothing selected" costs. */
 	function formatGroups(groups: DisplayGroup[]): string {
-		if (groups.length === 0) return formatCurrency(0);
+		// A deliberate display choice, not a fallback: nothing selected costs
+		// nothing, and a zero reads the same in any currency.
+		if (groups.length === 0) return formatMoney(0, { currency: orgCurrency.currency });
 		// The per-currency rendering itself lives in `currencyGroups` now, so
 		// /expenses' KPI rollup and this pay bar can't drift on it; only the
 		// "nothing selected" reading stays a per-caller display choice.
@@ -1661,43 +1659,29 @@
 		return paymentCounts[s] ?? paymentStore.all.filter((p) => p.status === s).length;
 	}
 
-	function formatCurrency(
-		amount: number | string | null | undefined,
-		currency?: string | null
-	): string {
-		// Per-row amounts pass their own currency; tenant-wide summary
-		// totals omit it and fall back to the org's configured default.
-		// Accepts string-Decimal money (formatMoney coerces) as well as numbers.
-		return formatMoney(amount, { currency: currency ?? orgCurrency.currency });
-	}
-
 	/** Render money under the currency the SERVER stated, honestly.
 	 *
-	 *  The one call every `/payments` money cell whose currency comes off a
-	 *  `Payment` / `PaymentRun` row goes through: a stated code formats
-	 *  normally, an unstated one renders BARE rather than borrowing the org
-	 *  default. Six call sites used to omit the currency entirely and take
-	 *  `orgCurrency` for every row — see `$lib/types/payment.ts`.
+	 *  Every `/payments` money cell goes through this, with the code its own
+	 *  payload names: the row's for a payment, a queue row or a run; the
+	 *  response's for the summary, the card dashboard, a rebate list or a
+	 *  corridor quote.
 	 *
-	 *  `PaymentResponse.currency` / `PaymentRunResponse.currency` are `null`
-	 *  exactly when the backend refused to guess — a run whose legs disagree,
-	 *  or a row with nothing recorded. Falling back to `orgCurrency` there would
-	 *  reinstate the fabrication the wire field exists to end: a code the reader
-	 *  takes as established fact when nobody established it
-	 *  (`docs/decisions.md` §79/§82 — no code rather than a wrong code).
-	 *
-	 *  The bare rendering reuses `formatAmountWithoutCurrency`, the same
-	 *  primitive `/discounts` uses for its own unprovable-currency case: it is
-	 *  not a hand-rolled *currency* format (the `frontend/CLAUDE.md` ban), it is
-	 *  the deliberate absence of one, and it follows the same active locale so
-	 *  grouping matches every labelled figure beside it. Nothing here adds,
-	 *  compares or converts — the value passes through untouched.
+	 *  It used to fall back to `orgCurrency` for a missing code, and a second
+	 *  helper (`formatRowMoney`) existed only to opt the per-row cells out of
+	 *  that. `PaymentResponse.currency` / `PaymentRunResponse.currency` are
+	 *  `null` exactly when the backend refused to guess — a run whose legs
+	 *  disagree, a row with nothing recorded — and borrowing the org's code
+	 *  there reinstated the fabrication the field exists to end
+	 *  (`docs/decisions.md` §79/§82). `formatMoney` now renders an unprovable
+	 *  code BARE itself (§196), so there is one path and no fallback to forget.
+	 *  Nothing here adds, compares or converts — the value passes through
+	 *  untouched.
 	 */
-	function formatRowMoney(
+	function formatCurrency(
 		amount: number | string | null | undefined,
 		currency: string | null | undefined
 	): string {
-		return currency ? formatCurrency(amount, currency) : formatAmountWithoutCurrency(amount);
+		return formatMoney(amount, { currency });
 	}
 
 
@@ -1902,7 +1886,7 @@
 								<!-- The queue row above this panel already renders `item.currency`;
 								     dropping it here made the review step — the last screen before a
 								     run is staged — the one place the figure lost its code. -->
-								<td class="right mono">{formatRowMoney(item.amount, item.currency)}</td>
+								<td class="right mono">{formatCurrency(item.amount, item.currency)}</td>
 								<td>
 									<!-- A rail-pinned row (a live virtual card already claims the
 									     invoice) offers only that rail: every other one is a 409
@@ -2144,7 +2128,7 @@
 							</Badge>
 						</td>
 						<td class="right mono">
-							{formatRowMoney(p.amount, p.currency)}
+							{formatCurrency(p.amount, p.currency)}
 							{#if p.settled_amount !== null && p.settled_amount !== undefined}
 								<!-- What the RAIL says it settled, beside what AP authorized.
 								     Both figures are rendered; no delta is computed here — the
@@ -2156,7 +2140,7 @@
 										// amount but no code — the same unprovable case as an
 										// unstated authorized currency, and it takes the same
 										// honest bare rendering rather than the org default.
-										amount: formatRowMoney(p.settled_amount, p.settled_currency)
+										amount: formatCurrency(p.settled_amount, p.settled_currency)
 									})}
 								</span>
 							{/if}
@@ -2257,7 +2241,7 @@
 						</td>
 						<td><Badge tone={runStatusTone(run.status)} variant={run.status}>{runLabel(run.status)}</Badge></td>
 						<td class="right mono">
-							{run.total_amount ? formatRowMoney(run.total_amount, run.currency) : '—'}
+							{run.total_amount ? formatCurrency(run.total_amount, run.currency) : '—'}
 						</td>
 						<td>{run.payment_count}</td>
 						<td class="muted">{formatDate(run.executed_at)}</td>
@@ -2598,7 +2582,7 @@
 		<p class="modal-hint">
 			<strong>{voidTarget.invoice_number ?? voidTarget.id.slice(0, 8)}</strong>
 			{#if voidTarget.vendor_name}· {voidTarget.vendor_name}{/if}
-			· {formatRowMoney(voidTarget.amount, voidTarget.currency)}
+			· {formatCurrency(voidTarget.amount, voidTarget.currency)}
 		</p>
 		{#if voidCardResult}
 			<!-- The void landed; its card leg did not. Both legs are best-effort so
@@ -2702,7 +2686,7 @@
 		<p class="modal-hint">
 			<strong>{complianceTarget.invoice_number ?? complianceTarget.id.slice(0, 8)}</strong>
 			{#if complianceTarget.vendor_name}· {complianceTarget.vendor_name}{/if}
-			· {formatRowMoney(complianceTarget.amount, complianceTarget.currency)}
+			· {formatCurrency(complianceTarget.amount, complianceTarget.currency)}
 		</p>
 		<p class="modal-warn">
 			{complianceMode === 'release'
@@ -2774,13 +2758,13 @@
 			<div>
 				<dt>{m('payments.settlement.authorized')}</dt>
 				<dd class="mono" data-testid="settlement-authorized-figure">
-					{formatRowMoney(settlementTarget.amount, settlementTarget.currency)}
+					{formatCurrency(settlementTarget.amount, settlementTarget.currency)}
 				</dd>
 			</div>
 			<div>
 				<dt>{m('payments.settlement.settled')}</dt>
 				<dd class="mono" data-testid="settlement-settled-figure">
-					{formatRowMoney(settlementTarget.settled_amount, settlementTarget.settled_currency)}
+					{formatCurrency(settlementTarget.settled_amount, settlementTarget.settled_currency)}
 				</dd>
 			</div>
 		</dl>
@@ -2858,7 +2842,7 @@
 			· {erpSyncTarget.payment_count}
 			{m('payments.summary.payments')}
 			{#if erpSyncTarget.total_amount}·
-				{formatRowMoney(erpSyncTarget.total_amount, erpSyncTarget.currency)}{/if}
+				{formatCurrency(erpSyncTarget.total_amount, erpSyncTarget.currency)}{/if}
 		</p>
 
 		{#if erpSyncResult}

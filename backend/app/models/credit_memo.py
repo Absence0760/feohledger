@@ -8,13 +8,20 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, EntityMixin, TimestampMixin
 
+#: Every status a memo can hold. `applied` is all-or-nothing — one memo credits
+#: its whole amount to exactly one invoice in one transaction — so there is no
+#: "partially applied" state to represent.
+CREDIT_MEMO_STATUSES: tuple[str, ...] = ("open", "applied", "void")
+
 
 class CreditMemo(Base, EntityMixin, TimestampMixin):
     """Vendor-issued credit reducing what's owed.
 
     Lifecycle: ``open`` (issued, unapplied) → ``applied`` (linked to an
     invoice; reduces the payable) → ``void`` (rescinded). Applied
-    credits are immutable for audit purposes.
+    credits are immutable for audit purposes. Only an ``open`` memo that has
+    never been applied is editable (``PATCH /api/credit-memos/{id}``) — until
+    then it moves no money: only ``applied`` rows are netted off a payable.
     """
 
     __tablename__ = "credit_memos"

@@ -49,7 +49,7 @@ and the manual audit is the tracked outstanding work.
 | 1.3.3 Sensory Characteristics | A | Supports | Instructions don't rely on shape/position/colour alone (status badges carry text labels). |
 | 1.4.1 Use of Color | A | Supports | Status and validation are conveyed by text/icon in addition to colour (e.g. `StatusBadge`, error text). |
 | 1.4.2 Audio Control | A | Not Applicable | No auto-playing audio. |
-| 2.1.1 Keyboard | A | Supports | All controls keyboard-operable; clickable rows expose a focusable `RowLink` rather than a click-only `<tr>`. |
+| 2.1.1 Keyboard | A | Supports | All controls keyboard-operable; clickable rows expose a focusable `RowLink` rather than a click-only `<tr>`; a data grid that scrolls inside its container is a focusable, named region the arrow keys pan (`a11y/reflow.spec.ts` runs axe's `scrollable-region-focusable` on every route at 320px). |
 | 2.1.2 No Keyboard Trap | A | Supports | The shared `Modal` traps focus only while open and releases it on `Esc`/close; no other traps. |
 | 2.1.4 Character Key Shortcuts | A | Not Applicable | No single-character key shortcuts are implemented. |
 | 2.2.1 Timing Adjustable | A | Supports | No time limits on user interaction; session expiry re-prompts for login without data loss of in-progress work beyond auth. |

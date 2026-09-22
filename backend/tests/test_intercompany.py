@@ -9,6 +9,9 @@ Covers ``POST /api/invoices/{id}/route-intercompany`` and the underlying
     is unchanged (no duplicate payable)
   - self-billing (counterparty == own entity) is rejected (400)
   - RBAC: an ap_clerk is 403
+  - segregation of duties crosses the entity boundary: everyone implicated in
+    the source payable (its uploader and its ``segregation_actor_ids``) is
+    refused the mirror's approval, and the routing actor is its uploader
 
 Runs against the opt-in ``realdb`` fixture (skips without ``pnpm db:up``).
 """
@@ -45,6 +48,8 @@ async def _seed_invoice(
     entity_id: uuid.UUID,
     amount: str = "1234.56",
     number: str = "IC-ORIGIN-1",
+    uploaded_by_id: uuid.UUID | None = None,
+    segregation_actor_ids: list[str] | None = None,
 ) -> uuid.UUID:
     inv_id = uuid.uuid4()
     async with mk() as s:
@@ -58,6 +63,8 @@ async def _seed_invoice(
                 amount=Decimal(amount),
                 currency="USD",
                 status=InvoiceStatus.approved,
+                uploaded_by_id=uploaded_by_id,
+                segregation_actor_ids=segregation_actor_ids,
             )
         )
         await s.commit()
@@ -111,6 +118,10 @@ async def test_route_creates_linked_mirror_under_counterparty(realdb):
     # creator") and the one person who caused a live liability under another
     # entity could also sign it off.
     assert mirror.uploaded_by_id == info.users["ap_manager"]
+    # The source was seeded with nobody implicated, so the mirror inherits
+    # nobody: NULL, the shape every creation path writes for "nobody beyond the
+    # uploader" — never `[]`.
+    assert mirror.segregation_actor_ids is None
 
 
 # ---------------------------------------------------------------------------
@@ -150,6 +161,139 @@ async def test_route_is_idempotent(realdb):
     assert first.json()["id"] == second.json()["id"]
     # Exactly one mirror created (origin + 1 mirror = before + 1).
     assert await _count() == before + 1
+
+
+# ---------------------------------------------------------------------------
+# Segregation of duties crosses the entity boundary
+#
+# The mirror's vendor, amount and currency are the source's, copied verbatim, so
+# whoever shaped the source shaped the mirror. Before the fix the mirror carried
+# only its router as uploader and `segregation_actor_ids=None`, so the employee
+# who uploaded the source payable — or any template author / material editor on
+# its implicated set — could approve the mirror under the counterparty entity.
+# ---------------------------------------------------------------------------
+
+
+async def _route(realdb, origin_id: uuid.UUID, counterparty: uuid.UUID, *, role: str) -> uuid.UUID:
+    async with realdb.client(key="a", role=role) as c:
+        resp = await c.post(
+            f"/api/invoices/{origin_id}/route-intercompany",
+            json={"counterparty_entity_id": str(counterparty)},
+        )
+    assert resp.status_code == 200, resp.text
+    return uuid.UUID(resp.json()["id"])
+
+
+async def _make_reviewable(mk, invoice_id: uuid.UUID) -> None:
+    """Put the mirror where an approval is legal, so a 403 below can only be the
+    segregation refusal and a 200 proves the invoice was approvable at all."""
+    async with mk() as s:
+        inv = await s.get(Invoice, invoice_id)
+        inv.status = InvoiceStatus.ready_for_review
+        await s.commit()
+
+
+@pytest.mark.asyncio
+async def test_the_source_uploader_cannot_approve_the_mirror(realdb):
+    info = realdb.info("a")
+    mk = realdb.sessionmaker("a")
+    origin_entity = await _default_entity_id(mk)
+    counterparty = await _make_entity(mk, info.org_id, name="Subsidiary H", slug="ic-sub-h")
+    source_uploader = info.users["ap_manager"]
+    origin_id = await _seed_invoice(
+        mk,
+        info.org_id,
+        entity_id=origin_entity,
+        number="IC-SOD-UPLOADER-1",
+        uploaded_by_id=source_uploader,
+    )
+
+    # A DIFFERENT employee routes it, so the source's uploader is not the
+    # mirror's uploader — the only thing that can refuse them is inheritance.
+    mirror_id = await _route(realdb, origin_id, counterparty, role="admin")
+
+    async with mk() as s:
+        mirror = await s.get(Invoice, mirror_id)
+    assert mirror.uploaded_by_id == info.users["admin"]
+    assert mirror.segregation_actor_ids == [str(source_uploader)]
+
+    await _make_reviewable(mk, mirror_id)
+
+    async with realdb.client(key="a", role="ap_manager") as c:
+        refused = await c.post(f"/api/invoices/{mirror_id}/approve", json={})
+    assert refused.status_code == 403, refused.text
+    assert "segregation" in refused.json()["detail"].lower()
+
+    # The control is a set of implicated people, not a lock on the queue: an
+    # employee with no hand in either invoice still approves.
+    async with realdb.client(key="a", role="cfo") as c:
+        allowed = await c.post(f"/api/invoices/{mirror_id}/approve", json={})
+    assert allowed.status_code == 200, allowed.text
+
+
+@pytest.mark.asyncio
+async def test_the_mirror_inherits_the_source_implicated_set_too(realdb):
+    """Both of the source's columns travel, not just its uploader. Carrying one
+    without the other would bar a source *uploader* while leaving a source
+    *editor* (a recurring template's author or material editor, stamped on the
+    source's `segregation_actor_ids`) free to sign the mirror."""
+    from app.services.approval_chain import violates_segregation
+
+    info = realdb.info("a")
+    mk = realdb.sessionmaker("a")
+    origin_entity = await _default_entity_id(mk)
+    counterparty = await _make_entity(mk, info.org_id, name="Subsidiary I", slug="ic-sub-i")
+    template_editor = info.users["cfo"]
+    origin_id = await _seed_invoice(
+        mk,
+        info.org_id,
+        entity_id=origin_entity,
+        number="IC-SOD-SET-1",
+        uploaded_by_id=info.users["ap_manager"],
+        segregation_actor_ids=[str(template_editor)],
+    )
+
+    mirror_id = await _route(realdb, origin_id, counterparty, role="admin")
+
+    async with mk() as s:
+        mirror = await s.get(Invoice, mirror_id)
+    assert mirror.uploaded_by_id == info.users["admin"]
+    assert mirror.segregation_actor_ids == sorted(
+        [str(info.users["ap_manager"]), str(template_editor)]
+    )
+    # Someone with no hand in the source is still free.
+    assert violates_segregation(mirror, uuid.uuid4(), {}) is False
+
+    await _make_reviewable(mk, mirror_id)
+    async with realdb.client(key="a", role="cfo") as c:
+        refused = await c.post(f"/api/invoices/{mirror_id}/approve", json={})
+    assert refused.status_code == 403, refused.text
+    assert "segregation" in refused.json()["detail"].lower()
+
+
+@pytest.mark.asyncio
+async def test_a_router_who_uploaded_the_source_is_named_once(realdb):
+    """When the router is also the source's uploader they land in the mirror's
+    `uploaded_by_id` and are dropped from the set — named once, so the two
+    columns never look like they disagree about someone."""
+    info = realdb.info("a")
+    mk = realdb.sessionmaker("a")
+    origin_entity = await _default_entity_id(mk)
+    counterparty = await _make_entity(mk, info.org_id, name="Subsidiary J", slug="ic-sub-j")
+    origin_id = await _seed_invoice(
+        mk,
+        info.org_id,
+        entity_id=origin_entity,
+        number="IC-SOD-SELF-1",
+        uploaded_by_id=info.users["ap_manager"],
+    )
+
+    mirror_id = await _route(realdb, origin_id, counterparty, role="ap_manager")
+
+    async with mk() as s:
+        mirror = await s.get(Invoice, mirror_id)
+    assert mirror.uploaded_by_id == info.users["ap_manager"]
+    assert mirror.segregation_actor_ids is None
 
 
 # ---------------------------------------------------------------------------

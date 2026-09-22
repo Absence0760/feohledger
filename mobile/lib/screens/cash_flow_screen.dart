@@ -7,6 +7,7 @@ import 'package:feohledger_mobile/stores/cash_flow_store.dart';
 import 'package:feohledger_mobile/stores/org_currency_store.dart';
 import 'package:feohledger_mobile/utils/money.dart';
 import 'package:feohledger_mobile/widgets/kpi_card.dart';
+import 'package:feohledger_mobile/widgets/partial_conversion_note.dart';
 
 /// Predictive cash-flow forecast (CFO / admin). Shows a KPI summary (opening +
 /// projected end balance, total committed / pending outflow over the horizon),
@@ -262,6 +263,20 @@ class _CashFlowScreenState extends State<CashFlowScreen> {
           style: Theme.of(context).textTheme.titleMedium,
         ),
         const SizedBox(height: 8),
+        // A commitment with no rate into the reporting currency is still
+        // projected — dropping it would understate the outflow — but at FACE
+        // value, so every total built from it mixes currencies. Said here,
+        // beside the rows, and it names the KPI totals above because they are
+        // the same rollup.
+        if (data.totals.unconvertedCount > 0) ...[
+          PartialConversionNote(
+            l.cashFlowForecastUnconverted(
+              data.totals.unconvertedCount,
+              currency ?? l.partialConversionCurrencyFallback,
+            ),
+          ),
+          const SizedBox(height: 4),
+        ],
         if (data.forecastPeriods.isEmpty)
           _emptyCard(l.cashFlowNoOutflows)
         else
@@ -347,6 +362,19 @@ class _CashFlowScreenState extends State<CashFlowScreen> {
           style: Theme.of(context).textTheme.titleMedium,
         ),
         const SizedBox(height: 8),
+        // The OUTFLOW half of the currency guard the opening balance already
+        // gets server-side. The curve carries each closing balance forward,
+        // so one face-value row poisons every period after it — and the
+        // Projected End KPI, which is the last of them.
+        if (data.positionUnconvertedCount > 0) ...[
+          PartialConversionNote(
+            l.cashFlowPositionUnconverted(
+              data.positionUnconvertedCount,
+              currency ?? l.partialConversionCurrencyFallback,
+            ),
+          ),
+          const SizedBox(height: 4),
+        ],
         if (data.positionPeriods.isEmpty)
           _emptyCard(l.cashFlowNoPosition)
         else

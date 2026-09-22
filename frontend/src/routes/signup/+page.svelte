@@ -10,11 +10,7 @@
 	import { onMount } from 'svelte';
 	import { m } from '$lib/i18n/store.svelte';
 	import { legalTitle } from '$lib/legal/pages';
-
-	interface PublicConfig {
-		hcaptcha_sitekey: string;
-		tenant_url_template: string;
-	}
+	import type { PublicConfig } from '$lib/types/publicConfig';
 
 	interface StartResponse {
 		status: string;
@@ -45,6 +41,13 @@
 	let error = $state('');
 	let successMessage = $state<string | null>(null);
 
+	// `FEOH_SIGNUP_ENABLED` off: every `/api/signup/*` route answers 404, so the
+	// form could only ever be refused. Set from `/api/public-config` and only on
+	// an explicit `false` — until the config arrives, or if it cannot be fetched,
+	// the page stays the form it has always been and the server remains the
+	// authority (a closed deployment still refuses the submit).
+	let signupClosed = $state(false);
+
 	let slugCheckTimer: ReturnType<typeof setTimeout> | null = null;
 
 	let emailInput = $state<HTMLInputElement | null>(null);
@@ -54,6 +57,11 @@
 	onMount(async () => {
 		try {
 			const cfg = await api.get<PublicConfig>('/api/public-config');
+			if (cfg.signup_enabled === false) {
+				// No widget to load and no slug to check: there is no form.
+				signupClosed = true;
+				return;
+			}
 			captchaSitekey = cfg.hcaptcha_sitekey || '';
 			if (captchaSitekey) loadHCaptcha();
 			if (cfg.tenant_url_template) {
@@ -194,8 +202,51 @@
 	<title>{m('auth.signup.pageTitle')}</title>
 </svelte:head>
 
-<AuthShell panelOnMobile>
-	{#if successMessage}
+<!-- What pressing the button starts. Worth saying before the press: the flow
+     crosses an inbox twice, and a user who does not expect the second email
+     (the temporary password) is a support ticket. Not shown on a closed
+     deployment, where there is no button to press. -->
+{#snippet nextSteps()}
+	<h3 class="next-heading">{m('auth.signup.nextHeading')}</h3>
+	<ol class="next-steps">
+		<li>
+			<span class="step-dot" aria-hidden="true">1</span>
+			<span class="step-text">
+				<strong>{m('auth.signup.step1Title')}</strong>
+				<span>{m('auth.signup.step1Body')}</span>
+			</span>
+		</li>
+		<li>
+			<span class="step-dot" aria-hidden="true">2</span>
+			<span class="step-text">
+				<strong>{m('auth.signup.step2Title')}</strong>
+				<span>{m('auth.signup.step2Body')}</span>
+			</span>
+		</li>
+		<li>
+			<span class="step-dot" aria-hidden="true">3</span>
+			<span class="step-text">
+				<strong>{m('auth.signup.step3Title')}</strong>
+				<span>{m('auth.signup.step3Body')}</span>
+			</span>
+		</li>
+	</ol>
+{/snippet}
+
+<AuthShell panelOnMobile={!signupClosed} panel={signupClosed ? undefined : nextSteps}>
+	{#if signupClosed}
+		<!-- The Landing page's calls to action still lead here, so this is where a
+		     visitor learns signup is by invitation — an honest dead end with the
+		     way on for an existing customer, rather than a form every submit of
+		     which would 404 (docs/decisions.md §193). -->
+		<div class="auth-stack">
+			<div class="head">
+				<BrandMark size={40} />
+				<h1>{m('auth.signup.closedHeading')}</h1>
+			</div>
+			<p class="sub">{m('auth.signup.closedBody')}</p>
+		</div>
+	{:else if successMessage}
 		<!-- Focus is moved to this heading on arrival (see onSubmit): the form it
 		     replaces took the focused button with it. `tabindex="-1"` makes it a
 		     programmatic focus target without adding a tab stop. -->
@@ -337,36 +388,6 @@
 			</p>
 		</form>
 	{/if}
-
-	{#snippet panel()}
-		<!-- What pressing the button starts. Worth saying before the press: the
-		     flow crosses an inbox twice, and a user who does not expect the
-		     second email (the temporary password) is a support ticket. -->
-		<h3 class="next-heading">{m('auth.signup.nextHeading')}</h3>
-		<ol class="next-steps">
-			<li>
-				<span class="step-dot" aria-hidden="true">1</span>
-				<span class="step-text">
-					<strong>{m('auth.signup.step1Title')}</strong>
-					<span>{m('auth.signup.step1Body')}</span>
-				</span>
-			</li>
-			<li>
-				<span class="step-dot" aria-hidden="true">2</span>
-				<span class="step-text">
-					<strong>{m('auth.signup.step2Title')}</strong>
-					<span>{m('auth.signup.step2Body')}</span>
-				</span>
-			</li>
-			<li>
-				<span class="step-dot" aria-hidden="true">3</span>
-				<span class="step-text">
-					<strong>{m('auth.signup.step3Title')}</strong>
-					<span>{m('auth.signup.step3Body')}</span>
-				</span>
-			</li>
-		</ol>
-	{/snippet}
 </AuthShell>
 
 <style>

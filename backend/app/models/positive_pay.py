@@ -109,11 +109,11 @@ class PositivePayFile(Base, EntityMixin, TimestampMixin):
     item_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     total_amount: Mapped[Decimal] = mapped_column(Numeric(18, 2), nullable=False, default=0)
 
-    # Currency ``total_amount`` is denominated in — the org's reporting (home)
-    # currency at generation time (ISO 4217). Nullable so legacy rows created
-    # before this column read as "unknown" and the UI falls back to the org
-    # default. ``Payment.amount`` is already home-currency, so this is a stored
-    # label, not an FX conversion. See ``backend/docs/positive-pay.md``.
+    # Currency ``total_amount`` is denominated in (ISO 4217). For a check-issue
+    # file, the one currency its cheques' invoices agree on — ``Payment.amount``
+    # is in the INVOICE's currency, not the org's — so a stored label, not an
+    # FX conversion. NULL for legacy rows and for cheques that disagree; the UI
+    # renders those totals bare. See ``backend/docs/positive-pay.md``.
     currency: Mapped[str | None] = mapped_column(String(3))
 
     # sha256 hex of the rendered file content (tamper-evidence / dedupe aid).

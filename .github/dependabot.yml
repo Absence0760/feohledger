@@ -88,6 +88,52 @@ updates:
       day: monday
     open-pull-requests-limit: 5
 
+  # Every `image:` in the two compose files is pinned `repo:tag@sha256:…`, and
+  # the `docker` entries above do NOT read compose files — they read
+  # Dockerfiles only. `docker-compose` is its own ecosystem; its fetcher matches
+  # `(docker-)?compose(-x)?(.x)?.ya?ml`, so it finds both
+  # `backend/docker-compose.yml` and `deploy/compose.prod.yml`, and its updater
+  # rewrites the tag and the digest together.
+  #
+  # What it does NOT reach: the `services:` images and the MinIO `docker run`
+  # in `.github/workflows/ci.yml` / `sso-e2e.yml`. `github-actions` reads only
+  # `uses:` lines, and no ecosystem reads a workflow's service containers. Those
+  # lines carry the same refs as backend/docker-compose.yml with a comment
+  # saying so — when a PR from this entry bumps pgvector, redis or minio, bump
+  # the workflow copies in the same PR. Nothing enforces that yet, and
+  # `dependabot-auto-merge.yml` merges a green minor/patch PR on its own, so
+  # until CI derives those refs from the compose file (a tracked follow-up) an
+  # auto-merged bump leaves CI testing the previous — still pinned, still
+  # pullable — digest.
+  #
+  # Majors are ignored for the stateful stores and for LocalStack. A Postgres
+  # or Redis major is a data-directory / persistence upgrade to plan, not a
+  # dependency bump to merge — pgvector's `-pg16` tag suffix already keeps it
+  # on 16, and this keeps `postgres` (Authentik's DB) and `redis` there too.
+  # LocalStack's next "major" is the calendar-versioned 2026.x line, which
+  # refuses to start without a LOCALSTACK_AUTH_TOKEN; local-first (guard rail 7)
+  # and CI's service-e2e job both run it with no account, so 3.x is held.
+  - package-ecosystem: docker-compose
+    directories:
+      - /backend
+      - /deploy
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      compose-minor-patch:
+        update-types:
+          - minor
+          - patch
+    ignore:
+      - dependency-name: postgres
+        update-types: ["version-update:semver-major"]
+      - dependency-name: redis
+        update-types: ["version-update:semver-major"]
+      - dependency-name: localstack/localstack
+        update-types: ["version-update:semver-major"]
+
   # fake-erp's Python deps. Dependabot's pip-compile support pairs
   # requirements.in with requirements.txt (it only treats a file as a
   # pip-compile lockfile when the name ends in `.txt` and matches the

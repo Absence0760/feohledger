@@ -12,6 +12,7 @@ import 'package:feohledger_mobile/screens/dashboard_screen.dart';
 import 'package:feohledger_mobile/services/offline_store.dart';
 import 'package:feohledger_mobile/stores/dashboard_store.dart';
 import 'package:feohledger_mobile/widgets/kpi_card.dart';
+import 'package:feohledger_mobile/widgets/partial_conversion_note.dart';
 
 // Wraps a screen with the localization delegates it now needs. No explicit
 // `locale` → defaults to `en`, so the English assertions below still hold.
@@ -44,6 +45,12 @@ Map<String, dynamic> _dashboardJson({
   // currencies and no single code describes them. `null` models a backend
   // predating the `reporting` block, where the figures render bare.
   Object? reportingCurrency = 'USD',
+  // How many rows each reporting rollup added at FACE value for want of a
+  // rate lock. The endpoint always serves these beside the figures; `0` is
+  // the fully-converted book.
+  int unconverted = 0,
+  int agingUnconverted = 0,
+  int upcomingUnconverted = 0,
 }) =>
     {
       'total_invoices': totalInvoices,
@@ -53,7 +60,7 @@ Map<String, dynamic> _dashboardJson({
           'reporting_currency': reportingCurrency,
           'total_amount': totalAmount,
           'total_count': totalInvoices,
-          'unconverted_count': 0,
+          'unconverted_count': unconverted,
           'by_currency': <Map<String, dynamic>>[],
         },
       if (reportingCurrency != null)
@@ -65,10 +72,12 @@ Map<String, dynamic> _dashboardJson({
                 'days_60': 5000,
                 'days_90_plus': 2000,
               }),
-          'unconverted_count': 0,
+          'unconverted_count': agingUnconverted,
         },
       if (reportingCurrency != null)
         'upcoming_total_amount_reporting': upcomingTotalAmount,
+      if (reportingCurrency != null)
+        'upcoming_unconverted_count': upcomingUnconverted,
       'pipeline': pipeline ?? {'ready_for_review': 3, 'approved': 5},
       'vendor_spend': vendorSpend ??
           [
@@ -369,5 +378,133 @@ void main() {
 
     expect(find.text('45K'), findsOneWidget);
     expect(find.textContaining(r'$'), findsNothing);
+  });
+
+  group('part-converted rollups are disclosed beside their figures', () {
+    // Each reporting-currency rollup keeps an invoice it could not convert in
+    // at FACE value and counts it. The figure is correctly NAMED either way;
+    // what the reader cannot see is that it mixes currencies — so each count
+    // is said beside the figure it describes, and nothing is said at zero.
+    testWidgets('the book, the upcoming total, the aging bands and the vendor '
+        'ranking each say how many rows went in at face value', (tester) async {
+      ApiClient().debugConfigure(
+        client: MockClient(
+          (req) async => _json(_dashboardJson(
+            reportingCurrency: 'EUR',
+            unconverted: 3,
+            upcomingUnconverted: 1,
+            agingUnconverted: 2,
+            vendorSpend: [
+              {
+                'vendor': 'PartialCo',
+                'amount': 20000,
+                'invoice_count': 4,
+                'unconverted_count': 1,
+              },
+              {
+                'vendor': 'CleanCo',
+                'amount': 15000,
+                'invoice_count': 3,
+                'unconverted_count': 0,
+              },
+            ],
+          )),
+        ),
+      );
+
+      await tester.pumpWidget(_localized(const DashboardScreen()));
+      await _pumpUntil(tester, find.byType(KpiCard));
+
+      expect(
+        find.text('Total Invoices: partial — 3 invoices with no exchange rate '
+            'into EUR, counted at face value, so the total mixes currencies '
+            'by that much.'),
+        findsOneWidget,
+      );
+      expect(
+        find.text('Upcoming: partial — 1 invoice with no exchange rate into '
+            'EUR, counted at face value, so the total mixes currencies by '
+            'that much.'),
+        findsOneWidget,
+      );
+      expect(
+        find.text('Partial: 2 invoices with no exchange rate into EUR, counted '
+            'at face value — the bands below mix currencies by that much.'),
+        findsOneWidget,
+      );
+
+      final vendorNote = find.text(
+        'Partial: 1 invoice with no exchange rate into EUR, counted at face '
+        'value — so these vendors are not all ranked in the same currency. '
+        'Book the missing rate before acting on the order.',
+      );
+      await tester.scrollUntilVisible(vendorNote, 200);
+      expect(vendorNote, findsOneWidget);
+      // The row says WHICH vendor; the clean one keeps its plain subtitle.
+      await tester.scrollUntilVisible(find.text('CleanCo'), 200);
+      expect(find.text('4 invoices · 1 at face value'), findsOneWidget);
+      expect(find.text('3 invoices'), findsOneWidget);
+      // No count of `PartialConversionNote`s here: the list is lazy, so the
+      // KPI notes are disposed once the vendors scroll in. Each note is
+      // pinned by its exact sentence above instead.
+    });
+
+    testWidgets('a fully converted book says nothing', (tester) async {
+      ApiClient().debugConfigure(
+        client: MockClient(
+          (req) async => _json(_dashboardJson(
+            vendorSpend: [
+              {
+                'vendor': 'ConvertedCo',
+                'amount': 20000,
+                'invoice_count': 4,
+                'unconverted_count': 0,
+              },
+            ],
+          )),
+        ),
+      );
+
+      await tester.pumpWidget(_localized(const DashboardScreen()));
+      await _pumpUntil(tester, find.text('ConvertedCo'));
+
+      expect(find.byType(PartialConversionNote), findsNothing);
+      expect(find.textContaining('face value'), findsNothing);
+      expect(find.text('4 invoices'), findsOneWidget);
+    });
+
+    testWidgets('the vendor note counts only the vendors it renders',
+        (tester) async {
+      // The list shows five; a sixth vendor's unconverted invoice is not part
+      // of the ranking on screen, so a note about it would describe rows the
+      // reader cannot find.
+      final vendors = [
+        for (var i = 0; i < 5; i++)
+          {
+            'vendor': 'Shown $i',
+            'amount': 9000 - i,
+            'invoice_count': 1,
+            'unconverted_count': 0,
+          },
+        {
+          'vendor': 'Hidden',
+          'amount': 1,
+          'invoice_count': 1,
+          'unconverted_count': 7,
+        },
+      ];
+      ApiClient().debugConfigure(
+        client: MockClient(
+          (req) async => _json(_dashboardJson(vendorSpend: vendors)),
+        ),
+      );
+
+      await tester.pumpWidget(_localized(const DashboardScreen()));
+      await _pumpUntil(tester, find.text('Shown 0'));
+      await tester.scrollUntilVisible(find.text('Shown 4'), 200);
+
+      expect(find.byType(PartialConversionNote), findsNothing);
+      expect(find.textContaining('face value'), findsNothing);
+    });
   });
 }

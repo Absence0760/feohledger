@@ -260,6 +260,9 @@ export const en = {
 	'common.search': 'Search',
 	'common.clear': 'Clear',
 	'common.apply': 'Apply',
+	// Accessible name of a <DataTable>'s scroll region (ui/DataTable.svelte) when
+	// the page passes none — what a screen reader announces on its tab stop.
+	'common.tableRegion': 'Data table',
 
 	// Bulk selection, shared by EVERY list that offers it (ui/BulkBar.svelte and
 	// the two lists — /invoices and /payments — that render their own bar).
@@ -1041,11 +1044,15 @@ export const en = {
 	'exceptions.title': 'Exceptions',
 	'exceptions.tab.queue': 'Queue',
 	'exceptions.tab.agents': 'AI Agents',
+	'exceptions.tab.aria': 'Exceptions views',
 	'exceptions.filter.open': 'Open',
 	'exceptions.filter.escalated': 'Escalated',
 	'exceptions.filter.resolved': 'Resolved',
 	'exceptions.filter.dismissed': 'Dismissed',
 	'exceptions.filter.allTypes': 'All types',
+	'exceptions.filter.allSeverities': 'All severities',
+	'exceptions.search.placeholder': 'Search invoice # or vendor...',
+	'exceptions.search.aria': 'Search exceptions by invoice number or vendor',
 	'exceptions.col.type': 'Type',
 	'exceptions.col.severity': 'Sev',
 
@@ -1086,6 +1093,29 @@ export const en = {
 	'exceptions.bulkModal.hint': 'All selected rows will receive the same resolution note. Rows already in a terminal state are skipped server-side, and so is any row whose flag you are recorded as involved in — escalate those instead.',
 	'exceptions.bulk.segregationSkipped': '{n, plural, one {# row was left open: segregation of duties — you are recorded as involved in that payable, or in raising its flag. Escalate it, or ask a different user to decide.} other {# rows were left open: segregation of duties — you are recorded as involved in those payables, or in raising their flags. Escalate them, or ask a different user to decide.}}',
 	'exceptions.bulkModal.notePlaceholder': 'Applied to every selected row',
+	// Queue toasts. One whole sentence per action outcome: these were built by
+	// conjugating the verb in a template literal (`Exception ${action}d`), which
+	// no other language can take and which English itself got wrong ("dismissd").
+	'exceptions.toast.loadFailed': 'Failed to load exceptions',
+	'exceptions.toast.noteRequired': 'Resolution note is required',
+	'exceptions.toast.actionFailed': 'Action failed',
+	'exceptions.toast.resolved': 'Exception resolved',
+	'exceptions.toast.escalated': 'Exception escalated',
+	'exceptions.toast.dismissed': 'Exception dismissed',
+	'exceptions.toast.bulkResolved': '{n, plural, one {# exception resolved} other {# exceptions resolved}}',
+	'exceptions.toast.bulkEscalated': '{n, plural, one {# exception escalated} other {# exceptions escalated}}',
+	'exceptions.toast.bulkDismissed': '{n, plural, one {# exception dismissed} other {# exceptions dismissed}}',
+	'exceptions.toast.bulkResolvedSkipped':
+		'{n, plural, one {# exception resolved} other {# exceptions resolved}}, {skipped, plural, one {# skipped} other {# skipped}}.',
+	'exceptions.toast.bulkEscalatedSkipped':
+		'{n, plural, one {# exception escalated} other {# exceptions escalated}}, {skipped, plural, one {# skipped} other {# skipped}}.',
+	'exceptions.toast.bulkDismissedSkipped':
+		'{n, plural, one {# exception dismissed} other {# exceptions dismissed}}, {skipped, plural, one {# skipped} other {# skipped}}.',
+	'exceptions.toast.selectedAllMatching':
+		'{n, plural, one {Selected all # matching exception} other {Selected all # matching exceptions}}',
+	'exceptions.toast.selectAllTruncated':
+		'Selected the first {shown} of {total} matching — narrow your filters to select the rest.',
+	'exceptions.toast.selectAllFailed': 'Failed to select all matching',
 
 	// Exception-type labels ($lib/types/exception.ts::EXCEPTION_TYPE_LABEL_KEYS).
 	// Each ENGLISH value is byte-identical to
@@ -2755,6 +2785,25 @@ export const en = {
 	'glAccounts.createModal.scopeEntity': 'This account will belong to {entity} alone. Switch to All entities to create a shared one.',
 	'glAccounts.createModal.toast.created': 'GL account {code} created',
 	'glAccounts.createModal.toast.createFailed': 'Could not create the account',
+	// Row actions + the edit dialog (PATCH /api/gl-accounts/{id}). "Retire", not
+	// "Delete": there is no delete — the account leaves the pickers and every
+	// line already coded to it keeps resolving.
+	'glAccounts.row.edit': 'Edit',
+	'glAccounts.row.editAria': 'Edit GL account {code}',
+	'glAccounts.row.retire': 'Retire',
+	'glAccounts.row.retireAria': 'Retire GL account {code}',
+	'glAccounts.row.confirm': 'Confirm',
+	'glAccounts.row.reactivate': 'Reactivate',
+	'glAccounts.row.reactivateAria': 'Reactivate GL account {code}',
+	'glAccounts.row.otherChart': 'Edit from All entities',
+	'glAccounts.row.toast.retired': 'Retired {code}. Pickers no longer offer it; invoices already coded to it keep the code.',
+	'glAccounts.row.toast.reactivated': 'Reactivated {code}',
+	'glAccounts.row.toast.failed': 'Could not update the account',
+	'glAccounts.editModal.aria': 'Edit GL account',
+	'glAccounts.editModal.title': 'Edit GL Account',
+	'glAccounts.editModal.save': 'Save changes',
+	'glAccounts.editModal.codeFixed': 'The code can’t be changed: invoices record it as text, so renaming it would orphan every line already coded to it. To replace an account, create the new one and retire this one.',
+	'glAccounts.editModal.toast.saved': 'GL account {code} updated',
 
 	// Purchase Orders (routes/purchase-orders/+page.svelte)
 	'purchaseOrders.title': 'Purchase Orders',
@@ -3101,7 +3150,11 @@ export const en = {
 	'byEntity.loading': 'Loading…',
 	'byEntity.loadFailed': 'Failed to load per-entity breakdown',
 	'byEntity.unconverted':
-		'Excluded from the consolidated Outstanding total: {n, plural, one {# open invoice} other {# open invoices}} with no locked exchange rate into {currency}.',
+		'Outstanding includes {n, plural, one {# open invoice} other {# open invoices}} with no locked exchange rate into {currency}, counted at face value — the totals mix currencies by that much.',
+	'byEntity.unconvertedSpend':
+		'Spend includes {n, plural, one {# invoice} other {# invoices}} with no locked exchange rate into {currency}, counted at face value — the totals mix currencies by that much.',
+	'byEntity.openPoNoCurrency':
+		'Purchase orders do not record a currency yet, so Open POs are shown without one.',
 
 	// Scheduled reports (components/analytics/ScheduledReportsPanel.svelte) —
 	// the CRUD surface for the report runner, hosted on /cfo. The report-type
@@ -3604,6 +3657,9 @@ export const en = {
 	'auth.signup.successSpamLink': 'try again',
 	'auth.signup.heading': 'Create your workspace',
 	'auth.signup.subtitle': 'Get your own AP workspace in under a minute.',
+	'auth.signup.closedHeading': 'Signup is closed',
+	'auth.signup.closedBody':
+		'New workspaces on this deployment are created by invitation only. If your organization already uses FeohLedger, sign in at your workspace\'s own address.',
 	'auth.signup.failed': 'Signup failed.',
 	'auth.signup.captchaRequired': 'Please complete the captcha.',
 	'auth.signup.companyName': 'Company name',
@@ -4680,15 +4736,23 @@ export const en = {
 	'creditMemos.createModal.aria': 'New credit memo',
 	'creditMemos.createModal.currency':
 		'Currency',
+	'creditMemos.createModal.currencyFromInvoice': 'Taken from the invoice this memo is applied to.',
 	'creditMemos.createModal.currencyHint':
-		'A credit memo can only be applied to an invoice in the same currency, and there is no way to change it afterwards.',
+		'A credit memo can only be applied to an invoice in the same currency. It can still be corrected until it is applied.',
 	'creditMemos.createModal.create': 'Create',
+	'creditMemos.createModal.invoice': 'Apply to invoice',
+	'creditMemos.createModal.invoiceHint': 'Choosing an invoice applies the credit to it as soon as the memo is created. Leave it empty to apply the credit later.',
+	'creditMemos.createModal.invoiceNeedsVendor': 'Choose a vendor to see its invoices.',
 	'creditMemos.createModal.memoNumber': 'Memo Number',
+	'creditMemos.createModal.noInvoice': 'Don’t apply yet',
 	'creditMemos.createModal.reason': 'Reason',
 	'creditMemos.createModal.reasonPlaceholder': 'e.g. Returned defective goods',
 	'creditMemos.createModal.selectVendor': 'Select vendor…',
 	'creditMemos.createModal.title': 'New Credit Memo',
 	'creditMemos.createModal.vendor': 'Vendor',
+	'creditMemos.editModal.aria': 'Edit credit memo',
+	'creditMemos.editModal.hint': 'A credit memo can be corrected until it is applied. Every change is recorded in the audit trail.',
+	'creditMemos.editModal.title': 'Edit Credit Memo',
 	'creditMemos.empty': 'No credit memos.',
 	'creditMemos.empty.filtered': 'No credit memos match this filter.',
 	'creditMemos.loadMore': 'Load more ({shown} of {total})',
@@ -4699,6 +4763,9 @@ export const en = {
 	'creditMemos.row.apply': 'Apply',
 	'creditMemos.row.void': 'Void',
 	'creditMemos.row.confirm': 'Confirm',
+	'creditMemos.row.edit': 'Edit',
+	'creditMemos.search.aria': 'Search credit memos',
+	'creditMemos.search.placeholder': 'Search memo # or vendor…',
 	'creditMemos.showingAll': 'Showing all {total, plural, one {# credit memo} other {# credit memos}}',
 	'creditMemos.status.applied': 'Applied',
 	'creditMemos.status.open': 'Open',
@@ -4709,6 +4776,8 @@ export const en = {
 	'creditMemos.toast.createFailed': 'Create failed',
 	'creditMemos.toast.created': 'Credit memo created',
 	'creditMemos.toast.loadFailed': 'Failed to load credit memos',
+	'creditMemos.toast.updateFailed': 'Update failed',
+	'creditMemos.toast.updated': 'Credit memo updated',
 	'creditMemos.toast.voidFailed': 'Void failed',
 	'creditMemos.toast.voided': 'Credit memo voided',
 	'csvImport.chooseFile': 'Choose file…',

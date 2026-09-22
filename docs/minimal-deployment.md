@@ -12,7 +12,7 @@ everything else in-process.**
         *.feohledger.com  ──────────► one VM (EC2 t4g.small)
                                  ├── Caddy         — TLS, static frontend, /api reverse-proxy
                                  ├── FastAPI       — backend container (uvicorn)
-                                 ├── Postgres 16   — pgvector/pgvector:pg16 (control + tenant DBs)
+                                 ├── Postgres 16   — pgvector/pgvector, -pg16 line (control + tenant DBs)
                                  └── Redis 7       — token blocklist, rate limits, MFA state
                                         │
                                      AWS S3 — invoice files, backups (no MinIO in prod)
@@ -158,11 +158,18 @@ resize is a stop → change-type → start. Add 2 GB of swap either way.
 
 ### 2. Production compose stack (`deploy/compose.prod.yml` — built)
 
-Four services (see [`deploy/README.md`](../deploy/README.md) for operations):
+Four services (see [`deploy/README.md`](../deploy/README.md) for operations).
+Every image is pinned to a release tag plus its index digest
+(`repo:tag@sha256:…`), the same refs `backend/docker-compose.yml` uses for
+Postgres and Redis, so a redeploy can never pick up an upstream retag; bumps
+arrive as Dependabot `docker-compose` PRs
+([`backend/docs/docker.md` § Image pinning](../backend/docs/docker.md#image-pinning)).
+`deploy.sh`'s frontend-build `NODE_IMAGE` is pinned the same way, by hand.
 
-- `postgres` — `pgvector/pgvector:pg16`, volume-backed, **no host port**
-  (compose-network only); password from the sops env.
-- `redis` — `redis:7-alpine` with `--appendonly yes`, no host port.
+- `postgres` — `pgvector/pgvector` on its `-pg16` line (Postgres 16),
+  volume-backed, **no host port** (compose-network only); password from the
+  sops env.
+- `redis` — `redis` 7.x alpine with `--appendonly yes`, no host port.
 - `api` — built from `backend/Dockerfile` (works on arm64; the lock resolves
   universally — if an arm64 wheel gap ever bites, fall back to an x86
   `t3a.small`, ~$14). Runs the image CMD, `uvicorn app.main:app` (the
@@ -202,9 +209,10 @@ Beyond the committed defaults, the deployed env sets at minimum:
 
 | Var | Value |
 |---|---|
-| `FEOH_ENVIRONMENT` | `production` (arms hCaptcha enforcement on signup) |
+| `FEOH_ENVIRONMENT` | `production` (arms hCaptcha enforcement on signup, while signup is on) |
 | `FEOH_SECRET_KEY` | `openssl rand -hex 32` |
-| `FEOH_HCAPTCHA_SECRET` / `FEOH_HCAPTCHA_SITEKEY` | **The secret is required whether or not you want signup** — the API refuses to boot in production with it empty, and `deploy.sh` refuses first. There is no signup off switch; to keep signup closed, set the secret and leave the sitekey empty: `/signup` renders, but every submit is refused with "Captcha is required." |
+| `FEOH_SIGNUP_ENABLED` | `false` to keep self-service signup closed (every `/api/signup/*` route 404s and `/signup` says signup is closed) — the usual choice here, with tenants provisioned by `deploy/add-tenant.sh`. Leave it unset (on) only when you want public signup, and then set both hCaptcha keys |
+| `FEOH_HCAPTCHA_SECRET` / `FEOH_HCAPTCHA_SITEKEY` | **Required while signup is on** — the API refuses to boot in production with the secret empty, and `deploy.sh` refuses first. With `FEOH_SIGNUP_ENABLED=false` neither is needed. |
 | `POSTGRES_PASSWORD` | `openssl rand -hex 24` (compose derives `FEOH_DATABASE_URL` / `FEOH_REDIS_URL` from it — don't set those) |
 | `FEOH_S3_BUCKET` | invoice-files bucket; set `FEOH_S3_ENDPOINT_URL` / `FEOH_S3_ACCESS_KEY` / `FEOH_S3_SECRET_KEY` **empty** → real S3 via the instance-profile credential chain |
 | `FEOH_MFA_ENABLED` / `FEOH_HSTS_ENABLED` | `true` / `true` |
@@ -226,7 +234,7 @@ SES note: `infra/email.tf` creates the SES identity for the platform domain, its
 DKIM and MAIL FROM records, and the Migadu mailbox records beside them — the
 bring-up order is `infra/README.md` § Email. A fresh SES account is still
 sandboxed (verified recipients only). Either request production access, or keep
-self-service signup closed at first (empty `FEOH_HCAPTCHA_SITEKEY`, above) and
+self-service signup closed at first (`FEOH_SIGNUP_ENABLED=false`, above) and
 provision tenants with `deploy/add-tenant.sh`, leaving email on `console` until
 SES clears.
 

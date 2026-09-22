@@ -25,7 +25,7 @@ const _thisDir = path.dirname(_thisFile);
  *
  * `backend/scripts/seed.py` provisions `FEOH_E2E_TENANT_COUNT` (default 4)
  * `e2e<N>` tenants. Each Playwright worker maps to one tenant via
- * `workerIndex`, so a worker that creates / deletes data in
+ * `parallelIndex`, so a worker that creates / deletes data in
  * `e2e1` can't collide with another worker working in `e2e2`. Spec
  * files import `test` from this module (not `@playwright/test`); the
  * fixture below overrides `baseURL` and injects role-specific creds
@@ -70,8 +70,16 @@ type WorkerFixtures = {
 	tenantCfo: TenantCreds;
 };
 
-function _tenantSlugFor(workerIndex: number): string {
-	return `e2e${((workerIndex + E2E_TENANT_OFFSET) % Math.max(E2E_TENANT_COUNT, 1)) + 1}`;
+// Keyed on `parallelIndex`, never `workerIndex`. Playwright replaces a worker
+// after a failed test and the replacement gets a NEW `workerIndex` (4, 5, …), so
+// `workerIndex % E2E_TENANT_COUNT` wrapped it onto a tenant a still-running
+// worker owned: after the first failure in a local 4-worker run, two workers
+// wrote to `e2e1` at once and counting specs failed on the other one's rows.
+// `parallelIndex` is what Playwright guarantees is distinct among live workers
+// (0 … workers-1) and is inherited by a replacement. CI provisions one tenant,
+// so there the two keys resolve identically.
+function _tenantSlugFor(parallelIndex: number): string {
+	return `e2e${((parallelIndex + E2E_TENANT_OFFSET) % Math.max(E2E_TENANT_COUNT, 1)) + 1}`;
 }
 
 function _credsFor(slug: string, role: 'admin' | 'manager' | 'clerk' | 'cfo'): TenantCreds {
@@ -81,7 +89,7 @@ function _credsFor(slug: string, role: 'admin' | 'manager' | 'clerk' | 'cfo'): T
 export const test = base.extend<object, WorkerFixtures>({
 	tenantSlug: [
 		async ({}, use, workerInfo) => {
-			await use(_tenantSlugFor(workerInfo.workerIndex));
+			await use(_tenantSlugFor(workerInfo.parallelIndex));
 		},
 		{ scope: 'worker' }
 	],
@@ -149,13 +157,49 @@ export const test = base.extend<object, WorkerFixtures>({
 	// still get the pre-nav; for them the worker's tenant root
 	// redirects to `/login` (no auth) which is the same place those
 	// specs were going to navigate next anyway.
+	//
+	// It also watches for a stub answering a dev-server MODULE request — see
+	// `watchForStubbedModules` below.
 	page: async ({ page, baseURL }, use) => {
+		const stubbedModules = watchForStubbedModules(page);
 		if (baseURL) {
 			await page.goto(baseURL);
 		}
 		await use(page);
+		expect(stubbedModules, STUBBED_MODULE_HINT).toEqual([]);
 	}
 });
+
+const STUBBED_MODULE_HINT =
+	'A page.route() stub answered a dev-server MODULE request with JSON, so the ' +
+	"route's code never loaded (SvelteKit renders its 500 page). Under `vite dev` " +
+	'the source is served over HTTP — `$lib/api/vendors.ts` is `/src/lib/api/vendors.ts` — ' +
+	'so a pattern like `**/api/vendors*` or `/\\/api\\/vendors/` matches the module as well ' +
+	'as the API call. Match the API request by its exact pathname instead. See ' +
+	'tests-e2e/README.md § Stubbing an API route.';
+
+/**
+ * Collect every module script the page received a JSON body for.
+ *
+ * Only a `page.route()` stub produces that: Vite serves every module —
+ * including a JSON import — as JavaScript, and the preview build CI runs
+ * serves hashed `/_app/immutable/` chunks no API pattern can match. So under
+ * `vite dev` an over-broad stub turns into a route that silently fails to
+ * load, and the spec then times out on whatever it looks for first — four
+ * `/credit-memos` specs sat red locally and green in CI for exactly this
+ * reason, with nothing in their output naming the stub (issue #443). Checked
+ * in the `page` fixture's teardown, so the failure names the module and the
+ * fix instead of a missing row.
+ */
+function watchForStubbedModules(page: Page): string[] {
+	const offenders: string[] = [];
+	page.on('response', (response) => {
+		if (response.request().resourceType() !== 'script') return;
+		const type = response.headers()['content-type'] ?? '';
+		if (type.includes('json')) offenders.push(new URL(response.url()).pathname);
+	});
+	return offenders;
+}
 
 /**
  * Read the auth_token value out of a persisted storageState JSON
@@ -269,8 +313,8 @@ export { expect };
  */
 function _currentWorkerAdmin(): TenantCreds {
 	try {
-		const wi = base.info().workerIndex;
-		return _credsFor(_tenantSlugFor(wi), 'admin');
+		const pi = base.info().parallelIndex;
+		return _credsFor(_tenantSlugFor(pi), 'admin');
 	} catch {
 		return ACME_ADMIN;
 	}
@@ -459,7 +503,7 @@ export async function signOut(page: Page) {
  *  rather than always acme. */
 export function currentTenantSlug(): string {
 	try {
-		return _tenantSlugFor(base.info().workerIndex);
+		return _tenantSlugFor(base.info().parallelIndex);
 	} catch {
 		return 'acme';
 	}

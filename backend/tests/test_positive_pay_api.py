@@ -91,7 +91,7 @@ async def _add_vendor(
         return str(v.id)
 
 
-async def _add_invoice(mk, org_id, *, vendor_id, invoice_number, amount="1000.00"):
+async def _add_invoice(mk, org_id, *, vendor_id, invoice_number, amount="1000.00", currency="USD"):
     async with mk() as s:
         inv = Invoice(
             organization_id=org_id,
@@ -100,7 +100,7 @@ async def _add_invoice(mk, org_id, *, vendor_id, invoice_number, amount="1000.00
             vendor_name="Globex Industrial",
             vendor_id=uuid.UUID(vendor_id),
             amount=Decimal(amount),
-            currency="USD",
+            currency=currency,
             invoice_date=_TODAY,
             due_date=_TODAY + timedelta(days=30),
             status=InvoiceStatus.approved,
@@ -200,30 +200,39 @@ async def _set_reporting_currency(realdb, org_id, currency: str | None) -> None:
         await s.commit()
 
 
-async def test_generate_check_issue_persists_reporting_currency(realdb):
-    """The generated file stamps + returns the org's reporting currency so its
-    total_amount has a stored currency context (not a UI guess)."""
+async def test_generate_check_issue_stamps_the_cheques_currency_not_the_reporting_one(realdb):
+    """The file's ``total_amount`` sums ``Payment.amount``, which is denominated
+    in each INVOICE's currency — so that is the code the file carries, stored
+    and served back, even when the org reports in something else.
+
+    It used to stamp the org's reporting currency: a USD cheque run for a
+    EUR-reporting org came back as a EUR file, and ``/positive-pay`` rendered
+    the dollar total under a euro sign.
+    """
     mk = realdb.sessionmaker("a")
     org_id = realdb.info("a").org_id
     await _set_check_account(realdb, org_id)
     await _set_reporting_currency(realdb, org_id, "EUR")
     try:
         vendor_id = await _add_vendor(mk, org_id)
-        invoice_id = await _add_invoice(mk, org_id, vendor_id=vendor_id, invoice_number="INV-EUR")
-        run_id = await _add_check_run(mk, org_id, invoice_id=invoice_id, check_number="CHKEUR1")
+        invoice_id = await _add_invoice(
+            mk, org_id, vendor_id=vendor_id, invoice_number="INV-USD", currency="usd"
+        )
+        run_id = await _add_check_run(mk, org_id, invoice_id=invoice_id, check_number="CHKUSD1")
 
         async with realdb.client(key="a", role="ap_manager") as c:
             gen = await c.post(f"/api/positive-pay/payment-runs/{run_id}/check-issue", json={})
             assert gen.status_code == 201, gen.text
-            assert gen.json()["currency"] == "EUR"
+            # Upper-cased: `usd` on the invoice row is the same currency.
+            assert gen.json()["currency"] == "USD"
             file_id = gen.json()["id"]
 
             # List + detail round-trip the stored currency.
             listed = await c.get("/api/positive-pay")
             row = next(f for f in listed.json()["items"] if f["id"] == file_id)
-            assert row["currency"] == "EUR"
+            assert row["currency"] == "USD"
             detail = await c.get(f"/api/positive-pay/{file_id}")
-            assert detail.json()["currency"] == "EUR"
+            assert detail.json()["currency"] == "USD"
 
         # Persisted on the DB row.
         async with mk() as s:
@@ -234,9 +243,46 @@ async def test_generate_check_issue_persists_reporting_currency(realdb):
                     select(PositivePayFile).where(PositivePayFile.id == uuid.UUID(file_id))
                 )
             ).scalar_one()
-            assert stored.currency == "EUR"
+            assert stored.currency == "USD"
     finally:
         await _set_reporting_currency(realdb, org_id, None)
+        await _clear_settings(realdb, org_id)
+
+
+async def test_generate_check_issue_names_no_currency_when_the_cheques_disagree(realdb):
+    """A legacy run predating the single-currency guard can hold a USD and a
+    EUR cheque; its total is a quantity in neither, so the file names no
+    currency rather than borrowing one (decisions §79/§82)."""
+    mk = realdb.sessionmaker("a")
+    org_id = realdb.info("a").org_id
+    await _set_check_account(realdb, org_id)
+    try:
+        vendor_id = await _add_vendor(mk, org_id)
+        usd = await _add_invoice(mk, org_id, vendor_id=vendor_id, invoice_number="INV-MIX-USD")
+        eur = await _add_invoice(
+            mk, org_id, vendor_id=vendor_id, invoice_number="INV-MIX-EUR", currency="EUR"
+        )
+        run_id = await _add_check_run(mk, org_id, invoice_id=usd, check_number="CHKMIX1")
+        async with mk() as s:
+            s.add(
+                Payment(
+                    entity_id=await _default_entity_id(s),
+                    invoice_id=uuid.UUID(eur),
+                    payment_run_id=uuid.UUID(run_id),
+                    amount=Decimal("500.00"),
+                    method="check",
+                    status="completed",
+                    reference="CHKMIX2",
+                )
+            )
+            await s.commit()
+
+        async with realdb.client(key="a", role="ap_manager") as c:
+            gen = await c.post(f"/api/positive-pay/payment-runs/{run_id}/check-issue", json={})
+        assert gen.status_code == 201, gen.text
+        assert gen.json()["item_count"] == 2
+        assert gen.json()["currency"] is None
+    finally:
         await _clear_settings(realdb, org_id)
 
 

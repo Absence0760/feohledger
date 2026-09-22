@@ -11,11 +11,14 @@
 	import BulkBar from '$lib/components/ui/BulkBar.svelte';
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 	import FilterChips from '$lib/components/ui/FilterChips.svelte';
+	import SearchBox from '$lib/components/ui/SearchBox.svelte';
+	import SortableHeader from '$lib/components/ui/SortableHeader.svelte';
 	import DataTable from '$lib/components/ui/DataTable.svelte';
 	import Modal from '$lib/components/ui/Modal.svelte';
 	import Tabs from '$lib/components/ui/Tabs.svelte';
 	import Badge from '$lib/components/ui/Badge.svelte';
 	import {
+		EXCEPTION_SEVERITIES,
 		exceptionSeverityLabelKey,
 		exceptionStatusLabelKey,
 		exceptionStatusTone,
@@ -23,6 +26,8 @@
 		exceptionTypeLabelKey
 	} from '$lib/types/exception';
 	import type { ExceptionSeverity } from '$lib/types/exception';
+	import type { ExceptionSummary } from '$lib/types/exceptionSummary';
+	import { toggleSort, type SortOrder } from '$lib/utils/sort';
 	import AgentDashboard from '$lib/components/exceptions/AgentDashboard.svelte';
 	import { formatMoney } from '$lib/utils/money';
 	import { formatDate, timeAgo } from '$lib/utils/time';
@@ -30,6 +35,8 @@
 	import { pruneSelection } from '$lib/utils/selection';
 	import { orgCurrency } from '$lib/stores/orgSettings.svelte';
 	import { m } from '$lib/i18n/store.svelte';
+	import type { MessageKey } from '$lib/i18n/messages';
+	import { formatApiDetail } from '$lib/utils/apiError';
 
 	interface ExceptionItem {
 		id: string;
@@ -59,13 +66,8 @@
 		created_at: string;
 	}
 
-	interface Summary {
-		open: number;
-		escalated: number;
-		resolved: number;
-		dismissed: number;
-		by_type: Record<string, number>;
-	}
+	/** Every chip tally on the page — see {@link ExceptionSummary}. */
+	type Summary = ExceptionSummary;
 
 	type Action = 'resolve' | 'escalate' | 'dismiss';
 
@@ -99,12 +101,43 @@
 			: 'open'
 	);
 	let typeFilter = $state<string | null>($pageStore.url.searchParams.get('type'));
+	// `?severity=`, clamped to the chips' own roster for the reason `status` is:
+	// an unknown value would narrow the table under a row with no chip pressed.
+	let severityFilter = $state<string>(
+		(EXCEPTION_SEVERITIES as readonly string[]).includes(
+			$pageStore.url.searchParams.get('severity') ?? ''
+		)
+			? ($pageStore.url.searchParams.get('severity') as string)
+			: 'all'
+	);
+	// Server-side search over invoice number + vendor (`?search=`). Never a
+	// client-side `.filter()` over the loaded page — that searches 20 rows and
+	// calls it the queue (`frontend/docs/ui-patterns.md` § Search).
+	let search = $state($pageStore.url.searchParams.get('search') ?? '');
+	// The term the newest ISSUED list load carried. Written by `loadExceptions`,
+	// read by the debounce effect (a term already on screen schedules nothing)
+	// and by the summary / select-all requests, which must describe the set the
+	// TABLE shows rather than whatever is half-typed in the box.
+	let appliedSearch = $state(($pageStore.url.searchParams.get('search') ?? '').trim());
+	// Column sort (`?sort=&order=`), clamped to the backend allowlist
+	// (`api/exceptions.EXCEPTION_SORTABLE_COLUMNS`): an unknown key is a 422
+	// there, which would turn a hand-edited link into the error state. `null` is
+	// the backend's default order, newest first.
+	const SORT_KEYS = ['created_at', 'severity', 'due_at'];
+	let sortField = $state<string | null>(
+		SORT_KEYS.includes($pageStore.url.searchParams.get('sort') ?? '')
+			? $pageStore.url.searchParams.get('sort')
+			: null
+	);
+	let sortOrder = $state<SortOrder>(
+		$pageStore.url.searchParams.get('order') === 'asc' ? 'asc' : 'desc'
+	);
 	let selectedIds = $state<Set<string>>(new Set());
 	// True once "Select all N matching" (below) has resolved the WHOLE
 	// filtered set of open/escalated exceptions — not just the loaded page —
 	// into `selectedIds`. See the identical mechanism on the invoices list
 	// page (`routes/invoices/+page.svelte`) for the full rationale. Reset by
-	// `loadExceptions` whenever `statusFilter`/`typeFilter` actually change.
+	// `reload()` whenever a chip or the search changes the set; a sort does not.
 	let selectedAllMatching = $state(false);
 	let selectingAllMatching = $state(false);
 
@@ -119,7 +152,8 @@
 	);
 
 	/**
-	 * The ONE writer of this route's query string — `view`, `status`, `type`.
+	 * The ONE writer of this route's query string — `view`, `status`, `type`,
+	 * `severity`, `search`, `sort` / `order`.
 	 *
 	 * It must be the only one, for the reason `routes/invoices/+page.svelte`
 	 * documents at length: SvelteKit's shallow `replaceState` writes `history`
@@ -140,6 +174,13 @@
 			if (view === 'agents') params.set('view', 'agents');
 			if (statusFilter !== 'open') params.set('status', statusFilter);
 			if (typeFilter) params.set('type', typeFilter);
+			if (severityFilter !== 'all') params.set('severity', severityFilter);
+			const term = search.trim();
+			if (term) params.set('search', term);
+			if (sortField) {
+				params.set('sort', sortField);
+				params.set('order', sortOrder);
+			}
 			const qs = params.toString();
 			replaceState(`${$pageStore.url.pathname}${qs ? `?${qs}` : ''}`, {});
 		});
@@ -246,26 +287,104 @@
 	const fetchSequence = createRequestSequencer();
 	const summarySequence = createRequestSequencer();
 
-	$effect(() => {
-		statusFilter;
-		typeFilter;
+	/**
+	 * Re-read the table AND its chip tallies for the current filters. The
+	 * summary is faceted over the same filter set the list takes, so any filter
+	 * change (a chip in any row, a search) moves some tally; sort and load-more
+	 * change neither, and call `loadExceptions` alone.
+	 *
+	 * `loadExceptions` runs first because it stamps `appliedSearch`
+	 * synchronously, before its first `await`, and `loadSummary` reads it.
+	 */
+	function reload() {
 		// The "select all N matching" set was resolved against the FILTERS
 		// active when it was clicked; once they change it no longer describes
-		// anything real, so drop out of matching mode. Must happen here,
-		// synchronously, before `loadExceptions()` — see the identical note on
-		// the invoices list page.
+		// anything real, so drop out of matching mode. Must happen before
+		// `loadExceptions()` — see the identical note on the invoices list page.
 		selectedAllMatching = false;
 		syncUrl();
 		loadExceptions();
-	});
+		loadSummary();
+	}
 
-	// The type-chip tallies are scoped to the STATUS the queue is showing, so
-	// they re-read when the status chip moves. Separate from the list effect:
-	// the type chip narrows the list without changing what the tallies count.
+	// A chip click is a discrete action, so it reloads immediately.
 	$effect(() => {
 		statusFilter;
-		loadSummary();
+		typeFilter;
+		severityFilter;
+		reload();
 	});
+
+	// A keystroke costs a request, so the term is debounced 300ms (the
+	// /invoices, /vendors, /requisitions convention) and the sequencers below
+	// discard a slow response for an earlier term. A term that already matches
+	// `appliedSearch` schedules nothing — that is what stops this effect's FIRST
+	// run (mount, including a bookmarked `?search=`) from firing a duplicate
+	// load 300ms behind the chip effect's, and it cancels a pending debounce
+	// when a chip click has already loaded with the typed term.
+	let searchTimer: ReturnType<typeof setTimeout>;
+	$effect(() => {
+		const next = search.trim();
+		clearTimeout(searchTimer);
+		if (next === appliedSearch) return;
+		searchTimer = setTimeout(reload, 300);
+		// Cancel a pending debounce on teardown, or it fires against a route
+		// the user already left.
+		return () => clearTimeout(searchTimer);
+	});
+
+	/**
+	 * The filter half of every queue request — list, chip tallies and the
+	 * select-all resolver — built in one place so the three cannot describe
+	 * different sets (the backend routes all three through one builder, too).
+	 * `status=all` is the backend's "no filter" as well, so it is omitted rather
+	 * than spelled. Every read is untracked: this runs inside the chip effect,
+	 * and a tracked `search` read would make that effect fire per keystroke,
+	 * un-debounced (issue #168).
+	 */
+	function filterParams(term: string): URLSearchParams {
+		const params = new URLSearchParams();
+		untrack(() => {
+			if (statusFilter !== 'all') params.set('status', statusFilter);
+			if (typeFilter) params.set('type', typeFilter);
+			if (severityFilter !== 'all') params.set('severity', severityFilter);
+		});
+		if (term) params.set('search', term);
+		return params;
+	}
+
+	function handleSort(field: string) {
+		const next = toggleSort({ field: sortField, order: sortOrder }, field);
+		applySort(next.field, next.order);
+	}
+
+	/**
+	 * `Age` is `created_at` read backwards — the OLDEST row has the LARGEST age —
+	 * so the Age header reports the order of the ages it shows: ascending age is
+	 * `created_at` descending. Without the flip its `aria-sort="ascending"`
+	 * would announce the opposite of what the column visibly does.
+	 */
+	const AGE_FIELD = 'created_at';
+	function flipOrder(order: SortOrder): SortOrder {
+		return order === 'asc' ? 'desc' : 'asc';
+	}
+	let ageOrder = $derived(flipOrder(sortOrder));
+	function handleAgeSort() {
+		const next = toggleSort(
+			{ field: sortField, order: sortField === AGE_FIELD ? ageOrder : sortOrder },
+			AGE_FIELD
+		);
+		applySort(AGE_FIELD, flipOrder(next.order));
+	}
+
+	// Sort reorders the set; it cannot change which rows are in it, so the chip
+	// tallies and a "select all N matching" selection both stay valid.
+	function applySort(field: string | null, order: SortOrder) {
+		sortField = field;
+		sortOrder = order;
+		syncUrl();
+		loadExceptions();
+	}
 
 	$effect(() => {
 		orgCurrency.ensureLoaded();
@@ -278,9 +397,19 @@
 		else loading = true;
 		errored = false;
 		try {
-			const params = new URLSearchParams();
-			if (statusFilter !== 'all') params.set('status', statusFilter);
-			if (typeFilter) params.set('type', typeFilter);
+			// A fresh load takes the live term and records it; load-more keeps the
+			// term page 1 was fetched with, or a half-typed box would append
+			// another search's rows to this one's.
+			const term = opts.append
+				? untrack(() => appliedSearch)
+				: untrack(() => search).trim();
+			if (!opts.append) appliedSearch = term;
+			const params = filterParams(term);
+			const currentSort = untrack(() => sortField);
+			if (currentSort) {
+				params.set('sort', currentSort);
+				params.set('order', untrack(() => sortOrder));
+			}
 			params.set('page', String(nextPage));
 			params.set('page_size', String(PAGE_SIZE));
 			const data = await api.get<{ items: ExceptionItem[]; total: number }>(
@@ -301,7 +430,7 @@
 			if (!fetchSequence.isCurrentRequest(token)) return;
 			errored = true;
 			if (!opts.append) exceptions = [];
-			toast('Failed to load exceptions', 'error');
+			toast(m('exceptions.toast.loadFailed'), 'error');
 		} finally {
 			// Flags and selection belong to the newest request only: a stale
 			// response used to clear the spinner while the live fetch was still
@@ -337,14 +466,13 @@
 	async function loadSummary() {
 		const token = summarySequence.start();
 		try {
-			// `status` is what makes `by_type` describe the rows on screen. The
-			// endpoint has taken it from the day it was written — see its
-			// docstring — and this page, its only caller, never sent it: so the
-			// type chips carried OPEN-only tallies while the operator was looking
-			// at Escalated / Resolved / All (a chip reading `Duplicate Invoice 1`
-			// above zero matching rows), and a type occurring only among resolved
-			// exceptions got no chip at all and so could not be filtered to.
-			const params = new URLSearchParams({ status: untrack(() => statusFilter) });
+			// The SAME filters the table was just loaded with — search included,
+			// via `appliedSearch` — so every chip counts the set on screen. This
+			// page once sent the summary nothing at all, and its type chips
+			// carried OPEN-only tallies while the operator was looking at
+			// Escalated / Resolved / All; with a search box that gap would have
+			// been every chip counting the tenant above a one-row table.
+			const params = filterParams(untrack(() => appliedSearch));
 			const data = await api.get<Summary>(`/api/exceptions/summary?${params}`);
 			// The chip counts drive the filter UI — an older summary landing
 			// last would relabel the chips with pre-resolve tallies.
@@ -365,25 +493,70 @@
 		resolutionText = '';
 	}
 
+	/**
+	 * One whole sentence per outcome, keyed by action. These toasts used to
+	 * conjugate the verb in a template literal — `Exception ${action}d`,
+	 * `${n} ${action}d, ${k} skipped` — which is English morphology no
+	 * catalogue key can carry, and which spelled the dismissal "dismissd".
+	 */
+	const DONE_KEYS: Record<Action, MessageKey> = {
+		resolve: 'exceptions.toast.resolved',
+		escalate: 'exceptions.toast.escalated',
+		dismiss: 'exceptions.toast.dismissed'
+	};
+	const BULK_DONE_KEYS: Record<Action, MessageKey> = {
+		resolve: 'exceptions.toast.bulkResolved',
+		escalate: 'exceptions.toast.bulkEscalated',
+		dismiss: 'exceptions.toast.bulkDismissed'
+	};
+	const BULK_DONE_SKIPPED_KEYS: Record<Action, MessageKey> = {
+		resolve: 'exceptions.toast.bulkResolvedSkipped',
+		escalate: 'exceptions.toast.bulkEscalatedSkipped',
+		dismiss: 'exceptions.toast.bulkDismissedSkipped'
+	};
+
+	/**
+	 * A refused or failed action, in the backend's own words.
+	 *
+	 * `api.ts` already renders every error body through `formatApiDetail` — a
+	 * 422's validation LIST as `field: msg`, a segregation-of-duties 403's
+	 * sentence verbatim — and throws that string as the `ApiError`'s message.
+	 * The helper this replaced read an `e.detail` no `ApiError` carries (dead:
+	 * had one ever been a list it would have printed `[object Object]`) and fell
+	 * back to an English literal. Routing the message through the same
+	 * `formatApiDetail` keeps a blank one on the translated fallback.
+	 */
+	function actionError(err: unknown): string {
+		return formatApiDetail(
+			err instanceof Error ? err.message : undefined,
+			m('exceptions.toast.actionFailed')
+		);
+	}
+
 	async function commitResolve(action: Action) {
 		if (!resolveTarget) return;
 		const note = resolutionText.trim();
 		if (!note && action !== 'dismiss') {
-			toast('Resolution note is required', 'error');
+			toast(m('exceptions.toast.noteRequired'), 'error');
 			return;
 		}
 		saving = true;
 		try {
+			// The note exactly as typed — empty for a dismissal without one. The
+			// page used to invent `${action}d by user` ("dismissd by user") and
+			// store it as though the operator had written it; the decision itself
+			// is already on the append-only `exception.dismissed` row, and the
+			// backend records no note when none was given.
 			await api.post(`/api/exceptions/${resolveTarget.id}/resolve`, {
-				resolution: note || `${action}d by user`,
+				resolution: note,
 				action,
 			});
-			toast(`Exception ${action}d`, 'success');
+			toast(m(DONE_KEYS[action]), 'success');
 			resolveTarget = null;
 			resolutionText = '';
 			await Promise.all([loadExceptions(), loadSummary()]);
 		} catch (err) {
-			toast(extractError(err), 'error');
+			toast(actionError(err), 'error');
 		} finally {
 			saving = false;
 		}
@@ -394,14 +567,15 @@
 		if (ids.length === 0) return;
 		const note = resolutionText.trim();
 		if (!note && action !== 'dismiss') {
-			toast('Resolution note is required', 'error');
+			toast(m('exceptions.toast.noteRequired'), 'error');
 			return;
 		}
 		saving = true;
 		try {
+			// As typed, for the reason `commitResolve` gives.
 			const body = await api.post<{ updated: number; skipped: { id: string; reason: string }[] }>(
 				'/api/exceptions/bulk/resolve',
-				{ ids, action, resolution: note || `bulk ${action}` }
+				{ ids, action, resolution: note }
 			);
 			const skipped = body.skipped.length;
 			// A segregation refusal is a per-row `skipped` reason, exactly like
@@ -413,15 +587,17 @@
 			const refused = body.skipped.filter((row) =>
 				row.reason.startsWith('segregation_')
 			).length;
+			// Two whole sentences at most: the outcome, then — only when rows
+			// were refused — the segregation explanation, which is its own
+			// catalogue sentence rather than a clause spliced into this one.
+			const outcome =
+				skipped === 0
+					? m(BULK_DONE_KEYS[action], { n: body.updated })
+					: m(BULK_DONE_SKIPPED_KEYS[action], { n: body.updated, skipped });
 			toast(
-				[
-					skipped === 0
-						? `${body.updated} ${action}d`
-						: `${body.updated} ${action}d, ${skipped} skipped`,
-					refused > 0 ? m('exceptions.bulk.segregationSkipped', { n: refused }) : ''
-				]
-					.filter(Boolean)
-					.join(' '),
+				refused > 0
+					? `${outcome} ${m('exceptions.bulk.segregationSkipped', { n: refused })}`
+					: outcome,
 				skipped === 0 ? 'success' : 'info'
 			);
 			bulkResolveOpen = false;
@@ -430,15 +606,10 @@
 			selectedAllMatching = false;
 			await Promise.all([loadExceptions(), loadSummary()]);
 		} catch (err) {
-			toast(extractError(err), 'error');
+			toast(actionError(err), 'error');
 		} finally {
 			saving = false;
 		}
-	}
-
-	function extractError(err: unknown): string {
-		const e = err as { detail?: string; message?: string } | null;
-		return e?.detail ?? e?.message ?? 'Action failed';
 	}
 
 	function toggleSelect(id: string) {
@@ -477,25 +648,26 @@
 	async function selectAllMatching() {
 		selectingAllMatching = true;
 		try {
-			const params = new URLSearchParams();
+			// The table's own filters, search and severity included — a selection
+			// wider than the rows on screen is a bulk action on rows nobody saw.
+			const params = filterParams(appliedSearch);
 			// Bulk resolve only ever acts on open/escalated rows — mirrors
 			// `selectableIds`. `statusFilter === 'all'` has no narrower value to
 			// reuse, so it's spelled out explicitly.
 			params.set('status', statusFilter === 'all' ? 'open,escalated' : statusFilter);
-			if (typeFilter) params.set('type', typeFilter);
 			const res = await api.get<MatchingIdsResponse>(`/api/exceptions/ids?${params}`);
 			selectedIds = new Set(res.ids);
 			selectedAllMatching = true;
 			if (res.truncated) {
 				toast(
-					`Selected the first ${res.ids.length} of ${res.total} matching — narrow your filters to select the rest.`,
+					m('exceptions.toast.selectAllTruncated', { shown: res.ids.length, total: res.total }),
 					'error'
 				);
 			} else {
-				toast(`Selected all ${res.ids.length} matching exception(s)`, 'success');
+				toast(m('exceptions.toast.selectedAllMatching', { n: res.ids.length }), 'success');
 			}
 		} catch {
-			toast('Failed to select all matching', 'error');
+			toast(m('exceptions.toast.selectAllFailed'), 'error');
 		} finally {
 			selectingAllMatching = false;
 		}
@@ -561,6 +733,43 @@
 		{ class: 'actions-col' }
 	]);
 
+	/**
+	 * The severity row — worst-first, the order the backend's rank map declares
+	 * and the Sev column sorts by. All three always render, zeros included, the
+	 * way the status row does: a severity chip that vanished at 0 would take the
+	 * pressed state with it and leave the table narrowed by a chip nobody can
+	 * see. A severity the server returns that this build predates still gets a
+	 * chip, with its raw value.
+	 */
+	let severityChips = $derived.by(() => {
+		if (!summary) return [];
+		const counts = summary.by_severity;
+		const known = EXCEPTION_SEVERITIES as readonly string[];
+		const keys = [...known, ...Object.keys(counts).filter((k) => !known.includes(k))];
+		return [
+			{
+				key: 'all',
+				label: m('exceptions.filter.allSeverities'),
+				count: Object.values(counts).reduce((sum, n) => sum + n, 0)
+			},
+			...keys.map((sev) => ({ key: sev, label: severityLabel(sev), count: counts[sev] ?? 0 }))
+		];
+	});
+
+	/**
+	 * The type row: every type the tallies found, plus the ACTIVE type even when
+	 * it counts 0. The tallies are faceted over the search and the other rows, so
+	 * a search can empty `by_type` — and a pressed type chip that dropped out of
+	 * the row would leave the table narrowed by a filter nothing on screen shows
+	 * or can undo (the `chipStatuses` rule on `/invoices`).
+	 */
+	let typeChipEntries = $derived.by((): [string, number][] => {
+		if (!summary) return [];
+		const entries = Object.entries(summary.by_type);
+		if (typeFilter && !(typeFilter in summary.by_type)) entries.push([typeFilter, 0]);
+		return entries;
+	});
+
 	let statusChips = $derived(
 		summary
 			? [
@@ -585,14 +794,14 @@
 	// flag and compliance hold in the tenant; with a type chip active it was
 	// being printed over a set of one type, so narrowing to `Fraud Flag` and
 	// finding none read as an all-clear on the whole queue. Only the
-	// unfiltered Open view has earned that sentence — everything else falls
-	// back to the neutral "No exceptions found."
+	// unfiltered Open view has earned that sentence — a type or severity chip,
+	// or a search term, falls back to the neutral "No exceptions found."
 	let emptyMessage = $derived(
 		loading
 			? m('common.loading')
 			: errored
 				? m('exceptions.empty.errored')
-				: statusFilter === 'open' && !typeFilter
+				: statusFilter === 'open' && !typeFilter && severityFilter === 'all' && !appliedSearch
 					? m('exceptions.empty.open')
 					: m('exceptions.empty.other')
 	);
@@ -601,12 +810,15 @@
 <PageHeader title={m('exceptions.title')}>
 	<Tabs
 		tabs={[
+			// Open + escalated within the current filters and search — the same
+			// faceted tallies as the status chips, so the tab and the chips below
+			// it never disagree about how big the queue on screen is.
 			{ key: 'queue', label: m('exceptions.tab.queue'), count: summary ? summary.open + summary.escalated : undefined },
 			{ key: 'agents', label: m('exceptions.tab.agents') }
 		]}
 		bind:active={view}
 		onchange={() => syncUrl()}
-		ariaLabel="Exceptions views"
+		ariaLabel={m('exceptions.tab.aria')}
 		idPrefix="exc"
 	/>
 
@@ -619,7 +831,7 @@
 	{#if summary}
 		<FilterChips chips={statusChips} bind:active={statusFilter} />
 
-		{#if Object.keys(summary.by_type).length > 0}
+		{#if typeChipEntries.length > 0}
 			<!-- `aria-pressed` mirrors `ui/FilterChips`: the status row announces
 			     which chip is on, and this row — the same control, one line
 			     below — announced nothing, so a screen-reader user could not tell
@@ -634,7 +846,7 @@
 				>
 					{m('exceptions.filter.allTypes')}
 				</button>
-				{#each Object.entries(summary.by_type) as [type, count]}
+				{#each typeChipEntries as [type, count]}
 					<button
 						class="type-chip"
 						class:active={typeFilter === type}
@@ -649,7 +861,17 @@
 				{/each}
 			</nav>
 		{/if}
+
+		<!-- The same `exceptions.severity.*` keys the row's Sev cell reads, so a
+		     chip and the rows it filters cannot name one severity two ways. -->
+		<FilterChips chips={severityChips} bind:active={severityFilter} />
 	{/if}
+
+	<SearchBox
+		bind:value={search}
+		placeholder={m('exceptions.search.placeholder')}
+		ariaLabel={m('exceptions.search.aria')}
+	/>
 
 	<BulkBar
 		count={selectedIds.size}
@@ -689,13 +911,32 @@
 					/>
 				</th>
 				<th scope="col">{m('exceptions.col.type')}</th>
-				<th scope="col">{m('exceptions.col.severity')}</th>
+				<SortableHeader
+					field="severity"
+					label={m('exceptions.col.severity')}
+					active={sortField === 'severity'}
+					order={sortOrder}
+					onsort={handleSort}
+				/>
 				<th scope="col">{m('exceptions.col.invoice')}</th>
 				<th scope="col">{m('exceptions.col.vendor')}</th>
 				<th class="right" scope="col">{m('exceptions.col.amount')}</th>
 				<th scope="col">{m('exceptions.col.assignee')}</th>
-				<th scope="col">{m('exceptions.col.age')}</th>
-				<th scope="col">{m('exceptions.col.due')}</th>
+				<!-- Sorts `created_at`, reported in AGE order — see `handleAgeSort`. -->
+				<SortableHeader
+					field={AGE_FIELD}
+					label={m('exceptions.col.age')}
+					active={sortField === AGE_FIELD}
+					order={ageOrder}
+					onsort={handleAgeSort}
+				/>
+				<SortableHeader
+					field="due_at"
+					label={m('exceptions.col.due')}
+					active={sortField === 'due_at'}
+					order={sortOrder}
+					onsort={handleSort}
+				/>
 				<th scope="col">{m('exceptions.col.status')}</th>
 				<th class="actions-col" scope="col"></th>
 			</tr>
@@ -797,7 +1038,7 @@
 <!-- Single-row resolve modal -->
 <Modal
 	open={resolveTarget !== null}
-	ariaLabel="Resolve exception"
+	ariaLabel={m('exceptions.resolveModal.title')}
 	width="sm"
 	onclose={() => (resolveTarget = null)}
 >
@@ -814,7 +1055,12 @@
 		{#if resolveTarget.description}
 			<p class="modal-description">{resolveTarget.description}</p>
 		{/if}
-		<form onsubmit={(e) => { e.preventDefault(); commitResolve('resolve'); }}>
+		<!-- `data-testid` is the e2e suite's handle on this dialog, so a spec
+		     never has to name it by its accessible name — which is translated. -->
+		<form
+			data-testid="exception-resolve-form"
+			onsubmit={(e) => { e.preventDefault(); commitResolve('resolve'); }}
+		>
 			<label>
 				<span>{m('exceptions.resolveModal.note')}</span>
 				<input
@@ -856,7 +1102,7 @@
 <!-- Bulk-resolve modal -->
 <Modal
 	open={bulkResolveOpen}
-	ariaLabel="Resolve selected exceptions"
+	ariaLabel={m('exceptions.bulkModal.title', { n: selectedIds.size })}
 	width="sm"
 	onclose={() => (bulkResolveOpen = false)}
 >
@@ -864,7 +1110,10 @@
 	<p class="modal-hint">
 		{m('exceptions.bulkModal.hint')}
 	</p>
-	<form onsubmit={(e) => { e.preventDefault(); commitBulkResolve('resolve'); }}>
+	<form
+		data-testid="exception-bulk-resolve-form"
+		onsubmit={(e) => { e.preventDefault(); commitBulkResolve('resolve'); }}
+	>
 		<label>
 			<span>{m('exceptions.resolveModal.note')}</span>
 			<input

@@ -2,18 +2,22 @@
 	import { api } from '$lib/api';
 	import { appendUnique, fetchAllPages, type PagedResponse } from '$lib/utils/pagination';
 	import { createRequestSequencer } from '$lib/utils/requestSequence';
+	import { toggleSort, type SortOrder } from '$lib/utils/sort';
 	import { untrack } from 'svelte';
 	import { page as urlStore } from '$app/stores';
 	import { replaceState } from '$app/navigation';
 	import RowAction from '$lib/components/ui/RowAction.svelte';
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 	import FilterChips from '$lib/components/ui/FilterChips.svelte';
+	import SearchBox from '$lib/components/ui/SearchBox.svelte';
+	import SortableHeader from '$lib/components/ui/SortableHeader.svelte';
 	import DataTable from '$lib/components/ui/DataTable.svelte';
 	import EmptyState from '$lib/components/ui/EmptyState.svelte';
 	import Modal from '$lib/components/ui/Modal.svelte';
 	import Money from '$lib/components/ui/Money.svelte';
 	import VendorPicker from '$lib/components/ui/VendorPicker.svelte';
-	import Badge, { type BadgeTone } from '$lib/components/ui/Badge.svelte';
+	import Badge from '$lib/components/ui/Badge.svelte';
+	import type { BadgeTone } from '$lib/components/ui/badgeTone';
 	import { toast } from '$lib/components/ui/Toast.svelte';
 	import { auth } from '$lib/stores/auth.svelte';
 	import { m } from '$lib/i18n/store.svelte';
@@ -22,11 +26,12 @@
 	import { currencyOptions } from '$lib/utils/money';
 	import { orgCurrency } from '$lib/stores/orgSettings.svelte';
 
-	// Create / apply / void are all `require_roles(ADMIN, AP_MANAGER)` on the
-	// backend, while the LIST is open to all four roles. The page carried no
-	// role check at all: a CFO — who reaches it through nav.ts — completed the
-	// create modal, or armed the two-click Void, and only then got a 403. Read
-	// stays open, which is also what lets the nav row admit a clerk.
+	// Create / edit / apply / void are all `require_roles(ADMIN, AP_MANAGER)` on
+	// the backend, while the LIST (and its chip summary) is open to all four
+	// roles. The page carried no role check at all: a CFO — who reaches it
+	// through nav.ts — completed the create modal, or armed the two-click Void,
+	// and only then got a 403. Read stays open, which is also what lets the nav
+	// row admit a clerk.
 	const canMutate = $derived(auth.isManager);
 
 	/**
@@ -60,28 +65,30 @@
 	/** The statuses `?status=` may carry — anything else falls back to `all`. */
 	const STATUSES = ['open', 'applied', 'void'];
 
-	const STATUS_CHIPS = $derived([
-		{ key: 'all', label: m('common.all') },
-		{ key: 'open', label: m('creditMemos.status.open') },
-		{ key: 'applied', label: m('creditMemos.status.applied') },
-		{ key: 'void', label: m('creditMemos.status.void') }
-	]);
+	/**
+	 * The columns `GET /api/credit-memos` accepts in `?sort=` — its
+	 * `CREDIT_MEMO_SORTABLE_COLUMNS`, verbatim. The backend 422s anything else,
+	 * so a bookmarked `?sort=` naming some other column is dropped here rather
+	 * than turned into a failed load.
+	 */
+	const SORTABLE_FIELDS = ['memo_number', 'amount', 'issued_date'];
 
-	const COLUMNS = $derived([
-		{ label: m('creditMemos.col.memoNumber') },
-		{ label: m('creditMemos.col.vendor') },
-		{ label: m('creditMemos.col.amount'), class: 'right' },
-		{ label: m('creditMemos.col.issued') },
-		{ label: m('creditMemos.col.appliedTo') },
-		// The create form captures a reason and nothing in the product ever
-		// showed it again — the one field that says WHY a supplier owes this
-		// credit. Reuses the form's own label rather than minting a second
-		// catalogue entry for the same word. It sits AFTER the money columns
-		// deliberately: the table scrolls horizontally on a narrow viewport, and
-		// putting free text ahead of the amount pushed the figure off a phone.
-		{ label: m('creditMemos.createModal.reason') },
-		{ label: m('creditMemos.col.status') },
-		{ class: 'actions-col' }
+	/**
+	 * Per-status tallies from `GET /api/credit-memos/counts`, over the WHOLE
+	 * matching set (search applied, status not — status is what is being
+	 * counted). `null` until it lands, and again after a failed fetch: the chips
+	 * then render bare labels rather than a page-local tally presented as the
+	 * whole set's.
+	 */
+	let summary = $state<{ total: number; by_status: Record<string, number> } | null>(null);
+
+	const STATUS_CHIPS = $derived([
+		{ key: 'all', label: m('common.all'), count: summary?.total },
+		...STATUSES.map((s) => ({
+			key: s,
+			label: m(STATUS_LABEL_KEYS[s]),
+			count: summary ? (summary.by_status[s] ?? 0) : undefined
+		}))
 	]);
 
 	interface CreditMemo {
@@ -106,6 +113,7 @@
 		invoice_number: string;
 		vendor: string;
 		vendor_id: string | null;
+		currency: string;
 	}
 
 	let memos = $state<CreditMemo[]>([]);
@@ -127,7 +135,20 @@
 			? ($urlStore.url.searchParams.get('status') as string)
 			: 'all'
 	);
-	let showCreate = $state(false);
+	// `?search=` — a SERVER filter over memo number + vendor name. It used to
+	// not exist at all: a client-side `.filter()` over the one loaded page would
+	// have searched a page rather than the set (frontend/docs/ui-patterns.md
+	// § Search), so the backend grew the leg instead.
+	let search = $state($urlStore.url.searchParams.get('search') ?? '');
+	// The term the newest ISSUED list request carried. Written by `loadMemos`,
+	// read by the debounce effect — see the comment there.
+	let appliedSearch = $state(($urlStore.url.searchParams.get('search') ?? '').trim());
+	// `?sort=&order=`; `null` = the backend's own default (newest first).
+	const urlSort = $urlStore.url.searchParams.get('sort');
+	let sortField = $state<string | null>(urlSort && SORTABLE_FIELDS.includes(urlSort) ? urlSort : null);
+	let sortOrder = $state<SortOrder>(
+		$urlStore.url.searchParams.get('order') === 'desc' ? 'desc' : 'asc'
+	);
 	let applyTargetId = $state<string | null>(null);
 
 	const PAGE_SIZE = 20;
@@ -135,33 +156,59 @@
 	let page = $state(1);
 	let loadingMore = $state(false);
 
-	let newMemoNumber = $state('');
+	/**
+	 * One dialog, two jobs: `create` a memo, or `edit` an open one that has
+	 * never been applied. The fields are identical — the form is the same
+	 * record either way — so it is one form with a mode rather than two copies
+	 * of the same markup drifting apart. `create` alone offers the invoice
+	 * link, because linking a memo IS applying it, which an edit never does
+	 * (`PATCH` refuses `invoice_id`; Apply is its own dialog).
+	 */
+	let formMode = $state<'create' | 'edit' | null>(null);
+	let editTarget = $state<CreditMemo | null>(null);
+	let formMemoNumber = $state('');
 	// Seeded from the org's reporting currency once it loads, and only while
 	// the user hasn't chosen one — otherwise a late `ensureLoaded()` would
-	// overwrite a deliberate pick mid-form.
-	let newCurrency = $state('');
+	// overwrite a deliberate pick mid-form. An edit marks it touched on open,
+	// so the memo's own currency is never replaced by the org's.
+	let formCurrency = $state('');
 	let currencyTouched = $state(false);
-	let newVendorId = $state('');
-	let newAmount = $state('');
-	let newReason = $state('');
+	let formVendorId = $state('');
+	// `bind:value` on a number input writes a number; an edit seeds it from the
+	// row. Either way it is serialised as a decimal STRING on the wire (money is
+	// exact — the backend parses it straight into a `Decimal`).
+	let formAmount = $state<number | string>('');
+	let formReason = $state('');
+	let formInvoiceId = $state('');
 	let saving = $state(false);
 
 	let applyInvoiceId = $state('');
 	let applying = $state(false);
 
-	// Sequences every `loadMemos` call — mount, status chip, load-more; one
-	// counter, latest-issued wins — so a page-1 replace and a page-2 append
-	// can't land out of order. Load more, then switch the chip: the replace
-	// landed first and the append then pushed the OLD filter's page-2 rows onto
-	// the new list and overwrote `total`/`page` with them. Create / apply / void
-	// all re-fetch through this loader rather than editing a row in place, so no
-	// `supersedeInFlight()` call is needed. See `frontend/CLAUDE.md`
-	// § Sequencing list fetches.
+	// Sequences every `loadMemos` call — mount, status chip, search, sort,
+	// load-more; one counter, latest-issued wins — so a page-1 replace and a
+	// page-2 append can't land out of order. Load more, then switch the chip:
+	// the replace landed first and the append then pushed the OLD filter's
+	// page-2 rows onto the new list and overwrote `total`/`page` with them.
+	// Create / edit / apply / void all re-fetch through this loader rather than
+	// editing a row in place, so no `supersedeInFlight()` call is needed. See
+	// `frontend/CLAUDE.md` § Sequencing list fetches.
 	const fetchSequence = createRequestSequencer();
+	// The chip summary fires alongside every page-1 load, so it needs its own
+	// counter: a slow summary for an older search term must not land over a
+	// newer one and leave the chips describing a set the table isn't showing.
+	const summarySequence = createRequestSequencer();
 
 	// The shortlist always contains the org's own reporting currency, so the
 	// picker can never be unable to express the currency the tenant reports in.
-	const CURRENCY_OPTIONS = $derived(currencyOptions(orgCurrency.currency));
+	// An edit adds the memo's own currency, so a memo keyed in something off the
+	// shortlist still shows what it holds rather than silently offering a
+	// different value.
+	const CURRENCY_OPTIONS = $derived.by(() => {
+		const options = currencyOptions(orgCurrency.currency);
+		const own = editTarget?.currency;
+		return own && !options.includes(own) ? [own, ...options] : options;
+	});
 
 	$effect(() => {
 		orgCurrency.ensureLoaded().catch(() => {
@@ -175,18 +222,18 @@
 	$effect(() => {
 		const ccy = orgCurrency.currency;
 		if (untrack(() => currencyTouched)) return;
-		newCurrency = ccy;
+		formCurrency = ccy;
 	});
 
-	// The mount effect loads all three lists ONCE. It must not depend on
+	// The mount effect loads the lists ONCE. It must not depend on
 	// `statusFilter`: `loadMemos` reads it synchronously (before its first
 	// await), and Svelte tracks reads transitively through called functions, so
 	// a plain read there made this effect a second status-filter subscriber —
 	// every chip click fired it AND the effect below, two unsequenced page-1
-	// requests racing with whichever landed last winning (and the vendor /
-	// invoice selects needlessly refetched). `untrack` inside `loadMemos` still
-	// reads the CURRENT filter, it just stops the read registering as the
-	// caller's dependency.
+	// requests racing with whichever landed last winning (and the invoice
+	// select needlessly refetched). `untrack` inside `loadMemos` still reads the
+	// CURRENT filter, it just stops the read registering as the caller's
+	// dependency.
 	$effect(() => {
 		loadAll();
 	});
@@ -206,17 +253,58 @@
 		loadMemos();
 	});
 
+	// A keystroke costs a request, so the term is debounced 300ms (the
+	// /invoices, /payments, /vendors convention) and the fetch sequencer above
+	// discards a slow response for an earlier term. `appliedSearch` is the term
+	// the newest ISSUED load used: re-running with a term that already matches
+	// it schedules nothing, which is what keeps this effect's first run (mount,
+	// including a bookmarked `?search=`) from firing a duplicate load 300ms
+	// behind the mount load — and cancels a pending debounce when a chip click
+	// has already loaded with the typed term.
+	let searchTimer: ReturnType<typeof setTimeout>;
+	$effect(() => {
+		const next = search.trim();
+		clearTimeout(searchTimer);
+		if (next === appliedSearch) return;
+		searchTimer = setTimeout(() => {
+			syncUrl();
+			loadMemos();
+		}, 300);
+		// Cancel a pending debounce on teardown: without it the timer fires after
+		// the page is gone, rewriting the URL of a route the user already left.
+		return () => clearTimeout(searchTimer);
+	});
+
 	// A WRITER of URL state, never a dependency source — every read inside is
-	// untracked so calling it from the status effect can't make that effect
-	// depend on `$urlStore` and re-fire itself (the pattern `/vendors` and
-	// `/expenses` settled; see ui-patterns.md § Sequencing list fetches).
+	// untracked so calling it from the status/search paths can't make them
+	// depend on `$urlStore` (or on `search`) and re-fire themselves (the
+	// pattern `/vendors` and `/expenses` settled; see ui-patterns.md
+	// § Sequencing list fetches).
 	function syncUrl() {
 		untrack(() => {
 			const url = new URL($urlStore.url);
 			if (statusFilter !== 'all') url.searchParams.set('status', statusFilter);
 			else url.searchParams.delete('status');
+			const term = search.trim();
+			if (term) url.searchParams.set('search', term);
+			else url.searchParams.delete('search');
+			if (sortField) {
+				url.searchParams.set('sort', sortField);
+				url.searchParams.set('order', sortOrder);
+			} else {
+				url.searchParams.delete('sort');
+				url.searchParams.delete('order');
+			}
 			replaceState(`${url.pathname}${url.search}`, {});
 		});
+	}
+
+	function handleSort(field: string) {
+		const next = toggleSort({ field: sortField, order: sortOrder }, field);
+		sortField = next.field;
+		sortOrder = next.order;
+		syncUrl();
+		loadMemos();
 	}
 
 	async function loadAll() {
@@ -234,10 +322,26 @@
 		try {
 			const nextPage = opts.nextPage ?? 1;
 			const params = new URLSearchParams();
+			// Every read here is untracked: this runs synchronously inside the
+			// mount / status / search effects, and a tracked read would subscribe
+			// THAT effect to it — the #168 double-fetch (ui-patterns.md § Search).
 			const status = untrack(() => statusFilter);
 			if (status !== 'all') params.set('status', status);
+			// Read at issue time, and recorded, so the debounce can tell a term
+			// already on screen from one that still needs a fetch.
+			const term = untrack(() => search).trim();
+			if (term) params.set('search', term);
+			appliedSearch = term;
+			const currentSort = untrack(() => sortField);
+			if (currentSort) {
+				params.set('sort', currentSort);
+				params.set('order', untrack(() => sortOrder));
+			}
 			params.set('page', String(nextPage));
 			params.set('page_size', String(PAGE_SIZE));
+			// The chips describe the same population as the table, so a fresh
+			// (non-append) load refreshes them with the same term.
+			if (!opts.append) void loadSummary(term);
 			const data = await api.get<{ items: CreditMemo[]; total: number }>(
 				`/api/credit-memos?${params}`
 			);
@@ -257,6 +361,22 @@
 				loading = false;
 				loadingMore = false;
 			}
+		}
+	}
+
+	async function loadSummary(term: string) {
+		const token = summarySequence.start();
+		try {
+			const qs = term ? `?${new URLSearchParams({ search: term })}` : '';
+			const data = await api.get<{ total: number; by_status: Record<string, number> }>(
+				`/api/credit-memos/counts${qs}`
+			);
+			if (!summarySequence.canCommit(token)) return;
+			summary = data;
+		} catch {
+			// Non-fatal: the chips fall back to bare labels, never to a count
+			// that describes only the loaded page.
+			if (summarySequence.isCurrentRequest(token)) summary = null;
 		}
 	}
 
@@ -286,43 +406,120 @@
 			);
 			invoicesErrored = false;
 		} catch {
-			// Not fatal to the list, but the Apply dialog must not present an
-			// empty select as "this vendor has no creditable invoice".
+			// Not fatal to the list, but neither invoice select may present an
+			// empty list as "this vendor has no creditable invoice".
 			invoicesErrored = true;
 		}
 	}
 
+	/**
+	 * Only a memo that has never moved money is editable — the same predicate
+	 * the backend's `_assert_editable` enforces, so the control is never offered
+	 * for a row whose PATCH can only 409.
+	 */
+	function isEditable(memo: CreditMemo): boolean {
+		return memo.status === 'open' && !memo.invoice_id && !memo.applied_at;
+	}
+
+	function openCreate() {
+		editTarget = null;
+		formMemoNumber = '';
+		formVendorId = '';
+		formAmount = '';
+		formReason = '';
+		formInvoiceId = '';
+		// Back to the org default for each new memo — a one-off foreign-currency
+		// credit shouldn't become sticky for every memo after it.
+		currencyTouched = false;
+		formCurrency = orgCurrency.currency;
+		formMode = 'create';
+	}
+
+	function openEdit(memo: CreditMemo) {
+		editTarget = memo;
+		formMemoNumber = memo.memo_number;
+		formVendorId = memo.vendor_id;
+		formAmount = String(memo.amount);
+		formReason = memo.reason ?? '';
+		formInvoiceId = '';
+		currencyTouched = true;
+		formCurrency = memo.currency;
+		formMode = 'edit';
+	}
+
+	function closeForm() {
+		formMode = null;
+		editTarget = null;
+	}
+
+	// The create dialog's invoice link. Only the chosen vendor's invoices are
+	// valid, for the same reason as in the Apply dialog below: the backend
+	// refuses any other (and any invoice with no resolved vendor) with a 409.
+	let linkableInvoices = $derived(
+		formVendorId ? invoices.filter((i) => i.vendor_id === formVendorId) : []
+	);
+	let linkedInvoice = $derived(invoices.find((i) => i.id === formInvoiceId) ?? null);
+
 	async function handleCreate() {
-		if (!newMemoNumber.trim() || !newVendorId || !newAmount) return;
+		if (!formMemoNumber.trim() || !formVendorId || formAmount === '' || formAmount == null) return;
 		saving = true;
 		try {
 			await api.post('/api/credit-memos', {
-				memo_number: newMemoNumber.trim(),
-				vendor_id: newVendorId,
-				amount: parseFloat(newAmount),
-				// Sent explicitly. The backend resolves an omitted currency from the
-				// named invoice, then the org's reporting currency — but this form
-				// creates an UNLINKED memo (there is no invoice field; linking
-				// happens later in the Apply dialog), so there is nothing to inherit
-				// from and the org default would be the only answer. A mixed-currency
-				// tenant issuing a EUR credit against a USD-reporting org needs to
-				// say so here, and there is no PATCH on credit memos to fix it after.
-				currency: newCurrency || orgCurrency.currency,
-				reason: newReason.trim() || null
+				memo_number: formMemoNumber.trim(),
+				vendor_id: formVendorId,
+				amount: String(formAmount),
+				// A linked memo INHERITS the invoice's currency on the backend
+				// (the currency select is locked to it below), so none is asserted.
+				// An unlinked one says what it is: the org default would be the
+				// only answer otherwise, and a mixed-currency tenant issuing a EUR
+				// credit against a USD-reporting org needs to say so here.
+				...(formInvoiceId
+					? { invoice_id: formInvoiceId }
+					: { currency: formCurrency || orgCurrency.currency }),
+				reason: formReason.trim() || null
 			});
 			toast(m('creditMemos.toast.created'), 'success');
-			showCreate = false;
-			newMemoNumber = '';
-			newVendorId = '';
-			newAmount = '';
-			newReason = '';
-			// Back to the org default for the next memo — a one-off foreign-currency
-			// credit shouldn't become sticky for every memo after it.
-			currencyTouched = false;
-			newCurrency = orgCurrency.currency;
+			closeForm();
 			await loadMemos();
 		} catch (err) {
 			toast(err instanceof Error ? err.message : m('creditMemos.toast.createFailed'), 'error');
+		} finally {
+			saving = false;
+		}
+	}
+
+	async function handleEdit() {
+		const target = editTarget;
+		if (!target || !formMemoNumber.trim() || !formVendorId || formAmount === '' || formAmount == null)
+			return;
+		// Send only what changed: the backend diffs field by field for the audit
+		// row, and a field this dialog did not touch must not be re-asserted over
+		// a concurrent edit someone else just saved.
+		const changes: Record<string, string | null> = {};
+		const memoNumber = formMemoNumber.trim();
+		if (memoNumber !== target.memo_number) changes.memo_number = memoNumber;
+		if (formVendorId !== target.vendor_id) changes.vendor_id = formVendorId;
+		// Compared as numbers only to decide WHETHER to send; what is sent is
+		// the decimal string the field holds.
+		if (Number(formAmount) !== Number(target.amount)) changes.amount = String(formAmount);
+		if (formCurrency !== target.currency) changes.currency = formCurrency;
+		const reason = formReason.trim() || null;
+		if (reason !== (target.reason ?? null)) changes.reason = reason;
+		if (Object.keys(changes).length === 0) {
+			closeForm();
+			return;
+		}
+		saving = true;
+		try {
+			await api.patch(`/api/credit-memos/${target.id}`, changes);
+			toast(m('creditMemos.toast.updated'), 'success');
+			closeForm();
+			await loadMemos();
+		} catch (err) {
+			// A 409 here means the memo was applied or voided since the row was
+			// drawn; the backend says which, and the reload shows it.
+			toast(err instanceof Error ? err.message : m('creditMemos.toast.updateFailed'), 'error');
+			await loadMemos();
 		} finally {
 			saving = false;
 		}
@@ -385,6 +582,10 @@
 		return invoices.filter((i) => i.vendor_id === memo.vendor_id);
 	});
 
+	// A search or a status chip narrows the set; either one makes "no rows" a
+	// statement about the filter, not about the tenant.
+	let filtered = $derived(statusFilter !== 'all' || appliedSearch !== '');
+
 	/**
 	 * Four distinct answers, never one message doing duty for all of them:
 	 * still loading, the fetch failed, a filter matched nothing, or this tenant
@@ -397,7 +598,7 @@
 			? m('common.loading')
 			: errored
 				? m('common.loadFailed')
-				: statusFilter !== 'all'
+				: filtered
 					? m('creditMemos.empty.filtered')
 					: m('creditMemos.empty')
 	);
@@ -405,9 +606,9 @@
 	// Only the true zero-data case gets the illustrated onboarding block: a
 	// filter that matched nothing keeps the plain in-table line, since "create
 	// your first credit memo" is a non-sequitur when the tenant already has
-	// some and the chip is simply narrow.
+	// some and the filter is simply narrow.
 	let showOnboarding = $derived(
-		!loading && !errored && total === 0 && memos.length === 0 && statusFilter === 'all'
+		!loading && !errored && total === 0 && memos.length === 0 && !filtered
 	);
 </script>
 
@@ -423,11 +624,18 @@
 <PageHeader title={m('creditMemos.title')}>
 	{#snippet actions()}
 		{#if canMutate}
-			<button class="btn-primary" onclick={() => (showCreate = true)}>{m('creditMemos.new')}</button>
+			<button class="btn-primary" onclick={openCreate}>{m('creditMemos.new')}</button>
 		{/if}
 	{/snippet}
 
-	<FilterChips chips={STATUS_CHIPS} bind:active={statusFilter} />
+	<div class="filter-row">
+		<SearchBox
+			bind:value={search}
+			placeholder={m('creditMemos.search.placeholder')}
+			ariaLabel={m('creditMemos.search.aria')}
+		/>
+		<FilterChips chips={STATUS_CHIPS} bind:active={statusFilter} />
+	</div>
 
 	{#if showOnboarding}
 		<EmptyState
@@ -436,10 +644,48 @@
 			heading={m('creditMemos.onboarding.heading')}
 			description={m('creditMemos.onboarding.description')}
 			actionLabel={canMutate ? m('creditMemos.new') : undefined}
-			onaction={canMutate ? () => (showCreate = true) : undefined}
+			onaction={canMutate ? openCreate : undefined}
 		/>
 	{:else}
-		<DataTable columns={COLUMNS} isEmpty={memos.length === 0} empty={emptyMessage}>
+		<DataTable isEmpty={memos.length === 0} empty={emptyMessage} colspan={8}>
+			{#snippet header()}
+				<tr>
+					<SortableHeader
+						field="memo_number"
+						label={m('creditMemos.col.memoNumber')}
+						active={sortField === 'memo_number'}
+						order={sortOrder}
+						onsort={handleSort}
+					/>
+					<th scope="col">{m('creditMemos.col.vendor')}</th>
+					<SortableHeader
+						field="amount"
+						label={m('creditMemos.col.amount')}
+						class="right"
+						active={sortField === 'amount'}
+						order={sortOrder}
+						onsort={handleSort}
+					/>
+					<SortableHeader
+						field="issued_date"
+						label={m('creditMemos.col.issued')}
+						active={sortField === 'issued_date'}
+						order={sortOrder}
+						onsort={handleSort}
+					/>
+					<th scope="col">{m('creditMemos.col.appliedTo')}</th>
+					<!-- The create form captures a reason and nothing in the product
+					     ever showed it again — the one field that says WHY a supplier
+					     owes this credit. Reuses the form's own label rather than
+					     minting a second catalogue entry for the same word. It sits
+					     AFTER the money columns deliberately: the table scrolls
+					     horizontally on a narrow viewport, and putting free text ahead
+					     of the amount pushed the figure off a phone. -->
+					<th scope="col">{m('creditMemos.createModal.reason')}</th>
+					<th scope="col">{m('creditMemos.col.status')}</th>
+					<th class="actions-col"></th>
+				</tr>
+			{/snippet}
 			{#snippet body()}
 				{#each memos as memo (memo.id)}
 					<tr
@@ -468,6 +714,9 @@
 						<td class="actions">
 							{#if canMutate && memo.status === 'open'}
 								<RowAction onclick={() => { applyTargetId = memo.id; applyInvoiceId = ''; }}>{m('creditMemos.row.apply')}</RowAction>
+								{#if isEditable(memo)}
+									<RowAction onclick={() => openEdit(memo)}>{m('creditMemos.row.edit')}</RowAction>
+								{/if}
 								<RowAction
 									variant="danger"
 									armed={confirmVoidId === memo.id}
@@ -498,43 +747,84 @@
 </PageHeader>
 
 <Modal
-	open={showCreate}
-	ariaLabel={m('creditMemos.createModal.aria')}
-	title={m('creditMemos.createModal.title')}
+	open={formMode !== null}
+	ariaLabel={formMode === 'edit' ? m('creditMemos.editModal.aria') : m('creditMemos.createModal.aria')}
+	title={formMode === 'edit' ? m('creditMemos.editModal.title') : m('creditMemos.createModal.title')}
 	width="sm"
-	onclose={() => (showCreate = false)}
+	onclose={closeForm}
 >
-	<form onsubmit={(e) => { e.preventDefault(); handleCreate(); }}>
+	{#if formMode === 'edit' && editTarget}
+		<p class="modal-hint">{m('creditMemos.editModal.hint')}</p>
+	{/if}
+	<form
+		onsubmit={(e) => {
+			e.preventDefault();
+			if (formMode === 'edit') handleEdit();
+			else handleCreate();
+		}}
+	>
 		<label>
 			<span>{m('creditMemos.createModal.memoNumber')} <em class="required">*</em></span>
-			<input type="text" bind:value={newMemoNumber} required />
+			<input type="text" bind:value={formMemoNumber} required />
 		</label>
 		<VendorPicker
-			bind:value={newVendorId}
+			bind:value={formVendorId}
 			label={m('creditMemos.createModal.vendor')}
 			placeholder={m('creditMemos.createModal.selectVendor')}
+			selectedLabel={formMode === 'edit' ? (editTarget?.vendor_name ?? null) : null}
 			required
 			disabled={!canMutate}
+			onselect={() => (formInvoiceId = '')}
 		/>
 		<label>
 			<span>{m('creditMemos.createModal.amount')} <em class="required">*</em></span>
-			<input type="number" min="0.01" step="0.01" bind:value={newAmount} required />
+			<input type="number" min="0.01" step="0.01" bind:value={formAmount} required />
 		</label>
+		{#if formMode === 'create'}
+			<label>
+				<span>{m('creditMemos.createModal.invoice')}</span>
+				<select bind:value={formInvoiceId} disabled={!formVendorId} aria-describedby="cm-invoice-hint">
+					<option value="">{m('creditMemos.createModal.noInvoice')}</option>
+					{#each linkableInvoices as inv (inv.id)}
+						<option value={inv.id}>{inv.invoice_number} — {inv.vendor}</option>
+					{/each}
+				</select>
+				<!-- `aria-describedby`, not a bare child of the label — see the
+				     currency hint below for why. -->
+				<small id="cm-invoice-hint" class="field-hint" aria-hidden="true">
+					{#if !formVendorId}
+						{m('creditMemos.createModal.invoiceNeedsVendor')}
+					{:else if invoicesErrored}
+						{m('common.loadFailed')}
+					{:else}
+						{m('creditMemos.createModal.invoiceHint')}
+					{/if}
+				</small>
+			</label>
+		{/if}
 		<label>
 			<span>{m('creditMemos.createModal.currency')} <em class="required">*</em></span>
-			<select
-				value={newCurrency}
-				onchange={(e) => {
-					currencyTouched = true;
-					newCurrency = (e.currentTarget as HTMLSelectElement).value;
-				}}
-				required
-				aria-describedby="cm-currency-hint"
-			>
-				{#each CURRENCY_OPTIONS as ccy (ccy)}
-					<option value={ccy}>{ccy}</option>
-				{/each}
-			</select>
+			{#if linkedInvoice && formMode === 'create'}
+				<!-- A linked memo takes the invoice's currency; asserting any other
+				     would only be refused (409), so the choice is shown, not offered. -->
+				<select disabled aria-describedby="cm-currency-hint">
+					<option>{linkedInvoice.currency.toUpperCase()}</option>
+				</select>
+			{:else}
+				<select
+					value={formCurrency}
+					onchange={(e) => {
+						currencyTouched = true;
+						formCurrency = (e.currentTarget as HTMLSelectElement).value;
+					}}
+					required
+					aria-describedby="cm-currency-hint"
+				>
+					{#each CURRENCY_OPTIONS as ccy (ccy)}
+						<option value={ccy}>{ccy}</option>
+					{/each}
+				</select>
+			{/if}
 			<!-- `aria-describedby`, not a bare child of the `<label>`: a hint
 			     inside the label is folded into the control's accessible NAME, so
 			     a screen reader announces the whole sentence every time the field
@@ -542,16 +832,24 @@
 			     removes it from the NAME computation; `aria-describedby` still
 			     resolves its text, so nothing is lost to a screen reader. -->
 			<small id="cm-currency-hint" class="field-hint" aria-hidden="true">
-				{m('creditMemos.createModal.currencyHint')}
+				{linkedInvoice && formMode === 'create'
+					? m('creditMemos.createModal.currencyFromInvoice')
+					: m('creditMemos.createModal.currencyHint')}
 			</small>
 		</label>
 		<label>
 			<span>{m('creditMemos.createModal.reason')}</span>
-			<textarea bind:value={newReason} rows="2" placeholder={m('creditMemos.createModal.reasonPlaceholder')}></textarea>
+			<textarea bind:value={formReason} rows="2" placeholder={m('creditMemos.createModal.reasonPlaceholder')}></textarea>
 		</label>
 		<div class="modal-footer">
-			<button type="button" class="btn-cancel" onclick={() => (showCreate = false)}>{m('common.cancel')}</button>
-			<button type="submit" class="btn-primary" disabled={saving}>{saving ? m('common.saving') : m('creditMemos.createModal.create')}</button>
+			<button type="button" class="btn-cancel" onclick={closeForm}>{m('common.cancel')}</button>
+			<button type="submit" class="btn-primary" disabled={saving}>
+				{saving
+					? m('common.saving')
+					: formMode === 'edit'
+						? m('common.save')
+						: m('creditMemos.createModal.create')}
+			</button>
 		</div>
 	</form>
 </Modal>
@@ -611,9 +909,10 @@
 	   colour of their own. */
 	/* Explains an empty apply-target list — the memo's vendor has no invoice
 	   whose vendor link is resolved and matching, so there is nothing to credit. */
-	/* Sub-label under the currency select. Muted on `--surface` clears 4.5:1;
-	   do NOT add `opacity` here — the token has already done that job and a
-	   fade only spends contrast (see frontend/CLAUDE.md § Colour tokens). */
+	/* Sub-label under the currency / invoice selects. Muted on `--surface`
+	   clears 4.5:1; do NOT add `opacity` here — the token has already done that
+	   job and a fade only spends contrast (see frontend/CLAUDE.md § Colour
+	   tokens). */
 	.field-hint {
 		display: block;
 		margin-top: 4px;

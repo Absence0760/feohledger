@@ -233,6 +233,7 @@ export const messages = {
 	'common.search': '検索',
 	'common.clear': 'クリア',
 	'common.apply': '適用',
+	'common.tableRegion': 'データ表',
 
 	// Bulk selection, shared by every list that offers it — see en.ts.
 
@@ -920,11 +921,15 @@ export const messages = {
 	'exceptions.title': '例外',
 	'exceptions.tab.queue': 'キュー',
 	'exceptions.tab.agents': 'AIエージェント',
+	'exceptions.tab.aria': '例外ビュー',
 	'exceptions.filter.open': 'オープン',
 	'exceptions.filter.escalated': 'エスカレーション済み',
 	'exceptions.filter.resolved': '解決済み',
 	'exceptions.filter.dismissed': '却下',
 	'exceptions.filter.allTypes': 'すべてのタイプ',
+	'exceptions.filter.allSeverities': 'すべての重大度',
+	'exceptions.search.placeholder': '請求書番号または取引先を検索...',
+	'exceptions.search.aria': '請求書番号または取引先で例外を検索',
 	'exceptions.col.type': 'タイプ',
 	'exceptions.col.severity': '重大度',
 
@@ -959,6 +964,25 @@ export const messages = {
 	'exceptions.bulkModal.hint': '選択したすべての行に同じ解決メモが適用されます。すでに最終状態にある行はサーバー側でスキップされます。あなたが関与者として記録されているフラグの行も同様にスキップされるため、それらはエスカレーションしてください。',
 	'exceptions.bulk.segregationSkipped': '{n, plural, other {# 件の行は未処理のままです: 職務分掌 — あなたはその支払い、またはそのフラグの起票に関与したと記録されています。エスカレーションするか、別のユーザーに判断を依頼してください。}}',
 	'exceptions.bulkModal.notePlaceholder': '選択したすべての行に適用',
+	'exceptions.toast.loadFailed': '例外を読み込めませんでした',
+	'exceptions.toast.noteRequired': '解決メモは必須です',
+	'exceptions.toast.actionFailed': '操作に失敗しました',
+	'exceptions.toast.resolved': '例外を解決しました',
+	'exceptions.toast.escalated': '例外をエスカレーションしました',
+	'exceptions.toast.dismissed': '例外を却下しました',
+	'exceptions.toast.bulkResolved': '{n, plural, other {# 件の例外を解決しました}}',
+	'exceptions.toast.bulkEscalated': '{n, plural, other {# 件の例外をエスカレーションしました}}',
+	'exceptions.toast.bulkDismissed': '{n, plural, other {# 件の例外を却下しました}}',
+	'exceptions.toast.bulkResolvedSkipped':
+		'{n, plural, other {# 件の例外を解決し}}、{skipped, plural, other {# 件をスキップしました}}。',
+	'exceptions.toast.bulkEscalatedSkipped':
+		'{n, plural, other {# 件の例外をエスカレーションし}}、{skipped, plural, other {# 件をスキップしました}}。',
+	'exceptions.toast.bulkDismissedSkipped':
+		'{n, plural, other {# 件の例外を却下し}}、{skipped, plural, other {# 件をスキップしました}}。',
+	'exceptions.toast.selectedAllMatching': '{n, plural, other {一致する例外 # 件すべてを選択しました}}',
+	'exceptions.toast.selectAllTruncated':
+		'一致する {total} 件のうち最初の {shown} 件を選択しました — 残りを選択するにはフィルターを絞り込んでください。',
+	'exceptions.toast.selectAllFailed': '一致するものすべての選択に失敗しました',
 
 	'exceptions.type.duplicate': '請求書の重複',
 	'exceptions.type.poMismatch': '発注との不一致',
@@ -2553,6 +2577,22 @@ export const messages = {
 	'glAccounts.createModal.scopeEntity': 'この勘定科目は {entity} のみに属します。共通の勘定科目を作成するには「すべての事業体」に切り替えてください。',
 	'glAccounts.createModal.toast.created': 'GL勘定科目 {code} を作成しました',
 	'glAccounts.createModal.toast.createFailed': '勘定科目を作成できませんでした',
+	'glAccounts.row.edit': '編集',
+	'glAccounts.row.editAria': 'GL勘定科目 {code} を編集',
+	'glAccounts.row.retire': '廃止',
+	'glAccounts.row.retireAria': 'GL勘定科目 {code} を廃止',
+	'glAccounts.row.confirm': '確認',
+	'glAccounts.row.reactivate': '再有効化',
+	'glAccounts.row.reactivateAria': 'GL勘定科目 {code} を再有効化',
+	'glAccounts.row.otherChart': '「すべての事業体」で編集',
+	'glAccounts.row.toast.retired': '{code} を廃止しました。選択肢には表示されなくなりますが、すでにこの科目で計上された請求書はコードを保持します。',
+	'glAccounts.row.toast.reactivated': '{code} を再有効化しました',
+	'glAccounts.row.toast.failed': '勘定科目を更新できませんでした',
+	'glAccounts.editModal.aria': 'GL勘定科目を編集',
+	'glAccounts.editModal.title': 'GL勘定科目を編集',
+	'glAccounts.editModal.save': '変更を保存',
+	'glAccounts.editModal.codeFixed': 'コードは変更できません。請求書はコードをテキストとして記録するため、変更するとすでに計上された明細がすべて参照先を失います。勘定科目を置き換えるには、新しい科目を作成してからこの科目を廃止してください。',
+	'glAccounts.editModal.toast.saved': 'GL勘定科目 {code} を更新しました',
 
 	// Purchase Orders (routes/purchase-orders/+page.svelte)
 	'purchaseOrders.title': '発注書',
@@ -2884,7 +2924,11 @@ export const messages = {
 	'byEntity.loading': '読み込み中…',
 	'byEntity.loadFailed': 'エンティティ別内訳の読み込みに失敗しました',
 	'byEntity.unconverted':
-		'統合された未払い合計から除外: {currency} への為替レートが未確定の未決済請求書が{n, plural, other {# 件}}あります。',
+		'未払いには、{currency} への為替レートが未確定の未決済請求書{n, plural, other {# 件}}が額面のまま含まれています。合計には複数の通貨が混在しています。',
+	'byEntity.unconvertedSpend':
+		'支出には、{currency} への為替レートが未確定の請求書{n, plural, other {# 件}}が額面のまま含まれています。合計には複数の通貨が混在しています。',
+	'byEntity.openPoNoCurrency':
+		'発注書にはまだ通貨が記録されていないため、未処理の発注は通貨なしで表示されます。',
 
 	// 定期レポート (components/analytics/ScheduledReportsPanel.svelte)
 	'scheduledReports.heading': '定期レポート',
@@ -3375,6 +3419,9 @@ export const messages = {
 	'auth.signup.successSpamLink': 'もう一度お試しください',
 	'auth.signup.heading': 'ワークスペースを作成',
 	'auth.signup.subtitle': '1分以内に専用のAPワークスペースを手に入れましょう。',
+	'auth.signup.closedHeading': '新規登録は受け付けていません',
+	'auth.signup.closedBody':
+		'このデプロイでは、新しいワークスペースは招待制でのみ作成されます。組織ですでに FeohLedger をご利用の場合は、ワークスペースのアドレスからサインインしてください。',
 	'auth.signup.failed': 'サインアップに失敗しました。',
 	'auth.signup.captchaRequired': 'キャプチャを完了してください。',
 	'auth.signup.companyName': '会社名',
@@ -4451,15 +4498,23 @@ export const messages = {
 	'creditMemos.createModal.aria': '新しいクレジットメモ',
 	'creditMemos.createModal.currency':
 		'通貨',
+	'creditMemos.createModal.currencyFromInvoice': '適用先の請求書の通貨が使用されます。',
 	'creditMemos.createModal.currencyHint':
-		'クレジットメモは同じ通貨の請求書にのみ適用できます。作成後に通貨を変更する方法はありません。',
+		'クレジットメモは同じ通貨の請求書にのみ適用できます。適用されるまでは修正できます。',
 	'creditMemos.createModal.create': '作成',
+	'creditMemos.createModal.invoice': '請求書に適用',
+	'creditMemos.createModal.invoiceHint': '請求書を選択すると、クレジットメモの作成と同時にその請求書に適用されます。後で適用する場合は空欄のままにしてください。',
+	'creditMemos.createModal.invoiceNeedsVendor': 'ベンダーを選択すると、その請求書が表示されます。',
 	'creditMemos.createModal.memoNumber': 'メモ番号',
+	'creditMemos.createModal.noInvoice': 'まだ適用しない',
 	'creditMemos.createModal.reason': '理由',
 	'creditMemos.createModal.reasonPlaceholder': '例：欠陥品の返品',
 	'creditMemos.createModal.selectVendor': 'ベンダーを選択…',
 	'creditMemos.createModal.title': '新しいクレジットメモ',
 	'creditMemos.createModal.vendor': 'ベンダー',
+	'creditMemos.editModal.aria': 'クレジットメモを編集',
+	'creditMemos.editModal.hint': 'クレジットメモは適用されるまで修正できます。すべての変更は監査証跡に記録されます。',
+	'creditMemos.editModal.title': 'クレジットメモを編集',
 	'creditMemos.empty': 'クレジットメモはありません。',
 	'creditMemos.empty.filtered': 'このフィルターに一致するクレジットメモはありません。',
 	'creditMemos.loadMore': 'さらに読み込む（{total} 件中 {shown} 件）',
@@ -4470,6 +4525,9 @@ export const messages = {
 	'creditMemos.row.apply': '適用',
 	'creditMemos.row.void': '無効化',
 	'creditMemos.row.confirm': '確認',
+	'creditMemos.row.edit': '編集',
+	'creditMemos.search.aria': 'クレジットメモを検索',
+	'creditMemos.search.placeholder': 'メモ番号またはベンダーで検索…',
 	'creditMemos.showingAll': '{total, plural, other {全 # 件のクレジットメモを表示中}}',
 	'creditMemos.status.applied': '適用済み',
 	'creditMemos.status.open': '未処理',
@@ -4480,6 +4538,8 @@ export const messages = {
 	'creditMemos.toast.createFailed': '作成に失敗しました',
 	'creditMemos.toast.created': 'クレジットメモを作成しました',
 	'creditMemos.toast.loadFailed': 'クレジットメモを読み込めませんでした',
+	'creditMemos.toast.updateFailed': '更新に失敗しました',
+	'creditMemos.toast.updated': 'クレジットメモを更新しました',
 	'creditMemos.toast.voidFailed': '無効化に失敗しました',
 	'creditMemos.toast.voided': 'クレジットメモを無効化しました',
 	'csvImport.chooseFile': 'ファイルを選択…',

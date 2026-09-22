@@ -124,3 +124,173 @@ async def test_login_allowed_when_not_sso_only():
 
     # Not a 403 — a real token response.
     assert getattr(result, "access_token", None)
+
+
+# ---------------------------------------------------------------------------
+# Step-up — a password that cannot sign in cannot authorize a factor change
+#
+# `login` refuses a correct password in an sso_only tenant, "even for users who
+# still carry a password hash". The step-up gate in front of every factor change
+# (TOTP enroll / disable, passkey register / delete) used to accept that same
+# hash as proof, so it went on authenticating a security-sensitive operation —
+# on raw bcrypt, for a pre-c6a91396 row that sign-in could never upgrade. The
+# password is now dropped before it is checked; the code and passkey proofs are
+# untouched.
+# ---------------------------------------------------------------------------
+
+SSO_ONLY_SETTINGS = {"sso": {"enabled": True, "sso_only": True, "provider": "saml"}}
+TOTP_SECRET = "JBSWY3DPEHPK3PXP"
+
+
+def _account_with_totp(pw: str):
+    """A member with a password hash AND a live TOTP factor — the account whose
+    factor change needs a step-up at all."""
+    user = _user_with_password(pw)
+    user.mfa_enabled = True
+    user.mfa_secret = TOTP_SECRET
+    user.mfa_enrolled_at = None
+    user.roles = []
+    user.locale = None
+    return user
+
+
+def _control_db(org):
+    """Serves the two lookups a step-up makes: the account's passkeys (none —
+    read through `scalars()`) and its organization (`scalar_one_or_none()`)."""
+    result = MagicMock()
+    result.scalars.return_value.all.return_value = []
+    result.scalar_one_or_none.return_value = org
+    db = AsyncMock()
+    db.execute = AsyncMock(return_value=result)
+    db.commit = AsyncMock()
+    return db
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("offered", ["Correct-Horse-9", "a-wrong-guess"])
+async def test_a_password_is_no_step_up_proof_in_an_sso_only_tenant(offered):
+    """Right or wrong, the password gets the same refusal — it is never checked,
+    so the answer cannot say which it was — and the refusal names the proofs
+    that DO work rather than asking for the password again."""
+    from app.api.auth import STEP_UP_SSO_ONLY_DETAIL, enroll_mfa_start
+    from app.schemas.auth import MFAStepUpRequest
+    from app.services import mfa as mfa_service
+
+    user = _account_with_totp("Correct-Horse-9")
+    org = SimpleNamespace(id=user.organization_id, settings=SSO_ONLY_SETTINGS)
+    verify = AsyncMock(return_value=True)
+    audit = AsyncMock()
+
+    with (
+        patch("app.api.auth.settings.mfa_enabled", True),
+        patch("app.services.mfa.verify_password", verify),
+        patch("app.api.auth.dispatch_auth_audit", audit),
+    ):
+        with pytest.raises(HTTPException) as exc:
+            await enroll_mfa_start(
+                body=MFAStepUpRequest(password=offered), user=user, db=_control_db(org)
+            )
+
+    assert exc.value.status_code == 400
+    assert exc.value.detail == STEP_UP_SSO_ONLY_DETAIL
+    verify.assert_not_awaited()
+    # Still a failed step-up on the trail, PII-free as ever.
+    (call,) = audit.await_args_list
+    assert call.kwargs["action"] == "auth.mfa.step_up.failure"
+    assert call.kwargs["details"] == {"operation": "totp_enroll"}
+    # Nothing moved: no candidate secret, the live factor untouched.
+    assert await mfa_service.read_pending_totp_secret(user.id) is None
+    assert user.mfa_secret == TOTP_SECRET
+
+
+@pytest.mark.asyncio
+async def test_disabling_totp_with_a_password_is_refused_in_an_sso_only_tenant():
+    """`/mfa/disable` rides the same gate — the most sensitive factor change
+    there is must not be the one a closed password still opens."""
+    from app.api.auth import STEP_UP_SSO_ONLY_DETAIL, disable_mfa
+    from app.schemas.auth import MFADisableRequest
+
+    pw = "Correct-Horse-9"
+    user = _account_with_totp(pw)
+    org = SimpleNamespace(id=user.organization_id, settings=SSO_ONLY_SETTINGS)
+
+    with patch("app.api.auth.dispatch_auth_audit", AsyncMock()):
+        with pytest.raises(HTTPException) as exc:
+            await disable_mfa(body=MFADisableRequest(password=pw), user=user, db=_control_db(org))
+
+    assert exc.value.status_code == 400
+    assert exc.value.detail == STEP_UP_SSO_ONLY_DETAIL
+    assert user.mfa_enabled is True
+    assert user.mfa_secret == TOTP_SECRET
+
+
+@pytest.mark.asyncio
+async def test_an_authenticator_code_still_proves_a_step_up_in_an_sso_only_tenant():
+    """Positive control: closing the password closes nothing else. An account
+    with a live TOTP factor holds the authenticator, so it is never left
+    without a proof it can offer."""
+    import pyotp
+
+    from app.api.auth import enroll_mfa_start
+    from app.schemas.auth import MFAStepUpRequest
+
+    user = _account_with_totp("Correct-Horse-9")
+    org = SimpleNamespace(id=user.organization_id, settings=SSO_ONLY_SETTINGS)
+
+    with patch("app.api.auth.settings.mfa_enabled", True):
+        resp = await enroll_mfa_start(
+            body=MFAStepUpRequest(code=pyotp.TOTP(TOTP_SECRET).now()),
+            user=user,
+            db=_control_db(org),
+        )
+
+    assert resp.secret != TOTP_SECRET
+    assert user.mfa_secret == TOTP_SECRET, "the live factor survives until verify"
+
+
+@pytest.mark.asyncio
+async def test_the_password_still_proves_a_step_up_when_sso_is_not_really_enforced():
+    """The step-up reads the SAME predicate as login: `sso_only` without
+    `sso.enabled` is not SSO-only (a broken IdP config keeps the password open
+    as the escape hatch), so there the password still proves a step-up — the
+    two doors cannot disagree about whether the password is an authenticator."""
+    from app.api.auth import enroll_mfa_start
+    from app.schemas.auth import MFAStepUpRequest
+
+    pw = "Correct-Horse-9"
+    user = _account_with_totp(pw)
+    org = SimpleNamespace(
+        id=user.organization_id, settings={"sso": {"enabled": False, "sso_only": True}}
+    )
+
+    with patch("app.api.auth.settings.mfa_enabled", True):
+        resp = await enroll_mfa_start(
+            body=MFAStepUpRequest(password=pw), user=user, db=_control_db(org)
+        )
+
+    assert resp.secret != TOTP_SECRET
+
+
+@pytest.mark.asyncio
+async def test_a_step_up_without_a_password_does_not_load_the_org():
+    """The org is consulted only when a password was actually offered, so the
+    code and passkey paths pay no extra query for a rule that cannot bind them."""
+    import pyotp
+
+    from app.api.auth import enroll_mfa_start
+    from app.schemas.auth import MFAStepUpRequest
+
+    user = _account_with_totp("Correct-Horse-9")
+    closed = AsyncMock(return_value=True)
+
+    with (
+        patch("app.api.auth.settings.mfa_enabled", True),
+        patch("app.api.auth._password_sign_in_closed", closed),
+    ):
+        await enroll_mfa_start(
+            body=MFAStepUpRequest(code=pyotp.TOTP(TOTP_SECRET).now()),
+            user=user,
+            db=_control_db(None),
+        )
+
+    closed.assert_not_awaited()

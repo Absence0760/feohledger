@@ -107,6 +107,7 @@ mobile/
 │       ├── notification_list_tile.dart # Notification row — unread dot, title, body, event label + relative time; one merged Semantics label
 │       ├── notification_bell.dart      # App-bar bell action with a live unread Badge → opens NotificationsScreen (in the Dashboard app bar; visible to all roles)
 │       ├── kpi_card.dart        # Dashboard metric card
+│       ├── partial_conversion_note.dart # Amber-reading disclosure that a rendered rollup counts unconvertible rows at face value (dashboard + cash flow); caller passes the localized sentence and renders it only for a non-zero count
 │       ├── cash_flow_button.dart # Dashboard app-bar action → CashFlowScreen; gated to CFO/admin (renders nothing otherwise; mirrors backend _CFO_ROLES)
 │       ├── invoice_list_tile.dart # Invoice row with vendor, amount, status
 │       ├── vendor_status_badge.dart # Colored vendor status chip (active/unverified/inactive/rejected)

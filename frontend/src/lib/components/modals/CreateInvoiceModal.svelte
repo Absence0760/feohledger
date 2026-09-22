@@ -1,7 +1,7 @@
 <script lang="ts">
 	import type { Invoice } from '$lib/types/invoice';
 	import { api } from '$lib/api';
-	import { listGlAccounts } from '$lib/api/glAccounts';
+	import { listGlAccounts, listInvoiceChart } from '$lib/api/glAccounts';
 	import { glAccountOptionLabel, type GlAccountOption } from '$lib/types/glAccount';
 	import Modal from '$lib/components/ui/Modal.svelte';
 	import { toast } from '$lib/components/ui/Toast.svelte';
@@ -33,15 +33,23 @@
 
 	$effect(() => {
 		(async () => {
+			// The entity list first: it names the entity this invoice will be
+			// filed under (the selection, else the default — the backend's write
+			// rule), and the picker offers THAT entity's chart. In the
+			// consolidated view the header scope is every subsidiary's chart at
+			// once, which is how another entity's code used to be offered here.
+			// It also names each option's `entity_id` for the scope suffix
+			// `glAccountOptionLabel` appends.
+			await entityStore.ensureLoaded();
 			try {
-				glAccounts = await listGlAccounts();
+				const target = entityStore.writeEntityId;
+				// Unknown only when the entity list failed to load: fall back to
+				// the header-scoped list and let the backend's check decide.
+				glAccounts = target ? await listInvoiceChart(target) : await listGlAccounts();
 			} catch {
 				// GL catalog is a convenience dropdown — fall back to free text.
 			}
 		})();
-		// The entity names behind each option's `entity_id`, for the scope
-		// suffix `glAccountOptionLabel` appends in the consolidated view.
-		entityStore.ensureLoaded();
 	});
 
 	const canSubmit = $derived(vendor.trim() !== '' && invoice_number.trim() !== '' && !!amount && amount > 0);
@@ -157,11 +165,12 @@
 				{#if glAccounts.length > 0}
 					<select bind:value={gl_account}>
 						<option value="">{m('invoices.modal.field.glSelect')}</option>
-						<!-- Keyed by `id`, not `code`: the consolidated view returns
-						     every subsidiary's chart, and two of them may each hold
-						     their own `6000` — a `code` key would collide. The bound
-						     VALUE stays the code, which is what `Invoice.gl_account`
-						     (a String(100)) records; see `types/glAccount.ts`. -->
+						<!-- Keyed by `id`, not `code`: the chart offered is shared ∪
+						     the target entity's own, and an entity may override a
+						     shared `6000` with its own — a `code` key would collide.
+						     The bound VALUE stays the code, which is what
+						     `Invoice.gl_account` (a String(100)) records; see
+						     `types/glAccount.ts`. -->
 						{#each glAccounts as acct (acct.id)}
 							<option value={acct.code}>
 								{glAccountOptionLabel(acct, entityStore, {

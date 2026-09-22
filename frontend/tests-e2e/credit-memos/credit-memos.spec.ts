@@ -2,6 +2,7 @@ import {
 	API_BASE,
 	authedTenantHeaders,
 	deleteInvoicesWhere,
+	escapeRegExp,
 	expect,
 	selectVendorInPicker,
 	tenantPsql,
@@ -157,7 +158,9 @@ test.describe('/credit-memos', () => {
 				(r) =>
 					r.url().includes('/api/credit-memos') && r.url().includes('status=open')
 			);
-			await page.locator('.filter-chip', { hasText: /^Open$/ }).click();
+			// `\b`, not `$`: the chip carries its whole-set count once
+			// `GET /api/credit-memos/counts` lands ("Open 3").
+			await page.locator('.filter-chip', { hasText: /^Open\b/ }).click();
 			await openFiltered;
 			await expect(
 				page.locator('table tbody tr.applied').first()
@@ -168,11 +171,47 @@ test.describe('/credit-memos', () => {
 				(r) =>
 					r.url().includes('/api/credit-memos') && r.url().includes('status=applied')
 			);
-			await page.locator('.filter-chip', { hasText: /^Applied$/ }).click();
+			await page.locator('.filter-chip', { hasText: /^Applied\b/ }).click();
 			await appliedFiltered;
 			await expect(
 				page.locator('table tbody tr', { hasText: open.id.slice(0, 8) })
 			).toHaveCount(0);
+		} finally {
+			for (const id of created) deleteMemo(id);
+		}
+	});
+
+	test('the chips carry the server tallies for exactly the searched population', async ({
+		page
+	}) => {
+		const vendor = await getVendorWithInvoice(page);
+		const prefix = `CM-CNT-${Date.now()}`;
+		const created: string[] = [];
+
+		try {
+			for (const suffix of ['A', 'B', 'C']) {
+				const memo = await createMemo(page, {
+					memo_number: `${prefix}-${suffix}`,
+					vendor_id: vendor.id,
+					amount: 5
+				});
+				created.push(memo.id);
+			}
+			const voidResp = await page.request.post(
+				`${API_BASE}/api/credit-memos/${created[2]}/void`,
+				{ headers: await authedTenantHeaders(page) }
+			);
+			expect(voidResp.status()).toBe(200);
+
+			// Real backend, real `GET /api/credit-memos/counts`: the search term
+			// narrows the tallies to exactly this test's three rows, whatever else
+			// the worker's tenant holds.
+			await page.goto(`/credit-memos?search=${prefix}`);
+			await expect(page.getByRole('button', { name: 'All 3', exact: true })).toBeVisible();
+			await expect(page.getByRole('button', { name: 'Open 2', exact: true })).toBeVisible();
+			await expect(page.getByRole('button', { name: 'Applied 0', exact: true })).toBeVisible();
+			await expect(page.getByRole('button', { name: 'Void 1', exact: true })).toBeVisible();
+			await expect(page.locator('table tbody tr')).toHaveCount(3);
 		} finally {
 			for (const id of created) deleteMemo(id);
 		}
@@ -333,6 +372,233 @@ test.describe('/credit-memos', () => {
 			expect(((await resp.json()) as { status: string }).status).toBe('void');
 		} finally {
 			deleteMemo(memo.id);
+		}
+	});
+});
+
+/**
+ * Correcting a mis-keyed memo, and linking one to its invoice at creation
+ * (issue #443). Before either existed, a memo keyed in the wrong currency was
+ * permanently unappliable AND uncorrectable — the only exit was Void and
+ * re-create, leaving a void row in the audit trail for what was a typo.
+ *
+ * Every test narrows the list to its own rows through the URL-backed
+ * `?search=`, so whatever else the worker's tenant holds is off screen.
+ */
+test.describe('/credit-memos — edit and link-at-create', () => {
+	function modalNamed(page: import('@playwright/test').Page, name: string) {
+		return page.locator(`div.modal[role="dialog"][aria-label="${name}"]`);
+	}
+
+	function editAuditRows(id: string): number {
+		return Number(
+			tenantPsql(
+				`SELECT count(*) FROM audit_log WHERE entity_id='${id}' AND entity_type='credit_memo' AND action='credit_memo.updated'`
+			).trim()
+		);
+	}
+
+	test('Edit corrects an open memo, sending only the fields that changed', async ({ page }) => {
+		const vendor = await getVendorWithInvoice(page);
+		const memoNumber = `CM-EDIT-${Date.now()}`;
+		const memo = await createMemo(page, {
+			memo_number: memoNumber,
+			vendor_id: vendor.id,
+			amount: '100.00',
+			currency: 'USD'
+		});
+
+		try {
+			await page.goto(`/credit-memos?search=${memoNumber}`);
+			const row = page.locator('table tbody tr', { hasText: memoNumber });
+			await row.getByRole('button', { name: 'Edit', exact: true }).click();
+
+			const modal = modalNamed(page, 'Edit credit memo');
+			await expect(modal).toBeVisible();
+			// Prefilled from the row, including the vendor the picker cannot look
+			// up from its own first page.
+			await expect(modal.getByLabel('Memo Number')).toHaveValue(memoNumber);
+			await expect(vendorPicker(modal)).toHaveValue(new RegExp(escapeRegExp(vendor.name)));
+
+			await modal.locator('input[type="number"]').fill('88.50');
+			await modal.getByLabel('Currency').selectOption('EUR');
+
+			const patched = page.waitForRequest(
+				(r) => r.method() === 'PATCH' && r.url().endsWith(`/api/credit-memos/${memo.id}`)
+			);
+			const saved = page.waitForResponse(
+				(r) => r.request().method() === 'PATCH' && r.url().endsWith(`/api/credit-memos/${memo.id}`)
+			);
+			await modal.getByRole('button', { name: 'Save', exact: true }).click();
+			// Only what changed — never a re-assertion of the untouched fields
+			// over whatever a concurrent editor just saved.
+			expect((await patched).postDataJSON()).toEqual({ amount: '88.5', currency: 'EUR' });
+			const resp = await saved;
+			expect(resp.status()).toBe(200);
+			const body = (await resp.json()) as { currency: string; status: string };
+			expect(body.currency).toBe('EUR');
+			expect(body.status).toBe('open');
+
+			await expect(modal).toBeHidden();
+			await expect(row).toContainText('88.50');
+			expect(editAuditRows(memo.id)).toBe(1);
+		} finally {
+			deleteMemo(memo.id);
+		}
+	});
+
+	test('Edit is offered only on an open memo that has never been applied', async ({ page }) => {
+		const vendor = await getVendorWithInvoice(page);
+		const prefix = `CM-EDITABLE-${Date.now()}`;
+		const created: string[] = [];
+
+		try {
+			const open = await createMemo(page, {
+				memo_number: `${prefix}-OPEN`,
+				vendor_id: vendor.id,
+				amount: 5
+			});
+			created.push(open.id);
+			const applied = await createMemo(page, {
+				memo_number: `${prefix}-APPLIED`,
+				vendor_id: vendor.id,
+				amount: 1,
+				invoice_id: vendor.invoiceId
+			});
+			created.push(applied.id);
+			expect(applied.status).toBe('applied');
+			const voided = await createMemo(page, {
+				memo_number: `${prefix}-VOID`,
+				vendor_id: vendor.id,
+				amount: 5
+			});
+			created.push(voided.id);
+			const voidResp = await page.request.post(`${API_BASE}/api/credit-memos/${voided.id}/void`, {
+				headers: await authedTenantHeaders(page)
+			});
+			expect(voidResp.status()).toBe(200);
+
+			await page.goto(`/credit-memos?search=${prefix}`);
+			const rowFor = (suffix: string) =>
+				page.locator('table tbody tr', { hasText: `${prefix}-${suffix}` });
+			await expect(rowFor('OPEN').getByRole('button', { name: 'Edit', exact: true })).toBeVisible();
+			// Positive assertion above first, so these absences are not passing
+			// vacuously against a table that has not rendered yet.
+			await expect(rowFor('APPLIED')).toBeVisible();
+			await expect(rowFor('APPLIED').getByRole('button', { name: 'Edit' })).toHaveCount(0);
+			await expect(rowFor('VOID')).toBeVisible();
+			await expect(rowFor('VOID').getByRole('button', { name: 'Edit' })).toHaveCount(0);
+		} finally {
+			for (const id of created) deleteMemo(id);
+		}
+	});
+
+	test('an edit that lost the race to an apply is refused with the reason, and the row catches up', async ({
+		page
+	}) => {
+		const vendor = await getVendorWithInvoice(page);
+		const memoNumber = `CM-EDIT-RACE-${Date.now()}`;
+		const memo = await createMemo(page, {
+			memo_number: memoNumber,
+			vendor_id: vendor.id,
+			amount: 1
+		});
+
+		try {
+			await page.goto(`/credit-memos?search=${memoNumber}`);
+			const row = page.locator('table tbody tr', { hasText: memoNumber });
+			await row.getByRole('button', { name: 'Edit', exact: true }).click();
+			const modal = modalNamed(page, 'Edit credit memo');
+			await expect(modal).toBeVisible();
+
+			// Someone else applies the memo while this dialog is open.
+			const applyResp = await page.request.post(
+				`${API_BASE}/api/credit-memos/${memo.id}/apply`,
+				{ headers: await authedTenantHeaders(page), data: { invoice_id: vendor.invoiceId } }
+			);
+			expect(applyResp.status()).toBe(200);
+
+			await modal.locator('textarea').fill('late correction');
+			const refused = page.waitForResponse(
+				(r) => r.request().method() === 'PATCH' && r.url().endsWith(`/api/credit-memos/${memo.id}`)
+			);
+			await modal.getByRole('button', { name: 'Save', exact: true }).click();
+			expect((await refused).status()).toBe(409);
+
+			// The server's own reason reaches the operator, and the list reloads
+			// to show why: the memo is applied, so it no longer offers Edit.
+			await expect(page.getByText(/never been applied can be edited/)).toBeVisible();
+			await expect(row.locator('.badge')).toHaveText('Applied');
+			await expect(row.getByRole('button', { name: 'Edit' })).toHaveCount(0);
+			expect(editAuditRows(memo.id)).toBe(0);
+		} finally {
+			deleteMemo(memo.id);
+		}
+	});
+
+	test('Create can link the memo to an invoice, which applies it in the invoice currency', async ({
+		page
+	}) => {
+		const vendor = await getVendorWithInvoice(page);
+		const headers = await authedTenantHeaders(page);
+		const invoice = (await (
+			await page.request.get(`${API_BASE}/api/invoices/${vendor.invoiceId}`, { headers })
+		).json()) as { invoice_number: string; currency: string };
+		const memoNumber = `CM-LINK-${Date.now()}`;
+		let createdId: string | null = null;
+
+		try {
+			await page.goto('/credit-memos');
+			await page.getByRole('button', { name: '+ New Credit Memo' }).click();
+			const modal = modalNamed(page, 'New credit memo');
+			await expect(modal).toBeVisible();
+
+			const invoiceSelect = modal.getByLabel('Apply to invoice');
+			// Nothing to link until a vendor names whose invoices are eligible.
+			await expect(invoiceSelect).toBeDisabled();
+
+			await modal.getByLabel('Memo Number').fill(memoNumber);
+			await selectVendorInPicker(vendorPicker(modal), vendor.name);
+			await modal.locator('input[type="number"]').fill('1.00');
+			await invoiceSelect.selectOption(vendor.invoiceId);
+
+			// Linked: the currency is the invoice's, shown rather than offered —
+			// asserting any other would only be refused.
+			const currency = modal.getByLabel('Currency');
+			await expect(currency).toBeDisabled();
+			await expect(currency).toHaveValue(invoice.currency.toUpperCase());
+
+			const posted = page.waitForRequest(
+				(r) => r.method() === 'POST' && r.url().endsWith('/api/credit-memos')
+			);
+			const created = page.waitForResponse(
+				(r) => r.request().method() === 'POST' && r.url().endsWith('/api/credit-memos')
+			);
+			await modal.getByRole('button', { name: /^Create$/ }).click();
+			const sent = (await posted).postDataJSON() as Record<string, unknown>;
+			expect(sent.invoice_id).toBe(vendor.invoiceId);
+			// The memo INHERITS the invoice's currency server-side.
+			expect(sent).not.toHaveProperty('currency');
+
+			const resp = await created;
+			expect(resp.status()).toBe(201);
+			const body = (await resp.json()) as {
+				id: string;
+				status: string;
+				invoice_id: string;
+				currency: string;
+			};
+			createdId = body.id;
+			expect(body.status).toBe('applied');
+			expect(body.invoice_id).toBe(vendor.invoiceId);
+			expect(body.currency).toBe(invoice.currency.toUpperCase());
+
+			await expect(modal).toBeHidden();
+			await expect(
+				page.locator('table tbody tr', { hasText: memoNumber })
+			).toContainText(invoice.invoice_number);
+		} finally {
+			if (createdId) deleteMemo(createdId);
 		}
 	});
 });

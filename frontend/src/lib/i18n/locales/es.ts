@@ -235,6 +235,7 @@ export const messages = {
 	'common.search': 'Buscar',
 	'common.clear': 'Limpiar',
 	'common.apply': 'Aplicar',
+	'common.tableRegion': 'Tabla de datos',
 
 	// Bulk selection, shared by every list that offers it — see en.ts.
 
@@ -935,11 +936,15 @@ export const messages = {
 	'exceptions.title': 'Excepciones',
 	'exceptions.tab.queue': 'Cola',
 	'exceptions.tab.agents': 'Agentes de IA',
+	'exceptions.tab.aria': 'Vistas de excepciones',
 	'exceptions.filter.open': 'Abierta',
 	'exceptions.filter.escalated': 'Escalada',
 	'exceptions.filter.resolved': 'Resuelta',
 	'exceptions.filter.dismissed': 'Descartada',
 	'exceptions.filter.allTypes': 'Todos los tipos',
+	'exceptions.filter.allSeverities': 'Todas las gravedades',
+	'exceptions.search.placeholder': 'Buscar n.º de factura o proveedor...',
+	'exceptions.search.aria': 'Buscar excepciones por número de factura o proveedor',
 	'exceptions.col.type': 'Tipo',
 	'exceptions.col.severity': 'Grav.',
 
@@ -974,6 +979,26 @@ export const messages = {
 	'exceptions.bulkModal.hint': 'Todas las filas seleccionadas recibirán la misma nota de resolución. Las filas que ya están en un estado terminal se omiten en el servidor, igual que cualquier fila en cuya alerta consta tu participación: escala esas en su lugar.',
 	'exceptions.bulk.segregationSkipped': '{n, plural, one {# fila sigue abierta: segregación de funciones; consta tu participación en ese pago o en la alerta que lo marcó. Escálala o pide a otro usuario que decida.} other {# filas siguen abiertas: segregación de funciones; consta tu participación en esos pagos o en las alertas que los marcaron. Escálalas o pide a otro usuario que decida.}}',
 	'exceptions.bulkModal.notePlaceholder': 'Aplicada a cada fila seleccionada',
+	'exceptions.toast.loadFailed': 'No se pudieron cargar las excepciones',
+	'exceptions.toast.noteRequired': 'La nota de resolución es obligatoria',
+	'exceptions.toast.actionFailed': 'La acción falló',
+	'exceptions.toast.resolved': 'Excepción resuelta',
+	'exceptions.toast.escalated': 'Excepción escalada',
+	'exceptions.toast.dismissed': 'Excepción descartada',
+	'exceptions.toast.bulkResolved': '{n, plural, one {# excepción resuelta} other {# excepciones resueltas}}',
+	'exceptions.toast.bulkEscalated': '{n, plural, one {# excepción escalada} other {# excepciones escaladas}}',
+	'exceptions.toast.bulkDismissed': '{n, plural, one {# excepción descartada} other {# excepciones descartadas}}',
+	'exceptions.toast.bulkResolvedSkipped':
+		'{n, plural, one {# excepción resuelta} other {# excepciones resueltas}}, {skipped, plural, one {# omitida} other {# omitidas}}.',
+	'exceptions.toast.bulkEscalatedSkipped':
+		'{n, plural, one {# excepción escalada} other {# excepciones escaladas}}, {skipped, plural, one {# omitida} other {# omitidas}}.',
+	'exceptions.toast.bulkDismissedSkipped':
+		'{n, plural, one {# excepción descartada} other {# excepciones descartadas}}, {skipped, plural, one {# omitida} other {# omitidas}}.',
+	'exceptions.toast.selectedAllMatching':
+		'{n, plural, one {# excepción coincidente seleccionada} other {# excepciones coincidentes seleccionadas}}',
+	'exceptions.toast.selectAllTruncated':
+		'Seleccionadas las primeras {shown} de {total} coincidentes — acota los filtros para seleccionar el resto.',
+	'exceptions.toast.selectAllFailed': 'No se pudieron seleccionar todas las coincidentes',
 
 	'exceptions.type.duplicate': 'Factura duplicada',
 	'exceptions.type.poMismatch': 'Discrepancia con el pedido',
@@ -2595,6 +2620,22 @@ export const messages = {
 	'glAccounts.createModal.scopeEntity': 'Esta cuenta pertenecerá únicamente a {entity}. Cambie a Todas las entidades para crear una cuenta compartida.',
 	'glAccounts.createModal.toast.created': 'Cuenta contable {code} creada',
 	'glAccounts.createModal.toast.createFailed': 'No se pudo crear la cuenta',
+	'glAccounts.row.edit': 'Editar',
+	'glAccounts.row.editAria': 'Editar la cuenta contable {code}',
+	'glAccounts.row.retire': 'Desactivar',
+	'glAccounts.row.retireAria': 'Desactivar la cuenta contable {code}',
+	'glAccounts.row.confirm': 'Confirmar',
+	'glAccounts.row.reactivate': 'Reactivar',
+	'glAccounts.row.reactivateAria': 'Reactivar la cuenta contable {code}',
+	'glAccounts.row.otherChart': 'Editar desde Todas las entidades',
+	'glAccounts.row.toast.retired': 'Cuenta {code} desactivada. Los selectores dejan de ofrecerla; las facturas ya imputadas conservan el código.',
+	'glAccounts.row.toast.reactivated': 'Cuenta {code} reactivada',
+	'glAccounts.row.toast.failed': 'No se pudo actualizar la cuenta',
+	'glAccounts.editModal.aria': 'Editar cuenta contable',
+	'glAccounts.editModal.title': 'Editar cuenta contable',
+	'glAccounts.editModal.save': 'Guardar cambios',
+	'glAccounts.editModal.codeFixed': 'El código no se puede cambiar: las facturas lo guardan como texto, así que renombrarlo dejaría huérfanas todas las líneas ya imputadas. Para sustituir una cuenta, cree la nueva y desactive esta.',
+	'glAccounts.editModal.toast.saved': 'Cuenta contable {code} actualizada',
 
 	// Purchase Orders (routes/purchase-orders/+page.svelte)
 	'purchaseOrders.title': 'Órdenes de compra',
@@ -2933,7 +2974,11 @@ export const messages = {
 	'byEntity.loading': 'Cargando…',
 	'byEntity.loadFailed': 'Error al cargar el desglose por entidad',
 	'byEntity.unconverted':
-		'Excluidas del total consolidado de Pendiente: {n, plural, one {# factura abierta} other {# facturas abiertas}} sin tipo de cambio fijado a {currency}.',
+		'Pendiente incluye a su valor nominal {n, plural, one {# factura abierta} other {# facturas abiertas}} sin tipo de cambio fijado a {currency}, por lo que los totales mezclan monedas.',
+	'byEntity.unconvertedSpend':
+		'El gasto incluye a su valor nominal {n, plural, one {# factura} other {# facturas}} sin tipo de cambio fijado a {currency}, por lo que los totales mezclan monedas.',
+	'byEntity.openPoNoCurrency':
+		'Las órdenes de compra aún no registran una moneda, por lo que las órdenes abiertas se muestran sin ella.',
 
 	// Informes programados (components/analytics/ScheduledReportsPanel.svelte)
 	'scheduledReports.heading': 'Informes programados',
@@ -3431,6 +3476,9 @@ export const messages = {
 	'auth.signup.successSpamLink': 'inténtalo de nuevo',
 	'auth.signup.heading': 'Crea tu espacio de trabajo',
 	'auth.signup.subtitle': 'Consigue tu propio espacio de trabajo AP en menos de un minuto.',
+	'auth.signup.closedHeading': 'El registro está cerrado',
+	'auth.signup.closedBody':
+		'En esta instancia, los nuevos espacios de trabajo solo se crean por invitación. Si tu organización ya usa FeohLedger, inicia sesión en la dirección de tu espacio de trabajo.',
 	'auth.signup.failed': 'Error en el registro.',
 	'auth.signup.captchaRequired': 'Por favor, completa el captcha.',
 	'auth.signup.companyName': 'Nombre de la empresa',
@@ -4507,15 +4555,23 @@ export const messages = {
 	'creditMemos.createModal.aria': 'Nueva nota de crédito',
 	'creditMemos.createModal.currency':
 		'Moneda',
+	'creditMemos.createModal.currencyFromInvoice': 'Se toma de la factura a la que se aplica esta nota.',
 	'creditMemos.createModal.currencyHint':
-		'Una nota de crédito solo puede aplicarse a una factura en la misma moneda, y después no hay forma de cambiarla.',
+		'Una nota de crédito solo puede aplicarse a una factura en la misma moneda. Se puede corregir hasta que se aplique.',
 	'creditMemos.createModal.create': 'Crear',
+	'creditMemos.createModal.invoice': 'Aplicar a la factura',
+	'creditMemos.createModal.invoiceHint': 'Si elige una factura, el crédito se le aplica en cuanto se crea la nota. Déjelo vacío para aplicarlo más tarde.',
+	'creditMemos.createModal.invoiceNeedsVendor': 'Elija un proveedor para ver sus facturas.',
 	'creditMemos.createModal.memoNumber': 'Número de nota',
+	'creditMemos.createModal.noInvoice': 'No aplicar todavía',
 	'creditMemos.createModal.reason': 'Motivo',
 	'creditMemos.createModal.reasonPlaceholder': 'p. ej. Mercancía defectuosa devuelta',
 	'creditMemos.createModal.selectVendor': 'Seleccionar proveedor…',
 	'creditMemos.createModal.title': 'Nueva nota de crédito',
 	'creditMemos.createModal.vendor': 'Proveedor',
+	'creditMemos.editModal.aria': 'Editar nota de crédito',
+	'creditMemos.editModal.hint': 'Una nota de crédito se puede corregir hasta que se aplica. Cada cambio queda registrado en el registro de auditoría.',
+	'creditMemos.editModal.title': 'Editar nota de crédito',
 	'creditMemos.empty': 'No hay notas de crédito.',
 	'creditMemos.empty.filtered': 'Ninguna nota de crédito coincide con este filtro.',
 	'creditMemos.loadMore': 'Cargar más ({shown} de {total})',
@@ -4526,6 +4582,9 @@ export const messages = {
 	'creditMemos.row.apply': 'Aplicar',
 	'creditMemos.row.void': 'Anular',
 	'creditMemos.row.confirm': 'Confirmar',
+	'creditMemos.row.edit': 'Editar',
+	'creditMemos.search.aria': 'Buscar notas de crédito',
+	'creditMemos.search.placeholder': 'Buscar n.º de nota o proveedor…',
 	'creditMemos.showingAll': 'Mostrando todas las {total, plural, one {# nota de crédito} other {# notas de crédito}}',
 	'creditMemos.status.applied': 'Aplicada',
 	'creditMemos.status.open': 'Abierta',
@@ -4536,6 +4595,8 @@ export const messages = {
 	'creditMemos.toast.createFailed': 'Error al crear',
 	'creditMemos.toast.created': 'Nota de crédito creada',
 	'creditMemos.toast.loadFailed': 'No se pudieron cargar las notas de crédito',
+	'creditMemos.toast.updateFailed': 'Error al actualizar',
+	'creditMemos.toast.updated': 'Nota de crédito actualizada',
 	'creditMemos.toast.voidFailed': 'Error al anular',
 	'creditMemos.toast.voided': 'Nota de crédito anulada',
 	'csvImport.chooseFile': 'Elegir archivo…',

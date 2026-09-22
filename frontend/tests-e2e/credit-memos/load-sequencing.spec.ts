@@ -42,21 +42,28 @@ function memo(n: number, status: 'open' | 'applied' | 'void' = 'open') {
 	};
 }
 
-/** Stub the two selects the page loads alongside the memo list. */
+/**
+ * Stub the invoice list the page loads alongside the memo list (the invoice
+ * selects in its dialogs). The vendor list is no longer fetched on mount —
+ * `ui/VendorPicker` searches it on demand — so it needs no stub.
+ *
+ * Matched on the EXACT pathname. These stubs used to be the globs
+ * `**\/api/vendors*` and `**\/api/invoices*`, which under `vite dev` also
+ * match the dev server's module URLs for `src/lib/api/vendors.ts` (imported
+ * by `VendorPicker`) and `src/lib/api/invoices.ts`. Answering the module with
+ * JSON meant the route never loaded, so all three tests here failed locally
+ * while CI — which serves a preview build of hashed chunks — stayed green
+ * (issue #443). See tests-e2e/README.md § Stubbing an API route.
+ */
 async function stubSelects(page: import('@playwright/test').Page) {
-	await page.route('**/api/vendors*', (route) =>
-		route.fulfill({
-			status: 200,
-			contentType: 'application/json',
-			body: JSON.stringify({ items: [], total: 0 })
-		})
-	);
-	await page.route('**/api/invoices*', (route) =>
-		route.fulfill({
-			status: 200,
-			contentType: 'application/json',
-			body: JSON.stringify({ items: [], total: 0 })
-		})
+	await page.route(
+		(url) => url.pathname === '/api/invoices',
+		(route) =>
+			route.fulfill({
+				status: 200,
+				contentType: 'application/json',
+				body: JSON.stringify({ items: [], total: 0 })
+			})
 	);
 }
 

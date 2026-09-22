@@ -29,6 +29,14 @@
  * retained as a stable, locale-independent identifier (used as an `{#each}`
  * key and as the English fallback); UI surfaces render `m(entry.labelKey)`,
  * not `entry.label`.
+ *
+ * **Keep this module pure** — no `$env/*`, `$app/*`, store or `.svelte`
+ * import. `tests-e2e/auth/rbac.spec.ts` value-imports it to compute each
+ * role's expected sidebar, and Playwright's loader resolves `$lib` but not
+ * SvelteKit's virtual modules (`frontend/CLAUDE.md` § `pnpm check` does not
+ * cover `tests-e2e/`). The per-row gates themselves are pinned as a literal
+ * table in `nav.test.ts`; change a row's `roles` here and that table in the
+ * same commit.
  */
 
 import type { MessageKey } from '$lib/i18n/messages';
@@ -183,9 +191,10 @@ export const NAV: NavEntry[] = [
 			// state: `GET /api/gl-accounts` is `get_current_user` — auth-gated,
 			// role-open — because a clerk coding an invoice has to be able to look
 			// a code up, and the invoice/expense/requisition GL pickers already
-			// serve them that same list. Both writes (`POST ""` create and
-			// `POST /sync-erp`) are admin | ap_manager and are gated in-page on
-			// `auth.isManager`, matching the backend, so the page renders read-only
+			// serve them that same list. All three writes (`POST ""` create, the
+			// row actions' `PATCH /{id}`, and `POST /sync-erp`) are admin |
+			// ap_manager and are gated in-page on `auth.isManager`, matching the
+			// backend, so the page renders read-only
 			// for a clerk. Gating the ROW on the write instead would have hidden a
 			// page whose every read succeeds — the dead end nav.ts has now fixed
 			// five times — while leaving `sync-erp` unreachable for the one role
@@ -388,6 +397,25 @@ export function isEntryVisible(entry: NavEntry, has: RoleCheck, can?: Permission
 /** Where a group's sidebar row navigates to — its first accessible child. */
 export function groupHref(group: NavGroup, has: RoleCheck, can?: PermissionCheck): string | null {
 	return visibleChildren(group, has, can)[0]?.href ?? null;
+}
+
+/** Where one sidebar row points: a link's own href, a group's landing child. */
+export function entryHref(entry: NavEntry, has: RoleCheck, can?: PermissionCheck): string | null {
+	return entry.kind === 'link' ? entry.href : groupHref(entry, has, can);
+}
+
+/**
+ * The sidebar a caller is offered, in nav order — one href per visible row.
+ * `Sidebar.svelte` renders exactly this set (`isEntryVisible` + `entryHref`),
+ * and `tests-e2e/auth/rbac.spec.ts` asserts the rendered DOM against it rather
+ * than against a hand-typed copy of the answer. What each role is ALLOWED to
+ * see is pinned once, as a literal table, in `nav.test.ts`.
+ */
+export function sidebarHrefs(has: RoleCheck, can?: PermissionCheck): string[] {
+	return NAV.filter((e) => isEntryVisible(e, has, can)).flatMap((e) => {
+		const href = entryHref(e, has, can);
+		return href ? [href] : [];
+	});
 }
 
 /**

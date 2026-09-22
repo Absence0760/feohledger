@@ -11,7 +11,8 @@
 	import { toast } from '$lib/components/ui/Toast.svelte';
 	import RowAction from '$lib/components/ui/RowAction.svelte';
 	import Money from '$lib/components/ui/Money.svelte';
-	import Badge, { type BadgeTone } from '$lib/components/ui/Badge.svelte';
+	import Badge from '$lib/components/ui/Badge.svelte';
+	import type { BadgeTone } from '$lib/components/ui/badgeTone';
 	import { m } from '$lib/i18n/store.svelte';
 	import { invoiceWarningText } from '$lib/api/invoiceWarnings';
 	import { formatDate } from '$lib/utils/time';
@@ -26,7 +27,7 @@
 		type FieldSuggestion,
 	} from '$lib/api/enrichment';
 	import { routeIntercompany } from '$lib/api/invoices';
-	import { listGlAccounts } from '$lib/api/glAccounts';
+	import { listInvoiceChart } from '$lib/api/glAccounts';
 	import { glAccountOptionLabel, type GlAccountOption } from '$lib/types/glAccount';
 	import { entityStore } from '$lib/stores/entity.svelte';
 
@@ -232,9 +233,15 @@
 		entityStore.ensureLoaded();
 	});
 
+	/**
+	 * The chart THIS invoice's code resolves in — shared ∪ its own entity's —
+	 * never the sidebar's view of it. The consolidated view returns every
+	 * subsidiary's chart, and offering subsidiary B's `6000` on an A invoice is
+	 * the write the backend now refuses (`services/gl_chart`).
+	 */
 	async function loadGLAccounts() {
 		try {
-			glAccounts = await listGlAccounts();
+			glAccounts = await listInvoiceChart(invoice.entity_id);
 		} catch { /* non-critical */ }
 	}
 
@@ -1834,8 +1841,9 @@
 									{#if gl_account && !glAccounts.some((a) => a.code === gl_account)}
 										<option value={gl_account}>{gl_account}</option>
 									{/if}
-									<!-- Keyed by `id`, not `code`: two subsidiaries may each
-									     hold their own `6000` in the consolidated view. -->
+									<!-- Keyed by `id`, not `code`: this invoice's chart is
+									     shared ∪ its entity's own, and an entity may override a
+									     shared `6000` with its own — two rows, one code. -->
 									{#each glAccounts as acct (acct.id)}
 										<option value={acct.code}>{glLabel(acct, true)}</option>
 									{/each}

@@ -8,10 +8,10 @@ who picks a 100-char password is fully protected by the suffix, where raw
 bcrypt would let any two passwords sharing the first 72 bytes verify against
 each other's hash. Legacy `$2b$...` hashes (written before the upgrade in
 c6a91396) still verify, so nobody is locked out; `needs_update` reports which
-stored hashes are on an older scheme, and `services/credential_upgrade` acts on
-it — the two login handlers re-hash such a row onto the current scheme the next
-time its owner signs in successfully, which is the only moment the plaintext
-needed to do so exists.
+stored hashes are on an older scheme or below the configured bcrypt cost, and
+`services/credential_upgrade` acts on it — the two login handlers re-hash such
+a row onto the current scheme and cost the next time its owner signs in
+successfully, which is the only moment the plaintext needed to do so exists.
 
 **We implement `bcrypt_sha256` directly rather than through passlib.** passlib
 owned this module until 2026-09 and pinned us to bcrypt 4.0.1: it reads
@@ -63,6 +63,9 @@ MIN_LENGTH = 12
 #: bcrypt cost for newly written hashes. 12 is what passlib defaulted to and
 #: what every hash in the column already carries, so this is a continuation
 #: rather than a choice: lowering it silently weakens every password set after.
+#: Raising it is safe and migrates the existing population on its own:
+#: `needs_update` flags a stored hash below this cost, so each account is
+#: re-hashed at the new cost on its owner's next successful login.
 DEFAULT_ROUNDS = 12
 
 #: Upper bound on a secret we will *write* a hash for, matching passlib's
@@ -148,7 +151,8 @@ class _BcryptSha256Context:
 
     #: The scheme new hashes are written with.
     scheme = "bcrypt_sha256"
-    #: Schemes we still verify but never write — `needs_update` reports these.
+    #: Schemes we still verify but never write — `needs_update` reports these
+    #: (and, on the current scheme, any hash below the configured cost).
     deprecated_schemes = ("bcrypt_sha256_v1", "bcrypt")
 
     def __init__(self, rounds: int = DEFAULT_ROUNDS) -> None:
@@ -235,8 +239,32 @@ class _BcryptSha256Context:
             return "bcrypt"
         return None
 
+    def rounds_of(self, hashed: str) -> int | None:
+        """The bcrypt cost `hashed` was written at, or None if unrecognised.
+
+        Read from whichever format the hash is in — the `r=` of a v2 wrapper,
+        the cost field of a v1 wrapper, or the `$NN$` of a raw bcrypt hash.
+        """
+        if not isinstance(hashed, str) or not hashed:
+            return None
+        match = _V2_RE.match(hashed) or _V1_RE.match(hashed)
+        if match is not None:
+            return int(match.group("rounds"))
+        if _BCRYPT_RE.match(hashed):
+            return int(hashed[4:6])
+        return None
+
     def needs_update(self, hashed: str) -> bool:
-        """True when `hashed` is on a scheme we no longer write.
+        """True when `hashed` is not what `hash` would write today.
+
+        Two ways to fall behind, and both are answered by re-hashing: a scheme
+        we no longer write, **or** the current scheme at a bcrypt cost below
+        `self.rounds`. The second is what makes raising `DEFAULT_ROUNDS` mean
+        anything for credentials that already exist — `identify` names only the
+        scheme, so a scheme-only check would leave every stored row at the old
+        cost for good, while new passwords quietly got the new one. A hash
+        *above* the configured cost is left alone: it is stronger than what we
+        would write, and lowering it would be a downgrade.
 
         Only meaningful after a successful `verify` — the answer for an
         unrecognised string is "replace it", but nothing can verify against one
@@ -246,7 +274,13 @@ class _BcryptSha256Context:
         place that would act on the answer: rewriting a row whose contents we
         cannot name would mint a working credential where there was none.
         """
-        return self.identify(hashed) != self.scheme
+        if self.identify(hashed) != self.scheme:
+            return True
+        cost = self.rounds_of(hashed)
+        # `identify` naming the current scheme means the v2 pattern matched, so
+        # a cost is always present here; the None arm is unreachable, and it
+        # answers "replace it" like every other string we cannot fully read.
+        return cost is None or cost < self.rounds
 
 
 pwd_context = _BcryptSha256Context()

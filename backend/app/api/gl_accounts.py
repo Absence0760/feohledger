@@ -2,7 +2,7 @@
 
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -14,6 +14,7 @@ from app.api.deps import (
     get_org_id,
     require_roles,
 )
+from app.models.entity import Entity
 from app.models.gl_account import GLAccount
 from app.models.organization import Organization
 from app.models.user import User
@@ -129,6 +130,7 @@ async def list_gl_accounts(
     search: str | None = None,
     account_type: str | None = None,
     active_only: bool = True,
+    chart_entity_id: uuid.UUID | None = Query(default=None),
     db: AsyncSession = Depends(get_tenant_db),
     user: User = Depends(get_current_user),
     entity_id: uuid.UUID | None = Depends(get_entity_id),
@@ -149,7 +151,25 @@ async def list_gl_accounts(
     `tests/test_pagination.py::test_gl_accounts_stays_unpaginated` pins that.
     Filtering is therefore server-side here (`search` / `account_type` /
     `active_only`) and never re-done in the browser.
+
+    **`chart_entity_id` asks for one entity's chart, whatever is selected.** An
+    invoice's GL code resolves against the chart of the entity the INVOICE
+    belongs to (shared ∪ its own — `services/gl_chart`), which is not always the
+    sidebar's: the consolidated view returns every subsidiary's chart at once,
+    and a deep link can open another entity's invoice while one is selected. So
+    the invoice GL pickers pass the invoice's `entity_id` here and are offered
+    exactly the codes a write to that invoice will accept. It widens nothing —
+    the consolidated view already returns every entity's rows to every role —
+    and an id that is not an entity of this tenant is a 400, as for
+    `X-Entity-ID`.
     """
+    if chart_entity_id is not None:
+        known = (
+            await db.execute(select(Entity.id).where(Entity.id == chart_entity_id))
+        ).scalar_one_or_none()
+        if known is None:
+            raise HTTPException(status_code=400, detail="Unknown entity for this tenant")
+        entity_id = chart_entity_id
     # A scoped chart is the shared accounts (NULL entity_id) ∪ the entity's own
     # (include_shared=True); the consolidated view (None) returns everything.
     query = apply_entity_scope(select(GLAccount), GLAccount, entity_id, include_shared=True)
@@ -322,8 +342,10 @@ async def update_gl_account(
     list endpoint already filters on it (``active_only``, default true) — until
     now nothing under ``app/`` ever wrote it, so an inactive row was reachable
     only by direct SQL or an imported chart. A retired account disappears from
-    every picker and from ``gl_recode._ActiveChart``, so nothing new can be
-    coded to it, while every historical line still resolves.
+    every picker and from ``gl_recode._ActiveChart``, so neither offers it for
+    new coding, while every historical line still resolves. (A hand-written
+    write of a retired code is not refused — ``services/gl_chart`` refuses only
+    another entity's code; see ``docs/followups.md``.)
 
     **Which rows an editor may touch follows the create rule, not the read
     rule.** The read is ``shared ∪ the selected entity``, but a shared row

@@ -1,3 +1,5 @@
+import type { VendorChangeRequestPage } from '$lib/types/vendor';
+
 import { expect, test } from '../fixtures/helpers';
 
 /**
@@ -139,22 +141,10 @@ test('vendor change requests: a failed RE-load clears the previous filter\'s row
 	const PATHNAME = '/api/vendors/change-requests';
 	const STALE_VENDOR = 'Stale Queue Vendor';
 
-	// One good response, then failures.
-	//
-	// Deliberately NOT `satisfies VendorChangeRequestPage`, which is the house
-	// rule for a stub whose shape has a `$lib/types` counterpart: importing it
-	// pulls `$lib/types/vendor.ts` into the `tsconfig.e2e.json` program, and
-	// that module does `import type { BadgeTone } from '…/ui/Badge.svelte'`.
-	// Plain `tsc` resolves a `.svelte` path through the ambient `*.svelte`
-	// module shim, which declares no named exports, so `pnpm check:e2e` fails
-	// with TS2614 on a file this spec never edits. (Durable fix: `BadgeTone`
-	// belongs in a `.ts` module — 28 files import it, so that is its own change.)
-	//
-	// The omission is affordable HERE in a way it was not for the dashboard
-	// stub that motivated the rule. That one's missing field made an assertion
-	// pass vacuously; this one's assertions are `toHaveCount(1)` then
-	// `toHaveCount(0)`, so a payload the page can no longer render fails the
-	// first one loudly rather than quietly weakening the second.
+	// One good response, then failures. Pinned to the type the page reads
+	// (`satisfies`, the house rule for a stub with a `$lib/types` counterpart),
+	// so a new field on the queue payload is a compile error here rather than a
+	// stub the page quietly stops rendering.
 	const pendingPage = {
 		items: [
 			{
@@ -175,7 +165,7 @@ test('vendor change requests: a failed RE-load clears the previous filter\'s row
 		total: 1,
 		page: 1,
 		page_size: 25
-	};
+	} satisfies VendorChangeRequestPage;
 
 	let served = 0;
 	await page.route(`**${PATHNAME}*`, async (route) => {

@@ -27,12 +27,13 @@ import uuid
 from dataclasses import dataclass, field
 from decimal import Decimal
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.invoice import Invoice
 from app.models.payment import Payment, PaymentRun
 from app.models.vendor import Vendor
+from app.services.payment_runs import one_currency
 from app.services.positive_pay_adapters import AchAuthorizationItem, CheckIssueItem
 from app.tenant import apply_entity_scope
 from app.utils.dates import utc_today
@@ -200,7 +201,7 @@ async def build_check_issue_items(
     run: PaymentRun,
     entity_id: uuid.UUID | None,
     account_number: str = "",
-) -> tuple[list[CheckIssueItem], Decimal, list[tuple[str, uuid.UUID, Decimal]]]:
+) -> tuple[list[CheckIssueItem], Decimal, list[tuple[str, uuid.UUID, Decimal]], str | None]:
     """Build the check-issue items for a payment run.
 
     Selects the run's cheque payments (``method == "check"``, excluding
@@ -211,7 +212,7 @@ async def build_check_issue_items(
     executed). ``account_number`` (the org's originating cheque account) is
     stamped onto every item by the caller.
 
-    Returns ``(items, total_amount, mapping)`` where ``mapping`` is a list of
+    Returns ``(items, total_amount, mapping, currency)`` where ``mapping`` is a list of
     ``(normalized_check_number, invoice_id, amount)`` triples so the CALLER can
     persist a point-in-time snapshot (see the check-issue file's
     ``meta["issued_map"]``). Because this is a LIVE query, calling it again
@@ -222,9 +223,17 @@ async def build_check_issue_items(
     generation time, and read that snapshot back rather than re-calling this
     function (see ``docs/positive-pay.md`` § Return processing). No account
     number is ever logged here.
+
+    ``currency`` is what ``total_amount`` is denominated in: the one currency
+    the included cheques' invoices agree on, or ``None`` when they carry none
+    or disagree (:func:`~app.services.payment_runs.one_currency`). A
+    ``Payment.amount`` is in its INVOICE's currency, not the org's reporting
+    currency, so stamping the reporting code on this total — as the file did
+    until 2026-09 — labelled a EUR cheque run in dollars for a USD-reporting
+    org.
     """
     query = (
-        select(Payment, Invoice.vendor_name)
+        select(Payment, Invoice.vendor_name, func.upper(Invoice.currency))
         .join(Invoice, Payment.invoice_id == Invoice.id)
         .where(
             Payment.payment_run_id == run.id,
@@ -241,8 +250,10 @@ async def build_check_issue_items(
     items: list[CheckIssueItem] = []
     total = Decimal("0")
     mapping: list[tuple[str, uuid.UUID, Decimal]] = []
+    currencies: list[str | None] = []
 
-    for payment, vendor_name in rows:
+    for payment, vendor_name, currency in rows:
+        currencies.append(currency)
         check_number = payment.reference or ""
         amount = payment.amount if payment.amount is not None else Decimal("0")
         items.append(
@@ -259,7 +270,7 @@ async def build_check_issue_items(
         if key:
             mapping.append((key, payment.invoice_id, amount))
 
-    return items, total, mapping
+    return items, total, mapping, one_currency(currencies)
 
 
 async def build_ach_authorization_items(

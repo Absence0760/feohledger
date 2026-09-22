@@ -53,6 +53,7 @@ from app.schemas.recurring_invoice import (
 )
 from app.services import recurring_invoices as svc
 from app.services.audit_dispatch import dispatch_audit
+from app.services.gl_chart import refuse_foreign_gl_codes
 from app.tenant import (
     apply_entity_scope,
     get_entity_id,
@@ -292,6 +293,12 @@ async def create_template(
 ):
     vendor_uuid = uuid.UUID(body.vendor_id) if body.vendor_id else None
     vendor_name = await _resolve_vendor_name(db, vendor_uuid)
+    # Every invoice this template raises is coded with this string and lands
+    # under the template's entity, so the code has to resolve in THAT entity's
+    # chart — refused here, once, rather than on each generated invoice.
+    await refuse_foreign_gl_codes(
+        db, organization_id=org_id, entity_id=entity_id, codes=[body.gl_account]
+    )
 
     template = RecurringInvoiceTemplate(
         organization_id=org_id,
@@ -363,6 +370,15 @@ async def update_template(
 ):
     template = await _get_scoped(db, template_id, entity_id)
     data = body.model_dump(exclude_unset=True)
+
+    new_gl = data.get("gl_account")
+    if new_gl and new_gl != template.gl_account:
+        await refuse_foreign_gl_codes(
+            db,
+            organization_id=template.organization_id,
+            entity_id=template.entity_id,
+            codes=[new_gl],
+        )
 
     changed: list[str] = []
     for field, value in data.items():

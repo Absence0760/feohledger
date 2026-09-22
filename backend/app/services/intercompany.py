@@ -24,6 +24,13 @@ Design notes:
 - The mirror enters via the normal workflow entry point
   (``workflow_engine.create_workflow_instance``) at status ``new``, exactly like
   any other freshly-created invoice — it is NOT slipped past the state machine.
+- **Segregation of duties crosses the entity boundary.** The mirror's terms are
+  the source's terms, copied verbatim, so everyone implicated in the source
+  payable (``approval_chain.implicated_actors``: its uploader plus its
+  ``segregation_actor_ids``) is implicated in the mirror, and the routing actor
+  — who created the mirror — is its uploader. Entities subdivide a tenant's
+  books; they are not a boundary a payable's authors stop being its authors at.
+  See docs/decisions.md §192.
 
 See backend/docs/inter-company.md.
 """
@@ -33,6 +40,7 @@ import uuid
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.invoice import Invoice, InvoiceStatus
+from app.services.approval_chain import implicated_actors
 from app.services.audit_dispatch import dispatch_audit
 from app.services.workflow_engine import create_workflow_instance
 
@@ -70,6 +78,20 @@ async def route_intercompany_invoice(
         if existing is not None:
             return existing
 
+    # Everyone implicated in the SOURCE payable is implicated in its mirror: the
+    # mirror's vendor, amount and currency are the source's, copied verbatim, so
+    # whoever shaped those terms shaped these. Both of the source's columns
+    # travel together — its uploader AND its `segregation_actor_ids` — through
+    # the same `implicated_actors` the approval gate refuses on, because
+    # carrying one without the other would bar a source *editor* from the mirror
+    # while leaving the source *uploader* free. Snapshotted now, like every
+    # other implicated set (§152): the source's terms are what they are at
+    # routing time. The routing actor lands in `uploaded_by_id` below and is
+    # dropped from the set, so no one is named twice (docs/decisions.md §192).
+    inherited = implicated_actors(invoice)
+    if actor_id is not None:
+        inherited.discard(str(actor_id))
+
     # Create the mirror payable under the counterparty entity. Amount stays an
     # exact Decimal (copied straight off the origin column). The invoice_number
     # is prefixed so the mirror is recognisable as the inter-company side.
@@ -82,16 +104,9 @@ async def route_intercompany_invoice(
         # one person who caused a live liability to exist under another entity
         # could also sign it off.
         uploaded_by_id=actor_id,
-        # The source invoice's implicated-actor set is deliberately NOT copied
-        # across the entity boundary. This mirror's segregation subject has
-        # always been its own creator — the routing actor — not the source's, and
-        # propagating only the set while still not propagating
-        # `uploaded_by_id` would make a source *editor* blocked here while the
-        # source *uploader* stays free, which is the inconsistent half of either
-        # choice. Whether shaping a payable under one entity should bar you from
-        # signing its mirror under another is an entity-scope question, not a
-        # recurring-template one; see docs/followups.md.
-        segregation_actor_ids=None,
+        # NULL rather than `[]` when nobody is left, the shape every other
+        # creation path writes for "nobody beyond the uploader".
+        segregation_actor_ids=sorted(inherited) or None,
         invoice_number=f"IC-{invoice.invoice_number}",
         vendor_name=invoice.vendor_name,
         amount=invoice.amount,

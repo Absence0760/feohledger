@@ -113,6 +113,23 @@ export function glAccountOptionLabel(
 }
 
 /**
+ * Whether the current view may correct or retire this row — the backend's
+ * `PATCH /api/gl-accounts/{id}` rule, which follows CREATE rather than read:
+ * the consolidated view (`selectedEntityId` null) may edit any row, while with
+ * an entity selected only that entity's OWN rows are editable. A shared row is
+ * visible in every entity's chart but belongs to all of them, so retiring it
+ * from inside one subsidiary would pull it out of every other's too — the
+ * backend 403s that, and `/gl-accounts` says where to go instead of offering a
+ * button that can only fail.
+ */
+export function canEditGlAccount(
+	account: Pick<GlAccount, 'entity_id'>,
+	selectedEntityId: string | null
+): boolean {
+	return selectedEntityId === null || account.entity_id === selectedEntityId;
+}
+
+/**
  * The four account types the domain documents (`models/gl_account.py`), used
  * for the `/gl-accounts` filter chips and the create form's select.
  *

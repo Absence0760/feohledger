@@ -122,9 +122,18 @@ column is suppressed: there is no second answer for it to give.
 `GlAccountModal` states which chart a new account will land in **before** it is
 created — shared when consolidated, the selected entity's own otherwise. That
 is not a courtesy: the backend reads it off `X-Entity-ID` rather than the
-request body, the difference is invisible in the form, and there is no PATCH on
-that router to correct it afterwards, so a silent sidebar selection would
-decide whether the account reaches one subsidiary or all of them.
+request body, the difference is invisible in the form, and the PATCH
+deliberately cannot move a row between charts afterwards (a move is a create
+plus a retire), so a silent sidebar selection would decide whether the account
+reaches one subsidiary or all of them.
+
+The page's **Edit** / **Retire** / **Reactivate** row actions (admin |
+ap_manager, `PATCH /api/gl-accounts/{id}`) follow the PATCH's scoping rule
+rather than the read's: in the consolidated view every row offers them, while
+with an entity selected only that entity's OWN rows do — a shared row is
+visible in the chart but belongs to every entity, so the backend 403s it, and
+the row says "Edit from All entities" instead of offering a button that can
+only fail (`types/glAccount.ts::canEditGlAccount`).
 
 ### Vendor matching: entity ∪ NULL, for a different reason
 
@@ -209,9 +218,9 @@ Three primitives back this (all in `app/tenant.py`):
 | Payments | `GET /payments`, `/payments/queue`, `/payments/summary`, `/payments/runs/`; every by-id route (`services/payments` `_get_scoped_payment` / `_get_scoped_run`); **and the invoices `POST /payments/runs` may stage** (`create_payment_run_for_invoices`'s `scope_entity_id`) | payment → its invoice's; payment run → write-entity (each payment still follows its own invoice) |
 | Purchase orders | `GET /purchase-orders` | ERP sync → write-entity |
 | Goods receipts | `GET /goods-receipts` | (no API create path) |
-| Credit memos | `GET /credit-memos` | create → the vendor's entity |
+| Credit memos | `GET /credit-memos`, `/credit-memos/counts` | create → the vendor's entity; a `PATCH` that changes the vendor moves the memo with it (the new vendor must be reachable from the selected entity, as on create). Both application paths also refuse a memo whose entity differs from the invoice's — `X-Entity-ID` confines both sides only when an entity is selected, so the consolidated view needed the explicit check (NULL on either side admitted, as unstamped) |
 | Exceptions | `GET /exceptions`, `/exceptions/summary` | all 4 creation sites (warnings, extraction dup/fail, review reject) → the invoice's entity |
-| GL accounts | `GET /gl-accounts` — **shared (NULL) ∪ entity's own** (`include_shared=True`) | create + ERP sync use `get_entity_id`: consolidated view → NULL (shared), entity selected → entity-specific. **`PATCH /gl-accounts/{id}` follows the CREATE rule, not the read rule**: entity selected → only that entity's OWN rows (a shared row is visible in its chart but belongs to every entity, so editing it there would reach every subsidiary — 403, edit it from the consolidated view that created it); consolidated → any row. `entity_id` itself is not patchable — a move between charts is a create + deactivate |
+| GL accounts | `GET /gl-accounts` — **shared (NULL) ∪ entity's own** (`include_shared=True`); `?chart_entity_id=` asks for one named entity's chart instead of the header's (the invoice GL pickers) | create + ERP sync use `get_entity_id`: consolidated view → NULL (shared), entity selected → entity-specific. **`PATCH /gl-accounts/{id}` follows the CREATE rule, not the read rule**: entity selected → only that entity's OWN rows (a shared row is visible in its chart but belongs to every entity, so editing it there would reach every subsidiary — 403, edit it from the consolidated view that created it); consolidated → any row. `entity_id` itself is not patchable — a move between charts is a create + deactivate |
 | Virtual cards | `GET /cards`, `/cards/dashboard` (active + spend) | generate → the invoice's entity |
 | Dashboard | `GET /dashboard` — every Invoice/Payment/Exception query | n/a |
 | CFO analytics (2b) | `GET /analytics/{cashflow_forecast,cashflow_whatif,cash_position,cfo,drill/spend_concentration,drill/dpo,export/{report}}` + `POST /analytics/forecast_variance` — every Invoice/Payment/PaymentSchedule(via Invoice)/PurchaseOrder/Exception query | n/a |
@@ -341,13 +350,42 @@ approval routing rules, the 1099 box map, the vendor GL priors and the extractio
 catalog all read that string as the code. Moving the invoice pickers to the uuid
 would write a uuid into that column and break every one of them.
 
-That leaves one gap the label makes visible rather than closes: in the
-consolidated view a user can still pick subsidiary B's `6000` for a subsidiary-A
-invoice, and the stored string `"6000"` then resolves against A's chart. Closing
-it means scoping the picker to the invoice's own effective chart, which the
-client cannot do today — `InvoiceResponse` does not carry the invoice's
-`entity_id` (only `counterparty_entity_id`), and no manual write validates
-`gl_account` against the chart the way `gl_recode` does for a bulk re-code.
+#### An invoice's code must resolve in the invoice's own chart
+
+The label made one gap visible without closing it: in the consolidated view a
+user could pick subsidiary B's `6000` for a subsidiary-A invoice, every manual
+write accepted it, and the stored string `"6000"` then resolved against A's
+chart. Both halves are now closed.
+
+- **The server refuses it.** `services/gl_chart.refuse_foreign_gl_codes` 422s a
+  code that exists ONLY in another entity's chart, on every path that writes the
+  column: `POST /api/invoices` (against the entity the invoice will be filed
+  under — the selection, else the default), `PATCH /api/invoices/{id}` and
+  `PUT …/line-items` (against the invoice's own `entity_id`, never the sidebar
+  selection), approve-with-corrections (so the GL-coding exception agent too —
+  its coordinator escalates on the refusal), CSV import (a per-row error, raised
+  before the row's vendor is resolved) and recurring-template create/PATCH
+  (against the template's entity, which every generated invoice inherits). Bulk
+  re-code already validated per invoice entity. Ownership is read over retired
+  rows too: a code the invoice's own chart holds only as a retired account still
+  resolves to that account, so it is not "another entity's".
+- **Only a code NEW to the row is checked.** An invoice coded across entities
+  before the check existed stays editable: re-saving its stored code, or
+  carrying a line's code over through the line-items replace, is not a coding
+  decision.
+- **The pickers offer only the invoice's chart.** `InvoiceResponse` now carries
+  the invoice's own `entity_id`, and both invoice pickers fetch
+  `GET /api/gl-accounts?chart_entity_id=<it>` (`api/glAccounts.ts::listInvoiceChart`)
+  — the chart by entity, not by header, since neither the consolidated view nor
+  a different selected entity is the invoice's chart. `CreateInvoiceModal` asks
+  for the entity the new invoice will land under (`entityStore.writeEntityId`,
+  the frontend mirror of `get_write_entity_id`). A NULL-entity invoice sees the
+  shared chart alone, the rule `gl_recode._ActiveChart` already applied.
+
+What is deliberately NOT refused here is a code in **no** chart (hand-typed, or
+on a retired account): that question has its own trade-offs — a historical CSV
+import carries codes whose accounts are long gone — and is tracked separately in
+`docs/followups.md`. See `docs/decisions.md` §194.
 
 ### Per-entity workflow selection
 
@@ -377,6 +415,11 @@ generated under the counterparty entity so both subsidiaries' books reflect it.
 `entity_id = counterparty_entity_id`, copies the **exact `Decimal` amount** /
 currency / vendor, prefixes the number `IC-`, enters the normal workflow, and
 writes a PII-free `invoice.intercompany_routed` audit row on **both** invoices.
+Segregation of duties is **not** scoped by entity: the router is the mirror's
+uploader, and everyone implicated in the source payable (its uploader and its
+`segregation_actor_ids`) is carried onto the mirror's `segregation_actor_ids`,
+so shaping a payable under one entity bars you from signing its mirror under
+another (`docs/decisions.md` §192).
 It is **idempotent** on `intercompany_mirror_id` — a second call returns the
 existing mirror, never a duplicate. Surfaced at `POST
 /api/invoices/{id}/route-intercompany` (admin / ap_manager; self-billing → 400).
@@ -386,8 +429,11 @@ See `backend/docs/inter-company.md`.
 
 `GET /api/analytics/by-entity` (admin / CFO) returns a per-entity rollup (total
 spend, outstanding, invoice count, open exceptions, open-PO amount — money as
-string-Decimal) plus a `consolidated` block computed with `entity_id=None` as a
-cross-check (it equals the sum across entities). It deliberately **ignores
+string-Decimal; spend and outstanding also in the org's reporting currency,
+which is what the UI renders) plus a `consolidated` block computed with
+`entity_id=None` as a cross-check (it equals the sum across entities). Field by
+field, with which currency each figure is in: `backend/docs/analytics.md`
+§ Consolidated reporting across entities. It deliberately **ignores
 `X-Entity-ID`** — it reports every entity at once — and reuses the same scoped
 helpers as `/analytics/cfo`. The `/cfo` dashboard renders it as a "By entity"
 breakdown table (hidden for single-entity tenants).

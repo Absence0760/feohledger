@@ -53,9 +53,10 @@ class PositivePayFileResponse(BaseModel):
     payment_run_id: str | None
     item_count: int
     total_amount: MoneyAmount
-    # Currency ``total_amount`` is denominated in — the org's reporting (home)
-    # currency stamped at generation. ``None`` for legacy rows created before
-    # the column existed; the UI falls back to the org default for those.
+    # Currency ``total_amount`` is denominated in — for a check-issue file the
+    # one currency its cheques' invoices agree on, stamped at generation.
+    # ``None`` for legacy rows and for cheques that disagree: NOT a licence to
+    # substitute a default, so the UI renders the total bare (decisions §196).
     currency: str | None
     account_last4: str | None
     file_key: str | None

@@ -236,6 +236,7 @@ export const messages = {
 	'common.search': 'Rechercher',
 	'common.clear': 'Effacer',
 	'common.apply': 'Appliquer',
+	'common.tableRegion': 'Tableau de données',
 
 	// Bulk selection, shared by every list that offers it — see en.ts.
 
@@ -938,11 +939,15 @@ export const messages = {
 	'exceptions.title': 'Exceptions',
 	'exceptions.tab.queue': "File d'attente",
 	'exceptions.tab.agents': 'Agents IA',
+	'exceptions.tab.aria': 'Vues des exceptions',
 	'exceptions.filter.open': 'Ouvert',
 	'exceptions.filter.escalated': 'Escaladé',
 	'exceptions.filter.resolved': 'Résolu',
 	'exceptions.filter.dismissed': 'Rejeté',
 	'exceptions.filter.allTypes': 'Tous les types',
+	'exceptions.filter.allSeverities': 'Toutes les gravités',
+	'exceptions.search.placeholder': 'Rechercher un n° de facture ou un fournisseur...',
+	'exceptions.search.aria': 'Rechercher des exceptions par numéro de facture ou fournisseur',
 	'exceptions.col.type': 'Type',
 	'exceptions.col.severity': 'Grav.',
 
@@ -977,6 +982,26 @@ export const messages = {
 	'exceptions.bulkModal.hint': 'Toutes les lignes sélectionnées recevront la même note de résolution. Les lignes déjà dans un état terminal sont ignorées côté serveur, ainsi que toute ligne dont le signalement vous désigne comme partie prenante : escaladez celles-là plutôt.',
 	'exceptions.bulk.segregationSkipped': '{n, plural, one {# ligne reste ouverte : séparation des tâches — vous êtes enregistré comme partie prenante de ce paiement ou de son signalement. Escaladez-la, ou demandez à un autre utilisateur de décider.} other {# lignes restent ouvertes : séparation des tâches — vous êtes enregistré comme partie prenante de ces paiements ou de leurs signalements. Escaladez-les, ou demandez à un autre utilisateur de décider.}}',
 	'exceptions.bulkModal.notePlaceholder': 'Appliquée à chaque ligne sélectionnée',
+	'exceptions.toast.loadFailed': 'Échec du chargement des exceptions',
+	'exceptions.toast.noteRequired': 'Une note de résolution est requise',
+	'exceptions.toast.actionFailed': "L'action a échoué",
+	'exceptions.toast.resolved': 'Exception résolue',
+	'exceptions.toast.escalated': 'Exception escaladée',
+	'exceptions.toast.dismissed': 'Exception rejetée',
+	'exceptions.toast.bulkResolved': '{n, plural, one {# exception résolue} other {# exceptions résolues}}',
+	'exceptions.toast.bulkEscalated': '{n, plural, one {# exception escaladée} other {# exceptions escaladées}}',
+	'exceptions.toast.bulkDismissed': '{n, plural, one {# exception rejetée} other {# exceptions rejetées}}',
+	'exceptions.toast.bulkResolvedSkipped':
+		'{n, plural, one {# exception résolue} other {# exceptions résolues}}, {skipped, plural, one {# ignorée} other {# ignorées}}.',
+	'exceptions.toast.bulkEscalatedSkipped':
+		'{n, plural, one {# exception escaladée} other {# exceptions escaladées}}, {skipped, plural, one {# ignorée} other {# ignorées}}.',
+	'exceptions.toast.bulkDismissedSkipped':
+		'{n, plural, one {# exception rejetée} other {# exceptions rejetées}}, {skipped, plural, one {# ignorée} other {# ignorées}}.',
+	'exceptions.toast.selectedAllMatching':
+		'{n, plural, one {# exception correspondante sélectionnée} other {# exceptions correspondantes sélectionnées}}',
+	'exceptions.toast.selectAllTruncated':
+		'Les {shown} premières sur {total} correspondantes sélectionnées — affinez vos filtres pour sélectionner le reste.',
+	'exceptions.toast.selectAllFailed': 'Échec de la sélection de toutes les correspondances',
 
 	'exceptions.type.duplicate': 'Facture en doublon',
 	'exceptions.type.poMismatch': 'Écart avec la commande',
@@ -2598,6 +2623,22 @@ export const messages = {
 	'glAccounts.createModal.scopeEntity': 'Ce compte appartiendra uniquement à {entity}. Basculez sur Toutes les entités pour créer un compte partagé.',
 	'glAccounts.createModal.toast.created': 'Compte général {code} créé',
 	'glAccounts.createModal.toast.createFailed': 'Impossible de créer le compte',
+	'glAccounts.row.edit': 'Modifier',
+	'glAccounts.row.editAria': 'Modifier le compte général {code}',
+	'glAccounts.row.retire': 'Désactiver',
+	'glAccounts.row.retireAria': 'Désactiver le compte général {code}',
+	'glAccounts.row.confirm': 'Confirmer',
+	'glAccounts.row.reactivate': 'Réactiver',
+	'glAccounts.row.reactivateAria': 'Réactiver le compte général {code}',
+	'glAccounts.row.otherChart': 'Modifier depuis Toutes les entités',
+	'glAccounts.row.toast.retired': 'Compte {code} désactivé. Les sélecteurs ne le proposent plus ; les factures déjà imputées conservent le code.',
+	'glAccounts.row.toast.reactivated': 'Compte {code} réactivé',
+	'glAccounts.row.toast.failed': 'Impossible de mettre à jour le compte',
+	'glAccounts.editModal.aria': 'Modifier le compte général',
+	'glAccounts.editModal.title': 'Modifier le compte général',
+	'glAccounts.editModal.save': 'Enregistrer',
+	'glAccounts.editModal.codeFixed': 'Le code ne peut pas être modifié : les factures l’enregistrent sous forme de texte, et le renommer rendrait orphelines toutes les lignes déjà imputées. Pour remplacer un compte, créez le nouveau puis désactivez celui-ci.',
+	'glAccounts.editModal.toast.saved': 'Compte général {code} mis à jour',
 
 	// Purchase Orders (routes/purchase-orders/+page.svelte)
 	'purchaseOrders.title': 'Bons de commande',
@@ -2936,7 +2977,11 @@ export const messages = {
 	'byEntity.loading': 'Chargement…',
 	'byEntity.loadFailed': 'Échec du chargement de la ventilation par entité',
 	'byEntity.unconverted':
-		'Exclues du total consolidé « En cours » : {n, plural, one {# facture ouverte} other {# factures ouvertes}} sans taux de change verrouillé vers {currency}.',
+		'En cours inclut au nominal {n, plural, one {# facture ouverte} other {# factures ouvertes}} sans taux de change verrouillé vers {currency} — les totaux mélangent donc des devises.',
+	'byEntity.unconvertedSpend':
+		'Les dépenses incluent au nominal {n, plural, one {# facture} other {# factures}} sans taux de change verrouillé vers {currency} — les totaux mélangent donc des devises.',
+	'byEntity.openPoNoCurrency':
+		'Les commandes n\'enregistrent pas encore de devise : les commandes ouvertes sont donc affichées sans devise.',
 
 	// Rapports planifiés (components/analytics/ScheduledReportsPanel.svelte)
 	'scheduledReports.heading': 'Rapports planifiés',
@@ -3406,6 +3451,9 @@ export const messages = {
 	'auth.signup.successSpamLink': 'réessayez',
 	'auth.signup.heading': 'Créez votre espace de travail',
 	'auth.signup.subtitle': 'Obtenez votre propre espace de travail AP en moins d\'une minute.',
+	'auth.signup.closedHeading': 'Les inscriptions sont fermées',
+	'auth.signup.closedBody':
+		'Sur cette instance, les nouveaux espaces de travail sont créés uniquement sur invitation. Si votre organisation utilise déjà FeohLedger, connectez-vous à l\'adresse de votre espace de travail.',
 	'auth.signup.failed': 'Échec de l\'inscription.',
 	'auth.signup.captchaRequired': 'Veuillez compléter le captcha.',
 	'auth.signup.companyName': 'Nom de l\'entreprise',
@@ -4482,15 +4530,23 @@ export const messages = {
 	'creditMemos.createModal.aria': 'Nouvel avoir',
 	'creditMemos.createModal.currency':
 		'Devise',
+	'creditMemos.createModal.currencyFromInvoice': 'Reprise de la facture à laquelle cet avoir est appliqué.',
 	'creditMemos.createModal.currencyHint':
-		'Un avoir ne peut être appliqué qu\'à une facture dans la même devise, et il n\'est plus modifiable ensuite.',
+		'Un avoir ne peut être appliqué qu\'à une facture dans la même devise. Il reste modifiable tant qu\'il n\'est pas appliqué.',
 	'creditMemos.createModal.create': 'Créer',
+	'creditMemos.createModal.invoice': 'Appliquer à la facture',
+	'creditMemos.createModal.invoiceHint': 'Si vous choisissez une facture, l\'avoir lui est appliqué dès sa création. Laissez vide pour l\'appliquer plus tard.',
+	'creditMemos.createModal.invoiceNeedsVendor': 'Choisissez un fournisseur pour voir ses factures.',
 	'creditMemos.createModal.memoNumber': 'Numéro d\'avoir',
+	'creditMemos.createModal.noInvoice': 'Ne pas appliquer maintenant',
 	'creditMemos.createModal.reason': 'Motif',
 	'creditMemos.createModal.reasonPlaceholder': 'ex. Marchandise défectueuse retournée',
 	'creditMemos.createModal.selectVendor': 'Sélectionner un fournisseur…',
 	'creditMemos.createModal.title': 'Nouvel avoir',
 	'creditMemos.createModal.vendor': 'Fournisseur',
+	'creditMemos.editModal.aria': 'Modifier l\'avoir',
+	'creditMemos.editModal.hint': 'Un avoir peut être corrigé tant qu\'il n\'est pas appliqué. Chaque modification est consignée dans la piste d\'audit.',
+	'creditMemos.editModal.title': 'Modifier l\'avoir',
 	'creditMemos.empty': 'Aucun avoir.',
 	'creditMemos.empty.filtered': 'Aucun avoir ne correspond à ce filtre.',
 	'creditMemos.loadMore': 'Charger plus ({shown} sur {total})',
@@ -4501,6 +4557,9 @@ export const messages = {
 	'creditMemos.row.apply': 'Appliquer',
 	'creditMemos.row.void': 'Annuler',
 	'creditMemos.row.confirm': 'Confirmer',
+	'creditMemos.row.edit': 'Modifier',
+	'creditMemos.search.aria': 'Rechercher des avoirs',
+	'creditMemos.search.placeholder': 'Rechercher un n° d\'avoir ou un fournisseur…',
 	'creditMemos.showingAll': 'Affichage de tous les {total, plural, one {# avoir} other {# avoirs}}',
 	'creditMemos.status.applied': 'Appliqué',
 	'creditMemos.status.open': 'Ouvert',
@@ -4511,6 +4570,8 @@ export const messages = {
 	'creditMemos.toast.createFailed': 'Échec de la création',
 	'creditMemos.toast.created': 'Avoir créé',
 	'creditMemos.toast.loadFailed': 'Échec du chargement des avoirs',
+	'creditMemos.toast.updateFailed': 'Échec de la mise à jour',
+	'creditMemos.toast.updated': 'Avoir mis à jour',
 	'creditMemos.toast.voidFailed': 'Échec de l\'annulation',
 	'creditMemos.toast.voided': 'Avoir annulé',
 	'csvImport.chooseFile': 'Choisir un fichier…',

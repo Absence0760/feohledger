@@ -58,6 +58,35 @@
       "count": { "type": "int" }
     }
   },
+  "partialConversionCurrencyFallback": "the reporting currency",
+  "dashboardKpiUnconverted": "{label}: partial — {count, plural, one {{count} invoice} other {{count} invoices}} with no exchange rate into {currency}, counted at face value, so the total mixes currencies by that much.",
+  "@dashboardKpiUnconverted": {
+    "placeholders": {
+      "label": { "type": "String" },
+      "count": { "type": "int" },
+      "currency": { "type": "String" }
+    }
+  },
+  "dashboardAgingUnconverted": "Partial: {count, plural, one {{count} invoice} other {{count} invoices}} with no exchange rate into {currency}, counted at face value — the bands below mix currencies by that much.",
+  "@dashboardAgingUnconverted": {
+    "placeholders": {
+      "count": { "type": "int" },
+      "currency": { "type": "String" }
+    }
+  },
+  "dashboardTopVendorsUnconverted": "Partial: {count, plural, one {{count} invoice} other {{count} invoices}} with no exchange rate into {currency}, counted at face value — so these vendors are not all ranked in the same currency. Book the missing rate before acting on the order.",
+  "@dashboardTopVendorsUnconverted": {
+    "placeholders": {
+      "count": { "type": "int" },
+      "currency": { "type": "String" }
+    }
+  },
+  "dashboardVendorFaceValueCount": "{count, plural, one {{count} at face value} other {{count} at face value}}",
+  "@dashboardVendorFaceValueCount": {
+    "placeholders": {
+      "count": { "type": "int" }
+    }
+  },
 
   "invoicesTitle": "Invoices",
   "invoicesSearchHint": "Search invoices...",
@@ -751,6 +780,20 @@
   "@cashFlowLowBalanceAlertLabel": {
     "placeholders": {
       "message": { "type": "String" }
+    }
+  },
+  "cashFlowForecastUnconverted": "Partial: {count, plural, one {{count} invoice} other {{count} invoices}} with no exchange rate into {currency}, counted at face value — these outflows, and the committed and pending totals above, mix currencies by that much.",
+  "@cashFlowForecastUnconverted": {
+    "placeholders": {
+      "count": { "type": "int" },
+      "currency": { "type": "String" }
+    }
+  },
+  "cashFlowPositionUnconverted": "Unconverted: {count, plural, one {{count} invoice} other {{count} invoices}} with no exchange rate into {currency}, counted at face value — so the running balance below, and the projected end balance above, mix currencies. Book the missing rate before acting on these figures.",
+  "@cashFlowPositionUnconverted": {
+    "placeholders": {
+      "count": { "type": "int" },
+      "currency": { "type": "String" }
     }
   },
 

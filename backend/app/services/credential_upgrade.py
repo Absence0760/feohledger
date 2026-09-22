@@ -1,8 +1,11 @@
-"""Re-hash a just-verified credential that is still stored under an older scheme.
+"""Re-hash a just-verified credential stored under an older scheme or a lower cost.
 
 `pwd_context` verifies three schemes and writes exactly one (`bcrypt_sha256`
-v2). `needs_update` names the gap between them; this module is the only thing
-that closes it, and it has to run here because **the only moment a stored
+v2, at `DEFAULT_ROUNDS`). `needs_update` names the gap between what is stored
+and what would be written today — a deprecated scheme, or the current scheme
+below the configured bcrypt cost, so raising the cost migrates existing rows
+rather than only new ones. This module is the only thing that closes that gap,
+and it has to run here because **the only moment a stored
 password's plaintext exists is the instant a login has just verified it**.
 There is no offline migration for a password column, and asking every account
 to reset is the user-visible cost `docs/decisions.md` §151 was written to avoid.
@@ -45,7 +48,8 @@ Four properties, each a decision rather than an implementation detail
   had just retired.
 * **Nothing is retained and nothing is logged.** The plaintext is a parameter,
   the new digest a local; neither outlives the call, and the log line carries an
-  account id and two scheme names, never a secret, a digest, or an email.
+  account id and the two scheme names and costs, never a secret, a digest, or
+  an email.
 
 No audit row: a status change gets one, and this is not one. The credential is
 unchanged — same secret, same owner, same validity — only its storage encoding
@@ -75,7 +79,8 @@ Credential = User | VendorUser
 
 async def upgrade_password_hash(db: AsyncSession, account: Credential, password: str) -> bool:
     """Re-hash `password` onto `account` if its stored hash is on a scheme we
-    no longer write. Returns True only when a row was actually rewritten.
+    no longer write, or below the configured bcrypt cost. Returns True only
+    when a row was actually rewritten.
 
     `password` MUST have just verified against `account.hashed_password`. This
     function deliberately does not re-verify — a second bcrypt on the login
@@ -175,10 +180,12 @@ async def upgrade_password_hash(db: AsyncSession, account: Credential, password:
     # let the next flush re-emit the write WITHOUT the compare-and-swap guard.
     set_committed_value(account, "hashed_password", fresh)
     logger.info(
-        "upgraded the stored password hash for %s %s: %s -> %s",
+        "upgraded the stored password hash for %s %s: %s (cost %s) -> %s (cost %s)",
         who,
         account_id,
         scheme,
+        pwd_context.rounds_of(stored),
         pwd_context.scheme,
+        pwd_context.rounds,
     )
     return True

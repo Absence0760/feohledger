@@ -154,6 +154,53 @@ class AppLocalizationsDe extends AppLocalizations {
   }
 
   @override
+  String get partialConversionCurrencyFallback => 'die Berichtswährung';
+
+  @override
+  String dashboardKpiUnconverted(String label, int count, String currency) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count Rechnungen',
+      one: '$count Rechnung',
+    );
+    return '$label: teilweise – $_temp0 ohne Wechselkurs in $currency, zum Nennwert erfasst; in diesem Umfang mischt die Summe Währungen.';
+  }
+
+  @override
+  String dashboardAgingUnconverted(int count, String currency) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count Rechnungen',
+      one: '$count Rechnung',
+    );
+    return 'Teilweise: $_temp0 ohne Wechselkurs in $currency, zum Nennwert erfasst – in diesem Umfang mischen die Bänder unten Währungen.';
+  }
+
+  @override
+  String dashboardTopVendorsUnconverted(int count, String currency) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count Rechnungen',
+      one: '$count Rechnung',
+    );
+    return 'Teilweise: $_temp0 ohne Wechselkurs in $currency, zum Nennwert erfasst – diese Lieferanten sind daher nicht alle in derselben Währung gereiht. Erfassen Sie den fehlenden Kurs, bevor Sie sich auf die Reihenfolge stützen.';
+  }
+
+  @override
+  String dashboardVendorFaceValueCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count zum Nennwert',
+      one: '$count zum Nennwert',
+    );
+    return '$_temp0';
+  }
+
+  @override
   String get invoicesTitle => 'Rechnungen';
 
   @override
@@ -1454,6 +1501,28 @@ class AppLocalizationsDe extends AppLocalizations {
   @override
   String cashFlowLowBalanceAlertLabel(String message) {
     return 'Warnung: niedriger Kontostand. $message';
+  }
+
+  @override
+  String cashFlowForecastUnconverted(int count, String currency) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count Rechnungen',
+      one: '$count Rechnung',
+    );
+    return 'Teilweise: $_temp0 ohne Wechselkurs in $currency, zum Nennwert erfasst – in diesem Umfang mischen diese Abflüsse und die fest zugesagten und ausstehenden Summen oben Währungen.';
+  }
+
+  @override
+  String cashFlowPositionUnconverted(int count, String currency) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count Rechnungen',
+      one: '$count Rechnung',
+    );
+    return 'Nicht umgerechnet: $_temp0 ohne Wechselkurs in $currency, zum Nennwert gezählt — der laufende Saldo unten und das prognostizierte Ende oben vermischen dadurch Währungen. Erfassen Sie den fehlenden Kurs, bevor Sie auf Basis dieser Zahlen handeln.';
   }
 
   @override

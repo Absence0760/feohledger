@@ -153,6 +153,53 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
+  String get partialConversionCurrencyFallback => 'the reporting currency';
+
+  @override
+  String dashboardKpiUnconverted(String label, int count, String currency) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count invoices',
+      one: '$count invoice',
+    );
+    return '$label: partial — $_temp0 with no exchange rate into $currency, counted at face value, so the total mixes currencies by that much.';
+  }
+
+  @override
+  String dashboardAgingUnconverted(int count, String currency) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count invoices',
+      one: '$count invoice',
+    );
+    return 'Partial: $_temp0 with no exchange rate into $currency, counted at face value — the bands below mix currencies by that much.';
+  }
+
+  @override
+  String dashboardTopVendorsUnconverted(int count, String currency) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count invoices',
+      one: '$count invoice',
+    );
+    return 'Partial: $_temp0 with no exchange rate into $currency, counted at face value — so these vendors are not all ranked in the same currency. Book the missing rate before acting on the order.';
+  }
+
+  @override
+  String dashboardVendorFaceValueCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count at face value',
+      one: '$count at face value',
+    );
+    return '$_temp0';
+  }
+
+  @override
   String get invoicesTitle => 'Invoices';
 
   @override
@@ -1434,6 +1481,28 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String cashFlowLowBalanceAlertLabel(String message) {
     return 'Low balance alert. $message';
+  }
+
+  @override
+  String cashFlowForecastUnconverted(int count, String currency) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count invoices',
+      one: '$count invoice',
+    );
+    return 'Partial: $_temp0 with no exchange rate into $currency, counted at face value — these outflows, and the committed and pending totals above, mix currencies by that much.';
+  }
+
+  @override
+  String cashFlowPositionUnconverted(int count, String currency) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count invoices',
+      one: '$count invoice',
+    );
+    return 'Unconverted: $_temp0 with no exchange rate into $currency, counted at face value — so the running balance below, and the projected end balance above, mix currencies. Book the missing rate before acting on these figures.';
   }
 
   @override

@@ -31,7 +31,7 @@ String _money(String display, String? currency) =>
 ///
 /// `payment_runs.total_amount` is a plain `SUM(Payment.amount)` with no
 /// currency column, but a run cannot span two currencies — the builder 422s
-/// that — so `api/payments.py::_one_currency` derives the code from the legs
+/// that — so `services/payment_runs.py::one_currency` derives the code from the legs
 /// and serves it on both the list and the detail. `PaymentRun.currency` is
 /// `null` only where that proof fails (no payments, no invoice currency, a
 /// legacy run whose legs disagree); [formatMoneyString] then renders the

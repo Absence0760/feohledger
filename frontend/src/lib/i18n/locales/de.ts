@@ -234,6 +234,7 @@ export const messages = {
 	'common.search': 'Suchen',
 	'common.clear': 'Löschen',
 	'common.apply': 'Anwenden',
+	'common.tableRegion': 'Datentabelle',
 
 	// Bulk selection, shared by every list that offers it — see en.ts.
 
@@ -938,11 +939,15 @@ export const messages = {
 	'exceptions.title': 'Ausnahmen',
 	'exceptions.tab.queue': 'Warteschlange',
 	'exceptions.tab.agents': 'KI-Agenten',
+	'exceptions.tab.aria': 'Ausnahmeansichten',
 	'exceptions.filter.open': 'Offen',
 	'exceptions.filter.escalated': 'Eskaliert',
 	'exceptions.filter.resolved': 'Gelöst',
 	'exceptions.filter.dismissed': 'Verworfen',
 	'exceptions.filter.allTypes': 'Alle Typen',
+	'exceptions.filter.allSeverities': 'Alle Schweregrade',
+	'exceptions.search.placeholder': 'Rechnungsnr. oder Lieferant suchen...',
+	'exceptions.search.aria': 'Ausnahmen nach Rechnungsnummer oder Lieferant durchsuchen',
 	'exceptions.col.type': 'Typ',
 	'exceptions.col.severity': 'Schw.',
 
@@ -977,6 +982,26 @@ export const messages = {
 	'exceptions.bulkModal.hint': 'Alle ausgewählten Zeilen erhalten dieselbe Lösungsnotiz. Zeilen, die sich bereits in einem Endzustand befinden, werden serverseitig übersprungen — ebenso jede Zeile, bei deren Markierung Sie als beteiligt erfasst sind; eskalieren Sie diese stattdessen.',
 	'exceptions.bulk.segregationSkipped': '{n, plural, one {# Zeile bleibt offen: Funktionstrennung — Sie sind als an dieser Zahlung oder an ihrer Markierung beteiligt erfasst. Eskalieren Sie sie oder lassen Sie einen anderen Benutzer entscheiden.} other {# Zeilen bleiben offen: Funktionstrennung — Sie sind als an diesen Zahlungen oder an ihren Markierungen beteiligt erfasst. Eskalieren Sie sie oder lassen Sie einen anderen Benutzer entscheiden.}}',
 	'exceptions.bulkModal.notePlaceholder': 'Auf jede ausgewählte Zeile angewendet',
+	'exceptions.toast.loadFailed': 'Ausnahmen konnten nicht geladen werden',
+	'exceptions.toast.noteRequired': 'Eine Lösungsnotiz ist erforderlich',
+	'exceptions.toast.actionFailed': 'Aktion fehlgeschlagen',
+	'exceptions.toast.resolved': 'Ausnahme gelöst',
+	'exceptions.toast.escalated': 'Ausnahme eskaliert',
+	'exceptions.toast.dismissed': 'Ausnahme verworfen',
+	'exceptions.toast.bulkResolved': '{n, plural, one {# Ausnahme gelöst} other {# Ausnahmen gelöst}}',
+	'exceptions.toast.bulkEscalated': '{n, plural, one {# Ausnahme eskaliert} other {# Ausnahmen eskaliert}}',
+	'exceptions.toast.bulkDismissed': '{n, plural, one {# Ausnahme verworfen} other {# Ausnahmen verworfen}}',
+	'exceptions.toast.bulkResolvedSkipped':
+		'{n, plural, one {# Ausnahme gelöst} other {# Ausnahmen gelöst}}, {skipped, plural, one {# übersprungen} other {# übersprungen}}.',
+	'exceptions.toast.bulkEscalatedSkipped':
+		'{n, plural, one {# Ausnahme eskaliert} other {# Ausnahmen eskaliert}}, {skipped, plural, one {# übersprungen} other {# übersprungen}}.',
+	'exceptions.toast.bulkDismissedSkipped':
+		'{n, plural, one {# Ausnahme verworfen} other {# Ausnahmen verworfen}}, {skipped, plural, one {# übersprungen} other {# übersprungen}}.',
+	'exceptions.toast.selectedAllMatching':
+		'{n, plural, one {Alle # passende Ausnahme ausgewählt} other {Alle # passenden Ausnahmen ausgewählt}}',
+	'exceptions.toast.selectAllTruncated':
+		'Die ersten {shown} von {total} passenden ausgewählt — schränken Sie die Filter ein, um die übrigen auszuwählen.',
+	'exceptions.toast.selectAllFailed': 'Auswahl aller passenden fehlgeschlagen',
 
 	'exceptions.type.duplicate': 'Doppelte Rechnung',
 	'exceptions.type.poMismatch': 'Bestellabweichung',
@@ -2599,6 +2624,22 @@ export const messages = {
 	'glAccounts.createModal.scopeEntity': 'Dieses Konto gehört ausschließlich zu {entity}. Wechseln Sie zu „Alle Einheiten“, um ein gemeinsames Konto anzulegen.',
 	'glAccounts.createModal.toast.created': 'Sachkonto {code} angelegt',
 	'glAccounts.createModal.toast.createFailed': 'Konto konnte nicht angelegt werden',
+	'glAccounts.row.edit': 'Bearbeiten',
+	'glAccounts.row.editAria': 'Sachkonto {code} bearbeiten',
+	'glAccounts.row.retire': 'Stilllegen',
+	'glAccounts.row.retireAria': 'Sachkonto {code} stilllegen',
+	'glAccounts.row.confirm': 'Bestätigen',
+	'glAccounts.row.reactivate': 'Reaktivieren',
+	'glAccounts.row.reactivateAria': 'Sachkonto {code} reaktivieren',
+	'glAccounts.row.otherChart': 'In „Alle Einheiten“ bearbeiten',
+	'glAccounts.row.toast.retired': 'Sachkonto {code} stillgelegt. Auswahllisten bieten es nicht mehr an; bereits darauf kontierte Rechnungen behalten den Code.',
+	'glAccounts.row.toast.reactivated': 'Sachkonto {code} reaktiviert',
+	'glAccounts.row.toast.failed': 'Konto konnte nicht aktualisiert werden',
+	'glAccounts.editModal.aria': 'Sachkonto bearbeiten',
+	'glAccounts.editModal.title': 'Sachkonto bearbeiten',
+	'glAccounts.editModal.save': 'Änderungen speichern',
+	'glAccounts.editModal.codeFixed': 'Der Code kann nicht geändert werden: Rechnungen speichern ihn als Text, eine Umbenennung würde also jede bereits darauf kontierte Position verwaisen lassen. Um ein Konto zu ersetzen, legen Sie das neue an und legen dieses still.',
+	'glAccounts.editModal.toast.saved': 'Sachkonto {code} aktualisiert',
 
 	// Purchase Orders (routes/purchase-orders/+page.svelte)
 	'purchaseOrders.title': 'Bestellungen',
@@ -2937,7 +2978,11 @@ export const messages = {
 	'byEntity.loading': 'Wird geladen…',
 	'byEntity.loadFailed': 'Aufschlüsselung nach Einheit konnte nicht geladen werden',
 	'byEntity.unconverted':
-		'Vom konsolidierten Ausstehend-Betrag ausgeschlossen: {n, plural, one {# offene Rechnung} other {# offene Rechnungen}} ohne festgelegten Wechselkurs in {currency}.',
+		'Ausstehend enthält {n, plural, one {# offene Rechnung} other {# offene Rechnungen}} ohne festgelegten Wechselkurs in {currency}, zum Nennwert gezählt – die Summen mischen Währungen in diesem Umfang.',
+	'byEntity.unconvertedSpend':
+		'Ausgaben enthalten {n, plural, one {# Rechnung} other {# Rechnungen}} ohne festgelegten Wechselkurs in {currency}, zum Nennwert gezählt – die Summen mischen Währungen in diesem Umfang.',
+	'byEntity.openPoNoCurrency':
+		'Bestellungen erfassen noch keine Währung, daher werden offene Bestellungen ohne Währung angezeigt.',
 
 	// Geplante Berichte (components/analytics/ScheduledReportsPanel.svelte)
 	'scheduledReports.heading': 'Geplante Berichte',
@@ -3405,6 +3450,9 @@ export const messages = {
 	'auth.signup.successSpamLink': 'versuchen Sie es erneut',
 	'auth.signup.heading': 'Erstellen Sie Ihren Arbeitsbereich',
 	'auth.signup.subtitle': 'Richten Sie Ihren eigenen AP-Arbeitsbereich in unter einer Minute ein.',
+	'auth.signup.closedHeading': 'Registrierung geschlossen',
+	'auth.signup.closedBody':
+		'Neue Arbeitsbereiche werden auf dieser Instanz nur auf Einladung eingerichtet. Wenn Ihr Unternehmen FeohLedger bereits nutzt, melden Sie sich unter der Adresse Ihres Arbeitsbereichs an.',
 	'auth.signup.failed': 'Registrierung fehlgeschlagen.',
 	'auth.signup.captchaRequired': 'Bitte schließen Sie das Captcha ab.',
 	'auth.signup.companyName': 'Firmenname',
@@ -4481,15 +4529,23 @@ export const messages = {
 	'creditMemos.createModal.aria': 'Neue Gutschrift',
 	'creditMemos.createModal.currency':
 		'Währung',
+	'creditMemos.createModal.currencyFromInvoice': 'Wird von der Rechnung übernommen, auf die diese Gutschrift angewendet wird.',
 	'creditMemos.createModal.currencyHint':
-		'Eine Gutschrift kann nur auf eine Rechnung derselben Währung angewendet werden, und sie lässt sich nachträglich nicht mehr ändern.',
+		'Eine Gutschrift kann nur auf eine Rechnung derselben Währung angewendet werden. Bis zur Anwendung lässt sie sich noch korrigieren.',
 	'creditMemos.createModal.create': 'Erstellen',
+	'creditMemos.createModal.invoice': 'Auf Rechnung anwenden',
+	'creditMemos.createModal.invoiceHint': 'Wenn Sie eine Rechnung wählen, wird die Gutschrift beim Erstellen sofort darauf angewendet. Lassen Sie das Feld leer, um sie später anzuwenden.',
+	'creditMemos.createModal.invoiceNeedsVendor': 'Wählen Sie einen Lieferanten, um seine Rechnungen zu sehen.',
 	'creditMemos.createModal.memoNumber': 'Gutschriftnummer',
+	'creditMemos.createModal.noInvoice': 'Noch nicht anwenden',
 	'creditMemos.createModal.reason': 'Grund',
 	'creditMemos.createModal.reasonPlaceholder': 'z. B. Mangelhafte Ware zurückgegeben',
 	'creditMemos.createModal.selectVendor': 'Lieferant auswählen…',
 	'creditMemos.createModal.title': 'Neue Gutschrift',
 	'creditMemos.createModal.vendor': 'Lieferant',
+	'creditMemos.editModal.aria': 'Gutschrift bearbeiten',
+	'creditMemos.editModal.hint': 'Eine Gutschrift kann korrigiert werden, bis sie angewendet wurde. Jede Änderung wird im Prüfprotokoll festgehalten.',
+	'creditMemos.editModal.title': 'Gutschrift bearbeiten',
 	'creditMemos.empty': 'Keine Gutschriften.',
 	'creditMemos.empty.filtered': 'Keine Gutschriften für diesen Filter.',
 	'creditMemos.loadMore': 'Mehr laden ({shown} von {total})',
@@ -4500,6 +4556,9 @@ export const messages = {
 	'creditMemos.row.apply': 'Anwenden',
 	'creditMemos.row.void': 'Stornieren',
 	'creditMemos.row.confirm': 'Bestätigen',
+	'creditMemos.row.edit': 'Bearbeiten',
+	'creditMemos.search.aria': 'Gutschriften durchsuchen',
+	'creditMemos.search.placeholder': 'Gutschrift-Nr. oder Lieferant suchen …',
 	'creditMemos.showingAll': 'Alle {total, plural, one {# Gutschrift} other {# Gutschriften}} werden angezeigt',
 	'creditMemos.status.applied': 'Angewendet',
 	'creditMemos.status.open': 'Offen',
@@ -4510,6 +4569,8 @@ export const messages = {
 	'creditMemos.toast.createFailed': 'Erstellen fehlgeschlagen',
 	'creditMemos.toast.created': 'Gutschrift erstellt',
 	'creditMemos.toast.loadFailed': 'Gutschriften konnten nicht geladen werden',
+	'creditMemos.toast.updateFailed': 'Aktualisieren fehlgeschlagen',
+	'creditMemos.toast.updated': 'Gutschrift aktualisiert',
 	'creditMemos.toast.voidFailed': 'Stornieren fehlgeschlagen',
 	'creditMemos.toast.voided': 'Gutschrift storniert',
 	'csvImport.chooseFile': 'Datei auswählen…',
