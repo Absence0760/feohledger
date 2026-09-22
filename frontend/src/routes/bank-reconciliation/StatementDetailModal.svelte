@@ -41,7 +41,6 @@
 	import SearchBox from '$lib/components/ui/SearchBox.svelte';
 	import { toast } from '$lib/components/ui/Toast.svelte';
 	import { auth } from '$lib/stores/auth.svelte';
-	import { orgCurrency } from '$lib/stores/orgSettings.svelte';
 	import { m } from '$lib/i18n/store.svelte';
 	import { formatDate } from '$lib/utils/time';
 
@@ -349,11 +348,12 @@
 											<li>
 												<span class="picker-vendor">{candidateLabel(p)}</span>
 												<span class="muted">{p.invoice_number ?? '—'}</span>
-												<!-- `UnclearedPaymentResponse` carries no per-row currency
-												     (unlike `unmatched_debits`, which does), so this falls
-												     back to the org reporting currency. See the note on the
-												     Uncleared bucket in +page.svelte. -->
-												<Money amount={p.amount} currency={orgCurrency.currency} mono />
+												<!-- The payment's own currency (its invoice's), which
+												     `UnclearedPaymentResponse` carries. This used to label
+												     every candidate with the org reporting currency on the
+												     belief that the row had none — so a EUR payment offered
+												     as a match for a EUR bank line read as dollars. -->
+												<Money amount={p.amount} currency={p.currency} mono />
 												<span class="muted">{formatDate(p.sent_on)}</span>
 												<RowAction
 													variant="accent"
