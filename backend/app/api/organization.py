@@ -30,7 +30,12 @@ from app.services.data_residency import (
     resolve_region,
 )
 from app.services.org_settings_view import settings_for_response
-from app.services.sso import generate_scim_token
+from app.services.sso import (
+    SSOConfigError,
+    check_sso_idp_config,
+    generate_scim_token,
+    sso_only_requested,
+)
 from app.tenant import get_tenant, normalize_custom_domain
 from app.utils.tenant_urls import is_under_platform_domain
 
@@ -200,6 +205,38 @@ def _validate_settings_patch(incoming: dict) -> None:
             )
 
 
+def _refuse_unresolvable_sso_only(merged_settings: dict) -> None:
+    """Refuse to save an `sso` block that asks for SSO-only but cannot deliver it.
+
+    `sso.enabled` + `sso.sso_only` is a request to close password sign-in. It is
+    honoured only when the selected protocol's IdP config resolves
+    (`services/sso.is_sso_only`). Otherwise the password stays open as the
+    escape hatch, because that tenant's login page has no SSO button. Saving
+    such a block would leave the admin believing SSO is enforced when it is
+    not, so it is refused here, where the admin can still fix it, rather than
+    discovered later (docs/decisions.md §204). `sso_only` with SSO switched off
+    is accepted, since an admin may stage the flag before the IdP is ready.
+
+    Checks the MERGED settings. The merge replaces the whole `sso` key, so this
+    is the block that would be stored. The 422 names the offending keys only,
+    never their values: the block holds the OIDC client secret.
+    """
+    if not sso_only_requested(merged_settings):
+        return
+    try:
+        check_sso_idp_config(merged_settings)
+    except SSOConfigError as exc:
+        names = ", ".join(f"sso.{name}" for name in exc.fields) or "the identity-provider settings"
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "sso.sso_only closes password sign-in, so it needs an identity-provider "
+                f"configuration that resolves. Missing or invalid: {names}. Complete them, "
+                "or save sso_only as false."
+            ),
+        ) from None
+
+
 @router.patch("", response_model=OrganizationResponse)
 async def update_organization(
     body: UpdateOrganizationRequest,
@@ -292,6 +329,10 @@ async def update_organization(
                 merged_brand = dict(merged_brand)
                 merged_brand["custom_domains"] = preserved
                 existing["brand"] = merged_brand
+        # Only when this PATCH writes `sso`: a stored block that is already
+        # unresolvable (a direct DB edit) must not block an unrelated save.
+        if "sso" in body.settings:
+            _refuse_unresolvable_sso_only(existing)
         org.settings = existing
 
     await db.commit()
