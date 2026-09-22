@@ -187,18 +187,19 @@ INVOICE_SORTABLE_COLUMNS: dict[str, object] = {
 def _invoice_list_filters(
     query,
     *,
-    status: str | None,
-    vendor: str | None,
-    invoice_number: str | None,
-    po_number: str | None,
-    description: str | None,
-    amount_min: Decimal | None,
-    amount_max: Decimal | None,
-    due_date_from: date | None,
-    due_date_to: date | None,
-    search: str | None,
+    status: str | None = None,
+    vendor: str | None = None,
+    invoice_number: str | None = None,
+    po_number: str | None = None,
+    description: str | None = None,
+    amount_min: Decimal | None = None,
+    amount_max: Decimal | None = None,
+    due_date_from: date | None = None,
+    due_date_to: date | None = None,
+    search: str | None = None,
     exclude_status: str | None = None,
     assigned_to_id: uuid.UUID | None = None,
+    vendor_id: uuid.UUID | None = None,
 ):
     """Apply the invoice-list filters to ``query``.
 
@@ -213,6 +214,17 @@ def _invoice_list_filters(
     "My Approvals" quick view (the caller's own id) — an exact match, not a
     search, since it's always a real user id from the assignable-reviewers
     picker or `auth.user.id`, never free text.
+
+    ``vendor_id`` is the exact counterpart of the free-text ``vendor`` leg: an
+    equality on the resolved ``Invoice.vendor_id`` link, never a name match
+    (``vendor=Acme`` also matches "Acme Holdings"). An invoice whose link is
+    NULL matches no vendor id. It is also the vendor leg of the credit-memo
+    invoice picker's eligible set (``credit_memos._eligible_invoices_query``
+    composes this builder), so "this vendor's invoices" means one thing on
+    both surfaces — ``docs/decisions.md`` §202.
+
+    Every parameter defaults to "not filtered", so a caller names only the
+    legs it applies.
     """
     if status:
         statuses = [s.strip() for s in status.split(",")]
@@ -252,6 +264,8 @@ def _invoice_list_filters(
         )
     if assigned_to_id:
         query = query.where(Invoice.assigned_to_id == assigned_to_id)
+    if vendor_id:
+        query = query.where(Invoice.vendor_id == vendor_id)
     return query
 
 
@@ -269,6 +283,7 @@ async def list_invoices(
     due_date_to: date | None = None,
     search: str | None = None,
     assigned_to_id: uuid.UUID | None = None,
+    vendor_id: uuid.UUID | None = None,
     sort: SortParams = Depends(sort_params),
     db: AsyncSession = Depends(get_tenant_db),
     user: User = Depends(get_current_user),
@@ -289,6 +304,7 @@ async def list_invoices(
         due_date_to=due_date_to,
         search=search,
         assigned_to_id=assigned_to_id,
+        vendor_id=vendor_id,
     )
 
     # Count
@@ -335,6 +351,7 @@ async def invoice_counts(
     due_date_to: date | None = None,
     search: str | None = None,
     assigned_to_id: uuid.UUID | None = None,
+    vendor_id: uuid.UUID | None = None,
     db: AsyncSession = Depends(get_tenant_db),
     user: User = Depends(get_current_user),
     entity_id: uuid.UUID | None = Depends(get_entity_id),
@@ -346,7 +363,7 @@ async def invoice_counts(
     tally over the first page of results undercounted past that window.
 
     Takes the list's population filters (`search` + the advanced filters +
-    `assigned_to_id`) through the SAME `_invoice_list_filters` builder as
+    `assigned_to_id` + `vendor_id`) through the SAME `_invoice_list_filters` builder as
     `GET /api/invoices`, so the chips describe exactly the rows the list would
     return — searching "acme" no longer leaves the chips reading `All 1284`
     over a 3-row table. Deliberately NOT `status`: status is the dimension
@@ -369,6 +386,7 @@ async def invoice_counts(
         due_date_to=due_date_to,
         search=search,
         assigned_to_id=assigned_to_id,
+        vendor_id=vendor_id,
     ).group_by(Invoice.status)
     result = await db.execute(counts_q)
     counts: dict[str, int] = {}
@@ -394,6 +412,7 @@ async def list_invoice_ids(
     search: str | None = None,
     exclude_status: str | None = None,
     assigned_to_id: uuid.UUID | None = None,
+    vendor_id: uuid.UUID | None = None,
     db: AsyncSession = Depends(get_tenant_db),
     user: User = Depends(get_current_user),
     entity_id: uuid.UUID | None = Depends(get_entity_id),
@@ -425,6 +444,7 @@ async def list_invoice_ids(
         search=search,
         exclude_status=exclude_status,
         assigned_to_id=assigned_to_id,
+        vendor_id=vendor_id,
     )
 
     total = (await db.execute(select(func.count()).select_from(query.subquery()))).scalar() or 0
