@@ -2758,6 +2758,25 @@ export const en = {
 	'glAccounts.createModal.scopeEntity': 'This account will belong to {entity} alone. Switch to All entities to create a shared one.',
 	'glAccounts.createModal.toast.created': 'GL account {code} created',
 	'glAccounts.createModal.toast.createFailed': 'Could not create the account',
+	// Row actions + the edit dialog (PATCH /api/gl-accounts/{id}). "Retire", not
+	// "Delete": there is no delete — the account leaves the pickers and every
+	// line already coded to it keeps resolving.
+	'glAccounts.row.edit': 'Edit',
+	'glAccounts.row.editAria': 'Edit GL account {code}',
+	'glAccounts.row.retire': 'Retire',
+	'glAccounts.row.retireAria': 'Retire GL account {code}',
+	'glAccounts.row.confirm': 'Confirm',
+	'glAccounts.row.reactivate': 'Reactivate',
+	'glAccounts.row.reactivateAria': 'Reactivate GL account {code}',
+	'glAccounts.row.otherChart': 'Edit from All entities',
+	'glAccounts.row.toast.retired': 'Retired {code}. Pickers no longer offer it; invoices already coded to it keep the code.',
+	'glAccounts.row.toast.reactivated': 'Reactivated {code}',
+	'glAccounts.row.toast.failed': 'Could not update the account',
+	'glAccounts.editModal.aria': 'Edit GL account',
+	'glAccounts.editModal.title': 'Edit GL Account',
+	'glAccounts.editModal.save': 'Save changes',
+	'glAccounts.editModal.codeFixed': 'The code can’t be changed: invoices record it as text, so renaming it would orphan every line already coded to it. To replace an account, create the new one and retire this one.',
+	'glAccounts.editModal.toast.saved': 'GL account {code} updated',
 
 	// Purchase Orders (routes/purchase-orders/+page.svelte)
 	'purchaseOrders.title': 'Purchase Orders',

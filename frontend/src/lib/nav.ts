@@ -191,9 +191,10 @@ export const NAV: NavEntry[] = [
 			// state: `GET /api/gl-accounts` is `get_current_user` — auth-gated,
 			// role-open — because a clerk coding an invoice has to be able to look
 			// a code up, and the invoice/expense/requisition GL pickers already
-			// serve them that same list. Both writes (`POST ""` create and
-			// `POST /sync-erp`) are admin | ap_manager and are gated in-page on
-			// `auth.isManager`, matching the backend, so the page renders read-only
+			// serve them that same list. All three writes (`POST ""` create, the
+			// row actions' `PATCH /{id}`, and `POST /sync-erp`) are admin |
+			// ap_manager and are gated in-page on `auth.isManager`, matching the
+			// backend, so the page renders read-only
 			// for a clerk. Gating the ROW on the write instead would have hidden a
 			// page whose every read succeeds — the dead end nav.ts has now fixed
 			// five times — while leaving `sync-erp` unreachable for the one role

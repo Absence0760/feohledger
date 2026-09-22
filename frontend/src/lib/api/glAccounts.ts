@@ -83,6 +83,35 @@ export function createGlAccount(
 	return api.post<Pick<GlAccount, 'id' | 'code' | 'name'>>('/api/gl-accounts', body);
 }
 
+/**
+ * The fields `PATCH /api/gl-accounts/{id}` accepts. `code` and `entity_id` are
+ * deliberately absent — the backend refuses to change either (an invoice
+ * records the code as TEXT, and the chart a row sits in is its meaning); a
+ * move between charts is a create plus a retire. Send only what changed:
+ * unset fields are left alone.
+ */
+export interface GlAccountUpdate {
+	name?: string;
+	account_type?: string | null;
+	parent_code?: string | null;
+	/** `false` retires the account (there is no DELETE); `true` reactivates it. */
+	is_active?: boolean;
+}
+
+/**
+ * `PATCH /api/gl-accounts/{id}` — admin / ap_manager. Correct or retire one
+ * account; returns the row in the list's shape.
+ *
+ * With an entity selected only that entity's OWN rows are editable — a shared
+ * row belongs to every entity, so the backend 403s and names the fix (switch to
+ * the consolidated view). `/gl-accounts` mirrors that rule before offering the
+ * actions (`types/glAccount.ts::canEditGlAccount`), but the server stays the
+ * authority.
+ */
+export function updateGlAccount(id: string, body: GlAccountUpdate): Promise<GlAccount> {
+	return api.patch<GlAccount>(`/api/gl-accounts/${id}`, body);
+}
+
 export interface GlAccountSyncResult {
 	success: boolean;
 	message: string;

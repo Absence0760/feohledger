@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
 	GL_ACCOUNT_TYPE_LABEL_KEYS,
 	GL_ACCOUNT_TYPES,
+	canEditGlAccount,
 	glAccountOptionLabel,
 	glAccountTypeLabelKey,
 	type GlAccountOption,
@@ -99,5 +100,19 @@ describe('glAccountTypeLabelKey', () => {
 		expect(glAccountTypeLabelKey(null)).toBeNull();
 		expect(glAccountTypeLabelKey('')).toBeNull();
 		expect(glAccountTypeLabelKey('contra-asset')).toBeNull();
+	});
+});
+
+describe('canEditGlAccount — the PATCH follows the create rule, not the read rule', () => {
+	it('lets the consolidated view edit any row, shared or owned', () => {
+		expect(canEditGlAccount({ entity_id: null }, null)).toBe(true);
+		expect(canEditGlAccount({ entity_id: 'ent-uk' }, null)).toBe(true);
+	});
+
+	it('lets a selected entity edit only its OWN rows', () => {
+		expect(canEditGlAccount({ entity_id: 'ent-uk' }, 'ent-uk')).toBe(true);
+		// A shared row is in this entity's chart but belongs to every entity.
+		expect(canEditGlAccount({ entity_id: null }, 'ent-uk')).toBe(false);
+		expect(canEditGlAccount({ entity_id: 'ent-us' }, 'ent-uk')).toBe(false);
 	});
 });

@@ -1,4 +1,13 @@
-import { expect, signInAndWait, test } from '../fixtures/helpers';
+import type { Page } from '@playwright/test';
+
+import {
+	API_BASE,
+	authedTenantHeaders,
+	expect,
+	signInAndWait,
+	tenantPsql,
+	test
+} from '../fixtures/helpers';
 
 /**
  * `/gl-accounts` — the chart-of-accounts list page.
@@ -12,16 +21,21 @@ import { expect, signInAndWait, test } from '../fixtures/helpers';
  * `/organization` Data Sync panel, which the nav shows to `admin` alone inside
  * a blanket read-only `<fieldset>`. See `docs/decisions.md` §161.
  *
- * **This spec creates no rows.** The lean seed gives each worker tenant exactly
- * one GL account (`6000` / "Operating Expenses" / expense), and there is no
- * DELETE on this router, so a created account could not be cleaned up — an
- * unbounded leak across runs. Create is therefore exercised as far as the
- * dialog (opened, fields present, cancelled) and no further; the write itself
- * is covered by `backend/tests/test_gl_accounts.py`, whose realdb harness
- * truncates. Sibling specs (`erp/merge-dev`, `organization/gl-accounts-sync`)
- * legitimately add rows to this same tenant via a mock-ERP sync, so nothing
- * here asserts an exact row count — only that the seeded account is present
- * and that the filters do what they claim.
+ * **The read-side tests create no rows.** The lean seed gives each worker
+ * tenant exactly one GL account (`6000` / "Operating Expenses" / expense), and
+ * there is no DELETE on this router. Create is therefore exercised as far as
+ * the dialog (opened, fields present, cancelled) and no further; the write
+ * itself is covered by `backend/tests/test_gl_accounts.py`, whose realdb
+ * harness truncates. Sibling specs (`erp/merge-dev`,
+ * `organization/gl-accounts-sync`) legitimately add rows to this same tenant
+ * via a mock-ERP sync, so nothing here asserts an exact row count — only that
+ * the seeded account is present and that the filters do what they claim.
+ *
+ * The row-action tests at the bottom DO need rows of their own — accounts
+ * they are allowed to rename and retire — so they create them under a
+ * `GLROW-` prefix and remove them with SQL in `afterEach`, the way
+ * `entities/switcher.spec.ts` cleans up entities (neither router has a
+ * DELETE, and on this one that is deliberate).
  */
 
 /** The one account the lean seed guarantees in every worker tenant. */
@@ -239,6 +253,10 @@ test.describe('/gl-accounts — RBAC', () => {
 		await expect(page.locator('table tbody tr').first()).toBeVisible();
 		await expect(page.getByRole('button', { name: 'Sync from ERP' })).toBeVisible();
 		await expect(page.getByRole('button', { name: '+ New Account' })).toBeVisible();
+		// …and the row actions, on the same gate as the PATCH behind them.
+		await expect(
+			page.getByRole('button', { name: `Edit GL account ${SEEDED_CODE}` }).first()
+		).toBeVisible();
 	});
 
 	test('an ap_clerk reads the chart and gets neither write control', async ({
@@ -255,8 +273,166 @@ test.describe('/gl-accounts — RBAC', () => {
 
 		await expect(page.getByRole('button', { name: 'Sync from ERP' })).toHaveCount(0);
 		await expect(page.getByRole('button', { name: '+ New Account' })).toHaveCount(0);
+		// No row actions either — `PATCH /api/gl-accounts/{id}` is admin | ap_manager.
+		await expect(page.getByRole('button', { name: /^Edit GL account / })).toHaveCount(0);
+		await expect(page.getByRole('button', { name: /^Retire GL account / })).toHaveCount(0);
 
 		// …and the row is genuinely reachable from the Procurement section bar.
 		await expect(page.locator('nav a[href="/gl-accounts"]')).toBeVisible();
+	});
+});
+
+// ---------------------------------------------------------------------------
+// Row actions — correct and retire (PATCH /api/gl-accounts/{id})
+// ---------------------------------------------------------------------------
+
+const ROW_PREFIX = 'GLROW-';
+
+/** Create one account through the API — consolidated, so a shared one. */
+async function createAccount(
+	page: Page,
+	code: string,
+	body: { name: string; parent_code?: string }
+): Promise<void> {
+	const headers = { ...(await authedTenantHeaders(page)), 'Content-Type': 'application/json' };
+	const r = await page.request.post(`${API_BASE}/api/gl-accounts`, {
+		headers,
+		data: { code, account_type: 'expense', ...body }
+	});
+	expect(r.ok(), await r.text()).toBe(true);
+}
+
+/** The row showing exactly `code`, found through the page's own server-side search. */
+async function rowFor(page: Page, code: string) {
+	const searched = page.waitForResponse(
+		(r) =>
+			new URL(r.url()).pathname.endsWith('/api/gl-accounts') &&
+			r.url().includes(`search=${encodeURIComponent(code)}`)
+	);
+	await page.getByPlaceholder('Search code or name...').fill(code);
+	await searched;
+	return codeRow(page, code);
+}
+
+function codeRow(page: Page, code: string) {
+	return page.locator('table tbody tr', {
+		has: page.locator('td.mono', { hasText: new RegExp(`^${code}$`) })
+	});
+}
+
+/** The next PATCH to one account, so a test can read what crossed the wire. */
+function nextPatch(page: Page) {
+	return page.waitForResponse(
+		(r) => r.request().method() === 'PATCH' && r.url().includes('/api/gl-accounts/')
+	);
+}
+
+test.describe('/gl-accounts — row actions', () => {
+	test.beforeEach(async ({ page }) => {
+		await page.goto('/gl-accounts');
+		await expect(page.locator('table tbody tr').first()).toBeVisible();
+	});
+
+	test.afterEach(() => {
+		tenantPsql(`DELETE FROM gl_accounts WHERE code LIKE '${ROW_PREFIX}%'`);
+	});
+
+	test('Edit corrects the name, sends only what changed, and keeps the code read-only', async ({
+		page
+	}) => {
+		const code = `${ROW_PREFIX}${Date.now().toString(36)}`;
+		await createAccount(page, code, { name: 'Travel (typo)' });
+
+		const row = await rowFor(page, code);
+		await expect(row).toHaveCount(1);
+		await row.getByRole('button', { name: `Edit GL account ${code}` }).click();
+
+		const modal = page.locator('div.modal[role="dialog"][aria-label="Edit GL account"]');
+		await expect(modal).toBeVisible();
+		const codeInput = modal.locator('label', { hasText: /^Code/ }).locator('input');
+		await expect(codeInput).toHaveValue(code);
+		await expect(codeInput).toHaveAttribute('readonly', '');
+
+		await modal.locator('label', { hasText: /^Name/ }).locator('input').fill('Travel');
+		const patched = nextPatch(page);
+		await modal.getByRole('button', { name: 'Save changes' }).click();
+		const resp = await patched;
+		expect(resp.status()).toBe(200);
+		// Only the changed field crosses the wire — an untouched type or parent
+		// is never rewritten by a save.
+		expect(resp.request().postDataJSON()).toEqual({ name: 'Travel' });
+
+		await expect(modal).toBeHidden();
+		await expect(row.locator('td').nth(1)).toHaveText('Travel');
+	});
+
+	test('a parent that would close a loop is refused inline, verbatim', async ({ page }) => {
+		const suffix = Date.now().toString(36);
+		const parent = `${ROW_PREFIX}P${suffix}`;
+		const child = `${ROW_PREFIX}C${suffix}`;
+		await createAccount(page, parent, { name: 'Parent' });
+		await createAccount(page, child, { name: 'Child', parent_code: parent });
+
+		const row = await rowFor(page, parent);
+		await row.getByRole('button', { name: `Edit GL account ${parent}` }).click();
+		const modal = page.locator('div.modal[role="dialog"][aria-label="Edit GL account"]');
+		await modal.locator('label', { hasText: 'Parent code' }).locator('input').fill(child);
+		await modal.getByRole('button', { name: 'Save changes' }).click();
+
+		// The backend's 422 names the account below it; the dialog stays open on
+		// it, because it is exactly what the user has to change.
+		await expect(modal.getByTestId('gl-account-save-error')).toContainText(child);
+		await expect(modal).toBeVisible();
+	});
+
+	test('Retire is two-click, hides the account, and Reactivate brings it back', async ({
+		page
+	}) => {
+		const code = `${ROW_PREFIX}${Date.now().toString(36)}`;
+		await createAccount(page, code, { name: 'Retire me' });
+
+		const row = await rowFor(page, code);
+		await row.getByRole('button', { name: `Retire GL account ${code}` }).click();
+		// Armed, not fired: the first click only asks.
+		const confirm = row.getByRole('button', { name: 'Confirm' });
+		await expect(confirm).toBeVisible();
+		expect(tenantPsql(`SELECT is_active FROM gl_accounts WHERE code = '${code}'`).trim()).toBe(
+			't'
+		);
+
+		const retired = nextPatch(page);
+		await confirm.click();
+		expect((await retired).request().postDataJSON()).toEqual({ is_active: false });
+
+		// The default view is active accounts only — the retired row leaves it…
+		await expect(row).toHaveCount(0);
+		expect(tenantPsql(`SELECT is_active FROM gl_accounts WHERE code = '${code}'`).trim()).toBe(
+			'f'
+		);
+
+		// …and stays reachable under the inactive filter, which is where it
+		// comes back from.
+		await page.getByLabel('Include inactive').check();
+		const inactive = codeRow(page, code);
+		await expect(inactive.getByText('Inactive', { exact: true })).toBeVisible();
+		const reactivated = nextPatch(page);
+		await inactive.getByRole('button', { name: `Reactivate GL account ${code}` }).click();
+		expect((await reactivated).request().postDataJSON()).toEqual({ is_active: true });
+		await expect(inactive.getByText('Active', { exact: true })).toBeVisible();
+	});
+
+	test('a click elsewhere disarms Retire without writing', async ({ page }) => {
+		const code = `${ROW_PREFIX}${Date.now().toString(36)}`;
+		await createAccount(page, code, { name: 'Keep me' });
+
+		const row = await rowFor(page, code);
+		await row.getByRole('button', { name: `Retire GL account ${code}` }).click();
+		await expect(row.getByRole('button', { name: 'Confirm' })).toBeVisible();
+
+		await page.getByRole('heading', { name: 'Chart of Accounts' }).click();
+		await expect(row.getByRole('button', { name: `Retire GL account ${code}` })).toBeVisible();
+		expect(tenantPsql(`SELECT is_active FROM gl_accounts WHERE code = '${code}'`).trim()).toBe(
+			't'
+		);
 	});
 });

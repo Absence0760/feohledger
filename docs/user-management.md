@@ -37,9 +37,9 @@ work — a clerk sees Purchase Orders, Goods Receipts, Requisitions, Intake,
 Catalogs and **Chart of Accounts** (`GET /api/gl-accounts` is auth-gated but
 role-open, because a clerk coding an invoice has to be able to look a GL code
 up) but not Budgets, whose every read is `require_roles(ADMIN, AP_MANAGER,
-CFO)`. On Chart of Accounts the write controls (New Account, Sync from ERP) are
-gated on `auth.isManager`, matching `require_roles(ADMIN, AP_MANAGER)` on the
-write endpoints.
+CFO)`. On Chart of Accounts the write controls (New Account, Sync from ERP, and
+the Edit / Retire / Reactivate row actions) are gated on `auth.isManager`,
+matching `require_roles(ADMIN, AP_MANAGER)` on the write endpoints.
 
 | Feature | Admin | AP Manager | AP Clerk | CFO |
 |---|---|---|---|---|
