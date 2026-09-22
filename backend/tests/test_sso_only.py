@@ -2,11 +2,13 @@
 
 `is_sso_only` is deterministic (unit-tested below); the login enforcement is
 exercised by calling the `login` handler directly with mocked DB sessions, the
-same DB-free pattern as test_auth_error_consistency.py.
+same DB-free pattern as test_auth_error_consistency.py. One realdb test drives
+the whole thing over HTTP at the end.
 """
 
 from __future__ import annotations
 
+import base64
 import uuid
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -14,7 +16,30 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from fastapi import HTTPException
 
-from app.services.sso import is_sso_only
+from app.services.sso import is_sso_only, sso_only_requested
+
+# Complete IdP blocks, one per protocol. Password sign-in is closed only when
+# SSO is on, required, AND the selected protocol's block resolves (§204).
+_OIDC_READY = {
+    "enabled": True,
+    "sso_only": True,
+    "discovery_url": "https://idp.example.com/.well-known/openid-configuration",
+    "client_id": "feoh",
+    "client_secret": "not-a-real-secret",
+}
+_SAML_READY = {
+    "enabled": True,
+    "sso_only": True,
+    "protocol": "saml",
+    "provider": "saml",
+    "idp_entity_id": "https://idp.example.com/saml",
+    "idp_sso_url": "https://idp.example.com/saml/sso",
+    "idp_x509_cert": base64.b64encode(b"fake-but-valid-base64-der-bytes").decode(),
+}
+
+
+def _without(block: dict, *keys: str) -> dict:
+    return {k: v for k, v in block.items() if k not in keys}
 
 
 @pytest.mark.parametrize(
@@ -26,11 +51,63 @@ from app.services.sso import is_sso_only
         ({"sso": {"sso_only": True}}, False),  # enabled missing => no lockout
         ({"sso": {"enabled": True}}, False),  # sso_only not set
         ({"sso": {"enabled": False, "sso_only": True}}, False),  # SSO off
-        ({"sso": {"enabled": True, "sso_only": True}}, True),
+        ({"sso": _OIDC_READY}, True),
+        ({"sso": _SAML_READY}, True),
+        # Required, but the IdP block does not resolve: the login page has no
+        # SSO button, so the password stays open as the escape hatch.
+        ({"sso": {"enabled": True, "sso_only": True}}, False),
+        ({"sso": _without(_OIDC_READY, "client_secret")}, False),
+        ({"sso": _without(_SAML_READY, "idp_x509_cert")}, False),
+        ({"sso": {**_OIDC_READY, "discovery_url": "file:///etc/passwd"}}, False),
+        ({"sso": {**_SAML_READY, "idp_x509_cert": "not base64 !!"}}, False),
+        # The protocol selects which block must resolve: a complete OIDC block
+        # does not satisfy a tenant that is configured for SAML.
+        ({"sso": {**_OIDC_READY, "protocol": "saml"}}, False),
     ],
 )
 def test_is_sso_only(settings_dict, expected):
     assert is_sso_only(settings_dict) is expected
+
+
+@pytest.mark.parametrize(
+    "settings_dict",
+    [
+        pytest.param({"sso": "yes"}, id="sso-not-an-object"),
+        pytest.param(["not", "a", "mapping"], id="settings-not-an-object"),
+        pytest.param({"sso": {**_OIDC_READY, "client_id": 12345}}, id="client_id-not-text"),
+        pytest.param({"sso": {**_OIDC_READY, "client_secret": "   "}}, id="secret-blank"),
+        pytest.param({"sso": {**_OIDC_READY, "discovery_url": "http://[::1"}}, id="bad-ipv6"),
+        pytest.param({"sso": {**_OIDC_READY, "provider": ["okta"]}}, id="provider-not-text"),
+        pytest.param(
+            {"sso": {**_OIDC_READY, "allowed_email_domains": "acme.com"}}, id="allowlist-a-string"
+        ),
+        pytest.param({"sso": {**_SAML_READY, "idp_x509_cert": 42}}, id="cert-not-text"),
+        pytest.param({"sso": {**_SAML_READY, "idp_sso_url": "not-a-url"}}, id="sso-url-shape"),
+        pytest.param(
+            {"sso": {**_SAML_READY, "idp_x509_cert_multi": "one-cert"}}, id="multi-not-a-list"
+        ),
+        pytest.param({"sso": {**_SAML_READY, "idp_x509_cert_multi": [None]}}, id="multi-entry"),
+        pytest.param({"sso": {**_SAML_READY, "idp_slo_url": {"x": 1}}}, id="slo-not-text"),
+        pytest.param({"sso": {**_SAML_READY, "sp_entity_id": 7}}, id="sp-entity-not-text"),
+    ],
+)
+def test_a_malformed_block_does_not_resolve_and_never_raises(settings_dict):
+    """`is_sso_only` runs on every password sign-in, over JSONB that
+    `PATCH /api/organization` merges with no schema. A malformed value must
+    read as "does not resolve", never raise: a raise there would be a 500 on
+    every password sign-in in the tenant, which is the lockout again."""
+    assert is_sso_only(settings_dict) is False
+
+
+def test_sso_only_requested_is_the_two_flags_alone():
+    """The request, not the verdict: what the admin asked for, whether or not
+    the IdP block can deliver it. The write-time refusal and the login warning
+    key on it; nothing that closes the password does."""
+    broken = {"sso": {"enabled": True, "sso_only": True}}
+    assert sso_only_requested(broken) is True
+    assert is_sso_only(broken) is False
+    assert sso_only_requested({"sso": {"enabled": False, "sso_only": True}}) is False
+    assert sso_only_requested({"sso": "yes"}) is False
 
 
 def _fake_request(ip: str = "203.0.113.1"):
@@ -75,10 +152,7 @@ async def test_login_rejected_when_sso_only():
 
     pw = "Correct-Horse-9"
     user = _user_with_password(pw)
-    org = SimpleNamespace(
-        id=user.organization_id,
-        settings={"sso": {"enabled": True, "sso_only": True, "provider": "saml"}},
-    )
+    org = SimpleNamespace(id=user.organization_id, settings={"sso": _SAML_READY})
 
     audits: list[dict] = []
 
@@ -138,7 +212,7 @@ async def test_login_allowed_when_not_sso_only():
 # untouched.
 # ---------------------------------------------------------------------------
 
-SSO_ONLY_SETTINGS = {"sso": {"enabled": True, "sso_only": True, "provider": "saml"}}
+SSO_ONLY_SETTINGS = {"sso": _SAML_READY}
 TOTP_SECRET = "JBSWY3DPEHPK3PXP"
 
 
@@ -249,19 +323,26 @@ async def test_an_authenticator_code_still_proves_a_step_up_in_an_sso_only_tenan
 
 
 @pytest.mark.asyncio
-async def test_the_password_still_proves_a_step_up_when_sso_is_not_really_enforced():
+@pytest.mark.parametrize(
+    "sso_block",
+    [
+        pytest.param({"enabled": False, "sso_only": True}, id="sso-switched-off"),
+        pytest.param({"enabled": True, "sso_only": True}, id="idp-unresolvable"),
+        pytest.param(_without(_SAML_READY, "idp_x509_cert"), id="saml-cert-missing"),
+    ],
+)
+async def test_the_password_still_proves_a_step_up_when_sso_is_not_really_enforced(sso_block):
     """The step-up reads the SAME predicate as login: `sso_only` without
-    `sso.enabled` is not SSO-only (a broken IdP config keeps the password open
-    as the escape hatch), so there the password still proves a step-up — the
-    two doors cannot disagree about whether the password is an authenticator."""
+    `sso.enabled` is not SSO-only, and neither is `sso_only` over an IdP block
+    that does not resolve (that is the escape hatch, §204). There the password
+    still proves a step-up, so the two doors cannot disagree about whether the
+    password is an authenticator."""
     from app.api.auth import enroll_mfa_start
     from app.schemas.auth import MFAStepUpRequest
 
     pw = "Correct-Horse-9"
     user = _account_with_totp(pw)
-    org = SimpleNamespace(
-        id=user.organization_id, settings={"sso": {"enabled": False, "sso_only": True}}
-    )
+    org = SimpleNamespace(id=user.organization_id, settings={"sso": sso_block})
 
     with patch("app.api.auth.settings.mfa_enabled", True):
         resp = await enroll_mfa_start(
@@ -297,44 +378,67 @@ async def test_a_step_up_without_a_password_does_not_load_the_org():
 
 
 # ---------------------------------------------------------------------------
-# `/auth/me` publishes the step-up's own predicate (docs/decisions.md §201)
+# One predicate, four readers (docs/decisions.md §201, §204)
 #
 # The profile page stops offering the password as a step-up proof where the
-# server stops accepting it. For that to be honest the page must learn exactly
-# the rule `_step_up_satisfied` enforces — not the public `/auth/{sso,saml}/
-# config` echo, which reports `sso_only` only when the IdP config resolves and
-# so says "open" for a tenant whose broken config still closes the password.
+# server stops accepting it, and the login page hides the password form where
+# sign-in refuses it. Both are honest only if every reader computes the same
+# thing: login's refusal, the step-up's password drop, `/auth/me` and the
+# public `/auth/{sso,saml}/config` echo.
 # ---------------------------------------------------------------------------
 
-# Every shape a hand-copied rule could get wrong. The last is the one the public
-# config echo gets wrong: SSO switched on and required, with no IdP it can
-# resolve — the password is closed at sign-in and at the step-up all the same.
-_OIDC_READY = {
-    "enabled": True,
-    "sso_only": True,
-    "discovery_url": "https://idp.example.com/.well-known/openid-configuration",
-    "client_id": "feoh",
-    "client_secret": "not-a-real-secret",
-}
+# Every shape a hand-copied rule could get wrong. The unresolvable ones are the
+# shapes the readers used to disagree on: the echo said "open" (no SSO button,
+# password form shown) while sign-in and the step-up refused the password, so
+# nobody in the tenant could start a session. They are open everywhere now.
 _PREDICATE_CASES = [
     pytest.param(None, False, id="no-settings"),
     pytest.param({"sso": {"sso_only": True}}, False, id="sso_only-without-enabled"),
     pytest.param({"sso": {"enabled": False, "sso_only": True}}, False, id="sso-switched-off"),
     pytest.param({"sso": {"enabled": True}}, False, id="sso-on-password-still-open"),
     pytest.param({"sso": _OIDC_READY}, True, id="sso-only-idp-resolves"),
+    pytest.param({"sso": _SAML_READY}, True, id="sso-only-saml-resolves"),
     pytest.param(
-        {"sso": {"enabled": True, "sso_only": True}}, True, id="sso-only-idp-unresolvable"
+        {"sso": {"enabled": True, "sso_only": True}}, False, id="sso-only-idp-unresolvable"
+    ),
+    pytest.param(
+        {"sso": _without(_OIDC_READY, "discovery_url")}, False, id="sso-only-oidc-incomplete"
+    ),
+    pytest.param(
+        {"sso": _without(_SAML_READY, "idp_sso_url")}, False, id="sso-only-saml-incomplete"
+    ),
+    pytest.param(
+        {"sso": {**_SAML_READY, "idp_x509_cert": "not base64 !!"}},
+        False,
+        id="sso-only-saml-bad-cert",
     ),
 ]
 
 
+async def _config_echoes(org) -> list:
+    """What the login page reads: both public config endpoints, for `org`."""
+    from app.api import auth_saml, auth_sso
+
+    async def _resolve(slug, host, db):
+        return org, "acme"
+
+    with (
+        patch.object(auth_sso, "_resolve_org", _resolve),
+        patch.object(auth_saml, "_resolve_org", _resolve),
+    ):
+        return [
+            await auth_sso.sso_config(slug="acme", host=None, db=None),
+            await auth_saml.saml_config(slug="acme", host=None, db=None),
+        ]
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("org_settings,closed", _PREDICATE_CASES)
-async def test_me_reports_exactly_the_predicate_the_step_up_and_login_enforce(org_settings, closed):
+async def test_every_reader_reports_exactly_the_predicate_login_enforces(org_settings, closed):
     """`password_sign_in_closed` on `/auth/me` is true exactly when a CORRECT
-    password fails the step-up and is refused at sign-in — the same answer from
-    all three, for every shape of `settings.sso`, including the one where the
-    public config echo disagrees."""
+    password fails the step-up, is refused at sign-in, and the login page is
+    told to hide the password form: the same answer from all four, for every
+    shape of `settings.sso`."""
     from app.api.auth import _step_up_satisfied, get_me, login
     from app.schemas.auth import LoginRequest, MFAStepUpRequest
 
@@ -344,6 +448,14 @@ async def test_me_reports_exactly_the_predicate_the_step_up_and_login_enforce(or
 
     me = await get_me(user=user, db=_control_db(org))
     assert me.password_sign_in_closed is closed
+
+    # The login page's own rule (`routes/login/+page.svelte`): hide the password
+    # form when either endpoint says `enabled && sso_only`. Where it does, the
+    # page shows that protocol's SSO button, so a closed password always has a
+    # way in beside it.
+    echoes = await _config_echoes(org)
+    assert any(e.enabled and e.sso_only for e in echoes) is closed
+    assert all(e.enabled for e in echoes if e.sso_only)
 
     proved = await _step_up_satisfied(
         _control_db(org),
@@ -425,3 +537,144 @@ async def test_a_refused_code_names_only_the_proofs_the_tenant_accepts(
         assert exc.value.detail == STEP_UP_FAILURE_DETAIL
     assert user.mfa_enabled is True
     assert user.mfa_secret == TOTP_SECRET
+
+
+# ---------------------------------------------------------------------------
+# The escape hatch (docs/decisions.md §204)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "sso_block,warned",
+    [
+        pytest.param({"enabled": True, "sso_only": True}, True, id="requested-not-honoured"),
+        pytest.param({"enabled": True}, False, id="not-requested"),
+        pytest.param({"enabled": False, "sso_only": True}, False, id="sso-switched-off"),
+    ],
+)
+async def test_a_password_let_through_by_the_escape_hatch_is_logged(sso_block, warned, caplog):
+    """The tenant asked for SSO-only and is not getting it. The sign-in
+    succeeds, and says so in the log: an org that believes it enforces SSO
+    and does not is something an operator has to hear about. The log line
+    names the org and nothing from the block, which carries the client
+    secret."""
+    import logging
+
+    from app.api.auth import login
+    from app.schemas.auth import LoginRequest
+
+    pw = "Correct-Horse-9"
+    user = _user_with_password(pw)
+    block = {**sso_block, "client_secret": "must-never-be-logged"}
+    org = SimpleNamespace(id=user.organization_id, settings={"sso": block})
+
+    with (
+        caplog.at_level(logging.WARNING, logger="app.api.auth"),
+        patch("app.api.auth.dispatch_auth_audit", AsyncMock()),
+        patch("app.api.auth.register_session", AsyncMock()),
+    ):
+        result = await login(
+            body=LoginRequest(email=user.email, password=pw),
+            request=_fake_request(),
+            db=_db_user_then_org(user, org),
+        )
+
+    assert getattr(result, "access_token", None)
+    hatch = [r for r in caplog.records if "does not resolve" in r.getMessage()]
+    assert bool(hatch) is warned
+    for record in hatch:
+        assert str(org.id) in record.getMessage()
+    assert "must-never-be-logged" not in caplog.text
+
+
+@pytest.fixture
+def fake_redis(monkeypatch):
+    """A successful login registers a session, which needs the zset+hash
+    Redis stand-in rather than the key/value-only autouse stub."""
+    from tests.test_session_management import FakeRedis
+
+    fake = FakeRedis()
+
+    async def _get_redis():
+        return fake
+
+    monkeypatch.setattr("app.redis.get_redis", _get_redis)
+    return fake
+
+
+async def _write_sso_block(realdb, block: dict | None) -> None:
+    """Write `settings.sso` straight to the row, the way a DB edit or a
+    pre-§204 save would, so no API-side validation is in the way."""
+    from sqlalchemy import select
+    from sqlalchemy.orm.attributes import flag_modified
+
+    from app.models.organization import Organization
+
+    async with realdb.control_sessionmaker()() as s:
+        org = (
+            await s.execute(select(Organization).where(Organization.id == realdb.info("a").org_id))
+        ).scalar_one()
+        settings = dict(org.settings or {})
+        if block is None:
+            settings.pop("sso", None)
+        else:
+            settings["sso"] = block
+        org.settings = settings
+        flag_modified(org, "settings")
+        await s.commit()
+
+
+async def _throwaway_user(realdb, password: str) -> str:
+    """A fresh account, so signing in cannot disturb a seeded role user."""
+    from app.models.user import User
+    from app.utils.passwords import pwd_context
+
+    email = f"ssoonly-{uuid.uuid4().hex[:10]}@{realdb.info('a').slug}.test"
+    async with realdb.control_sessionmaker()() as s:
+        s.add(
+            User(
+                id=uuid.uuid4(),
+                email=email,
+                full_name="SSO-only probe",
+                hashed_password=pwd_context.hash(password),
+                is_active=True,
+                organization_id=realdb.info("a").org_id,
+                must_change_password=False,
+            )
+        )
+        await s.commit()
+    return email
+
+
+@pytest.mark.asyncio
+async def test_an_unresolvable_sso_only_block_does_not_lock_the_tenant_out(realdb, fake_redis):
+    """The lockout, over HTTP against a real control plane. A block that asks
+    for SSO-only with no IdP behind it used to get a login page with a password
+    form and no SSO button, and a 403 for every password it submitted. Now the
+    page and the server agree it is open. With a block that resolves, they
+    agree it is closed, and the page has the SSO button to offer instead."""
+    pw = "Correct-Horse-9"
+    email = await _throwaway_user(realdb, pw)
+    slug = realdb.info("a").slug
+    try:
+        await _write_sso_block(realdb, {"enabled": True, "sso_only": True})
+        async with realdb.client(key="a", role=None) as c:
+            oidc = (await c.get(f"/api/auth/sso/config?slug={slug}")).json()
+            saml = (await c.get(f"/api/auth/saml/config?slug={slug}")).json()
+            signed_in = await c.post("/api/auth/login", json={"email": email, "password": pw})
+            assert signed_in.status_code == 200, signed_in.text
+            token = signed_in.json()["access_token"]
+            me = await c.get("/api/auth/me", headers={"Authorization": f"Bearer {token}"})
+        assert oidc["sso_only"] is False and saml["sso_only"] is False
+        assert me.status_code == 200, me.text
+        assert me.json()["password_sign_in_closed"] is False
+
+        await _write_sso_block(realdb, _SAML_READY)
+        async with realdb.client(key="a", role=None) as c:
+            saml = (await c.get(f"/api/auth/saml/config?slug={slug}")).json()
+            refused = await c.post("/api/auth/login", json={"email": email, "password": pw})
+        assert saml == {"enabled": True, "provider": "saml", "sso_only": True}
+        assert refused.status_code == 403, refused.text
+    finally:
+        await _write_sso_block(realdb, None)

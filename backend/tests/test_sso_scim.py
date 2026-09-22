@@ -36,8 +36,14 @@ def test_resolve_sso_config_returns_none_when_disabled():
 def test_resolve_sso_config_raises_when_partial():
     from app.services.sso import SSOConfigError, resolve_sso_config
 
-    with pytest.raises(SSOConfigError):
-        resolve_sso_config({"sso": {"enabled": True, "client_id": "a"}})
+    with pytest.raises(SSOConfigError) as exc:
+        resolve_sso_config(
+            {"sso": {"enabled": True, "client_id": "a", "client_secret": "must-not-echo"}}
+        )
+    # Every absent key, named, and nothing from the block's values: the message
+    # and `fields` both reach `PATCH /api/organization`'s 422 (decisions §204).
+    assert exc.value.fields == ("discovery_url",)
+    assert "must-not-echo" not in str(exc.value)
 
 
 def test_resolve_sso_config_returns_full_config():

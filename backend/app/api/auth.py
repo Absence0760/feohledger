@@ -80,7 +80,7 @@ from app.services.session_management import (
     revoke_other_sessions,
     revoke_user_sessions,
 )
-from app.services.sso import is_sso_only
+from app.services.sso import is_sso_only, sso_only_requested
 from app.utils.passwords import (
     PasswordError,
     dummy_verify,
@@ -431,8 +431,8 @@ async def login(
     # password is verified so it reuses the org load and doesn't perturb the
     # unknown-vs-wrong-password enumeration parity. (Passwordless SSO users
     # already 401'd above; the login page hides the password form when
-    # sso_only, so they use the IdP button.) The same predicate the step-up
-    # and `/auth/me` read, so the three cannot disagree.
+    # sso_only, so they use the IdP button.) The same predicate the step-up,
+    # `/auth/me` and the public config echo read, so the four cannot disagree.
     if _org_closes_password_sign_in(org):
         await dispatch_auth_audit(
             organization_id=user.organization_id,
@@ -443,6 +443,17 @@ async def login(
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="This workspace requires single sign-on. Sign in with your identity provider.",
+        )
+    if org is not None and sso_only_requested(org.settings):
+        # The tenant asked for SSO-only, but its IdP block does not resolve, so
+        # its login page offers no SSO button and the password stays open as
+        # the escape hatch (§204). Say so on every such sign-in: an org that
+        # believes it enforces SSO and does not is an operator's problem to fix.
+        # Org id only. The block's contents never reach the log.
+        logger.warning(
+            "[auth] org %s requires SSO but its identity-provider config does not "
+            "resolve; password sign-in stays open until it does",
+            org.id,
         )
 
     # A hash still stored under a scheme we no longer write gets replaced with
@@ -920,9 +931,13 @@ def _org_closes_password_sign_in(org: Organization | None) -> bool:
     proves one exactly when it would prove a sign-in — §191), and
     `_user_response` publishes it on `/auth/me` as `password_sign_in_closed`, so
     the profile page stops offering the password as a proof exactly where the
-    server stops accepting it (§201). It is `services/sso.is_sso_only`, which
-    also requires `sso.enabled` — `sso_only` set while SSO is switched off
-    closes nothing.
+    server stops accepting it (§201). It is `services/sso.is_sso_only`, the same
+    call the public `/auth/{sso,saml}/config` echo makes, so the login page
+    hides the password form exactly where this refuses it. It needs
+    `sso.enabled`, `sso_only` AND an IdP config that resolves: `sso_only` set
+    while SSO is switched off closes nothing, and neither does an IdP block that
+    does not resolve, because that tenant's login page has no SSO button to
+    offer instead (§204).
     """
     return is_sso_only(org.settings if org else None)
 
