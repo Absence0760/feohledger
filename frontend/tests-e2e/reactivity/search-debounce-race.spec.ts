@@ -122,6 +122,42 @@ const CASES: RouteCase[] = [
 			})
 	},
 	{
+		// Search arrived with issue #443 and carries the same `appliedSearch`
+		// shape as /requisitions and /expenses (see the header), which is why
+		// (a) types rather than fills here too.
+		name: 'credit-memos',
+		route: '/credit-memos',
+		apiPathname: '/api/credit-memos',
+		searchPlaceholder: 'Search memo # or vendor',
+		settle: async (page) => {
+			await expect(page.locator('table tbody tr')).toHaveCount(1);
+		},
+		buildBody: (searchTerm, marker) =>
+			JSON.stringify({
+				items: [
+					{
+						id: '00000000-0000-4000-b000-00000000c0de',
+						memo_number: marker,
+						vendor_id: '00000000-0000-4000-b001-000000000001',
+						vendor_name: `vendor for "${searchTerm}"`,
+						invoice_id: null,
+						invoice_number: null,
+						amount: 25,
+						currency: 'USD',
+						issued_date: '2026-01-01',
+						reason: null,
+						status: 'open',
+						applied_at: null,
+						applied_by: null,
+						created_at: '2026-01-01T00:00:00Z'
+					}
+				],
+				total: 1,
+				page: 1,
+				page_size: 20
+			})
+	},
+	{
 		// The #168 fix was originally applied to /invoices, /payments and
 		// /vendors only. /recurring (and its siblings /contracts, /budgets,
 		// /intake) carried the identical bug — their filter `$effect` called

@@ -132,6 +132,7 @@ one again to flip direction:
   `syncSortUrl()` when the page has no existing filter→URL sync).
 - Shipped on `/invoices`, `/vendors`, `/payments` (History tab), `/expenses`,
   and `/contracts` — the five primary list pages.
+- Also on `/credit-memos` (`memo_number` / `amount` / `issued_date`, issue #443).
 
 ### Search (`SearchBox`)
 
