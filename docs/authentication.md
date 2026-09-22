@@ -33,8 +33,9 @@ Plain `$2b$...` hashes written before commit c6a91396 also still verify — the
 legacy arm reproduces bcrypt 4.0's 72-byte truncation deliberately, since bcrypt
 4.1+ raises on a long secret and that would lock those accounts out of their own
 password. `pwd_context.needs_update(hash)` reports which stored hashes are on an
-older scheme, and a successful login acts on it — see **A legacy hash is
-upgraded on its owner's next login** below.
+older scheme **or below the configured bcrypt cost** (`DEFAULT_ROUNDS`), and a
+successful login acts on it — see **A legacy hash is upgraded on its owner's
+next login** below.
 
 **This is our code, not passlib's.** passlib 1.7.4 has been the last release
 since 2020 and cannot import against bcrypt 4.1+ (it reads a deleted
@@ -80,6 +81,17 @@ had not changed their password since c6a91396 kept authenticating against a raw
 
 What is worth knowing about it:
 
+- **A lower bcrypt cost counts as out of date, not only an older scheme.**
+  `identify` names the scheme and never the `r=` cost baked into the hash, so a
+  scheme-only `needs_update` would have made raising `DEFAULT_ROUNDS` apply to
+  new passwords only — every existing row silently staying at the old cost,
+  with nothing to say so. `needs_update` therefore also returns True for a v2
+  hash whose cost is below the context's `rounds`, and this same wiring
+  re-hashes it at the configured cost on the owner's next sign-in. A hash
+  *above* the configured cost is left alone: it is stronger than anything we
+  would write, and re-hashing it would be a downgrade. So raising the cost is a
+  one-line change to `DEFAULT_ROUNDS` and needs no migration; lowering it
+  migrates nothing and weakens every password set afterwards.
 - **It runs before the MFA branch**, which returns a challenge token rather than
   an access token. The password is already proven at that point; waiting for the
   second factor would skip the upgrade for exactly the accounts that have one.
@@ -115,8 +127,8 @@ What is worth knowing about it:
   is already on the trail as `auth.login.success` / `portal.login.success` in
   the same request. An INFO log line records the scheme transition for the
   operator question the follow-up actually posed ("do pre-c6a91396 hashes exist
-  in a deployed database?"); it carries an account id and two scheme names,
-  never a secret or a digest.
+  in a deployed database?"); it carries an account id and the two scheme names
+  and costs, never a secret or a digest.
 
 Covered by `backend/tests/test_password_hash_upgrade.py` (real Postgres, both
 surfaces, through the HTTP login route).
