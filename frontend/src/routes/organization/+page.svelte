@@ -2809,6 +2809,15 @@
 	   `.sections`' own `min-width: 0` is there for. */
 	.settings-layout {
 		display: grid;
+		/* Explicit, and `minmax(0, …)` in the ONE-column case too, not just in
+		   the two-column rule below. An implicit grid column is auto-sized and a
+		   grid item's default `min-width: auto` is its CONTENT width, so the
+		   widest panel pushed the document 43px past a 320px viewport — a real
+		   WCAG 1.4.10 failure, caught by `tests-e2e/a11y/reflow.spec.ts`.
+		   `/organization` only escaped it because its `.sections` fieldset
+		   already carried `min-width: 0` for an unrelated reason, which is
+		   exactly the kind of accident not to rely on. */
+		grid-template-columns: minmax(0, 1fr);
 		gap: 20px;
 	}
 
