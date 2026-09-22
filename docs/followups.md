@@ -31,8 +31,13 @@ matching entry here carries the category, durable fix, and trigger. Keep the
 pair consistent — if an item leaves this file, its roadmap section either loses
 its `**Open:**` line or moves to the archive.
 
-Mirrored as GitHub issue [#321](https://github.com/Absence0760/feohledger/issues/321)
-for the tracker view. Keep the two reconciled when either moves.
+[#321](https://github.com/Absence0760/feohledger/issues/321) is the GitHub-side
+entry point, but it is **a pointer to this file, not a mirror of it** — it holds
+no item list to keep in sync. It was a transcribed checklist until 2026-09-22,
+and an audit that re-derived both found the copy stale at nearly every sync
+(`61` against an actual `51`, `46 (c)` against an actual `36`), which is why the
+transcription was retired rather than corrected again. Add a follow-up here; add
+a GitHub issue only when one warrants its own thread.
 
 **Last reconciled:** 2026-09-22 — the follow-up batch, eight agents each in its
 own worktree, closing what the #321 / #443 batch had opened earlier the same
@@ -58,7 +63,7 @@ section carried its own `decisions.md` § reference, so nothing was lost by
 deleting it; that cross-reference is what makes the pruning safe, and writing
 one is what earns a future entry the right to be deleted.
 
-**54 open: 39 (c) · 9 (a) · 6 (b)** — re-derived from the file, never carried
+**55 open: 40 (c) · 9 (a) · 6 (b)** — re-derived from the file, never carried
 forward. The section heading is authoritative; where an entry also carries a
 `(c)`/`(a)`/`(b)` marker, the two agree.
 `grep -c '^- \[ \]' docs/followups.md`.
@@ -73,6 +78,15 @@ physically sits under (the shard-baseline entry was labelled `(c)` beneath
 `## (b)`) breaks the "section heading is authoritative" rule that makes one
 count possible. Re-derive with the command above, per section, and check the
 three sum to the total.
+
+**It drifted again after that was written, the same way.** #455 appended the
+dashboard-greeting entry without touching the header, so `main` carried
+`50 open: 35 (c)` over a file holding 51 / 36 (c), and the batch after it
+inherited the off-by-one (`54` over an actual 55). Neither shape above explains
+this one — the entry is a well-formed checkbox under the right heading. The
+lesson is simply that a count stored beside the thing it counts has no way to
+notice, so re-deriving it is the last step of any change that adds or prunes an
+entry, not a periodic clean-up.
 
 Round 26 closed eleven and opened nine, so the file shrank by two. **Three of
 the eleven were wrong about their own code**, and twice in the direction that
@@ -550,7 +564,11 @@ before implementing.
       § Secrets sketches, likewise unwired until something needs it.
       `AWS_DEPLOY_ENABLED` stays unset until both land. **Trigger:** the
       workload-stack build-out — step 1 of `docs/production-deployment.md`
-      § Arming the AWS pipeline.
+      § Arming the AWS pipeline. **See also #449**, which is the same role from
+      the other side: its *trust* policy named a subject GitHub no longer issues
+      (this repo is on immutable subject claims). That half is fixed; what is
+      left there is dispatching `AWS OIDC preflight` to prove the assume, which
+      does not need this policy.
 
 ### Surfaced by fixing the three privacy defects (2026-09-16, issues #423/#424/#425)
 

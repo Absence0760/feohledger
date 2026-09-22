@@ -27,7 +27,8 @@ each step.
 - [ ] **Stripe billing** — `stripe-billing.md`
   - [ ] Pricing model decided
   - [ ] Stripe account active
-  - [ ] `billing_adapters/` built (engineering task)
+  - [x] `billing_adapters/` built (engineering task) — `stripe_billing.py` ships,
+        tested against the `mock` provider; what is left below is operator work
   - [ ] Webhook live
   - [ ] First test charge works
 - [ ] **Payment rails** — `payment-rails-onboarding.md` _(start early — 4–8 week lead time)_

@@ -6978,6 +6978,15 @@ register are in that set deliberately — for a B2B processor they are what
 procurement asks for first, and leaving them out would have published the half
 of the story that is easiest to write.
 
+**Amended 2026-09-22 — it is six, not five.** The set shipped with an
+Accessibility Statement (`/legal/accessibility`) in the same change, which the
+paragraph above omits; `frontend/src/lib/legal/pages.ts` has always carried six
+`LEGAL_PAGES` entries, and `/legal` itself renders "the six documents". The
+miscount propagated to root `CLAUDE.md`'s pointer row and was found by an issue
+audit on 2026-09-22 (#428 § 0). Recorded here rather than edited above, because
+this file is append-only — but the original sentence is wrong, and a reader
+counting documents from it will come up one short.
+
 **They render ahead of both the auth gate and the tenant probe.** Everyone with
 the strongest reason to read them arrives without an account: a supplier
 chasing their own data, a DPO evaluating the product, a regulator. On a tenant
