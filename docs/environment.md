@@ -14,8 +14,10 @@ the place to check before raising either.
 
 There is no `.nvmrc` and no `engines` block in either `package.json`, so the
 workflow pins are the whole story for CI — **plus** `deploy/deploy.sh`, which
-builds the production frontend inside a `NODE_IMAGE=node:24-alpine` container
-(see [minimal-deployment.md](minimal-deployment.md)). Both move together: Node
+builds the production frontend inside a `NODE_IMAGE` container — Node 24 alpine,
+pinned to an exact release tag plus its index digest, which no Dependabot
+ecosystem reads, so it is bumped by hand (see
+[minimal-deployment.md](minimal-deployment.md)). Both move together: Node
 20 reached end-of-life on 2026-04-30, and a deploy image behind the CI pin means
 production builds on a runtime CI never tested.
 

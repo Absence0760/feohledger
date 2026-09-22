@@ -141,21 +141,67 @@ The `FEOH_ERP_*_BASE` env vars point the adapters at it (the committed
 
 ## Services
 
-| Service    | Image                       | Port(s)         | Profile | Description                                       |
+The **Image** column names the repository and the release line it is held on.
+The exact `tag@sha256:…` pin lives only in `backend/docker-compose.yml` — see
+[Image pinning](#image-pinning) — so this table cannot fall behind a Dependabot
+bump.
+
+| Service    | Image (line held)           | Port(s)         | Profile | Description                                       |
 |------------|-----------------------------|-----------------|---------|---------------------------------------------------|
-| PostgreSQL | `pgvector/pgvector:pg16`    | `5432`          | (core)  | Primary database (multi-DB) + pgvector extension  |
-| Redis      | `redis:7-alpine`            | `6379`          | (core)  | JWT blocklist + rate-limit counters               |
-| MinIO      | `quay.io/minio/minio:latest` | `9000`, `9001` | (core)  | S3-compatible storage. **quay.io, not Docker Hub** — see below |
-| Keycloak   | `quay.io/keycloak/keycloak` | `8088`          | `idp`   | Local OIDC IdP for SSO testing (opt-in)           |
+| PostgreSQL | `pgvector/pgvector` (`*-pg16` — Postgres 16) | `5432` | (core)  | Primary database (multi-DB) + pgvector extension  |
+| Redis      | `redis` (7.x, alpine)       | `6379`          | (core)  | JWT blocklist + rate-limit counters               |
+| MinIO      | `quay.io/minio/minio` (`RELEASE.2025-09-07T16-13-09Z`) | `9000`, `9001` | (core)  | S3-compatible storage. **quay.io, not Docker Hub** — see below |
+| Keycloak   | `quay.io/keycloak/keycloak` (26.x) | `8088`   | `idp`   | Local OIDC IdP for SSO testing (opt-in)           |
 | Authentik server | `ghcr.io/goauthentik/server` | `9002` | `idp` | Local SCIM IdP — pushes users into `/api/scim/v2` (opt-in) |
 | Authentik worker | `ghcr.io/goauthentik/server` | —      | `idp` | Runs the SCIM sync jobs (opt-in)                  |
-| Authentik Postgres | `postgres:16-alpine`     | —      | `idp` | Authentik's own DB (not the app's)               |
-| Authentik Redis | `redis:7-alpine`           | —      | `idp` | Authentik's own cache/broker (not the app's)     |
-| LocalStack | `localstack/localstack:3`     | `4566` | `aws` | Local AWS emulator — SQS, SES, CloudWatch Logs, S3 Object Lock (opt-in) |
-| Ollama     | `ollama/ollama:latest`        | `11435`| `ai`  | Local AI model server for the `ollama` extraction adapter (opt-in)      |
-| stripe-mock | `stripe/stripe-mock:latest`  | `12111`| `payments` | Stripe API mock for the `stripe_treasury` payment adapter (opt-in) |
-| Mailpit    | `axllent/mailpit:latest`      | `1025`, `8025` | `mail` | Local SMTP sink + web inbox for the `smtp` email adapter (opt-in) |
+| Authentik Postgres | `postgres` (16.x, alpine) | —     | `idp` | Authentik's own DB (not the app's)               |
+| Authentik Redis | `redis` (7.x, alpine)      | —      | `idp` | Authentik's own cache/broker (not the app's)     |
+| LocalStack | `localstack/localstack` (3.x — held, see below) | `4566` | `aws` | Local AWS emulator — SQS, SES, CloudWatch Logs, S3 Object Lock (opt-in) |
+| Ollama     | `ollama/ollama`               | `11435`| `ai`  | Local AI model server for the `ollama` extraction adapter (opt-in)      |
+| stripe-mock | `stripe/stripe-mock`         | `12111`| `payments` | Stripe API mock for the `stripe_treasury` payment adapter (opt-in) |
+| Mailpit    | `axllent/mailpit`             | `1025`, `8025` | `mail` | Local SMTP sink + web inbox for the `smtp` email adapter (opt-in) |
 | fake-erp   | (built from `tools/fake-erp/`) | `12112` | `erp` | Fake Merge.dev / NetSuite / Dynamics 365 BC server for real-ERP-adapter e2e (opt-in) |
+
+### Image pinning
+
+Every `image:` in `backend/docker-compose.yml` and `deploy/compose.prod.yml` is
+an exact release tag **plus** that tag's multi-arch index digest
+(`repo:tag@sha256:…`). The digest is what Docker actually pulls; the tag is
+there so a human and Dependabot can read which release it is. Floating tags
+(`latest`, `pg16`, `7-alpine`, `2-alpine`) made the stack a contributor got
+depend on the day they pulled, and an upstream retag or registry change landed
+as a red CI run on an unrelated PR — which is how the Docker Hub MinIO outage
+below surfaced.
+
+- **Bumps arrive as Dependabot PRs.** `.github/dependabot.yml` has a
+  `docker-compose` entry over `/backend` and `/deploy`; its updater rewrites the
+  tag and the digest together. Minor and patch bumps are grouped into one PR;
+  majors arrive alone, and are ignored outright for `postgres`, `redis`
+  (a major is a data-directory / persistence upgrade to plan, not a bump to
+  merge — pgvector's `-pg16` suffix already holds it on 16) and
+  `localstack/localstack` (from 2026.03.0 the image is calendar-versioned and
+  refuses to start without a `LOCALSTACK_AUTH_TOKEN`, which neither a
+  contributor's laptop nor CI's service-e2e job has).
+- **CI's own copies are bumped by hand, in the same PR.** GitHub Actions
+  `services:` containers (pgvector and redis in `ci.yml` and `sso-e2e.yml`)
+  and the MinIO `docker pull` / `docker run` lines in `ci.yml` carry the SAME
+  refs as `backend/docker-compose.yml`, each with a comment saying so — no
+  Dependabot ecosystem reads a workflow's service images (`github-actions`
+  reads only `uses:`). Nothing enforces the match yet, and
+  `dependabot-auto-merge.yml` merges a green minor/patch Dependabot PR on its
+  own, so an auto-merged compose bump leaves CI on the previous (still pinned,
+  still pullable) digest until someone re-syncs it — drift, not breakage, and a
+  tracked follow-up (derive CI's refs from the compose file). The Keycloak /
+  Mailpit / LocalStack / stripe-mock containers CI starts come from this
+  compose file, so they need nothing.
+  CI's Redis is the same alpine image as dev and production (it used to be the
+  Debian `redis:7`; same Redis release, smaller base).
+- **`deploy/deploy.sh`'s `NODE_IMAGE`** (the container that builds the
+  production frontend) is pinned the same way and also has no Dependabot
+  reader; keep its major in step with CI's `setup-node`.
+- **To re-pin by hand**, read the digest off the registry, never off a local
+  image: `docker buildx imagetools inspect <repo>:<tag>` prints the index
+  `Digest:` to copy.
 
 ### Why MinIO comes from quay.io
 
@@ -183,7 +229,18 @@ anonymously. The reference appears in three places that must stay in step:
 be a GitHub Actions `services:` container because it needs a `server /data`
 command argument.
 
-The PostgreSQL image is `pgvector/pgvector:pg16` (official Postgres 16 + the [pgvector](https://github.com/pgvector/pgvector) extension) because the RAG-based extraction priors use a `vector(1536)` column. The image is binary-compatible with the vanilla `postgres:16` data directory, so switching from plain Postgres doesn't require a volume wipe — just `docker compose down && up -d`. If you do swap images on an existing volume, run `REINDEX DATABASE <name>` on each DB once to rebuild any text-column indexes affected by a collation-version change.
+**The pinned release is `RELEASE.2025-09-07T16-13-09Z` — exactly what `latest`
+resolved to (same digest) when the tag was pinned, so pinning changed nothing
+that runs.** It is also the last community image MinIO published: upstream moved
+the community edition to source-only distribution in October 2025 and has since
+archived the repository, which is why `latest` stopped moving and why Dependabot
+has no newer release to offer. The
+`RELEASE.…Z.hotfix.<sha>` tags on quay are MinIO's hotfix line rather than a
+successor release; adopting one is a deliberate behaviour change, not a routine
+bump. Replacing MinIO as the local S3 stand-in, if it ever needs a security
+fix that only ships as source, is its own decision.
+
+The PostgreSQL image is `pgvector/pgvector` on the `-pg16` line (official Postgres 16 + the [pgvector](https://github.com/pgvector/pgvector) extension) because the RAG-based extraction priors use a `vector(1536)` column. The image is binary-compatible with the vanilla `postgres:16` data directory, so switching from plain Postgres doesn't require a volume wipe — just `docker compose down && up -d`. If you do swap images on an existing volume, run `REINDEX DATABASE <name>` on each DB once to rebuild any text-column indexes affected by a collation-version change.
 
 ## Default Credentials
 
