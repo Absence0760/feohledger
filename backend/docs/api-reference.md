@@ -423,10 +423,33 @@ Used by 3-way matching. `admin` / `ap_manager` / `ap_clerk`.
 
 | Method | Path                              | Roles | Description |
 |--------|-----------------------------------|-------|-------------|
-| `GET`  | `/api/credit-memos`                | admin, ap_manager, ap_clerk, cfo | List credit memos (paginated, entity-scoped, `?status=`) |
+| `GET`  | `/api/credit-memos`                | admin, ap_manager, ap_clerk, cfo | List credit memos (paginated, entity-scoped). `?status=`, `?search=` (substring of the memo number or the vendor name), `?sort=` ∈ `issued_date` / `amount` / `memo_number` with `?order=asc\|desc` — any other sort key is a 422 |
+| `GET`  | `/api/credit-memos/summary`        | admin, ap_manager, ap_clerk, cfo | Per-status tallies for the filter chips: `{total, by_status: {open, applied, void}}`, over the list's own population filters (entity scope + `?search=`), never `status` |
 | `POST` | `/api/credit-memos`                | admin, ap_manager | Create a credit memo. With no `invoice_id` it lands `open`; with one it is applied on the spot and runs the same guards as `/apply` |
 | `POST` | `/api/credit-memos/{id}/apply`     | admin, ap_manager | Apply an `open` credit memo against a payable |
 | `POST` | `/api/credit-memos/{id}/void`      | admin, ap_manager | Void an `open` memo (409 once `applied` — applied memos are immutable for audit) |
+
+### Search, sort and the chip summary
+
+`GET /api/credit-memos` and `GET /api/credit-memos/summary` share ONE filter
+builder (`_credit_memo_list_query`), so each chip's count is exactly the `total`
+the list would return under that chip — a search for one vendor narrows the
+chips with the table instead of leaving them on the tenant's whole count.
+`search` is a literal-substring match (`utils/search.ilike_contains`, so `%` and
+`_` are text, not wildcards) over `memo_number` and the vendor's name; the
+vendor join is many-to-one, so it can never fan the count out.
+
+The summary deliberately takes no `status`. `GET /api/exceptions/summary` does,
+but there `status` scopes a *second* dimension (the type chips); here status is
+the only dimension and the one being counted, so filtering on it would zero
+every chip but the active one. `by_status` always carries all three known
+statuses (a zero is an answer, not a missing key).
+
+`sort` follows `api/sorting.py`: an allowlist of `issued_date`, `amount` and
+`memo_number`, `.id` appended as the final tie-break, and any other key refused
+with a 422 naming the accepted ones rather than silently falling back to the
+default (`created_at` desc). `amount` orders the raw figure across currencies,
+as `/payments` does — it orders rows, it never sums them.
 
 ### `currency` is resolved, never defaulted to USD
 

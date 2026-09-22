@@ -1,7 +1,8 @@
 """Real-DB coverage for the credit-memos router.
 
 Covers ``backend/app/api/credit_memos.py`` end-to-end against two live test
-tenants: list/get, create (open + applied-at-creation), apply-to-invoice,
+tenants: list/get (incl. search + the sort allowlist), the per-status summary
+behind the filter chips, create (open + applied-at-creation), apply-to-invoice,
 void, the 409 lifecycle guards, RBAC, tenant isolation, and the Decimal money
 math (amounts are ``Numeric(15, 2)`` and must round-trip exactly).
 """
@@ -1011,3 +1012,166 @@ async def test_explicit_currency_still_wins_and_still_guards(realdb):
         )
     assert resp.status_code == 409, resp.text
     assert "currency" in resp.json()["detail"].lower()
+
+
+# ---------------------------------------------------------------------------
+# search + sort (issue #443) — a server-side leg, never a page-local filter
+# ---------------------------------------------------------------------------
+
+
+async def _seed_search_set(realdb) -> None:
+    """Five memos across two vendors: three open, one applied, one void."""
+    mk = realdb.sessionmaker("a")
+    org_id = realdb.info("a").org_id
+    globex = await _add_vendor(mk, org_id, name="Globex Corporation")
+    initech = await _add_vendor(mk, org_id, name="Initech")
+    inv = await _add_invoice(mk, org_id, vendor_id=globex, number="INV-SRCH")
+    async with realdb.client(key="a", role="ap_manager") as c:
+        for number, vendor, amount, issued in (
+            ("CM-300", globex, "30.00", "2026-03-01"),
+            ("CM-100", initech, "10.00", "2026-01-01"),
+            ("RTN_50%", globex, "20.00", "2026-02-01"),
+        ):
+            r = await c.post(
+                "/api/credit-memos",
+                json={
+                    "memo_number": number,
+                    "vendor_id": vendor,
+                    "amount": amount,
+                    "issued_date": issued,
+                },
+            )
+            assert r.status_code == 201, r.text
+        applied = await c.post(
+            "/api/credit-memos",
+            json={
+                "memo_number": "CM-APP",
+                "vendor_id": globex,
+                "amount": "5.00",
+                "invoice_id": inv,
+            },
+        )
+        assert applied.status_code == 201, applied.text
+        void_id = await _create_open_memo(c, initech, number="CM-VOIDED", amount="7.00")
+        assert (await c.post(f"/api/credit-memos/{void_id}/void")).status_code == 200
+
+
+async def test_list_search_matches_memo_number_and_vendor_name(realdb):
+    await _seed_search_set(realdb)
+    async with realdb.client(key="a", role="ap_clerk") as c:
+        by_vendor = (await c.get("/api/credit-memos", params={"search": "globex"})).json()
+        by_number = (await c.get("/api/credit-memos", params={"search": "cm-1"})).json()
+        # LIKE metacharacters are literal text, not wildcards: `%` must not
+        # match every row, `_` must not match any single character.
+        literal = (await c.get("/api/credit-memos", params={"search": "_50%"})).json()
+        underscore = (await c.get("/api/credit-memos", params={"search": "CM_"})).json()
+        blank = (await c.get("/api/credit-memos", params={"search": "   "})).json()
+
+    assert {m["memo_number"] for m in by_vendor["items"]} == {"CM-300", "RTN_50%", "CM-APP"}
+    assert by_vendor["total"] == 3
+    assert [m["memo_number"] for m in by_number["items"]] == ["CM-100"]
+    assert [m["memo_number"] for m in literal["items"]] == ["RTN_50%"]
+    assert underscore["total"] == 0
+    # A whitespace-only term is no filter at all, not "match nothing".
+    assert blank["total"] == 5
+
+
+async def test_list_search_composes_with_the_status_filter(realdb):
+    await _seed_search_set(realdb)
+    async with realdb.client(key="a", role="ap_manager") as c:
+        resp = await c.get("/api/credit-memos", params={"search": "globex", "status": "open"})
+    body = resp.json()
+    assert {m["memo_number"] for m in body["items"]} == {"CM-300", "RTN_50%"}
+    assert body["total"] == 2
+
+
+async def test_list_sort_allowlist(realdb):
+    await _seed_search_set(realdb)
+    async with realdb.client(key="a", role="ap_manager") as c:
+
+        async def numbers(**params) -> list[str]:
+            r = await c.get("/api/credit-memos", params={"status": "open", **params})
+            assert r.status_code == 200, r.text
+            return [m["memo_number"] for m in r.json()["items"]]
+
+        assert await numbers(sort="amount", order="asc") == ["CM-100", "RTN_50%", "CM-300"]
+        assert await numbers(sort="amount", order="desc") == ["CM-300", "RTN_50%", "CM-100"]
+        assert await numbers(sort="issued_date", order="asc") == ["CM-100", "RTN_50%", "CM-300"]
+        assert await numbers(sort="memo_number", order="asc") == ["CM-100", "CM-300", "RTN_50%"]
+
+        # Anything outside the allowlist is refused, never silently ignored —
+        # including real columns that are simply not offered for sorting.
+        for bad in ("vendor_id", "created_at", "amount; DROP TABLE credit_memos"):
+            r = await c.get("/api/credit-memos", params={"sort": bad})
+            assert r.status_code == 422, bad
+            assert "issued_date" in r.json()["detail"], bad
+        assert (await c.get("/api/credit-memos", params={"order": "sideways"})).status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# GET /credit-memos/summary — the chip counts
+# ---------------------------------------------------------------------------
+
+
+async def test_summary_counts_every_status_over_the_whole_set(realdb):
+    await _seed_search_set(realdb)
+    async with realdb.client(key="a", role="ap_clerk") as c:
+        resp = await c.get("/api/credit-memos/summary")
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == {"total": 5, "by_status": {"open": 3, "applied": 1, "void": 1}}
+
+
+async def test_summary_zero_fills_every_known_status(realdb):
+    async with realdb.client(key="a", role="cfo") as c:
+        resp = await c.get("/api/credit-memos/summary")
+    assert resp.json() == {"total": 0, "by_status": {"open": 0, "applied": 0, "void": 0}}
+
+
+async def test_summary_describes_exactly_the_rows_the_list_returns(realdb):
+    """Each chip's count must equal the list's total for that chip under the
+    same search — they come from one filter builder, and this is the pin."""
+    await _seed_search_set(realdb)
+    async with realdb.client(key="a", role="ap_manager") as c:
+        for term in (None, "globex", "initech", "cm-", "nothing-matches"):
+            params = {"search": term} if term else {}
+            summary = (await c.get("/api/credit-memos/summary", params=params)).json()
+            listed_all = (await c.get("/api/credit-memos", params=params)).json()["total"]
+            assert summary["total"] == listed_all, term
+            for status_key, count in summary["by_status"].items():
+                listed = (
+                    await c.get("/api/credit-memos", params={**params, "status": status_key})
+                ).json()["total"]
+                assert count == listed, (term, status_key)
+
+
+async def test_summary_is_entity_scoped(realdb):
+    mk = realdb.sessionmaker("a")
+    org_id = realdb.info("a").org_id
+    async with realdb.client(key="a", role="admin") as c:
+        default_id, other_id = await _entities(c, name="CM Sum Sub", slug="cm-sum-sub")
+    b_vendor, _ = await _seed_scoped_vendor_invoice(
+        mk, org_id, entity_id=other_id, number="CMSUM-B-1"
+    )
+    a_vendor, _ = await _seed_scoped_vendor_invoice(
+        mk, org_id, entity_id=default_id, number="CMSUM-A-1"
+    )
+    async with realdb.client(key="a", role="admin") as c:
+        c.headers["X-Entity-ID"] = other_id
+        await _create_open_memo(c, b_vendor, number="CM-B")
+        c.headers["X-Entity-ID"] = default_id
+        await _create_open_memo(c, a_vendor, number="CM-A")
+
+        scoped = (await c.get("/api/credit-memos/summary")).json()
+        c.headers.pop("X-Entity-ID")
+        consolidated = (await c.get("/api/credit-memos/summary")).json()
+
+    assert scoped == {"total": 1, "by_status": {"open": 1, "applied": 0, "void": 0}}
+    assert consolidated["total"] == 2
+
+
+async def test_summary_rbac_matches_the_list(realdb):
+    async with realdb.client(key="a", role=None) as c:
+        assert (await c.get("/api/credit-memos/summary")).status_code == 401
+    for role in ("admin", "ap_manager", "ap_clerk", "cfo"):
+        async with realdb.client(key="a", role=role) as c:
+            assert (await c.get("/api/credit-memos/summary")).status_code == 200, role
