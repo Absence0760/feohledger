@@ -115,3 +115,29 @@ class CreditMemoStatusCounts(BaseModel):
 
     total: int
     by_status: dict[str, int]
+
+
+class EligibleInvoiceResponse(BaseModel):
+    """One invoice a credit can be applied to, as the credit-memo pickers show it.
+
+    Deliberately narrower than `InvoiceResponse`: the picker needs to name the
+    invoice and say what it can still absorb, not render the invoice. Money is
+    `Decimal` in Python and a JSON number on the wire, like every other amount
+    on this router.
+    """
+
+    id: str
+    invoice_number: str
+    vendor_name: str
+    status: str
+    due_date: str | None = None
+    amount: MoneyAmount
+    currency: str
+    # `amount` minus every credit already APPLIED to the invoice — the figure
+    # the over-application guard on both application paths compares against.
+    creditable_balance: MoneyAmount
+
+
+class EligibleInvoiceListResponse(PageMeta):
+    items: list[EligibleInvoiceResponse]
+    total: int

@@ -1688,3 +1688,336 @@ async def test_apply_reads_the_amount_a_concurrent_edit_committed(realdb):
         memo = await s.get(CreditMemo, memo_uuid)
         assert memo.status == "open"
         assert memo.invoice_id is None
+
+
+# ---------------------------------------------------------------------------
+# Eligible invoices — the picker offers exactly what the application accepts
+# ---------------------------------------------------------------------------
+#
+# `GET /credit-memos/{id}/eligible-invoices` (the Apply dialog) and
+# `GET /credit-memos/eligible-invoices?vendor_id=` (the create dialog's link)
+# replace a page that walked every page of `GET /api/invoices` on mount and
+# filtered by vendor in the browser — offering invoices in another currency,
+# with too little balance left, or in another entity, every one of which the
+# apply then refused. The contract pinned here is a SET equality: what the
+# endpoint lists is what the application path accepts, over a matrix of every
+# refusal it makes (decisions §202).
+
+
+async def _add_target(
+    mk,
+    org_id,
+    *,
+    number: str,
+    vendor_id: str | None,
+    amount: str = "500.00",
+    currency: str = "USD",
+    status: InvoiceStatus = InvoiceStatus.approved,
+) -> str:
+    async with mk() as s:
+        inv = Invoice(
+            organization_id=org_id,
+            invoice_number=number,
+            vendor_name="Acme Supplies",
+            amount=Decimal(amount),
+            currency=currency,
+            status=status,
+            vendor_id=uuid.UUID(vendor_id) if vendor_id else None,
+        )
+        s.add(inv)
+        await s.commit()
+        await s.refresh(inv)
+        return str(inv.id)
+
+
+async def _refusal_matrix(realdb) -> tuple[str, dict[str, str]]:
+    """One vendor's worth of invoices, one per refusal the application makes
+    (and the admissions that sit right beside each). Returns
+    ``(vendor_id, {label: invoice_id})``.
+
+    `CREDITED` has 450 of its 500 already credited by an applied memo, so a
+    100.00 credit is 50 over what it can absorb; `EXACT` can absorb exactly
+    100.00, the boundary the guard admits.
+    """
+    mk = realdb.sessionmaker("a")
+    org_id = realdb.info("a").org_id
+    vendor_id = await _add_vendor(mk, org_id)
+    other_vendor = await _add_vendor(mk, org_id, name="Globex")
+    targets = {
+        "OK": await _add_target(mk, org_id, number="EL-OK", vendor_id=vendor_id),
+        "LOWER": await _add_target(
+            mk, org_id, number="EL-LOWER", vendor_id=vendor_id, currency="usd"
+        ),
+        "BLANK": await _add_target(mk, org_id, number="EL-BLANK", vendor_id=vendor_id, currency=""),
+        "EXACT": await _add_target(
+            mk, org_id, number="EL-EXACT", vendor_id=vendor_id, amount="100.00"
+        ),
+        "PAID": await _add_target(
+            mk, org_id, number="EL-PAID", vendor_id=vendor_id, status=InvoiceStatus.paid
+        ),
+        "EUR": await _add_target(mk, org_id, number="EL-EUR", vendor_id=vendor_id, currency="EUR"),
+        "OTHER": await _add_target(mk, org_id, number="EL-OTHER", vendor_id=other_vendor),
+        "UNLINKED": await _add_target(mk, org_id, number="EL-UNLINKED", vendor_id=None),
+        "SMALL": await _add_target(
+            mk, org_id, number="EL-SMALL", vendor_id=vendor_id, amount="99.99"
+        ),
+        "CREDITED": await _add_target(mk, org_id, number="EL-CREDITED", vendor_id=vendor_id),
+    }
+    async with realdb.client(key="a", role="ap_manager") as c:
+        resp = await c.post(
+            "/api/credit-memos",
+            json={
+                "memo_number": "CM-PRIOR",
+                "vendor_id": vendor_id,
+                "amount": "450.00",
+                "currency": "USD",
+                "invoice_id": targets["CREDITED"],
+            },
+        )
+        assert resp.status_code == 201, resp.text
+    return vendor_id, targets
+
+
+async def _listed(c, url: str, **params) -> dict[str, dict]:
+    resp = await c.get(url, params={"page_size": 100, **params})
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["total"] == len(body["items"])
+    return {row["id"]: row for row in body["items"]}
+
+
+async def test_the_apply_picker_offers_exactly_what_apply_accepts(realdb):
+    vendor_id, targets = await _refusal_matrix(realdb)
+    label_of = {invoice_id: label for label, invoice_id in targets.items()}
+
+    async with realdb.client(key="a", role="ap_manager") as c:
+        memo_id = await _create_open_memo(c, vendor_id, number="CM-EL", amount="100.00")
+        offered = await _listed(c, f"/api/credit-memos/{memo_id}/eligible-invoices")
+
+        # Ground truth: one fresh memo with the same terms per invoice, applied.
+        accepted = set()
+        for label, invoice_id in targets.items():
+            probe = await _create_open_memo(c, vendor_id, number=f"CM-P-{label}", amount="100.00")
+            resp = await c.post(f"/api/credit-memos/{probe}/apply", json={"invoice_id": invoice_id})
+            assert resp.status_code in (200, 409), (label, resp.text)
+            if resp.status_code == 200:
+                accepted.add(invoice_id)
+
+    assert set(offered) == accepted, (
+        sorted(label_of[i] for i in set(offered) ^ accepted),
+        "offered and accepted sets differ on these invoices",
+    )
+    # And the semantics themselves, so the equality cannot hold by both sides
+    # drifting together: a paid invoice is NOT refused (status is not a leg).
+    assert {label_of[i] for i in offered} == {"OK", "LOWER", "BLANK", "EXACT", "PAID"}
+    row = offered[targets["OK"]]
+    assert row["invoice_number"] == "EL-OK"
+    assert Decimal(str(row["creditable_balance"])) == Decimal("500.00")
+    assert row["currency"] == "USD"
+    assert row["status"] == "approved"
+
+
+async def test_the_create_picker_offers_exactly_what_a_linked_create_accepts(realdb):
+    """The create dialog sends no currency when it links (the memo inherits the
+    invoice's), so another currency is NOT a refusal on this path — only on
+    `/apply`, where the memo already has one."""
+    vendor_id, targets = await _refusal_matrix(realdb)
+    label_of = {invoice_id: label for label, invoice_id in targets.items()}
+
+    async with realdb.client(key="a", role="ap_manager") as c:
+        offered = await _listed(
+            c,
+            "/api/credit-memos/eligible-invoices",
+            vendor_id=vendor_id,
+            amount="100.00",
+        )
+        accepted = set()
+        for label, invoice_id in targets.items():
+            resp = await c.post(
+                "/api/credit-memos",
+                json={
+                    "memo_number": f"CM-L-{label}",
+                    "vendor_id": vendor_id,
+                    "amount": "100.00",
+                    "invoice_id": invoice_id,
+                },
+            )
+            assert resp.status_code in (201, 409), (label, resp.text)
+            if resp.status_code == 201:
+                accepted.add(invoice_id)
+
+    assert set(offered) == accepted, sorted(label_of[i] for i in set(offered) ^ accepted)
+    assert {label_of[i] for i in offered} == {"OK", "LOWER", "BLANK", "EXACT", "PAID", "EUR"}
+
+
+async def test_the_create_picker_without_an_amount_offers_every_invoice_with_balance_left(
+    realdb,
+):
+    """Before the amount is typed, "can absorb it" means "can absorb anything":
+    every credit is strictly positive, so only a fully credited invoice is out."""
+    mk = realdb.sessionmaker("a")
+    org_id = realdb.info("a").org_id
+    vendor_id, targets = await _refusal_matrix(realdb)
+    full = await _add_target(mk, org_id, number="EL-FULL", vendor_id=vendor_id, amount="30.00")
+    async with realdb.client(key="a", role="ap_manager") as c:
+        memo = await c.post(
+            "/api/credit-memos",
+            json={
+                "memo_number": "CM-FULL",
+                "vendor_id": vendor_id,
+                "amount": "30.00",
+                "invoice_id": full,
+            },
+        )
+        assert memo.status_code == 201, memo.text
+        offered = await _listed(c, "/api/credit-memos/eligible-invoices", vendor_id=vendor_id)
+
+    assert full not in offered
+    assert targets["SMALL"] in offered and targets["CREDITED"] in offered
+    assert Decimal(str(offered[targets["CREDITED"]]["creditable_balance"])) == Decimal("50.00")
+
+
+async def test_the_apply_picker_never_crosses_an_entity(realdb):
+    """Under the consolidated view nothing confines the invoice, and a vendor
+    id carried by another entity's invoice is the drift case the entity guard
+    exists for — so the picker must not offer it either."""
+    b_vendor, a_invoice, other_id = await _cross_entity_pair(realdb)
+    async with realdb.client(key="a", role="admin") as c:
+        c.headers["X-Entity-ID"] = other_id
+        memo_id = await _create_open_memo(c, b_vendor, number="CM-X-EL", amount="10.00")
+        home = await _listed(c, f"/api/credit-memos/{memo_id}/eligible-invoices")
+        c.headers.pop("X-Entity-ID")
+        consolidated = await _listed(c, f"/api/credit-memos/{memo_id}/eligible-invoices")
+        refused = await c.post(f"/api/credit-memos/{memo_id}/apply", json={"invoice_id": a_invoice})
+    assert refused.status_code == 409, refused.text
+    assert a_invoice not in consolidated
+    # The vendor's own entity-B invoice is offered from both views.
+    assert set(consolidated) == set(home) and len(home) == 1
+
+
+async def test_eligible_invoices_are_scoped_like_the_memo_they_describe(realdb):
+    """Opaque 404 for a memo outside the caller's entity or tenant, the apply's
+    own 409 for one that is no longer open, 404 for a vendor out of scope."""
+    mk = realdb.sessionmaker("a")
+    org_id = realdb.info("a").org_id
+    async with realdb.client(key="a", role="admin") as c:
+        default_id, other_id = await _entities(c, name="CM EL Sub", slug="cm-el-sub")
+    b_vendor, b_invoice = await _seed_scoped_vendor_invoice(
+        mk, org_id, entity_id=other_id, number="EL-SCOPE-B"
+    )
+
+    async with realdb.client(key="a", role="admin") as c:
+        c.headers["X-Entity-ID"] = other_id
+        memo_id = await _create_open_memo(c, b_vendor, number="CM-EL-SCOPE")
+        voided_id = await _create_open_memo(c, b_vendor, number="CM-EL-VOID")
+        assert (await c.post(f"/api/credit-memos/{voided_id}/void")).status_code == 200
+
+        c.headers["X-Entity-ID"] = default_id
+        out_of_entity = await c.get(f"/api/credit-memos/{memo_id}/eligible-invoices")
+        vendor_out_of_entity = await c.get(
+            "/api/credit-memos/eligible-invoices", params={"vendor_id": b_vendor}
+        )
+        c.headers["X-Entity-ID"] = other_id
+        voided = await c.get(f"/api/credit-memos/{voided_id}/eligible-invoices")
+        unknown = await c.get(f"/api/credit-memos/{uuid.uuid4()}/eligible-invoices")
+
+    async with realdb.client(key="b", role="admin") as c:
+        cross_tenant = await c.get(f"/api/credit-memos/{memo_id}/eligible-invoices")
+        cross_tenant_vendor = await c.get(
+            "/api/credit-memos/eligible-invoices", params={"vendor_id": b_vendor}
+        )
+
+    assert out_of_entity.status_code == 404
+    assert out_of_entity.json()["detail"] == "Credit memo not found"
+    assert vendor_out_of_entity.status_code == 404
+    assert voided.status_code == 409
+    assert voided.json()["detail"] == "Cannot apply a credit memo in 'void' status"
+    assert unknown.status_code == 404
+    assert cross_tenant.status_code == 404
+    assert cross_tenant_vendor.status_code == 404
+    assert b_invoice  # the in-scope invoice exists; the 404s above are scope, not absence
+
+
+async def test_eligible_invoices_rbac_matches_the_application_it_feeds(realdb):
+    """Reading the targets a credit may be applied to and applying it are one
+    privilege: admin + ap_manager, never ap_clerk or cfo."""
+    mk = realdb.sessionmaker("a")
+    org_id = realdb.info("a").org_id
+    vendor_id = await _add_vendor(mk, org_id)
+    await _add_target(mk, org_id, number="EL-RBAC", vendor_id=vendor_id)
+    async with realdb.client(key="a", role="ap_manager") as c:
+        memo_id = await _create_open_memo(c, vendor_id, number="CM-EL-RBAC")
+
+    for role, expected in (("admin", 200), ("ap_manager", 200), ("ap_clerk", 403), ("cfo", 403)):
+        async with realdb.client(key="a", role=role) as c:
+            by_memo = await c.get(f"/api/credit-memos/{memo_id}/eligible-invoices")
+            by_vendor = await c.get(
+                "/api/credit-memos/eligible-invoices", params={"vendor_id": vendor_id}
+            )
+        assert by_memo.status_code == expected, (role, by_memo.text)
+        assert by_vendor.status_code == expected, (role, by_vendor.text)
+
+    async with realdb.client(key="a", role=None) as c:
+        anon = await c.get(f"/api/credit-memos/{memo_id}/eligible-invoices")
+    assert anon.status_code == 401
+
+
+async def test_eligible_invoices_request_validation(realdb):
+    mk = realdb.sessionmaker("a")
+    org_id = realdb.info("a").org_id
+    vendor_id = await _add_vendor(mk, org_id)
+    async with realdb.client(key="a", role="ap_manager") as c:
+        bad_memo = await c.get("/api/credit-memos/not-a-uuid/eligible-invoices")
+        bad_vendor = await c.get(
+            "/api/credit-memos/eligible-invoices", params={"vendor_id": "not-a-uuid"}
+        )
+        no_vendor = await c.get("/api/credit-memos/eligible-invoices")
+        amounts = [
+            (
+                bad,
+                (
+                    await c.get(
+                        "/api/credit-memos/eligible-invoices",
+                        params={"vendor_id": vendor_id, "amount": bad},
+                    )
+                ).status_code,
+            )
+            for bad in ("0", "-1", "1.005", "abc")
+        ]
+    assert bad_memo.status_code == 422
+    assert bad_vendor.status_code == 422
+    assert no_vendor.status_code == 422
+    # Mirrors create's `MemoAmount`: an amount create would refuse is not a
+    # question worth answering, and a 3dp bound on a 2dp column would round.
+    assert all(code == 422 for _, code in amounts), amounts
+
+
+async def test_eligible_invoices_search_and_paging_state_the_whole_set(realdb):
+    """Server-side search over the invoice list's own search leg, and an honest
+    `total` for a page smaller than the matching set — the picker's count line
+    reads it."""
+    mk = realdb.sessionmaker("a")
+    org_id = realdb.info("a").org_id
+    vendor_id = await _add_vendor(mk, org_id)
+    for number in ("SRCH-1", "SRCH-2", "SRCH-3", "ELSE-1"):
+        await _add_target(mk, org_id, number=number, vendor_id=vendor_id)
+    async with realdb.client(key="a", role="ap_manager") as c:
+        memo_id = await _create_open_memo(c, vendor_id, number="CM-EL-SRCH")
+        url = f"/api/credit-memos/{memo_id}/eligible-invoices"
+        searched = await c.get(url, params={"search": "srch", "page_size": 2})
+        page_two = await c.get(url, params={"search": "srch", "page_size": 2, "page": 2})
+        literal = await c.get(url, params={"search": "SRCH_"})
+        blank = await c.get(url, params={"search": "   "})
+        create_side = await c.get(
+            "/api/credit-memos/eligible-invoices",
+            params={"vendor_id": vendor_id, "search": "ELSE"},
+        )
+    body = searched.json()
+    assert body["total"] == 3 and len(body["items"]) == 2
+    assert body["page"] == 1 and body["page_size"] == 2
+    numbers = {row["invoice_number"] for row in body["items"] + page_two.json()["items"]}
+    assert numbers == {"SRCH-1", "SRCH-2", "SRCH-3"}
+    # `_` is text, not a wildcard (utils/search.ilike_contains).
+    assert literal.json()["total"] == 0
+    assert blank.json()["total"] == 4
+    assert [row["invoice_number"] for row in create_side.json()["items"]] == ["ELSE-1"]
