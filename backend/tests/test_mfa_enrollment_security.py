@@ -67,11 +67,18 @@ def _db_returning_org(org):
     return db
 
 
-def _passkey_db(existing=None):
+def _passkey_db(existing=None, org=None):
     """Mock the control session for the `_user_passkeys` lookup enroll-start
-    now makes (a registered passkey is a live factor for step-up purposes)."""
+    now makes (a registered passkey is a live factor for step-up purposes), and
+    for the org lookup a password step-up makes (a password is no proof in an
+    SSO-only tenant) — by default an org that has not closed password sign-in.
+    The two never collide: the passkey list is read through `scalars()`, the org
+    through `scalar_one_or_none()`."""
     result = MagicMock()
     result.scalars.return_value.all.return_value = existing or []
+    result.scalar_one_or_none.return_value = (
+        org if org is not None else SimpleNamespace(settings={})
+    )
     db = AsyncMock()
     db.execute = AsyncMock(return_value=result)
     db.commit = AsyncMock()
@@ -343,7 +350,9 @@ async def test_disable_mfa_requires_password_re_entry():
     from app.schemas.auth import MFADisableRequest
 
     user = _fake_user(mfa_secret="JBSWY3DPEHPK3PXP", mfa_enabled=True)
-    db = AsyncMock()
+    # An org that has not closed password sign-in, so the password IS a proof
+    # here and it is the wrong one that is refused.
+    db = _db_returning_org(SimpleNamespace(id=user.organization_id, settings={}))
 
     with patch("app.utils.passwords.pwd_context.verify", return_value=False):
         with pytest.raises(HTTPException) as exc:

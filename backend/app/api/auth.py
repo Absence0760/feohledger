@@ -5,7 +5,7 @@ import json
 import logging
 import uuid
 from datetime import UTC, datetime
-from typing import Annotated
+from typing import Annotated, NoReturn
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from pydantic import BaseModel
@@ -894,6 +894,30 @@ STEP_UP_FAILURE_DETAIL = (
     "passkey to change your two-factor settings."
 )
 
+# The refusal an SSO-only tenant's member gets when the proof they offered was a
+# password. It says the same thing whether the password was right, wrong, or the
+# account has none at all (the password is never checked there), and the tenant's
+# `sso_only` flag is already public through `/auth/{sso,saml}/config` — so it
+# tells the caller nothing about the account they did not already know.
+STEP_UP_SSO_ONLY_DETAIL = (
+    "Your organization signs in with single sign-on, so a password cannot confirm "
+    "this change. Use a current authenticator code or a registered passkey."
+)
+
+
+async def _password_sign_in_closed(db: AsyncSession, user: User) -> bool:
+    """Has `user`'s organization closed password sign-in (`sso_only`)?
+
+    The same predicate `login` refuses a correct password on
+    (`services/sso.is_sso_only`, which also requires `sso.enabled`, so a broken
+    IdP config keeps the password open as the escape hatch). A step-up is an
+    authentication, and a tenant that has closed password login has said the
+    password is not an authenticator there — so the password proves a step-up
+    exactly when it would prove a sign-in, and never otherwise.
+    """
+    org = await _load_user_org(db, user.organization_id)
+    return is_sso_only(org.settings if org else None)
+
 
 async def _step_up_satisfied(
     db: AsyncSession,
@@ -923,11 +947,27 @@ async def _step_up_satisfied(
     around and used to authorize `passkey_delete` — nor can a LOGIN assertion
     satisfy any step-up (different Redis namespace entirely). See
     `services/webauthn._assertion_challenge_key`.
+
+    **The password is not a proof in an SSO-only tenant.** `login` refuses a
+    correct password there, and `api/auth.py::login`'s own comment is explicit
+    that the refusal holds "even for users who still carry a password hash" —
+    so the hash left on such an account must not go on authenticating the one
+    thing it still could, a change to the account's second factor. It is
+    dropped here, before `mfa.step_up_verified` sees it, and never verified:
+    the code and assertion proofs are untouched, and they are exactly what an
+    account with a live factor can offer. Enforced here rather than at each
+    caller so no route that asks "is the step-up satisfied?" can skip it; the
+    org is loaded only when a password was actually offered, so the code and
+    assertion paths cost no extra query. The supplier portal is unaffected — a
+    `VendorUser` signs in with a password and there is no SSO to close it.
     """
+    password = body.password if body else None
+    if password and await _password_sign_in_closed(db, user):
+        password = None
     if await mfa.step_up_verified(
         hashed_password=user.hashed_password,
         mfa_secret=user.mfa_secret,
-        password=body.password if body else None,
+        password=password,
         code=body.code if body else None,
     ):
         return True
@@ -982,7 +1022,27 @@ async def _require_mfa_step_up(
     await _throttle_step_up(user.id)
     if await _step_up_satisfied(db, user, body, operation=operation, rp=rp):
         return
+    await _refuse_step_up(db, user, body, operation=operation)
+
+
+async def _refuse_step_up(
+    db: AsyncSession,
+    user: User,
+    body: MFAStepUpRequest | None,
+    *,
+    operation: str,
+) -> NoReturn:
+    """Audit a failed step-up and raise its 400 — the one refusal both gates share.
+
+    A caller in an SSO-only tenant who offered a password gets
+    `STEP_UP_SSO_ONLY_DETAIL` instead of the generic sentence, which would
+    otherwise tell them to "confirm your password" — the one proof that tenant
+    no longer accepts. Everyone else gets the generic, account-agnostic one.
+    """
     await _audit_step_up_failure(user, operation=operation)
+    offered_password = body is not None and bool(body.password)
+    if offered_password and await _password_sign_in_closed(db, user):
+        raise HTTPException(status_code=400, detail=STEP_UP_SSO_ONLY_DETAIL)
     raise HTTPException(status_code=400, detail=STEP_UP_FAILURE_DETAIL)
 
 
@@ -1087,8 +1147,7 @@ async def disable_mfa(
     rp = await _relying_party(db, user.organization_id, host)
     await _throttle_step_up(user.id)
     if not await _step_up_satisfied(db, user, body, operation="totp_disable", rp=rp):
-        await _audit_step_up_failure(user, operation="totp_disable")
-        raise HTTPException(status_code=400, detail=STEP_UP_FAILURE_DETAIL)
+        await _refuse_step_up(db, user, body, operation="totp_disable")
 
     org = await _load_user_org(db, user.organization_id)
     if mfa.org_requires_mfa(org.settings if org else None):
