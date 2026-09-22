@@ -1,5 +1,3 @@
-import 'dart:io';
-
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:feohledger_mobile/l10n/gen/app_localizations.dart';
@@ -14,11 +12,17 @@ import 'package:feohledger_mobile/utils/format_locale.dart';
 // typed `params` beside the English `message`, and this is the mobile half
 // that turns the pair into a sentence in the reader's language.
 //
-// The parity group is the drift guard. The catalogue's authority is
-// `backend/app/services/invoice_warning_catalog.py`, which
-// `pnpm gen:warning-messages` renders into the frontend's generated module;
-// this file reads THAT and fails when mobile falls behind it, so a new
-// `WarningSpec` cannot ship web-only.
+// Parity with the web is NOT asserted here any more, deliberately. The code
+// map and the parameter kinds are generated — `pnpm gen:warning-messages`
+// writes `lib/l10n/invoice_warning_messages.generated.dart` in the same run,
+// from the same `backend/app/services/invoice_warning_catalog.py`, as the
+// web's `invoiceWarningMessages.generated.ts` — and
+// `pnpm check:warning-messages` fails CI's Backend lint job when either file
+// is stale. This test used to parse that TypeScript to catch a hand
+// transcription drifting from it; with no transcription left, the only thing
+// it could catch is a hand edit to a generated file, which the drift check
+// already refuses. What a generated file cannot prove about itself is that
+// every arm it emits reaches a real sentence, and that is the first group.
 void main() {
   final en = AppLocalizationsEn();
   final de = AppLocalizationsDe();
@@ -36,62 +40,77 @@ void main() {
         params: params,
       );
 
-  group('parity with the generated backend catalogue', () {
-    final source =
-        File('../frontend/src/lib/api/invoiceWarningMessages.generated.ts')
-            .readAsStringSync();
+  /// A well-formed sample value for every parameter [code] declares.
+  Map<String, String> sampleParams(String code) => {
+        for (final e in invoiceWarningParamKinds[code]!.entries)
+          e.key: switch (e.value) {
+            'money' => '1234.50',
+            'currency' => 'EUR',
+            'percent' => '20.0',
+            'number' => '3',
+            'count' => '2',
+            'date' => '2026-03-04',
+            _ => 'x',
+          },
+      };
 
-    String section(String name) =>
-        source.split('$name = {')[1].split('} as const')[0];
-
-    test('the generated module is where it is expected to be', () {
-      // A guard that silently passes when its input moves is not a guard.
-      expect(source, contains('INVOICE_WARNING_MESSAGE_KEYS'));
-      expect(source, contains('INVOICE_WARNING_PARAM_KINDS'));
-    });
-
-    test('mobile states every code the backend can emit — and only those', () {
-      final codes = RegExp(r"^\t'([a-z0-9_]+)':", multiLine: true)
-          .allMatches(section('INVOICE_WARNING_MESSAGE_KEYS'))
-          .map((m) => m.group(1)!)
-          .toSet();
-
-      expect(codes, isNotEmpty);
-      expect(invoiceWarningParamKinds.keys.toSet(), codes);
-      // Every code resolves to a real sentence, not just to a map entry.
-      for (final code in codes) {
-        final params = {
-          for (final e in invoiceWarningParamKinds[code]!.entries)
-            e.key: switch (e.value) {
-              'money' => '1234.50',
-              'percent' => '20.0',
-              'number' => '3',
-              'count' => '2',
-              'date' => '2026-03-04',
-              _ => 'x',
-            },
-        };
-        expect(localizeInvoiceWarning(en, warning(code, params: params)),
-            isNotNull,
-            reason: '$code has no localized sentence');
+  group('the generated catalogue', () {
+    test('declares only the parameter kinds this library can format', () {
+      // A kind the formatters here don't know would render verbatim at best;
+      // the generator reads kinds straight off the backend catalogue, so this
+      // is where a new backend kind first has to be taught to mobile.
+      const known = {
+        'text',
+        'currency',
+        'money',
+        'number',
+        'percent',
+        'count',
+        'date',
+      };
+      expect(invoiceWarningParamKinds, isNotEmpty);
+      for (final entry in invoiceWarningParamKinds.entries) {
+        expect(known, containsAll(entry.value.values.toSet()), reason: entry.key);
       }
     });
 
-    test('each parameter means the same thing on both surfaces', () {
-      // The kind is what decides whether `1234.50` renders as money in the
-      // row's currency or as a bare number — a drift here is a mislabelled
-      // figure, not a missing string.
-      final web = <String, Map<String, String>>{};
-      for (final m in RegExp(r"^\t'([a-z0-9_]+)': \{(.*)\},$", multiLine: true)
-          .allMatches(section('INVOICE_WARNING_PARAM_KINDS'))) {
-        web[m.group(1)!] = {
-          for (final p
-              in RegExp(r"(\w+): '(\w+)'").allMatches(m.group(2)!))
-            p.group(1)!: p.group(2)!,
-        };
+    test('every code resolves to a real sentence in every locale', () {
+      // Proves each generated arm reaches its `AppLocalizations` method with
+      // every argument its kind map promises — in all six catalogues, since a
+      // placeholder the translator dropped is where a locale would fall back.
+      final locales = [
+        for (final locale in AppLocalizations.supportedLocales)
+          lookupAppLocalizations(locale),
+      ];
+      expect(locales, isNotEmpty);
+      for (final l in locales) {
+        for (final code in invoiceWarningParamKinds.keys) {
+          final text = localizeInvoiceWarning(
+            l,
+            warning(code, params: sampleParams(code)),
+          );
+          expect(text, isNotNull, reason: '${l.localeName}: $code');
+          expect(text, isNot(contains('{')), reason: '${l.localeName}: $code');
+        }
       }
-      expect(web, isNotEmpty);
-      expect(invoiceWarningParamKinds, web);
+    });
+
+    test('every declared parameter is required, not decorative', () {
+      // Dropping any one non-currency parameter must fall the whole finding
+      // back to the server's English — the generated arm reads every
+      // parameter the sentence embeds, and none of them is optional.
+      for (final entry in invoiceWarningParamKinds.entries) {
+        final code = entry.key;
+        for (final name in entry.value.keys) {
+          if (entry.value[name] == 'currency') continue;
+          final params = sampleParams(code)..remove(name);
+          expect(
+            localizeInvoiceWarning(en, warning(code, params: params)),
+            isNull,
+            reason: '$code still renders without `$name`',
+          );
+        }
+      }
     });
   });
 

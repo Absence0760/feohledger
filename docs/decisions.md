@@ -7990,3 +7990,43 @@ longer be reasoned about separately.
 A verification link emailed while signup was open survives the switch
 unconsumed, so re-opening signup lets that visitor finish rather than
 stranding them.
+
+## 197. A generated Dart catalogue takes its call signature from the ARB, and the parity test it replaces is retired, not kept
+
+Round 26 localized invoice warnings on mobile by transcribing all 48 codes into
+`invoice_warning_messages.dart` by hand — a parameter-kind map and a 360-line
+`switch` — and backstopped the transcription with a flutter test that parsed the
+web's generated TypeScript. §157's generator now writes the Dart half as well,
+into `invoice_warning_messages.generated.dart` (a `part` of the hand-written
+library, which keeps only the per-kind formatters and the fallback rules). The
+generated `switch` is byte-identical to the transcribed one, which is the proof
+the transcription was mechanical enough to generate.
+
+**Where the web generator emits a key, this one has to emit a call.** A gen-l10n
+class exposes each message as its own typed method, so each code needs an arm
+that calls `l.invoiceWarningX(a, b, …)` with its arguments in order. Taking that
+order from the catalogue's `params` would have been the obvious choice and a
+latent defect: `flutter gen-l10n` builds the signature from the ARB's
+placeholder metadata, the two orders agree today only because round 26 typed
+them that way, and every warning placeholder but a plural selector is a
+`String` — so a swap compiles and renders a PO number where the amount belongs.
+The generator therefore reads order and type from `app_en.arb`, refuses outright
+when the ARB's placeholders are not the catalogue's (a missing or extra name, an
+`int` on anything but a `count`), and treats an ARB-only reorder as drift: the
+check names the mobile file stale even though the catalogue did not move. A code
+the ARB does not state yet still gets an arm, in catalogue order, which fails
+`flutter analyze` — the mobile counterpart of the web map's
+`satisfies Record<string, MessageKey>`, and the second link of the same
+three-guard chain.
+
+**The cross-surface parity test was deleted rather than kept beside the drift
+check.** It existed to catch a hand transcription drifting from the TypeScript;
+with both files written by one run from one source, the only divergence left for
+it to find is a hand edit to a generated file, which `--check` already refuses
+in the same CI job that would have run it. Keeping it would have been a second
+guard with no failure of its own to detect — and one that reads another
+workspace's source file by relative path, so it breaks when that file moves
+without anything having gone wrong. What a generated file cannot prove about
+itself is that every arm it emits reaches a real sentence; the mobile test now
+asserts that for every code in every locale, plus that dropping any one
+parameter falls the finding back to the server's English.
