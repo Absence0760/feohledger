@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { SubscriptionStatus } from '$lib/types/billing';
-	import Badge, { type BadgeTone } from './Badge.svelte';
+	import Badge from './Badge.svelte';
+	import type { BadgeTone } from './badgeTone';
 
 	let { status }: { status: SubscriptionStatus } = $props();
 

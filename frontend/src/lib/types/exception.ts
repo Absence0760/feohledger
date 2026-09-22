@@ -21,7 +21,7 @@
 // others is how two surfaces come to name a single status differently, which
 // is the defect above with a different column name.
 
-import type { BadgeTone } from '$lib/components/ui/Badge.svelte';
+import type { BadgeTone } from '$lib/components/ui/badgeTone';
 import type { MessageKey } from '$lib/i18n/messages';
 
 /**

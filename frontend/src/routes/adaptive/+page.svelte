@@ -36,7 +36,8 @@
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 	import Tabs from '$lib/components/ui/Tabs.svelte';
 	import DataTable from '$lib/components/ui/DataTable.svelte';
-	import Badge, { type BadgeTone } from '$lib/components/ui/Badge.svelte';
+	import Badge from '$lib/components/ui/Badge.svelte';
+	import type { BadgeTone } from '$lib/components/ui/badgeTone';
 	import KpiCard from '$lib/components/ui/KpiCard.svelte';
 	import Money from '$lib/components/ui/Money.svelte';
 	import RowAction from '$lib/components/ui/RowAction.svelte';

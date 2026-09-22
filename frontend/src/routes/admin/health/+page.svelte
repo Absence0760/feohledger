@@ -6,7 +6,7 @@
 	import DataTable from '$lib/components/ui/DataTable.svelte';
 	import KpiCard from '$lib/components/ui/KpiCard.svelte';
 	import Badge from '$lib/components/ui/Badge.svelte';
-	import type { BadgeTone } from '$lib/components/ui/Badge.svelte';
+	import type { BadgeTone } from '$lib/components/ui/badgeTone';
 	import { getSweepHealth, type SweepHealth, type SweepHealthReport } from '$lib/api/sweepHealth';
 	import type { MessageKey } from '$lib/i18n/messages';
 	import { m } from '$lib/i18n/store.svelte';
