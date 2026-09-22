@@ -267,3 +267,52 @@ async def test_by_entity_outstanding_reporting_converts_mixed_currency_invoices(
 
     default_row = next(r for r in body["entities"] if r["is_default"])
     assert Decimal(str(default_row["reporting_outstanding_amount"])) == (_USD_FACE + _EUR_AS_USD)
+
+
+@pytest.mark.asyncio
+async def test_by_entity_spend_reporting_converts_and_matches_the_cfo_tile(realdb):
+    """`total_spend` is a naive SUM across currencies, and the web labelled it
+    with the entity's currency (or the org's). `reporting_total_spend` is the
+    converted counterpart — and for the consolidated row it must equal `/cfo`'s
+    `reporting_spend`, whose population and rollup it reuses."""
+    await _seed_open_invoices(realdb)
+    # A foreign invoice with NO rate lock: counted at face value, and disclosed.
+    org_id = realdb.info(TENANT).org_id
+    async with realdb.sessionmaker(TENANT)() as s:
+        s.add(
+            Invoice(
+                organization_id=org_id,
+                entity_id=await _default_entity_id(s),
+                invoice_number=f"MC-GBP-{uuid.uuid4().hex[:6]}",
+                vendor_name="Multi-Currency Supply Co",
+                amount=Decimal("10.00"),
+                currency="GBP",
+                status=InvoiceStatus.approved,
+                invoice_date=utc_today(),
+                due_date=utc_today(),
+            )
+        )
+        await s.commit()
+
+    async with realdb.client(key=TENANT, role="cfo") as c:
+        body = (await c.get("/api/analytics/by-entity")).json()
+        cfo = (await c.get("/api/analytics/cfo")).json()
+
+    consolidated = body["consolidated"]
+    # Legacy field unchanged: the naive cross-currency sum.
+    assert Decimal(str(consolidated["total_spend"])) == Decimal("2010.00")
+    # Converted where a lock exists, face value (and counted) where none does.
+    expected = _USD_FACE + _EUR_AS_USD + Decimal("10.00")
+    assert Decimal(str(consolidated["reporting_total_spend"])) == expected
+    assert consolidated["reporting_total_spend_unconverted_count"] == 1
+    assert consolidated["reporting_currency"] == "USD"
+
+    # The consolidated row and the `/cfo` spend tile are one figure.
+    assert Decimal(str(cfo["reporting_spend"]["total_amount"])) == Decimal(
+        str(consolidated["reporting_total_spend"])
+    )
+    assert cfo["reporting_spend"]["unconverted_count"] == 1
+
+    default_row = next(r for r in body["entities"] if r["is_default"])
+    assert Decimal(str(default_row["reporting_total_spend"])) == expected
+    assert default_row["reporting_total_spend_unconverted_count"] == 1

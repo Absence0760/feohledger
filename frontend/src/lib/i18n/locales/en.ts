@@ -3128,7 +3128,11 @@ export const en = {
 	'byEntity.loading': 'Loading…',
 	'byEntity.loadFailed': 'Failed to load per-entity breakdown',
 	'byEntity.unconverted':
-		'Excluded from the consolidated Outstanding total: {n, plural, one {# open invoice} other {# open invoices}} with no locked exchange rate into {currency}.',
+		'Outstanding includes {n, plural, one {# open invoice} other {# open invoices}} with no locked exchange rate into {currency}, counted at face value — the totals mix currencies by that much.',
+	'byEntity.unconvertedSpend':
+		'Spend includes {n, plural, one {# invoice} other {# invoices}} with no locked exchange rate into {currency}, counted at face value — the totals mix currencies by that much.',
+	'byEntity.openPoNoCurrency':
+		'Purchase orders do not record a currency yet, so Open POs are shown without one.',
 
 	// Scheduled reports (components/analytics/ScheduledReportsPanel.svelte) —
 	// the CRUD surface for the report runner, hosted on /cfo. The report-type

@@ -2957,7 +2957,11 @@ export const messages = {
 	'byEntity.loading': 'Cargando…',
 	'byEntity.loadFailed': 'Error al cargar el desglose por entidad',
 	'byEntity.unconverted':
-		'Excluidas del total consolidado de Pendiente: {n, plural, one {# factura abierta} other {# facturas abiertas}} sin tipo de cambio fijado a {currency}.',
+		'Pendiente incluye a su valor nominal {n, plural, one {# factura abierta} other {# facturas abiertas}} sin tipo de cambio fijado a {currency}, por lo que los totales mezclan monedas.',
+	'byEntity.unconvertedSpend':
+		'El gasto incluye a su valor nominal {n, plural, one {# factura} other {# facturas}} sin tipo de cambio fijado a {currency}, por lo que los totales mezclan monedas.',
+	'byEntity.openPoNoCurrency':
+		'Las órdenes de compra aún no registran una moneda, por lo que las órdenes abiertas se muestran sin ella.',
 
 	// Informes programados (components/analytics/ScheduledReportsPanel.svelte)
 	'scheduledReports.heading': 'Informes programados',

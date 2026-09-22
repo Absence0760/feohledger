@@ -2960,7 +2960,11 @@ export const messages = {
 	'byEntity.loading': 'Chargement…',
 	'byEntity.loadFailed': 'Échec du chargement de la ventilation par entité',
 	'byEntity.unconverted':
-		'Exclues du total consolidé « En cours » : {n, plural, one {# facture ouverte} other {# factures ouvertes}} sans taux de change verrouillé vers {currency}.',
+		'En cours inclut au nominal {n, plural, one {# facture ouverte} other {# factures ouvertes}} sans taux de change verrouillé vers {currency} — les totaux mélangent donc des devises.',
+	'byEntity.unconvertedSpend':
+		'Les dépenses incluent au nominal {n, plural, one {# facture} other {# factures}} sans taux de change verrouillé vers {currency} — les totaux mélangent donc des devises.',
+	'byEntity.openPoNoCurrency':
+		'Les commandes n\'enregistrent pas encore de devise : les commandes ouvertes sont donc affichées sans devise.',
 
 	// Rapports planifiés (components/analytics/ScheduledReportsPanel.svelte)
 	'scheduledReports.heading': 'Rapports planifiés',

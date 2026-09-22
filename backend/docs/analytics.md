@@ -864,16 +864,34 @@ Response:
 - `period_days`, `period_start`
 - `entities[]` — one row per active entity:
   `{entity_id, entity_name, entity_slug, currency, is_default, total_spend,
-  outstanding_amount, invoice_count, open_exceptions, open_po_amount}`
+  reporting_total_spend, reporting_total_spend_unconverted_count,
+  outstanding_amount, reporting_outstanding_amount, reporting_currency,
+  reporting_outstanding_unconverted_count, invoice_count, open_exceptions,
+  open_po_amount}`
 - `consolidated` — the same metric block computed with `entity_id=None`
   (equals the sum across `entities[]`)
 
-Money fields (`total_spend`, `outstanding_amount`, `open_po_amount`) are
-**string-Decimal** (never floats). A single-entity tenant still returns a
-coherent one-row breakdown whose row equals the consolidated block. The web
-surface is the `By entity` table on `/cfo`
+Money fields are **string-Decimal** (never floats). A single-entity tenant still
+returns a coherent one-row breakdown whose row equals the consolidated block.
+
+**Which figure is in which currency — and which has none.**
+
+| Field | Denominated in |
+|-------|----------------|
+| `reporting_total_spend`, `reporting_outstanding_amount` | `reporting_currency` (the org's, same on every row). A foreign invoice with no locked rate is counted at **face value**, and the matching `*_unconverted_count` says how many. The consolidated spend figure is the same population and rollup as `/cfo`'s `reporting_spend`, so the two cannot disagree. |
+| `total_spend`, `outstanding_amount` | **Nothing** — naive `SUM`s across currencies, kept for API back-compat. Never render them. |
+| `open_po_amount` | **Unknown** — `PurchaseOrder` has no currency column, so this sums PO totals in currencies nobody recorded. Served with no code on purpose; the client renders it bare. |
+| `currency` (entity row) | Not a denomination: the entity's configured currency, `NULL` meaning "the org's reporting currency". It labels no figure. |
+
+The web surface is the `By entity` table on `/cfo`
 (`frontend/src/lib/components/analytics/ByEntityBreakdown.svelte`), which
-self-hides for single-entity tenants (mirrors the entity switcher).
+self-hides for single-entity tenants (mirrors the entity switcher). It renders
+Spend and Outstanding from the `reporting_*` fields in `reporting_currency` on
+every row, Open POs bare, and one face-value disclosure line per column whose
+consolidated count is non-zero. It used to label each entity row's naive
+`total_spend` / `outstanding_amount` / `open_po_amount` with the entity's
+`currency`, falling back to the org's — a mixed-currency figure wearing one
+currency's symbol (`docs/decisions.md` §198).
 
 ## Predictive cash-flow forecasting (`/api/analytics/{cashflow_forecast,cashflow_whatif,cash_position}`)
 

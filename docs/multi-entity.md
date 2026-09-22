@@ -391,8 +391,11 @@ See `backend/docs/inter-company.md`.
 
 `GET /api/analytics/by-entity` (admin / CFO) returns a per-entity rollup (total
 spend, outstanding, invoice count, open exceptions, open-PO amount — money as
-string-Decimal) plus a `consolidated` block computed with `entity_id=None` as a
-cross-check (it equals the sum across entities). It deliberately **ignores
+string-Decimal; spend and outstanding also in the org's reporting currency,
+which is what the UI renders) plus a `consolidated` block computed with
+`entity_id=None` as a cross-check (it equals the sum across entities). Field by
+field, with which currency each figure is in: `backend/docs/analytics.md`
+§ Consolidated reporting across entities. It deliberately **ignores
 `X-Entity-ID`** — it reports every entity at once — and reuses the same scoped
 helpers as `/analytics/cfo`. The `/cfo` dashboard renders it as a "By entity"
 breakdown table (hidden for single-entity tenants).
