@@ -7,7 +7,7 @@
 	import EntitySwitcher from '$lib/components/layout/EntitySwitcher.svelte';
 	import NotificationBell from '$lib/components/layout/NotificationBell.svelte';
 	import BrandMark from '$lib/components/ui/BrandMark.svelte';
-	import { NAV, groupHref, isEntryActive, isEntryVisible, type NavEntry } from '$lib/nav';
+	import { NAV, entryHref, isEntryActive, isEntryVisible, type NavEntry } from '$lib/nav';
 	import { m } from '$lib/i18n/store.svelte';
 
 	let collapsed = $derived(sidebar.collapsed);
@@ -49,7 +49,7 @@
 	// href). `entries` already dropped groups with no visible child, so the
 	// fallback is unreachable.
 	function hrefFor(entry: NavEntry): string {
-		return entry.kind === 'link' ? entry.href : (groupHref(entry, has, can) ?? '#');
+		return entryHref(entry, has, can) ?? '#';
 	}
 </script>
 

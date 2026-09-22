@@ -70,12 +70,18 @@ into the **Frontend** CI job beside the typecheck, and into root `pnpm lint` as
   dashboard's `discount_capture` money was typed `MoneyString` while the wire
   sends JSON numbers, and the five `AgingBuckets` bands were typed `number` and
   were being summed and divided as raw currency in the route.
-- **`$lib` imports under `tests-e2e/` must be `import type`.** `tsc` resolves the
-  alias through `.svelte-kit/tsconfig.json`'s `paths`; Playwright's own esbuild
-  transform does not read that file, so a VALUE import from `$lib` typechecks
-  and then fails to resolve when Playwright loads the spec. Types are erased
-  before the runtime sees them, which is why the contract costs nothing at test
-  time.
+- **`$lib` imports under `tests-e2e/` are `import type`, with one narrow
+  exception.** Types are erased before the runtime sees them, which is why the
+  contract costs nothing at test time. A VALUE import is different: Playwright
+  does resolve the `$lib` alias itself, but not SvelteKit's virtual modules, so
+  a value import typechecks and then fails to load (`Cannot find package
+  '$env'`) the moment its module graph reaches `$env/*`, `$app/*` or a
+  `.svelte` file — `$lib/api` does, through `$lib/tenant`. The exception is a
+  module that is **pure by design and says so**: `tests-e2e/auth/rbac.spec.ts`
+  imports `$lib/nav`'s functions so it can compare the rendered sidebar with
+  what the nav policy computes instead of re-typing the answer (the
+  round-31 red shard). If such a module ever gains a `$env`/`$app` import, the
+  spec fails to load loudly, not silently.
 
 `@types/node` is a devDependency for this config alone — the Playwright tree
 genuinely runs in Node (`process.env`, `Buffer`, `node:crypto`), and

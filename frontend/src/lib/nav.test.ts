@@ -5,6 +5,7 @@ import {
 	isEntryActive,
 	isEntryVisible,
 	sectionTabActive,
+	sidebarHrefs,
 	visibleChildren,
 	type NavLink,
 	type NavGroup,
@@ -27,6 +28,128 @@ const kid = (href: string) => kids.find((c) => c.href === href)!;
  */
 const anyKid = (href: string) => groups.flatMap((g) => g.children).find((c) => c.href === href)!;
 const url = (p: string) => new URL(`http://acme.localhost:7777${p}`);
+
+// ---------------------------------------------------------------------------
+// THE role matrix — pinned once, here, as a literal.
+//
+// Every nav row's gate, written out by hand. This is the deliberate literal the
+// rest of the nav's tests are allowed to lean on: `tests-e2e/auth/rbac.spec.ts`
+// no longer restates which hrefs each role sees — it renders the sidebar and
+// the section tabs for a real signed-in role and compares them with what
+// `nav.ts` computes (`sidebarHrefs` / `visibleChildren`). That proves the
+// WIRING; this table proves the POLICY. Two independent hand-typed copies were
+// how a one-row nav change turned an unrelated PR's e2e shard red in round 31,
+// while the unit copy — the only one visible before CI — had been updated.
+//
+// So a new, moved or re-gated row changes THIS table and nothing else, and an
+// accidental widening (a role or permission added to a row) fails here, in
+// `pnpm test:unit`, before anything reaches CI. The reasoning for each gate is
+// in the comment beside the row in `nav.ts` and in the tests below.
+//
+// `roles: null` = no role gate at all (every signed-in caller, including a
+// custom role holding no system role).
+// ---------------------------------------------------------------------------
+
+const ALL_FOUR = ['admin', 'ap_manager', 'ap_clerk', 'cfo'];
+const NOT_CLERK = ['admin', 'ap_manager', 'cfo'];
+
+const NAV_GATES: Record<string, { roles: string[] | null; permissions?: string[] }> = {
+	// top-level links
+	'/': { roles: null },
+	'/invoices': { roles: null },
+	'/payments': { roles: NOT_CLERK, permissions: [PERM_PAYMENT_EXECUTE, PERM_PAYMENT_VOID] },
+	'/vendors': { roles: NOT_CLERK },
+	'/vendors/screening': { roles: ALL_FOUR },
+	'/vendors/change-requests': { roles: ['admin', 'ap_manager'] },
+	'/exceptions': { roles: ['admin', 'ap_manager'] },
+	// Procurement
+	'/purchase-orders': { roles: ALL_FOUR },
+	'/goods-receipts': { roles: ALL_FOUR },
+	'/requisitions': { roles: ALL_FOUR },
+	'/intake': { roles: ALL_FOUR },
+	'/catalogs': { roles: ALL_FOUR },
+	'/gl-accounts': { roles: ALL_FOUR },
+	'/budgets': { roles: NOT_CLERK },
+	// Billing
+	'/contracts': { roles: ALL_FOUR },
+	'/expenses': { roles: ALL_FOUR },
+	'/credit-memos': { roles: ALL_FOUR },
+	'/discounts': { roles: ALL_FOUR },
+	'/recurring': { roles: ALL_FOUR },
+	'/vendor-statements': { roles: ALL_FOUR },
+	'/positive-pay': { roles: NOT_CLERK },
+	'/bank-reconciliation': { roles: ALL_FOUR },
+	'/billing': { roles: ['admin', 'cfo'] },
+	// Insights
+	'/assistant': { roles: ALL_FOUR },
+	'/cfo': { roles: ['admin', 'cfo'] },
+	'/cash-flow': { roles: NOT_CLERK },
+	'/tax': { roles: NOT_CLERK },
+	'/reports': { roles: ALL_FOUR },
+	// Automation
+	'/workflows': { roles: ['admin'] },
+	'/experiments': { roles: NOT_CLERK },
+	'/adaptive': { roles: NOT_CLERK },
+	// Governance
+	'/audit': { roles: ['admin', 'cfo'] },
+	'/admin/access-review': { roles: ['admin', 'cfo'] },
+	'/admin/retention': { roles: ['admin'] },
+	'/admin/privacy': { roles: ['admin'] },
+	// Settings
+	'/organization': { roles: ['admin'] },
+	'/admin?tab=users': { roles: ['admin'], permissions: [PERM_USER_MANAGE] },
+	'/admin?tab=roles': { roles: ['admin'] },
+	'/admin/entities': { roles: ['admin'] },
+	'/admin/partner': { roles: ['admin'] },
+	'/admin/api-keys': { roles: ['admin'] },
+	'/admin/webhooks': { roles: ['admin'] },
+	'/admin/health': { roles: ['admin'] }
+};
+
+test('every nav row carries exactly the gate the role matrix pins', () => {
+	const rows = NAV.flatMap((e) => (e.kind === 'group' ? e.children : [e]));
+	const actual = Object.fromEntries(
+		rows.map((r) => [
+			r.href,
+			{ roles: r.roles ?? null, ...(r.permissions ? { permissions: r.permissions } : {}) }
+		])
+	);
+	// Compared as whole objects: a row missing from the table, a table entry
+	// with no row, a role added or dropped, or a permission alternative gained
+	// all fail here with the offending href in the diff.
+	expect(actual).toEqual(NAV_GATES);
+	expect(rows).toHaveLength(Object.keys(NAV_GATES).length);
+});
+
+test('sidebarHrefs is the visible rows, each pointing at its own or its landing href', () => {
+	// The e2e compares the rendered sidebar against this function, so it has to
+	// mean what `Sidebar.svelte` means: every visible link, plus one row per
+	// visible group landing on the first child the caller can see. Checked
+	// against the TABLE above rather than a second literal per role, so the
+	// matrix stays written down once.
+	const admits = (href: string, role: string) => {
+		const gate = NAV_GATES[href];
+		return gate.roles === null || gate.roles.includes(role);
+	};
+	for (const role of ALL_FOUR) {
+		const expected = NAV.flatMap((e) => {
+			if (e.kind === 'link') return admits(e.href, role) ? [e.href] : [];
+			const landing = e.children.find((c) => admits(c.href, role));
+			return landing ? [landing.href] : [];
+		});
+		const has = (...roles: string[]) => roles.includes(role);
+		expect(sidebarHrefs(has, () => false), role).toEqual(expected);
+	}
+	// A caller with no system role and no permission still gets the two
+	// ungated rows, and a group with no visible child contributes nothing.
+	expect(sidebarHrefs(() => false, () => false)).toEqual(['/', '/invoices']);
+	// A permission-only custom role gains exactly the row that permission opens.
+	expect(sidebarHrefs(() => false, (p) => p === PERM_USER_MANAGE)).toEqual([
+		'/',
+		'/invoices',
+		'/admin?tab=users'
+	]);
+});
 
 test('isEntryActive: a plain link is active on its path and sub-paths', () => {
 	const vendors = link('/vendors');
