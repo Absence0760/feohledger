@@ -407,6 +407,13 @@ same rule now holds every manual write (`docs/decisions.md` §199):
 - **CSV history is exempt.** A `done` / `paid` import row may carry a retired or
   unknown code (only another entity's is refused); a `new` or `rejected` row
   reaches approval and takes the full rule. See `backend/docs/csv-import.md`.
+- **The modal never re-uses a code the chart no longer offers.** A line
+  carrying a since-retired code shows it as its own option (as the header
+  already did) rather than rendering blank while re-saving it, and a new line
+  inherits the header's code only when the line picker offers it — otherwise
+  the save was refused naming a code the user could not see
+  (`tests-e2e/invoices/gl-retired-code.spec.ts`). The coding-suggestion panel
+  drops a GL suggestion the save would refuse, for the same reason.
 
 ### Per-entity workflow selection
 

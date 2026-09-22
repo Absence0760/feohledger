@@ -1250,6 +1250,17 @@
 		markLineItemsDirty();
 	}
 
+	/**
+	 * `code` if the line pickers offer it — any code when the chart is empty
+	 * and the cell is free text — else null. A header coded before its account
+	 * was retired keeps that code, but a NEW line naming it is a new coding
+	 * decision the line-items save refuses (`docs/decisions.md` §199).
+	 */
+	function offeredGlCode(code: string): string | null {
+		if (!code) return null;
+		return glAccounts.length === 0 || glAccounts.some((a) => a.code === code) ? code : null;
+	}
+
 	function addLineItem() {
 		lineItems = [...lineItems, {
 			id: '',
@@ -1260,7 +1271,7 @@
 			unit_price: null,
 			tax: null,
 			total: null,
-			gl_account: gl_account || null,
+			gl_account: offeredGlCode(gl_account),
 		}];
 		markLineItemsDirty();
 	}
@@ -1950,6 +1961,14 @@
 											{#if glAccounts.length > 0}
 												<select class="li-input li-gl" aria-label={m('invoices.modal.lineItems.glAria', { n: idx + 1 })} value={li.gl_account ?? ''} onchange={(e) => updateLineItem(idx, 'gl_account', e.currentTarget.value)}>
 													<option value="">—</option>
+													<!-- A line coded before its account was retired keeps
+													     that code through every save (only a code NEW to the
+													     lines is judged), so it needs its own option, as the
+													     header's does: without one the cell renders blank while
+													     the row still carries the code. -->
+													{#if li.gl_account && !glAccounts.some((a) => a.code === li.gl_account)}
+														<option value={li.gl_account}>{li.gl_account}</option>
+													{/if}
 													{#each glAccounts as acct (acct.id)}
 														<option value={acct.code}>{glLabel(acct, false)}</option>
 													{/each}
