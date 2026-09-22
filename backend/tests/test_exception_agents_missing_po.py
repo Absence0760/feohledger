@@ -47,6 +47,7 @@ async def _seed_missing_po(
     number: str = "INV-MPO-1",
     with_invoice_date: bool = True,
     link_vendor: bool = True,
+    po_currencies: list[str | None] | None = None,
 ) -> tuple[uuid.UUID, uuid.UUID, uuid.UUID]:
     """Create a vendor, ``len(po_totals)`` open POs under it, and an invoice in
     ``ready_for_review`` that references a NON-EXISTENT po_number (so the live
@@ -72,13 +73,17 @@ async def _seed_missing_po(
         await s.commit()
         await s.refresh(vendor)
 
-        for i, total in enumerate(po_totals):
+        # Each PO in the invoice's own currency (USD) unless the test says
+        # otherwise — the agent only links a PO proven to be in it.
+        currencies = po_currencies or ["USD"] * len(po_totals)
+        for i, (total, currency) in enumerate(zip(po_totals, currencies, strict=True)):
             s.add(
                 PurchaseOrder(
                     organization_id=org_id,
                     po_number=f"PO-{number}-{i}",
                     vendor_id=vendor.id,
                     total=total,
+                    currency=currency,
                     status="open",
                 )
             )
@@ -220,6 +225,87 @@ async def test_multiple_candidates_escalate(realdb):
         assert d.action_taken == ACTION_ESCALATED
         assert d.changes is None
         assert d.confidence == Decimal("0.0000")
+
+
+async def test_a_po_in_another_currency_is_not_a_candidate(realdb):
+    """Two POs match on vendor + amount, but one is in EUR against a USD
+    invoice: it cannot match on amount, so the USD PO is the ONLY candidate and
+    the agent links it. Before the currency guard the two were indistinguishable
+    — ambiguous, escalated — or, with the USD one absent, a EUR order got linked
+    and approved against a USD invoice (decisions §197)."""
+    mk = realdb.sessionmaker("a")
+    org_id = realdb.info("a").org_id
+    actor_id = realdb.info("a").users["ap_manager"]
+
+    inv_id, _corr, _exc_id = await _seed_missing_po(
+        mk,
+        org_id,
+        invoice_amount=Decimal("1000.00"),
+        po_totals=[Decimal("1000.00"), Decimal("1000.00")],
+        po_currencies=["EUR", "USD"],
+        number="INV-MPO-CCY",
+    )
+
+    org_settings = {"exception_agents": {"autonomy_level": "balanced"}}
+    async with mk() as s:
+        exc = (
+            await s.execute(select(APException).where(APException.invoice_id == inv_id))
+        ).scalar_one()
+        result = await run_agent(
+            s,
+            exception=exc,
+            actor_id=actor_id,
+            org_settings=org_settings,
+            actor_roles={"ap_manager"},
+        )
+    assert result.decision.action_taken == ACTION_AUTO_RESOLVED
+
+    async with mk() as s:
+        inv = await s.get(Invoice, inv_id)
+    assert inv.po_number == "PO-INV-MPO-CCY-1"  # the USD one
+    assert inv.status == InvoiceStatus.approved
+
+
+async def test_a_sole_candidate_with_no_currency_escalates(realdb):
+    """The only vendor + amount + date match records no currency: the agent
+    cannot prove the link, so a human confirms it."""
+    mk = realdb.sessionmaker("a")
+    org_id = realdb.info("a").org_id
+    actor_id = realdb.info("a").users["ap_manager"]
+
+    inv_id, _corr, exc_id = await _seed_missing_po(
+        mk,
+        org_id,
+        invoice_amount=Decimal("1000.00"),
+        po_totals=[Decimal("1000.00")],
+        po_currencies=[None],
+        number="INV-MPO-NOCCY",
+    )
+
+    org_settings = {"exception_agents": {"autonomy_level": "balanced"}}
+    async with mk() as s:
+        exc = await s.get(APException, exc_id)
+        result = await run_agent(
+            s,
+            exception=exc,
+            actor_id=actor_id,
+            org_settings=org_settings,
+            actor_roles={"ap_manager"},
+        )
+    assert result.decision.action_taken == ACTION_ESCALATED
+
+    async with mk() as s:
+        inv = await s.get(Invoice, inv_id)
+        assert inv.po_number == "PO-DOES-NOT-EXIST-INV-MPO-NOCCY"
+        assert inv.status == InvoiceStatus.ready_for_review
+        # The dispatcher reports the LAST delegate's rationale; ask this one.
+        from app.services.exception_agents.resolvers.missing_po import MissingPOResolver
+
+        own = await MissingPOResolver().evaluate(
+            s, exception=await s.get(APException, exc_id), invoice=inv, org_settings=org_settings
+        )
+    assert own.recommended_action == ACTION_ESCALATED
+    assert "records no currency" in own.rationale
 
 
 async def test_no_candidate_escalates(realdb):

@@ -2406,6 +2406,25 @@ class AppLocalizationsFr extends AppLocalizations {
   }
 
   @override
+  String invoiceWarningPoAmountVariancePoCurrencyUnknown(
+    String variancePct,
+    String poNumber,
+    String invoiceAmount,
+    String poTotal,
+  ) {
+    return 'Écart de montant $variancePct par rapport à la commande $poNumber, qui n’indique aucune devise (facture $invoiceAmount contre commande $poTotal)';
+  }
+
+  @override
+  String invoiceWarningPoCurrencyMismatch(
+    String invoiceCurrency,
+    String poNumber,
+    String poCurrency,
+  ) {
+    return 'La facture est en $invoiceCurrency mais la commande $poNumber est en $poCurrency — les montants n’ont pas été comparés';
+  }
+
+  @override
   String invoiceWarningPoPartialReceipt(String matchType, String poNumber) {
     return 'Correspondance 3 voies partielle — correspondance $matchType avec la commande $poNumber, mais seule une partie de la quantité commandée a été reçue';
   }

@@ -2376,6 +2376,25 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
+  String invoiceWarningPoAmountVariancePoCurrencyUnknown(
+    String variancePct,
+    String poNumber,
+    String invoiceAmount,
+    String poTotal,
+  ) {
+    return 'Amount variance $variancePct vs PO $poNumber, which records no currency (invoice $invoiceAmount vs PO $poTotal)';
+  }
+
+  @override
+  String invoiceWarningPoCurrencyMismatch(
+    String invoiceCurrency,
+    String poNumber,
+    String poCurrency,
+  ) {
+    return 'Invoice is in $invoiceCurrency but PO $poNumber is in $poCurrency — the amounts were not compared';
+  }
+
+  @override
   String invoiceWarningPoPartialReceipt(String matchType, String poNumber) {
     return 'Partial 3-way match — $matchType match against PO $poNumber, but only part of the ordered quantity has been received';
   }

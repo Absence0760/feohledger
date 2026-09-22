@@ -2084,12 +2084,19 @@
 										<span class="po-match-value mono">{pm.po_number}</span>
 									</div>
 									{#if pm.po_total !== null}
+										<!-- The PO's OWN currency, not the invoice's: the two can
+										     differ, and that difference is what the currency guard
+										     flags. Bare when the PO records none (decisions §197). -->
 										<div>
 											<span class="po-match-label">{m('invoices.modal.poMatch.poTotal')}</span>
-											<span class="po-match-value mono">{formatMoney(pm.po_total, { currency: invoice.currency })}</span>
+											<span class="po-match-value mono" data-testid="po-match-total">{formatMoney(pm.po_total, { currency: pm.po_currency ?? null })}</span>
 										</div>
 									{/if}
-									{#if isPositiveAmount(pm.amount_variance) || isNegativeAmount(pm.amount_variance)}
+									{#if pm.amount_variance_pct !== null && (isPositiveAmount(pm.amount_variance) || isNegativeAmount(pm.amount_variance))}
+										<!-- invoice − PO. In the invoice's currency only when the PO
+										     is proven to share it; against a PO with no currency it is
+										     a face-value difference, so it is shown bare. A currency
+										     mismatch has no variance at all (`null`). -->
 										<div>
 											<span class="po-match-label">{m('invoices.modal.poMatch.variance')}</span>
 											<span
@@ -2097,12 +2104,19 @@
 												class:variance-pos={isPositiveAmount(pm.amount_variance)}
 												class:variance-neg={isNegativeAmount(pm.amount_variance)}
 											>
-												{isPositiveAmount(pm.amount_variance) ? '+' : ''}{formatMoney(pm.amount_variance, { currency: invoice.currency })}
+												{isPositiveAmount(pm.amount_variance) ? '+' : ''}{formatMoney(pm.amount_variance, {
+													currency: pm.currency_check === 'same' ? invoice.currency : null
+												})}
 												({pm.amount_variance_pct > 0 ? '+' : ''}{pm.amount_variance_pct.toFixed(1)}%)
 											</span>
 										</div>
 									{/if}
 								</div>
+								{#if pm.currency_check === 'unknown'}
+									<p class="po-match-note" data-testid="po-match-currency-unknown">
+										{m('invoices.modal.poMatch.currencyUnknown')}
+									</p>
+								{/if}
 							{/if}
 							{#if pm.match_type === '4-way' || pm.inspection_result || pm.inspection_required}
 								<div class="po-match-inspection">
@@ -3954,6 +3968,12 @@
 
 	.po-match-value.variance-neg {
 		color: #d4940a;
+	}
+
+	.po-match-note {
+		margin: 6px 0 0;
+		font-size: 0.8rem;
+		color: var(--text-muted);
 	}
 
 	.po-match-issues {

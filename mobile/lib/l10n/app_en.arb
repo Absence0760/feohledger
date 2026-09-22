@@ -1384,6 +1384,37 @@
       }
     }
   },
+  "invoiceWarningPoAmountVariancePoCurrencyUnknown": "Amount variance {variancePct} vs PO {poNumber}, which records no currency (invoice {invoiceAmount} vs PO {poTotal})",
+  "@invoiceWarningPoAmountVariancePoCurrencyUnknown": {
+    "placeholders": {
+      "variancePct": {
+        "type": "String"
+      },
+      "poNumber": {
+        "type": "String"
+      },
+      "invoiceAmount": {
+        "type": "String"
+      },
+      "poTotal": {
+        "type": "String"
+      }
+    }
+  },
+  "invoiceWarningPoCurrencyMismatch": "Invoice is in {invoiceCurrency} but PO {poNumber} is in {poCurrency} — the amounts were not compared",
+  "@invoiceWarningPoCurrencyMismatch": {
+    "placeholders": {
+      "invoiceCurrency": {
+        "type": "String"
+      },
+      "poNumber": {
+        "type": "String"
+      },
+      "poCurrency": {
+        "type": "String"
+      }
+    }
+  },
   "invoiceWarningPoPartialReceipt": "Partial 3-way match — {matchType} match against PO {poNumber}, but only part of the ordered quantity has been received",
   "@invoiceWarningPoPartialReceipt": {
     "placeholders": {

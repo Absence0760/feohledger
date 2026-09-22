@@ -139,6 +139,7 @@ async def _seed_split(
     po_totals: list[Decimal],
     number: str,
     with_invoice_date: bool = True,
+    po_currencies: list[str | None] | None = None,
 ) -> tuple[uuid.UUID, uuid.UUID, uuid.UUID]:
     """Create a vendor, ``len(po_totals)`` open POs under it, and an invoice in
     ``ready_for_review`` referencing a NON-EXISTENT po_number (so the live match
@@ -159,13 +160,16 @@ async def _seed_split(
         await s.commit()
         await s.refresh(vendor)
 
-        for i, total in enumerate(po_totals):
+        # USD — the invoice's own currency — unless the test says otherwise.
+        currencies = po_currencies or ["USD"] * len(po_totals)
+        for i, (total, currency) in enumerate(zip(po_totals, currencies, strict=True)):
             s.add(
                 PurchaseOrder(
                     organization_id=org_id,
                     po_number=f"PO-{number}-{i}",
                     vendor_id=vendor.id,
                     total=total,
+                    currency=currency,
                     status="open",
                 )
             )
@@ -239,6 +243,9 @@ async def test_clean_two_po_split_auto_resolves(realdb):
         assert inv.po_match["match_type"] == "multi-po-split"
         assert inv.po_match["po_count"] == 2
         assert inv.po_match["combined_po_total"] == "1000.00"
+        # ...labelled with the currency every PO in the set was proven to share.
+        assert inv.po_match["po_currency"] == "USD"
+        assert inv.po_match["currency_check"] == "same"
 
         exc = await s.get(APException, exc_id)
         assert exc.status == "resolved"
@@ -263,6 +270,76 @@ async def test_clean_two_po_split_auto_resolves(realdb):
             .all()
         )
         assert "invoice.approved" in {a.action for a in audits}
+
+
+async def test_a_po_in_another_currency_never_joins_the_sum(realdb):
+    """600 USD + 400 EUR "sums" to a 1000 USD invoice only if unlike quantities
+    are added. With the EUR PO out of the pool there is no set left, so the
+    agent escalates instead of linking and approving on it (decisions §197)."""
+    mk = realdb.sessionmaker("a")
+    org_id = realdb.info("a").org_id
+    actor_id = realdb.info("a").users["ap_manager"]
+
+    inv_id, _corr, exc_id = await _seed_split(
+        mk,
+        org_id,
+        invoice_amount=Decimal("1000.00"),
+        po_totals=[Decimal("600.00"), Decimal("400.00")],
+        po_currencies=["USD", "EUR"],
+        number="INV-SPLIT-CCY",
+    )
+
+    org_settings = {"exception_agents": {"autonomy_level": "balanced"}}
+    async with mk() as s:
+        exc = await s.get(APException, exc_id)
+        result = await run_agent(
+            s,
+            exception=exc,
+            actor_id=actor_id,
+            org_settings=org_settings,
+            actor_roles={"ap_manager"},
+        )
+    assert result.decision.action_taken == ACTION_ESCALATED
+
+    async with mk() as s:
+        inv = await s.get(Invoice, inv_id)
+    assert inv.status == InvoiceStatus.ready_for_review
+    assert inv.po_number == "PO-DOES-NOT-EXIST-INV-SPLIT-CCY"
+
+
+async def test_a_set_containing_a_po_with_no_currency_escalates(realdb):
+    """The unique set includes a PO that records no currency: the combined
+    total cannot be proven to be in the invoice's currency, so a human
+    confirms the split."""
+    mk = realdb.sessionmaker("a")
+    org_id = realdb.info("a").org_id
+    actor_id = realdb.info("a").users["ap_manager"]
+
+    inv_id, _corr, exc_id = await _seed_split(
+        mk,
+        org_id,
+        invoice_amount=Decimal("1000.00"),
+        po_totals=[Decimal("600.00"), Decimal("400.00")],
+        po_currencies=["USD", None],
+        number="INV-SPLIT-NOCCY",
+    )
+
+    org_settings = {"exception_agents": {"autonomy_level": "balanced"}}
+    async with mk() as s:
+        exc = await s.get(APException, exc_id)
+        result = await run_agent(
+            s,
+            exception=exc,
+            actor_id=actor_id,
+            org_settings=org_settings,
+            actor_roles={"ap_manager"},
+        )
+    assert result.decision.action_taken == ACTION_ESCALATED
+    assert "records no currency" in result.decision.rationale
+
+    async with mk() as s:
+        inv = await s.get(Invoice, inv_id)
+    assert inv.status == InvoiceStatus.ready_for_review
 
 
 async def test_ambiguous_two_sets_escalate(realdb):

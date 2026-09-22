@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.models.invoice import Invoice
-from app.models.procurement import GoodsReceipt, PurchaseOrder
+from app.models.procurement import GoodsReceipt, PurchaseOrder, po_currency_code
 from app.models.quality_inspection import QualityInspection
 from app.tenant import apply_entity_scope
 
@@ -42,6 +42,50 @@ def _to_decimal(value, default: Decimal = Decimal("0")) -> Decimal:
         return Decimal(str(value))
     except (InvalidOperation, ValueError, TypeError):
         return default
+
+
+#: `MatchResult.currency_check` values. The currency leg of the amount control:
+#:
+#: ``same``       both codes known and equal — the amounts were compared.
+#: ``different``  both known and unequal — the amounts were NOT compared, and
+#:                the match is a ``mismatch``: an invoice for EUR 1,000 is not
+#:                "within tolerance" of a USD 1,000 order, and no variance
+#:                between them means anything.
+#: ``unknown``    one side records no code (in practice the PO: a pre-0099 row
+#:                with no requisition behind it, or an ERP that stated none).
+#:                A missing code cannot prove a mismatch, so the amounts are
+#:                compared at face value, exactly as before the column existed —
+#:                but the result says the currency was NOT verified, the modal
+#:                shows that beside the PO total, and the exception agents treat
+#:                it as unproven and escalate rather than adjust or approve
+#:                (decisions §197).
+CURRENCY_SAME = "same"
+CURRENCY_DIFFERENT = "different"
+CURRENCY_UNKNOWN = "unknown"
+
+
+def compare_currencies(invoice_currency: object, po_currency: object) -> str:
+    """The currency leg for one invoice/PO pair — see the constants above.
+
+    Both sides are normalised through `po_currency_code`, so `"eur"` and
+    `"EUR "` agree and a malformed code counts as absent rather than as a
+    currency that happens to differ.
+    """
+    inv = po_currency_code(invoice_currency)
+    po = po_currency_code(po_currency)
+    if inv is None or po is None:
+        return CURRENCY_UNKNOWN
+    return CURRENCY_SAME if inv == po else CURRENCY_DIFFERENT
+
+
+def _labelled(amount: Decimal, currency: str | None) -> str:
+    """`1234.50 EUR` — or the bare figure when no code is known.
+
+    `issues` is rendered verbatim, so the code is spelled out rather than
+    symbolised; it used to print `$` on both figures whatever either was in.
+    """
+    figure = f"{amount:.2f}"
+    return f"{figure} {currency}" if currency else figure
 
 
 def format_quantity(value: Decimal) -> str:
@@ -86,10 +130,19 @@ class MatchResult:
     po_id: str | None = None
     po_number: str | None = None
     po_total: Decimal | None = None
+    #: The code `po_total` is in — the PO's own, `None` when it records none.
+    #: A client labels `po_total` with THIS, never with the invoice's currency.
+    po_currency: str | None = None
+    #: `same` / `different` / `unknown` (see `compare_currencies`); `None` only
+    #: when no PO was found.
+    currency_check: str | None = None
     gr_id: str | None = None
 
-    amount_variance: Decimal = Decimal("0")  # invoice - PO
-    amount_variance_pct: Decimal = Decimal("0")
+    #: invoice - PO, in the invoice's currency. `None` when the two are in
+    #: DIFFERENT currencies: no figure is the difference between EUR and USD
+    #: amounts, and a 0 would read as a perfect match.
+    amount_variance: Decimal | None = Decimal("0")
+    amount_variance_pct: Decimal | None = Decimal("0")
     within_tolerance: bool = False
 
     # 4-way: quality inspection leg
@@ -134,7 +187,10 @@ async def match_invoice_to_po(
     """Match an invoice against POs, goods receipts, and quality inspections.
 
     1. Find PO by po_number on the invoice
-    2. Compare amounts (2-way match)
+    2. Compare amounts (2-way match) — only when the invoice and the PO are in
+       the SAME currency. Different codes are a ``mismatch`` with no variance;
+       a PO that records no code is compared at face value and reported as
+       ``currency_check="unknown"`` (see ``compare_currencies``).
     3. If a LIVE (non-cancelled) GR exists for the PO, verify quantities
        (3-way match) — short receipt → ``partial``, over-receipt →
        ``over_receipt`` + an issue
@@ -199,6 +255,9 @@ async def match_invoice_to_po(
     result.po_id = str(po.id)
     result.po_number = po.po_number
     result.po_total = _to_decimal(po.total)
+    invoice_currency = po_currency_code(invoice.currency)
+    result.po_currency = po_currency_code(po.currency)
+    result.currency_check = compare_currencies(invoice_currency, result.po_currency)
 
     # 2-way match: invoice amount vs PO total. Every figure — the variance, the
     # variance %, and the tolerance gate — is exact Decimal end-to-end; money is
@@ -209,26 +268,41 @@ async def match_invoice_to_po(
     invoice_amount = _to_decimal(invoice.amount)
     po_total = _to_decimal(po.total)
     tolerance = _to_decimal(tolerance_pct, Decimal("5.0"))
-
-    variance = invoice_amount - po_total
-    if po_total > 0:
-        variance_pct = (variance / po_total) * Decimal(100)
-    else:
-        variance_pct = Decimal(100) if invoice_amount > 0 else Decimal(0)
-
-    result.amount_variance = variance
-    result.amount_variance_pct = variance_pct
-    result.within_tolerance = abs(variance_pct) <= tolerance
     result.match_type = "2-way"
 
-    if not result.within_tolerance:
+    if result.currency_check == CURRENCY_DIFFERENT:
+        # The currency guard. Before `purchase_orders.currency` existed this
+        # compared the two figures as bare numbers, so EUR 1,000 against a USD
+        # 1,000 order read `matched` at 0% — the amount control passed on two
+        # quantities in different units. A mismatch in the currency IS a
+        # mismatch in the amount; there is no variance to report.
+        result.amount_variance = None
+        result.amount_variance_pct = None
+        result.within_tolerance = False
         result.status = "mismatch"
         result.issues.append(
-            f"Amount mismatch: invoice ${invoice_amount:.2f} vs PO ${po_total:.2f} "
-            f"({variance_pct:+.1f}%)"
+            f"Currency mismatch: invoice in {invoice_currency}, PO in {result.po_currency} "
+            "— amounts not compared"
         )
     else:
-        result.status = "matched"
+        variance = invoice_amount - po_total
+        if po_total > 0:
+            variance_pct = (variance / po_total) * Decimal(100)
+        else:
+            variance_pct = Decimal(100) if invoice_amount > 0 else Decimal(0)
+
+        result.amount_variance = variance
+        result.amount_variance_pct = variance_pct
+        result.within_tolerance = abs(variance_pct) <= tolerance
+
+        if not result.within_tolerance:
+            result.status = "mismatch"
+            result.issues.append(
+                f"Amount mismatch: invoice {_labelled(invoice_amount, invoice_currency)} vs PO "
+                f"{_labelled(po_total, result.po_currency)} ({variance_pct:+.1f}%)"
+            )
+        else:
+            result.status = "matched"
 
     # 3-way match: check for goods receipts. A PO can have SEVERAL goods receipts
     # (the normal partial-delivery case — a PO filled by several shipments, each
@@ -375,6 +449,7 @@ async def match_invoice_to_po(
         "invoice_amount": invoice_amount,
         "variance": result.amount_variance,
         "variance_pct": result.amount_variance_pct,
+        "currency_check": result.currency_check,
         "tolerance_pct": tolerance,
         "within_tolerance": result.within_tolerance,
         "has_gr": gr is not None,

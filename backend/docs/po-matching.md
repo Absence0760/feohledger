@@ -23,7 +23,12 @@ Invoice has po_number?
               |
               ├── PO not found → status: "no_po", issue flagged
               |
-              └── PO found → 2-way match
+              └── PO found → currency guard (invoice vs PO currency)
+                    |
+                    ├── Different currencies → status: "mismatch", no variance,
+                    |                          po_currency_mismatch warning (see below)
+                    |
+                    └── Same currency, or PO records none → 2-way match
                     |
                     ├── Amount within tolerance → status: "matched"
                     |
@@ -99,6 +104,43 @@ recent GR is the representative row (`gr_id`) for the 4-way inspection lookup.
 The PO lookup and the GR lookup both pick a single deterministic row when a
 `po_number` / `gr_number` is non-unique — neither column is unique, so they
 cannot crash on a duplicate.
+
+### The currency guard
+
+An amount comparison only means something between figures in one currency.
+Before `purchase_orders.currency` existed (migration 0099) the matcher compared
+two bare numbers, so an invoice for EUR 1,000 against a USD 1,000 order read
+`matched` at 0% — the amount control passed on quantities in different units.
+`po_matching.compare_currencies` now runs first, on codes normalised through
+`models.procurement.po_currency_code`, and sets `MatchResult.currency_check`:
+
+| `currency_check` | When | What the matcher does |
+|---|---|---|
+| `same` | both codes known and equal | the 2-way comparison, as always |
+| `different` | both known, unequal | `status = "mismatch"`, `within_tolerance = false`, **`amount_variance` / `amount_variance_pct` = `null`** (no figure is the difference between EUR and USD amounts, and a `0` would read as a perfect match). `refresh_warnings` raises the `po_currency_mismatch` warning, naming both codes, and a `po_mismatch` exception at `warning` — the severity an out-of-tolerance amount gets, because it is the same control failing |
+| `unknown` | the PO records no currency (a pre-0099 row with no requisition behind it, or an ERP that stated none) | the comparison runs **at face value**, exactly as before the column existed — a missing code cannot prove a mismatch, and refusing would flag every legacy PO. What changes is that nothing pretends it was verified: the modal renders the PO total bare with a note saying so, an out-of-tolerance variance raises `po_amount_variance_po_currency_unknown` (the PO figure unlabelled, a `number` rather than `money` param), and the exception agents escalate instead of acting (below) |
+
+`MatchResult.po_currency` carries the PO's own code, and the invoice modal
+labels `po_total` with it — never with the invoice's currency. The variance is
+labelled with the invoice's currency only when `currency_check` is `same`; the
+matcher's `issues` sentences spell each figure's own code (they printed `$` on
+both, whatever either was in).
+
+**The agents fail closed on `unknown`.** A human reviewer may accept a
+face-value match; an agent that rewrites the invoice amount, or links and
+approves a PO, must be able to prove the currencies agree. So `amount_mismatch_v1`
+only snaps to a PO total whose `currency_check` is `same`; `missing_po_v1` never
+considers a PO in another currency and escalates when its sole candidate records
+none; `multi_po_split_v1` never sums a total in another currency and escalates
+when the chosen set contains a PO with none. A PO recording no currency stays in
+the missing-PO and split *pools* on purpose — dropping it could turn two
+plausible candidates into a false unique one. See `docs/decisions.md` §197 and
+`exception-agents.md`.
+
+Covered by `backend/tests/test_po_matching_algorithm.py` (the guard),
+`test_po_matching_wiring.py` (the two warning codes),
+`test_po_matching_critical_path.py::test_realdb_currency_guard_against_recorded_po_currencies`
+and the three agent test files.
 
 ### Cancelled receipts do not count as delivered goods
 
@@ -197,9 +239,11 @@ MatchResult:
     match_type: "none" | "2-way" | "3-way" | "4-way"
     status: "no_po" | "matched" | "mismatch" | "partial"
     po_id, po_number, po_total
+    po_currency: str | None     # the PO's own code — labels po_total
+    currency_check: "same" | "different" | "unknown" | None  # None = no PO found
     gr_id  # if 3-way
-    amount_variance: float      # invoice - PO in dollars
-    amount_variance_pct: float  # as percentage
+    amount_variance: Decimal | None      # invoice - PO; None on a currency mismatch
+    amount_variance_pct: Decimal | None  # as percentage; None on a currency mismatch
     within_tolerance: bool
     inspection_id: str | None              # if 4-way
     inspection_result: "pass" | "fail" | "partial" | None
@@ -556,7 +600,7 @@ The procurement models already exist:
 
 | Table | Purpose |
 |---|---|
-| `purchase_orders` | PO header (po_number, vendor_id, total, status) |
+| `purchase_orders` | PO header (po_number, vendor_id, total, currency, status) — `currency` nullable, no default (migration 0099) |
 | `po_line_items` | PO lines (description, quantity, unit_price, total) |
 | `goods_receipts` | GR header (gr_number, po_id, received_date, status) |
 | `gr_line_items` | GR lines (description, quantity_received) |
@@ -634,6 +678,7 @@ outcome (presence → 3-way; short receipt → `partial`).
 | Persisted on `invoice.po_match` (JSONB, alembic 0006) | Done |
 | Match result display in invoice modal (PO Match panel with status badge, variance, issues) | Done |
 | Exception routing for mismatches (`po_mismatch` exceptions auto-created by severity: error / warning / info) | Done |
-| PO management UI (list + detail page) | Planned |
-| PO sync from ERP (real adapter `list_pos()` — currently mock data) | Planned |
+| Currency guard (`compare_currencies`; a currency mismatch is a `mismatch` with no variance, an unrecorded PO currency is compared at face value and reported `unknown`) | Done (migration 0099, decisions §197) |
+| PO management UI (list + detail page) | Done (`/purchase-orders`) |
+| PO sync from ERP (`list_pos()`) | Done — `mock` and `merge_dev` (which maps the record's `currency`); NetSuite / Business Central inherit the empty default |
 | Configurable tolerance per org (`Organization.settings.po_matching.tolerance_pct`) | Planned |

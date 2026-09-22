@@ -192,9 +192,17 @@ export interface PoMatch {
 	// arrive numeric — but they are money, and the variance in particular is a
 	// figure a reviewer reads, never one to recompute client-side.
 	po_total: MoneyAmount;
+	/** The code `po_total` is in — the PO's own, `null` when it records none.
+	 *  Absent on a match persisted before migration 0099 (decisions §197). */
+	po_currency?: string | null;
+	/** The currency leg of the amount control (`po_matching.compare_currencies`):
+	 *  `different` means the amounts were not compared, `unknown` that they were
+	 *  compared at face value because the PO records no currency. */
+	currency_check?: 'same' | 'different' | 'unknown' | null;
 	gr_id: string | null;
+	/** `null` when the invoice and the PO are in different currencies. */
 	amount_variance: MoneyAmount;
-	amount_variance_pct: number;
+	amount_variance_pct: number | null;
 	within_tolerance: boolean;
 	inspection_id: string | null;
 	inspection_result: 'pass' | 'fail' | 'partial' | null;

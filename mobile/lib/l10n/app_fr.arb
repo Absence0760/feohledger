@@ -658,6 +658,8 @@
   "invoiceWarningPriceVarianceUnder": "Prix unitaire {deltaPct} au-dessous de la référence de ce fournisseur pour {item} ({unitPrice} contre {baselineUnitPrice})",
   "invoiceWarningPoNotFound": "Commande {poNumber} introuvable",
   "invoiceWarningPoAmountVariance": "Écart de montant {variancePct} par rapport à la commande {poNumber} (facture {invoiceAmount} contre commande {poTotal})",
+  "invoiceWarningPoAmountVariancePoCurrencyUnknown": "Écart de montant {variancePct} par rapport à la commande {poNumber}, qui n’indique aucune devise (facture {invoiceAmount} contre commande {poTotal})",
+  "invoiceWarningPoCurrencyMismatch": "La facture est en {invoiceCurrency} mais la commande {poNumber} est en {poCurrency} — les montants n’ont pas été comparés",
   "invoiceWarningPoPartialReceipt": "Correspondance 3 voies partielle — correspondance {matchType} avec la commande {poNumber}, mais seule une partie de la quantité commandée a été reçue",
   "invoiceWarningPoOverReceipt": "Sur-réception : {receivedQuantity} reçues contre {orderedQuantity} commandées (+{excessQuantity}) sur la commande {poNumber}",
   "invoiceWarningPoOverReceiptUnquantified": "Plus de marchandises reçues que commandées sur la commande {poNumber}",

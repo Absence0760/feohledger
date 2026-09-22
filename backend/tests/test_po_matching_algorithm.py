@@ -42,6 +42,7 @@ def _invoice(**overrides):
     base = dict(
         id=uuid.uuid4(),
         amount=Decimal("1000.00"),
+        currency="USD",
         po_number="PO-100",
         vendor_id=None,
     )
@@ -49,11 +50,18 @@ def _invoice(**overrides):
     return SimpleNamespace(**base)
 
 
-def _po(*, total: Decimal = Decimal("1000.00"), line_items=None, vendor_id=None):
+def _po(
+    *,
+    total: Decimal = Decimal("1000.00"),
+    line_items=None,
+    vendor_id=None,
+    currency: str | None = "USD",
+):
     return SimpleNamespace(
         id=uuid.uuid4(),
         po_number="PO-100",
         total=total,
+        currency=currency,
         vendor_id=vendor_id,
         line_items=line_items or [],
     )
@@ -177,7 +185,8 @@ async def test_invoice_outside_default_tolerance_is_mismatched():
     assert result.within_tolerance is False
     assert result.amount_variance == pytest.approx(100.0)
     assert result.amount_variance_pct == pytest.approx(10.0)
-    assert any("$1100.00" in i and "$1000.00" in i for i in result.issues)
+    # Each figure names its own currency — never a hardcoded `$` (decisions §197).
+    assert any("1100.00 USD" in i and "1000.00 USD" in i for i in result.issues)
 
 
 @pytest.mark.asyncio
@@ -500,3 +509,78 @@ async def test_to_json_dict_is_json_serialisable_and_numeric():
     assert isinstance(payload["details"]["tolerance_pct"], float)
     # No Decimal anywhere in the serialised artefact.
     assert not isinstance(payload["po_total"], Decimal)
+
+
+# ---------------------------------------------------------------------------
+# The currency guard (migration 0099, decisions §197). Before
+# `purchase_orders.currency` existed the matcher compared two bare numbers, so
+# EUR 1,000 against a USD 1,000 order read `matched` at 0%.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_invoice_in_another_currency_than_its_po_is_a_mismatch_with_no_variance():
+    db = _mk_db(po=_po(total=Decimal("1000.00"), currency="USD"))
+    result = await match_invoice_to_po(db, _invoice(amount=Decimal("1000.00"), currency="EUR"))
+
+    assert result.status == "mismatch"
+    assert result.currency_check == "different"
+    assert result.po_currency == "USD"
+    assert result.within_tolerance is False
+    # No figure is the difference between EUR and USD amounts — and a 0 would
+    # read as a perfect match.
+    assert result.amount_variance is None
+    assert result.amount_variance_pct is None
+    assert result.issues == ["Currency mismatch: invoice in EUR, PO in USD — amounts not compared"]
+    payload = result.to_json_dict()
+    assert payload["amount_variance"] is None
+    assert payload["details"]["currency_check"] == "different"
+
+
+@pytest.mark.asyncio
+async def test_a_currency_mismatch_is_not_softened_to_partial_by_a_short_receipt():
+    po = _po(total=Decimal("1000.00"), currency="USD", line_items=[_li(quantity=Decimal("10"))])
+    gr = _gr(line_items=[_li(received=Decimal("4"))])
+    result = await match_invoice_to_po(
+        _mk_db(po=po, gr=gr), _invoice(amount=Decimal("1000.00"), currency="EUR")
+    )
+    assert result.status == "mismatch"
+    assert result.match_type == "3-way"
+
+
+@pytest.mark.asyncio
+async def test_currency_codes_are_compared_normalised():
+    db = _mk_db(po=_po(total=Decimal("1000.00"), currency="EUR"))
+    result = await match_invoice_to_po(db, _invoice(amount=Decimal("1000.00"), currency=" eur"))
+    assert result.currency_check == "same"
+    assert result.status == "matched"
+
+
+@pytest.mark.asyncio
+async def test_a_po_with_no_currency_is_compared_at_face_value_and_reported_unverified():
+    """A missing code cannot prove a mismatch, so the amounts are compared as
+    they always were — but the result says the currency was not verified."""
+    db = _mk_db(po=_po(total=Decimal("1000.00"), currency=None))
+    result = await match_invoice_to_po(db, _invoice(amount=Decimal("1020.00"), currency="EUR"))
+    assert result.status == "matched"
+    assert result.currency_check == "unknown"
+    assert result.po_currency is None
+    assert result.amount_variance == Decimal("20.00")
+
+
+@pytest.mark.asyncio
+async def test_amount_mismatch_issue_names_each_figures_own_currency():
+    """`issues` is rendered verbatim; it used to print `$` on both figures."""
+    same = await match_invoice_to_po(
+        _mk_db(po=_po(total=Decimal("1000.00"), currency="GBP")),
+        _invoice(amount=Decimal("1200.00"), currency="GBP"),
+    )
+    assert same.issues == ["Amount mismatch: invoice 1200.00 GBP vs PO 1000.00 GBP (+20.0%)"]
+
+    unknown = await match_invoice_to_po(
+        _mk_db(po=_po(total=Decimal("1000.00"), currency=None)),
+        _invoice(amount=Decimal("1200.00"), currency="GBP"),
+    )
+    # The PO's figure is bare — nothing says what it is in.
+    assert unknown.issues == ["Amount mismatch: invoice 1200.00 GBP vs PO 1000.00 (+20.0%)"]
+    assert all("$" not in issue for issue in same.issues + unknown.issues)

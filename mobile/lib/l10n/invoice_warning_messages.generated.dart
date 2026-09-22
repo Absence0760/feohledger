@@ -90,6 +90,18 @@ const Map<String, Map<String, String>> invoiceWarningParamKinds = {
     'poTotal': 'money',
     'currency': 'currency',
   },
+  'po_amount_variance_po_currency_unknown': {
+    'variancePct': 'percent',
+    'poNumber': 'text',
+    'invoiceAmount': 'money',
+    'poTotal': 'number',
+    'currency': 'currency',
+  },
+  'po_currency_mismatch': {
+    'invoiceCurrency': 'text',
+    'poNumber': 'text',
+    'poCurrency': 'text',
+  },
   'po_partial_receipt': {'matchType': 'text', 'poNumber': 'text'},
   'po_over_receipt': {
     'receivedQuantity': 'number',
@@ -356,6 +368,35 @@ String? _localizeWarningCode(
         poNumber,
         invoiceAmount,
         poTotal,
+      );
+    // Amount variance {variancePct}% vs PO {poNumber}, which records no currency (invoice {invoiceAmount} {currency} vs PO {poTotal})
+    case 'po_amount_variance_po_currency_unknown':
+      final variancePct = _percent(p['variancePct'], currency);
+      if (variancePct == null) return null;
+      final poNumber = _text(p['poNumber'], currency);
+      if (poNumber == null) return null;
+      final invoiceAmount = _money(p['invoiceAmount'], currency);
+      if (invoiceAmount == null) return null;
+      final poTotal = _number(p['poTotal'], currency);
+      if (poTotal == null) return null;
+      return l.invoiceWarningPoAmountVariancePoCurrencyUnknown(
+        variancePct,
+        poNumber,
+        invoiceAmount,
+        poTotal,
+      );
+    // Invoice is in {invoiceCurrency} but PO {poNumber} is in {poCurrency} — the amounts were not compared
+    case 'po_currency_mismatch':
+      final invoiceCurrency = _text(p['invoiceCurrency'], currency);
+      if (invoiceCurrency == null) return null;
+      final poNumber = _text(p['poNumber'], currency);
+      if (poNumber == null) return null;
+      final poCurrency = _text(p['poCurrency'], currency);
+      if (poCurrency == null) return null;
+      return l.invoiceWarningPoCurrencyMismatch(
+        invoiceCurrency,
+        poNumber,
+        poCurrency,
       );
     // Partial 3-way match — {matchType} match against PO {poNumber}, but only part of the ordered quantity has been received
     case 'po_partial_receipt':

@@ -2307,6 +2307,25 @@ class AppLocalizationsJa extends AppLocalizations {
   }
 
   @override
+  String invoiceWarningPoAmountVariancePoCurrencyUnknown(
+    String variancePct,
+    String poNumber,
+    String invoiceAmount,
+    String poTotal,
+  ) {
+    return '通貨が記録されていない発注 $poNumber との金額差異 $variancePct（請求 $invoiceAmount / 発注 $poTotal）';
+  }
+
+  @override
+  String invoiceWarningPoCurrencyMismatch(
+    String invoiceCurrency,
+    String poNumber,
+    String poCurrency,
+  ) {
+    return '請求書は $invoiceCurrency、発注 $poNumber は $poCurrency のため、金額を比較していません';
+  }
+
+  @override
   String invoiceWarningPoPartialReceipt(String matchType, String poNumber) {
     return '3 ウェイ照合が部分一致 — 発注 $poNumber に対する$matchType照合ですが、発注数量の一部のみ入荷しています';
   }

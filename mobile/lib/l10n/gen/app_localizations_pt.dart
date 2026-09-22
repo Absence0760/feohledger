@@ -2396,6 +2396,25 @@ class AppLocalizationsPt extends AppLocalizations {
   }
 
   @override
+  String invoiceWarningPoAmountVariancePoCurrencyUnknown(
+    String variancePct,
+    String poNumber,
+    String invoiceAmount,
+    String poTotal,
+  ) {
+    return 'Variação de valor $variancePct em relação ao pedido $poNumber, que não registra moeda (nota $invoiceAmount contra pedido $poTotal)';
+  }
+
+  @override
+  String invoiceWarningPoCurrencyMismatch(
+    String invoiceCurrency,
+    String poNumber,
+    String poCurrency,
+  ) {
+    return 'A nota está em $invoiceCurrency, mas o pedido $poNumber está em $poCurrency — os valores não foram comparados';
+  }
+
+  @override
   String invoiceWarningPoPartialReceipt(String matchType, String poNumber) {
     return 'Correspondência parcial de 3 vias — correspondência $matchType com o pedido $poNumber, mas apenas parte da quantidade pedida foi recebida';
   }
@@ -4964,6 +4983,25 @@ class AppLocalizationsPtBr extends AppLocalizationsPt {
     String poTotal,
   ) {
     return 'Variação de valor $variancePct em relação ao pedido $poNumber (nota $invoiceAmount contra pedido $poTotal)';
+  }
+
+  @override
+  String invoiceWarningPoAmountVariancePoCurrencyUnknown(
+    String variancePct,
+    String poNumber,
+    String invoiceAmount,
+    String poTotal,
+  ) {
+    return 'Variação de valor $variancePct em relação ao pedido $poNumber, que não registra moeda (nota $invoiceAmount contra pedido $poTotal)';
+  }
+
+  @override
+  String invoiceWarningPoCurrencyMismatch(
+    String invoiceCurrency,
+    String poNumber,
+    String poCurrency,
+  ) {
+    return 'A nota está em $invoiceCurrency, mas o pedido $poNumber está em $poCurrency — os valores não foram comparados';
   }
 
   @override
