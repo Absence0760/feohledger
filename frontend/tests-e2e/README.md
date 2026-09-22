@@ -24,7 +24,15 @@ worker is pinned to its own tenant via the worker-scoped
 the same spec can't collide because they're operating against
 different Postgres databases.
 
-| Worker index | Tenant slug | Base URL                     |
+The pin is keyed on `parallelIndex`, not `workerIndex`. Playwright replaces a
+worker after a failed test, and the replacement gets a new `workerIndex`
+(4, 5, …) — keyed on that, it wrapped onto a tenant a live worker still owned,
+and one real failure turned into a cascade of count mismatches on the shared
+tenant. `parallelIndex` is unique among live workers and survives the
+replacement. `meta/tenant-pinning-guard.spec.ts` fails on any `workerIndex`
+read in this tree; CI (one tenant per shard) cannot see the difference.
+
+| Parallel index | Tenant slug | Base URL                     |
 | ------------ | ----------- | ---------------------------- |
 | 0            | `e2e1`      | `http://e2e1.localhost:7777` |
 | 1            | `e2e2`      | `http://e2e2.localhost:7777` |

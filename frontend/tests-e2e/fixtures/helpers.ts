@@ -25,7 +25,7 @@ const _thisDir = path.dirname(_thisFile);
  *
  * `backend/scripts/seed.py` provisions `FEOH_E2E_TENANT_COUNT` (default 4)
  * `e2e<N>` tenants. Each Playwright worker maps to one tenant via
- * `workerIndex`, so a worker that creates / deletes data in
+ * `parallelIndex`, so a worker that creates / deletes data in
  * `e2e1` can't collide with another worker working in `e2e2`. Spec
  * files import `test` from this module (not `@playwright/test`); the
  * fixture below overrides `baseURL` and injects role-specific creds
@@ -70,8 +70,16 @@ type WorkerFixtures = {
 	tenantCfo: TenantCreds;
 };
 
-function _tenantSlugFor(workerIndex: number): string {
-	return `e2e${((workerIndex + E2E_TENANT_OFFSET) % Math.max(E2E_TENANT_COUNT, 1)) + 1}`;
+// Keyed on `parallelIndex`, never `workerIndex`. Playwright replaces a worker
+// after a failed test and the replacement gets a NEW `workerIndex` (4, 5, …), so
+// `workerIndex % E2E_TENANT_COUNT` wrapped it onto a tenant a still-running
+// worker owned: after the first failure in a local 4-worker run, two workers
+// wrote to `e2e1` at once and counting specs failed on the other one's rows.
+// `parallelIndex` is what Playwright guarantees is distinct among live workers
+// (0 … workers-1) and is inherited by a replacement. CI provisions one tenant,
+// so there the two keys resolve identically.
+function _tenantSlugFor(parallelIndex: number): string {
+	return `e2e${((parallelIndex + E2E_TENANT_OFFSET) % Math.max(E2E_TENANT_COUNT, 1)) + 1}`;
 }
 
 function _credsFor(slug: string, role: 'admin' | 'manager' | 'clerk' | 'cfo'): TenantCreds {
@@ -81,7 +89,7 @@ function _credsFor(slug: string, role: 'admin' | 'manager' | 'clerk' | 'cfo'): T
 export const test = base.extend<object, WorkerFixtures>({
 	tenantSlug: [
 		async ({}, use, workerInfo) => {
-			await use(_tenantSlugFor(workerInfo.workerIndex));
+			await use(_tenantSlugFor(workerInfo.parallelIndex));
 		},
 		{ scope: 'worker' }
 	],
@@ -305,8 +313,8 @@ export { expect };
  */
 function _currentWorkerAdmin(): TenantCreds {
 	try {
-		const wi = base.info().workerIndex;
-		return _credsFor(_tenantSlugFor(wi), 'admin');
+		const pi = base.info().parallelIndex;
+		return _credsFor(_tenantSlugFor(pi), 'admin');
 	} catch {
 		return ACME_ADMIN;
 	}
@@ -495,7 +503,7 @@ export async function signOut(page: Page) {
  *  rather than always acme. */
 export function currentTenantSlug(): string {
 	try {
-		return _tenantSlugFor(base.info().workerIndex);
+		return _tenantSlugFor(base.info().parallelIndex);
 	} catch {
 		return 'acme';
 	}
