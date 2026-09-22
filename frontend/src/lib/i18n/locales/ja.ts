@@ -233,6 +233,7 @@ export const messages = {
 	'common.search': '検索',
 	'common.clear': 'クリア',
 	'common.apply': '適用',
+	'common.tableRegion': 'データ表',
 
 	// Bulk selection, shared by every list that offers it — see en.ts.
 
