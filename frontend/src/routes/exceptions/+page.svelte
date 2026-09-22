@@ -814,7 +814,12 @@
 		{#if resolveTarget.description}
 			<p class="modal-description">{resolveTarget.description}</p>
 		{/if}
-		<form onsubmit={(e) => { e.preventDefault(); commitResolve('resolve'); }}>
+		<!-- `data-testid` is the e2e suite's handle on this dialog, so a spec
+		     never has to name it by its accessible name — which is translated. -->
+		<form
+			data-testid="exception-resolve-form"
+			onsubmit={(e) => { e.preventDefault(); commitResolve('resolve'); }}
+		>
 			<label>
 				<span>{m('exceptions.resolveModal.note')}</span>
 				<input
@@ -864,7 +869,10 @@
 	<p class="modal-hint">
 		{m('exceptions.bulkModal.hint')}
 	</p>
-	<form onsubmit={(e) => { e.preventDefault(); commitBulkResolve('resolve'); }}>
+	<form
+		data-testid="exception-bulk-resolve-form"
+		onsubmit={(e) => { e.preventDefault(); commitBulkResolve('resolve'); }}
+	>
 		<label>
 			<span>{m('exceptions.resolveModal.note')}</span>
 			<input

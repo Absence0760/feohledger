@@ -5,6 +5,7 @@ import {
 	tenantPsql,
 	test
 } from '../fixtures/helpers';
+import { resolveDialog } from './dialogs';
 
 interface ExceptionRow {
 	id: string;
@@ -55,8 +56,12 @@ test.describe('/exceptions resolve actions', () => {
 		const row = page.locator('table tbody tr').first();
 		await row.getByRole('button', { name: 'Resolve' }).click();
 
-		const modal = page.getByRole('dialog', { name: 'Resolve exception' });
+		const modal = resolveDialog(page);
 		await expect(modal).toBeVisible();
+		// Found by test id, but it must still HAVE a name — a screen reader
+		// announces the dialog by it (WCAG 4.1.2). Which words is the catalogue's
+		// business, not this spec's.
+		await expect(modal).toHaveAccessibleName(/\S/);
 		await expect(modal.getByRole('button', { name: 'Resolve', exact: true })).toBeVisible();
 		await expect(modal.getByRole('button', { name: 'Escalate' })).toBeVisible();
 		await expect(modal.getByRole('button', { name: 'Dismiss' })).toBeVisible();
@@ -75,7 +80,7 @@ test.describe('/exceptions resolve actions', () => {
 			const row = page.locator('table tbody tr').first();
 			await row.getByRole('button', { name: 'Resolve' }).click();
 
-			const modal = page.getByRole('dialog', { name: 'Resolve exception' });
+			const modal = resolveDialog(page);
 			await modal.locator('input[type="text"]').fill('e2e: confirmed and closed');
 
 			const posted = page.waitForResponse(
@@ -102,7 +107,7 @@ test.describe('/exceptions resolve actions', () => {
 			const row = page.locator('table tbody tr').first();
 			await row.getByRole('button', { name: 'Resolve' }).click();
 
-			const modal = page.getByRole('dialog', { name: 'Resolve exception' });
+			const modal = resolveDialog(page);
 			await modal.locator('input[type="text"]').fill('e2e: needs CFO review');
 
 			const posted = page.waitForResponse(
@@ -131,7 +136,7 @@ test.describe('/exceptions resolve actions', () => {
 			const row = page.locator('table tbody tr').first();
 			await row.getByRole('button', { name: 'Resolve' }).click();
 
-			const modal = page.getByRole('dialog', { name: 'Resolve exception' });
+			const modal = resolveDialog(page);
 			// Dismiss accepts an empty note — sends "dismissd by user" server-side.
 			const posted = page.waitForResponse(
 				(r) =>
