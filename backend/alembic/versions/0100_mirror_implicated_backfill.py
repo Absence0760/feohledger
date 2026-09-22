@@ -54,7 +54,7 @@ alone, as an approval that breached segregation; the row dates the change so
 the historical decision stays re-derivable (§169's auditor argument).
 
 Revision ID: 0100_mirror_implicated_backfill
-Revises: 0098_exception_raiser
+Revises: 0099_purchase_order_currency
 Create Date: 2026-09-22
 
 The revision id is 31 characters. ``alembic_version.version_num`` is
@@ -77,7 +77,7 @@ from sqlalchemy import text
 from alembic import op
 
 revision = "0100_mirror_implicated_backfill"
-down_revision = "0098_exception_raiser"
+down_revision = "0099_purchase_order_currency"
 branch_labels = None
 depends_on = None
 
