@@ -24,8 +24,15 @@ test.describe('/purchase-orders', () => {
 		// `.count()` is a one-shot read with no auto-wait of its own, and it is
 		// the first thing this test does after the beforeEach navigation — so
 		// gate on the first row being rendered rather than on a quiet network.
-		await expect(page.locator('table tbody tr').first()).toBeVisible();
-		const before = await page.locator('table tbody tr').count();
+		//
+		// Count DATA rows, not any `<tr>`: `DataTable` renders a single
+		// placeholder row while the list is loading, which satisfies
+		// `.first()` being visible, so a `before` read a moment too early was 1
+		// and the filtered `after` (3 real rows) then failed `<= before`. The
+		// modal test below draws the same distinction, for the same reason.
+		const dataRows = page.locator('table tbody tr').filter({ has: page.locator('td.mono') });
+		await expect(dataRows.first()).toBeVisible();
+		const before = await dataRows.count();
 		// Pick the first row's PO number, search for a substring.
 		const firstPoNumber = await page.locator('table tbody tr td.mono').first().textContent();
 		expect(firstPoNumber).toBeTruthy();
@@ -42,7 +49,8 @@ test.describe('/purchase-orders', () => {
 		await page.getByPlaceholder('Search PO number...').fill(stem);
 		await filtered;
 
-		const after = await page.locator('table tbody tr').count();
+		await expect(dataRows.first()).toBeVisible();
+		const after = await dataRows.count();
 		expect(after).toBeGreaterThan(0);
 		expect(after).toBeLessThanOrEqual(before);
 	});
