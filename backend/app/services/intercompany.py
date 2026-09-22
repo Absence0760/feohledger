@@ -45,6 +45,28 @@ from app.services.audit_dispatch import dispatch_audit
 from app.services.workflow_engine import create_workflow_instance
 
 
+def inherited_actor_ids(source: Invoice, *, uploader_id: uuid.UUID | None) -> list[str] | None:
+    """The mirror's ``segregation_actor_ids``: everyone implicated in ``source``
+    except the mirror's own uploader.
+
+    ``approval_chain.implicated_actors(source)`` — the source's uploader ∪ its own
+    set — minus ``uploader_id``, who is named once, in the mirror's
+    ``uploaded_by_id`` (the same subtraction ``recurring_invoices.
+    implicated_actor_ids`` makes). Sorted, and ``None`` rather than ``[]`` when
+    nobody is left: the shape every creation path writes for "nobody beyond the
+    uploader".
+
+    Routing calls this, and migration ``0100_mirror_implicated_backfill`` states
+    the same rule in SQL for mirrors routed before §192;
+    ``tests/test_intercompany.py`` evaluates the two against each
+    other so they cannot drift (docs/decisions.md §192, §198).
+    """
+    inherited = implicated_actors(source)
+    if uploader_id is not None:
+        inherited.discard(str(uploader_id))
+    return sorted(inherited) or None
+
+
 async def route_intercompany_invoice(
     db: AsyncSession,
     invoice: Invoice,
@@ -88,9 +110,7 @@ async def route_intercompany_invoice(
     # other implicated set (§152): the source's terms are what they are at
     # routing time. The routing actor lands in `uploaded_by_id` below and is
     # dropped from the set, so no one is named twice (docs/decisions.md §192).
-    inherited = implicated_actors(invoice)
-    if actor_id is not None:
-        inherited.discard(str(actor_id))
+    inherited = inherited_actor_ids(invoice, uploader_id=actor_id)
 
     # Create the mirror payable under the counterparty entity. Amount stays an
     # exact Decimal (copied straight off the origin column). The invoice_number
@@ -106,7 +126,7 @@ async def route_intercompany_invoice(
         uploaded_by_id=actor_id,
         # NULL rather than `[]` when nobody is left, the shape every other
         # creation path writes for "nobody beyond the uploader".
-        segregation_actor_ids=sorted(inherited) or None,
+        segregation_actor_ids=inherited,
         invoice_number=f"IC-{invoice.invoice_number}",
         vendor_name=invoice.vendor_name,
         amount=invoice.amount,

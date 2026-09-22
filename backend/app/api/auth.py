@@ -80,7 +80,7 @@ from app.services.session_management import (
     revoke_other_sessions,
     revoke_user_sessions,
 )
-from app.services.sso import is_sso_only
+from app.services.sso import is_sso_only, sso_only_requested
 from app.utils.passwords import (
     PasswordError,
     dummy_verify,
@@ -264,6 +264,9 @@ def _user_response(user: User, org: Organization | None = None) -> UserResponse:
         must_change_password=user.must_change_password,
         mfa_enabled=user.mfa_enabled,
         mfa_required_by_org=org_required,
+        # The step-up's own predicate, not a client-side copy of it — see
+        # `_org_closes_password_sign_in` and docs/decisions.md §201.
+        password_sign_in_closed=_org_closes_password_sign_in(org),
         roles=[r.name for r in user.roles],
         # Effective granular permissions for the SPA's `can(perm)` gate. Resolved
         # off the user's roles (system via the default map, custom via their
@@ -428,8 +431,9 @@ async def login(
     # password is verified so it reuses the org load and doesn't perturb the
     # unknown-vs-wrong-password enumeration parity. (Passwordless SSO users
     # already 401'd above; the login page hides the password form when
-    # sso_only, so they use the IdP button.)
-    if is_sso_only(org.settings if org else None):
+    # sso_only, so they use the IdP button.) The same predicate the step-up,
+    # `/auth/me` and the public config echo read, so the four cannot disagree.
+    if _org_closes_password_sign_in(org):
         await dispatch_auth_audit(
             organization_id=user.organization_id,
             actor_id=None,
@@ -439,6 +443,17 @@ async def login(
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="This workspace requires single sign-on. Sign in with your identity provider.",
+        )
+    if org is not None and sso_only_requested(org.settings):
+        # The tenant asked for SSO-only, but its IdP block does not resolve, so
+        # its login page offers no SSO button and the password stays open as
+        # the escape hatch (§204). Say so on every such sign-in: an org that
+        # believes it enforces SSO and does not is an operator's problem to fix.
+        # Org id only. The block's contents never reach the log.
+        logger.warning(
+            "[auth] org %s requires SSO but its identity-provider config does not "
+            "resolve; password sign-in stays open until it does",
+            org.id,
         )
 
     # A hash still stored under a scheme we no longer write gets replaced with
@@ -894,29 +909,42 @@ STEP_UP_FAILURE_DETAIL = (
     "passkey to change your two-factor settings."
 )
 
-# The refusal an SSO-only tenant's member gets when the proof they offered was a
-# password. It says the same thing whether the password was right, wrong, or the
-# account has none at all (the password is never checked there), and the tenant's
-# `sso_only` flag is already public through `/auth/{sso,saml}/config` — so it
+# The refusal an SSO-only tenant's member gets for ANY failed step-up. It names
+# only the proofs that tenant accepts, so it never sends anyone back to the
+# password — whether they offered one (right, wrong, or on an account that has
+# none: it is never checked there) or a code / passkey that did not verify, which
+# is what the profile page now sends there instead (§201). The tenant's
+# `sso_only` flag is already public through `/auth/{sso,saml}/config`, so it
 # tells the caller nothing about the account they did not already know.
 STEP_UP_SSO_ONLY_DETAIL = (
-    "Your organization signs in with single sign-on, so a password cannot confirm "
-    "this change. Use a current authenticator code or a registered passkey."
+    "Your organization signs in with single sign-on, so only a current "
+    "authenticator code or a registered passkey can confirm this change."
 )
 
 
-async def _password_sign_in_closed(db: AsyncSession, user: User) -> bool:
-    """Has `user`'s organization closed password sign-in (`sso_only`)?
+def _org_closes_password_sign_in(org: Organization | None) -> bool:
+    """Has this organization closed password sign-in (`sso_only`)?
 
-    The same predicate `login` refuses a correct password on
-    (`services/sso.is_sso_only`, which also requires `sso.enabled`, so a broken
-    IdP config keeps the password open as the escape hatch). A step-up is an
-    authentication, and a tenant that has closed password login has said the
-    password is not an authenticator there — so the password proves a step-up
-    exactly when it would prove a sign-in, and never otherwise.
+    The ONE statement of the rule, with three readers that must never disagree:
+    `login` refuses a correct password on it, `_step_up_satisfied` drops an
+    offered password on it (a step-up is an authentication, so the password
+    proves one exactly when it would prove a sign-in — §191), and
+    `_user_response` publishes it on `/auth/me` as `password_sign_in_closed`, so
+    the profile page stops offering the password as a proof exactly where the
+    server stops accepting it (§201). It is `services/sso.is_sso_only`, the same
+    call the public `/auth/{sso,saml}/config` echo makes, so the login page
+    hides the password form exactly where this refuses it. It needs
+    `sso.enabled`, `sso_only` AND an IdP config that resolves: `sso_only` set
+    while SSO is switched off closes nothing, and neither does an IdP block that
+    does not resolve, because that tenant's login page has no SSO button to
+    offer instead (§204).
     """
-    org = await _load_user_org(db, user.organization_id)
     return is_sso_only(org.settings if org else None)
+
+
+async def _password_sign_in_closed(db: AsyncSession, user: User) -> bool:
+    """`_org_closes_password_sign_in` for `user`'s organization, loaded here."""
+    return _org_closes_password_sign_in(await _load_user_org(db, user.organization_id))
 
 
 async def _step_up_satisfied(
@@ -1022,26 +1050,30 @@ async def _require_mfa_step_up(
     await _throttle_step_up(user.id)
     if await _step_up_satisfied(db, user, body, operation=operation, rp=rp):
         return
-    await _refuse_step_up(db, user, body, operation=operation)
+    await _refuse_step_up(db, user, operation=operation)
 
 
 async def _refuse_step_up(
     db: AsyncSession,
     user: User,
-    body: MFAStepUpRequest | None,
     *,
     operation: str,
 ) -> NoReturn:
     """Audit a failed step-up and raise its 400 — the one refusal both gates share.
 
-    A caller in an SSO-only tenant who offered a password gets
-    `STEP_UP_SSO_ONLY_DETAIL` instead of the generic sentence, which would
-    otherwise tell them to "confirm your password" — the one proof that tenant
-    no longer accepts. Everyone else gets the generic, account-agnostic one.
+    Any caller in an SSO-only tenant gets `STEP_UP_SSO_ONLY_DETAIL` instead of
+    the generic sentence, which would otherwise tell them to "confirm your
+    password" — the one proof that tenant no longer accepts. That holds for a
+    mistyped authenticator code as much as for an offered password: the profile
+    page asks such a member for the code rather than the password (§201), and a
+    refusal that then sends them back to a password field the page does not
+    show is the dead end this sentence exists to avoid. The org is read here
+    for every refusal — a throttled failure path, so the query is cheap where
+    the success paths stay free of it. Everyone else gets the generic,
+    account-agnostic one.
     """
     await _audit_step_up_failure(user, operation=operation)
-    offered_password = body is not None and bool(body.password)
-    if offered_password and await _password_sign_in_closed(db, user):
+    if await _password_sign_in_closed(db, user):
         raise HTTPException(status_code=400, detail=STEP_UP_SSO_ONLY_DETAIL)
     raise HTTPException(status_code=400, detail=STEP_UP_FAILURE_DETAIL)
 
@@ -1147,7 +1179,7 @@ async def disable_mfa(
     rp = await _relying_party(db, user.organization_id, host)
     await _throttle_step_up(user.id)
     if not await _step_up_satisfied(db, user, body, operation="totp_disable", rp=rp):
-        await _refuse_step_up(db, user, body, operation="totp_disable")
+        await _refuse_step_up(db, user, operation="totp_disable")
 
     org = await _load_user_org(db, user.organization_id)
     if mfa.org_requires_mfa(org.settings if org else None):

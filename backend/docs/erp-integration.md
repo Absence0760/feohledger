@@ -88,6 +88,14 @@ class ErpAdapter:
         Default returns []. Adapters that don't implement PO sync
         cause `POST /api/purchase-orders/sync-erp` to no-op rather
         than 500 — currently overridden by `mock` and `merge_dev`.
+
+        `PoPayload.currency` is the ISO code the ERP record states
+        (Merge's unified PurchaseOrder carries `currency`; the mock
+        states `USD`). None when the record has none — never a
+        default. The sync stores it on `PurchaseOrder.currency`
+        through `po_currency_code`; on a re-sync a stated code wins
+        (it is the other half of `total`) and an absent one never
+        erases a recorded code (decisions §197).
         """
         ...
 

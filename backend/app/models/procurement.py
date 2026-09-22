@@ -21,6 +21,33 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, EntityMixin, TimestampMixin
 
+#: PO statuses that no longer represent a live commitment. `PurchaseOrder.status`
+#: is a free-form `String(30)` written by the ERP feed and the requisition
+#: conversion, so this is an EXCLUSION list, not an allowlist: an unrecognised
+#: but live status (`received`, `partially_received`) must keep counting, while
+#: silently counting a cancelled order as committed spend is what makes a
+#: figure wrong. Shared by the budget-commitment leg (`services/budget_service`)
+#: and the open-PO accrual (`api/analytics`), which must not disagree about what
+#: "open" means.
+DEAD_PO_STATUSES: tuple[str, ...] = ("cancelled", "closed", "voided")
+
+
+def po_currency_code(value: object) -> str | None:
+    """The ISO 4217 code a purchase order may record, or ``None``.
+
+    Trimmed and upper-cased; anything that is not three ASCII letters proves
+    nothing and yields ``None`` rather than a malformed label. Every path that
+    stamps ``PurchaseOrder.currency`` runs its source's code through this, so a
+    requisition's ``"eur "`` and an ERP's ``"EUR"`` are one group key, and a
+    blank one is NULL — never a borrowed default (migration 0099, decisions
+    §197). ``po_matching`` normalises the invoice side the same way before it
+    compares the two.
+    """
+    if not isinstance(value, str):
+        return None
+    code = value.strip().upper()
+    return code if len(code) == 3 and code.isascii() and code.isalpha() else None
+
 
 class PurchaseOrder(Base, EntityMixin, TimestampMixin):
     __tablename__ = "purchase_orders"
@@ -43,6 +70,14 @@ class PurchaseOrder(Base, EntityMixin, TimestampMixin):
         UUID(as_uuid=True), ForeignKey("vendors.id"), index=True
     )
     total: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
+    # The currency `total` (and every line figure) is denominated in — the code
+    # the PO's SOURCE knows: its requisition's, its contract's, the ERP
+    # payload's. NULL means no source said, and is rendered bare; there is
+    # deliberately no default, because a default is a claim made on behalf of
+    # every row that did not make one. Normalise through `po_currency_code`.
+    # `tests/test_purchase_order_currency_stamping.py` fails on a
+    # `PurchaseOrder(...)` that omits it. Migration 0099; decisions §197.
+    currency: Mapped[str | None] = mapped_column(String(3))
     status: Mapped[str] = mapped_column(String(30), default="open")
     # Promised / expected delivery date (nullable). Compared against a linked
     # GoodsReceipt.received_date to compute the data-enrichment on-time-delivery

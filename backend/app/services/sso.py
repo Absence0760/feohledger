@@ -71,7 +71,18 @@ ID_TOKEN_ALGORITHMS = [
 
 
 class SSOConfigError(ValueError):
-    """Raised when a tenant's SSO config is missing or invalid."""
+    """Raised when a tenant's SSO config is missing or invalid.
+
+    ``fields`` names the config keys at fault. It holds key names only, never
+    values, because the block carries the OIDC client secret and
+    ``PATCH /api/organization`` puts these names in its 422 body
+    (docs/decisions.md §204). Every message raised with it follows the same
+    rule.
+    """
+
+    def __init__(self, message: str, *, fields: tuple[str, ...] = ()) -> None:
+        super().__init__(message)
+        self.fields = fields
 
 
 class SSOValidationError(ValueError):
@@ -93,24 +104,129 @@ class ResolvedSSOConfig:
 # return None for the other protocol so neither can be driven by the wrong one.
 SAML_PROTOCOL = "saml"
 
+# The keys each protocol's IdP block cannot resolve without.
+OIDC_REQUIRED_FIELDS = ("discovery_url", "client_id", "client_secret")
+SAML_REQUIRED_FIELDS = ("idp_entity_id", "idp_sso_url", "idp_x509_cert")
 
-def _settings_protocol(sso: dict) -> str:
-    return (sso.get("protocol") or "oidc").lower()
 
+def _sso_block(org_settings: Mapping[str, Any] | None) -> Mapping[str, Any]:
+    """``org_settings["sso"]``, or an empty mapping when either level is not one.
 
-def is_sso_only(org_settings: dict | None) -> bool:
-    """True when the tenant has SSO enabled AND requires it — password login is
-    closed for the whole org (both OIDC and SAML set the same flag).
-
-    Deliberately requires ``sso.enabled`` too, so setting ``sso_only`` alone
-    (without configuring an IdP) can't lock everyone out. Admins must stand up
-    SSO first; the public /config endpoints only echo ``sso_only`` once the IdP
-    config actually resolves, so a broken config never hides the password form.
+    The block is free-form JSONB that ``PATCH /api/organization`` merges without
+    a schema, and ``is_sso_only`` reads it on every password sign-in. A
+    malformed row therefore has to read as "no SSO configured" and never raise.
     """
-    if not org_settings:
-        return False
-    sso = org_settings.get("sso") or {}
+    if not isinstance(org_settings, Mapping):
+        return {}
+    sso = org_settings.get("sso")
+    return sso if isinstance(sso, Mapping) else {}
+
+
+def _settings_protocol(sso: Mapping[str, Any]) -> str:
+    raw = sso.get("protocol")
+    return raw.lower() if isinstance(raw, str) and raw else "oidc"
+
+
+def _required_text(sso: Mapping[str, Any], names: tuple[str, ...]) -> list[str]:
+    """The values of ``names``, each of which must be a non-blank string.
+
+    Raises one ``SSOConfigError`` naming every key that is absent, blank or not
+    text, so an admin can fix the whole block after a single refusal.
+    """
+    bad = tuple(
+        name for name in names if not (isinstance(sso.get(name), str) and sso.get(name).strip())
+    )
+    if bad:
+        raise SSOConfigError(
+            f"SSO is enabled but these keys are missing, blank or not text: {', '.join(bad)}.",
+            fields=bad,
+        )
+    return [sso[name] for name in names]
+
+
+def _optional_text(sso: Mapping[str, Any], name: str, default: str | None) -> str | None:
+    """``sso[name]`` when set, ``default`` when falsy; refuses a value that is not text."""
+    value = sso.get(name)
+    if not value:
+        return default
+    if not isinstance(value, str):
+        raise SSOConfigError(f"SSO {name} must be text.", fields=(name,))
+    return value
+
+
+def _email_domains(sso: Mapping[str, Any]) -> list[str]:
+    """The optional JIT allowlist. A malformed one is refused, not ignored,
+    because ignoring it would admit every domain."""
+    raw = sso.get("allowed_email_domains")
+    if not raw:
+        return []
+    if not isinstance(raw, list) or not all(isinstance(d, str) for d in raw):
+        raise SSOConfigError(
+            "SSO allowed_email_domains must be a list of domains.",
+            fields=("allowed_email_domains",),
+        )
+    return list(raw)
+
+
+def sso_only_requested(org_settings: Mapping[str, Any] | None) -> bool:
+    """Has the tenant ASKED for SSO-only (``sso.enabled`` and ``sso.sso_only``)?
+
+    This is the request, not the verdict. Whether password sign-in is actually
+    closed is ``is_sso_only``, which also needs the IdP config to resolve. Use
+    this one only to ask what the admin configured, e.g. when validating a
+    write or noting that a request is not being honoured.
+    """
+    sso = _sso_block(org_settings)
     return bool(sso.get("enabled") and sso.get("sso_only"))
+
+
+def check_sso_idp_config(org_settings: Mapping[str, Any] | None) -> None:
+    """Raise ``SSOConfigError`` unless the IdP block of the protocol that
+    ``settings.sso`` selects resolves. Does nothing when SSO is switched off.
+
+    It runs the same code ``resolve_sso_config`` and ``resolve_saml_config``
+    run, so "resolves" means exactly what the public config endpoints and the
+    authorize / login handlers mean by it. Every check is local: presence,
+    type, URL shape and base64. There is no DNS lookup and no discovery fetch,
+    which is what makes it cheap enough for the password sign-in path, where
+    ``is_sso_only`` calls it.
+    """
+    sso = _sso_block(org_settings)
+    if not sso.get("enabled"):
+        return
+    if _settings_protocol(sso) == SAML_PROTOCOL:
+        _validated_saml_block(sso)
+    else:
+        resolve_sso_config(org_settings)
+
+
+def is_sso_only(org_settings: Mapping[str, Any] | None) -> bool:
+    """True when password sign-in is closed for the whole org: SSO is enabled,
+    the tenant requires it (``sso_only``, shared by OIDC and SAML), AND the IdP
+    config of the selected protocol resolves.
+
+    The last condition is the escape hatch. A tenant whose IdP block does not
+    resolve has no SSO button on its login page, because the public
+    ``/auth/{sso,saml}/config`` endpoints report SSO as off. If the password
+    were closed as well, nobody could start a session. So an unresolvable block
+    keeps the password open until it is fixed, and ``PATCH /api/organization``
+    refuses to save one in the first place (docs/decisions.md §204).
+
+    This is the one statement of the rule. Login's refusal, the step-up's
+    password drop, ``/auth/me``'s ``password_sign_in_closed`` (all through
+    ``api/auth._org_closes_password_sign_in``) and the config endpoints'
+    ``sso_only`` echo all call it, so none of them can disagree.
+
+    "Resolves" is a local completeness check, not a liveness check. A complete
+    block pointing at an IdP that is down still closes the password.
+    """
+    if not sso_only_requested(org_settings):
+        return False
+    try:
+        check_sso_idp_config(org_settings)
+    except SSOConfigError:
+        return False
+    return True
 
 
 async def resolve_sso_tenant_slug(
@@ -159,10 +275,20 @@ def _assert_sso_url_shape(url: str, *, what: str) -> None:
     resolution. `_assert_sso_url_public` below is the real SSRF guard and runs
     at each fetch site (off-thread), which is where a request actually leaves
     the process.
+
+    ``urlparse`` raises ``ValueError`` on some malformed input (an unclosed IPv6
+    bracket). That becomes the same ``SSOConfigError``, because this also runs
+    on the password sign-in path through ``is_sso_only``, and a bad row there
+    must not surface as a 500.
     """
-    parsed = urlparse(url or "")
-    if parsed.scheme not in ("http", "https") or not parsed.hostname:
-        raise SSOConfigError(f"SSO {what} must be an http(s) URL.")
+    message = f"SSO {what} must be an http(s) URL."
+    try:
+        parsed = urlparse(url or "")
+        hostname = parsed.hostname
+    except ValueError as exc:
+        raise SSOConfigError(message, fields=(what,)) from exc
+    if parsed.scheme not in ("http", "https") or not hostname:
+        raise SSOConfigError(message, fields=(what,))
 
 
 async def _assert_sso_url_public(url: str, *, what: str, error: type[ValueError]) -> None:
@@ -236,32 +362,28 @@ def _pinned_endpoint(discovery_doc: dict, key: str) -> str:
     return raw
 
 
-def resolve_sso_config(org_settings: dict | None) -> ResolvedSSOConfig | None:
+def resolve_sso_config(org_settings: Mapping[str, Any] | None) -> ResolvedSSOConfig | None:
     """Pull + validate the OIDC SSO block from Organization.settings. Returns
     None if OIDC SSO isn't configured for this tenant (incl. when the tenant is
-    configured for SAML instead)."""
-    if not org_settings:
-        return None
-    sso = org_settings.get("sso") or {}
+    configured for SAML instead).
+
+    Raises ``SSOConfigError``, and nothing else, for any block it cannot use:
+    ``is_sso_only`` reaches this on the password sign-in path through
+    ``check_sso_idp_config``."""
+    sso = _sso_block(org_settings)
     if not sso.get("enabled"):
         return None
     if _settings_protocol(sso) == SAML_PROTOCOL:
         # SAML tenant — resolved via resolve_saml_config, not the OIDC path.
         return None
-    discovery = sso.get("discovery_url")
-    client_id = sso.get("client_id")
-    client_secret = sso.get("client_secret")
-    if not (discovery and client_id and client_secret):
-        raise SSOConfigError(
-            "SSO is enabled but discovery_url/client_id/client_secret are missing."
-        )
+    discovery, client_id, client_secret = _required_text(sso, OIDC_REQUIRED_FIELDS)
     _assert_sso_url_shape(discovery, what="discovery_url")
     return ResolvedSSOConfig(
-        provider=sso.get("provider") or "oidc",
+        provider=_optional_text(sso, "provider", "oidc"),
         discovery_url=discovery,
         client_id=client_id,
         client_secret=client_secret,
-        allowed_email_domains=list(sso.get("allowed_email_domains") or []),
+        allowed_email_domains=_email_domains(sso),
     )
 
 
@@ -385,59 +507,76 @@ def saml_acs_url() -> str:
     return f"{base}/api/auth/saml/acs"
 
 
-def _normalize_x509_cert(raw: str) -> str:
+def _normalize_x509_cert(raw: object, *, field: str = "idp_x509_cert") -> str:
     """Strip PEM armor + whitespace and confirm the result is non-empty,
-    valid base64. Raises SSOConfigError on empty/blank/garbage so a missing or
-    malformed cert can NEVER reach python3-saml as "no cert => skip the
-    signature check" — the load-bearing trust control."""
-    if not raw or not raw.strip():
-        raise SSOConfigError("SAML idp_x509_cert is empty.")
+    valid base64. Raises SSOConfigError on empty/blank/garbage (and on a value
+    that is not text at all) so a missing or malformed cert can NEVER reach
+    python3-saml as "no cert => skip the signature check" — the load-bearing
+    trust control."""
+    if not isinstance(raw, str):
+        raise SSOConfigError(f"SAML {field} must be PEM or base64 text.", fields=(field,))
+    if not raw.strip():
+        raise SSOConfigError(f"SAML {field} is empty.", fields=(field,))
     lines = [ln.strip() for ln in raw.strip().splitlines() if ln.strip() and "-----" not in ln]
     b64 = "".join(lines) if lines else raw.strip()
     try:
         decoded = base64.b64decode(b64, validate=True)
     except (binascii.Error, ValueError) as exc:
-        raise SSOConfigError("SAML idp_x509_cert is not valid base64/PEM.") from exc
+        raise SSOConfigError(f"SAML {field} is not valid base64/PEM.", fields=(field,)) from exc
     if not decoded:
-        raise SSOConfigError("SAML idp_x509_cert decoded to empty bytes.")
+        raise SSOConfigError(f"SAML {field} decoded to empty bytes.", fields=(field,))
     return b64
 
 
-def resolve_saml_config(org_settings: dict | None, tenant_slug: str) -> ResolvedSAMLConfig | None:
-    """Pull + validate the SAML SSO block from Organization.settings. Returns
-    None when SAML SSO isn't configured for this tenant (incl. OIDC tenants).
-    Raises SSOConfigError when SAML is enabled but the IdP trust config is
-    incomplete or the signing cert is missing/malformed."""
-    if not org_settings:
-        return None
-    sso = org_settings.get("sso") or {}
-    if not sso.get("enabled"):
-        return None
-    if _settings_protocol(sso) != SAML_PROTOCOL:
-        return None
+def _validated_saml_block(sso: Mapping[str, Any]) -> ResolvedSAMLConfig:
+    """Everything ``resolve_saml_config`` can refuse, for an enabled SAML block.
 
-    idp_entity_id = sso.get("idp_entity_id")
-    idp_sso_url = sso.get("idp_sso_url")
-    raw_cert = sso.get("idp_x509_cert")
-    if not (idp_entity_id and idp_sso_url and raw_cert):
-        raise SSOConfigError(
-            "SAML SSO is enabled but idp_entity_id/idp_sso_url/idp_x509_cert are missing."
-        )
-
+    Split out because it needs no tenant slug: the slug only feeds the derived
+    default SP EntityID, which cannot fail. ``check_sso_idp_config`` calls this
+    directly, so ``is_sso_only`` does not need a slug to answer. The result's
+    ``sp_entity_id`` is the block's own override, or ``""`` when unset.
+    """
+    idp_entity_id, idp_sso_url, raw_cert = _required_text(sso, SAML_REQUIRED_FIELDS)
+    # The login handler 302s here. Refusing a non-URL at resolve time means a
+    # block that passes cannot hand the login page an SSO button that fails.
+    _assert_sso_url_shape(idp_sso_url, what="idp_sso_url")
     cert = _normalize_x509_cert(raw_cert)
-    cert_multi = [_normalize_x509_cert(c) for c in (sso.get("idp_x509_cert_multi") or [])]
-    sp_entity_id = sso.get("sp_entity_id") or saml_sp_entity_id(tenant_slug)
-
+    raw_multi = sso.get("idp_x509_cert_multi") or []
+    if not isinstance(raw_multi, list):
+        raise SSOConfigError(
+            "SAML idp_x509_cert_multi must be a list of certificates.",
+            fields=("idp_x509_cert_multi",),
+        )
+    cert_multi = [_normalize_x509_cert(c, field="idp_x509_cert_multi") for c in raw_multi]
     return ResolvedSAMLConfig(
-        provider=sso.get("provider") or "saml",
+        provider=_optional_text(sso, "provider", "saml"),
         idp_entity_id=idp_entity_id,
         idp_sso_url=idp_sso_url,
         idp_x509_cert=cert,
         idp_x509_cert_multi=cert_multi,
-        sp_entity_id=sp_entity_id,
-        idp_slo_url=sso.get("idp_slo_url") or None,
-        allowed_email_domains=list(sso.get("allowed_email_domains") or []),
+        sp_entity_id=_optional_text(sso, "sp_entity_id", ""),
+        idp_slo_url=_optional_text(sso, "idp_slo_url", None),
+        allowed_email_domains=_email_domains(sso),
     )
+
+
+def resolve_saml_config(
+    org_settings: Mapping[str, Any] | None, tenant_slug: str
+) -> ResolvedSAMLConfig | None:
+    """Pull + validate the SAML SSO block from Organization.settings. Returns
+    None when SAML SSO isn't configured for this tenant (incl. OIDC tenants).
+    Raises SSOConfigError, and nothing else, when SAML is enabled but the IdP
+    trust config is incomplete or malformed or the signing cert is
+    missing/malformed."""
+    sso = _sso_block(org_settings)
+    if not sso.get("enabled"):
+        return None
+    if _settings_protocol(sso) != SAML_PROTOCOL:
+        return None
+    config = _validated_saml_block(sso)
+    if not config.sp_entity_id:
+        config.sp_entity_id = saml_sp_entity_id(tenant_slug)
+    return config
 
 
 # ---------------------------------------------------------------------------

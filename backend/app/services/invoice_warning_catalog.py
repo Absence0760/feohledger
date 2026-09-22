@@ -278,6 +278,34 @@ WARNING_SPECS: tuple[WarningSpec, ...] = (
             "currency": "currency",
         },
     ),
+    # The PO records no currency (`po_matching.CURRENCY_UNKNOWN`), so the amounts
+    # were compared at face value and the PO's figure is NOT labelled: a `money`
+    # kind would format it with the invoice's code and assert the PO is in it.
+    # `poTotal` is a `number` for the reason the self-correction figures below
+    # are (decisions §197).
+    WarningSpec(
+        "po_amount_variance_po_currency_unknown",
+        "po_mismatch",
+        "Amount variance {variancePct}% vs PO {poNumber}, which records no currency "
+        "(invoice {invoiceAmount} {currency} vs PO {poTotal})",
+        {
+            "variancePct": "percent",
+            "poNumber": "text",
+            "invoiceAmount": "money",
+            "poTotal": "number",
+            "currency": "currency",
+        },
+    ),
+    # The two ARE in different currencies, so there is no variance to state —
+    # the codes are the finding. Both are `text`: they are printed, not used to
+    # format a figure.
+    WarningSpec(
+        "po_currency_mismatch",
+        "po_mismatch",
+        "Invoice is in {invoiceCurrency} but PO {poNumber} is in {poCurrency} — "
+        "the amounts were not compared",
+        {"invoiceCurrency": "text", "poNumber": "text", "poCurrency": "text"},
+    ),
     WarningSpec(
         "po_partial_receipt",
         "po_mismatch",

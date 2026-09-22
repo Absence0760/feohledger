@@ -54,6 +54,15 @@ pass over the vendor's invoices, acceptable for an on-demand reviewer endpoint
   is deterministic across runs.
 - We do **not** name-match a vendor-less draft — too loose; it could suggest
   another vendor's GL. A vendor-less draft returns empty arrays.
+- **A `gl_account` suggestion is dropped when saving it would be refused.** The
+  endpoint (not the pure `suggest_fields`) runs the dominant code through
+  `services/gl_chart.load_invoice_chart(...).judge(...)` for the DRAFT's own
+  entity: another entity's code (history read in the consolidated view spans
+  subsidiaries), or — whenever that chart has active accounts — a retired or
+  unknown one, is not offered, because "Apply" then "Save" would only produce a
+  422 (`docs/decisions.md` §199). It is dropped rather than replaced by the
+  runner-up, whose dominance over the remaining rows would overstate what the
+  history says. `tests/test_vendor_enrichment.py`.
 
 ## Price variance
 

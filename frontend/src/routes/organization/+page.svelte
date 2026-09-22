@@ -519,6 +519,12 @@
 					default_cost_center: defaultCostCenter,
 				},
 			});
+			// `invoice_defaults.currency` is a rung of the reporting-currency
+			// chain, and the store is session-cached: re-resolve it, or every
+			// label on this page (the CFO threshold's included) keeps naming the
+			// answer from before the save until a reload.
+			orgCurrency.reset();
+			void orgCurrency.ensureLoaded();
 		} catch (err) {
 			toast(err instanceof Error ? err.message : m('org.toast.saveFailed'), 'error');
 		} finally {
@@ -2168,7 +2174,7 @@
 
 					<div class="form-grid">
 						<label>
-							<span>{m('org.payments.cfoThreshold', { currency: orgCurrency.currency })}</span>
+							<span>{m('org.payments.cfoThreshold', { currency: orgCurrency.label })}</span>
 							<input
 								type="number"
 								min="0"

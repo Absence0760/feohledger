@@ -215,6 +215,9 @@ export interface ConvertToPoResult {
 	po_number: string;
 	/** The created PO's money total. */
 	total: MoneyAmount;
+	/** The code `total` is in — the requisition's, copied onto the PO. `null`
+	 *  when the requisition held no well-formed code (decisions §197). */
+	currency?: string | null;
 	created: boolean;
 }
 

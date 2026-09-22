@@ -101,7 +101,7 @@ async def _mk_requisition(
     return rid
 
 
-async def _mk_po(realdb, key, *, total, status="open") -> uuid.UUID:
+async def _mk_po(realdb, key, *, total, status="open", currency="USD") -> uuid.UUID:
     mk = realdb.sessionmaker(key)
     org_id = realdb.info(key).org_id
     pid = uuid.uuid4()
@@ -111,6 +111,8 @@ async def _mk_po(realdb, key, *, total, status="open") -> uuid.UUID:
                 id=pid,
                 po_number=f"PO-{_u()}",
                 total=Decimal(total),
+                # Conversion stamps the requisition's code onto the PO.
+                currency=currency,
                 status=status,
                 organization_id=org_id,
             )
@@ -540,6 +542,30 @@ async def test_spend_converted_req_counts_po_not_req(realdb):
     # cancelled PO (7777) do not.
     assert body["committed"] == 1500.0
     assert body["remaining"] == 8500.0
+
+
+async def test_spend_committed_po_leg_reads_the_pos_own_currency(realdb):
+    """Leg 2 sums the PO's total, so it is the PO's currency that says what the
+    figure is in — not the requisition's, which it merely started from. A USD
+    requisition whose PO was later re-denominated to EUR must not add EUR to a
+    USD budget; it is excluded and counted like any other unpriceable row
+    (decisions §197)."""
+    bid = await _mk_budget_row(realdb, amount="10000.00", currency="USD")
+    po_id = await _mk_po(realdb, "a", total="900.00", currency="EUR")
+    await _mk_requisition(
+        realdb,
+        "a",
+        budget_id=bid,
+        total="900.00",
+        status=RequisitionStatus.converted,
+        converted_po_id=po_id,
+        currency="USD",
+    )
+
+    async with realdb.client(key="a", role="cfo") as c:
+        body = (await c.get(f"/api/budgets/{bid}/spend")).json()
+    assert body["committed"] == 0.0
+    assert body["excluded_row_count"] == 1
 
 
 async def test_spend_actual_cost_center_invoices(realdb):

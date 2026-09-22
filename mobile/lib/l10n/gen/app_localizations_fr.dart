@@ -577,8 +577,9 @@ class AppLocalizationsFr extends AppLocalizations {
   String get invoiceDetailUpdated => 'Facture mise à jour';
 
   @override
-  String get invoiceDetailUpdateFailed =>
-      'Impossible d\'enregistrer les modifications — veuillez réessayer';
+  String invoiceDetailUpdateFailed(String error) {
+    return 'Impossible d\'enregistrer les modifications : $error';
+  }
 
   @override
   String get invoiceDetailApproved => 'Facture approuvée';
@@ -2402,6 +2403,25 @@ class AppLocalizationsFr extends AppLocalizations {
     String poTotal,
   ) {
     return 'Écart de montant $variancePct par rapport à la commande $poNumber (facture $invoiceAmount contre commande $poTotal)';
+  }
+
+  @override
+  String invoiceWarningPoAmountVariancePoCurrencyUnknown(
+    String variancePct,
+    String poNumber,
+    String invoiceAmount,
+    String poTotal,
+  ) {
+    return 'Écart de montant $variancePct par rapport à la commande $poNumber, qui n’indique aucune devise (facture $invoiceAmount contre commande $poTotal)';
+  }
+
+  @override
+  String invoiceWarningPoCurrencyMismatch(
+    String invoiceCurrency,
+    String poNumber,
+    String poCurrency,
+  ) {
+    return 'La facture est en $invoiceCurrency mais la commande $poNumber est en $poCurrency — les montants n’ont pas été comparés';
   }
 
   @override

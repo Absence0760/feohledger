@@ -82,6 +82,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.invoice import Invoice
 from app.models.procurement import (
+    DEAD_PO_STATUSES,
     Budget,
     BudgetDimension,
     PurchaseOrder,
@@ -99,8 +100,10 @@ OPEN_COMMITMENT_REQ_STATUSES: tuple[RequisitionStatus, ...] = (
 )
 
 # PO statuses that no longer represent a live commitment (excluded from the PO
-# leg of committed). Everything else (e.g. ``open``, ``received``) counts.
-_DEAD_PO_STATUSES: tuple[str, ...] = ("cancelled", "closed", "voided")
+# leg of committed). Everything else (e.g. ``open``, ``received``) counts. The
+# roster lives on the model, beside the column, because the open-PO accrual in
+# ``api/analytics`` has to exclude exactly the same statuses.
+_DEAD_PO_STATUSES = DEAD_PO_STATUSES
 
 # Maps each budget dimension to the ``Invoice`` column that carries that
 # dimension's value. Realised invoice spend is attributed by ``column ==
@@ -238,9 +241,14 @@ async def _committed_po_legs(
     db: AsyncSession, budget_ids: Sequence[uuid.UUID]
 ) -> dict[uuid.UUID, _Leg]:
     """Leg 2 — POs that these budgets' converted requisitions turned into."""
-    # PurchaseOrder carries no currency; the requisition it converted from does,
-    # and the two share it.
-    total, excluded = _leg_columns(PurchaseOrder.total, PurchaseRequisition.currency)
+    # Keyed on the PO's OWN currency — the one its `total` is in (migration
+    # 0099). Conversion copies the requisition's code onto the PO and 0099
+    # back-filled every older conversion the same way, so the two agree unless
+    # something re-denominated the PO afterwards (an ERP re-sync owns its
+    # currency); then it is the PO's figure being summed, and its own label is
+    # the one that says what it is. A PO recording none is excluded and
+    # counted, like any other row this budget cannot price (decisions §197).
+    total, excluded = _leg_columns(PurchaseOrder.total, PurchaseOrder.currency)
     query = (
         select(Budget.id, total, excluded)
         .select_from(Budget)

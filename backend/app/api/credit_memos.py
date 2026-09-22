@@ -1,11 +1,11 @@
-"""Credit memo endpoints — list, status counts, create, edit, apply, void."""
+"""Credit memo endpoints — list, status counts, eligible invoices, create, edit, apply, void."""
 
 import uuid
 from datetime import UTC, datetime
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import (
@@ -16,10 +16,11 @@ from app.api.deps import (
     get_org_id,
     require_roles,
 )
+from app.api.invoices import _invoice_list_filters
 from app.api.pagination import PaginationParams, pagination_params
 from app.api.sorting import SortParams, resolve_order_by, sort_params
 from app.models.credit_memo import CREDIT_MEMO_STATUSES, CreditMemo
-from app.models.invoice import Invoice
+from app.models.invoice import Invoice, InvoiceStatus
 from app.models.organization import Organization
 from app.models.user import User
 from app.models.vendor import Vendor
@@ -30,10 +31,13 @@ from app.schemas.credit_memo import (
     CreditMemoResponse,
     CreditMemoStatusCounts,
     CreditMemoUpdate,
+    EligibleInvoiceListResponse,
+    EligibleInvoiceResponse,
 )
 from app.services.audit_access import build_field_diff
 from app.services.audit_dispatch import dispatch_audit
 from app.services.currency_conversion import resolve_reporting_currency
+from app.services.workflow_engine import VALID_TRANSITIONS
 from app.tenant import apply_entity_scope, get_entity_id, get_tenant, get_tenant_db
 from app.utils.search import ilike_contains
 
@@ -53,6 +57,11 @@ _ENTITY_MISMATCH_DETAIL = (
     "cannot reduce another subsidiary's payable"
 )
 _CURRENCY_MISMATCH_DETAIL = "Credit memo currency does not match invoice currency"
+_INVOICE_SETTLED_DETAIL = (
+    "The invoice is '{status}': no payment will be made against it any more, so a "
+    "credit applied to it would reduce nothing. Leave the credit memo open and apply "
+    "it to the vendor's next invoice."
+)
 _NOT_EDITABLE_DETAIL = (
     "Only an open credit memo that has never been applied can be edited (this one is '{status}')"
 )
@@ -79,6 +88,69 @@ _EDITABLE_FIELDS: tuple[str, ...] = (
     "issued_date",
     "reason",
 )
+
+
+def _statuses_a_payment_can_still_net() -> frozenset[InvoiceStatus]:
+    """Every invoice status in which an applied credit is still READ by a payment.
+
+    A credit memo does nothing by itself: `services/payment_runs.net_payable_amount`
+    subtracts it from the invoice when a payment is built or executed. So a credit
+    is only worth applying while the invoice can still reach `payment_scheduled`
+    — the status a payment is booked under — without first being `paid`, the
+    status its payment settles into. That is a reachability question over the
+    state machine, so it is answered from `VALID_TRANSITIONS` rather than written
+    out as a list (the `api/payments.SCHEDULABLE_INVOICE_STATUSES` rule): a status
+    added to the graph is classified by its edges, and a status with no entry at
+    all is refused, never waved through.
+
+    The two anchors are the definition of the question, not a restatement of its
+    answer. What falls out today — `docs/decisions.md` §202:
+
+    - **Admitted:** everything upstream of a payment (`new` through
+      `posted_in_erp`); `rejected` and `failed`, which re-enter the flow (a
+      disputed invoice is rejected, the supplier issues a credit, the invoice is
+      resubmitted — the credit must be able to meet it); and `payment_scheduled`
+      itself, where the executor's `net_amount_changed` refusal re-nets a payment
+      booked before the credit.
+    - **Refused:** `paid` (its money has left) and `done` (terminal — nothing will
+      ever pay it). A credit on either is consumed against a payable no payment
+      will read again, and an applied memo can be neither voided nor re-applied.
+      A voided payment walks `paid → approved`, which is admitted again, so the
+      refusal lasts exactly as long as the money is out.
+    """
+    booked, settled = InvoiceStatus.payment_scheduled, InvoiceStatus.paid
+    creditable = {booked}
+    grew = True
+    while grew:
+        grew = False
+        for state, successors in VALID_TRANSITIONS.items():
+            if state in creditable or state == settled:
+                continue
+            if successors & creditable:
+                creditable.add(state)
+                grew = True
+    return frozenset(creditable)
+
+
+#: Where a credit memo may be applied. Both application paths refuse any other
+#: status (`_assert_creditable_status`) and the pickers' eligible set carries the
+#: same leg, so what is offered is what is accepted.
+CREDITABLE_INVOICE_STATUSES: frozenset[InvoiceStatus] = _statuses_a_payment_can_still_net()
+
+
+def _assert_creditable_status(invoice: Invoice) -> None:
+    """Refuse a credit on an invoice no payment will read again (`paid`, `done`).
+
+    Checked first on both application paths, before the vendor, entity, currency
+    and balance guards: it is about the invoice alone, and the operator's remedy
+    — keep the memo open for the vendor's next invoice — does not depend on
+    whether anything else about the pairing would also have been refused.
+    """
+    current = InvoiceStatus(invoice.status)
+    if current not in CREDITABLE_INVOICE_STATUSES:
+        raise HTTPException(
+            status_code=409, detail=_INVOICE_SETTLED_DETAIL.format(status=current.value)
+        )
 
 
 def _assert_vendor_matches(invoice: Invoice, vendor_id: uuid.UUID) -> None:
@@ -150,6 +222,135 @@ def _assert_editable(memo: CreditMemo) -> None:
     """
     if memo.status != "open" or memo.invoice_id is not None or memo.applied_at is not None:
         raise HTTPException(status_code=409, detail=_NOT_EDITABLE_DETAIL.format(status=memo.status))
+
+
+#: What Python's `str.strip()` removes from an ASCII string. `btrim` with no
+#: character list strips spaces only, so the SQL form of the currency guard
+#: names the set rather than quietly disagreeing about a tab.
+_STRIPPED_WHITESPACE = " \t\n\r\x0b\x0c"
+
+
+def _assert_applicable(memo: CreditMemo) -> None:
+    """Only an `open` memo can be applied — to anything.
+
+    Shared by `/apply` and by `/{id}/eligible-invoices`, so the picker refuses
+    a memo with the same answer the apply would give rather than listing
+    invoices none of which the apply could accept.
+    """
+    if memo.status != "open":
+        raise HTTPException(
+            status_code=409,
+            detail=f"Cannot apply a credit memo in '{memo.status}' status",
+        )
+
+
+def _creditable_balance(exclude_memo_id: uuid.UUID | None):
+    """SQL: the invoice's amount minus every credit already APPLIED to it.
+
+    The `remaining` both application paths compute in Python before their
+    over-application guard, as a correlated subquery over `Invoice`. `/apply`
+    leaves the memo being applied out of the sum (it is `open`, so it is never
+    in it — the exclusion only keeps the two spellings identical).
+    """
+    applied = select(func.coalesce(func.sum(CreditMemo.amount), Decimal("0"))).where(
+        CreditMemo.invoice_id == Invoice.id,
+        CreditMemo.status == "applied",
+    )
+    if exclude_memo_id is not None:
+        applied = applied.where(CreditMemo.id != exclude_memo_id)
+    return Invoice.amount - applied.correlate(Invoice).scalar_subquery()
+
+
+def _eligible_invoices_query(
+    *,
+    entity_id: uuid.UUID | None,
+    vendor_id: uuid.UUID,
+    memo_entity_id: uuid.UUID | None,
+    memo_currency: str | None,
+    amount: Decimal | None,
+    exclude_memo_id: uuid.UUID | None,
+    search: str | None,
+):
+    """`SELECT invoice, creditable_balance` for exactly the invoices a credit
+    with these terms can be applied to.
+
+    Each leg is the SQL form of one refusal the application paths make, so the
+    picker offers what `/apply` (and `POST` with an `invoice_id`) will accept
+    and nothing it will refuse (`docs/decisions.md` §202):
+
+    - **scope** — the caller's `X-Entity-ID`, the same `apply_entity_scope`
+      the application paths look the invoice up under (404 otherwise);
+    - **vendor** — `_assert_vendor_matches`: an equality on
+      `Invoice.vendor_id`, through the invoice list's own `vendor_id` leg, so
+      an unlinked (NULL) invoice is never offered;
+    - **entity** — `_assert_entity_matches`: a NULL on either side is
+      admitted, a different entity is not;
+    - **currency** — `_assert_currency_matches`: case- and space-insensitive,
+      a blank invoice currency admitted, and no leg at all when the credit
+      asserts none (a linked create inherits the invoice's);
+    - **status** — `_assert_creditable_status`: only an invoice a payment will
+      still read (`CREDITABLE_INVOICE_STATUSES` — never `paid` or `done`);
+    - **balance** — the over-application guard: the invoice must still absorb
+      `amount`, or, when the amount is not known yet, anything at all (every
+      credit is strictly positive, so a fully credited invoice refuses them
+      all).
+
+    `search` is the invoice list's own search leg, so a term means the same
+    thing in both places.
+    """
+    creditable = _creditable_balance(exclude_memo_id)
+    query = _invoice_list_filters(
+        apply_entity_scope(
+            select(Invoice, creditable.label("creditable_balance")), Invoice, entity_id
+        ),
+        vendor_id=vendor_id,
+        search=search.strip() if search and search.strip() else None,
+    )
+    query = query.where(
+        Invoice.status.in_(sorted(state.value for state in CREDITABLE_INVOICE_STATUSES))
+    )
+    if memo_entity_id is not None:
+        query = query.where(or_(Invoice.entity_id.is_(None), Invoice.entity_id == memo_entity_id))
+    if memo_currency:
+        invoice_currency = func.upper(
+            func.btrim(func.coalesce(Invoice.currency, ""), _STRIPPED_WHITESPACE)
+        )
+        query = query.where(
+            or_(invoice_currency == "", invoice_currency == memo_currency.strip().upper())
+        )
+    query = query.where(creditable >= amount if amount is not None else creditable > 0)
+    return query
+
+
+async def _eligible_invoice_page(
+    db: AsyncSession, pagination: PaginationParams, **terms
+) -> EligibleInvoiceListResponse:
+    """One page of `_eligible_invoices_query`, newest first, with its total."""
+    query = _eligible_invoices_query(**terms)
+    total = int(
+        (await db.execute(select(func.count()).select_from(query.subquery()))).scalar() or 0
+    )
+    rows = await db.execute(
+        query.order_by(Invoice.created_at.desc(), Invoice.id.desc())
+        .offset(pagination.offset)
+        .limit(pagination.limit)
+    )
+    items = [
+        EligibleInvoiceResponse(
+            id=str(invoice.id),
+            invoice_number=invoice.invoice_number,
+            vendor_name=invoice.vendor_name,
+            status=getattr(invoice.status, "value", str(invoice.status)),
+            due_date=invoice.due_date.isoformat() if invoice.due_date else None,
+            amount=invoice.amount,
+            currency=invoice.currency,
+            creditable_balance=creditable_balance,
+        )
+        for invoice, creditable_balance in rows.all()
+    ]
+    return EligibleInvoiceListResponse(
+        items=items, total=total, page=pagination.page, page_size=pagination.page_size
+    )
 
 
 def _to_response(
@@ -300,6 +501,87 @@ async def credit_memo_status_counts(
     return CreditMemoStatusCounts(total=sum(by_status.values()), by_status=by_status)
 
 
+# Literal path, declared before every `/{memo_id}` route for the same reason as
+# `/counts`.
+@router.get("/eligible-invoices", response_model=EligibleInvoiceListResponse)
+async def list_invoices_eligible_for_new_memo(
+    vendor_id: uuid.UUID = Query(..., description="The vendor the new memo credits"),
+    amount: Decimal | None = Query(
+        None,
+        gt=0,
+        max_digits=15,
+        decimal_places=2,
+        description="The memo amount, once known — only invoices that can absorb it are listed",
+    ),
+    search: str | None = Query(
+        None, description="The invoice list's search: invoice #, PO #, description or vendor"
+    ),
+    pagination: PaginationParams = Depends(pagination_params),
+    db: AsyncSession = Depends(get_tenant_db),
+    # Create's gate: reading the targets a credit may be linked to and linking
+    # it are the same privilege (the `assignable-reviewers` rule).
+    user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER)),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
+):
+    """The invoices `POST /credit-memos` would accept as this new memo's `invoice_id`.
+
+    Behind the create dialog's optional "Apply to invoice" picker. The vendor
+    is resolved exactly as create resolves it — entity-scoped, 404 otherwise —
+    and the memo's entity follows it, as on create. No currency leg: a linked
+    create that asserts none INHERITS the invoice's, which is what the dialog
+    sends. See `_eligible_invoices_query` and `docs/decisions.md` §202.
+    """
+    vendor = await _get_scoped_vendor(db, vendor_id, entity_id)
+    return await _eligible_invoice_page(
+        db,
+        pagination,
+        entity_id=entity_id,
+        vendor_id=vendor.id,
+        memo_entity_id=vendor.entity_id,
+        memo_currency=None,
+        amount=amount,
+        exclude_memo_id=None,
+        search=search,
+    )
+
+
+@router.get("/{memo_id}/eligible-invoices", response_model=EligibleInvoiceListResponse)
+async def list_invoices_eligible_for_memo(
+    memo_id: uuid.UUID,
+    search: str | None = Query(
+        None, description="The invoice list's search: invoice #, PO #, description or vendor"
+    ),
+    pagination: PaginationParams = Depends(pagination_params),
+    db: AsyncSession = Depends(get_tenant_db),
+    # `/apply`'s gate, for the same reason as the create-side listing above.
+    user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER)),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
+):
+    """The invoices `POST /credit-memos/{id}/apply` would accept for this memo.
+
+    Behind the Apply dialog's invoice picker, which used to walk every page of
+    `GET /api/invoices` on page mount and filter by vendor in the browser —
+    offering invoices the apply then refused (another currency, too small a
+    remaining balance, another entity). The terms are read off the memo row,
+    not restated by the client, so the list cannot describe a memo someone has
+    since edited. Same opaque 404 as every by-id route here, and the apply's
+    own 409 for a memo that is no longer `open`.
+    """
+    memo = await _get_scoped_memo(db, memo_id, entity_id)
+    _assert_applicable(memo)
+    return await _eligible_invoice_page(
+        db,
+        pagination,
+        entity_id=entity_id,
+        vendor_id=memo.vendor_id,
+        memo_entity_id=memo.entity_id,
+        memo_currency=memo.currency,
+        amount=memo.amount,
+        exclude_memo_id=memo.id,
+        search=search,
+    )
+
+
 async def _get_scoped_memo(
     db: AsyncSession,
     memo_id: uuid.UUID,
@@ -391,8 +673,9 @@ async def create_credit_memo(
         if not invoice:
             raise HTTPException(status_code=404, detail="Invoice not found")
         # Same guards as the /apply path — a credit applied at creation time must
-        # match the invoice's vendor and entity, and stay within its remaining
-        # balance.
+        # land on an invoice a payment will still read, match the invoice's
+        # vendor and entity, and stay within its remaining balance.
+        _assert_creditable_status(invoice)
         _assert_vendor_matches(invoice, vendor_uuid)
         # The memo will be stamped with its vendor's entity (below).
         _assert_entity_matches(invoice, vendor.entity_id)
@@ -551,11 +834,7 @@ async def apply_credit_memo(
     # (two applies to two different invoices used to both pass, leaving one
     # audit row per invoice for a credit that reduced only the last).
     memo = await _get_scoped_memo(db, memo_id, entity_id, for_update=True)
-    if memo.status != "open":
-        raise HTTPException(
-            status_code=409,
-            detail=f"Cannot apply a credit memo in '{memo.status}' status",
-        )
+    _assert_applicable(memo)
 
     invoice_uuid = body.invoice_id
     # Row-lock the invoice so concurrent applies to the same invoice serialize
@@ -570,6 +849,7 @@ async def apply_credit_memo(
     invoice = inv_result.scalar_one_or_none()
     if not invoice:
         raise HTTPException(status_code=404, detail="Invoice not found")
+    _assert_creditable_status(invoice)
     _assert_vendor_matches(invoice, memo.vendor_id)
     _assert_entity_matches(invoice, memo.entity_id)
     _assert_currency_matches(invoice, memo.currency)

@@ -89,6 +89,7 @@ export const messages = {
 	'common.retrying': 'Wird erneut versucht…',
 	'common.loadFailed': 'Diese Liste konnte nicht geladen werden. Zum erneuten Versuch aktualisieren.',
 	'common.amountInvalid': 'Geben Sie den Betrag als einfache Zahl ein, z. B. 1200 oder 1200.50',
+	'common.reportingCurrencyUnresolved': 'Berichtswährung',
 
 	// Cookie / consent banner (lib/components/ConsentBanner.svelte) — see en.ts.
 
@@ -156,6 +157,10 @@ export const messages = {
 		'Ihre Organisation verlangt MFA, daher ist das Deaktivieren nicht möglich.',
 	'profile.mfa.requiredEnroll': 'Ihre Organisation verlangt MFA — bitte jetzt einrichten.',
 	'profile.mfa.disablePassword': 'Passwort eingeben, um MFA zu deaktivieren',
+	'profile.mfa.disableCode':
+		'Aktuellen Code aus der Authenticator-App eingeben, um MFA zu deaktivieren',
+	'profile.mfa.ssoOnlyNoPassword':
+		'Ihre Organisation meldet sich per Single Sign-on an, daher kann Ihr Passwort keine Änderungen an Ihren Zwei-Faktor-Einstellungen bestätigen.',
 	'profile.mfa.confirmWithPasskey': 'Mit einem Passkey bestätigen',
 	'profile.mfa.disable': 'Zwei-Faktor deaktivieren',
 	'profile.mfa.disabling': 'Wird deaktiviert…',
@@ -182,6 +187,11 @@ export const messages = {
 		'Passwort bestätigen, um einen Passkey hinzuzufügen oder zu entfernen',
 	'profile.passkeys.stepUpBlankHint':
 		'Lassen Sie das Feld leer, um stattdessen mit einem Ihrer vorhandenen Passkeys zu bestätigen — die einzige Möglichkeit, wenn Sie sich per SSO anmelden und kein Passwort haben.',
+	'profile.passkeys.stepUpCode':
+		'Aktuellen Code aus der Authenticator-App eingeben, um einen Passkey hinzuzufügen oder zu entfernen',
+	'profile.passkeys.stepUpCodeBlankHint':
+		'Lassen Sie das Feld leer, um stattdessen mit einem Ihrer vorhandenen Passkeys zu bestätigen.',
+	'profile.passkeys.stepUpPasskeyOnly': 'Sie bestätigen mit einem Ihrer vorhandenen Passkeys.',
 	'profile.passkeys.lastUsed': 'Zuletzt verwendet {date}',
 	'profile.passkeys.neverUsed': 'Nie verwendet',
 	'profile.passkeys.remove': 'Entfernen',
@@ -255,8 +265,10 @@ export const messages = {
 	'dashboard.kpi.exceptions': 'Ausnahmen',
 	'dashboard.kpi.staleApprovals': 'Überfällige Freigaben',
 	'dashboard.kpi.rebatesEarned': 'Erzielte Rückvergütungen',
-	'dashboard.reporting.unconverted':
-		'Einige der obigen Summen schließen Zeilen ohne festgelegten Wechselkurs in {currency} aus – behandeln Sie sie als Untergrenze, nicht als exakten Wert.',
+	'dashboard.reporting.faceValue':
+		'Teilweise – {label}: {n, plural, one {# Rechnung} other {# Rechnungen}} ohne Wechselkurs in {currency}, zum Nennwert erfasst – in diesem Umfang mischt diese Summe Währungen. Erfassen Sie den fehlenden Kurs, bevor Sie sich darauf stützen.',
+	'dashboard.reporting.excluded':
+		'Nicht enthalten in {labels}: {n, plural, one {# Zahlung} other {# Zahlungen}} ohne Wechselkurs in {currency}, ausgelassen statt zum Nennwert erfasst – die angezeigten Zahlen unterschätzen daher den tatsächlichen Zahlungsfluss. Erfassen Sie den fehlenden Kurs für ein vollständiges Bild.',
 	'dashboard.vendorSpend.unconverted':
 		'Teilweise: {n, plural, one {# Rechnung} other {# Rechnungen}} ohne Wechselkurs in {currency}, zum Nennwert erfasst – diese Lieferanten sind daher nicht alle in derselben Währung gereiht. Betroffen: {vendors}. Erfassen Sie den fehlenden Kurs, bevor Sie sich auf die Reihenfolge stützen.',
 	'dashboard.aging.unconverted':
@@ -381,6 +393,8 @@ export const messages = {
 	'invoices.warning.priceVarianceUnder': 'Einzelpreis {deltaPct} unter der Referenz dieses Lieferanten für {item} ({unitPrice} statt {baselineUnitPrice})',
 	'invoices.warning.poNotFound': 'Bestellung {poNumber} nicht gefunden',
 	'invoices.warning.poAmountVariance': 'Betragsabweichung {variancePct} gegenüber Bestellung {poNumber} (Rechnung {invoiceAmount}, Bestellung {poTotal})',
+	'invoices.warning.poAmountVariancePoCurrencyUnknown': 'Betragsabweichung {variancePct} gegenüber Bestellung {poNumber}, für die keine Währung erfasst ist (Rechnung {invoiceAmount}, Bestellung {poTotal})',
+	'invoices.warning.poCurrencyMismatch': 'Die Rechnung lautet auf {invoiceCurrency}, Bestellung {poNumber} jedoch auf {poCurrency} — die Beträge wurden nicht verglichen',
 	'invoices.warning.poPartialReceipt': 'Teilweiser 3-Wege-Abgleich — {matchType}-Abgleich gegen Bestellung {poNumber}, es wurde jedoch nur ein Teil der bestellten Menge geliefert',
 	'invoices.warning.poOverReceipt': 'Überlieferung: {receivedQuantity} geliefert gegenüber {orderedQuantity} bestellt (+{excessQuantity}) bei Bestellung {poNumber}',
 	'invoices.warning.poOverReceiptUnquantified': 'Es wurden mehr Waren geliefert als bei Bestellung {poNumber} bestellt',
@@ -821,6 +835,18 @@ export const messages = {
 	'vendors.picker.listAria': 'Lieferanten',
 	'vendors.picker.unresolvedSelection':
 		'Es ist bereits ein Lieferant ausgewählt, dessen Name auf dieser Seite jedoch nicht verfügbar ist. Eine Auswahl hier ersetzt ihn.',
+	'invoices.picker.loading': 'Rechnungen werden geladen…',
+	'invoices.picker.loadFailed': 'Rechnungen konnten nicht geladen werden. Das bedeutet nicht, dass es keine gibt — bitte erneut versuchen.',
+	'invoices.picker.noMatches': 'Keine Rechnungen passen zu „{query}“',
+	'invoices.picker.showingAll': 'Alle Treffer angezeigt ({total})',
+	'invoices.picker.showingPartial': '{shown} von {total} Treffern angezeigt — tippen, um einzugrenzen',
+	'invoices.picker.refineHint': 'Es sind nicht alle Treffer aufgelistet',
+	'invoices.picker.loadMore': 'Mehr laden',
+	'invoices.picker.loadMoreFailed': 'Weitere konnten nicht geladen werden.',
+	'invoices.picker.clearAria': 'Ausgewählte Rechnung entfernen',
+	'invoices.picker.listAria': 'Rechnungen',
+	'invoices.picker.unresolvedSelection': 'Es ist bereits eine Rechnung ausgewählt, deren Nummer auf dieser Seite jedoch nicht verfügbar ist. Eine Auswahl hier ersetzt sie.',
+	'invoices.picker.leftToCredit': 'Noch {amount} gutschreibbar',
 	'vendors.changeRequests.navLabel': 'Bankänderungen',
 	'vendors.changeRequests.title': 'Freigaben für Bank- und Steuerdaten',
 	'vendors.changeRequests.intro':
@@ -1911,6 +1937,8 @@ export const messages = {
 	'cfoMetrics.accruals.received': 'Erhalten, nicht fakturiert',
 	'cfoMetrics.accruals.unposted': 'Nicht gebuchte Rechnungen',
 	'cfoMetrics.accruals.total': 'Gesamtabgrenzung',
+	'cfoMetrics.accruals.noCurrency':
+		'Bestellungen ohne erfasste Währung stehen in einer eigenen Zeile ohne Währungssymbol. Jede Währung wird für sich saldiert; die Zeilen werden nie addiert.',
 	'cfoMetrics.concentration.title': 'Lieferantenkonzentration',
 	'cfoMetrics.concentration.flagged': '⚠ {vendor} macht {pct}% der Ausgaben aus — Konzentrationsrisiko.',
 	'cfoMetrics.concentration.top10': 'Top 10 Lieferanten',
@@ -2982,7 +3010,7 @@ export const messages = {
 	'byEntity.unconvertedSpend':
 		'Ausgaben enthalten {n, plural, one {# Rechnung} other {# Rechnungen}} ohne festgelegten Wechselkurs in {currency}, zum Nennwert gezählt – die Summen mischen Währungen in diesem Umfang.',
 	'byEntity.openPoNoCurrency':
-		'Bestellungen erfassen noch keine Währung, daher werden offene Bestellungen ohne Währung angezeigt.',
+		'Für einige Bestellungen ist keine Währung erfasst; ihre offenen Beträge stehen in einer eigenen Zeile ohne Währungssymbol und werden nie zu einer anderen Währung addiert.',
 
 	// Geplante Berichte (components/analytics/ScheduledReportsPanel.svelte)
 	'scheduledReports.heading': 'Geplante Berichte',
@@ -3948,12 +3976,12 @@ export const messages = {
 	'workflows.builder.approval.approverAssignment': 'Zuweisung des Genehmigers',
 	'workflows.builder.approval.approvers': 'Genehmiger',
 	'workflows.builder.approval.autoApproveBelow': 'Automatisch genehmigen unter ({currency})',
-	'workflows.builder.approval.autoApproveBelowHint': 'Rechnungen unter diesem Betrag überspringen die Genehmigung vollständig. Verglichen wird der in {currency} umgerechnete Rechnungsbetrag – die Berichtswährung Ihrer Organisation.',
+	'workflows.builder.approval.autoApproveBelowHint': 'Rechnungen unter diesem Betrag überspringen die Genehmigung vollständig. Verglichen wird der in die Berichtswährung Ihrer Organisation umgerechnete Rechnungsbetrag.',
 	'workflows.builder.approval.autoWarning': 'Rechnungen werden ohne menschliche Prüfung automatisch genehmigt. Mit Vorsicht verwenden.',
 	'workflows.builder.approval.matrix': 'Genehmigungsmatrix',
-	'workflows.builder.approval.matrixHint': 'Definieren Sie eine oder mehrere Genehmigungsstufen. Jede Stufe kann nach Betrag oder Rechnungsattributen (Abteilung, Sachkonto, Lieferant) filtern und unterstützt parallele Genehmiger sowie zeitbasierte Eskalation. Beträge sind in {currency}, der Berichtswährung Ihrer Organisation.',
+	'workflows.builder.approval.matrixHint': 'Definieren Sie eine oder mehrere Genehmigungsstufen. Jede Stufe kann nach Betrag oder Rechnungsattributen (Abteilung, Sachkonto, Lieferant) filtern und unterstützt parallele Genehmiger sowie zeitbasierte Eskalation. Beträge sind in der Berichtswährung Ihrer Organisation angegeben.',
 	'workflows.builder.approval.maxInvoiceAmount': 'Maximaler Rechnungsbetrag ({currency})',
-	'workflows.builder.approval.maxInvoiceAmountHint': 'Rechnungen über diesem Betrag werden automatisch abgelehnt. Verglichen wird der in {currency} umgerechnete Rechnungsbetrag – die Berichtswährung Ihrer Organisation.',
+	'workflows.builder.approval.maxInvoiceAmountHint': 'Rechnungen über diesem Betrag werden automatisch abgelehnt. Verglichen wird der in die Berichtswährung Ihrer Organisation umgerechnete Rechnungsbetrag.',
 	'workflows.builder.approval.controlsTitle': 'Kontrollen',
 	'workflows.builder.approval.requireSegregation': 'Funktionstrennung verlangen',
 	'workflows.builder.approval.requireSegregationHint': 'Wer eine Rechnung hochgeladen hat, kann sie nicht selbst genehmigen. Empfohlen — die klassische Kreditoren-Betrugskontrolle.',
@@ -3963,7 +3991,7 @@ export const messages = {
 	'workflows.builder.approval.noMatchingUsers': 'Keine passenden Benutzer',
 	'workflows.builder.approval.removeApprover': 'Genehmiger {name} entfernen',
 	'workflows.builder.approval.requireCfoAbove': 'CFO-Genehmigung erforderlich über ({currency})',
-	'workflows.builder.approval.requireCfoAboveHint': 'Rechnungen über diesem Betrag müssen von einem Benutzer mit der CFO-Rolle genehmigt werden. Verglichen wird der in {currency} umgerechnete Rechnungsbetrag – die Berichtswährung Ihrer Organisation.',
+	'workflows.builder.approval.requireCfoAboveHint': 'Rechnungen über diesem Betrag müssen von einem Benutzer mit der CFO-Rolle genehmigt werden. Verglichen wird der in die Berichtswährung Ihrer Organisation umgerechnete Rechnungsbetrag.',
 	'workflows.builder.approval.required': 'Genehmigung erforderlich',
 	'workflows.builder.approval.roundRobinHint': '{count, plural, one {Rechnungen werden im Rundlaufverfahren dem # ausgewählten Genehmiger zugewiesen.} other {Rechnungen werden im Rundlaufverfahren den # ausgewählten Genehmigern zugewiesen.}}',
 	'workflows.builder.approval.searchUsers': 'Benutzer zum Hinzufügen suchen…',
@@ -4516,7 +4544,7 @@ export const messages = {
 	'creditMemos.applyModal.aria': 'Gutschrift anwenden',
 	'creditMemos.applyModal.hint': 'Wählen Sie eine Rechnung, auf die diese Gutschrift angewendet werden soll.',
 	'creditMemos.applyModal.invoice': 'Rechnung',
-	'creditMemos.applyModal.noEligible': 'Für diesen Lieferanten ist keine Rechnung verfügbar. Eine Rechnung kann erst gutgeschrieben werden, wenn ihr Lieferant zugeordnet ist — öffnen Sie die Rechnung und speichern Sie den Lieferanten erneut.',
+	'creditMemos.applyModal.noEligible': 'Keine Rechnung kann diese Gutschrift aufnehmen. Infrage kommt nur eine noch nicht bezahlte oder abgeschlossene Rechnung dieses Lieferanten in der Währung der Gutschrift, bei der noch mindestens ihr Betrag nicht gutgeschrieben ist. Eine Rechnung ohne zugeordneten Lieferanten kommt infrage, sobald Sie sie öffnen und den Lieferanten erneut speichern.',
 	'creditMemos.applyModal.selectInvoice': 'Rechnung auswählen…',
 	'creditMemos.applyModal.title': 'Gutschrift anwenden',
 	'creditMemos.col.amount': 'Betrag',
@@ -4538,6 +4566,7 @@ export const messages = {
 	'creditMemos.createModal.invoiceNeedsVendor': 'Wählen Sie einen Lieferanten, um seine Rechnungen zu sehen.',
 	'creditMemos.createModal.memoNumber': 'Gutschriftnummer',
 	'creditMemos.createModal.noInvoice': 'Noch nicht anwenden',
+	'creditMemos.createModal.noEligibleInvoice': 'Keine Rechnung dieses Lieferanten kann diese Gutschrift aufnehmen — jede ist bereits bezahlt oder abgeschlossen, bei ihr ist nicht mehr genug offen, oder ihr Lieferant ist noch nicht zugeordnet (öffnen Sie die Rechnung und speichern Sie den Lieferanten erneut).',
 	'creditMemos.createModal.reason': 'Grund',
 	'creditMemos.createModal.reasonPlaceholder': 'z. B. Mangelhafte Ware zurückgegeben',
 	'creditMemos.createModal.selectVendor': 'Lieferant auswählen…',
@@ -5188,6 +5217,7 @@ export const messages = {
 	'invoices.modal.noPdf': 'Kein PDF angehängt',
 	'invoices.modal.pdfTitle': 'Rechnungs-PDF — {number}',
 	'invoices.modal.poMatch.accepted': '{qty} angenommen',
+	'invoices.modal.poMatch.currencyUnknown': 'Für diese Bestellung ist keine Währung erfasst; ihr Gesamtbetrag wurde daher zum Nennwert mit der Rechnung verglichen.',
 	'invoices.modal.poMatch.failed': 'Nicht bestanden',
 	'invoices.modal.poMatch.matched': 'Abgeglichen',
 	'invoices.modal.poMatch.mismatch': 'Abweichung',

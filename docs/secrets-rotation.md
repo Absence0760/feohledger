@@ -114,7 +114,7 @@ Tenant admin self-serves rotation by re-calling `POST /api/organization/sso/scim
 
 ### Per-tenant OIDC client secret
 
-Tenant admin updates the secret in their Okta/Entra app, then PATCHes `org.settings.sso.client_secret` via `PATCH /api/organization`. SSO handshakes after the change use the new secret. **No grace period** — coordinate with the IdP cutover.
+Tenant admin updates the secret in their Okta/Entra app, then PATCHes `org.settings.sso.client_secret` via `PATCH /api/organization`. The merge is per top-level key, so the PATCH must carry the **whole** `sso` block with the new secret in it: a body holding only `client_secret` replaces the block, dropping the rest of the IdP config along with `enabled` and `sso_only`, which switches SSO off. A whole block that keeps `enabled` and `sso_only` but is missing an IdP key is refused with a `422` naming it (`docs/authentication.md` § SSO-only mode). SSO handshakes after the change use the new secret. **No grace period** — coordinate with the IdP cutover.
 
 ### Per-subscription outbound-webhook signing secret
 

@@ -948,3 +948,29 @@ def test_cash_position_money_is_decimal():
     assert isinstance(rows[0]["opening"], Decimal)
     assert isinstance(rows[0]["closing"], Decimal)
     assert isinstance(rows[0]["outflow"], Decimal)
+
+
+def test_accruals_by_currency_net_each_currency_within_itself():
+    """A currency present in any leg gets a row with zeros for the legs it is
+    absent from; each row's total is its own open + received − unposted; the
+    unknown-currency row (None) sorts last (decisions §197)."""
+    from app.services.analytics import compute_accruals_by_currency
+
+    rows = compute_accruals_by_currency(
+        open_po_amounts={"USD": Decimal("5000"), None: Decimal("700"), "EUR": Decimal("3000")},
+        received_amounts={"EUR": Decimal("1500")},
+        unposted_invoice_amounts={"USD": Decimal("1000"), "GBP": Decimal("40.5")},
+    )
+    assert [r.currency for r in rows] == ["EUR", "GBP", "USD", None]
+    by_code = {r.currency: r for r in rows}
+    assert by_code["EUR"].total_accrual == Decimal("4500.00")
+    assert by_code["GBP"].open_po_amount == Decimal("0.00")
+    assert by_code["GBP"].total_accrual == Decimal("-40.50")
+    assert by_code["USD"].total_accrual == Decimal("4000.00")
+    assert by_code[None].total_accrual == Decimal("700.00")
+    assert (
+        compute_accruals_by_currency(
+            open_po_amounts={}, received_amounts={}, unposted_invoice_amounts={}
+        )
+        == []
+    )

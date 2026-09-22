@@ -45,6 +45,7 @@ Map<String, dynamic> _invoiceJson(
   String? poNumber,
   String? description,
   String? fileUrl,
+  String? glAccount,
   List<Map<String, dynamic>>? warnings,
   Map<String, dynamic>? poMatch,
 }) =>
@@ -58,6 +59,7 @@ Map<String, dynamic> _invoiceJson(
       'po_number': poNumber,
       'description': description,
       'file_url': fileUrl,
+      'gl_account': glAccount,
       'warnings': warnings,
       'po_match': poMatch,
       'created_at': '2026-01-01T12:00:00',
@@ -546,6 +548,49 @@ void main() {
     expect(find.text('Invoice updated'), findsOneWidget);
   });
 
+  testWidgets('a refused edit shows the server\'s sentence, not "try again"',
+      (tester) async {
+    // The server refuses a GL code outside the invoice's chart (decisions
+    // §199). The sheet's GL field is free text, so this is where a mistyped
+    // code lands — and the user needs to be told WHICH code and why, since
+    // retrying the same save can only be refused again.
+    const refusal = "GL account '9999' is not in this invoice's chart of "
+        "accounts. Choose an active code from the invoice's own chart — the "
+        "shared accounts plus its entity's own.";
+    Map<String, dynamic>? sentBody;
+    final client = _detailClient(
+      _invoiceJson('1', status: 'ready_for_review', glAccount: '6100'),
+      onPatch: (req) {
+        sentBody = jsonDecode(req.body) as Map<String, dynamic>;
+        return http.Response(
+          jsonEncode({'detail': refusal}),
+          422,
+          headers: {'content-type': 'application/json'},
+        );
+      },
+    );
+    ApiClient().debugConfigure(client: client);
+    await AuthStore.instance.login('demo@acme.com', 'demo', 'acme');
+
+    await tester.pumpWidget(_localized());
+    await _pumpUntil(tester, find.byTooltip('Edit'));
+    await tester.tap(find.byTooltip('Edit'));
+    await tester.pumpAndSettle();
+
+    await tester.enterText(find.widgetWithText(TextFormField, '6100'), '9999');
+    await tester.ensureVisible(find.widgetWithText(FilledButton, 'Save'));
+    await tester.tap(find.widgetWithText(FilledButton, 'Save'));
+    await _pumpUntil(tester, find.textContaining("GL account '9999'"));
+
+    expect(
+      sentBody,
+      {'gl_account': '9999'},
+      reason: 'only the changed field is sent',
+    );
+    expect(find.text('Could not save changes: $refusal'), findsOneWidget);
+    expect(find.textContaining('ApiException'), findsNothing);
+  });
+
   testWidgets('the edit sheet sends the amount as a string-Decimal',
       (tester) async {
     Map<String, dynamic>? sentBody;
@@ -780,7 +825,7 @@ void main() {
       poMatch: {
         'match_type': '3-way',
         'status': 'mismatch',
-        'variance_pct': 8.0,
+        'amount_variance_pct': 8.0,
         'within_tolerance': false,
         'issues': ['Amount variance of 8.0%'],
       },
@@ -794,6 +839,8 @@ void main() {
     expect(find.text('PO Match'), findsOneWidget);
     expect(find.text('3-way match'), findsOneWidget);
     expect(find.text('Mismatch'), findsOneWidget);
+    // Read off `amount_variance_pct`, the key the matcher actually writes.
+    expect(find.text('+8.0% variance'), findsOneWidget);
   });
 
   testWidgets('shows ERP status derived from the audit log', (tester) async {

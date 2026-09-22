@@ -357,9 +357,9 @@ user could pick subsidiary B's `6000` for a subsidiary-A invoice, every manual
 write accepted it, and the stored string `"6000"` then resolved against A's
 chart. Both halves are now closed.
 
-- **The server refuses it.** `services/gl_chart.refuse_foreign_gl_codes` 422s a
-  code that exists ONLY in another entity's chart, on every path that writes the
-  column: `POST /api/invoices` (against the entity the invoice will be filed
+- **The server refuses it.** `services/gl_chart.refuse_gl_codes_outside_chart`
+  422s a code that exists ONLY in another entity's chart, on every path that
+  writes the column: `POST /api/invoices` (against the entity the invoice will be filed
   under — the selection, else the default), `PATCH /api/invoices/{id}` and
   `PUT …/line-items` (against the invoice's own `entity_id`, never the sidebar
   selection), approve-with-corrections (so the GL-coding exception agent too —
@@ -382,10 +382,38 @@ chart. Both halves are now closed.
   the frontend mirror of `get_write_entity_id`). A NULL-entity invoice sees the
   shared chart alone, the rule `gl_recode._ActiveChart` already applied.
 
-What is deliberately NOT refused here is a code in **no** chart (hand-typed, or
-on a retired account): that question has its own trade-offs — a historical CSV
-import carries codes whose accounts are long gone — and is tracked separately in
-`docs/followups.md`. See `docs/decisions.md` §194.
+See `docs/decisions.md` §194.
+
+#### …and be an active account of it, whenever that chart has any
+
+§194 deliberately left one question open: a code in **no** chart (mistyped, or
+hand-typed through the API) or on a **retired** account still wrote, although
+extraction and bulk re-code already refused both for the codes they choose. The
+same rule now holds every manual write (`docs/decisions.md` §199):
+
+- **An active account of the invoice's chart, whenever that chart has any.**
+  The effective ACTIVE chart is active shared accounts ∪ the invoice's entity's
+  own — exactly what `GET /api/gl-accounts?chart_entity_id=` serves the pickers,
+  so the server refuses what a `<select>` would not have offered. Every path
+  §194 covers refuses a retired or unknown code the same way, and the 422 names
+  each code with its reason (another entity's / retired / not in the chart).
+- **An empty active chart holds nothing to.** A subsidiary whose chart is not
+  built yet (no active own account, no active shared one) accepts any code
+  except another entity's, as before — the pickers are free text there too.
+- **Only a code the request sets or changes is judged.** An invoice coded
+  before its account was retired stays editable: an edit that leaves the GL
+  field alone or echoes its value back, a line carried through the line-items
+  replace, and an approval without a GL correction all go through.
+- **CSV history is exempt.** A `done` / `paid` import row may carry a retired or
+  unknown code (only another entity's is refused); a `new` or `rejected` row
+  reaches approval and takes the full rule. See `backend/docs/csv-import.md`.
+- **The modal never re-uses a code the chart no longer offers.** A line
+  carrying a since-retired code shows it as its own option (as the header
+  already did) rather than rendering blank while re-saving it, and a new line
+  inherits the header's code only when the line picker offers it — otherwise
+  the save was refused naming a code the user could not see
+  (`tests-e2e/invoices/gl-retired-code.spec.ts`). The coding-suggestion panel
+  drops a GL suggestion the save would refuse, for the same reason.
 
 ### Per-entity workflow selection
 
@@ -419,7 +447,11 @@ Segregation of duties is **not** scoped by entity: the router is the mirror's
 uploader, and everyone implicated in the source payable (its uploader and its
 `segregation_actor_ids`) is carried onto the mirror's `segregation_actor_ids`,
 so shaping a payable under one entity bars you from signing its mirror under
-another (`docs/decisions.md` §192).
+another (`docs/decisions.md` §192). Mirrors routed before that rule were brought
+into line by migration `0100_mirror_implicated_backfill`, which tells the mirror
+from its origin by the `role: mirror` routing audit row — the FK is set on both
+rows and the entity columns are symmetric, so neither can — and covers every
+mirror short of `done` (`docs/decisions.md` §198).
 It is **idempotent** on `intercompany_mirror_id` — a second call returns the
 existing mirror, never a duplicate. Surfaced at `POST
 /api/invoices/{id}/route-intercompany` (admin / ap_manager; self-billing → 400).

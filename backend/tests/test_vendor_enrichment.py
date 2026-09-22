@@ -18,6 +18,8 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
+import pytest
+
 from app.services.vendor_enrichment import (
     FieldSuggestion,
     PriceVarianceFlag,
@@ -441,6 +443,48 @@ async def test_suggestions_endpoint_happy_path(realdb):
     assert pv["baseline_unit_price"] == "10.00"
     assert pv["delta_pct"] == "30.0"
     assert pv["severity"] == "warning"
+
+
+@pytest.mark.parametrize(
+    ("dominant", "chart", "suggested"),
+    [
+        # An active account of the invoice's chart: offered.
+        ("6000", [("6000", True)], True),
+        # Retired since the vendor was coded to it: a save would refuse it.
+        ("6000", [("6000", False), ("7000", True)], False),
+        # In no chart while the chart has active accounts: refused on save.
+        ("6000", [("7000", True)], False),
+    ],
+)
+async def test_gl_suggestion_is_only_offered_when_a_save_would_accept_it(
+    realdb, dominant, chart, suggested
+):
+    """The suggestion is applied into the form and then SAVED, and the save
+    holds the code to the invoice's chart (`services/gl_chart`, decisions
+    §199). A suggestion the save would refuse is advice the reviewer cannot
+    take — so it is not offered. The other fields' suggestions are unaffected."""
+    from app.models.gl_account import GLAccount
+
+    mk = realdb.sessionmaker("a")
+    org_id = realdb.info("a").org_id
+    actor_id = realdb.info("a").users["ap_manager"]
+    async with mk() as s:
+        s.add_all(
+            [
+                GLAccount(organization_id=org_id, code=code, name=code, is_active=active)
+                for code, active in chart
+            ]
+        )
+        await s.commit()
+    vid = await _seed_vendor_with_history(mk, org_id, actor_id, gl=dominant)
+    draft_id = await _seed_draft(mk, org_id, vendor_id=vid, vendor_name="Acme Supplies")
+
+    async with realdb.client(key="a", role="ap_clerk") as client:
+        r = await client.get(f"/api/enrichment/invoices/{draft_id}/suggestions")
+    assert r.status_code == 200, r.text
+    fields = {f["field"]: f["value"] for f in r.json()["field_suggestions"]}
+    assert (fields.get("gl_account") == dominant) is suggested, fields
+    assert fields.get("payment_terms") == "NET30"
 
 
 async def test_suggestions_vendorless_draft_empty(realdb):

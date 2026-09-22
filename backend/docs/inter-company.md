@@ -79,9 +79,45 @@ freshly provisioned tenants (`create_all`, not Alembic) get it as well.
    at routing time like every implicated set, and NULL (never `[]`) when nobody
    is left. So the employee who uploaded or shaped the source payable cannot
    approve its mirror under the counterparty entity, while anyone with no hand in
-   either still can. Reasoning: `docs/decisions.md` §192.
+   either still can. The rule is one function, `inherited_actor_ids(source,
+   uploader_id=…)`, so the backfill below can be checked against it. Reasoning:
+   `docs/decisions.md` §192.
 4. **Audit** — a PII-free `invoice.intercompany_routed` row on **both** invoices
-   (ids + entity ids only) via `dispatch_audit`.
+   (ids + entity ids only) via `dispatch_audit`. The mirror's row carries
+   `role: "mirror"` and `origin_invoice_id`, and its `actor_id` is the router —
+   the only durable record of which side of a pair is the mirror.
+
+### Mirrors routed before §192 — migration `0100`
+
+A mirror routed before step 3 carried its set has none: SQL NULL if it predates
+migration `0097`, JSON `null` if it was routed between `0097` and §192 (a Python
+`None` on a `JSONB` column persists as JSON `null`, not SQL NULL — so an
+`IS NULL` test alone would have missed every one of them). One routed before
+§131 has no uploader either. `0100_mirror_implicated_backfill` (tenant-only,
+idempotent, one statement) gives each exactly what routing gives one today:
+
+- **Pairing and orientation come from the routing record.** The FK is set on
+  both rows and `entity_id` / `counterparty_entity_id` swap between them, so
+  neither says which is the mirror; `invoice_number` does (`IC-` + the origin's)
+  but is editable. The migration reads the `role: "mirror"` routing audit row —
+  append-only (`0022`), written in the routing transaction — and still requires
+  the two rows to point at each other.
+- **Uploader** — the mirror's own if set, else the routing row's `actor_id`.
+- **Set** — `inherited_actor_ids(source, uploader_id=<that uploader>)`, stated
+  in SQL as `INHERITED_SET_SQL`; only where the mirror's set is SQL NULL, JSON
+  `null` or `[]`. A non-empty set is never touched.
+- **Every status with a successor** in `VALID_TRANSITIONS` — today everything
+  but `done`. Not only mirrors awaiting approval: the set also gates clearing a
+  payment-blocking exception (§169), which only matters after approval, and
+  `paid` can be voided back to `approved`.
+- **An `invoice.segregation_backfilled` audit row** per mirror changed, on the
+  mirror's correlation id, `actor_id` NULL, `details = {revision,
+  origin_invoice_id, changes: {column: {old, new}}}` — so a pre-backfill
+  approval by someone now in the set reads as what it was.
+
+`downgrade` is a no-op: the schema is unchanged, and undoing the data would
+re-open the hole while leaving the audit rows describing a state that no longer
+holds. Reasoning: `docs/decisions.md` §198.
 
 ## API (`app/api/invoices.py`)
 
@@ -177,3 +213,18 @@ a direct repeat POST still yields exactly one mirror; plus a clerk 403).
   refused the mirror's approval (403) while an uninvolved approver succeeds; a
   source's own `segregation_actor_ids` member is refused too; a router who
   uploaded the source is named once, as the mirror's uploader
+- migration `0100` — each test routes a real mirror (so its routing audit rows
+  are genuine), rewinds it to a legacy shape and runs the migration's own SQL:
+  a JSON-`null` mirror ends up exactly as routing leaves one today and its
+  source's uploader gets a 403; a pre-§131 mirror gets its router from the
+  routing row; a router who uploaded the source is named once; a non-empty set,
+  a `done` mirror and a source with nobody implicated are left alone while every
+  other status is stamped (an approved mirror's source uploader can no longer
+  clear a `fraud_flag`); the origin, an ordinary invoice and a hand-linked pair
+  with no routing row are never touched, and a renamed mirror is still found;
+  a re-run writes nothing; the real `upgrade()` runs on a tenant and no-ops on
+  the control plane. `INHERITED_SET_SQL` is evaluated against
+  `inherited_actor_ids` / `implicated_actors` over every stored shape, the
+  terminal-status literal is re-derived from `VALID_TRANSITIONS`, and an AST pin
+  fails if `implicated_actors` starts reading a third column the backfill never
+  copied

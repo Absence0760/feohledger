@@ -187,7 +187,7 @@ async def test_amount_mismatch_apply_forwards_real_roles_not_fabricated():
         rationale="ok",
         changes={"amount": {"old": "95.00", "new": "100.00"}},
     )
-    match = SimpleNamespace(status="matched", po_total=Decimal("100.00"))
+    match = SimpleNamespace(status="matched", po_total=Decimal("100.00"), currency_check="same")
 
     captured: dict = {}
 

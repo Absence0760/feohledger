@@ -13,9 +13,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.exception import Exception as APException
 from app.models.invoice import Invoice, InvoiceStatus
+from app.models.procurement import po_currency_code
 from app.services.invoice_warning_catalog import warning
 from app.services.matching_rules import resolve_match_rule
-from app.services.po_matching import format_quantity, match_invoice_to_po
+from app.services.po_matching import (
+    CURRENCY_DIFFERENT,
+    CURRENCY_UNKNOWN,
+    format_quantity,
+    match_invoice_to_po,
+)
 from app.utils.dates import utc_today
 
 logger = logging.getLogger(__name__)
@@ -932,25 +938,69 @@ async def _refresh_po_match(
             f"Invoice references PO {invoice.po_number} but no matching PO exists",
             org_settings=org_settings,
         )
-    elif match.status == "mismatch":
-        # Lead with the most useful number — variance %.
+    elif match.status == "mismatch" and match.currency_check == CURRENCY_DIFFERENT:
+        # The currency guard tripped: the two are in different currencies, so
+        # the matcher compared nothing and there is no variance to state. Same
+        # severity and exception type as an out-of-tolerance amount — it is the
+        # same control failing, on the unit instead of the figure.
         flag = warning(
-            "po_amount_variance",
+            "po_currency_mismatch",
             "warning",
-            variancePct=f"{match.amount_variance_pct:+.1f}",
+            invoiceCurrency=po_currency_code(invoice.currency) or "",
             poNumber=match.po_number,
-            invoiceAmount=invoice.amount,
-            poTotal=match.po_total,
-            currency=invoice.currency,
+            poCurrency=match.po_currency or "",
         )
         msg = flag["message"]
         warnings.append(flag)
         await _ensure_exception(
             db, invoice, "po_mismatch", "warning", msg, org_settings=org_settings
         )
-    elif match.status == "partial":
+    elif (
+        match.status == "mismatch"
+        and not match.within_tolerance
+        and match.amount_variance_pct is not None
+    ):
+        # Keyed on the AMOUNT leg, not on `status` alone: the 4-way leg sets
+        # `mismatch` too, and a failed inspection on an in-tolerance invoice
+        # used to raise "Amount variance +0.0%" and a po_mismatch exception
+        # beside the quality hold that was the real finding.
+        #
+        # Lead with the most useful number — variance %. A PO that records no
+        # currency was compared at face value, and its figure must not borrow
+        # the invoice's label — that sentence is its own code.
+        common = {
+            "variancePct": f"{match.amount_variance_pct:+.1f}",
+            "poNumber": match.po_number,
+            "invoiceAmount": invoice.amount,
+            "currency": invoice.currency,
+        }
+        if match.currency_check == CURRENCY_UNKNOWN:
+            flag = warning(
+                "po_amount_variance_po_currency_unknown",
+                "warning",
+                poTotal=f"{match.po_total:.2f}",
+                **common,
+            )
+        else:
+            flag = warning("po_amount_variance", "warning", poTotal=match.po_total, **common)
+        msg = flag["message"]
+        warnings.append(flag)
+        await _ensure_exception(
+            db, invoice, "po_mismatch", "warning", msg, org_settings=org_settings
+        )
+    elif (
+        match.status == "partial"
+        and match.ordered_quantity is not None
+        and match.received_quantity is not None
+        and match.received_quantity < match.ordered_quantity
+    ):
         # Partial 3-way receipt — informational. Reviewer needs to know but
         # it's not an error; goods may be in transit.
+        #
+        # Keyed on the RECEIPT leg: a partial quality acceptance also sets
+        # `partial`, on goods that all arrived, and this sentence would then
+        # claim "only part of the ordered quantity has been received". The
+        # inspection block below raises that finding in its own words.
         flag = warning(
             "po_partial_receipt",
             "info",

@@ -1,4 +1,9 @@
 import { API_BASE, authedTenantHeaders, expect, signInAndWait, test } from '../fixtures/helpers';
+// A VALUE import, allowed because the module is pure by design and says so (no
+// `$env`, no `$app`, no imports at all) — the `frontend/CLAUDE.md` exception
+// `auth/rbac.spec.ts` established. The test computes the expected label with the
+// resolver the store uses rather than re-typing the rung order.
+import { resolveReportingCurrency } from '$lib/utils/reportingCurrency';
 
 interface OrgResponse {
 	id: string;
@@ -157,6 +162,18 @@ test.describe('/organization settings', () => {
 
 			const after = await getOrg(page);
 			expect(after.settings.invoice_defaults?.currency).toBe(next);
+
+			// `invoice_defaults.currency` is a rung of the reporting-currency
+			// chain, and the `orgCurrency` store is session-cached — so the label
+			// on this same page that names that currency has to follow the save,
+			// not keep naming the answer from before it until a reload
+			// (decisions §200). Computed with the store's own resolver, so a
+			// tenant carrying a higher rung expects that rung instead.
+			const expected = resolveReportingCurrency(after.settings);
+			expect(expected).not.toBeNull();
+			await expect(page.locator('#org-payments')).toContainText(
+				`CFO sign-off threshold (${expected})`
+			);
 		} finally {
 			await patchOrg(page, {
 				settings: {

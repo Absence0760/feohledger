@@ -113,9 +113,11 @@
 		// amount bands are BARE NUMBERS denominated in the org's reporting
 		// currency — the backend converts each invoice into it before comparing
 		// (`approval_chain.reporting_gate_amount`). Nothing in the input says so,
-		// so the labels name the code, resolved from the same store `/cfo` and
-		// `/discounts` use rather than assuming dollars. Until it loads the store
-		// holds the platform default, so the field is never unlabelled.
+		// so the labels name the code, resolved from the `orgCurrency` store
+		// rather than assuming dollars. Until it resolves — or when the org sets
+		// nothing the client can read — `orgCurrency.label` names the concept
+		// ("reporting currency") instead of guessing a code (decisions §200), so
+		// the field is never unlabelled and never mislabelled.
 		orgCurrency.ensureLoaded();
 	});
 
@@ -595,7 +597,7 @@
 								<div class="field">
 									<label for="approval-matrix">{m('workflows.builder.approval.matrix')}</label>
 									<p class="field-hint">
-										{m('workflows.builder.approval.matrixHint', { currency: orgCurrency.currency })}
+										{m('workflows.builder.approval.matrixHint')}
 									</p>
 									<ApprovalMatrixEditor
 										chain={cfg.approval_chain ?? []}
@@ -610,7 +612,7 @@
 							<h4 class="field-section-title">{m('workflows.builder.approval.thresholdsTitle')}</h4>
 
 							<div class="field">
-								<label for="auto-approve-below">{m('workflows.builder.approval.autoApproveBelow', { currency: orgCurrency.currency })}</label>
+								<label for="auto-approve-below">{m('workflows.builder.approval.autoApproveBelow', { currency: orgCurrency.label })}</label>
 								<input
 									id="auto-approve-below"
 									type="number"
@@ -620,11 +622,11 @@
 									value={cfg.auto_approve_below ?? ''}
 									oninput={(e) => updateStepConfig(selectedIndex, 'auto_approve_below', e.currentTarget.value.trim() || null)}
 								/>
-								<p class="field-hint">{m('workflows.builder.approval.autoApproveBelowHint', { currency: orgCurrency.currency })}</p>
+								<p class="field-hint">{m('workflows.builder.approval.autoApproveBelowHint')}</p>
 							</div>
 
 							<div class="field">
-								<label for="require-cfo-above">{m('workflows.builder.approval.requireCfoAbove', { currency: orgCurrency.currency })}</label>
+								<label for="require-cfo-above">{m('workflows.builder.approval.requireCfoAbove', { currency: orgCurrency.label })}</label>
 								<input
 									id="require-cfo-above"
 									type="number"
@@ -634,11 +636,11 @@
 									value={cfg.require_cfo_above ?? ''}
 									oninput={(e) => updateStepConfig(selectedIndex, 'require_cfo_above', e.currentTarget.value.trim() || null)}
 								/>
-								<p class="field-hint">{m('workflows.builder.approval.requireCfoAboveHint', { currency: orgCurrency.currency })}</p>
+								<p class="field-hint">{m('workflows.builder.approval.requireCfoAboveHint')}</p>
 							</div>
 
 							<div class="field">
-								<label for="max-invoice-amount">{m('workflows.builder.approval.maxInvoiceAmount', { currency: orgCurrency.currency })}</label>
+								<label for="max-invoice-amount">{m('workflows.builder.approval.maxInvoiceAmount', { currency: orgCurrency.label })}</label>
 								<input
 									id="max-invoice-amount"
 									type="number"
@@ -648,7 +650,7 @@
 									value={cfg.max_invoice_amount ?? ''}
 									oninput={(e) => updateStepConfig(selectedIndex, 'max_invoice_amount', e.currentTarget.value.trim() || null)}
 								/>
-								<p class="field-hint">{m('workflows.builder.approval.maxInvoiceAmountHint', { currency: orgCurrency.currency })}</p>
+								<p class="field-hint">{m('workflows.builder.approval.maxInvoiceAmountHint')}</p>
 							</div>
 
 							<div class="field-divider"></div>

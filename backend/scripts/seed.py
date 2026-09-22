@@ -1127,10 +1127,14 @@ async def seed_tenant(db_name: str, org_id: uuid.UUID, tenant_label: str):
         session.add_all(audit_entries)
         await session.flush()
 
-        # Purchase Orders — linked to vendors, some match invoices
+        # Purchase Orders — linked to vendors, some match invoices. USD because the
+        # invoices raised against them are; every PO states its currency, since
+        # `po_matching` compares an invoice to its PO only when the two agree
+        # (decisions §197).
         po1 = PurchaseOrder(
             organization_id=org_id,
             po_number="PO-2024-100",
+            currency="USD",
             vendor_id=v_office.id,
             total=Decimal("1250.00"),
             status="open",
@@ -1138,6 +1142,7 @@ async def seed_tenant(db_name: str, org_id: uuid.UUID, tenant_label: str):
         po2 = PurchaseOrder(
             organization_id=org_id,
             po_number="PO-2024-101",
+            currency="USD",
             vendor_id=v_cloud.id,
             total=Decimal("8500.00"),
             status="open",
@@ -1145,6 +1150,7 @@ async def seed_tenant(db_name: str, org_id: uuid.UUID, tenant_label: str):
         po3 = PurchaseOrder(
             organization_id=org_id,
             po_number="PO-2024-102",
+            currency="USD",
             vendor_id=v_facility.id,
             total=Decimal("3000.00"),
             status="open",
@@ -1152,6 +1158,7 @@ async def seed_tenant(db_name: str, org_id: uuid.UUID, tenant_label: str):
         po4 = PurchaseOrder(
             organization_id=org_id,
             po_number="PO-2024-104",
+            currency="USD",
             vendor_id=v_tech.id,
             total=Decimal("12000.00"),
             status="open",
@@ -1159,6 +1166,7 @@ async def seed_tenant(db_name: str, org_id: uuid.UUID, tenant_label: str):
         po5 = PurchaseOrder(
             organization_id=org_id,
             po_number="PO-2024-107",
+            currency="USD",
             vendor_id=v_transport.id,
             total=Decimal("6300.00"),
             status="open",
@@ -2121,6 +2129,7 @@ async def seed_tenant_lean(db_name: str, org_id: uuid.UUID, tenant_label: str):
             po = PurchaseOrder(
                 organization_id=org_id,
                 po_number="LEAN-PO-001",
+                currency="USD",
                 vendor_id=v_alpha.id,
                 total=Decimal("500.00"),
                 status="open",

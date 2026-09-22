@@ -11,10 +11,13 @@ the invoice row lock in ``apply`` — rather than trusting the (possibly stale)
 ``invoice.po_match`` JSONB snapshot. Only a live ``status == "matched"`` is
 auto-fixable; a ``partial`` 3-way receipt (goods not fully received) escalates.
 
-Currency note: the schema gives a ``PurchaseOrder`` no currency of its own —
-its ``total`` is denominated in the invoice's currency — so there is no
-cross-currency comparison to make here. If per-PO currency is ever added, this
-resolver must gate on ``invoice.currency == po.currency`` before adjusting.
+Currency: since migration 0099 a ``PurchaseOrder`` records its own currency,
+and this resolver only ever snaps an invoice to a PO total the matcher has
+proven is in the SAME currency (``match.currency_check == "same"``). Different
+currencies are already a ``mismatch`` (so never reach here as ``matched``); a PO
+that records NO currency was compared at face value, which a human reviewer may
+accept but an agent that rewrites the invoice amount must not — it escalates
+(decisions §197).
 """
 
 from __future__ import annotations
@@ -36,6 +39,7 @@ from app.services.exception_agents.base import (
     ExceptionResolver,
 )
 from app.services.exception_agents.llm_rationale import build_rationale
+from app.services.po_matching import CURRENCY_SAME
 
 # Default auto-fix tolerance. The PO-matcher's own warning tolerance is 5%
 # (po_matching); the AGENT only auto-fixes a *tighter* band so it never
@@ -100,6 +104,20 @@ class AmountMismatchResolver(ExceptionResolver):
                 rationale=(
                     f"PO match status is '{match_status or 'unknown'}', not a clean "
                     "amount-only variance; escalating to a human."
+                ),
+            )
+
+        # Snapping the invoice to the PO total asserts the two are in one
+        # currency. A PO that records none cannot prove it, and a figure moved
+        # on an assumption is the failure this whole control exists to stop.
+        if match.currency_check != CURRENCY_SAME:
+            return AgentEvaluation(
+                recommended_action=ACTION_ESCALATED,
+                confidence=_ZERO,
+                rationale=(
+                    "The purchase order records no currency, so the invoice cannot be "
+                    "proven to be in the same currency as the PO total; escalating to a "
+                    "human rather than adjusting the amount."
                 ),
             )
 
@@ -223,7 +241,11 @@ class AmountMismatchResolver(ExceptionResolver):
         # mutating money; otherwise bail so the coordinator escalates rather
         # than approving against a number that moved underneath us.
         recheck = await match_invoice_to_po(db, locked)
-        if recheck.status != "matched" or recheck.po_total is None:
+        if (
+            recheck.status != "matched"
+            or recheck.po_total is None
+            or recheck.currency_check != CURRENCY_SAME
+        ):
             raise _NotApprovable(locked.status)
         live_po_total = Decimal(str(recheck.po_total)).quantize(Decimal("0.01"))
         if live_po_total != new_amount:

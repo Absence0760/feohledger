@@ -226,7 +226,11 @@ GET /api/budgets/rollup?dimension=&period=&search=
 
 Every spend leg is scoped by currency (the legs never convert), so a
 requisition, PO or invoice denominated in another currency than its budget is
-**excluded** from `committed` / `actual`. That is the right call — summing
+**excluded** from `committed` / `actual`. The PO leg reads the PO's **own**
+`currency` (migration 0099) — the code its `total` is in — rather than the
+requisition's it was converted from; the two agree unless something
+re-denominated the PO afterwards, and then the PO's label is the true one
+(`docs/decisions.md` §197). That is the right call — summing
 unlike face values would be worse — but a figure that quietly left rows out
 reads exactly like a complete one.
 

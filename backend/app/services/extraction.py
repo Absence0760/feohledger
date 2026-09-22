@@ -112,7 +112,13 @@ def _resolve_extraction_config(org_settings: dict | None, *, announce: bool = Tr
     program_type = extraction.get("program_type", "platform")
 
     if program_type == "byok":
-        return extraction
+        # A COPY: `run_extraction` writes this invoice's `gl_account_catalog`
+        # and RAG `few_shot_prompt` into the config it gets back, and handing
+        # out the org's own nested dict wrote them into `org_settings` — so a
+        # caller reusing that dict for a second extraction sent the previous
+        # invoice's chart (another entity's, possibly) and neighbours as this
+        # one's hints whenever this one had none of its own to overwrite them.
+        return dict(extraction)
 
     # Platform mode — use app-level keys
     provider, reason = resolve_platform_provider(
@@ -487,10 +493,32 @@ async def run_extraction(
         )
         gl_accounts = gl_result.scalars().all()
         # Set of valid codes used post-extraction to validate AI suggestions
-        # against the org's actual chart. Empty when the org hasn't synced
-        # any GL accounts yet \u2014 in that mode we accept whatever the AI
-        # produces (since there's nothing to validate against).
+        # against the invoice's actual chart. Empty when that chart has no
+        # active account yet — in that mode there is no membership to
+        # check, and see `gl_code_refused` below for what is still refused.
         active_gl_codes: set[str] = {gl.code for gl in gl_accounts}
+        tenant_chart_ownership = None
+
+        async def gl_code_refused(code: str) -> bool:
+            """Whether an automated GL code may NOT land on this invoice.
+
+            With an active chart, anything outside it (unknown, retired, or
+            another entity's). With none, only a code that belongs to ANOTHER
+            entity's chart — never right for this invoice whether or not
+            its own chart has been synced yet (decisions §194/§199).
+            That branch reads the tenant's whole chart ownership once, lazily:
+            the vendor-prior overlay lands a code only after the document's
+            own codes were judged, so the codes cannot be listed up front.
+            """
+            nonlocal tenant_chart_ownership
+            if active_gl_codes:
+                return code not in active_gl_codes
+            if tenant_chart_ownership is None:
+                from app.services.gl_chart import load_chart_ownership
+
+                tenant_chart_ownership = await load_chart_ownership(db, invoice_org_id, None)
+            return tenant_chart_ownership.belongs_elsewhere(code, invoice_entity_id)
+
         if gl_accounts:
             gl_lines = [
                 f"{gl.code} \u2014 {gl.name}" + (f" [{gl.account_type}]" if gl.account_type else "")
@@ -587,7 +615,7 @@ async def run_extraction(
         invalid_gl_codes: list[str] = []
         for li in result.line_items:
             li_gl = li.gl_account.value if li.gl_account.value else None
-            if li_gl and active_gl_codes and li_gl not in active_gl_codes:
+            if li_gl and await gl_code_refused(li_gl):
                 invalid_gl_codes.append(li_gl)
                 li_gl = None  # don't persist a code that doesn't exist
 
@@ -614,14 +642,15 @@ async def run_extraction(
             )
             db.add(line_item)
 
-        # Apply AI-suggested GL coding. Validate against the org's active
+        # Apply AI-suggested GL coding. Validate against the invoice's active
         # chart of accounts when one is configured — the AI is constrained
         # via the prompt but can still hallucinate, especially without
-        # sufficient examples in the prompt's context window.
+        # sufficient examples in the prompt's context window — and against
+        # the other entities' charts when it is not.
         suggested_gl = result.suggested_gl_account.value
         suggested_gl_conf = result.suggested_gl_account.confidence
         if suggested_gl and suggested_gl_conf >= 0.7:
-            if active_gl_codes and suggested_gl not in active_gl_codes:
+            if await gl_code_refused(suggested_gl):
                 invalid_gl_codes.append(suggested_gl)
             else:
                 invoice.gl_account = suggested_gl
@@ -690,12 +719,12 @@ async def run_extraction(
 
         # Priors can overwrite the AI-validated gl_account with a cached
         # value that was valid at the time of prior caching but has since
-        # been deactivated in the chart. Re-check once after the overlay.
+        # been deactivated in the chart — or that was learned on another
+        # entity's invoice. Re-check once after the overlay, by the same rule.
         if (
             "gl_account" in applied_priors
-            and active_gl_codes
             and invoice.gl_account
-            and invoice.gl_account not in active_gl_codes
+            and await gl_code_refused(invoice.gl_account)
         ):
             stale_code = invoice.gl_account
             invoice.gl_account = None

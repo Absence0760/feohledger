@@ -197,11 +197,13 @@ Two consequences worth knowing before you touch either half:
 - **Bumping the floor is a two-file-set edit**, not one. Raising
   `node-version:` means checking every other place a Node version is written
   down. There is no `.nvmrc`, no `engines` block in either `package.json`, and
-  no Node Dockerfile in the app tree — but `deploy/deploy.sh` builds the
-  production frontend in a `NODE_IMAGE=node:<major>-alpine` container,
-  documented in `docs/minimal-deployment.md`. **Both halves move together**;
-  raising CI and leaving the deploy image behind means production builds on a
-  runtime CI never tested.
+  no Node Dockerfile in the app tree — but the production frontend builds in
+  `deploy/compose.prod.yml`'s `frontend-build` service, a
+  `node:<major>-alpine` image (`docs/minimal-deployment.md`). **Both halves
+  move together**: Dependabot ignores that image's majors, and
+  `backend/tests/test_container_supply_chain.py` fails when its major differs
+  from any `node-version:`, because a deploy image behind CI builds production
+  on a runtime CI never tested.
 - **The `# vN.N.N` comment beside a `setup-node@<sha>` pin is documentation,
   not the pin.** Eight of the nine sites carried `# v6.0.0` against a SHA that
   is really `v7.0.0`; Scorecard's PinnedDependencies check reads the SHA and
@@ -341,13 +343,13 @@ and the only way to exercise one on a laptop.
 
 | Store | File | State | Key methods |
 |-------|------|-------|-------------|
-| `auth` | `auth.svelte.ts` | `user` (incl. `mfa_enabled`, `mfa_required_by_org`), `loggedIn`, role checks (`isAdmin`, `isManager`, `isCfo`, `isClerkOnly`) | `login()` (returns `{kind:'ok'} \| {kind:'mfa', challenge}` — MFA branch routes to `/login/mfa`), `completeMfa(token, code, method)`, `requestEmailMfa(token)`, `completePasskey(token)`, `listPasskeys()`, `passkeyStepUp(operation)` (mint + sign a factor-change step-up assertion), `registerPasskey(name, stepUp)`, `deletePasskey(id, stepUp)`, `listSessions()` / `revokeSession(id)` / `revokeOtherSessions()` (the caller's own live sessions — see the `/profile` row), `logout()`, `fetchUser()`, `hasRole()`, `hasAnyRole()` |
+| `auth` | `auth.svelte.ts` | `user` (incl. `mfa_enabled`, `mfa_required_by_org`, `password_sign_in_closed` — the server's own "is the password a step-up proof here" predicate, which `/profile` reads; never re-derive it from the public SSO `/config` echo, `docs/decisions.md` §201), `loggedIn`, role checks (`isAdmin`, `isManager`, `isCfo`, `isClerkOnly`) | `login()` (returns `{kind:'ok'} \| {kind:'mfa', challenge}` — MFA branch routes to `/login/mfa`), `completeMfa(token, code, method)`, `requestEmailMfa(token)`, `completePasskey(token)`, `listPasskeys()`, `passkeyStepUp(operation)` (mint + sign a factor-change step-up assertion), `registerPasskey(name, stepUp)`, `deletePasskey(id, stepUp)`, `listSessions()` / `revokeSession(id)` / `revokeOtherSessions()` (the caller's own live sessions — see the `/profile` row), `logout()`, `fetchUser()`, `hasRole()`, `hasAnyRole()` |
 | `invoiceStore` | `invoices.svelte.ts` | `all`, `loading`, `errored`, `total`, `statusCounts` | `fetch(params)`, `fetchCounts(params)` (pass the list's `buildParams()` — the chip tallies are population-filtered too; own `countsSequence`), `update(id, changes)` |
 | `paymentStore` | `payments.svelte.ts` | `all`, `loading`, `errored`, `total`, `hasMore` | `fetch(params)`, `loadMore()` (history-tab Load-More; remembers filter params) |
 | `workflowStore` | `workflows.svelte.ts` | `all`, `loading`, `total`, `hasMore`, `activeSteps` | `fetch()`, `loadMore()`, `fetchActiveSteps()`, `getById()`, `create()`, `update()` |
 | `adminStore` | `admin.svelte.ts` | `users`, `roles`, `loading` | `fetchUsers()`, `fetchRoles()`, `createUser()`, `updateUser()`, `deleteUser()` |
 | `sidebar` | `sidebar.svelte.ts` | `collapsed` | `toggle()` |
-| `orgCurrency` | `orgSettings.svelte.ts` | `currency` | `ensureLoaded()`, `reset()` — tenant REPORTING currency for aggregate (non-per-row) money; lazy-loads from `/api/organization` and resolves via `utils/reportingCurrency.ts` in the backend's order, USD fallback |
+| `orgCurrency` | `orgSettings.svelte.ts` | `currency` (`string \| null`), `label` | `ensureLoaded()`, `reset()` — tenant REPORTING currency for aggregate money no payload labels; lazy-loads from `/api/organization` and resolves via `utils/reportingCurrency.ts` in the backend's order. **`null` when unresolved, never a USD guess** — figures render bare, forms take `?? DEFAULT_CURRENCY` themselves, labels read `label` (`docs/money-formatting.md`, decisions §200) |
 | `notificationStore` | `notifications.svelte.ts` | `items`, `unread`, **`inboxTotal`** (the WHOLE inbox, filter-independent — the All chip), **`filteredTotal`** (the count of what the current filter matched — `hasMore`, Load-more, "Showing all N"), `loading`, `hasMore`, `prefs`. The two were one field, so an `unread_only=true` response overwrote the inbox count and both chips showed the same number | `fetchList({unreadOnly})`, `loadMore()`, `fetchUnreadCount()`, `markRead(id)`, `markAllRead()`, `fetchPrefs()`, `updatePrefs()`, `startPolling()`/`stopPolling()` (60s unread-count poll for the sidebar-header bell badge; started from `+layout` when signed in) |
 
 ### Components (`src/lib/components/`)
@@ -360,7 +362,7 @@ Grouped into subfolders by role; import with the full path
 component the second time you would duplicate one.**
 
 - `ui/` — primitives: `PageHeader` `DataTable` `FilterChips` `Modal` `KpiCard` `Badge` `EmptyState` `Money` `SectionTabs` `Tabs` `FieldWarning` `SecretReveal` `BrandMark`
-- domain: `InvoiceModal` `VendorModal` `VendorPicker` `RunDetailModal` `ApprovalMatrixEditor` `BulkRecodeGLModal` `AdvancedSearchModal` `ScreeningBadge` `SubscriptionBadge` `SpendBarChart` `UsageMeter` `PortalListFilters`
+- domain: `InvoiceModal` `VendorModal` `VendorPicker` `InvoicePicker` (both over `ui/SearchPicker`) `RunDetailModal` `ApprovalMatrixEditor` `BulkRecodeGLModal` `AdvancedSearchModal` `ScreeningBadge` `SubscriptionBadge` `SpendBarChart` `UsageMeter` `PortalListFilters`
 - chrome: `Sidebar` `NotificationBell` `EntitySwitcher`
 - chat/assistant: `SupplierChatThread` `ChatMessage` `ExamplePrompts` `ToolResultView`
 - marketing: `Landing` `Pricing` `Atmosphere` `HeroPipeline` `AdapterRail` `MotionToggle`

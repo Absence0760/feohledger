@@ -70,6 +70,40 @@ jobs:
               - 'pnpm-lock.yaml'
               - '.github/workflows/ci.yml'
 
+  # The core service images every test job starts — pgvector, Redis, MinIO — are
+  # READ from backend/docker-compose.yml here and never written in this file
+  # (docs/decisions.md §203). Each job takes its ref from these outputs
+  # (`services.<id>.image` accepts the `needs` context), so the compose file is
+  # the one place a ref lives and a Dependabot `docker-compose` bump is exactly
+  # what that PR's own CI run tests. CI used to restate the refs by hand, which
+  # no Dependabot ecosystem reads, so `dependabot-auto-merge.yml` could land a
+  # compose bump CI had never run while CI went on testing the old digest.
+  # `test_container_supply_chain.py` fails if a ref is written here again.
+  #
+  # Not path-filtered: backend-test runs on every push and needs it, and it
+  # takes seconds. If it fails, the jobs that need it are SKIPPED, not failed —
+  # and ci-gate counts a skip as a pass — so ci-gate needs this job directly.
+  compose-images:
+    name: Service images (from compose)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      postgres: ${{ steps.refs.outputs.postgres }}
+      redis: ${{ steps.refs.outputs.redis }}
+      minio: ${{ steps.refs.outputs.minio }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # The reader's own tests come first. An empty `services.<id>.image` does
+      # not fail a job — GitHub just starts no container — so what has to be
+      # proven is that the reader refuses, not that it reads.
+      - name: The ref reader refuses what CI must not run
+        run: python3 -m unittest scripts/test_compose_image_refs.py
+      - name: Read the refs from backend/docker-compose.yml
+        id: refs
+        run: |
+          set -euo pipefail
+          scripts/compose_image_refs.sh backend/docker-compose.yml postgres redis minio | tee -a "$GITHUB_OUTPUT"
+
   # Backend lint is split out from the test shards: ruff needs no
   # Postgres/Redis/MinIO and shouldn't run four times across the matrix below.
   # A formatting / lint miss fails fast here in ~30s instead of riding along a
@@ -153,6 +187,8 @@ jobs:
   backend-test:
     name: Backend (shard ${{ matrix.shard }}/8)
     runs-on: ubuntu-latest
+    # Only for its service images — no path filter, so it still runs on every push.
+    needs: compose-images
     # This job had no timeout, so it inherited GitHub's 360-minute default and a
     # hung shard sat on a runner for six hours instead of failing (PR #366:
     # shards 1-3 finished in ~14 min, shard 4 was still "in_progress" at 40).
@@ -193,8 +229,8 @@ jobs:
         # `CREATE EXTENSION vector` for invoice_embeddings (RAG).
         # Stock postgres:16 doesn't ship the extension; CI without
         # this fails with "extension 'vector' is not available".
-        # same ref as backend/docker-compose.yml — no Dependabot ecosystem reads this line; bump both
-        image: pgvector/pgvector:0.8.6-pg16@sha256:ccc6e83d6e35e931dc7c5def2022729d5a6c370318d099181995567ff1fb4d6b
+        # backend/docker-compose.yml's ref, read by the compose-images job — never write one here (§203)
+        image: ${{ needs.compose-images.outputs.postgres }}
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
@@ -208,8 +244,8 @@ jobs:
           --health-retries=5
 
       redis:
-        # same ref as backend/docker-compose.yml — no Dependabot ecosystem reads this line; bump both
-        image: redis:7.4.11-alpine@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499
+        # backend/docker-compose.yml's ref, read by the compose-images job — never write one here (§203)
+        image: ${{ needs.compose-images.outputs.redis }}
         ports:
           - 6379:6379
         options: >-
@@ -272,13 +308,16 @@ jobs:
       # storage._ensure_bucket on first upload. Each matrix shard runs on its own
       # runner, so the fixed `--name minio` never collides across shards.
       - name: Start MinIO (S3)
+        env:
+          # backend/docker-compose.yml's ref, read by the compose-images job — never write one here (§203)
+          MINIO_IMAGE: ${{ needs.compose-images.outputs.minio }}
         run: |
           # Pull as its own step so a registry failure is distinguishable from
           # a container that started but never became healthy.
           for attempt in 1 2 3; do
-            if docker pull quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e; then break; fi
+            if docker pull "$MINIO_IMAGE"; then break; fi
             if [ "$attempt" = 3 ]; then
-              echo "::error::could not pull quay.io/minio/minio after 3 attempts - see each error above; a 401 or 'repository does not exist' is NOT transient and means the registry or image path is wrong"
+              echo "::error::could not pull $MINIO_IMAGE after 3 attempts - see each error above; a 401 or 'repository does not exist' is NOT transient and means the registry or image path is wrong"
               exit 1
             fi
             echo "::warning::MinIO pull attempt $attempt failed; retrying in $((attempt * 5))s"
@@ -287,7 +326,7 @@ jobs:
           docker run -d --name minio -p 9000:9000 \
             -e MINIO_ROOT_USER=minioadmin \
             -e MINIO_ROOT_PASSWORD=minioadmin \
-            quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e server /data
+            "$MINIO_IMAGE" server /data
           for i in $(seq 1 30); do
             if curl -sf http://localhost:9000/minio/health/live; then
               echo "MinIO ready"; exit 0
@@ -561,7 +600,7 @@ jobs:
     #     wall-clock isn't worse.
     name: Frontend e2e (Playwright) — shard ${{ matrix.shard }}/14
     runs-on: ubuntu-latest
-    needs: changes
+    needs: [changes, compose-images]
     # Skip the entire 14-shard fan-out on docs-only PRs. The detector
     # runs in ~5 s so the gate is essentially free.
     if: needs.changes.outputs.e2e == 'true'
@@ -581,8 +620,8 @@ jobs:
         # `CREATE EXTENSION vector` for invoice_embeddings (RAG).
         # Stock postgres:16 doesn't ship the extension; CI without
         # this fails with "extension 'vector' is not available".
-        # same ref as backend/docker-compose.yml — no Dependabot ecosystem reads this line; bump both
-        image: pgvector/pgvector:0.8.6-pg16@sha256:ccc6e83d6e35e931dc7c5def2022729d5a6c370318d099181995567ff1fb4d6b
+        # backend/docker-compose.yml's ref, read by the compose-images job — never write one here (§203)
+        image: ${{ needs.compose-images.outputs.postgres }}
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
@@ -613,8 +652,8 @@ jobs:
         # recurring as we add more tenants.
 
       redis:
-        # same ref as backend/docker-compose.yml — no Dependabot ecosystem reads this line; bump both
-        image: redis:7.4.11-alpine@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499
+        # backend/docker-compose.yml's ref, read by the compose-images job — never write one here (§203)
+        image: ${{ needs.compose-images.outputs.redis }}
         ports:
           - 6379:6379
         options: >-
@@ -726,13 +765,16 @@ jobs:
       # Each matrix shard runs on its own runner, so the fixed `--name minio`
       # never collides across shards.
       - name: Start MinIO (S3)
+        env:
+          # backend/docker-compose.yml's ref, read by the compose-images job — never write one here (§203)
+          MINIO_IMAGE: ${{ needs.compose-images.outputs.minio }}
         run: |
           # Pull as its own step so a registry failure is distinguishable from
           # a container that started but never became healthy.
           for attempt in 1 2 3; do
-            if docker pull quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e; then break; fi
+            if docker pull "$MINIO_IMAGE"; then break; fi
             if [ "$attempt" = 3 ]; then
-              echo "::error::could not pull quay.io/minio/minio after 3 attempts - see each error above; a 401 or 'repository does not exist' is NOT transient and means the registry or image path is wrong"
+              echo "::error::could not pull $MINIO_IMAGE after 3 attempts - see each error above; a 401 or 'repository does not exist' is NOT transient and means the registry or image path is wrong"
               exit 1
             fi
             echo "::warning::MinIO pull attempt $attempt failed; retrying in $((attempt * 5))s"
@@ -741,7 +783,7 @@ jobs:
           docker run -d --name minio -p 9000:9000 \
             -e MINIO_ROOT_USER=minioadmin \
             -e MINIO_ROOT_PASSWORD=minioadmin \
-            quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e server /data
+            "$MINIO_IMAGE" server /data
           for i in $(seq 1 30); do
             if curl -sf http://localhost:9000/minio/health/live; then
               echo "MinIO ready"; exit 0
@@ -890,14 +932,14 @@ jobs:
   service-e2e:
     name: Service e2e (Keycloak / Mailpit / LocalStack / stripe-mock)
     runs-on: ubuntu-latest
-    needs: changes
+    needs: [changes, compose-images]
     if: needs.changes.outputs.e2e == 'true'
     timeout-minutes: 25
 
     services:
       postgres:
-        # same ref as backend/docker-compose.yml — no Dependabot ecosystem reads this line; bump both
-        image: pgvector/pgvector:0.8.6-pg16@sha256:ccc6e83d6e35e931dc7c5def2022729d5a6c370318d099181995567ff1fb4d6b
+        # backend/docker-compose.yml's ref, read by the compose-images job — never write one here (§203)
+        image: ${{ needs.compose-images.outputs.postgres }}
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
@@ -912,8 +954,8 @@ jobs:
           --health-timeout=5s
           --health-retries=5
       redis:
-        # same ref as backend/docker-compose.yml — no Dependabot ecosystem reads this line; bump both
-        image: redis:7.4.11-alpine@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499
+        # backend/docker-compose.yml's ref, read by the compose-images job — never write one here (§203)
+        image: ${{ needs.compose-images.outputs.redis }}
         ports:
           - 6379:6379
         options: >-
@@ -1131,14 +1173,14 @@ jobs:
   erp-e2e:
     name: ERP e2e (fake-erp)
     runs-on: ubuntu-latest
-    needs: changes
+    needs: [changes, compose-images]
     if: needs.changes.outputs.e2e == 'true'
     timeout-minutes: 20
 
     services:
       postgres:
-        # same ref as backend/docker-compose.yml — no Dependabot ecosystem reads this line; bump both
-        image: pgvector/pgvector:0.8.6-pg16@sha256:ccc6e83d6e35e931dc7c5def2022729d5a6c370318d099181995567ff1fb4d6b
+        # backend/docker-compose.yml's ref, read by the compose-images job — never write one here (§203)
+        image: ${{ needs.compose-images.outputs.postgres }}
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
@@ -1153,8 +1195,8 @@ jobs:
           --health-timeout=5s
           --health-retries=5
       redis:
-        # same ref as backend/docker-compose.yml — no Dependabot ecosystem reads this line; bump both
-        image: redis:7.4.11-alpine@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499
+        # backend/docker-compose.yml's ref, read by the compose-images job — never write one here (§203)
+        image: ${{ needs.compose-images.outputs.redis }}
         ports:
           - 6379:6379
         options: >-
@@ -1326,6 +1368,7 @@ jobs:
     if: always()
     needs:
       - changes
+      - compose-images
       - backend-lint
       - backend-test
       - frontend

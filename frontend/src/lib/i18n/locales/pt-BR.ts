@@ -91,6 +91,7 @@ export const messages = {
 	'common.retrying': 'Tentando novamente…',
 	'common.loadFailed': 'Não foi possível carregar esta lista. Atualize para tentar novamente.',
 	'common.amountInvalid': 'Informe o valor como um número simples, por exemplo 1200 ou 1200.50',
+	'common.reportingCurrencyUnresolved': 'moeda de relatório',
 
 	// Cookie / consent banner (lib/components/ConsentBanner.svelte) — see en.ts.
 
@@ -159,6 +160,10 @@ export const messages = {
 		'Sua organização exige MFA, portanto a desativação não está disponível.',
 	'profile.mfa.requiredEnroll': 'Sua organização exige MFA — configure agora.',
 	'profile.mfa.disablePassword': 'Digite sua senha para desativar a MFA',
+	'profile.mfa.disableCode':
+		'Digite um código atual do seu aplicativo autenticador para desativar a MFA',
+	'profile.mfa.ssoOnlyNoPassword':
+		'Sua organização entra por login único (SSO), portanto sua senha não pode confirmar alterações nas suas configurações de duas etapas.',
 	'profile.mfa.confirmWithPasskey': 'Confirmar com uma chave de acesso',
 	'profile.mfa.disable': 'Desativar as duas etapas',
 	'profile.mfa.disabling': 'Desativando…',
@@ -185,6 +190,12 @@ export const messages = {
 		'Confirme sua senha para adicionar ou remover uma chave de acesso',
 	'profile.passkeys.stepUpBlankHint':
 		'Deixe em branco para confirmar com uma das chaves de acesso que você já tem — a única opção se você entra por SSO e não tem senha.',
+	'profile.passkeys.stepUpCode':
+		'Digite um código atual do seu aplicativo autenticador para adicionar ou remover uma chave de acesso',
+	'profile.passkeys.stepUpCodeBlankHint':
+		'Deixe em branco para confirmar com uma das chaves de acesso que você já tem.',
+	'profile.passkeys.stepUpPasskeyOnly':
+		'Você vai confirmar com uma das chaves de acesso que você já tem.',
 	'profile.passkeys.lastUsed': 'Último uso {date}',
 	'profile.passkeys.neverUsed': 'Nunca usada',
 	'profile.passkeys.remove': 'Remover',
@@ -258,8 +269,10 @@ export const messages = {
 	'dashboard.kpi.exceptions': 'Exceções',
 	'dashboard.kpi.staleApprovals': 'Aprovações atrasadas',
 	'dashboard.kpi.rebatesEarned': 'Reembolsos obtidos',
-	'dashboard.reporting.unconverted':
-		'Alguns totais acima excluem linhas sem taxa de câmbio travada para {currency} — trate-os como um piso, não um valor exato.',
+	'dashboard.reporting.faceValue':
+		'Parcial — {label}: {n, plural, one {# nota fiscal} other {# notas fiscais}} sem taxa de câmbio para {currency}, contabilizadas pelo valor de face — nessa medida esse total mistura moedas. Registre a taxa que falta antes de se basear nele.',
+	'dashboard.reporting.excluded':
+		'Excluídos de {labels}: {n, plural, one {# pagamento} other {# pagamentos}} sem taxa de câmbio para {currency}, deixados de fora em vez de contabilizados pelo valor de face — portanto os valores exibidos subestimam o que de fato foi movimentado. Registre a taxa faltante para ver o quadro completo.',
 	'dashboard.vendorSpend.unconverted':
 		'Parcial: {n, plural, one {# nota fiscal} other {# notas fiscais}} sem taxa de câmbio para {currency}, contabilizadas pelo valor de face — por isso estes fornecedores não estão todos classificados na mesma moeda. Afetados: {vendors}. Registre a taxa que falta antes de agir com base na ordem.',
 	'dashboard.aging.unconverted':
@@ -384,6 +397,8 @@ export const messages = {
 	'invoices.warning.priceVarianceUnder': 'Preço unitário {deltaPct} abaixo da referência deste fornecedor para {item} ({unitPrice} contra {baselineUnitPrice})',
 	'invoices.warning.poNotFound': 'Pedido {poNumber} não encontrado',
 	'invoices.warning.poAmountVariance': 'Variação de valor {variancePct} em relação ao pedido {poNumber} (nota {invoiceAmount} contra pedido {poTotal})',
+	'invoices.warning.poAmountVariancePoCurrencyUnknown': 'Variação de valor {variancePct} em relação ao pedido {poNumber}, que não registra moeda (nota {invoiceAmount} contra pedido {poTotal})',
+	'invoices.warning.poCurrencyMismatch': 'A nota está em {invoiceCurrency}, mas o pedido {poNumber} está em {poCurrency} — os valores não foram comparados',
 	'invoices.warning.poPartialReceipt': 'Correspondência parcial de 3 vias — correspondência {matchType} com o pedido {poNumber}, mas apenas parte da quantidade pedida foi recebida',
 	'invoices.warning.poOverReceipt': 'Recebimento em excesso: {receivedQuantity} recebidas contra {orderedQuantity} pedidas (+{excessQuantity}) no pedido {poNumber}',
 	'invoices.warning.poOverReceiptUnquantified': 'Foram recebidas mais mercadorias do que as pedidas no pedido {poNumber}',
@@ -822,6 +837,18 @@ export const messages = {
 	'vendors.picker.listAria': 'Fornecedores',
 	'vendors.picker.unresolvedSelection':
 		'Já há um fornecedor selecionado, mas o nome dele não está disponível nesta tela. Escolher um aqui o substitui.',
+	'invoices.picker.loading': 'Carregando faturas…',
+	'invoices.picker.loadFailed': 'Não foi possível carregar as faturas. Isso não é o mesmo que não haver nenhuma — tente novamente.',
+	'invoices.picker.noMatches': 'Nenhuma fatura corresponde a “{query}”',
+	'invoices.picker.showingAll': 'Todas as correspondências exibidas ({total})',
+	'invoices.picker.showingPartial': 'Exibindo {shown} de {total} correspondências — digite para refinar',
+	'invoices.picker.refineHint': 'Nem todas as correspondências estão listadas',
+	'invoices.picker.loadMore': 'Carregar mais',
+	'invoices.picker.loadMoreFailed': 'Não foi possível carregar mais.',
+	'invoices.picker.clearAria': 'Limpar a fatura selecionada',
+	'invoices.picker.listAria': 'Faturas',
+	'invoices.picker.unresolvedSelection': 'Já há uma fatura selecionada, mas o número dela não está disponível nesta tela. Escolher uma aqui a substitui.',
+	'invoices.picker.leftToCredit': 'Restam {amount} a creditar',
 	'vendors.changeRequests.navLabel': 'Alterações bancárias',
 	'vendors.changeRequests.title': 'Aprovações de alterações bancárias e fiscais',
 	'vendors.changeRequests.intro':
@@ -1911,6 +1938,8 @@ export const messages = {
 	'cfoMetrics.accruals.received': 'Recebido, não faturado',
 	'cfoMetrics.accruals.unposted': 'Faturas não lançadas',
 	'cfoMetrics.accruals.total': 'Provisão total',
+	'cfoMetrics.accruals.noCurrency':
+		'Pedidos de compra sem moeda registrada aparecem em uma linha própria, sem símbolo. Cada moeda é compensada separadamente; as linhas nunca são somadas.',
 	'cfoMetrics.concentration.title': 'Concentração de fornecedores',
 	'cfoMetrics.concentration.flagged': '⚠ {vendor} representa {pct}% dos gastos — risco de concentração.',
 	'cfoMetrics.concentration.top10': 'Top 10 fornecedores',
@@ -2981,7 +3010,7 @@ export const messages = {
 	'byEntity.unconvertedSpend':
 		'O gasto inclui pelo valor nominal {n, plural, one {# fatura} other {# faturas}} sem taxa de câmbio travada para {currency}, então os totais misturam moedas.',
 	'byEntity.openPoNoCurrency':
-		'Os pedidos de compra ainda não registram uma moeda, então os pedidos abertos são exibidos sem ela.',
+		'Alguns pedidos de compra não registram moeda; seus valores em aberto aparecem em uma linha própria, sem símbolo, e nunca são somados aos de outra moeda.',
 
 	// Relatórios agendados (components/analytics/ScheduledReportsPanel.svelte)
 	'scheduledReports.heading': 'Relatórios agendados',
@@ -3977,12 +4006,12 @@ export const messages = {
 	'workflows.builder.approval.approverAssignment': 'Atribuição do aprovador',
 	'workflows.builder.approval.approvers': 'Aprovadores',
 	'workflows.builder.approval.autoApproveBelow': 'Aprovar automaticamente abaixo de ({currency})',
-	'workflows.builder.approval.autoApproveBelowHint': 'Faturas abaixo desse valor ignoram totalmente a aprovação. O valor comparado é a fatura convertida para {currency}, a moeda de relatório da sua organização.',
+	'workflows.builder.approval.autoApproveBelowHint': 'Faturas abaixo desse valor ignoram totalmente a aprovação. O valor comparado é a fatura convertida para a moeda de relatório da sua organização.',
 	'workflows.builder.approval.autoWarning': 'As faturas serão aprovadas automaticamente sem revisão humana. Use com cautela.',
 	'workflows.builder.approval.matrix': 'Matriz de aprovação',
-	'workflows.builder.approval.matrixHint': 'Defina um ou mais níveis de aprovação. Cada nível pode filtrar por valor ou por atributos da fatura (departamento, conta contábil, fornecedor) e oferece suporte a aprovadores paralelos e escalonamento por tempo. Os valores estão em {currency}, a moeda de relatório da sua organização.',
+	'workflows.builder.approval.matrixHint': 'Defina um ou mais níveis de aprovação. Cada nível pode filtrar por valor ou por atributos da fatura (departamento, conta contábil, fornecedor) e oferece suporte a aprovadores paralelos e escalonamento por tempo. Os valores estão na moeda de relatório da sua organização.',
 	'workflows.builder.approval.maxInvoiceAmount': 'Valor máximo da fatura ({currency})',
-	'workflows.builder.approval.maxInvoiceAmountHint': 'Faturas acima desse valor são rejeitadas automaticamente. O valor comparado é a fatura convertida para {currency}, a moeda de relatório da sua organização.',
+	'workflows.builder.approval.maxInvoiceAmountHint': 'Faturas acima desse valor são rejeitadas automaticamente. O valor comparado é a fatura convertida para a moeda de relatório da sua organização.',
 	'workflows.builder.approval.controlsTitle': 'Controles',
 	'workflows.builder.approval.requireSegregation': 'Exigir segregação de funções',
 	'workflows.builder.approval.requireSegregationHint': 'Quem enviou uma fatura não pode aprová-la. Recomendado — é o controle antifraude clássico de contas a pagar.',
@@ -3992,7 +4021,7 @@ export const messages = {
 	'workflows.builder.approval.noMatchingUsers': 'Nenhum usuário correspondente',
 	'workflows.builder.approval.removeApprover': 'Remover o aprovador {name}',
 	'workflows.builder.approval.requireCfoAbove': 'Exigir aprovação do diretor financeiro acima de ({currency})',
-	'workflows.builder.approval.requireCfoAboveHint': 'Faturas acima desse valor exigem a aprovação de um usuário com o papel de diretor financeiro. O valor comparado é a fatura convertida para {currency}, a moeda de relatório da sua organização.',
+	'workflows.builder.approval.requireCfoAboveHint': 'Faturas acima desse valor exigem a aprovação de um usuário com o papel de diretor financeiro. O valor comparado é a fatura convertida para a moeda de relatório da sua organização.',
 	'workflows.builder.approval.required': 'Aprovação obrigatória',
 	'workflows.builder.approval.roundRobinHint': '{count, plural, one {As faturas serão atribuídas em rodízio ao # aprovador selecionado.} other {As faturas serão atribuídas em rodízio aos # aprovadores selecionados.}}',
 	'workflows.builder.approval.searchUsers': 'Pesquisar usuários para adicionar…',
@@ -4545,7 +4574,7 @@ export const messages = {
 	'creditMemos.applyModal.aria': 'Aplicar nota de crédito',
 	'creditMemos.applyModal.hint': 'Escolha uma fatura na qual aplicar este crédito.',
 	'creditMemos.applyModal.invoice': 'Fatura',
-	'creditMemos.applyModal.noEligible': 'Nenhuma fatura disponível para este fornecedor. Uma fatura só pode receber crédito depois que seu fornecedor for resolvido — abra a fatura e salve o fornecedor novamente.',
+	'creditMemos.applyModal.noEligible': 'Nenhuma fatura pode receber este crédito. É preciso uma fatura deste fornecedor ainda não paga nem encerrada, na moeda da nota, com pelo menos o valor da nota ainda não creditado. Uma fatura cujo fornecedor ainda não foi resolvido passa a se qualificar depois que você a abre e salva o fornecedor novamente.',
 	'creditMemos.applyModal.selectInvoice': 'Selecionar fatura…',
 	'creditMemos.applyModal.title': 'Aplicar nota de crédito',
 	'creditMemos.col.amount': 'Valor',
@@ -4567,6 +4596,7 @@ export const messages = {
 	'creditMemos.createModal.invoiceNeedsVendor': 'Escolha um fornecedor para ver as faturas dele.',
 	'creditMemos.createModal.memoNumber': 'Número da nota',
 	'creditMemos.createModal.noInvoice': 'Não aplicar agora',
+	'creditMemos.createModal.noEligibleInvoice': 'Nenhuma fatura deste fornecedor pode receber este crédito — cada uma já está paga ou encerrada, tem saldo insuficiente ainda não creditado, ou o fornecedor dela ainda não foi resolvido (abra a fatura e salve o fornecedor novamente).',
 	'creditMemos.createModal.reason': 'Motivo',
 	'creditMemos.createModal.reasonPlaceholder': 'ex. Mercadoria com defeito devolvida',
 	'creditMemos.createModal.selectVendor': 'Selecionar fornecedor…',
@@ -5215,6 +5245,7 @@ export const messages = {
 	'invoices.modal.noPdf': 'Nenhum PDF anexado',
 	'invoices.modal.pdfTitle': 'PDF da fatura — {number}',
 	'invoices.modal.poMatch.accepted': '{qty} aceito(s)',
+	'invoices.modal.poMatch.currencyUnknown': 'Este pedido não registra moeda, então seu total foi comparado com a nota pelo valor nominal.',
 	'invoices.modal.poMatch.failed': 'Reprovada',
 	'invoices.modal.poMatch.matched': 'Conciliado',
 	'invoices.modal.poMatch.mismatch': 'Divergência',

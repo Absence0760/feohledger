@@ -56,6 +56,23 @@ export function vendorSpendRow(
 	return { vendor, amount, unconverted_count };
 }
 
+/** One `upcoming_payments` row — a FACE amount in the invoice's own currency. */
+export function upcomingPaymentRow(
+	invoiceNumber: string,
+	amount: number,
+	currency: string | null
+): DashboardData['upcoming_payments'][number] {
+	return {
+		id: `00000000-0000-4000-8000-${invoiceNumber.replace(/\D/g, '').padStart(12, '0')}`,
+		invoice_number: invoiceNumber,
+		vendor_name: `Vendor ${invoiceNumber}`,
+		amount,
+		currency,
+		due_date: '2026-09-30',
+		is_overdue: false
+	};
+}
+
 /** One `monthly_trend` row. */
 export function monthlyTrendRow(
 	month: string,
@@ -68,10 +85,12 @@ export function monthlyTrendRow(
 /**
  * Everything a spec is allowed to vary.
  *
- * Deliberately narrow: every KPI-row count in the base is pinned at zero, so
- * the page-level `unconverted-rollup` banner never fires and a chart notice
- * can never be that banner misread. A spec that needs the banner should say so
- * by extending this type, not by spreading a raw object over the payload.
+ * Deliberately narrow: every KPI-row count defaults to zero, so the KPI row's
+ * two partial-conversion lines (`unconverted-rollup-face-value`,
+ * `unconverted-rollup-excluded`) never fire unless a spec asks for them — and a
+ * chart notice can never be one of them misread. A spec that needs a line says
+ * so through the three named counts below, not by spreading a raw object over
+ * the payload.
  */
 export interface DashboardPatch {
 	/** `vendor_spend`, in rank order. Pass `[]` to render no vendor bars. */
@@ -82,25 +101,45 @@ export interface DashboardPatch {
 	agingUnconverted?: number;
 	/** Overrides folded onto the base `discount_capture` block. */
 	discount?: Partial<DashboardDiscountCapture>;
+	/**
+	 * `reporting.unconverted_count` — invoices the Total Amount KPI counted at
+	 * FACE value (`invoice_reporting_amount_sql` falls back rather than drops).
+	 */
+	totalFaceValue?: number;
+	/**
+	 * `total_paid_unconverted_count` / `total_pending_unconverted_count` —
+	 * payments the Paid / Pending KPIs EXCLUDED (`payment_reporting_amount_sql`
+	 * refuses a face-value fallback). The opposite rule from the count above.
+	 */
+	paidExcluded?: number;
+	pendingExcluded?: number;
+	/**
+	 * `reporting.reporting_currency` — the code every KPI and chart figure is
+	 * denominated in, and the one the page labels them with.
+	 */
+	reportingCurrency?: string;
+	/** `upcoming_payments` — per-row FACE amounts, each in its own currency. */
+	upcomingPayments?: DashboardData['upcoming_payments'];
 }
 
 /** The base payload — every count zero, both chart series populated. */
-function base(agingUnconverted: number): DashboardData {
+function base(patch: DashboardPatch): DashboardData {
+	const reportingCurrency = patch.reportingCurrency ?? REPORTING_CURRENCY;
 	return {
 		total_invoices: 6,
 		total_amount: 6000,
 		reporting: {
-			reporting_currency: REPORTING_CURRENCY,
+			reporting_currency: reportingCurrency,
 			total_amount: 6000,
 			total_count: 6,
-			unconverted_count: 0
+			unconverted_count: patch.totalFaceValue ?? 0
 		},
 		total_paid: 2000,
 		total_pending: 4000,
 		total_paid_reporting: 2000,
 		total_pending_reporting: 4000,
-		total_paid_unconverted_count: 0,
-		total_pending_unconverted_count: 0,
+		total_paid_unconverted_count: patch.paidExcluded ?? 0,
+		total_pending_unconverted_count: patch.pendingExcluded ?? 0,
 		total_rebates: 0,
 		excluded_rebate_count: 0,
 		open_exceptions: 0,
@@ -119,10 +158,10 @@ function base(agingUnconverted: number): DashboardData {
 			days_60: 500,
 			days_90: 300,
 			days_90_plus: 200,
-			unconverted_count: agingUnconverted
+			unconverted_count: patch.agingUnconverted ?? 0
 		},
 		monthly_trend: [],
-		upcoming_payments: [],
+		upcoming_payments: patch.upcomingPayments ?? [],
 		discount_capture: {
 			eligible_count: 0,
 			captured_count: 0,
@@ -131,7 +170,7 @@ function base(agingUnconverted: number): DashboardData {
 			captured_amount: 0,
 			missed_amount: 0,
 			pending_amount: 0,
-			reporting_currency: REPORTING_CURRENCY,
+			reporting_currency: reportingCurrency,
 			captured_amount_reporting: 0,
 			missed_amount_reporting: 0,
 			pending_amount_reporting: 0,
@@ -154,7 +193,7 @@ function base(agingUnconverted: number): DashboardData {
  * EmptyState answers (`docs/decisions.md` §154), so it ships whole.
  */
 export function emptyTenantDashboardResponse() {
-	const payload = base(0);
+	const payload = base({});
 	const zeroBands = { current: 0, days_30: 0, days_60: 0, days_90: 0, days_90_plus: 0 };
 	return {
 		...payload,
@@ -174,7 +213,7 @@ export function emptyTenantDashboardResponse() {
 
 /** A full `GET /api/dashboard` body, ready to `JSON.stringify`. */
 export function dashboardResponse(patch: DashboardPatch = {}) {
-	const payload = base(patch.agingUnconverted ?? 0);
+	const payload = base(patch);
 	return {
 		...payload,
 		...NON_RENDERED_FIELDS,

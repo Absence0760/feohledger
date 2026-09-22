@@ -714,6 +714,61 @@ def compute_accruals(
     )
 
 
+@dataclass(frozen=True)
+class CurrencyAccruals:
+    """One currency's slice of the accruals — every leg in ``currency``.
+
+    ``currency`` is ``None`` for figures whose currency nobody recorded: POs
+    created before ``purchase_orders.currency`` existed with no requisition
+    behind them, or synced from an ERP that stated none (decisions §197). That
+    slice is kept apart and rendered bare, never folded into a real currency's.
+    """
+
+    currency: str | None
+    open_po_amount: Decimal
+    received_amount: Decimal
+    unposted_invoice_amount: Decimal
+    total_accrual: Decimal
+
+
+def compute_accruals_by_currency(
+    *,
+    open_po_amounts: dict[str | None, Decimal],
+    received_amounts: dict[str | None, Decimal],
+    unposted_invoice_amounts: dict[str | None, Decimal],
+) -> list[CurrencyAccruals]:
+    """The accruals, one row per currency, each netted WITHIN its currency.
+
+    `compute_accruals` over the whole book adds a EUR purchase order to a USD
+    one and subtracts a GBP invoice from both — a figure denominated in
+    nothing. The legs never convert (a PO carries no locked rate to bridge it),
+    so this groups instead: every currency that appears in any leg gets a row,
+    with zero for the legs it is absent from, and `total_accrual` is that
+    currency's own `open + received − unposted` through `compute_accruals`.
+
+    Ordered by code, the unknown-currency row last — a deterministic order that
+    does not reshuffle as the amounts move.
+    """
+    codes = set(open_po_amounts) | set(received_amounts) | set(unposted_invoice_amounts)
+    rows: list[CurrencyAccruals] = []
+    for code in sorted(codes, key=lambda c: (c is None, c or "")):
+        snapshot = compute_accruals(
+            open_po_amount=open_po_amounts.get(code, Decimal("0")),
+            received_amount=received_amounts.get(code, Decimal("0")),
+            unposted_invoice_amount=unposted_invoice_amounts.get(code, Decimal("0")),
+        )
+        rows.append(
+            CurrencyAccruals(
+                currency=code,
+                open_po_amount=snapshot.open_po_amount,
+                received_amount=snapshot.received_amount,
+                unposted_invoice_amount=snapshot.unposted_invoice_amount,
+                total_accrual=snapshot.total_accrual,
+            )
+        )
+    return rows
+
+
 # ---------------------------------------------------------------------------
 # Working-capital impact: "if we paid N days later, how much cash unlocked?"
 # ---------------------------------------------------------------------------

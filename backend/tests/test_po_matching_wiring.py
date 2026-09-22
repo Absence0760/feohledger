@@ -126,7 +126,7 @@ async def test_refresh_po_match_creates_exception_on_amount_mismatch():
         amount_variance=20.0,
         amount_variance_pct=20.0,
         within_tolerance=False,
-        issues=["Amount mismatch: invoice $120.00 vs PO $100.00 (+20.0%)"],
+        issues=["Amount mismatch: invoice 120.00 USD vs PO 100.00 USD (+20.0%)"],
     )
 
     with (
@@ -142,6 +142,83 @@ async def test_refresh_po_match_creates_exception_on_amount_mismatch():
     ensure.assert_awaited_once()
     # Exception type must match the registered EXCEPTION_TYPE_LABELS key.
     assert ensure.await_args.args[2] == "po_mismatch"
+
+
+@pytest.mark.asyncio
+async def test_refresh_po_match_currency_mismatch_names_both_codes_and_no_variance():
+    """Invoice and PO in different currencies: the finding is the codes, not a
+    variance — `po_amount_variance` would print a percentage between EUR and USD
+    figures. Same severity and exception type as an amount mismatch
+    (decisions §197)."""
+    from app.services import invoice_warnings
+    from app.services.po_matching import MatchResult
+
+    inv = _fake_invoice(amount=Decimal("100.00"), currency="eur")
+    warnings: list[dict] = []
+    fake_match = MatchResult(
+        match_type="2-way",
+        status="mismatch",
+        po_number="PO-001",
+        po_total=Decimal("100.00"),
+        po_currency="USD",
+        currency_check="different",
+        amount_variance=None,
+        amount_variance_pct=None,
+        within_tolerance=False,
+    )
+
+    with (
+        patch.object(invoice_warnings, "match_invoice_to_po", AsyncMock(return_value=fake_match)),
+        patch.object(invoice_warnings, "_ensure_exception", AsyncMock()) as ensure,
+    ):
+        await invoice_warnings._refresh_po_match(db=AsyncMock(), invoice=inv, warnings=warnings)
+
+    assert [w["code"] for w in warnings] == ["po_currency_mismatch"]
+    assert warnings[0]["params"] == {
+        "invoiceCurrency": "EUR",
+        "poNumber": "PO-001",
+        "poCurrency": "USD",
+    }
+    assert warnings[0]["severity"] == "warning"
+    ensure.assert_awaited_once()
+    assert ensure.await_args.args[2:4] == ("po_mismatch", "warning")
+    assert inv.po_match["currency_check"] == "different"
+    assert inv.po_match["amount_variance"] is None
+
+
+@pytest.mark.asyncio
+async def test_refresh_po_match_unknown_po_currency_leaves_the_po_figure_unlabelled():
+    """A PO with no currency is compared at face value; its figure must not
+    borrow the invoice's code, so it rides a `number` param, not `money`."""
+    from app.services import invoice_warnings
+    from app.services.po_matching import MatchResult
+
+    inv = _fake_invoice(amount=Decimal("120.00"), currency="GBP")
+    warnings: list[dict] = []
+    fake_match = MatchResult(
+        match_type="2-way",
+        status="mismatch",
+        po_number="PO-001",
+        po_total=Decimal("100.00"),
+        po_currency=None,
+        currency_check="unknown",
+        amount_variance=Decimal("20.00"),
+        amount_variance_pct=Decimal("20.0"),
+        within_tolerance=False,
+    )
+
+    with (
+        patch.object(invoice_warnings, "match_invoice_to_po", AsyncMock(return_value=fake_match)),
+        patch.object(invoice_warnings, "_ensure_exception", AsyncMock()),
+    ):
+        await invoice_warnings._refresh_po_match(db=AsyncMock(), invoice=inv, warnings=warnings)
+
+    assert [w["code"] for w in warnings] == ["po_amount_variance_po_currency_unknown"]
+    assert warnings[0]["params"]["poTotal"] == "100.00"
+    assert warnings[0]["message"] == (
+        "Amount variance +20.0% vs PO PO-001, which records no currency "
+        "(invoice 120.00 GBP vs PO 100.00)"
+    )
 
 
 @pytest.mark.asyncio
@@ -178,6 +255,9 @@ async def test_refresh_po_match_partial_is_info_severity():
         po_number="PO-001",
         po_total=100.0,
         within_tolerance=True,
+        # What the matcher sets alongside a short receipt.
+        ordered_quantity=Decimal("10"),
+        received_quantity=Decimal("6"),
         issues=["Partial receipt: 60% of ordered quantity received"],
     )
 
@@ -188,6 +268,72 @@ async def test_refresh_po_match_partial_is_info_severity():
         await invoice_warnings._refresh_po_match(db=AsyncMock(), invoice=inv, warnings=warnings)
 
     assert warnings[0]["severity"] == "info"
+
+
+@pytest.mark.asyncio
+async def test_a_failed_inspection_raises_no_amount_warning_on_an_in_tolerance_invoice():
+    """`status` is shared by the amount leg and the 4-way leg. A failed
+    inspection sets `mismatch` on an invoice whose amount matched, and keyed on
+    `status` alone that raised "Amount variance +0.0%" plus a po_mismatch
+    exception beside the quality hold that was the real finding."""
+    from app.services import invoice_warnings
+    from app.services.po_matching import MatchResult
+
+    inv = _fake_invoice()
+    warnings: list[dict] = []
+    fake_match = MatchResult(
+        match_type="4-way",
+        status="mismatch",
+        po_number="PO-001",
+        po_total=Decimal("100.00"),
+        po_currency="USD",
+        currency_check="same",
+        amount_variance=Decimal("0"),
+        amount_variance_pct=Decimal("0"),
+        within_tolerance=True,
+        inspection_result="fail",
+    )
+
+    with (
+        patch.object(invoice_warnings, "match_invoice_to_po", AsyncMock(return_value=fake_match)),
+        patch.object(invoice_warnings, "_ensure_exception", AsyncMock()) as ensure,
+    ):
+        await invoice_warnings._refresh_po_match(db=AsyncMock(), invoice=inv, warnings=warnings)
+
+    assert [w["code"] for w in warnings] == ["quality_inspection_failed"]
+    assert [call.args[2] for call in ensure.await_args_list] == ["quality_hold"]
+
+
+@pytest.mark.asyncio
+async def test_a_partial_acceptance_on_a_full_receipt_is_not_a_partial_receipt():
+    """A partial quality acceptance sets `partial` on goods that ALL arrived;
+    the receipt sentence ("only part of the ordered quantity has been
+    received") would be false there."""
+    from app.services import invoice_warnings
+    from app.services.po_matching import MatchResult
+
+    inv = _fake_invoice()
+    warnings: list[dict] = []
+    fake_match = MatchResult(
+        match_type="4-way",
+        status="partial",
+        po_number="PO-001",
+        po_total=Decimal("100.00"),
+        within_tolerance=True,
+        ordered_quantity=Decimal("10"),
+        received_quantity=Decimal("10"),
+        inspection_result="partial",
+        inspection_accepted_quantity=7.0,
+    )
+
+    with (
+        patch.object(invoice_warnings, "match_invoice_to_po", AsyncMock(return_value=fake_match)),
+        patch.object(invoice_warnings, "_ensure_exception", AsyncMock()) as ensure,
+    ):
+        await invoice_warnings._refresh_po_match(db=AsyncMock(), invoice=inv, warnings=warnings)
+
+    assert [w["code"] for w in warnings] == ["quality_partial_acceptance"]
+    assert [call.args[2] for call in ensure.await_args_list] == ["quality_hold"]
 
 
 # ---------- over-receipt reaches the exception queue -----------------------
@@ -270,7 +416,7 @@ async def test_refresh_po_match_over_receipt_rides_alongside_an_amount_mismatch(
         ordered_quantity=Decimal("10"),
         received_quantity=Decimal("14"),
         issues=[
-            "Amount mismatch: invoice $150.00 vs PO $100.00 (+50.0%)",
+            "Amount mismatch: invoice 150.00 USD vs PO 100.00 USD (+50.0%)",
             "Over-receipt: 14 received against 10 ordered (+4)",
         ],
     )

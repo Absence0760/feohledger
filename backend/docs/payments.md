@@ -378,7 +378,13 @@ endpoint:
 
 `credit_memos.py`'s own over-application guard (apply refuses a memo that would
 exceed the invoice's remaining creditable balance) is what guarantees the net
-can never go negative. Pinned by
+can never go negative. Its status guard is the other half of the contract: a
+credit is refused on a `paid` or `done` invoice, because netting only happens
+when a payment is built or executed and neither status will see another one — a
+credit applied there would be consumed while reducing nothing. A
+`payment_scheduled` invoice stays creditable: the executor's
+`net_amount_changed` refusal (below) fails the stale booked payment retry-safely
+and the rebuilt run pays net (`docs/decisions.md` §202). Pinned by
 `tests/test_payment_create_credit_memo_netting.py` (standalone) and
 `tests/test_payment_run_credit_memo_netting.py` (runs).
 
@@ -519,9 +525,9 @@ re-sent.
   Positive Pay return) has to stop the re-send here too. Both callers share
   `services/payment_runs.blocked_invoice_ids` so they can't drift.
 - `net_amount_changed` — a credit memo applied while the payment sat `failed`
-  (`credit_memos.py` gates on neither invoice status nor an existing payment)
-  means the failed row's `amount` is no longer what the vendor is owed. The
-  retry re-derives `net_payable_amount` and **skips**; the amount is never
+  (`credit_memos.py` refuses only a `paid` or `done` invoice, and never looks at
+  an existing payment) means the failed row's `amount` is no longer what the
+  vendor is owed. The retry re-derives `net_payable_amount` and **skips**; the amount is never
   silently adjusted, so the operator builds a fresh run through the full gate
   set.
 - `invoice_has_live_payment` — the invoice has since acquired another live

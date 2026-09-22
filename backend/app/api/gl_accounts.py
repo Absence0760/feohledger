@@ -343,9 +343,11 @@ async def update_gl_account(
     now nothing under ``app/`` ever wrote it, so an inactive row was reachable
     only by direct SQL or an imported chart. A retired account disappears from
     every picker and from ``gl_recode._ActiveChart``, so neither offers it for
-    new coding, while every historical line still resolves. (A hand-written
-    write of a retired code is not refused — ``services/gl_chart`` refuses only
-    another entity's code; see ``docs/followups.md``.)
+    new coding, while every historical line still resolves. A hand-written
+    write of a retired code is refused too (``services/gl_chart``,
+    ``docs/decisions.md`` §199) — but only a write that SETS it: a row already
+    carrying the code stays editable, and a CSV row imported as ``done`` /
+    ``paid`` history may still name it.
 
     **Which rows an editor may touch follows the create rule, not the read
     rule.** The read is ``shared ∪ the selected entity``, but a shared row

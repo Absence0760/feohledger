@@ -356,7 +356,13 @@ async def _seed_agent_po_mismatch(mk, org_id, *, invoice_amount, po_total, numbe
     async with mk() as s:
         s.add(
             PurchaseOrder(
-                organization_id=org_id, po_number=po_number, total=po_total, status="open"
+                organization_id=org_id,
+                po_number=po_number,
+                total=po_total,
+                # The invoice's own currency: an agent only adjusts against a PO
+                # proven to be in it (decisions §197).
+                currency="USD",
+                status="open",
             )
         )
         await s.commit()

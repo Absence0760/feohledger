@@ -85,7 +85,7 @@ from app.services import audit_summary
 from app.services.audit_access import build_field_diff
 from app.services.audit_dispatch import dispatch_audit
 from app.services.csv_import import MAX_CSV_IMPORT_SIZE, import_invoices_csv
-from app.services.gl_chart import refuse_foreign_gl_codes
+from app.services.gl_chart import refuse_gl_codes_outside_chart
 from app.services.gl_recode import RecodeFilter, bulk_recode_gl
 from app.services.invoice_warnings import reconcile_line_totals, refresh_warnings
 from app.services.report_export import csv_safe_cell
@@ -187,18 +187,19 @@ INVOICE_SORTABLE_COLUMNS: dict[str, object] = {
 def _invoice_list_filters(
     query,
     *,
-    status: str | None,
-    vendor: str | None,
-    invoice_number: str | None,
-    po_number: str | None,
-    description: str | None,
-    amount_min: Decimal | None,
-    amount_max: Decimal | None,
-    due_date_from: date | None,
-    due_date_to: date | None,
-    search: str | None,
+    status: str | None = None,
+    vendor: str | None = None,
+    invoice_number: str | None = None,
+    po_number: str | None = None,
+    description: str | None = None,
+    amount_min: Decimal | None = None,
+    amount_max: Decimal | None = None,
+    due_date_from: date | None = None,
+    due_date_to: date | None = None,
+    search: str | None = None,
     exclude_status: str | None = None,
     assigned_to_id: uuid.UUID | None = None,
+    vendor_id: uuid.UUID | None = None,
 ):
     """Apply the invoice-list filters to ``query``.
 
@@ -213,6 +214,17 @@ def _invoice_list_filters(
     "My Approvals" quick view (the caller's own id) — an exact match, not a
     search, since it's always a real user id from the assignable-reviewers
     picker or `auth.user.id`, never free text.
+
+    ``vendor_id`` is the exact counterpart of the free-text ``vendor`` leg: an
+    equality on the resolved ``Invoice.vendor_id`` link, never a name match
+    (``vendor=Acme`` also matches "Acme Holdings"). An invoice whose link is
+    NULL matches no vendor id. It is also the vendor leg of the credit-memo
+    invoice picker's eligible set (``credit_memos._eligible_invoices_query``
+    composes this builder), so "this vendor's invoices" means one thing on
+    both surfaces — ``docs/decisions.md`` §202.
+
+    Every parameter defaults to "not filtered", so a caller names only the
+    legs it applies.
     """
     if status:
         statuses = [s.strip() for s in status.split(",")]
@@ -252,6 +264,8 @@ def _invoice_list_filters(
         )
     if assigned_to_id:
         query = query.where(Invoice.assigned_to_id == assigned_to_id)
+    if vendor_id:
+        query = query.where(Invoice.vendor_id == vendor_id)
     return query
 
 
@@ -269,6 +283,7 @@ async def list_invoices(
     due_date_to: date | None = None,
     search: str | None = None,
     assigned_to_id: uuid.UUID | None = None,
+    vendor_id: uuid.UUID | None = None,
     sort: SortParams = Depends(sort_params),
     db: AsyncSession = Depends(get_tenant_db),
     user: User = Depends(get_current_user),
@@ -289,6 +304,7 @@ async def list_invoices(
         due_date_to=due_date_to,
         search=search,
         assigned_to_id=assigned_to_id,
+        vendor_id=vendor_id,
     )
 
     # Count
@@ -335,6 +351,7 @@ async def invoice_counts(
     due_date_to: date | None = None,
     search: str | None = None,
     assigned_to_id: uuid.UUID | None = None,
+    vendor_id: uuid.UUID | None = None,
     db: AsyncSession = Depends(get_tenant_db),
     user: User = Depends(get_current_user),
     entity_id: uuid.UUID | None = Depends(get_entity_id),
@@ -346,7 +363,7 @@ async def invoice_counts(
     tally over the first page of results undercounted past that window.
 
     Takes the list's population filters (`search` + the advanced filters +
-    `assigned_to_id`) through the SAME `_invoice_list_filters` builder as
+    `assigned_to_id` + `vendor_id`) through the SAME `_invoice_list_filters` builder as
     `GET /api/invoices`, so the chips describe exactly the rows the list would
     return — searching "acme" no longer leaves the chips reading `All 1284`
     over a 3-row table. Deliberately NOT `status`: status is the dimension
@@ -369,6 +386,7 @@ async def invoice_counts(
         due_date_to=due_date_to,
         search=search,
         assigned_to_id=assigned_to_id,
+        vendor_id=vendor_id,
     ).group_by(Invoice.status)
     result = await db.execute(counts_q)
     counts: dict[str, int] = {}
@@ -394,6 +412,7 @@ async def list_invoice_ids(
     search: str | None = None,
     exclude_status: str | None = None,
     assigned_to_id: uuid.UUID | None = None,
+    vendor_id: uuid.UUID | None = None,
     db: AsyncSession = Depends(get_tenant_db),
     user: User = Depends(get_current_user),
     entity_id: uuid.UUID | None = Depends(get_entity_id),
@@ -425,6 +444,7 @@ async def list_invoice_ids(
         search=search,
         exclude_status=exclude_status,
         assigned_to_id=assigned_to_id,
+        vendor_id=vendor_id,
     )
 
     total = (await db.execute(select(func.count()).select_from(query.subquery()))).scalar() or 0
@@ -1099,11 +1119,13 @@ async def save_invoice_line_items(
         "gl_accounts": sorted({r[_LINE_GL_IDX] for r in before_rows if r[_LINE_GL_IDX]}),
     }
 
-    # A line GL code must resolve in the invoice's own chart, the same rule the
-    # header PATCH applies (`services/gl_chart`). Only codes NEW to the invoice's
-    # lines are checked: this is a delete-and-reinsert of the whole set, so a
-    # code merely carried over from the previous lines is not a coding decision.
-    await refuse_foreign_gl_codes(
+    # A line GL code must resolve in the invoice's own chart — never another
+    # entity's, and an active account of it whenever it has any — the same rule
+    # the header PATCH applies (`services/gl_chart`, decisions §194/§199). Only
+    # codes NEW to the invoice's lines are checked: this is a delete-and-reinsert
+    # of the whole set, so a code merely carried over from the previous lines
+    # (even one whose account has since been retired) is not a coding decision.
+    await refuse_gl_codes_outside_chart(
         db,
         organization_id=invoice.organization_id,
         entity_id=invoice.entity_id,
@@ -1201,8 +1223,9 @@ async def create_invoice(
     entity_id: uuid.UUID = Depends(get_write_entity_id),
 ):
     # The code is resolved against the chart of the entity this invoice lands
-    # under — never another subsidiary's (`services/gl_chart`).
-    await refuse_foreign_gl_codes(
+    # under — never another subsidiary's, and an active account of it whenever
+    # it has any (`services/gl_chart`, decisions §194/§199).
+    await refuse_gl_codes_outside_chart(
         db, organization_id=org.id, entity_id=entity_id, codes=[body.gl_account]
     )
     invoice = Invoice(
@@ -1520,12 +1543,14 @@ async def update_invoice(
                 detail="Cannot edit financial fields once the invoice is approved",
             )
     # A GL code NEW to this invoice must resolve in the invoice's own chart
-    # (shared ∪ its entity), not another subsidiary's (`services/gl_chart`).
-    # Only a changed value is checked: a save that echoes the stored code back
-    # is not a coding decision, and refusing it would freeze the invoice.
+    # (shared ∪ its entity): not another subsidiary's, and an active account of
+    # it whenever it has any (`services/gl_chart`, decisions §194/§199). Only a
+    # changed value is checked: a save that echoes the stored code back is not a
+    # coding decision, and refusing it would freeze an invoice whose account was
+    # retired after it was coded — an unrelated edit must still go through.
     new_gl = update_data.get("gl_account")
     if new_gl and new_gl != invoice.gl_account:
-        await refuse_foreign_gl_codes(
+        await refuse_gl_codes_outside_chart(
             db,
             organization_id=invoice.organization_id,
             entity_id=invoice.entity_id,

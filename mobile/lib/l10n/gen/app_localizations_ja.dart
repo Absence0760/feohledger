@@ -558,7 +558,9 @@ class AppLocalizationsJa extends AppLocalizations {
   String get invoiceDetailUpdated => '請求書を更新しました';
 
   @override
-  String get invoiceDetailUpdateFailed => '変更を保存できませんでした。もう一度お試しください';
+  String invoiceDetailUpdateFailed(String error) {
+    return '変更を保存できませんでした: $error';
+  }
 
   @override
   String get invoiceDetailApproved => '請求書を承認しました';
@@ -2302,6 +2304,25 @@ class AppLocalizationsJa extends AppLocalizations {
     String poTotal,
   ) {
     return '発注 $poNumber との金額差異 $variancePct（請求 $invoiceAmount / 発注 $poTotal）';
+  }
+
+  @override
+  String invoiceWarningPoAmountVariancePoCurrencyUnknown(
+    String variancePct,
+    String poNumber,
+    String invoiceAmount,
+    String poTotal,
+  ) {
+    return '通貨が記録されていない発注 $poNumber との金額差異 $variancePct（請求 $invoiceAmount / 発注 $poTotal）';
+  }
+
+  @override
+  String invoiceWarningPoCurrencyMismatch(
+    String invoiceCurrency,
+    String poNumber,
+    String poCurrency,
+  ) {
+    return '請求書は $invoiceCurrency、発注 $poNumber は $poCurrency のため、金額を比較していません';
   }
 
   @override

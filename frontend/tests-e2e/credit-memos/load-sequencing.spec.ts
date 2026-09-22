@@ -11,7 +11,8 @@ import { expect, test } from '../fixtures/helpers';
  *    effect read `statusFilter` *transitively* through `loadMemos` (Svelte
  *    tracks reads through called functions), so it subscribed to the filter too
  *    and every chip click re-ran BOTH — two racing page-1 requests per click,
- *    plus a pointless refetch of the vendor and invoice selects.
+ *    plus a pointless refetch of the vendor and invoice selects (which the
+ *    page no longer loads at all — see `recordInvoiceListRequests`).
  * 2. `loadMemos` never touched `loading`, so a status-chip change sat on the
  *    previous filter's rows — or, from empty, kept asserting "No credit memos."
  *    — with no spinner until the response landed.
@@ -43,33 +44,36 @@ function memo(n: number, status: 'open' | 'applied' | 'void' = 'open') {
 }
 
 /**
- * Stub the invoice list the page loads alongside the memo list (the invoice
- * selects in its dialogs). The vendor list is no longer fetched on mount —
- * `ui/VendorPicker` searches it on demand — so it needs no stub.
+ * Record every request the page makes for an INVOICE list — `GET
+ * /api/invoices` itself, or either credit-memo `eligible-invoices` read.
  *
- * Matched on the EXACT pathname. These stubs used to be the globs
- * `**\/api/vendors*` and `**\/api/invoices*`, which under `vite dev` also
- * match the dev server's module URLs for `src/lib/api/vendors.ts` (imported
- * by `VendorPicker`) and `src/lib/api/invoices.ts`. Answering the module with
- * JSON meant the route never loaded, so all three tests here failed locally
- * while CI — which serves a preview build of hashed chunks — stayed green
- * (issue #443). See tests-e2e/README.md § Stubbing an API route.
+ * The page used to fill both dialogs' invoice selects on MOUNT by walking every
+ * page of `GET /api/invoices` (`fetchAllPages`), then filtering by vendor in the
+ * browser: one request per 100 invoices on every visit, for a list most visits
+ * never open. The pickers now ask for exactly their eligible set when a dialog
+ * opens (docs/decisions.md §202), so mount must ask for none.
+ *
+ * A listener rather than a stub, and matched on the EXACT pathname: under
+ * `vite dev` the app's own `src/lib/api/invoices.ts` and
+ * `src/lib/api/creditMemos.ts` are fetched too, and they are modules, not
+ * invoice lists (tests-e2e/README.md § Stubbing an API route).
  */
-async function stubSelects(page: import('@playwright/test').Page) {
-	await page.route(
-		(url) => url.pathname === '/api/invoices',
-		(route) =>
-			route.fulfill({
-				status: 200,
-				contentType: 'application/json',
-				body: JSON.stringify({ items: [], total: 0 })
-			})
-	);
+function recordInvoiceListRequests(page: import('@playwright/test').Page): string[] {
+	const seen: string[] = [];
+	page.on('request', (request) => {
+		const { pathname } = new URL(request.url());
+		if (pathname === '/api/invoices' || /^\/api\/credit-memos\/(.+\/)?eligible-invoices$/.test(pathname)) {
+			seen.push(pathname);
+		}
+	});
+	return seen;
 }
 
 test.describe('/credit-memos — list request sequencing', () => {
-	test('mount issues exactly one page-1 list request', async ({ page }) => {
-		await stubSelects(page);
+	test('mount issues exactly one page-1 list request, and no invoice list at all', async ({
+		page
+	}) => {
+		const invoiceLists = recordInvoiceListRequests(page);
 
 		const listUrls: string[] = [];
 		await page.route('**/api/credit-memos*', async (route) => {
@@ -102,6 +106,9 @@ test.describe('/credit-memos — list request sequencing', () => {
 
 		expect(listUrls, `mount fired ${listUrls.length} list requests: ${listUrls.join(', ')}`)
 			.toHaveLength(1);
+		// The same quiet network is what makes this absence honest: whatever the
+		// mount was going to ask for has been asked for by now.
+		expect(invoiceLists, `mount fetched invoice lists: ${invoiceLists.join(', ')}`).toEqual([]);
 
 		// A status chip is one request too — not one per subscribed effect.
 		listUrls.length = 0;
@@ -117,7 +124,6 @@ test.describe('/credit-memos — list request sequencing', () => {
 	test('a status change shows the loading state instead of claiming the list is empty', async ({
 		page
 	}) => {
-		await stubSelects(page);
 
 		let releaseSecond: () => void = () => {};
 		const secondGate = new Promise<void>((resolve) => (releaseSecond = resolve));
@@ -158,7 +164,6 @@ test.describe('/credit-memos — list request sequencing', () => {
 	});
 
 	test('a held page-2 append cannot clobber a newer status-filtered page 1', async ({ page }) => {
-		await stubSelects(page);
 
 		let releaseAppend: () => void = () => {};
 		const appendGate = new Promise<void>((resolve) => (releaseAppend = resolve));

@@ -53,7 +53,7 @@ from app.schemas.recurring_invoice import (
 )
 from app.services import recurring_invoices as svc
 from app.services.audit_dispatch import dispatch_audit
-from app.services.gl_chart import refuse_foreign_gl_codes
+from app.services.gl_chart import refuse_gl_codes_outside_chart
 from app.tenant import (
     apply_entity_scope,
     get_entity_id,
@@ -295,8 +295,10 @@ async def create_template(
     vendor_name = await _resolve_vendor_name(db, vendor_uuid)
     # Every invoice this template raises is coded with this string and lands
     # under the template's entity, so the code has to resolve in THAT entity's
-    # chart — refused here, once, rather than on each generated invoice.
-    await refuse_foreign_gl_codes(
+    # chart — never another's, and an active account of it whenever it has any
+    # (`services/gl_chart`, decisions §194/§199) — refused here, once, rather
+    # than on each generated invoice.
+    await refuse_gl_codes_outside_chart(
         db, organization_id=org_id, entity_id=entity_id, codes=[body.gl_account]
     )
 
@@ -371,9 +373,11 @@ async def update_template(
     template = await _get_scoped(db, template_id, entity_id)
     data = body.model_dump(exclude_unset=True)
 
+    # Only a CHANGED code is judged: the form re-sends every field, and a
+    # template coded before its account was retired must stay editable.
     new_gl = data.get("gl_account")
     if new_gl and new_gl != template.gl_account:
-        await refuse_foreign_gl_codes(
+        await refuse_gl_codes_outside_chart(
             db,
             organization_id=template.organization_id,
             entity_id=template.entity_id,

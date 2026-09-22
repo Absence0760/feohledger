@@ -230,10 +230,14 @@ approve.
   `mismatch` (variance beyond the matcher's own band), and `partial` (3-way
   underdelivery — goods only partially received) all **escalate** — paying a
   partially-received PO in full would be wrong.
-- **Currency:** a `PurchaseOrder` has no currency of its own in the schema; its
-  `total` is denominated in the invoice's currency, so there is no
-  cross-currency comparison to make. If per-PO currency is ever added, the
-  resolver must gate on `invoice.currency == po.currency` before adjusting.
+- **Currency:** a `PurchaseOrder` records its own currency (migration 0099), and
+  the resolver only snaps an invoice to a PO total the matcher proved is in the
+  **same** currency (`match.currency_check == "same"`), in `evaluate` and again
+  under the lock in `apply`. Different currencies are already a `mismatch`, so
+  they never reach here as `matched`; a PO that records **no** currency was
+  compared at face value, which a human may accept but an agent that rewrites the
+  invoice amount must not — it escalates (`docs/decisions.md` §197,
+  `po-matching.md` § The currency guard).
 - **Tolerance:** default **2.5%** (deliberately tighter than the matcher's 5%
   warning band so the agent never silently absorbs a variance a human reviewer
   would still consider material). Override via
@@ -377,6 +381,12 @@ rather than escalating a blank.
   - `0.80` for an undated, vendor+amount-only match — deliberately **below** the
     `balanced` 0.90 gate, so it auto-resolves only under `aggressive` autonomy.
   - Zero or **multiple** candidates → `0.0` → escalate (ambiguous → a human picks).
+- **Currency** (`docs/decisions.md` §197): a PO in a **different** currency from
+  the invoice is never a candidate — it cannot match on amount. A PO recording
+  **no** currency stays in the pool (dropping it could turn two plausible
+  candidates into a false unique one), but when it is the one left standing the
+  resolver escalates rather than link and approve on an unproven currency; `apply`
+  additionally requires the post-link match's `currency_check` to be `same`.
 - **`apply` — link + approve via the audited path.** There is no `Invoice.po_id`
   FK; the link is `invoice.po_number` (+ aligning `invoice.vendor_id` to the PO's
   when absent), mirroring how `po_matching` resolves a PO. `apply` re-locks the
@@ -429,6 +439,12 @@ or three POs. This is the deferred *"Multi-PO split matching"* follow-up to
     "unique" one — so the resolver **escalates with a logged rationale**
     (`SubsetSearchTooLarge`) instead of searching a partial pool. Size-1 subsets
     are excluded by construction (that's `missing_po_v1`'s job).
+- **Currency** (`docs/decisions.md` §197): a PO in a **different** currency never
+  enters the pool — summing EUR and USD totals is adding unlike quantities. One
+  recording **no** currency stays in (so the uniqueness search still sees every
+  plausible set), but a chosen set containing one escalates, and `apply`
+  re-checks every PO in the set under the lock. The persisted multi-PO snapshot
+  carries `po_currency` / `currency_check` so the modal labels the combined total.
 - **Ambiguity / none → escalate.** `find_po_subset` returns the single matching
   set only when **exactly one** distinct subset sums within tolerance; **more than
   one** (ambiguous) or **zero** → `None` → escalate. It never picks arbitrarily.

@@ -4,6 +4,7 @@ import {
   API_BASE,
   acceptConsent,
   currentTenantSlug,
+  deleteInvoicesWhere,
   expect,
   test,
   tenantPsql,
@@ -336,34 +337,46 @@ test.describe("/portal — self-service (PO flip, remittance, company)", () => {
       10,
     );
 
-    await page.getByRole("link", { name: "Purchase Orders" }).click();
-    await expect(page).toHaveURL(/\/portal\/purchase-orders/, {
-      timeout: 5_000,
-    });
-    await expect(
-      page.getByRole("heading", { name: "Purchase Orders" }),
-    ).toBeVisible({ timeout: 5_000 });
+    try {
+      await page.getByRole("link", { name: "Purchase Orders" }).click();
+      await expect(page).toHaveURL(/\/portal\/purchase-orders/, {
+        timeout: 5_000,
+      });
+      await expect(
+        page.getByRole("heading", { name: "Purchase Orders" }),
+      ).toBeVisible({ timeout: 5_000 });
 
-    // Flip the first PO — the page routes to the invoices list on success.
-    await page
-      .getByRole("button", { name: "Create invoice" })
-      .first()
-      .click();
-    await expect(page).toHaveURL(/\/portal\/invoices/, { timeout: 15_000 });
+      // Flip the first PO — the page routes to the invoices list on success.
+      await page
+        .getByRole("button", { name: "Create invoice" })
+        .first()
+        .click();
+      await expect(page).toHaveURL(/\/portal\/invoices/, { timeout: 15_000 });
 
-    // The new invoice landed for this vendor.
-    await expect
-      .poll(
-        () =>
-          parseInt(
-            tenantPsql(
-              `SELECT count(*) FROM invoices WHERE vendor_id='${vendorId}'`,
-            ).trim(),
-            10,
-          ),
-        { timeout: 10_000 },
-      )
-      .toBeGreaterThan(invoicesBefore);
+      // The new invoice landed for this vendor.
+      await expect
+        .poll(
+          () =>
+            parseInt(
+              tenantPsql(
+                `SELECT count(*) FROM invoices WHERE vendor_id='${vendorId}'`,
+              ).trim(),
+              10,
+            ),
+          { timeout: 10_000 },
+        )
+        .toBeGreaterThan(invoicesBefore);
+    } finally {
+      // Both rows this test created go back out. Leaving them was invisible in
+      // CI (a fresh seed per shard) and cumulative locally: every run added one
+      // invoice to the portal vendor, and once it passed the list's 20-row
+      // page the back-dated rows `list-filters.spec.ts` seeds fell off page 1
+      // and its date-range assertions could never pass again.
+      deleteInvoicesWhere(
+        `vendor_id='${vendorId}' AND po_number='${freshPo}'`,
+      );
+      tenantPsql(`DELETE FROM purchase_orders WHERE po_number='${freshPo}'`);
+    }
   });
 
   test("a vendor downloads a remittance PDF for a completed payment", async ({

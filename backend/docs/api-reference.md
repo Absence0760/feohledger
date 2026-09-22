@@ -94,7 +94,7 @@ full): `/gl-accounts` — it feeds the invoice GL dropdown, which needs every ro
 |---------|------------------------------|-------|--------------------------------------------------------------------|
 | `POST`  | `/api/auth/login`            | (public) | Login with email/password. Returns either `TokenResponse` (`{access_token, must_change_password}`) or `MFAChallengeResponse` (`{mfa_required: true, mfa_challenge_token, methods, must_enroll}`) when MFA is in play. |
 | `POST`  | `/api/auth/logout`           | * | Revoke current token via Redis blocklist                           |
-| `GET`   | `/api/auth/me`               | * | Get current user (roles, `must_change_password`, `mfa_enabled`, `mfa_required_by_org`) |
+| `GET`   | `/api/auth/me`               | * | Get current user (roles, `must_change_password`, `mfa_enabled`, `mfa_required_by_org`, `password_sign_in_closed` — the org's `sso_only` rule exactly as login and the step-up enforce it, so `/profile` stops offering the password as a proof there; `docs/decisions.md` §201) |
 | `PATCH` | `/api/auth/me`               | * | Update own name or password                                        |
 | `POST`  | `/api/auth/change-password`  | * | Set a new password (clears `must_change_password`)                 |
 | `GET`   | `/api/auth/sessions`         | * | The caller's own live sessions, newest first — `{id (jti), created_at, expires_at, ip, device, method, current}`. Expired-but-tracked entries are pruned, not listed. |
@@ -115,7 +115,7 @@ TOTP-based two-factor with email-OTP backup. Master switch `FEOH_MFA_ENABLED` (d
 | `POST` | `/api/auth/mfa/verify`            | (challenge token) | Body `{challenge_token, code, method}` (`method` ∈ `totp`/`email`). Returns `TokenResponse`. |
 | `POST` | `/api/auth/mfa/enroll`            | * | Optional body `{password?, code?, assertion?}`. Mints a CANDIDATE TOTP secret + QR (parked in Redis, not on the account). Returns `{secret, provisioning_uri, qr_code_data_url}`. 400 without a valid step-up when the account already has a live factor. |
 | `POST` | `/api/auth/mfa/enroll/verify`     | * | Body `{code}`. Promotes the pending candidate onto the account and flips `mfa_enabled` true — the only writer of `mfa_secret`. |
-| `POST` | `/api/auth/mfa/disable`           | * | Optional body `{password?, code?, assertion?}` — the same three-proof step-up as every other factor change (an SSO-only account has no password, so its passkey assertion is the proof). Turns MFA off. Blocked when org enforces MFA. In a tenant with `sso_only` on, a `password` is never a proof on any step-up (it cannot sign in there either) — 400 naming the code / passkey proofs instead. |
+| `POST` | `/api/auth/mfa/disable`           | * | Optional body `{password?, code?, assertion?}` — the same three-proof step-up as every other factor change (an SSO-only account has no password, so its passkey assertion is the proof). Turns MFA off. Blocked when org enforces MFA. In a tenant with `sso_only` on, a `password` is never a proof on any step-up (it cannot sign in there either), and every refused step-up there — a password, or a code / passkey that did not verify — is a 400 naming only the code / passkey proofs. |
 | `POST` | `/api/auth/mfa/passkey/register`  | * | Optional body `{password?, code?, assertion?}`. Mints WebAuthn registration options. 400 without a valid step-up when a factor is already live (TOTP or an existing passkey). |
 | `DELETE` | `/api/auth/mfa/passkey/{id}`    | * | Body `{password?, code?, assertion?}` — step-up ALWAYS required (the passkey is itself a live factor). Opaque 404 for an id that isn't the caller's. Blocked when it's the last factor under org enforcement. |
 | `POST` | `/api/auth/mfa/step-up/passkey`   | * | Body `{operation}` (`totp_enroll`\|`totp_disable`\|`passkey_register`\|`passkey_delete`). Mints WebAuthn assertion options for a factor-management step-up; the signed response goes back as `assertion` on the matching call. Challenge is single-use and bound to (user, step-up, operation), so it can't be replayed as a login or against a different operation. 400 when the account has no registered passkey. |
@@ -187,7 +187,7 @@ All three answer a bare `404` when `FEOH_SIGNUP_ENABLED` is off — before valid
 | Method | Path                              | Roles  | Description |
 |--------|-----------------------------------|--------|-------------|
 | `GET`  | `/api/organization`               | *      | Get the current tenant's org settings (company, invoice defaults, ERP, extraction, cards, mfa, sso) |
-| `PATCH` | `/api/organization`              | admin  | Patch settings. Body `{name?, settings?}` — `settings` is merged into existing JSONB. |
+| `PATCH` | `/api/organization`              | admin  | Patch settings. Body `{name?, settings?}` — `settings` is merged into existing JSONB one top-level key at a time, so a key sent replaces that whole block (send the complete `sso` block, not just the field you are changing). A `settings.sso` with `enabled` and `sso_only` whose IdP block does not resolve is a `422` naming the missing or invalid keys, never their values (see `docs/authentication.md` § SSO-only mode). |
 | `POST` | `/api/organization/test-erp`      | admin  | Test ERP connection (uses request body if provided, otherwise saved config) |
 | `POST` | `/api/organization/test-extraction` | admin  | Test AI extraction provider connection |
 | `POST` | `/api/organization/sso/scim-token` | admin  | Mint (or rotate) the per-tenant SCIM bearer. Returns `{token, bearer_hash_prefix}` ONCE. |
@@ -197,7 +197,7 @@ All three answer a bare `404` when `FEOH_SIGNUP_ENABLED` is off — before valid
 | Method   | Path                                | Roles | Description |
 |----------|-------------------------------------|-------|-------------|
 | `GET`    | `/api/invoices`                     | *     | List invoices (paginated, filterable). Returns `priors_summary` and `po_match` per row when applicable. |
-| `GET`    | `/api/invoices/counts`              | *     | Per-status tallies for the list-page filter chips — `{counts: {status: n}, total}` via a server-side GROUP BY. Honours the list's population filters (`search`, `vendor`, `invoice_number`, `po_number`, `description`, `amount_min/max`, `due_date_from/to`, `assigned_to_id`) through the SAME `_invoice_list_filters` builder as `GET /api/invoices`, so the chips describe exactly the rows the list would return — **not** `status` (the dimension being tallied). Entity-scoped. Mirrors `/api/vendors/counts` and `/api/purchase-orders/counts`. |
+| `GET`    | `/api/invoices/counts`              | *     | Per-status tallies for the list-page filter chips — `{counts: {status: n}, total}` via a server-side GROUP BY. Honours the list's population filters (`search`, `vendor`, `invoice_number`, `po_number`, `description`, `amount_min/max`, `due_date_from/to`, `assigned_to_id`, `vendor_id`) through the SAME `_invoice_list_filters` builder as `GET /api/invoices`, so the chips describe exactly the rows the list would return — **not** `status` (the dimension being tallied). Entity-scoped. Mirrors `/api/vendors/counts` and `/api/purchase-orders/counts`. |
 | `GET`    | `/api/invoices/assignable-reviewers` | admin/manager | Candidate approvers for `POST /api/invoices/{id}/assign` — a bare list of `{id, full_name, is_active}` for the org's ACTIVE users holding a role that confers `invoice.approve` (resolved via `effective_permissions`, so a custom role granting it is offered). Deliberately narrower than `GET /api/admin/users`: **no email, no roles, no audit metadata** — that projection is what makes the admin directory admin-only, and none of it is needed to pick an approver. RBAC mirrors `/assign` exactly (admin + ap_manager); the picker used to source the admin route and 403'd for every other role, so an invoice on a `approver_strategy: "manual"` workflow could not be submitted at all. |
 | `GET`    | `/api/invoices/chat/mentionable-users` | any authed | Colleagues the supplier-chat @mention picker may offer — the same `{id, full_name, is_active}` shape as `assignable-reviewers`, for the org's ACTIVE users. Gated on `get_current_user`, matching `POST /api/invoices/{id}/chat` exactly: reading the candidate list and acting on it are the same privilege. Deliberately NOT `assignable-reviewers` (admin/manager-only and scoped to `invoice.approve` holders — an ap_clerk or CFO can post a mention yet could not read that list) and deliberately NOT `GET /api/admin/users` (admin-only, and carries the email/roles a chat composer must not hold). The POST validates `mention_user_ids` against this same roster — an id outside it is a 400, not a silently stored mention of somebody who is never notified. See `docs/supplier-chat.md`. |
 | `GET`    | `/api/invoices/{id}`                | *     | Get single invoice — includes the latest `po_match` JSONB result and any `warnings`. A warning is `{type, severity, message, code, params}`: `code` + `params` are what a client localizes on, `message` the backend's English fallback (and the only field on a row written before the code catalogue shipped). See `backend/docs/invoice-warnings.md` |
@@ -215,7 +215,7 @@ All three answer a bare `404` when `FEOH_SIGNUP_ENABLED` is off — before valid
 | `POST`   | `/api/invoices/bulk/export`         | *     | Bulk export (CSV/JSON/XML) |
 | `POST`   | `/api/invoices/bulk-recode-gl`      | admin | Bulk GL re-code via vendor priors (+ optional AI fallback). Defaults to dry-run. See [`ai-extraction.md`](ai-extraction.md) § Bulk re-coding. |
 
-**Query parameters for `GET /api/invoices`:** `page`, `page_size`, `status` (comma-sep), `vendor`, `invoice_number`, `po_number`, `description`, `amount_min`, `amount_max`, `due_date_from`, `due_date_to`, `search`, `assigned_to_id` (exact match on `Invoice.assigned_to_id`; the frontend's "Assigned to" filter and "My Approvals" quick view both drive off it — the latter passing the caller's own id). `GET /api/invoices/ids` (the select-all-matching resolver) accepts the same filter set, `assigned_to_id` included, so a select-all under either filter can't silently widen past what's on screen. Every invoice row already carries `assigned_to_id` + `assigned_to` (the display name, denormalized at assign time) in `InvoiceResponse` — no separate lookup needed to render an assignee column.
+**Query parameters for `GET /api/invoices`:** `page`, `page_size`, `status` (comma-sep), `vendor`, `invoice_number`, `po_number`, `description`, `amount_min`, `amount_max`, `due_date_from`, `due_date_to`, `search`, `assigned_to_id` (exact match on `Invoice.assigned_to_id`; the frontend's "Assigned to" filter and "My Approvals" quick view both drive off it — the latter passing the caller's own id), `vendor_id` (exact match on the resolved `Invoice.vendor_id` link — the counterpart of the free-text `vendor`, which is a substring of the invoice's own vendor NAME and so also matches "Acme Holdings" for "Acme"; an unlinked invoice matches no id; a malformed value is a 422, like `assigned_to_id`; `docs/decisions.md` §202). `GET /api/invoices/ids` (the select-all-matching resolver) and `GET /api/invoices/counts` accept the same filter set, `assigned_to_id` and `vendor_id` included, so a select-all or a chip tally under either filter can't silently widen past what's on screen. Every invoice row already carries `assigned_to_id` + `assigned_to` (the display name, denormalized at assign time) in `InvoiceResponse` — no separate lookup needed to render an assignee column.
 
 ## Workflow Actions (per invoice)
 
@@ -313,9 +313,9 @@ See [`access-reviews.md`](access-reviews.md).
 
 | Method | Path                           | Roles | Description |
 |--------|--------------------------------|-------|-------------|
-| `GET`  | `/api/purchase-orders`         | * | List POs (filterable by `status`, `vendor_id`, `search`) |
+| `GET`  | `/api/purchase-orders`         | * | List POs (filterable by `status`, `vendor_id`, `search`). Each row carries its own `currency` — `null` when the PO records none (the client renders it bare); the detail route serves the same field, which labels `total` and every line, plus each linked invoice's OWN `currency` (`docs/decisions.md` §197) |
 | `GET`  | `/api/purchase-orders/counts`  | * | Whole-set status tallies for the filter chips — `{total, by_status}`, entity-scoped, honours `search` + `vendor_id` through the SAME `_purchase_order_list_filters` builder as the list (but not `status`, the dimension being tallied). Mirrors `GET /api/vendors/counts`; the list's `total` counts only the ACTIVE filter's result set, so it can't label the All chip. A malformed `vendor_id` is a 422 from the boundary on both endpoints — as is an explicitly EMPTY `?vendor_id=`, which previously read as falsy and silently dropped the filter. |
-| `POST` | `/api/purchase-orders/sync-erp` | admin/manager | Pull POs from connected ERP |
+| `POST` | `/api/purchase-orders/sync-erp` | admin/manager | Pull POs from connected ERP. Stores the currency the ERP record states (NULL when none); on a re-sync a stated code wins and an absent one never erases a recorded code |
 
 ## GL Accounts
 
@@ -426,6 +426,8 @@ Used by 3-way matching. `admin` / `ap_manager` / `ap_clerk`.
 |--------|-----------------------------------|-------|-------------|
 | `GET`  | `/api/credit-memos`                | admin, ap_manager, ap_clerk, cfo | List credit memos (paginated, entity-scoped). `?status=`, `?search=` (substring of the memo number or the vendor name), `?sort=` ∈ `issued_date` / `amount` / `memo_number` with `?order=asc\|desc` — any other sort key is a 422 |
 | `GET`  | `/api/credit-memos/counts`        | admin, ap_manager, ap_clerk, cfo | Per-status tallies for the filter chips: `{total, by_status: {open, applied, void}}`, over the list's own population filters (entity scope + `?search=`), never `status` |
+| `GET`  | `/api/credit-memos/eligible-invoices` | admin, ap_manager | The invoices a NEW memo can be linked to at creation: `?vendor_id=` (required, entity-scoped like create — 404 otherwise), optional `?amount=` (validated like a memo amount), `?search=`, paged — see § Eligible invoices |
+| `GET`  | `/api/credit-memos/{id}/eligible-invoices` | admin, ap_manager | The invoices `/apply` will accept for this memo — its terms read off the row; same opaque 404 as every by-id route, the apply's own 409 for a memo that is not `open` — see § Eligible invoices |
 | `POST` | `/api/credit-memos`                | admin, ap_manager | Create a credit memo. With no `invoice_id` it lands `open`; with one it is applied on the spot and runs the same guards as `/apply` |
 | `PATCH` | `/api/credit-memos/{id}`          | admin, ap_manager | Correct an `open`, never-applied memo — see § Editing a memo. 409 on anything else |
 | `POST` | `/api/credit-memos/{id}/apply`     | admin, ap_manager | Apply an `open` credit memo against a payable |
@@ -479,8 +481,21 @@ surfaced as a 500).
 
 Both application paths (`POST /api/credit-memos` with an `invoice_id`, and
 `POST /api/credit-memos/{id}/apply`) row-lock the target invoice (and `/apply`
-the memo itself — see § Editing a memo) and then enforce, in order, four 409s:
+the memo itself — see § Editing a memo) and then enforce, in order, five 409s:
 
+0. **The invoice must still be one a payment will read** — a credit does
+   nothing by itself; `services/payment_runs.net_payable_amount` subtracts it
+   when a payment is built or executed. So an invoice no payment will read again
+   is refused: `paid` (its money has left) and `done` (terminal). The memo stays
+   `open` for the vendor's next invoice. The admitted set is
+   `credit_memos.CREDITABLE_INVOICE_STATUSES`, DERIVED from
+   `workflow_engine.VALID_TRANSITIONS` as "can still reach `payment_scheduled`
+   without first being `paid`" rather than written out — so `rejected` and
+   `failed` (which re-enter the flow) and `payment_scheduled` itself (a booked
+   payment the executor's `net_amount_changed` refusal re-nets) are admitted,
+   and a voided payment (`paid → approved`) makes the invoice creditable again.
+   Checked first, because it is about the invoice alone
+   (`_assert_creditable_status`; `docs/decisions.md` §202).
 1. **Vendor must match, and must be PROVEN to match** — the memo's `vendor_id`
    has to equal the invoice's `vendor_id`. A NULL `Invoice.vendor_id` is
    **refused**, not waved through: an unlinked invoice is one whose vendor
@@ -503,6 +518,45 @@ the memo itself — see § Editing a memo) and then enforce, in order, four 409s
 4. **No over-application** — the sum of `applied` memos on an invoice may never
    exceed the invoice amount (a credit past the balance would mint a negative
    payable).
+
+### Eligible invoices — the pickers offer exactly what the guards accept
+
+`GET /api/credit-memos/{id}/eligible-invoices` (behind the Apply dialog) and
+`GET /api/credit-memos/eligible-invoices?vendor_id=` (behind the create dialog's
+optional link) return the invoices the matching application path will accept —
+the same set, not an approximation of it (`docs/decisions.md` §202). One builder,
+`_eligible_invoices_query`, is the SQL form of the five guards above, clause by
+clause: the caller's `X-Entity-ID` scope (the application paths look the invoice
+up under it), a status in `CREDITABLE_INVOICE_STATUSES` (never `paid` or
+`done`), `Invoice.vendor_id` equal to the memo's vendor (through the invoice
+list's own `vendor_id` leg, so an unlinked invoice is never offered), the entity
+rule (a NULL on either side admitted), the currency rule (case- and
+space-insensitive, a blank invoice currency admitted), and the balance rule —
+`amount − Σ applied credits ≥` the memo's amount, or `> 0` when the create
+dialog has no amount yet (every credit is strictly positive, so a fully credited
+invoice can take none).
+
+- **The Apply read takes its terms from the memo row**, not the client, so the
+  list cannot describe a memo someone has since edited, and a memo that is no
+  longer `open` gets the apply's own 409 rather than a list none of which the
+  apply could accept.
+- **The create read has no currency leg**: a linked create that names no
+  currency inherits the invoice's, which is what the dialog sends. Its `amount`
+  mirrors a memo amount's validation (`> 0`, two decimal places), so an
+  over-precise bound can never be rounded onto a boundary row.
+- **The status leg is the guard's own set**, so a `paid` or `done` invoice is
+  neither offered nor accepted, and a scheduled, rejected or failed one is both.
+- `search` is the invoice list's own search leg (invoice #, PO #, description,
+  vendor name — a literal substring); results are newest first; each row carries
+  `creditable_balance` beside `amount`. RBAC is the application's
+  (admin / ap_manager): reading the targets and acting on them are one privilege.
+
+`backend/tests/test_credit_memos.py` pins the contract as a set equality over a
+matrix of every refusal (another currency, another vendor, an unlinked invoice,
+too little balance, a partly credited invoice, another entity, `paid`, `done`)
+and the admissions beside each (lowercase and blank currency, the exact-balance
+boundary, `payment_scheduled`, `rejected`, `failed`): what the endpoint lists is
+what the path accepts.
 
 ### Editing a memo — `PATCH /api/credit-memos/{id}`
 

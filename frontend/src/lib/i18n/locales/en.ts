@@ -98,6 +98,7 @@ export const en = {
 	'common.retrying': 'Retrying…',
 	'common.loadFailed': 'Couldn’t load this list. Refresh to try again.',
 	'common.amountInvalid': 'Enter the amount as a plain number, e.g. 1200 or 1200.50',
+	'common.reportingCurrencyUnresolved': 'reporting currency',
 
 	// Cookie / consent banner (lib/components/ConsentBanner.svelte). It mounts
 	// from the root layout, so it is the FIRST thing a non-English visitor sees
@@ -182,6 +183,9 @@ export const en = {
 	'profile.mfa.requiredNoDisable': 'Your organization requires MFA, so disabling is not available.',
 	'profile.mfa.requiredEnroll': 'Your organization requires MFA — please enroll now.',
 	'profile.mfa.disablePassword': 'Enter your password to disable MFA',
+	'profile.mfa.disableCode': 'Enter a current authenticator code to disable MFA',
+	'profile.mfa.ssoOnlyNoPassword':
+		"Your organization signs in with single sign-on, so your password can't confirm changes to your two-factor settings.",
 	'profile.mfa.confirmWithPasskey': 'Confirm with a passkey',
 	'profile.mfa.disable': 'Disable two-factor',
 	'profile.mfa.disabling': 'Disabling…',
@@ -208,6 +212,10 @@ export const en = {
 	'profile.passkeys.stepUpPassword': 'Confirm your password to add or remove a passkey',
 	'profile.passkeys.stepUpBlankHint':
 		'Leave this blank to confirm with one of your existing passkeys instead — the only option if you sign in with SSO and have no password.',
+	'profile.passkeys.stepUpCode': 'Enter a current authenticator code to add or remove a passkey',
+	'profile.passkeys.stepUpCodeBlankHint':
+		'Leave this blank to confirm with one of your existing passkeys instead.',
+	'profile.passkeys.stepUpPasskeyOnly': "You'll confirm with one of your existing passkeys.",
 	'profile.passkeys.lastUsed': 'Last used {date}',
 	'profile.passkeys.neverUsed': 'Never used',
 	'profile.passkeys.remove': 'Remove',
@@ -306,8 +314,10 @@ export const en = {
 	'dashboard.kpi.exceptions': 'Exceptions',
 	'dashboard.kpi.staleApprovals': 'Stale Approvals',
 	'dashboard.kpi.rebatesEarned': 'Rebates Earned',
-	'dashboard.reporting.unconverted':
-		'Some totals above exclude rows with no locked exchange rate into {currency} — treat them as a floor, not an exact figure.',
+	'dashboard.reporting.faceValue':
+		'Partial — {label}: {n, plural, one {# invoice} other {# invoices}} with no exchange rate into {currency}, counted at face value, so that total mixes currencies by that much. Book the missing rate before relying on it.',
+	'dashboard.reporting.excluded':
+		'Excluded from {labels}: {n, plural, one {# payment} other {# payments}} with no exchange rate into {currency}, left out rather than counted at face value — so what is shown understates what actually moved. Book the missing rate to see the full picture.',
 	'dashboard.vendorSpend.unconverted':
 		'Partial: {n, plural, one {# invoice} other {# invoices}} with no exchange rate into {currency}, counted at face value — so these vendors are not all ranked in the same currency. Affected: {vendors}. Book the missing rate before acting on the order.',
 	'dashboard.aging.unconverted':
@@ -448,6 +458,8 @@ export const en = {
 	'invoices.warning.priceVarianceUnder': 'Unit price {deltaPct} under this vendor\'s baseline for {item} ({unitPrice} vs {baselineUnitPrice})',
 	'invoices.warning.poNotFound': 'PO {poNumber} not found',
 	'invoices.warning.poAmountVariance': 'Amount variance {variancePct} vs PO {poNumber} (invoice {invoiceAmount} vs PO {poTotal})',
+	'invoices.warning.poAmountVariancePoCurrencyUnknown': 'Amount variance {variancePct} vs PO {poNumber}, which records no currency (invoice {invoiceAmount} vs PO {poTotal})',
+	'invoices.warning.poCurrencyMismatch': 'Invoice is in {invoiceCurrency} but PO {poNumber} is in {poCurrency} — the amounts were not compared',
 	'invoices.warning.poPartialReceipt': 'Partial 3-way match — {matchType} match against PO {poNumber}, but only part of the ordered quantity has been received',
 	'invoices.warning.poOverReceipt': 'Over-receipt: {receivedQuantity} received against {orderedQuantity} ordered (+{excessQuantity}) on PO {poNumber}',
 	'invoices.warning.poOverReceiptUnquantified': 'More goods received than ordered on PO {poNumber}',
@@ -921,6 +933,23 @@ export const en = {
 	// "no vendor" while the form still held one.
 	'vendors.picker.unresolvedSelection':
 		'A vendor is already selected, but its name isn’t available on this screen. Picking one here replaces it.',
+	// --- Shared invoice picker (`ui/InvoicePicker.svelte`) ---
+	// Same contract as the vendor picker above: one server-filtered PAGE of
+	// the set is on screen, so the count line must say when it is a subset.
+	// The EMPTY-set sentence is not here — only the caller knows what its set
+	// means (e.g. `creditMemos.applyModal.noEligible`).
+	'invoices.picker.loading': 'Loading invoices…',
+	'invoices.picker.loadFailed': 'Invoices couldn’t be loaded. That is not the same as there being none — try again.',
+	'invoices.picker.noMatches': 'No invoices match “{query}”',
+	'invoices.picker.showingAll': 'All matches shown ({total})',
+	'invoices.picker.showingPartial': 'Showing {shown} of {total} matches — type to narrow',
+	'invoices.picker.refineHint': 'Not all matches are listed',
+	'invoices.picker.loadMore': 'Load more',
+	'invoices.picker.loadMoreFailed': 'Couldn’t load more.',
+	'invoices.picker.clearAria': 'Clear the selected invoice',
+	'invoices.picker.listAria': 'Invoices',
+	'invoices.picker.unresolvedSelection': 'An invoice is already selected, but its number isn’t available on this screen. Picking one here replaces it.',
+	'invoices.picker.leftToCredit': '{amount} left to credit',
 	'vendors.changeRequests.navLabel': 'Bank Changes',
 	'vendors.changeRequests.title': 'Bank & Tax Change Approvals',
 	'vendors.changeRequests.intro':
@@ -2057,6 +2086,8 @@ export const en = {
 	'cfoMetrics.accruals.received': 'Received, not invoiced',
 	'cfoMetrics.accruals.unposted': 'Unposted invoices',
 	'cfoMetrics.accruals.total': 'Total accrual',
+	'cfoMetrics.accruals.noCurrency':
+		'Purchase orders with no recorded currency are shown on their own line, without a symbol. Each currency is netted on its own; the lines are never added together.',
 	'cfoMetrics.concentration.title': 'Supplier concentration',
 	'cfoMetrics.concentration.flagged': '⚠ {vendor} accounts for {pct}% of spend — concentration risk.',
 	'cfoMetrics.concentration.top10': 'Top 10 vendors',
@@ -3154,7 +3185,7 @@ export const en = {
 	'byEntity.unconvertedSpend':
 		'Spend includes {n, plural, one {# invoice} other {# invoices}} with no locked exchange rate into {currency}, counted at face value — the totals mix currencies by that much.',
 	'byEntity.openPoNoCurrency':
-		'Purchase orders do not record a currency yet, so Open POs are shown without one.',
+		'Some purchase orders record no currency; their Open POs are shown on their own line, without a symbol, and never added to another currency\'s.',
 
 	// Scheduled reports (components/analytics/ScheduledReportsPanel.svelte) —
 	// the CRUD surface for the report runner, hosted on /cfo. The report-type
@@ -4155,12 +4186,12 @@ export const en = {
 	'workflows.builder.approval.approverAssignment': 'Approver Assignment',
 	'workflows.builder.approval.approvers': 'Approvers',
 	'workflows.builder.approval.autoApproveBelow': 'Auto-approve below ({currency})',
-	'workflows.builder.approval.autoApproveBelowHint': 'Invoices below this amount skip approval entirely. The amount compared is the invoice converted to {currency}, your organisation\'s reporting currency.',
+	'workflows.builder.approval.autoApproveBelowHint': 'Invoices below this amount skip approval entirely. The amount compared is the invoice converted to your organisation\'s reporting currency.',
 	'workflows.builder.approval.autoWarning': 'Invoices will be automatically approved without human review. Use with caution.',
 	'workflows.builder.approval.matrix': 'Approval matrix',
-	'workflows.builder.approval.matrixHint': 'Define one or more approval levels. Each level can filter by amount or invoice attributes (department, GL, vendor) and supports parallel approvers and time-based escalation. Amounts are in {currency}, your organisation\'s reporting currency.',
+	'workflows.builder.approval.matrixHint': 'Define one or more approval levels. Each level can filter by amount or invoice attributes (department, GL, vendor) and supports parallel approvers and time-based escalation. Amounts are in your organisation\'s reporting currency.',
 	'workflows.builder.approval.maxInvoiceAmount': 'Maximum invoice amount ({currency})',
-	'workflows.builder.approval.maxInvoiceAmountHint': 'Invoices above this amount are rejected automatically. The amount compared is the invoice converted to {currency}, your organisation\'s reporting currency.',
+	'workflows.builder.approval.maxInvoiceAmountHint': 'Invoices above this amount are rejected automatically. The amount compared is the invoice converted to your organisation\'s reporting currency.',
 	'workflows.builder.approval.controlsTitle': 'Controls',
 	'workflows.builder.approval.requireSegregation': 'Require segregation of duties',
 	'workflows.builder.approval.requireSegregationHint': 'The person who uploaded an invoice cannot approve it. Recommended — this is the classic AP fraud control.',
@@ -4170,7 +4201,7 @@ export const en = {
 	'workflows.builder.approval.noMatchingUsers': 'No matching users',
 	'workflows.builder.approval.removeApprover': 'Remove approver {name}',
 	'workflows.builder.approval.requireCfoAbove': 'Require CFO approval above ({currency})',
-	'workflows.builder.approval.requireCfoAboveHint': 'Invoices above this amount require a user with the CFO role to approve. The amount compared is the invoice converted to {currency}, your organisation\'s reporting currency.',
+	'workflows.builder.approval.requireCfoAboveHint': 'Invoices above this amount require a user with the CFO role to approve. The amount compared is the invoice converted to your organisation\'s reporting currency.',
 	'workflows.builder.approval.required': 'Approval Required',
 	'workflows.builder.approval.roundRobinHint': '{count, plural, one {Invoices will be round-robin assigned to the # selected approver.} other {Invoices will be round-robin assigned to the # selected approvers.}}',
 	'workflows.builder.approval.searchUsers': 'Search users to add…',
@@ -4723,7 +4754,7 @@ export const en = {
 	'creditMemos.applyModal.aria': 'Apply credit memo',
 	'creditMemos.applyModal.hint': 'Pick an invoice to apply this credit to.',
 	'creditMemos.applyModal.invoice': 'Invoice',
-	'creditMemos.applyModal.noEligible': 'No invoice is available for this vendor. An invoice can only be credited once its vendor is resolved — open the invoice and re-save its vendor.',
+	'creditMemos.applyModal.noEligible': 'No invoice can take this credit. It needs one of this vendor’s invoices that is not yet paid or closed, in the memo’s currency, with at least the memo’s amount still uncredited. An invoice whose vendor isn’t resolved yet qualifies once you open it and re-save its vendor.',
 	'creditMemos.applyModal.selectInvoice': 'Select invoice…',
 	'creditMemos.applyModal.title': 'Apply Credit Memo',
 	'creditMemos.col.amount': 'Amount',
@@ -4745,6 +4776,7 @@ export const en = {
 	'creditMemos.createModal.invoiceNeedsVendor': 'Choose a vendor to see its invoices.',
 	'creditMemos.createModal.memoNumber': 'Memo Number',
 	'creditMemos.createModal.noInvoice': 'Don’t apply yet',
+	'creditMemos.createModal.noEligibleInvoice': 'None of this vendor’s invoices can take this credit — each is already paid or closed, has too little left uncredited, or its vendor isn’t resolved yet (open the invoice and re-save its vendor).',
 	'creditMemos.createModal.reason': 'Reason',
 	'creditMemos.createModal.reasonPlaceholder': 'e.g. Returned defective goods',
 	'creditMemos.createModal.selectVendor': 'Select vendor…',
@@ -5399,6 +5431,7 @@ export const en = {
 	'invoices.modal.noPdf': 'No PDF attached',
 	'invoices.modal.pdfTitle': 'Invoice PDF — {number}',
 	'invoices.modal.poMatch.accepted': '{qty} accepted',
+	'invoices.modal.poMatch.currencyUnknown': 'This PO records no currency, so its total was compared with the invoice at face value.',
 	'invoices.modal.poMatch.failed': 'Failed',
 	'invoices.modal.poMatch.matched': 'Matched',
 	'invoices.modal.poMatch.mismatch': 'Mismatch',

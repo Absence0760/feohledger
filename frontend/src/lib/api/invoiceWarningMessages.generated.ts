@@ -72,6 +72,10 @@ export const INVOICE_WARNING_MESSAGE_KEYS = {
 	'po_not_found': 'invoices.warning.poNotFound',
 	// Amount variance {variancePct}% vs PO {poNumber} (invoice {invoiceAmount} {currency} vs PO {poTotal} {currency})
 	'po_amount_variance': 'invoices.warning.poAmountVariance',
+	// Amount variance {variancePct}% vs PO {poNumber}, which records no currency (invoice {invoiceAmount} {currency} vs PO {poTotal})
+	'po_amount_variance_po_currency_unknown': 'invoices.warning.poAmountVariancePoCurrencyUnknown',
+	// Invoice is in {invoiceCurrency} but PO {poNumber} is in {poCurrency} — the amounts were not compared
+	'po_currency_mismatch': 'invoices.warning.poCurrencyMismatch',
 	// Partial 3-way match — {matchType} match against PO {poNumber}, but only part of the ordered quantity has been received
 	'po_partial_receipt': 'invoices.warning.poPartialReceipt',
 	// Over-receipt: {receivedQuantity} received against {orderedQuantity} ordered (+{excessQuantity}) on PO {poNumber}
@@ -155,6 +159,8 @@ export const INVOICE_WARNING_PARAM_KINDS = {
 	'price_variance_under': { deltaPct: 'percent', item: 'text', unitPrice: 'money', baselineUnitPrice: 'money', currency: 'currency' },
 	'po_not_found': { poNumber: 'text' },
 	'po_amount_variance': { variancePct: 'percent', poNumber: 'text', invoiceAmount: 'money', poTotal: 'money', currency: 'currency' },
+	'po_amount_variance_po_currency_unknown': { variancePct: 'percent', poNumber: 'text', invoiceAmount: 'money', poTotal: 'number', currency: 'currency' },
+	'po_currency_mismatch': { invoiceCurrency: 'text', poNumber: 'text', poCurrency: 'text' },
 	'po_partial_receipt': { matchType: 'text', poNumber: 'text' },
 	'po_over_receipt': { receivedQuantity: 'number', orderedQuantity: 'number', excessQuantity: 'number', poNumber: 'text' },
 	'po_over_receipt_unquantified': { poNumber: 'text' },

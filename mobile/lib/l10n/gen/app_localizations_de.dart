@@ -574,8 +574,9 @@ class AppLocalizationsDe extends AppLocalizations {
   String get invoiceDetailUpdated => 'Rechnung aktualisiert';
 
   @override
-  String get invoiceDetailUpdateFailed =>
-      'Änderungen konnten nicht gespeichert werden — bitte erneut versuchen';
+  String invoiceDetailUpdateFailed(String error) {
+    return 'Änderungen konnten nicht gespeichert werden: $error';
+  }
 
   @override
   String get invoiceDetailApproved => 'Rechnung freigegeben';
@@ -2399,6 +2400,25 @@ class AppLocalizationsDe extends AppLocalizations {
     String poTotal,
   ) {
     return 'Betragsabweichung $variancePct gegenüber Bestellung $poNumber (Rechnung $invoiceAmount, Bestellung $poTotal)';
+  }
+
+  @override
+  String invoiceWarningPoAmountVariancePoCurrencyUnknown(
+    String variancePct,
+    String poNumber,
+    String invoiceAmount,
+    String poTotal,
+  ) {
+    return 'Betragsabweichung $variancePct gegenüber Bestellung $poNumber, für die keine Währung erfasst ist (Rechnung $invoiceAmount, Bestellung $poTotal)';
+  }
+
+  @override
+  String invoiceWarningPoCurrencyMismatch(
+    String invoiceCurrency,
+    String poNumber,
+    String poCurrency,
+  ) {
+    return 'Die Rechnung lautet auf $invoiceCurrency, Bestellung $poNumber jedoch auf $poCurrency — die Beträge wurden nicht verglichen';
   }
 
   @override

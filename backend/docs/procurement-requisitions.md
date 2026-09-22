@@ -71,8 +71,11 @@ locked (so the approver can't have the spend changed under them).
 
 `POST /requisitions/{id}/convert-to-po` turns an **approved** requisition into a
 `PurchaseOrder` (+ `POLineItem` rows) inheriting the requisition's entity,
-vendor, exact `Decimal` total, and lines. The requisition flips to `converted`
-and stores `converted_po_id`.
+vendor, exact `Decimal` total, lines, and **currency** — the PO's `currency` is
+the requisition's code, normalised (`models.procurement.po_currency_code`), and
+the response carries it. Migration 0099 back-filled the same answer onto every
+PO converted before the column existed (`docs/decisions.md` §197). The
+requisition flips to `converted` and stores `converted_po_id`.
 
 **Idempotent** (the operation creates money-moving artifacts): a requisition
 that already carries a `converted_po_id` returns its existing PO with

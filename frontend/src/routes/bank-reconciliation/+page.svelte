@@ -537,10 +537,14 @@
 				<section class="bucket">
 					<header class="bucket-head">
 						<h2>{m('bankRecon.section.uncleared')}</h2>
+						<!-- Each total in its own currency; one the backend reported
+						     under `""` (no currency established) renders bare rather
+						     than joining the org's (decisions §200). Only the EMPTY
+						     bucket — nothing outstanding — wears the org's code. The
+						     two buckets below follow the same rule. -->
 						<span class="bucket-total mono">
-							{formatCurrencyTotals(outstanding.uncleared_totals ?? [], orgCurrency.currency).join(
-								' · '
-							) || formatMoney('0.00', { currency: orgCurrency.currency })}
+							{formatCurrencyTotals(outstanding.uncleared_totals ?? []).join(' · ') ||
+								formatMoney('0.00', { currency: orgCurrency.currency })}
 						</span>
 					</header>
 					<p class="bucket-help muted">{m('bankRecon.section.unclearedHelp')}</p>
@@ -585,10 +589,8 @@
 					<header class="bucket-head">
 						<h2>{m('bankRecon.section.unmatched')}</h2>
 						<span class="bucket-total">
-							{formatCurrencyTotals(
-								outstanding.unmatched_debit_totals ?? [],
-								orgCurrency.currency
-							).join(' · ') || formatMoney('0.00', { currency: orgCurrency.currency })}
+							{formatCurrencyTotals(outstanding.unmatched_debit_totals ?? []).join(' · ') ||
+								formatMoney('0.00', { currency: orgCurrency.currency })}
 						</span>
 					</header>
 					<p class="bucket-help muted">{m('bankRecon.section.unmatchedHelp')}</p>
@@ -641,10 +643,8 @@
 						<h2>{m('bankRecon.section.discrepancies')}</h2>
 						<span class="bucket-total mono">
 							{m('bankRecon.kpi.netVariance')}:
-							{formatCurrencyTotals(
-								outstanding.amount_mismatch_net_variances ?? [],
-								orgCurrency.currency
-							).join(' · ') || formatMoney('0.00', { currency: orgCurrency.currency })}
+							{formatCurrencyTotals(outstanding.amount_mismatch_net_variances ?? []).join(' · ') ||
+								formatMoney('0.00', { currency: orgCurrency.currency })}
 						</span>
 					</header>
 					<p class="bucket-help muted">{m('bankRecon.section.discrepanciesHelp')}</p>

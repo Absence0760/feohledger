@@ -21,9 +21,12 @@ from app.services.erp_adapters.dispatcher import register_adapter
 # the org is configured against the mock ERP — keeps the demo flow
 # working without standing up a real ERP. Vendor names match the seed
 # script so vendor linking succeeds out of the box on the acme tenant.
+# Each PO states its currency the way a real ERP record does (Merge's unified
+# model carries one); the sync stores it on `PurchaseOrder.currency`.
 _MOCK_POS: list[PoPayload] = [
     PoPayload(
         po_number="PO-2024-200",
+        currency="USD",
         vendor_name="Office Supplies Co",
         total=Decimal("2500.00"),
         status="open",
@@ -51,6 +54,7 @@ _MOCK_POS: list[PoPayload] = [
     ),
     PoPayload(
         po_number="PO-2024-201",
+        currency="USD",
         vendor_name="Cloud Services Inc",
         total=Decimal("15000.00"),
         status="open",
@@ -72,6 +76,7 @@ _MOCK_POS: list[PoPayload] = [
     ),
     PoPayload(
         po_number="PO-2024-202",
+        currency="USD",
         vendor_name="Tech Hardware Corp",
         total=Decimal("24000.00"),
         status="open",
@@ -265,6 +270,7 @@ class MockAdapter(ErpAdapter):
                 total=p.total,
                 status=p.status,
                 expected_delivery_date=p.expected_delivery_date,
+                currency=p.currency,
                 line_items=[
                     PoLinePayload(
                         description=li.description,

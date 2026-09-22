@@ -128,13 +128,18 @@
 			</label>
 			<label>
 				<span>{m('policyModal.field.thresholdCurrency')}</span>
+				<!-- The placeholder shows what blank resolves to only when the org's
+				     code is known; unresolved, it is left empty rather than showing
+				     a guessed one — the hint beneath says what blank means. -->
 				<input
 					type="text"
 					maxlength="3"
 					bind:value={threshold_currency}
-					placeholder={m('policyModal.field.thresholdCurrencyPlaceholder', {
-						currency: orgCurrency.currency
-					})}
+					placeholder={orgCurrency.currency
+						? m('policyModal.field.thresholdCurrencyPlaceholder', {
+								currency: orgCurrency.currency
+							})
+						: undefined}
 					disabled={!canEdit}
 				/>
 				<small>{m('policyModal.field.thresholdCurrencyHint')}</small>

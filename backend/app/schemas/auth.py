@@ -54,6 +54,15 @@ class UserResponse(BaseModel):
     must_change_password: bool = False
     mfa_enabled: bool = False
     mfa_required_by_org: bool = False
+    # The caller's organization has closed password sign-in (`sso_only`, with an
+    # IdP config that resolves), so the password is not a step-up proof either.
+    # Filled from the SAME predicate `login` refuses on, `_step_up_satisfied`
+    # drops the password on and the public `/auth/{sso,saml}/config` echo
+    # reports (`api/auth._org_closes_password_sign_in`, which is
+    # `services/sso.is_sso_only`), never a copy of it. The profile page reads it
+    # to stop offering a password field for a factor change (docs/decisions.md
+    # §201, §204).
+    password_sign_in_closed: bool = False
     roles: list[str] = []
     # The user's effective granular permissions — the union over their roles
     # (system roles via the static default map, custom roles via their stored

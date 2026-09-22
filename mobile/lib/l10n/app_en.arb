@@ -257,7 +257,12 @@
   },
   "invoiceDetailNoChanges": "No changes to save",
   "invoiceDetailUpdated": "Invoice updated",
-  "invoiceDetailUpdateFailed": "Could not save changes — please try again",
+  "invoiceDetailUpdateFailed": "Could not save changes: {error}",
+  "@invoiceDetailUpdateFailed": {
+    "placeholders": {
+      "error": { "type": "String" }
+    }
+  },
   "invoiceDetailApproved": "Invoice approved",
   "invoiceDetailApproveFailed": "Could not approve invoice — please try again",
   "invoiceDetailRejected": "Invoice rejected",
@@ -1375,6 +1380,37 @@
         "type": "String"
       },
       "poTotal": {
+        "type": "String"
+      }
+    }
+  },
+  "invoiceWarningPoAmountVariancePoCurrencyUnknown": "Amount variance {variancePct} vs PO {poNumber}, which records no currency (invoice {invoiceAmount} vs PO {poTotal})",
+  "@invoiceWarningPoAmountVariancePoCurrencyUnknown": {
+    "placeholders": {
+      "variancePct": {
+        "type": "String"
+      },
+      "poNumber": {
+        "type": "String"
+      },
+      "invoiceAmount": {
+        "type": "String"
+      },
+      "poTotal": {
+        "type": "String"
+      }
+    }
+  },
+  "invoiceWarningPoCurrencyMismatch": "Invoice is in {invoiceCurrency} but PO {poNumber} is in {poCurrency} — the amounts were not compared",
+  "@invoiceWarningPoCurrencyMismatch": {
+    "placeholders": {
+      "invoiceCurrency": {
+        "type": "String"
+      },
+      "poNumber": {
+        "type": "String"
+      },
+      "poCurrency": {
         "type": "String"
       }
     }

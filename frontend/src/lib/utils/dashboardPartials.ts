@@ -16,7 +16,8 @@
  *     line not to trust.
  *
  * The KPI row's counts (`reporting`, `total_paid`, `total_pending`) are a
- * different question and stay in the page.
+ * different question — two opposite rules, not one — and have their own
+ * helper, {@link kpiRollupDisclosure}, below.
  *
  * Extracted for the same reason `discountPartialSet.ts` was: a `reduce` inline
  * in the template would force its unit test to restate the sum it is checking.
@@ -60,4 +61,49 @@ export function partialLabels<T extends PartialSeriesEntry>(
 function safeCount(value: number | null | undefined): number {
 	if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) return 0;
 	return Math.floor(value);
+}
+
+/** The projection of `GET /api/dashboard` the KPI-row disclosure reads. */
+export interface KpiRollupCounts {
+	reporting: { unconverted_count: number };
+	total_paid_unconverted_count: number;
+	total_pending_unconverted_count: number;
+}
+
+/** A payment-side KPI that can leave rows out. */
+export type ExcludingKpi = 'paid' | 'pending';
+
+/**
+ * The KPI row's two partial-conversion disclosures, which follow OPPOSITE rules
+ * and so can never share one sentence (`docs/decisions.md` §200).
+ *
+ * - `faceValue` — invoices the **Total Amount** KPI counted at FACE value for
+ *   want of a rate lock. `reporting.unconverted_count` comes from
+ *   `currency_conversion.invoice_reporting_amount_sql`, which falls back to the
+ *   face amount: that figure is not a floor, it mixes currencies.
+ * - `excluded` — payments **Paid** / **Pending** left OUT, because
+ *   `payment_reporting_amount_sql` refuses a face-value fallback (its figures
+ *   are the ones a filed total is built from). Those figures ARE floors.
+ *   `excludedFrom` names only the KPIs that actually lost a row, in row order,
+ *   so the sentence never blames a figure that is complete.
+ *
+ * One banner saying "some totals above exclude rows" was right for Paid and
+ * Pending and wrong for Total Amount — the one KPI a reader is most likely to
+ * quote.
+ */
+export function kpiRollupDisclosure(data: KpiRollupCounts | null | undefined): {
+	faceValue: number;
+	excluded: number;
+	excludedFrom: ExcludingKpi[];
+} {
+	const paid = safeCount(data?.total_paid_unconverted_count);
+	const pending = safeCount(data?.total_pending_unconverted_count);
+	const excludedFrom: ExcludingKpi[] = [];
+	if (paid > 0) excludedFrom.push('paid');
+	if (pending > 0) excludedFrom.push('pending');
+	return {
+		faceValue: safeCount(data?.reporting?.unconverted_count),
+		excluded: paid + pending,
+		excludedFrom
+	};
 }

@@ -127,6 +127,15 @@ def test_byok_org_is_untouched_by_the_platform_rules(monkeypatch):
     assert ext._resolve_extraction_config({"extraction": byok}) == byok
 
 
+def test_byok_config_is_a_copy_of_the_org_settings_not_the_settings_themselves():
+    """`run_extraction` writes per-invoice hints into the config it resolves;
+    they must never land in the org's settings dict (see the next test)."""
+    byok = {"program_type": "byok", "provider": "mock"}
+    resolved = ext._resolve_extraction_config({"extraction": byok})
+    resolved["gl_account_catalog"] = "6000 — B Marketing"
+    assert byok == {"program_type": "byok", "provider": "mock"}
+
+
 def test_offline_fallback_is_logged(monkeypatch, caplog):
     """`mock` output must never be mistaken for a real read — it announces itself."""
     with caplog.at_level("WARNING"):

@@ -75,7 +75,7 @@
 	import RowAction from '$lib/components/ui/RowAction.svelte';
 	import BulkBar from '$lib/components/ui/BulkBar.svelte';
 	import Money from '$lib/components/ui/Money.svelte';
-	import { formatMoney } from '$lib/utils/money';
+	import { DEFAULT_CURRENCY, formatMoney } from '$lib/utils/money';
 	import { formatCurrencyTotals } from '$lib/utils/currencyGroups';
 	import { formatDate } from '$lib/utils/time';
 	import ExpenseModal from '$lib/components/modals/ExpenseModal.svelte';
@@ -220,13 +220,17 @@
 		}
 	}
 
-	// One subtotal per currency, side by side — never added together. Mirrors
-	// `formatGroups` on /payments.
-	const periodTotalGroups = $derived(
-		formatCurrencyTotals(expenseSummary?.by_currency ?? [], orgCurrency.currency)
-	);
+	// One subtotal per currency, side by side — never added together; an
+	// unestablished currency renders bare rather than joining the org's
+	// (decisions §200). Mirrors `formatGroups` on /payments.
+	const periodTotalGroups = $derived(formatCurrencyTotals(expenseSummary?.by_currency ?? []));
+	// The org's code labels only the zero of a summary that landed empty. One
+	// that has not landed is no figure — `null`, which `KpiCard` draws as its
+	// dash — never a zero wearing a currency nobody computed.
 	const periodTotal = $derived(
-		periodTotalGroups[0] ?? formatMoney(0, { currency: orgCurrency.currency })
+		expenseSummary
+			? (periodTotalGroups[0] ?? formatMoney(0, { currency: orgCurrency.currency }))
+			: null
 	);
 	// Currencies past the first ride the card's muted sub-line, so the headline
 	// stays one readable figure while nothing is silently dropped.
@@ -630,7 +634,9 @@
 			const created = await createExpenseReport({
 				report_number: newReportNumber.trim(),
 				title: newReportTitle.trim() || null,
-				currency: orgCurrency.currency,
+				// A new record's initial value, not a label: the org's code when
+				// it resolved, else the platform default the backend would pick.
+				currency: orgCurrency.currency ?? DEFAULT_CURRENCY,
 				notes: null
 			});
 			toast(m('expenses.reports.toast.created'), 'success');
@@ -784,7 +790,9 @@
 	// A policy's thresholds are denominated in its own threshold_currency; an
 	// unset one means the org's reporting currency (what the backend engine
 	// falls back to), so the table must never render them in a different unit.
-	function policyCurrency(p: ExpensePolicy): string {
+	// `null` when that is unresolved too — the figures then render bare and the
+	// column names the concept, never a guessed code (decisions §200).
+	function policyCurrency(p: ExpensePolicy): string | null {
 		return p.threshold_currency ?? orgCurrency.currency;
 	}
 
@@ -906,7 +914,7 @@
 			await createPreapproval({
 				title: paTitle.trim(),
 				estimated_amount: exactAmount,
-				currency: orgCurrency.currency,
+				currency: orgCurrency.currency ?? DEFAULT_CURRENCY,
 				category: paCategory.trim() || null,
 				justification: paJustification.trim() || null
 			});
@@ -1512,7 +1520,7 @@
 							</RowLink>
 						</td>
 						<td>{p.category ?? m('expenses.policies.categoryAll')}</td>
-						<td>{policyCurrency(p)}</td>
+						<td>{policyCurrency(p) ?? orgCurrency.label}</td>
 						<td class="right mono">{p.category_limit != null ? formatMoney(p.category_limit, { currency: policyCurrency(p) }) : '—'}</td>
 						<td class="right mono">{p.requires_receipt_above != null ? formatMoney(p.requires_receipt_above, { currency: policyCurrency(p) }) : '—'}</td>
 						<td class="right mono">{p.requires_preapproval_above != null ? formatMoney(p.requires_preapproval_above, { currency: policyCurrency(p) }) : '—'}</td>

@@ -46,8 +46,17 @@
 
 	const budgetsOverCount = $derived(overBudgetCount(budgetRollup));
 
+	// The forecast, what-if and cash-position endpoints each denominate their
+	// figures through `resolve_reporting_currency`, and land together in one
+	// `load()` — but only the cash position NAMES the answer
+	// (`opening_balance_currency`). So the forecast and what-if figures are
+	// labelled from that sibling payload; the `orgCurrency` store, which sees
+	// three of the backend's four rungs and answers `null` past them, is only
+	// the fallback while nothing has landed (decisions §119, §200).
+	const reportingCurrency = $derived(position?.opening_balance_currency || orgCurrency.currency);
+
 	function fmt(amount: MoneyAmount): string {
-		return formatMoney(amount, { currency: orgCurrency.currency, whole: true });
+		return formatMoney(amount, { currency: reportingCurrency, whole: true });
 	}
 
 	/** Format a figure in the currency the RESPONSE says it is denominated in.

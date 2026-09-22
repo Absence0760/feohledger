@@ -15,7 +15,7 @@
 	import Modal from '$lib/components/ui/Modal.svelte';
 	import { toast } from '$lib/components/ui/Toast.svelte';
 	import { m } from '$lib/i18n/store.svelte';
-	import { currencyOptions } from '$lib/utils/money';
+	import { DEFAULT_CURRENCY, currencyOptions } from '$lib/utils/money';
 	import { orgCurrency } from '$lib/stores/orgSettings.svelte';
 
 	let {
@@ -31,7 +31,10 @@
 	let periodStart = $state('');
 	let periodEnd = $state('');
 	/* eslint-disable svelte/state-referenced-locally -- seeded once from the store */
-	let currency = $state(orgCurrency.currency);
+	// A form's initial value, so it needs A code: the org's when it resolved,
+	// else the platform default — explicitly, since the store itself no longer
+	// substitutes one (decisions §200).
+	let currency = $state(orgCurrency.currency ?? DEFAULT_CURRENCY);
 	/* eslint-enable svelte/state-referenced-locally */
 	let saving = $state(false);
 
@@ -51,7 +54,7 @@
 	 */
 	let importError = $state<string | null>(null);
 
-	const currencies = $derived(currencyOptions(orgCurrency.currency));
+	const currencies = $derived(currencyOptions(orgCurrency.currency ?? DEFAULT_CURRENCY));
 
 	const canSubmit = $derived(
 		file !== null && accountIdentifier.trim() !== '' && periodStart !== '' && periodEnd !== ''

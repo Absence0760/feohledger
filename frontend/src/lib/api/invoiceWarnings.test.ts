@@ -94,6 +94,38 @@ describe('localizeInvoiceWarning', () => {
 		expect(String(localized!.params.variancePct)).toBe('+20,0\u00a0%');
 	});
 
+	it("never labels a PO total with the invoice's currency when the PO records none", () => {
+		// decisions §197: the warning has ONE `currency` param, the invoice's, so a
+		// PO figure whose own currency is unknown rides a `number` param. Labelled,
+		// it would assert the PO is in euros.
+		setActiveFormatLocale('en-US');
+		const localized = localizeInvoiceWarning({
+			message: '',
+			code: 'po_amount_variance_po_currency_unknown',
+			params: {
+				variancePct: '+20.0',
+				poNumber: 'PO-1',
+				invoiceAmount: '120.00',
+				poTotal: '100.00',
+				currency: 'EUR'
+			}
+		});
+		expect(String(localized!.params.invoiceAmount)).toBe('€120.00');
+		expect(String(localized!.params.poTotal)).toBe('100.00');
+	});
+
+	it('prints both codes of a currency mismatch verbatim', () => {
+		const localized = localizeInvoiceWarning({
+			message: '',
+			code: 'po_currency_mismatch',
+			params: { invoiceCurrency: 'EUR', poNumber: 'PO-1', poCurrency: 'USD' }
+		});
+		expect(localized).toEqual({
+			key: 'invoices.warning.poCurrencyMismatch',
+			params: { invoiceCurrency: 'EUR', poNumber: 'PO-1', poCurrency: 'USD' }
+		});
+	});
+
 	it('keeps the precision the backend measured, in both directions', () => {
 		// `98` has no decimals and no sign; `+20.0` has one of each. Re-deciding
 		// that here would either lose a digit or invent one.

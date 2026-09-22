@@ -183,6 +183,10 @@ class ConvertToPoResponse(BaseModel):
     po_id: str
     po_number: str
     total: MoneyAmount
+    #: The currency the PO's ``total`` is in — the requisition's, copied on
+    #: conversion. ``None`` only for a PO whose requisition held no well-formed
+    #: code (decisions §197).
+    currency: str | None = None
     created: bool
 
 

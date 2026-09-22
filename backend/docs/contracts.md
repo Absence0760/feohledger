@@ -201,7 +201,10 @@ from its terms: vendor, line items, and total are copied from the contract.
 `po_number` defaults to `PO-<contract_number>-<short>`; `total` defaults to the
 sum of the contract's line-item totals, falling back to `total_value`. Only
 `draft` / `active` contracts can spawn a PO (`409` otherwise). The PO inherits
-the contract's `entity_id`. Writes a `contract.po_created` audit row.
+the contract's `entity_id` and its `currency` — the line items and
+`total_value` the PO's figures come from are denominated in it, and the response
+carries the code (`docs/decisions.md` §197). Writes a `contract.po_created` audit
+row.
 
 ## API surface
 

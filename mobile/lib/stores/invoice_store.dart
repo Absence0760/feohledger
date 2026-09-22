@@ -335,13 +335,19 @@ class InvoiceStore extends ChangeNotifier with SequencedFetch {
   /// the list so the edited row reflects the change; on failure records the
   /// error and returns null. Not a money-moving write — no idempotency key
   /// needed (a repeated PATCH is naturally idempotent: it sets the same fields).
+  ///
+  /// A refusal here is routine, not exceptional — a GL code outside the
+  /// invoice's chart (`docs/decisions.md` §194/§199), a financial field after
+  /// approval, a stale edit — and retrying will not help, so [error] carries
+  /// the server's own `detail` sentence (see [describeApiError]) for the
+  /// screen to show, never the raw `ApiException(422): …` form.
   Future<Invoice?> update(String id, Map<String, dynamic> changes) async {
     try {
       final updated = await InvoiceApi.update(id, changes);
       await _refreshAfterMutation();
       return updated;
     } catch (e) {
-      _error = e.toString();
+      _error = describeApiError(e);
       notifyListeners();
       return null;
     }

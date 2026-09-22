@@ -675,6 +675,7 @@ async def convert_to_po(
                 po_id=str(po.id),
                 po_number=po.po_number,
                 total=po.total,
+                currency=po.currency,
                 created=False,
             )
 
@@ -706,6 +707,7 @@ async def convert_to_po(
         po_id=str(po.id),
         po_number=po.po_number,
         total=po.total,
+        currency=po.currency,
         created=True,
     )
 

@@ -50,6 +50,11 @@ interface User {
 	must_change_password: boolean;
 	mfa_enabled: boolean;
 	mfa_required_by_org: boolean;
+	// The org has closed password sign-in (`sso_only`), so the server refuses
+	// the password as a step-up proof too. The server's own predicate — the
+	// one login and the step-up call — so `/profile` can stop offering a
+	// password field exactly where it would be refused (docs/decisions.md §201).
+	password_sign_in_closed: boolean;
 	roles: string[];
 	// Effective granular permissions (the union over the user's roles), from
 	// GET /api/auth/me. Drives `can(perm)` for the split sensitive controls.

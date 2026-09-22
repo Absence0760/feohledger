@@ -65,6 +65,45 @@ test.describe('2-way invoice↔PO matching', () => {
 		expect(exceptionsFor(invoiceId)).toContain('po_mismatch:warning');
 	});
 
+	test('an invoice in another currency than its PO → mismatch, no variance, both codes named', async ({
+		page
+	}) => {
+		// EUR 1,000 against a USD 1,000 order used to read `matched` at 0% — the
+		// amount control passing on quantities in different units (decisions §197).
+		const { poId, poNumber } = createPo({ total: 1000, currency: 'USD' });
+		created.poIds.push(poId);
+		const { invoiceId, poMatch } = await createMatchedInvoice(page, {
+			poNumber,
+			amount: 1000,
+			currency: 'EUR'
+		});
+		created.invoiceIds.push(invoiceId);
+
+		expect(poMatch!.status).toBe('mismatch');
+		expect(poMatch!.currency_check).toBe('different');
+		expect(poMatch!.po_currency).toBe('USD');
+		expect(poMatch!.amount_variance).toBeNull();
+		expect(poMatch!.within_tolerance).toBe(false);
+		expect(poMatch!.issues.join(' ')).toMatch(/Currency mismatch: invoice in EUR, PO in USD/);
+		expect(exceptionsFor(invoiceId)).toContain('po_mismatch:warning');
+	});
+
+	test('a PO that records no currency is compared at face value, and says so', async ({ page }) => {
+		const { poId, poNumber } = createPo({ total: 1000 });
+		created.poIds.push(poId);
+		const { invoiceId, poMatch } = await createMatchedInvoice(page, {
+			poNumber,
+			amount: 1000,
+			currency: 'EUR'
+		});
+		created.invoiceIds.push(invoiceId);
+
+		expect(poMatch!.status).toBe('matched');
+		expect(poMatch!.currency_check).toBe('unknown');
+		expect(poMatch!.po_currency).toBeNull();
+		expect(exceptionsFor(invoiceId)).not.toContain('po_mismatch:warning');
+	});
+
 	test('po_number with no matching PO → no_po + error exception', async ({ page }) => {
 		// No PO seeded for this number.
 		const { invoiceId, poMatch } = await createMatchedInvoice(page, {
@@ -195,6 +234,8 @@ test.describe('3-way invoice↔PO↔GR matching', () => {
 		const again = await recompute(page, invoiceId);
 		expect(again!.status).toBe('matched');
 		expect(again!.po_id).toBe(poMatch!.po_id);
-		expect(again!.amount_variance).toBeCloseTo(poMatch!.amount_variance, 2);
+		// Same-currency match, so the variance is a figure (it is `null` only on a
+		// currency mismatch).
+		expect(again!.amount_variance).toBeCloseTo(poMatch!.amount_variance!, 2);
 	});
 });

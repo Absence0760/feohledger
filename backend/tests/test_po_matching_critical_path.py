@@ -75,11 +75,12 @@ def _mk_db(*, po=None, gr=None, inspection=None):
     return db
 
 
-def _po(*, total: Decimal, vendor_id=None, line_items=None):
+def _po(*, total: Decimal, vendor_id=None, line_items=None, currency: str | None = "USD"):
     return SimpleNamespace(
         id=uuid.uuid4(),
         po_number="PO-100",
         total=total,
+        currency=currency,
         vendor_id=vendor_id,
         line_items=line_items or [],
     )
@@ -275,12 +276,15 @@ async def _default_entity_id(session) -> uuid.UUID:
     return (await session.execute(select(Entity.id).where(Entity.is_default))).scalar_one()
 
 
-async def _add_po(session, org_id, entity_id, *, po_number, total, vendor_id=None, lines=None):
+async def _add_po(
+    session, org_id, entity_id, *, po_number, total, vendor_id=None, lines=None, currency=None
+):
     from app.models.procurement import POLineItem, PurchaseOrder
 
     po = PurchaseOrder(
         po_number=po_number,
         total=Decimal(total),
+        currency=currency,
         status="open",
         organization_id=org_id,
         entity_id=entity_id,
@@ -312,13 +316,16 @@ async def _add_gr(session, org_id, entity_id, po_id, *, received=None):
     return gr
 
 
-async def _add_invoice(session, org_id, entity_id, *, po_number, amount, vendor_id=None):
+async def _add_invoice(
+    session, org_id, entity_id, *, po_number, amount, vendor_id=None, currency="USD"
+):
     from app.models.invoice import Invoice
 
     inv = Invoice(
         invoice_number=f"INV-{uuid.uuid4().hex[:8]}",
         vendor_name="Acme",
         amount=Decimal(amount),
+        currency=currency,
         po_number=po_number,
         organization_id=org_id,
         entity_id=entity_id,
@@ -351,6 +358,44 @@ async def test_realdb_two_way_match_within_and_outside_tolerance(realdb):
     assert ok.amount_variance_pct == pytest.approx(4.0)
     assert bad.status == "mismatch"
     assert bad.amount_variance_pct == pytest.approx(10.0)
+
+
+@pytest.mark.asyncio
+async def test_realdb_currency_guard_against_recorded_po_currencies(realdb):
+    """Real rows through the live matcher: a EUR invoice for the same figure as
+    a USD PO is a mismatch with no variance, the same invoice against a EUR PO
+    matches, and a PO recording no currency is compared at face value and
+    reported unverified (decisions §197)."""
+    org_id = realdb.info("a").org_id
+    mk = realdb.sessionmaker("a")
+    async with mk() as s:
+        ent = await _default_entity_id(s)
+        await _add_po(s, org_id, ent, po_number="PO-USD", total="1000.00", currency="USD")
+        await _add_po(s, org_id, ent, po_number="PO-EUR", total="1000.00", currency="EUR")
+        await _add_po(s, org_id, ent, po_number="PO-NONE", total="1000.00")
+        vs_usd = await _add_invoice(
+            s, org_id, ent, po_number="PO-USD", amount="1000.00", currency="EUR"
+        )
+        vs_eur = await _add_invoice(
+            s, org_id, ent, po_number="PO-EUR", amount="1000.00", currency="EUR"
+        )
+        vs_none = await _add_invoice(
+            s, org_id, ent, po_number="PO-NONE", amount="1000.00", currency="EUR"
+        )
+        await s.commit()
+
+        different = await match_invoice_to_po(s, vs_usd)
+        same = await match_invoice_to_po(s, vs_eur)
+        unknown = await match_invoice_to_po(s, vs_none)
+
+    assert (different.status, different.currency_check) == ("mismatch", "different")
+    assert different.amount_variance is None
+    assert (same.status, same.currency_check, same.po_currency) == ("matched", "same", "EUR")
+    assert (unknown.status, unknown.currency_check, unknown.po_currency) == (
+        "matched",
+        "unknown",
+        None,
+    )
 
 
 @pytest.mark.asyncio

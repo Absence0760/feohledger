@@ -8141,3 +8141,846 @@ would replace a probably-right label with none on every row. The difference
 between the two is deliberate and temporary — by-entity sums POs *across
 entities that may report in different currencies*, where the org label is not
 even probably right.
+
+## 197. A purchase order records the currency its source knew, and an unrecorded one is never guessed — on screen, in the matcher, or by an agent
+
+§196 traced every per-row money figure whose currency the server could name and
+made it send one, and ended by naming the exception: `PurchaseOrder` was "the one
+figure no payload can label", because the model had `total` and no currency
+column. The consequences were spread across four surfaces and one control.
+`/purchase-orders` and `/cfo`'s accruals card stamped the org's reporting
+currency on every PO figure; `/cfo`'s by-entity table rendered Open POs bare with
+a note; `PortalPOListItem.currency` defaulted to `"USD"` and the handler never
+set it, so **every supplier saw every order in dollars** and a PO flip booked the
+resulting invoice in dollars too. And `po_matching` compared the invoice amount
+with the PO total as two bare numbers, so an invoice for **EUR 1,000 against a
+USD 1,000 order read `matched` at 0%** — the amount control passing on
+quantities in different units.
+
+**The column is nullable with no default, because NULL is a fact.** Migration
+0099 adds `purchase_orders.currency` as `varchar(3)`, tenant-fanned and
+control-plane-no-op on 0098's pattern. A `DEFAULT 'USD'` would have been a claim
+made on behalf of every row that never made one — the same substitution §160 and
+§196 removed from the formatters, reinstated one layer down where no client could
+see it. NULL means *no source said*, and every surface renders such a figure bare.
+
+**The backfill copies the one answer that exists and invents none.** A PO
+converted from a requisition has `purchase_requisitions.converted_po_id` pointing
+at it, and `convert_requisition_to_po` copied that requisition's lines and exact
+total onto the PO — the two figures ARE the same money, so the requisition's code
+is the PO's. That is what `BACKFILL_SQL` copies, upper-cased and trimmed; a
+requisition whose code is not three letters (`max_length=3` admitted `""` and
+`"us"`) proves nothing, and two requisitions naming one PO with different codes
+are two answers rather than one, so both leave NULL. Every other PO stays NULL.
+The obvious proxy — the org's reporting currency — was rejected for §141/§152's
+reason: a GBP-reporting tenant syncing a USD order from its ERP would have that
+order relabelled GBP, and a bare figure is a visible gap a reader can ask about
+where a wrong symbol is a wrong number that looks right. Contract-spawned POs
+*are* recoverable in principle (the `contract.po_created` audit row carries
+`details.po_id`, and the contract carries a currency), and were still left out:
+that is an inference across a trail written for another purpose, and the operator's
+call was the requisition link only.
+
+**Every path that creates a PO now stamps what its source knows**, normalised
+through `models/procurement.po_currency_code`: the requisition's on conversion,
+the contract's on a contract-based PO, the ERP payload's on sync (`PoPayload.currency`,
+which the Merge adapter maps from the unified record and the mock states), and
+`USD` in the seed, matching its own invoices. `tests/test_purchase_order_currency_stamping.py`
+fails a `PurchaseOrder(...)` under `app/` or `scripts/` that omits the keyword,
+and a literal `None` has to be declared with its reason — the shape
+`test_invoice_uploader_stamping.py` established, for the same reason: NULL can
+only mean "nobody knew" if every path that *did* know wrote it down. On a
+re-sync the ERP's code wins, because it is the other half of the `total` the sync
+already overwrites; a payload that states none never erases a recorded one, which
+is `expected_delivery_date`'s rule — silence is not a correction.
+
+**The matcher gains a currency leg, and its three answers are not symmetric.**
+`compare_currencies` yields `same`, `different` or `unknown`. `different` is a
+`mismatch` with **no variance at all** — `amount_variance` / `amount_variance_pct`
+are `None`, not `0`, because a zero there reads as a perfect match, and no figure
+is the difference between EUR and USD amounts. `unknown` — the PO records no code
+— still compares at face value, exactly as the matcher always did. Refusing there
+was rejected: a missing code cannot prove a mismatch, and failing closed would
+have flagged every pre-0099 PO in every tenant on the invoice's next write,
+turning a control into a queue of noise. What changes is that nothing pretends it
+was verified: the result says so, the invoice modal renders the PO total bare
+with a note beside it, and the amount-variance warning gets its own code whose
+PO figure is a `number` rather than `money` (a warning carries ONE `currency`
+param — the invoice's — so labelling the PO's figure with it would assert the PO
+is in it).
+
+**The agents fail closed where a human may proceed, and that asymmetry is the
+point.** A reviewer reading "this PO records no currency, so its total was
+compared at face value" can go and look at the order. An agent that snaps the
+invoice amount to the PO total (`amount_mismatch_v1`), or links a PO and approves
+the invoice (`missing_po_v1`, `multi_po_split_v1`), is making the currency claim
+itself — so each of those requires `currency_check == "same"` and escalates
+otherwise. A PO with a *different* recorded currency never enters a candidate pool
+at all, since it cannot match on amount; one that records *none* stays in, because
+dropping it could turn two plausible candidates into a false unique one — the
+same reasoning `find_po_subset` already applied to a truncated pool — and the
+refusal happens at the decision instead.
+
+**Two aggregates could not be labelled, only regrouped.** The `/cfo` accruals card
+summed open POs, received goods and unposted invoices across every currency the
+book holds and rendered the result under the org's symbol. Converting is not
+available: an invoice carries a rate-locked `reporting_amount`, a PO carries
+nothing, and fetching a rate on a read is what `multi-currency.md` forbids. So
+both aggregates group instead — `accruals.by_currency` nets each currency's legs
+within itself, `by-entity`'s `open_po_by_currency` gives each row one entry per PO
+currency — and the flat fields stay as the naive sums, for back-compat, unrendered,
+beside `total_spend` which had already earned that treatment. The web renders both
+through one new primitive, `ui/MoneyByCurrency.svelte`: a line per currency, each
+labelled by its own code, the `null` entry bare and never merged.
+
+**Three defects surfaced while doing it, and all three were the same shape — a
+figure read off something that did not own it.** `MatchResult.status` is shared by
+the amount, receipt and inspection legs, so `_refresh_po_match` keyed on it raised
+"Amount variance +0.0%" and a `po_mismatch` exception for a *failed inspection* on
+an in-tolerance invoice, and told a reviewer only part of the order had arrived
+when a fully-delivered one was partially *accepted*; each warning now keys on its
+own leg. The open-PO accrual summed every PO the tenant had ever raised, though
+`AccrualsSnapshot` has always defined it as "non-closed POs" and the card is
+labelled "Open POs" — a cancelled order was a live commitment forever; it now
+excludes `models/procurement.DEAD_PO_STATUSES`, the roster the budget-commitment
+leg already used, moved to the model so the two cannot drift. And mobile's
+`PoMatch.fromJson` read a top-level `variance_pct` the backend never sends (it
+lives inside `details`), so the variance never rendered at all — with the test
+fixtures carrying the same wrong key, which is why nothing noticed.
+
+The budget-commitment PO leg reads the PO's own `currency` now rather than the
+requisition's: after conversion and the backfill the two agree, and when they
+stop agreeing (an ERP re-sync re-denominated the PO) it is the PO's figure being
+summed, so its own label is the true one. No mobile screen shows a PO's money, so
+there was nothing to relabel there — only the variance, and it is absent whenever
+the currencies differ.
+
+## 198. A mirror routed before §192 is backfilled from the routing's own record, on every status with a decision still ahead of it
+
+**Decided:** 2026-09-22 · `backend/alembic/versions/0100_mirror_implicated_backfill.py` ·
+`backend/app/services/intercompany.py` · `backend/tests/test_intercompany.py`
+
+§192 made routing give the mirror its source's implicated set. A mirror routed
+before that has no set, so the employee who uploaded or shaped the source could
+still approve the mirror. §141, §152 and 0098 all refused to backfill, and the
+reason was the same each time: nobody could honestly say who the missing person
+was. That reason does not apply here. The source's two columns are on the source
+row, so a backfill copies what is recorded instead of guessing, and
+`0100_mirror_implicated_backfill` writes exactly what routing writes today. The
+follow-up that asked for the backfill described it in some detail. Checked
+against the code, two of its premises were wrong, one filter as worded would have
+matched nothing, and one input was missing.
+
+**Which row is the mirror comes from the routing's audit row. No column says.**
+The entry paired rows on `intercompany_mirror_id` being set on both, the mirror's
+`entity_id` matching the origin's `counterparty_entity_id`, and the mirror's
+number being `'IC-' ||` the origin's. The FK does pair them, but it is symmetric:
+each row points at the other. The entity test is symmetric too, because routing
+swaps the two entity columns, so it matches in both directions. The only
+condition in the entry that tells mirror from origin is the invoice number, and
+`PATCH /api/invoices/{id}` can change it. A renamed pair would be skipped without
+a sound, or, in a contrived case, oriented backwards, and that would write the
+router onto the origin. What does record the answer is the audit row routing has
+written since the feature shipped: `invoice.intercompany_routed` with
+`role: "mirror"`, keyed on the mirror, naming `origin_invoice_id`, with the router
+in `actor_id`. It is written in the routing transaction, and the 0022 trigger
+makes it append-only. The migration orients each pair by that row and still
+requires the two rows to point at each other. `created_at` order was rejected as
+well: it is an inference that happens to hold, not a record. A pair linked with no
+routing row is left alone rather than guessed at.
+
+**Scope is every status with a successor, not "not yet past approval".** The
+entry excluded approved mirrors because "an approved one has no decision left to
+protect". §169 says otherwise. `exception_lifecycle.segregation_refusal` reads
+the same implicated set when someone clears a payment-blocking exception, and
+that decision only arises after approval: `PAYABLE_INVOICE_STATUSES` are
+`approved`, `posted_in_erp` and `payment_scheduled`. A void can also send `paid`
+back to `approved`. The one status with nothing ahead of it is `done`, which has
+no successor. So the migration stamps every status except those with an empty
+set in `VALID_TRANSITIONS`. It keeps that as a literal, since a migration must not
+import app code, and a test re-derives it from the state machine. `failed` is
+included because its status alone does not say which side of approval it failed
+on.
+
+**"Where the mirror's set is NULL" would have matched nothing that §192 left
+behind.** `segregation_actor_ids` is a plain `JSONB` column, and SQLAlchemy stores
+Python `None` in it as JSON `null`, not SQL NULL (`should_evaluate_none`). Every
+mirror routed between 0097 and §192 was built with `segregation_actor_ids=None`,
+so each one holds JSON `null`. Only mirrors older than 0097 hold SQL NULL. The
+migration treats SQL NULL, JSON `null` and `[]` as "no set" (§152 already says an
+empty set means the same as no set) and never touches a non-empty set. Python
+reads JSON `null` back as `None`, which is how this went unseen.
+
+**A mirror routed before §131 gets its router as its uploader.** §131 started
+stamping the router onto the mirror, so an older mirror has no uploader either,
+and its router could approve it. To match what routing writes today, the
+backfill has to name them. The router is in the routing row's `actor_id`, which
+is recorded, not inferred. The migration keeps the mirror's own `uploaded_by_id`
+when it has one, falls back to that `actor_id` otherwise, and subtracts whichever
+it used from the set, as routing does. Leaving this out would have closed the
+§192 gap while keeping the §131 one open on the same rows.
+
+**Each changed mirror gets an audit row, which earlier backfills did not
+write.** 0081 and 0091 changed reconciliation state and a WebAuthn RP ID.
+Neither is an input to a fraud control on a live payable. This migration changes
+who may approve or clear one. §169 argues that the invoice's columns, together
+with each decision's audit row, let an auditor work out afterwards whether the
+control held. That breaks here. A mirror approved before the backfill by someone
+the backfill then names would look, from its columns alone, like an approval
+that broke segregation. So every mirror the migration changes gets an
+`invoice.segregation_backfilled` row: keyed to the mirror's correlation id, with
+the revision, the origin's id, and the old and new value of each column that
+moved. Its `actor_id` is NULL for §141's reason: nobody acted. The row dates the
+new set, so the earlier approval reads as compliant, which it was. The UPDATE and
+the INSERT are one statement, so neither can land without the other.
+
+**Routing and the migration share one definition, and a test holds them
+together.** Routing's two lines became `intercompany.inherited_actor_ids(source,
+uploader_id=…)`. The migration states the same rule as `INHERITED_SET_SQL`, byte
+ordering included (`COLLATE "C"`, matching Python's `sorted`). A realdb test runs
+both over every shape the column actually holds (SQL NULL, JSON `null`, `[]`,
+unsorted arrays) with the excluded uploader absent, inside the set and outside
+it. The migration cannot import the helper: an applied revision has to stay what
+it was when it ran. So a second test parses `implicated_actors` and fails if it
+starts reading any column besides the two this backfill copied. Legacy mirrors
+would never carry a third input, and someone should decide whether they need
+another backfill before the pin is updated.
+
+`downgrade` is a documented no-op. The schema does not change, and the stamped
+values are what the previous revision's code would write for a mirror routed
+today. Undoing them would reopen the hole, and the append-only audit rows would
+then describe data that no longer existed.
+
+The follow-up prescribed `0100_intercompany_mirror_segregation_backfill` as the
+revision id. That is 45 characters, and `alembic_version.version_num` is
+`VARCHAR(32)`, the overflow 0086 shipped. The id is
+`0100_mirror_implicated_backfill` (31), and the filename matches it.
+
+**Residuals.** `deploy.sh` runs migrations while the previous containers are
+still serving. If this revision ships in the same release as §192, pre-§192 code
+could route a mirror between the backfill and the container roll, and that
+mirror would be created without a set. The window lasts only as long as
+`migrate_all_tenants` and the roll, and once the new containers are up nothing
+can create another such mirror. That is accepted. The same evidence-based
+backfill applies to two other §131 paths: CSV import and recurring
+`generate-now` both recorded the acting employee on an audit row keyed to the
+invoice before they stamped `uploaded_by_id`. They were left out of this revision
+because they are not mirrors, and `docs/followups.md` tracks them.
+
+## 199. A manual GL write must name an active account of the invoice's chart whenever it has one — history, and a code the request did not set, are exempt
+
+**Decided:** 2026-09-22 · `backend/app/services/gl_chart.py` ·
+`backend/app/services/csv_import.py` · `backend/app/services/extraction.py` ·
+`backend/app/api/enrichment.py` · `backend/tests/test_gl_code_entity_chart.py` ·
+`backend/tests/test_entity_coa.py` · `backend/tests/test_extraction_gl_validation.py`
+
+§194 closed the cross-entity half of GL coding and deliberately left the other
+half open: a code in **no** chart — mistyped into the mobile edit sheet's free
+text, hand-typed through the API, sent in a CSV — and a **retired** account's
+code still wrote on every manual path, while extraction and `gl_recode` already
+refused both for the codes *they* chose. The web pickers hid the gap (both are
+a `<select>` whenever the chart is non-empty); nothing else did, and the code
+then travelled to budgets, matching rules, the 1099 box map, approval routing
+and the ERP push as if it named an account. The operator made the product call
+§194 would not make for them: **yes — a manual write must name an active account
+of the invoice's effective chart whenever that chart has one.**
+
+**The rule is one function and two halves.** `gl_chart.refuse_gl_codes_outside_chart`
+replaced `refuse_foreign_gl_codes` on every path §194 wired — create, `PATCH`,
+the line-items replace, approve-with-corrections (and through it the GL-coding
+exception agent, which now escalates a vendor's dominant historical code whose
+account has since been retired instead of approving it in), CSV import and
+recurring-template create/`PATCH`. It refuses another entity's code always
+(§194), and — only when the invoice's effective ACTIVE chart (active shared ∪
+its entity's own; the shared chart alone for a NULL-entity invoice) has any
+account at all — a code that is not an active account of it. That set is
+exactly what `GET /api/gl-accounts?chart_entity_id=` serves the pickers, so the
+server now refuses precisely what a `<select>` would not have offered, and the
+free-text fallback appears exactly when the server has nothing to hold a code
+to. The 422 keeps §194's shape — a string `detail` the web toast and the mobile
+snackbar render verbatim — and names each code with its reason (another
+entity's, retired, or not in the chart), because the fix differs for each.
+
+**An empty active chart keeps today's behaviour.** Refusing everything there
+would make a tenant unusable until its first ERP sync, and a subsidiary created
+before anyone builds its chart would be unable to take a single coded invoice.
+The same holds for extraction, which §194 had left with the opposite gap: in its
+empty-chart branch it treated "nothing to validate against" as "accept
+anything", so another entity's `6000` reached an A invoice through the one
+path `gl_chart` did not cover. All three of its sites (lines, suggested header
+GL, the vendor-prior recheck) now ask the same question through one closure —
+membership in the catalog when there is one, `belongs_elsewhere` when there is
+not — and each keeps the warning it already raised (`gl_codes_not_in_chart`, or
+`gl_code_stale_prior` for the prior site, which already covered a foreign prior
+in a synced chart). The follow-up proposed `gl_codes_not_in_chart` at all three;
+one condition raising two different warnings depending on whether the chart
+happens to be synced would have been the inconsistency. The ownership read is
+the tenant's WHOLE chart, lazily and at most once, because the prior overlay
+lands a code only after the document's own codes were judged — a bounded read
+would have needed a second query. A synced chart pays nothing extra.
+
+**Only a code the request sets or changes is judged**, which is §194's rule
+applied to a case it matters far more for. An invoice coded to an account that
+is later retired did nothing wrong, and refusing an unrelated edit — a note, a
+due date, the web form's full-payload save that echoes the stored code back —
+because of a field the user did not touch would freeze every such invoice the
+day its account was retired. So `PATCH` and approve judge a code only when it
+differs from the stored one, the line-items replace only codes new to the lines,
+and a recurring `PATCH` only a changed code. The invoice modal was brought into
+line with the same rule: a line carrying a since-retired code now shows it as
+its own option (as the header already did) instead of rendering blank while
+re-saving it, and a new line inherits the header's code only when the line
+picker offers it — otherwise the save was refused naming a code the user could
+not see. For the same reason the invoice-coding suggestion
+(`GET /api/enrichment/invoices/{id}/suggestions`) no longer offers a dominant
+historical GL code the save would refuse: it is dropped, not replaced by the
+runner-up, whose dominance over the remaining rows would overstate what the
+history says.
+
+**CSV import refuses too, except rows that are history.** The importer's four
+statuses were checked against the state machine rather than the comment beside
+them, which called `rejected` "terminal-historical": it is not —
+`POST /api/invoices/{id}/resubmit` takes it back to `ready_for_review`, then to
+approval and the ERP push. `done` is terminal, and an imported `paid` row has no
+`Payment` for the void path to walk back to `approved`, so those two — and only
+those — are held to §194 alone: the account a payment was booked to years ago
+may be long retired, or never have been created in this chart, and refusing
+that would make a Day-0 migration impossible. `new` and `rejected` rows take the
+full rule. Reading the status before the GL code meant moving the status checks
+ahead of vendor resolution, which also stopped an unimportable-status row from
+minting an `unverified` vendor stub on its way to the error — the same
+"a refused row leaves nothing behind" rule §194's check already followed.
+
+Rejected: **refusing the stored code on any write to its row** (the rule is
+about coding decisions, and re-saving is not one); **a per-org opt-out** (an
+org that wants free-form codes has an empty chart, which is already the
+opt-out); **auto-clearing a retired code on the next save** (a silent data
+change under an unrelated edit, and the approval signature and the 1099 box
+map would both read the change); and **validating the recurring *generator***
+against the chart it materialises into — a template whose account is retired
+after it was written keeps stamping that code, which is a real gap but a
+different decision (drop the code, warn, or pause the template) with no human
+present to ask, so it is filed rather than guessed at.
+
+One thing found on the way is fixed with it: `_resolve_extraction_config`
+returned a BYOK org's own `settings["extraction"]` dict, which `run_extraction`
+then wrote the invoice's `gl_account_catalog` and RAG `few_shot_prompt` into.
+Production loads the org per job, so the damage stayed within one run, but any
+caller reusing the settings — which the realdb tests did — handed an invoice
+with an empty chart the previous invoice's catalog, another entity's, as its
+prompt hint. It returns a copy now.
+
+## 200. The web labels money only with a currency it can prove: an unknown row keeps its own subtotal, the org store answers `null`, and each dashboard disclosure states its own rule
+
+§196 made `formatMoney` render an unprovable code bare, and noted three places
+that still substituted one before the formatter ever saw it. All three were the
+same move — reach for the org's currency when the figure's own is missing — in
+three different disguises.
+
+**`utils/currencyGroups.ts` took the org's code as a fallback parameter.**
+`groupAmountsByCurrency(rows, fallback)` bucketed a row with no currency INTO
+the fallback's subtotal, so EUR 100 plus a row nobody could put a currency on
+rendered as one "€140"; `formatCurrencyTotals(totals, fallback)` labelled a
+total the backend had reported under `""` with the org's code, although
+`api/bank_reconciliation.py::_currency_totals` emits `""` precisely so such a
+total is "not folded into another currency's figure". An unknown row is now a
+group of its own, keyed `null`, sorted last and rendered bare. **Rejected:**
+keeping the parameter with a `null` default, which is §196's opt-in again — the
+parameter existed only to be handed `orgCurrency.currency`, and every caller
+handed it that. Dropping the unknown rows was rejected for the reason the helper
+exists at all: it understates the selection. The unknown group counts toward
+`spansMultipleCurrencies`, because nothing proves it is the currency beside it,
+and the warning is the cheaper error than a run refused at submit. What an EMPTY
+input reads as stays the caller's call, and the audit found one caller getting
+it wrong in a way the parameter had hidden: `/budgets`, `/expenses` and
+`/requisitions` rendered "$0.00" for a summary that had not landed or had
+failed. A zero wearing the org's code is right for a summary that answered with
+nothing; an unanswered summary is no figure, and now reaches `KpiCard` as
+`null`.
+
+**The `orgCurrency` store started at, reset to and degraded to `USD`.** Mobile's
+`OrgCurrencyStore` answers `null` there, and §119 is the reason: the backend's
+fourth rung, `settings.reporting_currency_default`, is operator configuration no
+client can read, so a client `USD` is a guess that looks exactly like a
+configured answer — and it was also the answer on every page before the store
+had loaded at all. The store is now `string | null`, starts and resets to
+`null`, and assigns the resolver's result as-is (`if (ccy)` kept the old value
+when the resolver abstained, which was the same guess with a longer memory).
+Every render reader then renders bare with no further change, since §196. The
+non-render readers split three ways, and the type system found every one: `m()`
+params are `string | number`, and a `string | null` reaching a
+`fallbackCurrency: string` or a form's `$state` fails `pnpm check`.
+
+- A **form** needs *a* value, so it names the platform default itself —
+  `orgCurrency.currency ?? DEFAULT_CURRENCY` in `currencyOptions`, the create
+  modals, the credit-memo form and the expense-report / pre-approval creates.
+  The store stopped being where that default comes from.
+- A **label** naming what a bare number input is denominated in —
+  "Auto-approve below (EUR)", the approval-matrix bands, the CFO sign-off
+  threshold — reads `orgCurrency.label`: the code, or the localized noun
+  "reporting currency", which is what the backend compares against whatever it
+  resolves. The three hints beneath those fields said "converted to {currency},
+  your organisation's reporting currency", which has no honest reading once the
+  code IS the noun; they now name the concept and leave the code to the label
+  directly above them.
+- A figure whose **payload names its currency** reads the payload, not the
+  store. The dashboard's KPIs and charts now label from
+  `reporting.reporting_currency`; `/cfo`'s forecast and what-if figures from the
+  cash position's `opening_balance_currency` (all three endpoints denominate
+  through one `resolve_reporting_currency` and land in one `load()`); the CFO
+  unrealized-FX columns from `unrealized_fx.reporting_currency`. Before, the
+  dashboard could print "no exchange rate into EUR" directly above figures
+  wearing `$`, because the notice read the payload and the figures read the
+  store. What is left on the store is what has nothing better to read — the
+  `/adaptive` thresholds and averages, the zero an empty selection costs, and
+  the PO figures until POs record a currency.
+
+Because the store is session-cached, the one page that edits a rung of the chain
+(`/organization`'s Invoice Defaults) now re-resolves it after a save; otherwise
+the CFO-threshold label on the same page kept naming the pre-save answer until a
+reload. **Deferred rather than done:** `GET /api/organization` could name the
+code the server itself resolves, fourth rung included, which would let the
+store answer where it now abstains. That widens a role-projected settings
+response and moves mobile's store with it, so it is filed rather than folded in.
+
+**The dashboard's one partial-conversion banner described the wrong rule for the
+figure a reader is most likely to quote.** It ORed three counts into "some
+totals above exclude rows … treat them as a floor". Verified against the SQL:
+`reporting.unconverted_count` comes from `invoice_reporting_amount_sql`, which
+falls back to the FACE amount, so Total Amount is not a floor — it mixes
+currencies; `total_paid_unconverted_count` and
+`total_pending_unconverted_count` come from `payment_reporting_amount_sql`,
+which refuses that fallback and leaves the payment out, so Paid and Pending are
+floors. The banner is now two lines, each naming the KPI it qualifies: a
+face-value line gated on the invoice count, and an excluded line gated on the
+payment counts that names only the KPIs that actually lost a row. The follow-up
+also gated the face-value line on `upcoming_unconverted_count`; that was
+declined for the web, because the web renders no upcoming TOTAL for a
+disclosure to qualify — mobile does, and words it there. What the web does
+render is the upcoming list's per-row FACE amounts, which it was labelling with
+the page's currency: a EUR invoice read as dollars. `UpcomingPayment` now
+carries the invoice's own `currency`, and each row wears it.
+
+## 201. The profile page learns whether the password is a proof from the server's own predicate, not from the login page's
+
+**Decided:** 2026-09-22 · `backend/app/api/auth.py` · `frontend/src/routes/profile/+page.svelte` · `backend/tests/test_sso_only.py` · `frontend/tests-e2e/auth/profile-sso-only-step-up.spec.ts`
+
+§191 stopped the password from proving a step-up in a tenant that has closed password
+sign-in. The server side was complete. The page did not know about it. `/profile`'s passkey
+card still rendered "Confirm your password" and preferred a typed password over the
+passkey ceremony, and the TOTP disable form offered nothing but a password field. A
+member who typed one got a 400 toast instead of never being asked. The follow-up
+understated one case. A member with TOTP and no passkey had no working proof on the
+passkey card at all, because the card had no code field. In an SSO-only tenant that
+member could not add a passkey, and could not turn TOTP off either.
+
+The page had to learn one bit, and the follow-up offered two sources. The first was the
+public `/auth/{sso,saml}/config`, which the login page already reads. The second was a
+field on `/auth/me`. **The second was taken, because the first is a different rule.** The
+config endpoints echo `sso_only` only when the IdP config resolves. `_step_up_satisfied`
+drops the password whenever `services/sso.is_sso_only` holds, and that needs only
+`sso.enabled` and `sso_only`. The two disagree for a tenant with SSO switched on and
+required and an IdP block that does not resolve. The echo says "open" there, while sign-in
+and step-up both refuse the password. A page built on the echo would have kept offering
+the refused field in exactly that tenant. So `/auth/me` carries `password_sign_in_closed`,
+and it is not computed next to the rule. It is computed by the rule:
+`_org_closes_password_sign_in(org)` is now the one function that login's refusal, the
+step-up's password drop (through `_password_sign_in_closed`) and `_user_response` all
+call. `test_sso_only.py` walks every shape of `settings.sso`, including the unresolvable
+one, and asserts that `/me`, the step-up and login give the same answer for each.
+
+Five calls inside it:
+
+1. **The field names the rule, not the setting.** It is `password_sign_in_closed`, not
+   `sso_only`. The setting alone does not close anything (`sso_only` without
+   `sso.enabled` is open). Reusing the name the config echo already uses, with a
+   different meaning, would invite the near-copy this entry exists to avoid.
+
+2. **Where it is set, no factor change renders a password field.** The disable form asks
+   for a current authenticator code instead. The factor being turned off is a live TOTP
+   secret, so that code is always on hand, and the passkey button remains when a passkey
+   exists. The passkey card asks for the code when TOTP is live, runs the passkey
+   ceremony when the field is left blank, and asks for nothing when TOTP is not live. In
+   that last case `needsPasskeyStepUp` already guarantees a passkey to run the ceremony
+   with. A half-typed code is not treated as an offered proof, because the server
+   refuses anything under six digits with a 422. The field is a page-local snippet rather
+   than a component, so the cards' scoped field styles still apply to it.
+
+3. **Where it is not set, nothing changes.** The password stays the typed proof, including
+   the existing "leave blank for a passkey" route for a passwordless account in a tenant
+   that has not closed the password. Offering the code there too would be a reasonable
+   addition, but no follow-up asked for it, and the password field is correct in that
+   tenant.
+
+4. **An account with no factor is not asked for anything, in any tenant.** This is the
+   "neither a passkey nor TOTP" case the follow-up raised. `_require_mfa_step_up` returns
+   before any proof is checked when nothing is live, so such a member can enrol either
+   factor. The page already knew that: `needsPasskeyStepUp` is false and no field
+   renders. The e2e pins it so a later change cannot put a dead prompt there. The
+   narrower case, an account whose only passkeys are bound to another host and which has
+   no TOTP, still has no proof this host can take (§191, point 4). The Add and Remove
+   buttons stay enabled. The server's wrong-host refusal names the host to use, which is
+   the only honest thing this page could say. Filtering on `usable_here` to disable the
+   buttons would have replaced that sentence with a silent grey button.
+
+5. **Every refused step-up in such a tenant gets the SSO sentence, not only a refused
+   password.** The page now sends an authenticator code where it used to send a
+   password. A mistyped code answered with the generic "Confirm your password, …" would
+   point at a field the page no longer shows. `_refuse_step_up` therefore reads the org
+   on every refusal, not only when a password was offered. That is a throttled failure
+   path, and the success paths still load the org only for an offered password (§191,
+   point 3). The sentence is reworded to "only a current authenticator code or a
+   registered passkey can confirm this change", which is correct for a refused password
+   and a refused code alike. It still reveals only what the config endpoints already
+   publish.
+
+Mobile is unaffected: it deserializes `/auth/me` but manages no factors. Enrolment,
+passkeys and disabling all happen on the web. The supplier portal is unaffected for the
+reason §191 gives.
+
+The disagreement that decided the source is itself a defect. A tenant with SSO switched on
+and required and an unresolvable IdP block gets a login page with a password form that
+every submit refuses, and no SSO button. It is recorded in `docs/known-issues.md`, with
+the fix: make `is_sso_only` require a resolving config, which `_org_closes_password_sign_in`
+now makes a one-site change. When that lands, `/me` follows it automatically. That is the
+point of reading the rule rather than copying it.
+
+## 202. The credit-memo invoice pickers ask the server for exactly the set the apply accepts, and the combobox under them is one component
+
+Both `/credit-memos` invoice selects — the Apply dialog, and since #443 the
+create dialog's optional "Apply to invoice" link — read one `invoices` array
+that the page filled on MOUNT by walking every page of `GET /api/invoices`
+(`fetchAllPages`), then filtered by `vendor_id` in the browser. That cost one
+request per 100 invoices on every visit, for a list most visits never open, and
+it grew with the tenant's whole invoice history. The follow-up that tracked it
+proposed a `vendor_id` filter on `GET /api/invoices` feeding a combobox on the
+`ui/VendorPicker` pattern.
+
+**The vendor filter was not the whole of what the apply refuses.** Both
+application paths run four guards, and vendor is only the first: the memo's
+entity against the invoice's, the memo's currency against the invoice's, and
+the over-application guard (the invoice must still absorb the credit). A
+picker narrowed only by vendor still offered a EUR invoice for a USD memo, a
+100.00 invoice for a 250.00 credit, or one already credited down to nothing —
+each a 409 the operator met only after choosing. So the pickers read two new
+endpoints on the credit-memo router, `GET /credit-memos/{id}/eligible-invoices`
+(Apply) and `GET /credit-memos/eligible-invoices?vendor_id=&amount=` (create),
+backed by one builder, `_eligible_invoices_query`, that is the SQL form of the
+guards clause by clause: the caller's entity scope, `Invoice.vendor_id` equal
+to the memo's vendor, the NULL-admitting entity rule, the case- and
+space-insensitive currency rule with a blank invoice currency admitted, and
+`amount − Σ applied ≥ credit` (or `> 0` before the create form has an amount,
+since every credit is strictly positive). The Apply read takes its terms off
+the memo row rather than from the client, so the list cannot describe a memo
+someone has since edited, and it answers a memo that is no longer `open` with
+the apply's own 409. The create read has no currency leg, because a linked
+create that names no currency inherits the invoice's — which is what the dialog
+sends. The contract is pinned as a set equality in
+`tests/test_credit_memos.py`: over a matrix of every refusal and the admission
+beside each, what the endpoint lists is exactly what the path accepts.
+
+**Status is a leg only because it became a guard.** A picker that hid
+invoices the apply accepts would be as wrong as one offering invoices it
+refuses, so the picker never filters on anything the application paths do not
+refuse. Building it surfaced that they accepted a credit on an invoice whose
+money had already left; that was decided in the same batch (below), and the
+status leg is the guard's own set.
+
+The `vendor_id` filter landed on `GET /api/invoices` anyway, in
+`_invoice_list_filters`, and so on `/counts` and `/ids` with it (decisions §48;
+`test_whole_set_kpi_rollups.py` would have refused a list filter the tally
+lacked). It is the exact counterpart the free-text `vendor` leg never was —
+`vendor=Acme` is a substring of the invoice's own name and also matches "Acme
+Holdings" — and the eligibility builder composes that builder for its vendor
+and search legs, so "this vendor's invoices" and "a search term" each mean one
+thing on both surfaces rather than two.
+
+**The combobox is one component.** `ui/VendorPicker` carried every lesson the
+picker had cost: the Escape capture (§146), focus that selects without opening,
+the typed-versus-committed split, a count line that never presents a subset as
+the whole or a failure as an empty set. A second copy would have had to be kept
+in step by hand, so the control moved into `ui/SearchPicker` — generic over the
+option, i18n-agnostic, with its rules in `utils/searchPicker.ts` — and
+`VendorPicker` and the new `InvoicePicker` are thin wrappers that own only the
+source, the label, the option row and the copy. Two properties were new:
+
+- **The source's identity is the set.** The answer the picker holds is stamped
+  with the `load` function that produced it, so a changed scope (another memo,
+  another vendor) is simply not this source's answer — its options are never
+  drawn, committed by Enter or announced — without an effect racing to clear
+  them. The page derives each loader from its scope; the create link's is keyed
+  on the vendor alone and reads the amount at fetch time, so typing an amount
+  does not throw away the operator's search on every keystroke.
+- **`InvoicePicker` preloads.** It fetches the unfiltered first page when its
+  dialog opens (never on page mount) and the CLOSED field reports an empty or
+  unreachable set in its description — for a dialog whose only purpose is
+  picking an invoice, "nothing here can take this credit" is the first thing to
+  know. The empty sentence is the caller's (`emptyText`), because only the
+  caller knows what its set means. `VendorPicker` still fetches only on open
+  and stays silent at rest: its last answer may be for a search the user has
+  abandoned.
+
+Considered and rejected:
+
+- **Only `vendor_id` (and perhaps `currency`) on `GET /api/invoices`.** It is
+  the follow-up's literal proposal, and it would have left the balance and
+  entity refusals to be discovered by the 409 — the defect, narrowed rather
+  than fixed. A credit-balance predicate has no business in the invoice list's
+  shared builder, which also feeds the list's chips and select-all.
+- **The client passing the memo's terms** (`vendor_id`, `currency`, `amount`)
+  to one generic endpoint for both dialogs. For Apply the memo exists, so the
+  server should read it; a client restating it can only be staler than the row.
+- **A copy of `VendorPicker` renamed.** Guard rail 9, and the §146 capture is
+  exactly the kind of detail a second copy loses in its first "tidy".
+- **Keeping `fetchAllPages`.** It had no caller left, and its docstring invited
+  the next `<select>` over a walked list; §145 and this entry are the reasons
+  not to write one.
+
+**Paid and done invoices are refused.** A credit memo does nothing by itself:
+`services/payment_runs.net_payable_amount` subtracts applied credits when a
+payment is built or executed. So a credit applied to an invoice no payment will
+read again reduces nothing — and because application is all-or-nothing and
+immutable (the memo is `applied`, can be neither voided nor re-applied), the
+vendor's credit is simply gone, while their next invoice is paid in full. Both
+application paths accepted exactly that for a `paid` or `done` invoice. They now
+refuse it with a 409 (`_assert_creditable_status`, checked first because it is
+about the invoice alone), and the memo stays open for the vendor's next invoice.
+
+The admitted set is not a list. `CREDITABLE_INVOICE_STATUSES` is derived from
+`workflow_engine.VALID_TRANSITIONS` — the rule `api/payments.SCHEDULABLE_INVOICE_STATUSES`
+follows — as every status that can still reach `payment_scheduled` (where a
+payment is booked) without first being `paid` (where it settles). Those two
+anchors are the definition of the question, not a restatement of its answer, and
+what falls out is the reasoning:
+
+- **Refused: `paid` and `done`.** `paid` is the settled status itself; its only
+  way back is the void (`paid → approved`), after which the invoice is `approved`
+  and creditable again — so the refusal lasts exactly as long as the money is out.
+  `done` is terminal: whether it closed after a payment or without one (`new`,
+  `approved` and `sent_to_erp` can all close straight to `done`), nothing will pay
+  it, and "no payment will read this" is the refusal's actual claim — which is
+  why its sentence says that, rather than "already paid".
+- **Admitted: `payment_scheduled`.** A payment is booked but has not settled; the
+  executor's `net_amount_changed` refusal fails the stale booked payment
+  retry-safely and the rebuilt run pays net. Refusing here would strand every
+  credit that arrives while a run awaits approval.
+- **Admitted: `rejected` and `failed`.** Both re-enter the flow (`rejected →
+  ready_for_review | new`, `failed → pending | sending_to_erp`). A disputed
+  invoice is typically rejected, the supplier issues a credit for the dispute, and
+  the invoice is resubmitted — the credit must be able to meet it.
+- **Everything upstream of a payment** (`new` through `posted_in_erp`) is
+  admitted, as before. A status the graph gains later is classified by its edges,
+  and a status with no entry in the graph is refused rather than waved through;
+  `test_creditable_statuses_are_derived_from_the_state_machine` pins the
+  derivation, not only today's answer.
+
+The picker leg in `_eligible_invoices_query` is the same set, so the parity
+tests now assert a `paid` and a `done` invoice are neither offered nor accepted,
+and a `payment_scheduled`, `rejected` and `failed` one are both. The refusal
+sentence is a plain `detail`, like the four application refusals beside it: none
+of them carries a machine code yet, which is the cross-cutting error-contract
+change the open "backend refusal sentence reaches a localized page in English"
+follow-up already owns — giving this one refusal a code alone would leave the
+toast inconsistent with its siblings. With the pickers offering only eligible
+invoices, the sentence is reached only by a race or a direct API caller.
+
+Considered and rejected: **refusing `payment_scheduled` too**, which would have
+been the simpler "money is committed" line but refuses credits the executor
+already knows how to honour; and **a literal `{paid, done}` set**, which is
+today's answer but would silently mis-classify the next status the workflow
+grows.
+
+
+## 203. An image ref is written once, in a compose file, and CI and the deploy read it from there
+
+Pinning every image to `repo:tag@sha256:…` gave the compose files a Dependabot
+reader (the `docker-compose` entry) and left six other copies without one. CI's
+pgvector and Redis `services:` containers (four jobs in `ci.yml`, one in
+`sso-e2e.yml`) and both MinIO `docker pull` / `docker run` steps restated
+`backend/docker-compose.yml`'s refs by hand, and `deploy/deploy.sh` held the
+production frontend-build image in a shell variable. `github-actions` reads only
+`uses:`, and nothing reads a shell variable. That was worse than drift. When
+`dependabot-auto-merge.yml` merged a green minor/patch compose PR, the green run
+had started the *old* images, so the check it trusted had tested something other
+than the bump. The follow-up called `NODE_IMAGE` a restated compose ref. It was
+not: no compose file declared a Node image at all. It was a ref with no reader,
+and so its digest (and the alpine CVEs under it) could only go stale.
+
+**CI reads the dev compose file through a job output.** A `compose-images` job in
+each workflow runs `scripts/compose_image_refs.sh backend/docker-compose.yml
+postgres redis minio` and exposes the three refs as outputs. `services.<id>.image`
+is `${{ needs.compose-images.outputs.<service> }}` (GitHub's context table lists
+`needs` for `jobs.<job_id>.services`), and the MinIO step pulls and runs
+`$MINIO_IMAGE`, set from the MinIO output. The compose file is the only place a
+ref is written, so a compose PR's own CI run starts the images it bumps. Four
+details shape it:
+
+- **JSON, not `config --images`.** `docker compose config --images` prints bare
+  refs in an order that changes with the arguments, and nothing ties a line to
+  its service. `config --format json` plus `jq` reads `.services.<name>.image` by
+  name. Both behave the same on the runner's Compose 2.38.2 and on 5.x.
+- **The reader fails closed.** If `services.<id>.image` is an empty string, GitHub
+  starts no container and still runs the job. So the reader refuses anything but
+  `repo:tag@sha256:<64 hex>`, and its refusals (a floating tag, no digest, no
+  tag, a build-only service, a service the file does not define) are unit-tested
+  at the top of the same job, before the extraction runs.
+- **`ci-gate` needs the job directly.** If `compose-images` fails, every job
+  behind it is *skipped*, and the gate counts a skip as a pass. The job has no
+  path filter, because `backend-test`, which runs on every push, needs it.
+  `backend-test` therefore starts about twenty seconds later than it used to,
+  and that cost was accepted.
+- **Service containers stay.** We did not replace them with `docker compose up`.
+  That would read the whole compose service rather than just its ref, but CI's
+  containers differ from dev's on purpose (tmpfs `PGDATA` with a 2 GB shm, no
+  `init-tenants.sql` mount, start gated on health before the first step). Only
+  the ref changes source. Keycloak, Mailpit, LocalStack, stripe-mock and fake-erp
+  already start through `docker compose`, so they were never copied.
+
+**The frontend build became a compose service instead of a `docker run`.** It is
+`compose.prod.yml`'s one-shot `frontend-build`: the pinned Node image, the repo
+bind mount and a pnpm-store volume, behind a `build` profile so `up -d --wait`
+never starts it. `deploy.sh` runs it with `docker compose run --rm -T` and passes
+`PNPM_SPEC` and the two public origins with `-e`, as it did before. The
+`docker-compose` Dependabot entry already covered `/deploy`, so Node minor and
+patch bumps now arrive as PRs. Node *majors* are ignored, because the major has
+to move with every `setup-node` `node-version:` at once (`frontend/CLAUDE.md`
+§ The Node floor). The cache volume became compose-managed
+(`feoh-prod_pnpm-store`). Adopting the old `feoh-prod-pnpm-store` by name prints a
+"not created by Docker Compose" warning on every deploy, and a warning that
+appears on every deploy trains people to ignore warnings. A cache costs one cold
+build to replace.
+
+**Enforced by `backend/tests/test_container_supply_chain.py`.** Until now it
+checked only Dockerfile `FROM` lines. It now fails in these cases:
+
+- a compose `image:` is unpinned;
+- a workflow value or a non-comment `deploy/*.sh` line spells out a digest or a
+  compose repository's `repo:tag`;
+- a `services:` / `container:` image is anything other than an output of a job
+  in that job's `needs` that runs the reader for that service (a `vars.` or `env`
+  indirection would be a copy kept somewhere else);
+- `compose.prod.yml`'s Postgres or Redis differs from the dev file's, which is
+  the one CI starts;
+- the `frontend-build` Node major differs from any `setup-node`.
+
+Both compose files sit in one Dependabot entry and one group. If the files are
+ever bumped in separate PRs, the equality check keeps both red until they merge
+together, which is correct: merging one would leave CI testing a Postgres that
+production does not run.
+
+**Rejected:**
+
+- **Keep the copies and add a test that they equal the compose refs.** That
+  turns silent drift into a red Dependabot PR that someone has to fix by hand.
+  Auto-merge would then stop working for every bump to the three core images,
+  and the copies would still exist to be edited. Reading the ref removes the
+  copy.
+- **A reusable `workflow_call` workflow shared by `ci.yml` and `sso-e2e.yml`.**
+  The logic already lives once, in the script. Two fifteen-line jobs are easier
+  to follow than an indirection, and a workflow cannot `needs:` another
+  workflow's job anyway.
+- **For Node, keep the shell variable and guard its major against `setup-node`.**
+  That guards the major and leaves the digest with no reader.
+- **A compose service that only holds the ref, with `deploy.sh` still running
+  `docker run`.** That service would exist only to carry a string. Making it the
+  real build container means `compose.prod.yml` describes what the VM runs.
+
+**What this does not cover:** images CI never starts. The Authentik stack and
+Ollama, which are local-only profiles, and `compose.prod.yml`'s Caddy and Node
+images are still auto-merged on a green run that never started them, and the
+next deploy is the first thing to run them. That gap is tracked in
+`docs/followups.md`.
+
+## 204. SSO-only closes the password only where an SSO sign-in can start, and a block that cannot start one is refused at save
+
+**Decided:** 2026-09-22 · `backend/app/services/sso.py` · `backend/app/api/auth.py` · `backend/app/api/organization.py` · `backend/tests/test_sso_only.py` · `backend/tests/test_organization_settings_validation.py`
+
+§201 found that two predicates decided whether a tenant was SSO-only, and that
+they disagreed. `is_sso_only` looked only at `sso.enabled` and `sso.sso_only`.
+The public `/auth/{sso,saml}/config` endpoints reported `sso_only` only when the
+IdP block resolved. Login, the step-up and `/auth/me` used the first. The login
+page used the second. For a block with both flags set and an IdP config that did
+not resolve (no `discovery_url` / `client_id` / `client_secret`, or no
+`idp_entity_id` / `idp_sso_url` / `idp_x509_cert`, or a malformed one) the page
+showed a password form and no SSO button, and every password it submitted got
+the 403. No member could start a session. §191, `docs/authentication.md` and
+`is_sso_only`'s own docstring all said a broken IdP config keeps the password
+open as the escape hatch. That was true only while `enabled` was false.
+`PATCH /api/organization` merged the block with no validation, so an admin could
+reach the state in one save.
+
+**Both halves were taken, and the first is the one that closes the lockout.**
+`is_sso_only` now requires a third thing: the IdP block of the protocol
+`settings.sso` selects must resolve. It gets that from `check_sso_idp_config`,
+which runs the same code `resolve_sso_config` and `resolve_saml_config` run. It
+is not a copy of their checks. Login's refusal, the step-up's password drop,
+`/auth/me`'s `password_sign_in_closed` (all through
+`api/auth._org_closes_password_sign_in`) and the config echo all call
+`is_sso_only`. So the page hides the password form exactly where the server
+refuses the password, and wherever it does, it has the SSO button to show. The
+write-time refusal is the second half: a `PATCH` that writes `sso` with
+`enabled` and `sso_only` over a block that does not resolve is a `422`. On its
+own it would not have been enough. A direct DB edit, or a row saved before it
+existed, bypasses it, and the predicate is what covers those.
+
+Five calls inside it:
+
+1. **Unresolvable means open, not closed.** The rejected alternative kept
+   `is_sso_only` as it was and made the echo report `sso_only: true` for a
+   broken block. That hides the password form and still shows no SSO button,
+   which is the same lockout with less explanation. Is failing open a security
+   concern? Only an admin writes `settings.sso`, and SCIM and the SCIM-token
+   mint only add keys to the block. The actor who can break the block could as
+   easily have switched `sso_only` off, so failing open gives nobody a door they
+   did not already hold. Each sign-in the escape hatch lets through logs a
+   warning naming the org (never the block, which holds the client secret). A
+   tenant that believes it enforces SSO and does not is an operator's problem.
+
+2. **"Resolves" is local, never live.** The check is presence, type, URL shape
+   and base64 decoding: microseconds, no DNS, no discovery fetch. It runs on
+   every password sign-in and every `/auth/me`, so a network call there would
+   put an IdP's latency, and its outages, on our login path. The cost is a
+   residual this does not cover. A complete block pointing at an IdP that is
+   down, or holding a client secret that has expired, still closes the password,
+   and recovering from that takes a platform operator. That is the ordinary
+   SSO-only trade-off, and it is filed as a follow-up rather than solved by
+   probing the IdP from the sign-in path.
+
+3. **The resolvers raise `SSOConfigError` and nothing else.** Before, a
+   malformed block (a numeric `client_id`, an unclosed IPv6 bracket in the
+   discovery URL, a string where the allowlist or the cert list should be)
+   raised a `TypeError` / `AttributeError` on the public config endpoint. That
+   was a 500 on a page nobody reads. Now the same code runs inside login, where
+   a 500 would be the lockout again. So every value they read is type-checked
+   into an `SSOConfigError`, and a test walks the malformed shapes. A malformed
+   allowlist is refused rather than ignored, because ignoring it would admit
+   every domain.
+
+4. **SAML's validation no longer needs a slug.** `resolve_saml_config` takes the
+   tenant slug only to derive the default SP EntityID, which cannot fail. The
+   refusable part moved into `_validated_saml_block`, so `is_sso_only` keeps its
+   settings-only signature and never needs a slug to answer. The SAML
+   `idp_sso_url` is now shape-checked at resolve time, as the OIDC
+   `discovery_url` already was. A block that passes can therefore never give
+   the login page a SAML button that `saml_login` would refuse.
+
+5. **The write-time refusal names keys and nothing else, and only guards a
+   write of `sso`.** `SSOConfigError` carries the offending key names in
+   `fields`. The `422` is a plain string `detail` like the endpoint's other
+   validation errors, and it lists `sso.<key>` for each one. It never echoes a
+   value, because one of them is the client secret. `sso_only` with SSO switched
+   off is accepted, since an admin may stage the flag before the IdP is ready,
+   and that closes nothing. An incomplete block without `sso_only` is accepted
+   too, since it only means there is no SSO button yet. A stored block that is
+   already unresolvable does not block a `PATCH` of some other setting. It is
+   harmless now that the password stays open over it, and refusing unrelated
+   saves would hold the whole settings page hostage to one block.
+
+§201 chose `/auth/me` over the config echo because the two disagreed. They now
+agree by construction. `/me` stays the profile page's source because the page
+is authenticated and already reads it, and because reading the rule rather than
+copying it is what made this a one-site change. A tenant already in the broken
+state moves from "nobody can sign in" to "the password works, and the log says
+why". The diagnosis's trigger assumed no production tenant had turned
+`sso_only` on yet, and nothing here depends on that.
+

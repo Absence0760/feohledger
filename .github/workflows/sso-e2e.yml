@@ -25,6 +25,7 @@ on:
       - "backend/scripts/enable_keycloak_sso.py"
       - "backend/scripts/enable_keycloak_saml.py"
       - "backend/docker-compose.yml"
+      - "scripts/compose_image_refs.sh"
       - "frontend/src/routes/login/**"
       - "frontend/tests-e2e/sso/**"
       - "frontend/tests-e2e/saml/**"
@@ -48,15 +49,35 @@ permissions:
   contents: read
 
 jobs:
+  # Postgres and Redis run the refs backend/docker-compose.yml pins, read here
+  # rather than written below — the same job as ci.yml's (docs/decisions.md
+  # §203), which is where the reasoning lives. A workflow cannot `needs:` a job
+  # in another workflow, so each reads the file for itself.
+  compose-images:
+    name: Service images (from compose)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      postgres: ${{ steps.refs.outputs.postgres }}
+      redis: ${{ steps.refs.outputs.redis }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Read the refs from backend/docker-compose.yml
+        id: refs
+        run: |
+          set -euo pipefail
+          scripts/compose_image_refs.sh backend/docker-compose.yml postgres redis | tee -a "$GITHUB_OUTPUT"
+
   sso-e2e:
     name: SSO e2e (Keycloak)
     runs-on: ubuntu-latest
+    needs: compose-images
     timeout-minutes: 15
 
     services:
       postgres:
-        # same ref as backend/docker-compose.yml — no Dependabot ecosystem reads this line; bump both
-        image: pgvector/pgvector:0.8.6-pg16@sha256:ccc6e83d6e35e931dc7c5def2022729d5a6c370318d099181995567ff1fb4d6b
+        # backend/docker-compose.yml's ref, read by the compose-images job — never write one here (§203)
+        image: ${{ needs.compose-images.outputs.postgres }}
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
@@ -71,8 +92,8 @@ jobs:
           --health-timeout=5s
           --health-retries=5
       redis:
-        # same ref as backend/docker-compose.yml — no Dependabot ecosystem reads this line; bump both
-        image: redis:7.4.11-alpine@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499
+        # backend/docker-compose.yml's ref, read by the compose-images job — never write one here (§203)
+        image: ${{ needs.compose-images.outputs.redis }}
         ports:
           - 6379:6379
         options: >-

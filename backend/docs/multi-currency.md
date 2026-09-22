@@ -146,6 +146,14 @@ Surfaced in:
   `payment_reporting_amount_sql` (below) rather than a raw `SUM(Payment.amount)`
   — the same resolver `GET /api/payments/summary` already used for its own
   `total_paid`/`total_pending`.
+  **The dashboard's unconverted counts follow two opposite rules**, so a client
+  must never word them as one: `reporting.unconverted_count`,
+  `aging_reporting.unconverted_count` and `upcoming_unconverted_count` count
+  rows added at FACE value (`invoice_reporting_amount_sql` /
+  `reporting_amount_for_row` fall back), so those figures mix currencies; the
+  two payment counts count rows LEFT OUT (`payment_reporting_amount_sql`
+  refuses to fall back), so Paid / Pending are floors. The web KPI row renders
+  one line per rule (`docs/decisions.md` §200).
 - **`GET /api/analytics/cfo`** → `reporting_spend` block (same shape, scoped to
   the period window) plus `unrealized_fx` (below). `accounts_payable_balance`
   gains a `reporting_accounts_payable_balance` block (same shape as

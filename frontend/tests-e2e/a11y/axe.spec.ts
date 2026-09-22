@@ -1,4 +1,5 @@
-import { expect, NO_TENANT_BASE, test, vendorPicker } from '../fixtures/helpers';
+import type { EligibleInvoice } from '$lib/types/creditMemo';
+import { expect, invoicePicker, NO_TENANT_BASE, test, vendorPicker } from '../fixtures/helpers';
 import { expectNoA11yViolations } from './axe-helper';
 
 /**
@@ -128,6 +129,85 @@ test.describe('accessibility — authenticated app (WCAG 2.2 AA)', () => {
 		// The vendor picker is populated from a fetch — wait for it so the scan
 		// covers the fully rendered form rather than a half-built one.
 		await expect(vendorPicker(modal)).toBeVisible();
+
+		await expectNoA11yViolations(page);
+	});
+
+	test('credit-memo Apply dialog with the invoice picker open has no axe violations', async ({
+		page
+	}) => {
+		// The picker is the dialog's whole interactive surface: a combobox, its
+		// listbox of options (two-line when a prior credit has eaten into the
+		// invoice), and a live count line wired in as the field's description.
+		// Both reads are stubbed on their EXACT pathnames (docs/decisions.md
+		// §190), so the scan covers a populated popup on any tenant.
+		const memoId = '00000000-0000-4000-b000-0000000000c1';
+		await page.route(
+			(url) => url.pathname === '/api/credit-memos',
+			(route) =>
+				route.fulfill({
+					json: {
+						items: [
+							{
+								id: memoId,
+								memo_number: 'CM-AXE-1',
+								vendor_id: '00000000-0000-4000-b001-0000000000c1',
+								vendor_name: 'Axe Supplies',
+								invoice_id: null,
+								invoice_number: null,
+								amount: 75,
+								currency: 'USD',
+								issued_date: '2026-01-01',
+								reason: null,
+								status: 'open',
+								applied_at: null,
+								applied_by: null,
+								created_at: '2026-01-01T00:00:00Z'
+							}
+						],
+						total: 1,
+						page: 1,
+						page_size: 20
+					}
+				})
+		);
+		const eligible = [
+			{
+				id: '00000000-0000-4000-b002-0000000000c1',
+				invoice_number: 'AXE-INV-1',
+				vendor_name: 'Axe Supplies',
+				status: 'approved',
+				due_date: '2026-02-01',
+				amount: 500,
+				currency: 'USD',
+				creditable_balance: 500
+			},
+			{
+				id: '00000000-0000-4000-b002-0000000000c2',
+				invoice_number: 'AXE-INV-2',
+				vendor_name: 'Axe Supplies',
+				status: 'approved',
+				due_date: null,
+				amount: 300,
+				currency: 'USD',
+				creditable_balance: 120
+			}
+		] satisfies EligibleInvoice[];
+		await page.route(
+			(url) => url.pathname === `/api/credit-memos/${memoId}/eligible-invoices`,
+			(route) => route.fulfill({ json: { items: eligible, total: 2, page: 1, page_size: 25 } })
+		);
+
+		await page.goto('/credit-memos');
+		await page
+			.locator('table tbody tr', { hasText: 'CM-AXE-1' })
+			.getByRole('button', { name: 'Apply', exact: true })
+			.click();
+		const dialog = page.getByRole('dialog', { name: 'Apply credit memo' });
+		await expect(dialog).toBeVisible();
+		await invoicePicker(dialog, 'Invoice').click();
+		await expect(page.getByRole('listbox', { name: 'Invoice' }).getByRole('option')).toHaveCount(2);
+		await expect(dialog.getByText('All matches shown (2)')).toBeVisible();
 
 		await expectNoA11yViolations(page);
 	});

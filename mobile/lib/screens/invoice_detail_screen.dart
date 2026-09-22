@@ -113,7 +113,12 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
         await _loadActivity();
         _showSnack(l.invoiceDetailUpdated);
       } else {
-        _showSnack(l.invoiceDetailUpdateFailed);
+        // The server's sentence, not a generic "try again": an edit is refused
+        // for a reason the user has to act on (a GL code outside the invoice's
+        // chart, a field frozen by approval), and retrying changes nothing.
+        _showSnack(
+          l.invoiceDetailUpdateFailed(InvoiceStore.instance.error ?? ''),
+        );
       }
     } finally {
       if (mounted) setState(() => _submitting = false);

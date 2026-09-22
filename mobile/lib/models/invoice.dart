@@ -184,6 +184,13 @@ class InvoiceWarning {
 /// `po_match` dict (populated by `services.invoice_warnings.refresh_warnings`).
 /// Null when the invoice has no `po_number`. Money/variance fields arrive as
 /// plain numbers from the backend (display-only — never used for client math).
+///
+/// The variance is `amount_variance_pct` — `MatchResult`'s own field name. This
+/// read the top-level `variance_pct`, a key the backend never sends (it lives
+/// only inside `details`), so the variance never rendered on mobile. It is
+/// `null` when the invoice and the PO are in different currencies: the matcher
+/// compared nothing, and there is no percentage between EUR and USD figures
+/// (decisions §197).
 class PoMatch {
   /// `none` | `2-way` | `3-way` | `4-way`.
   final String matchType;
@@ -207,7 +214,7 @@ class PoMatch {
     return PoMatch(
       matchType: json['match_type'] as String? ?? 'none',
       status: json['status'] as String? ?? 'no_po',
-      variancePct: (json['variance_pct'] as num?)?.toDouble(),
+      variancePct: (json['amount_variance_pct'] as num?)?.toDouble(),
       withinTolerance: json['within_tolerance'] as bool?,
       issues: issues is List
           ? issues.map((e) => e.toString()).toList()

@@ -34,10 +34,16 @@ its `**Open:**` line or moves to the archive.
 Mirrored as GitHub issue [#321](https://github.com/Absence0760/feohledger/issues/321)
 for the tracker view. Keep the two reconciled when either moves.
 
-**Last reconciled:** 2026-09-22 — the #321 / #443 batch, five agents each in
-its own worktree. **Nineteen entries closed**, two narrowed, **eight opened**, so
-the file went 61 → 50; the new ones are grouped under their own heading below.
-Before that, 2026-09-17 (round 26) closed eleven plus the engineering half of
+**Last reconciled:** 2026-09-22 — the follow-up batch, eight agents each in its
+own worktree, closing what the #321 / #443 batch had opened earlier the same
+day. **Ten entries closed**, one narrowed, **fourteen opened**, so the file went
+50 → 54; the new ones are grouped under their own heading below. All eight
+entries the #321 / #443 group held are now closed, so that heading is gone, and
+with it round 31's mobile-currency and CI-run sub-headings.
+Earlier on 2026-09-22 the #321 / #443 batch itself — five agents, each in its own
+worktree — closed **nineteen**, narrowed two and opened eight, taking the file
+from 61 → 50. Before that, 2026-09-17 (round 26) closed eleven plus the
+engineering half of
 [#432](https://github.com/Absence0760/feohledger/issues/432) and opened nine, and
 a housekeeping pass the same day pruned 54 checked entries, 21 emptied sections
 and two prose-only CLOSED narratives, taking the file from 2570 lines to 1215;
@@ -52,7 +58,7 @@ section carried its own `decisions.md` § reference, so nothing was lost by
 deleting it; that cross-reference is what makes the pruning safe, and writing
 one is what earns a future entry the right to be deleted.
 
-**50 open: 35 (c) · 9 (a) · 6 (b)** — re-derived from the file, never carried
+**54 open: 39 (c) · 9 (a) · 6 (b)** — re-derived from the file, never carried
 forward. The section heading is authoritative; where an entry also carries a
 `(c)`/`(a)`/`(b)` marker, the two agree.
 `grep -c '^- \[ \]' docs/followups.md`.
@@ -149,17 +155,18 @@ a 500, and never a rollback reaching past the statement it was cleaning up after
 currency symbol is a visible gap a reader can ask about; a substituted `$` is a
 wrong number that looks right. The same call §79/§82 made for
 `PaymentResponse.currency`, now general on mobile — and it immediately surfaced
-that the web `resolveCurrency` still substitutes USD, so the two surfaces
-currently disagree about the same row (§160).
+that the web still substituted USD. §196 and §200 have since taken that out of
+`formatMoney`, the per-currency grouping helpers and the `orgCurrency` store, so
+both surfaces now render an unprovable code bare (§160, §196, §200).
 
 **A held item is still an open item, and the hold has to be re-checked.** The
 header claimed for eight rounds that exception resolution "stays held" as the
 file's only segregation-of-duties entry. It had in fact shipped — `#408`,
 `services/exception_lifecycle.segregation_refusal`, migration `0098`
 ([decisions.md](decisions.md) §169–§170) — and the inter-company mirror entry that
-replaced it closed in the 2026-09-22 batch (§192), leaving only a data backfill
-for mirrors routed before it. A standing note nobody re-reads
-outlives the thing it describes.
+replaced it closed in the 2026-09-22 batch (§192), with the data backfill for
+mirrors routed before it following as migration 0100 (§198). A standing note
+nobody re-reads outlives the thing it describes.
 
 ## (c) Feature work — sized and unstarted
 
@@ -467,11 +474,11 @@ honestly be folded into the slice that surfaced it.
       the shape the fix wants, and the proof it is affordable.
       **Durable fix:** a stable machine `code` alongside `detail` on the refusals
       a user is expected to *act* on (the two SoD paths, the CFO / max-amount
-      gates, the named-approver gate), plus a frontend code→`MessageKey` map that
-      degrades to the server's sentence for an unknown code — the same tolerant
-      pattern `exceptionTypeLabelKey` and `screeningCategoryLabelKey` already
-      use, and the same conclusion §149 and §138 reached about rendering a raw
-      server string. Deliberately **not** done inside the segregation slice: it
+      gates, the named-approver gate, the credit-memo application refusals), plus
+      a frontend code→`MessageKey` map that degrades to the server's sentence for
+      an unknown code — the same tolerant pattern `exceptionTypeLabelKey` and
+      `screeningCategoryLabelKey` already use, and the same conclusion §149 and
+      §138 reached about rendering a raw server string. Deliberately **not** done inside the segregation slice: it
       is a cross-cutting error-contract change touching every refusal on the
       money path, and doing only the one new refusal would have left the page
       inconsistent with the older identical one beside it.
@@ -481,30 +488,32 @@ honestly be folded into the slice that surfaced it.
 ### Surfaced by the round-31 batch (2026-09-14)
 
 Eighteen entries were opened by round 31 (sixteen from the slices, two from its
-own CI run); four remain after the 2026-09-22 batch, two of them narrowed,
-grouped by the slice that surfaced them. The lesson the round recorded is in the
-header above and applies to every entry here: **an entry's file list and its counts are the least
+own CI run); two remain after the 2026-09-22 follow-up batch, one of them
+narrowed, grouped by the slice that surfaced them. The lesson the round recorded
+is in the header above and applies to every entry here: **an entry's file list and its counts are the least
 reliable part of it, and a durable fix stated in one sentence has usually not
-been tried.** Four of these were found to describe the code wrongly in the
-2026-09-17 pass and carry an inline correction; assume the rest are no better
-and re-derive before implementing.
+been tried.** Several of the round's entries were found to describe the code
+wrongly in the 2026-09-17 pass; assume the two below are no better and re-derive
+before implementing.
 
 #### Opened by the invoice-warning catalogue
 
 - [ ] **(c) `Invoice.po_match.issues` is still server English rendered verbatim.** The PO-match
       panel in `InvoiceModal` prints the matcher's own composed sentences ("Partial receipt: 60% of
-      ordered quantity received", "Amount mismatch: invoice $150.00 vs PO $100.00 (+50.0%)") one per
-      row. Round 31 keyed the `po_mismatch` *warnings* beside them, so the same dialog now shows a
-      German finding above an English issue list — a narrower version of the §155 mismatch, one
-      panel down. The `$` in the amount-mismatch issue is the same hardcoded-currency defect §157
-      removed from the warnings.
+      ordered quantity received", "Amount mismatch: invoice 150.00 USD vs PO 100.00 USD (+50.0%)")
+      one per row, and the mobile panel renders the same list. Round 31 keyed the `po_mismatch`
+      *warnings* beside them, so the same dialog shows a German finding above an English issue list
+      — a narrower version of the §155 mismatch, one panel down.
+      Narrowed 2026-09-22 (§197): the hardcoded `$` is gone — each figure now names its own
+      currency code, and the currency guard's own sentence is keyed (`po_currency_mismatch`),
+      so what is left is the English prose itself, not a wrong label inside it.
       **Durable fix:** `po_matching.py` already carries every figure those sentences embed as a
-      structured field (round 31 added `ordered_quantity` / `received_quantity` /
-      `inspection_deviation_notes` for exactly this reason), so the issues become
-      `{code, params}` entries in `invoice_warning_catalog` — a `po_match.issue.*` key namespace
-      reusing the generator and drift guard already wired. `issues` is `list[str]` on the persisted
-      JSONB and the frontend `PoMatch` type, so the wire shape changes and the modal's renderer
-      moves with it.
+      structured field (`ordered_quantity` / `received_quantity` / `inspection_deviation_notes`,
+      and now `po_currency` / `currency_check`), so the issues become `{code, params}` entries in
+      `invoice_warning_catalog` — a `po_match.issue.*` key namespace reusing the generator and
+      drift guard already wired. `issues` is `list[str]` on the persisted JSONB, the frontend
+      `PoMatch` type and the mobile model, so the wire shape changes and all three renderers move
+      with it.
       **Trigger:** the next change that touches the PO-match panel or `MatchResult.issues`.
 
 - [ ] **(c) `Exception.description` reaches the exception queue as server English.** `_ensure_exception`
@@ -520,50 +529,6 @@ and re-derive before implementing.
       already keyed (`EXCEPTION_TYPE_LABEL_KEYS`, §155); this is the sentence beneath it.
       **Trigger:** the next slice that touches `_ensure_exception` or the `/exceptions` detail panel —
       or sooner, since it is the surface an auditor reads.
-
-#### Opened by the mobile-currency slice
-
-- [ ] **(c) Purchase orders record no currency, so every PO figure is labelled by guess or not at all.**
-      Narrowed 2026-09-22 from the `resolveCurrency` entry: `formatMoney` now renders an
-      unprovable code bare, and every per-row fallback site that had a code to send —
-      Positive Pay, `/payments`, the by-entity table, bank-reconciliation's match picker —
-      sends it (§196). What is left is the one table with nothing to send:
-      `models/procurement.py::PurchaseOrder` has `total` and no currency column, so
-      `GET /api/purchase-orders` serves no per-row code. `routes/purchase-orders/+page.svelte`
-      and `analytics/CfoMetrics.svelte`'s accruals card label every PO figure with
-      `orgCurrency.currency`, and `/cfo`'s by-entity table renders Open POs bare with a
-      note, because it sums POs across entities that may report in different currencies. A
-      PO raised from a EUR requisition is booked with no record that it is EUR.
-      **Durable fix:** a `purchase_orders.currency` column as a tenant migration fanned to
-      every tenant DB. Backfill from the originating requisition where one exists and make
-      the rest an explicit decision (the org's reporting currency, or NULL rendered bare —
-      every proxy manufactures a claim). Then the serializer field, and have the PO list,
-      the accruals card (which needs a per-currency rollup, not a naive `SUM`) and
-      by-entity's Open POs label from it. PO matching's money comparisons should gain a
-      currency guard in the same change.
-      **Trigger:** the first tenant raising POs in a second currency, or the next change to
-      `PurchaseOrder`.
-
-#### Opened by the round-31 CI run
-
-- [ ] **(c) CI's service images are pinned by hand, so an auto-merged compose bump leaves them behind.**
-      Narrowed 2026-09-22: every compose, CI and `deploy.sh` image is now
-      `repo:tag@sha256:…` (`backend/docs/docker.md` § Image pinning), and a Dependabot
-      `docker-compose` entry bumps both compose files. No Dependabot ecosystem reads the
-      rest — `github-actions` reads only `uses:` — so the pgvector and redis `services:`
-      images in `ci.yml` and `sso-e2e.yml`, the two MinIO `docker pull` / `docker run` lines
-      in `ci.yml`, and `deploy.sh`'s `NODE_IMAGE` restate the compose refs by hand, with a
-      comment saying so. `dependabot-auto-merge.yml` merges a green minor/patch compose bump
-      on its own, after which CI keeps testing the previous digest while dev and production
-      run the new one — drift, not breakage.
-      **Durable fix:** derive CI's refs from the compose file instead of restating them: a
-      small job that reads `docker compose -f backend/docker-compose.yml config --images` and
-      exposes the pgvector / redis / minio refs as outputs, `services.*.image` pointed at
-      `${{ needs.<job>.outputs.* }}` (service images accept the `needs` context), and the
-      MinIO steps running the ref it reads. Update `dependabot-auto-merge.yml`'s header,
-      which still says "four ecosystems".
-      **Trigger:** the first auto-merged Dependabot compose PR that bumps pgvector, redis or
-      minio.
 
 ### Surfaced by wiring the FeohLedger AWS account (2026-09-14)
 
@@ -696,160 +661,296 @@ reliable part of it.
       320px is WCAG's own number. A floor decision adds steps above it.
       **Trigger:** the product call.
 
-### Surfaced by the #321 / #443 batch (2026-09-22)
+### Surfaced by the follow-up batch (2026-09-22)
 
-Five agents, each in its own worktree, closed all seven [#443](https://github.com/Absence0760/feohledger/issues/443)
-entries and twelve from [#321](https://github.com/Absence0760/feohledger/issues/321), and
-narrowed two more (§188–§196). These eight are what the work found and could not honestly
-fold in: each is a product call, needs a tenant migration (the batch took none), or is a
-sibling of a fix that needs its own pass.
+Eight agents, each in its own worktree, closed ten entries — all eight the
+[#321](https://github.com/Absence0760/feohledger/issues/321) /
+[#443](https://github.com/Absence0760/feohledger/issues/443) batch had opened earlier the
+same day, plus the two round 31 had left narrowed (PO currency, CI service images) — and
+narrowed one more (§197–§204). These fourteen are what that work found and could not
+honestly fold in: each is a product call, needs a tenant migration or an operator script,
+or is a sibling of a fix that needs its own pass.
 
-- [ ] **(c) `/profile` still offers a password field for the step-up in an SSO-only tenant, where a password is no longer a proof.**
-      Since §191, `api/auth._step_up_satisfied` drops an offered password when the member's
-      org has `sso_only` on, and the refusal is a 400 whose sentence names the proofs that do
-      work (an authenticator code or a registered passkey). The server side is complete and
-      honest, but the profile page does not know the tenant is SSO-only: the passkey card
-      still renders "Confirm your password" (`profile.passkeys.stepUpPassword`) and prefers a
-      typed password over the passkey ceremony (`passkeyCardProof`), so a member who types
-      one gets that 400 as a toast instead of never being asked. Not a security gap — the
-      backend is the boundary — but a control that can only ever be refused.
-      **Durable fix:** have the profile page learn `sso_only` the way the login page does
-      (`GET /api/auth/sso/config` + `/api/auth/saml/config`, both public and already echoing
-      `sso_only` only when the IdP resolves) — or expose it on `/auth/me` beside
-      `mfa_required_by_org` — and, when set, hide the password field and go straight to the
-      passkey / authenticator-code proof. An e2e stubbing the config to `sso_only: true`
-      pins it.
-      **Trigger:** the next `/profile` or MFA UI slice, or the first tenant that turns
-      `sso_only` on.
+- [ ] **(c) A PO that records no currency can never be given one, so its invoices stay unverifiable.**
+      Migration 0099 backfilled `purchase_orders.currency` from the originating requisition and
+      left every other PO NULL by design (§197). A NULL is honest, but it is also permanent for a
+      tenant whose POs came from the seed, a contract or an ERP that states no code: there is no
+      `PATCH /api/purchase-orders/{id}` at all (the router is list / detail / sync-erp), so the
+      only way a legacy PO ever gains a currency is an ERP re-sync that supplies one. The cost is
+      not cosmetic: `po_matching` reports `currency_check: "unknown"` forever, the invoice modal
+      carries the face-value note on every matched invoice, and `amount_mismatch_v1` /
+      `missing_po_v1` / `multi_po_split_v1` escalate instead of resolving — so a tenant sitting on
+      pre-0099 POs loses agent autonomy on exactly the invoices that used to auto-resolve.
+      **Durable fix:** an operator backfill in the shape of `scripts/backfill_import_provenance.py`
+      — the operator ASSERTS the currency for a named set (a tenant, an entity, a `po_number`
+      prefix, or every PO created before a cutover), the script stamps only rows still NULL, dry
+      runs by default, and writes a PII-free audit manifest. A `PATCH` route is the alternative and
+      is worse on its own: it re-prices one PO at a time through a surface that does not exist yet,
+      while the actual shape of the problem is "these 4,000 rows were all USD".
+      **Trigger:** the first tenant that notices its agents stopped auto-resolving PO mismatches,
+      or the first support request to label legacy POs.
 
-- [ ] **(c) Inter-company mirrors routed before §192 still carry no inherited implicated set.**
-      `route_intercompany_invoice` now copies the source's `uploaded_by_id` ∪
-      `segregation_actor_ids` onto the mirror at routing time (§192), but a mirror routed
-      before that change has `segregation_actor_ids = NULL`, so for a mirror still awaiting
-      approval the source's uploader or editors can approve it. Unlike §141/§152's
-      no-backfill cases the input here is *observed* — both source columns are on the origin
-      row — so a backfill copies evidence rather than inventing it.
-      **Durable fix:** an idempotent Alembic data migration fanned to every tenant that, for
-      each origin ↔ mirror pair (`intercompany_mirror_id` set on both; the mirror is the row
-      whose `invoice_number` is `'IC-' ||` the origin's and whose `entity_id` is the origin's
-      `counterparty_entity_id`), sets the mirror's `segregation_actor_ids` to the origin's
-      implicated set minus the mirror's `uploaded_by_id` where the mirror's is NULL —
-      limited to mirrors not yet past approval, since an approved one has no decision left
-      to protect. Reuse `approval_chain.implicated_actors`' definition in SQL form.
-      **Trigger:** the next round that ships a migration, or the first tenant that routes
-      inter-company before then.
+- [ ] **(c) A PO flip still books its invoice in USD when the PO records no currency.**
+      `POST /api/portal/purchase-orders/{id}/flip` now takes the PO's own currency (§197), but
+      `invoices.currency` is `NOT NULL`, so a PO with none falls back to the column's historical
+      `"USD"` — a supplier flipping a currency-less EUR order gets a USD invoice carrying the EUR
+      figure. The pairing is never mistaken for proof (the matcher reads the PO's NULL, not the
+      invoice's placeholder, and reports the leg unverified), and the same `"USD"` is what
+      `portal.submit_invoice` writes for an un-extracted upload — but it is still a claim nobody
+      made, on the one row the payment path ultimately funds.
+      **Durable fix:** the honest version is `invoices.currency` nullable, which is a tenant
+      migration plus an audit of every consumer that assumes a code (the reporting-currency
+      materialization, `payment_runs.one_currency`, the e-invoice writers, every serializer), and
+      is worth doing once rather than per-surface. The cheap intermediate — resolving the org's
+      `invoice_defaults.currency` at flip time — is explicitly NOT the fix: it is the org-currency
+      proxy §196/§197 refused, applied to a row that then looks established.
+      **Trigger:** the first tenant running the supplier portal in more than one currency, or the
+      next change to `invoices.currency`.
 
-- [ ] **(c) A GL code that is in no chart at all is still accepted on a manual invoice write.**
-      `services/gl_chart.refuse_foreign_gl_codes` (§194) refuses a code that belongs ONLY to
-      another entity's chart, on create / PATCH / line items / approve-with-corrections / CSV
-      import / recurring templates. A code in no chart — hand-typed through the API, or on a
-      RETIRED account — still writes. The UI mostly prevents it (both invoice pickers are a
-      `<select>` whenever the chart is non-empty), but the API, CSV import and the mobile
-      edit sheet's free-text GL field do not. Extraction and `gl_recode` already apply the
-      stricter rule to *automated* codes (must be in the effective active chart when one
-      exists).
-      **Durable fix:** a product call first — should a manual write require membership in
-      the invoice's effective ACTIVE chart whenever that chart is non-empty? If yes, add an
-      in-active-chart path to `gl_chart` and apply it on the interactive paths (create /
-      PATCH / line items / approve corrections / recurring); decide CSV import separately (a
-      historical-migration path whose `done`/`paid` rows legitimately carry retired codes —
-      likely exempt for terminal statuses); and fix the e2e fixtures that code to literals
-      not in their tenant's chart (`matching/four-way-inspection.spec.ts` uses `5000`,
-      `matching/rules-and-isolation` and `recurring/summary-kpi` use `6000`, which the full
-      local seed does not define).
-      **Trigger:** the product call, or the first report of a mistyped or retired code
-      reaching an ERP push.
+- [ ] **(c) Invoices an employee created before §131 still carry a NULL uploader, although the audit trail names them.**
+      Before §131 (2026-09-09), CSV import (`POST /api/invoices/import-csv`) and
+      recurring `generate-now` built the `Invoice` without `uploaded_by_id`. Each still
+      wrote an audit row keyed to the invoice with the acting employee in `actor_id`:
+      `invoice.imported_csv` for the import, and `invoice.created` with
+      `details.source = "recurring_template"` for generate-now (the sweep's copy of
+      that row has `actor_id` NULL). `approval_chain.violates_segregation` reads a NULL
+      uploader as "no employee created this", so on any such invoice not yet `done`,
+      the importer or generator can still approve it or clear a payment-blocking
+      exception on it. §198 closed the inter-company mirror's version of this gap from
+      the routing audit row. These two paths have the same kind of evidence and
+      were left out only because they are not mirrors.
+      **Durable fix:** a tenant data migration on the pattern of
+      `0100_mirror_implicated_backfill`. Set `uploaded_by_id` from the earliest matching
+      audit row's `actor_id`, only where the invoice's is NULL, the row's is not, and
+      the status has a successor in `VALID_TRANSITIONS`. Write an
+      `invoice.segregation_backfilled` row (actor NULL, old/new) for each change, and
+      test it against real audit rows the way `test_intercompany.py`'s 0100 section
+      does. Confirm first that no other pre-§131 employee path produced NULL (manual
+      create and upload always stamped the uploader).
+      **Trigger:** the next round that ships a tenant migration, or the first tenant
+      found with a pre-2026-09-09 CSV import or generate-now invoice still in flight.
 
-- [ ] **(c) Extraction still accepts another entity's GL code when the invoice's own active chart is empty.**
-      `services/extraction.run_extraction` validates the AI-suggested header/line GL and the
-      post-overlay vendor prior against `active_gl_codes` — the invoice's effective ACTIVE
-      chart — and treats an empty set as "nothing to validate against". So in a
-      multi-entity tenant where subsidiary A has no accounts of its own and there are no
-      shared ones, but B does, an extracted `6000` (B's) is written to an A invoice: the one
-      path §194's `gl_chart` does not cover. Not wired in the batch because the extraction
-      tests mock `db.execute` in a fixed order and `tests/test_entity_coa.py` mirrors the
-      exact catalog query, so the change needs its own pass.
-      **Durable fix:** in the empty-effective-chart branch (three sites: line items,
-      suggested header GL, stale-prior recheck) also refuse codes `gl_chart` classifies as
-      belonging elsewhere, raising the existing `gl_codes_not_in_chart` warning — one extra
-      `load_chart_ownership` call only when `active_gl_codes` is empty — and update the
-      mocks.
-      **Trigger:** the first multi-entity tenant with an entity that has neither its own nor
-      shared accounts, or the next change to extraction's GL validation.
+- [ ] **(c) A recurring template keeps stamping a GL code whose account was retired after it was written.**
+      §199 refuses a retired or unknown code on every write that SETS one, including
+      a recurring template's `gl_account` on create and on a PATCH that changes it.
+      Nothing re-checks the code afterwards: `services/recurring_invoices.generate_one`
+      copies `template.gl_account` onto every invoice it raises, so an account retired
+      a year after the template was authored keeps being coded onto new payables —
+      and those invoices then reach approval and the ERP push carrying a code the
+      same tenant's chart no longer offers. The sweep has no human to ask, which is
+      why §199 filed this instead of guessing.
+      **Durable fix:** a product call between three shapes — (a) generate with
+      `gl_account = None` plus a `gl_codes_not_in_chart` warning on the generated
+      invoice (the rule extraction applies to an automated code, and the one that
+      keeps the invoice payable after a human re-codes it), (b) generate unchanged
+      but raise an exception-queue item against the template, or (c) pause the
+      template and notify its author. Whichever is chosen, the check belongs in
+      `generate_one` through `services/gl_chart.load_invoice_chart` against the
+      template's own entity, and `/recurring`'s list should surface the affected
+      templates so the operator can re-code them in bulk.
+      **Trigger:** the first tenant that retires an account a live template codes to,
+      or the next change to recurring generation.
 
-- [ ] **(c) The `/credit-memos` invoice selects walk EVERY invoice page on mount and filter by vendor in the browser.**
-      Both invoice pickers on the page — the Apply dialog and, since #443, the create
-      dialog's optional "Apply to invoice" link — read one `invoices` array that
-      `loadInvoices()` fills with `fetchAllPages` over `/api/invoices` on mount, then
-      `.filter(i => i.vendor_id === …)`. That is correct (a truncated first page would hide
-      the invoice the operator wants to credit, and a native `<select>` has no search), but
-      it costs `ceil(total / MAX_PAGE_SIZE)` requests on every visit for a list most visits
-      never open, and it grows with the tenant's whole invoice history. The page's own
-      comment said this was "tracked separately"; it was not tracked anywhere.
-      **Durable fix:** an `InvoicePicker` combobox on the `ui/VendorPicker` pattern
-      (server-searched, paged, honest count line), fed by a `vendor_id` filter on
-      `GET /api/invoices` (today it has only a free-text `vendor` name filter), loaded when a
-      dialog opens rather than on mount. Both dialogs then take the same component.
-      **Trigger:** the first tenant whose invoice history makes `/credit-memos` slow to
-      open, or the next change to either credit-memo dialog.
+- [ ] **(c) The recurring-template form's GL field is still free text, so §199 refuses what it let you type.**
+      Both invoice GL pickers became a `<select>` scoped to the invoice's own chart
+      (§194), and §199 made the server refuse anything they would not have offered.
+      `RecurringModal.svelte` still renders `gl_account` as a bare `<input>`: the
+      refusal arrives as a toast carrying the server's sentence (which is correct and
+      actionable), but the form let the user type a code it could have known was
+      wrong — and every invoice the template raises inherits that code, so it is the
+      one GL field where a mistake is repeated on a schedule.
+      **Durable fix:** expose `entity_id` on `RecurringTemplateResponse` (the
+      template already carries the column; the response does not), then reuse
+      `api/glAccounts.ts::listInvoiceChart` exactly as `InvoiceModal` /
+      `CreateInvoiceModal` do — the template's own entity on edit,
+      `entityStore.writeEntityId` on create — falling back to free text when the
+      chart is empty. An e2e in `tests-e2e/recurring/` pinning that the select offers
+      the tenant's chart and not another entity's.
+      **Trigger:** the next `/recurring` UI slice, or the first report of a template
+      refused on save.
 
-- [ ] **(c) `utils/currencyGroups.ts` still files an unknown-currency row under the org's currency.**
-      §196 made `formatMoney` render an unprovable code bare, but the per-currency grouping
-      helpers still substitute one. `groupAmountsByCurrency(rows, fallback)` buckets a row
-      with no `currency` INTO the fallback's (the org's) subtotal, adding it to real
-      org-currency money; `formatCurrencyTotals(totals, fallback)` labels a total the
-      backend reported under `""` with the org's code — and
-      `api/bank_reconciliation.py::_currency_totals` reports an unestablished currency as
-      `""` precisely so it is "not folded into another currency's figure". Callers:
-      `/bank-reconciliation`'s three bucket totals, the `/budgets` / `/expenses` /
-      `/recurring` / `/requisitions` KPI rollups, and the `/payments` pay bar. It does not
-      fire where the rows' currency is NOT NULL (invoice-backed rows); it does wherever a
-      backend emits `""` or null.
-      **Durable fix:** keep unknown-currency rows in their own group (key `null`), never
-      merged into a real one, rendered through `formatMoney(total, { currency: null })`.
-      Drop the `fallbackCurrency` parameter from both helpers and pass the org's code only
-      where a caller genuinely means "an empty selection costs zero". Pin it in
-      `currencyGroups.test.ts` with a mixed `[EUR row, null row]` input.
-      **Trigger:** the next change to `utils/currencyGroups.ts`, or the first bucket total
-      the backend reports under `""`.
+- [ ] **(c) The GL-chart refusal is English-only, against the repo's own rule for server-composed sentences.**
+      `frontend/CLAUDE.md` § Internationalization says a sentence the backend
+      composed is localized from a stable CODE plus typed params, with the server's
+      prose as the fallback (the worked examples are e-invoice refusals and invoice
+      warnings). §194's refusal and §199's extension are a plain string `detail`, so
+      the web toast, the CSV import's per-row error list and the mobile snackbar all
+      render English into a translated frame. The web pickers make it rare on that
+      surface; CSV import and the mobile free-text GL field are where a non-English
+      operator actually meets it.
+      **Durable fix:** give `services/gl_chart.ChartRefusal` a structured body —
+      `{code: "gl_codes_outside_chart", foreign: [...], retired: [...], unknown: [...],
+      message: "<English>"}` — raised as the 422 `detail` object (`formatApiDetail`
+      already renders an object carrying `message`, so nothing breaks while the
+      clients catch up), then a message key per reason on web and in the mobile ARBs,
+      keyed on `code` with `message` as the fallback. Check the same pass whether the
+      other hand-written 422/409 sentences on the invoice path deserve the same
+      treatment, or whether this one is genuinely the outlier.
+      **Trigger:** the first non-English tenant importing a CSV, or the next i18n pass
+      over server-composed text.
 
-- [ ] **(c) The web `orgCurrency` store answers `USD` when nothing resolves, which §119 says it must not.**
-      `stores/orgSettings.svelte.ts` starts at `DEFAULT_CURRENCY`, and `reset()` and a load
-      that resolves nothing both leave it `'USD'` — so every aggregate labelled from the
-      store (the dashboard and `/cfo` KPIs, adaptive thresholds, approval-matrix labels, the
-      zero in `/payments`' empty pay bar) wears a `$` whenever no setting resolved, and
-      before the store has loaded. Mobile's `OrgCurrencyStore` returns `null` there, per
-      §119/§160. The backend's last rung, `settings.reporting_currency_default`, is
-      operator-set and invisible to any client, so a client `USD` is a guess
-      indistinguishable from a configured answer.
-      **Durable fix:** type the store `string | null`, start it at `null`, and let
-      `resolveReportingCurrency` return `null` when every rung misses; since §196 every
-      `formatMoney` caller then renders bare with no further change. Audit the non-render
-      readers — picker defaults (`currencyOptions`, the `CreateInvoiceModal` /
-      `RequisitionModal` / `ImportStatementModal` initial values) should take
-      `DEFAULT_CURRENCY` explicitly — and wherever a payload names its reporting currency,
-      read that over the store.
-      **Trigger:** the next change to `orgSettings.svelte.ts`, or the first org whose
-      reporting currency is set only through `reporting_currency_default`.
+- [ ] **(c) `gl_recode` reads "the chart is empty" org-wide, where every other consumer reads it per invoice entity.**
+      `services/gl_recode._ActiveChart.is_empty()` is true only when the org has NO
+      active account anywhere, while validity is resolved per invoice entity. So in a
+      multi-entity tenant where subsidiary A has neither its own nor shared accounts
+      and B has a chart, a bulk re-code of A's invoices rejects every candidate
+      (`skipped_invalid_code`) — including codes §199 and extraction both accept for
+      A, since A's own effective chart is empty. Nothing incorrect is written; the
+      feature is simply unusable for that subsidiary, and the two definitions of
+      "empty" disagree.
+      **Durable fix:** resolve emptiness per invoice entity — `is_empty_for(entity_id)`
+      over `shared ∪ that entity's own` — so `bulk_recode_gl` accepts a prior for an
+      entity with no chart exactly as `gl_chart` and extraction do, and keeps
+      refusing it for an entity that HAS one. Extend
+      `tests/test_entity_coa.py::test_empty_chart_accepts_any_code_regardless_of_entity`
+      with the mixed case (A empty, B populated).
+      **Trigger:** the first multi-entity tenant that bulk re-codes a subsidiary with
+      no chart of its own, or the next change to `gl_recode`.
 
-- [ ] **(c) The web dashboard's one partial-conversion banner says "exclude" for totals that count unconverted rows at face value.**
-      `routes/+page.svelte`'s `hasUnconvertedRows` ORs three counts into one banner,
-      `dashboard.reporting.unconverted` ("Some totals above exclude rows with no locked
-      exchange rate … treat them as a floor"), but the three follow opposite rules:
-      `reporting.unconverted_count` (the invoice total) comes from
-      `invoice_reporting_amount_sql`, which counts those rows at **face value**, while
-      `total_paid_unconverted_count` and `total_pending_unconverted_count` come from
-      `payment_reporting_amount_sql`, which **excludes** them. So for the invoice KPI the
-      banner is wrong — the figure is not a floor, it mixes currencies. The chart
-      disclosures beside it already say "counted at face value", §196 fixed the same
-      misstatement on `/cfo`'s by-entity table, and mobile (closed in this batch) words each
-      KPI separately.
-      **Durable fix:** split the banner in two — a face-value line naming the invoice-side
-      KPIs, gated on `reporting.unconverted_count` and `upcoming_unconverted_count`, and an
-      excluded line naming Paid / Pending, gated on the two payment counts — each with its
-      own key in all six locales, pinned in `tests-e2e/dashboard/` with the shared
-      `fixture.ts` builder.
-      **Trigger:** the next change to the dashboard KPI row or its disclosure copy.
+- [ ] **(c) `GET /api/organization` does not name the reporting currency the server resolves, so the org store abstains where the server knows the answer.**
+      `currency_conversion.resolve_reporting_currency` has four rungs; the fourth,
+      `settings.reporting_currency_default` (`FEOH_REPORTING_CURRENCY_DEFAULT`),
+      is operator config that neither the web `orgCurrency` store nor mobile's
+      `OrgCurrencyStore` can read, so both answer `null` for an org that set none
+      of the first three (decisions §119, §160, §200). That is honest, but the
+      server KNOWS the code every rollup and every approval-threshold comparison
+      is denominated in: an org configured only through the operator default sees
+      its `/adaptive` thresholds bare and its approval-threshold labels read
+      "(reporting currency)" where "(EUR)" is provable server-side. Most figures
+      already carry the code in their own payload (§160, §196, §200); what reads
+      the store is only what has no payload code — the `/adaptive` thresholds and
+      averages, the approval / CFO-threshold labels, the expense-policy currency
+      column, the zero of an empty selection.
+      **Durable fix:** serve the resolved code on `GET /api/organization` as its
+      own top-level field (e.g. `resolved_reporting_currency`, computed by
+      `resolve_reporting_currency(org.settings)`), admitted to every role by
+      `org_settings_view` the way the three settings rungs are; have both stores
+      read it first and keep the three-rung client resolution only as the
+      fallback for an older backend. The store then answers `null` only before
+      its load lands.
+      **Trigger:** the first tenant whose reporting currency is set only through
+      `FEOH_REPORTING_CURRENCY_DEFAULT`, or the next change to
+      `org_settings_view.NON_ADMIN_SETTINGS` / either store.
+
+- [ ] **(c) `/profile`'s Change-password card is a dead control for an account with no password, and does nothing useful where password sign-in is closed.**
+      The card always renders "Current password / New password" and `PATCH /api/auth/me`
+      refuses with "Current password is incorrect" whenever `User.hashed_password` is NULL,
+      which is every account JIT-provisioned by OIDC/SAML (`identity_provisioning.py`) or
+      created by SCIM (`api/scim.py`). Such a member sees a form they can never submit. In
+      an org with `password_sign_in_closed` (§201) a member who does hold a legacy hash can
+      rotate it, but the result authenticates nothing: no sign-in and no step-up (§191).
+      The rotation still signs out every other session, as any self-service password
+      change does. Not folded into §201 because the card is not a step-up, and the fix
+      needs a product call.
+      **Durable fix:** expose `has_password` on `/auth/me`. It describes the caller's own
+      account, so there is no enumeration concern. Where it is false, replace the form with
+      a sentence saying the account signs in with single sign-on and has no password.
+      Where `password_sign_in_closed` is true, decide whether to keep rotation available
+      (it matters again the day the org leaves SSO-only) with a note that the password is
+      not used for sign-in, or hide the card. Add an e2e beside
+      `tests-e2e/auth/profile-sso-only-step-up.spec.ts`.
+      **Trigger:** the next `/profile` slice, or the first SSO-provisioned member who
+      reports the refusal.
+
+- [ ] **(c) Step-up refusals on `/profile` render the server's English sentence in every locale.**
+      A refused factor-change step-up toasts `err.message`, which is the backend's `detail`
+      verbatim: `STEP_UP_FAILURE_DETAIL`, `STEP_UP_SSO_ONLY_DETAIL`, or the wrong-host
+      passkey sentence. A `de` / `ja` member reads English inside a translated page.
+      `frontend/CLAUDE.md` § Internationalization says a server-composed sentence is not
+      exempt: the backend should send a stable code and the client should key on it, with
+      the prose as fallback. §201 makes the SSO-only sentence the answer to every refused
+      step-up in such a tenant, so this is now the sentence those members see most.
+      **Durable fix:** add a machine-readable `code` to the step-up refusals
+      (`step_up_failed`, `step_up_sso_only`, `passkey_wrong_host` with the host as a param).
+      FastAPI's `detail` can carry an object, so the 400 can stay a 400. Map the codes
+      through `m()` on `/profile`, following `api/einvoiceIssues.ts`, and keep the English
+      as the fallback for a code the build predates. Pin it in `test_sso_only.py` and the
+      profile e2e.
+      **Trigger:** the next i18n slice that touches `/profile`, or the Change-password
+      entry above, since both land on the same page.
+
+- [ ] **(c) Dependabot auto-merges bumps to production images that no CI job runs.**
+      Since §203, a `docker-compose` PR is tested on the images it bumps *when CI starts
+      them*: pgvector, Redis and MinIO through `compose-images`, and Keycloak / Mailpit /
+      LocalStack / stripe-mock through `docker compose up` in `service-e2e`. No CI job
+      starts `deploy/compose.prod.yml`'s `caddy` or `frontend-build` (Node alpine) image.
+      `dependabot-auto-merge.yml` still squash-merges a green minor/patch bump to either,
+      so the first thing to run the new digest is the next production deploy. A
+      Caddyfile directive that a Caddy minor changes, or a musl-only install failure under
+      the new Node alpine image, would surface there. `deploy.sh` does fail loudly
+      (`caddy reload` rejects a bad config, and the build step exits non-zero before
+      anything rolls), but it fails on the VM rather than on the PR. The same is true of
+      the local-only Authentik and Ollama images, which matter much less because they
+      never reach production.
+      **Durable fix:** a small CI job, path-filtered on `deploy/**` and `frontend/**`,
+      that runs what the PR bumped against `deploy/compose.prod.yml` with a dummy `.env`:
+      `docker compose -f deploy/compose.prod.yml run --rm --no-deps caddy caddy validate
+      --config /etc/caddy/Caddyfile` (after seeding `tenants.caddy` from the example the
+      way `deploy.sh` does), and the real `frontend-build` service
+      (`docker compose run --rm -T -e PNPM_SPEC=… frontend-build`). Both read their refs
+      from the compose file, so nothing is restated. A cheaper alternative is to stop
+      auto-merging `/deploy` compose PRs (`dependabot/fetch-metadata` reports the
+      directory), which trades the test for a human review of every Caddy and Node patch.
+      **Trigger:** before the minimal VM serves its first customer, or the first
+      auto-merged Dependabot compose PR that touches `deploy/compose.prod.yml`.
+
+- [ ] **(c) The public SSO entry points answer an unresolvable IdP block with a 500, not their documented 400 / 404.**
+      `sso_authorize` and `sso_callback` (`api/auth_sso.py`), and `saml_login`, the ACS
+      and `saml_metadata` (`api/auth_saml.py`), call `resolve_sso_config` /
+      `resolve_saml_config` and handle only a `None` return ("SSO is not configured for
+      this tenant", 400, or 404 for metadata). A block with `enabled` set that does not
+      resolve raises `SSOConfigError`, which nothing catches and which has no app-level
+      handler, so these routes 500. Only the two `/config` endpoints catch it. This is
+      pre-existing and not a lockout: the login page shows no SSO button for such a block,
+      and since §204 the password stays open beside it, so nobody reaches these routes
+      except by hand, and the 500 body leaks nothing. But it is a public route whose
+      documented answer is a 400, and each 500 logs a traceback.
+      **Durable fix:** treat `SSOConfigError` exactly like `None` at each of the five
+      sites (one small `_resolved_or_none` helper per module, or the same `except` the
+      `/config` handlers use), returning the existing generic sentence. The public
+      response must not name the offending keys. Pin each route in `test_sso_security.py`
+      / `test_saml_security.py` with an `{enabled: true}` block.
+      **Trigger:** the next SSO or SAML slice.
+
+- [ ] **(c) `settings.sso` has no sanctioned, audited writer, and a partial PATCH silently switches SSO off.**
+      Turning `sso_only` on or off, swapping the IdP, and rotating the OIDC client secret
+      all go through the generic `PATCH /api/organization`, which writes no audit row.
+      Its merge is per top-level key, so a `{"sso": {"client_secret": "…"}}` PATCH
+      replaces the whole block. The runbook in `docs/secrets-rotation.md` told admins to
+      send exactly that until §204 corrected the text. That PATCH drops `enabled`,
+      `sso_only`, the rest of the IdP config and the SCIM group mappings
+      (`scim_groups`, `scim_group_role_map`), and nothing is recorded. §204's `422` covers
+      only a block that keeps both flags and loses an IdP key. The chat webhook and custom
+      domains each got a dedicated audited endpoint, and the PATCH refuses their keys, for
+      the same reason. There is also no SSO panel on `/organization`, so the raw API is
+      the only way to configure SSO at all.
+      **Durable fix:** add `PUT /api/organization/sso` (admin). It validates with
+      `services/sso.check_sso_idp_config` whenever `sso_only` is requested, keeps the
+      stored client secret when the field is omitted ("leave blank to keep"), and carries
+      the SCIM keys across. It audits `organization.sso_updated` with the changed key
+      names only, never values. `PATCH /api/organization` then refuses an `sso` key and
+      names the endpoint, as it does for `chat_notifications`. Add the `/organization`
+      panel on top of it.
+      **Trigger:** before the first tenant configures SSO in production, or the next SSO
+      slice, whichever comes first.
+
+- [ ] **(c) An SSO-only tenant whose complete IdP config stops working has no way back in without a DB edit.**
+      §204 keeps the password open only while the IdP block does not resolve, and
+      "resolves" is a local completeness check on purpose: probing the IdP from the
+      sign-in path would put its latency and outages on our login. So a complete block
+      whose IdP is down, whose client secret has expired (Entra secrets expire after one
+      to two years) or whose signing cert has rotated still closes the password. The
+      SSO button then fails at the IdP. Every member, the admins included, is locked out,
+      and the setting that would reopen the password is behind the sign-in it blocks.
+      Today the only recovery is a platform operator editing `organizations.settings`
+      by hand, with no runbook and no audit row.
+      **Durable fix:** an operator break-glass script, `scripts/sso_break_glass.py --slug
+      <slug>`, that clears `sso_only` (and nothing else) and writes an
+      `organization.sso_only_lifted` audit row. Document it in
+      `docs/founder-runbooks/` next to the other operator procedures, and link it from
+      `docs/authentication.md` § SSO-only mode. Optionally warn admins ahead of a known
+      client-secret or cert expiry.
+      **Trigger:** before the first production tenant turns `sso_only` on.
 
 ### Surfaced by widening the backend shard matrix (2026-09-17, issue #444)
 

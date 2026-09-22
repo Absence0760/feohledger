@@ -31,9 +31,14 @@ unaffected by the catalogue.
 
 ## One code per SENTENCE, not per type
 
-`po_mismatch` is five different sentences (no PO, an amount variance, a partial
+`po_mismatch` is seven different sentences (no PO, an amount variance, an amount
+variance against a PO that records no currency, a currency mismatch, a partial
 receipt, an over-receipt, an unquantified over-receipt) and `quality_hold` is
-five more. A label keyed on `type` could only ever name one of them, which is
+five more. The two currency codes (`po_amount_variance_po_currency_unknown`,
+`po_currency_mismatch` — `docs/decisions.md` §197) show why a `money` kind is not
+always right for a money figure: a warning has ONE `currency` param to format
+its money with, so a PO total whose currency is unknown rides a `number` param
+and renders unlabelled, and two codes that are the finding itself ride `text`. A label keyed on `type` could only ever name one of them, which is
 why `decisions.md` §155 filed this as needing a *parameterized* catalogue
 rather than a label map.
 

@@ -27,8 +27,10 @@ services:
     # Every image in this file is pinned to a release tag AND its index digest,
     # so a redeploy can never pick up an upstream retag, and bumps arrive as
     # Dependabot PRs (the `docker-compose` entry in .github/dependabot.yml
-    # reads this file). Keep postgres/redis on the SAME refs as
-    # backend/docker-compose.yml — dev, CI and production run one image.
+    # reads this file). Postgres and Redis stay on the SAME refs as
+    # backend/docker-compose.yml, which is what CI starts — dev, CI and
+    # production run one image, and backend/tests/test_container_supply_chain.py
+    # fails if a bump moves one file without the other.
     image: pgvector/pgvector:0.8.6-pg16@sha256:ccc6e83d6e35e931dc7c5def2022729d5a6c370318d099181995567ff1fb4d6b
     restart: unless-stopped
     logging: *default-logging
@@ -131,11 +133,44 @@ services:
     depends_on:
       - api
 
+  # The one-shot production frontend build: deploy.sh runs it as
+  # `docker compose run --rm frontend-build`, and the `build` profile keeps
+  # `up` from ever starting it. It is a service rather than a `docker run` in
+  # deploy.sh so that its Node image sits where the `docker-compose` Dependabot
+  # entry reads it — a ref in a shell variable has no reader and rots
+  # (docs/decisions.md §203). The Node MAJOR moves only with CI's `setup-node`
+  # (Dependabot ignores node majors, and backend/tests/
+  # test_container_supply_chain.py fails when the two part): production must
+  # build on the runtime CI tests. No Node or pnpm is installed on the VM.
+  frontend-build:
+    image: node:24.21.0-alpine@sha256:ebfe2f90462722a7a4de65e91990e97fe0d401c70e0e762c5b53302f905ec1c1
+    profiles: [build]
+    working_dir: /repo/frontend
+    volumes:
+      - ..:/repo
+      - pnpm-store:/pnpm-store
+    # deploy.sh passes PNPM_SPEC (read from frontend/package.json's
+    # `packageManager`), PUBLIC_API_URL and PUBLIC_SITE_URL with `run -e`; `$$`
+    # leaves the expansion to the container's shell.
+    environment:
+      npm_config_store_dir: /pnpm-store
+    command:
+      - sh
+      - -ec
+      - 'npm i -g "$$PNPM_SPEC" >/dev/null 2>&1 && pnpm install --frozen-lockfile && pnpm build'
+
 volumes:
   pgdata:
   redisdata:
   caddy_data:
   caddy_config:
+  # Caches the pnpm store across deploys so a rebuild does not re-download the
+  # world. Compose-managed (`feoh-prod_pnpm-store`), not the
+  # `feoh-prod-pnpm-store` deploy.sh's old `docker run -v` made: adopting that
+  # one by name draws a "not created by Docker Compose" warning on every deploy.
+  # A cache costs one cold build to replace; deploy/README.md says how to drop
+  # the old volume.
+  pnpm-store:
 
 networks:
   # Pinned so FEOH_TRUSTED_PROXY_CIDRS (api service above) can name the

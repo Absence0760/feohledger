@@ -1,4 +1,4 @@
-import { API_BASE, authToken, expect, tenantBase, tenantHeaders, test } from '../fixtures/helpers';
+import { API_BASE, authToken, chartGlCode, expect, tenantBase, tenantHeaders, test } from '../fixtures/helpers';
 import {
 	cleanup,
 	createGr,
@@ -258,19 +258,22 @@ test.describe('require_inspection rule (4-way gate when no inspection exists)', 
 	});
 
 	test('commodity (GL-account) rule lowers tolerance for a specific GL', async ({ page }) => {
-		// A tight 1% tolerance for GL 5000 only; org default stays 5%.
+		// A tight 1% tolerance for one GL only; org default stays 5%. The GL is a
+		// real account of the tenant's chart — an invoice write refuses any other
+		// (docs/decisions.md §199).
+		const gl = chartGlCode();
 		await setMatching(page, {
 			tolerance_pct: 5.0,
-			commodity_rules: { '5000': { tolerance_pct: 1.0 } }
+			commodity_rules: { [gl]: { tolerance_pct: 1.0 } }
 		});
 
 		const { poId, poNumber } = createPo({ total: 1000 });
 		created.poIds.push(poId);
-		// +3% — fine under org default (5%) but BREACHES the GL-5000 rule (1%).
+		// +3% — fine under org default (5%) but BREACHES that GL's rule (1%).
 		const { invoiceId, poMatch } = await createMatchedInvoice(page, {
 			poNumber,
 			amount: 1030,
-			glAccount: '5000'
+			glAccount: gl
 		});
 		created.invoiceIds.push(invoiceId);
 

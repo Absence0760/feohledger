@@ -39,8 +39,14 @@ Design constraints (project invariants):
 No new column / migration: the link is recorded on ``invoice.po_number`` (a
 combined ``"PO-A,PO-B"`` reference, mirroring how a human would note a split) and
 ``invoice.po_match`` (a multi-PO snapshot the modal can render). ``invoice.amount``
-is untouched. As with ``missing_po_v1``, a ``PurchaseOrder`` carries no currency
-of its own — its ``total`` is denominated in the invoice's currency.
+is untouched.
+
+Currency (migration 0099, decisions §197), the ``missing_po_v1`` rule applied to
+a set: a PO in a DIFFERENT currency from the invoice never enters the pool —
+summing EUR and USD totals to match an invoice is adding unlike quantities. A PO
+that records NO currency stays in the pool, so the uniqueness search still sees
+every plausible set, but a chosen set containing one escalates: the agent cannot
+prove the sum it is approving on.
 """
 
 from __future__ import annotations
@@ -55,7 +61,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.invoice import Invoice, InvoiceStatus
-from app.models.procurement import PurchaseOrder
+from app.models.procurement import PurchaseOrder, po_currency_code
 from app.services.approval_chain import (
     cfo_gate_applies,
     max_amount_gate_applies,
@@ -68,6 +74,7 @@ from app.services.exception_agents.base import (
     ExceptionResolver,
 )
 from app.services.exception_agents.llm_rationale import build_rationale
+from app.services.po_matching import CURRENCY_DIFFERENT, CURRENCY_SAME, compare_currencies
 
 logger = logging.getLogger(__name__)
 
@@ -267,6 +274,10 @@ async def _candidate_pos(
 
     triples: list[tuple] = []
     for po in rows:
+        # Never sum a total in another currency into this invoice's (see the
+        # module docstring); an unrecorded one is screened after the search.
+        if compare_currencies(invoice.currency, po.currency) == CURRENCY_DIFFERENT:
+            continue
         po_total = Decimal(str(po.total)).quantize(_CENTS)
         if po_total <= 0:
             continue
@@ -360,6 +371,22 @@ class MultiPOSplitResolver(ExceptionResolver):
                 ),
             )
 
+        currencies = (
+            await db.execute(
+                select(PurchaseOrder.currency).where(PurchaseOrder.id.in_(subset.po_ids))
+            )
+        ).scalars()
+        if any(compare_currencies(invoice.currency, c) != CURRENCY_SAME for c in currencies):
+            return AgentEvaluation(
+                recommended_action=ACTION_ESCALATED,
+                confidence=_ZERO,
+                rationale=(
+                    "A purchase order in the only matching set records no currency, so "
+                    "the combined total cannot be proven to be in the invoice's "
+                    "currency; a human must confirm the split. Escalating."
+                ),
+            )
+
         dated = invoice.invoice_date is not None
         confidence = _CONFIDENCE_DATED if dated else _CONFIDENCE_UNDATED
         combined_ref = ",".join(str(n) for n in subset.po_numbers)
@@ -439,6 +466,9 @@ class MultiPOSplitResolver(ExceptionResolver):
             raise _NotApprovable(locked.status)
         if any(po.status != "open" for po in rows):
             raise _NotApprovable(locked.status)
+        # Every PO in the set must still be provably in the invoice's currency.
+        if any(compare_currencies(locked.currency, po.currency) != CURRENCY_SAME for po in rows):
+            raise _NotApprovable(locked.status)
 
         # Re-derive the unique subset under the lock from the freshly-read totals
         # to re-confirm the sum still clears tolerance (a PO total could have moved
@@ -490,6 +520,10 @@ class MultiPOSplitResolver(ExceptionResolver):
             "po_ids": [str(t[0]) for t in triples],
             "po_numbers": [str(t[1]) for t in triples],
             "po_total": str(combined),
+            # Every PO in the set was proven to be in the invoice's currency
+            # above, so the combined total is too — the modal labels it with this.
+            "po_currency": po_currency_code(rows[0].currency),
+            "currency_check": CURRENCY_SAME,
             "combined_po_total": str(combined),
             "invoice_amount": str(target),
             "within_tolerance": True,

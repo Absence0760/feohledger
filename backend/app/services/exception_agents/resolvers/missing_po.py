@@ -23,8 +23,14 @@ under the CFO/maximum gate — approve through the SAME audited path a human use
 
 No new column / migration: linking is ``invoice.po_number`` (and aligning
 ``invoice.vendor_id`` to the PO's), mirroring how ``po_matching`` already resolves
-a PO. Currency note matches ``amount_mismatch``: a PurchaseOrder carries no
-currency of its own — its ``total`` is denominated in the invoice's currency.
+a PO.
+
+Currency (migration 0099, decisions §197): the amount leg only means anything
+between figures in one currency, so a PO that records a DIFFERENT currency from
+the invoice is never a candidate. A PO that records NONE stays in the pool — it
+may be the right PO, and dropping it could turn two plausible candidates into a
+false unique one — but if it is the one left standing, the agent escalates: it
+cannot prove the link, and a link it approves on is a claim it made.
 """
 
 from __future__ import annotations
@@ -49,6 +55,7 @@ from app.services.exception_agents.base import (
     ExceptionResolver,
 )
 from app.services.exception_agents.llm_rationale import build_rationale
+from app.services.po_matching import CURRENCY_DIFFERENT, CURRENCY_SAME, compare_currencies
 
 # Date window (days) around the invoice date a candidate PO's creation must fall
 # in. POs are raised before the invoice arrives, so the window is asymmetric:
@@ -165,6 +172,11 @@ async def _candidate_pos(
 
     candidates: list[PurchaseOrder] = []
     for po in rows:
+        # A PO in another currency cannot match this invoice on amount. One with
+        # no currency is kept (see the module docstring) and screened by the
+        # caller once it knows whether it is the only candidate.
+        if compare_currencies(invoice.currency, po.currency) == CURRENCY_DIFFERENT:
+            continue
         po_total = Decimal(str(po.total)).quantize(_CENTS)
         if not _within_amount_band(po_total, invoice_amount, tol_pct):
             continue
@@ -229,6 +241,16 @@ class MissingPOResolver(ExceptionResolver):
             )
 
         po = candidates[0]
+        if compare_currencies(invoice.currency, po.currency) != CURRENCY_SAME:
+            return AgentEvaluation(
+                recommended_action=ACTION_ESCALATED,
+                confidence=_ZERO,
+                rationale=(
+                    f"Purchase order {po.po_number} matches on vendor + amount but records "
+                    "no currency, so it cannot be proven to be in the invoice's currency; "
+                    "a human must confirm the link. Escalating."
+                ),
+            )
         dated = invoice.invoice_date is not None
         confidence = _CONFIDENCE_DATED if dated else _CONFIDENCE_UNDATED
         # `changes` records the link (po_number re-point) — string-typed, PII-free.
@@ -351,7 +373,7 @@ class MissingPOResolver(ExceptionResolver):
         # The link must produce a clean `matched`; anything else (a stale-amount
         # mismatch, partial receipt) means a human should look — escalate.
         post = await match_invoice_to_po(db, locked)
-        if post.status != "matched":
+        if post.status != "matched" or post.currency_check != CURRENCY_SAME:
             raise _NotApprovable(locked.status)
 
         await approve_invoice(

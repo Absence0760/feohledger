@@ -4,6 +4,8 @@ import {
 	deleteInvoicesWhere,
 	escapeRegExp,
 	expect,
+	invoicePicker,
+	selectInvoiceInPicker,
 	selectVendorInPicker,
 	tenantPsql,
 	test, vendorPicker
@@ -29,16 +31,23 @@ const _FIXTURE_VENDOR_PREFIX = 'ENRICH-TEST-';
  * didn't expose `vendor_id`; a name that had drifted, e.g. the enrichment
  * spec's "(MOCK)" suffix, then produced a vendor whose id didn't actually
  * own the invoice.) An invoice with a null `vendor_id` is skipped: it can't
- * be credited at all.
+ * be credited at all. So is one that is `paid` or `done`: no payment will read
+ * a credit on it, so both application paths refuse it (docs/decisions.md §202).
  */
 async function getVendorWithInvoice(
 	page: import('@playwright/test').Page
-): Promise<Vendor & { invoiceId: string }> {
+): Promise<Vendor & { invoiceId: string; invoiceNumber: string }> {
 	const headers = await authedTenantHeaders(page);
 
 	const invResp = await page.request.get(`${API_BASE}/api/invoices`, { headers });
 	const invBody = (await invResp.json()) as {
-		items: Array<{ id: string; vendor: string; vendor_id: string | null }>;
+		items: Array<{
+			id: string;
+			invoice_number: string;
+			vendor: string;
+			vendor_id: string | null;
+			status: string;
+		}>;
 	};
 	if (!invBody.items.length) throw new Error('No invoices found in the tenant');
 
@@ -48,10 +57,10 @@ async function getVendorWithInvoice(
 	);
 
 	for (const inv of invBody.items) {
-		if (!inv.vendor_id) continue;
+		if (!inv.vendor_id || inv.status === 'paid' || inv.status === 'done') continue;
 		const vendor = vendorsById.get(inv.vendor_id);
 		if (!vendor || vendor.name.startsWith(_FIXTURE_VENDOR_PREFIX)) continue;
-		return { ...vendor, invoiceId: inv.id };
+		return { ...vendor, invoiceId: inv.id, invoiceNumber: inv.invoice_number };
 	}
 	throw new Error('Could not find a non-fixture vendor with a linked invoice in the tenant');
 }
@@ -238,7 +247,9 @@ test.describe('/credit-memos', () => {
 				'div.modal[role="dialog"][aria-label="Apply credit memo"]'
 			);
 			await expect(applyModal).toBeVisible();
-			await applyModal.locator('select').selectOption(vendor.invoiceId);
+			// A server-searched combobox over the memo's eligible invoices, not a
+			// `<select>` over every invoice the page walked on mount.
+			await selectInvoiceInPicker(invoicePicker(applyModal, 'Invoice'), vendor.invoiceNumber);
 
 			const applied = page.waitForResponse(
 				(r) =>
@@ -553,14 +564,14 @@ test.describe('/credit-memos — edit and link-at-create', () => {
 			const modal = modalNamed(page, 'New credit memo');
 			await expect(modal).toBeVisible();
 
-			const invoiceSelect = modal.getByLabel('Apply to invoice');
+			const invoiceField = invoicePicker(modal, 'Apply to invoice');
 			// Nothing to link until a vendor names whose invoices are eligible.
-			await expect(invoiceSelect).toBeDisabled();
+			await expect(invoiceField).toBeDisabled();
 
 			await modal.getByLabel('Memo Number').fill(memoNumber);
 			await selectVendorInPicker(vendorPicker(modal), vendor.name);
 			await modal.locator('input[type="number"]').fill('1.00');
-			await invoiceSelect.selectOption(vendor.invoiceId);
+			await selectInvoiceInPicker(invoiceField, vendor.invoiceNumber);
 
 			// Linked: the currency is the invoice's, shown rather than offered —
 			// asserting any other would only be refused.

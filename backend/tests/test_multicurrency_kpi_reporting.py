@@ -316,3 +316,117 @@ async def test_by_entity_spend_reporting_converts_and_matches_the_cfo_tile(reald
     default_row = next(r for r in body["entities"] if r["is_default"])
     assert Decimal(str(default_row["reporting_total_spend"])) == expected
     assert default_row["reporting_total_spend_unconverted_count"] == 1
+
+
+# ---------------------------------------------------------------------------
+# Accruals + by-entity Open POs, per PO currency (decisions §197)
+# ---------------------------------------------------------------------------
+
+
+async def _seed_mixed_currency_pos(realdb) -> None:
+    """A USD PO, a EUR PO (half received), and a PO that records no currency.
+
+    Plus `_seed_open_invoices`' two `approved` invoices — one USD, one EUR — as
+    the unposted leg. The EUR PO's receipt values half its total in EUR.
+    """
+    from app.models.procurement import GoodsReceipt, GRLineItem, POLineItem, PurchaseOrder
+
+    await _seed_open_invoices(realdb)
+    org_id = realdb.info(TENANT).org_id
+    async with realdb.sessionmaker(TENANT)() as s:
+        ent = await _default_entity_id(s)
+        for number, total, currency, status in (
+            ("ACC-USD", Decimal("5000.00"), "USD", "open"),
+            ("ACC-EUR", Decimal("3000.00"), "EUR", "open"),
+            ("ACC-NONE", Decimal("700.00"), None, "open"),
+            # No longer a live commitment — excluded from the accrual entirely.
+            ("ACC-CANCELLED", Decimal("9999.00"), "USD", "cancelled"),
+            ("ACC-CLOSED", Decimal("8888.00"), "EUR", "closed"),
+        ):
+            po = PurchaseOrder(
+                po_number=number,
+                total=total,
+                currency=currency,
+                status=status,
+                organization_id=org_id,
+                entity_id=ent,
+            )
+            s.add(po)
+            await s.flush()
+            # One receipt, on the OPEN EUR order: the GR/IR leg is keyed on
+            # receipts, so a second one would value the closed PO too.
+            if number == "ACC-EUR":
+                s.add(POLineItem(po_id=po.id, description="Widget", quantity=Decimal("10")))
+                gr = GoodsReceipt(
+                    gr_number="ACC-GR-EUR",
+                    po_id=po.id,
+                    status="received",
+                    organization_id=org_id,
+                    entity_id=ent,
+                )
+                s.add(gr)
+                await s.flush()
+                s.add(GRLineItem(gr_id=gr.id, description="Widget", quantity_received=Decimal("5")))
+        await s.commit()
+
+
+@pytest.mark.asyncio
+async def test_cfo_accruals_are_netted_within_each_currency(realdb):
+    """The flat accruals added a EUR PO to a USD one and subtracted invoices in
+    either from both — a total denominated in nothing. `by_currency` nets each
+    currency's legs within it, and keeps the POs nobody recorded a currency for
+    in their own `null` row instead of folding them into one.
+
+    The seed also holds a cancelled and a closed PO: "Open POs" means open, so
+    neither is in any figure below."""
+    await _seed_mixed_currency_pos(realdb)
+    async with realdb.client(key=TENANT, role="cfo") as c:
+        accruals = (await c.get("/api/analytics/cfo")).json()["accruals"]
+
+    assert accruals["by_currency"] == [
+        {
+            "currency": "EUR",
+            "open_po_amount": "3000.00",
+            "received_amount": "1500.00",
+            "unposted_invoice_amount": "1000.00",
+            "total_accrual": "3500.00",
+        },
+        {
+            "currency": "USD",
+            "open_po_amount": "5000.00",
+            "received_amount": "0.00",
+            "unposted_invoice_amount": "1000.00",
+            "total_accrual": "4000.00",
+        },
+        {
+            "currency": None,
+            "open_po_amount": "700.00",
+            "received_amount": "0.00",
+            "unposted_invoice_amount": "0.00",
+            "total_accrual": "700.00",
+        },
+    ]
+    # The legacy flat fields stay the naive cross-currency sums (back-compat).
+    assert accruals["open_po_amount"] == "8700.00"
+    assert accruals["total_accrual"] == "8200.00"
+
+
+@pytest.mark.asyncio
+async def test_by_entity_open_pos_are_grouped_by_po_currency(realdb):
+    """Open POs were a bare sum across PO currencies, rendered with no symbol
+    because no code could be proven. Each row now serves them per currency,
+    the consolidated row agreeing with `/cfo`'s accruals."""
+    await _seed_mixed_currency_pos(realdb)
+    async with realdb.client(key=TENANT, role="cfo") as c:
+        body = (await c.get("/api/analytics/by-entity")).json()
+
+    # The cancelled + closed POs in the seed are in neither row.
+    expected = [
+        {"currency": "EUR", "amount": "3000.00"},
+        {"currency": "USD", "amount": "5000.00"},
+        {"currency": None, "amount": "700.00"},
+    ]
+    assert body["consolidated"]["open_po_by_currency"] == expected
+    default_row = next(r for r in body["entities"] if r["is_default"])
+    assert default_row["open_po_by_currency"] == expected
+    assert body["consolidated"]["open_po_amount"] == "8700.00"

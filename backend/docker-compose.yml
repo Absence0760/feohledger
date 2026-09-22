@@ -4,10 +4,13 @@
 # upstream retag landed as a red CI run on an unrelated PR — which is how the
 # Docker Hub MinIO outage surfaced. Bumps arrive as reviewable Dependabot PRs
 # (the `docker-compose` entry in .github/dependabot.yml, which rewrites the tag
-# and the digest together). The CI jobs that run these images outside compose
-# (`services:` containers and the MinIO `docker run`) carry the SAME refs by
-# hand, because no Dependabot ecosystem reads a workflow's service images —
-# bump them in the same PR. See backend/docs/docker.md § Image pinning.
+# and the digest together). This file is the ONLY place the postgres, redis
+# and minio refs are written: the CI jobs that run them outside compose
+# (`services:` containers and the MinIO `docker run`) read them from here via
+# scripts/compose_image_refs.sh, so a bump here is what that PR's CI tests
+# (docs/decisions.md §203). Renaming one of those three services means
+# updating the reader's call in ci.yml / sso-e2e.yml. See
+# backend/docs/docker.md § Image pinning.
 services:
   postgres:
     # pgvector/pgvector image = official Postgres 16 + the pgvector extension,
@@ -46,7 +49,7 @@ services:
     # quay.io, not Docker Hub: `minio/minio` there no longer serves anonymous
     # pulls, so a fresh clone's `pnpm db:up` failed with "repository does not
     # exist or may require 'docker login'". quay.io/minio/minio is MinIO's own
-    # registry. Keep the two CI copies in `.github/workflows/ci.yml` in step.
+    # registry. CI's two MinIO `docker run`s read this ref (see the header).
     #
     # RELEASE.2025-09-07T16-13-09Z is exactly what `latest` resolved to when this
     # was pinned (same index digest), so pinning changed nothing that runs.

@@ -1,4 +1,4 @@
-import { ACME_ADMIN, ACME_BASE, API_BASE, authToken, expect, signInAndWait, tenantBase, tenantHeaders, tenantPsql, test } from '../fixtures/helpers';
+import { ACME_ADMIN, ACME_BASE, API_BASE, authToken, chartGlCode, expect, signInAndWait, tenantBase, tenantHeaders, tenantPsql, test } from '../fixtures/helpers';
 import { cleanup, createMatchedInvoice, createPo, recompute, tenantScope } from './setup';
 
 /**
@@ -56,11 +56,12 @@ test.describe('matching_rules tolerance precedence (vendor > commodity > org)', 
 	}
 
 	test('vendor rule wins over commodity + org for the same invoice', async ({ page }) => {
-		// Org=5%, commodity GL 6000=3%, vendor=1%. The invoice carries BOTH the
+		// Org=5%, commodity GL=3%, vendor=1%. The invoice carries BOTH the
 		// vendor and the GL, so the vendor rule (1%) must be the applied one.
+		const gl = chartGlCode();
 		await setMatching(page, {
 			tolerance_pct: 5.0,
-			commodity_rules: { '6000': { tolerance_pct: 3.0 } },
+			commodity_rules: { [gl]: { tolerance_pct: 3.0 } },
 			vendor_rules: { [vendorId]: { tolerance_pct: 1.0 } }
 		});
 
@@ -71,7 +72,7 @@ test.describe('matching_rules tolerance precedence (vendor > commodity > org)', 
 			poNumber,
 			amount: 1020,
 			vendorId,
-			glAccount: '6000'
+			glAccount: gl
 		});
 		created.invoiceIds.push(invoiceId);
 
@@ -81,10 +82,11 @@ test.describe('matching_rules tolerance precedence (vendor > commodity > org)', 
 	});
 
 	test('commodity rule applies when no vendor rule matches', async ({ page }) => {
-		// Org=5%, commodity GL 6000=3%, NO vendor rule for this vendor.
+		// Org=5%, commodity GL=3%, NO vendor rule for this vendor.
+		const gl = chartGlCode();
 		await setMatching(page, {
 			tolerance_pct: 5.0,
-			commodity_rules: { '6000': { tolerance_pct: 3.0 } }
+			commodity_rules: { [gl]: { tolerance_pct: 3.0 } }
 		});
 
 		const { poId, poNumber } = createPo({ total: 1000, vendorId });
@@ -94,7 +96,7 @@ test.describe('matching_rules tolerance precedence (vendor > commodity > org)', 
 			poNumber,
 			amount: 1040,
 			vendorId,
-			glAccount: '6000'
+			glAccount: gl
 		});
 		created.invoiceIds.push(invoiceId);
 
@@ -103,6 +105,7 @@ test.describe('matching_rules tolerance precedence (vendor > commodity > org)', 
 	});
 
 	test('falls back to org default when neither vendor nor commodity matches', async ({ page }) => {
+		const gl = chartGlCode();
 		await setMatching(page, {
 			tolerance_pct: 5.0,
 			commodity_rules: { '9999': { tolerance_pct: 1.0 } }
@@ -110,12 +113,12 @@ test.describe('matching_rules tolerance precedence (vendor > commodity > org)', 
 
 		const { poId, poNumber } = createPo({ total: 1000, vendorId });
 		created.poIds.push(poId);
-		// +4% with GL 6000 (no rule) → org 5% applies → still matched.
+		// +4% with the invoice's GL (no rule) → org 5% applies → still matched.
 		const { invoiceId, poMatch } = await createMatchedInvoice(page, {
 			poNumber,
 			amount: 1040,
 			vendorId,
-			glAccount: '6000'
+			glAccount: gl
 		});
 		created.invoiceIds.push(invoiceId);
 

@@ -65,8 +65,20 @@ def test_resolve_saml_returns_none_for_non_saml(settings_dict):
 def test_resolve_saml_raises_when_required_field_missing(missing):
     settings_dict = _saml_settings()
     del settings_dict["sso"][missing]
-    with pytest.raises(SSOConfigError):
+    with pytest.raises(SSOConfigError) as exc:
         resolve_saml_config(settings_dict, "acme")
+    # Names exactly the key at fault, which `PATCH /api/organization` puts in
+    # its 422 (docs/decisions.md §204).
+    assert exc.value.fields == (missing,)
+
+
+@pytest.mark.parametrize("bad_url", ["not-a-url", "ftp://idp.example.com/sso", "https://"])
+def test_resolve_saml_raises_when_the_sso_url_is_not_an_http_url(bad_url):
+    # The login handler 302s to this. A value it would refuse must not resolve,
+    # or the login page would show a SAML button that cannot work.
+    with pytest.raises(SSOConfigError) as exc:
+        resolve_saml_config(_saml_settings(idp_sso_url=bad_url), "acme")
+    assert exc.value.fields == ("idp_sso_url",)
 
 
 @pytest.mark.parametrize(
@@ -77,8 +89,9 @@ def test_resolve_saml_raises_on_empty_or_malformed_cert(bad_cert):
     # An empty / blank / garbage cert must fail closed — it can NEVER reach
     # python3-saml as "no cert => skip signature verification".
     settings_dict = _saml_settings(idp_x509_cert=bad_cert)
-    with pytest.raises(SSOConfigError):
+    with pytest.raises(SSOConfigError) as exc:
         resolve_saml_config(settings_dict, "acme")
+    assert exc.value.fields == ("idp_x509_cert",)
 
 
 # --- resolve_saml_config: full happy path -----------------------------------

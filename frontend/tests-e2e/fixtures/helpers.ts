@@ -552,6 +552,27 @@ export function tenantPsql(query: string, slug?: string): string {
 }
 
 /**
+ * A GL code any invoice in the worker's tenant may be coded to: an ACTIVE
+ * account of the SHARED chart, which is in every entity's chart.
+ *
+ * Use this instead of a literal whenever a spec WRITES a GL code to an invoice
+ * or template. Since `docs/decisions.md` §199 such a write must name an active
+ * account of the invoice's chart whenever that chart has any, and the two seeds
+ * disagree on which codes exist — the lean seed CI runs defines only `6000`,
+ * the full local seed defines `1000`…`8000` without it — so a literal passes on
+ * one and 422s on the other. Throws rather than returning `''` so a tenant
+ * with no chart fails here, by name, instead of as a later refused write.
+ */
+export function chartGlCode(slug?: string): string {
+	const code = tenantPsql(
+		'SELECT code FROM gl_accounts WHERE is_active AND entity_id IS NULL ORDER BY code LIMIT 1',
+		slug
+	).trim();
+	if (!code) throw new Error('worker tenant has no active shared GL account — reseed it');
+	return code;
+}
+
+/**
  * Run a synchronous `psql -c <query>` against the CONTROL-plane database.
  *
  * The sibling of `tenantPsql` for the rows that do not live in a tenant DB —
@@ -961,6 +982,40 @@ export async function selectVendorInPicker(input: Locator, name: string): Promis
 	// asserting it here means a caller's next step can't run against a field
 	// that is still holding the raw search term.
 	await expect(input).toHaveValue(new RegExp(escapeRegExp(name)));
+}
+
+/**
+ * The shared `ui/InvoicePicker`'s combobox input within `scope`, by its label.
+ * Same role filter as {@link vendorPicker}, for the same reason: the clear
+ * button's name ("Clear the selected invoice") also names the field.
+ */
+export function invoicePicker(scope: Page | Locator, name: string): Locator {
+	return scope.getByRole('combobox', { name });
+}
+
+/**
+ * Choose an invoice in the shared `ui/InvoicePicker` combobox, by its number.
+ *
+ * Types the number (the picker searches server-side, so that is the reach
+ * mechanism, exactly as in {@link selectVendorInPicker}) and clicks the option
+ * whose accessible name STARTS with it. An option reads `<number> <amount>`, so
+ * a bare substring would let `INV-1` pick `INV-10`; anchoring on the number
+ * followed by whitespace is what makes the choice exact.
+ */
+export async function selectInvoiceInPicker(input: Locator, invoiceNumber: string): Promise<void> {
+	await input.click();
+	await input.fill(invoiceNumber);
+	// Wait for the SEARCH to answer before choosing. The popup keeps showing the
+	// previous page until the debounced request lands, and when the wanted
+	// invoice is already on it, clicking there commits, closes the popup and
+	// cancels the search — a pick that never exercised the reach mechanism. Once
+	// no listed option lacks the number, the list on screen is the answer.
+	const listbox = input.page().getByRole('listbox');
+	await expect(listbox.getByRole('option').filter({ hasNotText: invoiceNumber })).toHaveCount(0);
+	await listbox
+		.getByRole('option', { name: new RegExp(`^${escapeRegExp(invoiceNumber)}(\\s|$)`) })
+		.click();
+	await expect(input).toHaveValue(invoiceNumber);
 }
 
 /** The backend origin. Specs that hit `${API_BASE}/api/...` directly import

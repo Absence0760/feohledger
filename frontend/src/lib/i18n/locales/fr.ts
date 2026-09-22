@@ -90,6 +90,7 @@ export const messages = {
 	'common.retrying': 'Nouvelle tentative…',
 	'common.loadFailed': 'Impossible de charger cette liste. Actualisez pour réessayer.',
 	'common.amountInvalid': 'Saisissez le montant sous forme de nombre simple, p. ex. 1200 ou 1200.50',
+	'common.reportingCurrencyUnresolved': 'devise de reporting',
 
 	// Cookie / consent banner (lib/components/ConsentBanner.svelte) — see en.ts.
 
@@ -158,6 +159,10 @@ export const messages = {
 		'Votre organisation impose la MFA : la désactivation n’est donc pas disponible.',
 	'profile.mfa.requiredEnroll': 'Votre organisation impose la MFA — veuillez l’activer maintenant.',
 	'profile.mfa.disablePassword': 'Saisissez votre mot de passe pour désactiver la MFA',
+	'profile.mfa.disableCode':
+		'Saisissez un code actuel de votre application d’authentification pour désactiver la MFA',
+	'profile.mfa.ssoOnlyNoPassword':
+		'Votre organisation se connecte par authentification unique (SSO) : votre mot de passe ne peut donc pas confirmer les modifications de votre double authentification.',
 	'profile.mfa.confirmWithPasskey': 'Confirmer avec une clé d’accès',
 	'profile.mfa.disable': 'Désactiver la double authentification',
 	'profile.mfa.disabling': 'Désactivation…',
@@ -184,6 +189,12 @@ export const messages = {
 		'Confirmez votre mot de passe pour ajouter ou supprimer une clé d’accès',
 	'profile.passkeys.stepUpBlankHint':
 		'Laissez ce champ vide pour confirmer avec l’une de vos clés d’accès existantes — la seule option si vous vous connectez par SSO et n’avez pas de mot de passe.',
+	'profile.passkeys.stepUpCode':
+		'Saisissez un code actuel de votre application d’authentification pour ajouter ou supprimer une clé d’accès',
+	'profile.passkeys.stepUpCodeBlankHint':
+		'Laissez ce champ vide pour confirmer avec l’une de vos clés d’accès existantes.',
+	'profile.passkeys.stepUpPasskeyOnly':
+		'Vous confirmerez avec l’une de vos clés d’accès existantes.',
 	'profile.passkeys.lastUsed': 'Dernière utilisation {date}',
 	'profile.passkeys.neverUsed': 'Jamais utilisée',
 	'profile.passkeys.remove': 'Supprimer',
@@ -257,8 +268,10 @@ export const messages = {
 	'dashboard.kpi.exceptions': 'Exceptions',
 	'dashboard.kpi.staleApprovals': 'Approbations en retard',
 	'dashboard.kpi.rebatesEarned': 'Remises obtenues',
-	'dashboard.reporting.unconverted':
-		'Certains totaux ci-dessus excluent les lignes sans taux de change verrouillé vers {currency} — à considérer comme un plancher, pas un montant exact.',
+	'dashboard.reporting.faceValue':
+		'Partiel — {label} : {n, plural, one {# facture} other {# factures}} sans taux de change vers {currency}, comptabilisées à leur valeur faciale — ce total mélange donc les devises d’autant. Enregistrez le taux manquant avant de vous y fier.',
+	'dashboard.reporting.excluded':
+		'Exclus de {labels} : {n, plural, one {# paiement} other {# paiements}} sans taux de change vers {currency}, écartés plutôt que comptés à leur valeur faciale — les chiffres affichés sous-estiment donc les mouvements réels. Enregistrez le taux manquant pour avoir une vue complète.',
 	'dashboard.vendorSpend.unconverted':
 		'Partiel : {n, plural, one {# facture} other {# factures}} sans taux de change vers {currency}, comptabilisées à leur valeur faciale — ces fournisseurs ne sont donc pas tous classés dans la même devise. Concernés : {vendors}. Enregistrez le taux manquant avant de vous fier au classement.',
 	'dashboard.aging.unconverted':
@@ -383,6 +396,8 @@ export const messages = {
 	'invoices.warning.priceVarianceUnder': 'Prix unitaire {deltaPct} au-dessous de la référence de ce fournisseur pour {item} ({unitPrice} contre {baselineUnitPrice})',
 	'invoices.warning.poNotFound': 'Commande {poNumber} introuvable',
 	'invoices.warning.poAmountVariance': 'Écart de montant {variancePct} par rapport à la commande {poNumber} (facture {invoiceAmount} contre commande {poTotal})',
+	'invoices.warning.poAmountVariancePoCurrencyUnknown': 'Écart de montant {variancePct} par rapport à la commande {poNumber}, qui n’indique aucune devise (facture {invoiceAmount} contre commande {poTotal})',
+	'invoices.warning.poCurrencyMismatch': 'La facture est en {invoiceCurrency} mais la commande {poNumber} est en {poCurrency} — les montants n’ont pas été comparés',
 	'invoices.warning.poPartialReceipt': 'Correspondance 3 voies partielle — correspondance {matchType} avec la commande {poNumber}, mais seule une partie de la quantité commandée a été reçue',
 	'invoices.warning.poOverReceipt': 'Sur-réception : {receivedQuantity} reçues contre {orderedQuantity} commandées (+{excessQuantity}) sur la commande {poNumber}',
 	'invoices.warning.poOverReceiptUnquantified': 'Plus de marchandises reçues que commandées sur la commande {poNumber}',
@@ -821,6 +836,18 @@ export const messages = {
 	'vendors.picker.listAria': 'Fournisseurs',
 	'vendors.picker.unresolvedSelection':
 		'Un fournisseur est déjà sélectionné, mais son nom n’est pas disponible sur cet écran. En choisir un ici le remplacera.',
+	'invoices.picker.loading': 'Chargement des factures…',
+	'invoices.picker.loadFailed': 'Impossible de charger les factures. Cela ne signifie pas qu’il n’y en a aucune — réessayez.',
+	'invoices.picker.noMatches': 'Aucune facture ne correspond à « {query} »',
+	'invoices.picker.showingAll': 'Tous les résultats affichés ({total})',
+	'invoices.picker.showingPartial': 'Affichage de {shown} sur {total} résultats — saisissez pour affiner',
+	'invoices.picker.refineHint': 'Tous les résultats ne sont pas listés',
+	'invoices.picker.loadMore': 'Charger plus',
+	'invoices.picker.loadMoreFailed': 'Impossible d’en charger davantage.',
+	'invoices.picker.clearAria': 'Effacer la facture sélectionnée',
+	'invoices.picker.listAria': 'Factures',
+	'invoices.picker.unresolvedSelection': 'Une facture est déjà sélectionnée, mais son numéro n’est pas disponible sur cet écran. En choisir une ici la remplacera.',
+	'invoices.picker.leftToCredit': 'Reste {amount} à créditer',
 	'vendors.changeRequests.navLabel': 'Changements bancaires',
 	'vendors.changeRequests.title': 'Validations des changements bancaires et fiscaux',
 	'vendors.changeRequests.intro':
@@ -1910,6 +1937,8 @@ export const messages = {
 	'cfoMetrics.accruals.received': 'Reçu, non facturé',
 	'cfoMetrics.accruals.unposted': 'Factures non comptabilisées',
 	'cfoMetrics.accruals.total': 'Total des charges à payer',
+	'cfoMetrics.accruals.noCurrency':
+		'Les commandes sans devise enregistrée figurent sur une ligne à part, sans symbole. Chaque devise est compensée séparément ; les lignes ne sont jamais additionnées.',
 	'cfoMetrics.concentration.title': 'Concentration fournisseurs',
 	'cfoMetrics.concentration.flagged': '⚠ {vendor} représente {pct}% des dépenses — risque de concentration.',
 	'cfoMetrics.concentration.top10': 'Top 10 fournisseurs',
@@ -2981,7 +3010,7 @@ export const messages = {
 	'byEntity.unconvertedSpend':
 		'Les dépenses incluent au nominal {n, plural, one {# facture} other {# factures}} sans taux de change verrouillé vers {currency} — les totaux mélangent donc des devises.',
 	'byEntity.openPoNoCurrency':
-		'Les commandes n\'enregistrent pas encore de devise : les commandes ouvertes sont donc affichées sans devise.',
+		'Certaines commandes n’indiquent aucune devise : leurs montants ouverts figurent sur une ligne à part, sans symbole, et ne sont jamais ajoutés à ceux d’une autre devise.',
 
 	// Rapports planifiés (components/analytics/ScheduledReportsPanel.svelte)
 	'scheduledReports.heading': 'Rapports planifiés',
@@ -3949,12 +3978,12 @@ export const messages = {
 	'workflows.builder.approval.approverAssignment': 'Attribution de l\'approbateur',
 	'workflows.builder.approval.approvers': 'Approbateurs',
 	'workflows.builder.approval.autoApproveBelow': 'Approbation automatique en dessous de ({currency})',
-	'workflows.builder.approval.autoApproveBelowHint': 'Les factures inférieures à ce montant ignorent entièrement l\'approbation. Le montant comparé est la facture convertie en {currency}, la devise de reporting de votre organisation.',
+	'workflows.builder.approval.autoApproveBelowHint': 'Les factures inférieures à ce montant ignorent entièrement l\'approbation. Le montant comparé est la facture convertie dans la devise de reporting de votre organisation.',
 	'workflows.builder.approval.autoWarning': 'Les factures seront automatiquement approuvées sans contrôle humain. À utiliser avec prudence.',
 	'workflows.builder.approval.matrix': 'Matrice d\'approbation',
-	'workflows.builder.approval.matrixHint': 'Définissez un ou plusieurs niveaux d\'approbation. Chaque niveau peut filtrer par montant ou par attributs de facture (service, compte général, fournisseur) et prend en charge les approbateurs parallèles et l\'escalade chronométrée. Les montants sont exprimés en {currency}, la devise de reporting de votre organisation.',
+	'workflows.builder.approval.matrixHint': 'Définissez un ou plusieurs niveaux d\'approbation. Chaque niveau peut filtrer par montant ou par attributs de facture (service, compte général, fournisseur) et prend en charge les approbateurs parallèles et l\'escalade chronométrée. Les montants sont exprimés dans la devise de reporting de votre organisation.',
 	'workflows.builder.approval.maxInvoiceAmount': 'Montant maximal de la facture ({currency})',
-	'workflows.builder.approval.maxInvoiceAmountHint': 'Les factures supérieures à ce montant sont rejetées automatiquement. Le montant comparé est la facture convertie en {currency}, la devise de reporting de votre organisation.',
+	'workflows.builder.approval.maxInvoiceAmountHint': 'Les factures supérieures à ce montant sont rejetées automatiquement. Le montant comparé est la facture convertie dans la devise de reporting de votre organisation.',
 	'workflows.builder.approval.controlsTitle': 'Contrôles',
 	'workflows.builder.approval.requireSegregation': 'Exiger la séparation des tâches',
 	'workflows.builder.approval.requireSegregationHint': 'La personne qui a téléversé une facture ne peut pas l\'approuver. Recommandé — c\'est le contrôle antifraude classique en comptabilité fournisseurs.',
@@ -3964,7 +3993,7 @@ export const messages = {
 	'workflows.builder.approval.noMatchingUsers': 'Aucun utilisateur correspondant',
 	'workflows.builder.approval.removeApprover': 'Retirer l\'approbateur {name}',
 	'workflows.builder.approval.requireCfoAbove': 'Approbation du directeur financier requise au-dessus de ({currency})',
-	'workflows.builder.approval.requireCfoAboveHint': 'Les factures supérieures à ce montant nécessitent l\'approbation d\'un utilisateur ayant le rôle de directeur financier. Le montant comparé est la facture convertie en {currency}, la devise de reporting de votre organisation.',
+	'workflows.builder.approval.requireCfoAboveHint': 'Les factures supérieures à ce montant nécessitent l\'approbation d\'un utilisateur ayant le rôle de directeur financier. Le montant comparé est la facture convertie dans la devise de reporting de votre organisation.',
 	'workflows.builder.approval.required': 'Approbation requise',
 	'workflows.builder.approval.roundRobinHint': '{count, plural, one {Les factures seront attribuées à tour de rôle au # approbateur sélectionné.} other {Les factures seront attribuées à tour de rôle aux # approbateurs sélectionnés.}}',
 	'workflows.builder.approval.searchUsers': 'Rechercher des utilisateurs à ajouter…',
@@ -4517,7 +4546,7 @@ export const messages = {
 	'creditMemos.applyModal.aria': 'Appliquer l\'avoir',
 	'creditMemos.applyModal.hint': 'Choisissez une facture sur laquelle appliquer cet avoir.',
 	'creditMemos.applyModal.invoice': 'Facture',
-	'creditMemos.applyModal.noEligible': 'Aucune facture disponible pour ce fournisseur. Une facture ne peut être créditée qu\'une fois son fournisseur résolu — ouvrez la facture et enregistrez à nouveau son fournisseur.',
+	'creditMemos.applyModal.noEligible': 'Aucune facture ne peut recevoir cet avoir. Il faut une facture de ce fournisseur, ni payée ni clôturée, dans la devise de l’avoir, dont au moins le montant de l’avoir reste à créditer. Une facture dont le fournisseur n’est pas encore résolu devient éligible une fois que vous l’ouvrez et enregistrez à nouveau son fournisseur.',
 	'creditMemos.applyModal.selectInvoice': 'Sélectionner une facture…',
 	'creditMemos.applyModal.title': 'Appliquer l\'avoir',
 	'creditMemos.col.amount': 'Montant',
@@ -4539,6 +4568,7 @@ export const messages = {
 	'creditMemos.createModal.invoiceNeedsVendor': 'Choisissez un fournisseur pour voir ses factures.',
 	'creditMemos.createModal.memoNumber': 'Numéro d\'avoir',
 	'creditMemos.createModal.noInvoice': 'Ne pas appliquer maintenant',
+	'creditMemos.createModal.noEligibleInvoice': 'Aucune facture de ce fournisseur ne peut recevoir cet avoir — chacune est déjà payée ou clôturée, n’a plus assez de solde à créditer, ou son fournisseur n’est pas encore résolu (ouvrez la facture et enregistrez à nouveau son fournisseur).',
 	'creditMemos.createModal.reason': 'Motif',
 	'creditMemos.createModal.reasonPlaceholder': 'ex. Marchandise défectueuse retournée',
 	'creditMemos.createModal.selectVendor': 'Sélectionner un fournisseur…',
@@ -5187,6 +5217,7 @@ export const messages = {
 	'invoices.modal.noPdf': 'Aucun PDF joint',
 	'invoices.modal.pdfTitle': 'PDF de la facture — {number}',
 	'invoices.modal.poMatch.accepted': '{qty} accepté(s)',
+	'invoices.modal.poMatch.currencyUnknown': 'Cette commande n’indique aucune devise : son total a donc été comparé à la facture à sa valeur nominale.',
 	'invoices.modal.poMatch.failed': 'Échoué',
 	'invoices.modal.poMatch.matched': 'Rapproché',
 	'invoices.modal.poMatch.mismatch': 'Écart',

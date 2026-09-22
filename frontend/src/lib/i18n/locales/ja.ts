@@ -93,6 +93,7 @@ export const messages = {
 	'common.retrying': '再試行中…',
 	'common.loadFailed': 'このリストを読み込めませんでした。更新して再試行してください。',
 	'common.amountInvalid': '金額は 1200 や 1200.50 のような数値で入力してください',
+	'common.reportingCurrencyUnresolved': '報告通貨',
 
 	// Cookie / consent banner (lib/components/ConsentBanner.svelte) — see en.ts.
 
@@ -158,6 +159,8 @@ export const messages = {
 	'profile.mfa.requiredNoDisable': '組織が MFA を必須にしているため、無効化はできません。',
 	'profile.mfa.requiredEnroll': '組織が MFA を必須にしています — 今すぐ設定してください。',
 	'profile.mfa.disablePassword': 'MFA を無効にするにはパスワードを入力してください',
+	'profile.mfa.disableCode': 'MFA を無効にするには認証アプリの現在のコードを入力してください',
+	'profile.mfa.ssoOnlyNoPassword': '組織はシングルサインオン（SSO）でサインインするため、パスワードでは二要素認証の設定変更を確認できません。',
 	'profile.mfa.confirmWithPasskey': 'パスキーで確認',
 	'profile.mfa.disable': '二要素認証を無効にする',
 	'profile.mfa.disabling': '無効化中…',
@@ -183,6 +186,9 @@ export const messages = {
 	'profile.passkeys.stepUpPassword': 'パスキーを追加・削除するにはパスワードで確認してください',
 	'profile.passkeys.stepUpBlankHint':
 		'空欄のままにすると、登録済みのパスキーで確認します — SSO でサインインしていてパスワードがない場合は、これが唯一の方法です。',
+	'profile.passkeys.stepUpCode': 'パスキーを追加・削除するには認証アプリの現在のコードを入力してください',
+	'profile.passkeys.stepUpCodeBlankHint': '空欄のままにすると、登録済みのパスキーで確認します。',
+	'profile.passkeys.stepUpPasskeyOnly': '登録済みのパスキーで確認します。',
 	'profile.passkeys.lastUsed': '最終使用 {date}',
 	'profile.passkeys.neverUsed': '未使用',
 	'profile.passkeys.remove': '削除',
@@ -254,8 +260,10 @@ export const messages = {
 	'dashboard.kpi.exceptions': '例外',
 	'dashboard.kpi.staleApprovals': '滞留中の承認',
 	'dashboard.kpi.rebatesEarned': '獲得リベート',
-	'dashboard.reporting.unconverted':
-		'上記の一部の合計には、{currency} への為替レートが未確定の項目は含まれていません。正確な数値ではなく下限としてお考えください。',
+	'dashboard.reporting.faceValue':
+		'一部未換算 — {label}：{currency} への為替レートがない請求書 {n, plural, other {# 件}} を額面のまま計上しているため、この合計はその分だけ通貨が混在しています。この数値をもとに判断する前に、不足しているレートを登録してください。',
+	'dashboard.reporting.excluded':
+		'除外 — {labels}：{currency} への為替レートがない{n, plural, other {# 件の支払い}}は、額面で計上せずに合計から除外しています。表示されている金額は実際の支払額を下回ります。正確な全体像を得るには不足しているレートを登録してください。',
 	'dashboard.vendorSpend.unconverted':
 		'一部未換算：{currency} への為替レートがない請求書 {n, plural, other {# 件}} を額面のまま計上しているため、これらの取引先は同一通貨で並べられていません。該当：{vendors}。順位を判断する前に不足しているレートを登録してください。',
 	'dashboard.aging.unconverted':
@@ -380,6 +388,8 @@ export const messages = {
 	'invoices.warning.priceVarianceUnder': '単価が{item}におけるこの仕入先の基準を{deltaPct}下回っています（{unitPrice} / 基準 {baselineUnitPrice}）',
 	'invoices.warning.poNotFound': '発注 {poNumber} が見つかりません',
 	'invoices.warning.poAmountVariance': '発注 {poNumber} との金額差異 {variancePct}（請求 {invoiceAmount} / 発注 {poTotal}）',
+	'invoices.warning.poAmountVariancePoCurrencyUnknown': '通貨が記録されていない発注 {poNumber} との金額差異 {variancePct}（請求 {invoiceAmount} / 発注 {poTotal}）',
+	'invoices.warning.poCurrencyMismatch': '請求書は {invoiceCurrency}、発注 {poNumber} は {poCurrency} のため、金額を比較していません',
 	'invoices.warning.poPartialReceipt': '3 ウェイ照合が部分一致 — 発注 {poNumber} に対する{matchType}照合ですが、発注数量の一部のみ入荷しています',
 	'invoices.warning.poOverReceipt': '過剰入荷: 発注 {poNumber} で発注 {orderedQuantity} に対し {receivedQuantity} 入荷（+{excessQuantity}）',
 	'invoices.warning.poOverReceiptUnquantified': '発注 {poNumber} の発注数量を超える入荷があります',
@@ -812,6 +822,18 @@ export const messages = {
 	'vendors.picker.listAria': '取引先',
 	'vendors.picker.unresolvedSelection':
 		'取引先はすでに選択されていますが、この画面では名称を取得できません。ここで選ぶと置き換わります。',
+	'invoices.picker.loading': '請求書を読み込み中…',
+	'invoices.picker.loadFailed': '請求書を読み込めませんでした。請求書が存在しないという意味ではありません — 再試行してください。',
+	'invoices.picker.noMatches': '「{query}」に一致する請求書はありません',
+	'invoices.picker.showingAll': '一致するすべてを表示中（{total}件）',
+	'invoices.picker.showingPartial': '{total}件中{shown}件を表示中 — 入力して絞り込み',
+	'invoices.picker.refineHint': 'すべての一致が表示されているわけではありません',
+	'invoices.picker.loadMore': 'さらに読み込む',
+	'invoices.picker.loadMoreFailed': 'これ以上読み込めませんでした。',
+	'invoices.picker.clearAria': '選択した請求書をクリア',
+	'invoices.picker.listAria': '請求書',
+	'invoices.picker.unresolvedSelection': '請求書はすでに選択されていますが、この画面では番号を取得できません。ここで選ぶと置き換わります。',
+	'invoices.picker.leftToCredit': 'クレジット可能残高 {amount}',
 	'vendors.changeRequests.navLabel': '銀行情報変更',
 	'vendors.changeRequests.title': '銀行・税務情報の変更承認',
 	'vendors.changeRequests.intro':
@@ -1871,6 +1893,8 @@ export const messages = {
 	'cfoMetrics.accruals.received': '受領済み・未請求',
 	'cfoMetrics.accruals.unposted': '未計上の請求書',
 	'cfoMetrics.accruals.total': '未払費用合計',
+	'cfoMetrics.accruals.noCurrency':
+		'通貨が記録されていない発注は、記号なしの別行に表示されます。通貨ごとに個別に相殺し、各行を合算することはありません。',
 	'cfoMetrics.concentration.title': '仕入先集中度',
 	'cfoMetrics.concentration.flagged': '⚠ {vendor}が支出の{pct}%を占めています — 集中リスク。',
 	'cfoMetrics.concentration.top10': '上位10社',
@@ -2928,7 +2952,7 @@ export const messages = {
 	'byEntity.unconvertedSpend':
 		'支出には、{currency} への為替レートが未確定の請求書{n, plural, other {# 件}}が額面のまま含まれています。合計には複数の通貨が混在しています。',
 	'byEntity.openPoNoCurrency':
-		'発注書にはまだ通貨が記録されていないため、未処理の発注は通貨なしで表示されます。',
+		'通貨が記録されていない発注があります。その未処理額は記号なしの別行に表示され、他の通貨の額に加算されることはありません。',
 
 	// 定期レポート (components/analytics/ScheduledReportsPanel.svelte)
 	'scheduledReports.heading': '定期レポート',
@@ -3917,12 +3941,12 @@ export const messages = {
 	'workflows.builder.approval.approverAssignment': '承認者の割り当て',
 	'workflows.builder.approval.approvers': '承認者',
 	'workflows.builder.approval.autoApproveBelow': 'この金額未満を自動承認 ({currency})',
-	'workflows.builder.approval.autoApproveBelowHint': 'この金額未満の請求書は承認を完全にスキップします。比較されるのは、組織の報告通貨である {currency} に換算された請求書の金額です。',
+	'workflows.builder.approval.autoApproveBelowHint': 'この金額未満の請求書は承認を完全にスキップします。比較されるのは、組織の報告通貨に換算された請求書の金額です。',
 	'workflows.builder.approval.autoWarning': '請求書は人による確認なしに自動承認されます。慎重にご利用ください。',
 	'workflows.builder.approval.matrix': '承認マトリクス',
-	'workflows.builder.approval.matrixHint': '1 つ以上の承認レベルを定義します。各レベルは金額または請求書の属性（部門、勘定科目、ベンダー）でフィルタリングでき、並列承認者と時間ベースのエスカレーションに対応します。金額は、組織の報告通貨である {currency} で表されます。',
+	'workflows.builder.approval.matrixHint': '1 つ以上の承認レベルを定義します。各レベルは金額または請求書の属性（部門、勘定科目、ベンダー）でフィルタリングでき、並列承認者と時間ベースのエスカレーションに対応します。金額は組織の報告通貨で表されます。',
 	'workflows.builder.approval.maxInvoiceAmount': '請求書の上限金額 ({currency})',
-	'workflows.builder.approval.maxInvoiceAmountHint': 'この金額を超える請求書は自動的に却下されます。比較されるのは、組織の報告通貨である {currency} に換算された請求書の金額です。',
+	'workflows.builder.approval.maxInvoiceAmountHint': 'この金額を超える請求書は自動的に却下されます。比較されるのは、組織の報告通貨に換算された請求書の金額です。',
 	'workflows.builder.approval.controlsTitle': '統制',
 	'workflows.builder.approval.requireSegregation': '職務分掌を必須にする',
 	'workflows.builder.approval.requireSegregationHint': '請求書をアップロードした本人は承認できません。推奨 — 買掛金業務における古典的な不正防止統制です。',
@@ -3932,7 +3956,7 @@ export const messages = {
 	'workflows.builder.approval.noMatchingUsers': '該当するユーザーがいません',
 	'workflows.builder.approval.removeApprover': '承認者 {name} を削除',
 	'workflows.builder.approval.requireCfoAbove': 'この金額を超える場合は CFO の承認が必要 ({currency})',
-	'workflows.builder.approval.requireCfoAboveHint': 'この金額を超える請求書は CFO ロールを持つユーザーの承認が必要です。比較されるのは、組織の報告通貨である {currency} に換算された請求書の金額です。',
+	'workflows.builder.approval.requireCfoAboveHint': 'この金額を超える請求書は CFO ロールを持つユーザーの承認が必要です。比較されるのは、組織の報告通貨に換算された請求書の金額です。',
 	'workflows.builder.approval.required': '承認が必要',
 	'workflows.builder.approval.roundRobinHint': '{count, plural, other {請求書は選択された # 名の承認者にラウンドロビン方式で割り当てられます。}}',
 	'workflows.builder.approval.searchUsers': '追加するユーザーを検索…',
@@ -4485,7 +4509,7 @@ export const messages = {
 	'creditMemos.applyModal.aria': 'クレジットメモを適用',
 	'creditMemos.applyModal.hint': 'このクレジットを適用する請求書を選択してください。',
 	'creditMemos.applyModal.invoice': '請求書',
-	'creditMemos.applyModal.noEligible': 'このベンダーに利用可能な請求書はありません。請求書にクレジットを適用するには、まずベンダーの紐付けが必要です。請求書を開いてベンダーを保存し直してください。',
+	'creditMemos.applyModal.noEligible': 'このクレジットを適用できる請求書はありません。対象になるのは、このベンダーの支払済み・完了済みでない請求書で、クレジットメモと同じ通貨で、未クレジット残高がメモの金額以上あるものです。ベンダーが未紐付けの請求書は、請求書を開いてベンダーを保存し直すと対象になります。',
 	'creditMemos.applyModal.selectInvoice': '請求書を選択…',
 	'creditMemos.applyModal.title': 'クレジットメモを適用',
 	'creditMemos.col.amount': '金額',
@@ -4507,6 +4531,7 @@ export const messages = {
 	'creditMemos.createModal.invoiceNeedsVendor': 'ベンダーを選択すると、その請求書が表示されます。',
 	'creditMemos.createModal.memoNumber': 'メモ番号',
 	'creditMemos.createModal.noInvoice': 'まだ適用しない',
+	'creditMemos.createModal.noEligibleInvoice': 'このベンダーの請求書には、このクレジットを適用できるものがありません。すでに支払済みか完了済みであるか、未クレジット残高が足りないか、ベンダーがまだ紐付けられていません（請求書を開いてベンダーを保存し直してください）。',
 	'creditMemos.createModal.reason': '理由',
 	'creditMemos.createModal.reasonPlaceholder': '例：欠陥品の返品',
 	'creditMemos.createModal.selectVendor': 'ベンダーを選択…',
@@ -5156,6 +5181,7 @@ export const messages = {
 	'invoices.modal.noPdf': 'PDF が添付されていません',
 	'invoices.modal.pdfTitle': '請求書 PDF — {number}',
 	'invoices.modal.poMatch.accepted': '{qty} 件受領',
+	'invoices.modal.poMatch.currencyUnknown': 'この発注には通貨が記録されていないため、合計額を請求書と額面どおりに比較しました。',
 	'invoices.modal.poMatch.failed': '不合格',
 	'invoices.modal.poMatch.matched': '一致',
 	'invoices.modal.poMatch.mismatch': '不一致',

@@ -383,6 +383,11 @@ def _merge_po_to_payload(raw: dict) -> PoPayload:
         or raw.get("requested_delivery_date")
     )
 
+    # Merge's unified PurchaseOrder carries an ISO 4217 `currency` beside
+    # `total_amount`. Passed through as given; `api/purchase_orders` normalises
+    # it and stores NULL for an absent or malformed code — never a default.
+    raw_currency = raw.get("currency")
+
     return PoPayload(
         po_number=raw.get("number") or raw.get("transaction_number") or raw.get("id") or "UNKNOWN",
         vendor_name=vendor_name,
@@ -390,6 +395,7 @@ def _merge_po_to_payload(raw: dict) -> PoPayload:
         status=status,
         expected_delivery_date=expected_delivery_date,
         line_items=line_items,
+        currency=raw_currency if isinstance(raw_currency, str) else None,
     )
 
 

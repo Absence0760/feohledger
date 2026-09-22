@@ -132,6 +132,7 @@ async def _seed_po_mismatch(
     autonomy_level: str | None = "balanced",
     number="INV-AG-1",
     partial_receipt: bool = False,
+    po_currency: str | None = "USD",
 ) -> tuple[uuid.UUID, uuid.UUID, uuid.UUID]:
     """Create an invoice in ready_for_review with a LIVE PurchaseOrder it can be
     re-matched against, a workflow instance (so the approval path + CFO-gate
@@ -161,6 +162,9 @@ async def _seed_po_mismatch(
             organization_id=org_id,
             po_number=po_number,
             total=po_total,
+            # The invoice's own currency by default — the agent only snaps an
+            # amount to a PO total proven to be in it (decisions §197).
+            currency=po_currency,
             status="open",
         )
         s.add(po)
@@ -283,6 +287,54 @@ async def test_in_tolerance_mismatch_auto_resolves(realdb):
         # The amount correction is captured as string-Decimal in the diff.
         changes = approved_row.details.get("changes", {})
         assert changes["amount"]["new"] == "1010.00"
+
+
+async def test_po_without_a_currency_escalates_instead_of_snapping_the_amount(realdb):
+    """The same 1% in-band variance, but the PO records no currency: the agent
+    cannot prove the invoice and the PO total are in one currency, so it must
+    not rewrite the invoice amount to that total — it escalates, untouched
+    (decisions §197). A human may accept the face-value match; an agent that
+    moves money on an assumption is the failure this control exists to stop."""
+    mk = realdb.sessionmaker("a")
+    org_id = realdb.info("a").org_id
+    actor_id = realdb.info("a").users["ap_manager"]
+
+    inv_id, _corr, exc_id = await _seed_po_mismatch(
+        mk,
+        org_id,
+        invoice_amount=Decimal("1000.00"),
+        po_total=Decimal("1010.00"),
+        number="INV-AG-NOCCY",
+        po_currency=None,
+    )
+
+    org_settings = {"exception_agents": {"autonomy_level": "balanced"}}
+    async with mk() as s:
+        exc = await s.get(APException, exc_id)
+        result = await run_agent(
+            s,
+            exception=exc,
+            actor_id=actor_id,
+            org_settings=org_settings,
+            actor_roles={"ap_manager"},
+        )
+    assert result.decision.action_taken == ACTION_ESCALATED
+
+    async with mk() as s:
+        inv = await s.get(Invoice, inv_id)
+        assert inv.amount == Decimal("1000.00")
+        assert inv.status == InvoiceStatus.ready_for_review
+        # The dispatcher carries the LAST delegate's rationale on a full
+        # escalation, so ask the amount-mismatch resolver itself why it declined.
+        from app.services.exception_agents.resolvers.amount_mismatch import (
+            AmountMismatchResolver,
+        )
+
+        own = await AmountMismatchResolver().evaluate(
+            s, exception=await s.get(APException, exc_id), invoice=inv, org_settings=org_settings
+        )
+    assert own.recommended_action == ACTION_ESCALATED
+    assert "records no currency" in own.rationale
 
 
 async def test_out_of_tolerance_variance_escalates(realdb):

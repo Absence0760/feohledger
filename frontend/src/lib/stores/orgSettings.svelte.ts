@@ -1,5 +1,5 @@
 import { api } from '$lib/api';
-import { DEFAULT_CURRENCY } from '$lib/utils/money';
+import { m } from '$lib/i18n/store.svelte';
 import {
 	resolveReportingCurrency,
 	type ReportingCurrencySettings
@@ -7,25 +7,37 @@ import {
 
 /**
  * Tenant-wide display currency for *aggregate* figures that don't carry
- * their own per-row currency code — dashboard KPIs, payment-summary
- * totals, aging buckets, the CFO forecast. Per-row amounts (an invoice,
- * a credit memo) always render with *their own* `currency` field via
- * `<Money currency={row.currency} />`; this store only backs the
- * roll-ups where there is no single row to read from.
+ * their own per-row currency code — the adaptive thresholds, the approval
+ * money labels, the zero an empty selection costs. Per-row amounts (an
+ * invoice, a credit memo) always render with *their own* `currency` field via
+ * `<Money currency={row.currency} />`; and a rollup whose PAYLOAD names the
+ * currency it is denominated in (the dashboard's `reporting.reporting_currency`,
+ * the cash position's `opening_balance_currency`, CFO metrics'
+ * `reporting_currency`) is labelled from that payload, not from here. This
+ * store backs only the figures with nothing better to read.
  *
  * Resolved from `GET /api/organization` in the SAME order the backend uses —
  * `settings.reporting_currency` → `settings.payments.home_currency` →
- * `settings.invoice_defaults.currency` → {@link DEFAULT_CURRENCY}. That order
- * is not a preference; it is `currency_conversion.resolve_reporting_currency`,
- * the function that decides what currency the API's cross-currency rollups are
- * *actually denominated in* (`/api/payments/summary`, the CFO forecast + cash
- * position, the dashboard `reporting` block, the discount dashboard).
+ * `settings.invoice_defaults.currency`. That order is not a preference; it is
+ * `currency_conversion.resolve_reporting_currency`, the function that decides
+ * what currency the API's cross-currency rollups are *actually denominated in*.
  *
- * Reading only `invoice_defaults.currency` — as this store did — was therefore
- * a mislabel, not a fallback: an org reporting in GBP while its invoice default
- * stayed USD had its converted GBP totals rendered with a `$`, on every
- * aggregate figure in the app. The two keys agree in the common case, which is
- * exactly why it went unnoticed.
+ * **`currency` is `null` until resolved, and stays `null` when all three rungs
+ * miss.** The backend has a fourth rung — `settings.reporting_currency_default`,
+ * an operator setting no client can read — so a code substituted here would be
+ * a guess at an operator-settable value, indistinguishable on screen from one
+ * the tenant configured (`docs/decisions.md` §119, §160, §200). It used to
+ * start at, reset to, and degrade to `USD`, which put a `$` on every figure
+ * labelled from it for any org that set nothing — and on every figure before
+ * the store had loaded at all. Callers pass it straight to `formatMoney`, which
+ * renders a bare grouped figure for a `null` code (§196); a FORM that needs a
+ * value takes `orgCurrency.currency ?? DEFAULT_CURRENCY` itself, explicitly.
+ * Mobile's `OrgCurrencyStore` has the same contract.
+ *
+ * Reading only `invoice_defaults.currency` — as this store once did — was a
+ * mislabel, not a fallback: an org reporting in GBP while its invoice default
+ * stayed USD had its converted GBP totals rendered with a `$`. The two keys
+ * agree in the common case, which is exactly why it went unnoticed.
  *
  * `GET /api/organization` is open to any authenticated org user, but the
  * settings it returns are projected by role: a non-admin gets an allow-list
@@ -35,8 +47,9 @@ import {
  * `backend/app/services/org_settings_view.py`; a future field needed here has
  * to be added there on purpose.
  *
- * Resilient by design: any failure degrades to {@link DEFAULT_CURRENCY} rather
- * than breaking a dashboard render.
+ * Resilient by design: a failed load leaves `currency` `null` (figures render
+ * bare) and is not marked loaded, so a later navigation retries it. Throwing
+ * would take a dashboard down over a label.
  *
  * Cached for the session after the first successful load; `reset()`
  * clears it (e.g. on logout / tenant switch).
@@ -47,14 +60,29 @@ interface OrgResponse {
 }
 
 class OrgSettingsStore {
-	currency = $state(DEFAULT_CURRENCY);
+	/** The resolved ISO 4217 code, or `null` for "not proven" — not loaded yet,
+	 *  or genuinely unset on the org. Never a borrowed default. */
+	currency = $state<string | null>(null);
 	#loaded = false;
 	#inflight: Promise<void> | null = null;
 
 	/**
-	 * Lazy-load the tenant default currency once per session. Safe to
-	 * call from any page's `$effect`/`onMount`; concurrent callers share
-	 * one in-flight request and a non-admin 403 is swallowed.
+	 * The currency as TEXT for a label that names what a bare number input is
+	 * denominated in — "Auto-approve below (EUR)". The resolved code when there
+	 * is one, else the localized noun for the concept ("reporting currency"),
+	 * which is what the backend compares against whatever it resolves to.
+	 *
+	 * Never pass this to `formatMoney` / `<Money>`: a noun is not a currency
+	 * code, and a figure takes {@link currency}, `null` included.
+	 */
+	get label(): string {
+		return this.currency ?? m('common.reportingCurrencyUnresolved');
+	}
+
+	/**
+	 * Lazy-load the tenant reporting currency once per session. Safe to call
+	 * from any page's `$effect`/`onMount`; concurrent callers share one
+	 * in-flight request and a failure is swallowed.
 	 */
 	async ensureLoaded(): Promise<void> {
 		if (this.#loaded) return;
@@ -62,11 +90,13 @@ class OrgSettingsStore {
 		this.#inflight = (async () => {
 			try {
 				const org = await api.get<OrgResponse>('/api/organization');
-				const ccy = resolveReportingCurrency(org?.settings);
-				if (ccy) this.currency = ccy;
+				// `null` when the org declares nothing usable — assigned, not
+				// skipped, so the store says "unknown" rather than keeping a
+				// value from anywhere else.
+				this.currency = resolveReportingCurrency(org?.settings);
 				this.#loaded = true;
 			} catch {
-				// Transient error (or a signed-out race): keep the default and
+				// Transient error (or a signed-out race): stay unresolved and
 				// don't mark loaded, so a later navigation can still resolve it.
 			} finally {
 				this.#inflight = null;
@@ -76,7 +106,7 @@ class OrgSettingsStore {
 	}
 
 	reset(): void {
-		this.currency = DEFAULT_CURRENCY;
+		this.currency = null;
 		this.#loaded = false;
 		this.#inflight = null;
 	}

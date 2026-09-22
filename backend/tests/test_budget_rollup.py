@@ -115,6 +115,8 @@ async def _mk_converted_requisition(realdb, key="a", *, budget_id, po_total, cur
                 id=po_id,
                 po_number=f"PO-{_u()}",
                 total=Decimal(po_total),
+                # Conversion stamps the requisition's code onto the PO.
+                currency=currency,
                 status="open",
                 organization_id=org_id,
             )

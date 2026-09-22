@@ -412,10 +412,10 @@ async def test_reopen_is_422_from_any_non_rejected_state(realdb):
 # ---------------------------------------------------------------------------
 
 
-async def _approved_requisition(realdb) -> str:
+async def _approved_requisition(realdb, **payload_kw) -> str:
     """Create (clerk) → submit → approve (manager). Returns the requisition id."""
     async with realdb.client(key="a", role="ap_clerk") as c:
-        rid = (await c.post("/api/requisitions", json=_payload(_num()))).json()["id"]
+        rid = (await c.post("/api/requisitions", json=_payload(_num(), **payload_kw))).json()["id"]
         await c.post(f"/api/requisitions/{rid}/submit")
     async with realdb.client(key="a", role="ap_manager") as c:
         await c.post(f"/api/requisitions/{rid}/approve")
@@ -459,6 +459,35 @@ async def test_convert_creates_po(realdb):
             .all()
         )
         assert len(actions) >= 1
+
+
+async def test_convert_stamps_the_requisitions_currency_on_the_po(realdb):
+    """The PO is denominated in the currency its requisition was raised in.
+
+    `purchase_orders` had no currency column, so a PO converted from a EUR
+    requisition was booked with no record that it was EUR, and every surface
+    labelled it with the org's currency instead (decisions §197). The code is
+    normalised on the way across — the requisition schema admits lower case.
+    """
+    mk = realdb.sessionmaker("a")
+    rid = await _approved_requisition(realdb, currency="eur")
+    async with realdb.client(key="a", role="ap_manager") as c:
+        first = await c.post(f"/api/requisitions/{rid}/convert-to-po")
+        replay = await c.post(f"/api/requisitions/{rid}/convert-to-po")
+        assert first.status_code == 200, first.text
+        po_id = first.json()["po_id"]
+        detail = await c.get(f"/api/purchase-orders/{po_id}")
+
+    assert first.json()["currency"] == "EUR"
+    # The idempotent replay reports the same PO in the same currency.
+    assert replay.json()["created"] is False
+    assert replay.json()["currency"] == "EUR"
+    assert detail.json()["currency"] == "EUR"
+    async with mk() as s:
+        po = (
+            await s.execute(select(PurchaseOrder).where(PurchaseOrder.id == uuid.UUID(po_id)))
+        ).scalar_one()
+    assert po.currency == "EUR"
 
 
 async def test_convert_is_idempotent(realdb):

@@ -1088,8 +1088,8 @@ abstract class AppLocalizations {
   /// No description provided for @invoiceDetailUpdateFailed.
   ///
   /// In en, this message translates to:
-  /// **'Could not save changes — please try again'**
-  String get invoiceDetailUpdateFailed;
+  /// **'Could not save changes: {error}'**
+  String invoiceDetailUpdateFailed(String error);
 
   /// No description provided for @invoiceDetailApproved.
   ///
@@ -3932,6 +3932,27 @@ abstract class AppLocalizations {
     String poNumber,
     String invoiceAmount,
     String poTotal,
+  );
+
+  /// No description provided for @invoiceWarningPoAmountVariancePoCurrencyUnknown.
+  ///
+  /// In en, this message translates to:
+  /// **'Amount variance {variancePct} vs PO {poNumber}, which records no currency (invoice {invoiceAmount} vs PO {poTotal})'**
+  String invoiceWarningPoAmountVariancePoCurrencyUnknown(
+    String variancePct,
+    String poNumber,
+    String invoiceAmount,
+    String poTotal,
+  );
+
+  /// No description provided for @invoiceWarningPoCurrencyMismatch.
+  ///
+  /// In en, this message translates to:
+  /// **'Invoice is in {invoiceCurrency} but PO {poNumber} is in {poCurrency} — the amounts were not compared'**
+  String invoiceWarningPoCurrencyMismatch(
+    String invoiceCurrency,
+    String poNumber,
+    String poCurrency,
   );
 
   /// No description provided for @invoiceWarningPoPartialReceipt.

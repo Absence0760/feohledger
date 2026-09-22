@@ -64,8 +64,33 @@
 
 	let enrollment = $state<EnrollResponse | null>(null);
 	let verifyCode = $state('');
-	let disablePassword = $state('');
+	// The proof typed into the disable form: the password where it is a step-up
+	// proof, a current authenticator code where it is not (see `passwordIsProof`).
+	let disableProof = $state('');
 	let loading = $state(false);
+
+	// --- Which proof a factor change may ask the member to TYPE --------------
+	// The server drops an offered password from every step-up when the org has
+	// closed password sign-in (`sso_only`, docs/decisions.md §191), so a password
+	// field there is a control that can only ever be refused. `/auth/me`'s
+	// `password_sign_in_closed` is the server's own predicate — the one login and
+	// the step-up both call — rather than the login page's public `/config`
+	// echo, which says "open" for a tenant whose IdP config does not resolve
+	// even though the password is closed there too (§201). Where it is set, every
+	// step-up prompt below asks for a current authenticator code or runs the
+	// passkey ceremony instead.
+	const passwordIsProof = $derived(!auth.user?.password_sign_in_closed);
+
+	/** The server's own shape for a TOTP code (6-8 digits); a shorter entry is a
+	 * 422, so a half-typed code must not count as an offered proof. */
+	function isCompleteCode(value: string): boolean {
+		return /^[0-9]{6,8}$/.test(value);
+	}
+
+	/** Package a typed proof under the field the server reads it from. */
+	function typedStepUpProof(kind: 'password' | 'code', value: string): StepUpProof {
+		return kind === 'code' ? { code: value } : { password: value };
+	}
 
 	// Account editing
 	let fullName = $state('');
@@ -159,18 +184,25 @@
 		}
 	}
 
-	/** Turning MFA off with a passkey rather than the password — the only route
-	 * open to an SSO-only account, which has no password to re-type. */
+	/** Turning MFA off with a passkey rather than a typed proof — for an account
+	 * with no password to type, or one whose org no longer accepts it. */
 	async function disableWithPasskey() {
 		await disable(await auth.passkeyStepUp('totp_disable'));
 	}
 
-	async function disable(proof: StepUpProof = { password: disablePassword }) {
+	/** The kind of proof the disable form asks for. The factor being turned off
+	 * is a live TOTP secret, so a current code from it is always on hand. */
+	const disableProofKind = $derived<'password' | 'code'>(passwordIsProof ? 'password' : 'code');
+	const disableProofReady = $derived(
+		disableProofKind === 'code' ? isCompleteCode(disableProof) : Boolean(disableProof),
+	);
+
+	async function disable(proof: StepUpProof = typedStepUpProof(disableProofKind, disableProof)) {
 		loading = true;
 		try {
 			await api.post('/api/auth/mfa/disable', proof);
 			await auth.fetchUser();
-			disablePassword = '';
+			disableProof = '';
 			toast(m('profile.mfa.disabledToast'), 'success');
 		} catch (err) {
 			toast(err instanceof Error ? err.message : m('profile.mfa.disableFailed'), 'error');
@@ -191,7 +223,8 @@
 
 	let passkeys = $state<Passkey[] | null>(null);
 	let passkeyName = $state('');
-	let passkeyPassword = $state('');
+	// The typed proof for an add / remove: see `passkeyTypedProof`.
+	let passkeyProof = $state('');
 	let registeringPasskey = $state(false);
 	let passkeysLoaded = $state(false);
 	let passkeysError = $state(false);
@@ -235,8 +268,8 @@
 
 	// Adding a factor to an account that ALREADY has one is a step-up
 	// operation server-side — otherwise a stolen session could bind an
-	// attacker's authenticator. Mirror that here so the form asks for the
-	// password only when it's actually required.
+	// attacker's authenticator. Mirror that here so the form asks for a
+	// proof only when it's actually required.
 	// Fails CLOSED on an unknown list: if the fetch failed we cannot rule out a
 	// live factor, and the server will demand a proof regardless — so ask for
 	// one rather than submit without and collect an opaque 400.
@@ -253,15 +286,30 @@
 	// account has. If there really is no passkey the server refuses — which is
 	// the honest answer, not a bypass.
 	const hasPasskey = $derived(((passkeys?.length ?? 0) > 0 || passkeysError) && webAuthnOk);
-	const canStepUp = $derived(!needsPasskeyStepUp || Boolean(passkeyPassword) || hasPasskey);
 
-	/** Whichever proof the user has actually offered. A typed password wins (it
-	 * needs no device interaction); otherwise fall back to the passkey prompt. */
+	/** What the card asks the member to type, if anything. The password where it
+	 * is a proof; where it is not, a current authenticator code when TOTP is
+	 * live, and nothing when it is not — the step-up is then the passkey
+	 * ceremony, and `needsPasskeyStepUp` already guarantees there is a passkey
+	 * to run it with (with no factor at all no step-up is asked, in any tenant). */
+	const passkeyTypedProof = $derived<'password' | 'code' | null>(
+		passwordIsProof ? 'password' : auth.user?.mfa_enabled ? 'code' : null,
+	);
+	// A blank field falls back to the passkey; a typed code must be a whole one.
+	const canStepUp = $derived(
+		!needsPasskeyStepUp ||
+			(passkeyProof
+				? passkeyTypedProof !== 'code' || isCompleteCode(passkeyProof)
+				: hasPasskey),
+	);
+
+	/** Whichever proof the user has actually offered. A typed one wins (it needs
+	 * no device interaction); otherwise fall back to the passkey prompt. */
 	async function passkeyCardProof(
 		operation: 'passkey_register' | 'passkey_delete',
 	): Promise<StepUpProof> {
 		if (!needsPasskeyStepUp) return {};
-		if (passkeyPassword) return { password: passkeyPassword };
+		if (passkeyProof && passkeyTypedProof) return typedStepUpProof(passkeyTypedProof, passkeyProof);
 		return auth.passkeyStepUp(operation);
 	}
 
@@ -276,7 +324,7 @@
 			// be in when its key was registered.
 			await auth.registerPasskey(passkeyName.trim() || 'Passkey', proof);
 			passkeyName = '';
-			passkeyPassword = '';
+			passkeyProof = '';
 			await loadPasskeys();
 			toast(m('profile.passkeys.added'), 'success');
 		} catch (err) {
@@ -292,7 +340,7 @@
 			// Removing a passkey always needs the step-up — the passkey itself is
 			// a live factor, so the backend refuses a bare-session delete.
 			await auth.deletePasskey(id, await passkeyCardProof('passkey_delete'));
-			passkeyPassword = '';
+			passkeyProof = '';
 			await loadPasskeys();
 			toast(m('profile.passkeys.removed'), 'success');
 		} catch (err) {
@@ -430,6 +478,39 @@
 	}
 </script>
 
+<!-- The one field a factor change asks the member to type. A snippet rather than
+     a component so the card's scoped field styles still reach it. `password` is
+     the account password; `code` a current authenticator code, asked for where
+     the org has closed password sign-in (docs/decisions.md §201). -->
+{#snippet stepUpField(
+	kind: 'password' | 'code',
+	label: string,
+	value: string,
+	onValue: (value: string) => void,
+)}
+	<label>
+		<span>{label}</span>
+		{#if kind === 'code'}
+			<input
+				type="text"
+				inputmode="numeric"
+				pattern="[0-9]*"
+				maxlength="8"
+				autocomplete="one-time-code"
+				{value}
+				oninput={(e) => onValue(e.currentTarget.value)}
+			/>
+		{:else}
+			<input
+				type="password"
+				autocomplete="current-password"
+				{value}
+				oninput={(e) => onValue(e.currentTarget.value)}
+			/>
+		{/if}
+	</label>
+{/snippet}
+
 <div class="workspace">
 	<header class="toolbar">
 		<h1>{m('shell.profileAndSecurity')}</h1>
@@ -559,18 +640,20 @@
 							disable();
 						}}
 					>
-						<label>
-							<span>{m('profile.mfa.disablePassword')}</span>
-							<input
-								type="password"
-								bind:value={disablePassword}
-								autocomplete="current-password"
-							/>
-						</label>
+						{#if !passwordIsProof}
+							<p class="hint">{m('profile.mfa.ssoOnlyNoPassword')}</p>
+						{/if}
+						{@render stepUpField(
+							disableProofKind,
+							m(passwordIsProof ? 'profile.mfa.disablePassword' : 'profile.mfa.disableCode'),
+							disableProof,
+							(v) => (disableProof = v),
+						)}
 						<div class="actions">
 							{#if hasPasskey}
-								<!-- An SSO-only account has no password to type; its
-								     registered passkey is the proof instead. -->
+								<!-- The typed proof's alternative: a registered passkey,
+								     for an account with no password (or none the org
+								     accepts) that would rather not type a code. -->
 								<button
 									type="button"
 									class="secondary"
@@ -583,7 +666,7 @@
 							<button
 								type="submit"
 								class="danger"
-								disabled={loading || !disablePassword}
+								disabled={loading || !disableProofReady}
 							>
 								{loading ? m('profile.mfa.disabling') : m('profile.mfa.disable')}
 							</button>
@@ -647,17 +730,33 @@
 				{#if needsPasskeyStepUp}
 					<!-- One field for both operations: the backend requires a step-up
 					     to add a factor to an account that already has one, and always
-					     requires one to remove a passkey. -->
-					<label>
-						<span>{m('profile.passkeys.stepUpPassword')}</span>
-						<input
-							type="password"
-							bind:value={passkeyPassword}
-							autocomplete="current-password"
-						/>
-					</label>
-					{#if hasPasskey}
-						<p class="hint">{m('profile.passkeys.stepUpBlankHint')}</p>
+					     requires one to remove a passkey. Which proof it asks for is
+					     `passkeyTypedProof` (docs/decisions.md §201). -->
+					{#if !passwordIsProof}
+						<p class="hint">{m('profile.mfa.ssoOnlyNoPassword')}</p>
+					{/if}
+					{#if passkeyTypedProof}
+						{@render stepUpField(
+							passkeyTypedProof,
+							m(
+								passkeyTypedProof === 'code'
+									? 'profile.passkeys.stepUpCode'
+									: 'profile.passkeys.stepUpPassword',
+							),
+							passkeyProof,
+							(v) => (passkeyProof = v),
+						)}
+						{#if hasPasskey}
+							<p class="hint">
+								{m(
+									passkeyTypedProof === 'code'
+										? 'profile.passkeys.stepUpCodeBlankHint'
+										: 'profile.passkeys.stepUpBlankHint',
+								)}
+							</p>
+						{/if}
+					{:else}
+						<p class="hint">{m('profile.passkeys.stepUpPasskeyOnly')}</p>
 					{/if}
 				{/if}
 

@@ -120,7 +120,7 @@ the database, so they only matter where the old name is already materialised.
 | Resource | Old | New |
 |---|---|---|
 | Compose project | `ap-prod` | `feoh-prod` |
-| pnpm store volume | `ap-prod-pnpm-store` | `feoh-prod-pnpm-store` |
+| pnpm store volume | `ap-prod-pnpm-store` | `feoh-prod-pnpm-store`, since replaced by the compose-managed `feoh-prod_pnpm-store` (a cache — `deploy/README.md` § Deploys) |
 | Backup cron / log | `/etc/cron.d/ap-backup`, `/var/log/ap-backup.log` | `feoh-backup` |
 | SQS queues (lambda dispatch modes) | `ap-extraction`, `ap-erp`, `ap-audit` | `feoh-*` |
 | Audit WORM bucket | `ap-audit-worm` | `feoh-audit-worm` |

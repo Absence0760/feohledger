@@ -803,6 +803,13 @@ user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER))
 - Per-tenant config in `Organization.settings.sso`, discriminated by `protocol`
   (absent / `"oidc"` → OIDC; `"saml"` → SAML). `resolve_sso_config` /
   `resolve_saml_config` each return `None` for the other protocol.
+- **Whether password sign-in is closed is `services/sso.is_sso_only`, and only
+  that.** It needs `enabled` + `sso_only` + an IdP block that resolves; login,
+  the step-up, `/auth/me` and the public config echo all call it. Never test the
+  two flags yourself (`sso_only_requested` is the *request*, for validation and
+  logging). Because it runs on every password sign-in, the resolvers must raise
+  `SSOConfigError` and nothing else for any malformed block, and stay local (no
+  DNS, no discovery fetch). `docs/decisions.md` §204.
 - Both protocols share the identity tail in `services/identity_provisioning.py`
   (`jit_provision` + `extract_and_check_email`) and the session-mint tail — only
   IdP-response *verification* differs.

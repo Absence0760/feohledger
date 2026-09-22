@@ -60,13 +60,18 @@ export function createPo(opts: {
 	total: number;
 	lines?: PoLine[];
 	vendorId?: string | null;
+	/** The PO's own currency (`purchase_orders.currency`, migration 0099).
+	 *  Omitted = NULL, a PO that records none — what every seeded row was
+	 *  before the column existed (decisions §197). */
+	currency?: string | null;
 }): { poId: string; poNumber: string } {
 	const { orgId, entityId } = tenantScope();
 	const poNumber = uniq('PO-M');
 	const vendorCol = opts.vendorId ? `'${opts.vendorId}'` : 'NULL';
+	const currencyCol = opts.currency ? `'${opts.currency}'` : 'NULL';
 	sql(
-		`insert into purchase_orders (id, po_number, vendor_id, total, status, organization_id, entity_id, created_at, updated_at)
-		 values (gen_random_uuid(), '${poNumber}', ${vendorCol}, ${opts.total}, 'open', '${orgId}', '${entityId}', now(), now());`
+		`insert into purchase_orders (id, po_number, vendor_id, total, currency, status, organization_id, entity_id, created_at, updated_at)
+		 values (gen_random_uuid(), '${poNumber}', ${vendorCol}, ${opts.total}, ${currencyCol}, 'open', '${orgId}', '${entityId}', now(), now());`
 	);
 	const poId = sql(`select id from purchase_orders where po_number = '${poNumber}';`);
 	for (const l of opts.lines ?? []) {
@@ -123,7 +128,13 @@ export function createInspectionRow(opts: {
  *  `po_match` is materialized. Returns the id and the computed po_match. */
 export async function createMatchedInvoice(
 	page: Page,
-	opts: { poNumber?: string; amount: number; vendorId?: string; glAccount?: string }
+	opts: {
+		poNumber?: string;
+		amount: number;
+		vendorId?: string;
+		glAccount?: string;
+		currency?: string;
+	}
 ): Promise<{ invoiceId: string; poMatch: PoMatch | null }> {
 	const headers = { ...tenantHeaders(await authToken(page)), 'Content-Type': 'application/json' };
 	const createBody: Record<string, unknown> = {
@@ -134,6 +145,7 @@ export async function createMatchedInvoice(
 		po_number: opts.poNumber
 	};
 	if (opts.glAccount) createBody.gl_account = opts.glAccount;
+	if (opts.currency) createBody.currency = opts.currency;
 	const created = await page.request.post(`${API_BASE}/api/invoices`, { headers, data: createBody });
 	if (!created.ok()) throw new Error(`create invoice failed: ${created.status()} ${await created.text()}`);
 	const invoiceId = ((await created.json()) as { id: string }).id;
@@ -184,9 +196,14 @@ export type PoMatch = {
 	po_id: string | null;
 	po_number: string | null;
 	po_total: number | null;
+	/** The PO's own code; `null` when it records none. */
+	po_currency: string | null;
+	/** `same` / `different` / `unknown` — the currency leg (decisions §197). */
+	currency_check: 'same' | 'different' | 'unknown' | null;
 	gr_id: string | null;
-	amount_variance: number;
-	amount_variance_pct: number;
+	/** `null` on a currency mismatch — there is no variance between two units. */
+	amount_variance: number | null;
+	amount_variance_pct: number | null;
 	within_tolerance: boolean;
 	inspection_id: string | null;
 	inspection_result: string | null;

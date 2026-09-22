@@ -567,8 +567,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get invoiceDetailUpdated => 'Invoice updated';
 
   @override
-  String get invoiceDetailUpdateFailed =>
-      'Could not save changes — please try again';
+  String invoiceDetailUpdateFailed(String error) {
+    return 'Could not save changes: $error';
+  }
 
   @override
   String get invoiceDetailApproved => 'Invoice approved';
@@ -2372,6 +2373,25 @@ class AppLocalizationsEn extends AppLocalizations {
     String poTotal,
   ) {
     return 'Amount variance $variancePct vs PO $poNumber (invoice $invoiceAmount vs PO $poTotal)';
+  }
+
+  @override
+  String invoiceWarningPoAmountVariancePoCurrencyUnknown(
+    String variancePct,
+    String poNumber,
+    String invoiceAmount,
+    String poTotal,
+  ) {
+    return 'Amount variance $variancePct vs PO $poNumber, which records no currency (invoice $invoiceAmount vs PO $poTotal)';
+  }
+
+  @override
+  String invoiceWarningPoCurrencyMismatch(
+    String invoiceCurrency,
+    String poNumber,
+    String poCurrency,
+  ) {
+    return 'Invoice is in $invoiceCurrency but PO $poNumber is in $poCurrency — the amounts were not compared';
   }
 
   @override

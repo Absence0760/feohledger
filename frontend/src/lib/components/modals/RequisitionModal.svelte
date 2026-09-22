@@ -13,7 +13,13 @@
 	import Modal from '$lib/components/ui/Modal.svelte';
 	import Badge from '$lib/components/ui/Badge.svelte';
 	import Money from '$lib/components/ui/Money.svelte';
-	import { formatMoney, scaleMoney, sumMoney, type MoneyString } from '$lib/utils/money';
+	import {
+		DEFAULT_CURRENCY,
+		formatMoney,
+		scaleMoney,
+		sumMoney,
+		type MoneyString
+	} from '$lib/utils/money';
 	import { toast } from '$lib/components/ui/Toast.svelte';
 	import { m } from '$lib/i18n/store.svelte';
 	import { createRequisition, updateRequisition } from '$lib/api/requisitions';
@@ -78,7 +84,7 @@
 	let department = $state(requisition?.department ?? '');
 	let needed_by = $state(requisition?.needed_by ?? '');
 	let justification = $state(requisition?.justification ?? '');
-	let currency = $state(requisition?.currency ?? orgCurrency.currency ?? 'USD');
+	let currency = $state(requisition?.currency ?? orgCurrency.currency ?? DEFAULT_CURRENCY);
 	let notes = $state(requisition?.notes ?? '');
 	let lines = $state<LineRow[]>(
 		(requisition?.line_items ?? []).map(toRow)
@@ -170,7 +176,7 @@
 					department: department.trim() || null,
 					needed_by: needed_by || null,
 					justification: justification.trim() || null,
-					currency: currency.trim() || 'USD',
+					currency: currency.trim() || DEFAULT_CURRENCY,
 					notes: notes.trim() || null,
 					line_items: lineItems
 				});
@@ -181,7 +187,7 @@
 					department: department.trim() || null,
 					needed_by: needed_by || null,
 					justification: justification.trim() || null,
-					currency: currency.trim() || 'USD',
+					currency: currency.trim() || DEFAULT_CURRENCY,
 					notes: notes.trim() || null,
 					line_items: lineItems
 				});

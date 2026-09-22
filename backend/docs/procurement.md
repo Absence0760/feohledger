@@ -51,6 +51,14 @@ intake_request --(convert)--> purchase_requisition --(convert)--> purchase_order
                                 preferred vendors + in-contract sources
 ```
 
+- **A PO records the currency its source knew.** `purchase_orders.currency`
+  (migration 0099, nullable, no default) is stamped by every creation path —
+  the requisition's code on conversion, the contract's on a contract-based PO,
+  the ERP payload's on sync — and NULL means no source said, rendered bare.
+  Existing POs were back-filled from their originating requisition only; the
+  rest stay NULL rather than borrow the org's currency (`docs/decisions.md`
+  §197). `tests/test_purchase_order_currency_stamping.py` fails on a
+  `PurchaseOrder(...)` that omits `currency=`.
 - **Intake → Requisition → PO** is the spend escalation path. Each conversion is
   **idempotent** (a replay returns the existing downstream artifact, never a
   second one) and **row-locked** (`SELECT … FOR UPDATE` on the source row) so two

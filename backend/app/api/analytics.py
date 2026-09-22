@@ -33,6 +33,7 @@ from app.models.gl_account import GLAccount
 from app.models.invoice import Invoice, InvoiceStatus
 from app.models.organization import Organization
 from app.models.payment import Payment, PaymentSchedule
+from app.models.procurement import po_currency_code
 from app.models.user import User
 from app.models.virtual_card import CardRebate, VirtualCard
 from app.services.analytics import (
@@ -41,6 +42,7 @@ from app.services.analytics import (
     apply_payment_timing_scenario,
     bucket_outflows,
     compute_accruals,
+    compute_accruals_by_currency,
     compute_cash_conversion_cycle,
     compute_cash_position,
     compute_dpo,
@@ -798,19 +800,21 @@ async def get_cfo_analytics(
     ccc = compute_cash_conversion_cycle(dso_days=None, dio_days=None, dpo_days=dpo)
 
     # ----- Accruals — open POs, GRs, unposted invoices -----
-    # `_open_po_sum_query` keeps the failure surface narrow on tenants that
-    # never enabled PO matching (returns a literal-0 query) and entity-scopes
-    # the PO sum when a subsidiary is selected.
-    open_po_q = await db.execute(_open_po_sum_query(entity_id))
-    try:
-        open_po_amount = Decimal(str(open_po_q.scalar() or 0))
-    except Exception:  # noqa: BLE001
-        open_po_amount = Decimal("0")
+    # Every leg is gathered PER CURRENCY — each PO in its own recorded currency
+    # (NULL where none was recorded), each invoice in its own — and netted
+    # within it by `compute_accruals_by_currency`: the three legs span whatever
+    # currencies the book holds, and nothing bridges a PO into the reporting
+    # currency (it carries no locked rate). `accruals.by_currency` is the figure
+    # to render; the flat fields beside it are the legacy naive sums, kept for
+    # back-compat exactly like `total_spend` (decisions §197).
+    open_po_by_currency = await _open_po_amounts_by_currency(db, entity_id)
 
     # Unposted invoices: approved + sending_to_erp + sent_to_erp
-    unposted_q = await db.execute(
+    unposted_code = func.upper(Invoice.currency)
+    unposted_rows = await db.execute(
         _inv(
-            select(func.coalesce(func.sum(Invoice.amount), 0)).where(
+            select(unposted_code, func.coalesce(func.sum(Invoice.amount), 0))
+            .where(
                 Invoice.status.in_(
                     [
                         InvoiceStatus.approved.value,
@@ -819,17 +823,22 @@ async def get_cfo_analytics(
                     ]
                 )
             )
+            .group_by(unposted_code)
         )
     )
-    unposted_invoice_amount = Decimal(str(unposted_q.scalar() or 0))
+    unposted_by_currency = _amounts_by_code(unposted_rows.all())
     # GR-received-but-not-invoiced: fan the 3-way match out per-PO and
-    # value the received fraction of each receipted PO. `_received_amount`
-    # fails soft to 0 on tenants without procurement tables.
-    received_amount = await _received_amount(db, entity_id)
+    # value the received fraction of each receipted PO, per PO currency.
+    received_amount, received_by_currency = await _received_amounts(db, entity_id)
     accruals = compute_accruals(
-        open_po_amount=open_po_amount,
+        open_po_amount=sum(open_po_by_currency.values(), Decimal("0")),
         received_amount=received_amount,
-        unposted_invoice_amount=unposted_invoice_amount,
+        unposted_invoice_amount=sum(unposted_by_currency.values(), Decimal("0")),
+    )
+    accruals_by_currency = compute_accruals_by_currency(
+        open_po_amounts=open_po_by_currency,
+        received_amounts=received_by_currency,
+        unposted_invoice_amounts=unposted_by_currency,
     )
 
     # ----- Working-capital impact (extend by 5 days) -----
@@ -1154,10 +1163,25 @@ async def get_cfo_analytics(
         "dpo_trend": [{"month": r["month"], "dpo": float(r["dpo"])} for r in monthly_dpo_rows],
         "cash_conversion_cycle": float(ccc) if ccc is not None else None,
         "accruals": {
+            # Naive sums ACROSS currencies — kept for API back-compat, never to
+            # be rendered. `by_currency` below is the figure.
             "open_po_amount": _money(accruals.open_po_amount),
             "received_amount": _money(accruals.received_amount),
             "unposted_invoice_amount": _money(accruals.unposted_invoice_amount),
             "total_accrual": _money(accruals.total_accrual),
+            # One row per currency, each leg in it and `total_accrual` netted
+            # within it. `currency: null` is the slice nobody recorded a
+            # currency for (POs only) — render it bare, never merged.
+            "by_currency": [
+                {
+                    "currency": row.currency,
+                    "open_po_amount": _money(row.open_po_amount),
+                    "received_amount": _money(row.received_amount),
+                    "unposted_invoice_amount": _money(row.unposted_invoice_amount),
+                    "total_accrual": _money(row.total_accrual),
+                }
+                for row in accruals_by_currency
+            ],
         },
         "working_capital_impact_5_days": _money(wc_impact_5d),
         "avg_daily_outflow": _money(avg_daily_outflow),
@@ -1205,32 +1229,64 @@ async def get_cfo_analytics(
     }
 
 
-def _open_po_sum_query(entity_id: uuid.UUID | None):
-    """Build the open-PO accrual sum query, entity-scoped when a subsidiary is
-    selected. Lazily imports PurchaseOrder so a tenant without procurement
-    tables doesn't blow up — it falls back to a literal-0 sum. Keeping the
-    import lazy also keeps the failure surface narrow on those tenants."""
-    try:
-        from app.models.procurement import PurchaseOrder
+def _amounts_by_code(rows) -> dict[str | None, Decimal]:
+    """``(code, amount)`` rows → exact Decimal sums keyed by normalised code.
 
-        return apply_entity_scope(
-            select(func.coalesce(func.sum(PurchaseOrder.total), 0)), PurchaseOrder, entity_id
+    Codes go through `po_currency_code`, so `"eur"` and `"EUR"` land in one
+    group and a blank or malformed code lands in the `None` group — the same
+    "nobody recorded it" slice as a PO with no currency, never a real one.
+    """
+    out: dict[str | None, Decimal] = {}
+    for code, amount in rows:
+        key = po_currency_code(code)
+        out[key] = out.get(key, Decimal("0")) + Decimal(str(amount or 0))
+    return out
+
+
+async def _open_po_amounts_by_currency(
+    db: AsyncSession, entity_id: uuid.UUID | None
+) -> dict[str | None, Decimal]:
+    """Open-PO commitments summed per PO currency, entity-scoped when a
+    subsidiary is selected — `/cfo`'s accruals leg and every by-entity row.
+
+    Grouped because `purchase_orders.currency` is a per-row fact: a single SUM
+    across a tenant's POs adds totals in whatever currencies they were raised
+    in. The legacy flat figure is the sum of these groups (exact Decimal).
+
+    **Open means open.** `AccrualsSnapshot` has always defined this leg as "the
+    total of non-closed POs" and the card calls it "Open POs", but the query
+    summed every PO the tenant had ever raised — a cancelled order counted as a
+    live commitment forever. The exclusion list is the model's
+    `DEAD_PO_STATUSES`, shared with the budget-commitment leg so the two cannot
+    disagree about what is still committed."""
+    from app.models.procurement import DEAD_PO_STATUSES, PurchaseOrder
+
+    rows = await db.execute(
+        apply_entity_scope(
+            select(PurchaseOrder.currency, func.coalesce(func.sum(PurchaseOrder.total), 0))
+            .select_from(PurchaseOrder)
+            .where(PurchaseOrder.status.notin_(DEAD_PO_STATUSES))
+            .group_by(PurchaseOrder.currency),
+            PurchaseOrder,
+            entity_id,
         )
-    except Exception:  # noqa: BLE001
-        from sqlalchemy import literal
-
-        return select(func.coalesce(func.sum(literal(0)), 0))
+    )
+    return _amounts_by_code(rows.all())
 
 
-async def _received_amount(db: AsyncSession, entity_id: uuid.UUID | None) -> Decimal:
+async def _received_amounts(
+    db: AsyncSession, entity_id: uuid.UUID | None
+) -> tuple[Decimal, dict[str | None, Decimal]]:
     """Value goods received but not yet invoiced (the GR/IR accrual leg).
 
     Loads every `received` goods receipt (entity-scoped) with its line
     items, aggregates received quantity per PO, then values the received
-    fraction of each PO via `value_received_goods`. Lazily imports the
-    procurement models so a tenant without those tables falls back to 0
-    rather than 500-ing (mirrors `_open_po_sum_query`). Receipts with no
-    PO link can't be priced and are excluded.
+    fraction of each PO via `value_received_goods`. Returns the whole-book
+    figure (the legacy flat `received_amount`) and the same valuation grouped
+    by each PO's own currency — a receipt is worth its PO's money, in the PO's
+    currency. Lazily imports the procurement models so a tenant without those
+    tables falls back to 0 rather than 500-ing. Receipts with no PO link can't
+    be priced and are excluded.
     """
     try:
         from collections import defaultdict
@@ -1263,7 +1319,7 @@ async def _received_amount(db: AsyncSession, entity_id: uuid.UUID | None) -> Dec
                 (li.quantity_received or Decimal("0") for li in gr.line_items), Decimal("0")
             )
         if not gr_qty_by_po:
-            return Decimal("0")
+            return Decimal("0"), {}
 
         # Entity scope is carried transitively: the PO ids come only from the
         # entity-scoped GR query above, so this fetch is already confined to the
@@ -1281,19 +1337,25 @@ async def _received_amount(db: AsyncSession, entity_id: uuid.UUID | None) -> Dec
             .all()
         )
 
-        receipts = [
-            ReceivedPO(
-                po_total=po.total or Decimal("0"),
-                po_qty_total=sum(
-                    (li.quantity or Decimal("0") for li in po.line_items), Decimal("0")
-                ),
-                gr_qty_total=gr_qty_by_po[po.id],
+        receipts_by_code: dict[str | None, list[ReceivedPO]] = defaultdict(list)
+        for po in po_rows:
+            receipts_by_code[po_currency_code(po.currency)].append(
+                ReceivedPO(
+                    po_total=po.total or Decimal("0"),
+                    po_qty_total=sum(
+                        (li.quantity or Decimal("0") for li in po.line_items), Decimal("0")
+                    ),
+                    gr_qty_total=gr_qty_by_po[po.id],
+                )
             )
-            for po in po_rows
-        ]
-        return value_received_goods(receipts)
+        # The flat figure keeps its single quantize over the whole book, so it
+        # does not move by a rounding cent against what it always reported.
+        everything = [r for group in receipts_by_code.values() for r in group]
+        return value_received_goods(everything), {
+            code: value_received_goods(group) for code, group in receipts_by_code.items()
+        }
     except Exception:  # noqa: BLE001
-        return Decimal("0")
+        return Decimal("0"), {}
 
 
 # ---------------------------------------------------------------------------
@@ -1417,13 +1479,9 @@ async def _entity_metrics(
     except Exception:  # noqa: BLE001
         open_exceptions = 0
 
-    # Open-PO accrual — reuses /cfo's `_open_po_sum_query` (entity-scoped,
-    # literal-0 on tenants without procurement tables).
-    open_po_q = await db.execute(_open_po_sum_query(entity_id))
-    try:
-        open_po_amount = Decimal(str(open_po_q.scalar() or 0))
-    except Exception:  # noqa: BLE001
-        open_po_amount = Decimal("0")
+    # Open-PO accrual — the same per-currency grouping `/cfo`'s accruals card
+    # renders (entity-scoped), so the consolidated row and that card agree.
+    open_po_by_currency = await _open_po_amounts_by_currency(db, entity_id)
 
     return {
         # Naive cross-currency SUM, kept for API back-compat; the figure to
@@ -1443,10 +1501,15 @@ async def _entity_metrics(
         "reporting_outstanding_unconverted_count": outstanding_rollup.unconverted_count,
         "invoice_count": invoice_count,
         "open_exceptions": open_exceptions,
-        # `PurchaseOrder` carries no currency column, so this is a sum of PO
-        # totals in currencies nobody recorded. It is served without a code on
-        # purpose — the client renders it bare — until POs record their own.
-        "open_po_amount": _money(open_po_amount),
+        # Naive sum across PO currencies, kept for API back-compat; never
+        # render it. `open_po_by_currency` is the figure: one entry per PO
+        # currency, `currency: null` for POs that record none (rendered bare,
+        # never merged into a real currency's). Ordered like `/cfo`'s accruals.
+        "open_po_amount": _money(sum(open_po_by_currency.values(), Decimal("0"))),
+        "open_po_by_currency": [
+            {"currency": code, "amount": _money(open_po_by_currency[code])}
+            for code in sorted(open_po_by_currency, key=lambda c: (c is None, c or ""))
+        ],
     }
 
 

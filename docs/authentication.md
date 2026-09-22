@@ -610,13 +610,44 @@ resolved address.
 password login for the whole org. The `/api/auth/login` handler refuses with
 `403` + an `auth.login.failure` / `reason=sso_only` audit row **after** verifying
 the password (so it reuses the org load and doesn't perturb the unknown-vs-
-wrong-password enumeration parity). `services/sso.py::is_sso_only` gates on
-`sso.enabled` too, so setting the flag without a working IdP can't lock everyone
-out. The public `/auth/{sso,saml}/config` endpoints echo `sso_only` **only when
-the IdP config resolves** — so the login page hides the password form for an
-SSO-only tenant, but a broken config (enabled=False) leaves password login
-visible as the escape hatch. Backend enforcement is the security boundary; the
-hidden form is UX.
+wrong-password enumeration parity).
+
+**One predicate decides it: `services/sso.py::is_sso_only`.** It is true only
+when all three hold:
+
+1. `sso.enabled` is set, so the flag staged while SSO is switched off closes
+   nothing;
+2. `sso.sso_only` is set; and
+3. the IdP block of the protocol `settings.sso` selects (`protocol: "saml"`, or
+   OIDC when absent) **resolves**: `discovery_url` / `client_id` /
+   `client_secret` for OIDC, `idp_entity_id` / `idp_sso_url` / `idp_x509_cert`
+   for SAML, each present, text, and well-formed (an http(s) URL, a base64 or
+   PEM cert). It is the same check `resolve_sso_config` / `resolve_saml_config`
+   make, through `check_sso_idp_config`.
+
+Login's refusal, the step-up's password drop, `/auth/me`'s
+`password_sign_in_closed` and the public `/auth/{sso,saml}/config` echo of
+`sso_only` all call it, so the login page hides the password form exactly where
+the server refuses the password, and it shows that protocol's SSO button beside
+it. Backend enforcement is the security boundary; the hidden form is UX.
+
+**The third condition is the escape hatch.** A tenant whose IdP block does not
+resolve has no SSO button, because the config endpoints report SSO as off. If
+the password were closed there too, no member could start a session. So an
+unresolvable block leaves password sign-in open, and each password sign-in it
+lets through logs a warning naming the org, because a tenant that believes it
+enforces SSO and does not is an operator's problem to fix. `PATCH
+/api/organization` refuses to save that state in the first place: a `settings.sso`
+with `enabled` and `sso_only` whose block does not resolve is a `422` naming the
+offending keys (never their values; the block holds the client secret).
+`sso_only` with SSO switched off is accepted. Only a direct DB edit can still
+produce the state, and the escape hatch covers it. Reasoning:
+[decisions.md](decisions.md) §204.
+
+"Resolves" is a local completeness check. It does no DNS lookup and fetches no
+discovery document, which is what keeps it on the sign-in path. A complete block
+pointing at an IdP that is down, or holding a revoked client secret, still closes
+the password; recovering from that takes a platform operator.
 
 **The password is not a step-up proof there either.** Signing in is not the only
 thing the stored hash can authenticate: every change to a second factor (TOTP
@@ -630,8 +661,37 @@ together. The password is never verified in that case, so the refusal —
 `400` with a sentence naming the proofs that *do* work (an authenticator code or
 a registered passkey) — is identical for a right password, a wrong one and an
 account with no password at all, and it is still throttled and audited as an
-`auth.mfa.step_up.failure`. The code and passkey-assertion proofs are
-untouched, and the org is only loaded when a password was actually offered.
+`auth.mfa.step_up.failure`. **Every** refused step-up in such a tenant gets that
+sentence, not only one that offered a password: the profile page asks for the
+authenticator code there instead (below), and a mistyped code answered with the
+generic "confirm your password…" would send the member to a field the page no
+longer shows. The code and passkey-assertion proofs are untouched, and the
+successful step-up paths load the org only when a password was actually
+offered; the refusal path reads it every time, a throttled failure path.
+
+**The profile page learns the rule from `/auth/me`.** `GET /api/auth/me`
+carries `password_sign_in_closed`, filled from
+`api/auth._org_closes_password_sign_in`, which is `is_sso_only`: the function
+login's refusal, the step-up's password drop, `/me` and the public config echo
+all call. When §201 chose it, the echo computed a different rule (it reported
+`sso_only` only when the IdP config resolved, while sign-in closed the password
+on the two flags alone), so the page needed the server's own predicate. §204
+made the predicate require a resolving config, and the two now agree by
+construction; `/me` is still the source because the page is authenticated and
+reads it anyway. `/profile` reads the field and, when it is set, never renders
+a password field for a factor change: the
+two-factor card's disable form asks for a current authenticator code (the
+factor being turned off is itself the proof), and the passkey card asks for the
+code when TOTP is live, runs the passkey ceremony when the field is left blank
+or there is no TOTP, and asks for nothing at all on an account with no factor
+yet (a first factor needs no step-up, in any tenant). An account whose only
+passkeys are bound to another host and which has no TOTP has no proof this host
+can take; the button stays enabled and the server's wrong-host refusal names the
+host to use. `backend/tests/test_sso_only.py` pins that `/me`, the step-up,
+login and the config echo agree for every shape of `settings.sso`;
+`frontend/tests-e2e/auth/profile-sso-only-step-up.spec.ts` pins the page.
+Reasoning: [decisions.md](decisions.md) §201.
+
 Consequences worth knowing:
 
 - An account with a live factor always has a proof it can still offer — a TOTP
@@ -647,7 +707,8 @@ Consequences worth knowing:
 - The supplier portal is unaffected: a `VendorUser` signs in with a password,
   and there is no SSO that could close it.
 
-Reasoning: [decisions.md](decisions.md) §191. Tests: `backend/tests/test_sso_only.py`.
+Reasoning: [decisions.md](decisions.md) §191, §201, §204. Tests: `backend/tests/test_sso_only.py`,
+`backend/tests/test_organization_settings_validation.py` (the write-time refusal).
 
 ## Frontend Implementation
 
@@ -1111,6 +1172,20 @@ from the mirror while leaving the source *uploader* free, or the reverse.
 Entities subdivide a tenant's books; they are not a boundary at which a payable's
 authors stop being its authors ([decisions.md](decisions.md) §192).
 
+**Mirrors routed before that rule were backfilled, unlike the recurring
+templates below.** Migration `0100_mirror_implicated_backfill` gives every such
+mirror still short of `done` exactly what routing gives one today —
+`intercompany.inherited_actor_ids`, the source's implicated set minus the
+mirror's uploader — and, for a mirror routed before its router was stamped (§131),
+names the router as its uploader. Here nothing is guessed: the source's two
+columns are on the source row, and which side of a pair is the mirror, and who
+routed it, are on the routing's own append-only `invoice.intercompany_routed`
+audit row. Each mirror it changes gets an `invoice.segregation_backfilled` audit
+row (no actor), so an approval given before the set existed stays legible as the
+compliant one it was. It is not limited to mirrors awaiting approval: an approved
+mirror still has a payment-blocking exception's clearing ahead of it, which reads
+the same set ([decisions.md](decisions.md) §198).
+
 Nothing else writes the set. Every other creation path has a single actor, so the
 column stays NULL and the reading below is unchanged.
 `backend/tests/test_invoice_uploader_stamping.py` pins both writers and fails if
@@ -1133,7 +1208,7 @@ signed-in employee stamps the column —
 | `POST /api/workflow/upload` (file upload) | the caller |
 | `POST /api/invoices/import-csv` (CSV import) | the caller |
 | `POST /api/recurring/{id}/generate-now` | the caller |
-| `POST /api/invoices/{id}/route-intercompany` (the mirror payable) | the routing actor — and the source payable's whole implicated set on `segregation_actor_ids` |
+| `POST /api/invoices/{id}/route-intercompany` (the mirror payable) | the routing actor — and the source payable's whole implicated set on `segregation_actor_ids` (a mirror routed before either was stamped got both from migration `0100`, §198) |
 | the recurring-invoice background sweep | `RecurringInvoiceTemplate.created_by_user_id` — the employee who authored the template (NULL only for a template predating migration 0096) |
 | email intake, inbound PEPPOL | NULL — system ingestion, no human |
 | supplier-portal submit, portal PO flip | NULL — the actor is a tenant-scoped `VendorUser`, who holds no employee JWT and can never reach an approval endpoint |
@@ -1536,7 +1611,7 @@ Registering a passkey on an account that **already** has a factor (TOTP enabled,
 
 **Deleting** a passkey is a step-up operation too, and unconditionally: the passkey being deleted is itself a live factor, so `DELETE /api/auth/mfa/passkey/{id}` always requires the password, a current authenticator code, or a passkey assertion. Removing a factor with a stolen token is the same attack as replacing one. The credentials travel in the request **body**, never a query string — a password must not land in access logs or a `Referer` header. An id that isn't the caller's own is still an opaque `404`, checked *before* the step-up so an unknown id can't be used to burn the account's throttle or probe for existence. On top of that, under org-enforced MFA the last surviving factor can't be removed at all.
 
-The `/profile` passkey panel renders one "Confirm your password" field that serves both add and remove, shown only when a step-up actually applies. Leaving it blank on an account that holds a passkey runs the passkey step-up ceremony instead — the only route open to an SSO-only account.
+The `/profile` passkey panel renders one step-up field that serves both add and remove, shown only when a step-up actually applies. It is "Confirm your password" where the password is a proof; in a tenant that has closed password sign-in (`/auth/me`'s `password_sign_in_closed`) it is a current authenticator code when TOTP is live, and absent altogether when it is not — see [SSO-only mode](#sso-only-mode). Leaving it blank on an account that holds a passkey runs the passkey step-up ceremony instead — the only route open to an account with neither a password nor TOTP.
 
 #### Passkeys on a custom domain (vanity host)
 
@@ -1642,7 +1717,7 @@ The QR code is returned inline as a `data:image/png;base64,...` URL so the front
 
 A "live factor" here means an enabled TOTP secret **or** at least one registered passkey — adding TOTP to a passkey-protected account is as much a factor change as the reverse, so both doors are gated the same way.
 
-Neither field is required for a **first** enrollment: an account with no factor has nothing to protect, so onboarding stays frictionless. A missing or wrong step-up is a `400` with a generic message that reveals nothing about the account.
+Neither field is required for a **first** enrollment: an account with no factor has nothing to protect, so onboarding stays frictionless. A missing or wrong step-up is a `400` with a generic message that reveals nothing about the account (in an SSO-only tenant the message names only the code and passkey proofs, which reveals nothing `/auth/{sso,saml}/config` does not already publish).
 
 An SSO-only account — no password, no TOTP secret — has no *stateless* credential to be challenged on, and is still never **exempted**: exempting it would let a stolen JWT plant an attacker-controlled passkey on an account the attacker never proved control of. Instead, if it holds a registered passkey, that passkey **is** the challenge: `POST /api/auth/mfa/step-up/passkey` mints an assertion challenge bound to the operation, and the signed response goes back as `assertion`. That is what makes a passwordless SSO deployment able to enroll, rotate and remove its own factors at all; before it, such an account was locked out of factor management and recovered only via an admin password-set (which cannot help in an SSO-only tenant, where the password is no step-up proof) — `PATCH /api/admin/users/{user_id}` with a `password` field (`app/api/admin.py`, `app/schemas/admin.py::AdminUserUpdate`); there is no `POST .../password` route (still the fallback for an account with *no* factor of any kind, which genuinely has nothing to prove). The password / TOTP checks stay pure in `services/mfa.step_up_verified`; the assertion path is `api/auth._step_up_satisfied` because it needs the DB and Redis.
 
