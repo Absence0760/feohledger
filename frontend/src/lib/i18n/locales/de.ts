@@ -156,6 +156,10 @@ export const messages = {
 		'Ihre Organisation verlangt MFA, daher ist das Deaktivieren nicht möglich.',
 	'profile.mfa.requiredEnroll': 'Ihre Organisation verlangt MFA — bitte jetzt einrichten.',
 	'profile.mfa.disablePassword': 'Passwort eingeben, um MFA zu deaktivieren',
+	'profile.mfa.disableCode':
+		'Aktuellen Code aus der Authenticator-App eingeben, um MFA zu deaktivieren',
+	'profile.mfa.ssoOnlyNoPassword':
+		'Ihre Organisation meldet sich per Single Sign-on an, daher kann Ihr Passwort keine Änderungen an Ihren Zwei-Faktor-Einstellungen bestätigen.',
 	'profile.mfa.confirmWithPasskey': 'Mit einem Passkey bestätigen',
 	'profile.mfa.disable': 'Zwei-Faktor deaktivieren',
 	'profile.mfa.disabling': 'Wird deaktiviert…',
@@ -182,6 +186,11 @@ export const messages = {
 		'Passwort bestätigen, um einen Passkey hinzuzufügen oder zu entfernen',
 	'profile.passkeys.stepUpBlankHint':
 		'Lassen Sie das Feld leer, um stattdessen mit einem Ihrer vorhandenen Passkeys zu bestätigen — die einzige Möglichkeit, wenn Sie sich per SSO anmelden und kein Passwort haben.',
+	'profile.passkeys.stepUpCode':
+		'Aktuellen Code aus der Authenticator-App eingeben, um einen Passkey hinzuzufügen oder zu entfernen',
+	'profile.passkeys.stepUpCodeBlankHint':
+		'Lassen Sie das Feld leer, um stattdessen mit einem Ihrer vorhandenen Passkeys zu bestätigen.',
+	'profile.passkeys.stepUpPasskeyOnly': 'Sie bestätigen mit einem Ihrer vorhandenen Passkeys.',
 	'profile.passkeys.lastUsed': 'Zuletzt verwendet {date}',
 	'profile.passkeys.neverUsed': 'Nie verwendet',
 	'profile.passkeys.remove': 'Entfernen',

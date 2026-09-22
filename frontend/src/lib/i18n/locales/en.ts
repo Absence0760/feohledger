@@ -182,6 +182,9 @@ export const en = {
 	'profile.mfa.requiredNoDisable': 'Your organization requires MFA, so disabling is not available.',
 	'profile.mfa.requiredEnroll': 'Your organization requires MFA — please enroll now.',
 	'profile.mfa.disablePassword': 'Enter your password to disable MFA',
+	'profile.mfa.disableCode': 'Enter a current authenticator code to disable MFA',
+	'profile.mfa.ssoOnlyNoPassword':
+		"Your organization signs in with single sign-on, so your password can't confirm changes to your two-factor settings.",
 	'profile.mfa.confirmWithPasskey': 'Confirm with a passkey',
 	'profile.mfa.disable': 'Disable two-factor',
 	'profile.mfa.disabling': 'Disabling…',
@@ -208,6 +211,10 @@ export const en = {
 	'profile.passkeys.stepUpPassword': 'Confirm your password to add or remove a passkey',
 	'profile.passkeys.stepUpBlankHint':
 		'Leave this blank to confirm with one of your existing passkeys instead — the only option if you sign in with SSO and have no password.',
+	'profile.passkeys.stepUpCode': 'Enter a current authenticator code to add or remove a passkey',
+	'profile.passkeys.stepUpCodeBlankHint':
+		'Leave this blank to confirm with one of your existing passkeys instead.',
+	'profile.passkeys.stepUpPasskeyOnly': "You'll confirm with one of your existing passkeys.",
 	'profile.passkeys.lastUsed': 'Last used {date}',
 	'profile.passkeys.neverUsed': 'Never used',
 	'profile.passkeys.remove': 'Remove',

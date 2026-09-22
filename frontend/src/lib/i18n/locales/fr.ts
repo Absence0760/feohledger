@@ -158,6 +158,10 @@ export const messages = {
 		'Votre organisation impose la MFA : la désactivation n’est donc pas disponible.',
 	'profile.mfa.requiredEnroll': 'Votre organisation impose la MFA — veuillez l’activer maintenant.',
 	'profile.mfa.disablePassword': 'Saisissez votre mot de passe pour désactiver la MFA',
+	'profile.mfa.disableCode':
+		'Saisissez un code actuel de votre application d’authentification pour désactiver la MFA',
+	'profile.mfa.ssoOnlyNoPassword':
+		'Votre organisation se connecte par authentification unique (SSO) : votre mot de passe ne peut donc pas confirmer les modifications de votre double authentification.',
 	'profile.mfa.confirmWithPasskey': 'Confirmer avec une clé d’accès',
 	'profile.mfa.disable': 'Désactiver la double authentification',
 	'profile.mfa.disabling': 'Désactivation…',
@@ -184,6 +188,12 @@ export const messages = {
 		'Confirmez votre mot de passe pour ajouter ou supprimer une clé d’accès',
 	'profile.passkeys.stepUpBlankHint':
 		'Laissez ce champ vide pour confirmer avec l’une de vos clés d’accès existantes — la seule option si vous vous connectez par SSO et n’avez pas de mot de passe.',
+	'profile.passkeys.stepUpCode':
+		'Saisissez un code actuel de votre application d’authentification pour ajouter ou supprimer une clé d’accès',
+	'profile.passkeys.stepUpCodeBlankHint':
+		'Laissez ce champ vide pour confirmer avec l’une de vos clés d’accès existantes.',
+	'profile.passkeys.stepUpPasskeyOnly':
+		'Vous confirmerez avec l’une de vos clés d’accès existantes.',
 	'profile.passkeys.lastUsed': 'Dernière utilisation {date}',
 	'profile.passkeys.neverUsed': 'Jamais utilisée',
 	'profile.passkeys.remove': 'Supprimer',

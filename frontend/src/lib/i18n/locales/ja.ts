@@ -158,6 +158,8 @@ export const messages = {
 	'profile.mfa.requiredNoDisable': '組織が MFA を必須にしているため、無効化はできません。',
 	'profile.mfa.requiredEnroll': '組織が MFA を必須にしています — 今すぐ設定してください。',
 	'profile.mfa.disablePassword': 'MFA を無効にするにはパスワードを入力してください',
+	'profile.mfa.disableCode': 'MFA を無効にするには認証アプリの現在のコードを入力してください',
+	'profile.mfa.ssoOnlyNoPassword': '組織はシングルサインオン（SSO）でサインインするため、パスワードでは二要素認証の設定変更を確認できません。',
 	'profile.mfa.confirmWithPasskey': 'パスキーで確認',
 	'profile.mfa.disable': '二要素認証を無効にする',
 	'profile.mfa.disabling': '無効化中…',
@@ -183,6 +185,9 @@ export const messages = {
 	'profile.passkeys.stepUpPassword': 'パスキーを追加・削除するにはパスワードで確認してください',
 	'profile.passkeys.stepUpBlankHint':
 		'空欄のままにすると、登録済みのパスキーで確認します — SSO でサインインしていてパスワードがない場合は、これが唯一の方法です。',
+	'profile.passkeys.stepUpCode': 'パスキーを追加・削除するには認証アプリの現在のコードを入力してください',
+	'profile.passkeys.stepUpCodeBlankHint': '空欄のままにすると、登録済みのパスキーで確認します。',
+	'profile.passkeys.stepUpPasskeyOnly': '登録済みのパスキーで確認します。',
 	'profile.passkeys.lastUsed': '最終使用 {date}',
 	'profile.passkeys.neverUsed': '未使用',
 	'profile.passkeys.remove': '削除',

@@ -159,6 +159,10 @@ export const messages = {
 		'Sua organização exige MFA, portanto a desativação não está disponível.',
 	'profile.mfa.requiredEnroll': 'Sua organização exige MFA — configure agora.',
 	'profile.mfa.disablePassword': 'Digite sua senha para desativar a MFA',
+	'profile.mfa.disableCode':
+		'Digite um código atual do seu aplicativo autenticador para desativar a MFA',
+	'profile.mfa.ssoOnlyNoPassword':
+		'Sua organização entra por login único (SSO), portanto sua senha não pode confirmar alterações nas suas configurações de duas etapas.',
 	'profile.mfa.confirmWithPasskey': 'Confirmar com uma chave de acesso',
 	'profile.mfa.disable': 'Desativar as duas etapas',
 	'profile.mfa.disabling': 'Desativando…',
@@ -185,6 +189,12 @@ export const messages = {
 		'Confirme sua senha para adicionar ou remover uma chave de acesso',
 	'profile.passkeys.stepUpBlankHint':
 		'Deixe em branco para confirmar com uma das chaves de acesso que você já tem — a única opção se você entra por SSO e não tem senha.',
+	'profile.passkeys.stepUpCode':
+		'Digite um código atual do seu aplicativo autenticador para adicionar ou remover uma chave de acesso',
+	'profile.passkeys.stepUpCodeBlankHint':
+		'Deixe em branco para confirmar com uma das chaves de acesso que você já tem.',
+	'profile.passkeys.stepUpPasskeyOnly':
+		'Você vai confirmar com uma das chaves de acesso que você já tem.',
 	'profile.passkeys.lastUsed': 'Último uso {date}',
 	'profile.passkeys.neverUsed': 'Nunca usada',
 	'profile.passkeys.remove': 'Remover',

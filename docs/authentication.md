@@ -630,8 +630,35 @@ together. The password is never verified in that case, so the refusal —
 `400` with a sentence naming the proofs that *do* work (an authenticator code or
 a registered passkey) — is identical for a right password, a wrong one and an
 account with no password at all, and it is still throttled and audited as an
-`auth.mfa.step_up.failure`. The code and passkey-assertion proofs are
-untouched, and the org is only loaded when a password was actually offered.
+`auth.mfa.step_up.failure`. **Every** refused step-up in such a tenant gets that
+sentence, not only one that offered a password: the profile page asks for the
+authenticator code there instead (below), and a mistyped code answered with the
+generic "confirm your password…" would send the member to a field the page no
+longer shows. The code and passkey-assertion proofs are untouched, and the
+successful step-up paths load the org only when a password was actually
+offered; the refusal path reads it every time, a throttled failure path.
+
+**The profile page learns the rule from `/auth/me`, not from the login page's
+source.** `GET /api/auth/me` carries `password_sign_in_closed`, filled from
+`api/auth._org_closes_password_sign_in` — the one function login's refusal, the
+step-up's password drop and `/me` all call. The public
+`/auth/{sso,saml}/config` echo was the other candidate and was rejected: it
+reports `sso_only` only when the IdP config resolves, so for a tenant with SSO
+switched on and required but an unresolvable IdP block it says "open" while both
+the sign-in and the step-up refuse the password. `/profile` reads the field and,
+when it is set, never renders a password field for a factor change: the
+two-factor card's disable form asks for a current authenticator code (the
+factor being turned off is itself the proof), and the passkey card asks for the
+code when TOTP is live, runs the passkey ceremony when the field is left blank
+or there is no TOTP, and asks for nothing at all on an account with no factor
+yet (a first factor needs no step-up, in any tenant). An account whose only
+passkeys are bound to another host and which has no TOTP has no proof this host
+can take; the button stays enabled and the server's wrong-host refusal names the
+host to use. `backend/tests/test_sso_only.py` pins that `/me`, the step-up and
+login agree for every shape of `settings.sso`; `frontend/tests-e2e/auth/
+profile-sso-only-step-up.spec.ts` pins the page. Reasoning:
+[decisions.md](decisions.md) §201.
+
 Consequences worth knowing:
 
 - An account with a live factor always has a proof it can still offer — a TOTP
@@ -647,7 +674,7 @@ Consequences worth knowing:
 - The supplier portal is unaffected: a `VendorUser` signs in with a password,
   and there is no SSO that could close it.
 
-Reasoning: [decisions.md](decisions.md) §191. Tests: `backend/tests/test_sso_only.py`.
+Reasoning: [decisions.md](decisions.md) §191, §201. Tests: `backend/tests/test_sso_only.py`.
 
 ## Frontend Implementation
 
@@ -1536,7 +1563,7 @@ Registering a passkey on an account that **already** has a factor (TOTP enabled,
 
 **Deleting** a passkey is a step-up operation too, and unconditionally: the passkey being deleted is itself a live factor, so `DELETE /api/auth/mfa/passkey/{id}` always requires the password, a current authenticator code, or a passkey assertion. Removing a factor with a stolen token is the same attack as replacing one. The credentials travel in the request **body**, never a query string — a password must not land in access logs or a `Referer` header. An id that isn't the caller's own is still an opaque `404`, checked *before* the step-up so an unknown id can't be used to burn the account's throttle or probe for existence. On top of that, under org-enforced MFA the last surviving factor can't be removed at all.
 
-The `/profile` passkey panel renders one "Confirm your password" field that serves both add and remove, shown only when a step-up actually applies. Leaving it blank on an account that holds a passkey runs the passkey step-up ceremony instead — the only route open to an SSO-only account.
+The `/profile` passkey panel renders one step-up field that serves both add and remove, shown only when a step-up actually applies. It is "Confirm your password" where the password is a proof; in a tenant that has closed password sign-in (`/auth/me`'s `password_sign_in_closed`) it is a current authenticator code when TOTP is live, and absent altogether when it is not — see [SSO-only mode](#sso-only-mode). Leaving it blank on an account that holds a passkey runs the passkey step-up ceremony instead — the only route open to an account with neither a password nor TOTP.
 
 #### Passkeys on a custom domain (vanity host)
 
@@ -1642,7 +1669,7 @@ The QR code is returned inline as a `data:image/png;base64,...` URL so the front
 
 A "live factor" here means an enabled TOTP secret **or** at least one registered passkey — adding TOTP to a passkey-protected account is as much a factor change as the reverse, so both doors are gated the same way.
 
-Neither field is required for a **first** enrollment: an account with no factor has nothing to protect, so onboarding stays frictionless. A missing or wrong step-up is a `400` with a generic message that reveals nothing about the account.
+Neither field is required for a **first** enrollment: an account with no factor has nothing to protect, so onboarding stays frictionless. A missing or wrong step-up is a `400` with a generic message that reveals nothing about the account (in an SSO-only tenant the message names only the code and passkey proofs, which reveals nothing `/auth/{sso,saml}/config` does not already publish).
 
 An SSO-only account — no password, no TOTP secret — has no *stateless* credential to be challenged on, and is still never **exempted**: exempting it would let a stolen JWT plant an attacker-controlled passkey on an account the attacker never proved control of. Instead, if it holds a registered passkey, that passkey **is** the challenge: `POST /api/auth/mfa/step-up/passkey` mints an assertion challenge bound to the operation, and the signed response goes back as `assertion`. That is what makes a passwordless SSO deployment able to enroll, rotate and remove its own factors at all; before it, such an account was locked out of factor management and recovered only via an admin password-set (which cannot help in an SSO-only tenant, where the password is no step-up proof) — `PATCH /api/admin/users/{user_id}` with a `password` field (`app/api/admin.py`, `app/schemas/admin.py::AdminUserUpdate`); there is no `POST .../password` route (still the fallback for an account with *no* factor of any kind, which genuinely has nothing to prove). The password / TOTP checks stay pure in `services/mfa.step_up_verified`; the assertion path is `api/auth._step_up_satisfied` because it needs the DB and Redis.
 
