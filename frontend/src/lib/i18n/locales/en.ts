@@ -136,6 +136,10 @@ export const en = {
 	'consent.accept': 'Accept all',
 
 	// Profile → Language picker (profile/+page.svelte)
+	// Accessible name for the section rail, and the prefix on its
+	// narrow-viewport disclosure. The seven panel labels reuse the
+	// `profile.*.heading` keys — all short enough for the rail as they are.
+	'profile.rail.label': 'Profile section',
 	'profile.language.heading': 'Language',
 	'profile.language.hint':
 		'Choose the language used across the app. Your choice is saved on this device.',
@@ -1530,6 +1534,16 @@ export const en = {
 	'org.gettingStarted.users': 'Users & roles',
 	'org.gettingStarted.approvals': 'Approval thresholds',
 	'org.gettingStarted.branding': 'Branding',
+	// Rail labels for the settings section picker (`ui/SettingsRail.svelte`).
+	// `org.section.*` stays the PANEL heading; the rail needs short labels, so
+	// only the one heading too long to sit in a 200px column gets its own key.
+	'org.rail.label': 'Settings section',
+	'org.rail.group.company': 'Company',
+	'org.rail.group.integrations': 'Integrations',
+	'org.rail.group.money': 'Money',
+	'org.rail.group.compliance': 'Trust & compliance',
+	'org.rail.group.account': 'Account',
+	'org.rail.payments': 'Payments',
 	'org.section.company': 'Company Profile',
 	'org.section.companySaved': 'Company profile',
 	'org.company.name': 'Company Name',
