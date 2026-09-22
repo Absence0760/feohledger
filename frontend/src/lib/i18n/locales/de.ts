@@ -89,6 +89,7 @@ export const messages = {
 	'common.retrying': 'Wird erneut versucht…',
 	'common.loadFailed': 'Diese Liste konnte nicht geladen werden. Zum erneuten Versuch aktualisieren.',
 	'common.amountInvalid': 'Geben Sie den Betrag als einfache Zahl ein, z. B. 1200 oder 1200.50',
+	'common.reportingCurrencyUnresolved': 'Berichtswährung',
 
 	// Cookie / consent banner (lib/components/ConsentBanner.svelte) — see en.ts.
 
@@ -3959,12 +3960,12 @@ export const messages = {
 	'workflows.builder.approval.approverAssignment': 'Zuweisung des Genehmigers',
 	'workflows.builder.approval.approvers': 'Genehmiger',
 	'workflows.builder.approval.autoApproveBelow': 'Automatisch genehmigen unter ({currency})',
-	'workflows.builder.approval.autoApproveBelowHint': 'Rechnungen unter diesem Betrag überspringen die Genehmigung vollständig. Verglichen wird der in {currency} umgerechnete Rechnungsbetrag – die Berichtswährung Ihrer Organisation.',
+	'workflows.builder.approval.autoApproveBelowHint': 'Rechnungen unter diesem Betrag überspringen die Genehmigung vollständig. Verglichen wird der in die Berichtswährung Ihrer Organisation umgerechnete Rechnungsbetrag.',
 	'workflows.builder.approval.autoWarning': 'Rechnungen werden ohne menschliche Prüfung automatisch genehmigt. Mit Vorsicht verwenden.',
 	'workflows.builder.approval.matrix': 'Genehmigungsmatrix',
-	'workflows.builder.approval.matrixHint': 'Definieren Sie eine oder mehrere Genehmigungsstufen. Jede Stufe kann nach Betrag oder Rechnungsattributen (Abteilung, Sachkonto, Lieferant) filtern und unterstützt parallele Genehmiger sowie zeitbasierte Eskalation. Beträge sind in {currency}, der Berichtswährung Ihrer Organisation.',
+	'workflows.builder.approval.matrixHint': 'Definieren Sie eine oder mehrere Genehmigungsstufen. Jede Stufe kann nach Betrag oder Rechnungsattributen (Abteilung, Sachkonto, Lieferant) filtern und unterstützt parallele Genehmiger sowie zeitbasierte Eskalation. Beträge sind in der Berichtswährung Ihrer Organisation angegeben.',
 	'workflows.builder.approval.maxInvoiceAmount': 'Maximaler Rechnungsbetrag ({currency})',
-	'workflows.builder.approval.maxInvoiceAmountHint': 'Rechnungen über diesem Betrag werden automatisch abgelehnt. Verglichen wird der in {currency} umgerechnete Rechnungsbetrag – die Berichtswährung Ihrer Organisation.',
+	'workflows.builder.approval.maxInvoiceAmountHint': 'Rechnungen über diesem Betrag werden automatisch abgelehnt. Verglichen wird der in die Berichtswährung Ihrer Organisation umgerechnete Rechnungsbetrag.',
 	'workflows.builder.approval.controlsTitle': 'Kontrollen',
 	'workflows.builder.approval.requireSegregation': 'Funktionstrennung verlangen',
 	'workflows.builder.approval.requireSegregationHint': 'Wer eine Rechnung hochgeladen hat, kann sie nicht selbst genehmigen. Empfohlen — die klassische Kreditoren-Betrugskontrolle.',
@@ -3974,7 +3975,7 @@ export const messages = {
 	'workflows.builder.approval.noMatchingUsers': 'Keine passenden Benutzer',
 	'workflows.builder.approval.removeApprover': 'Genehmiger {name} entfernen',
 	'workflows.builder.approval.requireCfoAbove': 'CFO-Genehmigung erforderlich über ({currency})',
-	'workflows.builder.approval.requireCfoAboveHint': 'Rechnungen über diesem Betrag müssen von einem Benutzer mit der CFO-Rolle genehmigt werden. Verglichen wird der in {currency} umgerechnete Rechnungsbetrag – die Berichtswährung Ihrer Organisation.',
+	'workflows.builder.approval.requireCfoAboveHint': 'Rechnungen über diesem Betrag müssen von einem Benutzer mit der CFO-Rolle genehmigt werden. Verglichen wird der in die Berichtswährung Ihrer Organisation umgerechnete Rechnungsbetrag.',
 	'workflows.builder.approval.required': 'Genehmigung erforderlich',
 	'workflows.builder.approval.roundRobinHint': '{count, plural, one {Rechnungen werden im Rundlaufverfahren dem # ausgewählten Genehmiger zugewiesen.} other {Rechnungen werden im Rundlaufverfahren den # ausgewählten Genehmigern zugewiesen.}}',
 	'workflows.builder.approval.searchUsers': 'Benutzer zum Hinzufügen suchen…',

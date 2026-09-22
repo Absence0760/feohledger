@@ -173,7 +173,7 @@
 
 			<div class="row">
 				<label class="field">
-					<span>{m('approvalMatrix.minAmount', { currency: orgCurrency.currency })}</span>
+					<span>{m('approvalMatrix.minAmount', { currency: orgCurrency.label })}</span>
 					<input
 						type="number"
 						step="0.01"
@@ -187,7 +187,7 @@
 					/>
 				</label>
 				<label class="field">
-					<span>{m('approvalMatrix.maxAmount', { currency: orgCurrency.currency })}</span>
+					<span>{m('approvalMatrix.maxAmount', { currency: orgCurrency.label })}</span>
 					<input
 						type="number"
 						step="0.01"

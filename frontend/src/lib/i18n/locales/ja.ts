@@ -93,6 +93,7 @@ export const messages = {
 	'common.retrying': '再試行中…',
 	'common.loadFailed': 'このリストを読み込めませんでした。更新して再試行してください。',
 	'common.amountInvalid': '金額は 1200 や 1200.50 のような数値で入力してください',
+	'common.reportingCurrencyUnresolved': '報告通貨',
 
 	// Cookie / consent banner (lib/components/ConsentBanner.svelte) — see en.ts.
 
@@ -3924,12 +3925,12 @@ export const messages = {
 	'workflows.builder.approval.approverAssignment': '承認者の割り当て',
 	'workflows.builder.approval.approvers': '承認者',
 	'workflows.builder.approval.autoApproveBelow': 'この金額未満を自動承認 ({currency})',
-	'workflows.builder.approval.autoApproveBelowHint': 'この金額未満の請求書は承認を完全にスキップします。比較されるのは、組織の報告通貨である {currency} に換算された請求書の金額です。',
+	'workflows.builder.approval.autoApproveBelowHint': 'この金額未満の請求書は承認を完全にスキップします。比較されるのは、組織の報告通貨に換算された請求書の金額です。',
 	'workflows.builder.approval.autoWarning': '請求書は人による確認なしに自動承認されます。慎重にご利用ください。',
 	'workflows.builder.approval.matrix': '承認マトリクス',
-	'workflows.builder.approval.matrixHint': '1 つ以上の承認レベルを定義します。各レベルは金額または請求書の属性（部門、勘定科目、ベンダー）でフィルタリングでき、並列承認者と時間ベースのエスカレーションに対応します。金額は、組織の報告通貨である {currency} で表されます。',
+	'workflows.builder.approval.matrixHint': '1 つ以上の承認レベルを定義します。各レベルは金額または請求書の属性（部門、勘定科目、ベンダー）でフィルタリングでき、並列承認者と時間ベースのエスカレーションに対応します。金額は組織の報告通貨で表されます。',
 	'workflows.builder.approval.maxInvoiceAmount': '請求書の上限金額 ({currency})',
-	'workflows.builder.approval.maxInvoiceAmountHint': 'この金額を超える請求書は自動的に却下されます。比較されるのは、組織の報告通貨である {currency} に換算された請求書の金額です。',
+	'workflows.builder.approval.maxInvoiceAmountHint': 'この金額を超える請求書は自動的に却下されます。比較されるのは、組織の報告通貨に換算された請求書の金額です。',
 	'workflows.builder.approval.controlsTitle': '統制',
 	'workflows.builder.approval.requireSegregation': '職務分掌を必須にする',
 	'workflows.builder.approval.requireSegregationHint': '請求書をアップロードした本人は承認できません。推奨 — 買掛金業務における古典的な不正防止統制です。',
@@ -3939,7 +3940,7 @@ export const messages = {
 	'workflows.builder.approval.noMatchingUsers': '該当するユーザーがいません',
 	'workflows.builder.approval.removeApprover': '承認者 {name} を削除',
 	'workflows.builder.approval.requireCfoAbove': 'この金額を超える場合は CFO の承認が必要 ({currency})',
-	'workflows.builder.approval.requireCfoAboveHint': 'この金額を超える請求書は CFO ロールを持つユーザーの承認が必要です。比較されるのは、組織の報告通貨である {currency} に換算された請求書の金額です。',
+	'workflows.builder.approval.requireCfoAboveHint': 'この金額を超える請求書は CFO ロールを持つユーザーの承認が必要です。比較されるのは、組織の報告通貨に換算された請求書の金額です。',
 	'workflows.builder.approval.required': '承認が必要',
 	'workflows.builder.approval.roundRobinHint': '{count, plural, other {請求書は選択された # 名の承認者にラウンドロビン方式で割り当てられます。}}',
 	'workflows.builder.approval.searchUsers': '追加するユーザーを検索…',

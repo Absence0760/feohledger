@@ -90,6 +90,7 @@ export const messages = {
 	'common.retrying': 'Nouvelle tentative…',
 	'common.loadFailed': 'Impossible de charger cette liste. Actualisez pour réessayer.',
 	'common.amountInvalid': 'Saisissez le montant sous forme de nombre simple, p. ex. 1200 ou 1200.50',
+	'common.reportingCurrencyUnresolved': 'devise de reporting',
 
 	// Cookie / consent banner (lib/components/ConsentBanner.svelte) — see en.ts.
 
@@ -3961,12 +3962,12 @@ export const messages = {
 	'workflows.builder.approval.approverAssignment': 'Attribution de l\'approbateur',
 	'workflows.builder.approval.approvers': 'Approbateurs',
 	'workflows.builder.approval.autoApproveBelow': 'Approbation automatique en dessous de ({currency})',
-	'workflows.builder.approval.autoApproveBelowHint': 'Les factures inférieures à ce montant ignorent entièrement l\'approbation. Le montant comparé est la facture convertie en {currency}, la devise de reporting de votre organisation.',
+	'workflows.builder.approval.autoApproveBelowHint': 'Les factures inférieures à ce montant ignorent entièrement l\'approbation. Le montant comparé est la facture convertie dans la devise de reporting de votre organisation.',
 	'workflows.builder.approval.autoWarning': 'Les factures seront automatiquement approuvées sans contrôle humain. À utiliser avec prudence.',
 	'workflows.builder.approval.matrix': 'Matrice d\'approbation',
-	'workflows.builder.approval.matrixHint': 'Définissez un ou plusieurs niveaux d\'approbation. Chaque niveau peut filtrer par montant ou par attributs de facture (service, compte général, fournisseur) et prend en charge les approbateurs parallèles et l\'escalade chronométrée. Les montants sont exprimés en {currency}, la devise de reporting de votre organisation.',
+	'workflows.builder.approval.matrixHint': 'Définissez un ou plusieurs niveaux d\'approbation. Chaque niveau peut filtrer par montant ou par attributs de facture (service, compte général, fournisseur) et prend en charge les approbateurs parallèles et l\'escalade chronométrée. Les montants sont exprimés dans la devise de reporting de votre organisation.',
 	'workflows.builder.approval.maxInvoiceAmount': 'Montant maximal de la facture ({currency})',
-	'workflows.builder.approval.maxInvoiceAmountHint': 'Les factures supérieures à ce montant sont rejetées automatiquement. Le montant comparé est la facture convertie en {currency}, la devise de reporting de votre organisation.',
+	'workflows.builder.approval.maxInvoiceAmountHint': 'Les factures supérieures à ce montant sont rejetées automatiquement. Le montant comparé est la facture convertie dans la devise de reporting de votre organisation.',
 	'workflows.builder.approval.controlsTitle': 'Contrôles',
 	'workflows.builder.approval.requireSegregation': 'Exiger la séparation des tâches',
 	'workflows.builder.approval.requireSegregationHint': 'La personne qui a téléversé une facture ne peut pas l\'approuver. Recommandé — c\'est le contrôle antifraude classique en comptabilité fournisseurs.',
@@ -3976,7 +3977,7 @@ export const messages = {
 	'workflows.builder.approval.noMatchingUsers': 'Aucun utilisateur correspondant',
 	'workflows.builder.approval.removeApprover': 'Retirer l\'approbateur {name}',
 	'workflows.builder.approval.requireCfoAbove': 'Approbation du directeur financier requise au-dessus de ({currency})',
-	'workflows.builder.approval.requireCfoAboveHint': 'Les factures supérieures à ce montant nécessitent l\'approbation d\'un utilisateur ayant le rôle de directeur financier. Le montant comparé est la facture convertie en {currency}, la devise de reporting de votre organisation.',
+	'workflows.builder.approval.requireCfoAboveHint': 'Les factures supérieures à ce montant nécessitent l\'approbation d\'un utilisateur ayant le rôle de directeur financier. Le montant comparé est la facture convertie dans la devise de reporting de votre organisation.',
 	'workflows.builder.approval.required': 'Approbation requise',
 	'workflows.builder.approval.roundRobinHint': '{count, plural, one {Les factures seront attribuées à tour de rôle au # approbateur sélectionné.} other {Les factures seront attribuées à tour de rôle aux # approbateurs sélectionnés.}}',
 	'workflows.builder.approval.searchUsers': 'Rechercher des utilisateurs à ajouter…',

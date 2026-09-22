@@ -89,6 +89,7 @@ export const messages = {
 	'common.retrying': 'Reintentando…',
 	'common.loadFailed': 'No se pudo cargar esta lista. Actualiza para volver a intentarlo.',
 	'common.amountInvalid': 'Introduce el importe como un número simple, p. ej. 1200 o 1200.50',
+	'common.reportingCurrencyUnresolved': 'moneda de informe',
 
 	// Cookie / consent banner (lib/components/ConsentBanner.svelte) — see en.ts.
 
@@ -3986,12 +3987,12 @@ export const messages = {
 	'workflows.builder.approval.approverAssignment': 'Asignación del aprobador',
 	'workflows.builder.approval.approvers': 'Aprobadores',
 	'workflows.builder.approval.autoApproveBelow': 'Aprobar automáticamente por debajo de ({currency})',
-	'workflows.builder.approval.autoApproveBelowHint': 'Las facturas por debajo de este importe omiten la aprobación por completo. El importe comparado es la factura convertida a {currency}, la moneda de informe de su organización.',
+	'workflows.builder.approval.autoApproveBelowHint': 'Las facturas por debajo de este importe omiten la aprobación por completo. El importe comparado es la factura convertida a la moneda de informe de su organización.',
 	'workflows.builder.approval.autoWarning': 'Las facturas se aprobarán automáticamente sin revisión humana. Usar con precaución.',
 	'workflows.builder.approval.matrix': 'Matriz de aprobación',
-	'workflows.builder.approval.matrixHint': 'Define uno o más niveles de aprobación. Cada nivel puede filtrar por importe o por atributos de la factura (departamento, cuenta contable, proveedor) y admite aprobadores en paralelo y escalado por tiempo. Los importes están en {currency}, la moneda de informe de su organización.',
+	'workflows.builder.approval.matrixHint': 'Define uno o más niveles de aprobación. Cada nivel puede filtrar por importe o por atributos de la factura (departamento, cuenta contable, proveedor) y admite aprobadores en paralelo y escalado por tiempo. Los importes están en la moneda de informe de su organización.',
 	'workflows.builder.approval.maxInvoiceAmount': 'Importe máximo de la factura ({currency})',
-	'workflows.builder.approval.maxInvoiceAmountHint': 'Las facturas por encima de este importe se rechazan automáticamente. El importe comparado es la factura convertida a {currency}, la moneda de informe de su organización.',
+	'workflows.builder.approval.maxInvoiceAmountHint': 'Las facturas por encima de este importe se rechazan automáticamente. El importe comparado es la factura convertida a la moneda de informe de su organización.',
 	'workflows.builder.approval.controlsTitle': 'Controles',
 	'workflows.builder.approval.requireSegregation': 'Exigir segregación de funciones',
 	'workflows.builder.approval.requireSegregationHint': 'Quien sube una factura no puede aprobarla. Recomendado: es el control antifraude clásico de cuentas por pagar.',
@@ -4001,7 +4002,7 @@ export const messages = {
 	'workflows.builder.approval.noMatchingUsers': 'No hay usuarios coincidentes',
 	'workflows.builder.approval.removeApprover': 'Quitar al aprobador {name}',
 	'workflows.builder.approval.requireCfoAbove': 'Requerir aprobación del director financiero por encima de ({currency})',
-	'workflows.builder.approval.requireCfoAboveHint': 'Las facturas por encima de este importe requieren la aprobación de un usuario con el rol de director financiero. El importe comparado es la factura convertida a {currency}, la moneda de informe de su organización.',
+	'workflows.builder.approval.requireCfoAboveHint': 'Las facturas por encima de este importe requieren la aprobación de un usuario con el rol de director financiero. El importe comparado es la factura convertida a la moneda de informe de su organización.',
 	'workflows.builder.approval.required': 'Aprobación requerida',
 	'workflows.builder.approval.roundRobinHint': '{count, plural, one {Las facturas se asignarán por turnos al # aprobador seleccionado.} other {Las facturas se asignarán por turnos a los # aprobadores seleccionados.}}',
 	'workflows.builder.approval.searchUsers': 'Buscar usuarios para añadir…',

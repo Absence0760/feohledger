@@ -81,9 +81,11 @@ falls back to all-empty (= platform defaults).
 
 **Brand store** — `frontend/src/lib/stores/brand.svelte.ts` (a Svelte 5 rune
 store). Lazy-loads the branding once per session (`ensureLoaded()`), exactly
-like `orgCurrency`: cache + single in-flight request + resilient fallback to
-defaults on any failure. Exposes `productName`, `logoUrl`, `supportUrl`,
-`legalUrl`, plus `applyTheme()` / `ensureLoadedAndApply()` / `reset()`.
+like `orgCurrency`: cache + single in-flight request + a failure that never
+breaks a render (brand falls back to the platform defaults; `orgCurrency`
+stays unresolved and its figures render bare). Exposes `productName`,
+`logoUrl`, `supportUrl`, `legalUrl`, plus `applyTheme()` /
+`ensureLoadedAndApply()` / `reset()`.
 
 **Pure theming helpers** — `frontend/src/lib/stores/brandTheme.ts` (runtime-free,
 unit-tested under vitest): `isValidHexColor()` and `brandThemeVars(brand)`. The

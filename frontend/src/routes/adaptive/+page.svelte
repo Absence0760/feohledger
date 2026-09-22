@@ -776,7 +776,9 @@
 					<p class="unconverted" role="alert" data-testid="adaptive-vendor-unconverted">
 						{m('adaptive.patterns.unconverted', {
 							n: vendorUnconvertedTotal,
-							currency: orgCurrency.currency
+							// Text naming the denomination, so the code or — when the
+							// org's is unresolved — the concept, never a guess (§200).
+							currency: orgCurrency.label
 						})}
 					</p>
 				{/if}

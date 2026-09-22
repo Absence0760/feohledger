@@ -301,19 +301,28 @@
 				>
 					{#snippet body()}
 						{#each data?.unrealized_fx.by_currency ?? [] as e (e.currency)}
+							<!-- The three reporting-currency columns are labelled from the
+							     code THIS block names, not the `orgCurrency` store: the
+							     store sees three of the backend's four rungs and answers
+							     `null` where the server resolved from the fourth
+							     (decisions §119, §200). -->
+							{@const reportingCcy = data?.unrealized_fx.reporting_currency}
 							<tr>
 								<td>{e.currency}</td>
 								<!-- The open exposure is in the row's OWN currency; only the
 								     three columns after it are in the reporting currency
-								     (see CfoUnrealizedFxByCurrency). `fmt` stamps the
-								     reporting code, so this one column can't use it — a
-								     EUR 10,000 exposure read "$10,000" with its real code
-								     sitting in the cell immediately to the left. -->
+								     (see CfoUnrealizedFxByCurrency). A EUR 10,000 exposure
+								     once read "$10,000" with its real code sitting in the
+								     cell immediately to the left. -->
 								<td class="num">{fmtIn(e.open_original_amount, e.currency)}</td>
-								<td class="num">{fmt(e.booked_reporting_amount)}</td>
-								<td class="num">{fmt(e.current_reporting_amount)}</td>
+								<td class="num"
+									>{formatMoney(e.booked_reporting_amount, { currency: reportingCcy, whole: true })}</td
+								>
+								<td class="num"
+									>{formatMoney(e.current_reporting_amount, { currency: reportingCcy, whole: true })}</td
+								>
 								<td class="num" class:cfm-alert={isNegativeAmount(e.unrealized_gain_loss)}>
-									{fmt(e.unrealized_gain_loss)}
+									{formatMoney(e.unrealized_gain_loss, { currency: reportingCcy, whole: true })}
 								</td>
 							</tr>
 						{/each}

@@ -23,7 +23,7 @@
 	import { m } from '$lib/i18n/store.svelte';
 	import type { MessageKey } from '$lib/i18n/messages';
 	import { formatDate } from '$lib/utils/time';
-	import { currencyOptions } from '$lib/utils/money';
+	import { DEFAULT_CURRENCY, currencyOptions } from '$lib/utils/money';
 	import { orgCurrency } from '$lib/stores/orgSettings.svelte';
 
 	// Create / edit / apply / void are all `require_roles(ADMIN, AP_MANAGER)` on
@@ -205,22 +205,24 @@
 	// shortlist still shows what it holds rather than silently offering a
 	// different value.
 	const CURRENCY_OPTIONS = $derived.by(() => {
-		const options = currencyOptions(orgCurrency.currency);
+		const options = currencyOptions(orgCurrency.currency ?? DEFAULT_CURRENCY);
 		const own = editTarget?.currency;
 		return own && !options.includes(own) ? [own, ...options] : options;
 	});
 
 	$effect(() => {
 		orgCurrency.ensureLoaded().catch(() => {
-			/* degrades to DEFAULT_CURRENCY by design — see orgSettings.svelte.ts */
+			/* stays unresolved by design — see orgSettings.svelte.ts; the form
+			   below then starts from DEFAULT_CURRENCY, named explicitly */
 		});
 	});
 
 	// Seed the select once the org currency resolves, unless the user already
 	// picked. `untrack` on the write so this effect depends on the store, not
-	// on its own output.
+	// on its own output. A select needs A value, so an unresolved store seeds
+	// the platform default — here, explicitly, never inside the store.
 	$effect(() => {
-		const ccy = orgCurrency.currency;
+		const ccy = orgCurrency.currency ?? DEFAULT_CURRENCY;
 		if (untrack(() => currencyTouched)) return;
 		formCurrency = ccy;
 	});
@@ -431,7 +433,7 @@
 		// Back to the org default for each new memo — a one-off foreign-currency
 		// credit shouldn't become sticky for every memo after it.
 		currencyTouched = false;
-		formCurrency = orgCurrency.currency;
+		formCurrency = orgCurrency.currency ?? DEFAULT_CURRENCY;
 		formMode = 'create';
 	}
 
@@ -475,7 +477,7 @@
 				// credit against a USD-reporting org needs to say so here.
 				...(formInvoiceId
 					? { invoice_id: formInvoiceId }
-					: { currency: formCurrency || orgCurrency.currency }),
+					: { currency: formCurrency || orgCurrency.currency || DEFAULT_CURRENCY }),
 				reason: formReason.trim() || null
 			});
 			toast(m('creditMemos.toast.created'), 'success');

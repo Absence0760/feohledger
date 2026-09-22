@@ -14,6 +14,7 @@
 	import { toast } from '$lib/components/ui/Toast.svelte';
 	import { m } from '$lib/i18n/store.svelte';
 	import { normalizeMoneyInput } from '$lib/utils/moneyInput';
+	import { DEFAULT_CURRENCY } from '$lib/utils/money';
 	import { createIntake, updateIntake } from '$lib/api/intake';
 
 	let {
@@ -53,7 +54,10 @@
 	// `types/intake.ts` → request side). Seeded from the response amount, which
 	// itself arrives as a JSON number.
 	let estimated_amount = $state(String(intake?.estimated_amount ?? ''));
-	let currency = $state(intake?.currency ?? orgCurrency.currency);
+	// A form's initial value: the record's own, else the org's, else the
+	// platform default — named explicitly, since the store answers `null` for
+	// an org it could not resolve (decisions §200).
+	let currency = $state(intake?.currency ?? orgCurrency.currency ?? DEFAULT_CURRENCY);
 	let vendor_name = $state(intake?.vendor_name ?? '');
 	let needed_by = $state(intake?.needed_by ?? '');
 	let description = $state(intake?.description ?? '');
@@ -106,7 +110,7 @@
 				title: title.trim(),
 				request_type,
 				estimated_amount: estimate,
-				currency: currency.trim() || 'USD',
+				currency: currency.trim() || DEFAULT_CURRENCY,
 				vendor_name: vendor_name.trim() || null,
 				needed_by: needed_by || null,
 				description: description.trim() || null,

@@ -98,6 +98,7 @@ export const en = {
 	'common.retrying': 'Retrying…',
 	'common.loadFailed': 'Couldn’t load this list. Refresh to try again.',
 	'common.amountInvalid': 'Enter the amount as a plain number, e.g. 1200 or 1200.50',
+	'common.reportingCurrencyUnresolved': 'reporting currency',
 
 	// Cookie / consent banner (lib/components/ConsentBanner.svelte). It mounts
 	// from the root layout, so it is the FIRST thing a non-English visitor sees
@@ -4164,12 +4165,12 @@ export const en = {
 	'workflows.builder.approval.approverAssignment': 'Approver Assignment',
 	'workflows.builder.approval.approvers': 'Approvers',
 	'workflows.builder.approval.autoApproveBelow': 'Auto-approve below ({currency})',
-	'workflows.builder.approval.autoApproveBelowHint': 'Invoices below this amount skip approval entirely. The amount compared is the invoice converted to {currency}, your organisation\'s reporting currency.',
+	'workflows.builder.approval.autoApproveBelowHint': 'Invoices below this amount skip approval entirely. The amount compared is the invoice converted to your organisation\'s reporting currency.',
 	'workflows.builder.approval.autoWarning': 'Invoices will be automatically approved without human review. Use with caution.',
 	'workflows.builder.approval.matrix': 'Approval matrix',
-	'workflows.builder.approval.matrixHint': 'Define one or more approval levels. Each level can filter by amount or invoice attributes (department, GL, vendor) and supports parallel approvers and time-based escalation. Amounts are in {currency}, your organisation\'s reporting currency.',
+	'workflows.builder.approval.matrixHint': 'Define one or more approval levels. Each level can filter by amount or invoice attributes (department, GL, vendor) and supports parallel approvers and time-based escalation. Amounts are in your organisation\'s reporting currency.',
 	'workflows.builder.approval.maxInvoiceAmount': 'Maximum invoice amount ({currency})',
-	'workflows.builder.approval.maxInvoiceAmountHint': 'Invoices above this amount are rejected automatically. The amount compared is the invoice converted to {currency}, your organisation\'s reporting currency.',
+	'workflows.builder.approval.maxInvoiceAmountHint': 'Invoices above this amount are rejected automatically. The amount compared is the invoice converted to your organisation\'s reporting currency.',
 	'workflows.builder.approval.controlsTitle': 'Controls',
 	'workflows.builder.approval.requireSegregation': 'Require segregation of duties',
 	'workflows.builder.approval.requireSegregationHint': 'The person who uploaded an invoice cannot approve it. Recommended — this is the classic AP fraud control.',
@@ -4179,7 +4180,7 @@ export const en = {
 	'workflows.builder.approval.noMatchingUsers': 'No matching users',
 	'workflows.builder.approval.removeApprover': 'Remove approver {name}',
 	'workflows.builder.approval.requireCfoAbove': 'Require CFO approval above ({currency})',
-	'workflows.builder.approval.requireCfoAboveHint': 'Invoices above this amount require a user with the CFO role to approve. The amount compared is the invoice converted to {currency}, your organisation\'s reporting currency.',
+	'workflows.builder.approval.requireCfoAboveHint': 'Invoices above this amount require a user with the CFO role to approve. The amount compared is the invoice converted to your organisation\'s reporting currency.',
 	'workflows.builder.approval.required': 'Approval Required',
 	'workflows.builder.approval.roundRobinHint': '{count, plural, one {Invoices will be round-robin assigned to the # selected approver.} other {Invoices will be round-robin assigned to the # selected approvers.}}',
 	'workflows.builder.approval.searchUsers': 'Search users to add…',

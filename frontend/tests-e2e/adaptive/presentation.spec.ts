@@ -264,3 +264,58 @@ test.describe('/adaptive — vendor averages', () => {
 		await expect(page.getByTestId('adaptive-vendor-unconverted')).toHaveCount(0);
 	});
 });
+
+/**
+ * The threshold figures and the vendor averages carry no currency of their own
+ * on the wire, so they are labelled from the `orgCurrency` store — and when the
+ * org's settings resolve nothing a client can read, the store answers `null`
+ * and they render BARE. It used to answer `USD`, which put a `$` on every one
+ * of them for any org that had not set a currency, and on every one of them
+ * before the store had loaded. The backend's last rung
+ * (`settings.reporting_currency_default`) is operator config no client can
+ * see, so a `USD` here was a guess wearing the look of a configured answer
+ * (`docs/decisions.md` §119, §200).
+ */
+async function stubOrgSettings(page: Page, settings: Record<string, unknown>) {
+	await page.route(
+		(url) => url.pathname === '/api/organization',
+		(route) => route.fulfill({ json: { settings } })
+	);
+}
+
+async function openThreshold(page: Page) {
+	await stubPageLoad(page);
+	await page.goto('/adaptive');
+	await page.getByRole('tab', { name: 'Auto-approve threshold' }).click();
+	const card = page.getByTestId('adaptive-threshold-card');
+	await expect(card.locator('.kpi').first()).toHaveAttribute('data-kpi-state', 'value', {
+		timeout: 15_000
+	});
+	return card;
+}
+
+test.describe('/adaptive — figures labelled from the org store', () => {
+	test('an org whose settings resolve no currency sees the thresholds BARE, never in dollars', async ({
+		page
+	}) => {
+		await stubOrgSettings(page, {});
+		const card = await openThreshold(page);
+
+		const current = card.locator('.kpi', { hasText: 'Current threshold' }).locator('.kpi-value');
+		await expect(current).toHaveText('1,000.00');
+		await expect(card).not.toContainText('$');
+		await expect(card.locator('.kpi', { hasText: 'Cap' }).locator('.kpi-value')).toHaveText(
+			'5,000.00'
+		);
+	});
+
+	test('the same figures wear the org code once it resolves', async ({ page }) => {
+		// The contrast case, so the bare rendering above is proven to be about
+		// the unresolved store and not about the figure itself.
+		await stubOrgSettings(page, { reporting_currency: 'EUR' });
+		const card = await openThreshold(page);
+
+		const current = card.locator('.kpi', { hasText: 'Current threshold' }).locator('.kpi-value');
+		await expect(current).toHaveText('€1,000.00');
+	});
+});

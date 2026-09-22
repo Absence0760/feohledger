@@ -8,6 +8,7 @@
 	import { m } from '$lib/i18n/store.svelte';
 	import { entityStore } from '$lib/stores/entity.svelte';
 	import { orgCurrency } from '$lib/stores/orgSettings.svelte';
+	import { DEFAULT_CURRENCY } from '$lib/utils/money';
 
 	let { onclose, onsaved }: { onclose: () => void; onsaved: (invoice: Invoice) => void } =
 		$props();
@@ -15,11 +16,12 @@
 	let vendor = $state('');
 	let invoice_number = $state('');
 	let amount = $state<number | null>(null);
-	// Defaults to the org's configured invoice currency (`orgCurrency`, which
-	// itself falls back to USD when the org has none configured) rather than
-	// hardcoding USD — a UK/non-US tenant's manual entries should start in
-	// their own currency, not silently assume the platform default.
-	let currency = $state(orgCurrency.currency);
+	// Defaults to the org's resolved currency (`orgCurrency`) rather than
+	// hardcoding USD — a UK/non-US tenant's manual entries should start in their
+	// own currency, not silently assume the platform default. The store answers
+	// `null` when nothing resolves, so the platform default is named here, where
+	// a form genuinely needs a value (decisions §200).
+	let currency = $state(orgCurrency.currency ?? DEFAULT_CURRENCY);
 	let invoice_date = $state('');
 	let due_date = $state('');
 	let po_number = $state('');
@@ -67,7 +69,7 @@
 				vendor: vendor.trim(),
 				invoice_number: invoice_number.trim(),
 				amount,
-				currency: currency.trim() || 'USD',
+				currency: currency.trim() || DEFAULT_CURRENCY,
 				invoice_date: invoice_date || null,
 				due_date: due_date || null,
 				po_number: po_number.trim() || null,
