@@ -1041,6 +1041,7 @@ export const en = {
 	'exceptions.title': 'Exceptions',
 	'exceptions.tab.queue': 'Queue',
 	'exceptions.tab.agents': 'AI Agents',
+	'exceptions.tab.aria': 'Exceptions views',
 	'exceptions.filter.open': 'Open',
 	'exceptions.filter.escalated': 'Escalated',
 	'exceptions.filter.resolved': 'Resolved',
@@ -1089,6 +1090,29 @@ export const en = {
 	'exceptions.bulkModal.hint': 'All selected rows will receive the same resolution note. Rows already in a terminal state are skipped server-side, and so is any row whose flag you are recorded as involved in — escalate those instead.',
 	'exceptions.bulk.segregationSkipped': '{n, plural, one {# row was left open: segregation of duties — you are recorded as involved in that payable, or in raising its flag. Escalate it, or ask a different user to decide.} other {# rows were left open: segregation of duties — you are recorded as involved in those payables, or in raising their flags. Escalate them, or ask a different user to decide.}}',
 	'exceptions.bulkModal.notePlaceholder': 'Applied to every selected row',
+	// Queue toasts. One whole sentence per action outcome: these were built by
+	// conjugating the verb in a template literal (`Exception ${action}d`), which
+	// no other language can take and which English itself got wrong ("dismissd").
+	'exceptions.toast.loadFailed': 'Failed to load exceptions',
+	'exceptions.toast.noteRequired': 'Resolution note is required',
+	'exceptions.toast.actionFailed': 'Action failed',
+	'exceptions.toast.resolved': 'Exception resolved',
+	'exceptions.toast.escalated': 'Exception escalated',
+	'exceptions.toast.dismissed': 'Exception dismissed',
+	'exceptions.toast.bulkResolved': '{n, plural, one {# exception resolved} other {# exceptions resolved}}',
+	'exceptions.toast.bulkEscalated': '{n, plural, one {# exception escalated} other {# exceptions escalated}}',
+	'exceptions.toast.bulkDismissed': '{n, plural, one {# exception dismissed} other {# exceptions dismissed}}',
+	'exceptions.toast.bulkResolvedSkipped':
+		'{n, plural, one {# exception resolved} other {# exceptions resolved}}, {skipped, plural, one {# skipped} other {# skipped}}.',
+	'exceptions.toast.bulkEscalatedSkipped':
+		'{n, plural, one {# exception escalated} other {# exceptions escalated}}, {skipped, plural, one {# skipped} other {# skipped}}.',
+	'exceptions.toast.bulkDismissedSkipped':
+		'{n, plural, one {# exception dismissed} other {# exceptions dismissed}}, {skipped, plural, one {# skipped} other {# skipped}}.',
+	'exceptions.toast.selectedAllMatching':
+		'{n, plural, one {Selected all # matching exception} other {Selected all # matching exceptions}}',
+	'exceptions.toast.selectAllTruncated':
+		'Selected the first {shown} of {total} matching — narrow your filters to select the rest.',
+	'exceptions.toast.selectAllFailed': 'Failed to select all matching',
 
 	// Exception-type labels ($lib/types/exception.ts::EXCEPTION_TYPE_LABEL_KEYS).
 	// Each ENGLISH value is byte-identical to

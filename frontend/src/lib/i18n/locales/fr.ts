@@ -938,6 +938,7 @@ export const messages = {
 	'exceptions.title': 'Exceptions',
 	'exceptions.tab.queue': "File d'attente",
 	'exceptions.tab.agents': 'Agents IA',
+	'exceptions.tab.aria': 'Vues des exceptions',
 	'exceptions.filter.open': 'Ouvert',
 	'exceptions.filter.escalated': 'Escaladé',
 	'exceptions.filter.resolved': 'Résolu',
@@ -980,6 +981,26 @@ export const messages = {
 	'exceptions.bulkModal.hint': 'Toutes les lignes sélectionnées recevront la même note de résolution. Les lignes déjà dans un état terminal sont ignorées côté serveur, ainsi que toute ligne dont le signalement vous désigne comme partie prenante : escaladez celles-là plutôt.',
 	'exceptions.bulk.segregationSkipped': '{n, plural, one {# ligne reste ouverte : séparation des tâches — vous êtes enregistré comme partie prenante de ce paiement ou de son signalement. Escaladez-la, ou demandez à un autre utilisateur de décider.} other {# lignes restent ouvertes : séparation des tâches — vous êtes enregistré comme partie prenante de ces paiements ou de leurs signalements. Escaladez-les, ou demandez à un autre utilisateur de décider.}}',
 	'exceptions.bulkModal.notePlaceholder': 'Appliquée à chaque ligne sélectionnée',
+	'exceptions.toast.loadFailed': 'Échec du chargement des exceptions',
+	'exceptions.toast.noteRequired': 'Une note de résolution est requise',
+	'exceptions.toast.actionFailed': "L'action a échoué",
+	'exceptions.toast.resolved': 'Exception résolue',
+	'exceptions.toast.escalated': 'Exception escaladée',
+	'exceptions.toast.dismissed': 'Exception rejetée',
+	'exceptions.toast.bulkResolved': '{n, plural, one {# exception résolue} other {# exceptions résolues}}',
+	'exceptions.toast.bulkEscalated': '{n, plural, one {# exception escaladée} other {# exceptions escaladées}}',
+	'exceptions.toast.bulkDismissed': '{n, plural, one {# exception rejetée} other {# exceptions rejetées}}',
+	'exceptions.toast.bulkResolvedSkipped':
+		'{n, plural, one {# exception résolue} other {# exceptions résolues}}, {skipped, plural, one {# ignorée} other {# ignorées}}.',
+	'exceptions.toast.bulkEscalatedSkipped':
+		'{n, plural, one {# exception escaladée} other {# exceptions escaladées}}, {skipped, plural, one {# ignorée} other {# ignorées}}.',
+	'exceptions.toast.bulkDismissedSkipped':
+		'{n, plural, one {# exception rejetée} other {# exceptions rejetées}}, {skipped, plural, one {# ignorée} other {# ignorées}}.',
+	'exceptions.toast.selectedAllMatching':
+		'{n, plural, one {# exception correspondante sélectionnée} other {# exceptions correspondantes sélectionnées}}',
+	'exceptions.toast.selectAllTruncated':
+		'Les {shown} premières sur {total} correspondantes sélectionnées — affinez vos filtres pour sélectionner le reste.',
+	'exceptions.toast.selectAllFailed': 'Échec de la sélection de toutes les correspondances',
 
 	'exceptions.type.duplicate': 'Facture en doublon',
 	'exceptions.type.poMismatch': 'Écart avec la commande',

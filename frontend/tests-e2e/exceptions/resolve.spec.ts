@@ -137,7 +137,9 @@ test.describe('/exceptions resolve actions', () => {
 			await row.getByRole('button', { name: 'Resolve' }).click();
 
 			const modal = resolveDialog(page);
-			// Dismiss accepts an empty note — sends "dismissd by user" server-side.
+			// Dismiss accepts an empty note, and posts it empty: the real backend
+			// takes `resolution: ''` and records no note, rather than the invented
+			// "dismissd by user" the page used to store.
 			const posted = page.waitForResponse(
 				(r) =>
 					r.url().includes('/api/exceptions/') &&
@@ -146,6 +148,7 @@ test.describe('/exceptions resolve actions', () => {
 			);
 			await modal.getByRole('button', { name: 'Dismiss' }).click();
 			const resp = await posted;
+			expect(resp.request().postDataJSON()).toEqual({ resolution: '', action: 'dismiss' });
 			expect(resp.status()).toBe(200);
 			expect(((await resp.json()) as { status: string }).status).toBe('dismissed');
 		} finally {

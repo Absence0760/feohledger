@@ -920,6 +920,7 @@ export const messages = {
 	'exceptions.title': '例外',
 	'exceptions.tab.queue': 'キュー',
 	'exceptions.tab.agents': 'AIエージェント',
+	'exceptions.tab.aria': '例外ビュー',
 	'exceptions.filter.open': 'オープン',
 	'exceptions.filter.escalated': 'エスカレーション済み',
 	'exceptions.filter.resolved': '解決済み',
@@ -962,6 +963,25 @@ export const messages = {
 	'exceptions.bulkModal.hint': '選択したすべての行に同じ解決メモが適用されます。すでに最終状態にある行はサーバー側でスキップされます。あなたが関与者として記録されているフラグの行も同様にスキップされるため、それらはエスカレーションしてください。',
 	'exceptions.bulk.segregationSkipped': '{n, plural, other {# 件の行は未処理のままです: 職務分掌 — あなたはその支払い、またはそのフラグの起票に関与したと記録されています。エスカレーションするか、別のユーザーに判断を依頼してください。}}',
 	'exceptions.bulkModal.notePlaceholder': '選択したすべての行に適用',
+	'exceptions.toast.loadFailed': '例外を読み込めませんでした',
+	'exceptions.toast.noteRequired': '解決メモは必須です',
+	'exceptions.toast.actionFailed': '操作に失敗しました',
+	'exceptions.toast.resolved': '例外を解決しました',
+	'exceptions.toast.escalated': '例外をエスカレーションしました',
+	'exceptions.toast.dismissed': '例外を却下しました',
+	'exceptions.toast.bulkResolved': '{n, plural, other {# 件の例外を解決しました}}',
+	'exceptions.toast.bulkEscalated': '{n, plural, other {# 件の例外をエスカレーションしました}}',
+	'exceptions.toast.bulkDismissed': '{n, plural, other {# 件の例外を却下しました}}',
+	'exceptions.toast.bulkResolvedSkipped':
+		'{n, plural, other {# 件の例外を解決し}}、{skipped, plural, other {# 件をスキップしました}}。',
+	'exceptions.toast.bulkEscalatedSkipped':
+		'{n, plural, other {# 件の例外をエスカレーションし}}、{skipped, plural, other {# 件をスキップしました}}。',
+	'exceptions.toast.bulkDismissedSkipped':
+		'{n, plural, other {# 件の例外を却下し}}、{skipped, plural, other {# 件をスキップしました}}。',
+	'exceptions.toast.selectedAllMatching': '{n, plural, other {一致する例外 # 件すべてを選択しました}}',
+	'exceptions.toast.selectAllTruncated':
+		'一致する {total} 件のうち最初の {shown} 件を選択しました — 残りを選択するにはフィルターを絞り込んでください。',
+	'exceptions.toast.selectAllFailed': '一致するものすべての選択に失敗しました',
 
 	'exceptions.type.duplicate': '請求書の重複',
 	'exceptions.type.poMismatch': '発注との不一致',

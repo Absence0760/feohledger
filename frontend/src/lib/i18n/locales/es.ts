@@ -935,6 +935,7 @@ export const messages = {
 	'exceptions.title': 'Excepciones',
 	'exceptions.tab.queue': 'Cola',
 	'exceptions.tab.agents': 'Agentes de IA',
+	'exceptions.tab.aria': 'Vistas de excepciones',
 	'exceptions.filter.open': 'Abierta',
 	'exceptions.filter.escalated': 'Escalada',
 	'exceptions.filter.resolved': 'Resuelta',
@@ -977,6 +978,26 @@ export const messages = {
 	'exceptions.bulkModal.hint': 'Todas las filas seleccionadas recibirán la misma nota de resolución. Las filas que ya están en un estado terminal se omiten en el servidor, igual que cualquier fila en cuya alerta consta tu participación: escala esas en su lugar.',
 	'exceptions.bulk.segregationSkipped': '{n, plural, one {# fila sigue abierta: segregación de funciones; consta tu participación en ese pago o en la alerta que lo marcó. Escálala o pide a otro usuario que decida.} other {# filas siguen abiertas: segregación de funciones; consta tu participación en esos pagos o en las alertas que los marcaron. Escálalas o pide a otro usuario que decida.}}',
 	'exceptions.bulkModal.notePlaceholder': 'Aplicada a cada fila seleccionada',
+	'exceptions.toast.loadFailed': 'No se pudieron cargar las excepciones',
+	'exceptions.toast.noteRequired': 'La nota de resolución es obligatoria',
+	'exceptions.toast.actionFailed': 'La acción falló',
+	'exceptions.toast.resolved': 'Excepción resuelta',
+	'exceptions.toast.escalated': 'Excepción escalada',
+	'exceptions.toast.dismissed': 'Excepción descartada',
+	'exceptions.toast.bulkResolved': '{n, plural, one {# excepción resuelta} other {# excepciones resueltas}}',
+	'exceptions.toast.bulkEscalated': '{n, plural, one {# excepción escalada} other {# excepciones escaladas}}',
+	'exceptions.toast.bulkDismissed': '{n, plural, one {# excepción descartada} other {# excepciones descartadas}}',
+	'exceptions.toast.bulkResolvedSkipped':
+		'{n, plural, one {# excepción resuelta} other {# excepciones resueltas}}, {skipped, plural, one {# omitida} other {# omitidas}}.',
+	'exceptions.toast.bulkEscalatedSkipped':
+		'{n, plural, one {# excepción escalada} other {# excepciones escaladas}}, {skipped, plural, one {# omitida} other {# omitidas}}.',
+	'exceptions.toast.bulkDismissedSkipped':
+		'{n, plural, one {# excepción descartada} other {# excepciones descartadas}}, {skipped, plural, one {# omitida} other {# omitidas}}.',
+	'exceptions.toast.selectedAllMatching':
+		'{n, plural, one {# excepción coincidente seleccionada} other {# excepciones coincidentes seleccionadas}}',
+	'exceptions.toast.selectAllTruncated':
+		'Seleccionadas las primeras {shown} de {total} coincidentes — acota los filtros para seleccionar el resto.',
+	'exceptions.toast.selectAllFailed': 'No se pudieron seleccionar todas las coincidentes',
 
 	'exceptions.type.duplicate': 'Factura duplicada',
 	'exceptions.type.poMismatch': 'Discrepancia con el pedido',
