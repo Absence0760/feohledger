@@ -940,6 +940,9 @@ export const messages = {
 	'exceptions.filter.resolved': 'Resuelta',
 	'exceptions.filter.dismissed': 'Descartada',
 	'exceptions.filter.allTypes': 'Todos los tipos',
+	'exceptions.filter.allSeverities': 'Todas las gravedades',
+	'exceptions.search.placeholder': 'Buscar n.º de factura o proveedor...',
+	'exceptions.search.aria': 'Buscar excepciones por número de factura o proveedor',
 	'exceptions.col.type': 'Tipo',
 	'exceptions.col.severity': 'Grav.',
 

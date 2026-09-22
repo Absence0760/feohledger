@@ -1,4 +1,5 @@
 import { expect, test } from '../fixtures/helpers';
+import { exceptionSummary } from './summary';
 
 /**
  * `/exceptions` → AI Agents tab — the decision log's own request sequencing.
@@ -48,7 +49,7 @@ test.describe('/exceptions AI Agents — decision-log sequencing', () => {
 			route.fulfill({
 				status: 200,
 				contentType: 'application/json',
-				body: JSON.stringify({ open: 0, escalated: 0, resolved: 0, dismissed: 0, by_type: {} })
+				body: JSON.stringify(exceptionSummary())
 			})
 		);
 		await page.route('**/api/exceptions/agent-stats*', (route) =>
