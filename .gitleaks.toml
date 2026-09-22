@@ -96,6 +96,12 @@ regexes = [
     # pushes it over generic-api-key's entropy threshold. Allowlisted as an
     # exact literal, so a real Teams token in this variable still trips.
     '''ZGV2LXRlYW1zLXNlY3VyaXR5LXRva2Vu''',
+    # A keyword argument, not a value: backend/tests/test_signup.py passes
+    # `secret_key=strong_key, signup_enabled=True` to `Settings(...)`, and
+    # generic-api-key reads the `key` ending `strong_key` as its keyword, the
+    # `,` as its separator and `signup_enabled=True` (entropy 3.79) as the
+    # "secret". Anchored to the whole capture so only this exact kwarg passes.
+    '''^signup_enabled=(?:True|False)$''',
 ]
 
 # Historical findings the regexes above don't cleanly cover (a specific
