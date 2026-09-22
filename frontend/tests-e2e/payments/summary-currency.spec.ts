@@ -66,6 +66,39 @@ test.describe('/payments — reporting currency and FX exclusions', () => {
 		await expect(page.getByTestId('unconverted-payments')).toHaveCount(0);
 	});
 
+	test('a summary that names no currency renders bare, not in the org default', async ({
+		page
+	}) => {
+		// The page's `formatCurrency` used to write `currency ?? orgCurrency.currency`,
+		// so a response that did not state its denomination still wore the
+		// seeded org's `$` — the one symbol nothing in the payload established.
+		// `formatMoney` renders an unstated code bare now (decisions §198).
+		await page.route(
+			(url) => url.pathname === SUMMARY_PATH,
+			(route) =>
+				route.fulfill({
+					status: 200,
+					contentType: 'application/json',
+					body: JSON.stringify({
+						total_paid: '1234.50',
+						total_pending: '99.00',
+						payment_count: 3,
+						total_rebates: '0',
+						queue_count: 0,
+						currency: null,
+						unconverted_payment_count: 0
+					})
+				})
+		);
+
+		await page.goto('/payments');
+
+		const paid = page.locator('.scard').filter({ hasText: 'Total Paid' }).locator('.scard-value');
+		await expect(paid).toBeVisible();
+		await expect(paid).toContainText(/1[,.]?234[.,]50/);
+		await expect(paid).not.toContainText(/[$€£¥]|USD|EUR/);
+	});
+
 	test('an unconvertible payment is admitted rather than silently dropped', async ({ page }) => {
 		await page.route(
 			(url) => url.pathname === SUMMARY_PATH,
