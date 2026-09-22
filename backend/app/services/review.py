@@ -290,6 +290,21 @@ async def approve_invoice(
     field_diff: dict = {}
     if corrections:
         from app.services.audit_access import build_field_diff
+        from app.services.gl_chart import refuse_foreign_gl_codes
+
+        # A GL correction is a coding decision like any other write, so it must
+        # resolve in the invoice's own chart (shared ∪ its entity), refused
+        # BEFORE any correction is applied. This is also the door the GL-coding
+        # exception agent approves through; its coordinator turns the 422 into
+        # an escalation with this text as the rationale.
+        new_gl = corrections.get("gl_account")
+        if new_gl and new_gl != invoice.gl_account:
+            await refuse_foreign_gl_codes(
+                db,
+                organization_id=invoice.organization_id,
+                entity_id=invoice.entity_id,
+                codes=[new_gl],
+            )
 
         field_map = {"vendor": "vendor_name"}
         before: dict = {}

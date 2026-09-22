@@ -45,6 +45,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.invoice import Invoice, InvoiceStatus
 from app.models.vendor import Vendor
 from app.services.audit_dispatch import dispatch_audit
+from app.services.gl_chart import foreign_codes_detail, load_chart_ownership
 from app.services.numeric_bounds import MONEY_NUMERIC, fits_numeric
 from app.utils.dates import parse_ambiguous_date
 
@@ -420,6 +421,13 @@ async def import_invoices_csv(
     # instant the import ran, which is the fact being recorded.
     provenance = build_import_provenance()
     created: list[Invoice] = []
+    # Which chart each GL code in the file belongs to, read once for the batch.
+    # A code that exists only in ANOTHER entity's chart would resolve against
+    # the wrong one on every imported row (`services/gl_chart`); a code in no
+    # chart at all is still accepted — history carries retired accounts.
+    gl_ownership = await load_chart_ownership(
+        db, organization_id, ((row.get("gl_account") or "").strip() for row in rows)
+    )
 
     for i, row in enumerate(rows, start=2):
         invoice_number = (row.get("invoice_number") or "").strip()
@@ -441,6 +449,14 @@ async def import_invoices_csv(
             result.errors.append(
                 ImportRowError(row=i, message=f"amount invalid: {row.get('amount')!r}")
             )
+            result.skipped += 1
+            continue
+
+        # Refused BEFORE vendor resolution, which can create a vendor stub — a
+        # row that will not import must leave nothing behind.
+        gl_code = (row.get("gl_account") or "").strip() or None
+        if gl_code and gl_ownership.belongs_elsewhere(gl_code, entity_id):
+            result.errors.append(ImportRowError(row=i, message=foreign_codes_detail([gl_code])))
             result.skipped += 1
             continue
 
@@ -508,7 +524,7 @@ async def import_invoices_csv(
             due_date=_parse_date(row.get("due_date"), day_first=day_first),
             po_number=(row.get("po_number") or None) or None,
             description=(row.get("description") or None) or None,
-            gl_account=(row.get("gl_account") or None) or None,
+            gl_account=gl_code,
             cost_center=(row.get("cost_center") or None) or None,
             status=status_val,
             # Provenance: this row was migrated in, not processed here. Stamped

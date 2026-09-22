@@ -61,7 +61,7 @@ should review them on the Vendors page before paying any invoices.
 | `due_date` | no | Same formats |
 | `po_number` | no | |
 | `description` | no | |
-| `gl_account` | no | |
+| `gl_account` | no | A code that exists **only in another entity's chart** is refused per row (before its vendor is resolved, so the row leaves nothing behind) — it would resolve against the wrong chart. A code in no chart at all still imports: history carries retired accounts. See `services/gl_chart.py`. |
 | `cost_center` | no | |
 | `status` | no | Default `done`. Only `new`, `done`, `paid`, `rejected` are importable — a live pipeline stage (`approved`, `ready_for_review`, `payment_scheduled`, …) is rejected per row (issue #174). |
 

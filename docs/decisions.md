@@ -7662,3 +7662,51 @@ to start a run against a database behind head, naming each stale one and
 The delay is its own lesson: that entry named its own durable fix, sized it
 correctly, and still sat for nine days because it was filed as a note rather
 than as work.
+
+## 195. An invoice's GL code must resolve in its own entity's chart — refused only when it belongs to another
+
+§186 made the cross-entity ambiguity visible: in the consolidated view the
+invoice pickers offered subsidiary B's `6000` for a subsidiary-A invoice, now
+labelled as B's. Every manual write still accepted it, and the stored string
+then resolved against A's chart — a different account, or none — while budgets,
+matching rules, the 1099 box map, approval routing and the report builder all
+read it as A's. `services/gl_chart.refuse_foreign_gl_codes` now closes that, on
+every path that writes the column: create, `PATCH`, the line-items replace,
+approve-with-corrections (and through it the GL-coding exception agent), CSV
+import and recurring-template writes.
+
+Four calls shape it.
+
+**The chart is the invoice's entity's, never the sidebar's.** Create checks the
+entity the row will be filed under (`get_write_entity_id`: the selection, else
+the default); every other path checks `invoice.entity_id` (or the template's).
+The picker follows the same rule rather than the `X-Entity-ID` view: the
+consolidated view is every subsidiary's chart, and a deep link can open another
+entity's invoice while one is selected. So `GET /api/gl-accounts` took a
+`chart_entity_id` parameter and `InvoiceResponse` exposes `entity_id`; filtering
+the header-scoped list in the browser would have been silently incomplete in
+exactly the deep-link case. The parameter widens nothing — the consolidated read
+already returns every entity's rows to every role.
+
+**What is refused is "another entity's", not "not in my chart".** A code in no
+chart at all — hand-typed, or on a retired account — still writes. Refusing it
+too is the stricter rule `gl_recode` and extraction apply to *automated* codes,
+and it may well be right for manual ones; but it is a different decision with
+costs this one does not have: CSV import is a historical-migration path whose
+rows legitimately carry codes whose accounts are long gone, a tenant's chart may
+be partial (a few hand-made accounts awaiting the first ERP sync), and every e2e
+fixture that codes to a literal would have to create its account first. The refusal
+chosen here is never correct for the invoice it is written to; the stricter one
+sometimes is. It is filed separately rather than smuggled in.
+
+**Ownership is read over retired rows too.** A code A holds only as a retired
+account, and B holds live, still resolves to A's retired account on an A
+invoice — that is a retirement question, not a cross-entity one, and calling it
+"another entity's" would be both wrong and misleading.
+
+**Only a code NEW to the row is checked.** An invoice coded across entities
+before this existed must stay editable: a `PATCH` that echoes the stored code,
+or a line carried over through the delete-and-reinsert line-items `PUT`, is not
+a coding decision, and refusing it would freeze the invoice the day its account
+moved. The same rule `recurring`'s material-edit tracking applies — a re-sent
+unchanged field is not an edit.

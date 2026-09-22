@@ -249,6 +249,16 @@ export interface Invoice {
 	project: string | null;
 	contract_id: string | null;
 	/**
+	 * The subsidiary this invoice belongs to (multi-entity); `null` only on an
+	 * invoice no entity was ever stamped on. It decides which chart the GL code
+	 * resolves against — shared accounts ∪ this entity's own — so the GL pickers
+	 * scope to it (`api/glAccounts.ts::listInvoiceChart`) rather than to the
+	 * sidebar selection, which can differ (the consolidated view, a deep link).
+	 * The backend refuses a code from any other entity's chart
+	 * (`backend/app/services/gl_chart.py`).
+	 */
+	entity_id: string | null;
+	/**
 	 * Inter-company routing (multi-entity). `counterparty_entity_id` names the
 	 * OTHER subsidiary on an inter-company charge; `intercompany_mirror_id` links
 	 * an origin invoice to its generated mirror payable (and vice-versa). Both

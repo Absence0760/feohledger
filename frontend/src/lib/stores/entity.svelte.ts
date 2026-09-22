@@ -90,6 +90,18 @@ class EntityStore {
 		return this.entities.find((e) => e.id === this.selectedId) ?? null;
 	}
 
+	/**
+	 * The entity a NEW row is filed under — the backend's
+	 * `tenant.get_write_entity_id` rule: the selected entity, else the tenant's
+	 * default one. `null` until the list has loaded. A create form that has to
+	 * say (or scope by) where its row will land reads this rather than
+	 * re-deriving the rule — `CreateInvoiceModal` scopes its GL picker to that
+	 * entity's chart.
+	 */
+	get writeEntityId(): string | null {
+		return this.selected?.id ?? this.entities.find((e) => e.is_default)?.id ?? null;
+	}
+
 	/** Label for the current selection (switcher button text). */
 	get selectedLabel(): string {
 		return this.selected?.name ?? 'All entities';
