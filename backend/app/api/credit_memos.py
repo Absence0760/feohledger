@@ -1,4 +1,4 @@
-"""Credit memo endpoints — list, create, apply, void."""
+"""Credit memo endpoints — list, summary, create, apply, void."""
 
 import uuid
 from datetime import UTC, datetime
@@ -17,7 +17,8 @@ from app.api.deps import (
     require_roles,
 )
 from app.api.pagination import PaginationParams, pagination_params
-from app.models.credit_memo import CreditMemo
+from app.api.sorting import SortParams, resolve_order_by, sort_params
+from app.models.credit_memo import CREDIT_MEMO_STATUSES, CreditMemo
 from app.models.invoice import Invoice
 from app.models.organization import Organization
 from app.models.user import User
@@ -27,10 +28,12 @@ from app.schemas.credit_memo import (
     CreditMemoCreate,
     CreditMemoListResponse,
     CreditMemoResponse,
+    CreditMemoSummaryResponse,
 )
 from app.services.audit_dispatch import dispatch_audit
 from app.services.currency_conversion import resolve_reporting_currency
 from app.tenant import apply_entity_scope, get_entity_id, get_tenant, get_tenant_db
+from app.utils.search import ilike_contains
 
 router = APIRouter(prefix="/credit-memos", tags=["credit-memos"])
 
@@ -43,6 +46,18 @@ _VENDOR_UNRESOLVED_DETAIL = (
     "verified. Resolve the invoice's vendor first (re-save its vendor on the "
     "invoice), then apply the credit."
 )
+
+
+# `sort=` allowlist for `GET /credit-memos` — see `api/sorting.py`. `.id` is
+# always appended as the final tie-break regardless of which column is picked
+# (mirrors the pre-existing `created_at, id` default order). `amount` sorts the
+# raw figure across currencies, exactly as `/payments` does: it orders rows,
+# it never sums them.
+CREDIT_MEMO_SORTABLE_COLUMNS: dict[str, object] = {
+    "issued_date": CreditMemo.issued_date,
+    "amount": CreditMemo.amount,
+    "memo_number": CreditMemo.memo_number,
+}
 
 
 def _assert_vendor_matches(invoice: Invoice, vendor_id: uuid.UUID) -> None:
@@ -89,33 +104,80 @@ def _to_response(
     )
 
 
+def _credit_memo_list_query(
+    *columns,
+    entity_id: uuid.UUID | None,
+    status: str | None,
+    search: str | None,
+):
+    """`SELECT <columns> FROM credit_memos LEFT JOIN vendors …` with the list's
+    population filters applied.
+
+    The single builder behind `GET /credit-memos` (its rows AND its total) and
+    `GET /credit-memos/summary`, so the chip tallies describe exactly the rows
+    the list would return — the defect `payments.py::_payment_list_filters` and
+    `invoices.py::invoice_counts` each had to close on their own surface.
+
+    `Vendor` is always joined because the search leg matches the vendor NAME
+    (the column the table shows). The join is many-to-one — a memo has exactly
+    one vendor — so it can never fan the count out.
+
+    `status` is `None` for the summary: status is the dimension being tallied,
+    so applying it would zero every other chip.
+    """
+    query = apply_entity_scope(
+        select(*columns)
+        .select_from(CreditMemo)
+        .outerjoin(Vendor, CreditMemo.vendor_id == Vendor.id),
+        CreditMemo,
+        entity_id,
+    )
+    if status:
+        query = query.where(CreditMemo.status == status)
+    if search and search.strip():
+        term = search.strip()
+        query = query.where(
+            ilike_contains(CreditMemo.memo_number, term) | ilike_contains(Vendor.name, term)
+        )
+    return query
+
+
 @router.get("", response_model=CreditMemoListResponse)
 async def list_credit_memos(
     db: AsyncSession = Depends(get_tenant_db),
     user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER, ROLE_AP_CLERK, ROLE_CFO)),
     status_filter: str | None = Query(None, alias="status"),
+    search: str | None = Query(None, description="Substring of the memo number or vendor name"),
+    sort: SortParams = Depends(sort_params),
     pagination: PaginationParams = Depends(pagination_params),
     entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
-    base = apply_entity_scope(select(CreditMemo), CreditMemo, entity_id)
-    if status_filter:
-        base = base.where(CreditMemo.status == status_filter)
+    filters = {"entity_id": entity_id, "status": status_filter, "search": search}
 
-    total_q = await db.execute(select(func.count()).select_from(base.subquery()))
+    total_q = await db.execute(
+        select(func.count()).select_from(
+            _credit_memo_list_query(CreditMemo.id, **filters).subquery()
+        )
+    )
     total = int(total_q.scalar() or 0)
 
-    paged = apply_entity_scope(
-        select(CreditMemo, Vendor.name, Invoice.invoice_number)
-        .outerjoin(Vendor, CreditMemo.vendor_id == Vendor.id)
-        .outerjoin(Invoice, CreditMemo.invoice_id == Invoice.id)
-        .order_by(CreditMemo.created_at.desc(), CreditMemo.id.desc())
-        .offset(pagination.offset)
-        .limit(pagination.limit),
-        CreditMemo,
-        entity_id,
+    # `.id` tie-breaker: memos created in one request can share `created_at`,
+    # so without it Postgres may order them differently between pages. `sort=`
+    # / `order=` (validated against `CREDIT_MEMO_SORTABLE_COLUMNS`, unknown key
+    # → 422) override the default when supplied — see `api/sorting.py`.
+    order_by = resolve_order_by(
+        sort,
+        CREDIT_MEMO_SORTABLE_COLUMNS,
+        id_column=CreditMemo.id,
+        default=[CreditMemo.created_at.desc(), CreditMemo.id.desc()],
     )
-    if status_filter:
-        paged = paged.where(CreditMemo.status == status_filter)
+    paged = (
+        _credit_memo_list_query(CreditMemo, Vendor.name, Invoice.invoice_number, **filters)
+        .outerjoin(Invoice, CreditMemo.invoice_id == Invoice.id)
+        .order_by(*order_by)
+        .offset(pagination.offset)
+        .limit(pagination.limit)
+    )
     result = await db.execute(paged)
     items = [
         _to_response(memo, vendor_name=vendor_name, invoice_number=invoice_number)
@@ -124,6 +186,43 @@ async def list_credit_memos(
     return CreditMemoListResponse(
         items=items, total=total, page=pagination.page, page_size=pagination.page_size
     )
+
+
+# Literal path, declared before every `/{memo_id}` route so "summary" is never
+# parsed as a memo id.
+@router.get("/summary", response_model=CreditMemoSummaryResponse)
+async def credit_memo_summary(
+    db: AsyncSession = Depends(get_tenant_db),
+    # Exactly the list's gate: the chips sit on the list, and a role that can
+    # read one but 403s on the other gets bare labels over a populated table.
+    user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER, ROLE_AP_CLERK, ROLE_CFO)),
+    search: str | None = Query(None, description="Substring of the memo number or vendor name"),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
+):
+    """Per-status tallies for the `/credit-memos` filter chips.
+
+    Computed over the WHOLE entity-scoped set through the list's own filter
+    builder, so a search for one vendor narrows the chips with the table
+    instead of leaving them reading the tenant's total over a one-row list.
+
+    Deliberately takes no `status`. `GET /exceptions/summary` does, but there
+    `status` scopes a SECOND dimension (`by_type`, the type chips beside the
+    status chips); here status is the only dimension and it is the one being
+    counted, so filtering it would zero every chip but the active one.
+    """
+    rows = await db.execute(
+        _credit_memo_list_query(
+            CreditMemo.status,
+            func.count(CreditMemo.id),
+            entity_id=entity_id,
+            status=None,
+            search=search,
+        ).group_by(CreditMemo.status)
+    )
+    by_status = dict.fromkeys(CREDIT_MEMO_STATUSES, 0)
+    for memo_status, count in rows.all():
+        by_status[str(memo_status)] = int(count)
+    return CreditMemoSummaryResponse(total=sum(by_status.values()), by_status=by_status)
 
 
 async def _get_scoped_memo(

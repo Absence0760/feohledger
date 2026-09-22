@@ -8,6 +8,11 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, EntityMixin, TimestampMixin
 
+#: Every status a memo can hold. `applied` is all-or-nothing — one memo credits
+#: its whole amount to exactly one invoice in one transaction — so there is no
+#: "partially applied" state to represent.
+CREDIT_MEMO_STATUSES: tuple[str, ...] = ("open", "applied", "void")
+
 
 class CreditMemo(Base, EntityMixin, TimestampMixin):
     """Vendor-issued credit reducing what's owed.

@@ -51,3 +51,15 @@ class CreditMemoResponse(BaseModel):
 class CreditMemoListResponse(PageMeta):
     items: list[CreditMemoResponse]
     total: int
+
+
+class CreditMemoSummaryResponse(BaseModel):
+    """Per-status tallies for the `/credit-memos` filter chips.
+
+    `by_status` always carries every known status (a zero is a real answer, not
+    an absent key) plus any status this build does not know about yet, so a
+    new lifecycle state shows up as a count instead of vanishing from the sum.
+    """
+
+    total: int
+    by_status: dict[str, int]
