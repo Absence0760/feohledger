@@ -238,9 +238,14 @@ async def _committed_po_legs(
     db: AsyncSession, budget_ids: Sequence[uuid.UUID]
 ) -> dict[uuid.UUID, _Leg]:
     """Leg 2 — POs that these budgets' converted requisitions turned into."""
-    # PurchaseOrder carries no currency; the requisition it converted from does,
-    # and the two share it.
-    total, excluded = _leg_columns(PurchaseOrder.total, PurchaseRequisition.currency)
+    # Keyed on the PO's OWN currency — the one its `total` is in (migration
+    # 0099). Conversion copies the requisition's code onto the PO and 0099
+    # back-filled every older conversion the same way, so the two agree unless
+    # something re-denominated the PO afterwards (an ERP re-sync owns its
+    # currency); then it is the PO's figure being summed, and its own label is
+    # the one that says what it is. A PO recording none is excluded and
+    # counted, like any other row this budget cannot price (decisions §197).
+    total, excluded = _leg_columns(PurchaseOrder.total, PurchaseOrder.currency)
     query = (
         select(Budget.id, total, excluded)
         .select_from(Budget)
