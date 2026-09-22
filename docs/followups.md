@@ -899,6 +899,32 @@ sibling of a fix that needs its own pass.
       test dumps every thread's stack before it dies.
       **Trigger:** the next shard that is cancelled rather than failed.
 
+### Surfaced by retiring the stale archive PRs (2026-09-18, PRs #453/#454)
+
+- [ ] **(c) The dashboard has no greeting, and the only draft of one never
+      compiled.** A session crashed on 2026-09-16 mid-edit on
+      `frontend/src/routes/+page.svelte`; PR #454 preserved the 31-line stash so it
+      existed somewhere other than one machine's `.git`. That draft is not
+      salvageable and was closed rather than merged: it annotated
+      `greetingKey` as `MessageKey` against
+      `dashboard.greeting.{morning,afternoon,evening}`, and **those keys are defined
+      in no locale file** — `MessageKey` is `keyof typeof en`, so the annotation is a
+      type error and `pnpm check` fails on it. Below `</script>` none of
+      `greetingKey`, `todayLabel`, `userName` or the seven imported
+      `~icons/material-symbols/*` glyphs are referenced, so even with the keys added
+      it renders nothing and leaves seven unused imports. The idea is recorded here
+      because the draft is gone, not because the draft was close.
+      **Durable fix:** implement it as a normal change rather than recovering the
+      stash — the three `dashboard.greeting.*` keys across **all six** locale
+      catalogues (`en`, `de`, `es`, `fr`, `ja`, `pt-BR`; a missing key in one is a
+      compile error, which is the point), an actual render site in the
+      `<PageHeader>` slot, `$derived.by` re-reading `currentLocale()` so the date
+      re-renders on a locale switch, and the glyphs `aria-hidden` with each card's
+      `<h2>` still naming it. Greeting text keyed on the reader's own clock is
+      presentation only and must not gate or reorder any figure below it.
+      **Trigger:** the next `/polish-ui` pass on the dashboard, or any change that
+      already touches `frontend/src/routes/+page.svelte`'s header.
+
 ## (a) Blocked on external credentials, accounts, or hardware
 
 Categories (a) and (b) are operator work, not engineering work. Both are
