@@ -611,12 +611,16 @@ password login for the whole org. The `/api/auth/login` handler refuses with
 `403` + an `auth.login.failure` / `reason=sso_only` audit row **after** verifying
 the password (so it reuses the org load and doesn't perturb the unknown-vs-
 wrong-password enumeration parity). `services/sso.py::is_sso_only` gates on
-`sso.enabled` too, so setting the flag without a working IdP can't lock everyone
-out. The public `/auth/{sso,saml}/config` endpoints echo `sso_only` **only when
+`sso.enabled` too, so setting the flag while SSO is switched off closes nothing.
+The public `/auth/{sso,saml}/config` endpoints echo `sso_only` **only when
 the IdP config resolves** — so the login page hides the password form for an
-SSO-only tenant, but a broken config (enabled=False) leaves password login
-visible as the escape hatch. Backend enforcement is the security boundary; the
-hidden form is UX.
+SSO-only tenant, and a tenant with SSO switched off (enabled=False) keeps
+password login visible. Backend enforcement is the security boundary; the
+hidden form is UX. **The two predicates disagree for SSO switched on and
+required with an IdP block that does not resolve:** the page shows the password
+form and no SSO button, and the backend refuses every password — a whole-tenant
+sign-in lockout, diagnosed in [known-issues.md](known-issues.md) with its fix
+(make `is_sso_only` require a resolving config).
 
 **The password is not a step-up proof there either.** Signing in is not the only
 thing the stored hash can authenticate: every change to a second factor (TOTP
