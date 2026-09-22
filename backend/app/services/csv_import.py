@@ -45,7 +45,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.invoice import Invoice, InvoiceStatus
 from app.models.vendor import Vendor
 from app.services.audit_dispatch import dispatch_audit
-from app.services.gl_chart import foreign_codes_detail, load_chart_ownership
+from app.services.gl_chart import load_invoice_chart
 from app.services.numeric_bounds import MONEY_NUMERIC, fits_numeric
 from app.utils.dates import parse_ambiguous_date
 
@@ -86,11 +86,12 @@ _INVOICE_COLUMNS = {
 }
 
 # Statuses a CSV invoice import may land an invoice at *directly* (issue #174).
-# Only initial (`new`) and terminal-historical (`done`/`paid`/`rejected`) states
-# are safe: they don't drop a fabricated invoice into a live, actionable pipeline
-# stage. The mid-pipeline states — `approved` (payable NOW, no second approver),
-# `ready_for_review`, `pending`, the ERP-send + payment_scheduled states, and
-# `failed` — are blocked because reaching them by-passes the workflow engine,
+# Only initial (`new`), rejected (which re-enters the pipeline only through
+# resubmission and a fresh approval) and terminal-historical (`done`/`paid`)
+# states are safe: they don't drop a fabricated invoice into a live, actionable
+# pipeline stage. The mid-pipeline states — `approved` (payable NOW, no second
+# approver), `ready_for_review`, `pending`, the ERP-send + payment_scheduled
+# states, and `failed` — are blocked because reaching them by-passes the workflow engine,
 # so `dispatch_audit`, `check_segregation`, and the approval signature never run.
 # Open AP that still needs paying must be imported as `new` and go through the
 # normal approval controls. Those controls only bind because every imported row
@@ -98,6 +99,17 @@ _INVOICE_COLUMNS = {
 # duties is keyed on that column, so a row that landed without it was exempt
 # from the very gate this status allowlist exists to force it through.
 _IMPORTABLE_INVOICE_STATUSES = frozenset({"new", "done", "paid", "rejected"})
+
+# The importable statuses a row can never leave for a live stage again: `done`
+# is terminal, and an imported `paid` row has no `Payment` for the void path to
+# walk back to `approved`. Their GL codes are HISTORY — the account a payment
+# was booked to years ago may be long retired, or never have been created in
+# this chart — so they are held only to §194's "never another entity's" rule,
+# not to §199's "an active account of the invoice's chart". `new` and
+# `rejected` are NOT history: both reach approval (`rejected` via
+# `POST /api/invoices/{id}/resubmit`), and an approved code is what the ERP push
+# books to, so they take the full rule like any other write.
+_HISTORICAL_INVOICE_STATUSES = frozenset({"done", "paid"})
 
 # ---------------------------------------------------------------------------
 # Import provenance
@@ -421,12 +433,16 @@ async def import_invoices_csv(
     # instant the import ran, which is the fact being recorded.
     provenance = build_import_provenance()
     created: list[Invoice] = []
-    # Which chart each GL code in the file belongs to, read once for the batch.
-    # A code that exists only in ANOTHER entity's chart would resolve against
-    # the wrong one on every imported row (`services/gl_chart`); a code in no
-    # chart at all is still accepted — history carries retired accounts.
-    gl_ownership = await load_chart_ownership(
-        db, organization_id, ((row.get("gl_account") or "").strip() for row in rows)
+    # What the chart of the entity every row lands under says about each GL code
+    # in the file, read once for the batch (`services/gl_chart`). A code that
+    # exists only in ANOTHER entity's chart would resolve against the wrong one
+    # on every imported row, so it is refused on every row; a retired or unknown
+    # code is refused unless the row is history (`_HISTORICAL_INVOICE_STATUSES`).
+    gl_chart = await load_invoice_chart(
+        db,
+        organization_id,
+        entity_id,
+        [(row.get("gl_account") or "").strip() for row in rows],
     )
 
     for i, row in enumerate(rows, start=2):
@@ -452,23 +468,9 @@ async def import_invoices_csv(
             result.skipped += 1
             continue
 
-        # Refused BEFORE vendor resolution, which can create a vendor stub — a
-        # row that will not import must leave nothing behind.
-        gl_code = (row.get("gl_account") or "").strip() or None
-        if gl_code and gl_ownership.belongs_elsewhere(gl_code, entity_id):
-            result.errors.append(ImportRowError(row=i, message=foreign_codes_detail([gl_code])))
-            result.skipped += 1
-            continue
-
-        vendor = await _resolve_or_create_vendor(
-            db,
-            organization_id=organization_id,
-            vendor_name=vendor_name,
-            vendor_code=vendor_code,
-            entity_id=entity_id,
-            actor_id=actor_id,
-        )
-
+        # Every row-level refusal runs BEFORE vendor resolution, which can
+        # create a vendor stub — a row that will not import must leave nothing
+        # behind. The status is read first because the GL rule depends on it.
         status_raw = (row.get("status") or "done").strip().lower()
         try:
             status_val = InvoiceStatus(status_raw)
@@ -492,6 +494,24 @@ async def import_invoices_csv(
             )
             result.skipped += 1
             continue
+
+        gl_code = (row.get("gl_account") or "").strip() or None
+        gl_refusal = gl_chart.judge(
+            [gl_code], require_active=status_raw not in _HISTORICAL_INVOICE_STATUSES
+        )
+        if gl_refusal:
+            result.errors.append(ImportRowError(row=i, message=gl_refusal.detail()))
+            result.skipped += 1
+            continue
+
+        vendor = await _resolve_or_create_vendor(
+            db,
+            organization_id=organization_id,
+            vendor_name=vendor_name,
+            vendor_code=vendor_code,
+            entity_id=entity_id,
+            actor_id=actor_id,
+        )
 
         # Dedup on (vendor_id, invoice_number) — the natural AP uniqueness key
         q = await db.execute(

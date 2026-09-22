@@ -63,6 +63,7 @@ from app.services.enrichment_adapters import (
     get_enrichment_adapter,
     list_available_providers,
 )
+from app.services.gl_chart import load_invoice_chart
 from app.services.vendor_consolidation import (
     VendorRecord,
     find_consolidation_clusters,
@@ -219,6 +220,20 @@ async def invoice_suggestions(
             min_confidence=cfg["autofill_min_confidence"],
             min_sample=cfg["autofill_min_sample"],
         )
+        # A GL suggestion is advice the reviewer applies and then SAVES, so it
+        # must be a code that save accepts: resolved in THIS invoice's chart,
+        # and an active account of it whenever it has any (`services/gl_chart`,
+        # decisions §194/§199). History can carry either kind of code it would
+        # refuse — the consolidated view spans subsidiaries, and an account the
+        # vendor was coded to for years can be retired since — and offering it
+        # would only turn "Apply" into a refused save. Dropped, not replaced by
+        # a runner-up: a dominance figure computed over the other rows would
+        # state a confidence the history does not support.
+        gl_codes = [f.value for f in field_suggestions if f.field == "gl_account"]
+        if gl_codes:
+            chart = await load_invoice_chart(db, inv.organization_id, inv.entity_id, gl_codes)
+            if chart.judge(gl_codes):
+                field_suggestions = [f for f in field_suggestions if f.field != "gl_account"]
 
         # --- Price-variance history (this vendor's approved line items) ---
         # Pull each line's invoice currency so the baseline is keyed per

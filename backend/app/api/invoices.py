@@ -85,7 +85,7 @@ from app.services import audit_summary
 from app.services.audit_access import build_field_diff
 from app.services.audit_dispatch import dispatch_audit
 from app.services.csv_import import MAX_CSV_IMPORT_SIZE, import_invoices_csv
-from app.services.gl_chart import refuse_foreign_gl_codes
+from app.services.gl_chart import refuse_gl_codes_outside_chart
 from app.services.gl_recode import RecodeFilter, bulk_recode_gl
 from app.services.invoice_warnings import reconcile_line_totals, refresh_warnings
 from app.services.report_export import csv_safe_cell
@@ -1119,11 +1119,13 @@ async def save_invoice_line_items(
         "gl_accounts": sorted({r[_LINE_GL_IDX] for r in before_rows if r[_LINE_GL_IDX]}),
     }
 
-    # A line GL code must resolve in the invoice's own chart, the same rule the
-    # header PATCH applies (`services/gl_chart`). Only codes NEW to the invoice's
-    # lines are checked: this is a delete-and-reinsert of the whole set, so a
-    # code merely carried over from the previous lines is not a coding decision.
-    await refuse_foreign_gl_codes(
+    # A line GL code must resolve in the invoice's own chart — never another
+    # entity's, and an active account of it whenever it has any — the same rule
+    # the header PATCH applies (`services/gl_chart`, decisions §194/§199). Only
+    # codes NEW to the invoice's lines are checked: this is a delete-and-reinsert
+    # of the whole set, so a code merely carried over from the previous lines
+    # (even one whose account has since been retired) is not a coding decision.
+    await refuse_gl_codes_outside_chart(
         db,
         organization_id=invoice.organization_id,
         entity_id=invoice.entity_id,
@@ -1221,8 +1223,9 @@ async def create_invoice(
     entity_id: uuid.UUID = Depends(get_write_entity_id),
 ):
     # The code is resolved against the chart of the entity this invoice lands
-    # under — never another subsidiary's (`services/gl_chart`).
-    await refuse_foreign_gl_codes(
+    # under — never another subsidiary's, and an active account of it whenever
+    # it has any (`services/gl_chart`, decisions §194/§199).
+    await refuse_gl_codes_outside_chart(
         db, organization_id=org.id, entity_id=entity_id, codes=[body.gl_account]
     )
     invoice = Invoice(
@@ -1540,12 +1543,14 @@ async def update_invoice(
                 detail="Cannot edit financial fields once the invoice is approved",
             )
     # A GL code NEW to this invoice must resolve in the invoice's own chart
-    # (shared ∪ its entity), not another subsidiary's (`services/gl_chart`).
-    # Only a changed value is checked: a save that echoes the stored code back
-    # is not a coding decision, and refusing it would freeze the invoice.
+    # (shared ∪ its entity): not another subsidiary's, and an active account of
+    # it whenever it has any (`services/gl_chart`, decisions §194/§199). Only a
+    # changed value is checked: a save that echoes the stored code back is not a
+    # coding decision, and refusing it would freeze an invoice whose account was
+    # retired after it was coded — an unrelated edit must still go through.
     new_gl = update_data.get("gl_account")
     if new_gl and new_gl != invoice.gl_account:
-        await refuse_foreign_gl_codes(
+        await refuse_gl_codes_outside_chart(
             db,
             organization_id=invoice.organization_id,
             entity_id=invoice.entity_id,

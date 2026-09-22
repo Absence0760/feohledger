@@ -61,7 +61,7 @@ should review them on the Vendors page before paying any invoices.
 | `due_date` | no | Same formats |
 | `po_number` | no | |
 | `description` | no | |
-| `gl_account` | no | A code that exists **only in another entity's chart** is refused per row (before its vendor is resolved, so the row leaves nothing behind) — it would resolve against the wrong chart. A code in no chart at all still imports: history carries retired accounts. See `services/gl_chart.py`. |
+| `gl_account` | no | Resolved in the chart of the entity the rows land under (shared accounts ∪ that entity's own). A code that exists **only in another entity's chart** is refused on every row — it would resolve against the wrong chart. On a `new` or `rejected` row a code must also be an **active** account of that chart whenever it has any (a retired or unknown code is refused), because both reach approval and the ERP push books to it; a `done` / `paid` row is history and may carry a retired or unknown code. Every refusal is a per-row error raised before the row's vendor is resolved, so the row leaves nothing behind. See `services/gl_chart.py`, `docs/decisions.md` §194/§199. |
 | `cost_center` | no | |
 | `status` | no | Default `done`. Only `new`, `done`, `paid`, `rejected` are importable — a live pipeline stage (`approved`, `ready_for_review`, `payment_scheduled`, …) is rejected per row (issue #174). |
 
@@ -87,6 +87,16 @@ live pipeline stage (`approved`, `ready_for_review`, `payment_scheduled`, the
 ERP-send states, …) would drop a fabricated, payable invoice into the queue
 with no audit row and no second approver — so those statuses are rejected per
 row (issue #174). Never try to import open AP as `approved`; import it as `new`.
+
+**The status also decides how strictly a row's `gl_account` is held.** A `done`
+or `paid` row is history: the account it was booked to may have been retired
+since, or never been created in this chart, so it is refused only when the
+code belongs to another entity's chart. A `new` or `rejected` row is not
+history — `new` goes to approval, and `rejected` gets there through
+`POST /api/invoices/{id}/resubmit` — so once the entity's chart has any active
+account, its code must be one of them, exactly as a hand-keyed invoice's must
+(`docs/decisions.md` §199). Re-code open AP to a current account before
+importing it, or leave the column blank and code it in the app.
 
 ## The importer is recorded as the uploader
 
