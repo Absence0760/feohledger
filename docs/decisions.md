@@ -7705,3 +7705,35 @@ Considered and rejected:
 Every effective edit writes one `credit_memo.updated` row carrying the old and
 new value of each changed field (money as string-Decimal); an edit that changes
 nothing writes nothing.
+
+## 191. A `page.route` stub that answers a dev-server module fails the test by name
+
+Four `/credit-memos` e2e specs failed on every laptop and passed in every CI
+run. They stubbed the vendor list with `**/api/vendors*` and
+`/\/api\/vendors/`, and under `vite dev` the app's own source is served over
+HTTP: `$lib/api/vendors.ts`, imported by `VendorPicker`, is the URL
+`/src/lib/api/vendors.ts`. The stub answered that module with JSON, the route's
+code never loaded, SvelteKit rendered its 500 page, and the specs timed out
+looking for a row. CI serves a preview build of hashed `/_app/immutable/`
+chunks, which no API pattern can match — so the difference was the server, and
+nothing in the failure pointed at it.
+
+The specs now match the exact API pathname, the pattern `adaptive/` and
+`experiments/` had already adopted after hitting the same trap. What was missing
+was a way for the NEXT such stub to announce itself, so the `page` fixture now
+records every module script the page receives a JSON body for and fails the test
+at teardown naming the module. Only a stub can produce that — Vite serves every
+module, JSON imports included, as JavaScript — so the check has no false
+positives, costs one passive listener, and never fires in CI's preview build,
+which is the one place the bug cannot occur.
+
+Considered and rejected:
+
+- **Serving a preview build locally.** It would hide the defect rather than fix
+  it, and the local loop needs `vite dev`'s on-demand transforms for source
+  edits to show up without a rebuild.
+- **A static source guard over `page.route` patterns.** Eleven other specs use
+  a broad glob and dispatch on the pathname inside the handler, which is
+  correct; a pattern scan cannot see that, so it would flag them all and push
+  the guard towards being switched off. The runtime check keys on the effect,
+  not the spelling.

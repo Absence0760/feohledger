@@ -11,7 +11,13 @@ import { expect, test } from '../fixtures/helpers';
  */
 test.describe('credit-memo void confirmation', () => {
 	test('first click arms, outside click un-arms, second click voids', async ({ page }) => {
-		await page.route(/\/api\/credit-memos\?/, async (route) => {
+		// Every stub here matches the EXACT pathname. The vendor stub used to be
+		// the regex `/\/api\/vendors/`, which under `vite dev` also matches the
+		// module URL `/src/lib/api/vendors.ts` (imported by `ui/VendorPicker`);
+		// answering it with JSON meant the route never loaded, so this spec
+		// failed locally while CI's preview build stayed green (issue #443). The
+		// page no longer fetches vendors on mount at all, so that stub is gone.
+		await page.route((url) => url.pathname === '/api/credit-memos', async (route) => {
 			await route.fulfill({
 				status: 200,
 				contentType: 'application/json',
@@ -32,16 +38,16 @@ test.describe('credit-memo void confirmation', () => {
 				})
 			});
 		});
-		// Other list calls the page makes on load — keep them empty.
-		await page.route(/\/api\/vendors/, (r) =>
-			r.fulfill({ status: 200, contentType: 'application/json', body: '{"items":[]}' })
-		);
-		await page.route(/\/api\/invoices(\?|$)/, (r) =>
-			r.fulfill({ status: 200, contentType: 'application/json', body: '{"items":[],"total":0}' })
+		// The other list the page loads on mount (its invoice selects) — keep it
+		// empty.
+		await page.route(
+			(url) => url.pathname === '/api/invoices',
+			(r) =>
+				r.fulfill({ status: 200, contentType: 'application/json', body: '{"items":[],"total":0}' })
 		);
 
 		let voidCalls = 0;
-		await page.route(/\/api\/credit-memos\/[^/]+\/void/, async (route) => {
+		await page.route((url) => /^\/api\/credit-memos\/[^/]+\/void$/.test(url.pathname), async (route) => {
 			voidCalls += 1;
 			await route.fulfill({ status: 200, contentType: 'application/json', body: '{}' });
 		});
