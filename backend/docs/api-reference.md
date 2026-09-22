@@ -197,7 +197,7 @@ All three answer a bare `404` when `FEOH_SIGNUP_ENABLED` is off — before valid
 | Method   | Path                                | Roles | Description |
 |----------|-------------------------------------|-------|-------------|
 | `GET`    | `/api/invoices`                     | *     | List invoices (paginated, filterable). Returns `priors_summary` and `po_match` per row when applicable. |
-| `GET`    | `/api/invoices/counts`              | *     | Per-status tallies for the list-page filter chips — `{counts: {status: n}, total}` via a server-side GROUP BY. Honours the list's population filters (`search`, `vendor`, `invoice_number`, `po_number`, `description`, `amount_min/max`, `due_date_from/to`, `assigned_to_id`) through the SAME `_invoice_list_filters` builder as `GET /api/invoices`, so the chips describe exactly the rows the list would return — **not** `status` (the dimension being tallied). Entity-scoped. Mirrors `/api/vendors/counts` and `/api/purchase-orders/counts`. |
+| `GET`    | `/api/invoices/counts`              | *     | Per-status tallies for the list-page filter chips — `{counts: {status: n}, total}` via a server-side GROUP BY. Honours the list's population filters (`search`, `vendor`, `invoice_number`, `po_number`, `description`, `amount_min/max`, `due_date_from/to`, `assigned_to_id`, `vendor_id`) through the SAME `_invoice_list_filters` builder as `GET /api/invoices`, so the chips describe exactly the rows the list would return — **not** `status` (the dimension being tallied). Entity-scoped. Mirrors `/api/vendors/counts` and `/api/purchase-orders/counts`. |
 | `GET`    | `/api/invoices/assignable-reviewers` | admin/manager | Candidate approvers for `POST /api/invoices/{id}/assign` — a bare list of `{id, full_name, is_active}` for the org's ACTIVE users holding a role that confers `invoice.approve` (resolved via `effective_permissions`, so a custom role granting it is offered). Deliberately narrower than `GET /api/admin/users`: **no email, no roles, no audit metadata** — that projection is what makes the admin directory admin-only, and none of it is needed to pick an approver. RBAC mirrors `/assign` exactly (admin + ap_manager); the picker used to source the admin route and 403'd for every other role, so an invoice on a `approver_strategy: "manual"` workflow could not be submitted at all. |
 | `GET`    | `/api/invoices/chat/mentionable-users` | any authed | Colleagues the supplier-chat @mention picker may offer — the same `{id, full_name, is_active}` shape as `assignable-reviewers`, for the org's ACTIVE users. Gated on `get_current_user`, matching `POST /api/invoices/{id}/chat` exactly: reading the candidate list and acting on it are the same privilege. Deliberately NOT `assignable-reviewers` (admin/manager-only and scoped to `invoice.approve` holders — an ap_clerk or CFO can post a mention yet could not read that list) and deliberately NOT `GET /api/admin/users` (admin-only, and carries the email/roles a chat composer must not hold). The POST validates `mention_user_ids` against this same roster — an id outside it is a 400, not a silently stored mention of somebody who is never notified. See `docs/supplier-chat.md`. |
 | `GET`    | `/api/invoices/{id}`                | *     | Get single invoice — includes the latest `po_match` JSONB result and any `warnings`. A warning is `{type, severity, message, code, params}`: `code` + `params` are what a client localizes on, `message` the backend's English fallback (and the only field on a row written before the code catalogue shipped). See `backend/docs/invoice-warnings.md` |
@@ -215,7 +215,7 @@ All three answer a bare `404` when `FEOH_SIGNUP_ENABLED` is off — before valid
 | `POST`   | `/api/invoices/bulk/export`         | *     | Bulk export (CSV/JSON/XML) |
 | `POST`   | `/api/invoices/bulk-recode-gl`      | admin | Bulk GL re-code via vendor priors (+ optional AI fallback). Defaults to dry-run. See [`ai-extraction.md`](ai-extraction.md) § Bulk re-coding. |
 
-**Query parameters for `GET /api/invoices`:** `page`, `page_size`, `status` (comma-sep), `vendor`, `invoice_number`, `po_number`, `description`, `amount_min`, `amount_max`, `due_date_from`, `due_date_to`, `search`, `assigned_to_id` (exact match on `Invoice.assigned_to_id`; the frontend's "Assigned to" filter and "My Approvals" quick view both drive off it — the latter passing the caller's own id). `GET /api/invoices/ids` (the select-all-matching resolver) accepts the same filter set, `assigned_to_id` included, so a select-all under either filter can't silently widen past what's on screen. Every invoice row already carries `assigned_to_id` + `assigned_to` (the display name, denormalized at assign time) in `InvoiceResponse` — no separate lookup needed to render an assignee column.
+**Query parameters for `GET /api/invoices`:** `page`, `page_size`, `status` (comma-sep), `vendor`, `invoice_number`, `po_number`, `description`, `amount_min`, `amount_max`, `due_date_from`, `due_date_to`, `search`, `assigned_to_id` (exact match on `Invoice.assigned_to_id`; the frontend's "Assigned to" filter and "My Approvals" quick view both drive off it — the latter passing the caller's own id), `vendor_id` (exact match on the resolved `Invoice.vendor_id` link — the counterpart of the free-text `vendor`, which is a substring of the invoice's own vendor NAME and so also matches "Acme Holdings" for "Acme"; an unlinked invoice matches no id; a malformed value is a 422, like `assigned_to_id`; `docs/decisions.md` §202). `GET /api/invoices/ids` (the select-all-matching resolver) and `GET /api/invoices/counts` accept the same filter set, `assigned_to_id` and `vendor_id` included, so a select-all or a chip tally under either filter can't silently widen past what's on screen. Every invoice row already carries `assigned_to_id` + `assigned_to` (the display name, denormalized at assign time) in `InvoiceResponse` — no separate lookup needed to render an assignee column.
 
 ## Workflow Actions (per invoice)
 
@@ -426,6 +426,8 @@ Used by 3-way matching. `admin` / `ap_manager` / `ap_clerk`.
 |--------|-----------------------------------|-------|-------------|
 | `GET`  | `/api/credit-memos`                | admin, ap_manager, ap_clerk, cfo | List credit memos (paginated, entity-scoped). `?status=`, `?search=` (substring of the memo number or the vendor name), `?sort=` ∈ `issued_date` / `amount` / `memo_number` with `?order=asc\|desc` — any other sort key is a 422 |
 | `GET`  | `/api/credit-memos/counts`        | admin, ap_manager, ap_clerk, cfo | Per-status tallies for the filter chips: `{total, by_status: {open, applied, void}}`, over the list's own population filters (entity scope + `?search=`), never `status` |
+| `GET`  | `/api/credit-memos/eligible-invoices` | admin, ap_manager | The invoices a NEW memo can be linked to at creation: `?vendor_id=` (required, entity-scoped like create — 404 otherwise), optional `?amount=` (validated like a memo amount), `?search=`, paged — see § Eligible invoices |
+| `GET`  | `/api/credit-memos/{id}/eligible-invoices` | admin, ap_manager | The invoices `/apply` will accept for this memo — its terms read off the row; same opaque 404 as every by-id route, the apply's own 409 for a memo that is not `open` — see § Eligible invoices |
 | `POST` | `/api/credit-memos`                | admin, ap_manager | Create a credit memo. With no `invoice_id` it lands `open`; with one it is applied on the spot and runs the same guards as `/apply` |
 | `PATCH` | `/api/credit-memos/{id}`          | admin, ap_manager | Correct an `open`, never-applied memo — see § Editing a memo. 409 on anything else |
 | `POST` | `/api/credit-memos/{id}/apply`     | admin, ap_manager | Apply an `open` credit memo against a payable |
@@ -503,6 +505,44 @@ the memo itself — see § Editing a memo) and then enforce, in order, four 409s
 4. **No over-application** — the sum of `applied` memos on an invoice may never
    exceed the invoice amount (a credit past the balance would mint a negative
    payable).
+
+### Eligible invoices — the pickers offer exactly what the guards accept
+
+`GET /api/credit-memos/{id}/eligible-invoices` (behind the Apply dialog) and
+`GET /api/credit-memos/eligible-invoices?vendor_id=` (behind the create dialog's
+optional link) return the invoices the matching application path will accept —
+the same set, not an approximation of it (`docs/decisions.md` §202). One builder,
+`_eligible_invoices_query`, is the SQL form of the four guards above, clause by
+clause: the caller's `X-Entity-ID` scope (the application paths look the invoice
+up under it), `Invoice.vendor_id` equal to the memo's vendor (through the invoice
+list's own `vendor_id` leg, so an unlinked invoice is never offered), the entity
+rule (a NULL on either side admitted), the currency rule (case- and
+space-insensitive, a blank invoice currency admitted), and the balance rule —
+`amount − Σ applied credits ≥` the memo's amount, or `> 0` when the create
+dialog has no amount yet (every credit is strictly positive, so a fully credited
+invoice can take none).
+
+- **The Apply read takes its terms from the memo row**, not the client, so the
+  list cannot describe a memo someone has since edited, and a memo that is no
+  longer `open` gets the apply's own 409 rather than a list none of which the
+  apply could accept.
+- **The create read has no currency leg**: a linked create that names no
+  currency inherits the invoice's, which is what the dialog sends. Its `amount`
+  mirrors a memo amount's validation (`> 0`, two decimal places), so an
+  over-precise bound can never be rounded onto a boundary row.
+- **Status is not a leg**, because neither path refuses on the invoice's
+  status. A picker that hid what the apply accepts would be as wrong as one that
+  offered what it refuses.
+- `search` is the invoice list's own search leg (invoice #, PO #, description,
+  vendor name — a literal substring); results are newest first; each row carries
+  `creditable_balance` beside `amount`. RBAC is the application's
+  (admin / ap_manager): reading the targets and acting on them are one privilege.
+
+`backend/tests/test_credit_memos.py` pins the contract as a set equality over a
+matrix of every refusal (another currency, another vendor, an unlinked invoice,
+too little balance, a partly credited invoice, another entity) and the
+admissions beside each (lowercase and blank currency, the exact-balance
+boundary, a paid invoice): what the endpoint lists is what the path accepts.
 
 ### Editing a memo — `PATCH /api/credit-memos/{id}`
 

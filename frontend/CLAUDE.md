@@ -362,7 +362,7 @@ Grouped into subfolders by role; import with the full path
 component the second time you would duplicate one.**
 
 - `ui/` — primitives: `PageHeader` `DataTable` `FilterChips` `Modal` `KpiCard` `Badge` `EmptyState` `Money` `SectionTabs` `Tabs` `FieldWarning` `SecretReveal` `BrandMark`
-- domain: `InvoiceModal` `VendorModal` `VendorPicker` `RunDetailModal` `ApprovalMatrixEditor` `BulkRecodeGLModal` `AdvancedSearchModal` `ScreeningBadge` `SubscriptionBadge` `SpendBarChart` `UsageMeter` `PortalListFilters`
+- domain: `InvoiceModal` `VendorModal` `VendorPicker` `InvoicePicker` (both over `ui/SearchPicker`) `RunDetailModal` `ApprovalMatrixEditor` `BulkRecodeGLModal` `AdvancedSearchModal` `ScreeningBadge` `SubscriptionBadge` `SpendBarChart` `UsageMeter` `PortalListFilters`
 - chrome: `Sidebar` `NotificationBell` `EntitySwitcher`
 - chat/assistant: `SupplierChatThread` `ChatMessage` `ExamplePrompts` `ToolResultView`
 - marketing: `Landing` `Pricing` `Atmosphere` `HeroPipeline` `AdapterRail` `MotionToggle`

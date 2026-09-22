@@ -97,7 +97,7 @@ tests-e2e/
 ├── workflows/                       lifecycle, step config, approval matrix, etc.
 ├── exceptions/                      queue, assign, filter, resolve
 ├── erp/                             merge-dev / netsuite / dynamics adapter e2e (gated — needs fake-erp)
-├── credit-memos/                    list, pagination
+├── credit-memos/                    list, pagination, the invoice pickers
 ├── organization/                    settings, fraud rules, GL accounts sync
 ├── purchase-orders/                 list, sync
 ├── goods-receipts/                  list
