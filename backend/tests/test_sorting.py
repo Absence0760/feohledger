@@ -80,3 +80,33 @@ def test_sort_params_dependency_carries_field():
     params = sort_params(sort="amount", order="asc")
     assert params.field == "amount"
     assert params.order == "asc"
+
+
+@pytest.mark.parametrize("order", ["asc", "desc"])
+def test_nulls_last_key_trails_nulls_in_both_directions(order):
+    """A key named in `nulls_last` is one whose NULL means "no value on this
+    axis". Postgres ranks NULL above every value, so a plain `DESC` would lead
+    with those rows; the key sorts them last whichever way the caller asks."""
+    params = SortParams(field="amount", order=order)
+    result = resolve_order_by(
+        params,
+        ALLOWLIST,
+        id_column=_widgets.c.id,
+        default=[_widgets.c.id.desc()],
+        nulls_last=frozenset({"amount"}),
+    )
+    assert f"amount {order.upper()} NULLS LAST" in str(result[0])
+    # The tie-break is the primary key — never NULL — so it takes no clause.
+    assert "NULLS" not in str(result[1])
+
+
+def test_keys_outside_nulls_last_keep_the_database_default():
+    params = SortParams(field="name", order="desc")
+    result = resolve_order_by(
+        params,
+        ALLOWLIST,
+        id_column=_widgets.c.id,
+        default=[_widgets.c.id.desc()],
+        nulls_last=frozenset({"amount"}),
+    )
+    assert "NULLS" not in str(result[0])

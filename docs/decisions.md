@@ -7663,6 +7663,53 @@ The delay is its own lesson: that entry named its own durable fix, sized it
 correctly, and still sat for nine days because it was filed as a note rather
 than as work.
 
+## 188. The exception queue's chip tallies are faceted, not whole-set
+
+**Decided:** 2026-09-21 · `backend/app/api/exceptions.py`, `backend/app/api/sorting.py`
+
+`GET /api/exceptions/summary` feeds three chip rows beside the queue — status,
+type and (new) severity. Until now it was listed in
+`tests/test_whole_set_kpi_rollups.py::_DELIBERATELY_WHOLE_SET`: its status
+counts took no filter at all, and `by_type` took only `status`. That was
+defensible while the queue had no search box. Once it gained one (issue #443),
+a whole-set tally is the defect §48 describes: search for one vendor and the
+chips go on counting the tenant above a one-row table.
+
+§48's rule is that a counts endpoint takes every filter except the dimension it
+tallies. With three chip rows there are three dimensions, so the rule applies
+**per row**: the status counts honour type, severity, assignee and search; the
+type counts honour status, severity, assignee and search; the severity counts
+honour status, type, assignee and search. Every chip then reads what the table
+would show if that chip were clicked, given everything else selected — and the
+selected chip in each row equals the table's `total`. All three tallies, the
+list and the `/ids` resolver go through the one `_exception_list_filters`, so
+none of them can mean something different by a filter; the exemption is
+retired and the module joins `_SHARED_BUILDER_MODULES`.
+
+The considered alternative was to keep every row whole-set and add search only
+to the list. Rejected because the rows would then contradict the table the
+moment any chip in another row was on — `Open 12` above the 3 open fraud flags
+a type chip had narrowed to — which the old `by_type`-follows-`status` rule had
+already conceded for one pair of rows.
+
+Two smaller calls rode along:
+
+- **An omitted `status` means every status on all three endpoints.** The summary
+  used to count its types within `open` when no status was sent, so a bare call
+  described a different set from a bare list call; and `status=all` on the list
+  was passed into the `IN` clause, where it matched nothing. The queue always
+  sends the status it is showing, so nothing observed either difference — which
+  is why they were worth removing before something did.
+- **A sort key whose NULL means "no value" trails in both directions.**
+  `resolve_order_by` takes a `nulls_last` set. `due_at` is NULL when no SLA is
+  configured for the type, and Postgres ranks NULL above every value, so a
+  descending "Due" click would have led with every exception that has no
+  deadline. Opt-in per key, because on other columns the default was not wrong,
+  just unconsidered. Severity sorts by `exception_lifecycle.EXCEPTION_SEVERITY_RANK`
+  rather than by the text column, whose alphabetical order puts `info` between
+  `error` and `warning`; an unranked value ranks 0 so it sinks instead of posing
+  as urgent.
+
 ## 190. An open credit memo can be edited; an applied one never — and edit, apply and void share one row lock
 
 `POST /api/credit-memos` had no counterpart for correcting what it wrote. Both

@@ -418,13 +418,14 @@ async def test_summary_by_type_follows_the_status_filter(realdb):
         await s.commit()
 
     async with realdb.client(key="a", role="admin") as c:
-        default_view = (await c.get("/api/exceptions/summary")).json()
+        open_view = (await c.get("/api/exceptions/summary?status=open")).json()
         resolved_view = (await c.get("/api/exceptions/summary?status=resolved")).json()
         all_view = (await c.get("/api/exceptions/summary?status=all")).json()
+        bare = (await c.get("/api/exceptions/summary")).json()
 
-    # Default is still the open view — unchanged behaviour.
-    assert default_view["by_type"].get("duplicate") == 1
-    assert "price_variance" not in default_view["by_type"]
+    # The open view — what the queue opens on — counts open types only.
+    assert open_view["by_type"].get("duplicate") == 1
+    assert "price_variance" not in open_view["by_type"]
 
     # The resolved view now offers a chip for the resolved-only type.
     assert resolved_view["by_type"].get("price_variance") == 1
@@ -433,3 +434,8 @@ async def test_summary_by_type_follows_the_status_filter(realdb):
     # `all` counts both.
     assert all_view["by_type"].get("duplicate") == 1
     assert all_view["by_type"].get("price_variance") == 1
+
+    # No `status` at all means what it means on the list — every status. This
+    # used to fall back to `open`, so a bare summary described a different set
+    # from a bare `GET /api/exceptions`.
+    assert bare["by_type"] == all_view["by_type"]

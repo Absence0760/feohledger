@@ -216,12 +216,21 @@ describe('exception severity vocabulary', () => {
 	 *
 	 *     severity: Mapped[str] = mapped_column(String(20), default="warning")  # error, warning, info
 	 *
-	 * There is no `EXCEPTION_SEVERITIES` tuple to import the way there is for
-	 * the type roster. So the guard reads both halves of what does exist — that
-	 * comment, and every `severity="…"` a raising site actually writes — and a
-	 * fourth severity fails here whichever way it arrives. If the backend grows
-	 * a real constant, move this onto it.
+	 * The backend now also has a real constant — `EXCEPTION_SEVERITY_RANK` in
+	 * `services/exception_lifecycle.py`, which the queue's severity SORT ranks
+	 * by — so the guard reads all three: that map (roster AND order, since it is
+	 * declared worst-first like the chips), the comment, and every
+	 * `severity="…"` a raising site actually writes. A fourth severity fails
+	 * here whichever way it arrives. The comment and literal scans stay because
+	 * the map is only as complete as its own backend guard makes it.
 	 */
+	function backendRank(): string[] {
+		const py = source('services/exception_lifecycle.py');
+		const block = /EXCEPTION_SEVERITY_RANK[^=]*=\s*\{([^}]*)\}/.exec(py);
+		expect(block, 'EXCEPTION_SEVERITY_RANK not found — did it move or change shape?').not.toBeNull();
+		return [...block![1].matchAll(/"([a-z0-9_]+)":\s*\d+/g)].map((m) => m[1]);
+	}
+
 	function modelComment(): string[] {
 		const py = source('models/exception.py');
 		const line = /severity:\s*Mapped\[str\][^\n]*?#\s*([a-z0-9_, ]+)/.exec(py);
@@ -255,6 +264,14 @@ describe('exception severity vocabulary', () => {
 
 	it('carries the roster the column comment declares', () => {
 		expect([...EXCEPTION_SEVERITIES]).toEqual(modelComment());
+	});
+
+	it('carries the backend rank map, in its worst-first order', () => {
+		// The chips render in `EXCEPTION_SEVERITIES` order and the queue sorts by
+		// the backend's rank, so the two must agree on the order as well as the
+		// members — a chip row reading info / warning / error above a table
+		// sorted error-first would be two answers to one question.
+		expect([...EXCEPTION_SEVERITIES]).toEqual(backendRank());
 	});
 
 	it('labels the column default', () => {

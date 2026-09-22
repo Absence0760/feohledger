@@ -18,8 +18,9 @@ surfaces the #321 KPI-parity family touched it:
   never produced by calling the helper the endpoint calls — that would only
   prove the endpoint calls itself;
 * pins the documented dimension exceptions (`/api/invoices/counts` honours every
-  population filter but ignores `status`; `/api/payments/summary` and
-  `/api/exceptions/summary` are deliberately wider than any filtered table);
+  population filter but ignores `status`; `/api/exceptions/summary` honours every
+  filter but each tally's own dimension; `/api/payments/summary` is deliberately
+  wider than any filtered table);
 * pins the money invariant on every money-bearing rollup: exact decimal
   **strings**, split per currency, never one cross-currency sum;
 * pins entity scoping — `X-Entity-ID` must narrow the list and its rollup
@@ -27,7 +28,7 @@ surfaces the #321 KPI-parity family touched it:
 
 Surfaces: `/api/budgets`, `/api/intake`, `/api/positive-pay`, `/api/recurring`,
 `/api/requisitions`, `/api/vendor-statements`, `/api/invoices/counts`,
-`/api/expenses` (list + summary + export).
+`/api/expenses` (list + summary + export), `/api/exceptions` (list + ids + summary).
 """
 
 from __future__ import annotations
@@ -2078,7 +2079,7 @@ async def test_expense_summary_is_a_well_formed_zero_on_an_empty_set(realdb):
 
 
 # ===========================================================================
-# The two documented dimension exemptions
+# The documented whole-set exemption
 # ===========================================================================
 
 
@@ -2175,84 +2176,217 @@ async def test_payments_summary_is_still_entity_scoped(realdb):
     assert scoped["payment_count"] == 0
 
 
-async def _seed_exceptions(realdb, key="a"):
+# ===========================================================================
+# /api/exceptions/summary — faceted chip tallies
+# ===========================================================================
+#
+# Not an exemption any more. The summary takes every filter the queue takes and
+# applies them through the queue's own builder, and each of its three tallies
+# ignores exactly one filter — its own dimension — so a chip reads what the
+# table would show if it were clicked. The expectations below are recomputed
+# from the seed spec, never from the endpoint's own builder.
+
+#: Vendors the seeded invoices carry. `None` = an invoice-less exception (a
+#: Positive Pay `not_on_file` fraud flag has no invoice), which has no invoice
+#: number or vendor and so can never match a search.
+_EXC_VENDORS = ("Acme Supplies", "Globex Corp", "Initech 50%_Ltd", None)
+_EXC_TYPES = ("duplicate", "po_mismatch", "fraud_flag", "missing_data")
+_EXC_STATUSES = ("open", "open", "escalated", "resolved", "dismissed")
+_EXC_SEVERITIES = ("error", "warning", "info")
+
+
+async def _seed_exceptions(realdb, key="a") -> list[dict]:
+    """A population larger than one page, crossing every axis the queue
+    filters on. Returns the spec with each row's `invoice_number` filled in."""
     mk = realdb.sessionmaker(key)
     org_id = realdb.info(key).org_id
+    suffix = uuid.uuid4().hex[:6]
     spec = [
-        ("duplicate", "open"),
-        ("duplicate", "open"),
-        ("po_mismatch", "open"),
-        ("fraud_flag", "escalated"),
-        ("missing_data", "resolved"),
-        ("missing_data", "resolved"),
-        ("amount_exceeded", "dismissed"),
+        {
+            "exception_type": _EXC_TYPES[i % len(_EXC_TYPES)],
+            "status": _EXC_STATUSES[i % len(_EXC_STATUSES)],
+            "severity": _EXC_SEVERITIES[i % len(_EXC_SEVERITIES)],
+            "vendor_name": _EXC_VENDORS[i % len(_EXC_VENDORS)],
+            "invoice_number": None,
+        }
+        for i in range(_OVER_A_PAGE + 2)
     ]
     async with mk() as s:
         eid = await _default_entity_id(s)
-        for exc_type, status in spec:
+        for idx, row in enumerate(spec):
+            invoice_id = None
+            if row["vendor_name"] is not None:
+                row["invoice_number"] = f"EXC-{idx:03d}-{suffix}"
+                inv = Invoice(
+                    organization_id=org_id,
+                    entity_id=eid,
+                    invoice_number=row["invoice_number"],
+                    vendor_name=row["vendor_name"],
+                    amount=Decimal("10.00"),
+                    currency="USD",
+                    status=InvoiceStatus.new,
+                )
+                s.add(inv)
+                await s.flush()
+                invoice_id = inv.id
             s.add(
                 APException(
                     organization_id=org_id,
                     entity_id=eid,
-                    exception_type=exc_type,
-                    severity="warning",
-                    status=status,
+                    invoice_id=invoice_id,
+                    exception_type=row["exception_type"],
+                    severity=row["severity"],
+                    status=row["status"],
                 )
             )
         await s.commit()
     return spec
 
 
-async def test_exceptions_summary_status_counts_span_every_value_by_design(realdb):
-    """`/api/exceptions/summary` is the other documented exemption: its counts
-    POPULATE the filter chips, so they must span every status rather than being
-    narrowed by the chip currently selected — the same reason
-    `/api/invoices/counts` ignores a `status` param.
+def _exc_expect(rows: list[dict], **f) -> list[dict]:
+    """The queue's filter predicates, re-implemented over the seed spec.
+    `status` takes the list's own meaning: absent or `all` is no filter."""
+    kept = rows
+    if f.get("status") not in (None, "all"):
+        wanted = set(f["status"].split(","))
+        kept = [r for r in kept if r["status"] in wanted]
+    if f.get("type"):
+        kept = [r for r in kept if r["exception_type"] == f["type"]]
+    if f.get("severity"):
+        kept = [r for r in kept if r["severity"] == f["severity"]]
+    if f.get("search"):
+        term = f["search"]
+        kept = [
+            r
+            for r in kept
+            if _contains(r["invoice_number"], term) or _contains(r["vendor_name"], term)
+        ]
+    return kept
+
+
+def _without(filters: dict, dimension: str) -> dict:
+    return {k: v for k, v in filters.items() if k != dimension}
+
+
+def _statuses(rows: list[dict]) -> dict[str, int]:
+    tally = _tally(rows, "status")
+    return {s: tally.get(s, 0) for s in ("open", "escalated", "resolved", "dismissed")}
+
+
+_EXC_FILTER_CASES = [
+    {},
+    {"status": "open"},
+    {"status": "all"},
+    {"status": "open,escalated"},
+    {"type": "fraud_flag"},
+    {"severity": "error"},
+    {"search": "acme"},
+    # LIKE metacharacters are literal: `50%_` matches the one vendor that
+    # carries them, not every row (`%`) or any single character (`_`).
+    {"search": "50%_"},
+    {"search": "EXC-00"},
+    {"status": "open", "type": "duplicate", "severity": "warning", "search": "globex"},
+    {"search": "zzz-no-match"},
+]
+
+
+@pytest.mark.parametrize("filters", _EXC_FILTER_CASES, ids=repr)
+async def test_exceptions_summary_tallies_follow_every_filter_but_their_own(realdb, filters):
+    """Each chip row counts the set every OTHER selected filter describes.
+
+    The status counts ignore `status` (a selected status chip must not zero its
+    siblings), `by_type` ignores `type`, `by_severity` ignores `severity` — and
+    every one of them follows the search box, so a search for one vendor no
+    longer leaves the chips counting the whole tenant above a one-row table.
     """
     spec = await _seed_exceptions(realdb)
-    expected = {
-        "open": sum(1 for _, s in spec if s == "open"),
-        "escalated": sum(1 for _, s in spec if s == "escalated"),
-        "resolved": sum(1 for _, s in spec if s == "resolved"),
-        "dismissed": sum(1 for _, s in spec if s == "dismissed"),
-    }
 
     async with realdb.client(key="a", role="ap_manager") as c:
-        baseline = (await c.get("/api/exceptions/summary")).json()
-        # A selected chip must not zero the others.
-        with_resolved = (
-            await c.get("/api/exceptions/summary", params={"status": "resolved"})
-        ).json()
-        narrowed_list = (
-            await c.get("/api/exceptions", params={"status": "resolved", "page_size": 100})
-        ).json()
+        resp = await c.get("/api/exceptions/summary", params=filters)
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
 
-    for key_, value in expected.items():
-        assert baseline[key_] == value, key_
-        assert with_resolved[key_] == value, key_
-    # The list DID narrow — so the summary spanning everything is a deliberate
-    # difference, not a coincidence.
-    assert narrowed_list["total"] == expected["resolved"]
+    expected_status = _statuses(_exc_expect(spec, **_without(filters, "status")))
+    for status, count in expected_status.items():
+        assert body[status] == count, (filters, status)
+    assert body["by_type"] == _tally(
+        _exc_expect(spec, **_without(filters, "type")), "exception_type"
+    )
+    assert body["by_severity"] == _tally(
+        _exc_expect(spec, **_without(filters, "severity")), "severity"
+    )
 
 
-async def test_exceptions_summary_by_type_follows_the_status_chip(realdb):
-    """The one axis that IS filtered: `by_type` renders as the type chips beside
-    the list, so it honours the same `status` the list is showing (default
-    `open`). A type that exists only among resolved exceptions must still get a
-    chip once that status is selected."""
+@pytest.mark.parametrize("filters", _EXC_FILTER_CASES, ids=repr)
+async def test_exceptions_list_ids_and_active_chips_describe_one_set(realdb, filters):
+    """The table's total, the "select all N matching" resolver and the chip
+    that is switched on must all be the same number — the whole point of
+    routing the three endpoints through one filter builder.
+    """
     spec = await _seed_exceptions(realdb)
+    expected = _exc_expect(spec, **filters)
 
     async with realdb.client(key="a", role="ap_manager") as c:
-        default_view = (await c.get("/api/exceptions/summary")).json()
-        resolved_view = (
-            await c.get("/api/exceptions/summary", params={"status": "resolved"})
-        ).json()
-        all_view = (await c.get("/api/exceptions/summary", params={"status": "all"})).json()
+        listed = (await c.get("/api/exceptions", params={**filters, "page_size": 100})).json()
+        ids = (await c.get("/api/exceptions/ids", params=filters)).json()
+        summary = (await c.get("/api/exceptions/summary", params=filters)).json()
 
-    open_types = {t: sum(1 for tt, s in spec if tt == t and s == "open") for t, _ in spec}
-    assert default_view["by_type"] == {t: n for t, n in open_types.items() if n}
-    assert resolved_view["by_type"] == {"missing_data": 2}
-    assert all_view["by_type"] == {t: sum(1 for tt, _ in spec if tt == t) for t, _ in spec}
+    assert listed["total"] == len(expected), filters
+    assert len(listed["items"]) == len(expected), filters
+    assert ids["total"] == len(expected), filters
+    assert set(ids["ids"]) == {row["id"] for row in listed["items"]}, filters
+
+    # Summing any one chip row over its whole roster reproduces the table when
+    # that row's own filter is off; with it on, the selected chip does.
+    if filters.get("type"):
+        assert summary["by_type"].get(filters["type"], 0) == len(expected)
+    else:
+        assert sum(summary["by_type"].values()) == len(expected)
+    if filters.get("severity"):
+        assert summary["by_severity"].get(filters["severity"], 0) == len(expected)
+    else:
+        assert sum(summary["by_severity"].values()) == len(expected)
+    selected = [s for s in (filters.get("status") or "all").split(",") if s != "all"]
+    statuses = selected or ["open", "escalated", "resolved", "dismissed"]
+    assert sum(summary[s] for s in statuses) == len(expected), filters
+
+
+async def test_exceptions_search_never_matches_an_invoice_less_exception(realdb):
+    """An invoice-less exception has no number and no vendor. A search must
+    neither error on it nor match it, and clearing the search must bring it
+    back — it is excluded by the term, not lost by the join."""
+    spec = await _seed_exceptions(realdb)
+    orphans = [r for r in spec if r["vendor_name"] is None]
+    assert orphans, "the seed must include invoice-less exceptions"
+
+    async with realdb.client(key="a", role="ap_manager") as c:
+        searched = await c.get("/api/exceptions", params={"search": "e", "page_size": 100})
+        unsearched = await c.get("/api/exceptions", params={"page_size": 100})
+        blank = await c.get("/api/exceptions", params={"search": "   ", "page_size": 100})
+
+    assert searched.status_code == 200, searched.text
+    assert all(item["invoice_id"] is not None for item in searched.json()["items"])
+    assert sum(1 for i in unsearched.json()["items"] if i["invoice_id"] is None) == len(orphans)
+    # A whitespace-only term is no filter, as on every other list.
+    assert blank.json()["total"] == unsearched.json()["total"] == len(spec)
+
+
+async def test_exceptions_summary_is_entity_scoped(realdb):
+    """`X-Entity-ID` narrows every tally, exactly as it narrows the list."""
+    sub = await _extra_entity(realdb, slug="exc-sub")
+    await _seed_exceptions(realdb)
+
+    async with realdb.client(key="a", role="ap_manager") as c:
+        scoped = (await c.get("/api/exceptions/summary", headers={"X-Entity-ID": str(sub)})).json()
+
+    assert {k: scoped[k] for k in ("open", "escalated", "resolved", "dismissed")} == {
+        "open": 0,
+        "escalated": 0,
+        "resolved": 0,
+        "dismissed": 0,
+    }
+    assert scoped["by_type"] == {}
+    assert scoped["by_severity"] == {}
 
 
 # ===========================================================================

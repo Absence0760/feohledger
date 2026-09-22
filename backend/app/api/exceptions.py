@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import ROLE_ADMIN, ROLE_AP_MANAGER, require_roles
@@ -16,6 +16,7 @@ from app.api.pagination import (
     paginated,
     pagination_params,
 )
+from app.api.sorting import SortParams, resolve_order_by, sort_params
 from app.database import get_control_db
 from app.models.exception import Exception as APException
 from app.models.invoice import Invoice
@@ -24,6 +25,7 @@ from app.models.user import User
 from app.schemas.money import json_money
 from app.services.exception_lifecycle import (
     ACTIONABLE_STATUSES,
+    EXCEPTION_SEVERITY_RANK,
     RESOLUTION_ACTIONS,
     invoices_for,
     record_assignment,
@@ -31,6 +33,7 @@ from app.services.exception_lifecycle import (
     segregation_refusal,
 )
 from app.tenant import apply_entity_scope, get_entity_id, get_tenant, get_tenant_db
+from app.utils.search import ilike_contains
 
 router = APIRouter(prefix="/exceptions", tags=["exceptions"])
 
@@ -114,6 +117,32 @@ def _exception_dict(exc: APException, inv: Invoice | None) -> dict:
     }
 
 
+#: ``sort=`` allowlist for ``GET /api/exceptions`` — see ``api/sorting.py``. The
+#: row's own ``id`` is always appended as the final tie-break, whichever key is
+#: picked, exactly as on the default order.
+#:
+#: ``severity`` sorts on its RANK (``exception_lifecycle.EXCEPTION_SEVERITY_RANK``)
+#: rather than on the column: the column is text, and alphabetical order puts
+#: ``info`` between ``error`` and ``warning``. Descending is worst-first. A
+#: severity the rank map does not know ranks 0, below ``info``.
+#:
+#: ``due_at`` is the SLA deadline, and it is NULL whenever no SLA is configured
+#: for the type — "no deadline", which is neither the earliest deadline nor the
+#: latest. It is in ``_NULLS_LAST_SORT_KEYS`` so those rows trail in both
+#: directions instead of leading a descending sort (Postgres ranks NULL above
+#: every value).
+EXCEPTION_SORTABLE_COLUMNS: dict[str, object] = {
+    "created_at": APException.created_at,
+    "severity": case(EXCEPTION_SEVERITY_RANK, value=APException.severity, else_=0),
+    "due_at": APException.due_at,
+}
+_NULLS_LAST_SORT_KEYS = frozenset({"due_at"})
+
+#: The status value that means "no status filter" — what the queue's All chip
+#: sends. An omitted ``status`` means the same thing.
+STATUS_ALL = "all"
+
+
 def _exception_list_filters(
     query,
     *,
@@ -121,13 +150,35 @@ def _exception_list_filters(
     exception_type: str | None,
     severity: str | None,
     assigned_to_user_id: str | None,
+    search: str | None,
+    invoice_joined: bool = False,
 ):
     """Apply the exception-queue filters to ``query``.
 
-    Shared by ``GET /api/exceptions`` and ``GET /api/exceptions/ids`` so
-    "select all N matching" resolves EXACTLY the set the queue is showing.
+    The ONE definition of what each queue filter means, shared by
+    ``GET /api/exceptions`` (rows + total), ``GET /api/exceptions/ids`` (so
+    "select all N matching" resolves EXACTLY the set the queue is showing) and
+    ``GET /api/exceptions/summary`` (so every chip tally describes that set too).
+
+    ``status`` accepts a comma-separated list. ``all`` — or no value — is no
+    status filter at all. ``all`` used to be passed straight into the ``IN``
+    list here, where it matched nothing, so the list and the summary disagreed
+    about the one status value the summary did understand.
+
+    ``search`` is a case-insensitive literal substring over the joined invoice's
+    ``invoice_number`` and ``vendor_name`` — the two identifiers the queue row
+    shows. An exception with no invoice (a Positive Pay ``not_on_file`` fraud
+    flag) has neither, so it never matches a search, and never errors on one:
+    the outer join yields NULLs, and ``NULL ILIKE …`` is not true. A blank term
+    is no filter, as on every other list endpoint.
+
+    ``invoice_joined`` says whether ``query`` already joins ``Invoice``. The list
+    selects from it; the id resolver and the tallies select from ``APException``
+    alone and need the join added for the search leg only. An exception has at
+    most one invoice, so the join cannot fan a count out — it is conditional only
+    so the unsearched tallies stay single-table queries.
     """
-    if status_filter:
+    if status_filter and status_filter.strip() != STATUS_ALL:
         statuses = [s.strip() for s in status_filter.split(",")]
         query = query.where(APException.status.in_(statuses))
     if exception_type:
@@ -140,6 +191,13 @@ def _exception_list_filters(
         except ValueError as exc_:
             raise HTTPException(status_code=400, detail="Invalid assigned_to_user_id") from exc_
         query = query.where(APException.assigned_to_user_id == uid)
+    term = (search or "").strip()
+    if term:
+        if not invoice_joined:
+            query = query.outerjoin(Invoice, APException.invoice_id == Invoice.id)
+        query = query.where(
+            ilike_contains(Invoice.invoice_number, term) | ilike_contains(Invoice.vendor_name, term)
+        )
     return query
 
 
@@ -149,11 +207,27 @@ async def list_exceptions(
     exception_type: str | None = Query(None, alias="type"),
     severity: str | None = None,
     assigned_to_user_id: str | None = None,
+    search: str | None = None,
+    sort: SortParams = Depends(sort_params),
     pagination: PaginationParams = Depends(pagination_params),
     db: AsyncSession = Depends(get_tenant_db),
     user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER)),
     entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
+    # Resolved before any query runs, so an unknown `sort=` is a 422 naming the
+    # accepted keys rather than a parameter silently ignored.
+    order_by = resolve_order_by(
+        sort,
+        EXCEPTION_SORTABLE_COLUMNS,
+        id_column=APException.id,
+        # `created_at` alone is not a total order — two exceptions raised by the
+        # same sweep tick share a timestamp, and OFFSET/LIMIT over a non-total
+        # order can hand the same row to two pages or skip it entirely. The
+        # `/ids` resolver below already tie-breaks on `id`; the list it is meant
+        # to agree with did not.
+        default=[APException.created_at.desc(), APException.id.desc()],
+        nulls_last=_NULLS_LAST_SORT_KEYS,
+    )
     query = apply_entity_scope(
         select(APException, Invoice).outerjoin(Invoice, APException.invoice_id == Invoice.id),
         APException,
@@ -165,20 +239,13 @@ async def list_exceptions(
         exception_type=exception_type,
         severity=severity,
         assigned_to_user_id=assigned_to_user_id,
+        search=search,
+        invoice_joined=True,
     )
 
     total = (await db.execute(select(func.count()).select_from(query.subquery()))).scalar() or 0
 
-    query = (
-        # `created_at` alone is not a total order — two exceptions raised by the
-        # same sweep tick share a timestamp, and OFFSET/LIMIT over a non-total
-        # order can hand the same row to two pages or skip it entirely. The
-        # `/ids` resolver below already tie-breaks on `id`; the list it is meant
-        # to agree with did not.
-        query.order_by(APException.created_at.desc(), APException.id.desc())
-        .offset(pagination.offset)
-        .limit(pagination.limit)
-    )
+    query = query.order_by(*order_by).offset(pagination.offset).limit(pagination.limit)
     result = await db.execute(query)
     rows = result.all()
 
@@ -193,6 +260,7 @@ async def list_exception_ids(
     exception_type: str | None = Query(None, alias="type"),
     severity: str | None = None,
     assigned_to_user_id: str | None = None,
+    search: str | None = None,
     db: AsyncSession = Depends(get_tenant_db),
     user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER)),
     entity_id: uuid.UUID | None = Depends(get_entity_id),
@@ -200,7 +268,9 @@ async def list_exception_ids(
     """Every exception id matching the caller's queue filters — the resolver
     behind "select all N matching" on the exceptions queue. See
     `invoices.list_invoice_ids` for why this exists; same filters as
-    `GET /exceptions` so the two describe the same set."""
+    `GET /exceptions` — `search` included — so the two describe the same set.
+    Takes no `sort`: the selection is a set, and its order cannot change which
+    rows a bulk action touches."""
     query = apply_entity_scope(select(APException.id), APException, entity_id)
     query = _exception_list_filters(
         query,
@@ -208,6 +278,7 @@ async def list_exception_ids(
         exception_type=exception_type,
         severity=severity,
         assigned_to_user_id=assigned_to_user_id,
+        search=search,
     )
 
     total = (await db.execute(select(func.count()).select_from(query.subquery()))).scalar() or 0
@@ -221,43 +292,61 @@ async def list_exception_ids(
 @router.get("/summary")
 async def exception_summary(
     status_filter: str | None = Query(None, alias="status"),
+    exception_type: str | None = Query(None, alias="type"),
+    severity: str | None = None,
+    assigned_to_user_id: str | None = None,
+    search: str | None = None,
     db: AsyncSession = Depends(get_tenant_db),
     user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER)),
     entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
-    """Counts by status and type for the exception queue. Scoped to the entity.
+    """The chip tallies beside the exception queue: counts by status, by type
+    and by severity. Scoped to the entity.
 
-    `by_type` honours the SAME `status` filter the list endpoint takes, because
-    the frontend renders it as the type-filter chips beside the list. Computing
-    it `WHERE status = 'open'` unconditionally meant the chips showed open-only
-    tallies while the user was looking at Escalated / Resolved / All (a chip
-    reading `duplicate 12` beside 2 rows), and — worse — a type that exists
-    only among resolved exceptions got NO chip at all, so it could not be
-    filtered to. The status totals above stay unfiltered: they are what the
-    status chips themselves are counting.
+    Takes EVERY filter the list takes, and applies them through the list's own
+    `_exception_list_filters`, so a tally can never describe a set the table is
+    not showing: search for one vendor and every chip counts that vendor's
+    exceptions, not the tenant's.
+
+    Each tally ignores exactly ONE filter — its own dimension. A chip reads what
+    the table WOULD show if that chip were clicked, given everything else that
+    is selected, so a row of chips cannot be narrowed by the chip already on:
+    applying `status=resolved` to the status tallies would read Resolved 4
+    beside Open 0 and Escalated 0 — a row that lies about every queue but the
+    one on screen (the rule `GET /api/invoices/counts` states for its `status`).
+    So:
+
+    * the status counts honour type, severity, assignee and search;
+    * `by_type` honours status, severity, assignee and search — a type that
+      exists only among resolved exceptions gets a chip once Resolved is on;
+    * `by_severity` honours status, type, assignee and search.
+
+    `status` omitted, or `all`, is no status filter — the list's meaning. This
+    endpoint used to count its types within `open` when no status was sent, so
+    a bare call described a different set from a bare list call; the queue, its
+    only client, always sends the status it is showing, so nothing observed
+    that default.
     """
-    # By status
-    status_rows = await db.execute(
-        apply_entity_scope(
-            select(APException.status, func.count(APException.id)).group_by(APException.status),
-            APException,
-            entity_id,
-        )
-    )
-    by_status = {row[0]: row[1] for row in status_rows.all()}
+    filters = {
+        "status_filter": status_filter,
+        "exception_type": exception_type,
+        "severity": severity,
+        "assigned_to_user_id": assigned_to_user_id,
+        "search": search,
+    }
 
-    # By type — within the caller's current status view (default: open).
-    type_query = select(APException.exception_type, func.count(APException.id))
-    if status_filter != "all":
-        type_query = type_query.where(APException.status == (status_filter or "open"))
-    type_rows = await db.execute(
-        apply_entity_scope(
-            type_query.group_by(APException.exception_type),
-            APException,
-            entity_id,
-        )
-    )
-    by_type = {row[0]: row[1] for row in type_rows.all()}
+    async def tally(column, **own_dimension_off) -> dict:
+        query = _exception_list_filters(
+            apply_entity_scope(select(column, func.count(APException.id)), APException, entity_id),
+            **{**filters, **own_dimension_off},
+        ).group_by(column)
+        # A NULL key cannot be a chip — no query parameter selects NULL — so a
+        # row with no value on the axis is counted by no chip in that row.
+        return {row[0]: row[1] for row in (await db.execute(query)).all() if row[0] is not None}
+
+    by_status = await tally(APException.status, status_filter=None)
+    by_type = await tally(APException.exception_type, exception_type=None)
+    by_severity = await tally(APException.severity, severity=None)
 
     return {
         "open": by_status.get("open", 0),
@@ -265,6 +354,7 @@ async def exception_summary(
         "resolved": by_status.get("resolved", 0),
         "dismissed": by_status.get("dismissed", 0),
         "by_type": by_type,
+        "by_severity": by_severity,
     }
 
 
