@@ -585,7 +585,7 @@ Response:
   quantified lines but a booked receipt count as fully received;
   receipts with no PO link can't be priced and are excluded. Pure math
   in `analytics.value_received_goods`; SQL fan-out in
-  `api/analytics._received_amount`.)
+  `api/analytics._received_amounts`, which returns the whole-book figure and the same valuation grouped by each PO's currency.)
 - `working_capital_impact_5_days` — `avg_daily_outflow × 5`
 - `supplier_concentration.{top_10_share_pct, top_50_share_pct, largest_vendor, largest_vendor_share_pct, flagged}` — `flagged=true` iff the largest vendor **reaches or** exceeds 25% (configurable; the boundary is inclusive on purpose — a risk flag that stays dark at exactly the configured limit is the wrong direction to be wrong in). **Every share is computed against the whole period's spend**, never a top-N subtotal: `compute_supplier_concentration` derives its denominator from the list it is handed and takes its own `[:10]`/`[:50]` cuts, so the caller must pass the full vendor set and slice only for display. Passing a pre-sliced top-50 made `total_spend` the top-50 subtotal, inflated `top_10_share_pct` / `largest_vendor_share_pct` (and with them `flagged`), and pinned `top_50_share_pct` at exactly `100.0` on any tenant with 50+ vendors. The same rule governs `/drill/spend_concentration`, whose `total_spend` and `share_pct` are computed before `?limit=` is applied — otherwise `limit` silently rebased both and the drill disagreed with the tile it was opened from. Excludes `rejected` invoices (never real spend) — the SAME population its drill-through and the `vendor_spend` export/scheduled report use, so clicking from the tile into either agrees with the number the CFO started from. Also the SAME reporting-currency rollup as the dashboard's `vendor_spend` (see above) — a vendor's multi-currency invoices are converted before summing, never naively added across currencies
 - `supplier_concentration.unconverted_count` — invoices folded into `total_spend`, and therefore into every share above and into `flagged`, at **face value** because no locked exchange rate bridged them into the reporting currency. A count, not money; `0` on a single-currency tenant. See § Per-vendor spend is one query below
@@ -879,7 +879,7 @@ calls the shared `_entity_metrics(entity_id=...)` helper once per entity, then
 once more with `entity_id=None` for the `consolidated` block. Because every row
 and the consolidated block run the same entity-scoped query shapes used by
 `/analytics/cfo` (total spend, open-payables balance, invoice count,
-open-exception count, open-PO accrual via `_open_po_sum_query`), the
+open-exception count, open-PO accrual via `_open_po_amounts_by_currency`), the
 consolidated block is a true sum-across-entities cross-check.
 
 Query params: `period_days` (default 365, range 30–730).
