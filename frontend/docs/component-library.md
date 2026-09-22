@@ -219,8 +219,12 @@ a definition as JSON). All wrap the shared `ui/Modal.svelte` and call the
   mount effect fired three reads still on `require_roles`, so that row led
   straight to three 403s. When you widen a nav entry, check what the PAGE loads
   on mount, not just the endpoint the row is named after. Guard:
-  `src/lib/nav.test.ts` pins the exact Procurement link set each system role
-  sees, and asserts each entry carries its own gate.
+  `src/lib/nav.test.ts` pins every row's gate once, as a literal `NAV_GATES`
+  table (a new, moved or re-gated row changes that table and nothing else), and
+  `tests-e2e/auth/rbac.spec.ts` asserts the rendered sidebar and every section
+  bar equal what `nav.ts` computes (`sidebarHrefs` / `visibleChildren`) for the
+  signed-in role's real roles and permissions — the wiring, never a second
+  hand-typed copy of the answer.
 - `SectionTabs.svelte` — the per-page section sub-tab bar, rendered once in
   `routes/+layout.svelte` above the page slot. For a grouped route it renders
   the group's RBAC-visible children as tabs (suppressed when ≤1 is visible);
