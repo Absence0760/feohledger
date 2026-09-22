@@ -3406,6 +3406,9 @@ export const messages = {
 	'auth.signup.successSpamLink': 'réessayez',
 	'auth.signup.heading': 'Créez votre espace de travail',
 	'auth.signup.subtitle': 'Obtenez votre propre espace de travail AP en moins d\'une minute.',
+	'auth.signup.closedHeading': 'Les inscriptions sont fermées',
+	'auth.signup.closedBody':
+		'Sur cette instance, les nouveaux espaces de travail sont créés uniquement sur invitation. Si votre organisation utilise déjà FeohLedger, connectez-vous à l\'adresse de votre espace de travail.',
 	'auth.signup.failed': 'Échec de l\'inscription.',
 	'auth.signup.captchaRequired': 'Veuillez compléter le captcha.',
 	'auth.signup.companyName': 'Nom de l\'entreprise',

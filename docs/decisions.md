@@ -7878,3 +7878,68 @@ two-person team where one uploaded and the other routed) has the same
 each passes a real value, and fails if a third site starts writing the set
 without being declared, so "two writers" cannot quietly go stale the way the
 old "`generate_one` is the only writer" comment would have.
+
+## 194. Self-service signup gets its own off switch, and a closed signup is a 404 and a sentence, not a starved captcha
+
+**Decided:** 2026-09-21 · `backend/app/config.py` · `backend/app/api/signup.py` ·
+`frontend/src/routes/signup/+page.svelte` · `deploy/decrypt-env.sh`
+
+Until now the only way to close self-service signup was to misconfigure its
+abuse control: a deployed env refused to boot without `FEOH_HCAPTCHA_SECRET`, so
+an operator running an invite-only pilot set the secret and left the *sitekey*
+empty. That failed closed — no widget loaded, and `POST /api/signup/start`
+answered 400 "Captcha is required." — but it was a closed door painted to look
+open: `/signup` rendered a complete form that a visitor filled in only to be
+refused, and the operator held a captcha credential for a feature they had
+turned off. §176's rule applies in the other direction: a feature needs its own
+gate, and borrowing another control's failure mode as one means the two can no
+longer be reasoned about separately.
+
+`FEOH_SIGNUP_ENABLED` (default `true`) is that gate. Four calls inside it:
+
+1. **Default on.** Guard rail 7 and every existing deployment: `pnpm dev`, the
+   signup e2e and any box already taking signups behave exactly as before, and
+   closing signup is the deliberate act. `deploy/prod.sops.yaml.example` — the
+   invite-only minimal deployment's contract, which already told operators to
+   keep signup closed — now says `"false"` instead of describing the
+   empty-sitekey workaround.
+
+2. **Off is a bare 404 on all three routes, decided before anything else runs.**
+   It is a router-level dependency, so it fires before the body is validated,
+   before a session is opened, and before a rate limit is spent: a closed
+   deployment creates no `EmailVerification` row, consumes no pending token, and
+   a probe cannot burn a real visitor's per-IP budget or read slug availability.
+   404 with `{"detail": "Not Found"}` — the body an unmounted route returns —
+   rather than a 403 or 400 naming the feature, because that is what the
+   codebase's two other whole-surface kill switches already answer
+   (`cash_flow._require_enabled`, `v1_openapi._ensure_enabled`) and it says
+   nothing more than a route that does not exist. Publishing the state through
+   `/api/public-config` does not undercut that: the SPA needs it to render
+   honestly, and the 404 already told anyone who asked.
+
+3. **The captcha boot check follows the switch.** `_require_captcha_in_deployed_envs`
+   exists to stop a public, tenant-creating endpoint shipping without its abuse
+   control; with signup off there is no such endpoint, so the secret is required
+   only while `signup_enabled` is true. `deploy/decrypt-env.sh` mirrors the rule
+   — including every spelling pydantic reads as false, so the script and the app
+   cannot disagree about whether a deploy needs the secret — and a near-miss
+   spelling keeps the requirement rather than loosening it.
+
+4. **The SPA says "closed"; the marketing page's links still lead there.**
+   `/signup` reads `signup_enabled` from the public-config call it already made
+   and, on an explicit `false`, renders a heading and one sentence (new
+   workspaces are by invitation; an existing customer signs in at their
+   workspace's address) — no form, no captcha script, no slug check, and no
+   "what happens next" panel describing a flow that is not on offer. Until the
+   config arrives, or if it cannot be fetched, the page stays the form it always
+   was and the server remains the authority. The landing page's "Create your
+   workspace" calls to action are **not** hidden: they land on that notice,
+   which is an honest answer, whereas removing or rewording them is marketing
+   copy for a deployment shape the landing page was not written for — an apex
+   marketing page is a public-SaaS artefact, and an invite-only deployment
+   choosing what to say there instead is a product call, not a consequence of
+   the switch.
+
+A verification link emailed while signup was open survives the switch
+unconsumed, so re-opening signup lets that visitor finish rather than
+stranding them.

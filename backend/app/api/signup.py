@@ -14,6 +14,11 @@ Two-step flow:
      generated temp password), and emails the welcome message with the
      tenant URL + credentials.
 
+The whole router sits behind ``FEOH_SIGNUP_ENABLED`` (``settings.signup_enabled``,
+default on): off, every route here answers a bare 404 before validating
+anything, reading the database, or touching a rate limit — see
+:func:`_require_signup_enabled`.
+
 The split protects against:
 
   - Fake / stolen email submissions: nothing is created until the user
@@ -60,7 +65,30 @@ from app.utils.tenant_urls import tenant_base_url
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/signup", tags=["signup"])
+
+def _require_signup_enabled() -> None:
+    """Kill switch: with ``FEOH_SIGNUP_ENABLED`` off the signup surface is gone.
+
+    A router-level dependency, so it runs before each route's own parameters are
+    validated and before its database session or rate limiter is reached: a
+    closed deployment answers every request — well-formed or not — with the same
+    404 an unmounted route returns, and a probe can neither create an
+    ``EmailVerification`` row, consume a verification token, burn a per-IP
+    budget, nor read slug availability. 404 rather than a "signup is disabled"
+    403 for the reason the cash-flow copilot and the public API's switches give:
+    the response does not enumerate a feature that is off. The SPA learns the
+    state from ``/api/public-config`` instead, and renders "signup is closed"
+    rather than a form.
+    """
+    if not settings.signup_enabled:
+        raise HTTPException(status_code=404, detail="Not Found")
+
+
+router = APIRouter(
+    prefix="/signup",
+    tags=["signup"],
+    dependencies=[Depends(_require_signup_enabled)],
+)
 
 VERIFICATION_TTL = timedelta(hours=24)
 

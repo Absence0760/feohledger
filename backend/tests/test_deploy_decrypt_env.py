@@ -14,6 +14,8 @@ What the tests pin:
 - a file that fails any check never replaces the `.env` already in place, because
   `backup.sh` and `add-tenant.sh` read that file between deploys;
 - a value compose's `env_file` would silently rewrite is refused;
+- `FEOH_HCAPTCHA_SECRET` is required exactly when the app would require it —
+  while `FEOH_SIGNUP_ENABLED` is not false;
 - a refusal names the key, never the value.
 """
 
@@ -157,6 +159,28 @@ def test_refuses_a_missing_required_var(deploy: Deploy, missing: str, shape: str
     result = deploy.run(_dotenv({missing: None if shape == "absent" else ""}))
     _assert_refused_and_kept(deploy, result)
     assert missing in result.stderr
+
+
+@pytest.mark.parametrize("spelling", ["false", "False", "0", "no", "off", "f", "n"])
+def test_a_closed_signup_needs_no_captcha_secret(deploy: Deploy, spelling: str) -> None:
+    """The app demands FEOH_HCAPTCHA_SECRET only while self-service signup is on
+    (config.py `_require_captcha_in_deployed_envs`). The script mirrors that, for
+    every spelling pydantic reads as false, so an invite-only deploy is not
+    refused here for a secret the app itself would boot without."""
+    dotenv = _dotenv({"FEOH_HCAPTCHA_SECRET": None, "FEOH_SIGNUP_ENABLED": spelling})
+    result = deploy.run(dotenv)
+    assert result.returncode == 0, result.stderr
+    assert deploy.env.read_text() == dotenv
+
+
+@pytest.mark.parametrize("signup", [None, "true", "1", "falsey"])
+def test_an_open_signup_still_needs_the_captcha_secret(deploy: Deploy, signup: str | None) -> None:
+    """Unset, true, or anything pydantic would not read as false keeps signup on,
+    and with it the captcha requirement — never loosened by a near-miss spelling."""
+    deploy.env.write_text(PREVIOUS_ENV)
+    result = deploy.run(_dotenv({"FEOH_HCAPTCHA_SECRET": None, "FEOH_SIGNUP_ENABLED": signup}))
+    _assert_refused_and_kept(deploy, result)
+    assert "FEOH_HCAPTCHA_SECRET" in result.stderr
 
 
 @pytest.mark.parametrize("weak_key", ["change-me-in-production", "b" * 31])

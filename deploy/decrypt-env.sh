@@ -42,11 +42,20 @@ MANGLED=$(grep -E '^[A-Za-z_][A-Za-z0-9_]*=.*([[:space:]]#|\$|\\n)' .env.tmp | c
 
 # Everything compose interpolation / the app cannot default sensibly, plus
 # the vars the app hard-refuses to boot without in a deployed env
-# (FEOH_ENVIRONMENT=production arms those boot checks; FEOH_HCAPTCHA_SECRET
-# is one of them) and the two S3 buckets uploads/backups silently need.
+# (FEOH_ENVIRONMENT=production arms those boot checks) and the two S3 buckets
+# uploads/backups silently need.
+REQUIRED_VARS=(POSTGRES_PASSWORD APP_DOMAIN API_DOMAIN ACME_EMAIL AWS_REGION
+	FEOH_SECRET_KEY FEOH_ENVIRONMENT FEOH_S3_BUCKET BACKUP_S3_BUCKET)
+# FEOH_HCAPTCHA_SECRET is one of those boot checks only while self-service
+# signup is on (config.py _require_captcha_in_deployed_envs): with
+# FEOH_SIGNUP_ENABLED false the signup routes 404 and there is nothing for a
+# captcha to protect. Mirror the rule, including every spelling pydantic reads
+# as false, so the two cannot disagree about whether the secret is needed.
+if ! grep -Eiq '^FEOH_SIGNUP_ENABLED=(false|0|no|off|f|n)$' .env.tmp; then
+	REQUIRED_VARS+=(FEOH_HCAPTCHA_SECRET)
+fi
 MISSING=""
-for var in POSTGRES_PASSWORD APP_DOMAIN API_DOMAIN ACME_EMAIL AWS_REGION \
-	FEOH_SECRET_KEY FEOH_ENVIRONMENT FEOH_S3_BUCKET BACKUP_S3_BUCKET FEOH_HCAPTCHA_SECRET; do
+for var in "${REQUIRED_VARS[@]}"; do
 	grep -Eq "^${var}=.+" .env.tmp || MISSING="$MISSING $var"
 done
 [ -z "$MISSING" ] || die "required var(s) missing/empty in prod.sops.yaml:$MISSING (contract: deploy/prod.sops.yaml.example)"

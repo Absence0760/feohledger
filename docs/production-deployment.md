@@ -154,6 +154,11 @@ FEOH_EMAIL_PROVIDER=ses
 FEOH_EMAIL_FROM=no-reply@feohledger.com
 FEOH_PUBLIC_URL=https://feohledger.com
 FEOH_TENANT_URL_TEMPLATE=https://{slug}.feohledger.com
+# Self-service signup: keep it on (the default) for a public SaaS, and set
+# both hCaptcha keys — the API refuses to boot without the secret while signup
+# is on. For an invite-only deployment whose tenants are provisioned by an
+# operator, set FEOH_SIGNUP_ENABLED=false instead and omit both keys.
+FEOH_SIGNUP_ENABLED=true
 FEOH_HCAPTCHA_SECRET=<from hCaptcha dashboard>
 FEOH_HCAPTCHA_SITEKEY=<from hCaptcha dashboard>
 ```

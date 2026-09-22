@@ -3604,6 +3604,9 @@ export const en = {
 	'auth.signup.successSpamLink': 'try again',
 	'auth.signup.heading': 'Create your workspace',
 	'auth.signup.subtitle': 'Get your own AP workspace in under a minute.',
+	'auth.signup.closedHeading': 'Signup is closed',
+	'auth.signup.closedBody':
+		'New workspaces on this deployment are created by invitation only. If your organization already uses FeohLedger, sign in at your workspace\'s own address.',
 	'auth.signup.failed': 'Signup failed.',
 	'auth.signup.captchaRequired': 'Please complete the captcha.',
 	'auth.signup.companyName': 'Company name',

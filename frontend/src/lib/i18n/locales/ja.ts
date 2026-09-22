@@ -3375,6 +3375,9 @@ export const messages = {
 	'auth.signup.successSpamLink': 'もう一度お試しください',
 	'auth.signup.heading': 'ワークスペースを作成',
 	'auth.signup.subtitle': '1分以内に専用のAPワークスペースを手に入れましょう。',
+	'auth.signup.closedHeading': '新規登録は受け付けていません',
+	'auth.signup.closedBody':
+		'このデプロイでは、新しいワークスペースは招待制でのみ作成されます。組織ですでに FeohLedger をご利用の場合は、ワークスペースのアドレスからサインインしてください。',
 	'auth.signup.failed': 'サインアップに失敗しました。',
 	'auth.signup.captchaRequired': 'キャプチャを完了してください。',
 	'auth.signup.companyName': '会社名',
