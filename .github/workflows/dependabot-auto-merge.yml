@@ -1,10 +1,19 @@
 name: Dependabot auto-merge
 
 # Automatically squash-merges minor + patch Dependabot PRs once CI is
-# green. Saves review burden — `.github/dependabot.yml` configures
-# four ecosystems (github-actions, pip, npm, docker), each opening
-# 3–5 PRs / week, so without this most of the human review time goes
-# to bumping a patch version of an action or a transitive lodash dep.
+# green. Saves review burden — `.github/dependabot.yml` configures six
+# ecosystems (github-actions, pip, npm, docker, docker-compose,
+# terraform), each opening 3–5 PRs / week, so without this most of the
+# human review time goes to bumping a patch version of an action or a
+# transitive lodash dep.
+#
+# "Once CI is green" only means something if CI ran the thing that was
+# bumped. For `docker-compose` it does: every image CI starts is read
+# from backend/docker-compose.yml, not restated in a workflow
+# (docs/decisions.md §203), so a compose PR's own run tests the new
+# digest. What CI never starts is merged untested: the Authentik stack
+# and Ollama (local-only profiles), and deploy/compose.prod.yml's Caddy
+# and frontend-build Node image, which the next deploy is first to run.
 #
 # Major bumps stay manual. The last manual sweep through this repo
 # proved why: bcrypt 4 → 5 silently broke passlib 1.7.4 (passlib reads

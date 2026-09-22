@@ -181,24 +181,51 @@ below surfaced.
   merge — pgvector's `-pg16` suffix already holds it on 16) and
   `localstack/localstack` (from 2026.03.0 the image is calendar-versioned and
   refuses to start without a `LOCALSTACK_AUTH_TOKEN`, which neither a
-  contributor's laptop nor CI's service-e2e job has).
-- **CI's own copies are bumped by hand, in the same PR.** GitHub Actions
-  `services:` containers (pgvector and redis in `ci.yml` and `sso-e2e.yml`)
-  and the MinIO `docker pull` / `docker run` lines in `ci.yml` carry the SAME
-  refs as `backend/docker-compose.yml`, each with a comment saying so — no
-  Dependabot ecosystem reads a workflow's service images (`github-actions`
-  reads only `uses:`). Nothing enforces the match yet, and
-  `dependabot-auto-merge.yml` merges a green minor/patch Dependabot PR on its
-  own, so an auto-merged compose bump leaves CI on the previous (still pinned,
-  still pullable) digest until someone re-syncs it — drift, not breakage, and a
-  tracked follow-up (derive CI's refs from the compose file). The Keycloak /
-  Mailpit / LocalStack / stripe-mock containers CI starts come from this
-  compose file, so they need nothing.
+  contributor's laptop nor CI's service-e2e job has) and `node` (the
+  production frontend-build image, below — its major moves with CI's).
+- **A ref is written once, in a compose file, and everything else reads it**
+  (`docs/decisions.md` §203). No Dependabot ecosystem reads a workflow's
+  service images (`github-actions` reads only `uses:`) or a ref in a shell
+  script, so a copy anywhere else is a copy nothing bumps:
+  - **CI** — a `compose-images` job in `ci.yml` and in `sso-e2e.yml` runs
+    `scripts/compose_image_refs.sh backend/docker-compose.yml postgres redis
+    minio` and exposes each ref as a job output. The `services:` containers
+    take `image: ${{ needs.compose-images.outputs.postgres }}` (and `redis`),
+    and the MinIO step pulls and runs `$MINIO_IMAGE`, set from
+    `outputs.minio`. The script reads `docker compose config --format json`,
+    not the unordered `config --images`, and **fails closed**: a ref that is
+    not `repo:tag@sha256:<64 hex>` fails the job, because an empty
+    `services.<id>.image` does not — GitHub just starts no container. Its
+    refusals are tested first, in the same job
+    (`scripts/test_compose_image_refs.py`). If `compose-images` fails, the
+    jobs that need it are skipped, so `ci-gate` needs it directly — a skip
+    would otherwise read as a pass. The Keycloak / Mailpit / LocalStack /
+    stripe-mock / fake-erp containers CI starts come up through `docker
+    compose` itself, so they were never restated.
+  - **Production's frontend build** — the Node image is the one-shot
+    `frontend-build` service in `deploy/compose.prod.yml`, behind a `build`
+    profile so `up` never starts it; `deploy.sh` runs it with
+    `docker compose run --rm frontend-build`. Dependabot bumps its minor and
+    patch and ignores its major, which moves only with every `setup-node`
+    `node-version:` in the workflows (`frontend/CLAUDE.md` § The Node floor).
+
+  The payoff is that **a Dependabot compose PR is tested by its own CI run on
+  the images it bumps**, which is what makes `dependabot-auto-merge.yml`
+  merging a green minor/patch one safe. What CI never starts is still merged
+  untested: the Authentik stack and Ollama (local-only profiles), and
+  `compose.prod.yml`'s Caddy and Node images, first run by the next deploy.
   CI's Redis is the same alpine image as dev and production (it used to be the
   Debian `redis:7`; same Redis release, smaller base).
-- **`deploy/deploy.sh`'s `NODE_IMAGE`** (the container that builds the
-  production frontend) is pinned the same way and also has no Dependabot
-  reader; keep its major in step with CI's `setup-node`.
+- **Enforced, not described.** `backend/tests/test_container_supply_chain.py`
+  fails when a compose `image:` is not `repo:tag@sha256:…`; when any workflow
+  value or `deploy/*.sh` line spells out a digest or a compose repository's
+  `repo:tag`; when a `services:` / `container:` image is anything but
+  `${{ needs.<job>.outputs.<service> }}` from a job, in that job's `needs`,
+  that runs the compose reader for that service; when `compose.prod.yml`'s
+  Postgres or Redis ref differs from the dev file's (CI tests the dev file's);
+  and when the `frontend-build` Node major differs from any `setup-node`.
+  Comments may name images freely — only YAML values and non-comment shell
+  lines are scanned.
 - **To re-pin by hand**, read the digest off the registry, never off a local
   image: `docker buildx imagetools inspect <repo>:<tag>` prints the index
   `Digest:` to copy.
@@ -223,11 +250,12 @@ closed; nothing is buried. The health-check loop is deliberately untouched, and
 a container that starts but never goes healthy still fails exactly as before.
 
 `quay.io/minio/minio` is MinIO's own registry and serves the same image
-anonymously. The reference appears in three places that must stay in step:
-`backend/docker-compose.yml` and the two `docker run` invocations in
-`.github/workflows/ci.yml` (the backend-shard job and the e2e job) — MinIO can't
-be a GitHub Actions `services:` container because it needs a `server /data`
-command argument.
+anonymously. The reference is written once, in `backend/docker-compose.yml`;
+the two `docker pull` / `docker run` invocations in `.github/workflows/ci.yml`
+(the backend-shard job and the e2e job) run whatever ref the `compose-images`
+job reads from it ([Image pinning](#image-pinning)) — MinIO can't be a GitHub
+Actions `services:` container because it needs a `server /data` command
+argument.
 
 **The pinned release is `RELEASE.2025-09-07T16-13-09Z` — exactly what `latest`
 resolved to (same digest) when the tag was pinned, so pinning changed nothing
