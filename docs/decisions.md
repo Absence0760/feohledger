@@ -7662,3 +7662,46 @@ to start a run against a database behind head, naming each stale one and
 The delay is its own lesson: that entry named its own durable fix, sized it
 correctly, and still sat for nine days because it was filed as a note rather
 than as work.
+
+## 190. An open credit memo can be edited; an applied one never — and edit, apply and void share one row lock
+
+`POST /api/credit-memos` had no counterpart for correcting what it wrote. Both
+application paths refuse a currency mismatch, so a memo keyed in the wrong
+currency was permanently unappliable, and the only way out was Void and
+re-create — a void row in the audit trail for what was a typo (issue #443).
+
+`PATCH /api/credit-memos/{id}` now corrects it, and the boundary it draws is the
+money boundary: **only a memo that has never been applied**. That is the whole
+of "never rewrite a settled money record" here, because application is
+all-or-nothing — status, invoice link, `applied_at` and `applied_by` are written
+together in one transaction and nothing reverts them — and because only
+`applied` rows are netted off a payable, so an open memo's amount is not yet
+anything a payment run reads. The guard checks the link and the timestamp as
+well as the status anyway: a future "reopen" path must not make a settled record
+editable just by flipping one column.
+
+Considered and rejected:
+
+- **Editing an applied memo, with the invoice balance re-checked.** It would
+  restate a credit a payment may already have been booked net of
+  (`payment_runs.net_payable_amount`); the executor's stale-amount refusal would
+  catch the overpayment, but the ledger would already say something different
+  from what was approved. Void (for an open memo) and a new memo remain the
+  audit-honest path once money has moved.
+- **Letting the PATCH set `invoice_id`.** Linking a memo is applying it, with its
+  own guards and its own `credit_memo.applied` audit action. The schema forbids
+  the field (`extra="forbid"`) rather than ignoring it, so a caller can never
+  believe it applied a credit that it did not.
+- **Optimistic concurrency (an `updated_at` token) instead of a lock.** A token
+  protects an editor from another editor; the race that matters here is an edit
+  against an *apply*, which carries no token. So the edit reads the memo
+  `FOR UPDATE` before its checks, and `/apply` and `/void` now lock it too. The
+  apply side was a real gap before any PATCH existed: two applies of one open
+  memo to two different invoices both read `open`, both passed, and left one
+  `credit_memo.applied` row per invoice for a credit that reduced only the
+  second. The UI sends only the fields that changed, which keeps an edit from
+  re-asserting untouched fields over a concurrent one without needing a token.
+
+Every effective edit writes one `credit_memo.updated` row carrying the old and
+new value of each changed field (money as string-Decimal); an edit that changes
+nothing writes nothing.

@@ -2,14 +2,18 @@
 
 Covers ``backend/app/api/credit_memos.py`` end-to-end against two live test
 tenants: list/get (incl. search + the sort allowlist), the per-status summary
-behind the filter chips, create (open + applied-at-creation), apply-to-invoice,
-void, the 409 lifecycle guards, RBAC, tenant isolation, and the Decimal money
-math (amounts are ``Numeric(15, 2)`` and must round-trip exactly).
+behind the filter chips, create (open + applied-at-creation), edit of an open
+memo, apply-to-invoice, void, the 409 lifecycle guards, the row lock edit and
+apply serialize on, RBAC, tenant isolation, and the Decimal money math
+(amounts are ``Numeric(15, 2)`` and must round-trip exactly).
 """
 
+import asyncio
+import uuid
+from datetime import UTC, datetime
 from decimal import Decimal
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text, update
 
 from app.models.credit_memo import CreditMemo
 from app.models.invoice import Invoice, InvoiceStatus
@@ -1175,3 +1179,512 @@ async def test_summary_rbac_matches_the_list(realdb):
     for role in ("admin", "ap_manager", "ap_clerk", "cfo"):
         async with realdb.client(key="a", role=role) as c:
             assert (await c.get("/api/credit-memos/summary")).status_code == 200, role
+
+
+# ---------------------------------------------------------------------------
+# create: request validation + the entity guard on both application paths
+# ---------------------------------------------------------------------------
+
+
+async def test_malformed_ids_are_422_not_500(realdb):
+    """`vendor_id` / `invoice_id` were `str` and parsed by hand with
+    `uuid.UUID(...)`, so a malformed id raised an unhandled ValueError — a 500."""
+    mk = realdb.sessionmaker("a")
+    org_id = realdb.info("a").org_id
+    vendor_id = await _add_vendor(mk, org_id)
+    async with realdb.client(key="a", role="ap_manager") as c:
+        bad_vendor = await c.post(
+            "/api/credit-memos",
+            json={"memo_number": "CM-BAD", "vendor_id": "not-a-uuid", "amount": "1.00"},
+        )
+        bad_invoice = await c.post(
+            "/api/credit-memos",
+            json={
+                "memo_number": "CM-BAD",
+                "vendor_id": vendor_id,
+                "amount": "1.00",
+                "invoice_id": "not-a-uuid",
+            },
+        )
+        memo_id = await _create_open_memo(c, vendor_id)
+        bad_apply = await c.post(
+            f"/api/credit-memos/{memo_id}/apply", json={"invoice_id": "not-a-uuid"}
+        )
+    assert bad_vendor.status_code == 422
+    assert bad_invoice.status_code == 422
+    assert bad_apply.status_code == 422
+
+
+async def test_create_currency_must_be_an_iso_shape(realdb):
+    """A code no invoice can carry makes a memo that is unappliable from birth."""
+    mk = realdb.sessionmaker("a")
+    org_id = realdb.info("a").org_id
+    vendor_id = await _add_vendor(mk, org_id)
+    base = {"memo_number": "CM-C", "vendor_id": vendor_id, "amount": "1"}
+    async with realdb.client(key="a", role="ap_manager") as c:
+        for bad in ("US", "EURO", "12$"):
+            r = await c.post("/api/credit-memos", json={**base, "currency": bad})
+            assert r.status_code == 422, bad
+        ok = await c.post("/api/credit-memos", json={**base, "currency": " eur "})
+        blank_number = await c.post("/api/credit-memos", json={**base, "memo_number": "   "})
+    assert ok.status_code == 201, ok.text
+    assert ok.json()["currency"] == "EUR"
+    assert blank_number.status_code == 422
+
+
+async def test_currency_guard_ignores_case_on_the_invoice_side(realdb):
+    """The invoice schemas never normalised case, so a legacy `eur` invoice is
+    the same currency as a `EUR` memo — refusing it would be a false mismatch."""
+    mk = realdb.sessionmaker("a")
+    org_id = realdb.info("a").org_id
+    vendor_id = await _add_vendor(mk, org_id)
+    invoice_id = await _add_invoice(
+        mk, org_id, vendor_id=vendor_id, number="INV-LC", currency="eur"
+    )
+    async with realdb.client(key="a", role="ap_manager") as c:
+        resp = await c.post(
+            "/api/credit-memos",
+            json={
+                "memo_number": "CM-LC",
+                "vendor_id": vendor_id,
+                "amount": "10.00",
+                "currency": "EUR",
+                "invoice_id": invoice_id,
+            },
+        )
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["status"] == "applied"
+
+
+async def _cross_entity_pair(realdb) -> tuple[str, str, str]:
+    """A vendor stamped in entity B whose id an entity-A invoice carries.
+
+    `vendor_matching` never produces this link, so it is forced — the guard is
+    for the drift case under the consolidated view, where no header confines
+    either side, not for a path the app takes today. Returns
+    ``(b_vendor_id, a_invoice_id, b_entity_id)``.
+    """
+    mk = realdb.sessionmaker("a")
+    org_id = realdb.info("a").org_id
+    async with realdb.client(key="a", role="admin") as c:
+        default_id, other_id = await _entities(c, name="CM X Sub", slug="cm-x-sub")
+    b_vendor, _ = await _seed_scoped_vendor_invoice(mk, org_id, entity_id=other_id, number="X-B")
+    async with mk() as s:
+        inv = Invoice(
+            organization_id=org_id,
+            entity_id=uuid.UUID(default_id),
+            invoice_number="X-A-1",
+            vendor_name="CM Scope X-B",
+            vendor_id=uuid.UUID(b_vendor),
+            amount=Decimal("500.00"),
+            currency="USD",
+            status=InvoiceStatus.approved,
+        )
+        s.add(inv)
+        await s.commit()
+        await s.refresh(inv)
+        return b_vendor, str(inv.id), other_id
+
+
+async def test_create_refuses_to_credit_another_entitys_invoice(realdb):
+    b_vendor, a_invoice, _ = await _cross_entity_pair(realdb)
+    async with realdb.client(key="a", role="admin") as c:  # consolidated view
+        resp = await c.post(
+            "/api/credit-memos",
+            json={
+                "memo_number": "CM-X",
+                "vendor_id": b_vendor,
+                "amount": "10.00",
+                "invoice_id": a_invoice,
+            },
+        )
+    assert resp.status_code == 409, resp.text
+    assert "entities" in resp.json()["detail"]
+    async with realdb.sessionmaker("a")() as s:
+        assert (await s.execute(select(func.count()).select_from(CreditMemo))).scalar() == 0
+
+
+async def test_apply_refuses_to_credit_another_entitys_invoice(realdb):
+    b_vendor, a_invoice, other_id = await _cross_entity_pair(realdb)
+    async with realdb.client(key="a", role="admin") as c:
+        c.headers["X-Entity-ID"] = other_id
+        memo_id = await _create_open_memo(c, b_vendor, number="CM-X-OPEN")
+        c.headers.pop("X-Entity-ID")  # consolidated: no header confines the invoice
+        resp = await c.post(f"/api/credit-memos/{memo_id}/apply", json={"invoice_id": a_invoice})
+    assert resp.status_code == 409, resp.text
+    assert "entities" in resp.json()["detail"]
+    async with realdb.sessionmaker("a")() as s:
+        memo = await s.get(CreditMemo, uuid.UUID(memo_id))
+        assert memo.status == "open" and memo.invoice_id is None
+
+
+# ---------------------------------------------------------------------------
+# PATCH /credit-memos/{id} — correct a mis-keyed OPEN memo, never a settled one
+# ---------------------------------------------------------------------------
+
+
+async def _audit_rows(mk, memo_id: str, action: str) -> list[dict]:
+    from app.models.workflow import AuditLog
+
+    async with mk() as s:
+        rows = (
+            await s.execute(
+                select(AuditLog)
+                .where(
+                    AuditLog.entity_type == "credit_memo",
+                    AuditLog.entity_id == uuid.UUID(memo_id),
+                    AuditLog.action == action,
+                )
+                .order_by(AuditLog.created_at)
+            )
+        ).scalars()
+        return [{"actor_id": r.actor_id, "details": r.details} for r in rows]
+
+
+async def test_patch_open_memo_rewrites_fields_and_audits_before_after(realdb):
+    mk = realdb.sessionmaker("a")
+    info = realdb.info("a")
+    vendor_id = await _add_vendor(mk, info.org_id)
+    async with realdb.client(key="a", role="ap_manager") as c:
+        memo_id = await _create_open_memo(c, vendor_id, number="CM-TYPO", amount="100.00")
+        resp = await c.patch(
+            f"/api/credit-memos/{memo_id}",
+            json={
+                "memo_number": " CM-FIXED ",
+                "amount": "150.25",
+                "currency": "eur",
+                "issued_date": "2026-09-01",
+                "reason": "Short shipment",
+            },
+        )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["memo_number"] == "CM-FIXED"
+    assert body["amount"] == 150.25
+    assert body["currency"] == "EUR"
+    assert body["issued_date"] == "2026-09-01"
+    assert body["reason"] == "Short shipment"
+    assert body["status"] == "open"
+    assert body["vendor_name"] == "Acme Supplies"
+
+    async with mk() as s:
+        memo = await s.get(CreditMemo, uuid.UUID(memo_id))
+        assert memo.amount == Decimal("150.25")  # exact through Numeric(15, 2)
+        assert memo.currency == "EUR"
+
+    rows = await _audit_rows(mk, memo_id, "credit_memo.updated")
+    assert len(rows) == 1
+    assert rows[0]["actor_id"] == info.users["ap_manager"]
+    changes = rows[0]["details"]["changes"]
+    assert changes["memo_number"] == {"old": "CM-TYPO", "new": "CM-FIXED"}
+    # string-Decimal on both sides, never a float
+    assert changes["amount"] == {"old": "100.00", "new": "150.25"}
+    assert changes["currency"] == {"old": "USD", "new": "EUR"}
+    assert changes["issued_date"] == {"old": None, "new": "2026-09-01"}
+    assert changes["reason"] == {"old": None, "new": "Short shipment"}
+    # Unchanged fields are not restated.
+    assert "vendor_id" not in changes and "entity_id" not in changes
+
+
+async def test_patch_fixes_the_wrong_currency_dead_end(realdb):
+    """The follow-up's own scenario: a memo keyed in the wrong currency was
+    unappliable AND uncorrectable. It is now one PATCH away from applying."""
+    mk = realdb.sessionmaker("a")
+    org_id = realdb.info("a").org_id
+    vendor_id = await _add_vendor(mk, org_id)
+    invoice_id = await _add_invoice(
+        mk, org_id, vendor_id=vendor_id, number="INV-EUR", currency="EUR"
+    )
+    async with realdb.client(key="a", role="ap_manager") as c:
+        memo_id = await _create_open_memo(c, vendor_id, number="CM-WRONG-CCY")
+        apply_url = f"/api/credit-memos/{memo_id}/apply"
+        refused = await c.post(apply_url, json={"invoice_id": invoice_id})
+        assert refused.status_code == 409
+        fixed = await c.patch(f"/api/credit-memos/{memo_id}", json={"currency": "EUR"})
+        assert fixed.status_code == 200, fixed.text
+        applied = await c.post(apply_url, json={"invoice_id": invoice_id})
+    assert applied.status_code == 200, applied.text
+    assert applied.json()["status"] == "applied"
+
+
+async def test_patch_refused_once_applied_and_leaves_the_record_untouched(realdb):
+    mk = realdb.sessionmaker("a")
+    org_id = realdb.info("a").org_id
+    vendor_id = await _add_vendor(mk, org_id)
+    invoice_id = await _add_invoice(mk, org_id, vendor_id=vendor_id, number="INV-SETTLED")
+    async with realdb.client(key="a", role="admin") as c:
+        memo_id = await _create_open_memo(c, vendor_id, number="CM-SETTLED", amount="40.00")
+        applied = await c.post(
+            f"/api/credit-memos/{memo_id}/apply", json={"invoice_id": invoice_id}
+        )
+        assert applied.status_code == 200, applied.text
+        resp = await c.patch(f"/api/credit-memos/{memo_id}", json={"amount": "400.00"})
+    assert resp.status_code == 409, resp.text
+    assert "applied" in resp.json()["detail"]
+    async with mk() as s:
+        memo = await s.get(CreditMemo, uuid.UUID(memo_id))
+        assert memo.amount == Decimal("40.00")
+    assert await _audit_rows(mk, memo_id, "credit_memo.updated") == []
+
+
+async def test_patch_refused_on_a_voided_memo(realdb):
+    mk = realdb.sessionmaker("a")
+    vendor_id = await _add_vendor(mk, realdb.info("a").org_id)
+    async with realdb.client(key="a", role="admin") as c:
+        memo_id = await _create_open_memo(c, vendor_id)
+        assert (await c.post(f"/api/credit-memos/{memo_id}/void")).status_code == 200
+        resp = await c.patch(f"/api/credit-memos/{memo_id}", json={"reason": "undo"})
+    assert resp.status_code == 409
+    assert "void" in resp.json()["detail"]
+
+
+async def test_patch_refused_on_any_trace_of_an_application(realdb):
+    """No path writes `open` with an invoice link or an `applied_at` today —
+    application is all-or-nothing and nothing reverts it. The guard still
+    refuses such a row, so a future "reopen" path can never make a settled
+    record editable by flipping the status alone."""
+    mk = realdb.sessionmaker("a")
+    org_id = realdb.info("a").org_id
+    vendor_id = await _add_vendor(mk, org_id)
+    invoice_id = await _add_invoice(mk, org_id, vendor_id=vendor_id, number="INV-TRACE")
+    async with realdb.client(key="a", role="admin") as c:
+        linked = await _create_open_memo(c, vendor_id, number="CM-LINKED")
+        stamped = await _create_open_memo(c, vendor_id, number="CM-STAMPED")
+    async with mk() as s:
+        (await s.get(CreditMemo, uuid.UUID(linked))).invoice_id = uuid.UUID(invoice_id)
+        (await s.get(CreditMemo, uuid.UUID(stamped))).applied_at = datetime.now(UTC)
+        await s.commit()
+    async with realdb.client(key="a", role="admin") as c:
+        for memo_id in (linked, stamped):
+            resp = await c.patch(f"/api/credit-memos/{memo_id}", json={"amount": "1.00"})
+            assert resp.status_code == 409, memo_id
+
+
+async def test_patch_vendor_is_validated_like_create_and_entity_follows_it(realdb):
+    mk = realdb.sessionmaker("a")
+    org_id = realdb.info("a").org_id
+    async with realdb.client(key="a", role="admin") as c:
+        default_id, other_id = await _entities(c, name="CM Patch Sub", slug="cm-patch-sub")
+    b_vendor, _ = await _seed_scoped_vendor_invoice(mk, org_id, entity_id=other_id, number="PV-B")
+    a_vendor, _ = await _seed_scoped_vendor_invoice(mk, org_id, entity_id=default_id, number="PV-A")
+    a_vendor_2, _ = await _seed_scoped_vendor_invoice(
+        mk, org_id, entity_id=default_id, number="PV-A2"
+    )
+
+    async with realdb.client(key="a", role="admin") as c:
+        c.headers["X-Entity-ID"] = default_id
+        memo_id = await _create_open_memo(c, a_vendor, number="CM-PV")
+        url = f"/api/credit-memos/{memo_id}"
+        unknown = await c.patch(url, json={"vendor_id": str(uuid.uuid4())})
+        # Another entity's vendor is as unreachable here as it is on create.
+        foreign = await c.patch(url, json={"vendor_id": b_vendor})
+        ok = await c.patch(url, json={"vendor_id": a_vendor_2})
+        # The consolidated view can reach entity B's vendor; the memo follows it.
+        c.headers.pop("X-Entity-ID")
+        moved = await c.patch(url, json={"vendor_id": b_vendor})
+
+    assert unknown.status_code == 404 and unknown.json()["detail"] == "Vendor not found"
+    assert foreign.status_code == 404
+    assert ok.status_code == 200 and ok.json()["vendor_name"] == "CM Scope PV-A2"
+    assert moved.status_code == 200, moved.text
+    async with mk() as s:
+        memo = await s.get(CreditMemo, uuid.UUID(memo_id))
+        assert str(memo.vendor_id) == b_vendor
+        assert str(memo.entity_id) == other_id
+    rows = await _audit_rows(mk, memo_id, "credit_memo.updated")
+    assert len(rows) == 2
+    assert rows[0]["details"]["changes"]["vendor_id"] == {"old": a_vendor, "new": a_vendor_2}
+    assert "entity_id" not in rows[0]["details"]["changes"]  # same entity
+    assert rows[1]["details"]["changes"]["entity_id"] == {"old": default_id, "new": other_id}
+
+
+async def test_patch_request_validation(realdb):
+    mk = realdb.sessionmaker("a")
+    vendor_id = await _add_vendor(mk, realdb.info("a").org_id)
+    async with realdb.client(key="a", role="ap_manager") as c:
+        memo_id = await _create_open_memo(c, vendor_id)
+        url = f"/api/credit-memos/{memo_id}"
+        for bad in (
+            {},  # nothing to change
+            {"invoice_id": str(uuid.uuid4())},  # linking IS applying — its own endpoint
+            {"status": "void"},
+            {"memo_number": None},  # the NOT NULL fields cannot be blanked
+            {"amount": None},
+            {"currency": None},
+            {"vendor_id": None},
+            {"memo_number": "  "},
+            {"amount": "0"},
+            {"amount": "-1.00"},
+            {"amount": "1.005"},
+            {"amount": "10000000000000.00"},
+            {"currency": "US"},
+            {"vendor_id": "not-a-uuid"},
+        ):
+            r = await c.patch(url, json=bad)
+            assert r.status_code == 422, (bad, r.text)
+        # The nullable fields CAN be cleared (they are already empty here, so
+        # nothing changes and nothing is audited).
+        cleared = await c.patch(url, json={"reason": None, "issued_date": None})
+    assert cleared.status_code == 200, cleared.text
+    assert await _audit_rows(mk, memo_id, "credit_memo.updated") == []
+
+
+async def test_patch_that_changes_nothing_writes_no_audit_row(realdb):
+    mk = realdb.sessionmaker("a")
+    vendor_id = await _add_vendor(mk, realdb.info("a").org_id)
+    async with realdb.client(key="a", role="ap_manager") as c:
+        memo_id = await _create_open_memo(c, vendor_id, number="CM-SAME", amount="100.00")
+        resp = await c.patch(
+            f"/api/credit-memos/{memo_id}",
+            json={"memo_number": "CM-SAME", "amount": "100", "vendor_id": vendor_id},
+        )
+    assert resp.status_code == 200, resp.text
+    assert await _audit_rows(mk, memo_id, "credit_memo.updated") == []
+
+
+async def test_patch_rbac_matches_create(realdb):
+    mk = realdb.sessionmaker("a")
+    vendor_id = await _add_vendor(mk, realdb.info("a").org_id)
+    async with realdb.client(key="a", role="admin") as c:
+        memo_id = await _create_open_memo(c, vendor_id)
+    url = f"/api/credit-memos/{memo_id}"
+    async with realdb.client(key="a", role=None) as c:
+        assert (await c.patch(url, json={"reason": "x"})).status_code == 401
+    for role in ("ap_clerk", "cfo"):
+        async with realdb.client(key="a", role=role) as c:
+            assert (await c.patch(url, json={"reason": "x"})).status_code == 403, role
+    for role in ("admin", "ap_manager"):
+        async with realdb.client(key="a", role=role) as c:
+            assert (await c.patch(url, json={"reason": role})).status_code == 200, role
+
+
+async def test_patch_is_entity_and_tenant_scoped(realdb):
+    mk = realdb.sessionmaker("a")
+    org_id = realdb.info("a").org_id
+    async with realdb.client(key="a", role="admin") as c:
+        default_id, other_id = await _entities(c, name="CM PS Sub", slug="cm-ps-sub")
+    b_vendor, _ = await _seed_scoped_vendor_invoice(mk, org_id, entity_id=other_id, number="PS-B")
+    async with realdb.client(key="a", role="admin") as c:
+        c.headers["X-Entity-ID"] = other_id
+        memo_id = await _create_open_memo(c, b_vendor, number="CM-PS", amount="10.00")
+        c.headers["X-Entity-ID"] = default_id
+        cross_entity = await c.patch(f"/api/credit-memos/{memo_id}", json={"amount": "99.00"})
+    async with realdb.client(key="b", role="admin") as c:
+        cross_tenant = await c.patch(f"/api/credit-memos/{memo_id}", json={"amount": "99.00"})
+    # Opaque 404 on both — an out-of-scope id must not be distinguishable.
+    assert cross_entity.status_code == 404
+    assert cross_entity.json()["detail"] == "Credit memo not found"
+    assert cross_tenant.status_code == 404
+    async with mk() as s:
+        memo = await s.get(CreditMemo, uuid.UUID(memo_id))
+        assert memo.amount == Decimal("10.00")
+
+
+# ---------------------------------------------------------------------------
+# concurrency — edit and apply serialize on the memo row
+# ---------------------------------------------------------------------------
+
+
+async def _wait_for_lock_waiter(mk, *, timeout: float = 15.0) -> bool:
+    """True once Postgres reports another backend here waiting on a lock.
+
+    Asked of the server's own wait state from an independent session, never
+    slept for — the same signal `test_payment_concurrency.py` waits on. The
+    timeout only bounds a failure; the pass path returns as soon as the
+    waiter exists.
+    """
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
+    while loop.time() < deadline:
+        async with mk() as s:
+            waiting = (
+                await s.execute(
+                    text(
+                        "SELECT count(*) FROM pg_stat_activity "
+                        "WHERE datname = current_database() "
+                        "AND pid <> pg_backend_pid() "
+                        "AND wait_event_type = 'Lock'"
+                    )
+                )
+            ).scalar_one()
+        if waiting:
+            return True
+        await asyncio.sleep(0.05)
+    return False
+
+
+async def test_edit_cannot_interleave_with_a_concurrent_apply(realdb):
+    """An apply that commits while an edit is in flight must win: the edit then
+    sees `applied` and refuses, instead of rewriting a memo that has already
+    reduced a payable.
+
+    Without `FOR UPDATE` on the edit's read, the edit read `open` from the last
+    committed row, passed its guard, and its UPDATE merely queued behind the
+    apply's lock — then overwrote the amount of an APPLIED memo.
+    """
+    mk = realdb.sessionmaker("a")
+    org_id = realdb.info("a").org_id
+    vendor_id = await _add_vendor(mk, org_id)
+    invoice_id = await _add_invoice(mk, org_id, vendor_id=vendor_id, number="INV-RACE-E")
+    async with realdb.client(key="a", role="admin") as c:
+        memo_id = await _create_open_memo(c, vendor_id, number="CM-RACE-E", amount="50.00")
+    memo_uuid = uuid.UUID(memo_id)
+
+    async with mk() as held:
+        # Stand-in for an apply holding the row, mid-transaction.
+        await held.execute(select(CreditMemo).where(CreditMemo.id == memo_uuid).with_for_update())
+        await held.execute(
+            update(CreditMemo)
+            .where(CreditMemo.id == memo_uuid)
+            .values(status="applied", invoice_id=uuid.UUID(invoice_id))
+        )
+        async with realdb.client(key="a", role="admin") as c:
+            edit = asyncio.create_task(
+                c.patch(f"/api/credit-memos/{memo_id}", json={"amount": "450.00"})
+            )
+            assert await _wait_for_lock_waiter(mk), "the edit never queued behind the apply"
+            await held.commit()
+            resp = await edit
+
+    assert resp.status_code == 409, resp.text
+    async with mk() as s:
+        memo = await s.get(CreditMemo, memo_uuid)
+        assert memo.status == "applied"
+        assert memo.amount == Decimal("50.00")
+
+
+async def test_apply_reads_the_amount_a_concurrent_edit_committed(realdb):
+    """The reverse interleaving: an edit raising the amount commits while an
+    apply is in flight. The apply must check the balance against the NEW
+    amount. Without `FOR UPDATE` on the apply's memo read it checked the old
+    one, passed, and its UPDATE then stamped `applied` onto a memo worth more
+    than the invoice — a negative payable."""
+    mk = realdb.sessionmaker("a")
+    org_id = realdb.info("a").org_id
+    vendor_id = await _add_vendor(mk, org_id)
+    # `_add_invoice` books 500.00.
+    invoice_id = await _add_invoice(mk, org_id, vendor_id=vendor_id, number="INV-RACE-A")
+    async with realdb.client(key="a", role="admin") as c:
+        memo_id = await _create_open_memo(c, vendor_id, number="CM-RACE-A", amount="100.00")
+    memo_uuid = uuid.UUID(memo_id)
+
+    async with mk() as held:
+        # Stand-in for an edit holding the row, mid-transaction.
+        await held.execute(select(CreditMemo).where(CreditMemo.id == memo_uuid).with_for_update())
+        await held.execute(
+            update(CreditMemo).where(CreditMemo.id == memo_uuid).values(amount=Decimal("600.00"))
+        )
+        async with realdb.client(key="a", role="admin") as c:
+            apply = asyncio.create_task(
+                c.post(f"/api/credit-memos/{memo_id}/apply", json={"invoice_id": invoice_id})
+            )
+            assert await _wait_for_lock_waiter(mk), "the apply never queued behind the edit"
+            await held.commit()
+            resp = await apply
+
+    assert resp.status_code == 409, resp.text
+    assert "exceeds" in resp.json()["detail"]
+    async with mk() as s:
+        memo = await s.get(CreditMemo, memo_uuid)
+        assert memo.status == "open"
+        assert memo.invoice_id is None
