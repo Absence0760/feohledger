@@ -72,9 +72,11 @@ Existing fields stay: `pipeline`, `vendor_spend`, `aging`,
   `currency_conversion.vendor_rollup_to_reporting_currency` still backs the CFO
   supplier-concentration tile, its drill-through, the `vendor_spend` CSV export,
   and the scheduled report — see `docs/multi-currency.md` § Per-vendor rollups.
-- `total_amount` — the "Total Amount" KPI on the web dashboard (`routes/+page.svelte`).
-  A **naive sum across every invoice in the tenant, regardless of status or
-  date** — no filter at all. This is a different population from the CFO
+- `total_amount` — a **naive sum across every invoice in the tenant,
+  regardless of status or date** — no filter at all, and no currency either:
+  it is kept for API back-compat, and the web "Total Amount" KPI
+  (`routes/+page.svelte`) renders its currency-aware counterpart
+  `reporting.total_amount` over the same population instead. This is a different population from the CFO
   `total_spend` below (windowed + excludes rejected), even though both read
   like "how much have we spent": a rejected invoice, or one still sitting at
   `new`, counts toward this figure but not toward `total_spend`, and this
@@ -105,6 +107,12 @@ Existing fields stay: `pipeline`, `vendor_spend`, `aging`,
   was a partial slice of a month — sometimes a seventh, stub bucket of a
   fortnight's data — that reads as a spend collapse and shifts every single day
   as the window slides.
+- `upcoming_payments` — the (at most ten) unpaid invoices due within seven days
+  or overdue. Each row's `amount` is the invoice's **face** amount, in the
+  row's own `currency` (the invoice's) — not a reporting figure. Label each row
+  with that code, never with `reporting.reporting_currency` or the org's: the
+  row carried no code until `docs/decisions.md` §200, so the web dashboard
+  labelled a EUR invoice with a USD-reporting tenant's `$`.
 - `upcoming_total_amount` — server-computed total across the same rows behind
   `upcoming_payments` (summed in `Decimal`, converted to `float` exactly once
   at the response boundary). Callers (the mobile dashboard) must read this

@@ -390,6 +390,10 @@ async def get_dashboard(
             "invoice_number": r[1],
             "vendor_name": r[2],
             "amount": r[3],
+            # The code `amount` is denominated in — without it a client can
+            # only label the row with the org's reporting currency, which is
+            # wrong for every foreign invoice in the list.
+            "currency": r[5],
             "due_date": r[4].isoformat() if r[4] else None,
             "is_overdue": r[4] < today if r[4] else False,
         }

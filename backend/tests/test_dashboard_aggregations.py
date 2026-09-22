@@ -322,6 +322,32 @@ async def test_upcoming_payments_flag_overdue_only_when_due_date_before_today():
 
 
 @pytest.mark.asyncio
+async def test_upcoming_payment_rows_carry_their_own_invoice_currency():
+    """Each upcoming row's `amount` is the invoice's FACE amount, so the row has
+    to say what currency that is. Without it the web dashboard labelled every
+    row with the org's reporting currency — a EUR invoice read as dollars on a
+    USD-reporting tenant (docs/decisions.md §200). Asserted through
+    `DashboardResponse` too, since a field the dict carries but the response
+    model drops never reaches a client."""
+    import uuid
+
+    from app.schemas.dashboard import DashboardResponse
+
+    today = utc_today()
+    upcoming_rows = [
+        (uuid.uuid4(), "INV-US", "Acme", Decimal("100"), today, "USD", None, None),
+        (uuid.uuid4(), "INV-EU", "Bravo", Decimal("200"), today, "EUR", None, None),
+    ]
+    db = _mk_db(*_full_results(upcoming=upcoming_rows))
+    result = await get_dashboard(db=db, org=_org(), user=_user())
+    by_number = {row["invoice_number"]: row["currency"] for row in result["upcoming_payments"]}
+    assert by_number == {"INV-US": "USD", "INV-EU": "EUR"}
+
+    wire = DashboardResponse.model_validate(result).model_dump(mode="json")
+    assert [row["currency"] for row in wire["upcoming_payments"]] == ["USD", "EUR"]
+
+
+@pytest.mark.asyncio
 async def test_upcoming_total_amount_sums_in_decimal_not_accumulated_float():
     """`upcoming_total_amount` is a server-computed aggregate the mobile
     dashboard consumes directly instead of folding the per-row floats itself

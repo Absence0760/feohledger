@@ -82,7 +82,12 @@ class UpcomingPayment(BaseModel):
     id: str
     invoice_number: str | None
     vendor_name: str | None
+    # The invoice's FACE amount, in `currency` below — a per-row figure, not a
+    # reporting one. The row carried no code, so the web dashboard labelled it
+    # with the org's reporting currency: a EUR invoice read as dollars on a
+    # USD-reporting tenant (docs/decisions.md §200).
     amount: MoneyAmount
+    currency: str | None
     due_date: str | None
     is_overdue: bool
 
