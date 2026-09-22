@@ -30,6 +30,28 @@ logger = logging.getLogger(__name__)
 # ------------------------------------------------------------------
 
 
+def implicated_actors(invoice: Invoice) -> set[str]:
+    """Every control-plane user id segregation of duties refuses on this payable.
+
+    ``Invoice.uploaded_by_id`` ∪ ``Invoice.segregation_actor_ids``, stringified —
+    the single definition of "who is implicated in this payable".
+    :func:`violates_segregation` refuses exactly this set, and the inter-company
+    mirror inherits exactly this set from its source
+    (``services/intercompany.route_intercompany_invoice``), so the approval gate
+    and the mirror can never disagree about who shaped a payable. A third input
+    added here reaches both at once.
+
+    Stringified because ``segregation_actor_ids`` is JSONB (strings once
+    round-tripped through Postgres) while an in-memory row may still hold UUID
+    objects; the answer must not depend on which it is looking at. Read with
+    ``getattr`` for the reason :func:`violates_segregation` gives.
+    """
+    ids = {str(x) for x in (getattr(invoice, "segregation_actor_ids", None) or [])}
+    if invoice.uploaded_by_id is not None:
+        ids.add(str(invoice.uploaded_by_id))
+    return ids
+
+
 def violates_segregation(
     invoice: Invoice,
     actor_id: uuid.UUID,
@@ -46,12 +68,17 @@ def violates_segregation(
 
     * ``Invoice.uploaded_by_id`` — the one actor who caused this row to exist.
     * ``Invoice.segregation_actor_ids`` — every *other* control-plane user whose
-      act shaped the payable's terms. A recurring template has two such roles:
-      the employee who authored the standing instruction, and anyone who later
-      made a **material** edit to it (vendor, amount, currency, GL coding,
-      schedule — ``recurring_invoice.MATERIAL_EDIT_FIELDS``).
-      ``recurring_invoices.implicated_actor_ids`` computes it and ``generate_one``
-      stamps it; no other creation path has a second actor to name.
+      act shaped the payable's terms. Two creation paths have such people to
+      name. A recurring template has two roles: the employee who authored the
+      standing instruction, and anyone who later made a **material** edit to it
+      (vendor, amount, currency, GL coding, schedule —
+      ``recurring_invoice.MATERIAL_EDIT_FIELDS``);
+      ``recurring_invoices.implicated_actor_ids`` computes it and
+      ``generate_one`` stamps it. And an inter-company mirror copies its terms
+      verbatim from the source payable, so it inherits the source's whole
+      implicated set (:func:`implicated_actors`) —
+      ``intercompany.route_intercompany_invoice`` stamps it. Every other
+      creation path has no second actor to name.
 
     A single column could only ever hold one of those. Stamping the editor
     *instead* of the author would have moved the exemption rather than closed
@@ -114,15 +141,11 @@ def violates_segregation(
     """
     if approval_config.get("require_segregation", True) is False:
         return False
-    # The explicit NULL guard is not redundant: it keeps a ``None`` actor from
-    # matching a NULL uploader and reading as a breach.
-    if invoice.uploaded_by_id is not None and invoice.uploaded_by_id == actor_id:
-        return True
-    # Stringified both sides: the column is JSONB (strings once round-tripped
-    # through Postgres) but an in-memory row built by a service may still hold
-    # UUID objects, and the rule must not depend on which it is looking at.
-    implicated = getattr(invoice, "segregation_actor_ids", None) or []
-    return str(actor_id) in {str(x) for x in implicated}
+    # Not redundant: a ``None`` actor is nobody, and nobody is implicated in
+    # anything — it must never read as a breach against a NULL uploader.
+    if actor_id is None:
+        return False
+    return str(actor_id) in implicated_actors(invoice)
 
 
 def check_segregation(

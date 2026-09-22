@@ -377,6 +377,11 @@ generated under the counterparty entity so both subsidiaries' books reflect it.
 `entity_id = counterparty_entity_id`, copies the **exact `Decimal` amount** /
 currency / vendor, prefixes the number `IC-`, enters the normal workflow, and
 writes a PII-free `invoice.intercompany_routed` audit row on **both** invoices.
+Segregation of duties is **not** scoped by entity: the router is the mirror's
+uploader, and everyone implicated in the source payable (its uploader and its
+`segregation_actor_ids`) is carried onto the mirror's `segregation_actor_ids`,
+so shaping a payable under one entity bars you from signing its mirror under
+another (`docs/decisions.md` §193).
 It is **idempotent** on `intercompany_mirror_id` — a second call returns the
 existing mirror, never a duplicate. Surfaced at `POST
 /api/invoices/{id}/route-intercompany` (admin / ap_manager; self-billing → 400).

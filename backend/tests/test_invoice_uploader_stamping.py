@@ -31,11 +31,16 @@ Migration 0097 widened the rule from that one column to a **set**:
 ``Invoice.segregation_actor_ids`` carries every other actor the payable's terms
 are attributable to, because a recurring template can be shaped by its author
 *and* by whoever later repointed its vendor and amount. That column is **not**
-required at every construction site — unlike ``uploaded_by_id`` it has exactly
-one possible source, a template behind the invoice, and every other path has no
-second actor to name, so demanding the kwarg there would be noise with no
-safety in it. ``recurring_invoices.py`` is the site where omitting it *would*
-silently drop a real implicated actor, so that one site is pinned below.
+required at every construction site — unlike ``uploaded_by_id`` it has only two
+possible sources, and every other path has no second actor to name, so
+demanding the kwarg there would be noise with no safety in it. The two sources
+are pinned below, as a declared list in ``_SEGREGATION_SET_WRITERS``: a
+recurring template behind the invoice (``recurring_invoices.py``), and the
+source payable behind an inter-company mirror (``intercompany.py``, whose
+terms are the source's, copied verbatim — so everyone implicated in the source
+is implicated in the mirror). At either site, omitting the kwarg *would*
+silently drop a real implicated actor. A third site that starts writing the
+set has to join the list, so the claim "two writers" cannot quietly go stale.
 """
 
 from __future__ import annotations
@@ -276,35 +281,62 @@ def _kwarg(call: ast.Call, name: str) -> ast.expr | None:
     return None
 
 
-def test_the_recurring_generator_stamps_the_implicated_actor_set():
-    """``generate_one`` is the only writer of ``Invoice.segregation_actor_ids``.
+#: The construction sites that write ``Invoice.segregation_actor_ids``, and the
+#: second actors each one has to name. Keyed by module path relative to
+#: `backend/`.
+_SEGREGATION_SET_WRITERS: dict[str, str] = {
+    "app/services/recurring_invoices.py": (
+        "a recurring template's author and every material editor — "
+        "`implicated_actor_ids(template, uploader_id=...)`"
+    ),
+    "app/services/intercompany.py": (
+        "the source payable's whole implicated set (its uploader and its own "
+        "`segregation_actor_ids`), because the mirror's terms are the source's — "
+        "`approval_chain.implicated_actors(invoice)`"
+    ),
+}
 
-    Segregation of duties keys on the uploader **plus** that set
-    (``approval_chain.violates_segregation``), and the set is how a material
-    editor of someone else's recurring template is kept from approving the
-    invoice it raises. Drop the kwarg and nothing fails loudly: the column reads
-    NULL, the predicate reads "nobody beyond the uploader", and the editor can
-    approve again — exactly the silent regression the uploader guard above
-    exists to prevent, so this one site is pinned too.
 
-    Only this site. Every other construction path has no template behind it and
-    therefore no second actor to name; requiring the kwarg there would add a
-    ``None`` to six call sites and guard nothing.
+@pytest.mark.parametrize("module", sorted(_SEGREGATION_SET_WRITERS))
+def test_each_declared_writer_stamps_the_implicated_actor_set(module: str):
+    """Segregation of duties keys on the uploader **plus**
+    ``Invoice.segregation_actor_ids`` (``approval_chain.violates_segregation``).
+    At these sites the set is how a second person who shaped the payable is kept
+    from approving it: a recurring template's material editor, or — across the
+    entity boundary — whoever uploaded or shaped the source of an inter-company
+    mirror. Drop the kwarg (or hardcode ``None``) and nothing fails loudly: the
+    column reads NULL, the predicate reads "nobody beyond the uploader", and
+    that person can approve again — exactly the silent regression the uploader
+    guard above exists to prevent.
     """
-    sites = [
-        (rel, ln, call)
-        for rel, ln, call in _construction_sites()
-        if rel == "app/services/recurring_invoices.py"
-    ]
-    assert sites, "no Invoice construction site found in app/services/recurring_invoices.py"
+    sites = [(rel, ln, call) for rel, ln, call in _construction_sites() if rel == module]
+    assert sites, f"no Invoice construction site found in {module}"
     for rel, lineno, call in sites:
         value = _kwarg(call, "segregation_actor_ids")
         assert value is not None, (
-            f"{rel}:{lineno} does not pass `segregation_actor_ids` — a material editor "
-            "of the template would no longer be refused the approval"
+            f"{rel}:{lineno} does not pass `segregation_actor_ids` — it must name "
+            f"{_SEGREGATION_SET_WRITERS[module]}"
         )
         assert not _is_literal_none(value), (
-            f"{rel}:{lineno} hardcodes `segregation_actor_ids=None`, which discards the "
-            "template's author and every material editor. Pass "
-            "`implicated_actor_ids(template, uploader_id=...)`."
+            f"{rel}:{lineno} hardcodes `segregation_actor_ids=None`, which discards "
+            f"{_SEGREGATION_SET_WRITERS[module]}"
         )
+
+
+def test_no_undeclared_site_writes_the_implicated_actor_set():
+    """The other direction: every site that passes a real value is declared
+    above, and every declared writer still passes one. A new writer is a new
+    claim about who shaped a payable, so it has to be argued for in
+    ``_SEGREGATION_SET_WRITERS`` rather than appear silently — and a writer
+    that stops writing must leave the list, so the docs' "two writers" cannot
+    outlive the code."""
+    writers = {
+        rel
+        for rel, _, call in _construction_sites()
+        if (value := _kwarg(call, "segregation_actor_ids")) is not None
+        and not _is_literal_none(value)
+    }
+    assert writers == set(_SEGREGATION_SET_WRITERS), (
+        f"undeclared writers: {sorted(writers - set(_SEGREGATION_SET_WRITERS))}; "
+        f"declared but not writing: {sorted(set(_SEGREGATION_SET_WRITERS) - writers)}"
+    )
