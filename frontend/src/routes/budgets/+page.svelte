@@ -103,18 +103,24 @@
 			if (!summarySequence.canCommit(token)) return;
 			budgetSummary = res;
 		} catch {
-			// Non-fatal — the KPI card falls back to a zero placeholder rather
-			// than taking the page down. The table has its own error state.
+			// Non-fatal — the KPI card shows its no-figure dash rather than
+			// taking the page down. The table has its own error state.
 			if (summarySequence.isCurrentRequest(token)) budgetSummary = null;
 		}
 	}
 
-	// One subtotal per currency, side by side — never added together.
-	const allocatedGroups = $derived(
-		formatCurrencyTotals(budgetSummary?.by_currency ?? [], orgCurrency.currency)
-	);
+	// One subtotal per currency, side by side — never added together; a total
+	// with no established currency renders bare rather than joining the org's
+	// (decisions §200).
+	const allocatedGroups = $derived(formatCurrencyTotals(budgetSummary?.by_currency ?? []));
+	// The org's code labels ONE figure here: the zero of a summary that landed
+	// and allocated nothing. A summary that has not landed (or failed) is no
+	// figure at all — `null`, which `KpiCard` draws as its dash — never a zero
+	// wearing a currency nobody computed.
 	const allocatedTotal = $derived(
-		allocatedGroups[0] ?? formatMoney(0, { currency: orgCurrency.currency })
+		budgetSummary
+			? (allocatedGroups[0] ?? formatMoney(0, { currency: orgCurrency.currency }))
+			: null
 	);
 	// Currencies past the first ride the card's muted sub-line, so the headline
 	// stays one readable figure while nothing is silently dropped.

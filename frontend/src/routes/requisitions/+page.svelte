@@ -160,11 +160,15 @@
 	}
 
 	const pendingCount = $derived(reqSummary?.by_status.pending_approval ?? 0);
-	const periodTotalGroups = $derived(
-		formatCurrencyTotals(reqSummary?.by_currency ?? [], orgCurrency.currency)
-	);
+	// One subtotal per currency, never added; an unestablished currency renders
+	// bare rather than joining the org's (decisions §200). The org's code labels
+	// only the zero of a summary that landed empty — an unanswered one is no
+	// figure, which `KpiCard` draws as its dash.
+	const periodTotalGroups = $derived(formatCurrencyTotals(reqSummary?.by_currency ?? []));
 	const periodTotal = $derived(
-		periodTotalGroups[0] ?? formatMoney(0, { currency: orgCurrency.currency })
+		reqSummary
+			? (periodTotalGroups[0] ?? formatMoney(0, { currency: orgCurrency.currency }))
+			: null
 	);
 	const periodTotalRest = $derived(
 		periodTotalGroups.length > 1 ? periodTotalGroups.slice(1).join(' · ') : null

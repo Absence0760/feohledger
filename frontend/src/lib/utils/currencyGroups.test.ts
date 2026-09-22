@@ -52,34 +52,43 @@ describe('groupAmountsByCurrency', () => {
 		).toEqual([{ currency: 'USD', total: 20, count: 2 }]);
 	});
 
-	it('falls back for a missing / malformed code rather than dropping the row', () => {
+	it('keeps a missing / malformed code as ONE group of its own rather than dropping the row', () => {
 		// Dropping the row would understate the selection — the exact failure
-		// mode the helper exists to prevent.
+		// mode the helper exists to prevent. Every shape of "no code" lands in
+		// the same `null` group, so an unknown row is counted exactly once.
 		expect(
-			groupAmountsByCurrency(
-				[
-					{ amount: '5.00', currency: null },
-					{ amount: '5.00' },
-					{ amount: '5.00', currency: 'US' }
-				],
-				'ZAR'
-			)
-		).toEqual([{ currency: 'ZAR', total: 15, count: 3 }]);
+			groupAmountsByCurrency([
+				{ amount: '5.00', currency: null },
+				{ amount: '5.00' },
+				{ amount: '5.00', currency: 'US' },
+				{ amount: '5.00', currency: '' }
+			])
+		).toEqual([{ currency: null, total: 20, count: 4 }]);
 	});
 
-	it('defaults the fallback to USD when the caller gives none', () => {
-		expect(groupAmountsByCurrency([{ amount: '1.00', currency: '' }])).toEqual([
-			{ currency: 'USD', total: 1, count: 1 }
+	it('NEVER files an unknown-currency row under a real currency (decisions §200)', () => {
+		// The bug: the org's code was the fallback, so a row nobody could put a
+		// currency on was ADDED to real org-currency money — here EUR 100 + an
+		// unknown 40 would have read as one "€140.00".
+		const groups = groupAmountsByCurrency([
+			{ amount: '100.00', currency: 'EUR' },
+			{ amount: '40.00', currency: null }
 		]);
+		expect(groups).toEqual([
+			{ currency: 'EUR', total: 100, count: 1 },
+			{ currency: null, total: 40, count: 1 }
+		]);
+		expect(groups.find((g) => g.currency === 'EUR')?.total).toBe(100);
 	});
 
-	it('orders groups by currency code ascending, deterministically', () => {
+	it('orders groups by currency code ascending, the unknown group last', () => {
 		const codes = groupAmountsByCurrency([
+			{ amount: '3', currency: null },
 			{ amount: '1', currency: 'ZAR' },
 			{ amount: '9999', currency: 'AUD' },
 			{ amount: '5', currency: 'GBP' }
 		]).map((g) => g.currency);
-		expect(codes).toEqual(['AUD', 'GBP', 'ZAR']);
+		expect(codes).toEqual(['AUD', 'GBP', 'ZAR', null]);
 	});
 
 	it('counts non-numeric / null amounts as members but not as value', () => {
@@ -112,52 +121,84 @@ describe('spansMultipleCurrencies', () => {
 			)
 		).toBe(true);
 	});
-});
 
+	it('counts an unknown-currency row as a currency of its own', () => {
+		// Nothing proves it is the same currency as the row beside it, so the
+		// selection is reported as mixed rather than let through to a run that
+		// may refuse it.
+		expect(
+			spansMultipleCurrencies(
+				groupAmountsByCurrency([
+					{ amount: '1', currency: 'USD' },
+					{ amount: '1', currency: null }
+				])
+			)
+		).toBe(true);
+	});
+});
 
 describe('formatCurrencyTotals', () => {
 	it('returns [] for nothing, leaving the "no total" reading to the caller', () => {
-		expect(formatCurrencyTotals([], 'USD')).toEqual([]);
+		expect(formatCurrencyTotals([])).toEqual([]);
 	});
 
 	it('formats an exact decimal STRING without routing it through a float', () => {
 		// The shape `GET /api/expenses/summary` sends. 30.30 is exactly the sum
 		// of 10.10 + 20.20 — a float reduce would have produced 30.299999….
-		expect(formatCurrencyTotals([{ currency: 'USD', total: '30.30' }], 'USD')).toEqual([
-			'$30.30'
-		]);
+		expect(formatCurrencyTotals([{ currency: 'USD', total: '30.30' }])).toEqual(['$30.30']);
 	});
 
 	it('renders EACH currency in its own — never one combined figure', () => {
 		// The bug: EUR 5.05 + USD 30.30 shown as a single "$35.35".
-		const out = formatCurrencyTotals(
-			[
-				{ currency: 'EUR', total: '5.05' },
-				{ currency: 'USD', total: '30.30' }
-			],
-			'USD'
-		);
+		const out = formatCurrencyTotals([
+			{ currency: 'EUR', total: '5.05' },
+			{ currency: 'USD', total: '30.30' }
+		]);
 		expect(out).toHaveLength(2);
 		expect(out[0]).toContain('5.05');
 		expect(out[1]).toBe('$30.30');
 		expect(out.join(' · ')).not.toBe('$35.35');
 	});
 
-	it('falls back to the org currency when a row carries no usable code', () => {
-		expect(formatCurrencyTotals([{ currency: '', total: '1.00' }], 'USD')).toEqual(['$1.00']);
-		expect(formatCurrencyTotals([{ currency: null, total: '1.00' }], 'USD')).toEqual(['$1.00']);
+	it('renders a total with no usable code BARE, never under a borrowed one', () => {
+		// `api/bank_reconciliation.py::_currency_totals` reports an unestablished
+		// currency under `""` so it is "not folded into another currency's
+		// figure". Labelling it with the org's code folded it back in on screen.
+		expect(formatCurrencyTotals([{ currency: '', total: '1.00' }])).toEqual(['1.00']);
+		expect(formatCurrencyTotals([{ currency: null, total: '1.00' }])).toEqual(['1.00']);
+		expect(formatCurrencyTotals([{ total: '1.00' }])).toEqual(['1.00']);
+	});
+
+	it('keeps a backend "" total beside a real one, each in its own rendering', () => {
+		const out = formatCurrencyTotals([
+			{ currency: '', total: '12.50' },
+			{ currency: 'EUR', total: '100.00' }
+		]);
+		expect(out).toHaveLength(2);
+		expect(out[0]).toBe('12.50');
+		expect(out[0]).not.toMatch(/[$€£¥]|[A-Z]{3}/);
+		expect(out[1]).toContain('€');
+	});
+
+	it('renders a mixed [EUR row, null row] selection as two figures, the unknown one bare', () => {
+		const out = formatCurrencyTotals(
+			groupAmountsByCurrency([
+				{ amount: '100.00', currency: 'EUR' },
+				{ amount: '40.00', currency: null }
+			])
+		);
+		expect(out).toEqual([expect.stringContaining('€'), '40.00']);
+		expect(out[0]).toContain('100.00');
+		expect(out.join(' · ')).not.toContain('140');
 	});
 
 	it('preserves input order rather than re-sorting', () => {
 		// The server already orders `by_currency`; re-sorting here would make the
 		// headline figure on a KPI card jump between renders.
-		const out = formatCurrencyTotals(
-			[
-				{ currency: 'USD', total: '2.00' },
-				{ currency: 'EUR', total: '1.00' }
-			],
-			'USD'
-		);
+		const out = formatCurrencyTotals([
+			{ currency: 'USD', total: '2.00' },
+			{ currency: 'EUR', total: '1.00' }
+		]);
 		expect(out[0]).toBe('$2.00');
 	});
 
@@ -166,6 +207,6 @@ describe('formatCurrencyTotals', () => {
 			{ amount: '10.00', currency: 'USD' },
 			{ amount: '5.00', currency: 'USD' }
 		]);
-		expect(formatCurrencyTotals(groups, 'USD')).toEqual(['$15.00']);
+		expect(formatCurrencyTotals(groups)).toEqual(['$15.00']);
 	});
 });

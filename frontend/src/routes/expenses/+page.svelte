@@ -220,13 +220,17 @@
 		}
 	}
 
-	// One subtotal per currency, side by side — never added together. Mirrors
-	// `formatGroups` on /payments.
-	const periodTotalGroups = $derived(
-		formatCurrencyTotals(expenseSummary?.by_currency ?? [], orgCurrency.currency)
-	);
+	// One subtotal per currency, side by side — never added together; an
+	// unestablished currency renders bare rather than joining the org's
+	// (decisions §200). Mirrors `formatGroups` on /payments.
+	const periodTotalGroups = $derived(formatCurrencyTotals(expenseSummary?.by_currency ?? []));
+	// The org's code labels only the zero of a summary that landed empty. One
+	// that has not landed is no figure — `null`, which `KpiCard` draws as its
+	// dash — never a zero wearing a currency nobody computed.
 	const periodTotal = $derived(
-		periodTotalGroups[0] ?? formatMoney(0, { currency: orgCurrency.currency })
+		expenseSummary
+			? (periodTotalGroups[0] ?? formatMoney(0, { currency: orgCurrency.currency }))
+			: null
 	);
 	// Currencies past the first ride the card's muted sub-line, so the headline
 	// stays one readable figure while nothing is silently dropped.

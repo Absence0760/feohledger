@@ -410,7 +410,7 @@
 	 *  exact decimal STRING when it comes from the backend, a BigInt-scaled
 	 *  number when `groupAmountsByCurrency` summed the loaded rows. Never a
 	 *  cross-currency sum either way. */
-	type DisplayGroup = { currency: string; total: MoneyAmount };
+	type DisplayGroup = { currency: string | null; total: MoneyAmount };
 
 	function sliceToGroups(slices: QueueCurrencySlice[], key: 'total_amount' | 'total_savings'): DisplayGroup[] {
 		return slices
@@ -435,7 +435,7 @@
 	let selectedGroups = $derived<DisplayGroup[]>(
 		selectedAllQueueMatching
 			? sliceToGroups(selectAllQueueGroups, 'total_amount')
-			: groupAmountsByCurrency(selectedRows, orgCurrency.currency)
+			: groupAmountsByCurrency(selectedRows)
 	);
 
 	// `.filter(total > 0)` preserves the old `selectedSavings > 0` guard: a
@@ -446,8 +446,7 @@
 			? sliceToGroups(selectAllQueueGroups, 'total_savings')
 			: groupAmountsByCurrency(
 					selectedRows.filter((q) => q.discount_eligible && q.discount_amount)
-						.map((q) => ({ amount: q.discount_amount, currency: q.currency })),
-					orgCurrency.currency
+						.map((q) => ({ amount: q.discount_amount, currency: q.currency }))
 				).filter((g) => g.total > 0)
 	);
 
@@ -470,16 +469,19 @@
 	 *
 	 *  Single currency → exactly what the pay-bar always showed, but in the
 	 *  row's OWN currency rather than the org default. Several → each subtotal
-	 *  side by side, separated (never added). Empty → a zero in the org
-	 *  currency, which is what "nothing selected" costs. */
+	 *  side by side, separated (never added); a row with no code is its own
+	 *  subtotal and renders bare, never folded into the org's (decisions §200).
+	 *  Empty → a zero in the org currency, which is what "nothing selected"
+	 *  costs — bare while that currency is still unresolved. */
 	function formatGroups(groups: DisplayGroup[]): string {
 		// A deliberate display choice, not a fallback: nothing selected costs
-		// nothing, and a zero reads the same in any currency.
+		// nothing, and a zero reads the same in any currency. This is the ONE
+		// place on the pay bar the org's code is the right label.
 		if (groups.length === 0) return formatMoney(0, { currency: orgCurrency.currency });
 		// The per-currency rendering itself lives in `currencyGroups` now, so
 		// /expenses' KPI rollup and this pay bar can't drift on it; only the
 		// "nothing selected" reading stays a per-caller display choice.
-		return formatCurrencyTotals(groups, orgCurrency.currency).join(' · ');
+		return formatCurrencyTotals(groups).join(' · ');
 	}
 
 	// The server's refusal, kept on screen. A 409 from

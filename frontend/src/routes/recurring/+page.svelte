@@ -10,7 +10,6 @@
 	} from '$lib/types/recurring';
 	import { auth } from '$lib/stores/auth.svelte';
 	import { appendUnique } from '$lib/utils/pagination';
-	import { orgCurrency } from '$lib/stores/orgSettings.svelte';
 	import {
 		listRecurring,
 		getRecurringSummary,
@@ -196,10 +195,6 @@
 		load();
 	});
 
-	$effect(() => {
-		orgCurrency.ensureLoaded();
-	});
-
 	// No vendor fetch here any more. These options ARE the set of valid choices,
 	// so a truncated list is not a shorter list — it is a supplier the operator
 	// cannot pick. Walking every page on mount was the previous answer, and it
@@ -357,7 +352,7 @@
 	const activeCount = $derived(recurringSummary?.by_status.active ?? 0);
 	const soonestNextRun = $derived(recurringSummary?.soonest_next_run ?? null);
 	const monthlyGroups = $derived(
-		formatCurrencyTotals(recurringSummary?.monthly_equivalent ?? [], orgCurrency.currency)
+		formatCurrencyTotals(recurringSummary?.monthly_equivalent ?? [])
 	);
 	const monthlyRecurringValue = $derived(monthlyGroups[0] ?? null);
 	const monthlyRecurringRest = $derived(

@@ -101,6 +101,54 @@ test.describe('/bank-reconciliation (admin)', () => {
 		await expect(page.getByLabel('Filter outstanding reconciliation items')).toBeVisible();
 	});
 
+	test('a bucket total with no established currency renders bare, beside a real one — never inside it', async ({
+		page
+	}) => {
+		// `_currency_totals` reports a payment whose currency could not be
+		// established under `""` precisely so it is "not folded into another
+		// currency's figure". The page used to fold it straight back in on
+		// screen, labelling it with the org's code (decisions §200). The org is
+		// pinned to USD here so a total borrowing that code is unmistakable.
+		await page.route(
+			(url) => url.pathname === '/api/organization',
+			(route) => route.fulfill({ json: { settings: { reporting_currency: 'USD' } } })
+		);
+		await page.route(
+			(url) => url.pathname === '/api/bank-reconciliation/outstanding',
+			(route) =>
+				route.fulfill({
+					json: {
+						as_of: '2026-03-01',
+						older_than_days: 0,
+						uncleared_payments: [],
+						uncleared_count: 2,
+						uncleared_totals: [
+							{ currency: '', total: '12.50' },
+							{ currency: 'EUR', total: '100.00' }
+						],
+						unmatched_debits: [],
+						unmatched_debit_count: 0,
+						unmatched_debit_totals: [],
+						discrepancies: [],
+						discrepancy_count: 0,
+						amount_mismatch_net_variances: []
+					}
+				})
+		);
+
+		await page.goto('/bank-reconciliation');
+
+		const buckets = page.locator('section.bucket');
+		const uncleared = buckets.nth(0).locator('.bucket-total');
+		// Two figures side by side: the unknown one bare, the EUR one in euros.
+		await expect(uncleared).toHaveText('12.50 · €100.00');
+		await expect(uncleared).not.toContainText('$');
+
+		// An EMPTY bucket is the one place the org's code is the right label —
+		// nothing outstanding costs zero in the currency the org reports in.
+		await expect(buckets.nth(1).locator('.bucket-total')).toHaveText('$0.00');
+	});
+
 	test('the age filter is a SERVER filter and is URL-backed', async ({ page }) => {
 		await page.goto('/bank-reconciliation');
 
