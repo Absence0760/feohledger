@@ -255,6 +255,9 @@ async def test_refresh_po_match_partial_is_info_severity():
         po_number="PO-001",
         po_total=100.0,
         within_tolerance=True,
+        # What the matcher sets alongside a short receipt.
+        ordered_quantity=Decimal("10"),
+        received_quantity=Decimal("6"),
         issues=["Partial receipt: 60% of ordered quantity received"],
     )
 
@@ -265,6 +268,72 @@ async def test_refresh_po_match_partial_is_info_severity():
         await invoice_warnings._refresh_po_match(db=AsyncMock(), invoice=inv, warnings=warnings)
 
     assert warnings[0]["severity"] == "info"
+
+
+@pytest.mark.asyncio
+async def test_a_failed_inspection_raises_no_amount_warning_on_an_in_tolerance_invoice():
+    """`status` is shared by the amount leg and the 4-way leg. A failed
+    inspection sets `mismatch` on an invoice whose amount matched, and keyed on
+    `status` alone that raised "Amount variance +0.0%" plus a po_mismatch
+    exception beside the quality hold that was the real finding."""
+    from app.services import invoice_warnings
+    from app.services.po_matching import MatchResult
+
+    inv = _fake_invoice()
+    warnings: list[dict] = []
+    fake_match = MatchResult(
+        match_type="4-way",
+        status="mismatch",
+        po_number="PO-001",
+        po_total=Decimal("100.00"),
+        po_currency="USD",
+        currency_check="same",
+        amount_variance=Decimal("0"),
+        amount_variance_pct=Decimal("0"),
+        within_tolerance=True,
+        inspection_result="fail",
+    )
+
+    with (
+        patch.object(invoice_warnings, "match_invoice_to_po", AsyncMock(return_value=fake_match)),
+        patch.object(invoice_warnings, "_ensure_exception", AsyncMock()) as ensure,
+    ):
+        await invoice_warnings._refresh_po_match(db=AsyncMock(), invoice=inv, warnings=warnings)
+
+    assert [w["code"] for w in warnings] == ["quality_inspection_failed"]
+    assert [call.args[2] for call in ensure.await_args_list] == ["quality_hold"]
+
+
+@pytest.mark.asyncio
+async def test_a_partial_acceptance_on_a_full_receipt_is_not_a_partial_receipt():
+    """A partial quality acceptance sets `partial` on goods that ALL arrived;
+    the receipt sentence ("only part of the ordered quantity has been
+    received") would be false there."""
+    from app.services import invoice_warnings
+    from app.services.po_matching import MatchResult
+
+    inv = _fake_invoice()
+    warnings: list[dict] = []
+    fake_match = MatchResult(
+        match_type="4-way",
+        status="partial",
+        po_number="PO-001",
+        po_total=Decimal("100.00"),
+        within_tolerance=True,
+        ordered_quantity=Decimal("10"),
+        received_quantity=Decimal("10"),
+        inspection_result="partial",
+        inspection_accepted_quantity=7.0,
+    )
+
+    with (
+        patch.object(invoice_warnings, "match_invoice_to_po", AsyncMock(return_value=fake_match)),
+        patch.object(invoice_warnings, "_ensure_exception", AsyncMock()) as ensure,
+    ):
+        await invoice_warnings._refresh_po_match(db=AsyncMock(), invoice=inv, warnings=warnings)
+
+    assert [w["code"] for w in warnings] == ["quality_partial_acceptance"]
+    assert [call.args[2] for call in ensure.await_args_list] == ["quality_hold"]
 
 
 # ---------- over-receipt reaches the exception queue -----------------------

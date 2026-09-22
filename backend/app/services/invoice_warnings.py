@@ -955,7 +955,16 @@ async def _refresh_po_match(
         await _ensure_exception(
             db, invoice, "po_mismatch", "warning", msg, org_settings=org_settings
         )
-    elif match.status == "mismatch" and match.amount_variance_pct is not None:
+    elif (
+        match.status == "mismatch"
+        and not match.within_tolerance
+        and match.amount_variance_pct is not None
+    ):
+        # Keyed on the AMOUNT leg, not on `status` alone: the 4-way leg sets
+        # `mismatch` too, and a failed inspection on an in-tolerance invoice
+        # used to raise "Amount variance +0.0%" and a po_mismatch exception
+        # beside the quality hold that was the real finding.
+        #
         # Lead with the most useful number — variance %. A PO that records no
         # currency was compared at face value, and its figure must not borrow
         # the invoice's label — that sentence is its own code.
@@ -979,9 +988,19 @@ async def _refresh_po_match(
         await _ensure_exception(
             db, invoice, "po_mismatch", "warning", msg, org_settings=org_settings
         )
-    elif match.status == "partial":
+    elif (
+        match.status == "partial"
+        and match.ordered_quantity is not None
+        and match.received_quantity is not None
+        and match.received_quantity < match.ordered_quantity
+    ):
         # Partial 3-way receipt — informational. Reviewer needs to know but
         # it's not an error; goods may be in transit.
+        #
+        # Keyed on the RECEIPT leg: a partial quality acceptance also sets
+        # `partial`, on goods that all arrived, and this sentence would then
+        # claim "only part of the ordered quantity has been received". The
+        # inspection block below raises that finding in its own words.
         flag = warning(
             "po_partial_receipt",
             "info",

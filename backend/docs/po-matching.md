@@ -292,7 +292,15 @@ exception type (created by `invoice_warnings._refresh_po_match`):
 | `partial` | info | created (info) — accepted quantity noted |
 | `pass` | — | none |
 
-The existing `po_mismatch` handling is unchanged; `quality_hold` is additive.
+`quality_hold` is additive to `po_mismatch`, and the two never double-report
+one finding. `MatchResult.status` is shared by the legs — a failed inspection
+sets `mismatch` and a partial acceptance sets `partial` — so the `po_mismatch`
+warnings are keyed on the leg that failed rather than on `status`: the amount
+warning needs `within_tolerance` false, and the partial-receipt warning needs
+`received_quantity < ordered_quantity`. Keyed on `status`, a failed inspection on
+an in-tolerance invoice raised "Amount variance +0.0%" and a `po_mismatch`
+exception, and a partial acceptance on a full delivery claimed only part of the
+goods had arrived.
 
 ### Config
 Per-org, in `Organization.settings.matching`:
