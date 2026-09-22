@@ -32,7 +32,7 @@
  * `discountPartialSet.ts` and is unit-tested under the plain-Node vitest config.
  */
 
-import { getActiveFormatLocale } from '$lib/i18n/formatLocale';
+import { formatMoney } from '$lib/utils/money';
 
 /** The projection of `DiscountRecommendation` this rule reads. Deliberately
  *  narrower than the full interface — the currency question depends on the
@@ -77,11 +77,11 @@ function normalizeCode(value: string | null | undefined): string | null {
  * symbol — the honest rendering when {@link recommendationCurrency} returns
  * `null`.
  *
- * Not a hand-rolled currency formatter (the ban in `frontend/CLAUDE.md`
- * § Money formatting is on inventing a *currency* format): this deliberately
- * renders no symbol at all, which is the point. It follows the same active
- * locale `formatMoney` does, so grouping and decimal separators stay consistent
- * with every labelled figure beside it.
+ * Exactly `formatMoney` with no currency, which is what `formatMoney` renders
+ * for any unprovable code (`docs/decisions.md` §198). Kept as a named export so
+ * the call sites that deliberately withhold a currency say so, but it is one
+ * primitive: grouping, decimals and the active locale cannot drift from the
+ * labelled figures beside it.
  *
  * Null / non-finite input returns the placeholder rather than `NaN`.
  */
@@ -89,11 +89,5 @@ export function formatAmountWithoutCurrency(
 	amount: number | string | null | undefined,
 	placeholder = '—'
 ): string {
-	if (amount === null || amount === undefined || amount === '') return placeholder;
-	const n = typeof amount === 'number' ? amount : Number(amount);
-	if (!Number.isFinite(n)) return placeholder;
-	return new Intl.NumberFormat(getActiveFormatLocale(), {
-		minimumFractionDigits: 2,
-		maximumFractionDigits: 2
-	}).format(n);
+	return formatMoney(amount, { currency: null }, placeholder);
 }

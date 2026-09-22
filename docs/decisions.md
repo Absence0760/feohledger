@@ -8030,3 +8030,66 @@ without anything having gone wrong. What a generated file cannot prove about
 itself is that every arm it emits reaches a real sentence; the mobile test now
 asserts that for every code in every locale, plus that dropping any one
 parameter falls the finding back to the server's English.
+
+## 198. The web formatter renders an unprovable currency bare by default, and the servers send the code they know
+
+§160 made mobile render a figure with no provable currency bare and noted, in
+passing, that the web still disagreed: `utils/money.ts::resolveCurrency`
+returned `USD` for any null or malformed code, so the same payment row read as
+dollars on the web and bare on a phone. The follow-up proposed an opt-in — a
+`<Money>` prop a call site could set to get the honest rendering.
+
+**The default flipped instead.** An opt-in keeps the substitution as what
+happens when a caller forgets, and forgetting was the whole history of this
+bug: `/payments` grew a second helper (`formatRowMoney`) solely to opt its
+per-row cells out of its own fallback, and `RunDetailModal` and `/discounts`
+each re-derived the same escape. The audit that decided it was cheap: across
+`src/`, exactly one call site omits a currency entirely (the report builder's
+`ResultTable`, whose measures can sum across currencies and so have none to
+give), and every other call passes a code — so every render the flip changes is
+one where the code really was absent. `formatMoney` now renders grouped
+figures with two decimals and no symbol for a `null`, empty or malformed code,
+and for one `Intl` rejects; `accounting` keeps its parentheses, which `Intl` only
+offers beside a symbol. `DEFAULT_CURRENCY` survives for what needs a value — a
+picker default, a form's initial value — and `formatAmountWithoutCurrency` is
+now just `formatMoney` with no code, one primitive rather than two that could
+round differently.
+
+**A bare figure is only honest if the servers stop sending `null` where they
+know the answer**, so the three fallback sites the entry named were each traced
+to what the payload could have said:
+
+- **Positive Pay** stamped the org's reporting currency on a check-issue file
+  whose total sums `Payment.amount`. The model comment said that column was
+  "already home-currency"; it is the **invoice's** currency (the home debit is
+  `source_amount`). A USD cheque run for a EUR-reporting org was filed as EUR.
+  The file now stamps `services/payment_runs.one_currency` over its cheques'
+  invoices — the rule the run endpoints already used, moved out of
+  `api/payments.py` so a service can call it — and `null` when they disagree.
+- **`/analytics/by-entity`** rendered each entity row's naive `total_spend` /
+  `outstanding_amount` — sums across whatever currencies that entity's invoices
+  are in — under the entity's configured currency, or the org's when it had
+  none. The endpoint already served `reporting_outstanding_amount`; it now
+  serves `reporting_total_spend` too (the population and rollup of `/cfo`'s
+  `reporting_spend`, so the consolidated row equals that tile), and every row
+  renders both in the `reporting_currency` the payload names. That also makes
+  the consolidated row the cross-check it claimed to be: a column in one
+  currency can be summed by eye. The face-value disclosure under it said
+  unconverted invoices were *excluded*; the rollup counts them at face value,
+  and the sentence now says so.
+- **`/payments`**' own `formatCurrency` wrote `currency ?? orgCurrency.currency`.
+  It is now `formatMoney` with the payload's code, and `formatRowMoney` is gone.
+- **`/bank-reconciliation`**'s statement dialog labelled every match candidate
+  with the org's currency, under a comment saying `UnclearedPaymentResponse`
+  carried none. It has carried the invoice's currency since the Uncleared
+  bucket was fixed; the comment outlived the fact by a release.
+
+**`PurchaseOrder` is the one figure no payload can label**, because the model
+has no currency column. By-entity's Open POs column therefore renders bare,
+with a note saying why, while `/purchase-orders` and `/cfo`'s accruals card
+keep the org label they had: changing those is the tenant migration the entry
+sized separately, and bare-rendering the PO list before POs record a currency
+would replace a probably-right label with none on every row. The difference
+between the two is deliberate and temporary — by-entity sums POs *across
+entities that may report in different currencies*, where the org label is not
+even probably right.

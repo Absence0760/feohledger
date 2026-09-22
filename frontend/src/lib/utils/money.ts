@@ -17,7 +17,17 @@
 
 import { getActiveFormatLocale } from '$lib/i18n/formatLocale';
 
-/** ISO 4217 default when an amount arrives without an explicit currency. */
+/**
+ * The ISO 4217 code a FORM starts from — a picker's default, a new record's
+ * initial value — when nothing better is known.
+ *
+ * Never a rendering fallback. `formatMoney` used to substitute this for any
+ * code it was not given, which put a `$` on every figure whose currency the
+ * server had deliberately declined to name (`docs/decisions.md` §79/§82, §160,
+ * §198): a payment whose invoice carried no code read as dollars on the web
+ * while mobile rendered it bare. A figure with no provable currency now renders
+ * bare; see {@link formatMoney}.
+ */
 export const DEFAULT_CURRENCY = 'USD';
 
 /**
@@ -82,7 +92,11 @@ export type MoneyString = string;
 export type MoneyAmount = MoneyString | number | null | undefined;
 
 export interface MoneyFormatOptions {
-	/** ISO 4217 code. Falls back to {@link DEFAULT_CURRENCY} when empty/nullish. */
+	/**
+	 * ISO 4217 code — the one the figure's own payload names. Absent, empty or
+	 * malformed means NOBODY established it, and the figure renders bare
+	 * (grouped digits, no symbol) rather than under a borrowed default.
+	 */
 	currency?: string | null;
 	/**
 	 * BCP-47 locale. `undefined` (the default) uses the runtime/browser
@@ -95,10 +109,32 @@ export interface MoneyFormatOptions {
 	accounting?: boolean;
 }
 
-/** Normalise a possibly-empty currency code to a safe ISO 4217 string. */
-function resolveCurrency(currency?: string | null): string {
+/**
+ * Normalise a currency code to an ISO 4217 string, or `null` when there is none
+ * to normalise. Deliberately returns nothing rather than a default: the caller
+ * decides what an unprovable currency looks like, and `formatMoney`'s answer is
+ * "no symbol".
+ */
+function resolveCurrency(currency?: string | null): string | null {
 	const code = (currency ?? '').trim().toUpperCase();
-	return code.length === 3 ? code : DEFAULT_CURRENCY;
+	return /^[A-Z]{3}$/.test(code) ? code : null;
+}
+
+/**
+ * A figure with NO currency symbol — the honest rendering when no currency can
+ * be proven. Grouping and decimal separators still follow `locale`, so the
+ * figure sits consistently beside labelled ones; two fraction digits (none for
+ * `whole`) because no currency means no minor-unit count to read, and two is
+ * what every money column holds. `accounting` keeps its parentheses, which
+ * `Intl` only offers alongside a currency symbol.
+ */
+function formatBare(n: number, locale: string | undefined, options: MoneyFormatOptions): string {
+	const places = options.whole ? 0 : 2;
+	const fmt = new Intl.NumberFormat(locale, {
+		minimumFractionDigits: places,
+		maximumFractionDigits: places
+	});
+	return options.accounting && n < 0 ? `(${fmt.format(-n)})` : fmt.format(n);
 }
 
 /**
@@ -165,6 +201,15 @@ export function isNegativeAmount(amount: MoneyAmount): boolean {
 /**
  * Format an amount as locale-aware currency.
  *
+ * The currency is the one the figure's own payload names. When there is none —
+ * `null`, empty, malformed — the figure renders **bare**: grouped figures, no
+ * symbol. That is the answer, not a degraded mode (`docs/decisions.md` §160,
+ * §198). A `null` code is where the server refused to guess, so substituting
+ * one would reinstate the fabrication the field exists to end; a missing symbol
+ * is a visible gap a reader can ask about, a wrong one is a wrong number that
+ * looks right. It is not the `placeholder` either: that means *no figure*, and
+ * here there is a figure whose label is merely unknown.
+ *
  * @returns the formatted string, or `placeholder` (default `—`) when the
  *          amount is null/empty/non-finite.
  */
@@ -180,6 +225,7 @@ export function formatMoney(
 	// passes none; falls back to `undefined` (browser locale) pre-selection.
 	const locale = options.locale ?? getActiveFormatLocale();
 	const currency = resolveCurrency(options.currency);
+	if (currency === null) return formatBare(n, locale, options);
 	const fmtOptions: Intl.NumberFormatOptions = {
 		style: 'currency',
 		currency,
@@ -198,12 +244,9 @@ export function formatMoney(
 	try {
 		return new Intl.NumberFormat(locale, fmtOptions).format(n);
 	} catch {
-		// An invalid currency code throws RangeError. Fall back to the
-		// default currency rather than blow up a whole table render.
-		return new Intl.NumberFormat(locale, {
-			...fmtOptions,
-			currency: DEFAULT_CURRENCY
-		}).format(n);
+		// A code `Intl` rejects is one nobody can render a symbol for. Bare,
+		// never a borrowed code — and never a thrown table render.
+		return formatBare(n, locale, options);
 	}
 }
 

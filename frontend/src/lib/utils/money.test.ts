@@ -237,14 +237,53 @@ describe('formatMoney locale resolution', () => {
 		expect(getActiveFormatLocale()).toBeUndefined();
 	});
 
-	it('still localizes the invalid-currency fallback path', () => {
+	it('still localizes a figure it cannot label', () => {
 		setActiveFormatLocale('de-DE');
-		// Wrong length → normalised to USD before Intl is touched.
-		expect(norm(formatMoney('1234.50', { currency: 'NOPE' }))).toBe('1.234,50 $');
-		// Right length, not alphabetic → Intl throws RangeError and the catch
-		// re-formats as USD. That retry must reuse the ACTIVE locale, not
-		// silently drop back to the browser's.
-		expect(norm(formatMoney('1234.50', { currency: 'ZZ9' }))).toBe('1.234,50 $');
+		// Wrong length, and right length but not alphabetic: neither is a code
+		// anyone established. The bare figure must still follow the ACTIVE
+		// locale's separators, not drop back to the browser's.
+		expect(norm(formatMoney('1234.50', { currency: 'NOPE' }))).toBe('1.234,50');
+		expect(norm(formatMoney('1234.50', { currency: 'ZZ9' }))).toBe('1.234,50');
+	});
+});
+
+// A code the payload did not name is not a licence to substitute one
+// (`docs/decisions.md` §79/§82, §160, §198). `formatMoney` used to return
+// `$1,234.50` for every row below — so a payment whose invoice carried no
+// currency read as dollars on the web while mobile rendered it bare, and a
+// by-entity row with no configured currency borrowed the org's.
+describe('formatMoney with no provable currency', () => {
+	it('renders the figure bare — no symbol, and not the org default either', () => {
+		setActiveFormatLocale('en-US');
+		for (const unproven of [undefined, null, '', '   ', 'US', 'USDD', 'u$d', 'ZZ9']) {
+			expect(norm(formatMoney('1234.50', { currency: unproven }))).toBe('1,234.50');
+		}
+		expect(norm(formatMoney('1234.50'))).toBe('1,234.50');
+	});
+
+	it('still labels every code it was given, whatever its case', () => {
+		setActiveFormatLocale('en-US');
+		expect(norm(formatMoney('1234.50', { currency: 'EUR' }))).toBe('€1,234.50');
+		expect(norm(formatMoney('1234.50', { currency: ' gbp ' }))).toBe('£1,234.50');
+		// An unfamiliar but well-formed code is still a code: Intl prints it.
+		expect(norm(formatMoney('1234.50', { currency: 'XYZ' }))).toBe('XYZ 1,234.50');
+	});
+
+	it('keeps the placeholder for a missing FIGURE, which is a different gap', () => {
+		expect(formatMoney(null, { currency: null })).toBe('—');
+		expect(formatMoney('', { currency: null }, 'n/a')).toBe('n/a');
+		// A genuine zero is a figure.
+		expect(norm(formatMoney('0', { currency: null, locale: 'en-US' }))).toBe('0.00');
+	});
+
+	it('honours whole and accounting without a symbol', () => {
+		setActiveFormatLocale('en-US');
+		expect(norm(formatMoney('1234.50', { currency: null, whole: true }))).toBe('1,235');
+		expect(norm(formatMoney('-1234.50', { currency: null, accounting: true }))).toBe(
+			'(1,234.50)'
+		);
+		expect(norm(formatMoney('-1234.50', { currency: null }))).toBe('-1,234.50');
+		expect(norm(formatMoney('1234.50', { currency: null, accounting: true }))).toBe('1,234.50');
 	});
 });
 
