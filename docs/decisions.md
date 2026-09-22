@@ -8993,3 +8993,114 @@ state moves from "nobody can sign in" to "the password works, and the log says
 why". The diagnosis's trigger assumed no production tenant had turned
 `sso_only` on yet, and nothing here depends on that.
 
+## 205. A page's section navigation follows why its sections share the page
+
+`/organization` had sixteen `<h2>` sections in 3,341 lines, and the only way to
+find one was to scroll and read. It had a partial answer already — a
+"Getting started" card linking five destinations — which is how the gap stayed
+invisible: five sections were addressable, ten were not, and one anchor
+(`#org-email-intake`) existed with nothing pointing at it.
+
+A survey of the other sixty-odd routes found that this page is not a pattern.
+Nothing else in the app stacks that many unrelated concerns:
+
+```
+ lines  h2   page
+  3341  16   /organization      settings stack, mixed concerns
+  1552  21   /legal/dpa         document
+  1054  20   /legal/privacy     document
+   871  20   /legal/terms       document
+   868  10   /legal/sub-processors
+  1176   7   /profile           settings stack, coherent
+  3923   3   /payments          list page, merely long
+  2107   1   /expenses          list page, merely long
+```
+
+So the question is not "how long is this page" — `/payments` is the longest file
+in the tree and has no wayfinding problem at all, three sections and a table.
+The question is **why its sections share a page**, and there are three answers:
+
+- **They are alternatives** — you arrived to change exactly one. You need a
+  menu, not a contents page: one panel at a time, addressed by `?section=`.
+- **They are one continuous text** — you arrived to read or cite it. Everything
+  stays in the DOM with a table of contents over it.
+- **They are stages of one workflow** — leave them stacked; the scroll is the
+  narrative.
+
+The threshold is roughly eight unrelated sections for panels, any length at all
+for a document, and neither below about seven coherent ones.
+
+### Why panels for the settings pages
+
+`ui/SettingsRail.svelte` is a third navigation primitive, and the three do not
+overlap: `layout/SectionTabs.svelte` moves between routes in a nav group,
+`ui/Tabs.svelte` is a horizontal `role="tablist"` over local view state, and
+this moves between sections of one page with the section in the URL. It renders
+anchors with `aria-current`, not `role="tab"` buttons — the destination is an
+address, so it is a link, and a link owes no roving-tabindex contract.
+
+Three alternatives were rejected. A **complete anchor TOC** was the cheap option
+and buys only scanability: the seven requests still fire on arrival, the file is
+still one file, and a scroll offset is still the only sense of place. **Sixteen
+new routes** under the Settings nav group was worse than it sounds — that group
+already has eight children and `SectionTabs` already overflows them into a
+"More" menu. **Accordions** hide their labels behind chevrons and have no
+shareable address.
+
+The rail's real payment is not navigational. Seven reads fired on every arrival
+at `/organization`; six of them belong to exactly one panel each and now wait
+for it, so arriving costs two requests instead of seven, and an admin who came
+to change the ACH cut-off no longer pays for a DNS lookup, a residency read and
+a chat-webhook probe on the way past. `/profile` went from three to zero — and
+that, not its seven sections, is why it got a rail despite sitting below the
+threshold. Its sections are coherent enough to scroll; its eager reads were not
+defensible.
+
+Two properties are load-bearing and each has a test:
+
+**Field state stays at page level.** Only the markup is conditional, so an
+unsaved edit in one panel is still there — with its Save button — after a trip
+to another and back. That is what makes a confirm-on-leave dialog unnecessary,
+and it is the constraint a later refactor into per-panel components would
+quietly break, so `tests-e2e/organization/section-nav.spec.ts` types into a
+field, leaves, returns, and asserts the value survived.
+
+**A slug is a URL contract.** It lands in bookmarks, in the Getting-started
+links, and in docs. The five `#org-*` anchors the page was previously navigated
+by still resolve, and they resolve **by derivation** — `section` reads the query
+first and falls back to the anchor map — rather than by rewriting the URL to
+`?section=` in an effect.
+
+Rewriting was the first version. **It was observed to work** — a probe
+capturing `pageerror` and `console` saw the rewrite land cleanly, before the
+lead-in panel ever painted — so this is a simplicity and robustness call, not a
+bug fix, and the record should not pretend otherwise.
+
+What made it the wrong shape anyway is the dependency: `replaceState` is
+documented to throw when called before the SvelteKit router has initialised, so
+the rewrite put a router-timing precondition on the one path whose entire job is
+to still work for a link someone saved a year ago. Nothing established that a
+first-hydration effect actually lands inside that window — the evidence points
+the other way — but the derivation removes the question, along with an import
+and an effect. It cannot fail, and the stale `#hash` clears itself on the first
+rail click, since the rail's hrefs are query-only. Query beats hash, so an
+explicit `?section=` always wins over an anchor merely along for the ride.
+
+### Why not panels for the legal documents
+
+The six published documents carry ninety-one sections between them, every
+heading already `id`-anchored, and — until this change — not one table of
+contents; the `href="#…"` links in Terms and the DPA are inline
+cross-references ("see section 10"), not navigation. They are the page type
+where a contents page is the expected convention rather than a nicety: counsel
+reviews a DPA clause by clause, a customer cites "DPA §7.2", a regulator skims
+for Article 28 flow-down.
+
+They get the opposite treatment for that reason. Everything stays rendered:
+panels would break Ctrl-F across the text, printing, and citation by section,
+which is most of what these documents are for. The TOC is derived from the
+rendered `h2[id]` set inside `lib/legal/LegalPage.svelte` rather than passed
+per page, because the alternative was ninety-one duplicated entries that would
+drift from the headings inside a release — and because that wrapper is the one
+file all six already render through (§174 for why their text is English-only,
+#433's layout for why the surround is shared).

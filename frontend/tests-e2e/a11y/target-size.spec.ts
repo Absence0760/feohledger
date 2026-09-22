@@ -312,7 +312,7 @@ test.describe('accessibility — target size on the branding colour field (WCAG 
 		page
 	}) => {
 		// The Branding panel by name: the page shows one section at a time now
-		// (`docs/decisions.md` §188), so a bare `/organization` renders the
+		// (`docs/decisions.md` §205), so a bare `/organization` renders the
 		// Getting-started lead-in and this locator would find nothing.
 		await page.goto('/organization?section=branding');
 

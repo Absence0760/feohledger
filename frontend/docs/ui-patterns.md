@@ -45,6 +45,68 @@ is wide enough for grid pages on 1920–2560px monitors without leaving
 half the viewport empty; on a 13″ laptop the natural body width
 constrains it before the cap kicks in.
 
+### Navigating a long page
+
+Three primitives, and which one a page gets depends on **why its sections share
+the page** — not on how long the page is. `/payments` is the longest route file
+in the tree and needs none of this; it has three sections and a table.
+
+| Sections are… | Treatment | Reach for |
+|---|---|---|
+| **Alternatives** — you came to change exactly one | One panel at a time, `?section=<slug>` in the URL | `ui/SettingsRail.svelte` |
+| **One continuous text** — you came to read or cite it | All of it rendered, with a contents page over it | `lib/legal/LegalPage.svelte` derives its own |
+| **Stages of one workflow** | Leave them stacked — the scroll is the narrative | nothing |
+
+Roughly: **eight or more unrelated sections** earns panels, **a document of any
+length** earns a TOC, and below about **seven coherent** sections neither is
+worth the indirection. `/organization` (fifteen panels in five groups) and
+`/profile` (seven, flat) are the worked examples; reasoning in
+`docs/decisions.md` §205.
+
+Do not reach for panels on a document. Hiding clauses behind a picker breaks
+Ctrl-F across the text, printing, and citation by section — which is most of
+what a legal document is for.
+
+`SettingsRail` is distinct from the two navigation components it sits beside,
+and picking the wrong one is the common mistake:
+
+- `layout/SectionTabs.svelte` — between **routes** in a nav group, driven by
+  `lib/nav.ts`. Not for sections of one page.
+- `ui/Tabs.svelte` — horizontal `role="tablist"` over **local view state**, for
+  a few views of one dataset (`/expenses`, `/payments`, `/audit`). Buttons, not
+  addresses.
+- `ui/SettingsRail.svelte` — between **sections of one page**, with the section
+  in the URL. Anchors + `aria-current`, so it owns no arrow-key contract.
+
+Five things a panelised page has to get right:
+
+1. **The section goes in the URL**, like every other filter/sort/selection state
+   (see the rules above). An unrecognised slug falls back to the default rather
+   than rendering an empty page. A slug is an address — it reaches bookmarks and
+   docs, so renaming one is a breaking change, and any anchor the page was
+   previously navigated by keeps resolving. Resolve a legacy anchor **inside the
+   derivation** (query first, then the anchor map) rather than by rewriting the
+   URL in an effect: `replaceState` is documented to throw before the router has
+   initialised, so a rewrite puts a router-timing precondition on the path that
+   most needs to be reliable. Deriving it needs neither the import nor the
+   effect.
+2. **Panel-specific fetches become lazy** — fire them when their panel is first
+   shown, `once`-guarded so returning does not refetch, and keep any existing
+   role gate. Leave genuinely page-wide reads eager. This is most of the value:
+   `/organization` went from seven requests on arrival to two.
+3. **Field state stays at page level.** Only the markup is conditional, so an
+   unsaved edit survives a panel switch and needs no confirm-on-leave dialog.
+   Moving state into per-panel components silently breaks that.
+4. **`grid-template-columns: <rail> minmax(0, 1fr)`**, never `1fr`. A grid item's
+   default `min-width: auto` is its content width, so the widest form in any
+   panel pushes the track past the viewport and scrolls the document sideways
+   (1.4.10). Pair it with `align-items: start` — a stretched item fills the row
+   and leaves a sticky rail nothing to stick within.
+5. **A rail group label is not a heading.** The panels use `<h2>` for their own
+   titles, so a heading in the rail interleaves with the outline a screen-reader
+   user navigates by. `SettingsRail` hides the label from assistive tech and
+   re-attaches it as the list's accessible name.
+
 ### Data tables (`DataTable`)
 
 Use **`<DataTable>`** (`$lib/components/ui/DataTable.svelte`) for every

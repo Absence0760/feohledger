@@ -7,7 +7,7 @@ import { expect, test } from '../fixtures/helpers';
  * fetched notification preferences, the passkey list and the signed-in-device
  * list. They are now one panel at a time, addressed by `?section=` through
  * `ui/SettingsRail.svelte`, and each of those three reads waits for its own
- * panel (`docs/decisions.md` §188).
+ * panel (`docs/decisions.md` §205).
  *
  * The rail is the same primitive `/organization` uses, so the navigation
  * mechanics — fallback, history, `aria-current`, the narrow-viewport disclosure

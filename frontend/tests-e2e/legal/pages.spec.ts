@@ -34,7 +34,7 @@ import { WEB_ORIGIN, tenantOrigin } from '../fixtures/env';
  *     sections across the six, and the reason a document gets a TOC rather
  *     than the panels `/organization` gets is that all of it must stay
  *     rendered — so the contents list is the only navigation there is
- *     (`docs/decisions.md` §188).
+ *     (`docs/decisions.md` §205).
  *
  * Deliberately NOT asserted: the exact wording. These documents get revised,
  * and a spec that pinned prose would be edited to match on every revision until
