@@ -91,26 +91,55 @@ Rules that hold at every call site:
 knows what it measured — a duplicate similarity is whole percent, a PO variance
 is one decimal place.
 
-## The generated frontend catalogue
+## The generated client catalogues (web and mobile)
 
-`pnpm gen:warning-messages` writes
-`frontend/src/lib/api/invoiceWarningMessages.generated.ts` — a code → message-key
-map plus the param-kind map — from the Python catalogue.
-`pnpm check:warning-messages` is its drift guard and runs in CI's **Backend
-lint** job, exactly as `check:einvoice-messages` does for the e-invoice rule
-codes (`decisions.md` §95 established the shape).
+`pnpm gen:warning-messages` (`scripts/gen_invoice_warning_messages.py`) writes
+**two** files from the Python catalogue, in one run:
 
-Three guards in a chain, each catching the step after the one before it:
+| File | Contents | Reader |
+|------|----------|--------|
+| `frontend/src/lib/api/invoiceWarningMessages.generated.ts` | code → message-key map + param-kind map | `frontend/src/lib/api/invoiceWarnings.ts` |
+| `mobile/lib/l10n/invoice_warning_messages.generated.dart` | the same param-kind map + a `switch` arm per code calling its `AppLocalizations` method | `mobile/lib/l10n/invoice_warning_messages.dart` (of which it is a `part`) |
 
-1. `--check` goes red when the catalogue gains or reworders a code;
-2. once regenerated, `pnpm check` goes red because `en.ts` has no such key (the
-   generated map is `satisfies Record<string, MessageKey>`);
-3. once English exists, the locale-parity test demands the other five.
+They differ in shape because the clients do: the web looks a message up by its
+key string, while a gen-l10n class exposes each message as its own typed method,
+so Dart needs one call per code with its arguments in order. **That order, and
+each argument's type, comes from `mobile/lib/l10n/app_en.arb`'s placeholder
+metadata** — what `flutter gen-l10n` builds the signature from — not from the
+catalogue's own parameter order: two `String` arguments passed swapped would
+compile and render a PO number where the amount belongs. An ARB whose
+placeholders don't match the catalogue (a missing or extra one, an `int` on a
+non-`count` parameter) makes the generator refuse rather than write a half-right
+file. `currency` parameters are not placeholders on either client: they are how
+the `money` beside them is formatted.
 
-`frontend/src/lib/api/invoiceWarnings.ts` is the reader. It returns `null` —
-and the caller renders `message` — for an unknown code **and** for a known code
-whose params are incomplete, because `interpolate.ts` leaves an unfilled
-`{placeholder}` intact and braces at a reviewer are worse than English prose.
+`pnpm check:warning-messages` is the drift guard for **both** files and runs in
+CI's **Backend lint** job, exactly as `check:einvoice-messages` does for the
+e-invoice rule codes (`decisions.md` §95 established the shape). It names which
+file is stale — including the mobile one alone when only the English ARB's
+placeholder order moved.
+
+Three guards in a chain per client, each catching the step after the one before
+it:
+
+1. `--check` goes red when the catalogue gains or rewords a code;
+2. once regenerated, the web's `pnpm check` goes red because `en.ts` has no such
+   key (the generated map is `satisfies Record<string, MessageKey>`), and
+   mobile's `flutter analyze` goes red because the generated arm calls a method
+   `app_en.arb` does not declare;
+3. once English exists, each client's locale-parity test demands the other
+   translations (`messages_parity` on the web, `test/l10n/arb_parity_test.dart`
+   on mobile).
+
+Round 26 hand-transcribed the 48 Dart arms and backstopped them with a flutter
+test that parsed the TypeScript; generating both halves from one source is what
+retired it (`decisions.md` §197). The generator's own tests (`tests/test_invoice_warning_catalog.py`)
+pin both files in sync, the ARB-order read, and the refusal paths.
+
+Both readers return `null` — and the caller renders `message` — for an unknown
+code **and** for a known code whose params are incomplete: on the web
+`interpolate.ts` leaves an unfilled `{placeholder}` intact, and braces at a
+reviewer are worse than English prose.
 
 ## Old rows carry no code, and nothing backfills them
 
@@ -129,5 +158,3 @@ catalogue covers every code.
 - **`Exception.description`** — `_ensure_exception` is passed the same English
   prose (sometimes the warning's own `message`). The exception queue renders it
   raw.
-- **The mobile app.** `InvoiceWarningsPanel` renders `message`, so mobile is
-  unchanged — English, exactly as before, via the fallback that exists for it.

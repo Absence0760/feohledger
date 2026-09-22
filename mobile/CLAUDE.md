@@ -397,8 +397,11 @@ the English fallback for a finding this build cannot state.
 ## Conventions
 
 - **StatefulWidget + setState** for local state, **ChangeNotifier** for shared state
-- **No code generation** — manual `fromJson` factories for models (the only
-  generated code is the gen-l10n `AppLocalizations` under `lib/l10n/gen/`)
+- **No code generation** — manual `fromJson` factories for models. The only
+  generated code is the gen-l10n `AppLocalizations` under `lib/l10n/gen/` and
+  `lib/l10n/invoice_warning_messages.generated.dart`, which
+  `pnpm gen:warning-messages` writes from the backend's warning catalogue
+  (never edit it by hand; `mobile/docs/i18n.md` § Invoice warnings)
 - **Material 3** with `useMaterial3: true`
 - **iOS + Android** — no web/desktop targets
 - **Lint rules** (`analysis_options.yaml`): `prefer_single_quotes`, `require_trailing_commas`, `sort_pub_dependencies`, `always_use_package_imports`
