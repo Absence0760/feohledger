@@ -34,12 +34,14 @@ its `**Open:**` line or moves to the archive.
 Mirrored as GitHub issue [#321](https://github.com/Absence0760/feohledger/issues/321)
 for the tracker view. Keep the two reconciled when either moves.
 
-**Last reconciled:** 2026-09-17 (round 26) — five agents, each in its own
-worktree. **Eleven entries closed** plus the engineering half of
-[#432](https://github.com/Absence0760/feohledger/issues/432), **nine opened**.
-Earlier the same day a housekeeping pass pruned 54 checked entries, 21 emptied
-sections and two prose-only CLOSED narratives, taking the file from 2570 lines
-to 1215; nothing open was removed by it.
+**Last reconciled:** 2026-09-22 — the #321 / #443 batch, five agents each in
+its own worktree. **Nineteen entries closed**, two narrowed, **eight opened**, so
+the file went 61 → 50; the new ones are grouped under their own heading below.
+Before that, 2026-09-17 (round 26) closed eleven plus the engineering half of
+[#432](https://github.com/Absence0760/feohledger/issues/432) and opened nine, and
+a housekeeping pass the same day pruned 54 checked entries, 21 emptied sections
+and two prose-only CLOSED narratives, taking the file from 2570 lines to 1215;
+nothing open was removed by it.
 
 **This file had stopped obeying its own first rule.** "Open items only" is the
 line at the top, and 54 `[x]` entries plus their surrounding CLOSED narrative
@@ -50,7 +52,7 @@ section carried its own `decisions.md` § reference, so nothing was lost by
 deleting it; that cross-reference is what makes the pruning safe, and writing
 one is what earns a future entry the right to be deleted.
 
-**61 open: 46 (c) · 9 (a) · 6 (b)** — re-derived from the file, never carried
+**50 open: 35 (c) · 9 (a) · 6 (b)** — re-derived from the file, never carried
 forward. The section heading is authoritative; where an entry also carries a
 `(c)`/`(a)`/`(b)` marker, the two agree.
 `grep -c '^- \[ \]' docs/followups.md`.
@@ -154,8 +156,9 @@ currently disagree about the same row (§160).
 header claimed for eight rounds that exception resolution "stays held" as the
 file's only segregation-of-duties entry. It had in fact shipped — `#408`,
 `services/exception_lifecycle.segregation_refusal`, migration `0098`
-([decisions.md](decisions.md) §169–§170) — and the file's only remaining SoD
-entry is now the inter-company mirror below. A standing note nobody re-reads
+([decisions.md](decisions.md) §169–§170) — and the inter-company mirror entry that
+replaced it closed in the 2026-09-22 batch (§192), leaving only a data backfill
+for mirrors routed before it. A standing note nobody re-reads
 outlives the thing it describes.
 
 ## (c) Feature work — sized and unstarted
@@ -428,31 +431,8 @@ One entry remains of what round 29 could not close in the slice that found it.
 
 ### Surfaced by the round-30 batch (2026-09-11)
 
-Two of the eight entries this round opened remain. Both are findings that could
-not honestly be folded into the slice that surfaced them.
-
-- [ ] **(c) The inter-company mirror does not inherit the source payable's
-      implicated-actor set.** §152 made segregation key on
-      `Invoice.uploaded_by_id` ∪ `Invoice.segregation_actor_ids`, and
-      `services/intercompany.py` passes `segregation_actor_ids=None` on purpose: the
-      mirror's segregation subject has always been its own creator, the routing actor,
-      never the source invoice's. So if an `ap_manager` materially edits a recurring
-      template and a *different* employee routes the invoice it generates to a
-      counterparty entity, that editor can approve the mirror — they are on the
-      source's set, and nothing carries it across the boundary.
-      Narrow in practice: a recurring template carries no `counterparty_entity_id`
-      (the model has none and `generate_one` sets none), so routing needs a separate
-      deliberate act by an employee who becomes the mirror's uploader, and the source
-      invoice still needs its own clean approval.
-      **Durable fix:** decide the entity-scope rule, then apply it to BOTH columns at
-      once. Propagating the set while still not propagating `uploaded_by_id` is the
-      inconsistent half of either choice — it would block a source *editor* at the
-      counterparty while leaving the source *uploader* free. The question is whether
-      shaping a payable under one entity should bar you from signing its mirror under
-      another, which is a multi-entity approval-scope call (Phase 4 territory), not a
-      recurring-template one.
-      **Trigger:** the next multi-entity slice, or the first tenant that routes
-      recurring spend inter-company.
+One of the eight entries this round opened remains — a finding that could not
+honestly be folded into the slice that surfaced it.
 
 - [ ] **(c) The adaptive APPLY paths and the Feedback tab have no mobile
       counterpart, by design — but "by design" is a decision with an expiry.**
@@ -500,10 +480,10 @@ not honestly be folded into the slice that surfaced them.
 
 ### Surfaced by the round-31 batch (2026-09-14)
 
-The largest cluster in the file — eighteen entries opened by round 31 (sixteen
-from the slices, two from its own CI run), all still open, grouped by the slice
-that surfaced them. The lesson the round recorded is in the header above and
-applies to every entry here: **an entry's file list and its counts are the least
+Eighteen entries were opened by round 31 (sixteen from the slices, two from its
+own CI run); four remain after the 2026-09-22 batch, two of them narrowed,
+grouped by the slice that surfaced them. The lesson the round recorded is in the
+header above and applies to every entry here: **an entry's file list and its counts are the least
 reliable part of it, and a durable fix stated in one sentence has usually not
 been tried.** Four of these were found to describe the code wrongly in the
 2026-09-17 pass and carry an inline correction; assume the rest are no better
@@ -541,209 +521,49 @@ and re-derive before implementing.
       **Trigger:** the next slice that touches `_ensure_exception` or the `/exceptions` detail panel —
       or sooner, since it is the surface an auditor reads.
 
-#### Opened by the label-map slice
-
 #### Opened by the mobile-currency slice
 
-- [ ] **(c) `frontend/utils/money.ts::resolveCurrency` substitutes
-      `DEFAULT_CURRENCY` for a code the backend deliberately declined to
-      supply.** `formatMoney` funnels every web figure through
-      `resolveCurrency(options.currency)`, which returns `'USD'` for a null /
-      malformed code. That directly contradicts `PaymentResponse.currency`'s own
-      contract — "`None` is deliberate and is NOT a licence to substitute a
-      default … Render the bare figure rather than a code that cannot be
-      proven" (decisions §79/§82) — so a payment whose invoice carries no
-      currency renders as dollars on the web while round 31 made mobile render
-      it bare (§160). Several call sites additionally write
-      `p.currency ?? orgCurrency.currency`, labelling a per-row figure with the
-      org's reporting currency, which is the mislabel §160 removed.
-      **Durable fix:** let `formatMoney` render a bare grouped figure for an
-      unprovable code (a `Money` component prop, not a new helper), audit the
-      `?? orgCurrency.currency` call sites — *list corrected 2026-09-17:*
-      `bank-reconciliation/+page.svelte`, `PositivePayModal.svelte`,
-      `routes/positive-pay/+page.svelte`, `routes/payments/+page.svelte` and
-      `analytics/ByEntityBreakdown.svelte`. `RunDetailModal.svelte` is **no
-      longer** one: it now takes the server's `currency` and renders bare on
-      `null`, which is the shape the others should copy. Keep
-      `DEFAULT_CURRENCY` only for the picker defaults and form initial values
-      that genuinely need a value. Web-only; the two surfaces currently disagree
-      about the same row.
-      **One site is a backend gap, not a formatter one, and is the next one to
-      do:** `routes/purchase-orders/+page.svelte`'s `formatCurrency` labels every
-      PO with `orgCurrency.currency` because `GET /api/purchase-orders` serves no
-      per-row `currency` at all. **Corrected 2026-09-17 — this is bigger than the
-      entry claimed, and the correction matters because the PO work gates the
-      formatter work.** The entry said `PurchaseOrder` "carries the column, so
-      this is one serializer field plus the type". It does not:
-      `models/procurement.py::PurchaseOrder` has `total`, `status`,
-      `expected_delivery_date` and no currency anywhere, so this is a tenant
-      migration fanned out across every tenant DB, a backfill decision for
-      existing rows, and only then the serializer field — not the one-line
-      `_exception_dict` shape it was compared to. It still must land before the
-      formatter change, or bare-figure rendering would replace a wrong label
-      with no label on every PO row; sizing it honestly is what stops the
-      formatter change being blocked on a task nobody budgeted for. **Not** a site:
-      `bank-reconciliation/StatementDetailModal.svelte`'s Uncleared bucket, which
-      falls back deliberately and says so in a comment —
-      `UnclearedPaymentResponse` genuinely has no per-row currency where its
-      `unmatched_debits` sibling does, so that one is a payload question filed
-      with the reconciliation work, not this entry.
-      `routes/exceptions/+page.svelte` **was** on this list and is now fixed: the
-      round-31 `_exception_dict` change gave that row a currency, and the queue
-      reads it (§160).
-      **Trigger:** the first legacy invoice with no currency, or the next change
-      to `utils/money.ts`.
-
-- [ ] **(c) The mobile dashboard and cash-flow screens hide their
-      `unconverted_count`, so a part-converted rollup reads as a single-currency
-      figure.** Round 31 pointed both screens at the reporting-currency
-      counterparts and labelled them with the code the payload names, but
-      `GET /dashboard` also returns `reporting.unconverted_count`,
-      `aging_reporting.unconverted_count` and a per-bar count on
-      `monthly_trend`, and `cashflow_forecast` / `cash_position` return
-      `unconverted_count` — rows folded in at FACE value because no rate lock
-      bridged them. Non-zero means the labelled total mixes currencies, and the
-      cash-position curve carries the balance forward so one unconvertible row
-      poisons the tail. "A fallback nobody reports is just a wrong number"
-      (decisions §35), and the adaptive patterns tab and the vendor-spend tile
-      already disclose theirs.
-      **Durable fix:** parse the counts into `DashboardData` / `CashFlowData`
-      and render the same disclosure line the adaptive tab uses
-      (`adaptivePatternsUnconverted`'s shape — an ARB plural naming the count
-      and what it excludes), on the aging band set, the whole-book KPI and the
-      cash-position section. Needs new ARB entries in all six locales.
-      **Trigger:** the first tenant booking invoices in more than one currency,
-      or any change to the dashboard/cash-flow payload parsing.
-
-#### Opened by the GL-accounts slice
+- [ ] **(c) Purchase orders record no currency, so every PO figure is labelled by guess or not at all.**
+      Narrowed 2026-09-22 from the `resolveCurrency` entry: `formatMoney` now renders an
+      unprovable code bare, and every per-row fallback site that had a code to send —
+      Positive Pay, `/payments`, the by-entity table, bank-reconciliation's match picker —
+      sends it (§196). What is left is the one table with nothing to send:
+      `models/procurement.py::PurchaseOrder` has `total` and no currency column, so
+      `GET /api/purchase-orders` serves no per-row code. `routes/purchase-orders/+page.svelte`
+      and `analytics/CfoMetrics.svelte`'s accruals card label every PO figure with
+      `orgCurrency.currency`, and `/cfo`'s by-entity table renders Open POs bare with a
+      note, because it sums POs across entities that may report in different currencies. A
+      PO raised from a EUR requisition is booked with no record that it is EUR.
+      **Durable fix:** a `purchase_orders.currency` column as a tenant migration fanned to
+      every tenant DB. Backfill from the originating requisition where one exists and make
+      the rest an explicit decision (the org's reporting currency, or NULL rendered bare —
+      every proxy manufactures a claim). Then the serializer field, and have the PO list,
+      the accruals card (which needs a per-currency rollup, not a naive `SUM`) and
+      by-entity's Open POs label from it. PO matching's money comparisons should gain a
+      currency guard in the same change.
+      **Trigger:** the first tenant raising POs in a second currency, or the next change to
+      `PurchaseOrder`.
 
 #### Opened by the round-31 CI run
 
-- [ ] **(c) The nav role matrix is pinned twice, by hand, and only one of the two
-      pins is visible before CI.** Adding a single child row to a nav group in
-      round 31 turned a Playwright shard red: `tests-e2e/auth/rbac.spec.ts`
-      hardcodes the expected `sectionTabHrefs` set per role, and
-      `src/lib/nav.test.ts` hardcodes the same sets independently — the spec's own
-      comment says "`nav.test.ts` pins the same set", which is the tell. The unit
-      pin was updated with the change; the e2e twin was not, and could not be
-      caught locally: `pnpm check` does not typecheck `tests-e2e/`, `--list` only
-      proves a spec parses, and running the suite needs the whole stack up. So the
-      first signal was a red shard on an unrelated PR, which is the same failure
-      mode as [[e2e-spec-syntax-not-typechecked]] one layer up — a guard that only
-      speaks in CI.
-      **Durable fix:** derive one of the two from the other instead of restating
-      it. `nav.ts` already carries `roles` per entry, so the expected set for a
-      role is computable: export the filter `Sidebar`/`SectionTabs` already apply
-      (or a thin `navFor(role)` beside it), have `nav.test.ts` assert the *policy*
-      (which role may see which href, and that each row's roles match its
-      backend gate), and have `rbac.spec.ts` assert that the rendered DOM equals
-      `navFor(role)` rather than a literal array. Then a new row is a one-line
-      change and the e2e proves the wiring rather than re-typing the answer. Keep
-      one literal list somewhere deliberate — a computed expectation that reads
-      its answer from the code under test proves nothing — so pin the
-      href→roles table itself in `nav.test.ts` and let the e2e compare rendering
-      against it.
-      **Trigger:** the next nav row added, moved, or re-gated — it will cost a red
-      shard again otherwise.
-
-- [ ] **(c) Every container image the local stack and CI pull is a floating tag,
-      and one of them silently stopped being pullable.** Round 31's CI run failed
-      on two backend shards with `pull access denied for minio/minio, repository
-      does not exist or may require 'docker login'` — not a code defect and not
-      rate limiting: a manifest GET with a valid anonymous Docker Hub pull token
-      returns `401` for `minio/minio` while `library/alpine`, `postgres`, `redis`
-      and the other eight images the repo pulls all return `200`. MinIO's Docker
-      Hub distribution is gated; `quay.io/minio/minio` serves it. Fixed in that
-      round by moving all three references (the compose file and CI's two
-      `docker run` invocations) to quay.io.
-      **What is still open is the class, not that instance.** `minio/minio:latest`,
-      `axllent/mailpit:latest`, `ollama/ollama:latest`, `stripe/stripe-mock:latest`
-      and `caddy:2-alpine` are all floating tags, so the stack a contributor gets
-      depends on the day they pull, and an upstream retag or a registry change
-      lands as a red CI run on an unrelated PR — exactly how this one surfaced.
-      The images CI depends on for a *green* run are the ones that matter.
-      **Corrected 2026-09-17 — the Dependabot half of this entry was wrong, and
-      it names the wrong gap.** The entry says "`docker` is the one ecosystem not
-      covered". It **is** covered: `.github/dependabot.yml` has two
-      `package-ecosystem: docker` entries (`/backend`, `/tools/fake-erp`), and
-      both Dockerfiles are already digest-pinned
-      (`python:3.14-slim@sha256:…`). Dependabot's `docker` ecosystem reads
-      Dockerfiles, which is why the covered surface is the pinned one and the
-      uncovered surface is every compose file — the gap is a
-      `package-ecosystem: docker-compose` entry, plus the CI service images,
-      which no ecosystem reads.
-      The entry's tag list is also short. Floating in `backend/docker-compose.yml`:
-      `quay.io/minio/minio:latest`, `ollama/ollama:latest`,
-      `stripe/stripe-mock:latest`, `axllent/mailpit:latest`, and the loose-but-dated
-      `pgvector/pgvector:pg16`, `redis:7-alpine`, `postgres:16-alpine`,
-      `localstack/localstack:3`. **`caddy:2-alpine` is not in that file at all** —
-      it is in `deploy/compose.prod.yml`, alongside its own `pgvector:pg16` and
-      `redis:7-alpine`, so the *production* stack floats too and the entry never
-      said so. CI adds `pgvector/pgvector:pg16` and `redis:7`.
-      **Durable fix:** pin each to a digest (`image@sha256:…`) or at minimum a
-      dated release tag, and add a `docker-compose` ecosystem entry for both
-      compose files so the bumps arrive as reviewable PRs rather than as drift.
-      Do it in one change across `backend/docker-compose.yml`,
-      `deploy/compose.prod.yml` and the CI call sites, and note that pinning MinIO
-      means choosing a `RELEASE.*` tag deliberately rather than inheriting whatever
-      `latest` was, which is a behaviour decision and the reason round 31 did not
-      fold it in.
-      **Trigger:** the next time a floating-tag pull breaks a run, or the next
-      Dependabot configuration change — whichever comes first.
-
-#### Opened by the password-hash slice
-
-- [ ] **(c) `needs_update` is blind to the bcrypt cost, so a raised
-      `DEFAULT_ROUNDS` would migrate nothing.** Round 31 wired
-      `pwd_context.needs_update` into both login handlers
-      (`services/credential_upgrade.py`), so a row on a deprecated *scheme* now
-      re-hashes on its owner's next sign-in. But `needs_update` is exactly
-      `identify(h) != scheme`, and `identify` reports only the scheme — never
-      the `r=` cost baked into the hash. passlib's own `needs_update` compared
-      rounds as well. Today this is inert: `DEFAULT_ROUNDS = 12` is what passlib
-      defaulted to and what every row in the column carries, so scheme and cost
-      happen to move together. The moment somebody raises the cost (the normal
-      response to faster hardware, and the only knob the scheme exposes), every
-      existing credential silently stays at 12 while new ones get the higher
-      value, and the upgrade path that exists will not notice — a weaker-by-default
-      population with no signal that it exists.
-      **Durable fix:** have `needs_update` return True when the parsed `r=` of a
-      v2 hash is below `DEFAULT_ROUNDS`, and pin it with a test that a hash
-      written at a lower cost is flagged while one at the configured cost is
-      not. The existing wiring then migrates costs for free. Note
-      `tests/test_bcrypt_sha256_compat.py::test_needs_update_flags_exactly_the_schemes_we_no_longer_write`
-      asserts the current narrower contract and would need to widen with it; the
-      passlib-generated fixtures are at `r=4` and must NOT be regenerated, so the
-      test has to construct its own low-cost hash rather than reuse them.
-      **Trigger:** the first time anyone proposes raising `DEFAULT_ROUNDS` — and
-      the fix must land in the same change, or the bump quietly applies to new
-      passwords only.
-
-- [ ] **(c) An SSO-only tenant's legacy hash never upgrades, yet the password is
-      still a valid MFA step-up proof.** The round-31 upgrade is wired into the
-      two login handlers, and on the employee surface it deliberately sits after
-      the `sso_only` refusal: a tenant that has closed password login has made
-      that hash unreachable for signing in, so re-encoding it buys nothing
-      ([decisions.md](decisions.md) §163). The gap is that password login is not
-      the only consumer of `User.hashed_password`.
-      `services/mfa.step_up_verified` accepts the shared-context password as
-      proof for every factor-management step-up (enroll-start, passkey
-      register/delete, `/mfa/disable`), and `api/auth.py::login`'s own comment is
-      explicit that `sso_only` is "closed even for users who still carry a
-      password hash". So a pre-c6a91396 hash in an SSO-only tenant keeps
-      authenticating a security-sensitive operation, on raw bcrypt, forever — the
-      truncation weakness surviving in the one place nobody is looking at it.
-      **Durable fix:** either upgrade from the step-up path too, or stop
-      accepting a password as step-up proof in an `sso_only` tenant. The second
-      is the smaller and probably better change — a tenant that has closed
-      password login has said the password is not an authenticator there, and
-      passkey assertion plus TOTP already cover the SSO-only account the
-      assertion door was built for — but it is a policy change with its own
-      lockout question (an SSO-only account with neither a passkey nor TOTP), so
-      it is not a drive-by. The first needs the step-up helper, which is pure and
-      shared by four endpoints on two surfaces, to reach a session and a write.
-      **Trigger:** the next MFA/step-up slice, or any decision to enable
-      `sso_only` for a real tenant.
+- [ ] **(c) CI's service images are pinned by hand, so an auto-merged compose bump leaves them behind.**
+      Narrowed 2026-09-22: every compose, CI and `deploy.sh` image is now
+      `repo:tag@sha256:…` (`backend/docs/docker.md` § Image pinning), and a Dependabot
+      `docker-compose` entry bumps both compose files. No Dependabot ecosystem reads the
+      rest — `github-actions` reads only `uses:` — so the pgvector and redis `services:`
+      images in `ci.yml` and `sso-e2e.yml`, the two MinIO `docker pull` / `docker run` lines
+      in `ci.yml`, and `deploy.sh`'s `NODE_IMAGE` restate the compose refs by hand, with a
+      comment saying so. `dependabot-auto-merge.yml` merges a green minor/patch compose bump
+      on its own, after which CI keeps testing the previous digest while dev and production
+      run the new one — drift, not breakage.
+      **Durable fix:** derive CI's refs from the compose file instead of restating them: a
+      small job that reads `docker compose -f backend/docker-compose.yml config --images` and
+      exposes the pgvector / redis / minio refs as outputs, `services.*.image` pointed at
+      `${{ needs.<job>.outputs.* }}` (service images accept the `needs` context), and the
+      MinIO steps running the ref it reads. Update `dependabot-auto-merge.yml`'s header,
+      which still says "four ecosystems".
+      **Trigger:** the first auto-merged Dependabot compose PR that bumps pgvector, redis or
+      minio.
 
 ### Surfaced by wiring the FeohLedger AWS account (2026-09-14)
 
@@ -766,27 +586,6 @@ and re-derive before implementing.
       `AWS_DEPLOY_ENABLED` stays unset until both land. **Trigger:** the
       workload-stack build-out — step 1 of `docs/production-deployment.md`
       § Arming the AWS pipeline.
-
-### Surfaced by the minimal-deploy readiness review (2026-09-15)
-
-- [ ] **(c) Self-service signup has no off switch.** A deployed env refuses to
-      boot without `FEOH_HCAPTCHA_SECRET` (`config.py`
-      `_require_captcha_in_deployed_envs`), and nothing else gates `/signup` —
-      no setting, no plan flag. An operator who wants an invite-only pilot,
-      with tenants provisioned by `deploy/add-tenant.sh`, can only leave
-      `FEOH_HCAPTCHA_SITEKEY` empty. That fails closed — no widget loads and
-      `POST /api/signup/start` answers 400 "Captcha is required." — but the
-      page still renders a complete form that a visitor fills in only to be
-      refused, and the operator has to hold a captcha secret for a feature
-      they turned off. **Durable fix:** a `FEOH_SIGNUP_ENABLED` setting
-      (default `true`, today's behaviour) that the three `/api/signup/*`
-      routes refuse on, published through `/api/public-config` so the SPA
-      drops the route and its links rather than rendering a dead form; the
-      captcha boot check then applies only while signup is on. Documented
-      workaround meanwhile: `deploy/prod.sops.yaml.example` § hCaptcha,
-      `docs/minimal-deployment.md` § 3. **Trigger:** the first deploy whose
-      tenants are all provisioned by hand, or the first report of a refused
-      signup.
 
 ### Surfaced by fixing the three privacy defects (2026-09-16, issues #423/#424/#425)
 
@@ -847,19 +646,6 @@ code**, twice in the direction that would have caused damage. That is now the
 seventh round running where an entry's own account of its scope was the least
 reliable part of it.
 
-- [ ] **(c) A consolidated-view GL pick is still not validated against the invoice's own entity.**
-      Round 26 made the ambiguity *visible* — entity-scoped options now carry the owning
-      entity's name — but the picker still offers, and the server still accepts, subsidiary
-      B's `6000` for a subsidiary-A invoice. The stored string then resolves against A's
-      chart. Labelling was the half that fit in the frontend; refusing is the half that does
-      not.
-      **Durable fix:** expose the invoice's own `entity_id` on `InvoiceResponse` (it carries
-      only `counterparty_entity_id` today) so the picker can scope to that invoice's
-      effective chart, and validate on manual write — `gl_account_invalid` is raised today
-      only by `services/extraction.py` and `gl_recode`, never by a PATCH, so a hand-typed or
-      cross-entity code is accepted silently.
-      **Trigger:** the first multi-entity tenant whose subsidiaries define overlapping codes.
-
 - [ ] **(c) `Invoice.gl_account` stores a code, so a renamed or retired account cannot be traced.**
       Round 26 confirmed the shape while auditing the picker: `Invoice.gl_account` and
       `InvoiceLineItem.gl_account` are `String(100)` **codes**, while `Expense`,
@@ -881,15 +667,6 @@ reliable part of it.
       **Trigger:** the first request to rename or merge a GL account, or any work on
       cross-entity coding.
 
-- [ ] **(c) The new `PATCH /api/gl-accounts/{id}` has no caller.** The endpoint (correct /
-      retire, with a `parent_code` cycle guard and an audit row per changed field) landed in
-      round 26; `/gl-accounts` still renders no row actions, so an account is still
-      create-only from the UI. The backend agent's boundary stopped at `backend/`.
-      **Durable fix:** row actions on `/gl-accounts` for edit + deactivate/reactivate, and
-      show retired rows under a filter rather than hiding them — the list endpoint already
-      filters on `is_active`.
-      **Trigger:** the next change to `/gl-accounts`.
-
 - [ ] **(c) The exception `amount` still crosses the wire as a JSON number.** Round 26 made
       every money serializer exact (51 sites) but deliberately preserved the wire shape.
       Moving `amount` to an exact string is blocked on the clients:
@@ -898,43 +675,6 @@ reliable part of it.
       **Durable fix:** a coordinated backend + web + mobile change, one field at a time,
       each client tolerant of both shapes before the server switches.
       **Trigger:** the next deliberate wire-format slice — not a drive-by.
-
-- [ ] **(c) The invoice-warning message catalogue is generated for the web only.**
-      `backend/scripts/gen_invoice_warning_messages.py` emits
-      `frontend/src/lib/api/invoiceWarningMessages.generated.ts`; round 26 hand-transcribed
-      the same 48 codes into mobile's ARB files. A parity test
-      (`mobile/test/l10n/invoice_warning_messages_test.dart`) reads the generated TypeScript
-      and reddens mobile CI when the codes or parameter kinds diverge, so the duplication is
-      guarded rather than silent — but it is still duplication.
-      **Durable fix:** teach the generator to emit the Dart/ARB half beside the TypeScript
-      one, and drop the parity test to a generated-file drift check like the others.
-      `backend/docs/invoice-warnings.md` describes only the web client and understates this.
-      **Trigger:** the next new warning code, which is the moment the duplication costs
-      something.
-
-- [ ] **(c) `BadgeTone` lives in a `.svelte` module, so `tests-e2e/` cannot import the types
-      that reference it.** `$lib/types/vendor.ts` does `import type { BadgeTone } from
-      '…/ui/Badge.svelte'`, and plain `tsc` resolves `*.svelte` through an ambient shim with
-      no named exports — `TS2614` under `pnpm check:e2e`. So an e2e fixture cannot
-      `satisfies` any type that transitively touches it, against the house rule that
-      fixtures are type-pinned; round 26 had to skip that on one new fixture and say why
-      inline.
-      **Durable fix:** move `BadgeTone` into a `.ts` module and re-export it from
-      `Badge.svelte`. 28 files import it, so it is its own mechanical change and a poor
-      passenger on anything else.
-      **Trigger:** the next e2e fixture blocked by it, or any refactor already touching
-      `ui/Badge.svelte`.
-
-- [ ] **(c) `DataTable`'s scroll container is not keyboard-pannable.** `.grid-container`
-      scrolls horizontally but carries no `tabindex="0"`, so a table whose cells hold
-      nothing focusable cannot be panned by keyboard at narrow widths. Round 26 gave its
-      two new `/cfo` scrollers the attribute rather than change the shared component while
-      four agents were in that tree. Not a 1.4.10 failure — the table scrolls rather than
-      overflowing the document — but it is adjacent to 2.1.1.
-      **Durable fix:** `tabindex="0"` plus an accessible name on `.grid-container` in
-      `ui/DataTable.svelte`, and a check in the a11y suite that a horizontally-scrollable
-      region is reachable.
-      **Trigger:** the next change to `ui/DataTable.svelte`.
 
 - [ ] **(c) Breakpoints are ad hoc — the deferred half of [#432](https://github.com/Absence0760/feohledger/issues/432).**
       Round 26 closed #432's two engineering parts (the `/organization` 320px failure and a
@@ -956,107 +696,160 @@ reliable part of it.
       320px is WCAG's own number. A floor decision adds steps above it.
       **Trigger:** the product call.
 
-- [ ] **(c) `frontend/CLAUDE.md` documents a `t()` that does not exist.** It tells
-      contributors to put user-facing strings through `t()`; the runtime function is `m()`,
-      which is what every call site uses. A binding instruction file naming the wrong
-      function is the kind of error that costs a newcomer an hour.
-      **Durable fix:** correct the reference, and grep the per-area `CLAUDE.md` files for
-      other stale API names while there.
-      **Trigger:** the next edit to `frontend/CLAUDE.md`.
+### Surfaced by the #321 / #443 batch (2026-09-22)
 
-### Surfaced by the /polish-ui pass on /exceptions and /credit-memos (2026-09-17)
+Five agents, each in its own worktree, closed all seven [#443](https://github.com/Absence0760/feohledger/issues/443)
+entries and twelve from [#321](https://github.com/Absence0760/feohledger/issues/321), and
+narrowed two more (§188–§196). These eight are what the work found and could not honestly
+fold in: each is a product call, needs a tenant migration (the batch took none), or is a
+sibling of a fix that needs its own pass.
 
-Mirrored as GitHub issue [#443](https://github.com/Absence0760/feohledger/issues/443).
+- [ ] **(c) `/profile` still offers a password field for the step-up in an SSO-only tenant, where a password is no longer a proof.**
+      Since §191, `api/auth._step_up_satisfied` drops an offered password when the member's
+      org has `sso_only` on, and the refusal is a 400 whose sentence names the proofs that do
+      work (an authenticator code or a registered passkey). The server side is complete and
+      honest, but the profile page does not know the tenant is SSO-only: the passkey card
+      still renders "Confirm your password" (`profile.passkeys.stepUpPassword`) and prefers a
+      typed password over the passkey ceremony (`passkeyCardProof`), so a member who types
+      one gets that 400 as a toast instead of never being asked. Not a security gap — the
+      backend is the boundary — but a control that can only ever be refused.
+      **Durable fix:** have the profile page learn `sso_only` the way the login page does
+      (`GET /api/auth/sso/config` + `/api/auth/saml/config`, both public and already echoing
+      `sso_only` only when the IdP resolves) — or expose it on `/auth/me` beside
+      `mfa_required_by_org` — and, when set, hide the password field and go straight to the
+      passkey / authenticator-code proof. An e2e stubbing the config to `sso_only: true`
+      pins it.
+      **Trigger:** the next `/profile` or MFA UI slice, or the first tenant that turns
+      `sso_only` on.
 
-Two `ui-polisher` runs against the refreshed agent definition. Both pages landed
-their visual and correctness work; everything below is what the polish could not
-reach because it needs a router change, a six-locale catalogue tranche, or a
-call on test infrastructure. The pattern worth noting: **both pages were missing
-the same two primitives for the same reason** — the shared component exists, the
-backend parameter does not.
+- [ ] **(c) Inter-company mirrors routed before §192 still carry no inherited implicated set.**
+      `route_intercompany_invoice` now copies the source's `uploaded_by_id` ∪
+      `segregation_actor_ids` onto the mirror at routing time (§192), but a mirror routed
+      before that change has `segregation_actor_ids = NULL`, so for a mirror still awaiting
+      approval the source's uploader or editors can approve it. Unlike §141/§152's
+      no-backfill cases the input here is *observed* — both source columns are on the origin
+      row — so a backfill copies evidence rather than inventing it.
+      **Durable fix:** an idempotent Alembic data migration fanned to every tenant that, for
+      each origin ↔ mirror pair (`intercompany_mirror_id` set on both; the mirror is the row
+      whose `invoice_number` is `'IC-' ||` the origin's and whose `entity_id` is the origin's
+      `counterparty_entity_id`), sets the mirror's `segregation_actor_ids` to the origin's
+      implicated set minus the mirror's `uploaded_by_id` where the mirror's is NULL —
+      limited to mirrors not yet past approval, since an approved one has no decision left
+      to protect. Reuse `approval_chain.implicated_actors`' definition in SQL form.
+      **Trigger:** the next round that ships a migration, or the first tenant that routes
+      inter-company before then.
 
-- [ ] **(c) Neither `/exceptions` nor `/credit-memos` can be searched or sorted — the backend has no parameters for it.**
-      `GET /api/exceptions` and `GET /api/credit-memos` accept status/severity plus
-      pagination and nothing else. That is why both pages ship with zero `SearchBox` and
-      zero `SortableHeader` while five sibling list routes have both, and why neither
-      polish pass added them: approximating search with a client-side `.filter()` over the
-      one loaded page is the anti-pattern `frontend/docs/ui-patterns.md` § Search forbids,
-      because it silently searches a page instead of the set.
-      **Durable fix:** add `search` plus a sort allowlist to both routers — exceptions over
-      invoice number + vendor with sorts on `created_at` / `severity` / due, credit memos
-      over `memo_number` + `vendor_name` with sorts on `issued_date` / `amount` /
-      `memo_number`. Both pages then take the shared primitives with no new UI patterns.
-      **Trigger:** the first tenant whose exception queue or credit-memo list exceeds one
-      page of 20 — a triage queue that cannot be sorted by due date is the first thing an
-      AP manager asks for.
+- [ ] **(c) A GL code that is in no chart at all is still accepted on a manual invoice write.**
+      `services/gl_chart.refuse_foreign_gl_codes` (§194) refuses a code that belongs ONLY to
+      another entity's chart, on create / PATCH / line items / approve-with-corrections / CSV
+      import / recurring templates. A code in no chart — hand-typed through the API, or on a
+      RETIRED account — still writes. The UI mostly prevents it (both invoice pickers are a
+      `<select>` whenever the chart is non-empty), but the API, CSV import and the mobile
+      edit sheet's free-text GL field do not. Extraction and `gl_recode` already apply the
+      stricter rule to *automated* codes (must be in the effective active chart when one
+      exists).
+      **Durable fix:** a product call first — should a manual write require membership in
+      the invoice's effective ACTIVE chart whenever that chart is non-empty? If yes, add an
+      in-active-chart path to `gl_chart` and apply it on the interactive paths (create /
+      PATCH / line items / approve corrections / recurring); decide CSV import separately (a
+      historical-migration path whose `done`/`paid` rows legitimately carry retired codes —
+      likely exempt for terminal statuses); and fix the e2e fixtures that code to literals
+      not in their tenant's chart (`matching/four-way-inspection.spec.ts` uses `5000`,
+      `matching/rules-and-isolation` and `recurring/summary-kpi` use `6000`, which the full
+      local seed does not define).
+      **Trigger:** the product call, or the first report of a mistyped or retired code
+      reaching an ERP push.
 
-- [ ] **(c) The exception `severity` filter exists on the backend and nothing in the UI exposes it.**
-      `GET /api/exceptions?severity=` has always worked; the queue offers status and type
-      chips only. Cheap on its own, but it needs a third chip row and catalogue keys in six
-      locales, which is more than a polish pass should mint.
-      **Durable fix:** a third `FilterChips` row bound to `?severity=`, with the keys added
-      to all six catalogues in the same change.
-      **Trigger:** bundle it with the search/sort work above — same file, same tranche.
+- [ ] **(c) Extraction still accepts another entity's GL code when the invoice's own active chart is empty.**
+      `services/extraction.run_extraction` validates the AI-suggested header/line GL and the
+      post-overlay vendor prior against `active_gl_codes` — the invoice's effective ACTIVE
+      chart — and treats an empty set as "nothing to validate against". So in a
+      multi-entity tenant where subsidiary A has no accounts of its own and there are no
+      shared ones, but B does, an extracted `6000` (B's) is written to an A invoice: the one
+      path §194's `gl_chart` does not cover. Not wired in the batch because the extraction
+      tests mock `db.execute` in a fixed order and `tests/test_entity_coa.py` mirrors the
+      exact catalog query, so the change needs its own pass.
+      **Durable fix:** in the empty-effective-chart branch (three sites: line items,
+      suggested header GL, stale-prior recheck) also refuse codes `gl_chart` classifies as
+      belonging elsewhere, raising the existing `gl_codes_not_in_chart` warning — one extra
+      `load_chart_ownership` call only when `active_gl_codes` is empty — and update the
+      mocks.
+      **Trigger:** the first multi-entity tenant with an entity that has neither its own nor
+      shared accounts, or the next change to extraction's GL validation.
 
-- [ ] **(c) `/credit-memos` filter chips carry no counts, because there is no per-status count endpoint.**
-      `/exceptions` has `GET /api/exceptions/summary` feeding its chip tallies; credit memos
-      has no equivalent, so its chips are bare labels and the operator cannot see how many
-      open memos exist without clicking through.
-      **Durable fix:** a `GET /api/credit-memos/summary` mirroring the exceptions one —
-      including taking `?status=`, which is the defect the exceptions summary just had to be
-      fixed for (see the same-day commit scoping `by_type` to the viewed status).
-      **Trigger:** same tranche as the two above.
+- [ ] **(c) The `/credit-memos` invoice selects walk EVERY invoice page on mount and filter by vendor in the browser.**
+      Both invoice pickers on the page — the Apply dialog and, since #443, the create
+      dialog's optional "Apply to invoice" link — read one `invoices` array that
+      `loadInvoices()` fills with `fetchAllPages` over `/api/invoices` on mount, then
+      `.filter(i => i.vendor_id === …)`. That is correct (a truncated first page would hide
+      the invoice the operator wants to credit, and a native `<select>` has no search), but
+      it costs `ceil(total / MAX_PAGE_SIZE)` requests on every visit for a list most visits
+      never open, and it grows with the tenant's whole invoice history. The page's own
+      comment said this was "tracked separately"; it was not tracked anywhere.
+      **Durable fix:** an `InvoicePicker` combobox on the `ui/VendorPicker` pattern
+      (server-searched, paged, honest count line), fed by a `vendor_id` filter on
+      `GET /api/invoices` (today it has only a free-text `vendor` name filter), loaded when a
+      dialog opens rather than on mount. Both dialogs then take the same component.
+      **Trigger:** the first tenant whose invoice history makes `/credit-memos` slow to
+      open, or the next change to either credit-memo dialog.
 
-- [ ] **(c) The exceptions toasts assemble English grammar from a verb stem, so they cannot be translated.**
-      `commitResolve` builds `` `Exception ${action}d` `` and
-      `` `${body.updated} ${action}d, ${skipped} skipped` `` — English morphology in a
-      template literal, which no catalogue key can express. Alongside them sit hardcoded
-      `'Failed to load exceptions'`, `'Resolution note is required'`, `'Action failed'`,
-      `` `Selected all N matching exception(s)` `` and three `ariaLabel`s on `Tabs` / `Modal`.
-      **Durable fix:** one message key per action outcome rather than stem assembly, added
-      to all six catalogues. **Sequencing matters:** `tests-e2e/exceptions/resolve.spec.ts`
-      and `load-sequencing.spec.ts` select on the modal's exact English `ariaLabel`, so
-      those specs must move to a stable selector *before* the strings are translated, or
-      they break on the locale that isn't English.
-      **Trigger:** the next i18n tranche that touches the exceptions surface.
+- [ ] **(c) `utils/currencyGroups.ts` still files an unknown-currency row under the org's currency.**
+      §196 made `formatMoney` render an unprovable code bare, but the per-currency grouping
+      helpers still substitute one. `groupAmountsByCurrency(rows, fallback)` buckets a row
+      with no `currency` INTO the fallback's (the org's) subtotal, adding it to real
+      org-currency money; `formatCurrencyTotals(totals, fallback)` labels a total the
+      backend reported under `""` with the org's code — and
+      `api/bank_reconciliation.py::_currency_totals` reports an unestablished currency as
+      `""` precisely so it is "not folded into another currency's figure". Callers:
+      `/bank-reconciliation`'s three bucket totals, the `/budgets` / `/expenses` /
+      `/recurring` / `/requisitions` KPI rollups, and the `/payments` pay bar. It does not
+      fire where the rows' currency is NOT NULL (invoice-backed rows); it does wherever a
+      backend emits `""` or null.
+      **Durable fix:** keep unknown-currency rows in their own group (key `null`), never
+      merged into a real one, rendered through `formatMoney(total, { currency: null })`.
+      Drop the `fallbackCurrency` parameter from both helpers and pass the org's code only
+      where a caller genuinely means "an empty selection costs zero". Pin it in
+      `currencyGroups.test.ts` with a mixed `[EUR row, null row]` input.
+      **Trigger:** the next change to `utils/currencyGroups.ts`, or the first bucket total
+      the backend reports under `""`.
 
-- [ ] **(c) `extractError()` on `/exceptions` bypasses `$lib/utils/apiError.ts`, so a 422 renders as `[object Object]`.**
-      It hand-rolls `e?.detail ?? e?.message`. FastAPI returns a *list* of validation objects
-      for a 422, which stringifies to `[object Object]` — precisely the bug `formatApiDetail`
-      was written to fix.
-      **Durable fix:** swap `extractError` for `formatApiDetail`. One line, but it changes
-      what a refused segregation-of-duties resolve tells the operator, which is a money-path
-      message — so it ships with a test that asserts the refusal text, not on its own.
-      **Trigger:** the next change to the exception resolution path.
+- [ ] **(c) The web `orgCurrency` store answers `USD` when nothing resolves, which §119 says it must not.**
+      `stores/orgSettings.svelte.ts` starts at `DEFAULT_CURRENCY`, and `reset()` and a load
+      that resolves nothing both leave it `'USD'` — so every aggregate labelled from the
+      store (the dashboard and `/cfo` KPIs, adaptive thresholds, approval-matrix labels, the
+      zero in `/payments`' empty pay bar) wears a `$` whenever no setting resolved, and
+      before the store has loaded. Mobile's `OrgCurrencyStore` returns `null` there, per
+      §119/§160. The backend's last rung, `settings.reporting_currency_default`, is
+      operator-set and invisible to any client, so a client `USD` is a guess
+      indistinguishable from a configured answer.
+      **Durable fix:** type the store `string | null`, start it at `null`, and let
+      `resolveReportingCurrency` return `null` when every rung misses; since §196 every
+      `formatMoney` caller then renders bare with no further change. Audit the non-render
+      readers — picker defaults (`currencyOptions`, the `CreateInvoiceModal` /
+      `RequisitionModal` / `ImportStatementModal` initial values) should take
+      `DEFAULT_CURRENCY` explicitly — and wherever a payload names its reporting currency,
+      read that over the store.
+      **Trigger:** the next change to `orgSettings.svelte.ts`, or the first org whose
+      reporting currency is set only through `reporting_currency_default`.
 
-- [ ] **(c) A credit memo cannot be linked to an invoice at creation, and cannot be edited afterwards.**
-      `POST /api/credit-memos` accepts `invoice_id`, but the create modal never sends one;
-      and there is no `PATCH` on the resource at all. Because apply is currency fail-closed,
-      a memo created with the wrong currency is permanently unfixable *and* unappliable —
-      the only exit is Void and re-create, which leaves a void row in the audit trail for
-      what was a typo.
-      **Durable fix:** expose the invoice link in the create modal, and add a `PATCH`
-      restricted to memos in `open` (never one already applied — that would rewrite a
-      settled money record).
-      **Trigger:** the first support request about a mis-keyed credit memo.
-
-- [ ] **(c) Four `/credit-memos` e2e specs fail against a local dev server while CI is green — root cause unknown.**
-      `tests-e2e/credit-memos/load-sequencing.spec.ts` (×3) and `void-confirm.spec.ts` fail
-      locally with the row absent (`getByRole('table').getByRole('button', {name: 'Void'})`
-      not found) even though the spec **mocks** the list response, so tenant data cannot be
-      the cause. Established: they fail identically **at HEAD on a clean tree** (stash-tested,
-      15 passed / 4 failed both with and without the polish changes), a fresh dev server with
-      a rebuilt `.svelte-kit/generated` does not clear it, and the most recent `main` CI run
-      passed including all 14 Playwright shards. So it is neither the polish work nor a
-      product defect CI can see. Not yet in `known-issues.md` because there is no root cause
-      to record there — only a localisation.
-      **Durable fix:** determine whether this is a dev-server-versus-preview-build difference
-      (CI serves a preview build; these runs used `vite dev`) or a local harness/tenant-slot
-      issue, then fix the real cause. If it proves to be dev-only, the specs should say so
-      or the local runner should serve a preview build, because four permanently-red specs
-      locally is how a genuinely red one gets ignored.
-      **Trigger:** the next time anyone runs the credit-memos e2e locally — or sooner, since
-      the cost of a standing local red is paid by every contributor.
+- [ ] **(c) The web dashboard's one partial-conversion banner says "exclude" for totals that count unconverted rows at face value.**
+      `routes/+page.svelte`'s `hasUnconvertedRows` ORs three counts into one banner,
+      `dashboard.reporting.unconverted` ("Some totals above exclude rows with no locked
+      exchange rate … treat them as a floor"), but the three follow opposite rules:
+      `reporting.unconverted_count` (the invoice total) comes from
+      `invoice_reporting_amount_sql`, which counts those rows at **face value**, while
+      `total_paid_unconverted_count` and `total_pending_unconverted_count` come from
+      `payment_reporting_amount_sql`, which **excludes** them. So for the invoice KPI the
+      banner is wrong — the figure is not a floor, it mixes currencies. The chart
+      disclosures beside it already say "counted at face value", §196 fixed the same
+      misstatement on `/cfo`'s by-entity table, and mobile (closed in this batch) words each
+      KPI separately.
+      **Durable fix:** split the banner in two — a face-value line naming the invoice-side
+      KPIs, gated on `reporting.unconverted_count` and `upcoming_unconverted_count`, and an
+      excluded line naming Paid / Pending, gated on the two payment counts — each with its
+      own key in all six locales, pinned in `tests-e2e/dashboard/` with the shared
+      `fixture.ts` builder.
+      **Trigger:** the next change to the dashboard KPI row or its disclosure copy.
 
 ### Surfaced by widening the backend shard matrix (2026-09-17, issue #444)
 
