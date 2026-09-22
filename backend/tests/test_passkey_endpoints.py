@@ -112,14 +112,24 @@ async def test_passkey_authenticate_start_refused_when_master_switch_off():
 
 
 class _RegDB:
-    """Records the WebAuthnCredential added on register-verify."""
+    """Records the WebAuthnCredential added on register-verify.
 
-    def __init__(self, existing=None):
+    A password step-up also loads the account's organization (a password is no
+    proof in an SSO-only tenant — `api/auth._password_sign_in_closed`), so an
+    `organizations` select is answered with `org`: by default one that has not
+    closed password sign-in. Dispatched on the table, since the credential and
+    the org lookups both read `scalar_one_or_none`."""
+
+    def __init__(self, existing=None, org=None):
         self.added = []
         self._existing = existing or []
+        self._org = org if org is not None else SimpleNamespace(settings={})
 
-    async def execute(self, *_a, **_k):
+    async def execute(self, stmt, *_a, **_k):
         result = MagicMock()
+        if stmt.get_final_froms()[0].name == "organizations":
+            result.scalar_one_or_none.return_value = self._org
+            return result
         result.scalars.return_value.all.return_value = self._existing
         result.scalar_one_or_none.return_value = self._existing[0] if self._existing else None
         return result
@@ -336,7 +346,10 @@ async def test_passkey_register_start_refused_for_a_passwordless_sso_account_wit
     could plant an attacker-controlled passkey on an account the attacker
     never proved control of, and it goes live the moment such a user is given
     a password via the admin password-set. The recovery path is exactly that
-    admin password-set, after which the normal step-up works."""
+    admin password-set, after which the normal step-up works — in a tenant that
+    has not closed password sign-in. In an `sso_only` tenant a password is no
+    step-up proof at all (`api/auth._password_sign_in_closed`), and the route is
+    this passkey's own assertion instead."""
     from app.api import auth as auth_mod
 
     user = _fake_user()

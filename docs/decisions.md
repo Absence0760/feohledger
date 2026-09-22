@@ -7662,3 +7662,75 @@ to start a run against a database behind head, naming each stale one and
 The delay is its own lesson: that entry named its own durable fix, sized it
 correctly, and still sat for nine days because it was filed as a note rather
 than as work.
+
+## 192. A password that cannot sign in cannot authorize a factor change either
+
+**Decided:** 2026-09-21 · `backend/app/api/auth.py` · `backend/tests/test_sso_only.py`
+
+§163 placed the login-time hash upgrade after the SSO-only refusal, on the
+reasoning that a tenant which has closed password login has made the hash
+unreachable for signing in. It named the residue in the same breath: signing in
+is not the only consumer of `User.hashed_password`. Every change to a second
+factor — TOTP enroll and disable, passkey register and delete — demands a
+step-up, and the account password was one of its three proofs. So in an
+SSO-only tenant the hash went on authenticating the one security-sensitive
+operation it still could, and for a row written before c6a91396 it did so on raw
+bcrypt that no sign-in would ever upgrade.
+
+The follow-up offered two fixes: upgrade from the step-up path too, or stop
+accepting the password as a step-up proof there. **The second was taken, and
+the first turned out to be unnecessary once it was.** A tenant that turns
+`sso_only` on has said the password is not an authenticator in that tenant, and
+a step-up *is* an authentication. So `_step_up_satisfied` drops an offered
+password before `mfa.step_up_verified` sees it, through one predicate —
+`_password_sign_in_closed`, which is `services/sso.is_sso_only`, the same call
+the login refusal makes. The two doors therefore cannot disagree about whether
+the password authenticates: it proves a step-up exactly when it would prove a
+sign-in, and `is_sso_only`'s requirement that `sso.enabled` be true (a broken
+IdP config keeps the password open as the escape hatch) reopens both together.
+With the step-up closed, the legacy hash authenticates nothing that matters
+while the tenant stays SSO-only, and the day the tenant leaves SSO-only the
+owner's first password sign-in upgrades it through the path that already
+exists. Wiring an upgrade into the step-up would have meant a write from a pure
+helper shared by four endpoints on two surfaces, for a credential the tenant has
+retired.
+
+Four calls inside it:
+
+1. **The rule lives in `_step_up_satisfied`, not at each caller.** Every route
+   that asks "is the step-up satisfied?" goes through it, so a fifth factor
+   operation added later inherits the rule rather than having to remember it.
+   `mfa.step_up_verified` stays pure — no org, no DB — and is told
+   `password=None`; its docstring says the admissibility call is the caller's.
+
+2. **The password is never verified there, so the refusal cannot enumerate.**
+   A right password, a wrong one and an account with no password at all get the
+   byte-identical `400`. The sentence names the proofs that do work (an
+   authenticator code, a registered passkey) instead of the generic "confirm
+   your password", which in that tenant would be asking for the one proof it
+   refuses. It reveals only that the tenant is SSO-only, which
+   `/auth/{sso,saml}/config` already publishes to anyone, to a caller who is
+   already signed in to the account. It stays a `400` — the status every other
+   step-up refusal uses — and it is throttled and audited as an
+   `auth.mfa.step_up.failure` exactly like a wrong password, because a stolen
+   session trying the password is the signal that row exists to carry.
+
+3. **The org is loaded only when a password was offered.** Code and assertion
+   step-ups pay no extra query for a rule that cannot bind them; the refusal
+   path reads the org once more to pick its sentence, which is a failure path
+   and cheaper than threading a verdict out of a predicate that returns a bool.
+
+4. **The lockout question has a bounded answer.** A step-up is only demanded of
+   an account that has a live factor, and a live factor is itself a proof the
+   owner holds — the authenticator for TOTP, the passkey for a passkey — so no
+   account is left with nothing to offer. What goes is the password as a
+   *fallback*: a member who lost their authenticator, or whose only passkey is
+   bound to another host, cannot use it to step up here. That is accepted
+   because, in an SSO-only tenant, those factors gate nothing: OIDC and SAML
+   sign-in never consult them. A stuck factor there is an inconvenience with a
+   route out (the passkey's own host, or the tenant leaving SSO-only), not a
+   lockout, and keeping the password as a fallback would have kept exactly the
+   door this closes.
+
+The supplier portal is untouched: a `VendorUser` signs in with a password and no
+SSO can close it, so there the password remains the step-up proof it always was.
