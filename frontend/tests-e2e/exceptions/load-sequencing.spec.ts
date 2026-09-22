@@ -1,4 +1,5 @@
 import { expect, test } from '../fixtures/helpers';
+import { resolveDialog } from './dialogs';
 
 /**
  * `/exceptions` — list-load sequencing.
@@ -185,7 +186,7 @@ test.describe('/exceptions — list request sequencing', () => {
 		await expect(row).toBeVisible();
 
 		await row.getByRole('button', { name: 'Resolve' }).click();
-		const modal = page.getByRole('dialog', { name: 'Resolve exception' });
+		const modal = resolveDialog(page);
 		await modal.locator('input[type="text"]').fill('e2e: sequencer guard');
 		await modal.getByRole('button', { name: 'Resolve', exact: true }).click();
 
