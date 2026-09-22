@@ -48,6 +48,11 @@
   "dashboardCachedBanner": "Datos en caché — no se pudo conectar al servidor",
   "dashboardErrorPrefix": "Error: {error}",
   "dashboardInvoiceCount": "{count, plural, one {{count} factura} other {{count} facturas}}",
+  "partialConversionCurrencyFallback": "la moneda de reporte",
+  "dashboardKpiUnconverted": "{label}: parcial — {count, plural, one {{count} factura} other {{count} facturas}} sin tipo de cambio a {currency}, contabilizadas por su valor nominal, así que el total mezcla monedas en esa medida.",
+  "dashboardAgingUnconverted": "Parcial: {count, plural, one {{count} factura} other {{count} facturas}} sin tipo de cambio a {currency}, contabilizadas por su valor nominal: en esa medida los tramos de abajo mezclan monedas.",
+  "dashboardTopVendorsUnconverted": "Parcial: {count, plural, one {{count} factura} other {{count} facturas}} sin tipo de cambio a {currency}, contabilizadas por su valor nominal, por lo que estos proveedores no están todos clasificados en la misma moneda. Registre el tipo que falta antes de actuar según el orden.",
+  "dashboardVendorFaceValueCount": "{count, plural, one {{count} por su valor nominal} other {{count} por su valor nominal}}",
 
   "invoicesTitle": "Facturas",
   "invoicesSearchHint": "Buscar facturas…",
@@ -432,6 +437,8 @@
   "cashFlowPositionRowLabel": "{period}: inicial {opening}, salida {outflow}, final {closing}",
   "cashFlowBelowThresholdSuffix": ", por debajo del umbral",
   "cashFlowLowBalanceAlertLabel": "Alerta de saldo bajo. {message}",
+  "cashFlowForecastUnconverted": "Parcial: {count, plural, one {{count} factura} other {{count} facturas}} sin tipo de cambio a {currency}, contabilizadas por su valor nominal: en esa medida estas salidas, y los totales comprometido y pendiente de arriba, mezclan monedas.",
+  "cashFlowPositionUnconverted": "Sin convertir: {count, plural, one {{count} factura} other {{count} facturas}} sin tipo de cambio a {currency}, contabilizadas por su valor nominal: el saldo corriente de abajo y el final previsto de arriba mezclan monedas. Registre el tipo de cambio que falta antes de actuar sobre estas cifras.",
 
   "contractsTitle": "Contratos",
   "contractsSearchHint": "Buscar contratos…",

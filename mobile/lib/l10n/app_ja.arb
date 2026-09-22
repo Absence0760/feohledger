@@ -44,6 +44,11 @@
   "dashboardCachedBanner": "キャッシュデータを表示中 — サーバーに接続できませんでした",
   "dashboardErrorPrefix": "エラー: {error}",
   "dashboardInvoiceCount": "{count, plural, other {{count}件の請求書}}",
+  "partialConversionCurrencyFallback": "報告通貨",
+  "dashboardKpiUnconverted": "{label}：一部未換算 — {currency} への為替レートがない請求書 {count, plural, other {{count} 件}} を額面のまま計上しているため、合計にはその分だけ通貨が混在しています。",
+  "dashboardAgingUnconverted": "一部未換算：{currency} への為替レートがない請求書 {count, plural, other {{count} 件}} を額面のまま計上しているため、下の各区分はその分だけ通貨が混在しています。",
+  "dashboardTopVendorsUnconverted": "一部未換算：{currency} への為替レートがない請求書 {count, plural, other {{count} 件}} を額面のまま計上しているため、これらの取引先は同一通貨で並べられていません。順位を判断する前に不足しているレートを登録してください。",
+  "dashboardVendorFaceValueCount": "{count, plural, other {うち {count} 件は額面のまま}}",
   "invoicesTitle": "請求書",
   "invoicesSearchHint": "請求書を検索…",
   "invoicesSearchAria": "請求書を検索",
@@ -517,6 +522,8 @@
   },
   "cashFlowBelowThresholdSuffix": "、しきい値未満",
   "cashFlowLowBalanceAlertLabel": "残高不足の警告。{message}",
+  "cashFlowForecastUnconverted": "一部未換算：{currency} への為替レートがない請求書 {count, plural, other {{count} 件}} を額面のまま計上しているため、これらの支出と上の確定・保留中の合計には、その分だけ通貨が混在しています。",
+  "cashFlowPositionUnconverted": "未換算：{currency} への為替レートがない請求書 {count, plural, other {{count} 件}} を額面のまま集計しているため、下の残高推移と上の予測期末残高には複数通貨が混在しています。これらの数値をもとに判断する前に、不足しているレートを登録してください。",
   "@cashFlowLowBalanceAlertLabel": {
     "placeholders": {
       "message": {

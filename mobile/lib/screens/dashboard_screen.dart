@@ -7,6 +7,7 @@ import 'package:feohledger_mobile/utils/money.dart';
 import 'package:feohledger_mobile/widgets/cash_flow_button.dart';
 import 'package:feohledger_mobile/widgets/kpi_card.dart';
 import 'package:feohledger_mobile/widgets/notification_bell.dart';
+import 'package:feohledger_mobile/widgets/partial_conversion_note.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -60,6 +61,19 @@ class _DashboardScreenState extends State<DashboardScreen> {
           final data = store.data;
           if (data == null) return const SizedBox.shrink();
 
+          // What the part-conversion disclosures name as the currency the
+          // unconverted rows could not reach. The payload's own code whenever
+          // it names one; the counts ride the same `reporting` era of the
+          // payload, so the fallback is a guard, not a path anyone expects.
+          final disclosedCurrency =
+              data.reportingCurrency ?? l.partialConversionCurrencyFallback;
+          // The rows ACTUALLY rendered below — the disclosure has to describe
+          // the ranking the reader sees, not vendors the list never shows.
+          final vendors = data.topVendors.take(5).toList();
+          // A sum of row COUNTS, not money.
+          final vendorsUnconverted =
+              vendors.fold<int>(0, (n, v) => n + v.unconvertedCount);
+
           return RefreshIndicator(
             onRefresh: store.fetch,
             child: ListView(
@@ -102,6 +116,28 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     ),
                   ],
                 ),
+                // The two money KPIs above are reporting-currency rollups that
+                // keep an unconvertible row in at FACE value rather than drop
+                // it (dropping would understate the book and what is due), so
+                // each says so beside itself when it happened. Two lines, not
+                // one: they count different populations — the whole book, and
+                // the invoices due within the week.
+                if (data.unconvertedCount > 0)
+                  PartialConversionNote(
+                    l.dashboardKpiUnconverted(
+                      l.dashboardTotalInvoices,
+                      data.unconvertedCount,
+                      disclosedCurrency,
+                    ),
+                  ),
+                if (data.upcoming.unconvertedCount > 0)
+                  PartialConversionNote(
+                    l.dashboardKpiUnconverted(
+                      l.dashboardUpcoming,
+                      data.upcoming.unconvertedCount,
+                      disclosedCurrency,
+                    ),
+                  ),
                 const SizedBox(height: 12),
                 Row(
                   children: [
@@ -133,6 +169,19 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   style: Theme.of(context).textTheme.titleMedium,
                 ),
                 const SizedBox(height: 8),
+                // ONE note for the band set, matching the single
+                // `aging_reporting.unconverted_count` the API serves: which
+                // band an unconverted invoice fell into does not change what
+                // the reader should do about it.
+                if (data.aging.unconvertedCount > 0) ...[
+                  PartialConversionNote(
+                    l.dashboardAgingUnconverted(
+                      data.aging.unconvertedCount,
+                      disclosedCurrency,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                ],
                 Card(
                   elevation: 0,
                   shape: RoundedRectangleBorder(
@@ -179,20 +228,36 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   style: Theme.of(context).textTheme.titleMedium,
                 ),
                 const SizedBox(height: 8),
-                ...data.topVendors.take(5).map(
-                      (v) => ListTile(
-                        dense: true,
-                        title: Text(v.vendorName),
-                        trailing: Text(
-                          formatMoneyCompact(
-                            v.totalAmount,
-                            currency: data.reportingCurrency,
-                          ),
-                          style: const TextStyle(fontWeight: FontWeight.w600),
-                        ),
-                        subtitle: Text(l.dashboardInvoiceCount(v.invoiceCount)),
-                      ),
+                // A vendor with an unconverted invoice is ranked on a total
+                // that is not in the same currency as the rows around it. The
+                // section note says what that means; the row's own subtitle
+                // says WHICH vendors, so the reader need not guess.
+                if (vendorsUnconverted > 0)
+                  PartialConversionNote(
+                    l.dashboardTopVendorsUnconverted(
+                      vendorsUnconverted,
+                      disclosedCurrency,
                     ),
+                  ),
+                ...vendors.map(
+                  (v) => ListTile(
+                    dense: true,
+                    title: Text(v.vendorName),
+                    trailing: Text(
+                      formatMoneyCompact(
+                        v.totalAmount,
+                        currency: data.reportingCurrency,
+                      ),
+                      style: const TextStyle(fontWeight: FontWeight.w600),
+                    ),
+                    subtitle: Text(
+                      v.unconvertedCount > 0
+                          ? '${l.dashboardInvoiceCount(v.invoiceCount)} · '
+                              '${l.dashboardVendorFaceValueCount(v.unconvertedCount)}'
+                          : l.dashboardInvoiceCount(v.invoiceCount),
+                    ),
+                  ),
+                ),
               ],
             ),
           );

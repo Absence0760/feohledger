@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 
 import 'package:feohledger_mobile/api/api_client.dart';
+import 'package:feohledger_mobile/models/cash_flow.dart';
 import 'package:feohledger_mobile/stores/cash_flow_store.dart';
 
 /// The analytics endpoints serialise money as EXACT decimal strings (the
@@ -182,6 +183,51 @@ void main() {
     expect(store.data!.openingBalanceDisplay, '10000.50');
     expect(store.data!.positionPeriods.first.openingDisplay, '10000.5');
     expect(store.data!.projectedEndBalanceDisplay, '7000.25');
+  });
+
+  group('unconverted counts', () {
+    // Both legs keep a commitment with no rate into the reporting currency at
+    // FACE value and count it. The two counts live on different payloads and
+    // describe different figures (the forecast totals vs. the running
+    // balance), so each is read from its own key.
+    test('each leg reads its own count', () {
+      final data = CashFlowData.fromJson(
+        forecast: {
+          ..._forecastBody(),
+          'totals': {
+            ...(_forecastBody()['totals'] as Map<String, dynamic>),
+            'unconverted_count': 2,
+          },
+        },
+        position: {..._positionBody(), 'unconverted_count': 5},
+      );
+      expect(data.totals.unconvertedCount, 2);
+      expect(data.positionUnconvertedCount, 5);
+    });
+
+    test('absent keys (an older backend) read as nothing to disclose', () {
+      final data = CashFlowData.fromJson(
+        forecast: _forecastBody(),
+        position: _positionBody(),
+      );
+      expect(data.totals.unconvertedCount, 0);
+      expect(data.positionUnconvertedCount, 0);
+    });
+
+    test('an explicit null reads as zero too', () {
+      final data = CashFlowData.fromJson(
+        forecast: {
+          ..._forecastBody(),
+          'totals': {
+            ...(_forecastBody()['totals'] as Map<String, dynamic>),
+            'unconverted_count': null,
+          },
+        },
+        position: {..._positionBody(), 'unconverted_count': null},
+      );
+      expect(data.totals.unconvertedCount, 0);
+      expect(data.positionUnconvertedCount, 0);
+    });
   });
 
   test('surfaces an error and clears data when the network fails', () async {

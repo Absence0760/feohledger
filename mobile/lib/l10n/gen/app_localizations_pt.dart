@@ -154,6 +154,53 @@ class AppLocalizationsPt extends AppLocalizations {
   }
 
   @override
+  String get partialConversionCurrencyFallback => 'a moeda de relatório';
+
+  @override
+  String dashboardKpiUnconverted(String label, int count, String currency) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count faturas',
+      one: '$count fatura',
+    );
+    return '$label: parcial — $_temp0 sem taxa de câmbio para $currency, contabilizadas pelo valor de face, então o total mistura moedas nessa medida.';
+  }
+
+  @override
+  String dashboardAgingUnconverted(int count, String currency) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count faturas',
+      one: '$count fatura',
+    );
+    return 'Parcial: $_temp0 sem taxa de câmbio para $currency, contabilizadas pelo valor de face — nessa medida as faixas abaixo misturam moedas.';
+  }
+
+  @override
+  String dashboardTopVendorsUnconverted(int count, String currency) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count faturas',
+      one: '$count fatura',
+    );
+    return 'Parcial: $_temp0 sem taxa de câmbio para $currency, contabilizadas pelo valor de face — por isso estes fornecedores não estão todos classificados na mesma moeda. Registre a taxa que falta antes de agir com base na ordem.';
+  }
+
+  @override
+  String dashboardVendorFaceValueCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count pelo valor de face',
+      one: '$count pelo valor de face',
+    );
+    return '$_temp0';
+  }
+
+  @override
   String get invoicesTitle => 'Faturas';
 
   @override
@@ -1457,6 +1504,28 @@ class AppLocalizationsPt extends AppLocalizations {
   }
 
   @override
+  String cashFlowForecastUnconverted(int count, String currency) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count faturas',
+      one: '$count fatura',
+    );
+    return 'Parcial: $_temp0 sem taxa de câmbio para $currency, contabilizadas pelo valor de face — nessa medida estas saídas, e os totais confirmado e pendente acima, misturam moedas.';
+  }
+
+  @override
+  String cashFlowPositionUnconverted(int count, String currency) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count faturas',
+      one: '$count fatura',
+    );
+    return 'Não convertido: $_temp0 sem taxa de câmbio para $currency, contabilizadas pelo valor de face — então o saldo corrente abaixo e o saldo final previsto acima misturam moedas. Registre a taxa que falta antes de agir com base nestes números.';
+  }
+
+  @override
   String get contractsTitle => 'Contratos';
 
   @override
@@ -2650,6 +2719,53 @@ class AppLocalizationsPtBr extends AppLocalizationsPt {
       locale: localeName,
       other: '$count faturas',
       one: '$count fatura',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get partialConversionCurrencyFallback => 'a moeda de relatório';
+
+  @override
+  String dashboardKpiUnconverted(String label, int count, String currency) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count faturas',
+      one: '$count fatura',
+    );
+    return '$label: parcial — $_temp0 sem taxa de câmbio para $currency, contabilizadas pelo valor de face, então o total mistura moedas nessa medida.';
+  }
+
+  @override
+  String dashboardAgingUnconverted(int count, String currency) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count faturas',
+      one: '$count fatura',
+    );
+    return 'Parcial: $_temp0 sem taxa de câmbio para $currency, contabilizadas pelo valor de face — nessa medida as faixas abaixo misturam moedas.';
+  }
+
+  @override
+  String dashboardTopVendorsUnconverted(int count, String currency) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count faturas',
+      one: '$count fatura',
+    );
+    return 'Parcial: $_temp0 sem taxa de câmbio para $currency, contabilizadas pelo valor de face — por isso estes fornecedores não estão todos classificados na mesma moeda. Registre a taxa que falta antes de agir com base na ordem.';
+  }
+
+  @override
+  String dashboardVendorFaceValueCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count pelo valor de face',
+      one: '$count pelo valor de face',
     );
     return '$_temp0';
   }
@@ -3955,6 +4071,28 @@ class AppLocalizationsPtBr extends AppLocalizationsPt {
   @override
   String cashFlowLowBalanceAlertLabel(String message) {
     return 'Alerta de saldo baixo. $message';
+  }
+
+  @override
+  String cashFlowForecastUnconverted(int count, String currency) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count faturas',
+      one: '$count fatura',
+    );
+    return 'Parcial: $_temp0 sem taxa de câmbio para $currency, contabilizadas pelo valor de face — nessa medida estas saídas, e os totais confirmado e pendente acima, misturam moedas.';
+  }
+
+  @override
+  String cashFlowPositionUnconverted(int count, String currency) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count faturas',
+      one: '$count fatura',
+    );
+    return 'Não convertido: $_temp0 sem taxa de câmbio para $currency, contabilizadas pelo valor de face — então o saldo corrente abaixo e o saldo final previsto acima misturam moedas. Registre a taxa que falta antes de agir com base nestes números.';
   }
 
   @override

@@ -150,6 +150,49 @@ class AppLocalizationsJa extends AppLocalizations {
   }
 
   @override
+  String get partialConversionCurrencyFallback => '報告通貨';
+
+  @override
+  String dashboardKpiUnconverted(String label, int count, String currency) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count 件',
+    );
+    return '$label：一部未換算 — $currency への為替レートがない請求書 $_temp0 を額面のまま計上しているため、合計にはその分だけ通貨が混在しています。';
+  }
+
+  @override
+  String dashboardAgingUnconverted(int count, String currency) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count 件',
+    );
+    return '一部未換算：$currency への為替レートがない請求書 $_temp0 を額面のまま計上しているため、下の各区分はその分だけ通貨が混在しています。';
+  }
+
+  @override
+  String dashboardTopVendorsUnconverted(int count, String currency) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count 件',
+    );
+    return '一部未換算：$currency への為替レートがない請求書 $_temp0 を額面のまま計上しているため、これらの取引先は同一通貨で並べられていません。順位を判断する前に不足しているレートを登録してください。';
+  }
+
+  @override
+  String dashboardVendorFaceValueCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'うち $count 件は額面のまま',
+    );
+    return '$_temp0';
+  }
+
+  @override
   String get invoicesTitle => '請求書';
 
   @override
@@ -1411,6 +1454,26 @@ class AppLocalizationsJa extends AppLocalizations {
   @override
   String cashFlowLowBalanceAlertLabel(String message) {
     return '残高不足の警告。$message';
+  }
+
+  @override
+  String cashFlowForecastUnconverted(int count, String currency) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count 件',
+    );
+    return '一部未換算：$currency への為替レートがない請求書 $_temp0 を額面のまま計上しているため、これらの支出と上の確定・保留中の合計には、その分だけ通貨が混在しています。';
+  }
+
+  @override
+  String cashFlowPositionUnconverted(int count, String currency) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count 件',
+    );
+    return '未換算：$currency への為替レートがない請求書 $_temp0 を額面のまま集計しているため、下の残高推移と上の予測期末残高には複数通貨が混在しています。これらの数値をもとに判断する前に、不足しているレートを登録してください。';
   }
 
   @override

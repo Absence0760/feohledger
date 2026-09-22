@@ -153,6 +153,53 @@ class AppLocalizationsFr extends AppLocalizations {
   }
 
   @override
+  String get partialConversionCurrencyFallback => 'la devise de reporting';
+
+  @override
+  String dashboardKpiUnconverted(String label, int count, String currency) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count factures',
+      one: '$count facture',
+    );
+    return '$label : partiel — $_temp0 sans taux de change vers $currency, comptabilisées à leur valeur faciale ; le total mélange donc les devises d’autant.';
+  }
+
+  @override
+  String dashboardAgingUnconverted(int count, String currency) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count factures',
+      one: '$count facture',
+    );
+    return 'Partiel : $_temp0 sans taux de change vers $currency, comptabilisées à leur valeur faciale — les tranches ci-dessous mélangent les devises d’autant.';
+  }
+
+  @override
+  String dashboardTopVendorsUnconverted(int count, String currency) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count factures',
+      one: '$count facture',
+    );
+    return 'Partiel : $_temp0 sans taux de change vers $currency, comptabilisées à leur valeur faciale — ces fournisseurs ne sont donc pas tous classés dans la même devise. Enregistrez le taux manquant avant de vous fier au classement.';
+  }
+
+  @override
+  String dashboardVendorFaceValueCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count à valeur faciale',
+      one: '$count à valeur faciale',
+    );
+    return '$_temp0';
+  }
+
+  @override
   String get invoicesTitle => 'Factures';
 
   @override
@@ -1455,6 +1502,28 @@ class AppLocalizationsFr extends AppLocalizations {
   @override
   String cashFlowLowBalanceAlertLabel(String message) {
     return 'Alerte de solde faible. $message';
+  }
+
+  @override
+  String cashFlowForecastUnconverted(int count, String currency) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count factures',
+      one: '$count facture',
+    );
+    return 'Partiel : $_temp0 sans taux de change vers $currency, comptabilisées à leur valeur faciale — ces sorties, ainsi que les totaux engagés et en attente ci-dessus, mélangent les devises d’autant.';
+  }
+
+  @override
+  String cashFlowPositionUnconverted(int count, String currency) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count factures',
+      one: '$count facture',
+    );
+    return 'Non converti : $_temp0 sans taux de change vers $currency, comptabilisées à leur valeur faciale — le solde courant ci-dessous et la fin prévue ci-dessus mélangent donc des devises. Enregistrez le taux manquant avant d’agir sur ces chiffres.';
   }
 
   @override

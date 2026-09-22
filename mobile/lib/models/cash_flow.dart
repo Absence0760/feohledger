@@ -1,3 +1,4 @@
+import 'package:feohledger_mobile/models/payment.dart' show unconvertedCountOf;
 import 'package:feohledger_mobile/models/payment_queue.dart' show moneyToDisplay;
 
 /// Cash-flow forecast + cash-position data for the CFO screen, from
@@ -51,12 +52,19 @@ class CashFlowForecastTotals {
   final String discountEligibleAmountDisplay;
   final int count;
 
+  /// Commitments in the horizon with no exchange rate into the reporting
+  /// currency, added to every total above (and to their periods) at FACE
+  /// value — `totals.unconverted_count`. Non-zero means those totals mix
+  /// currencies by that many rows.
+  final int unconvertedCount;
+
   CashFlowForecastTotals({
     required this.scheduledAmountDisplay,
     required this.committedAmountDisplay,
     required this.pendingAmountDisplay,
     required this.discountEligibleAmountDisplay,
     required this.count,
+    this.unconvertedCount = 0,
   });
 
   factory CashFlowForecastTotals.fromJson(Map<String, dynamic> json) {
@@ -67,6 +75,7 @@ class CashFlowForecastTotals {
       discountEligibleAmountDisplay:
           moneyToDisplay(json['discount_eligible_amount']),
       count: (json['count'] as num?)?.toInt() ?? 0,
+      unconvertedCount: unconvertedCountOf(json['unconverted_count']),
     );
   }
 }
@@ -147,6 +156,17 @@ class CashFlowData {
   final List<CashPositionPeriod> positionPeriods;
   final List<CashPositionBreach> breaches;
 
+  /// Commitments subtracted from the running balance at FACE value because no
+  /// exchange rate bridged them into the reporting currency —
+  /// `cash_position.unconverted_count`, the outflow half of the currency guard
+  /// [openingBalanceCurrency] already applies to the opening balance.
+  ///
+  /// Non-zero means every closing balance from the first affected period on
+  /// is a mixed-currency number: the curve carries the balance forward, so
+  /// one unconvertible row poisons the tail, including
+  /// [projectedEndBalanceDisplay].
+  final int positionUnconvertedCount;
+
   CashFlowData({
     required this.horizonDays,
     required this.granularity,
@@ -158,6 +178,7 @@ class CashFlowData {
     this.thresholdDisplay,
     required this.positionPeriods,
     required this.breaches,
+    this.positionUnconvertedCount = 0,
   });
 
   /// The projected end balance is the closing balance of the LAST position
@@ -204,6 +225,7 @@ class CashFlowData {
           : moneyToDisplay(position['threshold']),
       positionPeriods: positionPeriods,
       breaches: breaches,
+      positionUnconvertedCount: unconvertedCountOf(position['unconverted_count']),
     );
   }
 }
