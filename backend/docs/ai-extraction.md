@@ -348,9 +348,11 @@ Even with the chart pinned in the prompt, the model can still hallucinate a plau
 }
 ```
 
-The same guard runs again right after `apply_priors_to_invoice` overlays a cached vendor prior — if the cached value was valid when learned but has since been deactivated in the chart, the guard scrubs it and emits a `stale prior` warning.
+The same guard runs again right after `apply_priors_to_invoice` overlays a cached vendor prior — if the cached value was valid when learned but has since been deactivated in the chart (or was learned on another entity's invoice), the guard scrubs it and emits a `gl_code_stale_prior` warning.
 
-Validation no-ops when the org hasn't synced a chart yet (an empty active set means there's nothing to validate against). Sync via `POST /api/gl-accounts/sync-erp` or seed the chart with `POST /api/gl-accounts`.
+**When the invoice's effective active chart is empty** there is no membership to check, so an unknown code is accepted — a tenant that has not synced its chart yet must not have every invoice flagged. What is still refused, at all three sites (lines, suggested header GL, the prior recheck) and with the same warnings, is a code that belongs ONLY to another entity's chart: in a multi-entity tenant where this invoice's subsidiary has no accounts of its own and there are no shared ones, B's `6000` would otherwise land on an A invoice and resolve against A's chart as a different account, or none (`docs/decisions.md` §194, §199). That branch reads the tenant's chart ownership once, lazily, via `services/gl_chart.load_chart_ownership(db, org_id, None)` — the whole chart, because the prior overlay lands a code only after the document's own codes were judged; a synced chart answers from the catalog already loaded, with no extra query. A code the invoice's own chart holds only as a RETIRED account is not "another entity's" (it still resolves to that account), so on this branch it is kept. Sync via `POST /api/gl-accounts/sync-erp` or seed the chart with `POST /api/gl-accounts`.
+
+**The resolved config is a copy.** `run_extraction` writes this invoice's `gl_account_catalog` (and the RAG `few_shot_prompt`) into the config `_resolve_extraction_config` returns; for a BYOK org that used to be the org's own `settings["extraction"]` dict, so a caller that reused the settings for a second extraction handed an invoice with an empty chart the PREVIOUS invoice's catalog — another entity's, possibly — as its hint. It now returns a copy (`tests/test_extraction_gl_validation.py`).
 
 ### Bulk re-coding
 

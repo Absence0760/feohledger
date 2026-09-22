@@ -16,15 +16,18 @@ consumers wired in this change:
 
   2. ``services.extraction.run_extraction`` — the GL-catalog hint passed to the
      AI extractor is scoped to ``shared ∪ the invoice's entity``, never another
-     entity's accounts.
+     entity's accounts; and when that effective ACTIVE chart is empty, a code
+     that belongs only to ANOTHER entity's chart is still dropped from the
+     header, the lines and a vendor-prior overlay (``docs/decisions.md`` §199).
 
 Single-entity baseline: with one entity every account is either shared (NULL)
 or under that one entity, so the scoping is a no-op — covered explicitly.
 
 The ``bulk_recode_gl`` cases mock the DB session (hermetic, mirroring
-``test_gl_recode.py``); the extraction GL-catalog query is exercised against a
-real Postgres tenant via the ``realdb`` harness (the cleanest way to assert the
-``or_(entity_id == X, entity_id IS NULL)`` filter against actual rows).
+``test_gl_recode.py``); the extraction cases run the real ``run_extraction``
+against a real Postgres tenant via the ``realdb`` harness with only the adapter
+swapped, so they assert the catalog the shipped query produced — not a copy of
+that query kept here, which could never notice the shipped one changing.
 """
 
 from __future__ import annotations
@@ -221,24 +224,65 @@ async def test_empty_chart_accepts_any_code_regardless_of_entity():
 
 
 # ---------------------------------------------------------------------------
-# extraction GL-catalog query — shared ∪ invoice's entity (realdb)
+# extraction — the invoice's own chart, driven through `run_extraction` (realdb)
+#
+# These run the real `run_extraction` against a real multi-entity tenant with
+# only the adapter swapped for one that returns chosen GL codes and records the
+# config it was built from — so they assert the catalog the shipped query
+# actually produced, not a copy of that query kept in this file.
 # ---------------------------------------------------------------------------
 
+_BYOK_MOCK = {"extraction": {"program_type": "byok", "provider": "mock"}}
 
-def _gl_catalog_query(org_id, entity_id):
-    """Mirror the catalog query in ``extraction.run_extraction`` so the test
-    asserts the exact scoping it ships."""
-    from sqlalchemy import or_
 
-    return (
-        select(GLAccount.code)
-        .where(
-            GLAccount.organization_id == org_id,
-            GLAccount.is_active == True,  # noqa: E712
-            or_(GLAccount.entity_id == entity_id, GLAccount.entity_id.is_(None)),
+class _GLAdapter:
+    """An extraction adapter returning fixed GL codes. ``configs`` collects the
+    config every ``get_extraction_adapter`` call was given."""
+
+    provider_name = "mock"
+
+    def __init__(self, *, vendor: str, suggested: str | None, lines: list[str | None]):
+        self.vendor = vendor
+        self.suggested = suggested
+        self.lines = lines
+        self.configs: list[dict] = []
+
+    def factory(self, config: dict):
+        self.configs.append(dict(config))
+        return self
+
+    async def extract(self, **_kwargs):
+        from app.services.extraction_adapters.base import (
+            ExtractedField,
+            ExtractedLineItem,
+            ExtractionResult,
         )
-        .order_by(GLAccount.code)
-    )
+
+        return ExtractionResult(
+            success=True,
+            overall_confidence=0.9,
+            vendor_name=ExtractedField(self.vendor, 0.95),
+            invoice_number=ExtractedField("COA-1", 0.95),
+            amount=ExtractedField("100.00", 0.95),
+            suggested_gl_account=ExtractedField(self.suggested, 0.9 if self.suggested else 0.0),
+            line_items=[
+                ExtractedLineItem(
+                    line_number=i + 1,
+                    description=ExtractedField(f"Line {i + 1}", 0.9),
+                    total=ExtractedField("50.00", 0.9),
+                    gl_account=ExtractedField(gl, 0.9),
+                )
+                for i, gl in enumerate(self.lines)
+            ],
+            provider="mock",
+        )
+
+    def catalog_codes(self) -> set[str]:
+        """Codes in the GL catalog handed to the adapter (empty: none sent)."""
+        catalog = next(
+            (c["gl_account_catalog"] for c in self.configs if "gl_account_catalog" in c), ""
+        )
+        return {line.split(" ", 1)[0] for line in catalog.splitlines()}
 
 
 async def _default_entity_id(realdb, key: str = "a") -> uuid.UUID:
@@ -247,21 +291,86 @@ async def _default_entity_id(realdb, key: str = "a") -> uuid.UUID:
         return (await s.execute(select(Entity.id).where(Entity.is_default))).scalar_one()
 
 
-async def test_extraction_gl_catalog_scopes_to_shared_union_entity(realdb):
-    """The catalog hint for an invoice sees shared (NULL) ∪ its own entity's
-    accounts — never another entity's."""
-    org_id = realdb.info("a").org_id
-    default_id = await _default_entity_id(realdb)
-
+async def _add_entity_b(realdb) -> uuid.UUID:
     mk = realdb.sessionmaker("a")
     async with mk() as s:
         entity_b = Entity(
-            organization_id=org_id, name="B Co", slug="b-co", is_default=False, is_active=True
+            organization_id=realdb.info("a").org_id,
+            name="B Co",
+            slug=f"b-co-{uuid.uuid4().hex[:6]}",
+            is_default=False,
+            is_active=True,
         )
         s.add(entity_b)
-        await s.flush()
-        b_id = entity_b.id
+        await s.commit()
+        return entity_b.id
 
+
+async def _invoice_with_file(realdb, *, vendor: str, entity_id=None) -> uuid.UUID:
+    import io
+
+    headers = {"X-Entity-ID": str(entity_id)} if entity_id else {}
+    async with realdb.client(key="a", role="admin") as c:
+        created = await c.post(
+            "/api/invoices",
+            json={
+                "invoice_number": f"COA-{uuid.uuid4().hex[:8]}",
+                "vendor": vendor,
+                "amount": "100.00",
+            },
+            headers=headers,
+        )
+        assert created.status_code == 201, created.text
+        inv_id = created.json()["id"]
+        attached = await c.post(
+            f"/api/invoices/{inv_id}/file",
+            files={"file": ("doc.pdf", io.BytesIO(b"%PDF-1.4 fixture"), "application/pdf")},
+        )
+        assert attached.status_code == 201, attached.text
+    return uuid.UUID(inv_id)
+
+
+async def _extract(realdb, inv_id, adapter: _GLAdapter):
+    from unittest.mock import patch
+
+    from app.models.invoice import Invoice, InvoiceLineItem
+    from app.services.extraction import run_extraction
+
+    mk = realdb.sessionmaker("a")
+    with patch(
+        "app.services.extraction_adapters.get_extraction_adapter", side_effect=adapter.factory
+    ):
+        async with mk() as s:
+            inv = (await s.execute(select(Invoice).where(Invoice.id == inv_id))).scalar_one()
+            await run_extraction(s, inv, org_settings=_BYOK_MOCK)
+    async with mk() as s:
+        inv = (await s.execute(select(Invoice).where(Invoice.id == inv_id))).scalar_one()
+        lines = list(
+            (
+                await s.execute(
+                    select(InvoiceLineItem.gl_account)
+                    .where(InvoiceLineItem.invoice_id == inv_id)
+                    .order_by(InvoiceLineItem.line_number)
+                )
+            )
+            .scalars()
+            .all()
+        )
+    return inv, lines
+
+
+def _gl_warnings(inv) -> list[dict]:
+    return [w for w in (inv.warnings or []) if w.get("type") == "gl_account_invalid"]
+
+
+async def test_extraction_gl_catalog_scopes_to_shared_union_entity(realdb):
+    """The catalog hint for an invoice sees shared (NULL) ∪ its own entity's
+    ACTIVE accounts — never another entity's, never a retired one."""
+    org_id = realdb.info("a").org_id
+    default_id = await _default_entity_id(realdb)
+    b_id = await _add_entity_b(realdb)
+
+    async with realdb.sessionmaker("a")() as s:
         s.add_all(
             [
                 GLAccount(organization_id=org_id, code="1000", name="Shared Cash", entity_id=None),
@@ -284,16 +393,17 @@ async def test_extraction_gl_catalog_scopes_to_shared_union_entity(realdb):
         )
         await s.commit()
 
-    async with mk() as s:
-        b_codes = set((await s.execute(_gl_catalog_query(org_id, b_id))).scalars().all())
-        def_codes = set((await s.execute(_gl_catalog_query(org_id, default_id))).scalars().all())
+    catalogs = {}
+    for label, entity_id in (("default", None), ("b", b_id)):
+        inv_id = await _invoice_with_file(realdb, vendor=f"Catalog {label}", entity_id=entity_id)
+        adapter = _GLAdapter(vendor=f"Catalog {label}", suggested=None, lines=[])
+        await _extract(realdb, inv_id, adapter)
+        catalogs[label] = adapter.catalog_codes()
 
+    # Default entity: shared 1000 ∪ its own 7000 — NOT B's 6000, NOT retired 9999.
+    assert catalogs["default"] == {"1000", "7000"}
     # Entity B: shared 1000 ∪ its own 6000 — NOT the default entity's 7000.
-    assert b_codes == {"1000", "6000"}
-    # Default entity: shared 1000 ∪ its own 7000 — NOT B's 6000.
-    assert def_codes == {"1000", "7000"}
-    # Inactive 9999 appears for nobody.
-    assert "9999" not in b_codes and "9999" not in def_codes
+    assert catalogs["b"] == {"1000", "6000"}
 
 
 async def test_extraction_gl_catalog_single_entity_unchanged(realdb):
@@ -302,8 +412,7 @@ async def test_extraction_gl_catalog_single_entity_unchanged(realdb):
     org_id = realdb.info("a").org_id
     default_id = await _default_entity_id(realdb)
 
-    mk = realdb.sessionmaker("a")
-    async with mk() as s:
+    async with realdb.sessionmaker("a")() as s:
         s.add_all(
             [
                 GLAccount(organization_id=org_id, code="1000", name="Cash", entity_id=None),
@@ -312,7 +421,83 @@ async def test_extraction_gl_catalog_single_entity_unchanged(realdb):
         )
         await s.commit()
 
-    async with mk() as s:
-        codes = set((await s.execute(_gl_catalog_query(org_id, default_id))).scalars().all())
+    inv_id = await _invoice_with_file(realdb, vendor="Single Entity")
+    adapter = _GLAdapter(vendor="Single Entity", suggested="6100", lines=["1000"])
+    inv, lines = await _extract(realdb, inv_id, adapter)
 
-    assert codes == {"1000", "6100"}
+    assert adapter.catalog_codes() == {"1000", "6100"}
+    assert inv.gl_account == "6100"
+    assert lines == ["1000"]
+    assert _gl_warnings(inv) == []
+
+
+async def _empty_own_chart_with_b_code(realdb) -> uuid.UUID:
+    """The default entity has no active account and there are no shared ones;
+    subsidiary B holds a live 6000. Returns B's id."""
+    b_id = await _add_entity_b(realdb)
+    async with realdb.sessionmaker("a")() as s:
+        s.add(
+            GLAccount(
+                organization_id=realdb.info("a").org_id,
+                code="6000",
+                name="B Marketing",
+                entity_id=b_id,
+            )
+        )
+        await s.commit()
+    return b_id
+
+
+async def test_extraction_with_an_empty_own_chart_still_refuses_another_entitys_code(realdb):
+    """The default entity's invoice has no active chart to validate against, so
+    an unknown code is accepted as before — but B's 6000 would resolve against
+    the default entity's chart as a different account, or none, and is dropped
+    from the header and the lines with the usual warning (§194, §199)."""
+    await _empty_own_chart_with_b_code(realdb)
+    inv_id = await _invoice_with_file(realdb, vendor="Empty Chart Vendor")
+    adapter = _GLAdapter(vendor="Empty Chart Vendor", suggested="6000", lines=["6000", "9999"])
+    inv, lines = await _extract(realdb, inv_id, adapter)
+
+    assert adapter.catalog_codes() == set(), "no active account in the invoice's chart"
+    assert inv.gl_account is None
+    assert lines == [None, "9999"]
+    warnings = _gl_warnings(inv)
+    assert [w["code"] for w in warnings] == ["gl_codes_not_in_chart"]
+    assert warnings[0]["codes"] == ["6000"]
+
+
+async def test_extraction_with_an_empty_own_chart_accepts_a_code_under_its_owner(realdb):
+    """The same 6000 on B's own invoice is B's account — kept."""
+    b_id = await _empty_own_chart_with_b_code(realdb)
+    inv_id = await _invoice_with_file(realdb, vendor="Owner Vendor", entity_id=b_id)
+    adapter = _GLAdapter(vendor="Owner Vendor", suggested="6000", lines=["6000"])
+    inv, lines = await _extract(realdb, inv_id, adapter)
+
+    assert inv.gl_account == "6000"
+    assert lines == ["6000"]
+    assert _gl_warnings(inv) == []
+
+
+async def test_extraction_with_an_empty_own_chart_clears_a_prior_from_another_entity(realdb):
+    """A vendor prior carrying B's code — learned while the vendor was coded
+    for B — is overlaid on a default-entity invoice and must be cleared."""
+    from app.models.invoice import Invoice
+    from app.models.vendor_priors import VendorExtractionPrior
+
+    await _empty_own_chart_with_b_code(realdb)
+    inv_id = await _invoice_with_file(realdb, vendor="Prior Vendor")
+    async with realdb.sessionmaker("a")() as s:
+        vendor_id = (
+            await s.execute(select(Invoice.vendor_id).where(Invoice.id == inv_id))
+        ).scalar_one()
+        assert vendor_id is not None
+        s.add(VendorExtractionPrior(vendor_id=vendor_id, field_name="gl_account", value="6000"))
+        await s.commit()
+
+    adapter = _GLAdapter(vendor="Prior Vendor", suggested=None, lines=[])
+    inv, _ = await _extract(realdb, inv_id, adapter)
+
+    assert inv.gl_account is None
+    warnings = _gl_warnings(inv)
+    assert [w["code"] for w in warnings] == ["gl_code_stale_prior"]
+    assert warnings[0]["codes"] == ["6000"]

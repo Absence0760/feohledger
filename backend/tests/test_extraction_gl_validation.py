@@ -9,10 +9,18 @@ lock the post-extraction guard:
   - Hallucinated invoice-level GL is dropped + warning emitted
   - Hallucinated line-item GL is dropped (line still persists)
   - Multiple bad codes deduplicate into a single aggregated warning
-  - When the org hasn't synced any chart, validation no-ops (we
-    can't validate without a reference)
+  - When the invoice's chart has no active account, membership can't be
+    checked — but a code that belongs only to ANOTHER entity's chart is
+    still dropped, at all three sites (decisions §194/§199), and the tenant
+    chart ownership that decides it is read once, and only on that branch
   - A vendor prior whose value is no longer in the active chart is
     cleared after `apply_priors_to_invoice` overlays it
+
+The GL catalog is the first `db.execute` `run_extraction` issues, so `_make_db`
+answers it in order. The ownership read is NOT sequenced into that mock: it is
+patched at `gl_chart.load_chart_ownership`, which each test states explicitly
+(`chart_ownership=`), so an empty-chart test cannot pass merely because a
+catch-all stub happened to iterate as "no rows".
 """
 
 from __future__ import annotations
@@ -29,6 +37,12 @@ from app.services.extraction_adapters.base import (
     ExtractedLineItem,
     ExtractionResult,
 )
+from app.services.gl_chart import ChartOwnership
+
+# Two entities. The invoices under test belong to `OWN`; `OTHER` is a sibling
+# subsidiary with a chart of its own.
+OWN = uuid.UUID("00000000-0000-4000-8000-00000000000a")
+OTHER = uuid.UUID("00000000-0000-4000-8000-00000000000b")
 
 # ---------- Fixtures (mirrors test_extraction_usage_placement patterns) -----------
 
@@ -66,7 +80,7 @@ def _make_invoice():
         gl_account=None,
         cost_center=None,
         vendor_id=None,
-        entity_id=None,
+        entity_id=OWN,
         warnings=None,
         po_match=None,
     )
@@ -137,10 +151,37 @@ def _result_with_gl(
     )
 
 
-def _patch_internals(extraction_result: ExtractionResult, *, applied_priors: list[str] = None):
+def _ownership(*, other_entity: set[str] = frozenset(), own: set[str] = frozenset()):
+    """The tenant chart ownership `gl_chart` would read: `OTHER`'s codes, and
+    (retired, since the active chart the catalog returns is empty) `OWN`'s."""
+    by_entity = {}
+    if other_entity:
+        by_entity[OTHER] = frozenset(other_entity)
+    if own:
+        by_entity[OWN] = frozenset(own)
+    return ChartOwnership(
+        shared=frozenset(),
+        by_entity=by_entity,
+        active_by_entity={OTHER: frozenset(other_entity)} if other_entity else {},
+    )
+
+
+def _patch_internals(
+    extraction_result: ExtractionResult,
+    *,
+    applied_priors: list[str] = None,
+    chart_ownership: ChartOwnership | None = None,
+):
     """Mock everything `run_extraction` reaches for, like
-    test_extraction_usage_placement does. Returns an ExitStack."""
+    test_extraction_usage_placement does. Returns an ExitStack whose
+    `ownership_read` is the patched `gl_chart.load_chart_ownership`."""
     stack = ExitStack()
+
+    ownership_read = AsyncMock(
+        return_value=chart_ownership or ChartOwnership(shared=frozenset(), by_entity={})
+    )
+    stack.enter_context(patch("app.services.gl_chart.load_chart_ownership", ownership_read))
+    stack.ownership_read = ownership_read
 
     mock_s3 = MagicMock()
     mock_s3.get_object.return_value = {"Body": MagicMock(read=lambda: b"PDF")}
@@ -250,7 +291,8 @@ async def test_invoice_gl_validation_skipped_when_no_chart_synced():
     db = _make_db(active_codes=[])  # empty chart
 
     result = _result_with_gl(suggested_gl="9999", suggested_gl_conf=0.9, line_gls=[])
-    with _patch_internals(result):
+    # A brand-new tenant: no chart anywhere, so nothing is anyone else's either.
+    with _patch_internals(result, chart_ownership=_ownership()):
         await run_extraction(db, invoice, actor_id=uuid.uuid4())
 
     assert invoice.gl_account == "9999"
@@ -394,3 +436,156 @@ async def test_fresh_vendor_prior_gl_kept_when_still_in_chart():
 
     assert invoice.gl_account == "6200"
     assert _gl_warnings(invoice) == []
+
+
+# ---------- Empty active chart: another entity's code is still refused ------
+#
+# Subsidiary OWN has no active account of its own and there are no shared
+# ones, but sibling OTHER has a chart. A code only OTHER owns would resolve
+# against OWN's chart as a different account, or none — the write §194 refuses
+# on every manual path, and extraction no longer lets through either.
+
+
+@pytest.mark.asyncio
+async def test_empty_chart_drops_another_entitys_suggested_code():
+    from app.services.extraction import run_extraction
+
+    invoice = _make_invoice()
+    db = _make_db(active_codes=[])
+
+    result = _result_with_gl(suggested_gl="6000", suggested_gl_conf=0.9, line_gls=[])
+    with _patch_internals(result, chart_ownership=_ownership(other_entity={"6000"})):
+        await run_extraction(db, invoice, actor_id=uuid.uuid4())
+
+    assert invoice.gl_account is None
+    warnings = _gl_warnings(invoice)
+    assert len(warnings) == 1
+    assert warnings[0]["code"] == "gl_codes_not_in_chart"
+    assert warnings[0]["codes"] == ["6000"]
+
+
+@pytest.mark.asyncio
+async def test_empty_chart_drops_another_entitys_line_code_and_keeps_an_unknown_one():
+    """Unknown is still accepted with no chart to check it against; only the
+    other entity's code is dropped."""
+    from app.services.extraction import run_extraction
+
+    invoice = _make_invoice()
+    db = _make_db(active_codes=[])
+    captured: list = []
+    db.add = MagicMock(side_effect=captured.append)
+
+    result = _result_with_gl(suggested_gl=None, suggested_gl_conf=0.0, line_gls=["6000", "9999"])
+    with _patch_internals(result, chart_ownership=_ownership(other_entity={"6000"})):
+        await run_extraction(db, invoice, actor_id=uuid.uuid4())
+
+    lines = {li.line_number: li for li in captured if hasattr(li, "line_number")}
+    assert lines[1].gl_account is None  # OTHER's 6000 stripped
+    assert lines[2].gl_account == "9999"
+    warnings = _gl_warnings(invoice)
+    assert len(warnings) == 1
+    assert warnings[0]["codes"] == ["6000"]
+
+
+@pytest.mark.asyncio
+async def test_empty_chart_clears_a_vendor_prior_from_another_entitys_chart():
+    """A prior learned on an OTHER invoice (the vendor bills both) overlays a
+    code OWN's chart does not hold. Same site, same warning as a stale prior
+    in a synced chart."""
+    from app.services.extraction import run_extraction
+
+    invoice = _make_invoice()
+    db = _make_db(active_codes=[])
+
+    async def fake_apply_priors(db_, inv_, result_):
+        inv_.gl_account = "6000"
+        return ["gl_account"]
+
+    result = _result_with_gl(suggested_gl=None, suggested_gl_conf=0.0, line_gls=[])
+    with _patch_internals(result, chart_ownership=_ownership(other_entity={"6000"})):
+        with patch(
+            "app.services.vendor_priors.apply_priors_to_invoice",
+            AsyncMock(side_effect=fake_apply_priors),
+        ):
+            await run_extraction(db, invoice, actor_id=uuid.uuid4())
+
+    assert invoice.gl_account is None
+    warnings = _gl_warnings(invoice)
+    assert len(warnings) == 1
+    assert warnings[0]["code"] == "gl_code_stale_prior"
+    assert warnings[0]["codes"] == ["6000"]
+
+
+@pytest.mark.asyncio
+async def test_empty_chart_keeps_a_code_its_own_chart_holds_even_if_retired():
+    """OWN holds 6000 only as a retired account and OTHER holds it live: on an
+    OWN invoice it resolves to OWN's retired account — a retirement question,
+    not a cross-entity one — so with no active chart it is kept (§194)."""
+    from app.services.extraction import run_extraction
+
+    invoice = _make_invoice()
+    db = _make_db(active_codes=[])
+
+    result = _result_with_gl(suggested_gl="6000", suggested_gl_conf=0.9, line_gls=[])
+    ownership = _ownership(other_entity={"6000"}, own={"6000"})
+    with _patch_internals(result, chart_ownership=ownership):
+        await run_extraction(db, invoice, actor_id=uuid.uuid4())
+
+    assert invoice.gl_account == "6000"
+    assert _gl_warnings(invoice) == []
+
+
+@pytest.mark.asyncio
+async def test_chart_ownership_is_read_once_and_only_when_the_active_chart_is_empty():
+    """Three sites judge codes, but the tenant ownership is one read — and a
+    synced chart answers from the catalog it already loaded, with no read."""
+    from app.services.extraction import run_extraction
+
+    async def fake_apply_priors(db_, inv_, result_):
+        inv_.gl_account = "7000"
+        return ["gl_account"]
+
+    for active_codes, expected_reads in ((["6100"], 0), ([], 1)):
+        invoice = _make_invoice()
+        db = _make_db(active_codes=active_codes)
+        result = _result_with_gl(
+            suggested_gl="6100", suggested_gl_conf=0.9, line_gls=["6100", "6200"]
+        )
+        with _patch_internals(result, chart_ownership=_ownership()) as stack:
+            with patch(
+                "app.services.vendor_priors.apply_priors_to_invoice",
+                AsyncMock(side_effect=fake_apply_priors),
+            ):
+                await run_extraction(db, invoice, actor_id=uuid.uuid4())
+        assert stack.ownership_read.await_count == expected_reads, active_codes
+        if expected_reads:
+            # The whole tenant chart (`codes=None`), for this invoice's org.
+            assert stack.ownership_read.await_args.args[1:] == (invoice.organization_id, None)
+
+
+@pytest.mark.asyncio
+async def test_the_gl_catalog_never_leaks_into_org_settings_or_the_next_extraction():
+    """The catalog is this invoice's chart. It used to be written into the
+    org's own `settings["extraction"]` dict (BYOK resolved to that very dict),
+    so reusing the settings for a second extraction handed an invoice whose
+    chart is empty the PREVIOUS invoice's catalog as its hint — another
+    entity's chart, in a multi-entity tenant."""
+    from app.services import extraction_adapters
+    from app.services.extraction import run_extraction
+
+    org_settings = {"extraction": {"program_type": "byok", "provider": "mock"}}
+    seen_catalogs: list[str | None] = []
+
+    for active_codes in (["6000"], []):
+        invoice = _make_invoice()
+        db = _make_db(active_codes=active_codes)
+        result = _result_with_gl(suggested_gl=None, suggested_gl_conf=0.0, line_gls=[])
+        with _patch_internals(result):
+            adapter_factory = extraction_adapters.get_extraction_adapter  # the patched mock
+            await run_extraction(db, invoice, actor_id=uuid.uuid4(), org_settings=org_settings)
+        # The adapter is built from the final config — the last call's argument.
+        seen_catalogs.append(adapter_factory.call_args.args[0].get("gl_account_catalog"))
+
+    assert org_settings == {"extraction": {"program_type": "byok", "provider": "mock"}}
+    assert seen_catalogs[0] is not None and seen_catalogs[0].startswith("6000")
+    assert seen_catalogs[1] is None, "an empty chart must send no catalog, not the last one"
