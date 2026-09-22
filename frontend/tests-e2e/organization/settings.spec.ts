@@ -224,12 +224,26 @@ test.describe('/organization settings', () => {
 
 			// `invoice_defaults.currency` is a rung of the reporting-currency
 			// chain, and the `orgCurrency` store is session-cached — so the label
-			// on this same page that names that currency has to follow the save,
-			// not keep naming the answer from before it until a reload
-			// (decisions §200). Computed with the store's own resolver, so a
-			// tenant carrying a higher rung expects that rung instead.
+			// that names that currency has to follow the save, not keep naming
+			// the answer from before it until a reload (decisions §200).
+			// Computed with the store's own resolver, so a tenant carrying a
+			// higher rung expects that rung instead.
+			//
+			// That label lives in the Payments panel, which since §205 is a
+			// different panel from the one just saved, so the assertion moves
+			// there. This still proves the same thing and is not a weaker check:
+			// a rail link is a same-route query navigation, so the page
+			// component — and with it the session-cached store — is never
+			// remounted. If `saveDefaults` had not re-resolved the currency, the
+			// stale value would still be in the store when this panel rendered.
+			// Reaching it by RELOADING would be the weaker check, because a
+			// reload re-resolves the store anyway and would pass either way.
 			const expected = resolveReportingCurrency(after.settings);
 			expect(expected).not.toBeNull();
+			await page
+				.getByRole('navigation', { name: 'Settings section' })
+				.locator('[data-section-link="payments"]')
+				.click();
 			await expect(page.locator('#org-payments')).toContainText(
 				`CFO sign-off threshold (${expected})`
 			);
