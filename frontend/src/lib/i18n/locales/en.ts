@@ -260,6 +260,9 @@ export const en = {
 	'common.search': 'Search',
 	'common.clear': 'Clear',
 	'common.apply': 'Apply',
+	// Accessible name of a <DataTable>'s scroll region (ui/DataTable.svelte) when
+	// the page passes none — what a screen reader announces on its tab stop.
+	'common.tableRegion': 'Data table',
 
 	// Bulk selection, shared by EVERY list that offers it (ui/BulkBar.svelte and
 	// the two lists — /invoices and /payments — that render their own bar).

@@ -2,7 +2,10 @@ import { readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import AxeBuilder from '@axe-core/playwright';
+
 import { expect, test } from '../fixtures/helpers';
+import { formatViolations } from './axe-helper';
 
 /**
  * WCAG 2.2 AA — 1.4.10 Reflow, asserted over the app's WHOLE route surface.
@@ -24,6 +27,16 @@ import { expect, test } from '../fixtures/helpers';
  * `/cfo` (81px), `/admin/retention` (9px) and `/reports` (7px) were failing the
  * same criterion with nothing to say so. Enumerating `src/routes` instead means
  * a new page is covered the moment it exists, with no list to remember.
+ *
+ * ## Why keyboard reachability is asserted here too (WCAG 2.1.1)
+ *
+ * The remedy this criterion allows — let a table that cannot reflow scroll
+ * inside its own container — is exactly what creates a region only a mouse can
+ * pan. axe's `scrollable-region-focusable` reports it, but only while the
+ * content ACTUALLY overflows, so the default-width sweep in `axe.spec.ts`
+ * cannot see it: at 1280px nothing scrolls. 320px is where every such region is
+ * live, so each route runs that one rule here, at the same width, in the same
+ * visit. A wide table is fine; a wide table the keyboard cannot reach is not.
  *
  * Every exclusion below is a route that is NOT part of the signed-in app shell,
  * and each one says what covers it instead. Do not add an app route here to
@@ -116,6 +129,17 @@ test.describe('reflow at 320px (WCAG 1.4.10)', () => {
 				() => document.documentElement.scrollWidth - document.documentElement.clientWidth
 			);
 			expect(overflow, `horizontal page overflow on ${path} at 320px`).toBeLessThanOrEqual(1);
+
+			// …and whatever scrolls instead of the document must be reachable by
+			// keyboard. One rule, not the full tag set — the full scan is
+			// `axe.spec.ts`'s job; this visit exists for the width.
+			const { violations } = await new AxeBuilder({ page })
+				.withRules(['scrollable-region-focusable'])
+				.analyze();
+			expect(
+				violations,
+				`keyboard-unreachable scroll region on ${path} at 320px:\n${formatViolations(violations)}`
+			).toEqual([]);
 		});
 	}
 });

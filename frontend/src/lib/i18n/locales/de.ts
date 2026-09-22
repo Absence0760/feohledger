@@ -234,6 +234,7 @@ export const messages = {
 	'common.search': 'Suchen',
 	'common.clear': 'Löschen',
 	'common.apply': 'Anwenden',
+	'common.tableRegion': 'Datentabelle',
 
 	// Bulk selection, shared by every list that offers it — see en.ts.
 

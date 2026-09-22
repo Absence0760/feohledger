@@ -182,6 +182,12 @@ CI plus two kinds of human review:
    listed with its reason in the spec, and the list is itself asserted to still
    match real routes. **Never add an app route to that list to turn a red run
    green** — fix the layout.
+   The same visit also runs axe's `scrollable-region-focusable` rule (SC 2.1.1),
+   because the container-scroll remedy is exactly what creates a region only a
+   mouse can pan, and axe only sees such a region while it actually overflows —
+   at the default width nothing does. Every `<DataTable>` scroller is a named,
+   focusable region for that reason (`frontend/docs/ui-patterns.md` §
+   Accessibility patterns → DataTable).
 7. **Flutter semantics tests (mobile).** The mobile app uses Flutter's
    `Semantics` tree and `meetsGuideline` widget tests (`mobile/test/a11y/`) to
    assert that interactive widgets expose labels, roles, and state to TalkBack /
@@ -213,7 +219,9 @@ The current build implements:
 - **Skip-to-content link** as the first focusable element on every page.
 - **Keyboard operability** across all interactive controls — clickable table
   rows expose a real focusable control (`RowLink`) rather than a click-only
-  `<tr>`, so the keyboard path and column-header semantics both survive.
+  `<tr>`, so the keyboard path and column-header semantics both survive. A
+  table wider than the viewport scrolls inside a focusable, named region, so
+  its far columns are reachable with the arrow keys.
 - **Visible focus indicator** (`:focus-visible`) on every interactive element.
 - **Focus management in dialogs** — the shared `Modal` traps focus, returns it
   to the trigger on close, and closes on `Esc`; dialogs carry `role="dialog"`
