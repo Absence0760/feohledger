@@ -278,7 +278,20 @@
 	const webAuthnOk = isWebAuthnSupported();
 
 	$effect(() => {
-		if (section === 'passkeys' && !passkeysLoaded) {
+		// Two panels, not one. The passkey list is obviously the Passkeys
+		// panel's, but the Two-factor panel reads it too, through `hasPasskey`:
+		// a live passkey is what lets that card offer "Confirm with a passkey"
+		// instead of a typed proof, and what makes `startEnroll` mint a step-up.
+		// Gating this on the Passkeys panel alone starved that — the button
+		// silently stopped rendering for an account that had a passkey, which
+		// in an SSO-only tenant is the ONLY proof available, so the card became
+		// a dead end. Caught by `tests-e2e/auth/profile-sso-only-step-up.spec.ts`.
+		//
+		// The general rule this broke: a read may only be scoped to one panel
+		// when the data it fetches is read by exactly that panel. Follow the
+		// deriveds, not just the state — `hasPasskey` is where the second reader
+		// was hiding.
+		if ((section === 'passkeys' || section === 'mfa') && !passkeysLoaded) {
 			void loadPasskeys();
 		}
 	});
