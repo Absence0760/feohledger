@@ -1046,6 +1046,9 @@ export const en = {
 	'exceptions.filter.resolved': 'Resolved',
 	'exceptions.filter.dismissed': 'Dismissed',
 	'exceptions.filter.allTypes': 'All types',
+	'exceptions.filter.allSeverities': 'All severities',
+	'exceptions.search.placeholder': 'Search invoice # or vendor...',
+	'exceptions.search.aria': 'Search exceptions by invoice number or vendor',
 	'exceptions.col.type': 'Type',
 	'exceptions.col.severity': 'Sev',
 

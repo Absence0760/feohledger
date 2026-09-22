@@ -943,6 +943,9 @@ export const messages = {
 	'exceptions.filter.resolved': 'Gelöst',
 	'exceptions.filter.dismissed': 'Verworfen',
 	'exceptions.filter.allTypes': 'Alle Typen',
+	'exceptions.filter.allSeverities': 'Alle Schweregrade',
+	'exceptions.search.placeholder': 'Rechnungsnr. oder Lieferant suchen...',
+	'exceptions.search.aria': 'Ausnahmen nach Rechnungsnummer oder Lieferant durchsuchen',
 	'exceptions.col.type': 'Typ',
 	'exceptions.col.severity': 'Schw.',
 

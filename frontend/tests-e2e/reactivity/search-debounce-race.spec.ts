@@ -267,6 +267,50 @@ const CASES: RouteCase[] = [
 			})
 	},
 	{
+		// The exceptions queue gained its search box in GitHub #443. Its chip
+		// effect calls `reload()`, which reaches `loadExceptions` AND
+		// `loadSummary` synchronously — two functions deep, where a tracked
+		// `search` read is easiest to reintroduce — and it keeps the
+		// `appliedSearch` guard, so this has to type rather than `fill()`.
+		name: 'exceptions',
+		route: '/exceptions',
+		apiPathname: '/api/exceptions',
+		searchPlaceholder: 'Search invoice # or vendor...',
+		settle: async (page) => {
+			await expect(page.getByRole('cell', { name: 'ROW', exact: true })).toBeVisible();
+		},
+		buildBody: (searchTerm, marker) =>
+			JSON.stringify({
+				items: [
+					{
+						id: `${marker}-id`,
+						invoice_id: null,
+						invoice_number: marker,
+						vendor_name: `vendor for "${searchTerm}"`,
+						amount: 100,
+						currency: 'USD',
+						exception_type: 'duplicate',
+						type_label: 'Duplicate Invoice',
+						severity: 'warning',
+						description: null,
+						status: 'open',
+						resolution: null,
+						resolved_by: null,
+						resolved_at: null,
+						assigned_to: null,
+						assigned_to_user_id: null,
+						due_at: null,
+						is_overdue: false,
+						time_to_resolution_hours: null,
+						created_at: '2026-03-01T00:00:00Z'
+					}
+				],
+				total: 1,
+				page: 1,
+				page_size: 20
+			})
+	},
+	{
 		name: 'payments (history tab)',
 		route: '/payments',
 		apiPathname: '/api/payments',

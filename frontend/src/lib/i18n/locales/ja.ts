@@ -925,6 +925,9 @@ export const messages = {
 	'exceptions.filter.resolved': '解決済み',
 	'exceptions.filter.dismissed': '却下',
 	'exceptions.filter.allTypes': 'すべてのタイプ',
+	'exceptions.filter.allSeverities': 'すべての重大度',
+	'exceptions.search.placeholder': '請求書番号または取引先を検索...',
+	'exceptions.search.aria': '請求書番号または取引先で例外を検索',
 	'exceptions.col.type': 'タイプ',
 	'exceptions.col.severity': '重大度',
 

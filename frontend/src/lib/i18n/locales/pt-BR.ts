@@ -944,6 +944,9 @@ export const messages = {
 	'exceptions.filter.resolved': 'Resolvida',
 	'exceptions.filter.dismissed': 'Descartada',
 	'exceptions.filter.allTypes': 'Todos os tipos',
+	'exceptions.filter.allSeverities': 'Todas as gravidades',
+	'exceptions.search.placeholder': 'Buscar nº da fatura ou fornecedor...',
+	'exceptions.search.aria': 'Buscar exceções por número da fatura ou fornecedor',
 	'exceptions.col.type': 'Tipo',
 	'exceptions.col.severity': 'Grav.',
 

@@ -1,4 +1,5 @@
 import { expect, test } from '../fixtures/helpers';
+import { exceptionSummary } from './summary';
 
 /**
  * `/exceptions` — the bulk selection must never outlive the rows it points at.
@@ -48,13 +49,14 @@ test.describe('/exceptions — stale selection', () => {
 			await route.fulfill({
 				status: 200,
 				contentType: 'application/json',
-				body: JSON.stringify({
-					open: 2,
-					escalated: 1,
-					resolved: 0,
-					dismissed: 0,
-					by_type: { duplicate: 2 }
-				})
+				body: JSON.stringify(
+					exceptionSummary({
+						open: 2,
+						escalated: 1,
+						by_type: { duplicate: 2 },
+						by_severity: { warning: 2 }
+					})
+				)
 			});
 		});
 

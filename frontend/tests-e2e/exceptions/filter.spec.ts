@@ -54,10 +54,13 @@ test.describe('/exceptions status filter', () => {
 		const filtered = page.waitForResponse(
 			(r) => r.url().includes('/api/exceptions?') && !r.url().includes('status=')
 		);
-		await page.locator('.filter-chip', { hasText: /^All/ }).click();
+		// `/^All\s+\d+/`, the convention `frontend/docs/ui-patterns.md` names for
+		// the status row's All chip: the severity row below it is FilterChips too,
+		// and its "All severities" chip also starts with "All".
+		await page.locator('.filter-chip', { hasText: /^All\s+\d+/ }).click();
 		await filtered;
 
-		await expect(page.locator('.filter-chip', { hasText: /^All/ })).toHaveClass(/active/);
+		await expect(page.locator('.filter-chip', { hasText: /^All\s+\d+/ })).toHaveClass(/active/);
 		await expect(page.locator('table tbody tr')).toHaveCount(totalApi);
 	});
 
