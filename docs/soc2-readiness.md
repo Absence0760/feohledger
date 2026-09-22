@@ -72,7 +72,7 @@ Things an auditor expects to see *in code or config*, not just in a policy doc. 
 | Quarterly access reviews (auditor-friendly export) | Done | `backend/scripts/access_review.py` |
 | Forced logout on role change | Done | `app/api/admin.py` → `update_user` / `delete_user` call `services.session_management.revoke_user_sessions` on role change or deactivation |
 | Concurrent session limit | Done | Redis sorted-set per user (`active_jtis:<user_id>`) populated on login / MFA verify / SSO callback; oldest evicted via `FEOH_MAX_CONCURRENT_SESSIONS` (default 5) |
-| SSO-only mode (disable password login when SSO is configured) | Pending | Org-settings flag; gate `/auth/login` |
+| SSO-only mode (disable password login when SSO is configured) | Done | `settings.sso.sso_only`, decided by `backend/app/services/sso.py::is_sso_only`: closes `/auth/login` and the password step-up once the IdP config resolves, and `PATCH /api/organization` refuses to save it over one that does not (`docs/authentication.md` § SSO-only mode) |
 
 ### Encryption
 

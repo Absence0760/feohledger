@@ -610,17 +610,44 @@ resolved address.
 password login for the whole org. The `/api/auth/login` handler refuses with
 `403` + an `auth.login.failure` / `reason=sso_only` audit row **after** verifying
 the password (so it reuses the org load and doesn't perturb the unknown-vs-
-wrong-password enumeration parity). `services/sso.py::is_sso_only` gates on
-`sso.enabled` too, so setting the flag while SSO is switched off closes nothing.
-The public `/auth/{sso,saml}/config` endpoints echo `sso_only` **only when
-the IdP config resolves** — so the login page hides the password form for an
-SSO-only tenant, and a tenant with SSO switched off (enabled=False) keeps
-password login visible. Backend enforcement is the security boundary; the
-hidden form is UX. **The two predicates disagree for SSO switched on and
-required with an IdP block that does not resolve:** the page shows the password
-form and no SSO button, and the backend refuses every password — a whole-tenant
-sign-in lockout, diagnosed in [known-issues.md](known-issues.md) with its fix
-(make `is_sso_only` require a resolving config).
+wrong-password enumeration parity).
+
+**One predicate decides it: `services/sso.py::is_sso_only`.** It is true only
+when all three hold:
+
+1. `sso.enabled` is set, so the flag staged while SSO is switched off closes
+   nothing;
+2. `sso.sso_only` is set; and
+3. the IdP block of the protocol `settings.sso` selects (`protocol: "saml"`, or
+   OIDC when absent) **resolves**: `discovery_url` / `client_id` /
+   `client_secret` for OIDC, `idp_entity_id` / `idp_sso_url` / `idp_x509_cert`
+   for SAML, each present, text, and well-formed (an http(s) URL, a base64 or
+   PEM cert). It is the same check `resolve_sso_config` / `resolve_saml_config`
+   make, through `check_sso_idp_config`.
+
+Login's refusal, the step-up's password drop, `/auth/me`'s
+`password_sign_in_closed` and the public `/auth/{sso,saml}/config` echo of
+`sso_only` all call it, so the login page hides the password form exactly where
+the server refuses the password, and it shows that protocol's SSO button beside
+it. Backend enforcement is the security boundary; the hidden form is UX.
+
+**The third condition is the escape hatch.** A tenant whose IdP block does not
+resolve has no SSO button, because the config endpoints report SSO as off. If
+the password were closed there too, no member could start a session. So an
+unresolvable block leaves password sign-in open, and each password sign-in it
+lets through logs a warning naming the org, because a tenant that believes it
+enforces SSO and does not is an operator's problem to fix. `PATCH
+/api/organization` refuses to save that state in the first place: a `settings.sso`
+with `enabled` and `sso_only` whose block does not resolve is a `422` naming the
+offending keys (never their values; the block holds the client secret).
+`sso_only` with SSO switched off is accepted. Only a direct DB edit can still
+produce the state, and the escape hatch covers it. Reasoning:
+[decisions.md](decisions.md) §204.
+
+"Resolves" is a local completeness check. It does no DNS lookup and fetches no
+discovery document, which is what keeps it on the sign-in path. A complete block
+pointing at an IdP that is down, or holding a revoked client secret, still closes
+the password; recovering from that takes a platform operator.
 
 **The password is not a step-up proof there either.** Signing in is not the only
 thing the stored hash can authenticate: every change to a second factor (TOTP
@@ -642,15 +669,17 @@ longer shows. The code and passkey-assertion proofs are untouched, and the
 successful step-up paths load the org only when a password was actually
 offered; the refusal path reads it every time, a throttled failure path.
 
-**The profile page learns the rule from `/auth/me`, not from the login page's
-source.** `GET /api/auth/me` carries `password_sign_in_closed`, filled from
-`api/auth._org_closes_password_sign_in` — the one function login's refusal, the
-step-up's password drop and `/me` all call. The public
-`/auth/{sso,saml}/config` echo was the other candidate and was rejected: it
-reports `sso_only` only when the IdP config resolves, so for a tenant with SSO
-switched on and required but an unresolvable IdP block it says "open" while both
-the sign-in and the step-up refuse the password. `/profile` reads the field and,
-when it is set, never renders a password field for a factor change: the
+**The profile page learns the rule from `/auth/me`.** `GET /api/auth/me`
+carries `password_sign_in_closed`, filled from
+`api/auth._org_closes_password_sign_in`, which is `is_sso_only`: the function
+login's refusal, the step-up's password drop, `/me` and the public config echo
+all call. When §201 chose it, the echo computed a different rule (it reported
+`sso_only` only when the IdP config resolved, while sign-in closed the password
+on the two flags alone), so the page needed the server's own predicate. §204
+made the predicate require a resolving config, and the two now agree by
+construction; `/me` is still the source because the page is authenticated and
+reads it anyway. `/profile` reads the field and, when it is set, never renders
+a password field for a factor change: the
 two-factor card's disable form asks for a current authenticator code (the
 factor being turned off is itself the proof), and the passkey card asks for the
 code when TOTP is live, runs the passkey ceremony when the field is left blank
@@ -658,10 +687,10 @@ or there is no TOTP, and asks for nothing at all on an account with no factor
 yet (a first factor needs no step-up, in any tenant). An account whose only
 passkeys are bound to another host and which has no TOTP has no proof this host
 can take; the button stays enabled and the server's wrong-host refusal names the
-host to use. `backend/tests/test_sso_only.py` pins that `/me`, the step-up and
-login agree for every shape of `settings.sso`; `frontend/tests-e2e/auth/
-profile-sso-only-step-up.spec.ts` pins the page. Reasoning:
-[decisions.md](decisions.md) §201.
+host to use. `backend/tests/test_sso_only.py` pins that `/me`, the step-up,
+login and the config echo agree for every shape of `settings.sso`;
+`frontend/tests-e2e/auth/profile-sso-only-step-up.spec.ts` pins the page.
+Reasoning: [decisions.md](decisions.md) §201.
 
 Consequences worth knowing:
 
@@ -678,7 +707,8 @@ Consequences worth knowing:
 - The supplier portal is unaffected: a `VendorUser` signs in with a password,
   and there is no SSO that could close it.
 
-Reasoning: [decisions.md](decisions.md) §191, §201. Tests: `backend/tests/test_sso_only.py`.
+Reasoning: [decisions.md](decisions.md) §191, §201, §204. Tests: `backend/tests/test_sso_only.py`,
+`backend/tests/test_organization_settings_validation.py` (the write-time refusal).
 
 ## Frontend Implementation
 
