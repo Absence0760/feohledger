@@ -50,6 +50,9 @@ def test_user_response_contract():
         "must_change_password",
         "mfa_enabled",
         "mfa_required_by_org",
+        # Web-only: /profile stops offering the password as a step-up proof
+        # when it is set (docs/decisions.md §201). Mobile manages no factors.
+        "password_sign_in_closed",
     }
     assert required_fields.issubset(data.keys())
     assert isinstance(data["roles"], list)

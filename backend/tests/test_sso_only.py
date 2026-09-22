@@ -294,3 +294,134 @@ async def test_a_step_up_without_a_password_does_not_load_the_org():
         )
 
     closed.assert_not_awaited()
+
+
+# ---------------------------------------------------------------------------
+# `/auth/me` publishes the step-up's own predicate (docs/decisions.md §201)
+#
+# The profile page stops offering the password as a step-up proof where the
+# server stops accepting it. For that to be honest the page must learn exactly
+# the rule `_step_up_satisfied` enforces — not the public `/auth/{sso,saml}/
+# config` echo, which reports `sso_only` only when the IdP config resolves and
+# so says "open" for a tenant whose broken config still closes the password.
+# ---------------------------------------------------------------------------
+
+# Every shape a hand-copied rule could get wrong. The last is the one the public
+# config echo gets wrong: SSO switched on and required, with no IdP it can
+# resolve — the password is closed at sign-in and at the step-up all the same.
+_OIDC_READY = {
+    "enabled": True,
+    "sso_only": True,
+    "discovery_url": "https://idp.example.com/.well-known/openid-configuration",
+    "client_id": "feoh",
+    "client_secret": "not-a-real-secret",
+}
+_PREDICATE_CASES = [
+    pytest.param(None, False, id="no-settings"),
+    pytest.param({"sso": {"sso_only": True}}, False, id="sso_only-without-enabled"),
+    pytest.param({"sso": {"enabled": False, "sso_only": True}}, False, id="sso-switched-off"),
+    pytest.param({"sso": {"enabled": True}}, False, id="sso-on-password-still-open"),
+    pytest.param({"sso": _OIDC_READY}, True, id="sso-only-idp-resolves"),
+    pytest.param(
+        {"sso": {"enabled": True, "sso_only": True}}, True, id="sso-only-idp-unresolvable"
+    ),
+]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("org_settings,closed", _PREDICATE_CASES)
+async def test_me_reports_exactly_the_predicate_the_step_up_and_login_enforce(org_settings, closed):
+    """`password_sign_in_closed` on `/auth/me` is true exactly when a CORRECT
+    password fails the step-up and is refused at sign-in — the same answer from
+    all three, for every shape of `settings.sso`, including the one where the
+    public config echo disagrees."""
+    from app.api.auth import _step_up_satisfied, get_me, login
+    from app.schemas.auth import LoginRequest, MFAStepUpRequest
+
+    pw = "Correct-Horse-9"
+    user = _account_with_totp(pw)
+    org = SimpleNamespace(id=user.organization_id, settings=org_settings)
+
+    me = await get_me(user=user, db=_control_db(org))
+    assert me.password_sign_in_closed is closed
+
+    proved = await _step_up_satisfied(
+        _control_db(org),
+        user,
+        MFAStepUpRequest(password=pw),
+        operation="totp_enroll",
+        rp=None,  # only an assertion reads it; none is offered
+    )
+    assert proved is (not closed)
+
+    signer = _user_with_password(pw)
+    with (
+        patch("app.api.auth.dispatch_auth_audit", AsyncMock()),
+        patch("app.api.auth.register_session", AsyncMock()),
+    ):
+        try:
+            await login(
+                body=LoginRequest(email=signer.email, password=pw),
+                request=_fake_request(),
+                db=_db_user_then_org(signer, org),
+            )
+            refused = False
+        except HTTPException as exc:
+            assert exc.status_code == 403
+            refused = True
+    assert refused is closed
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("endpoint", ["enroll", "disable"])
+@pytest.mark.parametrize(
+    "org_settings,expected",
+    [
+        pytest.param(SSO_ONLY_SETTINGS, "sso_only", id="sso-only"),
+        pytest.param({"sso": {"enabled": True}}, "generic", id="password-open"),
+    ],
+)
+async def test_a_refused_code_names_only_the_proofs_the_tenant_accepts(
+    endpoint, org_settings, expected
+):
+    """The profile page sends an authenticator code where the password is no
+    proof (§201). A mistyped one must not be answered with the generic sentence,
+    which asks for the password the page no longer shows — in an SSO-only
+    tenant every refusal names only the code and the passkey. Where the password
+    is open the generic sentence is still the right one."""
+    from app.api.auth import (
+        STEP_UP_FAILURE_DETAIL,
+        STEP_UP_SSO_ONLY_DETAIL,
+        disable_mfa,
+        enroll_mfa_start,
+    )
+    from app.schemas.auth import MFADisableRequest, MFAStepUpRequest
+
+    user = _account_with_totp("Correct-Horse-9")
+    org = SimpleNamespace(id=user.organization_id, settings=org_settings)
+
+    with (
+        patch("app.api.auth.settings.mfa_enabled", True),
+        # The code is "wrong" by construction rather than by guessing one that
+        # is not the current TOTP value.
+        patch("app.api.auth.mfa.step_up_verified", AsyncMock(return_value=False)),
+        patch("app.api.auth.dispatch_auth_audit", AsyncMock()),
+    ):
+        with pytest.raises(HTTPException) as exc:
+            if endpoint == "enroll":
+                await enroll_mfa_start(
+                    body=MFAStepUpRequest(code="123456"), user=user, db=_control_db(org)
+                )
+            else:
+                await disable_mfa(
+                    body=MFADisableRequest(code="123456"), user=user, db=_control_db(org)
+                )
+
+    assert exc.value.status_code == 400
+    if expected == "sso_only":
+        assert exc.value.detail == STEP_UP_SSO_ONLY_DETAIL
+        assert "password" not in exc.value.detail.lower()
+    else:
+        assert exc.value.detail == STEP_UP_FAILURE_DETAIL
+    assert user.mfa_enabled is True
+    assert user.mfa_secret == TOTP_SECRET
