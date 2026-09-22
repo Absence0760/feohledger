@@ -567,8 +567,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get invoiceDetailUpdated => 'Invoice updated';
 
   @override
-  String get invoiceDetailUpdateFailed =>
-      'Could not save changes — please try again';
+  String invoiceDetailUpdateFailed(String error) {
+    return 'Could not save changes: $error';
+  }
 
   @override
   String get invoiceDetailApproved => 'Invoice approved';

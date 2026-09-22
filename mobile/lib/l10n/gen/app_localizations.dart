@@ -1088,8 +1088,8 @@ abstract class AppLocalizations {
   /// No description provided for @invoiceDetailUpdateFailed.
   ///
   /// In en, this message translates to:
-  /// **'Could not save changes — please try again'**
-  String get invoiceDetailUpdateFailed;
+  /// **'Could not save changes: {error}'**
+  String invoiceDetailUpdateFailed(String error);
 
   /// No description provided for @invoiceDetailApproved.
   ///

@@ -163,7 +163,7 @@
   "invoiceDetailErrorPrefix": "Erro: {error}",
   "invoiceDetailNoChanges": "Nenhuma alteração para salvar",
   "invoiceDetailUpdated": "Fatura atualizada",
-  "invoiceDetailUpdateFailed": "Não foi possível salvar as alterações — tente novamente",
+  "invoiceDetailUpdateFailed": "Não foi possível salvar as alterações: {error}",
   "invoiceDetailApproved": "Fatura aprovada",
   "invoiceDetailApproveFailed": "Não foi possível aprovar a fatura — tente novamente",
   "invoiceDetailRejected": "Fatura rejeitada",

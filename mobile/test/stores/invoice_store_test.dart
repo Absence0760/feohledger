@@ -346,6 +346,26 @@ void main() {
       expect(updated, isNull);
       expect(store.error, isNotNull);
     });
+
+    test('records the server\'s detail sentence, not the exception form',
+        () async {
+      // A refusal is something the user acts on — e.g. a GL code outside the
+      // invoice's chart — so the screen shows `error` verbatim.
+      ApiClient().debugConfigure(
+        client: MockClient(
+          (req) async => http.Response(
+            jsonEncode({'detail': "GL account '9999' is retired"}),
+            422,
+            headers: {'content-type': 'application/json'},
+          ),
+        ),
+      );
+
+      final updated = await store.update('1', {'gl_account': '9999'});
+
+      expect(updated, isNull);
+      expect(store.error, "GL account '9999' is retired");
+    });
   });
 
   group('fetchAuditLog (activity timeline)', () {

@@ -257,7 +257,12 @@
   },
   "invoiceDetailNoChanges": "No changes to save",
   "invoiceDetailUpdated": "Invoice updated",
-  "invoiceDetailUpdateFailed": "Could not save changes — please try again",
+  "invoiceDetailUpdateFailed": "Could not save changes: {error}",
+  "@invoiceDetailUpdateFailed": {
+    "placeholders": {
+      "error": { "type": "String" }
+    }
+  },
   "invoiceDetailApproved": "Invoice approved",
   "invoiceDetailApproveFailed": "Could not approve invoice — please try again",
   "invoiceDetailRejected": "Invoice rejected",

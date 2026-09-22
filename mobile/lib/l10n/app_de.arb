@@ -176,7 +176,7 @@
   "invoiceDetailErrorPrefix": "Fehler: {error}",
   "invoiceDetailNoChanges": "Keine Änderungen zu speichern",
   "invoiceDetailUpdated": "Rechnung aktualisiert",
-  "invoiceDetailUpdateFailed": "Änderungen konnten nicht gespeichert werden — bitte erneut versuchen",
+  "invoiceDetailUpdateFailed": "Änderungen konnten nicht gespeichert werden: {error}",
   "invoiceDetailApproved": "Rechnung freigegeben",
   "invoiceDetailApproveFailed": "Rechnung konnte nicht freigegeben werden — bitte erneut versuchen",
   "invoiceDetailRejected": "Rechnung abgelehnt",

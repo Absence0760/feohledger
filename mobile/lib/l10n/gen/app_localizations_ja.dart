@@ -558,7 +558,9 @@ class AppLocalizationsJa extends AppLocalizations {
   String get invoiceDetailUpdated => '請求書を更新しました';
 
   @override
-  String get invoiceDetailUpdateFailed => '変更を保存できませんでした。もう一度お試しください';
+  String invoiceDetailUpdateFailed(String error) {
+    return '変更を保存できませんでした: $error';
+  }
 
   @override
   String get invoiceDetailApproved => '請求書を承認しました';

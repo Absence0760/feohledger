@@ -577,8 +577,9 @@ class AppLocalizationsFr extends AppLocalizations {
   String get invoiceDetailUpdated => 'Facture mise à jour';
 
   @override
-  String get invoiceDetailUpdateFailed =>
-      'Impossible d\'enregistrer les modifications — veuillez réessayer';
+  String invoiceDetailUpdateFailed(String error) {
+    return 'Impossible d\'enregistrer les modifications : $error';
+  }
 
   @override
   String get invoiceDetailApproved => 'Facture approuvée';

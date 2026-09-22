@@ -163,7 +163,7 @@
   "invoiceDetailErrorPrefix": "エラー: {error}",
   "invoiceDetailNoChanges": "保存する変更はありません",
   "invoiceDetailUpdated": "請求書を更新しました",
-  "invoiceDetailUpdateFailed": "変更を保存できませんでした。もう一度お試しください",
+  "invoiceDetailUpdateFailed": "変更を保存できませんでした: {error}",
   "invoiceDetailApproved": "請求書を承認しました",
   "invoiceDetailApproveFailed": "請求書を承認できませんでした。もう一度お試しください",
   "invoiceDetailRejected": "請求書を却下しました",

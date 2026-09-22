@@ -574,8 +574,9 @@ class AppLocalizationsDe extends AppLocalizations {
   String get invoiceDetailUpdated => 'Rechnung aktualisiert';
 
   @override
-  String get invoiceDetailUpdateFailed =>
-      'Änderungen konnten nicht gespeichert werden — bitte erneut versuchen';
+  String invoiceDetailUpdateFailed(String error) {
+    return 'Änderungen konnten nicht gespeichert werden: $error';
+  }
 
   @override
   String get invoiceDetailApproved => 'Rechnung freigegeben';

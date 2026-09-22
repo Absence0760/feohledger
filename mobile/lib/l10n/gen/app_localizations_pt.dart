@@ -574,8 +574,9 @@ class AppLocalizationsPt extends AppLocalizations {
   String get invoiceDetailUpdated => 'Fatura atualizada';
 
   @override
-  String get invoiceDetailUpdateFailed =>
-      'Não foi possível salvar as alterações — tente novamente';
+  String invoiceDetailUpdateFailed(String error) {
+    return 'Não foi possível salvar as alterações: $error';
+  }
 
   @override
   String get invoiceDetailApproved => 'Fatura aprovada';
@@ -3144,8 +3145,9 @@ class AppLocalizationsPtBr extends AppLocalizationsPt {
   String get invoiceDetailUpdated => 'Fatura atualizada';
 
   @override
-  String get invoiceDetailUpdateFailed =>
-      'Não foi possível salvar as alterações — tente novamente';
+  String invoiceDetailUpdateFailed(String error) {
+    return 'Não foi possível salvar as alterações: $error';
+  }
 
   @override
   String get invoiceDetailApproved => 'Fatura aprovada';
