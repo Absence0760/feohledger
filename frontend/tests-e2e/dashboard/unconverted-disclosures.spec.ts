@@ -23,9 +23,10 @@ import { REPORTING_CURRENCY, dashboardResponse, monthlyTrendRow, vendorSpendRow 
  * A stub with empty series would pass either way.
  *
  * `discount-capture.spec.ts` owns the fourth notice on this page (the discount
- * card's) and the KPI row's `unconverted-rollup` banner is a different
- * question again — every count in `./fixture.ts` that feeds it stays at zero,
- * so a chart notice here can never be the rollup banner misread.
+ * card's) and `kpi-rollup-disclosures.spec.ts` owns the KPI row's two lines,
+ * which are a different question again — every count in `./fixture.ts` that
+ * feeds them stays at zero here, so a chart notice can never be one of them
+ * misread.
  *
  * The payload lives in `./fixture.ts`, typed `satisfies DashboardData`. That
  * matters most to THIS spec: the shared shape it replaced omitted
@@ -66,11 +67,11 @@ async function stubDashboard(page: Page, { vendors = [0, 0], aging = 0, trend = 
 	);
 }
 
-/** The three chart notices, plus the KPI-row banner none of them may be. */
+/** The three chart notices, plus the two KPI-row lines none of them may be. */
 const VENDOR_NOTICE = 'unconverted-vendor-spend';
 const AGING_NOTICE = 'unconverted-aging';
 const TREND_NOTICE = 'unconverted-trend';
-const ROLLUP_BANNER = 'unconverted-rollup';
+const ROLLUP_LINES = ['unconverted-rollup-face-value', 'unconverted-rollup-excluded'];
 
 /** Wait for the dashboard to have actually rendered its charts, so a
  *  `toHaveCount(0)` can't pass against a page that is still loading. */
@@ -96,7 +97,7 @@ test('no chart folded a row at face value — none of the three notices appears'
 	await expect(page.getByTestId(VENDOR_NOTICE)).toHaveCount(0);
 	await expect(page.getByTestId(AGING_NOTICE)).toHaveCount(0);
 	await expect(page.getByTestId(TREND_NOTICE)).toHaveCount(0);
-	await expect(page.getByTestId(ROLLUP_BANNER)).toHaveCount(0);
+	for (const line of ROLLUP_LINES) await expect(page.getByTestId(line)).toHaveCount(0);
 });
 
 test('a part-converted vendor total names the vendor, and only that chart says so', async ({

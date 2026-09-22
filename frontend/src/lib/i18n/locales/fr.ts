@@ -267,8 +267,10 @@ export const messages = {
 	'dashboard.kpi.exceptions': 'Exceptions',
 	'dashboard.kpi.staleApprovals': 'Approbations en retard',
 	'dashboard.kpi.rebatesEarned': 'Remises obtenues',
-	'dashboard.reporting.unconverted':
-		'Certains totaux ci-dessus excluent les lignes sans taux de change verrouillé vers {currency} — à considérer comme un plancher, pas un montant exact.',
+	'dashboard.reporting.faceValue':
+		'Partiel — {label} : {n, plural, one {# facture} other {# factures}} sans taux de change vers {currency}, comptabilisées à leur valeur faciale — ce total mélange donc les devises d’autant. Enregistrez le taux manquant avant de vous y fier.',
+	'dashboard.reporting.excluded':
+		'Exclus de {labels} : {n, plural, one {# paiement} other {# paiements}} sans taux de change vers {currency}, écartés plutôt que comptés à leur valeur faciale — les chiffres affichés sous-estiment donc les mouvements réels. Enregistrez le taux manquant pour avoir une vue complète.',
 	'dashboard.vendorSpend.unconverted':
 		'Partiel : {n, plural, one {# facture} other {# factures}} sans taux de change vers {currency}, comptabilisées à leur valeur faciale — ces fournisseurs ne sont donc pas tous classés dans la même devise. Concernés : {vendors}. Enregistrez le taux manquant avant de vous fier au classement.',
 	'dashboard.aging.unconverted':

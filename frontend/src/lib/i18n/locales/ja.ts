@@ -259,8 +259,10 @@ export const messages = {
 	'dashboard.kpi.exceptions': '例外',
 	'dashboard.kpi.staleApprovals': '滞留中の承認',
 	'dashboard.kpi.rebatesEarned': '獲得リベート',
-	'dashboard.reporting.unconverted':
-		'上記の一部の合計には、{currency} への為替レートが未確定の項目は含まれていません。正確な数値ではなく下限としてお考えください。',
+	'dashboard.reporting.faceValue':
+		'一部未換算 — {label}：{currency} への為替レートがない請求書 {n, plural, other {# 件}} を額面のまま計上しているため、この合計はその分だけ通貨が混在しています。この数値をもとに判断する前に、不足しているレートを登録してください。',
+	'dashboard.reporting.excluded':
+		'除外 — {labels}：{currency} への為替レートがない{n, plural, other {# 件の支払い}}は、額面で計上せずに合計から除外しています。表示されている金額は実際の支払額を下回ります。正確な全体像を得るには不足しているレートを登録してください。',
 	'dashboard.vendorSpend.unconverted':
 		'一部未換算：{currency} への為替レートがない請求書 {n, plural, other {# 件}} を額面のまま計上しているため、これらの取引先は同一通貨で並べられていません。該当：{vendors}。順位を判断する前に不足しているレートを登録してください。',
 	'dashboard.aging.unconverted':

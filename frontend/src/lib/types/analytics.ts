@@ -469,7 +469,14 @@ export interface DashboardData {
 		id: string;
 		invoice_number: string;
 		vendor_name: string;
+		/** The invoice's FACE amount, in `currency` below — not a reporting figure. */
 		amount: MoneyAmount;
+		/**
+		 * The invoice's own currency, which `amount` is denominated in. Labelling
+		 * these rows with the page's reporting currency put a `$` on a EUR
+		 * invoice (`docs/decisions.md` §200). `null` renders bare.
+		 */
+		currency: string | null;
 		due_date: string | null;
 		is_overdue: boolean;
 	}>;

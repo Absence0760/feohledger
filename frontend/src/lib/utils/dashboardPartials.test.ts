@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+	kpiRollupDisclosure,
 	partialLabels,
 	totalUnconverted,
+	type KpiRollupCounts,
 	type PartialSeriesEntry
 } from './dashboardPartials';
 
@@ -90,5 +92,65 @@ describe('partialLabels', () => {
 		];
 		expect(partialLabels(rows, (v) => v.vendor)).toEqual(['Umbrella']);
 		expect(totalUnconverted(rows)).toBe(1);
+	});
+});
+
+function counts(invoices: number, paid: number, pending: number): KpiRollupCounts {
+	return {
+		reporting: { unconverted_count: invoices },
+		total_paid_unconverted_count: paid,
+		total_pending_unconverted_count: pending
+	};
+}
+
+describe('kpiRollupDisclosure', () => {
+	it('says nothing when every KPI converted', () => {
+		expect(kpiRollupDisclosure(counts(0, 0, 0))).toEqual({
+			faceValue: 0,
+			excluded: 0,
+			excludedFrom: []
+		});
+	});
+
+	it('keeps the invoice total on the FACE-VALUE side, never the excluded one', () => {
+		// The bug (decisions §200): one banner ORed all three counts and said
+		// "exclude" — true of Paid / Pending, false of Total Amount, which
+		// `invoice_reporting_amount_sql` counts at face value.
+		const d = kpiRollupDisclosure(counts(3, 0, 0));
+		expect(d.faceValue).toBe(3);
+		expect(d.excluded).toBe(0);
+		expect(d.excludedFrom).toEqual([]);
+	});
+
+	it('keeps the payment counts on the EXCLUDED side, naming only the KPIs that lost a row', () => {
+		expect(kpiRollupDisclosure(counts(0, 2, 0))).toEqual({
+			faceValue: 0,
+			excluded: 2,
+			excludedFrom: ['paid']
+		});
+		expect(kpiRollupDisclosure(counts(0, 0, 4))).toEqual({
+			faceValue: 0,
+			excluded: 4,
+			excludedFrom: ['pending']
+		});
+	});
+
+	it('reports both sides independently, and sums the two disjoint payment counts', () => {
+		// Completed and pending payments are disjoint statuses, so the sum is a
+		// count of distinct payments.
+		expect(kpiRollupDisclosure(counts(1, 2, 3))).toEqual({
+			faceValue: 1,
+			excluded: 5,
+			excludedFrom: ['paid', 'pending']
+		});
+	});
+
+	it('is silent for an absent payload and ignores malformed counts', () => {
+		expect(kpiRollupDisclosure(null)).toEqual({ faceValue: 0, excluded: 0, excludedFrom: [] });
+		expect(kpiRollupDisclosure(counts(-1, Number.NaN, 0.5))).toEqual({
+			faceValue: 0,
+			excluded: 0,
+			excludedFrom: []
+		});
 	});
 });

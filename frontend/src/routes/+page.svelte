@@ -14,10 +14,15 @@
 	} from '$lib/utils/money';
 	import { formatDate } from '$lib/utils/time';
 	import { formatList } from '$lib/utils/list';
-	import { partialLabels, totalUnconverted } from '$lib/utils/dashboardPartials';
+	import {
+		kpiRollupDisclosure,
+		partialLabels,
+		totalUnconverted,
+		type ExcludingKpi
+	} from '$lib/utils/dashboardPartials';
 	import type { DashboardData } from '$lib/types/analytics';
-	import { orgCurrency } from '$lib/stores/orgSettings.svelte';
 	import { m } from '$lib/i18n/store.svelte';
+	import type { MessageKey } from '$lib/i18n/messages';
 
 	// The response shape lives in `$lib/types/analytics.ts` (`DashboardData`,
 	// `ReportingAgingBuckets`, `AgingBuckets`) rather than here. Declared
@@ -46,7 +51,6 @@
 	}
 
 	$effect(() => {
-		orgCurrency.ensureLoaded();
 		load();
 	});
 
@@ -59,27 +63,30 @@
 	// and the charts').
 	const isEmptyTenant = $derived(!!data && data.total_invoices === 0);
 
-	// Dashboard figures are tenant-wide roll-ups with no per-row currency,
-	// so they render in the org's configured default currency.
+	// Every KPI and chart figure on this page is a tenant-wide rollup the
+	// backend denominated in ONE currency — `resolve_reporting_currency`'s
+	// answer — and the response NAMES it: `reporting.reporting_currency`. So
+	// that is the label, not the separately-fetched `orgCurrency` store, which
+	// can only see three of the backend's four rungs and so must answer `null`
+	// where the server answered from `settings.reporting_currency_default`
+	// (`docs/decisions.md` §119, §200). A currency label comes from the same
+	// payload as the number it labels.
+	const reportingCurrency = $derived(data?.reporting.reporting_currency ?? null);
+
 	function fmt(amount: MoneyAmount): string {
-		return formatMoney(amount, { currency: orgCurrency.currency, whole: true });
+		return formatMoney(amount, { currency: reportingCurrency, whole: true });
 	}
 
 	function fmtFull(amount: MoneyAmount): string {
-		return formatMoney(amount, { currency: orgCurrency.currency });
+		return formatMoney(amount, { currency: reportingCurrency });
 	}
 
-	/** Format a figure in the currency the RESPONSE says it is denominated in.
-	 *
-	 *  The KPIs above are tenant-wide rollups with no per-row currency, so they
-	 *  render in the separately-fetched org default. `discount_capture` is not
-	 *  one of those: it carries its OWN `reporting_currency`, and labelling its
-	 *  amounts with the org-settings code would let the page print "3 rows with
-	 *  no exchange rate into GBP" directly above a column of `$`. A currency
-	 *  label has to come from the same payload as the number it labels — the
-	 *  same rule `/cfo`'s `fmtIn` follows. */
+	/** Format a figure in the currency its OWN block names. `discount_capture`
+	 *  carries its own `reporting_currency`, so its amounts are labelled from
+	 *  that, exactly as the notice above them is. Absent → bare, never a
+	 *  borrowed code (decisions §196). */
 	function fmtIn(amount: MoneyAmount, currency: string | undefined): string {
-		return formatMoney(amount, { currency: currency || orgCurrency.currency, whole: true });
+		return formatMoney(amount, { currency, whole: true });
 	}
 
 	// Due-date cell: locale-aware short date, no year (the shared helper drives
@@ -153,18 +160,20 @@
 			: 1
 	);
 
-	// True whenever any reporting-currency rollup left rows out for lack of a
-	// locked exchange rate — the number above is then a floor, not the exact
-	// total, and that has to be visible right beside it (decisions §35).
-	let hasUnconvertedRows = $derived(
-		data
-			? data.reporting.unconverted_count > 0 ||
-				data.total_paid_unconverted_count > 0 ||
-				data.total_pending_unconverted_count > 0
-			: false
-	);
+	// The KPI row's two partial-conversion disclosures. They are TWO because the
+	// three counts follow opposite rules: Total Amount counts an unconverted
+	// invoice at FACE value (so it mixes currencies), while Paid / Pending leave
+	// an unconverted payment OUT (so they are floors). One banner saying
+	// "exclude" for all three misdescribed the figure a reader is most likely
+	// to quote (decisions §35, §200). The rule lives in `utils/dashboardPartials`.
+	let kpiDisclosure = $derived(kpiRollupDisclosure(data));
 
-	// The three CHART disclosures. `hasUnconvertedRows` above covers the KPI
+	const EXCLUDING_KPI_LABEL: Record<ExcludingKpi, MessageKey> = {
+		paid: 'dashboard.kpi.paid',
+		pending: 'dashboard.kpi.pending'
+	};
+
+	// The three CHART disclosures. `kpiDisclosure` above covers the KPI
 	// row; each chart carries its own because each answers a different
 	// question about the same fallback — which vendor's rank is unreliable,
 	// how much of the aging picture is part-converted, which month's bar not
@@ -302,9 +311,28 @@
 		<p class="loading">{m('common.loading')}</p>
 	{:else if data && !isEmptyTenant}
 
-		{#if hasUnconvertedRows}
-			<p class="dashboard-skipped" role="alert" data-testid="unconverted-rollup">
-				{m('dashboard.reporting.unconverted', { currency: data.reporting.reporting_currency })}
+		<!-- Each line NAMES the KPI it qualifies, because the two say opposite
+		     things: a face-value figure mixes currencies, an excluded one is a
+		     floor. -->
+		{#if kpiDisclosure.faceValue > 0}
+			<p class="dashboard-skipped" role="alert" data-testid="unconverted-rollup-face-value">
+				{m('dashboard.reporting.faceValue', {
+					label: m('dashboard.kpi.totalAmount'),
+					n: kpiDisclosure.faceValue,
+					currency: data.reporting.reporting_currency
+				})}
+			</p>
+		{/if}
+		{#if kpiDisclosure.excluded > 0}
+			<p class="dashboard-skipped" role="alert" data-testid="unconverted-rollup-excluded">
+				{m('dashboard.reporting.excluded', {
+					labels: formatList(
+						kpiDisclosure.excludedFrom.map((k) => m(EXCLUDING_KPI_LABEL[k])),
+						'and'
+					),
+					n: kpiDisclosure.excluded,
+					currency: data.reporting.reporting_currency
+				})}
 			</p>
 		{/if}
 
@@ -421,7 +449,11 @@
 									<span class="upcoming-vendor">{inv.vendor_name}</span>
 									<span class="upcoming-inv">{inv.invoice_number}</span>
 								</div>
-								<span class="upcoming-amount">{fmtFull(inv.amount)}</span>
+								<!-- A per-ROW face amount in the invoice's own currency, not
+								     a reporting figure — so its own code, never the page's. -->
+								<span class="upcoming-amount"
+									>{formatMoney(inv.amount, { currency: inv.currency })}</span
+								>
 								<span class="upcoming-date" class:overdue-text={inv.is_overdue}>
 									{fmtDue(inv.due_date)}
 									{#if inv.is_overdue}

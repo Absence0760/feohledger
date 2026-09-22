@@ -268,8 +268,10 @@ export const messages = {
 	'dashboard.kpi.exceptions': 'Exceções',
 	'dashboard.kpi.staleApprovals': 'Aprovações atrasadas',
 	'dashboard.kpi.rebatesEarned': 'Reembolsos obtidos',
-	'dashboard.reporting.unconverted':
-		'Alguns totais acima excluem linhas sem taxa de câmbio travada para {currency} — trate-os como um piso, não um valor exato.',
+	'dashboard.reporting.faceValue':
+		'Parcial — {label}: {n, plural, one {# nota fiscal} other {# notas fiscais}} sem taxa de câmbio para {currency}, contabilizadas pelo valor de face — nessa medida esse total mistura moedas. Registre a taxa que falta antes de se basear nele.',
+	'dashboard.reporting.excluded':
+		'Excluídos de {labels}: {n, plural, one {# pagamento} other {# pagamentos}} sem taxa de câmbio para {currency}, deixados de fora em vez de contabilizados pelo valor de face — portanto os valores exibidos subestimam o que de fato foi movimentado. Registre a taxa faltante para ver o quadro completo.',
 	'dashboard.vendorSpend.unconverted':
 		'Parcial: {n, plural, one {# nota fiscal} other {# notas fiscais}} sem taxa de câmbio para {currency}, contabilizadas pelo valor de face — por isso estes fornecedores não estão todos classificados na mesma moeda. Afetados: {vendors}. Registre a taxa que falta antes de agir com base na ordem.',
 	'dashboard.aging.unconverted':

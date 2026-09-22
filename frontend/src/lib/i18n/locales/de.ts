@@ -264,8 +264,10 @@ export const messages = {
 	'dashboard.kpi.exceptions': 'Ausnahmen',
 	'dashboard.kpi.staleApprovals': 'Überfällige Freigaben',
 	'dashboard.kpi.rebatesEarned': 'Erzielte Rückvergütungen',
-	'dashboard.reporting.unconverted':
-		'Einige der obigen Summen schließen Zeilen ohne festgelegten Wechselkurs in {currency} aus – behandeln Sie sie als Untergrenze, nicht als exakten Wert.',
+	'dashboard.reporting.faceValue':
+		'Teilweise – {label}: {n, plural, one {# Rechnung} other {# Rechnungen}} ohne Wechselkurs in {currency}, zum Nennwert erfasst – in diesem Umfang mischt diese Summe Währungen. Erfassen Sie den fehlenden Kurs, bevor Sie sich darauf stützen.',
+	'dashboard.reporting.excluded':
+		'Nicht enthalten in {labels}: {n, plural, one {# Zahlung} other {# Zahlungen}} ohne Wechselkurs in {currency}, ausgelassen statt zum Nennwert erfasst – die angezeigten Zahlen unterschätzen daher den tatsächlichen Zahlungsfluss. Erfassen Sie den fehlenden Kurs für ein vollständiges Bild.',
 	'dashboard.vendorSpend.unconverted':
 		'Teilweise: {n, plural, one {# Rechnung} other {# Rechnungen}} ohne Wechselkurs in {currency}, zum Nennwert erfasst – diese Lieferanten sind daher nicht alle in derselben Währung gereiht. Betroffen: {vendors}. Erfassen Sie den fehlenden Kurs, bevor Sie sich auf die Reihenfolge stützen.',
 	'dashboard.aging.unconverted':

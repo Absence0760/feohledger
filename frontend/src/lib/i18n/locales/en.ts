@@ -313,8 +313,10 @@ export const en = {
 	'dashboard.kpi.exceptions': 'Exceptions',
 	'dashboard.kpi.staleApprovals': 'Stale Approvals',
 	'dashboard.kpi.rebatesEarned': 'Rebates Earned',
-	'dashboard.reporting.unconverted':
-		'Some totals above exclude rows with no locked exchange rate into {currency} — treat them as a floor, not an exact figure.',
+	'dashboard.reporting.faceValue':
+		'Partial — {label}: {n, plural, one {# invoice} other {# invoices}} with no exchange rate into {currency}, counted at face value, so that total mixes currencies by that much. Book the missing rate before relying on it.',
+	'dashboard.reporting.excluded':
+		'Excluded from {labels}: {n, plural, one {# payment} other {# payments}} with no exchange rate into {currency}, left out rather than counted at face value — so what is shown understates what actually moved. Book the missing rate to see the full picture.',
 	'dashboard.vendorSpend.unconverted':
 		'Partial: {n, plural, one {# invoice} other {# invoices}} with no exchange rate into {currency}, counted at face value — so these vendors are not all ranked in the same currency. Affected: {vendors}. Book the missing rate before acting on the order.',
 	'dashboard.aging.unconverted':

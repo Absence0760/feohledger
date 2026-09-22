@@ -266,8 +266,10 @@ export const messages = {
 	'dashboard.kpi.exceptions': 'Excepciones',
 	'dashboard.kpi.staleApprovals': 'Aprobaciones atrasadas',
 	'dashboard.kpi.rebatesEarned': 'Reembolsos obtenidos',
-	'dashboard.reporting.unconverted':
-		'Algunos totales anteriores excluyen filas sin tipo de cambio fijado a {currency}; considérelos un mínimo, no una cifra exacta.',
+	'dashboard.reporting.faceValue':
+		'Parcial — {label}: {n, plural, one {# factura} other {# facturas}} sin tipo de cambio a {currency}, contabilizadas por su valor nominal, por lo que ese total mezcla monedas en esa medida. Registre el tipo que falta antes de basarse en él.',
+	'dashboard.reporting.excluded':
+		'Excluidos de {labels}: {n, plural, one {# pago} other {# pagos}} sin tipo de cambio a {currency}, omitidos en lugar de contabilizarse por su valor nominal, por lo que las cifras mostradas subestiman lo que realmente se movió. Registre el tipo de cambio que falta para ver el panorama completo.',
 	'dashboard.vendorSpend.unconverted':
 		'Parcial: {n, plural, one {# factura} other {# facturas}} sin tipo de cambio a {currency}, contabilizadas por su valor nominal, por lo que estos proveedores no están todos clasificados en la misma moneda. Afectados: {vendors}. Registre el tipo que falta antes de actuar según el orden.',
 	'dashboard.aging.unconverted':
