@@ -31,7 +31,8 @@ const _FIXTURE_VENDOR_PREFIX = 'ENRICH-TEST-';
  * didn't expose `vendor_id`; a name that had drifted, e.g. the enrichment
  * spec's "(MOCK)" suffix, then produced a vendor whose id didn't actually
  * own the invoice.) An invoice with a null `vendor_id` is skipped: it can't
- * be credited at all.
+ * be credited at all. So is one that is `paid` or `done`: no payment will read
+ * a credit on it, so both application paths refuse it (docs/decisions.md §202).
  */
 async function getVendorWithInvoice(
 	page: import('@playwright/test').Page
@@ -45,6 +46,7 @@ async function getVendorWithInvoice(
 			invoice_number: string;
 			vendor: string;
 			vendor_id: string | null;
+			status: string;
 		}>;
 	};
 	if (!invBody.items.length) throw new Error('No invoices found in the tenant');
@@ -55,7 +57,7 @@ async function getVendorWithInvoice(
 	);
 
 	for (const inv of invBody.items) {
-		if (!inv.vendor_id) continue;
+		if (!inv.vendor_id || inv.status === 'paid' || inv.status === 'done') continue;
 		const vendor = vendorsById.get(inv.vendor_id);
 		if (!vendor || vendor.name.startsWith(_FIXTURE_VENDOR_PREFIX)) continue;
 		return { ...vendor, invoiceId: inv.id, invoiceNumber: inv.invoice_number };

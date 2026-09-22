@@ -20,7 +20,8 @@ import {
  * MOUNT by walking every page of `GET /api/invoices`, then filtered by vendor in
  * the browser. That cost one request per 100 invoices on every visit, and it
  * still offered invoices the apply refused — another currency, too little
- * balance left — each a 409 the operator only met after choosing.
+ * balance left, an invoice already paid — each a 409 the operator only met
+ * after choosing.
  *
  * Driven against the real backend: the point is that what the picker lists and
  * what `POST /apply` accepts are the same set, and a stub would only prove the
@@ -97,10 +98,13 @@ test.describe('/credit-memos — the invoice pickers', () => {
 			const okB = `${RUN}-B`;
 			const okBId = await makeInvoice(page, vendor, okB, '300.00');
 			await makeInvoice(page, vendor, okA, '500.00');
-			// Refused by `/apply`, so never offered: another currency, and less
-			// balance than the 75.00 credit.
+			// Refused by `/apply`, so never offered: another currency, less
+			// balance than the 75.00 credit, and an invoice already paid (no
+			// payment will read a credit on it).
 			await makeInvoice(page, vendor, `${RUN}-EUR`, '500.00', 'EUR');
 			await makeInvoice(page, vendor, `${RUN}-SMALL`, '10.00');
+			const paidId = await makeInvoice(page, vendor, `${RUN}-PAID`, '500.00');
+			tenantPsql(`UPDATE invoices SET status='paid' WHERE id='${paidId}'`);
 			const memoNumber = `${RUN}-MEMO`;
 			const memoId = await makeMemo(page, vendorId, memoNumber, '75.00');
 
