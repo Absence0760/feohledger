@@ -123,9 +123,16 @@ test.describe('/portal/login — decorative backdrop (#422)', () => {
 		// animation being reintroduced for everyone else.
 		await page.goto('/portal/login');
 
-		const names = await page
-			.locator('.blob-a, .blob-b')
-			.evaluateAll((els) => els.map((el) => getComputedStyle(el).animationName));
+		// `evaluateAll` does not auto-wait, and this app renders nothing until
+		// hydration — so read the blobs only once they exist, or the assertion
+		// below measures an empty document and the `length > 0` guard is what
+		// fails (README § `networkidle` is not a readiness signal, case 1).
+		const blobs = page.locator('.blob-a, .blob-b');
+		await expect(blobs).toHaveCount(2);
+
+		const names = await blobs.evaluateAll((els) =>
+			els.map((el) => getComputedStyle(el).animationName)
+		);
 		expect(names.length).toBeGreaterThan(0);
 		for (const name of names) {
 			expect(name, 'the portal sign-in backdrop must not animate').toBe('none');
