@@ -577,7 +577,11 @@ Response:
   (`received_amount` values goods physically received but not yet
   invoiced — the GR/IR accrual leg. The 3-way match is fanned out per
   PO: each receipted PO contributes `po_total × min(1, gr_qty/po_qty)`,
-  the same received-fraction the PO matcher computes. POs with no
+  the same received-fraction the PO matcher computes. The open-PO leg counts
+  only POs that are still live — `models/procurement.DEAD_PO_STATUSES`
+  (`cancelled` / `closed` / `voided`) are excluded, the same roster the budget
+  commitment leg uses; it used to sum every PO the tenant had ever raised, so a
+  cancelled order stayed a commitment forever. POs with no
   quantified lines but a booked receipt count as fully received;
   receipts with no PO link can't be priced and are excluded. Pure math
   in `analytics.value_received_goods`; SQL fan-out in

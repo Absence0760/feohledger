@@ -21,6 +21,16 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, EntityMixin, TimestampMixin
 
+#: PO statuses that no longer represent a live commitment. `PurchaseOrder.status`
+#: is a free-form `String(30)` written by the ERP feed and the requisition
+#: conversion, so this is an EXCLUSION list, not an allowlist: an unrecognised
+#: but live status (`received`, `partially_received`) must keep counting, while
+#: silently counting a cancelled order as committed spend is what makes a
+#: figure wrong. Shared by the budget-commitment leg (`services/budget_service`)
+#: and the open-PO accrual (`api/analytics`), which must not disagree about what
+#: "open" means.
+DEAD_PO_STATUSES: tuple[str, ...] = ("cancelled", "closed", "voided")
+
 
 def po_currency_code(value: object) -> str | None:
     """The ISO 4217 code a purchase order may record, or ``None``.

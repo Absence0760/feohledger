@@ -82,6 +82,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.invoice import Invoice
 from app.models.procurement import (
+    DEAD_PO_STATUSES,
     Budget,
     BudgetDimension,
     PurchaseOrder,
@@ -99,8 +100,10 @@ OPEN_COMMITMENT_REQ_STATUSES: tuple[RequisitionStatus, ...] = (
 )
 
 # PO statuses that no longer represent a live commitment (excluded from the PO
-# leg of committed). Everything else (e.g. ``open``, ``received``) counts.
-_DEAD_PO_STATUSES: tuple[str, ...] = ("cancelled", "closed", "voided")
+# leg of committed). Everything else (e.g. ``open``, ``received``) counts. The
+# roster lives on the model, beside the column, because the open-PO accrual in
+# ``api/analytics`` has to exclude exactly the same statuses.
+_DEAD_PO_STATUSES = DEAD_PO_STATUSES
 
 # Maps each budget dimension to the ``Invoice`` column that carries that
 # dimension's value. Realised invoice spend is attributed by ``column ==

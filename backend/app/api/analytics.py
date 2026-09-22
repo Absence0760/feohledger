@@ -1251,13 +1251,21 @@ async def _open_po_amounts_by_currency(
 
     Grouped because `purchase_orders.currency` is a per-row fact: a single SUM
     across a tenant's POs adds totals in whatever currencies they were raised
-    in. The legacy flat figure is the sum of these groups (exact Decimal)."""
-    from app.models.procurement import PurchaseOrder
+    in. The legacy flat figure is the sum of these groups (exact Decimal).
+
+    **Open means open.** `AccrualsSnapshot` has always defined this leg as "the
+    total of non-closed POs" and the card calls it "Open POs", but the query
+    summed every PO the tenant had ever raised — a cancelled order counted as a
+    live commitment forever. The exclusion list is the model's
+    `DEAD_PO_STATUSES`, shared with the budget-commitment leg so the two cannot
+    disagree about what is still committed."""
+    from app.models.procurement import DEAD_PO_STATUSES, PurchaseOrder
 
     rows = await db.execute(
         apply_entity_scope(
             select(PurchaseOrder.currency, func.coalesce(func.sum(PurchaseOrder.total), 0))
             .select_from(PurchaseOrder)
+            .where(PurchaseOrder.status.notin_(DEAD_PO_STATUSES))
             .group_by(PurchaseOrder.currency),
             PurchaseOrder,
             entity_id,

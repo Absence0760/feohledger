@@ -335,22 +335,27 @@ async def _seed_mixed_currency_pos(realdb) -> None:
     org_id = realdb.info(TENANT).org_id
     async with realdb.sessionmaker(TENANT)() as s:
         ent = await _default_entity_id(s)
-        for number, total, currency in (
-            ("ACC-USD", Decimal("5000.00"), "USD"),
-            ("ACC-EUR", Decimal("3000.00"), "EUR"),
-            ("ACC-NONE", Decimal("700.00"), None),
+        for number, total, currency, status in (
+            ("ACC-USD", Decimal("5000.00"), "USD", "open"),
+            ("ACC-EUR", Decimal("3000.00"), "EUR", "open"),
+            ("ACC-NONE", Decimal("700.00"), None, "open"),
+            # No longer a live commitment — excluded from the accrual entirely.
+            ("ACC-CANCELLED", Decimal("9999.00"), "USD", "cancelled"),
+            ("ACC-CLOSED", Decimal("8888.00"), "EUR", "closed"),
         ):
             po = PurchaseOrder(
                 po_number=number,
                 total=total,
                 currency=currency,
-                status="open",
+                status=status,
                 organization_id=org_id,
                 entity_id=ent,
             )
             s.add(po)
             await s.flush()
-            if currency == "EUR":
+            # One receipt, on the OPEN EUR order: the GR/IR leg is keyed on
+            # receipts, so a second one would value the closed PO too.
+            if number == "ACC-EUR":
                 s.add(POLineItem(po_id=po.id, description="Widget", quantity=Decimal("10")))
                 gr = GoodsReceipt(
                     gr_number="ACC-GR-EUR",
@@ -370,7 +375,10 @@ async def test_cfo_accruals_are_netted_within_each_currency(realdb):
     """The flat accruals added a EUR PO to a USD one and subtracted invoices in
     either from both — a total denominated in nothing. `by_currency` nets each
     currency's legs within it, and keeps the POs nobody recorded a currency for
-    in their own `null` row instead of folding them into one."""
+    in their own `null` row instead of folding them into one.
+
+    The seed also holds a cancelled and a closed PO: "Open POs" means open, so
+    neither is in any figure below."""
     await _seed_mixed_currency_pos(realdb)
     async with realdb.client(key=TENANT, role="cfo") as c:
         accruals = (await c.get("/api/analytics/cfo")).json()["accruals"]
@@ -412,6 +420,7 @@ async def test_by_entity_open_pos_are_grouped_by_po_currency(realdb):
     async with realdb.client(key=TENANT, role="cfo") as c:
         body = (await c.get("/api/analytics/by-entity")).json()
 
+    # The cancelled + closed POs in the seed are in neither row.
     expected = [
         {"currency": "EUR", "amount": "3000.00"},
         {"currency": "USD", "amount": "5000.00"},
