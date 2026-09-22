@@ -193,7 +193,8 @@ jobs:
         # `CREATE EXTENSION vector` for invoice_embeddings (RAG).
         # Stock postgres:16 doesn't ship the extension; CI without
         # this fails with "extension 'vector' is not available".
-        image: pgvector/pgvector:pg16
+        # same ref as backend/docker-compose.yml — no Dependabot ecosystem reads this line; bump both
+        image: pgvector/pgvector:0.8.6-pg16@sha256:ccc6e83d6e35e931dc7c5def2022729d5a6c370318d099181995567ff1fb4d6b
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
@@ -207,7 +208,8 @@ jobs:
           --health-retries=5
 
       redis:
-        image: redis:7
+        # same ref as backend/docker-compose.yml — no Dependabot ecosystem reads this line; bump both
+        image: redis:7.4.11-alpine@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499
         ports:
           - 6379:6379
         options: >-
@@ -274,7 +276,7 @@ jobs:
           # Pull as its own step so a registry failure is distinguishable from
           # a container that started but never became healthy.
           for attempt in 1 2 3; do
-            if docker pull quay.io/minio/minio:latest; then break; fi
+            if docker pull quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e; then break; fi
             if [ "$attempt" = 3 ]; then
               echo "::error::could not pull quay.io/minio/minio after 3 attempts - see each error above; a 401 or 'repository does not exist' is NOT transient and means the registry or image path is wrong"
               exit 1
@@ -285,7 +287,7 @@ jobs:
           docker run -d --name minio -p 9000:9000 \
             -e MINIO_ROOT_USER=minioadmin \
             -e MINIO_ROOT_PASSWORD=minioadmin \
-            quay.io/minio/minio:latest server /data
+            quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e server /data
           for i in $(seq 1 30); do
             if curl -sf http://localhost:9000/minio/health/live; then
               echo "MinIO ready"; exit 0
@@ -579,7 +581,8 @@ jobs:
         # `CREATE EXTENSION vector` for invoice_embeddings (RAG).
         # Stock postgres:16 doesn't ship the extension; CI without
         # this fails with "extension 'vector' is not available".
-        image: pgvector/pgvector:pg16
+        # same ref as backend/docker-compose.yml — no Dependabot ecosystem reads this line; bump both
+        image: pgvector/pgvector:0.8.6-pg16@sha256:ccc6e83d6e35e931dc7c5def2022729d5a6c370318d099181995567ff1fb4d6b
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
@@ -610,7 +613,8 @@ jobs:
         # recurring as we add more tenants.
 
       redis:
-        image: redis:7
+        # same ref as backend/docker-compose.yml — no Dependabot ecosystem reads this line; bump both
+        image: redis:7.4.11-alpine@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499
         ports:
           - 6379:6379
         options: >-
@@ -726,7 +730,7 @@ jobs:
           # Pull as its own step so a registry failure is distinguishable from
           # a container that started but never became healthy.
           for attempt in 1 2 3; do
-            if docker pull quay.io/minio/minio:latest; then break; fi
+            if docker pull quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e; then break; fi
             if [ "$attempt" = 3 ]; then
               echo "::error::could not pull quay.io/minio/minio after 3 attempts - see each error above; a 401 or 'repository does not exist' is NOT transient and means the registry or image path is wrong"
               exit 1
@@ -737,7 +741,7 @@ jobs:
           docker run -d --name minio -p 9000:9000 \
             -e MINIO_ROOT_USER=minioadmin \
             -e MINIO_ROOT_PASSWORD=minioadmin \
-            quay.io/minio/minio:latest server /data
+            quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e server /data
           for i in $(seq 1 30); do
             if curl -sf http://localhost:9000/minio/health/live; then
               echo "MinIO ready"; exit 0
@@ -892,7 +896,8 @@ jobs:
 
     services:
       postgres:
-        image: pgvector/pgvector:pg16
+        # same ref as backend/docker-compose.yml — no Dependabot ecosystem reads this line; bump both
+        image: pgvector/pgvector:0.8.6-pg16@sha256:ccc6e83d6e35e931dc7c5def2022729d5a6c370318d099181995567ff1fb4d6b
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
@@ -907,7 +912,8 @@ jobs:
           --health-timeout=5s
           --health-retries=5
       redis:
-        image: redis:7
+        # same ref as backend/docker-compose.yml — no Dependabot ecosystem reads this line; bump both
+        image: redis:7.4.11-alpine@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499
         ports:
           - 6379:6379
         options: >-
@@ -1131,7 +1137,8 @@ jobs:
 
     services:
       postgres:
-        image: pgvector/pgvector:pg16
+        # same ref as backend/docker-compose.yml — no Dependabot ecosystem reads this line; bump both
+        image: pgvector/pgvector:0.8.6-pg16@sha256:ccc6e83d6e35e931dc7c5def2022729d5a6c370318d099181995567ff1fb4d6b
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
@@ -1146,7 +1153,8 @@ jobs:
           --health-timeout=5s
           --health-retries=5
       redis:
-        image: redis:7
+        # same ref as backend/docker-compose.yml — no Dependabot ecosystem reads this line; bump both
+        image: redis:7.4.11-alpine@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499
         ports:
           - 6379:6379
         options: >-

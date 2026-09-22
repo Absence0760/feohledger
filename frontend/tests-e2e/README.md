@@ -490,7 +490,9 @@ the containers and seeds SSO before running them.
 push/PR to main, **sharded across 14 parallel GitHub runners** via
 Playwright's `--shard=N/14` flag. Each shard:
 
-- pgvector/pgvector:pg16 + Redis 7 as services (per-shard, isolated)
+- pgvector (Postgres 16) + Redis 7 as services (per-shard, isolated), on
+  the same digest-pinned refs as `backend/docker-compose.yml`
+  (`backend/docs/docker.md` § Image pinning)
 - `FEOH_E2E_TENANT_COUNT=1` — each shard only needs one tenant
   (`e2e1`) since it runs `workers=1`. Skips provisioning the other
   three e2e tenants and shaves ~5 s off seed time per shard.

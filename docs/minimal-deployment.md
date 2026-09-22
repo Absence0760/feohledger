@@ -12,7 +12,7 @@ everything else in-process.**
         *.feohledger.com  ──────────► one VM (EC2 t4g.small)
                                  ├── Caddy         — TLS, static frontend, /api reverse-proxy
                                  ├── FastAPI       — backend container (uvicorn)
-                                 ├── Postgres 16   — pgvector/pgvector:pg16 (control + tenant DBs)
+                                 ├── Postgres 16   — pgvector/pgvector, -pg16 line (control + tenant DBs)
                                  └── Redis 7       — token blocklist, rate limits, MFA state
                                         │
                                      AWS S3 — invoice files, backups (no MinIO in prod)
@@ -158,11 +158,18 @@ resize is a stop → change-type → start. Add 2 GB of swap either way.
 
 ### 2. Production compose stack (`deploy/compose.prod.yml` — built)
 
-Four services (see [`deploy/README.md`](../deploy/README.md) for operations):
+Four services (see [`deploy/README.md`](../deploy/README.md) for operations).
+Every image is pinned to a release tag plus its index digest
+(`repo:tag@sha256:…`), the same refs `backend/docker-compose.yml` uses for
+Postgres and Redis, so a redeploy can never pick up an upstream retag; bumps
+arrive as Dependabot `docker-compose` PRs
+([`backend/docs/docker.md` § Image pinning](../backend/docs/docker.md#image-pinning)).
+`deploy.sh`'s frontend-build `NODE_IMAGE` is pinned the same way, by hand.
 
-- `postgres` — `pgvector/pgvector:pg16`, volume-backed, **no host port**
-  (compose-network only); password from the sops env.
-- `redis` — `redis:7-alpine` with `--appendonly yes`, no host port.
+- `postgres` — `pgvector/pgvector` on its `-pg16` line (Postgres 16),
+  volume-backed, **no host port** (compose-network only); password from the
+  sops env.
+- `redis` — `redis` 7.x alpine with `--appendonly yes`, no host port.
 - `api` — built from `backend/Dockerfile` (works on arm64; the lock resolves
   universally — if an arm64 wheel gap ever bites, fall back to an x86
   `t3a.small`, ~$14). Runs the image CMD, `uvicorn app.main:app` (the

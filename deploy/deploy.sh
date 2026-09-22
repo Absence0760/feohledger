@@ -15,7 +15,11 @@ COMPOSE=(docker compose -f compose.prod.yml)
 # Node matches CI's setup-node (24). pnpm is deliberately not pinned here — the
 # frontend build reads it from package.json (below). The named volume caches the
 # pnpm store across deploys so rebuilds don't re-download the world.
-NODE_IMAGE=node:24-alpine
+# Pinned to a release tag AND its index digest like every compose image, so a
+# production deploy can't build with whatever `24-alpine` meant that morning.
+# No Dependabot ecosystem reads a shell variable: bump it by hand when CI's
+# setup-node line moves (`docker buildx imagetools inspect node:<tag>`).
+NODE_IMAGE=node:24.21.0-alpine@sha256:ebfe2f90462722a7a4de65e91990e97fe0d401c70e0e762c5b53302f905ec1c1
 
 die() {
 	echo "deploy.sh: $*" >&2
