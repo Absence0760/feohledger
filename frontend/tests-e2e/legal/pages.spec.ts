@@ -30,6 +30,11 @@ import { WEB_ORIGIN, tenantOrigin } from '../fixtures/env';
  *  3. **The required clauses are present by name.** Each document has a handful
  *     of disclosures it exists to make. They are asserted individually so a
  *     refactor that drops one fails here rather than at a compliance review.
+ *  4. **Every section is reachable from a table of contents.** Ninety-one
+ *     sections across the six, and the reason a document gets a TOC rather
+ *     than the panels `/organization` gets is that all of it must stay
+ *     rendered — so the contents list is the only navigation there is
+ *     (`docs/decisions.md` §188).
  *
  * Deliberately NOT asserted: the exact wording. These documents get revised,
  * and a spec that pinned prose would be edited to match on every revision until
@@ -72,6 +77,17 @@ const DRAFT_MARKERS = [
  */
 const UNRENDERED = [/\bundefined\b/, /\bnull\b/, /\[object Object\]/, /NaN/];
 
+/**
+ * The contents list `lib/legal/LegalPage.svelte` derives for every document.
+ *
+ * A CSS locator rather than `getByRole`, on purpose: the `<summary>` that
+ * discloses the list has no role Playwright's own ARIA mapping computes, so
+ * `getByRole('button', { name: 'Contents' })` matches nothing. The `<nav>`'s
+ * accessible name is the stable part — it exists to distinguish this landmark
+ * from the "Other legal documents" one below it.
+ */
+const CONTENTS = 'nav[aria-label="Sections of this document"]';
+
 test.describe('legal pages', () => {
 	// Every test in this file runs signed OUT. That is the condition the pages
 	// have to work under, and the default worker storage state would hide a
@@ -96,7 +112,150 @@ test.describe('legal pages', () => {
 				expect(body, `${path} leaked an unrendered value: ${leak}`).not.toMatch(leak);
 			}
 		});
+
+		test(`${path} lists every one of its sections in its contents`, async ({ page }) => {
+			// The contents list is DERIVED from the rendered `h2[id]` set rather
+			// than declared per page, which is what makes this assertion the real
+			// contract instead of a restatement: a hand-kept list could match a
+			// count and still name the wrong sections, so the labels and the
+			// hrefs are compared element by element, in order. A section added,
+			// renamed or renumbered in the page file needs no edit here — one
+			// dropped out of the list fails.
+			await page.goto(path);
+			await expect(page.getByRole('heading', { level: 1, name: title })).toBeVisible();
+
+			const headings = page.locator('.legal-page h2[id]');
+			await expect(headings.first()).toBeVisible();
+			const sectionCount = await headings.count();
+			// The shortest of the six (the Cookie Notice) has nine. A document
+			// that suddenly reports one or two has lost its body, not its TOC.
+			expect(sectionCount, `${path} has no id'd sections to list`).toBeGreaterThanOrEqual(9);
+
+			const entries = page.locator(`${CONTENTS} a`);
+			await expect(entries).toHaveCount(sectionCount);
+
+			const flatten = (s: string) => s.replace(/\s+/g, ' ').trim();
+			expect(
+				(await entries.allTextContents()).map(flatten),
+				`${path}: a contents entry does not read like the heading it points at`
+			).toEqual((await headings.allTextContents()).map(flatten));
+			expect(
+				await entries.evaluateAll((els) =>
+					(els as HTMLAnchorElement[]).map((a) => a.getAttribute('href'))
+				),
+				`${path}: a contents entry points somewhere other than its section`
+			).toEqual(await headings.evaluateAll((els) => els.map((h) => `#${h.id}`)));
+		});
 	}
+
+	test('the contents lists document sections, never the page around them', async ({ page }) => {
+		// Three `<h2>`s on this page are not sections of the document: the
+		// pending-facts notice's "Details still to be confirmed", the
+		// cross-document nav's "Other documents", and the consent banner's
+		// "Your privacy choices". Scoping the derivation to the `<article>` is
+		// the whole of what excludes them — a query widened to the document
+		// would put all three in the contents of a privacy policy, and the
+		// count assertions above would still pass, because they count the same
+		// widened set.
+		await page.goto('/legal/privacy');
+
+		const entries = page.locator(`${CONTENTS} a`);
+		await expect(entries.first()).toBeVisible();
+
+		const sections = await page.locator('.legal-page h2[id]').count();
+		const everyHeading = await page.locator('h2').count();
+		expect(
+			everyHeading,
+			'the chrome headings this guard is about are gone — re-point it at whatever replaced them'
+		).toBeGreaterThan(sections);
+		await expect(entries).toHaveCount(sections);
+
+		for (const chrome of [
+			'Details still to be confirmed',
+			'Other documents',
+			'Your privacy choices'
+		]) {
+			await expect(
+				entries.filter({ hasText: chrome }),
+				`the contents lists page chrome: ${chrome}`
+			).toHaveCount(0);
+		}
+	});
+
+	test('activating a contents entry reaches that section and marks it current', async ({
+		page
+	}) => {
+		// The DPA is the document this exists for: twenty-one sections over
+		// 1,552 lines, and §14 is the one a customer's DPO is sent to.
+		await page.goto('/legal/dpa');
+
+		const entry = page.locator(`${CONTENTS} a[href="#transfers"]`);
+		await expect(entry).toHaveText('14. International transfers');
+		await entry.click();
+
+		// The section lands in the URL, so the reader can cite it, share it, and
+		// go Back — the three properties a JS scroll handler would have cost,
+		// and the reason these are plain anchors with nothing intercepting them.
+		await expect(page).toHaveURL(/\/legal\/dpa#transfers$/);
+		await expect(page.locator('.legal-page h2#transfers')).toBeInViewport();
+
+		// Scroll-spy: exactly one entry is current, and it is the section the
+		// reader is now in.
+		await expect(entry).toHaveAttribute('aria-current', 'true');
+		await expect(page.locator(`${CONTENTS} a[aria-current="true"]`)).toHaveCount(1);
+	});
+
+	test('a deep link to a section still lands on that section', async ({ page }) => {
+		// Every cross-reference inside Terms and the DPA is an in-page anchor
+		// ("see section 10"), and external links arrive on them too — a
+		// procurement email says "/legal/terms#termination". Adding navigation
+		// must not have changed what arriving at one does, and the contents list
+		// has to agree about where the reader landed.
+		await page.goto('/legal/terms#termination');
+
+		const heading = page.locator('.legal-page h2#termination');
+		await expect(heading).toBeVisible();
+		await expect(heading).toBeInViewport();
+		await expect(
+			page.locator(`${CONTENTS} a[href="#termination"]`)
+		).toHaveAttribute('aria-current', 'true');
+	});
+
+	test('the contents is a rail beside the document, or a closed disclosure above it', async ({
+		page
+	}) => {
+		// Two forms, one list. The reading measure is the thing neither form may
+		// touch: a contents column carved out of 46rem would make every document
+		// worse to read in exchange for navigating it, which is the trade #433
+		// already refused once.
+		const contents = page.locator(CONTENTS);
+		const disclosure = page.locator(`${CONTENTS} details`);
+		const column = page.locator('.legal-page');
+
+		await page.setViewportSize({ width: 1400, height: 900 });
+		await page.goto('/legal/privacy');
+		await expect(contents).toBeVisible();
+
+		// Wide: open, pinned, and entirely to the LEFT of the text column.
+		await expect(disclosure).toHaveJSProperty('open', true);
+		await expect(contents).toHaveCSS('position', 'sticky');
+		const rail = (await contents.boundingBox())!;
+		const wide = (await column.boundingBox())!;
+		expect(
+			rail.x + rail.width,
+			'the contents rail overlaps the reading column'
+		).toBeLessThanOrEqual(wide.x);
+		expect(wide.width, 'the rail was taken out of the 46rem measure').toBeGreaterThan(700);
+
+		// Narrow: back in the flow, above the text, and closed — on a phone an
+		// open twenty-one-entry list is a screenful in front of the document.
+		await page.setViewportSize({ width: 800, height: 900 });
+		await expect(disclosure).toHaveJSProperty('open', false);
+		await expect(contents).toHaveCSS('position', 'static');
+		const stacked = (await contents.boundingBox())!;
+		const narrow = (await column.boundingBox())!;
+		expect(stacked.y, 'the contents sits below the text it indexes').toBeLessThan(narrow.y);
+	});
 
 	test('the index links every document', async ({ page }) => {
 		await page.goto('/legal');

@@ -110,6 +110,12 @@
 		/* One gutter for the whole frame: the header aligns its mark to the
 		   document's own text edge, and the sheet turns it into padding. */
 		--legal-gutter: 16px;
+		/* Geometry of the contents rail `lib/legal/LegalPage.svelte` pins beside
+		   a document on a wide screen. Declared here because BOTH halves of that
+		   layout read it — the rail's own grid track, in that file, and the
+		   sheet's max-width below, in this one. */
+		--legal-contents-rail: 15rem;
+		--legal-contents-gap: 40px;
 		position: relative;
 		min-height: 100vh;
 		background: var(--bg);
@@ -252,6 +258,28 @@
 	@media (min-width: 52rem) {
 		.legal-root {
 			--legal-gutter: 28px;
+		}
+	}
+
+	/* A DOCUMENT — never the index — grows by exactly the contents rail at the
+	   width where `lib/legal/LegalPage.svelte` pins that rail beside the text.
+	   72rem has to match the `min-width` query and `RAIL_QUERY` in that file;
+	   all three turn together or the rail lands in a column that is not there.
+
+	   `:has()` rather than a prop or a class the page sets, because the sheet is
+	   the PARENT: a child cannot widen its container, and the index page
+	   (`routes/legal/+page.svelte`) has no rail and must keep the bare measure —
+	   a wider card with 46rem of centred text in it is the one outcome worth
+	   avoiding here.
+
+	   The measure itself does not move. 46rem stays 46rem and the rail plus its
+	   gap are added beside it, so every line length, every contrast pair and the
+	   e2e assertion that pins the reading column are all unchanged (#433). */
+	@media (min-width: 72rem) {
+		.legal-sheet:has(:global(.legal-shell)) {
+			max-width: calc(
+				46rem + var(--legal-contents-rail) + var(--legal-contents-gap) + 2 * var(--legal-gutter)
+			);
 		}
 	}
 </style>
