@@ -15,6 +15,11 @@ export interface GlAccountListParams {
 	 * either way — omitting it is not the same as `false`.
 	 */
 	active_only?: boolean;
+	/**
+	 * Ask for ONE entity's chart — the shared accounts plus that entity's own —
+	 * whatever the sidebar has selected. See {@link listInvoiceChart}.
+	 */
+	chart_entity_id?: string;
 }
 
 /**
@@ -29,8 +34,30 @@ export function listGlAccounts(params: GlAccountListParams = {}): Promise<GlAcco
 	if (params.search) qs.set('search', params.search);
 	if (params.account_type) qs.set('account_type', params.account_type);
 	if (params.active_only !== undefined) qs.set('active_only', String(params.active_only));
+	if (params.chart_entity_id) qs.set('chart_entity_id', params.chart_entity_id);
 	const suffix = qs.toString() ? `?${qs}` : '';
 	return api.get<GlAccount[]>(`/api/gl-accounts${suffix}`);
+}
+
+/**
+ * The chart an invoice filed under `entityId` may be coded against — the
+ * codes the backend will accept on every invoice GL write
+ * (`backend/app/services/gl_chart.py`), and so the only ones the two invoice
+ * pickers offer.
+ *
+ * An invoice's GL code resolves in the chart of the entity the INVOICE belongs
+ * to, which is not the sidebar's view: the consolidated view returns every
+ * subsidiary's chart at once (so subsidiary B's `6000` used to be offered for
+ * a subsidiary-A invoice), and a deep link can open another entity's invoice
+ * while one is selected. So the chart is asked for by entity, not by header.
+ *
+ * `null` is an invoice no entity was ever stamped on, which resolves against
+ * the shared chart alone — the list is fetched in whatever view is current
+ * and narrowed to its shared rows, since `chart_entity_id` names an entity.
+ */
+export async function listInvoiceChart(entityId: string | null): Promise<GlAccount[]> {
+	if (entityId) return listGlAccounts({ chart_entity_id: entityId });
+	return (await listGlAccounts()).filter((a) => !a.entity_id);
 }
 
 export interface GlAccountCreate {
