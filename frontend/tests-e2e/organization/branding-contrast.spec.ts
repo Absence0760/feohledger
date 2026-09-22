@@ -19,11 +19,17 @@ import { expect, test } from '../fixtures/helpers';
  * no network wait, no timeout. Selectors are the field's placeholder (the
  * `DEFAULT_ACCENT_STRONG` constant the page renders) and the warning's
  * `data-testid`.
+ *
+ * `?section=branding` because the route shows one panel at a time now. The
+ * slug is part of the page's URL contract (`SECTION_GROUPS` in
+ * `routes/organization/+page.svelte`); navigating straight to the owning panel
+ * keeps this spec about the advisory rather than about the rail, which
+ * `section-nav.spec.ts` owns.
  */
 
 test.describe('/organization branding contrast advisory', () => {
 	test.beforeEach(async ({ page }) => {
-		await page.goto('/organization');
+		await page.goto('/organization?section=branding');
 	});
 
 	test('warns for a colour white text cannot sit on, and clears when it can', async ({

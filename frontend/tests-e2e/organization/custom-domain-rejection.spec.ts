@@ -22,6 +22,9 @@ import { API_BASE, authedTenantHeaders, expect, test } from '../fixtures/helpers
  * another worker's tenant, so its status/detail pair is replayed through
  * `page.route` — the assertion is that the panel renders whatever the backend
  * said, which is the contract this spec exists to hold.
+ *
+ * `?section=custom-domains` because the route shows one panel at a time now
+ * (the slug is part of its URL contract).
  */
 
 async function getDomains(page: import('@playwright/test').Page): Promise<string[]> {
@@ -49,7 +52,7 @@ function panel(page: import('@playwright/test').Page) {
 
 test.describe('/organization custom-domain refusals', () => {
 	test.beforeEach(async ({ page }) => {
-		await page.goto('/organization');
+		await page.goto('/organization?section=custom-domains');
 	});
 
 	test('the panel points at the provisioning runbook', async ({ page }) => {

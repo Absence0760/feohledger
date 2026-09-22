@@ -36,6 +36,40 @@ import { expectNoA11yViolations } from './axe-helper';
  * would let axe scan a loading frame — passing on markup no user ever sees.
  * Omit it for the routes that render their shell synchronously.
  */
+/**
+ * `/organization` shows ONE panel at a time now, selected by `?section=<slug>`
+ * from a left rail — so a single `/organization` entry scans the Getting-started
+ * card and nothing else, and the ~16 panels of forms, armed destructive actions
+ * and one-time secret reveal that motivated adding this route in the first place
+ * would go unscanned. One entry per panel restores that, and each panel's own
+ * `<h2>` is a STRONGER `ready` signal than the route's `<h1>` was: the `<h1>`
+ * renders immediately, while every panel sits inside the page's `{#if org}`
+ * gate, and Fraud Detection additionally waits on the admin-only
+ * `…/fraud-rules/defaults`.
+ *
+ * Slug → heading mirrors `SECTION_GROUPS` in `routes/organization/+page.svelte`;
+ * `tests-e2e/organization/settings.spec.ts` is what fails if the page grows a
+ * panel this table has not heard about.
+ */
+const ORG_PANELS: [slug: string, heading: string][] = [
+	['getting-started', 'Getting started'],
+	['company', 'Company Profile'],
+	['defaults', 'Invoice Defaults'],
+	['branding', 'Branding'],
+	['custom-domains', 'Custom Domains'],
+	['erp', 'ERP Integration'],
+	['extraction', 'AI Extraction'],
+	['email-intake', 'Email Intake'],
+	['chat', 'Chat Notifications'],
+	['data-sync', 'Data Sync'],
+	['payments', 'Payments (ACH / Wire / RTP)'],
+	['cards', 'Virtual Cards'],
+	['security', 'Security'],
+	['fraud', 'Fraud Detection'],
+	['residency', 'Data Residency'],
+	['plan', 'Plan']
+];
+
 const AUTHED_ROUTES: { path: string; name: string; ready?: string }[] = [
 	{ path: '/', name: 'dashboard' },
 	{ path: '/invoices', name: 'invoices list' },
@@ -80,8 +114,14 @@ const AUTHED_ROUTES: { path: string; name: string; ready?: string }[] = [
 	// which proves the page was clean the day it landed but does not keep it
 	// clean: this list is what re-scans every route on every run. `/organization`
 	// in particular had never been scanned at all despite carrying ~10 panels of
-	// forms, armed destructive actions and a one-time secret reveal.
-	{ path: '/organization', name: 'organization settings', ready: 'Organization' },
+	// forms, armed destructive actions and a one-time secret reveal — which is
+	// why it is now one entry per panel (see `ORG_PANELS` above) rather than one
+	// entry that would only ever see the default card.
+	...ORG_PANELS.map(([slug, panelHeading]) => ({
+		path: `/organization?section=${slug}`,
+		name: `organization settings → ${panelHeading}`,
+		ready: panelHeading
+	})),
 	{ path: '/adaptive', name: 'adaptive workflows', ready: 'Adaptive Workflows' },
 	{ path: '/goods-receipts', name: 'goods receipts', ready: 'Goods Receipts' },
 	{ path: '/admin/entities', name: 'admin entities', ready: 'Entities' },

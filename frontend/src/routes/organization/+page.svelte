@@ -1,9 +1,11 @@
 <script lang="ts">
+	import { page } from '$app/state';
 	import { api } from '$lib/api';
 	import { toast } from '$lib/components/ui/Toast.svelte';
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 	import Badge from '$lib/components/ui/Badge.svelte';
 	import SecretReveal from '$lib/components/ui/SecretReveal.svelte';
+	import SettingsRail from '$lib/components/ui/SettingsRail.svelte';
 	import { m } from '$lib/i18n/store.svelte';
 	import { auth } from '$lib/stores/auth.svelte';
 	import { orgCurrency } from '$lib/stores/orgSettings.svelte';
@@ -253,22 +255,155 @@
 	const userLoaded = $derived(auth.user !== null);
 	const readOnly = $derived(userLoaded && !auth.isAdmin);
 
-	// The page's ROLE-OPEN reads, and only those. `GET /api/organization`,
-	// `/api/organization/branding/custom-domains` and
-	// `/api/organization/data-residency` are all `get_current_user`, and
-	// `/api/public-config` is public — so every one of these answers a clerk
-	// with real tenant data. The three admin-only reads (chat notifications,
-	// email intake, the fraud-rule defaults) each have their own auth-gated
-	// effect; a doomed request is not a way to find out what your role is.
+	// ── Section navigation ────────────────────────────────────────────────
+	// Fifteen panels' worth of unrelated concerns — company identity, DNS, chat
+	// webhooks, an AI model choice, ACH rails, fraud thresholds, the billing
+	// plan — share this route because they share `PATCH /api/organization`.
+	// Stacked on one scroll that made the page a book with no contents page: ten
+	// of the fifteen were reachable only by scrolling and reading. So one panel
+	// shows at a time, picked from `ui/SettingsRail.svelte` and addressed by
+	// `?section=`, the same URL-backed shape `/admin?tab=` already uses (and
+	// which `lib/nav.ts` already deep-links into).
+	//
+	// Field state stays here, at page level, deliberately: only the MARKUP is
+	// conditional, so an unsaved edit in one panel survives a trip to another
+	// and is still there — with its Save button — on the way back.
+	//
+	// A slug is part of the URL contract: it lands in bookmarks, in the
+	// Getting-started links below, and in the docs. Renaming one breaks those.
+	type SectionGroup = {
+		/** Omitted for the lead-in panel, which stands outside the grouping. */
+		labelKey?: MessageKey;
+		items: { slug: string; labelKey: MessageKey }[];
+	};
+
+	const SECTION_GROUPS: SectionGroup[] = [
+		{ items: [{ slug: 'getting-started', labelKey: 'org.gettingStarted.title' }] },
+		{
+			labelKey: 'org.rail.group.company',
+			items: [
+				{ slug: 'company', labelKey: 'org.section.company' },
+				{ slug: 'defaults', labelKey: 'org.section.defaults' },
+				{ slug: 'branding', labelKey: 'org.section.branding' },
+				{ slug: 'custom-domains', labelKey: 'org.section.customDomains' }
+			]
+		},
+		{
+			labelKey: 'org.rail.group.integrations',
+			items: [
+				{ slug: 'erp', labelKey: 'org.section.erp' },
+				{ slug: 'extraction', labelKey: 'org.section.extraction' },
+				{ slug: 'email-intake', labelKey: 'org.section.emailIntake' },
+				{ slug: 'chat', labelKey: 'org.section.chat' },
+				{ slug: 'data-sync', labelKey: 'org.section.dataSync' }
+			]
+		},
+		{
+			labelKey: 'org.rail.group.money',
+			items: [
+				// The rail's own short label: the panel heading is "Payments (ACH /
+				// Wire / RTP)", which does not sit in a 200px column.
+				{ slug: 'payments', labelKey: 'org.rail.payments' },
+				{ slug: 'cards', labelKey: 'org.section.cards' }
+			]
+		},
+		{
+			labelKey: 'org.rail.group.compliance',
+			items: [
+				{ slug: 'security', labelKey: 'org.section.security' },
+				{ slug: 'fraud', labelKey: 'org.section.fraud' },
+				{ slug: 'residency', labelKey: 'org.section.dataResidency' }
+			]
+		},
+		{
+			labelKey: 'org.rail.group.account',
+			items: [{ slug: 'plan', labelKey: 'org.section.plan' }]
+		}
+	];
+
+	const SECTION_SLUGS = new Set(SECTION_GROUPS.flatMap((g) => g.items.map((i) => i.slug)));
+	const DEFAULT_SECTION = 'getting-started';
+
+	// The five anchors the page was navigated by before it had panels. They live
+	// in the Getting-started card, and outside this repo in whatever bookmarks
+	// and links people already hold, so they have to keep working.
+	const LEGACY_HASH_SECTIONS: Record<string, string> = {
+		'org-company': 'company',
+		'org-defaults': 'defaults',
+		'org-branding': 'branding',
+		'org-email-intake': 'email-intake',
+		'org-payments': 'payments'
+	};
+
+	// An unknown slug falls back rather than rendering an empty page — the same
+	// treatment `/admin` gives a stale `?tab=`.
+	//
+	// A legacy anchor is resolved HERE, by derivation, rather than by rewriting
+	// the URL to `?section=` in an effect. Rewriting was the first version and is
+	// the wrong shape for this: `replaceState` throws if it runs before the
+	// SvelteKit router has initialised, and an effect on first hydration is
+	// exactly that window — so the tidier URL came at the cost of a failure mode
+	// on the one path whose whole job is to still work for a link someone saved
+	// a year ago. Deriving it cannot fail, needs no import, and the stale `#hash`
+	// clears itself on the first rail click (`SettingsRail`'s hrefs are
+	// query-only). Precedence is query-before-hash so an explicit `?section=`
+	// always wins over an anchor that happens to be along for the ride.
+	const section = $derived.by(() => {
+		const slug = page.url.searchParams.get('section');
+		if (slug && SECTION_SLUGS.has(slug)) return slug;
+		return LEGACY_HASH_SECTIONS[page.url.hash.replace(/^#/, '')] ?? DEFAULT_SECTION;
+	});
+
+	const railGroups = $derived(
+		SECTION_GROUPS.map((g) => ({
+			label: g.labelKey ? m(g.labelKey) : undefined,
+			items: g.items.map((i) => ({ slug: i.slug, label: m(i.labelKey) }))
+		}))
+	);
+
+	// The page's EAGER read. `GET /api/organization` alone fills the company,
+	// defaults, ERP, cards, security, fraud-override, payments and extraction
+	// forms plus the plan card, and the whole template is gated on it, so it has
+	// no panel to be lazy about.
+	//
+	// Every other read belongs to exactly one panel and now waits for it — seven
+	// requests on arrival became two, and an admin who came to change the ACH
+	// cut-off no longer pays for a DNS lookup, a residency read and a chat-webhook
+	// probe on the way. Each is `once()`-guarded so returning to a panel does not
+	// refetch, and the three admin-only ones keep their own role gate: a doomed
+	// request is not a way to find out what your role is.
 	$effect(() => {
 		loadOrg();
-		loadPlatformTenantUrl();
-		loadCustomDomains();
-		loadResidency();
 		// `payments.cfo_approval_above` is a bare number denominated in the org's
 		// reporting currency (`payment_controls.cfo_approval_decision`), so the
 		// field names that currency instead of hardcoding a dollar sign.
 		orgCurrency.ensureLoaded();
+	});
+
+	/**
+	 * Panel-scoped loads, fired the first time their panel is shown.
+	 *
+	 * `requestedPanels` is keyed by panel rather than by a per-loader boolean so the
+	 * set is visible in one place; a loader that also needs `auth` keeps its own
+	 * effect below, because folding those in would make every panel's read
+	 * re-run the moment `/me` resolves.
+	 */
+	const requestedPanels = new Set<string>();
+
+	function once(slug: string, load: () => void) {
+		if (section !== slug || requestedPanels.has(slug)) return;
+		requestedPanels.add(slug);
+		load();
+	}
+
+	$effect(() => {
+		// `/api/public-config` (public) and
+		// `/api/organization/branding/custom-domains` + `/data-residency` (both
+		// `get_current_user`) answer a clerk with real tenant data, so these three
+		// need no role gate — only their panel.
+		once('branding', loadPlatformTenantUrl);
+		once('custom-domains', loadCustomDomains);
+		once('residency', loadResidency);
 	});
 
 	async function loadOrg() {
@@ -426,7 +561,10 @@
 		// gated on the role like the chat and email-intake reads rather than fired
 		// and swallowed. For a non-admin the panel renders the admin-only hint, so
 		// the request was not merely refused — it was pointless.
-		if (!userLoaded || !auth.isAdmin || fraudDefaults) return;
+		//
+		// `fraudDefaults` is its own already-loaded guard, so this one needs no
+		// `once()` — the panel can be revisited without refetching.
+		if (section !== 'fraud' || !userLoaded || !auth.isAdmin || fraudDefaults) return;
 		loadFraudDefaults();
 	});
 
@@ -1064,12 +1202,16 @@
 		// `role="alert"` reading "Your role does not permit this action.". That is
 		// the anti-pattern the comment above says this design avoids, reached by
 		// the one read that was not gated on the role it requires.
-		if (!userLoaded) return;
+		//
+		// The role branch still has to run for a non-admin who opens the panel:
+		// `loadingChat` starts true, and without clearing it the panel would sit
+		// on its loading hint instead of reaching the admin-only one below it.
+		if (section !== 'chat' || !userLoaded) return;
 		if (!auth.isAdmin) {
 			loadingChat = false;
 			return;
 		}
-		loadChat();
+		once('chat', loadChat);
 	});
 
 	async function loadChat() {
@@ -1180,12 +1322,14 @@
 		// Deliberately its own effect rather than a line in the page's main
 		// loader: this one depends on the auth store, and folding it in would
 		// make every other panel re-fetch the moment `/me` resolves.
-		if (!userLoaded) return;
+		// The non-admin branch clears `loadingIntake` for the same reason the
+		// chat one does — otherwise the panel never leaves its loading hint.
+		if (section !== 'email-intake' || !userLoaded) return;
 		if (!auth.isAdmin) {
 			loadingIntake = false;
 			return;
 		}
-		loadEmailIntake();
+		once('email-intake', loadEmailIntake);
 	});
 
 	async function loadEmailIntake() {
@@ -1315,1276 +1459,1316 @@
 				{m('org.readOnly.banner')}
 			</p>
 		{/if}
-		<!-- A single disabled <fieldset> is the whole read-only mode: the
-		     attribute natively disables every descendant control, so a panel
-		     added later is covered without anyone remembering to gate it.
-		     Doing this per-input across ~10 panels is exactly how a gap gets
-		     left behind. The server still enforces admin on every write. -->
-		<fieldset class="sections" disabled={readOnly}>
-			<section class="getting-started card">
-				<h2>{m('org.gettingStarted.title')}</h2>
-				<p class="card-hint">{m('org.gettingStarted.intro')}</p>
-				<nav class="gs-links" aria-label={m('org.gettingStarted.title')}>
-					<a href="#org-company">{m('org.gettingStarted.company')}</a>
-					<a href="#org-defaults">{m('org.gettingStarted.defaults')}</a>
-					<a href="/admin">{m('org.gettingStarted.users')}</a>
-					<a href="#org-payments">{m('org.gettingStarted.approvals')}</a>
-					<a href="#org-branding">{m('org.gettingStarted.branding')}</a>
-				</nav>
-			</section>
+		<div class="settings-layout">
+			<SettingsRail groups={railGroups} active={section} label={m('org.rail.label')} />
 
-			<section class="card" id="org-company">
-				<h2>{m('org.section.company')}</h2>
-				<div class="form-grid">
-					<label>
-						<span>{m('org.company.name')}</span>
-						<input type="text" bind:value={name} />
-					</label>
-					<label>
-						<span>{m('org.company.taxId')}</span>
-						<input type="text" bind:value={taxId} placeholder={m('org.company.taxIdPlaceholder')} />
-					</label>
-					<label>
-						<span>{m('org.company.vatNumber')}</span>
-						<input type="text" bind:value={vatNumber} />
-					</label>
-					<label>
-						<span>{m('org.company.companiesHouseNumber')}</span>
-						<input type="text" bind:value={companiesHouseNumber} />
-					</label>
-					<label class="full-width">
-						<span>{m('org.company.address')}</span>
-						<textarea bind:value={address} rows="2" placeholder={m('org.company.addressPlaceholder')}></textarea>
-					</label>
-					<label>
-						<span>{m('org.company.phone')}</span>
-						<input type="tel" bind:value={phone} />
-					</label>
-					<label>
-						<span>{m('org.company.website')}</span>
-						<input type="url" bind:value={website} placeholder="https://" />
-					</label>
-				</div>
-				<div class="section-footer">
-					<button class="btn-save-section" disabled={savingProfile} onclick={saveProfile}>
-						{savingProfile ? m('org.common.saving') : m('org.company.save')}
-					</button>
-				</div>
-			</section>
+			<!-- A single disabled <fieldset> is the whole read-only mode: the
+			     attribute natively disables every descendant control, so a panel
+			     added later is covered without anyone remembering to gate it.
+			     Doing this per-input across ~10 panels is exactly how a gap gets
+			     left behind. The server still enforces admin on every write. -->
+			<fieldset class="sections" disabled={readOnly}>
+				{#if section === 'getting-started'}
+					<section class="getting-started card">
+						<h2>{m('org.gettingStarted.title')}</h2>
+						<p class="card-hint">{m('org.gettingStarted.intro')}</p>
+						<!-- These were `#org-*` anchors into one long scroll. They now name
+						     the panel that owns each step directly; the old anchors still
+						     resolve, via `LEGACY_HASH_SECTIONS`, for the copies of them
+						     that exist outside this repo. -->
+						<nav class="gs-links" aria-label={m('org.gettingStarted.title')}>
+							<a href="?section=company">{m('org.gettingStarted.company')}</a>
+							<a href="?section=defaults">{m('org.gettingStarted.defaults')}</a>
+							<a href="/admin">{m('org.gettingStarted.users')}</a>
+							<a href="?section=payments">{m('org.gettingStarted.approvals')}</a>
+							<a href="?section=branding">{m('org.gettingStarted.branding')}</a>
+						</nav>
+					</section>
+				{/if}
 
-			<section class="card" id="org-defaults">
-				<h2>{m('org.section.defaults')}</h2>
-				<p class="card-hint">{m('org.defaults.hint')}</p>
-				<div class="form-grid">
-					<label>
-						<span>{m('org.defaults.currency')}</span>
-						<select bind:value={currency}>
-							<option value="USD">USD — US Dollar</option>
-							<option value="EUR">EUR — Euro</option>
-							<option value="GBP">GBP — British Pound</option>
-							<option value="CAD">CAD — Canadian Dollar</option>
-							<option value="AUD">AUD — Australian Dollar</option>
-							<option value="JPY">JPY — Japanese Yen</option>
-						</select>
-					</label>
-					<label>
-						<span>{m('org.defaults.paymentTerms')}</span>
-						<select bind:value={paymentTerms}>
-							<option value="Due on Receipt">Due on Receipt</option>
-							<option value="Net 10">Net 10</option>
-							<option value="Net 15">Net 15</option>
-							<option value="Net 30">Net 30</option>
-							<option value="Net 45">Net 45</option>
-							<option value="Net 60">Net 60</option>
-							<option value="Net 90">Net 90</option>
-							<option value="2/10 Net 30">2/10 Net 30</option>
-						</select>
-					</label>
-					<label>
-						<span>{m('org.defaults.numberPrefix')}</span>
-						<input type="text" bind:value={numberPrefix} placeholder="INV-" />
-					</label>
-					<label>
-						<span>{m('org.defaults.defaultGl')}</span>
-						<input type="text" bind:value={defaultGl} placeholder={m('org.defaults.defaultGlPlaceholder')} />
-					</label>
-					<label>
-						<span>{m('org.defaults.defaultCostCenter')}</span>
-						<input type="text" bind:value={defaultCostCenter} placeholder={m('org.defaults.defaultCostCenterPlaceholder')} />
-					</label>
-				</div>
-				<div class="section-footer">
-					<button class="btn-save-section" disabled={savingDefaults} onclick={saveDefaults}>
-						{savingDefaults ? m('org.common.saving') : m('org.defaults.save')}
-					</button>
-				</div>
-			</section>
+				{#if section === 'company'}
+					<section class="card" id="org-company">
+						<h2>{m('org.section.company')}</h2>
+						<div class="form-grid">
+							<label>
+								<span>{m('org.company.name')}</span>
+								<input type="text" bind:value={name} />
+							</label>
+							<label>
+								<span>{m('org.company.taxId')}</span>
+								<input type="text" bind:value={taxId} placeholder={m('org.company.taxIdPlaceholder')} />
+							</label>
+							<label>
+								<span>{m('org.company.vatNumber')}</span>
+								<input type="text" bind:value={vatNumber} />
+							</label>
+							<label>
+								<span>{m('org.company.companiesHouseNumber')}</span>
+								<input type="text" bind:value={companiesHouseNumber} />
+							</label>
+							<label class="full-width">
+								<span>{m('org.company.address')}</span>
+								<textarea bind:value={address} rows="2" placeholder={m('org.company.addressPlaceholder')}></textarea>
+							</label>
+							<label>
+								<span>{m('org.company.phone')}</span>
+								<input type="tel" bind:value={phone} />
+							</label>
+							<label>
+								<span>{m('org.company.website')}</span>
+								<input type="url" bind:value={website} placeholder="https://" />
+							</label>
+						</div>
+						<div class="section-footer">
+							<button class="btn-save-section" disabled={savingProfile} onclick={saveProfile}>
+								{savingProfile ? m('org.common.saving') : m('org.company.save')}
+							</button>
+						</div>
+					</section>
+				{/if}
 
-			<section class="card" id="org-branding">
-				<h2>{m('org.section.branding')}</h2>
-				<p class="card-hint">
-					{m('org.branding.hint')}
-				</p>
-				<div class="form-grid">
-					<label>
-						<span>{m('org.branding.productName')}</span>
-						<input
-							type="text"
-							bind:value={brandProductName}
-							placeholder={m('org.branding.productNamePlaceholder')}
-							maxlength="120"
-						/>
-					</label>
-					<label>
-						<span>{m('org.branding.logoUrl')}</span>
-						<input
-							type="url"
-							bind:value={brandLogoUrl}
-							placeholder={m('org.branding.logoUrlPlaceholder')}
-						/>
-					</label>
-					<label>
-						<span>{m('org.branding.accentColor')}</span>
-						<span class="color-field">
-							<input
-								type="color"
-								aria-label={m('org.branding.accentColorPicker')}
-								value={brandAccentColor.trim() || DEFAULT_ACCENT}
-								oninput={(e) => (brandAccentColor = e.currentTarget.value)}
-							/>
-							<input
-								type="text"
-								bind:value={brandAccentColor}
-								placeholder={DEFAULT_ACCENT}
-							/>
-						</span>
-					</label>
-					<label>
-						<span>{m('org.branding.accentStrong')}</span>
-						<span class="color-field">
-							<input
-								type="color"
-								aria-label={m('org.branding.accentStrongPicker')}
-								value={brandAccentStrongColor.trim() || DEFAULT_ACCENT_STRONG}
-								oninput={(e) => (brandAccentStrongColor = e.currentTarget.value)}
-							/>
-							<input
-								type="text"
-								bind:value={brandAccentStrongColor}
-								placeholder={DEFAULT_ACCENT_STRONG}
-							/>
-						</span>
-						<FieldWarning
-							show={accentStrongFails}
-							testId="accent-strong-contrast-warning"
-							message={m('common.contrastWarning', {
-								ratio: accentStrongRatio === null ? '' : formatRatio(accentStrongRatio)
+				{#if section === 'defaults'}
+					<section class="card" id="org-defaults">
+						<h2>{m('org.section.defaults')}</h2>
+						<p class="card-hint">{m('org.defaults.hint')}</p>
+						<div class="form-grid">
+							<label>
+								<span>{m('org.defaults.currency')}</span>
+								<select bind:value={currency}>
+									<option value="USD">USD — US Dollar</option>
+									<option value="EUR">EUR — Euro</option>
+									<option value="GBP">GBP — British Pound</option>
+									<option value="CAD">CAD — Canadian Dollar</option>
+									<option value="AUD">AUD — Australian Dollar</option>
+									<option value="JPY">JPY — Japanese Yen</option>
+								</select>
+							</label>
+							<label>
+								<span>{m('org.defaults.paymentTerms')}</span>
+								<select bind:value={paymentTerms}>
+									<option value="Due on Receipt">Due on Receipt</option>
+									<option value="Net 10">Net 10</option>
+									<option value="Net 15">Net 15</option>
+									<option value="Net 30">Net 30</option>
+									<option value="Net 45">Net 45</option>
+									<option value="Net 60">Net 60</option>
+									<option value="Net 90">Net 90</option>
+									<option value="2/10 Net 30">2/10 Net 30</option>
+								</select>
+							</label>
+							<label>
+								<span>{m('org.defaults.numberPrefix')}</span>
+								<input type="text" bind:value={numberPrefix} placeholder="INV-" />
+							</label>
+							<label>
+								<span>{m('org.defaults.defaultGl')}</span>
+								<input type="text" bind:value={defaultGl} placeholder={m('org.defaults.defaultGlPlaceholder')} />
+							</label>
+							<label>
+								<span>{m('org.defaults.defaultCostCenter')}</span>
+								<input type="text" bind:value={defaultCostCenter} placeholder={m('org.defaults.defaultCostCenterPlaceholder')} />
+							</label>
+						</div>
+						<div class="section-footer">
+							<button class="btn-save-section" disabled={savingDefaults} onclick={saveDefaults}>
+								{savingDefaults ? m('org.common.saving') : m('org.defaults.save')}
+							</button>
+						</div>
+					</section>
+				{/if}
+
+				{#if section === 'branding'}
+					<section class="card" id="org-branding">
+						<h2>{m('org.section.branding')}</h2>
+						<p class="card-hint">
+							{m('org.branding.hint')}
+						</p>
+						<div class="form-grid">
+							<label>
+								<span>{m('org.branding.productName')}</span>
+								<input
+									type="text"
+									bind:value={brandProductName}
+									placeholder={m('org.branding.productNamePlaceholder')}
+									maxlength="120"
+								/>
+							</label>
+							<label>
+								<span>{m('org.branding.logoUrl')}</span>
+								<input
+									type="url"
+									bind:value={brandLogoUrl}
+									placeholder={m('org.branding.logoUrlPlaceholder')}
+								/>
+							</label>
+							<label>
+								<span>{m('org.branding.accentColor')}</span>
+								<span class="color-field">
+									<input
+										type="color"
+										aria-label={m('org.branding.accentColorPicker')}
+										value={brandAccentColor.trim() || DEFAULT_ACCENT}
+										oninput={(e) => (brandAccentColor = e.currentTarget.value)}
+									/>
+									<input
+										type="text"
+										bind:value={brandAccentColor}
+										placeholder={DEFAULT_ACCENT}
+									/>
+								</span>
+							</label>
+							<label>
+								<span>{m('org.branding.accentStrong')}</span>
+								<span class="color-field">
+									<input
+										type="color"
+										aria-label={m('org.branding.accentStrongPicker')}
+										value={brandAccentStrongColor.trim() || DEFAULT_ACCENT_STRONG}
+										oninput={(e) => (brandAccentStrongColor = e.currentTarget.value)}
+									/>
+									<input
+										type="text"
+										bind:value={brandAccentStrongColor}
+										placeholder={DEFAULT_ACCENT_STRONG}
+									/>
+								</span>
+								<FieldWarning
+									show={accentStrongFails}
+									testId="accent-strong-contrast-warning"
+									message={m('common.contrastWarning', {
+										ratio: accentStrongRatio === null ? '' : formatRatio(accentStrongRatio)
+									})}
+								/>
+							</label>
+							<label>
+								<span>{m('org.branding.supportUrl')}</span>
+								<input
+									type="url"
+									bind:value={brandSupportUrl}
+									placeholder={m('org.branding.supportUrlPlaceholder')}
+								/>
+							</label>
+							<label>
+								<span>{m('org.branding.legalUrl')}</span>
+								<input
+									type="url"
+									bind:value={brandLegalUrl}
+									placeholder={m('org.branding.legalUrlPlaceholder')}
+								/>
+							</label>
+							<div class="full-width">
+								<label>
+									<span>{m('org.branding.tenantUrl')}</span>
+									<input
+										type="text"
+										bind:value={brandTenantUrlTemplate}
+										placeholder={defaultTenantUrl || m('org.branding.tenantUrlPlaceholder')}
+										autocomplete="off"
+										spellcheck="false"
+										aria-describedby="brand-tenant-url-hint"
+									/>
+								</label>
+								<p class="field-hint" id="brand-tenant-url-hint">
+									{m('org.branding.tenantUrlHint')}
+									<span class="tenant-url-effective" data-testid="tenant-url-effective">
+										{#if brandTenantUrlTemplate.trim()}
+											{m('org.branding.tenantUrlEffective', { url: effectiveTenantUrl })}
+										{:else if defaultTenantUrl}
+											{m('org.branding.tenantUrlDefault', { url: defaultTenantUrl })}
+										{:else}
+											{m('org.branding.tenantUrlDefaultUnknown')}
+										{/if}
+									</span>
+								</p>
+							</div>
+							<div class="full-width">
+								<label>
+									<span>{m('org.branding.ssoCallback')}</span>
+									<input
+										type="text"
+										bind:value={brandSsoCallbackBaseUrl}
+										placeholder={m('org.branding.ssoCallbackPlaceholder')}
+										autocomplete="off"
+										spellcheck="false"
+										aria-describedby="brand-sso-callback-hint"
+									/>
+								</label>
+								<p class="field-hint sso-callback-hint" id="brand-sso-callback-hint">
+									<strong>{m('org.branding.ssoCallbackWarning')}</strong>
+									{m('org.branding.ssoCallbackHint')}
+								</p>
+							</div>
+						</div>
+						<p class="card-hint">
+							{m('org.branding.strongHint')}
+						</p>
+						<div class="section-footer">
+							<button class="btn-save-section" disabled={savingBranding} onclick={saveBranding}>
+								{savingBranding ? m('org.common.saving') : m('org.branding.save')}
+							</button>
+						</div>
+					</section>
+				{/if}
+
+				{#if section === 'custom-domains'}
+					<section class="card">
+						<h2>{m('org.section.customDomains')}</h2>
+						<p class="card-hint">
+							{m('org.customDomains.hint', { example: 'ap.acmecorp.com', slug: org?.slug ?? 'tenant' })}
+						</p>
+						<p class="card-hint">
+							{m('org.customDomains.setupHint', {
+								runbook: 'docs/founder-runbooks/custom-domain-provisioning.md'
 							})}
-						/>
-					</label>
-					<label>
-						<span>{m('org.branding.supportUrl')}</span>
-						<input
-							type="url"
-							bind:value={brandSupportUrl}
-							placeholder={m('org.branding.supportUrlPlaceholder')}
-						/>
-					</label>
-					<label>
-						<span>{m('org.branding.legalUrl')}</span>
-						<input
-							type="url"
-							bind:value={brandLegalUrl}
-							placeholder={m('org.branding.legalUrlPlaceholder')}
-						/>
-					</label>
-					<div class="full-width">
-						<label>
-							<span>{m('org.branding.tenantUrl')}</span>
-							<input
-								type="text"
-								bind:value={brandTenantUrlTemplate}
-								placeholder={defaultTenantUrl || m('org.branding.tenantUrlPlaceholder')}
-								autocomplete="off"
-								spellcheck="false"
-								aria-describedby="brand-tenant-url-hint"
-							/>
-						</label>
-						<p class="field-hint" id="brand-tenant-url-hint">
-							{m('org.branding.tenantUrlHint')}
-							<span class="tenant-url-effective" data-testid="tenant-url-effective">
-								{#if brandTenantUrlTemplate.trim()}
-									{m('org.branding.tenantUrlEffective', { url: effectiveTenantUrl })}
-								{:else if defaultTenantUrl}
-									{m('org.branding.tenantUrlDefault', { url: defaultTenantUrl })}
-								{:else}
-									{m('org.branding.tenantUrlDefaultUnknown')}
-								{/if}
-							</span>
 						</p>
-					</div>
-					<div class="full-width">
-						<label>
-							<span>{m('org.branding.ssoCallback')}</span>
-							<input
-								type="text"
-								bind:value={brandSsoCallbackBaseUrl}
-								placeholder={m('org.branding.ssoCallbackPlaceholder')}
-								autocomplete="off"
-								spellcheck="false"
-								aria-describedby="brand-sso-callback-hint"
-							/>
-						</label>
-						<p class="field-hint sso-callback-hint" id="brand-sso-callback-hint">
-							<strong>{m('org.branding.ssoCallbackWarning')}</strong>
-							{m('org.branding.ssoCallbackHint')}
-						</p>
-					</div>
-				</div>
-				<p class="card-hint">
-					{m('org.branding.strongHint')}
-				</p>
-				<div class="section-footer">
-					<button class="btn-save-section" disabled={savingBranding} onclick={saveBranding}>
-						{savingBranding ? m('org.common.saving') : m('org.branding.save')}
-					</button>
-				</div>
-			</section>
 
-			<section class="card">
-				<h2>{m('org.section.customDomains')}</h2>
-				<p class="card-hint">
-					{m('org.customDomains.hint', { example: 'ap.acmecorp.com', slug: org?.slug ?? 'tenant' })}
-				</p>
-				<p class="card-hint">
-					{m('org.customDomains.setupHint', {
-						runbook: 'docs/founder-runbooks/custom-domain-provisioning.md'
-					})}
-				</p>
+						{#if loadingDomains}
+							<p class="card-hint">{m('org.customDomains.loading')}</p>
+						{:else if domainsError}
+							<p class="domain-error" role="alert">{domainsError}</p>
+						{:else}
+							{#if domainSaveError}
+								<p class="domain-error" role="alert" data-testid="custom-domain-error">
+									{domainSaveError}
+								</p>
+							{/if}
+							{#if customDomains.length === 0}
+								<p class="card-hint domain-empty">{m('org.customDomains.empty')}</p>
+							{:else}
+								<ul class="domain-list">
+									{#each customDomains as host (host)}
+										<li class="domain-row">
+											<span class="domain-name mono">{host}</span>
+											<span class="domain-remove">
+												<button
+													type="button"
+													class="btn-remove-domain"
+													class:armed={confirmRemoveDomain === host}
+													disabled={savingDomains}
+													aria-label={m('org.customDomains.removeAria', { host })}
+													onclick={() => removeCustomDomain(host)}
+												>
+													{confirmRemoveDomain === host ? m('org.customDomains.confirmRemove') : m('org.customDomains.remove')}
+												</button>
+											</span>
+										</li>
+									{/each}
+								</ul>
+							{/if}
 
-				{#if loadingDomains}
-					<p class="card-hint">{m('org.customDomains.loading')}</p>
-				{:else if domainsError}
-					<p class="domain-error" role="alert">{domainsError}</p>
-				{:else}
-					{#if domainSaveError}
-						<p class="domain-error" role="alert" data-testid="custom-domain-error">
-							{domainSaveError}
-						</p>
-					{/if}
-					{#if customDomains.length === 0}
-						<p class="card-hint domain-empty">{m('org.customDomains.empty')}</p>
-					{:else}
-						<ul class="domain-list">
-							{#each customDomains as host (host)}
-								<li class="domain-row">
-									<span class="domain-name mono">{host}</span>
-									<span class="domain-remove">
+							<form
+								class="domain-add"
+								onsubmit={(e) => {
+									e.preventDefault();
+									addCustomDomain();
+								}}
+							>
+								<input
+									type="text"
+									bind:value={newDomain}
+									placeholder={m('org.customDomains.newPlaceholder')}
+									aria-label={m('org.customDomains.newAria')}
+									autocomplete="off"
+									spellcheck="false"
+								/>
+								<button type="submit" class="btn-save-section" disabled={savingDomains}>
+									{savingDomains ? m('org.customDomains.adding') : m('org.customDomains.add')}
+								</button>
+							</form>
+						{/if}
+					</section>
+				{/if}
+
+				{#if section === 'chat'}
+					<section class="card">
+						<h2>{m('org.section.chat')}</h2>
+						<p class="card-hint">{m('org.chat.hint')}</p>
+
+						{#if !userLoaded || loadingChat}
+							<p class="card-hint">{m('org.chat.loading')}</p>
+						{:else if readOnly}
+							<!-- GET is admin-only, so nothing is fetched for a non-admin and
+							     there is nothing to show. Say that, exactly as the Email
+							     Intake panel does, instead of rendering a 403 the reader
+							     cannot act on. -->
+							<p class="card-hint" data-testid="chat-admin-only">
+								{m('org.chat.adminOnly')}
+							</p>
+						{:else if chatError}
+							<p class="chat-error" role="alert">{chatError}</p>
+						{:else if chat}
+							<div class="form-grid">
+								<label class="switch-row">
+									<input type="checkbox" bind:checked={chatEnabled} />
+									<span>{m('org.chat.enabled')}</span>
+								</label>
+								<label>
+									{m('org.chat.provider')}
+									<select bind:value={chatProvider}>
+										{#each chat.supported_providers as p (p)}
+											<option value={p}>{chatProviderLabel(p)}</option>
+										{/each}
+									</select>
+								</label>
+							</div>
+
+							<fieldset class="chat-events">
+								<legend>{m('org.chat.events')}</legend>
+								<p class="card-hint">{m('org.chat.eventsHint')}</p>
+								{#each chat.supported_events as ev (ev)}
+									<label class="switch-row">
+										<input
+											type="checkbox"
+											checked={chatEvents[ev] ?? true}
+											onchange={(e) =>
+												(chatEvents = {
+													...chatEvents,
+													[ev]: (e.currentTarget as HTMLInputElement).checked
+												})}
+										/>
+										<span>{chatEventLabel(ev)}</span>
+									</label>
+								{/each}
+							</fieldset>
+
+							<div class="section-footer">
+								<button class="btn-save-section" disabled={savingChat} onclick={saveChat}>
+									{savingChat ? m('org.common.saving') : m('org.chat.save')}
+								</button>
+							</div>
+
+							<h3 class="chat-subhead">{m('org.chat.webhook.title')}</h3>
+							<p class="card-hint">{m('org.chat.webhook.hint')}</p>
+
+							{#if chatWebhookMissing}
+								<p class="chat-warning" role="alert">
+									{m('org.chat.webhook.missingWarning', {
+										provider: chatProviderLabel(chat.provider ?? '')
+									})}
+								</p>
+							{/if}
+
+							<div class="chat-webhook-status">
+								{#if chat.webhook_configured}
+									<span class="chat-webhook-set">
+										{chat.webhook_host
+											? m('org.chat.webhook.configured', { host: chat.webhook_host })
+											: m('org.chat.webhook.configuredUnknownHost')}
+									</span>
+									<span class="chat-webhook-remove">
 										<button
 											type="button"
 											class="btn-remove-domain"
-											class:armed={confirmRemoveDomain === host}
-											disabled={savingDomains}
-											aria-label={m('org.customDomains.removeAria', { host })}
-											onclick={() => removeCustomDomain(host)}
+											class:armed={confirmRemoveChatWebhook}
+											disabled={savingChatWebhook}
+											aria-label={m('org.chat.webhook.removeAria')}
+											onclick={removeChatWebhook}
 										>
-											{confirmRemoveDomain === host ? m('org.customDomains.confirmRemove') : m('org.customDomains.remove')}
+											{confirmRemoveChatWebhook
+												? m('org.chat.webhook.confirmRemove')
+												: m('org.chat.webhook.remove')}
 										</button>
 									</span>
-								</li>
-							{/each}
-						</ul>
-					{/if}
+								{:else}
+									<span class="card-hint">{m('org.chat.webhook.notConfigured')}</span>
+								{/if}
+							</div>
 
-					<form
-						class="domain-add"
-						onsubmit={(e) => {
-							e.preventDefault();
-							addCustomDomain();
-						}}
-					>
-						<input
-							type="text"
-							bind:value={newDomain}
-							placeholder={m('org.customDomains.newPlaceholder')}
-							aria-label={m('org.customDomains.newAria')}
-							autocomplete="off"
-							spellcheck="false"
-						/>
-						<button type="submit" class="btn-save-section" disabled={savingDomains}>
-							{savingDomains ? m('org.customDomains.adding') : m('org.customDomains.add')}
-						</button>
-					</form>
-				{/if}
-			</section>
-
-			<section class="card">
-				<h2>{m('org.section.chat')}</h2>
-				<p class="card-hint">{m('org.chat.hint')}</p>
-
-				{#if !userLoaded || loadingChat}
-					<p class="card-hint">{m('org.chat.loading')}</p>
-				{:else if readOnly}
-					<!-- GET is admin-only, so nothing is fetched for a non-admin and
-					     there is nothing to show. Say that, exactly as the Email
-					     Intake panel does, instead of rendering a 403 the reader
-					     cannot act on. -->
-					<p class="card-hint" data-testid="chat-admin-only">
-						{m('org.chat.adminOnly')}
-					</p>
-				{:else if chatError}
-					<p class="chat-error" role="alert">{chatError}</p>
-				{:else if chat}
-					<div class="form-grid">
-						<label class="switch-row">
-							<input type="checkbox" bind:checked={chatEnabled} />
-							<span>{m('org.chat.enabled')}</span>
-						</label>
-						<label>
-							{m('org.chat.provider')}
-							<select bind:value={chatProvider}>
-								{#each chat.supported_providers as p (p)}
-									<option value={p}>{chatProviderLabel(p)}</option>
-								{/each}
-							</select>
-						</label>
-					</div>
-
-					<fieldset class="chat-events">
-						<legend>{m('org.chat.events')}</legend>
-						<p class="card-hint">{m('org.chat.eventsHint')}</p>
-						{#each chat.supported_events as ev (ev)}
-							<label class="switch-row">
+							<form
+								class="domain-add"
+								onsubmit={(e) => {
+									e.preventDefault();
+									saveChatWebhook();
+								}}
+							>
 								<input
-									type="checkbox"
-									checked={chatEvents[ev] ?? true}
-									onchange={(e) =>
-										(chatEvents = {
-											...chatEvents,
-											[ev]: (e.currentTarget as HTMLInputElement).checked
-										})}
+									type="text"
+									bind:value={newChatWebhook}
+									placeholder={m('org.chat.webhook.placeholder')}
+									aria-label={m('org.chat.webhook.inputAria')}
+									autocomplete="off"
+									spellcheck="false"
 								/>
-								<span>{chatEventLabel(ev)}</span>
-							</label>
-						{/each}
-					</fieldset>
+								<button type="submit" class="btn-save-section" disabled={savingChatWebhook}>
+									{savingChatWebhook
+										? m('org.chat.webhook.saving')
+										: chat.webhook_configured
+											? m('org.chat.webhook.replace')
+											: m('org.chat.webhook.set')}
+								</button>
+							</form>
+							<p class="card-hint">{m('org.chat.webhook.rotateHint')}</p>
+						{/if}
+					</section>
+				{/if}
 
-					<div class="section-footer">
-						<button class="btn-save-section" disabled={savingChat} onclick={saveChat}>
-							{savingChat ? m('org.common.saving') : m('org.chat.save')}
-						</button>
-					</div>
+				{#if section === 'email-intake'}
+					<section class="card" id="org-email-intake">
+						<h2>{m('org.section.emailIntake')}</h2>
+						<p class="card-hint">{m('org.emailIntake.hint')}</p>
 
-					<h3 class="chat-subhead">{m('org.chat.webhook.title')}</h3>
-					<p class="card-hint">{m('org.chat.webhook.hint')}</p>
+						{#if !userLoaded || loadingIntake}
+							<p class="card-hint">{m('org.emailIntake.loading')}</p>
+						{:else if readOnly}
+							<!-- GET is admin-only. Say that, rather than firing a request
+							     that 403s and rendering a load failure nobody can act on. -->
+							<p class="card-hint" data-testid="email-intake-admin-only">
+								{m('org.emailIntake.adminOnly')}
+							</p>
+						{:else if intakeError}
+							<p class="domain-error" role="alert" data-testid="email-intake-error">
+								{intakeError}
+							</p>
+						{:else if intakeUnavailable}
+							<!-- Proven: a token exists and the server still renders no
+							     address, which only happens when the platform has no
+							     intake domain. No rotate control here — it would mint
+							     another token that still addresses nothing. -->
+							<p class="intake-unavailable" data-testid="email-intake-unavailable">
+								{m('org.emailIntake.unavailable')}
+							</p>
+						{:else if intakeUnprovisioned}
+							<p class="card-hint" data-testid="email-intake-unprovisioned">
+								{m('org.emailIntake.notProvisioned')}
+							</p>
+							<button
+								type="button"
+								class="btn-save-section"
+								disabled={rotatingIntake}
+								onclick={generateIntakeAddress}
+							>
+								{rotatingIntake
+									? m('org.emailIntake.generating')
+									: m('org.emailIntake.generate')}
+							</button>
+						{:else}
+							<p class="intake-address-label">{m('org.emailIntake.addressLabel')}</p>
+							<div class="intake-address-row">
+								<code class="intake-address mono" data-testid="email-intake-address"
+									>{intakeAddress}</code
+								>
+								<button
+									type="button"
+									class="btn-save-section"
+									aria-label={m('org.emailIntake.copyAria')}
+									onclick={copyIntakeAddress}
+								>
+									{intakeCopied ? m('org.emailIntake.copied') : m('org.emailIntake.copy')}
+								</button>
+							</div>
+							<p class="card-hint">{m('org.emailIntake.secretHint')}</p>
 
-					{#if chatWebhookMissing}
-						<p class="chat-warning" role="alert">
-							{m('org.chat.webhook.missingWarning', {
-								provider: chatProviderLabel(chat.provider ?? '')
-							})}
-						</p>
-					{/if}
-
-					<div class="chat-webhook-status">
-						{#if chat.webhook_configured}
-							<span class="chat-webhook-set">
-								{chat.webhook_host
-									? m('org.chat.webhook.configured', { host: chat.webhook_host })
-									: m('org.chat.webhook.configuredUnknownHost')}
-							</span>
-							<span class="chat-webhook-remove">
+							{#if confirmRotateIntake}
+								<p class="intake-rotate-warning" role="alert" data-testid="email-intake-rotate-warning">
+									{m('org.emailIntake.rotateWarning')}
+								</p>
+							{/if}
+							<span class="intake-rotate">
 								<button
 									type="button"
 									class="btn-remove-domain"
-									class:armed={confirmRemoveChatWebhook}
-									disabled={savingChatWebhook}
-									aria-label={m('org.chat.webhook.removeAria')}
-									onclick={removeChatWebhook}
+									class:armed={confirmRotateIntake}
+									disabled={rotatingIntake}
+									aria-label={m('org.emailIntake.rotateAria')}
+									onclick={rotateIntakeAddress}
 								>
-									{confirmRemoveChatWebhook
-										? m('org.chat.webhook.confirmRemove')
-										: m('org.chat.webhook.remove')}
+									{rotatingIntake
+										? m('org.emailIntake.rotating')
+										: confirmRotateIntake
+											? m('org.emailIntake.rotateConfirm')
+											: m('org.emailIntake.rotate')}
 								</button>
 							</span>
+						{/if}
+					</section>
+				{/if}
+
+				{#if section === 'residency'}
+					<section class="card">
+						<h2>{m('org.section.dataResidency')}</h2>
+						<p class="card-hint">{m('org.residency.hint')}</p>
+
+						{#if loadingResidency}
+							<p class="card-hint">{m('org.residency.loading')}</p>
+						{:else if residencyError}
+							<p class="residency-error" role="alert">{residencyError}</p>
 						{:else}
-							<span class="card-hint">{m('org.chat.webhook.notConfigured')}</span>
-						{/if}
-					</div>
-
-					<form
-						class="domain-add"
-						onsubmit={(e) => {
-							e.preventDefault();
-							saveChatWebhook();
-						}}
-					>
-						<input
-							type="text"
-							bind:value={newChatWebhook}
-							placeholder={m('org.chat.webhook.placeholder')}
-							aria-label={m('org.chat.webhook.inputAria')}
-							autocomplete="off"
-							spellcheck="false"
-						/>
-						<button type="submit" class="btn-save-section" disabled={savingChatWebhook}>
-							{savingChatWebhook
-								? m('org.chat.webhook.saving')
-								: chat.webhook_configured
-									? m('org.chat.webhook.replace')
-									: m('org.chat.webhook.set')}
-						</button>
-					</form>
-					<p class="card-hint">{m('org.chat.webhook.rotateHint')}</p>
-				{/if}
-			</section>
-
-			<section class="card" id="org-email-intake">
-				<h2>{m('org.section.emailIntake')}</h2>
-				<p class="card-hint">{m('org.emailIntake.hint')}</p>
-
-				{#if !userLoaded || loadingIntake}
-					<p class="card-hint">{m('org.emailIntake.loading')}</p>
-				{:else if readOnly}
-					<!-- GET is admin-only. Say that, rather than firing a request
-					     that 403s and rendering a load failure nobody can act on. -->
-					<p class="card-hint" data-testid="email-intake-admin-only">
-						{m('org.emailIntake.adminOnly')}
-					</p>
-				{:else if intakeError}
-					<p class="domain-error" role="alert" data-testid="email-intake-error">
-						{intakeError}
-					</p>
-				{:else if intakeUnavailable}
-					<!-- Proven: a token exists and the server still renders no
-					     address, which only happens when the platform has no
-					     intake domain. No rotate control here — it would mint
-					     another token that still addresses nothing. -->
-					<p class="intake-unavailable" data-testid="email-intake-unavailable">
-						{m('org.emailIntake.unavailable')}
-					</p>
-				{:else if intakeUnprovisioned}
-					<p class="card-hint" data-testid="email-intake-unprovisioned">
-						{m('org.emailIntake.notProvisioned')}
-					</p>
-					<button
-						type="button"
-						class="btn-save-section"
-						disabled={rotatingIntake}
-						onclick={generateIntakeAddress}
-					>
-						{rotatingIntake
-							? m('org.emailIntake.generating')
-							: m('org.emailIntake.generate')}
-					</button>
-				{:else}
-					<p class="intake-address-label">{m('org.emailIntake.addressLabel')}</p>
-					<div class="intake-address-row">
-						<code class="intake-address mono" data-testid="email-intake-address"
-							>{intakeAddress}</code
-						>
-						<button
-							type="button"
-							class="btn-save-section"
-							aria-label={m('org.emailIntake.copyAria')}
-							onclick={copyIntakeAddress}
-						>
-							{intakeCopied ? m('org.emailIntake.copied') : m('org.emailIntake.copy')}
-						</button>
-					</div>
-					<p class="card-hint">{m('org.emailIntake.secretHint')}</p>
-
-					{#if confirmRotateIntake}
-						<p class="intake-rotate-warning" role="alert" data-testid="email-intake-rotate-warning">
-							{m('org.emailIntake.rotateWarning')}
-						</p>
-					{/if}
-					<span class="intake-rotate">
-						<button
-							type="button"
-							class="btn-remove-domain"
-							class:armed={confirmRotateIntake}
-							disabled={rotatingIntake}
-							aria-label={m('org.emailIntake.rotateAria')}
-							onclick={rotateIntakeAddress}
-						>
-							{rotatingIntake
-								? m('org.emailIntake.rotating')
-								: confirmRotateIntake
-									? m('org.emailIntake.rotateConfirm')
-									: m('org.emailIntake.rotate')}
-						</button>
-					</span>
-				{/if}
-			</section>
-
-			<section class="card">
-				<h2>{m('org.section.dataResidency')}</h2>
-				<p class="card-hint">{m('org.residency.hint')}</p>
-
-				{#if loadingResidency}
-					<p class="card-hint">{m('org.residency.loading')}</p>
-				{:else if residencyError}
-					<p class="residency-error" role="alert">{residencyError}</p>
-				{:else}
-					<div class="form-grid">
-						<label>
-							<span>{m('org.residency.regionLabel')}</span>
-							<select bind:value={residencyRegion}>
-								{#each residencyRegions as token (token)}
-									<option value={token}>
-										{token === residencyDefault
-											? m('org.residency.regionDefault', { region: regionLabel(token) })
-											: regionLabel(token)}
-									</option>
-								{/each}
-							</select>
-						</label>
-					</div>
-
-					{#if residencyPlacement.db_cluster}
-						<p class="card-hint residency-placement">
-							{m('org.residency.placement', {
-								cluster: residencyPlacement.db_cluster,
-								bucket: residencyPlacement.s3_bucket ?? ''
-							})}
-						</p>
-					{/if}
-
-					{#if residencyAlignment}
-						<div
-							class="residency-alignment"
-							class:ok={residencyAlignment.status === 'aligned'}
-							class:warn={residencyAlignment.status === 'misaligned'}
-						>
-							<strong>{m('org.residency.alignment.title')}</strong>
-							<p>{alignmentMessage}</p>
-							<p class="residency-advisory">{m('org.residency.alignment.advisory')}</p>
-						</div>
-					{/if}
-
-					<div class="section-footer">
-						<button
-							class="btn-save-section"
-							disabled={savingResidency || residencyRegion === residencySavedRegion}
-							onclick={saveResidency}
-						>
-							{savingResidency ? m('org.common.saving') : m('org.residency.save')}
-						</button>
-					</div>
-				{/if}
-			</section>
-
-			<!-- The six panels from here to Fraud Detection have NO non-admin data
-			     to show. `services/org_settings_view.py::NON_ADMIN_SETTINGS` is an
-			     allow-list and admits none of `extraction`, `cards`, `mfa`,
-			     `fraud_rules`, the ERP credentials or the payments credentials —
-			     deliberately: most of them ARE third-party credentials (an ERP client
-			     secret, a processor credential set, a card API key) and the rest have
-			     no non-admin consumer. So for a non-admin those blocks arrive ABSENT
-			     and every field falls back to its initializer, which is a platform
-			     default wearing the tenant's clothes: Extraction reads "Claude Vision
-			     / Platform" whatever the tenant bought, Payments reads "Mock",
-			     Security reads MFA-not-required, and Fraud Detection disappeared
-			     entirely. A disabled <fieldset> around a wrong value is still a wrong
-			     value.
-
-			     Each therefore replaces its BODY with the same admin-only hint the
-			     Email Intake panel already uses, keeping its heading and its
-			     description. Hiding the sections outright was rejected: the heading
-			     is true (the setting exists, and knowing who to ask is the useful
-			     part), Getting Started links to #org-payments, and the page would
-			     otherwise carry two vocabularies for one fact — a hint here, silence
-			     there. Widening the projection to fill the fields was rejected
-			     outright: that is the credential leak `org_settings_view` exists to
-			     close.
-
-			     ONE exception inside these six, recorded so nobody reads the hint as
-			     a stronger claim than it is: the allow-list does admit
-			     `erp.integration_method`, so the ERP panel's routing-mode select
-			     alone could honestly be shown. It is not, because the panel is the
-			     unit and the field beside it (ERP system) plus every credential below
-			     are absent — one live select among fourteen missing ones would be a
-			     THIRD treatment for the same fact, and this page has just finished
-			     getting down to one. That key's declared non-admin consumer is the
-			     workflow builder's ERP hint, which still reads it.
-			     decisions §153. -->
-			<section class="card">
-				<h2>{m('org.section.extraction')}</h2>
-				<p class="card-hint">{m('org.extraction.hint')}</p>
-				{#if readOnly}
-					<p class="card-hint" data-testid="extraction-admin-only">
-						{m('org.readOnly.sectionAdminOnly')}
-					</p>
-				{:else}
-					<div class="form-grid">
-						<label>
-							<span>{m('org.extraction.program')}</span>
-							<select bind:value={extractionProgramType}>
-								<option value="platform">{m('org.extraction.programPlatform')}</option>
-								<option value="byok">{m('org.extraction.programByok')}</option>
-							</select>
-						</label>
-						{#if extractionProgramType === 'byok'}
-							<label>
-								<span>{m('org.extraction.provider')}</span>
-								<select bind:value={extractionProvider}>
-									{#each EXTRACTION_PROVIDERS as p}
-										<option value={p.value}>{p.label}</option>
-									{/each}
-								</select>
-							</label>
-						{:else}
-							<label>
-								<span>{m('org.extraction.provider')}</span>
-								<input type="text" value="Claude Vision (Anthropic)" disabled />
-							</label>
-						{/if}
-					</div>
-
-					{#if extractionProgramType === 'platform'}
-						<p class="card-hint" style="margin-top: 10px;">{m('org.extraction.platformHint')}</p>
-					{:else if extractionProvider === 'claude_vision' || extractionProvider === 'openai_vision'}
-						<div class="form-grid" style="margin-top: 14px;">
-							<label>
-								<span>{extractionProvider === 'claude_vision' ? m('org.extraction.anthropicKey') : m('org.extraction.openaiKey')}</span>
-								<input type="password" bind:value={extractionApiKey} placeholder="sk-..." />
-							</label>
-						</div>
-					{:else if extractionProvider === 'aws_textract'}
-						<div class="form-grid" style="margin-top: 14px;">
-							<label>
-								<span>{m('org.extraction.awsKeyId')}</span>
-								<input type="text" bind:value={extractionAwsKeyId} />
-							</label>
-							<label>
-								<span>{m('org.extraction.awsSecret')}</span>
-								<input type="password" bind:value={extractionAwsSecret} />
-							</label>
-							<label>
-								<span>{m('org.extraction.awsRegion')}</span>
-								<input type="text" bind:value={extractionAwsRegion} placeholder="us-east-1" />
-							</label>
-						</div>
-					{:else if extractionProvider === 'ollama'}
-						<div class="form-grid" style="margin-top: 14px;">
-							<label>
-								<span>{m('org.extraction.ollamaUrl')}</span>
-								<input type="url" bind:value={extractionOllamaUrl} placeholder="http://localhost:11434" />
-							</label>
-							<label>
-								<span>{m('org.extraction.model')}</span>
-								<select bind:value={extractionOllamaModel}>
-									<option value="llama3.2-vision:11b">Llama 3.2 Vision 11B</option>
-									<option value="llama3.2-vision:90b">Llama 3.2 Vision 90B</option>
-									<option value="llava:13b">LLaVA 13B</option>
-									<option value="llava:34b">LLaVA 34B</option>
-								</select>
-							</label>
-						</div>
-						<p class="card-hint" style="margin-top: 8px;">{m('org.extraction.ollamaHint')} <code>brew install ollama && ollama pull {extractionOllamaModel}</code></p>
-					{/if}
-
-					<div class="erp-test-row">
-						<button class="btn-save-section" disabled={savingExtraction} onclick={saveExtraction}>
-							{savingExtraction ? m('org.common.saving') : m('org.extraction.save')}
-						</button>
-						<button class="btn-test" disabled={testingExtraction} onclick={testExtraction}>
-							{testingExtraction ? m('org.common.testing') : m('org.common.testConnection')}
-						</button>
-						{#if extractionTestResult}
-							<span class="test-result" class:success={extractionTestResult.success} class:failure={!extractionTestResult.success}>
-								{extractionTestResult.message}
-							</span>
-						{/if}
-					</div>
-				{/if}
-			</section>
-
-			<section class="card">
-				<h2>{m('org.section.erp')}</h2>
-				<p class="card-hint">{m('org.erp.hint')}</p>
-				{#if readOnly}
-					<p class="card-hint" data-testid="erp-admin-only">
-						{m('org.readOnly.sectionAdminOnly')}
-					</p>
-				{:else}
-					<div class="form-grid">
-						<label>
-							<span>{m('org.erp.system')}</span>
-							<select bind:value={erpType}>
-								{#each ERP_TYPES as erp}
-									<option value={erp.value}>{erp.label}</option>
-								{/each}
-							</select>
-						</label>
-						<label>
-							<span>{m('org.erp.method')}</span>
-							<select bind:value={erpMethod}>
-								<option value="merge_dev">{m('org.erp.methodMergeDev')}</option>
-								<option value="direct">{m('org.erp.methodDirect')}</option>
-							</select>
-						</label>
-					</div>
-
-					{#if erpMethod === 'merge_dev'}
-						<div class="form-grid" style="margin-top: 14px;">
-							<label>
-								<span>{m('org.erp.mergeApiKey')}</span>
-								<input type="password" bind:value={erpApiKey} placeholder="test_..." />
-							</label>
-							<label>
-								<span>{m('org.erp.accountToken')}</span>
-								<input type="password" bind:value={erpAccountToken} placeholder={m('org.erp.accountTokenPlaceholder')} />
-							</label>
-						</div>
-						<p class="card-hint" style="margin-top: 8px;">{m('org.erp.mergeHintPre')} <a href="https://app.merge.dev" target="_blank" rel="noopener">{m('org.erp.mergeDashboard')}</a>{m('org.erp.mergeHintPost')}</p>
-					{:else if erpType === 'dynamics_365_bc'}
-						<div class="form-grid" style="margin-top: 14px;">
-							<label>
-								<span>{m('org.erp.baseUrl')}</span>
-								<input type="url" bind:value={erpBaseUrl} placeholder="https://api.businesscentral.dynamics.com/v2.0" />
-							</label>
-							<label>
-								<span>{m('org.erp.environment')}</span>
-								<input type="text" bind:value={erpEnvironment} placeholder="production" />
-							</label>
-							<label>
-								<span>{m('org.erp.tenantId')}</span>
-								<input type="text" bind:value={erpTenantId} />
-							</label>
-							<label>
-								<span>{m('org.erp.clientId')}</span>
-								<input type="text" bind:value={erpClientId} />
-							</label>
-							<label>
-								<span>{m('org.erp.clientSecret')}</span>
-								<input type="password" bind:value={erpClientSecret} />
-							</label>
-							<label>
-								<span>{m('org.erp.companyId')}</span>
-								<input type="text" bind:value={erpCompanyId} />
-							</label>
-						</div>
-					{:else if erpType === 'netsuite'}
-						<div class="form-grid" style="margin-top: 14px;">
-							<label>
-								<span>{m('org.erp.accountId')}</span>
-								<input type="text" bind:value={erpAccountId} placeholder="1234567" />
-							</label>
-							<label>
-								<span>{m('org.erp.consumerKey')}</span>
-								<input type="text" bind:value={erpConsumerKey} />
-							</label>
-							<label>
-								<span>{m('org.erp.consumerSecret')}</span>
-								<input type="password" bind:value={erpConsumerSecret} />
-							</label>
-							<label>
-								<span>{m('org.erp.tokenId')}</span>
-								<input type="text" bind:value={erpTokenId} />
-							</label>
-							<label>
-								<span>{m('org.erp.tokenSecret')}</span>
-								<input type="password" bind:value={erpTokenSecret} />
-							</label>
-						</div>
-					{:else}
-						<div class="form-grid" style="margin-top: 14px;">
-							<label>
-								<span>{m('org.erp.apiBaseUrl')}</span>
-								<input type="url" bind:value={erpBaseUrl} />
-							</label>
-							<label>
-								<span>{m('org.erp.apiKeyClientId')}</span>
-								<input type="password" bind:value={erpClientId} />
-							</label>
-							<label>
-								<span>{m('org.erp.apiSecretClientSecret')}</span>
-								<input type="password" bind:value={erpClientSecret} />
-							</label>
-						</div>
-						<p class="card-hint" style="margin-top: 8px;">{m('org.erp.directSoonHint', { erp: ERP_TYPES.find(e => e.value === erpType)?.label ?? erpType })}</p>
-					{/if}
-
-					<div class="erp-test-row">
-						<button class="btn-save-section" disabled={savingErp} onclick={saveErp}>
-							{savingErp ? m('org.common.saving') : m('org.erp.save')}
-						</button>
-						<button class="btn-test" disabled={testingConnection} onclick={testConnection}>
-							{testingConnection ? m('org.common.testing') : m('org.common.testConnection')}
-						</button>
-						{#if connectionResult}
-							<span class="test-result" class:success={connectionResult.success} class:failure={!connectionResult.success}>
-								{connectionResult.message}
-							</span>
-						{/if}
-					</div>
-				{/if}
-			</section>
-
-			<section class="card" id="org-payments">
-				<h2>{m('org.section.payments')}</h2>
-				<p class="card-hint">
-					{m('org.payments.hint')}
-				</p>
-				{#if readOnly}
-					<p class="card-hint" data-testid="payments-admin-only">
-						{m('org.readOnly.sectionAdminOnly')}
-					</p>
-				{:else}
-					<div class="form-grid">
-						<label>
-							<span>{m('org.payments.provider')}</span>
-							<select bind:value={paymentsProvider}>
-								<option value="mock">{m('org.payments.providerMock')}</option>
-								<option value="modern_treasury">Modern Treasury</option>
-							</select>
-						</label>
-					</div>
-
-					{#if paymentsProvider === 'modern_treasury'}
-						<div class="form-grid">
-							<label>
-								<span>{m('org.payments.orgId')}</span>
-								<input type="text" bind:value={paymentsOrgId} placeholder="org_..." />
-							</label>
-							<label>
-								<span>{m('org.payments.apiKey')}</span>
-								<input type="password" bind:value={paymentsApiKey} placeholder="••••••••" autocomplete="off" />
-							</label>
-							<label>
-								<span>{m('org.payments.originatingAccount')}</span>
-								<input type="text" bind:value={paymentsOriginatingAccount} placeholder={m('org.payments.originatingAccountPlaceholder')} />
-							</label>
-							<label>
-								<span>{m('org.payments.webhookSecret')}</span>
-								<input type="password" bind:value={paymentsWebhookSecret} placeholder={m('org.payments.webhookSecretPlaceholder')} autocomplete="off" />
-							</label>
-							<label class="switch-row">
-								<input type="checkbox" bind:checked={paymentsSandbox} />
-								<span>{m('org.payments.sandbox')}</span>
-							</label>
-						</div>
-						<p class="card-hint">
-							{m('org.payments.webhookHint')}
-							<code>{org.created_at ? `${window.location.origin.replace(window.location.host, org.slug + '.' + window.location.host)}/api/payments/webhook/${org.slug}/modern_treasury` : '...'}</code>
-						</p>
-					{/if}
-
-					<div class="form-grid">
-						<label>
-							<span>{m('org.payments.cfoThreshold', { currency: orgCurrency.label })}</span>
-							<input
-								type="number"
-								min="0"
-								step="100"
-								placeholder={m('org.payments.cfoThresholdPlaceholder')}
-								value={paymentsCfoThreshold ?? ''}
-								oninput={(e) => {
-									const v = (e.currentTarget as HTMLInputElement).value;
-									paymentsCfoThreshold = v ? parseFloat(v) : null;
-								}}
-							/>
-						</label>
-					</div>
-					<p class="card-hint">
-						{m('org.payments.cfoHint')}
-					</p>
-
-					<div class="section-footer">
-						<button class="btn-save-section" disabled={savingPayments} onclick={savePayments}>
-							{savingPayments ? m('org.common.saving') : m('org.payments.save')}
-						</button>
-						<button class="btn-test" disabled={testingPayments || paymentsProvider === 'mock'} onclick={testPayments}>
-							{testingPayments ? m('org.common.testing') : m('org.common.testConnection')}
-						</button>
-						{#if paymentsTestResult}
-							<span class="test-result" class:success={paymentsTestResult.success} class:failure={!paymentsTestResult.success}>
-								{paymentsTestResult.message}
-							</span>
-						{/if}
-					</div>
-				{/if}
-			</section>
-
-			<section class="card">
-				<h2>{m('org.section.cards')}</h2>
-				<p class="card-hint">{m('org.cards.hint')}</p>
-				{#if readOnly}
-					<p class="card-hint" data-testid="cards-admin-only">
-						{m('org.readOnly.sectionAdminOnly')}
-					</p>
-				{:else}
-					<div class="form-grid">
-						<label>
-							<span>{m('org.cards.enabled')}</span>
-							<select bind:value={cardsEnabled}>
-								<option value={false}>{m('org.cards.disabled')}</option>
-								<option value={true}>{m('org.cards.enabledOn')}</option>
-							</select>
-						</label>
-						<label>
-							<span>{m('org.cards.program')}</span>
-							<select bind:value={cardsProgramType}>
-								<option value="platform">{m('org.cards.programPlatform')}</option>
-								<option value="byok">{m('org.cards.programByok')}</option>
-							</select>
-						</label>
-						<label>
-							<span>{m('org.cards.region')}</span>
-							<select bind:value={cardsRegion}>
-								{#each CARD_REGIONS as r}
-									<option value={r.value}>{r.label}</option>
-								{/each}
-							</select>
-						</label>
-						<label>
-							<span>{m('org.cards.expiryDays')}</span>
-							<input type="number" min="1" max="90" bind:value={cardsExpiryDays} />
-						</label>
-					</div>
-
-					{#if cardsEnabled && cardsProgramType === 'platform'}
-						<p class="card-hint" style="margin-top: 10px;">{m('org.cards.platformHint', { provider: autoProvider === 'lithic' ? 'Lithic' : 'Nium' })}</p>
-					{/if}
-
-					{#if cardsEnabled && cardsProgramType === 'byok'}
-						<div class="form-grid" style="margin-top: 14px;">
-							<label>
-								<span>{m('org.cards.provider')}</span>
-								<select bind:value={cardsProvider}>
-									<option value="">{m('org.cards.providerAuto', { provider: autoProvider === 'lithic' ? 'Lithic' : 'Nium' })}</option>
-									<option value="lithic">{m('org.cards.providerLithic')}</option>
-									<option value="nium">{m('org.cards.providerNium')}</option>
-								</select>
-							</label>
-						</div>
-
-						{#if effectiveProvider === 'lithic'}
-							<div class="form-grid" style="margin-top: 14px;">
+							<div class="form-grid">
 								<label>
-									<span>{m('org.cards.lithicApiKey')}</span>
-									<input type="password" bind:value={cardsApiKey} placeholder="api-key-..." />
-								</label>
-								<label>
-									<span>{m('org.cards.sandboxMode')}</span>
-									<select bind:value={cardsSandbox}>
-										<option value={true}>{m('org.cards.sandboxTesting')}</option>
-										<option value={false}>{m('org.cards.production')}</option>
+									<span>{m('org.residency.regionLabel')}</span>
+									<select bind:value={residencyRegion}>
+										{#each residencyRegions as token (token)}
+											<option value={token}>
+												{token === residencyDefault
+													? m('org.residency.regionDefault', { region: regionLabel(token) })
+													: regionLabel(token)}
+											</option>
+										{/each}
 									</select>
 								</label>
 							</div>
-						{:else if effectiveProvider === 'nium'}
-							<div class="form-grid" style="margin-top: 14px;">
-								<label>
-									<span>{m('org.cards.clientId')}</span>
-									<input type="text" bind:value={cardsClientId} />
-								</label>
-								<label>
-									<span>{m('org.cards.clientSecret')}</span>
-									<input type="password" bind:value={cardsClientSecret} />
-								</label>
-								<label>
-									<span>{m('org.cards.customerHashId')}</span>
-									<input type="text" bind:value={cardsCustomerHashId} />
-								</label>
-								<label>
-									<span>{m('org.cards.walletHashId')}</span>
-									<input type="text" bind:value={cardsWalletHashId} />
-								</label>
-								<label>
-									<span>{m('org.cards.sandboxMode')}</span>
-									<select bind:value={cardsSandbox}>
-										<option value={true}>{m('org.cards.sandboxTesting')}</option>
-										<option value={false}>{m('org.cards.production')}</option>
-									</select>
-								</label>
+
+							{#if residencyPlacement.db_cluster}
+								<p class="card-hint residency-placement">
+									{m('org.residency.placement', {
+										cluster: residencyPlacement.db_cluster,
+										bucket: residencyPlacement.s3_bucket ?? ''
+									})}
+								</p>
+							{/if}
+
+							{#if residencyAlignment}
+								<div
+									class="residency-alignment"
+									class:ok={residencyAlignment.status === 'aligned'}
+									class:warn={residencyAlignment.status === 'misaligned'}
+								>
+									<strong>{m('org.residency.alignment.title')}</strong>
+									<p>{alignmentMessage}</p>
+									<p class="residency-advisory">{m('org.residency.alignment.advisory')}</p>
+								</div>
+							{/if}
+
+							<div class="section-footer">
+								<button
+									class="btn-save-section"
+									disabled={savingResidency || residencyRegion === residencySavedRegion}
+									onclick={saveResidency}
+								>
+									{savingResidency ? m('org.common.saving') : m('org.residency.save')}
+								</button>
 							</div>
 						{/if}
-					{/if}
-
-					<div class="section-footer">
-						<button class="btn-save-section" disabled={savingCards} onclick={saveCards}>
-							{savingCards ? m('org.common.saving') : m('org.cards.save')}
-						</button>
-					</div>
+					</section>
 				{/if}
-			</section>
 
-			<section class="card">
-				<h2>{m('org.section.security')}</h2>
-				<p class="card-hint">
-					{m('org.security.hint')}
-				</p>
-				{#if readOnly}
-					<p class="card-hint" data-testid="security-admin-only">
-						{m('org.readOnly.sectionAdminOnly')}
-					</p>
-				{:else}
-					<label class="switch-row">
-						<input type="checkbox" bind:checked={mfaRequired} />
-						<span>{m('org.security.requireMfa')}</span>
-					</label>
+				{#if section === 'extraction'}
+					<!-- The six panels from here to Fraud Detection have NO non-admin data
+					     to show. `services/org_settings_view.py::NON_ADMIN_SETTINGS` is an
+					     allow-list and admits none of `extraction`, `cards`, `mfa`,
+					     `fraud_rules`, the ERP credentials or the payments credentials —
+					     deliberately: most of them ARE third-party credentials (an ERP client
+					     secret, a processor credential set, a card API key) and the rest have
+					     no non-admin consumer. So for a non-admin those blocks arrive ABSENT
+					     and every field falls back to its initializer, which is a platform
+					     default wearing the tenant's clothes: Extraction reads "Claude Vision
+					     / Platform" whatever the tenant bought, Payments reads "Mock",
+					     Security reads MFA-not-required, and Fraud Detection disappeared
+					     entirely. A disabled <fieldset> around a wrong value is still a wrong
+					     value.
 
-					{#if mfaRequired && !mfaEnforcementActive}
-						<p class="mfa-enforcement-warning" role="alert" data-testid="mfa-enforcement-inactive">
-							{m('org.security.mfaEnforcementInactive')}
-						</p>
-					{/if}
+					     Each therefore replaces its BODY with the same admin-only hint the
+					     Email Intake panel already uses, keeping its heading and its
+					     description. Hiding the sections outright was rejected: the heading
+					     is true (the setting exists, and knowing who to ask is the useful
+					     part), Getting Started links to the Payments panel, and the page would
+					     otherwise carry two vocabularies for one fact — a hint here, silence
+					     there. Widening the projection to fill the fields was rejected
+					     outright: that is the credential leak `org_settings_view` exists to
+					     close.
 
-					<div class="section-footer">
-						<button class="btn-save-section" disabled={savingSecurity} onclick={saveSecurity}>
-							{savingSecurity ? m('org.common.saving') : m('org.security.save')}
-						</button>
-					</div>
-				{/if}
-			</section>
+					     ONE exception inside these six, recorded so nobody reads the hint as
+					     a stronger claim than it is: the allow-list does admit
+					     `erp.integration_method`, so the ERP panel's routing-mode select
+					     alone could honestly be shown. It is not, because the panel is the
+					     unit and the field beside it (ERP system) plus every credential below
+					     are absent — one live select among fourteen missing ones would be a
+					     THIRD treatment for the same fact, and this page has just finished
+					     getting down to one. That key's declared non-admin consumer is the
+					     workflow builder's ERP hint, which still reads it.
+					     decisions §153. -->
+					<section class="card">
+						<h2>{m('org.section.extraction')}</h2>
+						<p class="card-hint">{m('org.extraction.hint')}</p>
+						{#if readOnly}
+							<p class="card-hint" data-testid="extraction-admin-only">
+								{m('org.readOnly.sectionAdminOnly')}
+							</p>
+						{:else}
+							<div class="form-grid">
+								<label>
+									<span>{m('org.extraction.program')}</span>
+									<select bind:value={extractionProgramType}>
+										<option value="platform">{m('org.extraction.programPlatform')}</option>
+										<option value="byok">{m('org.extraction.programByok')}</option>
+									</select>
+								</label>
+								{#if extractionProgramType === 'byok'}
+									<label>
+										<span>{m('org.extraction.provider')}</span>
+										<select bind:value={extractionProvider}>
+											{#each EXTRACTION_PROVIDERS as p}
+												<option value={p.value}>{p.label}</option>
+											{/each}
+										</select>
+									</label>
+								{:else}
+									<label>
+										<span>{m('org.extraction.provider')}</span>
+										<input type="text" value="Claude Vision (Anthropic)" disabled />
+									</label>
+								{/if}
+							</div>
 
-			{#if readOnly || fraud}
-				<section class="card">
-					<h2>{m('org.section.fraud')}</h2>
-					<p class="card-hint">
-						{m('org.fraud.hint')}
-					</p>
-					{#if readOnly}
-						<p class="card-hint" data-testid="fraud-admin-only">
-							{m('org.readOnly.sectionAdminOnly')}
-						</p>
-					{:else if fraud}
-						<div class="fraud-grid">
-							<label class="switch-row">
-								<input type="checkbox" bind:checked={fraud.round_amount_enabled} />
-								<span>
-									<strong>{m('org.fraud.roundAmount')}</strong>
-									<span class="rule-hint">
-										{m('org.fraud.roundAmountHint', { min: fraud.round_amount_min })}
+							{#if extractionProgramType === 'platform'}
+								<p class="card-hint" style="margin-top: 10px;">{m('org.extraction.platformHint')}</p>
+							{:else if extractionProvider === 'claude_vision' || extractionProvider === 'openai_vision'}
+								<div class="form-grid" style="margin-top: 14px;">
+									<label>
+										<span>{extractionProvider === 'claude_vision' ? m('org.extraction.anthropicKey') : m('org.extraction.openaiKey')}</span>
+										<input type="password" bind:value={extractionApiKey} placeholder="sk-..." />
+									</label>
+								</div>
+							{:else if extractionProvider === 'aws_textract'}
+								<div class="form-grid" style="margin-top: 14px;">
+									<label>
+										<span>{m('org.extraction.awsKeyId')}</span>
+										<input type="text" bind:value={extractionAwsKeyId} />
+									</label>
+									<label>
+										<span>{m('org.extraction.awsSecret')}</span>
+										<input type="password" bind:value={extractionAwsSecret} />
+									</label>
+									<label>
+										<span>{m('org.extraction.awsRegion')}</span>
+										<input type="text" bind:value={extractionAwsRegion} placeholder="us-east-1" />
+									</label>
+								</div>
+							{:else if extractionProvider === 'ollama'}
+								<div class="form-grid" style="margin-top: 14px;">
+									<label>
+										<span>{m('org.extraction.ollamaUrl')}</span>
+										<input type="url" bind:value={extractionOllamaUrl} placeholder="http://localhost:11434" />
+									</label>
+									<label>
+										<span>{m('org.extraction.model')}</span>
+										<select bind:value={extractionOllamaModel}>
+											<option value="llama3.2-vision:11b">Llama 3.2 Vision 11B</option>
+											<option value="llama3.2-vision:90b">Llama 3.2 Vision 90B</option>
+											<option value="llava:13b">LLaVA 13B</option>
+											<option value="llava:34b">LLaVA 34B</option>
+										</select>
+									</label>
+								</div>
+								<p class="card-hint" style="margin-top: 8px;">{m('org.extraction.ollamaHint')} <code>brew install ollama && ollama pull {extractionOllamaModel}</code></p>
+							{/if}
+
+							<div class="erp-test-row">
+								<button class="btn-save-section" disabled={savingExtraction} onclick={saveExtraction}>
+									{savingExtraction ? m('org.common.saving') : m('org.extraction.save')}
+								</button>
+								<button class="btn-test" disabled={testingExtraction} onclick={testExtraction}>
+									{testingExtraction ? m('org.common.testing') : m('org.common.testConnection')}
+								</button>
+								{#if extractionTestResult}
+									<span class="test-result" class:success={extractionTestResult.success} class:failure={!extractionTestResult.success}>
+										{extractionTestResult.message}
 									</span>
-								</span>
-							</label>
-							<div class="threshold-row">
+								{/if}
+							</div>
+						{/if}
+					</section>
+				{/if}
+
+				{#if section === 'erp'}
+					<section class="card">
+						<h2>{m('org.section.erp')}</h2>
+						<p class="card-hint">{m('org.erp.hint')}</p>
+						{#if readOnly}
+							<p class="card-hint" data-testid="erp-admin-only">
+								{m('org.readOnly.sectionAdminOnly')}
+							</p>
+						{:else}
+							<div class="form-grid">
 								<label>
-									<span>{m('org.fraud.minAmount')}</span>
+									<span>{m('org.erp.system')}</span>
+									<select bind:value={erpType}>
+										{#each ERP_TYPES as erp}
+											<option value={erp.value}>{erp.label}</option>
+										{/each}
+									</select>
+								</label>
+								<label>
+									<span>{m('org.erp.method')}</span>
+									<select bind:value={erpMethod}>
+										<option value="merge_dev">{m('org.erp.methodMergeDev')}</option>
+										<option value="direct">{m('org.erp.methodDirect')}</option>
+									</select>
+								</label>
+							</div>
+
+							{#if erpMethod === 'merge_dev'}
+								<div class="form-grid" style="margin-top: 14px;">
+									<label>
+										<span>{m('org.erp.mergeApiKey')}</span>
+										<input type="password" bind:value={erpApiKey} placeholder="test_..." />
+									</label>
+									<label>
+										<span>{m('org.erp.accountToken')}</span>
+										<input type="password" bind:value={erpAccountToken} placeholder={m('org.erp.accountTokenPlaceholder')} />
+									</label>
+								</div>
+								<p class="card-hint" style="margin-top: 8px;">{m('org.erp.mergeHintPre')} <a href="https://app.merge.dev" target="_blank" rel="noopener">{m('org.erp.mergeDashboard')}</a>{m('org.erp.mergeHintPost')}</p>
+							{:else if erpType === 'dynamics_365_bc'}
+								<div class="form-grid" style="margin-top: 14px;">
+									<label>
+										<span>{m('org.erp.baseUrl')}</span>
+										<input type="url" bind:value={erpBaseUrl} placeholder="https://api.businesscentral.dynamics.com/v2.0" />
+									</label>
+									<label>
+										<span>{m('org.erp.environment')}</span>
+										<input type="text" bind:value={erpEnvironment} placeholder="production" />
+									</label>
+									<label>
+										<span>{m('org.erp.tenantId')}</span>
+										<input type="text" bind:value={erpTenantId} />
+									</label>
+									<label>
+										<span>{m('org.erp.clientId')}</span>
+										<input type="text" bind:value={erpClientId} />
+									</label>
+									<label>
+										<span>{m('org.erp.clientSecret')}</span>
+										<input type="password" bind:value={erpClientSecret} />
+									</label>
+									<label>
+										<span>{m('org.erp.companyId')}</span>
+										<input type="text" bind:value={erpCompanyId} />
+									</label>
+								</div>
+							{:else if erpType === 'netsuite'}
+								<div class="form-grid" style="margin-top: 14px;">
+									<label>
+										<span>{m('org.erp.accountId')}</span>
+										<input type="text" bind:value={erpAccountId} placeholder="1234567" />
+									</label>
+									<label>
+										<span>{m('org.erp.consumerKey')}</span>
+										<input type="text" bind:value={erpConsumerKey} />
+									</label>
+									<label>
+										<span>{m('org.erp.consumerSecret')}</span>
+										<input type="password" bind:value={erpConsumerSecret} />
+									</label>
+									<label>
+										<span>{m('org.erp.tokenId')}</span>
+										<input type="text" bind:value={erpTokenId} />
+									</label>
+									<label>
+										<span>{m('org.erp.tokenSecret')}</span>
+										<input type="password" bind:value={erpTokenSecret} />
+									</label>
+								</div>
+							{:else}
+								<div class="form-grid" style="margin-top: 14px;">
+									<label>
+										<span>{m('org.erp.apiBaseUrl')}</span>
+										<input type="url" bind:value={erpBaseUrl} />
+									</label>
+									<label>
+										<span>{m('org.erp.apiKeyClientId')}</span>
+										<input type="password" bind:value={erpClientId} />
+									</label>
+									<label>
+										<span>{m('org.erp.apiSecretClientSecret')}</span>
+										<input type="password" bind:value={erpClientSecret} />
+									</label>
+								</div>
+								<p class="card-hint" style="margin-top: 8px;">{m('org.erp.directSoonHint', { erp: ERP_TYPES.find(e => e.value === erpType)?.label ?? erpType })}</p>
+							{/if}
+
+							<div class="erp-test-row">
+								<button class="btn-save-section" disabled={savingErp} onclick={saveErp}>
+									{savingErp ? m('org.common.saving') : m('org.erp.save')}
+								</button>
+								<button class="btn-test" disabled={testingConnection} onclick={testConnection}>
+									{testingConnection ? m('org.common.testing') : m('org.common.testConnection')}
+								</button>
+								{#if connectionResult}
+									<span class="test-result" class:success={connectionResult.success} class:failure={!connectionResult.success}>
+										{connectionResult.message}
+									</span>
+								{/if}
+							</div>
+						{/if}
+					</section>
+				{/if}
+
+				{#if section === 'payments'}
+					<section class="card" id="org-payments">
+						<h2>{m('org.section.payments')}</h2>
+						<p class="card-hint">
+							{m('org.payments.hint')}
+						</p>
+						{#if readOnly}
+							<p class="card-hint" data-testid="payments-admin-only">
+								{m('org.readOnly.sectionAdminOnly')}
+							</p>
+						{:else}
+							<div class="form-grid">
+								<label>
+									<span>{m('org.payments.provider')}</span>
+									<select bind:value={paymentsProvider}>
+										<option value="mock">{m('org.payments.providerMock')}</option>
+										<option value="modern_treasury">Modern Treasury</option>
+									</select>
+								</label>
+							</div>
+
+							{#if paymentsProvider === 'modern_treasury'}
+								<div class="form-grid">
+									<label>
+										<span>{m('org.payments.orgId')}</span>
+										<input type="text" bind:value={paymentsOrgId} placeholder="org_..." />
+									</label>
+									<label>
+										<span>{m('org.payments.apiKey')}</span>
+										<input type="password" bind:value={paymentsApiKey} placeholder="••••••••" autocomplete="off" />
+									</label>
+									<label>
+										<span>{m('org.payments.originatingAccount')}</span>
+										<input type="text" bind:value={paymentsOriginatingAccount} placeholder={m('org.payments.originatingAccountPlaceholder')} />
+									</label>
+									<label>
+										<span>{m('org.payments.webhookSecret')}</span>
+										<input type="password" bind:value={paymentsWebhookSecret} placeholder={m('org.payments.webhookSecretPlaceholder')} autocomplete="off" />
+									</label>
+									<label class="switch-row">
+										<input type="checkbox" bind:checked={paymentsSandbox} />
+										<span>{m('org.payments.sandbox')}</span>
+									</label>
+								</div>
+								<p class="card-hint">
+									{m('org.payments.webhookHint')}
+									<code>{org.created_at ? `${window.location.origin.replace(window.location.host, org.slug + '.' + window.location.host)}/api/payments/webhook/${org.slug}/modern_treasury` : '...'}</code>
+								</p>
+							{/if}
+
+							<div class="form-grid">
+								<label>
+									<span>{m('org.payments.cfoThreshold', { currency: orgCurrency.label })}</span>
 									<input
 										type="number"
 										min="0"
 										step="100"
-										bind:value={fraud.round_amount_min}
-										disabled={!fraud.round_amount_enabled}
+										placeholder={m('org.payments.cfoThresholdPlaceholder')}
+										value={paymentsCfoThreshold ?? ''}
+										oninput={(e) => {
+											const v = (e.currentTarget as HTMLInputElement).value;
+											paymentsCfoThreshold = v ? parseFloat(v) : null;
+										}}
 									/>
 								</label>
 							</div>
+							<p class="card-hint">
+								{m('org.payments.cfoHint')}
+							</p>
 
-							<label class="switch-row">
-								<input type="checkbox" bind:checked={fraud.future_date_enabled} />
-								<span>
-									<strong>{m('org.fraud.futureDate')}</strong>
-									<span class="rule-hint">
-										{m('org.fraud.futureDateHint')}
+							<div class="section-footer">
+								<button class="btn-save-section" disabled={savingPayments} onclick={savePayments}>
+									{savingPayments ? m('org.common.saving') : m('org.payments.save')}
+								</button>
+								<button class="btn-test" disabled={testingPayments || paymentsProvider === 'mock'} onclick={testPayments}>
+									{testingPayments ? m('org.common.testing') : m('org.common.testConnection')}
+								</button>
+								{#if paymentsTestResult}
+									<span class="test-result" class:success={paymentsTestResult.success} class:failure={!paymentsTestResult.success}>
+										{paymentsTestResult.message}
 									</span>
-								</span>
-							</label>
+								{/if}
+							</div>
+						{/if}
+					</section>
+				{/if}
 
-							<label class="switch-row">
-								<input type="checkbox" bind:checked={fraud.rush_payment_enabled} />
-								<span>
-									<strong>{m('org.fraud.rushPayment')}</strong>
-									<span class="rule-hint">
-										{m('org.fraud.rushPaymentHint')}
-									</span>
-								</span>
-							</label>
-							<div class="threshold-row">
+				{#if section === 'cards'}
+					<section class="card">
+						<h2>{m('org.section.cards')}</h2>
+						<p class="card-hint">{m('org.cards.hint')}</p>
+						{#if readOnly}
+							<p class="card-hint" data-testid="cards-admin-only">
+								{m('org.readOnly.sectionAdminOnly')}
+							</p>
+						{:else}
+							<div class="form-grid">
 								<label>
-									<span>{m('org.fraud.maxDays')}</span>
-									<input
-										type="number"
-										min="0"
-										max="30"
-										bind:value={fraud.rush_payment_max_days}
-										disabled={!fraud.rush_payment_enabled}
-									/>
+									<span>{m('org.cards.enabled')}</span>
+									<select bind:value={cardsEnabled}>
+										<option value={false}>{m('org.cards.disabled')}</option>
+										<option value={true}>{m('org.cards.enabledOn')}</option>
+									</select>
+								</label>
+								<label>
+									<span>{m('org.cards.program')}</span>
+									<select bind:value={cardsProgramType}>
+										<option value="platform">{m('org.cards.programPlatform')}</option>
+										<option value="byok">{m('org.cards.programByok')}</option>
+									</select>
+								</label>
+								<label>
+									<span>{m('org.cards.region')}</span>
+									<select bind:value={cardsRegion}>
+										{#each CARD_REGIONS as r}
+											<option value={r.value}>{r.label}</option>
+										{/each}
+									</select>
+								</label>
+								<label>
+									<span>{m('org.cards.expiryDays')}</span>
+									<input type="number" min="1" max="90" bind:value={cardsExpiryDays} />
 								</label>
 							</div>
 
-							<label class="switch-row">
-								<input type="checkbox" bind:checked={fraud.new_vendor_large_enabled} />
-								<span>
-									<strong>{m('org.fraud.newVendorLarge')}</strong>
-									<span class="rule-hint">
-										{m('org.fraud.newVendorLargeHint', { amount: fraud.new_vendor_large_amount, days: fraud.new_vendor_max_age_days })}
-									</span>
-								</span>
-							</label>
-							<div class="threshold-row">
-								<label>
-									<span>{m('org.fraud.vendorAge')}</span>
-									<input
-										type="number"
-										min="1"
-										bind:value={fraud.new_vendor_max_age_days}
-										disabled={!fraud.new_vendor_large_enabled}
-									/>
-								</label>
-								<label>
-									<span>{m('org.fraud.largeThreshold')}</span>
-									<input
-										type="number"
-										min="0"
-										step="500"
-										bind:value={fraud.new_vendor_large_amount}
-										disabled={!fraud.new_vendor_large_enabled}
-									/>
-								</label>
+							{#if cardsEnabled && cardsProgramType === 'platform'}
+								<p class="card-hint" style="margin-top: 10px;">{m('org.cards.platformHint', { provider: autoProvider === 'lithic' ? 'Lithic' : 'Nium' })}</p>
+							{/if}
+
+							{#if cardsEnabled && cardsProgramType === 'byok'}
+								<div class="form-grid" style="margin-top: 14px;">
+									<label>
+										<span>{m('org.cards.provider')}</span>
+										<select bind:value={cardsProvider}>
+											<option value="">{m('org.cards.providerAuto', { provider: autoProvider === 'lithic' ? 'Lithic' : 'Nium' })}</option>
+											<option value="lithic">{m('org.cards.providerLithic')}</option>
+											<option value="nium">{m('org.cards.providerNium')}</option>
+										</select>
+									</label>
+								</div>
+
+								{#if effectiveProvider === 'lithic'}
+									<div class="form-grid" style="margin-top: 14px;">
+										<label>
+											<span>{m('org.cards.lithicApiKey')}</span>
+											<input type="password" bind:value={cardsApiKey} placeholder="api-key-..." />
+										</label>
+										<label>
+											<span>{m('org.cards.sandboxMode')}</span>
+											<select bind:value={cardsSandbox}>
+												<option value={true}>{m('org.cards.sandboxTesting')}</option>
+												<option value={false}>{m('org.cards.production')}</option>
+											</select>
+										</label>
+									</div>
+								{:else if effectiveProvider === 'nium'}
+									<div class="form-grid" style="margin-top: 14px;">
+										<label>
+											<span>{m('org.cards.clientId')}</span>
+											<input type="text" bind:value={cardsClientId} />
+										</label>
+										<label>
+											<span>{m('org.cards.clientSecret')}</span>
+											<input type="password" bind:value={cardsClientSecret} />
+										</label>
+										<label>
+											<span>{m('org.cards.customerHashId')}</span>
+											<input type="text" bind:value={cardsCustomerHashId} />
+										</label>
+										<label>
+											<span>{m('org.cards.walletHashId')}</span>
+											<input type="text" bind:value={cardsWalletHashId} />
+										</label>
+										<label>
+											<span>{m('org.cards.sandboxMode')}</span>
+											<select bind:value={cardsSandbox}>
+												<option value={true}>{m('org.cards.sandboxTesting')}</option>
+												<option value={false}>{m('org.cards.production')}</option>
+											</select>
+										</label>
+									</div>
+								{/if}
+							{/if}
+
+							<div class="section-footer">
+								<button class="btn-save-section" disabled={savingCards} onclick={saveCards}>
+									{savingCards ? m('org.common.saving') : m('org.cards.save')}
+								</button>
 							</div>
+						{/if}
+					</section>
+				{/if}
 
+				{#if section === 'security'}
+					<section class="card">
+						<h2>{m('org.section.security')}</h2>
+						<p class="card-hint">
+							{m('org.security.hint')}
+						</p>
+						{#if readOnly}
+							<p class="card-hint" data-testid="security-admin-only">
+								{m('org.readOnly.sectionAdminOnly')}
+							</p>
+						{:else}
 							<label class="switch-row">
-								<input type="checkbox" bind:checked={fraud.bank_change_enabled} />
-								<span>
-									<strong>{m('org.fraud.bankChange')}</strong>
-									<span class="rule-hint">
-										{m('org.fraud.bankChangeHint')}
-									</span>
-								</span>
+								<input type="checkbox" bind:checked={mfaRequired} />
+								<span>{m('org.security.requireMfa')}</span>
 							</label>
 
-							<label class="switch-row">
-								<input type="checkbox" bind:checked={fraud.personal_email_enabled} />
-								<span>
-									<strong>{m('org.fraud.personalEmail')}</strong>
-									<span class="rule-hint">
-										{m('org.fraud.personalEmailHint')}
-									</span>
-								</span>
-							</label>
-							<div class="threshold-row">
-								<label class="full">
-									<span>{m('org.fraud.personalEmailDomains')}</span>
-									<textarea
-										rows="4"
-										bind:value={personalEmailDomainsText}
-										disabled={!fraud.personal_email_enabled}
-									></textarea>
-								</label>
+							{#if mfaRequired && !mfaEnforcementActive}
+								<p class="mfa-enforcement-warning" role="alert" data-testid="mfa-enforcement-inactive">
+									{m('org.security.mfaEnforcementInactive')}
+								</p>
+							{/if}
+
+							<div class="section-footer">
+								<button class="btn-save-section" disabled={savingSecurity} onclick={saveSecurity}>
+									{savingSecurity ? m('org.common.saving') : m('org.security.save')}
+								</button>
 							</div>
+						{/if}
+					</section>
+				{/if}
 
-							<label class="switch-row">
-								<input type="checkbox" bind:checked={fraud.stat_anomaly_enabled} />
-								<span>
-									<strong>{m('org.fraud.statAnomaly')}</strong>
-									<span class="rule-hint">
-										{m('org.fraud.statAnomalyHint')}
-									</span>
-								</span>
-							</label>
-							<div class="threshold-row">
-								<label>
-									<span>{m('org.fraud.sigma')}</span>
-									<input
-										type="number"
-										min="0.5"
-										step="0.1"
-										bind:value={fraud.stat_anomaly_sigma}
-										disabled={!fraud.stat_anomaly_enabled}
-									/>
-								</label>
-								<label>
-									<span>{m('org.fraud.minPriorInvoices')}</span>
-									<input
-										type="number"
-										min="2"
-										bind:value={fraud.stat_anomaly_min_history}
-										disabled={!fraud.stat_anomaly_enabled}
-									/>
-								</label>
-							</div>
+				{#if section === 'fraud'}
+					{#if readOnly || fraud}
+						<section class="card">
+							<h2>{m('org.section.fraud')}</h2>
+							<p class="card-hint">
+								{m('org.fraud.hint')}
+							</p>
+							{#if readOnly}
+								<p class="card-hint" data-testid="fraud-admin-only">
+									{m('org.readOnly.sectionAdminOnly')}
+								</p>
+							{:else if fraud}
+								<div class="fraud-grid">
+									<label class="switch-row">
+										<input type="checkbox" bind:checked={fraud.round_amount_enabled} />
+										<span>
+											<strong>{m('org.fraud.roundAmount')}</strong>
+											<span class="rule-hint">
+												{m('org.fraud.roundAmountHint', { min: fraud.round_amount_min })}
+											</span>
+										</span>
+									</label>
+									<div class="threshold-row">
+										<label>
+											<span>{m('org.fraud.minAmount')}</span>
+											<input
+												type="number"
+												min="0"
+												step="100"
+												bind:value={fraud.round_amount_min}
+												disabled={!fraud.round_amount_enabled}
+											/>
+										</label>
+									</div>
 
-							<label class="switch-row">
-								<input type="checkbox" bind:checked={fraud.llm_anomaly_enabled} />
-								<span>
-									<strong>{m('org.fraud.llmAnomaly')}</strong>
-									<span class="rule-hint">
-										{m('org.fraud.llmAnomalyHint')}
-									</span>
-								</span>
-							</label>
-						</div>
+									<label class="switch-row">
+										<input type="checkbox" bind:checked={fraud.future_date_enabled} />
+										<span>
+											<strong>{m('org.fraud.futureDate')}</strong>
+											<span class="rule-hint">
+												{m('org.fraud.futureDateHint')}
+											</span>
+										</span>
+									</label>
 
-						<div class="section-footer">
-							<button
-								type="button"
-								class="btn-link"
-								onclick={resetFraudToDefaults}
-								disabled={savingFraud}
-							>
-								{m('org.fraud.resetDefaults')}
-							</button>
-							<button
-								class="btn-save-section"
-								disabled={savingFraud}
-								onclick={saveFraud}
-							>
-								{savingFraud ? m('org.common.saving') : m('org.fraud.save')}
-							</button>
-						</div>
+									<label class="switch-row">
+										<input type="checkbox" bind:checked={fraud.rush_payment_enabled} />
+										<span>
+											<strong>{m('org.fraud.rushPayment')}</strong>
+											<span class="rule-hint">
+												{m('org.fraud.rushPaymentHint')}
+											</span>
+										</span>
+									</label>
+									<div class="threshold-row">
+										<label>
+											<span>{m('org.fraud.maxDays')}</span>
+											<input
+												type="number"
+												min="0"
+												max="30"
+												bind:value={fraud.rush_payment_max_days}
+												disabled={!fraud.rush_payment_enabled}
+											/>
+										</label>
+									</div>
+
+									<label class="switch-row">
+										<input type="checkbox" bind:checked={fraud.new_vendor_large_enabled} />
+										<span>
+											<strong>{m('org.fraud.newVendorLarge')}</strong>
+											<span class="rule-hint">
+												{m('org.fraud.newVendorLargeHint', { amount: fraud.new_vendor_large_amount, days: fraud.new_vendor_max_age_days })}
+											</span>
+										</span>
+									</label>
+									<div class="threshold-row">
+										<label>
+											<span>{m('org.fraud.vendorAge')}</span>
+											<input
+												type="number"
+												min="1"
+												bind:value={fraud.new_vendor_max_age_days}
+												disabled={!fraud.new_vendor_large_enabled}
+											/>
+										</label>
+										<label>
+											<span>{m('org.fraud.largeThreshold')}</span>
+											<input
+												type="number"
+												min="0"
+												step="500"
+												bind:value={fraud.new_vendor_large_amount}
+												disabled={!fraud.new_vendor_large_enabled}
+											/>
+										</label>
+									</div>
+
+									<label class="switch-row">
+										<input type="checkbox" bind:checked={fraud.bank_change_enabled} />
+										<span>
+											<strong>{m('org.fraud.bankChange')}</strong>
+											<span class="rule-hint">
+												{m('org.fraud.bankChangeHint')}
+											</span>
+										</span>
+									</label>
+
+									<label class="switch-row">
+										<input type="checkbox" bind:checked={fraud.personal_email_enabled} />
+										<span>
+											<strong>{m('org.fraud.personalEmail')}</strong>
+											<span class="rule-hint">
+												{m('org.fraud.personalEmailHint')}
+											</span>
+										</span>
+									</label>
+									<div class="threshold-row">
+										<label class="full">
+											<span>{m('org.fraud.personalEmailDomains')}</span>
+											<textarea
+												rows="4"
+												bind:value={personalEmailDomainsText}
+												disabled={!fraud.personal_email_enabled}
+											></textarea>
+										</label>
+									</div>
+
+									<label class="switch-row">
+										<input type="checkbox" bind:checked={fraud.stat_anomaly_enabled} />
+										<span>
+											<strong>{m('org.fraud.statAnomaly')}</strong>
+											<span class="rule-hint">
+												{m('org.fraud.statAnomalyHint')}
+											</span>
+										</span>
+									</label>
+									<div class="threshold-row">
+										<label>
+											<span>{m('org.fraud.sigma')}</span>
+											<input
+												type="number"
+												min="0.5"
+												step="0.1"
+												bind:value={fraud.stat_anomaly_sigma}
+												disabled={!fraud.stat_anomaly_enabled}
+											/>
+										</label>
+										<label>
+											<span>{m('org.fraud.minPriorInvoices')}</span>
+											<input
+												type="number"
+												min="2"
+												bind:value={fraud.stat_anomaly_min_history}
+												disabled={!fraud.stat_anomaly_enabled}
+											/>
+										</label>
+									</div>
+
+									<label class="switch-row">
+										<input type="checkbox" bind:checked={fraud.llm_anomaly_enabled} />
+										<span>
+											<strong>{m('org.fraud.llmAnomaly')}</strong>
+											<span class="rule-hint">
+												{m('org.fraud.llmAnomalyHint')}
+											</span>
+										</span>
+									</label>
+								</div>
+
+								<div class="section-footer">
+									<button
+										type="button"
+										class="btn-link"
+										onclick={resetFraudToDefaults}
+										disabled={savingFraud}
+									>
+										{m('org.fraud.resetDefaults')}
+									</button>
+									<button
+										class="btn-save-section"
+										disabled={savingFraud}
+										onclick={saveFraud}
+									>
+										{savingFraud ? m('org.common.saving') : m('org.fraud.save')}
+									</button>
+								</div>
+							{/if}
+						</section>
 					{/if}
-				</section>
-			{/if}
+				{/if}
 
-			<!-- Data Sync is a SIGNPOST, not a second set of sync buttons.
-			     Each of the three ERP-synced data sets now has its own page
-			     carrying its own Sync-from-ERP action gated on `auth.isManager`
-			     — `/gl-accounts` (new), `/purchase-orders`, `/vendors` — which
-			     matches every one of those endpoints' real gate
-			     (admin | ap_manager). The two buttons that used to live here
-			     were admin-only by virtue of this route's nav gate, said nothing
-			     about which entity's chart they would write into, and reported
-			     into a bare <span> with no list to refresh; the vendors row had
-			     already been a link for exactly that reason. Three links is one
-			     vocabulary for one fact (decisions §153's objection to a panel
-			     growing a second shape, and §161 for the call).
-			     It keeps its place because this is where the ERP connection is
-			     configured, so "now where do I pull it?" is asked here. -->
-			<section class="card">
-				<h2>{m('org.section.dataSync')}</h2>
-				<p class="card-hint">{m('org.dataSync.hint')}</p>
+				{#if section === 'data-sync'}
+					<!-- Data Sync is a SIGNPOST, not a second set of sync buttons.
+					     Each of the three ERP-synced data sets now has its own page
+					     carrying its own Sync-from-ERP action gated on `auth.isManager`
+					     — `/gl-accounts` (new), `/purchase-orders`, `/vendors` — which
+					     matches every one of those endpoints' real gate
+					     (admin | ap_manager). The two buttons that used to live here
+					     were admin-only by virtue of this route's nav gate, said nothing
+					     about which entity's chart they would write into, and reported
+					     into a bare <span> with no list to refresh; the vendors row had
+					     already been a link for exactly that reason. Three links is one
+					     vocabulary for one fact (decisions §153's objection to a panel
+					     growing a second shape, and §161 for the call).
+					     It keeps its place because this is where the ERP connection is
+					     configured, so "now where do I pull it?" is asked here. -->
+					<section class="card">
+						<h2>{m('org.section.dataSync')}</h2>
+						<p class="card-hint">{m('org.dataSync.hint')}</p>
 
-				<div class="sync-grid">
-					<div class="sync-item">
-						<div class="sync-info">
-							<span class="sync-name">{m('org.dataSync.coa')}</span>
-							<span class="sync-desc">{m('org.dataSync.coaDesc')}</span>
+						<div class="sync-grid">
+							<div class="sync-item">
+								<div class="sync-info">
+									<span class="sync-name">{m('org.dataSync.coa')}</span>
+									<span class="sync-desc">{m('org.dataSync.coaDesc')}</span>
+								</div>
+								<a href="/gl-accounts" class="btn-outline">{m('org.dataSync.manageCoa')}</a>
+							</div>
+
+							<div class="sync-item">
+								<div class="sync-info">
+									<span class="sync-name">{m('org.dataSync.pos')}</span>
+									<span class="sync-desc">{m('org.dataSync.posDesc')}</span>
+								</div>
+								<a href="/purchase-orders" class="btn-outline">{m('org.dataSync.managePos')}</a>
+							</div>
+
+							<div class="sync-item">
+								<div class="sync-info">
+									<span class="sync-name">{m('org.dataSync.vendors')}</span>
+									<span class="sync-desc">{m('org.dataSync.vendorsDesc')}</span>
+								</div>
+								<a href="/vendors" class="btn-outline">{m('org.dataSync.manageVendors')}</a>
+							</div>
 						</div>
-						<a href="/gl-accounts" class="btn-outline">{m('org.dataSync.manageCoa')}</a>
-					</div>
+					</section>
+				{/if}
 
-					<div class="sync-item">
-						<div class="sync-info">
-							<span class="sync-name">{m('org.dataSync.pos')}</span>
-							<span class="sync-desc">{m('org.dataSync.posDesc')}</span>
+				{#if section === 'plan'}
+					<section class="card plan-card">
+						<h2>{m('org.section.plan')}</h2>
+						<div class="plan-info">
+							<Badge tone="accent" variant="plan-badge">{planLabel(org.plan)}</Badge>
+							<span class="plan-slug">{m('org.plan.tenant')} <code>{org.slug}</code></span>
+							<span class="plan-date">{m('org.plan.created', { date: formatDate(org.created_at, '—', { month: 'long', day: 'numeric', year: 'numeric' }) })}</span>
 						</div>
-						<a href="/purchase-orders" class="btn-outline">{m('org.dataSync.managePos')}</a>
-					</div>
-
-					<div class="sync-item">
-						<div class="sync-info">
-							<span class="sync-name">{m('org.dataSync.vendors')}</span>
-							<span class="sync-desc">{m('org.dataSync.vendorsDesc')}</span>
-						</div>
-						<a href="/vendors" class="btn-outline">{m('org.dataSync.manageVendors')}</a>
-					</div>
-				</div>
-			</section>
-
-			<section class="card plan-card">
-				<h2>{m('org.section.plan')}</h2>
-				<div class="plan-info">
-					<Badge tone="accent" variant="plan-badge">{planLabel(org.plan)}</Badge>
-					<span class="plan-slug">{m('org.plan.tenant')} <code>{org.slug}</code></span>
-					<span class="plan-date">{m('org.plan.created', { date: formatDate(org.created_at, '—', { month: 'long', day: 'numeric', year: 'numeric' }) })}</span>
-				</div>
-			</section>
-		</fieldset>
+					</section>
+				{/if}
+			</fieldset>
+		</div>
 	{:else}
 		<div class="loading">{m('org.loading')}</div>
 	{/if}
@@ -2616,6 +2800,28 @@
 	   border/padding/margin have to be reset so it lays out exactly as the
 	   <div> it replaced. `min-width: 0` stops the fieldset's default
 	   min-content sizing forcing the page wider than its container. */
+	/* Rail beside panel. One column on a phone, where the rail collapses to its
+	   own disclosure (`ui/SettingsRail.svelte`) and sits above the panel.
+	   `minmax(0, 1fr)` rather than `1fr` for the panel track: a grid item's
+	   default `min-width: auto` is its CONTENT width, so the widest form in any
+	   panel — the ERP credential grid — would push the track past the viewport
+	   and scroll the document sideways (WCAG 1.4.10), which is the same trap
+	   `.sections`' own `min-width: 0` is there for. */
+	.settings-layout {
+		display: grid;
+		gap: 20px;
+	}
+
+	@media (min-width: 60rem) {
+		.settings-layout {
+			grid-template-columns: 200px minmax(0, 1fr);
+			gap: 28px;
+			/* Not `stretch`: the rail is sticky, and a stretched grid item is as
+			   tall as the row, which leaves it nothing to stick within. */
+			align-items: start;
+		}
+	}
+
 	.sections {
 		display: flex;
 		flex-direction: column;

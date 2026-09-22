@@ -13,6 +13,10 @@ import { API_BASE, authedTenantHeaders, expect, test } from '../fixtures/helpers
  * `us` reads as aligned and pinning anything else reads as misaligned without
  * needing to reconfigure the backend under test. Each test restores the
  * region via the API in `finally` so runs are independent.
+ *
+ * `?section=residency` because the route shows one panel at a time now (the
+ * slug is part of its URL contract). A `page.reload()` below keeps the query
+ * string, so the panel survives one.
  */
 
 interface ResidencyResponse {
@@ -38,7 +42,7 @@ async function setRegion(page: import('@playwright/test').Page, region: string):
 
 test.describe('/organization data residency', () => {
 	test.beforeEach(async ({ page }) => {
-		await page.goto('/organization');
+		await page.goto('/organization?section=residency');
 	});
 
 	function panel(page: import('@playwright/test').Page) {

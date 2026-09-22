@@ -8,6 +8,10 @@ import { API_BASE, authedTenantHeaders, expect, test } from '../fixtures/helpers
  * panel lists current domains, adds one (validated), and removes one (armed
  * confirm). Each test cleans the list back to empty via the API in finally so
  * runs are independent and don't leak a host that other specs would collide on.
+ *
+ * `?section=custom-domains` because the route shows one panel at a time now
+ * (the slug is part of its URL contract). A `page.reload()` below keeps the
+ * query string, so the panel survives one.
  */
 
 async function getDomains(page: import('@playwright/test').Page): Promise<string[]> {
@@ -29,7 +33,7 @@ async function setDomains(
 
 test.describe('/organization custom domains', () => {
 	test.beforeEach(async ({ page }) => {
-		await page.goto('/organization');
+		await page.goto('/organization?section=custom-domains');
 	});
 
 	test('Custom Domains section renders', async ({ page }) => {

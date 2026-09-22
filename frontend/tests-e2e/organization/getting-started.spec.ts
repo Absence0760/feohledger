@@ -3,43 +3,85 @@ import { expect, test } from '../fixtures/helpers';
 /**
  * /organization — first-time-admin "Getting started" wayfinding strip.
  *
- * A card at the top of the settings stack with anchor links that jump to the
- * sections a new tenant configures first (issue #328, persona-new-user). It
- * hides nothing — purely a shortcut. This spec asserts the strip renders and
- * that an in-page link scrolls to / focuses its target section.
+ * It is the route's DEFAULT panel now (`?section=` absent or unrecognised lands
+ * here), and its links are the page's own section navigation rather than
+ * anchors into one long scroll: four `?section=` links plus `/admin`, which
+ * leaves the page entirely. So this spec is a navigation test — it asserts that
+ * activating each link actually shows the panel it names, not merely that the
+ * href reads right.
+ *
+ * The five `#org-*` anchors these links used to carry still resolve, because
+ * they exist in bookmarks and docs outside this repo; `section-nav.spec.ts`
+ * owns that leg.
  */
 
+/** The four links that stay on the page, with the panel each one names. */
+const PANEL_LINKS = [
+	['Company profile', 'company', 'Company Profile'],
+	['Invoice defaults', 'defaults', 'Invoice Defaults'],
+	['Approval thresholds', 'payments', 'Payments (ACH / Wire / RTP)'],
+	['Branding', 'branding', 'Branding']
+] as const;
+
+function strip(page: import('@playwright/test').Page) {
+	return page.locator('section.getting-started');
+}
+
 test.describe('/organization getting-started strip', () => {
-	test.beforeEach(async ({ page }) => {
+	test('is the default panel, and offers the five first-run destinations', async ({ page }) => {
 		await page.goto('/organization');
-	});
 
-	test('renders above the Company Profile section with the expected links', async ({ page }) => {
-		const strip = page.locator('section.getting-started');
-		await expect(strip.getByRole('heading', { name: 'Getting started' })).toBeVisible();
+		await expect(strip(page).getByRole('heading', { name: 'Getting started' })).toBeVisible();
 
-		const links = strip.getByRole('link');
+		const links = strip(page).getByRole('link');
 		await expect(links).toHaveCount(5);
-		await expect(strip.getByRole('link', { name: 'Company profile' })).toHaveAttribute(
-			'href',
-			'#org-company'
-		);
-		await expect(strip.getByRole('link', { name: 'Users & roles' })).toHaveAttribute(
+
+		// Each panel link names its section; the relative href keeps any other
+		// query parameter the page is carrying.
+		for (const [label, slug] of PANEL_LINKS) {
+			await expect(strip(page).getByRole('link', { name: label })).toHaveAttribute(
+				'href',
+				`?section=${slug}`
+			);
+		}
+		// Users & roles is the one that leaves the route — it is a page, not a
+		// panel, and always was.
+		await expect(strip(page).getByRole('link', { name: 'Users & roles' })).toHaveAttribute(
 			'href',
 			'/admin'
 		);
-
-		// The strip sits before the first real section.
-		const companyHeading = page.getByRole('heading', { name: 'Company Profile' });
-		await expect(companyHeading).toBeVisible();
 	});
 
-	test('an anchor link jumps to its section', async ({ page }) => {
-		await page.locator('section.getting-started').getByRole('link', { name: 'Branding' }).click();
-		await expect(page).toHaveURL(/#org-branding$/);
+	for (const [label, slug, heading] of PANEL_LINKS) {
+		test(`"${label}" opens the ${heading} panel`, async ({ page }) => {
+			await page.goto('/organization');
+			await expect(strip(page).getByRole('heading', { name: 'Getting started' })).toBeVisible();
 
-		const branding = page.locator('section#org-branding');
-		await expect(branding).toBeInViewport();
-		await expect(branding.getByRole('heading', { name: 'Branding' })).toBeVisible();
+			await strip(page).getByRole('link', { name: label }).click();
+
+			// The link's whole job: the named panel is on screen…
+			await expect(page.getByRole('heading', { name: heading, exact: true })).toBeVisible();
+			// …the section is in the URL, so it can be shared and bookmarked…
+			await expect(page).toHaveURL(new RegExp(`\\?section=${slug}$`));
+			// …the rail marks it as where the reader is…
+			await expect(page.locator(`[data-section-link="${slug}"]`)).toHaveAttribute(
+				'aria-current',
+				'page'
+			);
+			// …and the strip it was clicked from has been replaced, not scrolled
+			// past. (Asserted last: an absence check leading would pass against a
+			// page that had rendered nothing yet.)
+			await expect(strip(page)).toHaveCount(0);
+		});
+	}
+
+	test('"Users & roles" leaves the settings page for /admin', async ({ page }) => {
+		await page.goto('/organization');
+		await expect(strip(page).getByRole('heading', { name: 'Getting started' })).toBeVisible();
+
+		await strip(page).getByRole('link', { name: 'Users & roles' }).click();
+
+		await expect(page.getByRole('heading', { name: 'Users & Roles', exact: true })).toBeVisible();
+		await expect(page).toHaveURL(/\/admin$/);
 	});
 });

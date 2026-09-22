@@ -20,6 +20,10 @@ import {
  * the field is not its own panel), so these tests drive that button and read the
  * result back through `GET /api/organization/branding`. Every test restores the
  * whole brand payload in `finally` so a worker's tenant is left as found.
+ *
+ * `?section=branding` because the route shows one panel at a time now (the slug
+ * is part of its URL contract). The `page.reload()` calls below keep the query
+ * string, so the panel survives one.
  */
 
 interface BrandPayload {
@@ -57,7 +61,7 @@ function brandingCard(page: import('@playwright/test').Page) {
 
 test.describe('/organization tenant URL override', () => {
 	test.beforeEach(async ({ page }) => {
-		await page.goto('/organization');
+		await page.goto('/organization?section=branding');
 	});
 
 	test('shows the effective platform default while the override is empty', async ({ page }) => {
@@ -195,7 +199,7 @@ test.describe('/organization tenant URL override — non-admin', () => {
 		// goes read-only for a non-admin (one disabled <fieldset> around every
 		// panel) with a banner saying why. The server gate above is unchanged
 		// and remains the authority — this is the UI catching up to it.
-		await page.goto('/organization');
+		await page.goto('/organization?section=branding');
 
 		await expect(page.getByTestId('org-readonly-banner')).toBeVisible();
 		const card = brandingCard(page);
