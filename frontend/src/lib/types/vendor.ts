@@ -273,7 +273,7 @@ export interface VendorMergeResponse {
 	merged_at: string;
 }
 
-import type { BadgeTone } from '$lib/components/ui/Badge.svelte';
+import type { BadgeTone } from '$lib/components/ui/badgeTone';
 import type { MessageKey } from '$lib/i18n/messages';
 
 /**

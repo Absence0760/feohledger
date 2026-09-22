@@ -9,7 +9,7 @@
 // `unit_price` a `Decimal`, and `json.loads` turns a fractional JSON number
 // into a float before any validator can intervene.
 
-import type { BadgeTone } from '$lib/components/ui/Badge.svelte';
+import type { BadgeTone } from '$lib/components/ui/badgeTone';
 import type { MessageKey } from '$lib/i18n/messages';
 import type { MoneyAmount, MoneyString } from '$lib/utils/money';
 

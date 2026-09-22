@@ -3,7 +3,7 @@ import type { MoneyAmount, MoneyString } from '$lib/utils/money';
 // Types for the Contracts surface. Mirrors the JSON returned by the
 // `/api/contracts` endpoints (backend `Contract.to_dict()`). Money fields
 // arrive as numbers (or null); date fields are ISO date strings (or null).
-import type { BadgeTone } from '$lib/components/ui/Badge.svelte';
+import type { BadgeTone } from '$lib/components/ui/badgeTone';
 import type { MessageKey } from '$lib/i18n/messages';
 
 export type ContractType =

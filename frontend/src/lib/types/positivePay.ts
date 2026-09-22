@@ -7,7 +7,7 @@
 // crosses this boundary. `account_last4` is the only account detail on a
 // response; a `PresentedItem` carries only a check number + amount.
 
-import type { BadgeTone } from '$lib/components/ui/Badge.svelte';
+import type { BadgeTone } from '$lib/components/ui/badgeTone';
 import type { MessageKey } from '$lib/i18n/messages';
 import type { MoneyAmount, MoneyString } from '$lib/utils/money';
 

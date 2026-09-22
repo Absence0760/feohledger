@@ -10,7 +10,7 @@
 // `day_of_period`, `generated_count` and `variance_tolerance_pct` (a percent).
 // See `frontend/CLAUDE.md` § Money formatting.
 
-import type { BadgeTone } from '$lib/components/ui/Badge.svelte';
+import type { BadgeTone } from '$lib/components/ui/badgeTone';
 import type { MessageKey } from '$lib/i18n/messages';
 import type { MoneyAmount, MoneyString } from '$lib/utils/money';
 

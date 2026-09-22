@@ -11,7 +11,8 @@
 	import { toast } from '$lib/components/ui/Toast.svelte';
 	import RowAction from '$lib/components/ui/RowAction.svelte';
 	import Money from '$lib/components/ui/Money.svelte';
-	import Badge, { type BadgeTone } from '$lib/components/ui/Badge.svelte';
+	import Badge from '$lib/components/ui/Badge.svelte';
+	import type { BadgeTone } from '$lib/components/ui/badgeTone';
 	import { m } from '$lib/i18n/store.svelte';
 	import { invoiceWarningText } from '$lib/api/invoiceWarnings';
 	import { formatDate } from '$lib/utils/time';

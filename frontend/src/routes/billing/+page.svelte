@@ -7,7 +7,8 @@
 	import Modal from '$lib/components/ui/Modal.svelte';
 	import Money from '$lib/components/ui/Money.svelte';
 	import SubscriptionBadge from '$lib/components/ui/SubscriptionBadge.svelte';
-	import Badge, { type BadgeTone } from '$lib/components/ui/Badge.svelte';
+	import Badge from '$lib/components/ui/Badge.svelte';
+	import type { BadgeTone } from '$lib/components/ui/badgeTone';
 	import {
 		changeBillingPlan,
 		getBillingInvoices,

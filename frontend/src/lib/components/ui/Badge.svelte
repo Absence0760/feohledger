@@ -1,28 +1,10 @@
-<script lang="ts" module>
-	/**
-	 * The five tones the palette names, plus the two non-tinted cases every
-	 * badge row eventually needs.
-	 *
-	 * `neutral` is a flat `--bg` chip for a "nothing happening" state
-	 * (cancelled / not-applicable) — deliberately NOT a tint, because a tint
-	 * reads as a signal and these states are the absence of one.
-	 * `erp` is the one measured literal: purple carries no semantic the five
-	 * tones share (it exists to make "handed to the ERP" scannable
-	 * mid-pipeline), so it stays a literal here rather than becoming a palette
-	 * token with a single caller. See `StatusBadge.svelte` and decisions.md §30.
-	 */
-	export type BadgeTone =
-		| 'accent'
-		| 'success'
-		| 'warning'
-		| 'danger'
-		| 'muted'
-		| 'neutral'
-		| 'erp';
-</script>
-
 <script lang="ts">
 	import type { Snippet } from 'svelte';
+
+	// Deliberately NOT re-exported from here: the type lives in a `.ts` module
+	// so plain `tsc` (the `tests-e2e/` typecheck) can resolve it, and a
+	// re-export would invite the next importer back onto the path that cannot.
+	import type { BadgeTone } from './badgeTone';
 
 	/**
 	 * The shared tinted-badge primitive — ONE owner of the

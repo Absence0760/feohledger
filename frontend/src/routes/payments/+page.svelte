@@ -20,7 +20,8 @@
 	import { pruneSelection } from '$lib/utils/selection';
 	import SearchBox from '$lib/components/ui/SearchBox.svelte';
 	import StatusBadge from '$lib/components/ui/StatusBadge.svelte';
-	import Badge, { type BadgeTone } from '$lib/components/ui/Badge.svelte';
+	import Badge from '$lib/components/ui/Badge.svelte';
+	import type { BadgeTone } from '$lib/components/ui/badgeTone';
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 	import FilterChips from '$lib/components/ui/FilterChips.svelte';
 	import DataTable from '$lib/components/ui/DataTable.svelte';

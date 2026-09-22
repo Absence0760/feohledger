@@ -1,6 +1,6 @@
 import type { MoneyAmount } from '$lib/utils/money';
 import { normalizeMoneyInput } from '$lib/utils/moneyInput';
-import type { BadgeTone } from '$lib/components/ui/Badge.svelte';
+import type { BadgeTone } from '$lib/components/ui/badgeTone';
 
 // Types for the Dynamic Discounting & Early-Payment Optimization surface.
 // Mirrors the JSON the Phase-C `/api/discounts` router returns. Money fields

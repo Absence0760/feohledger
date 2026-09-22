@@ -11,7 +11,7 @@
 // the list/summary envelopes stays `number`: it is a ROW COUNT, not money.
 // See `frontend/CLAUDE.md` § Money formatting.
 
-import type { BadgeTone } from '$lib/components/ui/Badge.svelte';
+import type { BadgeTone } from '$lib/components/ui/badgeTone';
 import type { MessageKey } from '$lib/i18n/messages';
 import type { MoneyAmount, MoneyString } from '$lib/utils/money';
 

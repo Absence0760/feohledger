@@ -13,7 +13,8 @@
 	import Modal from '$lib/components/ui/Modal.svelte';
 	import Money from '$lib/components/ui/Money.svelte';
 	import VendorPicker from '$lib/components/ui/VendorPicker.svelte';
-	import Badge, { type BadgeTone } from '$lib/components/ui/Badge.svelte';
+	import Badge from '$lib/components/ui/Badge.svelte';
+	import type { BadgeTone } from '$lib/components/ui/badgeTone';
 	import { toast } from '$lib/components/ui/Toast.svelte';
 	import { auth } from '$lib/stores/auth.svelte';
 	import { m } from '$lib/i18n/store.svelte';

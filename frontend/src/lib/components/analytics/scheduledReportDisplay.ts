@@ -19,6 +19,7 @@
  *     invisible. Hardcoding either list is the bug this guards against.
  */
 
+import type { BadgeTone } from '$lib/components/ui/badgeTone';
 import type { MessageKey } from '$lib/i18n/messages';
 import type { ScheduledReport } from '$lib/types/scheduledReport';
 
@@ -118,10 +119,8 @@ export function scheduleHealth(s: ScheduledReport): ScheduleHealth {
 	return 'never_run';
 }
 
-/** Subset of `Badge`'s tones this panel uses. Structurally assignable to
- *  `BadgeTone`; declared locally so this module stays importable under the
- *  plain-Node vitest config (a `.svelte` import would need the compiler). */
-export type ScheduleBadgeTone = 'success' | 'warning' | 'danger' | 'muted' | 'neutral' | 'accent';
+/** The `Badge` tones this panel uses — every tone but the ERP pipeline's. */
+export type ScheduleBadgeTone = Exclude<BadgeTone, 'erp'>;
 
 /**
  * `auto_disabled` is `danger` while a hand-paused `disabled` is the flat,
