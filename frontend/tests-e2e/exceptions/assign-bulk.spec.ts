@@ -58,10 +58,18 @@ async function fetchAdminUserId(
  * too. The `created_at` / `updated_at` columns fill from their server
  * defaults, so a minimal column list is enough.
  */
+// `missing_data`, deliberately not a payment-blocking type (`duplicate`,
+// `fraud_flag`, …): clearing one of those is refused to anyone implicated in
+// the linked invoice (decisions §169–§170), and `invoices LIMIT 1` is whatever
+// row the heap yields first — once an earlier spec in the same tenant leaves an
+// invoice uploaded by this worker's admin in front, every dismiss here is a
+// segregation refusal and `updated` reads 0. These specs exercise assignment
+// and bulk mechanics, not segregation, so the seed must not depend on which
+// invoice it lands on.
 function seedOpenExceptions(n: number): string[] {
 	const out = tenantPsql(
 		`INSERT INTO exceptions (id, invoice_id, organization_id, exception_type, severity, description, status)
-		 SELECT gen_random_uuid(), i.id, i.organization_id, 'duplicate', 'warning', 'e2e self-seeded open exception', 'open'
+		 SELECT gen_random_uuid(), i.id, i.organization_id, 'missing_data', 'warning', 'e2e self-seeded open exception', 'open'
 		 FROM (SELECT id, organization_id FROM invoices LIMIT 1) i, generate_series(1, ${n})
 		 RETURNING id`
 	);
