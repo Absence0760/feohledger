@@ -176,7 +176,10 @@ test.describe('/bank-reconciliation (admin)', () => {
 			expect(txId).toBeTruthy();
 
 			// Candidate list = /outstanding's uncleared_payments bucket. Stubbed to
-			// a fixed row so the picker is exact without dispatching real money.
+			// a fixed row so the picker is exact without dispatching real money —
+			// in EUR, deliberately not the seeded org default, because the picker
+			// used to label every candidate with the org's currency on the belief
+			// that the row carried none.
 			await page.route(
 				(url) => url.pathname === '/api/bank-reconciliation/outstanding',
 				(route) =>
@@ -191,7 +194,7 @@ test.describe('/bank-reconciliation (admin)', () => {
 									invoice_number: 'E2E-INV-9001',
 									vendor_name: 'E2E Stub Vendor',
 									amount: '13579.24',
-									currency: 'USD',
+									currency: 'EUR',
 									method: 'ach',
 									status: 'submitted',
 									sent_on: '2019-03-05',
@@ -199,7 +202,7 @@ test.describe('/bank-reconciliation (admin)', () => {
 								}
 							],
 							uncleared_count: 1,
-							uncleared_totals: [{ currency: 'USD', total: '13579.24' }],
+							uncleared_totals: [{ currency: 'EUR', total: '13579.24' }],
 							unmatched_debits: [],
 							unmatched_debit_count: 0,
 							unmatched_debit_totals: [],
@@ -255,6 +258,10 @@ test.describe('/bank-reconciliation (admin)', () => {
 				name: 'Match this line to payment for E2E Stub Vendor'
 			});
 			await expect(pick).toBeVisible();
+			// The candidate wears ITS OWN currency, not the org's.
+			const candidate = dialog.locator('.picker-list li', { hasText: 'E2E Stub Vendor' });
+			await expect(candidate).toContainText(/€|EUR/);
+			await expect(candidate).not.toContainText('$');
 			await pick.click();
 
 			// The row now reads as a human-confirmed match, and the id the UI sent
