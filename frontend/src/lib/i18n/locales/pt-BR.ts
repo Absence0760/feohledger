@@ -2936,7 +2936,11 @@ export const messages = {
 	'byEntity.loading': 'Carregando…',
 	'byEntity.loadFailed': 'Falha ao carregar o detalhamento por entidade',
 	'byEntity.unconverted':
-		'Excluídas do total consolidado de Pendente: {n, plural, one {# fatura em aberto} other {# faturas em aberto}} sem taxa de câmbio travada para {currency}.',
+		'Em aberto inclui pelo valor nominal {n, plural, one {# fatura em aberto} other {# faturas em aberto}} sem taxa de câmbio travada para {currency}, então os totais misturam moedas.',
+	'byEntity.unconvertedSpend':
+		'O gasto inclui pelo valor nominal {n, plural, one {# fatura} other {# faturas}} sem taxa de câmbio travada para {currency}, então os totais misturam moedas.',
+	'byEntity.openPoNoCurrency':
+		'Os pedidos de compra ainda não registram uma moeda, então os pedidos abertos são exibidos sem ela.',
 
 	// Relatórios agendados (components/analytics/ScheduledReportsPanel.svelte)
 	'scheduledReports.heading': 'Relatórios agendados',

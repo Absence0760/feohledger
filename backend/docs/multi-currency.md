@@ -160,7 +160,11 @@ Surfaced in:
   row) gains `reporting_outstanding_amount` / `reporting_currency` /
   `reporting_outstanding_unconverted_count` beside the legacy naive
   `outstanding_amount`, using the same rollup `reporting_accounts_payable_balance`
-  uses so the two can't disagree for the consolidated row.
+  uses so the two can't disagree for the consolidated row — and
+  `reporting_total_spend` / `reporting_total_spend_unconverted_count` beside the
+  naive `total_spend`, the same population and rollup as `/cfo`'s
+  `reporting_spend`. `open_po_amount` has no counterpart: `PurchaseOrder` carries
+  no currency, so it is served, and rendered, with none.
 
 ### Per-vendor rollups
 

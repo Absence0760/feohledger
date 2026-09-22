@@ -281,16 +281,29 @@ export interface CfoAnalytics {
 // X-Entity-ID selection.
 
 export interface EntityMetrics {
+	/** Naive cross-currency SUM, kept for back-compat. Denominated in nothing — never render it. */
 	total_spend: string;
+	/**
+	 * Currency-aware counterpart of `total_spend`, in `reporting_currency` — the
+	 * same population and rollup as `/cfo`'s `reporting_spend`. Rows with no
+	 * locked rate are counted at FACE value; the count below says how many.
+	 */
+	reporting_total_spend: string;
+	reporting_total_spend_unconverted_count: number;
+	/** Naive cross-currency SUM, kept for back-compat. Never render it. */
 	outstanding_amount: string;
-	// Currency-aware counterpart of `outstanding_amount` — that field is a
-	// naive cross-currency sum; this is the same rollup `/cfo`'s
-	// `reporting_accounts_payable_balance` uses, in `reporting_currency`.
+	// Currency-aware counterpart of `outstanding_amount` — the same rollup
+	// `/cfo`'s `reporting_accounts_payable_balance` uses, in
+	// `reporting_currency`, unconverted rows at face value.
 	reporting_outstanding_amount: string;
 	reporting_currency: string;
 	reporting_outstanding_unconverted_count: number;
 	invoice_count: number;
 	open_exceptions: number;
+	/**
+	 * Sum of open PO totals. `PurchaseOrder` records no currency, so this is in
+	 * currencies nobody recorded and carries no code — render it bare.
+	 */
 	open_po_amount: string;
 }
 
@@ -298,6 +311,10 @@ export interface EntityRollupRow extends EntityMetrics {
 	entity_id: string;
 	entity_name: string;
 	entity_slug: string;
+	/**
+	 * The entity's CONFIGURED currency (`null` = the org's reporting one). Entity
+	 * metadata, not a denomination: none of the figures above is in it.
+	 */
 	currency: string | null;
 	is_default: boolean;
 }

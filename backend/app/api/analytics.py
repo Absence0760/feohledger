@@ -1341,6 +1341,25 @@ async def _entity_metrics(
     )
     total_spend = Decimal(str(total_spend_q.scalar() or 0))
 
+    # Currency-aware counterpart of the naive SUM above — the same population
+    # and the same rollup as `/cfo`'s `reporting_spend`, so the consolidated
+    # (entity_id=None) row and that tile cannot disagree. Without it the web
+    # labelled `total_spend` — a sum across whatever currencies an entity's
+    # invoices are in — with the entity's configured currency, or the org's when
+    # it had none: a mixed-currency figure wearing one currency's symbol.
+    spend_rows_q = await db.execute(
+        _inv(
+            invoice_currency_rollup_select(reporting_currency=reporting_currency).where(
+                Invoice.invoice_date >= period_start,
+                Invoice.status != InvoiceStatus.rejected.value,
+            )
+        )
+    )
+    spend_rollup = rollup_from_grouped_rows(
+        [dict(r) for r in spend_rows_q.mappings().all()],
+        reporting_currency=reporting_currency,
+    )
+
     # Invoice count in window (same filter as total spend).
     invoice_count_q = await db.execute(
         _inv(
@@ -1407,7 +1426,14 @@ async def _entity_metrics(
         open_po_amount = Decimal("0")
 
     return {
+        # Naive cross-currency SUM, kept for API back-compat; the figure to
+        # render is `reporting_total_spend` below.
         "total_spend": _money(total_spend),
+        # In `reporting_currency`. Rows with no locked rate into it are counted
+        # at FACE value (the shared `invoice_reporting_amount_sql` rule), and
+        # `reporting_total_spend_unconverted_count` says how many.
+        "reporting_total_spend": _money(spend_rollup.total_reporting_amount),
+        "reporting_total_spend_unconverted_count": spend_rollup.unconverted_count,
         "outstanding_amount": _money(outstanding_amount),
         # Reporting-currency counterpart, matching `/cfo`'s
         # `reporting_accounts_payable_balance`. `reporting_currency` is
@@ -1417,6 +1443,9 @@ async def _entity_metrics(
         "reporting_outstanding_unconverted_count": outstanding_rollup.unconverted_count,
         "invoice_count": invoice_count,
         "open_exceptions": open_exceptions,
+        # `PurchaseOrder` carries no currency column, so this is a sum of PO
+        # totals in currencies nobody recorded. It is served without a code on
+        # purpose — the client renders it bare — until POs record their own.
         "open_po_amount": _money(open_po_amount),
     }
 

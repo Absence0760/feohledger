@@ -2884,7 +2884,11 @@ export const messages = {
 	'byEntity.loading': '読み込み中…',
 	'byEntity.loadFailed': 'エンティティ別内訳の読み込みに失敗しました',
 	'byEntity.unconverted':
-		'統合された未払い合計から除外: {currency} への為替レートが未確定の未決済請求書が{n, plural, other {# 件}}あります。',
+		'未払いには、{currency} への為替レートが未確定の未決済請求書{n, plural, other {# 件}}が額面のまま含まれています。合計には複数の通貨が混在しています。',
+	'byEntity.unconvertedSpend':
+		'支出には、{currency} への為替レートが未確定の請求書{n, plural, other {# 件}}が額面のまま含まれています。合計には複数の通貨が混在しています。',
+	'byEntity.openPoNoCurrency':
+		'発注書にはまだ通貨が記録されていないため、未処理の発注は通貨なしで表示されます。',
 
 	// 定期レポート (components/analytics/ScheduledReportsPanel.svelte)
 	'scheduledReports.heading': '定期レポート',

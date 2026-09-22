@@ -2937,7 +2937,11 @@ export const messages = {
 	'byEntity.loading': 'Wird geladen…',
 	'byEntity.loadFailed': 'Aufschlüsselung nach Einheit konnte nicht geladen werden',
 	'byEntity.unconverted':
-		'Vom konsolidierten Ausstehend-Betrag ausgeschlossen: {n, plural, one {# offene Rechnung} other {# offene Rechnungen}} ohne festgelegten Wechselkurs in {currency}.',
+		'Ausstehend enthält {n, plural, one {# offene Rechnung} other {# offene Rechnungen}} ohne festgelegten Wechselkurs in {currency}, zum Nennwert gezählt – die Summen mischen Währungen in diesem Umfang.',
+	'byEntity.unconvertedSpend':
+		'Ausgaben enthalten {n, plural, one {# Rechnung} other {# Rechnungen}} ohne festgelegten Wechselkurs in {currency}, zum Nennwert gezählt – die Summen mischen Währungen in diesem Umfang.',
+	'byEntity.openPoNoCurrency':
+		'Bestellungen erfassen noch keine Währung, daher werden offene Bestellungen ohne Währung angezeigt.',
 
 	// Geplante Berichte (components/analytics/ScheduledReportsPanel.svelte)
 	'scheduledReports.heading': 'Geplante Berichte',
