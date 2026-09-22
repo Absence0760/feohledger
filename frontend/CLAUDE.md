@@ -243,6 +243,12 @@ call at a call site. The backend serializes money as an **exact decimal string**
 number to format it is how precision gets lost, so pass the string straight
 through. An absent figure formats as a dash, never `0.00`, and absence is keyed
 on nullish rather than falsiness so a genuine `0` still renders.
+
+**A figure is labelled by the currency its own payload names, and renders bare
+when there is none** — `formatMoney` shows grouped figures with no symbol for a
+`null` / malformed code instead of substituting `USD`. So never write
+`row.currency ?? orgCurrency.currency` for a per-row figure: pass the row's
+code, `null` included (`docs/decisions.md` §160, §198).
 ### Internationalization (i18n) — `src/lib/i18n/`
 
 **Full reference: `frontend/docs/i18n.md`** (catalogue layout, locale
