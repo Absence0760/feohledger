@@ -313,9 +313,9 @@ See [`access-reviews.md`](access-reviews.md).
 
 | Method | Path                           | Roles | Description |
 |--------|--------------------------------|-------|-------------|
-| `GET`  | `/api/purchase-orders`         | * | List POs (filterable by `status`, `vendor_id`, `search`) |
+| `GET`  | `/api/purchase-orders`         | * | List POs (filterable by `status`, `vendor_id`, `search`). Each row carries its own `currency` — `null` when the PO records none (the client renders it bare); the detail route serves the same field, which labels `total` and every line, plus each linked invoice's OWN `currency` (`docs/decisions.md` §197) |
 | `GET`  | `/api/purchase-orders/counts`  | * | Whole-set status tallies for the filter chips — `{total, by_status}`, entity-scoped, honours `search` + `vendor_id` through the SAME `_purchase_order_list_filters` builder as the list (but not `status`, the dimension being tallied). Mirrors `GET /api/vendors/counts`; the list's `total` counts only the ACTIVE filter's result set, so it can't label the All chip. A malformed `vendor_id` is a 422 from the boundary on both endpoints — as is an explicitly EMPTY `?vendor_id=`, which previously read as falsy and silently dropped the filter. |
-| `POST` | `/api/purchase-orders/sync-erp` | admin/manager | Pull POs from connected ERP |
+| `POST` | `/api/purchase-orders/sync-erp` | admin/manager | Pull POs from connected ERP. Stores the currency the ERP record states (NULL when none); on a re-sync a stated code wins and an absent one never erases a recorded code |
 
 ## GL Accounts
 

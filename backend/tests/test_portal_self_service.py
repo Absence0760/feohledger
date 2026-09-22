@@ -128,6 +128,56 @@ async def test_po_flip_creates_invoice_from_po(realdb):
 
 
 @pytest.mark.asyncio
+async def test_portal_pos_carry_their_own_currency_and_the_flip_inherits_it(realdb):
+    """A supplier sees each PO in the currency it was raised in, and an
+    invoice flipped from it is booked in that currency.
+
+    `PortalPOListItem.currency` defaulted to "USD" and the handler never set
+    it, so every PO a supplier saw read as dollars; the flip hardcoded "USD"
+    on the invoice too — a EUR order billed as a USD invoice of the same
+    figure (decisions §197). A PO that records no currency is served `null`
+    (the portal renders it bare), not a borrowed code.
+    """
+    org_id = realdb.info(TENANT).org_id
+    mk = realdb.sessionmaker(TENANT)
+    vendor_id, vu_id = await _seed_vendor_and_user(mk, org_id)
+    eur_id, bare_id = uuid.uuid4(), uuid.uuid4()
+    async with mk() as s:
+        for po_id, number, currency in ((eur_id, "PO-P-EUR", "EUR"), (bare_id, "PO-P-NONE", None)):
+            s.add(
+                PurchaseOrder(
+                    id=po_id,
+                    po_number=number,
+                    vendor_id=vendor_id,
+                    total=Decimal("300.00"),
+                    currency=currency,
+                    status="open",
+                    organization_id=org_id,
+                )
+            )
+        await s.commit()
+
+    async with _portal_client(realdb, vu_id, vendor_id) as client:
+        listed = (await client.get("/api/portal/purchase-orders")).json()["items"]
+        eur_detail = (await client.get(f"/api/portal/purchase-orders/{eur_id}")).json()
+        bare_detail = (await client.get(f"/api/portal/purchase-orders/{bare_id}")).json()
+        flipped = await client.post(f"/api/portal/purchase-orders/{eur_id}/flip")
+    assert flipped.status_code == 202, flipped.text
+
+    assert {row["po_number"]: row["currency"] for row in listed} == {
+        "PO-P-EUR": "EUR",
+        "PO-P-NONE": None,
+    }
+    assert eur_detail["currency"] == "EUR"
+    assert bare_detail["currency"] is None
+    async with mk() as s:
+        inv = (
+            await s.execute(select(Invoice).where(Invoice.id == uuid.UUID(flipped.json()["id"])))
+        ).scalar_one()
+    assert inv.currency == "EUR"
+
+
+@pytest.mark.asyncio
 async def test_po_flip_is_idempotent(realdb):
     """Two flips of the same PO from the same vendor return the same invoice
     — a double-click can't mint two invoices that each seed the payment path."""

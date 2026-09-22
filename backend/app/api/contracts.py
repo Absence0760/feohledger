@@ -39,7 +39,7 @@ from app.models.contract import (
     ContractLineItem,
     ContractStatus,
 )
-from app.models.procurement import POLineItem, PurchaseOrder
+from app.models.procurement import POLineItem, PurchaseOrder, po_currency_code
 from app.models.user import User
 from app.models.vendor import Vendor
 from app.schemas.contract import (
@@ -765,6 +765,9 @@ async def create_po_from_contract(
         po_number=po_number,
         vendor_id=contract.vendor_id,
         total=total,
+        # The contract's currency — its line items and `total_value`, which
+        # this total is taken from, are denominated in it.
+        currency=po_currency_code(contract.currency),
         status="open",
         organization_id=org_id,
         entity_id=contract.entity_id,
@@ -805,6 +808,7 @@ async def create_po_from_contract(
         "po_number": po.po_number,
         "vendor_id": str(po.vendor_id) if po.vendor_id else None,
         "total": json_money(po.total),
+        "currency": po.currency,
         "status": po.status,
         "contract_id": str(contract.id),
         "line_items": [

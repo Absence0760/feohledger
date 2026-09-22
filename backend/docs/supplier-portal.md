@@ -180,6 +180,15 @@ is AP's retry, not another vendor upload.
 | GET    | `/portal/purchase-orders/{id}`        | PO detail + line items; 404 for a foreign PO                                 |
 | POST   | `/portal/purchase-orders/{id}/flip`   | **PO flip** — create an invoice pre-populated from a vendor-owned PO         |
 
+Both reads serve each PO's own `currency` — `null` when the PO records none,
+and the portal renders that total bare. The schema used to default `currency`
+to `"USD"` and the handler never set it, so every PO a supplier saw read as
+dollars. The flip books the invoice in the PO's currency; a PO with none falls
+back to the column's historical `"USD"`, because `invoices.currency` is NOT NULL
+and cannot say "unknown" — PO matching reads the PO's NULL, not that
+placeholder, so the pair is reported as unverified rather than proven
+(`docs/decisions.md` §197).
+
 ### Company self-service (`portal.py`)
 
 | Method | Path                                  | Notes                                                                        |

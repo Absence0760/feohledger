@@ -59,6 +59,7 @@ async def _add_po(
     status: str = "open",
     vendor_id: uuid.UUID | None = None,
     line_items: list[dict] | None = None,
+    currency: str | None = None,
 ) -> uuid.UUID:
     async with mk() as s:
         po = PurchaseOrder(
@@ -66,6 +67,7 @@ async def _add_po(
             total=total,
             status=status,
             vendor_id=vendor_id,
+            currency=currency,
             organization_id=org_id,
         )
         s.add(po)
@@ -358,6 +360,51 @@ async def test_get_purchase_order_detail_with_invoices(realdb):
     assert body["linked_invoices"][0]["status"] == "approved"
 
 
+async def test_list_and_detail_serve_each_pos_own_currency(realdb):
+    """Every PO figure is labelled from the PO's own code — `null` included.
+
+    The list used to carry no currency at all, so the page stamped the org's on
+    every row; a NULL is served as `null` (the client renders the figure bare),
+    never replaced with a default (decisions §197). Linked invoices carry their
+    OWN currency, since an invoice in another currency than its PO is exactly
+    what a reviewer opens the panel to see.
+    """
+    mk = realdb.sessionmaker("a")
+    org_id = realdb.info("a").org_id
+    eur_id = await _add_po(
+        mk, org_id, po_number="PO-CCY-EUR", total=Decimal("100.00"), currency="EUR"
+    )
+    bare_id = await _add_po(mk, org_id, po_number="PO-CCY-NONE", total=Decimal("200.00"))
+    async with mk() as s:
+        s.add(
+            Invoice(
+                invoice_number="INV-CCY-1",
+                vendor_name="Anyone",
+                amount=Decimal("100.00"),
+                currency="GBP",
+                po_number="PO-CCY-EUR",
+                status=InvoiceStatus.approved,
+                organization_id=org_id,
+            )
+        )
+        await s.commit()
+
+    async with realdb.client(key="a", role="ap_clerk") as c:
+        listed = (await c.get("/api/purchase-orders?search=PO-CCY")).json()["items"]
+        eur = (await c.get(f"/api/purchase-orders/{eur_id}")).json()
+        bare = (await c.get(f"/api/purchase-orders/{bare_id}")).json()
+
+    assert {row["po_number"]: row["currency"] for row in listed} == {
+        "PO-CCY-EUR": "EUR",
+        "PO-CCY-NONE": None,
+    }
+    assert eur["currency"] == "EUR"
+    assert bare["currency"] is None
+    assert [(i["invoice_number"], i["currency"]) for i in eur["linked_invoices"]] == [
+        ("INV-CCY-1", "GBP")
+    ]
+
+
 async def test_get_purchase_order_404(realdb):
     async with realdb.client(key="a", role="ap_manager") as c:
         resp = await c.get(f"/api/purchase-orders/{uuid.uuid4()}")
@@ -434,6 +481,80 @@ async def test_sync_erp_creates_pos_and_is_idempotent(realdb):
         ).scalar_one_or_none()
         assert linked is not None
         assert linked.vendor_id is not None
+
+
+async def test_sync_erp_stamps_the_currency_the_erp_states(realdb):
+    """A synced PO records the code on the ERP record (the mock states USD)."""
+    org_id = realdb.info("a").org_id
+    await _set_org_erp(realdb, org_id, {"type": "mock", "integration_method": "direct"})
+    async with realdb.client(key="a", role="ap_manager") as c:
+        resp = await c.post("/api/purchase-orders/sync-erp")
+    assert resp.status_code == 200, resp.text
+
+    async with realdb.sessionmaker("a")() as s:
+        codes = (await s.execute(select(PurchaseOrder.currency))).scalars().all()
+    assert codes and set(codes) == {"USD"}
+
+
+async def _sync_with_payloads(realdb, monkeypatch, payloads) -> dict:
+    """Run sync-erp against the mock adapter, answering with ``payloads``."""
+    from app.services.erp_adapters.mock_adapter import MockAdapter
+
+    async def _list_pos(self):
+        return payloads
+
+    monkeypatch.setattr(MockAdapter, "list_pos", _list_pos)
+    await _set_org_erp(
+        realdb, realdb.info("a").org_id, {"type": "mock", "integration_method": "direct"}
+    )
+    async with realdb.client(key="a", role="ap_manager") as c:
+        resp = await c.post("/api/purchase-orders/sync-erp")
+    assert resp.status_code == 200, resp.text
+    return resp.json()
+
+
+async def _currency_of(realdb, po_number: str) -> str | None:
+    async with realdb.sessionmaker("a")() as s:
+        return (
+            await s.execute(
+                select(PurchaseOrder.currency).where(PurchaseOrder.po_number == po_number)
+            )
+        ).scalar_one()
+
+
+async def test_sync_erp_currency_is_erp_owned_but_silence_never_erases_it(realdb, monkeypatch):
+    """On a re-sync the ERP's code wins, like its total; a payload with none
+    leaves a recorded code alone; a new PO with none is stored NULL — never a
+    default, and a malformed code is no code at all."""
+    from app.services.erp_adapters.base import PoPayload
+
+    org_id = realdb.info("a").org_id
+    mk = realdb.sessionmaker("a")
+    await _add_po(mk, org_id, po_number="ERP-NULL", total=Decimal("10.00"))
+    await _add_po(mk, org_id, po_number="ERP-KEEP", total=Decimal("10.00"), currency="EUR")
+    await _add_po(mk, org_id, po_number="ERP-FIX", total=Decimal("10.00"), currency="EUR")
+
+    body = await _sync_with_payloads(
+        realdb,
+        monkeypatch,
+        [
+            PoPayload(po_number="ERP-NULL", total=Decimal("10.00"), currency="gbp"),
+            PoPayload(po_number="ERP-KEEP", total=Decimal("10.00"), currency=None),
+            PoPayload(po_number="ERP-FIX", total=Decimal("10.00"), currency="USD"),
+            PoPayload(po_number="ERP-NEW-NONE", total=Decimal("5.00"), currency=None),
+            PoPayload(po_number="ERP-NEW-BAD", total=Decimal("5.00"), currency="US"),
+        ],
+    )
+
+    assert await _currency_of(realdb, "ERP-NULL") == "GBP"  # back-filled, normalised
+    assert await _currency_of(realdb, "ERP-KEEP") == "EUR"  # silence is not a correction
+    assert await _currency_of(realdb, "ERP-FIX") == "USD"  # the ERP's code wins
+    assert await _currency_of(realdb, "ERP-NEW-NONE") is None
+    assert await _currency_of(realdb, "ERP-NEW-BAD") is None
+    # A currency change is a change: it is reported, not counted as skipped.
+    assert body["updated"] == 2
+    assert body["skipped"] == 1
+    assert body["created"] == 2
 
 
 async def test_sync_erp_isolated_per_tenant(realdb):

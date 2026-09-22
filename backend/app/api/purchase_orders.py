@@ -18,7 +18,7 @@ from app.api.deps import (
 from app.api.pagination import PaginationParams, paginated, pagination_params
 from app.models.invoice import Invoice
 from app.models.organization import Organization
-from app.models.procurement import POLineItem, PurchaseOrder
+from app.models.procurement import POLineItem, PurchaseOrder, po_currency_code
 from app.models.user import User
 from app.models.vendor import Vendor
 from app.schemas.money import json_money
@@ -126,6 +126,9 @@ async def list_purchase_orders(
                 "vendor_id": str(po.vendor_id) if po.vendor_id else None,
                 "vendor_name": vendor_names.get(str(po.vendor_id)) if po.vendor_id else None,
                 "total": json_money(po.total),
+                # The PO's own code — `null` when no source recorded one, and the
+                # client renders the figure bare rather than borrowing the org's.
+                "currency": po.currency,
                 "status": po.status,
                 "line_items": [_line_item_dict(li) for li in po.line_items],
                 "created_at": po.created_at.isoformat() if po.created_at else "",
@@ -282,6 +285,9 @@ async def get_purchase_order(
             "invoice_number": inv.invoice_number,
             "vendor_name": inv.vendor_name,
             "amount": json_money(inv.amount) if inv.amount else 0.0,
+            # The INVOICE's currency, which need not be the PO's — a reviewer
+            # opening this panel to compare the two must see both labels.
+            "currency": inv.currency,
             "status": inv.status.value if hasattr(inv.status, "value") else inv.status,
         }
         for inv in inv_q.scalars().all()
@@ -293,6 +299,8 @@ async def get_purchase_order(
         "vendor_id": str(po.vendor_id) if po.vendor_id else None,
         "vendor_name": vendor_name,
         "total": json_money(po.total),
+        # Labels `total` AND every line figure — lines carry no code of their own.
+        "currency": po.currency,
         "status": po.status,
         "line_items": [_line_item_dict(li) for li in po.line_items],
         "linked_invoices": linked_invoices,
@@ -377,6 +385,7 @@ async def sync_pos_from_erp(
             .limit(1)
         )
         existing_po = existing.scalar_one_or_none()
+        erp_currency = po_currency_code(erp_po.currency)
         if existing_po is not None:
             # Refresh the ERP-owned fields on an already-known PO. total and
             # status live entirely in the ERP (there's no PATCH endpoint for
@@ -403,6 +412,15 @@ async def sync_pos_from_erp(
             ):
                 existing_po.expected_delivery_date = erp_po.expected_delivery_date
                 changed = True
+            # The currency is the ERP's too — it is the other half of `total`,
+            # so a code the ERP states wins, exactly as the total just did. A
+            # payload that states none never erases one already recorded (the
+            # `expected_delivery_date` rule): silence is not a correction, and
+            # an unlabelled refresh of the same order is far likelier than a
+            # silent re-denomination.
+            if erp_currency is not None and existing_po.currency != erp_currency:
+                existing_po.currency = erp_currency
+                changed = True
 
             if changed:
                 updated += 1
@@ -420,6 +438,8 @@ async def sync_pos_from_erp(
             # Populate the promised delivery date straight from the ERP payload
             # (None when the ERP didn't supply one — never fabricated).
             expected_delivery_date=erp_po.expected_delivery_date,
+            # What the ERP says `total` is in; NULL when it says nothing.
+            currency=erp_currency,
             organization_id=org_id,
             entity_id=entity_id,
         )

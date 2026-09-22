@@ -23,6 +23,7 @@ from app.models.procurement import (
     PurchaseRequisition,
     RequisitionLineItem,
     RequisitionStatus,
+    po_currency_code,
 )
 
 # Allowed source → target requisition status transitions. An invalid source
@@ -154,12 +155,16 @@ def convert_requisition_to_po(
 
     Pure construction — the caller adds the PO to the session, flushes, links
     ``req.converted_po_id`` / ``req.status`` and writes the audit row. The PO
-    inherits the requisition's entity, vendor, and exact ``total``; each line's
-    ``total`` carries over unchanged (already ``Decimal``)."""
+    inherits the requisition's entity, vendor, exact ``total`` and the
+    ``currency`` that total is in; each line's ``total`` carries over unchanged
+    (already ``Decimal``). The currency is the same rule migration 0099's
+    backfill applies to every PO converted before the column existed, so a PO
+    converted today and one converted last year carry the same answer."""
     po = PurchaseOrder(
         po_number=po_number,
         vendor_id=req.vendor_id,
         total=Decimal(req.total or 0),
+        currency=po_currency_code(req.currency),
         status="open",
         organization_id=org_id,
         entity_id=req.entity_id,

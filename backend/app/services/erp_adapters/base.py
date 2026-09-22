@@ -164,6 +164,12 @@ class PoPayload:
     # adapter emits a deterministic value so local-first dev exercises the path.
     expected_delivery_date: date | None = None
     line_items: list[PoLinePayload] = field(default_factory=list)
+    # ISO 4217 code the ERP says `total` is denominated in. Maps onto
+    # ``PurchaseOrder.currency`` through ``po_currency_code``. None when the ERP
+    # record carries no code — real adapters must NOT fill in a default (a
+    # default is a label nobody gave the figure; decisions §197), and the sync
+    # then stores NULL, rendered bare.
+    currency: str | None = None
 
 
 @dataclass

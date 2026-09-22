@@ -642,6 +642,34 @@ async def test_create_po_from_contract(realdb):
         assert len(actions) >= 1
 
 
+async def test_create_po_from_contract_is_denominated_in_the_contracts_currency(realdb):
+    """The PO's total is the contract's figures, so it carries the contract's code.
+
+    Before `purchase_orders.currency` existed the PO recorded none, and every
+    surface labelled a GBP contract's PO with the org's currency (decisions §197).
+    """
+    mk = realdb.sessionmaker("a")
+    org_id = realdb.info("a").org_id
+    vendor_id = await _add_vendor(mk, org_id)
+
+    async with realdb.client(key="a", role="ap_manager") as c:
+        contract_id = (await _create_contract(c, vendor_id, currency="GBP")).json()["id"]
+        await c.post(f"/api/contracts/{contract_id}/activate")
+        resp = await c.post(f"/api/contracts/{contract_id}/create-po", json={})
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["currency"] == "GBP"
+
+    async with mk() as s:
+        from app.models.procurement import PurchaseOrder
+
+        stored = (
+            await s.execute(
+                select(PurchaseOrder).where(PurchaseOrder.id == uuid.UUID(resp.json()["id"]))
+            )
+        ).scalar_one()
+    assert stored.currency == "GBP"
+
+
 async def test_renewal_alert_sweep(realdb):
     from datetime import date, timedelta
 

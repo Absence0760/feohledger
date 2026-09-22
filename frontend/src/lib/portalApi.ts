@@ -203,7 +203,10 @@ export interface PortalPOListItem {
 	po_number: string;
 	status: string;
 	total: number | string;
-	currency: string;
+	/** The PO's own code; `null` when no source recorded one, and `<Money>`
+	 *  then renders the total bare. It used to arrive as `"USD"` for every PO,
+	 *  a schema default the handler never overrode (decisions §197). */
+	currency: string | null;
 	line_item_count: number;
 	created_at: string;
 }

@@ -242,6 +242,36 @@ def test_merge_dev_list_pos_maps_expected_delivery_date():
         assert pos[0].expected_delivery_date == expected, raw
 
 
+def test_merge_dev_list_pos_maps_currency_and_never_defaults_it():
+    """Merge's unified PurchaseOrder names its ``currency`` beside
+    ``total_amount``; the mapper passes it through, and a record with none
+    maps to None — a real adapter never fills in a default (decisions §197).
+    The mock adapter states one on every PO, as the ERP record would."""
+    from app.services.erp_adapters.dispatcher import get_erp_adapter
+    from app.services.erp_adapters.merge_dev import MergeDevAdapter
+
+    adapter = MergeDevAdapter({"api_key": "k", "account_token": "tok"})
+    cases = [
+        ({"number": "P", "currency": "EUR"}, "EUR"),
+        ({"number": "P"}, None),
+        ({"number": "P", "currency": None}, None),
+        ({"number": "P", "currency": 978}, None),  # a numeric ISO code is not ours to guess
+    ]
+    for raw, expected in cases:
+        body = {"results": [raw], "next": None}
+        with patch("httpx.AsyncClient") as client_cls:
+            client = client_cls.return_value.__aenter__.return_value
+            client.get = AsyncMock(return_value=_make_mock_response(200, body))
+            pos = _run(adapter.list_pos())
+        assert pos[0].currency == expected, raw
+
+    from app.services.erp_adapters.base import PoPayload
+
+    assert PoPayload(po_number="x").currency is None
+    mock = get_erp_adapter({"type": "mock", "integration_method": "direct"})
+    assert {p.currency for p in _run(mock.list_pos())} == {"USD"}
+
+
 def test_po_payload_expected_delivery_date_default_is_none():
     """A real adapter that doesn't set the field must leave it None — the
     on-time scorer treats None as "no promised date" (excluded), so a bogus

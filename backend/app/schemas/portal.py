@@ -238,7 +238,10 @@ class PortalPOListItem(BaseModel):
     po_number: str
     status: str
     total: Decimal
-    currency: str = "USD"
+    #: The PO's own code, or ``None`` when no source recorded one. This used to
+    #: default to ``"USD"`` and the handler never set it, so every PO a
+    #: supplier saw read as dollars whatever it was raised in (decisions §197).
+    currency: str | None = None
     line_item_count: int = 0
     created_at: datetime
 
@@ -260,7 +263,8 @@ class PortalPODetail(BaseModel):
     po_number: str
     status: str
     total: Decimal
-    currency: str = "USD"
+    #: Labels ``total`` and every line figure; ``None`` renders bare.
+    currency: str | None = None
     created_at: datetime
     line_items: list[PortalPOLineItem] = []
 

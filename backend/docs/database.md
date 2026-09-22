@@ -117,7 +117,7 @@ decimal comparison rather than binary drift.
 - `vendor_extraction_priors` — per-vendor correction cache. Unique on `(vendor_id, field_name)`. Populated when reviewers correct fields during approval; applied to low-confidence extractions for the same vendor.
 
 #### Procurement (for 3-way matching)
-- `purchase_orders` — PO header (vendor, total, status)
+- `purchase_orders` — PO header (vendor, total, **currency**, status). `currency` is nullable with no default (migration 0099): the code the PO's source knew, NULL when none said — see `docs/decisions.md` §197
 - `po_line_items` — PO lines
 - `goods_receipts` — GR header
 - `gr_line_items` — GR lines
@@ -449,7 +449,7 @@ gate fails if a model is added without being classified.
    - `InvoiceLineItem` — invoice_id, item_code, description, quantity, unit_price, total, gl_account
    - `InvoiceExtractionResult` — invoice_id, method, confidence, raw_result (JSONB)
    - `Vendor` — name, code, tax_id, status (active/unverified/inactive/rejected), source (manual/erp_sync/ai_extracted)
-   - `PurchaseOrder` — po_number, vendor_id, total, status
+   - `PurchaseOrder` — po_number, vendor_id, total, currency (nullable, no default — migration 0099), status
    - `POLineItem` — po_id, description, quantity, unit_price, total
    - `GoodsReceipt` — gr_number, po_id, received_date, status
    - `GRLineItem` — gr_id, description, quantity_received

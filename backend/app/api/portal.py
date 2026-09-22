@@ -947,6 +947,7 @@ async def list_my_purchase_orders(
                 po_number=po.po_number,
                 status=po.status,
                 total=po.total,
+                currency=po.currency,
                 line_item_count=n,
                 created_at=po.created_at,
             )
@@ -982,6 +983,7 @@ async def get_my_purchase_order(
         po_number=po.po_number,
         status=po.status,
         total=po.total,
+        currency=po.currency,
         created_at=po.created_at,
         line_items=[
             PortalPOLineItem(
@@ -1066,7 +1068,13 @@ async def flip_purchase_order(
         vendor_id=vendor.id,
         description=f"Created from {po.po_number}",
         amount=po.total,
-        currency="USD",
+        # The invoice bills the PO's own total, so it is in the PO's currency.
+        # A PO that records none (created before migration 0099 with no
+        # requisition behind it) falls back to the column's historical "USD":
+        # `invoices.currency` is NOT NULL and cannot say "unknown". That pairing
+        # is never mistaken for proof — `po_matching` reads the PO's NULL, not
+        # this placeholder, and reports the currency leg as unverified.
+        currency=po.currency or "USD",
         status=InvoiceStatus.new,
         po_number=po.po_number,
         # Stable per-PO marker — drives the idempotency guard above.
