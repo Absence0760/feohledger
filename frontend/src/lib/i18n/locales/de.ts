@@ -3405,6 +3405,9 @@ export const messages = {
 	'auth.signup.successSpamLink': 'versuchen Sie es erneut',
 	'auth.signup.heading': 'Erstellen Sie Ihren Arbeitsbereich',
 	'auth.signup.subtitle': 'Richten Sie Ihren eigenen AP-Arbeitsbereich in unter einer Minute ein.',
+	'auth.signup.closedHeading': 'Registrierung geschlossen',
+	'auth.signup.closedBody':
+		'Neue Arbeitsbereiche werden auf dieser Instanz nur auf Einladung eingerichtet. Wenn Ihr Unternehmen FeohLedger bereits nutzt, melden Sie sich unter der Adresse Ihres Arbeitsbereichs an.',
 	'auth.signup.failed': 'Registrierung fehlgeschlagen.',
 	'auth.signup.captchaRequired': 'Bitte schließen Sie das Captcha ab.',
 	'auth.signup.companyName': 'Firmenname',

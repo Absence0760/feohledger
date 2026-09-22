@@ -525,8 +525,13 @@ app.include_router(health.router, prefix="/api")
 @app.get("/api/public-config")
 async def public_config():
     """Non-secret config exposed to the frontend (e.g., captcha sitekey,
-    tenant URL shape used by the signup form and other non-tenant pages)."""
+    tenant URL shape used by the signup form and other non-tenant pages).
+
+    ``signup_enabled`` lets `/signup` render "signup is closed" rather than a
+    form every submit of which would 404 (`FEOH_SIGNUP_ENABLED`). Publishing it
+    leaks nothing: a closed deployment's signup routes already answer 404."""
     return {
         "hcaptcha_sitekey": settings.hcaptcha_sitekey,
         "tenant_url_template": settings.tenant_url_template,
+        "signup_enabled": settings.signup_enabled,
     }

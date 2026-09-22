@@ -2,6 +2,41 @@
 
 End-to-end flow for anonymous visitors to provision their own workspace. Landing page → signup form → verification email → workspace created → welcome email → first login → forced password change.
 
+## Turning signup off — `FEOH_SIGNUP_ENABLED`
+
+Self-service signup is **on by default** — `pnpm dev`, the signup e2e and every
+existing deployment keep working unchanged. Set `FEOH_SIGNUP_ENABLED=false` on a
+deployment whose tenants are all provisioned by an operator
+(`deploy/add-tenant.sh`, `scripts/create_tenant.py`), such as an invite-only
+pilot. With it off:
+
+- **All three `/api/signup/*` routes answer a bare `404 {"detail": "Not Found"}`**
+  — the body an unmounted route returns. The check is a router-level dependency
+  (`api/signup.py::_require_signup_enabled`), so it runs before the request body
+  is validated, before a database session is opened and before any rate limit is
+  spent: a closed deployment creates no `EmailVerification` row, consumes no
+  verification token, and a probe cannot burn a real visitor's per-IP budget.
+  404 rather than a "disabled" 403 follows the cash-flow copilot's and the
+  public API's kill switches — the response does not enumerate a feature that is
+  off.
+- **`/api/public-config` reports `signup_enabled: false`**, and `/signup` renders
+  a "Signup is closed" notice (no form, no captcha widget, no slug check, no
+  "what happens next" panel) instead of a form every submit of which would fail.
+  The landing page's calls to action still lead there, which is deliberate —
+  see [decisions.md](decisions.md) §194.
+- **The hCaptcha secret stops being required.** The deployed-env boot check
+  (`config.py::_require_captcha_in_deployed_envs`) and `deploy/decrypt-env.sh`
+  demand `FEOH_HCAPTCHA_SECRET` only while signup is on: with nothing public
+  creating tenants there is nothing for a captcha to protect.
+- A verification link already emailed while signup was open stays unconsumed;
+  re-opening signup lets that visitor finish.
+
+**What production should set:** a deployment that takes self-service customers
+keeps the default (`true`) and **must** set `FEOH_HCAPTCHA_SECRET` and
+`FEOH_HCAPTCHA_SITEKEY` — it refuses to boot without the secret. A deployment
+whose tenants are provisioned by hand sets `FEOH_SIGNUP_ENABLED=false` and may
+leave both hCaptcha values empty.
+
 ## User journey
 
 1. Visitor lands on the apex domain (no subdomain) and clicks **Create your workspace**.
@@ -39,7 +74,7 @@ End-to-end flow for anonymous visitors to provision their own workspace. Landing
 
 ## Abuse mitigations
 
-- **Captcha**: hCaptcha on `POST /signup/start`. Skipped locally when `FEOH_HCAPTCHA_SECRET` is empty — but a **deployed** env (`FEOH_ENVIRONMENT` not in `development`/`test`/`ci`/…) **refuses to boot** with the secret empty, so the gate can't silently fail open in production. The empty-secret skip logs at WARNING. **There is no switch that turns signup off**, so the secret is needed even on a box that wants none: to keep signup closed, set the secret and leave `FEOH_HCAPTCHA_SITEKEY` empty — the page loads no widget and sends no token, and `/signup/start` refuses every submit with 400 "Captcha is required." (the missing switch is tracked in [followups.md](followups.md)).
+- **Captcha**: hCaptcha on `POST /signup/start`. Skipped locally when `FEOH_HCAPTCHA_SECRET` is empty — but a **deployed** env (`FEOH_ENVIRONMENT` not in `development`/`test`/`ci`/…) with signup on **refuses to boot** with the secret empty, so the gate can't silently fail open in production. The empty-secret skip logs at WARNING. To close signup, don't starve the captcha — set `FEOH_SIGNUP_ENABLED=false` (above), which also lifts the secret requirement.
 - **Rate limit (per IP)**: Redis sliding window keyed by IP+endpoint. `FEOH_SIGNUP_RATE_LIMIT_PER_HOUR` (default 5) caps `/signup/start` and `/signup/complete`; `/signup/slug-check` has its own higher cap (`FEOH_SLUG_CHECK_RATE_LIMIT_PER_HOUR`, default 120) so it can't be scripted for namespace enumeration / control-plane DB amplification.
 - **Rate limit (per email)**: a second limiter keyed on the target address (`FEOH_SIGNUP_EMAIL_RATE_LIMIT_PER_HOUR`, default 3) caps verification-email volume to one victim — the per-IP limit alone can't stop an attacker rotating IPs to email-bomb an address. A "resend" also **replaces** any prior un-consumed verification for that email, so the table can't grow unbounded per address.
 - **Email verification**: no resources are provisioned until the user proves inbox access by clicking the link. Stolen email addresses don't result in tenants.
@@ -69,8 +104,9 @@ Adding a provider: copy `app/services/email_adapters/console_adapter.py`, implem
 | `FEOH_PUBLIC_URL` | `http://localhost:7777` | Frontend URL — used to build verification links |
 | `FEOH_TENANT_URL_TEMPLATE` | `http://{slug}.localhost:7777` | `{slug}` is substituted in the welcome email |
 | `FEOH_ENVIRONMENT` | `development` | Deployment discriminator. Any value outside `development`/`dev`/`local`/`test`/`ci` is "deployed" and turns on the production safety guards (e.g. captcha must be configured). |
-| `FEOH_HCAPTCHA_SECRET` | *(empty)* | Empty skips verification — OK for local dev; a deployed env refuses to boot when empty. |
-| `FEOH_HCAPTCHA_SITEKEY` | *(empty)* | Exposed to the frontend via `/api/public-config` |
+| `FEOH_SIGNUP_ENABLED` | `true` | Master switch for `/api/signup/*`. `false` → every signup route 404s, `/signup` says signup is closed, and the hCaptcha secret is no longer required. See § Turning signup off. |
+| `FEOH_HCAPTCHA_SECRET` | *(empty)* | Empty skips verification — OK for local dev; a deployed env with signup on refuses to boot when empty. |
+| `FEOH_HCAPTCHA_SITEKEY` | *(empty)* | Exposed to the frontend via `/api/public-config` (alongside `signup_enabled`) |
 | `FEOH_SIGNUP_RATE_LIMIT_PER_HOUR` | `5` | Per-IP cap on `/signup/start` (and `/signup/complete`) |
 | `FEOH_SIGNUP_EMAIL_RATE_LIMIT_PER_HOUR` | `3` | Per-email cap on verification sends (anti email-bombing) |
 | `FEOH_SLUG_CHECK_RATE_LIMIT_PER_HOUR` | `120` | Per-IP cap on `/signup/slug-check` (anti-enumeration) |

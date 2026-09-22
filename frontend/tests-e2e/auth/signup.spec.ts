@@ -1,3 +1,4 @@
+import type { PublicConfig } from '$lib/types/publicConfig';
 import { expect, NO_TENANT_BASE, test } from '../fixtures/helpers';
 
 
@@ -50,5 +51,32 @@ test.describe('/signup (no tenant)', () => {
 		// `.hint.ok` ("Available") appears once the debounced check
 		// returns 200 from /api/signup/slug-check.
 		await expect(page.locator('small.hint.ok')).toBeVisible({ timeout: 5_000 });
+	});
+
+	test('a deployment with signup closed says so instead of rendering the form', async ({
+		page
+	}) => {
+		// `FEOH_SIGNUP_ENABLED=false` reaches the SPA only through
+		// `/api/public-config`. Everything else in the real answer is kept, so
+		// the one field under test is the only thing this stub changes.
+		await page.route('**/api/public-config', async (route) => {
+			const upstream = await route.fetch();
+			const real = (await upstream.json()) as PublicConfig;
+			await route.fulfill({
+				response: upstream,
+				json: { ...real, signup_enabled: false } satisfies PublicConfig
+			});
+		});
+
+		await page.goto('/signup');
+
+		await expect(page.getByRole('heading', { name: 'Signup is closed' })).toBeVisible();
+		await expect(page.getByText(/created by invitation only/)).toBeVisible();
+		// No form that every submit of would 404 — and no "what happens next"
+		// panel describing a flow that is not on offer.
+		await expect(page.getByRole('heading', { name: 'Create your workspace' })).toHaveCount(0);
+		await expect(page.getByPlaceholder('acme')).toHaveCount(0);
+		await expect(page.getByRole('button', { name: 'Send verification email' })).toHaveCount(0);
+		await expect(page.getByRole('heading', { name: 'What happens next' })).toHaveCount(0);
 	});
 });

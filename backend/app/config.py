@@ -461,6 +461,17 @@ class Settings(BaseSettings):
     # See backend/docs/notifications.md § Chat notifications (Slack/Teams).
     chat_notification_provider: str = "mock"  # "mock" (default) | "slack" | "teams"
 
+    # Master switch for self-service tenant signup (`/api/signup/*`). On by
+    # default — today's behaviour, and the one `pnpm dev` and the signup e2e
+    # exercise. Off, all three signup routes answer a bare 404 (the surface is
+    # simply gone, like the cash-flow copilot's and the public API's kill
+    # switches), `/api/public-config` reports `signup_enabled: false` so the SPA
+    # renders "signup is closed" instead of a form that can only be refused, and
+    # the deployed-env captcha boot check below stops applying, because there is
+    # no public tenant-creating endpoint left for it to protect. Set it false on
+    # an invite-only deployment whose tenants are provisioned by
+    # `deploy/add-tenant.sh` / `scripts/create_tenant.py`.
+    signup_enabled: bool = True
     hcaptcha_secret: str = ""  # empty = skip captcha verification
     hcaptcha_sitekey: str = ""  # exposed to frontend via a public endpoint
     signup_rate_limit_per_hour: int = 5
@@ -923,12 +934,16 @@ class Settings(BaseSettings):
     def _require_captcha_in_deployed_envs(self) -> "Settings":
         # Fail fast at boot rather than silently shipping signup with captcha
         # disabled — a 'fail open' captcha is an abuse hole on a public,
-        # tenant-creating endpoint.
-        if self.is_deployed and not self.hcaptcha_secret:
+        # tenant-creating endpoint. Only while that endpoint exists: with
+        # `signup_enabled` off every signup route 404s before reaching the
+        # captcha check, so demanding a secret would only make an operator hold
+        # a credential for a feature they turned off.
+        if self.is_deployed and self.signup_enabled and not self.hcaptcha_secret:
             raise ValueError(
                 "FEOH_HCAPTCHA_SECRET must be set when FEOH_ENVIRONMENT is a deployed "
-                f"environment ({self.environment!r}); refusing to boot with captcha "
-                "verification disabled on the public signup endpoint."
+                f"environment ({self.environment!r}) and self-service signup is on; "
+                "refusing to boot with captcha verification disabled on the public "
+                "signup endpoint. Set FEOH_SIGNUP_ENABLED=false to close signup instead."
             )
         return self
 

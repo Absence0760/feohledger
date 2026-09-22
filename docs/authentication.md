@@ -1922,7 +1922,7 @@ parked here.
 | Route | Why it is public |
 |---|---|
 | `GET /health` | Liveness probe. No identity, no tenant data. |
-| `GET /public-config` | Non-secret config (hCaptcha sitekey, tenant URL template) the SPA needs before a session exists. |
+| `GET /public-config` | Non-secret config (hCaptcha sitekey, tenant URL template, whether self-service signup is open) the SPA needs before a session exists. |
 | `GET /v1/openapi.json`, `GET /v1/docs` | The published contract + reference for the public `/api/v1` surface — public to read like any API doc; both 404 when `FEOH_PUBLIC_API_ENABLED` is off. |
 | `GET /scim/v2/ServiceProviderConfig`, `GET /scim/v2/Schemas/{id}` | SCIM discovery documents. IdPs (Entra) probe them before they hold a bearer token; static capability/schema flags, no tenant data. |
 | `GET /auth/sso/config`, `GET /auth/saml/config` | The login page decides whether to render the SSO button before anyone is signed in. Returns only `{enabled, provider, sso_only}`. |

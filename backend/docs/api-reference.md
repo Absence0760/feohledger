@@ -174,13 +174,13 @@ Groups map to RBAC roles via `settings.sso.scim_group_role_map` (`{displayName: 
 | `POST`  | `/api/signup/start`       | Rate-limited + captcha-verified. Creates `email_verifications` row and sends verification email. |
 | `POST`  | `/api/signup/complete`    | Consumes token, provisions tenant (DB + org + admin user), sends welcome email. |
 
-See [`docs/self-service-signup.md`](../../docs/self-service-signup.md) for the full flow.
+All three answer a bare `404` when `FEOH_SIGNUP_ENABLED` is off — before validating the body, opening a session or spending a rate limit. See [`docs/self-service-signup.md`](../../docs/self-service-signup.md) for the full flow.
 
 ## Public config
 
 | Method | Path                  | Description |
 |--------|-----------------------|-------------|
-| `GET`  | `/api/public-config`  | Non-secret config (hcaptcha sitekey, tenant URL template) for the signup form |
+| `GET`  | `/api/public-config`  | Non-secret config for the pre-session SPA: `hcaptcha_sitekey`, `tenant_url_template`, `signup_enabled` (`FEOH_SIGNUP_ENABLED` — `/signup` renders "closed" on false) |
 
 ## Organization
 

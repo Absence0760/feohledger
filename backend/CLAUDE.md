@@ -879,9 +879,11 @@ The welcome email contains the tenant URL (`FEOH_TENANT_URL_TEMPLATE`, e.g. `htt
 - `utils/hcaptcha.py` — server-side siteverify. Skips when `FEOH_HCAPTCHA_SECRET` is empty (local dev).
 - `utils/passwords.py` — `generate_temp_password()` + `validate_password_complexity()` (min 12 chars, upper/lower/digit).
 
-The captcha sitekey is exposed to the frontend via `GET /api/public-config` so the SvelteKit build doesn't need to bake it in.
+The captcha sitekey is exposed to the frontend via `GET /api/public-config` so the SvelteKit build doesn't need to bake it in, alongside `signup_enabled`.
 
-Relevant env vars: `FEOH_ENVIRONMENT` (deployed envs refuse to boot with an empty `FEOH_HCAPTCHA_SECRET`), `FEOH_EMAIL_PROVIDER`, `FEOH_EMAIL_FROM`, `FEOH_AWS_SES_REGION`, `FEOH_PUBLIC_URL`, `FEOH_TENANT_URL_TEMPLATE`, `FEOH_HCAPTCHA_SECRET`, `FEOH_HCAPTCHA_SITEKEY`, `FEOH_SIGNUP_RATE_LIMIT_PER_HOUR`, `FEOH_SIGNUP_EMAIL_RATE_LIMIT_PER_HOUR`, `FEOH_SLUG_CHECK_RATE_LIMIT_PER_HOUR`.
+`FEOH_SIGNUP_ENABLED` (default `true`) is the off switch: a router-level dependency makes every `/api/signup/*` route a bare 404 before validation, DB or rate limit, and the SPA renders "signup is closed" from `public-config` (`docs/self-service-signup.md` § Turning signup off).
+
+Relevant env vars: `FEOH_SIGNUP_ENABLED`, `FEOH_ENVIRONMENT` (deployed envs with signup on refuse to boot with an empty `FEOH_HCAPTCHA_SECRET`), `FEOH_EMAIL_PROVIDER`, `FEOH_EMAIL_FROM`, `FEOH_AWS_SES_REGION`, `FEOH_PUBLIC_URL`, `FEOH_TENANT_URL_TEMPLATE`, `FEOH_HCAPTCHA_SECRET`, `FEOH_HCAPTCHA_SITEKEY`, `FEOH_SIGNUP_RATE_LIMIT_PER_HOUR`, `FEOH_SIGNUP_EMAIL_RATE_LIMIT_PER_HOUR`, `FEOH_SLUG_CHECK_RATE_LIMIT_PER_HOUR`.
 
 ## Secrets management (SOPS + AWS KMS, in the private infra-secrets repo)
 

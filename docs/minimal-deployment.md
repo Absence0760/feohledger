@@ -202,9 +202,10 @@ Beyond the committed defaults, the deployed env sets at minimum:
 
 | Var | Value |
 |---|---|
-| `FEOH_ENVIRONMENT` | `production` (arms hCaptcha enforcement on signup) |
+| `FEOH_ENVIRONMENT` | `production` (arms hCaptcha enforcement on signup, while signup is on) |
 | `FEOH_SECRET_KEY` | `openssl rand -hex 32` |
-| `FEOH_HCAPTCHA_SECRET` / `FEOH_HCAPTCHA_SITEKEY` | **The secret is required whether or not you want signup** — the API refuses to boot in production with it empty, and `deploy.sh` refuses first. There is no signup off switch; to keep signup closed, set the secret and leave the sitekey empty: `/signup` renders, but every submit is refused with "Captcha is required." |
+| `FEOH_SIGNUP_ENABLED` | `false` to keep self-service signup closed (every `/api/signup/*` route 404s and `/signup` says signup is closed) — the usual choice here, with tenants provisioned by `deploy/add-tenant.sh`. Leave it unset (on) only when you want public signup, and then set both hCaptcha keys |
+| `FEOH_HCAPTCHA_SECRET` / `FEOH_HCAPTCHA_SITEKEY` | **Required while signup is on** — the API refuses to boot in production with the secret empty, and `deploy.sh` refuses first. With `FEOH_SIGNUP_ENABLED=false` neither is needed. |
 | `POSTGRES_PASSWORD` | `openssl rand -hex 24` (compose derives `FEOH_DATABASE_URL` / `FEOH_REDIS_URL` from it — don't set those) |
 | `FEOH_S3_BUCKET` | invoice-files bucket; set `FEOH_S3_ENDPOINT_URL` / `FEOH_S3_ACCESS_KEY` / `FEOH_S3_SECRET_KEY` **empty** → real S3 via the instance-profile credential chain |
 | `FEOH_MFA_ENABLED` / `FEOH_HSTS_ENABLED` | `true` / `true` |
@@ -226,7 +227,7 @@ SES note: `infra/email.tf` creates the SES identity for the platform domain, its
 DKIM and MAIL FROM records, and the Migadu mailbox records beside them — the
 bring-up order is `infra/README.md` § Email. A fresh SES account is still
 sandboxed (verified recipients only). Either request production access, or keep
-self-service signup closed at first (empty `FEOH_HCAPTCHA_SITEKEY`, above) and
+self-service signup closed at first (`FEOH_SIGNUP_ENABLED=false`, above) and
 provision tenants with `deploy/add-tenant.sh`, leaving email on `console` until
 SES clears.
 
