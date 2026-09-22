@@ -130,7 +130,7 @@ export interface PositivePayFile {
 	 * cheques agree on (each `Payment.amount` is in its invoice's currency),
 	 * stamped at generation. `null` when they carry none or disagree, and for
 	 * legacy rows created before the column existed: render the total BARE
-	 * then, never under the org default (`docs/decisions.md` §198).
+	 * then, never under the org default (`docs/decisions.md` §196).
 	 */
 	currency: string | null;
 	account_last4: string | null;

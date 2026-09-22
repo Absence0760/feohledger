@@ -238,7 +238,7 @@
 		<!-- The Landing page's calls to action still lead here, so this is where a
 		     visitor learns signup is by invitation — an honest dead end with the
 		     way on for an existing customer, rather than a form every submit of
-		     which would 404 (docs/decisions.md §194). -->
+		     which would 404 (docs/decisions.md §193). -->
 		<div class="auth-stack">
 			<div class="head">
 				<BrandMark size={40} />

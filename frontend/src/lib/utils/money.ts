@@ -24,7 +24,7 @@ import { getActiveFormatLocale } from '$lib/i18n/formatLocale';
  * Never a rendering fallback. `formatMoney` used to substitute this for any
  * code it was not given, which put a `$` on every figure whose currency the
  * server had deliberately declined to name (`docs/decisions.md` §79/§82, §160,
- * §198): a payment whose invoice carried no code read as dollars on the web
+ * §196): a payment whose invoice carried no code read as dollars on the web
  * while mobile rendered it bare. A figure with no provable currency now renders
  * bare; see {@link formatMoney}.
  */
@@ -204,7 +204,7 @@ export function isNegativeAmount(amount: MoneyAmount): boolean {
  * The currency is the one the figure's own payload names. When there is none —
  * `null`, empty, malformed — the figure renders **bare**: grouped figures, no
  * symbol. That is the answer, not a degraded mode (`docs/decisions.md` §160,
- * §198). A `null` code is where the server refused to guess, so substituting
+ * §196). A `null` code is where the server refused to guess, so substituting
  * one would reinstate the fabrication the field exists to end; a missing symbol
  * is a visible gap a reader can ask about, a wrong one is a wrong number that
  * looks right. It is not the `placeholder` either: that means *no figure*, and

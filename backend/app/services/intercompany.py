@@ -30,7 +30,7 @@ Design notes:
   ``segregation_actor_ids``) is implicated in the mirror, and the routing actor
   — who created the mirror — is its uploader. Entities subdivide a tenant's
   books; they are not a boundary a payable's authors stop being its authors at.
-  See docs/decisions.md §193.
+  See docs/decisions.md §192.
 
 See backend/docs/inter-company.md.
 """
@@ -87,7 +87,7 @@ async def route_intercompany_invoice(
     # while leaving the source *uploader* free. Snapshotted now, like every
     # other implicated set (§152): the source's terms are what they are at
     # routing time. The routing actor lands in `uploaded_by_id` below and is
-    # dropped from the set, so no one is named twice (docs/decisions.md §193).
+    # dropped from the set, so no one is named twice (docs/decisions.md §192).
     inherited = implicated_actors(invoice)
     if actor_id is not None:
         inherited.discard(str(actor_id))

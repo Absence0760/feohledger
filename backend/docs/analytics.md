@@ -891,7 +891,7 @@ every row, Open POs bare, and one face-value disclosure line per column whose
 consolidated count is non-zero. It used to label each entity row's naive
 `total_spend` / `outstanding_amount` / `open_po_amount` with the entity's
 `currency`, falling back to the org's — a mixed-currency figure wearing one
-currency's symbol (`docs/decisions.md` §198).
+currency's symbol (`docs/decisions.md` §196).
 
 ## Predictive cash-flow forecasting (`/api/analytics/{cashflow_forecast,cashflow_whatif,cash_position}`)
 

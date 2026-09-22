@@ -26,7 +26,7 @@
 	let error = $state<string | null>(null);
 
 	// Every figure is labelled by the currency the PAYLOAD names for it, never
-	// a client-side guess (`docs/decisions.md` §198):
+	// a client-side guess (`docs/decisions.md` §196):
 	//
 	// - Spend and Outstanding render the `reporting_*` fields in
 	//   `reporting_currency` on every row. The rows used to render the naive

@@ -78,7 +78,7 @@ function normalizeCode(value: string | null | undefined): string | null {
  * `null`.
  *
  * Exactly `formatMoney` with no currency, which is what `formatMoney` renders
- * for any unprovable code (`docs/decisions.md` §198). Kept as a named export so
+ * for any unprovable code (`docs/decisions.md` §196). Kept as a named export so
  * the call sites that deliberately withhold a currency say so, but it is one
  * primitive: grouping, decimals and the active locale cannot drift from the
  * labelled figures beside it.

@@ -1291,7 +1291,7 @@ directly above it renders.
 
 The client renders an unprovable currency as a **bare grouped figure** — no
 symbol, no code — rather than borrowing the org default. Since
-`docs/decisions.md` §198 that is `utils/money.ts::formatMoney`'s own behaviour
+`docs/decisions.md` §196 that is `utils/money.ts::formatMoney`'s own behaviour
 for a `null` code, so every `/payments` cell goes through the one
 `formatCurrency` with its payload's code and there is no per-row opt-out left
 to forget (the page's old `formatCurrency` fell back to the org currency, and

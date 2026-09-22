@@ -79,7 +79,7 @@ freshly provisioned tenants (`create_all`, not Alembic) get it as well.
    at routing time like every implicated set, and NULL (never `[]`) when nobody
    is left. So the employee who uploaded or shaped the source payable cannot
    approve its mirror under the counterparty entity, while anyone with no hand in
-   either still can. Reasoning: `docs/decisions.md` §193.
+   either still can. Reasoning: `docs/decisions.md` §192.
 4. **Audit** — a PII-free `invoice.intercompany_routed` row on **both** invoices
    (ids + entity ids only) via `dispatch_audit`.
 

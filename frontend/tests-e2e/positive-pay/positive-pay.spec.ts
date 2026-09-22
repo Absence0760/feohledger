@@ -192,7 +192,7 @@ test.describe('/positive-pay (admin)', () => {
 		// disagree — nobody established what the total is in. The list cell and
 		// the detail dialog used to write `file.currency ?? orgCurrency.currency`
 		// and so rendered "$0.00" here; the figure now renders bare
-		// (`docs/decisions.md` §198).
+		// (`docs/decisions.md` §196).
 		const nullCurrency = async (route: Route) => {
 			if (route.request().method() !== 'GET') return route.continue();
 			const resp = await route.fetch();

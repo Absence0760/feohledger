@@ -23,7 +23,7 @@ pilot. With it off:
   a "Signup is closed" notice (no form, no captcha widget, no slug check, no
   "what happens next" panel) instead of a form every submit of which would fail.
   The landing page's calls to action still lead there, which is deliberate —
-  see [decisions.md](decisions.md) §194.
+  see [decisions.md](decisions.md) §193.
 - **The hCaptcha secret stops being required.** The deployed-env boot check
   (`config.py::_require_captcha_in_deployed_envs`) and `deploy/decrypt-env.sh`
   demand `FEOH_HCAPTCHA_SECRET` only while signup is on: with nothing public

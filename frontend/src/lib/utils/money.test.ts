@@ -248,7 +248,7 @@ describe('formatMoney locale resolution', () => {
 });
 
 // A code the payload did not name is not a licence to substitute one
-// (`docs/decisions.md` §79/§82, §160, §198). `formatMoney` used to return
+// (`docs/decisions.md` §79/§82, §160, §196). `formatMoney` used to return
 // `$1,234.50` for every row below — so a payment whose invoice carried no
 // currency read as dollars on the web while mobile rendered it bare, and a
 // by-entity row with no configured currency borrowed the org's.

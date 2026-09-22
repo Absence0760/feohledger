@@ -7710,7 +7710,7 @@ Two smaller calls rode along:
   `error` and `warning`; an unranked value ranks 0 so it sinks instead of posing
   as urgent.
 
-## 190. An open credit memo can be edited; an applied one never — and edit, apply and void share one row lock
+## 189. An open credit memo can be edited; an applied one never — and edit, apply and void share one row lock
 
 `POST /api/credit-memos` had no counterpart for correcting what it wrote. Both
 application paths refuse a currency mismatch, so a memo keyed in the wrong
@@ -7753,7 +7753,7 @@ Every effective edit writes one `credit_memo.updated` row carrying the old and
 new value of each changed field (money as string-Decimal); an edit that changes
 nothing writes nothing.
 
-## 191. A `page.route` stub that answers a dev-server module fails the test by name
+## 190. A `page.route` stub that answers a dev-server module fails the test by name
 
 Four `/credit-memos` e2e specs failed on every laptop and passed in every CI
 run. They stubbed the vendor list with `**/api/vendors*` and
@@ -7785,7 +7785,7 @@ Considered and rejected:
   the guard towards being switched off. The runtime check keys on the effect,
   not the spelling.
 
-## 192. A password that cannot sign in cannot authorize a factor change either
+## 191. A password that cannot sign in cannot authorize a factor change either
 
 **Decided:** 2026-09-21 · `backend/app/api/auth.py` · `backend/tests/test_sso_only.py`
 
@@ -7857,7 +7857,7 @@ Four calls inside it:
 The supplier portal is untouched: a `VendorUser` signs in with a password and no
 SSO can close it, so there the password remains the step-up proof it always was.
 
-## 193. Segregation of duties is not scoped by entity: a mirror inherits its source's implicated set
+## 192. Segregation of duties is not scoped by entity: a mirror inherits its source's implicated set
 
 **Decided:** 2026-09-21 · `backend/app/services/intercompany.py` ·
 `backend/app/services/approval_chain.py` · `backend/tests/test_intercompany.py`
@@ -7926,7 +7926,7 @@ each passes a real value, and fails if a third site starts writing the set
 without being declared, so "two writers" cannot quietly go stale the way the
 old "`generate_one` is the only writer" comment would have.
 
-## 194. Self-service signup gets its own off switch, and a closed signup is a 404 and a sentence, not a starved captcha
+## 193. Self-service signup gets its own off switch, and a closed signup is a 404 and a sentence, not a starved captcha
 
 **Decided:** 2026-09-21 · `backend/app/config.py` · `backend/app/api/signup.py` ·
 `frontend/src/routes/signup/+page.svelte` · `deploy/decrypt-env.sh`
@@ -7991,7 +7991,55 @@ A verification link emailed while signup was open survives the switch
 unconsumed, so re-opening signup lets that visitor finish rather than
 stranding them.
 
-## 197. A generated Dart catalogue takes its call signature from the ARB, and the parity test it replaces is retired, not kept
+## 194. An invoice's GL code must resolve in its own entity's chart — refused only when it belongs to another
+
+§186 made the cross-entity ambiguity visible: in the consolidated view the
+invoice pickers offered subsidiary B's `6000` for a subsidiary-A invoice, now
+labelled as B's. Every manual write still accepted it, and the stored string
+then resolved against A's chart — a different account, or none — while budgets,
+matching rules, the 1099 box map, approval routing and the report builder all
+read it as A's. `services/gl_chart.refuse_foreign_gl_codes` now closes that, on
+every path that writes the column: create, `PATCH`, the line-items replace,
+approve-with-corrections (and through it the GL-coding exception agent), CSV
+import and recurring-template writes.
+
+Four calls shape it.
+
+**The chart is the invoice's entity's, never the sidebar's.** Create checks the
+entity the row will be filed under (`get_write_entity_id`: the selection, else
+the default); every other path checks `invoice.entity_id` (or the template's).
+The picker follows the same rule rather than the `X-Entity-ID` view: the
+consolidated view is every subsidiary's chart, and a deep link can open another
+entity's invoice while one is selected. So `GET /api/gl-accounts` took a
+`chart_entity_id` parameter and `InvoiceResponse` exposes `entity_id`; filtering
+the header-scoped list in the browser would have been silently incomplete in
+exactly the deep-link case. The parameter widens nothing — the consolidated read
+already returns every entity's rows to every role.
+
+**What is refused is "another entity's", not "not in my chart".** A code in no
+chart at all — hand-typed, or on a retired account — still writes. Refusing it
+too is the stricter rule `gl_recode` and extraction apply to *automated* codes,
+and it may well be right for manual ones; but it is a different decision with
+costs this one does not have: CSV import is a historical-migration path whose
+rows legitimately carry codes whose accounts are long gone, a tenant's chart may
+be partial (a few hand-made accounts awaiting the first ERP sync), and every e2e
+fixture that codes to a literal would have to create its account first. The refusal
+chosen here is never correct for the invoice it is written to; the stricter one
+sometimes is. It is filed separately rather than smuggled in.
+
+**Ownership is read over retired rows too.** A code A holds only as a retired
+account, and B holds live, still resolves to A's retired account on an A
+invoice — that is a retirement question, not a cross-entity one, and calling it
+"another entity's" would be both wrong and misleading.
+
+**Only a code NEW to the row is checked.** An invoice coded across entities
+before this existed must stay editable: a `PATCH` that echoes the stored code,
+or a line carried over through the delete-and-reinsert line-items `PUT`, is not
+a coding decision, and refusing it would freeze the invoice the day its account
+moved. The same rule `recurring`'s material-edit tracking applies — a re-sent
+unchanged field is not an edit.
+
+## 195. A generated Dart catalogue takes its call signature from the ARB, and the parity test it replaces is retired, not kept
 
 Round 26 localized invoice warnings on mobile by transcribing all 48 codes into
 `invoice_warning_messages.dart` by hand — a parameter-kind map and a 360-line
@@ -8031,7 +8079,7 @@ itself is that every arm it emits reaches a real sentence; the mobile test now
 asserts that for every code in every locale, plus that dropping any one
 parameter falls the finding back to the server's English.
 
-## 198. The web formatter renders an unprovable currency bare by default, and the servers send the code they know
+## 196. The web formatter renders an unprovable currency bare by default, and the servers send the code they know
 
 §160 made mobile render a figure with no provable currency bare and noted, in
 passing, that the web still disagreed: `utils/money.ts::resolveCurrency`
@@ -8093,51 +8141,3 @@ would replace a probably-right label with none on every row. The difference
 between the two is deliberate and temporary — by-entity sums POs *across
 entities that may report in different currencies*, where the org label is not
 even probably right.
-
-## 195. An invoice's GL code must resolve in its own entity's chart — refused only when it belongs to another
-
-§186 made the cross-entity ambiguity visible: in the consolidated view the
-invoice pickers offered subsidiary B's `6000` for a subsidiary-A invoice, now
-labelled as B's. Every manual write still accepted it, and the stored string
-then resolved against A's chart — a different account, or none — while budgets,
-matching rules, the 1099 box map, approval routing and the report builder all
-read it as A's. `services/gl_chart.refuse_foreign_gl_codes` now closes that, on
-every path that writes the column: create, `PATCH`, the line-items replace,
-approve-with-corrections (and through it the GL-coding exception agent), CSV
-import and recurring-template writes.
-
-Four calls shape it.
-
-**The chart is the invoice's entity's, never the sidebar's.** Create checks the
-entity the row will be filed under (`get_write_entity_id`: the selection, else
-the default); every other path checks `invoice.entity_id` (or the template's).
-The picker follows the same rule rather than the `X-Entity-ID` view: the
-consolidated view is every subsidiary's chart, and a deep link can open another
-entity's invoice while one is selected. So `GET /api/gl-accounts` took a
-`chart_entity_id` parameter and `InvoiceResponse` exposes `entity_id`; filtering
-the header-scoped list in the browser would have been silently incomplete in
-exactly the deep-link case. The parameter widens nothing — the consolidated read
-already returns every entity's rows to every role.
-
-**What is refused is "another entity's", not "not in my chart".** A code in no
-chart at all — hand-typed, or on a retired account — still writes. Refusing it
-too is the stricter rule `gl_recode` and extraction apply to *automated* codes,
-and it may well be right for manual ones; but it is a different decision with
-costs this one does not have: CSV import is a historical-migration path whose
-rows legitimately carry codes whose accounts are long gone, a tenant's chart may
-be partial (a few hand-made accounts awaiting the first ERP sync), and every e2e
-fixture that codes to a literal would have to create its account first. The refusal
-chosen here is never correct for the invoice it is written to; the stricter one
-sometimes is. It is filed separately rather than smuggled in.
-
-**Ownership is read over retired rows too.** A code A holds only as a retired
-account, and B holds live, still resolves to A's retired account on an A
-invoice — that is a retirement question, not a cross-entity one, and calling it
-"another entity's" would be both wrong and misleading.
-
-**Only a code NEW to the row is checked.** An invoice coded across entities
-before this existed must stay editable: a `PATCH` that echoes the stored code,
-or a line carried over through the delete-and-reinsert line-items `PUT`, is not
-a coding decision, and refusing it would freeze the invoice the day its account
-moved. The same rule `recurring`'s material-edit tracking applies — a re-sent
-unchanged field is not an edit.

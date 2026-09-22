@@ -56,7 +56,7 @@ class PositivePayFileResponse(BaseModel):
     # Currency ``total_amount`` is denominated in — for a check-issue file the
     # one currency its cheques' invoices agree on, stamped at generation.
     # ``None`` for legacy rows and for cheques that disagree: NOT a licence to
-    # substitute a default, so the UI renders the total bare (decisions §198).
+    # substitute a default, so the UI renders the total bare (decisions §196).
     currency: str | None
     account_last4: str | None
     file_key: str | None

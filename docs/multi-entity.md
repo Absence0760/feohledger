@@ -385,7 +385,7 @@ chart. Both halves are now closed.
 What is deliberately NOT refused here is a code in **no** chart (hand-typed, or
 on a retired account): that question has its own trade-offs — a historical CSV
 import carries codes whose accounts are long gone — and is tracked separately in
-`docs/followups.md`. See `docs/decisions.md` §195.
+`docs/followups.md`. See `docs/decisions.md` §194.
 
 ### Per-entity workflow selection
 
@@ -419,7 +419,7 @@ Segregation of duties is **not** scoped by entity: the router is the mirror's
 uploader, and everyone implicated in the source payable (its uploader and its
 `segregation_actor_ids`) is carried onto the mirror's `segregation_actor_ids`,
 so shaping a payable under one entity bars you from signing its mirror under
-another (`docs/decisions.md` §193).
+another (`docs/decisions.md` §192).
 It is **idempotent** on `intercompany_mirror_id` — a second call returns the
 existing mirror, never a duplicate. Surfaced at `POST
 /api/invoices/{id}/route-intercompany` (admin / ap_manager; self-billing → 400).

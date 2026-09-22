@@ -1673,7 +1673,7 @@
 	 *  disagree, a row with nothing recorded — and borrowing the org's code
 	 *  there reinstated the fabrication the field exists to end
 	 *  (`docs/decisions.md` §79/§82). `formatMoney` now renders an unprovable
-	 *  code BARE itself (§198), so there is one path and no fallback to forget.
+	 *  code BARE itself (§196), so there is one path and no fallback to forget.
 	 *  Nothing here adds, compares or converts — the value passes through
 	 *  untouched.
 	 */

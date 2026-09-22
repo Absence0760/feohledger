@@ -647,7 +647,7 @@ Consequences worth knowing:
 - The supplier portal is unaffected: a `VendorUser` signs in with a password,
   and there is no SSO that could close it.
 
-Reasoning: [decisions.md](decisions.md) §192. Tests: `backend/tests/test_sso_only.py`.
+Reasoning: [decisions.md](decisions.md) §191. Tests: `backend/tests/test_sso_only.py`.
 
 ## Frontend Implementation
 
@@ -1109,7 +1109,7 @@ implicated in the mirror, and the routing actor is the mirror's uploader. Both
 source columns travel together: carrying only one would bar a source *editor*
 from the mirror while leaving the source *uploader* free, or the reverse.
 Entities subdivide a tenant's books; they are not a boundary at which a payable's
-authors stop being its authors ([decisions.md](decisions.md) §193).
+authors stop being its authors ([decisions.md](decisions.md) §192).
 
 Nothing else writes the set. Every other creation path has a single actor, so the
 column stays NULL and the reading below is unchanged.

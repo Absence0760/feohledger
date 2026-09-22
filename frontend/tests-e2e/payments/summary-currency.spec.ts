@@ -72,7 +72,7 @@ test.describe('/payments — reporting currency and FX exclusions', () => {
 		// The page's `formatCurrency` used to write `currency ?? orgCurrency.currency`,
 		// so a response that did not state its denomination still wore the
 		// seeded org's `$` — the one symbol nothing in the payload established.
-		// `formatMoney` renders an unstated code bare now (decisions §198).
+		// `formatMoney` renders an unstated code bare now (decisions §196).
 		await page.route(
 			(url) => url.pathname === SUMMARY_PATH,
 			(route) =>

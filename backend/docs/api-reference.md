@@ -509,7 +509,7 @@ the memo itself — see § Editing a memo) and then enforce, in order, four 409s
 A memo keyed with the wrong currency (or vendor, amount, number…) used to be
 unfixable: both application paths refuse a currency mismatch, and the only exit
 was Void and re-create — a void row in the audit trail for what was a typo. The
-`PATCH` corrects it, under four rules (`docs/decisions.md` §190):
+`PATCH` corrects it, under four rules (`docs/decisions.md` §189):
 
 - **Only a memo that has never moved money.** `status == "open"` with no
   `invoice_id` and no `applied_at`; anything else is a 409 naming the status.

@@ -254,7 +254,7 @@ on nullish rather than falsiness so a genuine `0` still renders.
 when there is none** — `formatMoney` shows grouped figures with no symbol for a
 `null` / malformed code instead of substituting `USD`. So never write
 `row.currency ?? orgCurrency.currency` for a per-row figure: pass the row's
-code, `null` included (`docs/decisions.md` §160, §198).
+code, `null` included (`docs/decisions.md` §160, §196).
 ### Internationalization (i18n) — `src/lib/i18n/`
 
 **Full reference: `frontend/docs/i18n.md`** (catalogue layout, locale

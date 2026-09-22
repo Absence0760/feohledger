@@ -133,7 +133,7 @@ it:
 
 Round 26 hand-transcribed the 48 Dart arms and backstopped them with a flutter
 test that parsed the TypeScript; generating both halves from one source is what
-retired it (`decisions.md` §197). The generator's own tests (`tests/test_invoice_warning_catalog.py`)
+retired it (`decisions.md` §195). The generator's own tests (`tests/test_invoice_warning_catalog.py`)
 pin both files in sync, the ARB-order read, and the refusal paths.
 
 Both readers return `null` — and the caller renders `message` — for an unknown
