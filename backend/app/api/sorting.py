@@ -57,6 +57,7 @@ def resolve_order_by(
     *,
     id_column: ColumnElement,
     default: list[ColumnElement],
+    nulls_last: frozenset[str] = frozenset(),
 ) -> list[ColumnElement]:
     """Build an ``ORDER BY`` clause list from validated, allowlisted input.
 
@@ -73,6 +74,15 @@ def resolve_order_by(
     The resolved column's tie-break direction, and the appended `.id`
     tie-break, both follow ``params.order`` — so switching a column between
     ascending and descending doesn't leave stale ties ordered the old way.
+
+    ``nulls_last`` names the allowlisted keys whose NULL means "this row has no
+    value on the axis", not "smallest" or "largest". Postgres sorts NULL as
+    larger than every value, so without it a descending sort puts every such
+    row FIRST — on the exception queue's `due_at`, a descending "Due" click
+    showed every exception with no SLA above the ones actually running out of
+    time. Those keys sort their NULLs last in BOTH directions. A key left out
+    keeps Postgres' default, which is what every endpoint had before this
+    parameter existed.
     """
     if params.field is None:
         return default
@@ -85,5 +95,7 @@ def resolve_order_by(
         )
     ascending = params.order == "asc"
     primary = column.asc() if ascending else column.desc()
+    if params.field in nulls_last:
+        primary = primary.nulls_last()
     tiebreak = id_column.asc() if ascending else id_column.desc()
     return [primary, tiebreak]

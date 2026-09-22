@@ -47,14 +47,6 @@ _DELIBERATELY_WHOLE_SET = {
         "`frontend/src/routes/payments/+page.svelte::loadSummary` calls it with "
         "no parameters."
     ),
-    "/api/exceptions/summary": (
-        "Its counts POPULATE the filter chips, so they must span every "
-        "type/severity/status rather than being narrowed by the chip currently "
-        "selected — the same reason `GET /api/invoices/counts` ignores a "
-        "`status` param. "
-        "`frontend/src/routes/exceptions/+page.svelte::loadSummary` calls it "
-        "with no parameters."
-    ),
 }
 
 
@@ -183,6 +175,15 @@ def test_a_rollup_accepts_every_filter_its_list_offers(pair):
 
 _SHARED_BUILDER_MODULES = {
     "app/api/budgets.py": ("_budget_list_filters", "list_budgets", "budget_summary"),
+    # Faceted rather than wide: every tally honours every filter but its own
+    # dimension (see `exception_summary`). It was exempted here as "whole-set"
+    # until the queue gained a search box, at which point chips counting the
+    # whole tenant over a searched table were the defect this file guards.
+    "app/api/exceptions.py": (
+        "_exception_list_filters",
+        "list_exceptions",
+        "exception_summary",
+    ),
     "app/api/expenses.py": ("_expense_list_filters", "list_expenses", "expense_summary"),
     "app/api/intake.py": ("_intake_list_filters", "list_intake", "intake_summary"),
     "app/api/positive_pay.py": (

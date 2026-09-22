@@ -365,8 +365,9 @@ All exception endpoints require `admin/manager`.
 
 | Method | Path                              | Description |
 |--------|-----------------------------------|-------------|
-| `GET`  | `/api/exceptions`                 | List flagged invoices (filter by `status`, `type`, `severity`) |
-| `GET`  | `/api/exceptions/summary`         | Counts by status + open-by-type breakdown |
+| `GET`  | `/api/exceptions`                 | List flagged invoices (filter by `status` — comma list, `all` = every status — `type`, `severity`, `assigned_to_user_id`, `search` over invoice number + vendor name; `sort=created_at\|severity\|due_at`, `order=asc\|desc`) |
+| `GET`  | `/api/exceptions/ids`             | Every id matching the same filters ("select all N matching") |
+| `GET`  | `/api/exceptions/summary`         | Chip tallies — counts by status, `by_type`, `by_severity` — over the same filters, each tally ignoring only its own dimension |
 | `POST` | `/api/exceptions/{id}/resolve`    | Body `{resolution, action}` (`resolve`/`escalate`/`dismiss`) |
 
 ## Notifications
