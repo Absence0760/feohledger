@@ -481,8 +481,21 @@ surfaced as a 500).
 
 Both application paths (`POST /api/credit-memos` with an `invoice_id`, and
 `POST /api/credit-memos/{id}/apply`) row-lock the target invoice (and `/apply`
-the memo itself — see § Editing a memo) and then enforce, in order, four 409s:
+the memo itself — see § Editing a memo) and then enforce, in order, five 409s:
 
+0. **The invoice must still be one a payment will read** — a credit does
+   nothing by itself; `services/payment_runs.net_payable_amount` subtracts it
+   when a payment is built or executed. So an invoice no payment will read again
+   is refused: `paid` (its money has left) and `done` (terminal). The memo stays
+   `open` for the vendor's next invoice. The admitted set is
+   `credit_memos.CREDITABLE_INVOICE_STATUSES`, DERIVED from
+   `workflow_engine.VALID_TRANSITIONS` as "can still reach `payment_scheduled`
+   without first being `paid`" rather than written out — so `rejected` and
+   `failed` (which re-enter the flow) and `payment_scheduled` itself (a booked
+   payment the executor's `net_amount_changed` refusal re-nets) are admitted,
+   and a voided payment (`paid → approved`) makes the invoice creditable again.
+   Checked first, because it is about the invoice alone
+   (`_assert_creditable_status`; `docs/decisions.md` §202).
 1. **Vendor must match, and must be PROVEN to match** — the memo's `vendor_id`
    has to equal the invoice's `vendor_id`. A NULL `Invoice.vendor_id` is
    **refused**, not waved through: an unlinked invoice is one whose vendor
@@ -512,9 +525,10 @@ the memo itself — see § Editing a memo) and then enforce, in order, four 409s
 `GET /api/credit-memos/eligible-invoices?vendor_id=` (behind the create dialog's
 optional link) return the invoices the matching application path will accept —
 the same set, not an approximation of it (`docs/decisions.md` §202). One builder,
-`_eligible_invoices_query`, is the SQL form of the four guards above, clause by
+`_eligible_invoices_query`, is the SQL form of the five guards above, clause by
 clause: the caller's `X-Entity-ID` scope (the application paths look the invoice
-up under it), `Invoice.vendor_id` equal to the memo's vendor (through the invoice
+up under it), a status in `CREDITABLE_INVOICE_STATUSES` (never `paid` or
+`done`), `Invoice.vendor_id` equal to the memo's vendor (through the invoice
 list's own `vendor_id` leg, so an unlinked invoice is never offered), the entity
 rule (a NULL on either side admitted), the currency rule (case- and
 space-insensitive, a blank invoice currency admitted), and the balance rule —
@@ -530,9 +544,8 @@ invoice can take none).
   currency inherits the invoice's, which is what the dialog sends. Its `amount`
   mirrors a memo amount's validation (`> 0`, two decimal places), so an
   over-precise bound can never be rounded onto a boundary row.
-- **Status is not a leg**, because neither path refuses on the invoice's
-  status. A picker that hid what the apply accepts would be as wrong as one that
-  offered what it refuses.
+- **The status leg is the guard's own set**, so a `paid` or `done` invoice is
+  neither offered nor accepted, and a scheduled, rejected or failed one is both.
 - `search` is the invoice list's own search leg (invoice #, PO #, description,
   vendor name — a literal substring); results are newest first; each row carries
   `creditable_balance` beside `amount`. RBAC is the application's
@@ -540,9 +553,10 @@ invoice can take none).
 
 `backend/tests/test_credit_memos.py` pins the contract as a set equality over a
 matrix of every refusal (another currency, another vendor, an unlinked invoice,
-too little balance, a partly credited invoice, another entity) and the
-admissions beside each (lowercase and blank currency, the exact-balance
-boundary, a paid invoice): what the endpoint lists is what the path accepts.
+too little balance, a partly credited invoice, another entity, `paid`, `done`)
+and the admissions beside each (lowercase and blank currency, the exact-balance
+boundary, `payment_scheduled`, `rejected`, `failed`): what the endpoint lists is
+what the path accepts.
 
 ### Editing a memo — `PATCH /api/credit-memos/{id}`
 

@@ -20,7 +20,7 @@ from app.api.invoices import _invoice_list_filters
 from app.api.pagination import PaginationParams, pagination_params
 from app.api.sorting import SortParams, resolve_order_by, sort_params
 from app.models.credit_memo import CREDIT_MEMO_STATUSES, CreditMemo
-from app.models.invoice import Invoice
+from app.models.invoice import Invoice, InvoiceStatus
 from app.models.organization import Organization
 from app.models.user import User
 from app.models.vendor import Vendor
@@ -37,6 +37,7 @@ from app.schemas.credit_memo import (
 from app.services.audit_access import build_field_diff
 from app.services.audit_dispatch import dispatch_audit
 from app.services.currency_conversion import resolve_reporting_currency
+from app.services.workflow_engine import VALID_TRANSITIONS
 from app.tenant import apply_entity_scope, get_entity_id, get_tenant, get_tenant_db
 from app.utils.search import ilike_contains
 
@@ -56,6 +57,11 @@ _ENTITY_MISMATCH_DETAIL = (
     "cannot reduce another subsidiary's payable"
 )
 _CURRENCY_MISMATCH_DETAIL = "Credit memo currency does not match invoice currency"
+_INVOICE_SETTLED_DETAIL = (
+    "The invoice is '{status}': no payment will be made against it any more, so a "
+    "credit applied to it would reduce nothing. Leave the credit memo open and apply "
+    "it to the vendor's next invoice."
+)
 _NOT_EDITABLE_DETAIL = (
     "Only an open credit memo that has never been applied can be edited (this one is '{status}')"
 )
@@ -82,6 +88,69 @@ _EDITABLE_FIELDS: tuple[str, ...] = (
     "issued_date",
     "reason",
 )
+
+
+def _statuses_a_payment_can_still_net() -> frozenset[InvoiceStatus]:
+    """Every invoice status in which an applied credit is still READ by a payment.
+
+    A credit memo does nothing by itself: `services/payment_runs.net_payable_amount`
+    subtracts it from the invoice when a payment is built or executed. So a credit
+    is only worth applying while the invoice can still reach `payment_scheduled`
+    — the status a payment is booked under — without first being `paid`, the
+    status its payment settles into. That is a reachability question over the
+    state machine, so it is answered from `VALID_TRANSITIONS` rather than written
+    out as a list (the `api/payments.SCHEDULABLE_INVOICE_STATUSES` rule): a status
+    added to the graph is classified by its edges, and a status with no entry at
+    all is refused, never waved through.
+
+    The two anchors are the definition of the question, not a restatement of its
+    answer. What falls out today — `docs/decisions.md` §202:
+
+    - **Admitted:** everything upstream of a payment (`new` through
+      `posted_in_erp`); `rejected` and `failed`, which re-enter the flow (a
+      disputed invoice is rejected, the supplier issues a credit, the invoice is
+      resubmitted — the credit must be able to meet it); and `payment_scheduled`
+      itself, where the executor's `net_amount_changed` refusal re-nets a payment
+      booked before the credit.
+    - **Refused:** `paid` (its money has left) and `done` (terminal — nothing will
+      ever pay it). A credit on either is consumed against a payable no payment
+      will read again, and an applied memo can be neither voided nor re-applied.
+      A voided payment walks `paid → approved`, which is admitted again, so the
+      refusal lasts exactly as long as the money is out.
+    """
+    booked, settled = InvoiceStatus.payment_scheduled, InvoiceStatus.paid
+    creditable = {booked}
+    grew = True
+    while grew:
+        grew = False
+        for state, successors in VALID_TRANSITIONS.items():
+            if state in creditable or state == settled:
+                continue
+            if successors & creditable:
+                creditable.add(state)
+                grew = True
+    return frozenset(creditable)
+
+
+#: Where a credit memo may be applied. Both application paths refuse any other
+#: status (`_assert_creditable_status`) and the pickers' eligible set carries the
+#: same leg, so what is offered is what is accepted.
+CREDITABLE_INVOICE_STATUSES: frozenset[InvoiceStatus] = _statuses_a_payment_can_still_net()
+
+
+def _assert_creditable_status(invoice: Invoice) -> None:
+    """Refuse a credit on an invoice no payment will read again (`paid`, `done`).
+
+    Checked first on both application paths, before the vendor, entity, currency
+    and balance guards: it is about the invoice alone, and the operator's remedy
+    — keep the memo open for the vendor's next invoice — does not depend on
+    whether anything else about the pairing would also have been refused.
+    """
+    current = InvoiceStatus(invoice.status)
+    if current not in CREDITABLE_INVOICE_STATUSES:
+        raise HTTPException(
+            status_code=409, detail=_INVOICE_SETTLED_DETAIL.format(status=current.value)
+        )
 
 
 def _assert_vendor_matches(invoice: Invoice, vendor_id: uuid.UUID) -> None:
@@ -219,15 +288,15 @@ def _eligible_invoices_query(
     - **currency** — `_assert_currency_matches`: case- and space-insensitive,
       a blank invoice currency admitted, and no leg at all when the credit
       asserts none (a linked create inherits the invoice's);
+    - **status** — `_assert_creditable_status`: only an invoice a payment will
+      still read (`CREDITABLE_INVOICE_STATUSES` — never `paid` or `done`);
     - **balance** — the over-application guard: the invoice must still absorb
       `amount`, or, when the amount is not known yet, anything at all (every
       credit is strictly positive, so a fully credited invoice refuses them
       all).
 
-    Status is deliberately NOT a leg: neither application path refuses on the
-    invoice's status, and a picker that hid what the apply accepts would be as
-    wrong as one that offered what it refuses. `search` is the invoice list's
-    own search leg, so a term means the same thing in both places.
+    `search` is the invoice list's own search leg, so a term means the same
+    thing in both places.
     """
     creditable = _creditable_balance(exclude_memo_id)
     query = _invoice_list_filters(
@@ -236,6 +305,9 @@ def _eligible_invoices_query(
         ),
         vendor_id=vendor_id,
         search=search.strip() if search and search.strip() else None,
+    )
+    query = query.where(
+        Invoice.status.in_(sorted(state.value for state in CREDITABLE_INVOICE_STATUSES))
     )
     if memo_entity_id is not None:
         query = query.where(or_(Invoice.entity_id.is_(None), Invoice.entity_id == memo_entity_id))
@@ -601,8 +673,9 @@ async def create_credit_memo(
         if not invoice:
             raise HTTPException(status_code=404, detail="Invoice not found")
         # Same guards as the /apply path — a credit applied at creation time must
-        # match the invoice's vendor and entity, and stay within its remaining
-        # balance.
+        # land on an invoice a payment will still read, match the invoice's
+        # vendor and entity, and stay within its remaining balance.
+        _assert_creditable_status(invoice)
         _assert_vendor_matches(invoice, vendor_uuid)
         # The memo will be stamped with its vendor's entity (below).
         _assert_entity_matches(invoice, vendor.entity_id)
@@ -776,6 +849,7 @@ async def apply_credit_memo(
     invoice = inv_result.scalar_one_or_none()
     if not invoice:
         raise HTTPException(status_code=404, detail="Invoice not found")
+    _assert_creditable_status(invoice)
     _assert_vendor_matches(invoice, memo.vendor_id)
     _assert_entity_matches(invoice, memo.entity_id)
     _assert_currency_matches(invoice, memo.currency)

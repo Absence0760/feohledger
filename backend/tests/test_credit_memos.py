@@ -1737,7 +1737,10 @@ async def _refusal_matrix(realdb) -> tuple[str, dict[str, str]]:
 
     `CREDITED` has 450 of its 500 already credited by an applied memo, so a
     100.00 credit is 50 over what it can absorb; `EXACT` can absorb exactly
-    100.00, the boundary the guard admits.
+    100.00, the boundary the guard admits. `PAID` and `DONE` are refused on
+    status — no payment will read a credit on them — while `SCHEDULED` (a
+    payment booked, not settled), `REJECTED` and `FAILED` (both re-enter the
+    flow) are admitted.
     """
     mk = realdb.sessionmaker("a")
     org_id = realdb.info("a").org_id
@@ -1754,6 +1757,22 @@ async def _refusal_matrix(realdb) -> tuple[str, dict[str, str]]:
         ),
         "PAID": await _add_target(
             mk, org_id, number="EL-PAID", vendor_id=vendor_id, status=InvoiceStatus.paid
+        ),
+        "DONE": await _add_target(
+            mk, org_id, number="EL-DONE", vendor_id=vendor_id, status=InvoiceStatus.done
+        ),
+        "SCHEDULED": await _add_target(
+            mk,
+            org_id,
+            number="EL-SCHEDULED",
+            vendor_id=vendor_id,
+            status=InvoiceStatus.payment_scheduled,
+        ),
+        "REJECTED": await _add_target(
+            mk, org_id, number="EL-REJECTED", vendor_id=vendor_id, status=InvoiceStatus.rejected
+        ),
+        "FAILED": await _add_target(
+            mk, org_id, number="EL-FAILED", vendor_id=vendor_id, status=InvoiceStatus.failed
         ),
         "EUR": await _add_target(mk, org_id, number="EL-EUR", vendor_id=vendor_id, currency="EUR"),
         "OTHER": await _add_target(mk, org_id, number="EL-OTHER", vendor_id=other_vendor),
@@ -1808,8 +1827,17 @@ async def test_the_apply_picker_offers_exactly_what_apply_accepts(realdb):
         "offered and accepted sets differ on these invoices",
     )
     # And the semantics themselves, so the equality cannot hold by both sides
-    # drifting together: a paid invoice is NOT refused (status is not a leg).
-    assert {label_of[i] for i in offered} == {"OK", "LOWER", "BLANK", "EXACT", "PAID"}
+    # drifting together: `paid` and `done` are neither offered nor accepted,
+    # while a scheduled, rejected or failed invoice is still both.
+    assert {label_of[i] for i in offered} == {
+        "OK",
+        "LOWER",
+        "BLANK",
+        "EXACT",
+        "SCHEDULED",
+        "REJECTED",
+        "FAILED",
+    }
     row = offered[targets["OK"]]
     assert row["invoice_number"] == "EL-OK"
     assert Decimal(str(row["creditable_balance"])) == Decimal("500.00")
@@ -1847,7 +1875,16 @@ async def test_the_create_picker_offers_exactly_what_a_linked_create_accepts(rea
                 accepted.add(invoice_id)
 
     assert set(offered) == accepted, sorted(label_of[i] for i in set(offered) ^ accepted)
-    assert {label_of[i] for i in offered} == {"OK", "LOWER", "BLANK", "EXACT", "PAID", "EUR"}
+    assert {label_of[i] for i in offered} == {
+        "OK",
+        "LOWER",
+        "BLANK",
+        "EXACT",
+        "EUR",
+        "SCHEDULED",
+        "REJECTED",
+        "FAILED",
+    }
 
 
 async def test_the_create_picker_without_an_amount_offers_every_invoice_with_balance_left(
@@ -2021,3 +2058,100 @@ async def test_eligible_invoices_search_and_paging_state_the_whole_set(realdb):
     assert literal.json()["total"] == 0
     assert blank.json()["total"] == 4
     assert [row["invoice_number"] for row in create_side.json()["items"]] == ["ELSE-1"]
+
+
+# ---------------------------------------------------------------------------
+# A credit is refused where no payment will read it — `paid` / `done`
+# ---------------------------------------------------------------------------
+
+
+async def _memo_count(mk) -> int:
+    async with mk() as s:
+        return (await s.execute(select(func.count()).select_from(CreditMemo))).scalar_one()
+
+
+async def test_a_settled_invoice_refuses_a_credit_on_both_paths(realdb):
+    """A credit applied to a `paid` or `done` invoice reduces no payment — the
+    money has left, or the invoice is closed — yet the memo would be `applied`,
+    un-voidable and un-re-appliable: the vendor's credit, gone. Both paths
+    refuse it, and the memo stays open for the vendor's next invoice."""
+    mk = realdb.sessionmaker("a")
+    org_id = realdb.info("a").org_id
+    vendor_id = await _add_vendor(mk, org_id)
+    for settled in (InvoiceStatus.paid, InvoiceStatus.done):
+        invoice_id = await _add_target(
+            mk, org_id, number=f"EL-{settled.value}", vendor_id=vendor_id, status=settled
+        )
+        async with realdb.client(key="a", role="ap_manager") as c:
+            memo_id = await _create_open_memo(c, vendor_id, number=f"CM-{settled.value}")
+            before = await _memo_count(mk)
+            applied = await c.post(
+                f"/api/credit-memos/{memo_id}/apply", json={"invoice_id": invoice_id}
+            )
+            linked = await c.post(
+                "/api/credit-memos",
+                json={
+                    "memo_number": f"CM-LINK-{settled.value}",
+                    "vendor_id": vendor_id,
+                    "amount": "10.00",
+                    "invoice_id": invoice_id,
+                },
+            )
+        for resp in (applied, linked):
+            assert resp.status_code == 409, (settled, resp.text)
+            assert resp.json()["detail"].startswith(f"The invoice is '{settled.value}'")
+            assert "next invoice" in resp.json()["detail"]
+        assert await _memo_count(mk) == before  # the linked create wrote nothing
+        async with mk() as s:
+            memo = await s.get(CreditMemo, uuid.UUID(memo_id))
+            assert memo.status == "open" and memo.invoice_id is None and memo.applied_at is None
+
+
+async def test_a_scheduled_invoice_still_takes_a_credit(realdb):
+    """`payment_scheduled` is a payment BOOKED, not settled: the executor's
+    `net_amount_changed` refusal re-nets it, so the credit still reduces what
+    the vendor is paid. Refusing here would strand every credit that arrives
+    while a run is being approved."""
+    mk = realdb.sessionmaker("a")
+    org_id = realdb.info("a").org_id
+    vendor_id = await _add_vendor(mk, org_id)
+    invoice_id = await _add_target(
+        mk,
+        org_id,
+        number="EL-SCHED",
+        vendor_id=vendor_id,
+        status=InvoiceStatus.payment_scheduled,
+    )
+    async with realdb.client(key="a", role="ap_manager") as c:
+        memo_id = await _create_open_memo(c, vendor_id, number="CM-SCHED")
+        resp = await c.post(f"/api/credit-memos/{memo_id}/apply", json={"invoice_id": invoice_id})
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["status"] == "applied"
+
+
+def test_creditable_statuses_are_derived_from_the_state_machine(monkeypatch):
+    """The set is a reachability answer over `VALID_TRANSITIONS`, not a list.
+
+    Today it is every status but `paid` and `done`. The derivation is what is
+    pinned, so a status the graph gains is classified by its edges: give `done`
+    a way back into payment and it is creditable again; drop a status from the
+    graph and it is refused rather than waved through.
+    """
+    from app.api import credit_memos
+    from app.services.workflow_engine import VALID_TRANSITIONS
+
+    assert credit_memos.CREDITABLE_INVOICE_STATUSES == frozenset(InvoiceStatus) - {
+        InvoiceStatus.paid,
+        InvoiceStatus.done,
+    }
+
+    reopened = {**VALID_TRANSITIONS, InvoiceStatus.done: {InvoiceStatus.approved}}
+    monkeypatch.setattr(credit_memos, "VALID_TRANSITIONS", reopened)
+    assert InvoiceStatus.done in credit_memos._statuses_a_payment_can_still_net()
+    # `paid` stays refused even though `paid -> approved` (the void) leads back:
+    # it is the settled status itself, whatever its edges say.
+    assert InvoiceStatus.paid not in credit_memos._statuses_a_payment_can_still_net()
+
+    unmapped = {k: v for k, v in VALID_TRANSITIONS.items() if k != InvoiceStatus.rejected}
+    monkeypatch.setattr(credit_memos, "VALID_TRANSITIONS", unmapped)
+    assert InvoiceStatus.rejected not in credit_memos._statuses_a_payment_can_still_net()
