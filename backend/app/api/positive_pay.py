@@ -273,7 +273,7 @@ async def generate_check_issue(
     formatter = _require_formatter(bank_format)
 
     company_name, account_number = _resolve_company_account(org)
-    items, total, mapping = await service.build_check_issue_items(
+    items, total, mapping, currency = await service.build_check_issue_items(
         db, run=run, entity_id=entity_id, account_number=account_number
     )
 
@@ -300,7 +300,11 @@ async def generate_check_issue(
         bank_format=bank_format,
         item_count=len(items),
         total_amount=total,
-        currency=resolve_reporting_currency(org.settings),
+        # The cheques' own currency, never the org's reporting one: `total` sums
+        # `Payment.amount`, which is denominated in each invoice's currency.
+        # `None` when the cheques carry none or disagree — the UI then renders
+        # the figure bare rather than under a code nobody established.
+        currency=currency,
         content_hash=content_hash,
         file_key=file_key,
         account_last4=_last4(account_number),

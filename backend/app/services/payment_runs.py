@@ -114,6 +114,30 @@ class PaymentRunRollup:
         return "partial" if self.completed else "failed"
 
 
+def one_currency(codes: Iterable[str | None]) -> str | None:
+    """The single currency a set of payment legs agrees on, or ``None``.
+
+    ``payment_runs.total_amount`` is a single bare ``Numeric`` with no currency
+    column beside it, and a ``Payment.amount`` is denominated in its INVOICE's
+    currency (the home-currency debit is ``source_amount``). What makes a run
+    total legitimate is the guard in :func:`create_payment_run_for_invoices`,
+    which 422s a run spanning more than one currency — so a run created through
+    either supported path has exactly one, carried on the invoices behind its
+    payments. The run endpoints and the Positive Pay check-issue file both name
+    a sum of those legs' amounts, so both ask this.
+
+    It refuses to guess. No legs, legs whose invoices carry no currency, and a
+    legacy run predating that guard whose legs disagree all come back ``None``:
+    in the last case the total is itself denominated in nothing real, so
+    stamping a code on it would dress up a meaningless figure as a genuine one —
+    ``docs/decisions.md`` §79/§82. (``{None}`` collapses to ``None`` for free,
+    which is the same answer for a different reason.) Callers pass codes
+    already upper-cased, so ``eur`` and ``EUR`` are one currency.
+    """
+    distinct = set(codes)
+    return next(iter(distinct)) if len(distinct) == 1 else None
+
+
 #: Run statuses that describe a CLAIM on the run, not an outcome of its
 #: payments. `draft` = never dispatched, `executing` = a dispatch pass holds it,
 #: `cancelled` = abandoned (its payments were deleted). `derive_run_status`

@@ -126,9 +126,11 @@ export interface PositivePayFile {
 	item_count: number;
 	total_amount: MoneyAmount;
 	/**
-	 * Currency `total_amount` is denominated in — the org's reporting (home)
-	 * currency stamped at generation. `null` for legacy rows created before the
-	 * column existed; the UI falls back to the org default for those.
+	 * Currency `total_amount` is denominated in — the one currency the file's
+	 * cheques agree on (each `Payment.amount` is in its invoice's currency),
+	 * stamped at generation. `null` when they carry none or disagree, and for
+	 * legacy rows created before the column existed: render the total BARE
+	 * then, never under the org default (`docs/decisions.md` §198).
 	 */
 	currency: string | null;
 	account_last4: string | null;

@@ -33,7 +33,7 @@ from app.models.entity import Entity
 from app.models.invoice import Invoice, InvoiceStatus
 from app.models.payment import Payment, PaymentRun
 
-# Marked per-test rather than module-wide: `_one_currency` is pure and sync.
+# Marked per-test rather than module-wide: `one_currency` is pure and sync.
 
 TENANT = "a"
 
@@ -152,9 +152,9 @@ def test_one_currency_refuses_to_guess(codes, expected):
     in practice — a run's is not, and this is where the refusal actually bites.
     Pure, so it needs no database.
     """
-    from app.api.payments import _one_currency
+    from app.services.payment_runs import one_currency
 
-    assert _one_currency(codes) == expected
+    assert one_currency(codes) == expected
 
 
 @pytest.mark.asyncio

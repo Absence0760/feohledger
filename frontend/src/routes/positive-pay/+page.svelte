@@ -9,7 +9,6 @@
 		bankFormatLabelKey
 	} from '$lib/types/positivePay';
 	import { auth } from '$lib/stores/auth.svelte';
-	import { orgCurrency } from '$lib/stores/orgSettings.svelte';
 	import {
 		listPositivePayFiles,
 		getPositivePaySummary,
@@ -217,10 +216,6 @@
 		load();
 	});
 
-	$effect(() => {
-		orgCurrency.ensureLoaded();
-	});
-
 	// Deep-link: `/positive-pay?id=<uuid>` opens that file's detail modal.
 	let deepLinkLoaded = $state<string | null>(null);
 	$effect(() => {
@@ -376,7 +371,7 @@
 					<td class="muted">{m(POSITIVE_PAY_FILE_TYPE_LABEL_KEYS[file.file_type])}</td>
 					<td class="muted">{bankFormatLabel(file.bank_format)}</td>
 					<td class="right mono">{file.item_count}</td>
-					<td class="right mono"><Money amount={file.total_amount} currency={file.currency ?? orgCurrency.currency} /></td>
+					<td class="right mono"><Money amount={file.total_amount} currency={file.currency} /></td>
 					<td class="mono muted">{file.account_last4 ? `••••${file.account_last4}` : '—'}</td>
 					<td class="muted">{formatDate(file.created_at)}</td>
 					<td>

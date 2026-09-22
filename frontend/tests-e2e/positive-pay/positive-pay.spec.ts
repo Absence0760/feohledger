@@ -1,3 +1,4 @@
+import type { Route } from '@playwright/test';
 import {
 	API_BASE,
 	authedTenantHeaders,
@@ -175,6 +176,58 @@ test.describe('/positive-pay (admin)', () => {
 			const totalCell = row.locator('td').nth(4);
 			await expect(totalCell).toContainText('€');
 			await expect(totalCell).not.toContainText('$');
+		} finally {
+			if (id) {
+				await page.request.delete(`${API_BASE}/api/positive-pay/${id}`, {
+					headers: await authedTenantHeaders(page)
+				});
+			}
+		}
+	});
+
+	test('a file with no stored currency renders its total bare, not in the org default', async ({
+		page
+	}) => {
+		// `currency: null` is a legacy row, or a cheque run whose invoices
+		// disagree — nobody established what the total is in. The list cell and
+		// the detail dialog used to write `file.currency ?? orgCurrency.currency`
+		// and so rendered "$0.00" here; the figure now renders bare
+		// (`docs/decisions.md` §198).
+		const nullCurrency = async (route: Route) => {
+			if (route.request().method() !== 'GET') return route.continue();
+			const resp = await route.fetch();
+			const body = await resp.json();
+			const strip = (f: Record<string, unknown>) => ({ ...f, currency: null });
+			await route.fulfill({
+				response: resp,
+				json: Array.isArray(body.items) ? { ...body, items: body.items.map(strip) } : strip(body)
+			});
+		};
+		await page.route('**/api/positive-pay?**', nullCurrency);
+
+		let id: string | null = null;
+		try {
+			const resp = await page.request.post(`${API_BASE}/api/positive-pay/ach-authorization`, {
+				headers: await authedTenantHeaders(page),
+				data: { bank_format: 'csv' }
+			});
+			expect(resp.ok()).toBeTruthy();
+			id = ((await resp.json()) as { id: string }).id;
+			await page.route(`**/api/positive-pay/${id}`, nullCurrency);
+
+			await page.goto('/positive-pay?file_type=ach_authorization');
+			const row = page.locator('tr', { hasText: id!.slice(0, 8) });
+			await expect(row).toBeVisible({ timeout: 10_000 });
+			const totalCell = row.locator('td').nth(4);
+			// An ACH authorization file's total is always zero: the figure, bare.
+			await expect(totalCell).toHaveText(/^\s*0[.,]00\s*$/);
+
+			await page.goto(`/positive-pay?id=${id}`);
+			const total = page
+				.getByRole('dialog')
+				.locator('.total-box', { hasText: 'Total amount' })
+				.locator('.total-value');
+			await expect(total).toHaveText(/^\s*0[.,]00\s*$/);
 		} finally {
 			if (id) {
 				await page.request.delete(`${API_BASE}/api/positive-pay/${id}`, {
