@@ -586,6 +586,43 @@ constants — the static set is for the cross-tenant specs only.
 | `e2e<N>` | ap_clerk | `demo+clerk@e2e<N>.localhost` | `demo` |
 | `e2e<N>` | cfo | `demo+cfo@e2e<N>.localhost` | `demo` |
 
+## Stubbing an API route (`page.route`) — match the exact pathname
+
+**Under `vite dev` the app's source is served over HTTP**, so
+`$lib/api/vendors.ts` is fetched as `/src/lib/api/vendors.ts`. A stub pattern
+written for the API call — the glob `**/api/vendors*`, the regex
+`/\/api\/vendors/` — matches that module request too, and fulfilling it with
+JSON means the importing route never loads: SvelteKit renders its 500 page and
+the spec times out on whatever it looks for first. CI serves a **preview
+build** (hashed `/_app/immutable/` chunks), where no API pattern can match a
+module, so the same spec is green there — which is exactly how four
+`/credit-memos` specs sat red on every laptop and green in CI until issue #443
+traced them to this. It bites whenever `src/lib/api/<name>.ts` shares its name
+with the endpoint (`vendors`, `invoices`, `budgets`, `experiments`, …).
+
+So match the API request, not a substring of a URL:
+
+```ts
+// A URL predicate on the exact pathname — cannot match a module.
+await page.route((url) => url.pathname === '/api/vendors', (route) => route.fulfill({ json }));
+
+// Or keep a broad glob, but dispatch on the pathname inside and hand
+// everything else back.
+await page.route('**/api/vendors**', async (route) => {
+	if (new URL(route.request().url()).pathname !== '/api/vendors') return route.fallback();
+	await route.fulfill({ json });
+});
+```
+
+The exact pathname also keeps a list stub from answering its own sub-routes
+(`/api/vendors/counts`, `/api/credit-memos/summary`), which carry the same query
+string and would otherwise receive the list's body.
+
+**The `page` fixture enforces this.** `fixtures/helpers.ts` records every module
+script the page receives a JSON body for — which only a stub can cause — and
+fails the test at teardown naming the module, so the failure reads "a stub
+answered `/src/lib/api/vendors.ts`" instead of "row not found".
+
 ## Fixture helpers (`fixtures/helpers.ts`)
 
 Reach for these instead of duplicating boilerplate per spec:

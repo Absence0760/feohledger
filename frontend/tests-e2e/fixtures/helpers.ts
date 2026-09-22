@@ -149,13 +149,49 @@ export const test = base.extend<object, WorkerFixtures>({
 	// still get the pre-nav; for them the worker's tenant root
 	// redirects to `/login` (no auth) which is the same place those
 	// specs were going to navigate next anyway.
+	//
+	// It also watches for a stub answering a dev-server MODULE request — see
+	// `watchForStubbedModules` below.
 	page: async ({ page, baseURL }, use) => {
+		const stubbedModules = watchForStubbedModules(page);
 		if (baseURL) {
 			await page.goto(baseURL);
 		}
 		await use(page);
+		expect(stubbedModules, STUBBED_MODULE_HINT).toEqual([]);
 	}
 });
+
+const STUBBED_MODULE_HINT =
+	'A page.route() stub answered a dev-server MODULE request with JSON, so the ' +
+	"route's code never loaded (SvelteKit renders its 500 page). Under `vite dev` " +
+	'the source is served over HTTP — `$lib/api/vendors.ts` is `/src/lib/api/vendors.ts` — ' +
+	'so a pattern like `**/api/vendors*` or `/\\/api\\/vendors/` matches the module as well ' +
+	'as the API call. Match the API request by its exact pathname instead. See ' +
+	'tests-e2e/README.md § Stubbing an API route.';
+
+/**
+ * Collect every module script the page received a JSON body for.
+ *
+ * Only a `page.route()` stub produces that: Vite serves every module —
+ * including a JSON import — as JavaScript, and the preview build CI runs
+ * serves hashed `/_app/immutable/` chunks no API pattern can match. So under
+ * `vite dev` an over-broad stub turns into a route that silently fails to
+ * load, and the spec then times out on whatever it looks for first — four
+ * `/credit-memos` specs sat red locally and green in CI for exactly this
+ * reason, with nothing in their output naming the stub (issue #443). Checked
+ * in the `page` fixture's teardown, so the failure names the module and the
+ * fix instead of a missing row.
+ */
+function watchForStubbedModules(page: Page): string[] {
+	const offenders: string[] = [];
+	page.on('response', (response) => {
+		if (response.request().resourceType() !== 'script') return;
+		const type = response.headers()['content-type'] ?? '';
+		if (type.includes('json')) offenders.push(new URL(response.url()).pathname);
+	});
+	return offenders;
+}
 
 /**
  * Read the auth_token value out of a persisted storageState JSON

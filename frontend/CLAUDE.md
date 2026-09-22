@@ -450,6 +450,15 @@ Three shapes need a real substitute rather than a deletion, and one keeps it:
 Never substitute `waitForTimeout`, and never raise the 30s timeout to absorb it
 (both are masking, see the root `CLAUDE.md` § Fix bugs at the source).
 
+### A `page.route` stub matches the exact API pathname (tests-e2e/)
+
+Under `vite dev`, `$lib/api/vendors.ts` is the URL `/src/lib/api/vendors.ts`,
+so a stub pattern like `**/api/vendors*` also answers the MODULE request and the
+route never loads — red locally, green in CI's preview build. Match with a URL
+predicate on the exact pathname (or dispatch on it inside and `fallback()` the
+rest); the `page` fixture fails any test whose stub hands a module JSON.
+Reference: `tests-e2e/README.md` § Stubbing an API route.
+
 **`pnpm check` does NOT typecheck `tests-e2e/`.** A syntax error there silently
 zeroes the whole Playwright suite. After any bulk edit run
 `pnpm exec playwright test --config=tests-e2e/playwright.config.ts --list` and
