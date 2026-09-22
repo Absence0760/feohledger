@@ -250,7 +250,8 @@ negotiation, pluralization, and the locale-aware number/date/currency helpers).
 Mobile has a parallel setup in `mobile/CLAUDE.md` § Internationalization.
 
 The rule: **no user-facing string is ever a hardcoded literal** — everything goes
-through `t()`, and every number, date and currency renders through the
+through `m()` (`$lib/i18n/store.svelte`, keyed by a typed `MessageKey`; there is
+no `t()`), and every number, date and currency renders through the
 locale-aware helpers rather than a raw `toLocaleString`. A new string ships with
 its catalogue entry in the same change.
 
@@ -274,7 +275,7 @@ a catalogue backfill; see `docs/decisions.md` §174. **This exception covers onl
 those two directories**, plus the document titles `pages.ts` exports for the
 links that reach them — take those from `legalTitle(path)`, never by typing the
 title again. A nav item, footer or banner elsewhere that merely *points at* a
-legal page is ordinary UI and goes through `t()` like anything else. A sentence
+legal page is ordinary UI and goes through `m()` like anything else. A sentence
 with a link inside it stays ONE catalogue entry with `{token}` markers, rendered
 through `ui/LinkedMessage.svelte`; fragmenting it into `…Pre`/`…Post` entries
 fixes the link order and cannot be translated (`frontend/docs/i18n.md` § A
@@ -398,7 +399,7 @@ The rules that hold everywhere, so you know when you need to go read the detail:
 - **Filter, sort, search and selection state is URL-backed**, so back/forward and a pasted link reproduce the view. State that lives only in a `$state` rune is a bug.
 - **List fetches go through `createRequestSequencer`** — a late response from a superseded request must never overwrite a newer one.
 - **Money renders through `<Money>`**, never a hand-rolled `toFixed` or `Intl` call. See `### Money formatting`.
-- **User-facing strings go through `t()`** — never a hardcoded literal. See `### Internationalization`.
+- **User-facing strings go through `m()`** — never a hardcoded literal. See `### Internationalization`.
 - **Accessibility is WCAG 2.2 AA and it is tested.** Focus management, keyboard reachability, target size, and reflow at 320 px are guarded by `frontend/tests-e2e/a11y/` (axe-core). `reflow.spec.ts` enumerates `src/routes` off disk, so a NEW route is measured at 320px the day it lands and there is no list to add it to. Never loosen those specs — fix the markup.
 - **Colour comes from the tokens in `app.css`**, never a literal hex in a component. Contrast ratios are computed and asserted; a new token pair must pass 1.4.3.
 - **Motion ends on its resting frame, hides nothing by stylesheet, and stops on request.** Continuous animation lives under a `data-motion` root with `MotionToggle` (WCAG 2.2.2); reduced motion collapses durations *and* delays. The five rules are `docs/ui-patterns.md` § Motion.
