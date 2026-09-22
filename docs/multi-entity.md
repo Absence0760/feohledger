@@ -122,9 +122,18 @@ column is suppressed: there is no second answer for it to give.
 `GlAccountModal` states which chart a new account will land in **before** it is
 created — shared when consolidated, the selected entity's own otherwise. That
 is not a courtesy: the backend reads it off `X-Entity-ID` rather than the
-request body, the difference is invisible in the form, and there is no PATCH on
-that router to correct it afterwards, so a silent sidebar selection would
-decide whether the account reaches one subsidiary or all of them.
+request body, the difference is invisible in the form, and the PATCH
+deliberately cannot move a row between charts afterwards (a move is a create
+plus a retire), so a silent sidebar selection would decide whether the account
+reaches one subsidiary or all of them.
+
+The page's **Edit** / **Retire** / **Reactivate** row actions (admin |
+ap_manager, `PATCH /api/gl-accounts/{id}`) follow the PATCH's scoping rule
+rather than the read's: in the consolidated view every row offers them, while
+with an entity selected only that entity's OWN rows do — a shared row is
+visible in the chart but belongs to every entity, so the backend 403s it, and
+the row says "Edit from All entities" instead of offering a button that can
+only fail (`types/glAccount.ts::canEditGlAccount`).
 
 ### Vendor matching: entity ∪ NULL, for a different reason
 
