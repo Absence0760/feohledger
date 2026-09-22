@@ -20,6 +20,7 @@
 // numbers and stay `number`.
 
 import type { MoneyAmount, MoneyString } from '$lib/utils/money';
+import type { CurrencyFigure } from '$lib/components/ui/moneyByCurrency';
 
 export type CashflowGranularity = 'day' | 'week' | 'month';
 
@@ -148,11 +149,26 @@ export interface CfoDpoTrendPoint {
 	dpo: number;
 }
 
-export interface CfoAccruals {
+/** One currency's accruals — every leg in `currency`, `total_accrual` netted
+ *  within it. `currency: null` is the slice of POs nobody recorded a currency
+ *  for: render it bare, never merged into a real currency's (decisions §197). */
+export interface CfoAccrualsByCurrency {
+	currency: string | null;
 	open_po_amount: MoneyString;
 	received_amount: MoneyString;
 	unposted_invoice_amount: MoneyString;
 	total_accrual: MoneyString;
+}
+
+export interface CfoAccruals {
+	/** The four flat fields are naive sums ACROSS currencies, kept for API
+	 *  back-compat. Never render them — `by_currency` is the figure. */
+	open_po_amount: MoneyString;
+	received_amount: MoneyString;
+	unposted_invoice_amount: MoneyString;
+	total_accrual: MoneyString;
+	/** Ordered by code, the unknown-currency row last. */
+	by_currency: CfoAccrualsByCurrency[];
 }
 
 export interface CfoSupplierConcentration {
@@ -300,11 +316,15 @@ export interface EntityMetrics {
 	reporting_outstanding_unconverted_count: number;
 	invoice_count: number;
 	open_exceptions: number;
-	/**
-	 * Sum of open PO totals. `PurchaseOrder` records no currency, so this is in
-	 * currencies nobody recorded and carries no code — render it bare.
-	 */
+	/** Naive sum of PO totals across their currencies, kept for back-compat.
+	 *  Never render it — `open_po_by_currency` is the figure. */
 	open_po_amount: string;
+	/**
+	 * Open POs per PO currency (`purchase_orders.currency`, migration 0099),
+	 * ordered by code with the unknown-currency entry (`currency: null`) last.
+	 * Render each in its own code, the `null` one bare (decisions §197).
+	 */
+	open_po_by_currency: CurrencyFigure[];
 }
 
 export interface EntityRollupRow extends EntityMetrics {

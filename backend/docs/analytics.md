@@ -560,6 +560,19 @@ Response:
   chart title) so "no data for this month yet" doesn't read as a bug.
 - `cash_conversion_cycle` (NULL when DSO/DIO not available — the
   AP-only product can't compute it)
+- `accruals.by_currency[]` — **the accruals figure to render.** One row per
+  currency that appears in any leg: `{currency, open_po_amount,
+  received_amount, unposted_invoice_amount, total_accrual}`, each leg in that
+  currency and `total_accrual` netted **within** it. Every PO is grouped by its
+  own `purchase_orders.currency`, every unposted invoice by its own, and a
+  receipt is worth its PO's money in its PO's currency. `currency: null` is the
+  slice nobody recorded a currency for (POs only — an invoice always carries
+  one): kept apart and rendered bare, never folded into a real currency's
+  figure. Ordered by code with that row last. The four flat
+  `accruals.{open_po_amount, received_amount, unposted_invoice_amount,
+  total_accrual}` fields beside it stay the **naive sums across currencies**,
+  kept for API back-compat like `total_spend` — a EUR purchase order added to a
+  USD one is denominated in nothing (`docs/decisions.md` §197).
 - `accruals.{open_po_amount, received_amount, unposted_invoice_amount, total_accrual}`
   (`received_amount` values goods physically received but not yet
   invoiced — the GR/IR accrual leg. The 3-way match is fanned out per
@@ -836,7 +849,10 @@ embedded in `/cfo` below the forecast/what-if/cash-position panels (a
 self-fetching component mirroring `ByEntityBreakdown` — its own `GET
 /api/analytics/cfo?period_days=` call, own loading/error state). Renders a KPI
 row (DPO current, cash conversion cycle, AP balance, rebate yield %), the DPO
-6-month trend as a bar chart, an accruals breakdown, supplier concentration
+6-month trend as a bar chart, an accruals breakdown (each of the four boxes
+one line per currency, from `accruals.by_currency` — never the flat sums —
+through `ui/MoneyByCurrency.svelte`, with a note when POs recording no currency
+are among them), supplier concentration
 (with the flagged-vendor banner), the fraud-rate trend, and the unrealized-FX
 table when available. `/forecast_variance` has its own surface on the same route
 (`routes/cfo/ForecastVariancePanel.svelte` — see above); the two remaining
@@ -888,18 +904,21 @@ returns a coherent one-row breakdown whose row equals the consolidated block.
 |-------|----------------|
 | `reporting_total_spend`, `reporting_outstanding_amount` | `reporting_currency` (the org's, same on every row). A foreign invoice with no locked rate is counted at **face value**, and the matching `*_unconverted_count` says how many. The consolidated spend figure is the same population and rollup as `/cfo`'s `reporting_spend`, so the two cannot disagree. |
 | `total_spend`, `outstanding_amount` | **Nothing** — naive `SUM`s across currencies, kept for API back-compat. Never render them. |
-| `open_po_amount` | **Unknown** — `PurchaseOrder` has no currency column, so this sums PO totals in currencies nobody recorded. Served with no code on purpose; the client renders it bare. |
+| `open_po_amount` | **Nothing** — a naive `SUM` across the PO currencies, kept for back-compat. Never render it: `open_po_by_currency` is the figure. |
+| `open_po_by_currency[]` | Each `{currency, amount}` in its OWN `currency` — the PO's `purchase_orders.currency` (migration 0099). `currency: null` is the entry for POs that record none; it renders bare and is never merged into another. Ordered by code with that entry last, the same order `/cfo`'s `accruals.by_currency` uses, and the consolidated row equals the sum of the entity rows per currency. |
 | `currency` (entity row) | Not a denomination: the entity's configured currency, `NULL` meaning "the org's reporting currency". It labels no figure. |
 
 The web surface is the `By entity` table on `/cfo`
 (`frontend/src/lib/components/analytics/ByEntityBreakdown.svelte`), which
 self-hides for single-entity tenants (mirrors the entity switcher). It renders
 Spend and Outstanding from the `reporting_*` fields in `reporting_currency` on
-every row, Open POs bare, and one face-value disclosure line per column whose
-consolidated count is non-zero. It used to label each entity row's naive
-`total_spend` / `outstanding_amount` / `open_po_amount` with the entity's
-`currency`, falling back to the org's — a mixed-currency figure wearing one
-currency's symbol (`docs/decisions.md` §196).
+every row, Open POs as one line per PO currency (`ui/MoneyByCurrency.svelte`),
+and one face-value disclosure line per column whose consolidated count is
+non-zero, plus a note when any PO records no currency at all. It used to label
+each entity row's naive `total_spend` / `outstanding_amount` / `open_po_amount`
+with the entity's `currency`, falling back to the org's — a mixed-currency
+figure wearing one currency's symbol (`docs/decisions.md` §196) — and then,
+once Open POs went bare, to show one unlabelled sum across PO currencies (§197).
 
 ## Predictive cash-flow forecasting (`/api/analytics/{cashflow_forecast,cashflow_whatif,cash_position}`)
 

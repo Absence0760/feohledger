@@ -1938,6 +1938,8 @@ export const messages = {
 	'cfoMetrics.accruals.received': 'Recebido, não faturado',
 	'cfoMetrics.accruals.unposted': 'Faturas não lançadas',
 	'cfoMetrics.accruals.total': 'Provisão total',
+	'cfoMetrics.accruals.noCurrency':
+		'Pedidos de compra sem moeda registrada aparecem em uma linha própria, sem símbolo. Cada moeda é compensada separadamente; as linhas nunca são somadas.',
 	'cfoMetrics.concentration.title': 'Concentração de fornecedores',
 	'cfoMetrics.concentration.flagged': '⚠ {vendor} representa {pct}% dos gastos — risco de concentração.',
 	'cfoMetrics.concentration.top10': 'Top 10 fornecedores',
@@ -3008,7 +3010,7 @@ export const messages = {
 	'byEntity.unconvertedSpend':
 		'O gasto inclui pelo valor nominal {n, plural, one {# fatura} other {# faturas}} sem taxa de câmbio travada para {currency}, então os totais misturam moedas.',
 	'byEntity.openPoNoCurrency':
-		'Os pedidos de compra ainda não registram uma moeda, então os pedidos abertos são exibidos sem ela.',
+		'Alguns pedidos de compra não registram moeda; seus valores em aberto aparecem em uma linha própria, sem símbolo, e nunca são somados aos de outra moeda.',
 
 	// Relatórios agendados (components/analytics/ScheduledReportsPanel.svelte)
 	'scheduledReports.heading': 'Relatórios agendados',

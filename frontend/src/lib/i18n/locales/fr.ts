@@ -1937,6 +1937,8 @@ export const messages = {
 	'cfoMetrics.accruals.received': 'Reçu, non facturé',
 	'cfoMetrics.accruals.unposted': 'Factures non comptabilisées',
 	'cfoMetrics.accruals.total': 'Total des charges à payer',
+	'cfoMetrics.accruals.noCurrency':
+		'Les commandes sans devise enregistrée figurent sur une ligne à part, sans symbole. Chaque devise est compensée séparément ; les lignes ne sont jamais additionnées.',
 	'cfoMetrics.concentration.title': 'Concentration fournisseurs',
 	'cfoMetrics.concentration.flagged': '⚠ {vendor} représente {pct}% des dépenses — risque de concentration.',
 	'cfoMetrics.concentration.top10': 'Top 10 fournisseurs',
@@ -3008,7 +3010,7 @@ export const messages = {
 	'byEntity.unconvertedSpend':
 		'Les dépenses incluent au nominal {n, plural, one {# facture} other {# factures}} sans taux de change verrouillé vers {currency} — les totaux mélangent donc des devises.',
 	'byEntity.openPoNoCurrency':
-		'Les commandes n\'enregistrent pas encore de devise : les commandes ouvertes sont donc affichées sans devise.',
+		'Certaines commandes n’indiquent aucune devise : leurs montants ouverts figurent sur une ligne à part, sans symbole, et ne sont jamais ajoutés à ceux d’une autre devise.',
 
 	// Rapports planifiés (components/analytics/ScheduledReportsPanel.svelte)
 	'scheduledReports.heading': 'Rapports planifiés',

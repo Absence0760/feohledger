@@ -10,7 +10,6 @@
 	import Badge from '$lib/components/ui/Badge.svelte';
 	import type { BadgeTone } from '$lib/components/ui/badgeTone';
 	import { formatMoney } from '$lib/utils/money';
-	import { orgCurrency } from '$lib/stores/orgSettings.svelte';
 	import { isRowOpenClick } from '$lib/utils/rowNav';
 	import { toast } from '$lib/components/ui/Toast.svelte';
 	import { auth } from '$lib/stores/auth.svelte';
@@ -42,6 +41,13 @@
 		vendor_id: string | null;
 		vendor_name: string | null;
 		total: number;
+		/**
+		 * The PO's OWN currency — `total` and every line are in it. `null` when
+		 * no source recorded one (a PO older than migration 0099 with no
+		 * requisition behind it), and the figures then render bare: the org's
+		 * currency would be a claim nobody made (decisions §197).
+		 */
+		currency: string | null;
 		status: string;
 		line_items: POLineItem[];
 		created_at: string;
@@ -52,6 +58,8 @@
 		invoice_number: string;
 		vendor_name: string | null;
 		amount: number;
+		/** The INVOICE's currency, which need not be the PO's. */
+		currency: string | null;
 		status: string;
 	}
 
@@ -93,7 +101,6 @@
 	let searchTimer: ReturnType<typeof setTimeout> | null = null;
 
 	$effect(() => {
-		orgCurrency.ensureLoaded();
 		void loadPos();
 		void fetchCounts();
 	});
@@ -294,9 +301,10 @@
 		}
 	}
 
-	function formatCurrency(n: number | null): string {
-		return formatMoney(n, { currency: orgCurrency.currency });
-	}
+	// Every figure on this page is labelled by the currency its own row names —
+	// the PO's for its total and lines, the invoice's for a linked invoice —
+	// and renders bare when that is `null`. It used to stamp the org's currency
+	// on every PO, so a EUR order read as dollars (decisions §196, §197).
 
 	let hasMore = $derived(pos.length < total);
 </script>
@@ -340,7 +348,7 @@
 						</RowLink>
 					</td>
 					<td>{po.vendor_name ?? '—'}</td>
-					<td class="right mono">{formatCurrency(po.total)}</td>
+					<td class="right mono" data-testid="po-total">{formatMoney(po.total, { currency: po.currency })}</td>
 					<td><Badge tone={STATUS_TONES[po.status] ?? 'neutral'} variant={po.status}>{po.status}</Badge></td>
 					<td class="muted">{po.line_items.length}</td>
 					<td class="muted">{formatDate(po.created_at)}</td>
@@ -387,7 +395,7 @@
 		{:else if detail}
 			<dl class="meta">
 				<dt>{m('purchaseOrders.modal.vendor')}</dt><dd>{detail.vendor_name ?? '—'}</dd>
-				<dt>{m('purchaseOrders.modal.total')}</dt><dd class="mono">{formatCurrency(detail.total)}</dd>
+				<dt>{m('purchaseOrders.modal.total')}</dt><dd class="mono" data-testid="po-detail-total">{formatMoney(detail.total, { currency: detail.currency })}</dd>
 				<dt>{m('purchaseOrders.modal.created')}</dt><dd>{formatDate(detail.created_at)}</dd>
 			</dl>
 
@@ -406,8 +414,8 @@
 						<tr>
 							<td>{li.description ?? '—'}</td>
 							<td class="right mono">{li.quantity ?? '—'}</td>
-							<td class="right mono">{formatCurrency(li.unit_price)}</td>
-							<td class="right mono">{formatCurrency(li.total)}</td>
+							<td class="right mono">{formatMoney(li.unit_price, { currency: detail.currency })}</td>
+							<td class="right mono">{formatMoney(li.total, { currency: detail.currency })}</td>
 						</tr>
 					{:else}
 						<tr><td colspan="4" class="empty">{m('purchaseOrders.modal.noLineItems')}</td></tr>
@@ -430,7 +438,7 @@
 						<tr>
 							<td class="mono">{inv.invoice_number}</td>
 							<td>{inv.vendor_name ?? '—'}</td>
-							<td class="right mono">{formatCurrency(inv.amount)}</td>
+							<td class="right mono">{formatMoney(inv.amount, { currency: inv.currency })}</td>
 							<td>{inv.status}</td>
 						</tr>
 					{:else}

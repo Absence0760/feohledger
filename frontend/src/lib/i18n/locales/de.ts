@@ -1937,6 +1937,8 @@ export const messages = {
 	'cfoMetrics.accruals.received': 'Erhalten, nicht fakturiert',
 	'cfoMetrics.accruals.unposted': 'Nicht gebuchte Rechnungen',
 	'cfoMetrics.accruals.total': 'Gesamtabgrenzung',
+	'cfoMetrics.accruals.noCurrency':
+		'Bestellungen ohne erfasste Währung stehen in einer eigenen Zeile ohne Währungssymbol. Jede Währung wird für sich saldiert; die Zeilen werden nie addiert.',
 	'cfoMetrics.concentration.title': 'Lieferantenkonzentration',
 	'cfoMetrics.concentration.flagged': '⚠ {vendor} macht {pct}% der Ausgaben aus — Konzentrationsrisiko.',
 	'cfoMetrics.concentration.top10': 'Top 10 Lieferanten',
@@ -3008,7 +3010,7 @@ export const messages = {
 	'byEntity.unconvertedSpend':
 		'Ausgaben enthalten {n, plural, one {# Rechnung} other {# Rechnungen}} ohne festgelegten Wechselkurs in {currency}, zum Nennwert gezählt – die Summen mischen Währungen in diesem Umfang.',
 	'byEntity.openPoNoCurrency':
-		'Bestellungen erfassen noch keine Währung, daher werden offene Bestellungen ohne Währung angezeigt.',
+		'Für einige Bestellungen ist keine Währung erfasst; ihre offenen Beträge stehen in einer eigenen Zeile ohne Währungssymbol und werden nie zu einer anderen Währung addiert.',
 
 	// Geplante Berichte (components/analytics/ScheduledReportsPanel.svelte)
 	'scheduledReports.heading': 'Geplante Berichte',

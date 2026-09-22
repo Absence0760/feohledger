@@ -2,13 +2,15 @@
 	import { api } from '$lib/api';
 	import DataTable from '$lib/components/ui/DataTable.svelte';
 	import KpiCard from '$lib/components/ui/KpiCard.svelte';
+	import MoneyByCurrency from '$lib/components/ui/MoneyByCurrency.svelte';
+	import type { CurrencyFigure } from '$lib/components/ui/moneyByCurrency';
 	import { formatMoney, isNegativeAmount } from '$lib/utils/money';
 	import type { MoneyAmount } from '$lib/utils/money';
 	import { formatPeriod } from '$lib/utils/time';
 	import { orgCurrency } from '$lib/stores/orgSettings.svelte';
 	import { m } from '$lib/i18n/store.svelte';
 	import { createRequestSequencer } from '$lib/utils/requestSequence';
-	import type { CfoAnalytics } from '$lib/types/analytics';
+	import type { CfoAccrualsByCurrency, CfoAnalytics } from '$lib/types/analytics';
 
 	// DPO, cash conversion cycle, accruals, supplier concentration, fraud-rate
 	// trend, and rebate yield — `GET /api/analytics/cfo` computes all of these
@@ -27,7 +29,8 @@
 	let loading = $state(false);
 	let error = $state<string | null>(null);
 
-	/** Format a figure the API has already expressed in the REPORTING currency. */
+	/** Format a figure the API has already expressed in the REPORTING currency.
+	 *  Not used for the accruals: those are per currency, never in one. */
 	function fmt(amount: MoneyAmount): string {
 		return formatMoney(amount, { currency: orgCurrency.currency, whole: true });
 	}
@@ -38,6 +41,22 @@
 	function fmtIn(amount: MoneyAmount, currency: string): string {
 		return formatMoney(amount, { currency, whole: true });
 	}
+
+	/** One accruals leg across every currency the response names — one figure
+	 *  per currency, never a sum across them (decisions §197). The flat
+	 *  `accruals.*` fields ARE such sums and are deliberately not read. */
+	function accrualFigures(
+		leg: 'open_po_amount' | 'received_amount' | 'unposted_invoice_amount' | 'total_accrual'
+	): CurrencyFigure[] {
+		return (data?.accruals.by_currency ?? []).map((row: CfoAccrualsByCurrency) => ({
+			currency: row.currency,
+			amount: row[leg]
+		}));
+	}
+
+	let accrualsHaveUnlabelledPos = $derived(
+		(data?.accruals.by_currency ?? []).some((row) => row.currency === null)
+	);
 
 	let maxDpo = $derived(Math.max(1, ...(data?.dpo_trend ?? []).map((r) => r.dpo)));
 	// `rate_pct` is null for a month with no invoices — the rate is not
@@ -170,26 +189,35 @@
 			</div>
 		{/if}
 
-		<div class="cfm-subsection">
+		<!-- Accruals, one line per currency in every box, each netted within its
+		     own currency by the server (`accruals.by_currency`). The boxes used
+		     to show the flat sums — a EUR purchase order added to a USD one,
+		     under the org's symbol — which are denominated in nothing. The same
+		     currencies appear in the same order in all four boxes, so a total
+		     reads straight across. -->
+		<div class="cfm-subsection" data-testid="cfm-accruals">
 			<h3>{m('cfoMetrics.accruals.title')}</h3>
 			<div class="cfm-stat-grid">
 				<div class="cfm-stat">
 					<span class="cfm-stat-label">{m('cfoMetrics.accruals.openPo')}</span>
-					<span class="cfm-stat-value">{fmt(data.accruals.open_po_amount)}</span>
+					<span class="cfm-stat-value"><MoneyByCurrency figures={accrualFigures('open_po_amount')} whole /></span>
 				</div>
 				<div class="cfm-stat">
 					<span class="cfm-stat-label">{m('cfoMetrics.accruals.received')}</span>
-					<span class="cfm-stat-value">{fmt(data.accruals.received_amount)}</span>
+					<span class="cfm-stat-value"><MoneyByCurrency figures={accrualFigures('received_amount')} whole /></span>
 				</div>
 				<div class="cfm-stat">
 					<span class="cfm-stat-label">{m('cfoMetrics.accruals.unposted')}</span>
-					<span class="cfm-stat-value">{fmt(data.accruals.unposted_invoice_amount)}</span>
+					<span class="cfm-stat-value"><MoneyByCurrency figures={accrualFigures('unposted_invoice_amount')} whole /></span>
 				</div>
 				<div class="cfm-stat cfm-stat-total">
 					<span class="cfm-stat-label">{m('cfoMetrics.accruals.total')}</span>
-					<span class="cfm-stat-value">{fmt(data.accruals.total_accrual)}</span>
+					<span class="cfm-stat-value"><MoneyByCurrency figures={accrualFigures('total_accrual')} whole /></span>
 				</div>
 			</div>
+			{#if accrualsHaveUnlabelledPos}
+				<p class="cfm-note" data-testid="accruals-no-currency">{m('cfoMetrics.accruals.noCurrency')}</p>
+			{/if}
 		</div>
 
 		<div class="cfm-subsection">

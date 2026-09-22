@@ -1935,6 +1935,8 @@ export const messages = {
 	'cfoMetrics.accruals.received': 'Recibido, no facturado',
 	'cfoMetrics.accruals.unposted': 'Facturas no contabilizadas',
 	'cfoMetrics.accruals.total': 'Devengo total',
+	'cfoMetrics.accruals.noCurrency':
+		'Las órdenes de compra sin moneda registrada aparecen en una línea aparte, sin símbolo. Cada moneda se compensa por separado; las líneas nunca se suman.',
 	'cfoMetrics.concentration.title': 'Concentración de proveedores',
 	'cfoMetrics.concentration.flagged': '⚠ {vendor} representa el {pct}% del gasto — riesgo de concentración.',
 	'cfoMetrics.concentration.top10': 'Los 10 principales proveedores',
@@ -3005,7 +3007,7 @@ export const messages = {
 	'byEntity.unconvertedSpend':
 		'El gasto incluye a su valor nominal {n, plural, one {# factura} other {# facturas}} sin tipo de cambio fijado a {currency}, por lo que los totales mezclan monedas.',
 	'byEntity.openPoNoCurrency':
-		'Las órdenes de compra aún no registran una moneda, por lo que las órdenes abiertas se muestran sin ella.',
+		'Algunas órdenes de compra no registran moneda; sus importes abiertos aparecen en una línea aparte, sin símbolo, y nunca se suman a los de otra moneda.',
 
 	// Informes programados (components/analytics/ScheduledReportsPanel.svelte)
 	'scheduledReports.heading': 'Informes programados',

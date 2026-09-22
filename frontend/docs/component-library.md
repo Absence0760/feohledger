@@ -78,6 +78,7 @@ Grouped into subfolders by role. Import with the full path, e.g.
   (transient, on submit) and from the `role="alert"` refusal panels (a request
   the server rejected). First use: the brand strong-accent contrast advisory on
   `/organization` + `/admin/partner`.
+- `MoneyByCurrency.svelte` — several figures that must NOT be added together, one per currency, one per line: `<MoneyByCurrency figures={row.open_po_by_currency} mono />`, where each `{currency, amount}` renders through `Money` in its OWN code and a `currency: null` entry renders bare (`docs/decisions.md` §196, §197). An empty list renders a bare `0` — the rollup ran and found nothing, which is a real zero in no currency. Its `CurrencyFigure` type lives in `moneyByCurrency.ts` beside it (the `badgeTone.ts` rule: e2e fixtures type payloads with it). Used by `/cfo`'s accruals card and by-entity's Open POs column, whose servers group by currency because the legs never convert.
 - `Money.svelte` — locale-aware currency display. `<Money amount={row.amount} currency={row.currency} />`. Opt-in `whole` (no decimals), `accounting` (parenthesised negatives), `mono` (tabular-nums). Over `utils/money.ts::formatMoney`; see *Money formatting* above. Use this (or `formatMoney` in script) for every currency value — don't write `Intl.NumberFormat` inline.
 - `EmptyState.svelte` — the first-run / zero-data affordance: an optional
   generated illustration `art` (`invoices` · `vendors` · `payments` · `inbox` ·

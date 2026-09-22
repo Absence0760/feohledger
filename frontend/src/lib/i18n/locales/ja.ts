@@ -1893,6 +1893,8 @@ export const messages = {
 	'cfoMetrics.accruals.received': '受領済み・未請求',
 	'cfoMetrics.accruals.unposted': '未計上の請求書',
 	'cfoMetrics.accruals.total': '未払費用合計',
+	'cfoMetrics.accruals.noCurrency':
+		'通貨が記録されていない発注は、記号なしの別行に表示されます。通貨ごとに個別に相殺し、各行を合算することはありません。',
 	'cfoMetrics.concentration.title': '仕入先集中度',
 	'cfoMetrics.concentration.flagged': '⚠ {vendor}が支出の{pct}%を占めています — 集中リスク。',
 	'cfoMetrics.concentration.top10': '上位10社',
@@ -2950,7 +2952,7 @@ export const messages = {
 	'byEntity.unconvertedSpend':
 		'支出には、{currency} への為替レートが未確定の請求書{n, plural, other {# 件}}が額面のまま含まれています。合計には複数の通貨が混在しています。',
 	'byEntity.openPoNoCurrency':
-		'発注書にはまだ通貨が記録されていないため、未処理の発注は通貨なしで表示されます。',
+		'通貨が記録されていない発注があります。その未処理額は記号なしの別行に表示され、他の通貨の額に加算されることはありません。',
 
 	// 定期レポート (components/analytics/ScheduledReportsPanel.svelte)
 	'scheduledReports.heading': '定期レポート',

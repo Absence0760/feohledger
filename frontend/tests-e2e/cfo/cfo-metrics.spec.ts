@@ -1,3 +1,5 @@
+import type { CfoAnalytics } from '$lib/types/analytics';
+
 import { expect, signInAndWait, test } from '../fixtures/helpers';
 
 /**
@@ -36,6 +38,70 @@ test.describe('/cfo CFO-metrics section (admin)', () => {
 
 		await expect(section.locator('h3', { hasText: 'Supplier concentration' })).toBeVisible();
 		await expect(section.locator('.cfm-stat', { hasText: 'Top 10 vendors' })).toBeVisible();
+	});
+
+	test('shows the accruals one line per currency, never a sum across them', async ({ page }) => {
+		// The card used to render the flat accruals — a EUR purchase order added
+		// to a USD one — under the org's symbol. It now renders
+		// `accruals.by_currency`, each currency netted within itself, and POs that
+		// record no currency on their own bare line (decisions §197). The real
+		// response is fetched and only its accruals replaced, so the rest of the
+		// section stays the backend's.
+		const byCurrency: CfoAnalytics['accruals']['by_currency'] = [
+			{
+				currency: 'EUR',
+				open_po_amount: '3000.00',
+				received_amount: '1500.00',
+				unposted_invoice_amount: '1000.00',
+				total_accrual: '3500.00'
+			},
+			{
+				currency: 'USD',
+				open_po_amount: '5000.00',
+				received_amount: '0.00',
+				unposted_invoice_amount: '1000.00',
+				total_accrual: '4000.00'
+			},
+			{
+				currency: null,
+				open_po_amount: '700.00',
+				received_amount: '0.00',
+				unposted_invoice_amount: '0.00',
+				total_accrual: '700.00'
+			}
+		];
+		await page.route(
+			(url) => url.pathname === '/api/analytics/cfo',
+			async (route) => {
+				const response = await route.fetch();
+				const body = (await response.json()) as CfoAnalytics;
+				body.accruals = {
+					open_po_amount: '8700.00',
+					received_amount: '1500.00',
+					unposted_invoice_amount: '2000.00',
+					total_accrual: '8200.00',
+					by_currency: byCurrency
+				};
+				await route.fulfill({ response, json: body });
+			}
+		);
+		await page.reload();
+
+		const accruals = page.getByTestId('cfm-accruals');
+		const openPo = accruals.locator('.cfm-stat', { hasText: 'Open POs' }).locator('.mbc-line');
+		await expect(openPo).toHaveCount(3);
+		await expect(openPo.nth(0)).toContainText(/€|EUR/);
+		await expect(openPo.nth(0)).toContainText(/3[,.]?000/);
+		await expect(openPo.nth(1)).toContainText('$');
+		// No currency recorded: no symbol at all, and not added to either.
+		await expect(openPo.nth(2)).toHaveText(/^\s*700\s*$/);
+
+		const total = accruals.locator('.cfm-stat', { hasText: 'Total accrual' }).locator('.mbc-line');
+		await expect(total.nth(0)).toContainText(/3[,.]?500/);
+		await expect(total.nth(1)).toContainText(/4[,.]?000/);
+		// The naive cross-currency 8,200 is never shown.
+		await expect(accruals).not.toContainText(/8[,.]?200/);
+		await expect(accruals.getByTestId('accruals-no-currency')).toBeVisible();
 	});
 
 	test('re-fetches CFO metrics when the horizon control changes', async ({ page }) => {

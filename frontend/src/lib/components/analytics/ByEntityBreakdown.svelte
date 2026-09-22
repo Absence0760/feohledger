@@ -3,8 +3,8 @@
 	import { m } from '$lib/i18n/store.svelte';
 	import DataTable from '$lib/components/ui/DataTable.svelte';
 	import Money from '$lib/components/ui/Money.svelte';
+	import MoneyByCurrency from '$lib/components/ui/MoneyByCurrency.svelte';
 	import { entityStore } from '$lib/stores/entity.svelte';
-	import { isPositiveAmount } from '$lib/utils/money';
 	import type { AnalyticsByEntity } from '$lib/types/analytics';
 
 	// Consolidated reporting ACROSS entities — a side-by-side per-entity AP
@@ -35,8 +35,16 @@
 	//   or `orgCurrency` when it had none: a mixed-currency figure wearing one
 	//   currency's symbol. One currency down the column is also what makes the
 	//   consolidated row the cross-check it claims to be.
-	// - Open POs render BARE. `PurchaseOrder` records no currency, so no code
-	//   can be proven for a sum of PO totals, and the server sends none.
+	// - Open POs render ONE FIGURE PER PO CURRENCY (`open_po_by_currency`),
+	//   each in its own code. They used to render one bare sum, because
+	//   `PurchaseOrder` recorded no currency and none could be proven for it;
+	//   since migration 0099 each PO carries its own, and a sum across them
+	//   would be denominated in nothing. POs that still record none are their
+	//   own `null` line, bare (`docs/decisions.md` §197).
+
+	let hasUnlabelledPos = $derived(
+		(data?.consolidated.open_po_by_currency ?? []).some((f) => f.currency === null)
+	);
 
 	$effect(() => {
 		// Register deps so a period change re-fetches.
@@ -103,7 +111,7 @@
 							</td>
 							<td class="num">{e.invoice_count}</td>
 							<td class="num" class:be-alert={e.open_exceptions > 0}>{e.open_exceptions}</td>
-							<td class="num"><Money amount={e.open_po_amount} currency={null} mono /></td>
+							<td class="num" data-testid="open-pos"><MoneyByCurrency figures={e.open_po_by_currency} mono /></td>
 						</tr>
 					{/each}
 					{#if data?.consolidated}
@@ -122,7 +130,7 @@
 							</td>
 							<td class="num">{c.invoice_count}</td>
 							<td class="num" class:be-alert={c.open_exceptions > 0}>{c.open_exceptions}</td>
-							<td class="num"><Money amount={c.open_po_amount} currency={null} mono /></td>
+							<td class="num" data-testid="open-pos"><MoneyByCurrency figures={c.open_po_by_currency} mono /></td>
 						</tr>
 					{/if}
 				{/snippet}
@@ -146,7 +154,7 @@
 					})}
 				</p>
 			{/if}
-			{#if isPositiveAmount(data.consolidated.open_po_amount)}
+			{#if hasUnlabelledPos}
 				<p class="be-note" data-testid="open-po-no-currency">{m('byEntity.openPoNoCurrency')}</p>
 			{/if}
 		{/if}

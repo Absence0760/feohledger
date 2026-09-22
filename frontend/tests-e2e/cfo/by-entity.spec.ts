@@ -68,7 +68,7 @@ test.describe('/cfo By-entity section', () => {
 		await expect(section.locator('tr.be-total', { hasText: 'Consolidated' })).toBeVisible();
 	});
 
-	test('labels every figure by the currency the payload names, and Open POs by none', async ({
+	test('labels every figure by the currency the payload names, Open POs per PO currency', async ({
 		page
 	}) => {
 		// The rows used to label the naive cross-currency `total_spend` with the
@@ -81,6 +81,13 @@ test.describe('/cfo By-entity section', () => {
 		await page.goto('/cfo');
 		const subId = await createEntity(page, name, `eur-sub-${suffix}`);
 
+		// Open POs arrive per PO currency (decisions §197): a EUR order on its
+		// own line in euros, and a PO that records no currency on its own line
+		// with no symbol — never one bare sum across both.
+		const openPos = [
+			{ currency: 'EUR', amount: '500.00' },
+			{ currency: null, amount: '250.00' }
+		];
 		const metrics = (spend: string, outstanding: string, po: string) => ({
 			total_spend: '999999.00',
 			reporting_total_spend: spend,
@@ -91,7 +98,8 @@ test.describe('/cfo By-entity section', () => {
 			reporting_outstanding_unconverted_count: 0,
 			invoice_count: 2,
 			open_exceptions: 0,
-			open_po_amount: po
+			open_po_amount: po,
+			open_po_by_currency: openPos
 		});
 		const payload = {
 			period_days: 365,
@@ -122,8 +130,14 @@ test.describe('/cfo By-entity section', () => {
 		await expect(cells.nth(1)).toContainText(/1[,.]?234[.,]50/);
 		await expect(cells.nth(1)).not.toContainText('$');
 		await expect(cells.nth(2)).toContainText(/€|EUR/);
-		// Open POs: no currency recorded, so no symbol at all.
-		await expect(cells.nth(5)).toHaveText(/^\s*750[.,]00\s*$/);
+		// Open POs: one line per PO currency. The naive 750.00 sum is never shown.
+		const openPoLines = cells.nth(5).locator('.mbc-line');
+		await expect(openPoLines).toHaveCount(2);
+		await expect(openPoLines.nth(0)).toContainText(/€|EUR/);
+		await expect(openPoLines.nth(0)).toContainText(/500[.,]00/);
+		// No currency recorded: the figure alone, no symbol at all.
+		await expect(openPoLines.nth(1)).toHaveText(/^\s*250[.,]00\s*$/);
+		await expect(cells.nth(5)).not.toContainText(/750/);
 
 		const section = page.getByTestId('by-entity-section');
 		await expect(section.getByTestId('unconverted-spend')).toContainText('face value');

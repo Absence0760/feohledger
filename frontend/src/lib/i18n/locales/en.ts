@@ -2086,6 +2086,8 @@ export const en = {
 	'cfoMetrics.accruals.received': 'Received, not invoiced',
 	'cfoMetrics.accruals.unposted': 'Unposted invoices',
 	'cfoMetrics.accruals.total': 'Total accrual',
+	'cfoMetrics.accruals.noCurrency':
+		'Purchase orders with no recorded currency are shown on their own line, without a symbol. Each currency is netted on its own; the lines are never added together.',
 	'cfoMetrics.concentration.title': 'Supplier concentration',
 	'cfoMetrics.concentration.flagged': '⚠ {vendor} accounts for {pct}% of spend — concentration risk.',
 	'cfoMetrics.concentration.top10': 'Top 10 vendors',
@@ -3183,7 +3185,7 @@ export const en = {
 	'byEntity.unconvertedSpend':
 		'Spend includes {n, plural, one {# invoice} other {# invoices}} with no locked exchange rate into {currency}, counted at face value — the totals mix currencies by that much.',
 	'byEntity.openPoNoCurrency':
-		'Purchase orders do not record a currency yet, so Open POs are shown without one.',
+		'Some purchase orders record no currency; their Open POs are shown on their own line, without a symbol, and never added to another currency\'s.',
 
 	// Scheduled reports (components/analytics/ScheduledReportsPanel.svelte) —
 	// the CRUD surface for the report runner, hosted on /cfo. The report-type
