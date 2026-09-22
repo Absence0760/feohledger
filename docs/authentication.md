@@ -1172,6 +1172,20 @@ from the mirror while leaving the source *uploader* free, or the reverse.
 Entities subdivide a tenant's books; they are not a boundary at which a payable's
 authors stop being its authors ([decisions.md](decisions.md) §192).
 
+**Mirrors routed before that rule were backfilled, unlike the recurring
+templates below.** Migration `0100_mirror_implicated_backfill` gives every such
+mirror still short of `done` exactly what routing gives one today —
+`intercompany.inherited_actor_ids`, the source's implicated set minus the
+mirror's uploader — and, for a mirror routed before its router was stamped (§131),
+names the router as its uploader. Here nothing is guessed: the source's two
+columns are on the source row, and which side of a pair is the mirror, and who
+routed it, are on the routing's own append-only `invoice.intercompany_routed`
+audit row. Each mirror it changes gets an `invoice.segregation_backfilled` audit
+row (no actor), so an approval given before the set existed stays legible as the
+compliant one it was. It is not limited to mirrors awaiting approval: an approved
+mirror still has a payment-blocking exception's clearing ahead of it, which reads
+the same set ([decisions.md](decisions.md) §198).
+
 Nothing else writes the set. Every other creation path has a single actor, so the
 column stays NULL and the reading below is unchanged.
 `backend/tests/test_invoice_uploader_stamping.py` pins both writers and fails if
@@ -1194,7 +1208,7 @@ signed-in employee stamps the column —
 | `POST /api/workflow/upload` (file upload) | the caller |
 | `POST /api/invoices/import-csv` (CSV import) | the caller |
 | `POST /api/recurring/{id}/generate-now` | the caller |
-| `POST /api/invoices/{id}/route-intercompany` (the mirror payable) | the routing actor — and the source payable's whole implicated set on `segregation_actor_ids` |
+| `POST /api/invoices/{id}/route-intercompany` (the mirror payable) | the routing actor — and the source payable's whole implicated set on `segregation_actor_ids` (a mirror routed before either was stamped got both from migration `0100`, §198) |
 | the recurring-invoice background sweep | `RecurringInvoiceTemplate.created_by_user_id` — the employee who authored the template (NULL only for a template predating migration 0096) |
 | email intake, inbound PEPPOL | NULL — system ingestion, no human |
 | supplier-portal submit, portal PO flip | NULL — the actor is a tenant-scoped `VendorUser`, who holds no employee JWT and can never reach an approval endpoint |

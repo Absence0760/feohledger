@@ -447,7 +447,11 @@ Segregation of duties is **not** scoped by entity: the router is the mirror's
 uploader, and everyone implicated in the source payable (its uploader and its
 `segregation_actor_ids`) is carried onto the mirror's `segregation_actor_ids`,
 so shaping a payable under one entity bars you from signing its mirror under
-another (`docs/decisions.md` §192).
+another (`docs/decisions.md` §192). Mirrors routed before that rule were brought
+into line by migration `0100_mirror_implicated_backfill`, which tells the mirror
+from its origin by the `role: mirror` routing audit row — the FK is set on both
+rows and the entity columns are symmetric, so neither can — and covers every
+mirror short of `done` (`docs/decisions.md` §198).
 It is **idempotent** on `intercompany_mirror_id` — a second call returns the
 existing mirror, never a duplicate. Surfaced at `POST
 /api/invoices/{id}/route-intercompany` (admin / ap_manager; self-billing → 400).
