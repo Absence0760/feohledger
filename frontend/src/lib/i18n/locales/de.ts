@@ -938,6 +938,7 @@ export const messages = {
 	'exceptions.title': 'Ausnahmen',
 	'exceptions.tab.queue': 'Warteschlange',
 	'exceptions.tab.agents': 'KI-Agenten',
+	'exceptions.tab.aria': 'Ausnahmeansichten',
 	'exceptions.filter.open': 'Offen',
 	'exceptions.filter.escalated': 'Eskaliert',
 	'exceptions.filter.resolved': 'Gelöst',
@@ -980,6 +981,26 @@ export const messages = {
 	'exceptions.bulkModal.hint': 'Alle ausgewählten Zeilen erhalten dieselbe Lösungsnotiz. Zeilen, die sich bereits in einem Endzustand befinden, werden serverseitig übersprungen — ebenso jede Zeile, bei deren Markierung Sie als beteiligt erfasst sind; eskalieren Sie diese stattdessen.',
 	'exceptions.bulk.segregationSkipped': '{n, plural, one {# Zeile bleibt offen: Funktionstrennung — Sie sind als an dieser Zahlung oder an ihrer Markierung beteiligt erfasst. Eskalieren Sie sie oder lassen Sie einen anderen Benutzer entscheiden.} other {# Zeilen bleiben offen: Funktionstrennung — Sie sind als an diesen Zahlungen oder an ihren Markierungen beteiligt erfasst. Eskalieren Sie sie oder lassen Sie einen anderen Benutzer entscheiden.}}',
 	'exceptions.bulkModal.notePlaceholder': 'Auf jede ausgewählte Zeile angewendet',
+	'exceptions.toast.loadFailed': 'Ausnahmen konnten nicht geladen werden',
+	'exceptions.toast.noteRequired': 'Eine Lösungsnotiz ist erforderlich',
+	'exceptions.toast.actionFailed': 'Aktion fehlgeschlagen',
+	'exceptions.toast.resolved': 'Ausnahme gelöst',
+	'exceptions.toast.escalated': 'Ausnahme eskaliert',
+	'exceptions.toast.dismissed': 'Ausnahme verworfen',
+	'exceptions.toast.bulkResolved': '{n, plural, one {# Ausnahme gelöst} other {# Ausnahmen gelöst}}',
+	'exceptions.toast.bulkEscalated': '{n, plural, one {# Ausnahme eskaliert} other {# Ausnahmen eskaliert}}',
+	'exceptions.toast.bulkDismissed': '{n, plural, one {# Ausnahme verworfen} other {# Ausnahmen verworfen}}',
+	'exceptions.toast.bulkResolvedSkipped':
+		'{n, plural, one {# Ausnahme gelöst} other {# Ausnahmen gelöst}}, {skipped, plural, one {# übersprungen} other {# übersprungen}}.',
+	'exceptions.toast.bulkEscalatedSkipped':
+		'{n, plural, one {# Ausnahme eskaliert} other {# Ausnahmen eskaliert}}, {skipped, plural, one {# übersprungen} other {# übersprungen}}.',
+	'exceptions.toast.bulkDismissedSkipped':
+		'{n, plural, one {# Ausnahme verworfen} other {# Ausnahmen verworfen}}, {skipped, plural, one {# übersprungen} other {# übersprungen}}.',
+	'exceptions.toast.selectedAllMatching':
+		'{n, plural, one {Alle # passende Ausnahme ausgewählt} other {Alle # passenden Ausnahmen ausgewählt}}',
+	'exceptions.toast.selectAllTruncated':
+		'Die ersten {shown} von {total} passenden ausgewählt — schränken Sie die Filter ein, um die übrigen auszuwählen.',
+	'exceptions.toast.selectAllFailed': 'Auswahl aller passenden fehlgeschlagen',
 
 	'exceptions.type.duplicate': 'Doppelte Rechnung',
 	'exceptions.type.poMismatch': 'Bestellabweichung',

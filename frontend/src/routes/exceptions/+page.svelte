@@ -35,6 +35,8 @@
 	import { pruneSelection } from '$lib/utils/selection';
 	import { orgCurrency } from '$lib/stores/orgSettings.svelte';
 	import { m } from '$lib/i18n/store.svelte';
+	import type { MessageKey } from '$lib/i18n/messages';
+	import { formatApiDetail } from '$lib/utils/apiError';
 
 	interface ExceptionItem {
 		id: string;
@@ -135,7 +137,7 @@
 	// filtered set of open/escalated exceptions — not just the loaded page —
 	// into `selectedIds`. See the identical mechanism on the invoices list
 	// page (`routes/invoices/+page.svelte`) for the full rationale. Reset by
-	// `loadExceptions` whenever `statusFilter`/`typeFilter` actually change.
+	// `reload()` whenever a chip or the search changes the set; a sort does not.
 	let selectedAllMatching = $state(false);
 	let selectingAllMatching = $state(false);
 
@@ -428,7 +430,7 @@
 			if (!fetchSequence.isCurrentRequest(token)) return;
 			errored = true;
 			if (!opts.append) exceptions = [];
-			toast('Failed to load exceptions', 'error');
+			toast(m('exceptions.toast.loadFailed'), 'error');
 		} finally {
 			// Flags and selection belong to the newest request only: a stale
 			// response used to clear the spinner while the live fetch was still
@@ -491,25 +493,70 @@
 		resolutionText = '';
 	}
 
+	/**
+	 * One whole sentence per outcome, keyed by action. These toasts used to
+	 * conjugate the verb in a template literal — `Exception ${action}d`,
+	 * `${n} ${action}d, ${k} skipped` — which is English morphology no
+	 * catalogue key can carry, and which spelled the dismissal "dismissd".
+	 */
+	const DONE_KEYS: Record<Action, MessageKey> = {
+		resolve: 'exceptions.toast.resolved',
+		escalate: 'exceptions.toast.escalated',
+		dismiss: 'exceptions.toast.dismissed'
+	};
+	const BULK_DONE_KEYS: Record<Action, MessageKey> = {
+		resolve: 'exceptions.toast.bulkResolved',
+		escalate: 'exceptions.toast.bulkEscalated',
+		dismiss: 'exceptions.toast.bulkDismissed'
+	};
+	const BULK_DONE_SKIPPED_KEYS: Record<Action, MessageKey> = {
+		resolve: 'exceptions.toast.bulkResolvedSkipped',
+		escalate: 'exceptions.toast.bulkEscalatedSkipped',
+		dismiss: 'exceptions.toast.bulkDismissedSkipped'
+	};
+
+	/**
+	 * A refused or failed action, in the backend's own words.
+	 *
+	 * `api.ts` already renders every error body through `formatApiDetail` — a
+	 * 422's validation LIST as `field: msg`, a segregation-of-duties 403's
+	 * sentence verbatim — and throws that string as the `ApiError`'s message.
+	 * The helper this replaced read an `e.detail` no `ApiError` carries (dead:
+	 * had one ever been a list it would have printed `[object Object]`) and fell
+	 * back to an English literal. Routing the message through the same
+	 * `formatApiDetail` keeps a blank one on the translated fallback.
+	 */
+	function actionError(err: unknown): string {
+		return formatApiDetail(
+			err instanceof Error ? err.message : undefined,
+			m('exceptions.toast.actionFailed')
+		);
+	}
+
 	async function commitResolve(action: Action) {
 		if (!resolveTarget) return;
 		const note = resolutionText.trim();
 		if (!note && action !== 'dismiss') {
-			toast('Resolution note is required', 'error');
+			toast(m('exceptions.toast.noteRequired'), 'error');
 			return;
 		}
 		saving = true;
 		try {
+			// The note exactly as typed — empty for a dismissal without one. The
+			// page used to invent `${action}d by user` ("dismissd by user") and
+			// store it as though the operator had written it; the decision itself
+			// is already on the append-only `exception.dismissed` row, and the
+			// backend records no note when none was given.
 			await api.post(`/api/exceptions/${resolveTarget.id}/resolve`, {
-				resolution: note || `${action}d by user`,
+				resolution: note,
 				action,
 			});
-			toast(`Exception ${action}d`, 'success');
+			toast(m(DONE_KEYS[action]), 'success');
 			resolveTarget = null;
 			resolutionText = '';
 			await Promise.all([loadExceptions(), loadSummary()]);
 		} catch (err) {
-			toast(extractError(err), 'error');
+			toast(actionError(err), 'error');
 		} finally {
 			saving = false;
 		}
@@ -520,14 +567,15 @@
 		if (ids.length === 0) return;
 		const note = resolutionText.trim();
 		if (!note && action !== 'dismiss') {
-			toast('Resolution note is required', 'error');
+			toast(m('exceptions.toast.noteRequired'), 'error');
 			return;
 		}
 		saving = true;
 		try {
+			// As typed, for the reason `commitResolve` gives.
 			const body = await api.post<{ updated: number; skipped: { id: string; reason: string }[] }>(
 				'/api/exceptions/bulk/resolve',
-				{ ids, action, resolution: note || `bulk ${action}` }
+				{ ids, action, resolution: note }
 			);
 			const skipped = body.skipped.length;
 			// A segregation refusal is a per-row `skipped` reason, exactly like
@@ -539,15 +587,17 @@
 			const refused = body.skipped.filter((row) =>
 				row.reason.startsWith('segregation_')
 			).length;
+			// Two whole sentences at most: the outcome, then — only when rows
+			// were refused — the segregation explanation, which is its own
+			// catalogue sentence rather than a clause spliced into this one.
+			const outcome =
+				skipped === 0
+					? m(BULK_DONE_KEYS[action], { n: body.updated })
+					: m(BULK_DONE_SKIPPED_KEYS[action], { n: body.updated, skipped });
 			toast(
-				[
-					skipped === 0
-						? `${body.updated} ${action}d`
-						: `${body.updated} ${action}d, ${skipped} skipped`,
-					refused > 0 ? m('exceptions.bulk.segregationSkipped', { n: refused }) : ''
-				]
-					.filter(Boolean)
-					.join(' '),
+				refused > 0
+					? `${outcome} ${m('exceptions.bulk.segregationSkipped', { n: refused })}`
+					: outcome,
 				skipped === 0 ? 'success' : 'info'
 			);
 			bulkResolveOpen = false;
@@ -556,15 +606,10 @@
 			selectedAllMatching = false;
 			await Promise.all([loadExceptions(), loadSummary()]);
 		} catch (err) {
-			toast(extractError(err), 'error');
+			toast(actionError(err), 'error');
 		} finally {
 			saving = false;
 		}
-	}
-
-	function extractError(err: unknown): string {
-		const e = err as { detail?: string; message?: string } | null;
-		return e?.detail ?? e?.message ?? 'Action failed';
 	}
 
 	function toggleSelect(id: string) {
@@ -615,14 +660,14 @@
 			selectedAllMatching = true;
 			if (res.truncated) {
 				toast(
-					`Selected the first ${res.ids.length} of ${res.total} matching — narrow your filters to select the rest.`,
+					m('exceptions.toast.selectAllTruncated', { shown: res.ids.length, total: res.total }),
 					'error'
 				);
 			} else {
-				toast(`Selected all ${res.ids.length} matching exception(s)`, 'success');
+				toast(m('exceptions.toast.selectedAllMatching', { n: res.ids.length }), 'success');
 			}
 		} catch {
-			toast('Failed to select all matching', 'error');
+			toast(m('exceptions.toast.selectAllFailed'), 'error');
 		} finally {
 			selectingAllMatching = false;
 		}
@@ -773,7 +818,7 @@
 		]}
 		bind:active={view}
 		onchange={() => syncUrl()}
-		ariaLabel="Exceptions views"
+		ariaLabel={m('exceptions.tab.aria')}
 		idPrefix="exc"
 	/>
 
@@ -993,7 +1038,7 @@
 <!-- Single-row resolve modal -->
 <Modal
 	open={resolveTarget !== null}
-	ariaLabel="Resolve exception"
+	ariaLabel={m('exceptions.resolveModal.title')}
 	width="sm"
 	onclose={() => (resolveTarget = null)}
 >
@@ -1057,7 +1102,7 @@
 <!-- Bulk-resolve modal -->
 <Modal
 	open={bulkResolveOpen}
-	ariaLabel="Resolve selected exceptions"
+	ariaLabel={m('exceptions.bulkModal.title', { n: selectedIds.size })}
 	width="sm"
 	onclose={() => (bulkResolveOpen = false)}
 >
