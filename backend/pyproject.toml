@@ -19,7 +19,7 @@ dependencies = [
     # symlinks outside secrets_dir).
     "pydantic-settings>=2.15.0,<3",
     "python-multipart>=0.0.32,<1",
-    "boto3>=1.43.97,<2",
+    "boto3>=1.43.98,<2",
     # Password hashing, called directly — there is no passlib here any more.
     # passlib 1.7.4 (its last release, 2020) held this floor at 4.0.1 for two
     # years: it reads `bcrypt.__about__.__version__`, deleted in bcrypt 5.0, and
