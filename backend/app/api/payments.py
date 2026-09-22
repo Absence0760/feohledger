@@ -3,7 +3,7 @@
 import asyncio
 import logging
 import uuid
-from collections.abc import Iterable, Sequence
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from decimal import ROUND_HALF_UP, Decimal
 from types import SimpleNamespace
@@ -90,6 +90,7 @@ from app.services.payment_runs import (
     derive_run_status,
     is_retry_safe,
     net_payable_amount,
+    one_currency,
     recompute_run_status,
     rollup_payment_statuses,
     run_refusal_reasons,
@@ -2303,32 +2304,13 @@ async def create_payment(
 # ── Payment Runs ─────────────────────────────────────────────────────
 
 
-def _one_currency(codes: Iterable[str | None]) -> str | None:
-    """The single currency a set of legs agrees on, or ``None``.
-
-    ``payment_runs.total_amount`` is a single bare ``Numeric`` with no currency
-    column beside it. What makes that legitimate is the guard in
-    ``services/payment_runs.create_payment_run_for_invoices``, which 422s a run
-    spanning more than one currency — so a run created through either supported
-    path has exactly one, carried on the invoices behind its payments.
-
-    It refuses to guess. A run with no payments, one whose invoices carry no
-    currency, and a legacy run predating that guard whose legs disagree all come
-    back ``None``: in the last case the total is itself denominated in nothing
-    real, so stamping a code on it would dress up a meaningless figure as a
-    genuine one — ``docs/decisions.md`` §79/§82. (``{None}`` collapses to
-    ``None`` for free, which is the same answer for a different reason.)
-    """
-    distinct = set(codes)
-    return next(iter(distinct)) if len(distinct) == 1 else None
-
-
 async def _run_currencies(
     db: AsyncSession, run_ids: Sequence[uuid.UUID]
 ) -> dict[uuid.UUID, str | None]:
     """{run id: its one currency} for several runs, in ONE grouped query.
 
-    The list endpoint's counterpart to :func:`_one_currency`, which it applies —
+    The list endpoint's counterpart to
+    :func:`~app.services.payment_runs.one_currency`, which it applies —
     never a lookup per run. A run id absent from the result (no payments at all)
     reads as ``None`` at the call site's ``.get``.
     """
@@ -2345,7 +2327,7 @@ async def _run_currencies(
     for run_id, code in rows.all():
         seen.setdefault(run_id, []).append(code)
 
-    return {rid: _one_currency(codes) for rid, codes in seen.items()}
+    return {rid: one_currency(codes) for rid, codes in seen.items()}
 
 
 @router.get("/runs/", response_model=PaymentRunListResponse)
@@ -2584,7 +2566,7 @@ async def get_payment_run(
         # payments list above was built from rather than a second query. `None`
         # where the run's legs disagree or carry no currency at all — see
         # `_run_currencies`.
-        "currency": _one_currency(
+        "currency": one_currency(
             (inv.currency.upper() if inv is not None and inv.currency else None) for _, inv in rows
         ),
         "initiated_by": str(run.initiated_by) if run.initiated_by else None,

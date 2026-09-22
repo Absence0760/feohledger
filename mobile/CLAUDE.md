@@ -359,7 +359,7 @@ that exists and never reach past it**:
    is a visible gap; a wrong one is a wrong number that looks right. A payment
    run's total is the worked example in both directions — `PaymentRunResponse`
    *does* name a currency, derived from the legs a run cannot span two of
-   (`api/payments.py::_one_currency`), so rung 2 applies and `PaymentRun.currency`
+   (`services/payment_runs.py::one_currency`), so rung 2 applies and `PaymentRun.currency`
    carries it; `null` there means a run with no payments, invoices carrying no
    code, or a legacy run whose legs disagree, and only then does the figure go
    bare.

@@ -75,7 +75,7 @@
 		 * column either — the total is one bare `Numeric`, kept meaningful by
 		 * `create_payment_run_for_invoices` refusing a run whose invoices span
 		 * more than one currency, so the server derives the code from the legs
-		 * (`api/payments.py::_one_currency`).
+		 * (`services/payment_runs.py::one_currency`).
 		 *
 		 * `null` when it could not be PROVEN: a run with no payments, or a
 		 * legacy run predating that guard whose legs disagree — in which case
@@ -213,7 +213,7 @@
 	 *  when nobody established it (§79/§82).
 	 *
 	 *  A payment row passes its OWN code, never the run's: they cannot
-	 *  disagree (`_one_currency` returns a code only when every leg carried
+	 *  disagree (`one_currency` returns a code only when every leg carried
 	 *  that same one, so a stated run currency implies every payment states it
 	 *  too), and a fallback that can never fire is a claim about the data that
 	 *  nothing checks.
