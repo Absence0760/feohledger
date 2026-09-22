@@ -109,6 +109,7 @@ COLUMN_FOR: dict[tuple[str, str, str], tuple[str, str]] = {
     ("contract", "ContractCreatePORequest", "total"): ("purchase_orders", "total"),
     # --- credit memos ----------------------------------------------------
     ("credit_memo", "CreditMemoCreate", "amount"): ("credit_memos", "amount"),
+    ("credit_memo", "CreditMemoUpdate", "amount"): ("credit_memos", "amount"),
     # --- dynamic discounting ---------------------------------------------
     ("discount", "DiscountOfferCreate", "base_amount"): ("discount_offers", "base_amount"),
     # --- expenses (the originally reported module) ------------------------

@@ -19,7 +19,9 @@ class CreditMemo(Base, EntityMixin, TimestampMixin):
 
     Lifecycle: ``open`` (issued, unapplied) → ``applied`` (linked to an
     invoice; reduces the payable) → ``void`` (rescinded). Applied
-    credits are immutable for audit purposes.
+    credits are immutable for audit purposes. Only an ``open`` memo that has
+    never been applied is editable (``PATCH /api/credit-memos/{id}``) — until
+    then it moves no money: only ``applied`` rows are netted off a payable.
     """
 
     __tablename__ = "credit_memos"
