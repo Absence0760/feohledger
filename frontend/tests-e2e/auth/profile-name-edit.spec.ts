@@ -20,7 +20,7 @@ test.describe('/profile — full-name field', () => {
 	test('clearing the field leaves it empty (the seed effect must not fight the user)', async ({
 		page
 	}) => {
-		await page.goto('/profile');
+		await page.goto('/profile?section=account');
 
 		const nameInput = page
 			.locator('section.card', { hasText: 'Account' })
@@ -49,7 +49,7 @@ test.describe('/profile — full-name field', () => {
 	});
 
 	test('the roles row reads the role LABEL, not the wire slug', async ({ page }) => {
-		await page.goto('/profile');
+		await page.goto('/profile?section=account');
 
 		// The worker's storage state is that tenant's admin, seeded with exactly
 		// one role (`scripts/seed.py::seed_e2e_control_plane`), so the cell is the

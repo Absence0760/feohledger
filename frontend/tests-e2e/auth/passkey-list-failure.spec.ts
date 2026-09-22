@@ -40,7 +40,7 @@ test.describe('/profile — passkey list failure', () => {
 			});
 		});
 
-		await page.goto('/profile');
+		await page.goto('/profile?section=passkeys');
 
 		const card = page.locator('section.card', { hasText: 'Passkeys' }).first();
 		await expect(card.getByText(/Couldn't load your passkeys/)).toBeVisible();

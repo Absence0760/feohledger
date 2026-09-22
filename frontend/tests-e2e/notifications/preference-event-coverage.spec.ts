@@ -35,7 +35,7 @@ const NEW_EVENT_LABELS = [
 test.describe('notification preference event coverage', () => {
 	test('every notifiable event has a labelled in-app + email toggle', async ({ page }) => {
 		await signInAndWait(page);
-		await page.goto('/profile');
+		await page.goto('/profile?section=notifications');
 
 		// The four that always shipped, unchanged.
 		for (const label of [
@@ -64,7 +64,7 @@ test.describe('notification preference event coverage', () => {
 		page
 	}) => {
 		await signInAndWait(page);
-		await page.goto('/profile');
+		await page.goto('/profile?section=notifications');
 
 		const chat = prefRow(page, 'New supplier chat message');
 		await expect(chat.email).toBeChecked();

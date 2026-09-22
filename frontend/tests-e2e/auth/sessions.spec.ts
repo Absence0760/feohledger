@@ -51,7 +51,7 @@ test.describe('signed-in devices', () => {
 			const pageB = await contextB.newPage();
 			await signInAndWait(pageB, tenantClerk);
 
-			await pageB.goto('/profile');
+			await pageB.goto('/profile?section=sessions');
 			const panel = sessionsPanel(pageB);
 
 			// Both sessions are listed, and B knows which one it is. Waiting on the

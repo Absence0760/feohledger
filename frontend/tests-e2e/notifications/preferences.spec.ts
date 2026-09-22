@@ -13,7 +13,7 @@ function prefRow(page: Page, eventLabel: string) {
 test.describe('notification preferences', () => {
 	test('toggling a preference persists across reload', async ({ page }) => {
 		await signInAndWait(page);
-		await page.goto('/profile');
+		await page.goto('/profile?section=notifications');
 
 		const row = prefRow(page, 'Invoice paid');
 		// Defaults: both channels on.
@@ -38,7 +38,7 @@ test.describe('notification preferences', () => {
 
 	test('a sibling event is unaffected by another event toggle', async ({ page }) => {
 		await signInAndWait(page);
-		await page.goto('/profile');
+		await page.goto('/profile?section=notifications');
 
 		const paid = prefRow(page, 'Invoice paid');
 		const approved = prefRow(page, 'Invoice approved');
