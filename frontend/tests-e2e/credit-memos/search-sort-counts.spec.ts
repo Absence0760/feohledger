@@ -8,7 +8,7 @@ import type { Page, Request } from '@playwright/test';
  * `SearchBox` / `SortableHeader` / chip-count primitives existed, the backend
  * parameters did not. Approximating search with a `.filter()` over the one
  * loaded page would have searched a PAGE rather than the set, so the router
- * grew `search`, a `sort` allowlist and `GET /api/credit-memos/summary`, and
+ * grew `search`, a `sort` allowlist and `GET /api/credit-memos/counts`, and
  * this page wires them the way its siblings do: URL-backed, sequenced, and
  * with the chips counting exactly the population the table is showing.
  *
@@ -21,7 +21,7 @@ import type { Page, Request } from '@playwright/test';
  */
 
 const LIST = '/api/credit-memos';
-const SUMMARY = '/api/credit-memos/summary';
+const COUNTS = '/api/credit-memos/counts';
 
 function memo(n: number, vendor = 'Globex Corporation') {
 	return {
@@ -76,7 +76,7 @@ test.describe('/credit-memos — search, sort and chip counts', () => {
 				)
 			);
 		});
-		await page.route(isGet(SUMMARY), (route) => {
+		await page.route(isGet(COUNTS), (route) => {
 			const term = new URL(route.request().url()).searchParams.get('search') ?? '';
 			summarySearches.push(term);
 			return route.fulfill(
@@ -129,7 +129,7 @@ test.describe('/credit-memos — search, sort and chip counts', () => {
 		await page.route(isGet(LIST), (route) =>
 			route.fulfill(json({ items: [memo(1), memo(2)], total: 2 }))
 		);
-		await page.route(isGet(SUMMARY), (route) => route.fulfill(json({ detail: 'boom' }, 500)));
+		await page.route(isGet(COUNTS), (route) => route.fulfill(json({ detail: 'boom' }, 500)));
 
 		await page.goto('/credit-memos');
 		await expect(page.getByText('E2E-SRCH-2')).toBeVisible();
@@ -147,7 +147,7 @@ test.describe('/credit-memos — search, sort and chip counts', () => {
 			const term = listQuery(route.request()).search ?? '';
 			return route.fulfill(json(term ? { items: [], total: 0 } : { items: [memo(1)], total: 1 }));
 		});
-		await page.route(isGet(SUMMARY), (route) =>
+		await page.route(isGet(COUNTS), (route) =>
 			route.fulfill(json({ total: 1, by_status: { open: 1, applied: 0, void: 0 } }))
 		);
 
@@ -159,7 +159,7 @@ test.describe('/credit-memos — search, sort and chip counts', () => {
 
 	test('column sort sends an allowlisted key and survives a reload', async ({ page }) => {
 		await stubInvoices(page);
-		await page.route(isGet(SUMMARY), (route) =>
+		await page.route(isGet(COUNTS), (route) =>
 			route.fulfill(json({ total: 2, by_status: { open: 2, applied: 0, void: 0 } }))
 		);
 		await page.route(isGet(LIST), (route) =>
@@ -213,7 +213,7 @@ test.describe('/credit-memos — search, sort and chip counts', () => {
 		page
 	}) => {
 		await stubInvoices(page);
-		await page.route(isGet(SUMMARY), (route) =>
+		await page.route(isGet(COUNTS), (route) =>
 			route.fulfill(json({ total: 1, by_status: { open: 1, applied: 0, void: 0 } }))
 		);
 		const mount = page.waitForRequest((r) => new URL(r.url()).pathname === LIST);

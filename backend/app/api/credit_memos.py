@@ -1,4 +1,4 @@
-"""Credit memo endpoints — list, summary, create, edit, apply, void."""
+"""Credit memo endpoints — list, status counts, create, edit, apply, void."""
 
 import uuid
 from datetime import UTC, datetime
@@ -28,7 +28,7 @@ from app.schemas.credit_memo import (
     CreditMemoCreate,
     CreditMemoListResponse,
     CreditMemoResponse,
-    CreditMemoSummaryResponse,
+    CreditMemoStatusCounts,
     CreditMemoUpdate,
 )
 from app.services.audit_access import build_field_diff
@@ -186,7 +186,7 @@ def _credit_memo_list_query(
     population filters applied.
 
     The single builder behind `GET /credit-memos` (its rows AND its total) and
-    `GET /credit-memos/summary`, so the chip tallies describe exactly the rows
+    `GET /credit-memos/counts`, so the chip tallies describe exactly the rows
     the list would return — the defect `payments.py::_payment_list_filters` and
     `invoices.py::invoice_counts` each had to close on their own surface.
 
@@ -194,8 +194,8 @@ def _credit_memo_list_query(
     (the column the table shows). The join is many-to-one — a memo has exactly
     one vendor — so it can never fan the count out.
 
-    `status` is `None` for the summary: status is the dimension being tallied,
-    so applying it would zero every other chip.
+    `status` is `None` for the counts: status is the dimension being tallied,
+    so applying it would zero every other chip (decisions §48).
     """
     query = apply_entity_scope(
         select(*columns)
@@ -260,10 +260,10 @@ async def list_credit_memos(
     )
 
 
-# Literal path, declared before every `/{memo_id}` route so "summary" is never
+# Literal path, declared before every `/{memo_id}` route so "counts" is never
 # parsed as a memo id.
-@router.get("/summary", response_model=CreditMemoSummaryResponse)
-async def credit_memo_summary(
+@router.get("/counts", response_model=CreditMemoStatusCounts)
+async def credit_memo_status_counts(
     db: AsyncSession = Depends(get_tenant_db),
     # Exactly the list's gate: the chips sit on the list, and a role that can
     # read one but 403s on the other gets bare labels over a populated table.
@@ -277,7 +277,10 @@ async def credit_memo_summary(
     builder, so a search for one vendor narrows the chips with the table
     instead of leaving them reading the tenant's total over a one-row list.
 
-    Deliberately takes no `status`. `GET /exceptions/summary` does, but there
+    A `/counts` surface under decisions §48, not a `/summary`: it takes every
+    narrowing filter the list takes and deliberately NOT `status`, and
+    `tests/test_whole_set_kpi_rollups.py` holds it to that and to the list's
+    exact RBAC gate. `GET /exceptions/summary` does take `status`, but there
     `status` scopes a SECOND dimension (`by_type`, the type chips beside the
     status chips); here status is the only dimension and it is the one being
     counted, so filtering it would zero every chip but the active one.
@@ -294,7 +297,7 @@ async def credit_memo_summary(
     by_status = dict.fromkeys(CREDIT_MEMO_STATUSES, 0)
     for memo_status, count in rows.all():
         by_status[str(memo_status)] = int(count)
-    return CreditMemoSummaryResponse(total=sum(by_status.values()), by_status=by_status)
+    return CreditMemoStatusCounts(total=sum(by_status.values()), by_status=by_status)
 
 
 async def _get_scoped_memo(

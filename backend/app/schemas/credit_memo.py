@@ -105,7 +105,7 @@ class CreditMemoListResponse(PageMeta):
     total: int
 
 
-class CreditMemoSummaryResponse(BaseModel):
+class CreditMemoStatusCounts(BaseModel):
     """Per-status tallies for the `/credit-memos` filter chips.
 
     `by_status` always carries every known status (a zero is a real answer, not

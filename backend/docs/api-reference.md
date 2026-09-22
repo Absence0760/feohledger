@@ -425,15 +425,15 @@ Used by 3-way matching. `admin` / `ap_manager` / `ap_clerk`.
 | Method | Path                              | Roles | Description |
 |--------|-----------------------------------|-------|-------------|
 | `GET`  | `/api/credit-memos`                | admin, ap_manager, ap_clerk, cfo | List credit memos (paginated, entity-scoped). `?status=`, `?search=` (substring of the memo number or the vendor name), `?sort=` ∈ `issued_date` / `amount` / `memo_number` with `?order=asc\|desc` — any other sort key is a 422 |
-| `GET`  | `/api/credit-memos/summary`        | admin, ap_manager, ap_clerk, cfo | Per-status tallies for the filter chips: `{total, by_status: {open, applied, void}}`, over the list's own population filters (entity scope + `?search=`), never `status` |
+| `GET`  | `/api/credit-memos/counts`        | admin, ap_manager, ap_clerk, cfo | Per-status tallies for the filter chips: `{total, by_status: {open, applied, void}}`, over the list's own population filters (entity scope + `?search=`), never `status` |
 | `POST` | `/api/credit-memos`                | admin, ap_manager | Create a credit memo. With no `invoice_id` it lands `open`; with one it is applied on the spot and runs the same guards as `/apply` |
 | `PATCH` | `/api/credit-memos/{id}`          | admin, ap_manager | Correct an `open`, never-applied memo — see § Editing a memo. 409 on anything else |
 | `POST` | `/api/credit-memos/{id}/apply`     | admin, ap_manager | Apply an `open` credit memo against a payable |
 | `POST` | `/api/credit-memos/{id}/void`      | admin, ap_manager | Void an `open` memo (409 once `applied` — applied memos are immutable for audit) |
 
-### Search, sort and the chip summary
+### Search, sort and the chip counts
 
-`GET /api/credit-memos` and `GET /api/credit-memos/summary` share ONE filter
+`GET /api/credit-memos` and `GET /api/credit-memos/counts` share ONE filter
 builder (`_credit_memo_list_query`), so each chip's count is exactly the `total`
 the list would return under that chip — a search for one vendor narrows the
 chips with the table instead of leaving them on the tenant's whole count.

@@ -74,7 +74,7 @@
 	const SORTABLE_FIELDS = ['memo_number', 'amount', 'issued_date'];
 
 	/**
-	 * Per-status tallies from `GET /api/credit-memos/summary`, over the WHOLE
+	 * Per-status tallies from `GET /api/credit-memos/counts`, over the WHOLE
 	 * matching set (search applied, status not — status is what is being
 	 * counted). `null` until it lands, and again after a failed fetch: the chips
 	 * then render bare labels rather than a page-local tally presented as the
@@ -369,7 +369,7 @@
 		try {
 			const qs = term ? `?${new URLSearchParams({ search: term })}` : '';
 			const data = await api.get<{ total: number; by_status: Record<string, number> }>(
-				`/api/credit-memos/summary${qs}`
+				`/api/credit-memos/counts${qs}`
 			);
 			if (!summarySequence.canCommit(token)) return;
 			summary = data;

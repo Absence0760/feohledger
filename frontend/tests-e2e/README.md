@@ -625,7 +625,7 @@ await page.route('**/api/vendors**', async (route) => {
 ```
 
 The exact pathname also keeps a list stub from answering its own sub-routes
-(`/api/vendors/counts`, `/api/credit-memos/summary`), which carry the same query
+(`/api/vendors/counts`, `/api/credit-memos/counts`), which carry the same query
 string and would otherwise receive the list's body.
 
 **The `page` fixture enforces this.** `fixtures/helpers.ts` records every module

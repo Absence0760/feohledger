@@ -1113,21 +1113,21 @@ async def test_list_sort_allowlist(realdb):
 
 
 # ---------------------------------------------------------------------------
-# GET /credit-memos/summary — the chip counts
+# GET /credit-memos/counts — the chip counts
 # ---------------------------------------------------------------------------
 
 
 async def test_summary_counts_every_status_over_the_whole_set(realdb):
     await _seed_search_set(realdb)
     async with realdb.client(key="a", role="ap_clerk") as c:
-        resp = await c.get("/api/credit-memos/summary")
+        resp = await c.get("/api/credit-memos/counts")
     assert resp.status_code == 200, resp.text
     assert resp.json() == {"total": 5, "by_status": {"open": 3, "applied": 1, "void": 1}}
 
 
 async def test_summary_zero_fills_every_known_status(realdb):
     async with realdb.client(key="a", role="cfo") as c:
-        resp = await c.get("/api/credit-memos/summary")
+        resp = await c.get("/api/credit-memos/counts")
     assert resp.json() == {"total": 0, "by_status": {"open": 0, "applied": 0, "void": 0}}
 
 
@@ -1138,7 +1138,7 @@ async def test_summary_describes_exactly_the_rows_the_list_returns(realdb):
     async with realdb.client(key="a", role="ap_manager") as c:
         for term in (None, "globex", "initech", "cm-", "nothing-matches"):
             params = {"search": term} if term else {}
-            summary = (await c.get("/api/credit-memos/summary", params=params)).json()
+            summary = (await c.get("/api/credit-memos/counts", params=params)).json()
             listed_all = (await c.get("/api/credit-memos", params=params)).json()["total"]
             assert summary["total"] == listed_all, term
             for status_key, count in summary["by_status"].items():
@@ -1165,9 +1165,9 @@ async def test_summary_is_entity_scoped(realdb):
         c.headers["X-Entity-ID"] = default_id
         await _create_open_memo(c, a_vendor, number="CM-A")
 
-        scoped = (await c.get("/api/credit-memos/summary")).json()
+        scoped = (await c.get("/api/credit-memos/counts")).json()
         c.headers.pop("X-Entity-ID")
-        consolidated = (await c.get("/api/credit-memos/summary")).json()
+        consolidated = (await c.get("/api/credit-memos/counts")).json()
 
     assert scoped == {"total": 1, "by_status": {"open": 1, "applied": 0, "void": 0}}
     assert consolidated["total"] == 2
@@ -1175,10 +1175,10 @@ async def test_summary_is_entity_scoped(realdb):
 
 async def test_summary_rbac_matches_the_list(realdb):
     async with realdb.client(key="a", role=None) as c:
-        assert (await c.get("/api/credit-memos/summary")).status_code == 401
+        assert (await c.get("/api/credit-memos/counts")).status_code == 401
     for role in ("admin", "ap_manager", "ap_clerk", "cfo"):
         async with realdb.client(key="a", role=role) as c:
-            assert (await c.get("/api/credit-memos/summary")).status_code == 200, role
+            assert (await c.get("/api/credit-memos/counts")).status_code == 200, role
 
 
 # ---------------------------------------------------------------------------

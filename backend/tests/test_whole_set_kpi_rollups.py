@@ -358,6 +358,7 @@ def _counts_pairs():
 #: Same non-vacuity guard the `/summary` discovery carries: a parametrisation
 #: over an empty list runs zero tests and reports success.
 _KNOWN_COUNTS_SURFACES = {
+    "/api/credit-memos/counts",
     "/api/invoices/counts",
     "/api/payments/counts",
     "/api/purchase-orders/counts",
@@ -561,6 +562,11 @@ def test_a_counts_endpoint_is_gated_exactly_like_its_list(pair):
 #: its exemption test first, and the value here would need to become a list of
 #: tuples before a second vendors entry could be added.
 _COUNTS_BUILDER_MODULES = {
+    "app/api/credit_memos.py": (
+        "_credit_memo_list_query",
+        "list_credit_memos",
+        "credit_memo_status_counts",
+    ),
     "app/api/invoices.py": ("_invoice_list_filters", "list_invoices", "invoice_counts"),
     "app/api/payments.py": (
         "_payment_list_filters",

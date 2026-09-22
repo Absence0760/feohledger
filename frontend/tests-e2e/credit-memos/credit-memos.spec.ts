@@ -159,7 +159,7 @@ test.describe('/credit-memos', () => {
 					r.url().includes('/api/credit-memos') && r.url().includes('status=open')
 			);
 			// `\b`, not `$`: the chip carries its whole-set count once
-			// `GET /api/credit-memos/summary` lands ("Open 3").
+			// `GET /api/credit-memos/counts` lands ("Open 3").
 			await page.locator('.filter-chip', { hasText: /^Open\b/ }).click();
 			await openFiltered;
 			await expect(
@@ -203,7 +203,7 @@ test.describe('/credit-memos', () => {
 			);
 			expect(voidResp.status()).toBe(200);
 
-			// Real backend, real `GET /api/credit-memos/summary`: the search term
+			// Real backend, real `GET /api/credit-memos/counts`: the search term
 			// narrows the tallies to exactly this test's three rows, whatever else
 			// the worker's tenant holds.
 			await page.goto(`/credit-memos?search=${prefix}`);
