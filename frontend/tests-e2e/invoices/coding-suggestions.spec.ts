@@ -1,6 +1,7 @@
 import {
 	API_BASE,
 	authedTenantHeaders,
+	chartGlCode,
 	deleteVendorsWhere,
 	expect,
 	tenantPsql,
@@ -53,11 +54,10 @@ async function seedHistory(page: import('@playwright/test').Page): Promise<Creat
 	expect(vResp.status()).toBe(201);
 	const vendorId = ((await vResp.json()) as { id: string }).id;
 
-	// Use a GL code the tenant's own catalog carries: the modal renders a
-	// <select> when GL accounts exist, and a code outside the catalog would be
-	// a less representative fixture than one a real coder could have picked.
-	const glCode = tenantPsql(`SELECT code FROM gl_accounts ORDER BY code LIMIT 1`).trim();
-	expect(glCode.length).toBeGreaterThan(0);
+	// Use a GL code the tenant's own chart carries: the modal renders a <select>
+	// when GL accounts exist, and since docs/decisions.md §199 the create below
+	// refuses a code that is not an active account of the invoice's chart.
+	const glCode = chartGlCode();
 
 	for (let i = 0; i < 3; i++) {
 		const resp = await page.request.post(`${API_BASE}/api/invoices`, {

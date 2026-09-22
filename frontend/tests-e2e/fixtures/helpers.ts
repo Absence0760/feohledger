@@ -552,6 +552,27 @@ export function tenantPsql(query: string, slug?: string): string {
 }
 
 /**
+ * A GL code any invoice in the worker's tenant may be coded to: an ACTIVE
+ * account of the SHARED chart, which is in every entity's chart.
+ *
+ * Use this instead of a literal whenever a spec WRITES a GL code to an invoice
+ * or template. Since `docs/decisions.md` §199 such a write must name an active
+ * account of the invoice's chart whenever that chart has any, and the two seeds
+ * disagree on which codes exist — the lean seed CI runs defines only `6000`,
+ * the full local seed defines `1000`…`8000` without it — so a literal passes on
+ * one and 422s on the other. Throws rather than returning `''` so a tenant
+ * with no chart fails here, by name, instead of as a later refused write.
+ */
+export function chartGlCode(slug?: string): string {
+	const code = tenantPsql(
+		'SELECT code FROM gl_accounts WHERE is_active AND entity_id IS NULL ORDER BY code LIMIT 1',
+		slug
+	).trim();
+	if (!code) throw new Error('worker tenant has no active shared GL account — reseed it');
+	return code;
+}
+
+/**
  * Run a synchronous `psql -c <query>` against the CONTROL-plane database.
  *
  * The sibling of `tenantPsql` for the rows that do not live in a tenant DB —
