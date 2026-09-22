@@ -1,5 +1,5 @@
 import { expect, test } from '../fixtures/helpers';
-import type { Page, Request } from '@playwright/test';
+import type { Request } from '@playwright/test';
 
 /**
  * `/credit-memos` — server-side search, column sort, and the chip counts.
@@ -53,18 +53,10 @@ function listQuery(request: Request): Record<string, string> {
 	return Object.fromEntries(new URL(request.url()).searchParams);
 }
 
-async function stubInvoices(page: Page) {
-	// The page loads every invoice for its two invoice selects; empty is fine.
-	await page.route(isGet('/api/invoices'), (route) =>
-		route.fulfill(json({ items: [], total: 0, page: 1, page_size: 100 }))
-	);
-}
-
 test.describe('/credit-memos — search, sort and chip counts', () => {
 	test('search is a server filter: URL-backed, sent to the list AND the chip summary', async ({
 		page
 	}) => {
-		await stubInvoices(page);
 		const summarySearches: string[] = [];
 		await page.route(isGet(LIST), (route) => {
 			const term = listQuery(route.request()).search ?? '';
@@ -125,7 +117,6 @@ test.describe('/credit-memos — search, sort and chip counts', () => {
 	});
 
 	test('a failed summary leaves bare chip labels, never a page-local tally', async ({ page }) => {
-		await stubInvoices(page);
 		await page.route(isGet(LIST), (route) =>
 			route.fulfill(json({ items: [memo(1), memo(2)], total: 2 }))
 		);
@@ -142,7 +133,6 @@ test.describe('/credit-memos — search, sort and chip counts', () => {
 	test('a filter that matches nothing says so, rather than claiming there are no memos', async ({
 		page
 	}) => {
-		await stubInvoices(page);
 		await page.route(isGet(LIST), (route) => {
 			const term = listQuery(route.request()).search ?? '';
 			return route.fulfill(json(term ? { items: [], total: 0 } : { items: [memo(1)], total: 1 }));
@@ -158,7 +148,6 @@ test.describe('/credit-memos — search, sort and chip counts', () => {
 	});
 
 	test('column sort sends an allowlisted key and survives a reload', async ({ page }) => {
-		await stubInvoices(page);
 		await page.route(isGet(COUNTS), (route) =>
 			route.fulfill(json({ total: 2, by_status: { open: 2, applied: 0, void: 0 } }))
 		);
@@ -212,7 +201,6 @@ test.describe('/credit-memos — search, sort and chip counts', () => {
 	test('a bookmarked sort the API does not allow is dropped, not sent to a 422', async ({
 		page
 	}) => {
-		await stubInvoices(page);
 		await page.route(isGet(COUNTS), (route) =>
 			route.fulfill(json({ total: 1, by_status: { open: 1, applied: 0, void: 0 } }))
 		);

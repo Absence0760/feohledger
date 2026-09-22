@@ -43,6 +43,8 @@ const RAW = import.meta.glob('/src/**/*.svelte', {
 const TRANSLATED = [
 	'/src/lib/components/ConsentBanner.svelte',
 	'/src/lib/components/ui/BulkBar.svelte',
+	'/src/lib/components/ui/InvoicePicker.svelte',
+	'/src/lib/components/ui/VendorPicker.svelte',
 	'/src/routes/credit-memos/+page.svelte',
 	'/src/routes/exceptions/+page.svelte'
 ];

@@ -963,6 +963,40 @@ export async function selectVendorInPicker(input: Locator, name: string): Promis
 	await expect(input).toHaveValue(new RegExp(escapeRegExp(name)));
 }
 
+/**
+ * The shared `ui/InvoicePicker`'s combobox input within `scope`, by its label.
+ * Same role filter as {@link vendorPicker}, for the same reason: the clear
+ * button's name ("Clear the selected invoice") also names the field.
+ */
+export function invoicePicker(scope: Page | Locator, name: string): Locator {
+	return scope.getByRole('combobox', { name });
+}
+
+/**
+ * Choose an invoice in the shared `ui/InvoicePicker` combobox, by its number.
+ *
+ * Types the number (the picker searches server-side, so that is the reach
+ * mechanism, exactly as in {@link selectVendorInPicker}) and clicks the option
+ * whose accessible name STARTS with it. An option reads `<number> <amount>`, so
+ * a bare substring would let `INV-1` pick `INV-10`; anchoring on the number
+ * followed by whitespace is what makes the choice exact.
+ */
+export async function selectInvoiceInPicker(input: Locator, invoiceNumber: string): Promise<void> {
+	await input.click();
+	await input.fill(invoiceNumber);
+	// Wait for the SEARCH to answer before choosing. The popup keeps showing the
+	// previous page until the debounced request lands, and when the wanted
+	// invoice is already on it, clicking there commits, closes the popup and
+	// cancels the search — a pick that never exercised the reach mechanism. Once
+	// no listed option lacks the number, the list on screen is the answer.
+	const listbox = input.page().getByRole('listbox');
+	await expect(listbox.getByRole('option').filter({ hasNotText: invoiceNumber })).toHaveCount(0);
+	await listbox
+		.getByRole('option', { name: new RegExp(`^${escapeRegExp(invoiceNumber)}(\\s|$)`) })
+		.click();
+	await expect(input).toHaveValue(invoiceNumber);
+}
+
 /** The backend origin. Specs that hit `${API_BASE}/api/...` directly import
  *  this instead of redeclaring `process.env.PUBLIC_API_URL ?? …`; it is defined
  *  in `fixtures/env.ts` alongside the web origin, so a worktree configures both

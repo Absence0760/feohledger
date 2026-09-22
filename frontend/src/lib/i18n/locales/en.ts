@@ -931,6 +931,23 @@ export const en = {
 	// "no vendor" while the form still held one.
 	'vendors.picker.unresolvedSelection':
 		'A vendor is already selected, but its name isn’t available on this screen. Picking one here replaces it.',
+	// --- Shared invoice picker (`ui/InvoicePicker.svelte`) ---
+	// Same contract as the vendor picker above: one server-filtered PAGE of
+	// the set is on screen, so the count line must say when it is a subset.
+	// The EMPTY-set sentence is not here — only the caller knows what its set
+	// means (e.g. `creditMemos.applyModal.noEligible`).
+	'invoices.picker.loading': 'Loading invoices…',
+	'invoices.picker.loadFailed': 'Invoices couldn’t be loaded. That is not the same as there being none — try again.',
+	'invoices.picker.noMatches': 'No invoices match “{query}”',
+	'invoices.picker.showingAll': 'All matches shown ({total})',
+	'invoices.picker.showingPartial': 'Showing {shown} of {total} matches — type to narrow',
+	'invoices.picker.refineHint': 'Not all matches are listed',
+	'invoices.picker.loadMore': 'Load more',
+	'invoices.picker.loadMoreFailed': 'Couldn’t load more.',
+	'invoices.picker.clearAria': 'Clear the selected invoice',
+	'invoices.picker.listAria': 'Invoices',
+	'invoices.picker.unresolvedSelection': 'An invoice is already selected, but its number isn’t available on this screen. Picking one here replaces it.',
+	'invoices.picker.leftToCredit': '{amount} left to credit',
 	'vendors.changeRequests.navLabel': 'Bank Changes',
 	'vendors.changeRequests.title': 'Bank & Tax Change Approvals',
 	'vendors.changeRequests.intro':
@@ -4733,7 +4750,7 @@ export const en = {
 	'creditMemos.applyModal.aria': 'Apply credit memo',
 	'creditMemos.applyModal.hint': 'Pick an invoice to apply this credit to.',
 	'creditMemos.applyModal.invoice': 'Invoice',
-	'creditMemos.applyModal.noEligible': 'No invoice is available for this vendor. An invoice can only be credited once its vendor is resolved — open the invoice and re-save its vendor.',
+	'creditMemos.applyModal.noEligible': 'No invoice can take this credit. It needs one of this vendor’s invoices, in the memo’s currency, with at least the memo’s amount still uncredited. An invoice whose vendor isn’t resolved yet qualifies once you open it and re-save its vendor.',
 	'creditMemos.applyModal.selectInvoice': 'Select invoice…',
 	'creditMemos.applyModal.title': 'Apply Credit Memo',
 	'creditMemos.col.amount': 'Amount',
@@ -4755,6 +4772,7 @@ export const en = {
 	'creditMemos.createModal.invoiceNeedsVendor': 'Choose a vendor to see its invoices.',
 	'creditMemos.createModal.memoNumber': 'Memo Number',
 	'creditMemos.createModal.noInvoice': 'Don’t apply yet',
+	'creditMemos.createModal.noEligibleInvoice': 'None of this vendor’s invoices can take this credit — none has enough left uncredited, or its vendor isn’t resolved yet (open the invoice and re-save its vendor).',
 	'creditMemos.createModal.reason': 'Reason',
 	'creditMemos.createModal.reasonPlaceholder': 'e.g. Returned defective goods',
 	'creditMemos.createModal.selectVendor': 'Select vendor…',

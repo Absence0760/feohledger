@@ -16,7 +16,8 @@ test.describe('credit-memo void confirmation', () => {
 		// module URL `/src/lib/api/vendors.ts` (imported by `ui/VendorPicker`);
 		// answering it with JSON meant the route never loaded, so this spec
 		// failed locally while CI's preview build stayed green (issue #443). The
-		// page no longer fetches vendors on mount at all, so that stub is gone.
+		// page no longer fetches vendors or invoices on mount at all, so neither
+		// needs a stub.
 		await page.route((url) => url.pathname === '/api/credit-memos', async (route) => {
 			await route.fulfill({
 				status: 200,
@@ -38,13 +39,6 @@ test.describe('credit-memo void confirmation', () => {
 				})
 			});
 		});
-		// The other list the page loads on mount (its invoice selects) — keep it
-		// empty.
-		await page.route(
-			(url) => url.pathname === '/api/invoices',
-			(r) =>
-				r.fulfill({ status: 200, contentType: 'application/json', body: '{"items":[],"total":0}' })
-		);
 
 		let voidCalls = 0;
 		await page.route((url) => /^\/api\/credit-memos\/[^/]+\/void$/.test(url.pathname), async (route) => {

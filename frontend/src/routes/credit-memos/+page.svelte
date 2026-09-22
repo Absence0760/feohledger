@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { api } from '$lib/api';
-	import { appendUnique, fetchAllPages, type PagedResponse } from '$lib/utils/pagination';
+	import { appendUnique } from '$lib/utils/pagination';
 	import { createRequestSequencer } from '$lib/utils/requestSequence';
 	import { toggleSort, type SortOrder } from '$lib/utils/sort';
 	import { untrack } from 'svelte';
@@ -16,6 +16,7 @@
 	import Modal from '$lib/components/ui/Modal.svelte';
 	import Money from '$lib/components/ui/Money.svelte';
 	import VendorPicker from '$lib/components/ui/VendorPicker.svelte';
+	import InvoicePicker from '$lib/components/ui/InvoicePicker.svelte';
 	import Badge from '$lib/components/ui/Badge.svelte';
 	import type { BadgeTone } from '$lib/components/ui/badgeTone';
 	import { toast } from '$lib/components/ui/Toast.svelte';
@@ -25,6 +26,10 @@
 	import { formatDate } from '$lib/utils/time';
 	import { DEFAULT_CURRENCY, currencyOptions } from '$lib/utils/money';
 	import { orgCurrency } from '$lib/stores/orgSettings.svelte';
+	import { listInvoicesEligibleForMemo, listInvoicesEligibleForNewMemo } from '$lib/api/creditMemos';
+	import type { EligibleInvoice } from '$lib/types/creditMemo';
+	import type { SearchPickerLoad } from '$lib/utils/searchPicker';
+	import { creditAmountParam } from '$lib/utils/invoicePicker';
 
 	// Create / edit / apply / void are all `require_roles(ADMIN, AP_MANAGER)` on
 	// the backend, while the LIST (and its chip summary) is open to all four
@@ -108,25 +113,12 @@
 		created_at: string;
 	}
 
-	interface Invoice {
-		id: string;
-		invoice_number: string;
-		vendor: string;
-		vendor_id: string | null;
-		currency: string;
-	}
-
 	let memos = $state<CreditMemo[]>([]);
-	let invoices = $state<Invoice[]>([]);
 	let loading = $state(true);
 	// Distinguishes "the list is empty" from "we never found out" — without it
 	// a failed fetch left the table asserting there are no credit memos, which
 	// on a payables surface reads as "this vendor owes you nothing".
 	let errored = $state(false);
-	// The invoice select is the Apply dialog's whole set of valid targets, so a
-	// failed load has to say so: an empty select otherwise claims the vendor has
-	// no creditable invoice.
-	let invoicesErrored = $state(false);
 	// Round-trips through `?status=` like the other ~24 list routes, so back /
 	// forward / reload / a pasted link reproduce the view. An unrecognised value
 	// falls back to `all` rather than silently filtering to nothing.
@@ -180,6 +172,9 @@
 	let formAmount = $state<number | string>('');
 	let formReason = $state('');
 	let formInvoiceId = $state('');
+	// The option the create dialog's invoice picker committed — kept for its
+	// currency, which the linked memo inherits and the dialog shows.
+	let formInvoiceOption = $state<EligibleInvoice | null>(null);
 	let saving = $state(false);
 
 	let applyInvoiceId = $state('');
@@ -227,17 +222,19 @@
 		formCurrency = ccy;
 	});
 
-	// The mount effect loads the lists ONCE. It must not depend on
+	// The mount effect loads the list ONCE. It must not depend on
 	// `statusFilter`: `loadMemos` reads it synchronously (before its first
 	// await), and Svelte tracks reads transitively through called functions, so
 	// a plain read there made this effect a second status-filter subscriber —
 	// every chip click fired it AND the effect below, two unsequenced page-1
-	// requests racing with whichever landed last winning (and the invoice
-	// select needlessly refetched). `untrack` inside `loadMemos` still reads the
-	// CURRENT filter, it just stops the read registering as the caller's
-	// dependency.
+	// requests racing with whichever landed last winning. `untrack` inside
+	// `loadMemos` still reads the CURRENT filter, it just stops the read
+	// registering as the caller's dependency.
+	//
+	// Nothing else loads on mount. The vendor and invoice pickers each fetch
+	// their own page when their dialog opens (docs/decisions.md §145, §202).
 	$effect(() => {
-		loadAll();
+		loadMemos();
 	});
 
 	// Status chip → refetch. Skips its own mount-time run: a Svelte `$effect`
@@ -307,10 +304,6 @@
 		sortOrder = next.order;
 		syncUrl();
 		loadMemos();
-	}
-
-	async function loadAll() {
-		await Promise.all([loadMemos(), loadInvoices()]);
 	}
 
 	async function loadMemos(opts: { append?: boolean; nextPage?: number } = {}) {
@@ -388,31 +381,41 @@
 
 	let hasMore = $derived(memos.length < total);
 
-	// The vendor list is no longer fetched here: `ui/VendorPicker` searches it
-	// server-side, so the create modal reaches every supplier without this page
-	// walking one request per 100 of them on mount.
-	//
-	// The INVOICE list still is, and for the reason the vendor one used to be:
-	// its options ARE the set of valid choices, so a truncated fetch is not a
-	// shorter list — it is the invoice the operator wants to credit, missing,
-	// with no search inside a native `<select>` to reach it. A bare
-	// `api.get('/api/invoices')` returns the server's DEFAULT_PAGE_SIZE of 20,
-	// and raising `page_size` only moves the cliff (the server caps it at
-	// MAX_PAGE_SIZE), so `fetchAllPages` walks the envelope's own `total`.
-	// Giving it the picker's treatment needs an invoice-shaped combobox of its
-	// own — tracked separately rather than half-done here.
-	async function loadInvoices() {
-		try {
-			invoices = await fetchAllPages<Invoice>((page, pageSize) =>
-				api.get<PagedResponse<Invoice>>(`/api/invoices?page=${page}&page_size=${pageSize}`)
+	/**
+	 * Neither the vendor nor the invoice list is fetched by this page. Both
+	 * dialogs used to read one `invoices` array that mount filled by walking
+	 * EVERY page of `GET /api/invoices`, then filtered by vendor in the browser —
+	 * one request per 100 invoices on every visit, for a list most visits never
+	 * open, and a list that still offered invoices the apply refused (another
+	 * currency, too little balance left, another entity). The pickers now ask
+	 * the server for exactly the set the application will accept, when their
+	 * dialog opens (docs/decisions.md §202).
+	 *
+	 * A loader's identity IS its set (`ui/SearchPicker`), so each is derived
+	 * from the scope it is bound to and changes only when that does.
+	 */
+	const noInvoices: SearchPickerLoad<EligibleInvoice> = async () => ({ items: [], total: 0 });
+
+	// Apply: the memo's own terms, read server-side off the memo row.
+	const applyLoad = $derived.by((): SearchPickerLoad<EligibleInvoice> => {
+		const memoId = applyTargetId;
+		return memoId ? (query) => listInvoicesEligibleForMemo(memoId, query) : noInvoices;
+	});
+
+	// Create's link: keyed on the VENDOR only. The amount is read when a page is
+	// fetched rather than baked into the loader, so typing an amount does not
+	// swap the source (and throw away the operator's search) on every
+	// keystroke; the next fetch — every open is one — narrows by it.
+	const linkLoad = $derived.by((): SearchPickerLoad<EligibleInvoice> => {
+		const vendorId = formVendorId;
+		if (!vendorId) return noInvoices;
+		return (query) =>
+			listInvoicesEligibleForNewMemo(
+				vendorId,
+				creditAmountParam(untrack(() => formAmount)),
+				query
 			);
-			invoicesErrored = false;
-		} catch {
-			// Not fatal to the list, but neither invoice select may present an
-			// empty list as "this vendor has no creditable invoice".
-			invoicesErrored = true;
-		}
-	}
+	});
 
 	/**
 	 * Only a memo that has never moved money is editable — the same predicate
@@ -430,6 +433,7 @@
 		formAmount = '';
 		formReason = '';
 		formInvoiceId = '';
+		formInvoiceOption = null;
 		// Back to the org default for each new memo — a one-off foreign-currency
 		// credit shouldn't become sticky for every memo after it.
 		currencyTouched = false;
@@ -454,13 +458,18 @@
 		editTarget = null;
 	}
 
-	// The create dialog's invoice link. Only the chosen vendor's invoices are
-	// valid, for the same reason as in the Apply dialog below: the backend
-	// refuses any other (and any invoice with no resolved vendor) with a 409.
-	let linkableInvoices = $derived(
-		formVendorId ? invoices.filter((i) => i.vendor_id === formVendorId) : []
+	// The invoice the create dialog links, while the picker still holds it.
+	let linkedInvoice = $derived(
+		formInvoiceId && formInvoiceOption?.id === formInvoiceId ? formInvoiceOption : null
 	);
-	let linkedInvoice = $derived(invoices.find((i) => i.id === formInvoiceId) ?? null);
+	// A linked memo inherits the invoice's currency; a blank one falls through
+	// to the org's reporting currency on the backend, so show that instead of
+	// an empty option.
+	let linkedCurrency = $derived(
+		linkedInvoice
+			? linkedInvoice.currency?.trim().toUpperCase() || orgCurrency.currency
+			: null
+	);
 
 	async function handleCreate() {
 		if (!formMemoNumber.trim() || !formVendorId || formAmount === '' || formAmount == null) return;
@@ -573,16 +582,6 @@
 	// the vendor are the two facts that decide whether the invoice they pick is
 	// the right one, and neither was on screen once the dialog covered the row.
 	let applyMemo = $derived(memos.find((cm) => cm.id === applyTargetId) ?? null);
-
-	// Only this memo's own vendor's invoices are valid targets. An invoice with
-	// no resolved `vendor_id` is NOT a wildcard — its vendor can't be proven, so
-	// the backend refuses the apply (409) and offering it here would only invite
-	// the error. Resolve the invoice's vendor first (re-save it on the invoice).
-	let invoicesForVendor = $derived.by(() => {
-		const memo = applyMemo;
-		if (!memo) return [];
-		return invoices.filter((i) => i.vendor_id === memo.vendor_id);
-	});
 
 	// A search or a status chip narrows the set; either one makes "no rows" a
 	// statement about the filter, not about the tenant.
@@ -776,33 +775,34 @@
 			selectedLabel={formMode === 'edit' ? (editTarget?.vendor_name ?? null) : null}
 			required
 			disabled={!canMutate}
-			onselect={() => (formInvoiceId = '')}
+			onselect={() => {
+				// Another vendor's invoice is not a valid link for this one.
+				formInvoiceId = '';
+				formInvoiceOption = null;
+			}}
 		/>
 		<label>
 			<span>{m('creditMemos.createModal.amount')} <em class="required">*</em></span>
 			<input type="number" min="0.01" step="0.01" bind:value={formAmount} required />
 		</label>
 		{#if formMode === 'create'}
-			<label>
-				<span>{m('creditMemos.createModal.invoice')}</span>
-				<select bind:value={formInvoiceId} disabled={!formVendorId} aria-describedby="cm-invoice-hint">
-					<option value="">{m('creditMemos.createModal.noInvoice')}</option>
-					{#each linkableInvoices as inv (inv.id)}
-						<option value={inv.id}>{inv.invoice_number} — {inv.vendor}</option>
-					{/each}
-				</select>
-				<!-- `aria-describedby`, not a bare child of the label — see the
-				     currency hint below for why. -->
-				<small id="cm-invoice-hint" class="field-hint" aria-hidden="true">
-					{#if !formVendorId}
-						{m('creditMemos.createModal.invoiceNeedsVendor')}
-					{:else if invoicesErrored}
-						{m('common.loadFailed')}
-					{:else}
-						{m('creditMemos.createModal.invoiceHint')}
-					{/if}
-				</small>
-			</label>
+			<!-- Optional: empty means "don't apply yet". Disabled until a vendor is
+			     chosen, because the set is that vendor's invoices; the picker
+			     then offers exactly what a linked create would accept. The hint
+			     is part of the field's description, never its name. -->
+			<InvoicePicker
+				bind:value={formInvoiceId}
+				load={linkLoad}
+				label={m('creditMemos.createModal.invoice')}
+				placeholder={m('creditMemos.createModal.noInvoice')}
+				emptyText={m('creditMemos.createModal.noEligibleInvoice')}
+				hint={formVendorId
+					? m('creditMemos.createModal.invoiceHint')
+					: m('creditMemos.createModal.invoiceNeedsVendor')}
+				disabled={!canMutate || !formVendorId}
+				testid="cm-link-invoice"
+				onselect={(option) => (formInvoiceOption = option)}
+			/>
 		{/if}
 		<label>
 			<span>{m('creditMemos.createModal.currency')} <em class="required">*</em></span>
@@ -810,7 +810,7 @@
 				<!-- A linked memo takes the invoice's currency; asserting any other
 				     would only be refused (409), so the choice is shown, not offered. -->
 				<select disabled aria-describedby="cm-currency-hint">
-					<option>{linkedInvoice.currency.toUpperCase()}</option>
+					<option>{linkedCurrency}</option>
 				</select>
 			{:else}
 				<select
@@ -875,27 +875,21 @@
 	{/if}
 	<p class="modal-hint">{m('creditMemos.applyModal.hint')}</p>
 	<form onsubmit={(e) => { e.preventDefault(); handleApply(); }}>
-		<label>
-			<span>{m('creditMemos.applyModal.invoice')} <em class="required">*</em></span>
-			<select bind:value={applyInvoiceId} required>
-				<option value="">{m('creditMemos.applyModal.selectInvoice')}</option>
-				{#each invoicesForVendor as inv}
-					<option value={inv.id}>{inv.invoice_number} — {inv.vendor}</option>
-				{/each}
-			</select>
-		</label>
-		{#if invoicesForVendor.length === 0}
-			<!-- An empty select has two causes and only one of them is "there is
-			     nothing to credit". Saying the vendor has no eligible invoice when
-			     the invoice fetch simply failed sends the operator off to re-save
-			     a vendor link that was never the problem. -->
-			<p class="modal-hint warn">
-				{invoicesErrored ? m('common.loadFailed') : m('creditMemos.applyModal.noEligible')}
-			</p>
-		{/if}
+		<!-- Exactly the invoices the apply will accept, asked of the server when
+		     this dialog opens. The picker's count line says so if there are none
+		     — or if they could not be loaded, which is a different answer. -->
+		<InvoicePicker
+			bind:value={applyInvoiceId}
+			load={applyLoad}
+			label={m('creditMemos.applyModal.invoice')}
+			placeholder={m('creditMemos.applyModal.selectInvoice')}
+			emptyText={m('creditMemos.applyModal.noEligible')}
+			required
+			testid="cm-apply-invoice"
+		/>
 		<div class="modal-footer">
 			<button type="button" class="btn-cancel" onclick={() => (applyTargetId = null)}>{m('common.cancel')}</button>
-			<button type="submit" class="btn-primary" disabled={applying || invoicesForVendor.length === 0}>{applying ? m('creditMemos.applyModal.applying') : m('creditMemos.applyModal.apply')}</button>
+			<button type="submit" class="btn-primary" disabled={applying || !applyInvoiceId}>{applying ? m('creditMemos.applyModal.applying') : m('creditMemos.applyModal.apply')}</button>
 		</div>
 	</form>
 </Modal>
@@ -909,9 +903,7 @@
 	   `.applied` / `.void` stay as the semantic classes — `tr.applied` is an e2e
 	   selector (tests-e2e/credit-memos/credit-memos.spec.ts) — and now carry no
 	   colour of their own. */
-	/* Explains an empty apply-target list — the memo's vendor has no invoice
-	   whose vendor link is resolved and matching, so there is nothing to credit. */
-	/* Sub-label under the currency / invoice selects. Muted on `--surface`
+	/* Sub-label under the currency select. Muted on `--surface`
 	   clears 4.5:1; do NOT add `opacity` here — the token has already done that
 	   job and a fade only spends contrast (see frontend/CLAUDE.md § Colour
 	   tokens). */
@@ -921,11 +913,6 @@
 		font-size: 0.78rem;
 		color: var(--text-muted);
 		font-weight: 400;
-	}
-
-	.modal-hint.warn {
-		color: #d4940a;
-		margin: -6px 0 0;
 	}
 
 	/* Free-text, so it is the one cell that can be arbitrarily long. Capped and
