@@ -42,16 +42,22 @@ function memo(n: number, status: 'open' | 'applied' | 'void' = 'open') {
 	};
 }
 
-/** Stub the two selects the page loads alongside the memo list. */
+// Stub the two selects the page loads alongside the memo list.
+//
+// Matched on the URL's PATH, never a glob over the whole URL: under `vite dev`
+// the browser fetches source modules individually, and `**/api/vendors*` also
+// matches `/src/lib/api/vendors.ts` — which `VendorPicker` imports — so the
+// stub answered the module request with JSON and the route chunk 500'd. CI
+// serves a bundled `vite preview`, which is why only local runs saw it.
 async function stubSelects(page: import('@playwright/test').Page) {
-	await page.route('**/api/vendors*', (route) =>
+	await page.route((url) => url.pathname.startsWith('/api/vendors'), (route) =>
 		route.fulfill({
 			status: 200,
 			contentType: 'application/json',
 			body: JSON.stringify({ items: [], total: 0 })
 		})
 	);
-	await page.route('**/api/invoices*', (route) =>
+	await page.route((url) => url.pathname.startsWith('/api/invoices'), (route) =>
 		route.fulfill({
 			status: 200,
 			contentType: 'application/json',

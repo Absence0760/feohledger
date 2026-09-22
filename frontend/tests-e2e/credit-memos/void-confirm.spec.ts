@@ -11,7 +11,10 @@ import { expect, test } from '../fixtures/helpers';
  */
 test.describe('credit-memo void confirmation', () => {
 	test('first click arms, outside click un-arms, second click voids', async ({ page }) => {
-		await page.route(/\/api\/credit-memos\?/, async (route) => {
+		// Every stub matches the URL's PATH: a regex over the whole URL also
+		// matched `/src/lib/api/vendors.ts`, the module `VendorPicker` imports
+		// under `vite dev`, and answering it with JSON 500'd the route chunk.
+		await page.route((url) => url.pathname === '/api/credit-memos', async (route) => {
 			await route.fulfill({
 				status: 200,
 				contentType: 'application/json',
@@ -33,10 +36,10 @@ test.describe('credit-memo void confirmation', () => {
 			});
 		});
 		// Other list calls the page makes on load — keep them empty.
-		await page.route(/\/api\/vendors/, (r) =>
+		await page.route((url) => url.pathname.startsWith('/api/vendors'), (r) =>
 			r.fulfill({ status: 200, contentType: 'application/json', body: '{"items":[]}' })
 		);
-		await page.route(/\/api\/invoices(\?|$)/, (r) =>
+		await page.route((url) => url.pathname === '/api/invoices', (r) =>
 			r.fulfill({ status: 200, contentType: 'application/json', body: '{"items":[],"total":0}' })
 		);
 
