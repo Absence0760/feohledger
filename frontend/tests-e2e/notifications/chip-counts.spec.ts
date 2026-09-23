@@ -17,9 +17,24 @@ import { clearNotifications, currentUserId, orgId, seedNotifications } from './s
 
 type Page = import('@playwright/test').Page;
 
-/** A chip's `.count` badge. Chips render as `<button>` with the count inside. */
+/**
+ * A filter chip, scoped to the chip row.
+ *
+ * Unscoped, a by-role button query anchored on the label also matched the
+ * entity switcher, whose accessible name is "All entities Entity" — so this
+ * file failed in strict mode for any tenant carrying more than one entity, on
+ * an ambiguity that had nothing to do with notifications.
+ * `ui/FilterChips.svelte` renders `nav.filters > button.filter-chip`, which is
+ * the row this scopes to.
+ */
+function chip(page: Page, label: 'All' | 'Unread') {
+	return page.locator('nav.filters button.filter-chip').filter({
+		has: page.getByText(new RegExp(`^${label}\\b`))
+	});
+}
+
 function chipCount(page: Page, label: 'All' | 'Unread') {
-	return page.getByRole('button', { name: new RegExp(`^${label}\\b`) }).locator('.count');
+	return chip(page, label).locator('.count');
 }
 
 test.describe('notification center — chip counts vs footer', () => {
@@ -42,7 +57,7 @@ test.describe('notification center — chip counts vs footer', () => {
 		await expect(chipCount(page, 'Unread')).toHaveText('3');
 		await expect(page.locator('.load-more-end')).toHaveText('Showing all 5 notifications');
 
-		await page.getByRole('button', { name: /^Unread\b/ }).click();
+		await chip(page, 'Unread').click();
 
 		// The regression: All must STILL be 5. Before the fix it flipped to 3 —
 		// the unread-filtered response's `total` — so both chips read the same.
@@ -68,7 +83,7 @@ test.describe('notification center — chip counts vs footer', () => {
 		await page.goto('/notifications');
 		await expect(chipCount(page, 'All')).toHaveText('5');
 
-		await page.getByRole('button', { name: /^Unread\b/ }).click();
+		await chip(page, 'Unread').click();
 		await expect(page.locator('.load-more-end')).toHaveText('Showing all 3 notifications');
 
 		await page.getByRole('button', { name: 'Mark all read' }).click();
@@ -85,7 +100,7 @@ test.describe('notification center — chip counts vs footer', () => {
 		await expect(chipCount(page, 'All')).toHaveText('5');
 
 		// Back on All, every one of the 5 rows is still there and readable.
-		await page.getByRole('button', { name: /^All\b/ }).click();
+		await chip(page, 'All').click();
 		await expect(page.locator('tbody tr.clickable')).toHaveCount(5);
 		await expect(page.locator('.load-more-end')).toHaveText('Showing all 5 notifications');
 

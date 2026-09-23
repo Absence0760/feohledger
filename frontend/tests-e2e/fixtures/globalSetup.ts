@@ -173,7 +173,7 @@ async function verifyOriginServesThisApp(): Promise<string[]> {
  * `NNNN_` prefix is monotonic — so the last filename in sort order IS the head
  * revision string, with no need to walk the `down_revision` chain.
  */
-function headRevisionOnDisk(): string | null {
+function revisionsOnDisk(): string[] | null {
 	const here = dirname(fileURLToPath(import.meta.url));
 	const versions = resolve(here, '../../../backend/alembic/versions');
 	let files: string[];
@@ -182,8 +182,7 @@ function headRevisionOnDisk(): string | null {
 	} catch {
 		return null; // no backend checkout beside this one; not this guard's problem
 	}
-	const newest = files.sort().at(-1);
-	return newest ? newest.replace(/\.py$/, '') : null;
+	return files.sort().map((f) => f.replace(/\.py$/, ''));
 }
 
 function currentRevision(db: string): string | null {
@@ -215,23 +214,47 @@ function currentRevision(db: string): string | null {
  * guard is purely for local runs.
  */
 function verifyMigrationsCurrent(slugs: string[]): string[] {
-	const head = headRevisionOnDisk();
-	if (head === null) return [];
+	const known = revisionsOnDisk();
+	if (known === null || known.length === 0) return [];
+	const head = known.at(-1)!;
 
+	// Direction matters, and it is what this guard used to get wrong: it called
+	// EVERY mismatch "behind" and prescribed `pnpm migrate:all`, which cannot
+	// help when the databases are AHEAD — and running it then writes a newer
+	// branch's migrations into a checkout that does not describe them. A
+	// revision this checkout has no file for is the honest test for ahead: the
+	// database has been migrated by a branch that carries migrations this one
+	// lacks, so the fix is to update the checkout, never the database.
 	const behind: string[] = [];
+	const ahead: string[] = [];
 	for (const db of ['feohledger', ...slugs.map((s) => `feoh_${s}`)]) {
 		const at = currentRevision(db);
-		if (at !== null && at !== head) behind.push(`${db} is at ${at}`);
+		if (at === null || at === head) continue;
+		(known.includes(at) ? behind : ahead).push(`${db} is at ${at}`);
 	}
-	if (behind.length === 0) return [];
 
-	return [
-		`${behind.length} local database(s) are not at the head revision ${head}:\n` +
-			behind.map((b) => `      ${b}`).join('\n') +
-			'\n    A stale schema surfaces as a 500 from the first request touching a new ' +
-			'column, which reads as an application bug rather than a migration gap.\n' +
-			'    Fix: pnpm migrate:all'
-	];
+	const problems: string[] = [];
+	if (behind.length > 0) {
+		problems.push(
+			`${behind.length} local database(s) are BEHIND the head revision ${head}:\n` +
+				behind.map((b) => `      ${b}`).join('\n') +
+				'\n    A stale schema surfaces as a 500 from the first request touching a new ' +
+				'column, which reads as an application bug rather than a migration gap.\n' +
+				'    Fix: pnpm migrate:all'
+		);
+	}
+	if (ahead.length > 0) {
+		problems.push(
+			`${ahead.length} local database(s) are AHEAD of this checkout, whose head is ${head}:\n` +
+				ahead.map((a) => `      ${a}`).join('\n') +
+				'\n    Those revisions have no file in backend/alembic/versions/, so another ' +
+				'branch migrated these databases.\n' +
+				'    Do NOT run pnpm migrate:all — it cannot downgrade, and this checkout does ' +
+				'not describe the schema it would be writing against.\n' +
+				'    Fix: bring this branch up to date (git log --oneline HEAD..main).'
+		);
+	}
+	return problems;
 }
 
 export default async function globalSetup(): Promise<void> {
@@ -256,12 +279,14 @@ export default async function globalSetup(): Promise<void> {
 
 	// Schema before shape: a database behind `alembic head` makes every check
 	// below unreliable, and its failures impersonate application bugs.
+	// Reports every mismatching database, and says which DIRECTION it sits in —
+	// the two have opposite fixes, and only one of them is `pnpm migrate:all`.
 	const stale = verifyMigrationsCurrent(slugs);
 	if (stale.length > 0) {
 		throw new Error(
-			'\nLocal databases are behind the migrations in this checkout ' +
+			'\nLocal databases do not match the migrations in this checkout ' +
 				'(see docs/known-issues.md § "Local e2e tenant databases drift behind `alembic head`"):' +
-				`\n\n  - ${stale[0]}\n`
+				`\n\n${stale.map((s) => `  - ${s}`).join('\n\n')}\n`
 		);
 	}
 

@@ -1,10 +1,13 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
+	import { page } from '$app/state';
 	import { auth } from '$lib/stores/auth.svelte';
 	import { api } from '$lib/api';
 	import { toast } from '$lib/components/ui/Toast.svelte';
+	import SettingsRail from '$lib/components/ui/SettingsRail.svelte';
 	import { SUPPORTED_LOCALES, LOCALE_LABELS, type Locale } from '$lib/i18n/locale';
 	import { currentLocale, setLocale, m } from '$lib/i18n/store.svelte';
+	import type { MessageKey } from '$lib/i18n/messages';
 	import { notificationStore } from '$lib/stores/notifications.svelte';
 	import {
 		EVENT_ORDER,
@@ -22,12 +25,55 @@
 		qr_code_data_url: string;
 	}
 
+	// ── Section navigation ────────────────────────────────────────────────
+	// Seven panels, all genuinely one subject ("my account"), so the rail is
+	// FLAT — no group headings, which is what `ui/SettingsRail.svelte` renders
+	// when a group carries no label. `/organization` groups its fifteen because
+	// they are fifteen unrelated concerns; seven coherent ones do not need it.
+	//
+	// The reason to give this page a rail at all is not the section count but
+	// the three reads below: preferences, passkeys and signed-in devices each
+	// fired on arrival, so opening the page to change a language fetched the
+	// device list. They now wait for their own panel.
+	//
+	// A slug is part of the URL contract — it can be bookmarked and linked to.
+	//
+	// The order below is the RAIL's, not the order the panels sit in the markup:
+	// identity, then credentials, then what is currently signed in, then
+	// preferences. Language led the old scroll purely because it was the
+	// shortest card to put at the top.
+	const SECTIONS: { slug: string; labelKey: MessageKey }[] = [
+		{ slug: 'account', labelKey: 'profile.account.heading' },
+		{ slug: 'password', labelKey: 'profile.password.heading' },
+		{ slug: 'mfa', labelKey: 'profile.mfa.heading' },
+		{ slug: 'passkeys', labelKey: 'profile.passkeys.heading' },
+		{ slug: 'sessions', labelKey: 'profile.sessions.heading' },
+		{ slug: 'notifications', labelKey: 'profile.notifications.heading' },
+		{ slug: 'language', labelKey: 'profile.language.heading' }
+	];
+
+	const SECTION_SLUGS = new Set(SECTIONS.map((s) => s.slug));
+	const DEFAULT_SECTION = 'account';
+
+	// Unknown slug falls back rather than rendering an empty page.
+	const section = $derived.by(() => {
+		const slug = page.url.searchParams.get('section');
+		return slug && SECTION_SLUGS.has(slug) ? slug : DEFAULT_SECTION;
+	});
+
+	const railGroups = $derived([
+		{ items: SECTIONS.map((s) => ({ slug: s.slug, label: m(s.labelKey) })) }
+	]);
+
 	// Notification preferences
 	let prefsLoaded = $state(false);
 	let savingPrefs = $state(false);
 
 	$effect(() => {
-		if (!prefsLoaded) {
+		// `prefsLoaded` is the already-fetched guard; the section check is what
+		// makes it lazy, so opening the page no longer reads preferences the
+		// visitor may never look at.
+		if (section === 'notifications' && !prefsLoaded) {
 			void loadPrefs();
 		}
 	});
@@ -232,7 +278,20 @@
 	const webAuthnOk = isWebAuthnSupported();
 
 	$effect(() => {
-		if (!passkeysLoaded) {
+		// Two panels, not one. The passkey list is obviously the Passkeys
+		// panel's, but the Two-factor panel reads it too, through `hasPasskey`:
+		// a live passkey is what lets that card offer "Confirm with a passkey"
+		// instead of a typed proof, and what makes `startEnroll` mint a step-up.
+		// Gating this on the Passkeys panel alone starved that — the button
+		// silently stopped rendering for an account that had a passkey, which
+		// in an SSO-only tenant is the ONLY proof available, so the card became
+		// a dead end. Caught by `tests-e2e/auth/profile-sso-only-step-up.spec.ts`.
+		//
+		// The general rule this broke: a read may only be scoped to one panel
+		// when the data it fetches is read by exactly that panel. Follow the
+		// deriveds, not just the state — `hasPasskey` is where the second reader
+		// was hiding.
+		if ((section === 'passkeys' || section === 'mfa') && !passkeysLoaded) {
 			void loadPasskeys();
 		}
 	});
@@ -365,7 +424,7 @@
 	let sessionBusy = $state(false);
 
 	$effect(() => {
-		if (!sessionsLoaded) {
+		if (section === 'sessions' && !sessionsLoaded) {
 			void loadSessions();
 		}
 	});
@@ -516,446 +575,464 @@
 		<h1>{m('shell.profileAndSecurity')}</h1>
 	</header>
 
-	<div class="sections">
-		<section class="card">
-			<h2>{m('profile.language.heading')}</h2>
-			<p class="hint">{m('profile.language.hint')}</p>
-			<label>
-				<span>{m('profile.language.label')}</span>
-				<select
-					value={activeLocale}
-					onchange={onLocaleChange}
-					aria-label={m('profile.language.label')}
-				>
-					{#each SUPPORTED_LOCALES as loc (loc)}
-						<option value={loc}>{LOCALE_LABELS[loc]}</option>
-					{/each}
-				</select>
-			</label>
-		</section>
+	<div class="settings-layout">
+		<SettingsRail groups={railGroups} active={section} label={m('profile.rail.label')} />
 
-		<section class="card">
-			<h2>{m('profile.account.heading')}</h2>
-			<form
-				onsubmit={(e) => {
-					e.preventDefault();
-					saveProfile();
-				}}
-			>
-				<label>
-					<span>{m('profile.account.fullName')}</span>
-					<input type="text" bind:value={fullName} required autocomplete="name" />
-				</label>
-				<!-- Each term/definition pair is its own wrapping row (a <div> inside
-				     a <dl> is valid and keeps the dt→dd association intact). A
-				     two-column grid could not collapse at a 320px viewport: an
-				     address like `someone@a-long-tenant.example` is one unbreakable
-				     token, so the value column's min-content pushed the whole
-				     document sideways — WCAG 1.4.10. -->
-				<dl class="readonly">
-					<div class="pair">
-						<dt>{m('profile.account.email')}</dt>
-						<dd>{auth.user?.email ?? '—'}</dd>
-					</div>
-					<div class="pair">
-						<dt>{m('profile.account.roles')}</dt>
-						<dd data-testid="profile-roles">{roleLabels(auth.user?.roles) || '—'}</dd>
-					</div>
-				</dl>
-				<div class="actions">
-					<button
-						type="submit"
-						disabled={savingProfile || !fullName.trim() || fullName === auth.user?.full_name}
-					>
-						{savingProfile ? m('common.saving') : m('common.save')}
-					</button>
-				</div>
-			</form>
-		</section>
+		<div class="sections">
+			{#if section === 'language'}
+				<section class="card">
+					<h2>{m('profile.language.heading')}</h2>
+					<p class="hint">{m('profile.language.hint')}</p>
+					<label>
+						<span>{m('profile.language.label')}</span>
+						<select
+							value={activeLocale}
+							onchange={onLocaleChange}
+							aria-label={m('profile.language.label')}
+						>
+							{#each SUPPORTED_LOCALES as loc (loc)}
+								<option value={loc}>{LOCALE_LABELS[loc]}</option>
+							{/each}
+						</select>
+					</label>
+				</section>
+			{/if}
 
-		<section class="card">
-			<h2>{m('profile.password.heading')}</h2>
-			<p class="hint">{m('profile.password.hint')}</p>
-			<form
-				onsubmit={(e) => {
-					e.preventDefault();
-					changePassword();
-				}}
-			>
-				<label>
-					<span>{m('profile.password.current')}</span>
-					<input
-						type="password"
-						bind:value={currentPassword}
-						required
-						autocomplete="current-password"
-					/>
-				</label>
-				<label>
-					<span>{m('profile.password.new')}</span>
-					<input
-						type="password"
-						bind:value={newPassword}
-						required
-						minlength="6"
-						autocomplete="new-password"
-					/>
-				</label>
-				<label>
-					<span>{m('profile.password.confirm')}</span>
-					<input
-						type="password"
-						bind:value={confirmPassword}
-						required
-						minlength="6"
-						autocomplete="new-password"
-					/>
-				</label>
-				<div class="actions">
-					<button
-						type="submit"
-						disabled={savingPassword || !currentPassword || !newPassword || newPassword !== confirmPassword}
-					>
-						{savingPassword ? m('common.saving') : m('profile.password.submit')}
-					</button>
-				</div>
-			</form>
-		</section>
-
-		<section class="card">
-			<h2>{m('profile.mfa.heading')}</h2>
-			<p class="hint">{m('profile.mfa.hint')}</p>
-
-			{#if auth.user?.mfa_enabled}
-				<div class="status enabled">
-					<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
-					{m('profile.mfa.enabled')}
-				</div>
-				{#if auth.user?.mfa_required_by_org}
-					<p class="hint">{m('profile.mfa.requiredNoDisable')}</p>
-				{:else}
+			{#if section === 'account'}
+				<section class="card">
+					<h2>{m('profile.account.heading')}</h2>
 					<form
 						onsubmit={(e) => {
 							e.preventDefault();
-							disable();
-						}}
-					>
-						{#if !passwordIsProof}
-							<p class="hint">{m('profile.mfa.ssoOnlyNoPassword')}</p>
-						{/if}
-						{@render stepUpField(
-							disableProofKind,
-							m(passwordIsProof ? 'profile.mfa.disablePassword' : 'profile.mfa.disableCode'),
-							disableProof,
-							(v) => (disableProof = v),
-						)}
-						<div class="actions">
-							{#if hasPasskey}
-								<!-- The typed proof's alternative: a registered passkey,
-								     for an account with no password (or none the org
-								     accepts) that would rather not type a code. -->
-								<button
-									type="button"
-									class="secondary"
-									disabled={loading}
-									onclick={disableWithPasskey}
-								>
-									{m('profile.mfa.confirmWithPasskey')}
-								</button>
-							{/if}
-							<button
-								type="submit"
-								class="danger"
-								disabled={loading || !disableProofReady}
-							>
-								{loading ? m('profile.mfa.disabling') : m('profile.mfa.disable')}
-							</button>
-						</div>
-					</form>
-				{/if}
-			{:else if enrollment}
-				<div class="enroll">
-					<p>
-						<strong>{m('profile.mfa.step1Label')}</strong> {m('profile.mfa.step1Text')}
-					</p>
-					<img src={enrollment.qr_code_data_url} alt={m('profile.mfa.qrAlt')} class="qr" />
-					<details>
-						<summary>{m('profile.mfa.manualSecret')}</summary>
-						<code class="secret">{enrollment.secret}</code>
-					</details>
-					<form
-						onsubmit={(e) => {
-							e.preventDefault();
-							verifyEnroll();
+							saveProfile();
 						}}
 					>
 						<label>
-							<span><strong>{m('profile.mfa.step2Label')}</strong> {m('profile.mfa.step2Text')}</span>
-							<input
-								type="text"
-								inputmode="numeric"
-								pattern="[0-9]*"
-								bind:value={verifyCode}
-								maxlength="8"
-								autocomplete="one-time-code"
-								required
-							/>
+							<span>{m('profile.account.fullName')}</span>
+							<input type="text" bind:value={fullName} required autocomplete="name" />
 						</label>
+						<!-- Each term/definition pair is its own wrapping row (a <div> inside
+						     a <dl> is valid and keeps the dt→dd association intact). A
+						     two-column grid could not collapse at a 320px viewport: an
+						     address like `someone@a-long-tenant.example` is one unbreakable
+						     token, so the value column's min-content pushed the whole
+						     document sideways — WCAG 1.4.10. -->
+						<dl class="readonly">
+							<div class="pair">
+								<dt>{m('profile.account.email')}</dt>
+								<dd>{auth.user?.email ?? '—'}</dd>
+							</div>
+							<div class="pair">
+								<dt>{m('profile.account.roles')}</dt>
+								<dd data-testid="profile-roles">{roleLabels(auth.user?.roles) || '—'}</dd>
+							</div>
+						</dl>
 						<div class="actions">
-							<button type="button" class="secondary" onclick={cancelEnroll}>{m('common.cancel')}</button>
-							<button type="submit" disabled={loading || verifyCode.length < 6}>
-								{loading ? m('profile.mfa.verifying') : m('profile.mfa.verifyAndEnable')}
+							<button
+								type="submit"
+								disabled={savingProfile || !fullName.trim() || fullName === auth.user?.full_name}
+							>
+								{savingProfile ? m('common.saving') : m('common.save')}
 							</button>
 						</div>
 					</form>
-				</div>
-			{:else}
-				<div class="status disabled">{m('profile.mfa.notConfigured')}</div>
-				{#if auth.user?.mfa_required_by_org}
-					<p class="warn">{m('profile.mfa.requiredEnroll')}</p>
-				{/if}
-				<button onclick={startEnroll} disabled={loading}>
-					{loading ? m('common.loading') : m('profile.mfa.setUp')}
-				</button>
+				</section>
 			{/if}
-		</section>
 
-		<section class="card">
-			<h2>{m('profile.passkeys.heading')}</h2>
-			<p class="hint">{m('profile.passkeys.hint')}</p>
+			{#if section === 'password'}
+				<section class="card">
+					<h2>{m('profile.password.heading')}</h2>
+					<p class="hint">{m('profile.password.hint')}</p>
+					<form
+						onsubmit={(e) => {
+							e.preventDefault();
+							changePassword();
+						}}
+					>
+						<label>
+							<span>{m('profile.password.current')}</span>
+							<input
+								type="password"
+								bind:value={currentPassword}
+								required
+								autocomplete="current-password"
+							/>
+						</label>
+						<label>
+							<span>{m('profile.password.new')}</span>
+							<input
+								type="password"
+								bind:value={newPassword}
+								required
+								minlength="6"
+								autocomplete="new-password"
+							/>
+						</label>
+						<label>
+							<span>{m('profile.password.confirm')}</span>
+							<input
+								type="password"
+								bind:value={confirmPassword}
+								required
+								minlength="6"
+								autocomplete="new-password"
+							/>
+						</label>
+						<div class="actions">
+							<button
+								type="submit"
+								disabled={savingPassword || !currentPassword || !newPassword || newPassword !== confirmPassword}
+							>
+								{savingPassword ? m('common.saving') : m('profile.password.submit')}
+							</button>
+						</div>
+					</form>
+				</section>
+			{/if}
 
-			{#if !webAuthnOk}
-				<div class="status disabled">{m('profile.passkeys.unsupported')}</div>
-			{:else}
-				{#if needsPasskeyStepUp}
-					<!-- One field for both operations: the backend requires a step-up
-					     to add a factor to an account that already has one, and always
-					     requires one to remove a passkey. Which proof it asks for is
-					     `passkeyTypedProof` (docs/decisions.md §201). -->
-					{#if !passwordIsProof}
-						<p class="hint">{m('profile.mfa.ssoOnlyNoPassword')}</p>
-					{/if}
-					{#if passkeyTypedProof}
-						{@render stepUpField(
-							passkeyTypedProof,
-							m(
-								passkeyTypedProof === 'code'
-									? 'profile.passkeys.stepUpCode'
-									: 'profile.passkeys.stepUpPassword',
-							),
-							passkeyProof,
-							(v) => (passkeyProof = v),
-						)}
-						{#if hasPasskey}
-							<p class="hint">
-								{m(
-									passkeyTypedProof === 'code'
-										? 'profile.passkeys.stepUpCodeBlankHint'
-										: 'profile.passkeys.stepUpBlankHint',
+			{#if section === 'mfa'}
+				<section class="card">
+					<h2>{m('profile.mfa.heading')}</h2>
+					<p class="hint">{m('profile.mfa.hint')}</p>
+
+					{#if auth.user?.mfa_enabled}
+						<div class="status enabled">
+							<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
+							{m('profile.mfa.enabled')}
+						</div>
+						{#if auth.user?.mfa_required_by_org}
+							<p class="hint">{m('profile.mfa.requiredNoDisable')}</p>
+						{:else}
+							<form
+								onsubmit={(e) => {
+									e.preventDefault();
+									disable();
+								}}
+							>
+								{#if !passwordIsProof}
+									<p class="hint">{m('profile.mfa.ssoOnlyNoPassword')}</p>
+								{/if}
+								{@render stepUpField(
+									disableProofKind,
+									m(passwordIsProof ? 'profile.mfa.disablePassword' : 'profile.mfa.disableCode'),
+									disableProof,
+									(v) => (disableProof = v),
 								)}
-							</p>
-						{/if}
-					{:else}
-						<p class="hint">{m('profile.passkeys.stepUpPasskeyOnly')}</p>
-					{/if}
-				{/if}
-
-				{#if passkeys && passkeys.length > 0}
-					<ul class="entry-list">
-						{#each passkeys as pk (pk.id)}
-							<li>
-								<div class="entry-meta">
-									<span class="entry-name">{pk.name}</span>
-									{#if pk.last_used_at}
-										<span class="entry-sub">
-											{m('profile.passkeys.lastUsed', {
-												date: formatDate(pk.last_used_at, '—', {
-													year: 'numeric',
-													month: 'numeric',
-													day: 'numeric'
-												})
-											})}
-										</span>
-									{:else}
-										<span class="entry-sub">{m('profile.passkeys.neverUsed')}</span>
+								<div class="actions">
+									{#if hasPasskey}
+										<!-- The typed proof's alternative: a registered passkey,
+										     for an account with no password (or none the org
+										     accepts) that would rather not type a code. -->
+										<button
+											type="button"
+											class="secondary"
+											disabled={loading}
+											onclick={disableWithPasskey}
+										>
+											{m('profile.mfa.confirmWithPasskey')}
+										</button>
 									{/if}
+									<button
+										type="submit"
+										class="danger"
+										disabled={loading || !disableProofReady}
+									>
+										{loading ? m('profile.mfa.disabling') : m('profile.mfa.disable')}
+									</button>
 								</div>
-								<button
-									type="button"
-									class="danger small"
-									disabled={!canStepUp}
-									onclick={() => removePasskey(pk.id)}
-								>
-									{m('profile.passkeys.remove')}
-								</button>
-							</li>
-						{/each}
-					</ul>
-				{:else if passkeysError}
-					<p class="warn">{m('profile.passkeys.loadFailed')}</p>
-					<div class="actions">
-						<button
-							type="button"
-							class="secondary"
-							disabled={passkeysBusy}
-							onclick={retryPasskeys}
-						>
-							{passkeysBusy ? m('common.retrying') : m('common.tryAgain')}
+							</form>
+						{/if}
+					{:else if enrollment}
+						<div class="enroll">
+							<p>
+								<strong>{m('profile.mfa.step1Label')}</strong> {m('profile.mfa.step1Text')}
+							</p>
+							<img src={enrollment.qr_code_data_url} alt={m('profile.mfa.qrAlt')} class="qr" />
+							<details>
+								<summary>{m('profile.mfa.manualSecret')}</summary>
+								<code class="secret">{enrollment.secret}</code>
+							</details>
+							<form
+								onsubmit={(e) => {
+									e.preventDefault();
+									verifyEnroll();
+								}}
+							>
+								<label>
+									<span><strong>{m('profile.mfa.step2Label')}</strong> {m('profile.mfa.step2Text')}</span>
+									<input
+										type="text"
+										inputmode="numeric"
+										pattern="[0-9]*"
+										bind:value={verifyCode}
+										maxlength="8"
+										autocomplete="one-time-code"
+										required
+									/>
+								</label>
+								<div class="actions">
+									<button type="button" class="secondary" onclick={cancelEnroll}>{m('common.cancel')}</button>
+									<button type="submit" disabled={loading || verifyCode.length < 6}>
+										{loading ? m('profile.mfa.verifying') : m('profile.mfa.verifyAndEnable')}
+									</button>
+								</div>
+							</form>
+						</div>
+					{:else}
+						<div class="status disabled">{m('profile.mfa.notConfigured')}</div>
+						{#if auth.user?.mfa_required_by_org}
+							<p class="warn">{m('profile.mfa.requiredEnroll')}</p>
+						{/if}
+						<button onclick={startEnroll} disabled={loading}>
+							{loading ? m('common.loading') : m('profile.mfa.setUp')}
 						</button>
-					</div>
-				{:else if passkeysLoaded}
-					<div class="status disabled">{m('profile.passkeys.none')}</div>
-				{/if}
-
-				<form
-					onsubmit={(e) => {
-						e.preventDefault();
-						addPasskey();
-					}}
-				>
-					<label>
-						<span>{m('profile.passkeys.nameLabel')}</span>
-						<input
-							type="text"
-							bind:value={passkeyName}
-							maxlength="120"
-							placeholder={m('profile.passkeys.namePlaceholder')}
-						/>
-					</label>
-					<div class="actions">
-						<button
-							type="submit"
-							disabled={registeringPasskey || !canStepUp}
-						>
-							{registeringPasskey ? m('profile.passkeys.waiting') : m('profile.passkeys.add')}
-						</button>
-					</div>
-				</form>
+					{/if}
+				</section>
 			{/if}
-		</section>
 
-		<section class="card">
-			<h2>{m('profile.sessions.heading')}</h2>
-			<p class="hint">{m('profile.sessions.hint')}</p>
+			{#if section === 'passkeys'}
+				<section class="card">
+					<h2>{m('profile.passkeys.heading')}</h2>
+					<p class="hint">{m('profile.passkeys.hint')}</p>
 
-			{#if !sessionsLoaded}
-				<p class="hint">{m('common.loading')}</p>
-			{:else if sessionsError}
-				<p class="warn">{m('profile.sessions.loadFailed')}</p>
-				<div class="actions">
-					<button type="button" class="secondary" disabled={sessionBusy} onclick={retrySessions}>
-						{sessionBusy ? m('common.retrying') : m('common.tryAgain')}
-					</button>
-				</div>
-			{:else if sessions && sessions.length > 0}
-				<ul class="entry-list">
-					{#each sessions as s (s.id)}
-						<li>
-							<div class="entry-meta">
-								<span class="entry-name">
-									{sessionLabel(s)}
-									{#if s.current}<span class="badge">{m('profile.sessions.thisDevice')}</span>{/if}
-								</span>
-								<span class="entry-sub">{sessionDetail(s)}</span>
-							</div>
-							{#if !s.current}
+					{#if !webAuthnOk}
+						<div class="status disabled">{m('profile.passkeys.unsupported')}</div>
+					{:else}
+						{#if needsPasskeyStepUp}
+							<!-- One field for both operations: the backend requires a step-up
+							     to add a factor to an account that already has one, and always
+							     requires one to remove a passkey. Which proof it asks for is
+							     `passkeyTypedProof` (docs/decisions.md §201). -->
+							{#if !passwordIsProof}
+								<p class="hint">{m('profile.mfa.ssoOnlyNoPassword')}</p>
+							{/if}
+							{#if passkeyTypedProof}
+								{@render stepUpField(
+									passkeyTypedProof,
+									m(
+										passkeyTypedProof === 'code'
+											? 'profile.passkeys.stepUpCode'
+											: 'profile.passkeys.stepUpPassword',
+									),
+									passkeyProof,
+									(v) => (passkeyProof = v),
+								)}
+								{#if hasPasskey}
+									<p class="hint">
+										{m(
+											passkeyTypedProof === 'code'
+												? 'profile.passkeys.stepUpCodeBlankHint'
+												: 'profile.passkeys.stepUpBlankHint',
+										)}
+									</p>
+								{/if}
+							{:else}
+								<p class="hint">{m('profile.passkeys.stepUpPasskeyOnly')}</p>
+							{/if}
+						{/if}
+
+						{#if passkeys && passkeys.length > 0}
+							<ul class="entry-list">
+								{#each passkeys as pk (pk.id)}
+									<li>
+										<div class="entry-meta">
+											<span class="entry-name">{pk.name}</span>
+											{#if pk.last_used_at}
+												<span class="entry-sub">
+													{m('profile.passkeys.lastUsed', {
+														date: formatDate(pk.last_used_at, '—', {
+															year: 'numeric',
+															month: 'numeric',
+															day: 'numeric'
+														})
+													})}
+												</span>
+											{:else}
+												<span class="entry-sub">{m('profile.passkeys.neverUsed')}</span>
+											{/if}
+										</div>
+										<button
+											type="button"
+											class="danger small"
+											disabled={!canStepUp}
+											onclick={() => removePasskey(pk.id)}
+										>
+											{m('profile.passkeys.remove')}
+										</button>
+									</li>
+								{/each}
+							</ul>
+						{:else if passkeysError}
+							<p class="warn">{m('profile.passkeys.loadFailed')}</p>
+							<div class="actions">
 								<button
 									type="button"
-									class="danger small"
+									class="secondary"
+									disabled={passkeysBusy}
+									onclick={retryPasskeys}
+								>
+									{passkeysBusy ? m('common.retrying') : m('common.tryAgain')}
+								</button>
+							</div>
+						{:else if passkeysLoaded}
+							<div class="status disabled">{m('profile.passkeys.none')}</div>
+						{/if}
+
+						<form
+							onsubmit={(e) => {
+								e.preventDefault();
+								addPasskey();
+							}}
+						>
+							<label>
+								<span>{m('profile.passkeys.nameLabel')}</span>
+								<input
+									type="text"
+									bind:value={passkeyName}
+									maxlength="120"
+									placeholder={m('profile.passkeys.namePlaceholder')}
+								/>
+							</label>
+							<div class="actions">
+								<button
+									type="submit"
+									disabled={registeringPasskey || !canStepUp}
+								>
+									{registeringPasskey ? m('profile.passkeys.waiting') : m('profile.passkeys.add')}
+								</button>
+							</div>
+						</form>
+					{/if}
+				</section>
+			{/if}
+
+			{#if section === 'sessions'}
+				<section class="card">
+					<h2>{m('profile.sessions.heading')}</h2>
+					<p class="hint">{m('profile.sessions.hint')}</p>
+
+					{#if !sessionsLoaded}
+						<p class="hint">{m('common.loading')}</p>
+					{:else if sessionsError}
+						<p class="warn">{m('profile.sessions.loadFailed')}</p>
+						<div class="actions">
+							<button type="button" class="secondary" disabled={sessionBusy} onclick={retrySessions}>
+								{sessionBusy ? m('common.retrying') : m('common.tryAgain')}
+							</button>
+						</div>
+					{:else if sessions && sessions.length > 0}
+						<ul class="entry-list">
+							{#each sessions as s (s.id)}
+								<li>
+									<div class="entry-meta">
+										<span class="entry-name">
+											{sessionLabel(s)}
+											{#if s.current}<span class="badge">{m('profile.sessions.thisDevice')}</span>{/if}
+										</span>
+										<span class="entry-sub">{sessionDetail(s)}</span>
+									</div>
+									{#if !s.current}
+										<button
+											type="button"
+											class="danger small"
+											disabled={sessionBusy}
+											onclick={() => {
+												if (armedSessionId === s.id) {
+													revokeSession(s.id);
+												} else {
+													armedSessionId = s.id;
+												}
+											}}
+										>
+											{armedSessionId === s.id
+												? m('profile.sessions.confirmSignOut')
+												: m('profile.sessions.signOut')}
+										</button>
+									{/if}
+								</li>
+							{/each}
+						</ul>
+
+						{#if otherSessionCount > 0}
+							<div class="actions">
+								<button
+									type="button"
+									class="danger"
 									disabled={sessionBusy}
 									onclick={() => {
-										if (armedSessionId === s.id) {
-											revokeSession(s.id);
+										if (armedRevokeOthers) {
+											revokeOtherSessions();
 										} else {
-											armedSessionId = s.id;
+											armedRevokeOthers = true;
 										}
 									}}
 								>
-									{armedSessionId === s.id
-										? m('profile.sessions.confirmSignOut')
-										: m('profile.sessions.signOut')}
+									{armedRevokeOthers
+										? m('profile.sessions.confirmSignOutOthers', { n: otherSessionCount })
+										: m('profile.sessions.signOutOthers')}
 								</button>
-							{/if}
-						</li>
-					{/each}
-				</ul>
-
-				{#if otherSessionCount > 0}
-					<div class="actions">
-						<button
-							type="button"
-							class="danger"
-							disabled={sessionBusy}
-							onclick={() => {
-								if (armedRevokeOthers) {
-									revokeOtherSessions();
-								} else {
-									armedRevokeOthers = true;
-								}
-							}}
-						>
-							{armedRevokeOthers
-								? m('profile.sessions.confirmSignOutOthers', { n: otherSessionCount })
-								: m('profile.sessions.signOutOthers')}
-						</button>
-					</div>
-				{/if}
-			{:else}
-				<div class="status disabled">{m('profile.sessions.none')}</div>
+							</div>
+						{/if}
+					{:else}
+						<div class="status disabled">{m('profile.sessions.none')}</div>
+					{/if}
+				</section>
 			{/if}
-		</section>
 
-		<section class="card">
-			<h2>{m('profile.notifications.heading')}</h2>
-			<p class="hint">
-				{m('profile.notifications.hint', {
-					email: auth.user?.email ?? m('profile.notifications.yourAddress')
-				})}
-			</p>
+			{#if section === 'notifications'}
+				<section class="card">
+					<h2>{m('profile.notifications.heading')}</h2>
+					<p class="hint">
+						{m('profile.notifications.hint', {
+							email: auth.user?.email ?? m('profile.notifications.yourAddress')
+						})}
+					</p>
 
-			{#if !prefsLoaded}
-				<p class="hint">{m('common.loading')}</p>
-			{:else if notificationStore.prefs}
-				{@const prefs = normalizePrefs(notificationStore.prefs)}
-				<table class="prefs-table">
-					<thead>
-						<tr>
-							<th>{m('profile.notifications.colEvent')}</th>
-							<th class="center">{m('profile.notifications.colInApp')}</th>
-							<th class="center">{m('profile.notifications.colEmail')}</th>
-						</tr>
-					</thead>
-					<tbody>
-						{#each EVENT_ORDER as event (event)}
-							{@const label = m(EVENT_LABEL_KEYS[event])}
-							<tr>
-								<td>{label}</td>
-								<td class="center">
-									<input
-										type="checkbox"
-										checked={prefs[event].in_app}
-										disabled={savingPrefs}
-										onchange={() => togglePref(event, 'in_app')}
-										aria-label={m('profile.notifications.inAppFor', { event: label })}
-									/>
-								</td>
-								<td class="center">
-									<input
-										type="checkbox"
-										checked={prefs[event].email}
-										disabled={savingPrefs}
-										onchange={() => togglePref(event, 'email')}
-										aria-label={m('profile.notifications.emailFor', { event: label })}
-									/>
-								</td>
-							</tr>
-						{/each}
-					</tbody>
-				</table>
-			{:else}
-				<p class="warn">{m('profile.notifications.loadFailed')}</p>
+					{#if !prefsLoaded}
+						<p class="hint">{m('common.loading')}</p>
+					{:else if notificationStore.prefs}
+						{@const prefs = normalizePrefs(notificationStore.prefs)}
+						<table class="prefs-table">
+							<thead>
+								<tr>
+									<th>{m('profile.notifications.colEvent')}</th>
+									<th class="center">{m('profile.notifications.colInApp')}</th>
+									<th class="center">{m('profile.notifications.colEmail')}</th>
+								</tr>
+							</thead>
+							<tbody>
+								{#each EVENT_ORDER as event (event)}
+									{@const label = m(EVENT_LABEL_KEYS[event])}
+									<tr>
+										<td>{label}</td>
+										<td class="center">
+											<input
+												type="checkbox"
+												checked={prefs[event].in_app}
+												disabled={savingPrefs}
+												onchange={() => togglePref(event, 'in_app')}
+												aria-label={m('profile.notifications.inAppFor', { event: label })}
+											/>
+										</td>
+										<td class="center">
+											<input
+												type="checkbox"
+												checked={prefs[event].email}
+												disabled={savingPrefs}
+												onchange={() => togglePref(event, 'email')}
+												aria-label={m('profile.notifications.emailFor', { event: label })}
+											/>
+										</td>
+									</tr>
+								{/each}
+							</tbody>
+						</table>
+					{:else}
+						<p class="warn">{m('profile.notifications.loadFailed')}</p>
+					{/if}
+				</section>
 			{/if}
-		</section>
+		</div>
 	</div>
 </div>
 
@@ -968,6 +1045,36 @@
 		flex-direction: column;
 		gap: 16px;
 		min-height: 100vh;
+	}
+
+	/* Rail beside panel — the same shape `/organization` uses, and the same
+	   reason for `minmax(0, 1fr)`: a grid item's default `min-width: auto` is
+	   its content width, so the widest panel (the notification-preference grid)
+	   would push the track past the viewport and scroll the document sideways
+	   (WCAG 1.4.10). One column below the breakpoint, where the rail collapses
+	   into its own disclosure and sits above the panel. */
+	.settings-layout {
+		display: grid;
+		/* Explicit, and `minmax(0, …)` in the ONE-column case too, not just in
+		   the two-column rule below. An implicit grid column is auto-sized and a
+		   grid item's default `min-width: auto` is its CONTENT width, so the
+		   widest panel pushed the document 43px past a 320px viewport — a real
+		   WCAG 1.4.10 failure, caught by `tests-e2e/a11y/reflow.spec.ts`.
+		   `/organization` only escaped it because its `.sections` fieldset
+		   already carried `min-width: 0` for an unrelated reason, which is
+		   exactly the kind of accident not to rely on. */
+		grid-template-columns: minmax(0, 1fr);
+		gap: 20px;
+	}
+
+	@media (min-width: 60rem) {
+		.settings-layout {
+			grid-template-columns: 200px minmax(0, 1fr);
+			gap: 28px;
+			/* Not `stretch`: the rail is sticky, and a stretched grid item fills
+			   the row, leaving it nothing to stick within. */
+			align-items: start;
+		}
 	}
 
 	.toolbar {

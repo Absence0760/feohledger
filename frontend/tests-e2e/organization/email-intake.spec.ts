@@ -25,6 +25,10 @@ import { API_BASE, authedTenantHeaders, expect, signInAndWait, test } from '../f
  *     the contract this spec exists to hold.
  *
  * The non-admin case is real end to end — it is about the page's own gate.
+ *
+ * `?section=email-intake` because the route shows one panel at a time now (the
+ * slug is part of its URL contract), and this panel's read only fires once it
+ * is shown. The `page.reload()` below keeps the query string.
  */
 
 const CONFIGURED = 'invoices+a1b2c3d4@ap.example.test';
@@ -69,7 +73,7 @@ test.describe('/organization email intake', () => {
 		// endpoint so `enabled` is true, then reload. `enabled: true` with a null
 		// address can only mean the platform has no intake domain — which is the
 		// committed dev default, so this is the honest local state, not a stub.
-		await page.goto('/organization');
+		await page.goto('/organization?section=email-intake');
 		const minted = await page.request.post(
 			`${API_BASE}/api/organization/email-intake/rotate-token`,
 			{ headers: await authedTenantHeaders(page) }
@@ -95,7 +99,7 @@ test.describe('/organization email intake', () => {
 
 	test('an admin sees the intake address with a copy control', async ({ page }) => {
 		await mockIntake(page, { address: CONFIGURED, enabled: true });
-		await page.goto('/organization');
+		await page.goto('/organization?section=email-intake');
 
 		const card = panel(page);
 		await expect(card.getByTestId('email-intake-address')).toHaveText(CONFIGURED);
@@ -106,7 +110,7 @@ test.describe('/organization email intake', () => {
 
 	test('rotate needs the armed second click and yields a different address', async ({ page }) => {
 		await mockIntake(page, { address: CONFIGURED, enabled: true });
-		await page.goto('/organization');
+		await page.goto('/organization?section=email-intake');
 
 		const card = panel(page);
 		const rotate = card.getByRole('button', { name: 'Rotate the email intake address' });
@@ -146,7 +150,7 @@ test.describe('/organization email intake', () => {
 
 	test('an unprovisioned tenant is offered create, never rotate', async ({ page }) => {
 		await mockIntake(page, { address: null, enabled: false });
-		await page.goto('/organization');
+		await page.goto('/organization?section=email-intake');
 
 		const card = panel(page);
 		await expect(card.getByTestId('email-intake-unprovisioned')).toBeVisible();
@@ -163,7 +167,7 @@ test.describe('/organization email intake', () => {
 		tenantClerk
 	}) => {
 		await signInAndWait(page, tenantClerk);
-		await page.goto('/organization');
+		await page.goto('/organization?section=email-intake');
 
 		await expect(page.getByTestId('org-readonly-banner')).toBeVisible();
 
@@ -174,10 +178,20 @@ test.describe('/organization email intake', () => {
 		// (`toBeDisabled` is asserted on the controls, not the fieldset:
 		// Playwright's disabled check doesn't count a <fieldset> itself, even
 		// though it does honour a disabled fieldset ancestor.)
+		//
+		// The two spot-checks each need their own panel visit now that the route
+		// shows one at a time — which makes the point more sharply than before,
+		// since the fieldset has to still be disabled on arrival at a panel that
+		// was never on screen when the role resolved.
 		await expect(page.locator('fieldset.sections')).toHaveAttribute('disabled', '');
+
+		await page.goto('/organization?section=company');
 		await expect(page.getByLabel('Company Name')).toBeDisabled();
+
+		await page.goto('/organization?section=custom-domains');
 		await expect(page.getByLabel('New custom domain')).toBeDisabled();
 
+		await page.goto('/organization?section=email-intake');
 		const card = panel(page);
 		// GET is admin-only; the panel says so instead of rendering a 403 as a
 		// load failure the reader cannot act on.

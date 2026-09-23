@@ -311,7 +311,10 @@ test.describe('accessibility — target size on the branding colour field (WCAG 
 	test('the swatch keeps its own width and the hex field clears the 24px floor', async ({
 		page
 	}) => {
-		await page.goto('/organization');
+		// The Branding panel by name: the page shows one section at a time now
+		// (`docs/decisions.md` §205), so a bare `/organization` renders the
+		// Getting-started lead-in and this locator would find nothing.
+		await page.goto('/organization?section=branding');
 
 		const field = page.locator('#org-branding .color-field').first();
 		await expect(field).toBeVisible();

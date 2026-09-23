@@ -60,12 +60,18 @@ async function clearFraudOverrides(page: import('@playwright/test').Page): Promi
  * (`services/invoice_warnings.refresh_warnings`); these specs assert the
  * UI reads/writes the right shape so a stale UI can't drift away from
  * `DEFAULT_FRAUD_RULES`.
+ *
+ * `?section=fraud` because the route shows one panel at a time now (the slug
+ * is part of its URL contract) — and this panel is the one that has to be
+ * asked for by name: `GET /api/organization/fraud-rules/defaults` only fires
+ * once the panel is shown, and the card does not render at all until it
+ * answers.
  */
 
 test.describe('/organization — fraud rules', () => {
 	test.beforeEach(async ({ page }) => {
 		await clearFraudOverrides(page);
-		await page.goto('/organization');
+		await page.goto('/organization?section=fraud');
 	});
 
 	test.afterAll(async ({ browser }) => {

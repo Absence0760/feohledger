@@ -239,7 +239,7 @@ test.describe('/login/mfa — challenge UI (sessionStorage-seeded)', () => {
 
 test.describe('/profile — two-factor section', () => {
 	test.beforeEach(async ({ page }) => {
-		await page.goto('/profile');
+		await page.goto('/profile?section=mfa');
 	});
 
 	test('renders the Two-factor authentication card', async ({ page }) => {
@@ -292,7 +292,7 @@ test.describe('/profile — real TOTP enrollment (MFA-enabled backend)', () => {
 	});
 
 	test('enrolls TOTP end to end (QR → verify → Enabled)', async ({ page }) => {
-		await page.goto('/profile');
+		await page.goto('/profile?section=mfa');
 
 		// Start enrollment → backend mints the secret + QR. Capture the secret
 		// from the enroll response so we can compute a matching TOTP code.

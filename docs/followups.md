@@ -63,7 +63,7 @@ section carried its own `decisions.md` § reference, so nothing was lost by
 deleting it; that cross-reference is what makes the pruning safe, and writing
 one is what earns a future entry the right to be deleted.
 
-**55 open: 40 (c) · 9 (a) · 6 (b)** — re-derived from the file, never carried
+**58 open: 43 (c) · 9 (a) · 6 (b)** — re-derived from the file, never carried
 forward. The section heading is authoritative; where an entry also carries a
 `(c)`/`(a)`/`(b)` marker, the two agree.
 `grep -c '^- \[ \]' docs/followups.md`.
@@ -1043,6 +1043,70 @@ or is a sibling of a fix that needs its own pass.
       presentation only and must not gate or reorder any figure below it.
       **Trigger:** the next `/polish-ui` pass on the dashboard, or any change that
       already touches `frontend/src/routes/+page.svelte`'s header.
+
+### Surfaced by panelising the settings pages (2026-09-22, decisions §205)
+
+- [ ] **(c) `/organization` is still one 3,400-line file, now with fifteen
+      `{#if}` blocks in it.** The section rail fixed the *navigation* problem
+      (`docs/decisions.md` §205) without touching the *organisation* one: the
+      panels are conditionals around markup that still shares one `<script>`
+      with 119 `$state` declarations, so guard rail 10 is no better served than
+      before. Extracting them was deliberately not bundled into the navigation
+      change, because the two have very different risk: the wrapping is
+      mechanical and reviewable with `git diff -w`, while the extraction has to
+      thread dozens of bindings and would have buried the behaviour change.
+      **Durable fix:** one component per panel under
+      `frontend/src/lib/components/organization/`, which almost certainly means
+      first grouping the loose `$state` vars into per-panel objects (`company`,
+      `erp`, `cards`, …) so a panel takes one or two props instead of fifteen.
+      Two constraints are load-bearing and must survive it: the single
+      `<fieldset disabled={readOnly}>` has to keep wrapping every panel — its
+      comment explains that it is the *whole* read-only mode, so a panel outside
+      it is silently editable — and field state has to stay above the panel
+      boundary, or an unsaved edit stops surviving a panel switch.
+      `tests-e2e/organization/section-nav.spec.ts` asserts the second one, so
+      the refactor has a guard already waiting for it.
+      **Trigger:** the next change that touches more than one panel of
+      `frontend/src/routes/organization/+page.svelte`.
+
+- [ ] **(c) `/profile` hand-rolls the page shell that `PageHeader` owns.** It
+      opens with its own `<div class="workspace"><header class="toolbar">` and
+      carries its own copy of the `.workspace` CSS, which
+      `frontend/docs/ui-patterns.md` § Page layout explicitly says not to do any
+      more ("Don't hand-roll … `PageHeader` … the shell still produces this
+      layout"). It predates the component. Noticed while adding the section rail
+      and left alone on purpose: swapping it in also means deleting the
+      duplicated `.workspace` / `.toolbar` rules, and that is an unrelated
+      refactor with its own spec risk to bundle into a navigation change.
+      **Durable fix:** wrap the body in `<PageHeader title={m('shell.profileAndSecurity')}>`
+      and delete the local `.workspace` + `.toolbar` blocks, checking the specs
+      that select `.workspace` on this route first.
+      **Trigger:** the next change to `frontend/src/routes/profile/+page.svelte`'s
+      header or page frame.
+
+- [ ] **(c) The consent banner can sit over the bottom of the legal contents
+      rail, so focus lands behind it (WCAG 2.4.11).** The six legal documents
+      now carry a sticky table-of-contents rail
+      (`frontend/src/lib/legal/LegalPage.svelte`, `docs/decisions.md` §205). At
+      short viewport heights the fixed, not-yet-dismissed `ConsentBanner`
+      overlays its last entry or two, so tabbing down the contents can move
+      focus to a link the reader cannot see. The banner already covers the
+      bottom of the document *text* on every page, which is pre-existing — but a
+      **focusable** control behind it is new, because the rail is new, and 2.4.11
+      Focus Not Obscured (Minimum) is a AA criterion this project targets.
+      Deliberately flagged rather than patched: the honest fix changes
+      `ConsentBanner`'s contract, and that component is the ePrivacy Art. 5(3)
+      consent gate with its own specs, which is not something to alter inside a
+      navigation change.
+      **Durable fix:** have `ConsentBanner` publish its presence and measured
+      height while mounted (a `data-consent-visible` attribute plus a
+      `--consent-banner-height` custom property on the root), and have the rail
+      subtract it from its `max-height` only while that is set — so the space is
+      reclaimed the moment the banner is dismissed, rather than reserved
+      permanently, which is why a fixed bottom gap was rejected.
+      **Trigger:** the next change to `ConsentBanner.svelte`, or the next
+      accessibility pass over `/legal` (`/a11y-hunt`, or the manual
+      screen-reader pass `docs/accessibility.md` still has open).
 
 ## (a) Blocked on external credentials, accounts, or hardware
 

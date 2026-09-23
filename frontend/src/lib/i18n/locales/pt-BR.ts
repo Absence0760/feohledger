@@ -117,6 +117,7 @@ export const messages = {
 	'consent.accept': 'Aceitar todos',
 
 	// Profile → Language picker
+	'profile.rail.label': 'Seção do perfil',
 	'profile.language.heading': 'Idioma',
 	'profile.language.hint':
 		'Escolha o idioma usado em todo o aplicativo. Sua escolha é salva neste dispositivo.',
@@ -1405,6 +1406,13 @@ export const messages = {
 	'org.gettingStarted.users': 'Usuários e funções',
 	'org.gettingStarted.approvals': 'Limites de aprovação',
 	'org.gettingStarted.branding': 'Identidade visual',
+	'org.rail.label': 'Seção de configurações',
+	'org.rail.group.company': 'Empresa',
+	'org.rail.group.integrations': 'Integrações',
+	'org.rail.group.money': 'Financeiro',
+	'org.rail.group.compliance': 'Confiança e conformidade',
+	'org.rail.group.account': 'Conta',
+	'org.rail.payments': 'Pagamentos',
 	'org.section.company': 'Perfil da empresa',
 	'org.section.companySaved': 'Perfil da empresa',
 	'org.company.name': 'Nome da empresa',
