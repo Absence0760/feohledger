@@ -76,6 +76,7 @@ pnpm check:icons              # its guard: masters match assets/logo-render/gen_
 pnpm gen:illustrations        # rewrite the empty-state illustration data module from assets/illustrations/gen_empty_states.py (check:illustrations is its CI guard; decisions §181)
 pnpm gen:marketing            # re-render the landing page's Blender tally ornament + grain overlay into frontend/static/marketing/ (docs/decisions.md §180)
 pnpm test:icons               # proves check:icons fails on a deliberately broken copy of the icon set (same CI job)
+pnpm check:followups          # docs/followups.md's headline count must match the file — re-derive it as the LAST step of any change that adds or prunes an entry (CI's Frontend job)
 pnpm migrate:all              # alembic upgrade head + migrate_all_tenants.py
 
 # Frontend (from frontend/)

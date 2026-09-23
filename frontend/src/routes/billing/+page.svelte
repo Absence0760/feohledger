@@ -19,6 +19,16 @@
 	} from '$lib/api/billing';
 	import { formatMoney } from '$lib/utils/money';
 	import { m } from '$lib/i18n/store.svelte';
+	// The published-address registry, not a literal typed here. All three
+	// `mailto:`s below read `billing@example.com` — the IANA-reserved TLD, which
+	// can never deliver — so every "contact us" on this page was a dead button.
+	// That is the same defect the `sales` entry in `operator.ts` records for the
+	// pricing page's Enterprise call-to-action, and `Pricing.svelte` already
+	// sources its address this way. There is no `billing@` alias: routing to one
+	// would re-create the bug in a subtler form, since an unprovisioned address
+	// bounces exactly like a reserved one. Each button goes to whichever of the
+	// five live aliases matches what the button's own label promises.
+	import { CONTACT } from '$lib/legal/operator';
 	import type {
 		BillingInvoice,
 		BillingInvoiceStatus,
@@ -318,7 +328,8 @@
 			<div class="empty" data-testid="billing-empty">
 				<h2>{m('billing.empty.heading')}</h2>
 				<p>{m('billing.empty.body')}</p>
-				<a class="btn primary" href="mailto:billing@example.com"
+				<!-- Labelled "Contact sales": the org has no subscription yet. -->
+				<a class="btn primary" href="mailto:{CONTACT.sales}"
 					>{m('billing.empty.contactSales')}</a
 				>
 			</div>
@@ -379,7 +390,8 @@
 					>
 						{m('billing.plan.changePlan')}
 					</button>
-					<a class="link" href="mailto:billing@example.com">{m('billing.plan.changeContact')}</a>
+					<!-- "Need a plan change?" is a commercial ask, so it goes to sales. -->
+					<a class="link" href="mailto:{CONTACT.sales}">{m('billing.plan.changeContact')}</a>
 				</div>
 			</section>
 		{/if}
@@ -484,7 +496,9 @@
 						<p>{m('billing.card.starting')}</p>
 					{:else if cardSetup.state === 'not_configured'}
 						<p>{cardSetup.message}</p>
-						<a class="link" href="mailto:billing@example.com">{m('billing.card.contactUs')}</a>
+						<!-- The payment provider is not configured — an operational
+						     fault on our side, not a purchase question, so: support. -->
+						<a class="link" href="mailto:{CONTACT.support}">{m('billing.card.contactUs')}</a>
 					{:else if cardSetup.state === 'error'}
 						<p>{cardSetup.message}</p>
 						<button type="button" class="btn" onclick={startAddCard}>{m('billing.retry')}</button>

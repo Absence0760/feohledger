@@ -409,6 +409,21 @@ jobs:
           node --test scripts/check_subprocessor_registry.test.mjs
           node scripts/check_subprocessor_registry.mjs
 
+      # `docs/followups.md` opens with a count of its own open items. A number
+      # stored beside the list it describes has no way to notice when the list
+      # changes under it, and this one has drifted three times — the seven
+      # /polish-ui entries, #455's dashboard-greeting entry, and #467's three
+      # panelisation entries. The file's preamble documents the first two AND
+      # states the lesson; the third happened anyway, which is what turned this
+      # from a convention into a guard. Same job as the register check above,
+      # for the same reason: it is a doc check that belongs to no workspace and
+      # Node is already here. Its tests come first, as with its sibling.
+      - name: The followups headline count matches the file
+        working-directory: .
+        run: |
+          node --test scripts/check_followups_count.test.mjs
+          node scripts/check_followups_count.mjs
+
       - name: Typecheck
         env:
           PUBLIC_API_URL: http://localhost:8000
