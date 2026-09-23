@@ -485,6 +485,32 @@ async def test_every_reader_reports_exactly_the_predicate_login_enforces(org_set
 
 
 @pytest.mark.asyncio
+async def test_has_password_reflects_the_account_row_not_the_org_setting():
+    """`/auth/me`'s `has_password` is `User.hashed_password is not None` — set
+    by whether THIS account was ever given a local credential (never true for
+    one JIT-provisioned by OIDC/SAML or created by SCIM,
+    `identity_provisioning.py` / `api/scim.py`). It is independent of
+    `password_sign_in_closed`, which is a property of the ORG: an org that has
+    not closed password sign-in still has SSO-provisioned members with no hash
+    to change. docs/followups.md (c)."""
+    from app.api.auth import get_me
+
+    org = SimpleNamespace(id=uuid.uuid4(), settings={})  # not SSO-only
+
+    account = _account_with_totp("Correct-Horse-9")
+    account.organization_id = org.id
+
+    me = await get_me(user=account, db=_control_db(org))
+    assert me.has_password is True
+    assert me.password_sign_in_closed is False
+
+    account.hashed_password = None
+    me = await get_me(user=account, db=_control_db(org))
+    assert me.has_password is False
+    assert me.password_sign_in_closed is False
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("endpoint", ["enroll", "disable"])
 @pytest.mark.parametrize(
     "org_settings,expected",

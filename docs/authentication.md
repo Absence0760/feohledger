@@ -710,6 +710,36 @@ Consequences worth knowing:
 Reasoning: [decisions.md](decisions.md) §191, §201, §204. Tests: `backend/tests/test_sso_only.py`,
 `backend/tests/test_organization_settings_validation.py` (the write-time refusal).
 
+### An account can have no password at all — a separate bit from SSO-only
+
+`password_sign_in_closed` is a property of the ORG. Whether *this* account has
+a password to change is a property of the ACCOUNT: `User.hashed_password` is
+`None` for every member JIT-provisioned by OIDC/SAML (`identity_provisioning.py`)
+or created by SCIM (`api/scim.py`), in any org, SSO-only or not. `PATCH
+/api/auth/me` refuses such an account's "current password" with the same
+"Current password is incorrect" a wrong password gets, so the profile page's
+Change-password form used to be a control that account could never submit.
+
+`GET /api/auth/me` carries `has_password` (`User.hashed_password is not None`)
+alongside `password_sign_in_closed`. It describes only the caller's own
+account, so publishing it carries no enumeration concern. `/profile` reads it:
+
+- **`has_password` is `false`** — the form is replaced by a sentence saying the
+  account signs in with single sign-on and has no password. This holds
+  regardless of `password_sign_in_closed`.
+- **`has_password` is `true` and `password_sign_in_closed` is `true`** — the
+  form stays, with a note that the password is not currently used for sign-in.
+  Rotation stays available on purpose: it matters again the day the org leaves
+  SSO-only, and there is no reason to make that day harder.
+- **Otherwise** — unchanged: the ordinary form.
+
+Tests: `backend/tests/test_sso_only.py` (`has_password` is pinned true/false off
+the account row, independent of the org's SSO settings) and
+`backend/tests/test_api_contracts.py` (the field is part of the `/auth/me`
+contract, defaulting to `true` so a stale caller fails open rather than hiding
+the card for an ordinary member). `frontend/tests-e2e/auth/profile-no-password.spec.ts`
+pins the page, beside `profile-sso-only-step-up.spec.ts` for the org-level case.
+
 ## Frontend Implementation
 
 - Auth state is managed in `src/lib/stores/auth.svelte.ts` (Svelte 5 runes)
