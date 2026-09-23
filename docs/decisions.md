@@ -9147,3 +9147,100 @@ The reflow cost is real and is now covered: `Back to app` is a wider pill than
 `Sign in`, and both legal a11y specs measure 320px anonymously, so the widest
 state of this header had no WCAG 1.4.10 coverage at all. The signed-in e2e case
 asserts it.
+
+## 207. A bulk re-code decides "the chart is empty" per invoice entity, by the same rule as a manual write
+
+`gl_recode._ActiveChart` validated a vendor-prior GL code against the invoice's
+own effective chart (shared ∪ its entity) from the start, but its escape hatch —
+"no active accounts, so accept any candidate" — asked the question org-wide. In
+a tenant where subsidiary A has no chart of its own and no shared accounts while
+B has a chart, every candidate for an A invoice was validated against a chart A
+does not have and rejected as `skipped_invalid_code`, although `gl_chart`
+(§194, §199) and the extraction catalog both accept any code for A. Nothing
+wrong was written; the feature was just unusable for that subsidiary.
+
+`_ActiveChart.is_empty_for(entity_id)` now resolves emptiness over shared ∪ that
+entity's own accounts, through `gl_chart.chart_is_empty` — the predicate
+`chart_has_active_accounts` states for a single write. The bulk pass keeps its
+one org-wide load and answers per invoice from it, so the fix costs no query per
+invoice. Tests: `tests/test_entity_coa.py`, both directions of the mixed case.
+
+## 208. A backend test that hangs dies with every thread's stack, at a ceiling no real test approaches
+
+Before this, the only backstop for a wedged test was `timeout-minutes: 40` on the
+CI shard, which reaps the runner and leaves `Terminate orphan process` and no
+traceback — the reason one slow-runner episode (#444) took two days to rule out
+as a hang. `pytest-timeout` now sets `timeout = 600` per test, with
+`faulthandler_timeout = 540` so pytest's own stack dump finishes first.
+
+The ceiling is derived, not guessed: the slowest test in `.test_durations` is
+14.65s, recorded figures understate CI by ~2.2x, so ~32s is a realistic CI worst
+case and 600s is ~18x above it. It is a diagnostic, not a performance gate, and
+a ceiling tight enough to fire on a slow-but-honest test would turn into exactly
+the retry-and-inflate masking guard rail 4 forbids — so if it ever fires on a
+legitimate test, the answer is to find why that test is slow, not to raise it.
+
+`timeout_method = "thread"`, not `signal`: SIGALRM only lands at a bytecode
+boundary and cannot reach a C-level wait — a blocked asyncpg read, a wedged
+socket — which is what a real hang in this async suite looks like. The thread
+method dumps and hard-kills the whole process rather than failing one test and
+continuing; the shard was going to die anyway, and now it dies with a stack.
+
+## 209. The password card asks whether the account has a password, and keeps rotation open where the password is not used to sign in
+
+`/profile` rendered "Current password / New password" for every member, including
+every account JIT-provisioned by OIDC/SAML or created by SCIM, which has no
+`hashed_password` at all. `PATCH /api/auth/me` refused them with the same
+sentence a wrong password gets, so the card could only ever produce a 400.
+`password_sign_in_closed` (§201) could not answer this: it describes the org's
+SSO setting, not whether this account was ever issued a credential. So
+`/auth/me` carries `has_password` too. It describes only the caller's own
+account, so publishing it enumerates nothing; the schema default is `true`, so
+an older response keeps the old form rather than hiding it.
+
+Where it is false, the form is replaced by a sentence — the account signs in
+with single sign-on and has nothing to change — rather than a disabled control.
+Where it is true but the org has closed password sign-in, the product call was
+to **keep rotation available** with a note that the password is not currently
+used to sign in: it becomes load-bearing again the day the org leaves SSO-only,
+and hiding the card would make that day harder for nothing. Mobile deserializes
+none of these flags and ships no change-password screen (§201), so it is
+unchanged. Tests: `test_sso_only.py`, `test_api_contracts.py`,
+`tests-e2e/auth/profile-no-password.spec.ts`.
+
+## 210. A public SSO entry point reads an IdP block that will not resolve exactly as one that is absent
+
+`sso_authorize`, `sso_callback`, `saml_login`, the ACS and `saml_metadata`
+handled a `None` from `resolve_sso_config` / `resolve_saml_config` and nothing
+else, so an `{enabled: true}` block missing a required key raised
+`SSOConfigError` into a 500 and a logged traceback. Each module now has one
+`_resolve_*_or_none` helper that turns `SSOConfigError` into `None`, which is the
+posture the two `/config` endpoints and `is_sso_only` already took: the same
+status (400, or 404 for metadata), the same generic sentence, and never the
+offending keys — naming a tenant's missing IdP fields to an anonymous caller is
+exactly what the generic answer exists to avoid.
+
+No warning is logged. The route is only reachable by hand — §204 hides the SSO
+button for a block that does not resolve — and the admin who can fix the block
+already gets the precise refusal from `/config` and at save (§204). A
+per-request log on a public route would be noise an unauthenticated caller can
+generate at will. Tests: `test_sso_security.py`, `test_saml_security.py`.
+
+## 211. `GET /api/organization` serves the reporting currency it resolved, and the clients' three-rung resolution becomes the fallback
+
+`currency_conversion.resolve_reporting_currency` has four rungs, and the last is
+operator config (`FEOH_REPORTING_CURRENCY_DEFAULT`) no client can read, so the
+web `orgCurrency` store and mobile's `OrgCurrencyStore` answered `null` for an
+org configured only that way (§119, §160, §200) — honest, but the server had
+already denominated every rollup and every approval threshold in a known code.
+The response now carries `resolved_reporting_currency` as a top-level field,
+computed from the raw settings so a non-admin gets the same answer an admin
+does, and both stores read it first. Their three-rung resolution stays, as the
+fallback for a response that predates the field.
+
+**Rejected:** adding the operator default to the role-projected `settings`
+block. That would publish the operator knob to every role as if it were tenant
+configuration; a top-level *result* carries the answer without the input that
+produced it. Tests: `test_org_settings_view.py`,
+`reportingCurrency.test.ts`, `organization_test.dart`,
+`org_currency_store_test.dart`.
