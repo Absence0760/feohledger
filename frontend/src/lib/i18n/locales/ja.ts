@@ -151,6 +151,10 @@ export const messages = {
 	'profile.password.mismatch': 'パスワードが一致しません',
 	'profile.password.updated': 'パスワードを更新しました',
 	'profile.password.updateFailed': 'パスワードを更新できませんでした',
+	'profile.password.noPassword':
+		'このアカウントはシングルサインオン（SSO）でサインインするため、変更するパスワードがありません。',
+	'profile.password.notUsedForSignIn':
+		'組織は現在シングルサインオン（SSO）を必須にしているため、このパスワードはサインインに使用されません。それでも変更できます。組織がSSOの必須化をやめた場合に再び必要になります。',
 
 	'profile.mfa.heading': '二要素認証',
 	'profile.mfa.hint':

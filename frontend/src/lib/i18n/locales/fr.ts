@@ -150,6 +150,10 @@ export const messages = {
 	'profile.password.mismatch': 'Les mots de passe ne correspondent pas',
 	'profile.password.updated': 'Mot de passe mis à jour',
 	'profile.password.updateFailed': 'Impossible de mettre à jour le mot de passe',
+	'profile.password.noPassword':
+		"Ce compte se connecte par authentification unique (SSO) et n'a pas de mot de passe à modifier.",
+	'profile.password.notUsedForSignIn':
+		"Votre organisation exige actuellement l'authentification unique (SSO), donc ce mot de passe n'est pas utilisé pour se connecter. Vous pouvez tout de même le modifier. Il sera à nouveau utile si votre organisation cesse d'exiger le SSO.",
 
 	'profile.mfa.heading': 'Authentification à deux facteurs',
 	'profile.mfa.hint':

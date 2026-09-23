@@ -151,6 +151,10 @@ export const messages = {
 	'profile.password.mismatch': 'As senhas não coincidem',
 	'profile.password.updated': 'Senha atualizada',
 	'profile.password.updateFailed': 'Não foi possível atualizar a senha',
+	'profile.password.noPassword':
+		'Esta conta entra por login único (SSO) e não tem senha para alterar.',
+	'profile.password.notUsedForSignIn':
+		'Sua organização atualmente exige login único (SSO), portanto esta senha não é usada para entrar. Você ainda pode alterá-la. Ela voltará a valer se sua organização deixar de exigir SSO.',
 
 	'profile.mfa.heading': 'Autenticação em duas etapas',
 	'profile.mfa.hint':
