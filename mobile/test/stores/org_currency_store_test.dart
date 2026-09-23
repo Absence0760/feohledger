@@ -10,23 +10,29 @@ import 'package:feohledger_mobile/stores/org_currency_store.dart';
 
 /// The org response with only the keys `org_settings_view.NON_ADMIN_SETTINGS`
 /// projects to a non-admin, since that is what this store's consumers get.
-Map<String, dynamic> _orgJson(Map<String, dynamic> settings) => {
-      'id': 'org1',
-      'name': 'Acme Corp',
-      'slug': 'acme',
-      'plan': 'pro',
-      'created_at': '2026-01-01T00:00:00',
-      'settings': settings,
-    };
+/// `resolved` is omitted by default so the existing rung-chain tests below
+/// exercise the fallback path — the shape of a pre-upgrade backend response.
+Map<String, dynamic> _orgJson(
+  Map<String, dynamic> settings, {
+  String? resolved,
+}) => {
+  'id': 'org1',
+  'name': 'Acme Corp',
+  'slug': 'acme',
+  'plan': 'pro',
+  'created_at': '2026-01-01T00:00:00',
+  'settings': settings,
+  'resolved_reporting_currency': ?resolved,
+};
 
 http.Response _ok(Map<String, dynamic> body) => http.Response(
-      jsonEncode(body),
-      200,
-      headers: {'content-type': 'application/json'},
-    );
+  jsonEncode(body),
+  200,
+  headers: {'content-type': 'application/json'},
+);
 
-OrgSettings _settings(Map<String, dynamic> settings) =>
-    OrgSettings.fromJson(_orgJson(settings));
+OrgSettings _settings(Map<String, dynamic> settings, {String? resolved}) =>
+    OrgSettings.fromJson(_orgJson(settings, resolved: resolved));
 
 void main() {
   group('OrgSettings.resolvedReportingCurrency — the rung chain', () {
@@ -99,6 +105,50 @@ void main() {
     });
   });
 
+  group('OrgSettings.resolvedReportingCurrency — the server field wins', () {
+    // The follow-up this closes: the backend KNOWS the answer (all four
+    // rungs, including the operator default no client can read) and used to
+    // serve only the settings ingredients, forcing every client to re-derive
+    // an incomplete answer.
+    test('the server field wins over every client-visible rung', () {
+      final s = _settings({
+        'reporting_currency': 'GBP',
+        'payments': {'home_currency': 'EUR'},
+        'invoice_defaults': {'currency': 'USD'},
+      }, resolved: 'JPY');
+      expect(s.resolvedReportingCurrency, 'JPY');
+    });
+
+    test('normalises the server field the same way as the client rungs', () {
+      final s = _settings({}, resolved: ' chf ');
+      expect(s.resolvedReportingCurrency, 'CHF');
+    });
+
+    test('falls back to the client rungs when the server field is absent', () {
+      // A pre-upgrade or cached backend response.
+      final s = _settings({
+        'payments': {'home_currency': 'EUR'},
+      });
+      expect(s.serverResolvedReportingCurrency, isNull);
+      expect(s.resolvedReportingCurrency, 'EUR');
+    });
+
+    test(
+      'falls back to the client rungs when the server field is present but unusable',
+      () {
+        final s = _settings({
+          'invoice_defaults': {'currency': 'ZAR'},
+        }, resolved: '');
+        expect(s.resolvedReportingCurrency, 'ZAR');
+      },
+    );
+
+    test('null when the server field AND every client rung miss', () {
+      final s = _settings({}, resolved: null);
+      expect(s.resolvedReportingCurrency, isNull);
+    });
+  });
+
   group('OrgCurrencyStore', () {
     final store = OrgCurrencyStore.instance;
 
@@ -151,8 +201,11 @@ void main() {
       await store.ensureLoaded();
 
       expect(store.currency, isNull);
-      expect(store.loaded, isTrue,
-          reason: 'the question was answered — the answer is "none"');
+      expect(
+        store.loaded,
+        isTrue,
+        reason: 'the question was answered — the answer is "none"',
+      );
     });
 
     test('a failure keeps NULL, does not throw, and stays retryable', () async {
@@ -194,20 +247,22 @@ void main() {
       expect(notified, 1);
     });
 
-    test('reset drops the code so the next account cannot inherit it',
-        () async {
-      ApiClient().debugConfigure(
-        client: MockClient(
-          (req) async => _ok(_orgJson({'reporting_currency': 'GBP'})),
-        ),
-      );
-      await store.ensureLoaded();
-      expect(store.currency, 'GBP');
+    test(
+      'reset drops the code so the next account cannot inherit it',
+      () async {
+        ApiClient().debugConfigure(
+          client: MockClient(
+            (req) async => _ok(_orgJson({'reporting_currency': 'GBP'})),
+          ),
+        );
+        await store.ensureLoaded();
+        expect(store.currency, 'GBP');
 
-      store.reset();
+        store.reset();
 
-      expect(store.currency, isNull);
-      expect(store.loaded, isFalse);
-    });
+        expect(store.currency, isNull);
+        expect(store.loaded, isFalse);
+      },
+    );
   });
 }

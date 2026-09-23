@@ -18,6 +18,7 @@ from __future__ import annotations
 import pytest
 from sqlalchemy import select
 
+from app.config import settings
 from app.models.organization import Organization
 from app.services.org_settings_view import (
     ALWAYS_REDACTED,
@@ -297,3 +298,65 @@ async def test_vat_and_companies_house_numbers_round_trip(realdb):
     company = resp.json()["settings"]["company"]
     assert company["vat_registration_number"] == "GB123456789"
     assert company["companies_house_number"] == "12345678"
+
+
+# ---------- resolved_reporting_currency --------------------------------------
+#
+# docs/followups.md (c): the server KNOWS the reporting currency every rollup
+# is denominated in — `currency_conversion.resolve_reporting_currency` — but
+# used to serve only its raw ingredients, so a client whose only signal was
+# the operator's `FEOH_REPORTING_CURRENCY_DEFAULT` (a setting no client can
+# read) had nothing to resolve. `resolved_reporting_currency` is that answer,
+# served as its own top-level field so it is never subject to the `settings`
+# role projection above.
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("role", ["admin", "ap_clerk"])
+async def test_get_organization_serves_resolved_reporting_currency(realdb, role):
+    """Server-side truth, not projected settings — reaches every role
+    identically, admin and non-admin alike."""
+    await _seed_settings(realdb)  # sets invoice_defaults.currency = "EUR"
+    async with realdb.client(key="a", role=role) as c:
+        resp = await c.get("/api/organization")
+    assert resp.status_code == 200
+    assert resp.json()["resolved_reporting_currency"] == "EUR"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("role", ["admin", "ap_clerk"])
+async def test_get_organization_resolved_reporting_currency_prefers_explicit_setting(realdb, role):
+    """The first rung still wins when the org has set one, for every role."""
+    cmk = realdb.control_sessionmaker()
+    async with cmk() as s:
+        org = (
+            await s.execute(select(Organization).where(Organization.id == realdb.info("a").org_id))
+        ).scalar_one()
+        org.settings = {
+            "reporting_currency": "GBP",
+            "payments": {"home_currency": "EUR"},
+            "invoice_defaults": {"currency": "USD"},
+        }
+        await s.commit()
+    async with realdb.client(key="a", role=role) as c:
+        resp = await c.get("/api/organization")
+    assert resp.status_code == 200
+    assert resp.json()["resolved_reporting_currency"] == "GBP"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("role", ["admin", "ap_clerk"])
+async def test_get_organization_resolved_reporting_currency_falls_to_operator_default(
+    realdb, monkeypatch, role
+):
+    """An org that has configured none of the three settings rungs (a fresh
+    org — the harness resets `Organization.settings` to `{}` before every
+    test) still gets a server-resolved answer: the operator's
+    `FEOH_REPORTING_CURRENCY_DEFAULT`, which no client can read for itself
+    (`docs/decisions.md` §119). Every role gets the same answer, because it is
+    operator config, not tenant data."""
+    monkeypatch.setattr(settings, "reporting_currency_default", "CHF")
+    async with realdb.client(key="a", role=role) as c:
+        resp = await c.get("/api/organization")
+    assert resp.status_code == 200
+    assert resp.json()["resolved_reporting_currency"] == "CHF"

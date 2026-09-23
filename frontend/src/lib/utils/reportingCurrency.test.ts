@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { resolveReportingCurrency } from './reportingCurrency';
+import { resolveOrgCurrency, resolveReportingCurrency } from './reportingCurrency';
 // The store is a `.svelte.ts` rune module (and reaches `$env` through
 // `$lib/api`), so it cannot be imported under this plain-Node config. Its
 // contract is small enough to pin from source instead.
@@ -55,6 +55,53 @@ describe('resolveReportingCurrency', () => {
 	});
 });
 
+describe('resolveOrgCurrency', () => {
+	it('prefers the server-resolved field over the client-side rungs', () => {
+		// The follow-up this closes: the backend KNOWS the answer (all four
+		// rungs, including the operator default no client can read) and used to
+		// serve only the settings a client could partially re-derive from.
+		expect(
+			resolveOrgCurrency({
+				resolved_reporting_currency: 'JPY',
+				settings: {
+					reporting_currency: 'GBP',
+					payments: { home_currency: 'EUR' },
+					invoice_defaults: { currency: 'USD' }
+				}
+			})
+		).toBe('JPY');
+	});
+
+	it('normalises the server field the same way as the client rungs', () => {
+		expect(resolveOrgCurrency({ resolved_reporting_currency: ' chf ' })).toBe('CHF');
+	});
+
+	it('falls back to the three-rung client resolution when the server field is absent', () => {
+		// An older / cached backend response that predates this field.
+		expect(
+			resolveOrgCurrency({
+				settings: { payments: { home_currency: 'EUR' } }
+			})
+		).toBe('EUR');
+	});
+
+	it('falls back when the server field is present but malformed', () => {
+		expect(
+			resolveOrgCurrency({
+				resolved_reporting_currency: '',
+				settings: { invoice_defaults: { currency: 'ZAR' } }
+			})
+		).toBe('ZAR');
+	});
+
+	it('returns null only when the server field AND every fallback rung miss', () => {
+		expect(resolveOrgCurrency(null)).toBeNull();
+		expect(resolveOrgCurrency(undefined)).toBeNull();
+		expect(resolveOrgCurrency({})).toBeNull();
+		expect(resolveOrgCurrency({ resolved_reporting_currency: null, settings: {} })).toBeNull();
+	});
+});
+
 describe('orgCurrency store — an unresolved currency stays null', () => {
 	// Code only: the store's docstring names the old `USD` fallback on purpose,
 	// to say why it is gone.
@@ -72,7 +119,7 @@ describe('orgCurrency store — an unresolved currency stays null', () => {
 	it('assigns the resolver result as-is, null included', () => {
 		// `if (ccy) this.currency = ccy` kept whatever was there before when the
 		// resolver abstained — the same guess, just older.
-		expect(code).toContain('this.currency = resolveReportingCurrency(');
+		expect(code).toContain('this.currency = resolveOrgCurrency(');
 		expect(code).not.toMatch(/if\s*\(\s*ccy\s*\)/);
 	});
 

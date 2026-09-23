@@ -186,7 +186,7 @@ All three answer a bare `404` when `FEOH_SIGNUP_ENABLED` is off — before valid
 
 | Method | Path                              | Roles  | Description |
 |--------|-----------------------------------|--------|-------------|
-| `GET`  | `/api/organization`               | *      | Get the current tenant's org settings (company, invoice defaults, ERP, extraction, cards, mfa, sso) |
+| `GET`  | `/api/organization`               | *      | Get the current tenant's org settings (company, invoice defaults, ERP, extraction, cards, mfa, sso — role-projected, see `docs/multi-currency.md`) plus the top-level `resolved_reporting_currency` (the server's own `currency_conversion.resolve_reporting_currency` answer, every role) |
 | `PATCH` | `/api/organization`              | admin  | Patch settings. Body `{name?, settings?}` — `settings` is merged into existing JSONB one top-level key at a time, so a key sent replaces that whole block (send the complete `sso` block, not just the field you are changing). A `settings.sso` with `enabled` and `sso_only` whose IdP block does not resolve is a `422` naming the missing or invalid keys, never their values (see `docs/authentication.md` § SSO-only mode). |
 | `POST` | `/api/organization/test-erp`      | admin  | Test ERP connection (uses request body if provided, otherwise saved config) |
 | `POST` | `/api/organization/test-extraction` | admin  | Test AI extraction provider connection |
