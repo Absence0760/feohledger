@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
-import { expect, test } from '../fixtures/helpers';
+import { acceptConsent, expect, test } from '../fixtures/helpers';
 import { WEB_ORIGIN, tenantOrigin } from '../fixtures/env';
 
 /**
@@ -308,6 +308,11 @@ test.describe('legal pages', () => {
 		// above is satisfied: the mark goes to `/`, which already resolves
 		// correctly on both host shapes (the marketing Landing on the apex, the
 		// app on a tenant subdomain), and sign-in goes to the one sign-in route.
+		//
+		// This describe block is ANONYMOUS (`test.use` at the top clears
+		// storage), which is what makes "Sign in" the right label here — the
+		// signed-in half of the same pill is pinned in `the legal set from
+		// inside the app` at the bottom of this file.
 		for (const { path } of [{ path: '/legal' }, ...PAGES]) {
 			await page.goto(path);
 			const header = page.getByRole('banner');
@@ -685,5 +690,75 @@ test.describe('the legal set from inside the app', () => {
 			'href',
 			'/legal/privacy'
 		);
+	});
+
+	test('and is sent back to the app, not to a sign-in form they already passed', async ({
+		page,
+	}) => {
+		// The half of the header the anonymous block above cannot see. It read
+		// "Sign in" → `/login` for everyone, so the employee who just used the
+		// profile menu to get here was offered the form they had already filled
+		// in — and `/login` does not bounce an authenticated user onward, so it
+		// was a round trip to nowhere.
+		//
+		// Asserted on a DOCUMENT rather than the index because that is where a
+		// reader is stranded longest, and both come from the one layout.
+		await page.goto('/legal/privacy');
+
+		const pill = page.getByRole('banner').getByRole('link', { name: 'Back to app' });
+		await expect(pill).toHaveAttribute('href', '/');
+		// Not merely relabelled: the wrong door must be gone, or the dead end
+		// is still one mis-click away.
+		await expect(
+			page.getByRole('banner').getByRole('link', { name: 'Sign in' })
+		).toHaveCount(0);
+
+		// "Back to app" is a wider pill than the "Sign in" it replaced, and both
+		// legal a11y specs measure 320px ANONYMOUSLY — so the widest state of
+		// this header had no reflow coverage at all (WCAG 1.4.10).
+		await page.setViewportSize({ width: 320, height: 720 });
+		await expect(pill).toBeVisible();
+		const overflow = await page.evaluate(
+			() => document.documentElement.scrollWidth - document.documentElement.clientWidth
+		);
+		expect(overflow, 'signed-in legal header overflows at 320px').toBeLessThanOrEqual(1);
+
+		await page.setViewportSize({ width: 1280, height: 720 });
+		await pill.click();
+		await expect(page.locator('aside.sidebar').first()).toBeVisible();
+	});
+});
+
+test.describe('the legal set from inside the supplier portal', () => {
+	// The third arrival, and the one the hardcoded header served worst. A
+	// supplier is a data subject whose bank details and tax ID we hold; the
+	// portal footer links these documents for exactly that reason. Sending them
+	// to `/login` was not a dead end but the WRONG DOOR — the employee sign-in
+	// form, which no password a vendor holds will ever open, on the surface
+	// where they went looking for their privacy rights.
+	//
+	// Anonymous storage state, then a real portal sign-in: the two surfaces
+	// keep separate localStorage keys (`auth_token` vs `portal_auth_token`), and
+	// it is that separation the header reads.
+	test.use({ storageState: { cookies: [], origins: [] } });
+
+	test('sends a signed-in vendor back to the portal, never to the employee login', async ({
+		page,
+	}) => {
+		await acceptConsent(page);
+		await page.goto('/portal/login');
+		await page.locator('input[type="email"]').fill('supplier@portal.test');
+		await page.locator('input[type="password"]').fill('demo');
+		await page.locator('button[type="submit"]').click();
+		await expect(page).toHaveURL(/\/portal\/?$/, { timeout: 15_000 });
+
+		await page.goto('/legal/privacy');
+
+		const banner = page.getByRole('banner');
+		await expect(banner.getByRole('link', { name: 'Back to portal' })).toHaveAttribute(
+			'href',
+			'/portal'
+		);
+		await expect(banner.getByRole('link', { name: 'Sign in' })).toHaveCount(0);
 	});
 });

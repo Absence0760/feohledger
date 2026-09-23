@@ -9104,3 +9104,46 @@ per page, because the alternative was ninety-one duplicated entries that would
 drift from the headings inside a release — and because that wrapper is the one
 file all six already render through (§174 for why their text is English-only,
 #433's layout for why the surround is shared).
+
+## 206. The legal header names the door the reader already has, and reads the one signal that costs no wait
+
+`routes/legal/+layout.svelte` shipped with a hardcoded `Sign in` → `/login`
+pill in its top bar (#434). That is correct for exactly one of the three ways a
+person reaches these documents, and wrong for the two that happen most.
+
+An employee gets here from `Sidebar.svelte`'s profile menu ("Legal & privacy"),
+which means the app offered a signed-in user a sign-in form they had already
+filled in. `/login` does not bounce an authenticated visitor onward — the root
+layout skips its redirect for any `/login` path — so following the only
+affordance in the header was a round trip back to where they started. Worse,
+`portal/+layout.svelte` links the same set from the supplier-portal footer, so
+a vendor exercising a data right over their own bank details and tax ID was
+pointed at the **employee** login: not a dead end but the wrong door, which no
+password they hold will ever open.
+
+So the pill is derived — `Back to app` → `/`, `Back to portal` → `/portal`, or
+`Sign in` → `/login` — from `auth.loggedIn` and `portalAuth.loggedIn`, employee
+first. A browser can hold both tokens (the two surfaces keep separate
+localStorage keys on purpose), and when it does the AP app is the likelier
+origin and the portal is one click from `/`.
+
+**The static requirement in #434 was about waiting, not about store reads**, and
+this keeps the part that matters. Both booleans initialize from a synchronous
+`localStorage` read at module load (`$state(hasToken())` /
+`$state(hasPortalToken())`), settled before first render. What the standalone
+branch in `routes/+layout.svelte` exists to avoid is `hasTenant` — an `$effect`,
+hence a tri-state that would blank a published document for a beat and, on the
+apex, serve the marketing Landing instead. Nothing here touches it, so the
+header still draws on the apex exactly as before, where neither token is likely
+to exist and `Sign in` is the honest answer anyway.
+
+It reads token PRESENCE, not proof of a live session, which is the same signal
+the rest of the app routes on. An expired token sends the reader to `/`, which
+bounces to `/login` on the first 401 — the right destination by a longer road.
+Verifying it here would mean a fetch, and a legal document that waits on the
+network is precisely what this layout refuses to be.
+
+The reflow cost is real and is now covered: `Back to app` is a wider pill than
+`Sign in`, and both legal a11y specs measure 320px anonymously, so the widest
+state of this header had no WCAG 1.4.10 coverage at all. The signed-in e2e case
+asserts it.

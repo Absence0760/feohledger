@@ -2,6 +2,8 @@
 	import Atmosphere from '$lib/components/marketing/Atmosphere.svelte';
 	import BrandMark from '$lib/components/ui/BrandMark.svelte';
 	import { OPERATOR } from '$lib/legal/operator';
+	import { auth } from '$lib/stores/auth.svelte';
+	import { portalAuth } from '$lib/stores/portalAuth.svelte';
 
 	/**
 	 * The frame every published legal route renders inside — the index and the
@@ -21,14 +23,44 @@
 	 * had the Back button and nothing else.
 	 *
 	 * This header is deliberately the smallest thing that fixes that, and
-	 * **entirely static**: two hardcoded hrefs, a decorative `<img>` from
-	 * `static/`, and one constant from `lib/legal/operator.ts`. No store read,
-	 * no `hasTenantContext()`, no fetch, nothing that resolves after mount — so
-	 * it cannot blank, flash, or reintroduce the wait that branch avoids. `/`
+	 * **nothing in it resolves after mount**: a decorative `<img>` from
+	 * `static/`, one constant from `lib/legal/operator.ts`, and the two
+	 * already-settled booleans below. No `hasTenantContext()`, no fetch — so it
+	 * cannot blank, flash, or reintroduce the wait that branch avoids. `/`
 	 * already resolves correctly on both host shapes (Landing on the apex, the
-	 * app on a tenant subdomain) and `/login` is the sign-in surface on a tenant
-	 * host; on the apex, where there is no tenant to sign into, it lands on the
-	 * marketing page, which is the honest answer to "sign in to what?".
+	 * app on a tenant subdomain).
+	 *
+	 * **The right-hand pill names the door the reader actually has.** It was a
+	 * hardcoded "Sign in" → `/login`, which is right for exactly one of the
+	 * three ways a person arrives here and wrong for the two that arrive most
+	 * often. `Sidebar.svelte` links "Legal & privacy" from the profile menu, so
+	 * a signed-in employee was offered a sign-in form they had already filled
+	 * in — and `/login` does not bounce an authenticated user onward, so
+	 * following it was a genuine dead end back to where they started. The
+	 * supplier portal's footer links here too (`portal/+layout.svelte`), and a
+	 * vendor sent to the EMPLOYEE login is worse than a dead end: it is the
+	 * wrong door, and no password they hold opens it.
+	 *
+	 * So the destination is derived from who is holding a token, employee
+	 * first — the two surfaces keep separate localStorage keys (`$lib/api` vs
+	 * `$lib/portalApi`) and a browser can hold both, in which case the AP app
+	 * is the likelier origin and the portal is one more click from `/`.
+	 *
+	 * **This costs no wait.** Both `auth.loggedIn` and `portalAuth.loggedIn`
+	 * initialize from a synchronous `localStorage` read at module load
+	 * (`$state(hasToken())` / `$state(hasPortalToken())`), which is settled
+	 * before this component's first render — unlike `hasTenant`, which is an
+	 * `$effect` and is exactly the tri-state wait the standalone branch exists
+	 * to avoid. Nothing here is gated on a tenant resolving, so the header
+	 * still draws on the apex, where a token for either surface is unlikely to
+	 * exist and the anonymous "Sign in" is the honest answer anyway.
+	 *
+	 * Presence of a token, not proof of a live session — the same signal the
+	 * rest of the app routes on (`routes/+layout.svelte` gates on this exact
+	 * boolean). An expired token sends the reader to `/`, which bounces to
+	 * `/login` on the first 401, which is the correct destination by a longer
+	 * road. Verifying it here would mean a fetch, and a legal document waiting
+	 * on the network is the thing this layout refuses to be.
 	 *
 	 * **2. A backdrop, applied once.** The documents were a 46rem column on flat
 	 * `var(--bg)`, which on a wide screen is about two-thirds undifferentiated
@@ -55,8 +87,8 @@
 	 * aurora's own peak (`rgba(99, 140, 255, 0.30)` over `--bg`) lifts the
 	 * ground to `rgb(40, 54, 93)`, where `--text-muted` is 3.67:1 — so muted
 	 * text may never sit directly on the atmosphere. The header obeys that: its
-	 * links are `--text` (9.30:1 on that same worst case) and the sign-in pill
-	 * has its own opaque `--surface`.
+	 * links are `--text` (9.30:1 on that same worst case) and the destination
+	 * pill has its own opaque `--surface`.
 	 *
 	 * English strings, like the rest of the chrome in this directory
 	 * (`LegalPage`'s "← All legal documents" and "Other documents") — see
@@ -65,6 +97,14 @@
 	 * from anywhere else is ordinary UI and is translated; this is the chrome
 	 * *inside* an English-only document set.
 	 */
+
+	const destination = $derived(
+		auth.loggedIn
+			? { href: '/', label: 'Back to app' }
+			: portalAuth.loggedIn
+				? { href: '/portal', label: 'Back to portal' }
+				: { href: '/login', label: 'Sign in' }
+	);
 </script>
 
 <div class="legal-root">
@@ -85,7 +125,7 @@
 				<BrandMark size={26} />
 				<span class="brand-name">{OPERATOR.serviceName}</span>
 			</a>
-			<a class="sign-in" href="/login">Sign in</a>
+			<a class="destination" href={destination.href}>{destination.label}</a>
 		</div>
 	</header>
 
@@ -172,7 +212,7 @@
 		text-decoration: underline;
 	}
 
-	.sign-in {
+	.destination {
 		/* Its own opaque fill for the same reason: a pill on --surface is a
 		   surface the palette contract already asserts --text against. */
 		padding: 8px 16px;
@@ -186,8 +226,8 @@
 		transition: border-color 0.15s, background 0.15s;
 	}
 
-	.sign-in:hover,
-	.sign-in:focus-visible {
+	.destination:hover,
+	.destination:focus-visible {
 		border-color: var(--accent);
 		/* --surface-2 is the raised companion, and --text is the ONLY token the
 		   palette allows on it (11.0:1; --text-muted is 4.34:1 there and is why
