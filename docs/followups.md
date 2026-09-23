@@ -88,6 +88,20 @@ lesson is simply that a count stored beside the thing it counts has no way to
 notice, so re-deriving it is the last step of any change that adds or prunes an
 entry, not a periodic clean-up.
 
+**Then a third time, which is what finally bought a guard.** #467's three
+settings-panelisation entries left `55 open: 40 (c)` over a file holding
+58 / 43. At that point the paragraphs above had documented the failure twice
+and stated the lesson once, and it happened anyway — so the discipline was not
+the fix. `pnpm check:followups`
+([`scripts/check_followups_count.mjs`](../scripts/check_followups_count.mjs))
+now re-derives the total and each category and **fails CI** when the header
+disagrees, in the same Frontend job as the sub-processor register check. It
+also asks the two questions the shapes above describe: whether the three
+categories sum to the total (which catches an item stranded outside every
+`## (x)` heading), and it counts by section heading only, never by an entry's
+own marker. Re-deriving by hand is still the right habit — the guard just means
+forgetting is now a red check rather than a number nobody can trust.
+
 Round 26 closed eleven and opened nine, so the file shrank by two. **Three of
 the eleven were wrong about their own code**, and twice in the direction that
 would have caused damage if implemented as written: the GL-picker entry
