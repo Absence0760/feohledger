@@ -10,6 +10,12 @@ dependencies = [
     # CVE-2026-54283 / CVE-2026-54282: request.form() limits silently ignored
     # for application/x-www-form-urlencoded (DoS), both fixed in 1.3.1.
     "starlette>=1.6.0,<2",
+    # Pinned explicitly (transitive via starlette / httpx / watchfiles) to hold
+    # the floor above CVE-2026-63374 (connect_tcp / TLSStream.wrap validate an
+    # IDNA-2003-mapped hostname, so a cert for a different ASCII name passes)
+    # and CVE-2026-64847 (undrained stderr hangs process-pool workers), both
+    # fixed in 4.14.2.
+    "anyio>=4.14.2,<5",
     "uvicorn[standard]>=0.53.0,<1",
     "sqlalchemy[asyncio]>=2.0.54,<3",
     "asyncpg>=0.31.0,<1",
