@@ -602,3 +602,90 @@ async def test_validate_id_token_refuses_a_jwks_uri_on_another_host(signing_key)
                 client_id=_CLIENT_ID,
                 expected_nonce="the-real-nonce",
             )
+
+
+# ---------------------------------------------------------------------------
+# An unresolvable-but-`enabled` block is a 400, never an uncaught 500
+# (docs/followups.md "The public SSO entry points answer an unresolvable IdP
+# block with a 500, not their documented 400 / 404")
+# ---------------------------------------------------------------------------
+
+
+def _broken_oidc_org(slug: str = "acme"):
+    """`enabled: true` but missing a required OIDC key — `resolve_sso_config`
+    raises `SSOConfigError` for this shape, not `None`."""
+    from types import SimpleNamespace
+
+    return SimpleNamespace(
+        slug=slug,
+        settings={
+            "sso": {
+                "enabled": True,
+                "discovery_url": "https://idp.example/.well-known/openid-configuration",
+                "client_id": "client-123",
+                # client_secret deliberately omitted -> SSOConfigError
+            }
+        },
+    )
+
+
+def test_resolve_sso_or_none_absorbs_config_error():
+    """The helper `sso_authorize` / `sso_callback` call: `SSOConfigError` ->
+    `None`, exactly like a genuinely absent block."""
+    from app.api import auth_sso
+    from app.services.sso import SSOConfigError
+
+    # Sanity: the block really does raise, not resolve to None on its own.
+    with pytest.raises(SSOConfigError):
+        auth_sso.resolve_sso_config(_broken_oidc_org().settings)
+    assert auth_sso._resolve_sso_or_none(_broken_oidc_org().settings) is None
+
+
+@pytest.mark.asyncio
+async def test_sso_authorize_broken_config_is_400_not_500(monkeypatch):
+    from fastapi import HTTPException
+
+    from app.api import auth_sso
+
+    async def _resolve_slug(slug, host, db):
+        return slug
+
+    async def _fetch_org(slug, db):
+        return _broken_oidc_org()
+
+    monkeypatch.setattr(auth_sso, "resolve_sso_tenant_slug", _resolve_slug)
+    monkeypatch.setattr(auth_sso, "_fetch_org_by_slug", _fetch_org)
+
+    with pytest.raises(HTTPException) as exc:
+        await auth_sso.sso_authorize(slug="acme", host=None, db=None)
+    assert exc.value.status_code == 400
+    assert exc.value.detail == "SSO is not configured for this tenant."
+    # The public response never names the offending key.
+    assert "client_secret" not in exc.value.detail
+
+
+@pytest.mark.asyncio
+async def test_sso_callback_broken_config_is_400_not_500(monkeypatch):
+    from types import SimpleNamespace
+
+    from fastapi import HTTPException
+
+    from app.api import auth_sso
+
+    async def _consume_state(state):
+        return {"tenant": "acme", "nonce": "nonce-y"}
+
+    async def _fetch_org(slug, db):
+        return _broken_oidc_org()
+
+    monkeypatch.setattr(auth_sso, "consume_state", _consume_state)
+    monkeypatch.setattr(auth_sso, "_fetch_org_by_slug", _fetch_org)
+
+    fake_request = SimpleNamespace(client=SimpleNamespace(host="1.2.3.4"), headers={})
+    body = auth_sso.SSOCallbackRequest(code="the-code", state="the-state")
+
+    with pytest.raises(HTTPException) as exc:
+        await auth_sso.sso_callback(body, fake_request, db=None)
+    assert exc.value.status_code == 400
+    assert exc.value.detail == "SSO is not configured for this tenant."
+    assert "client_secret" not in exc.value.detail
