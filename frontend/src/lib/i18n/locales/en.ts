@@ -177,6 +177,18 @@ export const en = {
 	'profile.password.mismatch': 'Passwords do not match',
 	'profile.password.updated': 'Password updated',
 	'profile.password.updateFailed': 'Failed to update password',
+	// Shown instead of the form for an account with no password at all
+	// (JIT-provisioned by SSO or created by SCIM — `has_password` on
+	// GET /api/auth/me). Distinct from the note below, which is about the
+	// ORG's setting rather than whether this account has a password.
+	'profile.password.noPassword':
+		'This account signs in with single sign-on and has no password to change.',
+	// Shown above the (still-usable) form when the account HAS a password but
+	// the org has closed password sign-in (`password_sign_in_closed`) —
+	// rotation stays available because it matters again if the org ever
+	// leaves SSO-only.
+	'profile.password.notUsedForSignIn':
+		"Your organization currently requires single sign-on, so this password isn't used to sign in. You can still change it. It will apply again if your organization stops requiring SSO.",
 
 	// Profile → Two-factor authentication card
 	'profile.mfa.heading': 'Two-factor authentication',

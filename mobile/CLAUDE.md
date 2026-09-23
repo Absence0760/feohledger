@@ -348,11 +348,14 @@ that exists and never reach past it**:
 3. **`OrgCurrencyStore.instance.currency`** for an aggregate the server
    denominates in the reporting currency *without* naming it — today the
    adaptive per-vendor averages and the cash-flow forecast leg. It mirrors the
-   web `orgCurrency` store and resolves the same three settings rungs
-   (`reporting_currency` → `payments.home_currency` →
-   `invoice_defaults.currency`); call `ensureLoaded()` in `initState` and put the
-   store in the screen's `ListenableBuilder` (`Listenable.merge`) so a figure
-   picks up its symbol when the code lands.
+   web `orgCurrency` store and reads `GET /api/organization`'s own
+   `resolved_reporting_currency` first — the server's answer, all four
+   resolution rungs included — falling back to the three client-visible
+   settings rungs (`reporting_currency` → `payments.home_currency` →
+   `invoice_defaults.currency`) only for a pre-upgrade or cached response that
+   omits the field; call `ensureLoaded()` in `initState` and put the store in
+   the screen's `ListenableBuilder` (`Listenable.merge`) so a figure picks up
+   its symbol when the code lands.
 4. **Nothing — pass `null` and let the figure render bare.** Not a degraded
    mode, the answer: a code the server declined to prove "is NOT a licence to
    substitute a default" (`docs/decisions.md` §79/§82, §160). A missing symbol

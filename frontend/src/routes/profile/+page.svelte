@@ -127,6 +127,16 @@
 	// passkey ceremony instead.
 	const passwordIsProof = $derived(!auth.user?.password_sign_in_closed);
 
+	// --- Whether the Password card has anything to submit ---------------------
+	// `has_password` (`User.hashed_password is not None`) is a property of the
+	// ACCOUNT, not the org: every member JIT-provisioned by OIDC/SAML or created
+	// by SCIM has none, in any tenant, closed-SSO or not. `PATCH /api/auth/me`
+	// refuses such an account's "current password" with the same sentence it
+	// gives a WRONG password, so the form was previously a control that could
+	// never succeed. Default to `true` (has a password) when the field is
+	// somehow missing, matching the schema's own fail-open default.
+	const hasPassword = $derived(auth.user?.has_password ?? true);
+
 	/** The server's own shape for a TOTP code (6-8 digits); a shorter entry is a
 	 * 422, so a half-typed code must not count as an offered proof. */
 	function isCompleteCode(value: string): boolean {
@@ -642,51 +652,65 @@
 			{#if section === 'password'}
 				<section class="card">
 					<h2>{m('profile.password.heading')}</h2>
-					<p class="hint">{m('profile.password.hint')}</p>
-					<form
-						onsubmit={(e) => {
-							e.preventDefault();
-							changePassword();
-						}}
-					>
-						<label>
-							<span>{m('profile.password.current')}</span>
-							<input
-								type="password"
-								bind:value={currentPassword}
-								required
-								autocomplete="current-password"
-							/>
-						</label>
-						<label>
-							<span>{m('profile.password.new')}</span>
-							<input
-								type="password"
-								bind:value={newPassword}
-								required
-								minlength="6"
-								autocomplete="new-password"
-							/>
-						</label>
-						<label>
-							<span>{m('profile.password.confirm')}</span>
-							<input
-								type="password"
-								bind:value={confirmPassword}
-								required
-								minlength="6"
-								autocomplete="new-password"
-							/>
-						</label>
-						<div class="actions">
-							<button
-								type="submit"
-								disabled={savingPassword || !currentPassword || !newPassword || newPassword !== confirmPassword}
-							>
-								{savingPassword ? m('common.saving') : m('profile.password.submit')}
-							</button>
-						</div>
-					</form>
+					{#if !hasPassword}
+						<!-- No `User.hashed_password` at all (SSO/SCIM-provisioned): the form
+						     would only ever collect a "Current password is incorrect" 400, so
+						     it is replaced rather than shown disabled. -->
+						<p class="hint">{m('profile.password.noPassword')}</p>
+					{:else}
+						<p class="hint">{m('profile.password.hint')}</p>
+						{#if !passwordIsProof}
+							<!-- The account HAS a password, but the org has closed password
+							     sign-in — rotation stays available (it matters again the day
+							     the org leaves SSO-only), with a note that it currently
+							     authenticates nothing. -->
+							<p class="hint">{m('profile.password.notUsedForSignIn')}</p>
+						{/if}
+						<form
+							onsubmit={(e) => {
+								e.preventDefault();
+								changePassword();
+							}}
+						>
+							<label>
+								<span>{m('profile.password.current')}</span>
+								<input
+									type="password"
+									bind:value={currentPassword}
+									required
+									autocomplete="current-password"
+								/>
+							</label>
+							<label>
+								<span>{m('profile.password.new')}</span>
+								<input
+									type="password"
+									bind:value={newPassword}
+									required
+									minlength="6"
+									autocomplete="new-password"
+								/>
+							</label>
+							<label>
+								<span>{m('profile.password.confirm')}</span>
+								<input
+									type="password"
+									bind:value={confirmPassword}
+									required
+									minlength="6"
+									autocomplete="new-password"
+								/>
+							</label>
+							<div class="actions">
+								<button
+									type="submit"
+									disabled={savingPassword || !currentPassword || !newPassword || newPassword !== confirmPassword}
+								>
+									{savingPassword ? m('common.saving') : m('profile.password.submit')}
+								</button>
+							</div>
+						</form>
+					{/if}
 				</section>
 			{/if}
 

@@ -163,6 +163,19 @@ async def _resolve_org(
     return await _fetch_org_by_slug(resolved, db), resolved
 
 
+def _resolve_saml_or_none(org_settings: dict | None, slug: str) -> ResolvedSAMLConfig | None:
+    """`resolve_saml_config`, but a block with `enabled` set that fails to
+    resolve (`SSOConfigError`) reads exactly like a genuinely absent one — the
+    same posture `saml_config` below already takes. Keeps `saml_login`,
+    `saml_acs` and `saml_metadata` on their documented 400/404 instead of an
+    uncaught 500, and never echoes `SSOConfigError.fields` (the offending
+    keys) to the caller."""
+    try:
+        return resolve_saml_config(org_settings, slug)
+    except SSOConfigError:
+        return None
+
+
 def _build_saml_settings(config: ResolvedSAMLConfig) -> dict:
     """Assemble the python3-saml settings dict.
 
@@ -330,7 +343,7 @@ async def saml_login(
     `FEOH_API_PUBLIC_URL` and registered at the IdP, so a vanity `Host` never
     re-points them."""
     org, slug = await _resolve_org(slug, host, db)
-    config = resolve_saml_config(org.settings, slug)
+    config = _resolve_saml_or_none(org.settings, slug)
     if config is None:
         raise HTTPException(status_code=400, detail="SAML SSO is not configured for this tenant.")
 
@@ -384,7 +397,7 @@ async def saml_acs(request: Request, db: AsyncSession = Depends(get_control_db))
         raise HTTPException(status_code=400, detail="Login session was incomplete. Try again.")
 
     org = await _fetch_org_by_slug(tenant_slug, db)
-    config = resolve_saml_config(org.settings, tenant_slug)
+    config = _resolve_saml_or_none(org.settings, tenant_slug)
     if config is None:
         raise HTTPException(status_code=400, detail="SAML SSO is not configured for this tenant.")
 
@@ -509,7 +522,7 @@ async def saml_metadata(slug: str, db: AsyncSession = Depends(get_control_db)):
     """SP EntityDescriptor metadata XML so an admin can register our SP at the
     IdP. No secrets (only the public SP cert if AuthnRequest signing is on)."""
     org = await _fetch_org_by_slug(slug, db)
-    config = resolve_saml_config(org.settings, slug)
+    config = _resolve_saml_or_none(org.settings, slug)
     if config is None:
         raise HTTPException(status_code=404, detail="SAML SSO is not configured for this tenant.")
     saml_settings = OneLogin_Saml2_Settings(_build_saml_settings(config), sp_validation_only=True)

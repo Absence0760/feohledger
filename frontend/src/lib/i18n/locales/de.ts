@@ -148,6 +148,10 @@ export const messages = {
 	'profile.password.mismatch': 'Die Passwörter stimmen nicht überein',
 	'profile.password.updated': 'Passwort aktualisiert',
 	'profile.password.updateFailed': 'Passwort konnte nicht aktualisiert werden',
+	'profile.password.noPassword':
+		'Dieses Konto meldet sich per Single Sign-on an und hat kein Passwort zum Ändern.',
+	'profile.password.notUsedForSignIn':
+		'Ihre Organisation verlangt derzeit Single Sign-on, daher wird dieses Passwort nicht zur Anmeldung verwendet. Sie können es trotzdem ändern. Es ist wieder wichtig, falls Ihre Organisation SSO nicht mehr verlangt.',
 
 	'profile.mfa.heading': 'Zwei-Faktor-Authentifizierung',
 	'profile.mfa.hint':

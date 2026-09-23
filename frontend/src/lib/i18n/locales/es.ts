@@ -149,6 +149,10 @@ export const messages = {
 	'profile.password.mismatch': 'Las contraseñas no coinciden',
 	'profile.password.updated': 'Contraseña actualizada',
 	'profile.password.updateFailed': 'No se pudo actualizar la contraseña',
+	'profile.password.noPassword':
+		'Esta cuenta inicia sesión con inicio de sesión único (SSO) y no tiene contraseña que cambiar.',
+	'profile.password.notUsedForSignIn':
+		'Su organización actualmente requiere inicio de sesión único (SSO), por lo que esta contraseña no se usa para iniciar sesión. Aún puede cambiarla. Volverá a ser útil si su organización deja de requerir SSO.',
 
 	'profile.mfa.heading': 'Autenticación en dos pasos',
 	'profile.mfa.hint':

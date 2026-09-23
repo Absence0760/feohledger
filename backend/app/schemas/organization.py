@@ -206,6 +206,17 @@ class OrganizationResponse(BaseModel):
     plan: str
     settings: dict  # raw JSONB — preserves erp, cards, extraction keys
     created_at: str
+    # The org's reporting (base) currency, ALREADY resolved server-side —
+    # `currency_conversion.resolve_reporting_currency(org.settings)`, all four
+    # rungs including `settings.reporting_currency_default`
+    # (`FEOH_REPORTING_CURRENCY_DEFAULT`), the operator config no client can
+    # read. A bare top-level field, not part of `settings`, so it is never
+    # touched by the role projection above and reaches every role exactly like
+    # the three settings rungs it is derived from (`services/org_settings_view`
+    # already admits those to non-admins for this same purpose). Always a
+    # 3-letter ISO 4217 code — the resolver never returns `None`. See
+    # `docs/decisions.md` §119, §160, §200.
+    resolved_reporting_currency: str
 
 
 class UpdateOrganizationRequest(BaseModel):
