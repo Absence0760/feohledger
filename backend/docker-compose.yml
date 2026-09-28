@@ -46,19 +46,17 @@ services:
       retries: 5
 
   minio:
-    # quay.io, not Docker Hub: `minio/minio` there no longer serves anonymous
-    # pulls, so a fresh clone's `pnpm db:up` failed with "repository does not
-    # exist or may require 'docker login'". quay.io/minio/minio is MinIO's own
-    # registry. CI's two MinIO `docker run`s read this ref (see the header).
-    #
-    # RELEASE.2025-09-07T16-13-09Z is exactly what `latest` resolved to when this
-    # was pinned (same index digest), so pinning changed nothing that runs.
-    # It is also the LAST community image MinIO published: upstream moved the
-    # community edition to source-only distribution after it, so `latest` has
-    # not moved since and Dependabot has nothing newer to offer. The
-    # `…Z.hotfix.<sha>` tags on quay are MinIO's hotfix line, not a successor
-    # release; adopting one is a deliberate behaviour change, not a bump.
-    image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
+    # pgsty/minio, a community rebuild of MinIO from upstream source. Neither
+    # of MinIO's own registries serves anonymous pulls any more: `minio/minio`
+    # on Docker Hub stopped first, then quay.io/minio/minio started answering
+    # 401 to anonymous manifest and tag requests (seen 2026-09-28), which took
+    # every CI backend and e2e shard down before a test ran. Upstream publishes
+    # the community edition as source only, so a third-party build is the only
+    # prebuilt image left; this one is a drop-in (same `minio server` CLI and
+    # env vars), versioned, and Dependabot-trackable. Why this one and not
+    # Chainguard's: backend/docs/docker.md § Where MinIO comes from.
+    # CI's two MinIO `docker run`s read this ref (see the header).
+    image: pgsty/minio:RELEASE.2026-08-04T00-00-00Z@sha256:b6bfe7239bfc83fb90d31612d9704d86039dd714f7904b3f1ad68f211e602372
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: minioadmin
@@ -242,7 +240,7 @@ services:
   # the deploy block for NVIDIA GPU (needs nvidia-container-toolkit).
   # See backend/docs/local-ai-testing.md.
   ollama:
-    image: ollama/ollama:0.34.2@sha256:da6e0dc5651df159e45686fd663c4dbe1624a52c44d7280eeac1551d8f865532
+    image: ollama/ollama:0.34.4@sha256:8262851b2846b87c649eddf3e76beb270c52f4d1bc94559f47efde16b0841551
     profiles: ["ai"]
     ports:
       - "11435:11434"
@@ -268,7 +266,7 @@ services:
   # it validates request shape + response parsing, not stateful flows. Point the
   # adapter at it with FEOH_STRIPE_API_BASE=http://localhost:12111/v1.
   stripe-mock:
-    image: stripe/stripe-mock:v0.203.0@sha256:90e2cb49557449a5da30d19f08780667b97a292862b017d56e1276adc5c63587
+    image: stripe/stripe-mock:v0.204.0@sha256:5ae06566429ca6be1088a09729c6015214e6d6a496514ad3d50c7905c84fa2e5
     profiles: ["payments"]
     ports:
       - "12111:12111"

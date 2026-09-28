@@ -54,6 +54,13 @@ class UserResponse(BaseModel):
     must_change_password: bool = False
     mfa_enabled: bool = False
     mfa_required_by_org: bool = False
+    # `User.hashed_password is not None` — every account JIT-provisioned by
+    # OIDC/SAML (`identity_provisioning.py`) or created by SCIM (`api/scim.py`)
+    # has none. This describes only the CALLER's own account, so there is no
+    # enumeration concern in publishing it. The profile page reads it to stop
+    # rendering the dead Change-password form for such an account instead of
+    # letting it submit into an unconditional "Current password is incorrect".
+    has_password: bool = True
     # The caller's organization has closed password sign-in (`sso_only`, with an
     # IdP config that resolves), so the password is not a step-up proof either.
     # Filled from the SAME predicate `login` refuses on, `_step_up_satisfied`

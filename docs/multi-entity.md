@@ -323,6 +323,13 @@ previously filtered by `organization_id` only:
   spans invoices in different entities, validity is resolved **per-invoice-entity**:
   a candidate GL code applies iff the account is shared or belongs to that
   invoice's entity. An entity-B-only code is rejected for an entity-A invoice.
+  **Whether the chart counts as "empty" is per-invoice-entity too**
+  (`_ActiveChart.is_empty_for`, sharing `gl_chart.chart_is_empty`'s rule with
+  the manual-write path below): a subsidiary with neither its own accounts nor
+  a shared one accepts any code, exactly as it would from `gl_chart` and
+  extraction, even when another entity in the same org has a populated chart —
+  an org-wide emptiness check would instead reject every candidate for the
+  chart-less subsidiary against accounts that were never its.
 
 Single-entity tenants are a no-op (every account is shared or under the one entity).
 

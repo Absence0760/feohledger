@@ -150,7 +150,7 @@ bump.
 |------------|-----------------------------|-----------------|---------|---------------------------------------------------|
 | PostgreSQL | `pgvector/pgvector` (`*-pg16` — Postgres 16) | `5432` | (core)  | Primary database (multi-DB) + pgvector extension  |
 | Redis      | `redis` (7.x, alpine)       | `6379`          | (core)  | JWT blocklist + rate-limit counters               |
-| MinIO      | `quay.io/minio/minio` (`RELEASE.2025-09-07T16-13-09Z`) | `9000`, `9001` | (core)  | S3-compatible storage. **quay.io, not Docker Hub** — see below |
+| MinIO      | `pgsty/minio` (`RELEASE.2026-08-04T00-00-00Z`) | `9000`, `9001` | (core)  | S3-compatible storage. **A community build, not MinIO's own image** — see below |
 | Keycloak   | `quay.io/keycloak/keycloak` (26.x) | `8088`   | `idp`   | Local OIDC IdP for SSO testing (opt-in)           |
 | Authentik server | `ghcr.io/goauthentik/server` | `9002` | `idp` | Local SCIM IdP — pushes users into `/api/scim/v2` (opt-in) |
 | Authentik worker | `ghcr.io/goauthentik/server` | —      | `idp` | Runs the SCIM sync jobs (opt-in)                  |
@@ -230,43 +230,56 @@ below surfaced.
   image: `docker buildx imagetools inspect <repo>:<tag>` prints the index
   `Digest:` to copy.
 
-### Why MinIO comes from quay.io
+### Where MinIO comes from
 
-`minio/minio` on Docker Hub stopped serving anonymous pulls: a manifest request
-with a valid anonymous pull token returns `401`, and `docker run` reports it as
-the misleading `repository does not exist or may require 'docker login'`. Every
-other image in the table above still pulls fine from Docker Hub — this one does
-not, so a `pnpm db:up` or CI failure naming MinIO is a registry problem, not a
-slow-start problem. That failure is **deterministic** — do not respond to it by
-adding retries or lengthening a health-check loop.
+Neither of MinIO's own registries serves anonymous pulls any more. `minio/minio`
+on Docker Hub stopped first; `quay.io/minio/minio`, which replaced it here, began
+answering `401` to anonymous manifest *and* tag-list requests on or before
+2026-09-28, which failed every CI backend and e2e shard at the pull step. In
+both cases `docker run` reports the misleading `repository does not exist or
+may require 'docker login'`. That failure is **deterministic** — a CI or
+`pnpm db:up` failure naming MinIO with a `401` is a registry problem, not a
+slow-start problem, so do not respond to it with retries or a longer
+health-check loop.
+
+Upstream moved the community edition to source-only distribution in October
+2025 and has since archived the repository, so any prebuilt image is now a
+third party's build. Two were evaluated (decisions §212):
+
+- **`pgsty/minio`** — chosen. A community rebuild of upstream MinIO by the
+  Pigsty project, on Docker Hub, with versioned `RELEASE.…` tags (so Dependabot
+  can track it and the compose file keeps its `repo:tag@sha256` pin) and the same
+  `minio server /data` CLI and `MINIO_ROOT_*` variables — a drop-in.
+- `cgr.dev/chainguard/minio` — also built from source and signed, but the free
+  tier serves only `latest`, so the pin would be `latest@sha256:…`, Dependabot
+  could not offer a versioned bump, and whether an old digest stays pullable is
+  outside our control.
+
+MinIO is a local/CI stand-in for S3 holding throwaway `minioadmin` data, which is
+why a community build is an acceptable trust level here; production uses real
+S3. If this image goes the same way, the next step is a different S3-compatible
+server, not another MinIO mirror hunt.
 
 A **transient** registry failure is a different thing, and CI tells them apart.
 Each `docker run` invocation in `.github/workflows/ci.yml` is preceded by a
-bounded `docker pull` loop — 3 attempts, backing off 5s then 10s — because
-quay.io returned a `502 Bad Gateway` on 1 of 14 e2e shards on 2026-09-15,
+bounded `docker pull` loop — 3 attempts, backing off 5s then 10s — because a
+registry returned a `502 Bad Gateway` on 1 of 14 e2e shards on 2026-09-15,
 killing that shard before a single test ran. Every attempt prints its own error,
 so a deterministic `401` still reads as itself, three times, and then fails
 closed; nothing is buried. The health-check loop is deliberately untouched, and
 a container that starts but never goes healthy still fails exactly as before.
 
-`quay.io/minio/minio` is MinIO's own registry and serves the same image
-anonymously. The reference is written once, in `backend/docker-compose.yml`;
-the two `docker pull` / `docker run` invocations in `.github/workflows/ci.yml`
-(the backend-shard job and the e2e job) run whatever ref the `compose-images`
-job reads from it ([Image pinning](#image-pinning)) — MinIO can't be a GitHub
+The reference is written once, in `backend/docker-compose.yml`; the two
+`docker pull` / `docker run` invocations in `.github/workflows/ci.yml` (the
+backend-shard job and the e2e job) run whatever ref the `compose-images` job
+reads from it ([Image pinning](#image-pinning)) — MinIO can't be a GitHub
 Actions `services:` container because it needs a `server /data` command
 argument.
 
-**The pinned release is `RELEASE.2025-09-07T16-13-09Z` — exactly what `latest`
-resolved to (same digest) when the tag was pinned, so pinning changed nothing
-that runs.** It is also the last community image MinIO published: upstream moved
-the community edition to source-only distribution in October 2025 and has since
-archived the repository, which is why `latest` stopped moving and why Dependabot
-has no newer release to offer. The
-`RELEASE.…Z.hotfix.<sha>` tags on quay are MinIO's hotfix line rather than a
-successor release; adopting one is a deliberate behaviour change, not a routine
-bump. Replacing MinIO as the local S3 stand-in, if it ever needs a security
-fix that only ships as source, is its own decision.
+**The pinned release is `RELEASE.2026-08-04T00-00-00Z`**, the newest `pgsty`
+tag when it was adopted. Moving off the frozen `RELEASE.2025-09-07T16-13-09Z`
+was unavoidable (no anonymously pullable registry still serves that digest),
+and CI's storage round-trip tests are what vouch for the newer server.
 
 The PostgreSQL image is `pgvector/pgvector` on the `-pg16` line (official Postgres 16 + the [pgvector](https://github.com/pgvector/pgvector) extension) because the RAG-based extraction priors use a `vector(1536)` column. The image is binary-compatible with the vanilla `postgres:16` data directory, so switching from plain Postgres doesn't require a volume wipe — just `docker compose down && up -d`. If you do swap images on an existing volume, run `REINDEX DATABASE <name>` on each DB once to rebuild any text-column indexes affected by a collation-version change.
 

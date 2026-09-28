@@ -131,6 +131,20 @@ async def load_chart_ownership(
     )
 
 
+def chart_is_empty(*, has_shared: bool, has_own_entity: bool) -> bool:
+    """The one rule behind "this invoice's effective ACTIVE chart — active
+    shared accounts ∪ its own entity's — holds nothing at all."
+
+    Two callers answer the same question from different data shapes and both
+    compose through this predicate so the union can't drift between them:
+    ``chart_has_active_accounts`` below asks it per invoice with one live
+    query; ``gl_recode._ActiveChart.is_empty_for`` asks it per invoice too,
+    but from the org-wide active set a bulk re-code pass already loaded once
+    for every entity it will touch.
+    """
+    return not has_shared and not has_own_entity
+
+
 async def chart_has_active_accounts(
     db: AsyncSession, organization_id: uuid.UUID, entity_id: uuid.UUID | None
 ) -> bool:
@@ -156,6 +170,9 @@ async def chart_has_active_accounts(
             .limit(1)
         )
     ).scalar_one_or_none()
+    # `in_chart` already ORs shared-or-own-entity into one query, so there is
+    # no separate has_shared / has_own_entity to hand `chart_is_empty` here —
+    # `found is not None` IS "not empty" for this combined read.
     return found is not None
 
 

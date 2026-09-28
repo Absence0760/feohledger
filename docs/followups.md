@@ -39,7 +39,13 @@ and an audit that re-derived both found the copy stale at nearly every sync
 transcription was retired rather than corrected again. Add a follow-up here; add
 a GitHub issue only when one warrants its own thread.
 
-**Last reconciled:** 2026-09-22 — the follow-up batch, eight agents each in its
+**Last reconciled:** 2026-09-23 — a five-agent batch closed **five** (c)
+entries and opened none, taking the file from 58 → 53: `gl_recode`'s org-wide
+empty-chart read (decisions §207), the missing per-test timeout on the backend
+suite (§208), the dead Change-password card for a password-less account (§209),
+the public SSO / SAML routes' 500 on an unresolvable IdP block (§210), and the
+reporting currency `GET /api/organization` knew but did not serve (§211).
+Before that, 2026-09-22 — the follow-up batch, eight agents each in its
 own worktree, closing what the #321 / #443 batch had opened earlier the same
 day. **Ten entries closed**, one narrowed, **fourteen opened**, so the file went
 50 → 54; the new ones are grouped under their own heading below. All eight
@@ -63,7 +69,7 @@ section carried its own `decisions.md` § reference, so nothing was lost by
 deleting it; that cross-reference is what makes the pruning safe, and writing
 one is what earns a future entry the right to be deleted.
 
-**58 open: 43 (c) · 9 (a) · 6 (b)** — re-derived from the file, never carried
+**53 open: 38 (c) · 9 (a) · 6 (b)** — re-derived from the file, never carried
 forward. The section heading is authoritative; where an entry also carries a
 `(c)`/`(a)`/`(b)` marker, the two agree.
 `grep -c '^- \[ \]' docs/followups.md`.
@@ -821,69 +827,6 @@ or is a sibling of a fix that needs its own pass.
       **Trigger:** the first non-English tenant importing a CSV, or the next i18n pass
       over server-composed text.
 
-- [ ] **(c) `gl_recode` reads "the chart is empty" org-wide, where every other consumer reads it per invoice entity.**
-      `services/gl_recode._ActiveChart.is_empty()` is true only when the org has NO
-      active account anywhere, while validity is resolved per invoice entity. So in a
-      multi-entity tenant where subsidiary A has neither its own nor shared accounts
-      and B has a chart, a bulk re-code of A's invoices rejects every candidate
-      (`skipped_invalid_code`) — including codes §199 and extraction both accept for
-      A, since A's own effective chart is empty. Nothing incorrect is written; the
-      feature is simply unusable for that subsidiary, and the two definitions of
-      "empty" disagree.
-      **Durable fix:** resolve emptiness per invoice entity — `is_empty_for(entity_id)`
-      over `shared ∪ that entity's own` — so `bulk_recode_gl` accepts a prior for an
-      entity with no chart exactly as `gl_chart` and extraction do, and keeps
-      refusing it for an entity that HAS one. Extend
-      `tests/test_entity_coa.py::test_empty_chart_accepts_any_code_regardless_of_entity`
-      with the mixed case (A empty, B populated).
-      **Trigger:** the first multi-entity tenant that bulk re-codes a subsidiary with
-      no chart of its own, or the next change to `gl_recode`.
-
-- [ ] **(c) `GET /api/organization` does not name the reporting currency the server resolves, so the org store abstains where the server knows the answer.**
-      `currency_conversion.resolve_reporting_currency` has four rungs; the fourth,
-      `settings.reporting_currency_default` (`FEOH_REPORTING_CURRENCY_DEFAULT`),
-      is operator config that neither the web `orgCurrency` store nor mobile's
-      `OrgCurrencyStore` can read, so both answer `null` for an org that set none
-      of the first three (decisions §119, §160, §200). That is honest, but the
-      server KNOWS the code every rollup and every approval-threshold comparison
-      is denominated in: an org configured only through the operator default sees
-      its `/adaptive` thresholds bare and its approval-threshold labels read
-      "(reporting currency)" where "(EUR)" is provable server-side. Most figures
-      already carry the code in their own payload (§160, §196, §200); what reads
-      the store is only what has no payload code — the `/adaptive` thresholds and
-      averages, the approval / CFO-threshold labels, the expense-policy currency
-      column, the zero of an empty selection.
-      **Durable fix:** serve the resolved code on `GET /api/organization` as its
-      own top-level field (e.g. `resolved_reporting_currency`, computed by
-      `resolve_reporting_currency(org.settings)`), admitted to every role by
-      `org_settings_view` the way the three settings rungs are; have both stores
-      read it first and keep the three-rung client resolution only as the
-      fallback for an older backend. The store then answers `null` only before
-      its load lands.
-      **Trigger:** the first tenant whose reporting currency is set only through
-      `FEOH_REPORTING_CURRENCY_DEFAULT`, or the next change to
-      `org_settings_view.NON_ADMIN_SETTINGS` / either store.
-
-- [ ] **(c) `/profile`'s Change-password card is a dead control for an account with no password, and does nothing useful where password sign-in is closed.**
-      The card always renders "Current password / New password" and `PATCH /api/auth/me`
-      refuses with "Current password is incorrect" whenever `User.hashed_password` is NULL,
-      which is every account JIT-provisioned by OIDC/SAML (`identity_provisioning.py`) or
-      created by SCIM (`api/scim.py`). Such a member sees a form they can never submit. In
-      an org with `password_sign_in_closed` (§201) a member who does hold a legacy hash can
-      rotate it, but the result authenticates nothing: no sign-in and no step-up (§191).
-      The rotation still signs out every other session, as any self-service password
-      change does. Not folded into §201 because the card is not a step-up, and the fix
-      needs a product call.
-      **Durable fix:** expose `has_password` on `/auth/me`. It describes the caller's own
-      account, so there is no enumeration concern. Where it is false, replace the form with
-      a sentence saying the account signs in with single sign-on and has no password.
-      Where `password_sign_in_closed` is true, decide whether to keep rotation available
-      (it matters again the day the org leaves SSO-only) with a note that the password is
-      not used for sign-in, or hide the card. Add an e2e beside
-      `tests-e2e/auth/profile-sso-only-step-up.spec.ts`.
-      **Trigger:** the next `/profile` slice, or the first SSO-provisioned member who
-      reports the refusal.
-
 - [ ] **(c) Step-up refusals on `/profile` render the server's English sentence in every locale.**
       A refused factor-change step-up toasts `err.message`, which is the backend's `detail`
       verbatim: `STEP_UP_FAILURE_DETAIL`, `STEP_UP_SSO_ONLY_DETAIL`, or the wrong-host
@@ -898,8 +841,9 @@ or is a sibling of a fix that needs its own pass.
       through `m()` on `/profile`, following `api/einvoiceIssues.ts`, and keep the English
       as the fallback for a code the build predates. Pin it in `test_sso_only.py` and the
       profile e2e.
-      **Trigger:** the next i18n slice that touches `/profile`, or the Change-password
-      entry above, since both land on the same page.
+      **Trigger:** the next i18n slice that touches `/profile`. (The Change-password
+      entry that shared this trigger closed as decisions §209; its two new strings
+      went through `m()`, so this is now the only server English left on the page.)
 
 - [ ] **(c) Dependabot auto-merges bumps to production images that no CI job runs.**
       Since §203, a `docker-compose` PR is tested on the images it bumps *when CI starts
@@ -925,24 +869,6 @@ or is a sibling of a fix that needs its own pass.
       directory), which trades the test for a human review of every Caddy and Node patch.
       **Trigger:** before the minimal VM serves its first customer, or the first
       auto-merged Dependabot compose PR that touches `deploy/compose.prod.yml`.
-
-- [ ] **(c) The public SSO entry points answer an unresolvable IdP block with a 500, not their documented 400 / 404.**
-      `sso_authorize` and `sso_callback` (`api/auth_sso.py`), and `saml_login`, the ACS
-      and `saml_metadata` (`api/auth_saml.py`), call `resolve_sso_config` /
-      `resolve_saml_config` and handle only a `None` return ("SSO is not configured for
-      this tenant", 400, or 404 for metadata). A block with `enabled` set that does not
-      resolve raises `SSOConfigError`, which nothing catches and which has no app-level
-      handler, so these routes 500. Only the two `/config` endpoints catch it. This is
-      pre-existing and not a lockout: the login page shows no SSO button for such a block,
-      and since §204 the password stays open beside it, so nobody reaches these routes
-      except by hand, and the 500 body leaks nothing. But it is a public route whose
-      documented answer is a 400, and each 500 logs a traceback.
-      **Durable fix:** treat `SSOConfigError` exactly like `None` at each of the five
-      sites (one small `_resolved_or_none` helper per module, or the same `except` the
-      `/config` handlers use), returning the existing generic sentence. The public
-      response must not name the offending keys. Pin each route in `test_sso_security.py`
-      / `test_saml_security.py` with an `{enabled: true}` block.
-      **Trigger:** the next SSO or SAML slice.
 
 - [ ] **(c) `settings.sso` has no sanctioned, audited writer, and a partial PATCH silently switches SSO off.**
       Turning `sso_only` on or off, swapping the IdP, and rotating the OIDC client secret
@@ -1014,23 +940,6 @@ or is a sibling of a fix that needs its own pass.
       the file. Then lower `MAX_MISSING_FRACTION` to match. **Never raise it.**
       **Trigger:** the guard firing, or a shard's median approaching ~15 min (where
       the documented 3x runner headroom runs out under a 40-minute cap).
-
-- [ ] **(c) A genuinely hung backend test produces zero diagnostic output.** There is
-      no `pytest-timeout`, no `faulthandler` configuration and no `-p no:randomly` in
-      the backend suite — `[tool.pytest.ini_options]` in `backend/pyproject.toml`
-      carries only `asyncio_mode`, and there is no `pytest.ini`/`setup.cfg`/`tox.ini`.
-      So `timeout-minutes: 40` in `ci.yml` is the only backstop, and when it fires the
-      runner reaps the process: the log ends at `Terminate orphan process: pid (…)
-      (pytest)` with no traceback and no indication of which test was executing.
-      This is **not** the #444 symptom — that was a slow runner, and its author
-      retracted the hang reading — but it is why that run cost two days to diagnose,
-      and PR #366 did hang for real (still `in_progress` at 40 min).
-      **Durable fix:** add `pytest-timeout` and set a per-test ceiling generous enough
-      never to fire on the slowest legitimate `realdb` test (the cap is a debugging
-      aid, not a performance gate — a too-tight timeout becomes exactly the
-      masking-by-retry guard rail 4 forbids), plus `faulthandler_timeout` so a wedged
-      test dumps every thread's stack before it dies.
-      **Trigger:** the next shard that is cancelled rather than failed.
 
 ### Surfaced by retiring the stale archive PRs (2026-09-18, PRs #453/#454)
 

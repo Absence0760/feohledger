@@ -43,6 +43,16 @@ class OrgSettings {
   /// (`docs/decisions.md` §119), and rung 3 is the last one a client can see.
   final String? configuredInvoiceCurrency;
 
+  /// The top-level `resolved_reporting_currency` — the server's OWN answer,
+  /// `currency_conversion.resolve_reporting_currency(org.settings)` computed
+  /// server-side, all four rungs included (the fourth,
+  /// `settings.reporting_currency_default`, is operator config no client can
+  /// read for itself). `null` only when talking to a pre-upgrade or cached
+  /// backend response that omits the field, in which case
+  /// [resolvedReportingCurrency] falls back to the three client-visible
+  /// rungs below.
+  final String? serverResolvedReportingCurrency;
+
   final String defaultPaymentTerms;
   final String invoiceNumberPrefix;
   final String defaultGlAccount;
@@ -61,29 +71,31 @@ class OrgSettings {
     this.reportingCurrency,
     this.paymentsHomeCurrency,
     this.configuredInvoiceCurrency,
+    this.serverResolvedReportingCurrency,
     required this.defaultPaymentTerms,
     required this.invoiceNumberPrefix,
     required this.defaultGlAccount,
     required this.defaultCostCenter,
   });
 
-  /// What the org's aggregate figures are denominated in, or `null` when it
-  /// declares nothing usable.
+  /// What the org's aggregate figures are denominated in, or `null` when
+  /// nothing — server field or client fallback — resolves.
   ///
-  /// The first three rungs of
+  /// Reads the server's own [serverResolvedReportingCurrency] first — the
+  /// exact output of
   /// `backend/app/services/currency_conversion.py::resolve_reporting_currency`,
-  /// in its order — and the direct mirror of the web
-  /// `utils/reportingCurrency.ts::resolveReportingCurrency`, which exists so
-  /// the two surfaces cannot drift. The fourth rung is the server-side
-  /// `settings.reporting_currency_default`, which no client can read; a client
-  /// that substituted `USD` in its place would be guessing at a value the
-  /// operator may have changed.
+  /// all four rungs included, the fourth (`settings.reporting_currency_default`)
+  /// being operator config no client could previously read at all. Falls back
+  /// to the first three client-visible rungs — the direct mirror of the web
+  /// `utils/reportingCurrency.ts::resolveReportingCurrency` — only for a
+  /// pre-upgrade or cached response that omits the field.
   ///
   /// Returns `null` rather than a default for the reason §119 records: this is
   /// the layer that must be able to abstain. The caller decides what an
   /// unproven currency renders as — and in this app it renders as no symbol
   /// at all, never as a dollar sign.
   String? get resolvedReportingCurrency =>
+      normalizeCurrencyCode(serverResolvedReportingCurrency) ??
       normalizeCurrencyCode(reportingCurrency) ??
       normalizeCurrencyCode(paymentsHomeCurrency) ??
       normalizeCurrencyCode(configuredInvoiceCurrency);
@@ -98,7 +110,8 @@ class OrgSettings {
     final company = (settings['company'] as Map<String, dynamic>?) ?? const {};
     final defaults =
         (settings['invoice_defaults'] as Map<String, dynamic>?) ?? const {};
-    final payments = (settings['payments'] as Map<String, dynamic>?) ?? const {};
+    final payments =
+        (settings['payments'] as Map<String, dynamic>?) ?? const {};
 
     String s(Map<String, dynamic> m, String k) => (m[k] as String?) ?? '';
 
@@ -115,6 +128,8 @@ class OrgSettings {
       reportingCurrency: settings['reporting_currency'] as String?,
       paymentsHomeCurrency: payments['home_currency'] as String?,
       configuredInvoiceCurrency: defaults['currency'] as String?,
+      serverResolvedReportingCurrency:
+          json['resolved_reporting_currency'] as String?,
       defaultPaymentTerms: (defaults['payment_terms'] as String?) ?? 'Net 30',
       invoiceNumberPrefix: (defaults['number_prefix'] as String?) ?? 'INV-',
       defaultGlAccount: s(defaults, 'default_gl_account'),
@@ -154,25 +169,25 @@ class OrgSettingsUpdate {
   });
 
   Map<String, dynamic> toJson() => {
-        'name': name,
-        // The backend's UpdateOrganizationRequest shallow-merges these top-level
-        // settings keys into the existing dict, so we send the whole `company`
-        // and `invoice_defaults` sub-objects (their own fields are replaced).
-        'settings': {
-          'company': {
-            'address': companyAddress,
-            'phone': companyPhone,
-            'website': companyWebsite,
-            'tax_id': companyTaxId,
-            'logo_url': companyLogoUrl,
-          },
-          'invoice_defaults': {
-            'currency': defaultCurrency,
-            'payment_terms': defaultPaymentTerms,
-            'number_prefix': invoiceNumberPrefix,
-            'default_gl_account': defaultGlAccount,
-            'default_cost_center': defaultCostCenter,
-          },
-        },
-      };
+    'name': name,
+    // The backend's UpdateOrganizationRequest shallow-merges these top-level
+    // settings keys into the existing dict, so we send the whole `company`
+    // and `invoice_defaults` sub-objects (their own fields are replaced).
+    'settings': {
+      'company': {
+        'address': companyAddress,
+        'phone': companyPhone,
+        'website': companyWebsite,
+        'tax_id': companyTaxId,
+        'logo_url': companyLogoUrl,
+      },
+      'invoice_defaults': {
+        'currency': defaultCurrency,
+        'payment_terms': defaultPaymentTerms,
+        'number_prefix': invoiceNumberPrefix,
+        'default_gl_account': defaultGlAccount,
+        'default_cost_center': defaultCostCenter,
+      },
+    },
+  };
 }

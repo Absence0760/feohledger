@@ -53,9 +53,32 @@ def test_user_response_contract():
         # Web-only: /profile stops offering the password as a step-up proof
         # when it is set (docs/decisions.md §201). Mobile manages no factors.
         "password_sign_in_closed",
+        # Whether THIS account has a password at all — false for every account
+        # JIT-provisioned by OIDC/SAML or created by SCIM. /profile reads it to
+        # replace the dead Change-password form for such an account.
+        "has_password",
     }
     assert required_fields.issubset(data.keys())
     assert isinstance(data["roles"], list)
+
+
+def test_user_response_has_password_defaults_true():
+    """A response built without the field (every pre-existing call site that
+    hasn't been updated) still describes an ordinary password account — the
+    schema default must fail OPEN to "has a password", never closed, or a
+    stale caller would silently blank the Change-password card for every
+    member."""
+    from app.schemas.auth import UserResponse
+
+    resp = UserResponse(
+        id="uuid-123",
+        email="test@acme.com",
+        full_name="Test User",
+        organization_id="org-uuid",
+        is_active=True,
+        roles=["admin"],
+    )
+    assert resp.has_password is True
 
 
 # -- /api/dashboard -----------------------------------------------------------

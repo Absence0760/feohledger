@@ -223,6 +223,77 @@ async def test_empty_chart_accepts_any_code_regardless_of_entity():
     assert report.skipped_invalid_code == 0
 
 
+@pytest.mark.asyncio
+async def test_empty_chart_is_resolved_per_invoice_entity_not_org_wide():
+    """Mixed multi-entity tenant: entity A has neither its own accounts nor a
+    shared one (its effective chart is empty), while entity B has its own
+    chart. A's invoice accepts any code — exactly what `gl_chart` and
+    extraction would do for the same invoice — while B's invoice is still
+    validated against B's own chart in the SAME pass.
+
+    Before the fix, `_ActiveChart.is_empty()` asked org-wide: because B's
+    account makes the org non-empty, A's candidate would be validated against
+    the org-wide chart and rejected as `skipped_invalid_code`, even though no
+    account of A's own or shared exists to reject it against."""
+    entity_a, entity_b = uuid.uuid4(), uuid.uuid4()
+    vendor_a, vendor_b = uuid.uuid4(), uuid.uuid4()
+
+    inv_a = _make_invoice(
+        vendor_id=vendor_a, gl_account=None, entity_id=entity_a, invoice_number="A"
+    )
+    inv_b = _make_invoice(
+        vendor_id=vendor_b, gl_account=None, entity_id=entity_b, invoice_number="B"
+    )
+
+    # Chart: entity_b owns 6000. No shared accounts, nothing for entity_a.
+    db = _make_db_for(
+        chart_rows=[("6000", entity_b)],
+        eligible_invoices=[inv_a, inv_b],
+        priors={vendor_a: "9999", vendor_b: "6000"},
+    )
+
+    report = await bulk_recode_gl(
+        db, organization_id=uuid.uuid4(), filt=RecodeFilter(), dry_run=True
+    )
+
+    changed = {c.invoice_number: c.new_gl for c in report.changes}
+    assert changed == {"A": "9999", "B": "6000"}
+    assert report.skipped_invalid_code == 0
+
+
+@pytest.mark.asyncio
+async def test_empty_chart_for_one_entity_does_not_exempt_a_populated_one():
+    """The other direction of the same mixed tenant: entity B (populated)
+    still refuses an out-of-chart code for its own invoice, even though
+    entity A — in the same bulk pass — has no chart at all and is accepting
+    any code. Emptiness for A must not leak into B's validation."""
+    entity_a, entity_b = uuid.uuid4(), uuid.uuid4()
+    vendor_a, vendor_b = uuid.uuid4(), uuid.uuid4()
+
+    inv_a = _make_invoice(
+        vendor_id=vendor_a, gl_account=None, entity_id=entity_a, invoice_number="A"
+    )
+    inv_b = _make_invoice(
+        vendor_id=vendor_b, gl_account=None, entity_id=entity_b, invoice_number="B"
+    )
+
+    # Chart: entity_b owns 6000. entity_a has nothing. Vendor B's prior points
+    # at a code that isn't live in entity_b's chart at all.
+    db = _make_db_for(
+        chart_rows=[("6000", entity_b)],
+        eligible_invoices=[inv_a, inv_b],
+        priors={vendor_a: "9999", vendor_b: "7777"},
+    )
+
+    report = await bulk_recode_gl(
+        db, organization_id=uuid.uuid4(), filt=RecodeFilter(), dry_run=True
+    )
+
+    changed = {c.invoice_number: c.new_gl for c in report.changes}
+    assert changed == {"A": "9999"}
+    assert report.skipped_invalid_code == 1  # entity B's invoice only
+
+
 # ---------------------------------------------------------------------------
 # extraction — the invoice's own chart, driven through `run_extraction` (realdb)
 #

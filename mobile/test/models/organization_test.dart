@@ -51,6 +51,19 @@ void main() {
       expect(s.defaultPaymentTerms, 'Net 30');
       expect(s.invoiceNumberPrefix, 'INV-');
     });
+
+    test('reads the top-level resolved_reporting_currency field', () {
+      final s = OrgSettings.fromJson({
+        'id': 'org1',
+        'name': 'Acme',
+        'slug': 'acme',
+        'plan': 'pro',
+        'resolved_reporting_currency': 'GBP',
+        'settings': <String, dynamic>{},
+      });
+
+      expect(s.serverResolvedReportingCurrency, 'GBP');
+    });
   });
 
   group('OrgSettingsUpdate.toJson', () {

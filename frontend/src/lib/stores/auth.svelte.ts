@@ -50,6 +50,14 @@ interface User {
 	must_change_password: boolean;
 	mfa_enabled: boolean;
 	mfa_required_by_org: boolean;
+	// Does THIS account have a password at all? False for every account
+	// JIT-provisioned by OIDC/SAML or created by SCIM — `User.hashed_password
+	// is not None` on the server. Independent of `password_sign_in_closed`
+	// below, which is a property of the ORG, not the account: a member can
+	// have no password in an org that has not closed password sign-in.
+	// `/profile` reads it to replace the Change-password form, which such an
+	// account could never submit, with a sentence.
+	has_password: boolean;
 	// The org has closed password sign-in (`sso_only`), so the server refuses
 	// the password as a step-up proof too. The server's own predicate — the
 	// one login and the step-up call — so `/profile` can stop offering a

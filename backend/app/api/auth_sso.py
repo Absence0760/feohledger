@@ -48,6 +48,7 @@ from app.services.identity_provisioning import (
 from app.services.rate_limit import resolve_client_ip
 from app.services.session_management import register_session
 from app.services.sso import (
+    ResolvedSSOConfig,
     SSOConfigError,
     SSOValidationError,
     consume_state,
@@ -125,6 +126,19 @@ async def _resolve_org(
     return await _fetch_org_by_slug(resolved, db), resolved
 
 
+def _resolve_sso_or_none(org_settings: dict | None) -> ResolvedSSOConfig | None:
+    """`resolve_sso_config`, but a block with `enabled` set that fails to
+    resolve (`SSOConfigError`) reads exactly like a genuinely absent one — the
+    same posture `sso_config` below and `is_sso_only` already take. Keeps
+    `sso_authorize` / `sso_callback` on their documented 400 instead of an
+    uncaught 500, and never echoes `SSOConfigError.fields` (the offending
+    keys) to the caller."""
+    try:
+        return resolve_sso_config(org_settings)
+    except SSOConfigError:
+        return None
+
+
 @router.get("/config", response_model=SSOConfigPublic)
 async def sso_config(
     slug: str | None = None,
@@ -164,7 +178,7 @@ async def sso_authorize(
     from fastapi.responses import RedirectResponse
 
     org, slug = await _resolve_org(slug, host, db)
-    config = resolve_sso_config(org.settings)
+    config = _resolve_sso_or_none(org.settings)
     if config is None:
         raise HTTPException(status_code=400, detail="SSO is not configured for this tenant.")
 
@@ -239,7 +253,7 @@ async def sso_callback(
     expected_nonce = bound["nonce"]
 
     org = await _fetch_org_by_slug(tenant_slug, db)
-    config = resolve_sso_config(org.settings)
+    config = _resolve_sso_or_none(org.settings)
     if config is None:
         raise HTTPException(status_code=400, detail="SSO is not configured for this tenant.")
 

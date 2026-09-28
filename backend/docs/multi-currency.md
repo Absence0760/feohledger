@@ -52,6 +52,26 @@ the default rather than 500-ing a dashboard.
 `PATCH /api/organization` with `{"settings": {"reporting_currency": "EUR"}}`
 (admin-only, merged into existing settings).
 
+### Reading it — server-resolved, every role
+
+`GET /api/organization` serves the already-resolved code as its own top-level
+field, `resolved_reporting_currency` — the exact output of this function, all
+four rungs included. It sits outside the role-projected `settings` block (see
+`services/org_settings_view.py`), so every role gets the same answer, admin or
+not; there is nothing here a non-admin projection needs to strip, since the
+first three rungs are already admitted to every role by
+`NON_ADMIN_SETTINGS` for the client-side fallback described next.
+
+Before this field existed, a client could only re-derive the first three rungs
+from `settings` — the fourth, `FEOH_REPORTING_CURRENCY_DEFAULT`, is operator
+config no client can read — so an org configured only through that operator
+default left the web `orgCurrency` store and mobile's `OrgCurrencyStore`
+answering `null` even though the server denominated every rollup in a known
+code (`docs/decisions.md` §119, §160, §200, followups (c)). Both stores now
+read `resolved_reporting_currency` first and keep their own three-rung
+resolution only as a fallback for a cached or pre-upgrade response that omits
+the field.
+
 ## Materialized conversion on the invoice
 
 Four nullable columns persist the conversion **at the time it is computed** so a

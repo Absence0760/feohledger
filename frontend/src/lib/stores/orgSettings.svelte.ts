@@ -1,9 +1,6 @@
 import { api } from '$lib/api';
 import { m } from '$lib/i18n/store.svelte';
-import {
-	resolveReportingCurrency,
-	type ReportingCurrencySettings
-} from '$lib/utils/reportingCurrency';
+import { resolveOrgCurrency, type OrgCurrencyResponse } from '$lib/utils/reportingCurrency';
 
 /**
  * Tenant-wide display currency for *aggregate* figures that don't carry
@@ -16,16 +13,19 @@ import {
  * `reporting_currency`) is labelled from that payload, not from here. This
  * store backs only the figures with nothing better to read.
  *
- * Resolved from `GET /api/organization` in the SAME order the backend uses —
- * `settings.reporting_currency` → `settings.payments.home_currency` →
- * `settings.invoice_defaults.currency`. That order is not a preference; it is
- * `currency_conversion.resolve_reporting_currency`, the function that decides
- * what currency the API's cross-currency rollups are *actually denominated in*.
+ * Resolved from `GET /api/organization`'s own `resolved_reporting_currency` —
+ * the exact answer `currency_conversion.resolve_reporting_currency` computed
+ * server-side, all four rungs included. `utils/reportingCurrency.ts`'s
+ * three-rung client resolution (`settings.reporting_currency` →
+ * `settings.payments.home_currency` → `settings.invoice_defaults.currency`)
+ * is kept as the FALLBACK for a cached or pre-upgrade response that omits the
+ * field — see `resolveOrgCurrency`.
  *
- * **`currency` is `null` until resolved, and stays `null` when all three rungs
- * miss.** The backend has a fourth rung — `settings.reporting_currency_default`,
- * an operator setting no client can read — so a code substituted here would be
- * a guess at an operator-settable value, indistinguishable on screen from one
+ * **`currency` is `null` until resolved, and stays `null` when both the server
+ * field and the three fallback rungs miss.** The backend's fourth rung —
+ * `settings.reporting_currency_default` — used to be an operator setting no
+ * client could read at all, so a code substituted here would have been a
+ * guess at an operator-settable value, indistinguishable on screen from one
  * the tenant configured (`docs/decisions.md` §119, §160, §200). It used to
  * start at, reset to, and degrade to `USD`, which put a `$` on every figure
  * labelled from it for any org that set nothing — and on every figure before
@@ -54,10 +54,6 @@ import {
  * Cached for the session after the first successful load; `reset()`
  * clears it (e.g. on logout / tenant switch).
  */
-
-interface OrgResponse {
-	settings?: ReportingCurrencySettings | null;
-}
 
 class OrgSettingsStore {
 	/** The resolved ISO 4217 code, or `null` for "not proven" — not loaded yet,
@@ -89,11 +85,11 @@ class OrgSettingsStore {
 		if (this.#inflight) return this.#inflight;
 		this.#inflight = (async () => {
 			try {
-				const org = await api.get<OrgResponse>('/api/organization');
+				const org = await api.get<OrgCurrencyResponse>('/api/organization');
 				// `null` when the org declares nothing usable — assigned, not
 				// skipped, so the store says "unknown" rather than keeping a
 				// value from anywhere else.
-				this.currency = resolveReportingCurrency(org?.settings);
+				this.currency = resolveOrgCurrency(org);
 				this.#loaded = true;
 			} catch {
 				// Transient error (or a signed-out race): stay unresolved and

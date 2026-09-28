@@ -94,7 +94,7 @@ full): `/gl-accounts` — it feeds the invoice GL dropdown, which needs every ro
 |---------|------------------------------|-------|--------------------------------------------------------------------|
 | `POST`  | `/api/auth/login`            | (public) | Login with email/password. Returns either `TokenResponse` (`{access_token, must_change_password}`) or `MFAChallengeResponse` (`{mfa_required: true, mfa_challenge_token, methods, must_enroll}`) when MFA is in play. |
 | `POST`  | `/api/auth/logout`           | * | Revoke current token via Redis blocklist                           |
-| `GET`   | `/api/auth/me`               | * | Get current user (roles, `must_change_password`, `mfa_enabled`, `mfa_required_by_org`, `password_sign_in_closed` — the org's `sso_only` rule exactly as login and the step-up enforce it, so `/profile` stops offering the password as a proof there; `docs/decisions.md` §201) |
+| `GET`   | `/api/auth/me`               | * | Get current user (roles, `must_change_password`, `mfa_enabled`, `mfa_required_by_org`, `password_sign_in_closed` — the org's `sso_only` rule exactly as login and the step-up enforce it, so `/profile` stops offering the password as a proof there; `docs/decisions.md` §201 — plus `has_password`, `User.hashed_password is not None`, a property of THIS account rather than the org: false for every OIDC/SAML/SCIM-provisioned member, so `/profile` replaces the dead Change-password form with a sentence instead; `docs/authentication.md` § An account can have no password at all) |
 | `PATCH` | `/api/auth/me`               | * | Update own name or password                                        |
 | `POST`  | `/api/auth/change-password`  | * | Set a new password (clears `must_change_password`)                 |
 | `GET`   | `/api/auth/sessions`         | * | The caller's own live sessions, newest first — `{id (jti), created_at, expires_at, ip, device, method, current}`. Expired-but-tracked entries are pruned, not listed. |
@@ -186,7 +186,7 @@ All three answer a bare `404` when `FEOH_SIGNUP_ENABLED` is off — before valid
 
 | Method | Path                              | Roles  | Description |
 |--------|-----------------------------------|--------|-------------|
-| `GET`  | `/api/organization`               | *      | Get the current tenant's org settings (company, invoice defaults, ERP, extraction, cards, mfa, sso) |
+| `GET`  | `/api/organization`               | *      | Get the current tenant's org settings (company, invoice defaults, ERP, extraction, cards, mfa, sso — role-projected, see `docs/multi-currency.md`) plus the top-level `resolved_reporting_currency` (the server's own `currency_conversion.resolve_reporting_currency` answer, every role) |
 | `PATCH` | `/api/organization`              | admin  | Patch settings. Body `{name?, settings?}` — `settings` is merged into existing JSONB one top-level key at a time, so a key sent replaces that whole block (send the complete `sso` block, not just the field you are changing). A `settings.sso` with `enabled` and `sso_only` whose IdP block does not resolve is a `422` naming the missing or invalid keys, never their values (see `docs/authentication.md` § SSO-only mode). |
 | `POST` | `/api/organization/test-erp`      | admin  | Test ERP connection (uses request body if provided, otherwise saved config) |
 | `POST` | `/api/organization/test-extraction` | admin  | Test AI extraction provider connection |
