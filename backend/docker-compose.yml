@@ -242,7 +242,7 @@ services:
   # the deploy block for NVIDIA GPU (needs nvidia-container-toolkit).
   # See backend/docs/local-ai-testing.md.
   ollama:
-    image: ollama/ollama:0.34.2@sha256:da6e0dc5651df159e45686fd663c4dbe1624a52c44d7280eeac1551d8f865532
+    image: ollama/ollama:0.34.4@sha256:8262851b2846b87c649eddf3e76beb270c52f4d1bc94559f47efde16b0841551
     profiles: ["ai"]
     ports:
       - "11435:11434"
@@ -268,7 +268,7 @@ services:
   # it validates request shape + response parsing, not stateful flows. Point the
   # adapter at it with FEOH_STRIPE_API_BASE=http://localhost:12111/v1.
   stripe-mock:
-    image: stripe/stripe-mock:v0.203.0@sha256:90e2cb49557449a5da30d19f08780667b97a292862b017d56e1276adc5c63587
+    image: stripe/stripe-mock:v0.204.0@sha256:5ae06566429ca6be1088a09729c6015214e6d6a496514ad3d50c7905c84fa2e5
     profiles: ["payments"]
     ports:
       - "12111:12111"
