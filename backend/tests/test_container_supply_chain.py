@@ -216,7 +216,7 @@ def _compose_images(path: Path) -> dict[str, str]:
 
 
 def _repositories() -> set[str]:
-    """Every repository any compose file pins, e.g. `quay.io/minio/minio`, `redis`."""
+    """Every repository any compose file pins, e.g. `pgsty/minio`, `redis`."""
     return {
         ref.split("@", 1)[0].rsplit(":", 1)[0]
         for path in COMPOSE_FILES

@@ -9244,3 +9244,25 @@ configuration; a top-level *result* carries the answer without the input that
 produced it. Tests: `test_org_settings_view.py`,
 `reportingCurrency.test.ts`, `organization_test.dart`,
 `org_currency_store_test.dart`.
+
+## 212. MinIO comes from a community build, `pgsty/minio`, because MinIO's own registries no longer serve anonymous pulls
+
+`quay.io/minio/minio` — adopted when Docker Hub's `minio/minio` stopped serving
+anonymous pulls — started answering `401` to anonymous manifest and tag-list
+requests too (observed 2026-09-28), failing every CI backend and e2e shard at
+the pull step. Upstream ships the community edition as source only, so any
+prebuilt image is now a third party's build. The compose file pins
+`pgsty/minio:RELEASE.2026-08-04T00-00-00Z@sha256:…`: a rebuild of upstream
+source with versioned tags, the same CLI and env vars, and Docker Hub hosting
+Dependabot already watches. The server moves off the frozen 2025-09-07 release
+because nothing anonymously pullable still serves that digest.
+
+**Rejected:** `cgr.dev/chainguard/minio` — signed and source-built, but the free
+tier serves only `latest`, so neither a versioned pin nor a Dependabot bump is
+possible and old-digest availability is outside our control. Building MinIO in
+CI from source — slower on every shard, for a local stand-in. Swapping to a
+different S3 server now — a larger behaviour change than a drop-in rebuild;
+it is the next step if this image goes the same way. The trust level is
+acceptable because MinIO only ever holds throwaway `minioadmin` data locally and
+in CI; production is real S3. Detail: `backend/docs/docker.md` § Where MinIO
+comes from.
