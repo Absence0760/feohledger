@@ -264,6 +264,10 @@ def _user_response(user: User, org: Organization | None = None) -> UserResponse:
         must_change_password=user.must_change_password,
         mfa_enabled=user.mfa_enabled,
         mfa_required_by_org=org_required,
+        # Whether this account has a password at all — every account
+        # JIT-provisioned by OIDC/SAML or created by SCIM does not. See
+        # `UserResponse.has_password`.
+        has_password=user.hashed_password is not None,
         # The step-up's own predicate, not a client-side copy of it — see
         # `_org_closes_password_sign_in` and docs/decisions.md §201.
         password_sign_in_closed=_org_closes_password_sign_in(org),

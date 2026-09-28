@@ -15,15 +15,18 @@ from __future__ import annotations
 
 import base64
 import datetime
+from types import SimpleNamespace
 
 import pytest
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.x509.oid import NameOID
+from fastapi import HTTPException
 from onelogin.saml2.auth import OneLogin_Saml2_Auth
 from onelogin.saml2.utils import OneLogin_Saml2_Utils
 
+import app.api.auth_saml as auth_saml
 from app.api.auth_saml import (
     SAMLConfigPublic,
     _acs_request_data,
@@ -34,6 +37,7 @@ from app.api.auth_saml import (
 )
 from app.services.sso import (
     ResolvedSAMLConfig,
+    SSOConfigError,
     SSOValidationError,
     consume_saml_handoff,
     consume_saml_relay_state,
@@ -421,3 +425,98 @@ async def test_replay_dedup_per_tenant(fake_redis):
     # Same assertion id under a DIFFERENT tenant is still fresh (no cross-tenant
     # block — assertion ids are only unique within an issuer).
     assert await is_event_already_processed("saml:techflow", "_a1") is False
+
+
+# ---------------------------------------------------------------------------
+# An unresolvable-but-`enabled` block is a 400/404, never an uncaught 500
+# (docs/followups.md "The public SSO entry points answer an unresolvable IdP
+# block with a 500, not their documented 400 / 404")
+# ---------------------------------------------------------------------------
+
+
+def _broken_saml_org(slug: str = "acme") -> SimpleNamespace:
+    """`enabled: true` but missing its required trust anchor — `resolve_saml_config`
+    raises `SSOConfigError` for this shape, not `None`."""
+    return SimpleNamespace(
+        slug=slug,
+        settings={
+            "sso": {
+                "enabled": True,
+                "protocol": "saml",
+                "provider": "saml",
+                "idp_entity_id": IDP,
+                "idp_sso_url": "https://idp.test/sso",
+                # idp_x509_cert deliberately omitted -> SSOConfigError
+            }
+        },
+    )
+
+
+class _FakeSAMLPostRequest:
+    """Just enough of `fastapi.Request` for `saml_acs`: a client IP, empty
+    headers, and an async `.form()`."""
+
+    def __init__(self, saml_response: str = "irrelevant", relay_state: str = "rs-1"):
+        self.client = SimpleNamespace(host="1.2.3.4")
+        self.headers: dict[str, str] = {}
+        self._form = {"SAMLResponse": saml_response, "RelayState": relay_state}
+
+    async def form(self):
+        return self._form
+
+
+def test_resolve_saml_or_none_absorbs_config_error():
+    """The helper the five public routes call: `SSOConfigError` -> `None`,
+    exactly like a genuinely absent block."""
+    # Sanity: the block really does raise, not resolve to None on its own.
+    with pytest.raises(SSOConfigError):
+        auth_saml.resolve_saml_config(_broken_saml_org().settings, "acme")
+    assert auth_saml._resolve_saml_or_none(_broken_saml_org().settings, "acme") is None
+
+
+async def test_saml_login_broken_config_is_400_not_500(monkeypatch):
+    async def _resolve_slug(slug, host, db):
+        return slug
+
+    async def _fetch_org(slug, db):
+        return _broken_saml_org()
+
+    monkeypatch.setattr(auth_saml, "resolve_sso_tenant_slug", _resolve_slug)
+    monkeypatch.setattr(auth_saml, "_fetch_org_by_slug", _fetch_org)
+
+    with pytest.raises(HTTPException) as exc:
+        await auth_saml.saml_login(slug="acme", host=None, db=None)
+    assert exc.value.status_code == 400
+    assert exc.value.detail == "SAML SSO is not configured for this tenant."
+    # The public response never names the offending key.
+    assert "idp_x509_cert" not in exc.value.detail
+
+
+async def test_saml_acs_broken_config_is_400_not_500(monkeypatch):
+    async def _consume_relay_state(state):
+        return {"tenant": "acme", "request_id": REQUEST_ID}
+
+    async def _fetch_org(slug, db):
+        return _broken_saml_org()
+
+    monkeypatch.setattr(auth_saml, "consume_saml_relay_state", _consume_relay_state)
+    monkeypatch.setattr(auth_saml, "_fetch_org_by_slug", _fetch_org)
+
+    with pytest.raises(HTTPException) as exc:
+        await auth_saml.saml_acs(_FakeSAMLPostRequest(), db=None)
+    assert exc.value.status_code == 400
+    assert exc.value.detail == "SAML SSO is not configured for this tenant."
+    assert "idp_x509_cert" not in exc.value.detail
+
+
+async def test_saml_metadata_broken_config_is_404_not_500(monkeypatch):
+    async def _fetch_org(slug, db):
+        return _broken_saml_org()
+
+    monkeypatch.setattr(auth_saml, "_fetch_org_by_slug", _fetch_org)
+
+    with pytest.raises(HTTPException) as exc:
+        await auth_saml.saml_metadata(slug="acme", db=None)
+    assert exc.value.status_code == 404
+    assert exc.value.detail == "SAML SSO is not configured for this tenant."
+    assert "idp_x509_cert" not in exc.value.detail

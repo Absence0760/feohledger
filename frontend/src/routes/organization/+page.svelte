@@ -106,6 +106,12 @@
 		plan: string;
 		settings: OrgSettings;
 		created_at: string;
+		// The server's own resolved reporting currency (all four rungs of
+		// `currency_conversion.resolve_reporting_currency`, admin or not). This
+		// page doesn't render it directly — it reloads the `orgCurrency` store
+		// after a save instead (see `orgCurrency.reset()` below) — but the field
+		// is always present, so the type stays honest with the wire shape.
+		resolved_reporting_currency: string;
 	}
 
 	let org = $state<OrgResponse | null>(null);

@@ -326,6 +326,42 @@ shard is reaped. It lives in the lint job because collection needs no services
 green is the one change the guard exists to prevent; the fix is
 `pytest --store-durations`.
 
+### Per-test timeout (pytest-timeout)
+
+Before this, a genuinely hung test had **no** backstop below the shard-level
+`timeout-minutes: 40` in `ci.yml` — GitHub reaps the runner and the log ends at
+`Terminate orphan process`, with no traceback and no indication of which test
+was running. `[tool.pytest.ini_options]` in `pyproject.toml` now sets:
+
+- `timeout = 600` — a 10-minute per-test ceiling. This is a debugging aid, not
+  a performance gate: it exists only to catch a test that will never finish,
+  and must never fire on a slow-but-legitimate one. The arithmetic, from
+  `backend/.test_durations`: the slowest recorded test is 14.65s
+  (`test_rename_databases_script.py`); recorded durations understate real CI
+  wall time by ~2.2x (see the `.test_durations` entry above), so ~32s is that
+  test's realistic CI-equivalent worst case; 600s is ~18.6x that figure — well
+  past the "well over 10x" floor a ceiling like this needs, even accounting for
+  a degraded (~3x slow) runner.
+- `timeout_method = "thread"` — a watchdog thread, not `SIGALRM`. `signal` only
+  interrupts at a Python bytecode boundary and can't reach a stuck C-level
+  wait (a blocked asyncpg/libpq call, a wedged socket) — exactly the shape a
+  real hang takes in this `asyncio_mode = "auto"` suite over Postgres/Redis/
+  MinIO. `thread` doesn't depend on interrupting whatever the main thread is
+  blocked on: at the ceiling it dumps every thread's stack to stderr, then
+  hard-kills the process. The whole run dies rather than just the one test —
+  an acceptable trade, since CI's 40-minute shard cap was going to kill the
+  process anyway; the difference is that the death now carries a traceback.
+- `faulthandler_timeout = 540` — pytest's built-in `faulthandler` plugin (no
+  extra dependency) dumps every thread's stack after this many seconds
+  regardless of `timeout`. Set below `timeout` so that dump completes and
+  flushes to stderr before pytest-timeout's own thread-mode dump-and-kill fires
+  at 600s.
+
+Proven locally: `@pytest.mark.timeout(1)` on a `time.sleep(5)` test, run from
+`backend/` so `pyproject.toml`'s ini options apply, dumped the full stack
+(showing the test blocked in `time.sleep`) and then hard-exited the process —
+no normal pass/fail summary, matching the intended "diagnose, then die" shape.
+
 ## Test databases (the `realdb` harness)
 
 Most of the suite is mock-based. Tests that request the `realdb` fixture

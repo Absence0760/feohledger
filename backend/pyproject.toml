@@ -82,6 +82,14 @@ dev = [
     # equal wall-clock slice. Regenerate the baseline with
     # `pytest --store-durations` after large test-surface changes.
     "pytest-split>=0.11.0,<1",
+    # A hung test previously produced zero diagnostic output: CI's only backstop
+    # was `timeout-minutes: 40` on the whole shard, which just reaps the runner
+    # with no traceback (docs/followups.md — "a genuinely hung backend test
+    # produces zero diagnostic output"). `timeout` + `timeout_method` in
+    # `[tool.pytest.ini_options]` below are this plugin's per-test ceiling; see
+    # that section, and `backend/CLAUDE.md` § CI test sharding, for the ceiling
+    # arithmetic and why `thread` mode is right for this asyncio suite.
+    "pytest-timeout>=2.4.0,<3",
     "httpx>=0.28.1,<1",
     # Tight pin: ruff occasionally adds new lint rules in patch
     # releases (0.15 added the I001 check that bit us once). Pinning
@@ -124,3 +132,41 @@ asyncio_mode = "auto"
 # passlib's import of the deprecated stdlib `crypt` module; dropping passlib
 # (`docs/decisions.md` §151) retired it. Keep the list absent rather than empty
 # so a future entry has to justify itself.
+
+# --- pytest-timeout: a per-test ceiling, so a genuinely hung test dies with
+# diagnostics instead of riding CI's 40-minute shard timeout to a silent
+# "Terminate orphan process" (docs/followups.md). This is a debugging aid, not
+# a performance gate — it must never fire on a slow-but-legitimate test.
+#
+# Ceiling arithmetic (backend/.test_durations, 8,143 recorded tests):
+#   - Slowest recorded test: 14.65s
+#     (test_rename_databases_script.py::test_apply_renames_tenants_control_and_rows_but_not_lookalikes)
+#   - The recorded figures understate real CI wall time by ~2.2x (sum of all
+#     recorded durations is 1,628s; the suite actually runs ~60min/8 shards on
+#     CI — docs/followups.md "the pytest-split baseline is stale" entry).
+#     14.65s * 2.2 ≈ 32.2s is that test's realistic CI-equivalent worst case.
+#   - `timeout = 600` (10 minutes) is ~18.6x that CI-adjusted figure (~41x the
+#     raw recorded figure) — well over the 10x floor, so a real hang is caught
+#     with minutes to spare under the shard's 40-minute cap, while no
+#     legitimate test (even one 3x-degraded on a bad runner, per `backend/
+#     CLAUDE.md` § CI test sharding) comes remotely close to tripping it.
+timeout = 600
+# "signal" (SIGALRM in the main thread) only interrupts at Python bytecode
+# boundaries and can't reach a genuinely stuck C-level wait — a blocked
+# asyncpg/libpq call, a wedged socket read — which is exactly the shape a real
+# hang takes in an `asyncio_mode = "auto"` suite over Postgres/Redis/MinIO. It
+# can also misbehave raising into asyncio's own machinery mid-await. "thread"
+# runs a separate watchdog thread that doesn't depend on interrupting whatever
+# the main thread is blocked on: at the ceiling it dumps every thread's stack
+# (via faulthandler) to stderr, then hard-kills the process. That sacrifices
+# "just fail the one test and keep going" — the whole run dies — but that is
+# the right trade here: a genuinely hung test needs the process to die anyway
+# (CI's 40-minute cap already does that), and this is what makes the death
+# carry a traceback instead of "Terminate orphan process" and nothing else.
+timeout_method = "thread"
+# Built into pytest itself (no extra dependency): dumps every thread's stack
+# to stderr once a test has run this long. Set below `timeout` so this dump —
+# and its flush to stderr — completes before pytest-timeout's own "thread"-mode
+# dump-and-kill fires at 600s; without that gap the process could exit before
+# this one finished writing.
+faulthandler_timeout = 540

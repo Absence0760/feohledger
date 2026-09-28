@@ -38,6 +38,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.gl_account import GLAccount
 from app.models.invoice import Invoice, InvoiceStatus
 from app.models.vendor_priors import VendorExtractionPrior
+from app.services.gl_chart import chart_is_empty
 
 if TYPE_CHECKING:
     from datetime import date
@@ -151,10 +152,25 @@ class _ActiveChart:
     #: entity_id → codes on that entity's own (non-shared) accounts.
     by_entity: dict[uuid.UUID, set[str]]
 
-    def is_empty(self) -> bool:
-        """No active accounts at all → nothing to validate against (accept any
-        candidate, mirroring the pre-multi-entity behaviour)."""
-        return not self.shared and not self.by_entity
+    def is_empty_for(self, entity_id: uuid.UUID | None) -> bool:
+        """No active accounts in THIS invoice's effective chart (shared ∪ its
+        own entity) → nothing to validate a candidate for THIS invoice against
+        (accept any candidate, mirroring the pre-multi-entity behaviour).
+
+        Emptiness is resolved per invoice entity, not org-wide: one bulk pass
+        can span a subsidiary with no chart of its own and one that has a
+        chart, and an org-wide "is there ANY active account anywhere" would
+        make the former's candidates fall back to org-wide validation and get
+        rejected against accounts that belong to a different entity entirely.
+        Composed from ``gl_chart.chart_is_empty`` — the same rule
+        ``chart_has_active_accounts`` applies to a single manual write —
+        computed here from the org-wide active set this module already loaded
+        once for the whole pass, instead of a fresh query per invoice.
+        """
+        return chart_is_empty(
+            has_shared=bool(self.shared),
+            has_own_entity=entity_id is not None and bool(self.by_entity.get(entity_id)),
+        )
 
     def is_valid_for(self, code: str, entity_id: uuid.UUID | None) -> bool:
         if code in self.shared:
@@ -340,11 +356,16 @@ async def bulk_recode_gl(
             no_prior.append(inv)
             continue
 
-        if not active_chart.is_empty() and not active_chart.is_valid_for(prior_code, inv.entity_id):
+        if not active_chart.is_empty_for(inv.entity_id) and not active_chart.is_valid_for(
+            prior_code, inv.entity_id
+        ):
             # Cached value isn't in this invoice's effective chart (shared ∪ the
             # invoice's own entity) — don't apply, but try AI fallback if the
             # operator opted in. An entity-B-only code is rejected here for an
             # entity-A invoice even though it's a live code elsewhere in the org.
+            # `is_empty_for` is per THIS invoice's entity: a subsidiary with no
+            # chart of its own still accepts any code even when another
+            # subsidiary in the same org has a populated one.
             invalid_prior.append(inv)
             continue
 

@@ -22,6 +22,7 @@ from app.schemas.organization import (
     UpdateOrganizationRequest,
 )
 from app.services.audit_dispatch import dispatch_auth_audit
+from app.services.currency_conversion import resolve_reporting_currency
 from app.services.data_residency import (
     DEFAULT_REGION,
     SUPPORTED_REGIONS,
@@ -123,6 +124,13 @@ def _org_response(org: Organization, *, is_admin: bool) -> OrganizationResponse:
         plan=org.plan,
         settings=raw,
         created_at=org.created_at.isoformat() if org.created_at else "",
+        # Computed from the RAW settings, not `raw` above: the three rungs it
+        # can read (`reporting_currency`, `payments.home_currency`,
+        # `invoice_defaults.currency`) are already admitted to every role by
+        # `NON_ADMIN_SETTINGS`, and the fourth rung is operator config, not
+        # tenant data — there is nothing here a non-admin projection would
+        # need to strip.
+        resolved_reporting_currency=resolve_reporting_currency(org.settings),
     )
 
 
@@ -138,6 +146,14 @@ async def get_organization(
     allow-listed projection, not the raw JSONB. Before that, every role could
     read the tenant's ERP / payment / card / extraction / SSO credentials and
     the Slack-Teams webhook URL straight out of this response.
+
+    `resolved_reporting_currency` carries the server's own answer to "what
+    currency is this org's reporting denominated in" — the same function every
+    cross-currency rollup calls, all four resolution rungs included. Every
+    role gets it; a client that previously had to guess (the web `orgCurrency`
+    store, mobile's `OrgCurrencyStore`) reads it first now, and its own
+    three-rung resolution stays only as a fallback for an older cached
+    response.
     """
     return _org_response(org, is_admin=_is_admin(user))
 

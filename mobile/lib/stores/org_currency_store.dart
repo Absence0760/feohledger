@@ -8,12 +8,15 @@ import 'package:feohledger_mobile/models/organization.dart';
 ///
 /// The mobile counterpart of the web `orgCurrency` store
 /// (`frontend/src/lib/stores/orgSettings.svelte.ts`). Both read
-/// `GET /api/organization` — gated only by `get_current_user`, with a
-/// role-projected settings allow-list that admits `reporting_currency`,
-/// `payments.home_currency` and `invoice_defaults.currency` to EVERY role for
-/// precisely this consumer (`backend/app/services/org_settings_view.py`) — and
-/// resolve them through the same three rungs the backend used when it
-/// denominated the figures. See [OrgSettings.resolvedReportingCurrency].
+/// `GET /api/organization`, whose top-level `resolved_reporting_currency` is
+/// the server's own answer — `currency_conversion.resolve_reporting_currency`,
+/// all four rungs included — and reaches every role identically, since it
+/// sits outside the role-projected `settings` block. The three client-visible
+/// settings rungs (`reporting_currency`, `payments.home_currency`,
+/// `invoice_defaults.currency` — admitted to every role by
+/// `backend/app/services/org_settings_view.py` for precisely this consumer)
+/// stay as the fallback for a pre-upgrade or cached response that omits the
+/// field. See [OrgSettings.resolvedReportingCurrency].
 ///
 /// **Not for per-row amounts.** An invoice, a contract, a payment and a
 /// payment-queue row each carry their own `currency`; formatting those with
