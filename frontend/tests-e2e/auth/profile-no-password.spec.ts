@@ -96,9 +96,9 @@ test.describe('/profile — Password card, a password the org no longer uses for
 
 		const submit = card.getByRole('button', { name: 'Change password' });
 		await expect(submit).toBeDisabled();
-		await card.getByLabel('Current password').fill('whatever-it-still-is');
-		await card.getByLabel('New password').fill('a-new-password-1');
-		await card.getByLabel('Confirm new password').fill('a-new-password-1');
+		await card.getByLabel('Current password', { exact: true }).fill('whatever-it-still-is');
+		await card.getByLabel('New password', { exact: true }).fill('a-new-password-1');
+		await card.getByLabel('Confirm new password', { exact: true }).fill('a-new-password-1');
 		await expect(submit).toBeEnabled();
 	});
 });
