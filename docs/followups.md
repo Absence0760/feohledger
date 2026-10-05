@@ -1031,28 +1031,25 @@ or is a sibling of a fix that needs its own pass.
       accessibility pass over `/legal` (`/a11y-hunt`, or the manual
       screen-reader pass `docs/accessibility.md` still has open).
 
-### Surfaced by the payment-path bug hunt (2026-10-04, decisions §214)
+### Surfaced by the payment-path bug hunt (2026-10-05, decisions §214)
 
-- [ ] **(c) Re-extraction can still break a credit memo already applied to the invoice.**
-      §214 makes `PATCH /api/invoices/{id}` and approve-with-corrections refuse
-      an edit that re-links the vendor, changes the currency, or lowers the
-      amount below the applied credits. Extraction is the remaining writer of
-      those fields: a manual `POST /api/invoices/{id}/extract` (from `new` /
-      `failed`, both creditable) re-reads amount + currency and re-runs vendor
-      matching, and the supplier-portal resubmit of a `rejected` invoice — the
-      exact flow decisions §202 admits credits on — re-reads amount + currency
-      (it pins the vendor). It runs in the background, so there is no request to
-      409, and refusing the document's own figures is not right either; the
-      resubmit case also raises a product question (does a corrected invoice
-      already reflect the credit, so netting it again double-counts?).
-      **Durable fix:** enforce the pairing at the money chokepoint as well —
-      `payment_runs.run_refusals` and `create_payment` refuse an invoice whose
-      applied memos disagree with its current vendor or currency (a new
-      `credit_mismatch` refusal code with its queue label), using
-      `applied_credit_integrity` as the one definition — and have extraction call
-      the same check to open a payment-blocking exception naming the memo.
-      **Trigger:** the next change to re-extraction or the portal resubmit
-      path, or the product answer on credits against resubmitted invoices.
+- [ ] **(c) Payment dispatch holds row locks across the processor call with no `lock_timeout`.**
+      `_execute_single_payment` locks the payment row (as it always has) and now
+      also the invoice row (`_lock_payment_invoice`, `FOR NO KEY UPDATE`, §214
+      batch). It holds both until the per-payment commit, which comes after
+      `adapter.create_payment` returns, and the void does the same across
+      `adapter.void_payment`. Every locked invoice writer (send-to-erp, approve,
+      `PATCH`, `payment_erp_sync`, `POST /api/payments`) therefore waits out a
+      slow processor. Nothing in `app/` sets `lock_timeout` or
+      `statement_timeout`, so the wait is unbounded. A deadlock or
+      lock-timeout error raised inside the loop is also caught by
+      `_dispatch_run_payments`' broad `except` and recorded as `failed` on an
+      aborted session. That is pre-existing behaviour, but this lock adds a way
+      to reach it. **Durable fix:** set a `SET LOCAL lock_timeout` on the
+      dispatch and void transactions, and treat a `LockNotAvailable` before the
+      adapter call as a named, retry-safe refusal (`invoice_locked`) rather than
+      `unexpected_error`. **Trigger:** the first report of a request stalled
+      behind a payment run, or the next change to `_dispatch_run_payments`.
 
 ## (a) Blocked on external credentials, accounts, or hardware
 

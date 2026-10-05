@@ -544,6 +544,9 @@ re-sent.
   vendor is owed. The retry re-derives `net_payable_amount` and **skips**; the amount is never
   silently adjusted, so the operator builds a fresh run through the full gate
   set.
+- `applied_credit_mismatch` — a credit memo applied to the invoice no longer
+  matches its vendor or currency (decisions §214). Dispatch would refuse it the
+  same way, so no doomed attempt row is booked.
 - `invoice_has_live_payment` — the invoice has since acquired another live
   payment.
 - `invoice_has_live_card` — a virtual card was minted against the invoice
@@ -1997,6 +2000,7 @@ types already did.
 | Refusal | Reason code | On the queue |
 |---------|-------------|--------------|
 | an unresolved (`open`/`escalated`) payment-blocking exception | the exception **type** (`duplicate` / `fraud_flag` / `line_total_mismatch` / `payment_reconciliation`) | `blocked: true` |
+| an applied credit memo's vendor or currency no longer matches the invoice (a background re-extraction rewrote it after the apply) — netting it would credit the wrong supplier or subtract across currencies (`services/applied_credit_integrity`, decisions §214). Checked before `fully_credited`, whose net is computed from that same credit. `POST /api/payments` refuses it with a 409, and dispatch fails a payment booked before the change as `applied_credit_mismatch:<vendor\|currency>`, before the processor call and retry-safe. `/retry-failed` skips it. | `applied_credit_mismatch` | `blocked: true` |
 | applied credit memos cover the whole invoice — a `$0` payment a real rail rejects as `failed` | `fully_credited` | `blocked: true` |
 | a live virtual card already claims the invoice (`POST /api/cards/generate` mints one with no `Payment` row behind it) | `live_virtual_card` | `blocked: false`, `required_method: "virtual_card"` |
 | a live payment already claims the invoice (`uq_payments_one_live_per_invoice`) | `live_payment` | the row is **excluded** — see below |

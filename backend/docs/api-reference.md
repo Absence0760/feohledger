@@ -531,7 +531,10 @@ exactly that total is allowed). Without this, vendor A's credit reduced vendor
 B's payment, a USD credit was netted digit-for-digit off a EUR payable, and a
 lowered amount consumed the excess credit against nothing. One owner for both
 paths: `services/applied_credit_integrity.refuse_edit_stranding_applied_credits`
-(`docs/decisions.md` §214).
+(`docs/decisions.md` §214). Re-extraction rewrites those fields in the
+background with no request to refuse, so the payment paths re-check the vendor
+and currency pairing as well. An invoice that fails it is refused as
+`applied_credit_mismatch` (`backend/docs/payments.md`).
 
 ### Eligible invoices — the pickers offer exactly what the guards accept
 

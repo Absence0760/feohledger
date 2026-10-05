@@ -33,6 +33,7 @@ from app.models.invoice import Invoice
 from app.models.organization import Organization
 from app.models.payment import Payment, PaymentRun
 from app.models.user import User
+from app.services.applied_credit_integrity import applied_credit_conflicts
 from app.services.currency_conversion import (
     reporting_amount_at_locked_rate,
     resolve_reporting_currency,
@@ -298,6 +299,10 @@ _RETRY_SAFE_FAILURE_PREFIXES = (
     # the payability gate itself and skips while the invoice is still
     # unpayable, so this only unlocks the retry once it is payable again.
     "invoice_not_payable",
+    # The invoice's vendor or currency no longer pairs with a credit memo
+    # applied to it (a background re-extraction rewrote it after the apply;
+    # decisions §214). Refused BEFORE the adapter call, like the two above.
+    "applied_credit_mismatch:",
     # A payment-blocking exception (`fraud_flag` from an approved BEC bank
     # swap, `duplicate`, `line_total_mismatch`, `payment_reconciliation`) was
     # raised after the run was built. `_execute_single_payment` refuses BEFORE
@@ -599,6 +604,10 @@ async def _live_payment_invoice_numbers(
 #: amount detail.
 REFUSAL_LIVE_VIRTUAL_CARD = "live_virtual_card"
 REFUSAL_FULLY_CREDITED = "fully_credited"
+#: An applied credit memo's vendor or currency no longer matches the invoice
+#: (`services/applied_credit_integrity`, decisions §214) — netting it would
+#: credit the wrong supplier or subtract across currencies.
+REFUSAL_APPLIED_CREDIT_MISMATCH = "applied_credit_mismatch"
 REFUSAL_LIVE_PAYMENT = "live_payment"
 
 #: The single rail a card-claimed invoice CAN still be paid on, derived from
@@ -638,6 +647,7 @@ class RunRefusal:
 #: backstop.
 _REFUSAL_ORDER: tuple[str, ...] = (
     REFUSAL_LIVE_VIRTUAL_CARD,
+    REFUSAL_APPLIED_CREDIT_MISMATCH,
     REFUSAL_FULLY_CREDITED,
     REFUSAL_LIVE_PAYMENT,
 )
@@ -695,6 +705,7 @@ async def run_refusal_reasons(
     if net_amounts is None:
         net_amounts = await net_payable_amounts(db, rows)
     live_payments = await live_payment_invoices(db, ids)
+    credit_conflicts = await applied_credit_conflicts(db, rows)
 
     out: dict[uuid.UUID, RunRefusal] = {}
     for inv in rows:
@@ -703,6 +714,10 @@ async def run_refusal_reasons(
             out[inv.id] = RunRefusal(exception_type)
         elif inv.id in card_refused:
             out[inv.id] = RunRefusal(REFUSAL_LIVE_VIRTUAL_CARD, only_method=CARD_CLAIM_ONLY_METHOD)
+        elif inv.id in credit_conflicts:
+            # Before `fully_credited`: the net that check reads is itself
+            # computed from the mismatched credit, so it means nothing here.
+            out[inv.id] = RunRefusal(REFUSAL_APPLIED_CREDIT_MISMATCH)
         elif net_amounts.get(inv.id, Decimal("0")) <= 0:
             out[inv.id] = RunRefusal(REFUSAL_FULLY_CREDITED)
         elif inv.id in live_payments:
@@ -734,6 +749,11 @@ _REFUSAL_MESSAGES: dict[str, str] = {
     REFUSAL_LIVE_VIRTUAL_CARD: (
         "Invoice(s) already have a live virtual card issued against them — "
         "pay them by card, or cancel the card first: {numbers}"
+    ),
+    REFUSAL_APPLIED_CREDIT_MISMATCH: (
+        "Invoice(s) carry an applied credit memo whose vendor or currency no longer "
+        "matches the invoice — correct the invoice so it matches the credit before "
+        "paying it: {numbers}"
     ),
     REFUSAL_FULLY_CREDITED: (
         "Invoice(s) fully covered by applied credit memos — nothing to pay: {numbers}"
