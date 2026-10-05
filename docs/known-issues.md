@@ -5,15 +5,21 @@ names the root cause, the evidence, blast radius, and a recommended fix
 approach — this is a staging area for real problems, not a place to let them
 go stale. See root `CLAUDE.md` guard rail 6 (no dangling deferred findings).
 
-**Two entries are open** — the two local-e2e entries at the bottom. The header
+**One entry is open**: the `payments/` local-e2e flake near the bottom. The
+`queue-blocked` entry beside it was struck on 2026-10-04. Its defect, a spec
+helper that counted DataTable's loading placeholder as a row, had been fixed
+on 2026-09-09 by #390, but nobody struck the entry, so the file over-reported
+by one for a month. The header
 once said "one" while three sat beneath it, then "three" in the same change
 that struck the third; a known-issues file that miscounts itself is the failure
 this note has now warned about twice. Two defects were **fixed on 2026-09-17**:
 the `/organization` 320px reflow defect (issue #432), along with six more routes
 that failed the same criterion and had no entry at all because nothing measured
 them; and the local-e2e `alembic` drift, which now has a pre-run guard that
-refuses to start against a stale database. The other fifteen are
-`~~struck-through~~` resolved stubs, kept because the *diagnosis* is the
+refuses to start against a stale database. Sixteen of the seventeen `##`
+entries are now `~~struck-through~~` resolved stubs. (This line said "the other
+fifteen" while the file held fifteen struck in total, the two above included.)
+They are kept because the *diagnosis* is the
 expensive part and is worth not re-deriving. Add a new entry at the top when a
 defect is diagnosed but can't be fixed in the same session.
 
@@ -804,9 +810,54 @@ lands, run `payments/` on its own when working locally.
 
 ---
 
-## Two `queue-blocked` e2e cases fail on a fully-seeded local tenant
+## ~~Two `queue-blocked` e2e cases fail on a fully-seeded local tenant~~ — FIXED 2026-09-09 (confirmed 2026-10-04)
 
-**Diagnosed 2026-09-04 · not fixed · local-only, CI is green**
+**Resolved — the defect was in the spec helper, not the app, and it was fixed
+by #390 without this entry being struck.** Root cause: `loadMoreUntilRow`
+(`frontend/tests-e2e/fixtures/helpers.ts`) counted rows with a bare
+`table tbody tr`, and `ui/DataTable.svelte` renders its *loading* state as a
+`<tr><td class="empty">` row too. So the opening "first page is on screen" poll
+passed against the loading placeholder, the loop then read `.btn-load-more`
+before the response that renders it had landed, saw `count() === 0`, and
+returned having paged nothing. A row on page 2 then failed `toBeVisible()` as
+"element(s) not found" — exactly the "exits on no Load-more control, though ~30
+rows against `QUEUE_PAGE_SIZE = 20` should show one" observation below, and the
+gap "between the queue response and the rendered rows". #390 (commit
+`08ae54b8`) changed the locator to `table tbody tr:not(:has(td.empty))`, so
+the poll waits for real rows and the Load-more check is read against the
+response that also renders the footer.
+
+Why only *these* cases, and only on a big tenant: the row has to be on page 2
+(the queue orders `due_date ASC NULLS LAST, id`, and the spec's invoices have no
+due date, so they sort last once the queue exceeds 20 rows), and the case has to
+call the helper exactly **once**. The fraud-flag case calls it twice; the second
+call starts after the first page has rendered and pages correctly, which is why
+it passed with the same interception helper.
+
+**Evidence (2026-10-04, `fix/queue-blocked-full-seed`).** Run against a
+dedicated backend on :8001 / Vite on :7801, tenant `e2e2` freshly seeded with
+the full `seed.py`. A fresh full seed leaves only 15 queue rows, under one
+page, so the tenant was padded with 12 dated `approved` invoices to the 27-row
+shape this entry described:
+
+| helper locator | tenant | result |
+|---|---|---|
+| old `table tbody tr` (reverted temporarily) | full + padded to 27 rows | **3 of 15 failed** (`--repeat-each 3`): the unknown-reason case twice and the create-draft-409 case once, each "element(s) not found" |
+| current `:not(:has(td.empty))` | full + padded to 27 rows | 30 / 30 passed (`--repeat-each 6`) |
+| current | full, unpadded (15 rows) | 15 / 15 passed |
+| current | lean (`seed_tenant_lean`) | 15 / 15 passed |
+
+The failure is a race, not deterministic: whether the loading placeholder is
+still on screen when the poll runs depends on how fast the queue answers.
+That explains why it showed up on a busy shared local stack and never in CI,
+and why the 409 case, which uses the same single-call pattern, failed in the
+reproduction even though this entry named only two cases.
+
+No app change was needed, and no timeout, retry or skip was added. The
+original diagnosis follows, kept because it is the record of how the symptom
+presented.
+
+**Diagnosed 2026-09-04**
 
 `frontend/tests-e2e/payments/queue-blocked.spec.ts` — *"an unknown
 `blocked_reason` code still blocks, with a generic reason"* and *"a
