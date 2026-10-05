@@ -3,7 +3,7 @@
 	// `result.columns`, with money-typed measures rendered through <Money> (the
 	// values are exact decimal strings, never re-computed here). Paginates over
 	// `total_rows`.
-	import type { ReportResult } from '$lib/types/reports';
+	import { cellCurrency, type ReportResult } from '$lib/types/reports';
 	import DataTable from '$lib/components/ui/DataTable.svelte';
 	import Money from '$lib/components/ui/Money.svelte';
 
@@ -47,7 +47,11 @@
 					{#each result.columns as col (col.key)}
 						<td class:right={col.kind === 'measure'} class:mono={col.kind === 'measure'}>
 							{#if isMoney(col.key)}
-								<Money amount={row[col.key] as string | number | null} mono />
+								<Money
+									amount={row[col.key] as string | number | null}
+									currency={cellCurrency(col, row)}
+									mono
+								/>
 							{:else}
 								{row[col.key] ?? '—'}
 							{/if}

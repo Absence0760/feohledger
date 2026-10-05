@@ -65,6 +65,9 @@ class Dimension:
     type: str  # "string" | "date" | "enum"
     column: Any  # the real SQLAlchemy column
     enum_values: tuple[str, ...] | None = None
+    # A column on another table names the (target, onclause) the engine
+    # outer-joins to reach it. Server-defined, like the column itself.
+    join: tuple[Any, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -94,6 +97,11 @@ class Source:
     dimensions: dict[str, Dimension] = field(default_factory=dict)
     measures: dict[str, Measure] = field(default_factory=dict)
     filters: dict[str, FilterDef] = field(default_factory=dict)
+    # The dimension holding the currency this source's money is denominated in.
+    # Required whenever the source has a money measure (guarded by
+    # `test_every_money_measure_has_a_currency_dimension`): a money aggregate is
+    # always grouped by it, so no figure is ever a sum across currencies.
+    currency_dimension: str | None = None
 
 
 def _source(
@@ -103,6 +111,8 @@ def _source(
     dimensions: list[Dimension],
     measures: list[Measure],
     filters: list[FilterDef],
+    *,
+    currency_dimension: str | None = None,
 ) -> Source:
     return Source(
         key=key,
@@ -111,6 +121,7 @@ def _source(
         dimensions={d.key: d for d in dimensions},
         measures={m.key: m for m in measures},
         filters={f.key: f for f in filters},
+        currency_dimension=currency_dimension,
     )
 
 
@@ -163,6 +174,7 @@ REPORT_SOURCES: dict[str, Source] = {
             FilterDef("due_date", "Due Date", "date", Invoice.due_date, _DATE_OPS),
             FilterDef("created_at", "Created", "date", Invoice.created_at, _DATE_OPS),
         ],
+        currency_dimension="currency",
     ),
     "payments": _source(
         "payments",
@@ -173,6 +185,16 @@ REPORT_SOURCES: dict[str, Source] = {
             Dimension("method", "Method", "string", Payment.method),
             Dimension("provider", "Provider", "string", Payment.provider),
             Dimension("corridor", "Corridor", "string", Payment.corridor),
+            # `Payment.amount` is denominated in its INVOICE's currency and the
+            # payment row carries no currency of its own (see
+            # `currency_conversion.payment_reporting_amount_sql`).
+            Dimension(
+                "currency",
+                "Currency",
+                "string",
+                Invoice.currency,
+                join=(Invoice, Invoice.id == Payment.invoice_id),
+            ),
             Dimension("created_at", "Created", "date", Payment.created_at),
             Dimension("submitted_at", "Submitted", "date", Payment.submitted_at),
             Dimension("completed_at", "Completed", "date", Payment.completed_at),
@@ -189,6 +211,7 @@ REPORT_SOURCES: dict[str, Source] = {
             FilterDef("created_at", "Created", "date", Payment.created_at, _DATE_OPS),
             FilterDef("completed_at", "Completed", "date", Payment.completed_at, _DATE_OPS),
         ],
+        currency_dimension="currency",
     ),
     "vendors": _source(
         "vendors",
@@ -253,6 +276,7 @@ REPORT_SOURCES: dict[str, Source] = {
             FilterDef("expense_date", "Expense Date", "date", Expense.expense_date, _DATE_OPS),
             FilterDef("created_at", "Created", "date", Expense.created_at, _DATE_OPS),
         ],
+        currency_dimension="currency",
     ),
 }
 
@@ -306,6 +330,7 @@ class _PlannedDimension:
     type: str
     expr: Any  # labeled SQLAlchemy expression
     is_date_bucket: bool
+    join: tuple[Any, Any] | None = None
 
 
 @dataclass
@@ -315,6 +340,9 @@ class _PlannedMeasure:
     type: str  # output type: "money" | "number"
     agg: str
     expr: Any
+    # Money only: the dimension key whose value, on the same row, is the
+    # currency this figure is denominated in.
+    currency_key: str | None = None
 
 
 @dataclass
@@ -479,6 +507,42 @@ def _build_where(fdef: FilterDef, op: str, value: Any) -> Any:
     raise ReportValidationError(f"unsupported operator '{op}'")
 
 
+def _plan_dimension(dim: Dimension, grain: str | None) -> _PlannedDimension:
+    """Compile one catalog dimension into its labeled group-by expression."""
+    if dim.type != "date":
+        return _PlannedDimension(
+            key=dim.key,
+            label=dim.label,
+            type=dim.type,
+            expr=dim.column.label(dim.key),
+            is_date_bucket=False,
+            join=dim.join,
+        )
+    grain = grain or DEFAULT_GRAIN
+    if grain not in ALLOWED_GRAINS:
+        raise ReportValidationError(
+            f"unknown date grain '{grain}'; allowed: {sorted(ALLOWED_GRAINS)}"
+        )
+    if _is_timestamp_column(dim.column):
+        # An instant is bucketed by its UTC calendar day — the same zone the
+        # date filters' day bounds use (`_day_start`). A bare cast to TIMESTAMP
+        # converted through the SESSION's `TimeZone`, so a row a January filter
+        # admitted could land in a February bucket on a non-UTC session.
+        bucket_input = func.timezone("UTC", dim.column)
+    else:
+        # A calendar DATE has no zone; the cast only gives date_trunc a
+        # TIMESTAMP to work on.
+        bucket_input = cast(dim.column, DateTime)
+    return _PlannedDimension(
+        key=dim.key,
+        label=dim.label,
+        type=dim.type,
+        expr=func.date_trunc(grain, bucket_input).label(dim.key),
+        is_date_bucket=True,
+        join=dim.join,
+    )
+
+
 def compile_spec(spec: ReportSpec) -> _Plan:
     """Validate ``spec`` against the catalog and compile it to a query plan.
 
@@ -505,33 +569,13 @@ def compile_spec(spec: ReportSpec) -> _Plan:
             )
         if dspec.key in expr_by_key:
             raise ReportValidationError(f"duplicate dimension '{dspec.key}'")
-        is_date_bucket = False
-        if dim.type == "date":
-            grain = dspec.grain or DEFAULT_GRAIN
-            if grain not in ALLOWED_GRAINS:
-                raise ReportValidationError(
-                    f"unknown date grain '{grain}'; allowed: {sorted(ALLOWED_GRAINS)}"
-                )
-            # Cast to TIMESTAMP first so date_trunc is unambiguous for both
-            # Date and TIMESTAMPTZ columns.
-            expr = func.date_trunc(grain, cast(dim.column, DateTime)).label(dim.key)
-            is_date_bucket = True
-        elif dspec.grain is not None:
+        if dim.type != "date" and dspec.grain is not None:
             raise ReportValidationError(
                 f"dimension '{dspec.key}' is not a date and does not take a grain"
             )
-        else:
-            expr = dim.column.label(dim.key)
-        expr_by_key[dim.key] = expr
-        planned_dims.append(
-            _PlannedDimension(
-                key=dim.key,
-                label=dim.label,
-                type=dim.type,
-                expr=expr,
-                is_date_bucket=is_date_bucket,
-            )
-        )
+        planned = _plan_dimension(dim, dspec.grain)
+        expr_by_key[dim.key] = planned.expr
+        planned_dims.append(planned)
 
     planned_measures: list[_PlannedMeasure] = []
     for mspec in spec.measures:
@@ -554,15 +598,27 @@ def compile_spec(spec: ReportSpec) -> _Plan:
         agg_fn = getattr(func, agg)
         expr = agg_fn(measure.column).label(out_key)
         expr_by_key[out_key] = expr
+        out_type = _measure_out_type(measure, agg)
         planned_measures.append(
             _PlannedMeasure(
                 out_key=out_key,
                 label=_measure_label(measure, agg),
-                type=_measure_out_type(measure, agg),
+                type=out_type,
                 agg=agg,
                 expr=expr,
+                currency_key=source.currency_dimension if out_type == "money" else None,
             )
         )
+
+    # A money aggregate is only meaningful within ONE currency. When the user
+    # did not group by currency, group by it for them — one row per currency
+    # per group, each labelled by its own code — rather than add USD to EUR and
+    # present the result as one number (docs/decisions.md §160, §200, §228).
+    ccy_key = source.currency_dimension
+    if ccy_key and ccy_key not in expr_by_key and any(m.currency_key for m in planned_measures):
+        planned = _plan_dimension(source.dimensions[ccy_key], None)
+        expr_by_key[ccy_key] = planned.expr
+        planned_dims.append(planned)
 
     where: list[Any] = []
     for fspec in spec.filters:
@@ -648,7 +704,10 @@ def _build_columns_meta(plan: _Plan) -> list[dict]:
     for d in plan.dimensions:
         cols.append({"key": d.key, "label": d.label, "kind": "dimension", "type": d.type})
     for m in plan.measures:
-        cols.append({"key": m.out_key, "label": m.label, "kind": "measure", "type": m.type})
+        col = {"key": m.out_key, "label": m.label, "kind": "measure", "type": m.type}
+        if m.currency_key:
+            col["currency_key"] = m.currency_key
+        cols.append(col)
     return cols
 
 
@@ -673,7 +732,14 @@ async def run_report(
 
     select_exprs = [d.expr for d in plan.dimensions] + [m.expr for m in plan.measures]
 
-    grouped = select(*select_exprs)
+    grouped = select(*select_exprs).select_from(model)
+    # A dimension living on another table (a payment's currency is its
+    # invoice's) is reached through its catalog-defined join, once.
+    joined: set[Any] = set()
+    for d in plan.dimensions:
+        if d.join is not None and d.join[0] not in joined:
+            grouped = grouped.outerjoin(*d.join)
+            joined.add(d.join[0])
     # Entity scope (multi-entity): narrows to model.entity_id when one is
     # selected; a consolidated view (None) leaves it untouched.
     grouped = apply_entity_scope(grouped, model, entity_id)
