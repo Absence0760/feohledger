@@ -1784,7 +1784,34 @@ Both surfaces funnel through one helper each (`api/auth._audit_mfa_event`, `api/
 | `Organization.settings.mfa.required` | control-plane DB (JSONB) | Org-wide policy; lives next to other settings. |
 | Email-OTP hash | Redis (`mfa:email_otp:<user_id>`) | Short-lived, single-use, no need to persist. |
 | WebAuthn ceremony challenge | Redis (`webauthn:{reg,auth}_challenge:<user_id>`) | Short-lived, single-use; the verify call rejects an attacker-chosen challenge. |
-| MFA challenge token | client only (sessionStorage) | Stateless JWT — server doesn't need to remember it. |
+| MFA challenge token | client only (sessionStorage) | Stateless JWT — server doesn't need to remember it, except its `jti` on the blocklist once redeemed. |
+
+#### Single-use means single-use under concurrency
+
+A check in one Redis round trip and a consume in another is single-use only for
+requests that happen not to overlap. Every one-time secret on the sign-in path is
+therefore consumed by **one atomic command whose result decides the outcome**:
+
+- **Email OTP** (both surfaces): after the constant-time compare matches, the
+  `DEL` that consumes it must report `1` — two requests carrying the same
+  correct code both pass the compare, and only the one whose `DEL` removed the
+  key is told it verified. A wrong guess never reaches the `DEL`, so it cannot
+  burn the owner's code.
+- **MFA challenge token**: `decode_challenge_token`'s "already used" check runs
+  *before* the factor is verified, so two requests can redeem one challenge
+  with two different valid factors (the authenticator code and an emailed
+  backup code). `consume_challenge_token` is a `SET NX` on the blocklist
+  (`app.redis.claim_token_block`); `/mfa/verify`, the passkey verify and the
+  portal twin all 401 `MFA challenge token already used` when they lose it, so
+  one password check yields at most one session.
+- **OIDC `state`, SAML RelayState, SAML token handoff**: `GETDEL`, like the
+  password-reset token. The RelayState is what binds an assertion to exactly
+  one AuthnRequest, so a race on it was a replay.
+
+`tests/test_mfa_single_use_race.py` drives each pair concurrently against a fake
+Redis that yields on every command, as a network round trip does — a fake that
+never yields cannot interleave two requests, which is how the old code passed
+its single-use tests.
 
 ### SSO + MFA
 

@@ -59,7 +59,9 @@ class _FakeRedis:
         return value
 
     async def delete(self, key):
-        self.store.pop(key, None)
+        # Real Redis DEL returns the number of keys removed; the email-OTP
+        # single-use claim reads it.
+        return 0 if self.store.pop(key, None) is None else 1
 
 
 @pytest.fixture

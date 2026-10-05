@@ -591,8 +591,10 @@ async def portal_mfa_challenge(
     await clear_auth_failures("portal_mfa", mfa_identity)
 
     # Single-use: burn the challenge token now that the factor is verified so
-    # it can't be replayed to mint a second session (issue #162).
-    await mfa.consume_challenge_token(claims.jti)
+    # it can't be replayed to mint a second session (issue #162). Refused when
+    # a concurrent request already redeemed it — mirrors `api/auth.verify_mfa`.
+    if not await mfa.consume_challenge_token(claims.jti):
+        raise HTTPException(status_code=401, detail="MFA challenge token already used")
 
     # Mint FIRST, audit second — the same order `api/auth.verify_mfa` uses, and
     # the same principle as §111's "the row is written after the commit".

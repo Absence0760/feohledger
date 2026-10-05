@@ -34,6 +34,16 @@ class FakeRedis:
         self.strings[key] = value if isinstance(value, bytes) else str(value).encode("utf-8")
         self.ttls[key] = ttl
 
+    async def set(self, key, value, nx: bool = False, ex: int | None = None):
+        # `app.redis.claim_token_block` (the MFA challenge's single-use claim)
+        # is a `SET NX EX`: None when the key already exists, as in real Redis.
+        if nx and key in self.strings:
+            return None
+        self.strings[key] = value if isinstance(value, bytes) else str(value).encode("utf-8")
+        if ex is not None:
+            self.ttls[key] = ex
+        return True
+
     async def exists(self, key) -> int:
         return 1 if key in self.strings else 0
 

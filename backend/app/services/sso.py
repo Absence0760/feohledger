@@ -652,13 +652,20 @@ async def create_state(tenant_slug: str) -> tuple[str, str]:
 
 
 async def consume_state(state: str) -> dict[str, Any]:
-    """Look up + delete the state binding. Raises if state is unknown/expired."""
+    """Look up + delete the state binding. Raises if state is unknown/expired.
+
+    One `GETDEL`, not a GET then a DELETE. With two round trips, concurrent
+    requests carrying the same value both read it before either deleted it, so
+    "single-use" held only for requests that happened not to overlap. The same
+    holds for the SAML RelayState and the token handoff below — the RelayState
+    is the binding that makes a SAML assertion answer exactly one AuthnRequest,
+    so a race on it is a replay.
+    """
     r = await get_redis()
     key = f"{STATE_PREFIX}{state}"
-    raw = await r.get(key)
+    raw = await r.getdel(key)
     if not raw:
         raise SSOValidationError("Login session expired or was tampered with. Please try again.")
-    await r.delete(key)
     return json.loads(raw)
 
 
@@ -685,10 +692,9 @@ async def consume_saml_relay_state(state: str) -> dict[str, Any]:
     or expired. Returns {tenant, request_id}."""
     r = await get_redis()
     key = f"{SAML_RELAYSTATE_PREFIX}{state}"
-    raw = await r.get(key)
+    raw = await r.getdel(key)
     if not raw:
         raise SSOValidationError("Login session expired or was tampered with. Please try again.")
-    await r.delete(key)
     return json.loads(raw)
 
 
@@ -716,10 +722,9 @@ async def consume_saml_handoff(code: str) -> dict[str, Any]:
     """Look up + delete the handoff record (single-use). Raises if expired."""
     r = await get_redis()
     key = f"{SAML_HANDOFF_PREFIX}{code}"
-    raw = await r.get(key)
+    raw = await r.getdel(key)
     if not raw:
         raise SSOValidationError("This login link has expired. Please sign in again.")
-    await r.delete(key)
     return json.loads(raw)
 
 

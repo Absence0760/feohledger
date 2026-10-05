@@ -822,8 +822,10 @@ async def verify_mfa(
 
     # Single-use: burn the challenge token now that the factor is verified so
     # it can't be replayed to mint a second session from one password check
-    # (issue #162).
-    await mfa.consume_challenge_token(claims.jti)
+    # (issue #162). A lost claim means a concurrent request redeemed the same
+    # challenge first — refuse, or one password check yields two sessions.
+    if not await mfa.consume_challenge_token(claims.jti):
+        raise HTTPException(status_code=401, detail="MFA challenge token already used")
 
     token, jti = create_access_token_with_jti(user.id, user.organization_id)
     await register_session(
@@ -1557,7 +1559,9 @@ async def passkey_authenticate_finish(
 
     # Single-use: burn the challenge token now that the passkey factor is
     # verified so it can't be replayed to mint a second session (issue #162).
-    await mfa.consume_challenge_token(claims.jti)
+    # Refused when a concurrent request already redeemed it (see verify_mfa).
+    if not await mfa.consume_challenge_token(claims.jti):
+        raise HTTPException(status_code=401, detail="MFA challenge token already used")
 
     token, jti = create_access_token_with_jti(user.id, user.organization_id)
     await register_session(
