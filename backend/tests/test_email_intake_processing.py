@@ -30,6 +30,7 @@ inconsistency to fix here.
 from __future__ import annotations
 
 import uuid
+from contextlib import ExitStack, contextmanager
 from decimal import Decimal
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -136,7 +137,7 @@ async def test_process_unknown_recipient_returns_error_and_touches_nothing():
     create_engine = MagicMock()
     get_client = MagicMock()
     with (
-        patch.object(email_intake, "resolve_tenant_from_recipient", AsyncMock(return_value=None)),
+        patch.object(email_intake, "resolve_tenants_from_recipient", AsyncMock(return_value=[])),
         patch("sqlalchemy.ext.asyncio.create_async_engine", create_engine),
         patch("app.services.storage._get_client", get_client),
     ):
@@ -158,7 +159,7 @@ async def test_unresolved_recipient_is_logged_without_the_intake_token(caplog):
 
     caplog.set_level(logging.WARNING, logger="app.services.email_intake")
     token = "S3cretIntakeTok"
-    with patch.object(email_intake, "resolve_tenant_from_recipient", AsyncMock(return_value=None)):
+    with patch.object(email_intake, "resolve_tenants_from_recipient", AsyncMock(return_value=[])):
         await email_intake.process_inbound_email(
             MagicMock(),
             InboundEmail(to=f"invoices+{token}@ap.example.com", sender="vendor@supplier.test"),
@@ -176,7 +177,7 @@ async def test_unresolved_recipient_without_a_token_reports_token_absent(caplog)
     import logging
 
     caplog.set_level(logging.WARNING, logger="app.services.email_intake")
-    with patch.object(email_intake, "resolve_tenant_from_recipient", AsyncMock(return_value=None)):
+    with patch.object(email_intake, "resolve_tenants_from_recipient", AsyncMock(return_value=[])):
         await email_intake.process_inbound_email(
             MagicMock(), InboundEmail(to="ap@ap.example.com", sender="v@x.com")
         )
@@ -188,7 +189,7 @@ async def test_process_no_usable_attachments_returns_error():
     create_engine = MagicMock()
     bad = InboundAttachment(filename="memo.docx", content_type="application/msword", content=b"x")
     with (
-        patch.object(email_intake, "resolve_tenant_from_recipient", AsyncMock(return_value=org)),
+        patch.object(email_intake, "resolve_tenants_from_recipient", AsyncMock(return_value=[org])),
         patch("sqlalchemy.ext.asyncio.create_async_engine", create_engine),
     ):
         result = await email_intake.process_inbound_email(
@@ -214,7 +215,7 @@ async def test_skipped_attachment_filename_is_sanitised():
         content=b"x",
     )
     with (
-        patch.object(email_intake, "resolve_tenant_from_recipient", AsyncMock(return_value=org)),
+        patch.object(email_intake, "resolve_tenants_from_recipient", AsyncMock(return_value=[org])),
         patch("sqlalchemy.ext.asyncio.create_async_engine", create_engine),
     ):
         result = await email_intake.process_inbound_email(
@@ -244,7 +245,7 @@ async def test_xml_attachment_is_accepted_not_skipped():
     )
     inv_id = uuid.uuid4()
     with (
-        patch.object(email_intake, "resolve_tenant_from_recipient", AsyncMock(return_value=org)),
+        patch.object(email_intake, "resolve_tenants_from_recipient", AsyncMock(return_value=[org])),
         patch.object(
             email_intake, "_create_invoice_from_attachment", AsyncMock(return_value=inv_id)
         ),
@@ -275,7 +276,7 @@ async def test_process_creates_invoice_per_attachment_and_dispatches_system_extr
     engine = MagicMock(dispose=AsyncMock())
     dispatch = AsyncMock()
     with (
-        patch.object(email_intake, "resolve_tenant_from_recipient", AsyncMock(return_value=org)),
+        patch.object(email_intake, "resolve_tenants_from_recipient", AsyncMock(return_value=[org])),
         patch.object(email_intake, "_create_invoice_from_attachment", AsyncMock(side_effect=ids)),
         patch(
             "app.database._make_tenant_url",
@@ -325,7 +326,7 @@ async def test_process_dedupes_identical_message_id_across_deliveries():
     )
 
     with (
-        patch.object(email_intake, "resolve_tenant_from_recipient", AsyncMock(return_value=org)),
+        patch.object(email_intake, "resolve_tenants_from_recipient", AsyncMock(return_value=[org])),
         patch.object(email_intake, "_create_invoice_from_attachment", AsyncMock(side_effect=ids)),
         patch(
             "app.database._make_tenant_url",
@@ -362,7 +363,7 @@ async def test_process_does_not_dedupe_distinct_message_ids():
     create_engine = MagicMock(return_value=engine)
 
     with (
-        patch.object(email_intake, "resolve_tenant_from_recipient", AsyncMock(return_value=org)),
+        patch.object(email_intake, "resolve_tenants_from_recipient", AsyncMock(return_value=[org])),
         patch.object(email_intake, "_create_invoice_from_attachment", AsyncMock(side_effect=ids)),
         patch(
             "app.database._make_tenant_url",
@@ -401,6 +402,121 @@ async def test_process_does_not_dedupe_distinct_message_ids():
     assert dispatch.await_count == 2
 
 
+@contextmanager
+def _patched_tenant_io(create_invoice, dispatch):
+    """The patches every orchestration test below needs, minus tenant resolution."""
+    patches = (
+        patch.object(email_intake, "_create_invoice_from_attachment", create_invoice),
+        patch(
+            "app.database._make_tenant_url",
+            MagicMock(return_value="postgresql+asyncpg://x/feoh_any"),
+        ),
+        patch(
+            "sqlalchemy.ext.asyncio.create_async_engine",
+            MagicMock(side_effect=lambda *_a, **_k: MagicMock(dispose=AsyncMock())),
+        ),
+        patch(
+            "sqlalchemy.ext.asyncio.async_sessionmaker",
+            MagicMock(side_effect=lambda *_a, **_k: _FakeSession),
+        ),
+        patch("app.services.extraction_dispatch.dispatch_extraction", dispatch),
+    )
+    with ExitStack() as stack:
+        for p in patches:
+            stack.enter_context(p)
+        yield
+
+
+async def test_one_message_id_reaching_two_tenants_is_delivered_to_both():
+    """The dedup claim is per TENANT, not per Message-ID.
+
+    ``Message-ID`` names the email, not a delivery. A vendor billing two
+    customers that both run on this platform sends ONE message to both intake
+    addresses, and Mailgun forwards it once per matched recipient carrying the
+    same Message-ID. With a platform-global key the first tenant's delivery
+    claimed it and the second tenant's invoice was silently dropped as a
+    "Duplicate delivery" — a payable that customer never saw.
+    """
+    org_a = _org(token="aaa", enabled=True, slug="acme")
+    org_b = _org(token="bbb", enabled=True, slug="beta")
+    ids = [uuid.uuid4(), uuid.uuid4()]
+    dispatch = AsyncMock()
+    msg_id = "<one-email-two-customers@vendor.example.com>"
+
+    def _email(to: str) -> InboundEmail:
+        return InboundEmail(to=to, sender="v@x.com", message_id=msg_id, attachments=[_pdf()])
+
+    resolve = AsyncMock(side_effect=[[org_a], [org_b]])
+    with (
+        patch.object(email_intake, "resolve_tenants_from_recipient", resolve),
+        _patched_tenant_io(AsyncMock(side_effect=ids), dispatch),
+    ):
+        to_a = await email_intake.process_inbound_email(MagicMock(), _email("invoices+aaa@ap.co"))
+        to_b = await email_intake.process_inbound_email(MagicMock(), _email("invoices+bbb@ap.co"))
+
+    assert to_a.error is None and to_a.invoices_created == [ids[0]]
+    assert to_b.error is None, "the second tenant's copy was deduped against the first's"
+    assert to_b.invoices_created == [ids[1]]
+    assert [c.args[1] for c in dispatch.await_args_list] == [org_a.id, org_b.id]
+
+
+async def test_a_redelivery_to_the_same_tenant_is_still_deduped_after_scoping():
+    """Scoping the key by tenant must not weaken the dedup it exists for."""
+    org = _org(token="aaa", enabled=True, slug="acme")
+    dispatch = AsyncMock()
+    email = InboundEmail(
+        to="invoices+aaa@ap.co", sender="v@x.com", message_id="<m@v>", attachments=[_pdf()]
+    )
+    with (
+        patch.object(email_intake, "resolve_tenants_from_recipient", AsyncMock(return_value=[org])),
+        _patched_tenant_io(AsyncMock(side_effect=[uuid.uuid4()]), dispatch),
+    ):
+        await email_intake.process_inbound_email(MagicMock(), email)
+        again = await email_intake.process_inbound_email(MagicMock(), email)
+    assert again.error == "Duplicate delivery"
+    dispatch.assert_awaited_once()
+
+
+async def test_one_notification_naming_two_intake_addresses_reaches_both_tenants():
+    """SES lists every recipient its receipt rule matched in ONE notification,
+    so one payload can name two tenants' intake addresses. Each is that
+    tenant's delivery — resolving only the first left the other with nothing.
+    """
+    org_a = _org(token="aaa", enabled=True, slug="acme")
+    org_b = _org(token="bbb", enabled=True, slug="beta")
+    ids = [uuid.uuid4(), uuid.uuid4()]
+    dispatch = AsyncMock()
+    with (
+        patch.object(
+            email_intake, "resolve_tenants_from_recipient", AsyncMock(return_value=[org_a, org_b])
+        ),
+        _patched_tenant_io(AsyncMock(side_effect=ids), dispatch),
+    ):
+        result = await email_intake.process_inbound_email(
+            MagicMock(),
+            InboundEmail(
+                to="invoices+aaa@ap.co, invoices+bbb@ap.co",
+                sender="v@x.com",
+                message_id="<both@v>",
+                attachments=[_pdf()],
+            ),
+        )
+    assert result.error is None
+    assert result.invoices_created == ids
+    assert [c.args[1] for c in dispatch.await_args_list] == [org_a.id, org_b.id]
+
+
+async def test_resolve_tenants_returns_every_enabled_recipient_once_in_order():
+    org_a = _org(token="aaa", enabled=True, slug="acme")
+    org_b = _org(token="bbb", enabled=True, slug="beta")
+    org_off = _org(token="ccc", enabled=False, slug="off")
+    ctrl = _FakeOrgsCtrl([org_a, org_b, org_off])
+    got = await email_intake.resolve_tenants_from_recipient(
+        ctrl, "invoices+bbb@ap.co, invoices+ccc@ap.co, invoices+aaa@ap.co, invoices+bbb@ap.co"
+    )
+    assert got == [org_b, org_a]
+
+
 async def test_process_releases_dedup_claim_on_downstream_failure_so_retry_succeeds():
     """If invoice creation blows up AFTER the dedup claim is made (e.g. a
     transient S3/tenant-DB outage), the claim must be released so the
@@ -420,7 +536,7 @@ async def test_process_releases_dedup_claim_on_downstream_failure_so_retry_succe
 
     # First delivery: invoice creation blows up mid-flight.
     with (
-        patch.object(email_intake, "resolve_tenant_from_recipient", AsyncMock(return_value=org)),
+        patch.object(email_intake, "resolve_tenants_from_recipient", AsyncMock(return_value=[org])),
         patch.object(
             email_intake,
             "_create_invoice_from_attachment",
@@ -447,7 +563,7 @@ async def test_process_releases_dedup_claim_on_downstream_failure_so_retry_succe
     engine2 = MagicMock(dispose=AsyncMock())
     dispatch2 = AsyncMock()
     with (
-        patch.object(email_intake, "resolve_tenant_from_recipient", AsyncMock(return_value=org)),
+        patch.object(email_intake, "resolve_tenants_from_recipient", AsyncMock(return_value=[org])),
         patch.object(
             email_intake, "_create_invoice_from_attachment", AsyncMock(return_value=inv_id)
         ),
@@ -504,7 +620,7 @@ async def test_post_commit_failure_keeps_the_dedup_claim_so_a_retry_cannot_dupli
     )
 
     with (
-        patch.object(email_intake, "resolve_tenant_from_recipient", AsyncMock(return_value=org)),
+        patch.object(email_intake, "resolve_tenants_from_recipient", AsyncMock(return_value=[org])),
         patch.object(
             email_intake, "_create_invoice_from_attachment", AsyncMock(return_value=inv_id)
         ),

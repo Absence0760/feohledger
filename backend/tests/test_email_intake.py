@@ -544,6 +544,71 @@ def test_ses_adapter_parses_mime():
     assert pdfs[0].content == pdf
 
 
+def _ses_body(raw_mime: str, **notification) -> bytes:
+    return json.dumps({"Message": json.dumps({"content": raw_mime, **notification})}).encode()
+
+
+_REDIRECTED_MIME = (
+    # What an AP mailbox's redirect rule (or a vendor's Bcc) delivers: the
+    # header still names the customer's own mailbox, never the intake address.
+    "From: ap@vendor.com\r\n"
+    "To: accounts-payable@customer.example\r\n"
+    "Subject: Invoice\r\n"
+    "\r\n"
+    "body\r\n"
+)
+
+
+def test_ses_adapter_routes_on_the_envelope_recipient_not_the_to_header():
+    """A Bcc'd or redirected intake message has no intake address in `To:` —
+    only the SMTP envelope (`receipt.recipients`) knows where SES delivered it.
+    Reading the header dropped every such message as an unknown address."""
+    from app.services.email_intake import extract_tokens
+    from app.services.email_intake_adapters import get_parser
+
+    parsed = get_parser("ses")(
+        _ses_body(
+            _REDIRECTED_MIME,
+            mail={"destination": ["invoices+tok@ap.example.com"]},
+            receipt={"recipients": ["invoices+tok@ap.example.com"]},
+        ),
+        {},
+    )
+    assert parsed is not None
+    assert extract_tokens(parsed.to) == ["tok"]
+
+
+def test_ses_adapter_keeps_every_envelope_recipient():
+    from app.services.email_intake import extract_tokens
+    from app.services.email_intake_adapters import get_parser
+
+    parsed = get_parser("ses")(
+        _ses_body(
+            _REDIRECTED_MIME,
+            receipt={"recipients": ["invoices+one@ap.example.com", "invoices+two@ap.example.com"]},
+        ),
+        {},
+    )
+    assert extract_tokens(parsed.to) == ["one", "two"]
+
+
+def test_ses_adapter_falls_back_to_mail_destination_then_the_header():
+    from app.services.email_intake import extract_tokens
+    from app.services.email_intake_adapters import get_parser
+
+    parser = get_parser("ses")
+    via_destination = parser(
+        _ses_body(_REDIRECTED_MIME, mail={"destination": ["invoices+dest@ap.example.com"]}), {}
+    )
+    assert extract_tokens(via_destination.to) == ["dest"]
+
+    header_only = parser(
+        _ses_body("From: a@b.c\r\nTo: invoices+hdr@ap.example.com\r\n\r\nx\r\n", receipt="junk"),
+        {},
+    )
+    assert extract_tokens(header_only.to) == ["hdr"]
+
+
 def test_mailgun_adapter_parses_json_form():
     from app.services.email_intake_adapters import get_parser
 
