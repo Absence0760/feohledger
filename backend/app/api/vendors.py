@@ -88,6 +88,7 @@ from app.services.sanctions_categories import (
 )
 from app.services.vendor_screening import screen_best_effort, screen_vendor_record
 from app.services.vendor_sync import sync_vendors_from_erp
+from app.services.vendor_tax_id import rekey_tax_id
 from app.tenant import (
     apply_entity_scope,
     get_entity_id,
@@ -1091,8 +1092,13 @@ async def update_vendor(
     # only STAGED here (not applied), so it doesn't re-screen the live vendor.
     identity_changed = bool((_IDENTITY_FIELDS - {"bank_details"}) & payload.keys())
 
+    # Through the shared writer, so a changed TIN voids the old IRS-match stamp
+    # instead of leaving the 1099 dashboard reporting it verified.
+    if "tax_id" in payload:
+        rekey_tax_id(vendor, payload["tax_id"])
     for field, value in payload.items():
-        setattr(vendor, field, value)
+        if field != "tax_id":
+            setattr(vendor, field, value)
 
     await db.flush()
     await db.refresh(vendor)
@@ -1517,7 +1523,12 @@ async def sync_vendors_from_erp_endpoint(
     vendor_dicts = [dataclasses.asdict(v) for v in erp_vendors]
 
     result = await sync_vendors_from_erp(
-        db, org_id, vendor_dicts, entity_id=entity_id, actor_id=user.id
+        db,
+        org_id,
+        vendor_dicts,
+        entity_id=entity_id,
+        actor_id=user.id,
+        org_settings=org.settings,
     )
     await db.commit()
 
@@ -1884,7 +1895,13 @@ async def reset_vendor_portal_user_password(
 async def list_vendor_change_requests(
     vendor_id: uuid.UUID,
     db: AsyncSession = Depends(get_tenant_db),
-    user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER, ROLE_CFO)),
+    # EXACTLY the queue's gate (`list_change_requests`, `change_request_counts`;
+    # decisions §48). This route returns the UNMASKED proposed value, and it
+    # used to admit ROLE_CFO — the one role the queue deliberately excludes,
+    # and one that `GET /vendors/{id}` shows only last-4s to — so a CFO could
+    # read every staged account number and tax ID in full. Its only caller is
+    # the admin | ap_manager review page.
+    user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER)),
 ):
     """Change requests for one vendor. Reveals the full proposed value so
     AP can verify the new bank / tax details before approving."""
@@ -2001,9 +2018,8 @@ async def approve_change_request(
     elif req.change_type == "tax_id":
         new_tax = str((req.proposed_value or {}).get("tax_id") or "")
         last4 = new_tax[-4:] if len(new_tax) >= 4 else None
-        vendor.tax_id = new_tax
         # A re-keyed tax ID invalidates any prior TIN verification.
-        vendor.tin_verified_at = None
+        rekey_tax_id(vendor, new_tax)
     else:
         raise HTTPException(status_code=400, detail="Unknown change type")
 
@@ -2042,6 +2058,19 @@ async def approve_change_request(
             actor_id=user.id,
         )
         await _flag_payable_invoices_for_bank_change(db, vendor=vendor, actor_id=user.id)
+    elif req.change_type == "tax_id":
+        # `tax_id` is in `_IDENTITY_FIELDS` and the adapters screen on it, so it
+        # owes the same re-screen `update_vendor` gives an AP edit of the field.
+        # Without this, the supplier-driven route was the one way to re-key a
+        # vendor's identity with no sanctions check behind it.
+        await _screen_best_effort(
+            db,
+            vendor=vendor,
+            org=org,
+            org_id=org.id,
+            check_type="tax_id_change",
+            actor_id=user.id,
+        )
 
     await db.commit()
     await db.refresh(req)

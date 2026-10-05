@@ -234,9 +234,20 @@ withholding compliance. Design notes:
 ### Early-payment discount offers (`portal.py`)
 
 Vendor-facing view of the dynamic-discounting offers the AP team extends to the
-supplier (see `dynamic-discounting.md`). Every offer the vendor sees is scoped
-to their own `vendor_id` **or** to one of their own invoices — a vendor can
-never see another vendor's offers (cross-vendor / unknown id → 404, never 403).
+supplier (see `dynamic-discounting.md`). Every offer the vendor sees is either a
+vendor-level offer (no invoice) scoped to their own `vendor_id`, **or** an offer
+on one of their own invoices — a vendor can never see another vendor's offers
+(cross-vendor / unknown id → 404, never 403).
+
+**An offer that names an invoice belongs to the invoice's current owner**, and
+its own `vendor_id` column is ignored for visibility. It used to be enough for
+that column to match: an offer raised before AP re-linked the invoice to the
+right vendor (or created with a mismatched `vendor_id` — `POST
+/api/discounts/offers` copies the body's) showed the stale vendor a foreign
+invoice's number and amount and let them **accept** the discount, which the
+payment run then deducted from the real owner's payment. Keying on the invoice
+means a re-link carries the offers with it (`_vendor_offer_filter`, pinned by
+`tests/test_portal_discount_offers.py`).
 
 | Method | Path                                       | Notes                                                                                  |
 |--------|--------------------------------------------|----------------------------------------------------------------------------------------|
@@ -356,7 +367,7 @@ concurrency) and `tests/test_card_reveal_endpoint.py` (handler ordering).
 | DELETE | `/vendors/{id}/portal-users/{vendor_user_id}`        | Remove a portal user                  |
 | GET    | `/vendors/change-requests/counts`                    | Whole-set tallies for the queue — `{total, pending, by_status}` (admin, ap_manager — **exactly** the queue list's gate, decisions §48: it previously admitted `cfo`, who cannot read the queue, so the size of the staged-bank-change review set was visible to a role excluded from it); counts only, PII-free. A nav badge driven off a page of results undercounts once the queue paginates — the same reason `/vendors/counts` exists |
 | GET    | `/vendors/change-requests`                           | Pending change-request queue (admin, ap_manager); value masked |
-| GET    | `/vendors/{id}/change-requests`                      | One vendor's requests (admin, ap_manager, cfo); value revealed |
+| GET    | `/vendors/{id}/change-requests`                      | One vendor's requests (admin, ap_manager — the queue's gate; CFO excluded because the value is revealed) |
 | POST   | `/vendors/change-requests/{id}/approve`              | Apply the staged change to the vendor (admin, ap_manager); `FOR UPDATE` locked, exactly-once |
 | POST   | `/vendors/change-requests/{id}/reject`               | Mark rejected; never touches the vendor (admin, ap_manager) |
 

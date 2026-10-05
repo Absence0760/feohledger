@@ -29,7 +29,7 @@ class SanctionsCheckResponse(BaseModel):
     id: str
     vendor_id: str
     provider: str
-    check_type: str  # initial | periodic | manual | pre_payment
+    check_type: str  # initial | periodic | manual | pre_payment | bank_change | tax_id_change
     result: str  # clear | match | review_required
     risk_score: str | None = None
     matched_list: str | None = None

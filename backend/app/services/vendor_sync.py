@@ -17,6 +17,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.vendor import Vendor
 from app.services.audit_dispatch import dispatch_audit
+from app.services.vendor_screening import screen_best_effort
+from app.services.vendor_tax_id import rekey_tax_id
 
 
 async def sync_vendors_from_erp(
@@ -25,6 +27,7 @@ async def sync_vendors_from_erp(
     erp_vendors: list[dict],
     entity_id: uuid.UUID | None = None,
     actor_id: uuid.UUID | None = None,
+    org_settings: dict | None = None,
 ) -> dict:
     """Sync a list of vendor records from an ERP into the local database.
 
@@ -36,6 +39,15 @@ async def sync_vendors_from_erp(
     row this writes. ``None`` means the sync had no human behind it (a future
     background caller), which the trail records as a system action rather than
     attributing it to nobody in particular.
+
+    ``org_settings`` selects the sanctions provider for the re-screen an
+    existing vendor owes when the ERP changes its identity (``name`` or
+    ``tax_id`` — the fields the adapters screen on), exactly as the same edit
+    through ``PATCH /api/vendors/{id}`` re-screens. Best-effort, like every
+    other identity re-screen: a provider failure never rolls the sync back.
+    Newly-created rows are left to the periodic sweep (they start with a NULL
+    ``last_screened_at``, so they are due on its first tick) and to the
+    pre-payment screen.
 
     Each erp_vendor dict should have:
         - erp_vendor_id: str (required — the vendor ID in the ERP)
@@ -59,6 +71,8 @@ async def sync_vendors_from_erp(
     # vendor audited before the flush would produce a row whose `entity_id` is
     # NULL — evidence pointing at nothing.
     audited: list[tuple[Vendor, str, str]] = []
+    # Existing vendors whose screened identity this pull changed.
+    rescreen: list[Vendor] = []
 
     for erp_v in erp_vendors:
         erp_id = erp_v.get("erp_vendor_id")
@@ -77,11 +91,21 @@ async def sync_vendors_from_erp(
         if existing:
             # Update fields if changed
             changed = False
-            for field in ("name", "code", "email", "phone", "address", "tax_id", "payment_terms"):
+            identity_changed = False
+            for field in ("name", "code", "email", "phone", "address", "payment_terms"):
                 new_val = erp_v.get(field)
                 if new_val is not None and getattr(existing, field) != new_val:
                     setattr(existing, field, new_val)
                     changed = True
+                    identity_changed = identity_changed or field == "name"
+            # Through the shared writer: an ERP-side TIN change voids the old
+            # IRS-match stamp rather than inheriting it.
+            new_tax_id = erp_v.get("tax_id")
+            if new_tax_id is not None and rekey_tax_id(existing, new_tax_id):
+                changed = True
+                identity_changed = True
+            if identity_changed:
+                rescreen.append(existing)
 
             existing.erp_synced_at = now
             if changed:
@@ -105,10 +129,14 @@ async def sync_vendors_from_erp(
                     # Link existing vendor to ERP
                     name_match.erp_vendor_id = erp_id
                     name_match.erp_synced_at = now
-                    for field in ("code", "email", "phone", "address", "tax_id", "payment_terms"):
+                    for field in ("code", "email", "phone", "address", "payment_terms"):
                         new_val = erp_v.get(field)
                         if new_val is not None:
                             setattr(name_match, field, new_val)
+                    if erp_v.get("tax_id") is not None and rekey_tax_id(
+                        name_match, erp_v["tax_id"]
+                    ):
+                        rescreen.append(name_match)
                     if name_match.status == "unverified":
                         name_match.status = "active"
                         name_match.source = "erp_sync"
@@ -147,6 +175,18 @@ async def sync_vendors_from_erp(
                 erp_vendor_id=erp_id,
                 change=change,
             )
+
+    # After the audit rows, so a screen's own `vendor.screened` row follows the
+    # `vendor.synced_from_erp` row that explains why it ran.
+    for vendor in rescreen:
+        await screen_best_effort(
+            db,
+            vendor=vendor,
+            org_settings=org_settings,
+            org_id=organization_id,
+            check_type="initial",
+            actor_id=actor_id,
+        )
 
     return {"created": created, "updated": updated, "unchanged": unchanged}
 

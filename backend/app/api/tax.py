@@ -81,6 +81,8 @@ from app.services.tin_validation_adapters import (
 from app.services.tin_validation_adapters import (
     list_available_providers as list_tin_providers,
 )
+from app.services.vendor_screening import screen_best_effort
+from app.services.vendor_tax_id import rekey_tax_id
 from app.tenant import get_tenant, get_tenant_db
 from app.utils.dates import utc_today
 
@@ -178,15 +180,31 @@ async def update_vendor_w9_fields(
     vendor_id: uuid.UUID,
     body: W9UpdateRequest,
     db: AsyncSession = Depends(get_tenant_db),
+    org: Organization = Depends(get_tenant),
     user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER)),
     org_id: uuid.UUID = Depends(get_org_id),
 ):
-    """Update W-9 / tax fields on a vendor without uploading a new file."""
+    """Update W-9 / tax fields on a vendor without uploading a new file.
+
+    A changed `tax_id` goes through `rekey_tax_id` (voids the old TIN match)
+    and re-screens the vendor, exactly as the same edit on `PATCH /vendors/{id}`
+    does — the TIN is an identity field the sanctions adapters screen on."""
     vendor = await _get_vendor_or_404(db, vendor_id)
 
     data = body.model_dump(exclude_unset=True)
+    tax_id_changed = "tax_id" in data and rekey_tax_id(vendor, data["tax_id"])
     for key, value in data.items():
-        setattr(vendor, key, value)
+        if key != "tax_id":
+            setattr(vendor, key, value)
+    if tax_id_changed:
+        await screen_best_effort(
+            db,
+            vendor=vendor,
+            org_settings=org.settings,
+            org_id=org_id,
+            check_type="initial",
+            actor_id=user.id,
+        )
     # PII-free: the FIELD NAMES that changed, never their values — `tax_id` is
     # one of them, and a TIN must never reach the audit trail (invariant #7).
     await dispatch_audit(
@@ -285,11 +303,12 @@ async def verify_vendor_tin(
 
     # An explicit tax_id in the request updates the stored TIN and validates
     # the new value; otherwise validate whatever is already on the row.
-    if body.tax_id is not None:
-        vendor.tax_id = body.tax_id
-    tin = vendor.tax_id
+    # Refuse an empty TIN BEFORE the row moves (same §29 rule as above), rather
+    # than re-keying to "" and relying on the session rollback to undo it.
+    tin = body.tax_id if body.tax_id is not None else vendor.tax_id
     if not tin:
         raise HTTPException(status_code=400, detail="Vendor has no TIN on file")
+    tax_id_changed = rekey_tax_id(vendor, tin)
     result = await adapter.validate(
         tin=tin,
         legal_name=vendor.name,
@@ -302,6 +321,17 @@ async def verify_vendor_tin(
         # A failed/indeterminate re-check clears any prior verification so the
         # dashboard never shows a stale green check against a bad TIN.
         vendor.tin_verified_at = None
+    if tax_id_changed:
+        # A replacement TIN is an identity change the sanctions adapters screen
+        # on — the same re-screen `PATCH /vendors/{id}` gives it.
+        await screen_best_effort(
+            db,
+            vendor=vendor,
+            org_settings=org.settings,
+            org_id=org_id,
+            check_type="initial",
+            actor_id=user.id,
+        )
     # PII-free: verdict + provider only. NEVER the TIN, and not the redacted
     # last-4 either — a durable trail is the wrong place for even a fragment.
     await dispatch_audit(

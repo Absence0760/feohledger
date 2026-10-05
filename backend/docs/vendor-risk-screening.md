@@ -110,6 +110,16 @@ Call sites:
   re-screens only when an identity field changed (`name`, `tax_id`,
   `bank_details.country`, beneficial owners). Best-effort: a screening failure
   never blocks the vendor write. Gated by `FEOH_VENDOR_SCREENING_ENABLED`.
+- **Other tax-ID writers** — `PATCH /api/tax/vendors/{id}/w9`, the
+  `POST /api/tax/vendors/{id}/tin-verify` override, and ERP vendor sync
+  (`services/vendor_sync.py`, for an existing row whose `name` or `tax_id` the
+  ERP changed) — `check_type="initial"`, best-effort. Every `tax_id` write goes
+  through `services/vendor_tax_id.rekey_tax_id`, which reports whether the
+  number actually changed; that, not the field's presence in the request, is
+  what triggers the screen. ERP-*created* rows are not screened inline: they
+  start with a NULL `last_screened_at`, so the periodic sweep picks them up on
+  its first tick, and the pre-payment screen backstops them before any money
+  moves.
 - **Manual re-screen** — `POST /api/vendors/{id}/screen` (`check_type="manual"`).
 - **Approved bank-detail change** (`api/vendors.py::approve_change_request`) —
   `check_type="bank_change"`. The dual-control gate catches the *approval* of a
@@ -133,6 +143,13 @@ Call sites:
   resolution has no segregation check of its own. See
   [`supplier-portal.md`](supplier-portal.md) § Credential provenance and the BEC
   dual control.
+- **Approved tax-ID change** (`api/vendors.py::approve_change_request`) —
+  `check_type="tax_id_change"`. `tax_id` is an identity field the adapters
+  screen on (`vendor_tax_id`), so applying a staged one re-screens exactly as an
+  AP edit of the field does. It used to apply silently, which made the
+  supplier-portal change request the one route that could re-key a vendor's
+  identity with no sanctions check. Best-effort, gated by
+  `FEOH_VENDOR_SCREENING_ENABLED`.
 - **Periodic sweep** — `services/vendor_rescreen.py` (`check_type="periodic"`).
 - **Pre-payment** — `check_payment_compliance` keeps its own
   `check_type="pre_payment"` screen (different verdict contract).

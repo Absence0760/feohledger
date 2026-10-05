@@ -328,6 +328,17 @@ async def create_offer(
         ).scalar_one_or_none()
         if invoice is None:
             raise HTTPException(status_code=404, detail="Invoice not found")
+        # An invoice-scoped offer is the invoice owner's. A `vendor_id` naming
+        # anyone else used to be stored as sent, which put the offer under the
+        # wrong vendor's name here and in front of the wrong supplier in the
+        # portal — who could accept a discount the real owner's payment then
+        # lost. The portal now keys on the invoice regardless
+        # (`api/portal._vendor_offer_filter`); this refuses the contradiction at
+        # the write. Omitting `vendor_id`, or sending the invoice's own, is fine.
+        if body.vendor_id is not None and body.vendor_id != invoice.vendor_id:
+            raise HTTPException(
+                status_code=422, detail="vendor_id does not match the invoice's vendor"
+            )
         base_amount = base_amount if base_amount is not None else invoice.amount
         currency = currency or invoice.currency
     elif body.scope == OFFER_SCOPE_VENDOR:
