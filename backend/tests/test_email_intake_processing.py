@@ -528,6 +528,105 @@ async def test_a_live_pre_upgrade_unscoped_claim_still_dedupes_the_redelivery():
     assert create_invoice.await_count == 2
 
 
+async def test_the_dedup_claim_key_is_the_org_scoped_message_id():
+    """Pins the key format itself, so the guard fails on the format and not on
+    a renamed helper: ``webhook:event:email_intake:<org_id>:<message_id>``."""
+    from app.services import webhook_security
+
+    org = _org(token="aaa", enabled=True, slug="acme")
+    claimed: list[tuple[str, str]] = []
+
+    async def _record(provider, event_id, **_k):
+        claimed.append((provider, event_id))
+        return False
+
+    with (
+        patch.object(email_intake, "resolve_tenants_from_recipient", AsyncMock(return_value=[org])),
+        patch.object(email_intake, "is_event_already_processed", _record),
+        _patched_tenant_io(AsyncMock(return_value=uuid.uuid4()), AsyncMock()),
+    ):
+        await email_intake.process_inbound_email(
+            MagicMock(),
+            InboundEmail(
+                to="invoices+aaa@ap.co", sender="v@x.com", message_id="<k@v>", attachments=[_pdf()]
+            ),
+        )
+    assert claimed == [("email_intake", f"{org.id}:<k@v>")]
+    assert webhook_security.DEDUP_PREFIX == "webhook:event:"
+
+
+async def test_one_tenant_failing_keeps_the_others_claim_and_the_retry_completes_only_it():
+    """Partial failure across tenants: A commits, B's invoice creation raises.
+
+    The call must raise (the route answers 503 so the provider redelivers),
+    A's claim must STAND (its invoice is durable — releasing it would make the
+    redelivery a duplicate payable) and B's must be released. On the
+    redelivery A is a duplicate and only B is created: one invoice per tenant.
+    """
+    org_a = _org(token="aaa", enabled=True, slug="acme")
+    org_b = _org(token="bbb", enabled=True, slug="beta")
+    id_a, id_b = uuid.uuid4(), uuid.uuid4()
+    email = InboundEmail(
+        to="invoices+aaa@ap.co, invoices+bbb@ap.co",
+        sender="v@x.com",
+        message_id="<partial@v>",
+        attachments=[_pdf()],
+    )
+    resolve = AsyncMock(return_value=[org_a, org_b])
+
+    first_dispatch = AsyncMock()
+    with (
+        patch.object(email_intake, "resolve_tenants_from_recipient", resolve),
+        _patched_tenant_io(
+            AsyncMock(side_effect=[id_a, RuntimeError("tenant B db down")]), first_dispatch
+        ),
+        pytest.raises(RuntimeError, match="tenant B db down"),
+    ):
+        await email_intake.process_inbound_email(MagicMock(), email)
+    # A committed and was dispatched before B failed.
+    assert [c.args for c in first_dispatch.await_args_list] == [
+        (id_a, org_a.id, email_intake.SYSTEM_ACTOR_ID)
+    ]
+
+    retry_create = AsyncMock(return_value=id_b)
+    retry_dispatch = AsyncMock()
+    with (
+        patch.object(email_intake, "resolve_tenants_from_recipient", resolve),
+        _patched_tenant_io(retry_create, retry_dispatch),
+    ):
+        retried = await email_intake.process_inbound_email(MagicMock(), email)
+
+    assert retried.error is None
+    assert retried.invoices_created == [id_b]
+    assert retry_create.await_count == 1
+    assert retry_create.await_args.kwargs["org_id"] == org_b.id
+    assert [c.args[1] for c in retry_dispatch.await_args_list] == [org_b.id]
+
+
+async def test_a_failure_building_the_tenant_engine_releases_the_claim():
+    """The claim is made before the tenant engine is built, so a failure there
+    is still pre-commit and must hand the claim back for the redelivery."""
+    org = _org(token="aaa", enabled=True, slug="acme")
+    released: list[tuple[str, str]] = []
+
+    async def _record_release(provider, event_id):
+        released.append((provider, event_id))
+
+    with (
+        patch.object(email_intake, "resolve_tenants_from_recipient", AsyncMock(return_value=[org])),
+        patch.object(email_intake, "release_event_claim", _record_release),
+        patch("app.database._make_tenant_url", MagicMock(side_effect=RuntimeError("bad url"))),
+        pytest.raises(RuntimeError, match="bad url"),
+    ):
+        await email_intake.process_inbound_email(
+            MagicMock(),
+            InboundEmail(
+                to="invoices+aaa@ap.co", sender="v@x.com", message_id="<e@v>", attachments=[_pdf()]
+            ),
+        )
+    assert released == [("email_intake", f"{org.id}:<e@v>")]
+
+
 async def test_one_notification_naming_two_intake_addresses_reaches_both_tenants():
     """SES lists every recipient its receipt rule matched in ONE notification,
     so one payload can name two tenants' intake addresses. Each is that
