@@ -771,3 +771,57 @@ def test_ensure_chain_routed_drops_a_chain_no_level_applies_to_any_more():
     assert init_chain_for_invoice(inst, _inv("5000"), config, org_settings=None)
     ensure_chain_routed(inst, _inv("50"), config, org_settings=None)
     assert get_chain_progress(inst) == {}
+
+
+def test_reroute_that_drops_level_zero_starts_the_new_head_fresh():
+    """[Manager, CFO] → [CFO]: CFO becomes the head having waited no time at
+    all, so it must not inherit Manager's 5-hour-old clock (the next sweep
+    would escalate it at once), and Manager's escalation does not follow."""
+    from app.services.approval_chain import (
+        apply_escalation,
+        ensure_chain_routed,
+        get_chain_progress,
+        init_chain_for_invoice,
+    )
+
+    config = {
+        "approver_strategy": "chain",
+        "approval_chain": [
+            {
+                "name": "Manager",
+                "approver_ids": ["m"],
+                "max_amount": "10000",
+                "escalation_hours": 4,
+                "escalation_to_user_ids": ["esc"],
+            },
+            {"name": "CFO", "approver_ids": ["cfo"], "min_amount": "500"},
+        ],
+    }
+    inst = _instance()
+    old_clock = datetime.now(UTC) - timedelta(hours=5)
+    init_chain_for_invoice(inst, _inv("600"), config, org_settings=None, entered_at=old_clock)
+    assert apply_escalation(inst) is True
+
+    before = datetime.now(UTC)
+    ensure_chain_routed(inst, _inv("50000"), config, org_settings=None)
+
+    chain = get_chain_progress(inst)
+    assert chain["routing"] == [1]
+    head = chain["levels"][0]
+    assert head["name"] == "CFO"
+    assert datetime.fromisoformat(head["entered_at"]) >= before
+    assert head["approver_ids"] == ["cfo"] and head["escalations"] == []
+    assert apply_escalation(inst) is False  # not overdue
+
+
+def test_route_chain_indices_track_the_configured_levels():
+    """`_route_chain` maps applicable levels back to config indices by object
+    identity; this pins that `resolve_applicable_levels` hands back the very
+    dicts it was given, including two levels that compare equal."""
+    from app.services.approval_chain import _route_chain
+
+    twin = {"name": "Twin", "approver_ids": []}
+    config = {"approval_chain": [dict(twin), {"name": "Big", "min_amount": "1000"}, dict(twin)]}
+    applicable, routing = _route_chain(_inv("50"), config, org_settings=None)
+    assert routing == [0, 2]
+    assert all(a is config["approval_chain"][i] for a, i in zip(applicable, routing, strict=True))
