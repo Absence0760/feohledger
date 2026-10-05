@@ -86,6 +86,30 @@ def _scim_http_error(status: int, detail: str, scim_type: str | None = None) -> 
     return HTTPException(status_code=status, detail=body)
 
 
+def _scim_active(value: object) -> bool:
+    """Read a PATCH op's `active` value — a JSON boolean, or its string spelling.
+
+    `bool(value)` was the old reading, and every non-empty string is truthy, so
+    the deprovision Microsoft Entra ID sends by default —
+    `{"op": "Replace", "path": "active", "value": "False"}`, the string, a known
+    SCIM-compliance gap Microsoft documents behind the `aadOptscim062020` flag —
+    LEFT THE ACCOUNT ACTIVE (or re-activated it) while answering 200, so the IdP
+    recorded a deprovision that never happened. "true"/"false" in any case are
+    accepted; anything else is a 400 `invalidValue` (RFC 7644 §3.12), never a
+    guess — an unreadable lifecycle signal must surface at the IdP, not resolve
+    silently to either state.
+    """
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered == "true":
+            return True
+        if lowered == "false":
+            return False
+    raise _scim_http_error(400, "'active' must be a boolean.", "invalidValue")
+
+
 async def _email_taken(
     db: AsyncSession, email: str, *, exclude_user_id: uuid.UUID | None = None
 ) -> bool:
@@ -361,7 +385,7 @@ async def patch_user(
             continue
 
         if path.lower() == "active":
-            user.is_active = bool(value) if action != "remove" else False
+            user.is_active = _scim_active(value) if action != "remove" else False
         elif path == "userName" and action in ("replace", "add"):
             if isinstance(value, str):
                 new_email = value.lower().strip()
@@ -371,7 +395,7 @@ async def patch_user(
         elif path == "" and isinstance(value, dict) and action == "replace":
             # Bulk replace on the root — common from Okta for status changes
             if "active" in value:
-                user.is_active = bool(value["active"])
+                user.is_active = _scim_active(value["active"])
             if "userName" in value and isinstance(value["userName"], str):
                 new_email = value["userName"].lower().strip()
             if "externalId" in value and isinstance(value["externalId"], str):

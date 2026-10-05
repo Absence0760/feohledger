@@ -1934,6 +1934,16 @@ the calling tenant would let an address already held in a *different* tenant sli
 past the guard and trip the DB constraint on flush — an unhandled 500 where the
 RFC requires a 409, which providers then retry forever.
 
+**A PATCH of `active` accepts the string spellings.** Microsoft Entra ID sends
+its deprovision as `{"op": "Replace", "path": "active", "value": "False"}` — a
+string — unless the app is registered with the `aadOptscim062020` compliance
+flag. The handler used to read it with `bool(value)`, which is `True` for every
+non-empty string, so Entra's deprovision left the account active and answered
+200. `api/scim._scim_active` takes a JSON boolean or `"true"`/`"false"` in any
+case, on both the `path: "active"` op and a path-less replace, and answers any
+other value with a 400 `invalidValue` rather than guessing a lifecycle state
+(`tests/test_scim_active_patch.py`).
+
 ### Filter syntax
 
 Only the filter subset Okta + Entra actually use:
