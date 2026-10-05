@@ -321,10 +321,33 @@ def export_payment_register(payments_with_invoice: Iterable) -> str:
 def export_aging_snapshot(aging_buckets: dict, *, snapshot_date: date | None = None) -> str:
     """Single-row report with the as-of-date and the five buckets
     (current / 1-30 / 31-60 / 61-90 / 90+ days past due).
-    Header matches the dashboard `aging` dict keys."""
+    Header matches the dashboard `aging` dict keys.
+
+    `reporting_currency` and `unconverted_count` close the row. Both callers
+    (`api/analytics._aging_snapshot_buckets`) hand over bands already converted
+    into the org's reporting currency, and a CSV has no page to carry the
+    caveat a foreign invoice with no locked rate needs — it is summed at FACE
+    value, exactly like `export_vendor_spend`'s rows, so the count is what tells
+    the spreadsheet's reader the bands are part-converted. Appended rather than
+    inserted, so a consumer reading by header keeps working. A caller that did
+    not say (no such key in `aging_buckets`) exports both BLANK, not `USD` / `0`:
+    "we did not ask" must not read as the reassuring answer (`decisions` §34)."""
     buf, w = _writer(
-        ["as_of_date", "current", "days_30", "days_60", "days_90", "days_90_plus", "total"]
+        [
+            "as_of_date",
+            "current",
+            "days_30",
+            "days_60",
+            "days_90",
+            "days_90_plus",
+            "total",
+            "reporting_currency",
+            "unconverted_count",
+        ]
     )
+    reporting_currency = aging_buckets.get("reporting_currency") or ""
+    raw_unconverted = aging_buckets.get("unconverted_count")
+    unconverted: str | int = "" if raw_unconverted is None else int(raw_unconverted)
     current = Decimal(str(aging_buckets.get("current", 0) or 0))
     d30 = Decimal(str(aging_buckets.get("days_30", 0) or 0))
     d60 = Decimal(str(aging_buckets.get("days_60", 0) or 0))
@@ -340,6 +363,8 @@ def export_aging_snapshot(aging_buckets: dict, *, snapshot_date: date | None = N
             _fmt_money(d90),
             _fmt_money(d90plus),
             _fmt_money(total),
+            reporting_currency,
+            unconverted,
         ]
     )
     return buf.getvalue()

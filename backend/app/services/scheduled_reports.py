@@ -214,7 +214,7 @@ async def list_due_schedules(
 
 # Report types whose rows are money summed across possibly-different invoice
 # currencies, so they need the org's reporting currency resolved up front.
-_REPORTING_CURRENCY_REPORTS = frozenset({"vendor_spend", "cashflow_forecast"})
+_REPORTING_CURRENCY_REPORTS = frozenset({"vendor_spend", "cashflow_forecast", "aging_snapshot"})
 
 
 async def _generate_report_payload(
@@ -369,51 +369,21 @@ async def _materialise_rows(
         return exporter(periods)
 
     if schedule.report_type == "aging_snapshot":
-        from decimal import Decimal as _D
-
-        from app.services.analytics import OPEN_AP_STATUSES
+        from app.api.analytics import _aging_snapshot_buckets
+        from app.services.currency_conversion import resolve_reporting_currency
 
         today = utc_today()
-        # Same open-payable population as the AP balance + the API aging export
-        # so the emailed snapshot reconciles with them (F-4): approved →
-        # payment_scheduled, not the pre-approval statuses. The AP balance has
-        # no due_date filter, so this must not either — an open invoice missing
-        # a due date used to inflate the balance while vanishing from every
-        # bucket.
-        aging_rows = await db.execute(
-            select(Invoice.due_date, Invoice.amount).where(
-                Invoice.status.in_(OPEN_AP_STATUSES),
-            )
+        # The SAME builder the `/analytics/export/aging_snapshot` route runs —
+        # one population (OPEN_AP_STATUSES, NULL due date = current), one set of
+        # band edges, and one conversion into the org's reporting currency, so
+        # the emailed snapshot and the downloaded one cannot disagree. They were
+        # two hand-copied loops, and both summed raw `Invoice.amount` across
+        # currencies. Whole-tenant (`entity_id=None`), like every branch here.
+        buckets = await _aging_snapshot_buckets(
+            db,
+            today=today,
+            reporting_currency=reporting_currency or resolve_reporting_currency(None),
         )
-        # Five buckets matching the exporter + the dashboard/analytics scheme
-        # (current / 1-30 / 31-60 / 61-90 / 90+). The 61-90 (`days_90`) bucket was
-        # missing here, so 61-90-day invoices collapsed into 90+ and the CSV's
-        # days_90 column was always 0 — disagreeing with the API export.
-        buckets = {
-            "current": _D("0"),
-            "days_30": _D("0"),
-            "days_60": _D("0"),
-            "days_90": _D("0"),
-            "days_90_plus": _D("0"),
-        }
-        for due, amt in aging_rows.all():
-            amount = _D(str(amt))
-            # A null due_date can't be judged overdue — bucket as "current" (the
-            # conservative read) rather than dropping it entirely.
-            if due is None:
-                buckets["current"] += amount
-                continue
-            days_past = (today - due).days
-            if days_past <= 0:
-                buckets["current"] += amount
-            elif days_past <= 30:
-                buckets["days_30"] += amount
-            elif days_past <= 60:
-                buckets["days_60"] += amount
-            elif days_past <= 90:
-                buckets["days_90"] += amount
-            else:
-                buckets["days_90_plus"] += amount
         # Label the CSV with the SAME `today` the buckets were computed against
         # (see api/analytics.py) rather than letting the exporter re-read the clock.
         return exporter(buckets, snapshot_date=today)

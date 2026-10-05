@@ -88,7 +88,10 @@ Existing fields stay: `pipeline`, `vendor_spend`, `aging`,
 - `aging` — open-invoice exposure bucketed by **days past the due date**:
   `current` (not yet due), `days_30` (1-30), `days_60` (31-60), `days_90`
   (61-90), `days_90_plus` (90+). The same five buckets back the
-  `aging_snapshot` CSV export and the emailed scheduled report. Covers the
+  `aging_snapshot` CSV export and the emailed scheduled report — which, having
+  no sibling field to carry a face-value total, export the **reporting-currency**
+  bands (`aging_reporting`'s rule) plus `reporting_currency` and
+  `unconverted_count` columns (see § CSV export). Covers the
   SAME population as the CFO `accounts_payable_balance` (F-4) — which has no
   `due_date` filter — so an open invoice with a null `due_date` buckets as
   `current` (unknowable, so not overdue) rather than being silently dropped;
@@ -1083,7 +1086,7 @@ returning "no threshold" rather than raising.
 | `invoice_register` | invoice_id, invoice_number, vendor_name, amount, currency, status, invoice_date, due_date, created_at, po_number |
 | `vendor_spend` | vendor_name, invoice_count, total_amount, currencies, unconverted_count |
 | `payment_register` | payment_id, invoice_id, invoice_number, vendor_name, amount, currency, method, status, provider, reference, submitted_at, completed_at |
-| `aging_snapshot` | as_of_date, current, days_30, days_60, days_90, days_90_plus, total. `as_of_date` defaults to `utc_today()` — neither caller passes `snapshot_date`, and both bucket against a UTC `today`, so a local-time default labelled the file with one date while the buckets were computed as of another |
+| `aging_snapshot` | as_of_date, current, days_30, days_60, days_90, days_90_plus, total, reporting_currency, unconverted_count. The bands are in the org's **reporting currency** — the rate locked on each invoice, else face value, with those face-value rows counted on `unconverted_count` (the dashboard `aging_reporting` rule, and the figure the CFO `reporting_accounts_payable_balance` they reconcile with uses). Both the export route and the emailed report call ONE builder, `api/analytics._aging_snapshot_buckets`; they used to be two hand-copied loops that summed raw `Invoice.amount` across currencies, so a ¥1,000,000 invoice sat in a band as "1000000.00" beside dollars in a file that names no currency. `as_of_date` defaults to `utc_today()` — neither caller passes `snapshot_date`, and both bucket against a UTC `today`, so a local-time default labelled the file with one date while the buckets were computed as of another |
 | `cashflow_forecast` | period, period_start, period_end, scheduled_amount, committed_amount, pending_amount, discount_eligible_amount, count |
 | `expense_register` | date, merchant, category, amount, currency, gl_code, payment_method, status, report_number |
 

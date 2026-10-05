@@ -66,6 +66,7 @@ from app.services.currency_conversion import (
     card_currency_sql,
     compute_unrealized_fx_gain_loss,
     invoice_currency_rollup_select,
+    invoice_reporting_amount_sql,
     payment_reporting_amount_sql,
     reporting_amount_for_row,
     resolve_reporting_currency,
@@ -245,6 +246,73 @@ async def _commitment_rows(
             }
         )
     return rows
+
+
+_AGING_BANDS = ("current", "days_30", "days_60", "days_90", "days_90_plus")
+
+
+async def _aging_snapshot_buckets(
+    db: AsyncSession,
+    *,
+    today: date,
+    reporting_currency: str,
+    entity_id: uuid.UUID | None = None,
+) -> dict:
+    """The aging snapshot's five bands, in the org's REPORTING currency — the
+    one builder behind `GET /api/analytics/export/aging_snapshot` and the
+    emailed `aging_snapshot` scheduled report.
+
+    Both used to sum the raw `Invoice.amount` across currencies into columns
+    that name no currency at all, so a ¥1,000,000 open invoice landed in a band
+    as "1000000.00" beside dollars — while the dashboard's `aging_reporting`
+    and the AP-balance rollup this snapshot reconciles with (F-4) both
+    converted. Each row now goes through `invoice_reporting_amount_sql`, the
+    rule every sibling reporting figure uses: the rate locked on the invoice,
+    else face value — and those face-value fallbacks are COUNTED on
+    `unconverted_count`, so a band that is part-converted says so.
+
+    Population and band edges are the dashboard's exactly: `OPEN_AP_STATUSES`
+    with no `due_date` filter (a NULL due date is `current` — unknowable, so
+    not overdue), days past due computed by Postgres `date - date` against the
+    caller's `today`, and 0 / 30 / 60 / 90 as inclusive upper edges.
+    """
+    rep = invoice_reporting_amount_sql(
+        reporting_currency=reporting_currency,
+        amount=Invoice.amount,
+        currency=Invoice.currency,
+        persisted_reporting_amount=Invoice.reporting_amount,
+        persisted_reporting_currency=Invoice.reporting_currency,
+    )
+    days_past = today - Invoice.due_date
+    band = case(
+        (Invoice.due_date.is_(None), "current"),
+        (days_past <= 0, "current"),
+        (days_past <= 30, "days_30"),
+        (days_past <= 60, "days_60"),
+        (days_past <= 90, "days_90"),
+        else_="days_90_plus",
+    )
+    result = await db.execute(
+        apply_entity_scope(
+            select(
+                band.label("band"),
+                func.coalesce(func.sum(rep.amount), 0),
+                func.coalesce(func.sum(rep.unconverted), 0),
+            )
+            .where(Invoice.status.in_(OPEN_AP_STATUSES))
+            .group_by(band),
+            Invoice,
+            entity_id,
+        )
+    )
+    buckets: dict = {name: Decimal("0") for name in _AGING_BANDS}
+    unconverted = 0
+    for name, total, unconv in result.all():
+        buckets[name] = Decimal(str(total))
+        unconverted += int(unconv or 0)
+    buckets["reporting_currency"] = reporting_currency.strip().upper()
+    buckets["unconverted_count"] = unconverted
+    return buckets
 
 
 def _money(value: Decimal | int | None) -> str | None:
@@ -1812,46 +1880,15 @@ async def export_report(
         payload = EXPORTERS[report](rows.all())
     elif report == "aging_snapshot":
         today = utc_today()
-        # Aging covers the same open-payable population as the AP balance so the
-        # buckets sum to it (F-4): approved → payment_scheduled, not the
-        # pre-approval statuses that aren't a confirmed liability yet. The AP
-        # balance has no due_date filter, so this must not either — an open
-        # invoice missing a due date used to inflate the balance while
-        # vanishing from every bucket.
-        aging_rows = await db.execute(
-            apply_entity_scope(
-                select(Invoice.due_date, Invoice.amount).where(
-                    Invoice.status.in_(OPEN_AP_STATUSES),
-                ),
-                Invoice,
-                entity_id,
-            )
+        # Same open-payable population as the AP balance, so the bands sum to
+        # its reporting rollup (F-4), and in the same currency — see
+        # `_aging_snapshot_buckets`, shared with the scheduled report.
+        buckets = await _aging_snapshot_buckets(
+            db,
+            today=today,
+            reporting_currency=resolve_reporting_currency(org.settings if org else None),
+            entity_id=entity_id,
         )
-        buckets = {
-            "current": Decimal("0"),
-            "days_30": Decimal("0"),
-            "days_60": Decimal("0"),
-            "days_90": Decimal("0"),
-            "days_90_plus": Decimal("0"),
-        }
-        for due, amt in aging_rows.all():
-            amount = Decimal(str(amt))
-            # A null due_date can't be judged overdue — bucket as "current"
-            # (the conservative read) rather than dropping it entirely.
-            if due is None:
-                buckets["current"] += amount
-                continue
-            days_past = (today - due).days
-            if days_past <= 0:
-                buckets["current"] += amount
-            elif days_past <= 30:
-                buckets["days_30"] += amount
-            elif days_past <= 60:
-                buckets["days_60"] += amount
-            elif days_past <= 90:
-                buckets["days_90"] += amount
-            else:
-                buckets["days_90_plus"] += amount
         # Label the CSV with the SAME `today` the buckets were computed against.
         # Without it the exporter re-reads the clock, so the as-of label is a
         # second, independent read that can disagree with the numbers under it.
