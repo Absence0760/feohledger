@@ -29,7 +29,7 @@
 	import { orgCurrency } from '$lib/stores/orgSettings.svelte';
 	import { m } from '$lib/i18n/store.svelte';
 	import { page } from '$app/stores';
-	import { replaceState } from '$app/navigation';
+	import { afterNavigate, replaceState } from '$app/navigation';
 	import { untrack } from 'svelte';
 	import SortableHeader from '$lib/components/ui/SortableHeader.svelte';
 	import { toggleSort, type SortOrder } from '$lib/utils/sort';
@@ -40,12 +40,23 @@
 	// `/expenses`. The Advanced Search modal's richer filters stay out of the
 	// URL (a separate, larger surface). `syncUrl()` is the ONE writer of the
 	// whole query string — read its comment before adding a param.
-	let search = $state($page.url.searchParams.get('search') ?? '');
-	let activeStatuses = $state<InvoiceStatus[]>(
-		($page.url.searchParams.get('status') ?? '')
-			.split(',')
-			.filter((s): s is InvoiceStatus => (INVOICE_STATUSES as readonly string[]).includes(s))
-	);
+	//
+	// `readUrlState` is the one READER of those params, used at mount and again
+	// by the `afterNavigate` hook below for a navigation that reuses this page.
+	function readUrlState(params: URLSearchParams) {
+		return {
+			search: params.get('search') ?? '',
+			statuses: (params.get('status') ?? '')
+				.split(',')
+				.filter((s): s is InvoiceStatus => (INVOICE_STATUSES as readonly string[]).includes(s)),
+			assignedToId: params.get('assigned_to_id') ?? '',
+			sortField: params.get('sort'),
+			sortOrder: (params.get('order') === 'asc' ? 'asc' : 'desc') as SortOrder
+		};
+	}
+	const initialUrlState = readUrlState($page.url.searchParams);
+	let search = $state(initialUrlState.search);
+	let activeStatuses = $state<InvoiceStatus[]>(initialUrlState.statuses);
 	// The `?id=` deep link, mirrored out of `$page.url` (see the effect near
 	// the bottom) so `syncUrl()` — the single query-string writer — can own it.
 	let deepLinkId = $state<string | null>($page.url.searchParams.get('id'));
@@ -63,7 +74,7 @@
 	// specific reviewer via the dropdown or to the caller via the "My
 	// Approvals" toggle (`myApprovalsActive` below). URL-backed so the queue an
 	// approver narrowed to survives a reload or a shared link — see `syncUrl()`.
-	let assignedToId = $state($page.url.searchParams.get('assigned_to_id') ?? '');
+	let assignedToId = $state(initialUrlState.assignedToId);
 	let myApprovalsActive = $derived(!!auth.user?.id && assignedToId === auth.user.id);
 	function toggleMyApprovals() {
 		assignedToId = myApprovalsActive ? '' : (auth.user?.id ?? '');
@@ -143,8 +154,8 @@
 	// Column sort — URL-backed (`?sort=&order=`) through the same single
 	// `syncUrl()` writer the filters use, mirroring /expenses. `null` field =
 	// the backend's own default order (most-recent first).
-	let sortField = $state<string | null>($page.url.searchParams.get('sort'));
-	let sortOrder = $state<SortOrder>(($page.url.searchParams.get('order') as SortOrder) ?? 'desc');
+	let sortField = $state<string | null>(initialUrlState.sortField);
+	let sortOrder = $state<SortOrder>(initialUrlState.sortOrder);
 
 	function handleSort(field: string) {
 		const next = toggleSort({ field: sortField, order: sortOrder }, field);
@@ -234,6 +245,46 @@
 			replaceState(`${$page.url.pathname}${qs ? `?${qs}` : ''}`, {});
 		});
 	}
+
+	/**
+	 * A navigation that REUSES this mounted page re-reads the URL.
+	 *
+	 * The state above is seeded from `$page.url` once, at mount — right for a
+	 * fresh visit, wrong for a navigation SvelteKit serves with the same
+	 * component: the sidebar's Invoices row clicked while on a filtered view, a
+	 * `goto('/invoices?…')`, or Back/Forward between two real history entries
+	 * of this route. Each of those changed the address bar and nothing else, so
+	 * a bare `/invoices` sat over a still-filtered table (and Forward/Back
+	 * swapped which one lied). `replaceState` writes are shallow and never fire
+	 * this hook, so `syncUrl()`'s own writes cannot loop back through it.
+	 *
+	 * Only what changed is assigned, so an unchanged filter does not refetch:
+	 * a status / assignee change re-runs the filter effect (which also carries
+	 * the new search and sort, read untracked), a search change alone goes
+	 * through the debounced search effect, and a sort change alone refetches
+	 * here because no effect tracks the sort. The `?id=` deep link is the
+	 * effect further down's job, off the same `$page.url`.
+	 */
+	afterNavigate(({ from, to, type }) => {
+		if (type === 'enter' || !from || !to || from.route.id !== to.route.id) return;
+		const next = readUrlState(to.url.searchParams);
+		const filtersChanged =
+			next.statuses.join(',') !== activeStatuses.join(',') ||
+			next.assignedToId !== assignedToId;
+		const searchChanged = next.search !== search;
+		const sortChanged = next.sortField !== sortField || next.sortOrder !== sortOrder;
+		if (sortChanged) {
+			sortField = next.sortField;
+			sortOrder = next.sortOrder;
+		}
+		if (searchChanged) search = next.search;
+		if (filtersChanged) {
+			activeStatuses = next.statuses;
+			assignedToId = next.assignedToId;
+		} else if (sortChanged && !searchChanged) {
+			invoiceStore.fetch(buildParams()).catch(() => {}); // noqa: raw-fetch-in-component — store method, routes through api client
+		}
+	});
 
 	// Debounce timer for search input
 	let searchTimer: ReturnType<typeof setTimeout>;
