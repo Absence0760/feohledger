@@ -477,6 +477,57 @@ async def test_a_redelivery_to_the_same_tenant_is_still_deduped_after_scoping():
     dispatch.assert_awaited_once()
 
 
+async def test_a_live_pre_upgrade_unscoped_claim_still_dedupes_the_redelivery():
+    """Deploy-window guard. A message processed by the pre-per-tenant code left
+    an unscoped ``email_intake:<message_id>`` claim that does not say which
+    tenant it reached. Its redelivery after the deploy must still be treated as
+    a duplicate — for every tenant, since none can be ruled out — or it would
+    create a second payable for the one it did reach."""
+    from app.services.webhook_security import is_event_already_processed
+
+    msg_id = "<processed-before-the-deploy@vendor.example.com>"
+    # Exactly what the old code wrote: the bare Message-ID as the claim.
+    assert await is_event_already_processed("email_intake", msg_id) is False
+
+    org_a = _org(token="aaa", enabled=True, slug="acme")
+    org_b = _org(token="bbb", enabled=True, slug="beta")
+    create_invoice = AsyncMock(side_effect=[uuid.uuid4(), uuid.uuid4()])
+    dispatch = AsyncMock()
+    with (
+        patch.object(
+            email_intake, "resolve_tenants_from_recipient", AsyncMock(return_value=[org_a, org_b])
+        ),
+        _patched_tenant_io(create_invoice, dispatch),
+    ):
+        result = await email_intake.process_inbound_email(
+            MagicMock(),
+            InboundEmail(
+                to="invoices+aaa@ap.co, invoices+bbb@ap.co",
+                sender="v@x.com",
+                message_id=msg_id,
+                attachments=[_pdf()],
+            ),
+        )
+        # A message the old code never saw is unaffected by the legacy check.
+        fresh = await email_intake.process_inbound_email(
+            MagicMock(),
+            InboundEmail(
+                to="invoices+aaa@ap.co",
+                sender="v@x.com",
+                message_id="<after-the-deploy@vendor.example.com>",
+                attachments=[_pdf()],
+            ),
+        )
+
+    assert result.error == "Duplicate delivery"
+    assert result.invoices_created == []
+    assert fresh.error is None
+    # Only `fresh` created anything: one invoice for each of the two tenants
+    # the resolver returns.
+    assert len(fresh.invoices_created) == 2
+    assert create_invoice.await_count == 2
+
+
 async def test_one_notification_naming_two_intake_addresses_reaches_both_tenants():
     """SES lists every recipient its receipt rule matched in ONE notification,
     so one payload can name two tenants' intake addresses. Each is that

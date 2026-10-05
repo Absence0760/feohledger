@@ -181,6 +181,26 @@ async def test_dedup_scopes_by_provider(fake_redis):
 
 
 @pytest.mark.asyncio
+async def test_event_claim_exists_reads_without_claiming():
+    """Read-only probe for a live claim (uses the conftest Redis stub). It must
+    never claim: probing twice and then claiming still finds the event new."""
+    from app.services.webhook_security import (
+        event_claim_exists,
+        is_event_already_processed,
+        release_event_claim,
+    )
+
+    assert await event_claim_exists("lithic", "evt_probe") is False
+    assert await event_claim_exists("lithic", "evt_probe") is False
+    assert await is_event_already_processed("lithic", "evt_probe") is False
+    assert await event_claim_exists("lithic", "evt_probe") is True
+    assert await event_claim_exists("nium", "evt_probe") is False
+    await release_event_claim("lithic", "evt_probe")
+    assert await event_claim_exists("lithic", "evt_probe") is False
+    assert await event_claim_exists("lithic", "") is False
+
+
+@pytest.mark.asyncio
 async def test_dedup_returns_false_when_event_id_is_empty(fake_redis):
     """An empty event id can't be deduped — every "no id" delivery
     must be treated as first-time. Logging happens but the helper
