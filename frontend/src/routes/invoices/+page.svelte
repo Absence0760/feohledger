@@ -424,7 +424,14 @@
 	// the table (see the template); this string covers the other three states
 	// the table can be empty in — loading, errored, and "a filter matched
 	// nothing" (frontend/CLAUDE.md § Data tables).
-	let noActiveFilters = $derived(!search.trim() && activeStatuses.length === 0 && !hasAdvancedFilters);
+	// The assignee filter counts: "My Approvals" (or a named reviewer) with
+	// nothing assigned is a filter that matched nothing, and it used to fall
+	// through to the fresh-tenant onboarding — "Upload your first invoice" over
+	// a tenant full of invoices, with the table and its "no matches" message
+	// replaced entirely.
+	let noActiveFilters = $derived(
+		!search.trim() && activeStatuses.length === 0 && !hasAdvancedFilters && !assignedToId
+	);
 	let showOnboarding = $derived(
 		invoiceStore.all.length === 0 &&
 			!invoiceStore.loading &&
