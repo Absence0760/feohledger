@@ -112,6 +112,20 @@ async def test_a_rebate_outside_every_window_never_inflates_the_run_rate(realdb)
 
 
 @pytest.mark.asyncio
+async def test_annualised_rebates_use_the_whole_window_not_a_floored_month_count(realdb):
+    """`months_in_period` was `period_days // 30`, so a 59-day window counted
+    as ONE month and its rebates were multiplied by 12 — nearly double the
+    run-rate. The window is 59/30 months; $100 over it annualises to
+    100 x 12 x 30 / 59 = 610.17, not 1200.00."""
+    await _seed(realdb)
+    async with realdb.client(key=TENANT, role="cfo") as c:
+        body = (await c.get("/api/analytics/cfo?period_days=59")).json()
+    rebate = body["rebate_yield"]
+    assert Decimal(str(rebate["rebates_total"])) == Decimal("100.00")
+    assert Decimal(str(rebate["annualised_rebates"])) == Decimal("610.17")
+
+
+@pytest.mark.asyncio
 async def test_rebate_yield_divides_by_reporting_currency_spend(realdb):
     """The numerator is reporting-currency rebates only (decisions §62), so the
     denominator must be reporting-currency spend too. It was the naive
