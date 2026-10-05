@@ -537,3 +537,40 @@ async def test_card_action_body_tamper_is_rejected(realdb, teams_keys):
 
     assert resp.status_code == 200  # opaque ack, never a 4xx
     assert await _status(realdb, inv_id) == InvoiceStatus.ready_for_review
+
+
+# ---------------------------------------------------------------------------
+# One message = one decision: using Reject spends the paired Approve token
+# ---------------------------------------------------------------------------
+
+
+async def test_rejecting_burns_the_sibling_approve_token(realdb, teams_keys):
+    """Reject, resubmit, then press the same message's Approve: refused. The
+    consume used to key on each token's own jti, so the sibling survived."""
+    from app.services.email_action_token import build_teams_action_tokens
+
+    info = realdb.info("a")
+    inv_id = await _make_invoice(realdb, uploaded_by_id=info.users["admin"])
+    approve, reject = build_teams_action_tokens(
+        tenant_slug=info.slug,
+        invoice_id=inv_id,
+        actor_id=info.users["ap_manager"],
+        signing_key=_ACTION_KEY,
+        ttl_hours=168,
+    )
+
+    async with realdb.client(key="a", role=None) as c:
+        body = _payload_body(reject)
+        resp = await c.post(_INTERACTIVITY_URL, content=body, headers=_signed_headers(body))
+        assert "rejected" in resp.json()["text"].lower()
+
+        mk = realdb.sessionmaker("a")
+        async with mk() as s:
+            inv = await s.get(Invoice, inv_id)
+            inv.status = InvoiceStatus.ready_for_review  # resubmitted
+            await s.commit()
+
+        body = _payload_body(approve)
+        replay = await c.post(_INTERACTIVITY_URL, content=body, headers=_signed_headers(body))
+    assert "already" in replay.json()["text"].lower(), replay.json()
+    assert await _status(realdb, inv_id) == InvoiceStatus.ready_for_review

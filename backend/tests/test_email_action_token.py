@@ -159,3 +159,47 @@ def test_link_builder_emits_both_valid_links():
         assert decoded is not None
         assert decoded.invoice_id == inv and decoded.actor_id == actor
         assert decoded.action in (ACTION_APPROVE, ACTION_REJECT)
+
+
+# ---------------------------------------------------------------------------
+# One message = one decision: the Approve/Reject tokens share a consume key
+# ---------------------------------------------------------------------------
+
+
+def test_every_builder_mints_its_two_tokens_as_one_pair():
+    from app.services.email_action_token import (
+        CHANNEL_SLACK,
+        CHANNEL_TEAMS,
+        build_slack_action_tokens,
+        build_teams_action_tokens,
+    )
+
+    facts = {
+        "tenant_slug": "acme",
+        "invoice_id": uuid.uuid4(),
+        "actor_id": uuid.uuid4(),
+        "signing_key": _KEY,
+        "ttl_hours": 24,
+    }
+    text, _html = build_email_action_links(api_base_url="http://x", **facts)
+    email = [verify_action_token(ln.split("email-action/")[1], _KEY) for ln in text.splitlines()]
+    slack = [
+        verify_action_token(t, _KEY, expected_channel=CHANNEL_SLACK)
+        for t in build_slack_action_tokens(**facts)
+    ]
+    teams = [
+        verify_action_token(t, _KEY, expected_channel=CHANNEL_TEAMS)
+        for t in build_teams_action_tokens(**facts)
+    ]
+    for approve, reject in (email, slack, teams):
+        assert approve.jti != reject.jti  # still two distinct tokens
+        assert approve.pair_id and approve.pair_id == reject.pair_id
+        assert approve.consume_key == reject.consume_key
+    # ...and every message is its own pair.
+    assert len({email[0].pair_id, slack[0].pair_id, teams[0].pair_id}) == 3
+
+
+def test_an_unpaired_token_consumes_on_its_own_jti():
+    decoded = verify_action_token(_build(), _KEY)
+    assert decoded.pair_id is None
+    assert decoded.consume_key == decoded.jti

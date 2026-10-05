@@ -34,8 +34,17 @@ production fallback key.
 Single-use is enforced two ways, layered:
   1. the workflow state machine — approve/reject move the invoice out of
      ``ready_for_review``, so a replay can't re-fire the same decision; and
-  2. a Redis consume on the ``jti`` at the endpoint — which also closes the
-     resubmit-replay window (a stale token reused after a reject→resubmit cycle).
+  2. a Redis consume at the endpoint on the token's **pair** — which also closes
+     the resubmit-replay window (a stale link used after a reject→resubmit cycle).
+
+The Approve and Reject tokens minted for one message share a ``pid`` (pair id)
+claim, and the endpoint consumes :attr:`ActionToken.consume_key` — the pair, not
+the individual token. One message carries ONE decision: once its Reject link is
+redeemed, its Approve link is spent too. Keying the consume on each token's own
+``jti`` (as it originally did) burned only the link that was clicked, so after
+the invoice was rejected and resubmitted the unused sibling Approve link from
+the superseded message still approved it. A token minted without a pair (an old
+token, or a direct :func:`build_action_token` call) falls back to its ``jti``.
 This module only owns the token's integrity + expiry; the endpoint owns consume.
 """
 
@@ -77,6 +86,15 @@ class ActionToken:
     jti: str
     exp: int
     channel: str = CHANNEL_EMAIL
+    #: The pair id shared by the Approve + Reject tokens of one message, or
+    #: ``None`` for a token minted on its own.
+    pair_id: str | None = None
+
+    @property
+    def consume_key(self) -> str:
+        """What the single-use consume claims: the message's pair, so redeeming
+        either of its links spends both; the token's own ``jti`` otherwise."""
+        return f"pair:{self.pair_id}" if self.pair_id else self.jti
 
 
 def _b64url_encode(raw: bytes) -> str:
@@ -102,6 +120,7 @@ def build_action_token(
     signing_key: str,
     ttl_hours: int,
     channel: str = CHANNEL_EMAIL,
+    pair_id: str | None = None,
     now: float | None = None,
 ) -> str | None:
     """Build a ``<b64url-payload>.<hex-hmac>`` token, or ``None`` if disabled.
@@ -114,6 +133,11 @@ def build_action_token(
     ``channel`` binds the token to its delivery surface (``email`` / ``slack``);
     it is part of the signed payload, so a token minted for one surface fails
     verification on another. Defaults to ``email`` for the original callers.
+
+    ``pair_id`` ties the token to its sibling (the other action of the same
+    message) so the endpoint can consume them as one — see the module
+    docstring. The ``build_*`` helpers below always pass one; it is signed like
+    every other claim.
     """
     if not signing_key or action not in _VALID_ACTIONS:
         return None
@@ -127,9 +151,16 @@ def build_action_token(
         "exp": int(issued) + ttl_hours * 3600,
         "jti": secrets.token_urlsafe(9),
     }
+    if pair_id:
+        payload["pid"] = pair_id
     raw = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
     body = _b64url_encode(raw)
     return f"{body}.{_sign(body, signing_key)}"
+
+
+def new_pair_id() -> str:
+    """A fresh pair id for the Approve + Reject tokens of one message."""
+    return secrets.token_urlsafe(9)
 
 
 def verify_action_token(
@@ -169,6 +200,7 @@ def verify_action_token(
         if channel != expected_channel:
             return None
         exp = int(data["exp"])
+        pair_id = data.get("pid")
         decoded = ActionToken(
             tenant_slug=str(data["t"]),
             invoice_id=uuid.UUID(str(data["i"])),
@@ -177,6 +209,7 @@ def verify_action_token(
             jti=str(data["jti"]),
             exp=exp,
             channel=channel,
+            pair_id=str(pair_id) if pair_id else None,
         )
     except (KeyError, ValueError, TypeError, json.JSONDecodeError):
         return None
@@ -204,6 +237,7 @@ def build_email_action_links(
     submits from there — so email link-prefetchers / security scanners that
     issue a bare GET can never auto-approve an invoice.
     """
+    pair_id = new_pair_id()
     approve = build_action_token(
         tenant_slug=tenant_slug,
         invoice_id=invoice_id,
@@ -211,6 +245,7 @@ def build_email_action_links(
         action=ACTION_APPROVE,
         signing_key=signing_key,
         ttl_hours=ttl_hours,
+        pair_id=pair_id,
         now=now,
     )
     reject = build_action_token(
@@ -220,6 +255,7 @@ def build_email_action_links(
         action=ACTION_REJECT,
         signing_key=signing_key,
         ttl_hours=ttl_hours,
+        pair_id=pair_id,
         now=now,
     )
     if not approve or not reject:
@@ -262,6 +298,7 @@ def build_slack_action_tokens(
     + expiry — but on the ``slack`` channel, so it can only be redeemed at the
     Slack interactivity endpoint, not the email-confirm one.
     """
+    pair_id = new_pair_id()
     approve = build_action_token(
         tenant_slug=tenant_slug,
         invoice_id=invoice_id,
@@ -270,6 +307,7 @@ def build_slack_action_tokens(
         signing_key=signing_key,
         ttl_hours=ttl_hours,
         channel=CHANNEL_SLACK,
+        pair_id=pair_id,
         now=now,
     )
     reject = build_action_token(
@@ -280,6 +318,7 @@ def build_slack_action_tokens(
         signing_key=signing_key,
         ttl_hours=ttl_hours,
         channel=CHANNEL_SLACK,
+        pair_id=pair_id,
         now=now,
     )
     if not approve or not reject:
@@ -304,6 +343,7 @@ def build_teams_action_tokens(
     action + expiry — but on the ``teams`` channel, so it can only be redeemed at
     the Teams interactivity endpoint, not the email-confirm or Slack one.
     """
+    pair_id = new_pair_id()
     approve = build_action_token(
         tenant_slug=tenant_slug,
         invoice_id=invoice_id,
@@ -312,6 +352,7 @@ def build_teams_action_tokens(
         signing_key=signing_key,
         ttl_hours=ttl_hours,
         channel=CHANNEL_TEAMS,
+        pair_id=pair_id,
         now=now,
     )
     reject = build_action_token(
@@ -322,6 +363,7 @@ def build_teams_action_tokens(
         signing_key=signing_key,
         ttl_hours=ttl_hours,
         channel=CHANNEL_TEAMS,
+        pair_id=pair_id,
         now=now,
     )
     if not approve or not reject:

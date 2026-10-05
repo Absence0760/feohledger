@@ -72,7 +72,8 @@ even though the frontend is a static site.
    door — and never narrower either: a custom role granting `invoice.approve`
    works here exactly as it does in the app. For the four system roles it
    resolves identically to `admin` / `ap_manager` / `cfo`.
-4. **Claim the token `jti`** in Redis (`SET NX EX`) — single-use. A replay shows
+4. **Claim the token's pair** in Redis (`SET NX EX` on `ActionToken.consume_key`)
+   — single-use per *message*, see below. A replay shows
    "already used".
 5. **Open a short-lived tenant session**, row-lock the invoice, and — only if it
    is still `ready_for_review` — call `review.approve_invoice` /
@@ -100,8 +101,19 @@ why (e.g. "this invoice requires CFO approval — please sign in").
 
 - **Workflow state machine** — approve/reject move the invoice out of
   `ready_for_review`, so the same decision can't re-fire (the hard guard).
-- **Redis `jti` consume** — also closes the reject→resubmit replay window (a
-  stale token reused after the invoice cycles back to `ready_for_review`).
+- **Redis consume on the link PAIR** — the Approve and Reject tokens of one
+  message share a signed `pid` claim, and the endpoint claims
+  `ActionToken.consume_key` (`pair:<pid>`), so redeeming either link spends
+  both. That is what closes the reject→resubmit replay window: keyed on each
+  token's own `jti` (as it originally was), redeeming Reject burned only the
+  Reject link, and once the supplier resubmitted, the unused Approve link from
+  the superseded email still approved the reworked invoice. A token minted
+  without a pair (pre-`pid`, or a direct `build_action_token` call) falls back
+  to its `jti` — so links already sitting in inboxes when this shipped keep the
+  old per-link behaviour, and the replay window, until they expire
+  (`FEOH_EMAIL_ACTION_TTL_HOURS`, default 7 days). Nothing to do but wait one
+  TTL; every link minted since carries a `pid`. A refused attempt (segregation, CFO gate, wrong status…)
+  releases the pair, so the reviewer can still use the other link.
 
 ## The email link
 
@@ -129,7 +141,7 @@ unset key simply disables the feature everywhere.
 - **Unforgeable / tamper-evident** — HMAC over the canonical payload; any edit to
   action/invoice/actor/expiry breaks the signature.
 - **Expiring** — default 7 days, then re-auth in the app.
-- **Single-use** — state machine + Redis `jti`.
+- **Single-use** — state machine + Redis consume on the message's link pair.
 - **No privilege escalation** — runs as the named reviewer with *their* roles;
   segregation + CFO gate + thresholds all enforced.
 - **Prefetch-safe** — GET never mutates; POST does.

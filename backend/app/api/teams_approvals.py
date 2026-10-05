@@ -25,7 +25,7 @@ Two gates, layered, both fail closed (the exact same posture as the Slack path):
    (> ``teams_request_max_age_seconds``) to stop replay of a captured POST. No
    secret configured → the feature is OFF and every request is rejected.
 2. **Action token** — verified exactly like the email/Slack path (HMAC + expiry +
-   ``teams`` channel + single-use ``jti`` consume in Redis), then the
+   ``teams`` channel + single-use consume of the card's button pair in Redis), then the
    approve/reject runs through the *normal* :mod:`app.services.review` path as the
    named reviewer, so segregation of duties, the approval thresholds, the CFO
    gate, the immutable audit row, and the approval digital signature all apply
@@ -240,8 +240,8 @@ async def teams_interactivity(
         logger.warning("teams interactivity: reviewer not permitted")
         return _ack()
 
-    # 4. Single-use consume on the token jti (closes the replay window — a
-    #    re-clicked action can't double-act). Released below if the action turns
+    # 4. Single-use consume on the card's button PAIR (`ActionToken.consume_key`) — a
+    #    re-clicked action can't double-act. Released below if the action turns
     #    out not to be applicable / permitted so the reviewer can still act in-app.
     claimed = await _claim_jti(decoded)
     if not claimed:
