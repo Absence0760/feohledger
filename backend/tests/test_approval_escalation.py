@@ -737,7 +737,12 @@ def _chain_snapshot(*, approver: str, target: str, hours: int = 24) -> dict:
 
 
 async def _seed_unapproved_chain(
-    realdb, *, review_age_hours: int, target: str, uploaded_by: uuid.UUID | None = None
+    realdb,
+    *,
+    review_age_hours: int,
+    target: str,
+    uploaded_by: uuid.UUID | None = None,
+    snapshot: dict | None = None,
 ):
     from datetime import timedelta
     from decimal import Decimal
@@ -747,7 +752,7 @@ async def _seed_unapproved_chain(
 
     info = realdb.info("a")
     mk = realdb.sessionmaker("a")
-    snapshot = _chain_snapshot(approver=str(uuid.uuid4()), target=target)
+    snapshot = snapshot or _chain_snapshot(approver=str(uuid.uuid4()), target=target)
     review_started = datetime.now(UTC) - timedelta(hours=review_age_hours)
     async with mk() as s:
         inv = Invoice(
@@ -897,3 +902,115 @@ async def test_escalation_never_targets_the_invoices_uploader(realdb):
     level = inst.state_data["approval_levels"]["levels"][0]
     assert str(uploader) not in level["approver_ids"]
     assert notes == []
+
+
+async def test_escalated_chain_is_rerouted_when_the_first_approver_corrects_the_amount(realdb):
+    """Sweep escalates level 0 of a $100 invoice (one level applies); the
+    escalation target then approves with the amount corrected to $50,000, which
+    falls in the CFO band. The CFO level must now be required — the routing the
+    first approval has always decided on the corrected figure."""
+    from decimal import Decimal
+
+    from app.models.invoice import Invoice, InvoiceStatus
+    from app.models.workflow import WorkflowInstance
+    from app.services.approval_chain import get_chain_progress
+    from app.services.approval_escalation import _escalate_tenant
+    from app.services.review import approve_invoice
+
+    info = realdb.info("a")
+    target = info.users["ap_clerk"]
+    snapshot = {
+        "steps": [
+            {
+                "type": "approval",
+                "enabled": True,
+                "config": {
+                    "approver_strategy": "chain",
+                    "approval_chain": [
+                        {
+                            "name": "Manager",
+                            "approver_ids": [str(uuid.uuid4())],
+                            "escalation_hours": 24,
+                            "escalation_to_user_ids": [str(target)],
+                        },
+                        {"name": "CFO", "approver_ids": [], "min_amount": "10000"},
+                    ],
+                },
+            }
+        ]
+    }
+    inst_id, _ = await _seed_unapproved_chain(
+        realdb, review_age_hours=48, target=str(target), snapshot=snapshot
+    )
+    escalated, failed = await _escalate_tenant(info.db_name, datetime.now(UTC), org_id=info.org_id)
+    assert (escalated, failed) == (1, 0)
+
+    mk = realdb.sessionmaker("a")
+    async with mk() as s:
+        inst = await s.get(WorkflowInstance, inst_id)
+        assert [lv["name"] for lv in get_chain_progress(inst)["levels"]] == ["Manager"]
+        invoice = await s.get(Invoice, inst.invoice_id)
+        await approve_invoice(
+            s,
+            invoice,
+            actor_id=target,
+            actor_name="Escalation Target",
+            actor_roles={"ap_manager"},
+            corrections={"amount": Decimal("50000.00")},
+            org_settings={},
+        )
+        await s.commit()
+
+    async with mk() as s:
+        inst = await s.get(WorkflowInstance, inst_id)
+        invoice = await s.get(Invoice, inst.invoice_id)
+    chain = get_chain_progress(inst)
+    assert [lv["name"] for lv in chain["levels"]] == ["Manager", "CFO"]
+    assert chain["current_level"] == 1
+    assert invoice.status == InvoiceStatus.ready_for_review, "the CFO level must still sign"
+
+
+async def test_escalation_may_target_the_uploader_when_segregation_is_off(realdb):
+    """`require_segregation: false` on the approval step is the explicit opt-out
+    (single-operator orgs); the sweep must honour it like the approval path."""
+    from app.models.workflow import WorkflowInstance
+    from app.services.approval_chain import get_chain_progress
+    from app.services.approval_escalation import _escalate_tenant
+
+    info = realdb.info("a")
+    uploader = info.users["ap_clerk"]
+    snapshot = _chain_snapshot(approver=str(uuid.uuid4()), target=str(uploader))
+    snapshot["steps"][0]["config"]["require_segregation"] = False
+    inst_id, _ = await _seed_unapproved_chain(
+        realdb, review_age_hours=48, target=str(uploader), uploaded_by=uploader, snapshot=snapshot
+    )
+
+    escalated, failed = await _escalate_tenant(info.db_name, datetime.now(UTC), org_id=info.org_id)
+    assert (escalated, failed) == (1, 0)
+    async with realdb.sessionmaker("a")() as s:
+        inst = await s.get(WorkflowInstance, inst_id)
+    assert str(uploader) in get_chain_progress(inst)["levels"][0]["approver_ids"]
+
+
+async def test_unapproved_chain_outside_review_is_never_initialised(realdb):
+    """Only an invoice actually waiting in `ready_for_review` has a level 0 to
+    escalate; any other status is left alone, in SQL and under the lock."""
+    from app.models.invoice import Invoice, InvoiceStatus
+    from app.models.workflow import WorkflowInstance
+    from app.services.approval_escalation import _escalate_tenant
+
+    info = realdb.info("a")
+    inst_id, _ = await _seed_unapproved_chain(
+        realdb, review_age_hours=48, target=str(info.users["ap_clerk"])
+    )
+    async with realdb.sessionmaker("a")() as s:
+        inst = await s.get(WorkflowInstance, inst_id)
+        invoice = await s.get(Invoice, inst.invoice_id)
+        invoice.status = InvoiceStatus.approved
+        await s.commit()
+
+    escalated, failed = await _escalate_tenant(info.db_name, datetime.now(UTC), org_id=info.org_id)
+    assert (escalated, failed) == (0, 0)
+    async with realdb.sessionmaker("a")() as s:
+        inst = await s.get(WorkflowInstance, inst_id)
+    assert not (inst.state_data or {}).get("approval_levels")

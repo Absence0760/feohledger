@@ -646,3 +646,128 @@ def test_apply_escalation_is_a_no_op_when_every_target_is_ineligible():
     )
     assert apply_escalation(inst, ineligible={"uploader"}) is False
     assert inst.state_data["approval_levels"]["levels"][0]["approver_ids"] == ["a", "b"]
+
+
+# ---------------------------------------------------------------------------
+# A chain nobody has approved is re-routed on the corrected invoice
+#
+# The escalation sweep now initialises a chain (to escalate level 0) before
+# anyone approves, from the invoice as it was then. Routing has always been
+# decided at the first approval, on the POST-correction figures; a sweep-built
+# chain must not freeze it earlier, or an amount corrected up into a higher band
+# clears without that band's level.
+# ---------------------------------------------------------------------------
+
+_BANDED_CONFIG = {
+    "approver_strategy": "chain",
+    "approval_chain": [
+        {
+            "name": "Manager",
+            "approver_ids": ["m"],
+            "escalation_hours": 4,
+            "escalation_to_user_ids": ["esc"],
+        },
+        {"name": "CFO", "approver_ids": ["cfo"], "min_amount": "10000"},
+    ],
+}
+
+
+def _inv(amount: str):
+    from decimal import Decimal
+
+    return SimpleNamespace(amount=Decimal(amount), currency="USD", vendor_id=None)
+
+
+def _escalated_unstarted_chain(amount: str):
+    from app.services.approval_chain import apply_escalation, init_chain_for_invoice
+
+    inst = _instance()
+    entered = datetime.now(UTC) - timedelta(hours=5)
+    assert init_chain_for_invoice(
+        inst, _inv(amount), _BANDED_CONFIG, org_settings=None, entered_at=entered
+    )
+    assert apply_escalation(inst) is True
+    return inst, entered
+
+
+def test_ensure_chain_routed_reroutes_an_unstarted_chain_into_a_higher_band():
+    from app.services.approval_chain import ensure_chain_routed, get_chain_progress
+
+    inst, entered = _escalated_unstarted_chain("500")
+    assert [lv["name"] for lv in get_chain_progress(inst)["levels"]] == ["Manager"]
+
+    ensure_chain_routed(inst, _inv("50000"), _BANDED_CONFIG, org_settings=None)
+
+    chain = get_chain_progress(inst)
+    assert [lv["name"] for lv in chain["levels"]] == ["Manager", "CFO"]
+    assert chain["routing"] == [0, 1]
+    manager = chain["levels"][0]
+    # The Manager level keeps its escalation and the clock it has been running.
+    assert manager["approver_ids"] == ["m", "esc"]
+    assert len(manager["escalations"]) == 1
+    assert datetime.fromisoformat(manager["entered_at"]) == entered
+
+
+def test_ensure_chain_routed_leaves_an_unchanged_routing_alone():
+    import copy
+
+    from app.services.approval_chain import ensure_chain_routed
+
+    inst, _ = _escalated_unstarted_chain("500")
+    before = copy.deepcopy(inst.state_data)
+    ensure_chain_routed(inst, _inv("600"), _BANDED_CONFIG, org_settings=None)
+    assert inst.state_data == before
+
+
+def test_ensure_chain_routed_never_reroutes_once_someone_has_approved():
+    from app.services.approval_chain import (
+        advance_approval_chain,
+        ensure_chain_routed,
+        get_chain_progress,
+        init_chain_for_invoice,
+    )
+
+    config = {
+        "approver_strategy": "chain",
+        "approval_chain": [
+            {"name": "L0", "approver_ids": []},
+            {"name": "L1", "approver_ids": []},
+            {"name": "CFO", "approver_ids": [], "min_amount": "10000"},
+        ],
+    }
+    inst = _instance()
+    init_chain_for_invoice(inst, _inv("500"), config, org_settings=None)
+    advance_approval_chain(inst, uuid.uuid4())
+    ensure_chain_routed(inst, _inv("50000"), config, org_settings=None)
+    assert [lv["name"] for lv in get_chain_progress(inst)["levels"]] == ["L0", "L1"]
+
+
+def test_ensure_chain_routed_ignores_a_chain_without_routing():
+    """A chain not built by `init_chain_for_invoice` (by hand, or legacy) is
+    never rewritten."""
+    import copy
+
+    from app.services.approval_chain import ensure_chain_routed, init_chain_state
+
+    inst = _instance()
+    init_chain_state(inst, [{"name": "Hand-built", "approver_ids": ["x"]}])
+    before = copy.deepcopy(inst.state_data)
+    ensure_chain_routed(inst, _inv("50000"), _BANDED_CONFIG, org_settings=None)
+    assert inst.state_data == before
+
+
+def test_ensure_chain_routed_drops_a_chain_no_level_applies_to_any_more():
+    from app.services.approval_chain import (
+        ensure_chain_routed,
+        get_chain_progress,
+        init_chain_for_invoice,
+    )
+
+    config = {
+        "approver_strategy": "chain",
+        "approval_chain": [{"name": "Big", "approver_ids": ["b"], "min_amount": "1000"}],
+    }
+    inst = _instance()
+    assert init_chain_for_invoice(inst, _inv("5000"), config, org_settings=None)
+    ensure_chain_routed(inst, _inv("50"), config, org_settings=None)
+    assert get_chain_progress(inst) == {}
