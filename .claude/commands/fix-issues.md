@@ -1,5 +1,5 @@
 ---
-description: Fix N open GitHub issues in parallel — one worktree-isolated agent per issue, each fixing at the root with tests + docs per the project invariants, then opening a PR. Defaults to 5 issues / 5 agents. The one command allowed to push (fix branches only, never main).
+description: Fix N open GitHub issues in parallel — one worktree-isolated agent per issue, each fixing at the root with tests + docs per the project invariants, then opening a PR. Defaults to 5 issues / 5 agents. Pushes fix branches only, never main.
 argument-hint: "[count | issue numbers | label filter] [single-pr] — e.g. \"5\", \"#118 #133\", \"label:bug 5\", \"single-pr\". Omit to fix 5 open issues, one PR each."
 ---
 
@@ -80,7 +80,7 @@ If fewer than the requested count survive both filters, take what qualifies and 
 
 ### 2. Confirm before spending (checkpoint)
 
-Opening PRs is an outward-facing action, and this repo's default is **never push** — invoking this command is the explicit authorization for pushing the fix branches (never `main`, never `--force`). Before fanning out, print the selected issue numbers + titles + the one-line fix intent for each, and the PR strategy (one-per-issue vs `single-pr`), and get a go-ahead. If the user invoked the command with explicit issue numbers, treat that as the go-ahead and proceed.
+Opening PRs is an outward-facing action. This command pushes the fix branches only (never `main`, never `--force`). Before fanning out, print the selected issue numbers + titles + the one-line fix intent for each, and the PR strategy (one-per-issue vs `single-pr`), and get a go-ahead. If the user invoked the command with explicit issue numbers, treat that as the go-ahead and proceed.
 
 If tests will need the local stack, run `pnpm db:up` **once from the orchestrator** before fanning out — the compose services (Postgres/Redis/MinIO) are shared by every worktree; agents must not restart them.
 

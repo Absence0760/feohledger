@@ -378,7 +378,7 @@ Standing rules for how to work in this repo. They are not optional; when in
 doubt, follow the rule and say so. (Several are detailed in their own sections
 below or in `## Project invariants` — this is the index.)
 
-1. **Commit each piece of work; never push.** One logical unit = one
+1. **Commit each piece of work.** One logical unit = one
    path-scoped commit, as you finish it. See [Git workflow](#git-workflow).
 2. **Add test coverage with the change.** A behavior change ships with tests in
    the same session (pytest / Playwright / flutter). If something is genuinely
@@ -480,7 +480,7 @@ below or in `## Project invariants` — this is the index.)
 
 ## Git workflow
 
-- **Commit each piece of work; never push.** Land every logical unit of work as its own path-scoped commit (`git commit -m "…" -- path/to/file …`) as you finish it — don't leave the tree dirty across tasks or batch unrelated changes into one commit. **Never `git push`** in this repo; publishing is the operator's call.
+- **Commit each piece of work.** Land every logical unit of work as its own path-scoped commit (`git commit -m "…" -- path/to/file …`) as you finish it — don't leave the tree dirty across tasks or batch unrelated changes into one commit.
 - Path-scoped commits are also required by the `.claude/hooks/git-scope-guard.py` PreToolUse hook — bare `git commit`, `git add -A/.`, `git commit -a`, and whole-tree ops are blocked. If a git command is denied, follow the scoped alternative in its message.
 - No `Co-Authored-By` / "Generated with" trailer in commits or PRs — write them as a human would.
 - **PR titles must be conventional-commit formatted** — `type(scope): subject`, type one of `feat|fix|chore|docs|refactor|test|perf|ci|build|revert` (scope free-form). CI enforces this via `.github/workflows/pr-title-lint.yml` (`lint title` check) and a bare descriptive title fails it, so pass a compliant `--title` to `gh pr create` / `gh pr edit`.

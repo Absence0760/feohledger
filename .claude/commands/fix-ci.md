@@ -3,7 +3,7 @@ description: Fix a failing CI job from a GitHub Actions run (backend / frontend 
 argument-hint: "<GitHub Actions run URL or run ID> [optional: which job — backend | frontend | mobile | e2e]"
 ---
 
-Fix the failing CI run `$ARGUMENTS`. Find the real cause, fix it at the root, add coverage, and stop before pushing.
+Fix the failing CI run `$ARGUMENTS`. Find the real cause, fix it at the root, and add coverage.
 
 ## The two hard rules (these override convenience)
 
@@ -60,12 +60,11 @@ Confirm the failure reproduces *before* the fix and is gone *after*. Capture the
 
 If a doc describes the behaviour you changed (a CI job's steps, a command, an env var, a port), update it in the same turn — deferred docs are drift (guard rail 12, docs-as-code; CLAUDE.md § Every change must update docs and tests).
 
-### 7. Commit, don't push — then a review pass
+### 7. Commit — then a review pass
 
 - One coherent piece → one **path-scoped** commit, fix + coverage + doc update together: `git commit -m "…" -- <paths>`. Bare `git commit`, `git add -A/.`, `git commit -a`, and whole-tree ops are blocked by `.claude/hooks/git-scope-guard.py` (concurrent sessions share one checkout) — follow the scoped alternative if a command is denied (guard rail 1).
 - No `Co-Authored-By` / "Generated with" / AI-attribution trailer in the message — write it as a human would.
 - Validate before committing where cheap: `python3 -c "import yaml; yaml.safe_load(open('<workflow>'))"` for workflow YAML, the relevant linter/test for code.
-- **Never `git push`.** Publishing is the operator's call — STOP before pushing.
 - Consider a `code-reviewer` pass on the diff before you hand back (guard rail 3), especially if the fix touched a money path, auth, tenant isolation, or a webhook.
 
 ## Output

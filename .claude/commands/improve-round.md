@@ -105,7 +105,6 @@ its tests in the **same** commit as the code:
   `git-scope-guard.py` hook blocks bare `git commit` / `git add -A`.
 - One piece = one commit. `git status` before each; confirm every path is yours.
 - No AI attribution / `Co-Authored-By` / robot footer.
-- **Never `git push`** — publishing is the operator's call.
 
 ### 3. Verify each piece before moving on
 

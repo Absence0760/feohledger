@@ -1,5 +1,5 @@
 ---
-description: Go wide hunting for real correctness bugs across FeohLedger — reproduce each with a probe, confirm it's real, fix at the root, lock it with a regression test, then sweep sibling paths. Multi-round; commits scoped; never pushes.
+description: Go wide hunting for real correctness bugs across FeohLedger — reproduce each with a probe, confirm it's real, fix at the root, lock it with a regression test, then sweep sibling paths. Multi-round; commits scoped.
 argument-hint: "[optional scope — a layer, feature, or path, e.g. 'PO matching', 'the payment webhooks', backend/app/services/po_matching.py; omit to let it choose high-yield targets]"
 ---
 
@@ -14,7 +14,7 @@ Hunt for genuine correctness bugs and land the fixes. This is the **cross-cuttin
 - **Be honest when there's no bug.** If a target is sound, say so and make the deliverable the coverage gap you closed — never invent a "fix" to justify the command. (Rail 6 / coverage.)
 - **Respect tenancy & secrets.** Never bypass tenant isolation (`get_tenant` / `get_tenant_db` is the chokepoint — never hardcode an `feoh_<slug>` name, never build a tenant engine outside `get_tenant_db`, never run tenant-data queries against the `feohledger` control plane), never log PII/banking data, never leak secrets. Treat auth/tenancy/migrations/approval gates/money/audit-trail/PII as load-bearing (mandatory review pass, step 7). (Rail 11.)
 - **Docs-as-code.** A behaviour/command/env/port/convention change updates its docs in the same commit. (Rail 12.)
-- **Commit each logical unit, path-scoped; never push.** Fix and tests are separate commits (`git commit -m "…" -- <paths>`; the `.claude/hooks/git-scope-guard.py` hook blocks bare/whole-tree commits, `git add -A/.`, and `git commit -a`). (Rail 1 / Git workflow.)
+- **Commit each logical unit, path-scoped.** Fix and tests are separate commits (`git commit -m "…" -- <paths>`; the `.claude/hooks/git-scope-guard.py` hook blocks bare/whole-tree commits, `git add -A/.`, and `git commit -a`). (Rail 1 / Git workflow.)
 
 ## Where bugs have actually lived here
 
@@ -65,9 +65,9 @@ The bug you found is rarely unique. Grep for the same shape elsewhere (the other
 - Run the **nearby existing** suites on the same path to prove no regression — report pass/fail counts faithfully.
 - For load-bearing diffs (money path, auth, tenancy, migrations, webhooks, audit trail), run the `code-reviewer` agent and apply/push back before committing.
 
-### 8. Commit (scoped) — never push
+### 8. Commit (scoped)
 
-Fix and tests as separate path-scoped commits, conventional-commit style, no AI/co-author trailer. Docs ride with the commit that changed the behaviour. Then go back to step 3 for the next target until you've covered the scope (or the user's round budget). **Never `git push`.**
+Fix and tests as separate path-scoped commits, conventional-commit style, no AI/co-author trailer. Docs ride with the commit that changed the behaviour. Then go back to step 3 for the next target until you've covered the scope (or the user's round budget).
 
 ## Report
 

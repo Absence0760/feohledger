@@ -1,5 +1,5 @@
 ---
-description: Pick one app area (random if none given), audit it for real bugs, fix at the root, and back the fix with as much pytest/Playwright/flutter coverage as the change warrants. Commits scoped; never pushes.
+description: Pick one app area (random if none given), audit it for real bugs, fix at the root, and back the fix with as much pytest/Playwright/flutter coverage as the change warrants. Commits scoped.
 argument-hint: "[optional area — a path, glob, module, or feature, e.g. backend/app/services/po_matching.py or 'the payment-run execute path']"
 ---
 
@@ -13,7 +13,7 @@ Deep-audit a single area of FeohLedger, fix the real issues you find, and ship t
 - **Be honest when there's no bug.** If the area is sound, say so plainly and make the deliverable the *test coverage gap* you closed — do **not** invent a "fix" to justify the command. A no-bug-found result with new tests is a success.
 - **Respect tenancy, money, secrets.** Don't bypass tenant isolation (`get_tenant` / `get_tenant_db` — the JWT `org` cross-check is the chokepoint), don't hardcode a tenant DB name, don't type money as `float`, don't drop idempotency on a money write, don't log PII / banking data. If the area is auth, tenant isolation, migrations, the money/payment path, webhook handlers, PII, or approval/RBAC, treat it as **load-bearing** (mandatory review pass in step 5).
 - **Docs-as-code.** If you change a behaviour, command, env var, port, or convention, update its docs in the same commit (guard rail 12).
-- **Commit each logical unit, path-scoped; never push.** Fix and tests are separate commits. Use `git commit -m "…" -- <paths>` (the scope-guard hook blocks bare/whole-tree commits, `git add -A/.`, and `git commit -a`). No AI/co-author trailer.
+- **Commit each logical unit, path-scoped.** Fix and tests are separate commits. Use `git commit -m "…" -- <paths>` (the scope-guard hook blocks bare/whole-tree commits, `git add -A/.`, and `git commit -a`). No AI/co-author trailer.
 
 ## Procedure
 
@@ -54,11 +54,10 @@ There are three test layers — pick the right one per the change (there is **no
 - Run the **nearby existing** tests that exercise the same path to prove no regression — report the pass/fail counts faithfully.
 - If the change is **load-bearing** (auth, tenant isolation, migrations, the money/payment path, webhook handlers, PII, approval/RBAC), run the `code-reviewer` agent on the diff — and `repo-security-auditor` for a security-sensitive area — and apply or push back on its findings before committing. For migration work, route through `/safe-migration` / the `migration-coordinator` agent (the change must fan out to every tenant DB).
 
-### 6. Commit (scoped) — never push
+### 6. Commit (scoped)
 
 - Commit the **fix** and the **tests** as separate path-scoped commits (conventional-commit style, no AI/co-author trailer). If a behaviour/doc changed, the doc edit rides with the commit that caused it.
 - If you only added tests (no bug), one `test(...)` commit is fine.
-- Do **not** `git push`.
 
 ## Report
 
