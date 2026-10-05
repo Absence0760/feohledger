@@ -9,7 +9,8 @@ keep the money trail (amounts, statuses, dates) and the append-only
 What is redacted vs. preserved, per subject type:
 
   * ``user`` (control plane) — redact ``email`` / ``full_name`` / ``sso_*``,
-    null the MFA secret + password, deactivate, **delete every
+    null the MFA secret + password + ``locale``, empty ``device_tokens`` (the
+    push registrations of the subject's phone), deactivate, **delete every
     ``WebAuthnCredential`` row** and **revoke every live session**. **Preserve**
     the row id, ``organization_id``, role assignments, and every ``audit_log``
     row the user authored (the actor_id link stays — non-repudiation).
@@ -279,16 +280,33 @@ async def erase_user(
         )
     await _erase_auth_material(subject_id=subject_id, control_db=control_db, result=result)
 
+    # The push registrations are a persistent identifier of the subject's own
+    # phone, not a financial record — dropped outright, like passkeys. Locale is
+    # a preference of a person who no longer has an account. Both run before
+    # the tombstone check for the same reason the legs above do: a subject
+    # erased before these columns were covered still holds them.
+    device_fields = 0
+    if user.device_tokens:
+        user.device_tokens = {}
+        device_fields += 1
+    if user.locale is not None:
+        user.locale = None
+        device_fields += 1
+
     # Idempotency: the User model has no `meta` column, so we detect a prior
     # erasure by the tombstone email we wrote last time. Deleting a leftover
-    # passkey or revoking a live session is real work, so a re-run that found
-    # either is NOT a no-op.
+    # passkey, revoking a live session or dropping a device registration is
+    # real work, so a re-run that found any of them is NOT a no-op.
     already_tombstoned = user.email.startswith("erased+") and user.email.endswith(
         "@redacted.invalid"
     )
     if already_tombstoned:
+        result.fields_redacted = device_fields
         result.already_erased = not (
-            result.passkeys_deleted or result.sessions_revoked or result.documents_deleted
+            result.passkeys_deleted
+            or result.sessions_revoked
+            or result.documents_deleted
+            or device_fields
         )
         if not result.already_erased:
             result.record_counts = _user_record_counts(result, users=0)
@@ -302,7 +320,7 @@ async def erase_user(
     user.mfa_secret = None
     user.mfa_enabled = False
     user.is_active = False
-    result.fields_redacted = 6
+    result.fields_redacted = 6 + device_fields
     result.record_counts = _user_record_counts(result, users=1)
     return result
 
