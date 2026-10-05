@@ -862,7 +862,13 @@ inherit it for free. Reuse these; don't re-solve them per page.
   WCAG 2.1.2 / 2.4.3) — `use:focusTrap={{ onEscape }}` on a dialog box
   (with `tabindex="-1"`) moves focus in on open, traps Tab / Shift+Tab
   with wrap-around, closes on Esc, and restores focus to the trigger on
-  close. `ui/Modal` uses it, and so do the four pre-existing hand-rolled
+  close. The restore runs **after** the render flush, not during teardown: a
+  dialog's own action can remove its trigger (approving a request from its
+  dialog filters the row out of the Pending list), and a trigger focused
+  synchronously is then lost to `<body>` when it unmounts. If the trigger is
+  gone or now disabled, focus lands on `<main id="main-content">` instead; if
+  something else already took focus (a second dialog), it is left alone.
+  Guard: `tests-e2e/a11y/screen-reader.spec.ts`. `ui/Modal` uses it, and so do the four pre-existing hand-rolled
   feature shells (`InvoiceModal`, `RunDetailModal`, `BulkRecodeGLModal`,
   portal discount-accept) so every dialog gets identical focus management.
   Prefer `ui/Modal` for new dialogs; if you must hand-roll a shell, add

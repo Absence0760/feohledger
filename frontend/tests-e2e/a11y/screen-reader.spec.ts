@@ -87,4 +87,77 @@ test.describe('screen-reader navigability — core flow', () => {
 		await expect(modal).toBeHidden();
 		await expect(opener).toBeFocused();
 	});
+
+	test('a dialog whose trigger vanished lands focus in <main>, not on <body> (2.4.3)', async ({
+		page
+	}) => {
+		// The other half of focus restoration. Approving a pending bank-change
+		// request from its dialog filters the row — and with it the button that
+		// opened the dialog — out of the Pending list in the same render flush
+		// that closes the dialog. `focusTrap` used to call `.focus()` on that
+		// button synchronously, which "worked" and was then lost to <body> when
+		// the row unmounted: a keyboard / screen-reader user was thrown back to
+		// the top of the document, above the sidebar. Every read is stubbed on
+		// its exact pathname (docs/decisions.md §190) so the row exists on any
+		// tenant and the approval never touches a real vendor.
+		const req = {
+			id: '00000000-0000-4000-b000-0000000000f1',
+			vendor_id: '00000000-0000-4000-b001-0000000000f1',
+			vendor_name: 'Focus Return Supplies',
+			change_type: 'bank_details',
+			status: 'pending',
+			proposed_value: { bank_name: 'Focus Bank', account_last4: '1234' },
+			// A portal-submitted request, so the admin is not the proposer and
+			// the segregation-of-duties gate leaves Approve enabled.
+			requested_by_vendor_user_id: '00000000-0000-4000-b002-0000000000f1',
+			requested_by_user_id: null,
+			reviewed_by_user_id: null,
+			reviewed_at: null,
+			review_note: null,
+			created_at: '2026-01-01T00:00:00Z'
+		};
+		let approved = false;
+		await page.route(
+			(url) =>
+				url.pathname === '/api/vendors/change-requests' ||
+				url.pathname === '/api/vendors/change-requests/counts' ||
+				url.pathname === `/api/vendors/${req.vendor_id}/change-requests` ||
+				url.pathname === `/api/vendors/change-requests/${req.id}/approve`,
+			(route) => {
+				const path = new URL(route.request().url()).pathname;
+				if (path.endsWith('/counts')) {
+					return route.fulfill({
+						json: { pending: approved ? 0 : 1, approved: approved ? 1 : 0, rejected: 0, all: 1 }
+					});
+				}
+				if (path.endsWith('/approve')) {
+					approved = true;
+					return route.fulfill({
+						json: { ...req, status: 'approved', reviewed_at: '2026-01-02T00:00:00Z' }
+					});
+				}
+				if (path === '/api/vendors/change-requests') {
+					return route.fulfill({
+						json: { items: approved ? [] : [req], total: approved ? 0 : 1, page: 1, page_size: 25 }
+					});
+				}
+				return route.fulfill({ json: [req] });
+			}
+		);
+
+		await page.goto('/vendors/change-requests');
+		const opener = page.getByRole('button', { name: /Focus Return Supplies/ });
+		await opener.click();
+		const dialog = page.getByRole('dialog');
+		await expect(dialog).toBeVisible();
+
+		// Armed two-click: the first press arms, the second decides.
+		const approve = dialog.getByRole('button', { name: /approve/i });
+		await approve.click();
+		await approve.click();
+		await expect(dialog).toBeHidden();
+		await expect(opener).toHaveCount(0);
+
+		await expect(page.locator('main#main-content')).toBeFocused();
+	});
 });
