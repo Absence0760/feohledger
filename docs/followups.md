@@ -69,7 +69,7 @@ section carried its own `decisions.md` § reference, so nothing was lost by
 deleting it; that cross-reference is what makes the pruning safe, and writing
 one is what earns a future entry the right to be deleted.
 
-**53 open: 38 (c) · 9 (a) · 6 (b)** — re-derived from the file, never carried
+**54 open: 39 (c) · 9 (a) · 6 (b)** — re-derived from the file, never carried
 forward. The section heading is authoritative; where an entry also carries a
 `(c)`/`(a)`/`(b)` marker, the two agree.
 `grep -c '^- \[ \]' docs/followups.md`.
@@ -1030,6 +1030,28 @@ or is a sibling of a fix that needs its own pass.
       **Trigger:** the next change to `ConsentBanner.svelte`, or the next
       accessibility pass over `/legal` (`/a11y-hunt`, or the manual
       screen-reader pass `docs/accessibility.md` still has open).
+
+### Surfaced by the invoices / exceptions UX hunt (2026-10-05)
+
+- [ ] **(c) An approved or paid invoice's source document can still be
+      replaced or deleted, and the original is destroyed.** `PUT` / `DELETE
+      /api/invoices/{id}/file` refuse only `done`
+      (`backend/app/api/invoices.py`); on `approved`, `sending_to_erp`,
+      `sent_to_erp`, `posted_in_erp`, `payment_scheduled` and `paid` they
+      succeed, and the replace path deletes the previous object from storage
+      after the commit. The audit row names the old filename, but the document
+      the approver signed off, and the one the payment was made against, is
+      gone. The invoice modal mirrors the server (`canManageFile` hides the
+      controls only on `done`), so this is a policy question rather than a
+      UI one, which is why the UX hunt reported it instead of changing the
+      gate. **Durable fix:** decide whether the source document freezes with
+      the financial fields (`_FINANCIALLY_LOCKED_STATUSES`, which starts at
+      `approved`). If it does, refuse both routes from that set and gate
+      `canManageFile` on the same list. If replacement must stay possible
+      (for a corrected scan), keep the superseded object, for example by
+      versioning the key instead of deleting it, so the evidence chain
+      survives. **Trigger:** the product call, or the next change to either
+      file route.
 
 ## (a) Blocked on external credentials, accounts, or hardware
 
