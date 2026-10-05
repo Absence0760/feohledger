@@ -1139,6 +1139,228 @@ abstract class AppLocalizations {
   /// **'Reject {count, plural, one {{count} invoice} other {{count} invoices}}'**
   String invoicesBulkRejectTitle(int count);
 
+  /// Destructive delete action (bulk bar button, confirm-dialog button).
+  ///
+  /// In en, this message translates to:
+  /// **'Delete'**
+  String get commonDelete;
+
+  /// Selected-row count in the multi-select app bar and the shared BulkActionBar. Generic across lists (invoices, exceptions), so it names no noun.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, one {{count} selected} other {{count} selected}}'**
+  String bulkSelectedCount(int count);
+
+  /// Tooltip + screen-reader label of the button that leaves multi-select mode.
+  ///
+  /// In en, this message translates to:
+  /// **'Cancel selection'**
+  String get bulkCancelSelection;
+
+  /// Tooltip + screen-reader label of the select-all button in multi-select mode.
+  ///
+  /// In en, this message translates to:
+  /// **'Select all'**
+  String get bulkSelectAll;
+
+  /// BulkActionBar button: export the selected rows.
+  ///
+  /// In en, this message translates to:
+  /// **'Export'**
+  String get bulkActionExport;
+
+  /// BulkActionBar button: change the status of the selected rows.
+  ///
+  /// In en, this message translates to:
+  /// **'Status'**
+  String get bulkActionStatus;
+
+  /// A bulk result line ({result}) followed by how many rows the backend skipped. Generic across lists, so it names no noun.
+  ///
+  /// In en, this message translates to:
+  /// **'{result} ({skipped, plural, one {{skipped} skipped} other {{skipped} skipped}})'**
+  String bulkResultWithSkipped(String result, int skipped);
+
+  /// Fallback error detail when a failed bulk action carries no message.
+  ///
+  /// In en, this message translates to:
+  /// **'unknown error'**
+  String get bulkUnknownError;
+
+  /// Invoices app-bar button that enters multi-select mode.
+  ///
+  /// In en, this message translates to:
+  /// **'Select multiple'**
+  String get invoicesSelectMultiple;
+
+  /// Title of the bulk-delete confirmation dialog.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete invoices?'**
+  String get invoicesBulkDeleteTitle;
+
+  /// Body of the bulk-delete confirmation dialog.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, one {Permanently delete {count} selected invoice?} other {Permanently delete {count} selected invoices?}} Invoices already paid or sent to the ERP are skipped.'**
+  String invoicesBulkDeleteBody(int count);
+
+  /// Snackbar after a bulk delete.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, one {Deleted {count} invoice} other {Deleted {count} invoices}}'**
+  String invoicesBulkDeleted(int count);
+
+  /// Snackbar when a bulk delete fails; {error} is the server detail.
+  ///
+  /// In en, this message translates to:
+  /// **'Bulk delete failed: {error}'**
+  String invoicesBulkDeleteFailed(String error);
+
+  /// Heading of the bulk status-change sheet.
+  ///
+  /// In en, this message translates to:
+  /// **'Change status to…'**
+  String get invoicesBulkStatusSheetTitle;
+
+  /// Snackbar after a bulk status change; {status} is the localized target status (invoiceStatus*).
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, one {Moved {count} invoice to {status}} other {Moved {count} invoices to {status}}}'**
+  String invoicesBulkMoved(int count, String status);
+
+  /// Snackbar when a bulk status change fails.
+  ///
+  /// In en, this message translates to:
+  /// **'Bulk status change failed: {error}'**
+  String invoicesBulkStatusFailed(String error);
+
+  /// Heading of the bulk export format sheet.
+  ///
+  /// In en, this message translates to:
+  /// **'Export as…'**
+  String get invoicesBulkExportSheetTitle;
+
+  /// Export format option (a file-format name).
+  ///
+  /// In en, this message translates to:
+  /// **'CSV'**
+  String get invoicesExportFormatCsv;
+
+  /// Export format option (a file-format name).
+  ///
+  /// In en, this message translates to:
+  /// **'XML'**
+  String get invoicesExportFormatXml;
+
+  /// Snackbar when a bulk export fails.
+  ///
+  /// In en, this message translates to:
+  /// **'Export failed: {error}'**
+  String invoicesBulkExportFailed(String error);
+
+  /// Snackbar when the platform share sheet cannot be opened for an export.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not open the share sheet: {error}'**
+  String invoicesBulkShareFailed(String error);
+
+  /// Screen-reader announcement after a bulk export; {format} is the format name.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, one {Exported {count} invoice as {format}} other {Exported {count} invoices as {format}}}'**
+  String invoicesBulkExported(int count, String format);
+
+  /// Exceptions app-bar button that enters multi-select mode.
+  ///
+  /// In en, this message translates to:
+  /// **'Select exceptions'**
+  String get exceptionsSelectMultiple;
+
+  /// Snackbar after a bulk resolve.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, one {Resolved {count} exception} other {Resolved {count} exceptions}}'**
+  String exceptionsBulkResolved(int count);
+
+  /// Snackbar after a bulk dismiss.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, one {Dismissed {count} exception} other {Dismissed {count} exceptions}}'**
+  String exceptionsBulkDismissed(int count);
+
+  /// Invoice status label (lib/l10n/invoice_status_labels.dart is the one mapping).
+  ///
+  /// In en, this message translates to:
+  /// **'New'**
+  String get invoiceStatusNew;
+
+  /// No description provided for @invoiceStatusPending.
+  ///
+  /// In en, this message translates to:
+  /// **'Pending'**
+  String get invoiceStatusPending;
+
+  /// No description provided for @invoiceStatusReadyForReview.
+  ///
+  /// In en, this message translates to:
+  /// **'Ready for Review'**
+  String get invoiceStatusReadyForReview;
+
+  /// No description provided for @invoiceStatusApproved.
+  ///
+  /// In en, this message translates to:
+  /// **'Approved'**
+  String get invoiceStatusApproved;
+
+  /// No description provided for @invoiceStatusRejected.
+  ///
+  /// In en, this message translates to:
+  /// **'Rejected'**
+  String get invoiceStatusRejected;
+
+  /// No description provided for @invoiceStatusSendingToErp.
+  ///
+  /// In en, this message translates to:
+  /// **'Sending to ERP'**
+  String get invoiceStatusSendingToErp;
+
+  /// No description provided for @invoiceStatusSentToErp.
+  ///
+  /// In en, this message translates to:
+  /// **'Sent to ERP'**
+  String get invoiceStatusSentToErp;
+
+  /// No description provided for @invoiceStatusPostedInErp.
+  ///
+  /// In en, this message translates to:
+  /// **'Posted in ERP'**
+  String get invoiceStatusPostedInErp;
+
+  /// No description provided for @invoiceStatusPaymentScheduled.
+  ///
+  /// In en, this message translates to:
+  /// **'Payment Scheduled'**
+  String get invoiceStatusPaymentScheduled;
+
+  /// No description provided for @invoiceStatusPaid.
+  ///
+  /// In en, this message translates to:
+  /// **'Paid'**
+  String get invoiceStatusPaid;
+
+  /// No description provided for @invoiceStatusDone.
+  ///
+  /// In en, this message translates to:
+  /// **'Done'**
+  String get invoiceStatusDone;
+
+  /// No description provided for @invoiceStatusFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Failed'**
+  String get invoiceStatusFailed;
+
   /// No description provided for @invoiceDetailApprove.
   ///
   /// In en, this message translates to:

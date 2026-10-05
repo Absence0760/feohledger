@@ -15,6 +15,8 @@ import 'package:feohledger_mobile/stores/exception_store.dart';
 import 'package:feohledger_mobile/widgets/bulk_action_bar.dart';
 import 'package:feohledger_mobile/widgets/exception_list_tile.dart';
 
+import '../support/untranslated_text.dart';
+
 Map<String, dynamic> _me(List<String> roles) => {
       'id': 'u1',
       'email': 'demo@acme.com',
@@ -287,15 +289,104 @@ void main() {
     await tester.pump(const Duration(milliseconds: 50));
     expect(store.selectedCount, 2);
 
-    // Bulk-resolve via the shared bar's "Status" action.
-    await tester.tap(find.widgetWithText(TextButton, 'Status'));
+    // Bulk-resolve via the shared bar's status slot, which this screen names
+    // for what it does here.
+    expect(find.widgetWithText(TextButton, 'Status'), findsNothing);
+    expect(find.widgetWithText(TextButton, 'Delete'), findsNothing);
+    expect(find.widgetWithText(TextButton, 'Dismiss'), findsOneWidget);
+    await tester.tap(find.widgetWithText(TextButton, 'Resolve'));
     await _pumpUntilTrue(tester, () => sentIds != null);
     await tester.pump(const Duration(milliseconds: 50));
 
     expect(sentIds, containsAll(<String>['1', '2']));
-    expect(find.textContaining('Resolved 2 exception'), findsOneWidget);
-    expect(find.textContaining('1 skipped'), findsOneWidget);
+    expect(find.text('Resolved 2 exceptions (1 skipped)'), findsOneWidget);
     // Selection mode exits on a successful bulk call.
     expect(store.selectionMode, isFalse);
+  });
+
+  // The selection app bar, the shared bar and the result snackbars were
+  // English literals (`N selected`, `Resolved N exception(s)`, `(M skipped)`).
+  // Drive the flow under `en` and `ja`; a string both runs render identically
+  // is a literal (`test/support/untranslated_text.dart`). The rows are their
+  // own extraction turn, so their subtrees are skipped.
+  testWidgets('the bulk-selection flow renders no hardcoded English',
+      (tester) async {
+    Future<Set<String>> runFlow(Locale locale) async {
+      final seen = <String>{};
+      void capture() => seen.addAll(renderedStrings(
+            tester,
+            skipSubtreesOf: {ExceptionListTile},
+          ));
+      Future<void> bulk(IconData icon) async {
+        await tester.tap(find.byIcon(Icons.checklist));
+        await tester.pump(const Duration(milliseconds: 50));
+        await tester.tap(find.byType(ExceptionListTile).at(0));
+        await tester.tap(find.byType(ExceptionListTile).at(1));
+        await tester.pump(const Duration(milliseconds: 50));
+        capture(); // selection app bar + BulkActionBar
+        await tester.tap(find.byIcon(icon));
+        await _pumpUntil(tester, find.byType(SnackBar));
+        expect(find.byType(SnackBar), findsOneWidget);
+        await tester.pump(const Duration(milliseconds: 300));
+        capture();
+        tester
+            .state<ScaffoldMessengerState>(find.byType(ScaffoldMessenger))
+            .removeCurrentSnackBar();
+        await tester.pump();
+      }
+
+      store.reset();
+      await _loginThen(
+        ['ap_manager'],
+        MockClient((req) async {
+          if (req.url.path.endsWith('/exceptions/bulk/resolve')) {
+            return http.Response(
+              jsonEncode({
+                'updated': 1,
+                'skipped': [
+                  {'id': '2', 'reason': 'already_resolved'},
+                ],
+              }),
+              200,
+              headers: {'content-type': 'application/json'},
+            );
+          }
+          return _list([_exceptionJson('1'), _exceptionJson('2')]);
+        }),
+      );
+      await tester.pumpWidget(MaterialApp(
+        // Keyed so the second run mounts a fresh screen (and its fetch).
+        key: ValueKey(locale),
+        locale: locale,
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        supportedLocales: AppLocalizations.supportedLocales,
+        home: const ExceptionsScreen(),
+      ));
+      await _pumpUntil(tester, find.byType(ExceptionListTile));
+      capture(); // the normal app bar, incl. the select action
+
+      await bulk(Icons.swap_horiz); // resolve
+      await _pumpUntil(tester, find.byType(ExceptionListTile));
+      await bulk(Icons.delete_outline); // dismiss
+
+      await AuthStore.instance.logout();
+      return seen;
+    }
+
+    final english = await runFlow(const Locale('en'));
+    expect(english, containsAll(<String>[
+      'Select exceptions',
+      '2 selected',
+      'Cancel selection',
+      'Resolve',
+      'Dismiss',
+      'Resolved 1 exception (1 skipped)',
+      'Dismissed 1 exception (1 skipped)',
+    ]));
+    expectNoUntranslatedStrings(
+      english: english,
+      other: await runFlow(const Locale('ja')),
+      surface: 'ExceptionsScreen bulk flow',
+    );
   });
 }

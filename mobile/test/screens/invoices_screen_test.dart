@@ -19,6 +19,8 @@ import 'package:feohledger_mobile/stores/invoice_store.dart';
 import 'package:feohledger_mobile/widgets/bulk_action_bar.dart';
 import 'package:feohledger_mobile/widgets/invoice_list_tile.dart';
 
+import '../support/untranslated_text.dart';
+
 /// Records the last share invocation so the export test can assert the bytes +
 /// filename reached the platform share sheet without touching a plugin channel.
 class _FakeFileShare extends FileShare {
@@ -394,6 +396,141 @@ void main() {
     expect(String.fromCharCodes(fake.lastBytes!), contains('Acme Corp'));
     // Non-mutating read keeps the selection.
     expect(store.selectionMode, isTrue);
+  });
+
+  // The multi-select flow — selection app bar, the bulk bar, the export and
+  // status sheets, the delete confirmation, and the result snackbars — was
+  // English literals around an otherwise localized screen. Drive the whole
+  // flow under `en` and again under `ja`; any string the two runs render
+  // identically is a literal nobody routed through AppLocalizations
+  // (`test/support/untranslated_text.dart`). The rows themselves are skipped:
+  // InvoiceListTile and its StatusBadge are their own extraction turn.
+  testWidgets('the bulk-selection flow renders no hardcoded English',
+      (tester) async {
+    Future<Set<String>> runFlow(Locale locale) async {
+      final l = lookupAppLocalizations(locale);
+      final seen = <String>{};
+      void capture() => seen.addAll(renderedStrings(
+            tester,
+            skipSubtreesOf: {InvoiceListTile},
+          ));
+      Future<void> snack() async {
+        await _pumpUntil(tester, find.byType(SnackBar));
+        expect(find.byType(SnackBar), findsOneWidget);
+        await tester.pump(const Duration(milliseconds: 300));
+        capture();
+        tester
+            .state<ScaffoldMessengerState>(find.byType(ScaffoldMessenger))
+            .removeCurrentSnackBar();
+        await tester.pump();
+      }
+
+      final fake = _FakeFileShare();
+      FileShare.debugOverride(fake);
+      store.reset();
+      ApiClient().debugConfigure(
+        client: MockClient((req) async {
+          final json = {'content-type': 'application/json'};
+          if (req.url.path == '/api/auth/login') {
+            return http.Response(
+                jsonEncode({'access_token': 'tok'}), 200, headers: json);
+          }
+          if (req.url.path == '/api/auth/me') {
+            return http.Response(jsonEncode(_me(['admin'])), 200,
+                headers: json);
+          }
+          if (req.url.path.endsWith('/bulk/export')) {
+            return http.Response('id\n1\n', 200, headers: {
+              'content-type': 'text/csv',
+              'content-disposition': 'attachment; filename="x.csv"',
+            });
+          }
+          // One row moved/deleted, one skipped: exercises the plural and the
+          // skipped-count suffix in every result line.
+          if (req.url.path.endsWith('/bulk/status')) {
+            return http.Response(
+                jsonEncode({'updated': 1, 'skipped': ['2']}), 200,
+                headers: json);
+          }
+          if (req.url.path.endsWith('/bulk/delete')) {
+            return http.Response(
+                jsonEncode({'deleted': 1, 'skipped': ['2']}), 200,
+                headers: json);
+          }
+          return _list([_invoiceJson('1'), _invoiceJson('2')]);
+        }),
+      );
+      await AuthStore.instance.login('demo@acme.com', 'demo', 'acme');
+
+      await tester.pumpWidget(MaterialApp(
+        // Keyed by locale so the second run mounts a fresh screen (and its
+        // initState fetch) instead of updating the first run's.
+        key: ValueKey(locale),
+        locale: locale,
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        supportedLocales: AppLocalizations.supportedLocales,
+        home: const InvoicesScreen(),
+      ));
+      await _pumpUntil(tester, find.byType(InvoiceListTile));
+      capture(); // the normal app bar, incl. the select-multiple action
+
+      Future<void> selectBoth() async {
+        await tester.tap(find.byIcon(Icons.checklist));
+        await tester.pump();
+        await tester.tap(find.byIcon(Icons.select_all));
+        await tester.pump();
+        expect(store.selectedCount, 2);
+      }
+
+      await selectBoth();
+      capture(); // selection app bar + BulkActionBar
+
+      // Export: format sheet, then the share hand-off.
+      await tester.tap(find.byIcon(Icons.ios_share));
+      await tester.pumpAndSettle();
+      capture();
+      await tester.tap(find.text(l.invoicesExportFormatCsv));
+      await _pumpUntilTrue(tester, () => fake.calls >= 1);
+      await tester.pumpAndSettle();
+
+      // Status: target sheet, then the result snackbar.
+      await tester.tap(find.byIcon(Icons.swap_horiz));
+      await tester.pumpAndSettle();
+      capture();
+      await tester.tap(find.widgetWithText(ListTile, l.invoiceStatusApproved));
+      await snack();
+
+      // Delete: confirmation dialog, then the result snackbar.
+      await selectBoth();
+      await tester.tap(find.byIcon(Icons.delete_outline));
+      await tester.pumpAndSettle();
+      capture();
+      await tester.tap(find.widgetWithText(FilledButton, l.commonDelete));
+      await snack();
+
+      await AuthStore.instance.logout();
+      return seen;
+    }
+
+    final english = await runFlow(const Locale('en'));
+    // The English run proves the capture reached each step it guards.
+    expect(english, containsAll(<String>[
+      'Select multiple',
+      '2 selected',
+      'Cancel selection',
+      'Export as…',
+      'Change status to…',
+      'Delete invoices?',
+      'Moved 1 invoice to Approved (1 skipped)',
+      'Deleted 1 invoice (1 skipped)',
+    ]));
+    expectNoUntranslatedStrings(
+      english: english,
+      other: await runFlow(const Locale('ja')),
+      // File-format names are the same token in every language.
+      allowed: {'CSV', 'XML'},
+      surface: 'InvoicesScreen bulk flow',
+    );
   });
 
   // `POST /api/invoices/bulk/status` 422s a `rejected` target with no `reason`

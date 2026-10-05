@@ -1,5 +1,6 @@
 // ignore: unused_import
 import 'package:intl/intl.dart' as intl;
+
 import 'app_localizations.dart';
 
 // ignore_for_file: type=lint
@@ -611,6 +612,183 @@ class AppLocalizationsDe extends AppLocalizations {
     );
     return '$_temp0 ablehnen';
   }
+
+  @override
+  String get commonDelete => 'Löschen';
+
+  @override
+  String bulkSelectedCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count ausgewählt',
+      one: '$count ausgewählt',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get bulkCancelSelection => 'Auswahl abbrechen';
+
+  @override
+  String get bulkSelectAll => 'Alle auswählen';
+
+  @override
+  String get bulkActionExport => 'Exportieren';
+
+  @override
+  String get bulkActionStatus => 'Status';
+
+  @override
+  String bulkResultWithSkipped(String result, int skipped) {
+    return '$result ($skipped übersprungen)';
+  }
+
+  @override
+  String get bulkUnknownError => 'unbekannter Fehler';
+
+  @override
+  String get invoicesSelectMultiple => 'Mehrere auswählen';
+
+  @override
+  String get invoicesBulkDeleteTitle => 'Rechnungen löschen?';
+
+  @override
+  String invoicesBulkDeleteBody(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count ausgewählte Rechnungen endgültig löschen?',
+      one: '$count ausgewählte Rechnung endgültig löschen?',
+    );
+    return '$_temp0 Bereits bezahlte oder an das ERP gesendete Rechnungen werden übersprungen.';
+  }
+
+  @override
+  String invoicesBulkDeleted(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count Rechnungen gelöscht',
+      one: '$count Rechnung gelöscht',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String invoicesBulkDeleteFailed(String error) {
+    return 'Massenlöschung fehlgeschlagen: $error';
+  }
+
+  @override
+  String get invoicesBulkStatusSheetTitle => 'Status ändern in…';
+
+  @override
+  String invoicesBulkMoved(int count, String status) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count Rechnungen auf „$status“ gesetzt',
+      one: '$count Rechnung auf „$status“ gesetzt',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String invoicesBulkStatusFailed(String error) {
+    return 'Statusänderung fehlgeschlagen: $error';
+  }
+
+  @override
+  String get invoicesBulkExportSheetTitle => 'Exportieren als…';
+
+  @override
+  String get invoicesExportFormatCsv => 'CSV';
+
+  @override
+  String get invoicesExportFormatXml => 'XML';
+
+  @override
+  String invoicesBulkExportFailed(String error) {
+    return 'Export fehlgeschlagen: $error';
+  }
+
+  @override
+  String invoicesBulkShareFailed(String error) {
+    return 'Teilen-Dialog konnte nicht geöffnet werden: $error';
+  }
+
+  @override
+  String invoicesBulkExported(int count, String format) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count Rechnungen als $format exportiert',
+      one: '$count Rechnung als $format exportiert',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get exceptionsSelectMultiple => 'Ausnahmen auswählen';
+
+  @override
+  String exceptionsBulkResolved(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count Ausnahmen gelöst',
+      one: '$count Ausnahme gelöst',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String exceptionsBulkDismissed(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count Ausnahmen verworfen',
+      one: '$count Ausnahme verworfen',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get invoiceStatusNew => 'Neu';
+
+  @override
+  String get invoiceStatusPending => 'Ausstehend';
+
+  @override
+  String get invoiceStatusReadyForReview => 'Prüfbereit';
+
+  @override
+  String get invoiceStatusApproved => 'Freigegeben';
+
+  @override
+  String get invoiceStatusRejected => 'Abgelehnt';
+
+  @override
+  String get invoiceStatusSendingToErp => 'Wird an ERP gesendet';
+
+  @override
+  String get invoiceStatusSentToErp => 'An ERP gesendet';
+
+  @override
+  String get invoiceStatusPostedInErp => 'In ERP gebucht';
+
+  @override
+  String get invoiceStatusPaymentScheduled => 'Zahlung geplant';
+
+  @override
+  String get invoiceStatusPaid => 'Bezahlt';
+
+  @override
+  String get invoiceStatusDone => 'Abgeschlossen';
+
+  @override
+  String get invoiceStatusFailed => 'Fehlgeschlagen';
 
   @override
   String get invoiceDetailApprove => 'Freigeben';

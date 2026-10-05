@@ -55,16 +55,16 @@ class _ExceptionsScreenState extends State<ExceptionsScreen> {
           appBar: AppBar(
             title: Text(
               selecting
-                  ? '${ExceptionStore.instance.selectedCount} selected'
+                  ? l.bulkSelectedCount(ExceptionStore.instance.selectedCount)
                   : l.exceptionsTitle,
             ),
             leading: selecting
                 ? Semantics(
-                    label: 'Cancel selection',
+                    label: l.bulkCancelSelection,
                     button: true,
                     child: IconButton(
                       icon: const Icon(Icons.close),
-                      tooltip: 'Cancel selection',
+                      tooltip: l.bulkCancelSelection,
                       onPressed: ExceptionStore.instance.exitSelectionMode,
                     ),
                   )
@@ -72,11 +72,11 @@ class _ExceptionsScreenState extends State<ExceptionsScreen> {
             actions: [
               if (!selecting && _canBulk)
                 Semantics(
-                  label: 'Select exceptions',
+                  label: l.exceptionsSelectMultiple,
                   button: true,
                   child: IconButton(
                     icon: const Icon(Icons.checklist),
-                    tooltip: 'Select exceptions',
+                    tooltip: l.exceptionsSelectMultiple,
                     onPressed: () =>
                         ExceptionStore.instance.enterSelectionMode(),
                   ),
@@ -87,9 +87,13 @@ class _ExceptionsScreenState extends State<ExceptionsScreen> {
               ? BulkActionBar(
                   selectedCount: ExceptionStore.instance.selectedCount,
                   busy: ExceptionStore.instance.loading,
-                  // Reuse the shared bar: Status → resolve, Delete → dismiss.
+                  // Reuse the shared bar's two slots for resolve / dismiss,
+                  // named for what they do here rather than "Status" /
+                  // "Delete".
                   onStatusChange: () => _bulkResolve('resolve'),
+                  statusLabel: l.exceptionActionResolve,
                   onDelete: () => _bulkResolve('dismiss'),
+                  deleteLabel: l.exceptionActionDismiss,
                 )
               : null,
           body: _buildBody(l),
@@ -280,11 +284,12 @@ class _ExceptionsScreenState extends State<ExceptionsScreen> {
       if (mounted) A11y.announce(context, l.exceptionActionFailed);
       return;
     }
-    final verb = action == 'dismiss' ? 'Dismissed' : 'Resolved';
-    final base = '$verb ${result.updated} exception'
-        '${result.updated == 1 ? '' : 's'}';
-    final message =
-        result.skippedCount == 0 ? base : '$base (${result.skippedCount} skipped)';
+    final base = action == 'dismiss'
+        ? l.exceptionsBulkDismissed(result.updated)
+        : l.exceptionsBulkResolved(result.updated);
+    final message = result.skippedCount == 0
+        ? base
+        : l.bulkResultWithSkipped(base, result.skippedCount);
     A11y.announce(context, message);
     ScaffoldMessenger.of(context)
         .showSnackBar(SnackBar(content: Text(message)));

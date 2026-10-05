@@ -1,5 +1,6 @@
 // ignore: unused_import
 import 'package:intl/intl.dart' as intl;
+
 import 'app_localizations.dart';
 
 // ignore_for_file: type=lint
@@ -611,6 +612,189 @@ class AppLocalizationsEs extends AppLocalizations {
     );
     return 'Rechazar $_temp0';
   }
+
+  @override
+  String get commonDelete => 'Eliminar';
+
+  @override
+  String bulkSelectedCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count elementos seleccionados',
+      one: '$count elemento seleccionado',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get bulkCancelSelection => 'Cancelar selección';
+
+  @override
+  String get bulkSelectAll => 'Seleccionar todo';
+
+  @override
+  String get bulkActionExport => 'Exportar';
+
+  @override
+  String get bulkActionStatus => 'Estado';
+
+  @override
+  String bulkResultWithSkipped(String result, int skipped) {
+    String _temp0 = intl.Intl.pluralLogic(
+      skipped,
+      locale: localeName,
+      other: '$skipped elementos omitidos',
+      one: '$skipped elemento omitido',
+    );
+    return '$result ($_temp0)';
+  }
+
+  @override
+  String get bulkUnknownError => 'error desconocido';
+
+  @override
+  String get invoicesSelectMultiple => 'Selección múltiple';
+
+  @override
+  String get invoicesBulkDeleteTitle => '¿Eliminar facturas?';
+
+  @override
+  String invoicesBulkDeleteBody(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '¿Eliminar definitivamente $count facturas seleccionadas?',
+      one: '¿Eliminar definitivamente $count factura seleccionada?',
+    );
+    return '$_temp0 Las facturas ya pagadas o enviadas al ERP se omiten.';
+  }
+
+  @override
+  String invoicesBulkDeleted(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count facturas eliminadas',
+      one: '$count factura eliminada',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String invoicesBulkDeleteFailed(String error) {
+    return 'Error en la eliminación masiva: $error';
+  }
+
+  @override
+  String get invoicesBulkStatusSheetTitle => 'Cambiar estado a…';
+
+  @override
+  String invoicesBulkMoved(int count, String status) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count facturas movidas a «$status»',
+      one: '$count factura movida a «$status»',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String invoicesBulkStatusFailed(String error) {
+    return 'Error en el cambio de estado masivo: $error';
+  }
+
+  @override
+  String get invoicesBulkExportSheetTitle => 'Exportar como…';
+
+  @override
+  String get invoicesExportFormatCsv => 'CSV';
+
+  @override
+  String get invoicesExportFormatXml => 'XML';
+
+  @override
+  String invoicesBulkExportFailed(String error) {
+    return 'Error en la exportación: $error';
+  }
+
+  @override
+  String invoicesBulkShareFailed(String error) {
+    return 'No se pudo abrir el menú para compartir: $error';
+  }
+
+  @override
+  String invoicesBulkExported(int count, String format) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count facturas exportadas como $format',
+      one: '$count factura exportada como $format',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get exceptionsSelectMultiple => 'Seleccionar excepciones';
+
+  @override
+  String exceptionsBulkResolved(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count excepciones resueltas',
+      one: '$count excepción resuelta',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String exceptionsBulkDismissed(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count excepciones descartadas',
+      one: '$count excepción descartada',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get invoiceStatusNew => 'Nueva';
+
+  @override
+  String get invoiceStatusPending => 'Pendiente';
+
+  @override
+  String get invoiceStatusReadyForReview => 'Lista para revisión';
+
+  @override
+  String get invoiceStatusApproved => 'Aprobada';
+
+  @override
+  String get invoiceStatusRejected => 'Rechazada';
+
+  @override
+  String get invoiceStatusSendingToErp => 'Enviando al ERP';
+
+  @override
+  String get invoiceStatusSentToErp => 'Enviada al ERP';
+
+  @override
+  String get invoiceStatusPostedInErp => 'Contabilizada en el ERP';
+
+  @override
+  String get invoiceStatusPaymentScheduled => 'Pago programado';
+
+  @override
+  String get invoiceStatusPaid => 'Pagada';
+
+  @override
+  String get invoiceStatusDone => 'Completada';
+
+  @override
+  String get invoiceStatusFailed => 'Fallida';
 
   @override
   String get invoiceDetailApprove => 'Aprobar';
