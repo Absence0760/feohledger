@@ -4,15 +4,56 @@ Project-scoped sub-agents, slash commands, and hooks. Checked into git so every 
 
 ## Sub-agents
 
-Specialised agents invoked by the slash commands or by name from any conversation. Most are review-only (they report findings, they don't edit); `flake-doctor` is the exception — it edits app + test files to land a source fix.
+Grouped by team, one folder each under `agents/` (Claude Code discovers agents
+recursively, so the folder is organisation only — an agent is still invoked by
+its `name:`). The session doing the work builds; agents review, audit, or
+produce one well-defined artefact. Most are read-only; the exceptions are
+marked **edits**.
+
+### `engineering/` — the per-change gate
 
 | Agent | What it does |
 |---|---|
-| [`agents/code-reviewer.md`](agents/code-reviewer.md) | Reviews the working diff against the project's documented conventions (root `CLAUDE.md`, ADRs, money-path / tenant-isolation / auth / secrets invariants). Outputs `CLEAN` or `NEEDS_CHANGES` with concrete file:line findings. |
-| [`agents/test-gap-checker.md`](agents/test-gap-checker.md) | Cross-references modified source files against the test files in the diff. Reports which unit / integration / e2e tests the change should ship with. |
-| [`agents/doc-hygiene-checker.md`](agents/doc-hygiene-checker.md) | Walks the doc set (README, `docs/*`, `CLAUDE.md` files) and reports which docs the diff invalidated. |
-| [`agents/repo-security-auditor.md`](agents/repo-security-auditor.md) | Security sweep across the five trust boundaries — tenant isolation, auth, money path, secrets, PII. The "Known bug shapes" section encodes every regression that's shipped to a branch so the agent learns from history. Pass the audit area as the prompt's first sentence. |
-| [`agents/flake-doctor.md`](agents/flake-doctor.md) | Reproduces, root-causes, and **source-fixes** a flaky/failing Playwright e2e spec (knows the 14-shard CI + per-worker `e2e<N>` tenant model and AP's async surfaces that race). Edits app or test; never masks with sleeps/retries/timeouts. Invoked by `/flake-doctor`. |
+| [`code-reviewer`](agents/engineering/code-reviewer.md) | Reviews the working diff against root `CLAUDE.md`, the per-area `CLAUDE.md` files and the project invariants. `CLEAN` / `NEEDS_CHANGES` with file:line findings. Run by `/check`, `/safe-edit`. |
+| [`money-path-reviewer`](agents/engineering/money-path-reviewer.md) | Domain reviewer for anything that decides whether, how much, in which currency and by whose authority money moves — state machine, SoD sets, payment runs / settlement / void, credit memos, FX labelling, PO matching, payment-blocking exceptions. Cites `docs/decisions.md`. Run by `/check` and `/safe-edit` when the diff reaches the money path. |
+| [`test-gap-checker`](agents/engineering/test-gap-checker.md) | Maps each changed source file to the pytest / vitest / Playwright / flutter test it should ship with. |
+| [`doc-hygiene-checker`](agents/engineering/doc-hygiene-checker.md) | Maps the diff to the docs (README, `docs/*`, per-area `docs/`, `CLAUDE.md` files) it invalidated. |
+| [`migration-coordinator`](agents/engineering/migration-coordinator.md) | For an Alembic revision: chain, id length, control-plane-vs-tenant gate, idempotent DDL, local apply + round-trip, model ↔ migration parity (fresh tenants use `create_all`), and the hand-synced layers (models, schemas, `frontend/src/lib/types`, `mobile/lib/models`). Run by `/safe-migration`, `/check`. |
+| [`flake-doctor`](agents/engineering/flake-doctor.md) | **Edits.** Reproduces, root-causes and source-fixes a flaky/failing Playwright spec (14-shard CI, per-worker `e2e<N>` tenants). Never masks. Run by `/flake-doctor`. |
+
+### `design/` — screens
+
+| Agent | What it does |
+|---|---|
+| [`ui-polisher`](agents/design/ui-polisher.md) | **Edits.** Rebuilds one SvelteKit page / component to `frontend/docs/ui-patterns.md`. Doesn't commit. `/polish-ui <route>`. |
+| [`mobile-ui-polisher`](agents/design/mobile-ui-polisher.md) | **Edits.** Same for one Flutter screen / widget against `mobile/CLAUDE.md`. `/polish-ui mobile:<screen>`. |
+| [`ui-reviewer`](agents/design/ui-reviewer.md) | Review mode for both front ends: nothing lost, money / dates / strings localised, design-system fit, WCAG 2.2 AA, tests. `/polish-ui review <target>`, and `/check` when the diff touches UI. |
+
+### `audit/` — periodic sweeps
+
+| Agent | What it does |
+|---|---|
+| [`repo-security-auditor`](agents/audit/repo-security-auditor.md) | Trust boundaries — tenant isolation, auth, money path, secrets, PII. Its "Known bug shapes" section is the institutional memory; append to it when a regression is fixed. Pass the area as the prompt's first sentence. `/audit-security`, `/audit/*`. |
+| [`compliance-auditor`](agents/audit/compliance-auditor.md) | Privacy / data-protection posture: DSAR export + erasure, retention, sub-processors, cookies, regional availability, accessibility. `/audit/gdpr` and siblings. |
+
+### `personas/` — bug-hunting points of view
+
+Seventeen `persona-*` agents, each walking the app as one kind of user and
+writing `reviews/<persona>.md`. Run with `/persona`; protocol and how to add one
+in [`personas/README.md`](personas/README.md).
+
+### `legal/`
+
+| Agent | What it does |
+|---|---|
+| [`saas-legal-doc-reviewer`](agents/legal/saas-legal-doc-reviewer.md) | Pre-counsel review of the published legal pages (`frontend/src/routes/legal/`). Not legal advice. |
+
+### Adding or changing an agent
+
+- Put it in the team folder it belongs to; a new team gets a folder once it has more than one member.
+- Name real paths, commands and rules, and cite where each rule lives (`CLAUDE.md` guard rail N, `docs/<file>.md` § …). Don't copy a rule's reasoning into the agent — point at the doc. A placeholder path is a bug.
+- Say whether it is read-only, and what it writes if not.
+- Update this file, and any command that invokes it.
 
 ## Slash commands
 

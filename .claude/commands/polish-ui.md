@@ -1,9 +1,20 @@
 ---
-description: Polish the UI/UX of a single web page or mobile screen to FeohLedger' quality bar. Dispatches to `ui-polisher` (frontend / SvelteKit) or `mobile-ui-polisher` (mobile / Flutter) based on the resolved target.
-argument-hint: <route, screen, or component/widget path>
+description: Polish the UI/UX of a single web page or mobile screen to FeohLedger' quality bar. Dispatches to `ui-polisher` (frontend / SvelteKit) or `mobile-ui-polisher` (mobile / Flutter) based on the resolved target. `/polish-ui review <target|diff>` runs the read-only `ui-reviewer` instead.
+argument-hint: [review] <route, screen, component/widget path, or 'diff'>
 ---
 
 Polish the UI/UX of `$ARGUMENTS` using the appropriate polisher agent.
+
+All three agents live in `.claude/agents/design/`.
+
+## Review mode
+
+If `$ARGUMENTS` starts with `review`, don't polish. Resolve the rest of the
+argument with the same rules below (or, for `review diff` / bare `review`, use
+the working diff), spawn `ui-reviewer` with "review: <resolved path or 'the
+working diff'>. Output the format from your spec.", relay its report verbatim,
+and stop — nothing is edited, nothing to commit. Offer to run the matching
+polisher on the Critical findings.
 
 ## When to use this command
 
