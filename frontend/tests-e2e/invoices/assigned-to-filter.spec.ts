@@ -164,3 +164,30 @@ test.describe('/invoices "My Approvals" + assigned-to filter', () => {
 		await expect(page.locator('[data-testid="assigned-to-filter"]')).toHaveValue(myId);
 	});
 });
+
+/**
+ * An assignee filter that matches nothing is a filtered-to-zero view, not an
+ * empty tenant. `noActiveFilters` on the page used to ignore `assigned_to_id`,
+ * so "My Approvals" with nothing assigned (or a reviewer with an empty queue)
+ * replaced the whole table with the fresh-tenant onboarding — "upload your
+ * first invoice" over a tenant full of them.
+ */
+test.describe('/invoices assigned-to filter matching nothing', () => {
+	test('shows the no-matches table, not the first-run onboarding', async ({ page }) => {
+		// No invoice is ever assigned to this id: there is no `users` row for it
+		// (assigned_to_id is a tenant column with no cross-database FK).
+		const nobody = '00000000-0000-0000-0000-0000000000cc';
+		const filtered = page.waitForResponse(
+			(r) =>
+				r.url().includes('/api/invoices?') &&
+				r.url().includes(`assigned_to_id=${nobody}`) &&
+				r.request().method() === 'GET'
+		);
+		await page.goto(`/invoices?assigned_to_id=${nobody}`);
+		const res = await filtered;
+		expect(((await res.json()) as { total: number }).total).toBe(0);
+
+		await expect(page.getByText('No invoices match your filters.')).toBeVisible();
+		await expect(page.locator('[data-testid="invoices-empty-state"]')).toHaveCount(0);
+	});
+});

@@ -523,6 +523,20 @@ fails any `$effect` body containing `setTimeout(` / `setInterval(` without a
 matching `return () => clear…` — a deliberate static guard, because the
 symptom only shows inside a sub-second window that no non-flaky e2e can pin.
 
+**Reading the URL once at mount is only half of the round trip.** SvelteKit
+reuses the mounted component for a navigation within the same route — the
+sidebar row clicked while on a filtered view, a `goto('/invoices?…')`, or
+Back/Forward between two real history entries of the route — so state seeded
+from `$page.url` at mount never sees it: the address bar changes and the view
+does not. Give the page ONE reader (`readUrlState(params)`), seed from it at
+mount, and call it again from `afterNavigate` when `from.route.id ===
+to.route.id`, assigning only what changed so an unchanged filter doesn't
+refetch (a sort change needs its own fetch — no effect tracks it). Shallow
+`replaceState` writes never fire `afterNavigate`, so the single writer
+(`syncUrl()`) cannot loop back through the reader. Shipped on `/invoices` and
+`/exceptions`; guarded by `tests-e2e/invoices/url-state.spec.ts` and
+`tests-e2e/exceptions/view-url-state.spec.ts` (§ same-route navigation).
+
 ### Status filter chips
 
 Use **`<FilterChips>`** (`$lib/components/ui/FilterChips.svelte`) for the

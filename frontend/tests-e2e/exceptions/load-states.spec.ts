@@ -139,4 +139,51 @@ test.describe('/exceptions load states', () => {
 		await expect(page.getByText('EXC-STUB-1')).toBeVisible({ timeout: 10_000 });
 		await expect(page.getByTestId('table-empty')).toHaveCount(0);
 	});
+
+	/**
+	 * The chip tallies are "non-critical" — but the chips are not. Every filter
+	 * row was wrapped in `{#if summary}`, so a failed summary request removed
+	 * them all: a link to `?status=resolved&type=fraud_flag` narrowed the table
+	 * and left no control on screen that could show or undo either filter.
+	 * They now render uncounted until a summary lands.
+	 */
+	test('a FAILED summary still leaves the filter chips usable', async ({ page }) => {
+		await page.route(
+			(url) => url.pathname === '/api/exceptions/summary',
+			(route) =>
+				route.fulfill({
+					status: 500,
+					contentType: 'application/json',
+					body: JSON.stringify({ detail: 'boom' })
+				})
+		);
+		const isList = (r: import('@playwright/test').Response) =>
+			new URL(r.url()).pathname === '/api/exceptions' && r.request().method() === 'GET';
+
+		const first = page.waitForResponse(
+			(r) => isList(r) && new URL(r.url()).searchParams.get('status') === 'resolved'
+		);
+		await page.goto('/exceptions?status=resolved&type=fraud_flag');
+		await first;
+
+		const resolved = page.getByRole('button', { name: 'Resolved', exact: true });
+		await expect(resolved).toHaveAttribute('aria-pressed', 'true');
+		// The active type keeps a chip, and "All types" can clear it.
+		await expect(page.locator('.type-chip[aria-pressed="true"]')).toHaveCount(1);
+		const cleared = page.waitForResponse(
+			(r) => isList(r) && !new URL(r.url()).searchParams.has('type')
+		);
+		await page.getByRole('button', { name: 'All types' }).click();
+		await cleared;
+
+		const open = page.waitForResponse(
+			(r) => isList(r) && new URL(r.url()).searchParams.get('status') === 'open'
+		);
+		await page.getByRole('button', { name: 'Open', exact: true }).click();
+		await open;
+		await expect(page.getByRole('button', { name: 'Open', exact: true })).toHaveAttribute(
+			'aria-pressed',
+			'true'
+		);
+	});
 });

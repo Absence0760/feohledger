@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
 	import { page as pageStore } from '$app/stores';
-	import { replaceState } from '$app/navigation';
+	import { afterNavigate, replaceState } from '$app/navigation';
 	import { api } from '$lib/api';
 	import { appendUnique } from '$lib/utils/pagination';
 	import type { MatchingIdsResponse } from '$lib/utils/pagination';
@@ -95,43 +95,51 @@
 	// leave every chip unpressed over an empty table, so the page would show a
 	// queue state that no control on it can explain or undo.
 	const STATUS_KEYS = ['all', 'open', 'escalated', 'resolved', 'dismissed'];
-	let statusFilter = $state(
-		STATUS_KEYS.includes($pageStore.url.searchParams.get('status') ?? '')
-			? ($pageStore.url.searchParams.get('status') as string)
-			: 'open'
-	);
-	let typeFilter = $state<string | null>($pageStore.url.searchParams.get('type'));
-	// `?severity=`, clamped to the chips' own roster for the reason `status` is:
-	// an unknown value would narrow the table under a row with no chip pressed.
-	let severityFilter = $state<string>(
-		(EXCEPTION_SEVERITIES as readonly string[]).includes(
-			$pageStore.url.searchParams.get('severity') ?? ''
-		)
-			? ($pageStore.url.searchParams.get('severity') as string)
-			: 'all'
-	);
-	// Server-side search over invoice number + vendor (`?search=`). Never a
-	// client-side `.filter()` over the loaded page — that searches 20 rows and
-	// calls it the queue (`frontend/docs/ui-patterns.md` § Search).
-	let search = $state($pageStore.url.searchParams.get('search') ?? '');
-	// The term the newest ISSUED list load carried. Written by `loadExceptions`,
-	// read by the debounce effect (a term already on screen schedules nothing)
-	// and by the summary / select-all requests, which must describe the set the
-	// TABLE shows rather than whatever is half-typed in the box.
-	let appliedSearch = $state(($pageStore.url.searchParams.get('search') ?? '').trim());
 	// Column sort (`?sort=&order=`), clamped to the backend allowlist
 	// (`api/exceptions.EXCEPTION_SORTABLE_COLUMNS`): an unknown key is a 422
 	// there, which would turn a hand-edited link into the error state. `null` is
 	// the backend's default order, newest first.
 	const SORT_KEYS = ['created_at', 'severity', 'due_at'];
-	let sortField = $state<string | null>(
-		SORT_KEYS.includes($pageStore.url.searchParams.get('sort') ?? '')
-			? $pageStore.url.searchParams.get('sort')
-			: null
-	);
-	let sortOrder = $state<SortOrder>(
-		$pageStore.url.searchParams.get('order') === 'asc' ? 'asc' : 'desc'
-	);
+
+	/**
+	 * The one READER of this route's query string — the counterpart of the one
+	 * writer, `syncUrl()`. Used at mount and again by the `afterNavigate` hook
+	 * for a navigation that reuses this page, so the two cannot clamp a param
+	 * differently.
+	 */
+	function readUrlState(params: URLSearchParams) {
+		const status = params.get('status') ?? '';
+		const severity = params.get('severity') ?? '';
+		const sort = params.get('sort') ?? '';
+		return {
+			view: (params.get('view') === 'agents' ? 'agents' : 'queue') as 'queue' | 'agents',
+			status: STATUS_KEYS.includes(status) ? status : 'open',
+			type: params.get('type'),
+			// `?severity=`, clamped to the chips' own roster for the reason
+			// `status` is: an unknown value would narrow the table under a row
+			// with no chip pressed.
+			severity: (EXCEPTION_SEVERITIES as readonly string[]).includes(severity) ? severity : 'all',
+			search: params.get('search') ?? '',
+			sortField: SORT_KEYS.includes(sort) ? sort : null,
+			sortOrder: (params.get('order') === 'asc' ? 'asc' : 'desc') as SortOrder
+		};
+	}
+	const initialUrlState = readUrlState($pageStore.url.searchParams);
+
+	let statusFilter = $state(initialUrlState.status);
+	let typeFilter = $state<string | null>(initialUrlState.type);
+	let severityFilter = $state<string>(initialUrlState.severity);
+	// Server-side search over invoice number + vendor (`?search=`). Never a
+	// client-side `.filter()` over the loaded page — that searches 20 rows and
+	// calls it the queue (`frontend/docs/ui-patterns.md` § Search).
+	let search = $state(initialUrlState.search);
+	// The term the newest ISSUED list load carried. Written by `loadExceptions`,
+	// read by the debounce effect (a term already on screen schedules nothing)
+	// and by the summary / select-all requests, which must describe the set the
+	// TABLE shows rather than whatever is half-typed in the box.
+	let appliedSearch = $state(initialUrlState.search.trim());
+	let sortField = $state<string | null>(initialUrlState.sortField);
+	let sortOrder = $state<SortOrder>(initialUrlState.sortOrder);
 	let selectedIds = $state<Set<string>>(new Set());
 	// True once "Select all N matching" (below) has resolved the WHOLE
 	// filtered set of open/escalated exceptions — not just the loaded page —
@@ -147,9 +155,7 @@
 	// in the URL (?view=agents) so a refresh / shared link keeps the tab — this
 	// used to be only a comment with no actual sync, so the tab reset to Queue
 	// on every reload.
-	let view = $state<'queue' | 'agents'>(
-		$pageStore.url.searchParams.get('view') === 'agents' ? 'agents' : 'queue'
-	);
+	let view = $state<'queue' | 'agents'>(initialUrlState.view);
 
 	/**
 	 * The ONE writer of this route's query string — `view`, `status`, `type`,
@@ -388,6 +394,39 @@
 
 	$effect(() => {
 		orgCurrency.ensureLoaded();
+	});
+
+	/**
+	 * A navigation that REUSES this mounted page re-reads the URL — the sidebar's
+	 * Exceptions row clicked on a filtered queue, or Back/Forward between two
+	 * real entries of this route. The state above is seeded once at mount, so
+	 * each of those used to change the address bar and nothing else (the
+	 * `/invoices` hook documents the same defect). Shallow `replaceState`
+	 * writes never fire this, so `syncUrl()` cannot loop back through it.
+	 *
+	 * Only what changed is assigned: a chip change re-runs the chip effect
+	 * (which carries the new search and sort with it), a search change alone
+	 * schedules the debounced reload, and a sort change alone reloads through
+	 * `applySort`, because no effect tracks the sort.
+	 */
+	afterNavigate(({ from, to, type }) => {
+		if (type === 'enter' || !from || !to || from.route.id !== to.route.id) return;
+		const next = readUrlState(to.url.searchParams);
+		if (next.view !== view) view = next.view;
+		const chipsChanged =
+			next.status !== statusFilter || next.type !== typeFilter || next.severity !== severityFilter;
+		const searchChanged = next.search !== search;
+		const sortChanged = next.sortField !== sortField || next.sortOrder !== sortOrder;
+		if (searchChanged) search = next.search;
+		if (chipsChanged) {
+			sortField = next.sortField;
+			sortOrder = next.sortOrder;
+			statusFilter = next.status;
+			typeFilter = next.type;
+			severityFilter = next.severity;
+		} else if (sortChanged) {
+			applySort(next.sortField, next.sortOrder);
+		}
 	});
 
 	async function loadExceptions(opts: { append?: boolean; nextPage?: number } = {}) {
@@ -742,17 +781,26 @@
 	 * chip, with its raw value.
 	 */
 	let severityChips = $derived.by(() => {
-		if (!summary) return [];
-		const counts = summary.by_severity;
+		// Without a summary (still loading, or the tally request failed) the
+		// chips still render, uncounted: the summary is "non-critical" to the
+		// queue, but the chips are the only control that can change — or undo —
+		// a severity the URL already applied to the table.
+		const counts = summary?.by_severity;
 		const known = EXCEPTION_SEVERITIES as readonly string[];
-		const keys = [...known, ...Object.keys(counts).filter((k) => !known.includes(k))];
+		const keys = counts
+			? [...known, ...Object.keys(counts).filter((k) => !known.includes(k))]
+			: [...known];
 		return [
 			{
 				key: 'all',
 				label: m('exceptions.filter.allSeverities'),
-				count: Object.values(counts).reduce((sum, n) => sum + n, 0)
+				count: counts ? Object.values(counts).reduce((sum, n) => sum + n, 0) : undefined
 			},
-			...keys.map((sev) => ({ key: sev, label: severityLabel(sev), count: counts[sev] ?? 0 }))
+			...keys.map((sev) => ({
+				key: sev,
+				label: severityLabel(sev),
+				count: counts ? (counts[sev] ?? 0) : undefined
+			}))
 		];
 	});
 
@@ -763,28 +811,32 @@
 	 * the row would leave the table narrowed by a filter nothing on screen shows
 	 * or can undo (the `chipStatuses` rule on `/invoices`).
 	 */
-	let typeChipEntries = $derived.by((): [string, number][] => {
-		if (!summary) return [];
-		const entries = Object.entries(summary.by_type);
+	let typeChipEntries = $derived.by((): [string, number | undefined][] => {
+		// No summary → no type roster to list, but an ACTIVE type still gets its
+		// chip (uncounted), so the filter stays visible and undoable.
+		if (!summary) return typeFilter ? [[typeFilter, undefined]] : [];
+		const entries: [string, number | undefined][] = Object.entries(summary.by_type);
 		if (typeFilter && !(typeFilter in summary.by_type)) entries.push([typeFilter, 0]);
 		return entries;
 	});
 
-	let statusChips = $derived(
-		summary
-			? [
-					{
-						key: 'all',
-						label: m('common.all'),
-						count: summary.open + summary.escalated + summary.resolved + summary.dismissed
-					},
-					{ key: 'open', label: m('exceptions.filter.open'), count: summary.open },
-					{ key: 'escalated', label: m('exceptions.filter.escalated'), count: summary.escalated },
-					{ key: 'resolved', label: m('exceptions.filter.resolved'), count: summary.resolved },
-					{ key: 'dismissed', label: m('exceptions.filter.dismissed'), count: summary.dismissed }
-				]
-			: []
-	);
+	// Rendered with or without a summary, for the reason `severityChips` gives:
+	// when the tally request failed, hiding the row stranded the operator on
+	// whatever status the URL had applied (`?status=resolved`) with no control
+	// on screen to leave it. Uncounted until the summary lands.
+	let statusChips = $derived([
+		{
+			key: 'all',
+			label: m('common.all'),
+			count: summary
+				? summary.open + summary.escalated + summary.resolved + summary.dismissed
+				: undefined
+		},
+		{ key: 'open', label: m('exceptions.filter.open'), count: summary?.open },
+		{ key: 'escalated', label: m('exceptions.filter.escalated'), count: summary?.escalated },
+		{ key: 'resolved', label: m('exceptions.filter.resolved'), count: summary?.resolved },
+		{ key: 'dismissed', label: m('exceptions.filter.dismissed'), count: summary?.dismissed }
+	]);
 
 	// Order matters: "still loading" and "we failed to look" both outrank any
 	// claim about what the queue contains.
@@ -828,7 +880,6 @@
 		</div>
 	{:else}
 	<div id="exc-panel-queue" role="tabpanel" aria-labelledby="exc-tab-queue">
-	{#if summary}
 		<FilterChips chips={statusChips} bind:active={statusFilter} />
 
 		{#if typeChipEntries.length > 0}
@@ -856,7 +907,7 @@
 						onclick={() => (typeFilter = typeFilter === type ? null : type)}
 					>
 						<span class="type-dot"></span>
-						{typeLabel(type)} <span class="count">{count}</span>
+						{typeLabel(type)}{#if count !== undefined}{' '}<span class="count">{count}</span>{/if}
 					</button>
 				{/each}
 			</nav>
@@ -865,7 +916,6 @@
 		<!-- The same `exceptions.severity.*` keys the row's Sev cell reads, so a
 		     chip and the rows it filters cannot name one severity two ways. -->
 		<FilterChips chips={severityChips} bind:active={severityFilter} />
-	{/if}
 
 	<SearchBox
 		bind:value={search}
