@@ -39,8 +39,13 @@ and an audit that re-derived both found the copy stale at nearly every sync
 transcription was retired rather than corrected again. Add a follow-up here; add
 a GitHub issue only when one warrants its own thread.
 
-**Last reconciled:** 2026-10-05 — the procurement bug hunt (PR #498) opened
-three (c) entries and closed none, taking the file from 53 → 56. Before that,
+**Last reconciled:** 2026-10-05 — the bug-hunt, UX, a11y and perf PRs of that
+day (#484–#509) landed together and took the file from 53 → 66: sixteen (c)
+entries opened across them and three closed (#508 the mobile multi-select entry
+#487 opened, #505 the two by-id entity-scope entries #500 opened). Merging #484
+and #487 back to back left `main` claiming 54 over a file of 55 until the rest
+landed: each PR re-derived the headline against its own base, and the guard
+only sees one branch at a time. Before that,
 2026-09-23 — a five-agent batch closed **five** (c)
 entries and opened none, taking the file from 58 → 53: `gl_recode`'s org-wide
 empty-chart read (decisions §207), the missing per-test timeout on the backend
@@ -71,7 +76,7 @@ section carried its own `decisions.md` § reference, so nothing was lost by
 deleting it; that cross-reference is what makes the pruning safe, and writing
 one is what earns a future entry the right to be deleted.
 
-**65 open: 50 (c) · 9 (a) · 6 (b)** — re-derived from the file, never carried
+**66 open: 51 (c) · 9 (a) · 6 (b)** — re-derived from the file, never carried
 forward. The section heading is authoritative; where an entry also carries a
 `(c)`/`(a)`/`(b)` marker, the two agree.
 `grep -c '^- \[ \]' docs/followups.md`.
@@ -1285,6 +1290,24 @@ or is a sibling of a fix that needs its own pass.
       cash-flow forecasting and `docs/cash-flow-copilot.md`.
       **Trigger:** the next change to `_commitment_rows` or to the `/cfo`
       cash panels, or a product decision on how overdue AP should appear.
+
+### Surfaced by scoping the email-intake dedup per tenant (2026-10-05, PR #509)
+
+- [ ] **(c) Delete the transitional legacy-claim check in email intake.** The
+      intake dedup claim moved from `email_intake:<message_id>` to
+      `email_intake:<org_id>:<message_id>` so one email addressed to two
+      tenants reaches both. Claims written before that deploy carry no tenant,
+      so `services/email_intake._legacy_claim_live` still treats a live
+      unscoped claim as "already processed" for every tenant — the only rule
+      that can never create a duplicate payable when a provider redelivers a
+      pre-deploy message. It is dead weight once every such claim has expired.
+      **Durable fix:** delete `_legacy_claim_live` and its call in
+      `_process_for_org`, delete `webhook_security.event_claim_exists` if
+      nothing else calls it by then, and delete
+      `test_a_live_pre_upgrade_unscoped_claim_still_dedupes_the_redelivery`
+      (plus `test_event_claim_exists_reads_without_claiming` with the helper).
+      **Trigger:** the dedup TTL (`DEFAULT_DEDUP_TTL_SECONDS`, 72h) has elapsed
+      since PR #509 was deployed to every environment.
 
 ## (a) Blocked on external credentials, accounts, or hardware
 

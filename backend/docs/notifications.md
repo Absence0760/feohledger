@@ -516,6 +516,11 @@ business data, so — like `notification_prefs` — they live on the
 control-plane `users` table, never fanned out to tenant DBs. Shape:
 `{"ios": {"token": "...", "updated_at": "<iso8601>"}, "android": {...}}`.
 
+**Data-subject rights**: a push token is an identifier of the employee's own
+phone, so a `user` DSAR export lists each registration (`push_devices`:
+platform + registration time, token withheld) and erasure empties the column
+(`backend/docs/privacy.md`).
+
 **Upsert semantics**: at most one token per platform per account. A fresh
 registration for a platform replaces whatever was stored — FCM tokens rotate
 (reinstall, OS-level refresh), and a stale, unregistered token should be

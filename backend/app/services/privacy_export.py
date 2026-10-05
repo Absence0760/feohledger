@@ -311,9 +311,24 @@ async def build_user_bundle(
             "mfa_enabled": user.mfa_enabled,
             "mfa_enrolled_at": _jsonable(user.mfa_enrolled_at),
             "notification_prefs": user.notification_prefs,
+            "locale": user.locale,
             "created_at": _jsonable(user.created_at),
             "organization_id": str(user.organization_id),
         },
+        # Mobile push registrations, one per platform. The token itself is
+        # withheld for the same reason a passkey's credential id is: it is a
+        # handle to the subject's device, and what makes the entry recognisable
+        # is the platform and when it was registered.
+        "push_devices": [
+            {
+                "platform": platform,
+                "registered_at": (entry or {}).get("updated_at")
+                if isinstance(entry, dict)
+                else None,
+                "_note": "push token withheld (device handle)",
+            }
+            for platform, entry in sorted((user.device_tokens or {}).items())
+        ],
         "roles": [r.name for r in user.roles],
         # The counts predate the content below and are kept: they are cheap, and
         # something out there reads them.
