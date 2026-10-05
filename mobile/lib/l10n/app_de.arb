@@ -261,6 +261,7 @@
   "payQueueBlockedFraudFlag": "Betrugsverdacht — ungeklärt",
   "payQueueBlockedLineTotalMismatch": "Positionssummen stimmen nicht überein — ungeklärt",
   "payQueueBlockedPaymentReconciliation": "Frühere Zahlung nicht abgestimmt — möglicherweise noch unterwegs",
+  "payQueueBlockedAppliedCreditMismatch": "Eine verrechnete Gutschrift passt nicht mehr zu Lieferant oder Währung dieser Rechnung — Rechnung zuerst korrigieren",
   "payQueueBlockedFullyCredited": "Vollständig durch Gutschriften gedeckt — nichts zu zahlen",
   "payQueueBlockedLiveVirtualCard": "Eine aktive virtuelle Karte beansprucht diese Rechnung — per Karte bezahlen",
   "payQueueBlockedGeneric": "Ungeklärte Ausnahme blockiert die Zahlung",

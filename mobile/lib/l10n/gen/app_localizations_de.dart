@@ -1,5 +1,6 @@
 // ignore: unused_import
 import 'package:intl/intl.dart' as intl;
+
 import 'app_localizations.dart';
 
 // ignore_for_file: type=lint
@@ -839,6 +840,10 @@ class AppLocalizationsDe extends AppLocalizations {
   @override
   String get payQueueBlockedPaymentReconciliation =>
       'Frühere Zahlung nicht abgestimmt — möglicherweise noch unterwegs';
+
+  @override
+  String get payQueueBlockedAppliedCreditMismatch =>
+      'Eine verrechnete Gutschrift passt nicht mehr zu Lieferant oder Währung dieser Rechnung — Rechnung zuerst korrigieren';
 
   @override
   String get payQueueBlockedFullyCredited =>

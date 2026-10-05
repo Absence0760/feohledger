@@ -477,6 +477,7 @@ export const messages = {
 	'payments.queue.blocked.fraudFlag': 'Alerte de fraude — non résolue',
 	'payments.queue.blocked.lineTotalMismatch': 'Totaux des lignes incohérents — non résolus',
 	'payments.queue.blocked.paymentReconciliation': 'Paiement antérieur non rapproché — peut-être encore en cours',
+	'payments.queue.blocked.appliedCreditMismatch': 'Un avoir imputé ne correspond plus au fournisseur ou à la devise de cette facture — corrigez d\'abord la facture',
 	'payments.queue.blocked.fullyCredited': 'Intégralement couverte par des avoirs — rien à payer',
 	'payments.queue.blocked.liveVirtualCard': 'Une carte virtuelle active couvre cette facture — payez-la par carte',
 	'payments.queue.blocked.generic': 'Une exception non résolue bloque le paiement',

@@ -67,6 +67,7 @@ String _blockedReasonLabel(AppLocalizations l, String? code) => switch (code) {
       'fraud_flag' => l.payQueueBlockedFraudFlag,
       'line_total_mismatch' => l.payQueueBlockedLineTotalMismatch,
       'payment_reconciliation' => l.payQueueBlockedPaymentReconciliation,
+      'applied_credit_mismatch' => l.payQueueBlockedAppliedCreditMismatch,
       'fully_credited' => l.payQueueBlockedFullyCredited,
       // Not a block — the row is pinned to the card rail. Its own sentence
       // says so, rather than the "can't be paid" generic.

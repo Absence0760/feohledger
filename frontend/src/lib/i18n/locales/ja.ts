@@ -469,6 +469,7 @@ export const messages = {
 	'payments.queue.blocked.fraudFlag': '不正フラグ — 未解決',
 	'payments.queue.blocked.lineTotalMismatch': '明細合計の不一致 — 未解決',
 	'payments.queue.blocked.paymentReconciliation': '過去の支払いが未消込 — 処理中の可能性があります',
+	'payments.queue.blocked.appliedCreditMismatch': '適用済みのクレジットメモがこの請求書の仕入先または通貨と一致しなくなりました — 先に請求書を修正してください',
 	'payments.queue.blocked.fullyCredited': 'クレジットメモで全額相殺済み — 支払う金額はありません',
 	'payments.queue.blocked.liveVirtualCard': '有効なバーチャルカードがこの請求書を確保しています — カードで支払ってください',
 	'payments.queue.blocked.generic': '未解決の例外により支払いがブロックされています',
