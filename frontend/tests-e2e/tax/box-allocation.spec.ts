@@ -76,14 +76,18 @@ async function loadWithAllocation(
 						box_allocations: BOXES,
 						unmapped_paid: '899.50',
 						unmapped_payment_count: 4,
-						box_unallocated: '0.00'
+						box_unallocated: '0.00',
+						// The backend's per-box verdict — the filing modal reads
+						// this, never a client-side threshold.
+						required_forms: ['1099-NEC', '1099-MISC']
 					}
 				: {
 						...r,
 						box_allocations: [],
 						unmapped_paid: '0',
 						unmapped_payment_count: 0,
-						box_unallocated: '0.00'
+						box_unallocated: '0.00',
+						required_forms: []
 					}
 		);
 		await route.fulfill({ response: resp, json: body });

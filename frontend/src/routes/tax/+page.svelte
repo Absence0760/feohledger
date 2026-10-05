@@ -136,11 +136,25 @@
 		return boxesForForm(r, formType).map((b) => b.amount);
 	}
 
+	// Whether this vendor must be filed on `formType` — the backend's own
+	// per-box, per-year verdict (`required_forms`, mirroring
+	// `tax_1099.row_requires_form`), never a client-side threshold. A vendor
+	// over threshold on one form is not thereby required on the other.
+	function requiresForm(r: Vendor1099Row, formType: string): boolean {
+		if ((r.box_allocations ?? []).length === 0) return r.over_threshold;
+		return (r.required_forms ?? []).includes(formType);
+	}
+
 	// Vendors that actually have something to file on the selected form —
 	// `sumMoney` only decides membership + renders one display subtotal; every
 	// per-box figure on screen is the backend's own string-Decimal.
 	let filableForForm = $derived(
-		(report?.rows ?? []).filter((r) => isReportable(r) && sumMoney(formAmounts(r, fileFormType)) > 0)
+		(report?.rows ?? []).filter(
+			(r) =>
+				isReportable(r) &&
+				requiresForm(r, fileFormType) &&
+				sumMoney(formAmounts(r, fileFormType)) > 0
+		)
 	);
 	let filableTotalForForm = $derived(
 		sumMoney(filableForForm.flatMap((r) => formAmounts(r, fileFormType)))
