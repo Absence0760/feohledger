@@ -605,6 +605,17 @@ class AppLocalizationsFr extends AppLocalizations {
   String get invoiceDetailReject => 'Rejeter';
 
   @override
+  String invoicesBulkRejectTitle(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count factures',
+      one: '$count facture',
+    );
+    return 'Rejeter $_temp0';
+  }
+
+  @override
   String get invoiceDetailApprove => 'Approuver';
 
   @override
@@ -1701,6 +1712,23 @@ class AppLocalizationsFr extends AppLocalizations {
   @override
   String get contractTerminateFailed =>
       'Impossible de résilier le contrat — veuillez réessayer';
+
+  @override
+  String get contractCancel => 'Annuler le contrat';
+
+  @override
+  String get contractCancelTitle => 'Annuler le contrat';
+
+  @override
+  String get contractCancelBody =>
+      'Cela retire le contrat — aucune autre facture ne pourra y être rapprochée. Cette action est irréversible. Continuer ?';
+
+  @override
+  String get contractCancelled => 'Contrat annulé';
+
+  @override
+  String get contractCancelFailed =>
+      'Impossible d’annuler le contrat — veuillez réessayer';
 
   @override
   String get exceptionDetailTitle => 'Exception';

@@ -15,6 +15,7 @@ import 'package:feohledger_mobile/widgets/erp_status_panel.dart';
 import 'package:feohledger_mobile/widgets/invoice_edit_sheet.dart';
 import 'package:feohledger_mobile/widgets/invoice_file_viewer.dart';
 import 'package:feohledger_mobile/widgets/invoice_warnings_panel.dart';
+import 'package:feohledger_mobile/widgets/reject_reason_dialog.dart';
 import 'package:feohledger_mobile/widgets/status_badge.dart';
 
 class InvoiceDetailScreen extends StatefulWidget {
@@ -145,35 +146,12 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
 
   Future<void> _reject() async {
     final l = AppLocalizations.of(context);
-    final reason = await showDialog<String>(
-      context: context,
-      builder: (context) {
-        final controller = TextEditingController();
-        return AlertDialog(
-          title: Text(l.invoiceDetailRejectTitle),
-          content: TextField(
-            controller: controller,
-            decoration: InputDecoration(
-              labelText: l.invoiceDetailRejectReason,
-              border: const OutlineInputBorder(),
-            ),
-            maxLines: 3,
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: Text(l.commonCancel),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(context, controller.text),
-              child: Text(l.invoiceDetailReject),
-            ),
-          ],
-        );
-      },
+    final reason = await showRejectReasonDialog(
+      context,
+      title: l.invoiceDetailRejectTitle,
     );
 
-    if (reason == null || reason.isEmpty || _submitting) return;
+    if (reason == null || _submitting) return;
 
     setState(() => _submitting = true);
     try {
@@ -494,7 +472,7 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
     final inv = _invoice;
     if (inv == null) return null;
     if (!inv.status.isActionable) return null;
-    if (!AuthStore.instance.canApprove) return null;
+    if (!AuthStore.instance.canApproveInvoice) return null;
     final l = AppLocalizations.of(context);
 
     return SafeArea(

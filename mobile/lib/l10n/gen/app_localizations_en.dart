@@ -595,6 +595,17 @@ class AppLocalizationsEn extends AppLocalizations {
   String get invoiceDetailReject => 'Reject';
 
   @override
+  String invoicesBulkRejectTitle(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count invoices',
+      one: '$count invoice',
+    );
+    return 'Reject $_temp0';
+  }
+
+  @override
   String get invoiceDetailApprove => 'Approve';
 
   @override
@@ -1680,6 +1691,23 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get contractTerminateFailed =>
       'Could not terminate contract — please try again';
+
+  @override
+  String get contractCancel => 'Cancel contract';
+
+  @override
+  String get contractCancelTitle => 'Cancel Contract';
+
+  @override
+  String get contractCancelBody =>
+      'This withdraws the contract — no further invoices can be matched against it. This cannot be undone. Continue?';
+
+  @override
+  String get contractCancelled => 'Contract cancelled';
+
+  @override
+  String get contractCancelFailed =>
+      'Could not cancel contract — please try again';
 
   @override
   String get exceptionDetailTitle => 'Exception';

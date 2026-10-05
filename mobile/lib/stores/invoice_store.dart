@@ -381,12 +381,17 @@ class InvoiceStore extends ChangeNotifier with SequencedFetch {
 
   /// Bulk status-change the currently-selected invoices to [status] (the target
   /// status value, e.g. `approved`). Same success/failure contract as
-  /// [bulkDeleteSelected].
-  Future<BulkResult?> bulkStatusSelected(String status) async {
+  /// [bulkDeleteSelected]. [reason] carries the rejection reason, which the
+  /// backend requires for a `rejected` target (see [InvoiceApi.bulkStatus]).
+  Future<BulkResult?> bulkStatusSelected(
+    String status, {
+    String? reason,
+  }) async {
     if (_selectedIds.isEmpty) return null;
     final ids = _selectedIds.toList();
     try {
-      final result = await InvoiceApi.bulkStatus(ids, status);
+      final result =
+          await InvoiceApi.bulkStatus(ids, status, reason: reason);
       exitSelectionMode();
       await _refreshAfterMutation();
       return result;

@@ -77,13 +77,46 @@ class _ContractDetailScreenState extends State<ContractDetailScreen> {
     }
   }
 
-  Future<void> _terminate() async {
+  Future<void> _terminate() {
+    final l = AppLocalizations.of(context);
+    return _confirmAndRun(
+      title: l.contractTerminateTitle,
+      body: l.contractTerminateBody,
+      confirmLabel: l.contractTerminate,
+      run: ContractStore.instance.terminate,
+      succeeded: l.contractTerminated,
+      failed: l.contractTerminateFailed,
+    );
+  }
+
+  Future<void> _cancel() {
+    final l = AppLocalizations.of(context);
+    return _confirmAndRun(
+      title: l.contractCancelTitle,
+      body: l.contractCancelBody,
+      confirmLabel: l.contractCancel,
+      run: ContractStore.instance.cancel,
+      succeeded: l.contractCancelled,
+      failed: l.contractCancelFailed,
+    );
+  }
+
+  /// The irreversible transitions (terminate, cancel) confirm first, then run
+  /// [run] once, reload and toast the outcome.
+  Future<void> _confirmAndRun({
+    required String title,
+    required String body,
+    required String confirmLabel,
+    required Future<bool> Function(String id) run,
+    required String succeeded,
+    required String failed,
+  }) async {
     final l = AppLocalizations.of(context);
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text(l.contractTerminateTitle),
-        content: Text(l.contractTerminateBody),
+        title: Text(title),
+        content: Text(body),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
@@ -91,7 +124,7 @@ class _ContractDetailScreenState extends State<ContractDetailScreen> {
           ),
           FilledButton(
             onPressed: () => Navigator.pop(context, true),
-            child: Text(l.contractTerminate),
+            child: Text(confirmLabel),
           ),
         ],
       ),
@@ -101,14 +134,13 @@ class _ContractDetailScreenState extends State<ContractDetailScreen> {
 
     setState(() => _submitting = true);
     try {
-      final success =
-          await ContractStore.instance.terminate(widget.contractId);
+      final success = await run(widget.contractId);
       if (!mounted) return;
       if (success) {
         await _load();
-        _showSnack(l.contractTerminated);
+        _showSnack(succeeded);
       } else {
-        _showSnack(l.contractTerminateFailed);
+        _showSnack(failed);
       }
     } finally {
       if (mounted) setState(() => _submitting = false);
@@ -379,44 +411,54 @@ class _ContractDetailScreenState extends State<ContractDetailScreen> {
     if (!c.status.isActionable) return null;
     if (!AuthStore.instance.canApprove) return null;
 
-    final canActivate = c.status == ContractStatus.draft;
+    final buttons = <Widget>[
+      if (c.status.canCancel)
+        _destructiveButton(Icons.cancel_outlined, l.contractCancel, _cancel),
+      if (c.status.canTerminate)
+        _destructiveButton(Icons.block, l.contractTerminate, _terminate),
+      if (c.status.canActivate)
+        FilledButton.icon(
+          onPressed: _submitting ? null : _activate,
+          icon: const Icon(Icons.check),
+          label: Text(l.contractActivate),
+          style: FilledButton.styleFrom(
+            padding: const EdgeInsets.symmetric(vertical: 14),
+            backgroundColor: Colors.green,
+          ),
+        ),
+    ];
 
     return SafeArea(
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Row(
           children: [
-            Expanded(
-              child: OutlinedButton.icon(
-                onPressed: _submitting ? null : _terminate,
-                icon: Icon(Icons.block, color: Colors.red.shade700),
-                label: Text(
-                  l.contractTerminate,
-                  // shade700 keeps the destructive label at AA contrast.
-                  style: TextStyle(color: Colors.red.shade700),
-                ),
-                style: OutlinedButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                  side: BorderSide(color: Colors.red.shade700),
-                ),
-              ),
-            ),
-            if (canActivate) ...[
-              const SizedBox(width: 16),
-              Expanded(
-                child: FilledButton.icon(
-                  onPressed: _submitting ? null : _activate,
-                  icon: const Icon(Icons.check),
-                  label: Text(l.contractActivate),
-                  style: FilledButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                    backgroundColor: Colors.green,
-                  ),
-                ),
-              ),
+            for (var i = 0; i < buttons.length; i++) ...[
+              if (i > 0) const SizedBox(width: 16),
+              Expanded(child: buttons[i]),
             ],
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _destructiveButton(
+    IconData icon,
+    String label,
+    Future<void> Function() onPressed,
+  ) {
+    return OutlinedButton.icon(
+      onPressed: _submitting ? null : onPressed,
+      icon: Icon(icon, color: Colors.red.shade700),
+      label: Text(
+        label,
+        // shade700 keeps the destructive label at AA contrast.
+        style: TextStyle(color: Colors.red.shade700),
+      ),
+      style: OutlinedButton.styleFrom(
+        padding: const EdgeInsets.symmetric(vertical: 14),
+        side: BorderSide(color: Colors.red.shade700),
       ),
     );
   }

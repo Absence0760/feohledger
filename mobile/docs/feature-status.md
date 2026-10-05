@@ -32,17 +32,20 @@ Parity direction is set in `frontend/CLAUDE.md` § Web vs Mobile feature parity.
 - ERP status — `ErpStatusPanel` shows the invoice's ERP integration status (ERP reference / document id / send error + last action). `ErpInfo.fromAuditLog` derives it from the already-loaded audit log (latest `invoice.erp_*` / `invoice.completed` entry), so no extra request. Shown for ERP-bound statuses (`sending_to_erp` / `sent_to_erp` / `posted_in_erp`) and ERP-failed invoices
 - Invoice editing — edit-sheet on the detail screen (vendor, invoice #, amount, PO, GL account, description, due date) via `PATCH /api/invoices/{id}`; amount sent as string-Decimal (never a lossy float); input validation; RBAC-gated (admin/ap_manager/cfo, hidden for clerks) and hidden in immutable statuses (the backend would 409); save success/failure announced via `A11y.announce`, and a refused save shows the **server's own sentence** (`InvoiceStore.update` records `describeApiError`) rather than a generic "try again" — the GL field is free text, so a code outside the invoice's chart (`docs/decisions.md` §194/§199) is refused with a sentence naming the code and the reason, and retrying the same save cannot succeed. **The financial freeze is mirrored client-side**: once an invoice is `approved` or later (`InvoiceStatus.isFinanciallyLocked` ⇄ the backend `_FINANCIALLY_LOCKED_STATUSES` = `{approved}` ∪ `IMMUTABLE_STATUSES`), the money + payee fields render **read-only** under a short notice saying how to change them (reject → correct → re-approve), and `stripFinancialFields` drops every key in `kFinancialInvoiceFields` (the mirror of the backend `_FINANCIAL_FIELDS`: amount, currency, subtotal, tax_amount, discount_amount, shipping_amount, tax_rate, vendor, vendor_name, remit_to_address) from the PATCH diff. The backend 409s the WHOLE request if one slips through, so a combined description + amount edit used to lose the description too — same guard the web modal applies in `invoiceFieldPayload()`. Locked by `test/widgets/invoice_edit_sheet_test.dart` + the `financial freeze` group in `test/models/invoice_test.dart`
 - Activity timeline — invoice audit log on the detail screen (`GET /api/invoices/{id}/audit-log`): action label, actor, timestamp, per-field before→after diff from `details.changes`; loading / empty / error states; one merged Semantics announcement per entry
-- Approvals tab with swipe-to-approve
+- Approvals tab with swipe-to-approve (shown to anyone holding `invoice.approve` — admin / AP manager / CFO by default, or a custom role)
 - Exception queue (list + status filter + resolve / escalate / dismiss via swipe; admin / AP manager only). **Detail / assign / bulk-resolve** now shipped: tapping a row opens `ExceptionDetailScreen` (`GET /api/exceptions/{id}`) — full fields + linked invoice + SLA/due/overdue + current assignee, with resolve/escalate/dismiss reachable there and loading/error/empty states. An admin-gated assignee picker (`POST /api/exceptions/{id}/assign`, null = unassign) reuses the admin-only `/admin/users` list — `ap_manager` can act but doesn't get the picker (no org-user-list access); reassignment patches the row in place. Multi-select (long-press or the checklist app-bar action) drives the shared `BulkActionBar` (Status → resolve, Delete → dismiss) → `POST /api/exceptions/bulk/resolve`, whose `{updated, skipped:[{id,reason}]}` partial-success result is surfaced in a snackbar. The bottom-sheet picker is height-capped (60% of the viewport) so a long user list scrolls inside the sheet
 - In-app notification center — `NotificationsScreen` + `NotificationStore` over `GET /api/notifications` (+ `unread-count` / `{id}/read` / `read-all`). Reached from the `NotificationBell` app-bar action (live unread `Badge`) in the Dashboard app bar (all roles). All / Unread filter chips; tapping a row marks it read (optimistic — flips the row + decrements the badge instantly, reconciles via refetch on failure) and deep-links to the invoice detail when the row is an `invoice` with an `entity_id` (other entity types e.g. `contract` just mark read — no mobile detail yet); mark-all-read app-bar action shown only while something is unread; offline-cached list + empty / loading / error (Retry) states. The email/in-app backend (Priority 8) serves mobile with no new endpoints
 - Contract management (CLM) — `ContractsScreen` + `ContractStore` over
   `GET /api/contracts` with status filter chips + debounced search; tapping a
   row opens `ContractDetailScreen` (`GET /api/contracts/{id}`) with the terms /
   dates / value fields, the spend-to-contract summary (invoiced vs
-  not-to-exceed, over-limit + remaining) and the line items. **Activate** and
-  **terminate** are confirm-then-act lifecycle actions gated to
+  not-to-exceed, over-limit + remaining) and the line items. **Activate**
+  (draft), **terminate** (active) and **cancel** (draft or active) are the
+  lifecycle actions — terminate and cancel confirm first — gated to
   admin/ap_manager (`AuthStore.canApprove`, mirroring the backend mutate gate)
-  and hidden once the contract is no longer actionable; success / failure is
+  and each offered only from a status the backend accepts it in
+  (`ContractStatus.canActivate` / `canTerminate` / `canCancel`, mirroring
+  `_LIFECYCLE_TRANSITIONS` and the web `ContractModal`); success / failure is
   toasted and live-region announced. Offline-cached list; loading / empty /
   error states. The web-only remainder is document upload + the file
   repository, renewal, and contract-based PO creation
@@ -146,7 +149,9 @@ Parity direction is set in `frontend/CLAUDE.md` § Web vs Mobile feature parity.
   app-bar action) + bulk delete / bulk status-change / **bulk export** over
   `POST /api/invoices/bulk/{delete,status,export}`; gated to
   admin/ap_manager/cfo; the backend skips immutable-status rows and the result
-  snackbar reports deleted/updated + skipped counts. **Export** offers CSV / XML
+  snackbar reports deleted/updated + skipped counts. Bulk **reject** first asks
+  for a reason (the shared `reject_reason_dialog.dart`) and sends it as
+  `reason` — the backend 422s a reasonless bulk rejection. **Export** offers CSV / XML
   from a format sheet, POSTs the selected ids to `bulk/export` (raw bytes via
   `ApiClient.postBytes`, which parses the `Content-Disposition` filename), writes
   the bytes to a temp file and hands them to the platform share sheet

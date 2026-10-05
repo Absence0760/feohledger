@@ -14,6 +14,8 @@ import 'package:feohledger_mobile/services/offline_store.dart';
 import 'package:feohledger_mobile/stores/auth_store.dart';
 import 'package:feohledger_mobile/stores/invoice_store.dart';
 
+import '../support/role_permissions.dart';
+
 /// Wraps the screen in a MaterialApp carrying the localization delegates so
 /// `AppLocalizations.of(context)` resolves (defaults to English).
 Widget _localized() => MaterialApp(
@@ -28,12 +30,17 @@ http.Response _json(Object body, [int status = 200]) => http.Response(
       headers: {'content-type': 'application/json'},
     );
 
-Map<String, dynamic> _meBody(List<String> roles) => {
+Map<String, dynamic> _meBody(
+  List<String> roles, {
+  List<String>? permissions,
+}) =>
+    {
       'id': 'u1',
       'email': 'demo@acme.com',
       'full_name': 'Demo User',
       'organization_id': 'org1',
       'roles': roles,
+      'permissions': permissions ?? systemRolePermissions(roles),
     };
 
 Map<String, dynamic> _invoiceJson(
@@ -95,6 +102,7 @@ MockClient _detailClient(
   http.Response Function(http.Request req)? onReject,
   http.Response Function(http.Request req)? onPatch,
   List<String> roles = const ['admin'],
+  List<String>? permissions,
   List<Map<String, dynamic>> audit = const [],
 }) {
   return MockClient((req) async {
@@ -103,7 +111,7 @@ MockClient _detailClient(
       return _json({'access_token': 'tok-123'});
     }
     if (req.method == 'GET' && path == '/api/auth/me') {
-      return _json(_meBody(roles));
+      return _json(_meBody(roles, permissions: permissions));
     }
     if (req.method == 'GET' && path.endsWith('/audit-log')) {
       return _json(audit);
@@ -274,6 +282,57 @@ void main() {
 
     expect(find.widgetWithText(FilledButton, 'Approve'), findsOneWidget);
     expect(find.widgetWithText(OutlinedButton, 'Reject'), findsOneWidget);
+  });
+
+  // Approve / reject are require_permission(PERM_INVOICE_APPROVE). The CFO
+  // holds it — and is the only role `require_cfo_above` accepts above the
+  // threshold — so a role check of admin/ap_manager hid the one button a
+  // high-value invoice needed.
+  testWidgets('a CFO gets Approve/Reject on an actionable invoice',
+      (tester) async {
+    await _arrange(
+      _detailClient(
+        _invoiceJson('1', status: 'ready_for_review'),
+        roles: ['cfo'],
+      ),
+    );
+
+    await tester.pumpWidget(_localized());
+    await _pumpUntil(tester, find.text('Approve'));
+
+    expect(find.widgetWithText(FilledButton, 'Approve'), findsOneWidget);
+    expect(find.widgetWithText(OutlinedButton, 'Reject'), findsOneWidget);
+  });
+
+  testWidgets('the action bar follows the permission, not the role name',
+      (tester) async {
+    // A custom role carrying invoice.approve is admitted by the backend…
+    await _arrange(
+      _detailClient(
+        _invoiceJson('1', status: 'ready_for_review'),
+        roles: ['ap_clerk', 'approver'],
+        permissions: ['invoice.approve'],
+      ),
+    );
+    await tester.pumpWidget(_localized());
+    await _pumpUntil(tester, find.text('Approve'));
+    expect(find.widgetWithText(FilledButton, 'Approve'), findsOneWidget);
+  });
+
+  testWidgets('a role the org split invoice.approve away from gets no '
+      'action bar', (tester) async {
+    // …and an org that split the duty away from a role is refused by it.
+    await _arrange(
+      _detailClient(
+        _invoiceJson('1', status: 'ready_for_review'),
+        roles: ['ap_manager'],
+        permissions: ['vendor.manage'],
+      ),
+    );
+    await tester.pumpWidget(_localized());
+    await _pumpUntil(tester, find.text('Acme Corp'));
+    expect(find.widgetWithText(FilledButton, 'Approve'), findsNothing);
+    expect(find.widgetWithText(OutlinedButton, 'Reject'), findsNothing);
   });
 
   testWidgets('hides the action bar when the invoice is not actionable',
@@ -461,6 +520,8 @@ void main() {
     await tester.pumpAndSettle();
 
     await tester.enterText(find.byType(TextField), 'Wrong amount');
+    // The confirm button enables on the rebuild that follows the input.
+    await tester.pump();
     await tester.tap(find.widgetWithText(FilledButton, 'Reject'));
     await _pumpUntil(tester, find.text('Invoice rejected'));
 

@@ -526,6 +526,35 @@ void main() {
       expect(result!.count, 1);
       expect(sentBody!['status'], 'approved');
       expect(sentBody!['ids'], ['1']);
+      expect(sentBody!.containsKey('reason'), isFalse,
+          reason: 'no reason key unless one was given');
+    });
+
+    test('bulkStatusSelected carries the rejection reason the backend requires',
+        () async {
+      Map<String, dynamic>? sentBody;
+      ApiClient().debugConfigure(
+        client: MockClient((req) async {
+          if (req.method == 'POST' && req.url.path.endsWith('/bulk/status')) {
+            sentBody = jsonDecode(req.body) as Map<String, dynamic>;
+            return http.Response(
+              jsonEncode({'updated': 1, 'skipped': []}),
+              200,
+              headers: {'content-type': 'application/json'},
+            );
+          }
+          return _list([]);
+        }),
+      );
+
+      store
+        ..reset()
+        ..enterSelectionMode('1');
+
+      await store.bulkStatusSelected('rejected', reason: 'Duplicate');
+
+      expect(sentBody!['status'], 'rejected');
+      expect(sentBody!['reason'], 'Duplicate');
     });
 
     test('bulk action with nothing selected is a no-op (null, no request)',

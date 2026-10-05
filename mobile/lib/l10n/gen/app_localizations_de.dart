@@ -602,6 +602,17 @@ class AppLocalizationsDe extends AppLocalizations {
   String get invoiceDetailReject => 'Ablehnen';
 
   @override
+  String invoicesBulkRejectTitle(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count Rechnungen',
+      one: '$count Rechnung',
+    );
+    return '$_temp0 ablehnen';
+  }
+
+  @override
   String get invoiceDetailApprove => 'Freigeben';
 
   @override
@@ -1700,6 +1711,23 @@ class AppLocalizationsDe extends AppLocalizations {
   @override
   String get contractTerminateFailed =>
       'Vertrag konnte nicht gekündigt werden – bitte erneut versuchen';
+
+  @override
+  String get contractCancel => 'Vertrag stornieren';
+
+  @override
+  String get contractCancelTitle => 'Vertrag stornieren';
+
+  @override
+  String get contractCancelBody =>
+      'Damit wird der Vertrag zurückgezogen – es können keine weiteren Rechnungen mehr zugeordnet werden. Dies kann nicht rückgängig gemacht werden. Fortfahren?';
+
+  @override
+  String get contractCancelled => 'Vertrag storniert';
+
+  @override
+  String get contractCancelFailed =>
+      'Vertrag konnte nicht storniert werden – bitte erneut versuchen';
 
   @override
   String get exceptionDetailTitle => 'Ausnahme';

@@ -177,13 +177,20 @@ Bottom navigation adapts based on user roles (same as web frontend):
 |-----|-----------|
 | Dashboard | All roles |
 | Invoices | All roles |
-| Contracts | All roles (activate / terminate: Admin, AP Manager only) |
-| Approvals | Admin, AP Manager |
+| Contracts | All roles (activate / terminate / cancel: Admin, AP Manager only) |
+| Approvals | Anyone holding `invoice.approve` — Admin, AP Manager, CFO by default, or a custom role (`AuthStore.canApproveInvoice`, read from `/auth/me`'s `permissions`; the invoice-detail Approve/Reject bar uses the same gate) |
 | Exceptions | Admin, AP Manager |
 | Vendors | Admin, AP Manager, CFO (verify/reject + ERP sync: Admin, AP Manager only) |
 | Pay | Admin, AP Manager, CFO |
 | Payments | Admin, AP Manager, CFO |
 | Settings | All roles |
+
+**Gate on the permission where the endpoint does.** A route behind
+`require_permission(...)` (invoice approve/reject today) is mirrored by
+`User.can(...)` over the server-computed `permissions` list, never by a role
+check: a role list cannot express a custom role, and admin/ap_manager-only
+hid Approvals from the CFO — the one role `require_cfo_above` accepts for a
+high-value invoice. A payload without `permissions` grants nothing.
 
 The **Settings list is the hub for everything that is not a bottom-nav tab**, and
 its sections are gated **per entry, against each surface's own backend gate** —

@@ -23,11 +23,27 @@ enum ContractStatus {
     ContractStatus.cancelled => 'Cancelled',
   };
 
-  /// Lifecycle actions are only offered while the contract can still change
-  /// state from the field. Terminal states (expired / terminated / cancelled)
-  /// expose no actions.
-  bool get isActionable =>
+  // Each lifecycle action is offered only from a state the backend accepts it
+  // in — `_LIFECYCLE_TRANSITIONS` in backend/app/api/contracts.py — gated the
+  // same way as the web ContractModal. The backend also admits activate /
+  // terminate from `expired`; neither surface offers them there, because an
+  // expired contract is brought back by a renewal (web-only), which pushes the
+  // end date forward instead of re-activating a contract whose term is over.
+
+  /// `POST /contracts/{id}/activate` — draft only.
+  bool get canActivate => this == ContractStatus.draft;
+
+  /// `POST /contracts/{id}/terminate` — ends a running contract early. A
+  /// draft never ran, so the backend 409s it there; it is cancelled instead.
+  bool get canTerminate => this == ContractStatus.active;
+
+  /// `POST /contracts/{id}/cancel` — draft or active.
+  bool get canCancel =>
       this == ContractStatus.draft || this == ContractStatus.active;
+
+  /// Whether any lifecycle action applies. Terminal states (expired /
+  /// terminated / cancelled) expose none.
+  bool get isActionable => canActivate || canTerminate || canCancel;
 }
 
 enum ContractType {

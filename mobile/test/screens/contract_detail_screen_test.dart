@@ -18,6 +18,7 @@ import 'package:feohledger_mobile/api/api_client.dart';
 import 'package:feohledger_mobile/l10n/gen/app_localizations.dart';
 import 'package:feohledger_mobile/screens/contract_detail_screen.dart';
 import 'package:feohledger_mobile/services/offline_store.dart';
+import 'package:feohledger_mobile/stores/auth_store.dart';
 
 http.Response _json(Object body, [int status = 200]) => http.Response(
       jsonEncode(body),
@@ -25,12 +26,16 @@ http.Response _json(Object body, [int status = 200]) => http.Response(
       headers: {'content-type': 'application/json'},
     );
 
-Map<String, dynamic> _contractJson({String? currency = 'USD'}) => {
+Map<String, dynamic> _contractJson({
+  String? currency = 'USD',
+  String status = 'active',
+}) =>
+    {
       'id': 'c1',
       'contract_number': 'CTR-001',
       'title': 'Cleaning services',
       'contract_type': 'service',
-      'status': 'active',
+      'status': status,
       'vendor_name': 'Acme Corp',
       'currency': ?currency,
       'total_value': 120000,
@@ -192,5 +197,109 @@ void main() {
 
     expect(find.text('120,000.00'), findsOneWidget);
     expect(find.textContaining(r'$'), findsNothing);
+  });
+
+  // The lifecycle buttons must offer only what `POST /api/contracts/{id}/*`
+  // accepts — `_LIFECYCLE_TRANSITIONS` in backend/app/api/contracts.py, gated
+  // the same way as the web ContractModal (activate: draft; terminate: active;
+  // cancel: draft | active). Terminate used to render for a DRAFT contract,
+  // where the backend 409s "Cannot terminate a contract in 'draft' status",
+  // and the cancel route — the only way to retire a draft — was never offered.
+  group('lifecycle actions', () {
+    Future<List<String>> pumpAs(
+      WidgetTester tester,
+      String status, {
+      List<String> roles = const ['admin'],
+    }) async {
+      final posts = <String>[];
+      var current = status;
+      ApiClient().debugConfigure(
+        client: MockClient((req) async {
+          final path = req.url.path;
+          if (path == '/api/auth/login') return _json({'access_token': 't'});
+          if (path == '/api/auth/me') {
+            return _json({
+              'id': 'u1',
+              'email': 'demo@acme.com',
+              'full_name': 'Demo',
+              'organization_id': 'org1',
+              'roles': roles,
+            });
+          }
+          if (req.method == 'POST') {
+            posts.add(path);
+            if (path.endsWith('/cancel')) current = 'cancelled';
+            return _json(_contractJson(status: current));
+          }
+          return _json(_contractJson(status: current));
+        }),
+      );
+      await AuthStore.instance.login('demo@acme.com', 'demo', 'acme');
+      await tester.pumpWidget(MaterialApp(
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        supportedLocales: AppLocalizations.supportedLocales,
+        home: const ContractDetailScreen(contractId: 'c1'),
+      ));
+      for (var i = 0;
+          i < 20 && find.text('Cleaning services').evaluate().isEmpty;
+          i++) {
+        await tester.pump(const Duration(milliseconds: 50));
+      }
+      return posts;
+    }
+
+    tearDown(AuthStore.instance.reset);
+
+    testWidgets('a draft offers Activate and Cancel, never Terminate',
+        (tester) async {
+      await pumpAs(tester, 'draft');
+      expect(find.text('Activate'), findsOneWidget);
+      expect(find.text('Cancel contract'), findsOneWidget);
+      expect(find.text('Terminate'), findsNothing);
+    });
+
+    testWidgets('an active contract offers Terminate and Cancel, not Activate',
+        (tester) async {
+      await pumpAs(tester, 'active');
+      expect(find.text('Terminate'), findsOneWidget);
+      expect(find.text('Cancel contract'), findsOneWidget);
+      expect(find.text('Activate'), findsNothing);
+    });
+
+    for (final terminal in ['expired', 'terminated', 'cancelled']) {
+      testWidgets('a $terminal contract offers no lifecycle action',
+          (tester) async {
+        await pumpAs(tester, terminal);
+        expect(find.text('Activate'), findsNothing);
+        expect(find.text('Terminate'), findsNothing);
+        expect(find.text('Cancel contract'), findsNothing);
+      });
+    }
+
+    testWidgets('a clerk sees no lifecycle action', (tester) async {
+      await pumpAs(tester, 'draft', roles: ['ap_clerk']);
+      expect(find.text('Activate'), findsNothing);
+      expect(find.text('Cancel contract'), findsNothing);
+    });
+
+    testWidgets('Cancel confirms, then POSTs /cancel', (tester) async {
+      final posts = await pumpAs(tester, 'draft');
+      await tester.tap(find.text('Cancel contract'));
+      await tester.pumpAndSettle();
+      expect(find.byType(AlertDialog), findsOneWidget);
+      expect(posts, isEmpty, reason: 'nothing is sent before confirmation');
+
+      await tester.tap(find.descendant(
+        of: find.byType(AlertDialog),
+        matching: find.widgetWithText(FilledButton, 'Cancel contract'),
+      ));
+      for (var i = 0;
+          i < 20 && find.text('Contract cancelled').evaluate().isEmpty;
+          i++) {
+        await tester.pump(const Duration(milliseconds: 50));
+      }
+      expect(posts, ['/api/contracts/c1/cancel']);
+      expect(find.text('Contract cancelled'), findsOneWidget);
+    });
   });
 }

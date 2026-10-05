@@ -395,6 +395,111 @@ void main() {
     // Non-mutating read keeps the selection.
     expect(store.selectionMode, isTrue);
   });
+
+  // `POST /api/invoices/bulk/status` 422s a `rejected` target with no `reason`
+  // (`review.reject_invoice` records it on the audit row and the
+  // `review_rejected` exception the supplier corrects from). The sheet used to
+  // offer "Rejected" and send `{ids, status}` only, so bulk-reject failed on
+  // every tap.
+  group('bulk reject', () {
+    MockClient rejectClient(List<Map<String, dynamic>> bodies) => MockClient(
+          (req) async {
+            if (req.url.path == '/api/auth/login') {
+              return http.Response(jsonEncode({'access_token': 'tok'}), 200,
+                  headers: {'content-type': 'application/json'});
+            }
+            if (req.url.path == '/api/auth/me') {
+              return http.Response(jsonEncode(_me(['admin'])), 200,
+                  headers: {'content-type': 'application/json'});
+            }
+            if (req.method == 'POST' &&
+                req.url.path.endsWith('/bulk/status')) {
+              final body = jsonDecode(req.body) as Map<String, dynamic>;
+              bodies.add(body);
+              // Mirror the backend's refusal of a reasonless bulk rejection.
+              final reason = (body['reason'] as String? ?? '').trim();
+              if (body['status'] == 'rejected' && reason.isEmpty) {
+                return http.Response(
+                  jsonEncode({
+                    'detail': 'A rejection reason is required when '
+                        'bulk-rejecting invoices.',
+                  }),
+                  422,
+                  headers: {'content-type': 'application/json'},
+                );
+              }
+              return http.Response(
+                  jsonEncode({'updated': 1, 'skipped': <Object>[]}), 200,
+                  headers: {'content-type': 'application/json'});
+            }
+            return _list([_invoiceJson('1', status: 'ready_for_review')]);
+          },
+        );
+
+    Future<void> openRejectChoice(WidgetTester tester) async {
+      await AuthStore.instance.login('demo@acme.com', 'demo', 'acme');
+      await tester.pumpWidget(_localized(const InvoicesScreen()));
+      await _pumpUntil(tester, find.byType(InvoiceListTile));
+      store.enterSelectionMode('1');
+      await tester.pump();
+      await tester.tap(find.widgetWithText(TextButton, 'Status'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(ListTile, 'Rejected'));
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('asks for a reason and sends it with the rejection',
+        (tester) async {
+      final bodies = <Map<String, dynamic>>[];
+      ApiClient().debugConfigure(client: rejectClient(bodies));
+      await openRejectChoice(tester);
+
+      // A reason prompt, not an immediate request.
+      expect(find.byType(AlertDialog), findsOneWidget);
+      expect(bodies, isEmpty);
+      await tester.enterText(
+          find.descendant(
+              of: find.byType(AlertDialog), matching: find.byType(TextField)),
+          '  Duplicate of INV-0 ');
+      await tester.pump();
+      await tester.tap(find.widgetWithText(FilledButton, 'Reject'));
+      await _pumpUntilTrue(tester, () => bodies.isNotEmpty);
+      await tester.pump();
+
+      expect(bodies.single['status'], 'rejected');
+      expect(bodies.single['ids'], ['1']);
+      expect(bodies.single['reason'], 'Duplicate of INV-0');
+      expect(store.selectionMode, isFalse,
+          reason: 'a successful bulk op exits selection mode');
+    });
+
+    testWidgets('cancelling the reason prompt sends nothing', (tester) async {
+      final bodies = <Map<String, dynamic>>[];
+      ApiClient().debugConfigure(client: rejectClient(bodies));
+      await openRejectChoice(tester);
+
+      await tester.tap(find.widgetWithText(TextButton, 'Cancel'));
+      await tester.pumpAndSettle();
+      expect(bodies, isEmpty);
+      expect(store.selectionMode, isTrue);
+    });
+
+    testWidgets('a blank reason cannot be submitted', (tester) async {
+      final bodies = <Map<String, dynamic>>[];
+      ApiClient().debugConfigure(client: rejectClient(bodies));
+      await openRejectChoice(tester);
+
+      await tester.enterText(
+          find.descendant(
+              of: find.byType(AlertDialog), matching: find.byType(TextField)),
+          '   ');
+      await tester.pump();
+      final confirm = tester.widget<FilledButton>(
+          find.widgetWithText(FilledButton, 'Reject'));
+      expect(confirm.onPressed, isNull);
+      expect(bodies, isEmpty);
+    });
+  });
 }
 
 Future<void> _pumpUntilTrue(WidgetTester tester, bool Function() c) async {

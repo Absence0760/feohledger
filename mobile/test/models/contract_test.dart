@@ -28,6 +28,28 @@ void main() {
       expect(ContractStatus.terminated.isActionable, isFalse);
       expect(ContractStatus.cancelled.isActionable, isFalse);
     });
+
+    test('each lifecycle action is offered only where the backend takes it',
+        () {
+      // backend/app/api/contracts.py::_LIFECYCLE_TRANSITIONS, minus the
+      // `expired` sources neither client offers (renewal is the way back).
+      final activate = {
+        for (final s in ContractStatus.values)
+          if (s.canActivate) s,
+      };
+      final terminate = {
+        for (final s in ContractStatus.values)
+          if (s.canTerminate) s,
+      };
+      final cancel = {
+        for (final s in ContractStatus.values)
+          if (s.canCancel) s,
+      };
+      expect(activate, {ContractStatus.draft});
+      // A draft never ran, so terminating it 409s — it is cancelled instead.
+      expect(terminate, {ContractStatus.active});
+      expect(cancel, {ContractStatus.draft, ContractStatus.active});
+    });
   });
 
   group('ContractType', () {

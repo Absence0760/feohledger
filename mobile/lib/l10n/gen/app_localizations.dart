@@ -1133,6 +1133,12 @@ abstract class AppLocalizations {
   /// **'Reject'**
   String get invoiceDetailReject;
 
+  /// Title of the reason prompt shown before bulk-rejecting the selected invoices.
+  ///
+  /// In en, this message translates to:
+  /// **'Reject {count, plural, one {{count} invoice} other {{count} invoices}}'**
+  String invoicesBulkRejectTitle(int count);
+
   /// No description provided for @invoiceDetailApprove.
   ///
   /// In en, this message translates to:
@@ -2905,6 +2911,36 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Could not terminate contract — please try again'**
   String get contractTerminateFailed;
+
+  /// No description provided for @contractCancel.
+  ///
+  /// In en, this message translates to:
+  /// **'Cancel contract'**
+  String get contractCancel;
+
+  /// No description provided for @contractCancelTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Cancel Contract'**
+  String get contractCancelTitle;
+
+  /// No description provided for @contractCancelBody.
+  ///
+  /// In en, this message translates to:
+  /// **'This withdraws the contract — no further invoices can be matched against it. This cannot be undone. Continue?'**
+  String get contractCancelBody;
+
+  /// No description provided for @contractCancelled.
+  ///
+  /// In en, this message translates to:
+  /// **'Contract cancelled'**
+  String get contractCancelled;
+
+  /// No description provided for @contractCancelFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not cancel contract — please try again'**
+  String get contractCancelFailed;
 
   /// No description provided for @exceptionDetailTitle.
   ///
