@@ -1714,6 +1714,23 @@ class AppLocalizationsFr extends AppLocalizations {
       'Impossible de résilier le contrat — veuillez réessayer';
 
   @override
+  String get contractCancel => 'Annuler le contrat';
+
+  @override
+  String get contractCancelTitle => 'Annuler le contrat';
+
+  @override
+  String get contractCancelBody =>
+      'Cela retire le contrat — aucune autre facture ne pourra y être rapprochée. Cette action est irréversible. Continuer ?';
+
+  @override
+  String get contractCancelled => 'Contrat annulé';
+
+  @override
+  String get contractCancelFailed =>
+      'Impossible d’annuler le contrat — veuillez réessayer';
+
+  @override
   String get exceptionDetailTitle => 'Exception';
 
   @override

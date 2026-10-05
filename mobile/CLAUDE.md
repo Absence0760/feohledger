@@ -177,7 +177,7 @@ Bottom navigation adapts based on user roles (same as web frontend):
 |-----|-----------|
 | Dashboard | All roles |
 | Invoices | All roles |
-| Contracts | All roles (activate / terminate: Admin, AP Manager only) |
+| Contracts | All roles (activate / terminate / cancel: Admin, AP Manager only) |
 | Approvals | Admin, AP Manager |
 | Exceptions | Admin, AP Manager |
 | Vendors | Admin, AP Manager, CFO (verify/reject + ERP sync: Admin, AP Manager only) |

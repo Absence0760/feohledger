@@ -492,6 +492,11 @@
   "contractTerminateBody": "Esto finaliza el contrato anticipadamente. No se puede deshacer. ¿Continuar?",
   "contractTerminated": "Contrato rescindido",
   "contractTerminateFailed": "No se pudo rescindir el contrato; inténtalo de nuevo",
+  "contractCancel": "Cancelar contrato",
+  "contractCancelTitle": "Cancelar contrato",
+  "contractCancelBody": "Esto retira el contrato: no se podrán asociar más facturas a él. No se puede deshacer. ¿Continuar?",
+  "contractCancelled": "Contrato cancelado",
+  "contractCancelFailed": "No se pudo cancelar el contrato; inténtalo de nuevo",
 
   "exceptionDetailTitle": "Excepción",
   "exceptionDetailNotFound": "Excepción no encontrada",

@@ -1655,6 +1655,22 @@ class AppLocalizationsJa extends AppLocalizations {
   String get contractTerminateFailed => '契約を解約できませんでした。もう一度お試しください';
 
   @override
+  String get contractCancel => '契約を取消';
+
+  @override
+  String get contractCancelTitle => '契約の取消';
+
+  @override
+  String get contractCancelBody =>
+      '契約を取り消します。以後この契約に請求書を照合できなくなります。この操作は取り消せません。続行しますか？';
+
+  @override
+  String get contractCancelled => '契約を取り消しました';
+
+  @override
+  String get contractCancelFailed => '契約を取り消せませんでした。もう一度お試しください';
+
+  @override
   String get exceptionDetailTitle => '例外';
 
   @override

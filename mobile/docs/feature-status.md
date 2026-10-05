@@ -39,10 +39,13 @@ Parity direction is set in `frontend/CLAUDE.md` § Web vs Mobile feature parity.
   `GET /api/contracts` with status filter chips + debounced search; tapping a
   row opens `ContractDetailScreen` (`GET /api/contracts/{id}`) with the terms /
   dates / value fields, the spend-to-contract summary (invoiced vs
-  not-to-exceed, over-limit + remaining) and the line items. **Activate** and
-  **terminate** are confirm-then-act lifecycle actions gated to
+  not-to-exceed, over-limit + remaining) and the line items. **Activate**
+  (draft), **terminate** (active) and **cancel** (draft or active) are the
+  lifecycle actions — terminate and cancel confirm first — gated to
   admin/ap_manager (`AuthStore.canApprove`, mirroring the backend mutate gate)
-  and hidden once the contract is no longer actionable; success / failure is
+  and each offered only from a status the backend accepts it in
+  (`ContractStatus.canActivate` / `canTerminate` / `canCancel`, mirroring
+  `_LIFECYCLE_TRANSITIONS` and the web `ContractModal`); success / failure is
   toasted and live-region announced. Offline-cached list; loading / empty /
   error states. The web-only remainder is document upload + the file
   repository, renewal, and contract-based PO creation

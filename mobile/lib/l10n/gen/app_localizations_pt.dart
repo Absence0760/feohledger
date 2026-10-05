@@ -1713,6 +1713,23 @@ class AppLocalizationsPt extends AppLocalizations {
       'Não foi possível rescindir o contrato — tente novamente';
 
   @override
+  String get contractCancel => 'Cancelar contrato';
+
+  @override
+  String get contractCancelTitle => 'Cancelar Contrato';
+
+  @override
+  String get contractCancelBody =>
+      'Isto retira o contrato — não será possível associar-lhe mais faturas. Esta ação não pode ser anulada. Continuar?';
+
+  @override
+  String get contractCancelled => 'Contrato cancelado';
+
+  @override
+  String get contractCancelFailed =>
+      'Não foi possível cancelar o contrato — tente novamente';
+
+  @override
   String get exceptionDetailTitle => 'Exceção';
 
   @override
@@ -4312,6 +4329,23 @@ class AppLocalizationsPtBr extends AppLocalizationsPt {
   @override
   String get contractTerminateFailed =>
       'Não foi possível rescindir o contrato — tente novamente';
+
+  @override
+  String get contractCancel => 'Cancelar contrato';
+
+  @override
+  String get contractCancelTitle => 'Cancelar Contrato';
+
+  @override
+  String get contractCancelBody =>
+      'Isto retira o contrato — não será mais possível vincular faturas a ele. Esta ação não pode ser desfeita. Continuar?';
+
+  @override
+  String get contractCancelled => 'Contrato cancelado';
+
+  @override
+  String get contractCancelFailed =>
+      'Não foi possível cancelar o contrato — tente novamente';
 
   @override
   String get exceptionDetailTitle => 'Exceção';

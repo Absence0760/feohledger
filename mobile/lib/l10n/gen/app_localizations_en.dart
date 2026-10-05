@@ -1693,6 +1693,23 @@ class AppLocalizationsEn extends AppLocalizations {
       'Could not terminate contract — please try again';
 
   @override
+  String get contractCancel => 'Cancel contract';
+
+  @override
+  String get contractCancelTitle => 'Cancel Contract';
+
+  @override
+  String get contractCancelBody =>
+      'This withdraws the contract — no further invoices can be matched against it. This cannot be undone. Continue?';
+
+  @override
+  String get contractCancelled => 'Contract cancelled';
+
+  @override
+  String get contractCancelFailed =>
+      'Could not cancel contract — please try again';
+
+  @override
   String get exceptionDetailTitle => 'Exception';
 
   @override
