@@ -237,7 +237,7 @@ down, and must report an unavailable probe.
 | Method + path | Roles | Purpose |
 |---|---|---|
 | `GET /offers` | all four | list (filters: `status` — `missed` = declined+expired — `scope`, `vendor_id`; paginated, entity-scoped). Both the filter and the reported `status` use the **effective** status (`effective_status_sql`), so a lapsed `offered` row is filtered and rendered as `expired` |
-| `POST /offers` | admin, ap_manager | create an offer (invoice base_amount defaults from the invoice). `422` for a malformed `invoice_id`/`vendor_id` **or an unknown key** — `DiscountOfferCreate` is `extra="forbid"` (§ Both create surfaces refuse what they cannot read) |
+| `POST /offers` | admin, ap_manager | create an offer (invoice base_amount defaults from the invoice). `422` for a malformed `invoice_id`/`vendor_id` **or an unknown key** — `DiscountOfferCreate` is `extra="forbid"` (§ Both create surfaces refuse what they cannot read). An invoice-scoped offer's `vendor_id`, if sent, must be the invoice's own (`422` otherwise): it was stored as sent, which put the offer in front of the wrong supplier in the portal |
 | `GET /offers/{id}` | all four | detail (entity-scoped) |
 | `POST /offers/{id}/accept` | admin, ap_manager, **cfo** | accept at a tier (`tier_days` or best tier today) |
 | `POST /offers/{id}/decline` | admin, ap_manager, **cfo** | decline |
