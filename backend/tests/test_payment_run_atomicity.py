@@ -151,6 +151,10 @@ def _queue_db(
             card_claim_scalars.all = MagicMock(return_value=[])
             card_claim_res.scalars = MagicMock(return_value=card_claim_scalars)
             per_pay_results.append(card_claim_res)
+            # `applied_credit_conflicts` (decisions §214): no applied memo.
+            memo_pair_res = MagicMock()
+            memo_pair_res.all = MagicMock(return_value=[])
+            per_pay_results.append(memo_pair_res)
             # `_execute_single_payment` re-derives the invoice's net payable
             # (invoice amount − applied credit memos) immediately before the
             # adapter call, so a credit recorded after the run was built can't

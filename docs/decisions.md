@@ -9267,6 +9267,48 @@ acceptable because MinIO only ever holds throwaway `minioadmin` data locally and
 in CI; production is real S3. Detail: `backend/docs/docker.md` § Where MinIO
 comes from.
 
+## 214. An invoice edit may not break a credit memo already applied to it
+
+Applying a credit checks the invoice's vendor, currency and remaining balance
+once, and an applied memo can never be voided or re-applied. But the invoice
+stays editable until approval, and `PATCH /api/invoices/{id}` and
+approve-with-corrections could re-save the vendor (re-linking `vendor_id`), the
+currency, or the amount afterwards. `payment_runs.net_payable_amount` then netted
+the memo off whatever the invoice had become: vendor A's credit reduced vendor
+B's payment, a USD credit came off a EUR payable digit for digit, and an amount
+lowered below the credits consumed the excess against nothing (the net went
+negative, the payment was refused as fully credited, and the stranded credit was
+unrecoverable). Both edit paths now call
+`services/applied_credit_integrity.refuse_edit_stranding_applied_credits` after
+writing the change and any vendor re-link, and 409 inside the same transaction.
+The rule is the apply guards read backwards — NULL vendor fails closed, currency
+compared case-insensitively, a blank invoice currency admitted only on a legacy
+row that was already blank, never when the edit is what blanked it — and an
+amount down to exactly the applied total stays legal (a fully credited invoice).
+
+**Rejected:** re-netting silently (adjusting or detaching the memo when the
+invoice changes). An applied memo is an immutable money record, and moving it
+without a human is the defect, not the cure. Unapplying on edit was rejected for
+the same reason.
+
+**Re-checked at the point of payment, too.** Re-extraction (a manual re-extract,
+or the supplier portal's resubmit of a rejected invoice) writes the same fields
+in the background, with no request to refuse. So `applied_credit_conflicts`
+checks the vendor and currency pairing wherever money is booked or dispatched.
+The run builder and the payment queue refuse such an invoice as the new
+`applied_credit_mismatch` refusal, ordered before `fully_credited` because that
+net is computed from the same credit. `POST /api/payments` returns 409,
+`/retry-failed` skips it, and dispatch fails the payment as
+`applied_credit_mismatch:<kind>` before the processor call, retry-safe. Refusing
+at payment, not inside extraction, keeps one gate for every writer, present or
+future. Opening an exception from extraction was rejected as a second spelling
+of the same check. The amount needs no payment-time code, because credits above
+the amount already make the net zero or negative (`fully_credited`).
+
+Tests: `test_credit_memos.py` § editing an invoice that already carries an
+applied credit; `test_payment_run_credit_memo_netting.py` and
+`test_payment_queue_blocked.py` for the payment-time check.
+
 ## 218. The dashboard's processing-time tile is reduced from grouped day counts, and fails loudly instead of reading zero
 
 `GET /api/dashboard` built the processing-time tile by streaming every

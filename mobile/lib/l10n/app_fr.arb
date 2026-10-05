@@ -262,6 +262,7 @@
   "payQueueBlockedFraudFlag": "Signalement de fraude — non résolu",
   "payQueueBlockedLineTotalMismatch": "Les totaux des lignes ne concordent pas — non résolu",
   "payQueueBlockedPaymentReconciliation": "Paiement antérieur non rapproché — peut-être encore en cours",
+  "payQueueBlockedAppliedCreditMismatch": "Un avoir imputé ne correspond plus au fournisseur ou à la devise de cette facture — corrigez d'abord la facture",
   "payQueueBlockedFullyCredited": "Entièrement couverte par des avoirs — rien à payer",
   "payQueueBlockedLiveVirtualCard": "Une carte virtuelle active couvre cette facture — payez-la par carte",
   "payQueueBlockedGeneric": "Une exception non résolue bloque le paiement",

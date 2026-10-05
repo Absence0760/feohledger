@@ -47,6 +47,9 @@ def _make_invoice(*, amount, uploaded_by_id=None, vendor_id=None):
         organization_id=uuid.uuid4(),
         entity_id=None,
         amount=Decimal(str(amount)),
+        # Every real Invoice carries a currency; the applied-credit guard that
+        # corrections now run through reads it.
+        currency="USD",
         vendor_name="Vendor",
         vendor_id=vendor_id,
         uploaded_by_id=uploaded_by_id,
@@ -54,6 +57,25 @@ def _make_invoice(*, amount, uploaded_by_id=None, vendor_id=None):
         approval_date=None,
         approved_by=None,
     )
+
+
+def _tenant_db(*, locked_instance=None):
+    """A tenant session fake whose queries answer the way an empty tenant would.
+
+    ``.all()`` is ``[]`` — this invoice carries no applied credit memo, so the
+    applied-credit guard the correction path runs (decisions §214) is the
+    no-op it is for almost every real invoice. A bare ``AsyncMock`` answers
+    ``.all()`` with a truthy ``MagicMock`` instead, which reads as "credits are
+    applied here" and trips the guard on tests that are not about it.
+    ``scalar_one()`` returns ``locked_instance`` for the chain path's
+    re-fetch of the workflow instance under a row lock.
+    """
+    result = MagicMock()
+    result.all = MagicMock(return_value=[])
+    result.scalar_one = MagicMock(return_value=locked_instance)
+    db = AsyncMock()
+    db.execute = AsyncMock(return_value=result)
+    return db
 
 
 def _instance(snapshot: dict | None, *, state_data=None):
@@ -82,7 +104,7 @@ async def test_corrected_amount_over_cap_is_rejected_422():
 
     invoice = _make_invoice(amount=100)
     instance = _instance(_single_level_snapshot({"max_invoice_amount": 1000}))
-    db = AsyncMock()
+    db = _tenant_db()
 
     with (
         patch.object(review, "get_workflow_instance", new=AsyncMock(return_value=instance)),
@@ -116,7 +138,7 @@ async def test_corrected_amount_over_cfo_gate_is_rejected_403():
 
     invoice = _make_invoice(amount=100)
     instance = _instance(_single_level_snapshot({"require_cfo_above": 500}))
-    db = AsyncMock()
+    db = _tenant_db()
 
     with (
         patch.object(review, "get_workflow_instance", new=AsyncMock(return_value=instance)),
@@ -150,7 +172,7 @@ async def test_corrected_amount_under_cap_still_approves():
     instance = _instance(
         _single_level_snapshot({"max_invoice_amount": 1000, "require_cfo_above": 500})
     )
-    db = AsyncMock()
+    db = _tenant_db()
 
     with (
         patch.object(review, "get_workflow_instance", new=AsyncMock(return_value=instance)),
@@ -201,10 +223,7 @@ async def test_intermediate_chain_approval_writes_audit_row():
     instance = _instance(snapshot, state_data=None)
 
     # The chain path re-fetches the instance under a row lock via db.execute().
-    locked_result = MagicMock()
-    locked_result.scalar_one = MagicMock(return_value=instance)
-    db = AsyncMock()
-    db.execute = AsyncMock(return_value=locked_result)
+    db = _tenant_db(locked_instance=instance)
 
     captured: list[dict] = []
 
@@ -273,10 +292,7 @@ async def test_completing_chain_approval_writes_final_approved_row_not_step():
     )
     advance_approval_chain(instance, uuid.uuid4())  # now on level 1, not complete
 
-    locked_result = MagicMock()
-    locked_result.scalar_one = MagicMock(return_value=instance)
-    db = AsyncMock()
-    db.execute = AsyncMock(return_value=locked_result)
+    db = _tenant_db(locked_instance=instance)
 
     captured: list[dict] = []
 
@@ -323,7 +339,7 @@ async def test_corrections_rerun_refresh_warnings():
 
     invoice = _make_invoice(amount=250)
     instance = _instance(_single_level_snapshot({}))
-    db = AsyncMock()
+    db = _tenant_db()
     org_settings = {"fraud_rules": {"round_amount_enabled": False}}
 
     captured: dict = {}
@@ -365,7 +381,7 @@ async def test_no_corrections_does_not_rerun_refresh_warnings():
 
     invoice = _make_invoice(amount=250)
     instance = _instance(_single_level_snapshot({}))
-    db = AsyncMock()
+    db = _tenant_db()
 
     calls: list = []
 
@@ -417,7 +433,7 @@ async def test_vendor_name_correction_relinks_vendor_id():
     matched_vendor_id = uuid.uuid4()
     invoice = _make_invoice(amount=250, vendor_id=stale_vendor_id)
     instance = _instance(_single_level_snapshot({}))
-    db = AsyncMock()
+    db = _tenant_db()
 
     captured: dict = {}
 
@@ -469,7 +485,7 @@ async def test_vendor_name_correction_matching_current_name_still_relinks_when_u
     invoice = _make_invoice(amount=250, vendor_id=None)
     invoice.vendor_name = "Vendor"  # matches the correction below
     instance = _instance(_single_level_snapshot({}))
-    db = AsyncMock()
+    db = _tenant_db()
 
     matched_vendor_id = uuid.uuid4()
     calls: list = []
@@ -511,7 +527,7 @@ async def test_vendor_name_correction_to_blank_clears_vendor_id_without_matching
 
     invoice = _make_invoice(amount=250, vendor_id=uuid.uuid4())
     instance = _instance(_single_level_snapshot({}))
-    db = AsyncMock()
+    db = _tenant_db()
 
     match_mock = AsyncMock()
 
@@ -548,7 +564,7 @@ async def test_non_vendor_correction_does_not_touch_vendor_link():
     original_vendor_id = uuid.uuid4()
     invoice = _make_invoice(amount=250, vendor_id=original_vendor_id)
     instance = _instance(_single_level_snapshot({}))
-    db = AsyncMock()
+    db = _tenant_db()
 
     match_mock = AsyncMock()
 
@@ -615,7 +631,7 @@ async def test_specific_strategy_rejects_non_named_approver():
             {"approver_strategy": "specific", "approver_ids": [str(named_approver)]}
         )
     )
-    db = AsyncMock()
+    db = _tenant_db()
 
     with (
         patch.object(review, "get_workflow_instance", new=AsyncMock(return_value=instance)),
@@ -646,7 +662,7 @@ async def test_specific_strategy_allows_named_approver():
             {"approver_strategy": "specific", "approver_ids": [str(named_approver)]}
         )
     )
-    db = AsyncMock()
+    db = _tenant_db()
 
     with (
         patch.object(review, "get_workflow_instance", new=AsyncMock(return_value=instance)),
@@ -693,10 +709,7 @@ async def test_chain_level_rejects_non_named_approver():
     )
     instance = _instance(snapshot, state_data=None)
 
-    locked_result = MagicMock()
-    locked_result.scalar_one = MagicMock(return_value=instance)
-    db = AsyncMock()
-    db.execute = AsyncMock(return_value=locked_result)
+    db = _tenant_db(locked_instance=instance)
 
     with (
         patch.object(review, "get_workflow_instance", new=AsyncMock(return_value=instance)),
@@ -745,10 +758,7 @@ async def test_chain_level_allows_named_approver_to_advance():
     )
     instance = _instance(snapshot, state_data=None)
 
-    locked_result = MagicMock()
-    locked_result.scalar_one = MagicMock(return_value=instance)
-    db = AsyncMock()
-    db.execute = AsyncMock(return_value=locked_result)
+    db = _tenant_db(locked_instance=instance)
 
     with (
         patch.object(review, "get_workflow_instance", new=AsyncMock(return_value=instance)),

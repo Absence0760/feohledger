@@ -378,6 +378,8 @@
 				// generic string and told the operator nothing actionable. The
 				// default arm stays for codes this build genuinely doesn't know.
 				return m('payments.queue.blocked.paymentReconciliation');
+			case 'applied_credit_mismatch':
+				return m('payments.queue.blocked.appliedCreditMismatch');
 			case 'fully_credited':
 				return m('payments.queue.blocked.fullyCredited');
 			case 'live_virtual_card':

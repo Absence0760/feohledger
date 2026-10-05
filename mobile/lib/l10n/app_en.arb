@@ -386,6 +386,7 @@
   "payQueueBlockedFraudFlag": "Fraud flag — unresolved",
   "payQueueBlockedLineTotalMismatch": "Line totals don’t match — unresolved",
   "payQueueBlockedPaymentReconciliation": "Earlier payment unreconciled — may still be in flight",
+  "payQueueBlockedAppliedCreditMismatch": "An applied credit memo no longer matches this invoice's vendor or currency — correct the invoice first",
   "payQueueBlockedFullyCredited": "Fully covered by credit memos — nothing to pay",
   "payQueueBlockedLiveVirtualCard": "A live virtual card claims this invoice — pay it by card",
   "payQueueBlockedGeneric": "Unresolved exception blocks payment",

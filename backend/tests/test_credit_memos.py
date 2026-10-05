@@ -656,6 +656,28 @@ async def test_void_applied_memo_409(realdb):
     assert "Applied" in void_resp.json()["detail"]
 
 
+async def test_voiding_a_void_memo_is_refused_and_writes_no_second_row(realdb):
+    """A double-clicked or retried void must not land a second
+    `credit_memo.voided` row: the append-only trail would then record two
+    rescissions of one memo, by possibly two different actors. Mirrors
+    `POST /api/payments/{id}/void`'s "already voided" 409."""
+    mk = realdb.sessionmaker("a")
+    org_id = realdb.info("a").org_id
+    vendor_id = await _add_vendor(mk, org_id)
+
+    async with realdb.client(key="a", role="ap_manager") as c:
+        memo_id = await _create_open_memo(c, vendor_id)
+        first = await c.post(f"/api/credit-memos/{memo_id}/void")
+        assert first.status_code == 200, first.text
+    async with realdb.client(key="a", role="admin") as c:
+        again = await c.post(f"/api/credit-memos/{memo_id}/void")
+    assert again.status_code == 409, again.text
+    assert again.json()["detail"] == "Credit memo is already void"
+
+    rows = await _audit_rows(mk, memo_id, "credit_memo.voided")
+    assert len(rows) == 1
+
+
 async def test_void_not_found_404(realdb):
     import uuid
 
@@ -2155,3 +2177,130 @@ def test_creditable_statuses_are_derived_from_the_state_machine(monkeypatch):
     unmapped = {k: v for k, v in VALID_TRANSITIONS.items() if k != InvoiceStatus.rejected}
     monkeypatch.setattr(credit_memos, "VALID_TRANSITIONS", unmapped)
     assert InvoiceStatus.rejected not in credit_memos._statuses_a_payment_can_still_net()
+
+
+# ---------------------------------------------------------------------------
+# editing an invoice that already carries an applied credit (decisions §214)
+# ---------------------------------------------------------------------------
+
+
+async def _invoice_with_applied_credit(realdb, c, *, credit="400.00", status=None):
+    """A 500.00 USD invoice of Vendor Alpha carrying one applied credit, plus a
+    second vendor (Vendor Beta) a rename could re-link it to."""
+    mk = realdb.sessionmaker("a")
+    org_id = realdb.info("a").org_id
+    vendor_a = await _add_vendor(mk, org_id, name="Vendor Alpha")
+    await _add_vendor(mk, org_id, name="Vendor Beta")
+    invoice_id = await _add_invoice(mk, org_id, vendor_id=vendor_a, number="INV-EDIT")
+    if status is not None:
+        async with mk() as s:
+            await s.execute(update(Invoice).where(Invoice.id == invoice_id).values(status=status))
+            await s.commit()
+    memo_id = await _create_open_memo(c, vendor_a, number="CM-EDIT", amount=credit)
+    applied = await c.post(f"/api/credit-memos/{memo_id}/apply", json={"invoice_id": invoice_id})
+    assert applied.status_code == 200, applied.text
+    return invoice_id, vendor_a
+
+
+async def _invoice_row(realdb, invoice_id):
+    async with realdb.sessionmaker("a")() as s:
+        return (await s.execute(select(Invoice).where(Invoice.id == invoice_id))).scalar_one()
+
+
+async def test_invoice_edit_cannot_move_an_applied_credit_to_another_vendor(realdb):
+    """Re-saving the vendor re-links `vendor_id`; with a credit already applied
+    that would net vendor Alpha's credit off what vendor Beta is paid."""
+    async with realdb.client(key="a", role="ap_manager") as c:
+        invoice_id, vendor_a = await _invoice_with_applied_credit(realdb, c)
+        resp = await c.patch(f"/api/invoices/{invoice_id}", json={"vendor": "Vendor Beta"})
+        assert resp.status_code == 409, resp.text
+        assert "applied credit memos" in resp.json()["detail"]
+
+        # Clearing the vendor leaves the credit attributable to nobody.
+        cleared = await c.patch(f"/api/invoices/{invoice_id}", json={"vendor": ""})
+        assert cleared.status_code == 409, cleared.text
+
+        # A name no vendor matches makes the matcher stage a new Vendor row;
+        # the refusal must roll that back with the rest of the edit.
+        unknown = await c.patch(f"/api/invoices/{invoice_id}", json={"vendor": "Vendor Gamma"})
+        assert unknown.status_code == 409, unknown.text
+
+    row = await _invoice_row(realdb, invoice_id)
+    assert str(row.vendor_id) == vendor_a
+    assert row.vendor_name == "Acme Supplies"
+    async with realdb.sessionmaker("a")() as s:
+        gamma = (await s.execute(select(Vendor).where(Vendor.name == "Vendor Gamma"))).all()
+    assert gamma == []
+
+
+async def test_invoice_edit_cannot_change_the_currency_under_an_applied_credit(realdb):
+    async with realdb.client(key="a", role="ap_manager") as c:
+        invoice_id, _ = await _invoice_with_applied_credit(realdb, c)
+        resp = await c.patch(f"/api/invoices/{invoice_id}", json={"currency": "EUR"})
+        assert resp.status_code == 409, resp.text
+        assert resp.json()["detail"] == (
+            "This invoice carries applied credit memos in USD; its currency cannot change "
+            "to EUR, or the credit would be netted across currencies"
+        )
+        # Blanking it is a change too: the apply guard admits a blank invoice
+        # currency only on a legacy row that never had one.
+        blank = await c.patch(f"/api/invoices/{invoice_id}", json={"currency": ""})
+        assert blank.status_code == 409, blank.text
+        assert "change to no currency" in blank.json()["detail"]
+        # Same currency, different case: not a change, as on the apply guard.
+        same = await c.patch(f"/api/invoices/{invoice_id}", json={"currency": "usd"})
+        assert same.status_code == 200, same.text
+
+    assert (await _invoice_row(realdb, invoice_id)).currency.upper() == "USD"
+
+
+async def test_invoice_amount_cannot_drop_below_the_credit_already_applied(realdb):
+    async with realdb.client(key="a", role="ap_manager") as c:
+        invoice_id, _ = await _invoice_with_applied_credit(realdb, c, credit="400.00")
+        resp = await c.patch(f"/api/invoices/{invoice_id}", json={"amount": "399.99"})
+        assert resp.status_code == 409, resp.text
+        assert resp.json()["detail"] == (
+            "The invoice amount cannot be lowered below the 400.00 already credited to it "
+            "by applied credit memos"
+        )
+        assert (await _invoice_row(realdb, invoice_id)).amount == Decimal("500.00")
+
+        # Down to exactly the credited total is a fully-credited invoice — legal.
+        exact = await c.patch(f"/api/invoices/{invoice_id}", json={"amount": "400.00"})
+        assert exact.status_code == 200, exact.text
+        # And an edit that touches none of the three fields is never refused.
+        other = await c.patch(f"/api/invoices/{invoice_id}", json={"description": "re-keyed"})
+        assert other.status_code == 200, other.text
+
+    assert (await _invoice_row(realdb, invoice_id)).amount == Decimal("400.00")
+
+
+async def test_approve_with_corrections_cannot_strand_an_applied_credit(realdb):
+    """Approve-with-corrections writes `amount` and `vendor` like the PATCH does,
+    so it takes the same guard — and a refusal leaves the invoice unapproved."""
+    async with realdb.client(key="a", role="ap_manager") as c:
+        invoice_id, vendor_a = await _invoice_with_applied_credit(
+            realdb, c, status=InvoiceStatus.ready_for_review
+        )
+        low = await c.post(f"/api/invoices/{invoice_id}/approve", json={"amount": "100.00"})
+        assert low.status_code == 409, low.text
+        assert low.json()["detail"] == (
+            "The invoice amount cannot be lowered below the 400.00 already credited to it "
+            "by applied credit memos"
+        )
+        moved = await c.post(f"/api/invoices/{invoice_id}/approve", json={"vendor": "Vendor Beta"})
+        assert moved.status_code == 409, moved.text
+        assert moved.json()["detail"].startswith("This invoice carries applied credit memos")
+
+        row = await _invoice_row(realdb, invoice_id)
+        assert row.status == InvoiceStatus.ready_for_review
+        assert row.amount == Decimal("500.00")
+        assert str(row.vendor_id) == vendor_a
+
+        # A correction down to exactly the credited total still approves.
+        ok = await c.post(f"/api/invoices/{invoice_id}/approve", json={"amount": "400.00"})
+        assert ok.status_code == 200, ok.text
+
+    row = await _invoice_row(realdb, invoice_id)
+    assert row.status == InvoiceStatus.approved
+    assert row.amount == Decimal("400.00")

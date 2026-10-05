@@ -608,6 +608,25 @@ void main() {
   // it 409s the WHOLE batch, so one held invoice used to take every other
   // invoice in the draft down with it. It still RENDERS — an operator has to
   // see what to go and clear — with the reason spelled out.
+  testWidgets('a credit-mismatch row names its own reason', (tester) async {
+    await loginThen(
+      ['ap_manager'],
+      _screenClient(queue: [
+        _queueItem('1', blocked: true, blockedReason: 'applied_credit_mismatch'),
+      ]),
+    );
+
+    await tester.pumpWidget(_localized(const PaymentQueueScreen()));
+    await _pumpUntil(tester, find.text('Vendor 1'));
+
+    expect(
+      find.text("An applied credit memo no longer matches this invoice's vendor "
+          'or currency — correct the invoice first'),
+      findsOneWidget,
+    );
+    expect(find.textContaining('applied_credit_mismatch'), findsNothing);
+  });
+
   testWidgets('a blocked row is unselectable and says why', (tester) async {
     await loginThen(
       ['ap_manager'],

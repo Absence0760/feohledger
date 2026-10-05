@@ -393,10 +393,17 @@ async def _seed_vendor(mk, org_id) -> uuid.UUID:
 async def _apply_credit(mk, org_id, invoice_id: uuid.UUID, *, amount: str) -> None:
     """An APPLIED credit memo against the invoice — what `net_payable_amounts`
     subtracts. An `open` memo must not count."""
+    from sqlalchemy import update
+
     from app.models.credit_memo import CreditMemo
 
     vendor_id = await _seed_vendor(mk, org_id)
     async with mk() as s:
+        # The API can only apply a credit to an invoice linked to the memo's
+        # own vendor (`credit_memos._assert_vendor_matches`), and the payment
+        # paths refuse any other pairing (`applied_credit_mismatch`), so the
+        # fixture links them the same way.
+        await s.execute(update(Invoice).where(Invoice.id == invoice_id).values(vendor_id=vendor_id))
         s.add(
             CreditMemo(
                 id=uuid.uuid4(),
@@ -487,6 +494,38 @@ async def test_a_partly_credited_invoice_stays_payable(realdb):
     assert str(inv_id) in await _selectable_ids(realdb, mk)
 
 
+async def _set_currency(mk, invoice_id: uuid.UUID, currency: str) -> None:
+    """A background re-extraction rewriting the currency under an applied credit."""
+    from sqlalchemy import update
+
+    async with mk() as s:
+        await s.execute(update(Invoice).where(Invoice.id == invoice_id).values(currency=currency))
+        await s.commit()
+
+
+async def test_a_credit_whose_currency_no_longer_pairs_blocks_the_row(realdb):
+    """A credit applied in USD to an invoice since re-extracted as EUR would be
+    subtracted across currencies, so a run refuses it — and the queue must say
+    so rather than offer a row that 409s the batch (decisions §214). Case on
+    the invoice side is not a mismatch, as on the apply guard."""
+    mk = realdb.sessionmaker(TENANT)
+    org_id = realdb.info(TENANT).org_id
+    moved = await _seed_invoice(mk, org_id, number="Q-CUR-MOVED")
+    same = await _seed_invoice(mk, org_id, number="Q-CUR-SAME")
+    await _apply_credit(mk, org_id, moved, amount="100.00")
+    await _apply_credit(mk, org_id, same, amount="100.00")
+    await _set_currency(mk, moved, "EUR")
+    await _set_currency(mk, same, "usd")
+
+    rows = await _queue(realdb, mk)
+    assert rows["Q-CUR-MOVED"]["blocked"] is True
+    assert rows["Q-CUR-MOVED"]["blocked_reason"] == "applied_credit_mismatch"
+    assert rows["Q-CUR-SAME"]["blocked"] is False
+    selectable = await _selectable_ids(realdb, mk)
+    assert str(moved) not in selectable
+    assert str(same) in selectable
+
+
 async def test_a_card_claimed_invoice_is_rail_pinned_not_blocked(realdb):
     """A live virtual card is refused on every rail EXCEPT `virtual_card`, which
     converges onto that card. So the row is NOT blocked — blocking it would kill
@@ -565,14 +604,17 @@ async def test_the_queues_sql_selectable_set_matches_the_python_verdict(realdb):
     credited_id = await _seed_invoice(mk, org_id, number="Q-SQL-CREDIT", amount="200.00")
     card_id = await _seed_invoice(mk, org_id, number="Q-SQL-CARD")
     live_id = await _seed_invoice(mk, org_id, number="Q-SQL-LIVE")
+    mismatch_id = await _seed_invoice(mk, org_id, number="Q-SQL-MISMATCH")
     await _add_exception(mk, org_id, exc_id, exception_type="fraud_flag")
     await _apply_credit(mk, org_id, credited_id, amount="200.00")
+    await _apply_credit(mk, org_id, mismatch_id, amount="50.00")
+    await _set_currency(mk, mismatch_id, "eur")
     await _mint_card(mk, org_id, card_id)
     await _book_payment(mk, live_id, status="submitted")
 
     selectable = await _selectable_ids(realdb, mk)
 
-    seeded = [clean_id, exc_id, credited_id, card_id, live_id]
+    seeded = [clean_id, exc_id, credited_id, card_id, live_id, mismatch_id]
     async with mk() as db:
         invoices = (
             (await db.execute(sa_select(InvoiceModel).where(InvoiceModel.id.in_(seeded))))
@@ -586,11 +628,12 @@ async def test_the_queues_sql_selectable_set_matches_the_python_verdict(realdb):
     assert verdicts[credited_id].reason == "fully_credited"
     assert verdicts[card_id].reason == "live_virtual_card"
     assert verdicts[live_id].reason == "live_payment"
+    assert verdicts[mismatch_id].reason == "applied_credit_mismatch"
     assert clean_id not in verdicts
 
     # SQL: the selectable set is exactly the rows with no refusal.
     assert str(clean_id) in selectable
-    for refused in (exc_id, credited_id, card_id, live_id):
+    for refused in (exc_id, credited_id, card_id, live_id, mismatch_id):
         assert str(refused) not in selectable, refused
 
 
@@ -604,6 +647,7 @@ async def test_every_queue_reason_code_is_one_the_run_builder_can_actually_raise
 
     non_exception = {
         payment_runs.REFUSAL_LIVE_VIRTUAL_CARD,
+        payment_runs.REFUSAL_APPLIED_CREDIT_MISMATCH,
         payment_runs.REFUSAL_FULLY_CREDITED,
         payment_runs.REFUSAL_LIVE_PAYMENT,
     }

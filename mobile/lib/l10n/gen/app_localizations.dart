@@ -1565,6 +1565,12 @@ abstract class AppLocalizations {
   /// **'Earlier payment unreconciled — may still be in flight'**
   String get payQueueBlockedPaymentReconciliation;
 
+  /// No description provided for @payQueueBlockedAppliedCreditMismatch.
+  ///
+  /// In en, this message translates to:
+  /// **'An applied credit memo no longer matches this invoice\'s vendor or currency — correct the invoice first'**
+  String get payQueueBlockedAppliedCreditMismatch;
+
   /// No description provided for @payQueueBlockedFullyCredited.
   ///
   /// In en, this message translates to:
