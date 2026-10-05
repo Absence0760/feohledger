@@ -239,7 +239,7 @@ down, and must report an unavailable probe.
 | `GET /offers` | all four | list (filters: `status` — `missed` = declined+expired — `scope`, `vendor_id`; paginated, entity-scoped). Both the filter and the reported `status` use the **effective** status (`effective_status_sql`), so a lapsed `offered` row is filtered and rendered as `expired` |
 | `POST /offers` | admin, ap_manager | create an offer (invoice base_amount defaults from the invoice). `422` for a malformed `invoice_id`/`vendor_id` **or an unknown key** — `DiscountOfferCreate` is `extra="forbid"` (§ Both create surfaces refuse what they cannot read) |
 | `GET /offers/{id}` | all four | detail (entity-scoped) |
-| `POST /offers/{id}/accept` | admin, ap_manager, **cfo** | accept at a tier (`tier_days` or best tier today) |
+| `POST /offers/{id}/accept` | admin, ap_manager, **cfo** | accept at a tier (`tier_days` or best tier today). `409` when the offer's invoice is already `paid` / `done` (§ No discount on a settled invoice) |
 | `POST /offers/{id}/decline` | admin, ap_manager, **cfo** | decline |
 | `GET /invoices/{id}/roi` | all four | annualized ROI of paying the invoice early (open offer's best tier, else the static `PaymentSchedule` term) |
 | `POST /optimize` | all four | rank open offers by ROI and select within an optional `{cash_budget}`. Offers with no resolvable net due date come back on `unrankable[]` with a `null` APR and `roi.horizon_known: false` — never a fabricated `0.00` (§ An unknown horizon is `null`, not `0`) |
@@ -252,6 +252,22 @@ writes `.captured` and a payment void `.capture_reversed`). Reads are
 entity-scoped; lifecycle guards return `409`. Percent / ROI fields serialize as
 JSON **numbers** (matching the frontend `number`-typed contract) while staying
 `Decimal` in Python.
+
+### No discount on a settled invoice
+
+Accepting an invoice-scoped offer commits to paying that invoice early. On an
+invoice already `paid` or `done` there is no payment left to make, so the
+acceptance can never be realized — yet it used to be recorded and audited on
+every accept path. All four now ask one gate,
+`discount_auto_trigger.settled_invoice_status`: `POST /offers/{id}/accept` and
+the supplier portal's accept answer `409` naming the status, while the
+auto-accept sweep and the copilot's `capture-discounts` skip the offer and leave
+it `offered`. The predicate, `discount_offers.invoice_awaits_payment`, is
+derived rather than listed: a status awaits payment when the payment queue's
+`PAYABLE_INVOICE_STATUSES` is reachable from it through `VALID_TRANSITIONS`
+without passing through `paid` / `done` — so a not-yet-approved invoice still
+qualifies, and the void back-edge cannot make a paid one look payable.
+Vendor-scoped bulk offers have no single invoice and are not gated.
 
 ## Proposing a vendor-wide offer
 
