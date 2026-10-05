@@ -63,10 +63,12 @@ The `data` bundle is intentionally loosely typed (it aggregates heterogeneous
 records). Per subject type:
 
 - **user** — `profile` (email, full_name, sso ids, MFA metadata,
-  notification_prefs), `roles`, `activity` counts (kept for compatibility), and
-  then the actual content: `audit_events` (the rows this user authored),
-  `notifications`, `expense_reports` + `expenses`, `passkeys` (metadata only)
-  and `documents`.
+  notification_prefs, locale), `roles`, `activity` counts (kept for
+  compatibility), and then the actual content: `audit_events` (the rows this
+  user authored), `notifications`, `expense_reports` + `expenses`, `passkeys`
+  (metadata only), `push_devices` (one entry per registered mobile platform with
+  its registration time — the push token itself is withheld, like a passkey's
+  credential id) and `documents`.
 - **vendor_user** — `profile` + the parent `vendor_id`, the `chat_messages` they
   authored, and `documents`.
 - **vendor_contact** — `vendor` (name, code, email, phone, address, tax_id,
@@ -176,7 +178,7 @@ transactional rows.** We redact PII *text* fields and keep the money trail.
 
 | Subject type | Redacted | Preserved |
 |---|---|---|
-| `user` | email → tombstone, full_name, sso_provider/id, hashed_password, mfa_secret; deactivated; **every `WebAuthnCredential` row deleted**; **every live session revoked** | row id, organization_id, role assignments, **every `audit_log` row authored** (the `actor_id` link stays — non-repudiation) |
+| `user` | email → tombstone, full_name, sso_provider/id, hashed_password, mfa_secret, locale; `device_tokens` emptied (the push registrations identify the subject's phone; like passkeys, cleared even on a re-run against an already-tombstoned subject); deactivated; **every `WebAuthnCredential` row deleted**; **every live session revoked** | row id, organization_id, role assignments, **every `audit_log` row authored** (the `actor_id` link stays — non-repudiation) |
 | `vendor_user` | email → tombstone, full_name, hashed_password, mfa_secret; deactivated; their supplier-authored chat attachments | row id, vendor link, the parent vendor's own documents (the company is a separate subject) |
 | `vendor_contact` | vendor email, phone, address, tax_id, bank_details, beneficial_owner_data; the vendor's portal users (as above); supplier-authored **chat message bodies** (free-text PII); the documents listed below | **`vendor.name`** (the legal payee, denormalised onto every Invoice's `vendor_name` money field), **every related Invoice / Payment amount + status + date**, the chat threads + AP-side messages, the `audit_log` |
 

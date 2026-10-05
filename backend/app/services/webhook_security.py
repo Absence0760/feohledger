@@ -100,6 +100,19 @@ async def release_event_claim(provider: str, event_id: str) -> None:
         logger.warning("[webhook-dedup] failed to release claim for provider=%s", provider)
 
 
+async def event_claim_exists(provider: str, event_id: str) -> bool:
+    """Read-only: is a claim made by `is_event_already_processed` still live?
+
+    Never claims. For a caller migrating its claim-key format, which must still
+    honour claims written under the old format until their TTL has elapsed.
+    An empty event id was never claimed, so it reads as absent.
+    """
+    if not event_id:
+        return False
+    r = await get_redis()
+    return bool(await r.exists(f"{DEDUP_PREFIX}{provider}:{event_id}"))
+
+
 def extract_signature_header(headers: dict, *candidates: str) -> str | None:
     """Pull the first present signature header out of a request.
 
