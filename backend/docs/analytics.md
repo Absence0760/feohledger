@@ -127,7 +127,17 @@ New keys added in a prior iteration:
 - `processing_time` — avg / median / p95 days for (upload→approval)
   and (upload→paid). Sample size below 5 collapses to zeros
   (`count_*_leg` still reported) so a tiny tenant doesn't see
-  noisy numbers driven by one outlier.
+  noisy numbers driven by one outlier. The approval leg runs to an
+  invoice's **first** `invoice.approved` audit row and the paid leg to
+  its first completed payment. Computed set-based: each leg is fetched as
+  `(days rounded to 0.1, invoice count)` groups and reduced by
+  `analytics.processing_time_from_day_counts`, which returns exactly what
+  the row-at-a-time `compute_processing_time_metrics` returns (equivalence
+  test in `tests/test_analytics.py`). The old path bound one SQL parameter
+  per approved invoice and read zeros past asyncpg's 32 767-parameter
+  ceiling — `docs/decisions.md` §218, `tests/test_dashboard_processing_time.py`.
+  Day rounding (`analytics._decimal_days`) is exact and half away from zero,
+  matching Postgres' `round(numeric, 1)`.
 - `approval_bottleneck` — per-approver pending counts, oldest
   pending age, average age. Top 10 returned, sorted by
   pending_count descending. Unassigned steps roll under the

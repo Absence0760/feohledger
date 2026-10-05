@@ -86,9 +86,23 @@ class ProcessingTimeMetrics:
     count_paid_leg: int
 
 
+_MICROS_PER_DAY = Decimal(86_400_000_000)
+
+
 def _decimal_days(td: timedelta) -> Decimal:
-    """Total elapsed days as Decimal with one decimal place."""
-    return Decimal(str(round(td.total_seconds() / 86400, 1)))
+    """Total elapsed days as Decimal with one decimal place, half away from zero.
+
+    Exact: the interval is taken in integer microseconds, never through a
+    float. Rounding ``td.total_seconds() / 86400`` with ``round()`` resolved a
+    ``.x5`` tie by whichever side of it the nearest binary double happened to
+    fall — 0.15 day rounded down, 0.25 down, 0.35 down, 0.45 up — so the answer
+    at a tie was an artefact of IEEE-754, not a rule. Half-away-from-zero is
+    also exactly what Postgres' ``round(numeric, 1)`` does, which is what lets
+    the dashboard bucket durations in SQL (`processing_time_from_day_counts`)
+    and still agree with this function to the digit.
+    """
+    micros = (td.days * 86_400 + td.seconds) * 1_000_000 + td.microseconds
+    return (Decimal(micros) / _MICROS_PER_DAY).quantize(Decimal("0.1"), rounding=ROUND_HALF_UP)
 
 
 def _quantile(values: list[Decimal], q: float) -> Decimal:
@@ -153,6 +167,90 @@ def compute_processing_time_metrics(
         p95_upload_to_paid_days=p95_p,
         count_approval_leg=len(approval_days),
         count_paid_leg=len(paid_days),
+    )
+
+
+def _quantile_from_counts(counts: list[tuple[Decimal, int]], n: int, q: float) -> Decimal:
+    """`_quantile` over the multiset ``counts`` describes, without expanding it.
+
+    ``counts`` is ``[(value, multiplicity), ...]`` sorted by value and ``n`` is
+    the sum of the multiplicities. Index arithmetic, interpolation weight and
+    final quantize are `_quantile`'s, line for line — only "the element at
+    sorted position k" is answered by walking cumulative counts instead of
+    indexing a materialised list.
+    """
+    if n == 0:
+        return Decimal("0")
+
+    def at(k: int) -> Decimal:
+        seen = 0
+        for value, count in counts:
+            seen += count
+            if k < seen:
+                return value
+        raise IndexError(k)
+
+    if n == 1:
+        return at(0)
+    pos = (n - 1) * q
+    lo = int(pos)
+    hi = min(lo + 1, n - 1)
+    weight = Decimal(str(pos - lo))
+    return (at(lo) * (Decimal("1") - weight) + at(hi) * weight).quantize(Decimal("0.1"))
+
+
+def processing_time_from_day_counts(
+    approval: list[tuple[Decimal, int]],
+    paid: list[tuple[Decimal, int]],
+    *,
+    min_sample: int = 5,
+) -> ProcessingTimeMetrics:
+    """Same result as `compute_processing_time_metrics`, from durations the DB
+    has already rounded and counted.
+
+    Each leg is ``[(days, count), ...]`` — how many invoices took exactly
+    ``days`` (one decimal, `_decimal_days`' rounding) to reach that milestone.
+    Because every duration is rounded to 0.1 day before any statistic is taken,
+    the number of distinct values is bounded by the span of the data, not by
+    the number of invoices: a year of history is at most a few thousand rows
+    however many invoices the tenant books. The mean, median and p95 are all
+    recoverable exactly from (value, multiplicity) pairs, so this returns what
+    the row-at-a-time function returns for the same population — pinned by
+    `tests/test_analytics.py`'s equivalence test.
+
+    The dashboard used to stream every ``invoice.approved`` audit row, every
+    completed payment and then every matching invoice into Python to build the
+    row list `compute_processing_time_metrics` takes — and the last of those
+    was an ``IN`` list with one bind parameter per invoice, which asyncpg
+    refuses past 32 767. Past that size the error was swallowed and the tile
+    read zero (`docs/decisions.md` §218).
+    """
+
+    def _bundle(counts: list[tuple[Decimal, int]]) -> tuple[Decimal, Decimal, Decimal, int]:
+        ordered = sorted((Decimal(v), int(c)) for v, c in counts if int(c) > 0)
+        n = sum(c for _, c in ordered)
+        if n < min_sample:
+            return Decimal("0"), Decimal("0"), Decimal("0"), n
+        total = sum((v * c for v, c in ordered), Decimal("0"))
+        avg = (total / Decimal(n)).quantize(Decimal("0.1"))
+        return (
+            avg,
+            _quantile_from_counts(ordered, n, 0.5),
+            _quantile_from_counts(ordered, n, 0.95),
+            n,
+        )
+
+    avg_a, med_a, p95_a, n_a = _bundle(approval)
+    avg_p, med_p, p95_p, n_p = _bundle(paid)
+    return ProcessingTimeMetrics(
+        avg_upload_to_approval_days=avg_a,
+        median_upload_to_approval_days=med_a,
+        p95_upload_to_approval_days=p95_a,
+        avg_upload_to_paid_days=avg_p,
+        median_upload_to_paid_days=med_p,
+        p95_upload_to_paid_days=p95_p,
+        count_approval_leg=n_a,
+        count_paid_leg=n_p,
     )
 
 

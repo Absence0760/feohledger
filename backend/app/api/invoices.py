@@ -312,7 +312,13 @@ async def list_invoices(
     total = (await db.execute(count_query)).scalar() or 0
 
     # Paginate. Eager-load extraction_results so priors_summary can be
-    # computed without N+1 queries per row.
+    # computed without N+1 queries per row — and load ONLY the two columns
+    # `schemas.invoice._priors_summary` reads. `raw_result` is the provider's
+    # whole response (an AWS Textract AnalyzeExpense payload is tens of KB of
+    # block geometry), fetched, de-TOASTed and JSON-decoded for every
+    # extraction of every row on the page and then thrown away: at 100 rows
+    # with two extractions each that was ~10 MB per page load and ~250 ms of
+    # the request. `docs/decisions.md` §218.
     # `created_at` is not unique (bulk/seed inserts share a timestamp), so it
     # alone gives Postgres no stable order across OFFSET/LIMIT pages — page 2
     # could re-return a page-1 row, which the frontend's keyed list rejects as a
@@ -327,7 +333,11 @@ async def list_invoices(
     )
     query = query.order_by(*order_by)
     query = query.offset(pagination.offset).limit(pagination.limit)
-    query = query.options(selectinload(Invoice.extraction_results))
+    query = query.options(
+        selectinload(Invoice.extraction_results).load_only(
+            InvoiceExtractionResult.created_at, InvoiceExtractionResult.priors_metadata
+        )
+    )
     result = await db.execute(query)
     invoices = result.scalars().all()
 

@@ -28,6 +28,8 @@ Pins:
 
 from __future__ import annotations
 
+import random
+from collections import Counter
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from types import SimpleNamespace
@@ -36,6 +38,7 @@ import pytest
 
 from app.services.analytics import (
     ReceivedPO,
+    _decimal_days,
     apply_payment_timing_scenario,
     bucket_outflows,
     compute_accruals,
@@ -53,6 +56,7 @@ from app.services.analytics import (
     compute_working_capital_impact,
     detect_threshold_breaches,
     discount_capture_from_grouped_rows,
+    processing_time_from_day_counts,
     value_received_goods,
 )
 
@@ -108,6 +112,70 @@ def test_processing_time_paid_leg_independent_of_approval_leg():
     pt = compute_processing_time_metrics(invs)
     assert pt.count_approval_leg == 5
     assert pt.count_paid_leg == 4
+
+
+@pytest.mark.parametrize(
+    ("elapsed", "expected"),
+    [
+        # Exact .x5 ties round half AWAY from zero. The float path got these
+        # by accident of binary representation: 0.15 day -> 0.1 (the double
+        # sits just below), 0.45 -> 0.5 (just above), 0.25 -> 0.2 (exact,
+        # banker's). Postgres' round(numeric, 1) is half-away, and the
+        # dashboard rounds there, so this function must agree with it.
+        (timedelta(hours=3, minutes=36), Decimal("0.2")),  # 0.15
+        (timedelta(hours=6), Decimal("0.3")),  # 0.25
+        (timedelta(hours=10, minutes=48), Decimal("0.5")),  # 0.45
+        (-timedelta(hours=3, minutes=36), Decimal("-0.2")),
+        (timedelta(days=2, hours=3), Decimal("2.1")),  # 2.125
+        (timedelta(microseconds=1), Decimal("0.0")),
+    ],
+)
+def test_decimal_days_rounds_exactly_half_away_from_zero(elapsed, expected):
+    assert _decimal_days(elapsed) == expected
+
+
+def test_processing_time_from_day_counts_matches_the_row_at_a_time_reference():
+    """The grouped reducer the dashboard uses must return EXACTLY what
+    `compute_processing_time_metrics` returns for the same population —
+    mean, median, p95 and both counts, on both legs, including the
+    below-min-sample collapse. Durations are drawn to land on .x5 ties and
+    to repeat heavily, since repeated values are precisely what the
+    (value, count) form compresses."""
+    rng = random.Random(218)
+    base = datetime(2026, 1, 1, tzinfo=UTC)
+    for trial in range(300):
+        n = rng.choice([0, 1, 2, 4, 5, 6, 7, 19, 20, 21, 40, 101])
+        rows = []
+        for _ in range(n):
+            approved = (
+                base + timedelta(minutes=rng.choice([0, 36, 72, 144, 216, 2880, 4320 * 3]))
+                if rng.random() < 0.9
+                else None
+            )
+            paid = (
+                base + timedelta(seconds=rng.randint(0, 40 * 86400), microseconds=rng.randint(0, 9))
+                if rng.random() < 0.6
+                else None
+            )
+            rows.append(_inv(base, approved, paid))
+
+        def leg(attr):
+            return Counter(
+                _decimal_days(getattr(r, attr) - r.created_at)
+                for r in rows
+                if getattr(r, attr) is not None
+            )
+
+        # Hand the counts over in a scrambled order: the DB returns groups in
+        # no particular order, so the reducer must not rely on it.
+        approval = list(leg("approved_at").items())
+        paid = list(leg("paid_at").items())
+        rng.shuffle(approval)
+        rng.shuffle(paid)
+
+        assert processing_time_from_day_counts(approval, paid) == (
+            compute_processing_time_metrics(rows)
+        ), f"trial {trial}: n={n}"
 
 
 # ---------------------------------------------------------------------------

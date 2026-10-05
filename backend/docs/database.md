@@ -306,6 +306,20 @@ one instance of a class of 20; see **Index parity between the two provisioning
 paths** below for the rest and for the systemic guard that now covers every
 revision.
 
+### `payments.payment_run_id`
+
+The foreign key every payment-run surface reads by had no index until
+`0101_payment_run_id_index`. Nineteen call sites filter on it — the run list's
+per-run status rollup and currency lookup, run detail, approve / execute /
+cancel / retry, the Positive Pay builder, the ERP sync-back, the run builder's
+idempotency check and the DSAR export — and each was a full scan of `payments`
+to find one run's few dozen rows: a cost linear in the tenant's whole payment
+history. Measured at 90 k payments across 1 500 runs: the run list's 20-run
+status rollup 19.1 ms (Seq Scan) → 1.1 ms (Bitmap Index Scan); one run's
+payments 4.2 ms / 1 699 buffers → 0.05 ms / 2. Declared as `index=True` on
+`Payment.payment_run_id` for `create_all`-built tenants, held to the migration
+by the parity guard below.
+
 ### Index parity between the two provisioning paths
 
 A database here is built **two ways**, and only one of them runs Alembic:

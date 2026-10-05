@@ -108,8 +108,11 @@ class Payment(Base, EntityMixin, TimestampMixin):
     invoice_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("invoices.id"), nullable=False, index=True
     )
+    # Indexed: every payment-run surface reads a run's payments by this key
+    # (list rollup, detail, approve / execute, Positive Pay, ERP sync-back).
+    # Without it each was a full scan of `payments` (migration 0101).
     payment_run_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("payment_runs.id")
+        UUID(as_uuid=True), ForeignKey("payment_runs.id"), index=True
     )
     amount: Mapped[Decimal] = mapped_column(Numeric(15, 2), nullable=False)
     method: Mapped[str | None] = mapped_column(String(50))

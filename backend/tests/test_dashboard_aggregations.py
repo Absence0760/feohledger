@@ -98,6 +98,13 @@ def _mk_db(*results):
 #  12.  rebates                           → .one() → (amount, excluded_count)
 #  13.  stale approvals                   → .scalar()
 #  14.  open exceptions                   → .scalar()
+#  15.  approval-leg day counts           → .all() → (days, n)
+#  16.  paid-leg day counts               → .all() → (days, n)
+#  17.  pending approval steps            → .all() → (assigned_to, created_at)
+#  18.  discount-capture buckets          → .all() → (bucket, n, amt, amt_rep, unconv)
+#
+# None of these sit inside a swallowing `try` any more (decisions §218), so a
+# fixture that runs out of results fails loudly instead of reading zeros.
 
 
 def _full_results(
@@ -118,6 +125,8 @@ def _full_results(
     rebates=(Decimal("0"), 0),
     stale=0,
     open_exc=0,
+    approval_days=(),
+    paid_days=(),
 ):
     return [
         _r(one=totals),
@@ -136,6 +145,10 @@ def _full_results(
         _r(one=rebates),
         _r(scalar=stale),
         _r(scalar=open_exc),
+        _r(all_=list(approval_days)),
+        _r(all_=list(paid_days)),
+        _r(all_=[]),
+        _r(all_=[]),
     ]
 
 
