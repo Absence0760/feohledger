@@ -1929,6 +1929,7 @@ export const messages = {
 	'cfo.position.colOpening': 'Anfang',
 	'cfo.position.colOutflow': 'Abfluss',
 	'cfo.position.colClosing': 'Ende',
+	'cfo.position.belowMinimum': 'Unter Mindestguthaben',
 	'cfo.position.empty': 'Keine prognostizierten Abflüsse in diesem Zeitraum.',
 
 	'cfoMetrics.heading': 'CFO-Kennzahlen',

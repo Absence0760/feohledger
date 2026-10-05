@@ -2092,6 +2092,7 @@ export const en = {
 	'cfo.position.colOpening': 'Opening',
 	'cfo.position.colOutflow': 'Outflow',
 	'cfo.position.colClosing': 'Closing',
+	'cfo.position.belowMinimum': 'Below minimum',
 	'cfo.position.empty': 'No outflows projected in this window.',
 
 	// CFO metrics (lib/components/analytics/CfoMetrics.svelte, embedded in /cfo)

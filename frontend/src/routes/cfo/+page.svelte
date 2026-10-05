@@ -2,6 +2,7 @@
 	import { api } from '$lib/api';
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 	import KpiCard from '$lib/components/ui/KpiCard.svelte';
+	import Badge from '$lib/components/ui/Badge.svelte';
 	import ByEntityBreakdown from '$lib/components/analytics/ByEntityBreakdown.svelte';
 	import CfoMetrics from '$lib/components/analytics/CfoMetrics.svelte';
 	import ScheduledReportsPanel from '$lib/components/analytics/ScheduledReportsPanel.svelte';
@@ -418,7 +419,12 @@
 				     cannot reflow (WCAG 1.4.10); without this wrapper the table pushed
 				     the whole document sideways at 320px. Same role `.grid-container`
 				     plays for the shared <DataTable>. -->
-				<div class="cf-table-scroll" tabindex="0">
+				<div
+					class="cf-table-scroll"
+					role="region"
+					aria-label={m('cfo.position.title')}
+					tabindex="0"
+				>
 					<table class="cf-table">
 						<thead>
 							<tr>
@@ -435,7 +441,15 @@
 									<td>{formatPeriod(p.period)}</td>
 									<td class="num">{fmtIn(p.opening, ccy)}</td>
 									<td class="num">-{fmtIn(p.outflow, ccy)}</td>
-									<td class="num closing">{fmtIn(p.closing, ccy)}</td>
+									<!-- The red row alone said WHICH periods breach only to a
+									     reader who can see red (WCAG 1.4.1 Use of Color); the
+									     banner above gives the count, this names the rows. -->
+									<td class="num closing">
+										{fmtIn(p.closing, ccy)}
+										{#if p.below_threshold}
+											<Badge tone="danger" variant="below-minimum">{m('cfo.position.belowMinimum')}</Badge>
+										{/if}
+									</td>
 								</tr>
 							{/each}
 							{#if position.periods.length === 0}
@@ -495,7 +509,12 @@
 				     cannot reflow (WCAG 1.4.10); without this wrapper the table pushed
 				     the whole document sideways at 320px. Same role `.grid-container`
 				     plays for the shared <DataTable>. -->
-				<div class="cf-table-scroll" tabindex="0">
+				<div
+					class="cf-table-scroll"
+					role="region"
+					aria-label={m('cfo.budgets.title')}
+					tabindex="0"
+				>
 					<table class="cf-table">
 						<thead>
 							<tr>
@@ -772,6 +791,10 @@
 	}
 	.cf-table td.closing {
 		font-weight: 600;
+	}
+	/* `<Badge>` owns colour and metrics; the caller owns placement. */
+	.cf-table td.closing :global(.below-minimum) {
+		margin-left: 6px;
 	}
 	.cf-table tr.breach td {
 		color: var(--danger);

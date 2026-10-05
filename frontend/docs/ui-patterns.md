@@ -916,6 +916,14 @@ inherit it for free. Reuse these; don't re-solve them per page.
   hand-rolled `.grid-container`), `tests-e2e/a11y/reflow.spec.ts` (runs that
   axe rule on every route at 320px, where every such region is live) and
   `tests-e2e/a11y/table-scroll-region.spec.ts` (the arrow key really pans).
+  A page that wraps its own table in a scroller (`/cfo`'s cash-position and
+  budget tables) owes the same three attributes; the static guard fails any
+  `tabindex="0"` region outside the legal tree that lacks a role or a name.
+- **Status by colour** (WCAG 1.4.1) — a row tinted red to say "this one
+  breaches" also says it in words: `/cfo`'s below-minimum periods carry a
+  `<Badge tone="danger">Below minimum</Badge>` in the Closing cell, the
+  `/payments` queue's overdue rows an "Overdue" badge. The banner above a table
+  can give the count; only the row can say which.
 - **Icon-only controls** — every icon-only `<button>` needs an
   `aria-label` (NotificationBell reflects the unread count; the sidebar
   collapse toggle + profile button carry `aria-label` + `aria-expanded`).

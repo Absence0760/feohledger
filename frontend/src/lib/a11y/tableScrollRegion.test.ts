@@ -105,6 +105,36 @@ describe('DataTable scroll region (WCAG 2.1.1)', () => {
 		expect(attr(region, 'aria-label'), 'an accessible name for the region').toBeDefined();
 	});
 
+	it('every other scroll region made a tab stop is named too (4.1.2)', () => {
+		// A page that wraps its own table in a scroller (`/cfo`'s two money
+		// tables) needs the same three attributes the DataTable container
+		// carries. With `tabindex="0"` alone the keyboard can reach it, and a
+		// screen reader then announces an anonymous stop with no role and no
+		// name — the CFO page did exactly that until both tables were named.
+		//
+		// The published legal pages are excluded, not exempt: their 19
+		// `.table-scroll` wrappers share the defect and are tracked in
+		// docs/followups.md, because naming each table is an edit to the legal
+		// text (decisions §174) rather than to UI copy.
+		const LEGAL = /^(routes\/legal\/|lib\/legal\/)/;
+		const offenders: string[] = [];
+		for (const f of files) {
+			if (LEGAL.test(f.path)) continue;
+			const ast = parse(f.source, { modern: true });
+			for (const el of collectElements(ast.fragment)) {
+				const tabindex = attr(el, 'tabindex');
+				if (!tabindex || staticValue(tabindex) !== '0') continue;
+				const role = attr(el, 'role');
+				// An element given an interactive role (StepNode's role="button")
+				// is a control, named by its content; this rule is about regions.
+				if (role && staticValue(role) !== 'region') continue;
+				const named = attr(el, 'aria-label') || attr(el, 'aria-labelledby');
+				if (!role || !named) offenders.push(`${f.path} <${el.name}>`);
+			}
+		}
+		expect(offenders, 'give the tab stop role="region" and an aria-label').toEqual([]);
+	});
+
 	it('no other file hand-rolls a .grid-container', () => {
 		const offenders = files
 			.filter((f) => f.path !== DATA_TABLE)
