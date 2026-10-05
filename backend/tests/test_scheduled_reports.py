@@ -543,28 +543,25 @@ async def test_execute_schedule_first_failure_does_not_disable():
 
 
 @pytest.mark.asyncio
-async def test_aging_snapshot_separates_61_90_from_90_plus():
-    """Regression: the materializer built only 4 buckets, so 61-90-day invoices
-    collapsed into 90+ and the CSV's days_90 column was always 0. It must
-    produce the same 5 buckets the exporter (and the API export) expect."""
-    from datetime import date
-    from datetime import timedelta as td
+async def test_aging_snapshot_runs_the_api_exports_builder(monkeypatch):
+    """The emailed snapshot used to be a hand-copied loop (it once lost the
+    61-90 band, then summed raw amounts across currencies). It now delegates to
+    `api.analytics._aging_snapshot_buckets` — the export route's own builder —
+    with the caller's reporting currency, the whole tenant, and the SAME `today`
+    the as-of label carries. The band edges and the conversion are pinned on
+    real SQL in `tests/test_analytics_aging_reconciliation.py`."""
     from decimal import Decimal
 
+    import app.api.analytics as analytics_api
     from app.services.scheduled_reports import _materialise_rows
 
-    today = date.today()
-    rows = [
-        (today + td(days=10), Decimal("10.00")),  # current (not yet due)
-        (today - td(days=15), Decimal("20.00")),  # days_30
-        (today - td(days=45), Decimal("30.00")),  # days_60
-        (today - td(days=75), Decimal("40.00")),  # days_90 (61-90)
-        (today - td(days=120), Decimal("50.00")),  # days_90_plus
-    ]
-    result = MagicMock()
-    result.all = MagicMock(return_value=rows)
-    db = AsyncMock()
-    db.execute = AsyncMock(return_value=result)
+    seen: dict = {}
+
+    async def _fake_builder(db, *, today, reporting_currency, entity_id=None):
+        seen.update(today=today, reporting_currency=reporting_currency, entity_id=entity_id)
+        return {"days_90": Decimal("40.00"), "reporting_currency": reporting_currency}
+
+    monkeypatch.setattr(analytics_api, "_aging_snapshot_buckets", _fake_builder)
 
     captured: dict = {}
 
@@ -574,15 +571,14 @@ async def test_aging_snapshot_separates_61_90_from_90_plus():
         return "csv"
 
     sched = _schedule(report_type="aging_snapshot")
-    out = await _materialise_rows(db, sched, _exporter)
+    out = await _materialise_rows(AsyncMock(), sched, _exporter, "EUR")
 
     assert out == "csv"
-    assert captured["days_60"] == Decimal("30.00")
-    assert captured["days_90"] == Decimal("40.00")  # the previously-missing bucket
-    assert captured["days_90_plus"] == Decimal("50.00")  # NOT 90.00 (40+50 lumped)
-    # The as-of label must be the SAME today the buckets were computed against,
-    # not a second clock read inside the exporter.
-    assert captured["_snapshot_date"] is not None
+    assert seen["reporting_currency"] == "EUR"
+    assert seen["entity_id"] is None
+    assert captured["days_90"] == Decimal("40.00")
+    # The as-of label is the SAME today the buckets were computed against.
+    assert captured["_snapshot_date"] == seen["today"]
 
 
 # ---------------------------------------------------------------------------
