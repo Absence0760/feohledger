@@ -1470,7 +1470,8 @@ async def void_payment(
     # and commits; the second blocks on the lock, then re-reads the now-
     # terminal status and 409s before touching the adapter. The Invoice is
     # fetched separately — Postgres can't `FOR UPDATE` the nullable side of
-    # an outer join, and we don't need to lock the invoice here.
+    # an outer join — and locked in its own right, because this path
+    # transitions it (`_lock_payment_invoice`).
     payment = await _get_scoped_payment(db, payment_id, entity_id, for_update=True)
 
     if payment.status in ("voided", "cancelled"):
@@ -1481,9 +1482,7 @@ async def void_payment(
             detail="Cannot void a failed payment (it never settled)",
         )
 
-    invoice = (
-        await db.execute(select(Invoice).where(Invoice.id == payment.invoice_id))
-    ).scalar_one_or_none()
+    invoice = await _lock_payment_invoice(db, payment)
 
     # Capture the status BEFORE mutating so the audit row records the real
     # prior state (any of completed / submitted / processing / pending).
@@ -1684,6 +1683,49 @@ async def retry_void_card_cancel(
     resp.void_card_outcome = card_outcome
     resp.void_card_disposition = disposition
     return resp
+
+
+async def _lock_payment_invoice(db: AsyncSession, payment: Payment) -> Invoice | None:
+    """The payment's invoice, row-locked and re-read, for a path that will
+    decide on its status and then transition it.
+
+    Every invoice transition takes the invoice row lock
+    (`workflow_engine.get_invoice_for_update`) — except, until this, the three
+    money paths that move an invoice off a PAYMENT: dispatch
+    (`_execute_single_payment`, `→ payment_scheduled`), void (`→ approved`) and
+    settlement acceptance (`→ paid`). Each read the invoice unlocked, checked
+    its status, and wrote the transition later — across a processor call, on
+    the dispatch leg. A concurrent locked writer committing in that window
+    (`send-to-erp` walking `approved → sending_to_erp`, `payment_erp_sync`
+    walking `payment_scheduled → paid`) was then overwritten by a transition
+    `validate_transition` had approved against the stale status: an ERP push
+    erased under a payment, or an audit row naming the wrong `from`. The lock
+    makes the concurrent writer wait and then see the new status — and refuse,
+    where the state machine says to.
+
+    `populate_existing` because the session may already hold this invoice
+    (`/compliance/release` loads it first, and `_dispatch_run_payments` keeps
+    one session across many payments with `expire_on_commit=False`): without
+    it the locked SELECT would hand back the cached row and its stale status.
+    Lock order is payment, then invoice — every caller already holds the
+    payment's lock, and no path takes them the other way round.
+
+    `FOR NO KEY UPDATE` (`key_share=True`), not `FOR UPDATE`: it still conflicts
+    with every status writer (`get_invoice_for_update`'s `FOR UPDATE` and plain
+    `UPDATE`s), but not with the `FOR KEY SHARE` lock Postgres takes on the
+    invoice whenever another transaction inserts a row referencing it — a
+    racing `virtual_cards` insert, an exception, an audit row. The dispatch
+    holds this lock across a processor call; a full `FOR UPDATE` would stall
+    every such insert for that long, and deadlock one made from inside the call.
+    """
+    return (
+        await db.execute(
+            select(Invoice)
+            .where(Invoice.id == payment.invoice_id)
+            .with_for_update(key_share=True)
+            .execution_options(populate_existing=True)
+        )
+    ).scalar_one_or_none()
 
 
 async def _recompute_parent_run_status(db: AsyncSession, payment: Payment) -> None:
@@ -1998,9 +2040,7 @@ async def accept_settlement(
             ),
         )
 
-    invoice = (
-        await db.execute(select(Invoice).where(Invoice.id == payment.invoice_id))
-    ).scalar_one_or_none()
+    invoice = await _lock_payment_invoice(db, payment)
 
     coverage = settlement_coverage(
         settled_amount=payment.settled_amount,
@@ -2887,9 +2927,11 @@ async def _execute_single_payment(
     problem with payment N (including this raising) must only ever affect
     payment N, never roll back payments the loop already committed earlier.
     """
-    # Resolve invoice + vendor for the payload
-    inv_result = await db.execute(select(Invoice).where(Invoice.id == payment.invoice_id))
-    invoice = inv_result.scalar_one_or_none()
+    # Resolve invoice + vendor for the payload. Locked: every gate below decides
+    # on the invoice's status and the `→ payment_scheduled` transition lands
+    # after the processor call, so the status must not move in between
+    # (`_lock_payment_invoice`). Held until the caller's per-payment commit.
+    invoice = await _lock_payment_invoice(db, payment)
 
     if invoice is None:
         # No invoice behind this payment. Every gate below — the credit-memo

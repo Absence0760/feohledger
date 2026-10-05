@@ -421,6 +421,20 @@ retry-safe for the same reason (no order exists at the processor):
   `workflow_engine.VALID_TRANSITIONS` rather than restated as a literal, so it
   can never again name a status the state machine refuses. It is
   `PAYABLE_INVOICE_STATUSES` minus `payment_scheduled` (already there).
+- **The check and the transition happen under the invoice's row lock.** The
+  re-check runs before the processor call and the `→ payment_scheduled`
+  transition after it, so the invoice was still free to move in between: it
+  was read unlocked, and a `send-to-erp` committing while the processor held
+  the order was then overwritten by a transition validated against the stale
+  `approved`. `_execute_single_payment` now reads the invoice through
+  `_lock_payment_invoice` (`FOR NO KEY UPDATE`, `populate_existing`) and holds
+  it to the per-payment commit — `NO KEY` so the inserts of rows that reference
+  the invoice (a racing virtual card, an exception) are not stalled behind the
+  processor call — so a concurrent ERP push waits, sees
+  `payment_scheduled`, and is refused by the state machine. The void
+  (`→ approved`) and `/settlement/accept` (`→ paid`) paths, which also decide on
+  the invoice's status and transition it, take the same lock — the void across
+  its own processor call. Lock order is payment, then invoice, on all three.
 
 Pinned by `tests/test_payment_run_invoice_payability.py`.
 
