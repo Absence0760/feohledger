@@ -230,6 +230,53 @@ Control-plane `CardRebate` KPIs (payments summary, card dashboard, dashboard
 tenant's entities. Invoice-id-keyed metrics (dashboard processing-time) inherit
 the scope from the scoped invoice query they consume.
 
+### By-id routes resolve within the selected entity
+
+Every list above was scoped from Phase 2, but most routers resolved their
+**by-id** routes on the primary key alone — so with subsidiary B selected, a
+caller could still read, edit, approve, convert or delete A's row by holding its
+id, and the selector was advisory exactly where it mattered. The rule now holds
+on every by-id route over an `EntityMixin` model: **an id outside the selected
+entity is a 404 byte-identical to the one an unknown id gets** (so the response
+can't enumerate a sibling's ids), nothing is written, and the consolidated view
+(`X-Entity-ID` absent / `all`) still reaches every row. Two shapes implement it:
+
+- **A scoped loader**, where the router owns one — `_get_scoped_po`,
+  `_get_scoped_payment` / `_get_scoped_run`, `_get_scoped_file`, the
+  procurement helpers (`requisitions._get_or_404`, `budgets._get_budget_or_404`,
+  `intake._get_intake_or_404`, `catalogs._get_catalog_or_404` /
+  `_get_item_or_404` / `_get_punchout_session_or_404`) — each takes the
+  `entity_id` and runs its select through `apply_entity_scope`.
+- **`app.tenant.ensure_in_entity_scope(db, Model, id, entity_id, detail=...)`**
+  at the top of the handler, where the row is loaded somewhere the header can't
+  reach — inside a service (`get_invoice_for_update`, `review.*`) or a helper
+  shared with non-request callers. It is a no-op without a selected entity, and
+  `detail` must be the route's own missing-row message. Used across invoices
+  (`api/invoices.py`, `api/workflow.py`, `api/audit.py`), vendors (incl.
+  `api/tax.py`, `api/vendor_risk.py` and the bank-change review, which scopes
+  through the request's vendor), contracts, expenses / expense reports /
+  policies / pre-approvals, workflow definitions, experiments, virtual cards,
+  quality inspections, adaptive suggestions and exception-agent resolve.
+
+Which rows an entity reaches by id matches what its list shows: strict
+`entity_id = selected` for most tables, **∪ NULL** for vendors (an unstamped
+vendor stays reachable from every entity, the `vendor_matching` rule) and for
+workflow definitions (a NULL definition is org-wide). Catalog items also
+validate their `vendor_id` / `gl_account_id` against the catalog's entity ∪
+NULL, as requisitions and intake already did. Guards:
+`backend/tests/test_procurement_entity_scope.py`,
+`backend/tests/test_entity_scope_by_id_sweep.py` (shared probe:
+`tests/entity_scope_probe.py`).
+
+Three families stay deliberately unscoped: **saved cash plans**
+(`cash_flow._load_saved_plan` — the `plan_id` already encodes the scope it was
+built under), **rebate confirm / mark-paid** (`cards._get_org_rebate` — an
+org-level bookkeeping action on a table with no `entity_id` of its own), and
+the **S3 file-key proxies** (`/invoices/file/…`,
+`/invoices/chat/file/…`, `/contracts/file/…`, `/expenses/receipt/…`), which
+are gated on the key's org prefix and never open the tenant DB; see
+`docs/followups.md`. Reasoning: `docs/decisions.md` §222.
+
 ### Frontend
 
 - `frontend/src/lib/entity.ts` — tenant-scoped localStorage selection (key

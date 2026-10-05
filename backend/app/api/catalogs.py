@@ -185,10 +185,28 @@ def _to_response(
     )
 
 
-async def _get_catalog_or_404(db: AsyncSession, catalog_id: uuid.UUID) -> Catalog:
+async def _get_catalog_or_404(
+    db: AsyncSession, catalog_id: uuid.UUID, entity_id: uuid.UUID | None
+) -> Catalog:
+    """Resolve one catalog within the caller's selected entity, or 404.
+
+    The three by-id lookups here (catalog, item, punch-out session) all go
+    through ``apply_entity_scope`` so the `X-Entity-ID` selector the list
+    honours also gates the row a subsidiary-scoped caller can read, edit,
+    delete or shop from. An out-of-scope id is the SAME 404 as a missing one
+    (the ``api/purchase_orders._get_scoped_po`` shape), so the route can't
+    enumerate a sibling's catalogs; the consolidated view (``entity_id is
+    None``) reaches every row.
+    """
     catalog = (
         await db.execute(
-            select(Catalog).where(Catalog.id == catalog_id).options(selectinload(Catalog.items))
+            apply_entity_scope(
+                select(Catalog)
+                .where(Catalog.id == catalog_id)
+                .options(selectinload(Catalog.items)),
+                Catalog,
+                entity_id,
+            )
         )
     ).scalar_one_or_none()
     if not catalog:
@@ -196,9 +214,17 @@ async def _get_catalog_or_404(db: AsyncSession, catalog_id: uuid.UUID) -> Catalo
     return catalog
 
 
-async def _get_item_or_404(db: AsyncSession, item_id: uuid.UUID) -> CatalogItem:
+async def _get_item_or_404(
+    db: AsyncSession, item_id: uuid.UUID, entity_id: uuid.UUID | None
+) -> CatalogItem:
+    """One catalog item, entity-scoped like ``_get_catalog_or_404`` (an item is
+    stamped with its catalog's entity on create)."""
     item = (
-        await db.execute(select(CatalogItem).where(CatalogItem.id == item_id))
+        await db.execute(
+            apply_entity_scope(
+                select(CatalogItem).where(CatalogItem.id == item_id), CatalogItem, entity_id
+            )
+        )
     ).scalar_one_or_none()
     if not item:
         raise HTTPException(status_code=404, detail="Catalog item not found")
@@ -206,9 +232,17 @@ async def _get_item_or_404(db: AsyncSession, item_id: uuid.UUID) -> CatalogItem:
 
 
 async def _resolve_vendor_id(
-    db: AsyncSession, raw: str | None, org_id: uuid.UUID
+    db: AsyncSession, raw: str | None, org_id: uuid.UUID, entity_id: uuid.UUID | None
 ) -> uuid.UUID | None:
-    """Coerce + validate an optional vendor_id (tenant-local). ``None`` clears it."""
+    """Coerce + validate an optional vendor_id. ``None`` clears it.
+
+    Validated against ``entity_id`` — the entity the catalog / item belongs to
+    (or will, on create) — ∪ unstamped vendors, the
+    ``api/intake.py::_resolve_vendor_id`` rule: a catalog item's vendor rides
+    through punch-out conversion onto a requisition and from there onto a PO,
+    so an org-only check let subsidiary A's catalog point at B's supplier
+    record. An out-of-entity id is the same opaque 404 as an unknown one.
+    """
     if not raw:
         return None
     try:
@@ -217,7 +251,12 @@ async def _resolve_vendor_id(
         raise HTTPException(status_code=400, detail="Invalid vendor_id")
     exists = (
         await db.execute(
-            select(Vendor.id).where(Vendor.id == vendor_uuid, Vendor.organization_id == org_id)
+            apply_entity_scope(
+                select(Vendor.id).where(Vendor.id == vendor_uuid, Vendor.organization_id == org_id),
+                Vendor,
+                entity_id,
+                include_shared=True,
+            )
         )
     ).scalar_one_or_none()
     if exists is None:
@@ -225,7 +264,12 @@ async def _resolve_vendor_id(
     return vendor_uuid
 
 
-async def _resolve_gl_id(db: AsyncSession, raw: str | None, org_id: uuid.UUID) -> uuid.UUID | None:
+async def _resolve_gl_id(
+    db: AsyncSession, raw: str | None, org_id: uuid.UUID, entity_id: uuid.UUID | None
+) -> uuid.UUID | None:
+    """Coerce + validate an optional gl_account_id against the item's own chart
+    — shared (NULL) ∪ its entity's accounts, the ``GET /api/gl-accounts`` rule.
+    Another subsidiary's account is the same opaque 404 as an unknown one."""
     if not raw:
         return None
     try:
@@ -234,7 +278,14 @@ async def _resolve_gl_id(db: AsyncSession, raw: str | None, org_id: uuid.UUID) -
         raise HTTPException(status_code=400, detail="Invalid gl_account_id")
     exists = (
         await db.execute(
-            select(GLAccount.id).where(GLAccount.id == gl_uuid, GLAccount.organization_id == org_id)
+            apply_entity_scope(
+                select(GLAccount.id).where(
+                    GLAccount.id == gl_uuid, GLAccount.organization_id == org_id
+                ),
+                GLAccount,
+                entity_id,
+                include_shared=True,
+            )
         )
     ).scalar_one_or_none()
     if exists is None:
@@ -293,7 +344,7 @@ async def create_catalog(
     org_id: uuid.UUID = Depends(get_org_id),
     entity_id: uuid.UUID = Depends(get_write_entity_id),
 ):
-    vendor_uuid = await _resolve_vendor_id(db, body.vendor_id, org_id)
+    vendor_uuid = await _resolve_vendor_id(db, body.vendor_id, org_id, entity_id)
 
     catalog = Catalog(
         name=body.name,
@@ -323,7 +374,7 @@ async def create_catalog(
         },
     )
     await db.commit()
-    fresh = await _get_catalog_or_404(db, catalog.id)
+    fresh = await _get_catalog_or_404(db, catalog.id, entity_id)
     return _to_response(fresh, with_items=True, vendor_name=await _vendor_name(db, fresh.vendor_id))
 
 
@@ -399,12 +450,19 @@ def _punchout_session_to_response(s: PunchoutSession) -> PunchoutSessionResponse
 
 
 async def _get_punchout_session_or_404(
-    db: AsyncSession, session_id: uuid.UUID, *, for_update: bool = False
+    db: AsyncSession,
+    session_id: uuid.UUID,
+    entity_id: uuid.UUID | None,
+    *,
+    for_update: bool = False,
 ) -> PunchoutSession:
-    stmt = (
+    """One punch-out session, entity-scoped like ``_get_catalog_or_404``."""
+    stmt = apply_entity_scope(
         select(PunchoutSession)
         .where(PunchoutSession.id == session_id)
-        .execution_options(populate_existing=True)
+        .execution_options(populate_existing=True),
+        PunchoutSession,
+        entity_id,
     )
     if for_update:
         # Lock for the state-changing convert path so two concurrent requests
@@ -424,7 +482,8 @@ async def start_punchout(
     user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER, ROLE_AP_CLERK)),
     ctrl_db: AsyncSession = Depends(get_control_db),
     org_id: uuid.UUID = Depends(get_org_id),
-    entity_id: uuid.UUID = Depends(get_write_entity_id),
+    write_entity_id: uuid.UUID = Depends(get_write_entity_id),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
     """Start a punch-out session against a ``punchout`` catalog.
 
@@ -434,7 +493,7 @@ async def start_punchout(
     catalog (or one with no URL, or an unconfigured real adapter) is a 422 with a
     PII-free code. Buyers (admin/ap_manager/ap_clerk) may start — punch-out is
     shopping, not config."""
-    catalog = await _get_catalog_or_404(db, catalog_id)
+    catalog = await _get_catalog_or_404(db, catalog_id, entity_id)
 
     # The org's punchout settings select the adapter. Tenant slug for the return
     # URL comes from the resolved org (never a client header).
@@ -450,7 +509,7 @@ async def start_punchout(
             catalog=catalog,
             tenant_slug=org.slug,
             org_id=org_id,
-            entity_id=entity_id,
+            entity_id=write_entity_id,
             user_id=user.id,
             org_settings=org.settings,
         )
@@ -471,7 +530,7 @@ async def start_punchout(
         details={"catalog_id": str(catalog.id), "provider": session.provider},
     )
     await db.commit()
-    fresh = await _get_punchout_session_or_404(db, session.id)
+    fresh = await _get_punchout_session_or_404(db, session.id, entity_id)
     return PunchoutStartResponse(
         session_id=str(fresh.id),
         buyer_cookie=fresh.buyer_cookie,
@@ -486,10 +545,13 @@ async def get_punchout_session(
     session_id: uuid.UUID,
     db: AsyncSession = Depends(get_tenant_db),
     user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER, ROLE_AP_CLERK, ROLE_CFO)),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
     """View a punch-out session — start state, and the returned cart once the
     supplier has posted it back."""
-    return _punchout_session_to_response(await _get_punchout_session_or_404(db, session_id))
+    return _punchout_session_to_response(
+        await _get_punchout_session_or_404(db, session_id, entity_id)
+    )
 
 
 @router.post("/punchout/sessions/{session_id}/convert", response_model=PunchoutConvertResponse)
@@ -498,6 +560,7 @@ async def convert_punchout_session(
     db: AsyncSession = Depends(get_tenant_db),
     user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER, ROLE_AP_CLERK)),
     org_id: uuid.UUID = Depends(get_org_id),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
     """Convert a ``returned`` session's cart into a purchase requisition.
 
@@ -505,7 +568,7 @@ async def convert_punchout_session(
     concurrent converts can't both create a requisition; a session that already
     carries ``converted_requisition_id`` returns its existing requisition
     (``created=False``). A session that has not returned a cart is a 422."""
-    session = await _get_punchout_session_or_404(db, session_id, for_update=True)
+    session = await _get_punchout_session_or_404(db, session_id, entity_id, for_update=True)
 
     # Idempotent replay — already converted: return the existing requisition.
     if session.converted_requisition_id is not None:
@@ -598,18 +661,19 @@ async def update_item(
     db: AsyncSession = Depends(get_tenant_db),
     user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER)),
     org_id: uuid.UUID = Depends(get_org_id),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
-    item = await _get_item_or_404(db, item_id)
+    item = await _get_item_or_404(db, item_id, entity_id)
     payload = body.model_dump(exclude_unset=True)
 
     changed: list[str] = []
     if "vendor_id" in payload:
-        new_vendor = await _resolve_vendor_id(db, payload.pop("vendor_id"), org_id)
+        new_vendor = await _resolve_vendor_id(db, payload.pop("vendor_id"), org_id, item.entity_id)
         if item.vendor_id != new_vendor:
             item.vendor_id = new_vendor
             changed.append("vendor_id")
     if "gl_account_id" in payload:
-        new_gl = await _resolve_gl_id(db, payload.pop("gl_account_id"), org_id)
+        new_gl = await _resolve_gl_id(db, payload.pop("gl_account_id"), org_id, item.entity_id)
         if item.gl_account_id != new_gl:
             item.gl_account_id = new_gl
             changed.append("gl_account_id")
@@ -631,7 +695,7 @@ async def update_item(
             details={"fields": changed},
         )
     await db.commit()
-    fresh = await _get_item_or_404(db, item.id)
+    fresh = await _get_item_or_404(db, item.id, entity_id)
     return _item_to_response(fresh)
 
 
@@ -641,8 +705,9 @@ async def delete_item(
     db: AsyncSession = Depends(get_tenant_db),
     user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER)),
     org_id: uuid.UUID = Depends(get_org_id),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
-    item = await _get_item_or_404(db, item_id)
+    item = await _get_item_or_404(db, item_id, entity_id)
     await dispatch_audit(
         db,
         correlation_id=uuid.uuid4(),
@@ -667,8 +732,9 @@ async def get_catalog(
     catalog_id: uuid.UUID,
     db: AsyncSession = Depends(get_tenant_db),
     user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER, ROLE_AP_CLERK, ROLE_CFO)),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
-    catalog = await _get_catalog_or_404(db, catalog_id)
+    catalog = await _get_catalog_or_404(db, catalog_id, entity_id)
     return _to_response(
         catalog, with_items=True, vendor_name=await _vendor_name(db, catalog.vendor_id)
     )
@@ -681,13 +747,16 @@ async def update_catalog(
     db: AsyncSession = Depends(get_tenant_db),
     user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER)),
     org_id: uuid.UUID = Depends(get_org_id),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
-    catalog = await _get_catalog_or_404(db, catalog_id)
+    catalog = await _get_catalog_or_404(db, catalog_id, entity_id)
     payload = body.model_dump(exclude_unset=True)
 
     changed: list[str] = []
     if "vendor_id" in payload:
-        new_vendor = await _resolve_vendor_id(db, payload.pop("vendor_id"), org_id)
+        new_vendor = await _resolve_vendor_id(
+            db, payload.pop("vendor_id"), org_id, catalog.entity_id
+        )
         if catalog.vendor_id != new_vendor:
             catalog.vendor_id = new_vendor
             changed.append("vendor_id")
@@ -709,7 +778,7 @@ async def update_catalog(
             details={"fields": changed},
         )
     await db.commit()
-    fresh = await _get_catalog_or_404(db, catalog.id)
+    fresh = await _get_catalog_or_404(db, catalog.id, entity_id)
     return _to_response(fresh, with_items=True, vendor_name=await _vendor_name(db, fresh.vendor_id))
 
 
@@ -719,8 +788,9 @@ async def delete_catalog(
     db: AsyncSession = Depends(get_tenant_db),
     user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER)),
     org_id: uuid.UUID = Depends(get_org_id),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
-    catalog = await _get_catalog_or_404(db, catalog_id)
+    catalog = await _get_catalog_or_404(db, catalog_id, entity_id)
     await dispatch_audit(
         db,
         correlation_id=uuid.uuid4(),
@@ -747,8 +817,9 @@ async def list_items(
     db: AsyncSession = Depends(get_tenant_db),
     user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER, ROLE_AP_CLERK, ROLE_CFO)),
     is_active: bool | None = Query(None),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
-    await _get_catalog_or_404(db, catalog_id)  # 404 if the catalog is unknown
+    await _get_catalog_or_404(db, catalog_id, entity_id)  # 404 if the catalog is unknown
     query = select(CatalogItem).where(CatalogItem.catalog_id == catalog_id)
     if is_active is not None:
         query = query.where(CatalogItem.is_active.is_(is_active))
@@ -768,10 +839,11 @@ async def create_item(
     db: AsyncSession = Depends(get_tenant_db),
     user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER)),
     org_id: uuid.UUID = Depends(get_org_id),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
-    catalog = await _get_catalog_or_404(db, catalog_id)
-    vendor_uuid = await _resolve_vendor_id(db, body.vendor_id, org_id)
-    gl_uuid = await _resolve_gl_id(db, body.gl_account_id, org_id)
+    catalog = await _get_catalog_or_404(db, catalog_id, entity_id)
+    vendor_uuid = await _resolve_vendor_id(db, body.vendor_id, org_id, catalog.entity_id)
+    gl_uuid = await _resolve_gl_id(db, body.gl_account_id, org_id, catalog.entity_id)
 
     item = CatalogItem(
         catalog_id=catalog.id,
@@ -802,7 +874,7 @@ async def create_item(
         details={"name": item.name, "catalog_id": str(catalog.id)},
     )
     await db.commit()
-    fresh = await _get_item_or_404(db, item.id)
+    fresh = await _get_item_or_404(db, item.id, entity_id)
     return _item_to_response(fresh)
 
 

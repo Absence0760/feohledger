@@ -89,7 +89,13 @@ from app.services.currency_conversion import (
     resolve_reporting_currency,
 )
 from app.services.review import assign_reviewer
-from app.tenant import apply_entity_scope, get_entity_id, get_tenant, get_tenant_db
+from app.tenant import (
+    apply_entity_scope,
+    ensure_in_entity_scope,
+    get_entity_id,
+    get_tenant,
+    get_tenant_db,
+)
 
 router = APIRouter(prefix="/adaptive", tags=["adaptive-workflows"])
 
@@ -910,7 +916,11 @@ async def dismiss_suggestion(
     db: AsyncSession = Depends(get_tenant_db),
     org: Organization = Depends(get_tenant),
     user: User = Depends(require_roles(*_WRITE_ROLES)),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
+    await ensure_in_entity_scope(
+        db, WorkflowSuggestion, suggestion_id, entity_id, detail="Suggestion not found"
+    )
     row = (
         await db.execute(
             select(WorkflowSuggestion).where(

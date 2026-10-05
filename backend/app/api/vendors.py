@@ -91,6 +91,7 @@ from app.services.vendor_sync import sync_vendors_from_erp
 from app.services.vendor_tax_id import rekey_tax_id
 from app.tenant import (
     apply_entity_scope,
+    ensure_in_entity_scope,
     get_entity_id,
     get_tenant,
     get_tenant_db,
@@ -956,7 +957,11 @@ async def get_vendor(
     vendor_id: uuid.UUID,
     db: AsyncSession = Depends(get_tenant_db),
     user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER, ROLE_CFO)),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
+    await ensure_in_entity_scope(
+        db, Vendor, vendor_id, entity_id, detail="Vendor not found", include_shared=True
+    )
     result = await db.execute(select(Vendor).where(Vendor.id == vendor_id))
     vendor = result.scalar_one_or_none()
     if not vendor:
@@ -1062,7 +1067,11 @@ async def update_vendor(
     org: Organization = Depends(get_tenant),
     user: User = Depends(require_permission(PERM_VENDOR_MANAGE)),
     org_id: uuid.UUID = Depends(get_org_id),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
+    await ensure_in_entity_scope(
+        db, Vendor, vendor_id, entity_id, detail="Vendor not found", include_shared=True
+    )
     result = await db.execute(select(Vendor).where(Vendor.id == vendor_id))
     vendor = result.scalar_one_or_none()
     if not vendor:
@@ -1145,6 +1154,7 @@ async def request_bank_change(
     org: Organization = Depends(get_tenant),
     user: User = Depends(require_permission(PERM_VENDOR_MANAGE)),
     org_id: uuid.UUID = Depends(get_org_id),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
     """Propose a vendor bank-details change (AP-initiated, dual-control).
 
@@ -1153,6 +1163,9 @@ async def request_bank_change(
     `vendor.bank_change.approve` must approve (and who can't be the proposer).
     Returns the staged request (202). See docs/authentication.md § SoD.
     """
+    await ensure_in_entity_scope(
+        db, Vendor, vendor_id, entity_id, detail="Vendor not found", include_shared=True
+    )
     vendor = (await db.execute(select(Vendor).where(Vendor.id == vendor_id))).scalar_one_or_none()
     if not vendor:
         raise HTTPException(status_code=404, detail="Vendor not found")
@@ -1173,7 +1186,11 @@ async def delete_vendor(
     # (`PERM_VENDOR_MANAGE`); the role set was already exactly admin/ap_manager.
     user: User = Depends(require_permission(PERM_VENDOR_MANAGE)),
     org_id: uuid.UUID = Depends(get_org_id),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
+    await ensure_in_entity_scope(
+        db, Vendor, vendor_id, entity_id, detail="Vendor not found", include_shared=True
+    )
     result = await db.execute(select(Vendor).where(Vendor.id == vendor_id))
     vendor = result.scalar_one_or_none()
     if not vendor:
@@ -1266,12 +1283,16 @@ async def screen_vendor(
     # by all four roles, broader than `vendor.manage`.
     user: User = Depends(require_permission(PERM_VENDOR_MANAGE)),
     org_id: uuid.UUID = Depends(get_org_id),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
     """Manually re-screen one vendor against the configured sanctions provider.
 
     Unlike the create/update screen, a manual re-screen is foreground: a
     provider failure surfaces as a 502 so the operator knows the screen did
     not run (rather than silently appearing 'clear')."""
+    await ensure_in_entity_scope(
+        db, Vendor, vendor_id, entity_id, detail="Vendor not found", include_shared=True
+    )
     result = await db.execute(select(Vendor).where(Vendor.id == vendor_id))
     vendor = result.scalar_one_or_none()
     if not vendor:
@@ -1308,8 +1329,12 @@ async def vendor_screening_history(
     db: AsyncSession = Depends(get_tenant_db),
     user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER, ROLE_AP_CLERK, ROLE_CFO)),
     org_id: uuid.UUID = Depends(get_org_id),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
     """The append-only screening trail for one vendor, newest first (cap 100)."""
+    await ensure_in_entity_scope(
+        db, Vendor, vendor_id, entity_id, detail="Vendor not found", include_shared=True
+    )
     await _get_vendor_or_404(db, vendor_id)
 
     rows = (
@@ -1347,9 +1372,13 @@ async def block_vendor_payments(
     db: AsyncSession = Depends(get_tenant_db),
     user: User = Depends(require_permission(PERM_VENDOR_BLOCK)),
     org_id: uuid.UUID = Depends(get_org_id),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
     """Manually block all payments to a vendor. The block is sticky —
     `check_payment_compliance` refuses every payment until an unblock."""
+    await ensure_in_entity_scope(
+        db, Vendor, vendor_id, entity_id, detail="Vendor not found", include_shared=True
+    )
     vendor = await _get_vendor_or_404(db, vendor_id)
     reason = (body.reason if body else None) or "manually blocked by AP"
 
@@ -1380,8 +1409,12 @@ async def unblock_vendor_payments(
     db: AsyncSession = Depends(get_tenant_db),
     user: User = Depends(require_permission(PERM_VENDOR_BLOCK)),
     org_id: uuid.UUID = Depends(get_org_id),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
     """Lift a payment block. Clears the block flag, reason, and timestamp."""
+    await ensure_in_entity_scope(
+        db, Vendor, vendor_id, entity_id, detail="Vendor not found", include_shared=True
+    )
     vendor = await _get_vendor_or_404(db, vendor_id)
     reason = (body.reason if body else None) or "manually unblocked by AP"
 
@@ -1411,8 +1444,12 @@ async def verify_vendor(
     db: AsyncSession = Depends(get_tenant_db),
     user: User = Depends(require_permission(PERM_VENDOR_MANAGE)),
     org_id: uuid.UUID = Depends(get_org_id),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
     """Verify an unverified vendor — makes them eligible for payment."""
+    await ensure_in_entity_scope(
+        db, Vendor, vendor_id, entity_id, detail="Vendor not found", include_shared=True
+    )
     result = await db.execute(select(Vendor).where(Vendor.id == vendor_id))
     vendor = result.scalar_one_or_none()
     if not vendor:
@@ -1447,8 +1484,12 @@ async def reject_vendor(
     db: AsyncSession = Depends(get_tenant_db),
     user: User = Depends(require_permission(PERM_VENDOR_MANAGE)),
     org_id: uuid.UUID = Depends(get_org_id),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
     """Reject an unverified vendor — marks as invalid/duplicate."""
+    await ensure_in_entity_scope(
+        db, Vendor, vendor_id, entity_id, detail="Vendor not found", include_shared=True
+    )
     result = await db.execute(select(Vendor).where(Vendor.id == vendor_id))
     vendor = result.scalar_one_or_none()
     if not vendor:
@@ -1605,7 +1646,11 @@ async def list_vendor_portal_users(
     vendor_id: uuid.UUID,
     db: AsyncSession = Depends(get_tenant_db),
     user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER, ROLE_CFO)),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
+    await ensure_in_entity_scope(
+        db, Vendor, vendor_id, entity_id, detail="Vendor not found", include_shared=True
+    )
     await _get_vendor_or_404(db, vendor_id)
     rows = (
         (
@@ -1633,6 +1678,7 @@ async def invite_vendor_portal_user(
     db: AsyncSession = Depends(get_tenant_db),
     user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER)),
     org_id: uuid.UUID = Depends(get_org_id),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
     """Create a supplier-portal user for a vendor and email them a temp
     password. Idempotent-ish: second invite for the same email is rejected
@@ -1652,6 +1698,9 @@ async def invite_vendor_portal_user(
     `approve_change_request` reads to refuse a bank-change approval by the same
     person — see that route and `backend/docs/supplier-portal.md`.
     """
+    await ensure_in_entity_scope(
+        db, Vendor, vendor_id, entity_id, detail="Vendor not found", include_shared=True
+    )
     vendor = await _get_vendor_or_404(db, vendor_id)
 
     existing = (
@@ -1753,7 +1802,11 @@ async def delete_vendor_portal_user(
     org_id: uuid.UUID = Depends(get_org_id),
     db: AsyncSession = Depends(get_tenant_db),
     user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER)),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
+    await ensure_in_entity_scope(
+        db, Vendor, vendor_id, entity_id, detail="Vendor not found", include_shared=True
+    )
     result = await db.execute(
         select(VendorUser).where(
             VendorUser.id == vendor_user_id,
@@ -1793,6 +1846,7 @@ async def reset_vendor_portal_user_password(
     org_id: uuid.UUID = Depends(get_org_id),
     db: AsyncSession = Depends(get_tenant_db),
     user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER)),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
     """AP-admin-triggered password reset for a locked-out supplier-portal
     user.
@@ -1818,6 +1872,9 @@ async def reset_vendor_portal_user_password(
     failure rolls the reset back so a working credential is never replaced by
     one nobody received.
     """
+    await ensure_in_entity_scope(
+        db, Vendor, vendor_id, entity_id, detail="Vendor not found", include_shared=True
+    )
     vendor = await _get_vendor_or_404(db, vendor_id)
     result = await db.execute(
         select(VendorUser).where(
@@ -1902,9 +1959,13 @@ async def list_vendor_change_requests(
     # read every staged account number and tax ID in full. Its only caller is
     # the admin | ap_manager review page.
     user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER)),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
     """Change requests for one vendor. Reveals the full proposed value so
     AP can verify the new bank / tax details before approving."""
+    await ensure_in_entity_scope(
+        db, Vendor, vendor_id, entity_id, detail="Vendor not found", include_shared=True
+    )
     rows = (
         (
             await db.execute(
@@ -1920,6 +1981,36 @@ async def list_vendor_change_requests(
     return [VendorChangeRequestResponse.from_db(r, vendor_name=vname, reveal=True) for r in rows]
 
 
+async def _get_scoped_change_request_for_update(
+    db: AsyncSession, request_id: uuid.UUID, entity_id: uuid.UUID | None
+) -> VendorChangeRequest:
+    """Lock one change request whose vendor is visible under ``entity_id``.
+
+    The request carries no entity of its own — it inherits its vendor's — so
+    the scope is applied through the vendor, with the same unstamped-vendor
+    allowance (``include_shared``) every other vendor by-id route here uses.
+    An out-of-scope request is the same 404 as a missing one, so a reviewer
+    scoped to subsidiary B can neither approve nor reject a bank-detail change
+    staged against A's supplier.
+    """
+    req = (
+        await db.execute(
+            apply_entity_scope(
+                select(VendorChangeRequest)
+                .join(Vendor, Vendor.id == VendorChangeRequest.vendor_id)
+                .where(VendorChangeRequest.id == request_id)
+                .with_for_update(of=VendorChangeRequest),
+                Vendor,
+                entity_id,
+                include_shared=True,
+            )
+        )
+    ).scalar_one_or_none()
+    if not req:
+        raise HTTPException(status_code=404, detail="Change request not found")
+    return req
+
+
 @router.post("/change-requests/{request_id}/approve", response_model=VendorChangeRequestResponse)
 async def approve_change_request(
     request_id: uuid.UUID,
@@ -1930,6 +2021,7 @@ async def approve_change_request(
     # the person who can redirect where money goes can't also send it. Defaults
     # to admin/ap_manager (unchanged).
     user: User = Depends(require_permission(PERM_VENDOR_BANK_CHANGE_APPROVE)),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
     """Apply the staged change to the vendor and mark the request approved.
 
@@ -1937,15 +2029,7 @@ async def approve_change_request(
     both apply the change. Re-approving an already-resolved request is a
     409 — the lock + status check makes the apply exactly-once.
     """
-    req = (
-        await db.execute(
-            select(VendorChangeRequest)
-            .where(VendorChangeRequest.id == request_id)
-            .with_for_update()
-        )
-    ).scalar_one_or_none()
-    if not req:
-        raise HTTPException(status_code=404, detail="Change request not found")
+    req = await _get_scoped_change_request_for_update(db, request_id, entity_id)
     if req.status != "pending":
         raise HTTPException(status_code=409, detail="Change request already resolved")
     # Segregation of duties, on BOTH axes an AP actor can be the proposer.
@@ -2097,17 +2181,10 @@ async def reject_change_request(
     # own top-of-file comment (frontend/src/routes/vendors/change-requests/
     # +page.svelte), which documents this exact split.
     user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER)),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
     """Mark the request rejected without ever touching the vendor row."""
-    req = (
-        await db.execute(
-            select(VendorChangeRequest)
-            .where(VendorChangeRequest.id == request_id)
-            .with_for_update()
-        )
-    ).scalar_one_or_none()
-    if not req:
-        raise HTTPException(status_code=404, detail="Change request not found")
+    req = await _get_scoped_change_request_for_update(db, request_id, entity_id)
     if req.status != "pending":
         raise HTTPException(status_code=409, detail="Change request already resolved")
 

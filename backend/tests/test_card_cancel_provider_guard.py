@@ -58,7 +58,7 @@ async def _call_cancel(adapter, card, db):
         patch("app.services.card_adapters.get_card_adapter", return_value=adapter),
         patch("app.services.audit_dispatch.dispatch_audit", new=AsyncMock()),
     ):
-        return await cancel_card(card_id=card.id, db=db, org=_org(), user=_user())
+        return await cancel_card(card_id=card.id, db=db, org=_org(), user=_user(), entity_id=None)
 
 
 @pytest.mark.asyncio

@@ -40,7 +40,12 @@ from app.models.vendor import Vendor
 from app.schemas.sanctions import VendorRiskResponse, VendorRiskSummaryItem
 from app.services.audit_dispatch import dispatch_audit
 from app.services.vendor_risk_scoring import recompute_and_persist
-from app.tenant import get_tenant, get_tenant_db
+from app.tenant import (
+    ensure_in_entity_scope,
+    get_entity_id,
+    get_tenant,
+    get_tenant_db,
+)
 
 router = APIRouter(prefix="/vendors", tags=["vendor-risk"])
 
@@ -80,9 +85,13 @@ async def get_vendor_risk(
     vendor_id: uuid.UUID,
     db: AsyncSession = Depends(get_tenant_db),
     user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER, ROLE_AP_CLERK, ROLE_CFO)),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
     """Return the vendor's persisted composite risk (reads denormalised
     columns; recompute is a separate POST)."""
+    await ensure_in_entity_scope(
+        db, Vendor, vendor_id, entity_id, detail="Vendor not found", include_shared=True
+    )
     vendor = (await db.execute(select(Vendor).where(Vendor.id == vendor_id))).scalar_one_or_none()
     if not vendor:
         raise HTTPException(status_code=404, detail="Vendor not found")
@@ -96,6 +105,7 @@ async def recompute_vendor_risk(
     org_id: uuid.UUID = Depends(get_org_id),
     org: Organization = Depends(get_tenant),
     user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER)),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
     """Recompute the vendor's composite risk from current signals
     (latest sanctions check + open fraud flags + payment history) and
@@ -106,6 +116,9 @@ async def recompute_vendor_risk(
     it against a threshold denominated in it, so without the settings the
     scorer would fall back to the platform default and judge a EUR book against
     a USD ramp."""
+    await ensure_in_entity_scope(
+        db, Vendor, vendor_id, entity_id, detail="Vendor not found", include_shared=True
+    )
     vendor = (await db.execute(select(Vendor).where(Vendor.id == vendor_id))).scalar_one_or_none()
     if not vendor:
         raise HTTPException(status_code=404, detail="Vendor not found")

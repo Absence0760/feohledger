@@ -36,6 +36,7 @@ from app.services.audit_dispatch import dispatch_audit
 from app.services.workflow_engine import DEFAULT_STEPS_CONFIG
 from app.tenant import (
     apply_entity_scope,
+    ensure_in_entity_scope,
     get_entity_id,
     get_tenant_db,
     get_write_entity_id,
@@ -486,7 +487,16 @@ async def get_workflow(
     db: AsyncSession = Depends(get_tenant_db),
     user: User = Depends(get_current_user),
     org_id: uuid.UUID = Depends(get_org_id),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
+    await ensure_in_entity_scope(
+        db,
+        WorkflowDefinition,
+        workflow_id,
+        entity_id,
+        detail="Workflow not found",
+        include_shared=True,
+    )
     result = await db.execute(
         select(WorkflowDefinition).where(
             WorkflowDefinition.id == workflow_id,
@@ -506,7 +516,16 @@ async def update_workflow(
     db: AsyncSession = Depends(get_tenant_db),
     user: User = Depends(require_roles(ROLE_ADMIN)),
     org_id: uuid.UUID = Depends(get_org_id),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
+    await ensure_in_entity_scope(
+        db,
+        WorkflowDefinition,
+        workflow_id,
+        entity_id,
+        detail="Workflow not found",
+        include_shared=True,
+    )
     result = await db.execute(
         select(WorkflowDefinition).where(
             WorkflowDefinition.id == workflow_id,
@@ -612,7 +631,16 @@ async def list_versions(
     db: AsyncSession = Depends(get_tenant_db),
     user: User = Depends(get_current_user),
     org_id: uuid.UUID = Depends(get_org_id),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
+    await ensure_in_entity_scope(
+        db,
+        WorkflowDefinition,
+        workflow_id,
+        entity_id,
+        detail="Workflow not found",
+        include_shared=True,
+    )
     await _get_workflow_or_404(db, workflow_id, org_id)
     result = await db.execute(
         select(WorkflowVersion)
@@ -634,8 +662,17 @@ async def create_version(
     db: AsyncSession = Depends(get_tenant_db),
     user: User = Depends(require_roles(ROLE_ADMIN)),
     org_id: uuid.UUID = Depends(get_org_id),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
     """Manually snapshot the current steps_config as a named version."""
+    await ensure_in_entity_scope(
+        db,
+        WorkflowDefinition,
+        workflow_id,
+        entity_id,
+        detail="Workflow not found",
+        include_shared=True,
+    )
     defn = await _get_workflow_or_404(db, workflow_id, org_id)
     version = await _snapshot_version(
         db, defn=defn, org_id=org_id, actor_id=user.id, note=body.note
@@ -662,12 +699,21 @@ async def restore_version(
     db: AsyncSession = Depends(get_tenant_db),
     user: User = Depends(require_roles(ROLE_ADMIN)),
     org_id: uuid.UUID = Depends(get_org_id),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
     """Restore a definition's steps from a prior version.
 
     The current state is first snapshotted as a new version (so a restore is
     itself undoable), then the chosen version's steps are applied.
     """
+    await ensure_in_entity_scope(
+        db,
+        WorkflowDefinition,
+        workflow_id,
+        entity_id,
+        detail="Workflow not found",
+        include_shared=True,
+    )
     defn = await _get_workflow_or_404(db, workflow_id, org_id)
     version = (
         await db.execute(
@@ -713,12 +759,21 @@ async def diff_versions(
     db: AsyncSession = Depends(get_tenant_db),
     user: User = Depends(get_current_user),
     org_id: uuid.UUID = Depends(get_org_id),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
     """Diff two versions (or a version against the current live steps_config).
 
     ``from`` / ``to`` are version row ids; ``to=current`` (default) compares
     against the definition's live steps_config.
     """
+    await ensure_in_entity_scope(
+        db,
+        WorkflowDefinition,
+        workflow_id,
+        entity_id,
+        detail="Workflow not found",
+        include_shared=True,
+    )
     defn = await _get_workflow_or_404(db, workflow_id, org_id)
 
     async def _resolve(token: str) -> tuple[dict, int | str]:
@@ -761,8 +816,17 @@ async def simulate_workflow(
     db: AsyncSession = Depends(get_tenant_db),
     user: User = Depends(get_current_user),
     org_id: uuid.UUID = Depends(get_org_id),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
     """Dry-run the workflow against a sample or real invoice (no side effects)."""
+    await ensure_in_entity_scope(
+        db,
+        WorkflowDefinition,
+        workflow_id,
+        entity_id,
+        detail="Workflow not found",
+        include_shared=True,
+    )
     from app.models.invoice import Invoice
     from app.services.workflow_builder import build_invoice_context
     from app.services.workflow_simulation import simulate
@@ -800,8 +864,17 @@ async def export_workflow(
     db: AsyncSession = Depends(get_tenant_db),
     user: User = Depends(get_current_user),
     org_id: uuid.UUID = Depends(get_org_id),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
     """Export a definition as a portable JSON document (safe to download)."""
+    await ensure_in_entity_scope(
+        db,
+        WorkflowDefinition,
+        workflow_id,
+        entity_id,
+        detail="Workflow not found",
+        include_shared=True,
+    )
     defn = await _get_workflow_or_404(db, workflow_id, org_id)
     return WorkflowExport(
         schema_version=1,
@@ -861,7 +934,16 @@ async def delete_workflow(
     db: AsyncSession = Depends(get_tenant_db),
     user: User = Depends(require_roles(ROLE_ADMIN)),
     org_id: uuid.UUID = Depends(get_org_id),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
+    await ensure_in_entity_scope(
+        db,
+        WorkflowDefinition,
+        workflow_id,
+        entity_id,
+        detail="Workflow not found",
+        include_shared=True,
+    )
     result = await db.execute(
         select(WorkflowDefinition).where(
             WorkflowDefinition.id == workflow_id,

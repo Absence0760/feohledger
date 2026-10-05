@@ -9353,3 +9353,30 @@ The same perf pass (no separate entry needed, recorded here for the trail):
 Guards: `test_list_endpoint_query_counts.py`, which also holds the payments,
 queue, runs, exceptions and credit-memo lists to a statement count that does
 not grow with the page.
+
+## 222. Every by-id route on an entity-scoped table resolves within the selected entity, and an out-of-scope id is a missing one
+
+Phase 2 scoped the lists; the by-id routes kept resolving on the primary key, so
+the entity selector stopped at the list page. Closing it router by router left a
+long tail (procurement, invoices, vendors, contracts, expenses, workflows,
+experiments, cards, inspections, suggestions, exception-agent resolve), so the
+rule is now stated once: with an entity selected, a row outside it is a 404
+byte-identical to an unknown id's, and the consolidated view reaches everything.
+Where a router owns a loader, the loader takes `entity_id`; where the row is
+loaded inside a service or a helper non-request code shares, the handler calls
+`app.tenant.ensure_in_entity_scope` first. Visibility by id matches the list's:
+strict for most tables, ∪ NULL for vendors (unstamped, `vendor_matching`'s
+reason) and workflow definitions (org-wide).
+
+**Rejected:** a 403 for an out-of-scope row — it confirms the id exists in a
+sibling subsidiary, the enumeration the opaque 404 exists to prevent. Threading
+`entity_id` into `get_invoice_for_update` and every `review.*` service — the
+services are also called by sweeps, the agent coordinator and webhooks that have
+no selected entity, and a defaulted parameter is one forgotten argument away
+from silently unscoped; one guard at the request boundary is where the header
+lives. A FastAPI dependency per model — it would run in signature order, so a
+role-refused caller could learn the row's scope before `require_roles` refused
+them. Saved cash plans stay unscoped (their deterministic `plan_id` already encodes the scope they were built under), and
+the S3 file-key proxies stay org-prefix-gated pending the follow-up that maps a
+key back to its row. Detail: `docs/multi-entity.md` § By-id routes resolve
+within the selected entity.

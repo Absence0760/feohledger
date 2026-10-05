@@ -109,6 +109,7 @@ from app.services.workflow_engine import (
 )
 from app.tenant import (
     apply_entity_scope,
+    ensure_in_entity_scope,
     get_entity_id,
     get_tenant,
     get_tenant_db,
@@ -533,7 +534,9 @@ async def get_invoice(
     invoice_id: uuid.UUID,
     db: AsyncSession = Depends(get_tenant_db),
     user: User = Depends(get_current_user),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
+    await ensure_in_entity_scope(db, Invoice, invoice_id, entity_id, detail="Invoice not found")
     # selectinload extraction_results so InvoiceResponse.from_db ->
     # _priors_summary can read the relationship without triggering an
     # async-illegal lazy load. list_invoices already does this.
@@ -553,6 +556,7 @@ async def get_invoice_priors(
     invoice_id: uuid.UUID,
     db: AsyncSession = Depends(get_tenant_db),
     user: User = Depends(get_current_user),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
     """Return priors metadata from the most recent extraction.
 
@@ -568,6 +572,7 @@ async def get_invoice_priors(
     Used by the invoice detail UI to show the reviewer which past corrections
     shaped the AI's output. Returns empty arrays when RAG/cache didn't fire.
     """
+    await ensure_in_entity_scope(db, Invoice, invoice_id, entity_id, detail="Invoice not found")
     result = await db.execute(
         select(InvoiceExtractionResult)
         .where(InvoiceExtractionResult.invoice_id == invoice_id)
@@ -605,6 +610,7 @@ async def get_invoice_summary(
     control_db: AsyncSession = Depends(get_control_db),
     org: Organization = Depends(get_tenant),
     user: User = Depends(require_roles(*ALL_ROLES)),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
     """One-paragraph natural-language summary of the invoice's audit timeline.
 
@@ -614,6 +620,7 @@ async def get_invoice_summary(
     write the cache, but the write is fingerprint-idempotent and moves no money,
     so no idempotency key is required.
     """
+    await ensure_in_entity_scope(db, Invoice, invoice_id, entity_id, detail="Invoice not found")
     invoice = await _load_invoice_for_summary(db, invoice_id)
     return await audit_summary.get_or_build_summary(
         db, control_db, invoice, org_settings=org.settings
@@ -627,9 +634,11 @@ async def regenerate_invoice_summary(
     control_db: AsyncSession = Depends(get_control_db),
     org: Organization = Depends(get_tenant),
     user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER)),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
     """Force-regenerate the audit summary, ignoring the cached fingerprint.
     Manager/admin only — backs the optional "Regenerate" button in the modal."""
+    await ensure_in_entity_scope(db, Invoice, invoice_id, entity_id, detail="Invoice not found")
     invoice = await _load_invoice_for_summary(db, invoice_id)
     return await audit_summary.get_or_build_summary(
         db, control_db, invoice, org_settings=org.settings, force=True
@@ -669,6 +678,7 @@ async def export_einvoice(
     db: AsyncSession = Depends(get_tenant_db),
     org: Organization = Depends(get_tenant),
     user: User = Depends(require_roles(*ALL_ROLES)),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
     """Generate a standards-compliant e-invoice for an invoice.
 
@@ -684,6 +694,7 @@ async def export_einvoice(
     pre-clearance documents; live government clearance (SdI / SAT-PAC / SEFAZ /
     DIAN) is a tracked follow-up — see `docs/e-invoicing.md`.
     """
+    await ensure_in_entity_scope(db, Invoice, invoice_id, entity_id, detail="Invoice not found")
     from app.models.entity import Entity
     from app.services.e_invoice import (
         EInvoiceValidationError,
@@ -787,6 +798,7 @@ async def peppol_send(
     db: AsyncSession = Depends(get_tenant_db),
     org: Organization = Depends(get_tenant),
     user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER, ROLE_CFO)),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
     """Transmit an invoice over the PEPPOL network via the configured Access Point.
 
@@ -799,6 +811,7 @@ async def peppol_send(
     422 on a tax-invalid invoice or an unregistered receiver; 400 on a malformed
     participant id; 404 if the invoice is missing. PII-free error bodies.
     """
+    await ensure_in_entity_scope(db, Invoice, invoice_id, entity_id, detail="Invoice not found")
     from app.models.entity import Entity
     from app.services.e_invoice import EInvoiceValidationError
     from app.services.peppol_adapters import ParticipantId, PeppolSendError
@@ -981,7 +994,9 @@ async def get_invoice_line_items(
     invoice_id: uuid.UUID,
     db: AsyncSession = Depends(get_tenant_db),
     user: User = Depends(get_current_user),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
+    await ensure_in_entity_scope(db, Invoice, invoice_id, entity_id, detail="Invoice not found")
     from app.models.invoice import InvoiceLineItem
 
     result = await db.execute(
@@ -1077,6 +1092,7 @@ async def save_invoice_line_items(
     db: AsyncSession = Depends(get_tenant_db),
     org: Organization = Depends(get_tenant),
     user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER, ROLE_CFO)),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
     """Replace all line items for an invoice.
 
@@ -1094,6 +1110,7 @@ async def save_invoice_line_items(
     before the invoice can be approved and paid. The response reports the
     outcome so the editor sees it immediately.
     """
+    await ensure_in_entity_scope(db, Invoice, invoice_id, entity_id, detail="Invoice not found")
     from app.models.invoice import InvoiceLineItem
 
     # Row-lock the invoice: the delete-and-reinsert below is not atomic on its
@@ -1346,6 +1363,7 @@ async def attach_invoice_file(
     org: Organization = Depends(get_tenant),
     user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER, ROLE_CFO)),
     org_id: uuid.UUID = Depends(get_org_id),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
     """Attach a source file to a manually-entered invoice that has none yet.
 
@@ -1357,6 +1375,7 @@ async def attach_invoice_file(
     role/status gating still to be decided (see docs/roadmap.md § Invoice PDF
     Management).
     """
+    await ensure_in_entity_scope(db, Invoice, invoice_id, entity_id, detail="Invoice not found")
     invoice = await _load_invoice_or_404(db, invoice_id)
     if invoice.file_key:
         raise HTTPException(status_code=409, detail="Invoice already has a file attached.")
@@ -1396,6 +1415,7 @@ async def replace_invoice_file(
     org: Organization = Depends(get_tenant),
     user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER, ROLE_CFO)),
     org_id: uuid.UUID = Depends(get_org_id),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
     """Replace an invoice's existing file — the companion to `attach_invoice_file`.
 
@@ -1405,6 +1425,7 @@ async def replace_invoice_file(
     upload. Refused once the invoice is `done` (terminal, financially frozen)
     to match the rest of the file-mutation gating in this file.
     """
+    await ensure_in_entity_scope(db, Invoice, invoice_id, entity_id, detail="Invoice not found")
     invoice = await _load_invoice_or_404(db, invoice_id)
     if not invoice.file_key:
         raise HTTPException(status_code=404, detail="No file to replace. Use upload to attach one.")
@@ -1461,8 +1482,10 @@ async def delete_invoice_file(
     db: AsyncSession = Depends(get_tenant_db),
     org: Organization = Depends(get_tenant),
     user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER, ROLE_CFO)),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
     """Delete an invoice's file without replacing it."""
+    await ensure_in_entity_scope(db, Invoice, invoice_id, entity_id, detail="Invoice not found")
     invoice = await _load_invoice_or_404(db, invoice_id)
     if not invoice.file_key:
         raise HTTPException(status_code=404, detail="No file to delete.")
@@ -1505,7 +1528,9 @@ async def update_invoice(
     db: AsyncSession = Depends(get_tenant_db),
     org: Organization = Depends(get_tenant),
     user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER, ROLE_CFO)),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
+    await ensure_in_entity_scope(db, Invoice, invoice_id, entity_id, detail="Invoice not found")
     # Row-locked read (same pattern as every status transition —
     # `get_invoice_for_update` — and needed here for the same reason: without
     # the lock, two concurrent PATCHes can both read the pre-edit row, both
@@ -1655,6 +1680,7 @@ async def link_contract(
     db: AsyncSession = Depends(get_tenant_db),
     org: Organization = Depends(get_tenant),
     user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER, ROLE_CFO)),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
     """Attribute this invoice's spend to a contract.
 
@@ -1662,6 +1688,7 @@ async def link_contract(
     invoice is exactly when you want it). Re-running ``refresh_warnings``
     recomputes the contract-compliance flags for the new link.
     """
+    await ensure_in_entity_scope(db, Invoice, invoice_id, entity_id, detail="Invoice not found")
     result = await db.execute(
         select(Invoice)
         .options(selectinload(Invoice.extraction_results))
@@ -1707,7 +1734,9 @@ async def unlink_contract(
     db: AsyncSession = Depends(get_tenant_db),
     org: Organization = Depends(get_tenant),
     user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER, ROLE_CFO)),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
+    await ensure_in_entity_scope(db, Invoice, invoice_id, entity_id, detail="Invoice not found")
     result = await db.execute(
         select(Invoice)
         .options(selectinload(Invoice.extraction_results))
@@ -1740,6 +1769,7 @@ async def route_intercompany(
     body: RouteIntercompanyRequest,
     db: AsyncSession = Depends(get_tenant_db),
     user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER)),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
     """Generate the mirror payable for an inter-company charge (multi-entity).
 
@@ -1758,6 +1788,7 @@ async def route_intercompany(
 
     Returns the mirror invoice.
     """
+    await ensure_in_entity_scope(db, Invoice, invoice_id, entity_id, detail="Invoice not found")
     from app.services.intercompany import route_intercompany_invoice
 
     # Row-lock the origin BEFORE the dedupe check. Without the lock two
@@ -1978,7 +2009,9 @@ async def get_invoice_chat(
     db: AsyncSession = Depends(get_tenant_db),
     org: Organization = Depends(get_tenant),
     user: User = Depends(get_current_user),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
+    await ensure_in_entity_scope(db, Invoice, invoice_id, entity_id, detail="Invoice not found")
     invoice = await _load_invoice_or_404(db, invoice_id)
     # Feature off → empty thread (never lazy-create on a read either way).
     if not chat_enabled(org):
@@ -2095,7 +2128,9 @@ async def post_invoice_chat(
     control_db: AsyncSession = Depends(get_control_db),
     org: Organization = Depends(get_tenant),
     user: User = Depends(get_current_user),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
+    await ensure_in_entity_scope(db, Invoice, invoice_id, entity_id, detail="Invoice not found")
     if not chat_enabled(org):
         raise HTTPException(status_code=403, detail="Supplier chat is disabled")
     invoice = await _load_invoice_or_404(db, invoice_id)
@@ -2127,7 +2162,9 @@ async def post_invoice_chat_attachment(
     control_db: AsyncSession = Depends(get_control_db),
     org: Organization = Depends(get_tenant),
     user: User = Depends(get_current_user),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
+    await ensure_in_entity_scope(db, Invoice, invoice_id, entity_id, detail="Invoice not found")
     if not chat_enabled(org):
         raise HTTPException(status_code=403, detail="Supplier chat is disabled")
     invoice = await _load_invoice_or_404(db, invoice_id)
@@ -2166,7 +2203,9 @@ async def resolve_invoice_chat(
     db: AsyncSession = Depends(get_tenant_db),
     org: Organization = Depends(get_tenant),
     user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER, ROLE_CFO)),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
+    await ensure_in_entity_scope(db, Invoice, invoice_id, entity_id, detail="Invoice not found")
     invoice = await _load_invoice_or_404(db, invoice_id)
     thread = await get_thread(db, invoice.id)
     if thread is None:
@@ -2194,7 +2233,9 @@ async def reopen_invoice_chat(
     db: AsyncSession = Depends(get_tenant_db),
     org: Organization = Depends(get_tenant),
     user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER, ROLE_CFO)),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
+    await ensure_in_entity_scope(db, Invoice, invoice_id, entity_id, detail="Invoice not found")
     invoice = await _load_invoice_or_404(db, invoice_id)
     thread = await get_thread(db, invoice.id)
     if thread is None:
@@ -2221,7 +2262,9 @@ async def delete_invoice(
     invoice_id: uuid.UUID,
     db: AsyncSession = Depends(get_tenant_db),
     user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER, ROLE_CFO)),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
+    await ensure_in_entity_scope(db, Invoice, invoice_id, entity_id, detail="Invoice not found")
     result = await db.execute(select(Invoice).where(Invoice.id == invoice_id))
     invoice = result.scalar_one_or_none()
     if not invoice:
