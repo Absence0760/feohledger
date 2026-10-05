@@ -92,6 +92,7 @@ from app.services.fx_adapters import UnknownFxProviderError, get_fx_adapter
 from app.services.storage import get_file, upload_expense_receipt
 from app.tenant import (
     apply_entity_scope,
+    ensure_in_entity_scope,
     get_entity_id,
     get_tenant,
     get_tenant_db,
@@ -713,7 +714,9 @@ async def upload_receipt(
     user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER, ROLE_AP_CLERK)),
     org_id: uuid.UUID = Depends(get_org_id),
     org: Organization = Depends(get_tenant),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
+    await ensure_in_entity_scope(db, Expense, expense_id, entity_id, detail="Expense not found")
     expense = await _get_expense_or_404(db, expense_id)
     try:
         file_key, _file_url = await upload_expense_receipt(org_id, expense.id, file)
@@ -967,7 +970,9 @@ async def get_expense(
     expense_id: uuid.UUID,
     db: AsyncSession = Depends(get_tenant_db),
     user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER, ROLE_AP_CLERK, ROLE_CFO)),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
+    await ensure_in_entity_scope(db, Expense, expense_id, entity_id, detail="Expense not found")
     return _to_response(await _get_expense_or_404(db, expense_id))
 
 
@@ -979,7 +984,9 @@ async def update_expense(
     user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER, ROLE_AP_CLERK)),
     org_id: uuid.UUID = Depends(get_org_id),
     org: Organization = Depends(get_tenant),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
+    await ensure_in_entity_scope(db, Expense, expense_id, entity_id, detail="Expense not found")
     expense = await _get_expense_or_404(db, expense_id)
     payload = body.model_dump(exclude_unset=True)
 
@@ -1080,7 +1087,9 @@ async def delete_expense(
     db: AsyncSession = Depends(get_tenant_db),
     user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER, ROLE_AP_CLERK)),
     org_id: uuid.UUID = Depends(get_org_id),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
+    await ensure_in_entity_scope(db, Expense, expense_id, entity_id, detail="Expense not found")
     expense = await _get_expense_or_404(db, expense_id)
     owning_report = expense.report_id
     # Deleting an expense off a locked report would silently shrink its total
@@ -1216,7 +1225,11 @@ async def get_report(
     report_id: uuid.UUID,
     db: AsyncSession = Depends(get_tenant_db),
     user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER, ROLE_AP_CLERK, ROLE_CFO)),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
+    await ensure_in_entity_scope(
+        db, ExpenseReport, report_id, entity_id, detail="Expense report not found"
+    )
     return _report_to_response(await _get_report_or_404(db, report_id))
 
 
@@ -1225,6 +1238,7 @@ async def report_summary(
     report_id: uuid.UUID,
     db: AsyncSession = Depends(get_tenant_db),
     user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER, ROLE_AP_CLERK, ROLE_CFO)),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
     """Aggregate the report's attached expenses: grand total + count plus
     per-category, per-status and per-CURRENCY rollups.
@@ -1237,6 +1251,9 @@ async def report_summary(
     conversion" instead of showing a number that quietly mixes dollars and
     euros. All arithmetic is ``Decimal``: the ``total`` fields stay ``Decimal``
     to the JSON boundary and the ``*_exact`` fields carry decimal strings."""
+    await ensure_in_entity_scope(
+        db, ExpenseReport, report_id, entity_id, detail="Expense report not found"
+    )
     report = await _get_report_or_404(db, report_id)
     rows = (
         await db.execute(
@@ -1319,7 +1336,11 @@ async def update_report(
     user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER, ROLE_AP_CLERK)),
     org_id: uuid.UUID = Depends(get_org_id),
     org: Organization = Depends(get_tenant),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
+    await ensure_in_entity_scope(
+        db, ExpenseReport, report_id, entity_id, detail="Expense report not found"
+    )
     report = await _get_report_or_404(db, report_id)
     # Report-level fields (currency in particular) reinterpret a locked total —
     # only editable while the report isn't locked in for approval (issue #155).
@@ -1365,6 +1386,7 @@ async def attach_expenses(
     user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER, ROLE_AP_CLERK)),
     org_id: uuid.UUID = Depends(get_org_id),
     org: Organization = Depends(get_tenant),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
     """Attach (or detach) expenses on a report and recompute its total.
 
@@ -1377,6 +1399,9 @@ async def attach_expenses(
     the row here, so the report's total is a real figure in the report's
     currency instead of a nonsense cross-currency sum (issue #157). A line we
     cannot convert is refused (422) rather than attached at face value."""
+    await ensure_in_entity_scope(
+        db, ExpenseReport, report_id, entity_id, detail="Expense report not found"
+    )
     report = await _get_report_or_404(db, report_id)
     # The target report's composition can only change while it's a draft.
     _require_draft_report(report)
@@ -1460,6 +1485,7 @@ async def submit_report(
     user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER, ROLE_AP_CLERK)),
     org_id: uuid.UUID = Depends(get_org_id),
     org: Organization = Depends(get_tenant),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
     """Submit a draft report for approval: ``draft → submitted``.
 
@@ -1474,6 +1500,9 @@ async def submit_report(
     report's currency (a legacy row predating the locked-FX columns), and the
     total is then locked into the ORG REPORTING currency so the CFO gate at
     approval time compares a figure fixed at submission."""
+    await ensure_in_entity_scope(
+        db, ExpenseReport, report_id, entity_id, detail="Expense report not found"
+    )
     report = await _get_report_or_404(db, report_id)
     if report.status != ExpenseReportStatus.draft:
         raise HTTPException(
@@ -1599,6 +1628,7 @@ async def approve_report(
     user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER, ROLE_CFO)),
     org_id: uuid.UUID = Depends(get_org_id),
     org: Organization = Depends(get_tenant),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
     """Approve a submitted report: ``submitted → approved``.
 
@@ -1608,6 +1638,9 @@ async def approve_report(
     (default ``5000``), only ``cfo`` / ``admin`` may approve. On success the
     report is stamped ``approved_at`` / ``approved_by`` and every child expense
     moves to ``approved``."""
+    await ensure_in_entity_scope(
+        db, ExpenseReport, report_id, entity_id, detail="Expense report not found"
+    )
     report = await _get_report_or_404(db, report_id)
     if report.status != ExpenseReportStatus.submitted:
         raise HTTPException(
@@ -1699,11 +1732,15 @@ async def reject_report(
     db: AsyncSession = Depends(get_tenant_db),
     user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER)),
     org_id: uuid.UUID = Depends(get_org_id),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
     """Reject a submitted report: ``submitted → rejected``.
 
     The child expenses are returned to ``draft`` so they can be corrected and
     re-reported. ``rejected`` is terminal for this report row."""
+    await ensure_in_entity_scope(
+        db, ExpenseReport, report_id, entity_id, detail="Expense report not found"
+    )
     report = await _get_report_or_404(db, report_id)
     if report.status != ExpenseReportStatus.submitted:
         raise HTTPException(

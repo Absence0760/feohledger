@@ -338,3 +338,43 @@ def apply_entity_scope(
     if include_shared:
         return query.where(or_(col == entity_id, col.is_(None)))
     return query.where(col == entity_id)
+
+
+async def ensure_in_entity_scope(
+    db: AsyncSession,
+    model: type,
+    row_id: uuid.UUID,
+    entity_id: uuid.UUID | None,
+    *,
+    detail: str,
+    include_shared: bool = False,
+) -> None:
+    """404 with ``detail`` unless row ``row_id`` of ``model`` is visible under
+    ``entity_id``; a no-op (no query) in the consolidated view.
+
+    The by-id counterpart of :func:`apply_entity_scope`, for routes whose row
+    is loaded somewhere the caller's ``X-Entity-ID`` can't reach — inside a
+    service (``review.approve_invoice``, ``get_invoice_for_update``) or a
+    helper shared with non-request callers. Call it at the top of the handler,
+    after auth, before anything reads or writes the row.
+
+    ``detail`` MUST be the route's own missing-row message: an out-of-scope id
+    has to be byte-identical to a nonexistent one, or the response becomes an
+    oracle that enumerates a sibling subsidiary's ids (the
+    ``api/purchase_orders._get_scoped_po`` rule). Where a router already owns
+    a scoped loader, scope that loader instead — this is for the rest.
+    """
+    if entity_id is None:
+        return
+    found = (
+        await db.execute(
+            apply_entity_scope(
+                select(model.id).where(model.id == row_id),
+                model,
+                entity_id,
+                include_shared=include_shared,
+            )
+        )
+    ).scalar_one_or_none()
+    if found is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=detail)

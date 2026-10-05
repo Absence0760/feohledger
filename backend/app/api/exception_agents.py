@@ -18,7 +18,13 @@ from app.schemas.exception_agent import (
     AgentStatsResponse,
 )
 from app.services.exception_agents import ExceptionNotActionable, run_agent
-from app.tenant import apply_entity_scope, get_entity_id, get_tenant, get_tenant_db
+from app.tenant import (
+    apply_entity_scope,
+    ensure_in_entity_scope,
+    get_entity_id,
+    get_tenant,
+    get_tenant_db,
+)
 
 router = APIRouter(prefix="/exceptions", tags=["exception-agents"])
 
@@ -98,7 +104,11 @@ async def agent_resolve(
     db: AsyncSession = Depends(get_tenant_db),
     org: Organization = Depends(get_tenant),  # for .settings (autonomy_level)
     user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER)),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
+    await ensure_in_entity_scope(
+        db, APException, exception_id, entity_id, detail="Exception not found"
+    )
     exc = (
         await db.execute(select(APException).where(APException.id == exception_id))
     ).scalar_one_or_none()

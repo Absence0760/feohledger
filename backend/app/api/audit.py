@@ -50,7 +50,7 @@ from app.services.audit_dispatch import dispatch_audit
 from app.services.audit_report_pdf import AuditReportContext, render_audit_report_pdf
 from app.services.branding import get_brand_context
 from app.services.report_export import safe_csv_writer
-from app.tenant import get_tenant_db
+from app.tenant import ensure_in_entity_scope, get_entity_id, get_tenant_db
 from app.utils.dates import utc_today
 
 router = APIRouter(prefix="/audit", tags=["audit"])
@@ -657,6 +657,7 @@ async def get_invoice_audit_trail(
     db: AsyncSession = Depends(get_tenant_db),
     control_db: AsyncSession = Depends(get_control_db),
     user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER, ROLE_CFO)),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
     """Auditor-facing per-invoice trail (alias of the operational endpoint).
 
@@ -664,6 +665,7 @@ async def get_invoice_audit_trail(
     in its own ``/api/audit`` namespace with the auditor RBAC set. Ordered by
     ``created_at`` so the timeline is chronological. The view is itself audited.
     """
+    await ensure_in_entity_scope(db, Invoice, invoice_id, entity_id, detail="Invoice not found")
     correlation_id = (
         await db.execute(select(Invoice.correlation_id).where(Invoice.id == invoice_id))
     ).scalar_one_or_none()
@@ -703,6 +705,7 @@ async def verify_invoice_signatures(
     db: AsyncSession = Depends(get_tenant_db),
     control_db: AsyncSession = Depends(get_control_db),
     user: User = Depends(require_roles(ROLE_ADMIN, ROLE_CFO)),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
     """Cryptographic non-repudiation check on an invoice's approval signatures.
 
@@ -717,6 +720,7 @@ async def verify_invoice_signatures(
     Admin/CFO only (the auditor privilege). This is a sensitive read, so it
     writes its own ``audit.viewed`` access row.
     """
+    await ensure_in_entity_scope(db, Invoice, invoice_id, entity_id, detail="Invoice not found")
     invoice = (
         await db.execute(select(Invoice).where(Invoice.id == invoice_id))
     ).scalar_one_or_none()

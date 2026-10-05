@@ -46,7 +46,13 @@ from app.services.workflow_engine import (
     is_step_enabled,
     transition_invoice,
 )
-from app.tenant import get_tenant, get_tenant_db, get_write_entity_id
+from app.tenant import (
+    ensure_in_entity_scope,
+    get_entity_id,
+    get_tenant,
+    get_tenant_db,
+    get_write_entity_id,
+)
 from app.utils.dates import utc_today
 
 router = APIRouter(prefix="/invoices", tags=["workflow"])
@@ -161,11 +167,13 @@ async def trigger_extraction(
     db: AsyncSession = Depends(get_tenant_db),
     user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER, ROLE_CFO)),
     org_id: uuid.UUID = Depends(get_org_id),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
     """Manually trigger or re-trigger extraction on an invoice.
 
     Works on invoices in 'new' or 'failed' status that have a file attached.
     """
+    await ensure_in_entity_scope(db, Invoice, invoice_id, entity_id, detail="Invoice not found")
     invoice = await get_invoice_for_update(db, invoice_id)
 
     if invoice.status not in (InvoiceStatus.new, InvoiceStatus.failed):
@@ -211,8 +219,10 @@ async def reset_extraction(
     db: AsyncSession = Depends(get_tenant_db),
     user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER, ROLE_CFO)),
     org_id: uuid.UUID = Depends(get_org_id),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
     """Reset a stuck extraction — moves invoice from 'pending' back to 'new'."""
+    await ensure_in_entity_scope(db, Invoice, invoice_id, entity_id, detail="Invoice not found")
     invoice = await get_invoice_for_update(db, invoice_id)
 
     if invoice.status != InvoiceStatus.pending:
@@ -249,7 +259,9 @@ async def assign_reviewer(
     db: AsyncSession = Depends(get_tenant_db),
     control_db: AsyncSession = Depends(get_control_db),
     user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER)),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
+    await ensure_in_entity_scope(db, Invoice, invoice_id, entity_id, detail="Invoice not found")
     invoice = await get_invoice_for_update(db, invoice_id)
     if invoice.status != InvoiceStatus.ready_for_review:
         raise HTTPException(
@@ -309,7 +321,9 @@ async def approve_invoice(
     db: AsyncSession = Depends(get_tenant_db),
     org: Organization = Depends(get_tenant),
     user: User = Depends(require_permission(PERM_INVOICE_APPROVE)),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
+    await ensure_in_entity_scope(db, Invoice, invoice_id, entity_id, detail="Invoice not found")
     invoice = await get_invoice_for_update(db, invoice_id)
     corrections = body.model_dump(exclude_unset=True) if body else None
 
@@ -342,7 +356,9 @@ async def reject_invoice(
     body: RejectRequest,
     db: AsyncSession = Depends(get_tenant_db),
     user: User = Depends(require_permission(PERM_INVOICE_APPROVE)),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
+    await ensure_in_entity_scope(db, Invoice, invoice_id, entity_id, detail="Invoice not found")
     invoice = await get_invoice_for_update(db, invoice_id)
 
     await review_svc.reject_invoice(
@@ -360,7 +376,9 @@ async def resubmit_invoice(
     invoice_id: uuid.UUID,
     db: AsyncSession = Depends(get_tenant_db),
     user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER, ROLE_CFO)),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
+    await ensure_in_entity_scope(db, Invoice, invoice_id, entity_id, detail="Invoice not found")
     invoice = await get_invoice_for_update(db, invoice_id)
 
     await review_svc.resubmit_invoice(
@@ -380,7 +398,9 @@ async def send_to_erp(
     db: AsyncSession = Depends(get_tenant_db),
     user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER, ROLE_CFO)),
     org_id: uuid.UUID = Depends(get_org_id),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
+    await ensure_in_entity_scope(db, Invoice, invoice_id, entity_id, detail="Invoice not found")
     invoice = await get_invoice_for_update(db, invoice_id)
 
     # Transition to sending_to_erp before dispatching
@@ -409,7 +429,9 @@ async def retry_erp(
     db: AsyncSession = Depends(get_tenant_db),
     user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER, ROLE_CFO)),
     org_id: uuid.UUID = Depends(get_org_id),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
+    await ensure_in_entity_scope(db, Invoice, invoice_id, entity_id, detail="Invoice not found")
     invoice = await get_invoice_for_update(db, invoice_id)
 
     await erp_svc.retry_erp(db, invoice, actor_id=user.id)
@@ -435,6 +457,7 @@ async def complete_invoice(
     org: Organization = Depends(get_tenant),
     user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER, ROLE_CFO)),
     org_id: uuid.UUID = Depends(get_org_id),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
     """Advance an invoice to the next logical step based on the workflow.
 
@@ -443,6 +466,7 @@ async def complete_invoice(
     - approved + ERP enabled → triggers ERP dispatch
     - approved + no ERP → done
     """
+    await ensure_in_entity_scope(db, Invoice, invoice_id, entity_id, detail="Invoice not found")
     invoice = await get_invoice_for_update(db, invoice_id)
 
     # Validate required fields
@@ -625,8 +649,10 @@ async def export_invoice(
     format: str = "json",
     db: AsyncSession = Depends(get_tenant_db),
     user: User = Depends(get_current_user),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
     """Export invoice data in the requested format for ERP upload."""
+    await ensure_in_entity_scope(db, Invoice, invoice_id, entity_id, detail="Invoice not found")
     result = await db.execute(select(Invoice).where(Invoice.id == invoice_id))
     invoice = result.scalar_one_or_none()
     if not invoice:
@@ -736,7 +762,11 @@ async def get_workflow(
     invoice_id: uuid.UUID,
     db: AsyncSession = Depends(get_tenant_db),
     user: User = Depends(get_current_user),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
+    await ensure_in_entity_scope(
+        db, Invoice, invoice_id, entity_id, detail="No workflow found for this invoice"
+    )
     result = await db.execute(
         select(WorkflowInstance).where(WorkflowInstance.invoice_id == invoice_id)
     )
@@ -760,7 +790,9 @@ async def get_audit_log(
     db: AsyncSession = Depends(get_tenant_db),
     control_db: AsyncSession = Depends(get_control_db),
     user: User = Depends(get_current_user),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
+    await ensure_in_entity_scope(db, Invoice, invoice_id, entity_id, detail="Invoice not found")
     # Get the invoice's correlation_id
     result = await db.execute(select(Invoice.correlation_id).where(Invoice.id == invoice_id))
     correlation_id = result.scalar_one_or_none()
@@ -805,7 +837,9 @@ async def get_extraction_results(
     invoice_id: uuid.UUID,
     db: AsyncSession = Depends(get_tenant_db),
     user: User = Depends(get_current_user),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
+    await ensure_in_entity_scope(db, Invoice, invoice_id, entity_id, detail="Invoice not found")
     result = await db.execute(
         select(InvoiceExtractionResult)
         .where(InvoiceExtractionResult.invoice_id == invoice_id)

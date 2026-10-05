@@ -60,7 +60,12 @@ from app.services.audit_dispatch import dispatch_audit
 from app.services.contract_spend import compute_spend_summary
 from app.services.report_export import csv_safe_cell
 from app.services.storage import get_file, upload_contract_file
-from app.tenant import apply_entity_scope, get_entity_id, get_tenant_db
+from app.tenant import (
+    apply_entity_scope,
+    ensure_in_entity_scope,
+    get_entity_id,
+    get_tenant_db,
+)
 from app.utils.search import ilike_contains
 
 router = APIRouter(prefix="/contracts", tags=["contracts"])
@@ -380,7 +385,9 @@ async def get_contract(
     contract_id: uuid.UUID,
     db: AsyncSession = Depends(get_tenant_db),
     user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER, ROLE_AP_CLERK, ROLE_CFO)),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
+    await ensure_in_entity_scope(db, Contract, contract_id, entity_id, detail="Contract not found")
     contract = await _get_contract_or_404(db, contract_id)
     vendor_name = await _vendor_name(db, contract.vendor_id)
     spend = await compute_spend_summary(db, contract)
@@ -394,7 +401,9 @@ async def update_contract(
     db: AsyncSession = Depends(get_tenant_db),
     user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER)),
     org_id: uuid.UUID = Depends(get_org_id),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
+    await ensure_in_entity_scope(db, Contract, contract_id, entity_id, detail="Contract not found")
     contract = await _get_contract_or_404(db, contract_id)
     payload = body.model_dump(exclude_unset=True)
 
@@ -443,7 +452,9 @@ async def delete_contract(
     db: AsyncSession = Depends(get_tenant_db),
     user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER)),
     org_id: uuid.UUID = Depends(get_org_id),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
+    await ensure_in_entity_scope(db, Contract, contract_id, entity_id, detail="Contract not found")
     contract = await _get_contract_or_404(db, contract_id)
     # An active contract with recorded spend is part of the audit story —
     # terminate it instead of deleting. Only draft/cancelled contracts delete.
@@ -475,7 +486,9 @@ async def upload_document(
     db: AsyncSession = Depends(get_tenant_db),
     user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER)),
     org_id: uuid.UUID = Depends(get_org_id),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
+    await ensure_in_entity_scope(db, Contract, contract_id, entity_id, detail="Contract not found")
     contract = await _get_contract_or_404(db, contract_id)
     try:
         file_key, file_url = await upload_contract_file(org_id, contract.id, file)
@@ -555,7 +568,9 @@ async def activate_contract(
     db: AsyncSession = Depends(get_tenant_db),
     user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER)),
     org_id: uuid.UUID = Depends(get_org_id),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
+    await ensure_in_entity_scope(db, Contract, contract_id, entity_id, detail="Contract not found")
     return await _transition("activate", contract_id, db, user, org_id)
 
 
@@ -565,7 +580,9 @@ async def terminate_contract(
     db: AsyncSession = Depends(get_tenant_db),
     user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER)),
     org_id: uuid.UUID = Depends(get_org_id),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
+    await ensure_in_entity_scope(db, Contract, contract_id, entity_id, detail="Contract not found")
     return await _transition("terminate", contract_id, db, user, org_id)
 
 
@@ -575,7 +592,9 @@ async def cancel_contract(
     db: AsyncSession = Depends(get_tenant_db),
     user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER)),
     org_id: uuid.UUID = Depends(get_org_id),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
+    await ensure_in_entity_scope(db, Contract, contract_id, entity_id, detail="Contract not found")
     return await _transition("cancel", contract_id, db, user, org_id)
 
 
@@ -586,6 +605,7 @@ async def renew_contract(
     db: AsyncSession = Depends(get_tenant_db),
     user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER)),
     org_id: uuid.UUID = Depends(get_org_id),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
     """Extend the contract to a new end date.
 
@@ -594,6 +614,7 @@ async def renew_contract(
     ``renewal_alert_sent_at`` so the renewal sweep can fire again for the new
     term.
     """
+    await ensure_in_entity_scope(db, Contract, contract_id, entity_id, detail="Contract not found")
     contract = await _get_contract_or_404(db, contract_id)
     if contract.status in (ContractStatus.terminated, ContractStatus.cancelled):
         raise HTTPException(
@@ -737,6 +758,7 @@ async def create_po_from_contract(
     db: AsyncSession = Depends(get_tenant_db),
     user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER)),
     org_id: uuid.UUID = Depends(get_org_id),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
     """Spin a Purchase Order out of a contract, auto-populated from its terms.
 
@@ -745,6 +767,7 @@ async def create_po_from_contract(
     the contract's line-item totals (falling back to ``total_value``). Only
     draft / active contracts can spawn a PO.
     """
+    await ensure_in_entity_scope(db, Contract, contract_id, entity_id, detail="Contract not found")
     contract = await _get_contract_or_404(db, contract_id)
     if contract.status not in (ContractStatus.draft, ContractStatus.active):
         raise HTTPException(

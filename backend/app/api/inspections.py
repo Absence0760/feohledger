@@ -34,6 +34,7 @@ from app.services.qms_adapters import UnknownQmsProviderError, list_available_pr
 from app.services.qms_sync import resolve_opted_in_qms_config, sync_tenant_inspections
 from app.tenant import (
     apply_entity_scope,
+    ensure_in_entity_scope,
     get_entity_id,
     get_tenant_db,
     get_write_entity_id,
@@ -332,7 +333,11 @@ async def get_inspection(
     inspection_id: uuid.UUID,
     db: AsyncSession = Depends(get_tenant_db),
     user: User = Depends(get_current_user),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
+    await ensure_in_entity_scope(
+        db, QualityInspection, inspection_id, entity_id, detail="Inspection not found"
+    )
     result = await db.execute(
         select(QualityInspection, GoodsReceipt.gr_number)
         .outerjoin(GoodsReceipt, QualityInspection.gr_id == GoodsReceipt.id)

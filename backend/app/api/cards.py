@@ -41,7 +41,13 @@ from app.services.currency_conversion import (
     resolve_reporting_currency,
 )
 from app.services.payment_adapters.base import minor_units_to_decimal
-from app.tenant import apply_entity_scope, get_entity_id, get_tenant, get_tenant_db
+from app.tenant import (
+    apply_entity_scope,
+    ensure_in_entity_scope,
+    get_entity_id,
+    get_tenant,
+    get_tenant_db,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -682,8 +688,10 @@ async def get_card_details(
     db: AsyncSession = Depends(get_tenant_db),
     org: Organization = Depends(get_tenant),
     user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER, ROLE_CFO)),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
     """Retrieve full card details. Restricted to admin/ap_manager/cfo. Audit-logged."""
+    await ensure_in_entity_scope(db, VirtualCard, card_id, entity_id, detail="Card not found")
     result = await db.execute(select(VirtualCard).where(VirtualCard.id == card_id))
     card = result.scalar_one_or_none()
     if not card:
@@ -726,6 +734,7 @@ async def cancel_card(
     # See the docstring — this is the one migrated route that deliberately does
     # NOT reproduce the prior system-role matrix.
     user: User = Depends(require_permission(PERM_PAYMENT_VOID)),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
     """Cancel an unused virtual card at the provider, then in our DB.
 
@@ -750,6 +759,7 @@ async def cancel_card(
     where it would kill the card while that payment and its invoice still claim
     money is in flight. The supported remedy sits ON the void.
     """
+    await ensure_in_entity_scope(db, VirtualCard, card_id, entity_id, detail="Card not found")
     result = await db.execute(select(VirtualCard).where(VirtualCard.id == card_id))
     card = result.scalar_one_or_none()
     if not card:
