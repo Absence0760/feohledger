@@ -55,6 +55,13 @@ export interface Vendor1099Row {
 	 * guarantee can be checked rather than taken on trust.
 	 */
 	box_unallocated: string;
+	/**
+	 * The forms this payee must receive (`'1099-NEC'` / `'1099-MISC'`) — each
+	 * box measured against its own per-year threshold (royalties $10, attorney
+	 * gross proceeds $600, everything else $600 before 2026 and $2,000 from
+	 * 2026). `over_threshold` is exactly "this list is non-empty".
+	 */
+	required_forms: string[];
 }
 
 /** One 1099 box's share of a vendor's reportable total. Money is a
