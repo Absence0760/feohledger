@@ -9266,3 +9266,44 @@ it is the next step if this image goes the same way. The trust level is
 acceptable because MinIO only ever holds throwaway `minioadmin` data locally and
 in CI; production is real S3. Detail: `backend/docs/docker.md` § Where MinIO
 comes from.
+
+## 228. The report builder splits a money aggregate by currency rather than sum across them, and buckets dates in the zone its filters use
+
+The ad-hoc report builder (`services/report_builder.py`) summed `amount` across
+every row in a group whatever its currency. A "spend by vendor" report over a
+vendor billing USD 100 and EUR 50 returned one row reading `150.00` — and with no
+dimension at all, the whole book collapsed into one such figure. The web
+`ResultTable` rendered it bare (§196 kept it from wearing a wrong symbol), but a
+bare number that is a sum of two currencies is still a wrong number; §160 and
+§200 both say a mixed-currency total must not be presented as one figure.
+
+**Split, not convert.** Every source with a money measure names its currency
+dimension, and `compile_spec` appends it to the group-by whenever a money
+aggregate is selected and the user did not group by it. Each money column names
+that dimension in `currency_key`, and the client labels each cell from its own
+row. Converting into the reporting currency was the other durable option and was
+rejected for this surface: `invoice_reporting_amount_sql` falls back to the face
+amount for an invoice with no usable lock, which reproduces the mixture under a
+reporting-currency label; `payment_reporting_amount_sql` has no fallback and
+would silently drop rows; and an ad-hoc report has no disclosure slot for an
+`unconverted_count`. Splitting needs no rate, cannot be wrong, and is the
+same answer a user gets today by adding the currency dimension themselves. A
+reporting-currency *measure* (`reporting_amount`) can be added later as its own
+catalog entry with its own disclosure; it is not a replacement for this.
+
+`payments` had no currency dimension at all, because `Payment` has no currency
+column — its `amount` is in its invoice's currency. The catalog gained a
+`currency` dimension over `Invoice.currency` with a server-defined outer join, so
+the join, like every column, stays inside the whitelist.
+
+`count` is not split (a count has no currency), and a spec that already groups by
+currency is unchanged. `test_every_money_measure_has_a_currency_dimension` fails
+when a money measure lands on a source without one.
+
+**Date buckets.** The date filters pinned their day bounds to UTC
+(`_day_start`), but the bucket was `date_trunc(grain, col::timestamp)`, and a
+`TIMESTAMPTZ → TIMESTAMP` cast converts through the session `TimeZone`. On a
+non-UTC session the two disagreed about the same row: 2026-01-31 20:00 UTC passed
+a January filter and landed in a February bucket. Timestamp columns are now
+bucketed via `timezone('UTC', col)`, so filter and bucket share one explicit zone
+and neither depends on the connection's settings. `DATE` columns are unchanged.

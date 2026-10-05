@@ -76,7 +76,9 @@ def test_compile_valid_spec_maps_keys_to_columns():
         sort=[SortSpec(key="amount_sum", dir="desc")],
     )
     plan = compile_spec(spec)
-    assert [d.key for d in plan.dimensions] == ["vendor_name"]
+    # `currency` is appended: `amount_sum` is money, and a money aggregate is
+    # always grouped by its currency (decisions §228).
+    assert [d.key for d in plan.dimensions] == ["vendor_name", "currency"]
     assert [(m.out_key, m.type) for m in plan.measures] == [
         ("amount_sum", "money"),
         ("id_count", "number"),
@@ -682,3 +684,273 @@ def test_date_in_op_would_also_be_day_scoped():
     # Two half-open windows OR'd together — never a bare `IN (...)` of dates.
     assert "IN " not in clause.upper()
     assert clause.count(">=") == 2 and clause.count("<") >= 2
+
+
+# --------------------------------------------------------------------------- #
+# A money aggregate never sums across currencies (decisions §160 / §200 / §228)
+# --------------------------------------------------------------------------- #
+async def _add_currency_invoice(mk, org_id, *, vendor_name, amount, currency):
+    async with mk() as s:
+        inv = Invoice(
+            organization_id=org_id,
+            entity_id=await _default_entity_id(s),
+            invoice_number=f"INV-{uuid.uuid4().hex[:8]}",
+            vendor_name=vendor_name,
+            amount=Decimal(amount),
+            currency=currency,
+            invoice_date=_TODAY,
+            due_date=_TODAY + timedelta(days=30),
+            status=InvoiceStatus.approved,
+        )
+        s.add(inv)
+        await s.flush()
+        inv_id = inv.id
+        await s.commit()
+        return inv_id
+
+
+async def _run(realdb, body):
+    async with realdb.client(key="a", role="cfo") as c:
+        resp = await c.post("/api/reports/run", json=body)
+    assert resp.status_code == 200, resp.text
+    return resp.json()
+
+
+async def test_money_sum_is_split_by_currency_when_not_grouped_by_it(realdb):
+    """USD 100 + EUR 50 for one vendor is not "150.00" of anything. A report
+    grouped only by vendor used to answer exactly that — one row, one figure,
+    two currencies. The engine now adds the currency to the grouping whenever a
+    money aggregate is selected, and names that column on the measure so each
+    row's figure is labelled by its own code."""
+    mk = realdb.sessionmaker("a")
+    org_id = realdb.info("a").org_id
+    await _add_currency_invoice(
+        mk, org_id, vendor_name="MixedCcyCo", amount="100.00", currency="USD"
+    )
+    await _add_currency_invoice(
+        mk, org_id, vendor_name="MixedCcyCo", amount="50.00", currency="EUR"
+    )
+
+    data = await _run(
+        realdb,
+        {
+            "data_source": "invoices",
+            "dimensions": [{"key": "vendor_name"}],
+            "measures": [{"key": "amount", "agg": "sum"}, {"key": "id", "agg": "count"}],
+            "filters": [{"key": "vendor_name", "op": "eq", "value": "MixedCcyCo"}],
+        },
+    )
+
+    by_ccy = {r["currency"]: r for r in data["rows"]}
+    assert set(by_ccy) == {"USD", "EUR"}
+    assert by_ccy["USD"]["amount_sum"] == "100.00"
+    assert by_ccy["EUR"]["amount_sum"] == "50.00"
+    assert by_ccy["USD"]["id_count"] == 1
+    assert data["total_rows"] == 2
+
+    cols = {c["key"]: c for c in data["columns"]}
+    assert [c["key"] for c in data["columns"]] == [
+        "vendor_name",
+        "currency",
+        "amount_sum",
+        "id_count",
+    ]
+    assert cols["currency"]["kind"] == "dimension"
+    assert cols["amount_sum"]["currency_key"] == "currency"
+    # A count is not money and names no currency.
+    assert cols["id_count"].get("currency_key") is None
+
+
+async def test_money_total_with_no_dimension_is_one_row_per_currency(realdb):
+    """No dimension at all used to collapse the whole book into one figure."""
+    mk = realdb.sessionmaker("a")
+    org_id = realdb.info("a").org_id
+    await _add_currency_invoice(
+        mk, org_id, vendor_name="NoDimCcyCo", amount="10.00", currency="GBP"
+    )
+    await _add_currency_invoice(mk, org_id, vendor_name="NoDimCcyCo", amount="5.00", currency="JPY")
+
+    data = await _run(
+        realdb,
+        {
+            "data_source": "invoices",
+            "measures": [{"key": "amount", "agg": "sum"}],
+            "filters": [{"key": "vendor_name", "op": "eq", "value": "NoDimCcyCo"}],
+        },
+    )
+    assert {r["currency"]: r["amount_sum"] for r in data["rows"]} == {
+        "GBP": "10.00",
+        "JPY": "5.00",
+    }
+
+
+async def test_explicit_currency_dimension_is_not_duplicated(realdb):
+    mk = realdb.sessionmaker("a")
+    org_id = realdb.info("a").org_id
+    await _add_currency_invoice(
+        mk, org_id, vendor_name="ExplicitCcyCo", amount="7.00", currency="USD"
+    )
+
+    data = await _run(
+        realdb,
+        {
+            "data_source": "invoices",
+            "dimensions": [{"key": "currency"}, {"key": "vendor_name"}],
+            "measures": [{"key": "amount", "agg": "sum"}],
+            "filters": [{"key": "vendor_name", "op": "eq", "value": "ExplicitCcyCo"}],
+        },
+    )
+    assert [c["key"] for c in data["columns"]] == ["currency", "vendor_name", "amount_sum"]
+    assert data["rows"] == [
+        {"currency": "USD", "vendor_name": "ExplicitCcyCo", "amount_sum": "7.00"}
+    ]
+
+
+async def test_count_only_report_is_not_split_by_currency(realdb):
+    """A count is currency-free, so a count-only report keeps the grouping the
+    user asked for."""
+    mk = realdb.sessionmaker("a")
+    org_id = realdb.info("a").org_id
+    await _add_currency_invoice(mk, org_id, vendor_name="CountCcyCo", amount="1.00", currency="USD")
+    await _add_currency_invoice(mk, org_id, vendor_name="CountCcyCo", amount="1.00", currency="EUR")
+
+    data = await _run(
+        realdb,
+        {
+            "data_source": "invoices",
+            "dimensions": [{"key": "vendor_name"}],
+            "measures": [{"key": "id", "agg": "count"}],
+            "filters": [{"key": "vendor_name", "op": "eq", "value": "CountCcyCo"}],
+        },
+    )
+    assert data["rows"] == [{"vendor_name": "CountCcyCo", "id_count": 2}]
+
+
+async def test_payment_sum_is_split_by_its_invoices_currency(realdb):
+    """``Payment.amount`` is denominated in its INVOICE's currency (see
+    ``currency_conversion.payment_reporting_amount_sql``) and carries no
+    currency column of its own — so the payments source groups by the
+    invoice's."""
+    from app.models.payment import Payment
+
+    mk = realdb.sessionmaker("a")
+    org_id = realdb.info("a").org_id
+    usd = await _add_currency_invoice(
+        mk, org_id, vendor_name="PayCcyCo", amount="300.00", currency="USD"
+    )
+    eur = await _add_currency_invoice(
+        mk, org_id, vendor_name="PayCcyCo", amount="200.00", currency="EUR"
+    )
+    async with mk() as s:
+        entity_id = await _default_entity_id(s)
+        for inv_id, amt in ((usd, "300.00"), (eur, "200.00")):
+            s.add(
+                Payment(
+                    invoice_id=inv_id,
+                    entity_id=entity_id,
+                    amount=Decimal(amt),
+                    method="ach",
+                    status="pay_ccy_probe",
+                    correlation_id=uuid.uuid4(),
+                )
+            )
+        await s.commit()
+
+    data = await _run(
+        realdb,
+        {
+            "data_source": "payments",
+            "dimensions": [{"key": "status"}],
+            "measures": [{"key": "amount", "agg": "sum"}],
+            "filters": [{"key": "status", "op": "eq", "value": "pay_ccy_probe"}],
+        },
+    )
+    assert {r["currency"]: r["amount_sum"] for r in data["rows"]} == {
+        "USD": "300.00",
+        "EUR": "200.00",
+    }
+
+
+def test_expense_money_measure_plans_a_currency_group():
+    """The third money source. Checked at the plan level — the grouping is the
+    same mechanism the invoice runs above exercise end to end."""
+    plan = compile_spec(
+        ReportSpec(
+            data_source="expenses",
+            dimensions=[DimensionSpec(key="category")],
+            measures=[MeasureSpec(key="amount", agg="sum")],
+        )
+    )
+    assert [d.key for d in plan.dimensions] == ["category", "currency"]
+    assert plan.measures[0].currency_key == "currency"
+
+
+def test_every_money_measure_has_a_currency_dimension():
+    """The drift guard: a money measure added to a source with no currency
+    dimension would quietly sum across currencies again."""
+    from app.services.report_builder import REPORT_SOURCES
+
+    for src in REPORT_SOURCES.values():
+        if any(m.type == "money" for m in src.measures.values()):
+            assert src.currency_dimension in src.dimensions, src.key
+
+
+# --------------------------------------------------------------------------- #
+# Date buckets are UTC, the same zone the date filters use
+# --------------------------------------------------------------------------- #
+async def test_date_bucket_ignores_the_session_timezone(realdb):
+    """A row recorded at 2026-01-31 20:00 UTC is a January row: the date filter
+    says so (its day bounds are pinned to UTC). The bucket used to cast the
+    TIMESTAMPTZ to a naive TIMESTAMP in the SESSION's zone, so on an
+    Auckland-zoned session the same row — admitted by a January filter — was
+    reported in a February bucket. Both now use UTC."""
+    from sqlalchemy import text
+
+    from app.services.report_builder import run_report
+
+    mk = realdb.sessionmaker("a")
+    org_id = realdb.info("a").org_id
+    stamp = datetime(2026, 1, 31, 20, 0, tzinfo=UTC)
+    await _add_invoice(mk, org_id, vendor_name="TzBucketCo", amount="40.00", created_at=stamp)
+
+    spec = ReportSpec(
+        data_source="invoices",
+        dimensions=[DimensionSpec(key="created_at", grain="month")],
+        measures=[MeasureSpec(key="id", agg="count")],
+        filters=[
+            FilterSpec(key="vendor_name", op="eq", value="TzBucketCo"),
+            FilterSpec(key="created_at", op="between", value=["2026-01-01", "2026-01-31"]),
+        ],
+    )
+    for zone in ("Pacific/Auckland", "America/Los_Angeles", "UTC"):
+        async with mk() as s:
+            # LOCAL: scoped to this transaction, so the pooled connection goes
+            # back to the pool on its default zone.
+            await s.execute(text(f"SET LOCAL TIME ZONE '{zone}'"))
+            result = await run_report(s, spec, entity_id=None)
+            await s.rollback()
+        assert result["rows"] == [{"created_at": "2026-01-01", "id_count": 1}], zone
+
+
+async def test_date_bucket_on_a_real_date_column_is_unshifted(realdb):
+    """``invoice_date`` is a DATE — no instant, so no zone applies to it."""
+    from sqlalchemy import text
+
+    from app.services.report_builder import run_report
+
+    mk = realdb.sessionmaker("a")
+    org_id = realdb.info("a").org_id
+    await _add_invoice(
+        mk, org_id, vendor_name="TzDateCo", amount="1.00", invoice_date=date(2026, 3, 31)
+    )
+    spec = ReportSpec(
+        data_source="invoices",
+        dimensions=[DimensionSpec(key="invoice_date", grain="month")],
+        measures=[MeasureSpec(key="id", agg="count")],
+        filters=[FilterSpec(key="vendor_name", op="eq", value="TzDateCo")],
+    )
+    async with mk() as s:
+        await s.execute(text("SET LOCAL TIME ZONE 'Pacific/Auckland'"))
+        result = await run_report(s, spec, entity_id=None)
+        await s.rollback()
+    assert result["rows"] == [{"invoice_date": "2026-03-01", "id_count": 1}]
