@@ -1297,3 +1297,44 @@ async def test_accept_refuses_an_offer_on_an_invoice_already_paid(realdb):
         async with mk() as s:
             row = await s.get(DiscountOffer, uuid.UUID(offer_id))
             assert row.status == OFFER_STATUS_OFFERED
+
+
+async def test_optimizer_and_projected_savings_exclude_offers_on_settled_invoices(realdb):
+    """The optimizer is the candidate list behind `POST /optimize`, the
+    dashboard's `projected_savings` and the copilot. An open offer on an
+    invoice already `paid` can never be taken, yet it was ranked, selected and
+    summed: 3% on a paid 2,000.00 invoice beside 3% on a payable 1,000.00 one
+    reported 90.00 of savings available where 30.00 is real."""
+    mk = realdb.sessionmaker("a")
+    org_id = realdb.info("a").org_id
+    payable = await _add_invoice(mk, org_id, amount="1000.00")
+    settled = await _add_invoice(mk, org_id, amount="2000.00")
+    async with realdb.client(key="a", role="ap_manager") as c:
+        offer_ids = {}
+        for inv in (payable, settled):
+            r = await c.post(
+                "/api/discounts/offers",
+                json={
+                    "scope": "invoice",
+                    "invoice_id": inv,
+                    "tiers": [{"days": 5, "percent": "3.00"}],
+                },
+            )
+            assert r.status_code == 201, r.text
+            offer_ids[inv] = r.json()["id"]
+    async with mk() as s:
+        (await s.get(Invoice, uuid.UUID(settled))).status = InvoiceStatus.paid
+        await s.commit()
+
+    async with realdb.client(key="a", role="ap_manager") as c:
+        opt = (await c.post("/api/discounts/optimize", json={})).json()
+        dash = (await c.get("/api/discounts/dashboard")).json()
+
+    ranked = {r["offer_id"] for r in opt["recommendations"]} | {
+        r["offer_id"] for r in opt["unrankable"]
+    }
+    assert ranked == {offer_ids[payable]}
+    assert Decimal(str(opt["total_savings_available"])) == Decimal("30.00")
+    assert Decimal(str(opt["total_savings_selected"])) == Decimal("30.00")
+    assert Decimal(str(opt["total_outlay_selected"])) == Decimal("970.00")
+    assert Decimal(str(dash["projected_savings"])) == Decimal("30.00")
