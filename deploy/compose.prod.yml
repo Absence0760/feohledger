@@ -31,7 +31,7 @@ services:
     # backend/docker-compose.yml, which is what CI starts — dev, CI and
     # production run one image, and backend/tests/test_container_supply_chain.py
     # fails if a bump moves one file without the other.
-    image: pgvector/pgvector:0.8.6-pg16@sha256:ccc6e83d6e35e931dc7c5def2022729d5a6c370318d099181995567ff1fb4d6b
+    image: pgvector/pgvector:0.8.7-pg16@sha256:7b822b0aac60967beb1ea5e576b8602c94c300a157d187f385ae3e0da199b90a
     restart: unless-stopped
     logging: *default-logging
     # Docker's default /dev/shm is 64 MB; Postgres parallel workers and
