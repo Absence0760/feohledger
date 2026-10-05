@@ -255,6 +255,9 @@ async def test_w9_upload_uses_sanitised_filename_in_s3_key(monkeypatch):
         db=db,
         user=SimpleNamespace(id=uuid4()),
         org_id=org_id,
+        # Consolidated view — called directly, so the Depends default is not
+        # resolved and would otherwise reach `ensure_in_entity_scope`.
+        entity_id=None,
     )
 
     assert "../" not in captured["Key"]
