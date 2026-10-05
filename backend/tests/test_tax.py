@@ -137,7 +137,7 @@ async def _set_reporting_currency(realdb, org_id, currency: str | None) -> None:
 
 
 async def test_1099_report_aggregates_completed_payments(realdb):
-    await _make_paid_vendor(realdb, "a", name="Contractor", amount="1500.00", year=2026)
+    await _make_paid_vendor(realdb, "a", name="Contractor", amount="2500.00", year=2026)
 
     async with realdb.client(key="a", role="ap_manager") as c:
         resp = await c.get("/api/tax/1099-report", params={"year": 2026})
@@ -145,15 +145,16 @@ async def test_1099_report_aggregates_completed_payments(realdb):
     assert resp.status_code == 200
     body = resp.json()
     assert body["year"] == 2026
-    assert body["threshold_usd"] == "600"
+    # OBBBA: $2,000 for payments made after 2025 (tests/test_tax_1099_thresholds.py).
+    assert body["threshold_usd"] == "2000"
     row = next(r for r in body["rows"] if r["vendor_name"] == "Contractor")
-    assert row["ytd_paid"] == "1500.00"
+    assert row["ytd_paid"] == "2500.00"
     assert row["over_threshold"] is True
     assert row["payment_count"] == 1
     assert body["vendor_count_eligible_over_threshold"] == 1
-    assert body["total_reportable"] == "1500.00"
+    assert body["total_reportable"] == "2500.00"
     # Back-compat alias still present with the same value.
-    assert body["total_reportable_usd"] == "1500.00"
+    assert body["total_reportable_usd"] == "2500.00"
     # Currency is explicit — the org default resolves to USD here.
     assert body["currency"] == "USD"
 
@@ -171,14 +172,14 @@ async def test_1099_report_labels_totals_with_org_reporting_currency(realdb):
     await _set_reporting_currency(realdb, org_id, "EUR")
     try:
         await _make_paid_vendor(
-            realdb, "a", name="EuroContractor", amount="1500.00", year=2026, currency="EUR"
+            realdb, "a", name="EuroContractor", amount="2500.00", year=2026, currency="EUR"
         )
         async with realdb.client(key="a", role="ap_manager") as c:
             resp = await c.get("/api/tax/1099-report", params={"year": 2026})
         assert resp.status_code == 200
         body = resp.json()
         assert body["currency"] == "EUR"
-        assert body["total_reportable"] == "1500.00"
+        assert body["total_reportable"] == "2500.00"
         # The dashboard surfaces the same currency.
         async with realdb.client(key="a", role="ap_manager") as c:
             dash = await c.get("/api/tax/1099-dashboard", params={"year": 2026})
