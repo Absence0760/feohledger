@@ -1762,9 +1762,22 @@ def _vendor_offer_filter(vu: VendorUser):
     one of their own invoices (invoice-scoped offers carry the invoice_id, not a
     vendor_id). The own-invoices set is an in-query subquery so the data layer —
     not just app code — enforces the scoping (project invariant: tenant/vendor
-    isolation at the data layer)."""
+    isolation at the data layer).
+
+    **An offer that names an invoice belongs to whoever owns that invoice NOW,
+    whatever its own `vendor_id` column says.** The `vendor_id` arm therefore
+    only admits offers with no invoice behind them. It used to admit any offer
+    stamped with the caller's `vendor_id`, which reached two real shapes: an
+    invoice-scoped offer created with a mismatched `vendor_id`
+    (`POST /api/discounts/offers` copies the body's), and — the routine one —
+    an offer raised before AP re-linked the invoice to the right vendor. Either
+    way the stale vendor saw a foreign invoice's number and amount and could
+    ACCEPT the discount, which `discount_capture` then deducts from the payment
+    to the invoice's real owner. Keying on the invoice is the durable answer:
+    re-linking an invoice moves its offers with it, with nothing to keep in
+    step."""
     own_invoice_ids = select(Invoice.id).where(Invoice.vendor_id == vu.vendor_id)
-    return (DiscountOffer.vendor_id == vu.vendor_id) | (
+    return (DiscountOffer.invoice_id.is_(None) & (DiscountOffer.vendor_id == vu.vendor_id)) | (
         DiscountOffer.invoice_id.in_(own_invoice_ids)
     )
 
