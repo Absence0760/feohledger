@@ -178,7 +178,8 @@ async def _build_opportunity(
 ) -> OfferOpportunity | None:
     """Turn an open offer into a ranked optimizer opportunity (best tier today).
 
-    Returns ``None`` when no tier is still achievable. Reuses the sweep's
+    Returns ``None`` when no tier is still achievable, or the offer's invoice is
+    already paid / done. Reuses the sweep's
     deadline / due-date economics so router and background sweep agree.
     """
     tier = offers_svc.best_tier_for_date(
@@ -188,6 +189,12 @@ async def _build_opportunity(
         reference_date=offers_svc.offer_reference_date(offer),
     )
     if tier is None:
+        return None
+    # An offer whose invoice is already paid / done can never be taken, so it is
+    # not an opportunity: ranking it inflated `/optimize`'s totals, the
+    # dashboard's `projected_savings` and the copilot's plan by savings nobody
+    # can realize — the same gate every accept path refuses on.
+    if await settled_invoice_status(db, offer) is not None:
         return None
     pay_by = _tier_deadline(offer, tier, today)
     # `pay_by` is deliberately NOT the last fallback. It used to be, and it made

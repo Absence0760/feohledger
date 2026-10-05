@@ -262,7 +262,10 @@ every accept path. All four now ask one gate,
 `discount_auto_trigger.settled_invoice_status`: `POST /offers/{id}/accept` and
 the supplier portal's accept answer `409` naming the status, while the
 auto-accept sweep and the copilot's `capture-discounts` skip the offer and leave
-it `offered`. The predicate, `discount_offers.invoice_awaits_payment`, is
+it `offered`. The optimizer's candidate builder (`api/discounts._build_opportunity`
+— behind `POST /optimize`, the dashboard's `projected_savings` and the copilot's
+plans) drops such an offer too, so it is never ranked, selected or summed into
+savings nobody can take. The predicate, `discount_offers.invoice_awaits_payment`, is
 derived rather than listed: a status awaits payment when the payment queue's
 `PAYABLE_INVOICE_STATUSES` is reachable from it through `VALID_TRANSITIONS`
 without passing through `paid` / `done` — so a not-yet-approved invoice still
