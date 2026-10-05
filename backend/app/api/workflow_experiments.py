@@ -56,7 +56,12 @@ from app.services.workflow_experiments import (
     VARIANT_B,
     compute_experiment_results,
 )
-from app.tenant import apply_entity_scope, get_entity_id, get_tenant_db
+from app.tenant import (
+    apply_entity_scope,
+    ensure_in_entity_scope,
+    get_entity_id,
+    get_tenant_db,
+)
 
 router = APIRouter(prefix="/experiments", tags=["workflow-experiments"])
 
@@ -230,7 +235,11 @@ async def update_experiment(
     body: ExperimentUpdate,
     db: AsyncSession = Depends(get_tenant_db),
     user: User = Depends(require_roles(*_WRITE_ROLES)),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
+    await ensure_in_entity_scope(
+        db, WorkflowExperiment, experiment_id, entity_id, detail="Experiment not found."
+    )
     exp = await _get_experiment(db, experiment_id, organization_id=user.organization_id)
     if exp.status != "draft":
         raise HTTPException(
@@ -289,7 +298,11 @@ async def start_experiment(
     experiment_id: uuid.UUID,
     db: AsyncSession = Depends(get_tenant_db),
     user: User = Depends(require_roles(*_WRITE_ROLES)),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
+    await ensure_in_entity_scope(
+        db, WorkflowExperiment, experiment_id, entity_id, detail="Experiment not found."
+    )
     exp = await _get_experiment(db, experiment_id, organization_id=user.organization_id)
     if exp.status == "running":
         # Idempotent — already running.
@@ -324,11 +337,15 @@ async def stop_experiment(
     experiment_id: uuid.UUID,
     db: AsyncSession = Depends(get_tenant_db),
     user: User = Depends(require_roles(*_WRITE_ROLES)),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
     """Stop a running experiment without concluding — new invoices stop being
     assigned, but already-assigned in-flight invoices keep their frozen variant
     snapshot. Returns the experiment to ``draft`` so it can be re-tuned/restarted.
     """
+    await ensure_in_entity_scope(
+        db, WorkflowExperiment, experiment_id, entity_id, detail="Experiment not found."
+    )
     exp = await _get_experiment(db, experiment_id, organization_id=user.organization_id)
     if exp.status != "running":
         raise HTTPException(status_code=409, detail="Only a running experiment can be stopped.")
@@ -356,9 +373,13 @@ async def conclude_experiment(
     experiment_id: uuid.UUID,
     db: AsyncSession = Depends(get_tenant_db),
     user: User = Depends(require_roles(*_WRITE_ROLES)),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
     """Conclude an experiment — terminal. No new assignments; the results readout
     remains available over the recorded assignments. Idempotent."""
+    await ensure_in_entity_scope(
+        db, WorkflowExperiment, experiment_id, entity_id, detail="Experiment not found."
+    )
     exp = await _get_experiment(db, experiment_id, organization_id=user.organization_id)
     if exp.status == "concluded":
         names = await _definition_names(db, {exp.workflow_definition_id})
@@ -392,7 +413,11 @@ async def delete_experiment(
     experiment_id: uuid.UUID,
     db: AsyncSession = Depends(get_tenant_db),
     user: User = Depends(require_roles(*_WRITE_ROLES)),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
+    await ensure_in_entity_scope(
+        db, WorkflowExperiment, experiment_id, entity_id, detail="Experiment not found."
+    )
     exp = await _get_experiment(db, experiment_id, organization_id=user.organization_id)
     if exp.status != "draft":
         raise HTTPException(
@@ -599,7 +624,11 @@ async def experiment_results(
     experiment_id: uuid.UUID,
     db: AsyncSession = Depends(get_tenant_db),
     user: User = Depends(require_roles(*_READ_ROLES)),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
+    await ensure_in_entity_scope(
+        db, WorkflowExperiment, experiment_id, entity_id, detail="Experiment not found."
+    )
     exp = await _get_experiment(db, experiment_id, organization_id=user.organization_id)
     rows_a, rows_b = await _experiment_metric_rows(db, exp)
     results = compute_experiment_results(

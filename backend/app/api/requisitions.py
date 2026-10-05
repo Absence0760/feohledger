@@ -137,13 +137,30 @@ def _to_response(r: PurchaseRequisition) -> RequisitionResponse:
 
 
 async def _get_or_404(
-    db: AsyncSession, req_id: uuid.UUID, *, for_update: bool = False
+    db: AsyncSession,
+    req_id: uuid.UUID,
+    entity_id: uuid.UUID | None,
+    *,
+    for_update: bool = False,
 ) -> PurchaseRequisition:
-    stmt = (
+    """Resolve one requisition within the caller's selected entity, or 404.
+
+    Every by-id route (read, edit, delete and each state-machine action) goes
+    through here, so the `X-Entity-ID` selector the list honours also gates the
+    row a subsidiary-scoped caller can read or move — on the primary key alone,
+    subsidiary A could approve or convert B's requisition by holding its id.
+    An out-of-scope id is the SAME 404 as a missing one (the
+    `api/purchase_orders._get_scoped_po` shape), so the route can't enumerate a
+    sibling's rows; the consolidated view (`entity_id is None`) reaches every
+    row, which is what it means.
+    """
+    stmt = apply_entity_scope(
         select(PurchaseRequisition)
         .where(PurchaseRequisition.id == req_id)
         .execution_options(populate_existing=True)
-        .options(selectinload(PurchaseRequisition.line_items))
+        .options(selectinload(PurchaseRequisition.line_items)),
+        PurchaseRequisition,
+        entity_id,
     )
     # Lock the row for state-changing money paths (convert-to-PO) so two
     # concurrent requests can't both read converted_po_id IS NULL and each
@@ -344,7 +361,7 @@ async def create_requisition(
         details={"requisition_number": req.requisition_number, "total": str(req.total)},
     )
     await db.commit()
-    fresh = await _get_or_404(db, req.id)
+    fresh = await _get_or_404(db, req.id, entity_id)
     return _to_response(fresh)
 
 
@@ -358,8 +375,9 @@ async def get_requisition(
     req_id: uuid.UUID,
     db: AsyncSession = Depends(get_tenant_db),
     user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER, ROLE_AP_CLERK, ROLE_CFO)),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
-    return _to_response(await _get_or_404(db, req_id))
+    return _to_response(await _get_or_404(db, req_id, entity_id))
 
 
 @router.patch("/{req_id}", response_model=RequisitionResponse)
@@ -369,13 +387,14 @@ async def update_requisition(
     db: AsyncSession = Depends(get_tenant_db),
     user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER, ROLE_AP_CLERK)),
     org_id: uuid.UUID = Depends(get_org_id),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
     """Edit a requisition — allowed on ``draft`` only.
 
     A non-draft requisition is locked: editing after submission would let a
     requester change the spend the approver already saw. ``line_items``, when
     present, fully replaces the lines and the header ``total`` is recomputed."""
-    req = await _get_or_404(db, req_id)
+    req = await _get_or_404(db, req_id, entity_id)
     if req.status != RequisitionStatus.draft:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
@@ -433,7 +452,7 @@ async def update_requisition(
             details={"fields": changed},
         )
     await db.commit()
-    fresh = await _get_or_404(db, req.id)
+    fresh = await _get_or_404(db, req.id, entity_id)
     return _to_response(fresh)
 
 
@@ -443,8 +462,9 @@ async def delete_requisition(
     db: AsyncSession = Depends(get_tenant_db),
     user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER, ROLE_AP_CLERK)),
     org_id: uuid.UUID = Depends(get_org_id),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
-    req = await _get_or_404(db, req_id)
+    req = await _get_or_404(db, req_id, entity_id)
     # Refuse once the requisition has produced downstream artifacts, the way
     # `DELETE /api/recurring/{id}` refuses a template that has already
     # generated invoices. Two distinct failures, both reachable today:
@@ -511,15 +531,16 @@ async def submit_requisition(
     db: AsyncSession = Depends(get_tenant_db),
     user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER, ROLE_AP_CLERK)),
     org_id: uuid.UUID = Depends(get_org_id),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
     """Submit a draft requisition for approval: ``draft → pending_approval``."""
-    req = await _get_or_404(db, req_id)
+    req = await _get_or_404(db, req_id, entity_id)
     guard_transition(req.status, RequisitionStatus.pending_approval)
     req.status = RequisitionStatus.pending_approval
     req.submitted_at = datetime.now(UTC)
     await _audit_transition(db, req, org_id, user.id, "requisition.submitted")
     await db.commit()
-    return _to_response(await _get_or_404(db, req.id))
+    return _to_response(await _get_or_404(db, req.id, entity_id))
 
 
 @router.post("/{req_id}/approve", response_model=RequisitionResponse)
@@ -528,12 +549,13 @@ async def approve_requisition(
     db: AsyncSession = Depends(get_tenant_db),
     user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER, ROLE_CFO)),
     org_id: uuid.UUID = Depends(get_org_id),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
     """Approve a pending requisition: ``pending_approval → approved``.
 
     Segregation of duties: the approver must differ from the requester (reuses
     ``check_segregation`` → 403). Stamps ``approved_by`` / ``approved_at``."""
-    req = await _get_or_404(db, req_id)
+    req = await _get_or_404(db, req_id, entity_id)
     guard_transition(req.status, RequisitionStatus.approved)
     # SoD — approver ≠ requester. Reuse the invoice helper via a tiny attribute
     # shim so the rule + 403 detail stay shared with the invoice/expense paths.
@@ -554,7 +576,7 @@ async def approve_requisition(
     req.approved_by = user.id
     await _audit_transition(db, req, org_id, user.id, "requisition.approved")
     await db.commit()
-    return _to_response(await _get_or_404(db, req.id))
+    return _to_response(await _get_or_404(db, req.id, entity_id))
 
 
 @router.post("/{req_id}/reject", response_model=RequisitionResponse)
@@ -564,9 +586,10 @@ async def reject_requisition(
     db: AsyncSession = Depends(get_tenant_db),
     user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER, ROLE_CFO)),
     org_id: uuid.UUID = Depends(get_org_id),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
     """Reject a pending requisition: ``pending_approval → rejected``."""
-    req = await _get_or_404(db, req_id)
+    req = await _get_or_404(db, req_id, entity_id)
     guard_transition(req.status, RequisitionStatus.rejected)
     req.status = RequisitionStatus.rejected
     req.rejection_reason = body.reason if body else None
@@ -579,7 +602,7 @@ async def reject_requisition(
         extra={"reason": body.reason} if body and body.reason else None,
     )
     await db.commit()
-    return _to_response(await _get_or_404(db, req.id))
+    return _to_response(await _get_or_404(db, req.id, entity_id))
 
 
 @router.post("/{req_id}/cancel", response_model=RequisitionResponse)
@@ -589,10 +612,11 @@ async def cancel_requisition(
     db: AsyncSession = Depends(get_tenant_db),
     user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER, ROLE_AP_CLERK)),
     org_id: uuid.UUID = Depends(get_org_id),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
     """Cancel a requisition (any non-terminal, non-converted state): ``→
     cancelled``. A converted requisition is terminal and cannot be cancelled."""
-    req = await _get_or_404(db, req_id)
+    req = await _get_or_404(db, req_id, entity_id)
     guard_transition(req.status, RequisitionStatus.cancelled)
     req.status = RequisitionStatus.cancelled
     await _audit_transition(
@@ -604,7 +628,7 @@ async def cancel_requisition(
         extra={"reason": body.reason} if body and body.reason else None,
     )
     await db.commit()
-    return _to_response(await _get_or_404(db, req.id))
+    return _to_response(await _get_or_404(db, req.id, entity_id))
 
 
 @router.post("/{req_id}/reopen", response_model=RequisitionResponse)
@@ -613,6 +637,7 @@ async def reopen_requisition(
     db: AsyncSession = Depends(get_tenant_db),
     user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER, ROLE_AP_CLERK)),
     org_id: uuid.UUID = Depends(get_org_id),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
     """Reopen a rejected requisition for rework: ``rejected -> draft``.
 
@@ -628,7 +653,7 @@ async def reopen_requisition(
     ``rejection_reason`` is deliberately left on the row — it is the brief for
     the rework, and a later rejection overwrites it.
     """
-    req = await _get_or_404(db, req_id)
+    req = await _get_or_404(db, req_id, entity_id)
     guard_transition(req.status, RequisitionStatus.draft)
     req.status = RequisitionStatus.draft
     # The prior submission's clock no longer describes this row: it is a draft
@@ -636,7 +661,7 @@ async def reopen_requisition(
     req.submitted_at = None
     await _audit_transition(db, req, org_id, user.id, "requisition.reopened")
     await db.commit()
-    return _to_response(await _get_or_404(db, req.id))
+    return _to_response(await _get_or_404(db, req.id, entity_id))
 
 
 # ---------------------------------------------------------------------------
@@ -650,6 +675,7 @@ async def convert_to_po(
     db: AsyncSession = Depends(get_tenant_db),
     user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER)),
     org_id: uuid.UUID = Depends(get_org_id),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
     """Convert an approved requisition into a ``PurchaseOrder``.
 
@@ -662,7 +688,7 @@ async def convert_to_po(
     The new PO inherits the requisition's entity, vendor, exact ``Decimal``
     total, and line items; the requisition flips to ``converted`` and the move is
     audited."""
-    req = await _get_or_404(db, req_id, for_update=True)
+    req = await _get_or_404(db, req_id, entity_id, for_update=True)
 
     # Idempotent replay — already converted: return the existing PO untouched.
     if req.converted_po_id is not None:

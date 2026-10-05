@@ -41,6 +41,7 @@ from app.schemas.expense import (
 from app.services.audit_dispatch import dispatch_audit
 from app.tenant import (
     apply_entity_scope,
+    ensure_in_entity_scope,
     get_entity_id,
     get_tenant_db,
     get_write_entity_id,
@@ -172,7 +173,11 @@ async def get_policy(
     policy_id: uuid.UUID,
     db: AsyncSession = Depends(get_tenant_db),
     user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER, ROLE_AP_CLERK, ROLE_CFO)),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
+    await ensure_in_entity_scope(
+        db, ExpensePolicy, policy_id, entity_id, detail="Expense policy not found"
+    )
     return _to_response(await _get_policy_or_404(db, policy_id))
 
 
@@ -183,7 +188,11 @@ async def update_policy(
     db: AsyncSession = Depends(get_tenant_db),
     user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER)),
     org_id: uuid.UUID = Depends(get_org_id),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
+    await ensure_in_entity_scope(
+        db, ExpensePolicy, policy_id, entity_id, detail="Expense policy not found"
+    )
     policy = await _get_policy_or_404(db, policy_id)
     payload = body.model_dump(exclude_unset=True)
     # A threshold-currency change re-denominates every threshold on the row, so
@@ -217,7 +226,11 @@ async def delete_policy(
     db: AsyncSession = Depends(get_tenant_db),
     user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER)),
     org_id: uuid.UUID = Depends(get_org_id),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
+    await ensure_in_entity_scope(
+        db, ExpensePolicy, policy_id, entity_id, detail="Expense policy not found"
+    )
     policy = await _get_policy_or_404(db, policy_id)
     await dispatch_audit(
         db,

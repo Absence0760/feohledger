@@ -83,7 +83,12 @@ from app.services.tin_validation_adapters import (
 )
 from app.services.vendor_screening import screen_best_effort
 from app.services.vendor_tax_id import rekey_tax_id
-from app.tenant import get_tenant, get_tenant_db
+from app.tenant import (
+    ensure_in_entity_scope,
+    get_entity_id,
+    get_tenant,
+    get_tenant_db,
+)
 from app.utils.dates import utc_today
 
 logger = logging.getLogger(__name__)
@@ -183,12 +188,16 @@ async def update_vendor_w9_fields(
     org: Organization = Depends(get_tenant),
     user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER)),
     org_id: uuid.UUID = Depends(get_org_id),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
     """Update W-9 / tax fields on a vendor without uploading a new file.
 
     A changed `tax_id` goes through `rekey_tax_id` (voids the old TIN match)
     and re-screens the vendor, exactly as the same edit on `PATCH /vendors/{id}`
     does — the TIN is an identity field the sanctions adapters screen on."""
+    await ensure_in_entity_scope(
+        db, Vendor, vendor_id, entity_id, detail="Vendor not found", include_shared=True
+    )
     vendor = await _get_vendor_or_404(db, vendor_id)
 
     data = body.model_dump(exclude_unset=True)
@@ -231,8 +240,12 @@ async def upload_vendor_w9(
     db: AsyncSession = Depends(get_tenant_db),
     user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER)),
     org_id: uuid.UUID = Depends(get_org_id),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
     """Upload the vendor's signed W-9 PDF and mark them 1099-tracked."""
+    await ensure_in_entity_scope(
+        db, Vendor, vendor_id, entity_id, detail="Vendor not found", include_shared=True
+    )
     vendor = await _get_vendor_or_404(db, vendor_id)
 
     content = await file.read()
@@ -286,6 +299,7 @@ async def verify_vendor_tin(
     org: Organization = Depends(get_tenant),
     user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER)),
     org_id: uuid.UUID = Depends(get_org_id),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
     """Validate a vendor's TIN and, on success, stamp ``tin_verified_at``.
 
@@ -294,6 +308,9 @@ async def verify_vendor_tin(
     The response carries only the verdict + the redacted last-4 — never the
     TIN itself, so a TIN can't leak into a client body or a log line.
     """
+    await ensure_in_entity_scope(
+        db, Vendor, vendor_id, entity_id, detail="Vendor not found", include_shared=True
+    )
     vendor = await _get_vendor_or_404(db, vendor_id)
 
     # Resolve the provider FIRST, before anything on the row moves: a config we
@@ -372,6 +389,7 @@ async def download_vendor_1099(
     org: Organization = Depends(get_tenant),
     user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER, ROLE_CFO)),
     org_id: uuid.UUID = Depends(get_org_id),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
     """Generate + download a vendor's 1099-NEC / 1099-MISC working copy PDF.
 
@@ -379,6 +397,9 @@ async def download_vendor_1099(
     1099 aggregation). Returns 400 if the form type is unsupported or the
     vendor has no reportable payments for the year.
     """
+    await ensure_in_entity_scope(
+        db, Vendor, vendor_id, entity_id, detail="Vendor not found", include_shared=True
+    )
     if form_type not in {FORM_NEC, FORM_MISC}:
         raise HTTPException(status_code=400, detail="Unsupported form type")
 

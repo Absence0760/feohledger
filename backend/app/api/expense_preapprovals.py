@@ -40,6 +40,7 @@ from app.services.approval_chain import check_segregation
 from app.services.audit_dispatch import dispatch_audit
 from app.tenant import (
     apply_entity_scope,
+    ensure_in_entity_scope,
     get_entity_id,
     get_tenant_db,
     get_write_entity_id,
@@ -157,7 +158,11 @@ async def get_preapproval(
     preapproval_id: uuid.UUID,
     db: AsyncSession = Depends(get_tenant_db),
     user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER, ROLE_AP_CLERK, ROLE_CFO)),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
+    await ensure_in_entity_scope(
+        db, ExpensePreapproval, preapproval_id, entity_id, detail="Pre-approval not found"
+    )
     return _to_response(await _get_preapproval_or_404(db, preapproval_id))
 
 
@@ -217,7 +222,11 @@ async def approve_preapproval(
     db: AsyncSession = Depends(get_tenant_db),
     user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER)),
     org_id: uuid.UUID = Depends(get_org_id),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
+    await ensure_in_entity_scope(
+        db, ExpensePreapproval, preapproval_id, entity_id, detail="Pre-approval not found"
+    )
     return await _decide(
         db,
         preapproval_id,
@@ -235,7 +244,11 @@ async def reject_preapproval(
     db: AsyncSession = Depends(get_tenant_db),
     user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER)),
     org_id: uuid.UUID = Depends(get_org_id),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
+    await ensure_in_entity_scope(
+        db, ExpensePreapproval, preapproval_id, entity_id, detail="Pre-approval not found"
+    )
     return await _decide(
         db,
         preapproval_id,

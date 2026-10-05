@@ -404,7 +404,9 @@ async def test_concurrent_routing_creates_exactly_one_mirror(realdb):
         session_mk = realdb.sessionmaker("a")
         async with session_mk() as db:
             try:
-                resp = await route_intercompany(invoice_id=origin_id, body=body, db=db, user=user)
+                resp = await route_intercompany(
+                    invoice_id=origin_id, body=body, db=db, user=user, entity_id=None
+                )
                 await db.commit()
                 return ("ok", resp.id)
             except HTTPException as exc:

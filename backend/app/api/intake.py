@@ -156,9 +156,24 @@ async def _resolve_vendor_id(
 
 
 async def _get_intake_or_404(
-    db: AsyncSession, intake_id: uuid.UUID, *, for_update: bool = False
+    db: AsyncSession,
+    intake_id: uuid.UUID,
+    entity_id: uuid.UUID | None,
+    *,
+    for_update: bool = False,
 ) -> IntakeRequest:
-    stmt = select(IntakeRequest).where(IntakeRequest.id == intake_id)
+    """Resolve one intake request within the caller's selected entity, or 404.
+
+    Every by-id route (read, edit, delete, each state-machine action and the
+    conversion) goes through here, so the `X-Entity-ID` selector the list
+    honours also gates which row a subsidiary-scoped caller can read or move.
+    An out-of-scope id is the SAME 404 as a missing one (the
+    ``api/purchase_orders._get_scoped_po`` shape); the consolidated view
+    (``entity_id is None``) reaches every row.
+    """
+    stmt = apply_entity_scope(
+        select(IntakeRequest).where(IntakeRequest.id == intake_id), IntakeRequest, entity_id
+    )
     # Lock the row on the conversion path so two concurrent requests can't both
     # read converted_requisition_id IS NULL and each create a PurchaseRequisition.
     if for_update:
@@ -324,7 +339,7 @@ async def create_intake(
         details={"request_number": intake.request_number, "type": str(intake.request_type)},
     )
     await db.commit()
-    fresh = await _get_intake_or_404(db, intake.id)
+    fresh = await _get_intake_or_404(db, intake.id, entity_id)
     return _to_response(fresh)
 
 
@@ -338,8 +353,9 @@ async def get_intake(
     intake_id: uuid.UUID,
     db: AsyncSession = Depends(get_tenant_db),
     user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER, ROLE_AP_CLERK, ROLE_CFO)),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
-    return _to_response(await _get_intake_or_404(db, intake_id))
+    return _to_response(await _get_intake_or_404(db, intake_id, entity_id))
 
 
 @router.patch("/{intake_id}", response_model=IntakeRequestResponse)
@@ -349,10 +365,11 @@ async def update_intake(
     db: AsyncSession = Depends(get_tenant_db),
     user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER, ROLE_AP_CLERK, ROLE_CFO)),
     org_id: uuid.UUID = Depends(get_org_id),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
     """Edit an intake. Only allowed while it is ``open`` — once it's in review or
     decided, the questionnaire is frozen (a 422 otherwise)."""
-    intake = await _get_intake_or_404(db, intake_id)
+    intake = await _get_intake_or_404(db, intake_id, entity_id)
     if intake.status != IntakeStatus.open:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
@@ -390,7 +407,7 @@ async def update_intake(
             details={"fields": changed or ["vendor_id"]},
         )
     await db.commit()
-    fresh = await _get_intake_or_404(db, intake.id)
+    fresh = await _get_intake_or_404(db, intake.id, entity_id)
     return _to_response(fresh)
 
 
@@ -400,8 +417,9 @@ async def delete_intake(
     db: AsyncSession = Depends(get_tenant_db),
     user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER, ROLE_AP_CLERK, ROLE_CFO)),
     org_id: uuid.UUID = Depends(get_org_id),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
-    intake = await _get_intake_or_404(db, intake_id)
+    intake = await _get_intake_or_404(db, intake_id, entity_id)
     # A converted intake is a record of spend that now EXISTS downstream — a
     # `PurchaseRequisition` (and, through it, a `PurchaseOrder`). Deleting it
     # destroys the only link between the ask and the commitment it produced,
@@ -454,9 +472,10 @@ async def submit_intake(
     db: AsyncSession = Depends(get_tenant_db),
     user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER, ROLE_AP_CLERK, ROLE_CFO)),
     org_id: uuid.UUID = Depends(get_org_id),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
     """Submit an open intake for review: ``open → in_review``."""
-    intake = await _get_intake_or_404(db, intake_id)
+    intake = await _get_intake_or_404(db, intake_id, entity_id)
     guard_transition(intake.status, IntakeStatus.in_review)
     intake.status = IntakeStatus.in_review
     await dispatch_audit(
@@ -470,7 +489,7 @@ async def submit_intake(
         details={"request_number": intake.request_number},
     )
     await db.commit()
-    fresh = await _get_intake_or_404(db, intake.id)
+    fresh = await _get_intake_or_404(db, intake.id, entity_id)
     return _to_response(fresh)
 
 
@@ -481,9 +500,10 @@ async def approve_intake(
     db: AsyncSession = Depends(get_tenant_db),
     user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER)),
     org_id: uuid.UUID = Depends(get_org_id),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
     """Approve an intake under review: ``in_review → approved``."""
-    intake = await _get_intake_or_404(db, intake_id)
+    intake = await _get_intake_or_404(db, intake_id, entity_id)
     guard_transition(intake.status, IntakeStatus.approved)
     intake.status = IntakeStatus.approved
     await dispatch_audit(
@@ -497,7 +517,7 @@ async def approve_intake(
         details={"reason": body.reason} if body and body.reason else None,
     )
     await db.commit()
-    fresh = await _get_intake_or_404(db, intake.id)
+    fresh = await _get_intake_or_404(db, intake.id, entity_id)
     return _to_response(fresh)
 
 
@@ -508,12 +528,13 @@ async def reject_intake(
     db: AsyncSession = Depends(get_tenant_db),
     user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER)),
     org_id: uuid.UUID = Depends(get_org_id),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
     """Reject an intake under review: ``in_review → rejected``.
 
     The rejection reason (when present) is stamped into ``form_data`` under
     ``review_reason`` so it survives on the row, and recorded in the audit."""
-    intake = await _get_intake_or_404(db, intake_id)
+    intake = await _get_intake_or_404(db, intake_id, entity_id)
     guard_transition(intake.status, IntakeStatus.rejected)
     intake.status = IntakeStatus.rejected
     if body and body.reason:
@@ -531,7 +552,7 @@ async def reject_intake(
         details={"reason": body.reason} if body and body.reason else None,
     )
     await db.commit()
-    fresh = await _get_intake_or_404(db, intake.id)
+    fresh = await _get_intake_or_404(db, intake.id, entity_id)
     return _to_response(fresh)
 
 
@@ -542,9 +563,10 @@ async def cancel_intake(
     db: AsyncSession = Depends(get_tenant_db),
     user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER, ROLE_AP_CLERK, ROLE_CFO)),
     org_id: uuid.UUID = Depends(get_org_id),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
     """Cancel an intake: ``open | in_review | approved → cancelled``."""
-    intake = await _get_intake_or_404(db, intake_id)
+    intake = await _get_intake_or_404(db, intake_id, entity_id)
     guard_transition(intake.status, IntakeStatus.cancelled)
     intake.status = IntakeStatus.cancelled
     await dispatch_audit(
@@ -558,7 +580,7 @@ async def cancel_intake(
         details={"reason": body.reason} if body and body.reason else None,
     )
     await db.commit()
-    fresh = await _get_intake_or_404(db, intake.id)
+    fresh = await _get_intake_or_404(db, intake.id, entity_id)
     return _to_response(fresh)
 
 
@@ -568,6 +590,7 @@ async def reopen_intake(
     db: AsyncSession = Depends(get_tenant_db),
     user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER, ROLE_AP_CLERK, ROLE_CFO)),
     org_id: uuid.UUID = Depends(get_org_id),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
     """Reopen a rejected intake for rework: ``rejected -> open``.
 
@@ -583,7 +606,7 @@ async def reopen_intake(
     The reviewer's reason is deliberately left on ``form_data`` — it is the
     brief for the rework, and a later rejection overwrites it.
     """
-    intake = await _get_intake_or_404(db, intake_id)
+    intake = await _get_intake_or_404(db, intake_id, entity_id)
     guard_transition(intake.status, IntakeStatus.open)
     intake.status = IntakeStatus.open
     await dispatch_audit(
@@ -597,7 +620,7 @@ async def reopen_intake(
         details={"request_number": intake.request_number},
     )
     await db.commit()
-    fresh = await _get_intake_or_404(db, intake.id)
+    fresh = await _get_intake_or_404(db, intake.id, entity_id)
     return _to_response(fresh)
 
 
@@ -613,6 +636,7 @@ async def convert_to_requisition(
     db: AsyncSession = Depends(get_tenant_db),
     user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER)),
     org_id: uuid.UUID = Depends(get_org_id),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
     """Convert an approved intake into a ``PurchaseRequisition``.
 
@@ -621,7 +645,7 @@ async def convert_to_requisition(
     a second click can't double-spend. Only an ``approved`` (or already
     ``converted``) intake may be converted; any other status is a 422.
     """
-    intake = await _get_intake_or_404(db, intake_id, for_update=True)
+    intake = await _get_intake_or_404(db, intake_id, entity_id, for_update=True)
 
     # Idempotent replay — already converted → return the existing requisition.
     if intake.converted_requisition_id is not None:
@@ -676,7 +700,7 @@ async def convert_to_requisition(
         },
     )
     await db.commit()
-    fresh = await _get_intake_or_404(db, intake.id)
+    fresh = await _get_intake_or_404(db, intake.id, entity_id)
     return IntakeConvertResponse(
         intake=_to_response(fresh),
         requisition_id=str(requisition.id),

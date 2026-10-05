@@ -102,8 +102,22 @@ async def _linked_requisition_count(db: AsyncSession, budget_id: uuid.UUID, *con
     )
 
 
-async def _get_budget_or_404(db: AsyncSession, budget_id: uuid.UUID) -> Budget:
-    budget = (await db.execute(select(Budget).where(Budget.id == budget_id))).scalar_one_or_none()
+async def _get_budget_or_404(
+    db: AsyncSession, budget_id: uuid.UUID, entity_id: uuid.UUID | None
+) -> Budget:
+    """Resolve one budget within the caller's selected entity, or 404.
+
+    Read, spend, check, edit and delete all go through here, so the
+    `X-Entity-ID` selector the list and the rollups honour also gates the
+    by-id routes. An out-of-scope id is the SAME 404 as a missing one (the
+    ``api/purchase_orders._get_scoped_po`` shape); the consolidated view
+    (``entity_id is None``) reaches every row.
+    """
+    budget = (
+        await db.execute(
+            apply_entity_scope(select(Budget).where(Budget.id == budget_id), Budget, entity_id)
+        )
+    ).scalar_one_or_none()
     if not budget:
         raise HTTPException(status_code=404, detail="Budget not found")
     return budget
@@ -211,7 +225,7 @@ async def create_budget(
         },
     )
     await db.commit()
-    fresh = await _get_budget_or_404(db, budget.id)
+    fresh = await _get_budget_or_404(db, budget.id, entity_id)
     return _to_response(fresh)
 
 
@@ -359,6 +373,7 @@ async def check_budget(
     amount: Decimal = Query(..., ge=0),
     db: AsyncSession = Depends(get_tenant_db),
     user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER, ROLE_CFO)),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
     """Would committing ``amount`` against this budget overspend it?
 
@@ -366,7 +381,7 @@ async def check_budget(
     headroom (``allocated - committed - actual``); ``remaining_after`` is what
     would be left once ``amount`` is committed; ``would_overspend`` is
     ``remaining_after < 0``. All Decimal math — never float."""
-    budget = await _get_budget_or_404(db, budget_id)
+    budget = await _get_budget_or_404(db, budget_id, entity_id)
     spend = await compute_budget_spend(db, budget)
     remaining_after = spend.remaining - amount
     return BudgetCheckResponse(
@@ -392,8 +407,9 @@ async def get_budget(
     budget_id: uuid.UUID,
     db: AsyncSession = Depends(get_tenant_db),
     user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER, ROLE_CFO)),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
-    return _to_response(await _get_budget_or_404(db, budget_id))
+    return _to_response(await _get_budget_or_404(db, budget_id, entity_id))
 
 
 @router.get("/{budget_id}/spend", response_model=BudgetSpendResponse)
@@ -401,13 +417,14 @@ async def get_budget_spend(
     budget_id: uuid.UUID,
     db: AsyncSession = Depends(get_tenant_db),
     user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER, ROLE_CFO)),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
     """Computed allocated vs committed vs actual vs remaining for this budget.
 
     Read-only display rollup: the SUMs run in Postgres over ``Numeric`` columns
     (exact) and stay ``Decimal`` through the response model, which converts to a
     JSON number only at JSON-write time."""
-    budget = await _get_budget_or_404(db, budget_id)
+    budget = await _get_budget_or_404(db, budget_id, entity_id)
     spend = await compute_budget_spend(db, budget)
     return BudgetSpendResponse(
         budget_id=str(budget.id),
@@ -431,8 +448,9 @@ async def update_budget(
     db: AsyncSession = Depends(get_tenant_db),
     user: User = Depends(require_roles(ROLE_ADMIN, ROLE_CFO)),
     org_id: uuid.UUID = Depends(get_org_id),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
-    budget = await _get_budget_or_404(db, budget_id)
+    budget = await _get_budget_or_404(db, budget_id, entity_id)
     payload = body.model_dump(exclude_unset=True)
     new_currency = payload.get("currency")
     if new_currency is not None and new_currency.upper() != (budget.currency or "").upper():
@@ -474,7 +492,7 @@ async def update_budget(
             details={"fields": changed},
         )
     await db.commit()
-    fresh = await _get_budget_or_404(db, budget.id)
+    fresh = await _get_budget_or_404(db, budget.id, entity_id)
     return _to_response(fresh)
 
 
@@ -484,8 +502,9 @@ async def delete_budget(
     db: AsyncSession = Depends(get_tenant_db),
     user: User = Depends(require_roles(ROLE_ADMIN, ROLE_CFO)),
     org_id: uuid.UUID = Depends(get_org_id),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
-    budget = await _get_budget_or_404(db, budget_id)
+    budget = await _get_budget_or_404(db, budget_id, entity_id)
     # `purchase_requisitions.budget_id` is a plain FK (NO ACTION), so a budget
     # any requisition still points at came back as a ForeignKeyViolation — a
     # 500 for a state the API should simply name. Refuse with a 409 rather than

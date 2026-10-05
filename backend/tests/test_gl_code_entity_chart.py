@@ -547,18 +547,27 @@ async def test_patch_refuses_another_entitys_code_and_changes_nothing(realdb, ch
 
 
 async def test_patch_is_checked_against_the_invoices_entity_not_the_selection(realdb, chart):
-    """The sidebar selection is not the invoice's chart: with B selected, an
-    A invoice still may not take B's code — and may take A's own."""
+    """The sidebar selection is not the invoice's chart. In the consolidated
+    view (no entity selected, so no chart at all from the header) an A invoice
+    still may not take B's code — and may take A's own.
+
+    With B selected the PATCH never reaches the chart check any more: an A
+    invoice is outside B's scope, so it is the same 404 as a missing invoice
+    (`docs/decisions.md` §222). This test used to drive the B-selected case,
+    which only worked because the by-id route ignored the selection."""
     entity_a, entity_b = chart
     inv_id = await _seed_invoice(realdb, entity_a)
-    headers = {"X-Entity-ID": str(entity_b)}
     async with realdb.client(key=TENANT, role="ap_manager") as c:
-        refused = await c.patch(
-            f"/api/invoices/{inv_id}", json={"gl_account": B_OWN}, headers=headers
+        refused = await c.patch(f"/api/invoices/{inv_id}", json={"gl_account": B_OWN})
+        ok = await c.patch(f"/api/invoices/{inv_id}", json={"gl_account": A_OWN})
+        out_of_scope = await c.patch(
+            f"/api/invoices/{inv_id}",
+            json={"gl_account": A_OWN},
+            headers={"X-Entity-ID": str(entity_b)},
         )
-        ok = await c.patch(f"/api/invoices/{inv_id}", json={"gl_account": A_OWN}, headers=headers)
     assert refused.status_code == 422, refused.text
     assert ok.status_code == 200, ok.text
+    assert out_of_scope.status_code == 404, out_of_scope.text
 
 
 async def test_patch_that_echoes_the_stored_code_back_is_not_refused(realdb, chart):
