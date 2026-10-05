@@ -6,11 +6,12 @@ request), invalid-state guards, RBAC, and audit rows. Mirrors the ``realdb``
 idioms in ``tests/test_expenses.py``.
 """
 
+import asyncio
 import uuid
 
-from sqlalchemy import select
+from sqlalchemy import select, text, update
 
-from app.models.expense import ExpensePreapproval
+from app.models.expense import ExpensePreapproval, PreapprovalStatus
 from app.models.workflow import AuditLog
 
 
@@ -164,3 +165,65 @@ async def test_unknown_preapproval_404(realdb):
     async with realdb.client(key="a", role="ap_manager") as c:
         resp = await c.post(f"/api/expense-preapprovals/{uuid.uuid4()}/approve")
     assert resp.status_code == 404
+
+
+async def test_approve_cannot_overwrite_a_concurrent_reject(realdb):
+    """The ``pending`` guard is read-then-write. Without a row lock an approve
+    read ``pending`` while a reject was mid-transaction, and its UPDATE queued
+    behind the reject's lock and then stamped ``approved`` over it — leaving an
+    approved authorization (which clears a blocking ``preapproval_required``)
+    beside an ``expense_preapproval.rejected`` audit row."""
+    mk = realdb.sessionmaker("a")
+    async with realdb.client(key="a", role="ap_clerk") as c:
+        pid = (
+            await c.post(
+                "/api/expense-preapprovals",
+                json={"title": "Race", "estimated_amount": "100.00"},
+            )
+        ).json()["id"]
+    pre_uuid = uuid.UUID(pid)
+
+    async with mk() as held:
+        # Stand-in for a reject holding the row, mid-transaction.
+        await held.execute(
+            select(ExpensePreapproval).where(ExpensePreapproval.id == pre_uuid).with_for_update()
+        )
+        await held.execute(
+            update(ExpensePreapproval)
+            .where(ExpensePreapproval.id == pre_uuid)
+            .values(status=PreapprovalStatus.rejected)
+        )
+        async with realdb.client(key="a", role="ap_manager") as c:
+            approve = asyncio.create_task(c.post(f"/api/expense-preapprovals/{pid}/approve"))
+            assert await _wait_for_lock_waiter(mk), "the approve never queued behind the reject"
+            await held.commit()
+            resp = await approve
+
+    assert resp.status_code == 422, resp.text
+    async with mk() as s:
+        row = await s.get(ExpensePreapproval, pre_uuid)
+        assert row.status == PreapprovalStatus.rejected
+        assert row.decided_by is None
+
+
+async def _wait_for_lock_waiter(mk, *, timeout: float = 15.0) -> bool:
+    """True once Postgres reports another backend here waiting on a lock —
+    asked of the server's own wait state, never slept for."""
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
+    while loop.time() < deadline:
+        async with mk() as s:
+            waiting = (
+                await s.execute(
+                    text(
+                        "SELECT count(*) FROM pg_stat_activity "
+                        "WHERE datname = current_database() "
+                        "AND pid <> pg_backend_pid() "
+                        "AND wait_event_type = 'Lock'"
+                    )
+                )
+            ).scalar_one()
+        if waiting:
+            return True
+        await asyncio.sleep(0.05)
+    return False

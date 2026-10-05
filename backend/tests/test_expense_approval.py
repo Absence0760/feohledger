@@ -15,13 +15,14 @@ Covers:
 Mirrors the ``realdb`` idioms in ``tests/test_expenses.py``.
 """
 
+import asyncio
 import uuid
 from decimal import Decimal
 
-from sqlalchemy import select
+from sqlalchemy import select, text, update
 
 from app.models.entity import Entity
-from app.models.expense import Expense, ExpensePolicy
+from app.models.expense import Expense, ExpensePolicy, ExpenseReport
 from app.models.organization import Organization
 from app.models.workflow import AuditLog
 
@@ -974,7 +975,21 @@ async def test_a_subsidiarys_preapproval_does_not_cover_another_entitys_expense(
             v["code"] for v in (in_a.json()["policy_violations"] or [])
         }
 
-        # The same expense under entity B IS covered.
+    # The same expense under entity B, on the REQUESTER's own report, IS covered.
+    # (A pre-approval covers the person who asked for it — see
+    # `test_a_colleagues_preapproval_does_not_cover_my_expense` — so the
+    # positive control has to be the clerk's spend, not the manager's.)
+    async with realdb.client(key="a", role="ap_manager") as c:
+        await c.post(
+            "/api/expense-policies",
+            json={
+                "name": "B preapproval",
+                "category": category,
+                "requires_preapproval_above": "100.00",
+            },
+            headers={"X-Entity-ID": entity_b},
+        )
+    async with realdb.client(key="a", role="ap_clerk") as c:
         in_b = await c.post(
             "/api/expenses",
             json={
@@ -986,6 +1001,273 @@ async def test_a_subsidiarys_preapproval_does_not_cover_another_entitys_expense(
             headers={"X-Entity-ID": entity_b},
         )
         assert in_b.status_code == 201, in_b.text
+        rid = (
+            await c.post(
+                "/api/expense-reports",
+                json={"report_number": f"R-{uuid.uuid4().hex[:8]}", "currency": "USD"},
+                headers={"X-Entity-ID": entity_b},
+            )
+        ).json()["id"]
+        attached = await c.post(
+            f"/api/expense-reports/{rid}/expenses",
+            json={"expense_ids": [in_b.json()["id"]]},
+            headers={"X-Entity-ID": entity_b},
+        )
+        assert attached.status_code == 200, attached.text
         assert "preapproval_required" not in {
-            v["code"] for v in (in_b.json()["policy_violations"] or [])
+            v["code"] for v in (attached.json()["expenses"][0]["policy_violations"] or [])
         }
+        submitted = await c.post(
+            f"/api/expense-reports/{rid}/submit", headers={"X-Entity-ID": entity_b}
+        )
+        assert submitted.status_code == 200, submitted.text
+
+
+# ---------------------------------------------------------------------------
+# A pre-approval covers its requester's spend, nobody else's
+# ---------------------------------------------------------------------------
+
+
+async def _approved_preapproval(realdb, *, requester_role: str, category: str, amount: str):
+    """``requester_role`` raises a USD pre-approval for ``category``; a different
+    user (``ap_manager``, or ``admin`` when the manager asked) approves it."""
+    async with realdb.client(key="a", role=requester_role) as c:
+        pre = await c.post(
+            "/api/expense-preapprovals",
+            json={
+                "title": "Conference",
+                "estimated_amount": amount,
+                "currency": "USD",
+                "category": category,
+            },
+        )
+        assert pre.status_code == 201, pre.text
+    decider = "admin" if requester_role == "ap_manager" else "ap_manager"
+    async with realdb.client(key="a", role=decider) as c:
+        decided = await c.post(f"/api/expense-preapprovals/{pre.json()['id']}/approve")
+        assert decided.status_code == 200, decided.text
+    return pre.json()["id"]
+
+
+async def test_a_colleagues_preapproval_does_not_cover_my_expense(realdb):
+    """A pre-approval is a specific authorization for the person who asked.
+
+    The cover lookup matched on status + currency + entity + (report OR
+    category) and never on WHO it was raised for, so one clerk's approved
+    "conference, 5 000 USD" request silently cleared the BLOCKING
+    ``preapproval_required`` on every other employee's expense in that category
+    — a control anyone could satisfy by pointing at a colleague's paperwork.
+    """
+    category = f"cat-{uuid.uuid4().hex[:6]}"
+    async with realdb.client(key="a", role="ap_manager") as c:
+        await _make_policy(
+            c, name="Preapproval", category=category, requires_preapproval_above="100.00"
+        )
+    await _approved_preapproval(realdb, requester_role="ap_clerk", category=category, amount="5000")
+
+    # The manager's own report, over the threshold, with no pre-approval of
+    # their own: the clerk's approval must not clear it.
+    async with realdb.client(key="a", role="ap_manager") as c:
+        rid, _ = await _make_report_with_expense(
+            c, amount="500.00", category=category, receipt=True
+        )
+        resp = await c.post(f"/api/expense-reports/{rid}/submit")
+    assert resp.status_code == 422, resp.text
+    codes = {v["code"] for v in resp.json()["detail"]["violations"]}
+    assert codes == {"preapproval_required"}
+
+    # Positive control: the requester's own report IS covered by it.
+    async with realdb.client(key="a", role="ap_clerk") as c:
+        rid, _ = await _make_report_with_expense(
+            c, amount="500.00", category=category, receipt=True
+        )
+        resp = await c.post(f"/api/expense-reports/{rid}/submit")
+    assert resp.status_code == 200, resp.text
+
+
+# ---------------------------------------------------------------------------
+# A line's claim content is frozen once its report is locked
+# ---------------------------------------------------------------------------
+
+
+async def test_cannot_recategorize_a_line_after_submit(realdb):
+    """Submit is where the BLOCKING policy rules run, and ``category`` decides
+    which policies apply. Only ``amount`` / ``currency`` / membership were
+    locked, so a line could be filed under an uncontrolled category, submitted
+    clean, then PATCHed into a category whose policy demands a pre-approval —
+    reaching the approver with a blocking violation submit would have refused.
+    The approver must approve what was submitted."""
+    category = f"cat-{uuid.uuid4().hex[:6]}"
+    async with realdb.client(key="a", role="ap_manager") as c:
+        await _make_policy(
+            c, name="Preapproval", category=category, requires_preapproval_above="10.00"
+        )
+    async with realdb.client(key="a", role="ap_clerk") as c:
+        rid, eid = await _make_report_with_expense(
+            c, amount="500.00", category="misc", receipt=True
+        )
+        assert (await c.post(f"/api/expense-reports/{rid}/submit")).status_code == 200
+        for patch in (
+            {"category": category},
+            {"mileage_miles": 40},
+            {"reimbursable": False},
+            {"payment_method": "corporate_card"},
+            {"expense_date": "2026-01-01"},
+            {"merchant": "Somewhere else"},
+            {"description": "rewritten"},
+        ):
+            resp = await c.patch(f"/api/expenses/{eid}", json=patch)
+            assert resp.status_code == 409, (patch, resp.text)
+        line = (await c.get(f"/api/expenses/{eid}")).json()
+    assert line["category"] == "misc"
+    assert not line["policy_violations"]
+
+
+async def test_cannot_replace_a_receipt_on_an_approved_report(realdb):
+    """The receipt is the evidence the approver signed off on. Swapping it after
+    approval rewrote that evidence with no re-approval."""
+    _, eid = await _submit_and_approve(realdb)
+    async with realdb.client(key="a", role="ap_clerk") as c:
+        before = (await c.get(f"/api/expenses/{eid}")).json()["receipt_file_key"]
+        resp = await c.post(
+            f"/api/expenses/{eid}/receipt",
+            files={"file": ("other.pdf", b"%PDF-1.4 other", "application/pdf")},
+        )
+        assert resp.status_code == 409, resp.text
+        after = (await c.get(f"/api/expenses/{eid}")).json()["receipt_file_key"]
+    assert after == before
+
+
+async def test_gl_coding_a_line_on_an_approved_report_stays_allowed(realdb):
+    """GL coding is the accountant's classification, not the employee's claim —
+    it is routinely done after approval (``/bulk-gl-code`` never gated on the
+    report), so the freeze must not reach it."""
+    _, eid = await _submit_and_approve(realdb)
+    async with realdb.client(key="a", role="ap_manager") as c:
+        resp = await c.patch(f"/api/expenses/{eid}", json={"gl_account_id": None})
+    assert resp.status_code == 200, resp.text
+
+
+async def test_line_on_a_rejected_report_stays_editable(realdb):
+    """The freeze only bites the locked states — a rejected report's lines are
+    back in draft so they can be corrected and re-reported."""
+    async with realdb.client(key="a", role="ap_clerk") as c:
+        rid, eid = await _make_report_with_expense(c, amount="100.00", receipt=True)
+        assert (await c.post(f"/api/expense-reports/{rid}/submit")).status_code == 200
+    async with realdb.client(key="a", role="ap_manager") as c:
+        assert (await c.post(f"/api/expense-reports/{rid}/reject")).status_code == 200
+    async with realdb.client(key="a", role="ap_clerk") as c:
+        resp = await c.patch(f"/api/expenses/{eid}", json={"category": "meals"})
+        assert resp.status_code == 200, resp.text
+        up = await c.post(
+            f"/api/expenses/{eid}/receipt",
+            files={"file": ("fixed.pdf", b"%PDF-1.4 fixed", "application/pdf")},
+        )
+        assert up.status_code == 200, up.text
+
+
+# ---------------------------------------------------------------------------
+# Concurrency — every report transition serialises on the report row
+# ---------------------------------------------------------------------------
+
+
+async def _wait_for_lock_waiter(mk, *, timeout: float = 15.0) -> bool:
+    """True once Postgres reports another backend here waiting on a lock.
+
+    Asked of the server's own wait state from an independent session, never
+    slept for — the signal `test_credit_memos.py` / `test_payment_concurrency.py`
+    wait on. The timeout only bounds a failure."""
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
+    while loop.time() < deadline:
+        async with mk() as s:
+            waiting = (
+                await s.execute(
+                    text(
+                        "SELECT count(*) FROM pg_stat_activity "
+                        "WHERE datname = current_database() "
+                        "AND pid <> pg_backend_pid() "
+                        "AND wait_event_type = 'Lock'"
+                    )
+                )
+            ).scalar_one()
+        if waiting:
+            return True
+        await asyncio.sleep(0.05)
+    return False
+
+
+async def test_approve_cannot_overwrite_a_concurrent_reject(realdb):
+    """A reject that commits while an approve is in flight must win: the approve
+    then sees ``rejected`` and refuses.
+
+    The transitions read the report with a plain SELECT, so the approve read
+    ``submitted`` from the last committed row, passed its source-state guard,
+    and its UPDATE merely queued behind the reject's row lock — then stamped
+    ``approved`` over a rejection. The report ended approved (its lines with
+    it) beside an ``expense_report.rejected`` audit row: a reimbursement nobody
+    can show was approved by a valid state machine, and a trail that
+    contradicts itself."""
+    mk = realdb.sessionmaker("a")
+    async with realdb.client(key="a", role="ap_clerk") as c:
+        rid, _ = await _make_report_with_expense(c, amount="100.00", receipt=True)
+        assert (await c.post(f"/api/expense-reports/{rid}/submit")).status_code == 200
+    report_uuid = uuid.UUID(rid)
+
+    async with mk() as held:
+        # Stand-in for a reject holding the row, mid-transaction.
+        await held.execute(
+            select(ExpenseReport).where(ExpenseReport.id == report_uuid).with_for_update()
+        )
+        await held.execute(
+            update(ExpenseReport).where(ExpenseReport.id == report_uuid).values(status="rejected")
+        )
+        async with realdb.client(key="a", role="ap_manager") as c:
+            approve = asyncio.create_task(c.post(f"/api/expense-reports/{rid}/approve"))
+            assert await _wait_for_lock_waiter(mk), "the approve never queued behind the reject"
+            await held.commit()
+            resp = await approve
+
+    assert resp.status_code == 422, resp.text
+    async with mk() as s:
+        report = await s.get(ExpenseReport, report_uuid)
+        assert str(report.status) == "rejected"
+        assert report.approved_by is None
+
+
+async def test_attach_cannot_land_on_a_report_a_concurrent_submit_locked(realdb):
+    """The composition paths gate on the report still being a draft, then write
+    the line and the total. Without a row lock that check raced submit: an
+    attach that read ``draft`` added a line to a report submit had just
+    totalled and sent for approval — moving the submitted total and nulling the
+    reporting figure the CFO gate reads."""
+    mk = realdb.sessionmaker("a")
+    async with realdb.client(key="a", role="ap_clerk") as c:
+        rid, _ = await _make_report_with_expense(c, amount="100.00", receipt=True)
+        extra = (
+            await c.post("/api/expenses", json={"expense_date": "2026-06-02", "amount": "900.00"})
+        ).json()["id"]
+    report_uuid = uuid.UUID(rid)
+
+    async with mk() as held:
+        # Stand-in for a submit holding the row, mid-transaction.
+        await held.execute(
+            select(ExpenseReport).where(ExpenseReport.id == report_uuid).with_for_update()
+        )
+        await held.execute(
+            update(ExpenseReport).where(ExpenseReport.id == report_uuid).values(status="submitted")
+        )
+        async with realdb.client(key="a", role="ap_clerk") as c:
+            attach = asyncio.create_task(
+                c.post(f"/api/expense-reports/{rid}/expenses", json={"expense_ids": [extra]})
+            )
+            assert await _wait_for_lock_waiter(mk), "the attach never queued behind the submit"
+            await held.commit()
+            resp = await attach
+
+    assert resp.status_code == 409, resp.text
+    async with mk() as s:
+        line = await s.get(Expense, uuid.UUID(extra))
+        assert line.report_id is None
+        report = await s.get(ExpenseReport, report_uuid)
+        assert report.total_amount == Decimal("100.00")

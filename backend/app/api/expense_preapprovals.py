@@ -67,11 +67,17 @@ def _to_response(p: ExpensePreapproval) -> ExpensePreapprovalResponse:
 
 
 async def _get_preapproval_or_404(
-    db: AsyncSession, preapproval_id: uuid.UUID
+    db: AsyncSession, preapproval_id: uuid.UUID, *, for_update: bool = False
 ) -> ExpensePreapproval:
-    row = (
-        await db.execute(select(ExpensePreapproval).where(ExpensePreapproval.id == preapproval_id))
-    ).scalar_one_or_none()
+    """``for_update`` row-locks the request; the decision path passes it. Its
+    ``pending`` guard is a read-then-write check, so without the lock an approve
+    and a reject in flight together both read ``pending`` and both landed — the
+    later commit's status won, beside audit rows for both decisions (the same
+    race ``expenses._get_report_or_404`` closes for report transitions)."""
+    query = select(ExpensePreapproval).where(ExpensePreapproval.id == preapproval_id)
+    if for_update:
+        query = query.with_for_update()
+    row = (await db.execute(query)).scalar_one_or_none()
     if not row:
         raise HTTPException(status_code=404, detail="Pre-approval not found")
     return row
@@ -164,7 +170,7 @@ async def _decide(
     new_status: PreapprovalStatus,
     reason: str | None,
 ) -> ExpensePreapprovalResponse:
-    preapproval = await _get_preapproval_or_404(db, preapproval_id)
+    preapproval = await _get_preapproval_or_404(db, preapproval_id, for_update=True)
     if preapproval.status != PreapprovalStatus.pending:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,

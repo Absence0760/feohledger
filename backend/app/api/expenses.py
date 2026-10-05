@@ -203,22 +203,50 @@ async def _get_expense_or_404(db: AsyncSession, expense_id: uuid.UUID) -> Expens
     return expense
 
 
-async def _get_report_or_404(db: AsyncSession, report_id: uuid.UUID) -> ExpenseReport:
-    report = (
-        await db.execute(
-            select(ExpenseReport)
-            .where(ExpenseReport.id == report_id)
-            # populate_existing so a report already in the identity map has its
-            # `expenses` collection refreshed from the DB — without it, a second
-            # fetch in the same session (e.g. after an attach mutation +
-            # re-fetch) would return the stale, previously-loaded collection.
-            .execution_options(populate_existing=True)
-            .options(selectinload(ExpenseReport.expenses))
-        )
-    ).scalar_one_or_none()
+async def _get_report_or_404(
+    db: AsyncSession, report_id: uuid.UUID, *, for_update: bool = False
+) -> ExpenseReport:
+    """Load a report with its expenses.
+
+    ``for_update`` takes a row lock, and every path that checks the report's
+    ``status`` and then WRITES — a transition (submit / approve / reject), or a
+    composition / content change gated on draft-or-unlocked — must pass it.
+    The status guards are read-then-write checks, not constraints: with a plain
+    SELECT an approve read ``submitted`` while a reject was mid-transaction,
+    passed its guard, and its UPDATE queued behind the reject's lock and then
+    stamped ``approved`` over the rejection; an attach likewise landed a line on
+    a report a concurrent submit had just totalled. Serialising on the report
+    row makes the second request read the first one's committed status.
+    """
+    query = (
+        select(ExpenseReport)
+        .where(ExpenseReport.id == report_id)
+        # populate_existing so a report already in the identity map has its
+        # `expenses` collection refreshed from the DB — without it, a second
+        # fetch in the same session (e.g. after an attach mutation +
+        # re-fetch) would return the stale, previously-loaded collection.
+        .execution_options(populate_existing=True)
+        .options(selectinload(ExpenseReport.expenses))
+    )
+    if for_update:
+        query = query.with_for_update(of=ExpenseReport)
+    report = (await db.execute(query)).scalar_one_or_none()
     if not report:
         raise HTTPException(status_code=404, detail="Expense report not found")
     return report
+
+
+async def _lock_reports(db: AsyncSession, report_ids) -> None:
+    """Row-lock several reports in ascending-id order.
+
+    A path that touches two reports (moving a line from one onto another) must
+    take both locks in ONE global order, or two opposite moves between the same
+    pair lock A-then-B and B-then-A and Postgres aborts one as a deadlock (a
+    500). Later ``_get_report_or_404(..., for_update=True)`` calls for the same
+    ids in the same transaction re-acquire a lock already held, so they are
+    free and cannot invert the order."""
+    for rid in sorted({r for r in report_ids if r is not None}):
+        await _get_report_or_404(db, rid, for_update=True)
 
 
 # Report states whose ``total_amount`` is locked in for an approval decision —
@@ -420,16 +448,28 @@ async def _approved_preapproval_amount(db: AsyncSession, expense: Expense) -> De
     approved request has no standing to clear another subsidiary's blocking
     `preapproval_required`. Unlike the policy read this scopes STRICTLY (no
     `include_shared`) — excluding an unstamped row leaves the violation raised,
-    which is the fail-closed direction here."""
-    if expense.report_id is None and expense.category is None:
+    which is the fail-closed direction here.
+
+    **And scoped to the person who asked for it.** A pre-approval authorizes
+    ITS REQUESTER's spend; the lookup used to match on status + currency +
+    entity + (report OR category) and never on whose request it was, so one
+    clerk's approved "conference, travel, 5 000" cleared the blocking
+    ``preapproval_required`` on every colleague's travel expense in the entity.
+    The expense's owner is its report's ``employee_user_id`` (the authenticated
+    creator — `create_report` never takes it from the body), so the cover must
+    have ``requester_user_id`` equal to it. An UNATTACHED expense has no owner
+    yet, so nothing covers it — the violation stays raised (advisory until
+    then; the attach re-evaluates it, and submit is the gate)."""
+    if expense.report_id is None:
         return None
-    conditions = []
-    if expense.report_id is not None:
-        conditions.append(ExpensePreapproval.expense_report_id == expense.report_id)
+    owner = (
+        select(ExpenseReport.employee_user_id)
+        .where(ExpenseReport.id == expense.report_id)
+        .scalar_subquery()
+    )
+    conditions = [ExpensePreapproval.expense_report_id == expense.report_id]
     if expense.category is not None:
         conditions.append(ExpensePreapproval.category == expense.category)
-    if not conditions:
-        return None
     rows = (
         (
             await db.execute(
@@ -439,6 +479,7 @@ async def _approved_preapproval_amount(db: AsyncSession, expense: Expense) -> De
                     expense.entity_id,
                 ).where(
                     ExpensePreapproval.status == PreapprovalStatus.approved,
+                    ExpensePreapproval.requester_user_id == owner,
                     func.upper(func.coalesce(ExpensePreapproval.currency, "USD"))
                     == normalize_currency(expense.currency),
                     or_(*conditions),
@@ -621,7 +662,7 @@ async def create_expense(
             report_uuid = uuid.UUID(body.report_id)
         except ValueError:
             raise HTTPException(status_code=400, detail="Invalid report_id")
-        report = await _get_report_or_404(db, report_uuid)
+        report = await _get_report_or_404(db, report_uuid, for_update=True)
         # Creating an expense with `report_id` already set IS an attach, and it
         # must gate exactly like the two other attach paths
         # (`POST /expense-reports/{id}/expenses` and a `PATCH` that moves an
@@ -715,10 +756,21 @@ async def upload_receipt(
     org: Organization = Depends(get_tenant),
 ):
     expense = await _get_expense_or_404(db, expense_id)
+    # The receipt is evidence the approver reviewed; on a locked report it is
+    # frozen with the rest of the line (see `update_expense`). Checked BEFORE
+    # the upload, so a refused replacement never lands in object storage —
+    # but unlocked, so no report row lock is held across the storage round
+    # trip; the authoritative locked re-check runs after it, right before the
+    # write (a submit that won the race in between still refuses it).
+    if expense.report_id:
+        _require_report_unlocked(await _get_report_or_404(db, expense.report_id))
     try:
         file_key, _file_url = await upload_expense_receipt(org_id, expense.id, file)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+    await db.refresh(expense)
+    if expense.report_id:
+        _require_report_unlocked(await _get_report_or_404(db, expense.report_id, for_update=True))
     expense.receipt_file_key = file_key
     # A newly-attached receipt can clear a receipt_required violation.
     await _refresh_policy_violations(db, expense, org)
@@ -1003,7 +1055,8 @@ async def update_expense(
                 new_report = uuid.UUID(raw)
             except ValueError:
                 raise HTTPException(status_code=400, detail="Invalid report_id")
-            await _get_report_or_404(db, new_report)
+        # Source and target, locked together in id order (404s on a bad target).
+        await _lock_reports(db, (expense.report_id, new_report))
         if expense.report_id != new_report:
             if expense.report_id:
                 affected_reports.add(expense.report_id)
@@ -1018,7 +1071,7 @@ async def update_expense(
                 # resubmitted, so the line just disappeared onto a dead row.
                 # Detaching (`report_id: null`) stays allowed from a terminal
                 # report — that is how its expenses get re-reported.
-                _require_draft_report(await _get_report_or_404(db, new_report))
+                _require_draft_report(await _get_report_or_404(db, new_report, for_update=True))
                 affected_reports.add(new_report)
             expense.report_id = new_report
 
@@ -1028,6 +1081,18 @@ async def update_expense(
             setattr(expense, field, payload[field])
             changed.append(field)
 
+    # A line on a locked report is frozen — every claim field, not only the ones
+    # that move the total. Submit is where the BLOCKING policy rules ran, and
+    # `category` / `mileage_miles` / `expense_date` decide which rules apply and
+    # what they find; `reimbursable` / `payment_method` decide what is owed.
+    # Locking only `amount` + `currency` let a line be filed under an
+    # uncontrolled category, submitted clean, then re-categorised in front of
+    # the approver into one whose policy demands a pre-approval. `gl_account_id`
+    # is deliberately not in `changed`: GL coding is the accountant's
+    # classification, done after approval (`/bulk-gl-code` never gated on it).
+    if changed and expense.report_id:
+        _require_report_unlocked(await _get_report_or_404(db, expense.report_id, for_update=True))
+
     # An amount / currency change ripples into the owning report's total — the
     # locked conversion describes the OLD amount+currency, so it must be re-locked.
     if ("amount" in changed or "currency" in changed) and expense.report_id:
@@ -1036,8 +1101,8 @@ async def update_expense(
     # Any report whose total this edit would move (an amount change or a
     # membership change) must not be locked — otherwise the edit bypasses the
     # CFO gate / stale-signs an already-approved report (issue #155).
-    for rid in affected_reports:
-        _require_report_unlocked(await _get_report_or_404(db, rid))
+    for rid in sorted(affected_reports):
+        _require_report_unlocked(await _get_report_or_404(db, rid, for_update=True))
 
     # Re-lock (or clear) the line's conversion whenever what it converts, or
     # what it converts INTO, changed (issue #157). Done before the recompute so
@@ -1051,7 +1116,7 @@ async def update_expense(
             clear_expense_conversion(expense)
 
     await db.flush()
-    for rid in affected_reports:
+    for rid in sorted(affected_reports):
         report = await _get_report_or_404(db, rid)
         await _recompute_report_total(db, report)
 
@@ -1086,7 +1151,7 @@ async def delete_expense(
     # Deleting an expense off a locked report would silently shrink its total
     # below the total the CFO gate / approval signature ran against (issue #155).
     if owning_report:
-        _require_report_unlocked(await _get_report_or_404(db, owning_report))
+        _require_report_unlocked(await _get_report_or_404(db, owning_report, for_update=True))
     # A card-reconciled expense is the target of a real FK
     # (`corporate_card_transactions.matched_expense_id`), so Postgres refused
     # the DELETE and it surfaced as an unhandled `ForeignKeyViolationError` — a
@@ -1320,7 +1385,7 @@ async def update_report(
     org_id: uuid.UUID = Depends(get_org_id),
     org: Organization = Depends(get_tenant),
 ):
-    report = await _get_report_or_404(db, report_id)
+    report = await _get_report_or_404(db, report_id, for_update=True)
     # Report-level fields (currency in particular) reinterpret a locked total —
     # only editable while the report isn't locked in for approval (issue #155).
     _require_report_unlocked(report)
@@ -1340,6 +1405,9 @@ async def update_report(
             await _lock_line_conversion(child, report, org)
         await db.flush()
         await _recompute_report_total(db, report)
+        # A fresh lock can resolve (or change) a threshold comparison.
+        for child in report.expenses:
+            await _refresh_policy_violations(db, child, org)
 
     if changed:
         await dispatch_audit(
@@ -1377,10 +1445,6 @@ async def attach_expenses(
     the row here, so the report's total is a real figure in the report's
     currency instead of a nonsense cross-currency sum (issue #157). A line we
     cannot convert is refused (422) rather than attached at face value."""
-    report = await _get_report_or_404(db, report_id)
-    # The target report's composition can only change while it's a draft.
-    _require_draft_report(report)
-
     expense_uuids: list[uuid.UUID] = []
     for raw in body.expense_ids:
         try:
@@ -1388,12 +1452,33 @@ async def attach_expenses(
         except ValueError:
             raise HTTPException(status_code=400, detail=f"Invalid expense id: {raw}")
 
+    # Lock the target AND every report the lines currently sit on, in one id
+    # order (`_lock_reports`), before reading anything the guards depend on.
+    source_ids = (
+        (
+            await db.execute(
+                select(Expense.report_id).where(
+                    Expense.id.in_(expense_uuids), Expense.report_id.is_not(None)
+                )
+            )
+        )
+        .scalars()
+        .all()
+        if expense_uuids
+        else []
+    )
+    await _lock_reports(db, (report_id, *source_ids))
+    report = await _get_report_or_404(db, report_id, for_update=True)
+    # The target report's composition can only change while it's a draft.
+    _require_draft_report(report)
+
     # Track every *other* report an expense is moving off of, so its
     # total_amount is recomputed too — otherwise reassigning an expense from
     # report A to report B leaves A's Numeric total stale (matches the
     # affected-reports handling in update_expense).
     affected_reports: set[uuid.UUID] = set()
     attached: list[Expense] = []
+    detached: list[Expense] = []
     for eid in expense_uuids:
         expense = await _get_expense_or_404(db, eid)
         if body.detach:
@@ -1402,6 +1487,7 @@ async def attach_expenses(
                 # The lock is an expression in THIS report's currency; once the
                 # line leaves, it no longer describes anything.
                 clear_expense_conversion(expense)
+                detached.append(expense)
         else:
             if expense.report_id and expense.report_id != report.id:
                 affected_reports.add(expense.report_id)
@@ -1410,8 +1496,8 @@ async def attach_expenses(
 
     # Moving an expense off a locked report would silently drop its total —
     # block that too (the source report also loses composition).
-    for rid in affected_reports:
-        _require_report_unlocked(await _get_report_or_404(db, rid))
+    for rid in sorted(affected_reports):
+        _require_report_unlocked(await _get_report_or_404(db, rid, for_update=True))
 
     # Lock each newly-attached line into the report's currency before totalling.
     for expense in attached:
@@ -1419,9 +1505,17 @@ async def attach_expenses(
 
     await db.flush()
     await _recompute_report_total(db, report)
-    for rid in affected_reports:
+    for rid in sorted(affected_reports):
         other = await _get_report_or_404(db, rid)
         await _recompute_report_total(db, other)
+
+    # Attaching or detaching changes two inputs the policy engine reads: the
+    # line's locked conversion (a threshold that was "unresolved" may now
+    # compare) and its owner (pre-approval cover is the report employee's —
+    # `_approved_preapproval_amount`). Re-evaluate, as every other expense write
+    # does, so the stored flags describe the line as it now stands.
+    for expense in (*attached, *detached):
+        await _refresh_policy_violations(db, expense, org)
 
     await dispatch_audit(
         db,
@@ -1474,7 +1568,7 @@ async def submit_report(
     report's currency (a legacy row predating the locked-FX columns), and the
     total is then locked into the ORG REPORTING currency so the CFO gate at
     approval time compares a figure fixed at submission."""
-    report = await _get_report_or_404(db, report_id)
+    report = await _get_report_or_404(db, report_id, for_update=True)
     if report.status != ExpenseReportStatus.draft:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
@@ -1608,7 +1702,7 @@ async def approve_report(
     (default ``5000``), only ``cfo`` / ``admin`` may approve. On success the
     report is stamped ``approved_at`` / ``approved_by`` and every child expense
     moves to ``approved``."""
-    report = await _get_report_or_404(db, report_id)
+    report = await _get_report_or_404(db, report_id, for_update=True)
     if report.status != ExpenseReportStatus.submitted:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
@@ -1704,7 +1798,7 @@ async def reject_report(
 
     The child expenses are returned to ``draft`` so they can be corrected and
     re-reported. ``rejected`` is terminal for this report row."""
-    report = await _get_report_or_404(db, report_id)
+    report = await _get_report_or_404(db, report_id, for_update=True)
     if report.status != ExpenseReportStatus.submitted:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
