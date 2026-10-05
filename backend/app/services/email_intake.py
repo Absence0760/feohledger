@@ -68,7 +68,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.models.invoice import Invoice, InvoiceStatus
 from app.models.organization import Organization
-from app.services.webhook_security import is_event_already_processed, release_event_claim
+from app.services.webhook_security import (
+    event_claim_exists,
+    is_event_already_processed,
+    release_event_claim,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -333,6 +337,25 @@ async def process_inbound_email(
     return result
 
 
+async def _legacy_claim_live(message_id: str) -> bool:
+    """TRANSITIONAL — is a pre-per-tenant ``email_intake:<message_id>`` claim live?
+
+    Before claims were scoped by org, the key was the bare Message-ID, and it
+    does not record WHICH tenant that delivery reached. A provider redelivery
+    of such a message arriving after the deploy would miss the new scoped key
+    and create a second payable. The only rule that can never duplicate is the
+    old one: a live legacy claim means "already processed" for every tenant.
+    Its cost is that the old cross-tenant drop persists for messages first
+    delivered before the deploy, and only until their claim expires
+    (``webhook_security.DEFAULT_DEDUP_TTL_SECONDS``, 72h).
+
+    Delete this check, and :func:`webhook_security.event_claim_exists` if it
+    has no other caller, once that TTL has elapsed after the per-tenant change
+    is deployed — tracked in ``docs/followups.md``.
+    """
+    return await event_claim_exists("email_intake", message_id)
+
+
 async def _process_for_org(org: Organization, payload: InboundEmail) -> IntakeResult:
     """Deliver one inbound message to ONE resolved tenant."""
     result = IntakeResult(tenant_slug=org.slug)
@@ -345,7 +368,9 @@ async def _process_for_org(org: Organization, payload: InboundEmail) -> IntakeRe
     # deliveries. A missing message id can't be deduped (logged by the
     # helper) — always processed, same as the other webhook handlers.
     dedup_id = dedup_event_id(org, payload.message_id)
-    if await is_event_already_processed("email_intake", dedup_id):
+    if await _legacy_claim_live(payload.message_id) or await is_event_already_processed(
+        "email_intake", dedup_id
+    ):
         result.error = "Duplicate delivery"
         logger.info(
             "Email intake: duplicate delivery for tenant=%s message_id=%s",

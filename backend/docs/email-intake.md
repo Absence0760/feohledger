@@ -383,7 +383,15 @@ invoice was dropped as a "duplicate delivery" it had never received. A
 notification naming several intake addresses is processed tenant by tenant,
 each with its own transaction and claim, so if one tenant fails (503) the
 redelivery dedupes the tenants that already committed and retries only the
-failed one. A provider retry or a
+failed one.
+
+**Transitional:** a claim written before the per-tenant change has the bare
+`email_intake:<message_id>` key and does not record which tenant it reached, so
+while one is still live (the 72h dedup TTL) `_legacy_claim_live` treats the
+message as already processed for every tenant — the only rule that cannot turn
+a provider's redelivery of a pre-deploy message into a second payable. Its
+removal, once the TTL has elapsed after deploy, is tracked in
+`docs/followups.md`. A provider retry or a
 genuine duplicate delivery of the same message creates **zero** additional
 invoices; the second delivery still gets the same opaque `200` ack. Providers
 that don't set `Message-ID` (or set an empty one) can't be deduped and are
