@@ -1874,6 +1874,17 @@ async def accept_my_discount_offer(
     offer = await _portal_offer_or_404(db, offer_id, vu)
     today = utc_today()
 
+    # Same gate as the AP accept: an invoice already paid / done has no payment
+    # left to discount, so the vendor's acceptance could never be realized.
+    from app.services.discount_auto_trigger import settled_invoice_status
+
+    settled = await settled_invoice_status(db, offer)
+    if settled is not None:
+        raise HTTPException(
+            status_code=409,
+            detail=f"The invoice is already {settled}; there is no payment left to discount",
+        )
+
     tier_days = body.tier_days if body else None
     if tier_days is not None:
         tier = offers_svc.select_tier_for_date(

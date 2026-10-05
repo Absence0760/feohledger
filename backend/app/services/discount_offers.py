@@ -355,6 +355,41 @@ def discount_savings(base_amount: Decimal, tier: dict) -> Decimal:
 # --------------------------------------------------------------------------- #
 
 
+def invoice_awaits_payment(status) -> bool:
+    """True when an invoice in ``status`` can still be paid — so an early-pay
+    discount on it can still be taken.
+
+    Derived, not listed: a status awaits payment when the payment queue's own
+    rule (``api/payments.PAYABLE_INVOICE_STATUSES``) is reachable from it
+    through ``workflow_engine.VALID_TRANSITIONS`` without passing through a
+    settled status (``paid`` / ``done``). The walk has to stop at those two
+    because the void back-edge (``paid → approved``) would otherwise make a
+    paid invoice look payable. So an unapproved invoice still awaits payment
+    (approval is ahead of it), while one already ``paid`` or ``done`` does not —
+    accepting a discount there records a deduction no payment can ever take.
+    """
+    # Lazy: `api.payments` is a large router module, and this one is imported
+    # by modules it (transitively) loads.
+    from app.api.payments import PAYABLE_INVOICE_STATUSES
+    from app.models.invoice import InvoiceStatus
+    from app.services.workflow_engine import VALID_TRANSITIONS
+
+    settled = {InvoiceStatus.paid, InvoiceStatus.done}
+    payable = {InvoiceStatus(s) for s in PAYABLE_INVOICE_STATUSES}
+    start = InvoiceStatus(status)
+    seen: set = set()
+    frontier = [start]
+    while frontier:
+        current = frontier.pop()
+        if current in seen or current in settled:
+            continue
+        if current in payable:
+            return True
+        seen.add(current)
+        frontier.extend(VALID_TRANSITIONS.get(current, set()))
+    return False
+
+
 def accept_offer(offer, *, tier: dict, actor_id, now: datetime) -> None:
     """Transition ``offered`` → ``accepted``, recording the chosen tier.
 
@@ -442,6 +477,27 @@ def mark_captured(offer, *, captured_amount: Decimal, now: datetime) -> None:
     offer.captured_amount = _q_money(Decimal(captured_amount))
     offer.captured_at = now
     offer.status = OFFER_STATUS_CAPTURED
+
+
+def reverse_capture(offer) -> Decimal:
+    """Undo :func:`mark_captured`: ``captured`` → ``accepted``, returning the
+    savings that are no longer realized.
+
+    A capture is savings realized ON a settlement. When that settlement is
+    voided the invoice goes back to ``approved`` and nothing was paid, so
+    nothing was saved — the offer returns to the state it was in before the
+    payment (the discount is still agreed; it is simply not yet taken), which
+    is also what lets a re-payment at the discounted payoff capture it again.
+
+    Raises ``ValueError`` if the offer is not currently ``captured``.
+    """
+    if offer.status != OFFER_STATUS_CAPTURED:
+        raise ValueError(f"cannot reverse an offer in status {offer.status!r} (must be 'captured')")
+    reversed_amount = _q_money(Decimal(offer.captured_amount or 0))
+    offer.captured_amount = None
+    offer.captured_at = None
+    offer.status = OFFER_STATUS_ACCEPTED
+    return reversed_amount
 
 
 def expire_if_past(offer, *, as_of: date) -> bool:

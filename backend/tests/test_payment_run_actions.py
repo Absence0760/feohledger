@@ -191,6 +191,14 @@ async def test_void_payment_returns_invoice_to_approved_via_transition_invoice()
         patch("app.api.payments.get_payment_adapter", return_value=SimpleNamespace()),
         patch("app.api.payments.transition_invoice", new_callable=AsyncMock) as ti,
         patch("app.services.audit_dispatch.dispatch_audit", new_callable=AsyncMock) as da,
+        # The void also un-captures any discount this payment realized; that
+        # leg queries discount offers, which this mock session doesn't model.
+        # Its behaviour is pinned against a real DB in test_discount_capture.py.
+        patch(
+            "app.services.discount_capture.reverse_captures_for_voided_payment",
+            new_callable=AsyncMock,
+            return_value=[],
+        ),
     ):
         ti.return_value = invoice
         da.return_value = None
@@ -274,6 +282,14 @@ async def test_void_audit_records_real_previous_status_and_decimal_amount():
         patch("app.api.payments.get_payment_adapter", return_value=SimpleNamespace()),
         patch("app.api.payments.transition_invoice", new_callable=AsyncMock) as ti,
         patch("app.services.audit_dispatch.dispatch_audit", new_callable=AsyncMock) as da,
+        # The void also un-captures any discount this payment realized; that
+        # leg queries discount offers, which this mock session doesn't model.
+        # Its behaviour is pinned against a real DB in test_discount_capture.py.
+        patch(
+            "app.services.discount_capture.reverse_captures_for_voided_payment",
+            new_callable=AsyncMock,
+            return_value=[],
+        ),
     ):
         ti.return_value = invoice
         da.return_value = None

@@ -32,7 +32,7 @@ tenant-scoped + `EntityMixin` + `TimestampMixin`). Money is exact: `amount` is
 | `cadence` | enum | `monthly` (default), `quarterly`, `annual` — how often the template generates. |
 | `day_of_period` | integer | Day-of-month (1–28) the invoice is dated/generated on. Capped at 28 so every month is valid (no Feb-30 clamp guesswork). |
 | `start_date` | date | Required. First period the template is eligible for. |
-| `end_date` | date | Nullable. After it, the template generates nothing (sweep nulls `next_run_on`). |
+| `end_date` | date | Nullable. After it, the template generates nothing — on any path (§ `end_date` is a hard stop). |
 | `next_run_on` | date | The next calendar date the sweep should generate for. Advanced after each successful generation. NULL = nothing pending (ended / past `end_date`). Indexed (the sweep's `WHERE`). |
 | `last_period_key` | varchar(40) | period_key of the most recently generated invoice (`"2026-06"`, `"2026-Q2"`, `"2026"`). Display + a cheap "already ran this period" guard ahead of the DB unique index. |
 | `last_generated_at` | timestamptz | When the last invoice was generated. |
@@ -127,6 +127,23 @@ savepoint is purely the concurrency backstop.)
 
 **The sweep never moves money.** It only creates an `Invoice` in the queue; the
 CFO-gated payment run is what funds it, exactly as for a manually-uploaded bill.
+
+### `end_date` is a hard stop
+
+A template whose `end_date` passes without anyone calling `/end` stays
+`active` — only its cursor is nulled. So `status` is not the stop; `end_date`
+is, and every path that generates a period or moves the cursor honours it
+through one predicate, `services/recurring_invoices.past_end_date`:
+
+| Path | Behaviour |
+|------|-----------|
+| `POST /{id}/generate-now` | `409` when the current period's run date is after `end_date`. Its period comes from today, never from the cursor, so the cursor's own `end_date` cap never reached it — one click used to raise a payable for a month the template no longer covered. |
+| `PATCH /{id}` changing `end_date` | Re-caps `next_run_on`, in both directions. **Shortened** before the cursor → the cursor is withdrawn (it used to stay, and the sweep raised one more period the operator had just ruled out). **Extended** after the schedule ran out → the cursor comes back from today (it used to stay NULL, leaving the template `active` and silent forever). A live cursor is re-capped from where it already is, so no owed period is skipped. |
+| the sweep | A cursor already past `end_date` (written before the PATCH fix) is withdrawn and committed, never generated from. |
+
+Periods that fell between an old `end_date` and an extension are **not**
+back-filled — the same rule `resume` follows for the time a template slept.
+`tests/test_recurring_invoices.py` pins each row.
 
 ### Who counts as the generated invoice's creator
 
@@ -341,7 +358,7 @@ Mounted at `/api/recurring`.
 | `POST /recurring/{id}/pause` | `active` → `paused` | mutate |
 | `POST /recurring/{id}/resume` | `paused` → `active` | mutate |
 | `POST /recurring/{id}/end` | → `ended` (terminal; nulls `next_run_on`) | mutate |
-| `POST /recurring/{id}/generate-now` | Generate this period's invoice on demand (idempotent on the DB unique index — a no-op if this period already generated) | mutate |
+| `POST /recurring/{id}/generate-now` | Generate this period's invoice on demand (idempotent on the DB unique index — a no-op if this period already generated). `409` for an ended template or one whose `end_date` has passed | mutate |
 | `GET /recurring/{id}/upcoming-schedule?count=` | Projected upcoming generations (no invoice created) — `period_key` + `run_on` + `amount`/`currency` per occurrence | read |
 | `GET /recurring/{id}/history` | The invoices generated from this template (links back via `recurring_template_id`) | read |
 

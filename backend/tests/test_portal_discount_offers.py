@@ -684,3 +684,25 @@ async def test_offer_on_another_vendors_invoice_is_invisible_and_unacceptable(re
     async with _portal_client(realdb, other_vu, other_vid) as client:
         listed = await client.get("/api/portal/discount-offers")
     assert [o["id"] for o in listed.json()["items"]] == [str(offer_id)]
+
+
+@pytest.mark.asyncio
+async def test_portal_accept_refuses_an_offer_on_an_invoice_already_paid(realdb):
+    """The supplier side of the same rule as `POST /api/discounts/offers/{id}/
+    accept`: an invoice already `paid` has no payment left to discount, so a
+    vendor accepting the offer records a deduction that can never be taken."""
+    org_id = realdb.info(TENANT).org_id
+    mk = realdb.sessionmaker(TENANT)
+    vendor_id, vu_id = await _seed_vendor_and_user(mk, org_id)
+    offer_id, invoice_id = await _seed_invoice_offer(mk, org_id, vendor_id)
+    async with mk() as s:
+        inv = await s.get(Invoice, invoice_id)
+        inv.status = InvoiceStatus.paid
+        await s.commit()
+
+    async with _portal_client(realdb, vu_id, vendor_id) as client:
+        resp = await client.post(f"/api/portal/discount-offers/{offer_id}/accept")
+    assert resp.status_code == 409, resp.text
+    assert "paid" in resp.json()["detail"]
+    async with mk() as s:
+        assert (await s.get(DiscountOffer, offer_id)).status == OFFER_STATUS_OFFERED

@@ -104,6 +104,7 @@ from app.services.currency_conversion import (
     payment_reporting_amount_sql,
     resolve_reporting_currency,
 )
+from app.services.discount_auto_trigger import settled_invoice_status
 from app.services.payment_runs import PaymentRunItemInput, create_payment_run_for_invoices
 from app.tenant import (
     apply_entity_scope,
@@ -579,6 +580,8 @@ async def capture_discounts_from_plan(
         await tenant_db.refresh(offer, with_for_update=True)
         if offer.status != OFFER_STATUS_OFFERED:
             continue  # already handled (accepted/captured/declined/expired) — no-op
+        if await settled_invoice_status(tenant_db, offer) is not None:
+            continue  # invoice already paid / done — nothing left to discount
         tier = offers_svc.select_tier_for_date(
             offer.tiers or [],
             rec.opportunity.tier_days,

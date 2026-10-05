@@ -1653,6 +1653,73 @@ async def test_enact_routes_forbid_ap_clerk(realdb, route):
     assert resp.status_code == 403, resp.text
 
 
+async def test_capture_discounts_skips_an_offer_whose_invoice_was_paid(realdb):
+    """capture-discounts re-checks each selected offer's invoice under its own
+    lock-and-reread: an invoice paid after the plan was proposed has no payment
+    left to discount, so the offer is skipped (counted, not accepted).
+
+    The optimizer refuses settled invoices too, which would hide this guard, so
+    that half is neutralised here — this pins the capture path on its own."""
+    from unittest.mock import patch
+
+    from app.models.discount import DiscountOffer
+    from app.models.invoice import Invoice, InvoiceStatus
+
+    a = realdb.info("a")
+    mk_a = realdb.sessionmaker("a")
+    async with mk_a() as sa:
+        ent = await _default_entity_id(sa, a.org_id)
+        inv = await _seed_invoice(
+            sa,
+            a.org_id,
+            ent,
+            number="CAP-PAID-1",
+            vendor_name="PaidCapCo",
+            amount="1000.00",
+            status="approved",
+            due_date=date.today() + timedelta(days=30),
+        )
+        await sa.commit()
+        inv_id = inv.id
+
+    async with realdb.client(key="a", role="ap_manager") as c:
+        r = await c.post(
+            "/api/discounts/offers",
+            json={
+                "scope": "invoice",
+                "invoice_id": str(inv_id),
+                "tiers": [{"days": 5, "percent": "3.00"}],
+            },
+        )
+        assert r.status_code == 201, r.text
+        offer_id = r.json()["id"]
+
+    plan = await _propose_plan(realdb, opening_balance=Decimal("5000.00"))
+    assert any(r.selected for r in plan.discount_recommendations)
+    body = _replay_body(plan)
+
+    async with mk_a() as sa:
+        (await sa.get(Invoice, inv_id)).status = InvoiceStatus.paid
+        await sa.commit()
+
+    async def _optimizer_blind(_db, _offer):
+        return None
+
+    with patch("app.api.discounts.settled_invoice_status", _optimizer_blind):
+        async with realdb.client(key="a", role="admin") as c:
+            r1 = await c.post(f"/api/cash-flow/plans/{plan.plan_id}/capture-discounts", json=body)
+    assert r1.status_code == 200, r1.text
+    data = r1.json()
+    assert data["accepted_offer_ids"] == []
+    assert data["accepted_count"] == 0
+    assert data["skipped_count"] == 1
+
+    async with mk_a() as sa:
+        offer = await sa.get(DiscountOffer, uuid.UUID(offer_id))
+        assert offer.status == "offered"
+        assert offer.accepted_tier is None
+
+
 async def test_capture_discounts_accepts_selected_offers_and_moves_no_money(realdb):
     from app.models.discount import DiscountOffer
     from app.models.invoice import Invoice

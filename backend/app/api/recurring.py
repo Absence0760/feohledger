@@ -405,6 +405,19 @@ async def update_template(
     # is still active (paused/ended templates don't carry a live cursor).
     if template.status == STATUS_ACTIVE and (_SCHEDULE_FIELDS & set(changed)):
         _seed_next_run_on(template, after=max(utc_today(), template.start_date))
+    elif template.status == STATUS_ACTIVE and "end_date" in changed:
+        # `end_date` bounds the cursor, so moving it has to move the cursor
+        # too, in both directions. Shortened: a cursor already past the new end
+        # is withdrawn (`compute_next_run_on` returns None), where it used to
+        # stay put for the sweep to generate one more period the operator had
+        # just ruled out. Extended: an exhausted schedule (cursor nulled at the
+        # old end) comes back from today, where it used to sit `active` and
+        # silent forever. A live cursor is re-capped from where it already is,
+        # so neither direction skips a period the sweep owes.
+        _seed_next_run_on(
+            template,
+            after=template.next_run_on or max(utc_today(), template.start_date),
+        )
 
     # Segregation of duties: whoever changed a TERM of the payable (vendor,
     # amount, currency, GL coding, schedule — `MATERIAL_EDIT_FIELDS`) has shaped
@@ -598,6 +611,15 @@ async def generate_now(
         start_date=template.start_date,
     )
     period_key = svc.period_key_for(template.cadence, run_on)
+    # `run_on` comes from today, not from the cursor, so the cursor's own
+    # `end_date` cap never applied here: a template whose end date passed
+    # without anyone calling `/end` is still `active`, and one click raised a
+    # payable for a period its standing instruction no longer covers.
+    if svc.past_end_date(template, run_on):
+        raise HTTPException(
+            status_code=409,
+            detail="Template's end date has passed; there is no current period to generate",
+        )
 
     # Pre-check for an already-generated period → idempotent 200, no duplicate.
     existing = (

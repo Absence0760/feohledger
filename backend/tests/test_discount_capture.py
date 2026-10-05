@@ -352,3 +352,172 @@ async def test_capture_is_idempotent_on_repeat_settlement(realdb):
         assert offer.status == "captured"
         assert offer.captured_amount == Decimal("20.00")  # unchanged, not doubled
         assert offer.captured_at == first_captured_at  # unchanged, not re-stamped
+
+
+# --------------------------------------------------------------------------- #
+# One payment realizes at most one discount; a void un-realizes it
+# --------------------------------------------------------------------------- #
+
+
+async def _accepted_offer(c, invoice_id: str, *, percent: str = "2.00") -> str:
+    resp = await c.post(
+        "/api/discounts/offers",
+        json={
+            "scope": "invoice",
+            "invoice_id": invoice_id,
+            "tiers": [{"days": 10, "percent": percent}],
+        },
+    )
+    assert resp.status_code == 201, resp.text
+    offer_id = resp.json()["id"]
+    accept = await c.post(f"/api/discounts/offers/{offer_id}/accept", json={})
+    assert accept.status_code == 200, accept.text
+    return offer_id
+
+
+async def _pay_at_discounted_payoff(realdb, invoice_id: str, *, memo: str) -> str:
+    """Net a $1000 invoice to $980 via a $20 credit memo, then run + execute
+    it (creator and executor differ — run segregation). Returns the completed
+    payment's id."""
+    async with realdb.client(key="a", role="ap_manager") as c:
+        vendor_id = (await c.get(f"/api/invoices/{invoice_id}")).json()["vendor_id"]
+        memo_resp = await c.post(
+            "/api/credit-memos",
+            json={
+                "memo_number": memo,
+                "vendor_id": vendor_id,
+                "amount": "20.00",
+                "invoice_id": invoice_id,
+            },
+        )
+        assert memo_resp.status_code == 201, memo_resp.text
+        run_resp = await c.post(
+            "/api/payments/runs",
+            json={"items": [{"invoice_id": invoice_id, "method": "ach"}]},
+        )
+        assert run_resp.status_code == 201, run_resp.text
+        assert run_resp.json()["total_amount"] == "980.00"
+        run_id = run_resp.json()["id"]
+    async with realdb.client(key="a", role="admin") as exec_c:
+        exec_resp = await exec_c.post(f"/api/payments/runs/{run_id}/execute")
+    assert exec_resp.status_code == 200, exec_resp.text
+    assert exec_resp.json()["payments_completed"] == 1
+    async with realdb.sessionmaker("a")() as s:
+        payment = (
+            await s.execute(select(Payment).where(Payment.invoice_id == uuid.UUID(invoice_id)))
+        ).scalar_one()
+        assert payment.status == "completed"
+        return str(payment.id)
+
+
+async def test_one_settlement_never_captures_two_offers(realdb):
+    """Two `accepted` offers with the same tier on one invoice — a supplier's
+    re-sent offer, both accepted — share one discounted payoff. ONE payment at
+    that payoff realizes ONE discount: the vendor was short-paid $20 once.
+    Capturing both booked $40 of savings off a $20 deduction, and the
+    dashboard's `captured_amount` reported money that was never saved."""
+    mk = realdb.sessionmaker("a")
+    _, invoice_id = await _seed_vendor_and_approved_invoice(
+        mk, realdb.info("a").org_id, number="DISC-CAP-DUP", amount=Decimal("1000.00")
+    )
+    async with realdb.client(key="a", role="ap_manager") as c:
+        first = await _accepted_offer(c, invoice_id)
+        second = await _accepted_offer(c, invoice_id)
+
+    await _pay_at_discounted_payoff(realdb, invoice_id, memo="CM-DISC-DUP")
+
+    async with mk() as s:
+        a = await s.get(DiscountOffer, uuid.UUID(first))
+        b = await s.get(DiscountOffer, uuid.UUID(second))
+        # The earlier acceptance is the one the settlement realizes.
+        assert (a.status, b.status) == ("captured", "accepted")
+        assert a.captured_amount == Decimal("20.00")
+        assert b.captured_amount is None
+        captured_rows = (
+            (
+                await s.execute(
+                    select(AuditLog).where(
+                        AuditLog.action == "discount_offer.captured",
+                        AuditLog.entity_id.in_([a.id, b.id]),
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert len(captured_rows) == 1
+
+
+async def test_voiding_the_settling_payment_reverses_the_capture(realdb):
+    """A captured discount is savings realized ON a settlement. Voiding that
+    payment returns the invoice to `approved` — nothing was paid, so nothing
+    was saved — but the offer used to stay `captured` with its
+    `captured_amount`, so the dashboard kept reporting $20 of savings on an
+    invoice that is now unpaid, and re-paying it at the discounted payoff
+    could capture nothing (the offer was no longer `accepted`)."""
+    mk = realdb.sessionmaker("a")
+    _, invoice_id = await _seed_vendor_and_approved_invoice(
+        mk, realdb.info("a").org_id, number="DISC-CAP-VOID", amount=Decimal("1000.00")
+    )
+    async with realdb.client(key="a", role="ap_manager") as c:
+        offer_id = await _accepted_offer(c, invoice_id)
+
+    payment_id = await _pay_at_discounted_payoff(realdb, invoice_id, memo="CM-DISC-VOID")
+    async with mk() as s:
+        assert (await s.get(DiscountOffer, uuid.UUID(offer_id))).status == "captured"
+
+    async with realdb.client(key="a", role="admin") as c:
+        resp = await c.post(
+            f"/api/payments/{payment_id}/void",
+            json={"reason": "Wrong account; re-paying."},
+        )
+    assert resp.status_code == 200, resp.text
+
+    async with mk() as s:
+        offer = await s.get(DiscountOffer, uuid.UUID(offer_id))
+        assert offer.status == "accepted"
+        assert offer.captured_amount is None
+        assert offer.captured_at is None
+        audit = (
+            await s.execute(
+                select(AuditLog).where(
+                    AuditLog.action == "discount_offer.capture_reversed",
+                    AuditLog.entity_id == uuid.UUID(offer_id),
+                )
+            )
+        ).scalar_one()
+        assert audit.details["payment_id"] == payment_id
+        assert audit.details["reversed_amount"] == "20.00"
+        assert (await s.get(Invoice, uuid.UUID(invoice_id))).status == InvoiceStatus.approved
+
+    async with realdb.client(key="a", role="ap_manager") as c:
+        dash = (await c.get("/api/discounts/dashboard")).json()
+    assert dash["captured_count"] == 0
+    assert Decimal(str(dash["captured_amount"])) == Decimal("0")
+
+
+async def test_voiding_a_payment_that_never_settled_leaves_captures_alone(realdb):
+    """Only a `completed` payment can have realized a discount, so voiding one
+    that never settled reverses nothing — the guard that keeps a void of some
+    other in-flight payment from un-capturing a discount it did not realize."""
+    from app.services.discount_capture import reverse_captures_for_voided_payment
+
+    mk = realdb.sessionmaker("a")
+    _, invoice_id = await _seed_vendor_and_approved_invoice(
+        mk, realdb.info("a").org_id, number="DISC-CAP-VOID2", amount=Decimal("1000.00")
+    )
+    async with realdb.client(key="a", role="ap_manager") as c:
+        offer_id = await _accepted_offer(c, invoice_id)
+    await _pay_at_discounted_payoff(realdb, invoice_id, memo="CM-DISC-VOID2")
+
+    async with mk() as s:
+        reversed_ = await reverse_captures_for_voided_payment(
+            s,
+            invoice_id=uuid.UUID(invoice_id),
+            voided_payment_id=uuid.uuid4(),
+            previous_status="processing",
+        )
+        await s.commit()
+    assert reversed_ == []
+    async with mk() as s:
+        assert (await s.get(DiscountOffer, uuid.UUID(offer_id))).status == "captured"

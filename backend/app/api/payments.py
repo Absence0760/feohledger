@@ -1562,6 +1562,37 @@ async def void_payment(
 
     from app.services.audit_dispatch import dispatch_audit
 
+    # A discount this payment realized is no longer realized: nothing was paid,
+    # so nothing was saved. Un-capture it in the SAME transaction as the void
+    # (not best-effort like the capture leg — that one must never stop a
+    # payment that moved money from recording it; this one is a pure DB write
+    # whose failure should fail the void rather than leave the dashboard
+    # reporting savings on an unpaid invoice). See
+    # `discount_capture.reverse_captures_for_voided_payment`.
+    if invoice is not None:
+        from app.services.discount_capture import reverse_captures_for_voided_payment
+
+        for offer, reversed_amount in await reverse_captures_for_voided_payment(
+            db,
+            invoice_id=invoice.id,
+            voided_payment_id=payment.id,
+            previous_status=previous_status,
+        ):
+            await dispatch_audit(
+                db,
+                correlation_id=payment.correlation_id or invoice.id,
+                organization_id=org.id,
+                actor_id=user.id,
+                action="discount_offer.capture_reversed",
+                entity_type="discount_offer",
+                entity_id=offer.id,
+                details={
+                    "invoice_id": str(invoice.id),
+                    "payment_id": str(payment.id),
+                    "reversed_amount": str(reversed_amount),
+                },
+            )
+
     await dispatch_audit(
         db,
         correlation_id=payment.correlation_id or uuid.uuid4(),

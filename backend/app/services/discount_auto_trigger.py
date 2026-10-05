@@ -96,6 +96,7 @@ from app.services.discount_offers import (
     best_tier_for_date,
     expire_if_past,
     has_lapsed,
+    invoice_awaits_payment,
     offer_reference_date,
 )
 from app.services.discount_roi import compute_roi, days_between
@@ -194,6 +195,26 @@ async def _resolve_due_date(db: AsyncSession, offer: DiscountOffer) -> date | No
     return (
         await db.execute(select(Invoice.due_date).where(Invoice.id == offer.invoice_id))
     ).scalar_one_or_none()
+
+
+async def settled_invoice_status(db: AsyncSession, offer: DiscountOffer) -> str | None:
+    """The offer's invoice status when that invoice can no longer be paid,
+    else ``None``.
+
+    The one gate every accept path asks — ``POST /api/discounts/offers/{id}/
+    accept``, the supplier portal's accept, the copilot's capture and this
+    sweep — so an acceptance can never be recorded against an invoice already
+    ``paid`` / ``done`` (``discount_offers.invoice_awaits_payment``). A
+    vendor-scoped bulk offer has no single invoice and is never refused here.
+    """
+    if offer.invoice_id is None:
+        return None
+    status = (
+        await db.execute(select(Invoice.status).where(Invoice.id == offer.invoice_id))
+    ).scalar_one_or_none()
+    if status is None or invoice_awaits_payment(status):
+        return None
+    return status.value if hasattr(status, "value") else str(status)
 
 
 async def _resolve_cost_of_capital(organization_id: uuid.UUID) -> Decimal:
@@ -421,6 +442,13 @@ async def _sweep_tenant(
                             reference_date=offer_reference_date(offer),
                         )
                         if tier is None:
+                            await db.rollback()
+                            continue
+
+                        # An invoice already paid / done has no payment left to
+                        # make early, so the discount can never be realized —
+                        # whatever its ROI. Left `offered` (no decision made).
+                        if await settled_invoice_status(db, offer) is not None:
                             await db.rollback()
                             continue
 

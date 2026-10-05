@@ -689,3 +689,44 @@ async def test_the_uncontended_path_still_accepts(realdb):
             await db.execute(select(DiscountOffer).where(DiscountOffer.id == offer_id))
         ).scalar_one()
         assert row.status == OFFER_STATUS_ACCEPTED
+
+
+@pytest.mark.asyncio
+async def test_sweep_never_auto_accepts_an_offer_on_a_settled_invoice(realdb):
+    """The sweep's ROI is worthwhile and its threshold clears, but the invoice
+    is already `paid`: there is no payment left to make early, so accepting the
+    discount can never be realized. It used to be auto-accepted (and audited as
+    such) all the same."""
+    from app.models.invoice import Invoice, InvoiceStatus
+
+    mk = realdb.sessionmaker("a")
+    info = realdb.info("a")
+    async with mk() as db:
+        inv = Invoice(
+            organization_id=info.org_id,
+            invoice_number=f"INV-PAID-{uuid.uuid4().hex[:6]}",
+            vendor_name="Paid Co",
+            amount=Decimal("10000.00"),
+            currency="USD",
+            due_date=date(2026, 1, 31),
+            status=InvoiceStatus.paid,
+        )
+        db.add(inv)
+        await db.flush()
+        offer = _make_offer(
+            info.org_id,
+            tiers=[{"days": 5, "percent": "3.00"}],
+            valid_until=date(2026, 1, 26),
+        )
+        offer.invoice_id = inv.id
+        db.add(offer)
+        await db.commit()
+        offer_id = offer.id
+
+    outcome = await discount_auto_trigger._sweep_tenant(info.db_name, _TODAY, _resolver_const)
+    assert outcome.captured == 0
+    assert outcome.offer_failures == 0
+    async with mk() as db:
+        row = await db.get(DiscountOffer, offer_id)
+        assert row.status == OFFER_STATUS_OFFERED
+        assert row.accepted_tier is None
