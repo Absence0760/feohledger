@@ -127,10 +127,15 @@ async def test_report_endpoint_aggregates_persisted_records(realdb):
         body = resp.json()
 
         assert body["record_count"] == 4  # out-of-period row excluded
-        assert body["total_vat_output"] == 200.0
-        assert body["total_vat_reverse_charge"] == 190.0
-        assert body["total_gst"] == 180.0
-        assert body["total_withholding"] == 470.0
+        # Four currencies in the period: no scalar grand total exists, the
+        # roll-up is per currency (see the currency tests below).
+        assert body["currency"] is None
+        assert body["total_vat_output"] is None
+        by_currency = {t["currency"]: t for t in body["totals_by_currency"]}
+        assert by_currency["GBP"]["vat_output"] == 200.0
+        assert by_currency["EUR"]["vat_reverse_charge"] == 190.0
+        assert by_currency["INR"]["gst_total"] == 180.0
+        assert by_currency["AUD"]["withholding_total"] == 470.0
 
         by_country = {c["country_code"]: c for c in body["countries"]}
         assert by_country["GB"]["vat_output"] == 200.0
@@ -165,5 +170,102 @@ async def test_report_endpoint_rejects_inverted_period(realdb):
                 params={"period_start": "2026-03-31", "period_end": "2026-03-01"},
             )
         assert resp.status_code == 400
+    finally:
+        await realdb.cleanup()
+
+
+# ---------- currency is never summed across ---------------------------------
+
+
+def _vat(org_id, country, currency, tax, day, *, rc=False):
+    return IntlTaxRecord(
+        id=uuid.uuid4(),
+        organization_id=org_id,
+        kind=TaxKind.vat,
+        country_code=country,
+        currency=currency,
+        net_amount=tax * 5,
+        tax_rate=Decimal("20.0000"),
+        tax_amount=tax,
+        settled_amount=Decimal("0.00") if rc else tax,
+        reverse_charge=rc,
+        tax_point_date=date(2026, 4, day),
+    )
+
+
+async def _april_report(realdb):
+    async with realdb.client(key="a", role="cfo") as client:
+        resp = await client.get(
+            "/api/international-tax/report",
+            params={"period_start": "2026-04-01", "period_end": "2026-04-30"},
+        )
+    assert resp.status_code == 200, resp.text
+    return resp.json()
+
+
+@pytest.mark.asyncio
+async def test_report_never_adds_figures_in_different_currencies(realdb):
+    """GBP 200 of UK VAT and EUR 190 of German VAT are not "390" of anything.
+
+    The grand totals used to add every row's ``tax_amount`` regardless of its
+    currency, and a country line took the FIRST row's currency as its label
+    and then summed every later row into it — so a German supply invoiced in
+    USD was reported as euros. Totals are per currency; the scalar totals are
+    only populated when the period holds exactly one currency."""
+    org_id = realdb.info("a").org_id
+    async with realdb.sessionmaker("a")() as s:
+        s.add_all(
+            [
+                _vat(org_id, "GB", "GBP", Decimal("200.00"), 2),
+                _vat(org_id, "DE", "EUR", Decimal("190.00"), 3),
+                _vat(org_id, "DE", "USD", Decimal("50.00"), 4),
+                _vat(org_id, "DE", "EUR", Decimal("10.00"), 5, rc=True),
+            ]
+        )
+        await s.commit()
+
+    try:
+        body = await _april_report(realdb)
+        assert body["record_count"] == 4
+        # No single-currency grand total exists for a mixed period.
+        assert body["currency"] is None
+        assert body["total_vat_output"] is None
+        assert body["total_vat_reverse_charge"] is None
+
+        by_currency = {t["currency"]: t for t in body["totals_by_currency"]}
+        assert set(by_currency) == {"EUR", "GBP", "USD"}
+        assert by_currency["GBP"]["vat_output"] == 200.0
+        assert by_currency["EUR"]["vat_output"] == 190.0
+        assert by_currency["EUR"]["vat_reverse_charge"] == 10.0
+        assert by_currency["USD"]["vat_output"] == 50.0
+
+        # One line per (country, currency) — DE in EUR and DE in USD apart.
+        lines = {(c["country_code"], c["currency"]): c for c in body["countries"]}
+        assert set(lines) == {("GB", "GBP"), ("DE", "EUR"), ("DE", "USD")}
+        assert lines[("DE", "EUR")]["vat_output"] == 190.0
+        assert lines[("DE", "EUR")]["record_count"] == 2
+        assert lines[("DE", "USD")]["vat_output"] == 50.0
+    finally:
+        await realdb.cleanup()
+
+
+@pytest.mark.asyncio
+async def test_single_currency_period_keeps_scalar_totals(realdb):
+    org_id = realdb.info("a").org_id
+    async with realdb.sessionmaker("a")() as s:
+        s.add_all(
+            [
+                _vat(org_id, "DE", "EUR", Decimal("190.00"), 3),
+                _vat(org_id, "FR", "EUR", Decimal("40.00"), 6),
+            ]
+        )
+        await s.commit()
+
+    try:
+        body = await _april_report(realdb)
+        assert body["currency"] == "EUR"
+        assert body["total_vat_output"] == 230.0
+        assert body["total_vat_reverse_charge"] == 0.0
+        assert [t["currency"] for t in body["totals_by_currency"]] == ["EUR"]
     finally:
         await realdb.cleanup()
