@@ -22,14 +22,22 @@ import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy import and_, func, or_, select
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.config import settings
 from app.database import _make_tenant_url, control_session_factory
+from app.models.invoice import Invoice, InvoiceStatus
 from app.models.organization import Organization
-from app.models.workflow import WorkflowInstance
-from app.services.approval_chain import CHAIN_STATE_KEY, apply_escalation, get_chain_progress
+from app.models.workflow import WorkflowInstance, WorkflowStep
+from app.services.approval_chain import (
+    CHAIN_SNAPSHOT_MARKER,
+    CHAIN_STATE_KEY,
+    apply_escalation,
+    escalation_ineligible,
+    get_chain_progress,
+    init_chain_for_invoice,
+)
 from app.services.audit_dispatch import dispatch_audit
 from app.services.sweep_health import SWEEP_APPROVAL_ESCALATION, run_sweep_loop
 
@@ -111,6 +119,76 @@ async def _notify_escalated_approvers(
         )
 
 
+async def _review_entered_at(db: AsyncSession, instance: WorkflowInstance) -> datetime:
+    """When the invoice entered the review it is waiting in — level 0's clock.
+
+    The open ``approval`` step is opened on every entry into review (extraction
+    → review, and again on each resubmission after a rejection), so its
+    ``created_at`` is the start of THIS review cycle. A path that puts an
+    invoice straight into review without opening a step (the recurring
+    generator) created the instance in the same transaction, so the instance's
+    own ``created_at`` is the same moment."""
+    opened = (
+        await db.execute(
+            select(func.max(WorkflowStep.created_at)).where(
+                WorkflowStep.instance_id == instance.id,
+                WorkflowStep.step_type == "approval",
+                WorkflowStep.completed_at.is_(None),
+            )
+        )
+    ).scalar_one_or_none()
+    return opened or instance.created_at
+
+
+async def _prepare_for_escalation(
+    db: AsyncSession,
+    instance: WorkflowInstance,
+    *,
+    org_settings: dict | None,
+) -> set[str] | None:
+    """Make ``instance`` escalatable and return the user ids it must not gain.
+
+    Returns ``None`` when there is nothing to escalate.
+
+    **A chain nobody has approved yet has no state.** ``review.approve_invoice``
+    creates it lazily, on the first approval — so before this, level 0 had no
+    ``entered_at`` for the sweep to age, the candidate query never saw the
+    instance, and a chain whose first approver never acted (precisely the case
+    escalation is for) could not escalate at all. For such an instance this
+    initialises the chain with the same routing the first approval would use
+    (``approval_chain.init_chain_for_invoice``), clocked from when the invoice
+    entered review. It only lands if an escalation actually fires: the caller
+    rolls back otherwise, leaving the lazy path exactly as it was.
+
+    The returned set is the payable's implicated actors
+    (``approval_chain.escalation_ineligible``) — segregation of duties refuses
+    them at approval time, so escalation must not make them approvers.
+    """
+    from app.services.review import resolve_approval_config
+
+    invoice = await db.get(Invoice, instance.invoice_id)
+    if invoice is None:
+        return None
+    approval_config = await resolve_approval_config(db, invoice, instance)
+
+    if not get_chain_progress(instance):
+        if invoice.status != InvoiceStatus.ready_for_review:
+            return None
+        if approval_config.get("approver_strategy") != "chain":
+            return None
+        entered_at = await _review_entered_at(db, instance)
+        if not init_chain_for_invoice(
+            instance,
+            invoice,
+            approval_config,
+            org_settings=org_settings,
+            entered_at=entered_at,
+        ):
+            return None
+
+    return escalation_ineligible(invoice, approval_config)
+
+
 @dataclass
 class EscalateResult:
     tenants_scanned: int = 0
@@ -131,13 +209,17 @@ async def escalate_once(*, now: datetime | None = None) -> EscalateResult:
     result = EscalateResult()
 
     async with control_session_factory() as ctrl:
-        rows = await ctrl.execute(select(Organization.id, Organization.db_name))
+        rows = await ctrl.execute(
+            select(Organization.id, Organization.db_name, Organization.settings)
+        )
         tenants = list(rows.all())
 
-    for org_id, db_name in tenants:
+    for org_id, db_name, org_settings in tenants:
         result.tenants_scanned += 1
         try:
-            n, instance_failures = await _escalate_tenant(db_name, now, org_id=org_id)
+            n, instance_failures = await _escalate_tenant(
+                db_name, now, org_id=org_id, org_settings=org_settings
+            )
             result.instances_escalated += n
             result.instance_failures += instance_failures
         except Exception as exc:
@@ -160,7 +242,11 @@ async def escalate_once(*, now: datetime | None = None) -> EscalateResult:
 
 
 async def _escalate_tenant(
-    db_name: str, now: datetime, *, org_id: uuid.UUID | None = None
+    db_name: str,
+    now: datetime,
+    *,
+    org_id: uuid.UUID | None = None,
+    org_settings: dict | None = None,
 ) -> tuple[int, int]:
     """Mutate every active instance whose current chain level is overdue.
 
@@ -202,6 +288,7 @@ async def _escalate_tenant(
         async with factory() as db:
             after: uuid.UUID | None = None
             while True:
+                chain_state = WorkflowInstance.state_data[CHAIN_STATE_KEY].astext
                 query = (
                     select(WorkflowInstance.id)
                     .where(
@@ -209,9 +296,25 @@ async def _escalate_tenant(
                         # No chain, nothing to escalate — skip it in SQL rather
                         # than paying a lock + a JSON parse to learn that.
                         # `astext` yields SQL NULL for a JSON `null`, so a
-                        # key present but null is skipped here exactly as
+                        # key present but null reads exactly as
                         # `chain_state_of` reads it in Python: no chain.
-                        WorkflowInstance.state_data[CHAIN_STATE_KEY].astext.isnot(None),
+                        or_(
+                            chain_state.isnot(None),
+                            # ...or a chain nobody has approved yet, which has
+                            # no state until its first approval — see
+                            # `_prepare_for_escalation`.
+                            and_(
+                                chain_state.is_(None),
+                                WorkflowInstance.steps_config_snapshot.contains(
+                                    CHAIN_SNAPSHOT_MARKER
+                                ),
+                                WorkflowInstance.invoice_id.in_(
+                                    select(Invoice.id).where(
+                                        Invoice.status == InvoiceStatus.ready_for_review
+                                    )
+                                ),
+                            ),
+                        ),
                     )
                     .order_by(WorkflowInstance.id.asc())
                     .limit(page_size)
@@ -242,9 +345,16 @@ async def _escalate_tenant(
                             # Deleted or completed between the id read and the lock.
                             await db.rollback()
                             continue
-                        if not apply_escalation(inst, now=now):
+                        ineligible = await _prepare_for_escalation(
+                            db, inst, org_settings=org_settings
+                        )
+                        if ineligible is None or not apply_escalation(
+                            inst, now=now, ineligible=ineligible
+                        ):
                             # Nothing to write — end the transaction so the row
-                            # lock is released immediately instead of at end of tick.
+                            # lock is released immediately instead of at end of
+                            # tick (and a chain `_prepare_for_escalation` only
+                            # initialised to inspect is discarded with it).
                             await db.rollback()
                             continue
                         if org_id is not None:

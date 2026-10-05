@@ -5,19 +5,19 @@ names the root cause, the evidence, blast radius, and a recommended fix
 approach — this is a staging area for real problems, not a place to let them
 go stale. See root `CLAUDE.md` guard rail 6 (no dangling deferred findings).
 
-**Three entries are open**: the legal-contents smooth-scroll race and the e2e
-cleanup race directly below, and the `payments/` local-e2e flake near the
-bottom. The `queue-blocked` entry beside it was struck on 2026-10-04. Its
-defect, a spec helper that counted DataTable's loading placeholder as a row,
-had been fixed on 2026-09-09 by #390, but nobody struck the entry, so the file
-over-reported by one for a month. The header
-once said "one" while three sat beneath it, then "three" in the same change
+**Four entries are open**: the `all`-mode approval-chain segregation deadlock,
+the legal-contents smooth-scroll race and the e2e cleanup race directly below,
+and the `payments/` local-e2e flake near the bottom. The `queue-blocked` entry
+beside it was struck on 2026-10-04. Its defect, a spec helper that counted
+DataTable's loading placeholder as a row, had been fixed on 2026-09-09 by #390,
+but nobody struck the entry, so the file over-reported by one for a month. The
+header once said "one" while three sat beneath it, then "three" in the same change
 that struck the third; a known-issues file that miscounts itself is the failure
 this note has now warned about twice. Two defects were **fixed on 2026-09-17**:
 the `/organization` 320px reflow defect (issue #432), along with six more routes
 that failed the same criterion and had no entry at all because nothing measured
 them; and the local-e2e `alembic` drift, which now has a pre-run guard that
-refuses to start against a stale database. Sixteen of the nineteen `##`
+refuses to start against a stale database. Sixteen of the twenty `##`
 entries are now `~~struck-through~~` resolved stubs. (This line said "the other
 fifteen" while the file held fifteen struck in total, the two above included.)
 They are kept because the *diagnosis* is the
@@ -41,6 +41,41 @@ goes to [followups.md](followups.md). Reasoning behind a deliberate design call
 goes to [decisions.md](decisions.md).
 
 ---
+
+## An `all`-mode chain level naming the invoice's own uploader can never clear
+
+**Root cause.** A chain level with `parallel_mode: "all"` is satisfied only when
+EVERY id in its `approver_ids` has approved (`approval_chain._level_satisfied`).
+Segregation of duties (`check_segregation`, run first in
+`review.approve_invoice`) refuses any approver in the invoice's implicated set
+(`uploaded_by_id` ∪ `segregation_actor_ids`). When a configured `all` level names
+someone who is also implicated in a particular invoice — an AP manager who both
+approves at that tier and uploaded this invoice — that level needs a signature
+the approval path will always refuse. The invoice sits in `ready_for_review`
+with no error naming why.
+
+**Evidence.** Found reviewing the escalation fix of 2026-10-05
+(`fix/workflow-exceptions-bug-hunt-r4`). That fix stopped the *sweep* from
+creating this state (it no longer substitutes an ineligible escalation target in
+— `apply_escalation(ineligible=…)`), and an escalation with at least one eligible
+target still clears it, because `all`-mode escalation substitutes out every
+not-yet-approved approver. What remains is a level configured this way with no
+escalation, or whose every escalation target is also ineligible: then nothing
+can move it.
+
+**Blast radius.** Liveness, not a bypass — the control fails closed (the invoice
+is never approved without the required people), but a payable is stranded until
+an admin edits the definition, which does not reach in-flight invoices (frozen
+snapshot), or rejects and reworks it.
+
+**Recommended fix.** Decide the policy explicitly rather than by accident:
+either (a) refuse at chain initialisation (`init_chain_for_invoice`) with a
+422 naming the level and the conflict, so the approver who hits it is told why
+and the queue can route it, or (b) treat the implicated approver as recused and
+require an escalation target in their place (raise an exception row so a human
+picks one). Silently dropping them from the `all` requirement is the one option
+to rule out — it weakens a two-signature control to one. Trigger: the next
+change to approval-chain configuration or the workflow builder's chain step.
 
 ## A contents-list jump on a legal page can be dropped while the focus scroll is still animating
 
@@ -108,6 +143,8 @@ takes `SELECT … FROM invoices WHERE … FOR UPDATE` — the worker's own write
 needs the invoice row, so it blocks until cleanup commits and then finds the
 invoice gone — rather than retrying the delete (a retry would mask the race,
 root `CLAUDE.md` guard rail 4).
+
+---
 
 ## ~~The DSAR export is the one surface that returns unmasked bank details~~ — FIXED 2026-09-16
 

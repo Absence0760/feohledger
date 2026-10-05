@@ -19,7 +19,9 @@ the reviewer named in the token, so segregation of duties, the approval
 thresholds, the CFO gate, the immutable audit row, and the approval digital
 signature all apply exactly as if they had logged in. Single-use is layered:
 the workflow state machine (the invoice must be in ``ready_for_review``) plus a
-Redis consume on the token ``jti`` (closes the reject→resubmit replay window).
+Redis consume on the token's PAIR (``ActionToken.consume_key``) — redeeming
+either link of a message spends both, which closes the reject→resubmit replay
+window.
 """
 
 from __future__ import annotations
@@ -379,14 +381,18 @@ async def _apply_action(
 
 
 async def _claim_jti(decoded: ActionToken) -> bool:
-    """Atomically claim the token jti. True = first use (proceed); False =
-    already consumed. TTL matches the token validity so the key self-expires."""
+    """Atomically claim the token's pair. True = first use (proceed); False =
+    already consumed. TTL matches the token validity so the key self-expires.
+
+    Claims ``consume_key`` — the message's Approve/Reject PAIR — not the
+    individual ``jti``: one message carries one decision, so the sibling link
+    must not survive the invoice cycling back to ``ready_for_review``."""
     from app.redis import get_redis
 
     r = await get_redis()
     ttl = max(1, settings.email_action_ttl_hours * 3600)
     # SET NX EX — only set if absent. Returns True on first claim.
-    claimed = await r.set(f"{_CONSUMED_PREFIX}{decoded.jti}", "1", nx=True, ex=ttl)
+    claimed = await r.set(f"{_CONSUMED_PREFIX}{decoded.consume_key}", "1", nx=True, ex=ttl)
     return bool(claimed)
 
 
@@ -397,6 +403,6 @@ async def _release_jti(decoded: ActionToken) -> None:
         from app.redis import get_redis
 
         r = await get_redis()
-        await r.delete(f"{_CONSUMED_PREFIX}{decoded.jti}")
+        await r.delete(f"{_CONSUMED_PREFIX}{decoded.consume_key}")
     except Exception:  # noqa: BLE001
         logger.warning("email_action: failed releasing jti claim")

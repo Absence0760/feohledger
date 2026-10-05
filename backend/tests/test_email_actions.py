@@ -218,6 +218,78 @@ async def test_post_reject_with_reason(realdb, signing_key):
 
 
 # ---------------------------------------------------------------------------
+# One decision per email — the Approve and Reject links are a PAIR
+#
+# The Redis consume used to key on each token's own `jti`, so redeeming Reject
+# burned only the Reject link. After the supplier resubmitted, the invoice was
+# back in `ready_for_review` and the UNUSED Approve link from the same,
+# superseded email still approved it — the reject→resubmit replay the consume
+# was documented to close.
+# ---------------------------------------------------------------------------
+
+
+def _email_link_pair(realdb, invoice_id, *, role="ap_manager") -> tuple[str, str]:
+    from urllib.parse import unquote
+
+    from app.services.email_action_token import build_email_action_links
+
+    info = realdb.info("a")
+    text, _html = build_email_action_links(
+        api_base_url="http://api.test",
+        tenant_slug=info.slug,
+        invoice_id=invoice_id,
+        actor_id=info.users[role],
+        signing_key=_KEY,
+        ttl_hours=168,
+    )
+    approve_line, reject_line = text.splitlines()
+    return (
+        unquote(approve_line.split("email-action/")[1]),
+        unquote(reject_line.split("email-action/")[1]),
+    )
+
+
+async def test_rejecting_burns_the_sibling_approve_link(realdb, signing_key):
+    admin = realdb.info("a").users["admin"]
+    inv_id = await _make_invoice(realdb, uploaded_by_id=admin)
+    approve, reject = _email_link_pair(realdb, inv_id)
+
+    async with realdb.client(key="a", role=None) as c:
+        resp = await c.post(
+            f"/api/invoices/email-action/{reject}/confirm", data={"reason": "Wrong PO"}
+        )
+        assert "rejected" in resp.text.lower()
+        assert await _status(realdb, inv_id) == InvoiceStatus.rejected
+
+        # The supplier corrects it and resubmits — back in review.
+        mk = realdb.sessionmaker("a")
+        async with mk() as s:
+            inv = await s.get(Invoice, inv_id)
+            inv.status = InvoiceStatus.ready_for_review
+            await s.commit()
+
+        replay = await c.post(f"/api/invoices/email-action/{approve}/confirm")
+    assert "already been used" in replay.text.lower(), replay.text
+    assert await _status(realdb, inv_id) == InvoiceStatus.ready_for_review
+
+
+async def test_a_refused_attempt_does_not_burn_the_pair(realdb, signing_key):
+    """The release path frees the PAIR, so a reviewer refused from email (here
+    by segregation) can still use the other link — the claim is only kept on a
+    genuine decision."""
+    reviewer = realdb.info("a").users["ap_manager"]
+    inv_id = await _make_invoice(realdb, uploaded_by_id=reviewer)
+    approve, reject = _email_link_pair(realdb, inv_id)
+
+    async with realdb.client(key="a", role=None) as c:
+        refused = await c.post(f"/api/invoices/email-action/{approve}/confirm")
+        assert "segregation" in refused.text.lower(), refused.text
+        resp = await c.post(f"/api/invoices/email-action/{reject}/confirm")
+    assert "rejected" in resp.text.lower(), resp.text
+    assert await _status(realdb, inv_id) == InvoiceStatus.rejected
+
+
+# ---------------------------------------------------------------------------
 # Authorization parity — segregation + role gate
 # ---------------------------------------------------------------------------
 

@@ -550,3 +550,278 @@ def test_apply_escalation_all_mode_never_makes_level_harder_to_satisfy():
     assert len(after_outstanding) <= len(before_outstanding)
     assert "a" not in after_outstanding
     assert "b" not in after_outstanding
+
+
+# ---------------------------------------------------------------------------
+# Escalation must never hand a level to someone who cannot approve it. Two
+# refusals apply at approval time: segregation of duties (the payable's
+# implicated actors) and the cross-level guard in `advance_approval_chain` (one
+# person per level). A target who trips either is not an approver at all, and in
+# 'all' mode substituting them in turned a stuck level into a permanently
+# UNCLEARABLE one — the sweep is idempotent, so it never tried again.
+# ---------------------------------------------------------------------------
+
+
+def _overdue_chain(inst, levels: list[dict], *, current: int = 0) -> None:
+    from app.services.approval_chain import init_chain_state
+
+    init_chain_state(inst, levels)
+    state = inst.state_data["approval_levels"]
+    state["current_level"] = current
+    state["levels"][current]["entered_at"] = (datetime.now(UTC) - timedelta(hours=5)).isoformat()
+
+
+def test_apply_escalation_all_mode_skips_an_earlier_level_approver():
+    """'x' cleared level 0, so `advance_approval_chain` refuses them at level 1.
+    Substituting them in as level 1's only outstanding approver would make the
+    level impossible to satisfy — the escalation must not happen."""
+    from app.services.approval_chain import apply_escalation
+
+    inst = _instance()
+    _overdue_chain(
+        inst,
+        [
+            {"name": "L0", "approver_ids": ["x"]},
+            {
+                "name": "L1",
+                "approver_ids": ["a", "b"],
+                "parallel_mode": "all",
+                "escalation_hours": 4,
+                "escalation_to_user_ids": ["x"],
+            },
+        ],
+        current=1,
+    )
+    inst.state_data["approval_levels"]["levels"][0]["approvals"].append(
+        {"user_id": "x", "at": datetime.now(UTC).isoformat()}
+    )
+
+    assert apply_escalation(inst) is False
+    level = inst.state_data["approval_levels"]["levels"][1]
+    assert level["approver_ids"] == ["a", "b"]
+    assert level["escalations"] == []
+
+
+def test_apply_escalation_never_adds_an_ineligible_target():
+    """An implicated actor (the uploader, say) is filtered out of the targets;
+    the eligible ones still land, in both modes."""
+    from app.services.approval_chain import apply_escalation
+
+    for mode in ("any", "all"):
+        inst = _instance()
+        _overdue_chain(
+            inst,
+            [
+                {
+                    "name": "L",
+                    "approver_ids": ["a"],
+                    "parallel_mode": mode,
+                    "escalation_hours": 4,
+                    "escalation_to_user_ids": ["uploader", "esc-1"],
+                }
+            ],
+        )
+        assert apply_escalation(inst, ineligible={"uploader"}) is True
+        level = inst.state_data["approval_levels"]["levels"][0]
+        assert "uploader" not in level["approver_ids"], mode
+        assert "esc-1" in level["approver_ids"], mode
+        assert level["escalations"][-1]["added_user_ids"] == ["esc-1"], mode
+
+
+def test_apply_escalation_is_a_no_op_when_every_target_is_ineligible():
+    from app.services.approval_chain import apply_escalation
+
+    inst = _instance()
+    _overdue_chain(
+        inst,
+        [
+            {
+                "name": "L",
+                "approver_ids": ["a", "b"],
+                "parallel_mode": "all",
+                "escalation_hours": 4,
+                "escalation_to_user_ids": ["uploader"],
+            }
+        ],
+    )
+    assert apply_escalation(inst, ineligible={"uploader"}) is False
+    assert inst.state_data["approval_levels"]["levels"][0]["approver_ids"] == ["a", "b"]
+
+
+# ---------------------------------------------------------------------------
+# A chain nobody has approved is re-routed on the corrected invoice
+#
+# The escalation sweep now initialises a chain (to escalate level 0) before
+# anyone approves, from the invoice as it was then. Routing has always been
+# decided at the first approval, on the POST-correction figures; a sweep-built
+# chain must not freeze it earlier, or an amount corrected up into a higher band
+# clears without that band's level.
+# ---------------------------------------------------------------------------
+
+_BANDED_CONFIG = {
+    "approver_strategy": "chain",
+    "approval_chain": [
+        {
+            "name": "Manager",
+            "approver_ids": ["m"],
+            "escalation_hours": 4,
+            "escalation_to_user_ids": ["esc"],
+        },
+        {"name": "CFO", "approver_ids": ["cfo"], "min_amount": "10000"},
+    ],
+}
+
+
+def _inv(amount: str):
+    from decimal import Decimal
+
+    return SimpleNamespace(amount=Decimal(amount), currency="USD", vendor_id=None)
+
+
+def _escalated_unstarted_chain(amount: str):
+    from app.services.approval_chain import apply_escalation, init_chain_for_invoice
+
+    inst = _instance()
+    entered = datetime.now(UTC) - timedelta(hours=5)
+    assert init_chain_for_invoice(
+        inst, _inv(amount), _BANDED_CONFIG, org_settings=None, entered_at=entered
+    )
+    assert apply_escalation(inst) is True
+    return inst, entered
+
+
+def test_ensure_chain_routed_reroutes_an_unstarted_chain_into_a_higher_band():
+    from app.services.approval_chain import ensure_chain_routed, get_chain_progress
+
+    inst, entered = _escalated_unstarted_chain("500")
+    assert [lv["name"] for lv in get_chain_progress(inst)["levels"]] == ["Manager"]
+
+    ensure_chain_routed(inst, _inv("50000"), _BANDED_CONFIG, org_settings=None)
+
+    chain = get_chain_progress(inst)
+    assert [lv["name"] for lv in chain["levels"]] == ["Manager", "CFO"]
+    assert chain["routing"] == [0, 1]
+    manager = chain["levels"][0]
+    # The Manager level keeps its escalation and the clock it has been running.
+    assert manager["approver_ids"] == ["m", "esc"]
+    assert len(manager["escalations"]) == 1
+    assert datetime.fromisoformat(manager["entered_at"]) == entered
+
+
+def test_ensure_chain_routed_leaves_an_unchanged_routing_alone():
+    import copy
+
+    from app.services.approval_chain import ensure_chain_routed
+
+    inst, _ = _escalated_unstarted_chain("500")
+    before = copy.deepcopy(inst.state_data)
+    ensure_chain_routed(inst, _inv("600"), _BANDED_CONFIG, org_settings=None)
+    assert inst.state_data == before
+
+
+def test_ensure_chain_routed_never_reroutes_once_someone_has_approved():
+    from app.services.approval_chain import (
+        advance_approval_chain,
+        ensure_chain_routed,
+        get_chain_progress,
+        init_chain_for_invoice,
+    )
+
+    config = {
+        "approver_strategy": "chain",
+        "approval_chain": [
+            {"name": "L0", "approver_ids": []},
+            {"name": "L1", "approver_ids": []},
+            {"name": "CFO", "approver_ids": [], "min_amount": "10000"},
+        ],
+    }
+    inst = _instance()
+    init_chain_for_invoice(inst, _inv("500"), config, org_settings=None)
+    advance_approval_chain(inst, uuid.uuid4())
+    ensure_chain_routed(inst, _inv("50000"), config, org_settings=None)
+    assert [lv["name"] for lv in get_chain_progress(inst)["levels"]] == ["L0", "L1"]
+
+
+def test_ensure_chain_routed_ignores_a_chain_without_routing():
+    """A chain not built by `init_chain_for_invoice` (by hand, or legacy) is
+    never rewritten."""
+    import copy
+
+    from app.services.approval_chain import ensure_chain_routed, init_chain_state
+
+    inst = _instance()
+    init_chain_state(inst, [{"name": "Hand-built", "approver_ids": ["x"]}])
+    before = copy.deepcopy(inst.state_data)
+    ensure_chain_routed(inst, _inv("50000"), _BANDED_CONFIG, org_settings=None)
+    assert inst.state_data == before
+
+
+def test_ensure_chain_routed_drops_a_chain_no_level_applies_to_any_more():
+    from app.services.approval_chain import (
+        ensure_chain_routed,
+        get_chain_progress,
+        init_chain_for_invoice,
+    )
+
+    config = {
+        "approver_strategy": "chain",
+        "approval_chain": [{"name": "Big", "approver_ids": ["b"], "min_amount": "1000"}],
+    }
+    inst = _instance()
+    assert init_chain_for_invoice(inst, _inv("5000"), config, org_settings=None)
+    ensure_chain_routed(inst, _inv("50"), config, org_settings=None)
+    assert get_chain_progress(inst) == {}
+
+
+def test_reroute_that_drops_level_zero_starts_the_new_head_fresh():
+    """[Manager, CFO] → [CFO]: CFO becomes the head having waited no time at
+    all, so it must not inherit Manager's 5-hour-old clock (the next sweep
+    would escalate it at once), and Manager's escalation does not follow."""
+    from app.services.approval_chain import (
+        apply_escalation,
+        ensure_chain_routed,
+        get_chain_progress,
+        init_chain_for_invoice,
+    )
+
+    config = {
+        "approver_strategy": "chain",
+        "approval_chain": [
+            {
+                "name": "Manager",
+                "approver_ids": ["m"],
+                "max_amount": "10000",
+                "escalation_hours": 4,
+                "escalation_to_user_ids": ["esc"],
+            },
+            {"name": "CFO", "approver_ids": ["cfo"], "min_amount": "500"},
+        ],
+    }
+    inst = _instance()
+    old_clock = datetime.now(UTC) - timedelta(hours=5)
+    init_chain_for_invoice(inst, _inv("600"), config, org_settings=None, entered_at=old_clock)
+    assert apply_escalation(inst) is True
+
+    before = datetime.now(UTC)
+    ensure_chain_routed(inst, _inv("50000"), config, org_settings=None)
+
+    chain = get_chain_progress(inst)
+    assert chain["routing"] == [1]
+    head = chain["levels"][0]
+    assert head["name"] == "CFO"
+    assert datetime.fromisoformat(head["entered_at"]) >= before
+    assert head["approver_ids"] == ["cfo"] and head["escalations"] == []
+    assert apply_escalation(inst) is False  # not overdue
+
+
+def test_route_chain_indices_track_the_configured_levels():
+    """`_route_chain` maps applicable levels back to config indices by object
+    identity; this pins that `resolve_applicable_levels` hands back the very
+    dicts it was given, including two levels that compare equal."""
+    from app.services.approval_chain import _route_chain
+
+    twin = {"name": "Twin", "approver_ids": []}
+    config = {"approval_chain": [dict(twin), {"name": "Big", "min_amount": "1000"}, dict(twin)]}
+    applicable, routing = _route_chain(_inv("50"), config, org_settings=None)
+    assert routing == [0, 2]
+    assert all(a is config["approval_chain"][i] for a, i in zip(applicable, routing, strict=True))

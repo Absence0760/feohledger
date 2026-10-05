@@ -104,9 +104,11 @@ invoice fields, the webhook URL, or any banking/PII).
   before any work.
 - **Workflow state machine** — approve/reject move the invoice out of
   `ready_for_review`, so the same decision can't re-fire.
-- **Redis `jti` consume** — `SET NX EX` on the token id closes the
-  reject→resubmit replay window. The token IS the dedupe — a re-clicked button
-  can't double-act.
+- **Redis consume on the button PAIR** — `SET NX EX` on
+  `ActionToken.consume_key`: the message's Approve and Reject buttons share a
+  signed pair id, so pressing either spends both, which closes the
+  reject→resubmit replay window (see `email-approval.md` § Single-use). The
+  token IS the dedupe — a re-clicked button can't double-act.
 
 ## What's PII-free
 
