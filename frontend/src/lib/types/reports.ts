@@ -134,8 +134,14 @@ export interface ResultColumn {
 	key: string;
 	label: string;
 	kind: 'dimension' | 'measure';
-	/** Rendering hint for measure columns — `money` renders via `<Money>`. */
-	type?: 'money' | 'number';
+	/** Rendering hint — `money` (a measure) renders via `<Money>`. A dimension
+	 *  column carries its dimension type (`string` / `date` / `enum`). */
+	type?: FieldType | null;
+	/** Money measures only: the key of the dimension column whose value on the
+	 *  SAME row is the currency that row's figure is denominated in. The server
+	 *  always groups a money aggregate by it (it never sums across currencies),
+	 *  so each cell is labelled with its own row's code — never the org's. */
+	currency_key?: string | null;
 }
 
 /** A result row: a flat map of column-key → value. Money cells are exact
@@ -211,4 +217,15 @@ export const GRAIN_LABELS: Record<DateGrain, string> = {
  *  Matches the backend's column-key convention so `sort` keys line up. */
 export function measureColumnKey(m: SpecMeasure): string {
 	return `${m.key}_${m.agg}`;
+}
+
+/** The currency a money cell is denominated in: the value, on the SAME row, of
+ *  the dimension column its measure names in `currency_key`. Never the org's
+ *  currency — a GBP-reporting tenant holds USD invoices. `null` when the column
+ *  names none or the row carries no code, which `formatMoney` renders bare
+ *  rather than guessing (decisions §160, §196, §228). */
+export function cellCurrency(col: ResultColumn, row: ReportRow): string | null {
+	if (!col.currency_key) return null;
+	const code = row[col.currency_key];
+	return typeof code === 'string' && code.trim() ? code : null;
 }
