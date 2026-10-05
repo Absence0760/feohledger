@@ -765,7 +765,7 @@ Set `FEOH_SECRET_KEY` to a strong, random value in production.
 The database supports four roles:
 - **admin** — full access to all features, user management, workflow configuration
 - **ap_manager** — review and approve invoices, manage vendors and payments
-- **ap_clerk** — upload and edit invoices, submit for review (cannot approve, delete, or change status)
+- **ap_clerk** — read invoices and the work around them (cannot upload, edit, submit, approve, delete, or change status — every invoice write is `require_roles(ADMIN, AP_MANAGER, CFO)` or narrower)
 - **cfo** — approve high-value invoices, view reports, manage vendors and payments
 
 Roles are returned by `GET /api/auth/me` in the `roles` array, and the user's
