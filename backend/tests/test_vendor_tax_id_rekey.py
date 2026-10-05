@@ -156,3 +156,44 @@ async def test_erp_sync_that_changes_the_tax_id_voids_the_tin_verification(reald
     v = await _vendor(realdb, vendor_id)
     assert v.tax_id == "98-7654321"
     assert v.tin_verified_at is None
+    # And, being an identity change, it re-screened like the other writers.
+    assert len(await _screen_rows(realdb, vendor_id)) == 1
+
+
+@pytest.mark.asyncio
+async def test_erp_sync_that_leaves_the_identity_alone_does_not_rescreen(realdb):
+    from app.services.vendor_sync import sync_vendors_from_erp
+
+    vendor_id = await _seed_verified_vendor(realdb)
+    org_id = realdb.info(TENANT).org_id
+    async with realdb.sessionmaker(TENANT)() as s:
+        await sync_vendors_from_erp(
+            s,
+            org_id,
+            [
+                {
+                    "erp_vendor_id": f"erp-{vendor_id}",
+                    "name": "Rekey Co",
+                    "tax_id": "12-3456789",
+                    "phone": "555-0199",
+                }
+            ],
+        )
+        await s.commit()
+
+    v = await _vendor(realdb, vendor_id)
+    assert v.phone == "555-0199"
+    assert v.tin_verified_at is not None
+    assert await _screen_rows(realdb, vendor_id) == []
+
+
+@pytest.mark.asyncio
+async def test_tin_verify_refuses_an_empty_replacement_before_touching_the_row(realdb):
+    vendor_id = await _seed_verified_vendor(realdb)
+    async with realdb.client(key=TENANT, role="ap_manager") as c:
+        resp = await c.post(f"/api/tax/vendors/{vendor_id}/tin-verify", json={"tax_id": ""})
+    assert resp.status_code == 400, resp.text
+
+    v = await _vendor(realdb, vendor_id)
+    assert v.tax_id == "12-3456789"
+    assert v.tin_verified_at is not None
