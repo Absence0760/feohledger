@@ -88,6 +88,7 @@ from app.services.storage import (
     upload_tax_form_file,
 )
 from app.services.supplier_chat import (
+    attachment_url,
     chat_enabled,
     get_or_create_thread,
     get_thread,
@@ -2184,7 +2185,9 @@ async def reveal_card(
 # backend/docs/supplier-chat.md.
 
 
-def _portal_chat_message_to_response(msg: SupplierChatMessage) -> PortalChatMessageResponse:
+def _portal_chat_message_to_response(
+    msg: SupplierChatMessage, invoice_id: uuid.UUID
+) -> PortalChatMessageResponse:
     return PortalChatMessageResponse(
         id=str(msg.id),
         author_role=str(msg.author_role),
@@ -2192,7 +2195,7 @@ def _portal_chat_message_to_response(msg: SupplierChatMessage) -> PortalChatMess
         body=msg.body,
         attachments=[
             PortalChatAttachmentOut(
-                file_url=a.get("file_url", ""),
+                file_url=attachment_url(a, invoice_id=invoice_id, surface="portal"),
                 filename=a.get("filename", ""),
                 content_type=a.get("content_type", ""),
                 size=a.get("size", 0),
@@ -2246,7 +2249,7 @@ async def get_portal_chat(
     return PortalChatThreadResponse(
         invoice_id=str(inv.id),
         status=str(thread.status),
-        messages=[_portal_chat_message_to_response(m) for m in messages],
+        messages=[_portal_chat_message_to_response(m, inv.id) for m in messages],
     )
 
 
@@ -2300,7 +2303,7 @@ async def _post_portal_chat_message(
 
     await db.commit()
     await db.refresh(msg)
-    return _portal_chat_message_to_response(msg)
+    return _portal_chat_message_to_response(msg, inv.id)
 
 
 @router.post(

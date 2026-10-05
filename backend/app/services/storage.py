@@ -184,6 +184,19 @@ async def delete_prefix(prefix: str) -> int:
     return await asyncio.to_thread(_delete_all)
 
 
+def invoice_file_url(file_key: str) -> str:
+    """The API-relative URL an invoice's source document is served from.
+
+    Always the authorising proxy (``GET /api/invoices/file/{key}``,
+    ``api/file_proxy``), never the object's bucket address: every path that
+    stores an invoice document — upload, supplier portal, email intake, PEPPOL
+    receive — builds its ``file_url`` here, so none can hand the browser a URL
+    that bypasses the entity-scoped check (or simply fails, the bucket being
+    private).
+    """
+    return f"/api/invoices/file/{file_key}"
+
+
 async def upload_invoice_file(
     org_id: uuid.UUID,
     invoice_id: uuid.UUID,
@@ -205,9 +218,8 @@ async def upload_invoice_file(
 
     await _put_object(file_key, content, content_type)
 
-    # Store an API-relative URL — the file endpoint generates a presigned URL on demand
-    file_url = f"/api/invoices/file/{file_key}"
-    return file_key, file_url
+    # An API-relative URL to the authorising proxy — never a presigned or bucket URL.
+    return file_key, invoice_file_url(file_key)
 
 
 async def upload_contract_file(
@@ -342,10 +354,11 @@ async def upload_chat_file(
 
     Returns ``(file_key, filename, content_type, size)``. The key is
     ``<org_id>/chat/<invoice_id>/<message_id>/<safe-filename>`` — the leading
-    ``org_id`` segment is the cross-tenant download gate (the chat file
-    endpoints refuse keys whose first segment isn't the caller's org),
-    mirroring the invoice / contract file paths. The ``file_url`` is built by
-    the caller (it differs between the AP and portal surfaces).
+    ``org_id`` segment and the ``invoice_id`` segment are what the download
+    routes resolve the owning invoice from (``api/file_proxy`` on the AP side,
+    the invoice-bound prefix check on the portal). The ``file_url`` is built
+    by the caller, and rebuilt per reading surface on every read
+    (``supplier_chat.attachment_url``).
     """
     content = await file.read()
 
@@ -440,8 +453,10 @@ async def get_file(file_key: str, *, expected_prefix: str | None = None) -> tupl
     not enforce that: whatever key the caller passes is fetched verbatim. The
     CALLER MUST validate the key against the requesting principal's tenant/owner
     before calling — otherwise a user-supplied `file_key` is a cross-tenant file
-    IDOR. Every current call site does this (portal chat/tax-form downloads, the
-    AP contract/expense/workflow file endpoints each check the leading segment).
+    IDOR. Every current call site does this: the portal chat/tax-form downloads
+    bind the key to the vendor's own row, and the AP proxies go through
+    ``api/file_proxy``, which resolves the row that owns the key within the
+    caller's selected entity — never the org segment alone.
 
     Pass `expected_prefix` to have this function enforce the check itself: the
     key must start with that prefix or a 404 `HTTPException` is raised (the same

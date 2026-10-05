@@ -5,6 +5,7 @@ from enum import StrEnum
 from pydantic import BaseModel, Field, model_validator
 
 from app.schemas.money import MoneyAmount, OptionalMoneyAmount
+from app.services.storage import invoice_file_url
 from app.services.vendor_consolidation import mask_tax_id
 
 
@@ -266,7 +267,10 @@ class InvoiceResponse(BaseModel):
             ),
             created_at=inv.created_at.isoformat() if inv.created_at else "",
             updated_at=inv.updated_at.isoformat() if inv.updated_at else "",
-            file_url=inv.file_url,
+            # Rebuilt from the key, so a row stored with a bucket URL (email
+            # intake and PEPPOL receive did that until §226) still points at
+            # the authorising proxy rather than at the private bucket.
+            file_url=invoice_file_url(inv.file_key) if inv.file_key else inv.file_url,
             warnings=inv.warnings,
             po_match=inv.po_match,
             priors_summary=_priors_summary(inv),

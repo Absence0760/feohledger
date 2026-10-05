@@ -77,6 +77,25 @@ def chat_enabled(org: Organization | None) -> bool:
     return bool((settings_dict.get("supplier_chat") or {}).get("enabled", True))
 
 
+def attachment_url(attachment: dict, *, invoice_id: uuid.UUID, surface: str) -> str:
+    """The download URL for a stored attachment, built for the surface READING it.
+
+    A message is read on both surfaces — the AP invoice modal and the supplier
+    portal — but each authenticates a different principal against a different
+    route, so a URL stamped by whichever surface POSTED the attachment is the
+    wrong one half the time: an employee can't use the portal route (it wants a
+    vendor JWT) and a vendor can't use the AP one. So the persisted
+    ``file_url`` is not echoed; the URL is rebuilt from ``file_key`` on read.
+    The stored value is the fallback only for a legacy row with no key.
+    """
+    key = attachment.get("file_key")
+    if not key:
+        return attachment.get("file_url", "")
+    if surface == "portal":
+        return f"/api/portal/invoices/{invoice_id}/chat/file/{key}"
+    return f"/api/invoices/{invoice_id}/chat/file/{key}"
+
+
 def is_valid_template_key(key: str | None) -> bool:
     return key is None or key in _TEMPLATE_KEYS
 

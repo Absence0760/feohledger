@@ -29,6 +29,7 @@ from app.api.deps import (
     get_org_id,
     require_roles,
 )
+from app.api.file_proxy import serve_owned_file
 from app.api.pagination import (
     MAX_SELECT_ALL_IDS,
     MatchingIdsResponse,
@@ -89,7 +90,7 @@ from app.services.expense_policy import (
     evaluate_report,
 )
 from app.services.fx_adapters import UnknownFxProviderError, get_fx_adapter
-from app.services.storage import get_file, upload_expense_receipt
+from app.services.storage import upload_expense_receipt
 from app.tenant import (
     apply_entity_scope,
     ensure_in_entity_scope,
@@ -728,23 +729,20 @@ async def create_expense(
 @router.get("/receipt/{file_key:path}")
 async def get_expense_receipt(
     file_key: str,
+    db: AsyncSession = Depends(get_tenant_db),
     user: User = Depends(get_current_user),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
     """Proxy a stored expense receipt from S3.
 
-    Keys are stamped ``<org_id>/expenses/<expense_id>/<filename>`` at upload.
-    The caller must belong to the org in the first segment — same 404 for
-    wrong-org and missing-file so the response can't enumerate prefixes
-    (mirrors the invoice / contract file endpoints).
+    Keys are stamped ``<org_id>/expenses/<expense_id>/<filename>``. The owning
+    expense is resolved within the caller's selected entity and the key must be
+    its current ``receipt_file_key`` — every refusal is the same 404 as a
+    missing file (``api/file_proxy``, ``docs/decisions.md`` §226).
     """
-    prefix = file_key.split("/", 1)[0]
-    if prefix != str(user.organization_id):
-        raise HTTPException(status_code=404, detail="File not found")
-    try:
-        content, content_type = await get_file(file_key)
-    except Exception:
-        raise HTTPException(status_code=404, detail="File not found")
-    return Response(content=content, media_type=content_type)
+    return await serve_owned_file(
+        db, file_key, org_id=user.organization_id, entity_id=entity_id, kind="expense"
+    )
 
 
 @router.post("/{expense_id}/receipt", response_model=ExpenseResponse)

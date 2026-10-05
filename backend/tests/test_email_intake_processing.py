@@ -588,6 +588,8 @@ async def test_create_invoice_is_pending_zero_decimal_and_org_prefixed_key():
 
     expected_key = f"{org_id}/{invoice_id}/bill.pdf"
     assert invoice.file_key == expected_key
+    # The authorising proxy, never the private bucket's address (decisions §226).
+    assert invoice.file_url == f"/api/invoices/file/{expected_key}"
     put = s3.put_object.call_args.kwargs
     assert put["Key"] == expected_key
     assert put["ContentType"] == "application/pdf"
