@@ -431,7 +431,7 @@ Used by 3-way matching. `admin` / `ap_manager` / `ap_clerk`.
 | `POST` | `/api/credit-memos`                | admin, ap_manager | Create a credit memo. With no `invoice_id` it lands `open`; with one it is applied on the spot and runs the same guards as `/apply` |
 | `PATCH` | `/api/credit-memos/{id}`          | admin, ap_manager | Correct an `open`, never-applied memo — see § Editing a memo. 409 on anything else |
 | `POST` | `/api/credit-memos/{id}/apply`     | admin, ap_manager | Apply an `open` credit memo against a payable |
-| `POST` | `/api/credit-memos/{id}/void`      | admin, ap_manager | Void an `open` memo (409 once `applied` — applied memos are immutable for audit) |
+| `POST` | `/api/credit-memos/{id}/void`      | admin, ap_manager | Void an `open` memo (409 once `applied` — applied memos are immutable for audit — and 409 on an already-`void` memo, so a retried void never writes a second `credit_memo.voided` row) |
 
 ### Search, sort and the chip counts
 
