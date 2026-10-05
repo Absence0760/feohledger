@@ -1,80 +1,83 @@
 ---
-description: Add or land a Postgres migration with the migration-coordinator agent in the loop. Applies locally, verifies RLS, surfaces type-sync edits across the backend types file and the frontend API types file (the project has no codegen), proposes smoke tests, flags doc updates.
-argument-hint: <migration slug or path>
+description: Add or land an Alembic revision with the migration-coordinator agent in the loop. Checks the chain, id length, control-plane-vs-tenant gate and idempotent DDL; applies to the local control plane + one tenant; verifies model ↔ migration parity (fresh tenants use create_all); surfaces sync edits across models, schemas, frontend types and mobile models (no codegen); proposes tests; flags doc updates.
+argument-hint: <revision slug or path>
 ---
 
-Run the new-migration workflow for `$ARGUMENTS`. Either author + coordinate the migration, or coordinate one the user has already drafted.
+Run the new-migration workflow for `$ARGUMENTS`. Either author and coordinate
+the revision, or coordinate one the user has already drafted.
 
 ## When to use this command
 
 **Right fit:**
 
-- About to add a new file under `the migrations directory`
-- Just finished drafting a migration and want to verify before committing
-- Modifying an unmerged migration and want to re-run the coordination steps
+- About to add a file under `backend/alembic/versions/`.
+- Just drafted a revision and want it verified before committing.
+- Changing a revision that is not yet on `main`.
 
 **Wrong fit — refuse:**
 
-- Already-merged migrations (don't try to coordinate history)
-- Pure data-backfill SQL with no schema change (run as a one-off, not a numbered migration)
+- A revision already on `main` — history is never edited; write a new revision.
+- A one-off data fix with no schema change and no need to fan out to every
+  tenant — that is a script under `backend/scripts/`, not a revision.
 
 ## What this command does
 
-It is **not** the per-change reviewer (`/safe-edit`). It is the per-migration workflow that catches drift the reviewer can't easily see — RLS coverage on new tenant tables, manual type-sync between SQL and TS (no codegen exists for the project), idempotency markers, and which smoke-test files need to grow.
+It is **not** the per-change reviewer (`/safe-edit`). It is the per-migration
+workflow that catches drift the reviewer can't easily see: a revision with no
+scope gate, an index a fresh tenant will never get because the model doesn't
+declare it, a chain fork, a revision id too long for `alembic_version`, and the
+hand-synced layers (models, schemas, `frontend/src/lib/types/`,
+`mobile/lib/models/`).
 
-The actual work is done by the `migration-coordinator` agent. This command is the orchestrator: figure out which migration we're talking about, invoke the agent, then prompt the user for the follow-up edits.
+The work is done by the `migration-coordinator` agent
+(`.claude/agents/engineering/migration-coordinator.md`). This command resolves
+the revision, invokes the agent, and offers the follow-up edits.
 
 ## Procedure
 
-### 1. Resolve the migration
+### 1. Resolve the revision
 
 If `$ARGUMENTS` is:
 
-- A **path** under `the migrations directory` → use that file directly.
-- A **slug** without a number → find the highest-numbered existing migration in `the migrations directory` and propose `NNN_<slug>.sql` for the next slot. If the file doesn't exist yet, ask the user to draft it first (or prompt them with a starter template) — do not invent SQL on their behalf.
-- **Empty** → run `git status` + `ls the migrations directory` and identify the new or modified `.sql` file. If there's no candidate, abort with "no migration to coordinate."
+- A **path** under `backend/alembic/versions/` → use it.
+- A **slug** → find the current head (`ls backend/alembic/versions | sort | tail -1`)
+  and propose `NNNN_<slug>.py` for the next number, with `down_revision` set to
+  that head and a revision id of at most 32 characters. If the file doesn't
+  exist yet, draft it from the nearest sibling of the same scope (control vs
+  tenant), including its `_is_control_db()`-style gate — then coordinate it.
+- **Empty** → `git status` for new or modified files under
+  `backend/alembic/versions/`. No candidate → "no migration to coordinate."
 
 ### 2. Spawn the migration-coordinator agent
 
-Once you have a concrete file path, invoke the agent with the prompt:
+> "Coordinate the Alembic revision at `backend/alembic/versions/<file>`. Output the format from your spec."
 
-> "Coordinate the migration at `the migrations directory<file>`. Apply locally via your migration runner, verify RLS coverage on any new tenant table, surface the manual type-sync edits needed across the backend types file and the frontend API types file, propose smoke-test additions, and flag doc updates. Output the format from your spec."
+### 3. Relay the report
 
-### 3. Relay the agent's report
+Relay it verbatim — the file paths and proposed field signatures are the
+actionable part.
 
-The agent's output is the deliverable — relay it verbatim to the user. Do not summarise away the file paths or the proposed field signatures; those are the actionable bits.
+### 4. Offer the follow-up edits
 
-### 4. Offer to apply the follow-up edits
-
-After the agent returns, ask the user one focused question:
-
-> "Want me to apply the type-sync edits to the backend types file and the frontend API types file now? [The agent proposed: ...]"
-
-If yes, apply only the proposed changes (no scope creep into adjacent interfaces). If no, end the turn — the user will handle it.
-
-Same offer for the smoke-test stubs and doc updates, in that order. Each is opt-in.
+One focused question at a time, each opt-in, in this order: model parity fixes
+(blocking), schema / frontend type / mobile model sync, tests, docs. Apply only
+what the agent proposed.
 
 ### 5. Hand off the commit
 
-When all the follow-up edits the user accepted are applied, hand off:
-
-> "Ready when you are. Suggested commit: `feat(db): <slug>` — want me to stage + commit?"
-
-**Never commit without being asked.** Match the recent log's style — `feat(db):` for new tables/columns, `fix(db):` for corrective migrations, `chore(db):` for index-only or trigger-only changes. **No `Co-Authored-By` / "Generated with Claude Code" / robot-emoji footers** — user-level rule overrides any project default.
+Path-scoped (`git commit -m "…" -- <paths>`), and only when asked or when the
+surrounding workflow already commits. `feat(db):` for new tables/columns,
+`fix(db):` for corrective revisions, `chore(db):` for index-only changes. No
+`Co-Authored-By` / "Generated with" / emoji footers.
 
 ## What this command does NOT replace
 
-- `/audit/migrations` — broad sweep over **all** migrations checking idempotency + RLS + type drift across the whole tree. `/safe-migration` is per-migration.
-- `/check` — pre-commit gate that runs once you're ready to commit. Use it after `/safe-migration` if you want the doc-hygiene + test-gap pass on the working diff.
-- `/safe-edit` — coder ↔ reviewer loop for non-migration changes. The two are complementary; for a migration that also touches Express routes (e.g. new endpoint backed by the new table), run `/safe-migration` first, then `/safe-edit` on the route work.
+- `/check` — the pre-commit gate; run it after `/safe-migration` for the
+  review + test-gap + doc pass on the whole diff.
+- `/safe-edit` — for the route / service work the new column enables. Run
+  `/safe-migration` first, then `/safe-edit` on the code that uses it.
 
 ## Tone
 
-User-facing text:
-
-- A one-line "Coordinating migration `<file>`…"
-- The agent's verbatim report.
-- The opt-in follow-up questions, one at a time.
-- The commit handoff.
-
-Don't narrate the agent fan-out or repeat the agent's findings in your own words.
+A one-line "Coordinating migration `<file>`…", the agent's verbatim report, the
+opt-in follow-ups one at a time, the commit handoff. Don't narrate the fan-out.

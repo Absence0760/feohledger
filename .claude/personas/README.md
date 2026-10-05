@@ -1,6 +1,6 @@
 # Persona audits
 
-A **persona** is a read-only Claude subagent (`.claude/agents/persona-*.md`) that
+A **persona** is a read-only Claude subagent (`.claude/agents/personas/persona-*.md`) that
 adopts a specific real-world point of view — an approver, a CFO, a South African
 business owner, a card processor — and walks the app the way that person would,
 looking for bugs, missing primitives, wrong assumptions, and jurisdiction gaps
@@ -106,7 +106,7 @@ _One paragraph: who I am and what I came here to check._
 
 ## Adding a new persona
 
-Copy the closest existing `.claude/agents/persona-*.md`, then:
+Copy the closest existing `.claude/agents/personas/persona-*.md`, then:
 
 1. Rewrite the frontmatter `name` (`persona-<slug>`) and `description`.
 2. Rewrite the identity paragraph and the "what I care about" list.

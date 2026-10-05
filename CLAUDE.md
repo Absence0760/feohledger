@@ -596,7 +596,7 @@ If you spot a candidate fix that fits one of those patterns: stop, surface the u
 
 ## Project invariants
 
-These are the rules the `.claude/agents/code-reviewer.md` agent cites. A diff that violates one is `Critical` unless the project explicitly opts out in writing. Stack-specific enforcement notes are in parentheses.
+These are the rules the `.claude/agents/engineering/code-reviewer.md` agent cites. A diff that violates one is `Critical` unless the project explicitly opts out in writing. Stack-specific enforcement notes are in parentheses.
 
 - **Money is exact.** Amounts use `Decimal` (never `float`), and SQLAlchemy columns for currency use `Numeric(precision, scale)` (never `Float` / `Real`). A new column or in-memory total typed as `float` for currency is `Critical`.
 - **Idempotency on writes that move money.** Anything that initiates a payment, reverses a payment, or confirms an invoice as paid must be idempotent at the API boundary. The mechanism is whichever the backend already uses (idempotency-key header, request-id table, or a DB-level unique constraint on the operation tuple). A new "send payment" / "post payment" / "confirm payable" handler with no idempotency story is `Critical`.

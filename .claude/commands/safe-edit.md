@@ -35,6 +35,13 @@ The cost of this loop is real (~2-3x tokens, ~30-60s extra latency, one or two `
 
    > "Review the working diff against FeohLedger' documented conventions. The task being implemented is: `$ARGUMENTS`. Output the strict format from your spec."
 
+   **If the task touches the money path** (the surface listed for
+   `money-path-reviewer` in `.claude/commands/check.md` § 3), spawn
+   `money-path-reviewer` in the same message with the same prompt, and treat
+   its findings exactly like `code-reviewer`'s through steps 3–4 — the loop is
+   CLEAN only when both are. Likewise `ui-reviewer` for a change to
+   `frontend/src/routes/`, `frontend/src/lib/components/` or `mobile/lib/screens|widgets/`.
+
    The reviewer reads `git diff`, cross-references project rules, and outputs:
    - `Status: CLEAN` → go to step 5.
    - `Status: NEEDS_CHANGES` with a numbered list of concrete file:line changes → go to step 3.
@@ -44,7 +51,7 @@ The cost of this loop is real (~2-3x tokens, ~30-60s extra latency, one or two `
    - If the finding is wrong (the reviewer misread, missed context, or cited a rule that doesn't apply here), state explicitly *why* you're not applying it. Do NOT silently skip — the user needs to see the disagreement.
    - If the finding is borderline, apply it; the reviewer is configured to be willing to retract on the next round, so over-applying is safe.
 
-4. **Round 2 review.** Spawn `code-reviewer` again with the same prompt. Three branches:
+4. **Round 2 review.** Spawn `code-reviewer` (and any domain reviewer from Round 1) again with the same prompt. Three branches:
    - `Status: CLEAN` → go to step 5.
    - `Status: NEEDS_CHANGES` again → **stop the loop**. Surface the remaining findings to the user along with what you tried in Round 1. Do not auto-cycle to Round 3 — at this point either the reviewer is being pedantic, the coder is missing something, or the change needs more thought than a tight loop can give. The user decides.
    - Reviewer retracts Round 1 findings → also `CLEAN`; go to step 5.
