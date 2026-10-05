@@ -9266,3 +9266,48 @@ it is the next step if this image goes the same way. The trust level is
 acceptable because MinIO only ever holds throwaway `minioadmin` data locally and
 in CI; production is real S3. Detail: `backend/docs/docker.md` § Where MinIO
 comes from.
+
+## 218. The dashboard's processing-time tile is reduced from grouped day counts, and fails loudly instead of reading zero
+
+`GET /api/dashboard` built the processing-time tile by streaming every
+`invoice.approved` audit row, every completed payment, and then every matching
+invoice into Python — the last as `Invoice.id IN (...)` with one bind
+parameter per invoice. asyncpg refuses more than 32 767, and a bare
+`except Exception` around the block turned that refusal into zeros, so every
+tenant past roughly 33k approved invoices saw "0 days" with nothing logged.
+Each leg is now one grouped query returning `(days rounded to 0.1, count)` —
+rows bounded by the span of the history, not its size — reduced by
+`analytics.processing_time_from_day_counts`, which an equivalence test pins
+to `compute_processing_time_metrics`. At 30k approvals the request went from
+544 ms to 170 ms; at 40k it went from a silent zero to the right answer.
+
+Three choices ride along. **The approval leg runs to an invoice's FIRST
+approval**: the old dict kept whichever audit row Postgres returned last, so a
+re-approved invoice's figure depended on heap order; first approval mirrors the
+paid leg's `MIN(completed_at)`. **`_decimal_days` became exact
+half-away-from-zero** (integer microseconds, `ROUND_HALF_UP`): `round()` on a
+float settled `.x5` ties by which side of them the nearest double fell, which
+SQL cannot reproduce and no one chose — it differs from the old value only at
+exact ties, in every caller. **The swallowing `try` is gone — from this block
+and from the three others on the page** (open exceptions, approval bottleneck,
+discount capture): it is what hid the defect, and the case it claimed to guard
+(a tenant without the table) cannot occur, since every table they read is part
+of the tenant schema every provisioning path builds. A failure is now a 500,
+which is a bug report rather than a plausible-looking wrong KPI.
+
+**Rejected:** `percentile_cont` in SQL — it returns `double precision`, so the
+p95 would drift from the Decimal reference at quantize boundaries; the
+(value, count) form keeps every figure exact. Batching the `IN` list under
+32 767 — fixes the failure, keeps the O(invoices) transfer. Tests:
+`test_dashboard_processing_time.py` (reference figures, entity scope, and a
+request whose statement and bind-parameter counts do not grow with the data),
+`test_analytics.py`.
+
+The same perf pass (no separate entry needed, recorded here for the trail):
+`payments.payment_run_id` gained the index every per-run read lacked
+(migration 0101), and the invoice list stopped loading each extraction's
+`raw_result` — the provider's entire response — to read two small columns
+(200-350 ms → 60-70 ms per 100-row page at ~50 KB per Textract payload).
+Guards: `test_list_endpoint_query_counts.py`, which also holds the payments,
+queue, runs, exceptions and credit-memo lists to a statement count that does
+not grow with the page.
