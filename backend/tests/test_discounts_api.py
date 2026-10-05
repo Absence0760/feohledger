@@ -1235,3 +1235,65 @@ async def test_offer_not_visible_cross_tenant(realdb):
     async with realdb.client(key="b", role="ap_manager") as c:
         resp = await c.get(f"/api/discounts/offers/{offer_id}")
     assert resp.status_code == 404
+
+
+# --------------------------------------------------------------------------- #
+# An offer on an invoice that can no longer be paid cannot be accepted
+# --------------------------------------------------------------------------- #
+
+
+def test_invoice_awaits_payment_is_derived_from_the_state_machine():
+    """`paid` / `done` are settled; everything that can still reach the payment
+    queue (PAYABLE_INVOICE_STATUSES) without passing through them is not."""
+    from app.services.discount_offers import invoice_awaits_payment
+
+    for status in (
+        InvoiceStatus.new,
+        InvoiceStatus.pending,
+        InvoiceStatus.ready_for_review,
+        InvoiceStatus.rejected,
+        InvoiceStatus.failed,
+        InvoiceStatus.approved,
+        InvoiceStatus.sending_to_erp,
+        InvoiceStatus.sent_to_erp,
+        InvoiceStatus.posted_in_erp,
+        InvoiceStatus.payment_scheduled,
+    ):
+        assert invoice_awaits_payment(status) is True, status
+    for status in (InvoiceStatus.paid, InvoiceStatus.done):
+        assert invoice_awaits_payment(status) is False, status
+    # Every status is classified — a new one cannot silently default either way.
+    assert {s for s in InvoiceStatus if not invoice_awaits_payment(s)} == {
+        InvoiceStatus.paid,
+        InvoiceStatus.done,
+    }
+
+
+async def test_accept_refuses_an_offer_on_an_invoice_already_paid(realdb):
+    """Accepting commits to paying early for a discount. On an invoice already
+    `paid` (or `done`) there is no payment left to make, so the acceptance can
+    never be realized — yet it was recorded, audited, and counted by every
+    surface that reads `accepted` offers."""
+    mk = realdb.sessionmaker("a")
+    org_id = realdb.info("a").org_id
+    for settled in (InvoiceStatus.paid, InvoiceStatus.done):
+        invoice_id = await _add_invoice(mk, org_id)
+        async with realdb.client(key="a", role="ap_manager") as c:
+            offer_id = (
+                await c.post(
+                    "/api/discounts/offers",
+                    json={"scope": "invoice", "invoice_id": invoice_id, "tiers": _tiers()},
+                )
+            ).json()["id"]
+        async with mk() as s:
+            inv = await s.get(Invoice, uuid.UUID(invoice_id))
+            inv.status = settled
+            await s.commit()
+
+        async with realdb.client(key="a", role="ap_manager") as c:
+            resp = await c.post(f"/api/discounts/offers/{offer_id}/accept", json={})
+        assert resp.status_code == 409, resp.text
+        assert settled.value in resp.json()["detail"]
+        async with mk() as s:
+            row = await s.get(DiscountOffer, uuid.UUID(offer_id))
+            assert row.status == OFFER_STATUS_OFFERED
