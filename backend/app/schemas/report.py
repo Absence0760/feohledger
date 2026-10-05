@@ -131,6 +131,10 @@ class ResultColumn(BaseModel):
     label: str
     kind: str  # "dimension" | "measure"
     type: str | None = None  # measures: "money" | "number"; dimensions: the dim type
+    # Money measures only: the key of the dimension column whose value on the
+    # same row is the currency the figure is denominated in. A money aggregate
+    # is always grouped by it — the engine never sums across currencies.
+    currency_key: str | None = None
 
 
 class ReportResult(BaseModel):

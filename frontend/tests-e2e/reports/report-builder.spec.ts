@@ -1,3 +1,5 @@
+import type { ReportResult } from '$lib/types/reports';
+
 import { expect, test } from '../fixtures/helpers';
 
 /**
@@ -158,5 +160,58 @@ test.describe('/reports export (stubbed — backend-independent)', () => {
 			.click();
 		const dl = await download;
 		expect(dl.suggestedFilename()).toMatch(/\.csv$/);
+	});
+
+	test("a money cell wears its own row's currency, one row per currency", async ({ page }) => {
+		// The server never sums across currencies: a money aggregate is grouped
+		// by the source's currency dimension and the column names it in
+		// `currency_key` (decisions §228). The table must label each cell from
+		// THAT row — USD 100 and EUR 50 are two figures, never "150".
+		const RESULT = {
+			columns: [
+				{ key: 'vendor_name', label: 'Vendor', kind: 'dimension', type: 'string' },
+				{ key: 'currency', label: 'Currency', kind: 'dimension', type: 'string' },
+				{
+					key: 'amount_sum',
+					label: 'Sum of Amount',
+					kind: 'measure',
+					type: 'money',
+					currency_key: 'currency'
+				}
+			],
+			rows: [
+				{ vendor_name: 'Acme', currency: 'USD', amount_sum: '100.00' },
+				{ vendor_name: 'Acme', currency: 'EUR', amount_sum: '50.00' }
+			],
+			total_rows: 2,
+			page: 1,
+			page_size: 100
+		} satisfies ReportResult;
+
+		await page.route('**/api/reports/catalog', (route) =>
+			route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(CATALOG) })
+		);
+		await page.route(
+			(url) => url.pathname === '/api/reports',
+			(route) =>
+				route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(SAVED) })
+		);
+		await page.route(
+			(url) => url.pathname === '/api/reports/run',
+			(route) =>
+				route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(RESULT) })
+		);
+
+		await page.goto('/reports');
+		await expect(page.getByLabel('Data source')).toBeVisible({ timeout: 10_000 });
+		await page.getByLabel('Add dimension').selectOption({ index: 1 });
+		await page.getByLabel('Add measure').selectOption({ index: 1 });
+		await page.getByTestId('run-report').click();
+
+		const result = page.getByTestId('report-result');
+		const usdRow = result.getByRole('row').filter({ hasText: 'USD' });
+		const eurRow = result.getByRole('row').filter({ hasText: 'EUR' });
+		await expect(usdRow.locator('.money')).toHaveText('$100.00');
+		await expect(eurRow.locator('.money')).toHaveText('€50.00');
 	});
 });

@@ -39,7 +39,7 @@ and **filters**. `GET /api/reports/catalog` returns this shape for the frontend.
 | Source | Dimensions | Measures | Filters |
 |--------|-----------|----------|---------|
 | `invoices` | vendor_name, status (enum), currency, gl_account, cost_center, department, project, payment_terms, invoice_date (date), due_date (date), created_at (date) | amount (money), tax_amount (money), id (count) | status, vendor_name, currency, gl_account, department, project, amount, invoice_date, due_date, created_at |
-| `payments` | status, method, provider, corridor, created_at (date), submitted_at (date), completed_at (date) | amount (money), id (count) | status, method, provider, amount, created_at, completed_at |
+| `payments` | status, method, provider, corridor, currency (the invoice's), created_at (date), submitted_at (date), completed_at (date) | amount (money), id (count) | status, method, provider, amount, created_at, completed_at |
 | `vendors` | status, source, risk_level, kyc_status, payment_terms, created_at (date) | id (count), risk_score (number: avg/min/max) | status, source, name, risk_level, kyc_status, created_at |
 | `expenses` | category, status (enum), payment_method (enum), merchant, currency, expense_date (date), created_at (date) | amount (money), id (count) | status, category, payment_method, merchant, currency, amount, expense_date, created_at |
 
@@ -79,6 +79,44 @@ sargable — no per-row `::date` cast — so an index on the column still applie
 Filters on real `DATE` columns are untouched. Guarded by
 `test_date_filter_on_timestamp_column_covers_the_whole_day` /
 `test_date_filter_on_real_date_column_is_unchanged`.
+
+**Date buckets use the same UTC day.** A date dimension over a timestamp column
+is bucketed as `date_trunc(grain, timezone('UTC', col))`. It used to be
+`date_trunc(grain, col::timestamp)`, and that cast converts a `TIMESTAMPTZ`
+through the session's `TimeZone` — so on an Auckland-zoned session a row
+recorded at 2026-01-31 20:00 UTC was admitted by a January `created_at` filter
+and then reported in the **February** bucket. A `DATE` column (`invoice_date`)
+has no instant and is bucketed as-is. Guarded by
+`test_date_bucket_ignores_the_session_timezone` (runs under
+`SET LOCAL TIME ZONE` for three zones) and
+`test_date_bucket_on_a_real_date_column_is_unshifted`.
+
+### A money aggregate is never a sum across currencies
+
+Every source with a money measure names its **currency dimension**
+(`Source.currency_dimension`): `invoices.currency`, `expenses.currency`, and for
+`payments` the **invoice's** currency, reached by a catalog-defined outer join —
+`Payment.amount` is denominated in its invoice's currency and the payment row
+carries none of its own (`currency_conversion.payment_reporting_amount_sql`).
+
+Whenever a spec selects a money aggregate (`sum` / `avg` / `min` / `max` of a
+money measure) and does not already group by that dimension, `compile_spec`
+appends it to the group-by. The result has one row per currency per group, the
+currency is a visible `dimension` column, and each money measure column carries
+`currency_key: "<that dimension's key>"` so a client labels every cell with the
+code on **its own row**. Before this, "Spend by vendor" over a vendor billing in
+USD and EUR returned one row reading `150.00` for USD 100 + EUR 50 — a figure in
+no currency. A `count`-only report is not split (a count has no currency), and a
+spec that already groups by currency is left as written.
+
+Converting into the reporting currency instead was considered and not taken:
+`invoice_reporting_amount_sql` falls back to face value for an unconverted
+invoice, which re-creates the mixture under a reporting-currency label, and
+payments have no face-value fallback at all. Splitting is exact and needs no
+rate. Reasoning: `docs/decisions.md` §228. Guarded by
+`test_money_sum_is_split_by_currency_when_not_grouped_by_it`,
+`test_payment_sum_is_split_by_its_invoices_currency` and the catalog drift guard
+`test_every_money_measure_has_a_currency_dimension`.
 
 ## Endpoints (`/api/reports`, JWT + tenant-gated)
 
@@ -129,16 +167,22 @@ report_definition`, details = `{name, data_source}`).
 ```json
 {
   "columns": [ { "key": "vendor_name", "label": "Vendor", "kind": "dimension", "type": "string" },
-               { "key": "amount_sum",  "label": "Sum of Amount", "kind": "measure", "type": "money" },
+               { "key": "currency",    "label": "Currency", "kind": "dimension", "type": "string" },
+               { "key": "amount_sum",  "label": "Sum of Amount", "kind": "measure", "type": "money",
+                 "currency_key": "currency" },
                { "key": "id_count",    "label": "Count", "kind": "measure", "type": "number" } ],
-  "rows":    [ { "vendor_name": "Acme", "amount_sum": "12345.67", "id_count": 42 } ],
+  "rows":    [ { "vendor_name": "Acme", "currency": "USD", "amount_sum": "12345.67", "id_count": 42 },
+               { "vendor_name": "Acme", "currency": "EUR", "amount_sum": "800.00", "id_count": 3 } ],
   "total_rows": 137,
   "page": 1, "page_size": 100
 }
 ```
 
 Money values in `rows` are exact decimal **strings**; counts are ints; date
-dimensions are ISO date strings.
+dimensions are ISO date strings. A money column's `currency_key` names the
+dimension column holding that row's currency; the web `ResultTable` renders each
+cell through `<Money currency={row[currency_key]}>` (`types/reports.cellCurrency`),
+bare when the row carries no code.
 
 A money measure is `null` (an empty cell in the CSV/PDF) when the group had
 nothing to aggregate — `min` / `max` / `avg` over a column that is NULL on every

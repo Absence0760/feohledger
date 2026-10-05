@@ -71,7 +71,7 @@ section carried its own `decisions.md` § reference, so nothing was lost by
 deleting it; that cross-reference is what makes the pruning safe, and writing
 one is what earns a future entry the right to be deleted.
 
-**65 open: 50 (c) · 9 (a) · 6 (b)** — re-derived from the file, never carried
+**66 open: 51 (c) · 9 (a) · 6 (b)** — re-derived from the file, never carried
 forward. The section heading is authoritative; where an entry also carries a
 `(c)`/`(a)`/`(b)` marker, the two agree.
 `grep -c '^- \[ \]' docs/followups.md`.
@@ -1282,6 +1282,32 @@ or is a sibling of a fix that needs its own pass.
       **Trigger:** any path that lets one invoice carry more than one
       `completed` payment at once (partial payments / split settlement), or the
       next schema change to `discount_offers`.
+### Surfaced by the report-builder currency pass (2026-10-05, decisions §228)
+
+- [ ] **(c) The cash forecast leaves out every committed invoice that is already past due.**
+      `api/analytics._commitment_rows` drops any row whose effective due date is
+      `< today` (`if due is None or due < today or due > horizon_end: continue`).
+      Probed with real numbers: an approved USD 1,000 invoice due yesterday plus
+      an approved USD 200 invoice due in five days gave
+      `/cashflow_forecast` totals of `committed_amount: "200.00"`, `count: 1` —
+      the overdue thousand is in no period. That one query feeds the forecast,
+      `/cash_position`'s balance curve, the what-if, the copilot's planning tools
+      and the shortfall-alert sweep, so all of them overstate the cash on hand by
+      exactly the AP the business is already late paying — the most certain
+      outflow it has. `backend/docs/analytics.md` does describe the
+      `[today, today + horizon_days]` bound, but the only reason the code gives
+      is "so the query doesn't scan the whole back-catalogue", and the bound is
+      applied in Python after the query has already fetched every open invoice,
+      so it buys nothing; no decision records excluding overdue AP as intended.
+      Left unchanged here because it moves every cash surface and the copilot's
+      `plan_id` hash at once, which is a product call rather than a bug fix.
+      **Durable fix:** carry past-due committed rows into the first period as an
+      explicit `overdue_amount` / `overdue_count` (not silently merged into
+      `scheduled_amount`), push the due-date bound into SQL for the future edge
+      only, and state the rule in `backend/docs/analytics.md` § Predictive
+      cash-flow forecasting and `docs/cash-flow-copilot.md`.
+      **Trigger:** the next change to `_commitment_rows` or to the `/cfo`
+      cash panels, or a product decision on how overdue AP should appear.
 
 ## (a) Blocked on external credentials, accounts, or hardware
 
