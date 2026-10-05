@@ -610,7 +610,14 @@ Response:
   rebates and $100k of spend in the last 30 days reported a 36% yield and a
   $432k annual run-rate against a truth of ~1% and ~$12k. Filtered on
   `CardRebate.created_at` (when the rebate was booked); the `period` column is a
-  display label, not a filter key.
+  display label, not a filter key. **Both sides are in the reporting
+  currency**: the numerator sums only rebates on reporting-currency cards
+  (`excluded_rebate_count` discloses the rest), and the denominator —
+  `rebate_yield.total_spend` — is `reporting_spend.total_amount`, never the
+  naive cross-currency `total_spend`. It was the naive figure, so one
+  ¥1,000,000 invoice locked at $6,700 in a $10,000 window made the denominator
+  1,010,000 and turned a 0.60% yield into 0.01%
+  (`tests/test_analytics_rebate_window.py`).
 
 ### Per-vendor spend is one query, and it says what it could not convert
 

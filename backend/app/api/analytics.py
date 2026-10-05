@@ -1101,9 +1101,17 @@ async def get_cfo_analytics(
     # `unconverted_count` on the leg immediately beside it in this same
     # response does exactly this for the same reason.
     excluded_rebate_count = int(rebate_row[1] or 0)
+    # The DENOMINATOR is the reporting-currency spend rollup, not the naive
+    # `total_spend` — the numerator above is reporting-currency rebates only, so
+    # dividing it by a cross-currency SUM was the same two-units ratio the
+    # numerator's filter exists to prevent, just moved to the other side: one
+    # ¥1,000,000 invoice locked at $6,700 turned a 0.60% yield into 0.01%.
+    # `reporting_spend.total_amount` is the figure, so `rebate_yield.total_spend`
+    # now matches it (face-value fallbacks are disclosed there, on
+    # `reporting_spend.unconverted_count`).
     rebate = compute_rebate_yield(
         rebates_total=rebates_total,
-        total_spend=total_spend,
+        total_spend=spend_rollup.total_reporting_amount,
         months_in_period=max(period_days // 30, 1),
     )
 
