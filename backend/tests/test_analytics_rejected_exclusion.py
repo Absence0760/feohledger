@@ -293,6 +293,111 @@ async def test_dpo_drill_through_serializes_money_as_exact_strings(realdb):
         assert isinstance(row["cogs"], str), row
 
 
+async def _seed_mixed_currency_closed_month(realdb) -> None:
+    """In the month that just closed: an OPEN USD 1,000 payable and a PAID
+    ¥1,000,000 invoice locked at USD 6,700 — spend, but no longer owed."""
+    from app.utils.dates import utc_today
+
+    org_id = realdb.info(TENANT).org_id
+    mk = realdb.sessionmaker(TENANT)
+    when = _last_month_end(utc_today())
+    async with mk() as s:
+        ent = await _default_entity_id(s)
+        s.add_all(
+            [
+                Invoice(
+                    organization_id=org_id,
+                    entity_id=ent,
+                    invoice_number="DPOFX-USD",
+                    vendor_name="ZZ DPO FX Co",
+                    amount=Decimal("1000.00"),
+                    currency="USD",
+                    reporting_amount=Decimal("1000.00"),
+                    reporting_currency="USD",
+                    status=InvoiceStatus.approved,
+                    invoice_date=when,
+                ),
+                Invoice(
+                    organization_id=org_id,
+                    entity_id=ent,
+                    invoice_number="DPOFX-JPY",
+                    vendor_name="ZZ DPO FX Co",
+                    amount=Decimal("1000000.00"),
+                    currency="JPY",
+                    reporting_amount=Decimal("6700.00"),
+                    reporting_currency="USD",
+                    status=InvoiceStatus.paid,
+                    invoice_date=when,
+                ),
+            ]
+        )
+        await s.commit()
+
+
+@pytest.mark.asyncio
+async def test_dpo_is_a_ratio_of_reporting_currency_figures(realdb):
+    """DPO divides the AP balance by a spend proxy. Both were naive SUMs across
+    currencies, so the yen's face value swamped the COGS proxy: AP 1,000 over
+    1,001,000 reported 0.0 days on the trend (and 0.0 on the headline) where
+    the true ratio — 1,000 over 7,700 USD — is 3.9 days on a 30-day month."""
+    from app.utils.dates import utc_today
+
+    await _seed_mixed_currency_closed_month(realdb)
+    month = _last_month_end(utc_today()).strftime("%Y-%m")
+
+    async with realdb.client(key=TENANT, role="cfo") as c:
+        cfo = (await c.get("/api/analytics/cfo?period_days=30")).json()
+        drill = (await c.get("/api/analytics/drill/dpo?months=1")).json()
+
+    drill_row = next(r for r in drill["rows"] if r["month"] == month)
+    assert drill["reporting_currency"] == "USD"
+    assert drill_row["cogs"] == "7700.00"
+    assert drill_row["accounts_payable"] == "1000.00"
+    # 1000 / 7700 x 30 = 3.896… → 3.9 (pre-fix: 1000 / 1001000 x 30 → 0.0).
+    assert Decimal(str(drill_row["dpo"])) == Decimal("3.9")
+    trend_point = next(r for r in cfo["dpo_trend"] if r["month"] == month)
+    assert Decimal(str(trend_point["dpo"])) == Decimal("3.9")
+
+
+@pytest.mark.asyncio
+async def test_headline_dpo_uses_the_reporting_rollups(realdb):
+    """`dpo_current` is AP balance / window spend x period_days, each side the
+    reporting-currency rollup served beside it in the same response."""
+    from app.utils.dates import utc_today
+
+    org_id = realdb.info(TENANT).org_id
+    mk = realdb.sessionmaker(TENANT)
+    today = utc_today()
+    async with mk() as s:
+        ent = await _default_entity_id(s)
+        for num, amt, ccy, rep, status in (
+            ("DPOH-USD", "1000.00", "USD", "1000.00", InvoiceStatus.approved),
+            ("DPOH-JPY", "1000000.00", "JPY", "6700.00", InvoiceStatus.paid),
+        ):
+            s.add(
+                Invoice(
+                    organization_id=org_id,
+                    entity_id=ent,
+                    invoice_number=num,
+                    vendor_name="ZZ DPO FX Co",
+                    amount=Decimal(amt),
+                    currency=ccy,
+                    reporting_amount=Decimal(rep),
+                    reporting_currency="USD",
+                    status=status,
+                    invoice_date=today - timedelta(days=3),
+                )
+            )
+        await s.commit()
+
+    async with realdb.client(key=TENANT, role="cfo") as c:
+        cfo = (await c.get("/api/analytics/cfo?period_days=30")).json()
+    assert cfo["reporting_accounts_payable_balance"]["total_amount"] == "1000.00"
+    assert cfo["reporting_spend"]["total_amount"] == "7700.00"
+    # Pre-fix: 1000 / 1001000 x 30 → 0.0.
+    assert Decimal(str(cfo["dpo_current"])) == Decimal("3.9")
+
+
 @pytest.mark.asyncio
 async def test_dashboard_total_amount_and_cfo_total_spend_are_different_populations(realdb):
     """Regression test for issue #131 part 2 (ambiguous KPI labels).

@@ -922,11 +922,15 @@ def compute_rebate_yield(
     *,
     rebates_total: Decimal,
     total_spend: Decimal,
-    months_in_period: int = 12,
+    months_in_period: Decimal | int = 12,
 ) -> dict:
     """Returns the rebate yield as a percentage of spend + an
     annualised run-rate dollars figure (useful for the CFO's
-    investor deck)."""
+    investor deck).
+
+    `months_in_period` may be fractional (`period_days / 30`): flooring it to an
+    int overstated the run-rate of any window that is not a whole number of
+    months — by nearly 2x at 59 days."""
     yield_pct = (
         (rebates_total / total_spend * Decimal("100")).quantize(Decimal("0.01"))
         if total_spend > 0

@@ -151,7 +151,11 @@ async def test_scheduled_report_aging_excludes_pre_approval(realdb):
     expected = await _seed(realdb)
     from app.services.scheduled_reports import _generate_report_payload
 
-    schedule = SimpleNamespace(report_type="aging_snapshot", period_days=30)
+    schedule = SimpleNamespace(
+        report_type="aging_snapshot",
+        period_days=30,
+        organization_id=realdb.info(TENANT).org_id,
+    )
     mk = realdb.sessionmaker(TENANT)
     async with mk() as s:
         csv_text = await _generate_report_payload(s, schedule)
@@ -269,7 +273,11 @@ async def test_scheduled_report_aging_includes_null_due_date(realdb):
     expected = await _seed_with_null_due_date(realdb)
     from app.services.scheduled_reports import _generate_report_payload
 
-    schedule = SimpleNamespace(report_type="aging_snapshot", period_days=30)
+    schedule = SimpleNamespace(
+        report_type="aging_snapshot",
+        period_days=30,
+        organization_id=realdb.info(TENANT).org_id,
+    )
     mk = realdb.sessionmaker(TENANT)
     async with mk() as s:
         csv_text = await _generate_report_payload(s, schedule)
@@ -423,3 +431,147 @@ async def test_monthly_trend_buckets_by_month_realdb(realdb):
     bucket = next(m for m in trend if m["month"] == recent_key)
     assert bucket["count"] == 2  # d_recent + its day-1 sibling
     assert Decimal(str(bucket["amount"])) == Decimal("100.00")  # 75 + 25
+
+
+# ---------------------------------------------------------------------------
+# The aging snapshot CSV (API export + emailed scheduled report) summed the raw
+# `Invoice.amount` across currencies, into columns that name no currency at
+# all, while the dashboard's `aging_reporting` and the AP-balance rollup it is
+# meant to reconcile with (F-4) both convert. A ¥1,000,000 open invoice landed
+# in the 31-60 band as "1000000.00", beside $300 of dollars.
+# ---------------------------------------------------------------------------
+
+
+async def _seed_mixed_currency(realdb) -> None:
+    """Three open payables in a USD-reporting tenant:
+
+    * USD 300, current;
+    * JPY 1,000,000 locked at USD 6,700.00, 31-60 days past due;
+    * EUR 500 with NO lock (FX blip at booking), 90+ days past due — the row
+      that is counted at face value AND must be disclosed.
+    """
+    org_id = realdb.info(TENANT).org_id
+    mk = realdb.sessionmaker(TENANT)
+    today = utc_today()
+
+    def inv(ent, num, amt, ccy, due_offset, rep_amt=None, rep_ccy=None):
+        return Invoice(
+            organization_id=org_id,
+            entity_id=ent,
+            invoice_number=num,
+            vendor_name="FX Aging Co",
+            amount=Decimal(amt),
+            currency=ccy,
+            reporting_amount=Decimal(rep_amt) if rep_amt else None,
+            reporting_currency=rep_ccy,
+            status=InvoiceStatus.approved,
+            invoice_date=today - timedelta(days=150),
+            due_date=today + timedelta(days=due_offset),
+        )
+
+    async with mk() as s:
+        ent = await _default_entity_id(s)
+        s.add_all(
+            [
+                inv(ent, "AGFX-USD", "300.00", "USD", 10, "300.00", "USD"),
+                inv(ent, "AGFX-JPY", "1000000.00", "JPY", -45, "6700.00", "USD"),
+                inv(ent, "AGFX-EUR", "500.00", "EUR", -120),
+            ]
+        )
+        await s.commit()
+
+
+def _grid_row(text: str) -> dict:
+    lines = text.splitlines()
+    start = next(i for i, ln in enumerate(lines) if ln.startswith("as_of_date"))
+    return next(csv.DictReader(io.StringIO("\n".join(lines[start:]))))
+
+
+def _assert_converted(row: dict) -> None:
+    assert row["current"] == "300.00"
+    # 6700.00, not 1000000.00 — the locked reporting figure, not the yen.
+    assert row["days_60"] == "6700.00"
+    # No lock: face value, and disclosed on the row rather than silent.
+    assert row["days_90_plus"] == "500.00"
+    assert row["total"] == "7500.00"
+    assert row["reporting_currency"] == "USD"
+    assert row["unconverted_count"] == "1"
+
+
+@pytest.mark.asyncio
+async def test_aging_snapshot_export_is_in_the_reporting_currency(realdb):
+    await _seed_mixed_currency(realdb)
+    async with realdb.client(key=TENANT, role="cfo") as c:
+        resp = await c.get("/api/analytics/export/aging_snapshot")
+        cfo = (await c.get("/api/analytics/cfo")).json()
+    assert resp.status_code == 200
+    row = _grid_row(resp.text)
+    _assert_converted(row)
+    # F-4 in the one currency both are now denominated in: the snapshot's total
+    # is the AP balance's reporting rollup.
+    assert Decimal(row["total"]) == Decimal(
+        cfo["reporting_accounts_payable_balance"]["total_amount"]
+    )
+
+
+@pytest.mark.asyncio
+async def test_scheduled_aging_snapshot_is_in_the_reporting_currency(realdb):
+    await _seed_mixed_currency(realdb)
+    from app.services.scheduled_reports import _generate_report_payload
+
+    schedule = SimpleNamespace(
+        report_type="aging_snapshot",
+        period_days=30,
+        organization_id=realdb.info(TENANT).org_id,
+    )
+    mk = realdb.sessionmaker(TENANT)
+    async with mk() as s:
+        csv_text = await _generate_report_payload(s, schedule)
+    _assert_converted(_grid_row(csv_text))
+
+
+@pytest.mark.asyncio
+async def test_aging_snapshot_export_band_boundaries_realdb(realdb):
+    """The export's bands moved into SQL with the conversion; pin every edge
+    (due today = current, 30/60/90 inclusive upper edges) on the CSV itself."""
+    org_id = realdb.info(TENANT).org_id
+    mk = realdb.sessionmaker(TENANT)
+    today = utc_today()
+    cases = [
+        (-10, "1.00"),  # current
+        (0, "2.00"),  # current (due today)
+        (1, "4.00"),  # days_30
+        (30, "8.00"),  # days_30
+        (31, "16.00"),  # days_60
+        (60, "32.00"),  # days_60
+        (61, "64.00"),  # days_90
+        (90, "128.00"),  # days_90
+        (91, "256.00"),  # days_90_plus
+    ]
+    async with mk() as s:
+        ent = await _default_entity_id(s)
+        s.add_all(
+            [
+                Invoice(
+                    organization_id=org_id,
+                    entity_id=ent,
+                    invoice_number=f"AGXB-{i}",
+                    vendor_name="Boundary Co",
+                    amount=Decimal(amt),
+                    currency="USD",
+                    status=InvoiceStatus.approved,
+                    invoice_date=today - timedelta(days=200),
+                    due_date=today - timedelta(days=off),
+                )
+                for i, (off, amt) in enumerate(cases)
+            ]
+        )
+        await s.commit()
+    async with realdb.client(key=TENANT, role="cfo") as c:
+        row = _grid_row((await c.get("/api/analytics/export/aging_snapshot")).text)
+    assert row["current"] == "3.00"
+    assert row["days_30"] == "12.00"
+    assert row["days_60"] == "48.00"
+    assert row["days_90"] == "192.00"
+    assert row["days_90_plus"] == "256.00"
+    assert row["unconverted_count"] == "0"

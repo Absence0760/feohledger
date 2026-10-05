@@ -66,6 +66,7 @@ from app.services.currency_conversion import (
     card_currency_sql,
     compute_unrealized_fx_gain_loss,
     invoice_currency_rollup_select,
+    invoice_reporting_amount_sql,
     payment_reporting_amount_sql,
     reporting_amount_for_row,
     resolve_reporting_currency,
@@ -245,6 +246,73 @@ async def _commitment_rows(
             }
         )
     return rows
+
+
+_AGING_BANDS = ("current", "days_30", "days_60", "days_90", "days_90_plus")
+
+
+async def _aging_snapshot_buckets(
+    db: AsyncSession,
+    *,
+    today: date,
+    reporting_currency: str,
+    entity_id: uuid.UUID | None = None,
+) -> dict:
+    """The aging snapshot's five bands, in the org's REPORTING currency — the
+    one builder behind `GET /api/analytics/export/aging_snapshot` and the
+    emailed `aging_snapshot` scheduled report.
+
+    Both used to sum the raw `Invoice.amount` across currencies into columns
+    that name no currency at all, so a ¥1,000,000 open invoice landed in a band
+    as "1000000.00" beside dollars — while the dashboard's `aging_reporting`
+    and the AP-balance rollup this snapshot reconciles with (F-4) both
+    converted. Each row now goes through `invoice_reporting_amount_sql`, the
+    rule every sibling reporting figure uses: the rate locked on the invoice,
+    else face value — and those face-value fallbacks are COUNTED on
+    `unconverted_count`, so a band that is part-converted says so.
+
+    Population and band edges are the dashboard's exactly: `OPEN_AP_STATUSES`
+    with no `due_date` filter (a NULL due date is `current` — unknowable, so
+    not overdue), days past due computed by Postgres `date - date` against the
+    caller's `today`, and 0 / 30 / 60 / 90 as inclusive upper edges.
+    """
+    rep = invoice_reporting_amount_sql(
+        reporting_currency=reporting_currency,
+        amount=Invoice.amount,
+        currency=Invoice.currency,
+        persisted_reporting_amount=Invoice.reporting_amount,
+        persisted_reporting_currency=Invoice.reporting_currency,
+    )
+    days_past = today - Invoice.due_date
+    band = case(
+        (Invoice.due_date.is_(None), "current"),
+        (days_past <= 0, "current"),
+        (days_past <= 30, "days_30"),
+        (days_past <= 60, "days_60"),
+        (days_past <= 90, "days_90"),
+        else_="days_90_plus",
+    )
+    result = await db.execute(
+        apply_entity_scope(
+            select(
+                band.label("band"),
+                func.coalesce(func.sum(rep.amount), 0),
+                func.coalesce(func.sum(rep.unconverted), 0),
+            )
+            .where(Invoice.status.in_(OPEN_AP_STATUSES))
+            .group_by(band),
+            Invoice,
+            entity_id,
+        )
+    )
+    buckets: dict = {name: Decimal("0") for name in _AGING_BANDS}
+    unconverted = 0
+    for name, total, unconv in result.all():
+        buckets[name] = Decimal(str(total))
+        unconverted += int(unconv or 0)
+    buckets["reporting_currency"] = reporting_currency.strip().upper()
+    buckets["unconverted_count"] = unconverted
+    return buckets
 
 
 def _money(value: Decimal | int | None) -> str | None:
@@ -617,8 +685,16 @@ async def _monthly_dpo_snapshots(
     months: int,
     entity_id: uuid.UUID | None,
     today: date,
+    reporting_currency: str,
 ) -> list[dict]:
     """Per-month `{month, accounts_payable, cogs}` rows, newest month last.
+
+    Both legs are summed in the org's REPORTING currency
+    (`invoice_reporting_amount_sql`: the locked rate, else face value). DPO is
+    a ratio of the two, so a naive cross-currency SUM on either side is not a
+    rounding error but a different number: an open $1,000 payable over a month
+    whose COGS proxy held a paid ¥1,000,000 invoice (locked at $6,700) reported
+    0.0 days instead of 3.9.
 
     This is the ONE population behind both DPO surfaces: the `dpo_trend` chart
     on `GET /api/analytics/cfo` and the `GET /api/analytics/drill/dpo`
@@ -635,6 +711,13 @@ async def _monthly_dpo_snapshots(
     hand-copied literal. The returned shape is exactly what the pure
     `services.analytics.compute_dpo_trend` consumes — money stays `Decimal`.
     """
+    rep = invoice_reporting_amount_sql(
+        reporting_currency=reporting_currency,
+        amount=Invoice.amount,
+        currency=Invoice.currency,
+        persisted_reporting_amount=Invoice.reporting_amount,
+        persisted_reporting_currency=Invoice.reporting_currency,
+    )
     rows: list[dict] = []
     cursor = today.replace(day=1)
     for _ in range(months):
@@ -642,7 +725,7 @@ async def _monthly_dpo_snapshots(
         month_start = month_end.replace(day=1)
         cogs_q = await db.execute(
             apply_entity_scope(
-                select(func.coalesce(func.sum(Invoice.amount), 0)).where(
+                select(func.coalesce(func.sum(rep.amount), 0)).where(
                     Invoice.invoice_date >= month_start,
                     Invoice.invoice_date <= month_end,
                     # Exclude rejected — match the headline `total_spend`, else
@@ -656,7 +739,7 @@ async def _monthly_dpo_snapshots(
         )
         ap_q = await db.execute(
             apply_entity_scope(
-                select(func.coalesce(func.sum(Invoice.amount), 0)).where(
+                select(func.coalesce(func.sum(rep.amount), 0)).where(
                     Invoice.invoice_date <= month_end,
                     Invoice.status.in_(OPEN_AP_STATUSES),
                 ),
@@ -784,13 +867,27 @@ async def get_cfo_analytics(
     # ----- DPO (using `total_spend` as a COGS proxy when the org -----
     # ----- doesn't surface real COGS data — the dashboard tile -----
     # ----- annotates this as a proxy estimate). -----
-    dpo = compute_dpo(accounts_payable=ap_balance, cogs=total_spend, period_days=period_days)
+    # Both legs are the reporting-currency rollups served in this response,
+    # never the naive `ap_balance` / `total_spend`: a ratio of two
+    # cross-currency SUMs is not "approximately" DPO — a paid ¥1,000,000
+    # invoice in the window swamped the COGS proxy and read 0.0 days.
+    dpo = compute_dpo(
+        accounts_payable=ap_balance_rollup.total_reporting_amount,
+        cogs=spend_rollup.total_reporting_amount,
+        period_days=period_days,
+    )
 
     # ----- DPO trend (last 6 months snapshots) -----
     # Snapshots + arithmetic both come from shared code, so this chart and the
     # `/drill/dpo` drill-through that explains it cannot disagree.
     monthly_dpo_rows = compute_dpo_trend(
-        await _monthly_dpo_snapshots(db, months=6, entity_id=entity_id, today=today),
+        await _monthly_dpo_snapshots(
+            db,
+            months=6,
+            entity_id=entity_id,
+            today=today,
+            reporting_currency=reporting_currency,
+        ),
         period_days=30,
     )
 
@@ -1033,10 +1130,22 @@ async def get_cfo_analytics(
     # `unconverted_count` on the leg immediately beside it in this same
     # response does exactly this for the same reason.
     excluded_rebate_count = int(rebate_row[1] or 0)
+    # The DENOMINATOR is the reporting-currency spend rollup, not the naive
+    # `total_spend` — the numerator above is reporting-currency rebates only, so
+    # dividing it by a cross-currency SUM was the same two-units ratio the
+    # numerator's filter exists to prevent, just moved to the other side: one
+    # ¥1,000,000 invoice locked at $6,700 turned a 0.60% yield into 0.01%.
+    # `reporting_spend.total_amount` is the figure, so `rebate_yield.total_spend`
+    # now matches it (face-value fallbacks are disclosed there, on
+    # `reporting_spend.unconverted_count`).
     rebate = compute_rebate_yield(
         rebates_total=rebates_total,
-        total_spend=total_spend,
-        months_in_period=max(period_days // 30, 1),
+        total_spend=spend_rollup.total_reporting_amount,
+        # The window's EXACT length in 30-day months. `period_days // 30` floored
+        # it, so a 59-day view annualised ~2 months of rebates as if they were
+        # one (x12 instead of x6.1) — and `period_days >= 30` already keeps
+        # this at or above 1, so the `max(..., 1)` guard it needed is gone.
+        months_in_period=Decimal(period_days) / Decimal(30),
     )
 
     # ----- Unrealized FX gain/loss on OPEN foreign-currency invoices -----
@@ -1656,6 +1765,7 @@ async def drill_spend_concentration(
 async def drill_dpo(
     months: int = Query(12, ge=1, le=24),
     db: AsyncSession = Depends(get_tenant_db),
+    org: Organization = Depends(get_tenant),
     user: User = Depends(require_roles(*_CFO_ROLES)),
     entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
@@ -1669,12 +1779,22 @@ async def drill_dpo(
     `dpo` is a day count, not money, and stays a JSON number so it matches the
     numeric `dpo` the chart already renders.
     """
+    reporting_currency = resolve_reporting_currency(org.settings)
     rows = compute_dpo_trend(
-        await _monthly_dpo_snapshots(db, months=months, entity_id=entity_id, today=utc_today()),
+        await _monthly_dpo_snapshots(
+            db,
+            months=months,
+            entity_id=entity_id,
+            today=utc_today(),
+            reporting_currency=reporting_currency,
+        ),
         period_days=30,
     )
     return {
         "months": months,
+        # What `accounts_payable` / `cogs` are denominated in — each invoice at
+        # its locked rate, else face value (`_monthly_dpo_snapshots`).
+        "reporting_currency": reporting_currency,
         "rows": [
             {
                 "month": r["month"],
@@ -1812,46 +1932,15 @@ async def export_report(
         payload = EXPORTERS[report](rows.all())
     elif report == "aging_snapshot":
         today = utc_today()
-        # Aging covers the same open-payable population as the AP balance so the
-        # buckets sum to it (F-4): approved → payment_scheduled, not the
-        # pre-approval statuses that aren't a confirmed liability yet. The AP
-        # balance has no due_date filter, so this must not either — an open
-        # invoice missing a due date used to inflate the balance while
-        # vanishing from every bucket.
-        aging_rows = await db.execute(
-            apply_entity_scope(
-                select(Invoice.due_date, Invoice.amount).where(
-                    Invoice.status.in_(OPEN_AP_STATUSES),
-                ),
-                Invoice,
-                entity_id,
-            )
+        # Same open-payable population as the AP balance, so the bands sum to
+        # its reporting rollup (F-4), and in the same currency — see
+        # `_aging_snapshot_buckets`, shared with the scheduled report.
+        buckets = await _aging_snapshot_buckets(
+            db,
+            today=today,
+            reporting_currency=resolve_reporting_currency(org.settings if org else None),
+            entity_id=entity_id,
         )
-        buckets = {
-            "current": Decimal("0"),
-            "days_30": Decimal("0"),
-            "days_60": Decimal("0"),
-            "days_90": Decimal("0"),
-            "days_90_plus": Decimal("0"),
-        }
-        for due, amt in aging_rows.all():
-            amount = Decimal(str(amt))
-            # A null due_date can't be judged overdue — bucket as "current"
-            # (the conservative read) rather than dropping it entirely.
-            if due is None:
-                buckets["current"] += amount
-                continue
-            days_past = (today - due).days
-            if days_past <= 0:
-                buckets["current"] += amount
-            elif days_past <= 30:
-                buckets["days_30"] += amount
-            elif days_past <= 60:
-                buckets["days_60"] += amount
-            elif days_past <= 90:
-                buckets["days_90"] += amount
-            else:
-                buckets["days_90_plus"] += amount
         # Label the CSV with the SAME `today` the buckets were computed against.
         # Without it the exporter re-reads the clock, so the as-of label is a
         # second, independent read that can disagree with the numbers under it.

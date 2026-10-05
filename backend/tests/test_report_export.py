@@ -444,8 +444,11 @@ def test_aging_snapshot_emits_single_row_with_totals():
         "days_90",
         "days_90_plus",
         "total",
+        "reporting_currency",
+        "unconverted_count",
     ]
-    # Total sums all five buckets.
+    # Total sums all five buckets. A caller that names no currency and no
+    # unconverted count gets both BLANK — never a guessed "USD" / "0".
     assert out[1] == [
         "2026-05-10",
         "100.00",
@@ -454,7 +457,29 @@ def test_aging_snapshot_emits_single_row_with_totals():
         "800.00",
         "1600.00",
         "3100.00",
+        "",
+        "",
     ]
+
+
+def test_aging_snapshot_states_its_currency_and_unconverted_count():
+    """The bands are in the org's reporting currency, with face-value fallbacks
+    counted — a CSV has no other place to carry that caveat."""
+    buckets = {
+        "current": Decimal("300"),
+        "days_60": Decimal("6700"),
+        "days_90_plus": Decimal("500"),
+        "reporting_currency": "USD",
+        "unconverted_count": 1,
+    }
+    out = _read(export_aging_snapshot(buckets, snapshot_date=date(2026, 5, 10)))
+    row = dict(zip(out[0], out[1], strict=True))
+    assert row["total"] == "7500.00"
+    assert row["reporting_currency"] == "USD"
+    assert row["unconverted_count"] == "1"
+    # Zero is an answer, distinct from "not asked".
+    out = _read(export_aging_snapshot({"reporting_currency": "EUR", "unconverted_count": 0}))
+    assert out[1][-2:] == ["EUR", "0"]
 
 
 def test_aging_snapshot_keeps_61_90_separate_from_90_plus():
@@ -471,7 +496,7 @@ def test_aging_snapshot_keeps_61_90_separate_from_90_plus():
 def test_aging_snapshot_empty_buckets_safe():
     """Empty input → zero row, not a crash."""
     out = _read(export_aging_snapshot({}))
-    assert out[1][1:] == ["0.00", "0.00", "0.00", "0.00", "0.00", "0.00"]
+    assert out[1][1:] == ["0.00", "0.00", "0.00", "0.00", "0.00", "0.00", "", ""]
 
 
 # ---------------------------------------------------------------------------

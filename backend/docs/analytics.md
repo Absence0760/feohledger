@@ -88,7 +88,10 @@ Existing fields stay: `pipeline`, `vendor_spend`, `aging`,
 - `aging` — open-invoice exposure bucketed by **days past the due date**:
   `current` (not yet due), `days_30` (1-30), `days_60` (31-60), `days_90`
   (61-90), `days_90_plus` (90+). The same five buckets back the
-  `aging_snapshot` CSV export and the emailed scheduled report. Covers the
+  `aging_snapshot` CSV export and the emailed scheduled report — which, having
+  no sibling field to carry a face-value total, export the **reporting-currency**
+  bands (`aging_reporting`'s rule) plus `reporting_currency` and
+  `unconverted_count` columns (see § CSV export). Covers the
   SAME population as the CFO `accounts_payable_balance` (F-4) — which has no
   `due_date` filter — so an open invoice with a null `due_date` buckets as
   `current` (unknowable, so not overdue) rather than being silently dropped;
@@ -607,7 +610,17 @@ Response:
   rebates and $100k of spend in the last 30 days reported a 36% yield and a
   $432k annual run-rate against a truth of ~1% and ~$12k. Filtered on
   `CardRebate.created_at` (when the rebate was booked); the `period` column is a
-  display label, not a filter key.
+  display label, not a filter key. **Both sides are in the reporting
+  currency**: the numerator sums only rebates on reporting-currency cards
+  (`excluded_rebate_count` discloses the rest), and the denominator —
+  `rebate_yield.total_spend` — is `reporting_spend.total_amount`, never the
+  naive cross-currency `total_spend`. It was the naive figure, so one
+  ¥1,000,000 invoice locked at $6,700 in a $10,000 window made the denominator
+  1,010,000 and turned a 0.60% yield into 0.01%
+  (`tests/test_analytics_rebate_window.py`). `annualised_rebates` scales by
+  the window's exact length, `months_in_period = period_days / 30`; it was
+  `period_days // 30`, which floored a 59-day window to one month and
+  reported nearly double the run-rate.
 
 ### Per-vendor spend is one query, and it says what it could not convert
 
@@ -750,6 +763,16 @@ two resolutions, so they must never disagree. They now share both halves:
   open-AP population from the canonical `OPEN_AP_STATUSES`, not a hand-copied
   status list.
 - **The arithmetic** comes from the pure `services/analytics.py::compute_dpo_trend`.
+- **Both legs are in the reporting currency.** The snapshots sum each invoice
+  through `invoice_reporting_amount_sql` (locked rate, else face value), and
+  `dpo_current` divides `reporting_accounts_payable_balance.total_amount` by
+  `reporting_spend.total_amount` — the rollups served in the same response.
+  They were naive cross-currency SUMs, and a ratio does not average that error
+  away: an open $1,000 payable beside a paid ¥1,000,000 invoice locked at
+  $6,700 reported 0.0 days where the truth is 3.9. `/drill/dpo` names its
+  denomination on a top-level `reporting_currency`. Pinned by
+  `tests/test_analytics_rejected_exclusion.py::test_dpo_is_a_ratio_of_reporting_currency_figures`
+  and `::test_headline_dpo_uses_the_reporting_rollups`.
 
 They used to be two hand-written copies of the same loop, and the copies had
 already drifted: the chart excluded `rejected` invoices from COGS, the
@@ -1083,7 +1106,7 @@ returning "no threshold" rather than raising.
 | `invoice_register` | invoice_id, invoice_number, vendor_name, amount, currency, status, invoice_date, due_date, created_at, po_number |
 | `vendor_spend` | vendor_name, invoice_count, total_amount, currencies, unconverted_count |
 | `payment_register` | payment_id, invoice_id, invoice_number, vendor_name, amount, currency, method, status, provider, reference, submitted_at, completed_at |
-| `aging_snapshot` | as_of_date, current, days_30, days_60, days_90, days_90_plus, total. `as_of_date` defaults to `utc_today()` — neither caller passes `snapshot_date`, and both bucket against a UTC `today`, so a local-time default labelled the file with one date while the buckets were computed as of another |
+| `aging_snapshot` | as_of_date, current, days_30, days_60, days_90, days_90_plus, total, reporting_currency, unconverted_count. The bands are in the org's **reporting currency** — the rate locked on each invoice, else face value, with those face-value rows counted on `unconverted_count` (the dashboard `aging_reporting` rule, and the figure the CFO `reporting_accounts_payable_balance` they reconcile with uses). Both the export route and the emailed report call ONE builder, `api/analytics._aging_snapshot_buckets`; they used to be two hand-copied loops that summed raw `Invoice.amount` across currencies, so a ¥1,000,000 invoice sat in a band as "1000000.00" beside dollars in a file that names no currency. `as_of_date` defaults to `utc_today()` — neither caller passes `snapshot_date`, and both bucket against a UTC `today`, so a local-time default labelled the file with one date while the buckets were computed as of another |
 | `cashflow_forecast` | period, period_start, period_end, scheduled_amount, committed_amount, pending_amount, discount_eligible_amount, count |
 | `expense_register` | date, merchant, category, amount, currency, gl_code, payment_method, status, report_number |
 
