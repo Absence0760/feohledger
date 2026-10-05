@@ -1141,7 +1141,11 @@ async def get_cfo_analytics(
     rebate = compute_rebate_yield(
         rebates_total=rebates_total,
         total_spend=spend_rollup.total_reporting_amount,
-        months_in_period=max(period_days // 30, 1),
+        # The window's EXACT length in 30-day months. `period_days // 30` floored
+        # it, so a 59-day view annualised ~2 months of rebates as if they were
+        # one (x12 instead of x6.1) — and `period_days >= 30` already keeps
+        # this at or above 1, so the `max(..., 1)` guard it needed is gone.
+        months_in_period=Decimal(period_days) / Decimal(30),
     )
 
     # ----- Unrealized FX gain/loss on OPEN foreign-currency invoices -----

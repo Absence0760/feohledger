@@ -617,7 +617,10 @@ Response:
   naive cross-currency `total_spend`. It was the naive figure, so one
   ¥1,000,000 invoice locked at $6,700 in a $10,000 window made the denominator
   1,010,000 and turned a 0.60% yield into 0.01%
-  (`tests/test_analytics_rebate_window.py`).
+  (`tests/test_analytics_rebate_window.py`). `annualised_rebates` scales by
+  the window's exact length, `months_in_period = period_days / 30`; it was
+  `period_days // 30`, which floored a 59-day window to one month and
+  reported nearly double the run-rate.
 
 ### Per-vendor spend is one query, and it says what it could not convert
 
