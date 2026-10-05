@@ -781,17 +781,26 @@
 	 * chip, with its raw value.
 	 */
 	let severityChips = $derived.by(() => {
-		if (!summary) return [];
-		const counts = summary.by_severity;
+		// Without a summary (still loading, or the tally request failed) the
+		// chips still render, uncounted: the summary is "non-critical" to the
+		// queue, but the chips are the only control that can change — or undo —
+		// a severity the URL already applied to the table.
+		const counts = summary?.by_severity;
 		const known = EXCEPTION_SEVERITIES as readonly string[];
-		const keys = [...known, ...Object.keys(counts).filter((k) => !known.includes(k))];
+		const keys = counts
+			? [...known, ...Object.keys(counts).filter((k) => !known.includes(k))]
+			: [...known];
 		return [
 			{
 				key: 'all',
 				label: m('exceptions.filter.allSeverities'),
-				count: Object.values(counts).reduce((sum, n) => sum + n, 0)
+				count: counts ? Object.values(counts).reduce((sum, n) => sum + n, 0) : undefined
 			},
-			...keys.map((sev) => ({ key: sev, label: severityLabel(sev), count: counts[sev] ?? 0 }))
+			...keys.map((sev) => ({
+				key: sev,
+				label: severityLabel(sev),
+				count: counts ? (counts[sev] ?? 0) : undefined
+			}))
 		];
 	});
 
@@ -802,28 +811,32 @@
 	 * the row would leave the table narrowed by a filter nothing on screen shows
 	 * or can undo (the `chipStatuses` rule on `/invoices`).
 	 */
-	let typeChipEntries = $derived.by((): [string, number][] => {
-		if (!summary) return [];
-		const entries = Object.entries(summary.by_type);
+	let typeChipEntries = $derived.by((): [string, number | undefined][] => {
+		// No summary → no type roster to list, but an ACTIVE type still gets its
+		// chip (uncounted), so the filter stays visible and undoable.
+		if (!summary) return typeFilter ? [[typeFilter, undefined]] : [];
+		const entries: [string, number | undefined][] = Object.entries(summary.by_type);
 		if (typeFilter && !(typeFilter in summary.by_type)) entries.push([typeFilter, 0]);
 		return entries;
 	});
 
-	let statusChips = $derived(
-		summary
-			? [
-					{
-						key: 'all',
-						label: m('common.all'),
-						count: summary.open + summary.escalated + summary.resolved + summary.dismissed
-					},
-					{ key: 'open', label: m('exceptions.filter.open'), count: summary.open },
-					{ key: 'escalated', label: m('exceptions.filter.escalated'), count: summary.escalated },
-					{ key: 'resolved', label: m('exceptions.filter.resolved'), count: summary.resolved },
-					{ key: 'dismissed', label: m('exceptions.filter.dismissed'), count: summary.dismissed }
-				]
-			: []
-	);
+	// Rendered with or without a summary, for the reason `severityChips` gives:
+	// when the tally request failed, hiding the row stranded the operator on
+	// whatever status the URL had applied (`?status=resolved`) with no control
+	// on screen to leave it. Uncounted until the summary lands.
+	let statusChips = $derived([
+		{
+			key: 'all',
+			label: m('common.all'),
+			count: summary
+				? summary.open + summary.escalated + summary.resolved + summary.dismissed
+				: undefined
+		},
+		{ key: 'open', label: m('exceptions.filter.open'), count: summary?.open },
+		{ key: 'escalated', label: m('exceptions.filter.escalated'), count: summary?.escalated },
+		{ key: 'resolved', label: m('exceptions.filter.resolved'), count: summary?.resolved },
+		{ key: 'dismissed', label: m('exceptions.filter.dismissed'), count: summary?.dismissed }
+	]);
 
 	// Order matters: "still loading" and "we failed to look" both outrank any
 	// claim about what the queue contains.
@@ -867,7 +880,6 @@
 		</div>
 	{:else}
 	<div id="exc-panel-queue" role="tabpanel" aria-labelledby="exc-tab-queue">
-	{#if summary}
 		<FilterChips chips={statusChips} bind:active={statusFilter} />
 
 		{#if typeChipEntries.length > 0}
@@ -895,7 +907,7 @@
 						onclick={() => (typeFilter = typeFilter === type ? null : type)}
 					>
 						<span class="type-dot"></span>
-						{typeLabel(type)} <span class="count">{count}</span>
+						{typeLabel(type)}{#if count !== undefined}{' '}<span class="count">{count}</span>{/if}
 					</button>
 				{/each}
 			</nav>
@@ -904,7 +916,6 @@
 		<!-- The same `exceptions.severity.*` keys the row's Sev cell reads, so a
 		     chip and the rows it filters cannot name one severity two ways. -->
 		<FilterChips chips={severityChips} bind:active={severityFilter} />
-	{/if}
 
 	<SearchBox
 		bind:value={search}
