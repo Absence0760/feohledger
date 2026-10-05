@@ -9293,3 +9293,52 @@ them. Saved cash plans stay unscoped (their deterministic `plan_id` already enco
 the S3 file-key proxies stay org-prefix-gated pending the follow-up that maps a
 key back to its row. Detail: `docs/multi-entity.md` § By-id routes resolve
 within the selected entity.
+
+## 226. A file-download proxy resolves the row that owns the key, and Positive Pay reads its run in the read scope
+
+The four S3 proxies (invoice document, supplier-chat attachment, contract
+document, expense receipt) took the key as the whole authorisation: its first
+segment had to be the caller's org, and the tenant DB was never opened. §222
+closed every by-id route over the owning rows, so with subsidiary B selected a
+caller could no longer open A's invoice — but could still download its PDF by
+key. Every key layout already embeds its owner (`<org>/<invoice_id>/…`,
+`<org>/chat/<invoice_id>/…`, `<org>/contracts/<id>/…`, `<org>/expenses/<id>/…`),
+so `api/file_proxy` parses that id, loads the owner with `apply_entity_scope`,
+and — where the row records exactly one file — requires the key to BE the row's
+current `file_key` / `receipt_file_key`. A malformed key, a foreign org, the
+wrong layout for the route, an out-of-scope owner, a missing owner, a superseded
+object and a missing object are all the same `404 "File not found"`. Owner
+resolution runs in the consolidated view too (not just under a selected
+entity), so an object whose row was deleted, erased or retention-expired stops
+being servable even if the bucket still holds it, and an `<org>/positive-pay/…`
+key no longer streams through the invoice proxy on the strength of its org
+segment.
+
+Two defects on the same objects went with it. The AP chat attachment URL every
+message stored, `/api/invoices/{id}/chat/file/{key}`, was not a route at all,
+and each surface echoed the URL the *posting* surface built, so an employee was
+handed the vendor-only portal route and vice versa. The invoice-bound AP route
+now exists (scoped, and the key must sit under that invoice, as the portal's
+does), and `supplier_chat.attachment_url` rebuilds the URL from `file_key` for
+the surface reading it. And email intake and PEPPOL receive stored the object's
+bucket address as `Invoice.file_url`; every writer now uses
+`storage.invoice_file_url`, and `InvoiceResponse` rebuilds the URL from
+`file_key` so rows written before this still point at the proxy.
+
+Positive Pay's check-issue generation and return processing resolved the run /
+file with `get_write_entity_id`, which maps "All entities" to the default
+entity — so the consolidated view 404'd on a subsidiary's run, the reverse of
+every other by-id route. They now resolve in the read scope (`get_entity_id`),
+and what they write follows the row, not the view: the check-issue file is
+stamped with the RUN's entity and each return fraud_flag with the FILE's, so
+generating from the consolidated view can't misfile a subsidiary's cheque file
+under the default entity. A run of a since-deactivated subsidiary can still have
+its file generated — the cheques were issued, and the fraud control has to work
+for them; deactivation stops new business, which a derived file is not.
+
+**Rejected:** presigned S3 URLs in place of the proxy — the object would then be
+fetchable by anyone holding the URL for its lifetime, entity selector or not,
+and revocation (a role change, an erasure) would lag by the expiry. Checking
+only the owner segment without matching the current key — leaves superseded
+objects servable. Removing the key-only chat route — the API is published; it is
+scoped the same way instead.

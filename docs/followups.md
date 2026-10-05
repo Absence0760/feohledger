@@ -69,7 +69,7 @@ section carried its own `decisions.md` § reference, so nothing was lost by
 deleting it; that cross-reference is what makes the pruning safe, and writing
 one is what earns a future entry the right to be deleted.
 
-**55 open: 40 (c) · 9 (a) · 6 (b)** — re-derived from the file, never carried
+**53 open: 38 (c) · 9 (a) · 6 (b)** — re-derived from the file, never carried
 forward. The section heading is authoritative; where an entry also carries a
 `(c)`/`(a)`/`(b)` marker, the two agree.
 `grep -c '^- \[ \]' docs/followups.md`.
@@ -1030,45 +1030,6 @@ or is a sibling of a fix that needs its own pass.
       **Trigger:** the next change to `ConsentBanner.svelte`, or the next
       accessibility pass over `/legal` (`/a11y-hunt`, or the manual
       screen-reader pass `docs/accessibility.md` still has open).
-
-### Surfaced by the by-id entity-scope sweep (2026-10-05, decisions §222)
-
-- [ ] **(c) The four S3 file-key proxies are org-gated, not entity-gated.**
-      `GET /api/invoices/file/{key}`, `/api/invoices/chat/file/{key}`,
-      `/api/contracts/file/{key}` and `/api/expenses/receipt/{key}` check only
-      that the key's first segment is the caller's org, and never open the
-      tenant DB — so with subsidiary B selected, a caller holding a key can
-      still download A's invoice PDF, chat attachment, contract or receipt,
-      after every by-id route over the owning rows was closed
-      (`docs/multi-entity.md` § By-id routes resolve within the selected
-      entity). Left out of the sweep because the fix is a different shape: a
-      key is not an id, and the routes would have to learn which row owns it.
-      **Durable fix:** each key already embeds its owner
-      (`<org>/<invoice_id>/…`, `<org>/chat/<invoice_id>/…`,
-      `<org>/contracts/<contract_id>/…`, `<org>/expenses/<expense_id>/…`), so
-      parse that segment and run `ensure_in_entity_scope` against the owning
-      model with the route's existing `"File not found"` detail — and refuse a
-      key whose owner segment isn't a UUID, rather than falling back to the
-      org check.
-      **Trigger:** the next change to any of the four proxies, or the moment
-      the entity selector becomes a per-user access grant rather than a view.
-
-- [ ] **(c) Positive Pay resolves runs and files by the WRITE entity, so the
-      consolidated view can't reach a non-default subsidiary's.**
-      `POST /api/positive-pay/payment-runs/{run_id}/check-issue` and
-      `POST /api/positive-pay/{file_id}/process-return` scope their lookup with
-      `get_write_entity_id`, which maps the consolidated view to the tenant's
-      DEFAULT entity — so with "All entities" selected, subsidiary B's run is a
-      404 and its check-issue file can only be generated from B's own view. The
-      opposite of every other by-id route, where consolidated reaches every row.
-      Not an isolation leak, so it was noted rather than bundled into the sweep.
-      **Durable fix:** look the run / file up with `get_entity_id` (the read
-      scope) and stamp the new file with the run's own `entity_id`, so the file
-      lands under the subsidiary whose cheques it lists regardless of the view
-      it was generated from; `build_check_issue_items` already takes the entity
-      explicitly.
-      **Trigger:** the next change to `api/positive_pay.py`, or a multi-entity
-      tenant generating cheque files.
 
 ## (a) Blocked on external credentials, accounts, or hardware
 
