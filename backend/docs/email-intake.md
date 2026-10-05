@@ -20,7 +20,8 @@ POST /api/email-intake/inbound/{provider}
      │
      ├── Provider adapter parses → InboundEmail (normalized)
      │
-     ├── Token in recipient address → resolve to Organization
+     ├── Token(s) in the ENVELOPE recipients → resolve each Organization
+     │     (one message to two tenants' addresses = one delivery per tenant)
      │
      ▼
  process_inbound_email(ctrl_db, payload)
@@ -106,6 +107,18 @@ Then create a receipt rule in SES console → store to S3 *or* publish to
 SNS. The SNS path is the one the `ses` adapter understands. Subscribe a
 Lambda (or our webhook directly, via HTTPS subscription) to the SNS
 topic.
+
+**Routing reads the SMTP envelope, not the `To:` header.** The `ses` adapter
+takes the recipients from the notification's `receipt.recipients` (the
+addresses the receipt rule matched), then `mail.destination`, and falls back
+to the MIME `To:` header only when the notification carries neither. The
+header is the wrong source for the common setups: a vendor that Cc's or Bcc's
+the intake address, or an AP mailbox with a redirect rule pointing at it
+(Outlook / Gmail redirects keep the original `To: ap@customer.com`), leaves no
+intake address in `To:` at all, and reading it dropped every such message as
+"unknown intake address". A Lambda forwarder that rewrites the SNS payload
+must keep `receipt` / `mail` intact. (Mailgun's `recipient` field is already
+the envelope recipient of the matched route.)
 
 **Mailgun:**
 ```
@@ -357,9 +370,20 @@ operator actually acts on. To check a specific tenant's token, read it from
 
 ## Redelivery / duplicate handling
 
-Every inbound message is deduped by the provider's `Message-ID` (via the
-shared `is_event_already_processed("email_intake", message_id)` Redis guard —
-the same primitive the payment/card/ERP webhooks use). A provider retry or a
+Every inbound message is deduped by the provider's `Message-ID`, **per
+tenant** (via the shared `is_event_already_processed("email_intake",
+"<org_id>:<message_id>")` Redis guard — the same primitive the
+payment/card/ERP webhooks use; the key is built by
+`email_intake.dedup_event_id`). The org scope is load-bearing: `Message-ID`
+names the email, not the delivery, so one message addressed to two tenants'
+intake addresses carries one id — Mailgun forwards it once per matched
+recipient, SES lists both recipients in one notification. With a
+platform-global key the first tenant claimed it and the second tenant's
+invoice was dropped as a "duplicate delivery" it had never received. A
+notification naming several intake addresses is processed tenant by tenant,
+each with its own transaction and claim, so if one tenant fails (503) the
+redelivery dedupes the tenants that already committed and retries only the
+failed one. A provider retry or a
 genuine duplicate delivery of the same message creates **zero** additional
 invoices; the second delivery still gets the same opaque `200` ack. Providers
 that don't set `Message-ID` (or set an empty one) can't be deduped and are

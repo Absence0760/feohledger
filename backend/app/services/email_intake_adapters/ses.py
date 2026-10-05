@@ -31,6 +31,18 @@ from email.policy import default as email_policy
 from app.services.email_intake import InboundAttachment, InboundEmail
 
 
+def _envelope_recipients(notification: dict) -> list[str]:
+    """SES's envelope recipients: ``receipt.recipients``, else ``mail.destination``."""
+    for section, key in (("receipt", "recipients"), ("mail", "destination")):
+        block = notification.get(section)
+        values = block.get(key) if isinstance(block, dict) else None
+        if isinstance(values, list):
+            found = [v for v in values if isinstance(v, str) and v]
+            if found:
+                return found
+    return []
+
+
 def parse(body: bytes, headers: dict[str, str]) -> InboundEmail | None:
     try:
         envelope = json.loads(body.decode("utf-8"))
@@ -41,11 +53,21 @@ def parse(body: bytes, headers: dict[str, str]) -> InboundEmail | None:
         raw_mime = envelope.get("content")
         if not raw_mime:
             return None
+        envelope_recipients = _envelope_recipients(envelope)
     except (UnicodeDecodeError, json.JSONDecodeError, AttributeError):
         return None
 
     msg = email.message_from_string(raw_mime, policy=email_policy)
-    to = msg.get("To") or msg.get("X-Original-To") or ""
+    # The ENVELOPE recipients, not the `To:` header. The header names whoever
+    # the sender wrote there, which for the common intake setups is not us: a
+    # vendor that Cc's or Bcc's the intake address, or an AP mailbox that
+    # REDIRECTS to it (an Outlook / Gmail redirect rule keeps the original
+    # `To: ap@customer.com`). Reading the header dropped every one of those
+    # as "unknown intake address". The envelope is what SES actually delivered
+    # to — `receipt.recipients` (the addresses this receipt rule matched),
+    # then `mail.destination` — and the header is only the fallback for a
+    # notification that carries neither.
+    to = ", ".join(envelope_recipients) or msg.get("To") or msg.get("X-Original-To") or ""
     sender = msg.get("From") or ""
     subject = msg.get("Subject") or ""
     message_id = msg.get("Message-ID") or ""

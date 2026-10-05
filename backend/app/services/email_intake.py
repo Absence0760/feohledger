@@ -171,35 +171,84 @@ _PLUS_TOKEN_RE = re.compile(r"invoices\+([A-Za-z0-9_-]+)@", re.IGNORECASE)
 
 
 def extract_token(to_address: str) -> str | None:
-    """Parse the ``+<token>@`` piece out of the recipient address."""
-    match = _PLUS_TOKEN_RE.search(to_address or "")
-    return match.group(1) if match else None
+    """Parse the first ``+<token>@`` piece out of the recipient address."""
+    tokens = extract_tokens(to_address)
+    return tokens[0] if tokens else None
 
 
-async def resolve_tenant_from_recipient(
+def extract_tokens(to_address: str) -> list[str]:
+    """Every distinct ``+<token>@`` in a recipient string, in order.
+
+    One message can be addressed to several intake addresses at once — a vendor
+    billing two customers who both run on this platform puts both in the
+    envelope, and SES reports every recipient its receipt rule matched in ONE
+    notification. Each is a separate tenant's delivery, so each is resolved.
+    """
+    seen: list[str] = []
+    for token in _PLUS_TOKEN_RE.findall(to_address or ""):
+        if token not in seen:
+            seen.append(token)
+    return seen
+
+
+async def resolve_tenants_from_recipient(
     ctrl_db: AsyncSession,
     to_address: str,
-) -> Organization | None:
-    """Look up the organization whose intake token matches the recipient address."""
-    token = extract_token(to_address)
-    if not token:
-        return None
+) -> list[Organization]:
+    """Every organization whose ENABLED intake token appears in the recipients.
+
+    Ordered by first appearance in ``to_address``; never repeats an org.
+    """
+    tokens = extract_tokens(to_address)
+    if not tokens:
+        return []
 
     # Postgres JSONB containment — the index-friendly form is
     # `settings @> '{"email_intake":{"token":"..."}}'` but we avoid a raw
     # fragment here and filter in Python on the small org set. For 10k
     # orgs this is still a single round-trip; revisit if it matters.
     q = await ctrl_db.execute(select(Organization))
-    for org in q.scalars().all():
-        intake = (org.settings or {}).get("email_intake") or {}
-        stored_token = intake.get("token")
-        if (
-            intake.get("enabled")
-            and isinstance(stored_token, str)
-            and hmac.compare_digest(stored_token.encode(), token.encode())
-        ):
-            return org
-    return None
+    orgs = q.scalars().all()
+    resolved: list[Organization] = []
+    for token in tokens:
+        for org in orgs:
+            intake = (org.settings or {}).get("email_intake") or {}
+            stored_token = intake.get("token")
+            if (
+                intake.get("enabled")
+                and isinstance(stored_token, str)
+                and hmac.compare_digest(stored_token.encode(), token.encode())
+            ):
+                if org not in resolved:
+                    resolved.append(org)
+                break
+    return resolved
+
+
+async def resolve_tenant_from_recipient(
+    ctrl_db: AsyncSession,
+    to_address: str,
+) -> Organization | None:
+    """The first organization whose intake token matches the recipient address."""
+    orgs = await resolve_tenants_from_recipient(ctrl_db, to_address)
+    return orgs[0] if orgs else None
+
+
+def dedup_event_id(org: Organization, message_id: str) -> str:
+    """The Redis dedup key for one TENANT's delivery of one message.
+
+    Scoped by org, because ``Message-ID`` names the email, not the delivery: the
+    same message addressed to two tenants' intake addresses carries ONE
+    Message-ID (Mailgun forwards it once per matched recipient; SES lists both
+    recipients in one notification). An unscoped key let whichever tenant was
+    processed first claim it, and the other tenant's invoice was then dropped as
+    a "duplicate delivery" it had never received. An empty id stays empty so
+    the shared helper still logs it as un-dedupable rather than keying on the
+    org alone.
+    """
+    if not message_id:
+        return ""
+    return f"{org.id}:{message_id}"
 
 
 # ---------------------------------------------------------------------------
@@ -241,11 +290,17 @@ async def process_inbound_email(
     provider — never the result body verbatim, which would let a caller
     holding the platform-wide signing secret enumerate valid intake tokens
     by watching for ``tenant_slug`` to populate.
+
+    A message addressed to several tenants' intake addresses is delivered to
+    EACH of them, one tenant transaction and one dedup claim apiece. Tenants
+    are processed in order; if one raises, the ones before it have committed
+    and keep their claims, so the provider's redelivery (the route answers
+    503) dedupes those and retries only the tenant that failed.
     """
     result = IntakeResult()
 
-    org = await resolve_tenant_from_recipient(ctrl_db, payload.to)
-    if org is None:
+    orgs = await resolve_tenants_from_recipient(ctrl_db, payload.to)
+    if not orgs:
         result.error = "Unknown or disabled intake address"
         # The recipient address is NOT loggable: its ``+<token>`` part IS the
         # tenant bearer credential (see this module's Security docstring —
@@ -262,15 +317,35 @@ async def process_inbound_email(
         )
         return result
 
-    result.tenant_slug = org.slug
+    result.tenant_slug = orgs[0].slug
+    outcomes = []
+    for org in orgs:
+        outcome = await _process_for_org(org, payload)
+        outcomes.append(outcome)
+        result.invoices_created.extend(outcome.invoices_created)
+        for skipped in outcome.skipped_attachments:
+            if skipped not in result.skipped_attachments:
+                result.skipped_attachments.append(skipped)
+    # The message is "processed" if any tenant took it; otherwise report the
+    # first tenant's reason (they share one payload, so it is the same reason).
+    if not any(o.error is None for o in outcomes):
+        result.error = outcomes[0].error
+    return result
+
+
+async def _process_for_org(org: Organization, payload: InboundEmail) -> IntakeResult:
+    """Deliver one inbound message to ONE resolved tenant."""
+    result = IntakeResult(tenant_slug=org.slug)
 
     # Dedup by the provider's message id — a provider retry (SES/Mailgun
     # retry-on-timeout) or a duplicate delivery must not create a second
     # Invoice from the same attachment. Mirrors payment/card/ERP webhook
-    # dedup via the shared Redis SET-NX helper. A missing message id can't
-    # be deduped (logged by the helper) — always processed, same as the
-    # other webhook handlers.
-    if await is_event_already_processed("email_intake", payload.message_id):
+    # dedup via the shared Redis SET-NX helper. The claim is per TENANT
+    # (`dedup_event_id`): one Message-ID addressed to two tenants is two
+    # deliveries. A missing message id can't be deduped (logged by the
+    # helper) — always processed, same as the other webhook handlers.
+    dedup_id = dedup_event_id(org, payload.message_id)
+    if await is_event_already_processed("email_intake", dedup_id):
         result.error = "Duplicate delivery"
         logger.info(
             "Email intake: duplicate delivery for tenant=%s message_id=%s",
@@ -324,7 +399,7 @@ async def process_inbound_email(
             # api/cards.py's webhook claim/release discipline. Re-raise so the
             # route answers 503 and the provider actually redelivers.
             result.invoices_created.clear()
-            await release_event_claim("email_intake", payload.message_id)
+            await release_event_claim("email_intake", dedup_id)
             raise
 
         # PAST THE COMMIT the claim MUST stand. The invoices exist; a failure
