@@ -26,7 +26,7 @@ from app.api.deps import (
     require_roles,
 )
 from app.api.pagination import PaginationParams, pagination_params
-from app.models.procurement import Budget
+from app.models.procurement import Budget, PurchaseRequisition, RequisitionStatus
 from app.models.user import User
 from app.schemas.budget import (
     BudgetCheckResponse,
@@ -85,6 +85,20 @@ def _to_response(b: Budget) -> BudgetResponse:
         notes=b.notes,
         created_at=b.created_at.isoformat() if b.created_at else "",
         updated_at=b.updated_at.isoformat() if b.updated_at else "",
+    )
+
+
+async def _linked_requisition_count(db: AsyncSession, budget_id: uuid.UUID, *conditions) -> int:
+    """How many requisitions link to this budget (optionally narrowed)."""
+    return int(
+        (
+            await db.execute(
+                select(func.count())
+                .select_from(PurchaseRequisition)
+                .where(PurchaseRequisition.budget_id == budget_id, *conditions)
+            )
+        ).scalar()
+        or 0
     )
 
 
@@ -420,6 +434,29 @@ async def update_budget(
 ):
     budget = await _get_budget_or_404(db, budget_id)
     payload = body.model_dump(exclude_unset=True)
+    new_currency = payload.get("currency")
+    if new_currency is not None and new_currency.upper() != (budget.currency or "").upper():
+        # Re-denominating a budget is the mirror of a requisition changing its
+        # currency under an existing link, which `PATCH /api/requisitions` 422s:
+        # the spend legs never convert, so every linked requisition in the OLD
+        # currency would silently drop out of `committed` and `/budgets/check`
+        # would report headroom that is already spoken for. A cancelled
+        # requisition commits nothing and can never come back, so it doesn't
+        # hold the budget's currency hostage.
+        mismatched = await _linked_requisition_count(
+            db,
+            budget.id,
+            PurchaseRequisition.status != RequisitionStatus.cancelled,
+            func.upper(PurchaseRequisition.currency) != new_currency.upper(),
+        )
+        if mismatched:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=(
+                    f"{mismatched} linked requisition(s) are not in {new_currency.upper()}; "
+                    "re-link or cancel them before changing this budget's currency."
+                ),
+            )
     changed: list[str] = []
     for field in _BUDGET_UPDATABLE_FIELDS:
         if field in payload and getattr(budget, field) != payload[field]:
@@ -449,6 +486,18 @@ async def delete_budget(
     org_id: uuid.UUID = Depends(get_org_id),
 ):
     budget = await _get_budget_or_404(db, budget_id)
+    # `purchase_requisitions.budget_id` is a plain FK (NO ACTION), so a budget
+    # any requisition still points at came back as a ForeignKeyViolation — a
+    # 500 for a state the API should simply name. Refuse with a 409 rather than
+    # cutting the link: it is what `committed` is summed over, and a cancelled
+    # requisition's link is still the record of what it was raised against.
+    # Same shape as `DELETE /api/requisitions/{id}` refusing a linked intake.
+    linked = await _linked_requisition_count(db, budget.id)
+    if linked:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Budget is linked to {linked} requisition(s); it cannot be deleted.",
+        )
     await dispatch_audit(
         db,
         correlation_id=uuid.uuid4(),

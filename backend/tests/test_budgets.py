@@ -101,7 +101,9 @@ async def _mk_requisition(
     return rid
 
 
-async def _mk_po(realdb, key, *, total, status="open", currency="USD") -> uuid.UUID:
+async def _mk_po(
+    realdb, key, *, total, status="open", currency="USD", po_number=None, entity_id=None
+) -> uuid.UUID:
     mk = realdb.sessionmaker(key)
     org_id = realdb.info(key).org_id
     pid = uuid.uuid4()
@@ -109,7 +111,8 @@ async def _mk_po(realdb, key, *, total, status="open", currency="USD") -> uuid.U
         s.add(
             PurchaseOrder(
                 id=pid,
-                po_number=f"PO-{_u()}",
+                po_number=po_number or f"PO-{_u()}",
+                entity_id=entity_id,
                 total=Decimal(total),
                 # Conversion stamps the requisition's code onto the PO.
                 currency=currency,
@@ -134,6 +137,7 @@ async def _mk_invoice(
     invoice_date=None,
     currency="USD",
     entity_id=None,
+    po_number=None,
 ) -> uuid.UUID:
     mk = realdb.sessionmaker(key)
     org_id = realdb.info(key).org_id
@@ -153,6 +157,7 @@ async def _mk_invoice(
                 invoice_date=invoice_date,
                 currency=currency,
                 entity_id=entity_id,
+                po_number=po_number,
                 organization_id=org_id,
             )
         )
@@ -544,6 +549,128 @@ async def test_spend_converted_req_counts_po_not_req(realdb):
     assert body["remaining"] == 8500.0
 
 
+async def _mk_converted_po(realdb, bid, *, total="1000.00", po_number=None, entity_id=None):
+    """A budget-linked requisition converted into an open PO; returns the PO number."""
+    number = po_number or f"PO-{_u()}"
+    po_id = await _mk_po(realdb, "a", total=total, po_number=number, entity_id=entity_id)
+    await _mk_requisition(
+        realdb,
+        "a",
+        budget_id=bid,
+        total=total,
+        status=RequisitionStatus.converted,
+        converted_po_id=po_id,
+        entity_id=entity_id,
+    )
+    return number
+
+
+async def test_spend_invoiced_po_is_not_counted_twice(realdb):
+    """An invoice billed against a budget's converted PO RELIEVES the PO's
+    commitment by the amount it moves into `actual`.
+
+    Nothing flips a PO's status when it is invoiced (only an ERP sync owns
+    that), so the PO leg kept counting the full PO total while the realised
+    invoice for the same goods was summed into `actual` beside it — one
+    purchase counted twice. A 1,000 PO invoiced 400 read committed 1,000 +
+    actual 400 = 1,400 consumed against a 2,000 budget; it is 1,000.
+    """
+    cc = f"CC-{_u()}"
+    bid = await _mk_budget_row(
+        realdb, dimension="cost_center", dimension_value=cc, amount="2000.00"
+    )
+    number = await _mk_converted_po(realdb, bid, total="1000.00")
+    await _mk_invoice(
+        realdb, "a", amount="400.00", status="approved", cost_center=cc, po_number=number
+    )
+
+    async with realdb.client(key="a", role="cfo") as c:
+        body = (await c.get(f"/api/budgets/{bid}/spend")).json()
+        check = (
+            await c.get("/api/budgets/check", params={"budget_id": str(bid), "amount": "1000"})
+        ).json()
+    assert body["committed"] == 600.0  # 1000 ordered - 400 already invoiced
+    assert body["actual"] == 400.0
+    assert body["remaining"] == 1000.0
+    assert body["utilization_pct"] == 50.0
+    # The pre-submit gate reads the same figure: 1,000 more fits exactly.
+    assert check["would_overspend"] is False
+
+
+async def test_spend_fully_and_over_invoiced_po_relief_is_clamped(realdb):
+    """A fully invoiced PO commits nothing more; an over-billed one never
+    commits a NEGATIVE amount (that would hand the overspend back as headroom)."""
+    cc = f"CC-{_u()}"
+    bid = await _mk_budget_row(
+        realdb, dimension="cost_center", dimension_value=cc, amount="5000.00"
+    )
+    full = await _mk_converted_po(realdb, bid, total="1000.00")
+    over = await _mk_converted_po(realdb, bid, total="500.00")
+    await _mk_invoice(realdb, "a", amount="1000.00", status="paid", cost_center=cc, po_number=full)
+    await _mk_invoice(realdb, "a", amount="700.00", status="paid", cost_center=cc, po_number=over)
+
+    async with realdb.client(key="a", role="cfo") as c:
+        body = (await c.get(f"/api/budgets/{bid}/spend")).json()
+    assert body["committed"] == 0.0
+    assert body["actual"] == 1700.0
+    assert body["remaining"] == 3300.0
+
+
+async def test_spend_po_relief_only_for_invoices_actual_counts(realdb):
+    """Relief removes a DOUBLE count — so only an invoice this budget's
+    `actual` leg already sums may relieve its PO. An invoice still in review,
+    one coded to another cost center, one in another currency, or one booked
+    under a sibling subsidiary is not in `actual` here, so the PO stays
+    committed in full rather than vanishing from both legs."""
+    cc = f"CC-{_u()}"
+    bid = await _mk_budget_row(
+        realdb, dimension="cost_center", dimension_value=cc, amount="5000.00"
+    )
+    number = await _mk_converted_po(realdb, bid, total="1000.00")
+    sibling = await _mk_entity(realdb, "a")
+    await _mk_invoice(realdb, "a", amount="300.00", status="new", cost_center=cc, po_number=number)
+    await _mk_invoice(
+        realdb, "a", amount="300.00", status="paid", cost_center="CC-ELSEWHERE", po_number=number
+    )
+    await _mk_invoice(
+        realdb,
+        "a",
+        amount="300.00",
+        status="paid",
+        cost_center=cc,
+        currency="EUR",
+        po_number=number,
+    )
+
+    async with realdb.client(key="a", role="cfo") as c:
+        body = (await c.get(f"/api/budgets/{bid}/spend")).json()
+    assert body["committed"] == 1000.0
+    assert body["actual"] == 0.0
+
+    # And an entity-bound budget's PO is relieved only by its own entity's invoice.
+    scoped = await _mk_budget_row(
+        realdb,
+        dimension="cost_center",
+        dimension_value=cc,
+        amount="5000.00",
+        entity_id=sibling,
+    )
+    scoped_number = await _mk_converted_po(realdb, scoped, total="800.00", entity_id=sibling)
+    await _mk_invoice(
+        realdb,
+        "a",
+        amount="200.00",
+        status="paid",
+        cost_center=cc,
+        po_number=scoped_number,
+        entity_id=sibling,
+    )
+    async with realdb.client(key="a", role="cfo") as c:
+        scoped_body = (await c.get(f"/api/budgets/{scoped}/spend")).json()
+    assert scoped_body["committed"] == 600.0
+    assert scoped_body["actual"] == 200.0
+
+
 async def test_spend_committed_po_leg_reads_the_pos_own_currency(realdb):
     """Leg 2 sums the PO's total, so it is the PO's currency that says what the
     figure is in — not the requisition's, which it merely started from. A USD
@@ -796,3 +923,92 @@ async def test_check_dates_roundtrip(realdb):
         body = (await c.get(f"/api/budgets/{bid}")).json()
     assert body["period_start"] == "2026-01-01"
     assert body["period_end"] == "2026-12-31"
+
+
+# ---------------------------------------------------------------------------
+# A budget's own mutations must respect the requisitions linked to it
+# ---------------------------------------------------------------------------
+
+
+async def test_delete_budget_with_linked_requisition_is_409_not_500(realdb):
+    """`purchase_requisitions.budget_id` is a plain FK (NO ACTION), so deleting
+    a budget any requisition still points at hit a ForeignKeyViolation at
+    commit — a 500 for a state the API should simply name. The refusal is a
+    409 and nothing is deleted (the link IS the committed-spend record, so it
+    must not be silently cut either)."""
+    bid = await _mk_budget_row(realdb)
+    await _mk_requisition(
+        realdb, "a", budget_id=bid, total="100.00", status=RequisitionStatus.cancelled
+    )
+    async with realdb.client(key="a", role="cfo") as c:
+        resp = await c.delete(f"/api/budgets/{bid}")
+        assert resp.status_code == 409, resp.text
+        assert "requisition" in resp.json()["detail"].lower()
+        assert (await c.get(f"/api/budgets/{bid}")).status_code == 200
+
+
+async def test_patch_budget_currency_refused_while_linked_requisitions_disagree(realdb):
+    """The requisition side refuses a budget link in another currency (422) —
+    on create, on a `budget_id` change, AND on a requisition `currency` change,
+    because a mismatched link is silently dropped from the rollup. The budget
+    side had no mirror: re-denominating a USD budget to EUR stranded every
+    linked USD requisition, so `committed` fell to 0 and `/budgets/check`
+    reported headroom that was already spoken for. Same 422 here."""
+    bid = await _mk_budget_row(realdb, amount="1000.00", currency="USD")
+    await _mk_requisition(
+        realdb, "a", budget_id=bid, total="400.00", status=RequisitionStatus.approved
+    )
+    async with realdb.client(key="a", role="cfo") as c:
+        resp = await c.patch(f"/api/budgets/{bid}", json={"currency": "EUR"})
+        assert resp.status_code == 422, resp.text
+        spend = (await c.get(f"/api/budgets/{bid}/spend")).json()
+    assert spend["currency"] == "USD"
+    assert spend["committed"] == 400.0
+
+    # A cancelled requisition no longer commits anything, so it doesn't block;
+    # and an unchanged (or case-only) currency is not a re-denomination.
+    other = await _mk_budget_row(realdb, amount="1000.00", currency="USD")
+    await _mk_requisition(
+        realdb, "a", budget_id=other, total="50.00", status=RequisitionStatus.cancelled
+    )
+    async with realdb.client(key="a", role="cfo") as c:
+        same = await c.patch(f"/api/budgets/{bid}", json={"currency": "usd", "name": "Renamed"})
+        assert same.status_code == 200, same.text
+        moved = await c.patch(f"/api/budgets/{other}", json={"currency": "EUR"})
+        assert moved.status_code == 200, moved.text
+        assert moved.json()["currency"] == "EUR"
+
+
+async def test_spend_po_relief_attributes_each_invoice_to_one_po(realdb):
+    """`po_number` is not unique, and the matcher attributes an invoice to
+    exactly ONE PO — the newest candidate. Relief must too: joining on the
+    number alone subtracted the same invoice from every PO carrying it, and the
+    over-relief handed back headroom the budget doesn't have."""
+    cc = f"CC-{_u()}"
+    bid = await _mk_budget_row(
+        realdb, dimension="cost_center", dimension_value=cc, amount="5000.00"
+    )
+    shared = f"PO-{_u()}"
+    # Older first, so the second one is the newest candidate for the number.
+    await _mk_converted_po(realdb, bid, total="1000.00", po_number=shared)
+    await _mk_converted_po(realdb, bid, total="500.00", po_number=shared)
+    await _mk_invoice(realdb, "a", amount="400.00", status="paid", cost_center=cc, po_number=shared)
+
+    async with realdb.client(key="a", role="cfo") as c:
+        body = (await c.get(f"/api/budgets/{bid}/spend")).json()
+    # 1000 (untouched) + (500 - 400). Relieving both would read 700.
+    assert body["committed"] == 1100.0
+    assert body["actual"] == 400.0
+
+    # A newer PO with the same number that ISN'T this budget's (an ERP-synced
+    # one, say) is where the matcher sends the invoice — so it relieves nothing
+    # here, and the budget's PO stays committed in full.
+    other_budget = await _mk_budget_row(
+        realdb, dimension="cost_center", dimension_value=cc, amount="5000.00"
+    )
+    number = await _mk_converted_po(realdb, other_budget, total="900.00")
+    await _mk_po(realdb, "a", total="900.00", po_number=number)
+    await _mk_invoice(realdb, "a", amount="300.00", status="paid", cost_center=cc, po_number=number)
+    async with realdb.client(key="a", role="cfo") as c:
+        other = (await c.get(f"/api/budgets/{other_budget}/spend")).json()
+    assert other["committed"] == 900.0

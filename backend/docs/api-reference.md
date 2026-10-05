@@ -417,8 +417,8 @@ Used by 3-way matching. `admin` / `ap_manager` / `ap_clerk`.
 
 | Method | Path                                    | Description |
 |--------|-----------------------------------------|-------------|
-| `GET`  | `/api/goods-receipts`                   | List goods receipts (paginated, filters by `vendor_id`, `po_id`, `status`) |
-| `GET`  | `/api/goods-receipts/{id}`              | Single GR with line items |
+| `GET`  | `/api/goods-receipts`                   | List goods receipts (paginated, entity-scoped; filters by `po_id`, `status`) |
+| `GET`  | `/api/goods-receipts/{id}`              | Single GR with line items (entity-scoped — out-of-scope id is a 404) |
 
 ## Credit Memos
 

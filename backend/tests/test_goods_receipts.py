@@ -328,3 +328,87 @@ async def test_cfo_accruals_received_amount_excludes_other_tenant(realdb):
     # Exact decimal string, and "0.00" — not "0" — because the zero is a money
     # figure carrying the column's scale, not a bare count.
     assert body["accruals"]["received_amount"] == "0.00"
+
+
+# ---------------------------------------------------------------------------
+# entity scoping on the by-id route + a malformed `po_id` filter
+# ---------------------------------------------------------------------------
+
+
+async def _two_entities(realdb) -> tuple[str, str]:
+    """Create a second entity in tenant `a`; return (default_id, other_id)."""
+    async with realdb.client(key="a", role="admin") as c:
+        r = await c.post("/api/entities", json={"name": "GR Scope IE", "slug": "gr-scope-ie"})
+        assert r.status_code == 201, r.text
+        other_id = r.json()["id"]
+        listing = await c.get("/api/entities")
+        default_id = next(e["id"] for e in listing.json() if e["is_default"])
+    return default_id, other_id
+
+
+async def test_get_detail_is_entity_scoped(realdb):
+    """`GET /goods-receipts/{id}` resolved on the primary key alone.
+
+    The list beside it has been entity-scoped since multi-entity Phase 2, and
+    `GET /purchase-orders/{id}` closed exactly this shape — yet a viewer scoped
+    to one subsidiary could still read a sibling's receipt, its received lines
+    and the PO number it was booked against just by holding the id. The 404 is
+    the same opaque body a missing id gets, so the route can't enumerate
+    another subsidiary's receipts.
+    """
+    default_id, other_id = await _two_entities(realdb)
+    po_id = await _add_po(realdb, "a", po_number="PO-SCOPED-1", entity_id=uuid.UUID(default_id))
+    gr_id = await _add_gr(
+        realdb,
+        "a",
+        gr_number="GR-SCOPED-1",
+        po_id=po_id,
+        entity_id=uuid.UUID(default_id),
+        lines=[{"description": "Widgets"}],
+    )
+
+    async with realdb.client(key="a", role="ap_clerk") as c:
+        own = await c.get(f"/api/goods-receipts/{gr_id}", headers={"X-Entity-ID": default_id})
+        assert own.status_code == 200, own.text
+        # The consolidated view sees every entity's rows, as the list does.
+        assert (await c.get(f"/api/goods-receipts/{gr_id}")).status_code == 200
+
+        blocked = await c.get(f"/api/goods-receipts/{gr_id}", headers={"X-Entity-ID": other_id})
+        assert blocked.status_code == 404, blocked.text
+        missing = await c.get(
+            f"/api/goods-receipts/{uuid.uuid4()}", headers={"X-Entity-ID": other_id}
+        )
+        assert missing.status_code == 404
+        assert blocked.json() == missing.json()
+
+
+async def test_list_malformed_po_id_is_422_not_500(realdb):
+    """`po_id` was a `str` parsed with a bare `uuid.UUID(...)` in the handler, so
+    a malformed value raised `ValueError` — an unhandled 500 for input the
+    caller got wrong. `GET /purchase-orders` fixed the same filter by declaring
+    it a `uuid.UUID`, which FastAPI rejects at the boundary with a 422."""
+    async with realdb.client(key="a", role="ap_clerk") as c:
+        resp = await c.get("/api/goods-receipts", params={"po_id": "not-a-uuid"})
+    assert resp.status_code == 422, resp.text
+
+
+async def test_zero_received_quantity_is_reported_as_zero_not_null(realdb):
+    """`quantity_received` rendered through `float(x) if x else None`, so a line
+    that recorded receiving NOTHING (`0`) read as `null` — "not recorded" —
+    which is the opposite fact. A zero receipt is exactly the line a reviewer
+    opens the detail to find."""
+    from decimal import Decimal
+
+    gr_id = await _add_gr(
+        realdb,
+        "a",
+        gr_number="GR-ZERO",
+        lines=[
+            {"description": "Shorted", "quantity_received": Decimal("0")},
+            {"description": "Unrecorded"},
+        ],
+    )
+    async with realdb.client(key="a", role="ap_clerk") as c:
+        body = (await c.get(f"/api/goods-receipts/{gr_id}")).json()
+    by_desc = {li["description"]: li["quantity_received"] for li in body["line_items"]}
+    assert by_desc == {"Shorted": 0.0, "Unrecorded": None}
