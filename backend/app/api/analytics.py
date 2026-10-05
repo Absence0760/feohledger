@@ -685,8 +685,16 @@ async def _monthly_dpo_snapshots(
     months: int,
     entity_id: uuid.UUID | None,
     today: date,
+    reporting_currency: str,
 ) -> list[dict]:
     """Per-month `{month, accounts_payable, cogs}` rows, newest month last.
+
+    Both legs are summed in the org's REPORTING currency
+    (`invoice_reporting_amount_sql`: the locked rate, else face value). DPO is
+    a ratio of the two, so a naive cross-currency SUM on either side is not a
+    rounding error but a different number: an open $1,000 payable over a month
+    whose COGS proxy held a paid ¥1,000,000 invoice (locked at $6,700) reported
+    0.0 days instead of 3.9.
 
     This is the ONE population behind both DPO surfaces: the `dpo_trend` chart
     on `GET /api/analytics/cfo` and the `GET /api/analytics/drill/dpo`
@@ -703,6 +711,13 @@ async def _monthly_dpo_snapshots(
     hand-copied literal. The returned shape is exactly what the pure
     `services.analytics.compute_dpo_trend` consumes — money stays `Decimal`.
     """
+    rep = invoice_reporting_amount_sql(
+        reporting_currency=reporting_currency,
+        amount=Invoice.amount,
+        currency=Invoice.currency,
+        persisted_reporting_amount=Invoice.reporting_amount,
+        persisted_reporting_currency=Invoice.reporting_currency,
+    )
     rows: list[dict] = []
     cursor = today.replace(day=1)
     for _ in range(months):
@@ -710,7 +725,7 @@ async def _monthly_dpo_snapshots(
         month_start = month_end.replace(day=1)
         cogs_q = await db.execute(
             apply_entity_scope(
-                select(func.coalesce(func.sum(Invoice.amount), 0)).where(
+                select(func.coalesce(func.sum(rep.amount), 0)).where(
                     Invoice.invoice_date >= month_start,
                     Invoice.invoice_date <= month_end,
                     # Exclude rejected — match the headline `total_spend`, else
@@ -724,7 +739,7 @@ async def _monthly_dpo_snapshots(
         )
         ap_q = await db.execute(
             apply_entity_scope(
-                select(func.coalesce(func.sum(Invoice.amount), 0)).where(
+                select(func.coalesce(func.sum(rep.amount), 0)).where(
                     Invoice.invoice_date <= month_end,
                     Invoice.status.in_(OPEN_AP_STATUSES),
                 ),
@@ -852,13 +867,27 @@ async def get_cfo_analytics(
     # ----- DPO (using `total_spend` as a COGS proxy when the org -----
     # ----- doesn't surface real COGS data — the dashboard tile -----
     # ----- annotates this as a proxy estimate). -----
-    dpo = compute_dpo(accounts_payable=ap_balance, cogs=total_spend, period_days=period_days)
+    # Both legs are the reporting-currency rollups served in this response,
+    # never the naive `ap_balance` / `total_spend`: a ratio of two
+    # cross-currency SUMs is not "approximately" DPO — a paid ¥1,000,000
+    # invoice in the window swamped the COGS proxy and read 0.0 days.
+    dpo = compute_dpo(
+        accounts_payable=ap_balance_rollup.total_reporting_amount,
+        cogs=spend_rollup.total_reporting_amount,
+        period_days=period_days,
+    )
 
     # ----- DPO trend (last 6 months snapshots) -----
     # Snapshots + arithmetic both come from shared code, so this chart and the
     # `/drill/dpo` drill-through that explains it cannot disagree.
     monthly_dpo_rows = compute_dpo_trend(
-        await _monthly_dpo_snapshots(db, months=6, entity_id=entity_id, today=today),
+        await _monthly_dpo_snapshots(
+            db,
+            months=6,
+            entity_id=entity_id,
+            today=today,
+            reporting_currency=reporting_currency,
+        ),
         period_days=30,
     )
 
@@ -1732,6 +1761,7 @@ async def drill_spend_concentration(
 async def drill_dpo(
     months: int = Query(12, ge=1, le=24),
     db: AsyncSession = Depends(get_tenant_db),
+    org: Organization = Depends(get_tenant),
     user: User = Depends(require_roles(*_CFO_ROLES)),
     entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
@@ -1745,12 +1775,22 @@ async def drill_dpo(
     `dpo` is a day count, not money, and stays a JSON number so it matches the
     numeric `dpo` the chart already renders.
     """
+    reporting_currency = resolve_reporting_currency(org.settings)
     rows = compute_dpo_trend(
-        await _monthly_dpo_snapshots(db, months=months, entity_id=entity_id, today=utc_today()),
+        await _monthly_dpo_snapshots(
+            db,
+            months=months,
+            entity_id=entity_id,
+            today=utc_today(),
+            reporting_currency=reporting_currency,
+        ),
         period_days=30,
     )
     return {
         "months": months,
+        # What `accounts_payable` / `cogs` are denominated in — each invoice at
+        # its locked rate, else face value (`_monthly_dpo_snapshots`).
+        "reporting_currency": reporting_currency,
         "rows": [
             {
                 "month": r["month"],

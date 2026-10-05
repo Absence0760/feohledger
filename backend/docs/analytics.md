@@ -760,6 +760,16 @@ two resolutions, so they must never disagree. They now share both halves:
   open-AP population from the canonical `OPEN_AP_STATUSES`, not a hand-copied
   status list.
 - **The arithmetic** comes from the pure `services/analytics.py::compute_dpo_trend`.
+- **Both legs are in the reporting currency.** The snapshots sum each invoice
+  through `invoice_reporting_amount_sql` (locked rate, else face value), and
+  `dpo_current` divides `reporting_accounts_payable_balance.total_amount` by
+  `reporting_spend.total_amount` — the rollups served in the same response.
+  They were naive cross-currency SUMs, and a ratio does not average that error
+  away: an open $1,000 payable beside a paid ¥1,000,000 invoice locked at
+  $6,700 reported 0.0 days where the truth is 3.9. `/drill/dpo` names its
+  denomination on a top-level `reporting_currency`. Pinned by
+  `tests/test_analytics_rejected_exclusion.py::test_dpo_is_a_ratio_of_reporting_currency_figures`
+  and `::test_headline_dpo_uses_the_reporting_rollups`.
 
 They used to be two hand-written copies of the same loop, and the copies had
 already drifted: the chart excluded `rejected` invoices from COGS, the
