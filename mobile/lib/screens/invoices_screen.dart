@@ -13,6 +13,7 @@ import 'package:feohledger_mobile/utils/debouncer.dart';
 import 'package:feohledger_mobile/widgets/advanced_search_sheet.dart';
 import 'package:feohledger_mobile/widgets/bulk_action_bar.dart';
 import 'package:feohledger_mobile/widgets/invoice_list_tile.dart';
+import 'package:feohledger_mobile/widgets/reject_reason_dialog.dart';
 
 /// Bulk status-change targets offered on mobile. A deliberately small, safe
 /// subset of the 12-state machine — the common manual moves an AP user makes in
@@ -347,8 +348,21 @@ class _InvoicesScreenState extends State<InvoicesScreen> {
     );
     if (target == null || !mounted) return;
 
+    // A rejection needs a reason: the backend 422s a reasonless bulk reject,
+    // and the reason is what the supplier corrects from.
+    String? reason;
+    if (target == InvoiceStatus.rejected) {
+      reason = await showRejectReasonDialog(
+        context,
+        title: AppLocalizations.of(context)
+            .invoicesBulkRejectTitle(InvoiceStore.instance.selectedCount),
+      );
+      if (reason == null || !mounted) return;
+    }
+
     setState(() => _busy = true);
-    final result = await InvoiceStore.instance.bulkStatusSelected(target.value);
+    final result = await InvoiceStore.instance
+        .bulkStatusSelected(target.value, reason: reason);
     if (!mounted) return;
     setState(() => _busy = false);
 

@@ -584,6 +584,11 @@ class AppLocalizationsJa extends AppLocalizations {
   String get invoiceDetailReject => '却下';
 
   @override
+  String invoicesBulkRejectTitle(int count) {
+    return '$count件の請求書を却下';
+  }
+
+  @override
   String get invoiceDetailApprove => '承認';
 
   @override

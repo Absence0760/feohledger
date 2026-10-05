@@ -1133,6 +1133,12 @@ abstract class AppLocalizations {
   /// **'Reject'**
   String get invoiceDetailReject;
 
+  /// Title of the reason prompt shown before bulk-rejecting the selected invoices.
+  ///
+  /// In en, this message translates to:
+  /// **'Reject {count, plural, one {{count} invoice} other {{count} invoices}}'**
+  String invoicesBulkRejectTitle(int count);
+
   /// No description provided for @invoiceDetailApprove.
   ///
   /// In en, this message translates to:

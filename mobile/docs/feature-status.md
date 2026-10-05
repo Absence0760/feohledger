@@ -146,7 +146,9 @@ Parity direction is set in `frontend/CLAUDE.md` § Web vs Mobile feature parity.
   app-bar action) + bulk delete / bulk status-change / **bulk export** over
   `POST /api/invoices/bulk/{delete,status,export}`; gated to
   admin/ap_manager/cfo; the backend skips immutable-status rows and the result
-  snackbar reports deleted/updated + skipped counts. **Export** offers CSV / XML
+  snackbar reports deleted/updated + skipped counts. Bulk **reject** first asks
+  for a reason (the shared `reject_reason_dialog.dart`) and sends it as
+  `reason` — the backend 422s a reasonless bulk rejection. **Export** offers CSV / XML
   from a format sheet, POSTs the selected ids to `bulk/export` (raw bytes via
   `ApiClient.postBytes`, which parses the `Content-Disposition` filename), writes
   the bytes to a temp file and hands them to the platform share sheet

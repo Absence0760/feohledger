@@ -602,6 +602,17 @@ class AppLocalizationsDe extends AppLocalizations {
   String get invoiceDetailReject => 'Ablehnen';
 
   @override
+  String invoicesBulkRejectTitle(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count Rechnungen',
+      one: '$count Rechnung',
+    );
+    return '$_temp0 ablehnen';
+  }
+
+  @override
   String get invoiceDetailApprove => 'Freigeben';
 
   @override

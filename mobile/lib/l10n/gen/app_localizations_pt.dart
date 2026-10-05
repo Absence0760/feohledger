@@ -602,6 +602,17 @@ class AppLocalizationsPt extends AppLocalizations {
   String get invoiceDetailReject => 'Rejeitar';
 
   @override
+  String invoicesBulkRejectTitle(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count faturas',
+      one: '$count fatura',
+    );
+    return 'Rejeitar $_temp0';
+  }
+
+  @override
   String get invoiceDetailApprove => 'Aprovar';
 
   @override
@@ -3190,6 +3201,17 @@ class AppLocalizationsPtBr extends AppLocalizationsPt {
 
   @override
   String get invoiceDetailReject => 'Rejeitar';
+
+  @override
+  String invoicesBulkRejectTitle(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count faturas',
+      one: '$count fatura',
+    );
+    return 'Rejeitar $_temp0';
+  }
 
   @override
   String get invoiceDetailApprove => 'Aprovar';

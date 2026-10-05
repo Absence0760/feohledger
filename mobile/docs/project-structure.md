@@ -90,6 +90,7 @@ mobile/
 │   └── widgets/
 │       ├── brand_mark.dart      # The FeohLedger mark (login, splash); decorative, rendered by assets/gen-icons.sh
 │       ├── activity_timeline.dart # Invoice audit-log timeline (action label, actor, time, per-field before→after diff); empty state; one merged Semantics label per entry
+│       ├── reject_reason_dialog.dart # showRejectReasonDialog — the reject-reason prompt shared by invoice-detail reject and invoices-list bulk reject; confirm disabled until the trimmed reason is non-blank (the bulk endpoint 422s a reasonless reject)
 │       ├── bulk_action_bar.dart  # Bottom bar shown in invoice multi-select mode — selected count + bulk export / status-change / delete actions (each action omitted when its callback is null; reusable shape)
 │       ├── advanced_search_sheet.dart # Modal bottom-sheet advanced search (vendor, PO, amount range, due-date range); seeded from live filters; min≤max + decimal validation; returns InvoiceSearchFilters (Apply) / empty (Clear) / null (dismiss)
 │       ├── invoice_warnings_panel.dart # Detail-screen warnings/fraud flags (severity-coloured) + PO-match panel (match type, status, variance %, issues); one merged Semantics label per warning

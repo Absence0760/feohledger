@@ -179,10 +179,20 @@ class InvoiceApi {
   /// (admin / ap_manager / cfo). [status] is the target invoice status value
   /// (e.g. `approved`); immutable rows are skipped. The transition runs through
   /// the normal workflow chokepoint (audited), so it's not a money-moving write.
-  static Future<BulkResult> bulkStatus(List<String> ids, String status) async {
+  ///
+  /// [reason] is REQUIRED by the backend when [status] is `rejected` — it 422s
+  /// a reasonless bulk rejection, because `review.reject_invoice` records the
+  /// reason on the audit row and on the `review_rejected` exception the
+  /// supplier corrects from. Omitted from the body when null.
+  static Future<BulkResult> bulkStatus(
+    List<String> ids,
+    String status, {
+    String? reason,
+  }) async {
     final data = await _api.post('/invoices/bulk/status', {
       'ids': ids,
       'status': status,
+      'reason': ?reason,
     });
     return BulkResult.fromJson(data, countKey: 'updated');
   }

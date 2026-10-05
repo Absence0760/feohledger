@@ -270,6 +270,15 @@
   "invoiceDetailRejectTitle": "Reject Invoice",
   "invoiceDetailRejectReason": "Reason",
   "invoiceDetailReject": "Reject",
+  "invoicesBulkRejectTitle": "Reject {count, plural, one {{count} invoice} other {{count} invoices}}",
+  "@invoicesBulkRejectTitle": {
+    "description": "Title of the reason prompt shown before bulk-rejecting the selected invoices.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
   "invoiceDetailApprove": "Approve",
   "invoiceDetailUnknownVendor": "Unknown Vendor",
   "invoiceDetailFieldInvoiceNumber": "Invoice #",

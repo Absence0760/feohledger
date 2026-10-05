@@ -184,6 +184,7 @@
   "invoiceDetailRejectTitle": "Rechnung ablehnen",
   "invoiceDetailRejectReason": "Grund",
   "invoiceDetailReject": "Ablehnen",
+  "invoicesBulkRejectTitle": "{count, plural, one {{count} Rechnung} other {{count} Rechnungen}} ablehnen",
   "invoiceDetailApprove": "Freigeben",
   "invoiceDetailUnknownVendor": "Unbekannter Lieferant",
   "invoiceDetailFieldInvoiceNumber": "Rechnungs-Nr.",

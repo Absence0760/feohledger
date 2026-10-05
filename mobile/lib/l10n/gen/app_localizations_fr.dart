@@ -605,6 +605,17 @@ class AppLocalizationsFr extends AppLocalizations {
   String get invoiceDetailReject => 'Rejeter';
 
   @override
+  String invoicesBulkRejectTitle(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count factures',
+      one: '$count facture',
+    );
+    return 'Rejeter $_temp0';
+  }
+
+  @override
   String get invoiceDetailApprove => 'Approuver';
 
   @override

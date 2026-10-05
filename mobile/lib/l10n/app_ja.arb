@@ -171,6 +171,7 @@
   "invoiceDetailRejectTitle": "請求書を却下",
   "invoiceDetailRejectReason": "理由",
   "invoiceDetailReject": "却下",
+  "invoicesBulkRejectTitle": "{count}件の請求書を却下",
   "invoiceDetailApprove": "承認",
   "invoiceDetailUnknownVendor": "不明な取引先",
   "invoiceDetailFieldInvoiceNumber": "請求書番号",

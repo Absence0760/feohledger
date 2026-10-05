@@ -171,6 +171,7 @@
   "invoiceDetailRejectTitle": "Rejeitar fatura",
   "invoiceDetailRejectReason": "Motivo",
   "invoiceDetailReject": "Rejeitar",
+  "invoicesBulkRejectTitle": "Rejeitar {count, plural, one {{count} fatura} other {{count} faturas}}",
   "invoiceDetailApprove": "Aprovar",
   "invoiceDetailUnknownVendor": "Fornecedor desconhecido",
   "invoiceDetailFieldInvoiceNumber": "N.º da fatura",

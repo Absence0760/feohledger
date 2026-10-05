@@ -461,6 +461,8 @@ void main() {
     await tester.pumpAndSettle();
 
     await tester.enterText(find.byType(TextField), 'Wrong amount');
+    // The confirm button enables on the rebuild that follows the input.
+    await tester.pump();
     await tester.tap(find.widgetWithText(FilledButton, 'Reject'));
     await _pumpUntil(tester, find.text('Invoice rejected'));
 
