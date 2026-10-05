@@ -870,11 +870,13 @@ export function deleteWorkflowsWhere(namePrefix: string, slug?: string): void {
  * A spec that creates a row and asserts `expect(row).toBeVisible()` straight
  * after the list loads is asserting something it never meant to: that the row
  * landed in the FIRST page. That holds only while the tenant is nearly empty.
- * The payments queue orders by `due_date ASC NULLS LAST, id` and pages at 20,
- * and the full local seed (`pnpm seed`, no `--lean`) already leaves ~23
- * payable invoices — so an API-created invoice with no due date sorts last and
- * lands on page 2. CI runs `seed.py --lean` (10 invoices/tenant), which is why
- * this only ever bit locally.
+ * The payments queue orders by `due_date ASC NULLS LAST, id` and pages at 20.
+ * A fresh full local seed (`pnpm seed`, no `--lean`) leaves 15 queue rows, but
+ * a long-lived local tenant collects more with every run and passes 20, and
+ * once it does an API-created invoice with no due date sorts last and lands on
+ * page 2. CI runs `seed.py --lean` (10 invoices/tenant) on a fresh database,
+ * which is why this only ever bit locally (`docs/known-issues.md` §
+ * "Two `queue-blocked` e2e cases…").
  *
  * The fix is to navigate to the row rather than assume its position: drive the
  * list's own "Load more" control until the row appears or the list is
