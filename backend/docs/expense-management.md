@@ -109,22 +109,43 @@ string-Decimal amounts — never PII.
 | GET | `/api/expenses` | List, paginated, entity-scoped (`X-Entity-ID`); `?status=` + `?report_id=` + `?search=` filters, all composable. `search` ILIKEs the three free-text columns the row renders — `merchant`, `description`, `category`. Before it existed the page could only filter the rows it had already loaded, so a term matching an expense past the first page read as "nothing matched". |
 | POST | `/api/expenses` | Create an expense. `amount` must be **strictly positive** (`gt=0` → 422 otherwise; a negative line could net a report under the CFO threshold while hiding a large expense). Lands under the selected entity (or the tenant default). If `report_id` is supplied this **is** an attach and gates like one: the target report must still be a `draft` (**409** otherwise, same rule as `POST /api/expense-reports/{id}/expenses`), and its `total_amount` is then recomputed. Creating straight onto a locked report used to be the one attach path with no gate — it moved an approved report's total past the CFO threshold it was approved under, and nulled the locked `reporting_*` figure that decision was derived from. |
 | GET | `/api/expenses/receipt/{file_key:path}` | Download proxy for a stored receipt. Cross-tenant-checked (first key segment must equal the caller's org); same 404 for wrong-org and missing-file. Declared before `/{expense_id}` so `receipt` isn't captured as an id. |
-| POST | `/api/expenses/{id}/receipt` | Upload a receipt to S3 (`upload_expense_receipt`) and stamp `receipt_file_key`. |
+| POST | `/api/expenses/{id}/receipt` | Upload a receipt to S3 (`upload_expense_receipt`) and stamp `receipt_file_key`. **409** when the line sits on a locked report (submitted/pending_approval/approved/reimbursed) — the receipt is the evidence the approver reviewed, so it is frozen with the rest of the line (checked before the upload, so a refused replacement never reaches storage). A `rejected` report's lines stay uploadable. |
 | GET | `/api/expenses/export` | **(WF2)** Stream the filtered expense register as `text/csv` (`expenses_<today>.csv` via Content-Disposition). `?status=&search=&category=&date_from=&date_to=&report_id=`; entity-scoped, no pagination (full filtered set). `status` / `report_id` / `search` run through the SAME `_expense_list_filters` as `GET /api/expenses` and `/summary`, so the CSV is the rows on screen — the export used to restate those clauses inline and declare no `search` leg, and FastAPI drops an undeclared param silently, so a CSV taken mid-search covered the whole status-filtered set. `category` + the date range stay export-only (period slicing is what the CSV is for). Outer-joins `GLAccount` (gl code) + `ExpenseReport` (report number) so an uncoded/unattached expense still emits a row. Serialised by `report_export.export_expense_register` (the `expense_register` exporter). Read RBAC (incl. CFO). Declared before `/{expense_id}`. |
 | POST | `/api/expenses/bulk-gl-code` | **(WF2)** Set `gl_account_id` on many expenses at once (`null` clears it). Body `{ expense_ids: [uuid], gl_account_id: uuid\|null }`. Each id resolved within the entity scope (out-of-scope/cross-tenant id → 404); a non-`null` GL is validated against the org's chart. One `expense.bulk_gl_coded` audit row per expense; returns `{ updated }`. Mutation RBAC (`admin`/`ap_manager`/`ap_clerk`). Declared before `/{expense_id}`. |
 | GET | `/api/expenses/summary` | Whole-set rollup for the list's KPI row: `{ total, by_status: {status: n}, by_currency: [{currency, total, count}] }`. Takes the SAME `?status=&report_id=&search=` filters as the list and runs them through the same `_expense_list_filters`, so the cards and the table can't describe different sets. Each bucket's `total` is an EXACT decimal string, and buckets are never added together — a cross-currency sum is a figure denominated in nothing. The KPIs used to reduce over the LOADED page (20 rows), so "Period total" summed a page while the "Expenses" card beside it showed the server's whole-set count. Read RBAC (all four roles — a rollup exposes strictly less than the rows it summarises). Declared before `/{expense_id}`. |
 | GET | `/api/expenses/{id}` | Get one expense. |
-| PATCH | `/api/expenses/{id}` | Update mutable fields (`amount` still `gt=0`). Audits only when a field actually changed. An `amount` change or a `report_id` move recomputes the affected report total(s) — and is **409** if any affected report has left `draft` into a locked state (submitted/pending_approval/approved/reimbursed), so an edit can't silently move a total the CFO gate / approval signature already ran against. Moving an expense **onto** a report is an attach, so the TARGET gates on `_require_draft_report` like the other two attach paths: a `rejected` / `cancelled` report is a **409** too (it can never be resubmitted, so the line would just vanish onto a dead row). Detaching (`report_id: null`) **from** a terminal report stays allowed — that is how its expenses get re-reported. |
+| PATCH | `/api/expenses/{id}` | Update mutable fields (`amount` still `gt=0`). Audits only when a field actually changed. An `amount` change or a `report_id` move recomputes the affected report total(s) — and is **409** if any affected report has left `draft` into a locked state (submitted/pending_approval/approved/reimbursed), so an edit can't silently move a total the CFO gate / approval signature already ran against. Moving an expense **onto** a report is an attach, so the TARGET gates on `_require_draft_report` like the other two attach paths: a `rejected` / `cancelled` report is a **409** too (it can never be resubmitted, so the line would just vanish onto a dead row). Detaching (`report_id: null`) **from** a terminal report stays allowed — that is how its expenses get re-reported. **A line on a locked report is frozen whole, not just its amount:** a change to any claim field (`category`, `mileage_miles`, `expense_date`, `merchant`, `description`, `reimbursable`, `payment_method`, as well as `amount` / `currency`) is **409**. Submit is where the blocking policy rules ran and `category` decides which rules apply, so locking only the total let a line be filed under an uncontrolled category, submitted clean, then re-categorised in front of the approver into one demanding a pre-approval. `gl_account_id` stays editable — GL coding is the accountant's classification, done after approval, and `/bulk-gl-code` never gated on it — and card reconciliation's `payment_method` stamp is the card feed's evidence, not a claim edit. |
 | DELETE | `/api/expenses/{id}` | Delete an expense; recomputes the owning report total if it was attached. **409** if the owning report is locked (submitted/approved/…) — deleting would shrink a total past its approval. Also **409** when a `CorporateCardTransaction` is reconciled to it (`matched_expense_id` is a real FK, so Postgres refused the DELETE and it surfaced as an unhandled `ForeignKeyViolationError` — a bare 500); the detail names the transaction to `/unmatch` first, the same posture `/ignore` takes. |
 | GET | `/api/expense-reports` | List, paginated, entity-scoped; `?status=` filter. |
 | POST | `/api/expense-reports` | Create a report. `employee_user_id` is **always the authenticated caller** — a report can't be raised on someone else's behalf. The body field is accepted for wire compatibility and ignored (a stale client gets a report owned by itself rather than a 422), the same posture `POST /api/expense-preapprovals` takes with its `requester_user_id`. Honouring it would have handed the creator the one value approval checks SoD against, so one user could raise a report "for" an arbitrary uuid and then approve it themselves. |
 | GET | `/api/expense-reports/{id}` | Get one report (with its expenses). |
 | GET | `/api/expense-reports/{id}/summary` | **(WF2)** Aggregate the report's attached expenses: `{ total, count, by_category: [{category, total, count}], by_status: [{status, total, count}] }`. SUMs run in Postgres over the `Numeric` column (exact); serialised as float to match `ExpenseResponse.amount` (read-only display rollup). Read RBAC (incl. CFO). |
 | PATCH | `/api/expense-reports/{id}` | Update mutable report fields. **409** once the report is locked (submitted/pending_approval/approved/reimbursed) — report-level fields (currency in particular) reinterpret a total the approval already ran against. |
-| POST | `/api/expense-reports/{id}/expenses` | Attach (or `detach: true`) expense ids; recomputes `total_amount`. Each id is looked up in this tenant's `expenses` table, so a cross-tenant/unknown id is a 404. Detaching nulls `report_id` (the expense outlives the report). Composition is only mutable while the **target** report is a `draft` (**409** otherwise), and an expense can't be moved off a **locked** source report (**409**) — terminal `rejected`/`cancelled` reports stay detachable so their expenses can be re-reported. |
+| POST | `/api/expense-reports/{id}/expenses` | Attach (or `detach: true`) expense ids; recomputes `total_amount`. Each id is looked up in this tenant's `expenses` table, so a cross-tenant/unknown id is a 404. Detaching nulls `report_id` (the expense outlives the report). Composition is only mutable while the **target** report is a `draft` (**409** otherwise), and an expense can't be moved off a **locked** source report (**409**) — terminal `rejected`/`cancelled` reports stay detachable so their expenses can be re-reported. Every attached/detached line's `policy_violations` is re-evaluated, as every other expense write does: the attach locks a conversion that may resolve a threshold comparison, and it sets the line's owner, which pre-approval cover depends on (a report-currency change re-evaluates its lines for the same reason). |
 | POST | `/api/expense-reports/{id}/submit` | **(WF3)** `draft → submitted`. Runs the policy engine over the report's expenses; if any BLOCKING violation (missing required receipt, or required pre-approval absent) is present, returns **422** with `{ detail: { message, violations: [...] } }` and does NOT transition. On success stamps `submitted_at` and moves every child expense to `submitted`. Invalid source status → 422. RBAC `admin`/`ap_manager`/`ap_clerk` (the owner submits). Audited `expense_report.submitted`. |
 | POST | `/api/expense-reports/{id}/approve` | **(WF3)** `submitted → approved`. Segregation of duties: the approver must differ from the report's `employee_user_id` (reuses `approval_chain.check_segregation` → **403**). CFO gate: when `total_amount` exceeds `Organization.settings.expense_approval.cfo_threshold` (default `5000`, Decimal math), only `cfo`/`admin` may approve (else 403). Stamps `approved_at` + `approved_by` (the approver's user id) and moves child expenses to `approved`. Invalid source status → 422. RBAC `admin`/`ap_manager`/`cfo`. Audited `expense_report.approved`. |
 | POST | `/api/expense-reports/{id}/reject` | **(WF3)** `submitted → rejected`. Body `{ reason? }`. Returns each child expense to `draft` so they can be corrected and re-reported (`rejected` is terminal for the report row). Invalid source status → 422. RBAC `admin`/`ap_manager` — deliberately NARROWER than approve, which also allows `cfo`. The frontend used one predicate for both, so a CFO saw no Approve button on exactly the over-threshold reports the CFO gate escalates TO them; the two are now split there as well. Audited `expense_report.rejected`. |
+
+**Every report write that checks the report's status locks the report row.**
+`submit` / `approve` / `reject`, and every composition or content change gated on
+draft-or-unlocked (attach/detach, create-with-`report_id`, expense PATCH /
+DELETE / receipt upload on an attached line, report PATCH), read the report
+with `_get_report_or_404(..., for_update=True)`. Their status guards are
+read-then-write checks, not constraints: with a plain SELECT an approve read
+`submitted` while a reject was mid-transaction, passed its guard, and its
+UPDATE queued behind the reject's lock and then stamped `approved` over the
+rejection — an approved report beside an `expense_report.rejected` audit row. An
+attach likewise landed a line on a report a concurrent submit had just totalled,
+moving the submitted total and nulling its reporting figure. A path touching
+two reports (a line moved from one onto another) takes both locks up front in
+ascending-id order (`_lock_reports`), so two opposite moves between the same pair
+cannot deadlock; the receipt upload checks unlocked before the storage round trip
+and re-checks under the lock after it, so no row lock is held across S3. The
+read-only routes (`GET` report / summary) stay unlocked. Covered by
+`test_approve_cannot_overwrite_a_concurrent_reject` and
+`test_attach_cannot_land_on_a_report_a_concurrent_submit_locked` in
+`tests/test_expense_approval.py`, which hold the row from a second session and
+wait on Postgres's own lock-wait state, never a sleep.
 
 ### Corporate-card reconciliation routes (WF4)
 
@@ -305,6 +326,20 @@ differently on purpose, each in its fail-closed direction:
 an unstamped expense keeps the old whole-tenant behaviour rather than being
 un-policed.
 
+#### Pre-approval cover is the requester's own
+
+A pre-approval authorizes **its requester's** spend. `_approved_preapproval_amount`
+used to match on status + currency + entity + (report OR category) and never on
+whose request it was, so one clerk's approved "conference, travel, 5 000 USD"
+cleared the blocking `preapproval_required` on every colleague's travel expense in
+the entity — the control was satisfiable by pointing at someone else's paperwork.
+The cover now also requires `requester_user_id` to equal the expense's owner,
+which is its report's `employee_user_id` (the authenticated creator —
+`create_report` never takes it from the body). An **unattached** expense has no
+owner yet, so nothing covers it: its `preapproval_required` stays raised as an
+advisory flag until it is attached (the attach re-evaluates it) — submit, which
+always has a report, is the gate.
+
 Report submit runs **one pass per entity** over its lines rather than one pass
 with a merged policy list — `evaluate_report` applies every policy handed to it
 to every expense, so a single list would re-open the same bleed at report level.
@@ -439,8 +474,8 @@ reused for a EUR threshold — it says nothing about it.
 Every such violation carries `comparison: "unresolved"` plus `currency` (the
 threshold's unit) and `expense_currency` (the unit of the `actual` figure), so
 the UI can say *why* it flagged instead of asserting a comparison that never
-happened. Attaching the line to a report locks a rate and the next evaluation
-compares for real.
+happened. Attaching the line to a report locks a rate and re-evaluates it, so
+the comparison is then made for real.
 
 **Existing rows have `threshold_currency = NULL`, and it was not backfilled.**
 NULL is a defined state — *"the org's reporting currency"*
@@ -696,7 +731,13 @@ while unattached, then clean once attaching it to a USD report locks a rate.
 Plus the mileage rule reaching that same write path: an over-claim flagged on
 `POST /api/expenses` naming the entitled figure and cleared by a corrective
 PATCH, the flag surviving into the approver's view without blocking submit, and
-a rate-less policy leaving a logged trip unjudged.
+a rate-less policy leaving a logged trip unjudged. Then the controls around the
+approval object: a colleague's approved pre-approval does not cover another
+employee's expense (the requester's own report is covered); a line on a
+submitted report refuses every claim-field edit and an approved line refuses a
+receipt replacement, while GL coding stays open and a rejected report's lines
+stay editable; and the two row-lock races (approve vs a concurrent reject,
+attach vs a concurrent submit).
 
 `backend/tests/test_expense_cards.py` (WF4, `realdb`) — CSV import (rows land,
 exact `Numeric` round-trip, shared `import_batch`) + dedupe-skip (re-import and

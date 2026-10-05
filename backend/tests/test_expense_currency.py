@@ -605,8 +605,15 @@ async def test_same_currency_preapproval_still_covers(realdb):
         approved = await c.post(f"/api/expense-preapprovals/{pre.json()['id']}/approve")
         assert approved.status_code == 200, approved.text
 
+    # Cover belongs to the requester, so the line has to be on the requester's
+    # own report — an unattached line has no owner yet and nothing covers it
+    # (backend/docs/expense-management.md § Pre-approval cover is the
+    # requester's own).
     async with realdb.client(key="a", role="ap_clerk") as c:
         usd = await _mk_expense(c, "500.00", "USD", category="hardware")
+        rid = await _mk_report(c, "USD")
+        attached = await c.post(f"/api/expense-reports/{rid}/expenses", json={"expense_ids": [usd]})
+        assert attached.status_code == 200, attached.text
         line = (await c.get(f"/api/expenses/{usd}")).json()
     codes = {v["code"] for v in (line["policy_violations"] or [])}
     assert "preapproval_required" not in codes

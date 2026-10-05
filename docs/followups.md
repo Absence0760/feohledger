@@ -70,6 +70,7 @@ deleting it; that cross-reference is what makes the pruning safe, and writing
 one is what earns a future entry the right to be deleted.
 
 **54 open: 39 (c) · 9 (a) · 6 (b)** — re-derived from the file, never carried
+**55 open: 40 (c) · 9 (a) · 6 (b)** — re-derived from the file, never carried
 forward. The section heading is authoritative; where an entry also carries a
 `(c)`/`(a)`/`(b)` marker, the two agree.
 `grep -c '^- \[ \]' docs/followups.md`.
@@ -1092,6 +1093,43 @@ or is a sibling of a fix that needs its own pass.
       versioning the key instead of deleting it, so the evidence chain
       survives. **Trigger:** the product call, or the next change to either
       file route.
+### Surfaced by the expense-management bug hunt (2026-10-05, round 2)
+
+- [ ] **(c) An approved pre-approval is never consumed, so one estimate covers
+      unlimited spend.** `_approved_preapproval_amount` returns the largest
+      approved estimate that matches the line, and the engine compares it to
+      each line *individually* (`covered >= amount`). Now that cover is scoped to
+      the requester (`backend/docs/expense-management.md` § Pre-approval cover is
+      the requester's own) a colleague's request can no longer be borrowed, but
+      the same employee's single "500 USD, travel" approval still clears
+      `preapproval_required` on any number of 400 USD travel lines, across any
+      number of reports, indefinitely — the split-to-evade shape an approval
+      limit exists to stop. Not fixed in the same change because the honest fix
+      needs a data-model decision, not a query tweak.
+      **Durable fix:** link a covered expense to the pre-approval that covers it
+      (an `expenses.preapproval_id` FK, or a consumption row) and draw lines down
+      against `estimated_amount` in the pre-approval's currency at submit, under
+      a row lock on the pre-approval; a line the remaining balance cannot cover
+      raises `preapproval_required`. Decide with product whether a pre-approval is
+      single-use, a running budget, or time-boxed, and migrate (tenant fan-out).
+      **Trigger:** the next change to pre-approval cover or the policy engine's
+      `preapproval_required` rule, or a product call on pre-approval semantics.
+
+- [ ] **(c) Report SoD names only the report owner, not who wrote its lines.**
+      `approve_report` refuses `employee_user_id` (the authenticated creator)
+      and nobody else, passing `segregation_actor_ids=None` because the table has
+      no editor tracking. But attach, create-with-`report_id` and expense PATCH
+      carry no ownership check, so a manager can author or rewrite lines on a
+      clerk's draft report — or submit it — and then approve it themselves. The
+      invoice path closed exactly this with `segregation_actor_ids`
+      (`docs/decisions.md` §141, §152).
+      **Durable fix:** either restrict composition and submit of a report to its
+      owner (simplest; matches the docs' "the owner submits"), or record every
+      material author/editor of a line on the report (a JSONB actor set, like
+      `invoices.segregation_actor_ids`) and pass it to `check_segregation`.
+      Tenant migration if the latter.
+      **Trigger:** the next change to report approval / SoD, or a persona-approver
+      or persona-fraudster pass over expenses.
 
 ## (a) Blocked on external credentials, accounts, or hardware
 
