@@ -44,14 +44,6 @@ router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 # module level so they're cheap to instantiate inside the endpoint
 # and trivial to mock in tests.
 @dataclass
-class SimpleNamespaceTimings:
-    id: object
-    created_at: datetime | None
-    approved_at: datetime | None
-    paid_at: datetime | None
-
-
-@dataclass
 class SimpleNamespaceStep:
     assigned_to: object | None
     created_at: datetime | None
@@ -583,65 +575,70 @@ async def get_dashboard(
     stale_approvals = stale_q.scalar() or 0
 
     # Open exceptions
-    try:
-        exc_q = await db.execute(
-            _exc(select(func.count()).where(APException.status.in_(["open", "escalated"])))
-        )
-        open_exceptions = exc_q.scalar() or 0
-    except Exception:
-        open_exceptions = 0
-        await db.rollback()
+    exc_q = await db.execute(
+        _exc(select(func.count()).where(APException.status.in_(["open", "escalated"])))
+    )
+    open_exceptions = exc_q.scalar() or 0
 
     # ----- Processing-time metrics ----------------------------------
-    # Avg + median + p95 from invoice creation to (a) approval (read
-    # from the audit_log row stamped on `invoice.approved`) and (b)
-    # completed payment (read from Payment.completed_at). Both legs
-    # collapse to 0 when the sample is below the min threshold (see
-    # `services/analytics.compute_processing_time_metrics`).
+    # Avg + median + p95 from invoice creation to (a) its FIRST approval (the
+    # earliest `invoice.approved` audit row) and (b) its first completed
+    # payment (`MIN(Payment.completed_at)`). Both legs collapse to 0 below the
+    # min sample (`services/analytics.processing_time_from_day_counts`).
+    #
+    # Set-based: each leg comes back as (days rounded to 0.1, how many
+    # invoices) — a few thousand rows at most, bounded by the SPAN of the
+    # history, never by the number of invoices in it. This block used to
+    # stream every approval audit row, every completed payment and then every
+    # matching invoice into Python, and the last step bound one parameter per
+    # invoice id: asyncpg refuses a statement with more than 32 767, a
+    # broad `except` around the block swallowed the error, and every tenant past ~33k
+    # approved invoices saw a processing-time tile of zeros. Rounding happens
+    # in SQL (`round(numeric, 1)`, half away from zero) exactly as
+    # `analytics._decimal_days` rounds, so the figures are the ones the
+    # row-at-a-time path produced. `docs/decisions.md` §218.
     from app.models.workflow import AuditLog
-    from app.services.analytics import compute_processing_time_metrics
+    from app.services.analytics import processing_time_from_day_counts
 
-    invoice_legs: list = []
-    try:
-        approval_rows = await db.execute(
-            select(AuditLog.entity_id, AuditLog.created_at).where(
-                AuditLog.entity_type == "invoice",
-                AuditLog.action == "invoice.approved",
-            )
+    first_approval = (
+        select(
+            AuditLog.entity_id.label("invoice_id"),
+            func.min(AuditLog.created_at).label("at"),
         )
-        approved_at_by_invoice = {row[0]: row[1] for row in approval_rows.all()}
-        paid_rows = await db.execute(
-            select(Payment.invoice_id, func.min(Payment.completed_at))
-            .where(Payment.status == "completed")
-            .group_by(Payment.invoice_id)
+        .where(AuditLog.entity_type == "invoice", AuditLog.action == "invoice.approved")
+        .group_by(AuditLog.entity_id)
+        .subquery("first_approval")
+    )
+    first_paid = (
+        select(
+            Payment.invoice_id.label("invoice_id"),
+            func.min(Payment.completed_at).label("at"),
         )
-        paid_at_by_invoice = {row[0]: row[1] for row in paid_rows.all() if row[1]}
-        # Only invoices with an approval or paid timestamp contribute a leg —
-        # every other row appends nothing. So fetch just those ids instead of
-        # the whole (potentially multi-million-row) invoice table; the entity
-        # scope still applies, so an out-of-scope id is dropped exactly as before.
-        relevant_ids = set(approved_at_by_invoice) | set(paid_at_by_invoice)
-        if relevant_ids:
-            inv_rows = await db.execute(
-                _inv(select(Invoice.id, Invoice.created_at).where(Invoice.id.in_(relevant_ids)))
-            )
-            for inv_id, created in inv_rows.all():
-                invoice_legs.append(
-                    SimpleNamespaceTimings(
-                        id=inv_id,
-                        created_at=created,
-                        approved_at=approved_at_by_invoice.get(inv_id),
-                        paid_at=paid_at_by_invoice.get(inv_id),
-                    )
-                )
-    except Exception:  # noqa: BLE001
-        # Tenants without the audit_log shipping pipeline enabled can
-        # still see the rest of the dashboard. Surface zeros and a
-        # note in the response.
-        await db.rollback()
-        invoice_legs = []
+        .where(Payment.status == "completed", Payment.completed_at.isnot(None))
+        .group_by(Payment.invoice_id)
+        .subquery("first_paid")
+    )
 
-    pt = compute_processing_time_metrics(invoice_legs)
+    async def _leg_day_counts(milestone) -> list[tuple[Decimal, int]]:
+        # Entity scope rides the invoice side of the join, as it did when the
+        # invoice ids were filtered by `_inv(...)` after the fact.
+        days = func.round(
+            (func.extract("epoch", milestone.c.at) - func.extract("epoch", Invoice.created_at))
+            / 86400,
+            1,
+        )
+        q = _inv(
+            select(days, func.count())
+            .select_from(Invoice)
+            .join(milestone, milestone.c.invoice_id == Invoice.id)
+            .where(Invoice.created_at.isnot(None))
+            .group_by(days)
+        )
+        return [(Decimal(d), int(n)) for d, n in (await db.execute(q)).all()]
+
+    pt = processing_time_from_day_counts(
+        await _leg_day_counts(first_approval), await _leg_day_counts(first_paid)
+    )
 
     # ----- Approval bottleneck --------------------------------------
     # Per-approver pending counts + oldest age + average age. Reads
@@ -650,27 +647,23 @@ async def get_dashboard(
     from app.models.workflow import WorkflowStep
     from app.services.analytics import compute_approval_bottleneck
 
-    try:
-        step_rows = await db.execute(
-            select(
-                WorkflowStep.assigned_to,
-                WorkflowStep.created_at,
-            ).where(
-                WorkflowStep.step_type == "approval",
-                WorkflowStep.completed_at.is_(None),
-            )
+    step_rows = await db.execute(
+        select(
+            WorkflowStep.assigned_to,
+            WorkflowStep.created_at,
+        ).where(
+            WorkflowStep.step_type == "approval",
+            WorkflowStep.completed_at.is_(None),
         )
-        pending_steps = [
-            SimpleNamespaceStep(
-                assigned_to=row[0],
-                created_at=row[1],
-                assignee_name=None,
-            )
-            for row in step_rows.all()
-        ]
-    except Exception:  # noqa: BLE001
-        await db.rollback()
-        pending_steps = []
+    )
+    pending_steps = [
+        SimpleNamespaceStep(
+            assigned_to=row[0],
+            created_at=row[1],
+            assignee_name=None,
+        )
+        for row in step_rows.all()
+    ]
     bottleneck_rows = compute_approval_bottleneck(pending_steps)
 
     # ----- Discount capture rate ------------------------------------
@@ -711,91 +704,87 @@ async def get_dashboard(
     # 100; this tile was the one place computing it the other way.
     _disc_amount = func.round(Invoice.amount * PaymentSchedule.discount_percent / 100, 2)
     _disc_amount_reporting = func.round(_rep_expr * PaymentSchedule.discount_percent / 100, 2)
-    try:
-        # Per invoice-and-schedule, with the completed payments collapsed to the
-        # earliest `completed_at`. The GROUP BY is the fold's, unchanged: an
-        # invoice carrying two schedules on different terms is still two rows.
-        eligible = (
-            _inv(
-                select(
-                    _disc_amount.label("discount_amount"),
-                    _disc_amount_reporting.label("discount_amount_reporting"),
-                    _unconv_expr.label("unconverted"),
-                    PaymentSchedule.discount_date.label("discount_date"),
-                    func.min(Payment.completed_at).label("paid_at"),
-                )
-                .join(PaymentSchedule, PaymentSchedule.invoice_id == Invoice.id)
-                .outerjoin(
-                    Payment,
-                    (Payment.invoice_id == Invoice.id) & (Payment.status == "completed"),
-                )
-                .where(PaymentSchedule.discount_percent.isnot(None))
-                .group_by(
-                    Invoice.id,
-                    Invoice.amount,
-                    Invoice.currency,
-                    Invoice.reporting_amount,
-                    Invoice.reporting_currency,
-                    PaymentSchedule.discount_percent,
-                    PaymentSchedule.discount_date,
-                )
-            )
-        ).subquery()
-        # `completed_at` is `timestamptz`, and asyncpg handed Python a UTC-aware
-        # datetime whose `.date()` was therefore the UTC date. A bare `::date`
-        # would read the SESSION's TimeZone instead, so the conversion is spelled
-        # out: this is a payment-against-deadline comparison, and taking it off
-        # the server's local calendar is the class of bug `utils/dates.utc_today`
-        # exists to prevent.
-        _paid_on = cast(func.timezone("UTC", eligible.c.paid_at), Date)
-        # An invoice whose discount deadline has NOT passed has missed nothing
-        # yet — it is still capturable, and the four other consumers of these
-        # economics all gate on that. This surface was the one that didn't, so
-        # the dashboard reported a growing pile of "missed" savings that were in
-        # fact still on the table. A row with no `discount_date` has no window
-        # that can be shown to have elapsed, so it is undecided too, never a
-        # miss. The second leg is `analytics.discount_window_open` negated; the
-        # first is the paid-before-the-deadline test — both in SQL.
-        bucket = case(
-            (
-                and_(
-                    eligible.c.paid_at.isnot(None),
-                    eligible.c.discount_date.isnot(None),
-                    _paid_on <= eligible.c.discount_date,
-                ),
-                "captured",
-            ),
-            (
-                and_(
-                    eligible.c.discount_date.isnot(None),
-                    eligible.c.discount_date < today,
-                ),
-                "missed",
-            ),
-            else_="pending",
-        )
-        bucket_rows = await db.execute(
+    # Per invoice-and-schedule, with the completed payments collapsed to the
+    # earliest `completed_at`. The GROUP BY is the fold's, unchanged: an
+    # invoice carrying two schedules on different terms is still two rows.
+    eligible = (
+        _inv(
             select(
-                bucket.label("bucket"),
-                func.count(),
-                func.coalesce(func.sum(eligible.c.discount_amount), 0),
-                func.coalesce(func.sum(eligible.c.discount_amount_reporting), 0),
-                func.coalesce(func.sum(eligible.c.unconverted), 0),
-            ).group_by(bucket)
+                _disc_amount.label("discount_amount"),
+                _disc_amount_reporting.label("discount_amount_reporting"),
+                _unconv_expr.label("unconverted"),
+                PaymentSchedule.discount_date.label("discount_date"),
+                func.min(Payment.completed_at).label("paid_at"),
+            )
+            .join(PaymentSchedule, PaymentSchedule.invoice_id == Invoice.id)
+            .outerjoin(
+                Payment,
+                (Payment.invoice_id == Invoice.id) & (Payment.status == "completed"),
+            )
+            .where(PaymentSchedule.discount_percent.isnot(None))
+            .group_by(
+                Invoice.id,
+                Invoice.amount,
+                Invoice.currency,
+                Invoice.reporting_amount,
+                Invoice.reporting_currency,
+                PaymentSchedule.discount_percent,
+                PaymentSchedule.discount_date,
+            )
         )
-        discount_groups = [
-            {
-                "bucket": row[0],
-                "count": row[1],
-                "amount": row[2],
-                "reporting_amount": row[3],
-                "unconverted_count": row[4],
-            }
-            for row in bucket_rows.all()
-        ]
-    except Exception:  # noqa: BLE001
-        await db.rollback()
-        discount_groups = []
+    ).subquery()
+    # `completed_at` is `timestamptz`, and asyncpg handed Python a UTC-aware
+    # datetime whose `.date()` was therefore the UTC date. A bare `::date`
+    # would read the SESSION's TimeZone instead, so the conversion is spelled
+    # out: this is a payment-against-deadline comparison, and taking it off
+    # the server's local calendar is the class of bug `utils/dates.utc_today`
+    # exists to prevent.
+    _paid_on = cast(func.timezone("UTC", eligible.c.paid_at), Date)
+    # An invoice whose discount deadline has NOT passed has missed nothing
+    # yet — it is still capturable, and the four other consumers of these
+    # economics all gate on that. This surface was the one that didn't, so
+    # the dashboard reported a growing pile of "missed" savings that were in
+    # fact still on the table. A row with no `discount_date` has no window
+    # that can be shown to have elapsed, so it is undecided too, never a
+    # miss. The second leg is `analytics.discount_window_open` negated; the
+    # first is the paid-before-the-deadline test — both in SQL.
+    bucket = case(
+        (
+            and_(
+                eligible.c.paid_at.isnot(None),
+                eligible.c.discount_date.isnot(None),
+                _paid_on <= eligible.c.discount_date,
+            ),
+            "captured",
+        ),
+        (
+            and_(
+                eligible.c.discount_date.isnot(None),
+                eligible.c.discount_date < today,
+            ),
+            "missed",
+        ),
+        else_="pending",
+    )
+    bucket_rows = await db.execute(
+        select(
+            bucket.label("bucket"),
+            func.count(),
+            func.coalesce(func.sum(eligible.c.discount_amount), 0),
+            func.coalesce(func.sum(eligible.c.discount_amount_reporting), 0),
+            func.coalesce(func.sum(eligible.c.unconverted), 0),
+        ).group_by(bucket)
+    )
+    discount_groups = [
+        {
+            "bucket": row[0],
+            "count": row[1],
+            "amount": row[2],
+            "reporting_amount": row[3],
+            "unconverted_count": row[4],
+        }
+        for row in bucket_rows.all()
+    ]
     discount = discount_capture_from_grouped_rows(discount_groups)
 
     return {

@@ -25,13 +25,11 @@ Before the grouped-query / batched-`IN` / `DISTINCT ON` fix all three
 
 from __future__ import annotations
 
-import re
 import uuid
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from sqlalchemy import event, select
-from sqlalchemy.engine import Engine
+from sqlalchemy import select
 
 from app.models.entity import Entity
 from app.models.invoice import Invoice
@@ -39,42 +37,9 @@ from app.models.sanctions_check import SanctionsCheck
 from app.models.vendor import Vendor
 from app.models.vendor_change_request import VendorChangeRequest
 from app.services.sanctions_categories import RAW_RESPONSE_CATEGORIES_KEY
+from tests.query_counter import QueryCounter
 
 TENANT = "a"
-
-
-class QueryCounter:
-    """Records every SQL statement executed while the block is open.
-
-    Listens on the ``Engine`` *class*, so it captures the request-path engines
-    the `realdb` client builds internally as well as any seeding session — the
-    counter needs no cooperation from the harness. Async engines dispatch these
-    events on their underlying sync engine, so class-level listening is the one
-    hook that sees them all.
-    """
-
-    def __init__(self) -> None:
-        self.statements: list[str] = []
-
-    def __enter__(self) -> QueryCounter:
-        event.listen(Engine, "before_cursor_execute", self._record)
-        return self
-
-    def __exit__(self, *exc) -> None:
-        event.remove(Engine, "before_cursor_execute", self._record)
-
-    def _record(self, conn, cursor, statement, parameters, context, executemany) -> None:  # noqa: ARG002
-        self.statements.append(" ".join(statement.split()))
-
-    def matching(self, pattern: str) -> list[str]:
-        rx = re.compile(pattern, re.IGNORECASE)
-        return [s for s in self.statements if rx.search(s)]
-
-    def count_matching(self, pattern: str) -> int:
-        return len(self.matching(pattern))
-
-    def __len__(self) -> int:
-        return len(self.statements)
 
 
 async def _default_entity_id(session) -> uuid.UUID:
