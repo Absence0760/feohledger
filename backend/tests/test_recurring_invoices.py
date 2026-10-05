@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import logging
 import uuid
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -36,6 +36,7 @@ from app.models.recurring_invoice import (
 from app.models.vendor import Vendor
 from app.models.workflow import AuditLog
 from app.services import recurring_invoices as svc
+from app.utils.dates import utc_today
 
 # --------------------------------------------------------------------------- #
 # Pure — period_key_for
@@ -1727,3 +1728,137 @@ async def test_a_template_editor_cannot_approve_what_the_sweep_generated(realdb)
     async with realdb.client(key="a", role="cfo") as c:
         allowed = await c.post(f"/api/invoices/{invoice_id}/approve", json={})
     assert allowed.status_code == 200, allowed.text
+
+
+# --------------------------------------------------------------------------- #
+# end_date is a hard stop — on every path that generates or moves the cursor
+# --------------------------------------------------------------------------- #
+
+
+def _month_start(months_from_now: int) -> date:
+    return svc._add_months(utc_today().replace(day=1), months_from_now)
+
+
+async def _invoices_for(mk, template_id) -> list[Invoice]:
+    async with mk() as s:
+        return list(
+            (
+                await s.execute(
+                    select(Invoice).where(
+                        Invoice.recurring_template_id == uuid.UUID(str(template_id))
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+
+async def test_generate_now_refuses_a_period_past_the_end_date(realdb):
+    """A template whose `end_date` has passed but which nobody ended stays
+    `active` (the sweep only nulls the cursor). `generate-now` resolves the
+    CURRENT period from today and never consulted `end_date`, so one click
+    raised a payable for a month the standing instruction no longer covers."""
+    mk = realdb.sessionmaker("a")
+    vendor_id = await _add_vendor(mk, realdb.info("a").org_id)
+    start = _month_start(-6)
+    end = _month_start(-2) - timedelta(days=1)  # last day of three months ago
+
+    async with realdb.client(key="a", role="ap_manager") as c:
+        created = await c.post(
+            "/api/recurring",
+            json=_create_body(
+                vendor_id=vendor_id,
+                start_date=start.isoformat(),
+                end_date=end.isoformat(),
+            ),
+        )
+        assert created.status_code == 201, created.text
+        tid = created.json()["id"]
+        resp = await c.post(f"/api/recurring/{tid}/generate-now")
+    assert resp.status_code == 409, resp.text
+    assert "end date" in resp.json()["detail"].lower()
+    assert await _invoices_for(mk, tid) == []
+
+
+async def test_patch_extending_end_date_revives_an_exhausted_schedule(realdb):
+    """Once the cursor passes `end_date` it is nulled. Extending `end_date`
+    afterwards changed the column and nothing else — `end_date` was not one of
+    the fields that re-anchor `next_run_on` — so the template sat `active`,
+    showed the new end date, and never generated again."""
+    mk = realdb.sessionmaker("a")
+    vendor_id = await _add_vendor(mk, realdb.info("a").org_id)
+    start = _month_start(0)
+
+    async with realdb.client(key="a", role="ap_manager") as c:
+        tid = (
+            await c.post(
+                "/api/recurring",
+                json=_create_body(
+                    vendor_id=vendor_id,
+                    start_date=start.isoformat(),
+                    end_date=start.isoformat(),  # one occurrence
+                ),
+            )
+        ).json()["id"]
+        assert (await c.post(f"/api/recurring/{tid}/generate-now")).status_code == 201
+        assert (await c.get(f"/api/recurring/{tid}")).json()["next_run_on"] is None
+
+        resp = await c.patch(
+            f"/api/recurring/{tid}",
+            json={"end_date": _month_start(12).isoformat()},
+        )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["next_run_on"] == _month_start(1).isoformat()
+
+
+async def test_patch_shortening_end_date_withdraws_a_cursor_past_it(realdb):
+    """The other direction: moving `end_date` before an already-scheduled
+    cursor left `next_run_on` pointing past the new end, and the sweep — which
+    checks only `next_run_on <= today` — would then raise one more invoice the
+    operator had just said not to."""
+    mk = realdb.sessionmaker("a")
+    vendor_id = await _add_vendor(mk, realdb.info("a").org_id)
+    start = _month_start(0)
+
+    async with realdb.client(key="a", role="ap_manager") as c:
+        tid = (
+            await c.post(
+                "/api/recurring",
+                json=_create_body(vendor_id=vendor_id, start_date=start.isoformat()),
+            )
+        ).json()["id"]
+        assert (await c.post(f"/api/recurring/{tid}/generate-now")).status_code == 201
+        assert (await c.get(f"/api/recurring/{tid}")).json()["next_run_on"] == (
+            _month_start(1).isoformat()
+        )
+
+        resp = await c.patch(
+            f"/api/recurring/{tid}",
+            json={"end_date": (_month_start(1) - timedelta(days=1)).isoformat()},
+        )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["next_run_on"] is None
+
+
+async def test_sweep_never_generates_a_cursor_that_has_passed_end_date(realdb):
+    """Belt for rows written before the PATCH fix: a cursor already past
+    `end_date` is withdrawn by the sweep, not generated from — and not left
+    in place to be re-selected on every tick."""
+    mk = realdb.sessionmaker("a")
+    tid = await _add_recurring_template(
+        mk, realdb.info("a").org_id, next_run_on=_SWEEP_TODAY, name="Past End Co"
+    )
+    async with mk() as s:
+        t = await s.get(RecurringInvoiceTemplate, tid)
+        t.end_date = _SWEEP_TODAY - timedelta(days=1)
+        await s.commit()
+
+    outcome = await svc._sweep_tenant(realdb.info("a").db_name, _SWEEP_TODAY)
+    assert outcome.generated == 0
+    assert outcome.template_failures == 0
+    assert await _invoices_for(mk, tid) == []
+    async with mk() as s:
+        t = await s.get(RecurringInvoiceTemplate, tid)
+        assert t.next_run_on is None
+        assert t.generated_count == 0
