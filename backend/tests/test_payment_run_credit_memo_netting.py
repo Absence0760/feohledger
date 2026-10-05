@@ -241,3 +241,115 @@ async def test_fully_credited_invoice_cannot_be_staged_into_a_run(realdb):
             .all()
         )
         assert rows == []
+
+
+# ---------------------------------------------------------------------------
+# The applied credit's pairing is re-checked at the point of payment (§214)
+# ---------------------------------------------------------------------------
+
+
+async def _credited_invoice(realdb, c, *, number: str) -> tuple[str, str]:
+    """A 1000.00 USD approved invoice carrying a 300.00 applied credit."""
+    info = realdb.info("a")
+    mk = realdb.sessionmaker("a")
+    vendor_id, invoice_id = await _seed_vendor_and_approved_invoice(
+        mk, info.org_id, number=number, amount=Decimal("1000.00")
+    )
+    memo = await c.post(
+        "/api/credit-memos",
+        json={
+            "memo_number": f"CM-{number}",
+            "vendor_id": vendor_id,
+            "amount": "300.00",
+            "invoice_id": invoice_id,
+        },
+    )
+    assert memo.status_code == 201, memo.text
+    return vendor_id, invoice_id
+
+
+async def _rewrite_under_the_credit(realdb, invoice_id: str, **values) -> None:
+    """What a background re-extraction (manual re-extract, or the supplier
+    portal's resubmit) does: write the document's fields straight onto the row,
+    with no request a 409 could be returned to."""
+    from sqlalchemy import update
+
+    async with realdb.sessionmaker("a")() as s:
+        await s.execute(update(Invoice).where(Invoice.id == uuid.UUID(invoice_id)).values(**values))
+        await s.commit()
+
+
+async def test_a_run_refuses_an_invoice_whose_currency_moved_under_its_credit(realdb):
+    async with realdb.client(key="a", role="admin") as c:
+        _, invoice_id = await _credited_invoice(realdb, c, number="CMX-CUR-1")
+        await _rewrite_under_the_credit(realdb, invoice_id, currency="EUR")
+
+        run_resp = await c.post(
+            "/api/payments/runs", json={"items": [{"invoice_id": invoice_id, "method": "ach"}]}
+        )
+        assert run_resp.status_code == 409, run_resp.text
+        assert "CMX-CUR-1" in run_resp.json()["detail"]
+        assert "credit memo" in run_resp.json()["detail"].lower()
+
+        # The standalone path takes the same refusal.
+        single = await c.post("/api/payments", json={"invoice_id": invoice_id, "method": "ach"})
+        assert single.status_code == 409, single.text
+        assert "credit memo" in single.json()["detail"].lower()
+
+
+async def test_a_run_refuses_an_invoice_whose_vendor_moved_under_its_credit(realdb):
+    info = realdb.info("a")
+    async with realdb.sessionmaker("a")() as s:
+        other = Vendor(organization_id=info.org_id, name="Someone Else Ltd")
+        s.add(other)
+        await s.commit()
+        await s.refresh(other)
+
+    async with realdb.client(key="a", role="admin") as c:
+        _, invoice_id = await _credited_invoice(realdb, c, number="CMX-VEN-1")
+        await _rewrite_under_the_credit(realdb, invoice_id, vendor_id=other.id)
+
+        run_resp = await c.post(
+            "/api/payments/runs", json={"items": [{"invoice_id": invoice_id, "method": "ach"}]}
+        )
+    assert run_resp.status_code == 409, run_resp.text
+    assert "CMX-VEN-1" in run_resp.json()["detail"]
+
+
+async def test_dispatch_refuses_when_the_pairing_breaks_after_booking(realdb):
+    """Booked clean, broken before `/execute` (a draft awaiting CFO sign-off is
+    exactly this window): the payment fails with a named, retry-safe reason
+    BEFORE the processor is called, and the invoice stays payable."""
+    mk = realdb.sessionmaker("a")
+    async with realdb.client(key="a", role="admin") as c:
+        _, invoice_id = await _credited_invoice(realdb, c, number="CMX-LATE-1")
+        run_resp = await c.post(
+            "/api/payments/runs", json={"items": [{"invoice_id": invoice_id, "method": "ach"}]}
+        )
+        assert run_resp.status_code == 201, run_resp.text
+        run_id = run_resp.json()["id"]
+
+    await _rewrite_under_the_credit(realdb, invoice_id, currency="GBP")
+
+    async with realdb.client(key="a", role="ap_manager") as c2:
+        exec_resp = await c2.post(f"/api/payments/runs/{run_id}/execute")
+        assert exec_resp.status_code == 200, exec_resp.text
+
+    async with mk() as s:
+        payment = (
+            await s.execute(select(Payment).where(Payment.invoice_id == uuid.UUID(invoice_id)))
+        ).scalar_one()
+        invoice = (
+            await s.execute(select(Invoice).where(Invoice.id == uuid.UUID(invoice_id)))
+        ).scalar_one()
+    assert payment.status == "failed"
+    assert payment.failure_reason == "applied_credit_mismatch:currency"
+    assert payment.provider_payment_id is None
+    assert invoice.status == InvoiceStatus.approved
+
+    from app.services.payment_runs import RETRY_SAFE, classify_payment_failure
+
+    assert (
+        classify_payment_failure(failure_reason=payment.failure_reason, provider_payment_id=None)
+        == RETRY_SAFE
+    )

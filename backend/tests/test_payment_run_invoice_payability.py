@@ -321,3 +321,100 @@ async def test_void_holds_the_invoice_lock_across_the_processor_call(realdb, mon
             await s.execute(select(Invoice).where(Invoice.id == uuid.UUID(invoice_id)))
         ).scalar_one()
     assert invoice.status == InvoiceStatus.approved
+
+
+async def _book_run(realdb, mk, *, number: str, amount: str) -> tuple[str, str]:
+    info = realdb.info("a")
+    invoice_id = await _seed_approved_invoice(
+        mk, info.org_id, number=number, amount=Decimal(amount)
+    )
+    async with realdb.client(key="a", role="admin") as c:
+        run_resp = await c.post(
+            "/api/payments/runs", json={"items": [{"invoice_id": invoice_id, "method": "ach"}]}
+        )
+        assert run_resp.status_code == 201, run_resp.text
+    return invoice_id, run_resp.json()["id"]
+
+
+async def test_compliance_release_holds_the_invoice_lock_across_the_processor_call(
+    realdb, monkeypatch
+):
+    """`/compliance/release` dispatches through `_execute_single_payment`, so it
+    inherits the dispatch lock — pinned here so a release path that stopped
+    going through it would be noticed."""
+    from app.services.payment_adapters.mock_adapter import MockPaymentAdapter
+
+    mk = realdb.sessionmaker("a")
+    invoice_id, _ = await _book_run(realdb, mk, number="LOCK-RELEASE", amount="60.00")
+    async with mk() as s:
+        payment = (
+            await s.execute(select(Payment).where(Payment.invoice_id == uuid.UUID(invoice_id)))
+        ).scalar_one()
+        payment.status = "pending_compliance"
+        payment.failure_reason = "compliance_hold: review"
+        await s.commit()
+        payment_id = payment.id
+
+    seen: list[str] = []
+    original = MockPaymentAdapter.create_payment
+
+    async def create_while_erp_pushes(self, payload):
+        seen.append(await _try_concurrent_erp_push(mk, invoice_id))
+        return await original(self, payload)
+
+    monkeypatch.setattr(MockPaymentAdapter, "create_payment", create_while_erp_pushes)
+
+    async with realdb.client(key="a", role="ap_manager") as c:
+        resp = await c.post(f"/api/payments/{payment_id}/compliance/release")
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["status"] == "completed", resp.text
+
+    assert seen == ["lock_held"]
+
+
+async def test_settlement_accept_holds_the_invoice_lock_until_the_transition(realdb, monkeypatch):
+    """`/settlement/accept` decides on `payment_scheduled` and then walks the
+    invoice to `paid`; a concurrent writer must not slip in between."""
+    from app.api import payments as payments_api
+
+    mk = realdb.sessionmaker("a")
+    invoice_id, run_id = await _book_run(realdb, mk, number="LOCK-ACCEPT", amount="90.00")
+    async with realdb.client(key="a", role="ap_manager") as c2:
+        exec_resp = await c2.post(f"/api/payments/runs/{run_id}/execute")
+        assert exec_resp.status_code == 200, exec_resp.text
+
+    # A short settlement the ERP sync holds at `payment_scheduled`.
+    async with mk() as s:
+        payment = (
+            await s.execute(select(Payment).where(Payment.invoice_id == uuid.UUID(invoice_id)))
+        ).scalar_one()
+        payment.settled_amount = Decimal("45.00")
+        payment.settled_currency = "USD"
+        invoice = (
+            await s.execute(select(Invoice).where(Invoice.id == uuid.UUID(invoice_id)))
+        ).scalar_one()
+        invoice.status = InvoiceStatus.payment_scheduled
+        await s.commit()
+        payment_id = payment.id
+
+    seen: list[str] = []
+    original = payments_api.transition_invoice
+
+    async def transition_after_a_racing_push(db, inv, target, **kwargs):
+        seen.append(await _try_concurrent_erp_push(mk, invoice_id))
+        return await original(db, inv, target, **kwargs)
+
+    monkeypatch.setattr(payments_api, "transition_invoice", transition_after_a_racing_push)
+
+    async with realdb.client(key="a", role="ap_manager") as c:
+        resp = await c.post(
+            f"/api/payments/{payment_id}/settlement/accept", json={"reason": "agreed short"}
+        )
+        assert resp.status_code == 200, resp.text
+
+    assert seen == ["lock_held"]
+    async with mk() as s:
+        invoice = (
+            await s.execute(select(Invoice).where(Invoice.id == uuid.UUID(invoice_id)))
+        ).scalar_one()
+    assert invoice.status == InvoiceStatus.paid

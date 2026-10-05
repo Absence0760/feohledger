@@ -162,6 +162,7 @@ void main() {
         'fraud_flag',
         'line_total_mismatch',
         'payment_reconciliation',
+        'applied_credit_mismatch',
         'fully_credited',
         'live_payment',
         'live_virtual_card',

@@ -517,7 +517,21 @@ def _mock_db(*, run, payment, invoice, vendor_bank, compliance_vendor=None, comp
     credit_res = MagicMock()
     credit_res.scalar_one = MagicMock(return_value=Decimal("0"))
 
-    queue = [run_res, pay_res, inv_res, blocking_res, card_claim_res, credit_res, bank_res]
+    # `applied_credit_conflicts` — the applied memos' vendor/currency pairing,
+    # re-checked before the net (decisions §214). No applied memo: no conflict.
+    memo_pair_res = MagicMock()
+    memo_pair_res.all = MagicMock(return_value=[])
+
+    queue = [
+        run_res,
+        pay_res,
+        inv_res,
+        blocking_res,
+        card_claim_res,
+        memo_pair_res,
+        credit_res,
+        bank_res,
+    ]
 
     if compliance_vendor is not False:
         v = compliance_vendor or SimpleNamespace(
