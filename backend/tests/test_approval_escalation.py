@@ -26,8 +26,8 @@ from app.services import approval_escalation
 
 
 def _fake_control_session(tenant_db_names: list[str]):
-    """Async-CM control session whose execute().all() yields (org_id, db_name)."""
-    fake_rows = [(f"org-{n}", n) for n in tenant_db_names]
+    """Async-CM control session whose execute().all() yields (org_id, db_name, settings)."""
+    fake_rows = [(f"org-{n}", n, {}) for n in tenant_db_names]
     fake_session = MagicMock()
     fake_session.execute = AsyncMock(return_value=MagicMock(all=lambda: fake_rows))
     cm = AsyncMock()
@@ -133,6 +133,10 @@ def _patch_tenant(session):
         patch.object(
             approval_escalation, "async_sessionmaker", MagicMock(return_value=lambda: session)
         ),
+        # The per-instance DB prep (invoice + approval-config read, lazy chain
+        # init) is covered against real Postgres below; these fakes model only
+        # the orchestration around `apply_escalation`.
+        patch.object(approval_escalation, "_prepare_for_escalation", AsyncMock(return_value=set())),
     )
 
 
@@ -152,6 +156,7 @@ async def test_escalate_tenant_commits_only_when_something_escalated():
         patches[0],
         patches[1],
         patches[2],
+        patches[3],
         patch.object(approval_escalation, "apply_escalation", MagicMock(side_effect=[True, False])),
     ):
         n, _failed = await approval_escalation._escalate_tenant("feoh_acme", datetime.now(UTC))
@@ -175,7 +180,7 @@ async def test_escalate_tenant_isolates_one_bad_instance_so_the_tail_still_escal
     session = _FakeTenantSession([good_a, bad, good_b])
     engine, patches = _patch_tenant(session)
 
-    def _apply(inst, *, now):
+    def _apply(inst, *, now, ineligible=()):
         if inst is bad:
             raise ValueError("malformed approval_levels")
         return True
@@ -184,6 +189,7 @@ async def test_escalate_tenant_isolates_one_bad_instance_so_the_tail_still_escal
         patches[0],
         patches[1],
         patches[2],
+        patches[3],
         patch.object(approval_escalation, "apply_escalation", MagicMock(side_effect=_apply)),
     ):
         n, failed = await approval_escalation._escalate_tenant("feoh_acme", datetime.now(UTC))
@@ -246,6 +252,7 @@ async def test_escalate_tenant_writes_audit_row_per_escalation():
         patches[0],
         patches[1],
         patches[2],
+        patches[3],
         patch.object(approval_escalation, "apply_escalation", MagicMock(return_value=True)),
         patch.object(approval_escalation, "dispatch_audit", _capture_audit),
     ):
@@ -271,6 +278,7 @@ async def test_escalate_tenant_does_not_commit_when_nothing_overdue():
         patches[0],
         patches[1],
         patches[2],
+        patches[3],
         patch.object(approval_escalation, "apply_escalation", MagicMock(return_value=False)),
     ):
         n, _failed = await approval_escalation._escalate_tenant("feoh_acme", datetime.now(UTC))
@@ -549,6 +557,7 @@ async def test_escalate_tenant_locks_one_row_at_a_time():
         patches[0],
         patches[1],
         patches[2],
+        patches[3],
         patch.object(approval_escalation, "apply_escalation", MagicMock(return_value=True)),
     ):
         n, _failed = await approval_escalation._escalate_tenant("feoh_acme", datetime.now(UTC))
@@ -575,6 +584,7 @@ async def test_escalate_tenant_releases_the_lock_when_nothing_changes():
         patches[0],
         patches[1],
         patches[2],
+        patches[3],
         patch.object(approval_escalation, "apply_escalation", MagicMock(return_value=False)),
     ):
         n, _failed = await approval_escalation._escalate_tenant("feoh_acme", datetime.now(UTC))
@@ -597,6 +607,7 @@ async def test_escalate_tenant_skips_an_instance_that_completed_under_the_lock()
         patches[0],
         patches[1],
         patches[2],
+        patches[3],
         patch.object(approval_escalation, "apply_escalation", apply_spy),
     ):
         n, _failed = await approval_escalation._escalate_tenant("feoh_acme", datetime.now(UTC))
@@ -688,3 +699,201 @@ async def test_escalate_tenant_pages_until_the_tenant_is_exhausted(realdb):
         cfg.approval_escalation_batch_size = original
 
     assert escalated == 5, "every candidate must be reached across pages"
+
+
+# ---------------------------------------------------------------------------
+# Level 0 escalates before anyone has approved.
+#
+# The chain's state — and with it level 0's `entered_at` clock — used to be
+# created only by the FIRST approval (`review.approve_invoice`). The sweep's
+# candidate query required that state, so a chain whose first approver never
+# acted (the exact case escalation exists for) was invisible to it forever:
+# level 0 could not escalate at all.
+# ---------------------------------------------------------------------------
+
+
+def _chain_snapshot(*, approver: str, target: str, hours: int = 24) -> dict:
+    return {
+        "steps": [
+            {
+                "type": "approval",
+                "enabled": True,
+                "config": {
+                    "approver_strategy": "chain",
+                    "approval_chain": [
+                        {
+                            "name": "Manager",
+                            "approver_ids": [approver],
+                            "required_approvals": 1,
+                            "escalation_hours": hours,
+                            "escalation_to_user_ids": [target],
+                        },
+                        {"name": "Director", "approver_ids": [], "required_approvals": 1},
+                    ],
+                },
+            }
+        ]
+    }
+
+
+async def _seed_unapproved_chain(
+    realdb, *, review_age_hours: int, target: str, uploaded_by: uuid.UUID | None = None
+):
+    from datetime import timedelta
+    from decimal import Decimal
+
+    from app.models.invoice import Invoice, InvoiceStatus
+    from app.models.workflow import WorkflowDefinition, WorkflowInstance, WorkflowStep
+
+    info = realdb.info("a")
+    mk = realdb.sessionmaker("a")
+    snapshot = _chain_snapshot(approver=str(uuid.uuid4()), target=target)
+    review_started = datetime.now(UTC) - timedelta(hours=review_age_hours)
+    async with mk() as s:
+        inv = Invoice(
+            organization_id=info.org_id,
+            invoice_number=f"INV-L0-{uuid.uuid4().hex[:8]}",
+            vendor_name="Acme",
+            amount=Decimal("100.00"),
+            currency="USD",
+            status=InvoiceStatus.ready_for_review,
+            uploaded_by_id=uploaded_by,
+        )
+        defn = WorkflowDefinition(organization_id=info.org_id, name="chain", steps_config=snapshot)
+        s.add_all([inv, defn])
+        await s.flush()
+        inst = WorkflowInstance(
+            definition_id=defn.id,
+            invoice_id=inv.id,
+            state="active",
+            state_data=None,  # nobody has approved yet — no chain state
+            steps_config_snapshot=snapshot,
+        )
+        s.add(inst)
+        await s.flush()
+        s.add(
+            WorkflowStep(
+                instance_id=inst.id,
+                step_number=1,
+                step_type="approval",
+                created_at=review_started,
+            )
+        )
+        await s.commit()
+        return inst.id, review_started
+
+
+async def test_level_zero_escalates_before_any_approval(realdb):
+    from app.models.workflow import WorkflowInstance
+    from app.services.approval_chain import get_chain_progress
+    from app.services.approval_escalation import _escalate_tenant
+
+    info = realdb.info("a")
+    target = str(info.users["ap_clerk"])
+    inst_id, review_started = await _seed_unapproved_chain(
+        realdb, review_age_hours=48, target=target
+    )
+
+    escalated, failed = await _escalate_tenant(info.db_name, datetime.now(UTC), org_id=info.org_id)
+    assert (escalated, failed) == (1, 0)
+
+    async with realdb.sessionmaker("a")() as s:
+        inst = await s.get(WorkflowInstance, inst_id)
+    chain = get_chain_progress(inst)
+    assert chain["current_level"] == 0
+    level0 = chain["levels"][0]
+    assert target in level0["approver_ids"]
+    # The clock is the time the invoice entered review, not the sweep's now.
+    assert datetime.fromisoformat(level0["entered_at"]) == review_started
+    # Routing is the same resolution the first approval would have done.
+    assert [lvl["name"] for lvl in chain["levels"]] == ["Manager", "Director"]
+
+
+async def test_level_zero_not_yet_due_leaves_the_chain_uninitialised(realdb):
+    """Nothing is due, so nothing is written — the chain stays lazily created by
+    the first approval exactly as before."""
+    from app.models.workflow import WorkflowInstance
+    from app.services.approval_escalation import _escalate_tenant
+
+    info = realdb.info("a")
+    inst_id, _ = await _seed_unapproved_chain(
+        realdb, review_age_hours=1, target=str(info.users["ap_clerk"])
+    )
+
+    escalated, failed = await _escalate_tenant(info.db_name, datetime.now(UTC), org_id=info.org_id)
+    assert (escalated, failed) == (0, 0)
+    async with realdb.sessionmaker("a")() as s:
+        inst = await s.get(WorkflowInstance, inst_id)
+    assert not (inst.state_data or {}).get("approval_levels")
+
+
+async def test_escalation_never_targets_the_invoices_uploader(realdb):
+    """The uploader is refused by segregation of duties at approval time, so the
+    sweep must not make them a level's approver (nor notify them to approve).
+    Seeded with the chain ALREADY initialised so this fails on the segregation
+    filter alone, independent of the level-0 fix above."""
+    from datetime import timedelta
+    from decimal import Decimal
+
+    from app.models.invoice import Invoice, InvoiceStatus
+    from app.models.notification import Notification
+    from app.models.workflow import WorkflowDefinition, WorkflowInstance
+    from app.services.approval_escalation import _escalate_tenant
+
+    info = realdb.info("a")
+    uploader = info.users["ap_clerk"]
+    mk = realdb.sessionmaker("a")
+    entered = (datetime.now(UTC) - timedelta(hours=48)).isoformat()
+    async with mk() as s:
+        inv = Invoice(
+            organization_id=info.org_id,
+            invoice_number="INV-ESC-SOD",
+            vendor_name="Acme",
+            amount=Decimal("100.00"),
+            status=InvoiceStatus.ready_for_review,
+            uploaded_by_id=uploader,
+        )
+        defn = WorkflowDefinition(organization_id=info.org_id, name="def", steps_config={})
+        s.add_all([inv, defn])
+        await s.flush()
+        inst = WorkflowInstance(
+            definition_id=defn.id,
+            invoice_id=inv.id,
+            state="active",
+            state_data={
+                "approval_levels": {
+                    "current_level": 0,
+                    "levels": [
+                        {
+                            "parallel_mode": "all",
+                            "escalation_hours": 24,
+                            "escalation_to_user_ids": [str(uploader)],
+                            "entered_at": entered,
+                            "approver_ids": [str(uuid.uuid4())],
+                            "approvals": [],
+                        }
+                    ],
+                }
+            },
+        )
+        s.add(inst)
+        await s.commit()
+        inst_id = inst.id
+
+    escalated, failed = await _escalate_tenant(info.db_name, datetime.now(UTC), org_id=info.org_id)
+    assert (escalated, failed) == (0, 0)
+
+    async with mk() as s:
+        inst = await s.get(WorkflowInstance, inst_id)
+        notes = (
+            (
+                await s.execute(
+                    select(Notification).where(Notification.recipient_user_id == uploader)
+                )
+            )
+            .scalars()
+            .all()
+        )
+    level = inst.state_data["approval_levels"]["levels"][0]
+    assert str(uploader) not in level["approver_ids"]
+    assert notes == []

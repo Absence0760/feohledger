@@ -550,3 +550,99 @@ def test_apply_escalation_all_mode_never_makes_level_harder_to_satisfy():
     assert len(after_outstanding) <= len(before_outstanding)
     assert "a" not in after_outstanding
     assert "b" not in after_outstanding
+
+
+# ---------------------------------------------------------------------------
+# Escalation must never hand a level to someone who cannot approve it. Two
+# refusals apply at approval time: segregation of duties (the payable's
+# implicated actors) and the cross-level guard in `advance_approval_chain` (one
+# person per level). A target who trips either is not an approver at all, and in
+# 'all' mode substituting them in turned a stuck level into a permanently
+# UNCLEARABLE one — the sweep is idempotent, so it never tried again.
+# ---------------------------------------------------------------------------
+
+
+def _overdue_chain(inst, levels: list[dict], *, current: int = 0) -> None:
+    from app.services.approval_chain import init_chain_state
+
+    init_chain_state(inst, levels)
+    state = inst.state_data["approval_levels"]
+    state["current_level"] = current
+    state["levels"][current]["entered_at"] = (datetime.now(UTC) - timedelta(hours=5)).isoformat()
+
+
+def test_apply_escalation_all_mode_skips_an_earlier_level_approver():
+    """'x' cleared level 0, so `advance_approval_chain` refuses them at level 1.
+    Substituting them in as level 1's only outstanding approver would make the
+    level impossible to satisfy — the escalation must not happen."""
+    from app.services.approval_chain import apply_escalation
+
+    inst = _instance()
+    _overdue_chain(
+        inst,
+        [
+            {"name": "L0", "approver_ids": ["x"]},
+            {
+                "name": "L1",
+                "approver_ids": ["a", "b"],
+                "parallel_mode": "all",
+                "escalation_hours": 4,
+                "escalation_to_user_ids": ["x"],
+            },
+        ],
+        current=1,
+    )
+    inst.state_data["approval_levels"]["levels"][0]["approvals"].append(
+        {"user_id": "x", "at": datetime.now(UTC).isoformat()}
+    )
+
+    assert apply_escalation(inst) is False
+    level = inst.state_data["approval_levels"]["levels"][1]
+    assert level["approver_ids"] == ["a", "b"]
+    assert level["escalations"] == []
+
+
+def test_apply_escalation_never_adds_an_ineligible_target():
+    """An implicated actor (the uploader, say) is filtered out of the targets;
+    the eligible ones still land, in both modes."""
+    from app.services.approval_chain import apply_escalation
+
+    for mode in ("any", "all"):
+        inst = _instance()
+        _overdue_chain(
+            inst,
+            [
+                {
+                    "name": "L",
+                    "approver_ids": ["a"],
+                    "parallel_mode": mode,
+                    "escalation_hours": 4,
+                    "escalation_to_user_ids": ["uploader", "esc-1"],
+                }
+            ],
+        )
+        assert apply_escalation(inst, ineligible={"uploader"}) is True
+        level = inst.state_data["approval_levels"]["levels"][0]
+        assert "uploader" not in level["approver_ids"], mode
+        assert "esc-1" in level["approver_ids"], mode
+        assert level["escalations"][-1]["added_user_ids"] == ["esc-1"], mode
+
+
+def test_apply_escalation_is_a_no_op_when_every_target_is_ineligible():
+    from app.services.approval_chain import apply_escalation
+
+    inst = _instance()
+    _overdue_chain(
+        inst,
+        [
+            {
+                "name": "L",
+                "approver_ids": ["a", "b"],
+                "parallel_mode": "all",
+                "escalation_hours": 4,
+                "escalation_to_user_ids": ["uploader"],
+            }
+        ],
+    )
+    assert apply_escalation(inst, ineligible={"uploader"}) is False
+    assert inst.state_data["approval_levels"]["levels"][0]["approver_ids"] == ["a", "b"]
