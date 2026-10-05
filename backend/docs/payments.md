@@ -638,6 +638,14 @@ the money already moved on that rail, and an ACH run would move it again.
 The exit is cancelling the card, which vacates the slot the index and this gate
 share.
 
+### Voiding a settled payment reverses the discount it captured
+
+When the voided payment was `completed` and had captured an early-pay
+`DiscountOffer`, the void moves that offer back to `accepted` in the same
+transaction and audits `discount_offer.capture_reversed` — nothing was paid,
+so nothing was saved, and a re-payment at the discounted payoff captures it
+again. See [dynamic-discounting.md](dynamic-discounting.md) § Capture.
+
 ### Voiding a card payment cancels the card
 
 `POST /payments/{id}/void` on a `virtual_card` payment also closes the card at

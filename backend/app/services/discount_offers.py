@@ -444,6 +444,27 @@ def mark_captured(offer, *, captured_amount: Decimal, now: datetime) -> None:
     offer.status = OFFER_STATUS_CAPTURED
 
 
+def reverse_capture(offer) -> Decimal:
+    """Undo :func:`mark_captured`: ``captured`` → ``accepted``, returning the
+    savings that are no longer realized.
+
+    A capture is savings realized ON a settlement. When that settlement is
+    voided the invoice goes back to ``approved`` and nothing was paid, so
+    nothing was saved — the offer returns to the state it was in before the
+    payment (the discount is still agreed; it is simply not yet taken), which
+    is also what lets a re-payment at the discounted payoff capture it again.
+
+    Raises ``ValueError`` if the offer is not currently ``captured``.
+    """
+    if offer.status != OFFER_STATUS_CAPTURED:
+        raise ValueError(f"cannot reverse an offer in status {offer.status!r} (must be 'captured')")
+    reversed_amount = _q_money(Decimal(offer.captured_amount or 0))
+    offer.captured_amount = None
+    offer.captured_at = None
+    offer.status = OFFER_STATUS_ACCEPTED
+    return reversed_amount
+
+
 def expire_if_past(offer, *, as_of: date) -> bool:
     """Materialize :func:`has_lapsed` onto the row: ``offered`` → ``expired``.
 

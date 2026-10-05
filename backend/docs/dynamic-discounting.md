@@ -247,7 +247,8 @@ down, and must report an unavailable probe.
 | `GET /dashboard` | all four | captured / missed / capture-rate / open-offers / projected-savings rollup |
 
 Every mutation writes an audit row (`discount_offer.created` / `.accepted` /
-`.declined` / `.bulk_created`; the sweep writes `.auto_accepted`). Reads are
+`.declined` / `.bulk_created`; the sweep writes `.auto_accepted`; settlement
+writes `.captured` and a payment void `.capture_reversed`). Reads are
 entity-scoped; lifecycle guards return `409`. Percent / ROI fields serialize as
 JSON **numbers** (matching the frontend `number`-typed contract) while staying
 `Decimal` in Python.
@@ -430,6 +431,30 @@ and swallowed, never the reason a payment that DID settle fails to record
 that it settled, or the reason a webhook delivery 5xxs and gets needlessly
 retried.
 
+**One settlement realizes at most one discount.** Nothing stops two
+`accepted` offers existing on one invoice (a supplier re-sends an offer and
+both are accepted), and two with the same tier share one discounted payoff.
+The vendor was short-paid that discount once, so the scan captures the first
+match — earliest `accepted_at`, `id` as the tiebreak — and stops. Capturing
+every match used to book the savings once per offer: a $20 deduction reported
+as $40 captured.
+
+**A void un-realizes the capture.** `POST /api/payments/{id}/void` returns the
+invoice to `approved` — nothing was paid, so nothing was saved — but the offer
+used to stay `captured`, so the dashboard reported savings on an unpaid invoice
+and a re-payment at the discounted payoff could capture nothing.
+`discount_capture.reverse_captures_for_voided_payment` now moves the offer back
+to `accepted` (`discount_offers.reverse_capture`, clearing `captured_amount` /
+`captured_at`) and writes a `discount_offer.capture_reversed` audit row carrying
+`payment_id` and `reversed_amount`. `DiscountOffer` holds no payment id, so
+attribution is by elimination and both conditions must hold: the voided payment
+was `completed` (capture only runs there), and no **other** `completed` payment
+remains on the invoice (if one does, the capture may be its, and the offer is
+left alone rather than guessed at). Unlike the capture leg this one is **not**
+best-effort — it is a pure DB write in the void's own transaction, and a void
+that cannot reverse the savings should fail rather than leave the dashboard
+wrong.
+
 **`GET /api/dashboard`'s `discount_capture` KPI is a different feature and is
 NOT affected by this.** It rolls up `PaymentSchedule.discount_percent` /
 `discount_date` — the *static* "2/10 net 30" term captured at invoice
@@ -539,7 +564,10 @@ portal nav.
   offer (explicit `currency` diverging from its own invoice) does NOT falsely
   capture even when the numbers numerically coincide; repeat calls to
   `capture_offers_for_settled_payment` are idempotent (no double-count, no
-  error on an already-`captured` offer).
+  error on an already-`captured` offer); one settlement captures only one of
+  two same-tier accepted offers; and voiding the settling payment reverses the
+  capture (offer back to `accepted`, `.capture_reversed` audited, dashboard
+  back to zero) while a void of a never-settled payment reverses nothing.
 - `frontend/tests-e2e/discounts/money-path.spec.ts` — live-stack e2e asserting
   the exact savings/ROI/APR Decimal values, best-vs-explicit tier selection,
   accept idempotency (double-accept is a safe 409, no double-count), the
