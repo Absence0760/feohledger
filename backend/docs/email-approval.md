@@ -109,7 +109,10 @@ why (e.g. "this invoice requires CFO approval — please sign in").
   Reject link, and once the supplier resubmitted, the unused Approve link from
   the superseded email still approved the reworked invoice. A token minted
   without a pair (pre-`pid`, or a direct `build_action_token` call) falls back
-  to its `jti`. A refused attempt (segregation, CFO gate, wrong status…)
+  to its `jti` — so links already sitting in inboxes when this shipped keep the
+  old per-link behaviour, and the replay window, until they expire
+  (`FEOH_EMAIL_ACTION_TTL_HOURS`, default 7 days). Nothing to do but wait one
+  TTL; every link minted since carries a `pid`. A refused attempt (segregation, CFO gate, wrong status…)
   releases the pair, so the reviewer can still use the other link.
 
 ## The email link

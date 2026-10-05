@@ -673,6 +673,9 @@ def _route_chain(
         reporting_gate_amount(invoice, org_settings=org_settings),
         invoice_attrs=invoice_routing_attrs(invoice),
     )
+    # Identity, not equality: two configured levels can be equal dicts.
+    # `resolve_applicable_levels` returns the very objects it was given (pinned
+    # by `test_route_chain_indices_track_the_configured_levels`).
     routing = [i for i, cfg in enumerate(configured) if any(cfg is a for a in applicable)]
     return applicable, routing
 
@@ -720,16 +723,26 @@ def ensure_chain_routed(
     if routing == old_routing:
         return
 
-    entered_raw = old_levels[0].get("entered_at") if old_levels else None
-    try:
-        entered_at = datetime.fromisoformat(entered_raw) if entered_raw else None
-    except ValueError:
-        entered_at = None
+    # Level 0's clock carries over only when level 0 is still the same
+    # configured level. A level that becomes the head because the old head was
+    # routed away has not been waiting at all — inheriting the old clock would
+    # let the next sweep escalate it at once — so it starts fresh.
+    entered_at = None
+    if old_levels and old_routing and routing and old_routing[0] == routing[0]:
+        entered_raw = old_levels[0].get("entered_at")
+        try:
+            entered_at = datetime.fromisoformat(entered_raw) if entered_raw else None
+        except ValueError:
+            entered_at = None
 
     state = copy.deepcopy(instance.state_data or {})
     clear_chain_state(state)
     instance.state_data = state
     if not applicable:
+        # The chain goes, escalated approvers and history with it: the invoice
+        # is single-level, exactly as it would have been had the sweep never
+        # run. The sweep's `invoice.approval_escalated` audit row is separate
+        # and immutable, so the trail of what happened survives.
         return
     init_chain_state(instance, applicable, entered_at=entered_at, routing=routing)
 
