@@ -790,7 +790,9 @@ async def test_email_otp_keyspace_isolated_from_employee(monkeypatch):
             return self.store.get(key)
 
         async def delete(self, key):
-            self.store.pop(key, None)
+            # Real Redis DEL returns the number of keys removed; the email-OTP
+            # single-use claim reads it.
+            return 0 if self.store.pop(key, None) is None else 1
 
     fake = _FakeRedis()
     monkeypatch.setattr("app.services.mfa.get_redis", AsyncMock(return_value=fake))

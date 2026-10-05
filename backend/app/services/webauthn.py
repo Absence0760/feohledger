@@ -272,8 +272,9 @@ async def finish_registration(
     """
     r = await get_redis()
     key = _redis_key(_REG_CHALLENGE_PREFIX, user_id)
-    stored = await r.get(key)
-    await r.delete(key)  # single-use: consume even on the failure path
+    # Single-use, consumed even on the failure path — in ONE command. A GET then
+    # a DELETE let two overlapping requests both read the challenge.
+    stored = await r.getdel(key)
     if not stored:
         raise WebAuthnError("Registration challenge expired or missing")
     expected_challenge = _decode_challenge(stored, rp)
@@ -383,8 +384,9 @@ async def finish_authentication(
     """
     r = await get_redis()
     key = _assertion_challenge_key(user_id, purpose=purpose, operation=operation)
-    stored = await r.get(key)
-    await r.delete(key)
+    # GETDEL, not GET then DELETE: see `finish_registration`. A step-up
+    # assertion has no later single-use claim to fall back on.
+    stored = await r.getdel(key)
     if not stored:
         raise WebAuthnError("Authentication challenge expired or missing")
     expected_challenge = _decode_challenge(stored, rp)

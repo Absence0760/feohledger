@@ -58,6 +58,11 @@ class _FakeRedis:
     async def delete(self, key):
         self.store.pop(key, None)
 
+    async def getdel(self, key):
+        value = await self.get(key)
+        self.store.pop(key, None)
+        return value
+
 
 @pytest.fixture
 def fake_redis(monkeypatch):

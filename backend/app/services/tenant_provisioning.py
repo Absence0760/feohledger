@@ -24,6 +24,7 @@ from app.models import Base
 from app.models.organization import Organization
 from app.models.user import Role, User, UserRole
 from app.services.billing.plan_catalog import ensure_plan_catalog, ensure_subscription
+from app.utils.emails import normalize_email
 from app.utils.passwords import hash_password
 from app.utils.slug import validate_slug_format
 
@@ -342,7 +343,8 @@ async def _provision_into(
         )
         user = User(
             id=user_id,
-            email=admin_email,
+            # Normalized like every other `users.email` write (`utils/emails`).
+            email=normalize_email(admin_email),
             full_name=admin_name,
             hashed_password=await hash_password(admin_password),
             is_active=True,
