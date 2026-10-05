@@ -81,8 +81,13 @@ automated posts and is not produced by this slice.
 ]
 ```
 
-`file_url` is built by the route (it differs between the AP and portal
-surfaces); the portal variant is `/api/portal/invoices/{id}/chat/file/{key}`.
+The stored `file_url` is **not** what either surface serves. Both message
+serializers rebuild it from `file_key` for the surface doing the READING
+(`supplier_chat.attachment_url`): `/api/invoices/{id}/chat/file/{key}` on the AP
+side, `/api/portal/invoices/{id}/chat/file/{key}` on the portal. Echoing the
+stored one handed each surface the poster's route, which the reader's JWT is
+refused on (decisions §226). The stored value is the fallback only for a legacy
+attachment with no `file_key`.
 
 ### `mentions` JSONB shape (list of id strings)
 
@@ -154,9 +159,13 @@ anything else raises and the route returns `400`.
 The leading `<org_id>` segment is the **cross-tenant download gate**, but the
 two surfaces enforce it at different granularities:
 
-- **AP side** (`/invoices/chat/file/{key}`, any authed employee): the key's
-  first segment must equal `user.organization_id`. Org-level is correct here —
-  AP staff legitimately see every invoice's chat in their org.
+- **AP side** (`/invoices/{invoice_id}/chat/file/{key}` — what every AP
+  `file_url` names — and the key-only `/invoices/chat/file/{key}`, any authed
+  employee): `api/file_proxy` parses the invoice id out of the key, requires the
+  org segment to be the caller's, and resolves that invoice **within the
+  selected entity** — with subsidiary B selected, A's attachment is a 404. The
+  invoice-bound route also requires the key's invoice to be the path's, so a
+  visible invoice id can't launder another invoice's key (decisions §226).
 - **Portal side** (`/portal/invoices/{invoice_id}/chat/file/{key}`, vendor):
   the key must start with `"<inv.organization_id>/chat/<inv.id>/"` — i.e. it must
   belong to the **ownership-checked invoice**, not merely share the tenant's
@@ -186,7 +195,8 @@ helpers) lives in `services/supplier_chat.py`.
 | POST | `/invoices/{id}/chat/attachments` | any authed | multipart `file` (+ optional `body`, `mention_user_ids`, `template_key` form fields) | `ChatMessageResponse` (201) |
 | POST | `/invoices/{id}/chat/resolve` | `admin` / `ap_manager` / `cfo` | — | `ChatThreadResponse` (200) |
 | POST | `/invoices/{id}/chat/reopen` | `admin` / `ap_manager` / `cfo` | — | `ChatThreadResponse` (200) |
-| GET | `/invoices/chat/file/{file_key:path}` | any authed | — | bytes (200) / 404 |
+| GET | `/invoices/{id}/chat/file/{file_key:path}` | any authed (entity-scoped) | — | bytes (200) / 404 |
+| GET | `/invoices/chat/file/{file_key:path}` | any authed (entity-scoped) | — | bytes (200) / 404 |
 | GET | `/invoices/chat/templates` | any authed | — | `list[ChatTemplate]` (200) |
 | GET | `/invoices/chat/mentionable-users` | any authed | — | `list[{id, full_name, is_active}]` (200) |
 

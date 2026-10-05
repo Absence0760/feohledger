@@ -155,7 +155,7 @@ async def receive_peppol_message(
     from app.database import _make_tenant_url
     from app.models.entity import Entity
     from app.services.extraction_dispatch import dispatch_extraction
-    from app.services.storage import _put_object
+    from app.services.storage import _put_object, invoice_file_url
 
     tenant_engine = create_async_engine(_make_tenant_url(org.db_name), pool_size=1, max_overflow=0)
     tenant_factory = async_sessionmaker(tenant_engine, expire_on_commit=False)
@@ -282,9 +282,7 @@ async def receive_peppol_message(
             file_key = f"{org.id}/{invoice_id}/peppol-inbound.xml"
             await _put_object(file_key, message.payload, "application/xml")
             invoice.file_key = file_key
-            invoice.file_url = (
-                f"{settings.s3_endpoint_url.rstrip('/')}/{settings.s3_bucket}/{file_key}"
-            )
+            invoice.file_url = invoice_file_url(file_key)
 
             # 7. Audit — PII-free details only (scheme/message-id/doc-type).
             await dispatch_audit(

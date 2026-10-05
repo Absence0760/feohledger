@@ -630,6 +630,59 @@ async def test_ap_message_email_gated_by_notifications_flag(realdb, monkeypatch)
     assert sent == []
 
 
+async def test_attachment_url_is_built_for_the_surface_reading_it(realdb):
+    """Each surface sees a URL it can actually fetch, whoever posted the file.
+
+    The persisted ``file_url`` was echoed verbatim, so it named the POSTING
+    surface's route: a supplier's attachment reached the AP modal as a
+    ``/api/portal/...`` URL an employee JWT is refused on, an AP attachment
+    reached the portal as an ``/api/invoices/...`` URL a vendor JWT is refused
+    on — and that AP URL wasn't even a route (``/api/invoices/{id}/chat/file``
+    didn't exist), so AP-side downloads 404'd for everyone. The URL is now
+    rebuilt from ``file_key`` per surface on read (decisions §226).
+    """
+    mk = realdb.sessionmaker(TENANT)
+    org_id = realdb.info(TENANT).org_id
+    vendor_id = await _add_vendor(mk, org_id)
+    vu_id = await _add_vendor_user(mk, vendor_id)
+    invoice_id = await _add_invoice(mk, org_id, vendor_id=vendor_id)
+
+    async with _portal_client(realdb, vu_id, vendor_id) as p:
+        up = await p.post(
+            f"/api/portal/invoices/{invoice_id}/chat/attachments",
+            files={"file": ("vendor.pdf", b"%PDF-1.4 from vendor", "application/pdf")},
+        )
+        assert up.status_code == 201, up.text
+
+    async with realdb.client(key=TENANT, role="ap_manager") as c:
+        up = await c.post(
+            f"/api/invoices/{invoice_id}/chat/attachments",
+            files={"file": ("ap.pdf", b"%PDF-1.4 from ap", "application/pdf")},
+        )
+        assert up.status_code == 201, up.text
+
+        thread = (await c.get(f"/api/invoices/{invoice_id}/chat")).json()
+        ap_urls = [a["file_url"] for m in thread["messages"] for a in m["attachments"]]
+        assert len(ap_urls) == 2
+        for url in ap_urls:
+            assert url.startswith(f"/api/invoices/{invoice_id}/chat/file/{org_id}/chat/")
+            dl = await c.get(url)
+            assert dl.status_code == 200, (url, dl.status_code)
+        assert {(await c.get(u)).content for u in ap_urls} == {
+            b"%PDF-1.4 from vendor",
+            b"%PDF-1.4 from ap",
+        }
+
+    async with _portal_client(realdb, vu_id, vendor_id) as p:
+        thread = (await p.get(f"/api/portal/invoices/{invoice_id}/chat")).json()
+        portal_urls = [a["file_url"] for m in thread["messages"] for a in m["attachments"]]
+        assert len(portal_urls) == 2
+        for url in portal_urls:
+            assert url.startswith(f"/api/portal/invoices/{invoice_id}/chat/file/")
+            dl = await p.get(url)
+            assert dl.status_code == 200, (url, dl.status_code)
+
+
 async def test_portal_attachment_upload_and_download(realdb):
     mk = realdb.sessionmaker(TENANT)
     org_id = realdb.info(TENANT).org_id

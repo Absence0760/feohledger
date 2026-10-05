@@ -268,14 +268,28 @@ NULL, as requisitions and intake already did. Guards:
 `backend/tests/test_entity_scope_by_id_sweep.py` (shared probe:
 `tests/entity_scope_probe.py`).
 
-Three families stay deliberately unscoped: **saved cash plans**
+Two families stay deliberately unscoped: **saved cash plans**
 (`cash_flow._load_saved_plan` — the `plan_id` already encodes the scope it was
-built under), **rebate confirm / mark-paid** (`cards._get_org_rebate` — an
-org-level bookkeeping action on a table with no `entity_id` of its own), and
-the **S3 file-key proxies** (`/invoices/file/…`,
-`/invoices/chat/file/…`, `/contracts/file/…`, `/expenses/receipt/…`), which
-are gated on the key's org prefix and never open the tenant DB; see
-`docs/followups.md`. Reasoning: `docs/decisions.md` §222.
+built under) and **rebate confirm / mark-paid** (`cards._get_org_rebate` — an
+org-level bookkeeping action on a table with no `entity_id` of its own).
+Reasoning: `docs/decisions.md` §222.
+
+**The S3 file-key proxies resolve the row that owns the key.**
+`/invoices/file/…`, both chat-attachment routes (`/invoices/{id}/chat/file/…`
+and the key-only `/invoices/chat/file/…`), `/contracts/file/…` and
+`/expenses/receipt/…` parse the owner id out of the key (`api/file_proxy`),
+load that invoice / contract / expense within the selected entity, and require
+the key to be the row's current file. With B selected, A's document is the same
+`404 "File not found"` as a key that names no row. Guard:
+`backend/tests/test_file_download_entity_scope.py`. Reasoning:
+`docs/decisions.md` §226.
+
+**Positive Pay generates and processes in the read scope, and files by the
+row.** `POST /positive-pay/payment-runs/{run_id}/check-issue` and
+`POST /positive-pay/{file_id}/process-return` resolve with `get_entity_id`, so
+the consolidated view reaches every subsidiary's run; the generated file takes
+the run's `entity_id` and a return's fraud_flags take the file's, never the
+default entity the consolidated view would otherwise write under (§226).
 
 ### Frontend
 

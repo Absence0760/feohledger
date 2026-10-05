@@ -16,6 +16,7 @@ from app.api.deps import (
     require_permission,
     require_roles,
 )
+from app.api.file_proxy import serve_owned_file
 from app.api.permissions import PERM_INVOICE_APPROVE
 from app.database import get_control_db
 from app.models.invoice import Invoice, InvoiceExtractionResult, InvoiceStatus
@@ -35,7 +36,7 @@ from app.services import review as review_svc
 from app.services.erp_dispatch import dispatch_erp
 from app.services.extraction_dispatch import dispatch_extraction
 from app.services.invoice_warnings import refresh_warnings
-from app.services.storage import get_file, upload_invoice_file
+from app.services.storage import upload_invoice_file
 from app.services.workflow_engine import (
     advance_workflow,
     create_workflow_instance,
@@ -728,30 +729,24 @@ async def export_invoice(
 
 
 @router.get("/file/{file_key:path}")
-async def get_invoice_file(file_key: str, user: User = Depends(get_current_user)):
-    """Proxy the file from S3 to the browser.
+async def get_invoice_file(
+    file_key: str,
+    db: AsyncSession = Depends(get_tenant_db),
+    user: User = Depends(get_current_user),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
+):
+    """Proxy an invoice's source document from S3 to the browser.
 
-    File keys are stamped as ``<org_id>/<invoice_id>/<filename>`` at
-    upload time. The user must belong to the org whose UUID is the
-    first segment — otherwise an authenticated user in tenant A
-    could read tenant B's files by passing a crafted key. UUIDs are
-    long enough to resist guessing but the explicit check is the
-    actual gate (and forensic evidence in audit logs).
+    The key is not the authorisation: ``api/file_proxy`` parses the owning
+    invoice out of ``<org_id>/<invoice_id>/<filename>``, resolves it within the
+    caller's selected entity, and requires the key to be that invoice's CURRENT
+    ``file_key``. Wrong org, wrong layout, another subsidiary's invoice, a
+    superseded object and a missing one are all the same 404, so the response
+    can't enumerate keys (``docs/decisions.md`` §226).
     """
-    from fastapi.responses import Response
-
-    prefix = file_key.split("/", 1)[0]
-    if prefix != str(user.organization_id):
-        # Same 404 either way — leaking "wrong org" vs "no such file"
-        # would help an attacker enumerate prefixes by response code.
-        raise HTTPException(status_code=404, detail="File not found")
-
-    try:
-        content, content_type = await get_file(file_key)
-    except Exception:
-        raise HTTPException(status_code=404, detail="File not found")
-
-    return Response(content=content, media_type=content_type)
+    return await serve_owned_file(
+        db, file_key, org_id=user.organization_id, entity_id=entity_id, kind="invoice"
+    )
 
 
 # ---------- Read endpoints ----------

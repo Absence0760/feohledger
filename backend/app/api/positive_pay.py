@@ -82,6 +82,7 @@ from app.tenant import (
     get_tenant,
     get_tenant_db,
     get_write_entity_id,
+    resolve_default_entity_id,
 )
 from app.utils.dates import utc_today
 from app.utils.search import ilike_contains
@@ -211,7 +212,7 @@ async def generate_check_issue(
     org: Organization = Depends(get_tenant),
     user: User = Depends(require_roles(*_WRITE_ROLES)),
     org_id: uuid.UUID = Depends(get_org_id),
-    entity_id: uuid.UUID = Depends(get_write_entity_id),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
     """Generate the check-issue Positive Pay file for a payment run.
 
@@ -219,6 +220,13 @@ async def generate_check_issue(
     exists for ``(run_id, bank_format)`` it is returned with 200 (no second
     file). Otherwise the run's cheque payments are rendered via the requested
     bank formatter, stored in MinIO, and a metadata row is persisted (201).
+
+    The run is a by-id READ, so it resolves within the selected entity like
+    every other by-id route — the consolidated view reaches every
+    subsidiary's run. The file it produces belongs to the RUN's entity, not
+    the caller's view: it lists that subsidiary's cheques, so filing it under
+    the default entity because "All entities" happened to be selected would
+    hide it from the subsidiary it describes (``docs/decisions.md`` §226).
     """
     bank_format = body.bank_format or "csv"
 
@@ -272,9 +280,13 @@ async def generate_check_issue(
     # since-removed format name is still returned rather than 422'd.)
     formatter = _require_formatter(bank_format)
 
+    # A run always carries its entity (EntityMixin backfills to the default);
+    # the fallback only covers a row that somehow predates that.
+    file_entity_id = run.entity_id or await resolve_default_entity_id(db)
+
     company_name, account_number = _resolve_company_account(org)
     items, total, mapping, currency = await service.build_check_issue_items(
-        db, run=run, entity_id=entity_id, account_number=account_number
+        db, run=run, entity_id=run.entity_id, account_number=account_number
     )
 
     ctx = FormatterContext(
@@ -294,7 +306,7 @@ async def generate_check_issue(
     row = PositivePayFile(
         id=file_id,
         organization_id=org_id,
-        entity_id=entity_id,
+        entity_id=file_entity_id,
         payment_run_id=run_id,
         file_type=FILE_TYPE_CHECK_ISSUE,
         bank_format=bank_format,
@@ -628,7 +640,7 @@ async def process_return(
     org: Organization = Depends(get_tenant),
     user: User = Depends(require_roles(*_WRITE_ROLES)),
     org_id: uuid.UUID = Depends(get_org_id),
-    entity_id: uuid.UUID = Depends(get_write_entity_id),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
     """Process the bank's return against a check-issue file.
 
@@ -643,6 +655,11 @@ async def process_return(
     (a cheque we never wrote) have no invoice and become a standalone
     ``invoice_id=None`` fraud_flag in the queue. The file flips to
     ``returned_processed`` with a PII-free summary in ``meta``.
+
+    The file resolves within the selected entity (the consolidated view
+    reaches every subsidiary's), and each fraud_flag it raises is filed under
+    the FILE's entity — the subsidiary whose cheques were presented — not the
+    caller's view.
     """
     row = await _get_scoped_file(db, file_id, entity_id)
     if row.file_type != FILE_TYPE_CHECK_ISSUE:
@@ -726,7 +743,7 @@ async def process_return(
             description=description,
             organization_id=org_id,
             invoice_id=invoice_id,
-            entity_id=entity_id,
+            entity_id=row.entity_id,
             # The BANK raised this: the return file says a cheque was altered,
             # stale-dated or never issued. The operator who imports the file is
             # not the actor the flag asks about, and stamping them would bar the

@@ -494,6 +494,120 @@ async def test_summary_is_whole_set_counts_items_and_returns(realdb):
         await _clear_settings(realdb, org_id)
 
 
+async def _move_run_to_entity(mk, run_id: str, invoice_id: str, entity_id: str) -> None:
+    """Re-home a run, its payments and its invoice under ``entity_id``."""
+    from sqlalchemy import update
+
+    ent = uuid.UUID(entity_id)
+    async with mk() as s:
+        await s.execute(
+            update(PaymentRun).where(PaymentRun.id == uuid.UUID(run_id)).values(entity_id=ent)
+        )
+        await s.execute(
+            update(Payment).where(Payment.payment_run_id == uuid.UUID(run_id)).values(entity_id=ent)
+        )
+        await s.execute(
+            update(Invoice).where(Invoice.id == uuid.UUID(invoice_id)).values(entity_id=ent)
+        )
+        await s.commit()
+
+
+async def test_consolidated_view_reaches_a_subsidiarys_run_and_files_under_it(realdb):
+    """The run and file lookups are by-id READS, so they resolve within the
+    selected entity — and the consolidated view reaches every subsidiary.
+
+    Both used to scope by the WRITE entity, which maps "All entities" to the
+    tenant's default: subsidiary B's run was a 404 from the consolidated view,
+    and its return file could only be processed from B's own view. The file a
+    run produces is stamped with the RUN's entity (it lists that subsidiary's
+    cheques), and every fraud_flag a return raises is filed under the FILE's
+    entity — never the default because of the view it was generated from
+    (decisions §226)."""
+    from app.models.positive_pay import PositivePayFile
+    from tests.entity_scope_probe import two_entities
+
+    mk = realdb.sessionmaker("a")
+    org_id = realdb.info("a").org_id
+    await _set_check_account(realdb, org_id)
+    try:
+        async with realdb.client(key="a", role="admin") as admin:
+            default_id, sub_id = await two_entities(admin, slug=f"pp-{uuid.uuid4().hex[:8]}")
+
+        vendor_id = await _add_vendor(mk, org_id)
+        invoice_id = await _add_invoice(mk, org_id, vendor_id=vendor_id, invoice_number="PPE-1")
+        run_id = await _add_check_run(mk, org_id, invoice_id=invoice_id, check_number="PPE001")
+        await _move_run_to_entity(mk, run_id, invoice_id, sub_id)
+
+        gen_path = f"/api/positive-pay/payment-runs/{run_id}/check-issue"
+        async with realdb.client(key="a", role="ap_manager") as c:
+            # The default entity's view can't see B's run — the same 404 as a
+            # run that doesn't exist.
+            hidden = await c.post(gen_path, json={}, headers={"X-Entity-ID": default_id})
+            assert hidden.status_code == 404
+            ghost = await c.post(
+                f"/api/positive-pay/payment-runs/{uuid.uuid4()}/check-issue",
+                json={},
+                headers={"X-Entity-ID": default_id},
+            )
+            assert hidden.json() == ghost.json()
+
+            # The consolidated view reaches it, and the file lists B's cheque.
+            gen = await c.post(gen_path, json={})
+            assert gen.status_code == 201, gen.text
+            body = gen.json()
+            assert body["item_count"] == 1
+            file_id = body["id"]
+
+            # Filed under the run's subsidiary, so B's own view lists it and
+            # the default entity's does not.
+            async with mk() as s:
+                row = (
+                    await s.execute(
+                        select(PositivePayFile).where(PositivePayFile.id == uuid.UUID(file_id))
+                    )
+                ).scalar_one()
+                assert str(row.entity_id) == sub_id
+            in_b = (await c.get("/api/positive-pay", headers={"X-Entity-ID": sub_id})).json()
+            assert file_id in {f["id"] for f in in_b["items"]}
+            in_default = (
+                await c.get("/api/positive-pay", headers={"X-Entity-ID": default_id})
+            ).json()
+            assert file_id not in {f["id"] for f in in_default["items"]}
+
+            # Return processing: the default view 404s exactly like a missing
+            # file; the consolidated view processes it.
+            ret_body = {"presented_items": [{"check_number": "PPE001", "amount": "9999.00"}]}
+            hidden_ret = await c.post(
+                f"/api/positive-pay/{file_id}/process-return",
+                json=ret_body,
+                headers={"X-Entity-ID": default_id},
+            )
+            ghost_ret = await c.post(
+                f"/api/positive-pay/{uuid.uuid4()}/process-return",
+                json=ret_body,
+                headers={"X-Entity-ID": default_id},
+            )
+            assert hidden_ret.status_code == ghost_ret.status_code == 404
+            assert hidden_ret.json() == ghost_ret.json()
+
+            ret = await c.post(f"/api/positive-pay/{file_id}/process-return", json=ret_body)
+            assert ret.status_code == 200, ret.text
+            assert ret.json()["exceptions_created"] == 1
+
+        async with mk() as s:
+            flag = (
+                await s.execute(
+                    select(APException).where(
+                        APException.invoice_id == uuid.UUID(invoice_id),
+                        APException.exception_type == "fraud_flag",
+                    )
+                )
+            ).scalar_one()
+            assert str(flag.entity_id) == sub_id
+    finally:
+        await _clear_settings(realdb, org_id)
+
+
 async def test_download_cross_tenant_404(realdb):
     mk = realdb.sessionmaker("a")
     org_id = realdb.info("a").org_id

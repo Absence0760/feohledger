@@ -351,7 +351,13 @@ Payments surface.
 - **write** (generate / process-return / delete) = `admin`, `ap_manager`
 
 Every read/write is **entity-scoped** (`X-Entity-ID` narrows to a subsidiary via
-`apply_entity_scope` / `get_entity_id` / `get_write_entity_id`).
+`apply_entity_scope` / `get_entity_id` / `get_write_entity_id`). Check-issue
+generation and return processing look their run / file up in the **read** scope
+(`get_entity_id`), so the consolidated view reaches every subsidiary's, and
+what they write follows the row rather than the view: the file is stamped with
+the run's `entity_id`, each return fraud_flag with the file's. Only the
+org-wide ACH-authorization file uses the write entity — it creates a file from
+no row (decisions §226).
 
 ### Audit actions
 
