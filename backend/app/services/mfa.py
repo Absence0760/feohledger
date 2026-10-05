@@ -348,6 +348,12 @@ async def _claim_otp(r, key: str) -> bool:
     many keys it removed, and Redis executes commands one at a time, so exactly
     one concurrent caller sees ``1``. The key is only deleted once the code has
     matched, so a wrong guess still cannot burn a legitimate user's code.
+
+    The challenge token is claimed separately, AFTER this. So a caller that wins
+    the code but loses the challenge claim (a double-submitted form) has spent
+    the code and is refused anyway, and must request a new one. That is the
+    deliberate order: claiming the challenge first would let any wrong guess
+    burn the challenge, turning every typo into a full re-login.
     """
     return bool(await r.delete(key))
 

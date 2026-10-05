@@ -52,6 +52,11 @@ class _FakeRedis:
     async def get(self, key):
         return self.store.get(key)
 
+    async def getdel(self, key):
+        value = await self.get(key)
+        await self.delete(key)
+        return value
+
     async def delete(self, key):
         # Real Redis DEL returns the number of keys removed; the email-OTP
         # single-use claim reads it.

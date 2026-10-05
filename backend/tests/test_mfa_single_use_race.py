@@ -86,6 +86,7 @@ def yielding_redis(monkeypatch):
     monkeypatch.setattr("app.services.mfa.get_redis", _get_redis)
     monkeypatch.setattr("app.redis.get_redis", _get_redis)
     monkeypatch.setattr("app.services.sso.get_redis", _get_redis)
+    monkeypatch.setattr("app.services.webauthn.get_redis", _get_redis)
     return fake
 
 
@@ -248,6 +249,52 @@ async def test_saml_relay_state_is_consumed_once_under_concurrency(yielding_redi
     results = await _race(sso.consume_saml_relay_state, "rs-1")
 
     assert sum(r is not None for r in results) == 1
+
+
+async def test_a_webauthn_step_up_challenge_is_read_by_one_ceremony_only(
+    yielding_redis, monkeypatch
+):
+    """A step-up assertion has no later single-use claim (unlike login, which
+    also has the challenge token), so the challenge read IS the replay guard.
+    Two overlapping verifies must not both get the stored challenge."""
+    from app.services import webauthn, webauthn_rp
+
+    rp = webauthn_rp.resolve_relying_party(host=None, org_settings=None)
+    user_id = uuid.uuid4()
+    await webauthn.begin_authentication(
+        user_id=user_id,
+        credentials=[],
+        purpose=webauthn.ASSERTION_PURPOSE_STEP_UP,
+        rp=rp,
+        operation="passkey_delete",
+    )
+    decoded: list[object] = []
+
+    def _spy(stored, _rp):
+        # Stop right after the challenge read: only how many callers got one
+        # matters here, not the signature verification behind it.
+        decoded.append(stored)
+        raise webauthn.WebAuthnError("stop")
+
+    monkeypatch.setattr(webauthn, "_decode_challenge", _spy)
+
+    async def _finish():
+        try:
+            await webauthn.finish_authentication(
+                user_id=user_id,
+                credential_json="{}",
+                stored_public_key="",
+                stored_sign_count=0,
+                purpose=webauthn.ASSERTION_PURPOSE_STEP_UP,
+                rp=rp,
+                operation="passkey_delete",
+            )
+        except webauthn.WebAuthnError:
+            pass
+
+    await asyncio.gather(_finish(), _finish())
+
+    assert len(decoded) == 1
 
 
 async def test_saml_handoff_is_consumed_once_under_concurrency(yielding_redis):
