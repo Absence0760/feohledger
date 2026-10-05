@@ -358,6 +358,19 @@ def compute_next_run_on(
     return candidate
 
 
+def past_end_date(template: RecurringInvoiceTemplate, run_on: date) -> bool:
+    """True when ``run_on`` falls after the template's ``end_date``.
+
+    The one predicate every generating path asks before raising a period — the
+    sweep (for a cursor written before ``PATCH`` re-anchored on ``end_date``)
+    and ``generate-now`` (which derives its period from today, never from the
+    cursor, so the cursor's own ``end_date`` cap never reached it). Status alone
+    is not the stop: a template whose ``end_date`` passed without anyone
+    calling ``/end`` stays ``active``.
+    """
+    return template.end_date is not None and run_on > template.end_date
+
+
 def current_due_run_on(
     cadence: str,
     day_of_period: int,
@@ -935,6 +948,15 @@ async def _sweep_tenant(db_name: str, today: date) -> TenantSweepOutcome:
                         continue
                     run_on = template.next_run_on
                     period_key = period_key_for(template.cadence, run_on)
+
+                    if past_end_date(template, run_on):
+                        # A cursor beyond `end_date` — written before PATCH
+                        # re-anchored on an `end_date` change. Withdraw it
+                        # rather than generate a period the template no longer
+                        # covers, or leave it to be re-selected every tick.
+                        template.next_run_on = None
+                        await db.commit()
+                        continue
 
                     reason = not_generatable_reason(template)
                     if reason is not None:
