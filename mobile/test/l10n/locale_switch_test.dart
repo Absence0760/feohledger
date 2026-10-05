@@ -4,10 +4,15 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:feohledger_mobile/l10n/gen/app_localizations.dart';
+import 'package:feohledger_mobile/l10n/invoice_status_labels.dart';
+import 'package:feohledger_mobile/models/invoice.dart';
 import 'package:feohledger_mobile/stores/locale_store.dart';
 import 'package:feohledger_mobile/utils/dates.dart';
 import 'package:feohledger_mobile/utils/format_locale.dart';
 import 'package:feohledger_mobile/utils/money.dart';
+import 'package:feohledger_mobile/widgets/bulk_action_bar.dart';
+
+import '../support/untranslated_text.dart';
 
 // End-to-end proof that the localeNotifier → MaterialApp.locale plumbing is
 // real: switching the device locale through LocaleStore must re-localize a
@@ -487,6 +492,72 @@ void main() {
     expect(
       find.text('レビュー中の請求書 7 件をスキャンしました。'),
       findsOneWidget,
+    );
+  });
+
+  testWidgets(
+      'the multi-select batch (BulkActionBar, bulk results, invoice status '
+      'names) switches with the locale', (tester) async {
+    // Guards the multi-select extraction: the shared bar rendered
+    // `N selected` / Export / Status / Delete as literals, and the bulk result
+    // lines composed their own English plurals. The bar is rendered for real
+    // (its labels are read inside the widget, so a literal there fails the
+    // en-vs-ja comparison); the result lines are composed exactly as the
+    // screens compose them.
+    final probe = Builder(
+      builder: (context) {
+        final l = AppLocalizations.of(context);
+        return Scaffold(
+          body: Column(
+            children: [
+              Text(l.bulkResultWithSkipped(l.invoicesBulkDeleted(3), 1)),
+              Text(l.invoicesBulkMoved(
+                  2, invoiceStatusLabel(l, InvoiceStatus.approved))),
+              Text(l.exceptionsBulkResolved(1)),
+            ],
+          ),
+          bottomNavigationBar: BulkActionBar(
+            selectedCount: 3,
+            onExport: () {},
+            onStatusChange: () {},
+            onDelete: () {},
+          ),
+        );
+      },
+    );
+
+    await LocaleStore.instance.setLocale(const Locale('en'));
+    await tester.pumpWidget(host(probe));
+    await tester.pump();
+    expect(find.text('3 selected'), findsOneWidget); // plural
+    expect(find.text('Deleted 3 invoices (1 skipped)'), findsOneWidget);
+    expect(find.text('Moved 2 invoices to Approved'), findsOneWidget);
+    expect(find.text('Resolved 1 exception'), findsOneWidget); // one arm
+    final english = renderedStrings(tester);
+
+    await LocaleStore.instance.setLocale(const Locale('de'));
+    await tester.pump();
+    expect(find.text('3 ausgewählt'), findsOneWidget);
+    expect(find.text('Exportieren'), findsOneWidget);
+    expect(find.text('3 Rechnungen gelöscht (1 übersprungen)'), findsOneWidget);
+    expect(find.text('2 Rechnungen auf „Freigegeben“ gesetzt'), findsOneWidget);
+
+    await LocaleStore.instance.setLocale(const Locale('fr'));
+    await tester.pump();
+    // French agrees in number on both counts, the skipped one included.
+    expect(
+      find.text('3 factures supprimées (1 élément ignoré)'),
+      findsOneWidget,
+    );
+
+    await LocaleStore.instance.setLocale(const Locale('ja'));
+    await tester.pump();
+    expect(find.text('3件を選択中'), findsOneWidget);
+    expect(find.text('2件の請求書を「承認済み」に変更しました'), findsOneWidget);
+    expectNoUntranslatedStrings(
+      english: english,
+      other: renderedStrings(tester),
+      surface: 'BulkActionBar',
     );
   });
 
