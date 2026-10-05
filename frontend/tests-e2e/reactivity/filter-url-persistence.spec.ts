@@ -51,7 +51,7 @@ const CASES: Case[] = [
 		statusChip: /^Completed/,
 		expectedStatus: 'completed',
 		before: async (page) => {
-			await page.getByRole('button', { name: /History/ }).click();
+			await page.getByRole('tab', { name: /History/ }).click();
 		},
 		expectTabParam: true
 	}

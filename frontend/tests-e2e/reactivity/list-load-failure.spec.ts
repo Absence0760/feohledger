@@ -55,7 +55,7 @@ const CASES: Case[] = [
 		notShown: /No payments match your filters/,
 		shown: /Could not load payments/,
 		before: async (page) => {
-			await page.getByRole('button', { name: /History/ }).click();
+			await page.getByRole('tab', { name: /History/ }).click();
 		}
 	},
 	{

@@ -92,7 +92,7 @@ async function mockVoid(
 
 async function openVoidDialog(page: import('@playwright/test').Page) {
 	await page.goto('/payments');
-	await page.getByRole('button', { name: 'History', exact: true }).click();
+	await page.getByRole('tab', { name: 'History', exact: true }).click();
 	// `exact` matters: the status filter chips carry a "Voided" label, and the
 	// dialog's own confirm is "Void payment".
 	await page.getByRole('button', { name: 'Void', exact: true }).first().click();

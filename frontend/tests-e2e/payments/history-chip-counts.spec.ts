@@ -52,7 +52,7 @@ function countsBody(total: number) {
 /** Switch to the History tab, where the chips render. */
 async function openHistory(page: import('@playwright/test').Page) {
 	await page.goto('/payments');
-	await page.getByRole('button', { name: 'History', exact: true }).click();
+	await page.getByRole('tab', { name: 'History', exact: true }).click();
 }
 
 const allChip = (page: import('@playwright/test').Page) =>

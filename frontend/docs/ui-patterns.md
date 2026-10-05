@@ -896,7 +896,11 @@ inherit it for free. Reuse these; don't re-solve them per page.
 - **Tabs** (`ui/Tabs.svelte`; WAI-ARIA tabs) — roving `tabindex`
   (active=0, others=-1) + Arrow/Home/End key navigation, plus the
   existing `role=tablist/tab` + `aria-selected` + `aria-controls`. The
-  caller still gives the panel `role="tabpanel"` + the matching ids.
+  caller still gives the panel `role="tabpanel"` + the matching ids. A
+  hand-rolled `<button class="tab" class:active>` bar announces as N
+  identical buttons — `/payments` and `/expenses` shipped one each until
+  2026-10-05. `src/lib/a11y/tabBar.test.ts` fails any `.tab` button outside
+  `ui/Tabs.svelte` that lacks `role="tab"` + `aria-selected`.
 - **Filter chips** (`ui/FilterChips.svelte`) — `<button aria-pressed>`
   reflects the active chip.
 - **DataTable** (`ui/DataTable.svelte`) — auto-rendered `<th>` get

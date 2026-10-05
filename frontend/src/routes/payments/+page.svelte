@@ -26,6 +26,7 @@
 	import FilterChips from '$lib/components/ui/FilterChips.svelte';
 	import DataTable from '$lib/components/ui/DataTable.svelte';
 	import Modal from '$lib/components/ui/Modal.svelte';
+	import Tabs from '$lib/components/ui/Tabs.svelte';
 	import { formatMoney, isPositiveAmount, type MoneyAmount } from '$lib/utils/money';
 	import type { MessageKey } from '$lib/i18n/messages';
 	import { compareCorridorQuotes } from '$lib/api/corridorQuotes';
@@ -197,6 +198,21 @@
 		excluded_rebate_count?: number;
 	}
 	let summary = $state<Summary | null>(null);
+
+	// The shared `<Tabs>` (WAI-ARIA tablist: role=tab + aria-selected + roving
+	// tabindex). The tab bar used to be four plain buttons whose selected state
+	// was a CSS class only, so a screen reader announced four identical buttons
+	// and never which list was showing (WCAG 4.1.2).
+	const tabBar = $derived([
+		{
+			key: 'queue',
+			label: m('payments.tab.queue'),
+			...(summary ? { count: summary.queue_count } : {})
+		},
+		{ key: 'history', label: m('payments.tab.history') },
+		{ key: 'cards', label: m('payments.tab.cards') },
+		{ key: 'runs', label: m('payments.tab.runs') }
+	]);
 
 	// Queue
 	interface QueueItem {
@@ -1783,20 +1799,22 @@
 		{/if}
 	{/if}
 
-	<nav class="tabs">
-		<button class="tab" class:active={activeTab === 'queue'} onclick={() => selectTab('queue')}>
-			{m('payments.tab.queue')} {#if summary}<span class="tab-count">{summary.queue_count}</span>{/if}
-		</button>
-		<button class="tab" class:active={activeTab === 'history'} onclick={() => selectTab('history')}>
-			{m('payments.tab.history')}
-		</button>
-		<button class="tab" class:active={activeTab === 'cards'} onclick={() => selectTab('cards')}>
-			{m('payments.tab.cards')}
-		</button>
-		<button class="tab" class:active={activeTab === 'runs'} onclick={() => selectTab('runs')}>
-			{m('payments.tab.runs')}
-		</button>
-	</nav>
+	<Tabs
+		tabs={tabBar}
+		active={activeTab}
+		onchange={(key) => selectTab(key as Tab)}
+		ariaLabel={m('payments.title')}
+		idPrefix="payments"
+	/>
+
+	<!-- One panel element for whichever tab is active, completing the pairing
+	     `<Tabs>` names in each tab's `aria-controls`. Its contents are left at
+	     their old indentation on purpose, to keep this change reviewable. -->
+	<div
+		id={`payments-panel-${activeTab}`}
+		role="tabpanel"
+		aria-labelledby={`payments-tab-${activeTab}`}
+	>
 
 	{#if activeTab === 'history'}
 		<div class="filter-row">
@@ -2473,6 +2491,7 @@
 			</div>
 		{/if}
 	{/if}
+	</div>
 </PageHeader>
 
 {#if activeRunId}
@@ -3108,52 +3127,6 @@
 		color: var(--text-muted);
 		text-transform: uppercase;
 		letter-spacing: 0.03em;
-	}
-
-	/* --- Tabs --- */
-
-	.tabs {
-		display: flex;
-		gap: 0;
-		border-bottom: 1px solid var(--border);
-		/* WCAG 1.4.10: let the tab row wrap rather than push the page wider
-		   than a narrow viewport. */
-		flex-wrap: wrap;
-	}
-
-	.tab {
-		display: flex;
-		align-items: center;
-		gap: 6px;
-		padding: 10px 20px;
-		border: none;
-		background: none;
-		color: var(--text-muted);
-		font-size: 0.88rem;
-		font-weight: 500;
-		cursor: pointer;
-		font-family: inherit;
-		border-bottom: 2px solid transparent;
-		margin-bottom: -1px;
-		transition: all 0.12s;
-	}
-
-	.tab:hover {
-		color: var(--text);
-	}
-
-	.tab.active {
-		color: var(--accent);
-		border-bottom-color: var(--accent);
-	}
-
-	.tab-count {
-		font-size: 0.72rem;
-		padding: 1px 6px;
-		border-radius: 8px;
-		background: rgba(99, 140, 255, 0.12);
-		color: var(--accent);
-		font-weight: 600;
 	}
 
 	/* --- Queue --- */

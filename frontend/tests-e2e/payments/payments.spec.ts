@@ -22,8 +22,26 @@ test.describe('/payments (acme admin)', () => {
 		expect(await labels.count()).toBeGreaterThanOrEqual(1);
 	});
 
-	test('Queue tab is active by default', async ({ page }) => {
-		await expect(page.locator('.tab', { hasText: 'Queue' })).toHaveClass(/active/);
+	test('Queue tab is active by default, and says so to assistive tech', async ({ page }) => {
+		// The selected state is exposed, not just painted: the bar used to be
+		// plain buttons with an `.active` class, announced as four identical
+		// buttons (WCAG 4.1.2). It is the shared `<Tabs>` tablist now.
+		const tablist = page.getByRole('tablist', { name: 'Payments' });
+		const queue = tablist.getByRole('tab', { name: /Queue/ });
+		await expect(queue).toHaveAttribute('aria-selected', 'true');
+		await expect(tablist.getByRole('tab', { name: 'History' })).toHaveAttribute(
+			'aria-selected',
+			'false'
+		);
+		await expect(page.getByRole('tabpanel', { name: /Queue/ })).toBeVisible();
+
+		// Arrow keys move between tabs (roving tabindex), and the panel follows.
+		await queue.focus();
+		await page.keyboard.press('ArrowRight');
+		const history = tablist.getByRole('tab', { name: 'History' });
+		await expect(history).toBeFocused();
+		await expect(history).toHaveAttribute('aria-selected', 'true');
+		await expect(page.getByRole('tabpanel', { name: 'History' })).toBeVisible();
 	});
 
 	test('History tab shows seeded payments', async ({ page }) => {

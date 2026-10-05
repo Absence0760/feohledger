@@ -93,7 +93,7 @@ test.describe('/payments virtual-card reveal', () => {
 		);
 
 		await page.goto('/payments');
-		await page.getByRole('button', { name: 'Cards', exact: true }).click();
+		await page.getByRole('tab', { name: 'Cards', exact: true }).click();
 
 		const row = page.getByRole('row', { name: /CARD-REVEAL-1/ });
 		await expect(row).toBeVisible();
@@ -132,7 +132,7 @@ test.describe('/payments virtual-card reveal', () => {
 		);
 
 		await page.goto('/payments');
-		await page.getByRole('button', { name: 'Cards', exact: true }).click();
+		await page.getByRole('tab', { name: 'Cards', exact: true }).click();
 		await page.getByRole('row', { name: /CARD-REVEAL-1/ }).getByRole('button', { name: 'Reveal' }).click();
 
 		const dialog = page.getByRole('dialog', { name: 'Card details' });

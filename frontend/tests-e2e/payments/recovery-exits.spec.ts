@@ -130,12 +130,12 @@ async function mockRuns(page: import('@playwright/test').Page, status = 'complet
 
 async function openHistory(page: import('@playwright/test').Page) {
 	await page.goto('/payments');
-	await page.getByRole('button', { name: 'History', exact: true }).click();
+	await page.getByRole('tab', { name: 'History', exact: true }).click();
 }
 
 async function openRuns(page: import('@playwright/test').Page) {
 	await page.goto('/payments');
-	await page.getByRole('button', { name: 'Runs', exact: true }).click();
+	await page.getByRole('tab', { name: 'Runs', exact: true }).click();
 }
 
 // Located by ACCESSIBLE NAME, which is each row action's `aria-label` — a
