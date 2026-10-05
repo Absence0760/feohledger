@@ -19,7 +19,7 @@ services:
     # is safe — the image is binary-compatible with the same data directory.
     # The `-pg16` suffix is what holds the Postgres major: Dependabot only
     # proposes tags of the same shape, and a major is a data-directory upgrade.
-    image: pgvector/pgvector:0.8.6-pg16@sha256:ccc6e83d6e35e931dc7c5def2022729d5a6c370318d099181995567ff1fb4d6b
+    image: pgvector/pgvector:0.8.7-pg16@sha256:7b822b0aac60967beb1ea5e576b8602c94c300a157d187f385ae3e0da199b90a
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
@@ -79,7 +79,7 @@ services:
   # (feohledger-app) and two test users (demo@acme.com, newhire@acme.com),
   # both password `demo`.
   keycloak:
-    image: quay.io/keycloak/keycloak:26.7.4@sha256:82a77884f3af238beab1e7afd63b5f530e1b5c0590bd7aa60b40a40463e29b2c
+    image: quay.io/keycloak/keycloak:26.8.0@sha256:b0f60d489d51c5d113390bdf5461d4c06e6051be026c05549f2e1e10ec352bcc
     profiles: ["idp"]
     command: ["start-dev", "--import-realm"]
     environment:
@@ -240,7 +240,7 @@ services:
   # the deploy block for NVIDIA GPU (needs nvidia-container-toolkit).
   # See backend/docs/local-ai-testing.md.
   ollama:
-    image: ollama/ollama:0.34.4@sha256:8262851b2846b87c649eddf3e76beb270c52f4d1bc94559f47efde16b0841551
+    image: ollama/ollama:0.35.0@sha256:2a6e883b917fc543389599dae79918f5cac9e1438890506982f44aa4f5625d01
     profiles: ["ai"]
     ports:
       - "11435:11434"
@@ -266,7 +266,7 @@ services:
   # it validates request shape + response parsing, not stateful flows. Point the
   # adapter at it with FEOH_STRIPE_API_BASE=http://localhost:12111/v1.
   stripe-mock:
-    image: stripe/stripe-mock:v0.204.0@sha256:5ae06566429ca6be1088a09729c6015214e6d6a496514ad3d50c7905c84fa2e5
+    image: stripe/stripe-mock:v0.206.0@sha256:aeb96b83e87a893d2ac005e363ac01ffa6e59a5ad85b49c155dfc9129de02e78
     profiles: ["payments"]
     ports:
       - "12111:12111"
@@ -297,7 +297,7 @@ services:
   # instead of the real internet — view rendered HTML at http://localhost:8025.
   # Opt-in under the `mail` profile (`pnpm mail:up`). Captures only; never relays.
   mailpit:
-    image: axllent/mailpit:v1.31.2@sha256:74d609a42ec279aa63c6b4622a6fa9b5408d1ad5b1d76a1c4be40a265ce0863d
+    image: axllent/mailpit:v1.31.3@sha256:ed9b00c609e77e99c79b93f1178255ebc271868920f2c69a8d166bd5634ed10d
     profiles: ["mail"]
     ports:
       - "1025:1025"   # SMTP — FEOH_SMTP_PORT
