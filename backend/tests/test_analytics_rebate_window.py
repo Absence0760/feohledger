@@ -109,3 +109,40 @@ async def test_a_rebate_outside_every_window_never_inflates_the_run_rate(realdb)
     async with realdb.client(key=TENANT, role="cfo") as c:
         body = (await c.get("/api/analytics/cfo?period_days=365")).json()
     assert Decimal(str(body["rebate_yield"]["rebates_total"])) == Decimal("100.00")
+
+
+@pytest.mark.asyncio
+async def test_rebate_yield_divides_by_reporting_currency_spend(realdb):
+    """The numerator is reporting-currency rebates only (decisions §62), so the
+    denominator must be reporting-currency spend too. It was the naive
+    cross-currency `total_spend`: one ¥1,000,000 invoice locked at $6,700 made
+    the window's "spend" 1,010,000 and the 1.00%-ish yield read 0.01%."""
+    await _seed(realdb)
+    org_id = realdb.info(TENANT).org_id
+    mk = realdb.sessionmaker(TENANT)
+    async with mk() as s:
+        ent = (await s.execute(select(Entity.id).where(Entity.is_default))).scalar_one()
+        s.add(
+            Invoice(
+                organization_id=org_id,
+                entity_id=ent,
+                invoice_number=f"REB-JPY-{uuid.uuid4().hex[:6]}",
+                vendor_name="Rebate Window Co",
+                amount=Decimal("1000000.00"),
+                currency="JPY",
+                reporting_amount=Decimal("6700.00"),
+                reporting_currency="USD",
+                status=InvoiceStatus.approved,
+                invoice_date=utc_today() - timedelta(days=5),
+            )
+        )
+        await s.commit()
+
+    async with realdb.client(key=TENANT, role="cfo") as c:
+        body = (await c.get("/api/analytics/cfo?period_days=30")).json()
+    rebate = body["rebate_yield"]
+    # 10,000 USD + the yen invoice's locked 6,700 USD.
+    assert rebate["total_spend"] == "16700.00"
+    assert rebate["total_spend"] == body["reporting_spend"]["total_amount"]
+    # 100 / 16,700 = 0.5988…% → 0.60 (pre-fix: 100 / 1,010,000 → 0.01).
+    assert Decimal(str(rebate["yield_pct"])) == Decimal("0.60")
