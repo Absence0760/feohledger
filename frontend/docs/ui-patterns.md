@@ -882,6 +882,17 @@ inherit it for free. Reuse these; don't re-solve them per page.
   two persistent live containers (`aria-live="assertive"` for errors,
   `"polite"` for the rest). Each toast has a real `<button>` dismiss
   (`aria-label="Dismiss notification"`); auto-dismiss timer kept.
+- **Inline form feedback** (WCAG 4.1.3) — a message that appears in response
+  to an action (`{#if saved}<div class="message">…`) must be announced, not
+  just shown. A polite status sits inside a live region that already exists
+  (`<div role="status">{#if msg}<div class="message">{msg}</div>{/if}</div>`,
+  the reliable form); an error may carry `role="alert"` inline, since its
+  insertion is the announcement. When the feedback REPLACES the control the
+  user activated (a form swapped for its confirmation), move focus onto it
+  instead — `tabindex="-1"` + `.focus()` after `tick()`, as `/signup` and the
+  forgot/reset-password pages do. Guard: `src/lib/a11y/liveRegionAudit.test.ts`
+  (Svelte-AST scan of every `{#if}`-rendered `error` / `message` / `msg` /
+  `success` element; the two non-feedback matches are an explained allowlist).
 - **Tabs** (`ui/Tabs.svelte`; WAI-ARIA tabs) — roving `tabindex`
   (active=0, others=-1) + Arrow/Home/End key navigation, plus the
   existing `role=tablist/tab` + `aria-selected` + `aria-controls`. The

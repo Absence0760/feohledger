@@ -2166,11 +2166,17 @@
 								<button class="btn-test" disabled={testingExtraction} onclick={testExtraction}>
 									{testingExtraction ? m('org.common.testing') : m('org.common.testConnection')}
 								</button>
-								{#if extractionTestResult}
-									<span class="test-result" class:success={extractionTestResult.success} class:failure={!extractionTestResult.success}>
-										{extractionTestResult.message}
-									</span>
-								{/if}
+								<!-- Always mounted, so the result is announced when it arrives
+								     (WCAG 4.1.3): a live region inserted together with its text
+								     is not read by every screen reader. -->
+								<span
+									class="test-result"
+									role="status"
+									class:success={extractionTestResult?.success === true}
+									class:failure={extractionTestResult?.success === false}
+								>
+									{extractionTestResult?.message ?? ''}
+								</span>
 							</div>
 						{/if}
 					</section>
@@ -2290,11 +2296,17 @@
 								<button class="btn-test" disabled={testingConnection} onclick={testConnection}>
 									{testingConnection ? m('org.common.testing') : m('org.common.testConnection')}
 								</button>
-								{#if connectionResult}
-									<span class="test-result" class:success={connectionResult.success} class:failure={!connectionResult.success}>
-										{connectionResult.message}
-									</span>
-								{/if}
+								<!-- Always mounted, so the result is announced when it arrives
+								     (WCAG 4.1.3): a live region inserted together with its text
+								     is not read by every screen reader. -->
+								<span
+									class="test-result"
+									role="status"
+									class:success={connectionResult?.success === true}
+									class:failure={connectionResult?.success === false}
+								>
+									{connectionResult?.message ?? ''}
+								</span>
 							</div>
 						{/if}
 					</section>
@@ -2377,11 +2389,17 @@
 								<button class="btn-test" disabled={testingPayments || paymentsProvider === 'mock'} onclick={testPayments}>
 									{testingPayments ? m('org.common.testing') : m('org.common.testConnection')}
 								</button>
-								{#if paymentsTestResult}
-									<span class="test-result" class:success={paymentsTestResult.success} class:failure={!paymentsTestResult.success}>
-										{paymentsTestResult.message}
-									</span>
-								{/if}
+								<!-- Always mounted, so the result is announced when it arrives
+								     (WCAG 4.1.3): a live region inserted together with its text
+								     is not read by every screen reader. -->
+								<span
+									class="test-result"
+									role="status"
+									class:success={paymentsTestResult?.success === true}
+									class:failure={paymentsTestResult?.success === false}
+								>
+									{paymentsTestResult?.message ?? ''}
+								</span>
 							</div>
 						{/if}
 					</section>
