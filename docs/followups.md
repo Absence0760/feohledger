@@ -69,7 +69,7 @@ section carried its own `decisions.md` § reference, so nothing was lost by
 deleting it; that cross-reference is what makes the pruning safe, and writing
 one is what earns a future entry the right to be deleted.
 
-**53 open: 38 (c) · 9 (a) · 6 (b)** — re-derived from the file, never carried
+**54 open: 39 (c) · 9 (a) · 6 (b)** — re-derived from the file, never carried
 forward. The section heading is authoritative; where an entry also carries a
 `(c)`/`(a)`/`(b)` marker, the two agree.
 `grep -c '^- \[ \]' docs/followups.md`.
@@ -1030,6 +1030,28 @@ or is a sibling of a fix that needs its own pass.
       **Trigger:** the next change to `ConsentBanner.svelte`, or the next
       accessibility pass over `/legal` (`/a11y-hunt`, or the manual
       screen-reader pass `docs/accessibility.md` still has open).
+
+### Surfaced by the recurring + discounting bug hunt (2026-10-05, PR #503)
+
+- [ ] **(c) A payment void reverses a captured discount only by elimination.**
+      `DiscountOffer` records no payment id, so
+      `discount_capture.reverse_captures_for_voided_payment` un-captures an
+      invoice's `captured` offer on a void only when the voided payment was
+      `completed` **and** no other `completed` payment remains on the invoice.
+      With two completed payments on one invoice (one matched the discounted
+      payoff, one did not) and the capturing one voided, the offer stays
+      `captured` and the discounting dashboard keeps reporting the savings —
+      deliberately, because guessing which payment realized it could un-realize
+      savings that really happened. Single-payment invoices, the normal case,
+      are fully covered.
+      **Durable fix:** a tenant migration adding a nullable
+      `discount_offers.captured_by_payment_id` FK, stamped by `mark_captured`
+      from `_capture_discount_offers`, and the void reversing exactly the offers
+      whose column names the voided payment (legacy NULL rows keep the
+      elimination rule).
+      **Trigger:** any path that lets one invoice carry more than one
+      `completed` payment at once (partial payments / split settlement), or the
+      next schema change to `discount_offers`.
 
 ## (a) Blocked on external credentials, accounts, or hardware
 
