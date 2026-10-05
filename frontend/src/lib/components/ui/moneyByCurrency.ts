@@ -8,11 +8,11 @@
  * folded into a real currency's figure.
  *
  * **Why a `.ts` module and not the component's `<script module>`:** the same
- * reason as `badgeTone.ts` — `$lib/types/analytics.ts` types its payloads with
+ * reason as `badgeTone.ts` — `#lib/types/analytics.ts` types its payloads with
  * it, and e2e fixtures pin those payloads with `satisfies`, which `pnpm
  * check:e2e` resolves through the `*.svelte` shim that has no named exports.
  */
-import type { MoneyAmount } from '$lib/utils/money';
+import type { MoneyAmount } from '#lib/utils/money.ts';
 
 export interface CurrencyFigure {
 	currency: string | null;

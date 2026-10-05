@@ -15,8 +15,8 @@
 	is what says WHICH line or tax row is at fault.
 -->
 <script lang="ts">
-	import { einvoiceRuleMessageKey, type EInvoiceValidationIssue } from '$lib/api/einvoice';
-	import { m } from '$lib/i18n/store.svelte';
+	import { einvoiceRuleMessageKey, type EInvoiceValidationIssue } from '#lib/api/einvoice.ts';
+	import { m } from '#lib/i18n/store.svelte.ts';
 
 	let { issues }: { issues: EInvoiceValidationIssue[] } = $props();
 </script>

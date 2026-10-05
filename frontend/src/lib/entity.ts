@@ -1,4 +1,4 @@
-import { getTenantStorageKey } from '$lib/tenant';
+import { getTenantStorageKey } from '#lib/tenant.ts';
 
 /**
  * Multi-entity (subsidiary) selection — the client half of the backend's
@@ -8,7 +8,7 @@ import { getTenantStorageKey } from '$lib/tenant';
  * every subsidiary) or a specific entity UUID. It persists in localStorage
  * **keyed by tenant**, so switching hosts never carries one tenant's entity id
  * into another (which the backend would reject with a 400 on every request).
- * The key comes from `$lib/tenant.ts::getTenantStorageKey` — the slug on a
+ * The key comes from `#lib/tenant.ts::getTenantStorageKey` — the slug on a
  * platform subdomain, the hostname on a tenant's vanity custom domain, where
  * there is no slug in the URL at all but the host still maps 1:1 to a tenant.
  * Reading `getTenantSlug()` here would have silently disabled entity

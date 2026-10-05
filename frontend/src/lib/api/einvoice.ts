@@ -13,8 +13,8 @@
  * X-Entity-ID + the 401 clear-and-bounce), so this module never hand-rolls a
  * `fetch` and can't drift from the rest of the app's transport.
  */
-import { api } from '$lib/api';
-import type { MessageKey } from '$lib/i18n/messages';
+import { api } from '#lib/api.ts';
+import type { MessageKey } from '#lib/i18n/messages.ts';
 
 /** The `?format=` tokens `GET /api/invoices/{id}/einvoice` accepts.
  *  `ubl` / `cii` are the built-in dialects; the rest are national formats
@@ -97,8 +97,8 @@ export function sendInvoiceOverPeppol(
 
 /**
  * The 422 refusal rows are parsed and localized in `einvoiceIssues.ts`, a
- * DEPENDENCY-FREE sibling — this module reaches `$lib/api`, which reaches
- * `$env/static/public`, which the node-environment vitest config does not
+ * DEPENDENCY-FREE sibling — this module reaches `#lib/api`, which reaches
+ * `$app/env/public`, which the node-environment vitest config does not
  * alias. Same split, and the same reason, as `hostRouting.ts` under
  * `tenant.ts`. Re-exported here so callers still see one module.
  */
@@ -106,7 +106,7 @@ export {
 	einvoiceRuleMessageKey,
 	parseEInvoiceIssues,
 	type EInvoiceValidationIssue,
-} from '$lib/api/einvoiceIssues';
+} from '#lib/api/einvoiceIssues.ts';
 
 /** One row of `GET /api/invoices/{id}/peppol-transmissions` — PII-free by
  *  construction: the counterparty's and our own registered participant ids

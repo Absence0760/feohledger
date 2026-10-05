@@ -18,7 +18,7 @@ This statement covers the three end-user surfaces of the product:
 
 | Surface | Stack | Notes |
 | ------- | ----- | ----- |
-| Web app (AP staff) | SvelteKit 2 / Svelte 5, static SPA | The full invoice → approve → pay workflow, vendors, payments, exceptions, analytics, admin. |
+| Web app (AP staff) | SvelteKit 3 / Svelte 5, static SPA | The full invoice → approve → pay workflow, vendors, payments, exceptions, analytics, admin. |
 | Supplier portal | SvelteKit (same app, `/portal/*`) | Vendor self-service: invoice submission, payment history, virtual-card reveal, supplier chat. |
 | Mobile app | Flutter 3.41+ (iOS + Android) | Core approval workflow, camera OCR, push notifications. |
 

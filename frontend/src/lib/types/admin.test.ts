@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { en } from '$lib/i18n/locales/en';
+import { en } from '#lib/i18n/locales/en.ts';
 import { ROLE_LABEL_KEYS, SYSTEM_ROLES, roleLabelKey } from './admin';
 
 /**

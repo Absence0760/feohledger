@@ -1,23 +1,23 @@
 <script lang="ts">
-	import { page } from '$app/stores';
+	import { page } from '$app/state';
 	import { beforeNavigate, goto } from '$app/navigation';
-	import { auth } from '$lib/stores/auth.svelte';
-	import { workflowStore } from '$lib/stores/workflows.svelte';
-	import { adminStore } from '$lib/stores/admin.svelte';
-	import { api } from '$lib/api';
-	import { createRequestSequencer } from '$lib/utils/requestSequence';
-	import { toast } from '$lib/components/ui/Toast.svelte';
-	import { m } from '$lib/i18n/store.svelte';
-	import { orgCurrency } from '$lib/stores/orgSettings.svelte';
-	import type { MoneyAmount } from '$lib/utils/money';
-	import { isMoneyInput } from '$lib/utils/moneyInput';
-	import ApprovalMatrixEditor from '$lib/components/modals/ApprovalMatrixEditor.svelte';
-	import Badge from '$lib/components/ui/Badge.svelte';
-	import WorkflowCanvas from '$lib/components/workflow-builder/WorkflowCanvas.svelte';
-	import StepPalette from '$lib/components/workflow-builder/StepPalette.svelte';
-	import ConditionBuilder from '$lib/components/workflow-builder/ConditionBuilder.svelte';
-	import ParallelBranchEditor from '$lib/components/workflow-builder/ParallelBranchEditor.svelte';
-	import CustomStepConfig from '$lib/components/workflow-builder/CustomStepConfig.svelte';
+	import { auth } from '#lib/stores/auth.svelte.ts';
+	import { workflowStore } from '#lib/stores/workflows.svelte.ts';
+	import { adminStore } from '#lib/stores/admin.svelte.ts';
+	import { api } from '#lib/api.ts';
+	import { createRequestSequencer } from '#lib/utils/requestSequence.ts';
+	import { toast } from '#lib/components/ui/Toast.svelte';
+	import { m } from '#lib/i18n/store.svelte.ts';
+	import { orgCurrency } from '#lib/stores/orgSettings.svelte.ts';
+	import type { MoneyAmount } from '#lib/utils/money.ts';
+	import { isMoneyInput } from '#lib/utils/moneyInput.ts';
+	import ApprovalMatrixEditor from '#lib/components/modals/ApprovalMatrixEditor.svelte';
+	import Badge from '#lib/components/ui/Badge.svelte';
+	import WorkflowCanvas from '#lib/components/workflow-builder/WorkflowCanvas.svelte';
+	import StepPalette from '#lib/components/workflow-builder/StepPalette.svelte';
+	import ConditionBuilder from '#lib/components/workflow-builder/ConditionBuilder.svelte';
+	import ParallelBranchEditor from '#lib/components/workflow-builder/ParallelBranchEditor.svelte';
+	import CustomStepConfig from '#lib/components/workflow-builder/CustomStepConfig.svelte';
 	import type {
 		WorkflowDefinition,
 		WorkflowStep,
@@ -32,13 +32,13 @@
 		WebhookStepConfig,
 		EmailStepConfig,
 		DelayStepConfig,
-	} from '$lib/types/workflow';
+	} from '#lib/types/workflow.ts';
 	import {
 		STEP_TYPE_LABELS,
 		STEP_TYPE_DESCRIPTIONS,
 		ERP_FORMAT_LABELS,
 		DEFAULT_STEP_CONFIGS,
-	} from '$lib/types/workflow';
+	} from '#lib/types/workflow.ts';
 
 	let workflow = $state<WorkflowDefinition | null>(null);
 	let steps = $state<WorkflowStep[]>([]);
@@ -78,7 +78,7 @@
 	// Set while a palette item is being dragged, so the canvas can show drop slots.
 	let paletteDragType = $state<WorkflowStepType | null>(null);
 
-	const id = $derived($page.params.id ?? '');
+	const id = $derived(page.params.id ?? '');
 
 	/**
 	 * The same redirect guard the `/workflows` list carries, for the same

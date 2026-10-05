@@ -1,20 +1,18 @@
-// TYPE-ONLY on purpose. `$lib` is a SvelteKit alias resolved from
-// `.svelte-kit/tsconfig.json`'s `paths`; `tsc` honours it, but Playwright's
-// own esbuild transform does not read that file. A `import type` is erased
-// before the runtime ever sees it, so this costs nothing at test time — a
-// VALUE import from `$lib` here would fail to resolve when Playwright loads
-// the spec. Keep app *values* out of the e2e tree; app *types* are what make
+// TYPE-ONLY on purpose. `#lib` is a package.json `imports` entry, so both
+// `tsc` and Playwright resolve it — but a VALUE import whose module graph
+// reaches a SvelteKit virtual module (`$app/*`) or a `.svelte` file fails to
+// load under Playwright, which knows nothing of those. A `import type` is
+// erased before the runtime ever sees it, so this costs nothing at test time. Keep app *values* out of the e2e tree; app *types* are what make
 // these fixtures honest.
-import type { DashboardData, DashboardDiscountCapture } from '$lib/types/analytics';
+import type { DashboardData, DashboardDiscountCapture } from '#lib/types/analytics.ts';
 
 /**
  * The one `GET /api/dashboard` stub the dashboard specs build on.
  *
  * **Why it is shared, and why it is typed.** Both dashboard specs used to
  * carry their own hand-written copy of this payload, and nothing compared
- * either against the shape the page reads — `pnpm check` extends
- * `.svelte-kit/tsconfig.json`, whose `include` covers `../src/**` and not
- * `tests-e2e`. The drift that cost: the stub omitted `unconverted_count` on
+ * either against the shape the page reads — `pnpm check`'s
+ * `tsconfig.json` includes `src` and not `tests-e2e`. The drift that cost: the stub omitted `unconverted_count` on
  * `aging_reporting`, `undefined > 0` is false, and the partial-conversion
  * disclosure the spec existed to exercise could only ever render its
  * no-notice branch. Two files, one omission, no signal.

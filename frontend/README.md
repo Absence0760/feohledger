@@ -1,6 +1,6 @@
 # FeohLedger — Frontend
 
-SvelteKit 2 + Svelte 5 + TypeScript
+SvelteKit 3 + Svelte 5 + TypeScript
 
 See [`CLAUDE.md`](CLAUDE.md) for full documentation (structure, stores, routes, API mappings).
 

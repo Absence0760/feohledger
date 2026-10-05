@@ -16,7 +16,7 @@
 // it is a ROW COUNT, not an allocation. The per-currency allocation totals live
 // on `BudgetSummary.by_currency`.
 
-import type { MoneyAmount, MoneyString } from '$lib/utils/money';
+import type { MoneyAmount, MoneyString } from '#lib/utils/money.ts';
 
 export type BudgetDimension = 'department' | 'project' | 'cost_center' | 'gl_account';
 
@@ -102,7 +102,7 @@ export interface BudgetCurrencyTotal {
  * The page's `totalAllocated` used to reduce over the LOADED page and add
  * across currencies into the org default — so it contradicted the whole-set
  * row count beside it and rendered EUR + USD as one figure. `by_currency` is
- * grouped, never summed (see `$lib/utils/currencyGroups`).
+ * grouped, never summed (see `#lib/utils/currencyGroups`).
  */
 export interface BudgetSummary {
 	/** Row count of the whole filtered set — NOT money. */

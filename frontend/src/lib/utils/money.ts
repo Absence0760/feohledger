@@ -15,7 +15,7 @@
  * visitor and "1.234,50 £" for a de-DE visitor — both correct.
  */
 
-import { getActiveFormatLocale } from '$lib/i18n/formatLocale';
+import { getActiveFormatLocale } from '#lib/i18n/formatLocale.ts';
 
 /**
  * The ISO 4217 code a FORM starts from — a picker's default, a new record's

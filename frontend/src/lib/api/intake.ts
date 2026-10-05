@@ -1,7 +1,7 @@
 // Typed helpers for the procurement intake endpoints. All requests route
 // through the shared `api` client (Bearer + X-Tenant-Slug + X-Entity-ID +
 // 401-bounce). Mirrors the pattern of `src/lib/api/expenses.ts`.
-import { api } from '$lib/api';
+import { api } from '#lib/api.ts';
 import type {
 	IntakeRequest,
 	IntakeCreate,
@@ -9,7 +9,7 @@ import type {
 	IntakeListResponse,
 	IntakeSummary,
 	IntakeConvertResponse
-} from '$lib/types/intake';
+} from '#lib/types/intake.ts';
 
 export interface IntakeListParams {
 	status?: string;

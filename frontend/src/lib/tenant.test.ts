@@ -8,10 +8,10 @@ import {
 	tenantStorageKeyForHost,
 } from './hostRouting';
 
-// These cover `$lib/tenant.ts`'s behaviour through `$lib/hostRouting.ts`, which
+// These cover `#lib/tenant.ts`'s behaviour through `#lib/hostRouting.ts`, which
 // holds the whole rule set. `tenant.ts` itself is four one-line compositions
 // over these functions plus the `PUBLIC_PLATFORM_DOMAINS` read, and it can't be
-// imported here: it pulls `$env/static/public` / `$env/dynamic/public`, which
+// imported here: it pulls `$app/env/public`, which
 // the node-environment `vitest.config.ts` doesn't alias. Splitting the rules out
 // is what makes them testable at all — so keep new rules in `hostRouting.ts`,
 // never inline in `tenant.ts`.

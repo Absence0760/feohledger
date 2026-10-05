@@ -1,6 +1,6 @@
-import type { BadgeTone } from '$lib/components/ui/badgeTone';
-import type { MessageKey } from '$lib/i18n/messages';
-import type { MoneyAmount } from '$lib/utils/money';
+import type { BadgeTone } from '#lib/components/ui/badgeTone.ts';
+import type { MessageKey } from '#lib/i18n/messages.ts';
+import type { MoneyAmount } from '#lib/utils/money.ts';
 
 // Types for the Procurement / Requisitions surface. Mirrors the JSON returned
 // by the `/api/requisitions` endpoints (backend `RequisitionResponse` /
@@ -199,7 +199,7 @@ export interface RequisitionCurrencyTotal {
  * The page's `pendingCount` filtered the LOADED page for `pending_approval`
  * and `periodTotal` reduced over it — so both contradicted the whole-set row
  * count beside them, and `periodTotal` added values across currencies.
- * `by_currency` is grouped, never summed (see `$lib/utils/currencyGroups`).
+ * `by_currency` is grouped, never summed (see `#lib/utils/currencyGroups`).
  */
 export interface RequisitionSummary {
 	total: number;

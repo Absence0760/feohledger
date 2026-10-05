@@ -2,8 +2,8 @@
 // /api/portal/invoices/…). Routes through the portal client (`portalApi`),
 // which carries the VendorUser token. The portal surface is masked: no
 // author_user_id, no mentions, no templates, no resolve/reopen.
-import { portalApi } from '$lib/portalApi';
-import type { PortalChatMessage, PortalChatThread } from '$lib/types/supplierChat';
+import { portalApi } from '#lib/portalApi.ts';
+import type { PortalChatMessage, PortalChatThread } from '#lib/types/supplierChat.ts';
 
 export function getPortalChatThread(invoiceId: string): Promise<PortalChatThread> {
 	return portalApi.get<PortalChatThread>(`/api/portal/invoices/${invoiceId}/chat`);

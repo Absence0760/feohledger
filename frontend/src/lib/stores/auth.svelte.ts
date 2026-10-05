@@ -1,5 +1,5 @@
-import { api, setToken, clearToken, hasToken } from '$lib/api';
-import { performAuthentication, performRegistration } from '$lib/webauthn';
+import { api, setToken, clearToken, hasToken } from '#lib/api.ts';
+import { performAuthentication, performRegistration } from '#lib/webauthn.ts';
 
 export interface Passkey {
 	id: string;

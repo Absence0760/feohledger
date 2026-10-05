@@ -1,8 +1,7 @@
 {
 	// Typecheck for the Playwright tree (`tests-e2e/`), which `pnpm check` does
-	// NOT cover: `tsconfig.json` extends `.svelte-kit/tsconfig.json`, whose
-	// generated `include` lists `../src/**`, `../test/**` and `../tests/**` —
-	// and `tests-e2e` is none of those. TypeScript does not merge includes from
+	// NOT cover: `tsconfig.json`'s `include` is `src` plus the root config
+	// files, and `tests-e2e` is neither. TypeScript does not merge includes from
 	// an extended config, so the omission is silent.
 	//
 	// What that cost: every e2e stub of an API response was a hand-maintained
@@ -14,7 +13,7 @@
 	//
 	// Run via `pnpm check:e2e` (frontend) / `pnpm lint:frontend:e2e` (root).
 	// It is a TYPE check only — it starts no server and runs no test.
-	"extends": "./.svelte-kit/tsconfig.json",
+	"extends": "$app/tsconfig",
 	"compilerOptions": {
 		"esModuleInterop": true,
 		"forceConsistentCasingInFileNames": true,

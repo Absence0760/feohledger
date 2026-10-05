@@ -1,10 +1,10 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { page } from '$app/stores';
-	import { api, setToken } from '$lib/api';
-	import { auth } from '$lib/stores/auth.svelte';
+	import { page } from '$app/state';
+	import { api, setToken } from '#lib/api.ts';
+	import { auth } from '#lib/stores/auth.svelte.ts';
 	import { goto } from '$app/navigation';
-	import { m } from '$lib/i18n/store.svelte';
+	import { m } from '#lib/i18n/store.svelte.ts';
 
 	interface SAMLExchangeResponse {
 		access_token: string;
@@ -21,8 +21,8 @@
 		// exchange it for the JWT in the response BODY — the token never rides
 		// in the URL (no fragment, no query), so it can't leak via history /
 		// Referer / server logs.
-		const code = $page.url.searchParams.get('code');
-		const err = $page.url.searchParams.get('error');
+		const code = page.url.searchParams.get('code');
+		const err = page.url.searchParams.get('error');
 
 		if (err) {
 			phase = 'error';

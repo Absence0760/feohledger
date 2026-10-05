@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { formatList, __resetListFormatterCache } from './list';
-import { setActiveFormatLocale } from '$lib/i18n/formatLocale';
-import { SUPPORTED_LOCALES } from '$lib/i18n/locale';
+import { setActiveFormatLocale } from '#lib/i18n/formatLocale.ts';
+import { SUPPORTED_LOCALES } from '#lib/i18n/locale.ts';
 
 afterEach(() => {
 	// Reset the shared holder so locale state never leaks across tests, and drop

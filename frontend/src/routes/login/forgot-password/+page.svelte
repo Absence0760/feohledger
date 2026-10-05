@@ -1,8 +1,8 @@
 <script lang="ts">
 	import { tick } from 'svelte';
-	import AuthCard from '$lib/components/auth/AuthCard.svelte';
-	import { api } from '$lib/api';
-	import { m } from '$lib/i18n/store.svelte';
+	import AuthCard from '#lib/components/auth/AuthCard.svelte';
+	import { api } from '#lib/api.ts';
+	import { m } from '#lib/i18n/store.svelte.ts';
 
 	let email = $state('');
 	let error = $state('');

@@ -14,7 +14,7 @@
 // + 401-bounce) — never raw fetch. Every numeric field arrives as a STRING
 // (the backend's exact-Decimal wire convention); render them, never do money or
 // score arithmetic on them client-side.
-import { api } from '$lib/api';
+import { api } from '#lib/api.ts';
 
 // ---------------------------------------------------------------------------
 // Vendor performance score — GET /api/enrichment/vendors/{id}/score

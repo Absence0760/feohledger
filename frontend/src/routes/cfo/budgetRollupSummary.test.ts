@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { formatUtilization, overBudgetCount } from './budgetRollupSummary';
-import type { BudgetCurrencyRollup, BudgetRollup } from '$lib/types/budget';
+import type { BudgetCurrencyRollup, BudgetRollup } from '#lib/types/budget.ts';
 
 function row(over: Partial<BudgetCurrencyRollup> = {}): BudgetCurrencyRollup {
 	return {

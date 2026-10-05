@@ -669,13 +669,13 @@ live adapter fails closed without a key), or any provider error yields
 
 The read/display surface for the endpoint above. Route `/billing`, mounted as
 the **Subscription** sub-tab of the existing **Billing** nav group
-(`$lib/nav.ts`, `labelKey: 'nav.platformBilling'`), admin/cfo-gated to match the
+(`#lib/nav.ts`, `labelKey: 'nav.platformBilling'`), admin/cfo-gated to match the
 backend (`require_roles(admin, cfo)`); a clerk/manager is redirected to the
 dashboard and never sees the tab.
 
 - `+page.svelte` consumes `GET /api/billing/subscription` via
-  `$lib/api/billing.ts::getBillingSubscription` (types in
-  `$lib/types/billing.ts`) — the shared `api` client adds the JWT + tenant
+  `#lib/api/billing.ts::getBillingSubscription` (types in
+  `#lib/types/billing.ts`) — the shared `api` client adds the JWT + tenant
   header.
 - Renders: the current plan (tier name, monthly price via `<Money>` so the
   exact decimal string is formatted, not re-computed), a `SubscriptionBadge`
@@ -687,8 +687,8 @@ dashboard and never sees the tab.
   live subscription → "No active subscription" + a contact-sales link, usage
   meters still shown).
 - **Payment methods** (`GET /api/billing/payment-methods` via
-  `$lib/api/billing.ts::getBillingPaymentMethods`, types in
-  `$lib/types/billing.ts`) is a `DataTable` of the org's saved cards — PII-safe
+  `#lib/api/billing.ts::getBillingPaymentMethods`, types in
+  `#lib/types/billing.ts`) is a `DataTable` of the org's saved cards — PII-safe
   metadata only (`Brand ····last4` + `Expires MM/YYYY` + a `Default` pill,
   **never a PAN**) — loaded **independently** of the plan/usage/invoices blocks
   (its own loading / error / **empty** "No payment method on file." states), so
@@ -711,7 +711,7 @@ dashboard and never sees the tab.
     re-fetched.
 - **Live plan-change flow.** The "Change plan" button opens a `Modal`
   (`billing-change-plan-modal` — plan list fetched from `GET /api/billing/plans`
-  via `$lib/api/billing.ts::getBillingPlans`, cheapest first). Each plan renders
+  via `#lib/api/billing.ts::getBillingPlans`, cheapest first). Each plan renders
   as a radio option with its `<Money>` price; the org's current plan is marked
   with a "Current plan" pill and its radio is disabled (a genuine change is the
   point — the idempotent same-plan no-op below exists for a race, not as the
@@ -728,7 +728,7 @@ dashboard and never sees the tab.
   re-fetches `GET /api/billing/subscription` so the plan card reflects the
   change without a manual reload. A "contact us" link stays alongside for
   anything outside the self-serve catalog (enterprise/custom plans).
-- `SubscriptionBadge.svelte` (`$lib/components/ui/`) is a new shared status pill
+- `SubscriptionBadge.svelte` (`#lib/components/ui/`) is a new shared status pill
   for the four subscription states (WCAG-1.4.3-calibrated tones, matching
   `StatusBadge`).
 - e2e: `frontend/tests-e2e/billing/billing.spec.ts` — header + empty state +

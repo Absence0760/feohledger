@@ -27,21 +27,21 @@
 	 *    repo's existing armed-confirm idiom (`RowAction armed`,
 	 *    `BulkDeleteButton`) rather than a single click.
 	 */
-	import { auth } from '$lib/stores/auth.svelte';
-	import Modal from '$lib/components/ui/Modal.svelte';
-	import Money from '$lib/components/ui/Money.svelte';
-	import { m } from '$lib/i18n/store.svelte';
-	import { scaleMoney } from '$lib/utils/money';
-	import { bulkNegotiateDiscount } from '$lib/api/discounts';
-	import VendorPicker from '$lib/components/ui/VendorPicker.svelte';
-	import type { VendorOption } from '$lib/api/vendors';
-	import type { DiscountOffer } from '$lib/types/discounts';
+	import { auth } from '#lib/stores/auth.svelte.ts';
+	import Modal from '#lib/components/ui/Modal.svelte';
+	import Money from '#lib/components/ui/Money.svelte';
+	import { m } from '#lib/i18n/store.svelte.ts';
+	import { scaleMoney } from '#lib/utils/money.ts';
+	import { bulkNegotiateDiscount } from '#lib/api/discounts.ts';
+	import VendorPicker from '#lib/components/ui/VendorPicker.svelte';
+	import type { VendorOption } from '#lib/api/vendors.ts';
+	import type { DiscountOffer } from '#lib/types/discounts.ts';
 	import {
 		isTierStarted,
 		normalizeTierDays,
 		normalizeTierPercent,
 		type BulkTierInput
-	} from '$lib/types/discounts';
+	} from '#lib/types/discounts.ts';
 
 	let {
 		onclose,

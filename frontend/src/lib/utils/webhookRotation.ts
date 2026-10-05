@@ -12,7 +12,7 @@
 // a key they wanted dead alive), so the picker must only ever offer values the
 // backend accepts. See `backend/docs/public-api.md` § Rotating a signing secret.
 
-import type { MessageKey } from '$lib/i18n/messages';
+import type { MessageKey } from '#lib/i18n/messages.ts';
 
 /** `0` = hard cutover: the retiring secret stops verifying immediately. */
 export const OVERLAP_MIN_MINUTES = 0;

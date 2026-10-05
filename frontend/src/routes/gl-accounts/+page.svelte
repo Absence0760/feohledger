@@ -21,28 +21,28 @@
 	 * why the footer states a plain count and there is no Load-more control to
 	 * pair with a "Showing all N" claim.
 	 */
-	import { listGlAccounts, syncGlAccountsFromErp, updateGlAccount } from '$lib/api/glAccounts';
-	import type { GlAccount } from '$lib/types/glAccount';
+	import { listGlAccounts, syncGlAccountsFromErp, updateGlAccount } from '#lib/api/glAccounts.ts';
+	import type { GlAccount } from '#lib/types/glAccount.ts';
 	import {
 		GL_ACCOUNT_TYPES,
 		GL_ACCOUNT_TYPE_LABEL_KEYS,
 		canEditGlAccount,
 		glAccountTypeLabelKey
-	} from '$lib/types/glAccount';
-	import { auth } from '$lib/stores/auth.svelte';
-	import { entityStore } from '$lib/stores/entity.svelte';
-	import PageHeader from '$lib/components/ui/PageHeader.svelte';
-	import SearchBox from '$lib/components/ui/SearchBox.svelte';
-	import FilterChips from '$lib/components/ui/FilterChips.svelte';
-	import DataTable from '$lib/components/ui/DataTable.svelte';
-	import EmptyState from '$lib/components/ui/EmptyState.svelte';
-	import Badge from '$lib/components/ui/Badge.svelte';
-	import RowAction from '$lib/components/ui/RowAction.svelte';
-	import GlAccountModal from '$lib/components/modals/GlAccountModal.svelte';
-	import { toast } from '$lib/components/ui/Toast.svelte';
-	import { createRequestSequencer } from '$lib/utils/requestSequence';
-	import { m } from '$lib/i18n/store.svelte';
-	import { page } from '$app/stores';
+	} from '#lib/types/glAccount.ts';
+	import { auth } from '#lib/stores/auth.svelte.ts';
+	import { entityStore } from '#lib/stores/entity.svelte.ts';
+	import PageHeader from '#lib/components/ui/PageHeader.svelte';
+	import SearchBox from '#lib/components/ui/SearchBox.svelte';
+	import FilterChips from '#lib/components/ui/FilterChips.svelte';
+	import DataTable from '#lib/components/ui/DataTable.svelte';
+	import EmptyState from '#lib/components/ui/EmptyState.svelte';
+	import Badge from '#lib/components/ui/Badge.svelte';
+	import RowAction from '#lib/components/ui/RowAction.svelte';
+	import GlAccountModal from '#lib/components/modals/GlAccountModal.svelte';
+	import { toast } from '#lib/components/ui/Toast.svelte';
+	import { createRequestSequencer } from '#lib/utils/requestSequence.ts';
+	import { m } from '#lib/i18n/store.svelte.ts';
+	import { page } from '$app/state';
 	import { replaceState } from '$app/navigation';
 	import { untrack } from 'svelte';
 
@@ -54,12 +54,12 @@
 	const canManage = $derived(auth.isManager);
 
 	// --- Filter state (URL-backed) ---
-	let search = $state($page.url.searchParams.get('search') ?? '');
-	let typeFilter = $state<string>($page.url.searchParams.get('type') ?? 'all');
+	let search = $state(page.url.searchParams.get('search') ?? '');
+	let typeFilter = $state<string>(page.url.searchParams.get('type') ?? 'all');
 	// An inactive account is why a code "disappeared" from the pickers, so it
 	// has to be reachable — but it is not what you want to read by default,
 	// which is also the backend's default (`active_only=True`).
-	let includeInactive = $state($page.url.searchParams.get('inactive') === '1');
+	let includeInactive = $state(page.url.searchParams.get('inactive') === '1');
 
 	// --- Data ---
 	let accounts = $state<GlAccount[]>([]);
@@ -158,7 +158,7 @@
 
 	/**
 	 * Reflect the live filter state into the URL. EVERY read in here is
-	 * untracked, `$page.url` included: syncUrl() is a WRITER called from the
+	 * untracked, `page.url` included: syncUrl() is a WRITER called from the
 	 * filter effects, not a source of dependencies — the URL read would
 	 * self-trigger the effect that writes it via replaceState
 	 * (`effect_update_depth_exceeded`), and a tracked `search` read is issue
@@ -166,7 +166,7 @@
 	 */
 	function syncUrl() {
 		untrack(() => {
-			const url = new URL($page.url);
+			const url = new URL(page.url.href);
 			if (typeFilter !== 'all') url.searchParams.set('type', typeFilter);
 			else url.searchParams.delete('type');
 			if (search.trim()) url.searchParams.set('search', search.trim());

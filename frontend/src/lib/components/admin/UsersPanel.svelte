@@ -1,21 +1,21 @@
 <script lang="ts">
-	import type { AdminUser } from '$lib/types/admin';
-	import { roleLabelKey } from '$lib/types/admin';
-	import { adminStore } from '$lib/stores/admin.svelte';
-	import { auth } from '$lib/stores/auth.svelte';
-	import BulkBar from '$lib/components/ui/BulkBar.svelte';
-	import BulkDeleteButton from '$lib/components/ui/BulkDeleteButton.svelte';
-	import RowAction from '$lib/components/ui/RowAction.svelte';
-	import RowLink from '$lib/components/ui/RowLink.svelte';
-	import { isRowOpenClick } from '$lib/utils/rowNav';
-	import { formatDate } from '$lib/utils/time';
-	import { formatList } from '$lib/utils/list';
-	import { pruneSelection } from '$lib/utils/selection';
-	import SearchBox from '$lib/components/ui/SearchBox.svelte';
-	import DataTable from '$lib/components/ui/DataTable.svelte';
-	import Modal from '$lib/components/ui/Modal.svelte';
-	import { toast } from '$lib/components/ui/Toast.svelte';
-	import { m } from '$lib/i18n/store.svelte';
+	import type { AdminUser } from '#lib/types/admin.ts';
+	import { roleLabelKey } from '#lib/types/admin.ts';
+	import { adminStore } from '#lib/stores/admin.svelte.ts';
+	import { auth } from '#lib/stores/auth.svelte.ts';
+	import BulkBar from '#lib/components/ui/BulkBar.svelte';
+	import BulkDeleteButton from '#lib/components/ui/BulkDeleteButton.svelte';
+	import RowAction from '#lib/components/ui/RowAction.svelte';
+	import RowLink from '#lib/components/ui/RowLink.svelte';
+	import { isRowOpenClick } from '#lib/utils/rowNav.ts';
+	import { formatDate } from '#lib/utils/time.ts';
+	import { formatList } from '#lib/utils/list.ts';
+	import { pruneSelection } from '#lib/utils/selection.ts';
+	import SearchBox from '#lib/components/ui/SearchBox.svelte';
+	import DataTable from '#lib/components/ui/DataTable.svelte';
+	import Modal from '#lib/components/ui/Modal.svelte';
+	import { toast } from '#lib/components/ui/Toast.svelte';
+	import { m } from '#lib/i18n/store.svelte.ts';
 
 	let showCreateModal = $state(false);
 	let editingUser = $state<AdminUser | null>(null);
@@ -511,7 +511,7 @@
 <style>
 	/* Panel-specific styling; shared design-system CSS lives in app.css. */
 
-	/* --- Bulk-row checkbox column (BulkBar / BulkDeleteButton come from $lib/components) --- */
+	/* --- Bulk-row checkbox column (BulkBar / BulkDeleteButton come from #lib/components) --- */
 
 	.checkbox-col {
 		width: 36px;

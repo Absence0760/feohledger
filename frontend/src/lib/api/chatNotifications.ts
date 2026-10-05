@@ -6,11 +6,11 @@
  * helper that tries to fetch it — the backend has no endpoint that serves it.
  * See `backend/docs/notifications.md` § Rotating the webhook URL.
  */
-import { api } from '$lib/api';
+import { api } from '#lib/api.ts';
 import type {
 	ChatNotificationSettingsUpdate,
 	ChatNotificationStatus
-} from '$lib/types/chatNotifications';
+} from '#lib/types/chatNotifications.ts';
 
 const BASE = '/api/organization/chat-notifications';
 

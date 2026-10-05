@@ -2,8 +2,8 @@
 // shared `api` client (Bearer + X-Tenant-Slug + 401-bounce) — never raw fetch.
 // Backend: `backend/app/api/api_keys.py` (admin + JWT gated). The mint response
 // carries the plaintext `key` exactly once; everything else is metadata only.
-import { api } from '$lib/api';
-import type { ApiKey, ApiKeyCreated, ApiKeyUsage } from '$lib/types/apiKeys';
+import { api } from '#lib/api.ts';
+import type { ApiKey, ApiKeyCreated, ApiKeyUsage } from '#lib/types/apiKeys.ts';
 
 /** This org's API keys (active + revoked), newest first. Metadata only. */
 export function listApiKeys(): Promise<ApiKey[]> {

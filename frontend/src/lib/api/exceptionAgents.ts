@@ -1,15 +1,15 @@
 // Typed helpers for the autonomous exception-agent surfaces. All requests route
 // through the shared `api` client (Bearer + X-Tenant-Slug + 401-bounce). Backend
 // endpoints are admin/ap_manager-gated (see `app/api/exception_agents.py`).
-import { api } from '$lib/api';
+import { api } from '#lib/api.ts';
 import type {
 	AgentCandidateException,
 	AgentDecisionList,
 	AgentResolveResult,
 	AgentStats
-} from '$lib/types/exceptionAgents';
-import { AGENT_RUNNABLE_STATUSES } from '$lib/types/exceptionAgents';
-import type { PagedResponse } from '$lib/utils/pagination';
+} from '#lib/types/exceptionAgents.ts';
+import { AGENT_RUNNABLE_STATUSES } from '#lib/types/exceptionAgents.ts';
+import type { PagedResponse } from '#lib/utils/pagination.ts';
 
 export interface AgentDecisionParams {
 	exceptionType?: string;

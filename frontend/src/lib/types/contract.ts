@@ -1,10 +1,10 @@
-import type { MoneyAmount, MoneyString } from '$lib/utils/money';
+import type { MoneyAmount, MoneyString } from '#lib/utils/money.ts';
 
 // Types for the Contracts surface. Mirrors the JSON returned by the
 // `/api/contracts` endpoints (backend `Contract.to_dict()`). Money fields
 // arrive as numbers (or null); date fields are ISO date strings (or null).
-import type { BadgeTone } from '$lib/components/ui/badgeTone';
-import type { MessageKey } from '$lib/i18n/messages';
+import type { BadgeTone } from '#lib/components/ui/badgeTone.ts';
+import type { MessageKey } from '#lib/i18n/messages.ts';
 
 export type ContractType =
 	| 'purchase'

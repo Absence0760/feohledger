@@ -30,7 +30,7 @@
  * the plain-Node vitest config exactly like `money.ts` and `time.ts`.
  */
 
-import { getActiveFormatLocale } from '$lib/i18n/formatLocale';
+import { getActiveFormatLocale } from '#lib/i18n/formatLocale.ts';
 
 /**
  * How a list reads once joined.

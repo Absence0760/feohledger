@@ -1,9 +1,9 @@
 // Typed helpers for the vendor sanctions-screening + risk endpoints. All
 // requests route through the shared `api` client (Bearer + X-Tenant-Slug +
 // 401-bounce). Mirrors the pattern of `src/lib/api/contracts.ts` / `tax.ts`.
-import { api } from '$lib/api';
-import type { MatchingIdsResponse } from '$lib/utils/pagination';
-import { triggerDownload } from '$lib/utils/download';
+import { api } from '#lib/api.ts';
+import type { MatchingIdsResponse } from '#lib/utils/pagination.ts';
+import { triggerDownload } from '#lib/utils/download.ts';
 import type {
 	Vendor,
 	SanctionsCheck,
@@ -16,8 +16,8 @@ import type {
 	VendorConsolidationResponse,
 	VendorMergeResponse,
 	VendorStatusCounts
-} from '$lib/types/vendor';
-import type { ImportResult } from '$lib/types/csvImport';
+} from '#lib/types/vendor.ts';
+import type { ImportResult } from '#lib/types/csvImport.ts';
 
 // --- Vendor picker options ---
 

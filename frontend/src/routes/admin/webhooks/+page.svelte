@@ -1,21 +1,21 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
-	import { page } from '$app/stores';
-	import { formatDate } from '$lib/utils/time';
-	import { auth } from '$lib/stores/auth.svelte';
-	import PageHeader from '$lib/components/ui/PageHeader.svelte';
-	import DataTable from '$lib/components/ui/DataTable.svelte';
-	import Modal from '$lib/components/ui/Modal.svelte';
-	import SecretReveal from '$lib/components/ui/SecretReveal.svelte';
-	import FilterChips from '$lib/components/ui/FilterChips.svelte';
-	import RowAction from '$lib/components/ui/RowAction.svelte';
-	import RowLink from '$lib/components/ui/RowLink.svelte';
-	import Badge from '$lib/components/ui/Badge.svelte';
-	import type { BadgeTone } from '$lib/components/ui/badgeTone';
-	import { toast } from '$lib/components/ui/Toast.svelte';
-	import { m } from '$lib/i18n/store.svelte';
-	import { isRowOpenClick } from '$lib/utils/rowNav';
-	import { createRequestSequencer } from '$lib/utils/requestSequence';
+	import { page } from '$app/state';
+	import { formatDate } from '#lib/utils/time.ts';
+	import { auth } from '#lib/stores/auth.svelte.ts';
+	import PageHeader from '#lib/components/ui/PageHeader.svelte';
+	import DataTable from '#lib/components/ui/DataTable.svelte';
+	import Modal from '#lib/components/ui/Modal.svelte';
+	import SecretReveal from '#lib/components/ui/SecretReveal.svelte';
+	import FilterChips from '#lib/components/ui/FilterChips.svelte';
+	import RowAction from '#lib/components/ui/RowAction.svelte';
+	import RowLink from '#lib/components/ui/RowLink.svelte';
+	import Badge from '#lib/components/ui/Badge.svelte';
+	import type { BadgeTone } from '#lib/components/ui/badgeTone.ts';
+	import { toast } from '#lib/components/ui/Toast.svelte';
+	import { m } from '#lib/i18n/store.svelte.ts';
+	import { isRowOpenClick } from '#lib/utils/rowNav.ts';
+	import { createRequestSequencer } from '#lib/utils/requestSequence.ts';
 	import {
 		listWebhookSubscriptions,
 		createWebhookSubscription,
@@ -24,19 +24,19 @@
 		deleteWebhookSubscription,
 		listWebhookDeliveries,
 		redeliverWebhookDelivery
-	} from '$lib/api/webhooks';
+	} from '#lib/api/webhooks.ts';
 	import {
 		WEBHOOK_EVENT_TYPES,
 		type WebhookSubscription,
 		type WebhookSubscriptionCreated,
 		type WebhookSecretRotated,
 		type WebhookDelivery
-	} from '$lib/types/webhooks';
+	} from '#lib/types/webhooks.ts';
 	import {
 		OVERLAP_CHOICES,
 		OVERLAP_DEFAULT_MINUTES,
 		isOverlapLive
-	} from '$lib/utils/webhookRotation';
+	} from '#lib/utils/webhookRotation.ts';
 
 	// RBAC: the backend gates every /api/webhooks endpoint to admin only and
 	// 403s the rest. Wait for `auth.user` to resolve before redirecting so we
@@ -373,7 +373,7 @@
 	let redeliveringId = $state<string | null>(null);
 
 	// URL-backed status filter (so a deep link / reload preserves the view).
-	const statusFilter = $derived($page.url.searchParams.get('status') ?? 'all');
+	const statusFilter = $derived(page.url.searchParams.get('status') ?? 'all');
 
 	const deliveryChips = $derived([
 		{ key: 'all', label: m('admin.webhooks.filter.all') },
@@ -381,10 +381,10 @@
 	]);
 
 	function setStatusFilter(next: string) {
-		const url = new URL($page.url);
+		const url = new URL(page.url.href);
 		if (next === 'all') url.searchParams.delete('status');
 		else url.searchParams.set('status', next);
-		goto(`${url.pathname}${url.search}`, { replaceState: true, keepFocus: true, noScroll: true });
+		goto(`${url.pathname}${url.search}`, { replace: true, reset: false });
 	}
 
 	async function loadDeliveries() {

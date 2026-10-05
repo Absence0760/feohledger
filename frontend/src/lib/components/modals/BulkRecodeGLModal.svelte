@@ -1,7 +1,7 @@
 <script lang="ts">
-	import { focusTrap } from '$lib/actions/focusTrap';
-	import { api } from '$lib/api';
-	import { toast } from '$lib/components/ui/Toast.svelte';
+	import { focusTrap } from '#lib/actions/focusTrap.ts';
+	import { api } from '#lib/api.ts';
+	import { toast } from '#lib/components/ui/Toast.svelte';
 
 	interface Props {
 		onclose: () => void;

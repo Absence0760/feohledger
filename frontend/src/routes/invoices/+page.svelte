@@ -1,38 +1,38 @@
 <script lang="ts">
-	import type { Invoice, InvoiceStatus, AdvancedSearchFilters } from '$lib/types/invoice';
-	import { INVOICE_STATUSES, INVOICE_STATUS_LABEL_KEYS, EMPTY_ADVANCED_FILTERS, SYSTEM_MANAGED_STATUSES, IMMUTABLE_STATUSES, commonTransitions } from '$lib/types/invoice';
-	import { invoiceStore } from '$lib/stores/invoices.svelte';
-	import { auth } from '$lib/stores/auth.svelte';
-	import { adminStore } from '$lib/stores/admin.svelte';
-	import { api } from '$lib/api';
-	import StatusBadge from '$lib/components/ui/StatusBadge.svelte';
-	import InvoiceModal from '$lib/components/modals/InvoiceModal.svelte';
-	import CreateInvoiceModal from '$lib/components/modals/CreateInvoiceModal.svelte';
-	import AdvancedSearchModal from '$lib/components/modals/AdvancedSearchModal.svelte';
-	import BulkRecodeGLModal from '$lib/components/modals/BulkRecodeGLModal.svelte';
-	import ImportCsvModal from '$lib/components/modals/ImportCsvModal.svelte';
-	import type { ImportResult } from '$lib/types/csvImport';
-	import RowAction from '$lib/components/ui/RowAction.svelte';
-	import RowLink from '$lib/components/ui/RowLink.svelte';
-	import { isRowOpenClick } from '$lib/utils/rowNav';
-	import { formatList } from '$lib/utils/list';
-	import { invoiceWarningText } from '$lib/api/invoiceWarnings';
-	import { pruneSelection } from '$lib/utils/selection';
-	import type { MatchingIdsResponse } from '$lib/utils/pagination';
-	import SearchBox from '$lib/components/ui/SearchBox.svelte';
-	import PageHeader from '$lib/components/ui/PageHeader.svelte';
-	import DataTable from '$lib/components/ui/DataTable.svelte';
-	import EmptyState from '$lib/components/ui/EmptyState.svelte';
-	import Money from '$lib/components/ui/Money.svelte';
-	import { toast } from '$lib/components/ui/Toast.svelte';
-	import { workflowStore } from '$lib/stores/workflows.svelte';
-	import { orgCurrency } from '$lib/stores/orgSettings.svelte';
-	import { m } from '$lib/i18n/store.svelte';
-	import { page } from '$app/stores';
+	import type { Invoice, InvoiceStatus, AdvancedSearchFilters } from '#lib/types/invoice.ts';
+	import { INVOICE_STATUSES, INVOICE_STATUS_LABEL_KEYS, EMPTY_ADVANCED_FILTERS, SYSTEM_MANAGED_STATUSES, IMMUTABLE_STATUSES, commonTransitions } from '#lib/types/invoice.ts';
+	import { invoiceStore } from '#lib/stores/invoices.svelte.ts';
+	import { auth } from '#lib/stores/auth.svelte.ts';
+	import { adminStore } from '#lib/stores/admin.svelte.ts';
+	import { api } from '#lib/api.ts';
+	import StatusBadge from '#lib/components/ui/StatusBadge.svelte';
+	import InvoiceModal from '#lib/components/modals/InvoiceModal.svelte';
+	import CreateInvoiceModal from '#lib/components/modals/CreateInvoiceModal.svelte';
+	import AdvancedSearchModal from '#lib/components/modals/AdvancedSearchModal.svelte';
+	import BulkRecodeGLModal from '#lib/components/modals/BulkRecodeGLModal.svelte';
+	import ImportCsvModal from '#lib/components/modals/ImportCsvModal.svelte';
+	import type { ImportResult } from '#lib/types/csvImport.ts';
+	import RowAction from '#lib/components/ui/RowAction.svelte';
+	import RowLink from '#lib/components/ui/RowLink.svelte';
+	import { isRowOpenClick } from '#lib/utils/rowNav.ts';
+	import { formatList } from '#lib/utils/list.ts';
+	import { invoiceWarningText } from '#lib/api/invoiceWarnings.ts';
+	import { pruneSelection } from '#lib/utils/selection.ts';
+	import type { MatchingIdsResponse } from '#lib/utils/pagination.ts';
+	import SearchBox from '#lib/components/ui/SearchBox.svelte';
+	import PageHeader from '#lib/components/ui/PageHeader.svelte';
+	import DataTable from '#lib/components/ui/DataTable.svelte';
+	import EmptyState from '#lib/components/ui/EmptyState.svelte';
+	import Money from '#lib/components/ui/Money.svelte';
+	import { toast } from '#lib/components/ui/Toast.svelte';
+	import { workflowStore } from '#lib/stores/workflows.svelte.ts';
+	import { orgCurrency } from '#lib/stores/orgSettings.svelte.ts';
+	import { m } from '#lib/i18n/store.svelte.ts';
+	import { page } from '$app/state';
 	import { afterNavigate, replaceState } from '$app/navigation';
 	import { untrack } from 'svelte';
-	import SortableHeader from '$lib/components/ui/SortableHeader.svelte';
-	import { toggleSort, type SortOrder } from '$lib/utils/sort';
+	import SortableHeader from '#lib/components/ui/SortableHeader.svelte';
+	import { toggleSort, type SortOrder } from '#lib/utils/sort.ts';
 
 	// Search + the quick status chips are URL-backed (`?search=&status=`)
 	// alongside `assigned_to_id`, sort and the `?id=` deep link, so a reload /
@@ -43,7 +43,7 @@
 	//
 	// `readUrlState` is the one READER of those params, used at mount and again
 	// by the `afterNavigate` hook below for a navigation that reuses this page.
-	function readUrlState(params: URLSearchParams) {
+	function readUrlState(params: Pick<URLSearchParams, 'get'>) {
 		return {
 			search: params.get('search') ?? '',
 			statuses: (params.get('status') ?? '')
@@ -54,12 +54,12 @@
 			sortOrder: (params.get('order') === 'asc' ? 'asc' : 'desc') as SortOrder
 		};
 	}
-	const initialUrlState = readUrlState($page.url.searchParams);
+	const initialUrlState = readUrlState(page.url.searchParams);
 	let search = $state(initialUrlState.search);
 	let activeStatuses = $state<InvoiceStatus[]>(initialUrlState.statuses);
-	// The `?id=` deep link, mirrored out of `$page.url` (see the effect near
+	// The `?id=` deep link, mirrored out of `page.url` (see the effect near
 	// the bottom) so `syncUrl()` — the single query-string writer — can own it.
-	let deepLinkId = $state<string | null>($page.url.searchParams.get('id'));
+	let deepLinkId = $state<string | null>(page.url.searchParams.get('id'));
 	let editing = $state<Invoice | null>(null);
 	let showAdvancedSearch = $state(false);
 	let advancedFilters = $state<AdvancedSearchFilters>({ ...EMPTY_ADVANCED_FILTERS });
@@ -210,22 +210,22 @@
 	 *
 	 * SvelteKit's shallow-routing `replaceState` writes `history` and
 	 * `page.state` but **never updates `page.url`** (see `@sveltejs/kit`'s
-	 * `client.js`), so `$page.url` stays frozen at the last real navigation.
+	 * `client.js`), so `page.url` stays frozen at the last real navigation.
 	 * Two writers that each rebuilt from it therefore didn't merely race —
 	 * they deterministically dropped each other's params: the old
 	 * `syncSortUrl()` rebuilt a URL with no `search=`/`status=` in it, and the
 	 * next filter change rebuilt one with no `sort=`. Same reason `?id=` is
-	 * owned here rather than inherited from `$page.url`: after
+	 * owned here rather than inherited from `page.url`: after
 	 * `closeInvoiceModal()` scrubbed it, the next rebuild read it straight
 	 * back off the frozen URL and re-armed the deep link.
 	 *
-	 * Building the string from scratch (rather than mutating `$page.url`) is
+	 * Building the string from scratch (rather than mutating `page.url`) is
 	 * what makes "one owner" checkable: a param that is not listed below does
-	 * not survive, so a future param cannot be half-owned. `$page.url` is read
+	 * not survive, so a future param cannot be half-owned. `page.url` is read
 	 * only for `pathname`.
 	 *
 	 * Every read here is untracked because this is a WRITER called from the
-	 * filter `$effect`s below — a tracked `$page.url` read would self-trigger
+	 * filter `$effect`s below — a tracked `page.url` read would self-trigger
 	 * the very effect that calls `replaceState`, and a tracked `search` read
 	 * would make every filter effect re-fire on each keystroke (issue #168).
 	 */
@@ -242,14 +242,14 @@
 				params.set('order', sortOrder);
 			}
 			const qs = params.toString();
-			replaceState(`${$page.url.pathname}${qs ? `?${qs}` : ''}`, {});
+			replaceState(`${page.url.pathname}${qs ? `?${qs}` : ''}`, {});
 		});
 	}
 
 	/**
 	 * A navigation that REUSES this mounted page re-reads the URL.
 	 *
-	 * The state above is seeded from `$page.url` once, at mount — right for a
+	 * The state above is seeded from `page.url` once, at mount — right for a
 	 * fresh visit, wrong for a navigation SvelteKit serves with the same
 	 * component: the sidebar's Invoices row clicked while on a filtered view, a
 	 * `goto('/invoices?…')`, or Back/Forward between two real history entries
@@ -263,7 +263,7 @@
 	 * the new search and sort, read untracked), a search change alone goes
 	 * through the debounced search effect, and a sort change alone refetches
 	 * here because no effect tracks the sort. The `?id=` deep link is the
-	 * effect further down's job, off the same `$page.url`.
+	 * effect further down's job, off the same `page.url`.
 	 */
 	afterNavigate(({ from, to, type }) => {
 		if (type === 'enter' || !from || !to || from.route.id !== to.route.id) return;
@@ -363,10 +363,10 @@
 	// fetch, so resolve it straight from the API rather than the in-memory list.
 	//
 	// Two halves, deliberately split:
-	//   - the READ is `$page.url`, because a deep link arrives by REAL
+	//   - the READ is `page.url`, because a deep link arrives by REAL
 	//     navigation and that is the only thing which updates it;
 	//   - the WRITE is `deepLinkId`, mirrored out of that read and serialised
-	//     by `syncUrl()`, because `replaceState` never updates `$page.url` — so
+	//     by `syncUrl()`, because `replaceState` never updates `page.url` — so
 	//     the scrub on close has to be recorded in state or the next URL write
 	//     reads the id straight back off the frozen URL.
 	// Re-arming stays driven by the URL, never by the close handler (a marker
@@ -374,7 +374,7 @@
 	// re-open the modal the user had just closed).
 	let deepLinkLoaded = $state<string | null>(null);
 	$effect(() => {
-		const id = $page.url.searchParams.get('id');
+		const id = page.url.searchParams.get('id');
 		// State reads AND writes are untracked: this effect depends on the
 		// router's URL and on nothing else, so it can neither self-trigger nor
 		// re-fire when `syncUrl()` clears the mirror.

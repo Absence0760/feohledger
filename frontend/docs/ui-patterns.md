@@ -19,7 +19,7 @@ existing component first; only deviate with a written justification.
 ### Page layout
 
 Wrap every authenticated route in **`<PageHeader title="…">`**
-(`$lib/components/ui/PageHeader.svelte`) — it renders the `.workspace`
+(`#lib/components/ui/PageHeader.svelte`) — it renders the `.workspace`
 shell, the `.toolbar` header with the `<h1>` title, and an optional
 `{#snippet actions()}` for right-aligned primary actions (e.g.
 `+ Invite User`, `+ Upload Invoices`). The page body goes in `children`.
@@ -109,7 +109,7 @@ Five things a panelised page has to get right:
 
 ### Data tables (`DataTable`)
 
-Use **`<DataTable>`** (`$lib/components/ui/DataTable.svelte`) for every
+Use **`<DataTable>`** (`#lib/components/ui/DataTable.svelte`) for every
 grid page instead of hand-rolling `<div class="grid-container"><table>`:
 
 ```svelte
@@ -159,16 +159,16 @@ grid page instead of hand-rolling `<div class="grid-container"><table>`:
 
 ### Column sort (`SortableHeader`)
 
-`$lib/components/ui/SortableHeader.svelte` renders one clickable, sortable
+`#lib/components/ui/SortableHeader.svelte` renders one clickable, sortable
 `<th>` for use inside a `DataTable`'s `header` snippet (see the note in
-*Data tables* above). Pairs with the pure `$lib/utils/sort.ts::toggleSort`
+*Data tables* above). Pairs with the pure `#lib/utils/sort.ts::toggleSort`
 helper — click an inactive column to sort it ascending, click the active
 one again to flip direction:
 
 ```svelte
 <script lang="ts">
-    import SortableHeader from '$lib/components/ui/SortableHeader.svelte';
-    import { toggleSort, type SortOrder } from '$lib/utils/sort';
+    import SortableHeader from '#lib/components/ui/SortableHeader.svelte';
+    import { toggleSort, type SortOrder } from '#lib/utils/sort.ts';
 
     let sortField = $state<string | null>($page.url.searchParams.get('sort'));
     let sortOrder = $state<SortOrder>(($page.url.searchParams.get('order') as SortOrder) ?? 'desc');
@@ -211,7 +211,7 @@ Pill-shaped search input with a magnifier-glass SVG. Single component:
 
 ```svelte
 <script lang="ts">
-    import SearchBox from '$lib/components/ui/SearchBox.svelte';
+    import SearchBox from '#lib/components/ui/SearchBox.svelte';
     let search = $state('');
 </script>
 
@@ -271,8 +271,8 @@ appears when one or more rows are selected:
 
 ```svelte
 <script lang="ts">
-    import BulkBar from '$lib/components/ui/BulkBar.svelte';
-    import BulkDeleteButton from '$lib/components/ui/BulkDeleteButton.svelte';
+    import BulkBar from '#lib/components/ui/BulkBar.svelte';
+    import BulkDeleteButton from '#lib/components/ui/BulkDeleteButton.svelte';
 
     let selected = $state<Set<string>>(new Set());
 </script>
@@ -344,7 +344,7 @@ items, then a centred Load More button below the table:
 ```
 
 - Append, don't replace. `loadMore` issues `page=N+1` and appends the new
-  items **via `appendUnique` (`$lib/utils/pagination.ts`)** — never a raw
+  items **via `appendUnique` (`#lib/utils/pagination.ts`)** — never a raw
   `[...existing, ...res.items]` spread. Offset pagination can re-surface a
   row when the underlying set shifts between fetches (a new row inserted, a
   notification arriving), and a duplicated id crashes the keyed
@@ -382,7 +382,7 @@ items, then a centred Load More button below the table:
 
 Every list surface that can have a request in flight while something else
 changes the list wires **`createRequestSequencer()`**
-(`$lib/utils/requestSequence.ts`). This is now the whole app, not a handful of
+(`#lib/utils/requestSequence.ts`). This is now the whole app, not a handful of
 pages: the list stores (`invoices`, `payments`, `contracts`, `expenses`,
 `notifications`, `admin`, `workflows`), the list routes (`vendors`,
 `vendors/screening`, `discounts`, `positive-pay`, `recurring`, `budgets`,
@@ -539,7 +539,7 @@ refetch (a sort change needs its own fetch — no effect tracks it). Shallow
 
 ### Status filter chips
 
-Use **`<FilterChips>`** (`$lib/components/ui/FilterChips.svelte`) for the
+Use **`<FilterChips>`** (`#lib/components/ui/FilterChips.svelte`) for the
 pill-shaped status filter above the table:
 
 ```svelte
@@ -586,7 +586,7 @@ pill-shaped status filter above the table:
 
 ### Modals
 
-Use **`<Modal>`** (`$lib/components/ui/Modal.svelte`) — backdrop +
+Use **`<Modal>`** (`#lib/components/ui/Modal.svelte`) — backdrop +
 centred dialog with backdrop-click + Esc to close:
 
 ```svelte
@@ -612,7 +612,7 @@ centred dialog with backdrop-click + Esc to close:
 - Cancel sits left of the primary action. Required-field markers use
   `<em class="required">*</em>`.
 - **Never hand-roll a modal shell.** Every dialog — including the feature
-  dialogs in `$lib/components/modals/` — wraps its body in `<Modal>`. Do
+  dialogs in `#lib/components/modals/` — wraps its body in `<Modal>`. Do
   not write your own `.backdrop` / `div.modal[role="dialog"]`, your own
   Esc / backdrop-click handlers, or a `<svelte:window onkeydown>` to close
   — `Modal` already owns all of that, and a private copy drifts (the
@@ -625,7 +625,7 @@ centred dialog with backdrop-click + Esc to close:
 
 ### Per-row actions
 
-Use the shared `<RowAction>` component (`$lib/components/ui/RowAction.svelte`)
+Use the shared `<RowAction>` component (`#lib/components/ui/RowAction.svelte`)
 for every per-row button across every grid page. Variants:
 - `default` — neutral border, accent on hover (Edit, Apply, link buttons)
 - `success` — green border + text (Verify)
@@ -664,7 +664,7 @@ accessible:
 
 1. **Primary cell** (the id / name / number — `invoice_number`,
    `po_number`, workflow name, user name) wraps its content in
-   **`<RowLink>`** (`$lib/components/ui/RowLink.svelte`). RowLink renders
+   **`<RowLink>`** (`#lib/components/ui/RowLink.svelte`). RowLink renders
    a real `<button>` (pass `onclick` — opens a modal) or `<a>` (pass
    `href` — navigates), styled to look like plain cell text but
    focusable, keyboard-operable, and announced by screen readers. This
@@ -676,7 +676,7 @@ accessible:
 
 2. **Whole row** carries `class="clickable"` + an `onclick` that opens
    the same destination, gated by **`isRowOpenClick(e)`**
-   (`$lib/utils/rowNav.ts`). The guard bails when the click lands on a
+   (`#lib/utils/rowNav.ts`). The guard bails when the click lands on a
    button, link, input, or the `.checkbox-col` / `.actions` cells — so the
    bulk-select checkbox and the kept **Delete** (and other per-row action)
    buttons still work. This is the Gmail/Linear "click anywhere except the
@@ -808,10 +808,10 @@ Don't re-add per-route `accent-color` rules on checkboxes/radios — they
 only tint the *checked* state and are redundant no-ops under the global
 `appearance: none`.
 
-(All Source paths are under `$lib/components/`.) If a shared style is
+(All Source paths are under `#lib/components/`.) If a shared style is
 missing, add it to `src/app.css` (class-scoped) — not a per-route
 `<style>`. If you need a brand-new pattern, add a component under
-`$lib/components/ui/` and document it here. **Do not** invent a new
+`#lib/components/ui/` and document it here. **Do not** invent a new
 class name for an existing pattern, and **do not** re-introduce a
 per-route copy of the table/modal/chip/shell CSS.
 
@@ -849,7 +849,7 @@ inherit it for free. Reuse these; don't re-solve them per page.
      loop ends on its finished picture — never on the blank frame it starts
      from, never off-screen.
   2. **A hidden starting state is set by script, never by a stylesheet.**
-     `use:reveal` (`$lib/actions/reveal.ts`) adds `.reveal` only once it has
+     `use:reveal` (`#lib/actions/reveal.ts`) adds `.reveal` only once it has
      attached, and not at all under reduced motion or without
      `IntersectionObserver` — so a failed bundle is a normal page, not a blank
      one. `use:countUp` likewise leaves the real figure in the markup.
@@ -872,7 +872,7 @@ inherit it for free. Reuse these; don't re-solve them per page.
   (`tests-e2e/marketing/landing.spec.ts`), and the axe scans of these pages run
   under `emulateMedia({ reducedMotion: 'reduce' })` so contrast is measured at
   rest rather than mid-fade.
-- **Modal / focus trap** (`ui/Modal.svelte` + `$lib/actions/focusTrap.ts`;
+- **Modal / focus trap** (`ui/Modal.svelte` + `#lib/actions/focusTrap.ts`;
   WCAG 2.1.2 / 2.4.3) — `use:focusTrap={{ onEscape }}` on a dialog box
   (with `tabindex="-1"`) moves focus in on open, traps Tab / Shift+Tab
   with wrap-around, closes on Esc, and restores focus to the trigger on

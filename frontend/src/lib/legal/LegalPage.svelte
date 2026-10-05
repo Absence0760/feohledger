@@ -102,7 +102,7 @@
 		const headings = [...root.querySelectorAll<HTMLElement>('h2[id]')];
 		sections = headings.map((h) => ({ id: h.id, label: (h.textContent ?? '').trim() }));
 
-		// Same guard as `$lib/actions/reveal.ts`: without the observer the list
+		// Same guard as `#lib/actions/reveal.ts`: without the observer the list
 		// is still a complete, working table of contents — it just marks nothing
 		// as current. Degrading to "no highlight" beats throwing on a legal page.
 		if (headings.length === 0 || typeof IntersectionObserver === 'undefined') return;

@@ -1,47 +1,47 @@
 <script lang="ts">
-	import { api } from '$lib/api';
-	import { appendUnique } from '$lib/utils/pagination';
-	import type { MatchingIdsResponse } from '$lib/utils/pagination';
-	import { createRequestSequencer } from '$lib/utils/requestSequence';
-	import { pruneSelection } from '$lib/utils/selection';
-	import { toggleSort, type SortOrder } from '$lib/utils/sort';
+	import { api } from '#lib/api.ts';
+	import { appendUnique } from '#lib/utils/pagination.ts';
+	import type { MatchingIdsResponse } from '#lib/utils/pagination.ts';
+	import { createRequestSequencer } from '#lib/utils/requestSequence.ts';
+	import { pruneSelection } from '#lib/utils/selection.ts';
+	import { toggleSort, type SortOrder } from '#lib/utils/sort.ts';
 	import { untrack } from 'svelte';
 	// Aliased: this page already has a local `page` variable for the loaded
-	// vendor-list page number (below) — `$app/stores`'s page is the URL/route
+	// vendor-list page number (below) — `$app/state`'s page is the URL/route
 	// store, unrelated, and the two names would otherwise collide.
-	import { page as urlStore } from '$app/stores';
+	import { page as urlStore } from '$app/state';
 	import { replaceState } from '$app/navigation';
-	import RowAction from '$lib/components/ui/RowAction.svelte';
-	import RowLink from '$lib/components/ui/RowLink.svelte';
-	import SearchBox from '$lib/components/ui/SearchBox.svelte';
-	import PageHeader from '$lib/components/ui/PageHeader.svelte';
-	import FilterChips from '$lib/components/ui/FilterChips.svelte';
-	import DataTable from '$lib/components/ui/DataTable.svelte';
-	import SortableHeader from '$lib/components/ui/SortableHeader.svelte';
-	import BulkBar from '$lib/components/ui/BulkBar.svelte';
-	import Modal from '$lib/components/ui/Modal.svelte';
-	import Badge from '$lib/components/ui/Badge.svelte';
-	import ScreeningBadge from '$lib/components/ui/ScreeningBadge.svelte';
-	import VendorModal from '$lib/components/modals/VendorModal.svelte';
-	import VendorConsolidationModal from '$lib/components/modals/VendorConsolidationModal.svelte';
-	import ImportCsvModal from '$lib/components/modals/ImportCsvModal.svelte';
-	import CreateVendorModal from '$lib/components/modals/CreateVendorModal.svelte';
-	import EmptyState from '$lib/components/ui/EmptyState.svelte';
-	import InviteVendorPortalUserModal from '$lib/components/modals/InviteVendorPortalUserModal.svelte';
-	import { toast } from '$lib/components/ui/Toast.svelte';
-	import { isRowOpenClick } from '$lib/utils/rowNav';
-	import { auth } from '$lib/stores/auth.svelte';
-	import { PERM_VENDOR_MANAGE } from '$lib/types/admin';
-	import { m } from '$lib/i18n/store.svelte';
-	import { importVendorsCsv, type PortalInviteResult } from '$lib/api/vendors';
+	import RowAction from '#lib/components/ui/RowAction.svelte';
+	import RowLink from '#lib/components/ui/RowLink.svelte';
+	import SearchBox from '#lib/components/ui/SearchBox.svelte';
+	import PageHeader from '#lib/components/ui/PageHeader.svelte';
+	import FilterChips from '#lib/components/ui/FilterChips.svelte';
+	import DataTable from '#lib/components/ui/DataTable.svelte';
+	import SortableHeader from '#lib/components/ui/SortableHeader.svelte';
+	import BulkBar from '#lib/components/ui/BulkBar.svelte';
+	import Modal from '#lib/components/ui/Modal.svelte';
+	import Badge from '#lib/components/ui/Badge.svelte';
+	import ScreeningBadge from '#lib/components/ui/ScreeningBadge.svelte';
+	import VendorModal from '#lib/components/modals/VendorModal.svelte';
+	import VendorConsolidationModal from '#lib/components/modals/VendorConsolidationModal.svelte';
+	import ImportCsvModal from '#lib/components/modals/ImportCsvModal.svelte';
+	import CreateVendorModal from '#lib/components/modals/CreateVendorModal.svelte';
+	import EmptyState from '#lib/components/ui/EmptyState.svelte';
+	import InviteVendorPortalUserModal from '#lib/components/modals/InviteVendorPortalUserModal.svelte';
+	import { toast } from '#lib/components/ui/Toast.svelte';
+	import { isRowOpenClick } from '#lib/utils/rowNav.ts';
+	import { auth } from '#lib/stores/auth.svelte.ts';
+	import { PERM_VENDOR_MANAGE } from '#lib/types/admin.ts';
+	import { m } from '#lib/i18n/store.svelte.ts';
+	import { importVendorsCsv, type PortalInviteResult } from '#lib/api/vendors.ts';
 	import {
 		VENDOR_STATUS_TONES,
 		vendorSourceLabelKey,
 		vendorStatusLabelKey
-	} from '$lib/types/vendor';
-	import type { Vendor, VendorBankDetails } from '$lib/types/vendor';
-	import type { ImportResult } from '$lib/types/csvImport';
-	import { getVendorIds, bulkVendorStatus, bulkScreenVendors, exportVendorsCsv } from '$lib/api/vendors';
+	} from '#lib/types/vendor.ts';
+	import type { Vendor, VendorBankDetails } from '#lib/types/vendor.ts';
+	import type { ImportResult } from '#lib/types/csvImport.ts';
+	import { getVendorIds, bulkVendorStatus, bulkScreenVendors, exportVendorsCsv } from '#lib/api/vendors.ts';
 
 	type BankDetails = VendorBankDetails;
 
@@ -150,10 +150,10 @@
 	// (below) so a reload / back-button / shared link reproduces the same view —
 	// mirrors `/contracts` + `/expenses`. See `syncUrl()`.
 	const VENDOR_STATUSES = ['active', 'unverified', 'inactive', 'rejected'];
-	let search = $state($urlStore.url.searchParams.get('search') ?? '');
+	let search = $state(urlStore.url.searchParams.get('search') ?? '');
 	let statusFilter = $state(
-		VENDOR_STATUSES.includes($urlStore.url.searchParams.get('status') ?? '')
-			? ($urlStore.url.searchParams.get('status') as string)
+		VENDOR_STATUSES.includes(urlStore.url.searchParams.get('status') ?? '')
+			? (urlStore.url.searchParams.get('status') as string)
 			: 'all'
 	);
 	let syncing = $state(false);
@@ -171,8 +171,8 @@
 	// Column sort — URL-backed (`?sort=&order=`) so it survives a reload/share,
 	// mirroring the /expenses `syncUrl()` pattern (see `syncSortUrl` below).
 	// `null` field = the backend's own default order (name ascending).
-	let sortField = $state<string | null>($urlStore.url.searchParams.get('sort'));
-	let sortOrder = $state<SortOrder>(($urlStore.url.searchParams.get('order') as SortOrder) ?? 'asc');
+	let sortField = $state<string | null>(urlStore.url.searchParams.get('sort'));
+	let sortOrder = $state<SortOrder>((urlStore.url.searchParams.get('order') as SortOrder) ?? 'asc');
 
 	// --- Bulk selection ---
 	let selected = $state<Set<string>>(new Set());
@@ -221,7 +221,7 @@
 
 	// Status and source are message keys, not English literals — an
 	// unrecognised value from the API renders raw rather than blank. Both maps
-	// live in `$lib/types/vendor.ts` beside `VENDOR_STATUS_TONES`, so the badge
+	// live in `#lib/types/vendor.ts` beside `VENDOR_STATUS_TONES`, so the badge
 	// can't name a status the tone map tints differently.
 	const statusLabel = (s: string) => {
 		const key = vendorStatusLabelKey(s);
@@ -334,14 +334,14 @@
 
 	// Reflect the live filter state (search + status + sort) into the URL —
 	// mirrors `/contracts` + `/expenses`. EVERY read here is untracked,
-	// `$urlStore.url` included: this is a WRITER called from the filter
+	// `urlStore.url` included: this is a WRITER called from the filter
 	// `$effect`s and the debounce timer, never a dependency source — a tracked
-	// `$urlStore` read would self-trigger the effect that calls `replaceState`,
+	// `urlStore` read would self-trigger the effect that calls `replaceState`,
 	// and a tracked `search` read would make every filter effect re-fire on
 	// each keystroke (issue #168).
 	function syncUrl() {
 		untrack(() => {
-			const url = new URL($urlStore.url);
+			const url = new URL(urlStore.url.href);
 			const s = search.trim();
 			if (s) url.searchParams.set('search', s);
 			else url.searchParams.delete('search');

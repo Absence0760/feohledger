@@ -4,14 +4,14 @@
 		RoutingField,
 		RoutingOperator,
 		RoutingRule,
-	} from '$lib/types/workflow';
+	} from '#lib/types/workflow.ts';
 	import {
 		ROUTING_FIELD_LABELS,
 		ROUTING_OPERATOR_LABELS,
-	} from '$lib/types/workflow';
-	import type { AdminUser } from '$lib/types/admin';
-	import { m } from '$lib/i18n/store.svelte';
-	import { orgCurrency } from '$lib/stores/orgSettings.svelte';
+	} from '#lib/types/workflow.ts';
+	import type { AdminUser } from '#lib/types/admin.ts';
+	import { m } from '#lib/i18n/store.svelte.ts';
+	import { orgCurrency } from '#lib/stores/orgSettings.svelte.ts';
 
 	type Props = {
 		chain: ApprovalLevelConfig[];

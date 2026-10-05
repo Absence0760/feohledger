@@ -1,9 +1,9 @@
 <script lang="ts">
-	import ToolResultView from '$lib/components/assistant/ToolResultView.svelte';
-	import CashPositionChart from '$lib/components/cash-flow/CashPositionChart.svelte';
-	import PlanCard from '$lib/components/cash-flow/PlanCard.svelte';
-	import type { ToolInvocation } from '$lib/types/assistant';
-	import type { CashPositionResult, PaymentPlanResult } from '$lib/types/cashFlow';
+	import ToolResultView from '#lib/components/assistant/ToolResultView.svelte';
+	import CashPositionChart from '#lib/components/cash-flow/CashPositionChart.svelte';
+	import PlanCard from '#lib/components/cash-flow/PlanCard.svelte';
+	import type { ToolInvocation } from '#lib/types/assistant.ts';
+	import type { CashPositionResult, PaymentPlanResult } from '#lib/types/cashFlow.ts';
 
 	let { invocation }: { invocation: ToolInvocation } = $props();
 

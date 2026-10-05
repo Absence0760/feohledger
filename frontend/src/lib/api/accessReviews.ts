@@ -1,11 +1,11 @@
 // Typed helpers for the periodic SOX access-review surface. Routes through the
 // shared `api` client (Bearer + X-Tenant-Slug + 401-bounce) — never raw fetch.
 // Backend: `backend/app/api/access_reviews.py` (admin/CFO gated).
-import { api } from '$lib/api';
+import { api } from '#lib/api.ts';
 import type {
 	AccessReviewAcknowledgeResponse,
 	AccessReviewResponse
-} from '$lib/types/accessReview';
+} from '#lib/types/accessReview.ts';
 
 /** Every active user holding an elevated role, with a computed dormancy
  *  verdict. The read itself is audited server-side (a sensitive read). */

@@ -5,9 +5,9 @@
 		ConditionField,
 		ConditionOperator,
 		WorkflowStep,
-	} from '$lib/types/workflow';
-	import { CONDITION_FIELD_LABELS, CONDITION_OPERATOR_LABELS } from '$lib/types/workflow';
-	import { m } from '$lib/i18n/store.svelte';
+	} from '#lib/types/workflow.ts';
+	import { CONDITION_FIELD_LABELS, CONDITION_OPERATOR_LABELS } from '#lib/types/workflow.ts';
+	import { m } from '#lib/i18n/store.svelte.ts';
 
 	type Props = {
 		config: ConditionStepConfig;

@@ -3,17 +3,17 @@
 	// accuracy (placeholder), plus the recent decision log. Read-only surface over
 	// GET /api/exceptions/agent-stats + /agent-decisions (admin/ap_manager-gated).
 	import { onMount } from 'svelte';
-	import KpiCard from '$lib/components/ui/KpiCard.svelte';
-	import DataTable from '$lib/components/ui/DataTable.svelte';
-	import Modal from '$lib/components/ui/Modal.svelte';
-	import RowAction from '$lib/components/ui/RowAction.svelte';
-	import { toast } from '$lib/components/ui/Toast.svelte';
+	import KpiCard from '#lib/components/ui/KpiCard.svelte';
+	import DataTable from '#lib/components/ui/DataTable.svelte';
+	import Modal from '#lib/components/ui/Modal.svelte';
+	import RowAction from '#lib/components/ui/RowAction.svelte';
+	import { toast } from '#lib/components/ui/Toast.svelte';
 	import {
 		getAgentStats,
 		getAgentDecisions,
 		getAgentCandidates,
 		runExceptionAgent
-	} from '$lib/api/exceptionAgents';
+	} from '#lib/api/exceptionAgents.ts';
 	import {
 		agentActionLabelKey,
 		autonomyLevelLabelKey,
@@ -21,16 +21,16 @@
 		type AgentDecision,
 		type AgentCandidateException,
 		type AgentResolveResult
-	} from '$lib/types/exceptionAgents';
+	} from '#lib/types/exceptionAgents.ts';
 	import {
 		exceptionStatusLabelKey,
 		exceptionTypeFallback,
 		exceptionTypeLabelKey
-	} from '$lib/types/exception';
-	import { appendUnique } from '$lib/utils/pagination';
-	import { createRequestSequencer } from '$lib/utils/requestSequence';
-	import { formatDate } from '$lib/utils/time';
-	import { m } from '$lib/i18n/store.svelte';
+	} from '#lib/types/exception.ts';
+	import { appendUnique } from '#lib/utils/pagination.ts';
+	import { createRequestSequencer } from '#lib/utils/requestSequence.ts';
+	import { formatDate } from '#lib/utils/time.ts';
+	import { m } from '#lib/i18n/store.svelte.ts';
 
 	const PAGE_SIZE = 20;
 

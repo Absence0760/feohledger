@@ -13,14 +13,14 @@
 // until later extraction slices — that's the intended incremental path.
 
 export const en = {
-	// Primary navigation — top-level links ($lib/nav.ts)
+	// Primary navigation — top-level links (#lib/nav.ts)
 	'nav.dashboard': 'Dashboard',
 	'nav.invoices': 'Invoices',
 	'nav.payments': 'Payments',
 	'nav.vendors': 'Vendors',
 	'nav.exceptions': 'Exceptions',
 
-	// Primary navigation — group labels ($lib/nav.ts)
+	// Primary navigation — group labels (#lib/nav.ts)
 	'nav.group.procurement': 'Procurement',
 	'nav.group.billing': 'Billing',
 	'nav.group.insights': 'Insights',
@@ -28,7 +28,7 @@ export const en = {
 	'nav.group.governance': 'Governance',
 	'nav.group.settings': 'Settings',
 
-	// Primary navigation — group children ($lib/nav.ts)
+	// Primary navigation — group children (#lib/nav.ts)
 	'nav.purchaseOrders': 'Purchase Orders',
 	'nav.goodsReceipts': 'Goods Receipts',
 	'nav.requisitions': 'Requisitions',
@@ -425,7 +425,7 @@ export const en = {
 	'invoices.col.assignedTo': 'Assigned To',
 	// Invoice status labels — the /invoices chips + bulk picker, the dashboard
 	// pipeline, StatusBadge, InvoiceModal and AdvancedSearchModal
-	// ($lib/types/invoice.ts::INVOICE_STATUS_LABEL_KEYS)
+	// (#lib/types/invoice.ts::INVOICE_STATUS_LABEL_KEYS)
 	'invoices.status.new': 'New',
 	'invoices.status.pending': 'Extracting',
 	'invoices.status.readyForReview': 'Ready for Review',
@@ -576,7 +576,7 @@ export const en = {
 	'payments.col.status': 'Status',
 	'payments.col.routes': 'Routes',
 
-	// Payment status labels — the History badge + its filter chips ($lib/types/payment.ts::PAYMENT_STATUS_LABEL_KEYS)
+	// Payment status labels — the History badge + its filter chips (#lib/types/payment.ts::PAYMENT_STATUS_LABEL_KEYS)
 	'payments.status.pending': 'Pending',
 	'payments.status.pendingCompliance': 'Compliance Hold',
 	'payments.status.submitted': 'Submitted',
@@ -586,7 +586,7 @@ export const en = {
 	'payments.status.cancelled': 'Cancelled',
 	'payments.status.voided': 'Voided',
 
-	// Payment rail labels ($lib/types/payment.ts). BACS / Faster Payments / CHAPS are UK scheme NAMES and stay verbatim in every locale, like ACH.
+	// Payment rail labels (#lib/types/payment.ts). BACS / Faster Payments / CHAPS are UK scheme NAMES and stay verbatim in every locale, like ACH.
 	'payments.method.ach': 'ACH',
 	'payments.method.wire': 'Wire',
 	'payments.method.check': 'Check',
@@ -796,7 +796,7 @@ export const en = {
 	'vendors.filter.active': 'Active',
 	'vendors.filter.rejected': 'Rejected',
 
-	// Vendor lifecycle status + source value labels ($lib/types/vendor.ts). The status wording matches the filter chips above on purpose — chip and row badge name the same state.
+	// Vendor lifecycle status + source value labels (#lib/types/vendor.ts). The status wording matches the filter chips above on purpose — chip and row badge name the same state.
 	'vendors.status.active': 'Active',
 	'vendors.status.unverified': 'Unverified',
 	'vendors.status.inactive': 'Inactive',
@@ -811,7 +811,7 @@ export const en = {
 	'vendors.col.status': 'Status',
 	'vendors.col.screening': 'Screening',
 
-	// Sanctions-screening pill — ui/ScreeningBadge.svelte + $lib/types/vendor.ts
+	// Sanctions-screening pill — ui/ScreeningBadge.svelte + #lib/types/vendor.ts
 	'vendors.screening.status.unscreened': 'Unscreened',
 	'vendors.screening.status.clear': 'Clear',
 	'vendors.screening.status.review': 'Review',
@@ -819,14 +819,14 @@ export const en = {
 	'vendors.screening.blocked': 'Blocked',
 	'vendors.screening.adverseMedia': 'Negative news',
 	'vendors.screening.adverseMediaTitle': 'Adverse-media (negative news) hit — review the relationship',
-	// Screening-hit taxonomy ($lib/types/vendor.ts). Fixed, PII-free vocabulary —
+	// Screening-hit taxonomy (#lib/types/vendor.ts). Fixed, PII-free vocabulary —
 	// the adapters normalise every provider's own wording into these four.
 	'vendors.screening.category.sanctions': 'Sanctions list',
 	'vendors.screening.category.pep': 'Politically exposed person',
 	'vendors.screening.category.adverseMedia': 'Negative news',
 	'vendors.screening.category.highRiskCountry': 'High-risk jurisdiction',
 
-	// Vendor risk level + the two composed pill strings, and the enrichable-field names ($lib/types/vendor.ts)
+	// Vendor risk level + the two composed pill strings, and the enrichable-field names (#lib/types/vendor.ts)
 	'vendors.risk.low': 'Low',
 	'vendors.risk.medium': 'Medium',
 	'vendors.risk.high': 'High',
@@ -1103,7 +1103,7 @@ export const en = {
 	'exceptions.col.type': 'Type',
 	'exceptions.col.severity': 'Sev',
 
-	// Exception-severity labels ($lib/types/exception.ts::EXCEPTION_SEVERITY_LABEL_KEYS).
+	// Exception-severity labels (#lib/types/exception.ts::EXCEPTION_SEVERITY_LABEL_KEYS).
 	// The queue's `severity` cell printed the raw wire value (`error` / `warning`
 	// / `info`, lowercase Latin) beside a type and a status that were already
 	// translated. The backend declares the roster in a comment on
@@ -1164,7 +1164,7 @@ export const en = {
 		'Selected the first {shown} of {total} matching — narrow your filters to select the rest.',
 	'exceptions.toast.selectAllFailed': 'Failed to select all matching',
 
-	// Exception-type labels ($lib/types/exception.ts::EXCEPTION_TYPE_LABEL_KEYS).
+	// Exception-type labels (#lib/types/exception.ts::EXCEPTION_TYPE_LABEL_KEYS).
 	// Each ENGLISH value is byte-identical to
 	// `backend/app/api/exceptions.py::EXCEPTION_TYPE_LABELS`, which is what the
 	// queue still renders through the wire's `type_label`; `exception.test.ts`
@@ -1194,7 +1194,7 @@ export const en = {
 	'exceptions.agents.kpi.escalationRate': 'Escalation rate',
 	// The agent-action vocabulary — one set of keys shared by the decision badge,
 	// the filter chips and the two count KPIs
-	// ($lib/types/exceptionAgents.ts::ACTION_LABEL_KEYS).
+	// (#lib/types/exceptionAgents.ts::ACTION_LABEL_KEYS).
 	'exceptions.agents.action.autoResolved': 'Auto-resolved',
 	'exceptions.agents.action.escalated': 'Escalated',
 	'exceptions.agents.action.noAction': 'No action',
@@ -1283,7 +1283,7 @@ export const en = {
 	'contracts.col.value': 'Value',
 	'contracts.col.spend': 'Spend',
 
-	// Contract status + type value labels ($lib/types/contract.ts)
+	// Contract status + type value labels (#lib/types/contract.ts)
 	'contracts.status.draft': 'Draft',
 	'contracts.status.active': 'Active',
 	'contracts.status.expired': 'Expired',
@@ -1424,7 +1424,7 @@ export const en = {
 	'recurring.col.generated': 'Generated',
 	'recurring.col.status': 'Status',
 
-	// Recurring template status + cadence value labels ($lib/types/recurring.ts)
+	// Recurring template status + cadence value labels (#lib/types/recurring.ts)
 	'recurring.status.active': 'Active',
 	'recurring.status.paused': 'Paused',
 	'recurring.status.ended': 'Ended',
@@ -2167,7 +2167,7 @@ export const en = {
 	'expenses.col.amount': 'Amount',
 	'expenses.col.status': 'Status',
 
-	// Expense status + payment-method value labels ($lib/types/expense.ts)
+	// Expense status + payment-method value labels (#lib/types/expense.ts)
 	'expenses.status.draft': 'Draft',
 	'expenses.status.submitted': 'Submitted',
 	'expenses.status.approved': 'Approved',
@@ -2220,7 +2220,7 @@ export const en = {
 	'expenses.reports.col.category': 'Category',
 	'expenses.reports.col.amount': 'Amount',
 
-	// Expense-report status labels ($lib/types/expense.ts)
+	// Expense-report status labels (#lib/types/expense.ts)
 	'expenses.reports.status.draft': 'Draft',
 	'expenses.reports.status.submitted': 'Submitted',
 	'expenses.reports.status.pendingApproval': 'Pending Approval',
@@ -2265,7 +2265,7 @@ export const en = {
 	'expenses.preapprovals.col.estimated': 'Estimated',
 	'expenses.preapprovals.col.status': 'Status',
 
-	// Pre-approval request status labels ($lib/types/expense.ts)
+	// Pre-approval request status labels (#lib/types/expense.ts)
 	'expenses.preapprovals.status.pending': 'Pending',
 	'expenses.preapprovals.status.approved': 'Approved',
 	'expenses.preapprovals.status.rejected': 'Rejected',
@@ -2287,7 +2287,7 @@ export const en = {
 	'expenses.cards.col.amount': 'Amount',
 	'expenses.cards.col.status': 'Status',
 
-	// Corporate-card reconciliation status labels ($lib/types/expense.ts)
+	// Corporate-card reconciliation status labels (#lib/types/expense.ts)
 	'expenses.cards.status.unmatched': 'Unmatched',
 	'expenses.cards.status.matched': 'Matched',
 	'expenses.cards.status.ignored': 'Ignored',
@@ -2605,7 +2605,7 @@ export const en = {
 	'catalogs.col.name': 'Name',
 	'catalogs.col.type': 'Type',
 
-	// Catalog type value labels ($lib/types/catalog.ts). Punch-out is the industry term and stays verbatim outside ja, which already transliterates it in catalogs.punchout.title.
+	// Catalog type value labels (#lib/types/catalog.ts). Punch-out is the industry term and stays verbatim outside ja, which already transliterates it in catalogs.punchout.title.
 	'catalogs.type.internal': 'Internal',
 	'catalogs.type.punchout': 'Punch-out',
 
@@ -2641,7 +2641,7 @@ export const en = {
 	'catalogs.guided.contractLabel': 'Contract: {number}',
 	'catalogs.guided.preferredTag': 'Preferred',
 
-	// Why guided buying is steering the buyer here ($lib/types/catalog.ts)
+	// Why guided buying is steering the buyer here (#lib/types/catalog.ts)
 	'catalogs.guided.reason.preferredCatalog': 'Preferred catalog',
 	'catalogs.guided.reason.activeContract': 'Active contract',
 
@@ -2717,7 +2717,7 @@ export const en = {
 	'catalogs.punchout.noRole': "Your role can't start a punch-out session.",
 	'catalogs.punchout.status': 'Status',
 
-	// Punch-out session status labels ($lib/types/catalog.ts)
+	// Punch-out session status labels (#lib/types/catalog.ts)
 	'catalogs.punchout.status.pending': 'Awaiting cart',
 	'catalogs.punchout.status.returned': 'Cart returned',
 	'catalogs.punchout.status.converted': 'Converted',
@@ -3121,7 +3121,7 @@ export const en = {
 	'positivePay.col.created': 'Created',
 	'positivePay.col.status': 'Status',
 
-	// Bank formatter labels ($lib/types/positivePay.ts) — read by the generate
+	// Bank formatter labels (#lib/types/positivePay.ts) — read by the generate
 	// picker, the list's Format column AND the detail meta pill, which used to print
 	// the raw `fixed_width`. "CSV" stays verbatim in every locale (a format name).
 	'positivePay.bankFormat.csv': 'CSV',
@@ -3176,7 +3176,7 @@ export const en = {
 	'positivePay.modal.toast.returnFailed': 'Could not process return',
 	'positivePay.modal.toast.downloadFailed': 'Download failed',
 
-	// Positive Pay file-type + status value labels ($lib/types/positivePay.ts). The type also interpolates into positivePay.fileLabel below, so an English literal would land mid-sentence.
+	// Positive Pay file-type + status value labels (#lib/types/positivePay.ts). The type also interpolates into positivePay.fileLabel below, so an English literal would land mid-sentence.
 	'positivePay.fileType.checkIssue': 'Check issue',
 	'positivePay.fileType.achAuthorization': 'ACH authorization',
 	'positivePay.status.generated': 'Generated',
@@ -3374,7 +3374,7 @@ export const en = {
 	'portal.invoices.resubmitted': 'Invoice resubmitted for AP review.',
 	'portal.invoices.resubmitFailed': 'Resubmission failed',
 	'portal.invoices.filterAll': 'All',
-	// Vendor-facing invoice PHASE labels ($lib/types/portalStatus.ts). A phase is a
+	// Vendor-facing invoice PHASE labels (#lib/types/portalStatus.ts). A phase is a
 	// stable id, not the label — these strings are display only, so translating one
 	// can never move a status between filter chips.
 	'portal.invoices.phase.submitted': 'Submitted',
@@ -3414,7 +3414,7 @@ export const en = {
 	'portal.payments.emptyFiltered': 'No payments match your filters.',
 	'portal.payments.clearFilters': 'Clear filters',
 	'portal.payments.filterAll': 'All',
-	// Vendor-facing payment PHASE labels ($lib/types/portalStatus.ts).
+	// Vendor-facing payment PHASE labels (#lib/types/portalStatus.ts).
 	'portal.payments.phase.scheduled': 'Scheduled',
 	'portal.payments.phase.processing': 'Processing',
 	'portal.payments.phase.completed': 'Completed',
@@ -5157,7 +5157,7 @@ export const en = {
 	'vendorStatements.col.statementTotal': 'Statement total',
 	'vendorStatements.col.status': 'Status',
 
-	// Reconciliation run status ($lib/types/vendorStatementRecon.ts)
+	// Reconciliation run status (#lib/types/vendorStatementRecon.ts)
 	'vendorStatements.status.open': 'Open',
 	'vendorStatements.status.resolved': 'Resolved',
 
@@ -5253,7 +5253,7 @@ export const en = {
 	'vendorStatements.modal.thClassification': 'Classification',
 	'vendorStatements.modal.thResolution': 'Resolution',
 
-	// Per-line classification / resolution + the source-format pill ($lib/types/vendorStatementRecon.ts)
+	// Per-line classification / resolution + the source-format pill (#lib/types/vendorStatementRecon.ts)
 	'vendorStatements.classification.matched': 'Matched',
 	'vendorStatements.classification.amountMismatch': 'Amount mismatch',
 	'vendorStatements.classification.missingOurSide': 'Missing (our side)',
@@ -5684,7 +5684,7 @@ export const en = {
 	'paymentRuns.runDetail.title': 'Payment Run',
 	'paymentRuns.runDetail.total': 'Total',
 	// Payment-RUN status labels — the /payments Runs table + RunDetailModal's
-	// header pill ($lib/types/payment.ts::RUN_STATUS_LABEL_KEYS)
+	// header pill (#lib/types/payment.ts::RUN_STATUS_LABEL_KEYS)
 	'paymentRuns.status.draft': 'Draft',
 	'paymentRuns.status.executing': 'Executing',
 	'paymentRuns.status.submitted': 'Submitted',

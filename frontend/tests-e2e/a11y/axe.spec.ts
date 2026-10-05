@@ -1,4 +1,4 @@
-import type { EligibleInvoice } from '$lib/types/creditMemo';
+import type { EligibleInvoice } from '#lib/types/creditMemo.ts';
 import { expect, invoicePicker, NO_TENANT_BASE, test, vendorPicker } from '../fixtures/helpers';
 import { expectNoA11yViolations } from './axe-helper';
 

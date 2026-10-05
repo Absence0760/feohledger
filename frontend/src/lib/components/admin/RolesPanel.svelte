@@ -1,12 +1,12 @@
 <script lang="ts">
-	import { adminStore } from '$lib/stores/admin.svelte';
-	import { toast } from '$lib/components/ui/Toast.svelte';
-	import RowAction from '$lib/components/ui/RowAction.svelte';
-	import DataTable from '$lib/components/ui/DataTable.svelte';
-	import Modal from '$lib/components/ui/Modal.svelte';
-	import { m } from '$lib/i18n/store.svelte';
-	import { roleLabelKey } from '$lib/types/admin';
-	import type { Role } from '$lib/types/admin';
+	import { adminStore } from '#lib/stores/admin.svelte.ts';
+	import { toast } from '#lib/components/ui/Toast.svelte';
+	import RowAction from '#lib/components/ui/RowAction.svelte';
+	import DataTable from '#lib/components/ui/DataTable.svelte';
+	import Modal from '#lib/components/ui/Modal.svelte';
+	import { m } from '#lib/i18n/store.svelte.ts';
+	import { roleLabelKey } from '#lib/types/admin.ts';
+	import type { Role } from '#lib/types/admin.ts';
 
 	// $derived so the column headers re-render when the locale changes.
 	let SYSTEM_COLUMNS = $derived([{ label: m('admin.roles.col.name') }, { label: m('admin.roles.col.description') }]);

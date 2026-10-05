@@ -1,25 +1,25 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
-	import { formatDate } from '$lib/utils/time';
-	import { auth } from '$lib/stores/auth.svelte';
-	import Badge from '$lib/components/ui/Badge.svelte';
-	import PageHeader from '$lib/components/ui/PageHeader.svelte';
-	import DataTable from '$lib/components/ui/DataTable.svelte';
-	import Modal from '$lib/components/ui/Modal.svelte';
-	import SecretReveal from '$lib/components/ui/SecretReveal.svelte';
-	import RowAction from '$lib/components/ui/RowAction.svelte';
-	import RowLink from '$lib/components/ui/RowLink.svelte';
-	import { toast } from '$lib/components/ui/Toast.svelte';
-	import { m } from '$lib/i18n/store.svelte';
-	import { isRowOpenClick } from '$lib/utils/rowNav';
-	import { createRequestSequencer } from '$lib/utils/requestSequence';
+	import { formatDate } from '#lib/utils/time.ts';
+	import { auth } from '#lib/stores/auth.svelte.ts';
+	import Badge from '#lib/components/ui/Badge.svelte';
+	import PageHeader from '#lib/components/ui/PageHeader.svelte';
+	import DataTable from '#lib/components/ui/DataTable.svelte';
+	import Modal from '#lib/components/ui/Modal.svelte';
+	import SecretReveal from '#lib/components/ui/SecretReveal.svelte';
+	import RowAction from '#lib/components/ui/RowAction.svelte';
+	import RowLink from '#lib/components/ui/RowLink.svelte';
+	import { toast } from '#lib/components/ui/Toast.svelte';
+	import { m } from '#lib/i18n/store.svelte.ts';
+	import { isRowOpenClick } from '#lib/utils/rowNav.ts';
+	import { createRequestSequencer } from '#lib/utils/requestSequence.ts';
 	import {
 		listApiKeys,
 		createApiKey,
 		revokeApiKey,
 		getApiKeyUsage
-	} from '$lib/api/apiKeys';
-	import type { ApiKey, ApiKeyCreated, ApiKeyUsage } from '$lib/types/apiKeys';
+	} from '#lib/api/apiKeys.ts';
+	import type { ApiKey, ApiKeyCreated, ApiKeyUsage } from '#lib/types/apiKeys.ts';
 
 	// RBAC: the backend gates every /api/api-keys endpoint to admin only and 403s
 	// the rest. Wait for `auth.user` to resolve before redirecting so we don't

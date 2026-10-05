@@ -1,8 +1,8 @@
 <script lang="ts">
-	import { page } from '$app/stores';
-	import { api } from '$lib/api';
-	import { formatMoney } from '$lib/utils/money';
-	import { m } from '$lib/i18n/store.svelte';
+	import { page } from '$app/state';
+	import { api } from '#lib/api.ts';
+	import { formatMoney } from '#lib/utils/money.ts';
+	import { m } from '#lib/i18n/store.svelte.ts';
 
 	interface RevealResponse {
 		last_four: string | null;
@@ -19,7 +19,7 @@
 	let card = $state<RevealResponse | null>(null);
 	let copied = $state<'pan' | 'cvv' | null>(null);
 
-	const token = $derived($page.params.token ?? '');
+	const token = $derived(page.params.token ?? '');
 
 	$effect(() => {
 		if (!token) return;

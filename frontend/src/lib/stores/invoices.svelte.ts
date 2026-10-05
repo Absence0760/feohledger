@@ -1,7 +1,7 @@
-import type { Invoice } from '$lib/types/invoice';
-import { api } from '$lib/api';
-import { appendUnique } from '$lib/utils/pagination';
-import { createRequestSequencer } from '$lib/utils/requestSequence';
+import type { Invoice } from '#lib/types/invoice.ts';
+import { api } from '#lib/api.ts';
+import { appendUnique } from '#lib/utils/pagination.ts';
+import { createRequestSequencer } from '#lib/utils/requestSequence.ts';
 
 interface InvoiceListResponse {
 	items: Invoice[];

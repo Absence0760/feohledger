@@ -396,7 +396,7 @@ Audit `details` never carry PII / banking data.
 
 ## Frontend route
 
-`/recurring`, under the **Billing** nav group (`$lib/nav.ts`). Template CRUD via
+`/recurring`, under the **Billing** nav group (`#lib/nav.ts`). Template CRUD via
 a `<Modal>`, status `FilterChips` (`active` / `paused` / `ended`), a KPI row
 (active templates, monthly committed, generated this period, next run), and — in
 the detail modal — an **upcoming-schedule preview** (from

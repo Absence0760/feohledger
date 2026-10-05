@@ -1,6 +1,6 @@
 ---
 name: ui-polisher
-description: Redesigns one page, route, or component of the SvelteKit app to FeohLedger's UI/UX quality bar — correct archetype for the data, the shared `$lib/components/ui/` primitives, URL-backed filter/sort state, localized dates + money, the four async states, and WCAG 2.2 AA. Knows the CI guards a careless polish trips. Edits files; does not commit. Invoked by /polish-ui or when the user asks to "make page X look better".
+description: Redesigns one page, route, or component of the SvelteKit app to FeohLedger's UI/UX quality bar — correct archetype for the data, the shared `#lib/components/ui/` primitives, URL-backed filter/sort state, localized dates + money, the four async states, and WCAG 2.2 AA. Knows the CI guards a careless polish trips. Edits files; does not commit. Invoked by /polish-ui or when the user asks to "make page X look better".
 tools: Bash, Read, Edit, Write, Grep, Glob
 model: opus
 ---
@@ -103,7 +103,7 @@ this order; the early ones dominate.
   will reject (`backend/app/services/workflow_engine.py::VALID_TRANSITIONS`).
 - An error message names **what happened, why, and the next action.** Never a
   raw status code, never a stack trace, never "Something went wrong" alone.
-  Route API failures through `$lib/utils/apiError.ts` rather than rendering
+  Route API failures through `#lib/utils/apiError.ts` rather than rendering
   `err.message`.
 - Validate on blur and on submit — not on every keystroke, which scolds a user
   mid-type.
@@ -163,7 +163,7 @@ is current as of this file's last revision; when it conflicts with
 
 ### The primitives exist — use them
 
-`$lib/components/ui/` carries 27 primitives. Before you write markup, check
+`#lib/components/ui/` carries 27 primitives. Before you write markup, check
 whether one already owns it:
 
 `DataTable` · `PageHeader` · `SearchBox` · `SortableHeader` · `FilterChips` ·
@@ -173,11 +173,11 @@ whether one already owns it:
 `SecretReveal` · `ApprovalChainProgress` · `DiscountTierBar` · `LinkedMessage` ·
 `BrandMark` · `emptyStateArt.generated.ts`
 
-Plus `$lib/actions/focusTrap.ts` (dialog focus management — do not hand-roll
-Esc/Tab handling), `$lib/actions/reveal.ts`, `$lib/utils/rowNav.ts`,
-`$lib/utils/time.ts`, `$lib/utils/money.ts`, `$lib/utils/selection.ts`,
-`$lib/utils/sort.ts`, `$lib/utils/pagination.ts`,
-`$lib/utils/requestSequence.ts`, `$lib/utils/apiError.ts`.
+Plus `#lib/actions/focusTrap.ts` (dialog focus management — do not hand-roll
+Esc/Tab handling), `#lib/actions/reveal.ts`, `#lib/utils/rowNav.ts`,
+`#lib/utils/time.ts`, `#lib/utils/money.ts`, `#lib/utils/selection.ts`,
+`#lib/utils/sort.ts`, `#lib/utils/pagination.ts`,
+`#lib/utils/requestSequence.ts`, `#lib/utils/apiError.ts`.
 
 The class-name conventions table in `ui-patterns.md` maps every shared class to
 the primitive that owns it. Shared CSS lives in `src/app.css`, class-scoped —
@@ -215,7 +215,7 @@ The app ships six locales (`en`, `de`, `es`, `fr`, `ja`, `pt-BR`).
   `TRANSLATED` roster must come from `m()` — a bare Latin text node or a
   human-readable attribute literal fails that test. That includes
   `aria-label`, `title`, `placeholder`, and button text.
-- Dates: `formatDate` / `timeAgo` / `formatPeriod` from `$lib/utils/time.ts`.
+- Dates: `formatDate` / `timeAgo` / `formatPeriod` from `#lib/utils/time.ts`.
   They follow the active in-app locale. **Never** write
   `toLocaleDateString('en-US', …)` inline — it pins English into five other
   locales. Never leak a raw ISO string or a full `toLocaleString()`
@@ -265,7 +265,7 @@ and is the one exception — do not copy it elsewhere.
 
 - Runes only: `$state` / `$derived` / `$effect` / `$props`. No `export let`,
   no `$:`, no legacy stores in new code.
-- All data through `$lib/api.ts` (it adds the JWT + `X-Tenant-Slug`).
+- All data through `#lib/api.ts` (it adds the JWT + `X-Tenant-Slug`).
   No SSR — the app is `adapter-static` behind CloudFront.
 - Comment the *why*, not the *what*. No docstrings narrating obvious markup.
 - Do not soften a test assertion to make a redesign pass. If markup moved,

@@ -2,8 +2,8 @@
 // through the shared `api` client (Bearer + X-Tenant-Slug + X-Entity-ID +
 // 401-bounce), so every call here is tenant- and entity-scoped by the client
 // the same way the backend scopes it.
-import { api } from '$lib/api';
-import type { GlAccount } from '$lib/types/glAccount';
+import { api } from '#lib/api.ts';
+import type { GlAccount } from '#lib/types/glAccount.ts';
 
 export interface GlAccountListParams {
 	/** Server-side ILIKE over code + name. Never filter the loaded rows instead. */

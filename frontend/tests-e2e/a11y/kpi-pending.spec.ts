@@ -6,7 +6,7 @@ import { expectNoA11yViolations } from './axe-helper';
 
 /**
  * Accessibility regression guard for the **KPI "no figure yet" affordance**
- * (`$lib/components/ui/KpiCard.svelte` + `$lib/utils/kpiValue.ts`).
+ * (`#lib/components/ui/KpiCard.svelte` + `#lib/utils/kpiValue.ts`).
  *
  * The convention this guards, in the order the component applies it:
  *

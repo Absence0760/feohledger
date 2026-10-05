@@ -1,11 +1,11 @@
 <script lang="ts">
-	import { api } from '$lib/api';
-	import { m } from '$lib/i18n/store.svelte';
-	import DataTable from '$lib/components/ui/DataTable.svelte';
-	import Money from '$lib/components/ui/Money.svelte';
-	import MoneyByCurrency from '$lib/components/ui/MoneyByCurrency.svelte';
-	import { entityStore } from '$lib/stores/entity.svelte';
-	import type { AnalyticsByEntity } from '$lib/types/analytics';
+	import { api } from '#lib/api.ts';
+	import { m } from '#lib/i18n/store.svelte.ts';
+	import DataTable from '#lib/components/ui/DataTable.svelte';
+	import Money from '#lib/components/ui/Money.svelte';
+	import MoneyByCurrency from '#lib/components/ui/MoneyByCurrency.svelte';
+	import { entityStore } from '#lib/stores/entity.svelte.ts';
+	import type { AnalyticsByEntity } from '#lib/types/analytics.ts';
 
 	// Consolidated reporting ACROSS entities — a side-by-side per-entity AP
 	// rollup plus a consolidated total (the cross-check). Renders only when the

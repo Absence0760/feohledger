@@ -1,5 +1,5 @@
 {
-	"extends": "./.svelte-kit/tsconfig.json",
+	"extends": "$app/tsconfig",
 	"compilerOptions": {
 		"allowJs": true,
 		"checkJs": true,
@@ -21,11 +21,15 @@
 		// vitest is unaffected: `src/**/*.test.ts` import `describe`/`it`/
 		// `expect` from `'vitest'` explicitly rather than relying on globals.
 		// Node types for the Playwright tree come from `tsconfig.e2e.json`.
-		"types": []
-	}
-	// Path aliases are handled by https://kit.svelte.dev/docs/configuration#alias
-	// except $lib which is handled by https://kit.svelte.dev/docs/configuration#files
-	//
-	// If you want to overwrite includes/excludes, make sure to copy over the relevant includes/excludes
-	// from the referenced tsconfig.json - TypeScript does not merge them in
+		// `$app/types` is SvelteKit's own ambient set (the `$app/*` / `$env/*`
+		// modules); since SvelteKit 3 it arrives through `types` rather than an
+		// `include`d ambient file, so naming it here is what keeps it.
+		"types": ["$app/types"]
+	},
+	// SvelteKit 3's generated parent config carries no `include`, so the set is
+	// declared here. `*` is the root config files; `tests-e2e/` is deliberately
+	// absent — `tsconfig.e2e.json` checks it.
+	"include": ["src", "*"],
+	"exclude": ["src/service-worker"]
+	// `#lib` is a package.json `imports` entry, which TypeScript resolves itself.
 }

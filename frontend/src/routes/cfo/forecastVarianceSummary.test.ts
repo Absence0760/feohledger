@@ -6,7 +6,7 @@ import {
 	variancePctLabel,
 	varianceTone
 } from './forecastVarianceSummary';
-import type { ForecastVariance, ForecastVarianceRow } from '$lib/types/analytics';
+import type { ForecastVariance, ForecastVarianceRow } from '#lib/types/analytics.ts';
 
 function row(over: Partial<ForecastVarianceRow> = {}): ForecastVarianceRow {
 	return {

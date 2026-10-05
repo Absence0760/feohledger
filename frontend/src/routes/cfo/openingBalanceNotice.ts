@@ -1,4 +1,4 @@
-import type { MessageKey } from '$lib/i18n/messages';
+import type { MessageKey } from '#lib/i18n/messages.ts';
 
 /**
  * Which notice — if any — the cash-position card owes the reader about where

@@ -1,7 +1,7 @@
-import type { AdminUser, PermissionCatalogEntry, Role } from '$lib/types/admin';
-import { api } from '$lib/api';
-import { appendUnique } from '$lib/utils/pagination';
-import { createRequestSequencer } from '$lib/utils/requestSequence';
+import type { AdminUser, PermissionCatalogEntry, Role } from '#lib/types/admin.ts';
+import { api } from '#lib/api.ts';
+import { appendUnique } from '#lib/utils/pagination.ts';
+import { createRequestSequencer } from '#lib/utils/requestSequence.ts';
 
 interface AdminUserListResponse {
 	items: AdminUser[];

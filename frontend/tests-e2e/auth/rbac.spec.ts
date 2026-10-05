@@ -1,6 +1,6 @@
 import type { Page } from '@playwright/test';
 
-import { NAV, sidebarHrefs, visibleChildren, type NavGroup } from '$lib/nav';
+import { NAV, sidebarHrefs, visibleChildren, type NavGroup } from '#lib/nav.ts';
 
 import {
 	API_BASE,

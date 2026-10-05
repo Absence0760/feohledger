@@ -2,9 +2,9 @@
 	// Measure (metric + aggregation) picker for the report builder. Driven by the
 	// catalog source's `measures` — each measure exposes the aggregations it
 	// allows. The same field may be added under more than one aggregation.
-	import type { AggFn, CatalogMeasure, SpecMeasure } from '$lib/types/reports';
-	import { AGG_LABELS, measureColumnKey } from '$lib/types/reports';
-	import RowAction from '$lib/components/ui/RowAction.svelte';
+	import type { AggFn, CatalogMeasure, SpecMeasure } from '#lib/types/reports.ts';
+	import { AGG_LABELS, measureColumnKey } from '#lib/types/reports.ts';
+	import RowAction from '#lib/components/ui/RowAction.svelte';
 
 	interface Props {
 		available: CatalogMeasure[];

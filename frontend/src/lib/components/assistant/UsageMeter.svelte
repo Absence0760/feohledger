@@ -1,6 +1,6 @@
 <script lang="ts">
-	import type { UsageResponse } from '$lib/types/assistant';
-	import { m } from '$lib/i18n/store.svelte';
+	import type { UsageResponse } from '#lib/types/assistant.ts';
+	import { m } from '#lib/i18n/store.svelte.ts';
 
 	let { usage }: { usage: UsageResponse | null } = $props();
 

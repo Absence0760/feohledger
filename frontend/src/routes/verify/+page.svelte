@@ -1,11 +1,11 @@
 <script lang="ts">
-	import AuthShell from '$lib/components/auth/AuthShell.svelte';
-	import BrandMark from '$lib/components/ui/BrandMark.svelte';
+	import AuthShell from '#lib/components/auth/AuthShell.svelte';
+	import BrandMark from '#lib/components/ui/BrandMark.svelte';
 	import IconCheck from '~icons/material-symbols/check-circle-outline';
-	import { api } from '$lib/api';
-	import { page } from '$app/stores';
+	import { api } from '#lib/api.ts';
+	import { page } from '$app/state';
 	import { onMount } from 'svelte';
-	import { m } from '$lib/i18n/store.svelte';
+	import { m } from '#lib/i18n/store.svelte.ts';
 
 	interface CompleteResponse {
 		status: string;
@@ -19,7 +19,7 @@
 	let errorMessage = $state<string>('');
 
 	onMount(async () => {
-		const token = $page.url.searchParams.get('token');
+		const token = page.url.searchParams.get('token');
 		if (!token) {
 			phase = 'error';
 			errorMessage = m('auth.verify.noToken');

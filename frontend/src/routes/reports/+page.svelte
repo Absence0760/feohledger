@@ -3,10 +3,10 @@
 	// choose dimensions / measures / filters — the whole builder is driven by
 	// `GET /api/reports/catalog`, never a hardcoded field list. Run renders a
 	// `ReportResult`; a spec can be saved as a named definition, re-loaded, and
-	// exported (CSV / PDF). See `$lib/api/reports.ts` + the API contract.
-	import { page } from '$app/stores';
+	// exported (CSV / PDF). See `#lib/api/reports.ts` + the API contract.
+	import { page } from '$app/state';
 	import { replaceState } from '$app/navigation';
-	import { auth } from '$lib/stores/auth.svelte';
+	import { auth } from '#lib/stores/auth.svelte.ts';
 	import {
 		createReport,
 		deleteReport,
@@ -17,7 +17,7 @@
 		runReport,
 		runSavedReport,
 		updateReport
-	} from '$lib/api/reports';
+	} from '#lib/api/reports.ts';
 	import type {
 		ReportCatalog,
 		ReportDefinition,
@@ -27,20 +27,20 @@
 		SpecDimension,
 		SpecFilter,
 		SpecMeasure
-	} from '$lib/types/reports';
-	import { AGG_LABELS, measureColumnKey } from '$lib/types/reports';
-	import PageHeader from '$lib/components/ui/PageHeader.svelte';
-	import DataTable from '$lib/components/ui/DataTable.svelte';
-	import RowLink from '$lib/components/ui/RowLink.svelte';
-	import RowAction from '$lib/components/ui/RowAction.svelte';
-	import { toast } from '$lib/components/ui/Toast.svelte';
-	import { timeAgo } from '$lib/utils/time';
-	import { isRowOpenClick } from '$lib/utils/rowNav';
-	import DimensionEditor from '$lib/components/reports/DimensionEditor.svelte';
-	import MeasureEditor from '$lib/components/reports/MeasureEditor.svelte';
-	import FilterEditor from '$lib/components/reports/FilterEditor.svelte';
-	import ResultTable from '$lib/components/reports/ResultTable.svelte';
-	import SaveReportModal from '$lib/components/reports/SaveReportModal.svelte';
+	} from '#lib/types/reports.ts';
+	import { AGG_LABELS, measureColumnKey } from '#lib/types/reports.ts';
+	import PageHeader from '#lib/components/ui/PageHeader.svelte';
+	import DataTable from '#lib/components/ui/DataTable.svelte';
+	import RowLink from '#lib/components/ui/RowLink.svelte';
+	import RowAction from '#lib/components/ui/RowAction.svelte';
+	import { toast } from '#lib/components/ui/Toast.svelte';
+	import { timeAgo } from '#lib/utils/time.ts';
+	import { isRowOpenClick } from '#lib/utils/rowNav.ts';
+	import DimensionEditor from '#lib/components/reports/DimensionEditor.svelte';
+	import MeasureEditor from '#lib/components/reports/MeasureEditor.svelte';
+	import FilterEditor from '#lib/components/reports/FilterEditor.svelte';
+	import ResultTable from '#lib/components/reports/ResultTable.svelte';
+	import SaveReportModal from '#lib/components/reports/SaveReportModal.svelte';
 
 	// Saving / patching / deleting a definition is admin/ap_manager/cfo; running
 	// + reading is all four roles (the backend enforces regardless).
@@ -199,12 +199,12 @@
 	}
 
 	function setIdParam(id: string) {
-		const url = new URL($page.url);
+		const url = new URL(page.url.href);
 		url.searchParams.set('id', id);
 		replaceState(`${url.pathname}${url.search}`, {});
 	}
 	function clearIdParam() {
-		const url = new URL($page.url);
+		const url = new URL(page.url.href);
 		if (url.searchParams.has('id')) {
 			url.searchParams.delete('id');
 			replaceState(`${url.pathname}${url.search}`, {});
@@ -322,7 +322,7 @@
 		void (async () => {
 			await Promise.all([loadCatalog(), loadSaved()]);
 			// Deep-link: /reports?id=<uuid> loads that saved definition.
-			const id = $page.url.searchParams.get('id');
+			const id = page.url.searchParams.get('id');
 			if (id && !loadedId) await loadDefinition(id, { updateUrl: false });
 		})();
 	});

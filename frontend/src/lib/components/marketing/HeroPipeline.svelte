@@ -3,7 +3,7 @@
 	import IconBolt from '~icons/material-symbols/bolt';
 	import IconApprove from '~icons/material-symbols/fact-check-outline';
 	import IconPay from '~icons/material-symbols/payments-outline';
-	import Badge from '$lib/components/ui/Badge.svelte';
+	import Badge from '#lib/components/ui/Badge.svelte';
 
 	/**
 	 * The hero's moving part: one invoice walking the pipeline the product

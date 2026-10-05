@@ -1,4 +1,4 @@
-import { api } from '$lib/api';
+import { api } from '#lib/api.ts';
 import {
 	EMPTY_BRAND,
 	DEFAULT_PRODUCT_NAME,
@@ -6,7 +6,7 @@ import {
 	brandMark,
 	type Brand,
 	type BrandMarkChoice
-} from '$lib/stores/brandTheme';
+} from '#lib/stores/brandTheme.ts';
 
 /**
  * Per-tenant white-label branding (logo, product name, accent theme colors,
@@ -30,7 +30,7 @@ import {
  */
 
 export type { Brand, BrandMarkChoice };
-export { isValidHexColor, brandThemeVars, brandMark } from '$lib/stores/brandTheme';
+export { isValidHexColor, brandThemeVars, brandMark } from '#lib/stores/brandTheme.ts';
 
 class BrandStore {
 	brand = $state<Brand>({ ...EMPTY_BRAND });

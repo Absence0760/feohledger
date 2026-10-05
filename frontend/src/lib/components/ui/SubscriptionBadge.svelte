@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { SubscriptionStatus } from '$lib/types/billing';
+	import type { SubscriptionStatus } from '#lib/types/billing.ts';
 	import Badge from './Badge.svelte';
 	import type { BadgeTone } from './badgeTone';
 

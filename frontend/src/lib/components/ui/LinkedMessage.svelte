@@ -1,12 +1,12 @@
 <script lang="ts">
-	import { splitTokens } from '$lib/i18n/segments';
+	import { splitTokens } from '#lib/i18n/segments.ts';
 
 	/**
 	 * A translated sentence with links inside it.
 	 *
 	 * The message carries `{token}` markers and `links` maps each token to the
 	 * anchor it renders as, so the translation controls where in the sentence
-	 * each link falls. See `$lib/i18n/segments.ts` for why the alternative —
+	 * each link falls. See `#lib/i18n/segments.ts` for why the alternative —
 	 * `…Pre` / `…Post` catalogue fragments — cannot be translated correctly once
 	 * there is more than one link.
 	 *

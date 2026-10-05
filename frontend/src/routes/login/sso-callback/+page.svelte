@@ -1,10 +1,10 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { page } from '$app/stores';
-	import { api, setToken } from '$lib/api';
-	import { auth } from '$lib/stores/auth.svelte';
+	import { page } from '$app/state';
+	import { api, setToken } from '#lib/api.ts';
+	import { auth } from '#lib/stores/auth.svelte.ts';
 	import { goto } from '$app/navigation';
-	import { m } from '$lib/i18n/store.svelte';
+	import { m } from '#lib/i18n/store.svelte.ts';
 
 	interface SSOCallbackResponse {
 		access_token: string;
@@ -17,9 +17,9 @@
 	let message = $state(m('auth.callback.signingIn'));
 
 	onMount(async () => {
-		const code = $page.url.searchParams.get('code');
-		const state = $page.url.searchParams.get('state');
-		const err = $page.url.searchParams.get('error');
+		const code = page.url.searchParams.get('code');
+		const state = page.url.searchParams.get('state');
+		const err = page.url.searchParams.get('error');
 
 		if (err) {
 			phase = 'error';

@@ -1,4 +1,4 @@
-import { portalApi, setPortalToken, clearPortalToken, hasPortalToken } from '$lib/portalApi';
+import { portalApi, setPortalToken, clearPortalToken, hasPortalToken } from '#lib/portalApi.ts';
 
 interface PortalUser {
 	id: string;

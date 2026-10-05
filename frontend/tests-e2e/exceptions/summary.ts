@@ -1,4 +1,4 @@
-import type { ExceptionSummary } from '$lib/types/exceptionSummary';
+import type { ExceptionSummary } from '#lib/types/exceptionSummary.ts';
 
 /**
  * A stubbed `GET /api/exceptions/summary` body. Every exceptions spec that

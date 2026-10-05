@@ -1,7 +1,7 @@
 // Vendor + sanctions-screening / risk types. These mirror the backend
 // `VendorResponse`, `SanctionsCheckResponse`, `ScreeningReviewItem`, and the
 // `/risk` payloads. The vendor list/detail UI and the typed helpers in
-// `$lib/api/vendors.ts` share them.
+// `#lib/api/vendors.ts` share them.
 
 export type ScreeningStatus = 'unscreened' | 'clear' | 'review' | 'match';
 export type RiskLevel = 'low' | 'medium' | 'high' | 'critical' | 'unknown';
@@ -273,8 +273,8 @@ export interface VendorMergeResponse {
 	merged_at: string;
 }
 
-import type { BadgeTone } from '$lib/components/ui/badgeTone';
-import type { MessageKey } from '$lib/i18n/messages';
+import type { BadgeTone } from '#lib/components/ui/badgeTone.ts';
+import type { MessageKey } from '#lib/i18n/messages.ts';
 
 /**
  * Badge tone per vendor lifecycle status (`Vendor.status`).

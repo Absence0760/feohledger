@@ -1,16 +1,16 @@
 <script lang="ts">
-	import AuthShell from '$lib/components/auth/AuthShell.svelte';
-	import BrandMark from '$lib/components/ui/BrandMark.svelte';
-	import LinkedMessage from '$lib/components/ui/LinkedMessage.svelte';
+	import AuthShell from '#lib/components/auth/AuthShell.svelte';
+	import BrandMark from '#lib/components/ui/BrandMark.svelte';
+	import LinkedMessage from '#lib/components/ui/LinkedMessage.svelte';
 	import IconMail from '~icons/material-symbols/mark-email-unread-outline';
 	import IconCheck from '~icons/material-symbols/check-circle';
 	import IconClose from '~icons/material-symbols/cancel';
 	import { tick } from 'svelte';
-	import { api } from '$lib/api';
+	import { api } from '#lib/api.ts';
 	import { onMount } from 'svelte';
-	import { m } from '$lib/i18n/store.svelte';
-	import { legalTitle } from '$lib/legal/pages';
-	import type { PublicConfig } from '$lib/types/publicConfig';
+	import { m } from '#lib/i18n/store.svelte.ts';
+	import { legalTitle } from '#lib/legal/pages.ts';
+	import type { PublicConfig } from '#lib/types/publicConfig.ts';
 
 	interface StartResponse {
 		status: string;

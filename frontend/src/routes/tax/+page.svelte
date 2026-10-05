@@ -1,27 +1,27 @@
 <script lang="ts">
-	import PageHeader from '$lib/components/ui/PageHeader.svelte';
-	import KpiCard from '$lib/components/ui/KpiCard.svelte';
-	import DataTable from '$lib/components/ui/DataTable.svelte';
-	import SearchBox from '$lib/components/ui/SearchBox.svelte';
-	import FilterChips from '$lib/components/ui/FilterChips.svelte';
-	import Money from '$lib/components/ui/Money.svelte';
-	import Modal from '$lib/components/ui/Modal.svelte';
-	import RowAction from '$lib/components/ui/RowAction.svelte';
-	import Badge from '$lib/components/ui/Badge.svelte';
-	import VendorTaxModal from '$lib/components/modals/VendorTaxModal.svelte';
-	import { toast } from '$lib/components/ui/Toast.svelte';
-	import { formatMoney, isPositiveAmount, sumMoney } from '$lib/utils/money';
-	import { get1099Report, file1099Batch } from '$lib/api/tax';
-	import { auth } from '$lib/stores/auth.svelte';
-	import { m } from '$lib/i18n/store.svelte';
-	import { createRequestSequencer } from '$lib/utils/requestSequence';
+	import PageHeader from '#lib/components/ui/PageHeader.svelte';
+	import KpiCard from '#lib/components/ui/KpiCard.svelte';
+	import DataTable from '#lib/components/ui/DataTable.svelte';
+	import SearchBox from '#lib/components/ui/SearchBox.svelte';
+	import FilterChips from '#lib/components/ui/FilterChips.svelte';
+	import Money from '#lib/components/ui/Money.svelte';
+	import Modal from '#lib/components/ui/Modal.svelte';
+	import RowAction from '#lib/components/ui/RowAction.svelte';
+	import Badge from '#lib/components/ui/Badge.svelte';
+	import VendorTaxModal from '#lib/components/modals/VendorTaxModal.svelte';
+	import { toast } from '#lib/components/ui/Toast.svelte';
+	import { formatMoney, isPositiveAmount, sumMoney } from '#lib/utils/money.ts';
+	import { get1099Report, file1099Batch } from '#lib/api/tax.ts';
+	import { auth } from '#lib/stores/auth.svelte.ts';
+	import { m } from '#lib/i18n/store.svelte.ts';
+	import { createRequestSequencer } from '#lib/utils/requestSequence.ts';
 	import type {
 		Box1099Allocation,
 		Filing1099Response,
 		Report1099,
 		Vendor1099Row
-	} from '$lib/types/tax';
-	import { formatDate } from '$lib/utils/time';
+	} from '#lib/types/tax.ts';
+	import { formatDate } from '#lib/utils/time.ts';
 
 	// `POST /api/tax/vendors/{id}/{w9,tin-verify}` and `POST /api/tax/1099/file`
 	// are all `require_roles(ROLE_ADMIN, ROLE_AP_MANAGER)` — a CFO can read this

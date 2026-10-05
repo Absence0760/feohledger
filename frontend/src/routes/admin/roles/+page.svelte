@@ -5,6 +5,6 @@
 	import { goto } from '$app/navigation';
 
 	$effect(() => {
-		goto('/admin?tab=roles', { replaceState: true });
+		goto('/admin?tab=roles', { replace: true });
 	});
 </script>

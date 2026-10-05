@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { formatDate, formatPeriod, timeAgo } from './time';
-import { setActiveFormatLocale } from '$lib/i18n/formatLocale';
+import { setActiveFormatLocale } from '#lib/i18n/formatLocale.ts';
 
 // The date helpers drive their locale off the active in-app i18n locale
 // (the same holder money.ts reads). These tests assert the locale actually

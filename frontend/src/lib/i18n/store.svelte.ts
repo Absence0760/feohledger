@@ -1,4 +1,4 @@
-import { browser } from '$app/environment';
+import { browser } from '$app/env';
 import { en } from './locales/en';
 import { CATALOGUE_LOADERS } from './catalogues';
 import { interpolate } from './interpolate';

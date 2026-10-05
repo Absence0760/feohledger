@@ -1,23 +1,23 @@
 <script lang="ts">
-	import type { Catalog, CatalogItem, CatalogType } from '$lib/types/catalog';
-	import { CATALOG_TYPES, CATALOG_TYPE_LABEL_KEYS } from '$lib/types/catalog';
-	import { auth } from '$lib/stores/auth.svelte';
-	import Modal from '$lib/components/ui/Modal.svelte';
-	import Money from '$lib/components/ui/Money.svelte';
-	import RowAction from '$lib/components/ui/RowAction.svelte';
-	import VendorPicker from '$lib/components/ui/VendorPicker.svelte';
-	import { toast } from '$lib/components/ui/Toast.svelte';
-	import { m } from '$lib/i18n/store.svelte';
-	import { normalizeMoneyInput } from '$lib/utils/moneyInput';
+	import type { Catalog, CatalogItem, CatalogType } from '#lib/types/catalog.ts';
+	import { CATALOG_TYPES, CATALOG_TYPE_LABEL_KEYS } from '#lib/types/catalog.ts';
+	import { auth } from '#lib/stores/auth.svelte.ts';
+	import Modal from '#lib/components/ui/Modal.svelte';
+	import Money from '#lib/components/ui/Money.svelte';
+	import RowAction from '#lib/components/ui/RowAction.svelte';
+	import VendorPicker from '#lib/components/ui/VendorPicker.svelte';
+	import { toast } from '#lib/components/ui/Toast.svelte';
+	import { m } from '#lib/i18n/store.svelte.ts';
+	import { normalizeMoneyInput } from '#lib/utils/moneyInput.ts';
 	import {
 		createCatalog,
 		updateCatalog,
 		createCatalogItem,
 		deleteCatalogItem,
 		type GlAccountOption
-	} from '$lib/api/catalogs';
-	import { glAccountOptionLabel } from '$lib/types/glAccount';
-	import { entityStore } from '$lib/stores/entity.svelte';
+	} from '#lib/api/catalogs.ts';
+	import { glAccountOptionLabel } from '#lib/types/glAccount.ts';
+	import { entityStore } from '#lib/stores/entity.svelte.ts';
 
 	let {
 		catalog,

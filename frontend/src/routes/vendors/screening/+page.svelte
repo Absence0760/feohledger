@@ -15,31 +15,31 @@
 		blockVendor,
 		unblockVendor,
 		screenVendor
-	} from '$lib/api/vendors';
-	import type { ScreeningReviewItem, SanctionsCheck } from '$lib/types/vendor';
+	} from '#lib/api/vendors.ts';
+	import type { ScreeningReviewItem, SanctionsCheck } from '#lib/types/vendor.ts';
 	import {
 		screeningStatusLabelKey,
 		riskLevelLabelKey,
 		sanctionsResultLabelKey,
 		screeningCategoryLabels
-	} from '$lib/types/vendor';
-	import PageHeader from '$lib/components/ui/PageHeader.svelte';
-	import DataTable from '$lib/components/ui/DataTable.svelte';
-	import SearchBox from '$lib/components/ui/SearchBox.svelte';
-	import Modal from '$lib/components/ui/Modal.svelte';
-	import RowAction from '$lib/components/ui/RowAction.svelte';
-	import RowLink from '$lib/components/ui/RowLink.svelte';
-	import ScreeningBadge from '$lib/components/ui/ScreeningBadge.svelte';
-	import KpiCard from '$lib/components/ui/KpiCard.svelte';
-	import { toast } from '$lib/components/ui/Toast.svelte';
-	import { isRowOpenClick } from '$lib/utils/rowNav';
-	import { createRequestSequencer } from '$lib/utils/requestSequence';
-	import { formatDate } from '$lib/utils/time';
-	import { formatList } from '$lib/utils/list';
+	} from '#lib/types/vendor.ts';
+	import PageHeader from '#lib/components/ui/PageHeader.svelte';
+	import DataTable from '#lib/components/ui/DataTable.svelte';
+	import SearchBox from '#lib/components/ui/SearchBox.svelte';
+	import Modal from '#lib/components/ui/Modal.svelte';
+	import RowAction from '#lib/components/ui/RowAction.svelte';
+	import RowLink from '#lib/components/ui/RowLink.svelte';
+	import ScreeningBadge from '#lib/components/ui/ScreeningBadge.svelte';
+	import KpiCard from '#lib/components/ui/KpiCard.svelte';
+	import { toast } from '#lib/components/ui/Toast.svelte';
+	import { isRowOpenClick } from '#lib/utils/rowNav.ts';
+	import { createRequestSequencer } from '#lib/utils/requestSequence.ts';
+	import { formatDate } from '#lib/utils/time.ts';
+	import { formatList } from '#lib/utils/list.ts';
 	import { untrack } from 'svelte';
-	import { m } from '$lib/i18n/store.svelte';
-	import { auth } from '$lib/stores/auth.svelte';
-	import { PERM_VENDOR_BLOCK } from '$lib/types/admin';
+	import { m } from '#lib/i18n/store.svelte.ts';
+	import { auth } from '#lib/stores/auth.svelte.ts';
+	import { PERM_VENDOR_BLOCK } from '#lib/types/admin.ts';
 
 	// Reviewer capabilities — mirror the backend gates so the UI can't drift.
 	// Block/unblock is the splittable granular permission; re-screen stays on

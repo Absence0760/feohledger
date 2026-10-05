@@ -1,10 +1,10 @@
 <script lang="ts">
-	import AuthShell from '$lib/components/auth/AuthShell.svelte';
-	import BrandMark from '$lib/components/ui/BrandMark.svelte';
-	import { api } from '$lib/api';
-	import { auth } from '$lib/stores/auth.svelte';
+	import AuthShell from '#lib/components/auth/AuthShell.svelte';
+	import BrandMark from '#lib/components/ui/BrandMark.svelte';
+	import { api } from '#lib/api.ts';
+	import { auth } from '#lib/stores/auth.svelte.ts';
 	import { goto } from '$app/navigation';
-	import { m } from '$lib/i18n/store.svelte';
+	import { m } from '#lib/i18n/store.svelte.ts';
 
 	interface UserResponse {
 		id: string;

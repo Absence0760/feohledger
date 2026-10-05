@@ -18,12 +18,12 @@
 	 * failed inspection, see it listed, and watch the invoice pay anyway. The
 	 * receipt carries the PO, so both ids go up together.
 	 */
-	import type { InspectionCreateBody, InspectionResult } from '$lib/api/inspections';
-	import { createInspection, INSPECTION_RESULTS } from '$lib/api/inspections';
-	import type { Inspection } from '$lib/api/inspections';
-	import Modal from '$lib/components/ui/Modal.svelte';
-	import { m } from '$lib/i18n/store.svelte';
-	import type { MessageKey } from '$lib/i18n/messages';
+	import type { InspectionCreateBody, InspectionResult } from '#lib/api/inspections.ts';
+	import { createInspection, INSPECTION_RESULTS } from '#lib/api/inspections.ts';
+	import type { Inspection } from '#lib/api/inspections.ts';
+	import Modal from '#lib/components/ui/Modal.svelte';
+	import { m } from '#lib/i18n/store.svelte.ts';
+	import type { MessageKey } from '#lib/i18n/messages.ts';
 
 	/** The minimum a receipt must expose for this form to link an inspection. */
 	export type InspectableReceipt = {

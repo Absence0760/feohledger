@@ -1,4 +1,4 @@
-import type { CashPosition } from '$lib/types/analytics';
+import type { CashPosition } from '#lib/types/analytics.ts';
 import { expect, signInAndWait, test } from '../fixtures/helpers';
 
 /**

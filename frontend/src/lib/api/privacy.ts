@@ -3,14 +3,14 @@
 // Backend: `backend/app/api/privacy.py` (admin-gated). The DSAR bundle + the
 // erasure confirmation are the two destructive/sensitive operations here —
 // see `backend/docs/privacy.md`.
-import { api } from '$lib/api';
+import { api } from '#lib/api.ts';
 import type {
 	DataSubjectRequestList,
 	DSARRequest,
 	DSARResponse,
 	ErasureRequest,
 	ErasureResponse
-} from '$lib/types/privacy';
+} from '#lib/types/privacy.ts';
 
 /** Assemble a portable bundle of everything held about a data subject.
  *  Non-destructive — safe to re-run. The bundle is returned in the response

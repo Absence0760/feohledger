@@ -1,10 +1,10 @@
 // Typed helpers for the expense + expense-report endpoints. All requests route
 // through the shared `api` client (Bearer + X-Tenant-Slug + X-Entity-ID +
 // 401-bounce). Mirrors the pattern of `src/lib/api/contracts.ts`.
-import { api, formatApiDetail } from '$lib/api';
-import { getApiBase, getTenantSlug } from '$lib/tenant';
-import { getSelectedEntityId } from '$lib/entity';
-import type { MatchingIdsResponse } from '$lib/utils/pagination';
+import { api, formatApiDetail } from '#lib/api.ts';
+import { getApiBase, getTenantSlug } from '#lib/tenant.ts';
+import { getSelectedEntityId } from '#lib/entity.ts';
+import type { MatchingIdsResponse } from '#lib/utils/pagination.ts';
 import type {
 	Expense,
 	ExpenseCreate,
@@ -24,7 +24,7 @@ import type {
 	CardMatchSuggestion,
 	CardImportResult,
 	SyncVirtualCardsResult
-} from '$lib/types/expense';
+} from '#lib/types/expense.ts';
 
 /**
  * Query shape shared by `listExpenses` and `exportExpensesCsv` — but the two
@@ -77,7 +77,7 @@ interface Paginated<T> {
 // The GL picker's option type + loader are owned by `api/glAccounts.ts` /
 // `types/glAccount.ts` (the chart-of-accounts surface), re-exported here so the
 // expense / requisition pages keep one import.
-export type { GlAccountOption } from '$lib/types/glAccount';
+export type { GlAccountOption } from '#lib/types/glAccount.ts';
 
 function expenseQuery(params: ExpenseListParams): URLSearchParams {
 	const qs = new URLSearchParams();
@@ -224,7 +224,7 @@ export function bulkGlCode(
 
 // --- GL accounts (reused from the existing chart-of-accounts endpoint) ---
 
-export { listGlAccounts } from '$lib/api/glAccounts';
+export { listGlAccounts } from '#lib/api/glAccounts.ts';
 
 // --- CSV export ---
 

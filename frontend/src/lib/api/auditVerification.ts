@@ -5,7 +5,7 @@
 // Both reads are themselves audited server-side (`audit.viewed`), so the UI
 // calls them ONLY on an explicit user action — never on mount, never polled.
 // A speculative fetch would write an access row nobody asked for.
-import { api } from '$lib/api';
+import { api } from '#lib/api.ts';
 
 /** The three verdicts `services/approval_signature.check_approval_row` returns.
  *  `invalid` and `unsigned` are deliberately DIFFERENT claims — see

@@ -1,21 +1,21 @@
 <script lang="ts">
-	import type { IntakeRequest, IntakeType } from '$lib/types/intake';
+	import type { IntakeRequest, IntakeType } from '#lib/types/intake.ts';
 	import {
 		INTAKE_TYPES,
 		intakeTypeLabelKey,
 		intakeStatusLabelKey,
 		intakeStatusTone,
 		INTAKE_FORM_FIELDS
-	} from '$lib/types/intake';
-	import { auth } from '$lib/stores/auth.svelte';
-	import { orgCurrency } from '$lib/stores/orgSettings.svelte';
-	import Badge from '$lib/components/ui/Badge.svelte';
-	import Modal from '$lib/components/ui/Modal.svelte';
-	import { toast } from '$lib/components/ui/Toast.svelte';
-	import { m } from '$lib/i18n/store.svelte';
-	import { normalizeMoneyInput } from '$lib/utils/moneyInput';
-	import { DEFAULT_CURRENCY } from '$lib/utils/money';
-	import { createIntake, updateIntake } from '$lib/api/intake';
+	} from '#lib/types/intake.ts';
+	import { auth } from '#lib/stores/auth.svelte.ts';
+	import { orgCurrency } from '#lib/stores/orgSettings.svelte.ts';
+	import Badge from '#lib/components/ui/Badge.svelte';
+	import Modal from '#lib/components/ui/Modal.svelte';
+	import { toast } from '#lib/components/ui/Toast.svelte';
+	import { m } from '#lib/i18n/store.svelte.ts';
+	import { normalizeMoneyInput } from '#lib/utils/moneyInput.ts';
+	import { DEFAULT_CURRENCY } from '#lib/utils/money.ts';
+	import { createIntake, updateIntake } from '#lib/api/intake.ts';
 
 	let {
 		intake,

@@ -9,7 +9,7 @@
 // decisions.md §95 removed the hand-written version because it covered
 // four codes out of dozens and drifted; this one is derived, so it
 // cannot.
-import type { MessageKey } from '$lib/i18n/messages';
+import type { MessageKey } from '#lib/i18n/messages.ts';
 
 /** Rule id → the localized sentence that explains it. */
 export const E_INVOICE_RULE_MESSAGE_KEYS = {

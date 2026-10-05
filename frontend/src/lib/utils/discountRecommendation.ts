@@ -32,7 +32,7 @@
  * `discountPartialSet.ts` and is unit-tested under the plain-Node vitest config.
  */
 
-import { formatMoney } from '$lib/utils/money';
+import { formatMoney } from '#lib/utils/money.ts';
 
 /** The projection of `DiscountRecommendation` this rule reads. Deliberately
  *  narrower than the full interface — the currency question depends on the

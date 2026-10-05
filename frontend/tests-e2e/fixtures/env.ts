@@ -82,7 +82,7 @@ export const PLATFORM_DOMAINS: string = process.env.PUBLIC_PLATFORM_DOMAINS ?? W
  * loopback per RFC 6761, which is why no /etc/hosts entry is needed) — and
  * `localhost` is precisely what `PUBLIC_PLATFORM_DOMAINS` declares, so no
  * `.localhost` name can ever classify as vanity. An IP literal is never a
- * platform host unless it is listed verbatim (`$lib/hostRouting.ts`), Vite
+ * platform host unless it is listed verbatim (`#lib/hostRouting.ts`), Vite
  * serves it with no `allowedHosts` entry (IP literals are exempt from the host
  * check), and it needs no DNS and no Chromium resolver rule at all. The code
  * path it exercises is identical to a real vanity hostname's:

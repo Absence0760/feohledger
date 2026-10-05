@@ -17,7 +17,7 @@ it is read on demand rather than loaded into every conversation:
 
 ## Stack
 
-- **SvelteKit 2** with **Svelte 5** (runes syntax), adapter-static
+- **SvelteKit 3** with **Svelte 5** (runes syntax), adapter-static
 - **TypeScript** 5.8, **pnpm**
 - **Icons**: unplugin-icons with `@iconify-json/material-symbols`
 - **Markdown**: mdsvex
@@ -45,10 +45,9 @@ pnpm test:unit        # vitest unit tests (i18n parity, pure helpers, the
 
 ### `pnpm check` does not cover `tests-e2e/` — `pnpm check:e2e` does
 
-`tsconfig.json` extends `.svelte-kit/tsconfig.json`, whose generated `include`
-lists `../src/**`, `../test/**` and `../tests/**`. `tests-e2e` is none of those,
-and TypeScript does not merge includes from an extended config, so the omission
-is **silent**: an e2e spec can carry any type error at all and `pnpm check`
+`tsconfig.json` extends SvelteKit's generated `$app/tsconfig` and declares its
+own `include` of `src` plus the root config files. `tests-e2e` is neither, so
+the omission is **silent**: an e2e spec can carry any type error at all and `pnpm check`
 stays green.
 
 What that cost: every e2e stub of an API response was a hand-maintained object
@@ -66,21 +65,21 @@ into the **Frontend** CI job beside the typecheck, and into root `pnpm lint` as
   `satisfies DashboardData`, so a new non-optional field on the app type is a
   compile error in the fixture rather than a spec that quietly stops exercising
   its own branch. Build a new stub this way whenever the shape it fakes has a
-  `$lib/types` counterpart. It found two real drifts on the way in — the
+  `#lib/types` counterpart. It found two real drifts on the way in — the
   dashboard's `discount_capture` money was typed `MoneyString` while the wire
   sends JSON numbers, and the five `AgingBuckets` bands were typed `number` and
   were being summed and divided as raw currency in the route.
-- **`$lib` imports under `tests-e2e/` are `import type`, with one narrow
+- **`#lib` imports under `tests-e2e/` are `import type`, with one narrow
   exception.** Types are erased before the runtime sees them, which is why the
   contract costs nothing at test time. A VALUE import is different: Playwright
-  does resolve the `$lib` alias itself, but not SvelteKit's virtual modules, so
-  a value import typechecks and then fails to load (`Cannot find package
-  '$env'`) the moment its module graph reaches `$env/*`, `$app/*` or a
-  `.svelte` file — `$lib/api` does, through `$lib/tenant`. The exception is a
+  resolves `#lib` itself (it is a package.json `imports` entry), but not
+  SvelteKit's virtual modules, so a value import typechecks and then fails to
+  load the moment its module graph reaches `$app/*` or a `.svelte` file —
+  `#lib/api.ts` does, through `#lib/tenant.ts` (`$app/env/public`). The exception is a
   module that is **pure by design and says so**: `tests-e2e/auth/rbac.spec.ts`
-  imports `$lib/nav`'s functions so it can compare the rendered sidebar with
+  imports `#lib/nav`'s functions so it can compare the rendered sidebar with
   what the nav policy computes instead of re-typing the answer (the
-  round-31 red shard). If such a module ever gains a `$env`/`$app` import, the
+  round-31 red shard). If such a module ever gains a `$app` import, the
   spec fails to load loudly, not silently.
 
 `@types/node` is a devDependency for this config alone — the Playwright tree
@@ -264,7 +263,7 @@ negotiation, pluralization, and the locale-aware number/date/currency helpers).
 Mobile has a parallel setup in `mobile/CLAUDE.md` § Internationalization.
 
 The rule: **no user-facing string is ever a hardcoded literal** — everything goes
-through `m()` (`$lib/i18n/store.svelte`, keyed by a typed `MessageKey`; there is
+through `m()` (`#lib/i18n/store.svelte`, keyed by a typed `MessageKey`; there is
 no `t()`), and every number, date and currency renders through the
 locale-aware helpers rather than a raw `toLocaleString`. A new string ships with
 its catalogue entry in the same change.
@@ -323,7 +322,7 @@ simply stay unreachable until an operator opts in.
   origin hands the backend the *platform's* `Host`. Same-origin `/api` is what
   carries the vanity hostname, which makes "proxy `/api` on the vanity origin"
   an operator requirement (see `docs/white-label.md`).
-- `getTenantStorageKey()` — per-tenant browser-storage key (`$lib/entity.ts`):
+- `getTenantStorageKey()` — per-tenant browser-storage key (`#lib/entity.ts`):
   the slug on a platform host, the hostname on a vanity one.
 
 `tenantSlugUsage.test.ts` ratchets both invariants: nothing re-derives the slug
@@ -356,7 +355,7 @@ and the only way to exercise one on a laptop.
 
 **Full props and usage for every component: `frontend/docs/component-library.md`.**
 Grouped into subfolders by role; import with the full path
-(`import Modal from '$lib/components/ui/Modal.svelte'`) — there is no barrel file.
+(`import Modal from '#lib/components/ui/Modal.svelte'`) — there is no barrel file.
 
 **Guard rail 9: build UI from these, never copy-pasted markup. Extract a new
 component the second time you would duplicate one.**
@@ -423,6 +422,7 @@ The rules that hold everywhere, so you know when you need to go read the detail:
 
 - **Svelte 5 runes** — `$state`, `$derived`, `$effect`, `$props`. No legacy options API.
 - **TypeScript** — `lang="ts"` on all `<script>` blocks.
+- **SvelteKit 3 shapes** — there is no `svelte.config.js`: Kit + compiler options live in the `sveltekit({...})` call in `vite.config.ts` (an existing `svelte.config.js` is a hard error). Import from `#lib/...` (a package.json `imports` entry) **with the file's real extension** — `#lib/api.ts`, `#lib/i18n/store.svelte.ts`, `#lib/components/ui/Modal.svelte`; extensionless specifiers do not resolve. The route/URL state is `page` from `$app/state` (read `page.url`, never `$page`); `browser` comes from `$app/env`. A new environment variable is declared in `src/env.ts` (`static: true` — there is no runtime to read it) and imported from `$app/env/public`. `asset('logo.svg')` takes a path with no leading slash.
 - **API access** — always through `src/lib/api.ts`, never raw `fetch()`.
 - **BASE_PATH** — URL prefix for serving under a sub-path. Unset everywhere today (the deploy serves from the CDN root); kept as an escape hatch.
 - **No SSR** — static adapter only. Dynamic data comes from the backend API.
@@ -467,7 +467,7 @@ Never substitute `waitForTimeout`, and never raise the 30s timeout to absorb it
 
 ### A `page.route` stub matches the exact API pathname (tests-e2e/)
 
-Under `vite dev`, `$lib/api/vendors.ts` is the URL `/src/lib/api/vendors.ts`,
+Under `vite dev`, `#lib/api/vendors.ts` is the URL `/src/lib/api/vendors.ts`,
 so a stub pattern like `**/api/vendors*` also answers the MODULE request and the
 route never loads — red locally, green in CI's preview build. Match with a URL
 predicate on the exact pathname (or dispatch on it inside and `fallback()` the

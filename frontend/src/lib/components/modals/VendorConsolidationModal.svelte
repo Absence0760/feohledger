@@ -13,16 +13,16 @@
 	// `require_permission(PERM_VENDOR_MANAGE)`. The modal is only opened from a
 	// header action the page already gates the same way, but the per-cluster
 	// Merge button re-checks so the control and the API gate can't drift.
-	import { auth } from '$lib/stores/auth.svelte';
-	import { PERM_VENDOR_MANAGE } from '$lib/types/admin';
-	import { toast } from '$lib/components/ui/Toast.svelte';
-	import Modal from '$lib/components/ui/Modal.svelte';
-	import RowAction from '$lib/components/ui/RowAction.svelte';
+	import { auth } from '#lib/stores/auth.svelte.ts';
+	import { PERM_VENDOR_MANAGE } from '#lib/types/admin.ts';
+	import { toast } from '#lib/components/ui/Toast.svelte';
+	import Modal from '#lib/components/ui/Modal.svelte';
+	import RowAction from '#lib/components/ui/RowAction.svelte';
 	import {
 		getVendorConsolidationSuggestions,
 		mergeVendorConsolidation
-	} from '$lib/api/vendors';
-	import type { VendorCluster } from '$lib/types/vendor';
+	} from '#lib/api/vendors.ts';
+	import type { VendorCluster } from '#lib/types/vendor.ts';
 
 	let {
 		onclose,

@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { resolveOrgCurrency, resolveReportingCurrency } from './reportingCurrency';
-// The store is a `.svelte.ts` rune module (and reaches `$env` through
-// `$lib/api`), so it cannot be imported under this plain-Node config. Its
+// The store is a `.svelte.ts` rune module (and reaches `$app/env` through
+// `#lib/api`), so it cannot be imported under this plain-Node config. Its
 // contract is small enough to pin from source instead.
 import storeSource from '../stores/orgSettings.svelte.ts?raw';
 

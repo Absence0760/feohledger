@@ -1,21 +1,21 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
-	import { formatDate } from '$lib/utils/time';
-	import { auth } from '$lib/stores/auth.svelte';
-	import PageHeader from '$lib/components/ui/PageHeader.svelte';
-	import DataTable from '$lib/components/ui/DataTable.svelte';
-	import Modal from '$lib/components/ui/Modal.svelte';
-	import Badge from '$lib/components/ui/Badge.svelte';
-	import RowAction from '$lib/components/ui/RowAction.svelte';
-	import { toast } from '$lib/components/ui/Toast.svelte';
-	import { submitDsar, submitErasure, listPrivacyRequests } from '$lib/api/privacy';
+	import { formatDate } from '#lib/utils/time.ts';
+	import { auth } from '#lib/stores/auth.svelte.ts';
+	import PageHeader from '#lib/components/ui/PageHeader.svelte';
+	import DataTable from '#lib/components/ui/DataTable.svelte';
+	import Modal from '#lib/components/ui/Modal.svelte';
+	import Badge from '#lib/components/ui/Badge.svelte';
+	import RowAction from '#lib/components/ui/RowAction.svelte';
+	import { toast } from '#lib/components/ui/Toast.svelte';
+	import { submitDsar, submitErasure, listPrivacyRequests } from '#lib/api/privacy.ts';
 	import {
 		SUBJECT_TYPES,
 		SUBJECT_TYPE_LABELS,
 		SUBJECT_IDENTIFIER_HINTS,
 		type SubjectType
-	} from '$lib/types/privacy';
-	import type { DataSubjectRequestSummary, DSARResponse } from '$lib/types/privacy';
+	} from '#lib/types/privacy.ts';
+	import type { DataSubjectRequestSummary, DSARResponse } from '#lib/types/privacy.ts';
 
 	// RBAC: the backend gates every /api/privacy endpoint to admin only (the
 	// privacy-officer privilege) and 403s the rest.

@@ -1,29 +1,29 @@
 <script lang="ts">
-	import type { Catalog, GuidedBuyingSuggestion } from '$lib/types/catalog';
-	import { catalogTypeLabelKey, guidedBuyingReasonLabelKey } from '$lib/types/catalog';
-	import { auth } from '$lib/stores/auth.svelte';
+	import type { Catalog, GuidedBuyingSuggestion } from '#lib/types/catalog.ts';
+	import { catalogTypeLabelKey, guidedBuyingReasonLabelKey } from '#lib/types/catalog.ts';
+	import { auth } from '#lib/stores/auth.svelte.ts';
 	import {
 		listCatalogs,
 		deleteCatalog as apiDeleteCatalog,
 		guidedBuying,
 		listGlAccounts,
 		type GlAccountOption
-	} from '$lib/api/catalogs';
-	import PageHeader from '$lib/components/ui/PageHeader.svelte';
-	import SearchBox from '$lib/components/ui/SearchBox.svelte';
-	import FilterChips from '$lib/components/ui/FilterChips.svelte';
-	import DataTable from '$lib/components/ui/DataTable.svelte';
-	import RowLink from '$lib/components/ui/RowLink.svelte';
-	import RowAction from '$lib/components/ui/RowAction.svelte';
-	import Money from '$lib/components/ui/Money.svelte';
-	import CatalogModal from '$lib/components/modals/CatalogModal.svelte';
-	import PunchoutModal from '$lib/components/modals/PunchoutModal.svelte';
-	import { toast } from '$lib/components/ui/Toast.svelte';
+	} from '#lib/api/catalogs.ts';
+	import PageHeader from '#lib/components/ui/PageHeader.svelte';
+	import SearchBox from '#lib/components/ui/SearchBox.svelte';
+	import FilterChips from '#lib/components/ui/FilterChips.svelte';
+	import DataTable from '#lib/components/ui/DataTable.svelte';
+	import RowLink from '#lib/components/ui/RowLink.svelte';
+	import RowAction from '#lib/components/ui/RowAction.svelte';
+	import Money from '#lib/components/ui/Money.svelte';
+	import CatalogModal from '#lib/components/modals/CatalogModal.svelte';
+	import PunchoutModal from '#lib/components/modals/PunchoutModal.svelte';
+	import { toast } from '#lib/components/ui/Toast.svelte';
 	import { goto } from '$app/navigation';
-	import { isRowOpenClick } from '$lib/utils/rowNav';
-	import { createRequestSequencer } from '$lib/utils/requestSequence';
-	import { appendUnique } from '$lib/utils/pagination';
-	import { m } from '$lib/i18n/store.svelte';
+	import { isRowOpenClick } from '#lib/utils/rowNav.ts';
+	import { createRequestSequencer } from '#lib/utils/requestSequence.ts';
+	import { appendUnique } from '#lib/utils/pagination.ts';
+	import { m } from '#lib/i18n/store.svelte.ts';
 
 	const canCreate = $derived(auth.isManager); // admin | ap_manager
 	// Buyers (admin / ap_manager / ap_clerk) may start a punch-out session.

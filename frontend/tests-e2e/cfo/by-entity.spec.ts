@@ -1,5 +1,5 @@
 import type { Page } from '@playwright/test';
-import type { AnalyticsByEntity } from '$lib/types/analytics';
+import type { AnalyticsByEntity } from '#lib/types/analytics.ts';
 
 import { API_BASE, expect, test } from '../fixtures/helpers';
 

@@ -6,7 +6,7 @@ import {
 	experimentStatusLabelKey,
 	type PrimaryMetric
 } from './experiments';
-import { en } from '$lib/i18n/locales/en';
+import { en } from '#lib/i18n/locales/en.ts';
 
 /**
  * Map-completeness guard for the experiment label maps.

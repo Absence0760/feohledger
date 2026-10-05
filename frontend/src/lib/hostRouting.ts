@@ -1,11 +1,11 @@
 /**
  * Pure host → tenant routing rules.
  *
- * This module deliberately imports NOTHING — no `$env`, no `$app/*`, no
+ * This module deliberately imports NOTHING — no `$app/env`, no `$app/*`, no
  * `window` — so it can be unit-tested under the node vitest environment and so
  * there is exactly ONE place that decides what a hostname means. The
  * env-bound wrappers (`getTenantSlug` / `getApiBase` / …) live in
- * `$lib/tenant.ts`, which is the only module that reads the configuration.
+ * `#lib/tenant.ts`, which is the only module that reads the configuration.
  *
  * ## Why a hostname needs classifying at all
  *
@@ -186,7 +186,7 @@ export function resolveApiBase(
  *
  * The slug on a platform host; the hostname itself on a vanity host (a vanity
  * hostname maps 1:1 to a tenant, so it partitions storage just as well). Keeps
- * the invariant `$lib/entity.ts` depends on: switching hosts must never carry
+ * the invariant `#lib/entity.ts` depends on: switching hosts must never carry
  * one tenant's selected entity id into another.
  */
 export function tenantStorageKeyForHost(
@@ -204,8 +204,8 @@ export function tenantStorageKeyForHost(
  * prerender — the build prerenders every route, so this path is live).
  *
  * The one browser read in this module. It lives here rather than in
- * `$lib/tenant.ts` so the `typeof window === 'undefined'` guard is covered by
- * the same unit tests as the rules it feeds; `$lib/tenant.ts` is then nothing
+ * `#lib/tenant.ts` so the `typeof window === 'undefined'` guard is covered by
+ * the same unit tests as the rules it feeds; `#lib/tenant.ts` is then nothing
  * but the configuration read.
  */
 export function currentHostname(): string | null {

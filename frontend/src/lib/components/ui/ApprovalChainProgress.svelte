@@ -7,8 +7,8 @@
 	// i18n-agnostic like `FieldWarning`/`SecretReveal`: every string arrives
 	// already localized from the caller, which keeps its own i18n key
 	// namespace (see frontend/CLAUDE.md § `ui/` primitives).
-	import type { ChainLevelState } from '$lib/types/workflowInstance';
-	import { distinctApprovedCount } from '$lib/types/workflowInstance';
+	import type { ChainLevelState } from '#lib/types/workflowInstance.ts';
+	import { distinctApprovedCount } from '#lib/types/workflowInstance.ts';
 
 	let {
 		levels,

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { formatMoney } from '$lib/utils/money';
+import { formatMoney } from '#lib/utils/money.ts';
 
 import { cellCurrency, type ResultColumn } from './reports';
 

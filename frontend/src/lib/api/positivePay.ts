@@ -1,14 +1,14 @@
 // Typed helpers for the Positive Pay / Payment Fraud File endpoints. All
 // requests route through the shared `api` client (Bearer + X-Tenant-Slug +
 // X-Entity-ID + 401-bounce). Mirrors `src/lib/api/vendorStatementRecon.ts`.
-import { api } from '$lib/api';
+import { api } from '#lib/api.ts';
 import type {
 	PositivePayFile,
 	PositivePayListResponse,
 	PositivePaySummary,
 	PresentedItemInput,
 	ProcessReturnResponse
-} from '$lib/types/positivePay';
+} from '#lib/types/positivePay.ts';
 
 export interface PositivePayListParams {
 	file_type?: string;

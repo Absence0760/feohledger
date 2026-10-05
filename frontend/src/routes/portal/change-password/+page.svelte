@@ -1,7 +1,7 @@
 <script lang="ts">
-	import { portalAuth } from '$lib/stores/portalAuth.svelte';
+	import { portalAuth } from '#lib/stores/portalAuth.svelte.ts';
 	import { goto } from '$app/navigation';
-	import { m } from '$lib/i18n/store.svelte';
+	import { m } from '#lib/i18n/store.svelte.ts';
 
 	let currentPassword = $state('');
 	let newPassword = $state('');

@@ -1,35 +1,35 @@
 <script lang="ts">
-	import { api } from '$lib/api';
-	import { appendUnique } from '$lib/utils/pagination';
-	import { createRequestSequencer } from '$lib/utils/requestSequence';
-	import { toggleSort, type SortOrder } from '$lib/utils/sort';
+	import { api } from '#lib/api.ts';
+	import { appendUnique } from '#lib/utils/pagination.ts';
+	import { createRequestSequencer } from '#lib/utils/requestSequence.ts';
+	import { toggleSort, type SortOrder } from '#lib/utils/sort.ts';
 	import { untrack } from 'svelte';
-	import { page as urlStore } from '$app/stores';
+	import { page as urlStore } from '$app/state';
 	import { replaceState } from '$app/navigation';
-	import RowAction from '$lib/components/ui/RowAction.svelte';
-	import PageHeader from '$lib/components/ui/PageHeader.svelte';
-	import FilterChips from '$lib/components/ui/FilterChips.svelte';
-	import SearchBox from '$lib/components/ui/SearchBox.svelte';
-	import SortableHeader from '$lib/components/ui/SortableHeader.svelte';
-	import DataTable from '$lib/components/ui/DataTable.svelte';
-	import EmptyState from '$lib/components/ui/EmptyState.svelte';
-	import Modal from '$lib/components/ui/Modal.svelte';
-	import Money from '$lib/components/ui/Money.svelte';
-	import VendorPicker from '$lib/components/ui/VendorPicker.svelte';
-	import InvoicePicker from '$lib/components/ui/InvoicePicker.svelte';
-	import Badge from '$lib/components/ui/Badge.svelte';
-	import type { BadgeTone } from '$lib/components/ui/badgeTone';
-	import { toast } from '$lib/components/ui/Toast.svelte';
-	import { auth } from '$lib/stores/auth.svelte';
-	import { m } from '$lib/i18n/store.svelte';
-	import type { MessageKey } from '$lib/i18n/messages';
-	import { formatDate } from '$lib/utils/time';
-	import { DEFAULT_CURRENCY, currencyOptions } from '$lib/utils/money';
-	import { orgCurrency } from '$lib/stores/orgSettings.svelte';
-	import { listInvoicesEligibleForMemo, listInvoicesEligibleForNewMemo } from '$lib/api/creditMemos';
-	import type { EligibleInvoice } from '$lib/types/creditMemo';
-	import type { SearchPickerLoad } from '$lib/utils/searchPicker';
-	import { creditAmountParam } from '$lib/utils/invoicePicker';
+	import RowAction from '#lib/components/ui/RowAction.svelte';
+	import PageHeader from '#lib/components/ui/PageHeader.svelte';
+	import FilterChips from '#lib/components/ui/FilterChips.svelte';
+	import SearchBox from '#lib/components/ui/SearchBox.svelte';
+	import SortableHeader from '#lib/components/ui/SortableHeader.svelte';
+	import DataTable from '#lib/components/ui/DataTable.svelte';
+	import EmptyState from '#lib/components/ui/EmptyState.svelte';
+	import Modal from '#lib/components/ui/Modal.svelte';
+	import Money from '#lib/components/ui/Money.svelte';
+	import VendorPicker from '#lib/components/ui/VendorPicker.svelte';
+	import InvoicePicker from '#lib/components/ui/InvoicePicker.svelte';
+	import Badge from '#lib/components/ui/Badge.svelte';
+	import type { BadgeTone } from '#lib/components/ui/badgeTone.ts';
+	import { toast } from '#lib/components/ui/Toast.svelte';
+	import { auth } from '#lib/stores/auth.svelte.ts';
+	import { m } from '#lib/i18n/store.svelte.ts';
+	import type { MessageKey } from '#lib/i18n/messages.ts';
+	import { formatDate } from '#lib/utils/time.ts';
+	import { DEFAULT_CURRENCY, currencyOptions } from '#lib/utils/money.ts';
+	import { orgCurrency } from '#lib/stores/orgSettings.svelte.ts';
+	import { listInvoicesEligibleForMemo, listInvoicesEligibleForNewMemo } from '#lib/api/creditMemos.ts';
+	import type { EligibleInvoice } from '#lib/types/creditMemo.ts';
+	import type { SearchPickerLoad } from '#lib/utils/searchPicker.ts';
+	import { creditAmountParam } from '#lib/utils/invoicePicker.ts';
 
 	// Create / edit / apply / void are all `require_roles(ADMIN, AP_MANAGER)` on
 	// the backend, while the LIST (and its chip summary) is open to all four
@@ -123,23 +123,23 @@
 	// forward / reload / a pasted link reproduce the view. An unrecognised value
 	// falls back to `all` rather than silently filtering to nothing.
 	let statusFilter = $state<string>(
-		STATUSES.includes($urlStore.url.searchParams.get('status') ?? '')
-			? ($urlStore.url.searchParams.get('status') as string)
+		STATUSES.includes(urlStore.url.searchParams.get('status') ?? '')
+			? (urlStore.url.searchParams.get('status') as string)
 			: 'all'
 	);
 	// `?search=` — a SERVER filter over memo number + vendor name. It used to
 	// not exist at all: a client-side `.filter()` over the one loaded page would
 	// have searched a page rather than the set (frontend/docs/ui-patterns.md
 	// § Search), so the backend grew the leg instead.
-	let search = $state($urlStore.url.searchParams.get('search') ?? '');
+	let search = $state(urlStore.url.searchParams.get('search') ?? '');
 	// The term the newest ISSUED list request carried. Written by `loadMemos`,
 	// read by the debounce effect — see the comment there.
-	let appliedSearch = $state(($urlStore.url.searchParams.get('search') ?? '').trim());
+	let appliedSearch = $state((urlStore.url.searchParams.get('search') ?? '').trim());
 	// `?sort=&order=`; `null` = the backend's own default (newest first).
-	const urlSort = $urlStore.url.searchParams.get('sort');
+	const urlSort = urlStore.url.searchParams.get('sort');
 	let sortField = $state<string | null>(urlSort && SORTABLE_FIELDS.includes(urlSort) ? urlSort : null);
 	let sortOrder = $state<SortOrder>(
-		$urlStore.url.searchParams.get('order') === 'desc' ? 'desc' : 'asc'
+		urlStore.url.searchParams.get('order') === 'desc' ? 'desc' : 'asc'
 	);
 	let applyTargetId = $state<string | null>(null);
 
@@ -276,12 +276,12 @@
 
 	// A WRITER of URL state, never a dependency source — every read inside is
 	// untracked so calling it from the status/search paths can't make them
-	// depend on `$urlStore` (or on `search`) and re-fire themselves (the
+	// depend on `urlStore` (or on `search`) and re-fire themselves (the
 	// pattern `/vendors` and `/expenses` settled; see ui-patterns.md
 	// § Sequencing list fetches).
 	function syncUrl() {
 		untrack(() => {
-			const url = new URL($urlStore.url);
+			const url = new URL(urlStore.url.href);
 			if (statusFilter !== 'all') url.searchParams.set('status', statusFilter);
 			else url.searchParams.delete('status');
 			const term = search.trim();

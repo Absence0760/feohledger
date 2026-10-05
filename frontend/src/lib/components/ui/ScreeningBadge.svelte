@@ -13,8 +13,8 @@
 		screeningStatusLabelKey,
 		type ScreeningStatus,
 		type RiskLevel
-	} from '$lib/types/vendor';
-	import { m } from '$lib/i18n/store.svelte';
+	} from '#lib/types/vendor.ts';
+	import { m } from '#lib/i18n/store.svelte.ts';
 
 	let {
 		screening,

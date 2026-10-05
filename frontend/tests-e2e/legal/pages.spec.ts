@@ -44,7 +44,7 @@ import { WEB_ORIGIN, tenantOrigin } from '../fixtures/env';
 /**
  * The document set, hardcoded rather than imported.
  *
- * `$lib` value imports do not resolve under Playwright's transform (see
+ * `#lib` value imports do not resolve under Playwright's transform (see
  * `frontend/CLAUDE.md` § `pnpm check` does not cover `tests-e2e/`), but that
  * constraint is a feature here: a hardcoded list means DELETING a page from
  * `pages.ts` fails this spec, where a loop over the imported list would just

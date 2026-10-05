@@ -1,14 +1,14 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
-	import { auth } from '$lib/stores/auth.svelte';
-	import PageHeader from '$lib/components/ui/PageHeader.svelte';
-	import Badge from '$lib/components/ui/Badge.svelte';
-	import { toast } from '$lib/components/ui/Toast.svelte';
-	import { getRetentionPolicy, updateRetentionPolicy } from '$lib/api/retention';
+	import { auth } from '#lib/stores/auth.svelte.ts';
+	import PageHeader from '#lib/components/ui/PageHeader.svelte';
+	import Badge from '#lib/components/ui/Badge.svelte';
+	import { toast } from '#lib/components/ui/Toast.svelte';
+	import { getRetentionPolicy, updateRetentionPolicy } from '#lib/api/retention.ts';
 	import {
 		RETENTION_RECORD_CLASSES,
 		type RetentionRecordClass
-	} from '$lib/types/retention';
+	} from '#lib/types/retention.ts';
 
 	// RBAC: the backend gates GET/PUT /api/retention-policy to admin only and
 	// 403s the rest. Wait for `auth.user` to resolve before redirecting so we

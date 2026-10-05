@@ -1,11 +1,11 @@
 <script lang="ts">
 	import { onMount, tick } from 'svelte';
-	import { api, streamAssistantChat, AssistantBudgetError } from '$lib/api';
-	import PageHeader from '$lib/components/ui/PageHeader.svelte';
-	import ChatMessage from '$lib/components/assistant/ChatMessage.svelte';
-	import ExamplePrompts from '$lib/components/assistant/ExamplePrompts.svelte';
-	import UsageMeter from '$lib/components/assistant/UsageMeter.svelte';
-	import { m } from '$lib/i18n/store.svelte';
+	import { api, streamAssistantChat, AssistantBudgetError } from '#lib/api.ts';
+	import PageHeader from '#lib/components/ui/PageHeader.svelte';
+	import ChatMessage from '#lib/components/assistant/ChatMessage.svelte';
+	import ExamplePrompts from '#lib/components/assistant/ExamplePrompts.svelte';
+	import UsageMeter from '#lib/components/assistant/UsageMeter.svelte';
+	import { m } from '#lib/i18n/store.svelte.ts';
 	import type {
 		ChatResponse,
 		ConversationDetail,
@@ -14,7 +14,7 @@
 		ToolInvocation,
 		UiMessage,
 		UsageResponse
-	} from '$lib/types/assistant';
+	} from '#lib/types/assistant.ts';
 
 	let messages = $state<UiMessage[]>([]);
 	let input = $state('');

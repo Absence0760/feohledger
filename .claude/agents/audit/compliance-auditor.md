@@ -13,7 +13,7 @@ punch list the user can fix and then re-run you against.
 
 ## What this project is
 
-A multi-tenant accounts-payable SaaS: SvelteKit 2 static frontend (six locales),
+A multi-tenant accounts-payable SaaS: SvelteKit 3 static frontend (six locales),
 FastAPI backend (SQLAlchemy 2 async, Alembic, PostgreSQL 16, Redis, MinIO/S3),
 Flutter mobile app (iOS + Android). Two front doors — the AP app for the
 customer's own staff, and the **supplier portal** for their vendors.

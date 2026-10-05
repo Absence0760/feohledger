@@ -9,8 +9,8 @@
 //
 // Role gate mirrors the server's `require_roles(admin, ap_manager, cfo)`, so a
 // clerk never sees a control that can only 403.
-import { api } from '$lib/api';
-import type { CorridorQuoteComparison, QuoteMode } from '$lib/types/corridorQuote';
+import { api } from '#lib/api.ts';
+import type { CorridorQuoteComparison, QuoteMode } from '#lib/types/corridorQuote.ts';
 
 export interface CorridorQuoteRequest {
 	invoiceId: string;

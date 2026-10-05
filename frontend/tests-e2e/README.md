@@ -600,7 +600,7 @@ constants — the static set is for the cross-tenant specs only.
 ## Stubbing an API route (`page.route`) — match the exact pathname
 
 **Under `vite dev` the app's source is served over HTTP**, so
-`$lib/api/vendors.ts` is fetched as `/src/lib/api/vendors.ts`. A stub pattern
+`#lib/api/vendors.ts` is fetched as `/src/lib/api/vendors.ts`. A stub pattern
 written for the API call — the glob `**/api/vendors*`, the regex
 `/\/api\/vendors/` — matches that module request too, and fulfilling it with
 JSON means the importing route never loads: SvelteKit renders its 500 page and

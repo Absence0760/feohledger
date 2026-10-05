@@ -24,7 +24,7 @@
  *
  * See `backend/docs/email-intake.md`.
  */
-import { api } from '$lib/api';
+import { api } from '#lib/api.ts';
 
 const BASE = '/api/organization/email-intake';
 

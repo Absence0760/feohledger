@@ -1,17 +1,17 @@
 <script lang="ts">
-	import Modal from '$lib/components/ui/Modal.svelte';
-	import Money from '$lib/components/ui/Money.svelte';
-	import { toast } from '$lib/components/ui/Toast.svelte';
-	import { m } from '$lib/i18n/store.svelte';
-	import { formatDate } from '$lib/utils/time';
-	import { isPositiveAmount } from '$lib/utils/money';
+	import Modal from '#lib/components/ui/Modal.svelte';
+	import Money from '#lib/components/ui/Money.svelte';
+	import { toast } from '#lib/components/ui/Toast.svelte';
+	import { m } from '#lib/i18n/store.svelte.ts';
+	import { formatDate } from '#lib/utils/time.ts';
+	import { isPositiveAmount } from '#lib/utils/money.ts';
 	import {
 		downloadVendor1099Pdf,
 		updateVendorTaxFields,
 		uploadVendorW9,
 		verifyVendorTin
-	} from '$lib/api/tax';
-	import type { TinValidationResult, Vendor1099Row } from '$lib/types/tax';
+	} from '#lib/api/tax.ts';
+	import type { TinValidationResult, Vendor1099Row } from '#lib/types/tax.ts';
 
 	// W-9 box-3 entity classifications. Plain English option labels — not run
 	// through `m()` — mirroring the established precedent in

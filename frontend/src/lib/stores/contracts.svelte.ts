@@ -1,7 +1,7 @@
-import type { Contract } from '$lib/types/contract';
-import { listContracts, type ContractListParams } from '$lib/api/contracts';
-import { appendUnique } from '$lib/utils/pagination';
-import { createRequestSequencer } from '$lib/utils/requestSequence';
+import type { Contract } from '#lib/types/contract.ts';
+import { listContracts, type ContractListParams } from '#lib/api/contracts.ts';
+import { appendUnique } from '#lib/utils/pagination.ts';
+import { createRequestSequencer } from '#lib/utils/requestSequence.ts';
 
 function createContractStore() {
 	let contracts = $state<Contract[]>([]);

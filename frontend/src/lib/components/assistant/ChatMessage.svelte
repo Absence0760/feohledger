@@ -1,7 +1,7 @@
 <script lang="ts">
-	import ToolResultView from '$lib/components/assistant/ToolResultView.svelte';
-	import { m } from '$lib/i18n/store.svelte';
-	import type { UiMessage } from '$lib/types/assistant';
+	import ToolResultView from '#lib/components/assistant/ToolResultView.svelte';
+	import { m } from '#lib/i18n/store.svelte.ts';
+	import type { UiMessage } from '#lib/types/assistant.ts';
 
 	let { message }: { message: UiMessage } = $props();
 

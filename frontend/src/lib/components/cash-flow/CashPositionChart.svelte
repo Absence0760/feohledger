@@ -1,8 +1,8 @@
 <script lang="ts">
-	import { formatMoney } from '$lib/utils/money';
-	import { formatPeriod } from '$lib/utils/time';
-	import { m } from '$lib/i18n/store.svelte';
-	import type { CashPositionResult } from '$lib/types/cashFlow';
+	import { formatMoney } from '#lib/utils/money.ts';
+	import { formatPeriod } from '#lib/utils/time.ts';
+	import { m } from '#lib/i18n/store.svelte.ts';
+	import type { CashPositionResult } from '#lib/types/cashFlow.ts';
 
 	let { result }: { result: CashPositionResult } = $props();
 

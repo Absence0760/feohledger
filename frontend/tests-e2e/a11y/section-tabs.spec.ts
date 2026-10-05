@@ -1,7 +1,7 @@
 import { expect, test } from '../fixtures/helpers';
 
 /**
- * Section sub-tab bar (`$lib/components/layout/SectionTabs.svelte`).
+ * Section sub-tab bar (`#lib/components/layout/SectionTabs.svelte`).
  *
  * The bar lays a NAV group's children out as one horizontal row. It used to be
  * a flex container with `white-space: nowrap` children and neither `flex-wrap`

@@ -12,7 +12,7 @@ import {
 	isMachineRead,
 	sourceStatementFilename
 } from './vendorStatementRecon';
-import { en } from '$lib/i18n/locales/en';
+import { en } from '#lib/i18n/locales/en.ts';
 
 // The vendor-statement provenance surface is the only place a reviewer learns
 // that a run's lines were MACHINE-READ off a PDF rather than typed or parsed

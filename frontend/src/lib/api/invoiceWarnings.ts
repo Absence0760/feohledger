@@ -29,11 +29,11 @@ import {
 	INVOICE_WARNING_MESSAGE_KEYS,
 	INVOICE_WARNING_PARAM_KINDS,
 	type WarningParamKind
-} from '$lib/api/invoiceWarningMessages.generated';
-import { getActiveFormatLocale } from '$lib/i18n/formatLocale';
-import type { MessageKey } from '$lib/i18n/messages';
-import { formatMoney } from '$lib/utils/money';
-import { formatDate } from '$lib/utils/time';
+} from '#lib/api/invoiceWarningMessages.generated.ts';
+import { getActiveFormatLocale } from '#lib/i18n/formatLocale.ts';
+import type { MessageKey } from '#lib/i18n/messages.ts';
+import { formatMoney } from '#lib/utils/money.ts';
+import { formatDate } from '#lib/utils/time.ts';
 
 /** The shape this module needs off an `InvoiceWarning` (see `types/invoice.ts`). */
 export interface LocalizableWarning {
@@ -48,7 +48,7 @@ export interface LocalizedWarning {
 	params: Record<string, string | number>;
 }
 
-/** `m` from `$lib/i18n/store.svelte`, passed in so this module stays pure. */
+/** `m` from `#lib/i18n/store.svelte`, passed in so this module stays pure. */
 export type Translate = (key: MessageKey, params?: Record<string, string | number>) => string;
 
 const KEYS: Record<string, MessageKey> = INVOICE_WARNING_MESSAGE_KEYS;

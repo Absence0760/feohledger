@@ -1,8 +1,8 @@
 // Typed helpers for the platform billing surface. Routes through the shared
 // `api` client (Bearer + X-Tenant-Slug + 401-bounce). See
-// `$lib/types/billing` for the response contracts and `backend/docs/billing.md`
+// `#lib/types/billing` for the response contracts and `backend/docs/billing.md`
 // for the backend slice this consumes.
-import { api } from '$lib/api';
+import { api } from '#lib/api.ts';
 import type {
 	BillingInvoicesResponse,
 	BillingPaymentMethodsResponse,
@@ -10,7 +10,7 @@ import type {
 	BillingPlansResponse,
 	BillingSetupIntentResponse,
 	BillingSubscriptionResponse
-} from '$lib/types/billing';
+} from '#lib/types/billing.ts';
 
 /** Current plan + subscription status + usage-to-date for the active period.
  *  `plan`/`subscription` are null when the org has no live subscription. */

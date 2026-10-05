@@ -1,7 +1,7 @@
 <script lang="ts" module>
-	import { workflowStore } from '$lib/stores/workflows.svelte';
-	import { toast } from '$lib/components/ui/Toast.svelte';
-	import { m } from '$lib/i18n/store.svelte';
+	import { workflowStore } from '#lib/stores/workflows.svelte.ts';
+	import { toast } from '#lib/components/ui/Toast.svelte';
+	import { m } from '#lib/i18n/store.svelte.ts';
 
 	/**
 	 * Export a workflow definition as a downloaded `.json` file. Exposed at the
@@ -37,9 +37,9 @@
 </script>
 
 <script lang="ts">
-	import Modal from '$lib/components/ui/Modal.svelte';
+	import Modal from '#lib/components/ui/Modal.svelte';
 	import { goto } from '$app/navigation';
-	import type { WorkflowExport } from '$lib/types/workflow';
+	import type { WorkflowExport } from '#lib/types/workflow.ts';
 
 	let {
 		open,

@@ -3,9 +3,9 @@
 	// `filters`: each field advertises the operators the server accepts and,
 	// for enum fields, the allowed values. The value input adapts to the field
 	// type + operator (single scalar / two-value `between` / multi-value `in`).
-	import type { CatalogFilter, FilterOp, SpecFilter } from '$lib/types/reports';
-	import { OP_LABELS } from '$lib/types/reports';
-	import RowAction from '$lib/components/ui/RowAction.svelte';
+	import type { CatalogFilter, FilterOp, SpecFilter } from '#lib/types/reports.ts';
+	import { OP_LABELS } from '#lib/types/reports.ts';
+	import RowAction from '#lib/components/ui/RowAction.svelte';
 
 	interface Props {
 		available: CatalogFilter[];

@@ -5,11 +5,11 @@
 		ChatTemplate,
 		PortalChatThread,
 		PortalChatMessage,
-	} from '$lib/types/supplierChat';
-	import type { ChatMentionCandidate } from '$lib/api/supplierChat';
-	import RowAction from '$lib/components/ui/RowAction.svelte';
-	import { toast } from '$lib/components/ui/Toast.svelte';
-	import { formatDate } from '$lib/utils/time';
+	} from '#lib/types/supplierChat.ts';
+	import type { ChatMentionCandidate } from '#lib/api/supplierChat.ts';
+	import RowAction from '#lib/components/ui/RowAction.svelte';
+	import { toast } from '#lib/components/ui/Toast.svelte';
+	import { formatDate } from '#lib/utils/time.ts';
 
 	// A message is one of the two surface shapes. Reads are guarded so the
 	// component works against either: AP messages carry author_user_id +

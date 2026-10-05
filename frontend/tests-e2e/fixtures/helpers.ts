@@ -173,7 +173,7 @@ export const test = base.extend<object, WorkerFixtures>({
 const STUBBED_MODULE_HINT =
 	'A page.route() stub answered a dev-server MODULE request with JSON, so the ' +
 	"route's code never loaded (SvelteKit renders its 500 page). Under `vite dev` " +
-	'the source is served over HTTP — `$lib/api/vendors.ts` is `/src/lib/api/vendors.ts` — ' +
+	'the source is served over HTTP — `#lib/api/vendors.ts` is `/src/lib/api/vendors.ts` — ' +
 	'so a pattern like `**/api/vendors*` or `/\\/api\\/vendors/` matches the module as well ' +
 	'as the API call. Match the API request by its exact pathname instead. See ' +
 	'tests-e2e/README.md § Stubbing an API route.';

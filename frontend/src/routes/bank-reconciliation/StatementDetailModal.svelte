@@ -26,23 +26,23 @@
 		BankTransaction,
 		MatchState,
 		UnclearedPayment
-	} from '$lib/types/bankReconciliation';
+	} from '#lib/types/bankReconciliation.ts';
 	import {
 		MATCH_STATE_TONES,
 		needsHumanDecision,
 		transactionMatchState
-	} from '$lib/types/bankReconciliation';
-	import { getOutstandingItems, resolveBankTransaction } from '$lib/api/bankReconciliation';
-	import Badge from '$lib/components/ui/Badge.svelte';
-	import DataTable from '$lib/components/ui/DataTable.svelte';
-	import Modal from '$lib/components/ui/Modal.svelte';
-	import Money from '$lib/components/ui/Money.svelte';
-	import RowAction from '$lib/components/ui/RowAction.svelte';
-	import SearchBox from '$lib/components/ui/SearchBox.svelte';
-	import { toast } from '$lib/components/ui/Toast.svelte';
-	import { auth } from '$lib/stores/auth.svelte';
-	import { m } from '$lib/i18n/store.svelte';
-	import { formatDate } from '$lib/utils/time';
+	} from '#lib/types/bankReconciliation.ts';
+	import { getOutstandingItems, resolveBankTransaction } from '#lib/api/bankReconciliation.ts';
+	import Badge from '#lib/components/ui/Badge.svelte';
+	import DataTable from '#lib/components/ui/DataTable.svelte';
+	import Modal from '#lib/components/ui/Modal.svelte';
+	import Money from '#lib/components/ui/Money.svelte';
+	import RowAction from '#lib/components/ui/RowAction.svelte';
+	import SearchBox from '#lib/components/ui/SearchBox.svelte';
+	import { toast } from '#lib/components/ui/Toast.svelte';
+	import { auth } from '#lib/stores/auth.svelte.ts';
+	import { m } from '#lib/i18n/store.svelte.ts';
+	import { formatDate } from '#lib/utils/time.ts';
 
 	let {
 		statement,

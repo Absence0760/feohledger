@@ -10,13 +10,13 @@
 	 * returns the FIRST statement rather than creating a second one that would
 	 * match nothing and read as "this file didn't reconcile".
 	 */
-	import type { BankStatement } from '$lib/types/bankReconciliation';
-	import { uploadBankStatement } from '$lib/api/bankReconciliation';
-	import Modal from '$lib/components/ui/Modal.svelte';
-	import { toast } from '$lib/components/ui/Toast.svelte';
-	import { m } from '$lib/i18n/store.svelte';
-	import { DEFAULT_CURRENCY, currencyOptions } from '$lib/utils/money';
-	import { orgCurrency } from '$lib/stores/orgSettings.svelte';
+	import type { BankStatement } from '#lib/types/bankReconciliation.ts';
+	import { uploadBankStatement } from '#lib/api/bankReconciliation.ts';
+	import Modal from '#lib/components/ui/Modal.svelte';
+	import { toast } from '#lib/components/ui/Toast.svelte';
+	import { m } from '#lib/i18n/store.svelte.ts';
+	import { DEFAULT_CURRENCY, currencyOptions } from '#lib/utils/money.ts';
+	import { orgCurrency } from '#lib/stores/orgSettings.svelte.ts';
 
 	let {
 		onclose,

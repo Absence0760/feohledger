@@ -1,18 +1,18 @@
 <script lang="ts">
-	import Money from '$lib/components/ui/Money.svelte';
-	import { formatMoney } from '$lib/utils/money';
-	import { formatDate, formatPeriod } from '$lib/utils/time';
-	import { m } from '$lib/i18n/store.svelte';
-	import { ApiError } from '$lib/api';
-	import { auth } from '$lib/stores/auth.svelte';
+	import Money from '#lib/components/ui/Money.svelte';
+	import { formatMoney } from '#lib/utils/money.ts';
+	import { formatDate, formatPeriod } from '#lib/utils/time.ts';
+	import { m } from '#lib/i18n/store.svelte.ts';
+	import { ApiError } from '#lib/api.ts';
+	import { auth } from '#lib/stores/auth.svelte.ts';
 	import {
 		captureDiscountsFromPlan,
 		createDraftRunFromPlan,
 		saveCashFlowPlan,
 		type CaptureDiscountsResult,
 		type DraftRunResult
-	} from '$lib/api/cashFlow';
-	import type { PaymentPlanResult, SaveCashPlanResult } from '$lib/types/cashFlow';
+	} from '#lib/api/cashFlow.ts';
+	import type { PaymentPlanResult, SaveCashPlanResult } from '#lib/types/cashFlow.ts';
 
 	let {
 		result,

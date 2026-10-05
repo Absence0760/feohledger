@@ -17,7 +17,7 @@ import {
 	type PortalInvoicePhase,
 	type PortalPaymentPhase
 } from './portalStatus';
-import { en } from '$lib/i18n/locales/en';
+import { en } from '#lib/i18n/locales/en.ts';
 
 /**
  * Drift guard + regression test for the persona-supplier audit finding

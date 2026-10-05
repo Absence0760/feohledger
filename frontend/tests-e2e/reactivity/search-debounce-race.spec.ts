@@ -15,7 +15,7 @@ import { expect, test } from '../fixtures/helpers';
  *
  * The fix: the params-builder reads `search` via `untrack()` so only the
  * dedicated debounce effect (which reads `search` directly) triggers a
- * fetch, plus a monotonic request-token guard (`$lib/utils/requestSequence.ts`)
+ * fetch, plus a monotonic request-token guard (`#lib/utils/requestSequence.ts`)
  * that discards a response superseded by a later request.
  *
  * Each route below proves both halves of the fix:

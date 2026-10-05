@@ -1,8 +1,8 @@
 <script lang="ts">
 	import { page } from '$app/state';
-	import { auth } from '$lib/stores/auth.svelte';
-	import { groupForPath, sectionTabActive, visibleChildren, type NavChild } from '$lib/nav';
-	import { m } from '$lib/i18n/store.svelte';
+	import { auth } from '#lib/stores/auth.svelte.ts';
+	import { groupForPath, sectionTabActive, visibleChildren, type NavChild } from '#lib/nav.ts';
+	import { m } from '#lib/i18n/store.svelte.ts';
 
 	// The grouped section (Procurement / Billing / Automation / Governance /
 	// Settings / Insights) that owns the current route, if any. Top-level links

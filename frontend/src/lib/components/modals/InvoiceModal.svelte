@@ -1,35 +1,35 @@
 <script lang="ts">
-	import { focusTrap } from '$lib/actions/focusTrap';
-	import type { Invoice, AuditSummary } from '$lib/types/invoice';
-	import { INVOICE_STATUS_LABEL_KEYS } from '$lib/types/invoice';
-	import { formatMoney, isNegativeAmount, isPositiveAmount } from '$lib/utils/money';
-	import { invoiceStore } from '$lib/stores/invoices.svelte';
-	import { auth } from '$lib/stores/auth.svelte';
-	import { adminStore } from '$lib/stores/admin.svelte';
-	import { api, ApiError } from '$lib/api';
-	import { createRequestSequencer } from '$lib/utils/requestSequence';
-	import { toast } from '$lib/components/ui/Toast.svelte';
-	import RowAction from '$lib/components/ui/RowAction.svelte';
-	import Money from '$lib/components/ui/Money.svelte';
-	import Badge from '$lib/components/ui/Badge.svelte';
-	import type { BadgeTone } from '$lib/components/ui/badgeTone';
-	import { m } from '$lib/i18n/store.svelte';
-	import { invoiceWarningText } from '$lib/api/invoiceWarnings';
-	import { formatDate } from '$lib/utils/time';
-	import { formatList } from '$lib/utils/list';
-	import type { MessageKey } from '$lib/i18n/messages';
-	import type { ActiveSteps } from '$lib/stores/workflows.svelte';
+	import { focusTrap } from '#lib/actions/focusTrap.ts';
+	import type { Invoice, AuditSummary } from '#lib/types/invoice.ts';
+	import { INVOICE_STATUS_LABEL_KEYS } from '#lib/types/invoice.ts';
+	import { formatMoney, isNegativeAmount, isPositiveAmount } from '#lib/utils/money.ts';
+	import { invoiceStore } from '#lib/stores/invoices.svelte.ts';
+	import { auth } from '#lib/stores/auth.svelte.ts';
+	import { adminStore } from '#lib/stores/admin.svelte.ts';
+	import { api, ApiError } from '#lib/api.ts';
+	import { createRequestSequencer } from '#lib/utils/requestSequence.ts';
+	import { toast } from '#lib/components/ui/Toast.svelte';
+	import RowAction from '#lib/components/ui/RowAction.svelte';
+	import Money from '#lib/components/ui/Money.svelte';
+	import Badge from '#lib/components/ui/Badge.svelte';
+	import type { BadgeTone } from '#lib/components/ui/badgeTone.ts';
+	import { m } from '#lib/i18n/store.svelte.ts';
+	import { invoiceWarningText } from '#lib/api/invoiceWarnings.ts';
+	import { formatDate } from '#lib/utils/time.ts';
+	import { formatList } from '#lib/utils/list.ts';
+	import type { MessageKey } from '#lib/i18n/messages.ts';
+	import type { ActiveSteps } from '#lib/stores/workflows.svelte.ts';
 
-	import type { AuditEntry, AuditFieldChange } from '$lib/types/audit';
-	import { getInvoiceAuditLog } from '$lib/api/audit';
+	import type { AuditEntry, AuditFieldChange } from '#lib/types/audit.ts';
+	import { getInvoiceAuditLog } from '#lib/api/audit.ts';
 	import {
 		getInvoiceSuggestions,
 		type FieldSuggestion,
-	} from '$lib/api/enrichment';
-	import { routeIntercompany } from '$lib/api/invoices';
-	import { listInvoiceChart } from '$lib/api/glAccounts';
-	import { glAccountOptionLabel, type GlAccountOption } from '$lib/types/glAccount';
-	import { entityStore } from '$lib/stores/entity.svelte';
+	} from '#lib/api/enrichment.ts';
+	import { routeIntercompany } from '#lib/api/invoices.ts';
+	import { listInvoiceChart } from '#lib/api/glAccounts.ts';
+	import { glAccountOptionLabel, type GlAccountOption } from '#lib/types/glAccount.ts';
+	import { entityStore } from '#lib/stores/entity.svelte.ts';
 
 	/**
 	 * Badge tone per quality-inspection verdict (the 4-way match's gate).
@@ -45,13 +45,13 @@
 		fail: 'danger',
 		partial: 'warning'
 	};
-	import type { WorkflowInstanceDetail } from '$lib/types/workflowInstance';
-	import { chainIsComplete, chainLevelRemaining } from '$lib/types/workflowInstance';
-	import { getInvoiceWorkflowInstance } from '$lib/api/workflowInstance';
-	import ApprovalChainProgress from '$lib/components/ui/ApprovalChainProgress.svelte';
+	import type { WorkflowInstanceDetail } from '#lib/types/workflowInstance.ts';
+	import { chainIsComplete, chainLevelRemaining } from '#lib/types/workflowInstance.ts';
+	import { getInvoiceWorkflowInstance } from '#lib/api/workflowInstance.ts';
+	import ApprovalChainProgress from '#lib/components/ui/ApprovalChainProgress.svelte';
 
-	import SupplierChatThread from '$lib/components/chat/SupplierChatThread.svelte';
-	import type { ChatThread, ChatTemplate } from '$lib/types/supplierChat';
+	import SupplierChatThread from '#lib/components/chat/SupplierChatThread.svelte';
+	import type { ChatThread, ChatTemplate } from '#lib/types/supplierChat.ts';
 	import {
 		getChatThread,
 		postChatMessage,
@@ -61,7 +61,7 @@
 		getChatTemplates,
 		getChatMentionableUsers,
 		type ChatMentionCandidate,
-	} from '$lib/api/supplierChat';
+	} from '#lib/api/supplierChat.ts';
 
 	import {
 		E_INVOICE_FORMATS,
@@ -75,8 +75,8 @@
 		type EInvoiceValidationIssue,
 		type PeppolSendResult,
 		type PeppolTransmissionSummary,
-	} from '$lib/api/einvoice';
-	import EInvoiceIssueList from '$lib/components/EInvoiceIssueList.svelte';
+	} from '#lib/api/einvoice.ts';
+	import EInvoiceIssueList from '#lib/components/EInvoiceIssueList.svelte';
 
 	/*
 	 * There is still no HAND-WRITTEN code→prose map here, and there never will
@@ -874,7 +874,7 @@
 			if (pollCancelled) return;
 
 			try {
-				const updated = await api.get<import('$lib/types/invoice').Invoice>(`/api/invoices/${invoice.id}`);
+				const updated = await api.get<import('#lib/types/invoice.ts').Invoice>(`/api/invoices/${invoice.id}`);
 				if (pollCancelled) return;
 
 				if (updated.status !== 'pending') {

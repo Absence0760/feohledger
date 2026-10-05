@@ -1,6 +1,6 @@
 import type { Page } from '@playwright/test';
 
-import type { DashboardDiscountCapture } from '$lib/types/analytics';
+import type { DashboardDiscountCapture } from '#lib/types/analytics.ts';
 
 import { expect, test } from '../fixtures/helpers';
 import { dashboardResponse } from './fixture';

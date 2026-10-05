@@ -5,7 +5,7 @@ import {
 	REQUISITION_STATUS_LABEL_KEYS,
 	requisitionStatusLabelKey
 } from './requisition';
-import { en } from '$lib/i18n/locales/en';
+import { en } from '#lib/i18n/locales/en.ts';
 
 /**
  * Map-completeness guard for the requisition status labels — the sibling of

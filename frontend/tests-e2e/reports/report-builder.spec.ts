@@ -1,4 +1,4 @@
-import type { ReportResult } from '$lib/types/reports';
+import type { ReportResult } from '#lib/types/reports.ts';
 
 import { expect, test } from '../fixtures/helpers';
 

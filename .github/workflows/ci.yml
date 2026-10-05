@@ -429,9 +429,8 @@ jobs:
           PUBLIC_API_URL: http://localhost:8000
         run: pnpm check
 
-      # svelte-check covers src/ only — tsconfig.json extends
-      # .svelte-kit/tsconfig.json, whose generated include lists ../src/**,
-      # ../test/** and ../tests/**, and tests-e2e is none of those. So every
+      # svelte-check covers src/ only — tsconfig.json's include is src plus
+      # the root config files, and tests-e2e is neither. So every
       # e2e stub of an API response was a hand-maintained literal nothing
       # compared against the type the app reads, and one had silently drifted
       # (the dashboard stub omitted unconverted_count, undefined > 0 is false,
@@ -849,8 +848,8 @@ jobs:
         env:
           PUBLIC_API_URL: http://localhost:8000
           # The SPA's platform-vs-vanity host classification. A production
-          # build BAKES `$env/dynamic/public` in (adapter-static has no server
-          # to read it at runtime) and does not read `.env.development`, so
+          # build INLINES it (`static: true` in src/env.ts — adapter-static has
+          # no server to read it at runtime) and does not read `.env.development`, so
           # this build step is the CI half of what `playwright.config.ts`'s
           # `webServer.env` does locally — both take the value from
           # `tests-e2e/fixtures/env.ts::PLATFORM_DOMAINS`. Unset means "no host

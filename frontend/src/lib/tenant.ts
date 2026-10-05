@@ -2,22 +2,19 @@
  * Tenant + API-origin resolution for the current host.
  *
  * This module is the ONLY place that reads the host-routing configuration; the
- * rules themselves are dependency-free in `$lib/hostRouting.ts` (and unit-tested
+ * rules themselves are dependency-free in `#lib/hostRouting.ts` (and unit-tested
  * there, via `tenant.test.ts`). Everything below is the same one-line
  * composition, so the two can't drift and no call site re-derives a slug or an
  * API origin of its own.
  *
  * Configuration: `PUBLIC_PLATFORM_DOMAINS` — a comma-separated list of the
  * registrable domains the PLATFORM serves (e.g. `feohledger.com,localhost`).
- * Read through `$env/dynamic/public` rather than `$env/static/public` on
- * purpose: a `$env/static/public` import of an unset variable is a hard
- * build error, and every existing build (CI, `deploy/deploy.sh`, the S3 +
- * CloudFront release deploy) sets only `PUBLIC_API_URL`. Unset therefore has
- * to be legal, and it means "replay the pre-change rule" — see
- * `$lib/hostRouting.ts`.
+ * Declared optional in `src/env.ts` on purpose: every existing build (CI,
+ * `deploy/deploy.sh`, the S3 + CloudFront release deploy) sets only
+ * `PUBLIC_API_URL`. Unset therefore has to be legal, and it means "replay the
+ * pre-change rule" — see `#lib/hostRouting.ts`.
  */
-import { PUBLIC_API_URL } from '$env/static/public';
-import { env as publicEnv } from '$env/dynamic/public';
+import { PUBLIC_API_URL, PUBLIC_PLATFORM_DOMAINS } from '$app/env/public';
 import {
 	classifyHost,
 	currentHostname,
@@ -25,9 +22,9 @@ import {
 	resolveApiBase,
 	tenantSlugForHost,
 	tenantStorageKeyForHost,
-} from '$lib/hostRouting';
+} from '#lib/hostRouting.ts';
 
-const PLATFORM_DOMAINS = parsePlatformDomains(publicEnv.PUBLIC_PLATFORM_DOMAINS);
+const PLATFORM_DOMAINS = parsePlatformDomains(PUBLIC_PLATFORM_DOMAINS);
 
 /**
  * The `X-Tenant-Slug` header value for the current host, or `null` to send no
@@ -68,7 +65,7 @@ export function hasTenantContext(): boolean {
 	return kind === 'platform-tenant' || kind === 'vanity';
 }
 
-/** A stable per-tenant key for browser storage (`$lib/entity.ts`), or `null`
+/** A stable per-tenant key for browser storage (`#lib/entity.ts`), or `null`
  *  when there is no tenant context. The slug on a platform host, the hostname
  *  on a vanity host. */
 export function getTenantStorageKey(): string | null {

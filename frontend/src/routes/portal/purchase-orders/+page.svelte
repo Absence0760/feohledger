@@ -4,14 +4,14 @@
 		listPortalPurchaseOrders,
 		PORTAL_PAGE_SIZE,
 		type PortalPOListItem,
-	} from '$lib/portalApi';
+	} from '#lib/portalApi.ts';
 	import { goto } from '$app/navigation';
 	import { onMount } from 'svelte';
-	import Money from '$lib/components/ui/Money.svelte';
-	import { formatDate } from '$lib/utils/time';
-	import { appendUnique } from '$lib/utils/pagination';
-	import { createRequestSequencer } from '$lib/utils/requestSequence';
-	import { m } from '$lib/i18n/store.svelte';
+	import Money from '#lib/components/ui/Money.svelte';
+	import { formatDate } from '#lib/utils/time.ts';
+	import { appendUnique } from '#lib/utils/pagination.ts';
+	import { createRequestSequencer } from '#lib/utils/requestSequence.ts';
+	import { m } from '#lib/i18n/store.svelte.ts';
 
 	type PortalPO = PortalPOListItem;
 

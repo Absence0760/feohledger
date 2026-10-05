@@ -1,21 +1,21 @@
 <script lang="ts">
-	import { api } from '$lib/api';
-	import { appendUnique } from '$lib/utils/pagination';
-	import SearchBox from '$lib/components/ui/SearchBox.svelte';
-	import PageHeader from '$lib/components/ui/PageHeader.svelte';
-	import FilterChips from '$lib/components/ui/FilterChips.svelte';
-	import DataTable from '$lib/components/ui/DataTable.svelte';
-	import Modal from '$lib/components/ui/Modal.svelte';
-	import RowLink from '$lib/components/ui/RowLink.svelte';
-	import Badge from '$lib/components/ui/Badge.svelte';
-	import type { BadgeTone } from '$lib/components/ui/badgeTone';
-	import { formatMoney } from '$lib/utils/money';
-	import { isRowOpenClick } from '$lib/utils/rowNav';
-	import { toast } from '$lib/components/ui/Toast.svelte';
-	import { auth } from '$lib/stores/auth.svelte';
-	import { m } from '$lib/i18n/store.svelte';
-	import { formatDate } from '$lib/utils/time';
-	import { createRequestSequencer } from '$lib/utils/requestSequence';
+	import { api } from '#lib/api.ts';
+	import { appendUnique } from '#lib/utils/pagination.ts';
+	import SearchBox from '#lib/components/ui/SearchBox.svelte';
+	import PageHeader from '#lib/components/ui/PageHeader.svelte';
+	import FilterChips from '#lib/components/ui/FilterChips.svelte';
+	import DataTable from '#lib/components/ui/DataTable.svelte';
+	import Modal from '#lib/components/ui/Modal.svelte';
+	import RowLink from '#lib/components/ui/RowLink.svelte';
+	import Badge from '#lib/components/ui/Badge.svelte';
+	import type { BadgeTone } from '#lib/components/ui/badgeTone.ts';
+	import { formatMoney } from '#lib/utils/money.ts';
+	import { isRowOpenClick } from '#lib/utils/rowNav.ts';
+	import { toast } from '#lib/components/ui/Toast.svelte';
+	import { auth } from '#lib/stores/auth.svelte.ts';
+	import { m } from '#lib/i18n/store.svelte.ts';
+	import { formatDate } from '#lib/utils/time.ts';
+	import { createRequestSequencer } from '#lib/utils/requestSequence.ts';
 	import { untrack } from 'svelte';
 
 	const COLUMNS = $derived([

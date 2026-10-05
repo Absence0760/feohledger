@@ -1,12 +1,12 @@
 /**
- * Supplier-portal HTTP client. Parallel to $lib/api.ts but scoped to a
+ * Supplier-portal HTTP client. Parallel to #lib/api.ts but scoped to a
  * separate token key so the AP app and the portal can't stomp on each other's
  * localStorage (opening both in the same browser would otherwise clobber one).
  */
-import { getApiBase, getTenantSlug } from '$lib/tenant';
+import { getApiBase, getTenantSlug } from '#lib/tenant.ts';
 
 // Resolved per request, not frozen at module load — see the note in
-// `$lib/api.ts`. The supplier portal is served from the SAME hosts as the AP
+// `#lib/api.ts`. The supplier portal is served from the SAME hosts as the AP
 // app (including a tenant's vanity custom domain), so it must resolve its API
 // origin through the same owner rather than keeping a second spelling.
 const TOKEN_KEY = 'portal_auth_token';
@@ -213,7 +213,7 @@ export interface PortalPOListItem {
 
 /** Filter params for the signed-in vendor's own invoice list. `status` carries
  *  the raw internal `InvoiceStatus` values behind a vendor-facing phase chip
- *  (see `$lib/types/portalStatus.PORTAL_INVOICE_PHASES`); `search` is a
+ *  (see `#lib/types/portalStatus.PORTAL_INVOICE_PHASES`); `search` is a
  *  substring match on the invoice number. */
 export interface PortalInvoiceListParams extends PortalListParams {
 	status?: string[];
@@ -245,7 +245,7 @@ export function listPortalInvoices(params: PortalInvoiceListParams = {}) {
 
 /** Filter params for the signed-in vendor's payment history. `status` carries
  *  the raw `payments.status` values behind a vendor-facing phase chip (see
- *  `$lib/types/portalStatus.PORTAL_PAYMENT_PHASES`); `search` matches the paid
+ *  `#lib/types/portalStatus.PORTAL_PAYMENT_PHASES`); `search` matches the paid
  *  invoice's number. */
 export interface PortalPaymentListParams extends PortalListParams {
 	status?: string[];
@@ -375,7 +375,7 @@ export interface PortalCurrencyTotal {
  *
  *  Whole-set and vendor-scoped: the counts describe every invoice this supplier
  *  has, not the 20 rows the list page happens to have loaded. Buckets mirror
- *  the collapsed phases in `$lib/types/portalStatus` — a supplier never sees a
+ *  the collapsed phases in `#lib/types/portalStatus` — a supplier never sees a
  *  raw workflow status. */
 export interface PortalSummary {
 	invoices_total: number;

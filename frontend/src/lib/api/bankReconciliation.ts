@@ -6,12 +6,12 @@
 // resolve, delete) is admin/ap_manager only — treasury-adjacent, clerks
 // excluded, the same write gate as Positive Pay. The page gates its controls
 // on the same split; the backend is authoritative regardless.
-import { api } from '$lib/api';
+import { api } from '#lib/api.ts';
 import type {
 	BankStatement,
 	BankStatementListResponse,
 	OutstandingItems
-} from '$lib/types/bankReconciliation';
+} from '#lib/types/bankReconciliation.ts';
 
 export type { BankStatementListResponse };
 

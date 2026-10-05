@@ -10,7 +10,7 @@
  * that found it).
  *
  * Lives in `utils/` rather than inside `api.ts` because it is pure — no
- * `$env/static/public`, no `fetch`, no browser globals — so it is unit-testable
+ * `$app/env/public`, no `fetch`, no browser globals — so it is unit-testable
  * under the plain-Node vitest config. `api.ts` is its only production caller
  * (plus `api/expenses.ts`, which hand-rolls one `fetch`).
  */

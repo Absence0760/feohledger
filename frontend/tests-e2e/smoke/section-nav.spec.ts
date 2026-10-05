@@ -4,7 +4,7 @@ import { clickSectionTab, expect, sectionTabHrefs, test } from '../fixtures/help
  * Grouped sidebar navigation + the per-page section sub-tab bar.
  *
  * Lower-traffic routes are folded behind group rows (Procurement / Billing /
- * Insights / Automation / Governance / Settings — see `$lib/nav`). A group row
+ * Insights / Automation / Governance / Settings — see `#lib/nav`). A group row
  * lands on its first child; the page then shows the group's children as a
  * section tab bar that round-trips navigation and tracks the active route. Run
  * as admin (sees every group).

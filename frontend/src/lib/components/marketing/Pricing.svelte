@@ -1,8 +1,8 @@
 <script lang="ts">
 	import IconArrow from '~icons/material-symbols/arrow-forward';
 	import IconCheck from '~icons/material-symbols/check-small';
-	import { CONTACT } from '$lib/legal/operator';
-	import { reveal } from '$lib/actions/reveal';
+	import { CONTACT } from '#lib/legal/operator.ts';
+	import { reveal } from '#lib/actions/reveal.ts';
 
 	type Billing = 'monthly' | 'annual';
 	let billing = $state<Billing>('annual');

@@ -1,7 +1,7 @@
 // Typed helpers for the recurring / subscription invoice endpoints. All
 // requests route through the shared `api` client (Bearer + X-Tenant-Slug +
 // 401-bounce). Mirrors the pattern of `src/lib/api/contracts.ts`.
-import { api } from '$lib/api';
+import { api } from '#lib/api.ts';
 import type {
 	RecurringTemplate,
 	RecurringTemplateCreate,
@@ -9,7 +9,7 @@ import type {
 	RecurringTemplateSummary,
 	UpcomingSchedule,
 	RecurringHistory
-} from '$lib/types/recurring';
+} from '#lib/types/recurring.ts';
 
 export interface RecurringListParams {
 	status?: string;

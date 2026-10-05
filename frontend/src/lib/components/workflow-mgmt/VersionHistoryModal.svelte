@@ -1,9 +1,9 @@
 <script lang="ts">
-	import Modal from '$lib/components/ui/Modal.svelte';
-	import { toast } from '$lib/components/ui/Toast.svelte';
-	import { m } from '$lib/i18n/store.svelte';
-	import { workflowStore } from '$lib/stores/workflows.svelte';
-	import type { WorkflowVersion, WorkflowDiff } from '$lib/types/workflow';
+	import Modal from '#lib/components/ui/Modal.svelte';
+	import { toast } from '#lib/components/ui/Toast.svelte';
+	import { m } from '#lib/i18n/store.svelte.ts';
+	import { workflowStore } from '#lib/stores/workflows.svelte.ts';
+	import type { WorkflowVersion, WorkflowDiff } from '#lib/types/workflow.ts';
 
 	let {
 		open,

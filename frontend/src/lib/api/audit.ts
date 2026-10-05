@@ -1,7 +1,7 @@
 // Typed helpers for the audit trail + auditor-export endpoints. All requests
 // route through the shared `api` client (Bearer + X-Tenant-Slug + 401-bounce).
-import { api } from '$lib/api';
-import type { AuditEntry } from '$lib/types/audit';
+import { api } from '#lib/api.ts';
+import type { AuditEntry } from '#lib/types/audit.ts';
 
 export interface AuditExportParams {
 	invoiceId?: string;

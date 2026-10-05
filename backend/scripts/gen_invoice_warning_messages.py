@@ -110,7 +110,7 @@ def render() -> str:
         "// decisions.md §155 shipped a localized frame around server-English",
         "// findings and named this as the fix: a label per `type` could not work,",
         "// because one type is up to five different sentences.",
-        "import type { MessageKey } from '$lib/i18n/messages';",
+        "import type { MessageKey } from '#lib/i18n/messages.ts';",
         "",
         "/** What a warning parameter holds, and therefore how it renders. */",
         "export type WarningParamKind =",

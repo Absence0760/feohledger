@@ -1,6 +1,6 @@
-import { api } from '$lib/api';
-import { m } from '$lib/i18n/store.svelte';
-import { resolveOrgCurrency, type OrgCurrencyResponse } from '$lib/utils/reportingCurrency';
+import { api } from '#lib/api.ts';
+import { m } from '#lib/i18n/store.svelte.ts';
+import { resolveOrgCurrency, type OrgCurrencyResponse } from '#lib/utils/reportingCurrency.ts';
 
 /**
  * Tenant-wide display currency for *aggregate* figures that don't carry

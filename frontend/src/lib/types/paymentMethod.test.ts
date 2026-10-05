@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { PAYMENT_METHODS, PAYMENT_METHOD_LABEL_KEYS, paymentMethodLabelKey } from './payment';
-import { en } from '$lib/i18n/locales/en';
-import { SUPPORTED_LOCALES } from '$lib/i18n/locale';
-import { CATALOGUE_LOADERS } from '$lib/i18n/catalogues';
+import { en } from '#lib/i18n/locales/en.ts';
+import { SUPPORTED_LOCALES } from '#lib/i18n/locale.ts';
+import { CATALOGUE_LOADERS } from '#lib/i18n/catalogues.ts';
 
 /**
  * Drift guard: the frontend payment-method vocabulary must cover every rail the

@@ -1,23 +1,23 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
 	import { page } from '$app/state';
-	import { auth } from '$lib/stores/auth.svelte';
-	import { api } from '$lib/api';
-	import { toast } from '$lib/components/ui/Toast.svelte';
-	import SettingsRail from '$lib/components/ui/SettingsRail.svelte';
-	import { SUPPORTED_LOCALES, LOCALE_LABELS, type Locale } from '$lib/i18n/locale';
-	import { currentLocale, setLocale, m } from '$lib/i18n/store.svelte';
-	import type { MessageKey } from '$lib/i18n/messages';
-	import { notificationStore } from '$lib/stores/notifications.svelte';
+	import { auth } from '#lib/stores/auth.svelte.ts';
+	import { api } from '#lib/api.ts';
+	import { toast } from '#lib/components/ui/Toast.svelte';
+	import SettingsRail from '#lib/components/ui/SettingsRail.svelte';
+	import { SUPPORTED_LOCALES, LOCALE_LABELS, type Locale } from '#lib/i18n/locale.ts';
+	import { currentLocale, setLocale, m } from '#lib/i18n/store.svelte.ts';
+	import type { MessageKey } from '#lib/i18n/messages.ts';
+	import { notificationStore } from '#lib/stores/notifications.svelte.ts';
 	import {
 		EVENT_ORDER,
 		EVENT_LABEL_KEYS,
 		normalizePrefs,
 		type ChannelPrefs,
 		type NotificationEventType,
-	} from '$lib/types/notification';
-	import { roleLabelKey } from '$lib/types/admin';
-	import { formatList } from '$lib/utils/list';
+	} from '#lib/types/notification.ts';
+	import { roleLabelKey } from '#lib/types/admin.ts';
+	import { formatList } from '#lib/utils/list.ts';
 
 	interface EnrollResponse {
 		secret: string;
@@ -273,9 +273,9 @@
 	}
 
 	// --- Passkeys (WebAuthn) — an additional MFA factor ----------------------
-	import { isWebAuthnSupported } from '$lib/webauthn';
-	import type { ActiveSession, Passkey, StepUpProof } from '$lib/stores/auth.svelte';
-	import { formatDate } from '$lib/utils/time';
+	import { isWebAuthnSupported } from '#lib/webauthn.ts';
+	import type { ActiveSession, Passkey, StepUpProof } from '#lib/stores/auth.svelte.ts';
+	import { formatDate } from '#lib/utils/time.ts';
 
 	let passkeys = $state<Passkey[] | null>(null);
 	let passkeyName = $state('');

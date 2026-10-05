@@ -608,13 +608,13 @@ experiments `DataTable` with clickable rows opening a **results readout** modal
 row highlighted), a create `Modal` (pick a definition — seeds both configs from
 its live `steps_config` — set split %, primary metric, min sample, edit the two
 JSON configs), and per-row start / stop / conclude / delete actions gated by
-status + role. Over `$lib/api/experiments.ts` (types in
-`$lib/types/experiments.ts`).
+status + role. Over `#lib/api/experiments.ts` (types in
+`#lib/types/experiments.ts`).
 
 ### Frontend — `/adaptive`
 
 An `/adaptive` route under the **Settings** nav group, over
-`$lib/api/adaptive.ts` (types live in that module — it is the only consumer,
+`#lib/api/adaptive.ts` (types live in that module — it is the only consumer,
 and every money field on the wire is an exact decimal string). Read is
 admin / ap_manager / cfo, matching `_READ_ROLES`; a clerk is redirected, since
 every route here would 403 them.

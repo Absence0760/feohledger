@@ -1,16 +1,16 @@
 <script lang="ts">
-	import { api } from '$lib/api';
-	import DataTable from '$lib/components/ui/DataTable.svelte';
-	import KpiCard from '$lib/components/ui/KpiCard.svelte';
-	import MoneyByCurrency from '$lib/components/ui/MoneyByCurrency.svelte';
-	import type { CurrencyFigure } from '$lib/components/ui/moneyByCurrency';
-	import { formatMoney, isNegativeAmount } from '$lib/utils/money';
-	import type { MoneyAmount } from '$lib/utils/money';
-	import { formatPeriod } from '$lib/utils/time';
-	import { orgCurrency } from '$lib/stores/orgSettings.svelte';
-	import { m } from '$lib/i18n/store.svelte';
-	import { createRequestSequencer } from '$lib/utils/requestSequence';
-	import type { CfoAccrualsByCurrency, CfoAnalytics } from '$lib/types/analytics';
+	import { api } from '#lib/api.ts';
+	import DataTable from '#lib/components/ui/DataTable.svelte';
+	import KpiCard from '#lib/components/ui/KpiCard.svelte';
+	import MoneyByCurrency from '#lib/components/ui/MoneyByCurrency.svelte';
+	import type { CurrencyFigure } from '#lib/components/ui/moneyByCurrency.ts';
+	import { formatMoney, isNegativeAmount } from '#lib/utils/money.ts';
+	import type { MoneyAmount } from '#lib/utils/money.ts';
+	import { formatPeriod } from '#lib/utils/time.ts';
+	import { orgCurrency } from '#lib/stores/orgSettings.svelte.ts';
+	import { m } from '#lib/i18n/store.svelte.ts';
+	import { createRequestSequencer } from '#lib/utils/requestSequence.ts';
+	import type { CfoAccrualsByCurrency, CfoAnalytics } from '#lib/types/analytics.ts';
 
 	// DPO, cash conversion cycle, accruals, supplier concentration, fraud-rate
 	// trend, and rebate yield — `GET /api/analytics/cfo` computes all of these

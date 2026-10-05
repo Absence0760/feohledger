@@ -11,8 +11,8 @@
 // Not entity-scoped: `BankStatement` / `BankTransaction` predate multi-entity
 // and cover an org-wide bank account, so there is no entity filter here.
 
-import type { BadgeTone } from '$lib/components/ui/badgeTone';
-import type { MoneyAmount } from '$lib/utils/money';
+import type { BadgeTone } from '#lib/components/ui/badgeTone.ts';
+import type { MoneyAmount } from '#lib/utils/money.ts';
 
 // --- Match method ---------------------------------------------------------
 

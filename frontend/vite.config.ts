@@ -1,4 +1,7 @@
+import adapter from "@sveltejs/adapter-static";
 import { sveltekit } from "@sveltejs/kit/vite";
+import { vitePreprocess } from "@sveltejs/vite-plugin-svelte";
+import { mdsvex } from "mdsvex";
 import Icons from "unplugin-icons/vite";
 import { defineConfig, loadEnv } from "vite";
 
@@ -26,6 +29,10 @@ import { defineConfig, loadEnv } from "vite";
  */
 export default defineConfig(({ mode }) => {
 	const env = loadEnv(mode, ".", "PUBLIC_");
+	// SvelteKit 3 reads its config from the plugin, not `svelte.config.js`.
+	// `BASE_PATH` (unprefixed, so `loadEnv` needs the empty prefix to see it) is
+	// the sub-path escape hatch — unset everywhere today.
+	const { BASE_PATH } = loadEnv(mode, ".", "BASE_PATH");
 	const apiProxy = {
 		"/api": {
 			target: env.PUBLIC_API_URL || "http://localhost:8000",
@@ -35,7 +42,26 @@ export default defineConfig(({ mode }) => {
 
 	return {
 		plugins: [
-			sveltekit(),
+			sveltekit({
+				extensions: [".svelte", ".md"],
+				compilerOptions: {
+					modernAst: true,
+					warningFilter,
+				},
+				preprocess: [vitePreprocess(), mdsvex({ extensions: [".md"] })],
+				// adapter-static with an SPA fallback: there is no server to render
+				// on, so every unprerendered path is served this one document.
+				adapter: adapter({
+					fallback: "index.html",
+				}),
+				prerender: {
+					entries: ["*"],
+				},
+				paths: {
+					base: (BASE_PATH || "") as "" | `/${string}`,
+				},
+				inlineStyleThreshold: 0,
+			}),
 			Icons({
 				autoInstall: true,
 				compiler: "svelte",
@@ -45,3 +71,15 @@ export default defineConfig(({ mode }) => {
 		preview: { proxy: apiProxy },
 	};
 });
+
+/**
+ * Silence the Svelte compiler warnings this codebase has decided not to act on.
+ */
+function warningFilter(warning: { code: string }): boolean {
+	return ![
+		"svelte_component_deprecated",
+		"slot_element_deprecated",
+		"a11y_no_noninteractive_tabindex",
+		"css_unused_selector",
+	].includes(warning.code);
+}

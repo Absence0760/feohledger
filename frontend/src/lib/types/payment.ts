@@ -1,6 +1,6 @@
-import type { BadgeTone } from '$lib/components/ui/badgeTone';
-import type { MessageKey } from '$lib/i18n/messages';
-import type { MoneyAmount } from '$lib/utils/money';
+import type { BadgeTone } from '#lib/components/ui/badgeTone.ts';
+import type { MessageKey } from '#lib/i18n/messages.ts';
+import type { MoneyAmount } from '#lib/utils/money.ts';
 
 // Mirrors the statuses the backend actually persists on `payments.status`.
 // `pending_compliance` is the parking state the sanctions/KYC gate

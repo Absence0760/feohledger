@@ -1,15 +1,15 @@
-import { api } from '$lib/api';
+import { api } from '#lib/api.ts';
 import {
 	ALL_ENTITIES,
 	getStoredEntitySelection,
 	setStoredEntitySelection,
-} from '$lib/entity';
+} from '#lib/entity.ts';
 
 /**
  * Multi-entity (subsidiary) selector store — backs the sidebar entity
  * switcher. Loads the tenant's entities (`GET /api/entities`) and tracks the
  * current selection (a UUID, or {@link ALL_ENTITIES} for the consolidated
- * view). The selection persists via `$lib/entity` (tenant-scoped localStorage);
+ * view). The selection persists via `#lib/entity` (tenant-scoped localStorage);
  * `api.ts` reads it on every request to set `X-Entity-ID`.
  *
  * Switching entity calls {@link select}, which persists the choice and reloads

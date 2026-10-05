@@ -12,8 +12,8 @@
 //
 // See `backend/docs/payments.md` § ERP Payment Sync + § Settlement-amount
 // verification + § Voiding a card payment.
-import { api } from '$lib/api';
-import type { Payment } from '$lib/types/payment';
+import { api } from '#lib/api.ts';
+import type { Payment } from '#lib/types/payment.ts';
 
 /**
  * What `POST /api/payments/runs/{run_id}/sync-erp` returns.

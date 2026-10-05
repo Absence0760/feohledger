@@ -19,29 +19,29 @@
 	// row says so instead of offering a button that can only fail — and the 403
 	// is still mapped to the specific message, because the UI is not the gate.
 	import { goto } from '$app/navigation';
-	import { api, ApiError } from '$lib/api';
-	import { auth } from '$lib/stores/auth.svelte';
-	import { PERM_VENDOR_BANK_CHANGE_APPROVE } from '$lib/types/admin';
+	import { api, ApiError } from '#lib/api.ts';
+	import { auth } from '#lib/stores/auth.svelte.ts';
+	import { PERM_VENDOR_BANK_CHANGE_APPROVE } from '#lib/types/admin.ts';
 	import type {
 		VendorChangeRequest,
 		VendorChangeRequestCounts,
 		VendorChangeRequestPage
-	} from '$lib/types/vendor';
-	import { maskedProposalSummary, revealedProposalFields } from '$lib/types/vendor';
-	import PageHeader from '$lib/components/ui/PageHeader.svelte';
-	import DataTable from '$lib/components/ui/DataTable.svelte';
-	import FilterChips from '$lib/components/ui/FilterChips.svelte';
-	import Modal from '$lib/components/ui/Modal.svelte';
-	import RowAction from '$lib/components/ui/RowAction.svelte';
-	import RowLink from '$lib/components/ui/RowLink.svelte';
-	import Badge from '$lib/components/ui/Badge.svelte';
-	import type { BadgeTone } from '$lib/components/ui/badgeTone';
-	import { toast } from '$lib/components/ui/Toast.svelte';
-	import { isRowOpenClick } from '$lib/utils/rowNav';
-	import { appendUnique } from '$lib/utils/pagination';
-	import { createRequestSequencer } from '$lib/utils/requestSequence';
-	import { formatDate } from '$lib/utils/time';
-	import { m } from '$lib/i18n/store.svelte';
+	} from '#lib/types/vendor.ts';
+	import { maskedProposalSummary, revealedProposalFields } from '#lib/types/vendor.ts';
+	import PageHeader from '#lib/components/ui/PageHeader.svelte';
+	import DataTable from '#lib/components/ui/DataTable.svelte';
+	import FilterChips from '#lib/components/ui/FilterChips.svelte';
+	import Modal from '#lib/components/ui/Modal.svelte';
+	import RowAction from '#lib/components/ui/RowAction.svelte';
+	import RowLink from '#lib/components/ui/RowLink.svelte';
+	import Badge from '#lib/components/ui/Badge.svelte';
+	import type { BadgeTone } from '#lib/components/ui/badgeTone.ts';
+	import { toast } from '#lib/components/ui/Toast.svelte';
+	import { isRowOpenClick } from '#lib/utils/rowNav.ts';
+	import { appendUnique } from '#lib/utils/pagination.ts';
+	import { createRequestSequencer } from '#lib/utils/requestSequence.ts';
+	import { formatDate } from '#lib/utils/time.ts';
+	import { m } from '#lib/i18n/store.svelte.ts';
 
 	const PAGE_SIZE = 20;
 

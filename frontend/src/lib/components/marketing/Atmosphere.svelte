@@ -51,7 +51,7 @@
 	// The grain is a generated file (assets/marketing/gen-marketing.sh), so its
 	// URL has to survive a non-empty `paths.base` — which a hardcoded `url()` in
 	// the stylesheet would not. Handed to CSS as a custom property instead.
-	const grain = `url(${asset('/marketing/grain.svg')})`;
+	const grain = `url(${asset('marketing/grain.svg')})`;
 </script>
 
 <div class="atmosphere" class:dense class:still class:fixed aria-hidden="true" style="--grain-url: {grain}">

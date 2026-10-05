@@ -1,26 +1,26 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { focusTrap } from '$lib/actions/focusTrap';
-	import { api } from '$lib/api';
-	import { toast } from '$lib/components/ui/Toast.svelte';
-	import Badge from '$lib/components/ui/Badge.svelte';
+	import { focusTrap } from '#lib/actions/focusTrap.ts';
+	import { api } from '#lib/api.ts';
+	import { toast } from '#lib/components/ui/Toast.svelte';
+	import Badge from '#lib/components/ui/Badge.svelte';
 	import {
 		paymentMethodLabelKey,
 		paymentStatusLabelKey,
 		runStatusLabelKey,
 		PAYMENT_STATUS_TONES,
 		runStatusTone
-	} from '$lib/types/payment';
-	import type { PaymentStatus } from '$lib/types/payment';
-	import { auth } from '$lib/stores/auth.svelte';
-	import { PERM_PAYMENT_EXECUTE } from '$lib/types/admin';
-	import { formatMoney } from '$lib/utils/money';
+	} from '#lib/types/payment.ts';
+	import type { PaymentStatus } from '#lib/types/payment.ts';
+	import { auth } from '#lib/stores/auth.svelte.ts';
+	import { PERM_PAYMENT_EXECUTE } from '#lib/types/admin.ts';
+	import { formatMoney } from '#lib/utils/money.ts';
 	// The bare (no-symbol) rendering `fmt` falls back to when the server could
 	// not establish a figure's currency — the same primitive `/payments` and
 	// `/discounts` use for their own unprovable-currency cases, so a change to
 	// rounding or locale can't land in one and not the others.
-	import { formatAmountWithoutCurrency } from '$lib/utils/discountRecommendation';
-	import { m } from '$lib/i18n/store.svelte';
+	import { formatAmountWithoutCurrency } from '#lib/utils/discountRecommendation.ts';
+	import { m } from '#lib/i18n/store.svelte.ts';
 
 	let {
 		runId,
@@ -591,7 +591,7 @@
 
 	/* No status-badge rules here on purpose. Both pills in this dialog are
 	   `<Badge>`, and their tones come from `PAYMENT_STATUS_TONES` /
-	   `RUN_STATUS_TONES` in `$lib/types/payment` — shared with `/payments`,
+	   `RUN_STATUS_TONES` in `#lib/types/payment` — shared with `/payments`,
 	   which badges the same two vocabularies one click away. This file used to
 	   carry its own seven rules and they had already drifted: `draft` was
 	   amber here and flat there, and `submitted` / `cancelled` / `voided` /

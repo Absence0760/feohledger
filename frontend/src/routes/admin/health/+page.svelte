@@ -1,15 +1,15 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
-	import { auth } from '$lib/stores/auth.svelte';
-	import { formatDate } from '$lib/utils/time';
-	import PageHeader from '$lib/components/ui/PageHeader.svelte';
-	import DataTable from '$lib/components/ui/DataTable.svelte';
-	import KpiCard from '$lib/components/ui/KpiCard.svelte';
-	import Badge from '$lib/components/ui/Badge.svelte';
-	import type { BadgeTone } from '$lib/components/ui/badgeTone';
-	import { getSweepHealth, type SweepHealth, type SweepHealthReport } from '$lib/api/sweepHealth';
-	import type { MessageKey } from '$lib/i18n/messages';
-	import { m } from '$lib/i18n/store.svelte';
+	import { auth } from '#lib/stores/auth.svelte.ts';
+	import { formatDate } from '#lib/utils/time.ts';
+	import PageHeader from '#lib/components/ui/PageHeader.svelte';
+	import DataTable from '#lib/components/ui/DataTable.svelte';
+	import KpiCard from '#lib/components/ui/KpiCard.svelte';
+	import Badge from '#lib/components/ui/Badge.svelte';
+	import type { BadgeTone } from '#lib/components/ui/badgeTone.ts';
+	import { getSweepHealth, type SweepHealth, type SweepHealthReport } from '#lib/api/sweepHealth.ts';
+	import type { MessageKey } from '#lib/i18n/messages.ts';
+	import { m } from '#lib/i18n/store.svelte.ts';
 
 	// RBAC parity with the backend: `GET /api/health/sweeps` is
 	// `require_roles(ROLE_ADMIN)`. Wait for `auth.user` to resolve before

@@ -8,7 +8,7 @@
  * and every subtraction (`remaining`), in `Decimal`.
  */
 
-import type { BudgetRollup } from '$lib/types/budget';
+import type { BudgetRollup } from '#lib/types/budget.ts';
 
 /**
  * How many budgets across the whole rollup have gone over their allocation.

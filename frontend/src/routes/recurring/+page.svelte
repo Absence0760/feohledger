@@ -1,15 +1,15 @@
 <script lang="ts">
-	import type { RecurringTemplate } from '$lib/types/recurring';
-	import type { MessageKey } from '$lib/i18n/messages';
+	import type { RecurringTemplate } from '#lib/types/recurring.ts';
+	import type { MessageKey } from '#lib/i18n/messages.ts';
 	import {
 		RECURRING_STATUSES,
 		recurringStatusLabelKey,
 		STATUS_TONES,
 		cadenceLabelKey,
 		skipReasonKey
-	} from '$lib/types/recurring';
-	import { auth } from '$lib/stores/auth.svelte';
-	import { appendUnique } from '$lib/utils/pagination';
+	} from '#lib/types/recurring.ts';
+	import { auth } from '#lib/stores/auth.svelte.ts';
+	import { appendUnique } from '#lib/utils/pagination.ts';
 	import {
 		listRecurring,
 		getRecurringSummary,
@@ -19,27 +19,27 @@
 		resumeRecurring,
 		endRecurring,
 		generateRecurringNow
-	} from '$lib/api/recurring';
-	import type { RecurringTemplateSummary } from '$lib/types/recurring';
-	import { formatCurrencyTotals } from '$lib/utils/currencyGroups';
-	import Badge from '$lib/components/ui/Badge.svelte';
-	import PageHeader from '$lib/components/ui/PageHeader.svelte';
-	import SearchBox from '$lib/components/ui/SearchBox.svelte';
-	import FilterChips from '$lib/components/ui/FilterChips.svelte';
-	import KpiCard from '$lib/components/ui/KpiCard.svelte';
-	import DataTable from '$lib/components/ui/DataTable.svelte';
-	import RowLink from '$lib/components/ui/RowLink.svelte';
-	import RowAction from '$lib/components/ui/RowAction.svelte';
-	import Money from '$lib/components/ui/Money.svelte';
-	import RecurringModal from '$lib/components/modals/RecurringModal.svelte';
-	import { toast } from '$lib/components/ui/Toast.svelte';
-	import { isRowOpenClick } from '$lib/utils/rowNav';
-	import { m } from '$lib/i18n/store.svelte';
-	import { page } from '$app/stores';
+	} from '#lib/api/recurring.ts';
+	import type { RecurringTemplateSummary } from '#lib/types/recurring.ts';
+	import { formatCurrencyTotals } from '#lib/utils/currencyGroups.ts';
+	import Badge from '#lib/components/ui/Badge.svelte';
+	import PageHeader from '#lib/components/ui/PageHeader.svelte';
+	import SearchBox from '#lib/components/ui/SearchBox.svelte';
+	import FilterChips from '#lib/components/ui/FilterChips.svelte';
+	import KpiCard from '#lib/components/ui/KpiCard.svelte';
+	import DataTable from '#lib/components/ui/DataTable.svelte';
+	import RowLink from '#lib/components/ui/RowLink.svelte';
+	import RowAction from '#lib/components/ui/RowAction.svelte';
+	import Money from '#lib/components/ui/Money.svelte';
+	import RecurringModal from '#lib/components/modals/RecurringModal.svelte';
+	import { toast } from '#lib/components/ui/Toast.svelte';
+	import { isRowOpenClick } from '#lib/utils/rowNav.ts';
+	import { m } from '#lib/i18n/store.svelte.ts';
+	import { page } from '$app/state';
 	import { replaceState } from '$app/navigation';
 	import { untrack } from 'svelte';
-	import { formatDate } from '$lib/utils/time';
-	import { createRequestSequencer } from '$lib/utils/requestSequence';
+	import { formatDate } from '#lib/utils/time.ts';
+	import { createRequestSequencer } from '#lib/utils/requestSequence.ts';
 
 	const canCreate = $derived(auth.isManager);
 
@@ -73,8 +73,8 @@
 	const PAGE_SIZE = 20;
 
 	// URL-backed filter state (mirrors the contracts page convention).
-	let search = $state($page.url.searchParams.get('search') ?? '');
-	let statusFilter = $state<string>($page.url.searchParams.get('status') ?? 'all');
+	let search = $state(page.url.searchParams.get('search') ?? '');
+	let statusFilter = $state<string>(page.url.searchParams.get('status') ?? 'all');
 
 	let templates = $state<RecurringTemplate[]>([]);
 	let total = $state(0);
@@ -104,7 +104,7 @@
 	}
 
 	// Reflect the live filter state into the URL. EVERY read in here is
-	// untracked, `$page.url` included, because syncUrl() is a WRITER called
+	// untracked, `page.url` included, because syncUrl() is a WRITER called
 	// from the filter `$effect`s below — not a source of dependencies:
 	//   - the URL read would self-trigger the effect that writes it via
 	//     replaceState (Svelte effect_update_depth_exceeded);
@@ -116,7 +116,7 @@
 	//     reading them directly, so nothing here needs to be tracked.
 	function syncUrl() {
 		untrack(() => {
-			const url = new URL($page.url);
+			const url = new URL(page.url.href);
 			if (statusFilter !== 'all') url.searchParams.set('status', statusFilter);
 			else url.searchParams.delete('status');
 			if (search.trim()) url.searchParams.set('search', search.trim());
@@ -206,7 +206,7 @@
 	// Deep-link: `/recurring?id=<uuid>` opens that template's detail modal.
 	let deepLinkLoaded = $state<string | null>(null);
 	$effect(() => {
-		const id = $page.url.searchParams.get('id');
+		const id = page.url.searchParams.get('id');
 		if (!id || deepLinkLoaded === id) return;
 		deepLinkLoaded = id;
 		getRecurring(id)
@@ -225,7 +225,7 @@
 	function closeModal() {
 		editing = null;
 		showCreate = false;
-		const url = new URL($page.url);
+		const url = new URL(page.url.href);
 		if (url.searchParams.has('id')) {
 			url.searchParams.delete('id');
 			replaceState(`${url.pathname}${url.search}`, {});

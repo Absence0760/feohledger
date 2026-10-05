@@ -1,8 +1,8 @@
 <script lang="ts">
-	import { inviteVendorPortalUser, type PortalInviteResult } from '$lib/api/vendors';
-	import Modal from '$lib/components/ui/Modal.svelte';
-	import { toast } from '$lib/components/ui/Toast.svelte';
-	import { m } from '$lib/i18n/store.svelte';
+	import { inviteVendorPortalUser, type PortalInviteResult } from '#lib/api/vendors.ts';
+	import Modal from '#lib/components/ui/Modal.svelte';
+	import { toast } from '#lib/components/ui/Toast.svelte';
+	import { m } from '#lib/i18n/store.svelte.ts';
 
 	let {
 		vendorId,

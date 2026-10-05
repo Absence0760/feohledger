@@ -1,6 +1,6 @@
 <script lang="ts">
-	import { CONTACT, LAST_UPDATED, OPERATOR } from '$lib/legal/operator';
-	import { LEGAL_PAGES } from '$lib/legal/pages';
+	import { CONTACT, LAST_UPDATED, OPERATOR } from '#lib/legal/operator.ts';
+	import { LEGAL_PAGES } from '#lib/legal/pages.ts';
 
 	/**
 	 * Index of the published legal document set.

@@ -33,13 +33,13 @@ Find any key on the wrong side of either boundary.
    - Run `git log --all --full-history -- backend/.env frontend/.env` to confirm neither plaintext-secret file has ever been committed.
 
 4. **Client-bundle leakage (frontend).**
-   - SvelteKit env vars are split: `$env/static/public` is inlined into the client bundle, `$env/static/private` is server-only. Per `frontend/CLAUDE.md`, the frontend stays static — there's no `$env/dynamic/private` anywhere; if it appears, that's a Critical because it implies an SSR adapter was added.
-   - Grep `frontend/src/` for `$env/static/private`, `$env/dynamic`. Every hit is a finding.
+   - SvelteKit env vars are split: variables declared in `src/env.ts` with `public: true` are imported from `$app/env/public` and inlined into the client bundle; `$app/env/private` is server-only. Per `frontend/CLAUDE.md`, the frontend stays static — there's no `$env/dynamic/private` anywhere; if it appears, that's a Critical because it implies an SSR adapter was added.
+   - Grep `frontend/src/` for `$app/env/private`, and `frontend/src/env.ts` for an entry without `public: true`. Every hit is a finding.
    - Grep `frontend/src/` for raw `process.env` references. SvelteKit's static build doesn't expose `process.env` to the client — any reference is either dead code or a bug.
    - Remember `PUBLIC_API_URL` is baked in **at build time**, not read at runtime: a value that is correct locally and wrong in the deployed bundle is a deployment bug, not a secret leak — but a *secret* baked the same way is unrecoverable without a rebuild.
 
 5. **Server-only env touched from a non-server frontend path.**
-   - The frontend has no server-only paths today (static adapter). Any reference to `$env/static/private` or to a non-`PUBLIC_*` env var from `frontend/src/` is a finding.
+   - The frontend has no server-only paths today (static adapter). Any reference to `$app/env/private` or to a non-`PUBLIC_*` env var from `frontend/src/` is a finding.
 
 6. **Backend env hygiene (Python / FastAPI).**
    - Every setting is declared in `backend/app/config.py` under the `FEOH_` prefix. A secret read with a hardcoded fallback (`os.environ.get("X", "some-default")`, or a pydantic field defaulting to a usable key) is **Critical** per the root `CLAUDE.md` invariant — adapters must fail closed without a credential, not silently substitute one. The `change-me` JWT key in `.env.development` is the deliberate exception, and `bin/`'s deploy preflight already refuses it in a deployed env; confirm that guard still exists.

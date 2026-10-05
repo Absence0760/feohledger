@@ -1,7 +1,7 @@
 <script lang="ts">
-	import type { WorkflowStepType } from '$lib/types/workflow';
-	import { STEP_TYPE_LABELS, STEP_TYPE_DESCRIPTIONS } from '$lib/types/workflow';
-	import { m } from '$lib/i18n/store.svelte';
+	import type { WorkflowStepType } from '#lib/types/workflow.ts';
+	import { STEP_TYPE_LABELS, STEP_TYPE_DESCRIPTIONS } from '#lib/types/workflow.ts';
+	import { m } from '#lib/i18n/store.svelte.ts';
 
 	type Props = {
 		ondragtype: (type: WorkflowStepType) => void;

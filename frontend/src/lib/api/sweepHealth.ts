@@ -6,7 +6,7 @@
 // would turn a misconfigured audit sink into a rolling restart loop
 // (`backend/docs/background-sweeps.md`). This admin read is therefore the only
 // surface on which a dead or stalled sweep is visible at all.
-import { api } from '$lib/api';
+import { api } from '#lib/api.ts';
 
 /** Per-sweep state. `not_started` (enabled but never registered) and `died`
  *  are the real defects; `disabled` is an expected, benign state. */

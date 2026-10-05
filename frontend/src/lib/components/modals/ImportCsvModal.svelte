@@ -1,9 +1,9 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
-	import Modal from '$lib/components/ui/Modal.svelte';
-	import { toast } from '$lib/components/ui/Toast.svelte';
-	import { m } from '$lib/i18n/store.svelte';
-	import type { ImportResult } from '$lib/types/csvImport';
+	import Modal from '#lib/components/ui/Modal.svelte';
+	import { toast } from '#lib/components/ui/Toast.svelte';
+	import { m } from '#lib/i18n/store.svelte.ts';
+	import type { ImportResult } from '#lib/types/csvImport.ts';
 
 	// Generic Day-0 CSV import flow shared by `/vendors` and `/invoices`:
 	// pick a file, upload it, show the skip-and-report result (every bad row

@@ -1,4 +1,4 @@
-import type { MessageKey } from '$lib/i18n/messages';
+import type { MessageKey } from '#lib/i18n/messages.ts';
 import type { InvoiceStatus } from './invoice';
 import type { PaymentStatus } from './payment';
 
@@ -16,8 +16,8 @@ import type { PaymentStatus } from './payment';
  * These maps collapse the internal state machines into the handful of phases
  * a vendor actually cares about — Submitted / Processing / Approved / Paid /
  * Rejected — while staying keyed on the SAME `InvoiceStatus` /
- * `PaymentStatus` types the internal app uses (`$lib/types/invoice`,
- * `$lib/types/payment`): a `Record<InvoiceStatus, …>` fails typechecking here
+ * `PaymentStatus` types the internal app uses (`#lib/types/invoice`,
+ * `#lib/types/payment`): a `Record<InvoiceStatus, …>` fails typechecking here
  * until a new backend status is classified, instead of falling through to the
  * raw string.
  *
