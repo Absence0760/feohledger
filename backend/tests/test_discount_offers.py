@@ -339,6 +339,25 @@ def test_mark_captured_guard_requires_accepted():
         do.mark_captured(offer, captured_amount=Decimal("10.00"), now=datetime.now(UTC))
 
 
+def test_reverse_capture_is_the_inverse_of_mark_captured():
+    """A voided settlement un-realizes its discount: back to `accepted` with no
+    captured figure, so a re-payment at the payoff can capture it again."""
+    offer = _offer(status=OFFER_STATUS_ACCEPTED)
+    do.mark_captured(offer, captured_amount=Decimal("20.00"), now=datetime.now(UTC))
+    assert do.reverse_capture(offer) == Decimal("20.00")
+    assert offer.status == OFFER_STATUS_ACCEPTED
+    assert offer.captured_amount is None
+    assert offer.captured_at is None
+    do.mark_captured(offer, captured_amount=Decimal("20.00"), now=datetime.now(UTC))
+    assert offer.status == OFFER_STATUS_CAPTURED
+
+
+def test_reverse_capture_guard_requires_captured():
+    offer = _offer(status=OFFER_STATUS_ACCEPTED)
+    with pytest.raises(ValueError):
+        do.reverse_capture(offer)
+
+
 def test_expire_if_past_changes_when_window_closed():
     offer = _offer(valid_until=date(2026, 1, 1))
     assert do.expire_if_past(offer, as_of=date(2026, 1, 2)) is True

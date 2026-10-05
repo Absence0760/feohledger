@@ -239,7 +239,7 @@ down, and must report an unavailable probe.
 | `GET /offers` | all four | list (filters: `status` — `missed` = declined+expired — `scope`, `vendor_id`; paginated, entity-scoped). Both the filter and the reported `status` use the **effective** status (`effective_status_sql`), so a lapsed `offered` row is filtered and rendered as `expired` |
 | `POST /offers` | admin, ap_manager | create an offer (invoice base_amount defaults from the invoice). `422` for a malformed `invoice_id`/`vendor_id` **or an unknown key** — `DiscountOfferCreate` is `extra="forbid"` (§ Both create surfaces refuse what they cannot read). An invoice-scoped offer's `vendor_id`, if sent, must be the invoice's own (`422` otherwise): it was stored as sent, which put the offer in front of the wrong supplier in the portal |
 | `GET /offers/{id}` | all four | detail (entity-scoped) |
-| `POST /offers/{id}/accept` | admin, ap_manager, **cfo** | accept at a tier (`tier_days` or best tier today) |
+| `POST /offers/{id}/accept` | admin, ap_manager, **cfo** | accept at a tier (`tier_days` or best tier today). `409` when the offer's invoice is already `paid` / `done` (§ No discount on a settled invoice) |
 | `POST /offers/{id}/decline` | admin, ap_manager, **cfo** | decline |
 | `GET /invoices/{id}/roi` | all four | annualized ROI of paying the invoice early (open offer's best tier, else the static `PaymentSchedule` term) |
 | `POST /optimize` | all four | rank open offers by ROI and select within an optional `{cash_budget}`. Offers with no resolvable net due date come back on `unrankable[]` with a `null` APR and `roi.horizon_known: false` — never a fabricated `0.00` (§ An unknown horizon is `null`, not `0`) |
@@ -247,10 +247,30 @@ down, and must report an unavailable probe.
 | `GET /dashboard` | all four | captured / missed / capture-rate / open-offers / projected-savings rollup |
 
 Every mutation writes an audit row (`discount_offer.created` / `.accepted` /
-`.declined` / `.bulk_created`; the sweep writes `.auto_accepted`). Reads are
+`.declined` / `.bulk_created`; the sweep writes `.auto_accepted`; settlement
+writes `.captured` and a payment void `.capture_reversed`). Reads are
 entity-scoped; lifecycle guards return `409`. Percent / ROI fields serialize as
 JSON **numbers** (matching the frontend `number`-typed contract) while staying
 `Decimal` in Python.
+
+### No discount on a settled invoice
+
+Accepting an invoice-scoped offer commits to paying that invoice early. On an
+invoice already `paid` or `done` there is no payment left to make, so the
+acceptance can never be realized — yet it used to be recorded and audited on
+every accept path. All four now ask one gate,
+`discount_auto_trigger.settled_invoice_status`: `POST /offers/{id}/accept` and
+the supplier portal's accept answer `409` naming the status, while the
+auto-accept sweep and the copilot's `capture-discounts` skip the offer and leave
+it `offered`. The optimizer's candidate builder (`api/discounts._build_opportunity`
+— behind `POST /optimize`, the dashboard's `projected_savings` and the copilot's
+plans) drops such an offer too, so it is never ranked, selected or summed into
+savings nobody can take. The predicate, `discount_offers.invoice_awaits_payment`, is
+derived rather than listed: a status awaits payment when the payment queue's
+`PAYABLE_INVOICE_STATUSES` is reachable from it through `VALID_TRANSITIONS`
+without passing through `paid` / `done` — so a not-yet-approved invoice still
+qualifies, and the void back-edge cannot make a paid one look payable.
+Vendor-scoped bulk offers have no single invoice and are not gated.
 
 ## Proposing a vendor-wide offer
 
@@ -430,6 +450,30 @@ and swallowed, never the reason a payment that DID settle fails to record
 that it settled, or the reason a webhook delivery 5xxs and gets needlessly
 retried.
 
+**One settlement realizes at most one discount.** Nothing stops two
+`accepted` offers existing on one invoice (a supplier re-sends an offer and
+both are accepted), and two with the same tier share one discounted payoff.
+The vendor was short-paid that discount once, so the scan captures the first
+match — earliest `accepted_at`, `id` as the tiebreak — and stops. Capturing
+every match used to book the savings once per offer: a $20 deduction reported
+as $40 captured.
+
+**A void un-realizes the capture.** `POST /api/payments/{id}/void` returns the
+invoice to `approved` — nothing was paid, so nothing was saved — but the offer
+used to stay `captured`, so the dashboard reported savings on an unpaid invoice
+and a re-payment at the discounted payoff could capture nothing.
+`discount_capture.reverse_captures_for_voided_payment` now moves the offer back
+to `accepted` (`discount_offers.reverse_capture`, clearing `captured_amount` /
+`captured_at`) and writes a `discount_offer.capture_reversed` audit row carrying
+`payment_id` and `reversed_amount`. `DiscountOffer` holds no payment id, so
+attribution is by elimination and both conditions must hold: the voided payment
+was `completed` (capture only runs there), and no **other** `completed` payment
+remains on the invoice (if one does, the capture may be its, and the offer is
+left alone rather than guessed at). Unlike the capture leg this one is **not**
+best-effort — it is a pure DB write in the void's own transaction, and a void
+that cannot reverse the savings should fail rather than leave the dashboard
+wrong.
+
 **`GET /api/dashboard`'s `discount_capture` KPI is a different feature and is
 NOT affected by this.** It rolls up `PaymentSchedule.discount_percent` /
 `discount_date` — the *static* "2/10 net 30" term captured at invoice
@@ -539,7 +583,10 @@ portal nav.
   offer (explicit `currency` diverging from its own invoice) does NOT falsely
   capture even when the numbers numerically coincide; repeat calls to
   `capture_offers_for_settled_payment` are idempotent (no double-count, no
-  error on an already-`captured` offer).
+  error on an already-`captured` offer); one settlement captures only one of
+  two same-tier accepted offers; and voiding the settling payment reverses the
+  capture (offer back to `accepted`, `.capture_reversed` audited, dashboard
+  back to zero) while a void of a never-settled payment reverses nothing.
 - `frontend/tests-e2e/discounts/money-path.spec.ts` — live-stack e2e asserting
   the exact savings/ROI/APR Decimal values, best-vs-explicit tier selection,
   accept idempotency (double-accept is a safe 409, no double-count), the

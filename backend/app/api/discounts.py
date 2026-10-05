@@ -58,7 +58,11 @@ from app.schemas.discount import (
 from app.services import discount_offers as offers_svc
 from app.services.audit_dispatch import dispatch_audit
 from app.services.currency_conversion import resolve_reporting_currency
-from app.services.discount_auto_trigger import _resolve_due_date, _tier_deadline
+from app.services.discount_auto_trigger import (
+    _resolve_due_date,
+    _tier_deadline,
+    settled_invoice_status,
+)
 from app.services.discount_optimizer import OfferOpportunity, optimize
 from app.services.discount_roi import compute_roi, days_between
 from app.tenant import (
@@ -174,7 +178,8 @@ async def _build_opportunity(
 ) -> OfferOpportunity | None:
     """Turn an open offer into a ranked optimizer opportunity (best tier today).
 
-    Returns ``None`` when no tier is still achievable. Reuses the sweep's
+    Returns ``None`` when no tier is still achievable, or the offer's invoice is
+    already paid / done. Reuses the sweep's
     deadline / due-date economics so router and background sweep agree.
     """
     tier = offers_svc.best_tier_for_date(
@@ -184,6 +189,12 @@ async def _build_opportunity(
         reference_date=offers_svc.offer_reference_date(offer),
     )
     if tier is None:
+        return None
+    # An offer whose invoice is already paid / done can never be taken, so it is
+    # not an opportunity: ranking it inflated `/optimize`'s totals, the
+    # dashboard's `projected_savings` and the copilot's plan by savings nobody
+    # can realize — the same gate every accept path refuses on.
+    if await settled_invoice_status(db, offer) is not None:
         return None
     pay_by = _tier_deadline(offer, tier, today)
     # `pay_by` is deliberately NOT the last fallback. It used to be, and it made
@@ -225,6 +236,18 @@ def _roi_response(roi) -> DiscountROIResponse:
         worthwhile=roi.worthwhile,
         horizon_known=roi.horizon_known,
     )
+
+
+async def _refuse_settled_invoice(db: AsyncSession, offer: DiscountOffer) -> None:
+    """409 when the offer's invoice is already paid / done — accepting would
+    record a deduction no payment can ever take
+    (``discount_auto_trigger.settled_invoice_status``)."""
+    settled = await settled_invoice_status(db, offer)
+    if settled is not None:
+        raise HTTPException(
+            status_code=409,
+            detail=f"The invoice is already {settled}; there is no payment left to discount",
+        )
 
 
 async def _get_offer_scoped(
@@ -410,6 +433,7 @@ async def accept_offer(
 ):
     offer = await _get_offer_scoped(db, offer_id, entity_id)
     today = utc_today()
+    await _refuse_settled_invoice(db, offer)
     if body.tier_days is not None:
         tier = offers_svc.select_tier_for_date(
             offer.tiers or [],
