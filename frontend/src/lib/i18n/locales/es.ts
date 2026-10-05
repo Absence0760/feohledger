@@ -352,6 +352,7 @@ export const messages = {
 	'invoices.bulk.cannotDelete': 'No se pueden eliminar facturas en estados gestionados por el sistema',
 	'invoices.bulk.noTransitions': 'No hay transiciones de estado comunes para las facturas seleccionadas',
 	'invoices.bulk.newStatusAria': 'Nuevo estado para las facturas seleccionadas',
+	'invoices.bulk.rejectReasonAria': 'Motivo del rechazo de las facturas seleccionadas',
 	'invoices.col.invoiceNumber': 'N.º de factura',
 	'invoices.col.vendor': 'Proveedor',
 	'invoices.col.description': 'Descripción',

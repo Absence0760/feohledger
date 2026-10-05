@@ -449,6 +449,13 @@
 	let selected = $state<Set<string>>(new Set());
 	let bulkBusy = $state(false);
 	let bulkStatusValue = $state<InvoiceStatus>('approved');
+	// `POST /api/invoices/bulk/status` 422s a `rejected` target with no
+	// reason — rejections route through `review.reject_invoice`, which records
+	// it on the audit row and the `review_rejected` exception. The picker
+	// offered Rejected without ever asking for one, so every bulk reject was a
+	// guaranteed error toast. Sent only when the target is `rejected`.
+	let bulkRejectReason = $state('');
+	let bulkNeedsReason = $derived(bulkStatusValue === 'rejected');
 	let showBulkStatusSelect = $state(false);
 
 	// True once "Select all N matching" has resolved the WHOLE filtered set
@@ -578,12 +585,14 @@
 			const res = (await api.post('/api/invoices/bulk/status', {
 				ids: [...selected],
 				status: bulkStatusValue,
+				...(bulkNeedsReason ? { reason: bulkRejectReason.trim() } : {}),
 			})) as { updated: number; skipped: { id: string; reason: string }[] };
 			await invoiceStore.fetch(buildParams()); // noqa: raw-fetch-in-component — store method, routes through api client
 			await invoiceStore.fetchCounts(buildParams());
 			selected = new Set();
 			selectedAllMatching = false;
 			showBulkStatusSelect = false;
+			bulkRejectReason = '';
 			// A skip can be an immutable status, but it can just as easily be a
 			// segregation-of-duties or CFO-threshold refusal — an authorization
 			// decision, not a data problem. Surface the backend's own reason(s)
@@ -836,7 +845,21 @@
 									<option value={s}>{m(INVOICE_STATUS_LABEL_KEYS[s])}</option>
 								{/each}
 							</select>
-							<button class="bulk-apply-btn" disabled={bulkBusy} onclick={bulkStatusChange}>{m('common.apply')}</button>
+							{#if bulkNeedsReason}
+								<input
+									type="text"
+									class="bulk-reject-reason"
+									bind:value={bulkRejectReason}
+									maxlength="1000"
+									placeholder={m('invoices.modal.review.rejectPlaceholder')}
+									aria-label={m('invoices.bulk.rejectReasonAria')}
+								/>
+							{/if}
+							<button
+								class="bulk-apply-btn"
+								disabled={bulkBusy || (bulkNeedsReason && !bulkRejectReason.trim())}
+								onclick={bulkStatusChange}
+							>{m('common.apply')}</button>
 						</div>
 					{/if}
 				</div>
@@ -1386,6 +1409,12 @@
 		/* base look (border/radius/colour/font/chevron) from the global recipe */
 		padding: 5px 30px 5px 8px;
 		font-size: 0.82rem;
+	}
+
+	.bulk-reject-reason {
+		padding: 5px 8px;
+		font-size: 0.82rem;
+		min-width: 220px;
 	}
 
 	.bulk-apply-btn {

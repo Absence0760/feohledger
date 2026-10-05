@@ -414,6 +414,7 @@ export const en = {
 	'invoices.bulk.cannotDelete': 'Cannot delete invoices in system-managed statuses',
 	'invoices.bulk.noTransitions': 'No common status transitions for the selected invoices',
 	'invoices.bulk.newStatusAria': 'New status for selected invoices',
+	'invoices.bulk.rejectReasonAria': 'Reason for rejecting the selected invoices',
 	'invoices.col.invoiceNumber': 'Invoice #',
 	'invoices.col.vendor': 'Vendor',
 	'invoices.col.description': 'Description',
