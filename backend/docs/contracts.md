@@ -87,10 +87,12 @@ The spend-to-contract link lives on the invoice side: `invoices.contract_id`
 document. `POST /{id}/upload` pushes the file to S3/MinIO via
 `storage.upload_contract_file` (key form `<org_id>/contracts/<contract_id>/<filename>`)
 and stamps `file_key` / `file_url`. `GET /contracts/file/{file_key}` proxies the
-stored document back, cross-tenant-checked: the key's first segment must equal
-the caller's `organization_id`, with the **same 404** for wrong-org and
-missing-file so the response can't enumerate prefixes (mirrors the invoice file
-endpoint).
+stored document back through `api/file_proxy`: the contract id is parsed out
+of the key, the contract is resolved within the caller's selected entity, and
+the key must be its current `file_key` — wrong org, another subsidiary's
+contract, a superseded object and a missing file are all the **same 404**, so
+the response can't enumerate keys (mirrors the invoice file endpoint;
+`docs/decisions.md` §226).
 
 List (`GET /contracts`) supports `status`, `contract_type`, `vendor_id`, and
 `search` (over `contract_number` + `title`) filters with pagination.
@@ -219,7 +221,7 @@ Mounted at `/api/contracts`.
 | `PATCH /contracts/{id}` | Update (status excluded — lifecycle endpoints own it) | mutate |
 | `DELETE /contracts/{id}` | Delete — `draft` / `cancelled` only (`409` otherwise) | mutate |
 | `POST /contracts/{id}/upload` | Upload contract document → S3 | mutate |
-| `GET /contracts/file/{file_key}` | Proxy stored document (cross-tenant-checked) | any authenticated |
+| `GET /contracts/file/{file_key}` | Proxy stored document — the owning contract is resolved within the selected entity and the key must be its current `file_key` (`api/file_proxy`) | any authenticated |
 | `POST /contracts/{id}/activate` | Lifecycle → `active` | mutate |
 | `POST /contracts/{id}/terminate` | Lifecycle → `terminated` | mutate |
 | `POST /contracts/{id}/cancel` | Lifecycle → `cancelled` | mutate |

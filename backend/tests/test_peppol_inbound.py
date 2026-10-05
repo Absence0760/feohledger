@@ -147,6 +147,8 @@ async def test_valid_inbound_creates_invoice_and_transmission(realdb):
         assert isinstance(inv.amount, Decimal)
         assert inv.currency == "EUR"
         assert inv.file_key and inv.file_key.endswith("peppol-inbound.xml")
+        # The authorising proxy, never the private bucket's address (decisions §226).
+        assert inv.file_url == f"/api/invoices/file/{inv.file_key}"
 
         txns = (await s.execute(select(PeppolTransmission))).scalars().all()
         assert len(txns) == 1

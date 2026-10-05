@@ -255,6 +255,9 @@ async def test_w9_upload_uses_sanitised_filename_in_s3_key(monkeypatch):
         db=db,
         user=SimpleNamespace(id=uuid4()),
         org_id=org_id,
+        # Consolidated view — called directly, so the Depends default is not
+        # resolved and would otherwise reach `ensure_in_entity_scope`.
+        entity_id=None,
     )
 
     assert "../" not in captured["Key"]
@@ -267,12 +270,22 @@ async def test_w9_upload_uses_sanitised_filename_in_s3_key(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
+def _owner_db(row):
+    """A tenant session whose owning-row lookup returns ``row`` (or nothing)."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    result = MagicMock()
+    result.one_or_none.return_value = row
+    db = MagicMock()
+    db.execute = AsyncMock(return_value=result)
+    return db
+
+
 @pytest.mark.asyncio
 async def test_get_invoice_file_refuses_cross_tenant_file_key():
-    """A user in org A who calls `/api/workflow/file/<orgB-uuid>/...`
-    must get a 404 — not the file. The endpoint's auth dep only
-    proves the user is *some* authenticated user; the file key tells
-    us which tenant owns it. Cross-check is mandatory."""
+    """A user in org A who calls `/api/invoices/file/<orgB-uuid>/...` must get
+    a 404 — not the file. The key is parsed before anything is read: a foreign
+    org segment is refused without touching the tenant DB or S3."""
     from types import SimpleNamespace
     from unittest.mock import AsyncMock, patch
 
@@ -281,46 +294,49 @@ async def test_get_invoice_file_refuses_cross_tenant_file_key():
     from app.api.workflow import get_invoice_file
 
     user = SimpleNamespace(id=uuid.uuid4(), organization_id=uuid.uuid4())
-    other_org = uuid.uuid4()
-    cross_tenant_key = f"{other_org}/some-invoice/file.pdf"
+    cross_tenant_key = f"{uuid.uuid4()}/{uuid.uuid4()}/file.pdf"
+    db = _owner_db(None)
 
-    with patch("app.api.workflow.get_file", AsyncMock()) as mk_get_file:
+    with patch("app.api.file_proxy.get_file", AsyncMock()) as mk_get_file:
         with pytest.raises(HTTPException) as exc:
-            await get_invoice_file(file_key=cross_tenant_key, user=user)
+            await get_invoice_file(file_key=cross_tenant_key, db=db, user=user, entity_id=None)
 
     assert exc.value.status_code == 404
-    mk_get_file.assert_not_called(), "S3 must not be touched when org check fails"
+    mk_get_file.assert_not_called(), "S3 must not be touched when the key is refused"
+    db.execute.assert_not_called()
 
 
 @pytest.mark.asyncio
 async def test_get_invoice_file_same_org_succeeds():
-    """Positive control — when the file key's first segment IS the
-    user's org, the file is fetched and returned. Without this, the
-    cross-tenant test could pass because every request 404s."""
+    """Positive control — the key's owner resolves to an invoice whose current
+    ``file_key`` IS this key, so the file is fetched and returned. Without this,
+    the refusal tests could pass because every request 404s."""
     from types import SimpleNamespace
     from unittest.mock import AsyncMock, patch
 
     from app.api.workflow import get_invoice_file
 
     user = SimpleNamespace(id=uuid.uuid4(), organization_id=uuid.uuid4())
-    same_org_key = f"{user.organization_id}/inv-1/file.pdf"
+    invoice_id = uuid.uuid4()
+    key = f"{user.organization_id}/{invoice_id}/file.pdf"
 
     with patch(
-        "app.api.workflow.get_file",
+        "app.api.file_proxy.get_file",
         AsyncMock(return_value=(b"PDF content", "application/pdf")),
     ):
-        resp = await get_invoice_file(file_key=same_org_key, user=user)
+        resp = await get_invoice_file(
+            file_key=key, db=_owner_db((invoice_id, key)), user=user, entity_id=None
+        )
 
-    # Response body is the file content.
     assert resp.body == b"PDF content"
     assert resp.media_type == "application/pdf"
 
 
 @pytest.mark.asyncio
-async def test_get_invoice_file_returns_same_404_for_wrong_org_and_missing_file():
-    """No enumeration: "wrong org" and "no such file in your org"
-    must produce the same 404 with the same detail. A diff would
-    let an attacker map other tenants' UUID prefixes."""
+async def test_get_invoice_file_returns_same_404_for_every_refusal_and_missing_file():
+    """No enumeration: wrong org, an owner the caller can't see, a key that is
+    not the owner's current document, and a missing object all produce the
+    same 404 with the same detail."""
     from types import SimpleNamespace
     from unittest.mock import AsyncMock, patch
 
@@ -329,21 +345,28 @@ async def test_get_invoice_file_returns_same_404_for_wrong_org_and_missing_file(
     from app.api.workflow import get_invoice_file
 
     user = SimpleNamespace(id=uuid.uuid4(), organization_id=uuid.uuid4())
+    invoice_id = uuid.uuid4()
+    key = f"{user.organization_id}/{invoice_id}/x.pdf"
 
-    # Wrong-org case
-    with pytest.raises(HTTPException) as exc_wrong_org:
-        await get_invoice_file(
-            file_key=f"{uuid.uuid4()}/inv/x.pdf",
-            user=user,
-        )
+    cases = [
+        (f"{uuid.uuid4()}/{invoice_id}/x.pdf", None),  # wrong org
+        (key, None),  # owner missing / out of entity scope
+        (key, (invoice_id, f"{user.organization_id}/{invoice_id}/newer.pdf")),  # superseded
+    ]
+    details = []
+    for file_key, row in cases:
+        with pytest.raises(HTTPException) as exc:
+            await get_invoice_file(file_key=file_key, db=_owner_db(row), user=user, entity_id=None)
+        assert exc.value.status_code == 404
+        details.append(exc.value.detail)
 
-    # Missing-file case (same-org key but S3 raises NoSuchKey)
-    with patch("app.api.workflow.get_file", AsyncMock(side_effect=Exception("NoSuchKey"))):
+    # Missing object: the owner checks out but S3 raises NoSuchKey.
+    with patch("app.api.file_proxy.get_file", AsyncMock(side_effect=Exception("NoSuchKey"))):
         with pytest.raises(HTTPException) as exc_missing:
             await get_invoice_file(
-                file_key=f"{user.organization_id}/inv/x.pdf",
-                user=user,
+                file_key=key, db=_owner_db((invoice_id, key)), user=user, entity_id=None
             )
+    assert exc_missing.value.status_code == 404
+    details.append(exc_missing.value.detail)
 
-    assert exc_wrong_org.value.status_code == exc_missing.value.status_code == 404
-    assert exc_wrong_org.value.detail == exc_missing.value.detail
+    assert set(details) == {"File not found"}

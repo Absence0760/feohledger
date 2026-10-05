@@ -26,6 +26,7 @@ from app.api.deps import (
     get_org_id,
     require_roles,
 )
+from app.api.file_proxy import serve_owned_file
 from app.api.money_filters import snap_lower_bound, snap_upper_bound
 from app.api.pagination import (
     MAX_SELECT_ALL_IDS,
@@ -89,9 +90,10 @@ from app.services.gl_chart import refuse_gl_codes_outside_chart
 from app.services.gl_recode import RecodeFilter, bulk_recode_gl
 from app.services.invoice_warnings import reconcile_line_totals, refresh_warnings
 from app.services.report_export import csv_safe_cell
-from app.services.storage import delete_file, get_file, upload_chat_file, upload_invoice_file
+from app.services.storage import delete_file, upload_chat_file, upload_invoice_file
 from app.services.supplier_chat import (
     CHAT_TEMPLATES,
+    attachment_url,
     chat_enabled,
     get_or_create_thread,
     get_thread,
@@ -1835,7 +1837,9 @@ async def route_intercompany(
 # ---------------------------------------------------------------------------
 
 
-def _chat_message_to_response(msg: SupplierChatMessage) -> ChatMessageResponse:
+def _chat_message_to_response(
+    msg: SupplierChatMessage, invoice_id: uuid.UUID
+) -> ChatMessageResponse:
     return ChatMessageResponse(
         id=str(msg.id),
         thread_id=str(msg.thread_id),
@@ -1845,7 +1849,15 @@ def _chat_message_to_response(msg: SupplierChatMessage) -> ChatMessageResponse:
         body=msg.body,
         mention_user_ids=[str(m) for m in (msg.mentions or [])],
         template_key=msg.template_key,
-        attachments=[ChatAttachmentOut(**a) for a in (msg.attachments or [])],
+        attachments=[
+            ChatAttachmentOut(
+                file_url=attachment_url(a, invoice_id=invoice_id, surface="ap"),
+                filename=a.get("filename", ""),
+                content_type=a.get("content_type", ""),
+                size=a.get("size", 0),
+            )
+            for a in (msg.attachments or [])
+        ],
         created_at=msg.created_at.isoformat() if msg.created_at else "",
     )
 
@@ -1866,7 +1878,7 @@ async def _chat_thread_response(db: AsyncSession, invoice: Invoice) -> ChatThrea
         status=str(thread.status),
         resolved_at=thread.resolved_at.isoformat() if thread.resolved_at else None,
         resolved_by=str(thread.resolved_by) if thread.resolved_by else None,
-        messages=[_chat_message_to_response(m) for m in messages],
+        messages=[_chat_message_to_response(m, invoice.id) for m in messages],
     )
 
 
@@ -1966,22 +1978,45 @@ async def get_chat_templates(
 @router.get("/chat/file/{file_key:path}")
 async def get_chat_file(
     file_key: str,
+    db: AsyncSession = Depends(get_tenant_db),
     user: User = Depends(get_current_user),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
-    """Proxy a stored chat attachment from S3.
+    """Proxy a stored chat attachment from S3, by key alone.
 
-    Keys are stamped ``<org_id>/chat/<invoice_id>/<message_id>/<filename>``. The
-    caller must belong to the org in the first segment — same 404 for wrong-org
-    and missing-file so the response can't enumerate prefixes.
+    Keys are stamped ``<org_id>/chat/<invoice_id>/<message_id>/<filename>``; the
+    invoice the key names is resolved within the caller's selected entity, so
+    the key is never the whole authorisation (``api/file_proxy``,
+    ``docs/decisions.md`` §226). Same 404 for every refusal and a missing file.
     """
-    prefix = file_key.split("/", 1)[0]
-    if prefix != str(user.organization_id):
-        raise HTTPException(status_code=404, detail="File not found")
-    try:
-        content, content_type = await get_file(file_key)
-    except Exception:
-        raise HTTPException(status_code=404, detail="File not found")
-    return Response(content=content, media_type=content_type)
+    return await serve_owned_file(
+        db, file_key, org_id=user.organization_id, entity_id=entity_id, kind="chat"
+    )
+
+
+@router.get("/{invoice_id}/chat/file/{file_key:path}")
+async def get_invoice_chat_file(
+    invoice_id: uuid.UUID,
+    file_key: str,
+    db: AsyncSession = Depends(get_tenant_db),
+    user: User = Depends(get_current_user),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
+):
+    """Proxy a chat attachment of ``invoice_id`` — the URL every AP-side
+    attachment's ``file_url`` names (``supplier_chat.attachment_url``).
+
+    The invoice is resolved within the caller's selected entity and the key
+    must live under THAT invoice's chat prefix, mirroring the portal's route:
+    a key under any other invoice is the same 404 as a missing file.
+    """
+    return await serve_owned_file(
+        db,
+        file_key,
+        org_id=user.organization_id,
+        entity_id=entity_id,
+        kind="chat",
+        owner_id=invoice_id,
+    )
 
 
 @router.get("/{invoice_id}/chat", response_model=ChatThreadResponse)
@@ -2094,7 +2129,7 @@ async def _post_ap_chat_message(
 
     await db.commit()
     await db.refresh(msg)
-    return _chat_message_to_response(msg)
+    return _chat_message_to_response(msg, invoice.id)
 
 
 @router.post(

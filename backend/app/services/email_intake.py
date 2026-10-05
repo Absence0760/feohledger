@@ -415,12 +415,12 @@ async def _create_invoice_from_attachment(
 
     await create_workflow_instance(tenant_db, invoice)
 
-    from app.services.storage import _put_object, _safe_filename
+    from app.services.storage import _put_object, _safe_filename, invoice_file_url
 
     file_key = f"{org_id}/{invoice.id}/{_safe_filename(attachment.filename)}"
     # boto3 is blocking; `_put_object` hands it to a worker thread so this
     # public webhook path never parks the event loop on an S3 round trip.
     await _put_object(file_key, attachment.content, attachment.content_type)
     invoice.file_key = file_key
-    invoice.file_url = f"{settings.s3_endpoint_url.rstrip('/')}/{settings.s3_bucket}/{file_key}"
+    invoice.file_url = invoice_file_url(file_key)
     return invoice.id

@@ -27,6 +27,7 @@ from app.api.deps import (
     get_org_id,
     require_roles,
 )
+from app.api.file_proxy import serve_owned_file
 from app.api.pagination import (
     MAX_SELECT_ALL_IDS,
     MatchingIdsResponse,
@@ -59,7 +60,7 @@ from app.schemas.money import json_money
 from app.services.audit_dispatch import dispatch_audit
 from app.services.contract_spend import compute_spend_summary
 from app.services.report_export import csv_safe_cell
-from app.services.storage import get_file, upload_contract_file
+from app.services.storage import upload_contract_file
 from app.tenant import (
     apply_entity_scope,
     ensure_in_entity_scope,
@@ -361,23 +362,20 @@ async def create_contract(
 @router.get("/file/{file_key:path}")
 async def get_contract_file(
     file_key: str,
+    db: AsyncSession = Depends(get_tenant_db),
     user: User = Depends(get_current_user),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
     """Proxy a stored contract document from S3.
 
-    Keys are stamped ``<org_id>/contracts/<contract_id>/<filename>`` at upload.
-    The caller must belong to the org in the first segment — same 404 for
-    wrong-org and missing-file so the response can't enumerate prefixes
-    (mirrors the invoice file endpoint).
+    Keys are stamped ``<org_id>/contracts/<contract_id>/<filename>``. The
+    owning contract is resolved within the caller's selected entity and the key
+    must be its current ``file_key`` — every refusal is the same 404 as a
+    missing file (``api/file_proxy``, ``docs/decisions.md`` §226).
     """
-    prefix = file_key.split("/", 1)[0]
-    if prefix != str(user.organization_id):
-        raise HTTPException(status_code=404, detail="File not found")
-    try:
-        content, content_type = await get_file(file_key)
-    except Exception:
-        raise HTTPException(status_code=404, detail="File not found")
-    return Response(content=content, media_type=content_type)
+    return await serve_owned_file(
+        db, file_key, org_id=user.organization_id, entity_id=entity_id, kind="contract"
+    )
 
 
 @router.get("/{contract_id}", response_model=ContractResponse)
