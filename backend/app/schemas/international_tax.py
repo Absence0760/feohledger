@@ -121,12 +121,29 @@ class CountryTaxLineResponse(BaseModel):
     record_count: int
 
 
+class CurrencyTaxTotalsResponse(BaseModel):
+    currency: str
+    vat_output: MoneyAmount
+    vat_reverse_charge: MoneyAmount
+    gst_total: MoneyAmount
+    withholding_total: MoneyAmount
+    record_count: int
+
+
 class TaxReportResponse(BaseModel):
     period_start: date
     period_end: date
+    # One line per (country, currency) — a country invoiced in two currencies
+    # gets two lines rather than one sum labelled with either.
     countries: list[CountryTaxLineResponse]
-    total_vat_output: MoneyAmount
+    # The authoritative roll-up: one entry per currency, never added together.
+    totals_by_currency: list[CurrencyTaxTotalsResponse]
+    # Set (and the ``total_*`` scalars populated) only when the whole period is
+    # in one currency. ``None`` for a mixed period — a sum across currencies is
+    # not a figure in any of them.
+    currency: str | None = None
+    total_vat_output: OptionalMoneyAmount
     total_vat_reverse_charge: OptionalMoneyAmount
-    total_gst: MoneyAmount
-    total_withholding: MoneyAmount
+    total_gst: OptionalMoneyAmount
+    total_withholding: OptionalMoneyAmount
     record_count: int

@@ -7,6 +7,15 @@ tenant-scoped — the caller passes the tenant DB session resolved via
 ``get_tenant_db`` so isolation is enforced at the data layer.
 
 All sums are ``Decimal``; the function never coerces money to ``float``.
+
+**Figures in different currencies are never added together.** Each persisted
+row carries its own ``currency`` (the invoice's), so the report keys a country
+line on ``(country, currency)`` and totals per currency. The scalar grand
+totals exist only when the whole period is in one currency; for a mixed period
+they are ``None`` rather than a number that is GBP + EUR + USD at face value.
+Nothing is converted: a rate fetched on a read would make a filed return move
+under the reader, and a VAT return is filed in the jurisdiction's own currency
+anyway.
 """
 
 from __future__ import annotations
@@ -39,16 +48,35 @@ class CountryTaxLine:
 
 
 @dataclass
+class CurrencyTaxTotals:
+    """Period totals for the rows denominated in one currency."""
+
+    currency: str
+    vat_output: Decimal = _ZERO
+    vat_reverse_charge: Decimal = _ZERO
+    gst_total: Decimal = _ZERO
+    withholding_total: Decimal = _ZERO
+    record_count: int = 0
+
+
+@dataclass
 class TaxReport:
-    """The full per-period report."""
+    """The full per-period report.
+
+    ``totals_by_currency`` is the authoritative roll-up. The ``total_*``
+    scalars and ``currency`` are populated only when every row in the period
+    shares one currency, and are ``None`` otherwise — a sum across currencies
+    is not a figure in any of them."""
 
     period_start: date
     period_end: date
     countries: list[CountryTaxLine]
-    total_vat_output: Decimal
-    total_vat_reverse_charge: Decimal
-    total_gst: Decimal
-    total_withholding: Decimal
+    totals_by_currency: list[CurrencyTaxTotals]
+    currency: str | None
+    total_vat_output: Decimal | None
+    total_vat_reverse_charge: Decimal | None
+    total_gst: Decimal | None
+    total_withholding: Decimal | None
     record_count: int
 
 
@@ -73,46 +101,60 @@ async def generate_tax_report(
 
     rows = (await db.execute(stmt)).scalars().all()
 
-    by_country: dict[str, CountryTaxLine] = {}
-    total_vat_output = _ZERO
-    total_vat_rc = _ZERO
-    total_gst = _ZERO
-    total_wht = _ZERO
+    # Keyed on (country, currency): a country line holds ONE currency. Keying
+    # on country alone labelled the line with whichever row arrived first and
+    # then summed every later row into it, whatever its currency.
+    by_country: dict[tuple[str, str], CountryTaxLine] = {}
+    by_currency: dict[str, CurrencyTaxTotals] = {}
 
     for r in rows:
-        line = by_country.get(r.country_code)
+        currency = (r.currency or "").strip().upper()
+        line = by_country.get((r.country_code, currency))
         if line is None:
-            line = CountryTaxLine(country_code=r.country_code, currency=r.currency)
-            by_country[r.country_code] = line
+            line = CountryTaxLine(country_code=r.country_code, currency=currency)
+            by_country[(r.country_code, currency)] = line
+        totals = by_currency.get(currency)
+        if totals is None:
+            totals = by_currency[currency] = CurrencyTaxTotals(currency=currency)
         line.record_count += 1
+        totals.record_count += 1
 
         if r.kind == TaxKind.vat:
             if r.reverse_charge:
                 line.vat_reverse_charge += r.tax_amount
-                total_vat_rc += r.tax_amount
+                totals.vat_reverse_charge += r.tax_amount
             else:
                 line.vat_output += r.tax_amount
-                total_vat_output += r.tax_amount
+                totals.vat_output += r.tax_amount
         elif r.kind == TaxKind.gst:
             line.gst_total += r.tax_amount
-            total_gst += r.tax_amount
+            totals.gst_total += r.tax_amount
             for name, amount in (r.components or {}).items():
                 # Components persisted as string-Decimal in JSONB.
                 acc = line.gst_components.get(name, _ZERO)
                 line.gst_components[name] = acc + Decimal(str(amount))
         elif r.kind == TaxKind.withholding:
             line.withholding_total += r.tax_amount
-            total_wht += r.tax_amount
+            totals.withholding_total += r.tax_amount
 
-    countries = sorted(by_country.values(), key=lambda c: c.country_code)
+    countries = sorted(by_country.values(), key=lambda c: (c.country_code, c.currency))
+    currency_totals = sorted(by_currency.values(), key=lambda t: t.currency)
+    # A scalar grand total is only a real figure when there is one currency.
+    # An empty period is trivially single-currency: zero is zero in any unit.
+    single = currency_totals[0] if len(currency_totals) == 1 else None
+    mixed = len(currency_totals) > 1
     return TaxReport(
         period_start=period_start,
         period_end=period_end,
         countries=countries,
-        total_vat_output=total_vat_output,
-        total_vat_reverse_charge=total_vat_rc,
-        total_gst=total_gst,
-        total_withholding=total_wht,
+        totals_by_currency=currency_totals,
+        currency=single.currency if single else None,
+        total_vat_output=None if mixed else (single.vat_output if single else _ZERO),
+        total_vat_reverse_charge=(
+            None if mixed else (single.vat_reverse_charge if single else _ZERO)
+        ),
+        total_gst=None if mixed else (single.gst_total if single else _ZERO),
+        total_withholding=None if mixed else (single.withholding_total if single else _ZERO),
         record_count=len(rows),
     )
 
