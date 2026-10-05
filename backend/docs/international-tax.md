@@ -155,9 +155,25 @@ report doesn't recompute from rates that may have drifted. No PII / banking
 data is stored (only country code, regime, rates, Decimal amounts).
 
 `GET /api/international-tax/report?period_start=&period_end=&country=` rolls the
-rows up for the period into per-country lines + grand totals (VAT output, VAT
+rows up for the period into per-country lines + totals (VAT output, VAT
 reverse-charge, GST by component, withholding). Tenant-scoped via
 `get_tenant_db`; admin / ap_manager / cfo only.
+
+**Figures in different currencies are never added together.** Each row carries
+its own `currency`, so:
+
+- a country line is keyed on **`(country, currency)`** — a German supply
+  invoiced in EUR and another invoiced in USD are two lines, not one sum
+  labelled with whichever row happened to arrive first;
+- `totals_by_currency` (one entry per currency) is the authoritative roll-up;
+- the scalar `total_vat_output` / `total_vat_reverse_charge` / `total_gst` /
+  `total_withholding` and `currency` are populated **only when the whole period
+  is in one currency**, and are `null` for a mixed period. They used to add
+  GBP 200 and EUR 190 into "390".
+
+Nothing is converted at read time — a rate fetched on a read would move a filed
+return under the reader, and each jurisdiction's return is filed in its own
+currency anyway. Guard: `tests/test_intl_tax_report.py`.
 
 ## API surface
 

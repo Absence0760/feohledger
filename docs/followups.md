@@ -423,6 +423,24 @@ plus two product-fit gaps in the section below. Both are category **(c)**.
       **Trigger:** a decision to support UK/EU VAT properly (a prerequisite for
       the UK-business go-to-market).
 
+- [ ] **The 1099 `total_reportable` KPI still counts boxes on forms a vendor is
+      not required to receive.** Since the per-box, per-year thresholds
+      (`tax_1099.forms_requiring_filing`, PR #504) a vendor can be required on
+      one form and not the other — a 2026 law firm paid $800 of attorney
+      proceeds (MISC-10, $600) and $1,000 of fees (NEC-1, $2,000) gets a MISC
+      only, and the filing batch files exactly that. But `Report1099.summary`
+      still sums the vendor's whole `ytd_paid` into `total_reportable`, and the
+      summary box panel reconciles against that same figure, so the KPI
+      overstates what will be filed by the not-required form's boxes. Filing is
+      correct; the headline number is not.
+      **Durable fix:** derive `total_reportable` and the summary
+      `box_allocations` from the boxes on each vendor's `required_forms` only,
+      keeping the reconciliation residual computed over that same population
+      (the per-row `box_unallocated` stays whole-`ytd_paid`), and update the
+      `/tax` KPI copy + `box-allocation.spec.ts`.
+      **Trigger:** the next change to the `/tax` summary panel, or before the
+      2026 filing season (January 2027).
+
 **Investigated, deliberately not changed (recorded so it isn't re-litigated):**
 
 - `approve_payment_run` stays on `require_roles(ROLE_CFO)` rather than

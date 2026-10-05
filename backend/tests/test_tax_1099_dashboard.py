@@ -80,7 +80,7 @@ async def test_dashboard_flags_threshold_and_readiness(realdb):
     await _paid_invoice(mk, org_id, v_ready, "5000.00")
     # Eligible, over threshold, missing W-9 + TIN → needs attention.
     v_gap = await _vendor(mk, org_id, name="Gap Co", eligible=True)
-    await _paid_invoice(mk, org_id, v_gap, "1200.00")
+    await _paid_invoice(mk, org_id, v_gap, "2400.00")
     # Eligible, under threshold → not counted as over.
     v_small = await _vendor(mk, org_id, name="Small Co", eligible=True, w9=True)
     await _paid_invoice(mk, org_id, v_small, "100.00")
@@ -95,8 +95,8 @@ async def test_dashboard_flags_threshold_and_readiness(realdb):
     assert body["vendor_count_over_threshold_without_w9"] == 1
     assert body["vendor_count_over_threshold_tin_unverified"] == 1
     assert body["vendor_count_needs_attention"] == 1
-    # Reportable total = 5000 + 1200 (small is under threshold).
-    assert body["total_reportable_usd"] == "6200.00"
+    # Reportable total = 5000 + 2400 (small is under threshold).
+    assert body["total_reportable_usd"] == "7400.00"
 
     rows = {r["vendor_name"]: r for r in body["rows"]}
     assert rows["Ready Co"]["needs_attention"] is False
@@ -340,7 +340,7 @@ async def test_foreign_invoice_reports_the_home_currency_leg(realdb):
 
     vid = await _vendor(mk, org_id, name="Euro Supplier", eligible=True, w9=True, tin_verified=True)
     await _foreign_paid_invoice(
-        mk, org_id, vid, amount="1000.00", currency="EUR", source=("1100.00", "USD")
+        mk, org_id, vid, amount="2000.00", currency="EUR", source=("2200.00", "USD")
     )
 
     async with realdb.client(key="a", role="cfo") as c:
@@ -350,10 +350,10 @@ async def test_foreign_invoice_reports_the_home_currency_leg(realdb):
     assert body["currency"] == "USD"
 
     row = next(r for r in body["rows"] if r["vendor_name"] == "Euro Supplier")
-    assert Decimal(row["ytd_paid"]) == Decimal("1100.00")
+    assert Decimal(row["ytd_paid"]) == Decimal("2200.00")
     assert row["payment_count"] == 1
     assert row["unconverted_payment_count"] == 0
-    assert Decimal(body["total_reportable"]) == Decimal("1100.00")
+    assert Decimal(body["total_reportable"]) == Decimal("2200.00")
     assert body["unconverted_payment_count"] == 0
 
 

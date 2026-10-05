@@ -224,7 +224,7 @@ async def test_summary_counts_open_offers_and_pending_change(realdb):
                 requested_by_vendor_user_id=vu_id,
                 change_type="bank_details",
                 status="pending",
-                proposed_value={"account_number": "1234"},
+                proposed_value={"account_number": _STAGED_ACCOUNT},
             )
         )
         await s.commit()
@@ -237,7 +237,16 @@ async def test_summary_counts_open_offers_and_pending_change(realdb):
     assert body["pending_change"]["status"] == "pending"
     # PII guard: the staged value never crosses the wire on the summary.
     assert "proposed_value" not in body["pending_change"]
-    assert "1234" not in json.dumps(body)
+    assert _STAGED_ACCOUNT not in json.dumps(body)
+
+
+# The PII sentinel must be a string nothing legitimate in the body can contain.
+# It was "1234", which the response's own microsecond timestamps
+# ("…T10:09:02.123486Z") contain whenever the clock lands on those digits —
+# a CI failure on a correct response. ISO timestamps carry at most six
+# contiguous digits and UUIDs are hyphenated hex, so a 14-digit run can only
+# come from the staged value itself.
+_STAGED_ACCOUNT = "90817263540123"
 
 
 @pytest.mark.asyncio

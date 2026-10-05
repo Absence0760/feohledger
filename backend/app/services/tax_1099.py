@@ -42,10 +42,45 @@ from app.utils.dates import utc_today
 
 logger = logging.getLogger(__name__)
 
-# IRS 1099-NEC / 1099-MISC reporting threshold for the 2024+ tax years.
-# Lowered from $600 to $5000 for 1099-K specifically, but 1099-NEC
-# (contractor payments) remains $600 — that's the common AP case.
+# The general information-reporting threshold (IRC §6041 / §6041A — 1099-NEC
+# box 1, and 1099-MISC rents / other income / medical) for payments made
+# BEFORE 2026. Kept under its historical name for callers that build rows by
+# hand; the report itself resolves the figure per box and per year through
+# ``reporting_threshold`` — there is no single 1099 threshold.
 THRESHOLD_USD = Decimal("600")
+
+# OBBBA §70433 raised the §6041 / §6041A threshold from $600 to $2,000 for
+# payments made after 2025-12-31, indexed for inflation after 2026. Keyed by
+# the first payment year each figure applies to. When the IRS publishes an
+# indexed figure for 2027+, append it here. Until then the $2,000 floor is
+# used for every later year: indexing only RAISES the threshold, so the floor
+# can over-include a vendor (voluntary reporting below the threshold is
+# permitted) but can never drop a return that is required.
+_GENERAL_THRESHOLDS: tuple[tuple[int, Decimal], ...] = ((2026, Decimal("2000")),)
+
+# Boxes whose threshold is NOT the general one:
+# * MISC-2 royalties — §6050N, $10. Untouched by OBBBA.
+# * MISC-10 gross proceeds paid to an attorney — §6045(f), $600. OBBBA amended
+#   §6041 / §6041A only, and IRS Publication 1099 (2026) still lists $600.
+_FIXED_BOX_THRESHOLDS: dict[str, Decimal] = {
+    "MISC-2": Decimal("10"),
+    "MISC-10": Decimal("600"),
+}
+
+
+def general_reporting_threshold(year: int) -> Decimal:
+    """The §6041 / §6041A threshold for payments made in ``year``."""
+    threshold = THRESHOLD_USD
+    for first_year, amount in _GENERAL_THRESHOLDS:
+        if year >= first_year:
+            threshold = amount
+    return threshold
+
+
+def reporting_threshold(box_code: str, year: int) -> Decimal:
+    """The amount at which a payee's ``box_code`` total requires a return."""
+    fixed = _FIXED_BOX_THRESHOLDS.get(box_code)
+    return fixed if fixed is not None else general_reporting_threshold(year)
 
 
 # ---------------------------------------------------------------------------
@@ -366,6 +401,32 @@ def box_total_for_form(row: VendorReportRow, form_type: str) -> Decimal:
     return sum((a.amount for a in row.box_allocations if a.form_type == form_type), Decimal("0"))
 
 
+def forms_requiring_filing(allocations: Iterable[BoxAllocation], year: int) -> tuple[str, ...]:
+    """The forms a payee must receive for ``year``, in catalog order.
+
+    A form is required when ANY of its boxes reaches that box's own threshold
+    (``reporting_threshold``) — not when the payee's combined total across
+    every form does. $400 of rent plus $300 of contract work is $700, yet
+    neither form is required; $50 of royalties is far below $600, yet a MISC
+    is. Once a form is required, its other populated boxes ride on it."""
+    required: set[str] = set()
+    for alloc in allocations:
+        if alloc.amount >= reporting_threshold(alloc.box, year):
+            required.add(alloc.form_type)
+    return tuple(f for f in (FORM_NEC, FORM_MISC) if f in required)
+
+
+def row_requires_form(row: VendorReportRow, form_type: str) -> bool:
+    """Whether ``row`` must be filed on ``form_type``.
+
+    Rows the aggregation produced carry ``required_forms``. A hand-built row
+    with no allocation falls back to its own ``over_threshold`` flag, matching
+    ``box_total_for_form``'s whole-total fallback for the same rows."""
+    if not row.box_allocations:
+        return row.over_threshold
+    return form_type in row.required_forms
+
+
 def aggregate_box_allocations(rows: Sequence[VendorReportRow]) -> list[BoxAllocation]:
     """Roll per-vendor allocations up into one per-box total for a population.
 
@@ -456,6 +517,10 @@ class VendorReportRow:
     # is the preparer's worklist before filing.
     unmapped_paid: Decimal = Decimal("0")
     unmapped_payment_count: int = 0
+    # The forms this payee must receive (``forms_requiring_filing``) — each
+    # box measured against its own per-year threshold. ``over_threshold`` is
+    # exactly "this tuple is non-empty" for every aggregated row.
+    required_forms: tuple[str, ...] = ()
 
     @property
     def box_unallocated(self) -> Decimal:
@@ -489,6 +554,7 @@ class VendorReportRow:
             "unmapped_paid": str(self.unmapped_paid),
             "unmapped_payment_count": self.unmapped_payment_count,
             "box_unallocated": str(self.box_unallocated),
+            "required_forms": list(self.required_forms),
         }
 
 
@@ -517,7 +583,10 @@ class Report1099:
     year: int
     generated_at: date
     rows: list[VendorReportRow]
-    threshold_usd: Decimal = THRESHOLD_USD
+    # The headline (§6041 / §6041A) threshold for ``year`` — $600 before 2026,
+    # $2,000 from 2026. Derived from the year unless given; per-box exceptions
+    # (royalties $10, attorney gross proceeds $600) are applied per row.
+    threshold_usd: Decimal | None = None
     # The currency the reportable totals + per-vendor ``ytd_paid`` are actually
     # denominated in — the org's reporting (home) currency. Not a label applied
     # after the fact: the aggregation only counts a payment it can PROVE is
@@ -526,6 +595,10 @@ class Report1099:
     # US/IRS concept (dollars), but a non-USD tenant's home currency is
     # surfaced honestly here instead of being silently called "USD".
     currency: str = "USD"
+
+    def __post_init__(self) -> None:
+        if self.threshold_usd is None:
+            self.threshold_usd = general_reporting_threshold(self.year)
 
     def summary(self) -> dict:
         eligible_over = [r for r in self.rows if r.is_1099_eligible and r.over_threshold]
@@ -716,6 +789,9 @@ async def build_1099_report(
         # the allocation sees carry only the non-card population
         # (`~is_card` in the aggregation), and `card_paid` is summed apart.
         allocation = allocate_boxes(buckets, mapping, vendor_id=vendor_id)
+        # Each box against its OWN per-year threshold, never the combined
+        # total against one $600 figure — see `forms_requiring_filing`.
+        required_forms = forms_requiring_filing(allocation.allocations, year)
         rows.append(
             VendorReportRow(
                 vendor_id=first.vendor_id,
@@ -732,7 +808,7 @@ async def build_1099_report(
                 # the key's path segment — only an actual W-9 counts here.
                 w9_on_file=tax_form_type_from_key(first.w9_file_key) == "w9",
                 ytd_paid=ytd,
-                over_threshold=ytd >= THRESHOLD_USD,
+                over_threshold=bool(required_forms),
                 payment_count=sum(b.payment_count for b in buckets),
                 tin_verified=first.tin_verified_at is not None,
                 card_paid=acc["card_paid"],
@@ -741,6 +817,7 @@ async def build_1099_report(
                 box_allocations=allocation.allocations,
                 unmapped_paid=allocation.unmapped_amount,
                 unmapped_payment_count=allocation.unmapped_payment_count,
+                required_forms=required_forms,
             )
         )
 
@@ -788,10 +865,17 @@ class Dashboard1099:
     year: int
     generated_at: date
     rows: list[VendorReportRow]
-    threshold_usd: Decimal = THRESHOLD_USD
+    # The headline (§6041 / §6041A) threshold for ``year`` — $600 before 2026,
+    # $2,000 from 2026. Derived from the year unless given; per-box exceptions
+    # (royalties $10, attorney gross proceeds $600) are applied per row.
+    threshold_usd: Decimal | None = None
     # See ``Report1099.currency`` — the reporting (home) currency the totals are
     # denominated in, enforced by the aggregation rather than asserted.
     currency: str = "USD"
+
+    def __post_init__(self) -> None:
+        if self.threshold_usd is None:
+            self.threshold_usd = general_reporting_threshold(self.year)
 
     def summary(self) -> dict:
         eligible = [r for r in self.rows if r.is_1099_eligible]

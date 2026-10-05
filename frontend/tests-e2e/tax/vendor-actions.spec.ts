@@ -54,7 +54,7 @@ test.describe('/tax — vendor tax workflow (admin/ap_manager)', () => {
 		vendorId = vendor.id;
 
 		const invoiceNumber = `E2E-1099-${Date.now()}`;
-		await importCsvInvoice(page, vendorName, invoiceNumber, '1200.00');
+		await importCsvInvoice(page, vendorName, invoiceNumber, '2400.00');
 
 		// The imported invoice is the only one this run created for this
 		// vendor, so it's safe to look it up by invoice_number for the
@@ -68,11 +68,11 @@ test.describe('/tax — vendor tax workflow (admin/ap_manager)', () => {
 		// non-card rails count toward the reportable YTD total.
 		tenantPsql(
 			`INSERT INTO payments (id, invoice_id, amount, method, status, completed_at, created_at, updated_at)
-			 VALUES (gen_random_uuid(), '${invRow}', 1200.00, 'ach', 'completed', now(), now(), now())`
+			 VALUES (gen_random_uuid(), '${invRow}', 2400.00, 'ach', 'completed', now(), now(), now())`
 		);
 
 		// Flag the vendor 1099-eligible — the human judgement call
-		// `PATCH .../w9` makes; over the $600 threshold it now becomes
+		// `PATCH .../w9` makes; over the year's threshold ($2,000 from 2026) it becomes
 		// "reportable" and shows up in the filing batch.
 		tenantPsql(`UPDATE vendors SET is_1099_eligible=true WHERE id='${vendorId}'`);
 	});

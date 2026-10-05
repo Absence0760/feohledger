@@ -56,6 +56,7 @@ from app.services.tax_1099 import (
     box_total_for_form,
     build_1099_dashboard,
     build_1099_report,
+    row_requires_form,
 )
 from app.services.tax_1099_forms import (
     FORM_MISC,
@@ -490,7 +491,15 @@ async def file_1099_batch(
     report = await build_1099_report(
         db, org_id, body.year, resolve_reporting_currency(org.settings), org.settings
     )
-    filable = [r for r in report.rows if r.is_1099_eligible and r.over_threshold]
+    # A vendor is filed on THIS form only when one of its boxes on this form
+    # reaches that box's own threshold for the year (`row_requires_form`) —
+    # not when its combined total across both forms passes one $600 figure.
+    # The combined test filed $400 of rent and $300 of contract work as two
+    # sub-threshold returns, filed 2026 contractors under OBBBA's $2,000, and
+    # never filed $50 of royalties ($10 threshold) at all.
+    filable = [
+        r for r in report.rows if r.is_1099_eligible and row_requires_form(r, body.form_type)
+    ]
 
     # The filed amount is the part of the vendor's reportable total that
     # belongs on THIS form, not the whole total. A vendor paid for rent

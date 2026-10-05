@@ -38,6 +38,7 @@ from app.models.user import User
 from app.schemas.international_tax import (
     CountryRuleResponse,
     CountryTaxLineResponse,
+    CurrencyTaxTotalsResponse,
     GSTRequest,
     GSTResponse,
     TaxRateResponse,
@@ -306,6 +307,18 @@ async def tax_report(
             )
             for line in report.countries
         ],
+        totals_by_currency=[
+            CurrencyTaxTotalsResponse(
+                currency=t.currency,
+                vat_output=t.vat_output,
+                vat_reverse_charge=t.vat_reverse_charge,
+                gst_total=t.gst_total,
+                withholding_total=t.withholding_total,
+                record_count=t.record_count,
+            )
+            for t in report.totals_by_currency
+        ],
+        currency=report.currency,
         total_vat_output=report.total_vat_output,
         total_vat_reverse_charge=report.total_vat_reverse_charge,
         total_gst=report.total_gst,
