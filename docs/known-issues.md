@@ -5,7 +5,7 @@ names the root cause, the evidence, blast radius, and a recommended fix
 approach — this is a staging area for real problems, not a place to let them
 go stale. See root `CLAUDE.md` guard rail 6 (no dangling deferred findings).
 
-**Two entries are open** — the two local-e2e entries at the bottom. The header
+**Three entries are open** — the e2e cleanup race directly below, and the two local-e2e entries at the bottom. The header
 once said "one" while three sat beneath it, then "three" in the same change
 that struck the third; a known-issues file that miscounts itself is the failure
 this note has now warned about twice. Two defects were **fixed on 2026-09-17**:
@@ -34,6 +34,37 @@ goes to [followups.md](followups.md). Reasoning behind a deliberate design call
 goes to [decisions.md](decisions.md).
 
 ---
+
+## `deleteInvoicesWhere` races the backend's own workers on a just-resubmitted invoice
+
+**Seen:** 2026-10-05, `tests-e2e/portal/rejected-invoice.spec.ts` ("the vendor
+can revise & resubmit a rejected invoice"), once in two runs, on a local stack.
+The test body passed; its cleanup failed:
+
+```
+DELETE FROM invoices WHERE id IN ('…')
+ERROR:  update or delete on table "invoices" violates foreign key constraint
+        "exceptions_invoice_id_fkey" on table "exceptions"
+```
+
+**Root cause:** `fixtures/helpers.ts::deleteInvoicesWhere` deletes the child
+tables (`exceptions` among them) and then the invoice, as separate `psql`
+statements with no transaction and no lock. Resubmitting from the portal
+re-queues the invoice into the in-process extraction pool, which raises
+exceptions (duplicate / warning checks) asynchronously. When a worker commits
+an `exceptions` row between the child delete and the parent delete, the parent
+delete hits the FK. The spec ends as soon as the UI shows the resubmitted
+state, so the worker is still running when cleanup starts.
+
+**Blast radius:** any spec that drives an invoice back into extraction and then
+cleans up with `deleteInvoicesWhere` — a red test after a green body, and the
+invoice (plus whatever the worker wrote) left behind in the e2e tenant.
+
+**Recommended fix:** run the helper's statements as ONE transaction that first
+takes `SELECT … FROM invoices WHERE … FOR UPDATE` — the worker's own write
+needs the invoice row, so it blocks until cleanup commits and then finds the
+invoice gone — rather than retrying the delete (a retry would mask the race,
+root `CLAUDE.md` guard rail 4).
 
 ## ~~The DSAR export is the one surface that returns unmasked bank details~~ — FIXED 2026-09-16
 
