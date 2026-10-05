@@ -188,6 +188,40 @@ async def test_list_change_requests_masks_value(realdb):
 
 
 @pytest.mark.asyncio
+async def test_per_vendor_change_requests_reveal_is_limited_to_the_queue_roles(realdb):
+    """`GET /vendors/{id}/change-requests` returns the UNMASKED proposed value —
+    full account number, full tax ID — because it is what the reviewer checks
+    before approving. It admitted CFO, a role the queue list and its counts
+    deliberately exclude and to whom `GET /vendors/{id}` shows last-4s only, so
+    a CFO could read every staged account number in full. Same gate as the
+    queue it serves."""
+    org_id = realdb.info(TENANT).org_id
+    mk = realdb.sessionmaker(TENANT)
+    vendor_id = await _seed_vendor(mk, org_id)
+    await _stage(
+        mk,
+        org_id,
+        vendor_id,
+        "bank_details",
+        {"bank_details": {"account_number": "55512349876", "bank_name": "Bank"}},
+    )
+    await _stage(mk, org_id, vendor_id, "tax_id", {"tax_id": "77-1234567"})
+
+    async with realdb.client(key=TENANT, role="cfo") as client:
+        cfo = await client.get(f"/api/vendors/{vendor_id}/change-requests")
+    assert cfo.status_code == 403
+    assert "55512349876" not in cfo.text
+    assert "77-1234567" not in cfo.text
+
+    # The reviewer still gets the full value it needs to verify.
+    async with realdb.client(key=TENANT, role="ap_manager") as client:
+        reviewer = await client.get(f"/api/vendors/{vendor_id}/change-requests")
+    assert reviewer.status_code == 200, reviewer.text
+    assert "55512349876" in reviewer.text
+    assert "77-1234567" in reviewer.text
+
+
+@pytest.mark.asyncio
 async def test_change_requests_literal_route_not_shadowed(realdb):
     """`GET /vendors/change-requests` must hit the queue handler, not the
     `/{vendor_id}` route (which would 422 on the non-UUID segment)."""
