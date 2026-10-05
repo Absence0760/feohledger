@@ -43,8 +43,13 @@ test.describe('/login/forgot-password', () => {
 		// Same success copy whether or not the address matched an account —
 		// the enumeration-resistance contract backend/app/api/auth.py
 		// ::forgot_password documents.
-		await expect(page.getByText(/we've sent a link to reset your password/i)).toBeVisible();
+		const success = page.getByText(/we've sent a link to reset your password/i);
+		await expect(success).toBeVisible();
 		await expect(page.getByRole('link', { name: /Back to sign in/i })).toBeVisible();
+		// The submit button that held focus went with the form. Focus moves onto
+		// the confirmation, which is how a screen reader hears it at all — left
+		// alone it fell to <body> and the success was silent (WCAG 2.4.3, 4.1.3).
+		await expect(success).toBeFocused();
 	});
 });
 
@@ -72,5 +77,27 @@ test.describe('/login/reset-password', () => {
 		// for a non-Error/network failure, a different path than this test
 		// exercises.
 		await expect(page.getByText(/invalid or expired/i)).toBeVisible();
+	});
+
+	test('moves focus onto the confirmation once the password is reset', async ({ page }) => {
+		// Stubbed on its exact pathname: a real redemption needs a minted token
+		// and would change a seeded credential (see the file header). What is
+		// under test is only the page's reaction to a 2xx.
+		await page.route(
+			(url) => url.pathname === '/api/auth/reset-password',
+			(route) => route.fulfill({ json: { message: 'ok' } })
+		);
+		await page.goto('/login/reset-password?token=stubbed-token');
+
+		await page.locator('input[type="password"]').first().fill('BrandNewPassw0rd!42');
+		await page.locator('input[type="password"]').nth(1).fill('BrandNewPassw0rd!42');
+		await page.getByRole('button', { name: /Reset password/i }).click();
+
+		// Same defect as the forgot-password confirmation: the form (and the
+		// focused submit button) is replaced, so focus has to be put somewhere
+		// that announces the outcome rather than dropping to <body>.
+		const success = page.getByText(/your password has been reset/i);
+		await expect(success).toBeVisible();
+		await expect(success).toBeFocused();
 	});
 });

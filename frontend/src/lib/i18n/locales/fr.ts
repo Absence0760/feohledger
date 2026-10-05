@@ -1930,6 +1930,7 @@ export const messages = {
 	'cfo.position.colOpening': 'Ouverture',
 	'cfo.position.colOutflow': 'Sortie',
 	'cfo.position.colClosing': 'Clôture',
+	'cfo.position.belowMinimum': 'Sous le minimum',
 	'cfo.position.empty': 'Aucune sortie projetée dans cette fenêtre.',
 
 	'cfoMetrics.heading': 'Indicateurs financiers',

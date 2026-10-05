@@ -876,7 +876,13 @@ inherit it for free. Reuse these; don't re-solve them per page.
   WCAG 2.1.2 / 2.4.3) — `use:focusTrap={{ onEscape }}` on a dialog box
   (with `tabindex="-1"`) moves focus in on open, traps Tab / Shift+Tab
   with wrap-around, closes on Esc, and restores focus to the trigger on
-  close. `ui/Modal` uses it, and so do the four pre-existing hand-rolled
+  close. The restore runs **after** the render flush, not during teardown: a
+  dialog's own action can remove its trigger (approving a request from its
+  dialog filters the row out of the Pending list), and a trigger focused
+  synchronously is then lost to `<body>` when it unmounts. If the trigger is
+  gone or now disabled, focus lands on `<main id="main-content">` instead; if
+  something else already took focus (a second dialog), it is left alone.
+  Guard: `tests-e2e/a11y/screen-reader.spec.ts`. `ui/Modal` uses it, and so do the four pre-existing hand-rolled
   feature shells (`InvoiceModal`, `RunDetailModal`, `BulkRecodeGLModal`,
   portal discount-accept) so every dialog gets identical focus management.
   Prefer `ui/Modal` for new dialogs; if you must hand-roll a shell, add
@@ -890,12 +896,37 @@ inherit it for free. Reuse these; don't re-solve them per page.
   two persistent live containers (`aria-live="assertive"` for errors,
   `"polite"` for the rest). Each toast has a real `<button>` dismiss
   (`aria-label="Dismiss notification"`); auto-dismiss timer kept.
+- **Inline form feedback** (WCAG 4.1.3) — a message that appears in response
+  to an action (`{#if saved}<div class="message">…`) must be announced, not
+  just shown. A polite status sits inside a live region that already exists
+  (`<div role="status">{#if msg}<div class="message">{msg}</div>{/if}</div>`,
+  the reliable form); an error may carry `role="alert"` inline, since its
+  insertion is the announcement. When the feedback REPLACES the control the
+  user activated (a form swapped for its confirmation), move focus onto it
+  instead — `tabindex="-1"` + `.focus()` after `tick()`, as `/signup` and the
+  forgot/reset-password pages do. Guard: `src/lib/a11y/liveRegionAudit.test.ts`
+  (Svelte-AST scan of every `{#if}`-rendered `error` / `message` / `msg` /
+  `success` element; the two non-feedback matches are an explained allowlist).
 - **Tabs** (`ui/Tabs.svelte`; WAI-ARIA tabs) — roving `tabindex`
   (active=0, others=-1) + Arrow/Home/End key navigation, plus the
   existing `role=tablist/tab` + `aria-selected` + `aria-controls`. The
-  caller still gives the panel `role="tabpanel"` + the matching ids.
+  caller still gives the panel `role="tabpanel"` + the matching ids. A
+  hand-rolled `<button class="tab" class:active>` bar announces as N
+  identical buttons — `/payments` and `/expenses` shipped one each until
+  2026-10-05. `src/lib/a11y/tabBar.test.ts` fails any `.tab` button outside
+  `ui/Tabs.svelte` that lacks `role="tab"` + `aria-selected`.
 - **Filter chips** (`ui/FilterChips.svelte`) — `<button aria-pressed>`
   reflects the active chip.
+- **Selected / current state** (WCAG 4.1.2, 1.3.1) — anything painted "on" by
+  `class:active` also says so: `aria-current="page"` on the nav link to the
+  page you are on (the sidebar — `"true"` on a folded group — and the portal
+  nav), `aria-pressed` on a toggle, segmented or filter button (`/cfo`'s
+  granularity / horizon pickers, which also sit in a named `role="group"`),
+  `role="tab"` + `aria-selected` on a tab. Guard:
+  `src/lib/a11y/selectedState.test.ts` fails any `class:active` link or button
+  without one; the two exceptions (a toggle whose label is its state, and
+  `SortableHeader`, whose `<th>` carries `aria-sort`) are an explained
+  allowlist.
 - **DataTable** (`ui/DataTable.svelte`) — auto-rendered `<th>` get
   `scope="col"`. A page that passes its own `{#snippet header()}` owns
   adding `scope` to its `<th>`s. The `.grid-container` scroller is a
@@ -913,6 +944,14 @@ inherit it for free. Reuse these; don't re-solve them per page.
   hand-rolled `.grid-container`), `tests-e2e/a11y/reflow.spec.ts` (runs that
   axe rule on every route at 320px, where every such region is live) and
   `tests-e2e/a11y/table-scroll-region.spec.ts` (the arrow key really pans).
+  A page that wraps its own table in a scroller (`/cfo`'s cash-position and
+  budget tables) owes the same three attributes; the static guard fails any
+  `tabindex="0"` region outside the legal tree that lacks a role or a name.
+- **Status by colour** (WCAG 1.4.1) — a row tinted red to say "this one
+  breaches" also says it in words: `/cfo`'s below-minimum periods carry a
+  `<Badge tone="danger">Below minimum</Badge>` in the Closing cell, the
+  `/payments` queue's overdue rows an "Overdue" badge. The banner above a table
+  can give the count; only the row can say which.
 - **Icon-only controls** — every icon-only `<button>` needs an
   `aria-label` (NotificationBell reflects the unread count; the sidebar
   collapse toggle + profile button carry `aria-label` + `aria-expanded`).

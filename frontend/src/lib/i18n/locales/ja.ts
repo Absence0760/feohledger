@@ -1887,6 +1887,7 @@ export const messages = {
 	'cfo.position.colOpening': '期初',
 	'cfo.position.colOutflow': '支出',
 	'cfo.position.colClosing': '期末',
+	'cfo.position.belowMinimum': '最低残高未満',
 	'cfo.position.empty': 'この期間に予測される支出はありません。',
 
 	'cfoMetrics.heading': 'CFO指標',

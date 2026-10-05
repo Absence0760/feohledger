@@ -161,7 +161,9 @@ CI plus two kinds of human review:
 5. **Navigability tests (web).** `frontend/tests-e2e/a11y/screen-reader.spec.ts`
    asserts the structural semantics a screen-reader/keyboard user relies on:
    skip link + named landmarks + a single `<h1>`, no positive tabindex, and
-   dialog focus-trap + focus-restore on Esc. `workflow-builder.spec.ts` covers
+   dialog focus-trap + focus-restore on Esc — and, when the dialog's own action
+   removed its trigger, focus landing on `<main>` rather than being lost to
+   `<body>`. `workflow-builder.spec.ts` covers
    the keyboard step-reorder path.
 6. **Automated (320px reflow scan, every CI run).**
    `frontend/tests-e2e/a11y/reflow.spec.ts` sets a 320px viewport — the width

@@ -5,18 +5,19 @@ names the root cause, the evidence, blast radius, and a recommended fix
 approach — this is a staging area for real problems, not a place to let them
 go stale. See root `CLAUDE.md` guard rail 6 (no dangling deferred findings).
 
-**One entry is open**: the `payments/` local-e2e flake near the bottom. The
-`queue-blocked` entry beside it was struck on 2026-10-04. Its defect, a spec
-helper that counted DataTable's loading placeholder as a row, had been fixed
-on 2026-09-09 by #390, but nobody struck the entry, so the file over-reported
-by one for a month. The header
+**Three entries are open**: the legal-contents smooth-scroll race and the e2e
+cleanup race directly below, and the `payments/` local-e2e flake near the
+bottom. The `queue-blocked` entry beside it was struck on 2026-10-04. Its
+defect, a spec helper that counted DataTable's loading placeholder as a row,
+had been fixed on 2026-09-09 by #390, but nobody struck the entry, so the file
+over-reported by one for a month. The header
 once said "one" while three sat beneath it, then "three" in the same change
 that struck the third; a known-issues file that miscounts itself is the failure
 this note has now warned about twice. Two defects were **fixed on 2026-09-17**:
 the `/organization` 320px reflow defect (issue #432), along with six more routes
 that failed the same criterion and had no entry at all because nothing measured
 them; and the local-e2e `alembic` drift, which now has a pre-run guard that
-refuses to start against a stale database. Sixteen of the seventeen `##`
+refuses to start against a stale database. Sixteen of the nineteen `##`
 entries are now `~~struck-through~~` resolved stubs. (This line said "the other
 fifteen" while the file held fifteen struck in total, the two above included.)
 They are kept because the *diagnosis* is the
@@ -40,6 +41,73 @@ goes to [followups.md](followups.md). Reasoning behind a deliberate design call
 goes to [decisions.md](decisions.md).
 
 ---
+
+## A contents-list jump on a legal page can be dropped while the focus scroll is still animating
+
+**Seen:** 2026-10-05, CI run 37287438662 (PR #497, shard 9/14),
+`tests-e2e/legal/a11y-narrow.spec.ts` ("the collapsed contents opens and
+navigates from the keyboard alone at 320px"): the URL reached `#scope` but the
+`<h2 id="scope">` was a full screen below the viewport. Not introduced by #497 —
+the spec and `LegalPage.svelte` are unchanged there; the PR's new specs only
+moved this one into a different shard.
+
+**Root cause.** `LegalPage.svelte` sets `scroll-behavior: smooth` on `html`
+while a document is mounted, and at 320×720 the consent banner reserves ~460px
+of `scroll-padding-bottom` (`ConsentBanner.svelte`, WCAG 2.4.11). Tabbing onto
+the first contents entry therefore scrolls the page (to y=1186 on the DPA), and
+that scroll is a ~500ms animation. If Enter lands on the link while it is still
+running, Chromium sometimes drops the fragment scroll and finishes the focus
+scroll instead. Measured with a scroll-event probe: 5 of 24 runs ended at the
+focus scroll's target with `hashchange` fired; 0 of 40 once the probe waited
+for `scrollend` before pressing Enter.
+
+**Blast radius.** A keyboard reader who Tabs onto an entry and presses Enter
+inside that half-second, on a viewport short enough that focus has to scroll,
+lands short of the section; the URL and history are right, and pressing Enter
+again works. No data or money path is involved.
+
+**Test.** The spec now waits for the browser's `scrollend` after the Tab, which
+is what a reader does — the guard still fails if the jump itself is broken.
+
+**Recommended fix.** Make focus-induced scrolling instant and keep smoothness
+only for the jump itself — e.g. drop the `html` `scroll-behavior` and have the
+contents links call `target.scrollIntoView({ behavior: 'smooth' })` *after*
+letting the browser perform the native fragment navigation (so URL, history and
+the focus starting point stay native, per the comment in `LegalPage.svelte`), or
+drop smooth scrolling on these pages altogether. Either is a design call on #467's
+behaviour, so it was not made inside a CI fix. Trigger: the next change to
+`LegalPage.svelte`'s contents list, or any report of a section jump landing short.
+
+## `deleteInvoicesWhere` races the backend's own workers on a just-resubmitted invoice
+
+**Seen:** 2026-10-05, `tests-e2e/portal/rejected-invoice.spec.ts` ("the vendor
+can revise & resubmit a rejected invoice"), once in two runs, on a local stack.
+The test body passed; its cleanup failed:
+
+```
+DELETE FROM invoices WHERE id IN ('…')
+ERROR:  update or delete on table "invoices" violates foreign key constraint
+        "exceptions_invoice_id_fkey" on table "exceptions"
+```
+
+**Root cause:** `fixtures/helpers.ts::deleteInvoicesWhere` deletes the child
+tables (`exceptions` among them) and then the invoice, as separate `psql`
+statements with no transaction and no lock. Resubmitting from the portal
+re-queues the invoice into the in-process extraction pool, which raises
+exceptions (duplicate / warning checks) asynchronously. When a worker commits
+an `exceptions` row between the child delete and the parent delete, the parent
+delete hits the FK. The spec ends as soon as the UI shows the resubmitted
+state, so the worker is still running when cleanup starts.
+
+**Blast radius:** any spec that drives an invoice back into extraction and then
+cleans up with `deleteInvoicesWhere` — a red test after a green body, and the
+invoice (plus whatever the worker wrote) left behind in the e2e tenant.
+
+**Recommended fix:** run the helper's statements as ONE transaction that first
+takes `SELECT … FROM invoices WHERE … FOR UPDATE` — the worker's own write
+needs the invoice row, so it blocks until cleanup commits and then finds the
+invoice gone — rather than retrying the delete (a retry would mask the race,
+root `CLAUDE.md` guard rail 4).
 
 ## ~~The DSAR export is the one surface that returns unmasked bank details~~ — FIXED 2026-09-16
 

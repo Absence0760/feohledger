@@ -352,7 +352,7 @@ const CASES: RouteCase[] = [
 		apiPathname: '/api/payments',
 		searchPlaceholder: 'Search payments...',
 		beforeSearch: async (page) => {
-			await page.getByRole('button', { name: /History/ }).click();
+			await page.getByRole('tab', { name: /History/ }).click();
 		},
 		buildBody: (searchTerm, marker) =>
 			JSON.stringify({

@@ -249,8 +249,8 @@
 	<section class="card">
 		<h2>{m('portal.company.contact.title')}</h2>
 		<p class="note">{m('portal.company.contact.note')}</p>
-		{#if contactErr}<div class="error">{contactErr}</div>{/if}
-		{#if contactMsg}<div class="message">{contactMsg}</div>{/if}
+		{#if contactErr}<div class="error" role="alert">{contactErr}</div>{/if}
+		<div role="status">{#if contactMsg}<div class="message">{contactMsg}</div>{/if}</div>
 		<form onsubmit={saveContact}>
 			<label>
 				{m('portal.company.contact.email')}
@@ -277,7 +277,7 @@
 			{m('portal.company.bank.note')}
 			{#if info?.has_bank_details}<span class="tag">{m('portal.company.bank.onFile')}</span>{/if}
 		</p>
-		{#if bankErr}<div class="error">{bankErr}</div>{/if}
+		{#if bankErr}<div class="error" role="alert">{bankErr}</div>{/if}
 		<form onsubmit={submitBankChange}>
 			<label>
 				{m('portal.company.bank.name')}
@@ -324,7 +324,7 @@
 			{m('portal.company.tax.note')}
 			{#if info?.tax_id_last4}<span class="tag">{m('portal.company.tax.ending', { last4: info.tax_id_last4 })}</span>{/if}
 		</p>
-		{#if taxErr}<div class="error">{taxErr}</div>{/if}
+		{#if taxErr}<div class="error" role="alert">{taxErr}</div>{/if}
 		<form onsubmit={submitTaxChange}>
 			<label>
 				{m('portal.company.tax.new')}
@@ -348,8 +348,8 @@
 				</span>
 			{/if}
 		</p>
-		{#if taxFormErr}<div class="error">{taxFormErr}</div>{/if}
-		{#if taxFormMsg}<div class="message">{taxFormMsg}</div>{/if}
+		{#if taxFormErr}<div class="error" role="alert">{taxFormErr}</div>{/if}
+		<div role="status">{#if taxFormMsg}<div class="message">{taxFormMsg}</div>{/if}</div>
 
 		{#if taxForm?.on_file}
 			<p class="note">
@@ -394,8 +394,8 @@
 			{m('portal.company.mfa.note')}
 			{#if mfaEnabled}<span class="tag">{m('portal.company.mfa.on')}</span>{/if}
 		</p>
-		{#if mfaErr}<div class="error">{mfaErr}</div>{/if}
-		{#if mfaMsg}<div class="message">{mfaMsg}</div>{/if}
+		{#if mfaErr}<div class="error" role="alert">{mfaErr}</div>{/if}
+		<div role="status">{#if mfaMsg}<div class="message">{mfaMsg}</div>{/if}</div>
 
 		{#if mfaEnabled && !disableMode}
 			<button type="button" class="btn-danger" onclick={() => (disableMode = true)}>

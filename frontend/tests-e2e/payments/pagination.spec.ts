@@ -62,7 +62,7 @@ test.describe('/payments pagination', () => {
 		const firstPage = page.waitForResponse(
 			(r) => new URL(r.url()).pathname.endsWith('/api/payments') && r.url().includes('page=1')
 		);
-		await page.getByRole('button', { name: /History/ }).click();
+		await page.getByRole('tab', { name: /History/ }).click();
 		await firstPage;
 
 		const firstPageRows = await page.locator('table tbody tr').count();

@@ -22,6 +22,35 @@ const FOCUSABLE =
  * discount-accept dialog) — so every dialog gets identical focus management
  * without a risky structural rewrite of those e2e-load-bearing modals.
  */
+/**
+ * Where focus goes when a dialog closes (WCAG 2.4.3 Focus Order).
+ *
+ * 1. Only when focus was actually LOST — sitting on `<body>`, which is where the
+ *    browser puts it when the focused dialog node is removed. If something else
+ *    already holds focus (a second dialog opened in the same flush, or a caller
+ *    that moved focus deliberately), restoring would steal it back.
+ * 2. To the trigger, if it is still in the document and accepts focus — a
+ *    disabled button (a row whose action is now in flight) silently refuses
+ *    `focus()`, which is why the check reads `activeElement` afterwards rather
+ *    than trusting the call.
+ * 3. Otherwise to the page's `<main id="main-content" tabindex="-1">` — the
+ *    landmark both shells (`routes/+layout.svelte`, `routes/portal/+layout.svelte`)
+ *    already expose as the skip-link target, so the user resumes inside the
+ *    content they were working in instead of at the top of the document.
+ *
+ * Guard: `tests-e2e/a11y/screen-reader.spec.ts` (both the surviving-trigger and
+ * the vanished-trigger cases).
+ */
+function restoreFocus(prev: HTMLElement | null): void {
+	const active = document.activeElement;
+	if (active && active !== document.body && active.isConnected) return;
+	if (prev?.isConnected) {
+		prev.focus?.();
+		if (document.activeElement === prev) return;
+	}
+	document.getElementById('main-content')?.focus();
+}
+
 export const focusTrap: Action<HTMLElement, FocusTrapParams | undefined> = (node, params) => {
 	let onEscape = params?.onEscape;
 	// Where focus was before the dialog opened — restored on destroy (2.4.3).
@@ -72,7 +101,16 @@ export const focusTrap: Action<HTMLElement, FocusTrapParams | undefined> = (node
 		},
 		destroy() {
 			node.removeEventListener('keydown', onKey);
-			prevFocused?.focus?.();
+			// Deferred to a microtask, not done here. The action is torn down in
+			// the SAME flush as whatever the dialog's action changed, so the
+			// trigger may be about to disappear: approving a pending change
+			// request from its dialog filters the row (and the button that opened
+			// the dialog) out of the Pending list. Focusing it synchronously
+			// "succeeds" and is then lost to `<body>` when the row unmounts a
+			// moment later — a keyboard or screen-reader user is thrown back to
+			// the top of the document (WCAG 2.4.3). After the flush the DOM is
+			// settled, so the restore can see what really survived.
+			queueMicrotask(() => restoreFocus(prevFocused));
 		},
 	};
 };
