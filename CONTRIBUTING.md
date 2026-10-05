@@ -98,7 +98,7 @@ measured and why the growth is warranted. Don't edit the number silently.
 ## Reviewing a PR
 
 - Pull the branch locally, run the test suite, exercise the change manually if it's user-visible.
-- The `/code-reviewer` agent (in `.claude/agents/`) can produce a first-pass review. Use it as a starting point, not a substitute for human eyes.
+- The `/code-reviewer` agent (in `.claude/agents/engineering/`) can produce a first-pass review. Use it as a starting point, not a substitute for human eyes.
 
 ## Security findings
 

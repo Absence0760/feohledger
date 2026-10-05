@@ -1,5 +1,5 @@
 ---
-description: Run one, several, or all of the bug-hunting persona auditors (.claude/agents/persona-*.md). Each persona adopts a real-world point of view — the AP domain roles (approver, CFO, accountant, supplier, fraudster), the integration counterparties (card/payment processor, integrator), the jurisdictions (USA/UK/ZA business, international user), and the cross-cutting users (new user, power user, admin, data subject, accessibility user) — and writes findings to reviews/<persona>.md. Usage — `/persona cfo`, `/persona uk-business,card-processor`, or `/persona all` (default).
+description: Run one, several, or all of the bug-hunting persona auditors (.claude/agents/personas/persona-*.md). Each persona adopts a real-world point of view — the AP domain roles (approver, CFO, accountant, supplier, fraudster), the integration counterparties (card/payment processor, integrator), the jurisdictions (USA/UK/ZA business, international user), and the cross-cutting users (new user, power user, admin, data subject, accessibility user) — and writes findings to reviews/<persona>.md. Usage — `/persona cfo`, `/persona uk-business,card-processor`, or `/persona all` (default).
 ---
 
 Dispatch the persona auditors named in the argument, in parallel, and summarize
@@ -9,7 +9,7 @@ what each filed.
 
 `$ARGUMENTS` selects which personas to run:
 
-- empty or `all` → the whole panel (every `.claude/agents/persona-*.md`).
+- empty or `all` → the whole panel (every `.claude/agents/personas/persona-*.md`).
 - a comma/space-separated list of slugs → just those. Accept slugs with or
   without the `persona-` prefix (`cfo`, `persona-cfo`, `uk-business` all resolve).
 - if a slug doesn't match an existing `persona-*` agent, list the available
@@ -25,7 +25,7 @@ The current panel, grouped by what each is positioned to catch:
 - **Cross-cutting users** — `new-user`, `power-user`, `admin`, `data-subject`,
   `accessibility-user`.
 
-(Discover the live list with `ls .claude/agents/persona-*.md` so this stays
+(Discover the live list with `ls .claude/agents/personas/persona-*.md` so this stays
 correct as personas are added. `all` is 17 agents in parallel — for a scoped
 run, name a group's slugs explicitly.)
 

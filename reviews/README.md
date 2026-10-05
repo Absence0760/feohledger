@@ -1,6 +1,6 @@
 # reviews/
 
-Output folder for the persona auditors (`.claude/agents/persona-*.md`). Each
+Output folder for the persona auditors (`.claude/agents/personas/persona-*.md`). Each
 persona writes its findings to `reviews/<persona-name>.md`.
 
 **Everything in here except this README is git-ignored.** The reports are
