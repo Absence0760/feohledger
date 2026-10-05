@@ -159,8 +159,9 @@ Two gates, layered, both fail closed:
    expiry + channel). Then load the named reviewer (active, right org, holds the
    `invoice.approve` granular permission — the shared `email_actions.may_approve`
    gate, identical to the in-app `require_permission(PERM_INVOICE_APPROVE)`, so a
-   custom role granting it works here too), **claim the token `jti`** in Redis
-   (single-use), and call `review.approve_invoice` / `review.reject_invoice` **as
+   custom role granting it works here too), **claim the card's button pair**
+   in Redis (`ActionToken.consume_key` — single-use per card, see
+   `email-approval.md` § Single-use), and call `review.approve_invoice` / `review.reject_invoice` **as
    the reviewer**. Segregation of duties, the approval thresholds, the CFO gate,
    the `invoice.approved`/`invoice.rejected` immutable audit row, and the approval
    digital signature all apply exactly as if they had logged in — and the org's
