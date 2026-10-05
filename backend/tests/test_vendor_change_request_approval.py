@@ -650,6 +650,60 @@ async def test_bank_change_approval_rescreen_blocks_sanctioned_vendor(realdb):
         assert rows[0].result == "match"
 
 
+@pytest.mark.asyncio
+async def test_tax_id_change_approval_rescreens_against_the_new_tax_id(realdb, monkeypatch):
+    """`tax_id` is an identity field: the sanctions adapters take it
+    (`vendor_tax_id`), and `PATCH /vendors/{id}` re-screens when AP edits it
+    directly. Approving a STAGED tax-ID change applied the new value with no
+    screen at all, so the supplier-portal route — the one a supplier drives —
+    was the one way to re-key a vendor's identity without a sanctions check.
+
+    The probe records what the adapter was asked, so this proves the screen ran
+    against the APPLIED tax id, not the stale one."""
+    from app.services.sanctions_adapters.mock_adapter import MockSanctionsAdapter
+
+    seen_tax_ids: list[str | None] = []
+    real_screen = MockSanctionsAdapter.screen_vendor
+
+    async def recording_screen(self, **kwargs):
+        seen_tax_ids.append(kwargs.get("vendor_tax_id"))
+        return await real_screen(self, **kwargs)
+
+    monkeypatch.setattr(MockSanctionsAdapter, "screen_vendor", recording_screen)
+
+    org_id = realdb.info(TENANT).org_id
+    mk = realdb.sessionmaker(TENANT)
+    # On the mock SDN list but un-blocked, as in the bank-change sibling above:
+    # the re-screen is what has to catch it.
+    vendor_id = await _seed_vendor(mk, org_id, name="Blocked Party LLC", tax_id="11-1111111")
+    req_id = await _stage(mk, org_id, vendor_id, "tax_id", {"tax_id": "22-2222222"})
+
+    async with realdb.client(key=TENANT, role="admin") as client:
+        resp = await client.post(f"/api/vendors/change-requests/{req_id}/approve")
+    assert resp.status_code == 200, resp.text
+
+    assert seen_tax_ids == ["22-2222222"]
+    async with mk() as s:
+        v = (await s.execute(select(Vendor).where(Vendor.id == vendor_id))).scalar_one()
+        assert v.tax_id == "22-2222222"
+        assert v.screening_status == "match"
+        assert v.payments_blocked is True
+        rows = (
+            (
+                await s.execute(
+                    select(SanctionsCheck).where(
+                        SanctionsCheck.vendor_id == vendor_id,
+                        SanctionsCheck.check_type == "tax_id_change",
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert len(rows) == 1
+        assert rows[0].result == "match"
+
+
 # ---------------------------------------------------------------------------
 # Issue #121 — new-vendor bank details bypassed the BEC dual-control gate.
 #
