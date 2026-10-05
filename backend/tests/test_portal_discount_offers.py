@@ -590,3 +590,97 @@ async def test_decline_still_works_on_the_last_day_of_the_window(realdb):
         resp = await client.post(f"/api/portal/discount-offers/{offer_id}/decline")
     assert resp.status_code == 200, resp.text
     assert resp.json()["status"] == "declined"
+
+
+# ---------------------------------------------------------------------------
+# An invoice-scoped offer belongs to whoever owns the INVOICE now
+# ---------------------------------------------------------------------------
+
+
+async def _seed_invoice_offer_stamped_with(
+    mk, org_id, *, invoice_vendor_id, offer_vendor_id
+) -> tuple[uuid.UUID, uuid.UUID]:
+    """An invoice-scoped offer on `invoice_vendor_id`'s invoice whose own
+    `vendor_id` column names `offer_vendor_id`.
+
+    Two real ways to get here: `POST /api/discounts/offers` copies
+    `body.vendor_id` onto an invoice-scoped offer without checking it against
+    the invoice, and AP re-linking an invoice to the correct vendor (review
+    correction, vendor merge) never touches the offers already raised on it.
+    """
+    invoice_id = uuid.uuid4()
+    offer_id = uuid.uuid4()
+    async with mk() as s:
+        s.add(
+            Invoice(
+                id=invoice_id,
+                invoice_number="INV-OTHER-VENDOR",
+                vendor_name="Other",
+                vendor_id=invoice_vendor_id,
+                amount=Decimal("8000.00"),
+                currency="USD",
+                status=InvoiceStatus.approved,
+                organization_id=org_id,
+            )
+        )
+        await s.flush()
+        s.add(
+            DiscountOffer(
+                id=offer_id,
+                organization_id=org_id,
+                scope=OFFER_SCOPE_INVOICE,
+                invoice_id=invoice_id,
+                vendor_id=offer_vendor_id,
+                source="supplier",
+                status=OFFER_STATUS_OFFERED,
+                tiers=_TIERS,
+                base_amount=Decimal("8000.00"),
+                currency="USD",
+                valid_from=utc_today(),
+                valid_until=utc_today() + timedelta(days=30),
+            )
+        )
+        await s.commit()
+    return offer_id, invoice_id
+
+
+@pytest.mark.asyncio
+async def test_offer_on_another_vendors_invoice_is_invisible_and_unacceptable(realdb):
+    """A stale/mismatched `vendor_id` on an invoice-scoped offer must not hand
+    that vendor somebody else's invoice.
+
+    The portal filter admitted any offer whose `vendor_id` matched the caller,
+    regardless of who owns the invoice the offer prices. So vendor "Mine" saw
+    "Other"'s invoice number and amount — and could ACCEPT the early-pay
+    discount on it, which `discount_capture` then deducts from the payment to
+    "Other". An invoice-scoped offer is the invoice owner's, and only theirs.
+    """
+    org_id = realdb.info(TENANT).org_id
+    mk = realdb.sessionmaker(TENANT)
+    mine_vid, mine_vu = await _seed_vendor_and_user(mk, org_id, name="Mine")
+    other_vid, other_vu = await _seed_vendor_and_user(mk, org_id, name="Other")
+    offer_id, _ = await _seed_invoice_offer_stamped_with(
+        mk, org_id, invoice_vendor_id=other_vid, offer_vendor_id=mine_vid
+    )
+
+    async with _portal_client(realdb, mine_vu, mine_vid) as client:
+        listed = await client.get("/api/portal/discount-offers")
+        summary = await client.get("/api/portal/summary")
+        accept = await client.post(f"/api/portal/discount-offers/{offer_id}/accept", json={})
+        decline = await client.post(f"/api/portal/discount-offers/{offer_id}/decline")
+    assert listed.status_code == 200, listed.text
+    assert listed.json()["total"] == 0
+    assert summary.json()["open_discount_offers"] == 0
+    assert accept.status_code == 404
+    assert decline.status_code == 404
+
+    async with mk() as s:
+        row = (
+            await s.execute(select(DiscountOffer).where(DiscountOffer.id == offer_id))
+        ).scalar_one()
+        assert row.status == OFFER_STATUS_OFFERED  # untouched
+
+    # The invoice's actual owner still sees it.
+    async with _portal_client(realdb, other_vu, other_vid) as client:
+        listed = await client.get("/api/portal/discount-offers")
+    assert [o["id"] for o in listed.json()["items"]] == [str(offer_id)]
