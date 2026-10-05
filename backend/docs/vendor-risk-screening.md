@@ -133,6 +133,13 @@ Call sites:
   resolution has no segregation check of its own. See
   [`supplier-portal.md`](supplier-portal.md) § Credential provenance and the BEC
   dual control.
+- **Approved tax-ID change** (`api/vendors.py::approve_change_request`) —
+  `check_type="tax_id_change"`. `tax_id` is an identity field the adapters
+  screen on (`vendor_tax_id`), so applying a staged one re-screens exactly as an
+  AP edit of the field does. It used to apply silently, which made the
+  supplier-portal change request the one route that could re-key a vendor's
+  identity with no sanctions check. Best-effort, gated by
+  `FEOH_VENDOR_SCREENING_ENABLED`.
 - **Periodic sweep** — `services/vendor_rescreen.py` (`check_type="periodic"`).
 - **Pre-payment** — `check_payment_compliance` keeps its own
   `check_type="pre_payment"` screen (different verdict contract).

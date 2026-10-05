@@ -2042,6 +2042,19 @@ async def approve_change_request(
             actor_id=user.id,
         )
         await _flag_payable_invoices_for_bank_change(db, vendor=vendor, actor_id=user.id)
+    elif req.change_type == "tax_id":
+        # `tax_id` is in `_IDENTITY_FIELDS` and the adapters screen on it, so it
+        # owes the same re-screen `update_vendor` gives an AP edit of the field.
+        # Without this, the supplier-driven route was the one way to re-key a
+        # vendor's identity with no sanctions check behind it.
+        await _screen_best_effort(
+            db,
+            vendor=vendor,
+            org=org,
+            org_id=org.id,
+            check_type="tax_id_change",
+            actor_id=user.id,
+        )
 
     await db.commit()
     await db.refresh(req)
