@@ -110,6 +110,54 @@ async def _add_offer_row(mk, org_id, *, status, valid_until=None, base="1000.00"
 # ---------------------------------------------------------------------------
 
 
+async def test_create_invoice_offer_refuses_a_vendor_id_that_is_not_the_invoices(realdb):
+    """An invoice-scoped offer's `vendor_id` was copied from the body unchecked,
+    so an offer on vendor A's invoice could be stamped vendor B — and the
+    supplier portal used to show B that offer (A's invoice number and amount)
+    and let B accept the discount A's payment would then lose. The portal now
+    keys on invoice ownership; this closes the write that produced the row.
+    The matching id every existing caller sends still works."""
+    mk = realdb.sessionmaker("a")
+    org_id = realdb.info("a").org_id
+    owner = await _add_vendor(mk, org_id, name="Invoice Owner")
+    other = await _add_vendor(mk, org_id, name="Someone Else")
+    invoice_id = await _add_invoice(mk, org_id, vendor_id=owner)
+
+    async with realdb.client(key="a", role="ap_manager") as c:
+        mismatched = await c.post(
+            "/api/discounts/offers",
+            json={
+                "scope": "invoice",
+                "invoice_id": invoice_id,
+                "vendor_id": other,
+                "tiers": _tiers(),
+            },
+        )
+        matching = await c.post(
+            "/api/discounts/offers",
+            json={
+                "scope": "invoice",
+                "invoice_id": invoice_id,
+                "vendor_id": owner,
+                "tiers": _tiers(),
+            },
+        )
+    assert mismatched.status_code == 422, mismatched.text
+    assert matching.status_code == 201, matching.text
+
+    async with mk() as s:
+        rows = (
+            (
+                await s.execute(
+                    select(DiscountOffer).where(DiscountOffer.invoice_id == uuid.UUID(invoice_id))
+                )
+            )
+            .scalars()
+            .all()
+        )
+    assert [str(r.vendor_id) for r in rows] == [owner]
+
+
 async def test_create_invoice_offer_defaults_base_amount_and_audits(realdb):
     mk = realdb.sessionmaker("a")
     org_id = realdb.info("a").org_id
