@@ -69,7 +69,7 @@ section carried its own `decisions.md` § reference, so nothing was lost by
 deleting it; that cross-reference is what makes the pruning safe, and writing
 one is what earns a future entry the right to be deleted.
 
-**54 open: 39 (c) · 9 (a) · 6 (b)** — re-derived from the file, never carried
+**53 open: 38 (c) · 9 (a) · 6 (b)** — re-derived from the file, never carried
 forward. The section heading is authoritative; where an entry also carries a
 `(c)`/`(a)`/`(b)` marker, the two agree.
 `grep -c '^- \[ \]' docs/followups.md`.
@@ -1030,29 +1030,6 @@ or is a sibling of a fix that needs its own pass.
       **Trigger:** the next change to `ConsentBanner.svelte`, or the next
       accessibility pass over `/legal` (`/a11y-hunt`, or the manual
       screen-reader pass `docs/accessibility.md` still has open).
-
-### Surfaced by the mobile bug hunt (2026-10-04)
-
-- [ ] **(c) The mobile multi-select surfaces still render English literals.**
-      The invoices list's bulk flow (`mobile/lib/screens/invoices_screen.dart`
-      — the "N selected" header, Select all / Select multiple / Cancel selection
-      labels, the delete confirmation, "Change status to…", "Export as…", and
-      every result / failure snackbar), the exception queue's selection-mode
-      labels (`exceptions_screen.dart`), and the shared `BulkActionBar`
-      (`N selected`, Export / Status / Delete) are hardcoded English, so a
-      `de`/`fr`/`es`/`pt`/`ja` user sees English text in the middle of an otherwise
-      localized screen. `mobile/docs/i18n.md` lists every extracted surface and
-      the shared status-badge enum maps it deliberately left for later. It does
-      not mention these, so they are an omission, not a recorded exemption. The
-      bulk-reject reason prompt added the same day is localized
-      (`invoicesBulkRejectTitle`), but the rest of its flow is not.
-      **Durable fix:** extract each literal to an ARB key in all seven
-      catalogues, with ICU plurals for the counts. Pass `BulkActionBar` its
-      labels through `AppLocalizations`. Localize the status-sheet option
-      through the same mapping the invoice `StatusBadge` gets in its own turn,
-      so the two can't disagree. Then add the surfaces to `mobile/docs/i18n.md`.
-      **Trigger:** the next mobile i18n slice, or the status-badge enum-map
-      extraction, whichever comes first.
 
 ## (a) Blocked on external credentials, accounts, or hardware
 
