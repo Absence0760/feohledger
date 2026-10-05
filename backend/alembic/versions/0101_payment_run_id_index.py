@@ -15,10 +15,10 @@ Measured, not assumed
 Local Postgres 16, warm cache, ``EXPLAIN (ANALYZE, BUFFERS)``. Dataset: 90 000
 ``payments`` across 1 500 runs, 200 000 ``invoices``.
 
-| query                                              | before                  | after                     |
-|----------------------------------------------------|-------------------------|---------------------------|
-| run list: status rollup over a 20-run page         | 19.1 ms, Seq Scan 90 k  | 1.1 ms, Bitmap Index Scan |
-| one run's payments (detail / approve / execute)    | 4.2 ms / 1 699 buffers  | 0.05 ms / 2 buffers       |
+| query                                       | before                | after                     |
+|---------------------------------------------|-----------------------|---------------------------|
+| run list: status rollup, 20-run page        | 19.1 ms, Seq Scan 90k | 1.1 ms, Bitmap Index Scan |
+| one run's payments (detail/approve/execute) | 4.2 ms / 1699 buffers | 0.05 ms / 2 buffers       |
 
 Both "before" figures are linear in the size of ``payments``; the "after"
 figures are linear in the size of the run. The index is 672 kB against a
