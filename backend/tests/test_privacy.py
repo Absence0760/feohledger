@@ -141,6 +141,56 @@ async def test_dsar_user_bundle(realdb):
     assert body["data"]["activity"]["audit_actions_authored"] >= 1
 
 
+async def test_dsar_user_bundle_includes_device_registrations_and_locale(realdb):
+    """Every personal column on ``users`` reaches the export.
+
+    ``device_tokens`` (one push registration per platform) and ``locale`` are
+    the subject's own data; the bundle stopped at ``notification_prefs`` and
+    silently omitted both.
+    """
+    from app.models.user import User
+
+    ctrl_mk = realdb.control_sessionmaker()
+    org_id = realdb.info("a").org_id
+    target_id = uuid.uuid4()
+    target_email = f"dsar-device-{target_id}@{realdb.info('a').slug}.test"
+    async with ctrl_mk() as s:
+        s.add(
+            User(
+                id=target_id,
+                email=target_email,
+                full_name="Device Holder",
+                hashed_password="x",
+                is_active=True,
+                organization_id=org_id,
+                must_change_password=False,
+                device_tokens={
+                    "android": {"token": "fcm-secret-handle", "updated_at": "2026-02-03T04:05:06"}
+                },
+                locale="fr",
+            )
+        )
+        await s.commit()
+    try:
+        async with realdb.client(key="a", role="admin") as c:
+            resp = await c.post(
+                "/api/privacy/dsar", json={"subject_type": "user", "identifier": target_email}
+            )
+        assert resp.status_code == 200, resp.text
+        data = resp.json()["data"]
+        assert data["profile"]["locale"] == "fr"
+        devices = data["push_devices"]
+        assert [d["platform"] for d in devices] == ["android"]
+        assert devices[0]["registered_at"] == "2026-02-03T04:05:06"
+        # Like a passkey's credential id, the raw token is a handle to the
+        # device, not information the subject needs to recognise the entry.
+        assert "fcm-secret-handle" not in resp.text
+    finally:
+        async with ctrl_mk() as s:
+            await s.execute(User.__table__.delete().where(User.id == target_id))
+            await s.commit()
+
+
 async def test_dsar_vendor_contact_bundle(realdb):
     """DSAR for a vendor_contact returns vendor PII + related invoices/payments."""
     tenant_mk = realdb.sessionmaker("a")
@@ -352,6 +402,12 @@ async def test_erasure_user_redacts_pii(realdb):
                 is_active=True,
                 organization_id=org_id,
                 must_change_password=False,
+                # A registered phone: a push token is a persistent identifier
+                # of the subject's own device (Art. 4(1) "online identifier").
+                device_tokens={
+                    "ios": {"token": "fcm-token-of-erase-me", "updated_at": "2026-01-01T00:00:00"}
+                },
+                locale="de",
             )
         )
         await s.commit()
@@ -377,6 +433,11 @@ async def test_erasure_user_redacts_pii(realdb):
             assert u.sso_provider_id is None
             assert u.is_active is False
             assert u.hashed_password is None
+            # The device identifier goes too — nothing in the money trail
+            # needs it, and a future push sender must never reach the erased
+            # person's phone. Locale is a preference of a person who is gone.
+            assert u.device_tokens == {}
+            assert u.locale is None
             # Identity preserved for the audit/financial link.
             assert u.organization_id == org_id
     finally:
@@ -384,6 +445,49 @@ async def test_erasure_user_redacts_pii(realdb):
 
         async with ctrl_mk() as s:
             await s.execute(U.__table__.delete().where(U.id == target_id))
+            await s.commit()
+
+
+async def test_erasure_rerun_reaches_a_device_registration_left_by_an_older_erasure(realdb):
+    """A user tombstoned before ``device_tokens`` was covered still holds the
+    registration. Asking again must remove it, not answer ``noop``."""
+    from app.models.user import User
+
+    ctrl_mk = realdb.control_sessionmaker()
+    org_id = realdb.info("a").org_id
+    target_id = uuid.uuid4()
+    tombstone = f"erased+{target_id}@redacted.invalid"
+    async with ctrl_mk() as s:
+        s.add(
+            User(
+                id=target_id,
+                email=tombstone,
+                full_name="[redacted]",
+                is_active=False,
+                organization_id=org_id,
+                must_change_password=False,
+                device_tokens={"ios": {"token": "left-behind", "updated_at": "2026-01-01"}},
+            )
+        )
+        await s.commit()
+    try:
+        async with realdb.client(key="a", role="admin") as c:
+            first = await c.post(
+                "/api/privacy/erasure",
+                json={"subject_type": "user", "identifier": tombstone, "confirm": True},
+            )
+            again = await c.post(
+                "/api/privacy/erasure",
+                json={"subject_type": "user", "identifier": tombstone, "confirm": True},
+            )
+        assert first.status_code == 200, first.text
+        assert first.json()["status"] == "completed"
+        assert again.json()["status"] == "noop"
+        async with ctrl_mk() as s:
+            assert (await s.get(User, target_id)).device_tokens == {}
+    finally:
+        async with ctrl_mk() as s:
+            await s.execute(User.__table__.delete().where(User.id == target_id))
             await s.commit()
 
 
