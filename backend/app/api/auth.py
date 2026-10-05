@@ -81,6 +81,7 @@ from app.services.session_management import (
     revoke_user_sessions,
 )
 from app.services.sso import is_sso_only, sso_only_requested
+from app.utils.emails import email_matches, exact_email_first, normalize_email
 from app.utils.passwords import (
     PasswordError,
     dummy_verify,
@@ -118,6 +119,24 @@ def _spawn_background(coro) -> None:
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+async def _user_by_email(db: AsyncSession, address: str) -> User | None:
+    """The account a submitted address names — case- and padding-insensitive.
+
+    `users.email` is the login identifier, and an exact compare made
+    `Jane@Acme.com` and `jane@acme.com` different people: the owner of the
+    first couldn't sign in typing the second (see `utils/emails`). An exact
+    match wins over a case-variant, should rows predating normalization hold
+    both.
+    """
+    result = await db.execute(
+        select(User)
+        .where(email_matches(User.email, address))
+        .order_by(exact_email_first(User.email, address).desc())
+        .limit(1)
+    )
+    return result.scalar_one_or_none()
 
 
 async def _load_user_org(db: AsyncSession, org_id) -> Organization | None:
@@ -389,8 +408,7 @@ async def login(
         window_seconds=LOGIN_FAILURE_WINDOW_SECONDS,
     )
     ip = _client_ip(request)
-    result = await db.execute(select(User).where(User.email == body.email))
-    user = result.scalar_one_or_none()
+    user = await _user_by_email(db, body.email)
 
     if not user or not user.hashed_password or not user.is_active:
         # `is_active` belongs HERE, beside "no such account", not after the
@@ -411,7 +429,7 @@ async def login(
         raise await _reject_login(
             identity,
             user,
-            email=body.email,
+            email=normalize_email(body.email),
             ip=ip,
             reason=(
                 "unknown_account"
@@ -420,7 +438,9 @@ async def login(
             ),
         )
     if not await verify_password(body.password, user.hashed_password):
-        raise await _reject_login(identity, user, email=body.email, ip=ip, reason="bad_password")
+        raise await _reject_login(
+            identity, user, email=normalize_email(body.email), ip=ip, reason="bad_password"
+        )
 
     # The password checked out — wipe the budget so earlier typos (or someone
     # else's spray against this address) can never keep the real owner out. The
@@ -442,7 +462,7 @@ async def login(
             organization_id=user.organization_id,
             actor_id=None,
             action="auth.login.failure",
-            details={"email": body.email, "ip": ip, "reason": "sso_only"},
+            details={"email": normalize_email(body.email), "ip": ip, "reason": "sso_only"},
         )
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -636,8 +656,7 @@ async def forgot_password(
         window_seconds=3600,
     )
 
-    result = await db.execute(select(User).where(User.email == body.email))
-    user = result.scalar_one_or_none()
+    user = await _user_by_email(db, body.email)
 
     if user is not None and user.is_active:
         org = await _load_user_org(db, user.organization_id)

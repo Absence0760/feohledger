@@ -56,6 +56,7 @@ from app.services.session_management import (
     revoke_other_sessions,
 )
 from app.tenant import get_tenant_db, get_tenant_slug
+from app.utils.emails import email_matches, exact_email_first
 from app.utils.passwords import (
     PasswordError,
     dummy_verify,
@@ -239,7 +240,14 @@ async def portal_login(
         window_seconds=LOGIN_FAILURE_WINDOW_SECONDS,
     )
     ip = resolve_client_ip(request) or "unknown"
-    result = await db.execute(select(VendorUser).where(VendorUser.email == body.email))
+    # Case-insensitive, exact match first — the same rule as the employee
+    # login (`api/auth._user_by_email`, `utils/emails`).
+    result = await db.execute(
+        select(VendorUser)
+        .where(email_matches(VendorUser.email, body.email))
+        .order_by(exact_email_first(VendorUser.email, body.email).desc())
+        .limit(1)
+    )
     vu = result.scalar_one_or_none()
 
     if not vu or not vu.hashed_password or not vu.is_active:

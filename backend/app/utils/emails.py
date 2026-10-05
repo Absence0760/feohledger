@@ -40,7 +40,16 @@ from __future__ import annotations
 
 import re
 
-__all__ = ["EMAIL_SHAPE_PATTERN", "is_header_safe", "looks_like_email"]
+from sqlalchemy import ColumnElement, func
+
+__all__ = [
+    "EMAIL_SHAPE_PATTERN",
+    "email_matches",
+    "exact_email_first",
+    "is_header_safe",
+    "looks_like_email",
+    "normalize_email",
+]
 
 #: Permissive shape check. Local part: any run of non-space, non-``@``. Domain:
 #: one or more dot-delimited labels of non-space, non-``@``, non-dot characters
@@ -101,3 +110,54 @@ def looks_like_email(value: str) -> bool:
     header-safe, because the weaker rule is unchanged.
     """
     return is_header_safe(value) and bool(EMAIL_SHAPE_PATTERN.match(value))
+
+
+# ---------------------------------------------------------------------------
+# Email as an identity: one canonical form, matched without regard to case
+# ---------------------------------------------------------------------------
+#
+# An address is the login identifier (`users.email`, `vendor_users.email`) and
+# the key SSO JIT and SCIM link an IdP identity to. Those paths disagreed on
+# what "the same address" meant: SCIM and SSO lower-cased what they wrote and
+# looked up, while the admin create/update, tenant provisioning and the portal
+# invite stored whatever was typed, and every lookup compared exactly. So an
+# admin-created `Jane.Doe@Acme.com` was a different person from the
+# `jane.doe@acme.com` her IdP asserts: SSO JIT minted a SECOND account (as
+# `ap_clerk`) instead of linking hers, SCIM's 409 guard missed and provisioned a
+# duplicate — whose later deprovision left the original, with its roles and its
+# password, active — and she could not sign in typing her address in lower case.
+#
+# Every write stores `normalize_email(...)`; every identity lookup goes through
+# `email_matches`, which also finds rows written before writes were normalized.
+
+
+def normalize_email(value: str) -> str:
+    """The stored, canonical form of an address: trimmed and lower-cased.
+
+    Lower-casing the local part is technically stricter than RFC 5321, which
+    lets a mail server treat it case-sensitively; no mainstream provider or IdP
+    does, and SCIM's `userName` is `caseExact: false`. Two accounts that differ
+    only in case are a defect, not a feature.
+    """
+    return value.strip().lower()
+
+
+def email_matches(column, address: str) -> ColumnElement[bool]:
+    """SQL predicate: ``column`` holds ``address``, ignoring case and padding.
+
+    Compares ``lower(column)`` rather than the column itself so a row stored
+    before writes were normalized (mixed case) still matches.
+    """
+    return func.lower(column) == normalize_email(address)
+
+
+def exact_email_first(column, address: str) -> ColumnElement[bool]:
+    """ORDER BY key for a single-row lookup under `email_matches`.
+
+    Rows stored before normalization can include two that differ only in case.
+    A login must not 500 on that (an unbounded ``scalar_one_or_none`` would), and
+    must not pick between them arbitrarily: the row whose stored address is
+    exactly what was submitted sorts first. Use as
+    ``.order_by(exact_email_first(...).desc()).limit(1)``.
+    """
+    return column == address.strip()

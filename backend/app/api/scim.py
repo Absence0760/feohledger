@@ -46,6 +46,7 @@ from app.schemas.scim import (
 )
 from app.services import scim_groups
 from app.services.sso import hash_scim_token
+from app.utils.emails import email_matches, normalize_email
 
 logger = logging.getLogger(__name__)
 
@@ -127,10 +128,13 @@ async def _email_taken(
     same doomed write came back on every reconcile cycle. `admin.create_user` /
     `admin.update_user` have always checked globally; this brings SCIM in line.
     """
-    stmt = select(User.id).where(User.email == email)
+    # Case-insensitive too: an IdP pushing `jane@acme.com` for an admin-created
+    # `Jane@Acme.com` is the same person, and missing that provisioned a
+    # duplicate whose later deprovision left the original active.
+    stmt = select(User.id).where(email_matches(User.email, email))
     if exclude_user_id is not None:
         stmt = stmt.where(User.id != exclude_user_id)
-    return (await db.execute(stmt)).scalar_one_or_none() is not None
+    return (await db.execute(stmt.limit(1))).scalar_one_or_none() is not None
 
 
 # ---------------------------------------------------------------------------
@@ -210,6 +214,12 @@ def _apply_filter(query, filter_expr: str):
         prefix = f"{attr} eq "
         if expr.startswith(prefix):
             value = expr[len(prefix) :].strip().strip('"')
+            if column is User.email:
+                # `userName` is `caseExact: false` (RFC 7643 §4.1.1). Okta and
+                # Entra probe with this filter before a POST; an exact compare
+                # answered "no such user" for a mixed-case row and the IdP then
+                # created a second one.
+                return query.where(email_matches(User.email, value))
             return query.where(column == value)
 
     if expr in ("active eq true", "active eq True"):
@@ -284,7 +294,7 @@ async def create_user(
     org: Organization = Depends(get_scim_tenant),
     db: AsyncSession = Depends(get_control_db),
 ):
-    email = _extract_primary_email(body.emails, body.userName).lower().strip()
+    email = normalize_email(_extract_primary_email(body.emails, body.userName))
 
     # SCIM requires 409 on duplicate userName. Platform-wide — see `_email_taken`.
     if await _email_taken(db, email):
@@ -329,7 +339,7 @@ async def replace_user(
     if user is None:
         raise _scim_http_error(404, f"User {user_id} not found.")
 
-    email = _extract_primary_email(body.emails, body.userName).lower().strip()
+    email = normalize_email(_extract_primary_email(body.emails, body.userName))
     # Uniqueness invariant: PUT must not rename this user onto another user's
     # userName. Platform-wide — see `_email_taken`.
     if await _email_taken(db, email, exclude_user_id=user.id):
@@ -388,7 +398,7 @@ async def patch_user(
             user.is_active = _scim_active(value) if action != "remove" else False
         elif path == "userName" and action in ("replace", "add"):
             if isinstance(value, str):
-                new_email = value.lower().strip()
+                new_email = normalize_email(value)
         elif path == "externalId" and action in ("replace", "add"):
             if isinstance(value, str):
                 user.sso_provider_id = value
@@ -397,7 +407,7 @@ async def patch_user(
             if "active" in value:
                 user.is_active = _scim_active(value["active"])
             if "userName" in value and isinstance(value["userName"], str):
-                new_email = value["userName"].lower().strip()
+                new_email = normalize_email(value["userName"])
             if "externalId" in value and isinstance(value["externalId"], str):
                 user.sso_provider_id = value["externalId"]
             if "name" in value and isinstance(value["name"], dict):

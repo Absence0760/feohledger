@@ -42,6 +42,7 @@ from app.schemas.admin import (
 from app.services.audit_dispatch import dispatch_auth_audit
 from app.services.email_adapters import EmailMessage, get_email_adapter
 from app.services.session_management import revoke_user_sessions
+from app.utils.emails import email_matches, normalize_email
 from app.utils.passwords import (
     PasswordError,
     generate_temp_password,
@@ -481,7 +482,11 @@ async def create_user(
     org_id: uuid.UUID = Depends(get_org_id),
 ):
     # Check email uniqueness
-    existing = await db.execute(select(User).where(User.email == body.email))
+    # Case-insensitive, and stored normalized: `users.email` is a login
+    # identifier, so `Jane@Acme.com` and `jane@acme.com` are one person
+    # (`utils/emails`).
+    email = normalize_email(body.email)
+    existing = await db.execute(select(User.id).where(email_matches(User.email, email)).limit(1))
     if existing.scalar_one_or_none():
         raise HTTPException(status_code=409, detail="Email already in use")
 
@@ -493,7 +498,7 @@ async def create_user(
     # Signup and partner provisioning already use this one.
     temp_password = generate_temp_password()
     new_user = User(
-        email=body.email,
+        email=email,
         full_name=body.full_name,
         hashed_password=await hash_password(temp_password),
         organization_id=org_id,
@@ -626,12 +631,13 @@ async def update_user(
         target.full_name = body.full_name
         changed_fields.append("full_name")
     if body.email is not None:
+        new_email = normalize_email(body.email)
         existing = await db.execute(
-            select(User).where(User.email == body.email, User.id != user_id)
+            select(User.id).where(email_matches(User.email, new_email), User.id != user_id).limit(1)
         )
         if existing.scalar_one_or_none():
             raise HTTPException(status_code=409, detail="Email already in use")
-        target.email = body.email
+        target.email = new_email
         changed_fields.append("email")
     if body.is_active is not None:
         target.is_active = body.is_active
