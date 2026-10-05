@@ -129,30 +129,37 @@
 			</div>
 			<nav aria-label={m('portal.shell.nav')}>
 				<a href="/portal" class:active={$page.url.pathname === '/portal'}
+					aria-current={$page.url.pathname === '/portal' ? 'page' : undefined}
 					>{m('portal.nav.overview')}</a
 				>
 				<a href="/portal/invoices" class:active={$page.url.pathname.startsWith('/portal/invoices')}
+					aria-current={$page.url.pathname.startsWith('/portal/invoices') ? 'page' : undefined}
 					>{m('portal.nav.invoices')}</a
 				>
 				<a
 					href="/portal/purchase-orders"
 					class:active={$page.url.pathname.startsWith('/portal/purchase-orders')}
+					aria-current={$page.url.pathname.startsWith('/portal/purchase-orders') ? 'page' : undefined}
 					>{m('portal.nav.purchaseOrders')}</a
 				>
 				<a href="/portal/payments" class:active={$page.url.pathname.startsWith('/portal/payments')}
+					aria-current={$page.url.pathname.startsWith('/portal/payments') ? 'page' : undefined}
 					>{m('portal.nav.payments')}</a
 				>
 				<a
 					href="/portal/discount-offers"
 					class:active={$page.url.pathname.startsWith('/portal/discount-offers')}
+					aria-current={$page.url.pathname.startsWith('/portal/discount-offers') ? 'page' : undefined}
 					>{m('portal.nav.discounts')}</a
 				>
 				<a href="/portal/company" class:active={$page.url.pathname.startsWith('/portal/company')}
+					aria-current={$page.url.pathname.startsWith('/portal/company') ? 'page' : undefined}
 					>{m('portal.nav.company')}</a
 				>
 				<a
 					href="/portal/notifications"
 					class:active={$page.url.pathname.startsWith('/portal/notifications')}
+					aria-current={$page.url.pathname.startsWith('/portal/notifications') ? 'page' : undefined}
 					>{m('portal.nav.notifications')}</a
 				>
 			</nav>

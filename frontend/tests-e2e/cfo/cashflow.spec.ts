@@ -39,8 +39,17 @@ test.describe('/cfo (admin)', () => {
 		const respPromise = page.waitForResponse(
 			(r) => r.url().includes('/api/analytics/cashflow_forecast') && r.url().includes('granularity=month')
 		);
-		await page.locator('.seg-btn', { hasText: 'month' }).click();
+		const month = page.getByRole('group', { name: 'Granularity' }).getByRole('button', {
+			name: 'month'
+		});
+		await expect(month).toHaveAttribute('aria-pressed', 'false');
+		await month.click();
 		await respPromise;
+		// The chosen value is exposed, not only painted (WCAG 4.1.2).
+		await expect(month).toHaveAttribute('aria-pressed', 'true');
+		await expect(
+			page.getByRole('group', { name: 'Granularity' }).getByRole('button', { pressed: true })
+		).toHaveCount(1);
 		await expect(page.locator('.chart-card h2', { hasText: 'Projected outflows (month)' })).toBeVisible();
 	});
 

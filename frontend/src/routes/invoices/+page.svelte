@@ -747,6 +747,7 @@
 				type="button"
 				class="filter-chip my-approvals-chip"
 				class:active={myApprovalsActive}
+				aria-pressed={myApprovalsActive}
 				onclick={toggleMyApprovals}
 				data-testid="my-approvals-toggle"
 			>
@@ -765,11 +766,21 @@
 			</select>
 		</div>
 		<nav class="filters">
-			<button class="filter-chip" class:active={activeStatuses.length === 0} onclick={() => (activeStatuses = [])}>
+			<button
+				class="filter-chip"
+				class:active={activeStatuses.length === 0}
+				aria-pressed={activeStatuses.length === 0}
+				onclick={() => (activeStatuses = [])}
+			>
 				{m('common.all')} <span class="count">{totalCount}</span>
 			</button>
 			{#each chipStatuses as s}
-				<button class="filter-chip" class:active={activeStatuses.includes(s)} onclick={() => toggleStatus(s)}>
+				<button
+					class="filter-chip"
+					class:active={activeStatuses.includes(s)}
+					aria-pressed={activeStatuses.includes(s)}
+					onclick={() => toggleStatus(s)}
+				>
 					{m(INVOICE_STATUS_LABEL_KEYS[s])} <span class="count">{statusCount(s)}</span>
 				</button>
 			{/each}

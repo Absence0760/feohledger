@@ -218,22 +218,28 @@
 
 	<div class="cf-controls">
 		<div class="control">
-			<span class="control-label">{m('cfo.control.granularity')}</span>
-			<div class="seg">
+			<span class="control-label" id="cf-granularity-label">{m('cfo.control.granularity')}</span>
+			<div class="seg" role="group" aria-labelledby="cf-granularity-label">
 				{#each ['day', 'week', 'month'] as g (g)}
 					<button
 						class="seg-btn"
 						class:active={granularity === g}
+						aria-pressed={granularity === g}
 						onclick={() => (granularity = g as CashflowGranularity)}
 					>{granLabel(g)}</button>
 				{/each}
 			</div>
 		</div>
 		<div class="control">
-			<span class="control-label">{m('cfo.control.horizon')}</span>
-			<div class="seg">
+			<span class="control-label" id="cf-horizon-label">{m('cfo.control.horizon')}</span>
+			<div class="seg" role="group" aria-labelledby="cf-horizon-label">
 				{#each [30, 90, 180, 365] as h (h)}
-					<button class="seg-btn" class:active={horizonDays === h} onclick={() => (horizonDays = h)}>
+					<button
+						class="seg-btn"
+						class:active={horizonDays === h}
+						aria-pressed={horizonDays === h}
+						onclick={() => (horizonDays = h)}
+					>
 						{m('cfo.control.horizonDays', { days: h })}
 					</button>
 				{/each}

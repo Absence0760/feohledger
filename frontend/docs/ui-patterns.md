@@ -903,6 +903,16 @@ inherit it for free. Reuse these; don't re-solve them per page.
   `ui/Tabs.svelte` that lacks `role="tab"` + `aria-selected`.
 - **Filter chips** (`ui/FilterChips.svelte`) — `<button aria-pressed>`
   reflects the active chip.
+- **Selected / current state** (WCAG 4.1.2, 1.3.1) — anything painted "on" by
+  `class:active` also says so: `aria-current="page"` on the nav link to the
+  page you are on (the sidebar — `"true"` on a folded group — and the portal
+  nav), `aria-pressed` on a toggle, segmented or filter button (`/cfo`'s
+  granularity / horizon pickers, which also sit in a named `role="group"`),
+  `role="tab"` + `aria-selected` on a tab. Guard:
+  `src/lib/a11y/selectedState.test.ts` fails any `class:active` link or button
+  without one; the two exceptions (a toggle whose label is its state, and
+  `SortableHeader`, whose `<th>` carries `aria-sort`) are an explained
+  allowlist.
 - **DataTable** (`ui/DataTable.svelte`) — auto-rendered `<th>` get
   `scope="col"`. A page that passes its own `{#snippet header()}` owns
   adding `scope` to its `<th>`s. The `.grid-container` scroller is a

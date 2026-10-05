@@ -159,6 +159,7 @@
 				type="button"
 				class="filter-chip"
 				class:active={activeFilter === f.key}
+				aria-pressed={activeFilter === f.key}
 				onclick={() => setFilter(f.key)}>{m(f.labelKey)}</button
 			>
 		{/each}

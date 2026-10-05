@@ -93,6 +93,11 @@
 				href={hrefFor(entry)}
 				class="nav-item"
 				class:active={isEntryActive(entry, pathname)}
+				aria-current={isEntryActive(entry, pathname)
+					? entry.kind === 'link'
+						? 'page'
+						: 'true'
+					: undefined}
 				title={collapsed ? m(entry.labelKey) : ''}
 			>
 				<span class="nav-icon">

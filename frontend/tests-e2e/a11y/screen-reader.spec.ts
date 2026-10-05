@@ -40,6 +40,20 @@ test.describe('screen-reader navigability — core flow', () => {
 		await expect(page.getByRole('heading', { level: 1 })).toHaveCount(1);
 	});
 
+	test('the sidebar tells assistive tech which page is current (1.3.1 / 4.1.2)', async ({
+		page
+	}) => {
+		// The highlighted nav item was colour alone: nothing told a screen
+		// reader which link was "you are here".
+		await page.goto('/payments');
+		const primary = page.getByRole('navigation', { name: 'Primary' });
+		await expect(primary).toBeVisible();
+		const current = primary.locator('[aria-current]');
+		await expect(current).toHaveCount(1);
+		await expect(current).toHaveAttribute('aria-current', 'page');
+		await expect(current).toHaveAttribute('href', /\/payments$/);
+	});
+
 	test('no element uses a positive tabindex (2.4.3)', async ({ page }) => {
 		for (const path of ['/', '/invoices', '/vendors', '/payments']) {
 			await page.goto(path);
