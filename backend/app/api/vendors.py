@@ -1523,7 +1523,12 @@ async def sync_vendors_from_erp_endpoint(
     vendor_dicts = [dataclasses.asdict(v) for v in erp_vendors]
 
     result = await sync_vendors_from_erp(
-        db, org_id, vendor_dicts, entity_id=entity_id, actor_id=user.id
+        db,
+        org_id,
+        vendor_dicts,
+        entity_id=entity_id,
+        actor_id=user.id,
+        org_settings=org.settings,
     )
     await db.commit()
 

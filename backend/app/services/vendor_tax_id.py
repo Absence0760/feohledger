@@ -9,8 +9,8 @@ override, an approved change request, ERP sync) and only the change-request
 approval voided it; this function is now how all of them write the field.
 
 Re-screening is deliberately NOT done here: it needs the org's sanctions config,
-an actor and a savepoint, and the ERP sync has none of the first two. Callers
-that re-key on a person's say-so re-screen themselves when this returns True
+an actor and a savepoint, and the ERP sync batches its screens after its single
+flush. Every caller re-screens itself when this returns True
 (`vendor_screening.screen_best_effort`).
 """
 

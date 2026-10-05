@@ -302,10 +302,12 @@ async def verify_vendor_tin(
 
     # An explicit tax_id in the request updates the stored TIN and validates
     # the new value; otherwise validate whatever is already on the row.
-    tax_id_changed = body.tax_id is not None and rekey_tax_id(vendor, body.tax_id)
-    tin = vendor.tax_id
+    # Refuse an empty TIN BEFORE the row moves (same §29 rule as above), rather
+    # than re-keying to "" and relying on the session rollback to undo it.
+    tin = body.tax_id if body.tax_id is not None else vendor.tax_id
     if not tin:
         raise HTTPException(status_code=400, detail="Vendor has no TIN on file")
+    tax_id_changed = rekey_tax_id(vendor, tin)
     result = await adapter.validate(
         tin=tin,
         legal_name=vendor.name,
