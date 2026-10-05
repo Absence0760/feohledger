@@ -390,21 +390,19 @@ async def approve_invoice(
     if approval_config.get("approver_strategy") == "chain" and instance:
         # Lock the workflow instance row to prevent concurrent approval races
         from app.models.workflow import WorkflowInstance
-        from app.services.approval_chain import init_chain_for_invoice
+        from app.services.approval_chain import ensure_chain_routed
 
         locked_result = await db.execute(
             select(WorkflowInstance).where(WorkflowInstance.id == instance.id).with_for_update()
         )
         instance = locked_result.scalar_one()
 
-        # Initialize chain state on first approval if not yet initialized
-        # `get_chain_progress` owns the read (and the "a stored `null` means
-        # no chain" coercion) — see `approval_chain.chain_state_of`.
-        # (the escalation sweep may already have done so, with the same routing
-        # — `init_chain_for_invoice` is the one place a chain's levels are
-        # resolved). No applicable level → treat as single-level, fall through.
-        if not get_chain_progress(instance):
-            init_chain_for_invoice(instance, invoice, approval_config, org_settings=org_settings)
+        # Initialize chain state on first approval if not yet initialized — or,
+        # when the escalation sweep initialised it and nobody has approved yet,
+        # re-route it against the CORRECTED invoice: routing is decided here, on
+        # the post-correction figures (`approval_chain.ensure_chain_routed`). No
+        # applicable level → treat as single-level, fall through.
+        ensure_chain_routed(instance, invoice, approval_config, org_settings=org_settings)
 
         # The level index this approval is being recorded against — read BEFORE
         # advancing (advance_approval_chain bumps current_level once the level

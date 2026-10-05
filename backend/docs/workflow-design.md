@@ -314,9 +314,23 @@ snapshot's approval strategy is `chain` and whose invoice is
 routing), clocking level 0 from when the invoice entered review — the open
 `approval` step's `created_at`, else the instance's. The chain is only persisted
 if an escalation actually fires; otherwise the transaction rolls back and the
-lazy path is untouched. A chain the sweep initialises is routed on the invoice
-as it stood then — the same freeze a chain initialised by a level-0 approval
-already has for every later level.
+lazy path is untouched.
+
+Routing is still decided at the **first approval**, on the post-correction
+invoice. A sweep-initialised chain carries `routing` (the indices of the
+configured levels it was built from), and while no level has an approval
+recorded, `approval_chain.ensure_chain_routed` (called by `approve_invoice`
+after corrections) re-routes it if the corrected amount or coding now selects
+different levels — an amount corrected up into the CFO band picks up the CFO
+level. Levels in both routings keep their escalated approvers and history, and
+level 0 keeps its clock; if no level applies any more the chain is dropped and
+the approval is single-level. Once any approval is recorded the routing is
+frozen, as it always was, and a chain without `routing` (hand-built / legacy) is
+never rewritten.
+
+An `all` level that *configures* an approver who is implicated in a particular
+invoice still cannot clear unless an eligible escalation substitutes them — see
+`docs/known-issues.md`.
 
 ### Segregation of Duties
 

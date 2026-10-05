@@ -577,6 +577,7 @@ def init_chain_state(
     applicable_levels: list[dict],
     *,
     entered_at: datetime | None = None,
+    routing: list[int] | None = None,
 ) -> None:
     """Initialize the approval chain state on a workflow instance.
 
@@ -586,6 +587,10 @@ def init_chain_state(
     right for the first approval initialising the chain; the escalation sweep
     passes the time the invoice actually entered review, because that is how
     long level 0 has really been waiting.
+
+    ``routing`` records which entries of the configured ``approval_chain`` the
+    levels came from (see :func:`ensure_chain_routed`). A chain built without it
+    (by hand, or before it existed) is never re-routed.
     """
     now_iso = (entered_at or datetime.now(UTC)).isoformat()
     levels_state = []
@@ -610,10 +615,13 @@ def init_chain_state(
         )
 
     state = dict(instance.state_data or {})
-    state[CHAIN_STATE_KEY] = {
+    chain_state: dict = {
         "levels": levels_state,
         "current_level": 0,
     }
+    if routing is not None:
+        chain_state["routing"] = list(routing)
+    state[CHAIN_STATE_KEY] = chain_state
     instance.state_data = state
 
 
@@ -647,15 +655,92 @@ def init_chain_for_invoice(
 
     Returns False, writing nothing, when no level applies.
     """
+    applicable, routing = _route_chain(invoice, approval_config, org_settings=org_settings)
+    if not applicable:
+        return False
+    init_chain_state(instance, applicable, entered_at=entered_at, routing=routing)
+    return True
+
+
+def _route_chain(
+    invoice, approval_config: dict, *, org_settings: dict | None
+) -> tuple[list[dict], list[int]]:
+    """The applicable level configs for ``invoice`` and their indices in the
+    configured ``approval_chain``."""
+    configured = approval_config.get("approval_chain", []) or []
     applicable = resolve_applicable_levels(
-        approval_config.get("approval_chain", []),
+        configured,
         reporting_gate_amount(invoice, org_settings=org_settings),
         invoice_attrs=invoice_routing_attrs(invoice),
     )
+    routing = [i for i, cfg in enumerate(configured) if any(cfg is a for a in applicable)]
+    return applicable, routing
+
+
+def ensure_chain_routed(
+    instance: WorkflowInstance,
+    invoice,
+    approval_config: dict,
+    *,
+    org_settings: dict | None,
+) -> None:
+    """Make the chain on ``instance`` the one ``invoice`` routes to right now.
+
+    Called by ``review.approve_invoice`` after the reviewer's corrections are
+    applied and before the approval is recorded.
+
+    * **No chain yet** — initialise it (:func:`init_chain_for_invoice`).
+    * **A chain nobody has approved** — re-route it against the invoice as it
+      now stands. Such a chain exists only because the escalation sweep
+      initialised it to escalate level 0, from the invoice as it was THEN. The
+      first approval is where routing has always been decided — on the
+      post-correction amount and coding — so an amount corrected up into a
+      higher band must still pick up that band's level rather than clear on
+      the sweep's stale routing. Levels present in both routings keep their
+      state (escalated approvers, escalation history); level 0 keeps the clock
+      it has been running since the invoice entered review. If no level applies
+      any more, the chain is dropped and the approval proceeds single-level, as
+      it would have without the sweep.
+    * **A chain with any approval recorded** — left alone. Routing is frozen
+      once someone has signed against it, as it always was.
+
+    Only a chain carrying ``routing`` (one :func:`init_chain_for_invoice` built)
+    is re-routed; anything else is left exactly as found.
+    """
+    chain = get_chain_progress(instance)
+    if not chain:
+        init_chain_for_invoice(instance, invoice, approval_config, org_settings=org_settings)
+        return
+    old_routing = chain.get("routing")
+    old_levels = chain.get("levels") or []
+    if old_routing is None or any(lvl.get("approvals") for lvl in old_levels):
+        return
+
+    applicable, routing = _route_chain(invoice, approval_config, org_settings=org_settings)
+    if routing == old_routing:
+        return
+
+    entered_raw = old_levels[0].get("entered_at") if old_levels else None
+    try:
+        entered_at = datetime.fromisoformat(entered_raw) if entered_raw else None
+    except ValueError:
+        entered_at = None
+
+    state = copy.deepcopy(instance.state_data or {})
+    clear_chain_state(state)
+    instance.state_data = state
     if not applicable:
-        return False
-    init_chain_state(instance, applicable, entered_at=entered_at)
-    return True
+        return
+    init_chain_state(instance, applicable, entered_at=entered_at, routing=routing)
+
+    carried = dict(zip(old_routing, old_levels, strict=False))
+    state = copy.deepcopy(instance.state_data)
+    for idx, level in zip(routing, chain_state_of(state)["levels"], strict=True):
+        previous = carried.get(idx)
+        if previous is not None:
+            level["approver_ids"] = list(previous.get("approver_ids") or [])
+            level["escalations"] = list(previous.get("escalations") or [])
+    instance.state_data = state
 
 
 def escalation_ineligible(invoice, approval_config: dict) -> set[str]:
