@@ -126,7 +126,7 @@ def _create_run_db(
     `.all()` of `(invoice_id, invoice_number)`. It then `db.add(run)`,
     `db.flush()`, `db.add(payment)` per item, and `db.commit()`. We
     capture every added object so a test can inspect the created run +
-    payment rows. Finally, AFTER the commit, (6) `_run_currencies` reads the
+    payment rows. Finally, AFTER the commit, (7) `_run_currencies` reads the
     one currency the run's invoices share → `.all()` of `(run_id, code)` — the
     handler names it on the response instead of stamping a `$` on the total.
 
@@ -191,9 +191,16 @@ def _create_run_db(
         ]
     )
 
+    # (6) `applied_credit_conflicts`, the last of `run_refusal_reasons`' reads:
+    # `.all()` of `(invoice_id, vendor_id, currency)` for the applied memos. The
+    # credit totals above are seeded as bare sums with no memo rows behind them,
+    # so no pairing exists to break.
+    memo_pair_sel = MagicMock()
+    memo_pair_sel.all = MagicMock(return_value=[])
+
     db = AsyncMock()
 
-    # (5) `_run_currencies`, after the commit. Resolved lazily off `db.added`
+    # (7) `_run_currencies`, after the commit. Resolved lazily off `db.added`
     # because the run's id is minted by the handler, not by this builder — a
     # fixed row would key against a run that doesn't exist and the currency
     # would read `None` for the wrong reason.
@@ -211,7 +218,7 @@ def _create_run_db(
     )
 
     db.execute = AsyncMock(
-        side_effect=[sel, credit_sel, block_sel, card_sel, live_sel, currency_sel]
+        side_effect=[sel, credit_sel, block_sel, card_sel, live_sel, memo_pair_sel, currency_sel]
     )
     db.commit = AsyncMock()
     db.flush = AsyncMock()
@@ -1014,6 +1021,12 @@ def _execute_db(run, payments, invoice_by_id, vendor_by_invoice=None, completing
             card_claim_scalars.all = MagicMock(return_value=[])
             card_claim_res.scalars = MagicMock(return_value=card_claim_scalars)
             per_pay_results.append(card_claim_res)
+            # `applied_credit_integrity.applied_credit_conflicts` — the applied
+            # memos' vendor/currency pairing, re-checked before pricing
+            # (decisions §214). No applied memo here, so no conflict.
+            memo_pair_res = MagicMock()
+            memo_pair_res.all = MagicMock(return_value=[])
+            per_pay_results.append(memo_pair_res)
             # `_execute_single_payment` re-derives the invoice's net payable
             # (invoice amount − applied credit memos) immediately before the
             # adapter call, so a credit recorded after the run was built can't

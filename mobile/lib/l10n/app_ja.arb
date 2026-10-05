@@ -243,6 +243,7 @@
   "payQueueBlockedFraudFlag": "不正フラグ — 未解決",
   "payQueueBlockedLineTotalMismatch": "明細合計が一致しません — 未解決",
   "payQueueBlockedPaymentReconciliation": "過去の支払いが未照合 — 処理中の可能性があります",
+  "payQueueBlockedAppliedCreditMismatch": "適用済みのクレジットメモがこの請求書の仕入先または通貨と一致しなくなりました — 先に請求書を修正してください",
   "payQueueBlockedFullyCredited": "クレジットメモで全額相殺済み — 支払額はありません",
   "payQueueBlockedLiveVirtualCard": "有効なバーチャルカードがこの請求書を押さえています — カードで支払ってください",
   "payQueueBlockedGeneric": "未解決の例外が支払いをブロックしています",

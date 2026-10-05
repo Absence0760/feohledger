@@ -431,7 +431,7 @@ Used by 3-way matching. `admin` / `ap_manager` / `ap_clerk`.
 | `POST` | `/api/credit-memos`                | admin, ap_manager | Create a credit memo. With no `invoice_id` it lands `open`; with one it is applied on the spot and runs the same guards as `/apply` |
 | `PATCH` | `/api/credit-memos/{id}`          | admin, ap_manager | Correct an `open`, never-applied memo — see § Editing a memo. 409 on anything else |
 | `POST` | `/api/credit-memos/{id}/apply`     | admin, ap_manager | Apply an `open` credit memo against a payable |
-| `POST` | `/api/credit-memos/{id}/void`      | admin, ap_manager | Void an `open` memo (409 once `applied` — applied memos are immutable for audit) |
+| `POST` | `/api/credit-memos/{id}/void`      | admin, ap_manager | Void an `open` memo (409 once `applied` — applied memos are immutable for audit — and 409 on an already-`void` memo, so a retried void never writes a second `credit_memo.voided` row) |
 
 ### Search, sort and the chip counts
 
@@ -518,6 +518,23 @@ the memo itself — see § Editing a memo) and then enforce, in order, five 409s
 4. **No over-application** — the sum of `applied` memos on an invoice may never
    exceed the invoice amount (a credit past the balance would mint a negative
    payable).
+
+**The guards keep holding after the apply.** An applied memo can never be
+undone, but the invoice under it stays editable until approval. So
+`PATCH /api/invoices/{id}` and approve-with-corrections
+(`POST /api/invoices/{id}/approve` with a body) refuse with **409** any edit
+that would break a pairing the apply checked: re-saving the vendor so
+`vendor_id` re-links elsewhere (or clears), changing the currency away from the
+memos' (blanking it included — a blank invoice currency is admitted only on a
+legacy row that never had one), or lowering the amount below the credits already applied (down to
+exactly that total is allowed). Without this, vendor A's credit reduced vendor
+B's payment, a USD credit was netted digit-for-digit off a EUR payable, and a
+lowered amount consumed the excess credit against nothing. One owner for both
+paths: `services/applied_credit_integrity.refuse_edit_stranding_applied_credits`
+(`docs/decisions.md` §214). Re-extraction rewrites those fields in the
+background with no request to refuse, so the payment paths re-check the vendor
+and currency pairing as well. An invoice that fails it is refused as
+`applied_credit_mismatch` (`backend/docs/payments.md`).
 
 ### Eligible invoices — the pickers offer exactly what the guards accept
 

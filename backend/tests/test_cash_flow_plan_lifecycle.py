@@ -1513,6 +1513,7 @@ async def test_a_payment_blocking_exception_refuses_the_whole_plan_run(realdb):
 
 async def _seed_applied_credit_memo(session, org_id, entity_id, invoice_id, *, amount, number):
     from app.models.credit_memo import CreditMemo
+    from app.models.invoice import Invoice
     from app.models.vendor import Vendor
 
     vendor = Vendor(
@@ -1523,6 +1524,11 @@ async def _seed_applied_credit_memo(session, org_id, entity_id, invoice_id, *, a
     )
     session.add(vendor)
     await session.flush()
+    # Linked to the memo's vendor, as the apply guard requires and the payment
+    # paths re-check (`applied_credit_mismatch`, decisions §214).
+    await session.execute(
+        update(Invoice).where(Invoice.id == invoice_id).values(vendor_id=vendor.id)
+    )
     session.add(
         CreditMemo(
             id=uuid.uuid4(),

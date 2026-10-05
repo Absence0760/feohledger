@@ -243,6 +243,7 @@
   "payQueueBlockedFraudFlag": "Alerta de fraude — por resolver",
   "payQueueBlockedLineTotalMismatch": "Os totais das linhas não conferem — por resolver",
   "payQueueBlockedPaymentReconciliation": "Pagamento anterior não conciliado — pode ainda estar em trânsito",
+  "payQueueBlockedAppliedCreditMismatch": "Uma nota de crédito aplicada não corresponde mais ao fornecedor ou à moeda desta fatura — corrija a fatura primeiro",
   "payQueueBlockedFullyCredited": "Totalmente coberta por notas de crédito — nada a pagar",
   "payQueueBlockedLiveVirtualCard": "Um cartão virtual ativo cobre esta fatura — pague-a com cartão",
   "payQueueBlockedGeneric": "Uma exceção por resolver bloqueia o pagamento",

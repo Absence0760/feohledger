@@ -71,7 +71,7 @@ section carried its own `decisions.md` § reference, so nothing was lost by
 deleting it; that cross-reference is what makes the pruning safe, and writing
 one is what earns a future entry the right to be deleted.
 
-**62 open: 47 (c) · 9 (a) · 6 (b)** — re-derived from the file, never carried
+**63 open: 48 (c) · 9 (a) · 6 (b)** — re-derived from the file, never carried
 forward. The section heading is authoritative; where an entry also carries a
 `(c)`/`(a)`/`(b)` marker, the two agree.
 `grep -c '^- \[ \]' docs/followups.md`.
@@ -1209,6 +1209,25 @@ or is a sibling of a fix that needs its own pass.
       requisition conversion. It is a migration, so land it outside a parallel
       batch.
 
+### Surfaced by the payment-path bug hunt (2026-10-05, decisions §214)
+
+- [ ] **(c) Payment dispatch holds row locks across the processor call with no `lock_timeout`.**
+      `_execute_single_payment` locks the payment row (as it always has) and now
+      also the invoice row (`_lock_payment_invoice`, `FOR NO KEY UPDATE`, §214
+      batch). It holds both until the per-payment commit, which comes after
+      `adapter.create_payment` returns, and the void does the same across
+      `adapter.void_payment`. Every locked invoice writer (send-to-erp, approve,
+      `PATCH`, `payment_erp_sync`, `POST /api/payments`) therefore waits out a
+      slow processor. Nothing in `app/` sets `lock_timeout` or
+      `statement_timeout`, so the wait is unbounded. A deadlock or
+      lock-timeout error raised inside the loop is also caught by
+      `_dispatch_run_payments`' broad `except` and recorded as `failed` on an
+      aborted session. That is pre-existing behaviour, but this lock adds a way
+      to reach it. **Durable fix:** set a `SET LOCAL lock_timeout` on the
+      dispatch and void transactions, and treat a `LockNotAvailable` before the
+      adapter call as a named, retry-safe refusal (`invoice_locked`) rather than
+      `unexpected_error`. **Trigger:** the first report of a request stalled
+      behind a payment run, or the next change to `_dispatch_run_payments`.
 
 ## (a) Blocked on external credentials, accounts, or hardware
 

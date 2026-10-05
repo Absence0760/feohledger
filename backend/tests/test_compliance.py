@@ -710,6 +710,9 @@ async def test_execute_payment_run_refuses_sanctions_matched_vendor_without_call
     # Model that SUM: no credits applied.
     credit_res = MagicMock()
     credit_res.scalar_one = MagicMock(return_value=Decimal("0"))
+    # `applied_credit_conflicts` (decisions §214): no applied memo, no conflict.
+    memo_pair_res = MagicMock()
+    memo_pair_res.all = MagicMock(return_value=[])
 
     db = AsyncMock()
     db.execute = AsyncMock(
@@ -719,6 +722,7 @@ async def test_execute_payment_run_refuses_sanctions_matched_vendor_without_call
             inv_res,
             blocking_res,
             card_claim_res,
+            memo_pair_res,
             credit_res,
             bank_res,
             vendor_lookup_res,
@@ -861,6 +865,9 @@ async def test_execute_payment_run_holds_virtual_card_for_null_vendor_invoice():
     # Model that SUM: no credits applied.
     credit_res = MagicMock()
     credit_res.scalar_one = MagicMock(return_value=Decimal("0"))
+    # `applied_credit_conflicts` (decisions §214): no applied memo, no conflict.
+    memo_pair_res = MagicMock()
+    memo_pair_res.all = MagicMock(return_value=[])
 
     db = AsyncMock()
     # Five queries fire before the hold: run lookup, payments fan-out, invoice
@@ -874,6 +881,7 @@ async def test_execute_payment_run_holds_virtual_card_for_null_vendor_invoice():
             pay_res,
             inv_res,
             blocking_res,
+            memo_pair_res,
             credit_res,
             no_existing_exception,
             rollup_res,

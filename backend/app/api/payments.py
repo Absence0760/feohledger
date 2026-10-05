@@ -51,6 +51,10 @@ from app.schemas.payment import (
     PaymentRunListResponse,
     PaymentRunResponse,
 )
+from app.services.applied_credit_integrity import (
+    applied_credit_conflict_exists,
+    applied_credit_conflicts,
+)
 from app.services.audit_access import log_access
 from app.services.card_issuance import card_cancel_disposition
 from app.services.currency_conversion import (
@@ -541,6 +545,7 @@ def _queue_selectable_where() -> list:
     return [
         *_queue_base_where(),
         not_(_queue_blocking_exists()),
+        not_(applied_credit_conflict_exists()),
         not_(_queue_fully_credited()),
         not_(_queue_live_card_exists()),
     ]
@@ -560,7 +565,11 @@ def _queue_blocked_on_every_rail():
     and the per-row flag flips to blocked. Derived from the same constant, so the
     count and the flag cannot disagree.
     """
-    clauses = [_queue_blocking_exists(), _queue_fully_credited()]
+    clauses = [
+        _queue_blocking_exists(),
+        applied_credit_conflict_exists(),
+        _queue_fully_credited(),
+    ]
     if CARD_CLAIM_ONLY_METHOD is None:
         clauses.append(_queue_live_card_exists())
     return or_(*clauses)
@@ -1470,7 +1479,8 @@ async def void_payment(
     # and commits; the second blocks on the lock, then re-reads the now-
     # terminal status and 409s before touching the adapter. The Invoice is
     # fetched separately — Postgres can't `FOR UPDATE` the nullable side of
-    # an outer join, and we don't need to lock the invoice here.
+    # an outer join — and locked in its own right, because this path
+    # transitions it (`_lock_payment_invoice`).
     payment = await _get_scoped_payment(db, payment_id, entity_id, for_update=True)
 
     if payment.status in ("voided", "cancelled"):
@@ -1481,9 +1491,7 @@ async def void_payment(
             detail="Cannot void a failed payment (it never settled)",
         )
 
-    invoice = (
-        await db.execute(select(Invoice).where(Invoice.id == payment.invoice_id))
-    ).scalar_one_or_none()
+    invoice = await _lock_payment_invoice(db, payment)
 
     # Capture the status BEFORE mutating so the audit row records the real
     # prior state (any of completed / submitted / processing / pending).
@@ -1684,6 +1692,49 @@ async def retry_void_card_cancel(
     resp.void_card_outcome = card_outcome
     resp.void_card_disposition = disposition
     return resp
+
+
+async def _lock_payment_invoice(db: AsyncSession, payment: Payment) -> Invoice | None:
+    """The payment's invoice, row-locked and re-read, for a path that will
+    decide on its status and then transition it.
+
+    Every invoice transition takes the invoice row lock
+    (`workflow_engine.get_invoice_for_update`) — except, until this, the three
+    money paths that move an invoice off a PAYMENT: dispatch
+    (`_execute_single_payment`, `→ payment_scheduled`), void (`→ approved`) and
+    settlement acceptance (`→ paid`). Each read the invoice unlocked, checked
+    its status, and wrote the transition later — across a processor call, on
+    the dispatch leg. A concurrent locked writer committing in that window
+    (`send-to-erp` walking `approved → sending_to_erp`, `payment_erp_sync`
+    walking `payment_scheduled → paid`) was then overwritten by a transition
+    `validate_transition` had approved against the stale status: an ERP push
+    erased under a payment, or an audit row naming the wrong `from`. The lock
+    makes the concurrent writer wait and then see the new status — and refuse,
+    where the state machine says to.
+
+    `populate_existing` because the session may already hold this invoice
+    (`/compliance/release` loads it first, and `_dispatch_run_payments` keeps
+    one session across many payments with `expire_on_commit=False`): without
+    it the locked SELECT would hand back the cached row and its stale status.
+    Lock order is payment, then invoice — every caller already holds the
+    payment's lock, and no path takes them the other way round.
+
+    `FOR NO KEY UPDATE` (`key_share=True`), not `FOR UPDATE`: it still conflicts
+    with every status writer (`get_invoice_for_update`'s `FOR UPDATE` and plain
+    `UPDATE`s), but not with the `FOR KEY SHARE` lock Postgres takes on the
+    invoice whenever another transaction inserts a row referencing it — a
+    racing `virtual_cards` insert, an exception, an audit row. The dispatch
+    holds this lock across a processor call; a full `FOR UPDATE` would stall
+    every such insert for that long, and deadlock one made from inside the call.
+    """
+    return (
+        await db.execute(
+            select(Invoice)
+            .where(Invoice.id == payment.invoice_id)
+            .with_for_update(key_share=True)
+            .execution_options(populate_existing=True)
+        )
+    ).scalar_one_or_none()
 
 
 async def _recompute_parent_run_status(db: AsyncSession, payment: Payment) -> None:
@@ -1998,9 +2049,7 @@ async def accept_settlement(
             ),
         )
 
-    invoice = (
-        await db.execute(select(Invoice).where(Invoice.id == payment.invoice_id))
-    ).scalar_one_or_none()
+    invoice = await _lock_payment_invoice(db, payment)
 
     coverage = settlement_coverage(
         settled_amount=payment.settled_amount,
@@ -2161,6 +2210,18 @@ async def create_payment(
     # amount AND 422ing the correct net figure if a caller tried to submit it.
     # `net_payable_amount` is the same helper the run builder uses, so the two
     # money paths can't disagree about what an invoice is worth.
+    # An applied credit whose vendor or currency no longer pairs with the
+    # invoice (a background re-extraction rewrote it) makes the net below
+    # meaningless — the run builder's `applied_credit_mismatch` refusal, here.
+    if invoice.id in await applied_credit_conflicts(db, [invoice]):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Invoice carries an applied credit memo whose vendor or currency no longer "
+                "matches the invoice — correct the invoice so it matches the credit before "
+                "paying it"
+            ),
+        )
     net_amount = await net_payable_amount(db, invoice)
     if net_amount <= 0:
         raise HTTPException(
@@ -2887,9 +2948,11 @@ async def _execute_single_payment(
     problem with payment N (including this raising) must only ever affect
     payment N, never roll back payments the loop already committed earlier.
     """
-    # Resolve invoice + vendor for the payload
-    inv_result = await db.execute(select(Invoice).where(Invoice.id == payment.invoice_id))
-    invoice = inv_result.scalar_one_or_none()
+    # Resolve invoice + vendor for the payload. Locked: every gate below decides
+    # on the invoice's status and the `→ payment_scheduled` transition lands
+    # after the processor call, so the status must not move in between
+    # (`_lock_payment_invoice`). Held until the caller's per-payment commit.
+    invoice = await _lock_payment_invoice(db, payment)
 
     if invoice is None:
         # No invoice behind this payment. Every gate below — the credit-memo
@@ -2983,6 +3046,17 @@ async def _execute_single_payment(
     # it through the full gate set. This mirrors `/retry-failed`'s
     # `net_amount_changed` skip exactly, and is a refusal made BEFORE the
     # adapter is called, hence retry-safe (`_RETRY_SAFE_FAILURE_PREFIXES`).
+    # The applied credits must still pair with the invoice: a re-extraction
+    # can rewrite its vendor or currency after booking, and the net below would
+    # then credit the wrong supplier or subtract across currencies. Refused
+    # BEFORE the adapter call, so retry-safe (decisions §214).
+    _credit_conflict = (await applied_credit_conflicts(db, [invoice])).get(invoice.id)
+    if _credit_conflict is not None:
+        payment.status = "failed"
+        payment.failure_reason = f"applied_credit_mismatch:{_credit_conflict}"
+        payment.completed_at = now
+        return
+
     if invoice is not None:
         from app.services.payment_runs import net_payable_amount as _net_payable_amount
 
@@ -3861,6 +3935,8 @@ async def retry_failed_payments(
       means the failed row's `amount` is no longer what the vendor is owed
       (`payment_runs.net_payable_amount`). The amount is never silently
       adjusted — a fresh run re-derives it through the full gate set;
+    - `applied_credit_mismatch` — a credit memo applied to the invoice no
+      longer pairs with its vendor or currency (decisions §214);
     - `invoice_has_live_payment` — the invoice has since acquired another live
       payment. The savepoint around each insert is the backstop for the same
       conflict arriving as a race.
@@ -3945,6 +4021,7 @@ async def retry_failed_payments(
     blocked_ids: set[uuid.UUID] = set()
     card_claimed_ids: set[uuid.UUID] = set()
     occupied_ids: set[uuid.UUID] = set()
+    credit_conflict_ids: set[uuid.UUID] = set()
     if invoice_ids:
         invoices = {
             inv.id: inv
@@ -3956,6 +4033,7 @@ async def retry_failed_payments(
             iid for iid, inv in invoices.items() if inv.status.value in PAYABLE_INVOICE_STATUSES
         }
         blocked_ids = await blocked_invoice_ids(db, invoice_ids)
+        credit_conflict_ids = set(await applied_credit_conflicts(db, invoices.values()))
         # A live virtual card minted since the run was built claims the invoice
         # on a rail this retry isn't using. Same shared gate the run builder and
         # the standalone endpoint run — a retry dispatches real money days or
@@ -3995,6 +4073,11 @@ async def retry_failed_payments(
             continue
         if payment.invoice_id in occupied_ids:
             skipped.append("invoice_has_live_payment")
+            continue
+        if payment.invoice_id in credit_conflict_ids:
+            # Dispatch would refuse it the same way; booking a doomed attempt
+            # row first would only add noise to the run (decisions §214).
+            skipped.append("applied_credit_mismatch")
             continue
         # What the invoice is worth NOW. A credit memo applied while this sat
         # `failed` (credit_memos.py gates on neither invoice status nor an

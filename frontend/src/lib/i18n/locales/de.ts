@@ -475,6 +475,7 @@ export const messages = {
 	'payments.queue.blocked.fraudFlag': 'Betrugsverdacht — ungeklärt',
 	'payments.queue.blocked.lineTotalMismatch': 'Positionssummen stimmen nicht — ungeklärt',
 	'payments.queue.blocked.paymentReconciliation': 'Frühere Zahlung nicht abgestimmt — möglicherweise noch unterwegs',
+	'payments.queue.blocked.appliedCreditMismatch': 'Eine verrechnete Gutschrift passt nicht mehr zu Lieferant oder Währung dieser Rechnung — Rechnung zuerst korrigieren',
 	'payments.queue.blocked.fullyCredited': 'Vollständig durch Gutschriften gedeckt — nichts zu zahlen',
 	'payments.queue.blocked.liveVirtualCard': 'Eine aktive virtuelle Karte beansprucht diese Rechnung — per Karte bezahlen',
 	'payments.queue.blocked.generic': 'Ungeklärte Ausnahme blockiert die Zahlung',

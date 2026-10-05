@@ -922,6 +922,12 @@ async def void_credit_memo(
         raise HTTPException(
             status_code=409, detail="Applied credit memos cannot be voided (immutable for audit)"
         )
+    # A repeat void (double-click, client retry, a second operator) used to
+    # succeed and stage a second `credit_memo.voided` row, so the append-only
+    # trail recorded two rescissions of one memo. Same answer as
+    # `POST /api/payments/{id}/void` gives an already-voided payment.
+    if memo.status == "void":
+        raise HTTPException(status_code=409, detail="Credit memo is already void")
 
     memo.status = "void"
     await dispatch_audit(

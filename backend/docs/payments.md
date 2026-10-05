@@ -421,6 +421,20 @@ retry-safe for the same reason (no order exists at the processor):
   `workflow_engine.VALID_TRANSITIONS` rather than restated as a literal, so it
   can never again name a status the state machine refuses. It is
   `PAYABLE_INVOICE_STATUSES` minus `payment_scheduled` (already there).
+- **The check and the transition happen under the invoice's row lock.** The
+  re-check runs before the processor call and the `→ payment_scheduled`
+  transition after it, so the invoice was still free to move in between: it
+  was read unlocked, and a `send-to-erp` committing while the processor held
+  the order was then overwritten by a transition validated against the stale
+  `approved`. `_execute_single_payment` now reads the invoice through
+  `_lock_payment_invoice` (`FOR NO KEY UPDATE`, `populate_existing`) and holds
+  it to the per-payment commit — `NO KEY` so the inserts of rows that reference
+  the invoice (a racing virtual card, an exception) are not stalled behind the
+  processor call — so a concurrent ERP push waits, sees
+  `payment_scheduled`, and is refused by the state machine. The void
+  (`→ approved`) and `/settlement/accept` (`→ paid`) paths, which also decide on
+  the invoice's status and transition it, take the same lock — the void across
+  its own processor call. Lock order is payment, then invoice, on all three.
 
 Pinned by `tests/test_payment_run_invoice_payability.py`.
 
@@ -530,6 +544,9 @@ re-sent.
   vendor is owed. The retry re-derives `net_payable_amount` and **skips**; the amount is never
   silently adjusted, so the operator builds a fresh run through the full gate
   set.
+- `applied_credit_mismatch` — a credit memo applied to the invoice no longer
+  matches its vendor or currency (decisions §214). Dispatch would refuse it the
+  same way, so no doomed attempt row is booked.
 - `invoice_has_live_payment` — the invoice has since acquired another live
   payment.
 - `invoice_has_live_card` — a virtual card was minted against the invoice
@@ -1983,6 +2000,7 @@ types already did.
 | Refusal | Reason code | On the queue |
 |---------|-------------|--------------|
 | an unresolved (`open`/`escalated`) payment-blocking exception | the exception **type** (`duplicate` / `fraud_flag` / `line_total_mismatch` / `payment_reconciliation`) | `blocked: true` |
+| an applied credit memo's vendor or currency no longer matches the invoice (a background re-extraction rewrote it after the apply) — netting it would credit the wrong supplier or subtract across currencies (`services/applied_credit_integrity`, decisions §214). Checked before `fully_credited`, whose net is computed from that same credit. `POST /api/payments` refuses it with a 409, and dispatch fails a payment booked before the change as `applied_credit_mismatch:<vendor\|currency>`, before the processor call and retry-safe. `/retry-failed` skips it. | `applied_credit_mismatch` | `blocked: true` |
 | applied credit memos cover the whole invoice — a `$0` payment a real rail rejects as `failed` | `fully_credited` | `blocked: true` |
 | a live virtual card already claims the invoice (`POST /api/cards/generate` mints one with no `Payment` row behind it) | `live_virtual_card` | `blocked: false`, `required_method: "virtual_card"` |
 | a live payment already claims the invoice (`uq_payments_one_live_per_invoice`) | `live_payment` | the row is **excluded** — see below |
