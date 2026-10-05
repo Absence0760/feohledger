@@ -61,7 +61,7 @@
 	</header>
 
 	{#if err}<div class="error" role="alert">{err}</div>{/if}
-	{#if msg}<div class="message">{msg}</div>{/if}
+	<div role="status">{#if msg}<div class="message">{msg}</div>{/if}</div>
 
 	<section class="card">
 		<h2>{m('portal.notifications.cardTitle')}</h2>

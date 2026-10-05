@@ -63,7 +63,7 @@ test.describe('/payments cards pagination', () => {
 		const firstPage = page.waitForResponse(
 			(r) => r.url().includes('/api/cards?') && r.url().includes('page=1')
 		);
-		await page.getByRole('button', { name: 'Cards', exact: true }).click();
+		await page.getByRole('tab', { name: 'Cards', exact: true }).click();
 		await firstPage;
 
 		// Scoped to the cards table: the Cards tab also renders a rebates table

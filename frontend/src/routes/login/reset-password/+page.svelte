@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, tick } from 'svelte';
 	import { page } from '$app/stores';
 	import AuthCard from '$lib/components/auth/AuthCard.svelte';
 	import { api } from '$lib/api';
@@ -11,6 +11,7 @@
 	let error = $state('');
 	let submitting = $state(false);
 	let done = $state(false);
+	let successEl = $state<HTMLParagraphElement | null>(null);
 
 	onMount(() => {
 		token = $page.url.searchParams.get('token') ?? '';
@@ -46,6 +47,13 @@
 		try {
 			await api.post('/api/auth/reset-password', { token, new_password: newPassword });
 			done = true;
+			// The submit button had focus, and it has just been removed from the
+			// DOM along with the form — which drops focus to <body> and leaves a
+			// screen reader with nothing to say. Land it on the confirmation
+			// instead, the way /signup does: that is announced, and it puts
+			// keyboard users at the top of the new content (WCAG 2.4.3, 4.1.3).
+			await tick();
+			successEl?.focus();
 		} catch (err) {
 			// A reused/expired/bogus token surfaces as the backend's own opaque
 			// "Invalid or expired reset link." (they're indistinguishable by
@@ -68,7 +76,7 @@
 	{error}
 >
 	{#if done}
-		<p class="success">{m('auth.resetPassword.success')}</p>
+		<p class="success" tabindex="-1" bind:this={successEl}>{m('auth.resetPassword.success')}</p>
 		<a class="link-btn" href="/login">{m('auth.resetPassword.goToLogin')}</a>
 	{:else if token}
 		<form onsubmit={handleSubmit}>

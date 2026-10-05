@@ -101,7 +101,7 @@ and the manual audit is the tracked outstanding work.
 | 3.3.4 Error Prevention (Legal, Financial, Data) | AA | Supports | Money-moving actions (payment-run execute, void, bulk delete) use explicit armed-confirm; partial-success results are surfaced per-row. |
 | 3.3.7 Redundant Entry | AA | Partially Supports | **New in 2.2.** Multi-step flows (signup → verify, payment-run build) avoid re-asking for known data; a complete pass over every multi-step flow is part of the manual audit. |
 | 3.3.8 Accessible Authentication (Minimum) | AA | Partially Supports | **New in 2.2.** Login is email + password (paste-enabled, no cognitive-function test); password managers work. MFA via TOTP/email is supported. A confirmation that no step imposes a cognitive-function test without an alternative is part of the manual pass. |
-| 4.1.3 Status Messages | AA | Supports | Async status and toasts use `aria-live` regions so they're announced without moving focus. |
+| 4.1.3 Status Messages | AA | Supports | Async status and toasts use `aria-live` regions so they're announced without moving focus. Inline form feedback (save confirmations, request errors, connection-test results) sits in a `role="status"` / `role="alert"` region; a confirmation that replaces its form takes focus instead. Guarded statically by `src/lib/a11y/liveRegionAudit.test.ts` — the supplier portal's Company page shipped eight silent messages before it. |
 
 ## WCAG 2.2 — new success criteria summary
 

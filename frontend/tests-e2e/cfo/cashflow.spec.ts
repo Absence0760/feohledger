@@ -1,3 +1,4 @@
+import type { CashPosition } from '$lib/types/analytics';
 import { expect, signInAndWait, test } from '../fixtures/helpers';
 
 /**
@@ -38,8 +39,17 @@ test.describe('/cfo (admin)', () => {
 		const respPromise = page.waitForResponse(
 			(r) => r.url().includes('/api/analytics/cashflow_forecast') && r.url().includes('granularity=month')
 		);
-		await page.locator('.seg-btn', { hasText: 'month' }).click();
+		const month = page.getByRole('group', { name: 'Granularity' }).getByRole('button', {
+			name: 'month'
+		});
+		await expect(month).toHaveAttribute('aria-pressed', 'false');
+		await month.click();
 		await respPromise;
+		// The chosen value is exposed, not only painted (WCAG 4.1.2).
+		await expect(month).toHaveAttribute('aria-pressed', 'true');
+		await expect(
+			page.getByRole('group', { name: 'Granularity' }).getByRole('button', { pressed: true })
+		).toHaveCount(1);
 		await expect(page.locator('.chart-card h2', { hasText: 'Projected outflows (month)' })).toBeVisible();
 	});
 
@@ -66,6 +76,60 @@ test.describe('/cfo (admin)', () => {
 		expect(resp.status()).toBe(200);
 		// The running-balance table renders rows with opening/closing columns.
 		await expect(page.locator('.cf-table thead th', { hasText: 'Opening' })).toBeVisible();
+	});
+
+	test('a breaching period is named in text, not only coloured red (WCAG 1.4.1)', async ({
+		page
+	}) => {
+		// The real response, with its first period forced into breach: what is
+		// under test is how the table marks a breaching row, and whether the
+		// seeded tenant's curve happens to cross a threshold is not.
+		await page.route(
+			(url) => url.pathname === '/api/analytics/cash_position',
+			async (route) => {
+				const res = await route.fetch();
+				const body = (await res.json()) as CashPosition;
+				if (body.periods.length === 0) {
+					body.periods = [
+						{
+							period: '2026-01',
+							period_start: '2026-01-01',
+							period_end: '2026-01-31',
+							opening: '100.00',
+							outflow: '150.00',
+							inflow: '0.00',
+							closing: '-50.00',
+							below_threshold: false,
+							unconverted_count: 0
+						}
+					];
+				}
+				body.periods = body.periods.map((p, i) => ({ ...p, below_threshold: i === 0 }));
+				const first = body.periods[0];
+				body.breaches = [
+					{
+						period: first.period,
+						period_start: first.period_start,
+						period_end: first.period_end,
+						closing: first.closing,
+						shortfall: '1.00'
+					}
+				];
+				await route.fulfill({ response: res, json: body });
+			}
+		);
+		await page.goto('/cfo');
+
+		// The table scrolls inside a focusable region; it is announced by name,
+		// like every <DataTable>'s container, rather than as an anonymous stop.
+		const region = page.getByRole('region', { name: 'Cash position' });
+		await expect(region).toBeVisible({ timeout: 10_000 });
+
+		const rows = region.locator('tbody tr');
+		await expect(rows.first()).toHaveAttribute('data-breach', 'true');
+		await expect(rows.first()).toContainText('Below minimum');
+		// Only the breaching row says so.
+		await expect(region.getByText('Below minimum')).toHaveCount(1);
 	});
 
 	test('Export CSV triggers a download', async ({ page }) => {

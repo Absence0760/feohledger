@@ -94,7 +94,7 @@
 	</header>
 
 	{#if error}<div class="error" role="alert">{error}</div>{/if}
-	{#if message}<div class="message">{message}</div>{/if}
+	<div role="status">{#if message}<div class="message">{message}</div>{/if}</div>
 
 	{#if loading && !items.length}
 		<div class="loading">{m('portal.common.loading')}</div>

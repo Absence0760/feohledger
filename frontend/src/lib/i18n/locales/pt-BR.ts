@@ -1931,6 +1931,7 @@ export const messages = {
 	'cfo.position.colOpening': 'Abertura',
 	'cfo.position.colOutflow': 'Saída',
 	'cfo.position.colClosing': 'Fechamento',
+	'cfo.position.belowMinimum': 'Abaixo do mínimo',
 	'cfo.position.empty': 'Nenhuma saída projetada nesta janela.',
 
 	'cfoMetrics.heading': 'Métricas do CFO',

@@ -69,8 +69,7 @@ section carried its own `decisions.md` § reference, so nothing was lost by
 deleting it; that cross-reference is what makes the pruning safe, and writing
 one is what earns a future entry the right to be deleted.
 
-**54 open: 39 (c) · 9 (a) · 6 (b)** — re-derived from the file, never carried
-**55 open: 40 (c) · 9 (a) · 6 (b)** — re-derived from the file, never carried
+**59 open: 44 (c) · 9 (a) · 6 (b)** — re-derived from the file, never carried
 forward. The section heading is authoritative; where an entry also carries a
 `(c)`/`(a)`/`(b)` marker, the two agree.
 `grep -c '^- \[ \]' docs/followups.md`.
@@ -232,6 +231,25 @@ nobody re-reads outlives the thing it describes.
       the code silently — what is still missing is telling customers when they
       change.
       **Trigger:** before adding or changing any sub-processor.
+
+- [ ] **The legal pages' table scrollers are anonymous tab stops.** Every
+      `.table-scroll` wrapper under `src/routes/legal/` (19 across privacy,
+      cookies, sub-processors and the DPA) carries `tabindex="0"` so the
+      keyboard can pan a table too wide for a 320px viewport (WCAG 2.1.1) — but
+      no `role` and no name, so a screen reader announces an unnamed stop with
+      nothing to say what it holds (4.1.2). The app's own tables were fixed
+      2026-10-05: `<DataTable>` already named its container, and `/cfo`'s two
+      hand-rolled scrollers now do too, guarded by
+      `src/lib/a11y/tableScrollRegion.test.ts`, which excludes the legal tree
+      by path and says why.
+      **Durable fix:** `role="region"` plus an `aria-labelledby` pointing at the
+      heading each table sits under (most already carry an `id` for the
+      in-page anchors) or an `aria-label` where none does, then drop the
+      legal-tree exclusion from that test so it covers every page. It is held
+      here rather than done in the a11y sweep because naming a table is an edit
+      to the published legal text, which is English-only and reviewed as a
+      document (`docs/decisions.md` §174), not a UI-copy change.
+      **Trigger:** the next edit to any legal page, or a legal-text review.
 
 ### The pricing page and the billing code describe different products
 

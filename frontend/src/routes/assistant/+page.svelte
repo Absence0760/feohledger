@@ -272,6 +272,7 @@
 								type="button"
 								class="convo-item"
 								class:active={c.id === conversationId}
+								aria-current={c.id === conversationId ? 'true' : undefined}
 								onclick={() => openConversation(c.id)}
 								disabled={busy}
 							>

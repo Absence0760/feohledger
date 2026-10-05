@@ -65,6 +65,7 @@
 	} from '$lib/api/expenses';
 	import Badge from '$lib/components/ui/Badge.svelte';
 	import Modal from '$lib/components/ui/Modal.svelte';
+	import Tabs from '$lib/components/ui/Tabs.svelte';
 	import PolicyModal from '$lib/components/modals/PolicyModal.svelte';
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 	import SearchBox from '$lib/components/ui/SearchBox.svelte';
@@ -95,6 +96,16 @@
 	const canCreate = $derived(auth.hasAnyRole('admin', 'ap_manager', 'ap_clerk'));
 	// Policy CRUD + report/pre-approval REJECT = admin | ap_manager.
 	const canManagePolicies = $derived(auth.isManager);
+	// The shared `<Tabs>` (WAI-ARIA tablist). The bar used to be hand-rolled
+	// buttons whose selected state was a CSS class only — announced as five
+	// identical buttons, never which list was showing (WCAG 4.1.2).
+	const tabBar = $derived([
+		{ key: 'expenses', label: m('expenses.tab.expenses') },
+		{ key: 'reports', label: m('expenses.tab.reports') },
+		...(canManagePolicies ? [{ key: 'policies', label: m('expenses.tab.policies') }] : []),
+		{ key: 'preapprovals', label: m('expenses.tab.preapprovals') },
+		{ key: 'cards', label: m('expenses.tab.cards') }
+	]);
 	// Report APPROVE is admin | ap_manager | cfo — and above the org's
 	// `expense_approval.cfo_threshold` the backend demands cfo/admin, so the CFO
 	// must be able to see the button. `auth.isCfo` = admin|cfo, so the union with
@@ -1181,15 +1192,17 @@
 		{/if}
 	{/snippet}
 
-	<div class="tab-row">
-		<button class="tab" class:active={tab === 'expenses'} onclick={() => switchTab('expenses')}>{m('expenses.tab.expenses')}</button>
-		<button class="tab" class:active={tab === 'reports'} onclick={() => switchTab('reports')}>{m('expenses.tab.reports')}</button>
-		{#if canManagePolicies}
-			<button class="tab" class:active={tab === 'policies'} onclick={() => switchTab('policies')}>{m('expenses.tab.policies')}</button>
-		{/if}
-		<button class="tab" class:active={tab === 'preapprovals'} onclick={() => switchTab('preapprovals')}>{m('expenses.tab.preapprovals')}</button>
-		<button class="tab" class:active={tab === 'cards'} onclick={() => switchTab('cards')}>{m('expenses.tab.cards')}</button>
-	</div>
+	<Tabs
+		tabs={tabBar}
+		active={tab}
+		onchange={(key) => switchTab(key as Tab)}
+		ariaLabel={m('expenses.title')}
+		idPrefix="expenses"
+	/>
+
+	<!-- One panel for whichever tab is active, completing the pairing each tab's
+	     `aria-controls` names. Contents keep their old indentation on purpose. -->
+	<div id={`expenses-panel-${tab}`} role="tabpanel" aria-labelledby={`expenses-tab-${tab}`}>
 
 	{#if tab === 'expenses'}
 		<div class="kpi-row">
@@ -1692,6 +1705,7 @@
 			</div>
 		{/if}
 	{/if}
+	</div>
 </PageHeader>
 
 <!-- Bulk GL code bar (expenses tab only) -->
@@ -1834,35 +1848,6 @@
 {/if}
 
 <style>
-	.tab-row {
-		display: flex;
-		/* Wraps for the same reason as the shared `ui/Tabs.svelte` tab bar this
-		   is a local copy of — a nowrap row of tabs pushes the whole document
-		   sideways at 320px (WCAG 1.4.10). */
-		flex-wrap: wrap;
-		gap: 4px;
-		border-bottom: 1px solid var(--border);
-	}
-	.tab {
-		padding: 8px 16px;
-		border: none;
-		background: none;
-		color: var(--text-muted);
-		font-size: 0.9rem;
-		font-weight: 500;
-		cursor: pointer;
-		font-family: inherit;
-		border-bottom: 2px solid transparent;
-		margin-bottom: -1px;
-	}
-	.tab:hover {
-		color: var(--text);
-	}
-	.tab.active {
-		color: var(--accent);
-		border-bottom-color: var(--accent);
-	}
-
 	.filter-row {
 		display: flex;
 		align-items: center;

@@ -22,7 +22,7 @@ import { expect, test } from '../fixtures/helpers';
 
 async function openCards(page: import('@playwright/test').Page) {
 	await page.goto('/payments');
-	await page.getByRole('button', { name: 'Cards', exact: true }).click();
+	await page.getByRole('tab', { name: 'Cards', exact: true }).click();
 }
 
 /** Keep the sibling rebates list out of the way — it has its own error state,
