@@ -1,16 +1,16 @@
 <script lang="ts">
-	import { notificationStore } from '$lib/stores/notifications.svelte';
-	import { toast } from '$lib/components/ui/Toast.svelte';
-	import PageHeader from '$lib/components/ui/PageHeader.svelte';
-	import FilterChips from '$lib/components/ui/FilterChips.svelte';
-	import DataTable from '$lib/components/ui/DataTable.svelte';
-	import RowLink from '$lib/components/ui/RowLink.svelte';
-	import { isRowOpenClick } from '$lib/utils/rowNav';
+	import { notificationStore } from '#lib/stores/notifications.svelte.ts';
+	import { toast } from '#lib/components/ui/Toast.svelte';
+	import PageHeader from '#lib/components/ui/PageHeader.svelte';
+	import FilterChips from '#lib/components/ui/FilterChips.svelte';
+	import DataTable from '#lib/components/ui/DataTable.svelte';
+	import RowLink from '#lib/components/ui/RowLink.svelte';
+	import { isRowOpenClick } from '#lib/utils/rowNav.ts';
 	import { goto } from '$app/navigation';
-	import { timeAgo } from '$lib/utils/time';
-	import { m } from '$lib/i18n/store.svelte';
-	import { EVENT_LABELS } from '$lib/types/notification';
-	import type { Notification } from '$lib/types/notification';
+	import { timeAgo } from '#lib/utils/time.ts';
+	import { m } from '#lib/i18n/store.svelte.ts';
+	import { EVENT_LABELS } from '#lib/types/notification.ts';
+	import type { Notification } from '#lib/types/notification.ts';
 
 	let filter = $state<'all' | 'unread'>('all');
 	let errored = $state(false);

@@ -79,7 +79,7 @@ test.describe('/invoices bulk export request headers', () => {
 
 	test('carries X-Entity-ID when the page is scoped to a subsidiary', async ({ page }) => {
 		// Resolve a real entity for this tenant — the header is only sent when a
-		// specific entity is selected (absent = consolidated, per `$lib/entity.ts`).
+		// specific entity is selected (absent = consolidated, per `#lib/entity.ts`).
 		const res = await page.request.get(`${API_BASE}/api/entities`, {
 			headers: await authedTenantHeaders(page)
 		});

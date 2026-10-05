@@ -5,14 +5,14 @@
 // horizon_days, min_balance_threshold, cash_budget, cost_of_capital_pct) —
 // callers must echo those back verbatim, never invent their own. See
 // docs/cash-flow-copilot.md §6.
-import { api } from '$lib/api';
+import { api } from '#lib/api.ts';
 import type {
 	PaymentPlanResult,
 	PlanVarianceResult,
 	SaveCashPlanResult,
 	SavedPlanDetail,
 	SavedPlanSummary
-} from '$lib/types/cashFlow';
+} from '#lib/types/cashFlow.ts';
 
 export interface PlanReplayParams {
 	granularity: string;

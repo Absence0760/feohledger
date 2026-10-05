@@ -1,7 +1,7 @@
 <script lang="ts">
-	import type { InvoiceStatus } from '$lib/types/invoice';
-	import { invoiceStatusLabelKey } from '$lib/types/invoice';
-	import { m } from '$lib/i18n/store.svelte';
+	import type { InvoiceStatus } from '#lib/types/invoice.ts';
+	import { invoiceStatusLabelKey } from '#lib/types/invoice.ts';
+	import { m } from '#lib/i18n/store.svelte.ts';
 
 	let { status }: { status: InvoiceStatus } = $props();
 

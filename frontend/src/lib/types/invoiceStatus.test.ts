@@ -8,7 +8,7 @@ import {
 	invoiceStatusLabelKey,
 	type InvoiceStatus
 } from './invoice';
-import { en } from '$lib/i18n/locales/en';
+import { en } from '#lib/i18n/locales/en.ts';
 
 /**
  * Drift guard for the invoice-status LABELS, the sibling of

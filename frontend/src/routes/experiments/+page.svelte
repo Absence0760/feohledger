@@ -3,16 +3,16 @@
 		Experiment,
 		ExperimentResults,
 		PrimaryMetric
-	} from '$lib/types/experiments';
+	} from '#lib/types/experiments.ts';
 	import {
 		EXPERIMENT_STATUSES,
 		experimentStatusLabelKey,
 		STATUS_TONES,
 		PRIMARY_METRIC_LABEL_KEYS
-	} from '$lib/types/experiments';
-	import type { WorkflowDefinition } from '$lib/types/workflow';
-	import { auth } from '$lib/stores/auth.svelte';
-	import { api } from '$lib/api';
+	} from '#lib/types/experiments.ts';
+	import type { WorkflowDefinition } from '#lib/types/workflow.ts';
+	import { auth } from '#lib/stores/auth.svelte.ts';
+	import { api } from '#lib/api.ts';
 	import {
 		listExperiments,
 		createExperiment,
@@ -21,18 +21,18 @@
 		concludeExperiment,
 		deleteExperiment,
 		getExperimentResults
-	} from '$lib/api/experiments';
-	import Badge from '$lib/components/ui/Badge.svelte';
-	import PageHeader from '$lib/components/ui/PageHeader.svelte';
-	import FilterChips from '$lib/components/ui/FilterChips.svelte';
-	import DataTable from '$lib/components/ui/DataTable.svelte';
-	import RowLink from '$lib/components/ui/RowLink.svelte';
-	import RowAction from '$lib/components/ui/RowAction.svelte';
-	import Modal from '$lib/components/ui/Modal.svelte';
-	import { toast } from '$lib/components/ui/Toast.svelte';
-	import { m } from '$lib/i18n/store.svelte';
-	import { isRowOpenClick } from '$lib/utils/rowNav';
-	import { createRequestSequencer } from '$lib/utils/requestSequence';
+	} from '#lib/api/experiments.ts';
+	import Badge from '#lib/components/ui/Badge.svelte';
+	import PageHeader from '#lib/components/ui/PageHeader.svelte';
+	import FilterChips from '#lib/components/ui/FilterChips.svelte';
+	import DataTable from '#lib/components/ui/DataTable.svelte';
+	import RowLink from '#lib/components/ui/RowLink.svelte';
+	import RowAction from '#lib/components/ui/RowAction.svelte';
+	import Modal from '#lib/components/ui/Modal.svelte';
+	import { toast } from '#lib/components/ui/Toast.svelte';
+	import { m } from '#lib/i18n/store.svelte.ts';
+	import { isRowOpenClick } from '#lib/utils/rowNav.ts';
+	import { createRequestSequencer } from '#lib/utils/requestSequence.ts';
 
 	const canMutate = $derived(auth.isAdmin);
 

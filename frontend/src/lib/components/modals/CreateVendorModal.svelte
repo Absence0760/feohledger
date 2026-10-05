@@ -1,9 +1,9 @@
 <script lang="ts">
-	import type { Vendor } from '$lib/types/vendor';
-	import { createVendor } from '$lib/api/vendors';
-	import Modal from '$lib/components/ui/Modal.svelte';
-	import { toast } from '$lib/components/ui/Toast.svelte';
-	import { m } from '$lib/i18n/store.svelte';
+	import type { Vendor } from '#lib/types/vendor.ts';
+	import { createVendor } from '#lib/api/vendors.ts';
+	import Modal from '#lib/components/ui/Modal.svelte';
+	import { toast } from '#lib/components/ui/Toast.svelte';
+	import { m } from '#lib/i18n/store.svelte.ts';
 
 	let { onclose, onsaved }: { onclose: () => void; onsaved: (vendor: Vendor) => void } = $props();
 

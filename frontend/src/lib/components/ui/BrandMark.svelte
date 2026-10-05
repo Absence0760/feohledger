@@ -26,7 +26,7 @@
 
 <img
 	class="brand-mark"
-	src={asset('/logo-mark.svg')}
+	src={asset('logo-mark.svg')}
 	width={size}
 	height={size}
 	alt={label}

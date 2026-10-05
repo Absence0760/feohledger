@@ -330,7 +330,7 @@ UI and defaults.
 ## 7. Frontend
 
 A `/cash-flow` route (Insights nav group), Svelte 5 runes, static — no SSR,
-fetches via `$lib/api.ts`:
+fetches via `#lib/api.ts`:
 
 - **Copilot panel** — chat over `/api/cash-flow/copilot/stream`, reusing the
   assistant's streaming client + the chartable structured `result` (the forecast
@@ -340,9 +340,9 @@ fetches via `$lib/api.ts`:
   red (from `get_cash_position`).
 - **Proposed-plan card** (`PlanCard.svelte`) — the period-by-period pay
   schedule, captured-savings figure, and two explicit buttons ("Create draft
-  run", "Capture N discounts") that call `$lib/api/cashFlow.ts`
+  run", "Capture N discounts") that call `#lib/api/cashFlow.ts`
   (`createDraftRunFromPlan` / `captureDiscountsFromPlan`, both over
-  `$lib/api.ts`, never raw `fetch`). The buttons are gated by role
+  `#lib/api.ts`, never raw `fetch`). The buttons are gated by role
   (`auth.isManager || auth.isCfo` — mirroring the backend's `_COPILOT_ROLES`,
   the same check `/discounts`' accept button uses) and rendered only when the
   plan has anything to act on. "Create draft run" fires on a single click
@@ -350,7 +350,7 @@ fetches via `$lib/api.ts`:
   isn't destructive); "Capture N discounts" uses an armed two-click confirm
   (mutates several `DiscountOffer` rows). A `409` from either call — the
   stale-plan guard (§6) — surfaces a friendly "ask the copilot for a fresh
-  plan" notice instead of a raw error (`ApiError`, `$lib/api.ts`, carries the
+  plan" notice instead of a raw error (`ApiError`, `#lib/api.ts`, carries the
   HTTP status so the frontend can branch on it without parsing message text).
 - **Save plan** — a third `PlanCard` action, over `saveCashFlowPlan`.
   Deliberately **no** confirm step: saving a snapshot moves no money, cannot be

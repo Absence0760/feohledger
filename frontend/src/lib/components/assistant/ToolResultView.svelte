@@ -1,11 +1,11 @@
 <script lang="ts">
-	import Money from '$lib/components/ui/Money.svelte';
-	import StatusBadge from '$lib/components/ui/StatusBadge.svelte';
-	import SpendBarChart from '$lib/components/assistant/SpendBarChart.svelte';
-	import { formatMoney } from '$lib/utils/money';
-	import { m } from '$lib/i18n/store.svelte';
-	import type { InvoiceStatus } from '$lib/types/invoice';
-	import { invoiceStatusLabelKey } from '$lib/types/invoice';
+	import Money from '#lib/components/ui/Money.svelte';
+	import StatusBadge from '#lib/components/ui/StatusBadge.svelte';
+	import SpendBarChart from '#lib/components/assistant/SpendBarChart.svelte';
+	import { formatMoney } from '#lib/utils/money.ts';
+	import { m } from '#lib/i18n/store.svelte.ts';
+	import type { InvoiceStatus } from '#lib/types/invoice.ts';
+	import { invoiceStatusLabelKey } from '#lib/types/invoice.ts';
 	import type {
 		ToolInvocation,
 		VendorSpendResult,
@@ -13,8 +13,8 @@
 		InvoiceListResult,
 		PendingApprovalsResult,
 		TextSearchResult
-	} from '$lib/types/assistant';
-	import { formatDate } from '$lib/utils/time';
+	} from '#lib/types/assistant.ts';
+	import { formatDate } from '#lib/utils/time.ts';
 
 	let { invocation }: { invocation: ToolInvocation } = $props();
 

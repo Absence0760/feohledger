@@ -1,8 +1,8 @@
 <script lang="ts">
-	import { portalCompany } from '$lib/stores/portalCompany.svelte';
-	import { portalAuth } from '$lib/stores/portalAuth.svelte';
+	import { portalCompany } from '#lib/stores/portalCompany.svelte.ts';
+	import { portalAuth } from '#lib/stores/portalAuth.svelte.ts';
 	import { onMount } from 'svelte';
-	import { m } from '$lib/i18n/store.svelte';
+	import { m } from '#lib/i18n/store.svelte.ts';
 
 	let email = $state('');
 	let phone = $state('');

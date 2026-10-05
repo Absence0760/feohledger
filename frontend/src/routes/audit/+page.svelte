@@ -1,22 +1,22 @@
 <script lang="ts">
-	import { auth } from '$lib/stores/auth.svelte';
-	import { getAuditExport, downloadAuditExportCsv } from '$lib/api/audit';
+	import { auth } from '#lib/stores/auth.svelte.ts';
+	import { getAuditExport, downloadAuditExportCsv } from '#lib/api/audit.ts';
 	import {
 		verifyInvoiceSignatures,
 		verifySignaturesForPeriod,
 		type InvoiceSignatureReport,
 		type SignatureVerificationReport
-	} from '$lib/api/auditVerification';
-	import type { AuditEntry, AuditFieldChange } from '$lib/types/audit';
-	import PageHeader from '$lib/components/ui/PageHeader.svelte';
-	import DataTable from '$lib/components/ui/DataTable.svelte';
-	import KpiCard from '$lib/components/ui/KpiCard.svelte';
-	import Badge from '$lib/components/ui/Badge.svelte';
-	import RowLink from '$lib/components/ui/RowLink.svelte';
-	import { toast } from '$lib/components/ui/Toast.svelte';
-	import { formatDate } from '$lib/utils/time';
-	import { createRequestSequencer } from '$lib/utils/requestSequence';
-	import { m } from '$lib/i18n/store.svelte';
+	} from '#lib/api/auditVerification.ts';
+	import type { AuditEntry, AuditFieldChange } from '#lib/types/audit.ts';
+	import PageHeader from '#lib/components/ui/PageHeader.svelte';
+	import DataTable from '#lib/components/ui/DataTable.svelte';
+	import KpiCard from '#lib/components/ui/KpiCard.svelte';
+	import Badge from '#lib/components/ui/Badge.svelte';
+	import RowLink from '#lib/components/ui/RowLink.svelte';
+	import { toast } from '#lib/components/ui/Toast.svelte';
+	import { formatDate } from '#lib/utils/time.ts';
+	import { createRequestSequencer } from '#lib/utils/requestSequence.ts';
+	import { m } from '#lib/i18n/store.svelte.ts';
 
 	// RBAC parity with the backend: the auditor export is admin/CFO only (the
 	// backend 403s everyone else). Gate the page content on the loaded user's

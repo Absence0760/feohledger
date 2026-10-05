@@ -1,18 +1,18 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { focusTrap } from '$lib/actions/focusTrap';
-	import Money from '$lib/components/ui/Money.svelte';
-	import { formatDate } from '$lib/utils/time';
-	import { m } from '$lib/i18n/store.svelte';
-	import { appendUnique } from '$lib/utils/pagination';
-	import { createRequestSequencer } from '$lib/utils/requestSequence';
+	import { focusTrap } from '#lib/actions/focusTrap.ts';
+	import Money from '#lib/components/ui/Money.svelte';
+	import { formatDate } from '#lib/utils/time.ts';
+	import { m } from '#lib/i18n/store.svelte.ts';
+	import { appendUnique } from '#lib/utils/pagination.ts';
+	import { createRequestSequencer } from '#lib/utils/requestSequence.ts';
 	import {
 		listPortalDiscountOffers,
 		acceptPortalDiscountOffer,
 		declinePortalDiscountOffer,
 		PORTAL_PAGE_SIZE,
 		type PortalDiscountOffer,
-	} from '$lib/portalApi';
+	} from '#lib/portalApi.ts';
 
 	const FILTERS = [
 		{ key: '', labelKey: 'portal.discounts.filter.all' },

@@ -1,7 +1,7 @@
-import type { Expense } from '$lib/types/expense';
-import { listExpenses, type ExpenseListParams } from '$lib/api/expenses';
-import { appendUnique } from '$lib/utils/pagination';
-import { createRequestSequencer } from '$lib/utils/requestSequence';
+import type { Expense } from '#lib/types/expense.ts';
+import { listExpenses, type ExpenseListParams } from '#lib/api/expenses.ts';
+import { appendUnique } from '#lib/utils/pagination.ts';
+import { createRequestSequencer } from '#lib/utils/requestSequence.ts';
 
 function createExpenseStore() {
 	let expenses = $state<Expense[]>([]);

@@ -1,9 +1,9 @@
 <script lang="ts">
-	import { portalAuth } from '$lib/stores/portalAuth.svelte';
-	import { portalBrand } from '$lib/stores/portalBrand.svelte';
-	import BrandMark from '$lib/components/ui/BrandMark.svelte';
+	import { portalAuth } from '#lib/stores/portalAuth.svelte.ts';
+	import { portalBrand } from '#lib/stores/portalBrand.svelte.ts';
+	import BrandMark from '#lib/components/ui/BrandMark.svelte';
 	import { goto } from '$app/navigation';
-	import { m } from '$lib/i18n/store.svelte';
+	import { m } from '#lib/i18n/store.svelte.ts';
 
 	let email = $state('');
 	let password = $state('');

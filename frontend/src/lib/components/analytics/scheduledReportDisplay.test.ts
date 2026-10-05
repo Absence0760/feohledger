@@ -12,7 +12,7 @@ import {
 	scheduleHealth,
 	showsRunError
 } from './scheduledReportDisplay';
-import type { ScheduledReport } from '$lib/types/scheduledReport';
+import type { ScheduledReport } from '#lib/types/scheduledReport.ts';
 
 function row(over: Partial<ScheduledReport> = {}): ScheduledReport {
 	return {

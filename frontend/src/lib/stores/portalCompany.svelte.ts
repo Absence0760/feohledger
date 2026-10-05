@@ -1,4 +1,4 @@
-import { portalApi } from '$lib/portalApi';
+import { portalApi } from '#lib/portalApi.ts';
 
 export interface PortalPendingChange {
 	id: string;

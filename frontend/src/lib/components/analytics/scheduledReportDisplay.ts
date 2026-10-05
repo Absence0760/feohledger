@@ -19,9 +19,9 @@
  *     invisible. Hardcoding either list is the bug this guards against.
  */
 
-import type { BadgeTone } from '$lib/components/ui/badgeTone';
-import type { MessageKey } from '$lib/i18n/messages';
-import type { ScheduledReport } from '$lib/types/scheduledReport';
+import type { BadgeTone } from '#lib/components/ui/badgeTone.ts';
+import type { MessageKey } from '#lib/i18n/messages.ts';
+import type { ScheduledReport } from '#lib/types/scheduledReport.ts';
 
 /** Consecutive failures after which the runner disables a schedule itself.
  *  Mirrors `backend/app/services/scheduled_reports.py`. */

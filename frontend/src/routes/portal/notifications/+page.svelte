@@ -1,11 +1,11 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { m } from '$lib/i18n/store.svelte';
+	import { m } from '#lib/i18n/store.svelte.ts';
 	import {
 		getPortalNotificationPreferences,
 		updatePortalNotificationPreferences,
 		type PortalNotificationPreferences,
-	} from '$lib/portalApi';
+	} from '#lib/portalApi.ts';
 
 	let emailOnPayment = $state(true);
 	let emailOnRejection = $state(true);

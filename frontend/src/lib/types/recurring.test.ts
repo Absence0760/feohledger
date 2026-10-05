@@ -9,7 +9,7 @@ import {
 	recurringStatusLabelKey,
 	skipReasonKey
 } from './recurring';
-import { en } from '$lib/i18n/locales/en';
+import { en } from '#lib/i18n/locales/en.ts';
 
 describe('skipReasonKey', () => {
 	it('names every reason code the backend sweep can emit', () => {

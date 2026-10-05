@@ -20,7 +20,7 @@ techflow.localhost:7777┘                       └── feohledger DB
 
 | Layer          | Tech                                    |
 |----------------|-----------------------------------------|
-| Frontend       | SvelteKit 2, Svelte 5, TypeScript       |
+| Frontend       | SvelteKit 3, Svelte 5, TypeScript       |
 | Backend        | FastAPI, SQLAlchemy 2 (async), Pydantic |
 | Database       | PostgreSQL 16                           |
 | Cache/Queue    | Redis 7                                 |

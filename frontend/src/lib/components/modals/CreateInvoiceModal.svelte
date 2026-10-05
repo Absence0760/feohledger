@@ -1,14 +1,14 @@
 <script lang="ts">
-	import type { Invoice } from '$lib/types/invoice';
-	import { api } from '$lib/api';
-	import { listGlAccounts, listInvoiceChart } from '$lib/api/glAccounts';
-	import { glAccountOptionLabel, type GlAccountOption } from '$lib/types/glAccount';
-	import Modal from '$lib/components/ui/Modal.svelte';
-	import { toast } from '$lib/components/ui/Toast.svelte';
-	import { m } from '$lib/i18n/store.svelte';
-	import { entityStore } from '$lib/stores/entity.svelte';
-	import { orgCurrency } from '$lib/stores/orgSettings.svelte';
-	import { DEFAULT_CURRENCY } from '$lib/utils/money';
+	import type { Invoice } from '#lib/types/invoice.ts';
+	import { api } from '#lib/api.ts';
+	import { listGlAccounts, listInvoiceChart } from '#lib/api/glAccounts.ts';
+	import { glAccountOptionLabel, type GlAccountOption } from '#lib/types/glAccount.ts';
+	import Modal from '#lib/components/ui/Modal.svelte';
+	import { toast } from '#lib/components/ui/Toast.svelte';
+	import { m } from '#lib/i18n/store.svelte.ts';
+	import { entityStore } from '#lib/stores/entity.svelte.ts';
+	import { orgCurrency } from '#lib/stores/orgSettings.svelte.ts';
+	import { DEFAULT_CURRENCY } from '#lib/utils/money.ts';
 
 	let { onclose, onsaved }: { onclose: () => void; onsaved: (invoice: Invoice) => void } =
 		$props();

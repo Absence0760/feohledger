@@ -10,14 +10,14 @@
 	import IconBolt from '~icons/material-symbols/bolt';
 	import IconCheck from '~icons/material-symbols/check-circle-outline';
 	import IconArrow from '~icons/material-symbols/arrow-forward';
-	import Pricing from '$lib/components/marketing/Pricing.svelte';
-	import AdapterRail from '$lib/components/marketing/AdapterRail.svelte';
-	import Atmosphere from '$lib/components/marketing/Atmosphere.svelte';
-	import HeroPipeline from '$lib/components/marketing/HeroPipeline.svelte';
-	import MotionToggle from '$lib/components/marketing/MotionToggle.svelte';
-	import { LEGAL_PAGES } from '$lib/legal/pages';
-	import BrandMark from '$lib/components/ui/BrandMark.svelte';
-	import { countUp, reveal } from '$lib/actions/reveal';
+	import Pricing from '#lib/components/marketing/Pricing.svelte';
+	import AdapterRail from '#lib/components/marketing/AdapterRail.svelte';
+	import Atmosphere from '#lib/components/marketing/Atmosphere.svelte';
+	import HeroPipeline from '#lib/components/marketing/HeroPipeline.svelte';
+	import MotionToggle from '#lib/components/marketing/MotionToggle.svelte';
+	import { LEGAL_PAGES } from '#lib/legal/pages.ts';
+	import BrandMark from '#lib/components/ui/BrandMark.svelte';
+	import { countUp, reveal } from '#lib/actions/reveal.ts';
 
 	const features = [
 		{
@@ -248,7 +248,7 @@
 
 				<div class="tally-art" use:reveal={{ delay: 120 }}>
 					<img
-						src={asset('/marketing/tally-split.webp')}
+						src={asset('marketing/tally-split.webp')}
 						width="1100"
 						height="460"
 						loading="lazy"

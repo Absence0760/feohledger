@@ -9,7 +9,7 @@ import {
 	runStatusLabelKey,
 	type PaymentStatus
 } from './payment';
-import { en } from '$lib/i18n/locales/en';
+import { en } from '#lib/i18n/locales/en.ts';
 
 /**
  * Drift guard: the frontend payment-status vocabulary must cover every status

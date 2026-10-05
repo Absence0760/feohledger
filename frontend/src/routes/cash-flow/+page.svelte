@@ -1,12 +1,12 @@
 <script lang="ts">
 	import { onMount, tick } from 'svelte';
-	import { api, streamCashFlowCopilot, AssistantBudgetError } from '$lib/api';
-	import PageHeader from '$lib/components/ui/PageHeader.svelte';
-	import UsageMeter from '$lib/components/assistant/UsageMeter.svelte';
-	import CopilotChatMessage from '$lib/components/cash-flow/CopilotChatMessage.svelte';
-	import SavedPlansPanel from '$lib/components/cash-flow/SavedPlansPanel.svelte';
-	import { m } from '$lib/i18n/store.svelte';
-	import type { ChatResponse, ToolInvocation, UiMessage, UsageResponse } from '$lib/types/assistant';
+	import { api, streamCashFlowCopilot, AssistantBudgetError } from '#lib/api.ts';
+	import PageHeader from '#lib/components/ui/PageHeader.svelte';
+	import UsageMeter from '#lib/components/assistant/UsageMeter.svelte';
+	import CopilotChatMessage from '#lib/components/cash-flow/CopilotChatMessage.svelte';
+	import SavedPlansPanel from '#lib/components/cash-flow/SavedPlansPanel.svelte';
+	import { m } from '#lib/i18n/store.svelte.ts';
+	import type { ChatResponse, ToolInvocation, UiMessage, UsageResponse } from '#lib/types/assistant.ts';
 
 	// Cash-flow copilot starter prompts. The first two route to `get_cash_position`
 	// (running-balance chart); the third exercises the discount optimizer; the

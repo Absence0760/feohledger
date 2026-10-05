@@ -1,15 +1,15 @@
 <script lang="ts">
-	import type { Budget, BudgetDimension, BudgetSpend } from '$lib/types/budget';
-	import { BUDGET_DIMENSIONS, BUDGET_DIMENSION_LABELS } from '$lib/types/budget';
-	import { auth } from '$lib/stores/auth.svelte';
-	import Modal from '$lib/components/ui/Modal.svelte';
-	import Money from '$lib/components/ui/Money.svelte';
-	import KpiCard from '$lib/components/ui/KpiCard.svelte';
-	import { toast } from '$lib/components/ui/Toast.svelte';
-	import { formatMoney, isNegativeAmount } from '$lib/utils/money';
-	import { normalizeMoneyInput } from '$lib/utils/moneyInput';
-	import { m } from '$lib/i18n/store.svelte';
-	import { createBudget, updateBudget, getBudgetSpend } from '$lib/api/budgets';
+	import type { Budget, BudgetDimension, BudgetSpend } from '#lib/types/budget.ts';
+	import { BUDGET_DIMENSIONS, BUDGET_DIMENSION_LABELS } from '#lib/types/budget.ts';
+	import { auth } from '#lib/stores/auth.svelte.ts';
+	import Modal from '#lib/components/ui/Modal.svelte';
+	import Money from '#lib/components/ui/Money.svelte';
+	import KpiCard from '#lib/components/ui/KpiCard.svelte';
+	import { toast } from '#lib/components/ui/Toast.svelte';
+	import { formatMoney, isNegativeAmount } from '#lib/utils/money.ts';
+	import { normalizeMoneyInput } from '#lib/utils/moneyInput.ts';
+	import { m } from '#lib/i18n/store.svelte.ts';
+	import { createBudget, updateBudget, getBudgetSpend } from '#lib/api/budgets.ts';
 
 	let {
 		budget,

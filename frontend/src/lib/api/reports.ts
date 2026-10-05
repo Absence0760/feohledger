@@ -1,11 +1,11 @@
 // Typed helpers for the Custom Report Builder surface. All requests route
 // through the shared `api` client (Bearer + X-Tenant-Slug + X-Entity-ID +
-// 401-bounce). See `$lib/types/reports` for the response contracts and the
+// 401-bounce). See `#lib/types/reports` for the response contracts and the
 // authoritative API contract for the endpoint shapes.
 //
 // The client only ever sends catalog keys — never raw SQL / column / table
 // names (the backend maps keys → whitelisted columns and 422s anything else).
-import { api } from '$lib/api';
+import { api } from '#lib/api.ts';
 import type {
 	CreateReportBody,
 	ReportCatalog,
@@ -14,7 +14,7 @@ import type {
 	ReportResult,
 	ReportSpec,
 	UpdateReportBody
-} from '$lib/types/reports';
+} from '#lib/types/reports.ts';
 
 /** The field catalog that drives the whole builder UI (data sources +
  *  dimensions / measures / filters). Read by all four roles. */

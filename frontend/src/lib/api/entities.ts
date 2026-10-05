@@ -10,8 +10,8 @@
 //
 // The row shape is the store's `Entity`: one definition, imported here as a
 // type (erased at build) so the admin page and the switcher can't drift.
-import { api } from '$lib/api';
-import type { Entity } from '$lib/stores/entity.svelte';
+import { api } from '#lib/api.ts';
+import type { Entity } from '#lib/stores/entity.svelte.ts';
 
 export type { Entity };
 

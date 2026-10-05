@@ -3,7 +3,7 @@
 // `backend/app/schemas/exception_agent.py`. Confidence is a display-only float
 // (stored exact as Numeric(5,4) server-side).
 
-import type { MessageKey } from '$lib/i18n/messages';
+import type { MessageKey } from '#lib/i18n/messages.ts';
 
 export interface AgentDecision {
 	id: string;

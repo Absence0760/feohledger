@@ -9,7 +9,7 @@ import {
 	scaleMoney,
 	sumMoney
 } from './money';
-import { getActiveFormatLocale, setActiveFormatLocale } from '$lib/i18n/formatLocale';
+import { getActiveFormatLocale, setActiveFormatLocale } from '#lib/i18n/formatLocale.ts';
 
 afterEach(() => {
 	// Reset the shared holder so locale state never leaks across tests.

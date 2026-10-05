@@ -3,7 +3,7 @@ import { API_BASE, authedTenantHeaders, expect, signInAndWait, test } from '../f
 // `$env`, no `$app`, no imports at all) — the `frontend/CLAUDE.md` exception
 // `auth/rbac.spec.ts` established. The test computes the expected label with the
 // resolver the store uses rather than re-typing the rung order.
-import { resolveReportingCurrency } from '$lib/utils/reportingCurrency';
+import { resolveReportingCurrency } from '#lib/utils/reportingCurrency.ts';
 
 interface OrgResponse {
 	id: string;

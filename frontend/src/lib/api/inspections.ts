@@ -11,8 +11,8 @@
 //
 // The list endpoint is paginated on the canonical `page` / `page_size`
 // contract and accepts a `gr_id` filter; see {@link listInspections}.
-import { api } from '$lib/api';
-import type { PagedResponse } from '$lib/utils/pagination';
+import { api } from '#lib/api.ts';
+import type { PagedResponse } from '#lib/utils/pagination.ts';
 
 /** Mirrors `backend/app/api/pagination.py::DEFAULT_PAGE_SIZE`, so a bare call
  *  and the server's own default return the same rows. */

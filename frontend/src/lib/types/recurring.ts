@@ -10,9 +10,9 @@
 // `day_of_period`, `generated_count` and `variance_tolerance_pct` (a percent).
 // See `frontend/CLAUDE.md` § Money formatting.
 
-import type { BadgeTone } from '$lib/components/ui/badgeTone';
-import type { MessageKey } from '$lib/i18n/messages';
-import type { MoneyAmount, MoneyString } from '$lib/utils/money';
+import type { BadgeTone } from '#lib/components/ui/badgeTone.ts';
+import type { MessageKey } from '#lib/i18n/messages.ts';
+import type { MoneyAmount, MoneyString } from '#lib/utils/money.ts';
 
 export type RecurringCadence = 'monthly' | 'quarterly' | 'annual';
 
@@ -186,7 +186,7 @@ export interface RecurringCurrencyTotal {
  * The page's `activeCount`, `soonestNextRun` and `monthlyRecurringTotal` were
  * all derived from the LOADED page, and the monthly total divided floats
  * (`amount / 3`, `amount / 12`). `monthly_equivalent` is grouped by currency,
- * never summed across them (see `$lib/utils/currencyGroups`).
+ * never summed across them (see `#lib/utils/currencyGroups`).
  */
 export interface RecurringTemplateSummary {
 	/** Row count of the whole filtered set — NOT money. */

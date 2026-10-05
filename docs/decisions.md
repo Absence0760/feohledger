@@ -9470,3 +9470,27 @@ non-UTC session the two disagreed about the same row: 2026-01-31 20:00 UTC passe
 a January filter and landed in a February bucket. Timestamp columns are now
 bucketed via `timezone('UTC', col)`, so filter and bucket share one explicit zone
 and neither depends on the connection's settings. `DATE` columns are unchanged.
+
+## 229. SvelteKit 3: `#lib` with real extensions, and every env var declared `static`
+
+SvelteKit 3 (#492) removed `$lib`, `svelte.config.js`, `$app/stores`,
+`$app/environment` and the implicit `$env/*` modules. Kit's own error offers an
+escape hatch — `alias: { '$lib': 'src/lib' }` keeps the old specifier — and it
+was rejected: it defers the migration rather than doing it, and leaves the tree
+on a shape upstream has stopped documenting.
+
+**`#lib/...` names the file.** `#lib` is a package.json `imports` entry, which
+Node, TypeScript, Vite and Playwright all resolve natively — so no tool needs an
+alias any more (vitest's hand-mapped one is gone). Subpath imports do no
+extension probing, so every specifier carries the real file name:
+`#lib/api.ts`, `#lib/i18n/store.svelte.ts`. Upstream's examples write `.js` and
+rely on each resolver mapping it to `.ts`; the real extension was chosen instead
+because it is what is on disk, and needs no mapping in any of the four.
+
+**Every variable in `src/env.ts` is `static: true`.** A non-static public
+variable is read "when the app starts", which presumes a server; this build is
+files in S3. Inlining at build time is what the old `$env/dynamic/public`
+already did under adapter-static, so behaviour is unchanged.
+`PUBLIC_API_URL` stays required (a build without it fails, as before);
+`PUBLIC_PLATFORM_DOMAINS` and `PUBLIC_SITE_URL` stay optional, each for the
+reason its entry gives.

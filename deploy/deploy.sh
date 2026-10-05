@@ -53,7 +53,7 @@ umask 077
 
 # ── Frontend ─────────────────────────────────────────────────────────────────
 if [ "$DO_FRONTEND" = 1 ]; then
-	# PUBLIC_API_URL is baked into the static build ($env/static/public).
+	# PUBLIC_API_URL is baked into the static build (declared `static` in frontend/src/env.ts).
 	# PUBLIC_SITE_URL prefixes the absolute og:image URL in src/app.html (link
 	# previews); SvelteKit would substitute an empty string for it silently, which
 	# is why it comes from APP_DOMAIN, which decrypt-env.sh refuses empty.

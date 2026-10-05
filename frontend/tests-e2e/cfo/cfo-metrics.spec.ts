@@ -1,4 +1,4 @@
-import type { CfoAnalytics } from '$lib/types/analytics';
+import type { CfoAnalytics } from '#lib/types/analytics.ts';
 
 import { expect, signInAndWait, test } from '../fixtures/helpers';
 

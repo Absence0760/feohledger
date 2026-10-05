@@ -62,7 +62,7 @@ describe('supplier-portal paged lists', () => {
 			it('appends the next page via appendUnique (never a raw spread)', () => {
 				const src = RAW[path];
 				expect(src, 'no appendUnique import').toContain(
-					"from '$lib/utils/pagination'"
+					"from '#lib/utils/pagination.ts'"
 				);
 				expect(src).toContain('appendUnique(items, res.items)');
 				expect(src, 'raw spread re-surfaces a shifted row and breaks the keyed each').not.toMatch(

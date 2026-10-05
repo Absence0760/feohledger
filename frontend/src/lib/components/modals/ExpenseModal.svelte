@@ -1,27 +1,27 @@
 <script lang="ts">
-	import type { Expense, ExpenseStatus } from '$lib/types/expense';
+	import type { Expense, ExpenseStatus } from '#lib/types/expense.ts';
 	import {
 		EXPENSE_PAYMENT_METHODS,
 		EXPENSE_PAYMENT_METHOD_LABEL_KEYS,
 		expenseStatusLabelKey,
 		EXPENSE_STATUS_TONES
-	} from '$lib/types/expense';
-	import { auth } from '$lib/stores/auth.svelte';
-	import { m } from '$lib/i18n/store.svelte';
-	import type { MoneyAmount } from '$lib/utils/money';
-	import { normalizeMoneyInput } from '$lib/utils/moneyInput';
-	import Modal from '$lib/components/ui/Modal.svelte';
-	import Badge from '$lib/components/ui/Badge.svelte';
-	import { toast } from '$lib/components/ui/Toast.svelte';
+	} from '#lib/types/expense.ts';
+	import { auth } from '#lib/stores/auth.svelte.ts';
+	import { m } from '#lib/i18n/store.svelte.ts';
+	import type { MoneyAmount } from '#lib/utils/money.ts';
+	import { normalizeMoneyInput } from '#lib/utils/moneyInput.ts';
+	import Modal from '#lib/components/ui/Modal.svelte';
+	import Badge from '#lib/components/ui/Badge.svelte';
+	import { toast } from '#lib/components/ui/Toast.svelte';
 	import {
 		createExpense,
 		updateExpense,
 		uploadReceipt,
 		receiptUrl,
 		type GlAccountOption
-	} from '$lib/api/expenses';
-	import { glAccountOptionLabel } from '$lib/types/glAccount';
-	import { entityStore } from '$lib/stores/entity.svelte';
+	} from '#lib/api/expenses.ts';
+	import { glAccountOptionLabel } from '#lib/types/glAccount.ts';
+	import { entityStore } from '#lib/stores/entity.svelte.ts';
 
 	let {
 		expense,

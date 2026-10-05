@@ -13,9 +13,9 @@
  * denominated in nothing.
  */
 
-import type { ForecastVariance, ForecastVarianceInput, ForecastVarianceRow } from '$lib/types/analytics';
-import { isNegativeAmount, isPositiveAmount } from '$lib/utils/money';
-import { normalizeMoneyInput } from '$lib/utils/moneyInput';
+import type { ForecastVariance, ForecastVarianceInput, ForecastVarianceRow } from '#lib/types/analytics.ts';
+import { isNegativeAmount, isPositiveAmount } from '#lib/utils/money.ts';
+import { normalizeMoneyInput } from '#lib/utils/moneyInput.ts';
 
 /** One row of the entry form, exactly as typed. `forecast` is RAW text. */
 export interface ForecastEntry {

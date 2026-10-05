@@ -2,8 +2,8 @@ import { expect, test } from '../fixtures/helpers';
 import { VANITY_ORIGIN } from '../fixtures/env';
 
 /**
- * Host-derived tenant + API-origin resolution (`$lib/tenant.ts` over
- * `$lib/hostRouting.ts`).
+ * Host-derived tenant + API-origin resolution (`#lib/tenant.ts` over
+ * `#lib/hostRouting.ts`).
  *
  * ## What this spec covers, and what it deliberately doesn't
  *

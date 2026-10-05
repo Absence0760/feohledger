@@ -1,10 +1,10 @@
 <script lang="ts">
-	import { createGlAccount, updateGlAccount, type GlAccountUpdate } from '$lib/api/glAccounts';
-	import { GL_ACCOUNT_TYPES, glAccountTypeLabelKey, type GlAccount } from '$lib/types/glAccount';
-	import Modal from '$lib/components/ui/Modal.svelte';
-	import { toast } from '$lib/components/ui/Toast.svelte';
-	import { entityStore } from '$lib/stores/entity.svelte';
-	import { m } from '$lib/i18n/store.svelte';
+	import { createGlAccount, updateGlAccount, type GlAccountUpdate } from '#lib/api/glAccounts.ts';
+	import { GL_ACCOUNT_TYPES, glAccountTypeLabelKey, type GlAccount } from '#lib/types/glAccount.ts';
+	import Modal from '#lib/components/ui/Modal.svelte';
+	import { toast } from '#lib/components/ui/Toast.svelte';
+	import { entityStore } from '#lib/stores/entity.svelte.ts';
+	import { m } from '#lib/i18n/store.svelte.ts';
 	import { untrack } from 'svelte';
 
 	/**

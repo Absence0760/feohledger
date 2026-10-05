@@ -1,6 +1,6 @@
 <script lang="ts">
-	import { entityStore, ALL_ENTITIES } from '$lib/stores/entity.svelte';
-	import { m } from '$lib/i18n/store.svelte';
+	import { entityStore, ALL_ENTITIES } from '#lib/stores/entity.svelte.ts';
+	import { m } from '#lib/i18n/store.svelte.ts';
 
 	let { collapsed = false }: { collapsed?: boolean } = $props();
 

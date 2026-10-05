@@ -2,8 +2,8 @@
 // Money / statistic Decimals arrive as string-Decimal from the backend —
 // display via `formatMoney` / render directly, never `parseFloat`.
 
-import type { BadgeTone } from '$lib/components/ui/badgeTone';
-import type { MessageKey } from '$lib/i18n/messages';
+import type { BadgeTone } from '#lib/components/ui/badgeTone.ts';
+import type { MessageKey } from '#lib/i18n/messages.ts';
 
 export type ExperimentStatus = 'draft' | 'running' | 'concluded';
 

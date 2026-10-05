@@ -481,7 +481,7 @@ measured in weeks would never fire. `docs/decisions.md` §184.
 ## Frontend
 
 Route `/positive-pay` (`frontend/src/routes/positive-pay/+page.svelte`), under
-the **Billing** nav group (`$lib/nav.ts`, roles `admin` / `ap_manager` / `cfo` —
+the **Billing** nav group (`#lib/nav.ts`, roles `admin` / `ap_manager` / `cfo` —
 clerks excluded, matching the backend). Built from the shared `ui/` components:
 `PageHeader` + a KPI row (`KpiCard`: total files, items exported, returns
 flagged) + file-type `FilterChips` (All / Check issue / ACH auth) + `SearchBox`
@@ -491,7 +491,7 @@ delete (`RowAction`). Money renders via `<Money>` in the file's stored
 filter state via `$page` + `replaceState` (deep-link `?id=` opens a file's
 detail modal).
 
-The modal (`$lib/components/modals/PositivePayModal.svelte`) is dual-mode:
+The modal (`#lib/components/modals/PositivePayModal.svelte`) is dual-mode:
 
 - **Generate** — pick file type (check-issue → choose a payment run;
   ACH-authorization → org-wide) + bank format, gated to managers.
@@ -500,8 +500,8 @@ The modal (`$lib/components/modals/PositivePayModal.svelte`) is dual-mode:
   table, and a "process return" sub-form (paste `check#,amount` per line) for
   check-issue files.
 
-Typed client `$lib/api/positivePay.ts` over the shared `api` object; types in
-`$lib/types/positivePay.ts`.
+Typed client `#lib/api/positivePay.ts` over the shared `api` object; types in
+`#lib/types/positivePay.ts`.
 
 ## Migration
 

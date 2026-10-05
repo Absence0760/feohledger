@@ -1,5 +1,5 @@
-import type { MessageKey } from '$lib/i18n/messages';
-import type { MoneyAmount } from '$lib/utils/money';
+import type { MessageKey } from '#lib/i18n/messages.ts';
+import type { MoneyAmount } from '#lib/utils/money.ts';
 
 export type InvoiceStatus =
 	| 'new'
@@ -166,7 +166,7 @@ export interface InvoiceWarning {
 	severity: 'error' | 'warning' | 'info';
 	/**
 	 * The backend's own English sentence. It is the FALLBACK rendering, not the
-	 * thing to render: prefer `invoiceWarningText` (`$lib/api/invoiceWarnings`),
+	 * thing to render: prefer `invoiceWarningText` (`#lib/api/invoiceWarnings`),
 	 * which resolves `code` + `params` into the reader's language and falls back
 	 * to this when it cannot.
 	 */

@@ -4,7 +4,7 @@
 	 * `DataTable`'s `header` snippet alongside the page's other (non-sortable)
 	 * `<th>`s. A click sorts ascending on a column that isn't the active one,
 	 * or flips the direction on the one that already is — the page owns the
-	 * actual state + URL persistence (see `$lib/utils/sort.ts::toggleSort`)
+	 * actual state + URL persistence (see `#lib/utils/sort.ts::toggleSort`)
 	 * and passes it down as `active` / `order`.
 	 *
 	 * `aria-sort` on the `<th>` (not the button) is what a screen reader

@@ -1,7 +1,7 @@
 <script lang="ts">
 	// Save-as-report dialog. Collects a name (required) + optional description;
 	// the parent owns the actual POST/PATCH and passes save state back in.
-	import Modal from '$lib/components/ui/Modal.svelte';
+	import Modal from '#lib/components/ui/Modal.svelte';
 
 	interface Props {
 		open: boolean;

@@ -119,7 +119,7 @@ describe('locale-aware list joining', () => {
 			[
 				'These files join fragments with a literal ", ".',
 				'If the joined text is PROSE a human reads (translated fragments, or data',
-				'spliced into an m() sentence), use `formatList` from $lib/utils/list.',
+				'spliced into an m() sentence), use `formatList` from #lib/utils/list.',
 				'If it is an input value re-split on ",", a machine payload, or a bare list',
 				'of identifiers, add it to ALLOWED in this file with the reason.'
 			].join('\n')

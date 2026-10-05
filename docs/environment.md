@@ -49,9 +49,10 @@ white-label vanity domain carries, and without it a custom domain cannot be
 exercised locally at all.
 
 `frontend/.env.development` is **committed** with the safe local default above
-and Vite loads it automatically in dev mode — no setup step. Because `tenant.ts`
-imports `PUBLIC_API_URL` from `$env/static/public`, the var must exist for the
-dev server to start, and the committed file guarantees it does. For a personal
+and Vite loads it automatically in dev mode — no setup step. Because `src/env.ts`
+declares `PUBLIC_API_URL` required (`tenant.ts` imports it from
+`$app/env/public`), the var must exist for the dev server to start and for a
+build to succeed, and the committed file guarantees it does. For a personal
 override, create a gitignored `frontend/.env.local` (it wins in Vite's
 precedence over `.env.development`).
 

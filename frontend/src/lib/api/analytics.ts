@@ -6,8 +6,8 @@
 // `cash_position`) stays inline in `routes/cfo/+page.svelte` — three
 // `api.get`s issued together through one request sequencer. This module exists
 // for the endpoint that could NOT be a GET.
-import { api } from '$lib/api';
-import type { ForecastVariance, ForecastVarianceInput } from '$lib/types/analytics';
+import { api } from '#lib/api.ts';
+import type { ForecastVariance, ForecastVarianceInput } from '#lib/types/analytics.ts';
 
 /**
  * Compare a caller-supplied forecast against the actual outflow per month.

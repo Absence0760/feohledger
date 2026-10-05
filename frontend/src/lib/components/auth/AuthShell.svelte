@@ -1,9 +1,9 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
 	import { asset } from '$app/paths';
-	import Atmosphere from '$lib/components/marketing/Atmosphere.svelte';
-	import BrandMark from '$lib/components/ui/BrandMark.svelte';
-	import { m } from '$lib/i18n/store.svelte';
+	import Atmosphere from '#lib/components/marketing/Atmosphere.svelte';
+	import BrandMark from '#lib/components/ui/BrandMark.svelte';
+	import { m } from '#lib/i18n/store.svelte.ts';
 
 	/**
 	 * The split-screen frame every pre-auth employee page renders inside: the
@@ -83,7 +83,7 @@
 			     depicts, so an alt text would announce the same idea twice. -->
 			<img
 				class="panel-art"
-				src={asset('/marketing/tally-split.webp')}
+				src={asset('marketing/tally-split.webp')}
 				width="1100"
 				height="460"
 				alt=""

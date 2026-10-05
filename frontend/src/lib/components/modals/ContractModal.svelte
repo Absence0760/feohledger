@@ -3,22 +3,22 @@
 		Contract,
 		ContractType,
 		ContractLineItemInput
-	} from '$lib/types/contract';
+	} from '#lib/types/contract.ts';
 	import {
 		CONTRACT_TYPES,
 		CONTRACT_TYPE_LABEL_KEYS,
 		contractStatusLabelKey,
 		STATUS_TONES
-	} from '$lib/types/contract';
-	import { auth } from '$lib/stores/auth.svelte';
-	import Badge from '$lib/components/ui/Badge.svelte';
-	import Modal from '$lib/components/ui/Modal.svelte';
-	import Money from '$lib/components/ui/Money.svelte';
-	import VendorPicker from '$lib/components/ui/VendorPicker.svelte';
-	import { toast } from '$lib/components/ui/Toast.svelte';
-	import { m } from '$lib/i18n/store.svelte';
-	import type { MoneyAmount } from '$lib/utils/money';
-	import { isMoneyInput } from '$lib/utils/moneyInput';
+	} from '#lib/types/contract.ts';
+	import { auth } from '#lib/stores/auth.svelte.ts';
+	import Badge from '#lib/components/ui/Badge.svelte';
+	import Modal from '#lib/components/ui/Modal.svelte';
+	import Money from '#lib/components/ui/Money.svelte';
+	import VendorPicker from '#lib/components/ui/VendorPicker.svelte';
+	import { toast } from '#lib/components/ui/Toast.svelte';
+	import { m } from '#lib/i18n/store.svelte.ts';
+	import type { MoneyAmount } from '#lib/utils/money.ts';
+	import { isMoneyInput } from '#lib/utils/moneyInput.ts';
 	import {
 		createContract,
 		updateContract,
@@ -29,7 +29,7 @@
 		cancelContract,
 		renewContract,
 		createPoFromContract
-	} from '$lib/api/contracts';
+	} from '#lib/api/contracts.ts';
 
 	let {
 		contract,

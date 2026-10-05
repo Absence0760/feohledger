@@ -327,7 +327,7 @@ if [[ "$FILE" == */src/* && "$FILE" != */api.ts && "$FILE" != */portalApi.ts ]];
     ln="${m%%:*}"
     register "raw-fetch-in-component" "$ln" \
       "Direct fetch() bypasses api.ts — no Bearer header, no X-Tenant-Slug, no 401-bounce" \
-      "Use api.get/post/patch/delete from \$lib/api"
+      "Use api.get/post/patch/delete from #lib/api"
   done < <(grep -nE '\bfetch\(' "$FILE" | grep -v 'api\.ts')
 fi
 

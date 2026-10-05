@@ -10,9 +10,9 @@ import {
 	positivePayFileTypeLabelKey,
 	positivePayStatusLabelKey
 } from './positivePay';
-import { CATALOGUE_LOADERS } from '$lib/i18n/catalogues';
-import { SUPPORTED_LOCALES } from '$lib/i18n/locale';
-import { en } from '$lib/i18n/locales/en';
+import { CATALOGUE_LOADERS } from '#lib/i18n/catalogues.ts';
+import { SUPPORTED_LOCALES } from '#lib/i18n/locale.ts';
+import { en } from '#lib/i18n/locales/en.ts';
 
 /**
  * Map-completeness guard for the Positive Pay label maps.

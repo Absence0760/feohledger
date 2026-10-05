@@ -1,4 +1,4 @@
-import { getActiveFormatLocale } from '$lib/i18n/formatLocale';
+import { getActiveFormatLocale } from '#lib/i18n/formatLocale.ts';
 
 /**
  * `Intl.RelativeTimeFormat` is not free to construct and `timeAgo` runs once
@@ -34,7 +34,7 @@ function relativeFormatter(numeric: 'auto' | 'always'): Intl.RelativeTimeFormat 
  * inside an otherwise-German page. `Intl` was chosen over ICU plural message
  * keys because this module must stay importable under vitest's node
  * environment: `m()` lives in `i18n/store.svelte.ts`, a rune module that
- * imports `$app/environment`, and pulling it in here would break both the
+ * imports `$app/env`, and pulling it in here would break both the
  * pure-module contract and the unit tests. `Intl` also gets every locale's
  * plural rules for free and needs no catalogue keys at all.
  *

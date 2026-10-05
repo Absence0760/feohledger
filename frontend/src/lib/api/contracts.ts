@@ -1,15 +1,15 @@
 // Typed helpers for the contract endpoints. All requests route through the
 // shared `api` client (Bearer + X-Tenant-Slug + 401-bounce). Mirrors the
 // pattern of `src/lib/api/tax.ts` / `audit.ts`.
-import { api } from '$lib/api';
-import type { MatchingIdsResponse } from '$lib/utils/pagination';
-import { triggerDownload } from '$lib/utils/download';
-import type { MoneyString } from '$lib/utils/money';
+import { api } from '#lib/api.ts';
+import type { MatchingIdsResponse } from '#lib/utils/pagination.ts';
+import { triggerDownload } from '#lib/utils/download.ts';
+import type { MoneyString } from '#lib/utils/money.ts';
 import type {
 	Contract,
 	ContractCreate,
 	ContractListResponse
-} from '$lib/types/contract';
+} from '#lib/types/contract.ts';
 
 export interface ContractListParams {
 	status?: string;

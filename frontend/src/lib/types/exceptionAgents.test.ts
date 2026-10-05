@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { en } from '$lib/i18n/locales/en';
+import { en } from '#lib/i18n/locales/en.ts';
 import {
 	ACTION_LABEL_KEYS,
 	AUTONOMY_LEVELS,

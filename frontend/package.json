@@ -4,8 +4,12 @@
 	"version": "0.0.1",
 	"packageManager": "pnpm@10.12.4",
 	"private": true,
+	"imports": {
+		"#lib": "./src/lib",
+		"#lib/*": "./src/lib/*"
+	},
 	"scripts": {
-		"//": "`prepare` runs automatically after `pnpm install`. svelte-kit sync generates .svelte-kit/tsconfig.json, which the checked-in tsconfig.json extends — so ANY TypeScript transform needs it, vitest included. It used to appear only as a prefix on `check`, leaving `test:unit` with an undeclared dependency on some other script having run first: a fresh clone (or a CI job that runs the tests before the typecheck) failed with 21 files at TSCONFIG_ERROR and zero tests executed. Declaring it here makes the ordering irrelevant.",
+		"//": "`prepare` runs automatically after `pnpm install`. svelte-kit sync generates node_modules/$app/tsconfig.json, which the checked-in tsconfig.json extends — so ANY TypeScript transform needs it, vitest included. It used to appear only as a prefix on `check`, leaving `test:unit` with an undeclared dependency on some other script having run first: a fresh clone (or a CI job that runs the tests before the typecheck) failed with 21 files at TSCONFIG_ERROR and zero tests executed. Declaring it here makes the ordering irrelevant.",
 		"prepare": "svelte-kit sync",
 		"dev": "vite dev --port 7777",
 		"build": "vite build",
@@ -23,8 +27,8 @@
 		"@axe-core/playwright": "^4.13.0",
 		"@iconify-json/material-symbols": "1.2.93",
 		"@playwright/test": "1.63.0",
-		"@sveltejs/adapter-static": "3.0.10",
-		"@sveltejs/kit": "2.70.3",
+		"@sveltejs/adapter-static": "4.0.0",
+		"@sveltejs/kit": "3.0.0",
 		"@sveltejs/vite-plugin-svelte": "7.3.1",
 		"@types/node": "^26.6.4",
 		"axe-core": "^4.13.0",

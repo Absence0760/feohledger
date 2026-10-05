@@ -5,7 +5,7 @@
 		ReconStatus,
 		ReconClassification,
 		StatementLineInput
-	} from '$lib/types/vendorStatementRecon';
+	} from '#lib/types/vendorStatementRecon.ts';
 	import {
 		reconStatusLabelKey,
 		RECON_STATUS_TONES,
@@ -16,25 +16,25 @@
 		formatExtractionConfidence,
 		isMachineRead,
 		sourceStatementFilename
-	} from '$lib/types/vendorStatementRecon';
-	import type { ReconSourceFormat } from '$lib/types/vendorStatementRecon';
-	import { auth } from '$lib/stores/auth.svelte';
-	import Badge from '$lib/components/ui/Badge.svelte';
-	import Modal from '$lib/components/ui/Modal.svelte';
-	import Money from '$lib/components/ui/Money.svelte';
-	import RowAction from '$lib/components/ui/RowAction.svelte';
-	import VendorPicker from '$lib/components/ui/VendorPicker.svelte';
-	import { toast } from '$lib/components/ui/Toast.svelte';
-	import { m } from '$lib/i18n/store.svelte';
-	import { formatDate } from '$lib/utils/time';
-	import { normalizeMoneyInput } from '$lib/utils/moneyInput';
+	} from '#lib/types/vendorStatementRecon.ts';
+	import type { ReconSourceFormat } from '#lib/types/vendorStatementRecon.ts';
+	import { auth } from '#lib/stores/auth.svelte.ts';
+	import Badge from '#lib/components/ui/Badge.svelte';
+	import Modal from '#lib/components/ui/Modal.svelte';
+	import Money from '#lib/components/ui/Money.svelte';
+	import RowAction from '#lib/components/ui/RowAction.svelte';
+	import VendorPicker from '#lib/components/ui/VendorPicker.svelte';
+	import { toast } from '#lib/components/ui/Toast.svelte';
+	import { m } from '#lib/i18n/store.svelte.ts';
+	import { formatDate } from '#lib/utils/time.ts';
+	import { normalizeMoneyInput } from '#lib/utils/moneyInput.ts';
 	import {
 		createReconciliation,
 		uploadReconciliation,
 		resolveLine,
 		getReconciliation,
 		downloadSourceStatement
-	} from '$lib/api/vendorStatementRecon';
+	} from '#lib/api/vendorStatementRecon.ts';
 
 	let {
 		recon,

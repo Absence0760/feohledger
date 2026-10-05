@@ -8,7 +8,7 @@ import {
 	type CorridorQuote,
 	type CorridorQuoteComparison
 } from './corridorQuote';
-import { en } from '$lib/i18n/locales/en';
+import { en } from '#lib/i18n/locales/en.ts';
 
 function quote(over: Partial<CorridorQuote> = {}): CorridorQuote {
 	return {

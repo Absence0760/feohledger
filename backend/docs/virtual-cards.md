@@ -524,7 +524,7 @@ on a status that isn't the required predecessor, and write an append-only
 #### The UI
 
 The `/payments` **Cards** tab is the surface (`frontend/src/routes/payments/
-+page.svelte`, over `$lib/api/cards.ts` + `$lib/types/cardRebate.ts`). It
++page.svelte`, over `#lib/api/cards.ts` + `#lib/types/cardRebate.ts`). It
 renders a **Rebates** table — period, card, rate, amount, status — above the
 cards table, and offers **exactly one** transition per row: `Confirm` on a
 `pending` rebate, `Mark paid out` on a `confirmed` one, and nothing at all on

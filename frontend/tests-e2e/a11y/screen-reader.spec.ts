@@ -11,7 +11,7 @@ import { expect, test } from '../fixtures/helpers';
  *   - no positive tabindex hijacking the tab order (2.4.3)
  *   - dialogs trap focus on open and restore it to the trigger on Esc
  *     (2.1.2 No Keyboard Trap / 2.4.3 Focus Order) — exercises the shared
- *     `$lib/actions/focusTrap` action
+ *     `#lib/actions/focusTrap` action
  *
  * The literal device pass (VoiceOver / NVDA / TalkBack) still has to be run by a
  * human against the checklist in docs/accessibility-screen-reader-checklist.md;

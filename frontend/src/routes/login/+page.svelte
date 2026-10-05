@@ -1,12 +1,12 @@
 <script lang="ts">
-	import AuthShell from '$lib/components/auth/AuthShell.svelte';
-	import BrandMark from '$lib/components/ui/BrandMark.svelte';
-	import { auth } from '$lib/stores/auth.svelte';
+	import AuthShell from '#lib/components/auth/AuthShell.svelte';
+	import BrandMark from '#lib/components/ui/BrandMark.svelte';
+	import { auth } from '#lib/stores/auth.svelte.ts';
 	import { goto } from '$app/navigation';
 	import { onMount } from 'svelte';
-	import { api } from '$lib/api';
-	import { getApiBase, getTenantSlug } from '$lib/tenant';
-	import { m } from '$lib/i18n/store.svelte';
+	import { api } from '#lib/api.ts';
+	import { getApiBase, getTenantSlug } from '#lib/tenant.ts';
+	import { m } from '#lib/i18n/store.svelte.ts';
 
 	interface SSOConfigPublic {
 		enabled: boolean;
@@ -36,7 +36,7 @@
 	};
 
 	// `?slug=` is now OPTIONAL on every SSO/SAML entry point: on a customer's
-	// vanity host there is no slug in the hostname (`$lib/hostRouting.ts`
+	// vanity host there is no slug in the hostname (`#lib/hostRouting.ts`
 	// classifies it and `getTenantSlug()` returns null so no `X-Tenant-Slug`
 	// header suppresses the backend's lookup), and the backend resolves the
 	// tenant from the request `Host` against its registered custom domains

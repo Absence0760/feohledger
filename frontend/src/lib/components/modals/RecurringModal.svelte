@@ -4,24 +4,24 @@
 		RecurringCadence,
 		UpcomingSchedule,
 		RecurringHistory
-	} from '$lib/types/recurring';
+	} from '#lib/types/recurring.ts';
 	import {
 		RECURRING_CADENCES,
 		CADENCE_LABEL_KEYS,
 		recurringStatusLabelKey,
 		STATUS_TONES
-	} from '$lib/types/recurring';
-	import { auth } from '$lib/stores/auth.svelte';
-	import Badge from '$lib/components/ui/Badge.svelte';
-	import Modal from '$lib/components/ui/Modal.svelte';
-	import Money from '$lib/components/ui/Money.svelte';
-	import StatusBadge from '$lib/components/ui/StatusBadge.svelte';
-	import VendorPicker from '$lib/components/ui/VendorPicker.svelte';
-	import type { InvoiceStatus } from '$lib/types/invoice';
-	import { toast } from '$lib/components/ui/Toast.svelte';
-	import { m } from '$lib/i18n/store.svelte';
-	import { formatDate } from '$lib/utils/time';
-	import { normalizeMoneyInput } from '$lib/utils/moneyInput';
+	} from '#lib/types/recurring.ts';
+	import { auth } from '#lib/stores/auth.svelte.ts';
+	import Badge from '#lib/components/ui/Badge.svelte';
+	import Modal from '#lib/components/ui/Modal.svelte';
+	import Money from '#lib/components/ui/Money.svelte';
+	import StatusBadge from '#lib/components/ui/StatusBadge.svelte';
+	import VendorPicker from '#lib/components/ui/VendorPicker.svelte';
+	import type { InvoiceStatus } from '#lib/types/invoice.ts';
+	import { toast } from '#lib/components/ui/Toast.svelte';
+	import { m } from '#lib/i18n/store.svelte.ts';
+	import { formatDate } from '#lib/utils/time.ts';
+	import { normalizeMoneyInput } from '#lib/utils/moneyInput.ts';
 	import {
 		createRecurring,
 		updateRecurring,
@@ -31,7 +31,7 @@
 		generateRecurringNow,
 		getUpcomingSchedule,
 		getGeneratedHistory
-	} from '$lib/api/recurring';
+	} from '#lib/api/recurring.ts';
 
 	let {
 		template,

@@ -1,38 +1,38 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
-	import { appendUnique } from '$lib/utils/pagination';
-	import { createRequestSequencer } from '$lib/utils/requestSequence';
-	import { hasPartialRealisedSet, partialRealisedCount } from '$lib/utils/discountPartialSet';
+	import { appendUnique } from '#lib/utils/pagination.ts';
+	import { createRequestSequencer } from '#lib/utils/requestSequence.ts';
+	import { hasPartialRealisedSet, partialRealisedCount } from '#lib/utils/discountPartialSet.ts';
 	import {
 		formatAmountWithoutCurrency,
 		recommendationCurrency
-	} from '$lib/utils/discountRecommendation';
-	import { normalizeMoneyInput } from '$lib/utils/moneyInput';
-	import { auth } from '$lib/stores/auth.svelte';
-	import { orgCurrency } from '$lib/stores/orgSettings.svelte';
-	import { formatMoney, scaleMoney } from '$lib/utils/money';
-	import type { MoneyAmount, MoneyString } from '$lib/utils/money';
-	import { formatDate } from '$lib/utils/time';
-	import { toast } from '$lib/components/ui/Toast.svelte';
-	import { m } from '$lib/i18n/store.svelte';
-	import PageHeader from '$lib/components/ui/PageHeader.svelte';
-	import KpiCard from '$lib/components/ui/KpiCard.svelte';
-	import DataTable from '$lib/components/ui/DataTable.svelte';
-	import FilterChips from '$lib/components/ui/FilterChips.svelte';
-	import Modal from '$lib/components/ui/Modal.svelte';
-	import Money from '$lib/components/ui/Money.svelte';
-	import RowAction from '$lib/components/ui/RowAction.svelte';
-	import DiscountTierBar from '$lib/components/ui/DiscountTierBar.svelte';
-	import Badge from '$lib/components/ui/Badge.svelte';
-	import BulkNegotiationModal from '$lib/components/modals/BulkNegotiationModal.svelte';
+	} from '#lib/utils/discountRecommendation.ts';
+	import { normalizeMoneyInput } from '#lib/utils/moneyInput.ts';
+	import { auth } from '#lib/stores/auth.svelte.ts';
+	import { orgCurrency } from '#lib/stores/orgSettings.svelte.ts';
+	import { formatMoney, scaleMoney } from '#lib/utils/money.ts';
+	import type { MoneyAmount, MoneyString } from '#lib/utils/money.ts';
+	import { formatDate } from '#lib/utils/time.ts';
+	import { toast } from '#lib/components/ui/Toast.svelte';
+	import { m } from '#lib/i18n/store.svelte.ts';
+	import PageHeader from '#lib/components/ui/PageHeader.svelte';
+	import KpiCard from '#lib/components/ui/KpiCard.svelte';
+	import DataTable from '#lib/components/ui/DataTable.svelte';
+	import FilterChips from '#lib/components/ui/FilterChips.svelte';
+	import Modal from '#lib/components/ui/Modal.svelte';
+	import Money from '#lib/components/ui/Money.svelte';
+	import RowAction from '#lib/components/ui/RowAction.svelte';
+	import DiscountTierBar from '#lib/components/ui/DiscountTierBar.svelte';
+	import Badge from '#lib/components/ui/Badge.svelte';
+	import BulkNegotiationModal from '#lib/components/modals/BulkNegotiationModal.svelte';
 	import {
 		getDiscountDashboard,
 		listDiscountOffers,
 		acceptDiscountOffer,
 		declineDiscountOffer,
 		optimizeDiscounts
-	} from '$lib/api/discounts';
-	import { DISCOUNT_STATUS_TONES } from '$lib/types/discounts';
+	} from '#lib/api/discounts.ts';
+	import { DISCOUNT_STATUS_TONES } from '#lib/types/discounts.ts';
 	import type {
 		DiscountDashboard,
 		DiscountOffer,
@@ -40,7 +40,7 @@
 		DiscountStatus,
 		DiscountStatusFilter,
 		DiscountOptimization
-	} from '$lib/types/discounts';
+	} from '#lib/types/discounts.ts';
 
 	// RBAC mirrors `backend/app/api/discounts.py`, which is the layer that
 	// actually enforces:
@@ -378,7 +378,7 @@
 
 		     Every card passes `null` rather than a figure until the dashboard
 		     response lands, so all five render the shared "no figure" dash
-		     (`$lib/utils/kpiValue`) instead of a formatted zero. Round 26 moved
+		     (`#lib/utils/kpiValue`) instead of a formatted zero. Round 26 moved
 		     the capture-rate card off the zero-while-loading pattern on its own,
 		     leaving the row saying two contradictory things at once; this is
 		     that decision applied to the whole row and pushed down into

@@ -6,14 +6,14 @@
 		DelayStepConfig,
 		WebhookMethod,
 		EmailRecipientKind,
-	} from '$lib/types/workflow';
-	import { m } from '$lib/i18n/store.svelte';
+	} from '#lib/types/workflow.ts';
+	import { m } from '#lib/i18n/store.svelte.ts';
 	import {
 		headersToRows,
 		rowsMatchHeaders,
 		rowsToHeaders,
 		type HeaderRow
-	} from '$lib/utils/webhookHeaders';
+	} from '#lib/utils/webhookHeaders.ts';
 	import { untrack } from 'svelte';
 
 	type Props = {

@@ -3,9 +3,9 @@
 // `ExpenseResponse` / `ExpenseReportResponse`). Money fields arrive as
 // numbers (backend `float(...)`); date/datetime fields are ISO strings.
 
-import type { BadgeTone } from '$lib/components/ui/badgeTone';
-import type { MessageKey } from '$lib/i18n/messages';
-import type { MoneyAmount, MoneyString } from '$lib/utils/money';
+import type { BadgeTone } from '#lib/components/ui/badgeTone.ts';
+import type { MessageKey } from '#lib/i18n/messages.ts';
+import type { MoneyAmount, MoneyString } from '#lib/utils/money.ts';
 
 export type ExpenseStatus = 'draft' | 'submitted' | 'approved' | 'rejected' | 'reimbursed';
 
@@ -265,7 +265,7 @@ export interface ExpenseCurrencyTotal {
  * total" and "Pending" described 20 rows while the "Expenses" card beside them
  * described every row. `by_currency` is grouped rather than summed — adding EUR
  * to USD produces a figure denominated in nothing (see
- * `$lib/utils/currencyGroups`).
+ * `#lib/utils/currencyGroups`).
  */
 export interface ExpenseSummary {
 	total: number;

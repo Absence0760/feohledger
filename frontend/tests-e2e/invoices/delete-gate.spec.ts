@@ -10,7 +10,7 @@ import { API_BASE, authedTenantHeaders, expect, tenantPsql, test } from '../fixt
  * only three of the six, so a `posted_in_erp` / `payment_scheduled` / `paid`
  * row rendered a Delete the user could arm and confirm — and every confirm
  * bought a "Cannot delete invoice in this status" error toast. The gate now
- * reads the shared `IMMUTABLE_STATUSES` in `$lib/types/invoice`.
+ * reads the shared `IMMUTABLE_STATUSES` in `#lib/types/invoice`.
  */
 
 async function createInvoice(

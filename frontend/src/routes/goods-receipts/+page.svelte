@@ -22,28 +22,28 @@
 	 * admin / ap_manager (`auth.isManager`). A clerk sees every inspection and
 	 * no button; `require_roles` refuses the write regardless.
 	 */
-	import { api } from '$lib/api';
-	import { MAX_PAGE_SIZE, appendUnique } from '$lib/utils/pagination';
-	import { createRequestSequencer } from '$lib/utils/requestSequence';
-	import PageHeader from '$lib/components/ui/PageHeader.svelte';
-	import DataTable from '$lib/components/ui/DataTable.svelte';
-	import Modal from '$lib/components/ui/Modal.svelte';
-	import RowLink from '$lib/components/ui/RowLink.svelte';
-	import Badge from '$lib/components/ui/Badge.svelte';
-	import type { BadgeTone } from '$lib/components/ui/badgeTone';
-	import Tabs from '$lib/components/ui/Tabs.svelte';
-	import { isRowOpenClick } from '$lib/utils/rowNav';
-	import { toast } from '$lib/components/ui/Toast.svelte';
-	import { m } from '$lib/i18n/store.svelte';
-	import type { MessageKey } from '$lib/i18n/messages';
-	import { formatDate } from '$lib/utils/time';
-	import { goodsReceiptTone } from '$lib/types/goodsReceipt';
-	import { auth } from '$lib/stores/auth.svelte';
-	import type { Inspection } from '$lib/api/inspections';
-	import { isInspectionResult, listInspections, syncInspections } from '$lib/api/inspections';
+	import { api } from '#lib/api.ts';
+	import { MAX_PAGE_SIZE, appendUnique } from '#lib/utils/pagination.ts';
+	import { createRequestSequencer } from '#lib/utils/requestSequence.ts';
+	import PageHeader from '#lib/components/ui/PageHeader.svelte';
+	import DataTable from '#lib/components/ui/DataTable.svelte';
+	import Modal from '#lib/components/ui/Modal.svelte';
+	import RowLink from '#lib/components/ui/RowLink.svelte';
+	import Badge from '#lib/components/ui/Badge.svelte';
+	import type { BadgeTone } from '#lib/components/ui/badgeTone.ts';
+	import Tabs from '#lib/components/ui/Tabs.svelte';
+	import { isRowOpenClick } from '#lib/utils/rowNav.ts';
+	import { toast } from '#lib/components/ui/Toast.svelte';
+	import { m } from '#lib/i18n/store.svelte.ts';
+	import type { MessageKey } from '#lib/i18n/messages.ts';
+	import { formatDate } from '#lib/utils/time.ts';
+	import { goodsReceiptTone } from '#lib/types/goodsReceipt.ts';
+	import { auth } from '#lib/stores/auth.svelte.ts';
+	import type { Inspection } from '#lib/api/inspections.ts';
+	import { isInspectionResult, listInspections, syncInspections } from '#lib/api/inspections.ts';
 	import RecordInspectionModal from './RecordInspectionModal.svelte';
 	import type { InspectableReceipt } from './RecordInspectionModal.svelte';
-	import { page as pageStore } from '$app/stores';
+	import { page as pageStore } from '$app/state';
 	import { replaceState } from '$app/navigation';
 	import { untrack } from 'svelte';
 
@@ -109,7 +109,7 @@
 	type TabKey = 'receipts' | 'inspections';
 
 	function initialTab(): TabKey {
-		return $pageStore.url.searchParams.get('tab') === 'inspections' ? 'inspections' : 'receipts';
+		return pageStore.url.searchParams.get('tab') === 'inspections' ? 'inspections' : 'receipts';
 	}
 
 	let tab = $state<TabKey>(initialTab());
@@ -170,7 +170,7 @@
 	$effect(() => {
 		const active = tab;
 		untrack(() => {
-			const url = new URL($pageStore.url);
+			const url = new URL(pageStore.url.href);
 			if (active === 'inspections') url.searchParams.set('tab', active);
 			else url.searchParams.delete('tab');
 			replaceState(`${url.pathname}${url.search}`, {});

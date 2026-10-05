@@ -1,17 +1,17 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
-	import { auth } from '$lib/stores/auth.svelte';
-	import PageHeader from '$lib/components/ui/PageHeader.svelte';
-	import DataTable from '$lib/components/ui/DataTable.svelte';
-	import Modal from '$lib/components/ui/Modal.svelte';
-	import RowLink from '$lib/components/ui/RowLink.svelte';
-	import RowAction from '$lib/components/ui/RowAction.svelte';
-	import FieldWarning from '$lib/components/ui/FieldWarning.svelte';
-	import { toast } from '$lib/components/ui/Toast.svelte';
-	import { m } from '$lib/i18n/store.svelte';
-	import { isRowOpenClick } from '$lib/utils/rowNav';
-	import { accentStrongContrast } from '$lib/stores/brandTheme';
-	import { formatRatio, WCAG_AA_NORMAL } from '$lib/a11y/contrast';
+	import { auth } from '#lib/stores/auth.svelte.ts';
+	import PageHeader from '#lib/components/ui/PageHeader.svelte';
+	import DataTable from '#lib/components/ui/DataTable.svelte';
+	import Modal from '#lib/components/ui/Modal.svelte';
+	import RowLink from '#lib/components/ui/RowLink.svelte';
+	import RowAction from '#lib/components/ui/RowAction.svelte';
+	import FieldWarning from '#lib/components/ui/FieldWarning.svelte';
+	import { toast } from '#lib/components/ui/Toast.svelte';
+	import { m } from '#lib/i18n/store.svelte.ts';
+	import { isRowOpenClick } from '#lib/utils/rowNav.ts';
+	import { accentStrongContrast } from '#lib/stores/brandTheme.ts';
+	import { formatRatio, WCAG_AA_NORMAL } from '#lib/a11y/contrast.ts';
 	import {
 		getPartnerOverview,
 		getChildBranding,
@@ -20,13 +20,13 @@
 		attachChild,
 		provisionChild,
 		detachChild
-	} from '$lib/api/partner';
+	} from '#lib/api/partner.ts';
 	import type {
 		ChildBranding,
 		ChildTenant,
 		PartnerOverview,
 		ProvisionedChild
-	} from '$lib/types/partner';
+	} from '#lib/types/partner.ts';
 
 	// RBAC: the backend gates every /api/partner endpoint to admin only and 403s
 	// the rest. Wait for `auth.user` to resolve before redirecting so we don't

@@ -1,7 +1,7 @@
 <script lang="ts">
-	import LegalPage from '$lib/legal/LegalPage.svelte';
-	import { resetConsent } from '$lib/components/ConsentBanner.svelte';
-	import { CONTACT, OPERATOR } from '$lib/legal/operator';
+	import LegalPage from '#lib/legal/LegalPage.svelte';
+	import { resetConsent } from '#lib/components/ConsentBanner.svelte';
+	import { CONTACT, OPERATOR } from '#lib/legal/operator.ts';
 
 	// Withdrawal has to be as easy as consent. Describing "clear your browser's
 	// site data" as the mechanism was accurate but not equivalent — so the

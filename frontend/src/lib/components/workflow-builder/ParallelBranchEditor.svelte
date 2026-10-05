@@ -1,7 +1,7 @@
 <script lang="ts">
-	import type { ParallelStepConfig, ParallelBranchConfig } from '$lib/types/workflow';
-	import type { AdminUser } from '$lib/types/admin';
-	import { m } from '$lib/i18n/store.svelte';
+	import type { ParallelStepConfig, ParallelBranchConfig } from '#lib/types/workflow.ts';
+	import type { AdminUser } from '#lib/types/admin.ts';
+	import { m } from '#lib/i18n/store.svelte.ts';
 
 	type Props = {
 		config: ParallelStepConfig;

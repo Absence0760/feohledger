@@ -1,14 +1,14 @@
 <script lang="ts">
-	import { auth } from '$lib/stores/auth.svelte';
-	import DataTable from '$lib/components/ui/DataTable.svelte';
-	import KpiCard from '$lib/components/ui/KpiCard.svelte';
-	import Modal from '$lib/components/ui/Modal.svelte';
-	import Money from '$lib/components/ui/Money.svelte';
-	import { toast } from '$lib/components/ui/Toast.svelte';
-	import { m } from '$lib/i18n/store.svelte';
-	import { formatPeriod } from '$lib/utils/time';
-	import { postForecastVariance } from '$lib/api/analytics';
-	import type { ForecastVariance } from '$lib/types/analytics';
+	import { auth } from '#lib/stores/auth.svelte.ts';
+	import DataTable from '#lib/components/ui/DataTable.svelte';
+	import KpiCard from '#lib/components/ui/KpiCard.svelte';
+	import Modal from '#lib/components/ui/Modal.svelte';
+	import Money from '#lib/components/ui/Money.svelte';
+	import { toast } from '#lib/components/ui/Toast.svelte';
+	import { m } from '#lib/i18n/store.svelte.ts';
+	import { formatPeriod } from '#lib/utils/time.ts';
+	import { postForecastVariance } from '#lib/api/analytics.ts';
+	import type { ForecastVariance } from '#lib/types/analytics.ts';
 	import {
 		collectForecastEntries,
 		unconvertedTotal,

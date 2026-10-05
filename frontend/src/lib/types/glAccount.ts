@@ -7,7 +7,7 @@
 //
 // No money lives here — a GL account is a code and a label, not an amount.
 
-import type { MessageKey } from '$lib/i18n/messages';
+import type { MessageKey } from '#lib/i18n/messages.ts';
 
 /**
  * One row of `GET /api/gl-accounts`.
@@ -68,7 +68,7 @@ export type GlAccountOption = Pick<
 
 /**
  * The entity context a picker label needs — structurally satisfied by
- * `entityStore` (`$lib/stores/entity.svelte`), which is where every caller
+ * `entityStore` (`#lib/stores/entity.svelte`), which is where every caller
  * gets it from. Declared structurally rather than importing the store so this
  * module stays a pure, unit-testable types module with no rune dependency.
  */

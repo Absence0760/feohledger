@@ -5,11 +5,11 @@
 	// docs/cash-flow-copilot.md §5). This panel lists them and, on demand,
 	// fetches the comparison against what actually got paid. Everything here is
 	// read-only except the delete, which discards the baseline and nothing else.
-	import Money from '$lib/components/ui/Money.svelte';
-	import { formatDate, formatPeriod } from '$lib/utils/time';
-	import { m } from '$lib/i18n/store.svelte';
-	import { deleteSavedPlan, getSavedPlanVariance, listSavedPlans } from '$lib/api/cashFlow';
-	import type { PlanVarianceResult, SavedPlanSummary } from '$lib/types/cashFlow';
+	import Money from '#lib/components/ui/Money.svelte';
+	import { formatDate, formatPeriod } from '#lib/utils/time.ts';
+	import { m } from '#lib/i18n/store.svelte.ts';
+	import { deleteSavedPlan, getSavedPlanVariance, listSavedPlans } from '#lib/api/cashFlow.ts';
+	import type { PlanVarianceResult, SavedPlanSummary } from '#lib/types/cashFlow.ts';
 
 	let {
 		consolidated = false

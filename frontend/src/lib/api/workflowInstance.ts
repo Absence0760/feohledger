@@ -2,8 +2,8 @@
 // (`GET /api/invoices/{id}/workflow`) — the chain-progress stepper's data
 // source. Routes through the shared `api` client (Bearer + X-Tenant-Slug +
 // 401-bounce).
-import { api, ApiError } from '$lib/api';
-import type { WorkflowInstanceDetail } from '$lib/types/workflowInstance';
+import { api, ApiError } from '#lib/api.ts';
+import type { WorkflowInstanceDetail } from '#lib/types/workflowInstance.ts';
 
 /** Fetch the live workflow instance (steps + `state_data.approval_levels`)
  *  for an invoice. Returns `null` on a 404 — an invoice with no workflow

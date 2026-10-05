@@ -13,12 +13,12 @@
 	 * summed across them.
 	 */
 	import { onMount } from 'svelte';
-	import { getPortalSummary, type PortalSummary } from '$lib/portalApi';
-	import { m } from '$lib/i18n/store.svelte';
-	import type { MessageKey } from '$lib/i18n/messages';
-	import KpiCard from '$lib/components/ui/KpiCard.svelte';
-	import EmptyState from '$lib/components/ui/EmptyState.svelte';
-	import Money from '$lib/components/ui/Money.svelte';
+	import { getPortalSummary, type PortalSummary } from '#lib/portalApi.ts';
+	import { m } from '#lib/i18n/store.svelte.ts';
+	import type { MessageKey } from '#lib/i18n/messages.ts';
+	import KpiCard from '#lib/components/ui/KpiCard.svelte';
+	import EmptyState from '#lib/components/ui/EmptyState.svelte';
+	import Money from '#lib/components/ui/Money.svelte';
 
 	// `change_type` is a backend vocabulary string; it must never render raw in
 	// front of a supplier. Typed map so `m()` stays statically checked
@@ -126,7 +126,7 @@
 						{m('portal.home.actionRequired.body', { count: summary.invoices_action_required })}
 					</p>
 					<!-- `phase` carries the stable phase ID from
-					     `$lib/types/portalStatus`, never a display label — the
+					     `#lib/types/portalStatus`, never a display label — the
 					     chips used to be keyed by their English text, which a
 					     translated portal would have stopped matching. -->
 					<a class="btn-primary" href="/portal/invoices?phase=rejected">

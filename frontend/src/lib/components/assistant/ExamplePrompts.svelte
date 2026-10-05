@@ -1,6 +1,6 @@
 <script lang="ts">
-	import { EXAMPLE_PROMPTS } from '$lib/types/assistant';
-	import { m } from '$lib/i18n/store.svelte';
+	import { EXAMPLE_PROMPTS } from '#lib/types/assistant.ts';
+	import { m } from '#lib/i18n/store.svelte.ts';
 
 	// Clicking a prompt fills + sends it (the page wires `onpick`).
 	let { onpick }: { onpick: (prompt: string) => void } = $props();

@@ -2,8 +2,8 @@
 // `stores/invoices.svelte.ts` (list/CRUD) or the modal's inline `api` calls.
 // Routes through the shared `api` client (Bearer + X-Tenant-Slug + X-Entity-ID
 // + 401-bounce) — never raw fetch. Backend: `backend/app/api/invoices.py`.
-import { api } from '$lib/api';
-import type { Invoice } from '$lib/types/invoice';
+import { api } from '#lib/api.ts';
+import type { Invoice } from '#lib/types/invoice.ts';
 
 /**
  * Route an inter-company charge — generate the mirror **payable** under the

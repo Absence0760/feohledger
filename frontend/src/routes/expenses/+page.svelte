@@ -13,7 +13,7 @@
 		CorporateCardTransaction,
 		CardMatchSuggestion,
 		ExpenseSummary
-	} from '$lib/types/expense';
+	} from '#lib/types/expense.ts';
 	import {
 		EXPENSE_FILTER_STATUSES,
 		EXPENSE_STATUS_LABEL_KEYS,
@@ -27,10 +27,10 @@
 		RECONCILIATION_STATUSES,
 		reconciliationStatusLabelKey,
 		RECONCILIATION_STATUS_TONES
-	} from '$lib/types/expense';
-	import { expenseStore } from '$lib/stores/expenses.svelte';
-	import { auth } from '$lib/stores/auth.svelte';
-	import { orgCurrency } from '$lib/stores/orgSettings.svelte';
+	} from '#lib/types/expense.ts';
+	import { expenseStore } from '#lib/stores/expenses.svelte.ts';
+	import { auth } from '#lib/stores/auth.svelte.ts';
+	import { orgCurrency } from '#lib/stores/orgSettings.svelte.ts';
 	import {
 		listGlAccounts,
 		exportExpensesCsv,
@@ -62,36 +62,36 @@
 		getExpenseIds,
 		type ExpenseListParams,
 		type GlAccountOption
-	} from '$lib/api/expenses';
-	import Badge from '$lib/components/ui/Badge.svelte';
-	import Modal from '$lib/components/ui/Modal.svelte';
-	import Tabs from '$lib/components/ui/Tabs.svelte';
-	import PolicyModal from '$lib/components/modals/PolicyModal.svelte';
-	import PageHeader from '$lib/components/ui/PageHeader.svelte';
-	import SearchBox from '$lib/components/ui/SearchBox.svelte';
-	import FilterChips from '$lib/components/ui/FilterChips.svelte';
-	import DataTable from '$lib/components/ui/DataTable.svelte';
-	import KpiCard from '$lib/components/ui/KpiCard.svelte';
-	import RowLink from '$lib/components/ui/RowLink.svelte';
-	import RowAction from '$lib/components/ui/RowAction.svelte';
-	import BulkBar from '$lib/components/ui/BulkBar.svelte';
-	import Money from '$lib/components/ui/Money.svelte';
-	import { DEFAULT_CURRENCY, formatMoney } from '$lib/utils/money';
-	import { formatCurrencyTotals } from '$lib/utils/currencyGroups';
-	import { formatDate } from '$lib/utils/time';
-	import ExpenseModal from '$lib/components/modals/ExpenseModal.svelte';
-	import { toast } from '$lib/components/ui/Toast.svelte';
-	import { isRowOpenClick } from '$lib/utils/rowNav';
-	import { pruneSelection } from '$lib/utils/selection';
-	import { page } from '$app/stores';
+	} from '#lib/api/expenses.ts';
+	import Badge from '#lib/components/ui/Badge.svelte';
+	import Modal from '#lib/components/ui/Modal.svelte';
+	import Tabs from '#lib/components/ui/Tabs.svelte';
+	import PolicyModal from '#lib/components/modals/PolicyModal.svelte';
+	import PageHeader from '#lib/components/ui/PageHeader.svelte';
+	import SearchBox from '#lib/components/ui/SearchBox.svelte';
+	import FilterChips from '#lib/components/ui/FilterChips.svelte';
+	import DataTable from '#lib/components/ui/DataTable.svelte';
+	import KpiCard from '#lib/components/ui/KpiCard.svelte';
+	import RowLink from '#lib/components/ui/RowLink.svelte';
+	import RowAction from '#lib/components/ui/RowAction.svelte';
+	import BulkBar from '#lib/components/ui/BulkBar.svelte';
+	import Money from '#lib/components/ui/Money.svelte';
+	import { DEFAULT_CURRENCY, formatMoney } from '#lib/utils/money.ts';
+	import { formatCurrencyTotals } from '#lib/utils/currencyGroups.ts';
+	import { formatDate } from '#lib/utils/time.ts';
+	import ExpenseModal from '#lib/components/modals/ExpenseModal.svelte';
+	import { toast } from '#lib/components/ui/Toast.svelte';
+	import { isRowOpenClick } from '#lib/utils/rowNav.ts';
+	import { pruneSelection } from '#lib/utils/selection.ts';
+	import { page } from '$app/state';
 	import { replaceState } from '$app/navigation';
 	import { untrack } from 'svelte';
-	import { createRequestSequencer } from '$lib/utils/requestSequence';
-	import { appendUnique } from '$lib/utils/pagination';
-	import { m } from '$lib/i18n/store.svelte';
-	import { normalizeMoneyInput } from '$lib/utils/moneyInput';
-	import SortableHeader from '$lib/components/ui/SortableHeader.svelte';
-	import { toggleSort, type SortOrder } from '$lib/utils/sort';
+	import { createRequestSequencer } from '#lib/utils/requestSequence.ts';
+	import { appendUnique } from '#lib/utils/pagination.ts';
+	import { m } from '#lib/i18n/store.svelte.ts';
+	import { normalizeMoneyInput } from '#lib/utils/moneyInput.ts';
+	import SortableHeader from '#lib/components/ui/SortableHeader.svelte';
+	import { toggleSort, type SortOrder } from '#lib/utils/sort.ts';
 
 	const canCreate = $derived(auth.hasAnyRole('admin', 'ap_manager', 'ap_clerk'));
 	// Policy CRUD + report/pre-approval REJECT = admin | ap_manager.
@@ -114,18 +114,18 @@
 
 	// --- Tabs ---
 	type Tab = 'expenses' | 'reports' | 'policies' | 'preapprovals' | 'cards';
-	let tab = $state<Tab>(($page.url.searchParams.get('tab') as Tab) ?? 'expenses');
+	let tab = $state<Tab>((page.url.searchParams.get('tab') as Tab) ?? 'expenses');
 
 	// --- Expenses tab filter state (URL-backed) ---
-	let search = $state($page.url.searchParams.get('search') ?? '');
+	let search = $state(page.url.searchParams.get('search') ?? '');
 	// The search term the newest issued list request carried. Written by
 	// `loadExpenses()`, read by the debounce effect — see the comment there.
-	let appliedSearch = $state(($page.url.searchParams.get('search') ?? '').trim());
-	let statusFilter = $state<string>($page.url.searchParams.get('status') ?? 'all');
+	let appliedSearch = $state((page.url.searchParams.get('search') ?? '').trim());
+	let statusFilter = $state<string>(page.url.searchParams.get('status') ?? 'all');
 	// Column sort (expenses tab only) — URL-backed via the same `syncUrl()`
 	// below. `null` field = the backend's own default order (most-recent first).
-	let sortField = $state<string | null>($page.url.searchParams.get('sort'));
-	let sortOrder = $state<SortOrder>(($page.url.searchParams.get('order') as SortOrder) ?? 'desc');
+	let sortField = $state<string | null>(page.url.searchParams.get('sort'));
+	let sortOrder = $state<SortOrder>((page.url.searchParams.get('order') as SortOrder) ?? 'desc');
 
 	// --- Modal + selection state ---
 	let showCreate = $state(false);
@@ -210,7 +210,7 @@
 	// across currencies and rendered the result in the org default, so EUR 100 +
 	// USD 100 read as one meaningless "200". The rollup groups by currency and
 	// never adds across them — the rule `/payments` already applies via
-	// `groupAmountsByCurrency` (`$lib/utils/currencyGroups`).
+	// `groupAmountsByCurrency` (`#lib/utils/currencyGroups`).
 	let expenseSummary = $state<ExpenseSummary | null>(null);
 
 	// Its own sequencer, not the store's: this is an independent request that
@@ -311,7 +311,7 @@
 	}
 
 	// Reflect the live filter state into the URL. EVERY read in here is
-	// untracked, `$page.url` included, because syncUrl() is a WRITER called
+	// untracked, `page.url` included, because syncUrl() is a WRITER called
 	// from the filter `$effect`s below — not a source of dependencies:
 	//   - the URL read would self-trigger the effect that writes it via
 	//     replaceState (Svelte effect_update_depth_exceeded);
@@ -323,7 +323,7 @@
 	//     reading them directly, so nothing here needs to be tracked.
 	function syncUrl() {
 		untrack(() => {
-			const url = new URL($page.url);
+			const url = new URL(page.url.href);
 			if (tab !== 'expenses') url.searchParams.set('tab', tab);
 			else url.searchParams.delete('tab');
 			if (statusFilter !== 'all') url.searchParams.set('status', statusFilter);
@@ -863,7 +863,7 @@
 	// ======================== Pre-approvals tab ========================
 	let preapprovals = $state<ExpensePreapproval[]>([]);
 	let preapprovalsLoading = $state(false);
-	let preapprovalStatus = $state<string>($page.url.searchParams.get('pa_status') ?? 'all');
+	let preapprovalStatus = $state<string>(page.url.searchParams.get('pa_status') ?? 'all');
 	let showNewPreapproval = $state(false);
 	let paBusy = $state(false);
 	let paTitle = $state('');
@@ -985,7 +985,7 @@
 
 	// Same rule as the reports list: `cardsTotal` is the whole set.
 	let cardsHasMore = $derived(cardTxns.length < cardsTotal);
-	let reconFilter = $state<string>($page.url.searchParams.get('recon') ?? 'all');
+	let reconFilter = $state<string>(page.url.searchParams.get('recon') ?? 'all');
 	let cardBusy = $state(false);
 	let cardFileInput = $state<HTMLInputElement>();
 
@@ -1872,7 +1872,7 @@
 	}
 
 	/* Every pill on this page is `<Badge>`. The tone per status lives beside the
-	   label map in `$lib/types/expense` — four of them, one per vocabulary this
+	   label map in `#lib/types/expense` — four of them, one per vocabulary this
 	   page badges (expense, report, pre-approval, card reconciliation) — so the
 	   list page, the report-detail tables and `ExpenseModal` can't tint the same
 	   status two different shades, which is what they were doing (.12 alpha

@@ -3,9 +3,9 @@
 	// `result.columns`, with money-typed measures rendered through <Money> (the
 	// values are exact decimal strings, never re-computed here). Paginates over
 	// `total_rows`.
-	import { cellCurrency, type ReportResult } from '$lib/types/reports';
-	import DataTable from '$lib/components/ui/DataTable.svelte';
-	import Money from '$lib/components/ui/Money.svelte';
+	import { cellCurrency, type ReportResult } from '#lib/types/reports.ts';
+	import DataTable from '#lib/components/ui/DataTable.svelte';
+	import Money from '#lib/components/ui/Money.svelte';
 
 	interface Props {
 		result: ReportResult;

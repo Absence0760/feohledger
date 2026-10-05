@@ -1,4 +1,4 @@
-import type { MoneyAmount, MoneyString } from '$lib/utils/money';
+import type { MoneyAmount, MoneyString } from '#lib/utils/money.ts';
 
 export type WorkflowStepType =
 	| 'extraction'

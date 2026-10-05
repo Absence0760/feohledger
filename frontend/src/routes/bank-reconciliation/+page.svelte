@@ -30,39 +30,39 @@
 		Discrepancy,
 		UnclearedPayment,
 		UnmatchedDebit
-	} from '$lib/types/bankReconciliation';
-	import { isTruncated } from '$lib/types/bankReconciliation';
+	} from '#lib/types/bankReconciliation.ts';
+	import { isTruncated } from '#lib/types/bankReconciliation.ts';
 	import {
 		deleteBankStatement,
 		getBankStatement,
 		getOutstandingItems,
 		listBankStatements
-	} from '$lib/api/bankReconciliation';
-	import type { OutstandingItems } from '$lib/types/bankReconciliation';
-	import Badge from '$lib/components/ui/Badge.svelte';
-	import DataTable from '$lib/components/ui/DataTable.svelte';
-	import EmptyState from '$lib/components/ui/EmptyState.svelte';
-	import FilterChips from '$lib/components/ui/FilterChips.svelte';
-	import KpiCard from '$lib/components/ui/KpiCard.svelte';
-	import Money from '$lib/components/ui/Money.svelte';
-	import PageHeader from '$lib/components/ui/PageHeader.svelte';
-	import RowAction from '$lib/components/ui/RowAction.svelte';
-	import RowLink from '$lib/components/ui/RowLink.svelte';
-	import SearchBox from '$lib/components/ui/SearchBox.svelte';
-	import Tabs from '$lib/components/ui/Tabs.svelte';
-	import { toast } from '$lib/components/ui/Toast.svelte';
+	} from '#lib/api/bankReconciliation.ts';
+	import type { OutstandingItems } from '#lib/types/bankReconciliation.ts';
+	import Badge from '#lib/components/ui/Badge.svelte';
+	import DataTable from '#lib/components/ui/DataTable.svelte';
+	import EmptyState from '#lib/components/ui/EmptyState.svelte';
+	import FilterChips from '#lib/components/ui/FilterChips.svelte';
+	import KpiCard from '#lib/components/ui/KpiCard.svelte';
+	import Money from '#lib/components/ui/Money.svelte';
+	import PageHeader from '#lib/components/ui/PageHeader.svelte';
+	import RowAction from '#lib/components/ui/RowAction.svelte';
+	import RowLink from '#lib/components/ui/RowLink.svelte';
+	import SearchBox from '#lib/components/ui/SearchBox.svelte';
+	import Tabs from '#lib/components/ui/Tabs.svelte';
+	import { toast } from '#lib/components/ui/Toast.svelte';
 	import ImportStatementModal from './ImportStatementModal.svelte';
 	import StatementDetailModal from './StatementDetailModal.svelte';
-	import { auth } from '$lib/stores/auth.svelte';
-	import { orgCurrency } from '$lib/stores/orgSettings.svelte';
-	import { formatCurrencyTotals } from '$lib/utils/currencyGroups';
-	import { formatMoney } from '$lib/utils/money';
-	import { m } from '$lib/i18n/store.svelte';
-	import { appendUnique } from '$lib/utils/pagination';
-	import { createRequestSequencer } from '$lib/utils/requestSequence';
-	import { formatDate } from '$lib/utils/time';
-	import { isRowOpenClick } from '$lib/utils/rowNav';
-	import { page } from '$app/stores';
+	import { auth } from '#lib/stores/auth.svelte.ts';
+	import { orgCurrency } from '#lib/stores/orgSettings.svelte.ts';
+	import { formatCurrencyTotals } from '#lib/utils/currencyGroups.ts';
+	import { formatMoney } from '#lib/utils/money.ts';
+	import { m } from '#lib/i18n/store.svelte.ts';
+	import { appendUnique } from '#lib/utils/pagination.ts';
+	import { createRequestSequencer } from '#lib/utils/requestSequence.ts';
+	import { formatDate } from '#lib/utils/time.ts';
+	import { isRowOpenClick } from '#lib/utils/rowNav.ts';
+	import { page } from '$app/state';
 	import { replaceState } from '$app/navigation';
 	import { untrack } from 'svelte';
 
@@ -82,35 +82,35 @@
 	const VALID_AGES = [0, 7, 30, 60];
 
 	function initialTab(): string {
-		const t = $page.url.searchParams.get('tab') ?? '';
+		const t = page.url.searchParams.get('tab') ?? '';
 		return VALID_TABS.includes(t) ? t : 'outstanding';
 	}
 	function initialAge(): number {
-		const raw = Number($page.url.searchParams.get('older_than_days'));
+		const raw = Number(page.url.searchParams.get('older_than_days'));
 		return VALID_AGES.includes(raw) ? raw : 0;
 	}
 
 	let tab = $state(initialTab());
 	let olderThanDays = $state(initialAge());
-	let search = $state($page.url.searchParams.get('search') ?? '');
+	let search = $state(page.url.searchParams.get('search') ?? '');
 	/**
 	 * The Statements tab's own term, on its own URL key — the two tabs query
 	 * different endpoints (`/outstanding` vs the paginated statement list) and
 	 * search different columns, so one shared `?search=` would carry a vendor
 	 * name into an account filter (or the reverse) on every tab switch.
 	 */
-	let statementSearch = $state($page.url.searchParams.get('statement_search') ?? '');
+	let statementSearch = $state(page.url.searchParams.get('statement_search') ?? '');
 
 	/**
 	 * Reflect the live view state into the URL. EVERY read here is untracked:
 	 * `syncUrl` is a WRITER called from the `$effect`s below, not a source of
-	 * dependencies — reading `$page.url` tracked would self-trigger the effect
+	 * dependencies — reading `page.url` tracked would self-trigger the effect
 	 * that writes it via `replaceState`, and reading `search` tracked would
 	 * make the age/tab effects fire on every keystroke.
 	 */
 	function syncUrl() {
 		untrack(() => {
-			const url = new URL($page.url);
+			const url = new URL(page.url.href);
 			if (tab !== 'outstanding') url.searchParams.set('tab', tab);
 			else url.searchParams.delete('tab');
 			if (olderThanDays > 0) url.searchParams.set('older_than_days', String(olderThanDays));
@@ -260,7 +260,7 @@
 	 * `?statement_search=` doesn't fire a second load behind the mount load.
 	 */
 	let appliedStatementSearch = $state(
-		($page.url.searchParams.get('statement_search') ?? '').trim()
+		(page.url.searchParams.get('statement_search') ?? '').trim()
 	);
 
 	async function loadStatements(opts: { append?: boolean } = {}) {
@@ -368,7 +368,7 @@
 	// Deep-link: `/bank-reconciliation?id=<uuid>` opens that statement.
 	let deepLinkLoaded = $state<string | null>(null);
 	$effect(() => {
-		const id = $page.url.searchParams.get('id');
+		const id = page.url.searchParams.get('id');
 		if (!id || deepLinkLoaded === id) return;
 		deepLinkLoaded = id;
 		getBankStatement(id)
@@ -379,7 +379,7 @@
 	function closeModals() {
 		detail = null;
 		showImport = false;
-		const url = new URL($page.url);
+		const url = new URL(page.url.href);
 		if (url.searchParams.has('id')) {
 			url.searchParams.delete('id');
 			replaceState(`${url.pathname}${url.search}`, {});

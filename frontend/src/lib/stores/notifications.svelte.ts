@@ -1,12 +1,12 @@
-import { api } from '$lib/api';
-import { hasToken } from '$lib/api';
+import { api } from '#lib/api.ts';
+import { hasToken } from '#lib/api.ts';
 import type {
 	Notification,
 	NotificationListResponse,
 	NotificationPrefs,
-} from '$lib/types/notification';
-import { appendUnique } from '$lib/utils/pagination';
-import { createRequestSequencer } from '$lib/utils/requestSequence';
+} from '#lib/types/notification.ts';
+import { appendUnique } from '#lib/utils/pagination.ts';
+import { createRequestSequencer } from '#lib/utils/requestSequence.ts';
 
 const PAGE_SIZE = 20;
 const POLL_INTERVAL_MS = 60_000;

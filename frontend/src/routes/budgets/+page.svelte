@@ -1,37 +1,37 @@
 <script lang="ts">
-	import type { Budget } from '$lib/types/budget';
+	import type { Budget } from '#lib/types/budget.ts';
 	import {
 		BUDGET_DIMENSIONS,
 		BUDGET_DIMENSION_LABELS,
 		type BudgetDimension
-	} from '$lib/types/budget';
-	import { auth } from '$lib/stores/auth.svelte';
-	import { orgCurrency } from '$lib/stores/orgSettings.svelte';
+	} from '#lib/types/budget.ts';
+	import { auth } from '#lib/stores/auth.svelte.ts';
+	import { orgCurrency } from '#lib/stores/orgSettings.svelte.ts';
 	import {
 		listBudgets,
 		getBudgetSummary,
 		deleteBudget as apiDeleteBudget
-	} from '$lib/api/budgets';
-	import type { BudgetSummary } from '$lib/types/budget';
-	import { formatCurrencyTotals } from '$lib/utils/currencyGroups';
-	import PageHeader from '$lib/components/ui/PageHeader.svelte';
-	import SearchBox from '$lib/components/ui/SearchBox.svelte';
-	import FilterChips from '$lib/components/ui/FilterChips.svelte';
-	import DataTable from '$lib/components/ui/DataTable.svelte';
-	import KpiCard from '$lib/components/ui/KpiCard.svelte';
-	import RowLink from '$lib/components/ui/RowLink.svelte';
-	import RowAction from '$lib/components/ui/RowAction.svelte';
-	import Money from '$lib/components/ui/Money.svelte';
-	import BudgetModal from '$lib/components/modals/BudgetModal.svelte';
-	import { formatMoney } from '$lib/utils/money';
-	import { toast } from '$lib/components/ui/Toast.svelte';
-	import { isRowOpenClick } from '$lib/utils/rowNav';
-	import { m } from '$lib/i18n/store.svelte';
-	import { page } from '$app/stores';
+	} from '#lib/api/budgets.ts';
+	import type { BudgetSummary } from '#lib/types/budget.ts';
+	import { formatCurrencyTotals } from '#lib/utils/currencyGroups.ts';
+	import PageHeader from '#lib/components/ui/PageHeader.svelte';
+	import SearchBox from '#lib/components/ui/SearchBox.svelte';
+	import FilterChips from '#lib/components/ui/FilterChips.svelte';
+	import DataTable from '#lib/components/ui/DataTable.svelte';
+	import KpiCard from '#lib/components/ui/KpiCard.svelte';
+	import RowLink from '#lib/components/ui/RowLink.svelte';
+	import RowAction from '#lib/components/ui/RowAction.svelte';
+	import Money from '#lib/components/ui/Money.svelte';
+	import BudgetModal from '#lib/components/modals/BudgetModal.svelte';
+	import { formatMoney } from '#lib/utils/money.ts';
+	import { toast } from '#lib/components/ui/Toast.svelte';
+	import { isRowOpenClick } from '#lib/utils/rowNav.ts';
+	import { m } from '#lib/i18n/store.svelte.ts';
+	import { page } from '$app/state';
 	import { replaceState } from '$app/navigation';
 	import { untrack } from 'svelte';
-	import { createRequestSequencer } from '$lib/utils/requestSequence';
-	import { appendUnique } from '$lib/utils/pagination';
+	import { createRequestSequencer } from '#lib/utils/requestSequence.ts';
+	import { appendUnique } from '#lib/utils/pagination.ts';
 
 	const PAGE_SIZE = 50;
 
@@ -39,8 +39,8 @@
 	const canManage = $derived(auth.hasAnyRole('admin', 'cfo'));
 
 	// --- Filter state (URL-backed) ---
-	let search = $state($page.url.searchParams.get('search') ?? '');
-	let dimensionFilter = $state<string>($page.url.searchParams.get('dimension') ?? 'all');
+	let search = $state(page.url.searchParams.get('search') ?? '');
+	let dimensionFilter = $state<string>(page.url.searchParams.get('dimension') ?? 'all');
 
 	// --- Data ---
 	let budgets = $state<Budget[]>([]);
@@ -89,7 +89,7 @@
 	// page while the "Budgets" count beside it was the server's whole-set
 	// `total`, and it added every row's bare `amount` across currencies into the
 	// org default, so EUR 400 + USD 3 500 read as one meaningless figure. The
-	// rollup groups by currency and never adds across them (`$lib/utils/currencyGroups`).
+	// rollup groups by currency and never adds across them (`#lib/utils/currencyGroups`).
 	let budgetSummary = $state<BudgetSummary | null>(null);
 
 	// Independent sequencer: this request can be in flight alongside the list's,
@@ -144,7 +144,7 @@
 	}
 
 	// Reflect the live filter state into the URL. EVERY read in here is
-	// untracked, `$page.url` included, because syncUrl() is a WRITER called
+	// untracked, `page.url` included, because syncUrl() is a WRITER called
 	// from the filter `$effect`s below — not a source of dependencies:
 	//   - the URL read would self-trigger the effect that writes it via
 	//     replaceState (Svelte effect_update_depth_exceeded);
@@ -156,7 +156,7 @@
 	//     reading them directly, so nothing here needs to be tracked.
 	function syncUrl() {
 		untrack(() => {
-			const url = new URL($page.url);
+			const url = new URL(page.url.href);
 			if (dimensionFilter !== 'all') url.searchParams.set('dimension', dimensionFilter);
 			else url.searchParams.delete('dimension');
 			if (search.trim()) url.searchParams.set('search', search.trim());

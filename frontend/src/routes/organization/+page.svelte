@@ -1,28 +1,28 @@
 <script lang="ts">
 	import { page } from '$app/state';
-	import { api } from '$lib/api';
-	import { toast } from '$lib/components/ui/Toast.svelte';
-	import PageHeader from '$lib/components/ui/PageHeader.svelte';
-	import Badge from '$lib/components/ui/Badge.svelte';
-	import SecretReveal from '$lib/components/ui/SecretReveal.svelte';
-	import SettingsRail from '$lib/components/ui/SettingsRail.svelte';
-	import { m } from '$lib/i18n/store.svelte';
-	import { auth } from '$lib/stores/auth.svelte';
-	import { orgCurrency } from '$lib/stores/orgSettings.svelte';
-	import type { MessageKey } from '$lib/i18n/messages';
-	import { formatDate } from '$lib/utils/time';
+	import { api } from '#lib/api.ts';
+	import { toast } from '#lib/components/ui/Toast.svelte';
+	import PageHeader from '#lib/components/ui/PageHeader.svelte';
+	import Badge from '#lib/components/ui/Badge.svelte';
+	import SecretReveal from '#lib/components/ui/SecretReveal.svelte';
+	import SettingsRail from '#lib/components/ui/SettingsRail.svelte';
+	import { m } from '#lib/i18n/store.svelte.ts';
+	import { auth } from '#lib/stores/auth.svelte.ts';
+	import { orgCurrency } from '#lib/stores/orgSettings.svelte.ts';
+	import type { MessageKey } from '#lib/i18n/messages.ts';
+	import { formatDate } from '#lib/utils/time.ts';
 	import {
 		getChatNotifications,
 		revokeChatWebhook,
 		rotateChatWebhook,
 		updateChatNotifications
-	} from '$lib/api/chatNotifications';
-	import { getEmailIntake, rotateEmailIntakeToken } from '$lib/api/emailIntake';
+	} from '#lib/api/chatNotifications.ts';
+	import { getEmailIntake, rotateEmailIntakeToken } from '#lib/api/emailIntake.ts';
 	import {
 		CHAT_EVENT_LABELS,
 		CHAT_PROVIDER_LABELS,
 		type ChatNotificationStatus
-	} from '$lib/types/chatNotifications';
+	} from '#lib/types/chatNotifications.ts';
 
 	interface CompanyProfile {
 		address: string;
@@ -819,10 +819,10 @@
 		})[plan] ?? plan;
 
 	// ── White-label branding ────────────────────────────────────────────
-	import { brand } from '$lib/stores/brand.svelte';
-	import { accentStrongContrast } from '$lib/stores/brandTheme';
-	import { formatRatio, WCAG_AA_NORMAL } from '$lib/a11y/contrast';
-	import FieldWarning from '$lib/components/ui/FieldWarning.svelte';
+	import { brand } from '#lib/stores/brand.svelte.ts';
+	import { accentStrongContrast } from '#lib/stores/brandTheme.ts';
+	import { formatRatio, WCAG_AA_NORMAL } from '#lib/a11y/contrast.ts';
+	import FieldWarning from '#lib/components/ui/FieldWarning.svelte';
 
 	let brandProductName = $state('');
 	let brandLogoUrl = $state('');

@@ -1,6 +1,6 @@
-import { api } from '$lib/api';
-import type { EligibleInvoice } from '$lib/types/creditMemo';
-import type { SearchPickerPage } from '$lib/utils/searchPicker';
+import { api } from '#lib/api.ts';
+import type { EligibleInvoice } from '#lib/types/creditMemo.ts';
+import type { SearchPickerPage } from '#lib/utils/searchPicker.ts';
 
 export type { EligibleInvoice };
 

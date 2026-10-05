@@ -1,13 +1,13 @@
 // Typed helpers for the workflow-experiment (A/B testing) endpoints. All
 // requests route through the shared `api` client (Bearer + X-Tenant-Slug +
 // 401-bounce). Mirrors the pattern of `src/lib/api/recurring.ts`.
-import { api } from '$lib/api';
+import { api } from '#lib/api.ts';
 import type {
 	Experiment,
 	ExperimentCreate,
 	ExperimentListResponse,
 	ExperimentResults
-} from '$lib/types/experiments';
+} from '#lib/types/experiments.ts';
 
 export function listExperiments(status?: string): Promise<ExperimentListResponse> {
 	const qs = new URLSearchParams();

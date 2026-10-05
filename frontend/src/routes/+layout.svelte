@@ -1,26 +1,26 @@
 <script lang="ts">
 	import '../app.css';
-	import Landing from '$lib/components/marketing/Landing.svelte';
-	import Sidebar from '$lib/components/layout/Sidebar.svelte';
-	import SectionTabs from '$lib/components/layout/SectionTabs.svelte';
-	import Toast from '$lib/components/ui/Toast.svelte';
-	import ConsentBanner from '$lib/components/ConsentBanner.svelte';
-	import { sidebar } from '$lib/stores/sidebar.svelte';
-	import { auth } from '$lib/stores/auth.svelte';
-	import { brand } from '$lib/stores/brand.svelte';
-	import { notificationStore } from '$lib/stores/notifications.svelte';
+	import Landing from '#lib/components/marketing/Landing.svelte';
+	import Sidebar from '#lib/components/layout/Sidebar.svelte';
+	import SectionTabs from '#lib/components/layout/SectionTabs.svelte';
+	import Toast from '#lib/components/ui/Toast.svelte';
+	import ConsentBanner from '#lib/components/ConsentBanner.svelte';
+	import { sidebar } from '#lib/stores/sidebar.svelte.ts';
+	import { auth } from '#lib/stores/auth.svelte.ts';
+	import { brand } from '#lib/stores/brand.svelte.ts';
+	import { notificationStore } from '#lib/stores/notifications.svelte.ts';
 	import { goto } from '$app/navigation';
-	import { page } from '$app/stores';
-	import { hasTenantContext } from '$lib/tenant';
-	import { browser } from '$app/environment';
-	import { initLocale, m } from '$lib/i18n/store.svelte';
+	import { page } from '$app/state';
+	import { hasTenantContext } from '#lib/tenant.ts';
+	import { browser } from '$app/env';
+	import { initLocale, m } from '#lib/i18n/store.svelte.ts';
 
 	// Tri-state: `undefined` until the browser resolves it (render nothing, no
 	// flash), then true/false. This asks "does this host carry a tenant at all",
 	// NOT "what is its slug" — a white-label vanity host has a tenant but no
 	// slug in the URL (the backend resolves it from `Host`), so gating on the
 	// slug rendered the marketing Landing page to a customer on their own
-	// domain. The slug itself is never needed here; `$lib/api` attaches it.
+	// domain. The slug itself is never needed here; `#lib/api` attaches it.
 	let hasTenant = $state<boolean | undefined>(undefined);
 
 	// Detect + apply the visitor's UI language once on first client mount
@@ -57,7 +57,7 @@
 	$effect(() => {
 		if (!hasTenant) return;
 
-		const path = $page.url.pathname;
+		const path = page.url.pathname;
 
 		// Portal has its own auth tree — don't interleave the two.
 		if (path.startsWith(PORTAL_PREFIX)) return;
@@ -113,7 +113,7 @@
 			auth.loggedIn &&
 			!!auth.user &&
 			!auth.user.must_change_password &&
-			!$page.url.pathname.startsWith(PORTAL_PREFIX);
+			!page.url.pathname.startsWith(PORTAL_PREFIX);
 		if (active) {
 			brand.ensureLoadedAndApply();
 		}
@@ -128,7 +128,7 @@
 			auth.loggedIn &&
 			!!auth.user &&
 			!auth.user.must_change_password &&
-			!$page.url.pathname.startsWith(PORTAL_PREFIX);
+			!page.url.pathname.startsWith(PORTAL_PREFIX);
 		if (active) {
 			notificationStore.startPolling();
 		} else {
@@ -141,7 +141,7 @@
 	<title>{brand.productName}</title>
 </svelte:head>
 
-{#if $page.url.pathname.startsWith(LEGAL_PREFIX)}
+{#if page.url.pathname.startsWith(LEGAL_PREFIX)}
 	<!--
 		Legal documents render standalone and first — ahead of the tenant probe,
 		because they are identical on the apex and on every tenant subdomain and
@@ -152,13 +152,13 @@
 	<slot />
 {:else if hasTenant === undefined}
 	<!-- SSR / hydration: tenant not resolved yet, render nothing to avoid flash -->
-{:else if $page.url.pathname.startsWith(PORTAL_PREFIX)}
+{:else if page.url.pathname.startsWith(PORTAL_PREFIX)}
 	<slot />
-{:else if PUBLIC_PATHS.includes($page.url.pathname)}
+{:else if PUBLIC_PATHS.includes(page.url.pathname)}
 	<slot />
 {:else if hasTenant === false}
 	<Landing />
-{:else if $page.url.pathname.startsWith('/login') || $page.url.pathname === '/change-password'}
+{:else if page.url.pathname.startsWith('/login') || page.url.pathname === '/change-password'}
 	<slot />
 {:else if auth.loggedIn && auth.user && !auth.user.must_change_password}
 	<div class="app-shell">

@@ -1,7 +1,7 @@
 // Typed helpers for the virtual-card REBATE lifecycle — the three endpoints
 // that let AP record what the card processor did out-of-band. Everything routes
 // through the shared `api` client (Bearer + X-Tenant-Slug + X-Entity-ID +
-// 401-bounce), like every other `$lib/api/*` module.
+// 401-bounce), like every other `#lib/api/*` module.
 //
 // All three are `require_roles(admin, ap_manager, cfo)` on the server — a ROLE
 // gate, not one of the granular `payment.*` permissions the recovery exits in
@@ -16,8 +16,8 @@
 // payout, and neither pays anyone.
 //
 // See `backend/docs/virtual-cards.md` § Rebate status lifecycle.
-import { api } from '$lib/api';
-import type { CardRebate, RebateListResponse } from '$lib/types/cardRebate';
+import { api } from '#lib/api.ts';
+import type { CardRebate, RebateListResponse } from '#lib/types/cardRebate.ts';
 
 /** Mirrors `backend/app/api/pagination.py::DEFAULT_PAGE_SIZE`, so a bare call
  *  and the server's own default return the same rows. */

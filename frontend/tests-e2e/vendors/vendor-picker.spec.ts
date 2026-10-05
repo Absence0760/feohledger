@@ -8,7 +8,7 @@ import {
 } from '../fixtures/helpers';
 
 /**
- * The shared vendor picker (`$lib/components/ui/VendorPicker.svelte`) reaches
+ * The shared vendor picker (`#lib/components/ui/VendorPicker.svelte`) reaches
  * PAST its first page.
  *
  * What this replaced: five surfaces each rendered a native `<select>` over a
@@ -30,8 +30,8 @@ import {
  * the proof for all five.
  */
 
-/** `VENDOR_PICKER_PAGE_SIZE` in `$lib/utils/vendorPicker.ts`. Duplicated rather
- *  than imported: a VALUE import from `$lib` typechecks and then fails to
+/** `VENDOR_PICKER_PAGE_SIZE` in `#lib/utils/vendorPicker.ts`. Duplicated rather
+ *  than imported: a VALUE import from `#lib` typechecks and then fails to
  *  resolve when Playwright loads the spec (frontend `CLAUDE.md` § check:e2e). */
 const PAGE = 25;
 

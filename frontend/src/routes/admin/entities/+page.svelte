@@ -1,23 +1,23 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
-	import { auth } from '$lib/stores/auth.svelte';
-	import { entityStore } from '$lib/stores/entity.svelte';
-	import Badge from '$lib/components/ui/Badge.svelte';
-	import PageHeader from '$lib/components/ui/PageHeader.svelte';
-	import DataTable from '$lib/components/ui/DataTable.svelte';
-	import Modal from '$lib/components/ui/Modal.svelte';
-	import RowAction from '$lib/components/ui/RowAction.svelte';
-	import RowLink from '$lib/components/ui/RowLink.svelte';
-	import { toast } from '$lib/components/ui/Toast.svelte';
-	import { m } from '$lib/i18n/store.svelte';
-	import { isRowOpenClick } from '$lib/utils/rowNav';
+	import { auth } from '#lib/stores/auth.svelte.ts';
+	import { entityStore } from '#lib/stores/entity.svelte.ts';
+	import Badge from '#lib/components/ui/Badge.svelte';
+	import PageHeader from '#lib/components/ui/PageHeader.svelte';
+	import DataTable from '#lib/components/ui/DataTable.svelte';
+	import Modal from '#lib/components/ui/Modal.svelte';
+	import RowAction from '#lib/components/ui/RowAction.svelte';
+	import RowLink from '#lib/components/ui/RowLink.svelte';
+	import { toast } from '#lib/components/ui/Toast.svelte';
+	import { m } from '#lib/i18n/store.svelte.ts';
+	import { isRowOpenClick } from '#lib/utils/rowNav.ts';
 	import {
 		listEntities,
 		createEntity,
 		updateEntity,
 		setDefaultEntity,
 		type Entity
-	} from '$lib/api/entities';
+	} from '#lib/api/entities.ts';
 
 	// RBAC: `GET /api/entities` is open to any authenticated user (the sidebar
 	// switcher reads it), but POST / PATCH / set-default are

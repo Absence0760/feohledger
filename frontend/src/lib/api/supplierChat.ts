@@ -1,8 +1,8 @@
 // Typed helpers for the AP-side supplier-chat endpoints (under /api/invoices/…).
 // All requests route through the shared `api` client (Bearer + X-Tenant-Slug +
-// 401-bounce), mirroring $lib/api/audit.ts.
-import { api } from '$lib/api';
-import type { ChatMessage, ChatThread, ChatTemplate } from '$lib/types/supplierChat';
+// 401-bounce), mirroring #lib/api/audit.ts.
+import { api } from '#lib/api.ts';
+import type { ChatMessage, ChatThread, ChatTemplate } from '#lib/types/supplierChat.ts';
 
 export function getChatThread(invoiceId: string): Promise<ChatThread> {
 	return api.get<ChatThread>(`/api/invoices/${invoiceId}/chat`);

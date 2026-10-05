@@ -1,7 +1,7 @@
 // Typed helpers for the Procurement / Requisitions endpoints. All requests
 // route through the shared `api` client (Bearer + X-Tenant-Slug + X-Entity-ID +
 // 401-bounce). Mirrors the pattern of `src/lib/api/expenses.ts`.
-import { api } from '$lib/api';
+import { api } from '#lib/api.ts';
 import type {
 	Requisition,
 	RequisitionListResponse,
@@ -9,7 +9,7 @@ import type {
 	RequisitionCreate,
 	RequisitionUpdate,
 	ConvertToPoResult
-} from '$lib/types/requisition';
+} from '#lib/types/requisition.ts';
 
 export interface RequisitionListParams {
 	status?: string;

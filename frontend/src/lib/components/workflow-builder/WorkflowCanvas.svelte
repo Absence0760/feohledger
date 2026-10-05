@@ -1,7 +1,7 @@
 <script lang="ts">
-	import type { WorkflowStep, WorkflowStepType, ConditionStepConfig, ParallelStepConfig } from '$lib/types/workflow';
+	import type { WorkflowStep, WorkflowStepType, ConditionStepConfig, ParallelStepConfig } from '#lib/types/workflow.ts';
 	import StepNode from './StepNode.svelte';
-	import { m } from '$lib/i18n/store.svelte';
+	import { m } from '#lib/i18n/store.svelte.ts';
 
 	type Props = {
 		steps: WorkflowStep[];

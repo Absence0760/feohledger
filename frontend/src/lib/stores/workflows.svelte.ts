@@ -7,10 +7,10 @@ import type {
 	SimInvoice,
 	SimulationResult,
 	WorkflowExport,
-} from '$lib/types/workflow';
-import { api } from '$lib/api';
-import { appendUnique } from '$lib/utils/pagination';
-import { createRequestSequencer } from '$lib/utils/requestSequence';
+} from '#lib/types/workflow.ts';
+import { api } from '#lib/api.ts';
+import { appendUnique } from '#lib/utils/pagination.ts';
+import { createRequestSequencer } from '#lib/utils/requestSequence.ts';
 
 export interface ApprovalConfig {
 	approver_strategy: 'manual' | 'specific' | 'auto';

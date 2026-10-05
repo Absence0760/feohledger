@@ -19,8 +19,8 @@
 // ordering only). A day count, a percentage and a row count are genuinely
 // numbers and stay `number`.
 
-import type { MoneyAmount, MoneyString } from '$lib/utils/money';
-import type { CurrencyFigure } from '$lib/components/ui/moneyByCurrency';
+import type { MoneyAmount, MoneyString } from '#lib/utils/money.ts';
+import type { CurrencyFigure } from '#lib/components/ui/moneyByCurrency.ts';
 
 export type CashflowGranularity = 'day' | 'week' | 'month';
 

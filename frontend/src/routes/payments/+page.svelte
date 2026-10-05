@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { Payment, PaymentStatus } from '$lib/types/payment';
+	import type { Payment, PaymentStatus } from '#lib/types/payment.ts';
 	import {
 		PAYMENT_STATUSES,
 		paymentStatusLabelKey,
@@ -8,28 +8,28 @@
 		runStatusLabelKey,
 		runStatusTone,
 		voidCardOutcomeLabelKey
-	} from '$lib/types/payment';
-	import { paymentStore } from '$lib/stores/payments.svelte';
-	import { appendUnique } from '$lib/utils/pagination';
-	import { api } from '$lib/api';
-	import { toast } from '$lib/components/ui/Toast.svelte';
-	import RunDetailModal from '$lib/components/modals/RunDetailModal.svelte';
-	import RowAction from '$lib/components/ui/RowAction.svelte';
-	import RowLink from '$lib/components/ui/RowLink.svelte';
-	import { isRowOpenClick } from '$lib/utils/rowNav';
-	import { pruneSelection } from '$lib/utils/selection';
-	import SearchBox from '$lib/components/ui/SearchBox.svelte';
-	import StatusBadge from '$lib/components/ui/StatusBadge.svelte';
-	import Badge from '$lib/components/ui/Badge.svelte';
-	import type { BadgeTone } from '$lib/components/ui/badgeTone';
-	import PageHeader from '$lib/components/ui/PageHeader.svelte';
-	import FilterChips from '$lib/components/ui/FilterChips.svelte';
-	import DataTable from '$lib/components/ui/DataTable.svelte';
-	import Modal from '$lib/components/ui/Modal.svelte';
-	import Tabs from '$lib/components/ui/Tabs.svelte';
-	import { formatMoney, isPositiveAmount, type MoneyAmount } from '$lib/utils/money';
-	import type { MessageKey } from '$lib/i18n/messages';
-	import { compareCorridorQuotes } from '$lib/api/corridorQuotes';
+	} from '#lib/types/payment.ts';
+	import { paymentStore } from '#lib/stores/payments.svelte.ts';
+	import { appendUnique } from '#lib/utils/pagination.ts';
+	import { api } from '#lib/api.ts';
+	import { toast } from '#lib/components/ui/Toast.svelte';
+	import RunDetailModal from '#lib/components/modals/RunDetailModal.svelte';
+	import RowAction from '#lib/components/ui/RowAction.svelte';
+	import RowLink from '#lib/components/ui/RowLink.svelte';
+	import { isRowOpenClick } from '#lib/utils/rowNav.ts';
+	import { pruneSelection } from '#lib/utils/selection.ts';
+	import SearchBox from '#lib/components/ui/SearchBox.svelte';
+	import StatusBadge from '#lib/components/ui/StatusBadge.svelte';
+	import Badge from '#lib/components/ui/Badge.svelte';
+	import type { BadgeTone } from '#lib/components/ui/badgeTone.ts';
+	import PageHeader from '#lib/components/ui/PageHeader.svelte';
+	import FilterChips from '#lib/components/ui/FilterChips.svelte';
+	import DataTable from '#lib/components/ui/DataTable.svelte';
+	import Modal from '#lib/components/ui/Modal.svelte';
+	import Tabs from '#lib/components/ui/Tabs.svelte';
+	import { formatMoney, isPositiveAmount, type MoneyAmount } from '#lib/utils/money.ts';
+	import type { MessageKey } from '#lib/i18n/messages.ts';
+	import { compareCorridorQuotes } from '#lib/api/corridorQuotes.ts';
 	import {
 		allQuotes,
 		formatFeeRate,
@@ -39,30 +39,30 @@
 		type CorridorQuote,
 		type CorridorQuoteComparison,
 		type QuoteMode
-	} from '$lib/types/corridorQuote';
+	} from '#lib/types/corridorQuote.ts';
 	import {
 		formatCurrencyTotals,
 		groupAmountsByCurrency,
 		spansMultipleCurrencies,
 		type CurrencyGroup
-	} from '$lib/utils/currencyGroups';
-	import { createRequestSequencer } from '$lib/utils/requestSequence';
-	import { formatDate } from '$lib/utils/time';
-	import { orgCurrency } from '$lib/stores/orgSettings.svelte';
-	import { auth } from '$lib/stores/auth.svelte';
-	import { PERM_PAYMENT_EXECUTE, PERM_PAYMENT_VOID } from '$lib/types/admin';
+	} from '#lib/utils/currencyGroups.ts';
+	import { createRequestSequencer } from '#lib/utils/requestSequence.ts';
+	import { formatDate } from '#lib/utils/time.ts';
+	import { orgCurrency } from '#lib/stores/orgSettings.svelte.ts';
+	import { auth } from '#lib/stores/auth.svelte.ts';
+	import { PERM_PAYMENT_EXECUTE, PERM_PAYMENT_VOID } from '#lib/types/admin.ts';
 	import {
 		acceptPaymentSettlement,
 		retryRunErpSync,
 		retryVoidCardCancel,
 		voidPayment,
 		type RunErpSyncResult
-	} from '$lib/api/payments';
+	} from '#lib/api/payments.ts';
 	import {
 		confirmCardRebate,
 		listCardRebates,
 		markCardRebatePaid
-	} from '$lib/api/cards';
+	} from '#lib/api/cards.ts';
 	import {
 		formatRebateRate,
 		nextRebateTransition,
@@ -70,13 +70,13 @@
 		type CardRebate,
 		type RebateListResponse,
 		type RebateTransition
-	} from '$lib/types/cardRebate';
-	import { m } from '$lib/i18n/store.svelte';
+	} from '#lib/types/cardRebate.ts';
+	import { m } from '#lib/i18n/store.svelte.ts';
 	import { untrack } from 'svelte';
-	import { page } from '$app/stores';
+	import { page } from '$app/state';
 	import { replaceState } from '$app/navigation';
-	import SortableHeader from '$lib/components/ui/SortableHeader.svelte';
-	import { toggleSort, type SortOrder } from '$lib/utils/sort';
+	import SortableHeader from '#lib/components/ui/SortableHeader.svelte';
+	import { toggleSort, type SortOrder } from '#lib/utils/sort.ts';
 
 	let RUNS_COLUMNS = $derived([
 		{ label: m('payments.col.run') },
@@ -121,26 +121,26 @@
 	// included because the History search/status controls are meaningless
 	// without knowing which tab is showing. See `syncUrl()`.
 	let activeTab = $state<Tab>(
-		TABS.includes($page.url.searchParams.get('tab') as Tab)
-			? ($page.url.searchParams.get('tab') as Tab)
+		TABS.includes(page.url.searchParams.get('tab') as Tab)
+			? (page.url.searchParams.get('tab') as Tab)
 			: 'queue'
 	);
-	let search = $state($page.url.searchParams.get('search') ?? '');
+	let search = $state(page.url.searchParams.get('search') ?? '');
 	let activeStatus = $state<PaymentStatus | 'all'>(
-		PAYMENT_STATUSES.includes($page.url.searchParams.get('status') as PaymentStatus)
-			? ($page.url.searchParams.get('status') as PaymentStatus)
+		PAYMENT_STATUSES.includes(page.url.searchParams.get('status') as PaymentStatus)
+			? (page.url.searchParams.get('status') as PaymentStatus)
 			: 'all'
 	);
 
-	let sortField = $state<string | null>($page.url.searchParams.get('sort'));
-	let sortOrder = $state<SortOrder>(($page.url.searchParams.get('order') as SortOrder) ?? 'desc');
+	let sortField = $state<string | null>(page.url.searchParams.get('sort'));
+	let sortOrder = $state<SortOrder>((page.url.searchParams.get('order') as SortOrder) ?? 'desc');
 
-	// WRITER — every read untracked, `$page.url` included (issue #168 / the
+	// WRITER — every read untracked, `page.url` included (issue #168 / the
 	// self-trigger on replaceState). Called from the tab/status effect, the
 	// search debounce, the sort handler, and each tab button.
 	function syncUrl() {
 		untrack(() => {
-			const url = new URL($page.url);
+			const url = new URL(page.url.href);
 			if (activeTab !== 'queue') url.searchParams.set('tab', activeTab);
 			else url.searchParams.delete('tab');
 			const s = search.trim();
@@ -1018,7 +1018,7 @@
 		total_amount: number | null;
 		/** What `total_amount` is denominated in, off `PaymentRunResponse`.
 		 *  `null` when the server could not prove one — see
-		 *  `$lib/types/payment.ts::PaymentRun.currency`. */
+		 *  `#lib/types/payment.ts::PaymentRun.currency`. */
 		currency: string | null;
 		executed_at: string | null;
 		created_at: string;
@@ -2066,7 +2066,7 @@
 						</td>
 						<td class="muted">{item.payment_terms ?? '—'}</td>
 						<td>
-							<StatusBadge status={item.status as import('$lib/types/invoice').InvoiceStatus} />
+							<StatusBadge status={item.status as import('#lib/types/invoice.ts').InvoiceStatus} />
 							{#if isBlocked(item)}
 								<span class="blocked-chip" data-testid="queue-blocked-chip">
 									{blockedReason(item)}
@@ -2802,7 +2802,7 @@
 			<p class="modal-warn" role="alert" data-testid="settlement-not-held">
 				{m('payments.settlement.notHeld')}
 				<StatusBadge
-					status={settlementInvoiceStatus as import('$lib/types/invoice').InvoiceStatus}
+					status={settlementInvoiceStatus as import('#lib/types/invoice.ts').InvoiceStatus}
 				/>
 			</p>
 			<div class="modal-footer">
@@ -3157,7 +3157,7 @@
 	/* --- Status badges --- */
 
 	/* Every pill on this page is `<Badge>`; the tone per status lives in
-	   `PAYMENT_STATUS_TONES` / `RUN_STATUS_TONES` in `$lib/types/payment`
+	   `PAYMENT_STATUS_TONES` / `RUN_STATUS_TONES` in `#lib/types/payment`
 	   (shared with `RunDetailModal`, which badges the same two vocabularies)
 	   and in the page-local `CARD_STATUS_TONES`, which has no second caller.
 	   What stays here is placement and the one emphasis the palette has no

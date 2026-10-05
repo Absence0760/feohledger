@@ -500,8 +500,8 @@ what puts the *vanity* hostname in the `Host` header for it to look up. A vanity
 host that called the build-time API origin would hand the backend the platform's
 own hostname and get the 400 anyway. `frontend/src/lib/tenant.ts::getApiBase()`
 is the single owner of that decision, resolved per request at **runtime** rather
-than frozen into a module constant at build time, and `$lib/api.ts` +
-`$lib/portalApi.ts` both read it — there is no second spelling.
+than frozen into a module constant at build time, and `#lib/api.ts` +
+`#lib/portalApi.ts` both read it — there is no second spelling.
 
 **Two things the operator must do**, beyond the DNS + TLS below:
 
@@ -532,9 +532,9 @@ one remaining shape rule is the backend's own `normalize_custom_domain` (bare,
 lowercase, no port, no IPv6 literal).
 
 **Consequences elsewhere in the SPA.** A vanity host has a tenant but no slug, so
-anything that keyed off the slug needs the host instead. `$lib/entity.ts`
+anything that keyed off the slug needs the host instead. `#lib/entity.ts`
 partitions its stored multi-entity selection by
-`$lib/tenant.ts::getTenantStorageKey()` — the slug on a platform host, the
+`#lib/tenant.ts::getTenantStorageKey()` — the slug on a platform host, the
 hostname on a vanity host — rather than by `getTenantSlug()`, which would have
 silently disabled entity persistence on every vanity host.
 
@@ -590,7 +590,7 @@ adding a host through the UI round-trips through GET; removing one (armed
 confirm) drops it; an invalid hostname surfaces an inline error and fires no PUT.
 
 `frontend/src/lib/tenant.test.ts` — the SPA half, over the dependency-free
-`$lib/hostRouting.ts`: the four host kinds; a vanity 3-label host and a vanity
+`#lib/hostRouting.ts`: the four host kinds; a vanity 3-label host and a vanity
 apex both yielding **no** slug; the `*.localhost` dev convention and the deployed
 platform subdomain still yielding one; longest-platform-domain-first matching;
 the API-base resolver (platform host → build-time `PUBLIC_API_URL`, vanity host →
@@ -612,8 +612,9 @@ touching the harness:
 
 - **`PUBLIC_PLATFORM_DOMAINS` reaches both run modes.** Locally `pnpm dev` gets
   it from `playwright.config.ts`'s `webServer.env`; in CI a production `vite
-  build` bakes it into `build/_app/env.js` from the build step's own env
-  (`adapter-static` has no server to read `$env/dynamic/public` at runtime, and
+  build` inlines it into the bundle from the build step's own env (it is
+  `static: true` in `frontend/src/env.ts`: `adapter-static` has no server to
+  read a variable at runtime, and
   a production build does not read `.env.development`). Both take the value from
   `tests-e2e/fixtures/env.ts::PLATFORM_DOMAINS` so they cannot disagree — which
   matters because unset means "no host is a vanity host", and the same

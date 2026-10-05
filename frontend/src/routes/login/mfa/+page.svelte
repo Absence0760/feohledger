@@ -1,10 +1,10 @@
 <script lang="ts">
-	import AuthShell from '$lib/components/auth/AuthShell.svelte';
-	import BrandMark from '$lib/components/ui/BrandMark.svelte';
-	import { auth, type MFAChallenge } from '$lib/stores/auth.svelte';
+	import AuthShell from '#lib/components/auth/AuthShell.svelte';
+	import BrandMark from '#lib/components/ui/BrandMark.svelte';
+	import { auth, type MFAChallenge } from '#lib/stores/auth.svelte.ts';
 	import { goto } from '$app/navigation';
 	import { onMount } from 'svelte';
-	import { m } from '$lib/i18n/store.svelte';
+	import { m } from '#lib/i18n/store.svelte.ts';
 
 	type Method = 'totp' | 'passkey' | 'email';
 

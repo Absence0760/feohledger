@@ -1,13 +1,13 @@
 <script lang="ts">
-	import type { Requisition, RequisitionStatus } from '$lib/types/requisition';
+	import type { Requisition, RequisitionStatus } from '#lib/types/requisition.ts';
 	import {
 		REQUISITION_FILTER_STATUSES,
 		REQUISITION_STATUS_LABEL_KEYS,
 		requisitionStatusLabelKey,
 		REQUISITION_STATUS_TONES
-	} from '$lib/types/requisition';
-	import { auth } from '$lib/stores/auth.svelte';
-	import { orgCurrency } from '$lib/stores/orgSettings.svelte';
+	} from '#lib/types/requisition.ts';
+	import { auth } from '#lib/stores/auth.svelte.ts';
+	import { orgCurrency } from '#lib/stores/orgSettings.svelte.ts';
 	import {
 		listRequisitions,
 		getRequisitionSummary,
@@ -20,30 +20,30 @@
 		reopenRequisition,
 		convertRequisitionToPo,
 		type RequisitionListParams
-	} from '$lib/api/requisitions';
-	import type { RequisitionSummary } from '$lib/types/requisition';
-	import { formatCurrencyTotals } from '$lib/utils/currencyGroups';
-	import { listGlAccounts, type GlAccountOption } from '$lib/api/expenses';
-	import Badge from '$lib/components/ui/Badge.svelte';
-	import PageHeader from '$lib/components/ui/PageHeader.svelte';
-	import SearchBox from '$lib/components/ui/SearchBox.svelte';
-	import FilterChips from '$lib/components/ui/FilterChips.svelte';
-	import DataTable from '$lib/components/ui/DataTable.svelte';
-	import KpiCard from '$lib/components/ui/KpiCard.svelte';
-	import RowLink from '$lib/components/ui/RowLink.svelte';
-	import RowAction from '$lib/components/ui/RowAction.svelte';
-	import Money from '$lib/components/ui/Money.svelte';
-	import { formatMoney } from '$lib/utils/money';
-	import RequisitionModal from '$lib/components/modals/RequisitionModal.svelte';
-	import { toast } from '$lib/components/ui/Toast.svelte';
-	import { isRowOpenClick } from '$lib/utils/rowNav';
-	import { m } from '$lib/i18n/store.svelte';
-	import { page } from '$app/stores';
+	} from '#lib/api/requisitions.ts';
+	import type { RequisitionSummary } from '#lib/types/requisition.ts';
+	import { formatCurrencyTotals } from '#lib/utils/currencyGroups.ts';
+	import { listGlAccounts, type GlAccountOption } from '#lib/api/expenses.ts';
+	import Badge from '#lib/components/ui/Badge.svelte';
+	import PageHeader from '#lib/components/ui/PageHeader.svelte';
+	import SearchBox from '#lib/components/ui/SearchBox.svelte';
+	import FilterChips from '#lib/components/ui/FilterChips.svelte';
+	import DataTable from '#lib/components/ui/DataTable.svelte';
+	import KpiCard from '#lib/components/ui/KpiCard.svelte';
+	import RowLink from '#lib/components/ui/RowLink.svelte';
+	import RowAction from '#lib/components/ui/RowAction.svelte';
+	import Money from '#lib/components/ui/Money.svelte';
+	import { formatMoney } from '#lib/utils/money.ts';
+	import RequisitionModal from '#lib/components/modals/RequisitionModal.svelte';
+	import { toast } from '#lib/components/ui/Toast.svelte';
+	import { isRowOpenClick } from '#lib/utils/rowNav.ts';
+	import { m } from '#lib/i18n/store.svelte.ts';
+	import { page } from '$app/state';
 	import { replaceState } from '$app/navigation';
 	import { onMount, untrack } from 'svelte';
-	import { createRequestSequencer } from '$lib/utils/requestSequence';
-	import { appendUnique } from '$lib/utils/pagination';
-	import { formatDate } from '$lib/utils/time';
+	import { createRequestSequencer } from '#lib/utils/requestSequence.ts';
+	import { appendUnique } from '#lib/utils/pagination.ts';
+	import { formatDate } from '#lib/utils/time.ts';
 
 	const canCreate = $derived(auth.hasAnyRole('admin', 'ap_manager', 'ap_clerk'));
 	// approve / reject = admin | ap_manager | CFO. One predicate used to cover
@@ -74,11 +74,11 @@
 	// says "Showing all {total}" is only true once every row is loaded.
 	let hasMore = $derived(requisitions.length < total);
 
-	let search = $state($page.url.searchParams.get('search') ?? '');
+	let search = $state(page.url.searchParams.get('search') ?? '');
 	// The search term the newest issued list request carried. Written by
 	// `load()`, read by the debounce effect — see the comment there.
-	let appliedSearch = $state(($page.url.searchParams.get('search') ?? '').trim());
-	let statusFilter = $state<string>($page.url.searchParams.get('status') ?? 'all');
+	let appliedSearch = $state((page.url.searchParams.get('search') ?? '').trim());
+	let statusFilter = $state<string>(page.url.searchParams.get('status') ?? 'all');
 
 	let showCreate = $state(false);
 	let editing = $state<Requisition | null>(null);
@@ -140,7 +140,7 @@
 	// while the "Requisitions" card beside it showed the server's whole-set
 	// `total`, and `periodTotal` summed one page AND added values across
 	// currencies into the org default. The rollup groups by currency and never
-	// adds across them (`$lib/utils/currencyGroups`).
+	// adds across them (`#lib/utils/currencyGroups`).
 	let reqSummary = $state<RequisitionSummary | null>(null);
 	const summarySequence = createRequestSequencer();
 
@@ -175,7 +175,7 @@
 	);
 
 	// Reflect the live filter state into the URL. EVERY read in here is
-	// untracked, `$page.url` included, because syncUrl() is a WRITER called
+	// untracked, `page.url` included, because syncUrl() is a WRITER called
 	// from the filter `$effect`s below — not a source of dependencies:
 	//   - the URL read would self-trigger the effect that writes it via
 	//     replaceState (Svelte effect_update_depth_exceeded);
@@ -187,7 +187,7 @@
 	//     reading them directly, so nothing here needs to be tracked.
 	function syncUrl() {
 		untrack(() => {
-			const url = new URL($page.url);
+			const url = new URL(page.url.href);
 			// `id` is a transient deep-link param (see deepLinkId below) — it is
 			// consumed once at load and never persisted, so the filter-state sync
 			// always drops it rather than resurrecting it from a stale URL read.
@@ -300,7 +300,7 @@
 	// punch-out cart is converted into a draft). Captured once at init — before
 	// syncUrl() normalizes the URL and strips the transient param — then resolved
 	// straight from the API (the target may live past the 100 rows we fetch).
-	const deepLinkId = $page.url.searchParams.get('id');
+	const deepLinkId = page.url.searchParams.get('id');
 	onMount(() => {
 		if (!deepLinkId) return;
 		getRequisition(deepLinkId)
@@ -575,7 +575,7 @@
 
 	/* No status-badge rules here on purpose. The one pill on this page is
 	   `<Badge>`, and its tone comes from `REQUISITION_STATUS_TONES` beside the
-	   label map in `$lib/types/requisition` — shared with `RequisitionModal`,
+	   label map in `#lib/types/requisition` — shared with `RequisitionModal`,
 	   which badges the same union one click away and used to hold a second copy
 	   at a different alpha. The status class survives as `variant`: a selector
 	   hook, never colour (decisions.md §47). */

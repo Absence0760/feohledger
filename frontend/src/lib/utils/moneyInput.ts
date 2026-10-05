@@ -31,7 +31,7 @@
  * sends a non-negative decimal the backend also constrains to `>= 0`: the
  * optimizer's cash budget, a vendor-statement line amount, and a
  * bulk-negotiation tier percent (which layers its own `0 < p < 100` bounds on
- * top — see `$lib/types/discounts::normalizeTierPercent`). Digits are
+ * top — see `#lib/types/discounts::normalizeTierPercent`). Digits are
  * bounded so a paste of a thousand characters is refused rather than sent.
  *
  * The fractional bound is generous on purpose. A budget beyond 2dp is not

@@ -4,13 +4,13 @@
  * `POST .../peppol-send`).
  *
  * Deliberately imports NOTHING beyond the generated catalogue and a type: the
- * feature module `einvoice.ts` pulls `$lib/api` → `$env/static/public`, which
+ * feature module `einvoice.ts` pulls `#lib/api` → `$app/env/public`, which
  * the node-environment `vitest.config.ts` does not alias, so the logic worth
  * unit-testing lives here instead. Same arrangement as `hostRouting.ts` under
  * `tenant.ts`.
  */
-import { E_INVOICE_RULE_MESSAGE_KEYS } from '$lib/api/einvoiceRuleMessages.generated';
-import type { MessageKey } from '$lib/i18n/messages';
+import { E_INVOICE_RULE_MESSAGE_KEYS } from '#lib/api/einvoiceRuleMessages.generated.ts';
+import type { MessageKey } from '#lib/i18n/messages.ts';
 
 export interface EInvoiceValidationIssue {
 	/** Dotted field path, e.g. `seller.tax_id`, `lines`, `taxes[0].rate`. */

@@ -1,13 +1,13 @@
 // Typed helpers for the 1099 reporting + admin-workflow endpoints. All
 // requests route through the shared `api` client (Bearer + X-Tenant-Slug +
 // 401-bounce). See backend/docs/tax-1099.md for the full contract.
-import { api } from '$lib/api';
+import { api } from '#lib/api.ts';
 import type {
 	Filing1099Response,
 	Report1099,
 	TinVerifyResponse,
 	VendorTaxProfile
-} from '$lib/types/tax';
+} from '#lib/types/tax.ts';
 
 // 1099 report for a calendar year. Aggregates completed payments per
 // vendor and flags W-9 / TIN / >$600-threshold status.

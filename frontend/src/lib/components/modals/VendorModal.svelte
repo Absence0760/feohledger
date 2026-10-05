@@ -5,12 +5,12 @@
 	// history timeline. Mutating actions (re-screen, recompute risk, block,
 	// unblock) default to admin / ap_manager and emit the updated vendor (or
 	// refreshed risk) back to the parent list.
-	import { auth } from '$lib/stores/auth.svelte';
-	import { PERM_VENDOR_BLOCK, PERM_VENDOR_MANAGE } from '$lib/types/admin';
-	import { toast } from '$lib/components/ui/Toast.svelte';
-	import Modal from '$lib/components/ui/Modal.svelte';
-	import RowAction from '$lib/components/ui/RowAction.svelte';
-	import ScreeningBadge from '$lib/components/ui/ScreeningBadge.svelte';
+	import { auth } from '#lib/stores/auth.svelte.ts';
+	import { PERM_VENDOR_BLOCK, PERM_VENDOR_MANAGE } from '#lib/types/admin.ts';
+	import { toast } from '#lib/components/ui/Toast.svelte';
+	import Modal from '#lib/components/ui/Modal.svelte';
+	import RowAction from '#lib/components/ui/RowAction.svelte';
+	import ScreeningBadge from '#lib/components/ui/ScreeningBadge.svelte';
 	import {
 		screenVendor,
 		getScreeningHistory,
@@ -19,7 +19,7 @@
 		recomputeVendorRisk,
 		enrichVendor,
 		applyVendorEnrichment
-	} from '$lib/api/vendors';
+	} from '#lib/api/vendors.ts';
 	import {
 		riskLevelLabelKey,
 		ENRICHABLE_FIELD_LABEL_KEYS,
@@ -27,11 +27,11 @@
 		type SanctionsCheck,
 		type ScreeningStatus,
 		type EnrichmentFieldSuggestion
-	} from '$lib/types/vendor';
-	import { m } from '$lib/i18n/store.svelte';
-	import { formatDate } from '$lib/utils/time';
-	import { getVendorScore, type VendorScoreResponse } from '$lib/api/enrichment';
-	import type { MessageKey } from '$lib/i18n/messages';
+	} from '#lib/types/vendor.ts';
+	import { m } from '#lib/i18n/store.svelte.ts';
+	import { formatDate } from '#lib/utils/time.ts';
+	import { getVendorScore, type VendorScoreResponse } from '#lib/api/enrichment.ts';
+	import type { MessageKey } from '#lib/i18n/messages.ts';
 
 	const SCREENING_RESULTS: ScreeningStatus[] = ['unscreened', 'clear', 'review', 'match'];
 

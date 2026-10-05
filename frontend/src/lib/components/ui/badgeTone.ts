@@ -12,7 +12,7 @@
  * decisions.md §30.
  *
  * **Why this is a `.ts` module and not the component's `<script module>`.**
- * Every `$lib/types/*` status→tone map is typed with it, and those modules are
+ * Every `#lib/types/*` status→tone map is typed with it, and those modules are
  * also what an e2e fixture reaches for to pin a stub (`satisfies SomeType`).
  * `tests-e2e/` is typechecked by plain `tsc` (`pnpm check:e2e`), which
  * resolves a `.svelte` import through the ambient `*.svelte` shim — a shim

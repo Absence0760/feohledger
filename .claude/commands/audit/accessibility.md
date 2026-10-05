@@ -16,7 +16,7 @@ Note there are **two distinct web audiences**: the AP application (the customer'
 
 ## What to check
 
-### Web (SvelteKit 2 / Svelte 5)
+### Web (SvelteKit 3 / Svelte 5)
 
 1. **Semantic HTML.** `<button>` not `<div onclick>`. Every icon-only control carries an `aria-label` or visually-hidden text. Walk the shared library first — `frontend/src/lib/components/` — because a defect in `RowAction`, `StatusBadge`, `BulkBar`, `SearchBox` or `Modal` ships on every route at once, and so does its fix.
 2. **Focus management.** Modals trap focus and restore it on close — the shared `focusTrap` action is the single owner; flag any dialog that hand-rolls its own. `:focus-visible` ring on every focusable. `tabindex="-1"` only on non-interactive targets.

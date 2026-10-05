@@ -4,17 +4,17 @@
 		listPortalPayments,
 		PORTAL_PAGE_SIZE,
 		type PortalPaymentListItem,
-	} from '$lib/portalApi';
+	} from '#lib/portalApi.ts';
 	import { onMount, untrack } from 'svelte';
-	import { page } from '$app/stores';
+	import { page } from '$app/state';
 	import { replaceState } from '$app/navigation';
-	import Money from '$lib/components/ui/Money.svelte';
-	import { formatDate } from '$lib/utils/time';
-	import { appendUnique } from '$lib/utils/pagination';
-	import { createRequestSequencer } from '$lib/utils/requestSequence';
-	import { m } from '$lib/i18n/store.svelte';
-	import { portalPaymentStatusLabelKey, PORTAL_PAYMENT_PHASES } from '$lib/types/portalStatus';
-	import PortalListFilters from '$lib/components/portal/PortalListFilters.svelte';
+	import Money from '#lib/components/ui/Money.svelte';
+	import { formatDate } from '#lib/utils/time.ts';
+	import { appendUnique } from '#lib/utils/pagination.ts';
+	import { createRequestSequencer } from '#lib/utils/requestSequence.ts';
+	import { m } from '#lib/i18n/store.svelte.ts';
+	import { portalPaymentStatusLabelKey, PORTAL_PAYMENT_PHASES } from '#lib/types/portalStatus.ts';
+	import PortalListFilters from '#lib/components/portal/PortalListFilters.svelte';
 
 	type PortalPayment = PortalPaymentListItem;
 
@@ -36,15 +36,15 @@
 	 * backend would not recognise, and it carries the phase ID (`completed`),
 	 * never its label — so the link survives a locale switch. */
 	const seededPhase = (() => {
-		const raw = $page.url.searchParams.get('phase');
+		const raw = page.url.searchParams.get('phase');
 		if (!raw) return null;
 		return PORTAL_PAYMENT_PHASES.some((c) => c.phase === raw) ? raw : null;
 	})();
 	const initialFilters = {
 		phase: seededPhase,
-		search: $page.url.searchParams.get('search') ?? '',
-		dateFrom: $page.url.searchParams.get('date_from') ?? '',
-		dateTo: $page.url.searchParams.get('date_to') ?? '',
+		search: page.url.searchParams.get('search') ?? '',
+		dateFrom: page.url.searchParams.get('date_from') ?? '',
+		dateTo: page.url.searchParams.get('date_to') ?? '',
 	};
 
 	// --- Filters. PortalListFilters owns the phase chips + debounced search
@@ -66,7 +66,7 @@
 
 	function syncUrl() {
 		untrack(() => {
-			const url = new URL($page.url);
+			const url = new URL(page.url.href);
 			const set = (k: string, v: string) =>
 				v ? url.searchParams.set(k, v) : url.searchParams.delete(k);
 			set('phase', activePhase ?? '');

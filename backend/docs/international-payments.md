@@ -212,8 +212,8 @@ can quote the corridor at all.
 
 It had **no caller in `frontend/src`** — the optimizer was a module
 nothing reached. It now ships as a **Compare routes** row action on the
-`/payments` Queue tab (`$lib/api/corridorQuotes.ts` +
-`$lib/types/corridorQuote.ts`, the latter holding the pure display
+`/payments` Queue tab (`#lib/api/corridorQuotes.ts` +
+`#lib/types/corridorQuote.ts`, the latter holding the pure display
 helpers and their vitest guard). Four contracts the UI has to keep:
 
 - **It leads with the advisory notice, before any figure.** Nothing

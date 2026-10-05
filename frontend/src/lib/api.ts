@@ -1,8 +1,8 @@
-import { getApiBase, getTenantSlug } from '$lib/tenant';
-import { getSelectedEntityId } from '$lib/entity';
-import { formatApiDetail } from '$lib/utils/apiError';
+import { getApiBase, getTenantSlug } from '#lib/tenant.ts';
+import { getSelectedEntityId } from '#lib/entity.ts';
+import { formatApiDetail } from '#lib/utils/apiError.ts';
 
-// Re-exported so callers that already import from `$lib/api` (e.g. the
+// Re-exported so callers that already import from `#lib/api` (e.g. the
 // hand-rolled fetch in `api/expenses.ts`) don't need a second import path.
 export { formatApiDetail };
 
@@ -11,7 +11,7 @@ export { formatApiDetail };
 // `PUBLIC_API_URL` on a platform host, same-origin (`''`) on a tenant's vanity
 // custom domain, where only a same-origin request carries the vanity hostname
 // in `Host` for the backend to resolve the tenant from. One owner —
-// `$lib/tenant.ts::getApiBase` — so no call site re-derives it.
+// `#lib/tenant.ts::getApiBase` — so no call site re-derives it.
 
 /** Raised by `request()` on any non-OK HTTP response. Carries the status code
  *  so a caller can branch on a specific status (e.g. a 409 "stale state"

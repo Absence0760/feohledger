@@ -1,6 +1,6 @@
 /**
  * Type contracts for the Custom (ad-hoc) Report Builder — mirrors the
- * authoritative API contract consumed by `$lib/api/reports.ts` and the
+ * authoritative API contract consumed by `#lib/api/reports.ts` and the
  * `/reports` route. Endpoints live under `/api/reports` (`backend/app/api/reports.py`).
  *
  * Security model (enforced server-side): the client only ever sends **catalog

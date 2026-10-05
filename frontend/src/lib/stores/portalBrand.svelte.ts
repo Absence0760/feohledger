@@ -1,4 +1,4 @@
-import { portalApi } from '$lib/portalApi';
+import { portalApi } from '#lib/portalApi.ts';
 import {
 	EMPTY_BRAND,
 	DEFAULT_PRODUCT_NAME,
@@ -6,12 +6,12 @@ import {
 	brandMark,
 	type Brand,
 	type BrandMarkChoice
-} from '$lib/stores/brandTheme';
+} from '#lib/stores/brandTheme.ts';
 
 /**
  * Per-tenant white-label branding for the **supplier portal**
  * (`/portal/*`) — the portal counterpart of the employee-app
- * {@link import('$lib/stores/brand.svelte').brand} store.
+ * {@link import('#lib/stores/brand.svelte.ts').brand} store.
  *
  * Why a separate store: the employee store reads `GET /api/organization/branding`
  * over the authenticated `api` client (JWT-gated, employee `User`). The portal

@@ -3,13 +3,13 @@
 // raw fetch. Backend: `backend/app/api/webhooks.py` (admin + JWT gated). The
 // create response carries the plaintext `signing_secret` exactly once;
 // everything else is metadata only (`secret_prefix`).
-import { api } from '$lib/api';
+import { api } from '#lib/api.ts';
 import type {
 	WebhookDelivery,
 	WebhookSecretRotated,
 	WebhookSubscription,
 	WebhookSubscriptionCreated
-} from '$lib/types/webhooks';
+} from '#lib/types/webhooks.ts';
 
 /** This org's webhook subscriptions, newest first. Metadata only. */
 export function listWebhookSubscriptions(): Promise<WebhookSubscription[]> {
@@ -53,7 +53,7 @@ export function updateWebhookSubscription(
  * `X-Webhook-Signature-Previous` header for that long, so a receiver accepting
  * either header rotates with no dropped deliveries; `0` is a hard cutover for a
  * known-compromised secret. Out-of-range values are refused by the backend
- * (422), not clamped — see `$lib/utils/webhookRotation`.
+ * (422), not clamped — see `#lib/utils/webhookRotation`.
  */
 export function rotateWebhookSecret(
 	id: string,

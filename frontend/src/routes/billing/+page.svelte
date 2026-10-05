@@ -1,14 +1,14 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
-	import { auth } from '$lib/stores/auth.svelte';
-	import PageHeader from '$lib/components/ui/PageHeader.svelte';
-	import KpiCard from '$lib/components/ui/KpiCard.svelte';
-	import DataTable from '$lib/components/ui/DataTable.svelte';
-	import Modal from '$lib/components/ui/Modal.svelte';
-	import Money from '$lib/components/ui/Money.svelte';
-	import SubscriptionBadge from '$lib/components/ui/SubscriptionBadge.svelte';
-	import Badge from '$lib/components/ui/Badge.svelte';
-	import type { BadgeTone } from '$lib/components/ui/badgeTone';
+	import { auth } from '#lib/stores/auth.svelte.ts';
+	import PageHeader from '#lib/components/ui/PageHeader.svelte';
+	import KpiCard from '#lib/components/ui/KpiCard.svelte';
+	import DataTable from '#lib/components/ui/DataTable.svelte';
+	import Modal from '#lib/components/ui/Modal.svelte';
+	import Money from '#lib/components/ui/Money.svelte';
+	import SubscriptionBadge from '#lib/components/ui/SubscriptionBadge.svelte';
+	import Badge from '#lib/components/ui/Badge.svelte';
+	import type { BadgeTone } from '#lib/components/ui/badgeTone.ts';
 	import {
 		changeBillingPlan,
 		getBillingInvoices,
@@ -16,9 +16,9 @@
 		getBillingPlans,
 		getBillingSubscription,
 		startBillingSetupIntent
-	} from '$lib/api/billing';
-	import { formatMoney } from '$lib/utils/money';
-	import { m } from '$lib/i18n/store.svelte';
+	} from '#lib/api/billing.ts';
+	import { formatMoney } from '#lib/utils/money.ts';
+	import { m } from '#lib/i18n/store.svelte.ts';
 	// The published-address registry, not a literal typed here. All three
 	// `mailto:`s below read `billing@example.com` — the IANA-reserved TLD, which
 	// can never deliver — so every "contact us" on this page was a dead button.
@@ -28,7 +28,7 @@
 	// would re-create the bug in a subtler form, since an unprovisioned address
 	// bounces exactly like a reserved one. Each button goes to whichever of the
 	// five live aliases matches what the button's own label promises.
-	import { CONTACT } from '$lib/legal/operator';
+	import { CONTACT } from '#lib/legal/operator.ts';
 	import type {
 		BillingInvoice,
 		BillingInvoiceStatus,
@@ -36,9 +36,9 @@
 		BillingPlan,
 		BillingPlanChangeResponse,
 		BillingSubscriptionResponse
-	} from '$lib/types/billing';
-	import { rebateMeterGroups } from '$lib/types/billing';
-	import { formatDate } from '$lib/utils/time';
+	} from '#lib/types/billing.ts';
+	import { rebateMeterGroups } from '#lib/types/billing.ts';
+	import { formatDate } from '#lib/utils/time.ts';
 
 	// RBAC: the backend gates `GET /api/billing/subscription` to admin / cfo and
 	// 403s everyone else. `isAdmin` covers admin; `isCfo` = admin|cfo, so the

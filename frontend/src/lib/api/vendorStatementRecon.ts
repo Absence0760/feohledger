@@ -1,7 +1,7 @@
 // Typed helpers for the vendor statement reconciliation endpoints. All
 // requests route through the shared `api` client (Bearer + X-Tenant-Slug +
 // 401-bounce). Mirrors the pattern of `src/lib/api/recurring.ts`.
-import { api } from '$lib/api';
+import { api } from '#lib/api.ts';
 import type {
 	Reconciliation,
 	ReconciliationCreate,
@@ -9,7 +9,7 @@ import type {
 	ReconciliationSummary,
 	LineResolveRequest,
 	CloseReadinessResponse
-} from '$lib/types/vendorStatementRecon';
+} from '#lib/types/vendorStatementRecon.ts';
 
 export interface ReconListParams {
 	vendor_id?: string;

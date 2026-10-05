@@ -1,9 +1,9 @@
 <script lang="ts">
 	import { onMount, tick } from 'svelte';
-	import { page } from '$app/stores';
-	import AuthCard from '$lib/components/auth/AuthCard.svelte';
-	import { api } from '$lib/api';
-	import { m } from '$lib/i18n/store.svelte';
+	import { page } from '$app/state';
+	import AuthCard from '#lib/components/auth/AuthCard.svelte';
+	import { api } from '#lib/api.ts';
+	import { m } from '#lib/i18n/store.svelte.ts';
 
 	let token = $state('');
 	let newPassword = $state('');
@@ -14,7 +14,7 @@
 	let successEl = $state<HTMLParagraphElement | null>(null);
 
 	onMount(() => {
-		token = $page.url.searchParams.get('token') ?? '';
+		token = page.url.searchParams.get('token') ?? '';
 		if (!token) {
 			error = m('auth.resetPassword.missingToken');
 		}

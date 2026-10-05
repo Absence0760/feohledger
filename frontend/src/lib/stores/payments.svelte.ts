@@ -1,7 +1,7 @@
-import type { Payment } from '$lib/types/payment';
-import { api } from '$lib/api';
-import { appendUnique } from '$lib/utils/pagination';
-import { createRequestSequencer } from '$lib/utils/requestSequence';
+import type { Payment } from '#lib/types/payment.ts';
+import { api } from '#lib/api.ts';
+import { appendUnique } from '#lib/utils/pagination.ts';
+import { createRequestSequencer } from '#lib/utils/requestSequence.ts';
 
 interface PaymentListResponse {
 	items: Payment[];

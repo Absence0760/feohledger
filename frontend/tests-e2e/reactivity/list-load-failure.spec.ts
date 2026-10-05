@@ -1,4 +1,4 @@
-import type { VendorChangeRequestPage } from '$lib/types/vendor';
+import type { VendorChangeRequestPage } from '#lib/types/vendor.ts';
 
 import { expect, test } from '../fixtures/helpers';
 
@@ -142,7 +142,7 @@ test('vendor change requests: a failed RE-load clears the previous filter\'s row
 	const STALE_VENDOR = 'Stale Queue Vendor';
 
 	// One good response, then failures. Pinned to the type the page reads
-	// (`satisfies`, the house rule for a stub with a `$lib/types` counterpart),
+	// (`satisfies`, the house rule for a stub with a `#lib/types` counterpart),
 	// so a new field on the queue payload is a compile error here rather than a
 	// stub the page quietly stops rendering.
 	const pendingPage = {

@@ -3,29 +3,29 @@
 		Requisition,
 		RequisitionLineItemInput,
 		RequisitionStatus
-	} from '$lib/types/requisition';
+	} from '#lib/types/requisition.ts';
 	import {
 		requisitionStatusLabelKey,
 		REQUISITION_STATUS_TONES
-	} from '$lib/types/requisition';
-	import { auth } from '$lib/stores/auth.svelte';
-	import { orgCurrency } from '$lib/stores/orgSettings.svelte';
-	import Modal from '$lib/components/ui/Modal.svelte';
-	import Badge from '$lib/components/ui/Badge.svelte';
-	import Money from '$lib/components/ui/Money.svelte';
+	} from '#lib/types/requisition.ts';
+	import { auth } from '#lib/stores/auth.svelte.ts';
+	import { orgCurrency } from '#lib/stores/orgSettings.svelte.ts';
+	import Modal from '#lib/components/ui/Modal.svelte';
+	import Badge from '#lib/components/ui/Badge.svelte';
+	import Money from '#lib/components/ui/Money.svelte';
 	import {
 		DEFAULT_CURRENCY,
 		formatMoney,
 		scaleMoney,
 		sumMoney,
 		type MoneyString
-	} from '$lib/utils/money';
-	import { toast } from '$lib/components/ui/Toast.svelte';
-	import { m } from '$lib/i18n/store.svelte';
-	import { createRequisition, updateRequisition } from '$lib/api/requisitions';
-	import type { GlAccountOption } from '$lib/api/expenses';
-	import { glAccountOptionLabel } from '$lib/types/glAccount';
-	import { entityStore } from '$lib/stores/entity.svelte';
+	} from '#lib/utils/money.ts';
+	import { toast } from '#lib/components/ui/Toast.svelte';
+	import { m } from '#lib/i18n/store.svelte.ts';
+	import { createRequisition, updateRequisition } from '#lib/api/requisitions.ts';
+	import type { GlAccountOption } from '#lib/api/expenses.ts';
+	import { glAccountOptionLabel } from '#lib/types/glAccount.ts';
+	import { entityStore } from '#lib/stores/entity.svelte.ts';
 
 	let {
 		requisition,

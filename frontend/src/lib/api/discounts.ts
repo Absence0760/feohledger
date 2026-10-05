@@ -1,7 +1,7 @@
 // Typed helpers for the Dynamic Discounting & Early-Payment endpoints. All
 // requests route through the shared `api` client (Bearer + X-Tenant-Slug +
-// 401-bounce). See `$lib/types/discounts` for the response contracts.
-import { api } from '$lib/api';
+// 401-bounce). See `#lib/types/discounts` for the response contracts.
+import { api } from '#lib/api.ts';
 import type {
 	DiscountDashboard,
 	DiscountOffer,
@@ -9,8 +9,8 @@ import type {
 	DiscountOptimization,
 	DiscountRoi,
 	DiscountStatusFilter
-} from '$lib/types/discounts';
-import type { MoneyString } from '$lib/utils/money';
+} from '#lib/types/discounts.ts';
+import type { MoneyString } from '#lib/utils/money.ts';
 
 /** KPI roll-up for the dashboard header (captured / missed / open / projected). */
 export function getDiscountDashboard(): Promise<DiscountDashboard> {
@@ -75,7 +75,7 @@ export function optimizeDiscounts(cashBudget?: MoneyString): Promise<DiscountOpt
 export interface BulkNegotiationPayload {
 	vendorId: string;
 	/** `percent` is the EXACT decimal string the user typed — see
-	 *  `$lib/types/discounts::normalizeTierPercent`. */
+	 *  `#lib/types/discounts::normalizeTierPercent`. */
 	tiers: { days: number; percent: string }[];
 	validUntil?: string | null;
 	notes?: string | null;

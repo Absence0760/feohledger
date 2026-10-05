@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { formatMoney, type MoneyFormatOptions } from '$lib/utils/money';
+	import { formatMoney, type MoneyFormatOptions } from '#lib/utils/money.ts';
 
 	interface Props extends MoneyFormatOptions {
 		/** The amount — number, string-Decimal from the API, or null. */

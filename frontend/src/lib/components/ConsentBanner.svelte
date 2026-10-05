@@ -54,9 +54,9 @@
 </script>
 
 <script lang="ts">
-	import { browser } from '$app/environment';
-	import { m } from '$lib/i18n/store.svelte';
-	import LinkedMessage from '$lib/components/ui/LinkedMessage.svelte';
+	import { browser } from '$app/env';
+	import { m } from '#lib/i18n/store.svelte.ts';
+	import LinkedMessage from '#lib/components/ui/LinkedMessage.svelte';
 
 	// `undefined` until we've read localStorage on the client — render nothing
 	// during that window so the banner never flashes for a user who already chose.

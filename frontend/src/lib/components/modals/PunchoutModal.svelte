@@ -1,17 +1,17 @@
 <script lang="ts">
-	import type { Catalog, PunchoutSession } from '$lib/types/catalog';
-	import { punchoutStatusLabelKey, punchoutStatusTone } from '$lib/types/catalog';
-	import { auth } from '$lib/stores/auth.svelte';
-	import Badge from '$lib/components/ui/Badge.svelte';
-	import Modal from '$lib/components/ui/Modal.svelte';
-	import Money from '$lib/components/ui/Money.svelte';
-	import { toast } from '$lib/components/ui/Toast.svelte';
-	import { m } from '$lib/i18n/store.svelte';
+	import type { Catalog, PunchoutSession } from '#lib/types/catalog.ts';
+	import { punchoutStatusLabelKey, punchoutStatusTone } from '#lib/types/catalog.ts';
+	import { auth } from '#lib/stores/auth.svelte.ts';
+	import Badge from '#lib/components/ui/Badge.svelte';
+	import Modal from '#lib/components/ui/Modal.svelte';
+	import Money from '#lib/components/ui/Money.svelte';
+	import { toast } from '#lib/components/ui/Toast.svelte';
+	import { m } from '#lib/i18n/store.svelte.ts';
 	import {
 		startPunchout,
 		getPunchoutSession,
 		convertPunchoutSession
-	} from '$lib/api/catalogs';
+	} from '#lib/api/catalogs.ts';
 
 	let {
 		catalog,

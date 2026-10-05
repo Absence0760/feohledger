@@ -1,8 +1,8 @@
 <script lang="ts">
-	import Modal from '$lib/components/ui/Modal.svelte';
-	import { INVOICE_STATUSES, INVOICE_STATUS_LABEL_KEYS } from '$lib/types/invoice';
-	import type { AdvancedSearchFilters, InvoiceStatus } from '$lib/types/invoice';
-	import { m } from '$lib/i18n/store.svelte';
+	import Modal from '#lib/components/ui/Modal.svelte';
+	import { INVOICE_STATUSES, INVOICE_STATUS_LABEL_KEYS } from '#lib/types/invoice.ts';
+	import type { AdvancedSearchFilters, InvoiceStatus } from '#lib/types/invoice.ts';
+	import { m } from '#lib/i18n/store.svelte.ts';
 
 	let {
 		filters,

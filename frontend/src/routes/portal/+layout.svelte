@@ -1,19 +1,19 @@
 <script lang="ts">
-	import { portalAuth } from '$lib/stores/portalAuth.svelte';
-	import { portalBrand } from '$lib/stores/portalBrand.svelte';
-	import BrandMark from '$lib/components/ui/BrandMark.svelte';
-	import { page } from '$app/stores';
+	import { portalAuth } from '#lib/stores/portalAuth.svelte.ts';
+	import { portalBrand } from '#lib/stores/portalBrand.svelte.ts';
+	import BrandMark from '#lib/components/ui/BrandMark.svelte';
+	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
-	import { browser } from '$app/environment';
-	import { hasTenantContext } from '$lib/tenant';
-	import { m } from '$lib/i18n/store.svelte';
+	import { browser } from '$app/env';
+	import { hasTenantContext } from '#lib/tenant.ts';
+	import { m } from '#lib/i18n/store.svelte.ts';
 
 	// Tri-state: `undefined` until the browser resolves it, then true/false.
 	// "Does this host carry a tenant", NOT "what is its slug" — a white-label
 	// vanity host has a tenant but no slug in the URL (the backend resolves it
 	// from `Host`), and gating on the slug showed a supplier the no-tenant page
 	// on their customer's own domain. The portal never needs the slug value:
-	// `$lib/portalApi` attaches the header when there is one.
+	// `#lib/portalApi` attaches the header when there is one.
 	let hasTenant = $state<boolean | undefined>(undefined);
 
 	$effect(() => {
@@ -30,7 +30,7 @@
 
 	$effect(() => {
 		if (!hasTenant) return;
-		const path = $page.url.pathname;
+		const path = page.url.pathname;
 
 		// `/portal/cards/<token>` is the email-emitted single-use reveal
 		// link. The URL token is the credential — vendors don't need a
@@ -69,7 +69,7 @@
 	<div class="no-tenant">
 		<p>{m('portal.shell.noTenant')}</p>
 	</div>
-{:else if $page.url.pathname === '/portal/login' || $page.url.pathname === '/portal/change-password' || $page.url.pathname.startsWith('/portal/cards/')}
+{:else if page.url.pathname === '/portal/login' || page.url.pathname === '/portal/change-password' || page.url.pathname.startsWith('/portal/cards/')}
 	<div class="portal-shell">
 		<div class="portal-standalone">
 			<slot />
@@ -128,38 +128,38 @@
 				</div>
 			</div>
 			<nav aria-label={m('portal.shell.nav')}>
-				<a href="/portal" class:active={$page.url.pathname === '/portal'}
-					aria-current={$page.url.pathname === '/portal' ? 'page' : undefined}
+				<a href="/portal" class:active={page.url.pathname === '/portal'}
+					aria-current={page.url.pathname === '/portal' ? 'page' : undefined}
 					>{m('portal.nav.overview')}</a
 				>
-				<a href="/portal/invoices" class:active={$page.url.pathname.startsWith('/portal/invoices')}
-					aria-current={$page.url.pathname.startsWith('/portal/invoices') ? 'page' : undefined}
+				<a href="/portal/invoices" class:active={page.url.pathname.startsWith('/portal/invoices')}
+					aria-current={page.url.pathname.startsWith('/portal/invoices') ? 'page' : undefined}
 					>{m('portal.nav.invoices')}</a
 				>
 				<a
 					href="/portal/purchase-orders"
-					class:active={$page.url.pathname.startsWith('/portal/purchase-orders')}
-					aria-current={$page.url.pathname.startsWith('/portal/purchase-orders') ? 'page' : undefined}
+					class:active={page.url.pathname.startsWith('/portal/purchase-orders')}
+					aria-current={page.url.pathname.startsWith('/portal/purchase-orders') ? 'page' : undefined}
 					>{m('portal.nav.purchaseOrders')}</a
 				>
-				<a href="/portal/payments" class:active={$page.url.pathname.startsWith('/portal/payments')}
-					aria-current={$page.url.pathname.startsWith('/portal/payments') ? 'page' : undefined}
+				<a href="/portal/payments" class:active={page.url.pathname.startsWith('/portal/payments')}
+					aria-current={page.url.pathname.startsWith('/portal/payments') ? 'page' : undefined}
 					>{m('portal.nav.payments')}</a
 				>
 				<a
 					href="/portal/discount-offers"
-					class:active={$page.url.pathname.startsWith('/portal/discount-offers')}
-					aria-current={$page.url.pathname.startsWith('/portal/discount-offers') ? 'page' : undefined}
+					class:active={page.url.pathname.startsWith('/portal/discount-offers')}
+					aria-current={page.url.pathname.startsWith('/portal/discount-offers') ? 'page' : undefined}
 					>{m('portal.nav.discounts')}</a
 				>
-				<a href="/portal/company" class:active={$page.url.pathname.startsWith('/portal/company')}
-					aria-current={$page.url.pathname.startsWith('/portal/company') ? 'page' : undefined}
+				<a href="/portal/company" class:active={page.url.pathname.startsWith('/portal/company')}
+					aria-current={page.url.pathname.startsWith('/portal/company') ? 'page' : undefined}
 					>{m('portal.nav.company')}</a
 				>
 				<a
 					href="/portal/notifications"
-					class:active={$page.url.pathname.startsWith('/portal/notifications')}
-					aria-current={$page.url.pathname.startsWith('/portal/notifications') ? 'page' : undefined}
+					class:active={page.url.pathname.startsWith('/portal/notifications')}
+					aria-current={page.url.pathname.startsWith('/portal/notifications') ? 'page' : undefined}
 					>{m('portal.nav.notifications')}</a
 				>
 			</nav>

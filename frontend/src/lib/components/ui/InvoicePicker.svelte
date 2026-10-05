@@ -25,14 +25,14 @@
 	 */
 	import SearchPicker from './SearchPicker.svelte';
 	import Money from './Money.svelte';
-	import { m } from '$lib/i18n/store.svelte';
-	import { formatMoney } from '$lib/utils/money';
-	import type { SearchPickerLoad } from '$lib/utils/searchPicker';
+	import { m } from '#lib/i18n/store.svelte.ts';
+	import { formatMoney } from '#lib/utils/money.ts';
+	import type { SearchPickerLoad } from '#lib/utils/searchPicker.ts';
 	import {
 		invoiceOptionLabel,
 		remainingToCredit,
 		type InvoicePickerOption
-	} from '$lib/utils/invoicePicker';
+	} from '#lib/utils/invoicePicker.ts';
 
 	let {
 		value = $bindable(''),

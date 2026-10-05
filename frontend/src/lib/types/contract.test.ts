@@ -7,7 +7,7 @@ import {
 	contractStatusLabelKey,
 	contractTypeLabelKey
 } from './contract';
-import { en } from '$lib/i18n/locales/en';
+import { en } from '#lib/i18n/locales/en.ts';
 
 /**
  * Map-completeness guard for the contract label maps.

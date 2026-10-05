@@ -20,9 +20,9 @@
 	 * reports as a load failure, never as a tenant with no vendors.
 	 */
 	import SearchPicker from './SearchPicker.svelte';
-	import { searchVendorOptions, type VendorOption } from '$lib/api/vendors';
-	import { m } from '$lib/i18n/store.svelte';
-	import { vendorOptionLabel } from '$lib/utils/vendorPicker';
+	import { searchVendorOptions, type VendorOption } from '#lib/api/vendors.ts';
+	import { m } from '#lib/i18n/store.svelte.ts';
+	import { vendorOptionLabel } from '#lib/utils/vendorPicker.ts';
 
 	let {
 		value = $bindable(''),

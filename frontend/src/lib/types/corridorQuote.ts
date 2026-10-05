@@ -10,13 +10,13 @@
 // response says so itself (`advisory: true`), and the UI must never imply that
 // looking at a comparison selected anything.
 //
-// Kept free of `$lib/api` (and therefore of `$app/*`) so the helpers below stay
+// Kept free of `#lib/api` (and therefore of `$app/*`) so the helpers below stay
 // unit-testable under vitest's plain-node environment — the same split
 // `types/recurring.ts` and `types/vendorStatementRecon.ts` use.
 //
 // See `backend/docs/international-payments.md` § Multi-route quote optimization.
-import type { MoneyString } from '$lib/utils/money';
-import { getActiveFormatLocale } from '$lib/i18n/formatLocale';
+import type { MoneyString } from '#lib/utils/money.ts';
+import { getActiveFormatLocale } from '#lib/i18n/formatLocale.ts';
 
 /** How the auction ranks the routes. Mirrors the backend `OptimizeMode`. */
 export type QuoteMode = 'cheapest' | 'fastest';

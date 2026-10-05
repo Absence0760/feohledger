@@ -1,7 +1,7 @@
 // Typed helpers for the procurement budgets endpoints. All requests route
 // through the shared `api` client (Bearer + X-Tenant-Slug + X-Entity-ID +
 // 401-bounce). Mirrors the pattern of `src/lib/api/expenses.ts`.
-import { api } from '$lib/api';
+import { api } from '#lib/api.ts';
 import type {
 	Budget,
 	BudgetCheck,
@@ -11,8 +11,8 @@ import type {
 	BudgetSpend,
 	BudgetSummary,
 	BudgetUpdate
-} from '$lib/types/budget';
-import type { MoneyString } from '$lib/utils/money';
+} from '#lib/types/budget.ts';
+import type { MoneyString } from '#lib/utils/money.ts';
 
 export interface BudgetListParams {
 	dimension?: string;

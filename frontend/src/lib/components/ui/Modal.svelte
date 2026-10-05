@@ -1,6 +1,6 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
-	import { focusTrap } from '$lib/actions/focusTrap';
+	import { focusTrap } from '#lib/actions/focusTrap.ts';
 
 	type Props = {
 		/** Controls visibility. Defaults to true so `{#if open}<Modal>` reads naturally. */

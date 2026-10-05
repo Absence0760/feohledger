@@ -15,8 +15,8 @@ import {
 	expensePreapprovalStatusLabelKey,
 	reconciliationStatusLabelKey
 } from './expense';
-import { en } from '$lib/i18n/locales/en';
-import type { MessageKey } from '$lib/i18n/messages';
+import { en } from '#lib/i18n/locales/en.ts';
+import type { MessageKey } from '#lib/i18n/messages.ts';
 
 /**
  * Map-completeness guard for the four expense label maps.

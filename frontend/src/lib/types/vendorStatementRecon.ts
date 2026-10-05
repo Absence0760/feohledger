@@ -1,12 +1,12 @@
-import type { MoneyAmount, MoneyString } from '$lib/utils/money';
+import type { MoneyAmount, MoneyString } from '#lib/utils/money.ts';
 
 // Types for the Vendor Statement Reconciliation surface. Mirrors the JSON
 // returned by the `/api/vendor-statements` endpoints (the Pydantic contract in
 // `backend/app/schemas/vendor_statement_recon.py`). Money fields arrive as
 // numbers (or null); date/time fields are ISO strings (or null).
 
-import type { BadgeTone } from '$lib/components/ui/badgeTone';
-import type { MessageKey } from '$lib/i18n/messages';
+import type { BadgeTone } from '#lib/components/ui/badgeTone.ts';
+import type { MessageKey } from '#lib/i18n/messages.ts';
 
 // --- Run status -----------------------------------------------------------
 

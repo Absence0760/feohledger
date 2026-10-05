@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import type { DiscountOptimization, DiscountRoi } from './discounts';
 import { isTierStarted, normalizeTierDays, normalizeTierPercent } from './discounts';
-import { en } from '$lib/i18n/locales/en';
-import { interpolate } from '$lib/i18n/interpolate';
+import { en } from '#lib/i18n/locales/en.ts';
+import { interpolate } from '#lib/i18n/interpolate.ts';
 
 /**
  * Guard on the optimizer's two-list contract.

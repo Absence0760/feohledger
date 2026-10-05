@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { DiscountTier } from '$lib/types/discounts';
+	import type { DiscountTier } from '#lib/types/discounts.ts';
 
 	type Props = {
 		/** Sliding-scale tiers (e.g. 2% by day 10, 1% by day 20). */

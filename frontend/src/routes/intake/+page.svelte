@@ -1,14 +1,14 @@
 <script lang="ts">
-	import type { IntakeRequest } from '$lib/types/intake';
+	import type { IntakeRequest } from '#lib/types/intake.ts';
 	import {
 		INTAKE_STATUSES,
 		intakeStatusLabelKey,
 		intakeStatusTone,
 		INTAKE_TYPES,
 		intakeTypeLabelKey
-	} from '$lib/types/intake';
-	import { auth } from '$lib/stores/auth.svelte';
-	import { orgCurrency } from '$lib/stores/orgSettings.svelte';
+	} from '#lib/types/intake.ts';
+	import { auth } from '#lib/stores/auth.svelte.ts';
+	import { orgCurrency } from '#lib/stores/orgSettings.svelte.ts';
 	import {
 		listIntake,
 		getIntakeSummary,
@@ -19,26 +19,26 @@
 		cancelIntake,
 		reopenIntake,
 		convertIntakeToRequisition
-	} from '$lib/api/intake';
-	import type { IntakeSummary } from '$lib/types/intake';
-	import Badge from '$lib/components/ui/Badge.svelte';
-	import PageHeader from '$lib/components/ui/PageHeader.svelte';
-	import SearchBox from '$lib/components/ui/SearchBox.svelte';
-	import FilterChips from '$lib/components/ui/FilterChips.svelte';
-	import DataTable from '$lib/components/ui/DataTable.svelte';
-	import KpiCard from '$lib/components/ui/KpiCard.svelte';
-	import RowLink from '$lib/components/ui/RowLink.svelte';
-	import RowAction from '$lib/components/ui/RowAction.svelte';
-	import Money from '$lib/components/ui/Money.svelte';
-	import IntakeModal from '$lib/components/modals/IntakeModal.svelte';
-	import { toast } from '$lib/components/ui/Toast.svelte';
-	import { isRowOpenClick } from '$lib/utils/rowNav';
-	import { m } from '$lib/i18n/store.svelte';
-	import { page } from '$app/stores';
+	} from '#lib/api/intake.ts';
+	import type { IntakeSummary } from '#lib/types/intake.ts';
+	import Badge from '#lib/components/ui/Badge.svelte';
+	import PageHeader from '#lib/components/ui/PageHeader.svelte';
+	import SearchBox from '#lib/components/ui/SearchBox.svelte';
+	import FilterChips from '#lib/components/ui/FilterChips.svelte';
+	import DataTable from '#lib/components/ui/DataTable.svelte';
+	import KpiCard from '#lib/components/ui/KpiCard.svelte';
+	import RowLink from '#lib/components/ui/RowLink.svelte';
+	import RowAction from '#lib/components/ui/RowAction.svelte';
+	import Money from '#lib/components/ui/Money.svelte';
+	import IntakeModal from '#lib/components/modals/IntakeModal.svelte';
+	import { toast } from '#lib/components/ui/Toast.svelte';
+	import { isRowOpenClick } from '#lib/utils/rowNav.ts';
+	import { m } from '#lib/i18n/store.svelte.ts';
+	import { page } from '$app/state';
 	import { replaceState } from '$app/navigation';
 	import { untrack } from 'svelte';
-	import { createRequestSequencer } from '$lib/utils/requestSequence';
-	import { appendUnique } from '$lib/utils/pagination';
+	import { createRequestSequencer } from '#lib/utils/requestSequence.ts';
+	import { appendUnique } from '#lib/utils/pagination.ts';
 
 	const PAGE_SIZE = 50;
 
@@ -62,9 +62,9 @@
 	// says "Showing all {total}" is only true once every row is loaded.
 	let hasMore = $derived(items.length < total);
 
-	let search = $state($page.url.searchParams.get('search') ?? '');
-	let statusFilter = $state<string>($page.url.searchParams.get('status') ?? 'all');
-	let typeFilter = $state<string>($page.url.searchParams.get('type') ?? 'all');
+	let search = $state(page.url.searchParams.get('search') ?? '');
+	let statusFilter = $state<string>(page.url.searchParams.get('status') ?? 'all');
+	let typeFilter = $state<string>(page.url.searchParams.get('type') ?? 'all');
 
 	let showCreate = $state(false);
 	let editing = $state<IntakeRequest | null>(null);
@@ -141,7 +141,7 @@
 	}
 
 	// Reflect the live filter state into the URL. EVERY read in here is
-	// untracked, `$page.url` included, because syncUrl() is a WRITER called
+	// untracked, `page.url` included, because syncUrl() is a WRITER called
 	// from the filter `$effect`s below — not a source of dependencies:
 	//   - the URL read would self-trigger the effect that writes it via
 	//     replaceState (Svelte effect_update_depth_exceeded);
@@ -153,7 +153,7 @@
 	//     reading them directly, so nothing here needs to be tracked.
 	function syncUrl() {
 		untrack(() => {
-			const url = new URL($page.url);
+			const url = new URL(page.url.href);
 			if (statusFilter !== 'all') url.searchParams.set('status', statusFilter);
 			else url.searchParams.delete('status');
 			if (typeFilter !== 'all') url.searchParams.set('type', typeFilter);

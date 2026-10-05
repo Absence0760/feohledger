@@ -1,14 +1,14 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
-	import { formatDate } from '$lib/utils/time';
-	import { auth } from '$lib/stores/auth.svelte';
-	import PageHeader from '$lib/components/ui/PageHeader.svelte';
-	import DataTable from '$lib/components/ui/DataTable.svelte';
-	import Badge from '$lib/components/ui/Badge.svelte';
-	import KpiCard from '$lib/components/ui/KpiCard.svelte';
-	import { toast } from '$lib/components/ui/Toast.svelte';
-	import { getAccessReview, acknowledgeAccessReview } from '$lib/api/accessReviews';
-	import type { AccessReviewResponse } from '$lib/types/accessReview';
+	import { formatDate } from '#lib/utils/time.ts';
+	import { auth } from '#lib/stores/auth.svelte.ts';
+	import PageHeader from '#lib/components/ui/PageHeader.svelte';
+	import DataTable from '#lib/components/ui/DataTable.svelte';
+	import Badge from '#lib/components/ui/Badge.svelte';
+	import KpiCard from '#lib/components/ui/KpiCard.svelte';
+	import { toast } from '#lib/components/ui/Toast.svelte';
+	import { getAccessReview, acknowledgeAccessReview } from '#lib/api/accessReviews.ts';
+	import type { AccessReviewResponse } from '#lib/types/accessReview.ts';
 
 	// RBAC: the backend gates both /api/access-reviews routes to admin | cfo
 	// (`require_roles(ROLE_ADMIN, ROLE_CFO)`) — the reviewer privilege. Wait for

@@ -2,9 +2,9 @@
 	// Group-by dimension picker for the report builder. Entirely driven by the
 	// catalog source's `dimensions` — no hardcoded field list. Date dimensions
 	// expose a grain selector (day/month/quarter/year).
-	import type { CatalogDimension, DateGrain, SpecDimension } from '$lib/types/reports';
-	import { GRAIN_LABELS } from '$lib/types/reports';
-	import RowAction from '$lib/components/ui/RowAction.svelte';
+	import type { CatalogDimension, DateGrain, SpecDimension } from '#lib/types/reports.ts';
+	import { GRAIN_LABELS } from '#lib/types/reports.ts';
+	import RowAction from '#lib/components/ui/RowAction.svelte';
 
 	interface Props {
 		/** All group-by fields the chosen data source offers. */

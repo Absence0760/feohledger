@@ -5,30 +5,30 @@
 		resubmitPortalInvoice,
 		PORTAL_PAGE_SIZE,
 		type PortalInvoiceListItem,
-	} from '$lib/portalApi';
-	import { portalAuth } from '$lib/stores/portalAuth.svelte';
-	import { page } from '$app/stores';
+	} from '#lib/portalApi.ts';
+	import { portalAuth } from '#lib/stores/portalAuth.svelte.ts';
+	import { page } from '$app/state';
 	import { replaceState } from '$app/navigation';
 	import { onMount, untrack } from 'svelte';
-	import { formatMoney } from '$lib/utils/money';
-	import { formatDate } from '$lib/utils/time';
-	import { appendUnique } from '$lib/utils/pagination';
-	import { createRequestSequencer } from '$lib/utils/requestSequence';
-	import { m } from '$lib/i18n/store.svelte';
+	import { formatMoney } from '#lib/utils/money.ts';
+	import { formatDate } from '#lib/utils/time.ts';
+	import { appendUnique } from '#lib/utils/pagination.ts';
+	import { createRequestSequencer } from '#lib/utils/requestSequence.ts';
+	import { m } from '#lib/i18n/store.svelte.ts';
 	import {
 		portalInvoiceStatusLabelKey,
 		PORTAL_INVOICE_PHASES,
 		type PortalInvoicePhase,
-	} from '$lib/types/portalStatus';
-	import PortalListFilters from '$lib/components/portal/PortalListFilters.svelte';
-	import EmptyState from '$lib/components/ui/EmptyState.svelte';
-	import SupplierChatThread from '$lib/components/chat/SupplierChatThread.svelte';
-	import type { PortalChatThread } from '$lib/types/supplierChat';
+	} from '#lib/types/portalStatus.ts';
+	import PortalListFilters from '#lib/components/portal/PortalListFilters.svelte';
+	import EmptyState from '#lib/components/ui/EmptyState.svelte';
+	import SupplierChatThread from '#lib/components/chat/SupplierChatThread.svelte';
+	import type { PortalChatThread } from '#lib/types/supplierChat.ts';
 	import {
 		getPortalChatThread,
 		postPortalChatMessage,
 		uploadPortalChatAttachment,
-	} from '$lib/portalChat';
+	} from '#lib/portalChat.ts';
 
 	type PortalInvoice = PortalInvoiceListItem;
 
@@ -71,15 +71,15 @@
 	 * stable across locales, so a bookmarked link keeps working when the
 	 * supplier switches language — which a label-keyed URL could not do. */
 	const seededPhase = (() => {
-		const raw = $page.url.searchParams.get('phase');
+		const raw = page.url.searchParams.get('phase');
 		if (!raw) return null;
 		return PORTAL_INVOICE_PHASES.some((c) => c.phase === raw) ? raw : null;
 	})();
 	const initialFilters = {
 		phase: seededPhase,
-		search: $page.url.searchParams.get('search') ?? '',
-		dateFrom: $page.url.searchParams.get('date_from') ?? '',
-		dateTo: $page.url.searchParams.get('date_to') ?? '',
+		search: page.url.searchParams.get('search') ?? '',
+		dateFrom: page.url.searchParams.get('date_from') ?? '',
+		dateTo: page.url.searchParams.get('date_to') ?? '',
 	};
 
 	// --- Filters (PortalListFilters owns the phase chips + debounced search and
@@ -103,7 +103,7 @@
 
 	function syncUrl() {
 		untrack(() => {
-			const url = new URL($page.url);
+			const url = new URL(page.url.href);
 			const set = (k: string, v: string) =>
 				v ? url.searchParams.set(k, v) : url.searchParams.delete(k);
 			set('phase', activePhase ?? '');

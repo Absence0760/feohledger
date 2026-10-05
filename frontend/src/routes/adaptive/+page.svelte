@@ -30,21 +30,21 @@
 	 *    computed-looking number nothing backs.
 	 */
 	import { goto } from '$app/navigation';
-	import { ApiError, api } from '$lib/api';
-	import { auth } from '$lib/stores/auth.svelte';
-	import { orgCurrency } from '$lib/stores/orgSettings.svelte';
-	import PageHeader from '$lib/components/ui/PageHeader.svelte';
-	import Tabs from '$lib/components/ui/Tabs.svelte';
-	import DataTable from '$lib/components/ui/DataTable.svelte';
-	import Badge from '$lib/components/ui/Badge.svelte';
-	import type { BadgeTone } from '$lib/components/ui/badgeTone';
-	import KpiCard from '$lib/components/ui/KpiCard.svelte';
-	import Money from '$lib/components/ui/Money.svelte';
-	import RowAction from '$lib/components/ui/RowAction.svelte';
-	import RowLink from '$lib/components/ui/RowLink.svelte';
-	import { toast } from '$lib/components/ui/Toast.svelte';
-	import { m } from '$lib/i18n/store.svelte';
-	import { formatMoney } from '$lib/utils/money';
+	import { ApiError, api } from '#lib/api.ts';
+	import { auth } from '#lib/stores/auth.svelte.ts';
+	import { orgCurrency } from '#lib/stores/orgSettings.svelte.ts';
+	import PageHeader from '#lib/components/ui/PageHeader.svelte';
+	import Tabs from '#lib/components/ui/Tabs.svelte';
+	import DataTable from '#lib/components/ui/DataTable.svelte';
+	import Badge from '#lib/components/ui/Badge.svelte';
+	import type { BadgeTone } from '#lib/components/ui/badgeTone.ts';
+	import KpiCard from '#lib/components/ui/KpiCard.svelte';
+	import Money from '#lib/components/ui/Money.svelte';
+	import RowAction from '#lib/components/ui/RowAction.svelte';
+	import RowLink from '#lib/components/ui/RowLink.svelte';
+	import { toast } from '#lib/components/ui/Toast.svelte';
+	import { m } from '#lib/i18n/store.svelte.ts';
+	import { formatMoney } from '#lib/utils/money.ts';
 	import {
 		getApprovalPatterns,
 		getAnomalies,
@@ -62,7 +62,7 @@
 		type SuggestionStatus,
 		type ThresholdRecommendation,
 		type WorkflowSuggestion
-	} from '$lib/api/adaptive';
+	} from '#lib/api/adaptive.ts';
 
 	// RBAC mirrors the backend exactly:
 	//   read   → _READ_ROLES            = admin | ap_manager | cfo
@@ -906,7 +906,7 @@
 				     plus the reason, never a computed-looking 0%.
 
 				     `null`, never a literal em dash: `KpiCard` owns the glyph
-				     (`$lib/utils/kpiValue.ts::KPI_NO_FIGURE`, pinned equal to
+				     (`#lib/utils/kpiValue.ts::KPI_NO_FIGURE`, pinned equal to
 				     `formatMoney(null)`) and a hand-written one renders
 				     `data-kpi-state="value"` — the card CLAIMING a figure
 				     exists, which is the opposite of what this branch means

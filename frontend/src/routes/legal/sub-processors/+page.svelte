@@ -1,7 +1,7 @@
 <script lang="ts">
-	import LegalPage from '$lib/legal/LegalPage.svelte';
-	import Fact from '$lib/legal/Fact.svelte';
-	import { CONTACT, OPERATOR } from '$lib/legal/operator';
+	import LegalPage from '#lib/legal/LegalPage.svelte';
+	import Fact from '#lib/legal/Fact.svelte';
+	import { CONTACT, OPERATOR } from '#lib/legal/operator.ts';
 
 	/**
 	 * The public sub-processor register.

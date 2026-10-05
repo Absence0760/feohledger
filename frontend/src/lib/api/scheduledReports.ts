@@ -19,13 +19,13 @@
  * caller surfaces `e.message` as-is; there is no per-message mapping table to
  * drift from the backend's own wording.
  */
-import { api } from '$lib/api';
+import { api } from '#lib/api.ts';
 import type {
 	ScheduledReport,
 	ScheduledReportCreate,
 	ScheduledReportList,
 	ScheduledReportPatch
-} from '$lib/types/scheduledReport';
+} from '#lib/types/scheduledReport.ts';
 
 const BASE = '/api/analytics/scheduled-reports';
 

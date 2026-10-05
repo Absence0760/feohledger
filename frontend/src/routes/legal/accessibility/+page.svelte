@@ -1,6 +1,6 @@
 <script lang="ts">
-	import LegalPage from '$lib/legal/LegalPage.svelte';
-	import { CONTACT, OPERATOR } from '$lib/legal/operator';
+	import LegalPage from '#lib/legal/LegalPage.svelte';
+	import { CONTACT, OPERATOR } from '#lib/legal/operator.ts';
 
 	/**
 	 * The published accessibility statement.

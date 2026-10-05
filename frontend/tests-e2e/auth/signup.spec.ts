@@ -1,4 +1,4 @@
-import type { PublicConfig } from '$lib/types/publicConfig';
+import type { PublicConfig } from '#lib/types/publicConfig.ts';
 import { expect, NO_TENANT_BASE, test } from '../fixtures/helpers';
 
 

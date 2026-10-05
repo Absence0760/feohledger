@@ -1,5 +1,5 @@
-import type { BadgeTone } from '$lib/components/ui/badgeTone';
-import type { MoneyAmount } from '$lib/utils/money';
+import type { BadgeTone } from '#lib/components/ui/badgeTone.ts';
+import type { MoneyAmount } from '#lib/utils/money.ts';
 
 /**
  * Card-rebate shapes and the pure helpers the `/payments` Cards tab reads.

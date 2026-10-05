@@ -23,13 +23,13 @@
 	 *    Arrow/Home/End/Enter/Escape, an accessible name from a real `<label>`,
 	 *    and the count line wired in as the input's description.
 	 *
-	 * The rules live in `$lib/utils/searchPicker.ts` so they are testable without
+	 * The rules live in `#lib/utils/searchPicker.ts` so they are testable without
 	 * a DOM; this file owns fetching, focus and markup.
 	 */
 	import type { Snippet } from 'svelte';
 	import { untrack } from 'svelte';
-	import { appendUnique } from '$lib/utils/pagination';
-	import { createRequestSequencer } from '$lib/utils/requestSequence';
+	import { appendUnique } from '#lib/utils/pagination.ts';
+	import { createRequestSequencer } from '#lib/utils/requestSequence.ts';
 	import {
 		SEARCH_PICKER_PAGE_SIZE,
 		hasMoreOptions,
@@ -43,7 +43,7 @@
 		type SearchPickerFailure,
 		type SearchPickerLoad,
 		type SearchPickerText
-	} from '$lib/utils/searchPicker';
+	} from '#lib/utils/searchPicker.ts';
 
 	let {
 		value = $bindable(''),

@@ -4,7 +4,7 @@ import invoiceModalSource from './components/modals/InvoiceModal.svelte?raw';
 
 // Regression coverage for issue #170: two call sites hand-rolled
 // `document.location.hostname.split('.')[0]` for the X-Tenant-Slug header on
-// a raw-fetch binary-download path (bypassing $lib/api.ts by necessity — a
+// a raw-fetch binary-download path (bypassing #lib/api.ts by necessity — a
 // blob download needs the raw Response). That duplicated getTenantSlug()'s
 // logic without its bare-apex-domain guard, so a deployed apex hostname with
 // no tenant subdomain would send the apex's first label as a bogus tenant
@@ -24,7 +24,7 @@ import invoiceModalSource from './components/modals/InvoiceModal.svelte?raw';
 // no longer just skips the apex guard — it can't tell a platform subdomain
 // from a customer's white-label VANITY host, and on a vanity host the correct
 // header is *no header at all* (a present one suppresses the backend's
-// `Host`-based tenant lookup). See `$lib/hostRouting.ts`.
+// `Host`-based tenant lookup). See `#lib/hostRouting.ts`.
 
 const SITES: [string, string][] = [
 	['routes/invoices/+page.svelte', invoicesListSource],
@@ -39,9 +39,9 @@ describe('tenant-slug header derivation (issue #170 follow-up)', () => {
 
 	it.each(SITES)('%s builds X-Tenant-Slug via getTenantSlug, or not at all', (_name, src) => {
 		// Match the header as an object KEY, not any mention of it — a file that
-		// routes through $lib/api names it only in a comment.
+		// routes through #lib/api names it only in a comment.
 		if (!src.includes("'X-Tenant-Slug':")) return;
-		expect(src).toContain("import { getTenantSlug } from '$lib/tenant'");
+		expect(src).toContain("import { getTenantSlug } from '#lib/tenant.ts'");
 		expect(src).toContain("'X-Tenant-Slug': getTenantSlug() ?? ''");
 	});
 });
@@ -66,7 +66,7 @@ const FILES: [string, string][] = Object.entries(RAW)
 const HOST_RULE_OWNERS = new Set(['lib/tenant.ts', 'lib/hostRouting.ts']);
 
 describe('no file re-derives a tenant slug from the hostname', () => {
-	it('only $lib/hostRouting.ts splits a hostname into labels', () => {
+	it('only #lib/hostRouting.ts splits a hostname into labels', () => {
 		const offenders = FILES.filter(
 			([path, src]) =>
 				!HOST_RULE_OWNERS.has(path) && /\bhostname\s*\.\s*split\s*\(/.test(src)
@@ -77,7 +77,7 @@ describe('no file re-derives a tenant slug from the hostname', () => {
 
 /**
  * Files still reading the build-time `PUBLIC_API_URL` directly instead of
- * `$lib/tenant.ts::getApiBase()`.
+ * `#lib/tenant.ts::getApiBase()`.
  *
  * `getApiBase()` resolves the API origin from the CURRENT host — the build-time
  * URL on a platform host, same-origin on a customer's vanity domain (only a
@@ -104,7 +104,7 @@ describe('API origin is resolved at runtime, not baked at build time', () => {
 	it('only the baselined files still read PUBLIC_API_URL directly', () => {
 		// The IMPORT, not any mention — `lib/api.ts` and `lib/hostRouting.ts`
 		// name the variable in prose explaining why they no longer read it.
-		const importsIt = /import\s*\{[^}]*\bPUBLIC_API_URL\b[^}]*\}\s*from\s*'\$env\/static\/public'/;
+		const importsIt = /import\s*\{[^}]*\bPUBLIC_API_URL\b[^}]*\}\s*from\s*'\$app\/env\/public'/;
 		const offenders = FILES.filter(
 			([path, src]) => path !== 'lib/tenant.ts' && importsIt.test(src)
 		).map(([path]) => path);
@@ -115,7 +115,7 @@ describe('API origin is resolved at runtime, not baked at build time', () => {
 		for (const path of ['lib/api.ts', 'lib/portalApi.ts']) {
 			const src = RAW[`/src/${path}`];
 			expect(src, `${path} should exist`).toBeTruthy();
-			expect(src).toContain("from '$lib/tenant'");
+			expect(src).toContain("from '#lib/tenant.ts'");
 			expect(src).toContain('getApiBase()');
 		}
 	});

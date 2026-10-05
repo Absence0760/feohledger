@@ -1,7 +1,7 @@
 <script lang="ts">
-	import CashFlowToolResult from '$lib/components/cash-flow/CashFlowToolResult.svelte';
-	import { m } from '$lib/i18n/store.svelte';
-	import type { UiMessage } from '$lib/types/assistant';
+	import CashFlowToolResult from '#lib/components/cash-flow/CashFlowToolResult.svelte';
+	import { m } from '#lib/i18n/store.svelte.ts';
+	import type { UiMessage } from '#lib/types/assistant.ts';
 
 	let { message }: { message: UiMessage } = $props();
 

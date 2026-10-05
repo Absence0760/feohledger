@@ -1,6 +1,6 @@
 <script lang="ts">
-	import { m } from '$lib/i18n/store.svelte';
-	import { kpiDisplayValue, kpiFigureState } from '$lib/utils/kpiValue';
+	import { m } from '#lib/i18n/store.svelte.ts';
+	import { kpiDisplayValue, kpiFigureState } from '#lib/utils/kpiValue.ts';
 
 	type Props = {
 		/**
@@ -8,7 +8,7 @@
 		 * `null` / `undefined` means there is no figure to show — the response
 		 * has not landed, or it failed — and the card renders the shared
 		 * "no figure" dash instead of a number nobody computed. A genuine `0`
-		 * is a figure and renders as one. See `$lib/utils/kpiValue`.
+		 * is a figure and renders as one. See `#lib/utils/kpiValue`.
 		 */
 		value: string | number | null | undefined;
 		label: string;

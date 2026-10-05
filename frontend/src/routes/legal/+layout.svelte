@@ -1,9 +1,9 @@
 <script lang="ts">
-	import Atmosphere from '$lib/components/marketing/Atmosphere.svelte';
-	import BrandMark from '$lib/components/ui/BrandMark.svelte';
-	import { OPERATOR } from '$lib/legal/operator';
-	import { auth } from '$lib/stores/auth.svelte';
-	import { portalAuth } from '$lib/stores/portalAuth.svelte';
+	import Atmosphere from '#lib/components/marketing/Atmosphere.svelte';
+	import BrandMark from '#lib/components/ui/BrandMark.svelte';
+	import { OPERATOR } from '#lib/legal/operator.ts';
+	import { auth } from '#lib/stores/auth.svelte.ts';
+	import { portalAuth } from '#lib/stores/portalAuth.svelte.ts';
 
 	/**
 	 * The frame every published legal route renders inside — the index and the
@@ -42,8 +42,8 @@
 	 * wrong door, and no password they hold opens it.
 	 *
 	 * So the destination is derived from who is holding a token, employee
-	 * first — the two surfaces keep separate localStorage keys (`$lib/api` vs
-	 * `$lib/portalApi`) and a browser can hold both, in which case the AP app
+	 * first — the two surfaces keep separate localStorage keys (`#lib/api` vs
+	 * `#lib/portalApi`) and a browser can hold both, in which case the AP app
 	 * is the likelier origin and the portal is one more click from `/`.
 	 *
 	 * **This costs no wait.** Both `auth.loggedIn` and `portalAuth.loggedIn`

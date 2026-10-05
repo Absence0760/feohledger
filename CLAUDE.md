@@ -30,7 +30,7 @@ Full-stack accounts payable management app. SvelteKit frontend + FastAPI backend
 
 ## Stack
 
-- **frontend/** — SvelteKit 2, Svelte 5 (runes), adapter-static, TypeScript, pnpm. Dev port `7777`.
+- **frontend/** — SvelteKit 3, Svelte 5 (runes), adapter-static, TypeScript, pnpm. Dev port `7777`.
 - **backend/** — FastAPI, Python 3.12+, SQLAlchemy 2 async, Alembic, PostgreSQL 16, Redis 7, MinIO (S3). Dev port `8000`.
 - **mobile/** — Flutter 3.41+, Dart 3.11+, iOS + Android. Material 3, ChangeNotifier stores.
 - **infra/** — Terraform for the FeohLedger AWS account (security substrate today). See `infra/README.md`.

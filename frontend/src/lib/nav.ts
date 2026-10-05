@@ -30,17 +30,17 @@
  * key and as the English fallback); UI surfaces render `m(entry.labelKey)`,
  * not `entry.label`.
  *
- * **Keep this module pure** — no `$env/*`, `$app/*`, store or `.svelte`
+ * **Keep this module pure** — no `$app/*`, store or `.svelte`
  * import. `tests-e2e/auth/rbac.spec.ts` value-imports it to compute each
- * role's expected sidebar, and Playwright's loader resolves `$lib` but not
+ * role's expected sidebar, and Playwright's loader resolves `#lib` but not
  * SvelteKit's virtual modules (`frontend/CLAUDE.md` § `pnpm check` does not
  * cover `tests-e2e/`). The per-row gates themselves are pinned as a literal
  * table in `nav.test.ts`; change a row's `roles` here and that table in the
  * same commit.
  */
 
-import type { MessageKey } from '$lib/i18n/messages';
-import { PERM_PAYMENT_EXECUTE, PERM_PAYMENT_VOID, PERM_USER_MANAGE } from '$lib/types/admin';
+import type { MessageKey } from '#lib/i18n/messages.ts';
+import { PERM_PAYMENT_EXECUTE, PERM_PAYMENT_VOID, PERM_USER_MANAGE } from '#lib/types/admin.ts';
 
 /**
  * Every icon key `Sidebar.svelte` can draw. A union rather than `string` so a
@@ -435,8 +435,15 @@ export function pathMatches(href: string, pathname: string): boolean {
  *  - exact match on every query param the tab specifies → active;
  *  - if the URL carries none of those params, the FIRST sibling sharing that
  *    path is the default and wins (so bare `/admin` lights up Users).
+ *
+ * `url` is typed by what is read, so SvelteKit's read-only `page.url` passes
+ * as-is (and this module stays free of any `$app/*` import).
  */
-export function sectionTabActive(child: NavChild, siblings: NavChild[], url: URL): boolean {
+export function sectionTabActive(
+	child: NavChild,
+	siblings: NavChild[],
+	url: { readonly pathname: string; readonly searchParams: Pick<URLSearchParams, 'get'> }
+): boolean {
 	const [path, qs] = child.href.split('?');
 	if (!qs) {
 		// A plain-path tab is active on its path or a sub-path — unless a

@@ -7,7 +7,7 @@
 // workflow by being displayed: a suggestion is a recommendation a human
 // accepts, never a change that already happened.
 //
-// Types live here rather than in `$lib/types/` because this is the only
+// Types live here rather than in `#lib/types/` because this is the only
 // consumer, and because every money field on the wire is an exact decimal
 // STRING (`MoneyString`) — the backend stringifies its `Decimal`s — so nothing
 // in this module may be typed `number` for currency (frontend/CLAUDE.md
@@ -17,8 +17,8 @@
 // `adaptive_feedback.viewed` ACCESS-AUDIT row on the server. Never poll it and
 // never fetch it speculatively — call it on an explicit user action, or once
 // per page visit.
-import { api } from '$lib/api';
-import type { MoneyString } from '$lib/utils/money';
+import { api } from '#lib/api.ts';
+import type { MoneyString } from '#lib/utils/money.ts';
 
 // ---------------------------------------------------------------------------
 // Approval patterns — GET /api/adaptive/approval-patterns

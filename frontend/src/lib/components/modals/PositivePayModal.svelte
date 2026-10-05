@@ -4,7 +4,7 @@
 		PositivePayFileType,
 		BankFormat,
 		PresentedItemInput
-	} from '$lib/types/positivePay';
+	} from '#lib/types/positivePay.ts';
 	import {
 		positivePayFileTypeLabelKey,
 		positivePayStatusLabelKey,
@@ -12,24 +12,24 @@
 		BANK_FORMATS,
 		BANK_FORMAT_LABEL_KEYS,
 		bankFormatLabelKey
-	} from '$lib/types/positivePay';
-	import { runStatusLabelKey } from '$lib/types/payment';
-	import { auth } from '$lib/stores/auth.svelte';
-	import { m } from '$lib/i18n/store.svelte';
-	import { api } from '$lib/api';
-	import Badge from '$lib/components/ui/Badge.svelte';
-	import Modal from '$lib/components/ui/Modal.svelte';
-	import Money from '$lib/components/ui/Money.svelte';
-	import { toast } from '$lib/components/ui/Toast.svelte';
+	} from '#lib/types/positivePay.ts';
+	import { runStatusLabelKey } from '#lib/types/payment.ts';
+	import { auth } from '#lib/stores/auth.svelte.ts';
+	import { m } from '#lib/i18n/store.svelte.ts';
+	import { api } from '#lib/api.ts';
+	import Badge from '#lib/components/ui/Badge.svelte';
+	import Modal from '#lib/components/ui/Modal.svelte';
+	import Money from '#lib/components/ui/Money.svelte';
+	import { toast } from '#lib/components/ui/Toast.svelte';
 	import {
 		generateCheckIssue,
 		generateAchAuthorization,
 		processReturn,
 		getPositivePayFile,
 		downloadPositivePayFile
-	} from '$lib/api/positivePay';
-	import { formatDate } from '$lib/utils/time';
-	import { normalizeMoneyInput } from '$lib/utils/moneyInput';
+	} from '#lib/api/positivePay.ts';
+	import { formatDate } from '#lib/utils/time.ts';
+	import { normalizeMoneyInput } from '#lib/utils/moneyInput.ts';
 
 	interface RunOption {
 		id: string;

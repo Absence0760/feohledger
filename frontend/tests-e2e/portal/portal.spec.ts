@@ -14,7 +14,7 @@ import {
  * Supplier portal (`/portal/*`) — a SEPARATE surface from the AP app.
  *
  * Auth model: VendorUser, not the employee User. The portal store
- * (`$lib/stores/portalAuth.svelte.ts`) posts to `/api/portal/auth/login`
+ * (`#lib/stores/portalAuth.svelte.ts`) posts to `/api/portal/auth/login`
  * and stashes the JWT in `localStorage['portal_auth_token']` (a distinct
  * key from the AP app's `auth_token`, so the two surfaces can't clobber
  * each other). Every portal endpoint is vendor-scoped: the handler only

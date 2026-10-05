@@ -1,14 +1,14 @@
 <script lang="ts">
 	import { page } from '$app/state';
-	import { sidebar } from '$lib/stores/sidebar.svelte';
-	import { auth } from '$lib/stores/auth.svelte';
-	import { brand } from '$lib/stores/brand.svelte';
-	import { entityStore } from '$lib/stores/entity.svelte';
-	import EntitySwitcher from '$lib/components/layout/EntitySwitcher.svelte';
-	import NotificationBell from '$lib/components/layout/NotificationBell.svelte';
-	import BrandMark from '$lib/components/ui/BrandMark.svelte';
-	import { NAV, entryHref, isEntryActive, isEntryVisible, type NavEntry } from '$lib/nav';
-	import { m } from '$lib/i18n/store.svelte';
+	import { sidebar } from '#lib/stores/sidebar.svelte.ts';
+	import { auth } from '#lib/stores/auth.svelte.ts';
+	import { brand } from '#lib/stores/brand.svelte.ts';
+	import { entityStore } from '#lib/stores/entity.svelte.ts';
+	import EntitySwitcher from '#lib/components/layout/EntitySwitcher.svelte';
+	import NotificationBell from '#lib/components/layout/NotificationBell.svelte';
+	import BrandMark from '#lib/components/ui/BrandMark.svelte';
+	import { NAV, entryHref, isEntryActive, isEntryVisible, type NavEntry } from '#lib/nav.ts';
+	import { m } from '#lib/i18n/store.svelte.ts';
 
 	let collapsed = $derived(sidebar.collapsed);
 	let mark = $derived(brand.mark);
@@ -37,7 +37,7 @@
 	const has = (...roles: string[]) => auth.hasAnyRole(...roles);
 	const can = (perm: string) => auth.can(perm);
 
-	// The primary nav (`$lib/nav`) is the single source of truth, shared with
+	// The primary nav (`#lib/nav`) is the single source of truth, shared with
 	// the per-page section sub-tab bar. High-traffic destinations are top-level
 	// links; the rest are folded into groups (Procurement / Billing / Insights /
 	// Settings) that open a sub-tabbed page. Filter to what this role/permission

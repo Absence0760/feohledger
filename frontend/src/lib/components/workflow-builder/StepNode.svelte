@@ -1,7 +1,7 @@
 <script lang="ts">
-	import type { WorkflowStep } from '$lib/types/workflow';
-	import { STEP_TYPE_LABELS } from '$lib/types/workflow';
-	import { m } from '$lib/i18n/store.svelte';
+	import type { WorkflowStep } from '#lib/types/workflow.ts';
+	import { STEP_TYPE_LABELS } from '#lib/types/workflow.ts';
+	import { m } from '#lib/i18n/store.svelte.ts';
 
 	type Props = {
 		step: WorkflowStep;

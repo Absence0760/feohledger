@@ -1,34 +1,34 @@
 <script lang="ts">
-	import type { WorkflowDefinition } from '$lib/types/workflow';
-	import { STEP_TYPE_LABELS } from '$lib/types/workflow';
-	import type { WorkflowStepType } from '$lib/types/workflow';
-	import { workflowStore } from '$lib/stores/workflows.svelte';
+	import type { WorkflowDefinition } from '#lib/types/workflow.ts';
+	import { STEP_TYPE_LABELS } from '#lib/types/workflow.ts';
+	import type { WorkflowStepType } from '#lib/types/workflow.ts';
+	import { workflowStore } from '#lib/stores/workflows.svelte.ts';
 	import {
 		DEFAULT_EXTRACTION_CONFIG,
 		DEFAULT_APPROVAL_CONFIG,
 		DEFAULT_ERP_CONFIG,
-	} from '$lib/types/workflow';
-	import BulkBar from '$lib/components/ui/BulkBar.svelte';
-	import BulkDeleteButton from '$lib/components/ui/BulkDeleteButton.svelte';
-	import RowAction from '$lib/components/ui/RowAction.svelte';
-	import RowLink from '$lib/components/ui/RowLink.svelte';
-	import Badge from '$lib/components/ui/Badge.svelte';
-	import PageHeader from '$lib/components/ui/PageHeader.svelte';
-	import DataTable from '$lib/components/ui/DataTable.svelte';
-	import Modal from '$lib/components/ui/Modal.svelte';
-	import { toast } from '$lib/components/ui/Toast.svelte';
-	import { m } from '$lib/i18n/store.svelte';
-	import { formatDate } from '$lib/utils/time';
-	import { isRowOpenClick } from '$lib/utils/rowNav';
-	import { pruneSelection } from '$lib/utils/selection';
+	} from '#lib/types/workflow.ts';
+	import BulkBar from '#lib/components/ui/BulkBar.svelte';
+	import BulkDeleteButton from '#lib/components/ui/BulkDeleteButton.svelte';
+	import RowAction from '#lib/components/ui/RowAction.svelte';
+	import RowLink from '#lib/components/ui/RowLink.svelte';
+	import Badge from '#lib/components/ui/Badge.svelte';
+	import PageHeader from '#lib/components/ui/PageHeader.svelte';
+	import DataTable from '#lib/components/ui/DataTable.svelte';
+	import Modal from '#lib/components/ui/Modal.svelte';
+	import { toast } from '#lib/components/ui/Toast.svelte';
+	import { m } from '#lib/i18n/store.svelte.ts';
+	import { formatDate } from '#lib/utils/time.ts';
+	import { isRowOpenClick } from '#lib/utils/rowNav.ts';
+	import { pruneSelection } from '#lib/utils/selection.ts';
 	import { goto } from '$app/navigation';
-	import { auth } from '$lib/stores/auth.svelte';
-	import TemplateLibraryModal from '$lib/components/workflow-mgmt/TemplateLibraryModal.svelte';
-	import VersionHistoryModal from '$lib/components/workflow-mgmt/VersionHistoryModal.svelte';
-	import SimulationModal from '$lib/components/workflow-mgmt/SimulationModal.svelte';
+	import { auth } from '#lib/stores/auth.svelte.ts';
+	import TemplateLibraryModal from '#lib/components/workflow-mgmt/TemplateLibraryModal.svelte';
+	import VersionHistoryModal from '#lib/components/workflow-mgmt/VersionHistoryModal.svelte';
+	import SimulationModal from '#lib/components/workflow-mgmt/SimulationModal.svelte';
 	import ImportExportControls, {
 		exportWorkflowToFile,
-	} from '$lib/components/workflow-mgmt/ImportExportControls.svelte';
+	} from '#lib/components/workflow-mgmt/ImportExportControls.svelte';
 
 	let showCreate = $state(false);
 	let newName = $state('');
@@ -48,7 +48,7 @@
 	 * RBAC: redirect a non-admin instead of stranding them on this page.
 	 *
 	 * The gate matched here is the **nav's**, not the backend's, and the two
-	 * genuinely differ: `$lib/nav.ts` gates the Workflows row to
+	 * genuinely differ: `#lib/nav.ts` gates the Workflows row to
 	 * `roles: ['admin']`, while every READ under `/api/workflows` is
 	 * `get_current_user` (list, detail, templates, versions, diff, simulate,
 	 * export) and only the mutations are `require_roles(ROLE_ADMIN)`. So a

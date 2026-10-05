@@ -10,7 +10,7 @@ import {
 /**
  * `/workflows` and `/workflows/[id]` — the non-admin redirect guard.
  *
- * **What this closes.** `$lib/nav.ts` gates the Workflows row to
+ * **What this closes.** `#lib/nav.ts` gates the Workflows row to
  * `roles: ['admin']`, but every READ under `/api/workflows` is
  * `get_current_user` — list, detail, templates, versions, diff, simulate,
  * export — and only the mutations are `require_roles(ROLE_ADMIN)`. So a

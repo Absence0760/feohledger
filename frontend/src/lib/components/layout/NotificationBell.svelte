@@ -1,9 +1,9 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
-	import { notificationStore } from '$lib/stores/notifications.svelte';
-	import { timeAgo } from '$lib/utils/time';
-	import { EVENT_LABELS } from '$lib/types/notification';
-	import type { Notification } from '$lib/types/notification';
+	import { notificationStore } from '#lib/stores/notifications.svelte.ts';
+	import { timeAgo } from '#lib/utils/time.ts';
+	import { EVENT_LABELS } from '#lib/types/notification.ts';
+	import type { Notification } from '#lib/types/notification.ts';
 
 	let { collapsed = false }: { collapsed?: boolean } = $props();
 

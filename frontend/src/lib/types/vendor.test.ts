@@ -21,8 +21,8 @@ import {
 	type RiskLevel,
 	type ScreeningStatus
 } from './vendor';
-import { interpolate } from '$lib/i18n/interpolate';
-import { en } from '$lib/i18n/locales/en';
+import { interpolate } from '#lib/i18n/interpolate.ts';
+import { en } from '#lib/i18n/locales/en.ts';
 
 /**
  * Map-completeness guard for the sanctions-screening label map.

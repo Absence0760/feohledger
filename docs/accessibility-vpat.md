@@ -94,7 +94,7 @@ and the manual audit is the tracked outstanding work.
 | 2.5.7 Dragging Movements | AA | Supports | **New in 2.2.** Most interactions need no dragging. The workflow-builder canvas uses native HTML5 drag-and-drop **and** a per-node keyboard / single-pointer alternative — Move ↑ / Move ↓ on every step and in the step config panel (`components/workflow-builder/StepNode.svelte`), covered by `tests-e2e/workflow-builder.spec.ts`. |
 | 2.5.8 Target Size (Minimum) | AA | Supports | **New in 2.2.** Interactive targets meet the 24×24 CSS-px minimum (buttons, chips, row controls). The row-select checkbox is the case worth stating: it is *painted* 16×16 to fit a dense table row, so it used to conform only through the criterion's spacing exception — which each page's checkbox-column padding decided rather than the design system. Its own box is now 24×24 (a transparent border, returned to the layout as a negative margin, so nothing moves and no row grows), meeting the size minimum outright. Guarded by the axe `target-size` rule, by `tests-e2e/a11y/target-size.spec.ts` on a *selectable* row, and by the stylesheet scan `src/lib/a11y/targetSizeAudit.test.ts`. |
 | 3.1.2 Language of Parts | AA | Not Applicable | Content is single-language (en-US); no inline foreign-language passages requiring `lang`. |
-| 3.2.3 Consistent Navigation | AA | Supports | Sidebar nav and section tabs appear in the same relative order across routes (driven by the single `$lib/nav.ts` source). |
+| 3.2.3 Consistent Navigation | AA | Supports | Sidebar nav and section tabs appear in the same relative order across routes (driven by the single `#lib/nav.ts` source). |
 | 3.2.4 Consistent Identification | AA | Supports | Components with the same function (e.g. status badges, row actions, money formatting) are identified consistently via the shared `ui/` component library. |
 | 3.2.6 Consistent Help | AA | Partially Supports | **New in 2.2.** The feedback/help contact is consistent; a full audit that any help affordance appears in a consistent relative order across all surfaces is part of the manual pass. |
 | 3.3.3 Error Suggestion | AA | Supports | Validation errors describe how to fix the input where the fix is known (format hints, required markers). |
@@ -128,7 +128,7 @@ The structural follow-ups from the initial pass are now **resolved**:
   buttons (keyboard + single-pointer) on every step; covered by
   `workflow-builder.spec.ts`.
 - ~~Hand-rolled-modal focus management (2.1.2 / 2.4.3)~~ — **Done.** The shared
-  `$lib/actions/focusTrap` action gives `InvoiceModal`, `RunDetailModal`,
+  `#lib/actions/focusTrap` action gives `InvoiceModal`, `RunDetailModal`,
   `BulkRecodeGLModal`, and the portal discount-accept dialog the same focus
   trap + restore as `ui/Modal`; covered by `screen-reader.spec.ts`.
 - ~~`autocomplete` tokens (1.3.5)~~ and ~~320px reflow (1.4.10)~~ — **Done** and

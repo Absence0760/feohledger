@@ -284,7 +284,7 @@ Roles: `admin`, `ap_manager`, `ap_clerk`, `cfo` (clerks review drafts).
 #### Frontend UI
 
 The **auto-fill suggestions ship on the invoice detail modal**
-(`$lib/components/modals/InvoiceModal.svelte`), immediately below the coding
+(`#lib/components/modals/InvoiceModal.svelte`), immediately below the coding
 fields they apply to. Advisory here means the *user* applies it, so the surface
 is built around that:
 
@@ -308,7 +308,7 @@ is built around that:
 Price variances are **not** rendered here: `invoice_warnings.refresh_warnings`
 already persists them as invoice warnings + a `price_variance` exception, and the
 modal renders those. A second, differently-timed copy of the same finding beside
-the first would be the drift. API client + types: `$lib/api/enrichment.ts`
+the first would be the drift. API client + types: `#lib/api/enrichment.ts`
 (`getInvoiceSuggestions`). e2e:
 `frontend/tests-e2e/invoices/coding-suggestions.spec.ts`.
 
@@ -333,7 +333,7 @@ Roles: `admin`, `ap_manager`, `cfo` (managerial — clerk excluded).
 #### Frontend UI
 
 The **score panel ships on the vendor detail modal**
-(`$lib/components/modals/VendorModal.svelte`, reached from `/vendors`), gated
+(`#lib/components/modals/VendorModal.svelte`, reached from `/vendors`), gated
 `auth.isManager || auth.isCfo` — the frontend mirror of `_SCORE_ROLES`. It loads
 on open like the screening history (compute-on-read, nothing persisted).
 
@@ -362,7 +362,7 @@ composite's renormalization is visible rather than implied.
 Not carried on the response, and so not shown: the per-sub-score **weights**
 behind the composite. The panel says the composite is weighted across the signals
 below without asserting a split it cannot prove. API client + types:
-`$lib/api/enrichment.ts` (`getVendorScore`). e2e:
+`#lib/api/enrichment.ts` (`getVendorScore`). e2e:
 `frontend/tests-e2e/vendors/performance-score.spec.ts`.
 
 ### `GET /api/enrichment/vendors/consolidation-suggestions`
@@ -467,7 +467,7 @@ What the merge does, in one tenant transaction (`app/services/vendor_merge.py`):
 The **"Merge into canonical" UI now ships** on `/vendors`. A **Merge duplicates**
 header action (visible only when `auth.can('vendor.manage')` — the same granular
 permission the endpoint enforces, NOT a role check) opens
-`$lib/components/modals/VendorConsolidationModal.svelte`, which fetches
+`#lib/components/modals/VendorConsolidationModal.svelte`, which fetches
 `consolidation-suggestions` and renders each cluster as a canonical-vs-duplicate
 diff table (name / code / masked tax ID / status / invoice count / role, with the
 clustering `reasons` as pills). A per-cluster **Merge into canonical** button uses
@@ -475,8 +475,8 @@ a two-step arm → **Confirm merge** (the fold is soft-retire-irreversible), cal
 `/consolidation/merge` for that cluster's duplicate ids, drops the merged cluster
 from the list, surfaces the backend's 4xx detail (self-merge / cross-entity /
 unknown) in the failure toast, and refreshes the vendor list. API client +
-types: `$lib/api/vendors.ts` (`getVendorConsolidationSuggestions` /
-`mergeVendorConsolidation`) + `$lib/types/vendor.ts`. e2e:
+types: `#lib/api/vendors.ts` (`getVendorConsolidationSuggestions` /
+`mergeVendorConsolidation`) + `#lib/types/vendor.ts`. e2e:
 `frontend/tests-e2e/vendors/consolidation-merge.spec.ts` (seeds a duplicate pair
 sharing a tax id, merges, asserts the duplicate goes `inactive`; plus a clerk who
 never sees the action).

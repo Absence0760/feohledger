@@ -5,7 +5,7 @@
  * `BrandConfig` validators.
  */
 
-import { contrastRatio, WCAG_AA_NORMAL } from '$lib/a11y/contrast';
+import { contrastRatio, WCAG_AA_NORMAL } from '#lib/a11y/contrast.ts';
 
 export interface Brand {
 	product_name: string;

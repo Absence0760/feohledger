@@ -1,30 +1,30 @@
 <script lang="ts">
-	import { api } from '$lib/api';
-	import { INVOICE_STATUS_LABEL_KEYS } from '$lib/types/invoice';
-	import type { InvoiceStatus } from '$lib/types/invoice';
-	import PageHeader from '$lib/components/ui/PageHeader.svelte';
-	import KpiCard from '$lib/components/ui/KpiCard.svelte';
-	import Badge from '$lib/components/ui/Badge.svelte';
-	import EmptyState from '$lib/components/ui/EmptyState.svelte';
+	import { api } from '#lib/api.ts';
+	import { INVOICE_STATUS_LABEL_KEYS } from '#lib/types/invoice.ts';
+	import type { InvoiceStatus } from '#lib/types/invoice.ts';
+	import PageHeader from '#lib/components/ui/PageHeader.svelte';
+	import KpiCard from '#lib/components/ui/KpiCard.svelte';
+	import Badge from '#lib/components/ui/Badge.svelte';
+	import EmptyState from '#lib/components/ui/EmptyState.svelte';
 	import {
 		formatMoney,
 		isPositiveAmount,
 		parseMoneyForLayout,
 		type MoneyAmount
-	} from '$lib/utils/money';
-	import { formatDate } from '$lib/utils/time';
-	import { formatList } from '$lib/utils/list';
+	} from '#lib/utils/money.ts';
+	import { formatDate } from '#lib/utils/time.ts';
+	import { formatList } from '#lib/utils/list.ts';
 	import {
 		kpiRollupDisclosure,
 		partialLabels,
 		totalUnconverted,
 		type ExcludingKpi
-	} from '$lib/utils/dashboardPartials';
-	import type { DashboardData } from '$lib/types/analytics';
-	import { m } from '$lib/i18n/store.svelte';
-	import type { MessageKey } from '$lib/i18n/messages';
+	} from '#lib/utils/dashboardPartials.ts';
+	import type { DashboardData } from '#lib/types/analytics.ts';
+	import { m } from '#lib/i18n/store.svelte.ts';
+	import type { MessageKey } from '#lib/i18n/messages.ts';
 
-	// The response shape lives in `$lib/types/analytics.ts` (`DashboardData`,
+	// The response shape lives in `#lib/types/analytics.ts` (`DashboardData`,
 	// `ReportingAgingBuckets`, `AgingBuckets`) rather than here. Declared
 	// inline and un-exported, it was a shape only this file could compare a
 	// payload against — so every e2e stub of `/api/dashboard` was a
@@ -124,7 +124,7 @@
 	// money — `backend/app/schemas/dashboard.py::AgingBuckets` annotates them
 	// `MoneyAmount` — so `sum + b.value` and `b.value / agingTotal` were raw
 	// arithmetic on currency, which the frontend type only started refusing
-	// once these shapes moved into `$lib/types/analytics.ts` and the money-type
+	// once these shapes moved into `#lib/types/analytics.ts` and the money-type
 	// ratchet could see them. `parseMoneyForLayout` is the one sanctioned hop
 	// and is named so the call site refuses the wrong use: `layout` drives a
 	// width and must never be rendered or read as a business fact.

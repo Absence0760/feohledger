@@ -517,9 +517,9 @@ separate. The `vendor_user_id` is carried in `details` instead.
 
 Separate auth + HTTP surface:
 
-- `$lib/portalApi.ts` — parallel to `$lib/api.ts`, uses `portal_auth_token`
+- `#lib/portalApi.ts` — parallel to `#lib/api.ts`, uses `portal_auth_token`
   in localStorage so the AP app and portal can coexist in the same browser.
-- `$lib/stores/portalAuth.svelte.ts` — parallel to `auth.svelte.ts`.
+- `#lib/stores/portalAuth.svelte.ts` — parallel to `auth.svelte.ts`.
 - `/portal/+layout.svelte` — portal shell (header, nav, logout). Root
   `+layout.svelte` bypasses all AP-auth logic when the path starts with
   `/portal`.

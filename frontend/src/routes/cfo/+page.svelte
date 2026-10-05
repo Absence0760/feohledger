@@ -1,29 +1,29 @@
 <script lang="ts">
-	import { api } from '$lib/api';
-	import PageHeader from '$lib/components/ui/PageHeader.svelte';
-	import KpiCard from '$lib/components/ui/KpiCard.svelte';
-	import Badge from '$lib/components/ui/Badge.svelte';
-	import ByEntityBreakdown from '$lib/components/analytics/ByEntityBreakdown.svelte';
-	import CfoMetrics from '$lib/components/analytics/CfoMetrics.svelte';
-	import ScheduledReportsPanel from '$lib/components/analytics/ScheduledReportsPanel.svelte';
+	import { api } from '#lib/api.ts';
+	import PageHeader from '#lib/components/ui/PageHeader.svelte';
+	import KpiCard from '#lib/components/ui/KpiCard.svelte';
+	import Badge from '#lib/components/ui/Badge.svelte';
+	import ByEntityBreakdown from '#lib/components/analytics/ByEntityBreakdown.svelte';
+	import CfoMetrics from '#lib/components/analytics/CfoMetrics.svelte';
+	import ScheduledReportsPanel from '#lib/components/analytics/ScheduledReportsPanel.svelte';
 	import ForecastVariancePanel from './ForecastVariancePanel.svelte';
-	import { formatMoney, isNegativeAmount, isPositiveAmount, parseMoneyForLayout } from '$lib/utils/money';
-	import type { MoneyAmount } from '$lib/utils/money';
-	import { formatPeriod } from '$lib/utils/time';
-	import { orgCurrency } from '$lib/stores/orgSettings.svelte';
-	import { m } from '$lib/i18n/store.svelte';
-	import { createRequestSequencer } from '$lib/utils/requestSequence';
+	import { formatMoney, isNegativeAmount, isPositiveAmount, parseMoneyForLayout } from '#lib/utils/money.ts';
+	import type { MoneyAmount } from '#lib/utils/money.ts';
+	import { formatPeriod } from '#lib/utils/time.ts';
+	import { orgCurrency } from '#lib/stores/orgSettings.svelte.ts';
+	import { m } from '#lib/i18n/store.svelte.ts';
+	import { createRequestSequencer } from '#lib/utils/requestSequence.ts';
 	import { untrack } from 'svelte';
 	import { openingBalanceSkipKey } from './openingBalanceNotice';
 	import { formatUtilization, overBudgetCount } from './budgetRollupSummary';
-	import { getBudgetRollup } from '$lib/api/budgets';
-	import type { BudgetRollup } from '$lib/types/budget';
+	import { getBudgetRollup } from '#lib/api/budgets.ts';
+	import type { BudgetRollup } from '#lib/types/budget.ts';
 	import type {
 		CashflowForecast,
 		CashflowGranularity,
 		CashPosition,
 		WhatIfScenarios
-	} from '$lib/types/analytics';
+	} from '#lib/types/analytics.ts';
 
 	let granularity = $state<CashflowGranularity>('week');
 	let horizonDays = $state(90);

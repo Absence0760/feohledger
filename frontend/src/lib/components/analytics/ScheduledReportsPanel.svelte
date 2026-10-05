@@ -11,25 +11,25 @@
 </script>
 
 <script lang="ts">
-	import { ApiError } from '$lib/api';
-	import { auth } from '$lib/stores/auth.svelte';
-	import Badge from '$lib/components/ui/Badge.svelte';
-	import DataTable from '$lib/components/ui/DataTable.svelte';
-	import Modal from '$lib/components/ui/Modal.svelte';
-	import RowAction from '$lib/components/ui/RowAction.svelte';
-	import RowLink from '$lib/components/ui/RowLink.svelte';
-	import { toast } from '$lib/components/ui/Toast.svelte';
-	import { m } from '$lib/i18n/store.svelte';
-	import { createRequestSequencer } from '$lib/utils/requestSequence';
-	import { isRowOpenClick } from '$lib/utils/rowNav';
-	import { formatDate } from '$lib/utils/time';
+	import { ApiError } from '#lib/api.ts';
+	import { auth } from '#lib/stores/auth.svelte.ts';
+	import Badge from '#lib/components/ui/Badge.svelte';
+	import DataTable from '#lib/components/ui/DataTable.svelte';
+	import Modal from '#lib/components/ui/Modal.svelte';
+	import RowAction from '#lib/components/ui/RowAction.svelte';
+	import RowLink from '#lib/components/ui/RowLink.svelte';
+	import { toast } from '#lib/components/ui/Toast.svelte';
+	import { m } from '#lib/i18n/store.svelte.ts';
+	import { createRequestSequencer } from '#lib/utils/requestSequence.ts';
+	import { isRowOpenClick } from '#lib/utils/rowNav.ts';
+	import { formatDate } from '#lib/utils/time.ts';
 	import {
 		createScheduledReport,
 		deleteScheduledReport,
 		listScheduledReports,
 		updateScheduledReport
-	} from '$lib/api/scheduledReports';
-	import type { ScheduledReport, ScheduledReportCreate } from '$lib/types/scheduledReport';
+	} from '#lib/api/scheduledReports.ts';
+	import type { ScheduledReport, ScheduledReportCreate } from '#lib/types/scheduledReport.ts';
 	import {
 		cadenceLabelKey,
 		droppedRecipientCount,

@@ -1,22 +1,22 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
-	import { page as pageStore } from '$app/stores';
+	import { page as pageStore } from '$app/state';
 	import { afterNavigate, replaceState } from '$app/navigation';
-	import { api } from '$lib/api';
-	import { appendUnique } from '$lib/utils/pagination';
-	import type { MatchingIdsResponse } from '$lib/utils/pagination';
-	import { createRequestSequencer } from '$lib/utils/requestSequence';
-	import { toast } from '$lib/components/ui/Toast.svelte';
-	import RowAction from '$lib/components/ui/RowAction.svelte';
-	import BulkBar from '$lib/components/ui/BulkBar.svelte';
-	import PageHeader from '$lib/components/ui/PageHeader.svelte';
-	import FilterChips from '$lib/components/ui/FilterChips.svelte';
-	import SearchBox from '$lib/components/ui/SearchBox.svelte';
-	import SortableHeader from '$lib/components/ui/SortableHeader.svelte';
-	import DataTable from '$lib/components/ui/DataTable.svelte';
-	import Modal from '$lib/components/ui/Modal.svelte';
-	import Tabs from '$lib/components/ui/Tabs.svelte';
-	import Badge from '$lib/components/ui/Badge.svelte';
+	import { api } from '#lib/api.ts';
+	import { appendUnique } from '#lib/utils/pagination.ts';
+	import type { MatchingIdsResponse } from '#lib/utils/pagination.ts';
+	import { createRequestSequencer } from '#lib/utils/requestSequence.ts';
+	import { toast } from '#lib/components/ui/Toast.svelte';
+	import RowAction from '#lib/components/ui/RowAction.svelte';
+	import BulkBar from '#lib/components/ui/BulkBar.svelte';
+	import PageHeader from '#lib/components/ui/PageHeader.svelte';
+	import FilterChips from '#lib/components/ui/FilterChips.svelte';
+	import SearchBox from '#lib/components/ui/SearchBox.svelte';
+	import SortableHeader from '#lib/components/ui/SortableHeader.svelte';
+	import DataTable from '#lib/components/ui/DataTable.svelte';
+	import Modal from '#lib/components/ui/Modal.svelte';
+	import Tabs from '#lib/components/ui/Tabs.svelte';
+	import Badge from '#lib/components/ui/Badge.svelte';
 	import {
 		EXCEPTION_SEVERITIES,
 		exceptionSeverityLabelKey,
@@ -24,19 +24,19 @@
 		exceptionStatusTone,
 		exceptionTypeFallback,
 		exceptionTypeLabelKey
-	} from '$lib/types/exception';
-	import type { ExceptionSeverity } from '$lib/types/exception';
-	import type { ExceptionSummary } from '$lib/types/exceptionSummary';
-	import { toggleSort, type SortOrder } from '$lib/utils/sort';
-	import AgentDashboard from '$lib/components/exceptions/AgentDashboard.svelte';
-	import { formatMoney } from '$lib/utils/money';
-	import { formatDate, timeAgo } from '$lib/utils/time';
-	import { getActiveFormatLocale } from '$lib/i18n/formatLocale';
-	import { pruneSelection } from '$lib/utils/selection';
-	import { orgCurrency } from '$lib/stores/orgSettings.svelte';
-	import { m } from '$lib/i18n/store.svelte';
-	import type { MessageKey } from '$lib/i18n/messages';
-	import { formatApiDetail } from '$lib/utils/apiError';
+	} from '#lib/types/exception.ts';
+	import type { ExceptionSeverity } from '#lib/types/exception.ts';
+	import type { ExceptionSummary } from '#lib/types/exceptionSummary.ts';
+	import { toggleSort, type SortOrder } from '#lib/utils/sort.ts';
+	import AgentDashboard from '#lib/components/exceptions/AgentDashboard.svelte';
+	import { formatMoney } from '#lib/utils/money.ts';
+	import { formatDate, timeAgo } from '#lib/utils/time.ts';
+	import { getActiveFormatLocale } from '#lib/i18n/formatLocale.ts';
+	import { pruneSelection } from '#lib/utils/selection.ts';
+	import { orgCurrency } from '#lib/stores/orgSettings.svelte.ts';
+	import { m } from '#lib/i18n/store.svelte.ts';
+	import type { MessageKey } from '#lib/i18n/messages.ts';
+	import { formatApiDetail } from '#lib/utils/apiError.ts';
 
 	interface ExceptionItem {
 		id: string;
@@ -107,7 +107,7 @@
 	 * for a navigation that reuses this page, so the two cannot clamp a param
 	 * differently.
 	 */
-	function readUrlState(params: URLSearchParams) {
+	function readUrlState(params: Pick<URLSearchParams, 'get'>) {
 		const status = params.get('status') ?? '';
 		const severity = params.get('severity') ?? '';
 		const sort = params.get('sort') ?? '';
@@ -124,7 +124,7 @@
 			sortOrder: (params.get('order') === 'asc' ? 'asc' : 'desc') as SortOrder
 		};
 	}
-	const initialUrlState = readUrlState($pageStore.url.searchParams);
+	const initialUrlState = readUrlState(pageStore.url.searchParams);
 
 	let statusFilter = $state(initialUrlState.status);
 	let typeFilter = $state<string | null>(initialUrlState.type);
@@ -163,9 +163,9 @@
 	 *
 	 * It must be the only one, for the reason `routes/invoices/+page.svelte`
 	 * documents at length: SvelteKit's shallow `replaceState` writes `history`
-	 * but never `$page.url`, so a second writer rebuilding from `$page.url`
+	 * but never `page.url`, so a second writer rebuilding from `page.url`
 	 * reads a frozen snapshot and deterministically drops whatever the first
-	 * writer added. The previous `syncViewToUrl` mutated a copy of `$page.url`,
+	 * writer added. The previous `syncViewToUrl` mutated a copy of `page.url`,
 	 * which worked only while `view` was the sole param on the route.
 	 *
 	 * Built from scratch rather than by mutation so "one owner" stays
@@ -188,7 +188,7 @@
 				params.set('order', sortOrder);
 			}
 			const qs = params.toString();
-			replaceState(`${$pageStore.url.pathname}${qs ? `?${qs}` : ''}`, {});
+			replaceState(`${pageStore.url.pathname}${qs ? `?${qs}` : ''}`, {});
 		});
 	}
 
@@ -228,7 +228,7 @@
 	// a tinted cell printing a raw wire value — is a compile error. It stays
 	// HERE rather than moving next to the label keys because it is the sibling
 	// of `TYPE_COLORS` above, and the contrast reasoning written there governs
-	// both; `$lib/types/` carries vocabularies and tone NAMES
+	// both; `#lib/types/` carries vocabularies and tone NAMES
 	// (`EXCEPTION_STATUS_TONES` is `BadgeTone`), not measured hexes.
 	const SEVERITY_COLORS: Record<ExceptionSeverity, string> = {
 		error: '#f06464',
@@ -243,7 +243,7 @@
 	 * few pixels apart. It reads the chips' OWN keys, so the two cannot drift.
 	 * An unrecognised status still prints raw rather than blank.
 	 *
-	 * The tone map moved to `$lib/types/exception` alongside those keys, so a
+	 * The tone map moved to `#lib/types/exception` alongside those keys, so a
 	 * status that gains a colour without a label is a compile error.
 	 */
 	/**

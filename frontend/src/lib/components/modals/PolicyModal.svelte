@@ -1,13 +1,13 @@
 <script lang="ts">
-	import type { ExpensePolicy, ExpensePolicyCreate } from '$lib/types/expense';
-	import { auth } from '$lib/stores/auth.svelte';
-	import { orgCurrency } from '$lib/stores/orgSettings.svelte';
-	import { m } from '$lib/i18n/store.svelte';
-	import Modal from '$lib/components/ui/Modal.svelte';
-	import { toast } from '$lib/components/ui/Toast.svelte';
-	import { createPolicy, updatePolicy } from '$lib/api/expenses';
-	import type { MoneyAmount } from '$lib/utils/money';
-	import { isMoneyInput } from '$lib/utils/moneyInput';
+	import type { ExpensePolicy, ExpensePolicyCreate } from '#lib/types/expense.ts';
+	import { auth } from '#lib/stores/auth.svelte.ts';
+	import { orgCurrency } from '#lib/stores/orgSettings.svelte.ts';
+	import { m } from '#lib/i18n/store.svelte.ts';
+	import Modal from '#lib/components/ui/Modal.svelte';
+	import { toast } from '#lib/components/ui/Toast.svelte';
+	import { createPolicy, updatePolicy } from '#lib/api/expenses.ts';
+	import type { MoneyAmount } from '#lib/utils/money.ts';
+	import { isMoneyInput } from '#lib/utils/moneyInput.ts';
 
 	let {
 		policy,
