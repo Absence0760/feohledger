@@ -367,7 +367,7 @@ concurrency) and `tests/test_card_reveal_endpoint.py` (handler ordering).
 | DELETE | `/vendors/{id}/portal-users/{vendor_user_id}`        | Remove a portal user                  |
 | GET    | `/vendors/change-requests/counts`                    | Whole-set tallies for the queue — `{total, pending, by_status}` (admin, ap_manager — **exactly** the queue list's gate, decisions §48: it previously admitted `cfo`, who cannot read the queue, so the size of the staged-bank-change review set was visible to a role excluded from it); counts only, PII-free. A nav badge driven off a page of results undercounts once the queue paginates — the same reason `/vendors/counts` exists |
 | GET    | `/vendors/change-requests`                           | Pending change-request queue (admin, ap_manager); value masked |
-| GET    | `/vendors/{id}/change-requests`                      | One vendor's requests (admin, ap_manager, cfo); value revealed |
+| GET    | `/vendors/{id}/change-requests`                      | One vendor's requests (admin, ap_manager — the queue's gate; CFO excluded because the value is revealed) |
 | POST   | `/vendors/change-requests/{id}/approve`              | Apply the staged change to the vendor (admin, ap_manager); `FOR UPDATE` locked, exactly-once |
 | POST   | `/vendors/change-requests/{id}/reject`               | Mark rejected; never touches the vendor (admin, ap_manager) |
 

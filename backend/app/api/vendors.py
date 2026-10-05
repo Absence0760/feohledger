@@ -1890,7 +1890,13 @@ async def reset_vendor_portal_user_password(
 async def list_vendor_change_requests(
     vendor_id: uuid.UUID,
     db: AsyncSession = Depends(get_tenant_db),
-    user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER, ROLE_CFO)),
+    # EXACTLY the queue's gate (`list_change_requests`, `change_request_counts`;
+    # decisions §48). This route returns the UNMASKED proposed value, and it
+    # used to admit ROLE_CFO — the one role the queue deliberately excludes,
+    # and one that `GET /vendors/{id}` shows only last-4s to — so a CFO could
+    # read every staged account number and tax ID in full. Its only caller is
+    # the admin | ap_manager review page.
+    user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER)),
 ):
     """Change requests for one vendor. Reveals the full proposed value so
     AP can verify the new bank / tax details before approving."""
