@@ -9266,3 +9266,30 @@ it is the next step if this image goes the same way. The trust level is
 acceptable because MinIO only ever holds throwaway `minioadmin` data locally and
 in CI; production is real S3. Detail: `backend/docs/docker.md` § Where MinIO
 comes from.
+
+## 214. An invoice edit may not break a credit memo already applied to it
+
+Applying a credit checks the invoice's vendor, currency and remaining balance
+once, and an applied memo can never be voided or re-applied. But the invoice
+stays editable until approval, and `PATCH /api/invoices/{id}` and
+approve-with-corrections could re-save the vendor (re-linking `vendor_id`), the
+currency, or the amount afterwards. `payment_runs.net_payable_amount` then netted
+the memo off whatever the invoice had become: vendor A's credit reduced vendor
+B's payment, a USD credit came off a EUR payable digit for digit, and an amount
+lowered below the credits consumed the excess against nothing (the net went
+negative, the payment was refused as fully credited, and the stranded credit was
+unrecoverable). Both edit paths now call
+`services/applied_credit_integrity.refuse_edit_stranding_applied_credits` after
+writing the change and any vendor re-link, and 409 inside the same transaction.
+The rule is the apply guards read backwards — NULL vendor fails closed, currency
+compared case-insensitively, a blank invoice currency admitted only on a legacy
+row that was already blank, never when the edit is what blanked it — and an
+amount down to exactly the applied total stays legal (a fully credited invoice).
+
+**Rejected:** re-netting silently (adjusting or detaching the memo when the
+invoice changes). An applied memo is an immutable money record, and moving it
+without a human is the defect, not the cure. Unapplying on edit was rejected for
+the same reason. Re-extraction, the one background writer of those fields, is
+tracked in `docs/followups.md` with the money-chokepoint check as its durable
+fix. Tests: `test_credit_memos.py` § editing an invoice that already carries an
+applied credit.

@@ -69,7 +69,7 @@ section carried its own `decisions.md` § reference, so nothing was lost by
 deleting it; that cross-reference is what makes the pruning safe, and writing
 one is what earns a future entry the right to be deleted.
 
-**53 open: 38 (c) · 9 (a) · 6 (b)** — re-derived from the file, never carried
+**54 open: 39 (c) · 9 (a) · 6 (b)** — re-derived from the file, never carried
 forward. The section heading is authoritative; where an entry also carries a
 `(c)`/`(a)`/`(b)` marker, the two agree.
 `grep -c '^- \[ \]' docs/followups.md`.
@@ -1030,6 +1030,29 @@ or is a sibling of a fix that needs its own pass.
       **Trigger:** the next change to `ConsentBanner.svelte`, or the next
       accessibility pass over `/legal` (`/a11y-hunt`, or the manual
       screen-reader pass `docs/accessibility.md` still has open).
+
+### Surfaced by the payment-path bug hunt (2026-10-04, decisions §214)
+
+- [ ] **(c) Re-extraction can still break a credit memo already applied to the invoice.**
+      §214 makes `PATCH /api/invoices/{id}` and approve-with-corrections refuse
+      an edit that re-links the vendor, changes the currency, or lowers the
+      amount below the applied credits. Extraction is the remaining writer of
+      those fields: a manual `POST /api/invoices/{id}/extract` (from `new` /
+      `failed`, both creditable) re-reads amount + currency and re-runs vendor
+      matching, and the supplier-portal resubmit of a `rejected` invoice — the
+      exact flow decisions §202 admits credits on — re-reads amount + currency
+      (it pins the vendor). It runs in the background, so there is no request to
+      409, and refusing the document's own figures is not right either; the
+      resubmit case also raises a product question (does a corrected invoice
+      already reflect the credit, so netting it again double-counts?).
+      **Durable fix:** enforce the pairing at the money chokepoint as well —
+      `payment_runs.run_refusals` and `create_payment` refuse an invoice whose
+      applied memos disagree with its current vendor or currency (a new
+      `credit_mismatch` refusal code with its queue label), using
+      `applied_credit_integrity` as the one definition — and have extraction call
+      the same check to open a payment-blocking exception naming the memo.
+      **Trigger:** the next change to re-extraction or the portal resubmit
+      path, or the product answer on credits against resubmitted invoices.
 
 ## (a) Blocked on external credentials, accounts, or hardware
 

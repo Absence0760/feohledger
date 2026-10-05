@@ -344,6 +344,20 @@ async def approve_invoice(
             after["vendor_id"] = invoice.vendor_id
             diff_fields.append("vendor_id")
 
+        # The PATCH path's applied-credit guard, for the same reason: a
+        # corrected vendor, currency or amount must not strand a credit memo
+        # already applied to this invoice (decisions §214). Unfiltered by field:
+        # `corrections` is a bare dict internal callers also pass, and the guard
+        # is a no-op query for an invoice with no applied memo.
+        if after:
+            from app.services.applied_credit_integrity import (
+                refuse_edit_stranding_applied_credits,
+            )
+
+            await refuse_edit_stranding_applied_credits(
+                db, invoice, currency_edited="currency" in after
+            )
+
         field_diff = build_field_diff(before, after, diff_fields)
 
         # Store vendor-consistent corrections in the correction cache so

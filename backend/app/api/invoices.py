@@ -82,6 +82,7 @@ from app.schemas.invoice import (
 )
 from app.schemas.money import json_money
 from app.services import audit_summary
+from app.services.applied_credit_integrity import refuse_edit_stranding_applied_credits
 from app.services.audit_access import build_field_diff
 from app.services.audit_dispatch import dispatch_audit
 from app.services.csv_import import MAX_CSV_IMPORT_SIZE, import_invoices_csv
@@ -1599,6 +1600,14 @@ async def update_invoice(
         else:
             invoice.vendor_id = None
         diff_fields.append("vendor_id")
+
+    # A credit memo already applied here was checked against this invoice's
+    # vendor, currency and balance when it was applied, and can never be undone.
+    # Re-saving any of those must not quietly break that pairing (decisions §214).
+    if update_data.keys() & {"vendor_name", "currency", "amount"}:
+        await refuse_edit_stranding_applied_credits(
+            db, invoice, currency_edited="currency" in update_data
+        )
 
     after = {field: getattr(invoice, field, None) for field in diff_fields}
 

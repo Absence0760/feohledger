@@ -519,6 +519,20 @@ the memo itself — see § Editing a memo) and then enforce, in order, five 409s
    exceed the invoice amount (a credit past the balance would mint a negative
    payable).
 
+**The guards keep holding after the apply.** An applied memo can never be
+undone, but the invoice under it stays editable until approval. So
+`PATCH /api/invoices/{id}` and approve-with-corrections
+(`POST /api/invoices/{id}/approve` with a body) refuse with **409** any edit
+that would break a pairing the apply checked: re-saving the vendor so
+`vendor_id` re-links elsewhere (or clears), changing the currency away from the
+memos' (blanking it included — a blank invoice currency is admitted only on a
+legacy row that never had one), or lowering the amount below the credits already applied (down to
+exactly that total is allowed). Without this, vendor A's credit reduced vendor
+B's payment, a USD credit was netted digit-for-digit off a EUR payable, and a
+lowered amount consumed the excess credit against nothing. One owner for both
+paths: `services/applied_credit_integrity.refuse_edit_stranding_applied_credits`
+(`docs/decisions.md` §214).
+
 ### Eligible invoices — the pickers offer exactly what the guards accept
 
 `GET /api/credit-memos/{id}/eligible-invoices` (behind the Apply dialog) and
