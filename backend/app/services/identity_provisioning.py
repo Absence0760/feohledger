@@ -20,7 +20,12 @@ from sqlalchemy.orm import selectinload
 
 from app.models.organization import Organization
 from app.models.user import Role, User, UserRole
-from app.utils.emails import is_header_safe
+from app.utils.emails import (
+    email_matches,
+    exact_email_first,
+    is_header_safe,
+    normalize_email,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -96,7 +101,7 @@ def extract_and_check_email(email_raw: str, allowed_email_domains: list[str]) ->
     every notification the app sends that user. A tenant's own IdP is trusted
     to assert identities, not to inject mail headers.
     """
-    email = email_raw.lower().strip()
+    email = normalize_email(email_raw)
     if not is_header_safe(email):
         raise UnsafeEmailAddress(email)
     if allowed_email_domains:
@@ -149,8 +154,14 @@ async def jit_provision(
 
     # 2. Link by email — first SSO login for an existing password user
     if user is None:
+        # Case-insensitive: an admin-created `Jane@Acme.com` IS the
+        # `jane@acme.com` the IdP asserts. An exact compare missed her and fell
+        # through to branch 3, minting a second account as `ap_clerk`.
         result = await db.execute(
-            select(User).where(User.email == email, User.organization_id == org.id)
+            select(User)
+            .where(email_matches(User.email, email), User.organization_id == org.id)
+            .order_by(exact_email_first(User.email, email).desc())
+            .limit(1)
         )
         user = result.scalar_one_or_none()
         if user is not None:

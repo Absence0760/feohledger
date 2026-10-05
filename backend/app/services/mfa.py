@@ -38,7 +38,7 @@ import qrcode
 from jose import JWTError, jwt
 
 from app.config import settings
-from app.redis import block_token, get_redis, is_token_blocked
+from app.redis import claim_token_block, get_redis, is_token_blocked
 from app.utils.passwords import verify_password
 
 ALGORITHM = "HS256"
@@ -337,6 +337,27 @@ async def issue_email_otp(user_id: uuid.UUID) -> str:
     return code
 
 
+async def _claim_otp(r, key: str) -> bool:
+    """Single-use claim on a matched email OTP: whoever's DELETE removes the key
+    wins, and only that caller is told the code verified.
+
+    The check (GET + compare) and the consume are two round trips, so two
+    requests carrying the same correct code can both pass the compare before
+    either deletes — and an unconditional ``return True`` after the DELETE then
+    handed BOTH a success, i.e. two sessions from one code. DEL returns how
+    many keys it removed, and Redis executes commands one at a time, so exactly
+    one concurrent caller sees ``1``. The key is only deleted once the code has
+    matched, so a wrong guess still cannot burn a legitimate user's code.
+
+    The challenge token is claimed separately, AFTER this. So a caller that wins
+    the code but loses the challenge claim (a double-submitted form) has spent
+    the code and is refused anyway, and must request a new one. That is the
+    deliberate order: claiming the challenge first would let any wrong guess
+    burn the challenge, turning every typo into a full re-login.
+    """
+    return bool(await r.delete(key))
+
+
 async def verify_email_otp(user_id: uuid.UUID, code: str) -> bool:
     """Verify + consume a previously-issued email OTP. Single-use."""
     if not code:
@@ -350,8 +371,7 @@ async def verify_email_otp(user_id: uuid.UUID, code: str) -> bool:
     # constant-time compare to thwart timing oracles
     if not hmac.compare_digest(stored_hex, _hash_otp(code.strip())):
         return False
-    await r.delete(key)
-    return True
+    return await _claim_otp(r, key)
 
 
 # Supplier-portal email-OTP backup — same mechanism as the employee one above,
@@ -389,8 +409,7 @@ async def verify_vendor_email_otp(vendor_user_id: uuid.UUID, code: str) -> bool:
     stored_hex = stored.decode("utf-8") if isinstance(stored, bytes) else stored
     if not hmac.compare_digest(stored_hex, _hash_otp(code.strip())):
         return False
-    await r.delete(key)
-    return True
+    return await _claim_otp(r, key)
 
 
 # ---------------------------------------------------------------------------
@@ -411,13 +430,20 @@ class ChallengeTokenClaims:
     jti: str
 
 
-async def consume_challenge_token(jti: str) -> None:
+async def consume_challenge_token(jti: str) -> bool:
     """Single-use: blocklist a challenge token's jti immediately after a
     successful MFA verify (issue #162) so it can't be replayed to mint a
     second access token from the same password check. Shares the same Redis
     blocklist as regular access-token logout — jti values never collide
-    across token types since each is a freshly generated UUID."""
-    await block_token(jti, settings.mfa_challenge_ttl_seconds)
+    across token types since each is a freshly generated UUID.
+
+    Returns whether THIS call consumed it. `decode_challenge_token`'s
+    "already used" check runs before the factor is verified, so two requests
+    presenting one challenge token — each with its own valid factor (a TOTP
+    code and an email OTP, say) — both pass it, and an unconditional blocklist
+    write then let both mint a session. The write is a `SET NX`, so exactly
+    one caller gets ``True``; every caller must refuse on ``False``."""
+    return await claim_token_block(jti, settings.mfa_challenge_ttl_seconds)
 
 
 def create_challenge_token(user_id: uuid.UUID) -> str:

@@ -28,6 +28,18 @@ async def block_token(jti: str, expires_in: int) -> None:
     await r.setex(f"{BLOCKLIST_PREFIX}{jti}", expires_in, "1")
 
 
+async def claim_token_block(jti: str, expires_in: int) -> bool:
+    """Blocklist a token ID only if it is not already blocklisted, atomically.
+
+    `block_token`'s SETEX cannot tell its caller whether the jti was already
+    burned, which is exactly what a single-use token (the MFA challenge) needs
+    to know: two concurrent redemptions both passed `is_token_blocked`, so the
+    one that loses this `SET NX` must refuse. True when this call claimed it.
+    """
+    r = await get_redis()
+    return bool(await r.set(f"{BLOCKLIST_PREFIX}{jti}", "1", nx=True, ex=expires_in))
+
+
 async def is_token_blocked(jti: str) -> bool:
     """Check if a token has been blocklisted (logged out)."""
     r = await get_redis()

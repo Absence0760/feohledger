@@ -56,6 +56,7 @@ from app.services.session_management import (
     revoke_other_sessions,
 )
 from app.tenant import get_tenant_db, get_tenant_slug
+from app.utils.emails import email_matches, exact_email_first
 from app.utils.passwords import (
     PasswordError,
     dummy_verify,
@@ -239,7 +240,14 @@ async def portal_login(
         window_seconds=LOGIN_FAILURE_WINDOW_SECONDS,
     )
     ip = resolve_client_ip(request) or "unknown"
-    result = await db.execute(select(VendorUser).where(VendorUser.email == body.email))
+    # Case-insensitive, exact match first — the same rule as the employee
+    # login (`api/auth._user_by_email`, `utils/emails`).
+    result = await db.execute(
+        select(VendorUser)
+        .where(email_matches(VendorUser.email, body.email))
+        .order_by(exact_email_first(VendorUser.email, body.email).desc())
+        .limit(1)
+    )
     vu = result.scalar_one_or_none()
 
     if not vu or not vu.hashed_password or not vu.is_active:
@@ -591,8 +599,10 @@ async def portal_mfa_challenge(
     await clear_auth_failures("portal_mfa", mfa_identity)
 
     # Single-use: burn the challenge token now that the factor is verified so
-    # it can't be replayed to mint a second session (issue #162).
-    await mfa.consume_challenge_token(claims.jti)
+    # it can't be replayed to mint a second session (issue #162). Refused when
+    # a concurrent request already redeemed it — mirrors `api/auth.verify_mfa`.
+    if not await mfa.consume_challenge_token(claims.jti):
+        raise HTTPException(status_code=401, detail="MFA challenge token already used")
 
     # Mint FIRST, audit second — the same order `api/auth.verify_mfa` uses, and
     # the same principle as §111's "the row is written after the commit".

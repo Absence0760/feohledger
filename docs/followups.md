@@ -71,7 +71,7 @@ section carried its own `decisions.md` § reference, so nothing was lost by
 deleting it; that cross-reference is what makes the pruning safe, and writing
 one is what earns a future entry the right to be deleted.
 
-**65 open: 50 (c) · 9 (a) · 6 (b)** — re-derived from the file, never carried
+**66 open: 51 (c) · 9 (a) · 6 (b)** — re-derived from the file, never carried
 forward. The section heading is authoritative; where an entry also carries a
 `(c)`/`(a)`/`(b)` marker, the two agree.
 `grep -c '^- \[ \]' docs/followups.md`.
@@ -1266,6 +1266,33 @@ or is a sibling of a fix that needs its own pass.
       explicitly.
       **Trigger:** the next change to `api/positive_pay.py`, or a multi-entity
       tenant generating cheque files.
+### Surfaced by the auth bug hunt, round 3 (2026-10-05)
+
+- [ ] **(c) `users.email` / `vendor_users.email` are not case-insensitively
+      unique in the database, and identity lookups cannot use an index.** Every
+      write now stores `utils/emails.normalize_email(...)` and every identity
+      lookup matches `lower(email)` (`docs/authentication.md` § An email address
+      is matched without regard to case), so the app no longer creates or misses
+      a case variant. But the constraint is still the plain, case-sensitive
+      `UNIQUE(email)`: rows written before normalization keep their mixed case,
+      two of them can differ only in case, and a concurrent pair of creates
+      that both pass the app-level 409 check can still land a case variant.
+      Login, forgot-password, SSO JIT and SCIM now filter on `lower(email)`,
+      which the existing btree cannot serve — a sequential scan of the control
+      plane's `users` table per sign-in (small today; the per-tenant
+      `vendor_users` scan is smaller still).
+      Not done in the same change because it is a data migration with a
+      decision in it: an existing pair of case variants has to be merged or one
+      of them renamed before a unique index can build, and which account wins
+      is an operator call, not something a migration should guess.
+      **Durable fix:** a control-plane migration that reports (and refuses on)
+      any `lower(email)` collision, lower-cases every `users.email`, and
+      replaces `UNIQUE(email)` with a unique index on `lower(email)`; the same
+      per tenant for `vendor_users.email`. The lookups can then go back to an
+      indexed equality on the normalized value.
+      **Trigger:** before the first production tenant's users table holds
+      enough rows for the scan to show on login latency, or the first
+      case-variant pair reported in any environment — whichever is first.
 
 ## (a) Blocked on external credentials, accounts, or hardware
 

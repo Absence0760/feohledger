@@ -108,6 +108,7 @@ from app.tenant import (
 from app.utils.bank_masking import BANK_SECRET_KEYS as _BANK_SECRET_KEYS  # noqa: F401
 from app.utils.bank_masking import bank_details_audit_summary as _bank_details_audit_summary
 from app.utils.bank_masking import last4 as _last4
+from app.utils.emails import email_matches, normalize_email
 from app.utils.passwords import generate_temp_password, hash_password
 from app.utils.search import ilike_contains
 from app.utils.tenant_urls import tenant_base_url
@@ -1703,8 +1704,13 @@ async def invite_vendor_portal_user(
     )
     vendor = await _get_vendor_or_404(db, vendor_id)
 
+    # Stored normalized and checked case-insensitively: the address is the
+    # portal login, so a case variant is the same supplier (`utils/emails`).
+    email = normalize_email(body.email)
     existing = (
-        await db.execute(select(VendorUser).where(VendorUser.email == body.email))
+        await db.execute(
+            select(VendorUser.id).where(email_matches(VendorUser.email, email)).limit(1)
+        )
     ).scalar_one_or_none()
     if existing:
         raise HTTPException(status_code=409, detail="A portal user with this email already exists.")
@@ -1713,7 +1719,7 @@ async def invite_vendor_portal_user(
     vu = VendorUser(
         vendor_id=vendor.id,
         organization_id=vendor.organization_id,
-        email=body.email,
+        email=email,
         full_name=body.full_name,
         hashed_password=await hash_password(temp_password),
         is_active=True,

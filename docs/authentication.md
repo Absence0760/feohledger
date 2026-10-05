@@ -158,6 +158,32 @@ surfaces, through the HTTP login route).
 
 `POST /api/auth/login` — accepts email and password, verifies against the hashed password in the **control-plane database**. Returns either a signed JWT (`{access_token, ...}`) or, when MFA is in play, a short-lived challenge token (`{mfa_required: true, mfa_challenge_token, methods, must_enroll}`). See the **MFA** section below for the full flow. This endpoint uses `get_control_db` (not the tenant DB).
 
+### An email address is matched without regard to case
+
+`users.email` (and, per tenant, `vendor_users.email`) is the login identifier
+and the key SSO JIT and SCIM link an IdP identity to, so `Jane.Doe@Acme.com` and
+`jane.doe@acme.com` must be one person. They were not: SCIM and SSO lower-cased
+what they wrote and looked up, while the admin create/update path, tenant
+provisioning (signup, partner, CLI) and the supplier-portal invite stored the
+address as typed, and every lookup compared exactly. An admin-created
+mixed-case account therefore got a **second** account minted by SSO JIT (as
+`ap_clerk`, with none of its roles), a duplicate provisioned by SCIM — whose
+later deprovision left the original, roles and password intact, active — and
+could not sign in typing the address in lower case.
+
+The rule now lives in `app/utils/emails.py`: every write stores
+`normalize_email(...)` (trimmed, lower-cased), and every identity lookup —
+password login, forgot-password, the admin and SCIM uniqueness checks, SCIM's
+`userName eq` / `emails eq` filter, the SSO JIT email-link branch, and the
+portal login and invite — matches with `email_matches`, which compares
+`lower(email)` so rows written before normalization still match. A single-row
+lookup orders an exact match first (`exact_email_first`), so a pre-existing
+pair of case variants resolves deterministically instead of 500ing. The
+database constraint is still the case-sensitive `UNIQUE(email)`; replacing it
+with a unique index on `lower(email)` needs a data migration with an operator
+decision in it and is tracked in `docs/followups.md`.
+`tests/test_email_identity_case.py` pins each path against a mixed-case row.
+
 ### Logout endpoint
 
 `POST /api/auth/logout` — revokes the current token by adding its `jti` (unique token ID) to a Redis blocklist. The blocklist entry expires automatically when the token would have expired, so Redis doesn't accumulate stale entries.
@@ -1784,7 +1810,42 @@ Both surfaces funnel through one helper each (`api/auth._audit_mfa_event`, `api/
 | `Organization.settings.mfa.required` | control-plane DB (JSONB) | Org-wide policy; lives next to other settings. |
 | Email-OTP hash | Redis (`mfa:email_otp:<user_id>`) | Short-lived, single-use, no need to persist. |
 | WebAuthn ceremony challenge | Redis (`webauthn:{reg,auth}_challenge:<user_id>`) | Short-lived, single-use; the verify call rejects an attacker-chosen challenge. |
-| MFA challenge token | client only (sessionStorage) | Stateless JWT — server doesn't need to remember it. |
+| MFA challenge token | client only (sessionStorage) | Stateless JWT — server doesn't need to remember it, except its `jti` on the blocklist once redeemed. |
+
+#### Single-use means single-use under concurrency
+
+A check in one Redis round trip and a consume in another is single-use only for
+requests that happen not to overlap. Every one-time secret on the sign-in path is
+therefore consumed by **one atomic command whose result decides the outcome**:
+
+- **Email OTP** (both surfaces): after the constant-time compare matches, the
+  `DEL` that consumes it must report `1` — two requests carrying the same
+  correct code both pass the compare, and only the one whose `DEL` removed the
+  key is told it verified. A wrong guess never reaches the `DEL`, so it cannot
+  burn the owner's code.
+- **MFA challenge token**: `decode_challenge_token`'s "already used" check runs
+  *before* the factor is verified, so two requests can redeem one challenge
+  with two different valid factors (the authenticator code and an emailed
+  backup code). `consume_challenge_token` is a `SET NX` on the blocklist
+  (`app.redis.claim_token_block`); `/mfa/verify`, the passkey verify and the
+  portal twin all 401 `MFA challenge token already used` when they lose it, so
+  one password check yields at most one session.
+- **OIDC `state`, SAML RelayState, SAML token handoff**: `GETDEL`, like the
+  password-reset token. The RelayState is what binds an assertion to exactly
+  one AuthnRequest, so a race on it was a replay.
+- **WebAuthn registration and assertion challenges**: `GETDEL` too. A step-up
+  assertion has no later single-use claim to fall back on (login at least has
+  the challenge token), so the challenge read is its whole replay guard.
+
+A code that wins its own claim but whose request then loses the challenge claim
+(a double-submitted form) is spent, and the user requests a new one. That order
+is deliberate: claiming the challenge first would let every mistyped code burn
+it, turning a typo into a full re-login.
+
+`tests/test_mfa_single_use_race.py` drives each pair concurrently against a fake
+Redis that yields on every command, as a network round trip does — a fake that
+never yields cannot interleave two requests, which is how the old code passed
+its single-use tests.
 
 ### SSO + MFA
 
@@ -1906,6 +1967,16 @@ scope `admin.create_user` uses) and return 409 `uniqueness`. Scoping the check t
 the calling tenant would let an address already held in a *different* tenant slip
 past the guard and trip the DB constraint on flush — an unhandled 500 where the
 RFC requires a 409, which providers then retry forever.
+
+**A PATCH of `active` accepts the string spellings.** Microsoft Entra ID sends
+its deprovision as `{"op": "Replace", "path": "active", "value": "False"}` — a
+string — unless the app is registered with the `aadOptscim062020` compliance
+flag. The handler used to read it with `bool(value)`, which is `True` for every
+non-empty string, so Entra's deprovision left the account active and answered
+200. `api/scim._scim_active` takes a JSON boolean or `"true"`/`"false"` in any
+case, on both the `path: "active"` op and a path-less replace, and answers any
+other value with a 400 `invalidValue` rather than guessing a lifecycle state
+(`tests/test_scim_active_patch.py`).
 
 ### Filter syntax
 

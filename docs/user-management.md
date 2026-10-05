@@ -181,7 +181,7 @@ organizations
 | Field | Type | Description |
 |---|---|---|
 | id | UUID | Primary key |
-| email | String | Unique across all orgs |
+| email | String | Unique across all orgs, case-insensitively — stored lower-cased (`utils/emails.normalize_email`) |
 | full_name | String | Display name |
 | hashed_password | String | Bcrypt hash (nullable for SSO-only users) |
 | is_active | Boolean | Account status |
