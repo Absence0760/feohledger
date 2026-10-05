@@ -40,6 +40,34 @@ void main() {
       expect(user.isAdmin, isFalse);
       expect(user.isClerkOnly, isFalse);
     });
+
+    test('parses the effective permissions /auth/me returns', () {
+      final user = User.fromJson({
+        'id': 'u1',
+        'email': 'a@acme.com',
+        'full_name': 'Ada',
+        'organization_id': 'org1',
+        'roles': <dynamic>['cfo'],
+        'permissions': <dynamic>['invoice.approve', 'payment.void'],
+      });
+      expect(user.permissions, ['invoice.approve', 'payment.void']);
+      expect(user.can(kPermInvoiceApprove), isTrue);
+      expect(user.can('user.manage'), isFalse);
+    });
+
+    test('a payload without permissions grants none (fail closed)', () {
+      // Never re-derived from the role names: an admin is not assumed to hold
+      // invoice.approve unless the server says so.
+      final user = User.fromJson({
+        'id': 'u1',
+        'email': 'a@acme.com',
+        'full_name': 'Ada',
+        'organization_id': 'org1',
+        'roles': <dynamic>['admin'],
+      });
+      expect(user.permissions, isEmpty);
+      expect(user.can(kPermInvoiceApprove), isFalse);
+    });
   });
 
   group('role helpers', () {

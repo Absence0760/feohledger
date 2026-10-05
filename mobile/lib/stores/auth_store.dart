@@ -50,7 +50,17 @@ class AuthStore extends ChangeNotifier {
   bool get isManager => _user?.isManager ?? false;
   bool get isCfo => _user?.isCfo ?? false;
   bool get isClerkOnly => _user?.isClerkOnly ?? false;
+  // Exception-queue actions and contract lifecycle — both
+  // require_roles(ROLE_ADMIN, ROLE_AP_MANAGER) on the backend. NOT the invoice
+  // approve gate; that is [canApproveInvoice].
   bool get canApprove => isAdmin || isManager;
+  // Approving / rejecting an invoice — POST /api/invoices/{id}/{approve,reject}
+  // are require_permission(PERM_INVOICE_APPROVE), which the CFO holds by
+  // default and a custom role can be granted. Gating this on admin/ap_manager
+  // hid the Approvals tab and the Approve button from the CFO — the one role
+  // the `require_cfo_above` gate (services/review.py) demands for a high-value
+  // invoice — so such an invoice could not be approved from mobile at all.
+  bool get canApproveInvoice => _user?.can(kPermInvoiceApprove) ?? false;
   bool get canViewPayments => isAdmin || isManager || isCfo;
   // Vendor verify/reject + ERP sync — mirrors the backend gate on those
   // routes (require_roles(ROLE_ADMIN, ROLE_AP_MANAGER)). Vendor *reads* are

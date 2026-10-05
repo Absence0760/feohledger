@@ -19,18 +19,25 @@ import 'package:feohledger_mobile/stores/invoice_store.dart';
 import 'package:feohledger_mobile/stores/payment_queue_store.dart';
 import 'package:feohledger_mobile/stores/vendor_store.dart';
 
+import '../support/role_permissions.dart';
+
 http.Response _json(Object body, [int status = 200]) => http.Response(
       jsonEncode(body),
       status,
       headers: {'content-type': 'application/json'},
     );
 
-Map<String, dynamic> _meBody(List<String> roles) => {
+Map<String, dynamic> _meBody(
+  List<String> roles, {
+  List<String>? permissions,
+}) =>
+    {
       'id': 'u1',
       'email': 'demo@acme.com',
       'full_name': 'Demo User',
       'organization_id': 'org1',
       'roles': roles,
+      'permissions': permissions ?? systemRolePermissions(roles),
     };
 
 /// Minimal-but-valid dashboard payload so DashboardStore.fetch resolves to a
@@ -69,6 +76,7 @@ Map<String, dynamic> _invoiceJson(String id, {String status = 'pending'}) => {
 MockClient _homeClient(
   List<String> roles, {
   List<Map<String, dynamic>>? invoices,
+  List<String>? permissions,
 }) {
   return MockClient((req) async {
     final path = req.url.path;
@@ -76,7 +84,7 @@ MockClient _homeClient(
       return _json({'access_token': 'tok-123'});
     }
     if (req.method == 'GET' && path == '/api/auth/me') {
-      return _json(_meBody(roles));
+      return _json(_meBody(roles, permissions: permissions));
     }
     if (req.method == 'POST' && path == '/api/auth/logout') {
       return _json({});
@@ -182,9 +190,10 @@ void main() {
   Future<void> loginAs(
     List<String> roles, {
     List<Map<String, dynamic>>? invoices,
+    List<String>? permissions,
   }) async {
     ApiClient().debugConfigure(
-      client: _homeClient(roles, invoices: invoices),
+      client: _homeClient(roles, invoices: invoices, permissions: permissions),
     );
     final result =
         await AuthStore.instance.login('demo@acme.com', 'demo', 'acme');
@@ -242,7 +251,12 @@ void main() {
     expect(find.byType(CircularProgressIndicator), findsNothing);
   });
 
-  testWidgets('cfo sees Vendors / Pay / Payments but not Approvals',
+  // The CFO holds `invoice.approve` (POST /api/invoices/{id}/approve is
+  // require_permission(PERM_INVOICE_APPROVE)) and is the ONLY role the
+  // `require_cfo_above` gate accepts for a high-value invoice, so hiding
+  // Approvals from them left such an invoice unapprovable from mobile. The
+  // exception queue stays admin/ap_manager (require_roles on that router).
+  testWidgets('cfo sees Approvals, Vendors / Pay / Payments but not Exceptions',
       (tester) async {
     await loginAs(['cfo']);
     await pumpHome(tester);
@@ -253,11 +267,24 @@ void main() {
         'Dashboard',
         'Invoices',
         'Contracts',
+        'Approvals',
         'Vendors',
         'Pay',
         'Payments',
         'Settings',
       ],
+    );
+  });
+
+  testWidgets(
+      'a custom role granted invoice.approve gets Approvals; the tab follows '
+      'the permission, not the role name', (tester) async {
+    await loginAs(['ap_clerk', 'approver'], permissions: ['invoice.approve']);
+    await pumpHome(tester);
+
+    expect(
+      navLabels(tester),
+      ['Dashboard', 'Invoices', 'Contracts', 'Approvals', 'Settings'],
     );
   });
 

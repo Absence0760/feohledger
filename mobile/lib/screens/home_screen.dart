@@ -28,10 +28,13 @@ class _HomeScreenState extends State<HomeScreen> {
       const InvoicesScreen(),
       const ContractsScreen(),
     ];
-    if (AuthStore.instance.canApprove) {
+    // Approvals follows the invoice-approve permission (the CFO holds it); the
+    // exception queue is require_roles(ROLE_ADMIN, ROLE_AP_MANAGER). Two gates,
+    // not one — keep [_buildNavItems] in step.
+    if (AuthStore.instance.canApproveInvoice) {
       screens.add(const ApprovalsScreen());
-      // Exception queue is gated to admin / ap_manager on the backend
-      // (require_roles(ROLE_ADMIN, ROLE_AP_MANAGER)) — same as approvals.
+    }
+    if (AuthStore.instance.canApprove) {
       screens.add(const ExceptionsScreen());
     }
     if (AuthStore.instance.canViewPayments) {
@@ -60,11 +63,13 @@ class _HomeScreenState extends State<HomeScreen> {
         label: l.navContracts,
       ),
     ];
-    if (AuthStore.instance.canApprove) {
+    if (AuthStore.instance.canApproveInvoice) {
       items.add(BottomNavigationBarItem(
         icon: const Icon(Icons.check_circle),
         label: l.navApprovals,
       ));
+    }
+    if (AuthStore.instance.canApprove) {
       items.add(BottomNavigationBarItem(
         icon: const Icon(Icons.error_outline),
         label: l.navExceptions,

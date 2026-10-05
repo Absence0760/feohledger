@@ -472,7 +472,7 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
     final inv = _invoice;
     if (inv == null) return null;
     if (!inv.status.isActionable) return null;
-    if (!AuthStore.instance.canApprove) return null;
+    if (!AuthStore.instance.canApproveInvoice) return null;
     final l = AppLocalizations.of(context);
 
     return SafeArea(
