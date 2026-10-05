@@ -1,3 +1,4 @@
+import type { Page } from '@playwright/test';
 import { expect, test } from '../fixtures/helpers';
 import { expectNoA11yViolations } from '../a11y/axe-helper';
 
@@ -37,6 +38,37 @@ const PATHS = [
  * addressed by element rather than by role.
  */
 const CONTENTS = 'nav[aria-label="Sections of this document"]';
+
+type ScrollWatch = { __scrollSettled?: Promise<void> };
+
+/**
+ * Start watching for the next document scroll to finish. Resolves on the
+ * browser's `scrollend`, or — when the action that follows scrolls nothing at
+ * all — once three frames have passed with no `scroll` event, since a smooth
+ * scroll emits one on its first frame.
+ */
+async function armScrollSettled(page: Page): Promise<void> {
+	await page.evaluate(() => {
+		(window as ScrollWatch).__scrollSettled = new Promise<void>((resolve) => {
+			let scrolled = false;
+			addEventListener('scroll', () => (scrolled = true), { once: true });
+			addEventListener('scrollend', () => resolve(), { once: true });
+			let frames = 0;
+			const idle = () => {
+				if (scrolled) return;
+				if (++frames >= 3) resolve();
+				else requestAnimationFrame(idle);
+			};
+			// Counted from the next input, not from now: the first frame starts
+			// once `keyboard.press` has been dispatched.
+			addEventListener('keydown', () => requestAnimationFrame(idle), { once: true });
+		});
+	});
+}
+
+async function scrollSettled(page: Page): Promise<void> {
+	await page.evaluate(() => (window as ScrollWatch).__scrollSettled);
+}
 
 test.describe('legal documents — accessibility where the tables overflow', () => {
 	test.use({ storageState: { cookies: [], origins: [] } });
@@ -97,8 +129,21 @@ test.describe('legal documents — the contents list on a narrow viewport', () =
 			`the open contents overflows the viewport by ${overflow}px (WCAG 1.4.10)`
 		).toBeLessThanOrEqual(0);
 
+		// Tabbing onto the first entry SCROLLS the page — at 320×720 the consent
+		// banner reserves ~460px of `scroll-padding-bottom`, so the entry sits
+		// behind it until focus brings it up (2.4.11) — and under the page's
+		// `scroll-behavior: smooth` that scroll is a ~500ms animation. Pressing
+		// Enter while it is still running races two smooth scrolls in Chromium:
+		// about one run in six the fragment jump is dropped and the focus scroll
+		// finishes instead, leaving `#scope` a full screen below the viewport
+		// (CI run 37287438662; 5 of 24 locally, 0 of 40 once the wait below was
+		// added). A reader sees the page move and acts when it stops, so wait for
+		// that: the browser's own `scrollend`, armed before the Tab so a scroll
+		// that finishes quickly cannot be missed.
+		await armScrollSettled(page);
 		await page.keyboard.press('Tab');
 		await expect(firstEntry).toBeFocused();
+		await scrollSettled(page);
 		await page.keyboard.press('Enter');
 		await expect(page).toHaveURL(/\/legal\/dpa#scope$/);
 		await expect(page.locator('.legal-page h2#scope')).toBeInViewport();

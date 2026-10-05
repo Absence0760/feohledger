@@ -5,7 +5,7 @@ names the root cause, the evidence, blast radius, and a recommended fix
 approach — this is a staging area for real problems, not a place to let them
 go stale. See root `CLAUDE.md` guard rail 6 (no dangling deferred findings).
 
-**Three entries are open** — the e2e cleanup race directly below, and the two local-e2e entries at the bottom. The header
+**Four entries are open** — the legal-contents smooth-scroll race and the e2e cleanup race directly below, and the two local-e2e entries at the bottom. The header
 once said "one" while three sat beneath it, then "three" in the same change
 that struck the third; a known-issues file that miscounts itself is the failure
 this note has now warned about twice. Two defects were **fixed on 2026-09-17**:
@@ -34,6 +34,42 @@ goes to [followups.md](followups.md). Reasoning behind a deliberate design call
 goes to [decisions.md](decisions.md).
 
 ---
+
+## A contents-list jump on a legal page can be dropped while the focus scroll is still animating
+
+**Seen:** 2026-10-05, CI run 37287438662 (PR #497, shard 9/14),
+`tests-e2e/legal/a11y-narrow.spec.ts` ("the collapsed contents opens and
+navigates from the keyboard alone at 320px"): the URL reached `#scope` but the
+`<h2 id="scope">` was a full screen below the viewport. Not introduced by #497 —
+the spec and `LegalPage.svelte` are unchanged there; the PR's new specs only
+moved this one into a different shard.
+
+**Root cause.** `LegalPage.svelte` sets `scroll-behavior: smooth` on `html`
+while a document is mounted, and at 320×720 the consent banner reserves ~460px
+of `scroll-padding-bottom` (`ConsentBanner.svelte`, WCAG 2.4.11). Tabbing onto
+the first contents entry therefore scrolls the page (to y=1186 on the DPA), and
+that scroll is a ~500ms animation. If Enter lands on the link while it is still
+running, Chromium sometimes drops the fragment scroll and finishes the focus
+scroll instead. Measured with a scroll-event probe: 5 of 24 runs ended at the
+focus scroll's target with `hashchange` fired; 0 of 40 once the probe waited
+for `scrollend` before pressing Enter.
+
+**Blast radius.** A keyboard reader who Tabs onto an entry and presses Enter
+inside that half-second, on a viewport short enough that focus has to scroll,
+lands short of the section; the URL and history are right, and pressing Enter
+again works. No data or money path is involved.
+
+**Test.** The spec now waits for the browser's `scrollend` after the Tab, which
+is what a reader does — the guard still fails if the jump itself is broken.
+
+**Recommended fix.** Make focus-induced scrolling instant and keep smoothness
+only for the jump itself — e.g. drop the `html` `scroll-behavior` and have the
+contents links call `target.scrollIntoView({ behavior: 'smooth' })` *after*
+letting the browser perform the native fragment navigation (so URL, history and
+the focus starting point stay native, per the comment in `LegalPage.svelte`), or
+drop smooth scrolling on these pages altogether. Either is a design call on #467's
+behaviour, so it was not made inside a CI fix. Trigger: the next change to
+`LegalPage.svelte`'s contents list, or any report of a section jump landing short.
 
 ## `deleteInvoicesWhere` races the backend's own workers on a just-resubmitted invoice
 
