@@ -22,7 +22,12 @@ Spend definitions (the contract the ``/spend`` + ``/check`` endpoints expose):
                  2. ``PurchaseOrder.total`` for the POs those budget-linked
                     requisitions converted into (``status == 'converted'`` reqs,
                     joined to ``purchase_orders`` via ``converted_po_id``),
-                    excluding cancelled/closed POs.
+                    excluding cancelled/closed POs. Each PO counts only its
+                    UNINVOICED remainder: ``PO.total`` minus the realised
+                    invoices billed against it that the ``actual`` leg below
+                    already counts for this budget, floored at zero
+                    (``_po_relief_subquery``). Without that relief an invoiced
+                    PO was counted twice — once here, once in ``actual``.
                A converted requisition's amount is represented by its PO (leg 2),
                NOT by the requisition (leg 1) — the OPEN-COMMITMENT status list
                deliberately omits ``converted`` so the two legs never
@@ -77,7 +82,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from decimal import Decimal
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import and_, case, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.invoice import Invoice
@@ -237,10 +242,158 @@ async def _committed_requisition_legs(
     return await _collect_legs(db, query)
 
 
+def _realised_for_budget() -> list:
+    """The predicates that make an already dimension-matched invoice part of a
+    budget's ``actual`` leg, correlated against ``Budget`` — everything except
+    the dimension match itself (each caller joins on its own column) and the
+    currency rule, which ``_leg_columns`` owns (it COUNTS a foreign-currency
+    row instead of dropping it).
+
+    Written once because two legs need exactly this set: ``actual`` sums the
+    invoices it admits, and the PO leg relieves each PO by precisely those
+    invoices. If the two could disagree, relief would either leave a double
+    count standing or drop spend from both legs at once."""
+    return [
+        Invoice.status.in_(REALISED_INVOICE_STATUSES),
+        # Bound realised spend to the budget's own period so two budgets
+        # tracking the same dimension in different periods don't both report
+        # all-time spend. Only applied when BOTH bounds are set; a period-less
+        # budget stays all-time.
+        or_(
+            Budget.period_start.is_(None),
+            Budget.period_end.is_(None),
+            Invoice.invoice_date.between(Budget.period_start, Budget.period_end),
+        ),
+        # `apply_entity_scope(query, Invoice, budget.entity_id)` written
+        # correlated: an entity-less budget is unscoped, an entity-bound one
+        # admits only its own entity's invoices (never a NULL).
+        or_(Budget.entity_id.is_(None), Invoice.entity_id == Budget.entity_id),
+    ]
+
+
+def _budget_dimension_column():
+    """``Budget.dimension`` → the matching ``Invoice`` column, as SQL.
+
+    The ``actual`` leg picks the column in Python and batches by dimension to
+    keep each query a plain indexed equality. The PO-relief subquery can't: it
+    is keyed by PO, and one PO leg spans budgets of every dimension. A
+    ``CASE`` over the same ``_DIMENSION_MATCH_COLUMN`` map keeps the mapping
+    written once."""
+    return case(
+        *((Budget.dimension == dim, col) for dim, col in _DIMENSION_MATCH_COLUMN.items()),
+        else_=None,
+    )
+
+
+def _po_relief_subquery(budget_ids: Sequence[uuid.UUID]):
+    """Per (budget, converted PO): the realised invoice spend this budget's
+    ``actual`` leg already counts for that PO.
+
+    **Why relief exists.** Nothing changes a PO's status when it is invoiced
+    (only an ERP sync owns ``purchase_orders.status``), so before this the PO
+    leg kept counting the full PO total while the invoice billed against it was
+    summed into ``actual`` beside it — one purchase counted twice. A 1,000 PO
+    invoiced 400 consumed 1,400 of the budget; ``/budgets/check`` then refused
+    a requisition the budget could in fact afford.
+
+    **Which invoices relieve.** Only ones ``actual`` sums for THIS budget
+    (``_realised_for_budget`` + the budget's currency): relief removes a double
+    count, nothing more. An invoice still in review, coded to another
+    dimension value, in another currency or in a sibling subsidiary is not in
+    ``actual`` here, so its PO stays committed rather than vanishing from both
+    legs.
+
+    **Which PO an invoice belongs to** is the matcher's rule
+    (``po_matching.match_invoice_to_po``), and so is the answer when several
+    qualify: same ``po_number``, the PO in the invoice's own entity (an
+    unstamped invoice is unscoped), the PO's vendor when the invoice names one
+    — and of the POs left, the NEWEST, exactly one. ``po_number`` is not
+    unique, so joining invoices to POs on those predicates alone attributed one
+    invoice to EVERY qualifying PO and subtracted it once per PO: two converted
+    POs sharing a number each lost the same invoice, and the over-relief handed
+    headroom back that ``/budgets/check`` then approved against.
+    ``_invoice_po_attribution`` ranks every candidate PO (converted or not —
+    the matcher doesn't care how a PO was created) and only the top-ranked one
+    is relieved."""
+    match_col = _budget_dimension_column()
+    attribution = _invoice_po_attribution(budget_ids)
+    return (
+        select(
+            Budget.id.label("budget_id"),
+            PurchaseOrder.id.label("po_id"),
+            func.sum(Invoice.amount).label("invoiced"),
+        )
+        .select_from(Budget)
+        .join(PurchaseRequisition, PurchaseRequisition.budget_id == Budget.id)
+        .join(PurchaseOrder, PurchaseOrder.id == PurchaseRequisition.converted_po_id)
+        .join(
+            attribution,
+            and_(attribution.c.po_id == PurchaseOrder.id, attribution.c.rank == 1),
+        )
+        .join(Invoice, Invoice.id == attribution.c.invoice_id)
+        .where(
+            Budget.id.in_(budget_ids),
+            PurchaseRequisition.status == RequisitionStatus.converted,
+            match_col == Budget.dimension_value,
+            Invoice.currency == Budget.currency,
+            *_realised_for_budget(),
+        )
+        .group_by(Budget.id, PurchaseOrder.id)
+        .subquery()
+    )
+
+
+def _invoice_po_attribution(budget_ids: Sequence[uuid.UUID]):
+    """Every (invoice, candidate PO) pair the matcher's predicates admit,
+    ranked newest PO first per invoice — ``rank == 1`` is the PO
+    ``po_matching.match_invoice_to_po`` would pick (``created_at DESC LIMIT
+    1``; ``id`` breaks a same-instant tie deterministically).
+
+    Narrowed to invoices carrying a number one of these budgets' converted POs
+    holds, so the scan is bounded by the budgets in hand rather than by every
+    PO-referencing invoice in the tenant."""
+    converted_numbers = (
+        select(PurchaseOrder.po_number)
+        .join(PurchaseRequisition, PurchaseRequisition.converted_po_id == PurchaseOrder.id)
+        .where(
+            PurchaseRequisition.budget_id.in_(budget_ids),
+            PurchaseRequisition.status == RequisitionStatus.converted,
+        )
+    )
+    return (
+        select(
+            Invoice.id.label("invoice_id"),
+            PurchaseOrder.id.label("po_id"),
+            func.row_number()
+            .over(
+                partition_by=Invoice.id,
+                order_by=(PurchaseOrder.created_at.desc(), PurchaseOrder.id.desc()),
+            )
+            .label("rank"),
+        )
+        .select_from(Invoice)
+        .join(
+            PurchaseOrder,
+            and_(
+                PurchaseOrder.po_number == Invoice.po_number,
+                or_(Invoice.entity_id.is_(None), PurchaseOrder.entity_id == Invoice.entity_id),
+                or_(Invoice.vendor_id.is_(None), PurchaseOrder.vendor_id == Invoice.vendor_id),
+            ),
+        )
+        .where(
+            Invoice.po_number.in_(converted_numbers),
+            Invoice.status.in_(REALISED_INVOICE_STATUSES),
+        )
+        .subquery()
+    )
+
+
 async def _committed_po_legs(
     db: AsyncSession, budget_ids: Sequence[uuid.UUID]
 ) -> dict[uuid.UUID, _Leg]:
-    """Leg 2 — POs that these budgets' converted requisitions turned into."""
+    """Leg 2 — POs that these budgets' converted requisitions turned into,
+    each net of the invoices ``actual`` already counts for it (never below
+    zero — see ``_po_relief_subquery``)."""
     # Keyed on the PO's OWN currency — the one its `total` is in (migration
     # 0099). Conversion copies the requisition's code onto the PO and 0099
     # back-filled every older conversion the same way, so the two agree unless
@@ -248,12 +401,21 @@ async def _committed_po_legs(
     # currency); then it is the PO's figure being summed, and its own label is
     # the one that says what it is. A PO recording none is excluded and
     # counted, like any other row this budget cannot price (decisions §197).
-    total, excluded = _leg_columns(PurchaseOrder.total, PurchaseOrder.currency)
+    relief = _po_relief_subquery(budget_ids)
+    # Clamped at zero: an over-billed PO has no commitment left, but a NEGATIVE
+    # one would hand the overspend back to the budget as headroom. The overage
+    # is already in `actual`, where it belongs.
+    open_commitment = func.greatest(PurchaseOrder.total - func.coalesce(relief.c.invoiced, 0), 0)
+    total, excluded = _leg_columns(open_commitment, PurchaseOrder.currency)
     query = (
         select(Budget.id, total, excluded)
         .select_from(Budget)
         .join(PurchaseRequisition, PurchaseRequisition.budget_id == Budget.id)
         .join(PurchaseOrder, PurchaseOrder.id == PurchaseRequisition.converted_po_id)
+        .outerjoin(
+            relief,
+            and_(relief.c.budget_id == Budget.id, relief.c.po_id == PurchaseOrder.id),
+        )
         .where(
             Budget.id.in_(budget_ids),
             PurchaseRequisition.status == RequisitionStatus.converted,
@@ -320,21 +482,7 @@ async def _actual_invoice_legs(
             .where(
                 Budget.id.in_([b.id for b in group]),
                 *_invoice_scan_narrowing(match_col, group),
-                Invoice.status.in_(REALISED_INVOICE_STATUSES),
-                # Bound realised spend to the budget's own period so two budgets
-                # tracking the same dimension in different periods don't both
-                # report all-time spend. Only applied when BOTH bounds are set;
-                # a period-less budget stays all-time — the correlated form of
-                # the `if budget.period_start is not None and ...` guard.
-                or_(
-                    Budget.period_start.is_(None),
-                    Budget.period_end.is_(None),
-                    Invoice.invoice_date.between(Budget.period_start, Budget.period_end),
-                ),
-                # `apply_entity_scope(query, Invoice, budget.entity_id)` written
-                # correlated: an entity-less budget is unscoped, an entity-bound
-                # one admits only its own entity's invoices (never a NULL).
-                or_(Budget.entity_id.is_(None), Invoice.entity_id == Budget.entity_id),
+                *_realised_for_budget(),
             )
             .group_by(Budget.id)
         )

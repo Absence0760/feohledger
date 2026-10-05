@@ -39,7 +39,9 @@ and an audit that re-derived both found the copy stale at nearly every sync
 transcription was retired rather than corrected again. Add a follow-up here; add
 a GitHub issue only when one warrants its own thread.
 
-**Last reconciled:** 2026-09-23 — a five-agent batch closed **five** (c)
+**Last reconciled:** 2026-10-05 — the procurement bug hunt (PR #498) opened
+three (c) entries and closed none, taking the file from 53 → 56. Before that,
+2026-09-23 — a five-agent batch closed **five** (c)
 entries and opened none, taking the file from 58 → 53: `gl_recode`'s org-wide
 empty-chart read (decisions §207), the missing per-test timeout on the backend
 suite (§208), the dead Change-password card for a password-less account (§209),
@@ -69,7 +71,7 @@ section carried its own `decisions.md` § reference, so nothing was lost by
 deleting it; that cross-reference is what makes the pruning safe, and writing
 one is what earns a future entry the right to be deleted.
 
-**59 open: 44 (c) · 9 (a) · 6 (b)** — re-derived from the file, never carried
+**62 open: 47 (c) · 9 (a) · 6 (b)** — re-derived from the file, never carried
 forward. The section heading is authoritative; where an entry also carries a
 `(c)`/`(a)`/`(b)` marker, the two agree.
 `grep -c '^- \[ \]' docs/followups.md`.
@@ -1148,6 +1150,65 @@ or is a sibling of a fix that needs its own pass.
       Tenant migration if the latter.
       **Trigger:** the next change to report approval / SoD, or a persona-approver
       or persona-fraudster pass over expenses.
+### Surfaced by the procurement bug hunt (2026-10-05, PR #498)
+
+- [ ] **(c) The budget PO-relief join reads `invoices.po_number`, which has no
+      index, and the cost is unmeasured.** `budget_service._invoice_po_attribution`
+      (the relief that stops an invoiced PO counting in both `committed` and
+      `actual`) joins invoices to POs on `po_number`. Migration 0073 indexed only
+      `purchase_orders.po_number`. The join is narrowed to the numbers held by the
+      budgets in hand, but the narrowing is an `IN (subquery)` over an unindexed
+      column, and this runs on `GET /budgets/check` before every requisition
+      submit. The `_invoice_scan_narrowing` docstring records 0.11 ms vs 4.3 ms
+      over 40k invoices for the actual leg. Nobody has taken the same measurement
+      for relief.
+      **Durable fix:** `EXPLAIN ANALYZE` the single-budget spend query over a
+      40k-invoice tenant with realistic PO references. If relief dominates, add
+      `ix_invoices_po_number` in a migration that fans out to every tenant (and to
+      `tenant_provisioning` for fresh ones), with a plan test in the shape of
+      `tests/test_invoice_budget_dimension_indexes.py`.
+      **Trigger:** the next perf pass on budgets/procurement, or any report of
+      `/budgets/check` latency.
+
+- [ ] **(c) A budget delete or currency change can race a requisition linking
+      to it.** `api/budgets.py` counts linked requisitions and then deletes or
+      re-denominates in the same transaction without locking the budget row. A
+      requisition created or re-linked between the count and the commit gets
+      through. For a delete, the FK still refuses at commit, but that comes back
+      as the old 500 instead of the 409. For a currency change, the result is a
+      requisition linked to a budget in another currency. The rollup excludes it
+      and discloses it through `excluded_row_count`, so nothing is summed wrong,
+      but the 422 that should have prevented it never fires.
+      **Durable fix:** take `SELECT … FOR UPDATE` on the budget row in
+      `update_budget` / `delete_budget`, and the same lock in
+      `api/requisitions._resolve_links` whenever it resolves a `budget_id`, so the
+      two sides serialise. Map a residual FK `IntegrityError` on delete to the
+      same 409.
+      **Trigger:** any change to either guard, or a seen
+      `purchase_requisitions_budget_id_fkey` violation.
+
+- [ ] **(c) Requisition approval checks only the requester, not whoever edited
+      the draft.** `PATCH /api/requisitions/{id}` lets any admin / ap_manager /
+      ap_clerk rewrite another user's `draft`: lines, amounts and vendor. That
+      includes a requisition an ap_manager has just created through
+      `POST /intake/{id}/convert-to-requisition`, whose `requester_user_id` is
+      the intake's requester, not the converter. The editor can then submit it
+      and approve it, because `approve_requisition`'s SoD shim names only
+      `requester_user_id` (`segregation_actor_ids=None`). This is the gap that
+      `recurring_invoice_templates.material_editor_ids` closed for recurring
+      invoices (`docs/decisions.md` §141, §152): one column names one person,
+      and the spend can be shaped by several.
+      **Durable fix:** a `material_editor_ids` JSONB column on
+      `purchase_requisitions` (migration, fanned out to every tenant), appended
+      by `update_requisition` when a material field changes (lines, `currency`,
+      `vendor_id`, `budget_id`). Pass it as `segregation_actor_ids` in the
+      approve shim, plus a stamping guard test in the shape of
+      `tests/test_invoice_uploader_stamping.py`. Not backfilled: no honest
+      editor history exists to recover.
+      **Trigger:** the next change to requisition approval or the intake →
+      requisition conversion. It is a migration, so land it outside a parallel
+      batch.
+
 
 ## (a) Blocked on external credentials, accounts, or hardware
 

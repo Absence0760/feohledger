@@ -61,14 +61,14 @@ submit. Because they are derived from the budget set, the SAME code emits
 | Term | Definition |
 |------|-----------|
 | **allocated** | `budget.amount` — the cap for this dimension/period. |
-| **committed** | Earmarked but not yet invoiced. Two legs, summed: (1) `PurchaseRequisition.total` for requisitions linked to the budget (`budget_id == budget.id`) in an **open-commitment** status — `submitted`, `pending_approval`, `approved` (live demand not yet a PO); (2) `PurchaseOrder.total` for the POs those budget-linked requisitions converted into (`converted` reqs joined via `converted_po_id`), excluding cancelled/closed/voided POs. A converted req is counted via its PO (leg 2), **not** the req (leg 1) — `converted` is deliberately omitted from leg 1 so the two never double-count. |
+| **committed** | Earmarked but not yet invoiced. Two legs, summed: (1) `PurchaseRequisition.total` for requisitions linked to the budget (`budget_id == budget.id`) in an **open-commitment** status — `submitted`, `pending_approval`, `approved` (live demand not yet a PO); (2) `PurchaseOrder.total` for the POs those budget-linked requisitions converted into (`converted` reqs joined via `converted_po_id`), excluding cancelled/closed/voided POs. Each PO counts only its **uninvoiced remainder** — `PO.total` minus the realised invoices billed against it (attributed the way `po_matching` does it: same `po_number`, the invoice's entity, the invoice's vendor when it names one, and of those the **newest** PO only — `po_number` is not unique, so an invoice relieves one PO, never every PO carrying its number) that this budget's **actual** leg already counts, floored at `0`. Nothing changes a PO's status when it is invoiced, so without that relief an invoiced PO was counted twice: once here, once in actual. Only invoices actual sums relieve — one still in review, coded to another dimension value, in another currency or in a sibling subsidiary leaves the PO committed in full. A converted req is counted via its PO (leg 2), **not** the req (leg 1) — `converted` is deliberately omitted from leg 1 so the two never double-count. |
 | **actual** | Realised invoice spend matched to the dimension. Invoices have no `budget_id`, so they're attributed by column — one per dimension, all four covered: `cost_center` → `Invoice.cost_center`, `gl_account` → `Invoice.gl_account`, `department` → `Invoice.department`, `project` → `Invoice.project`. Only invoices in a realised status count — `approved`, `sent_to_erp`, `posted_in_erp`, `payment_scheduled`, `paid`, `done` — so a new/rejected invoice never inflates actual. When the budget sets both `period_start`/`period_end`, actual is further bounded to invoices dated inside that window (so a Q1 and a Q2 budget on the same dimension don't both report all-time spend). |
 | **remaining** | `allocated - committed - actual` (negative = overspend). |
 | **utilization_pct** | `(committed + actual) / allocated * 100`, 2 dp. `0` when allocated is 0. |
 
 **Every leg is scoped by currency.** The legs never convert, so a EUR and a USD
-invoice on the same dimension are **not** summed as equal (POs carry no
-currency column, so the PO leg filters on the source requisition's currency).
+invoice on the same dimension are **not** summed as equal (the PO leg
+filters on the PO's own `currency`, migration 0099).
 
 **Only the `actual` (invoice) leg is scoped by entity.** Attribution there is a
 fuzzy free-text `dimension_value` match, so narrowing to the budget's own
@@ -88,6 +88,10 @@ requisition could name a budget the rollup then silently dropped. The currency
 predicate stays on the read legs as a safety net for links made before the
 guard — summing two currencies' face values would be worse than excluding the
 row.
+
+The budget side holds the same line: `PATCH /api/budgets/{id}` refuses to
+change `currency` while a non-cancelled linked requisition is in another one
+(422), and `DELETE` refuses a budget any requisition still links to (409).
 
 ### `department` / `project` actuals — resolved
 
@@ -167,8 +171,8 @@ Every list/read is entity-scoped (`X-Entity-ID`) and tenant-isolated
 | GET | `/budgets/check` | Overspend pre-check (query `budget_id` + `amount`). |
 | GET | `/budgets/{id}` | Detail. |
 | GET | `/budgets/{id}/spend` | Computed allocated / committed / actual / remaining / utilization rollup. |
-| PATCH | `/budgets/{id}` | Update changed fields. Audited `budget.updated`. |
-| DELETE | `/budgets/{id}` | Delete. Audited `budget.deleted`. |
+| PATCH | `/budgets/{id}` | Update changed fields. Audited `budget.updated`. Changing `currency` is a **422** while any non-cancelled linked requisition is in another currency — the mirror of the requisition-side link guard, since the legs never convert and those requisitions would silently drop out of `committed`. |
+| DELETE | `/budgets/{id}` | Delete. Audited `budget.deleted`. **409** while any requisition (any status) still links to it — the FK would otherwise surface as a 500, and the link is the record of what the spend was raised against. |
 
 ### `GET /budgets/rollup` contract
 
