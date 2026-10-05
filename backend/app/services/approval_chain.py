@@ -11,6 +11,7 @@ from __future__ import annotations
 import copy
 import logging
 import uuid
+from collections.abc import Collection
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal, InvalidOperation
@@ -574,12 +575,19 @@ def clear_chain_state(state_data: dict) -> None:
 def init_chain_state(
     instance: WorkflowInstance,
     applicable_levels: list[dict],
+    *,
+    entered_at: datetime | None = None,
 ) -> None:
     """Initialize the approval chain state on a workflow instance.
 
     Called when an invoice enters the approval phase with strategy="chain".
+
+    ``entered_at`` is level 0's escalation clock. It defaults to now, which is
+    right for the first approval initialising the chain; the escalation sweep
+    passes the time the invoice actually entered review, because that is how
+    long level 0 has really been waiting.
     """
-    now_iso = datetime.now(UTC).isoformat()
+    now_iso = (entered_at or datetime.now(UTC)).isoformat()
     levels_state = []
     for i, level in enumerate(applicable_levels):
         levels_state.append(
@@ -607,6 +615,61 @@ def init_chain_state(
         "current_level": 0,
     }
     instance.state_data = state
+
+
+#: JSONB containment marker for "this snapshot's approval step is a chain". The
+#: escalation sweep uses it (``@>``) to find instances whose chain nobody has
+#: approved yet, and so has no state to read; ``get_step_config`` matches the
+#: step by exactly this ``type``.
+CHAIN_SNAPSHOT_MARKER: dict = {
+    "steps": [{"type": "approval", "config": {"approver_strategy": "chain"}}]
+}
+
+
+def init_chain_for_invoice(
+    instance: WorkflowInstance,
+    invoice,
+    approval_config: dict,
+    *,
+    org_settings: dict | None,
+    entered_at: datetime | None = None,
+) -> bool:
+    """Resolve the levels that apply to ``invoice`` and initialise the chain.
+
+    The one routing decision for a chain, shared by the first approval
+    (``review.approve_invoice``) and the escalation sweep, so a chain the sweep
+    initialises is exactly the chain the first approver would have met. The
+    bands are compared against a ``GateAmount`` in the org's REPORTING currency
+    (``reporting_gate_amount``) — the per-level ``min_amount`` / ``max_amount``
+    are bare numbers denominated there, like ``require_cfo_above`` — and an
+    invoice with no locked rate reports ``expressible=False``, under which every
+    routing-matched level applies (fail closed = more approvers).
+
+    Returns False, writing nothing, when no level applies.
+    """
+    applicable = resolve_applicable_levels(
+        approval_config.get("approval_chain", []),
+        reporting_gate_amount(invoice, org_settings=org_settings),
+        invoice_attrs=invoice_routing_attrs(invoice),
+    )
+    if not applicable:
+        return False
+    init_chain_state(instance, applicable, entered_at=entered_at)
+    return True
+
+
+def escalation_ineligible(invoice, approval_config: dict) -> set[str]:
+    """User ids an escalation must never make a level's approver on ``invoice``.
+
+    Exactly the people :func:`check_segregation` would refuse at approval time —
+    the payable's implicated actors, unless the approval step opted out of
+    segregation — so the sweep and the approval path read one rule. (The other
+    approval-time refusal, the cross-level guard, needs no input from here:
+    :func:`apply_escalation` reads it off the chain itself.)
+    """
+    if approval_config.get("require_segregation", True) is False:
+        return set()
+    return implicated_actors(invoice)
 
 
 async def _resolve_authorized_approvers(approver_ids: list[str]) -> set[str]:
@@ -735,7 +798,12 @@ def advance_approval_chain(
 # ------------------------------------------------------------------
 
 
-def apply_escalation(instance: WorkflowInstance, *, now: datetime | None = None) -> bool:
+def apply_escalation(
+    instance: WorkflowInstance,
+    *,
+    now: datetime | None = None,
+    ineligible: Collection[str] = (),
+) -> bool:
     """If the current level has been stale longer than its escalation_hours,
     unblock it with `escalation_to_user_ids` and record an escalation event.
     Returns True if the instance was mutated.
@@ -763,6 +831,18 @@ def apply_escalation(instance: WorkflowInstance, *, now: datetime | None = None)
     (Such a level is never eligibility-blocked in the first place: `any` mode
     counts distinct approvals without consulting `approver_ids`, and `all` mode
     over an empty list is satisfied by the first approval.)
+
+    **A target who could not approve is never added.** Two refusals apply at
+    approval time: segregation of duties (``check_segregation`` — the caller
+    passes the payable's implicated actors as ``ineligible``, see
+    :func:`escalation_ineligible`) and the cross-level guard in
+    :func:`advance_approval_chain` (anyone who already approved a *different*
+    level, read here off the chain itself). Adding such a person widened
+    nothing in `any` mode — and notified them to approve something they would
+    be refused — while in `all` mode it SUBSTITUTED them in as a required
+    approver, turning a stuck level into one nobody could ever clear; the
+    idempotency below then meant the sweep never tried again. When every
+    target is ineligible the escalation is a no-op.
 
     Idempotent — once a level is escalated to a given user set, re-running
     is a no-op."""
@@ -804,9 +884,15 @@ def apply_escalation(instance: WorkflowInstance, *, now: datetime | None = None)
         return False
 
     existing = set(approver_ids)
-    new_targets = [uid for uid in targets if uid not in existing]
+    refused = {str(uid) for uid in ineligible}
+    for idx, other in enumerate(levels):
+        if idx != current_idx:
+            refused.update(str(a.get("user_id")) for a in other.get("approvals", []))
+    new_targets = [uid for uid in targets if uid not in existing and str(uid) not in refused]
     if not new_targets:
-        return False  # already escalated to these users — idempotent
+        # Already escalated to these users (idempotent), or every remaining
+        # target is someone the approval path would refuse.
+        return False
 
     if level.get("parallel_mode") == "all":
         # Substitute every NOT-YET-APPROVED approver with the escalation

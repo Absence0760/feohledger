@@ -292,6 +292,32 @@ Escalation is idempotent — once a level has absorbed a target set, re-running 
 a no-op, so the sweep can run on a tight interval and across overlapping
 replicas.
 
+**A target who could not approve is never added.** Segregation of duties refuses
+the payable's implicated actors (`uploaded_by_id` ∪ `segregation_actor_ids`,
+unless the approval step sets `require_segregation: false`), and
+`advance_approval_chain` refuses anyone who already approved a different level.
+`apply_escalation` filters both out of the targets (`ineligible=` from
+`approval_chain.escalation_ineligible`, plus the chain's own earlier approvals).
+Adding them gained nothing in `any` mode — it only notified them to approve
+something they would be refused — and in `all` mode it *substituted* them in as
+a required approver, leaving a level nobody could clear (and, the sweep being
+idempotent, permanently so). If every target is ineligible the escalation is a
+no-op.
+
+**Level 0 escalates before anyone approves.** Chain state is still created
+lazily by the first approval, so a chain whose first approver never acts has no
+state — and used to be invisible to the sweep, meaning level 0 could never
+escalate. The sweep now also selects active instances with no chain state whose
+snapshot's approval strategy is `chain` and whose invoice is
+`ready_for_review`; for those it initialises the chain through the same
+`approval_chain.init_chain_for_invoice` the first approval uses (identical
+routing), clocking level 0 from when the invoice entered review — the open
+`approval` step's `created_at`, else the instance's. The chain is only persisted
+if an escalation actually fires; otherwise the transaction rolls back and the
+lazy path is untouched. A chain the sweep initialises is routed on the invoice
+as it stood then — the same freeze a chain initialised by a level-0 approval
+already has for every later level.
+
 ### Segregation of Duties
 
 `require_segregation: bool` on the approval step config. When enabled:

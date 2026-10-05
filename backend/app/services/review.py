@@ -390,7 +390,7 @@ async def approve_invoice(
     if approval_config.get("approver_strategy") == "chain" and instance:
         # Lock the workflow instance row to prevent concurrent approval races
         from app.models.workflow import WorkflowInstance
-        from app.services.approval_chain import init_chain_state, resolve_applicable_levels
+        from app.services.approval_chain import init_chain_for_invoice
 
         locked_result = await db.execute(
             select(WorkflowInstance).where(WorkflowInstance.id == instance.id).with_for_update()
@@ -400,26 +400,11 @@ async def approve_invoice(
         # Initialize chain state on first approval if not yet initialized
         # `get_chain_progress` owns the read (and the "a stored `null` means
         # no chain" coercion) — see `approval_chain.chain_state_of`.
+        # (the escalation sweep may already have done so, with the same routing
+        # — `init_chain_for_invoice` is the one place a chain's levels are
+        # resolved). No applicable level → treat as single-level, fall through.
         if not get_chain_progress(instance):
-            from app.services.approval_chain import invoice_routing_attrs, reporting_gate_amount
-
-            applicable = resolve_applicable_levels(
-                approval_config.get("approval_chain", []),
-                # A `GateAmount` in the org's REPORTING currency — the per-level
-                # `min_amount` / `max_amount` bands are bare numbers denominated
-                # there, exactly like `require_cfo_above`, so a foreign invoice
-                # must not be routed on its billed figure. Exact Decimal
-                # throughout, so a boundary amount still lands on the right
-                # approver tier; an invoice with no locked rate reports
-                # `expressible=False` and every routing-matched level applies.
-                reporting_gate_amount(invoice, org_settings=org_settings),
-                invoice_attrs=invoice_routing_attrs(invoice),
-            )
-            if applicable:
-                init_chain_state(instance, applicable)
-            else:
-                # No levels apply — treat as single-level, fall through
-                pass
+            init_chain_for_invoice(instance, invoice, approval_config, org_settings=org_settings)
 
         # The level index this approval is being recorded against — read BEFORE
         # advancing (advance_approval_chain bumps current_level once the level
