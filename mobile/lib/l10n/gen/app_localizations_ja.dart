@@ -590,6 +590,141 @@ class AppLocalizationsJa extends AppLocalizations {
   }
 
   @override
+  String get commonDelete => '削除';
+
+  @override
+  String bulkSelectedCount(int count) {
+    return '$count件を選択中';
+  }
+
+  @override
+  String get bulkCancelSelection => '選択を解除';
+
+  @override
+  String get bulkSelectAll => 'すべて選択';
+
+  @override
+  String get bulkActionExport => 'エクスポート';
+
+  @override
+  String get bulkActionStatus => 'ステータス';
+
+  @override
+  String bulkResultWithSkipped(String result, int skipped) {
+    return '$result（$skipped件をスキップ）';
+  }
+
+  @override
+  String get bulkUnknownError => '不明なエラー';
+
+  @override
+  String get invoicesSelectMultiple => '複数選択';
+
+  @override
+  String get invoicesBulkDeleteTitle => '請求書を削除しますか？';
+
+  @override
+  String invoicesBulkDeleteBody(int count) {
+    return '選択した$count件の請求書を完全に削除しますか？支払済みまたはERPへ送信済みの請求書はスキップされます。';
+  }
+
+  @override
+  String invoicesBulkDeleted(int count) {
+    return '$count件の請求書を削除しました';
+  }
+
+  @override
+  String invoicesBulkDeleteFailed(String error) {
+    return '一括削除に失敗しました: $error';
+  }
+
+  @override
+  String get invoicesBulkStatusSheetTitle => 'ステータスを変更…';
+
+  @override
+  String invoicesBulkMoved(int count, String status) {
+    return '$count件の請求書を「$status」に変更しました';
+  }
+
+  @override
+  String invoicesBulkStatusFailed(String error) {
+    return '一括ステータス変更に失敗しました: $error';
+  }
+
+  @override
+  String get invoicesBulkExportSheetTitle => 'エクスポート形式…';
+
+  @override
+  String get invoicesExportFormatCsv => 'CSV';
+
+  @override
+  String get invoicesExportFormatXml => 'XML';
+
+  @override
+  String invoicesBulkExportFailed(String error) {
+    return 'エクスポートに失敗しました: $error';
+  }
+
+  @override
+  String invoicesBulkShareFailed(String error) {
+    return '共有シートを開けませんでした: $error';
+  }
+
+  @override
+  String invoicesBulkExported(int count, String format) {
+    return '$count件の請求書を$formatでエクスポートしました';
+  }
+
+  @override
+  String get exceptionsSelectMultiple => '例外を選択';
+
+  @override
+  String exceptionsBulkResolved(int count) {
+    return '$count件の例外を解決しました';
+  }
+
+  @override
+  String exceptionsBulkDismissed(int count) {
+    return '$count件の例外を却下しました';
+  }
+
+  @override
+  String get invoiceStatusNew => '新規';
+
+  @override
+  String get invoiceStatusPending => '保留中';
+
+  @override
+  String get invoiceStatusReadyForReview => 'レビュー待ち';
+
+  @override
+  String get invoiceStatusApproved => '承認済み';
+
+  @override
+  String get invoiceStatusRejected => '却下';
+
+  @override
+  String get invoiceStatusSendingToErp => 'ERPへ送信中';
+
+  @override
+  String get invoiceStatusSentToErp => 'ERPへ送信済み';
+
+  @override
+  String get invoiceStatusPostedInErp => 'ERPに計上済み';
+
+  @override
+  String get invoiceStatusPaymentScheduled => '支払予定';
+
+  @override
+  String get invoiceStatusPaid => '支払済み';
+
+  @override
+  String get invoiceStatusDone => '完了';
+
+  @override
+  String get invoiceStatusFailed => '失敗';
+
+  @override
   String get invoiceDetailApprove => '承認';
 
   @override

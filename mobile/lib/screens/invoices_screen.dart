@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 
 import 'package:feohledger_mobile/l10n/gen/app_localizations.dart';
+import 'package:feohledger_mobile/l10n/invoice_status_labels.dart';
 import 'package:feohledger_mobile/models/invoice.dart';
 import 'package:feohledger_mobile/screens/capture_screen.dart';
 import 'package:feohledger_mobile/screens/invoice_detail_screen.dart';
@@ -162,10 +163,10 @@ class _InvoicesScreenState extends State<InvoicesScreen> {
         // enters selection mode.
         if (_canBulk)
           Semantics(
-            label: 'Select multiple',
+            label: l.invoicesSelectMultiple,
             button: true,
             child: IconButton(
-              tooltip: 'Select multiple',
+              tooltip: l.invoicesSelectMultiple,
               icon: const Icon(Icons.checklist),
               onPressed: () => InvoiceStore.instance.enterSelectionMode(),
             ),
@@ -228,21 +229,21 @@ class _InvoicesScreenState extends State<InvoicesScreen> {
     final store = InvoiceStore.instance;
     return AppBar(
       leading: Semantics(
-        label: 'Cancel selection',
+        label: l.bulkCancelSelection,
         button: true,
         child: IconButton(
-          tooltip: 'Cancel selection',
+          tooltip: l.bulkCancelSelection,
           icon: const Icon(Icons.close),
           onPressed: store.exitSelectionMode,
         ),
       ),
-      title: Text('${store.selectedCount} selected'),
+      title: Text(l.bulkSelectedCount(store.selectedCount)),
       actions: [
         Semantics(
-          label: 'Select all',
+          label: l.bulkSelectAll,
           button: true,
           child: IconButton(
-            tooltip: 'Select all',
+            tooltip: l.bulkSelectAll,
             icon: const Icon(Icons.select_all),
             onPressed: store.selectAll,
           ),
@@ -286,25 +287,25 @@ class _InvoicesScreenState extends State<InvoicesScreen> {
     final count = InvoiceStore.instance.selectedCount;
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Delete invoices?'),
-        content: Text(
-          'Permanently delete $count selected '
-          '${count == 1 ? 'invoice' : 'invoices'}? '
-          'Invoices already paid or sent to the ERP are skipped.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: Text(AppLocalizations.of(dialogContext).commonCancel),
-          ),
-          FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: Colors.red.shade700),
-            onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: const Text('Delete'),
-          ),
-        ],
-      ),
+      builder: (dialogContext) {
+        final dl = AppLocalizations.of(dialogContext);
+        return AlertDialog(
+          title: Text(dl.invoicesBulkDeleteTitle),
+          content: Text(dl.invoicesBulkDeleteBody(count)),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: Text(dl.commonCancel),
+            ),
+            FilledButton(
+              style:
+                  FilledButton.styleFrom(backgroundColor: Colors.red.shade700),
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: Text(dl.commonDelete),
+            ),
+          ],
+        );
+      },
     );
     if (confirmed != true || !mounted) return;
 
@@ -313,9 +314,14 @@ class _InvoicesScreenState extends State<InvoicesScreen> {
     if (!mounted) return;
     setState(() => _busy = false);
 
+    final l = AppLocalizations.of(context);
     final message = result == null
-        ? 'Bulk delete failed: ${InvoiceStore.instance.error ?? ''}'
-        : _resultMessage('Deleted', result.count, result.skipped.length);
+        ? l.invoicesBulkDeleteFailed(_storeError(l))
+        : _withSkipped(
+            l,
+            l.invoicesBulkDeleted(result.count),
+            result.skipped.length,
+          );
     ScaffoldMessenger.of(context)
         .showSnackBar(SnackBar(content: Text(message)));
     A11y.announce(context, message);
@@ -329,16 +335,22 @@ class _InvoicesScreenState extends State<InvoicesScreen> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const ListTile(
+              ListTile(
                 title: Text(
-                  'Change status to…',
-                  style: TextStyle(fontWeight: FontWeight.w600),
+                  AppLocalizations.of(sheetContext)
+                      .invoicesBulkStatusSheetTitle,
+                  style: const TextStyle(fontWeight: FontWeight.w600),
                 ),
               ),
               const Divider(height: 1),
               for (final status in _bulkStatusTargets)
                 ListTile(
-                  title: Text(status.label),
+                  title: Text(
+                    invoiceStatusLabel(
+                      AppLocalizations.of(sheetContext),
+                      status,
+                    ),
+                  ),
                   onTap: () => Navigator.of(sheetContext).pop(status),
                 ),
             ],
@@ -366,11 +378,12 @@ class _InvoicesScreenState extends State<InvoicesScreen> {
     if (!mounted) return;
     setState(() => _busy = false);
 
+    final l = AppLocalizations.of(context);
     final message = result == null
-        ? 'Bulk status change failed: ${InvoiceStore.instance.error ?? ''}'
-        : _resultMessage(
-            'Moved to ${target.label}:',
-            result.count,
+        ? l.invoicesBulkStatusFailed(_storeError(l))
+        : _withSkipped(
+            l,
+            l.invoicesBulkMoved(result.count, invoiceStatusLabel(l, target)),
             result.skipped.length,
           );
     ScaffoldMessenger.of(context)
@@ -389,21 +402,26 @@ class _InvoicesScreenState extends State<InvoicesScreen> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const ListTile(
+              ListTile(
                 title: Text(
-                  'Export as…',
-                  style: TextStyle(fontWeight: FontWeight.w600),
+                  AppLocalizations.of(sheetContext)
+                      .invoicesBulkExportSheetTitle,
+                  style: const TextStyle(fontWeight: FontWeight.w600),
                 ),
               ),
               const Divider(height: 1),
               ListTile(
                 leading: const Icon(Icons.table_chart_outlined),
-                title: const Text('CSV'),
+                title: Text(
+                  AppLocalizations.of(sheetContext).invoicesExportFormatCsv,
+                ),
                 onTap: () => Navigator.of(sheetContext).pop('csv'),
               ),
               ListTile(
                 leading: const Icon(Icons.code),
-                title: const Text('XML'),
+                title: Text(
+                  AppLocalizations.of(sheetContext).invoicesExportFormatXml,
+                ),
                 onTap: () => Navigator.of(sheetContext).pop('xml'),
               ),
             ],
@@ -420,8 +438,8 @@ class _InvoicesScreenState extends State<InvoicesScreen> {
 
     if (result == null) {
       setState(() => _busy = false);
-      final message =
-          'Export failed: ${InvoiceStore.instance.error ?? 'unknown error'}';
+      final l = AppLocalizations.of(context);
+      final message = l.invoicesBulkExportFailed(_storeError(l));
       ScaffoldMessenger.of(context)
           .showSnackBar(SnackBar(content: Text(message)));
       A11y.announce(context, message);
@@ -436,7 +454,8 @@ class _InvoicesScreenState extends State<InvoicesScreen> {
       );
     } catch (e) {
       if (!mounted) return;
-      final message = 'Could not open the share sheet: $e';
+      final message =
+          AppLocalizations.of(context).invoicesBulkShareFailed('$e');
       ScaffoldMessenger.of(context)
           .showSnackBar(SnackBar(content: Text(message)));
       A11y.announce(context, message);
@@ -445,18 +464,25 @@ class _InvoicesScreenState extends State<InvoicesScreen> {
       if (mounted) setState(() => _busy = false);
     }
     if (!mounted) return;
-    final noun = count == 1 ? 'invoice' : 'invoices';
+    final l = AppLocalizations.of(context);
     A11y.announce(
       context,
-      'Exported $count $noun as ${format.toUpperCase()}',
+      l.invoicesBulkExported(
+        count,
+        format == 'xml' ? l.invoicesExportFormatXml : l.invoicesExportFormatCsv,
+      ),
     );
   }
 
-  /// Compose a "verb N invoice(s) (M skipped)" result line shared by both
-  /// bulk actions. M is omitted when nothing was skipped.
-  String _resultMessage(String verb, int count, int skipped) {
-    final noun = count == 1 ? 'invoice' : 'invoices';
-    final base = '$verb $count $noun';
-    return skipped == 0 ? base : '$base ($skipped skipped)';
+  /// The store's failure detail, or a localized "unknown error" when the
+  /// failure carried none — never an empty string after the colon.
+  String _storeError(AppLocalizations l) {
+    final error = InvoiceStore.instance.error;
+    return error == null || error.isEmpty ? l.bulkUnknownError : error;
   }
+
+  /// Append the backend's skipped-row count to a bulk [result] line; omitted
+  /// when nothing was skipped.
+  String _withSkipped(AppLocalizations l, String result, int skipped) =>
+      skipped == 0 ? result : l.bulkResultWithSkipped(result, skipped);
 }

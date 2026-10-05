@@ -279,6 +279,190 @@
       }
     }
   },
+  "commonDelete": "Delete",
+  "@commonDelete": {
+    "description": "Destructive delete action (bulk bar button, confirm-dialog button)."
+  },
+  "bulkSelectedCount": "{count, plural, one {{count} selected} other {{count} selected}}",
+  "@bulkSelectedCount": {
+    "description": "Selected-row count in the multi-select app bar and the shared BulkActionBar. Generic across lists (invoices, exceptions), so it names no noun.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "bulkCancelSelection": "Cancel selection",
+  "@bulkCancelSelection": {
+    "description": "Tooltip + screen-reader label of the button that leaves multi-select mode."
+  },
+  "bulkSelectAll": "Select all",
+  "@bulkSelectAll": {
+    "description": "Tooltip + screen-reader label of the select-all button in multi-select mode."
+  },
+  "bulkActionExport": "Export",
+  "@bulkActionExport": {
+    "description": "BulkActionBar button: export the selected rows."
+  },
+  "bulkActionStatus": "Status",
+  "@bulkActionStatus": {
+    "description": "BulkActionBar button: change the status of the selected rows."
+  },
+  "bulkResultWithSkipped": "{result} ({skipped, plural, one {{skipped} skipped} other {{skipped} skipped}})",
+  "@bulkResultWithSkipped": {
+    "description": "A bulk result line ({result}) followed by how many rows the backend skipped. Generic across lists, so it names no noun.",
+    "placeholders": {
+      "result": {
+        "type": "String"
+      },
+      "skipped": {
+        "type": "int"
+      }
+    }
+  },
+  "bulkUnknownError": "unknown error",
+  "@bulkUnknownError": {
+    "description": "Fallback error detail when a failed bulk action carries no message."
+  },
+  "invoicesSelectMultiple": "Select multiple",
+  "@invoicesSelectMultiple": {
+    "description": "Invoices app-bar button that enters multi-select mode."
+  },
+  "invoicesBulkDeleteTitle": "Delete invoices?",
+  "@invoicesBulkDeleteTitle": {
+    "description": "Title of the bulk-delete confirmation dialog."
+  },
+  "invoicesBulkDeleteBody": "{count, plural, one {Permanently delete {count} selected invoice?} other {Permanently delete {count} selected invoices?}} Invoices already paid or sent to the ERP are skipped.",
+  "@invoicesBulkDeleteBody": {
+    "description": "Body of the bulk-delete confirmation dialog.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "invoicesBulkDeleted": "{count, plural, one {Deleted {count} invoice} other {Deleted {count} invoices}}",
+  "@invoicesBulkDeleted": {
+    "description": "Snackbar after a bulk delete.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "invoicesBulkDeleteFailed": "Bulk delete failed: {error}",
+  "@invoicesBulkDeleteFailed": {
+    "description": "Snackbar when a bulk delete fails; {error} is the server detail.",
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "invoicesBulkStatusSheetTitle": "Change status to…",
+  "@invoicesBulkStatusSheetTitle": {
+    "description": "Heading of the bulk status-change sheet."
+  },
+  "invoicesBulkMoved": "{count, plural, one {Moved {count} invoice to {status}} other {Moved {count} invoices to {status}}}",
+  "@invoicesBulkMoved": {
+    "description": "Snackbar after a bulk status change; {status} is the localized target status (invoiceStatus*).",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      },
+      "status": {
+        "type": "String"
+      }
+    }
+  },
+  "invoicesBulkStatusFailed": "Bulk status change failed: {error}",
+  "@invoicesBulkStatusFailed": {
+    "description": "Snackbar when a bulk status change fails.",
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "invoicesBulkExportSheetTitle": "Export as…",
+  "@invoicesBulkExportSheetTitle": {
+    "description": "Heading of the bulk export format sheet."
+  },
+  "invoicesExportFormatCsv": "CSV",
+  "@invoicesExportFormatCsv": {
+    "description": "Export format option (a file-format name)."
+  },
+  "invoicesExportFormatXml": "XML",
+  "@invoicesExportFormatXml": {
+    "description": "Export format option (a file-format name)."
+  },
+  "invoicesBulkExportFailed": "Export failed: {error}",
+  "@invoicesBulkExportFailed": {
+    "description": "Snackbar when a bulk export fails.",
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "invoicesBulkShareFailed": "Could not open the share sheet: {error}",
+  "@invoicesBulkShareFailed": {
+    "description": "Snackbar when the platform share sheet cannot be opened for an export.",
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "invoicesBulkExported": "{count, plural, one {Exported {count} invoice as {format}} other {Exported {count} invoices as {format}}}",
+  "@invoicesBulkExported": {
+    "description": "Screen-reader announcement after a bulk export; {format} is the format name.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      },
+      "format": {
+        "type": "String"
+      }
+    }
+  },
+  "exceptionsSelectMultiple": "Select exceptions",
+  "@exceptionsSelectMultiple": {
+    "description": "Exceptions app-bar button that enters multi-select mode."
+  },
+  "exceptionsBulkResolved": "{count, plural, one {Resolved {count} exception} other {Resolved {count} exceptions}}",
+  "@exceptionsBulkResolved": {
+    "description": "Snackbar after a bulk resolve.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "exceptionsBulkDismissed": "{count, plural, one {Dismissed {count} exception} other {Dismissed {count} exceptions}}",
+  "@exceptionsBulkDismissed": {
+    "description": "Snackbar after a bulk dismiss.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "invoiceStatusNew": "New",
+  "@invoiceStatusNew": {
+    "description": "Invoice status label (lib/l10n/invoice_status_labels.dart is the one mapping)."
+  },
+  "invoiceStatusPending": "Pending",
+  "invoiceStatusReadyForReview": "Ready for Review",
+  "invoiceStatusApproved": "Approved",
+  "invoiceStatusRejected": "Rejected",
+  "invoiceStatusSendingToErp": "Sending to ERP",
+  "invoiceStatusSentToErp": "Sent to ERP",
+  "invoiceStatusPostedInErp": "Posted in ERP",
+  "invoiceStatusPaymentScheduled": "Payment Scheduled",
+  "invoiceStatusPaid": "Paid",
+  "invoiceStatusDone": "Done",
+  "invoiceStatusFailed": "Failed",
   "invoiceDetailApprove": "Approve",
   "invoiceDetailUnknownVendor": "Unknown Vendor",
   "invoiceDetailFieldInvoiceNumber": "Invoice #",
