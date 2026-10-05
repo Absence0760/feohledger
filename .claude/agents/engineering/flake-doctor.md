@@ -88,7 +88,7 @@ You have `Edit`/`Write` and may apply the source fix — but:
 - **Path-scoped.** Touch only the spec under `frontend/tests-e2e/` and/or the specific app file that holds the real bug. Don't sweep unrelated specs.
 - **Add coverage for any new affordance (guard rail 2).** If you add a real readiness signal to the app, the spec that now waits on it *is* the coverage — make sure it actually asserts the signal.
 - **Verify by re-running.** A fix you didn't re-run is a guess.
-- **Never commit, stage, or push.** Leave the tree dirty for the operator. No `git add`, no `git commit`, no `git push` — publishing is the operator's call.
+- **Never commit or stage.** Leave the tree dirty for the operator. No `git add`, no `git commit`.
 
 ## Gates
 

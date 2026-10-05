@@ -1,5 +1,5 @@
 ---
-description: Hunt for interaction/UX defects in the SvelteKit app — dead-ends, broken back/forward + URL filter/sort/selection state, missing empty/loading/error states, stale selection, filter/sort/count inconsistency, keyboard traps, invalid status transitions surfaced as controls. Fixes the objective bugs (with e2e), reports the judgment calls. Commits scoped; never pushes.
+description: Hunt for interaction/UX defects in the SvelteKit app — dead-ends, broken back/forward + URL filter/sort/selection state, missing empty/loading/error states, stale selection, filter/sort/count inconsistency, keyboard traps, invalid status transitions surfaced as controls. Fixes the objective bugs (with e2e), reports the judgment calls. Commits scoped.
 argument-hint: "[optional scope — a route or feature, e.g. /invoices, the payment-runs flow, 'the exceptions queue master/detail'; omit to sweep the main app routes]"
 ---
 
@@ -36,7 +36,7 @@ These are the classes that strand a real AP user:
 - **Reusable components & runes.** Build UI from `frontend/src/lib/components/*`; Svelte 5 runes only (`$state` / `$derived` / `$effect` / `$props`). All dynamic data goes through `frontend/src/lib/api.ts` (it adds the JWT + `X-Tenant-Slug` header) — there is no SSR data load. Don't copy-paste markup. (Rail 9; `frontend/CLAUDE.md`.)
 - **Honour the project invariants.** Auth before everything, tenant isolation at the data layer, money exact, no PII/banking in URLs — see `## What counts as a UX bug` and the root invariants list. (Rail 11.)
 - **Be honest about non-findings.** A sound flow + a new e2e test that locks the good behaviour is a success. (Rail 6 — no dangling findings; close the loop or hand it off explicitly.)
-- **Docs-as-code; commit scoped; never push.** (Rail 12; git workflow — fix and test as separate path-scoped commits via `git commit -m "…" -- <paths>`; the scope-guard hook blocks bare/whole-tree commits; never `git push`; no AI/co-author trailer.)
+- **Docs-as-code; commit scoped.** (Rail 12; git workflow — fix and test as separate path-scoped commits via `git commit -m "…" -- <paths>`; the scope-guard hook blocks bare/whole-tree commits; no AI/co-author trailer.)
 
 ## Procedure
 
@@ -47,7 +47,7 @@ These are the classes that strand a real AP user:
 5. **Lock with e2e** in `frontend/tests-e2e/<area>/` (areas: auth, invoices, vendors, payments, purchase-orders, goods-receipts, credit-memos, exceptions, workflows, admin, organization, sso, scim, email, smoke). Prefer read-only assertions where possible so they're parallel-safe across worker tenants; wait on real signals, never sleeps. The test must fail on the old behaviour. Run one spec from `frontend/`:
    `pnpm exec playwright test --config=tests-e2e/playwright.config.ts <spec> --project=chromium`
 6. **Verify:** `pnpm check` (svelte-check) + the new specs + the nearby existing specs for that area (report counts). For load-bearing flows (auth walls, tenant scoping, status-transition gating surfaced in UI, money display) run `code-reviewer`.
-7. **Commit** fix + tests as separate path-scoped commits; **never push**. Write up the subjective/out-of-scope findings for the operator.
+7. **Commit** fix + tests as separate path-scoped commits. Write up the subjective/out-of-scope findings for the operator.
 
 ## Report
 

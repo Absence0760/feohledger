@@ -47,7 +47,7 @@ git rev-list --count HEAD..origin/main
 git rev-list --count origin/main..HEAD
 ```
 
-Both `0` → green. Behind → red. Ahead → red ("local main has unpushed commits — push first, wait for CI, then re-run"). Note: `git push` is on the `.claude/settings.json` deny list by default; surface this as a manual step.
+Both `0` → green. Behind → red. Ahead → red ("local main has unpushed commits — push first, wait for CI, then re-run"). This command is read-only, so surface the push as a next step rather than running it.
 
 #### 2c. Latest CI run on main is green
 
@@ -175,7 +175,7 @@ End with:
 > git push origin main      # if you have commits ahead
 > gh release create v<x.y.z> --title "..." --notes "..."
 > ```
-> I won't run those — `git push` and `gh release create` are both on the deny list by default. That's your call.
+> I won't run those — this command is read-only, and tagging a release is your call.
 
 **Do not tag, do not push, do not create a release, do not auto-fix any of the red gates.** This command is read-only.
 

@@ -1,5 +1,5 @@
 ---
-description: Hunt for untested behaviour and invariants and backfill the right layer of tests (pytest / Playwright e2e / flutter) — no bug required. The proactive, area-scoped counterpart to the diff-scoped test-gap-checker. Commits scoped; never pushes.
+description: Hunt for untested behaviour and invariants and backfill the right layer of tests (pytest / Playwright e2e / flutter) — no bug required. The proactive, area-scoped counterpart to the diff-scoped test-gap-checker. Commits scoped.
 argument-hint: "[optional scope — a module, route, feature, or path, e.g. backend/app/services/po_matching.py, frontend/tests-e2e/invoices, 'the append-only audit log'; omit to pick an under-covered area]"
 ---
 
@@ -18,7 +18,7 @@ Find behaviour that *works but isn't tested* and lock it in with tests at the la
   - **Mobile** → `flutter test` in `mobile/test/`.
   (See `frontend/tests-e2e/README.md` and the existing `backend/tests/` patterns for conventions.)
 - **Deterministic + parallel-safe.** e2e specs may run against shared seed data — prefer read-only assertions, unique nonces for any writes, and don't depend on additive-seed counts being exact. Wait on real readiness signals, never sleeps. (DETERMINISM rules; guard rail 4.)
-- **Commit scoped; never push.** `test(...)` commits, path-scoped. (Guard rail 1; Git workflow.)
+- **Commit scoped.** `test(...)` commits, path-scoped. (Guard rail 1; Git workflow.)
 
 ## Procedure
 
@@ -45,9 +45,9 @@ Run the code / read the contract so the test encodes what the app *actually does
 - Run the nearby existing suite to prove no collision; report pass/fail counts faithfully.
 - Lint gate if you touched any non-test code (e.g. added a readiness attribute): `ruff check .` (backend), `pnpm check` (svelte-check), `flutter analyze` — or the aggregate `pnpm lint`.
 
-### 5. Commit (scoped) — never push
+### 5. Commit (scoped)
 
-`test(<area>): …` commits, path-scoped (`git commit -m "…" -- <paths>`; the git-scope-guard hook blocks bare / whole-tree commits). If you added a real app affordance for determinism (a readiness signal), that's a separate non-test commit with its doc update. **Never `git push`.** No co-author / "Generated with" trailer.
+`test(<area>): …` commits, path-scoped (`git commit -m "…" -- <paths>`; the git-scope-guard hook blocks bare / whole-tree commits). If you added a real app affordance for determinism (a readiness signal), that's a separate non-test commit with its doc update. No co-author / "Generated with" trailer.
 
 ## Report
 
