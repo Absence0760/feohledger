@@ -88,6 +88,7 @@ from app.services.sanctions_categories import (
 )
 from app.services.vendor_screening import screen_best_effort, screen_vendor_record
 from app.services.vendor_sync import sync_vendors_from_erp
+from app.services.vendor_tax_id import rekey_tax_id
 from app.tenant import (
     apply_entity_scope,
     get_entity_id,
@@ -1091,8 +1092,13 @@ async def update_vendor(
     # only STAGED here (not applied), so it doesn't re-screen the live vendor.
     identity_changed = bool((_IDENTITY_FIELDS - {"bank_details"}) & payload.keys())
 
+    # Through the shared writer, so a changed TIN voids the old IRS-match stamp
+    # instead of leaving the 1099 dashboard reporting it verified.
+    if "tax_id" in payload:
+        rekey_tax_id(vendor, payload["tax_id"])
     for field, value in payload.items():
-        setattr(vendor, field, value)
+        if field != "tax_id":
+            setattr(vendor, field, value)
 
     await db.flush()
     await db.refresh(vendor)
@@ -2001,9 +2007,8 @@ async def approve_change_request(
     elif req.change_type == "tax_id":
         new_tax = str((req.proposed_value or {}).get("tax_id") or "")
         last4 = new_tax[-4:] if len(new_tax) >= 4 else None
-        vendor.tax_id = new_tax
         # A re-keyed tax ID invalidates any prior TIN verification.
-        vendor.tin_verified_at = None
+        rekey_tax_id(vendor, new_tax)
     else:
         raise HTTPException(status_code=400, detail="Unknown change type")
 

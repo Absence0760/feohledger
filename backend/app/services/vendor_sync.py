@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.vendor import Vendor
 from app.services.audit_dispatch import dispatch_audit
+from app.services.vendor_tax_id import rekey_tax_id
 
 
 async def sync_vendors_from_erp(
@@ -77,11 +78,16 @@ async def sync_vendors_from_erp(
         if existing:
             # Update fields if changed
             changed = False
-            for field in ("name", "code", "email", "phone", "address", "tax_id", "payment_terms"):
+            for field in ("name", "code", "email", "phone", "address", "payment_terms"):
                 new_val = erp_v.get(field)
                 if new_val is not None and getattr(existing, field) != new_val:
                     setattr(existing, field, new_val)
                     changed = True
+            # Through the shared writer: an ERP-side TIN change voids the old
+            # IRS-match stamp rather than inheriting it.
+            new_tax_id = erp_v.get("tax_id")
+            if new_tax_id is not None and rekey_tax_id(existing, new_tax_id):
+                changed = True
 
             existing.erp_synced_at = now
             if changed:
@@ -105,10 +111,12 @@ async def sync_vendors_from_erp(
                     # Link existing vendor to ERP
                     name_match.erp_vendor_id = erp_id
                     name_match.erp_synced_at = now
-                    for field in ("code", "email", "phone", "address", "tax_id", "payment_terms"):
+                    for field in ("code", "email", "phone", "address", "payment_terms"):
                         new_val = erp_v.get(field)
                         if new_val is not None:
                             setattr(name_match, field, new_val)
+                    if erp_v.get("tax_id") is not None:
+                        rekey_tax_id(name_match, erp_v["tax_id"])
                     if name_match.status == "unverified":
                         name_match.status = "active"
                         name_match.source = "erp_sync"
