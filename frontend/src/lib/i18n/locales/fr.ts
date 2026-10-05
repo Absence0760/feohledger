@@ -353,6 +353,7 @@ export const messages = {
 	'invoices.bulk.cannotDelete': 'Impossible de supprimer des factures dans un statut géré par le système',
 	'invoices.bulk.noTransitions': 'Aucune transition de statut commune pour les factures sélectionnées',
 	'invoices.bulk.newStatusAria': 'Nouveau statut pour les factures sélectionnées',
+	'invoices.bulk.rejectReasonAria': 'Motif du rejet des factures sélectionnées',
 	'invoices.col.invoiceNumber': 'N° de facture',
 	'invoices.col.vendor': 'Fournisseur',
 	'invoices.col.description': 'Description',

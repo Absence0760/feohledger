@@ -354,6 +354,7 @@ export const messages = {
 	'invoices.bulk.cannotDelete': 'Não é possível excluir faturas em status gerenciados pelo sistema',
 	'invoices.bulk.noTransitions': 'Nenhuma transição de status comum para as faturas selecionadas',
 	'invoices.bulk.newStatusAria': 'Novo status para as faturas selecionadas',
+	'invoices.bulk.rejectReasonAria': 'Motivo da rejeição das faturas selecionadas',
 	'invoices.col.invoiceNumber': 'N.º da fatura',
 	'invoices.col.vendor': 'Fornecedor',
 	'invoices.col.description': 'Descrição',

@@ -29,7 +29,7 @@
 	import { orgCurrency } from '$lib/stores/orgSettings.svelte';
 	import { m } from '$lib/i18n/store.svelte';
 	import { page } from '$app/stores';
-	import { replaceState } from '$app/navigation';
+	import { afterNavigate, replaceState } from '$app/navigation';
 	import { untrack } from 'svelte';
 	import SortableHeader from '$lib/components/ui/SortableHeader.svelte';
 	import { toggleSort, type SortOrder } from '$lib/utils/sort';
@@ -40,12 +40,23 @@
 	// `/expenses`. The Advanced Search modal's richer filters stay out of the
 	// URL (a separate, larger surface). `syncUrl()` is the ONE writer of the
 	// whole query string — read its comment before adding a param.
-	let search = $state($page.url.searchParams.get('search') ?? '');
-	let activeStatuses = $state<InvoiceStatus[]>(
-		($page.url.searchParams.get('status') ?? '')
-			.split(',')
-			.filter((s): s is InvoiceStatus => (INVOICE_STATUSES as readonly string[]).includes(s))
-	);
+	//
+	// `readUrlState` is the one READER of those params, used at mount and again
+	// by the `afterNavigate` hook below for a navigation that reuses this page.
+	function readUrlState(params: URLSearchParams) {
+		return {
+			search: params.get('search') ?? '',
+			statuses: (params.get('status') ?? '')
+				.split(',')
+				.filter((s): s is InvoiceStatus => (INVOICE_STATUSES as readonly string[]).includes(s)),
+			assignedToId: params.get('assigned_to_id') ?? '',
+			sortField: params.get('sort'),
+			sortOrder: (params.get('order') === 'asc' ? 'asc' : 'desc') as SortOrder
+		};
+	}
+	const initialUrlState = readUrlState($page.url.searchParams);
+	let search = $state(initialUrlState.search);
+	let activeStatuses = $state<InvoiceStatus[]>(initialUrlState.statuses);
 	// The `?id=` deep link, mirrored out of `$page.url` (see the effect near
 	// the bottom) so `syncUrl()` — the single query-string writer — can own it.
 	let deepLinkId = $state<string | null>($page.url.searchParams.get('id'));
@@ -63,7 +74,7 @@
 	// specific reviewer via the dropdown or to the caller via the "My
 	// Approvals" toggle (`myApprovalsActive` below). URL-backed so the queue an
 	// approver narrowed to survives a reload or a shared link — see `syncUrl()`.
-	let assignedToId = $state($page.url.searchParams.get('assigned_to_id') ?? '');
+	let assignedToId = $state(initialUrlState.assignedToId);
 	let myApprovalsActive = $derived(!!auth.user?.id && assignedToId === auth.user.id);
 	function toggleMyApprovals() {
 		assignedToId = myApprovalsActive ? '' : (auth.user?.id ?? '');
@@ -143,8 +154,8 @@
 	// Column sort — URL-backed (`?sort=&order=`) through the same single
 	// `syncUrl()` writer the filters use, mirroring /expenses. `null` field =
 	// the backend's own default order (most-recent first).
-	let sortField = $state<string | null>($page.url.searchParams.get('sort'));
-	let sortOrder = $state<SortOrder>(($page.url.searchParams.get('order') as SortOrder) ?? 'desc');
+	let sortField = $state<string | null>(initialUrlState.sortField);
+	let sortOrder = $state<SortOrder>(initialUrlState.sortOrder);
 
 	function handleSort(field: string) {
 		const next = toggleSort({ field: sortField, order: sortOrder }, field);
@@ -234,6 +245,46 @@
 			replaceState(`${$page.url.pathname}${qs ? `?${qs}` : ''}`, {});
 		});
 	}
+
+	/**
+	 * A navigation that REUSES this mounted page re-reads the URL.
+	 *
+	 * The state above is seeded from `$page.url` once, at mount — right for a
+	 * fresh visit, wrong for a navigation SvelteKit serves with the same
+	 * component: the sidebar's Invoices row clicked while on a filtered view, a
+	 * `goto('/invoices?…')`, or Back/Forward between two real history entries
+	 * of this route. Each of those changed the address bar and nothing else, so
+	 * a bare `/invoices` sat over a still-filtered table (and Forward/Back
+	 * swapped which one lied). `replaceState` writes are shallow and never fire
+	 * this hook, so `syncUrl()`'s own writes cannot loop back through it.
+	 *
+	 * Only what changed is assigned, so an unchanged filter does not refetch:
+	 * a status / assignee change re-runs the filter effect (which also carries
+	 * the new search and sort, read untracked), a search change alone goes
+	 * through the debounced search effect, and a sort change alone refetches
+	 * here because no effect tracks the sort. The `?id=` deep link is the
+	 * effect further down's job, off the same `$page.url`.
+	 */
+	afterNavigate(({ from, to, type }) => {
+		if (type === 'enter' || !from || !to || from.route.id !== to.route.id) return;
+		const next = readUrlState(to.url.searchParams);
+		const filtersChanged =
+			next.statuses.join(',') !== activeStatuses.join(',') ||
+			next.assignedToId !== assignedToId;
+		const searchChanged = next.search !== search;
+		const sortChanged = next.sortField !== sortField || next.sortOrder !== sortOrder;
+		if (sortChanged) {
+			sortField = next.sortField;
+			sortOrder = next.sortOrder;
+		}
+		if (searchChanged) search = next.search;
+		if (filtersChanged) {
+			activeStatuses = next.statuses;
+			assignedToId = next.assignedToId;
+		} else if (sortChanged && !searchChanged) {
+			invoiceStore.fetch(buildParams()).catch(() => {}); // noqa: raw-fetch-in-component — store method, routes through api client
+		}
+	});
 
 	// Debounce timer for search input
 	let searchTimer: ReturnType<typeof setTimeout>;
@@ -424,7 +475,14 @@
 	// the table (see the template); this string covers the other three states
 	// the table can be empty in — loading, errored, and "a filter matched
 	// nothing" (frontend/CLAUDE.md § Data tables).
-	let noActiveFilters = $derived(!search.trim() && activeStatuses.length === 0 && !hasAdvancedFilters);
+	// The assignee filter counts: "My Approvals" (or a named reviewer) with
+	// nothing assigned is a filter that matched nothing, and it used to fall
+	// through to the fresh-tenant onboarding — "Upload your first invoice" over
+	// a tenant full of invoices, with the table and its "no matches" message
+	// replaced entirely.
+	let noActiveFilters = $derived(
+		!search.trim() && activeStatuses.length === 0 && !hasAdvancedFilters && !assignedToId
+	);
 	let showOnboarding = $derived(
 		invoiceStore.all.length === 0 &&
 			!invoiceStore.loading &&
@@ -449,6 +507,13 @@
 	let selected = $state<Set<string>>(new Set());
 	let bulkBusy = $state(false);
 	let bulkStatusValue = $state<InvoiceStatus>('approved');
+	// `POST /api/invoices/bulk/status` 422s a `rejected` target with no
+	// reason — rejections route through `review.reject_invoice`, which records
+	// it on the audit row and the `review_rejected` exception. The picker
+	// offered Rejected without ever asking for one, so every bulk reject was a
+	// guaranteed error toast. Sent only when the target is `rejected`.
+	let bulkRejectReason = $state('');
+	let bulkNeedsReason = $derived(bulkStatusValue === 'rejected');
 	let showBulkStatusSelect = $state(false);
 
 	// True once "Select all N matching" has resolved the WHOLE filtered set
@@ -578,12 +643,14 @@
 			const res = (await api.post('/api/invoices/bulk/status', {
 				ids: [...selected],
 				status: bulkStatusValue,
+				...(bulkNeedsReason ? { reason: bulkRejectReason.trim() } : {}),
 			})) as { updated: number; skipped: { id: string; reason: string }[] };
 			await invoiceStore.fetch(buildParams()); // noqa: raw-fetch-in-component — store method, routes through api client
 			await invoiceStore.fetchCounts(buildParams());
 			selected = new Set();
 			selectedAllMatching = false;
 			showBulkStatusSelect = false;
+			bulkRejectReason = '';
 			// A skip can be an immutable status, but it can just as easily be a
 			// segregation-of-duties or CFO-threshold refusal — an authorization
 			// decision, not a data problem. Surface the backend's own reason(s)
@@ -836,7 +903,21 @@
 									<option value={s}>{m(INVOICE_STATUS_LABEL_KEYS[s])}</option>
 								{/each}
 							</select>
-							<button class="bulk-apply-btn" disabled={bulkBusy} onclick={bulkStatusChange}>{m('common.apply')}</button>
+							{#if bulkNeedsReason}
+								<input
+									type="text"
+									class="bulk-reject-reason"
+									bind:value={bulkRejectReason}
+									maxlength="1000"
+									placeholder={m('invoices.modal.review.rejectPlaceholder')}
+									aria-label={m('invoices.bulk.rejectReasonAria')}
+								/>
+							{/if}
+							<button
+								class="bulk-apply-btn"
+								disabled={bulkBusy || (bulkNeedsReason && !bulkRejectReason.trim())}
+								onclick={bulkStatusChange}
+							>{m('common.apply')}</button>
 						</div>
 					{/if}
 				</div>
@@ -1386,6 +1467,12 @@
 		/* base look (border/radius/colour/font/chevron) from the global recipe */
 		padding: 5px 30px 5px 8px;
 		font-size: 0.82rem;
+	}
+
+	.bulk-reject-reason {
+		padding: 5px 8px;
+		font-size: 0.82rem;
+		min-width: 220px;
 	}
 
 	.bulk-apply-btn {

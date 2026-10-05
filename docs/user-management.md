@@ -43,13 +43,21 @@ matching `require_roles(ADMIN, AP_MANAGER)` on the write endpoints.
 
 | Feature | Admin | AP Manager | AP Clerk | CFO |
 |---|---|---|---|---|
-| Invoice: edit fields | Yes | Yes | Yes | Yes |
-| Invoice: change status dropdown | Yes | Yes | No | Yes |
-| Invoice: submit for review (new) | Yes | Yes | Yes | Yes |
+| Invoice: edit fields (Save) | Yes | Yes | No | Yes |
+| Invoice: submit for review (new) | Yes | Yes | No | Yes |
 | Invoice: approve/reject | Yes | Yes | No | No |
 | Invoice: delete | Yes | Yes | No | Yes |
 | Bulk: delete, status change | Yes | Yes | No | Yes |
 | Bulk: export | Yes | Yes | Yes | Yes |
+
+A clerk reads every invoice but changes none: `PATCH /api/invoices/{id}`,
+`POST /api/invoices/{id}/complete`, `/extract` and `/reset-extraction` are all
+`require_roles(ADMIN, AP_MANAGER, CFO)`, and the detail modal gates Save,
+Submit, Extract and Reset on that same any-of list (`canWrite`). There is no
+status picker for any role — the modal shows status read-only, because `PATCH`
+does not accept `status`; a status moves only through the workflow actions
+(Submit, Approve / Reject, Retry) or the list's bulk Change Status, whose
+**Rejected** target asks for the reason the endpoint requires.
 
 Backend API endpoints are role-gated via `Depends(require_roles(...))` in `backend/app/api/deps.py`. The frontend matrix above mirrors what the backend allows. A coverage gate in `backend/tests/test_rbac.py` fails CI if a new endpoint ships without an auth dependency. Full permission matrix in `authentication.md` § RBAC.
 

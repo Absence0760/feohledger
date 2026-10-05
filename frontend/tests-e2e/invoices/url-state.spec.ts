@@ -149,4 +149,54 @@ test.describe('/invoices URL state', () => {
 		await expect(page).not.toHaveURL(/[?&]id=/);
 		await expect(page).toHaveURL(/sort=amount/);
 	});
+
+	/**
+	 * A navigation that REUSES the mounted page must re-read the URL.
+	 *
+	 * The filter state was read from `$page.url` once, at mount. Clicking the
+	 * sidebar's Invoices row while on a filtered view is a real navigation to
+	 * the bare `/invoices`, but the component is not remounted — so the URL went
+	 * bare while the Approved chip stayed pressed and the table stayed filtered.
+	 * Back then returned to `?status=approved`, and Forward to a bare URL over a
+	 * filtered table: the view and the address bar disagreed in both directions,
+	 * and a reload of either "fixed" it into something else.
+	 */
+	test('a same-route navigation and back/forward re-apply the URL', async ({ page }) => {
+		const approvedChip = page.locator('.filter-chip', { hasText: /^Approved\s/ });
+		const allChip = page.locator('nav.filters .filter-chip').first();
+
+		const filtered = page.waitForResponse(
+			(r) => r.url().includes('/api/invoices?') && r.url().includes('status=approved')
+		);
+		await page.goto('/invoices?status=approved');
+		await filtered;
+		await expect(approvedChip).toHaveClass(/active/);
+
+		// The sidebar row: a real navigation to the same route, unfiltered.
+		const unfiltered = page.waitForResponse(
+			(r) => r.url().includes('/api/invoices?') && !r.url().includes('status=')
+		);
+		await page.getByRole('link', { name: 'Invoices', exact: true }).click();
+		await unfiltered;
+		await expect(page).toHaveURL(/\/invoices$/);
+		await expect(allChip).toHaveClass(/active/);
+		await expect(approvedChip).not.toHaveClass(/active/);
+
+		// Back to the filtered entry: the view follows.
+		const refiltered = page.waitForResponse(
+			(r) => r.url().includes('/api/invoices?') && r.url().includes('status=approved')
+		);
+		await page.goBack();
+		await refiltered;
+		await expect(page).toHaveURL(/status=approved/);
+		await expect(approvedChip).toHaveClass(/active/);
+
+		// And Forward to the bare one.
+		const again = page.waitForResponse(
+			(r) => r.url().includes('/api/invoices?') && !r.url().includes('status=')
+		);
+		await page.goForward();
+		await again;
+		await expect(allChip).toHaveClass(/active/);
+	});
 });

@@ -345,6 +345,7 @@ export const messages = {
 	'invoices.bulk.cannotDelete': 'システム管理ステータスの請求書は削除できません',
 	'invoices.bulk.noTransitions': '選択した請求書に共通するステータス遷移がありません',
 	'invoices.bulk.newStatusAria': '選択した請求書の新しいステータス',
+	'invoices.bulk.rejectReasonAria': '選択した請求書を却下する理由',
 	'invoices.col.invoiceNumber': '請求書番号',
 	'invoices.col.vendor': '取引先',
 	'invoices.col.description': '説明',

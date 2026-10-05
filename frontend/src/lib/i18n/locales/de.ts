@@ -350,6 +350,7 @@ export const messages = {
 	'invoices.bulk.cannotDelete': 'Rechnungen in systemverwalteten Status können nicht gelöscht werden',
 	'invoices.bulk.noTransitions': 'Keine gemeinsamen Statusübergänge für die ausgewählten Rechnungen',
 	'invoices.bulk.newStatusAria': 'Neuer Status für ausgewählte Rechnungen',
+	'invoices.bulk.rejectReasonAria': 'Grund für die Ablehnung der ausgewählten Rechnungen',
 	'invoices.col.invoiceNumber': 'Rechnungs-Nr.',
 	'invoices.col.vendor': 'Lieferant',
 	'invoices.col.description': 'Beschreibung',

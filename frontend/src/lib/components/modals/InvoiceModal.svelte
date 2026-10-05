@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { focusTrap } from '$lib/actions/focusTrap';
 	import type { Invoice, AuditSummary } from '$lib/types/invoice';
-	import { INVOICE_STATUSES, INVOICE_STATUS_LABEL_KEYS } from '$lib/types/invoice';
+	import { INVOICE_STATUS_LABEL_KEYS } from '$lib/types/invoice';
 	import { formatMoney, isNegativeAmount, isPositiveAmount } from '$lib/utils/money';
 	import { invoiceStore } from '$lib/stores/invoices.svelte';
 	import { auth } from '$lib/stores/auth.svelte';
@@ -576,6 +576,16 @@
 	});
 
 	let isClerkOnly = $derived(auth.isClerkOnly);
+	// The role gate every invoice WRITE behind this modal's footer carries on
+	// the server: `PATCH /api/invoices/{id}` (Save, and the pre-save inside
+	// Submit), `POST /{id}/complete` (Submit for review / Send to ERP / Mark
+	// complete), `POST /{id}/extract` and `/reset-extraction` are all
+	// `require_roles(ADMIN, AP_MANAGER, CFO)`. Those buttons were gated on
+	// `!isClerkOnly` — or, for Submit, offered to a clerk on purpose — so a
+	// clerk was handed four controls that could only 403, and a custom-role
+	// user (not "clerk only", holding none of the three) got them all too.
+	// Mirror the server's own any-of list rather than its complement.
+	let canWrite = $derived(auth.hasAnyRole('admin', 'ap_manager', 'cfo'));
 	let isDone = $derived(status === 'done' || status === 'sent_to_erp');
 	let isExtracting = $derived(status === 'pending');
 	let resettingExtraction = $state(false);
@@ -602,22 +612,15 @@
 	let canRetryErp = $derived(status === 'failed' && !isClerkOnly && invoice.approved_by);
 	let retryingErp = $state(false);
 	let canExtract = $derived(
-		(status === 'new' || status === 'failed') && currentFileUrl
+		canWrite && (status === 'new' || status === 'failed') && currentFileUrl
 	);
 	let extracting = $state(false);
-	let canDelete = $derived(
-		!isClerkOnly && status !== 'done' && status !== 'sent_to_erp' && status !== 'sending_to_erp'
-	);
 	let canManageFile = $derived(!isClerkOnly && status !== 'done');
 	let isReadyForReview = $derived(status === 'ready_for_review');
 	let canReview = $derived(isReadyForReview && !isClerkOnly && (
 		!invoice.assigned_to_id || invoice.assigned_to_id === auth.user?.id
 	));
-	let canSubmitStatus = $derived(
-		isClerkOnly
-			? status === 'new'
-			: status === 'new' || status === 'approved'
-	);
+	let canSubmitStatus = $derived(canWrite && (status === 'new' || status === 'approved'));
 
 	let submitLabel = $derived.by(() => {
 		if (status === 'new' && activeSteps.approval) return m('invoices.modal.submit.forReview');
@@ -1735,7 +1738,9 @@
 			<!-- svelte-ignore a11y_no_static_element_interactions -->
 			<div class="resize-handle" onmousedown={startResize}></div>
 			<div class="form-pane" style="width:{formPaneWidth}px">
-				<form onsubmit={(e) => { e.preventDefault(); save(); }}>
+				<!-- Enter in a field submits too, so the form honours the Save button's
+				     own gate rather than firing a PATCH the server refuses. -->
+				<form onsubmit={(e) => { e.preventDefault(); if (canWrite && !isDone) save(); }}>
 					{#if summaryLoading && !summary}
 						<div class="audit-summary" data-testid="audit-summary">
 							<div class="audit-summary-skeleton"></div>
@@ -1789,21 +1794,26 @@
 							<span>{m('invoices.modal.field.poNumber')} {#if dot('po_number', po_number)}<span class="confidence-dot" style="background:{confidenceColor(fieldConfidence.po_number)}" data-tip="{Math.round(fieldConfidence.po_number * 100)}% — {confidenceLabel(fieldConfidence.po_number)}"></span>{/if}</span>
 							<input type="text" bind:value={po_number} />
 						</label>
-						{#if !isClerkOnly}
-							<label>
-								<span>{m('invoices.modal.field.status')}</span>
-								<select bind:value={status}>
-									{#each INVOICE_STATUSES as s}
-										<option value={s}>{m(INVOICE_STATUS_LABEL_KEYS[s])}</option>
-									{/each}
-								</select>
-							</label>
-						{:else}
-							<label>
-								<span>{m('invoices.modal.field.status')}</span>
-								<input type="text" value={m(INVOICE_STATUS_LABEL_KEYS[status])} disabled />
-							</label>
-						{/if}
+						<!-- Read-only for EVERY role. This was a `<select>` of all twelve
+						     statuses for anyone but a clerk, bound to the local `status`
+						     and never sent: `PATCH /api/invoices/{id}` deliberately does
+						     not accept `status` (schemas/invoice.py `InvoiceUpdate`) —
+						     transitions go through the workflow endpoints the buttons
+						     below call. So "Save" after picking Paid reported success
+						     and changed nothing, and because every gate in this modal
+						     reads `status`, the pick also re-dressed it: Approve/Reject
+						     on a `new` invoice (a guaranteed 409), and on a fake
+						     `approved` the financial-lock dropped vendor/amount edits
+						     from the save without a word. -->
+						<label>
+							<span>{m('invoices.modal.field.status')}</span>
+							<input
+								type="text"
+								value={m(INVOICE_STATUS_LABEL_KEYS[status])}
+								disabled
+								data-testid="invoice-modal-status"
+							/>
+						</label>
 						<label>
 							<span>{m('invoices.modal.field.referenceNumber')} {#if dot('reference_number', reference_number)}<span class="confidence-dot" style="background:{confidenceColor(fieldConfidence.reference_number)}" data-tip="{Math.round(fieldConfidence.reference_number * 100)}% — {confidenceLabel(fieldConfidence.reference_number)}"></span>{/if}</span>
 							<input type="text" bind:value={reference_number} />
@@ -2655,12 +2665,12 @@
 									{/if}
 								</button>
 							{/if}
-							{#if isExtracting && !extracting}
+							{#if canWrite && isExtracting && !extracting}
 								<button type="button" class="btn-reset" disabled={resettingExtraction} onclick={handleResetExtraction}>
 									{resettingExtraction ? m('invoices.modal.resetting') : m('invoices.modal.reset')}
 								</button>
 							{/if}
-							{#if !isDone}
+							{#if canWrite && !isDone}
 								<button type="submit" class="btn-save" disabled={saving}>
 									{saving ? m('common.saving') : m('common.save')}
 								</button>
