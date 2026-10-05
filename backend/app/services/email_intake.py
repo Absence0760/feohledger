@@ -390,11 +390,17 @@ async def _process_for_org(org: Organization, payload: InboundEmail) -> IntakeRe
     from app.database import _make_tenant_url
     from app.services.extraction_dispatch import dispatch_extraction
 
-    tenant_engine = create_async_engine(_make_tenant_url(org.db_name), pool_size=1, max_overflow=0)
-    tenant_factory = async_sessionmaker(tenant_engine, expire_on_commit=False)
-
+    tenant_engine = None
     try:
         try:
+            # Engine construction sits INSIDE the releasing try: the claim is
+            # already made, so anything that raises from here to the commit
+            # must hand it back, or the redelivery is deduped and the
+            # message is lost.
+            tenant_engine = create_async_engine(
+                _make_tenant_url(org.db_name), pool_size=1, max_overflow=0
+            )
+            tenant_factory = async_sessionmaker(tenant_engine, expire_on_commit=False)
             async with tenant_factory() as tenant_db:
                 # Email intake has no entity selector — land invoices under the
                 # tenant's default entity so they stay visible in entity-scoped
@@ -452,7 +458,8 @@ async def _process_for_org(org: Organization, payload: InboundEmail) -> IntakeRe
                     exc.__class__.__name__,
                 )
     finally:
-        await tenant_engine.dispose()
+        if tenant_engine is not None:
+            await tenant_engine.dispose()
 
     return result
 
