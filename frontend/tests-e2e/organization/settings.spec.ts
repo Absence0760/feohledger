@@ -83,14 +83,16 @@ const PANELS = [
 	['payments', 'Payments (ACH / Wire / RTP)'],
 	['cards', 'Virtual Cards'],
 	['security', 'Security'],
+	['sso', 'Single Sign-On'],
 	['fraud', 'Fraud Detection'],
 	['residency', 'Data Residency'],
 	['plan', 'Plan']
 ] as const;
 
 /**
- * The six panels whose settings block `org_settings_view.NON_ADMIN_SETTINGS`
- * withholds, so they have no non-admin data at all — slug, heading, and the
+ * The panels with no non-admin data at all — the six whose settings block
+ * `org_settings_view.NON_ADMIN_SETTINGS` withholds, plus Single Sign-On, whose
+ * only read (`GET /api/organization/sso`) is admin-only — slug, heading, and the
  * testid of the admin-only hint that replaces their body for a non-admin.
  *
  * Shared by the admin case (none of these hints may appear) and the clerk cases
@@ -103,6 +105,7 @@ const ADMIN_ONLY_PANELS = [
 	['payments', 'Payments (ACH / Wire / RTP)', 'payments-admin-only'],
 	['cards', 'Virtual Cards', 'cards-admin-only'],
 	['security', 'Security', 'security-admin-only'],
+	['sso', 'Single Sign-On', 'sso-admin-only'],
 	['fraud', 'Fraud Detection', 'fraud-admin-only']
 ] as const;
 

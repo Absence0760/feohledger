@@ -65,6 +65,7 @@ const ORG_PANELS: [slug: string, heading: string][] = [
 	['payments', 'Payments (ACH / Wire / RTP)'],
 	['cards', 'Virtual Cards'],
 	['security', 'Security'],
+	['sso', 'Single Sign-On'],
 	['fraud', 'Fraud Detection'],
 	['residency', 'Data Residency'],
 	['plan', 'Plan']

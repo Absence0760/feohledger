@@ -1703,6 +1703,55 @@ export const messages = {
 	'org.security.mfaEnforcementInactive':
 		'Esto está guardado, pero aún no se aplica: la autenticación de dos factores está desactivada en toda la plataforma para este despliegue. Los usuarios no verán la solicitud hasta que se active.',
 	'org.security.save': 'Guardar',
+	// /organization -> Single Sign-On panel (PUT /api/organization/sso)
+	'orgSso.title': 'Inicio de sesión único',
+	'orgSso.hint':
+		'Permite que los miembros inicien sesión con su proveedor de identidad, mediante OpenID Connect o SAML. Cada cambio aquí queda auditado.',
+	'orgSso.loading': 'Cargando la configuración de SSO…',
+	'orgSso.enabled': 'Activar el inicio de sesión único',
+	'orgSso.field.protocol': 'Protocolo',
+	'orgSso.field.provider': 'Botón de inicio de sesión',
+	'orgSso.protocol.oidc': 'OpenID Connect (OIDC)',
+	'orgSso.protocol.saml': 'SAML 2.0',
+	'orgSso.provider.generic': 'Genérico («Iniciar sesión con SSO»)',
+	'orgSso.field.discoveryUrl': 'URL de descubrimiento',
+	'orgSso.field.clientId': 'ID de cliente',
+	'orgSso.field.clientSecret': 'Secreto de cliente',
+	'orgSso.field.idpEntityId': 'ID de entidad del IdP',
+	'orgSso.field.idpSsoUrl': 'URL de inicio de sesión del IdP',
+	'orgSso.field.idpCert': 'Certificado de firma del IdP',
+	'orgSso.field.idpCertMulti': 'Certificados de firma adicionales',
+	'orgSso.field.idpSloUrl': 'URL de cierre de sesión del IdP (opcional)',
+	'orgSso.field.spEntityId': 'ID de entidad del SP personalizado (opcional)',
+	'orgSso.field.allowedDomains': 'Dominios de correo permitidos',
+	'orgSso.domainsHint':
+		'Separados por comas. Un primer inicio de sesión con SSO crea una cuenta solo para estos dominios. Déjelo vacío para aceptar cualquier dominio.',
+	'orgSso.secret.keepPlaceholder': 'Déjelo en blanco para conservar el secreto guardado',
+	'orgSso.secret.configured':
+		'Hay un secreto de cliente guardado. No se vuelve a mostrar; escriba uno nuevo para reemplazarlo.',
+	'orgSso.secret.notConfigured': 'No hay ningún secreto de cliente guardado.',
+	'orgSso.secret.clear': 'Eliminar el secreto de cliente guardado',
+	'orgSso.register.title': 'Registre esta aplicación en su proveedor de identidad',
+	'orgSso.register.hint':
+		'Copie estos valores en la aplicación que cree en su proveedor de identidad.',
+	'orgSso.register.redirectUri': 'URI de redirección',
+	'orgSso.register.acsUrl': 'URL de ACS',
+	'orgSso.register.spEntityId': 'ID de entidad del SP (audiencia)',
+	'orgSso.ssoOnly': 'Exigir SSO (cerrar el inicio de sesión con contraseña)',
+	'orgSso.ssoOnlyHint':
+		'Los miembros solo podrán iniciar sesión mediante el proveedor de identidad. Solo se guarda cuando la configuración del proveedor de arriba está completa. Si el proveedor deja de funcionar más adelante, un operador de la plataforma puede reabrir el inicio de sesión con contraseña.',
+	'orgSso.status.passwordClosed':
+		'Solo SSO está en vigor: el inicio de sesión con contraseña está cerrado para todos los miembros.',
+	'orgSso.status.incomplete':
+		'El SSO está activado, pero el botón de inicio de sesión permanece oculto hasta que se configure lo siguiente: {fields}.',
+	'orgSso.status.incompleteUnknown':
+		'El SSO está activado, pero la configuración del proveedor de identidad está incompleta, así que el botón de inicio de sesión permanece oculto.',
+	'orgSso.save': 'Guardar configuración de SSO',
+	'orgSso.toast.loadFailed': 'No se pudo cargar la configuración de SSO',
+	'orgSso.toast.saved': 'Configuración de SSO guardada',
+	'orgSso.toast.saveFailed': 'No se pudo guardar la configuración de SSO',
+	'orgSso.refusal.idpUnresolved':
+		'Exigir SSO cierra el inicio de sesión con contraseña, así que primero la configuración del proveedor de identidad debe estar completa. Falta o no es válido: {fields}.',
 	'org.section.fraud': 'Detección de fraude',
 	'org.section.fraudSaved': 'Detección de fraude',
 	'org.fraud.hint': 'Cada regla a continuación se verifica cuando se crea o actualiza una factura. Deshabilitar una regla suprime tanto la advertencia como la excepción generada automáticamente para mantener limpia la cola.',

@@ -1705,6 +1705,55 @@ export const messages = {
 	'org.security.mfaEnforcementInactive':
 		'Dies ist gespeichert, wird aber noch nicht erzwungen – die Zwei-Faktor-Authentifizierung ist für dieses Deployment plattformweit deaktiviert. Nutzer werden erst dazu aufgefordert, wenn sie aktiviert wird.',
 	'org.security.save': 'Speichern',
+	// /organization -> Single Sign-On panel (PUT /api/organization/sso)
+	'orgSso.title': 'Single Sign-On',
+	'orgSso.hint':
+		'Mitglieder melden sich über Ihren Identitätsanbieter an, per OpenID Connect oder SAML. Jede Änderung hier wird protokolliert.',
+	'orgSso.loading': 'SSO-Einstellungen werden geladen…',
+	'orgSso.enabled': 'Single Sign-On aktivieren',
+	'orgSso.field.protocol': 'Protokoll',
+	'orgSso.field.provider': 'Anmeldeschaltfläche',
+	'orgSso.protocol.oidc': 'OpenID Connect (OIDC)',
+	'orgSso.protocol.saml': 'SAML 2.0',
+	'orgSso.provider.generic': 'Generisch („Mit SSO anmelden“)',
+	'orgSso.field.discoveryUrl': 'Discovery-URL',
+	'orgSso.field.clientId': 'Client-ID',
+	'orgSso.field.clientSecret': 'Client-Secret',
+	'orgSso.field.idpEntityId': 'IdP-Entity-ID',
+	'orgSso.field.idpSsoUrl': 'IdP-Anmelde-URL',
+	'orgSso.field.idpCert': 'IdP-Signaturzertifikat',
+	'orgSso.field.idpCertMulti': 'Weitere Signaturzertifikate',
+	'orgSso.field.idpSloUrl': 'IdP-Abmelde-URL (optional)',
+	'orgSso.field.spEntityId': 'SP-Entity-ID überschreiben (optional)',
+	'orgSso.field.allowedDomains': 'Zulässige E-Mail-Domains',
+	'orgSso.domainsHint':
+		'Durch Kommas getrennt. Eine erste SSO-Anmeldung legt nur für diese Domains ein Konto an. Leer lassen, um jede Domain zuzulassen.',
+	'orgSso.secret.keepPlaceholder': 'Leer lassen, um das gespeicherte Secret zu behalten',
+	'orgSso.secret.configured':
+		'Ein Client-Secret ist gespeichert. Es wird nie wieder angezeigt; geben Sie ein neues ein, um es zu ersetzen.',
+	'orgSso.secret.notConfigured': 'Es ist kein Client-Secret gespeichert.',
+	'orgSso.secret.clear': 'Gespeichertes Client-Secret entfernen',
+	'orgSso.register.title': 'Diese App bei Ihrem Identitätsanbieter registrieren',
+	'orgSso.register.hint':
+		'Übernehmen Sie diese Werte in die Anwendung, die Sie bei Ihrem Identitätsanbieter anlegen.',
+	'orgSso.register.redirectUri': 'Weiterleitungs-URI',
+	'orgSso.register.acsUrl': 'ACS-URL',
+	'orgSso.register.spEntityId': 'SP-Entity-ID (Audience)',
+	'orgSso.ssoOnly': 'SSO verlangen (Passwort-Anmeldung schließen)',
+	'orgSso.ssoOnlyHint':
+		'Mitglieder können sich dann nur noch über den Identitätsanbieter anmelden. Speichern ist erst möglich, wenn die Anbietereinstellungen oben vollständig sind. Fällt der Anbieter später aus, kann ein Plattformbetreiber die Passwort-Anmeldung wieder öffnen.',
+	'orgSso.status.passwordClosed':
+		'Nur SSO ist aktiv: Die Passwort-Anmeldung ist für alle Mitglieder geschlossen.',
+	'orgSso.status.incomplete':
+		'SSO ist aktiv, aber die Anmeldeschaltfläche bleibt verborgen, bis Folgendes gesetzt ist: {fields}.',
+	'orgSso.status.incompleteUnknown':
+		'SSO ist aktiv, aber die Einstellungen des Identitätsanbieters sind unvollständig, daher bleibt die Anmeldeschaltfläche verborgen.',
+	'orgSso.save': 'SSO-Einstellungen speichern',
+	'orgSso.toast.loadFailed': 'SSO-Einstellungen konnten nicht geladen werden',
+	'orgSso.toast.saved': 'SSO-Einstellungen gespeichert',
+	'orgSso.toast.saveFailed': 'SSO-Einstellungen konnten nicht gespeichert werden',
+	'orgSso.refusal.idpUnresolved':
+		'SSO zu verlangen schließt die Passwort-Anmeldung, daher müssen die Einstellungen des Identitätsanbieters zuerst vollständig sein. Fehlend oder ungültig: {fields}.',
 	'org.section.fraud': 'Betrugserkennung',
 	'org.section.fraudSaved': 'Betrugserkennung',
 	'org.fraud.hint': 'Jede Regel unten wird geprüft, wenn eine Rechnung erstellt oder aktualisiert wird. Das Deaktivieren einer Regel unterdrückt sowohl die Warnung als auch die automatisch erzeugte Ausnahme, damit die Warteschlange übersichtlich bleibt.',
