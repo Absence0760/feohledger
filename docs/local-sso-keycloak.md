@@ -56,6 +56,14 @@ always a clean, reproducible state (no persisted volume).
 for the chosen tenant (the same shape Okta/Entra would use), merging into the
 existing settings rather than overwriting `cards` / `payments` / etc.
 
+The seed is a **dev shortcut that writes the row directly**: it bypasses the
+product's one writer of `settings.sso`, `PUT /api/organization/sso` (the
+`/organization` → **Single Sign-On** panel), so it is unaudited and replaces the
+whole `sso` block, SCIM keys included — run `pnpm scim:seed` after it, not
+before. To exercise the real path, configure the same values in the panel
+instead (`docs/authentication.md` § SSO configuration). `PATCH
+/api/organization` refuses an `sso` key.
+
 ## Why port 8088 (not 8080)
 
 Keycloak's own default is 8080, but that port is commonly taken by other local

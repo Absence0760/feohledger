@@ -846,6 +846,12 @@ user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER))
   logging). Because it runs on every password sign-in, the resolvers must raise
   `SSOConfigError` and nothing else for any malformed block, and stay local (no
   DNS, no discovery fetch). `docs/decisions.md` §204.
+- **`settings.sso` has one writer: `PUT /api/organization/sso`** (`api/organization_sso.py`
+  over the pure `services/sso_settings.py`). `PATCH /api/organization` refuses
+  the key. The client secret is write-only (blank keeps it, never returned —
+  `org_settings_view.ALWAYS_REDACTED`), the SCIM keys are carried across, and
+  each save audits `organization.sso_updated` with key names only. The operator
+  way back into a locked-out SSO-only tenant is `scripts/sso_break_glass.py`.
 - Both protocols share the identity tail in `services/identity_provisioning.py`
   (`jit_provision` + `extract_and_check_email`) and the session-mint tail — only
   IdP-response *verification* differs.
@@ -898,6 +904,7 @@ Severity: `error`, `warning`, `info`. Auto-detected by `invoice_warnings.py`. `e
 | `scripts/seed_payable_invoices.py` | Tops up a tenant's payment queue with N approved invoices (`--tenant`, `--count`) — re-run after executing a payment run drains the queue. |
 | `scripts/create_tenant.py` | CLI wrapper around `services.tenant_provisioning.provision_tenant` — provisions a single tenant (org + admin user + DB + tables) |
 | `scripts/delete_tenant.py` | CLI wrapper around `services.tenant_deletion.delete_tenant` — deletes one tenant completely (object-storage prefix, tenant DB, control-plane rows), in that order. `--dry-run` inventories; otherwise it needs `--confirm <slug>` or `--yes`. Driven by `deploy/remove-tenant.sh`, which adds the Caddy and backup legs. The deletion `/legal/dpa` § 13 promises. |
+| `scripts/sso_break_glass.py` | CLI wrapper around `services.sso_break_glass.lift_sso_only` — clears `settings.sso.sso_only` (and nothing else) for one SSO-only tenant whose IdP has stopped working, after writing an `organization.sso_only_lifted` audit row; refuses to change anything if the row cannot be written. `--slug`, optional `--reason` (ticket ref, no PII). Procedure: `../docs/founder-runbooks/sso-break-glass.md` |
 | `scripts/migrate_all_tenants.py` | Runs `alembic upgrade head` on every tenant DB |
 
 ## Self-service tenant signup

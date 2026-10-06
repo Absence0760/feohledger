@@ -166,7 +166,7 @@ before changing any router; the summaries below are only an index.
 | `/scim/v2` | SCIM 2.0 user provisioning (Okta/Entra/Authentik), per-tenant bearer auth |
 | `/portal`, `/portal/auth` | Supplier portal — VendorUser auth, invoice submit/resubmit, payments, self-service, MFA |
 | `/admin` | User CRUD, role assignment |
-| `/organization` | Org settings, connection tests, SCIM token, branding, custom domains, data residency |
+| `/organization` | Org settings, connection tests, SSO config (`/organization/sso`, the one audited writer of `settings.sso`), SCIM token, branding, custom domains, data residency |
 | `/entities` | Multi-entity admin (legal entities / subsidiaries — the `entity_id` scope target) |
 | `/partner` | Partner / reseller multi-tenant admin — child tenants, link codes, provision |
 | `/invoices` | Invoice CRUD, upload, extraction, approve/reject, line items, e-invoice, email approval |

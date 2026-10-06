@@ -25,7 +25,7 @@ This is a SOC 2 prerequisite (`docs/soc2-readiness.md` § Secrets management).
 | AWS SES credentials (transactional email) | IAM role (preferred) or sops — `infra-secrets` | **365 days** if static | Send email from our domain |
 | GitHub Actions OIDC role | AWS IAM role (no static keys) | n/a — short-lived | n/a |
 | Per-tenant SCIM bearer tokens | `Organization.settings.sso.scim_bearer_hash` (sha256) | **On request** by tenant admin via `POST /api/organization/sso/scim-token` | Read/write users on that one tenant |
-| Per-tenant OIDC client secret | `Organization.settings.sso.client_secret` (encrypted at row) | **On request** by tenant admin | Mint OIDC tokens for that one tenant |
+| Per-tenant OIDC client secret | `Organization.settings.sso.client_secret` (encrypted at row; write-only, never returned) | **On request** by tenant admin via `PUT /api/organization/sso` | Mint OIDC tokens for that one tenant |
 | Per-tenant chat webhook URL (Slack / Teams) | `Organization.settings.chat_notifications.webhook_url` | **On request** by tenant admin via `PUT /api/organization/chat-notifications/webhook` | Post arbitrary content into that tenant's approval channel — a phishing surface aimed at the people who approve payments |
 
 **Triggers for an out-of-band rotation** — do these even if the cadence hasn't fired:
@@ -114,7 +114,7 @@ Tenant admin self-serves rotation by re-calling `POST /api/organization/sso/scim
 
 ### Per-tenant OIDC client secret
 
-Tenant admin updates the secret in their Okta/Entra app, then PATCHes `org.settings.sso.client_secret` via `PATCH /api/organization`. The merge is per top-level key, so the PATCH must carry the **whole** `sso` block with the new secret in it: a body holding only `client_secret` replaces the block, dropping the rest of the IdP config along with `enabled` and `sso_only`, which switches SSO off. A whole block that keeps `enabled` and `sso_only` but is missing an IdP key is refused with a `422` naming it (`docs/authentication.md` § SSO-only mode). SSO handshakes after the change use the new secret. **No grace period** — coordinate with the IdP cutover.
+Tenant admin creates the new secret in their Okta/Entra app, then pastes it into **Organization → Single Sign-On → Client secret** and saves (`PUT /api/organization/sso`). Every other field is round-tripped from the panel, so nothing else changes; leaving the field blank on a later save keeps the stored secret. The save is audited as `organization.sso_updated` with `client_secret` in `changed` — the name only, never the value — and no endpoint ever returns the stored secret (`GET /api/organization` drops it for every role). `PATCH /api/organization` refuses an `sso` key, because its per-key merge used to replace the whole block on a secret-only body and switch SSO off unaudited. SSO handshakes after the change use the new secret. **No grace period** — coordinate with the IdP cutover. If the old secret already expired and the tenant is SSO-only, nobody can sign in to paste the new one: run the break-glass procedure (`docs/founder-runbooks/sso-break-glass.md`) first.
 
 ### Per-subscription outbound-webhook signing secret
 
