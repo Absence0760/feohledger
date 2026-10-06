@@ -580,6 +580,70 @@ class AppLocalizationsPt extends AppLocalizations {
   }
 
   @override
+  String glChartRefusalForeign(int count, String codes) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'As contas contábeis',
+      one: 'A conta contábil',
+    );
+    String _temp1 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'pertencem ao',
+      one: 'pertence ao',
+    );
+    return '$_temp0 $codes $_temp1 plano de contas de outra entidade, não ao desta fatura.';
+  }
+
+  @override
+  String glChartRefusalRetired(int count, String codes) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'As contas contábeis',
+      one: 'A conta contábil',
+    );
+    String _temp1 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'estão desativadas',
+      one: 'está desativada',
+    );
+    return '$_temp0 $codes $_temp1 no plano de contas desta fatura.';
+  }
+
+  @override
+  String glChartRefusalUnknown(int count, String codes) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'As contas contábeis',
+      one: 'A conta contábil',
+    );
+    String _temp1 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'não estão',
+      one: 'não está',
+    );
+    return '$_temp0 $codes $_temp1 no plano de contas desta fatura.';
+  }
+
+  @override
+  String get glChartRefusalPick =>
+      'Escolha uma conta do plano de contas próprio da fatura: as contas compartilhadas mais as da sua entidade.';
+
+  @override
+  String get glChartRefusalPickActive =>
+      'Escolha uma conta ativa do plano de contas próprio da fatura: as contas compartilhadas mais as da sua entidade.';
+
+  @override
+  String glChartRefusalOnLines(String reasons) {
+    return 'Itens da fatura: $reasons';
+  }
+
+  @override
   String get invoiceDetailApproved => 'Fatura aprovada';
 
   @override
@@ -3382,6 +3446,70 @@ class AppLocalizationsPtBr extends AppLocalizationsPt {
   @override
   String invoiceDetailUpdateFailed(String error) {
     return 'Não foi possível salvar as alterações: $error';
+  }
+
+  @override
+  String glChartRefusalForeign(int count, String codes) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'As contas contábeis',
+      one: 'A conta contábil',
+    );
+    String _temp1 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'pertencem ao',
+      one: 'pertence ao',
+    );
+    return '$_temp0 $codes $_temp1 plano de contas de outra entidade, não ao desta fatura.';
+  }
+
+  @override
+  String glChartRefusalRetired(int count, String codes) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'As contas contábeis',
+      one: 'A conta contábil',
+    );
+    String _temp1 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'estão desativadas',
+      one: 'está desativada',
+    );
+    return '$_temp0 $codes $_temp1 no plano de contas desta fatura.';
+  }
+
+  @override
+  String glChartRefusalUnknown(int count, String codes) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'As contas contábeis',
+      one: 'A conta contábil',
+    );
+    String _temp1 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'não estão',
+      one: 'não está',
+    );
+    return '$_temp0 $codes $_temp1 no plano de contas desta fatura.';
+  }
+
+  @override
+  String get glChartRefusalPick =>
+      'Escolha uma conta do plano de contas próprio da fatura: as contas compartilhadas mais as da sua entidade.';
+
+  @override
+  String get glChartRefusalPickActive =>
+      'Escolha uma conta ativa do plano de contas próprio da fatura: as contas compartilhadas mais as da sua entidade.';
+
+  @override
+  String glChartRefusalOnLines(String reasons) {
+    return 'Itens da fatura: $reasons';
   }
 
   @override

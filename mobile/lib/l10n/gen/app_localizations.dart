@@ -1091,6 +1091,42 @@ abstract class AppLocalizations {
   /// **'Could not save changes: {error}'**
   String invoiceDetailUpdateFailed(String error);
 
+  /// GL-chart refusal (lib/l10n/gl_chart_refusal_messages.dart): codes that belong to another entity's chart. {codes} is the quoted, locale-joined code list; {count} its length.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, one {GL account} other {GL accounts}} {codes} {count, plural, one {belongs to} other {belong to}} another entity\'s chart of accounts, not this invoice\'s.'**
+  String glChartRefusalForeign(int count, String codes);
+
+  /// No description provided for @glChartRefusalRetired.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, one {GL account} other {GL accounts}} {codes} {count, plural, one {is retired} other {are retired}} in this invoice\'s chart.'**
+  String glChartRefusalRetired(int count, String codes);
+
+  /// No description provided for @glChartRefusalUnknown.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, one {GL account} other {GL accounts}} {codes} {count, plural, one {is not} other {are not}} in this invoice\'s chart of accounts.'**
+  String glChartRefusalUnknown(int count, String codes);
+
+  /// No description provided for @glChartRefusalPick.
+  ///
+  /// In en, this message translates to:
+  /// **'Choose a code from the invoice\'s own chart — the shared accounts plus its entity\'s own.'**
+  String get glChartRefusalPick;
+
+  /// No description provided for @glChartRefusalPickActive.
+  ///
+  /// In en, this message translates to:
+  /// **'Choose an active code from the invoice\'s own chart — the shared accounts plus its entity\'s own.'**
+  String get glChartRefusalPickActive;
+
+  /// No description provided for @glChartRefusalOnLines.
+  ///
+  /// In en, this message translates to:
+  /// **'Line items: {reasons}'**
+  String glChartRefusalOnLines(String reasons);
+
   /// No description provided for @invoiceDetailApproved.
   ///
   /// In en, this message translates to:

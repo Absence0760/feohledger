@@ -580,6 +580,70 @@ class AppLocalizationsDe extends AppLocalizations {
   }
 
   @override
+  String glChartRefusalForeign(int count, String codes) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Die Sachkonten',
+      one: 'Das Sachkonto',
+    );
+    String _temp1 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'gehören zum',
+      one: 'gehört zum',
+    );
+    return '$_temp0 $codes $_temp1 Kontenplan einer anderen Einheit, nicht zu dem dieser Rechnung.';
+  }
+
+  @override
+  String glChartRefusalRetired(int count, String codes) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Die Sachkonten',
+      one: 'Das Sachkonto',
+    );
+    String _temp1 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'sind im',
+      one: 'ist im',
+    );
+    return '$_temp0 $codes $_temp1 Kontenplan dieser Rechnung stillgelegt.';
+  }
+
+  @override
+  String glChartRefusalUnknown(int count, String codes) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Die Sachkonten',
+      one: 'Das Sachkonto',
+    );
+    String _temp1 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'sind nicht',
+      one: 'ist nicht',
+    );
+    return '$_temp0 $codes $_temp1 im Kontenplan dieser Rechnung enthalten.';
+  }
+
+  @override
+  String get glChartRefusalPick =>
+      'Wählen Sie ein Konto aus dem eigenen Kontenplan der Rechnung – den gemeinsamen Konten plus denen ihrer Einheit.';
+
+  @override
+  String get glChartRefusalPickActive =>
+      'Wählen Sie ein aktives Konto aus dem eigenen Kontenplan der Rechnung – den gemeinsamen Konten plus denen ihrer Einheit.';
+
+  @override
+  String glChartRefusalOnLines(String reasons) {
+    return 'Positionen: $reasons';
+  }
+
+  @override
   String get invoiceDetailApproved => 'Rechnung freigegeben';
 
   @override

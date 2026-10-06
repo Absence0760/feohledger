@@ -652,6 +652,54 @@ void main() {
     expect(find.textContaining('ApiException'), findsNothing);
   });
 
+  testWidgets(
+      'a structured GL-chart refusal is stated from its code, not the '
+      "server's English", (tester) async {
+    // The backend sends the GL-chart refusal as `{code, foreign, retired,
+    // unknown, on_lines, message}` so the client can state it in the reader's
+    // language (`gl_chart_refusal_messages.dart`). The `message` here is a
+    // sentinel: if the snackbar shows it, the code was not localized.
+    final client = _detailClient(
+      _invoiceJson('1', status: 'ready_for_review', glAccount: '6100'),
+      onPatch: (req) => http.Response(
+        jsonEncode({
+          'detail': {
+            'code': 'gl_codes_outside_chart',
+            'on_lines': false,
+            'foreign': <String>[],
+            'retired': <String>[],
+            'unknown': ['9999'],
+            'message': 'SERVER ENGLISH SENTINEL',
+          },
+        }),
+        422,
+        headers: {'content-type': 'application/json'},
+      ),
+    );
+    ApiClient().debugConfigure(client: client);
+    await AuthStore.instance.login('demo@acme.com', 'demo', 'acme');
+
+    await tester.pumpWidget(_localized());
+    await _pumpUntil(tester, find.byTooltip('Edit'));
+    await tester.tap(find.byTooltip('Edit'));
+    await tester.pumpAndSettle();
+
+    await tester.enterText(find.widgetWithText(TextFormField, '6100'), '9999');
+    await tester.ensureVisible(find.widgetWithText(FilledButton, 'Save'));
+    await tester.tap(find.widgetWithText(FilledButton, 'Save'));
+    await _pumpUntil(tester, find.textContaining("GL account '9999'"));
+
+    expect(
+      find.text(
+        "Could not save changes: GL account '9999' is not in this invoice's "
+        "chart of accounts. Choose an active code from the invoice's own "
+        "chart — the shared accounts plus its entity's own.",
+      ),
+      findsOneWidget,
+    );
+    expect(find.textContaining('SENTINEL'), findsNothing);
+  });
+
   testWidgets('the edit sheet sends the amount as a string-Decimal',
       (tester) async {
     Map<String, dynamic>? sentBody;
