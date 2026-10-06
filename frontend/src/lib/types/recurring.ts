@@ -115,6 +115,10 @@ export function skipReasonKey(code: string): string | null {
 export interface RecurringTemplate {
 	id: string;
 	name: string;
+	/** The entity every invoice this template raises lands under, and so the
+	 *  chart its `gl_account` must resolve in (`backend/app/services/gl_chart.py`).
+	 *  `null` only on a template written before multi-entity. */
+	entity_id: string | null;
 	vendor_id: string | null;
 	vendor_name: string | null;
 	description: string | null;

@@ -97,6 +97,10 @@ class GenerationSkip(BaseModel):
 class RecurringTemplateResponse(BaseModel):
     id: str
     name: str
+    #: The entity every invoice this template raises lands under — and so the
+    #: chart its `gl_account` must resolve in (`services/gl_chart`). The form
+    #: scopes its GL picker to it on edit. NULL only on a pre-multi-entity row.
+    entity_id: str | None = None
     vendor_id: str | None
     vendor_name: str | None
     description: str | None
@@ -152,6 +156,7 @@ class RecurringTemplateResponse(BaseModel):
         return cls(
             id=str(t.id),
             name=t.name,
+            entity_id=str(t.entity_id) if t.entity_id else None,
             vendor_id=str(t.vendor_id) if t.vendor_id else None,
             vendor_name=t.vendor_name,
             description=t.description,

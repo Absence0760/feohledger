@@ -449,6 +449,13 @@ chart. Both halves are now closed.
   for the entity the new invoice will land under (`entityStore.writeEntityId`,
   the frontend mirror of `get_write_entity_id`). A NULL-entity invoice sees the
   shared chart alone, the rule `gl_recode._ActiveChart` already applied.
+  **The recurring-template form does the same**: `RecurringTemplateResponse`
+  carries the template's `entity_id`, and `RecurringModal`'s GL field is a
+  picker over that entity's chart on edit and over `writeEntityId`'s on create,
+  falling back to free text only when the chart is empty
+  (`tests-e2e/recurring/gl-picker-entity-chart.spec.ts`). It is the one GL field
+  whose mistake is repeated on a schedule, so it is the last place a free-text
+  box should invite a code the save would refuse.
 
 See `docs/decisions.md` §194.
 

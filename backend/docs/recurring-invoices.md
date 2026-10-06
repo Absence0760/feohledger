@@ -28,7 +28,7 @@ tenant-scoped + `EntityMixin` + `TimestampMixin`). Money is exact: `amount` is
 | `description` | varchar(500) | |
 | `amount` | numeric(15,2) | Fixed amount stamped onto each generated invoice. Required to generate. |
 | `currency` | varchar(3) | Default `USD`. |
-| `gl_account` / `cost_center` / `department` / `project` / `po_number` / `payment_terms` | varchar | Pre-coding carried onto every generated invoice. A `gl_account` is refused (422) on create and on a PATCH that changes it when it belongs only to another entity's chart, or — whenever the template entity's effective active chart has any account — when it is not an active account of it (retired or unknown): every generated invoice lands under the template's `entity_id` and carries this code (`services/gl_chart.py`, `docs/decisions.md` §194/§199). A PATCH that re-sends the stored code unchanged is not judged, so a template whose account is retired later stays editable — and keeps stamping that code on what it generates until someone re-codes it (`docs/followups.md`). |
+| `gl_account` / `cost_center` / `department` / `project` / `po_number` / `payment_terms` | varchar | Pre-coding carried onto every generated invoice. A `gl_account` is refused (422) on create and on a PATCH that changes it when it belongs only to another entity's chart, or — whenever the template entity's effective active chart has any account — when it is not an active account of it (retired or unknown): every generated invoice lands under the template's `entity_id` and carries this code (`services/gl_chart.py`, `docs/decisions.md` §194/§199). A PATCH that re-sends the stored code unchanged is not judged, so a template whose account is retired later stays editable — and keeps stamping that code on what it generates until someone re-codes it (`docs/followups.md`). The `/recurring` form offers this field as a picker over the template entity's chart (the template's own `entity_id` on edit, the entity a create lands under on create), free text only while that chart is empty — so it cannot invite a code the save would refuse. |
 | `cadence` | enum | `monthly` (default), `quarterly`, `annual` — how often the template generates. |
 | `day_of_period` | integer | Day-of-month (1–28) the invoice is dated/generated on. Capped at 28 so every month is valid (no Feb-30 clamp guesswork). |
 | `start_date` | date | Required. First period the template is eligible for. |
@@ -42,7 +42,7 @@ tenant-scoped + `EntityMixin` + `TimestampMixin`). Money is exact: `amount` is
 | `notes` | varchar(500) | |
 | `meta` | jsonb | Free-form bag. No PII / banking data. |
 | `organization_id` | uuid | Indexed. |
-| `entity_id` | uuid FK → entities | From `EntityMixin`; the generated invoices inherit it. |
+| `entity_id` | uuid FK → entities | From `EntityMixin`; the generated invoices inherit it. Returned on `RecurringTemplateResponse` (create / read / list / PATCH / lifecycle), because it names the chart `gl_account` must resolve in. |
 | `created_at` / `updated_at` | timestamptz | From `TimestampMixin`. |
 
 The status / cadence string constants live on the model

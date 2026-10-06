@@ -899,3 +899,32 @@ async def test_invoice_response_carries_its_entity(realdb, chart):
         resp = await c.get(f"/api/invoices/{inv_id}")
     assert resp.status_code == 200, resp.text
     assert resp.json()["entity_id"] == str(entity_b)
+
+
+async def test_recurring_template_response_carries_its_entity(realdb, chart):
+    """The template form scopes its GL picker to the template's OWN entity on
+    edit — the chart every invoice it raises is coded against — so every read
+    of a template has to say which entity that is, whatever is selected now."""
+    _, entity_b = chart
+    async with realdb.client(key=TENANT, role="ap_manager") as c:
+        created = await c.post(
+            "/api/recurring",
+            json=_template_body(B_OWN),
+            headers={"X-Entity-ID": str(entity_b)},
+        )
+        assert created.status_code == 201, created.text
+        tid = created.json()["id"]
+        detail = await c.get(f"/api/recurring/{tid}")
+        listed = await c.get("/api/recurring")
+        patched = await c.patch(
+            f"/api/recurring/{tid}",
+            json={"notes": "re-read"},
+            headers={"X-Entity-ID": str(entity_b)},
+        )
+    assert created.json()["entity_id"] == str(entity_b)
+    assert detail.status_code == 200, detail.text
+    assert detail.json()["entity_id"] == str(entity_b)
+    assert patched.status_code == 200, patched.text
+    assert patched.json()["entity_id"] == str(entity_b)
+    row = next(t for t in listed.json()["items"] if t["id"] == tid)
+    assert row["entity_id"] == str(entity_b)
