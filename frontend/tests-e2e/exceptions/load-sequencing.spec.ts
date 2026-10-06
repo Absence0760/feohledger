@@ -26,7 +26,7 @@ function exceptionRow(n: number, status: 'open' | 'escalated' = 'open') {
 		invoice_id: null,
 		invoice_number: `E2E-EXC-${n}`,
 		vendor_name: 'Sequencer Vendor',
-		amount: 100,
+		amount: '100.00',
 		exception_type: 'duplicate',
 		type_label: 'Duplicate',
 		severity: 'warning',

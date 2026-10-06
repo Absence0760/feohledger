@@ -28,7 +28,7 @@ function exceptionRow(n: number, severity = 'warning') {
 		invoice_id: null,
 		invoice_number: `E2E-SRCH-${n}`,
 		vendor_name: 'Search Vendor',
-		amount: 100,
+		amount: '100.00',
 		currency: 'USD',
 		exception_type: 'duplicate',
 		type_label: 'Duplicate Invoice',

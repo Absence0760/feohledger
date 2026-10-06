@@ -438,6 +438,44 @@ retry-safe for the same reason (no order exists at the processor):
 
 Pinned by `tests/test_payment_run_invoice_payability.py`.
 
+### Bounded wait for the invoice lock
+
+Nothing in `app/` sets a session-wide `lock_timeout`, so a money path waiting on
+the invoice row used to wait for as long as the holder did — and the holder can
+be another money path sitting on that lock across its own processor call. The
+wait is now bounded: `_lock_payment_invoice` takes the lock through
+`utils/db_locks.bounded_lock_wait` with
+`FEOH_PAYMENT_INVOICE_LOCK_TIMEOUT_MS` (default `5000`; `0` = wait forever).
+
+- **The bound is scoped to the one locking statement.** It runs in a SAVEPOINT,
+  sets `lock_timeout` with `SET LOCAL` semantics and restores the previous value
+  before releasing it. Without the restore the setting would survive the
+  savepoint to the end of the transaction — onto the `→ payment_scheduled`
+  transition and audit writes that follow an *accepted* processor order, where
+  a timeout would abort the only record that the money moved.
+- **A timeout is always pre-processor, so always retry-safe.** Every caller
+  takes the invoice lock before calling the processor. The savepoint rollback
+  leaves the caller's transaction, and the payment row lock it holds, intact.
+- **What each caller does with it:**
+  - run dispatch (`/execute`, `/resume`, `/retry-failed`) records that payment
+    `failed` / `invoice_locked` — a named refusal in
+    `_RETRY_SAFE_FAILURE_PREFIXES`, never `unexpected_error:*` on an aborted
+    session — and carries on with the rest of the run;
+  - `POST {id}/void`, `POST {id}/settlement/accept` and
+    `POST {id}/compliance/release` answer `409` with a detail starting
+    `invoice_locked:` and change nothing (the release leaves the payment
+    `pending_compliance`, not `failed`, so the operator just retries).
+- **What it does not bound.** The *other* invoice writers (send-to-erp,
+  approve, `PATCH`, `payment_erp_sync`, `POST /api/payments`) still wait out a
+  dispatch holding the lock across a processor call, for as long as that call
+  takes. That wait is bounded by the payment adapters' own HTTP timeouts, not by
+  this setting. The payment-row lock the dispatch loop takes first is
+  deliberately unbounded: its holder is another dispatcher sending the same
+  payment, and the correct outcome there is to wait and then skip it.
+
+Pinned by the "BOUNDED" section of `tests/test_payment_run_invoice_payability.py`,
+which holds the invoice lock from a second connection.
+
 ### Why a payment failed, and retrying it
 
 `Payment.failure_reason` is written on every failure path — compliance refusal,
@@ -544,6 +582,9 @@ re-sent.
   vendor is owed. The retry re-derives `net_payable_amount` and **skips**; the amount is never
   silently adjusted, so the operator builds a fresh run through the full gate
   set.
+- `invoice_locked` is retry-safe and needs no skip rule: it only means another
+  request held the invoice row past the bound when dispatch tried (§ Bounded
+  wait for the invoice lock), so the retry simply re-attempts it.
 - `applied_credit_mismatch` — a credit memo applied to the invoice no longer
   matches its vendor or currency (decisions §214). Dispatch would refuse it the
   same way, so no doomed attempt row is booked.

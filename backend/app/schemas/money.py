@@ -83,6 +83,30 @@ def json_money(value: Decimal | None) -> float | None:
     return _decimal_to_json_number(value)
 
 
+def json_money_string(value: Decimal | None) -> str | None:
+    """The ``Decimal`` → exact JSON **string** hop for a hand-built ``dict``.
+
+    The stronger contract ``json_money`` stops short of: the figure never
+    becomes a binary float on the server or on the wire, and a client gets the
+    exact digits to keep (a display formatter may still go through a number to
+    render them, which is display, not arithmetic). Use it for a
+    field whose clients have been made to accept a string (the move from
+    number to string is a coordinated client change, never a drive-by — see
+    ``docs/followups.md`` and the exception queue's ``amount``, the first field
+    moved). Each client then renders the string verbatim (``formatMoney`` on
+    web, ``formatMoneyString`` on mobile).
+
+    Fixed-point, not ``str()``: a ``Decimal`` carrying a positive exponent
+    renders as ``"1E+3"`` under ``str()``, which is the kind of value a
+    consumer's parser fumbles. Scale is kept (``"250.00"`` stays ``"250.00"``);
+    this is not ``.normalize()``. The same rendering as ``api/analytics._money``
+    and the outbound-webhook ``_money_str``. ``None`` stays JSON ``null``.
+    """
+    if value is None:
+        return None
+    return format(Decimal(value), "f")
+
+
 # --------------------------------------------------------------------------- #
 # Inbound money — the request side
 # --------------------------------------------------------------------------- #

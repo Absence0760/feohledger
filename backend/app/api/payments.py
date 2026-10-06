@@ -115,6 +115,7 @@ from app.tenant import (
     get_write_entity_id,
 )
 from app.utils.dates import utc_today
+from app.utils.db_locks import LockWaitTimeout, bounded_lock_wait
 from app.utils.http import content_disposition_attachment
 from app.utils.search import ilike_contains
 from app.utils.tenant_urls import tenant_base_url
@@ -1491,7 +1492,12 @@ async def void_payment(
             detail="Cannot void a failed payment (it never settled)",
         )
 
-    invoice = await _lock_payment_invoice(db, payment)
+    # Bounded: refused before the processor is asked to reverse anything, so a
+    # 409 here leaves the payment exactly as it was (the request rolls back).
+    try:
+        invoice = await _lock_payment_invoice(db, payment)
+    except InvoiceLockedError:
+        raise HTTPException(status_code=409, detail=INVOICE_LOCKED_DETAIL) from None
 
     # Capture the status BEFORE mutating so the audit row records the real
     # prior state (any of completed / submitted / processing / pending).
@@ -1757,15 +1763,51 @@ async def _lock_payment_invoice(db: AsyncSession, payment: Payment) -> Invoice |
     racing `virtual_cards` insert, an exception, an audit row. The dispatch
     holds this lock across a processor call; a full `FOR UPDATE` would stall
     every such insert for that long, and deadlock one made from inside the call.
+
+    **The wait is bounded** (`settings.payment_invoice_lock_timeout_ms`, via
+    `utils/db_locks.bounded_lock_wait`). Every caller takes this lock BEFORE its
+    processor call, so a refusal here is always retry-safe: nothing has been
+    sent. Past the bound it raises `InvoiceLockedError` with the savepoint
+    rolled back and the caller's transaction — and the payment row lock it
+    already holds — intact, so the caller can record a named refusal instead of
+    an `unexpected_error` on an aborted session. The bound covers this one
+    statement only and is restored before returning, so nothing the caller does
+    after its processor call can time out on a lock (`docs/decisions.md`).
     """
-    return (
-        await db.execute(
-            select(Invoice)
-            .where(Invoice.id == payment.invoice_id)
-            .with_for_update(key_share=True)
-            .execution_options(populate_existing=True)
-        )
-    ).scalar_one_or_none()
+    from app.config import settings as app_settings
+
+    try:
+        async with bounded_lock_wait(db, app_settings.payment_invoice_lock_timeout_ms):
+            return (
+                await db.execute(
+                    select(Invoice)
+                    .where(Invoice.id == payment.invoice_id)
+                    .with_for_update(key_share=True)
+                    .execution_options(populate_existing=True)
+                )
+            ).scalar_one_or_none()
+    except LockWaitTimeout:
+        raise InvoiceLockedError from None
+
+
+class InvoiceLockedError(Exception):
+    """`_lock_payment_invoice` gave up waiting for the invoice row lock.
+
+    Raised BEFORE any processor call, with the caller's transaction still
+    usable. The dispatch loop records it as the retry-safe refusal
+    `INVOICE_LOCKED_REASON`; the request paths (void, settlement acceptance,
+    compliance release) answer `409` and change nothing."""
+
+
+#: `Payment.failure_reason` for a dispatch refused because the invoice row was
+#: locked past the bound. Retry-safe (`payment_runs._RETRY_SAFE_FAILURE_PREFIXES`).
+INVOICE_LOCKED_REASON = "invoice_locked"
+
+#: The 409 body every request path answers with for the same refusal.
+INVOICE_LOCKED_DETAIL = (
+    "invoice_locked: the invoice is being changed by another request — nothing "
+    "was sent to the processor; retry in a moment"
+)
 
 
 async def _recompute_parent_run_status(db: AsyncSession, payment: Payment) -> None:
@@ -1884,6 +1926,11 @@ async def release_compliance_hold(
         await _execute_single_payment(
             db, payment=payment, org=org, adapter=adapter, user=user, now=now
         )
+    except InvoiceLockedError:
+        # Refused before the processor call: the payment stays
+        # `pending_compliance` (the request rolls back) and the operator can
+        # simply release again — unlike a run, there is no batch to keep going.
+        raise HTTPException(status_code=409, detail=INVOICE_LOCKED_DETAIL) from None
     except Exception as exc:  # noqa: BLE001
         # Same guard `_dispatch_run_payments` puts round this call, for the
         # same reason: a live FX / sanctions / processor adapter can raise
@@ -2080,7 +2127,10 @@ async def accept_settlement(
             ),
         )
 
-    invoice = await _lock_payment_invoice(db, payment)
+    try:
+        invoice = await _lock_payment_invoice(db, payment)
+    except InvoiceLockedError:
+        raise HTTPException(status_code=409, detail=INVOICE_LOCKED_DETAIL) from None
 
     coverage = settlement_coverage(
         settled_amount=payment.settled_amount,
@@ -2983,6 +3033,9 @@ async def _execute_single_payment(
     # on the invoice's status and the `→ payment_scheduled` transition lands
     # after the processor call, so the status must not move in between
     # (`_lock_payment_invoice`). Held until the caller's per-payment commit.
+    # MUST stay ahead of every adapter / card-provider call: its timeout
+    # (`InvoiceLockedError`) is recorded as the RETRY-SAFE `invoice_locked`,
+    # which is only true while no order can exist at the processor yet.
     invoice = await _lock_payment_invoice(db, payment)
 
     if invoice is None:
@@ -3558,6 +3611,16 @@ async def _dispatch_run_payments(
             await _execute_single_payment(
                 db, payment=payment, org=org, adapter=adapter, user=user, now=now
             )
+        except InvoiceLockedError:
+            # Another request held the invoice row past the bound. Raised by
+            # `_lock_payment_invoice`, the first thing `_execute_single_payment`
+            # does — before any processor or card-provider call — with only
+            # its savepoint rolled back, so this transaction (and the payment
+            # row lock) is intact and the refusal is recorded like every other
+            # pre-adapter one: named and retry-safe, never `unexpected_error`.
+            payment.status = "failed"
+            payment.failure_reason = INVOICE_LOCKED_REASON
+            payment.completed_at = now
         except Exception as exc:  # noqa: BLE001
             # A live FX / sanctions / processor adapter can raise anything on
             # a network or API hiccup (bare RuntimeError, httpx errors, ...).

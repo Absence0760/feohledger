@@ -17,6 +17,11 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from fastapi import HTTPException
 
+# These tests drive the payment money paths over a hand-built `AsyncMock`
+# session, which cannot model the invoice lock's SAVEPOINT-scoped bound — see
+# the `mock_session_lock_wait` fixture in conftest.py.
+pytestmark = pytest.mark.usefixtures("mock_session_lock_wait")
+
 
 def _db_returning_scalar(value):
     """Mock an AsyncSession whose `execute().scalar_one_or_none()`

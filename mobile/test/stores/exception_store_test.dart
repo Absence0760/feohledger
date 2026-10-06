@@ -84,6 +84,30 @@ void main() {
       expect(store.fromCache, isTrue);
     });
 
+    test('the offline cache keeps the exact amount and its currency', () async {
+      ApiClient().debugConfigure(
+        client: MockClient((req) async => _list([
+              {
+                ..._exceptionJson('1'),
+                'amount': '12345678901234.56',
+                'currency': 'ZAR',
+              },
+            ])),
+      );
+      await store.fetch();
+
+      ApiClient().debugConfigure(
+        client: MockClient((req) async => throw Exception('offline')),
+      );
+      await store.fetch();
+
+      expect(store.fromCache, isTrue);
+      // Not rounded through a double on the way in or out of the cache, and
+      // still labelled — an uncached currency rendered the figure bare.
+      expect(store.exceptions.first.amount, '12345678901234.56');
+      expect(store.exceptions.first.currency, 'ZAR');
+    });
+
     test('surfaces an error when the network fails and no cache exists',
         () async {
       ApiClient().debugConfigure(
