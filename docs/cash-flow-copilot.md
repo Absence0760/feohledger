@@ -149,11 +149,14 @@ entity-scoped, money as **exact Decimal → JSON string** (never `float`).
 
 **Role gating per tool.** The five cash tools (the four §4 planning tools plus
 `propose_payment_plan`, §5) are finance-leader reads —
-`admin` / `ap_manager` / `cfo` (mirroring analytics' `_CFO_ROLES`), **not**
-`ap_clerk`. This is stricter than the assistant's blanket four-role access, so
+`admin` / `ap_manager` / `cfo` (`api/cash_flow.COPILOT_ROLES` — wider than
+analytics' own `_CFO_ROLES`, which is `admin` / `cfo`), **not** `ap_clerk`. This is stricter than the assistant's blanket four-role access, so
 the `run_tool` closure enforces a per-tool `allowed_roles` check and returns a
 clean "not permitted" tool result (never a 500, never leaking data) when a clerk
-asks a cash question. The other (existing) tools keep their current access.
+asks a cash question. The general assistant's `get_payment_forecast` serves the
+same outflow figures and carries the same gate; the other general tools stay
+open to all four roles (`backend/docs/conversational-assistant.md` § The ten
+tools has the per-tool table and its drift guard).
 
 **Audit shape (PII-safe).** Same as today: log the tool name + arg *shape*, never
 values — e.g. `optimize_discount_capture` logs `{"has_budget": bool,
