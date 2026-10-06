@@ -89,8 +89,10 @@ from app.services.payment_runs import (
     PAYABLE_VENDOR_STATUS,
     PaymentRunItemInput,
     active_run_payments,
+    audit_applied_discount,
     blocked_invoice_ids,
     blocking_exception_types,
+    booked_discount_mismatch,
     card_claimed_invoice_ids,
     create_payment_run_for_invoices,
     derive_run_status,
@@ -98,6 +100,8 @@ from app.services.payment_runs import (
     is_retry_safe,
     net_payable_amount,
     one_currency,
+    payable_amount,
+    payable_amounts,
     recompute_run_status,
     rollup_payment_statuses,
     run_refusal_reasons,
@@ -812,10 +816,17 @@ async def payment_queue(
     # omitting it is the fail-closed reading (every rail non-converging), which
     # is what surfaces the card claim as `required_method`.
     refusals = await run_refusal_reasons(db, [inv for inv, _ in rows])
+    # What a run booked today would move per row — net of applied credits,
+    # minus an ACCEPTED early-payment discount whose deadline today meets
+    # (`payment_runs.payable_amounts`, the figure the builder books). Distinct
+    # from `discount_*` below, which is the invoice's STATIC term ("2/10 net
+    # 30") on its payment schedule and is only ever advisory.
+    payables = await payable_amounts(db, [inv for inv, _ in rows], pay_date=today)
 
     items: list[dict] = []
     for inv, sched in rows:
         refusal = refusals.get(inv.id)
+        payable = payables[inv.id]
         discount_amount: Decimal | None = None
         discount_eligible = False
         if (
@@ -863,6 +874,15 @@ async def payment_queue(
                 if sched and sched.discount_percent
                 else None,
                 "discount_amount": str(discount_amount) if discount_amount else None,
+                # An accepted early-payment offer a run built today would take,
+                # and the amount it would then pay. `None` when none applies.
+                "accepted_discount_amount": (
+                    str(payable.discount_amount) if payable.discount is not None else None
+                ),
+                "accepted_discount_pay_by": (
+                    payable.discount.deadline.isoformat() if payable.discount is not None else None
+                ),
+                "payable_amount": str(payable.amount),
                 # `blocked` is what the UI disables the row's checkbox on, and
                 # is true only for a refusal that holds on EVERY rail — a
                 # rail-conditional one carries `required_method` instead and
@@ -2688,11 +2708,17 @@ async def create_payment(
             status_code=409,
             detail="Invoice is fully covered by applied credit memos — nothing to pay",
         )
+    # An accepted early-payment discount whose deadline today meets is taken
+    # here exactly as a run takes it — the two money paths must not disagree
+    # about what an invoice is worth.
+    payable = await payable_amount(db, invoice, pay_date=utc_today())
+    net_amount = payable.amount
     if body.amount is not None and Decimal(str(body.amount)) != net_amount:
         raise HTTPException(
             status_code=422,
             detail=(
-                "Payment amount must equal the approved invoice amount net of applied credit memos"
+                "Payment amount must equal the approved invoice amount net of applied credit "
+                "memos and any accepted early-payment discount"
             ),
         )
 
@@ -2771,6 +2797,8 @@ async def create_payment(
         # Payment follows the invoice's entity (multi-entity Phase 2).
         entity_id=invoice.entity_id,
         amount=net_amount,
+        discount_offer_id=payable.discount_offer_id,
+        discount_amount=payable.discount_amount,
         method=body.method.value if body.method else None,
         reference=body.reference,
         # Always standalone — `payment_run_id` is deliberately not a request
@@ -2815,7 +2843,18 @@ async def create_payment(
             "method": payment.method,
             "reference": payment.reference,
             "payment_run_id": str(payment.payment_run_id) if payment.payment_run_id else None,
+            "discount_amount": (
+                str(payment.discount_amount) if payment.discount_amount is not None else None
+            ),
         },
+    )
+    await audit_applied_discount(
+        db,
+        organization_id=org.id,
+        actor_id=user.id,
+        payment=payment,
+        invoice=invoice,
+        payable=payable,
     )
 
     await db.refresh(payment)
@@ -3006,6 +3045,8 @@ async def create_payment_run(
         # rather than a guessed code (`docs/decisions.md` §79/§82).
         "currency": currency,
         "payment_count": result.payment_count,
+        # Early-payment discounts already deducted from `total_amount`.
+        "discount_total": str(result.discount_total),
         "requires_cfo_approval": run.requires_cfo_approval,
         "message": (
             f"Payment run created with {result.payment_count} payments totaling "
@@ -3064,6 +3105,13 @@ async def get_payment_run(
             "failure_reason": p.failure_reason,
             "submitted_at": p.submitted_at.isoformat() if p.submitted_at else None,
             "completed_at": p.completed_at.isoformat() if p.completed_at else None,
+            # The accepted early-payment discount this payment takes, already
+            # deducted from `amount`; `None` when it pays the full net.
+            "discount_amount": (str(p.discount_amount) if p.discount_amount is not None else None),
+            "discount_offer_id": str(p.discount_offer_id) if p.discount_offer_id else None,
+            "invoice_amount": str(inv.amount)
+            if inv is not None and inv.amount is not None
+            else None,
         }
         for p, inv in rows
     ]
@@ -3083,6 +3131,11 @@ async def get_payment_run(
         "status": derive_run_status(run.status, rollup),
         # Money serialises as an exact Decimal STRING, never float().
         "total_amount": str(run.total_amount) if run.total_amount else "0",
+        # Early-payment discounts the run's ACTIVE payments take — already
+        # deducted from `total_amount`.
+        "discount_total": str(
+            sum((p.discount_amount for p in active if p.discount_amount is not None), Decimal("0"))
+        ),
         # What `total_amount` is denominated in, derived from the same rows the
         # payments list above was built from rather than a second query. `None`
         # where the run's legs disagree or carry no currency at all — see
@@ -3351,12 +3404,11 @@ async def _capture_discount_offers(
         if invoice is None:
             return
 
-        from app.services.discount_capture import capture_offers_for_settled_payment
+        from app.services.discount_capture import capture_offer_for_settled_payment
 
-        captured = await capture_offers_for_settled_payment(
+        captured = await capture_offer_for_settled_payment(
             db,
-            invoice_id=invoice.id,
-            payment_amount=payment.amount,
+            payment=payment,
             invoice_currency=invoice.currency,
             now=now,
         )
@@ -3378,6 +3430,7 @@ async def _capture_discount_offers(
                     "invoice_id": str(invoice.id),
                     "payment_id": str(payment.id),
                     "captured_amount": str(offer.captured_amount),
+                    "payment_amount": str(payment.amount),
                 },
             )
     except Exception as exc:  # noqa: BLE001
@@ -3516,13 +3569,11 @@ async def _execute_single_payment(
 
     # What the invoice is worth NOW, immediately before the adapter call.
     # `payment.amount` was netted against applied credit memos when the row was
-    # booked (`payment_runs.net_payable_amount`), but `credit_memos.py` gates an
+    # booked (`payment_runs.payable_amounts`), but `credit_memos.py` gates an
     # application on neither invoice status nor an existing payment — so a
     # credit recorded between booking and dispatch (a run sitting `draft`
     # awaiting CFO sign-off, a payment held `pending_compliance`) leaves the
-    # row's amount stale and would overpay the vendor by the credit. That
-    # window is not hypothetical: `docs/dynamic-discounting.md` documents
-    # recording a credit memo as THE way to take an early-pay discount.
+    # row's amount stale and would overpay the vendor by the credit.
     #
     # The amount is never silently adjusted here — re-pricing money nobody
     # re-approved is its own defect — so refuse and let a fresh run re-derive
@@ -3540,15 +3591,24 @@ async def _execute_single_payment(
         payment.completed_at = now
         return
 
-    if invoice is not None:
-        from app.services.payment_runs import net_payable_amount as _net_payable_amount
-
-        current_net = await _net_payable_amount(db, invoice)
-        if current_net != payment.amount:
-            payment.status = "failed"
-            payment.failure_reason = "net_amount_changed"
-            payment.completed_at = now
-            return
+    # The same question for an accepted early-payment discount, asked on the
+    # day the money actually moves: the row was booked with the discount its
+    # booking date earned, and a draft can wait past the offer's deadline for
+    # CFO sign-off (or a discount can be accepted after booking). Moving a
+    # different amount than the one approved is the re-pricing this function
+    # refuses, so it fails retry-safe as `discount_changed` and a fresh run
+    # books what is owed now — the full amount once the deadline has passed.
+    current = await payable_amount(db, invoice, pay_date=now.date())
+    if booked_discount_mismatch(payment, current):
+        payment.status = "failed"
+        payment.failure_reason = "discount_changed"
+        payment.completed_at = now
+        return
+    if current.amount != payment.amount:
+        payment.status = "failed"
+        payment.failure_reason = "net_amount_changed"
+        payment.completed_at = now
+        return
 
     vendor_bank: dict | None = None
     if invoice and invoice.vendor_id:
@@ -3833,6 +3893,9 @@ async def _execute_single_payment(
                 org_home_currency=org_home_currency,
                 fx_adapter=fx_adapter,
                 requested_method=payment.method,
+                # The booked amount, not the invoice's: net of applied credits
+                # and any accepted early-payment discount.
+                amount=payment.amount,
             )
         except InternationalPaymentError as exc:
             payment.status = "failed"
@@ -4454,6 +4517,10 @@ async def retry_failed_payments(
       means the failed row's `amount` is no longer what the vendor is owed
       (`payment_runs.net_payable_amount`). The amount is never silently
       adjusted — a fresh run re-derives it through the full gate set;
+    - `discount_changed` — the accepted early-payment discount the failed row
+      was booked with no longer applies today (its deadline passed), or one now
+      applies that it was not booked with (`payment_runs.payable_amounts`). Same
+      rule: never re-priced here, a fresh run books what is owed now;
     - `applied_credit_mismatch` — a credit memo applied to the invoice no
       longer pairs with its vendor or currency (decisions §214);
     - `invoice_has_live_payment` — the invoice has since acquired another live
@@ -4607,7 +4674,14 @@ async def retry_failed_payments(
         # `failed` (credit_memos.py gates on neither invoice status nor an
         # existing payment) makes the failed row's amount stale; pay it and the
         # vendor is overpaid by the credit.
-        net_amount = await net_payable_amount(db, invoices[payment.invoice_id])
+        payable = await payable_amount(db, invoices[payment.invoice_id], pay_date=utc_today())
+        if booked_discount_mismatch(payment, payable):
+            # The early-payment discount the failed row was booked with no
+            # longer applies today (its deadline passed) — or one now applies
+            # that it was not booked with. A fresh run books what is owed now.
+            skipped.append("discount_changed")
+            continue
+        net_amount = payable.amount
         if net_amount != payment.amount:
             skipped.append("net_amount_changed")
             continue
@@ -4617,6 +4691,8 @@ async def retry_failed_payments(
             entity_id=payment.entity_id,
             payment_run_id=run.id,
             amount=net_amount,
+            discount_offer_id=payable.discount_offer_id,
+            discount_amount=payable.discount_amount,
             method=payment.method,
             status="pending",
             # A new order at the processor, so a new idempotency key. The

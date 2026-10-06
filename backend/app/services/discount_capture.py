@@ -1,5 +1,19 @@
-"""Recognize a settled payment as the realization of an accepted early-pay
-discount — the missing caller for ``discount_offers.mark_captured``.
+"""The bridge between an accepted early-pay discount and the payment that
+takes it: what a payment run deducts (``applicable_discounts``), recognizing
+the settlement that realized it (``capture_offer_for_settled_payment``), and
+un-realizing it when that payment is voided
+(``reverse_captures_for_voided_payment``).
+
+**What is paid.** Once a supplier's offer is accepted, the buyer pays the
+discounted amount before the offer's deadline — that is the whole bargain of
+dynamic discounting. ``applicable_discounts`` is the one answer to "does an
+accepted discount apply to this invoice if it is paid on this date, and for
+how much"; ``payment_runs.payable_amounts`` deducts it, the run books it on the
+payment (``Payment.discount_offer_id`` / ``discount_amount``), and dispatch
+re-asks on the day the money moves. A missed deadline pays the full amount.
+
+**What is captured.** The rest of this docstring describes the capture leg —
+the missing caller for ``discount_offers.mark_captured``.
 
 ``services/discount_offers.mark_captured`` is the only code that sets
 ``DiscountOffer.captured_amount`` / ``captured_at`` and transitions an offer
@@ -21,7 +35,9 @@ from __future__ import annotations
 
 import logging
 import uuid
-from datetime import datetime
+from collections.abc import Iterable
+from dataclasses import dataclass
+from datetime import date, datetime
 from decimal import Decimal
 
 from sqlalchemy import select
@@ -33,12 +49,157 @@ from app.models.discount import (
     OFFER_STATUS_CAPTURED,
     DiscountOffer,
 )
+from app.models.invoice import Invoice
 from app.models.payment import Payment
 from app.services import discount_offers as offers_svc
 
 logger = logging.getLogger(__name__)
 
 _CENTS = Decimal("0.01")
+
+
+@dataclass(frozen=True)
+class AppliedDiscount:
+    """An accepted early-payment discount a payment made on ``pay_date`` takes.
+
+    ``amount`` is the exact savings deducted — ``discount_savings(base_amount,
+    accepted_tier)``, cent-quantized half-up — and ``deadline`` the last day it
+    could still be taken (``discount_offers.accepted_discount_deadline``).
+    """
+
+    offer_id: uuid.UUID
+    amount: Decimal
+    deadline: date
+
+
+async def applicable_discounts(
+    db: AsyncSession,
+    invoices: Iterable[Invoice],
+    *,
+    pay_date: date,
+    net_amounts: dict[uuid.UUID, Decimal],
+) -> dict[uuid.UUID, AppliedDiscount]:
+    """Which of ``invoices`` an ACCEPTED early-pay discount applies to if paid
+    on ``pay_date`` — and for how much. One query for the batch.
+
+    An offer applies only when every one of these holds, and otherwise the
+    invoice is paid in full (never refused — the supplier is owed the whole
+    amount once the bargain cannot be honoured):
+
+    * it is invoice-scoped and ``accepted`` with a tier on record. A
+      vendor-scoped bulk offer spans several invoices, so no single payment can
+      be shown to be its settlement — the same reason the capture leg skips it;
+    * ``pay_date`` is on or before the tier's deadline
+      (``accepted_discount_deadline``). An offer the payment path cannot date
+      is not applied — a deduction the supplier may consider expired is a
+      short payment;
+    * its ``currency`` is the invoice's (a payment is denominated in the
+      invoice's currency; a figure in another one is not a deduction from it);
+    * its ``base_amount`` is still the invoice's ``amount``. An invoice whose
+      amount moved after the offer was made no longer matches the terms the
+      supplier accepted, and recomputing them would be pricing a bargain nobody
+      struck; the invoice is paid in full and the mismatch logged;
+    * the deduction leaves something to pay: ``savings < net_amounts[id]``
+      (the invoice net of applied credit memos).
+
+    Several accepted offers on one invoice (a re-sent offer, both accepted):
+    the earliest accepted is the one taken — one payment realizes one discount,
+    the rule the capture leg applies.
+    """
+    rows = [inv for inv in invoices if inv.id is not None]
+    if not rows:
+        return {}
+    offers = (
+        (
+            await db.execute(
+                select(DiscountOffer)
+                .where(
+                    DiscountOffer.invoice_id.in_([inv.id for inv in rows]),
+                    DiscountOffer.scope == OFFER_SCOPE_INVOICE,
+                    DiscountOffer.status == OFFER_STATUS_ACCEPTED,
+                )
+                .order_by(DiscountOffer.accepted_at.asc().nulls_last(), DiscountOffer.id.asc())
+            )
+        )
+        .scalars()
+        .all()
+    )
+    by_invoice: dict[uuid.UUID, list[DiscountOffer]] = {}
+    for offer in offers:
+        by_invoice.setdefault(offer.invoice_id, []).append(offer)
+
+    out: dict[uuid.UUID, AppliedDiscount] = {}
+    for inv in rows:
+        for offer in by_invoice.get(inv.id, ()):
+            if not offer.accepted_tier:
+                continue
+            deadline = offers_svc.accepted_discount_deadline(offer)
+            if deadline is None or pay_date > deadline:
+                continue
+            if (offer.currency or "").upper() != (inv.currency or "").upper():
+                continue
+            base = Decimal(offer.base_amount).quantize(_CENTS)
+            if inv.amount is None or base != Decimal(inv.amount).quantize(_CENTS):
+                logger.warning(
+                    "discount offer %s base no longer matches its invoice's amount; "
+                    "paying the invoice in full",
+                    offer.id,
+                )
+                continue
+            savings = offers_svc.discount_savings(base, offer.accepted_tier)
+            if savings <= 0 or savings >= net_amounts.get(inv.id, Decimal("0")):
+                continue
+            out[inv.id] = AppliedDiscount(offer_id=offer.id, amount=savings, deadline=deadline)
+            break
+    return out
+
+
+async def capture_offer_for_settled_payment(
+    db: AsyncSession,
+    *,
+    payment: Payment,
+    invoice_currency: str,
+    now: datetime,
+) -> list[DiscountOffer]:
+    """Capture the discount ``payment`` took, now that it has settled.
+
+    A payment booked with a discount (``payment.discount_offer_id``) names its
+    offer, so the capture is that offer, for exactly ``payment.discount_amount``
+    — no matching, no guessing — and is stamped with the payment's id so a void
+    reverses exactly this capture. Idempotent: an offer already ``captured``
+    (a retried webhook, a reconciliation re-run) is left untouched, and the row
+    is locked so two settlement paths cannot both capture it.
+
+    A payment with no discount booked falls back to the amount match below
+    (:func:`capture_offers_for_settled_payment`), which is how a payment made
+    before discounts were deducted automatically — paid at the discounted
+    figure through a credit memo — is still recognized.
+    """
+    if payment.discount_offer_id is None:
+        return await capture_offers_for_settled_payment(
+            db,
+            invoice_id=payment.invoice_id,
+            payment_amount=payment.amount,
+            invoice_currency=invoice_currency,
+            now=now,
+            payment_id=payment.id,
+        )
+    offer = (
+        await db.execute(
+            select(DiscountOffer)
+            .where(DiscountOffer.id == payment.discount_offer_id)
+            .with_for_update()
+        )
+    ).scalar_one_or_none()
+    if offer is None or offer.status != OFFER_STATUS_ACCEPTED:
+        return []
+    offers_svc.mark_captured(
+        offer,
+        captured_amount=payment.discount_amount or Decimal("0"),
+        now=now,
+        payment_id=payment.id,
+    )
+    return [offer]
 
 
 async def capture_offers_for_settled_payment(
@@ -48,10 +209,15 @@ async def capture_offers_for_settled_payment(
     payment_amount: Decimal,
     invoice_currency: str,
     now: datetime,
+    payment_id: uuid.UUID | None = None,
 ) -> list[DiscountOffer]:
     """Capture any ``accepted`` invoice-scoped ``DiscountOffer`` on
     ``invoice_id`` whose accepted tier's discounted payoff exactly matches
     ``payment_amount``.
+
+    The FALLBACK leg of :func:`capture_offer_for_settled_payment`, for a
+    payment that booked no discount of its own. ``payment_id`` is stamped on
+    the capture when given, so even a matched capture is reversed exactly.
 
     Only invoice-scoped offers are considered (``scope == "invoice"``) — a
     vendor-scoped bulk offer's ``base_amount`` is the summed open balance
@@ -139,7 +305,7 @@ async def capture_offers_for_settled_payment(
         if paid != discounted_payoff:
             continue
         try:
-            offers_svc.mark_captured(offer, captured_amount=savings, now=now)
+            offers_svc.mark_captured(offer, captured_amount=savings, now=now, payment_id=payment_id)
         except ValueError:
             # Lost a race with another settlement/reconciliation path that
             # captured this same offer first — already handled, no-op.
@@ -171,8 +337,11 @@ async def reverse_captures_for_voided_payment(
     and a re-payment at the discounted payoff could capture nothing, because
     the offer was no longer ``accepted``.
 
-    Which offer did THIS payment capture? ``DiscountOffer`` carries no payment
-    id, so attribution is by elimination, and both conditions must hold:
+    Which offer did THIS payment capture? Every capture made since migration
+    0104 names its payment (``captured_by_payment_id``), so those are reversed
+    exactly — whatever else the invoice carries. Only a capture made before
+    that column existed (NULL) falls back to attribution by elimination, and
+    both conditions must then hold:
 
     * ``previous_status == "completed"`` — capture only ever runs when a
       payment reaches ``completed`` (both legs in ``api/payments``), so voiding
@@ -189,6 +358,24 @@ async def reverse_captures_for_voided_payment(
     reversed, for the caller's audit row. Never commits — the void's
     transaction owns that, so the reversal lands atomically with the void.
     """
+    exact = (
+        (
+            await db.execute(
+                select(DiscountOffer)
+                .where(
+                    DiscountOffer.captured_by_payment_id == voided_payment_id,
+                    DiscountOffer.status == OFFER_STATUS_CAPTURED,
+                )
+                .order_by(DiscountOffer.id.asc())
+                .with_for_update()
+            )
+        )
+        .scalars()
+        .all()
+    )
+    if exact:
+        return [(offer, offers_svc.reverse_capture(offer)) for offer in exact]
+
     if previous_status != "completed":
         return []
 
@@ -214,6 +401,9 @@ async def reverse_captures_for_voided_payment(
                     DiscountOffer.invoice_id == invoice_id,
                     DiscountOffer.scope == OFFER_SCOPE_INVOICE,
                     DiscountOffer.status == OFFER_STATUS_CAPTURED,
+                    # Elimination is for captures that name no payment. One
+                    # that names another payment is that payment's to reverse.
+                    DiscountOffer.captured_by_payment_id.is_(None),
                 )
                 .order_by(DiscountOffer.id.asc())
                 .with_for_update()

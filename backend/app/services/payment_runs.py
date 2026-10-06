@@ -20,6 +20,7 @@ import uuid
 from collections.abc import Iterable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
+from datetime import date
 from decimal import Decimal
 
 from fastapi import HTTPException
@@ -38,6 +39,7 @@ from app.services.currency_conversion import (
     reporting_amount_at_locked_rate,
     resolve_reporting_currency,
 )
+from app.services.discount_capture import AppliedDiscount, applicable_discounts
 from app.services.payment_controls import (
     CFO_REASON_AMOUNT_NOT_EXPRESSIBLE,
     CFO_REASON_THRESHOLD_UNPARSEABLE,
@@ -303,6 +305,11 @@ _RETRY_SAFE_FAILURE_PREFIXES = (
     # no longer what the vendor is owed. `_execute_single_payment` refuses
     # BEFORE the adapter call, so no order exists at the processor.
     "net_amount_changed",
+    # The early-payment discount the row was booked with no longer applies on
+    # the day the money would move (its deadline passed while the run waited),
+    # or one now applies that it was not booked with. Same shape as
+    # `net_amount_changed`: refused before the adapter call.
+    "discount_changed",
     # The invoice left `PAYABLE_INVOICE_STATUSES` between booking and dispatch
     # (an ERP push walked it to `sent_to_erp`, a void took it back). Same shape
     # as `net_amount_changed`: `_execute_single_payment` refuses BEFORE the
@@ -572,6 +579,120 @@ async def net_payable_amounts(
     }
 
 
+@dataclass(frozen=True)
+class PayableAmount:
+    """What a payment against one invoice moves on a given day, and why.
+
+    ``net`` is the invoice ``amount`` minus applied credit memos
+    (:func:`net_payable_amounts`); ``discount`` the accepted early-payment
+    discount that day earns, if any (``discount_capture.applicable_discounts``);
+    ``amount`` is ``net`` minus that discount — the figure booked on
+    ``Payment.amount``, verified at settlement and summed into the run total.
+    """
+
+    amount: Decimal
+    net: Decimal
+    discount: AppliedDiscount | None = None
+
+    @property
+    def discount_offer_id(self) -> uuid.UUID | None:
+        return self.discount.offer_id if self.discount is not None else None
+
+    @property
+    def discount_amount(self) -> Decimal | None:
+        return self.discount.amount if self.discount is not None else None
+
+
+async def payable_amounts(
+    db: AsyncSession,
+    invoices: Iterable[Invoice],
+    *,
+    pay_date: date,
+    net_amounts: dict[uuid.UUID, Decimal] | None = None,
+) -> dict[uuid.UUID, PayableAmount]:
+    """What a payment against each invoice moves if it is made on ``pay_date``.
+
+    The single answer every money path books and re-checks against: the run
+    builder, the standalone ``POST /api/payments``, dispatch (re-asked on the
+    day the money actually moves) and ``/retry-failed``. Credit-memo netting
+    first, then an accepted early-payment discount whose deadline ``pay_date``
+    meets — the buyer's side of a dynamic-discounting bargain is paying the
+    discounted amount before the deadline, so accepting an offer has to change
+    what is paid, not just what the dashboard says.
+
+    ``net_amounts`` lets a caller that already computed them skip the
+    credit-memo query.
+    """
+    rows = list(invoices)
+    if net_amounts is None:
+        net_amounts = await net_payable_amounts(db, rows)
+    discounts = await applicable_discounts(db, rows, pay_date=pay_date, net_amounts=net_amounts)
+    out: dict[uuid.UUID, PayableAmount] = {}
+    for inv in rows:
+        net = net_amounts.get(inv.id, Decimal("0"))
+        discount = discounts.get(inv.id)
+        amount = net - discount.amount if discount is not None else net
+        out[inv.id] = PayableAmount(amount=amount, net=net, discount=discount)
+    return out
+
+
+async def payable_amount(db: AsyncSession, invoice: Invoice, *, pay_date: date) -> PayableAmount:
+    """:func:`payable_amounts` for one invoice."""
+    return (await payable_amounts(db, [invoice], pay_date=pay_date))[invoice.id]
+
+
+def booked_discount_mismatch(payment: Payment, payable: PayableAmount) -> bool:
+    """True when ``payment`` was booked with a different early-payment discount
+    than ``payable`` says applies now — the deadline passed while the payment
+    waited, or a discount was accepted after it was booked.
+
+    Dispatch and ``/retry-failed`` refuse such a payment (``discount_changed``)
+    rather than re-price it: the run was approved — by the CFO, above the
+    threshold — at the booked figure, and moving a different amount is money
+    nobody approved. A fresh run re-derives it.
+    """
+    return payment.discount_offer_id != payable.discount_offer_id
+
+
+async def audit_applied_discount(
+    db: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    actor_id: uuid.UUID | None,
+    payment: Payment,
+    invoice: Invoice,
+    payable: PayableAmount,
+) -> None:
+    """Append the ``discount_offer.applied`` row for a payment booked with an
+    early-payment discount — what the invoice was worth, what was deducted under
+    which offer, and the pay-by date it was taken against. PII-free: ids, exact
+    Decimal amounts as strings, a date."""
+    if payable.discount is None:
+        return
+    # Local import: callers/tests patch `app.services.audit_dispatch.dispatch_audit`.
+    from app.services.audit_dispatch import dispatch_audit
+
+    await dispatch_audit(
+        db,
+        correlation_id=payment.correlation_id or invoice.id,
+        organization_id=organization_id,
+        actor_id=actor_id,
+        action="discount_offer.applied",
+        entity_type="discount_offer",
+        entity_id=payable.discount.offer_id,
+        details={
+            "invoice_id": str(invoice.id),
+            "payment_id": str(payment.id),
+            "payment_run_id": str(payment.payment_run_id) if payment.payment_run_id else None,
+            "invoice_amount": str(invoice.amount),
+            "net_before_discount": str(payable.net),
+            "discount_amount": str(payable.discount.amount),
+            "payment_amount": str(payable.amount),
+            "pay_by": payable.discount.deadline.isoformat(),
+        },
+    )
+
+
 async def net_payable_amount(db: AsyncSession, invoice: Invoice) -> Decimal:
     """What a payment against ``invoice`` should actually move.
 
@@ -604,6 +725,8 @@ class PaymentRunCreationResult:
     # False when an existing `plan_id` run was returned instead of a new one
     # being created — the caller uses this to pick 200 vs 201.
     created: bool
+    # Early-payment discounts deducted from `total_amount` (zero when none).
+    discount_total: Decimal = Decimal("0")
 
 
 @asynccontextmanager
@@ -808,14 +931,19 @@ async def _existing_run_for_plan(db: AsyncSession, plan_id: str) -> PaymentRunCr
     ).scalar_one_or_none()
     if existing is None:
         return None
-    count = (
-        await db.execute(select(func.count()).where(Payment.payment_run_id == existing.id))
-    ).scalar() or 0
+    count, discount_total = (
+        await db.execute(
+            select(func.count(), func.coalesce(func.sum(Payment.discount_amount), 0)).where(
+                Payment.payment_run_id == existing.id
+            )
+        )
+    ).one()
     return PaymentRunCreationResult(
         run=existing,
         total_amount=existing.total_amount or Decimal("0"),
-        payment_count=count,
+        payment_count=count or 0,
         created=False,
+        discount_total=Decimal(discount_total or 0),
     )
 
 
@@ -1032,6 +1160,16 @@ async def create_payment_run_for_invoices(
     if refusals:
         _raise_refusal(refusals, invoices)
 
+    # What each payment moves: net of applied credits, minus any accepted
+    # early-payment discount whose deadline today's booking meets. Dispatch
+    # re-asks on the day the money moves and refuses (`discount_changed`) if the
+    # answer moved — a draft can wait days for CFO sign-off.
+    from app.utils.dates import utc_today
+
+    payables = await payable_amounts(
+        db, invoices.values(), pay_date=utc_today(), net_amounts=net_amounts
+    )
+
     # Two totals, deliberately: `total` is what the run PAYS, in the one
     # currency its invoices share (`PaymentRun.total_amount`), and
     # `reporting_total` is the same money expressed in the org's REPORTING
@@ -1042,9 +1180,11 @@ async def create_payment_run_for_invoices(
     total = Decimal("0")
     reporting_total = Decimal("0")
     reporting_unconverted = False
+    discount_total = Decimal("0")
     for item in items:
         inv = invoices[item.invoice_id]
-        net_amount = net_amounts[item.invoice_id]
+        net_amount = payables[item.invoice_id].amount
+        discount_total += payables[item.invoice_id].discount_amount or Decimal("0")
         total += net_amount
         # No FX call: the rate was locked onto the invoice row when it was last
         # saved (`currency_conversion.materialize_reporting_amount`). A row we
@@ -1116,18 +1256,23 @@ async def create_payment_run_for_invoices(
         async with _savepoint(db):
             db.add(run)
             await db.flush()
+            booked: list[tuple[Payment, Invoice]] = []
             for item in items:
                 inv = invoices[item.invoice_id]
+                payable = payables[item.invoice_id]
                 payment = Payment(
                     invoice_id=inv.id,
                     entity_id=inv.entity_id,
                     payment_run_id=run.id,
-                    amount=net_amounts[item.invoice_id],
+                    amount=payable.amount,
+                    discount_offer_id=payable.discount_offer_id,
+                    discount_amount=payable.discount_amount,
                     method=item.method,
                     status="pending",
                     correlation_id=uuid.uuid4(),
                 )
                 db.add(payment)
+                booked.append((payment, inv))
             await db.flush()
     except IntegrityError as exc:
         if plan_id is not None:
@@ -1168,6 +1313,9 @@ async def create_payment_run_for_invoices(
         entity_id=run.id,
         details={
             "total_amount": str(total),
+            # Early-payment discounts deducted from `total_amount` — each one
+            # also has its own `discount_offer.applied` row below.
+            "discount_total": str(discount_total),
             "payment_count": len(items),
             "requires_cfo_approval": run.requires_cfo_approval,
             "plan_id": plan_id,
@@ -1183,6 +1331,20 @@ async def create_payment_run_for_invoices(
         },
     )
 
+    for payment, inv in booked:
+        await audit_applied_discount(
+            db,
+            organization_id=org.id,
+            actor_id=user.id,
+            payment=payment,
+            invoice=inv,
+            payable=payables[inv.id],
+        )
+
     return PaymentRunCreationResult(
-        run=run, total_amount=total, payment_count=len(items), created=True
+        run=run,
+        total_amount=total,
+        payment_count=len(items),
+        created=True,
+        discount_total=discount_total,
     )
