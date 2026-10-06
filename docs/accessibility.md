@@ -223,7 +223,9 @@ The current build implements:
   rows expose a real focusable control (`RowLink`) rather than a click-only
   `<tr>`, so the keyboard path and column-header semantics both survive. A
   table wider than the viewport scrolls inside a focusable, named region, so
-  its far columns are reachable with the arrow keys.
+  its far columns are reachable with the arrow keys — in the app's own tables
+  and in the published legal documents alike, where each scroller is named by
+  the heading its table sits under.
 - **Visible focus indicator** (`:focus-visible`) on every interactive element.
 - **Focus management in dialogs** — the shared `Modal` traps focus, returns it
   to the trigger on close, and closes on `Esc`; dialogs carry `role="dialog"`

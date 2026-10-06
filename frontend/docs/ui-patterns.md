@@ -946,7 +946,11 @@ inherit it for free. Reuse these; don't re-solve them per page.
   `tests-e2e/a11y/table-scroll-region.spec.ts` (the arrow key really pans).
   A page that wraps its own table in a scroller (`/cfo`'s cash-position and
   budget tables) owes the same three attributes; the static guard fails any
-  `tabindex="0"` region outside the legal tree that lacks a role or a name.
+  `tabindex="0"` region anywhere in `src/` that lacks a role or a name, or
+  whose static `aria-labelledby` names an id not in the same file. The legal
+  pages' 19 `.table-scroll` wrappers are covered too: each is
+  `aria-labelledby` the heading its table sits under (the legal text stays
+  English, decisions §174, so these names are not catalogue entries).
 - **Status by colour** (WCAG 1.4.1) — a row tinted red to say "this one
   breaches" also says it in words: `/cfo`'s below-minimum periods carry a
   `<Badge tone="danger">Below minimum</Badge>` in the Closing cell, the

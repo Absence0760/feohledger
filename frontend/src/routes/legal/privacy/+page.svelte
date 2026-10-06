@@ -191,9 +191,9 @@
 
 	<h2 id="data-we-hold">4. What personal data we hold</h2>
 
-	<h3>Held by us, as controller</h3>
+	<h3 id="held-as-controller">Held by us, as controller</h3>
 
-	<div class="table-scroll" tabindex="0">
+	<div class="table-scroll" tabindex="0" role="region" aria-labelledby="data-we-hold held-as-controller">
 		<table>
 			<thead>
 				<tr>
@@ -350,7 +350,7 @@
 		only the processing where <strong>we</strong> are the controller.
 	</p>
 
-	<div class="table-scroll" tabindex="0">
+	<div class="table-scroll" tabindex="0" role="region" aria-labelledby="lawful-basis">
 		<table>
 			<thead>
 				<tr>

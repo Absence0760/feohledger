@@ -635,7 +635,7 @@ test.describe('legal pages', () => {
 		expect(await page.evaluate((key) => localStorage.getItem(key), CONSENT_KEY)).toBeNull();
 	});
 
-	test('every table scroller is reachable by keyboard (WCAG 2.1.1)', async ({ page }) => {
+	test('every table scroller is a named keyboard stop (WCAG 2.1.1, 4.1.2)', async ({ page }) => {
 		// Solving reflow by wrapping a wide table in an `overflow-x: auto` div
 		// creates a region only a mouse can pan. axe reports it as
 		// `scrollable-region-focusable`, but ONLY once the table actually
@@ -653,6 +653,17 @@ test.describe('legal pages', () => {
 					scrollers.nth(i),
 					`${path}: table scroller ${i} is not keyboard-reachable`
 				).toHaveAttribute('tabindex', '0');
+				// A tab stop also has to say what it is (4.1.2): a named region,
+				// named by the heading the table sits under. Asserting the
+				// COMPUTED name catches an aria-labelledby whose target is gone,
+				// which the attribute alone would not.
+				await expect(scrollers.nth(i), `${path}: table scroller ${i} has no role`).toHaveRole(
+					'region'
+				);
+				await expect(
+					scrollers.nth(i),
+					`${path}: table scroller ${i} is an anonymous tab stop`
+				).toHaveAccessibleName(/\S/);
 			}
 		}
 	});
