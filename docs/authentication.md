@@ -1359,11 +1359,18 @@ who, and inferring an editor manufactures either a refusal or an absolution.
 
 `check_segregation` is reused for expense reports, requisitions and expense
 pre-approvals through a `SimpleNamespace` attribute shim, so one rule and one
-403 string serve every "decider ≠ requester" surface. Those three pass
-`segregation_actor_ids=None` explicitly — none of those tables records who
-*edited* a row, so there is no second actor to name — rather than relying on the
-predicate's `getattr` default, which exists only so a future subject that forgets
-cannot raise `AttributeError` on the approval path.
+403 string serve every "decider ≠ requester" surface. Each shim passes
+`segregation_actor_ids` explicitly rather than relying on the predicate's
+`getattr` default, which exists only so a future subject that forgets cannot
+raise `AttributeError` on the approval path. **Requisitions pass their material
+editors**: `PATCH /api/requisitions/{id}` lets another user rewrite a draft's
+lines, vendor, currency or budget (including an intake-converted requisition,
+whose requester is the intake's), so migration 0102 added
+`purchase_requisitions.material_editor_ids`, appended on a real change to a
+field in `models/procurement.REQUISITION_MATERIAL_EDIT_FIELDS`, and `approve`
+refuses requester ∪ editors (`backend/docs/procurement-requisitions.md` § Who
+an approval refuses). Expense reports and pre-approvals pass `None`: neither
+table records who *edited* a row, so there is no second actor to name.
 
 The inter-company mirror (`POST /api/invoices/{id}/route-intercompany`)
 deliberately does **not** inherit the source invoice's set. Its segregation

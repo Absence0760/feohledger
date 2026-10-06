@@ -35,6 +35,7 @@ from app.api.deps import (
 from app.api.pagination import PaginationParams, pagination_params
 from app.models.contract import Contract
 from app.models.procurement import (
+    REQUISITION_MATERIAL_EDIT_FIELDS,
     Budget,
     IntakeRequest,
     PurchaseOrder,
@@ -60,7 +61,10 @@ from app.services.requisition_service import (
     build_line_items,
     convert_requisition_to_po,
     guard_transition,
+    implicated_editor_ids,
+    line_items_differ,
     recompute_total,
+    record_material_editor,
 )
 from app.tenant import (
     apply_entity_scope,
@@ -436,9 +440,22 @@ async def update_requisition(
                 changed.append(field)
 
     if body.line_items is not None:
-        req.line_items = build_line_items(body.line_items)
-        recompute_total(req)
-        changed.append("line_items")
+        proposed = build_line_items(body.line_items)
+        # Compared, not assumed: the edit modal re-sends every line on every
+        # save, so presence in the payload is no evidence the lines changed.
+        if line_items_differ(req.line_items, proposed):
+            req.line_items = proposed
+            recompute_total(req)
+            changed.append("line_items")
+
+    # Segregation of duties: whoever changed a TERM of the spend on this draft
+    # (lines, vendor, currency, budget — `REQUISITION_MATERIAL_EDIT_FIELDS`)
+    # has shaped what an approval releases as completely as the requester did,
+    # and `approve_requisition` refuses them through this set. Keyed off
+    # `changed`, so a re-sent identical value implicates nobody.
+    material = sorted(REQUISITION_MATERIAL_EDIT_FIELDS & set(changed))
+    if material:
+        record_material_editor(req, user.id)
 
     if changed:
         await dispatch_audit(
@@ -449,7 +466,10 @@ async def update_requisition(
             action="requisition.updated",
             entity_type="requisition",
             entity_id=req.id,
-            details={"fields": changed},
+            # `material` says why the editor joined the approval's refused set —
+            # without it the trail shows a wider SoD block with nothing
+            # explaining which edit earned it.
+            details={"fields": changed, "material": material},
         )
     await db.commit()
     fresh = await _get_or_404(db, req.id, entity_id)
@@ -553,20 +573,20 @@ async def approve_requisition(
 ):
     """Approve a pending requisition: ``pending_approval → approved``.
 
-    Segregation of duties: the approver must differ from the requester (reuses
-    ``check_segregation`` → 403). Stamps ``approved_by`` / ``approved_at``."""
+    Segregation of duties: the approver must be neither the requester nor anyone
+    who materially edited the draft (``material_editor_ids``) — reuses
+    ``check_segregation`` → 403. Stamps ``approved_by`` / ``approved_at``."""
     req = await _get_or_404(db, req_id, entity_id)
     guard_transition(req.status, RequisitionStatus.approved)
-    # SoD — approver ≠ requester. Reuse the invoice helper via a tiny attribute
-    # shim so the rule + 403 detail stay shared with the invoice/expense paths.
+    # SoD — approver ∉ requester ∪ material editors. Reuse the invoice helper
+    # via a tiny attribute shim so the rule + 403 detail stay shared with the
+    # invoice/expense paths. The editor set is what stops an ap_manager who
+    # rewrote someone else's draft (or the intake-converted requisition they
+    # then edited) from approving the spend they wrote.
     check_segregation(
         SimpleNamespace(
             uploaded_by_id=req.requester_user_id,
-            # No editor-tracking column on this table, so there is no second
-            # implicated actor to name. Stated rather than left absent: a
-            # missing attribute on a fraud control reads as an oversight, and
-            # `violates_segregation`'s getattr default would silently supply it.
-            segregation_actor_ids=None,
+            segregation_actor_ids=implicated_editor_ids(req),
         ),
         user.id,
         {"require_segregation": True},
@@ -817,16 +837,21 @@ async def _resolve_links(
         resolved[field] = value
         if value is None:
             continue
-        row = (
-            await db.execute(
-                apply_entity_scope(
-                    select(model).where(model.id == value, model.organization_id == org_id),
-                    model,
-                    entity_id,
-                    include_shared=True,
-                )
-            )
-        ).scalar_one_or_none()
+        stmt = apply_entity_scope(
+            select(model).where(model.id == value, model.organization_id == org_id),
+            model,
+            entity_id,
+            include_shared=True,
+        )
+        if field == "budget_id":
+            # Row-lock the budget for the rest of this transaction.
+            # `PATCH` / `DELETE /api/budgets/{id}` take the same lock around
+            # their linked-requisition guards (a count, then a re-denominate or
+            # a delete), so a link made here either lands before the guard
+            # counts it or waits and then sees the budget's new currency (422)
+            # or its absence (404) — never slips in between.
+            stmt = stmt.with_for_update(of=model).execution_options(populate_existing=True)
+        row = (await db.execute(stmt)).scalar_one_or_none()
         if row is None:
             raise HTTPException(status_code=404, detail=f"{label} not found")
         if field == "budget_id" and (row.currency or "").upper() != (currency or "").upper():
