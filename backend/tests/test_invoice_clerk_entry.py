@@ -14,6 +14,7 @@ in `test_invoice_file_management.py`.
 from __future__ import annotations
 
 import uuid
+from datetime import date
 from decimal import Decimal
 from unittest.mock import AsyncMock
 
@@ -291,40 +292,119 @@ async def test_clerk_cannot_complete_where_the_workflow_has_no_approval_step(rea
     assert (await _row(realdb, invoice_id)).status == InvoiceStatus.new
 
 
-async def test_clerk_edit_refused_once_a_chain_level_has_signed(realdb):
-    """`approved_by` is set only at FINAL approval; a level-1 sign-off on a
-    multi-level chain survives an edit, so it would carry over to content its
-    approver never saw. A clerk reworks it through reject instead."""
-    from app.models.workflow import WorkflowInstance
-
+async def test_clerk_cannot_change_an_invoice_once_it_is_submitted(realdb):
+    """Approval binds to no version, so an edit landing between the approver's
+    read and their click would be approved unseen — re-pointing the payee
+    (`vendor` re-links `vendor_id`) is the dangerous one. The clerk's window
+    closes at submit; a correction goes through reject → rework."""
     async with realdb.client(key="a", role="ap_clerk") as c:
-        invoice_id = await _clerk_create(c, "CLERK-CHAIN-001")
+        invoice_id = await _clerk_create(c, "CLERK-SUBMITTED-001")
         assert (await c.post(f"/api/invoices/{invoice_id}/complete")).status_code == 200
+
+        edit = await c.patch(f"/api/invoices/{invoice_id}", json={"vendor": "Someone Else"})
+        assert edit.status_code == 403
+        assert edit.json()["detail"]["code"] == "invoice_entry_window_closed"
+        assert (await c.put(f"/api/invoices/{invoice_id}/line-items", json=[])).status_code == 403
+        attach = await c.post(f"/api/invoices/{invoice_id}/file", files={"file": PDF})
+        assert attach.status_code == 403
+    row = await _row(realdb, invoice_id)
+    assert row.status == InvoiceStatus.ready_for_review
+    assert row.vendor_name == "Clerk Entry Vendor"
+    assert row.file_key is None
+
+    # A manager's reach is unchanged: they still correct a submitted invoice.
+    async with realdb.client(key="a", role="ap_manager") as c:
+        edit = await c.patch(f"/api/invoices/{invoice_id}", json={"notes": "checked"})
+    assert edit.status_code == 200, edit.text
+
+
+async def test_the_window_reads_approval_date_not_just_the_approver_name(realdb):
+    """`approved_by` is a display name and is empty for a user with a blank
+    `full_name`; an approved invoice whose ERP push then failed would read as
+    never approved on the name alone."""
+    async with realdb.client(key="a", role="ap_clerk") as c:
+        invoice_id = await _clerk_create(c, "CLERK-BLANKNAME-001")
     async with realdb.sessionmaker("a")() as s:
-        inst = (
-            await s.execute(
-                select(WorkflowInstance).where(WorkflowInstance.invoice_id == invoice_id)
-            )
-        ).scalar_one()
-        inst.state_data = {
-            **(inst.state_data or {}),
-            "approval_levels": {
-                "current_level": 1,
-                "levels": [
-                    {"level": 0, "approvals": [{"user_id": str(uuid.uuid4())}]},
-                    {"level": 1, "approvals": []},
-                ],
-            },
-        }
+        row = (await s.execute(select(Invoice).where(Invoice.id == invoice_id))).scalar_one()
+        row.status = InvoiceStatus.failed
+        row.approved_by = ""
+        row.approval_date = date(2026, 1, 2)
         await s.commit()
 
     async with realdb.client(key="a", role="ap_clerk") as c:
         edit = await c.patch(f"/api/invoices/{invoice_id}", json={"amount": "1.00"})
-        assert edit.status_code == 403
-        assert edit.json()["detail"]["code"] == "invoice_entry_window_closed"
-        lines = await c.put(f"/api/invoices/{invoice_id}/line-items", json=[])
-        assert lines.status_code == 403
+    assert edit.status_code == 403
     assert (await _row(realdb, invoice_id)).amount == Decimal("500.00")
+
+
+# ---------------------------------------------------------------------------
+# An entry-only caller's document never auto-approves
+# ---------------------------------------------------------------------------
+
+
+def _enable_extraction_on_upload(monkeypatch):
+    """Report the extraction step enabled so `upload` reaches its dispatch,
+    whatever the shared test tenant's workflow says."""
+    from app.api import workflow as workflow_api
+
+    real = workflow_api.is_step_enabled
+
+    async def _is_step_enabled(db, org_id, step_type, **kwargs):
+        if step_type == "extraction":
+            return True
+        return await real(db, org_id, step_type, **kwargs)
+
+    monkeypatch.setattr(workflow_api, "is_step_enabled", _is_step_enabled)
+
+
+async def test_clerk_upload_dispatches_extraction_with_auto_approve_suppressed(realdb, monkeypatch):
+    """The unattended confidence / amount gates would otherwise approve a
+    document the clerk chose, with nobody else involved."""
+    dispatch = AsyncMock()
+    monkeypatch.setattr("app.api.workflow.dispatch_extraction", dispatch)
+    _enable_extraction_on_upload(monkeypatch)
+    async with realdb.client(key="a", role="ap_clerk") as c:
+        resp = await c.post("/api/invoices/upload", files={"file": PDF})
+    assert resp.status_code == 202, resp.text
+    dispatch.assert_awaited_once()
+    assert dispatch.await_args.kwargs["suppress_auto_approve"] is True
+
+
+async def test_manager_upload_keeps_touchless_auto_approve(realdb, monkeypatch):
+    dispatch = AsyncMock()
+    monkeypatch.setattr("app.api.workflow.dispatch_extraction", dispatch)
+    _enable_extraction_on_upload(monkeypatch)
+    async with realdb.client(key="a", role="ap_manager") as c:
+        resp = await c.post("/api/invoices/upload", files={"file": PDF})
+    assert resp.status_code == 202, resp.text
+    dispatch.assert_awaited_once()
+    assert dispatch.await_args.kwargs["suppress_auto_approve"] is False
+
+
+async def test_clerk_re_extraction_never_auto_approves(realdb, monkeypatch):
+    """The laundering shape: an intake invoice nobody uploaded, a clerk swaps
+    in a document of their choosing and re-extracts it. What the flag does
+    inside `run_extraction` is pinned in `test_extraction_reextract_options.py`."""
+    dispatch = AsyncMock()
+    monkeypatch.setattr("app.services.extraction_dispatch.dispatch_extraction", dispatch)
+    async with realdb.client(key="a", role="ap_manager") as c:
+        invoice_id = await _clerk_create(c, "CLERK-REEXTRACT-001")
+        assert (
+            await c.post(f"/api/invoices/{invoice_id}/file", files={"file": PDF})
+        ).status_code == 201
+    await _force(realdb, invoice_id, status=InvoiceStatus.failed, approved_by=None)
+    async with realdb.sessionmaker("a")() as s:
+        row = (await s.execute(select(Invoice).where(Invoice.id == invoice_id))).scalar_one()
+        row.uploaded_by_id = None  # an intake-shaped row
+        await s.commit()
+
+    async with realdb.client(key="a", role="ap_clerk") as c:
+        swap = await c.put(f"/api/invoices/{invoice_id}/file", files={"file": PDF})
+        assert swap.status_code == 200, swap.text
+        extract = await c.post(f"/api/invoices/{invoice_id}/extract")
+    assert extract.status_code == 200, extract.text
+    dispatch.assert_awaited_once()
+    assert dispatch.await_args.kwargs["suppress_auto_approve"] is True
 
 
 async def test_clerk_bulk_resubmits_rejected_and_skips_what_is_past_entry(realdb):
@@ -361,3 +441,240 @@ async def test_clerk_bulk_sends_a_rejected_invoice_back_to_draft(realdb):
     assert resp.status_code == 200, resp.text
     assert resp.json()["updated"] == 1
     assert (await _row(realdb, invoice_id)).status == InvoiceStatus.new
+
+
+# ---------------------------------------------------------------------------
+# An entry-only editor joins the invoice's segregation set
+# ---------------------------------------------------------------------------
+
+
+async def _intake_shaped(realdb, number: str) -> str:
+    """An invoice nobody uploaded — the email-intake / PEPPOL shape."""
+    async with realdb.client(key="a", role="ap_manager") as c:
+        invoice_id = await _clerk_create(c, number)
+    async with realdb.sessionmaker("a")() as s:
+        row = (await s.execute(select(Invoice).where(Invoice.id == invoice_id))).scalar_one()
+        row.uploaded_by_id = None
+        await s.commit()
+    return invoice_id
+
+
+async def test_a_clerk_who_edits_someone_elses_invoice_can_never_approve_it(realdb):
+    """With no uploader the segregation set was empty, so a clerk later given
+    `invoice.approve` (a custom role, a promotion) could approve figures they
+    keyed. Every content write stamps them — once."""
+    clerk_id = realdb.info("a").users["ap_clerk"]
+    invoice_id = await _intake_shaped(realdb, "CLERK-STAMP-001")
+
+    async with realdb.client(key="a", role="ap_clerk") as c:
+        assert (
+            await c.patch(f"/api/invoices/{invoice_id}", json={"amount": "450.00"})
+        ).status_code == 200
+        assert (
+            await c.put(
+                f"/api/invoices/{invoice_id}/line-items",
+                json=[{"line_number": 1, "description": "Widgets", "total": "450.00"}],
+            )
+        ).status_code == 200
+        assert (
+            await c.post(f"/api/invoices/{invoice_id}/file", files={"file": PDF})
+        ).status_code == 201
+
+    row = await _row(realdb, invoice_id)
+    assert row.uploaded_by_id is None
+    assert row.segregation_actor_ids == [str(clerk_id)]
+    assert violates_segregation(row, clerk_id, {"require_segregation": True})
+
+
+@pytest.mark.parametrize("route", ["file_replace", "file_delete"])
+async def test_a_clerk_swapping_the_source_document_is_stamped(realdb, route):
+    clerk_id = realdb.info("a").users["ap_clerk"]
+    async with realdb.client(key="a", role="ap_manager") as c:
+        invoice_id = await _clerk_create(c, f"CLERK-STAMP-{route}")
+        assert (
+            await c.post(f"/api/invoices/{invoice_id}/file", files={"file": PDF})
+        ).status_code == 201
+    async with realdb.client(key="a", role="ap_clerk") as c:
+        if route == "file_replace":
+            resp = await c.put(
+                f"/api/invoices/{invoice_id}/file",
+                files={"file": ("other.pdf", b"%PDF-1.4 other", "application/pdf")},
+            )
+        else:
+            resp = await c.delete(f"/api/invoices/{invoice_id}/file")
+    assert resp.status_code == 200, resp.text
+    assert (await _row(realdb, invoice_id)).segregation_actor_ids == [str(clerk_id)]
+
+
+async def test_a_clerk_re_extracting_someone_elses_invoice_is_stamped(realdb, monkeypatch):
+    """Re-extraction rewrites the vendor, amount, dates and lines — a content
+    change, even with the document left as it was."""
+    monkeypatch.setattr("app.services.extraction_dispatch.dispatch_extraction", AsyncMock())
+    clerk_id = realdb.info("a").users["ap_clerk"]
+    async with realdb.client(key="a", role="ap_manager") as c:
+        invoice_id = await _clerk_create(c, "CLERK-STAMP-EXTRACT-001")
+        assert (
+            await c.post(f"/api/invoices/{invoice_id}/file", files={"file": PDF})
+        ).status_code == 201
+    async with realdb.client(key="a", role="ap_clerk") as c:
+        assert (await c.post(f"/api/invoices/{invoice_id}/extract")).status_code == 200
+    assert (await _row(realdb, invoice_id)).segregation_actor_ids == [str(clerk_id)]
+
+
+async def test_bulk_status_reports_an_id_it_could_not_find(realdb):
+    """The batch is entity-scoped and row-locked; an id it cannot load (gone, or
+    in another entity) comes back as a skip, never a silent drop."""
+    missing = str(uuid.uuid4())
+    async with realdb.client(key="a", role="ap_clerk") as c:
+        invoice_id = await _clerk_create(c, "CLERK-BULK-MISSING-1")
+        resp = await c.post(
+            "/api/invoices/bulk/status",
+            json={"ids": [invoice_id, missing], "status": "ready_for_review"},
+        )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["updated"] == 1
+    assert body["skipped"] == [{"id": missing, "reason": "invoice not found"}]
+
+
+async def test_a_clerk_editing_their_own_entry_is_not_restamped(realdb):
+    """The uploader column already names them; the set holds OTHER actors."""
+    async with realdb.client(key="a", role="ap_clerk") as c:
+        invoice_id = await _clerk_create(c, "CLERK-STAMP-OWN-001")
+        assert (
+            await c.patch(f"/api/invoices/{invoice_id}", json={"notes": "own"})
+        ).status_code == 200
+    assert not (await _row(realdb, invoice_id)).segregation_actor_ids
+
+
+async def test_a_managers_edit_is_not_stamped(realdb):
+    """Approve-with-corrections is the approver editing what they sign; a
+    manager's pre-review fix must not refuse that same manager the approval."""
+    invoice_id = await _intake_shaped(realdb, "CLERK-STAMP-MGR-001")
+    async with realdb.client(key="a", role="ap_manager") as c:
+        assert (
+            await c.patch(f"/api/invoices/{invoice_id}", json={"amount": "450.00"})
+        ).status_code == 200
+    assert not (await _row(realdb, invoice_id)).segregation_actor_ids
+
+
+async def test_a_no_op_save_by_a_clerk_does_not_stamp(realdb):
+    """Only a change is a preparer's act — echoing the stored values back is not."""
+    invoice_id = await _intake_shaped(realdb, "CLERK-STAMP-NOOP-001")
+    async with realdb.client(key="a", role="ap_clerk") as c:
+        resp = await c.patch(f"/api/invoices/{invoice_id}", json={"amount": "500.00"})
+    assert resp.status_code == 200, resp.text
+    assert not (await _row(realdb, invoice_id)).segregation_actor_ids
+
+
+async def test_clerk_entry_is_on_the_audit_trail_under_the_clerk(realdb):
+    from app.models.workflow import AuditLog
+
+    clerk_id = realdb.info("a").users["ap_clerk"]
+    async with realdb.client(key="a", role="ap_clerk") as c:
+        invoice_id = await _clerk_create(c, "CLERK-AUDIT-001")
+        assert (
+            await c.patch(f"/api/invoices/{invoice_id}", json={"amount": "510.00"})
+        ).status_code == 200
+        assert (
+            await c.post(f"/api/invoices/{invoice_id}/file", files={"file": PDF})
+        ).status_code == 201
+    row = await _row(realdb, invoice_id)
+    async with realdb.sessionmaker("a")() as s:
+        actions = {
+            a.action: a.actor_id
+            for a in (
+                await s.execute(
+                    select(AuditLog).where(AuditLog.correlation_id == row.correlation_id)
+                )
+            )
+            .scalars()
+            .all()
+        }
+    for action in ("invoice.created", "invoice.edited", "invoice.file_attached"):
+        assert actions.get(action) == clerk_id, (action, actions)
+
+
+# ---------------------------------------------------------------------------
+# Entry is a ROLE (`INVOICE_ENTRY_ROLES`), and approval a permission
+# ---------------------------------------------------------------------------
+
+
+async def _custom_role_client(realdb, *, permissions: list[str], with_clerk: bool = False):
+    """A client for a fresh user in tenant A holding one custom role — and the
+    system `ap_clerk` role too when `with_clerk`."""
+    from app.api.deps import create_access_token
+    from app.models.user import Role, User, UserRole
+    from app.utils.passwords import pwd_context
+
+    info = realdb.info("a")
+    uid = uuid.uuid4()
+    async with realdb.control_sessionmaker()() as s:
+        role = Role(
+            id=uuid.uuid4(),
+            name=f"Custom {uuid.uuid4().hex[:8]}",
+            description="clerk-entry test role",
+            organization_id=info.org_id,
+            permissions=permissions,
+        )
+        s.add(role)
+        s.add(
+            User(
+                id=uid,
+                email=f"{uuid.uuid4().hex[:10]}@clerk-entry.test",
+                full_name="Custom Role User",
+                hashed_password=pwd_context.hash("Passw0rd!xyz"),
+                is_active=True,
+                organization_id=info.org_id,
+                must_change_password=False,
+            )
+        )
+        await s.flush()
+        s.add(UserRole(user_id=uid, role_id=role.id))
+        if with_clerk:
+            clerk_role = (
+                await s.execute(
+                    select(Role).where(Role.name == "ap_clerk", Role.organization_id.is_(None))
+                )
+            ).scalar_one()
+            s.add(UserRole(user_id=uid, role_id=clerk_role.id))
+        await s.commit()
+    c = realdb.client(key="a", role=None)
+    c.headers["Authorization"] = f"Bearer {create_access_token(uid, info.org_id)}"
+    return c, uid
+
+
+async def test_a_custom_role_alone_cannot_enter_invoices(realdb):
+    """Entry is `INVOICE_ENTRY_ROLES`, not a catalog permission — a custom role
+    confers it to no one, even one that can approve."""
+    c, _ = await _custom_role_client(realdb, permissions=["invoice.approve"])
+    async with c:
+        resp = await c.post(
+            "/api/invoices",
+            json={"vendor": "V", "invoice_number": "CUSTOM-NOPE-001", "amount": "1.00"},
+        )
+        assert resp.status_code == 403
+        assert (await c.post("/api/invoices/upload", files={"file": PDF})).status_code == 403
+
+
+async def test_a_clerk_granted_approval_cannot_approve_what_they_edited(realdb):
+    """The case the editor stamp exists for. `ap_clerk` plus a custom role
+    granting `invoice.approve`, and no manage role: entry-only on the entry
+    routes, yet able to call `/approve`. Their edit to an intake invoice (no
+    uploader) stamps them, so their own approval of it is a segregation
+    refusal rather than a self-approval of their own figures."""
+    invoice_id = await _intake_shaped(realdb, "CUSTOM-BOTH-001")
+    c, uid = await _custom_role_client(realdb, permissions=["invoice.approve"], with_clerk=True)
+    async with c:
+        assert (
+            await c.patch(f"/api/invoices/{invoice_id}", json={"amount": "10.00"})
+        ).status_code == 200
+        submit = await c.post(f"/api/invoices/{invoice_id}/complete")
+        assert submit.status_code == 200, submit.text
+        assert submit.json()["status"] == "ready_for_review"
+        approve = await c.post(f"/api/invoices/{invoice_id}/approve", json={})
+    assert approve.status_code == 403, approve.text
+    assert approve.json()["detail"]["code"] == "approval_segregation"
+    row = await _row(realdb, invoice_id)
+    assert row.status == InvoiceStatus.ready_for_review
+    assert row.segregation_actor_ids == [str(uid)]

@@ -41,6 +41,11 @@ terms are the source's, copied verbatim — so everyone implicated in the source
 is implicated in the mirror). At either site, omitting the kwarg *would*
 silently drop a real implicated actor. A third site that starts writing the
 set has to join the list, so the claim "two writers" cannot quietly go stale.
+
+This file pins CONSTRUCTION sites only. The one post-construction writer —
+``api/invoice_entry.stamp_entry_editor``, which adds an entry-only caller who
+edits an invoice they did not upload — is pinned by behaviour in
+``test_invoice_clerk_entry.py``.
 """
 
 from __future__ import annotations

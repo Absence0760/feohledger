@@ -433,7 +433,8 @@ async def import_invoices_csv(
     (``services/approval_chain.violates_segregation``).
 
     ``allow_historical=False`` refuses every row at a ``_HISTORICAL_INVOICE_STATUSES``
-    status — the endpoint passes it for an AP clerk, who may import open AP for
+    status — the endpoint passes it for a caller without an admin / AP manager
+    role (`invoice_entry.HISTORICAL_IMPORT_ROLES`), who may import open AP for
     approval but not rows asserting a payment that already happened. A blank
     ``status`` cell still defaults to ``done``, so such a row is refused too
     rather than silently re-read as ``new``."""

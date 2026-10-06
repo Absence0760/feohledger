@@ -669,6 +669,7 @@ async def test_import_invoices_endpoint_ap_clerk_imports_open_ap_only(realdb):
 
 
 async def test_import_invoices_endpoint_cfo_still_forbidden(realdb):
+    """Import opened to the AP clerk, not to the CFO (`INVOICE_IMPORT_ROLES`)."""
     csv_bytes = b"invoice_number,vendor_name,amount,status\nIMP-CFO-1,V,1.00,new\n"
     async with realdb.client(key="a", role="cfo") as c:
         resp = await c.post(
@@ -676,6 +677,17 @@ async def test_import_invoices_endpoint_cfo_still_forbidden(realdb):
             files={"file": ("invoices.csv", csv_bytes, "text/csv")},
         )
     assert resp.status_code == 403
+
+
+async def test_import_invoices_endpoint_ap_manager_still_imports_history(realdb):
+    csv_bytes = b"invoice_number,vendor_name,amount,status\nIMP-MGR-H1,Mgr Hist Vendor,5.00,paid\n"
+    async with realdb.client(key="a", role="ap_manager") as c:
+        resp = await c.post(
+            "/api/invoices/import-csv",
+            files={"file": ("invoices.csv", csv_bytes, "text/csv")},
+        )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["imported"] == 1, resp.text
 
 
 async def test_import_invoices_endpoint_rejects_oversized_file(realdb):

@@ -23,6 +23,7 @@ from app.api.invoice_entry import (
     in_entry_window,
     is_entry_only,
     refuse_entry_only_outside_window,
+    stamp_entry_editor,
 )
 from app.api.permissions import PERM_INVOICE_APPROVE
 from app.api.refusals import coded_refusal
@@ -133,7 +134,13 @@ async def upload_invoice(
             await db.refresh(invoice)
 
             print(f"[upload] Dispatching extraction for invoice {invoice.id}")
-            await dispatch_extraction(invoice.id, org_id, user.id)
+            # An entry-only caller's upload always lands at review: the
+            # unattended confidence / amount gates would otherwise approve a
+            # document they chose with no second person involved
+            # (`api/invoice_entry.py`).
+            await dispatch_extraction(
+                invoice.id, org_id, user.id, suppress_auto_approve=is_entry_only(user)
+            )
             print(f"[upload] Extraction dispatched for invoice {invoice.id}")
 
             # Log that extraction was dispatched
@@ -205,6 +212,9 @@ async def trigger_extraction(
             status_code=400, detail="No file attached to this invoice. Upload a file first."
         )
 
+    # Re-extraction rewrites the vendor, amount, dates and lines: a content
+    # change by whoever asked for it.
+    stamp_entry_editor(user, invoice)
     # Transition to pending
     await transition_invoice(
         db,
@@ -220,7 +230,11 @@ async def trigger_extraction(
     # Dispatch extraction
     from app.services.extraction_dispatch import dispatch_extraction
 
-    await dispatch_extraction(invoice.id, org_id, user.id)
+    # Same as upload: a clerk may have just attached or swapped the document,
+    # so their extraction never auto-approves.
+    await dispatch_extraction(
+        invoice.id, org_id, user.id, suppress_auto_approve=is_entry_only(user)
+    )
 
     return {
         "id": str(invoice.id),
@@ -488,10 +502,11 @@ async def complete_invoice(
     `new` invoice for review is the end of entry, while closing an invoice with
     no approval step, or pushing an approved one to the ERP, is past it. Their
     submit ALWAYS lands at review — the amount-floor auto-approve below is
-    skipped for them. A clerk may have just edited the amount, and nothing
-    stamps an editor into the segregation set, so on an invoice with no
-    recorded uploader (email intake, PEPPOL) the floor would approve the
-    clerk's own figures with no second person involved.
+    skipped for them, whatever the org's `require_segregation`. The floor's own
+    segregation degrade would usually catch a clerk (they are the uploader, or
+    `stamp_entry_editor` put them in the set), but an org that opted out of
+    segregation would then have the floor approve the clerk's own figures with
+    no second person involved; entry never ends in an approval.
     """
     await ensure_in_entity_scope(db, Invoice, invoice_id, entity_id, detail="Invoice not found")
     invoice = await get_invoice_for_update(db, invoice_id)

@@ -394,7 +394,10 @@ async def run_extraction(
         already REJECTED; letting the unattended confidence / small-amount gates
         approve the replacement would let a supplier launder a rejected invoice
         past the reviewer who rejected it. The invoice lands at
-        ``ready_for_review`` and a human decides again.
+        ``ready_for_review`` and a human decides again. Also set when an
+        entry-only caller (an AP clerk, ``api/invoice_entry.py``) uploads or
+        re-extracts: they chose the document and cannot approve, so an
+        unattended approval of it would have no second person in it.
     """
     # Cache IDs before try block — after rollback, invoice attrs may be expired
     invoice_id = invoice.id
@@ -867,13 +870,13 @@ async def run_extraction(
                 target_status = InvoiceStatus.approved
 
         if suppress_auto_approve and auto_approved:
-            # A human already rejected this document once (see the docstring).
-            # Fall back to review rather than approving the replacement
-            # unattended.
+            # A human already rejected this document, or an entry-only caller
+            # supplied it (see the docstring). Fall back to review rather than
+            # approving it unattended.
             auto_approved = False
             target_status = InvoiceStatus.ready_for_review
             logger.info(
-                "[extraction] auto-approve suppressed for re-extracted invoice %s",
+                "[extraction] auto-approve suppressed for invoice %s",
                 invoice_id,
             )
 
