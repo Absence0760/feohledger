@@ -32,7 +32,7 @@ from app.database import get_control_db
 from app.models.organization import Organization
 from app.models.user import Role, User
 from app.schemas.organization import SSOSettingsStatus, UpdateSSOSettingsRequest
-from app.services.audit_dispatch import dispatch_auth_audit
+from app.services.audit_dispatch import record_auth_audit_or_raise
 from app.services.sso import SSOConfigError, check_sso_idp_config, sso_only_requested
 from app.services.sso_settings import (
     SCIM_GROUP_ROLE_MAP_KEY,
@@ -43,7 +43,7 @@ from app.services.sso_settings import (
     sso_status,
     stored_sso_block,
 )
-from app.tenant import get_tenant
+from app.tenant import get_tenant, lock_organization
 
 router = APIRouter(prefix="/organization/sso", tags=["organization"])
 
@@ -161,17 +161,10 @@ async def update_sso_settings(
     resulting `enabled` / `sso_only` / `protocol` posture — never a value of the
     IdP configuration, and never the secret.
     """
-    # Re-read the row under a lock so a concurrent save (or a SCIM group write
-    # that reads the row after this one) cannot interleave with this
-    # read-modify-write of the settings JSONB.
-    locked = (
-        await db.execute(
-            select(Organization)
-            .where(Organization.id == org.id)
-            .with_for_update()
-            .execution_options(populate_existing=True)
-        )
-    ).scalar_one()
+    # Every settings writer (this one, the PATCH, the SCIM token mint and the
+    # SCIM group writes) takes the same row lock before reading, so none of
+    # them can write a stale snapshot back over another's change.
+    locked = await lock_organization(db, org)
 
     before = stored_sso_block(locked.settings)
     try:
@@ -197,24 +190,37 @@ async def update_sso_settings(
     refuse_unresolvable_sso_only(merged)
 
     changed = changed_keys(before, block)
+
+    # The row FIRST, and no change without it: this is a sign-in policy (and,
+    # with `client_secret`, a credential) change, and an unrecorded one is worse
+    # than a refused one — the same call `services/sso_break_glass` makes. Names
+    # and posture only: `client_secret` appears in `changed` as a NAME when it
+    # was replaced or cleared; its value never enters the trail, which is
+    # shipped to CloudWatch and a WORM bucket. Written while the row lock is
+    # held; a commit failing after it leaves a row for a save that did not land,
+    # which is the safe direction to be wrong in.
+    try:
+        await record_auth_audit_or_raise(
+            organization_id=locked.id,
+            actor_id=user.id,
+            action="organization.sso_updated",
+            entity_type="organization",
+            entity_id=locked.id,
+            details={
+                "changed": changed,
+                "enabled": block["enabled"],
+                "sso_only": block["sso_only"],
+                "protocol": block["protocol"],
+            },
+        )
+    except Exception:
+        await db.rollback()
+        raise HTTPException(
+            status_code=503,
+            detail="The change could not be recorded in the audit trail, so it was not saved.",
+        ) from None
+
     locked.settings = merged
     flag_modified(locked, "settings")
     await db.commit()
-
-    # Names and posture only. `client_secret` appears in `changed` as a NAME
-    # when it was replaced or cleared; its value never enters the trail, which
-    # is shipped to CloudWatch and a WORM bucket.
-    await dispatch_auth_audit(
-        organization_id=locked.id,
-        actor_id=user.id,
-        action="organization.sso_updated",
-        entity_type="organization",
-        entity_id=locked.id,
-        details={
-            "changed": changed,
-            "enabled": block["enabled"],
-            "sso_only": block["sso_only"],
-            "protocol": block["protocol"],
-        },
-    )
     return _status(locked)

@@ -32,7 +32,7 @@ from app.services.data_residency import (
 )
 from app.services.org_settings_view import settings_for_response
 from app.services.sso import generate_scim_token
-from app.tenant import get_tenant, normalize_custom_domain
+from app.tenant import get_tenant, lock_organization, normalize_custom_domain
 from app.utils.tenant_urls import is_under_platform_domain
 
 logger = logging.getLogger(__name__)
@@ -223,6 +223,10 @@ async def update_organization(
     user: User = Depends(require_roles(ROLE_ADMIN)),
     db: AsyncSession = Depends(get_control_db),
 ):
+    # The merge below writes the whole settings dict back, so read it under the
+    # row lock (`tenant.lock_organization`) or a concurrent audited writer —
+    # `PUT /organization/sso`, the SCIM group writes — is silently reverted.
+    org = await lock_organization(db, org)
     if body.name is not None:
         org.name = body.name
 
@@ -761,6 +765,9 @@ async def mint_scim_token(
     """
     raw, digest = generate_scim_token()
 
+    # Under the row lock, like every settings writer: an unlocked read here could
+    # write back a stale `sso` block over a concurrent `PUT /organization/sso`.
+    org = await lock_organization(db, org)
     settings_dict = dict(org.settings or {})
     sso = dict(settings_dict.get("sso") or {})
     sso["scim_bearer_hash"] = digest

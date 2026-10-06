@@ -421,3 +421,63 @@ async def test_a_first_save_does_not_report_respelled_keys(realdb):
     resp = await _put(realdb, OIDC_READY)
     assert resp.status_code == 200, resp.text
     assert (await _audit_rows(realdb))[0].details["changed"] == []
+
+
+# ---------- audit-first and the row lock ----------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_no_audit_row_means_no_save(realdb, monkeypatch):
+    """A sign-in policy change that the trail cannot record is refused, not
+    applied unrecorded — the same call the break-glass makes."""
+    from app.services import audit_dispatch
+
+    await _seed(realdb, {**OIDC_READY, "sso_only": False})
+
+    async def _fail(**_kwargs):
+        raise ConnectionError("audit store down")
+
+    monkeypatch.setattr(audit_dispatch, "_write_auth_audit", _fail)
+    resp = await _put(realdb, {**OIDC_READY, "client_secret": SECRET_2})
+    assert resp.status_code == 503, resp.text
+    assert SECRET_2 not in resp.text
+    stored = await _stored(realdb)
+    assert stored["client_secret"] == SECRET
+    assert stored["sso_only"] is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "body",
+    [
+        pytest.param([SECRET], id="array-body"),
+        pytest.param({**OIDC_READY, "enabled": "maybe"}, id="enabled-wrong-type"),
+        pytest.param({**OIDC_READY, "allowed_email_domains": "acme.com"}, id="domains-not-list"),
+    ],
+)
+async def test_framework_validation_errors_do_not_echo_the_secret(realdb, body):
+    resp = await _put(realdb, body)
+    assert resp.status_code == 422, resp.text
+    assert SECRET not in resp.text
+
+
+@pytest.mark.asyncio
+async def test_lock_organization_refreshes_a_stale_snapshot(realdb):
+    """Every settings writer reads `org.settings` after `lock_organization`, so
+    a snapshot loaded before another writer committed is refreshed rather than
+    written back over that commit."""
+    from app.tenant import lock_organization
+
+    org_id = realdb.info("a").org_id
+    async with realdb.control_sessionmaker()() as stale:
+        org = (
+            await stale.execute(select(Organization).where(Organization.id == org_id))
+        ).scalar_one()
+        assert "sso" not in (org.settings or {})
+        # Another writer commits while this session still holds its snapshot
+        # (READ COMMITTED, and the plain SELECT above took no lock).
+        await _seed(realdb, {**OIDC_READY, "sso_only": False})
+        locked = await lock_organization(stale, org)
+        assert locked is org
+        assert org.settings["sso"]["client_id"] == "feoh"
+        await stale.rollback()
