@@ -91,7 +91,7 @@ section carried its own `decisions.md` § reference, so nothing was lost by
 deleting it; that cross-reference is what makes the pruning safe, and writing
 one is what earns a future entry the right to be deleted.
 
-**52 open: 37 (c) · 9 (a) · 6 (b)** — re-derived from the file, never carried
+**64 open: 49 (c) · 9 (a) · 6 (b)** — re-derived from the file, never carried
 forward. The section heading is authoritative; where an entry also carries a
 `(c)`/`(a)`/`(b)` marker, the two agree.
 `grep -c '^- \[ \]' docs/followups.md`.
@@ -1007,6 +1007,117 @@ or is a sibling of a fix that needs its own pass.
       attach refused for a line someone else created.
       **Trigger:** the next change to expense ownership or the expense SoD check,
       or a persona-fraudster pass over expenses.
+
+### Surfaced by writing the help centre (2026-10-06, decisions §244)
+
+Writing the in-app guides against the code turned these up. The guides
+describe what the code does today; each item says what changes in help when it
+lands. Pure doc drift was corrected in the same PR. The two diagnosed defects
+(the assistant's forecast gate, expense Attach) are in
+[known-issues.md](known-issues.md).
+
+- [ ] **(c) Translate the help centre's guide prose.** Guide bodies, glossary
+      long text and page-directory lines are English, rendered `lang="en"`
+      under a translated notice. The chrome, term names, tooltips and diagram
+      labels are already in all six locales (`frontend/docs/help-centre.md`
+      § Translation). **Durable fix:** a per-locale overlay keyed by guide id
+      that carries a hash of the English source it was translated from, so a
+      guide edited after translation falls back to English rather than
+      showing a stale translation, plus a test that fails on a stale hash.
+      Reviewed by a fluent finance reader per locale, not machine output.
+      **Trigger:** the first customer contract in a non-English market, or a
+      locale's tenants passing a share of active users worth the review cost.
+- [ ] **(c) PRODUCT CALL — should an unverified vendor block payment?**
+      `backend/docs/vendor-management.md` says unverified vendors are blocked
+      from payment runs. The code raises only an `unverified_vendor` warning
+      and exception, and that type is not in `PAYMENT_BLOCKING_EXCEPTION_TYPES`
+      (`backend/app/api/payments.py`). **Durable fix:** decide. Either add the
+      vendor-status check to run creation and compliance (with a test), or
+      delete the claim from the doc. The help guides currently say a warning and
+      an exception appear. **Trigger:** before the first production payment
+      run.
+- [ ] **(c) PRODUCT CALL — should a failed inspection or PO mismatch block
+      payment?** `backend/docs/po-matching.md` and the
+      `goodsReceipts.inspections.hint` UI string say a failed inspection
+      "blocks the invoice with a quality hold". `quality_hold` and
+      `po_mismatch` are not payment-blocking types, so neither stops a run.
+      **Durable fix:** decide, then either add them to
+      `PAYMENT_BLOCKING_EXCEPTION_TYPES` (and to the SoD-on-clearing set, which
+      keys on the same list) or correct the hint string in all six locales and
+      the doc. **Trigger:** same as above.
+- [ ] **(c) Nothing creates a goods receipt.** There is no create endpoint, ERP
+      sync or UI for goods receipts; only seed data makes them. So three-way
+      and four-way matching can't be fed in a real tenant. **Durable fix:**
+      ERP sync of receipts beside the PO sync (the adapter families already
+      sync POs), plus a manual "record receipt" form for tenants without one.
+      **Trigger:** the first tenant that turns on three-way matching.
+- [ ] **(c) A requisition can't be linked to a budget from the UI.** The
+      requisition form has no budget field and `checkBudget()` (the overspend
+      pre-check in the frontend API module) is never called, so a budget's
+      "Committed" figure can only be filled through the API. **Durable fix:** a
+      budget picker on the requisition form that calls `checkBudget()` and
+      shows the overspend warning before submit. **Trigger:** the next change
+      to requisitions or budgets.
+- [ ] **(c) A rejected invoice has no resubmit button on the web.** The web
+      invoice modal offers none. Resubmission happens through the bulk
+      status change or the supplier portal, which a clerk fixing their own
+      rejection won't find. **Durable fix:** a "Resubmit for review" action in
+      the modal for a `rejected` invoice, behind the same role gate as the bulk
+      action. **Trigger:** the next invoice-modal change.
+- [ ] **(c) PRODUCT CALL — accepting a discount offer does not reduce the
+      payment.** The documented workaround is a credit memo for the discount.
+      **Durable fix:** decide whether acceptance should set the payable amount
+      for the next run (with the capture/void reversal already built), or
+      keep the workaround and say so on the accept dialog. **Trigger:** the
+      first tenant that uses dynamic discounting with real suppliers.
+- [ ] **(c) Settings with a backend and no screen.** Approval delegation,
+      per-vendor / per-GL match tolerance, exception-agent autonomy level, the
+      SCIM bearer token, an admin revoking another user's sessions, and the
+      line-total-mismatch on/off switch (`settings.fraud_rules`) all
+      exist in the API with no UI, so help can describe their effect but can't
+      tell anyone where to change them. **Durable fix:** a panel each in
+      `/organization` (or the user row's actions for sessions), each with its
+      own help guide step. **Trigger:** the first customer asking to change
+      one, or SCIM onboarding for an enterprise tenant.
+- [ ] **(c) Pages still hardcoded in English.** The Report Builder page,
+      `/admin/access-review`, `/admin/privacy`, the vendors list's "Merge
+      duplicates" action and the budget dimension labels
+      (`lib/types/budget.ts`) carry literal English. Help has to name those
+      labels in bold rather than through `{ui:}`. **Durable fix:** extract them
+      to the catalogues and swap the guides' bold labels for `{ui:}`
+      references (`content.test.ts` will check them). **Trigger:** the next
+      i18n extraction slice.
+- [ ] **(c) A CSV-imported invoice shows no warnings until it is submitted.**
+      `services/csv_import.py::import_invoices_csv` creates rows at `new`
+      without calling `refresh_warnings`, which manual create, upload without
+      extraction, and every PATCH do. The checks still run before approval
+      (the submit-for-review step in `api/workflow.py` refreshes them), so no
+      unchecked invoice can reach an approver. But a duplicate imported by CSV
+      sits in the list unflagged until someone submits it. **Durable fix:**
+      call `refresh_warnings` per created invoice inside the import, with a
+      test that imports a byte-identical copy of an existing invoice and
+      asserts the duplicate warning on import. **Trigger:** the next change to
+      CSV import, or the first tenant bulk-loading invoices that way.
+- [ ] **(c) PRODUCT CALL — the dashboard's "touchless rate" is a
+      cleared-vs-rejected rate.** `backend/docs/analytics.md` defines it as
+      invoices that passed review without a human touching them, but
+      `compute_touchless_rate` counts every invoice in approved through
+      payment_scheduled (plus approval-stamped done/paid/failed) as cleared,
+      including ones a person approved; only rejections count against it.
+      The experiments readout uses a different definition (auto-approved
+      with no field changes) under the same label. The glossary entry
+      describes the code. **Durable fix:** decide what the KPI should mean,
+      then either compute it from the audit trail (no human approval and no
+      field edit) or rename it to what it measures, and give both screens one
+      definition. **Trigger:** before the KPI is used in a sales or
+      board-reporting context.
+- [ ] **(c) Help for the mobile app and the supplier portal.** The help centre
+      covers the employee web app. Mobile users and suppliers get none.
+      **Durable fix:** a portal-side help section (suppliers are a separate
+      audience: submit, get paid, change bank details, card payments) reusing
+      the same content shapes and tests, and a Help row in the mobile app's
+      settings that opens the web help for the user's tenant. **Trigger:** the
+      first supplier onboarding at volume, or the first mobile-first customer.
 
 ## (a) Blocked on external credentials, accounts, or hardware
 

@@ -42,6 +42,57 @@ goes to [decisions.md](decisions.md).
 
 ---
 
+## The assistant's payment-forecast tool skips the forecast's role gate
+
+**Root cause.** The REST cash-flow forecast (`GET /api/analytics/…forecast`,
+`app/api/analytics.py::get_cashflow_forecast`) is `require_roles(*_CFO_ROLES)`,
+and the sidebar hides Cash Flow from AP clerks and AP managers to match. The AP
+assistant is open to all four roles (`app/api/assistant.py::_ASSISTANT_ROLES`),
+and its per-tool gate (`ToolSpec.allowed_roles`, enforced in
+`services/assistant/orchestrator.py`) is set only on the five cash-flow-copilot
+tools. `get_payment_forecast` in `services/assistant/tools/__init__.py` carries
+no `allowed_roles`, so an AP clerk can ask the assistant for the upcoming
+payment forecast that the app itself refuses them.
+
+**Evidence.** Found 2026-10-06 while writing the help centre's assistant guide
+(the guide was going to say the assistant only answers with what your role can
+see; `backend/docs/conversational-assistant.md` says the same, and it is not
+true for this tool).
+
+**Blast radius.** Information disclosure inside one tenant and one entity, to an
+authenticated employee: aggregate upcoming-payment figures, no bank details and
+no cross-tenant reach. It is still an authorization inconsistency on a finance
+read. The SOX-minded reader of the role matrix would call it a control gap.
+
+**Recommended fix.** Give `get_payment_forecast` the same roles as the endpoint
+whose data it serves (`allowed_roles=FINANCE_LEADER_ROLES`, or a tuple matching
+`_CFO_ROLES` exactly if those differ). Add an orchestrator test per tool that
+asserts a tool's `allowed_roles` matches the REST gate of the read it wraps, so
+the next tool can't drift the same way. Audit the other four general tools
+against their REST counterparts in the same change. Trigger: next change to the
+assistant, or before the assistant is enabled for a production tenant, whichever
+is first.
+
+## An expense report's Attach asks for an expense ID the UI never shows
+
+**Root cause.** On `/expenses`, a draft report's attach control is a text box
+labelled "Expense ID to attach". No surface in the web app displays an
+expense's ID, and there is no bulk "add to report" action on the expenses list,
+so attaching an expense to a report from the UI needs an ID copied out of the
+API or the database.
+
+**Evidence.** Found 2026-10-06 writing the "submit expenses" help guide, which
+had to describe the step without the ID detail.
+
+**Blast radius.** A usability dead end on the expense-report path, not a
+correctness or security defect: reports can still be built through the API.
+
+**Recommended fix.** Replace the free-text ID with a picker over the user's
+unattached draft expenses (the `SearchPicker` primitive the vendor and invoice
+pickers use), and add "Add to report" as a bulk action on the expenses list.
+Update the help guide's step in the same change. Trigger: the next change to
+expense reports.
+
 ## An `all`-mode chain level naming the invoice's own uploader can never clear
 
 **Root cause.** A chain level with `parallel_mode: "all"` is satisfied only when
