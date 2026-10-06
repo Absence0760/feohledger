@@ -65,11 +65,12 @@ def test_assignment_extremes_force_one_variant():
     )
 
 
-def _row(decision, *, auto=False, unmodified=False, ttd=None, exc=False):
+def _row(decision, *, touchless=False, ttd=None, exc=False):
+    # `touchless` is the shared `services/touchless` classification the API
+    # layer computes in SQL; the pure metrics only count it.
     return {
         "decision": decision,
-        "auto_approved": auto,
-        "unmodified": unmodified,
+        "touchless": touchless,
         "time_to_approval_days": ttd,
         "had_exception": exc,
     }
@@ -101,8 +102,8 @@ def test_metrics_winner_lower_time_is_better():
 
 def test_metrics_winner_higher_touchless_is_better():
     # B has a higher touchless rate → B wins when touchless is the primary metric.
-    rows_a = [_row("approved", auto=False, unmodified=True, ttd=Decimal("1")) for _ in range(10)]
-    rows_b = [_row("approved", auto=True, unmodified=True, ttd=Decimal("1")) for _ in range(10)]
+    rows_a = [_row("approved", touchless=False, ttd=Decimal("1")) for _ in range(10)]
+    rows_b = [_row("approved", touchless=True, ttd=Decimal("1")) for _ in range(10)]
     res = compute_experiment_results(
         rows_a, rows_b, primary_metric="touchless_rate_pct", min_sample_per_variant=10
     )
@@ -114,14 +115,8 @@ def test_metrics_winner_higher_touchless_is_better():
 def test_metrics_rates_and_exception_counting():
     # 10 assigned: 6 approved (2 touchless), 2 rejected, 2 in-flight; 3 had exc.
     rows = (
-        [
-            _row("approved", auto=True, unmodified=True, ttd=Decimal("2"), exc=False)
-            for _ in range(2)
-        ]
-        + [
-            _row("approved", auto=False, unmodified=False, ttd=Decimal("3"), exc=True)
-            for _ in range(4)
-        ]
+        [_row("approved", touchless=True, ttd=Decimal("2"), exc=False) for _ in range(2)]
+        + [_row("approved", touchless=False, ttd=Decimal("3"), exc=True) for _ in range(4)]
         + [_row("rejected", exc=True) for _ in range(2)]
         + [_row(None) for _ in range(2)]
     )
@@ -139,6 +134,15 @@ def test_metrics_rates_and_exception_counting():
     assert m.touchless_rate_pct == Decimal("25.0")
     # rejection rate over completed (8).
     assert m.rejection_rate_pct == Decimal("25.0")
+
+
+def test_metrics_touchless_flag_on_a_rejection_is_never_counted():
+    # A rejection is a person's decision by construction; a stray flag on one
+    # (a caller bug) must not lift the rate.
+    rows = [_row("rejected", touchless=True) for _ in range(4)]
+    res = compute_experiment_results(rows, list(rows), min_sample_per_variant=1)
+    assert res.variant_a.touchless_count == 0
+    assert res.variant_a.touchless_rate_pct == Decimal("0.0")
 
 
 def test_metrics_tie():
@@ -186,7 +190,7 @@ def test_metrics_zero_approvals_special_case_does_not_affect_other_metrics():
     # unaffected by the time-to-approval zero-approval special case, even when
     # one variant has 0 approved invoices.
     rows_a = [_row("rejected") for _ in range(10)]
-    rows_b = [_row("approved", auto=True, unmodified=True, ttd=Decimal("2")) for _ in range(10)]
+    rows_b = [_row("approved", touchless=True, ttd=Decimal("2")) for _ in range(10)]
     res = compute_experiment_results(
         rows_a, rows_b, primary_metric="touchless_rate_pct", min_sample_per_variant=10
     )
@@ -515,6 +519,12 @@ async def test_results_not_enough_then_winner(realdb):
         assert body["winner"] == VARIANT_B
         assert body["variant_b"]["median_time_to_approval_days"] == "1.0"
         assert body["variant_a"]["median_time_to_approval_days"] == "5.0"
+        # Every approval here was a person's (`invoice.approved`), so neither
+        # arm processed anything touchlessly — the old readout's definition
+        # agreed, but the dashboard's used to call all twelve touchless.
+        assert body["variant_a"]["touchless_rate_pct"] == "0.0"
+        assert body["variant_b"]["touchless_rate_pct"] == "0.0"
+        assert body["variant_a"]["completed_count"] == 6
 
 
 async def test_assignment_at_invoice_creation_freezes_variant_snapshot(realdb):

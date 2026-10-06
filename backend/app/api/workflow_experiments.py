@@ -50,6 +50,7 @@ from app.schemas.workflow_experiments import (
 )
 from app.services.adaptive_workflows import _decimal_days
 from app.services.audit_dispatch import dispatch_audit
+from app.services.touchless import touchless_classification_select
 from app.services.workflow_experiments import (
     PRIMARY_METRICS,
     VARIANT_A,
@@ -476,8 +477,9 @@ async def _experiment_metric_rows(
     db: AsyncSession, exp: WorkflowExperiment
 ) -> tuple[list[dict], list[dict]]:
     """Build the per-variant duck-typed metric rows from the recorded
-    assignments. Each row carries the invoice's terminal decision, the touchless
-    signals, time-to-approval, and whether it raised any exception — the shape
+    assignments. Each row carries the invoice's review decision and touchless
+    flag (both from the shared ``services/touchless`` predicates the dashboard
+    uses), time-to-approval, and whether it raised any exception — the shape
     ``services/workflow_experiments`` consumes."""
     assignments: dict = exp.assignments or {}
     if not assignments:
@@ -492,25 +494,37 @@ async def _experiment_metric_rows(
     if not invoice_ids:
         return [], []
 
-    # Terminal decision + touchless signals from the audit log: the approval row
-    # (human ``invoice.approved`` or system ``invoice.auto_approved``) or the
-    # ``invoice.rejected`` row. Pull all decision rows for these invoices.
-    decision_rows = (
+    # Decision + touchless classification: the SAME predicates the dashboard's
+    # `touchless_rate` counts with (`services/touchless`), so an invoice is
+    # "decided" / "touchless" here exactly when it is there. `cleared` means
+    # approved-or-later; decided-but-not-cleared means rejected; neither means
+    # still in flight (including a rejection resubmitted back into review).
+    classified = {
+        inv_id: (bool(cleared), bool(decided), bool(touchless))
+        for inv_id, cleared, decided, touchless in (
+            await db.execute(touchless_classification_select(invoice_ids))
+        ).all()
+    }
+
+    # Approval timestamps for the time-to-approval leg: the latest approval row
+    # (human ``invoice.approved`` or system ``invoice.auto_approved``) — an
+    # invoice may be re-approved after a void or a re-review.
+    approval_rows = (
         await db.execute(
-            select(
-                AuditLog.entity_id,
-                AuditLog.action,
-                AuditLog.created_at,
-                AuditLog.details,
-            ).where(
+            select(AuditLog.entity_id, AuditLog.created_at).where(
                 AuditLog.entity_type == "invoice",
                 AuditLog.entity_id.in_(invoice_ids),
-                AuditLog.action.in_(
-                    ("invoice.approved", "invoice.auto_approved", "invoice.rejected")
-                ),
+                AuditLog.action.in_(("invoice.approved", "invoice.auto_approved")),
             )
         )
     ).all()
+    approved_at: dict[uuid.UUID, datetime] = {}
+    for inv_id, created_at in approval_rows:
+        if created_at is None:
+            continue
+        prev = approved_at.get(inv_id)
+        if prev is None or created_at >= prev:
+            approved_at[inv_id] = created_at
 
     # ready_for_review clock-starts for the time-to-approval leg.
     start_rows = (
@@ -535,22 +549,6 @@ async def _experiment_metric_rows(
             if cur is None or (created_at is not None and created_at < cur):
                 rfr_starts[inv_id] = created_at
 
-    # Latest decision per invoice (an invoice may have multiple decision rows
-    # over re-review; the most recent is the terminal one).
-    decisions: dict[uuid.UUID, dict] = {}
-    for inv_id, action, created_at, details in decision_rows:
-        prev = decisions.get(inv_id)
-        if prev is None or (created_at is not None and created_at >= prev["created_at"]):
-            decisions[inv_id] = {
-                "action": action,
-                "created_at": created_at,
-                # A non-object `details` records no corrections — see above. It
-                # is NOT read as "corrections present": the touchless leg asks
-                # whether a human changed a field, and a malformed blob is not
-                # evidence that one did.
-                "details": _details_obj(details),
-            }
-
     # Invoice base rows (created_at fallback for the clock-start) + exception
     # presence.
     inv_rows = (
@@ -572,26 +570,20 @@ async def _experiment_metric_rows(
             inv_id = uuid.UUID(raw_id)
         except (ValueError, TypeError):
             continue
-        dec = decisions.get(inv_id)
+        cleared, decided, touchless = classified.get(inv_id, (False, False, False))
         decision: str | None = None
-        auto_approved = False
-        unmodified = False
         ttd: Decimal | None = None
-        if dec is not None:
-            action = dec["action"]
-            if action in ("invoice.approved", "invoice.auto_approved"):
-                decision = "approved"
-                auto_approved = action == "invoice.auto_approved"
-                unmodified = not dec["details"].get("changes")
-                clock_start = rfr_starts.get(inv_id) or inv_created.get(inv_id)
-                if clock_start is not None and dec["created_at"] is not None:
-                    ttd = max(Decimal("0"), _decimal_days(dec["created_at"] - clock_start))
-            elif action == "invoice.rejected":
-                decision = "rejected"
+        if cleared:
+            decision = "approved"
+            clock_start = rfr_starts.get(inv_id) or inv_created.get(inv_id)
+            at = approved_at.get(inv_id)
+            if clock_start is not None and at is not None:
+                ttd = max(Decimal("0"), _decimal_days(at - clock_start))
+        elif decided:
+            decision = "rejected"
         row = {
             "decision": decision,
-            "auto_approved": auto_approved,
-            "unmodified": unmodified,
+            "touchless": touchless,
             "time_to_approval_days": ttd,
             "had_exception": inv_id in has_exception,
         }

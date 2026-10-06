@@ -119,7 +119,7 @@ _HISTORICAL_INVOICE_STATUSES = frozenset({"done", "paid"})
 # An imported invoice is a HISTORICAL row copied in from whatever the tenant
 # used before us. The workflow engine never ran on it, so it is evidence
 # neither for nor against anything this platform did — and metrics that
-# describe our own work (the touchless rate in `services/analytics`) have to
+# describe our own work (the touchless rate in `services/touchless`) have to
 # be able to tell it apart from an invoice we actually processed.
 #
 # Status cannot answer that question: `done`, `paid` and `rejected` are all

@@ -34,8 +34,10 @@ import pytest
 from sqlalchemy import select
 
 from app.models.entity import Entity
+from app.models.exception import Exception as APException
 from app.models.invoice import Invoice, InvoiceStatus
 from app.models.payment import Payment, PaymentSchedule
+from app.models.workflow import AuditLog
 from app.services.csv_import import (
     IMPORT_PROVENANCE_KEY,
     build_import_provenance,
@@ -402,13 +404,20 @@ async def test_discount_amount_rounds_a_half_cent_tie_away_from_zero(realdb):
 # ---------------------------------------------------------------------------
 
 
-async def _seed_statuses(realdb, rows: list[tuple]) -> None:
+async def _seed_statuses(realdb, rows: list[tuple]) -> list[uuid.UUID]:
     """`rows` is [(status, has_approval_stamp)], optionally with a third
     element: a `meta` dict to persist on the row (the import provenance
-    marker, or another `meta` tenant such as a cached audit summary)."""
+    marker, or another `meta` tenant such as a cached audit summary).
+
+    A stamped row is seeded as an UNTOUCHED AUTOMATIC approval — an
+    `invoice.auto_approved` row on its trail and nothing else — so these
+    population tests read the rate off rows that are touchless by the shared
+    definition (`services/touchless`). The human-vs-automatic legs are pinned
+    in section 3c below. Returns the new invoice ids, in order."""
     org_id = realdb.info(TENANT).org_id
     mk = realdb.sessionmaker(TENANT)
     today = utc_today()
+    ids: list[uuid.UUID] = []
     async with mk() as s:
         ent = await _default_entity_id(s)
         for row in rows:
@@ -419,18 +428,34 @@ async def _seed_statuses(realdb, rows: list[tuple]) -> None:
             # which is a different value from SQL NULL and behaves differently
             # under the `?` operator. Omitting the column is what real invoices
             # that never touch `meta` produce.
-            s.add(
-                _inv(
-                    org_id,
-                    ent,
-                    status=status,
-                    invoice_date=today,
-                    approval_date=today if approved else None,
-                    approved_by="Reviewer" if approved else None,
-                    **extra,
-                )
+            inv = _inv(
+                org_id,
+                ent,
+                status=status,
+                invoice_date=today,
+                approval_date=today if approved else None,
+                approved_by="system (auto-approve)" if approved else None,
+                **extra,
             )
+            s.add(inv)
+            await s.flush()
+            ids.append(inv.id)
+            if approved:
+                s.add(_audit(org_id, inv.id, "invoice.auto_approved"))
         await s.commit()
+    return ids
+
+
+def _audit(org_id, entity_id, action, *, entity_type="invoice", actor_id=None, details=None):
+    return AuditLog(
+        organization_id=org_id,
+        correlation_id=uuid.uuid4(),
+        actor_id=actor_id,
+        action=action,
+        entity_type=entity_type,
+        entity_id=entity_id,
+        details=details,
+    )
 
 
 def _import_marker() -> dict:
@@ -692,6 +717,186 @@ async def test_touchless_rate_treats_an_unmarked_row_as_native(realdb):
         body = (await c.get("/api/dashboard")).json()
 
     assert body["touchless_rate"] == 50.0
+
+
+# ---------------------------------------------------------------------------
+# 3c. touchless_rate — touchless means NO PERSON intervened
+#
+# The figure used to count every invoice that CLEARED review, whoever approved
+# it — so it measured cleared-vs-rejected, not automation. It now uses the one
+# definition in `services/touchless`: approved automatically, no human field /
+# line-item correction, no exception a person decided. The experiments readout
+# calls the same predicates; the last test proves the two agree.
+# ---------------------------------------------------------------------------
+
+
+async def _add_rows(realdb, *rows) -> None:
+    async with realdb.sessionmaker(TENANT)() as s:
+        s.add_all(rows)
+        await s.commit()
+
+
+async def _dashboard_rate(realdb) -> float:
+    async with realdb.client(key=TENANT, role="admin") as c:
+        return (await c.get("/api/dashboard")).json()["touchless_rate"]
+
+
+@pytest.mark.asyncio
+async def test_a_human_approved_invoice_is_not_touchless(realdb):
+    """Both invoices cleared review and both carry the approval stamp — under
+    the old definition this read 100.0%. Only the auto-approved one went
+    straight through; the one a reviewer approved is in the denominator only.
+    """
+    org_id = realdb.info(TENANT).org_id
+    auto_id, human_id = await _seed_statuses(
+        realdb, [(InvoiceStatus.approved, True), (InvoiceStatus.approved, False)]
+    )
+    async with realdb.sessionmaker(TENANT)() as s:
+        inv = await s.get(Invoice, human_id)
+        inv.approval_date = utc_today()
+        inv.approved_by = "Reviewer"
+        s.add(_audit(org_id, human_id, "invoice.approved", actor_id=uuid.uuid4()))
+        await s.commit()
+
+    assert await _dashboard_rate(realdb) == 50.0
+
+
+@pytest.mark.asyncio
+async def test_an_auto_approved_untouched_invoice_is_touchless(realdb):
+    await _seed_statuses(realdb, [(InvoiceStatus.payment_scheduled, True)])
+    assert await _dashboard_rate(realdb) == 100.0
+
+
+@pytest.mark.asyncio
+async def test_a_cleared_invoice_with_no_auto_approval_evidence_is_not_touchless(realdb):
+    """Positive evidence is required: a cleared invoice whose trail carries no
+    `invoice.auto_approved` row (seeded, or approved before the action existed)
+    is counted as decided, never as touchless."""
+    org_id = realdb.info(TENANT).org_id
+    async with realdb.sessionmaker(TENANT)() as s:
+        ent = await _default_entity_id(s)
+        s.add(_inv(org_id, ent, status=InvoiceStatus.approved, approval_date=utc_today()))
+        await s.commit()
+    assert await _dashboard_rate(realdb) == 0.0
+
+
+@pytest.mark.parametrize(
+    "action", ["invoice.edited", "invoice.line_items_edited", "invoice.gl_recoded"]
+)
+@pytest.mark.asyncio
+async def test_an_auto_approved_invoice_a_person_corrected_is_not_touchless(realdb, action):
+    """The machine approved it, but a person fixed the captured data first (or
+    after) — that is manual intervention, whichever correction door it took."""
+    org_id = realdb.info(TENANT).org_id
+    _clean, corrected = await _seed_statuses(
+        realdb, [(InvoiceStatus.approved, True), (InvoiceStatus.approved, True)]
+    )
+    await _add_rows(
+        realdb,
+        _audit(
+            org_id,
+            corrected,
+            action,
+            actor_id=uuid.uuid4(),
+            details={"changes": {"amount": {"old": "100.00", "new": "110.00"}}},
+        ),
+    )
+    assert await _dashboard_rate(realdb) == 50.0
+
+
+@pytest.mark.asyncio
+async def test_a_rejected_invoice_counts_in_the_denominator(realdb):
+    await _seed_statuses(realdb, [(InvoiceStatus.approved, True), (InvoiceStatus.rejected, False)])
+    assert await _dashboard_rate(realdb) == 50.0
+
+
+@pytest.mark.asyncio
+async def test_an_exception_a_person_decided_breaks_touchless_but_an_agent_decision_does_not(
+    realdb,
+):
+    """Three auto-approved invoices, each with an exception: one resolved by a
+    person, one escalated by a person, one resolved by the AP agent
+    (`via: "agent"`). Only the agent-handled one stays touchless → 1/3."""
+    org_id = realdb.info(TENANT).org_id
+    ids = await _seed_statuses(realdb, [(InvoiceStatus.approved, True)] * 3)
+    human_resolved, human_escalated, agent_resolved = ids
+    rows = []
+    for inv_id, action, details in (
+        (human_resolved, "exception.resolved", {"new_status": "resolved"}),
+        (human_escalated, "exception.escalated", {"new_status": "escalated"}),
+        (agent_resolved, "exception.resolved", {"new_status": "resolved", "via": "agent"}),
+    ):
+        exc = APException(
+            id=uuid.uuid4(),
+            organization_id=org_id,
+            invoice_id=inv_id,
+            exception_type="po_mismatch",
+            description="PO mismatch",
+        )
+        rows += [
+            exc,
+            _audit(
+                org_id,
+                exc.id,
+                action,
+                entity_type="exception",
+                actor_id=uuid.uuid4(),
+                details={"invoice_id": str(inv_id), **details},
+            ),
+        ]
+    async with realdb.sessionmaker(TENANT)() as s:
+        ent = await _default_entity_id(s)
+        for r in rows:
+            if isinstance(r, APException):
+                r.entity_id = ent
+        s.add_all([r for r in rows if isinstance(r, APException)])
+        await s.flush()
+        s.add_all([r for r in rows if isinstance(r, AuditLog)])
+        await s.commit()
+
+    assert await _dashboard_rate(realdb) == 33.3
+
+
+@pytest.mark.asyncio
+async def test_experiments_readout_and_dashboard_agree_on_the_same_invoices(realdb):
+    """One definition everywhere: put every invoice of a mixed population in one
+    experiment arm and the arm's `touchless_rate_pct` must equal the dashboard's
+    `touchless_rate` — including the rows that are in neither leg."""
+    from types import SimpleNamespace
+
+    from app.api.workflow_experiments import _experiment_metric_rows
+    from app.services.workflow_experiments import VARIANT_A, compute_experiment_results
+
+    org_id = realdb.info(TENANT).org_id
+    ids = await _seed_statuses(
+        realdb,
+        [
+            (InvoiceStatus.approved, True),  # touchless
+            (InvoiceStatus.done, True),  # touchless
+            (InvoiceStatus.approved, True),  # corrected below → not touchless
+            (InvoiceStatus.posted_in_erp, True),  # human-approved below
+            (InvoiceStatus.rejected, False),  # denominator only
+            (InvoiceStatus.done, False),  # skipped approval → neither leg
+            (InvoiceStatus.ready_for_review, False),  # in flight → neither leg
+        ],
+    )
+    await _add_rows(
+        realdb,
+        _audit(org_id, ids[2], "invoice.edited", actor_id=uuid.uuid4()),
+        _audit(org_id, ids[3], "invoice.approved", actor_id=uuid.uuid4()),
+    )
+
+    dashboard = await _dashboard_rate(realdb)
+    async with realdb.sessionmaker(TENANT)() as s:
+        rows_a, rows_b = await _experiment_metric_rows(
+            s, SimpleNamespace(assignments={str(i): VARIANT_A for i in ids})
+        )
+    res = compute_experiment_results(rows_a, rows_b, min_sample_per_variant=1)
+
+    assert res.variant_a.completed_count == 5
+    assert res.variant_a.touchless_count == 2
+    assert res.variant_a.touchless_rate_pct == Decimal("40.0")
+    assert Decimal(str(dashboard)) == res.variant_a.touchless_rate_pct
 
 
 # ---------------------------------------------------------------------------
