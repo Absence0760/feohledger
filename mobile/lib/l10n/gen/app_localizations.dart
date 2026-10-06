@@ -4529,6 +4529,145 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Cached vendor GL code “{code}” is no longer in the active chart of accounts.'**
   String invoiceWarningGlCodeStalePrior(String code);
+
+  /// No description provided for @invoicePoMatchIssuePoNotFound.
+  ///
+  /// In en, this message translates to:
+  /// **'PO {poNumber} not found'**
+  String invoicePoMatchIssuePoNotFound(String poNumber);
+
+  /// No description provided for @invoicePoMatchIssueCurrencyMismatch.
+  ///
+  /// In en, this message translates to:
+  /// **'Currency mismatch: invoice in {invoiceCurrency}, PO in {poCurrency} — amounts not compared'**
+  String invoicePoMatchIssueCurrencyMismatch(
+    String invoiceCurrency,
+    String poCurrency,
+  );
+
+  /// No description provided for @invoicePoMatchIssueAmountMismatch.
+  ///
+  /// In en, this message translates to:
+  /// **'Amount mismatch: invoice {invoiceAmount} vs PO {poTotal} ({variancePct})'**
+  String invoicePoMatchIssueAmountMismatch(
+    String invoiceAmount,
+    String poTotal,
+    String variancePct,
+  );
+
+  /// No description provided for @invoicePoMatchIssueAmountMismatchPoCurrencyUnknown.
+  ///
+  /// In en, this message translates to:
+  /// **'Amount mismatch: invoice {invoiceAmount} vs PO {poTotal} ({variancePct})'**
+  String invoicePoMatchIssueAmountMismatchPoCurrencyUnknown(
+    String invoiceAmount,
+    String poTotal,
+    String variancePct,
+  );
+
+  /// No description provided for @invoicePoMatchIssueAmountMismatchCurrencyUnknown.
+  ///
+  /// In en, this message translates to:
+  /// **'Amount mismatch: invoice {invoiceAmount} vs PO {poTotal} ({variancePct})'**
+  String invoicePoMatchIssueAmountMismatchCurrencyUnknown(
+    String invoiceAmount,
+    String poTotal,
+    String variancePct,
+  );
+
+  /// No description provided for @invoicePoMatchIssuePartialReceipt.
+  ///
+  /// In en, this message translates to:
+  /// **'Partial receipt: {receivedPct} of ordered quantity received'**
+  String invoicePoMatchIssuePartialReceipt(String receivedPct);
+
+  /// No description provided for @invoicePoMatchIssueOverReceipt.
+  ///
+  /// In en, this message translates to:
+  /// **'Over-receipt: {receivedQuantity} received against {orderedQuantity} ordered (+{excessQuantity})'**
+  String invoicePoMatchIssueOverReceipt(
+    String receivedQuantity,
+    String orderedQuantity,
+    String excessQuantity,
+  );
+
+  /// No description provided for @invoicePoMatchIssueInspectionFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Failed quality inspection'**
+  String get invoicePoMatchIssueInspectionFailed;
+
+  /// No description provided for @invoicePoMatchIssueInspectionFailedNotes.
+  ///
+  /// In en, this message translates to:
+  /// **'Failed quality inspection: {notes}'**
+  String invoicePoMatchIssueInspectionFailedNotes(String notes);
+
+  /// No description provided for @invoicePoMatchIssuePartialAcceptance.
+  ///
+  /// In en, this message translates to:
+  /// **'Partial acceptance: {acceptedQuantity} of ordered quantity accepted'**
+  String invoicePoMatchIssuePartialAcceptance(String acceptedQuantity);
+
+  /// No description provided for @invoicePoMatchIssuePartialAcceptanceUnquantified.
+  ///
+  /// In en, this message translates to:
+  /// **'Partial acceptance: part of ordered quantity accepted'**
+  String get invoicePoMatchIssuePartialAcceptanceUnquantified;
+
+  /// No description provided for @invoicePoMatchIssueInspectionRequiredMissing.
+  ///
+  /// In en, this message translates to:
+  /// **'Quality inspection required but missing'**
+  String get invoicePoMatchIssueInspectionRequiredMissing;
+
+  /// No description provided for @exceptionDescriptionMissingDataAfterExtraction.
+  ///
+  /// In en, this message translates to:
+  /// **'Required fields missing after extraction'**
+  String get exceptionDescriptionMissingDataAfterExtraction;
+
+  /// No description provided for @exceptionDescriptionPriceVarianceFindings.
+  ///
+  /// In en, this message translates to:
+  /// **'Line-item price variance vs vendor history on {count, plural, one {{count} line} other {{count} lines}}'**
+  String exceptionDescriptionPriceVarianceFindings(int count);
+
+  /// No description provided for @exceptionDescriptionContractNoncompliantFindings.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, one {{count} contract-compliance finding} other {{count} contract-compliance findings}}'**
+  String exceptionDescriptionContractNoncompliantFindings(int count);
+
+  /// No description provided for @warningsPoMatchStatusMatched.
+  ///
+  /// In en, this message translates to:
+  /// **'Matched'**
+  String get warningsPoMatchStatusMatched;
+
+  /// No description provided for @warningsPoMatchStatusMismatch.
+  ///
+  /// In en, this message translates to:
+  /// **'Mismatch'**
+  String get warningsPoMatchStatusMismatch;
+
+  /// No description provided for @warningsPoMatchStatusPartial.
+  ///
+  /// In en, this message translates to:
+  /// **'Partial'**
+  String get warningsPoMatchStatusPartial;
+
+  /// No description provided for @warningsPoMatchStatusNoPo.
+  ///
+  /// In en, this message translates to:
+  /// **'No PO'**
+  String get warningsPoMatchStatusNoPo;
+
+  /// No description provided for @warningsPoMatchAnnouncement.
+  ///
+  /// In en, this message translates to:
+  /// **'PO match: {summary}'**
+  String warningsPoMatchAnnouncement(String summary);
 }
 
 class _AppLocalizationsDelegate

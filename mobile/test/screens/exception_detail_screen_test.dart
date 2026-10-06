@@ -130,6 +130,52 @@ void main() {
     expect(find.text('Unassigned'), findsOneWidget);
   });
 
+  testWidgets('a coded composite description lists its localized findings',
+      (tester) async {
+    setTallSurface(tester);
+    ApiClient().debugConfigure(
+      client: MockClient(
+        (req) async => _json({
+          ..._detailJson(),
+          'exception_type': 'price_variance',
+          'type_label': 'Price Variance',
+          'description': 'server English fallback',
+          'description_code': 'exception.price_variance_findings',
+          'description_params': {
+            'count': 2,
+            'findings': [
+              {
+                'code': 'price_variance_over',
+                'params': {
+                  'deltaPct': '+20.0',
+                  'item': 'Widget',
+                  'unitPrice': '12.00',
+                  'baselineUnitPrice': '10.00',
+                  'currency': 'USD',
+                },
+                'message': 'english line',
+              },
+              {'code': 'from_the_future', 'params': {}, 'message': 'own'},
+            ],
+          },
+        }),
+      ),
+    );
+
+    await tester.pumpWidget(
+      _host(const ExceptionDetailScreen(exceptionId: '1')),
+    );
+    await _pumpUntil(tester, find.text('Price Variance'));
+
+    expect(
+      find.text('Line-item price variance vs vendor history on 2 lines'),
+      findsOneWidget,
+    );
+    expect(find.textContaining('for Widget'), findsOneWidget);
+    expect(find.text('• own'), findsOneWidget);
+    expect(find.text('server English fallback'), findsNothing);
+  });
+
   testWidgets('renders the error state on a 404 with a retry', (tester) async {
     ApiClient().debugConfigure(
       client: MockClient((req) async => _json({'detail': 'nope'}, 404)),

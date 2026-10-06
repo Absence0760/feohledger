@@ -3,6 +3,10 @@
 ///
 /// Named `ApException` to avoid clashing with Dart core `Exception` — the
 /// backend ORM model does the same dodge (`Exception as APException`).
+library;
+
+import 'package:feohledger_mobile/models/invoice.dart';
+
 enum ApExceptionStatus {
   open('open'),
   escalated('escalated'),
@@ -78,7 +82,22 @@ class ApException {
   /// Falls back to the raw type when the backend doesn't map it.
   final String typeLabel;
   final ApExceptionSeverity severity;
+
+  /// The English sentence — the FALLBACK whenever [descriptionCode] is set.
+  /// Render through `exceptionDescriptionText`, never this directly.
   final String? description;
+
+  /// The backend catalogue code the description states (usually the invoice
+  /// warning it mirrors). `null` for a human-written reason and for every row
+  /// raised before migration 0103 — [description] is then the rendering.
+  final String? descriptionCode;
+
+  /// [descriptionCode]'s scalar parameters, as the exact wire strings.
+  final Map<String, String> descriptionParams;
+
+  /// A composite description's findings (several price-variance lines, several
+  /// contract terms), from `description_params.findings`. Empty otherwise.
+  final List<CatalogueFinding> descriptionFindings;
   final ApExceptionStatus status;
   final String? resolution;
   final String? assignedTo;
@@ -109,6 +128,9 @@ class ApException {
     required this.typeLabel,
     required this.severity,
     this.description,
+    this.descriptionCode,
+    this.descriptionParams = const {},
+    this.descriptionFindings = const [],
     required this.status,
     this.resolution,
     this.assignedTo,
@@ -128,6 +150,8 @@ class ApException {
 
   factory ApException.fromJson(Map<String, dynamic> json) {
     final type = json['exception_type'] as String? ?? 'unknown';
+    final rawParams = json['description_params'];
+    final rawFindings = rawParams is Map ? rawParams['findings'] : null;
     return ApException(
       id: json['id'] as String,
       invoiceId: json['invoice_id'] as String?,
@@ -139,6 +163,11 @@ class ApException {
       typeLabel: json['type_label'] as String? ?? type,
       severity: ApExceptionSeverity.fromString(json['severity'] as String?),
       description: json['description'] as String?,
+      descriptionCode: json['description_code'] as String?,
+      descriptionParams: CatalogueFinding.scalarParams(rawParams),
+      descriptionFindings: rawFindings is List
+          ? rawFindings.map(CatalogueFinding.fromJson).nonNulls.toList()
+          : const [],
       status: ApExceptionStatus.fromString(json['status'] as String? ?? 'open'),
       resolution: json['resolution'] as String?,
       assignedTo: json['assigned_to'] as String?,

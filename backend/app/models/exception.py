@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text, text
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, EntityMixin, TimestampMixin
@@ -45,7 +45,19 @@ class Exception(Base, EntityMixin, TimestampMixin):
     # Types: duplicate, po_mismatch, fraud_flag, extraction_failed,
     #        unverified_vendor, review_rejected, amount_exceeded, missing_data
     severity: Mapped[str] = mapped_column(String(20), default="warning")  # error, warning, info
+    # The English sentence. Since migration 0103 it is the FALLBACK for a
+    # detector-raised exception: `description_code` names the same sentence in
+    # `invoice_warning_catalog` (usually the very warning the invoice carries,
+    # so the queue and the invoice agree in wording) and `description_params`
+    # holds its typed figures, which is what a client localizes on. A
+    # composite description (several price-variance lines, several contract
+    # findings) carries its findings as a list under `params.findings`. Both
+    # stay NULL for a human-authored description (a rejection reason) and for
+    # every row raised before 0103 — nothing backfills them, so `description`
+    # is the normal rendering for those.
     description: Mapped[str | None] = mapped_column(Text)
+    description_code: Mapped[str | None] = mapped_column(String(100))
+    description_params: Mapped[dict | None] = mapped_column(JSONB)
     status: Mapped[str] = mapped_column(
         String(30), default="open"
     )  # open, resolved, escalated, dismissed

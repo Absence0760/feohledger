@@ -180,6 +180,42 @@ const Map<String, Map<String, String>> invoiceWarningParamKinds = {
   },
   'gl_codes_not_in_chart': {'codes': 'text'},
   'gl_code_stale_prior': {'code': 'text'},
+  'po_match.issue.po_not_found': {'poNumber': 'text'},
+  'po_match.issue.currency_mismatch': {
+    'invoiceCurrency': 'text',
+    'poCurrency': 'text',
+  },
+  'po_match.issue.amount_mismatch': {
+    'invoiceAmount': 'money',
+    'poTotal': 'money',
+    'currency': 'currency',
+    'variancePct': 'percent',
+  },
+  'po_match.issue.amount_mismatch_po_currency_unknown': {
+    'invoiceAmount': 'money',
+    'poTotal': 'number',
+    'currency': 'currency',
+    'variancePct': 'percent',
+  },
+  'po_match.issue.amount_mismatch_currency_unknown': {
+    'invoiceAmount': 'number',
+    'poTotal': 'number',
+    'variancePct': 'percent',
+  },
+  'po_match.issue.partial_receipt': {'receivedPct': 'percent'},
+  'po_match.issue.over_receipt': {
+    'receivedQuantity': 'number',
+    'orderedQuantity': 'number',
+    'excessQuantity': 'number',
+  },
+  'po_match.issue.inspection_failed': {},
+  'po_match.issue.inspection_failed_notes': {'notes': 'text'},
+  'po_match.issue.partial_acceptance': {'acceptedQuantity': 'number'},
+  'po_match.issue.partial_acceptance_unquantified': {},
+  'po_match.issue.inspection_required_missing': {},
+  'exception.missing_data_after_extraction': {},
+  'exception.price_variance_findings': {'count': 'count'},
+  'exception.contract_noncompliant_findings': {'count': 'count'},
 };
 
 /// The localized sentence for [warningCode], or `null` when this build does
@@ -629,6 +665,107 @@ String? _localizeWarningCode(
       final code = _text(p['code'], currency);
       if (code == null) return null;
       return l.invoiceWarningGlCodeStalePrior(code);
+    // PO {poNumber} not found
+    case 'po_match.issue.po_not_found':
+      final poNumber = _text(p['poNumber'], currency);
+      if (poNumber == null) return null;
+      return l.invoicePoMatchIssuePoNotFound(poNumber);
+    // Currency mismatch: invoice in {invoiceCurrency}, PO in {poCurrency} — amounts not compared
+    case 'po_match.issue.currency_mismatch':
+      final invoiceCurrency = _text(p['invoiceCurrency'], currency);
+      if (invoiceCurrency == null) return null;
+      final poCurrency = _text(p['poCurrency'], currency);
+      if (poCurrency == null) return null;
+      return l.invoicePoMatchIssueCurrencyMismatch(invoiceCurrency, poCurrency);
+    // Amount mismatch: invoice {invoiceAmount} {currency} vs PO {poTotal} {currency} ({variancePct}%)
+    case 'po_match.issue.amount_mismatch':
+      final invoiceAmount = _money(p['invoiceAmount'], currency);
+      if (invoiceAmount == null) return null;
+      final poTotal = _money(p['poTotal'], currency);
+      if (poTotal == null) return null;
+      final variancePct = _percent(p['variancePct'], currency);
+      if (variancePct == null) return null;
+      return l.invoicePoMatchIssueAmountMismatch(
+        invoiceAmount,
+        poTotal,
+        variancePct,
+      );
+    // Amount mismatch: invoice {invoiceAmount} {currency} vs PO {poTotal} ({variancePct}%)
+    case 'po_match.issue.amount_mismatch_po_currency_unknown':
+      final invoiceAmount = _money(p['invoiceAmount'], currency);
+      if (invoiceAmount == null) return null;
+      final poTotal = _number(p['poTotal'], currency);
+      if (poTotal == null) return null;
+      final variancePct = _percent(p['variancePct'], currency);
+      if (variancePct == null) return null;
+      return l.invoicePoMatchIssueAmountMismatchPoCurrencyUnknown(
+        invoiceAmount,
+        poTotal,
+        variancePct,
+      );
+    // Amount mismatch: invoice {invoiceAmount} vs PO {poTotal} ({variancePct}%)
+    case 'po_match.issue.amount_mismatch_currency_unknown':
+      final invoiceAmount = _number(p['invoiceAmount'], currency);
+      if (invoiceAmount == null) return null;
+      final poTotal = _number(p['poTotal'], currency);
+      if (poTotal == null) return null;
+      final variancePct = _percent(p['variancePct'], currency);
+      if (variancePct == null) return null;
+      return l.invoicePoMatchIssueAmountMismatchCurrencyUnknown(
+        invoiceAmount,
+        poTotal,
+        variancePct,
+      );
+    // Partial receipt: {receivedPct}% of ordered quantity received
+    case 'po_match.issue.partial_receipt':
+      final receivedPct = _percent(p['receivedPct'], currency);
+      if (receivedPct == null) return null;
+      return l.invoicePoMatchIssuePartialReceipt(receivedPct);
+    // Over-receipt: {receivedQuantity} received against {orderedQuantity} ordered (+{excessQuantity})
+    case 'po_match.issue.over_receipt':
+      final receivedQuantity = _number(p['receivedQuantity'], currency);
+      if (receivedQuantity == null) return null;
+      final orderedQuantity = _number(p['orderedQuantity'], currency);
+      if (orderedQuantity == null) return null;
+      final excessQuantity = _number(p['excessQuantity'], currency);
+      if (excessQuantity == null) return null;
+      return l.invoicePoMatchIssueOverReceipt(
+        receivedQuantity,
+        orderedQuantity,
+        excessQuantity,
+      );
+    // Failed quality inspection
+    case 'po_match.issue.inspection_failed':
+      return l.invoicePoMatchIssueInspectionFailed;
+    // Failed quality inspection: {notes}
+    case 'po_match.issue.inspection_failed_notes':
+      final notes = _text(p['notes'], currency);
+      if (notes == null) return null;
+      return l.invoicePoMatchIssueInspectionFailedNotes(notes);
+    // Partial acceptance: {acceptedQuantity} of ordered quantity accepted
+    case 'po_match.issue.partial_acceptance':
+      final acceptedQuantity = _number(p['acceptedQuantity'], currency);
+      if (acceptedQuantity == null) return null;
+      return l.invoicePoMatchIssuePartialAcceptance(acceptedQuantity);
+    // Partial acceptance: part of ordered quantity accepted
+    case 'po_match.issue.partial_acceptance_unquantified':
+      return l.invoicePoMatchIssuePartialAcceptanceUnquantified;
+    // Quality inspection required but missing
+    case 'po_match.issue.inspection_required_missing':
+      return l.invoicePoMatchIssueInspectionRequiredMissing;
+    // Required fields missing after extraction
+    case 'exception.missing_data_after_extraction':
+      return l.exceptionDescriptionMissingDataAfterExtraction;
+    // Line-item price variance vs vendor history on {count, plural, one {# line} other {# lines}}
+    case 'exception.price_variance_findings':
+      final count = _count(p['count']);
+      if (count == null) return null;
+      return l.exceptionDescriptionPriceVarianceFindings(count);
+    // {count, plural, one {# contract-compliance finding} other {# contract-compliance findings}}
+    case 'exception.contract_noncompliant_findings':
+      final count = _count(p['count']);
+      if (count == null) return null;
+      return l.exceptionDescriptionContractNoncompliantFindings(count);
   }
   return null;
 }

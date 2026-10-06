@@ -15,6 +15,11 @@ from decimal import Decimal
 import pytest
 
 
+def _messages(result) -> list[str]:
+    """The English fallback of each `po_match.issue.*` finding."""
+    return [i["message"] for i in result.issues]
+
+
 async def _default_entity_id(session) -> uuid.UUID:
     from sqlalchemy import select
 
@@ -145,9 +150,9 @@ async def test_match_fail_is_mismatch(realdb):
     assert match.match_type == "4-way"
     assert match.inspection_result == "fail"
     assert match.status == "mismatch"
-    assert any("quality inspection" in i.lower() for i in match.issues)
+    assert any("quality inspection" in i.lower() for i in _messages(match))
     # Deviation notes surface in the issue text.
-    assert any("Cracked casings" in i for i in match.issues)
+    assert any("Cracked casings" in i for i in _messages(match))
 
 
 async def test_match_partial_acceptance(realdb):
@@ -176,7 +181,7 @@ async def test_match_partial_acceptance(realdb):
     assert match.inspection_result == "partial"
     assert match.status == "partial"
     assert match.inspection_accepted_quantity == 7.0
-    assert any("partial acceptance" in i.lower() for i in match.issues)
+    assert any("partial acceptance" in i.lower() for i in _messages(match))
 
 
 async def test_require_inspection_missing(realdb):
@@ -195,7 +200,7 @@ async def test_require_inspection_missing(realdb):
 
     assert match.inspection_required is True
     assert match.inspection_result is None
-    assert any("quality inspection required" in i.lower() for i in match.issues)
+    assert any("quality inspection required" in i.lower() for i in _messages(match))
 
 
 async def test_refresh_po_match_raises_quality_hold_on_fail(realdb):

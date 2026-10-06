@@ -342,3 +342,42 @@ async def test_price_variance_message_is_pii_free():
     msg = next(w["message"] for w in warnings if w["type"] == "price_variance")
     assert "Premium Widget" in msg
     assert "15.00" in msg and "10.00" in msg
+
+
+def _added_exceptions(db):
+    from app.models.exception import Exception as APException
+
+    return [
+        c.args[0] for c in db.add.call_args_list if c.args and isinstance(c.args[0], APException)
+    ]
+
+
+@pytest.mark.asyncio
+async def test_price_variance_exception_carries_the_lines_decomposed_not_joined():
+    """Two flagged lines raise ONE exception whose description is the frame
+    code + the two line warnings themselves (migration 0103) — not a
+    server-joined English summary, and no `$` on a rand invoice. Each finding
+    is the SAME dict the invoice's warning list carries, so the queue and the
+    invoice state each line in one wording."""
+    from app.services.invoice_warnings import refresh_warnings
+
+    draft = [
+        _line(item_code="WIDGET-A", unit_price=Decimal("15.00")),
+        _line(item_code="BOLT-B", unit_price=Decimal("5.00")),
+    ]
+    history = [
+        _line(item_code=code, unit_price=Decimal("10.00"), currency="ZAR")
+        for code in ("WIDGET-A", "WIDGET-A", "BOLT-B", "BOLT-B")
+    ]
+    db = _make_db(vendor=_vendor(), draft_lines=draft, history_lines=history)
+    warnings = await refresh_warnings(db, _invoice(currency="ZAR"))
+
+    line_warnings = [w for w in warnings if w["type"] == "price_variance"]
+    (exc,) = [e for e in _added_exceptions(db) if e.exception_type == "price_variance"]
+    assert exc.description_code == "exception.price_variance_findings"
+    assert exc.description_params["count"] == 2
+    assert [
+        {"code": f["code"], "params": f["params"]} for f in exc.description_params["findings"]
+    ] == [{"code": w["code"], "params": w["params"]} for w in line_warnings]
+    assert "$" not in exc.description
+    assert "ZAR" in exc.description

@@ -41,6 +41,12 @@ from app.services import invoice_warnings
 from app.services.matching_rules import resolve_match_rule
 from app.services.po_matching import match_invoice_to_po
 
+
+def _messages(result) -> list[str]:
+    """The English fallback of each `po_match.issue.*` finding."""
+    return [i["message"] for i in result.issues]
+
+
 # ---------------------------------------------------------------------------
 # Helpers — a row-level mock DB for the matcher (PO lookup, GR lookup, then
 # the 4-way inspection lookup). Mirrors test_po_matching_algorithm._mk_db.
@@ -468,7 +474,7 @@ async def test_realdb_partial_receipt_downgrades_matched_to_partial(realdb):
     assert match.match_type == "3-way"
     assert match.status == "partial"
     assert match.gr_id is not None
-    assert any("60%" in i and "Partial" in i for i in match.issues)
+    assert any("60%" in i and "Partial" in i for i in _messages(match))
 
 
 @pytest.mark.asyncio
@@ -486,7 +492,7 @@ async def test_realdb_missing_po_reports_no_po(realdb):
         match = await match_invoice_to_po(s, inv)
 
     assert match.status == "no_po"
-    assert any("PO-DOES-NOT-EXIST" in i for i in match.issues)
+    assert any("PO-DOES-NOT-EXIST" in i for i in _messages(match))
 
 
 @pytest.mark.asyncio
@@ -518,7 +524,7 @@ async def test_realdb_multiple_goods_receipts_aggregate_received_qty(realdb):
     assert match.gr_id is not None
     # 6 + 4 == 10 ordered → fully received across both GRs → matched.
     assert match.status == "matched"
-    assert not any("Partial receipt" in i for i in match.issues)
+    assert not any("Partial receipt" in i for i in _messages(match))
 
 
 @pytest.mark.asyncio
@@ -543,7 +549,7 @@ async def test_realdb_multiple_goods_receipts_partial_sum_downgrades(realdb):
     assert match.match_type == "3-way"
     assert match.status == "partial"
     # 6 + 2 == 8 of 10 → 80% received (not 20% from the newest GR alone).
-    assert any("80%" in i and "Partial receipt" in i for i in match.issues)
+    assert any("80%" in i and "Partial receipt" in i for i in _messages(match))
 
 
 @pytest.mark.asyncio
@@ -569,7 +575,7 @@ async def test_realdb_fractional_quantities_sum_exactly_not_float(realdb):
 
     assert match.match_type == "3-way"
     assert match.status == "matched"
-    assert not any("Partial receipt" in i for i in match.issues)
+    assert not any("Partial receipt" in i for i in _messages(match))
 
 
 @pytest.mark.asyncio
@@ -757,7 +763,7 @@ async def test_realdb_po_level_failed_inspection_is_seen_when_a_gr_exists(realdb
     assert match.match_type == "4-way"
     assert match.inspection_result == "fail"
     assert match.status == "mismatch"
-    assert any(i.startswith("Failed quality") for i in match.issues)
+    assert any(i.startswith("Failed quality") for i in _messages(match))
 
 
 @pytest.mark.asyncio

@@ -2915,4 +2915,122 @@ class AppLocalizationsEn extends AppLocalizations {
   String invoiceWarningGlCodeStalePrior(String code) {
     return 'Cached vendor GL code “$code” is no longer in the active chart of accounts.';
   }
+
+  @override
+  String invoicePoMatchIssuePoNotFound(String poNumber) {
+    return 'PO $poNumber not found';
+  }
+
+  @override
+  String invoicePoMatchIssueCurrencyMismatch(
+    String invoiceCurrency,
+    String poCurrency,
+  ) {
+    return 'Currency mismatch: invoice in $invoiceCurrency, PO in $poCurrency — amounts not compared';
+  }
+
+  @override
+  String invoicePoMatchIssueAmountMismatch(
+    String invoiceAmount,
+    String poTotal,
+    String variancePct,
+  ) {
+    return 'Amount mismatch: invoice $invoiceAmount vs PO $poTotal ($variancePct)';
+  }
+
+  @override
+  String invoicePoMatchIssueAmountMismatchPoCurrencyUnknown(
+    String invoiceAmount,
+    String poTotal,
+    String variancePct,
+  ) {
+    return 'Amount mismatch: invoice $invoiceAmount vs PO $poTotal ($variancePct)';
+  }
+
+  @override
+  String invoicePoMatchIssueAmountMismatchCurrencyUnknown(
+    String invoiceAmount,
+    String poTotal,
+    String variancePct,
+  ) {
+    return 'Amount mismatch: invoice $invoiceAmount vs PO $poTotal ($variancePct)';
+  }
+
+  @override
+  String invoicePoMatchIssuePartialReceipt(String receivedPct) {
+    return 'Partial receipt: $receivedPct of ordered quantity received';
+  }
+
+  @override
+  String invoicePoMatchIssueOverReceipt(
+    String receivedQuantity,
+    String orderedQuantity,
+    String excessQuantity,
+  ) {
+    return 'Over-receipt: $receivedQuantity received against $orderedQuantity ordered (+$excessQuantity)';
+  }
+
+  @override
+  String get invoicePoMatchIssueInspectionFailed => 'Failed quality inspection';
+
+  @override
+  String invoicePoMatchIssueInspectionFailedNotes(String notes) {
+    return 'Failed quality inspection: $notes';
+  }
+
+  @override
+  String invoicePoMatchIssuePartialAcceptance(String acceptedQuantity) {
+    return 'Partial acceptance: $acceptedQuantity of ordered quantity accepted';
+  }
+
+  @override
+  String get invoicePoMatchIssuePartialAcceptanceUnquantified =>
+      'Partial acceptance: part of ordered quantity accepted';
+
+  @override
+  String get invoicePoMatchIssueInspectionRequiredMissing =>
+      'Quality inspection required but missing';
+
+  @override
+  String get exceptionDescriptionMissingDataAfterExtraction =>
+      'Required fields missing after extraction';
+
+  @override
+  String exceptionDescriptionPriceVarianceFindings(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count lines',
+      one: '$count line',
+    );
+    return 'Line-item price variance vs vendor history on $_temp0';
+  }
+
+  @override
+  String exceptionDescriptionContractNoncompliantFindings(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count contract-compliance findings',
+      one: '$count contract-compliance finding',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get warningsPoMatchStatusMatched => 'Matched';
+
+  @override
+  String get warningsPoMatchStatusMismatch => 'Mismatch';
+
+  @override
+  String get warningsPoMatchStatusPartial => 'Partial';
+
+  @override
+  String get warningsPoMatchStatusNoPo => 'No PO';
+
+  @override
+  String warningsPoMatchAnnouncement(String summary) {
+    return 'PO match: $summary';
+  }
 }

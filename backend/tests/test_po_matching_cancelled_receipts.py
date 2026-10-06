@@ -36,6 +36,12 @@ from app.models.invoice import Invoice, InvoiceStatus
 from app.models.procurement import GoodsReceipt, GRLineItem, POLineItem, PurchaseOrder
 from app.services.po_matching import match_invoice_to_po
 
+
+def _messages(result) -> list[str]:
+    """The English fallback of each `po_match.issue.*` finding."""
+    return [i["message"] for i in result.issues]
+
+
 TENANT = "a"
 
 
@@ -143,7 +149,7 @@ async def test_cancelled_receipt_does_not_top_up_a_partial_delivery(realdb):
 
     assert result.match_type == "3-way"
     assert result.status == "partial", result.issues
-    assert any("Partial receipt: 40%" in i for i in result.issues), result.issues
+    assert any("Partial receipt: 40%" in i for i in _messages(result)), result.issues
     assert result.over_receipt is False
 
 
@@ -195,9 +201,9 @@ async def test_over_receipt_is_flagged(realdb):
     assert result.over_receipt is True
     assert result.details["over_receipt"] is True
     # Quantities render without the Numeric(12, 4) trailing zeros.
-    assert any(i == "Over-receipt: 14 received against 10 ordered (+4)" for i in result.issues), (
-        result.issues
-    )
+    assert any(
+        i == "Over-receipt: 14 received against 10 ordered (+4)" for i in _messages(result)
+    ), result.issues
     # The amount control still owns `status` — an in-tolerance amount stays
     # `matched`; over-receipt is a receiving discrepancy, not a billing one.
     assert result.status == "matched"

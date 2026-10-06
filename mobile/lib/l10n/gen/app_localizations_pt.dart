@@ -2935,6 +2935,125 @@ class AppLocalizationsPt extends AppLocalizations {
   String invoiceWarningGlCodeStalePrior(String code) {
     return 'A conta contábil “$code” em cache para o fornecedor não está mais no plano de contas ativo.';
   }
+
+  @override
+  String invoicePoMatchIssuePoNotFound(String poNumber) {
+    return 'Pedido $poNumber não encontrado';
+  }
+
+  @override
+  String invoicePoMatchIssueCurrencyMismatch(
+    String invoiceCurrency,
+    String poCurrency,
+  ) {
+    return 'Divergência de moeda: nota em $invoiceCurrency, pedido em $poCurrency — valores não comparados';
+  }
+
+  @override
+  String invoicePoMatchIssueAmountMismatch(
+    String invoiceAmount,
+    String poTotal,
+    String variancePct,
+  ) {
+    return 'Divergência de valor: nota $invoiceAmount contra pedido $poTotal ($variancePct)';
+  }
+
+  @override
+  String invoicePoMatchIssueAmountMismatchPoCurrencyUnknown(
+    String invoiceAmount,
+    String poTotal,
+    String variancePct,
+  ) {
+    return 'Divergência de valor: nota $invoiceAmount contra pedido $poTotal ($variancePct)';
+  }
+
+  @override
+  String invoicePoMatchIssueAmountMismatchCurrencyUnknown(
+    String invoiceAmount,
+    String poTotal,
+    String variancePct,
+  ) {
+    return 'Divergência de valor: nota $invoiceAmount contra pedido $poTotal ($variancePct)';
+  }
+
+  @override
+  String invoicePoMatchIssuePartialReceipt(String receivedPct) {
+    return 'Recebimento parcial: $receivedPct da quantidade pedida recebida';
+  }
+
+  @override
+  String invoicePoMatchIssueOverReceipt(
+    String receivedQuantity,
+    String orderedQuantity,
+    String excessQuantity,
+  ) {
+    return 'Recebimento em excesso: $receivedQuantity recebidas contra $orderedQuantity pedidas (+$excessQuantity)';
+  }
+
+  @override
+  String get invoicePoMatchIssueInspectionFailed =>
+      'Inspeção de qualidade reprovada';
+
+  @override
+  String invoicePoMatchIssueInspectionFailedNotes(String notes) {
+    return 'Inspeção de qualidade reprovada: $notes';
+  }
+
+  @override
+  String invoicePoMatchIssuePartialAcceptance(String acceptedQuantity) {
+    return 'Aceitação parcial: $acceptedQuantity da quantidade pedida aceitas';
+  }
+
+  @override
+  String get invoicePoMatchIssuePartialAcceptanceUnquantified =>
+      'Aceitação parcial: parte da quantidade pedida aceita';
+
+  @override
+  String get invoicePoMatchIssueInspectionRequiredMissing =>
+      'Inspeção de qualidade obrigatória, mas ausente';
+
+  @override
+  String get exceptionDescriptionMissingDataAfterExtraction =>
+      'Campos obrigatórios ausentes após a extração';
+
+  @override
+  String exceptionDescriptionPriceVarianceFindings(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count linhas',
+      one: '$count linha',
+    );
+    return 'Variação de preço em relação ao histórico do fornecedor em $_temp0';
+  }
+
+  @override
+  String exceptionDescriptionContractNoncompliantFindings(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count constatações de conformidade contratual',
+      one: '$count constatação de conformidade contratual',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get warningsPoMatchStatusMatched => 'Conciliado';
+
+  @override
+  String get warningsPoMatchStatusMismatch => 'Divergência';
+
+  @override
+  String get warningsPoMatchStatusPartial => 'Parcial';
+
+  @override
+  String get warningsPoMatchStatusNoPo => 'Sem pedido';
+
+  @override
+  String warningsPoMatchAnnouncement(String summary) {
+    return 'Conciliação com pedido: $summary';
+  }
 }
 
 /// The translations for Portuguese, as used in Brazil (`pt_BR`).
@@ -5867,5 +5986,124 @@ class AppLocalizationsPtBr extends AppLocalizationsPt {
   @override
   String invoiceWarningGlCodeStalePrior(String code) {
     return 'A conta contábil “$code” em cache para o fornecedor não está mais no plano de contas ativo.';
+  }
+
+  @override
+  String invoicePoMatchIssuePoNotFound(String poNumber) {
+    return 'Pedido $poNumber não encontrado';
+  }
+
+  @override
+  String invoicePoMatchIssueCurrencyMismatch(
+    String invoiceCurrency,
+    String poCurrency,
+  ) {
+    return 'Divergência de moeda: nota em $invoiceCurrency, pedido em $poCurrency — valores não comparados';
+  }
+
+  @override
+  String invoicePoMatchIssueAmountMismatch(
+    String invoiceAmount,
+    String poTotal,
+    String variancePct,
+  ) {
+    return 'Divergência de valor: nota $invoiceAmount contra pedido $poTotal ($variancePct)';
+  }
+
+  @override
+  String invoicePoMatchIssueAmountMismatchPoCurrencyUnknown(
+    String invoiceAmount,
+    String poTotal,
+    String variancePct,
+  ) {
+    return 'Divergência de valor: nota $invoiceAmount contra pedido $poTotal ($variancePct)';
+  }
+
+  @override
+  String invoicePoMatchIssueAmountMismatchCurrencyUnknown(
+    String invoiceAmount,
+    String poTotal,
+    String variancePct,
+  ) {
+    return 'Divergência de valor: nota $invoiceAmount contra pedido $poTotal ($variancePct)';
+  }
+
+  @override
+  String invoicePoMatchIssuePartialReceipt(String receivedPct) {
+    return 'Recebimento parcial: $receivedPct da quantidade pedida recebida';
+  }
+
+  @override
+  String invoicePoMatchIssueOverReceipt(
+    String receivedQuantity,
+    String orderedQuantity,
+    String excessQuantity,
+  ) {
+    return 'Recebimento em excesso: $receivedQuantity recebidas contra $orderedQuantity pedidas (+$excessQuantity)';
+  }
+
+  @override
+  String get invoicePoMatchIssueInspectionFailed =>
+      'Inspeção de qualidade reprovada';
+
+  @override
+  String invoicePoMatchIssueInspectionFailedNotes(String notes) {
+    return 'Inspeção de qualidade reprovada: $notes';
+  }
+
+  @override
+  String invoicePoMatchIssuePartialAcceptance(String acceptedQuantity) {
+    return 'Aceitação parcial: $acceptedQuantity da quantidade pedida aceitas';
+  }
+
+  @override
+  String get invoicePoMatchIssuePartialAcceptanceUnquantified =>
+      'Aceitação parcial: parte da quantidade pedida aceita';
+
+  @override
+  String get invoicePoMatchIssueInspectionRequiredMissing =>
+      'Inspeção de qualidade obrigatória, mas ausente';
+
+  @override
+  String get exceptionDescriptionMissingDataAfterExtraction =>
+      'Campos obrigatórios ausentes após a extração';
+
+  @override
+  String exceptionDescriptionPriceVarianceFindings(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count linhas',
+      one: '$count linha',
+    );
+    return 'Variação de preço em relação ao histórico do fornecedor em $_temp0';
+  }
+
+  @override
+  String exceptionDescriptionContractNoncompliantFindings(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count constatações de conformidade contratual',
+      one: '$count constatação de conformidade contratual',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get warningsPoMatchStatusMatched => 'Conciliado';
+
+  @override
+  String get warningsPoMatchStatusMismatch => 'Divergência';
+
+  @override
+  String get warningsPoMatchStatusPartial => 'Parcial';
+
+  @override
+  String get warningsPoMatchStatusNoPo => 'Sem pedido';
+
+  @override
+  String warningsPoMatchAnnouncement(String summary) {
+    return 'Conciliação com pedido: $summary';
   }
 }

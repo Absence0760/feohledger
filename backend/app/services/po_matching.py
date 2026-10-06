@@ -14,6 +14,7 @@ from sqlalchemy.orm import selectinload
 from app.models.invoice import Invoice
 from app.models.procurement import GoodsReceipt, PurchaseOrder, po_currency_code
 from app.models.quality_inspection import QualityInspection
+from app.services.invoice_warning_catalog import po_match_issue
 from app.tenant import apply_entity_scope
 
 # Goods-receipt statuses that record a delivery which was undone or never
@@ -78,14 +79,44 @@ def compare_currencies(invoice_currency: object, po_currency: object) -> str:
     return CURRENCY_SAME if inv == po else CURRENCY_DIFFERENT
 
 
-def _labelled(amount: Decimal, currency: str | None) -> str:
-    """`1234.50 EUR` — or the bare figure when no code is known.
+def _amount_mismatch_issue(
+    invoice_amount: Decimal,
+    invoice_currency: str | None,
+    po_total: Decimal,
+    po_currency: str | None,
+    variance_pct: Decimal,
+) -> dict:
+    """The out-of-tolerance issue, in whichever of three sentences is honest.
 
-    `issues` is rendered verbatim, so the code is spelled out rather than
-    symbolised; it used to print `$` on both figures whatever either was in.
+    Only reached when the currencies are not DIFFERENT, so either both codes
+    are known and equal, or one is missing. A figure is labelled only with a
+    code that is its own: a PO recording no currency gets a bare figure (it used
+    to print `$` on both figures whatever either was in), and an invoice whose
+    own code is invalid takes the PO's label away too.
     """
-    figure = f"{amount:.2f}"
-    return f"{figure} {currency}" if currency else figure
+    pct = f"{variance_pct:+.1f}"
+    if invoice_currency is None:
+        return po_match_issue(
+            "amount_mismatch_currency_unknown",
+            invoiceAmount=f"{invoice_amount:.2f}",
+            poTotal=f"{po_total:.2f}",
+            variancePct=pct,
+        )
+    if po_currency is None:
+        return po_match_issue(
+            "amount_mismatch_po_currency_unknown",
+            invoiceAmount=invoice_amount,
+            poTotal=f"{po_total:.2f}",
+            currency=invoice_currency,
+            variancePct=pct,
+        )
+    return po_match_issue(
+        "amount_mismatch",
+        invoiceAmount=invoice_amount,
+        poTotal=po_total,
+        currency=invoice_currency,
+        variancePct=pct,
+    )
 
 
 def format_quantity(value: Decimal) -> str:
@@ -160,7 +191,7 @@ class MatchResult:
     # values (`no_po` / `matched` / `mismatch` / `partial`), since `mismatch` is
     # owned by the AMOUNT control and an over-receipt with an in-tolerance
     # amount is a receiving discrepancy, not a billing one. It rides `issues`,
-    # which the invoice modal renders verbatim.
+    # which the invoice modal renders in the PO-match panel.
     over_receipt: bool = False
     #: 3-way quantities, aggregated across every live goods receipt for the PO.
     #: Populated only when the PO carries line items AND at least one receipt
@@ -170,7 +201,13 @@ class MatchResult:
     ordered_quantity: Decimal | None = None
     received_quantity: Decimal | None = None
 
-    issues: list[str] = field(default_factory=list)
+    #: One `{code, params, message}` entry per finding, built by
+    #: `invoice_warning_catalog.po_match_issue` — the client localizes on
+    #: `code` and renders `message` only as the fallback. A match persisted
+    #: before the catalogue covered issues holds bare English strings here, and
+    #: nothing backfills them (the next `refresh_warnings` re-derives the row),
+    #: so every reader of `invoice.po_match.issues` accepts both shapes.
+    issues: list[dict] = field(default_factory=list)
     details: dict = field(default_factory=dict)
 
     def to_json_dict(self) -> dict:
@@ -249,7 +286,7 @@ async def match_invoice_to_po(
 
     if not po:
         result.status = "no_po"
-        result.issues.append(f"PO {invoice.po_number} not found")
+        result.issues.append(po_match_issue("po_not_found", poNumber=invoice.po_number))
         return result
 
     result.po_id = str(po.id)
@@ -281,8 +318,11 @@ async def match_invoice_to_po(
         result.within_tolerance = False
         result.status = "mismatch"
         result.issues.append(
-            f"Currency mismatch: invoice in {invoice_currency}, PO in {result.po_currency} "
-            "— amounts not compared"
+            po_match_issue(
+                "currency_mismatch",
+                invoiceCurrency=invoice_currency,
+                poCurrency=result.po_currency,
+            )
         )
     else:
         variance = invoice_amount - po_total
@@ -298,8 +338,9 @@ async def match_invoice_to_po(
         if not result.within_tolerance:
             result.status = "mismatch"
             result.issues.append(
-                f"Amount mismatch: invoice {_labelled(invoice_amount, invoice_currency)} vs PO "
-                f"{_labelled(po_total, result.po_currency)} ({variance_pct:+.1f}%)"
+                _amount_mismatch_issue(
+                    invoice_amount, invoice_currency, po_total, result.po_currency, variance_pct
+                )
             )
         else:
             result.status = "matched"
@@ -355,7 +396,7 @@ async def match_invoice_to_po(
             if po_qty_total > 0 and gr_qty_total < po_qty_total:
                 pct_received = (gr_qty_total / po_qty_total) * Decimal(100)
                 result.issues.append(
-                    f"Partial receipt: {pct_received:.0f}% of ordered quantity received"
+                    po_match_issue("partial_receipt", receivedPct=f"{pct_received:.0f}")
                 )
                 if result.status == "matched":
                     result.status = "partial"
@@ -365,14 +406,18 @@ async def match_invoice_to_po(
                 # ordered passed the 3-way leg in silence — and an over-delivery
                 # is how an invoice for quantities nobody authorised gets its
                 # supporting receipt. Surfaced as an issue (the invoice modal
-                # renders `issues` verbatim) plus the additive `over_receipt`
+                # renders `issues` in its PO-match panel) plus the additive `over_receipt`
                 # flag; `status` is left to the amount control, which is the
                 # gate that decides whether the invoice is payable.
                 result.over_receipt = True
                 over_qty = gr_qty_total - po_qty_total
                 result.issues.append(
-                    f"Over-receipt: {format_quantity(gr_qty_total)} received against "
-                    f"{format_quantity(po_qty_total)} ordered (+{format_quantity(over_qty)})"
+                    po_match_issue(
+                        "over_receipt",
+                        receivedQuantity=format_quantity(gr_qty_total),
+                        orderedQuantity=format_quantity(po_qty_total),
+                        excessQuantity=format_quantity(over_qty),
+                    )
                 )
 
     # 4-way match: check for a quality inspection. Prefer one tied to the
@@ -423,23 +468,26 @@ async def match_invoice_to_po(
 
         if inspection.result == "fail":
             result.status = "mismatch"
-            msg = "Failed quality inspection"
             if inspection.deviation_notes:
-                msg = f"{msg}: {inspection.deviation_notes}"
-            result.issues.append(msg)
+                issue = po_match_issue("inspection_failed_notes", notes=inspection.deviation_notes)
+            else:
+                issue = po_match_issue("inspection_failed")
+            result.issues.append(issue)
         elif inspection.result == "partial":
             if result.status == "matched":
                 result.status = "partial"
-            accepted = (
-                f"{result.inspection_accepted_quantity:g}"
-                if result.inspection_accepted_quantity is not None
-                else "part"
-            )
-            result.issues.append(f"Partial acceptance: {accepted} of ordered quantity accepted")
+            if result.inspection_accepted_quantity is not None:
+                issue = po_match_issue(
+                    "partial_acceptance",
+                    acceptedQuantity=f"{result.inspection_accepted_quantity:g}",
+                )
+            else:
+                issue = po_match_issue("partial_acceptance_unquantified")
+            result.issues.append(issue)
         # result == "pass" -> no status change
     elif require_inspection and po is not None:
         result.inspection_required = True
-        result.issues.append("Quality inspection required but missing")
+        result.issues.append(po_match_issue("inspection_required_missing"))
 
     # Decimal values here are rendered to numbers by `to_json_dict()` at the
     # JSONB boundary — the arithmetic that produced them was exact Decimal.

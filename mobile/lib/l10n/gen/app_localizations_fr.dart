@@ -2945,4 +2945,122 @@ class AppLocalizationsFr extends AppLocalizations {
   String invoiceWarningGlCodeStalePrior(String code) {
     return 'Le compte général « $code » mis en cache pour ce fournisseur n’est plus dans le plan comptable actif.';
   }
+
+  @override
+  String invoicePoMatchIssuePoNotFound(String poNumber) {
+    return 'Commande $poNumber introuvable';
+  }
+
+  @override
+  String invoicePoMatchIssueCurrencyMismatch(
+    String invoiceCurrency,
+    String poCurrency,
+  ) {
+    return 'Devises différentes : facture en $invoiceCurrency, commande en $poCurrency — montants non comparés';
+  }
+
+  @override
+  String invoicePoMatchIssueAmountMismatch(
+    String invoiceAmount,
+    String poTotal,
+    String variancePct,
+  ) {
+    return 'Écart de montant : facture $invoiceAmount contre commande $poTotal ($variancePct)';
+  }
+
+  @override
+  String invoicePoMatchIssueAmountMismatchPoCurrencyUnknown(
+    String invoiceAmount,
+    String poTotal,
+    String variancePct,
+  ) {
+    return 'Écart de montant : facture $invoiceAmount contre commande $poTotal ($variancePct)';
+  }
+
+  @override
+  String invoicePoMatchIssueAmountMismatchCurrencyUnknown(
+    String invoiceAmount,
+    String poTotal,
+    String variancePct,
+  ) {
+    return 'Écart de montant : facture $invoiceAmount contre commande $poTotal ($variancePct)';
+  }
+
+  @override
+  String invoicePoMatchIssuePartialReceipt(String receivedPct) {
+    return 'Réception partielle : $receivedPct de la quantité commandée reçue';
+  }
+
+  @override
+  String invoicePoMatchIssueOverReceipt(
+    String receivedQuantity,
+    String orderedQuantity,
+    String excessQuantity,
+  ) {
+    return 'Sur-réception : $receivedQuantity reçues contre $orderedQuantity commandées (+$excessQuantity)';
+  }
+
+  @override
+  String get invoicePoMatchIssueInspectionFailed => 'Contrôle qualité échoué';
+
+  @override
+  String invoicePoMatchIssueInspectionFailedNotes(String notes) {
+    return 'Contrôle qualité échoué : $notes';
+  }
+
+  @override
+  String invoicePoMatchIssuePartialAcceptance(String acceptedQuantity) {
+    return 'Acceptation partielle : $acceptedQuantity de la quantité commandée acceptées';
+  }
+
+  @override
+  String get invoicePoMatchIssuePartialAcceptanceUnquantified =>
+      'Acceptation partielle : une partie de la quantité commandée acceptée';
+
+  @override
+  String get invoicePoMatchIssueInspectionRequiredMissing =>
+      'Contrôle qualité requis mais absent';
+
+  @override
+  String get exceptionDescriptionMissingDataAfterExtraction =>
+      'Champs obligatoires manquants après l’extraction';
+
+  @override
+  String exceptionDescriptionPriceVarianceFindings(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count lignes',
+      one: '$count ligne',
+    );
+    return 'Écart de prix par rapport à l’historique du fournisseur sur $_temp0';
+  }
+
+  @override
+  String exceptionDescriptionContractNoncompliantFindings(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count constats de conformité au contrat',
+      one: '$count constat de conformité au contrat',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get warningsPoMatchStatusMatched => 'Rapproché';
+
+  @override
+  String get warningsPoMatchStatusMismatch => 'Écart';
+
+  @override
+  String get warningsPoMatchStatusPartial => 'Partiel';
+
+  @override
+  String get warningsPoMatchStatusNoPo => 'Aucune commande';
+
+  @override
+  String warningsPoMatchAnnouncement(String summary) {
+    return 'Rapprochement commande : $summary';
+  }
 }
