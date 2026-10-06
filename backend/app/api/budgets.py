@@ -16,6 +16,7 @@ from decimal import Decimal
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import Response
 from sqlalchemy import func, or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import (
@@ -103,7 +104,11 @@ async def _linked_requisition_count(db: AsyncSession, budget_id: uuid.UUID, *con
 
 
 async def _get_budget_or_404(
-    db: AsyncSession, budget_id: uuid.UUID, entity_id: uuid.UUID | None
+    db: AsyncSession,
+    budget_id: uuid.UUID,
+    entity_id: uuid.UUID | None,
+    *,
+    for_update: bool = False,
 ) -> Budget:
     """Resolve one budget within the caller's selected entity, or 404.
 
@@ -112,12 +117,18 @@ async def _get_budget_or_404(
     by-id routes. An out-of-scope id is the SAME 404 as a missing one (the
     ``api/purchase_orders._get_scoped_po`` shape); the consolidated view
     (``entity_id is None``) reaches every row.
+
+    ``for_update`` takes ``SELECT … FOR UPDATE`` on the budget row. Edit and
+    delete need it because their linked-requisition guards are a count followed
+    by a write: without the lock, a requisition linked between the two (create
+    or re-link, both through ``api/requisitions._resolve_links``) slipped past
+    the guard. ``_resolve_links`` takes the same lock when it resolves a
+    ``budget_id``, so the two sides serialise on this one row.
     """
-    budget = (
-        await db.execute(
-            apply_entity_scope(select(Budget).where(Budget.id == budget_id), Budget, entity_id)
-        )
-    ).scalar_one_or_none()
+    stmt = apply_entity_scope(select(Budget).where(Budget.id == budget_id), Budget, entity_id)
+    if for_update:
+        stmt = stmt.with_for_update(of=Budget).execution_options(populate_existing=True)
+    budget = (await db.execute(stmt)).scalar_one_or_none()
     if not budget:
         raise HTTPException(status_code=404, detail="Budget not found")
     return budget
@@ -450,7 +461,10 @@ async def update_budget(
     org_id: uuid.UUID = Depends(get_org_id),
     entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
-    budget = await _get_budget_or_404(db, budget_id, entity_id)
+    # Locked: the currency guard below counts linked requisitions and then
+    # re-denominates; a requisition linking in between would land in the old
+    # currency, never trip the 422, and drop silently out of `committed`.
+    budget = await _get_budget_or_404(db, budget_id, entity_id, for_update=True)
     payload = body.model_dump(exclude_unset=True)
     new_currency = payload.get("currency")
     if new_currency is not None and new_currency.upper() != (budget.currency or "").upper():
@@ -504,7 +518,9 @@ async def delete_budget(
     org_id: uuid.UUID = Depends(get_org_id),
     entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
-    budget = await _get_budget_or_404(db, budget_id, entity_id)
+    # Locked, so no requisition can link to this budget between the count below
+    # and the DELETE (`_resolve_links` takes the same row lock).
+    budget = await _get_budget_or_404(db, budget_id, entity_id, for_update=True)
     # `purchase_requisitions.budget_id` is a plain FK (NO ACTION), so a budget
     # any requisition still points at came back as a ForeignKeyViolation — a
     # 500 for a state the API should simply name. Refuse with a 409 rather than
@@ -517,6 +533,19 @@ async def delete_budget(
             status_code=status.HTTP_409_CONFLICT,
             detail=f"Budget is linked to {linked} requisition(s); it cannot be deleted.",
         )
+    deleted_details = {"name": budget.name, "amount": str(budget.amount)}
+    await db.delete(budget)
+    try:
+        await db.flush()
+    except IntegrityError as exc:
+        # The lock covers every path that links a requisition today; the FK is
+        # still the real guard, so a link from a path that skips the lock comes
+        # back as the same 409 rather than a 500.
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Budget is linked to one or more requisitions; it cannot be deleted.",
+        ) from exc
     await dispatch_audit(
         db,
         correlation_id=uuid.uuid4(),
@@ -525,8 +554,7 @@ async def delete_budget(
         action="budget.deleted",
         entity_type="budget",
         entity_id=budget.id,
-        details={"name": budget.name, "amount": str(budget.amount)},
+        details=deleted_details,
     )
-    await db.delete(budget)
     await db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)

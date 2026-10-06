@@ -10,11 +10,12 @@ DO NOT run this file standalone in a concurrent build — the ``realdb`` fixture
 truncates all tables sequentially. The orchestrator runs the suite at the end.
 """
 
+import asyncio
 import uuid
 from datetime import date
 from decimal import Decimal
 
-from sqlalchemy import select
+from sqlalchemy import delete, select, text, update
 
 from app.models.invoice import Invoice
 from app.models.procurement import (
@@ -1012,3 +1013,165 @@ async def test_spend_po_relief_attributes_each_invoice_to_one_po(realdb):
     async with realdb.client(key="a", role="cfo") as c:
         other = (await c.get(f"/api/budgets/{other_budget}/spend")).json()
     assert other["committed"] == 900.0
+
+
+# ---------------------------------------------------------------------------
+# Budget edit / delete vs a requisition linking to it — the two sides serialise
+# on the budget row (`SELECT … FOR UPDATE` in `update_budget` /
+# `delete_budget` and in `api/requisitions._resolve_links`).
+#
+# Each test holds the budget row lock in its own session, starts the competing
+# request as a task, and waits for a REAL signal — a backend on the tenant DB
+# waiting on a lock in `pg_stat_activity` — before committing the holder's
+# write. What the request answers after that proves which side it read.
+# ---------------------------------------------------------------------------
+
+
+async def _wait_for_lock_waiter(realdb, key="a", timeout_s: float = 15.0) -> None:
+    db_name = realdb.info(key).db_name
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout_s
+    async with realdb.sessionmaker(key)() as probe:
+        while True:
+            waiting = (
+                await probe.execute(
+                    text(
+                        "SELECT count(*) FROM pg_stat_activity "
+                        "WHERE datname = :d AND wait_event_type = 'Lock'"
+                    ),
+                    {"d": db_name},
+                )
+            ).scalar()
+            await probe.rollback()
+            if waiting:
+                return
+            assert loop.time() < deadline, "the competing request never blocked on the budget row"
+            await asyncio.sleep(0.02)
+
+
+async def _lock_budget(session, bid) -> None:
+    await session.execute(select(Budget).where(Budget.id == bid).with_for_update())
+
+
+def _req_body(**kw) -> dict:
+    body = {
+        "requisition_number": f"REQ-{_u()}",
+        "currency": "USD",
+        "line_items": [{"description": "Thing", "quantity": "1", "unit_price": "10.00"}],
+    }
+    body.update(kw)
+    return body
+
+
+def _linked_draft(realdb, bid) -> PurchaseRequisition:
+    return PurchaseRequisition(
+        requisition_number=f"REQ-{_u()}",
+        requester_user_id=uuid.uuid4(),
+        budget_id=bid,
+        total=Decimal("10.00"),
+        status=RequisitionStatus.draft,
+        currency="USD",
+        organization_id=realdb.info("a").org_id,
+    )
+
+
+async def test_requisition_link_waits_for_a_budget_delete_and_then_404s(realdb):
+    """Without the lock in `_resolve_links` the create read the budget, inserted
+    the link and hit the FK at commit — a 500. Now it waits for the delete and
+    sees the budget gone."""
+    bid = await _mk_budget_row(realdb)
+    async with realdb.sessionmaker("a")() as holder:
+        await _lock_budget(holder, bid)
+        async with realdb.client(key="a", role="ap_clerk") as c:
+            task = asyncio.create_task(
+                c.post("/api/requisitions", json=_req_body(budget_id=str(bid)))
+            )
+            await _wait_for_lock_waiter(realdb)
+            await holder.execute(delete(Budget).where(Budget.id == bid))
+            await holder.commit()
+            resp = await task
+    assert resp.status_code == 404, resp.text
+    assert resp.json()["detail"] == "Budget not found"
+
+
+async def test_requisition_link_waits_for_a_budget_currency_change_and_then_422s(realdb):
+    """Without the lock the link landed in the budget's OLD currency, the
+    budget's own 422 never saw it, and the rollup silently excluded it."""
+    bid = await _mk_budget_row(realdb, currency="USD")
+    async with realdb.sessionmaker("a")() as holder:
+        await _lock_budget(holder, bid)
+        async with realdb.client(key="a", role="ap_clerk") as c:
+            task = asyncio.create_task(
+                c.post("/api/requisitions", json=_req_body(budget_id=str(bid)))
+            )
+            await _wait_for_lock_waiter(realdb)
+            await holder.execute(update(Budget).where(Budget.id == bid).values(currency="EUR"))
+            await holder.commit()
+            resp = await task
+    assert resp.status_code == 422, resp.text
+    assert "EUR" in resp.json()["detail"]
+
+
+async def test_budget_delete_waits_for_a_linking_requisition_and_then_409s(realdb):
+    """The other direction: a link in flight holds the budget row, so the
+    delete's count runs after it commits and names it."""
+    bid = await _mk_budget_row(realdb)
+    async with realdb.sessionmaker("a")() as holder:
+        await _lock_budget(holder, bid)
+        async with realdb.client(key="a", role="cfo") as c:
+            task = asyncio.create_task(c.delete(f"/api/budgets/{bid}"))
+            await _wait_for_lock_waiter(realdb)
+            holder.add(_linked_draft(realdb, bid))
+            await holder.commit()
+            resp = await task
+            assert resp.status_code == 409, resp.text
+            # The count names the link — the pre-delete guard saw it, not the
+            # FK fallback.
+            assert "1 requisition(s)" in resp.json()["detail"]
+            assert (await c.get(f"/api/budgets/{bid}")).status_code == 200
+
+
+async def test_budget_currency_change_waits_for_a_linking_requisition_and_then_422s(realdb):
+    bid = await _mk_budget_row(realdb, currency="USD")
+    async with realdb.sessionmaker("a")() as holder:
+        await _lock_budget(holder, bid)
+        async with realdb.client(key="a", role="cfo") as c:
+            task = asyncio.create_task(c.patch(f"/api/budgets/{bid}", json={"currency": "EUR"}))
+            await _wait_for_lock_waiter(realdb)
+            holder.add(_linked_draft(realdb, bid))
+            await holder.commit()
+            resp = await task
+    assert resp.status_code == 422, resp.text
+
+
+async def test_budget_delete_maps_a_residual_fk_violation_to_409(realdb, monkeypatch):
+    """The FK is still the real guard. A link the count did not see — any path
+    that skips the lock — comes back as the same 409, not a 500, and nothing is
+    deleted or audited."""
+    import app.api.budgets as budgets_api
+
+    bid = await _mk_budget_row(realdb)
+    await _mk_requisition(realdb, "a", budget_id=bid, total="5.00", status=RequisitionStatus.draft)
+
+    async def _blind_count(*_a, **_k) -> int:
+        return 0
+
+    monkeypatch.setattr(budgets_api, "_linked_requisition_count", _blind_count)
+    async with realdb.client(key="a", role="cfo") as c:
+        resp = await c.delete(f"/api/budgets/{bid}")
+        assert resp.status_code == 409, resp.text
+        assert "requisition" in resp.json()["detail"].lower()
+        assert (await c.get(f"/api/budgets/{bid}")).status_code == 200
+    async with realdb.sessionmaker("a")() as s:
+        audited = (
+            (
+                await s.execute(
+                    select(AuditLog).where(
+                        AuditLog.action == "budget.deleted", AuditLog.entity_id == bid
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+    assert audited == []

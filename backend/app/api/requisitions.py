@@ -843,6 +843,14 @@ async def _resolve_links(
             entity_id,
             include_shared=True,
         )
+        if field == "budget_id":
+            # Row-lock the budget for the rest of this transaction.
+            # `PATCH` / `DELETE /api/budgets/{id}` take the same lock around
+            # their linked-requisition guards (a count, then a re-denominate or
+            # a delete), so a link made here either lands before the guard
+            # counts it or waits and then sees the budget's new currency (422)
+            # or its absence (404) — never slips in between.
+            stmt = stmt.with_for_update(of=model).execution_options(populate_existing=True)
         row = (await db.execute(stmt)).scalar_one_or_none()
         if row is None:
             raise HTTPException(status_code=404, detail=f"{label} not found")

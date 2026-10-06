@@ -93,6 +93,20 @@ The budget side holds the same line: `PATCH /api/budgets/{id}` refuses to
 change `currency` while a non-cancelled linked requisition is in another one
 (422), and `DELETE` refuses a budget any requisition still links to (409).
 
+**Both guards are a count followed by a write, so both sides lock the budget
+row.** `update_budget` / `delete_budget` read the budget `FOR UPDATE`
+(`_get_budget_or_404(..., for_update=True)`), and
+`api/requisitions._resolve_links` takes the same lock whenever it resolves a
+`budget_id`. A requisition created or re-linked mid-guard used to slip past it:
+a delete then failed at the FK (a 500, not the 409), and a currency change left
+a requisition linked in the old currency — excluded from the rollup and
+disclosed via `excluded_row_count`, but never refused. Now whichever side locks
+second waits, then re-reads: the link sees the new currency (422) or the
+deleted budget (404), and the budget guard counts the new link. A residual FK
+`IntegrityError` on delete (a future path that skips the lock) is mapped to the
+same 409, and nothing is deleted or audited. Tests:
+`tests/test_budgets.py` (`*_waits_for_*`, `*_residual_fk_*`).
+
 ### `department` / `project` actuals — resolved
 
 Previously `actual` read `0` for `department` / `project` budgets because
