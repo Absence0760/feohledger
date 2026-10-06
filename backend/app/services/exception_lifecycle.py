@@ -1,8 +1,9 @@
 """Exception lifecycle — the single chokepoint for queue decisions + their
 append-only audit rows.
 
-An AP ``Exception`` is a *control*, not a note. Three of the types the queue
-carries — ``duplicate``, ``fraud_flag``, ``line_total_mismatch`` — block a
+An AP ``Exception`` is a *control*, not a note. Six of the types the queue
+carries — ``duplicate``, ``fraud_flag``, ``line_total_mismatch``,
+``payment_reconciliation``, ``quality_hold`` and ``po_mismatch`` — block a
 payment run outright (``api/payments.PAYMENT_BLOCKING_EXCEPTION_TYPES``), and
 invoice approval gates on none of them. Clearing one is therefore the human
 sign-off that lets money move, and it has to leave a trace an auditor can trust.
@@ -60,7 +61,9 @@ from __future__ import annotations
 
 import logging
 import uuid
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
+from contextlib import contextmanager
+from contextvars import ContextVar
 from datetime import UTC, datetime
 
 from fastapi import HTTPException
@@ -189,6 +192,68 @@ REFUSAL_MESSAGES: dict[str, str] = {
 _MAX_RESOLUTION_CHARS = 500
 
 
+class Decision:
+    """A decision in progress on one exception — see :func:`deciding`.
+
+    ``refound`` is set when a refresh the decider's own change triggered still
+    reports the finding the exception is about (``mark_refound``): the decider
+    must then escalate rather than resolve, because the row it is about to
+    clear would otherwise swallow a finding it never evaluated.
+    """
+
+    __slots__ = ("exception_id", "refound")
+
+    def __init__(self, exception_id: uuid.UUID) -> None:
+        self.exception_id = exception_id
+        self.refound = False
+
+
+#: Decisions in progress in THIS task. A ContextVar, so it follows the
+#: coroutine and never leaks into a concurrent request.
+_BEING_DECIDED: ContextVar[tuple[Decision, ...]] = ContextVar(
+    "exceptions_being_decided", default=()
+)
+
+
+@contextmanager
+def deciding(exception_id: uuid.UUID) -> Iterator[Decision]:
+    """Mark ``exception_id`` as being decided by the current caller.
+
+    The agent coordinator wraps ``resolver.apply`` in this. A resolver that
+    corrects or relinks the invoice re-runs ``refresh_warnings``, and that
+    refresh closes any PO-match row whose finding has gone
+    (``invoice_warnings._close_cleared_po_exceptions``) — which, without this
+    marker, would close the very row the agent is about to resolve: as "PO
+    match", with no actor, and then a second time as the agent. The detector
+    skips a row this names, so the decision lands once, attributed to the
+    decider that actually made it.
+
+    The other direction matters as much: if that refresh still FINDS the
+    exception's type — a relink that exposed over-billing against the new PO,
+    say — the finding folds into this same open row (``_ensure_exception``
+    de-dupes per type), so the detector marks the yielded :class:`Decision`
+    ``refound`` and the coordinator escalates instead of resolving.
+    """
+    decision = Decision(exception_id)
+    token = _BEING_DECIDED.set((*_BEING_DECIDED.get(), decision))
+    try:
+        yield decision
+    finally:
+        _BEING_DECIDED.reset(token)
+
+
+def is_being_decided(exception_id: uuid.UUID) -> bool:
+    """True inside a :func:`deciding` block for ``exception_id``."""
+    return any(d.exception_id == exception_id for d in _BEING_DECIDED.get())
+
+
+def mark_refound(exception_id: uuid.UUID) -> None:
+    """Record that a refresh re-found the finding of a row being decided."""
+    for decision in _BEING_DECIDED.get():
+        if decision.exception_id == exception_id:
+            decision.refound = True
+
+
 def is_payment_blocking(exception_type: str) -> bool:
     """True when an unresolved exception of this type stops a payment run.
 
@@ -272,8 +337,10 @@ def segregation_refusal(
     * the org opted out (``settings.exceptions.require_segregation: false``);
     * ``action`` is not a clearing verb (``escalate`` is always open);
     * the exception's type does not block a payment run. Clearing a
-      ``po_mismatch`` / ``missing_data`` / ``quality_hold`` releases nothing, so
-      a refusal there would be friction with no control behind it. Scoping to
+      ``missing_data`` / ``price_variance`` / ``unverified_vendor`` row releases
+      nothing, so a refusal there would be friction with no control behind it
+      (``po_mismatch`` and ``quality_hold`` DO block, and so are in scope).
+      Scoping to
       ``is_payment_blocking`` reuses the ONE definition of "clearing this lets
       money move" — the same tuple the audit row already advertises as
       ``payment_blocking`` — so adding a type to it extends this control

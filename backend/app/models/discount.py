@@ -88,6 +88,22 @@ class DiscountOffer(Base, EntityMixin, TimestampMixin):
     # actual savings without recomputing against the tier table.
     captured_amount: Mapped[Decimal | None] = mapped_column(Numeric(15, 2))
     captured_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # The settled payment that realized the capture (migration 0104). Lets a
+    # void reverse exactly the capture its own payment made instead of
+    # attributing it by elimination; NULL on a capture made before the column
+    # existed, which the void still handles by the old elimination rule
+    # (`discount_capture.reverse_captures_for_voided_payment`). `use_alter`
+    # because `payments.discount_offer_id` points back the other way.
+    captured_by_payment_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey(
+            "payments.id",
+            ondelete="SET NULL",
+            use_alter=True,
+            name="fk_discount_offers_captured_by_payment_id",
+        ),
+        index=True,
+    )
 
     # Populated when source == "financing" — which marketplace funded the
     # early payment (see services/financing_adapters/).

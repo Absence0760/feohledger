@@ -17,6 +17,7 @@ import pytest
 from sqlalchemy import select
 
 from app.models.invoice import Invoice, InvoiceStatus
+from app.models.vendor import Vendor
 
 
 async def _create_entity(c, *, name: str, slug: str) -> str:
@@ -147,6 +148,12 @@ async def test_payment_list_and_summary_scope_by_entity(realdb):
                     await s.execute(select(Invoice).where(Invoice.id == uuid.UUID(inv_id)))
                 ).scalar_one()
                 row.status = InvoiceStatus.approved
+                # Creating the invoice by vendor name links a vendor it creates
+                # as `unverified`, which a payment refuses — verify it here for
+                # the same reason the status is promoted directly.
+                if row.vendor_id is not None:
+                    vendor = await s.get(Vendor, row.vendor_id)
+                    vendor.status = "active"
                 await s.commit()
             pay = await c.post(
                 "/api/payments",
@@ -328,7 +335,6 @@ async def test_exception_list_and_summary_scope_by_entity(realdb):
     import uuid
 
     from app.models.exception import Exception as APException
-    from app.models.vendor import Vendor
 
     # Pre-seed active (not "unverified") vendors named X/Y so
     # match_and_link_vendor links the invoices below to them instead of

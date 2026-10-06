@@ -127,6 +127,30 @@ async def test_prepare_eur_invoice_from_us_org_picks_intl_wire_with_fx_lock():
 
 
 @pytest.mark.asyncio
+async def test_prepare_converts_the_booked_amount_not_the_invoice_total():
+    """A payment that moves LESS than the invoice — net of an applied credit or
+    an accepted early-payment discount — must lock a home-currency debit for
+    what is actually sent. Converting the invoice total would debit the org
+    for money that never leaves (`amount=` is the booked `Payment.amount`)."""
+    fx = MockFXAdapter({"mock_rates": {"EUR": "0.92"}})
+    inv = _invoice(amount=Decimal("1000.00"), currency="EUR")
+    vendor = _vendor(iban=_VALID_DE_IBAN, swift=_VALID_DEUTSCHE_BIC, country="DE")
+
+    prepared = await prepare_international_payment(
+        invoice=inv,
+        vendor=vendor,
+        org_home_currency="USD",
+        fx_adapter=fx,
+        amount=Decimal("980.00"),
+    )
+
+    p = prepared.payment
+    assert p.amount == Decimal("980.00")
+    # 980 / 0.92 = 1065.2173… → 1065.22, not the 1086.96 the invoice total costs.
+    assert p.source_amount == Decimal("1065.22")
+
+
+@pytest.mark.asyncio
 async def test_prepare_eur_to_eur_within_sepa_uses_sepa_no_fx():
     """EUR home → EUR invoice to a German vendor → SEPA, no FX
     lookup, source_amount = invoice amount, target_country = DE."""
@@ -429,6 +453,9 @@ def _payment(*, method="international_wire"):
         fx_locked_at=None,
         corridor=None,
         target_country=None,
+        # Migration 0104: booked with no early-payment discount.
+        discount_offer_id=None,
+        discount_amount=None,
     )
 
 
@@ -527,14 +554,26 @@ def _mock_db(*, run, payment, invoice, vendor_bank, compliance_vendor=None, comp
     memo_pair_res = MagicMock()
     memo_pair_res.all = MagicMock(return_value=[])
 
+    # `inactive_vendor_statuses` — the invoice names a vendor, so its status is
+    # read; still `active`, so dispatch carries on.
+    vendor_status_res = MagicMock()
+    vendor_status_res.all = MagicMock(return_value=[(invoice.vendor_id, "active")])
+
+    # `payable_amount` → `applicable_discounts`: no accepted offer, so the
+    # payment moves the net it was booked at.
+    offers_res = MagicMock()
+    offers_res.scalars = MagicMock(return_value=MagicMock(all=MagicMock(return_value=[])))
+
     queue = [
         run_res,
         pay_res,
         inv_res,
         blocking_res,
+        *([vendor_status_res] if invoice.vendor_id else []),
         card_claim_res,
         memo_pair_res,
         credit_res,
+        offers_res,
         bank_res,
     ]
 

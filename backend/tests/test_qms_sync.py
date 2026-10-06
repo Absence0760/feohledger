@@ -247,6 +247,8 @@ async def test_sync_upsert_is_idempotent_and_resolves_docs(realdb):
     assert by_num["QMS-B"].result == "fail"
     # entity defaulted to the tenant's default entity
     assert by_num["QMS-A"].entity_id is not None
+    # Migration 0105: a synced verdict is the QMS's, attributed to no user.
+    assert {(r.source, r.recorded_by_user_id) for r in rows} == {("qms", None)}
 
     # Second sync with a CHANGED result for QMS-A — updates in place, no dupes.
     changed = [
@@ -408,3 +410,43 @@ async def test_doc_resolvers_bound_lookup_to_a_single_row():
     # A blank number short-circuits to None without touching the DB.
     assert await _resolve_po_id(db, uuid.uuid4(), None) is None
     assert await _resolve_gr_id(db, uuid.uuid4(), "") is None
+
+
+@pytest.mark.asyncio
+async def test_a_hand_typed_row_the_qms_takes_over_loses_its_hand_picked_links(realdb):
+    """Someone types an inspection under the number of a QMS inspection that
+    passed for a PO not imported here, linking it to their own invoice's PO. If
+    the sync kept that link while flipping the row to `qms`, the typed verdict
+    would become a "QMS" pass on a PO the QMS never inspected — and lift that
+    invoice's quality hold. The QMS's own resolution wins, NULL included."""
+    from app.models.quality_inspection import QualityInspection as QI
+
+    mk = realdb.sessionmaker("a")
+    org_id = realdb.info("a").org_id
+    async with mk() as s:
+        po = PurchaseOrder(organization_id=org_id, po_number="PO-OWN", total=Decimal("100.00"))
+        s.add(po)
+        await s.flush()
+        s.add(
+            QI(
+                inspection_number="QMS-B",  # the QMS's number, PO unresolvable here
+                po_id=po.id,
+                result="pass",
+                source="manual",
+                recorded_by_user_id=uuid.uuid4(),
+                organization_id=org_id,
+            )
+        )
+        await s.commit()
+
+    with patch.object(qms_sync, "get_qms_adapter", lambda cfg: _stub_adapter([_RECORDS[1]])):
+        async with mk() as db:
+            await sync_tenant_inspections(db, org_id=org_id, qms_config={"provider": "mock"})
+            await db.commit()
+
+    async with mk() as db:
+        (row,) = (await db.execute(select_qi(org_id))).scalars().all()
+    assert row.source == "qms"
+    assert row.recorded_by_user_id is None
+    assert row.po_id is None  # the QMS's PO-NONEXISTENT does not resolve
+    assert row.result == "fail"

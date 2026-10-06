@@ -617,12 +617,16 @@ export const en = {
 	'payments.queue.blocked.fraudFlag': 'Fraud flag — unresolved',
 	'payments.queue.blocked.lineTotalMismatch': 'Line totals don’t match — unresolved',
 	'payments.queue.blocked.paymentReconciliation': 'Earlier payment unreconciled — may still be in flight',
+	'payments.queue.blocked.qualityHold': 'Quality hold — goods failed or await inspection',
+	'payments.queue.blocked.poMismatch': 'Doesn’t match its purchase order — unresolved',
+	'payments.queue.blocked.vendorNotActive': 'Vendor not verified or not active — verify the vendor first',
 	'payments.queue.blocked.appliedCreditMismatch': 'An applied credit memo no longer matches this invoice\'s vendor or currency — correct the invoice first',
 	'payments.queue.blocked.fullyCredited': 'Fully covered by credit memos — nothing to pay',
 	'payments.queue.blocked.liveVirtualCard': 'A live virtual card claims this invoice — pay it by card',
 	'payments.queue.blocked.generic': 'Unresolved exception blocks payment',
 	'payments.queue.discountSave': 'Save {amount}',
 	'payments.queue.discountBy': '{percent}% by {date}',
+	'payments.queue.acceptedDiscount': 'Accepted offer: pays {amount} by {date}',
 	'payments.queue.loadMore': 'Load more ({shown} of {total})',
 	'payments.queue.showingAll':
 		'{total, plural, one {Showing all # invoice} other {Showing all # invoices}}',
@@ -5838,6 +5842,8 @@ export const en = {
 	'paymentRuns.runDetail.pendingCfoStrong': 'Pending CFO approval.',
 	'paymentRuns.runDetail.title': 'Payment Run',
 	'paymentRuns.runDetail.total': 'Total',
+	'paymentRuns.runDetail.discountTotal': 'Early-payment discounts taken',
+	'paymentRuns.runDetail.rowDiscount': '{amount} discount taken',
 	// Payment-RUN status labels — the /payments Runs table + RunDetailModal's
 	// header pill (#lib/types/payment.ts::RUN_STATUS_LABEL_KEYS)
 	'paymentRuns.status.draft': 'Draft',

@@ -14,12 +14,14 @@ the HTTP door refuses them — strictly worse than the gap being closed. The age
 therefore inherits the refusal, and degrades to the escalation every other
 refusal produces rather than a bare 403.
 
-Nothing in the shipped registry can reach the gate today: ``duplicate`` and
-``fraud_flag`` are escalate-only stubs and ``line_total_mismatch`` /
-``payment_reconciliation`` have no resolver at all, so no payment-blocking type
-has an auto-resolving agent. That is exactly why it is tested with one
-registered here: the gate has to be right *before* the first such resolver
-lands, or it lands as a bypass.
+``po_mismatch`` is the one payment-blocking type with real auto-resolving
+resolvers in the shipped registry (amount-within-tolerance, missing-PO,
+multi-PO split): it joined ``PAYMENT_BLOCKING_EXCEPTION_TYPES`` with them, so
+they now run behind this gate, and an agent run the invoice's uploader triggers
+escalates instead of clearing their own PO variance. ``duplicate`` and
+``fraud_flag`` are escalate-only stubs and the rest have no resolver at all —
+which is why the fraud-flag cases are tested with a probe registered here: the
+gate has to be right *before* such a resolver lands, or it lands as a bypass.
 """
 
 from __future__ import annotations
@@ -232,9 +234,52 @@ async def test_the_shipped_registry_has_no_auto_resolving_blocking_resolver(real
         for t in PAYMENT_BLOCKING_EXCEPTION_TYPES
         if (r := get_resolver(t)) is not None and type(r).apply is not ExceptionResolver.apply
     ]
+    # `po_mismatch`'s resolvers are known and covered by
+    # `test_a_po_mismatch_agent_run_triggered_by_the_uploader_escalates`.
+    live = [t for t in live if t != "po_mismatch"]
     assert not live, (
         f"{live} now has a resolver that can mutate and auto-resolve. That is fine, "
         "but it runs behind `exception_lifecycle.segregation_refusal` in the "
         "coordinator — re-read `test_an_agent_run_triggered_by_the_uploader_escalates` "
         "and confirm the escalation path is still what you want."
     )
+
+
+class _AutoResolvingPoMismatchProbe(_AutoResolvingStub):
+    exception_type = "po_mismatch"
+
+
+@pytest.mark.asyncio
+async def test_a_po_mismatch_agent_run_triggered_by_the_uploader_escalates(realdb, monkeypatch):
+    """`po_mismatch` blocks payment now, so the PO resolvers that auto-clear it
+    run behind the queue's segregation gate: the invoice's uploader triggering
+    one gets an escalation, never a self-cleared PO variance."""
+    from app.services.exception_agents import coordinator
+    from app.services.exception_service import create_exception
+
+    monkeypatch.setattr(coordinator, "get_resolver", lambda _t: _AutoResolvingPoMismatchProbe())
+    mk, fraud_exc_id = await _seed(realdb, uploaded_by_role="admin", number="INV-AGSOD-PO")
+    info = realdb.info(TENANT)
+    async with mk() as s:
+        fraud = await s.get(APException, fraud_exc_id)
+        inv = await s.get(Invoice, fraud.invoice_id)
+        exc = await create_exception(
+            s,
+            exception_type="po_mismatch",
+            severity="warning",
+            description="detector output",
+            organization_id=info.org_id,
+            invoice=inv,
+            raised_by_user_id=None,
+        )
+        exc_id = exc.id
+        await s.commit()
+
+    async with realdb.client(key=TENANT, role="admin") as c:
+        res = await c.post(f"/api/exceptions/{exc_id}/agent-resolve")
+
+    assert res.status_code == 200, res.text
+    assert res.json()["decision"]["action_taken"] == "escalated"
+    assert "Segregation of duties" in res.json()["decision"]["rationale"]
+    async with mk() as s:
+        assert (await s.get(APException, exc_id)).status == "escalated"

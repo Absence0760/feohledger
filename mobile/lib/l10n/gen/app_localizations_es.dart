@@ -1161,6 +1161,18 @@ class AppLocalizationsEs extends AppLocalizations {
       'Pago anterior sin conciliar: puede seguir en tránsito';
 
   @override
+  String get payQueueBlockedQualityHold =>
+      'Retención por calidad: mercancía rechazada o pendiente de inspección';
+
+  @override
+  String get payQueueBlockedPoMismatch =>
+      'No coincide con su orden de compra, sin resolver';
+
+  @override
+  String get payQueueBlockedVendorNotActive =>
+      'Proveedor no verificado o inactivo: verifique primero el proveedor';
+
+  @override
   String get payQueueBlockedAppliedCreditMismatch =>
       'Una nota de crédito aplicada ya no coincide con el proveedor o la moneda de esta factura — corrija primero la factura';
 

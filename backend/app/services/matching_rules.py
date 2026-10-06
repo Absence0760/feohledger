@@ -172,3 +172,29 @@ def resolve_match_rule(
         tolerance_pct=tolerance_pct,
         source=source,
     )
+
+
+def strictest_rule_for_any_commodity(
+    org_settings: dict | None, *, vendor_id: uuid.UUID | str | None
+) -> EffectiveMatchRule:
+    """The strictest rule this invoice could resolve to, whatever its GL code.
+
+    ``resolve_match_rule`` lets the header GL account (the commodity) pick the
+    tolerance and ``require_inspection``, and ``gl_account`` stays editable on an
+    approved invoice. So a rule that clears a payment block AFTER approval must
+    not depend on the GL code someone may just have changed: this resolves the
+    rule under every configured commodity (and none) for the vendor, then takes
+    the smallest tolerance and requires an inspection if any of them does. A
+    vendor rule still outranks every commodity, exactly as in the resolver.
+    """
+    matching = (org_settings or {}).get("matching")
+    commodities = matching.get("commodity_rules") if isinstance(matching, dict) else None
+    keys: list[str | None] = [None]
+    if isinstance(commodities, dict):
+        keys.extend(k for k in commodities if isinstance(k, str))
+    rules = [resolve_match_rule(org_settings, vendor_id=vendor_id, gl_account=k) for k in keys]
+    return EffectiveMatchRule(
+        require_inspection=any(r.require_inspection for r in rules),
+        tolerance_pct=min(r.tolerance_pct for r in rules),
+        source="strictest",
+    )

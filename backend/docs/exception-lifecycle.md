@@ -7,7 +7,7 @@ both humans and agents run on.
 
 ## Why an exception is a control, not a note
 
-Four exception types block a payment run outright —
+Six exception types block a payment run outright —
 `api/payments.PAYMENT_BLOCKING_EXCEPTION_TYPES`:
 
 | Type | Raised by |
@@ -16,6 +16,8 @@ Four exception types block a payment run outright —
 | `fraud_flag` | fraud rules, Positive Pay returns |
 | `line_total_mismatch` | line-total reconciliation (see [line-total-reconciliation.md](line-total-reconciliation.md)) |
 | `payment_reconciliation` | `services/payment_reconciler.flag_payment_for_reconciliation` — a payment recorded `failed` that the processor may still hold an order for (e.g. aged out by the reconciler backstop) |
+| `quality_hold` | the 4-way leg of PO matching — a failed, partial or missing-but-required inspection (see [po-matching.md](po-matching.md)) |
+| `po_mismatch` | PO matching — missing PO, currency mismatch, billing above the PO beyond tolerance, or billing beyond what has been received; never partial billing or an in-tolerance variance (see [po-matching.md](po-matching.md) § Before Payment) |
 
 Invoice **approval gates on none of them**. So clearing one of these is the
 human sign-off that lets the money move — the last control between a flagged
@@ -42,7 +44,7 @@ So every lifecycle event writes an `audit_log` row through
 | Action | Written when | Actor |
 |---|---|---|
 | `exception.raised` | `services/exception_service.create_exception` opens a row | usually `NULL` — a detector, not a person |
-| `exception.resolved` | a human or an agent resolves it | the deciding user |
+| `exception.resolved` | a human or an agent resolves it, or a PO-match refresh no longer finds its finding | the deciding user; `NULL` (`via: po_match_refresh`) for the refresh |
 | `exception.escalated` | a human or an agent escalates it | the deciding user |
 | `exception.dismissed` | a human dismisses it | the deciding user |
 | `exception.assigned` | the queue routes it to (or away from) a user | the routing user |
@@ -91,7 +93,7 @@ groups that exception's raise / assign / resolve rows together.
   a vendor, the row already holds it, and the trail gains nothing by
   duplicating it.
 
-## One chokepoint, four callers
+## One chokepoint, five callers
 
 `exception_lifecycle.record_decision` both applies the bookkeeping and writes
 the row — **and enforces segregation of duties**. Every decider goes through it:
@@ -107,6 +109,17 @@ the row — **and enforces segregation of duties**. Every decider goes through i
 - `api/portal.py` — a supplier re-uploading a rejected invoice clears the
   `review_rejected` exception it supersedes, with `actor_id=None` (the actor is
   a tenant-scoped `VendorUser`, who holds no control-plane identity).
+- `services/invoice_warnings._close_cleared_po_exceptions` — a refresh that no
+  longer reports an open `po_mismatch` / `quality_hold` finding resolves the row
+  as `"PO match"`, `actor_id=None`, `via: "po_match_refresh"` (the rest of a
+  short delivery arrived, a newer inspection passed). Both types ARE
+  payment-blocking, and the NULL actor passes the segregation check — a detector
+  observed this, nobody decided it. What keeps that from being a self-clearing
+  route is the close's own scope: past approval, a row raised against a
+  different PO than the invoice now cites is left for a human, so is a quality
+  hold cleared by a `pass` someone implicated in the invoice typed in
+  themselves, and a row an agent is mid-way through deciding
+  (`exception_lifecycle.deciding`) is left for the agent ([po-matching.md](po-matching.md) § Before Payment).
 
 Previously these were copies (the coordinator's helper carried a comment saying
 it was mirroring the API's; the payments one said the same), and none wrote an
@@ -133,7 +146,7 @@ audited: [`docs/authentication.md`](../../docs/authentication.md) § Segregation
 of duties on the exception queue, and `docs/decisions.md` §169–§170.
 
 **Being the chokepoint is what makes it safe to put the check here**, and it is
-also why the two non-queue callers above need no exemption: neither
+also why the two non-queue callers (compliance release, portal) need no exemption: neither
 `payment_compliance_hold` nor `review_rejected` is payment-blocking, and the
 portal's actor is NULL, so both early-return. A refusal there would strand a
 supplier resubmission or desynchronise the queue from a released hold — neither

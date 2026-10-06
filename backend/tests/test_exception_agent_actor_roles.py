@@ -78,7 +78,15 @@ def _mock_db(exc, invoice):
 @pytest.mark.asyncio
 async def test_actor_roles_threaded_into_resolver_apply():
     exc = _exception()
-    invoice = SimpleNamespace(id=exc.invoice_id, entity_id=None, correlation_id=uuid.uuid4())
+    invoice = SimpleNamespace(
+        id=exc.invoice_id,
+        entity_id=None,
+        correlation_id=uuid.uuid4(),
+        # The real row always carries the implicated-actor set; `po_mismatch`
+        # is payment-blocking, so the queue segregation check reads it.
+        uploaded_by_id=None,
+        segregation_actor_ids=None,
+    )
     db = _mock_db(exc, invoice)
 
     captured: dict = {}
@@ -130,7 +138,15 @@ async def test_missing_actor_roles_fails_closed_to_escalation():
     """A run whose actor roles are unknown must NOT self-approve on a fabricated
     set — it escalates. The resolver's ``apply`` is never reached."""
     exc = _exception()
-    invoice = SimpleNamespace(id=exc.invoice_id, entity_id=None, correlation_id=uuid.uuid4())
+    invoice = SimpleNamespace(
+        id=exc.invoice_id,
+        entity_id=None,
+        correlation_id=uuid.uuid4(),
+        # The real row always carries the implicated-actor set; `po_mismatch`
+        # is payment-blocking, so the queue segregation check reads it.
+        uploaded_by_id=None,
+        segregation_actor_ids=None,
+    )
     db = _mock_db(exc, invoice)
 
     apply_called = False
@@ -175,11 +191,20 @@ async def test_amount_mismatch_apply_forwards_real_roles_not_fabricated():
     from app.services.exception_agents.resolvers.amount_mismatch import AmountMismatchResolver
 
     resolver = AmountMismatchResolver()
+    # `vendor_id` / `gl_account` are what the org's match rule is resolved by.
     invoice = SimpleNamespace(
-        id=uuid.uuid4(), amount=Decimal("100.00"), status=InvoiceStatus.ready_for_review
+        id=uuid.uuid4(),
+        amount=Decimal("100.00"),
+        status=InvoiceStatus.ready_for_review,
+        vendor_id=None,
+        gl_account=None,
     )
     locked = SimpleNamespace(
-        id=invoice.id, amount=Decimal("100.00"), status=InvoiceStatus.ready_for_review
+        id=invoice.id,
+        amount=Decimal("100.00"),
+        status=InvoiceStatus.ready_for_review,
+        vendor_id=None,
+        gl_account=None,
     )
     evaluation = AgentEvaluation(
         recommended_action=ACTION_AUTO_RESOLVED,

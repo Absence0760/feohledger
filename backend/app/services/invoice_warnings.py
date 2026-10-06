@@ -19,7 +19,7 @@ from app.services.invoice_warning_catalog import (
     exception_findings,
     warning,
 )
-from app.services.matching_rules import resolve_match_rule
+from app.services.matching_rules import resolve_match_rule, strictest_rule_for_any_commodity
 from app.services.po_matching import (
     CURRENCY_DIFFERENT,
     CURRENCY_UNKNOWN,
@@ -879,6 +879,32 @@ async def _refresh_reporting_amount(invoice: Invoice, org_settings: dict | None)
         logger.warning("reporting-currency materialization failed for invoice; left NULL")
 
 
+#: The exception types `_refresh_po_match` owns. Both block payment
+#: (`api/payments.PAYMENT_BLOCKING_EXCEPTION_TYPES`), so an open row whose
+#: finding a refresh no longer reports is closed again by
+#: `_close_cleared_po_exceptions` — otherwise a partial receipt that later
+#: completes, or a failed inspection that is re-run and passes, would hold the
+#: payable until someone noticed the queue row was stale.
+PO_MATCH_EXCEPTION_TYPES: tuple[str, ...] = ("po_mismatch", "quality_hold")
+
+#: Invoice statuses that precede AP approval. A `po_mismatch` raised against
+#: one PO may be auto-closed by a match against a DIFFERENT PO only here, where
+#: an approver who is not the invoice's creator still has to sign the result
+#: off (`approval_chain.violates_segregation`). Past approval, re-pointing the
+#: invoice at another PO is no longer re-reviewed by anyone, so letting it
+#: clear the hold would let the person who changed the reference also release
+#: the payment — the open row stays for a human (`segregation_refusal`).
+_PRE_APPROVAL_STATUSES = frozenset({"new", "pending", "ready_for_review", "rejected"})
+
+#: The resolution text and actor an auto-close writes. Not a person — a
+#: detector observing that its own finding is gone — so the audit row carries
+#: no `actor_id`, the way a detector's raise carries none.
+_AUTO_CLOSE_ACTOR = "PO match"
+_AUTO_CLOSE_RESOLUTION = (
+    "Cleared automatically: the purchase-order match no longer reports this finding."
+)
+
+
 async def _refresh_po_match(
     db: AsyncSession,
     invoice: Invoice,
@@ -889,6 +915,22 @@ async def _refresh_po_match(
 
     Stores the structured result on `invoice.po_match` for UI rendering.
     Mutates `warnings` in place.
+
+    **What opens an exception, and why it is narrower than what warns.**
+    `po_mismatch` and `quality_hold` block payment, so they are raised only for
+    a finding that makes paying the invoice wrong: the PO it cites does not
+    exist, the currencies differ (nothing could be compared), it bills ABOVE
+    the PO beyond the match tolerance, or it bills beyond the share of the PO
+    that has actually been received. Billing LESS than the PO — the first
+    delivery of a split or blanket PO, invoiced on its own — is partial billing
+    and never blocks; nor does an in-tolerance variance, nor an over-receipt on
+    its own (decisions §67: a receiving-side discrepancy, not a billing one).
+    Each of those still lands on `invoice.warnings`, which the reviewer reads at
+    approval.
+
+    Every open row of the two types this refresh no longer finds is then
+    closed (`_close_cleared_po_exceptions`), so the hold lifts the moment the
+    evidence catches up.
     """
     rule = resolve_match_rule(
         org_settings, vendor_id=invoice.vendor_id, gl_account=invoice.gl_account
@@ -904,17 +946,27 @@ async def _refresh_po_match(
     # Decimal); every variance figure was computed and compared in Decimal.
     invoice.po_match = match.to_json_dict()
 
+    # Which of PO_MATCH_EXCEPTION_TYPES this refresh still finds.
+    found: set[str] = set()
+
+    async def _raise(exception_type: str, severity: str, flag: dict) -> None:
+        found.add(exception_type)
+        await _ensure_exception(
+            db, invoice, exception_type, severity, flag, org_settings=org_settings
+        )
+
+    partial_receipt_flag: dict | None = None
+
     if match.status == "no_po":
         flag = warning("po_not_found", "error", poNumber=invoice.po_number)
         warnings.append(flag)
-        await _ensure_exception(
-            db, invoice, "po_mismatch", "error", flag, org_settings=org_settings
-        )
+        await _raise("po_mismatch", "error", flag)
     elif match.status == "mismatch" and match.currency_check == CURRENCY_DIFFERENT:
         # The currency guard tripped: the two are in different currencies, so
         # the matcher compared nothing and there is no variance to state. Same
         # severity and exception type as an out-of-tolerance amount — it is the
-        # same control failing, on the unit instead of the figure.
+        # same control failing, on the unit instead of the figure, and with no
+        # figure there is no way to show the invoice is not over-billing.
         flag = warning(
             "po_currency_mismatch",
             "warning",
@@ -923,9 +975,7 @@ async def _refresh_po_match(
             poCurrency=match.po_currency or "",
         )
         warnings.append(flag)
-        await _ensure_exception(
-            db, invoice, "po_mismatch", "warning", flag, org_settings=org_settings
-        )
+        await _raise("po_mismatch", "warning", flag)
     elif (
         match.status == "mismatch"
         and not match.within_tolerance
@@ -955,50 +1005,67 @@ async def _refresh_po_match(
         else:
             flag = warning("po_amount_variance", "warning", poTotal=match.po_total, **common)
         warnings.append(flag)
-        await _ensure_exception(
-            db, invoice, "po_mismatch", "warning", flag, org_settings=org_settings
-        )
+        # Only OVER-billing blocks. A negative variance is the invoice asking
+        # for less than the PO authorizes — the first of several invoices
+        # against a split or blanket PO, which the matcher cannot tell apart
+        # from a short one because it compares each invoice with the whole PO
+        # total. Holding it would hold every correctly-billed partial delivery;
+        # the warning keeps it in front of the reviewer instead.
+        if match.amount_variance is not None and match.amount_variance > 0:
+            await _raise("po_mismatch", "warning", flag)
     elif (
         match.status == "partial"
         and match.ordered_quantity is not None
         and match.received_quantity is not None
         and match.received_quantity < match.ordered_quantity
     ):
-        # Partial 3-way receipt — informational. Reviewer needs to know but
-        # it's not an error; goods may be in transit.
-        #
-        # Keyed on the RECEIPT leg: a partial quality acceptance also sets
-        # `partial`, on goods that all arrived, and this sentence would then
-        # claim "only part of the ordered quantity has been received". The
-        # inspection block below raises that finding in its own words.
-        flag = warning(
+        # Partial 3-way receipt. Keyed on the RECEIPT leg: a partial quality
+        # acceptance also sets `partial`, on goods that all arrived, and this
+        # sentence would then claim "only part of the ordered quantity has been
+        # received". The inspection block below raises that finding in its own
+        # words. Whether it BLOCKS is the receipt-value test just below.
+        partial_receipt_flag = warning(
             "po_partial_receipt",
             "info",
             matchType=match.match_type,
             poNumber=match.po_number,
         )
-        warnings.append(flag)
-        await _ensure_exception(db, invoice, "po_mismatch", "info", flag, org_settings=org_settings)
+        warnings.append(partial_receipt_flag)
+
+    # 3-way: the invoice bills beyond what has been received. Independent of
+    # the amount leg above, because an invoice can be under the PO total and
+    # still over what arrived (half the PO billed, a third delivered). A short
+    # receipt on its own is routinely benign — goods in transit, or a split PO
+    # invoiced delivery by delivery — so the hold is raised only when the
+    # invoice asks for more than the received slice of the PO is worth
+    # (`MatchResult.billed_beyond_receipt`, same tolerance as the amount leg).
+    if match.billed_beyond_receipt:
+        if partial_receipt_flag is None:
+            partial_receipt_flag = warning(
+                "po_partial_receipt",
+                "info",
+                matchType=match.match_type,
+                poNumber=match.po_number,
+            )
+            warnings.append(partial_receipt_flag)
+        await _raise("po_mismatch", "warning", partial_receipt_flag)
 
     # 3-way: an OVER-receipt (more units booked in than were ordered).
     # Independent of the po-status handling above, and for the same reason the
     # inspection block below is: `status` is owned by the AMOUNT control, so an
     # over-receipt can ride alongside a perfectly `matched` invoice — which is
-    # exactly the case that used to disappear. The matcher flagged it on
-    # `po_match.over_receipt` and rendered it into the invoice modal, but
-    # nothing raised it here, so it never reached the exception queue and no
-    # clerk was ever asked about it.
+    # exactly the case that used to disappear from the invoice entirely.
     #
     # `warning`, not the `info` a partial receipt gets: a short delivery is
     # routinely benign (goods in transit), whereas quantities nobody ordered
     # cannot be explained by timing — and an over-delivery is how an invoice
     # for unauthorised quantities acquires its supporting receipt.
     #
-    # `po_mismatch` is the type: an over-receipt IS an invoice-vs-PO
-    # discrepancy, and the roster in `services/exception_lifecycle` is a fixed
-    # vocabulary. When the amount leg already opened one, `_ensure_exception`
-    # de-dupes per (invoice, type, open) and this is a no-op — the warning
-    # still lands on the invoice, which is where a reviewer reads it.
+    # A warning on the invoice, and NOT a `po_mismatch` exception: that type
+    # blocks payment, and decisions §67 is explicit that an over-receipt with an
+    # in-tolerance amount is a receiving discrepancy that must not block a
+    # payable. When the extra units ARE being billed beyond tolerance, the
+    # amount leg above has already raised the blocking row on its own figure.
     # The PO reference the over-receipt and quality sentences both name. The
     # matcher's `po_number` when it resolved one, else what the invoice claims.
     po_ref = match.po_number or invoice.po_number or ""
@@ -1019,9 +1086,6 @@ async def _refresh_po_match(
         else:
             flag = warning("po_over_receipt_unquantified", "warning", poNumber=po_ref)
         warnings.append(flag)
-        await _ensure_exception(
-            db, invoice, "po_mismatch", "warning", flag, org_settings=org_settings
-        )
 
     # 4-way: quality-inspection outcomes route to a `quality_hold` exception.
     # Independent of the po-status handling above — a quality failure can ride
@@ -1043,15 +1107,11 @@ async def _refresh_po_match(
         else:
             flag = warning("quality_inspection_failed", "error", poNumber=po_ref)
         warnings.append(flag)
-        await _ensure_exception(
-            db, invoice, "quality_hold", "error", flag, org_settings=org_settings
-        )
+        await _raise("quality_hold", "error", flag)
     elif match.inspection_required and match.inspection_result is None:
         flag = warning("quality_inspection_missing", "warning", poNumber=po_ref)
         warnings.append(flag)
-        await _ensure_exception(
-            db, invoice, "quality_hold", "warning", flag, org_settings=org_settings
-        )
+        await _raise("quality_hold", "warning", flag)
     elif match.inspection_result == "partial":
         if match.inspection_accepted_quantity is not None:
             flag = warning(
@@ -1063,9 +1123,256 @@ async def _refresh_po_match(
         else:
             flag = warning("quality_partial_acceptance_unquantified", "info", poNumber=po_ref)
         warnings.append(flag)
-        await _ensure_exception(
-            db, invoice, "quality_hold", "info", flag, org_settings=org_settings
+        await _raise("quality_hold", "info", flag)
+
+    await _reconcile_po_exceptions(
+        db,
+        invoice,
+        found=found,
+        po_ref=po_ref,
+        inspection_id=match.inspection_id,
+        org_settings=org_settings,
+        rule=rule,
+    )
+
+
+def blocking_finding_types(match) -> set[str]:
+    """The payment-blocking exception types ``match`` warrants — the same
+    decisions ``_refresh_po_match`` takes when it raises them, as a pure
+    predicate (``tests/test_po_match_exception_reconciliation.py`` pins the
+    two against each other)."""
+    found: set[str] = set()
+    if match.status == "no_po":
+        found.add("po_mismatch")
+    elif match.status == "mismatch" and match.currency_check == CURRENCY_DIFFERENT:
+        found.add("po_mismatch")
+    elif (
+        match.status == "mismatch"
+        and not match.within_tolerance
+        and match.amount_variance_pct is not None
+        and match.amount_variance is not None
+        and match.amount_variance > 0
+    ):
+        found.add("po_mismatch")
+    if match.billed_beyond_receipt:
+        found.add("po_mismatch")
+    if match.inspection_result in ("fail", "partial") or (
+        match.inspection_required and match.inspection_result is None
+    ):
+        found.add("quality_hold")
+    return found
+
+
+async def _reconcile_po_exceptions(
+    db: AsyncSession,
+    invoice: Invoice,
+    *,
+    found: set[str],
+    po_ref: str,
+    inspection_id: str | None,
+    org_settings: dict | None,
+    rule=None,
+) -> None:
+    """Square the invoice's open PO-match rows with what this refresh found.
+
+    Two jobs, over one read of the open/escalated ``po_mismatch`` /
+    ``quality_hold`` rows:
+
+    * a row of a type this refresh still FINDS, which an agent is mid-way
+      through deciding (``exception_lifecycle.deciding``), is marked
+      ``refound`` — the finding folded into that row via ``_ensure_exception``'s
+      per-type de-dupe, and the coordinator must escalate rather than resolve
+      a row that now carries a finding the agent never evaluated;
+    * a row of a type it no longer finds is closed
+      (:func:`_close_cleared_po_exceptions`).
+    """
+    rows = (
+        (
+            await db.execute(
+                select(APException).where(
+                    APException.invoice_id == invoice.id,
+                    APException.exception_type.in_(PO_MATCH_EXCEPTION_TYPES),
+                    APException.status.in_(["open", "escalated"]),
+                )
+            )
         )
+        .scalars()
+        .all()
+    )
+    if not rows:
+        return
+
+    from app.services.exception_lifecycle import is_being_decided, mark_refound
+
+    for row in rows:
+        if row.exception_type in found and is_being_decided(row.id):
+            mark_refound(row.id)
+
+    cleared_rows = [r for r in rows if r.exception_type not in found]
+    if cleared_rows:
+        await _close_cleared_po_exceptions(
+            db,
+            invoice,
+            rows=cleared_rows,
+            po_ref=po_ref,
+            inspection_id=inspection_id,
+            org_settings=org_settings,
+            rule=rule,
+        )
+
+
+async def _close_cleared_po_exceptions(
+    db: AsyncSession,
+    invoice: Invoice,
+    *,
+    rows: list,
+    po_ref: str,
+    inspection_id: str | None,
+    org_settings: dict | None,
+    rule=None,
+) -> None:
+    """Resolve open/escalated PO-match ``rows`` this refresh no longer reports.
+
+    These rows block payment, and nothing else re-evaluates them: before this,
+    a short receipt that later completed, or a failed inspection re-run as a
+    pass, left the hold in place until a human happened to clear a queue row
+    whose finding no longer existed. Closing goes through
+    ``exception_lifecycle.record_decision``, so it writes the same append-only
+    ``exception.resolved`` audit row a human resolution writes — with no
+    ``actor_id`` (a detector observed this, nobody decided it) and
+    ``via="po_match_refresh"``.
+
+    A detector closing a payment-blocking row is only sound when nobody with a
+    motive could have produced the evidence that cleared it, so it refuses —
+    leaving the row for a human, whom ``segregation_refusal`` then vets — in
+    every case where somebody could:
+
+    * **No org settings, no close.** The refresh judged under the platform
+      default match rule (5 %, no required inspection). A finding the org's own
+      stricter rule raised would read as gone, so a caller that did not thread
+      ``org_settings`` may raise findings but never clear them.
+    * **A different PO, past approval.** A row raised against another PO than
+      the one just matched (its ``poNumber`` parameter) closes only while the
+      invoice is still pre-approval (``_PRE_APPROVAL_STATUSES``) AND its
+      approval step enforces segregation — that is, while an approver who did
+      not create it still reviews the corrected invoice. Otherwise re-pointing
+      ``po_number`` at a PO that happens to match would let whoever edited it
+      release the payment. A row with no recorded PO counts as a different one.
+    * **A hand-recorded pass.** Receipts only ever arrive from the ERP sync, but
+      an inspection can be typed in (``POST /api/inspections``). A
+      ``quality_hold`` cleared by a manual inspection whose recorder is unknown,
+      or is implicated in the invoice (``approval_chain.violates_segregation``),
+      stays open. A QMS-synced inspection carries the QMS's verdict; an
+      inspection predating the source column is unknown and stays held.
+    * **A rule the GL code picked, past approval.** The match rule is chosen by
+      vendor and by header GL account, and ``gl_account`` stays editable on an
+      approved invoice — so re-coding it to a commodity with a looser rule
+      would make a finding vanish. Past approval a row closes only if the
+      finding is also gone under the strictest rule any GL code could select
+      (``matching_rules.strictest_rule_for_any_commodity``).
+    * **A row an agent is deciding** — the agent records it
+      (``exception_lifecycle.deciding``).
+
+    The org's ``settings.exceptions.require_segregation: false`` opt-out lifts
+    the two segregation limits, as it does on the queue.
+    """
+    if org_settings is None:
+        return
+
+    from app.services.exception_lifecycle import (
+        exception_segregation_enabled,
+        is_being_decided,
+        record_decision,
+    )
+
+    segregation = exception_segregation_enabled(org_settings)
+    relink_allowed = not segregation or await _pre_approval_with_segregation(db, invoice)
+    inspection_ok = not segregation or await _inspection_clears_hold(db, invoice, inspection_id)
+    still_found: set[str] = set()
+    if segregation and _status_str(invoice.status) not in _PRE_APPROVAL_STATUSES:
+        strict = strictest_rule_for_any_commodity(org_settings, vendor_id=invoice.vendor_id)
+        if rule is None or (strict.tolerance_pct, strict.require_inspection) != (
+            rule.tolerance_pct,
+            rule.require_inspection,
+        ):
+            strict_match = await match_invoice_to_po(
+                db,
+                invoice,
+                tolerance_pct=strict.tolerance_pct,
+                require_inspection=strict.require_inspection,
+            )
+            still_found = blocking_finding_types(strict_match)
+
+    for row in rows:
+        if is_being_decided(row.id):
+            # A decider (the agent coordinator) is resolving this row right
+            # now and will record that decision itself (`deciding`).
+            continue
+        raised_against = (row.description_params or {}).get("poNumber")
+        same_po = raised_against is not None and str(raised_against) == po_ref
+        if not same_po and not relink_allowed:
+            continue
+        if row.exception_type == "quality_hold" and not inspection_ok:
+            continue
+        if row.exception_type in still_found:
+            continue
+        await record_decision(
+            db,
+            exception=row,
+            action="resolve",
+            resolution=_AUTO_CLOSE_RESOLUTION,
+            actor_id=None,
+            actor_name=_AUTO_CLOSE_ACTOR,
+            invoice=invoice,
+            via="po_match_refresh",
+        )
+
+
+async def _pre_approval_with_segregation(db: AsyncSession, invoice: Invoice) -> bool:
+    """True when the invoice has yet to be approved AND its approval step will
+    refuse its own implicated actors — the condition under which a corrected
+    PO reference is still reviewed by someone else."""
+    if _status_str(invoice.status) not in _PRE_APPROVAL_STATUSES:
+        return False
+    from app.services.review import resolve_approval_config
+
+    config = await resolve_approval_config(db, invoice)
+    return (config or {}).get("require_segregation", True) is not False
+
+
+async def _inspection_clears_hold(
+    db: AsyncSession, invoice: Invoice, inspection_id: str | None
+) -> bool:
+    """Whether the inspection the matcher now reads may lift a quality hold —
+    see ``_close_cleared_po_exceptions``. No inspection at all (the rule stopped
+    requiring one) is an admin's configuration act, not evidence anyone typed
+    in, and does not hold the close back."""
+    if not inspection_id:
+        return True
+    import uuid as _uuid
+
+    from app.models.quality_inspection import INSPECTION_SOURCE_QMS, QualityInspection
+    from app.services.approval_chain import violates_segregation
+
+    try:
+        key = _uuid.UUID(str(inspection_id))
+    except ValueError:
+        return False
+    row = (
+        await db.execute(
+            select(QualityInspection.source, QualityInspection.recorded_by_user_id).where(
+                QualityInspection.id == key
+            )
+        )
+    ).one_or_none()
+    if row is None:
+        return False
+    source, recorder = row
+    if source == INSPECTION_SOURCE_QMS:
+        return True
+    if recorder is None:
+        return False
+    return not violates_segregation(invoice, recorder, {})
 
 
 async def _refresh_contract_compliance(

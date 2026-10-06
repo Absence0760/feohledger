@@ -67,6 +67,9 @@ String _blockedReasonLabel(AppLocalizations l, String? code) => switch (code) {
       'fraud_flag' => l.payQueueBlockedFraudFlag,
       'line_total_mismatch' => l.payQueueBlockedLineTotalMismatch,
       'payment_reconciliation' => l.payQueueBlockedPaymentReconciliation,
+      'quality_hold' => l.payQueueBlockedQualityHold,
+      'po_mismatch' => l.payQueueBlockedPoMismatch,
+      'vendor_not_active' => l.payQueueBlockedVendorNotActive,
       'applied_credit_mismatch' => l.payQueueBlockedAppliedCreditMismatch,
       'fully_credited' => l.payQueueBlockedFullyCredited,
       // Not a block — the row is pinned to the card rail. Its own sentence

@@ -303,10 +303,10 @@ class MultiPOSplitResolver(ExceptionResolver):
     exception_type = "po_mismatch"
 
     async def evaluate(self, db, *, exception, invoice, org_settings) -> AgentEvaluation:
-        from app.services.po_matching import match_invoice_to_po
+        from app.services.po_matching import match_invoice_under_org_rules
 
         # Only act on a genuine missing-PO case (disjoint from amount_mismatch).
-        match = await match_invoice_to_po(db, invoice)
+        match = await match_invoice_under_org_rules(db, invoice, org_settings)
         if match.status != "no_po":
             return AgentEvaluation(
                 recommended_action=ACTION_ESCALATED,
@@ -435,7 +435,7 @@ class MultiPOSplitResolver(ExceptionResolver):
         from app.services.exception_agents.resolvers.amount_mismatch import (
             NotApprovable as _NotApprovable,
         )
-        from app.services.po_matching import match_invoice_to_po
+        from app.services.po_matching import match_invoice_under_org_rules
         from app.services.review import approve_invoice
         from app.services.workflow_engine import get_invoice_for_update
 
@@ -446,7 +446,7 @@ class MultiPOSplitResolver(ExceptionResolver):
         # Re-assert this is still a missing-PO case (idempotency: a concurrent run
         # / prior apply may already have linked + approved → not ready_for_review,
         # caught above; or relinked the po_number → match no longer no_po here).
-        recheck = await match_invoice_to_po(db, locked)
+        recheck = await match_invoice_under_org_rules(db, locked, org_settings)
         if recheck.status != "no_po":
             raise _NotApprovable(locked.status)
 

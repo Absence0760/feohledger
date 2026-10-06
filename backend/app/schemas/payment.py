@@ -125,6 +125,12 @@ class PaymentResponse(BaseModel):
     settled_amount: OptionalMoneyAmount = None
     settled_currency: str | None = None
 
+    # The accepted early-payment discount this payment takes, already deducted
+    # from `amount` (migration 0104). `None` when it pays the full net — never
+    # a zero standing in for "no discount".
+    discount_amount: OptionalMoneyAmount = None
+    discount_offer_id: str | None = None
+
     # Set ONLY by `POST /{id}/void` — the outcome of the two best-effort legs
     # that path fires: the payment rail (`void_adapter_outcome`) and, for a
     # card payment, the card provider (`void_card_outcome`, e.g.
@@ -199,6 +205,8 @@ class PaymentResponse(BaseModel):
             completed_at=p.completed_at.isoformat() if p.completed_at else None,
             settled_amount=p.settled_amount,
             settled_currency=p.settled_currency,
+            discount_amount=p.discount_amount,
+            discount_offer_id=str(p.discount_offer_id) if p.discount_offer_id else None,
             vendor_name=invoice.vendor_name if invoice else None,
             invoice_number=invoice.invoice_number if invoice else None,
             # Never `or "USD"`: an unset invoice currency is unknown, and a

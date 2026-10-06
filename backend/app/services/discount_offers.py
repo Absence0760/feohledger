@@ -281,6 +281,38 @@ def _add_days(d: date, days: int):
     return d + timedelta(days=days)
 
 
+def tier_deadline(offer, tier: dict, *, fallback_reference: date) -> date:
+    """The last date a payment can be made and still earn ``tier`` — the one
+    definition every surface that names a "pay by" date reads.
+
+    ``offer_reference_date(offer)`` plus ``tier.days``, capped at the offer's
+    ``valid_until`` (nothing can be captured after the offer itself ends).
+    ``fallback_reference`` is used only for an object carrying neither
+    ``valid_from`` nor ``created_at`` — an unpersisted offer being previewed,
+    where "measured from today" is the correct reading.
+    """
+    reference = offer_reference_date(offer) or fallback_reference
+    deadline = _add_days(reference, int(tier["days"]))
+    valid_until = getattr(offer, "valid_until", None)
+    if valid_until is not None and deadline > valid_until:
+        return valid_until
+    return deadline
+
+
+def accepted_discount_deadline(offer) -> date | None:
+    """The pay-by date of an ACCEPTED offer's chosen tier, or ``None`` when it
+    has no tier or no date to measure from.
+
+    ``None`` is deliberately not "today": a discount the payment path cannot
+    date is not applied (``discount_capture.applicable_discounts``), because
+    taking a deduction the supplier may consider expired is a short payment.
+    """
+    tier = getattr(offer, "accepted_tier", None)
+    if not tier or offer_reference_date(offer) is None:
+        return None
+    return tier_deadline(offer, tier, fallback_reference=date.min)
+
+
 # --------------------------------------------------------------------------- #
 # Expiry — derived from the calendar, never read from the column
 # --------------------------------------------------------------------------- #
@@ -467,8 +499,11 @@ def decline_offer(offer, *, now: datetime, as_of: date) -> None:
     offer.status = OFFER_STATUS_DECLINED
 
 
-def mark_captured(offer, *, captured_amount: Decimal, now: datetime) -> None:
-    """Transition ``accepted`` → ``captured``, recording the realized discount.
+def mark_captured(offer, *, captured_amount: Decimal, now: datetime, payment_id=None) -> None:
+    """Transition ``accepted`` → ``captured``, recording the realized discount
+    and — when known — the settled payment that realized it
+    (``captured_by_payment_id``), which is what lets a void reverse exactly its
+    own capture.
 
     Raises ``ValueError`` if the offer is not currently ``accepted``.
     """
@@ -476,6 +511,7 @@ def mark_captured(offer, *, captured_amount: Decimal, now: datetime) -> None:
         raise ValueError(f"cannot capture an offer in status {offer.status!r} (must be 'accepted')")
     offer.captured_amount = _q_money(Decimal(captured_amount))
     offer.captured_at = now
+    offer.captured_by_payment_id = payment_id
     offer.status = OFFER_STATUS_CAPTURED
 
 
@@ -496,6 +532,7 @@ def reverse_capture(offer) -> Decimal:
     reversed_amount = _q_money(Decimal(offer.captured_amount or 0))
     offer.captured_amount = None
     offer.captured_at = None
+    offer.captured_by_payment_id = None
     offer.status = OFFER_STATUS_ACCEPTED
     return reversed_amount
 

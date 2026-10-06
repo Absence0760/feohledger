@@ -103,6 +103,8 @@ def _payment(*, amount=Decimal("100.00"), status="pending"):
         fx_locked_at=None,
         corridor=None,
         target_country=None,
+        discount_offer_id=None,
+        discount_amount=None,
     )
 
 
@@ -152,6 +154,12 @@ def _queue_db(
             blocking_res = MagicMock()
             blocking_res.all = MagicMock(return_value=[])
             per_pay_results.append(blocking_res)
+            # `inactive_vendor_statuses` — still `active` (only queried when the
+            # invoice names a vendor).
+            if getattr(inv, "vendor_id", None):
+                vendor_status_res = MagicMock()
+                vendor_status_res.all = MagicMock(return_value=[(inv.vendor_id, "active")])
+                per_pay_results.append(vendor_status_res)
             card_claim_res = MagicMock()
             card_claim_scalars = MagicMock()
             card_claim_scalars.all = MagicMock(return_value=[])
@@ -170,6 +178,10 @@ def _queue_db(
             credit_res = MagicMock()
             credit_res.scalar_one = MagicMock(return_value=Decimal("0"))
             per_pay_results.append(credit_res)
+            # `payable_amount` → `applicable_discounts`: no accepted offer.
+            offers_res = MagicMock()
+            offers_res.scalars = MagicMock(return_value=MagicMock(all=MagicMock(return_value=[])))
+            per_pay_results.append(offers_res)
 
         bank_res = MagicMock()
         bank_res.scalar_one_or_none = MagicMock(return_value=None)

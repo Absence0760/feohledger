@@ -299,6 +299,15 @@ export interface Payment {
 	 * never a substituted default (`docs/decisions.md` §79/§82).
 	 */
 	currency?: string | null;
+	/**
+	 * The accepted early-payment discount this payment TAKES, already deducted
+	 * from `amount` (`schemas/payment.py::PaymentResponse`, migration 0104), and
+	 * the offer it realizes. `null` when it pays the full net — never a zero
+	 * standing in for "no discount". Never add it back to `amount` client-side:
+	 * `amount` is what was authorized and what settlement is verified against.
+	 */
+	discount_amount?: MoneyAmount;
+	discount_offer_id?: string | null;
 	vendor_name: string | null;
 	invoice_number: string | null;
 	card_last_four: string | null;

@@ -88,9 +88,9 @@ class AmountMismatchResolver(ExceptionResolver):
         # (goods only partially received). Reconciling against the live row
         # closes both gaps in one read: we only auto-fix when the live match is
         # still exactly `matched`, and we adjust to the live PO total.
-        from app.services.po_matching import match_invoice_to_po
+        from app.services.po_matching import match_invoice_under_org_rules
 
-        match = await match_invoice_to_po(db, invoice)
+        match = await match_invoice_under_org_rules(db, invoice, org_settings)
         match_status = match.status
         po_total_raw = match.po_total
 
@@ -218,7 +218,7 @@ class AmountMismatchResolver(ExceptionResolver):
     ) -> None:
         """Adjust amount → approve. Writes audit rows for BOTH the field change
         and the approval (the latter via review.approve_invoice → transition)."""
-        from app.services.po_matching import match_invoice_to_po
+        from app.services.po_matching import match_invoice_under_org_rules
         from app.services.review import approve_invoice
         from app.services.workflow_engine import get_invoice_for_update
 
@@ -240,7 +240,7 @@ class AmountMismatchResolver(ExceptionResolver):
         # snaps to the current PO total and the match is still clean before
         # mutating money; otherwise bail so the coordinator escalates rather
         # than approving against a number that moved underneath us.
-        recheck = await match_invoice_to_po(db, locked)
+        recheck = await match_invoice_under_org_rules(db, locked, org_settings)
         if (
             recheck.status != "matched"
             or recheck.po_total is None

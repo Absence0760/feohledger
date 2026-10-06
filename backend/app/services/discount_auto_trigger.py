@@ -75,7 +75,7 @@ import logging
 import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, date, datetime
 from decimal import Decimal
 
 from sqlalchemy import select
@@ -98,6 +98,7 @@ from app.services.discount_offers import (
     has_lapsed,
     invoice_awaits_payment,
     offer_reference_date,
+    tier_deadline,
 )
 from app.services.discount_roi import compute_roi, days_between
 from app.services.sweep_health import SWEEP_DISCOUNT_AUTO_TRIGGER, run_sweep_loop
@@ -161,11 +162,7 @@ def _tier_deadline(offer: DiscountOffer, tier: dict, ref_today: date) -> date:
     ``ref_today`` fallback now applies only to an offer carrying neither date —
     an unpersisted one being previewed, where "from today" is correct.
     """
-    reference = offer_reference_date(offer) or ref_today
-    deadline = reference + timedelta(days=int(tier["days"]))
-    if offer.valid_until is not None and deadline > offer.valid_until:
-        return offer.valid_until
-    return deadline
+    return tier_deadline(offer, tier, fallback_reference=ref_today)
 
 
 async def _resolve_due_date(db: AsyncSession, offer: DiscountOffer) -> date | None:

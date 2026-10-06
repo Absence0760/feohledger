@@ -86,16 +86,22 @@ from app.services.payment_controls import (
 )
 from app.services.payment_runs import (
     CARD_CLAIM_ONLY_METHOD,
+    PAYABLE_VENDOR_STATUS,
     PaymentRunItemInput,
     active_run_payments,
+    audit_applied_discount,
     blocked_invoice_ids,
     blocking_exception_types,
+    booked_discount_mismatch,
     card_claimed_invoice_ids,
     create_payment_run_for_invoices,
     derive_run_status,
+    inactive_vendor_statuses,
     is_retry_safe,
     net_payable_amount,
     one_currency,
+    payable_amount,
+    payable_amounts,
     recompute_run_status,
     rollup_payment_statuses,
     run_refusal_reasons,
@@ -178,13 +184,40 @@ SCHEDULABLE_INVOICE_STATUSES = tuple(
 #                          exception is what stops a fresh run paying the same
 #                          invoice a second time until a human has reconciled
 #                          the rail (see `services/payment_reconciler.py`).
+#   quality_hold         — the 4-way leg: the goods failed inspection, were only
+#                          partly accepted, or an inspection the match rule
+#                          requires is not on record. A four-way match exists so
+#                          that failed quality acceptance stops payment; paying
+#                          past it pays for goods the business refused.
+#   po_mismatch          — paying the invoice would pay more than its purchase
+#                          order supports: the cited PO doesn't exist, the
+#                          currencies differ (nothing could be compared), it
+#                          bills ABOVE the PO beyond the match rule's tolerance,
+#                          or it bills beyond the share of the PO actually
+#                          received. Only those raise one
+#                          (`invoice_warnings._refresh_po_match`): billing LESS
+#                          than the PO (a split / blanket PO invoiced delivery by
+#                          delivery), an in-tolerance variance and an
+#                          over-receipt on its own (decisions §67) stay warnings
+#                          on the invoice and never hold it. A refresh that no
+#                          longer finds the problem closes the row again. Same
+#                          rule as an ERP's price/quantity variance payment
+#                          block.
 #
-# Resolving/dismissing the exception is the human sign-off that clears it.
+# Resolving/dismissing the exception is the human sign-off that clears it. The
+# same tuple also scopes segregation of duties on that sign-off
+# (`services/exception_lifecycle.segregation_refusal`): someone implicated in
+# creating the invoice may not clear a flag that blocks its payment.
+#
+# Order is the precedence a row's `blocked_reason` reports when an invoice
+# carries several (`services/payment_runs.blocking_exception_types`).
 PAYMENT_BLOCKING_EXCEPTION_TYPES = (
     "duplicate",
     "fraud_flag",
     "line_total_mismatch",
     "payment_reconciliation",
+    "quality_hold",
+    "po_mismatch",
 )
 
 # Terminal payment states — a payment in one of these no longer represents a
@@ -468,6 +501,20 @@ def _queue_blocking_exists():
     )
 
 
+def _queue_vendor_not_active():
+    """SQL EXISTS — the invoice's vendor may not be paid (status other than
+    ``active``, NULL included), the SAME condition
+    ``services/payment_runs.inactive_vendor_statuses`` resolves. An invoice
+    with no vendor row matches nothing here, exactly as that helper reports
+    nothing for it. Correlated on ``Invoice.vendor_id``."""
+    return exists(
+        select(1).where(
+            Vendor.id == Invoice.vendor_id,
+            Vendor.status.is_distinct_from(PAYABLE_VENDOR_STATUS),
+        )
+    )
+
+
 def _live_payment_invoice_ids():
     """Sub-query: invoice ids already claimed by a LIVE payment — anything not
     in ``LIVE_PAYMENT_TERMINAL_STATUSES``, the SAME definition the run builder's
@@ -547,6 +594,7 @@ def _queue_selectable_where() -> list:
     return [
         *_queue_base_where(),
         not_(_queue_blocking_exists()),
+        not_(_queue_vendor_not_active()),
         not_(applied_credit_conflict_exists()),
         not_(_queue_fully_credited()),
         not_(_queue_live_card_exists()),
@@ -569,6 +617,7 @@ def _queue_blocked_on_every_rail():
     """
     clauses = [
         _queue_blocking_exists(),
+        _queue_vendor_not_active(),
         applied_credit_conflict_exists(),
         _queue_fully_credited(),
     ]
@@ -771,10 +820,17 @@ async def payment_queue(
     # omitting it is the fail-closed reading (every rail non-converging), which
     # is what surfaces the card claim as `required_method`.
     refusals = await run_refusal_reasons(db, [inv for inv, _ in rows])
+    # What a run booked today would move per row — net of applied credits,
+    # minus an ACCEPTED early-payment discount whose deadline today meets
+    # (`payment_runs.payable_amounts`, the figure the builder books). Distinct
+    # from `discount_*` below, which is the invoice's STATIC term ("2/10 net
+    # 30") on its payment schedule and is only ever advisory.
+    payables = await payable_amounts(db, [inv for inv, _ in rows], pay_date=today)
 
     items: list[dict] = []
     for inv, sched in rows:
         refusal = refusals.get(inv.id)
+        payable = payables[inv.id]
         discount_amount: Decimal | None = None
         discount_eligible = False
         if (
@@ -822,6 +878,15 @@ async def payment_queue(
                 if sched and sched.discount_percent
                 else None,
                 "discount_amount": str(discount_amount) if discount_amount else None,
+                # An accepted early-payment offer a run built today would take,
+                # and the amount it would then pay. `None` when none applies.
+                "accepted_discount_amount": (
+                    str(payable.discount_amount) if payable.discount is not None else None
+                ),
+                "accepted_discount_pay_by": (
+                    payable.discount.deadline.isoformat() if payable.discount is not None else None
+                ),
+                "payable_amount": str(payable.amount),
                 # `blocked` is what the UI disables the row's checkbox on, and
                 # is true only for a refusal that holds on EVERY rail — a
                 # rail-conditional one carries `required_method` instead and
@@ -2571,9 +2636,8 @@ async def create_payment(
 
     # Financial-integrity gate — the SAME one `POST /api/payments/runs` and
     # `/retry-failed` run, via the same shared helper so the three can't drift.
-    # `PAYMENT_BLOCKING_EXCEPTION_TYPES` (duplicate / fraud_flag /
-    # line_total_mismatch) are `error`-severity flags that invoice APPROVAL does
-    # not gate on, so every path that books money has to re-check them —
+    # `PAYMENT_BLOCKING_EXCEPTION_TYPES` are financial-integrity flags that
+    # invoice APPROVAL does not gate on, so every path that books money has to re-check them —
     # otherwise an invoice the run path refuses with a 409 can be paid by
     # posting it here instead, which is exactly what this endpoint did. A
     # settlement-amount mismatch, a Positive Pay altered cheque and a BEC
@@ -2590,6 +2654,19 @@ async def create_payment(
                 "Invoice has an unresolved payment-blocking exception "
                 f"({_blocking[invoice.id]}) and can't be paid until it's cleared: "
                 f"{invoice.invoice_number}"
+            ),
+        )
+
+    # The vendor must be verified and active — the run builder's
+    # `vendor_not_active` refusal, through the same shared helper, so posting
+    # here can't pay an unverified / inactive / rejected vendor the run path
+    # refuses.
+    if invoice.id in await inactive_vendor_statuses(db, [invoice]):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Invoice's vendor is not active (unverified, inactive or rejected) — "
+                f"verify or reactivate the vendor before paying: {invoice.invoice_number}"
             ),
         )
 
@@ -2635,11 +2712,21 @@ async def create_payment(
             status_code=409,
             detail="Invoice is fully covered by applied credit memos — nothing to pay",
         )
+    # An accepted early-payment discount whose deadline today meets is taken
+    # here exactly as a run takes it — the two money paths must not disagree
+    # about what an invoice is worth.
+    payable = (
+        await payable_amounts(
+            db, [invoice], pay_date=utc_today(), net_amounts={invoice.id: net_amount}
+        )
+    )[invoice.id]
+    net_amount = payable.amount
     if body.amount is not None and Decimal(str(body.amount)) != net_amount:
         raise HTTPException(
             status_code=422,
             detail=(
-                "Payment amount must equal the approved invoice amount net of applied credit memos"
+                "Payment amount must equal the approved invoice amount net of applied credit "
+                "memos and any accepted early-payment discount"
             ),
         )
 
@@ -2718,6 +2805,8 @@ async def create_payment(
         # Payment follows the invoice's entity (multi-entity Phase 2).
         entity_id=invoice.entity_id,
         amount=net_amount,
+        discount_offer_id=payable.discount_offer_id,
+        discount_amount=payable.discount_amount,
         method=body.method.value if body.method else None,
         reference=body.reference,
         # Always standalone — `payment_run_id` is deliberately not a request
@@ -2762,7 +2851,18 @@ async def create_payment(
             "method": payment.method,
             "reference": payment.reference,
             "payment_run_id": str(payment.payment_run_id) if payment.payment_run_id else None,
+            "discount_amount": (
+                str(payment.discount_amount) if payment.discount_amount is not None else None
+            ),
         },
+    )
+    await audit_applied_discount(
+        db,
+        organization_id=org.id,
+        actor_id=user.id,
+        payment=payment,
+        invoice=invoice,
+        payable=payable,
     )
 
     await db.refresh(payment)
@@ -2953,6 +3053,8 @@ async def create_payment_run(
         # rather than a guessed code (`docs/decisions.md` §79/§82).
         "currency": currency,
         "payment_count": result.payment_count,
+        # Early-payment discounts already deducted from `total_amount`.
+        "discount_total": str(result.discount_total),
         "requires_cfo_approval": run.requires_cfo_approval,
         "message": (
             f"Payment run created with {result.payment_count} payments totaling "
@@ -3011,6 +3113,13 @@ async def get_payment_run(
             "failure_reason": p.failure_reason,
             "submitted_at": p.submitted_at.isoformat() if p.submitted_at else None,
             "completed_at": p.completed_at.isoformat() if p.completed_at else None,
+            # The accepted early-payment discount this payment takes, already
+            # deducted from `amount`; `None` when it pays the full net.
+            "discount_amount": (str(p.discount_amount) if p.discount_amount is not None else None),
+            "discount_offer_id": str(p.discount_offer_id) if p.discount_offer_id else None,
+            "invoice_amount": str(inv.amount)
+            if inv is not None and inv.amount is not None
+            else None,
         }
         for p, inv in rows
     ]
@@ -3030,6 +3139,11 @@ async def get_payment_run(
         "status": derive_run_status(run.status, rollup),
         # Money serialises as an exact Decimal STRING, never float().
         "total_amount": str(run.total_amount) if run.total_amount else "0",
+        # Early-payment discounts the run's ACTIVE payments take — already
+        # deducted from `total_amount`.
+        "discount_total": str(
+            sum((p.discount_amount for p in active if p.discount_amount is not None), Decimal("0"))
+        ),
         # What `total_amount` is denominated in, derived from the same rows the
         # payments list above was built from rather than a second query. `None`
         # where the run's legs disagree or carry no currency at all — see
@@ -3273,9 +3387,12 @@ async def _capture_discount_offers(
     rail confirms instantly or days later. Both callers already hold the
     `Invoice` and pass it in; `invoice=None` falls back to resolving it from
     `payment.invoice_id` for any future caller that doesn't. No invoice found
-    is a no-op (nothing to match against); a payment amount that doesn't
-    match a discounted payoff exactly is also a no-op (see
-    `discount_capture.capture_offers_for_settled_payment`).
+    is a no-op (nothing to match against). A payment BOOKED with a discount
+    (`Payment.discount_offer_id`, migration 0104) captures exactly that offer
+    for exactly `Payment.discount_amount`; one booked without falls back to the
+    exact-payoff match, which is how a discount taken the old way — through a
+    credit memo — is still recognized (see
+    `discount_capture.capture_offer_for_settled_payment`).
 
     NOT called when the settlement verifier flagged a discrepancy — the
     payoff match runs against OUR authorized amount, which a divergent
@@ -3298,12 +3415,11 @@ async def _capture_discount_offers(
         if invoice is None:
             return
 
-        from app.services.discount_capture import capture_offers_for_settled_payment
+        from app.services.discount_capture import capture_offer_for_settled_payment
 
-        captured = await capture_offers_for_settled_payment(
+        captured = await capture_offer_for_settled_payment(
             db,
-            invoice_id=invoice.id,
-            payment_amount=payment.amount,
+            payment=payment,
             invoice_currency=invoice.currency,
             now=now,
         )
@@ -3325,6 +3441,7 @@ async def _capture_discount_offers(
                     "invoice_id": str(invoice.id),
                     "payment_id": str(payment.id),
                     "captured_amount": str(offer.captured_amount),
+                    "payment_amount": str(payment.amount),
                 },
             )
     except Exception as exc:  # noqa: BLE001
@@ -3419,12 +3536,12 @@ async def _execute_single_payment(
         return
 
     # A payment-blocking exception raised AFTER the run was built must stop
-    # dispatch. `create_payment_run_for_invoices` refuses `duplicate` /
-    # `fraud_flag` / `line_total_mismatch` / `payment_reconciliation` at
-    # creation, but nothing freezes the invoice while a draft run waits for CFO
-    # sign-off or a payment sits `pending_compliance` — and the single sharpest
-    # case is an approved BEC bank-detail swap, which raises a `fraud_flag`
-    # ("Vendor bank details changed; verify before payment") and whose new
+    # dispatch. `create_payment_run_for_invoices` refuses every
+    # `PAYMENT_BLOCKING_EXCEPTION_TYPES` member at creation, but nothing
+    # freezes the invoice while a draft run waits for CFO sign-off or a
+    # payment sits `pending_compliance` — and the single sharpest case is an
+    # approved BEC bank-detail swap, which raises a `fraud_flag` ("Vendor bank
+    # details changed; verify before payment") and whose new
     # `Vendor.bank_details` this function then re-reads two blocks down.
     # `/retry-failed` already re-runs this gate before a days-later re-send; so
     # must `/execute`, `/resume` and `/compliance/release`. Same shared
@@ -3435,6 +3552,18 @@ async def _execute_single_payment(
     if invoice.id in _blocked:
         payment.status = "failed"
         payment.failure_reason = f"invoice_blocked:{_blocked[invoice.id]}"
+        payment.completed_at = now
+        return
+
+    # The vendor must still be verified and active. The run builder refuses an
+    # unverified / inactive / rejected vendor, but a vendor can be deactivated,
+    # rejected or merged away while a draft run waits for CFO sign-off. Same
+    # shared predicate (`inactive_vendor_statuses`), refused BEFORE the adapter
+    # call so it is retry-safe; `/retry-failed` re-checks it before a re-send.
+    _vendor_refused = await inactive_vendor_statuses(db, [invoice])
+    if invoice.id in _vendor_refused:
+        payment.status = "failed"
+        payment.failure_reason = f"vendor_not_active:{_vendor_refused[invoice.id]}"
         payment.completed_at = now
         return
 
@@ -3451,13 +3580,11 @@ async def _execute_single_payment(
 
     # What the invoice is worth NOW, immediately before the adapter call.
     # `payment.amount` was netted against applied credit memos when the row was
-    # booked (`payment_runs.net_payable_amount`), but `credit_memos.py` gates an
+    # booked (`payment_runs.payable_amounts`), but `credit_memos.py` gates an
     # application on neither invoice status nor an existing payment — so a
     # credit recorded between booking and dispatch (a run sitting `draft`
     # awaiting CFO sign-off, a payment held `pending_compliance`) leaves the
-    # row's amount stale and would overpay the vendor by the credit. That
-    # window is not hypothetical: `docs/dynamic-discounting.md` documents
-    # recording a credit memo as THE way to take an early-pay discount.
+    # row's amount stale and would overpay the vendor by the credit.
     #
     # The amount is never silently adjusted here — re-pricing money nobody
     # re-approved is its own defect — so refuse and let a fresh run re-derive
@@ -3475,15 +3602,24 @@ async def _execute_single_payment(
         payment.completed_at = now
         return
 
-    if invoice is not None:
-        from app.services.payment_runs import net_payable_amount as _net_payable_amount
-
-        current_net = await _net_payable_amount(db, invoice)
-        if current_net != payment.amount:
-            payment.status = "failed"
-            payment.failure_reason = "net_amount_changed"
-            payment.completed_at = now
-            return
+    # The same question for an accepted early-payment discount, asked on the
+    # day the money actually moves: the row was booked with the discount its
+    # booking date earned, and a draft can wait past the offer's deadline for
+    # CFO sign-off (or a discount can be accepted after booking). Moving a
+    # different amount than the one approved is the re-pricing this function
+    # refuses, so it fails retry-safe as `discount_changed` and a fresh run
+    # books what is owed now — the full amount once the deadline has passed.
+    current = await payable_amount(db, invoice, pay_date=now.date())
+    if booked_discount_mismatch(payment, current):
+        payment.status = "failed"
+        payment.failure_reason = "discount_changed"
+        payment.completed_at = now
+        return
+    if current.amount != payment.amount:
+        payment.status = "failed"
+        payment.failure_reason = "net_amount_changed"
+        payment.completed_at = now
+        return
 
     vendor_bank: dict | None = None
     if invoice and invoice.vendor_id:
@@ -3768,6 +3904,9 @@ async def _execute_single_payment(
                 org_home_currency=org_home_currency,
                 fx_adapter=fx_adapter,
                 requested_method=payment.method,
+                # The booked amount, not the invoice's: net of applied credits
+                # and any accepted early-payment discount.
+                amount=payment.amount,
             )
         except InternationalPaymentError as exc:
             payment.status = "failed"
@@ -4371,12 +4510,14 @@ async def retry_failed_payments(
       `done`, so paying it would move money against something nobody currently
       approves;
     - `invoice_has_blocking_exception` — an unresolved
-      `PAYMENT_BLOCKING_EXCEPTION_TYPES` flag (duplicate / fraud_flag /
-      line_total_mismatch). Run creation refuses these outright; this endpoint
-      re-dispatches money days or weeks later, so a `fraud_flag` raised in the
-      interim (a BEC bank-detail swap, an altered cheque off a Positive Pay
-      return) has to stop the re-send here too. Same shared query
+      `PAYMENT_BLOCKING_EXCEPTION_TYPES` flag. Run creation refuses these
+      outright; this endpoint re-dispatches money days or weeks later, so a
+      `fraud_flag` raised in the interim (a BEC bank-detail swap, an altered
+      cheque off a Positive Pay return) has to stop the re-send here too. Same shared query
       (`payment_runs.blocked_invoice_ids`) so the two can't drift;
+    - `vendor_not_active` — the invoice's vendor has since been rejected,
+      deactivated or merged away (or was never verified), the run builder's
+      `vendor_not_active` refusal (`payment_runs.inactive_vendor_statuses`);
     - `needs_reconciliation` — we cannot prove the processor never accepted the
       original order (`classify_payment_failure`): a populated
       `provider_payment_id`, an `unexpected_error:*` / `*_transport_error:*` /
@@ -4387,6 +4528,10 @@ async def retry_failed_payments(
       means the failed row's `amount` is no longer what the vendor is owed
       (`payment_runs.net_payable_amount`). The amount is never silently
       adjusted — a fresh run re-derives it through the full gate set;
+    - `discount_changed` — the accepted early-payment discount the failed row
+      was booked with no longer applies today (its deadline passed), or one now
+      applies that it was not booked with (`payment_runs.payable_amounts`). Same
+      rule: never re-priced here, a fresh run books what is owed now;
     - `applied_credit_mismatch` — a credit memo applied to the invoice no
       longer pairs with its vendor or currency (decisions §214);
     - `invoice_has_live_payment` — the invoice has since acquired another live
@@ -4474,6 +4619,7 @@ async def retry_failed_payments(
     card_claimed_ids: set[uuid.UUID] = set()
     occupied_ids: set[uuid.UUID] = set()
     credit_conflict_ids: set[uuid.UUID] = set()
+    vendor_refused_ids: set[uuid.UUID] = set()
     if invoice_ids:
         invoices = {
             inv.id: inv
@@ -4485,6 +4631,7 @@ async def retry_failed_payments(
             iid for iid, inv in invoices.items() if inv.status.value in PAYABLE_INVOICE_STATUSES
         }
         blocked_ids = await blocked_invoice_ids(db, invoice_ids)
+        vendor_refused_ids = set(await inactive_vendor_statuses(db, invoices.values()))
         credit_conflict_ids = set(await applied_credit_conflicts(db, invoices.values()))
         # A live virtual card minted since the run was built claims the invoice
         # on a rail this retry isn't using. Same shared gate the run builder and
@@ -4515,6 +4662,9 @@ async def retry_failed_payments(
         if payment.invoice_id in blocked_ids:
             skipped.append("invoice_has_blocking_exception")
             continue
+        if payment.invoice_id in vendor_refused_ids:
+            skipped.append("vendor_not_active")
+            continue
         if payment.invoice_id in card_claimed_ids:
             skipped.append("invoice_has_live_card")
             continue
@@ -4535,7 +4685,14 @@ async def retry_failed_payments(
         # `failed` (credit_memos.py gates on neither invoice status nor an
         # existing payment) makes the failed row's amount stale; pay it and the
         # vendor is overpaid by the credit.
-        net_amount = await net_payable_amount(db, invoices[payment.invoice_id])
+        payable = await payable_amount(db, invoices[payment.invoice_id], pay_date=utc_today())
+        if booked_discount_mismatch(payment, payable):
+            # The early-payment discount the failed row was booked with no
+            # longer applies today (its deadline passed) — or one now applies
+            # that it was not booked with. A fresh run books what is owed now.
+            skipped.append("discount_changed")
+            continue
+        net_amount = payable.amount
         if net_amount != payment.amount:
             skipped.append("net_amount_changed")
             continue
@@ -4545,6 +4702,8 @@ async def retry_failed_payments(
             entity_id=payment.entity_id,
             payment_run_id=run.id,
             amount=net_amount,
+            discount_offer_id=payable.discount_offer_id,
+            discount_amount=payable.discount_amount,
             method=payment.method,
             status="pending",
             # A new order at the processor, so a new idempotency key. The
@@ -4587,9 +4746,26 @@ async def retry_failed_payments(
                 "payment_id": str(payment.id),
                 "retry_payment_id": str(retry_payment.id),
                 "amount": str(retry_payment.amount),
+                # The same early-payment discount the failed attempt was booked
+                # with — a retry never changes it (`discount_changed` above).
+                "discount_amount": (
+                    str(retry_payment.discount_amount)
+                    if retry_payment.discount_amount is not None
+                    else None
+                ),
                 "method": retry_payment.method,
                 "previous_failure_reason": payment.failure_reason,
             },
+        )
+        # A new payment row booking the discount gets its own applied row, the
+        # same evidence the run builder and the standalone payment write.
+        await audit_applied_discount(
+            db,
+            organization_id=org.id,
+            actor_id=user.id,
+            payment=retry_payment,
+            invoice=invoices[payment.invoice_id],
+            payable=payable,
         )
 
     from app.services.audit_dispatch import dispatch_audit

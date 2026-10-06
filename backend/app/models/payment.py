@@ -138,6 +138,23 @@ class Payment(Base, EntityMixin, TimestampMixin):
     retry_of_payment_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("payments.id"), index=True
     )
+    # The accepted early-payment discount this payment TAKES (migration 0104).
+    # Booked when the run was built (`payment_runs.payable_amounts`): the
+    # invoice-scoped `DiscountOffer` whose deadline the payment date met, and
+    # the exact savings deducted, so `amount` is the invoice net of applied
+    # credits MINUS `discount_amount`. Both NULL when no discount applies.
+    #
+    # Stored rather than re-derived on read because it is a fact about what was
+    # AUTHORIZED: settlement verification, the capture on completion
+    # (`discount_capture.capture_offer_for_settled_payment`) and the void
+    # reversal all key on it, and none of them may depend on the offer's tiers
+    # or the calendar still saying what they said at booking.
+    discount_offer_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("discount_offers.id", ondelete="SET NULL"),
+        index=True,
+    )
+    discount_amount: Mapped[Decimal | None] = mapped_column(Numeric(15, 2))
     # Lifecycle timestamps. `submitted_at` = sent to processor; `completed_at`
     # = terminal status reported. Lets us compute settlement latency for
     # ops dashboards without parsing audit logs.

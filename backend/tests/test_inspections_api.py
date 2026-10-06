@@ -82,6 +82,16 @@ async def test_create_inspection_writes_an_audit_row(realdb):
     assert mine[0].details["inspection_number"] == "QI-AUDIT"
     assert mine[0].details["result"] == "pass"
 
+    # Migration 0105: a hand-typed verdict says so, and names who typed it —
+    # the PO-match auto-close will not let it release a quality hold on an
+    # invoice that person is implicated in.
+    from app.models.quality_inspection import QualityInspection
+
+    async with realdb.sessionmaker("a")() as s:
+        row = await s.get(QualityInspection, uuid.UUID(iid))
+    assert row.source == "manual"
+    assert row.recorded_by_user_id == mine[0].actor_id
+
 
 async def test_get_unknown_inspection_is_404(realdb):
     async with realdb.client(key="a", role="admin") as c:

@@ -198,9 +198,9 @@ class MissingPOResolver(ExceptionResolver):
         # A `matched`/`mismatch`/`partial` status belongs to the amount-mismatch
         # resolver or a human, not here. This keeps the two po_mismatch resolvers
         # disjoint (status `no_po` is ours; `matched` is amount_mismatch's).
-        from app.services.po_matching import match_invoice_to_po
+        from app.services.po_matching import match_invoice_under_org_rules
 
-        match = await match_invoice_to_po(db, invoice)
+        match = await match_invoice_under_org_rules(db, invoice, org_settings)
         if match.status != "no_po":
             return AgentEvaluation(
                 recommended_action=ACTION_ESCALATED,
@@ -290,7 +290,7 @@ class MissingPOResolver(ExceptionResolver):
             NotApprovable as _NotApprovable,
         )
         from app.services.invoice_warnings import refresh_warnings
-        from app.services.po_matching import match_invoice_to_po
+        from app.services.po_matching import match_invoice_under_org_rules
         from app.services.review import approve_invoice
         from app.services.workflow_engine import get_invoice_for_update
 
@@ -301,7 +301,7 @@ class MissingPOResolver(ExceptionResolver):
         # Re-verify the live match is still `no_po` (idempotency: a concurrent
         # run / a prior apply may already have linked the PO — then there is
         # nothing to link and we escalate rather than double-acting).
-        recheck = await match_invoice_to_po(db, locked)
+        recheck = await match_invoice_under_org_rules(db, locked, org_settings)
         if recheck.status != "no_po":
             raise _NotApprovable(locked.status)
 
@@ -372,7 +372,7 @@ class MissingPOResolver(ExceptionResolver):
 
         # The link must produce a clean `matched`; anything else (a stale-amount
         # mismatch, partial receipt) means a human should look — escalate.
-        post = await match_invoice_to_po(db, locked)
+        post = await match_invoice_under_org_rules(db, locked, org_settings)
         if post.status != "matched" or post.currency_check != CURRENCY_SAME:
             raise _NotApprovable(locked.status)
 
