@@ -214,6 +214,35 @@ html, body {
 }
 
 /* ===================================================================
+   Help row — a heading or label with its ⓘ HelpTip beside it
+   -------------------------------------------------------------------
+   `<div class="help-row"><h2>…</h2><HelpTip term="…" /></div>`. The tip
+   is a SIBLING of the text, never inside it, so the heading's text and a
+   label's accessible name are unchanged.
+
+   The child's own margin is zeroed so the tip centres on the text; any
+   spacing the heading used to carry moves to the row, on a local class
+   beside this one (`class="help-row po-match-head"`). This rule is
+   deliberately low-specificity and early in the file, so a component's
+   scoped heading margin (or a later global one like `.modal h2`) still
+   wins — a row whose heading carries such a margin zeroes it locally.
+
+   Global because it had started duplicating: ~20 hand-rolled copies
+   (`.title-row`, `.label-row`, `.card-title`, …) of the same three
+   declarations, at drifting gaps. One recipe, every consumer.
+   =================================================================== */
+.help-row {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	flex-wrap: wrap;
+	min-width: 0;
+}
+.help-row > :is(h1, h2, h3, h4, h5, h6, p, label, legend, span) {
+	margin: 0;
+}
+
+/* ===================================================================
    Global focus indicator (WCAG 2.4.7 Focus Visible)
    -------------------------------------------------------------------
    Every interactive element gets a visible accent ring on keyboard

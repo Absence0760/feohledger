@@ -14,6 +14,7 @@ it is read on demand rather than loaded into every conversation:
 | Every route, the endpoints it calls, its role gating | `docs/routes-api-map.md` |
 | i18n — catalogues, negotiation, locale-aware formatting | `docs/i18n.md` |
 | Money rendering (`<Money>`, exact decimal strings) | `docs/money-formatting.md` |
+| The in-app help centre — writing guides, glossary terms, diagrams; `HelpTip` placement | `docs/help-centre.md` |
 
 ## Stack
 
@@ -296,6 +297,12 @@ through `ui/LinkedMessage.svelte`; fragmenting it into `…Pre`/`…Post` entrie
 fixes the link order and cannot be translated (`frontend/docs/i18n.md` § A
 sentence with a link inside it).
 
+**The help centre's guide prose is the other, narrower exception** (`docs/decisions.md`
+§244): chrome, glossary term names + one-liners and diagram labels are catalogued
+in all six locales; guide bodies under `src/lib/help/` are English, rendered
+`lang="en"`, and name every UI label with `{ui:key}` rather than typing it —
+`src/lib/help/content.test.ts` resolves each reference. See `docs/help-centre.md`.
+
 ### Tenant — `src/lib/tenant.ts` + `src/lib/hostRouting.ts`
 
 `hostRouting.ts` owns the pure rules ("what does this hostname mean") and is
@@ -362,7 +369,8 @@ Grouped into subfolders by role; import with the full path
 **Guard rail 9: build UI from these, never copy-pasted markup. Extract a new
 component the second time you would duplicate one.**
 
-- `ui/` — primitives: `PageHeader` `DataTable` `FilterChips` `Modal` `KpiCard` `Badge` `EmptyState` `Money` `SectionTabs` `Tabs` `SettingsRail` `FieldWarning` `SecretReveal` `BrandMark`
+- `help/` — `HelpTip` (the ⓘ toggletip: `<HelpTip term="glossary-id" />`; `KpiCard helpTerm` / DataTable column `help` forward one) `RichText` `HelpNav` `HelpCrumbs` `InvoiceLifecycle` `EnglishNotice` `diagrams/` — placement rules in `docs/ui-patterns.md` § Contextual help
+- `ui/` — primitives: `PageHeader` (renders the page's "How this page works" link) `DataTable` `FilterChips` `Modal` `KpiCard` `Badge` `EmptyState` `Money` `SectionTabs` `Tabs` `SettingsRail` `FieldWarning` `SecretReveal` `BrandMark`
 - domain: `InvoiceModal` `VendorModal` `VendorPicker` `InvoicePicker` (both over `ui/SearchPicker`) `RunDetailModal` `ApprovalMatrixEditor` `BulkRecodeGLModal` `AdvancedSearchModal` `ScreeningBadge` `SubscriptionBadge` `SpendBarChart` `UsageMeter` `PortalListFilters`
 - chrome: `Sidebar` `NotificationBell` `EntitySwitcher`
 - chat/assistant: `SupplierChatThread` `ChatMessage` `ExamplePrompts` `ToolResultView`

@@ -2,10 +2,18 @@
 	import type { Snippet } from 'svelte';
 
 	import { m } from '#lib/i18n/store.svelte.ts';
+	import HelpTip from '#lib/components/help/HelpTip.svelte';
 
 	type Column = {
 		/** Header text. Omit for the actions / checkbox column. */
 		label?: string;
+		/**
+		 * A glossary id (`#lib/help/glossary.ts`): an ⓘ HelpTip after the
+		 * label. It joins the header's accessible name ("Screening About
+		 * Sanctions screening"), so don't use it on a column a spec selects by
+		 * exact name.
+		 */
+		help?: string;
 		/** Optional class on the `<th>` (e.g. `right`, `actions-col`, `checkbox-col`). */
 		class?: string;
 	};
@@ -74,7 +82,9 @@
 				<tr>
 					{#each columns as col}
 						<!-- WCAG 1.3.1: scope ties each header to its column for AT. -->
-						<th scope="col" class={col.class ?? null}>{col.label ?? ''}</th>
+						<th scope="col" class={col.class ?? null}
+							>{col.label ?? ''}{#if col.help}<HelpTip term={col.help} />{/if}</th
+						>
 					{/each}
 				</tr>
 			{/if}

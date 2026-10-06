@@ -361,6 +361,7 @@ Prefer reading docs over guessing. Update them when behavior changes.
 | Data enrichment | `backend/docs/data-enrichment.md` |
 | Backup + DR | `docs/backup-disaster-recovery.md` |
 | Secrets rotation | `docs/secrets-rotation.md` |
+| In-app help centre (`/help`: guides, glossary, ⓘ HelpTips, diagrams) | `frontend/docs/help-centre.md` — a new sidebar page needs a `lib/help/pages.ts` row; prose names UI by `{ui:key}` |
 | Getting started | `docs/getting-started.md` |
 | Troubleshooting | `docs/troubleshooting.md` |
 | Known issues (diagnosed, unfixed) | `docs/known-issues.md` — diagnosed defects, incl. struck-through resolved ones kept for the diagnosis |

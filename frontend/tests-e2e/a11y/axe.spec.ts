@@ -132,7 +132,16 @@ const AUTHED_ROUTES: { path: string; name: string; ready?: string }[] = [
 	// the ones this suite exists for: a checkbox filter whose only label is the
 	// text beside it, a column set that changes shape with that checkbox, and
 	// two `<Badge>` tint pairs in the Scope / Status cells.
-	{ path: '/gl-accounts', name: 'chart of accounts', ready: 'Chart of Accounts' }
+	{ path: '/gl-accounts', name: 'chart of accounts', ready: 'Chart of Accounts' },
+	// The help centre (docs/decisions.md §244): its own disclosure contents,
+	// role chips, the lifecycle tab list, and long prose with `lang` switches.
+	// One guide carries the lifecycle walkthrough, another a diagram.
+	{ path: '/help', name: 'help centre', ready: 'Follow an invoice' },
+	{ path: '/help/guides/invoice-lifecycle', name: 'help guide with the lifecycle walkthrough', ready: 'How an invoice moves through FeohLedger' },
+	{ path: '/help/guides/run-payments', name: 'help guide with a diagram', ready: 'Run a payment run' },
+	{ path: '/help/glossary', name: 'help glossary', ready: 'Glossary' },
+	{ path: '/help/pages', name: 'help page directory', ready: 'Page by page' },
+	{ path: '/help/search?q=payment', name: 'help search', ready: 'Search' }
 ];
 
 test.describe('accessibility — authenticated app (WCAG 2.2 AA)', () => {

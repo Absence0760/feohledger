@@ -711,6 +711,48 @@ accessible:
   memos, payments history/cards) keep their existing conditional
   `RowAction` buttons — there's no single "open" destination to wire.
 
+### Contextual help (`HelpTip`, the page help link)
+
+Every `PageHeader` already links to **How this page works**; a page needs no
+wiring beyond its row in `lib/help/pages.ts`. Beyond that, put an ⓘ
+`<HelpTip term="…" />` (decisions §244, `docs/help-centre.md`) where a reader
+would reasonably ask "what does this mean?": AP jargon (three-way match,
+settlement, Positive Pay), a control that is about to stop them (a CFO gate, a
+payment-blocking exception, segregation of duties), a setting whose effect is
+not obvious. A handful per page, not one per label. A page full of ⓘ icons is
+noise, and the reader stops opening them.
+
+Placement keeps every accessible name the app and the specs rely on:
+
+- **Beside, never inside**, a `<label>`, `<button>`, `<a>`, `<legend>`,
+  `<summary>`, a `SortableHeader`, or anything with an `onclick`. Inside, the
+  tip's "About …" name would become part of that control's name, and the click
+  would hit both.
+- **A heading gets a row, not a child.** Wrap it in the global `.help-row`:
+  `<div class="help-row"><h2>…</h2><HelpTip term="…" /></div>`. The heading's
+  text is unchanged. Don't hand-write the flex row — it had grown ~20 private
+  copies at drifting gaps before it was consolidated. `.help-row` zeroes the
+  heading's margin so the tip centres on the text; spacing the heading used to
+  carry moves to a local class beside it (`class="help-row po-match-title-row"`
+  with only that margin). The reset is low-specificity on purpose, so a scoped
+  heading margin still wins — zero it locally (`.card-title > h2 { margin: 0 }`)
+  when the heading has one. A field label's row may set a tighter `gap: 4px`
+  locally; nothing else about the row is local.
+- **KPI cards and table columns take a prop**: `<KpiCard helpTerm="…">` and
+  `columns={[{ label, help: '…' }]}`. A column tip joins the `<th>`'s
+  accessible name ("Screening About Sanctions screening"), so don't add one to
+  a column a spec selects with `exact: true`.
+- **Not inside a `role="alert"` region.** An alert reads out its whole content,
+  and the tip's "About …" label becomes part of the alarm. Put the tip next to
+  the alert instead.
+- A form field whose caption is a `<label>` gets the tip after the label
+  element, in the same `.help-row`, never inside it.
+
+`term` is a literal glossary id. When it varies, use an expression over literal
+ids (`term={pm.match_type === '2-way' ? 'two-way-match' : 'three-way-match'}`).
+`content.test.ts` reads every one, including `helpTerm=` and column `help:`
+values, and fails on an id with no glossary entry or no guide to read next.
+
 ### App surfaces — depth, accent and motion (decisions §181)
 
 The signed-in app shares one visual layer, set in `src/app.css` and the shell
@@ -777,6 +819,7 @@ the `ui/` primitive in the Source column.
 | Money / currency | `<Money>` / `formatMoney` | `ui/Money.svelte` / `utils/money.ts` |
 | Field-level advisory | `.field-warning` (`role="status"`) | `ui/FieldWarning.svelte` |
 | Zero-data onboarding block | `.empty-state` (+ `data-testid`) | `ui/EmptyState.svelte` |
+| Heading / label + ⓘ HelpTip | `.help-row` (+ a local class for spacing only) | `src/app.css` (see § Contextual help) |
 | Checkbox / radio / file | `input[type='checkbox'\|'radio'\|'file']` (global base) | `src/app.css` |
 
 **Native form controls** are dark-themed globally in `src/app.css` so a

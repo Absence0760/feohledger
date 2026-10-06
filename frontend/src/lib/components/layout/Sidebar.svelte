@@ -136,6 +136,30 @@
 		{/each}
 	</nav>
 
+	<!--
+		The help centre. A footer row beside the profile rather than a primary
+		nav row: it is reached for, not worked in, and it must not count as a
+		destination in the role policy (`nav.ts` / rbac.spec.ts read only
+		`a.nav-item`). Visible to every signed-in role — help is never gated.
+	-->
+	<a
+		class="help-link"
+		class:collapsed
+		class:active={pathname === '/help' || pathname.startsWith('/help/')}
+		aria-current={pathname === '/help' || pathname.startsWith('/help/') ? 'page' : undefined}
+		href="/help"
+		title={collapsed ? m('shell.help') : ''}
+		aria-label={collapsed ? m('shell.help') : undefined}
+		data-testid="sidebar-help"
+	>
+		<span class="nav-icon">
+			<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+				><circle cx="12" cy="12" r="10" /><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3" /><line x1="12" y1="17" x2="12.01" y2="17" /></svg
+			>
+		</span>
+		{#if !collapsed}<span class="help-label">{m('shell.help')}</span>{/if}
+	</a>
+
 	<div class="profile-wrapper">
 		{#if showProfile}
 			<!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -299,6 +323,51 @@
 		flex: 1 1 auto;
 		min-height: 0;
 		overflow-y: auto;
+	}
+
+	.help-link {
+		display: flex;
+		align-items: center;
+		gap: 10px;
+		padding: 9px 10px;
+		margin-bottom: 2px;
+		border-radius: 6px;
+		color: var(--text-muted);
+		font-size: 0.88rem;
+		font-weight: 500;
+		text-decoration: none;
+		transition: all 0.12s;
+	}
+	.help-link.collapsed {
+		justify-content: center;
+		padding: 9px 0;
+	}
+	.help-link:hover {
+		background: rgba(226, 228, 234, 0.05);
+		color: var(--text);
+	}
+	/* The same "you are here" as `.nav-item.active` below: the tenant's own
+	   accent as a wash, the icon and an edge bar; the label stays on --text. */
+	.help-link {
+		position: relative;
+	}
+	.help-link.active {
+		background: color-mix(in srgb, var(--accent) 14%, transparent);
+		color: var(--text);
+	}
+	.help-link.active .nav-icon {
+		color: var(--accent);
+	}
+	.help-link.active::before {
+		content: '';
+		position: absolute;
+		left: 0;
+		top: 9px;
+		bottom: 9px;
+		width: 3px;
+		border-radius: 0 3px 3px 0;
+		background: var(--accent);
+		box-shadow: 0 0 10px var(--accent-glow);
 	}
 
 	.profile-wrapper {

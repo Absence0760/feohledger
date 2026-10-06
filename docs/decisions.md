@@ -9799,3 +9799,69 @@ which tests run — and uploads what it measured; `pnpm gen:test-durations <run-
 unions a run's eight artifacts, refusing an incomplete or overlapping set. The
 first such baseline covers all but 0.08%, and the ratchet moved from 0.25 to
 0.05.
+
+## 244. Help is in the app, written per role, and its prose names the UI by catalogue key
+
+FeohLedger had no user-facing help: everything a new AP clerk or CFO needed to
+know lived in engineering docs they will never open. The help centre at `/help`
+(`frontend/docs/help-centre.md`) puts it where people already are, and three
+choices shape it.
+
+**Per role, not per feature.** The four system roles do different jobs and see
+different pages, so the landing page opens on a "your first week" guide for
+the reader's own role (their most senior one; `?role=` shows another), with
+that role's everyday tasks beside it. A guide's "Open …" button and the page
+directory both use `nav.ts::canSee`, the sidebar's own gate. That way help never
+sends someone to a page that would refuse them, and a page their role can't open
+is still listed and marked, so they know it exists and who to ask.
+
+**Help is reachable from where the question arises.** Every `PageHeader` links
+to "How this page works", resolved from the page directory (`PAGE_HELP`) with no
+per-route wiring. `content.test.ts` holds `PAGE_HELP` to `NAV`, so a new
+sidebar page can't ship without help. AP jargon gets an ⓘ `HelpTip` where it is
+used. The tip is a button-driven toggletip, not a hover tooltip, so it works by
+keyboard and touch. It shows the term's catalogued one-liner, a glossary link,
+and the guides that explain it. Those guides are fetched by dynamic `import()`
+on first open, because `PageHeader` and `HelpTip` render on every page and must
+not carry the guide prose into every route's bundle.
+
+**What is translated, and how the rest can't drift.** Rule one of
+`frontend/docs/i18n.md` is that no user-facing string is a literal. Translating
+around twenty-five guides into five languages, and keeping six copies in step
+on every edit, is a content programme rather than a catalogue backfill. Doing it
+badly (machine output nobody reviews) would be worse than an honest English
+original. So the split mirrors §174 (legal) but narrower:
+
+- **Catalogued, all six locales:** the chrome, every glossary term's name and
+  one-line definition (the in-app tooltip text), and every diagram label.
+- **English prose:** guide bodies, glossary long text and page-directory lines.
+  They render with `lang="en"` (WCAG 3.1.2) under a notice, in the reader's
+  language, saying the guides are in English for now. Translating them is a
+  tracked follow-up.
+
+The prose never types a UI label. `{ui:key}` renders the catalogue label, so a
+German reader sees *Freigeben* in the middle of an English sentence about
+approving, exactly as it appears on their screen. `content.test.ts` resolves
+every `{ui:}`, `[[term]]`, `[[guide:]]` and `[[page:]]` reference, rejects a
+key whose value has a placeholder, and enumerates `INVOICE_STATUSES` against the
+lifecycle walkthrough. A renamed button, a deleted route or a new workflow
+status fails CI instead of leaving a guide that describes an app that no longer
+exists. That is the failure mode help systems are known for.
+
+**Typed data, not markdown.** mdsvex is installed and would have made guides
+easier to type. It was not used because the references above need to be data a
+test can walk: a markdown link to `/payments` is a string nobody checks. A
+`{ui:}` label also has to render through `m()` at runtime. Guides are
+TypeScript objects with a ten-token inline grammar, rendered element by element
+(`RichText.svelte`), so the tree keeps its no-`{@html}` rule.
+
+**Illustrations are code.** Diagrams are inline-SVG Svelte components
+coloured from the `app.css` tokens, so they follow a white-label tenant's
+accent, and labelled from the catalogue, so they translate. A rendered
+PNG would have baked in English and one brand colour.
+
+Writing the guides against the code, not the docs, turned up a set of
+places where the engineering docs or in-app copy disagree with what the app
+does. The guides follow the code. Pure doc drift and false in-app copy were
+corrected in the same change. The rest is filed in `docs/followups.md`
+(product calls and sized work) or `docs/known-issues.md` (diagnosed defects).
