@@ -85,7 +85,7 @@ async def _write_auth_audit(
     Split out from :func:`dispatch_auth_audit` so a caller that runs this OFF
     the response path (:func:`queue_auth_audit`) can see — and escalate — a
     failure that the fire-and-forget wrapper would otherwise swallow. Nothing
-    calls this directly except the two wrappers below.
+    calls this directly except the wrappers in this module.
     """
     correlation_id = uuid.uuid4()
     # AuditLog.entity_id is nullable, but most writers pass one. Fall back to
@@ -186,6 +186,32 @@ async def dispatch_auth_audit(
             actor_id,
             exc.__class__.__name__,
         )
+
+
+async def record_auth_audit_or_raise(
+    *,
+    organization_id: uuid.UUID,
+    actor_id: uuid.UUID | None,
+    action: str,
+    entity_id: uuid.UUID | None = None,
+    entity_type: str = "auth",
+    details: dict | None = None,
+) -> None:
+    """Write a control-plane-originated audit row and **raise** if it fails.
+
+    For an operator tool, not a request path: there an unrecorded change is
+    worse than a refused one, so the caller writes this row first and makes its
+    change only once the row exists (`services/sso_break_glass`). Request paths
+    keep :func:`dispatch_auth_audit`, which must never fail the request.
+    """
+    await _write_auth_audit(
+        organization_id=organization_id,
+        actor_id=actor_id,
+        action=action,
+        entity_id=entity_id,
+        entity_type=entity_type,
+        details=details,
+    )
 
 
 # Strong references to in-flight audit writes. Without this the only reference
