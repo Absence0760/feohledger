@@ -60,7 +60,9 @@ def stub_upload(monkeypatch):
     async def _fake_upload(org_id, invoice_id, file):
         return f"{org_id}/{invoice_id}/inv.pdf", "http://example.invalid/inv.pdf"
 
-    async def _fake_dispatch(invoice_id, org_id, actor_id):
+    async def _fake_dispatch(
+        invoice_id, org_id, actor_id, *, skip_vendor_match=False, suppress_auto_approve=False
+    ):
         dispatched.append(invoice_id)
 
     monkeypatch.setattr(workflow_api, "upload_invoice_file", _fake_upload)
