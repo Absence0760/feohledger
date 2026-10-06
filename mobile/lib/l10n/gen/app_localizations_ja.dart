@@ -1,6 +1,5 @@
 // ignore: unused_import
 import 'package:intl/intl.dart' as intl;
-
 import 'app_localizations.dart';
 
 // ignore_for_file: type=lint
@@ -605,6 +604,68 @@ class AppLocalizationsJa extends AppLocalizations {
   String glChartRefusalOnLines(String reasons) {
     return '明細行: $reasons';
   }
+
+  @override
+  String get codedRefusalApprovalSegregation =>
+      '職務分掌：この請求書の作成に関与したユーザーは、承認することもできません。';
+
+  @override
+  String get codedRefusalApprovalLevelReuse =>
+      'このチェーンの前のレベルをすでに承認しています。別の承認者が必要です。';
+
+  @override
+  String get codedRefusalApprovalNotNamedApprover => 'このステップの承認者として認められていません。';
+
+  @override
+  String codedRefusalApprovalMaxExceeded(String amount, String limit) {
+    return '請求額 $amount が上限額 $limit を超えています。';
+  }
+
+  @override
+  String get codedRefusalApprovalMaxMisconfigured =>
+      'このワークフローの承認ステップの請求書上限額が使用できない値です。管理者がワークフロー定義を修正するまで承認はできません。';
+
+  @override
+  String codedRefusalApprovalCfoRequired(String amount, String limit) {
+    return '請求額 $amount が $limit を超えています。CFO の承認が必要です。';
+  }
+
+  @override
+  String codedRefusalApprovalCfoRequiredUnknownLimit(String amount) {
+    return '請求額 $amount が設定された上限を超えています。CFO の承認が必要です。';
+  }
+
+  @override
+  String codedRefusalGateStructuring(
+    String recent,
+    int days,
+    String aggregate,
+  ) {
+    String _temp0 = intl.Intl.pluralLogic(
+      days,
+      locale: localeName,
+      other: '過去 $days 日間',
+    );
+    return 'この請求書単体ではしきい値未満ですが、この仕入先の最近の他の請求書（$_temp0）の $recent と合わせると $aggregate になります。';
+  }
+
+  @override
+  String codedRefusalGateInexpressible(String currency) {
+    return 'この請求書は上限の通貨である $currency で表せないため、上限と照合できません。';
+  }
+
+  @override
+  String codedRefusalGateMeasured(String measured, String currency) {
+    return '$measured として測定しました。上限は $currency で設定されています。';
+  }
+
+  @override
+  String get codedRefusalExceptionSegregationRaiser =>
+      '職務分掌：この例外を発生させた操作のユーザーは、解消することもできません。エスカレーションするか、別のユーザーに判断を依頼してください。';
+
+  @override
+  String get codedRefusalExceptionSegregationImplicated =>
+      '職務分掌：この請求書の作成に関与したユーザーは、その支払いを止めている例外を解消できません。エスカレーションするか、別のユーザーに判断を依頼してください。';
 
   @override
   String get invoiceDetailApproved => '請求書を承認しました';

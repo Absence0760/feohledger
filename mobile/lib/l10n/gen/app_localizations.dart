@@ -1091,7 +1091,7 @@ abstract class AppLocalizations {
   /// **'Could not save changes: {error}'**
   String invoiceDetailUpdateFailed(String error);
 
-  /// GL-chart refusal (lib/l10n/gl_chart_refusal_messages.dart): codes that belong to another entity's chart. {codes} is the quoted, locale-joined code list; {count} its length.
+  /// GL-chart refusal (lib/l10n/gl_chart_refusal_messages.dart): codes that belong to another entity's chart. {codes} is the quoted, comma-joined code list; {count} its length.
   ///
   /// In en, this message translates to:
   /// **'{count, plural, one {GL account} other {GL accounts}} {codes} {count, plural, one {belongs to} other {belong to}} another entity\'s chart of accounts, not this invoice\'s.'**
@@ -1126,6 +1126,78 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Line items: {reasons}'**
   String glChartRefusalOnLines(String reasons);
+
+  /// Coded refusal (lib/l10n/coded_refusal_messages.dart) `approval_segregation`: the approver is implicated in the invoice.
+  ///
+  /// In en, this message translates to:
+  /// **'Segregation of duties: a user involved in creating this invoice cannot also approve it.'**
+  String get codedRefusalApprovalSegregation;
+
+  /// Coded refusal `approval_level_reuse`: the approver already signed an earlier chain level.
+  ///
+  /// In en, this message translates to:
+  /// **'You already approved an earlier level of this chain; a different approver is required.'**
+  String get codedRefusalApprovalLevelReuse;
+
+  /// Coded refusal `approval_not_named_approver`.
+  ///
+  /// In en, this message translates to:
+  /// **'You are not an authorized approver for this step.'**
+  String get codedRefusalApprovalNotNamedApprover;
+
+  /// Coded refusal `approval_max_amount_exceeded`. {amount} / {limit} are formatted money with their currency.
+  ///
+  /// In en, this message translates to:
+  /// **'Invoice amount {amount} exceeds the maximum allowed {limit}.'**
+  String codedRefusalApprovalMaxExceeded(String amount, String limit);
+
+  /// Coded refusal `approval_max_amount_misconfigured`.
+  ///
+  /// In en, this message translates to:
+  /// **'This workflow\'s approval step has an unusable maximum invoice amount. Approval is blocked until an admin corrects the workflow definition.'**
+  String get codedRefusalApprovalMaxMisconfigured;
+
+  /// Coded refusal `approval_cfo_required`. {amount} / {limit} are formatted money with their currency.
+  ///
+  /// In en, this message translates to:
+  /// **'Invoice amount {amount} exceeds {limit}. CFO approval required.'**
+  String codedRefusalApprovalCfoRequired(String amount, String limit);
+
+  /// Coded refusal `approval_cfo_required` when the threshold itself is malformed.
+  ///
+  /// In en, this message translates to:
+  /// **'Invoice amount {amount} exceeds the configured limit. CFO approval required.'**
+  String codedRefusalApprovalCfoRequiredUnknownLimit(String amount);
+
+  /// Money-gate note: the structuring aggregate. {recent} / {aggregate} are formatted money; {days} the window length.
+  ///
+  /// In en, this message translates to:
+  /// **'This invoice alone is under the threshold, but combined with {recent} in other recent invoices from this vendor ({days, plural, one {last {days} day} other {last {days} days}}) it totals {aggregate}.'**
+  String codedRefusalGateStructuring(String recent, int days, String aggregate);
+
+  /// Money-gate note: the invoice could not be converted into the limit's currency {currency}.
+  ///
+  /// In en, this message translates to:
+  /// **'This invoice could not be expressed in {currency}, the currency the limit is set in, so it cannot be cleared against it.'**
+  String codedRefusalGateInexpressible(String currency);
+
+  /// Money-gate note: the converted figure {measured} that was compared.
+  ///
+  /// In en, this message translates to:
+  /// **'Measured as {measured} — the limit is set in {currency}.'**
+  String codedRefusalGateMeasured(String measured, String currency);
+
+  /// Coded refusal `segregation_raiser` on resolving an exception.
+  ///
+  /// In en, this message translates to:
+  /// **'Segregation of duties: the user whose action raised this exception cannot also clear it. Escalate it, or ask a different user to decide.'**
+  String get codedRefusalExceptionSegregationRaiser;
+
+  /// Coded refusal `segregation_implicated` on resolving an exception.
+  ///
+  /// In en, this message translates to:
+  /// **'Segregation of duties: a user involved in creating this invoice cannot also clear an exception that blocks its payment. Escalate it, or ask a different user to decide.'**
+  String get codedRefusalExceptionSegregationImplicated;
 
   /// No description provided for @invoiceDetailApproved.
   ///

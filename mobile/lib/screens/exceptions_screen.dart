@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 
+import 'package:feohledger_mobile/l10n/coded_refusal_messages.dart';
 import 'package:feohledger_mobile/l10n/gen/app_localizations.dart';
 import 'package:feohledger_mobile/models/exception.dart';
 import 'package:feohledger_mobile/screens/exception_detail_screen.dart';
@@ -227,6 +228,17 @@ class _ExceptionsScreenState extends State<ExceptionsScreen> {
             context,
             resolve ? l.exceptionResolved : l.exceptionDismissed,
           );
+        } else if (!ok && mounted) {
+          // A refused swipe snaps back; the segregation refusal says why.
+          final reason = localizeCodedRefusal(
+            l,
+            ExceptionStore.instance.actionErrorDetail,
+          );
+          if (reason != null) {
+            A11y.announce(context, reason);
+            ScaffoldMessenger.of(context)
+                .showSnackBar(SnackBar(content: Text(reason)));
+          }
         }
         return ok;
       },

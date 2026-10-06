@@ -175,6 +175,46 @@ void main() {
     expect(sentAction, 'resolve');
   });
 
+  testWidgets('a segregation refusal says why, not just that it failed',
+      (tester) async {
+    setTallSurface(tester);
+    // The queue's SoD 403 (`exception_lifecycle.record_decision`), coded with
+    // the same string the bulk route reports per skipped row.
+    ApiClient().debugConfigure(
+      client: MockClient((req) async {
+        if (req.method == 'POST' && req.url.path.endsWith('/resolve')) {
+          return _json({
+            'detail': {
+              'code': 'segregation_implicated',
+              'message': 'server english',
+              'params': <String, dynamic>{},
+            },
+          }, 403);
+        }
+        if (req.method == 'GET' &&
+            RegExp(r'/exceptions/[^/]+$').hasMatch(req.url.path)) {
+          return _json(_detailJson());
+        }
+        return _json({'items': [], 'total': 0, 'page': 1});
+      }),
+    );
+
+    await tester.pumpWidget(
+      _host(const ExceptionDetailScreen(exceptionId: '1')),
+    );
+    await _pumpUntil(tester, find.widgetWithText(FilledButton, 'Resolve'));
+
+    await tester.tap(find.widgetWithText(FilledButton, 'Resolve'));
+    await _pumpUntil(tester, find.textContaining('Segregation of duties'));
+
+    expect(find.textContaining('Segregation of duties'), findsOneWidget);
+    expect(find.text('Could not resolve the exception'), findsNothing);
+    expect(
+      ExceptionStore.instance.actionErrorDetail,
+      isA<Map<String, dynamic>>(),
+    );
+  });
+
   testWidgets('admin can open the assignee picker and assign a user',
       (tester) async {
     // Default window so the bounded (60%-height) bottom-sheet picker fits;

@@ -61,6 +61,13 @@ class InvoiceStore extends ChangeNotifier with SequencedFetch {
   /// fallback. Null after a successful update or a non-API failure.
   Object? _updateErrorDetail;
 
+  /// The raw `detail` of the last refused [approve] — a coded refusal
+  /// (segregation of duties, the CFO / max-amount gates, the named-approver
+  /// gate) that a screen states in the reader's language through
+  /// `lib/l10n/coded_refusal_messages.dart`. Null after a successful approve
+  /// or a non-API failure.
+  Object? _approveErrorDetail;
+
   // ----- Approvals queue -----
   // The Approvals tab's list is fetched SEPARATELY, server-filtered to
   // `ready_for_review`, and never shares the Invoices tab's filter, list or
@@ -92,6 +99,7 @@ class InvoiceStore extends ChangeNotifier with SequencedFetch {
   bool get loading => _loading;
   String? get error => _error;
   Object? get updateErrorDetail => _updateErrorDetail;
+  Object? get approveErrorDetail => _approveErrorDetail;
   String? get statusFilter => _statusFilter;
   InvoiceSearchFilters get filters => _filters;
   bool get fromCache => _fromCache;
@@ -117,6 +125,7 @@ class InvoiceStore extends ChangeNotifier with SequencedFetch {
     _loading = false;
     _error = null;
     _updateErrorDetail = null;
+    _approveErrorDetail = null;
     _pending = [];
     _pendingLoading = false;
     _pendingError = null;
@@ -315,12 +324,14 @@ class InvoiceStore extends ChangeNotifier with SequencedFetch {
   }
 
   Future<bool> approve(String id) async {
+    _approveErrorDetail = null;
     try {
       await InvoiceApi.approve(id);
       await _refreshAfterMutation();
       return true;
     } catch (e) {
-      _error = e.toString();
+      _error = describeApiError(e);
+      _approveErrorDetail = e is ApiException ? e.detail : null;
       notifyListeners();
       return false;
     }
