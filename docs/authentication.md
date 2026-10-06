@@ -840,10 +840,10 @@ rolls back and answers `503` without saving. A commit failing after the row
 leaves a row for a save that did not land, the safe direction to be wrong in. The
 break-glass lift's `organization.sso_only_lifted` row takes the same path. The
 save holds the org row lock (`app/tenant.lock_organization`, `SELECT … FOR
-UPDATE`) from before it reads `settings` until it commits, as do
-`PATCH /api/organization`, the SCIM token mint and the SCIM group writes — each
-rewrites the whole `settings` JSONB, so without it a SCIM group push could
-silently revert a secret rotation, or the reverse.
+UPDATE`) from before it reads `settings` until it commits, as does every other
+`settings` writer (guarded by `tests/test_settings_writers_lock_the_org_row.py`)
+— each rewrites the whole `settings` JSONB, so without it a branding save or a
+SCIM group push could silently revert a secret rotation, or the reverse.
 
 The view also carries the server's verdict (`password_sign_in_closed`, i.e. `is_sso_only`),
 the IdP keys the selected protocol still lacks (`idp_config_missing`), and the
