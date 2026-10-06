@@ -135,6 +135,10 @@ async def _enforce_approval_thresholds(
     # guessed code would render a code-less invoice as dollars (decisions
     # §160 / §196); a None figure renders bare.
     params_currency = (getattr(invoice, "currency", None) or "").strip().upper() or None
+    # The same rule for the English `message`, which several surfaces show as-is
+    # (the email-action page, bulk-status skip reasons, agent rationales): a
+    # code-less invoice's figure is stated bare, never as dollars.
+    message_currency = f" {params_currency}" if params_currency else ""
     vendor_id = getattr(invoice, "vendor_id", None)
     structuring_window_days = 0
     if vendor_id is not None:
@@ -179,9 +183,9 @@ async def _enforce_approval_thresholds(
             return ""
         return (
             f" This invoice alone is under the threshold, but combined with "
-            f"{recent_spend:,.2f} {invoice_currency} in other recent invoices from this "
+            f"{recent_spend:,.2f}{message_currency} in other recent invoices from this "
             f"vendor (last {structuring_window_days} days) it totals "
-            f"{aggregate_amount:,.2f} {invoice_currency}."
+            f"{aggregate_amount:,.2f}{message_currency}."
         )
 
     def _measured_differs() -> bool:
@@ -250,7 +254,7 @@ async def _enforce_approval_thresholds(
         else:
             detail = coded_refusal(
                 APPROVAL_MAX_AMOUNT_EXCEEDED,
-                f"Invoice amount {amount:,.2f} {invoice_currency} exceeds maximum allowed "
+                f"Invoice amount {amount:,.2f}{message_currency} exceeds maximum allowed "
                 f"{max_amount_dec:,.2f} {gate_currency}."
                 + _structuring_note(max_amount_dec)
                 + _compared_note(),
@@ -283,7 +287,7 @@ async def _enforce_approval_thresholds(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=coded_refusal(
                 APPROVAL_CFO_REQUIRED,
-                f"Invoice amount {amount:,.2f} {invoice_currency} exceeds {limit}. "
+                f"Invoice amount {amount:,.2f}{message_currency} exceeds {limit}. "
                 f"CFO approval required." + note + _compared_note(),
                 **_gate_params(threshold_dec),
             ),

@@ -591,3 +591,22 @@ def test_finite_money_threshold_rejects_unusable_values():
     assert finite_money_threshold("-Infinity") is None
     assert finite_money_threshold("2500.50") == Decimal("2500.50")
     assert finite_money_threshold(2500) == Decimal("2500")
+
+
+@pytest.mark.asyncio
+async def test_a_code_less_invoice_is_never_stated_in_dollars():
+    """`params.currency` is null for an invoice naming no currency, and the
+    English `message` — shown as-is by the email-action page, bulk-status skip
+    reasons and agent rationales — follows the same rule: the figure is bare,
+    never the `USD` stand-in the gate compares with (decisions §160 / §196)."""
+    from app.services.review import _enforce_approval_thresholds
+
+    invoice = _make_invoice(amount=50000)
+    instance = _make_instance({"require_cfo_above": 10000})
+    with patch("app.services.review.get_workflow_instance", new=AsyncMock(return_value=instance)):
+        with pytest.raises(HTTPException) as exc_info:
+            await _enforce_approval_thresholds(_db_mock(), invoice, actor_roles={"ap_manager"})
+
+    detail = exc_info.value.detail
+    assert detail["params"]["currency"] is None
+    assert detail["message"].startswith("Invoice amount 50,000.00 exceeds ")
