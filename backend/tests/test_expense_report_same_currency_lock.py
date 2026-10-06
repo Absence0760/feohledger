@@ -219,7 +219,8 @@ async def test_cfo_gate_still_evaluates_the_same_currency_report_correctly(reald
         async with realdb.client(key="a", role="ap_manager") as c:
             denied = await c.post(f"/api/expense-reports/{over}/approve")
         assert denied.status_code == 403, denied.text
-        assert "cfo" in denied.json()["detail"].lower()
+        assert "cfo" in denied.json()["detail"]["message"].lower()
+        assert denied.json()["detail"]["code"] == "expense_cfo_required"
         async with realdb.client(key="a", role="cfo") as c:
             escalated = await c.post(f"/api/expense-reports/{over}/approve")
         assert escalated.status_code == 200, escalated.text
@@ -241,7 +242,8 @@ async def test_cfo_gate_fails_closed_on_the_cross_currency_report(realdb):
         async with realdb.client(key="a", role="ap_manager") as c:
             denied = await c.post(f"/api/expense-reports/{rid}/approve")
         assert denied.status_code == 403, denied.text
-        assert "cfo" in denied.json()["detail"].lower()
+        assert "cfo" in denied.json()["detail"]["message"].lower()
+        assert denied.json()["detail"]["code"] == "expense_cfo_required"
         async with realdb.client(key="a", role="cfo") as c:
             ok = await c.post(f"/api/expense-reports/{rid}/approve")
         assert ok.status_code == 200, ok.text

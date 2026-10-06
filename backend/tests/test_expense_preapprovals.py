@@ -102,7 +102,8 @@ async def test_self_approval_blocked_by_segregation(realdb):
         ).json()["id"]
         resp = await c.post(f"/api/expense-preapprovals/{pid}/approve")
     assert resp.status_code == 403
-    assert "segregation" in resp.json()["detail"].lower()
+    assert "segregation" in resp.json()["detail"]["message"].lower()
+    assert resp.json()["detail"]["code"] == "approval_segregation"
 
 
 async def test_reject_path(realdb):

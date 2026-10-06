@@ -157,7 +157,8 @@ async def test_corrected_amount_over_cfo_gate_is_rejected_403():
             )
 
     assert exc_info.value.status_code == 403
-    assert "CFO" in exc_info.value.detail
+    assert "CFO" in exc_info.value.detail["message"]
+    assert exc_info.value.detail["code"] == "approval_cfo_required"
     assert Decimal(str(invoice.amount)) == Decimal("5000")
     assert invoice.approval_date is None
 

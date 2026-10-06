@@ -238,7 +238,8 @@ async def test_the_source_uploader_cannot_approve_the_mirror(realdb):
     async with realdb.client(key="a", role="ap_manager") as c:
         refused = await c.post(f"/api/invoices/{mirror_id}/approve", json={})
     assert refused.status_code == 403, refused.text
-    assert "segregation" in refused.json()["detail"].lower()
+    assert "segregation" in refused.json()["detail"]["message"].lower()
+    assert refused.json()["detail"]["code"] == "approval_segregation"
 
     # The control is a set of implicated people, not a lock on the queue: an
     # employee with no hand in either invoice still approves.
@@ -282,7 +283,8 @@ async def test_the_mirror_inherits_the_source_implicated_set_too(realdb):
     async with realdb.client(key="a", role="cfo") as c:
         refused = await c.post(f"/api/invoices/{mirror_id}/approve", json={})
     assert refused.status_code == 403, refused.text
-    assert "segregation" in refused.json()["detail"].lower()
+    assert "segregation" in refused.json()["detail"]["message"].lower()
+    assert refused.json()["detail"]["code"] == "approval_segregation"
 
 
 @pytest.mark.asyncio
@@ -641,7 +643,8 @@ async def test_backfill_gives_a_legacy_mirror_what_routing_gives_it_today(realdb
     async with realdb.client(key="a", role="ap_manager") as c:
         refused = await c.post(f"/api/invoices/{mirror_id}/approve", json={})
     assert refused.status_code == 403, refused.text
-    assert "segregation" in refused.json()["detail"].lower()
+    assert "segregation" in refused.json()["detail"]["message"].lower()
+    assert refused.json()["detail"]["code"] == "approval_segregation"
 
     # Idempotent: nothing left to change, so no second row either.
     await _backfill(mk)

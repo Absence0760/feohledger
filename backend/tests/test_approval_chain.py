@@ -79,7 +79,8 @@ def test_segregation_blocks_uploader_from_approving():
         check_segregation(invoice, actor_id, config)
 
     assert exc_info.value.status_code == 403
-    assert "segregation" in exc_info.value.detail.lower()
+    assert "segregation" in exc_info.value.detail["message"].lower()
+    assert exc_info.value.detail["code"] == "approval_segregation"
 
 
 def test_segregation_allows_different_user():
@@ -294,7 +295,8 @@ def test_check_segregation_raises_403_for_an_implicated_actor():
     with pytest.raises(HTTPException) as exc_info:
         check_segregation(invoice, editor, {})
     assert exc_info.value.status_code == 403
-    assert "segregation" in exc_info.value.detail.lower()
+    assert "segregation" in exc_info.value.detail["message"].lower()
+    assert exc_info.value.detail["code"] == "approval_segregation"
 
 
 def test_every_segregation_shim_states_both_attributes():

@@ -69,8 +69,8 @@ async def test_max_amount_rejects():
             await _enforce_approval_thresholds(db, invoice, actor_roles=set())
 
     assert exc_info.value.status_code == 422
-    assert "50,000" in exc_info.value.detail
-    assert "10,000" in exc_info.value.detail
+    assert "50,000" in exc_info.value.detail["message"]
+    assert "10,000" in exc_info.value.detail["message"]
 
 
 @pytest.mark.asyncio
@@ -115,7 +115,7 @@ async def test_cfo_required_blocks_non_cfo():
             await _enforce_approval_thresholds(db, invoice, actor_roles={"ap_manager"})
 
     assert exc_info.value.status_code == 403
-    assert "CFO" in exc_info.value.detail
+    assert "CFO" in exc_info.value.detail["message"]
 
 
 @pytest.mark.asyncio
@@ -287,8 +287,8 @@ async def test_string_cfo_threshold_blocks_non_cfo_without_500():
             await _enforce_approval_thresholds(db, invoice, actor_roles={"ap_manager"})
 
     assert exc_info.value.status_code == 403
-    assert "CFO" in exc_info.value.detail
-    assert "10,000.00" in exc_info.value.detail
+    assert "CFO" in exc_info.value.detail["message"]
+    assert "10,000.00" in exc_info.value.detail["message"]
 
 
 # ---------------------------------------------------------------------------
@@ -333,8 +333,15 @@ async def test_structuring_escalates_cfo_gate_when_aggregate_crosses():
             await _enforce_approval_thresholds(db, invoice, actor_roles={"ap_manager"})
 
     assert exc_info.value.status_code == 403
-    assert "18,000.00" in exc_info.value.detail
-    assert "12,000.00" in exc_info.value.detail
+    assert "18,000.00" in exc_info.value.detail["message"]
+    assert "12,000.00" in exc_info.value.detail["message"]
+    # The structuring note travels as typed params too, so a client can state it
+    # in the reader's language (`api/refusals.coded_refusal`).
+    assert exc_info.value.detail["code"] == "approval_cfo_required"
+    params = exc_info.value.detail["params"]
+    assert params["recent_spend"] == "12000"
+    assert params["aggregate_amount"] == "18000"
+    assert isinstance(params["window_days"], int) and params["window_days"] > 0
 
 
 @pytest.mark.asyncio
@@ -367,7 +374,7 @@ async def test_structuring_escalates_max_amount_reject():
             await _enforce_approval_thresholds(db, invoice, actor_roles=set())
 
     assert exc_info.value.status_code == 422
-    assert "13,000.00" in exc_info.value.detail
+    assert "13,000.00" in exc_info.value.detail["message"]
 
 
 @pytest.mark.asyncio
@@ -422,7 +429,7 @@ async def test_string_max_amount_rejects_without_500():
             await _enforce_approval_thresholds(db, invoice, actor_roles=set())
 
     assert exc_info.value.status_code == 422
-    assert "10,000.00" in exc_info.value.detail
+    assert "10,000.00" in exc_info.value.detail["message"]
 
 
 # ---------------------------------------------------------------------------
@@ -452,7 +459,12 @@ async def test_malformed_cfo_threshold_blocks_non_cfo(bad_threshold):
             await _enforce_approval_thresholds(db, invoice, actor_roles={"ap_manager"})
 
     assert exc_info.value.status_code == 403
-    assert "CFO approval required" in exc_info.value.detail
+    assert "CFO approval required" in exc_info.value.detail["message"]
+    # No usable figure to name — not even a NaN rendered as one — so the
+    # sentence names the configured limit and the typed `limit` is null.
+    assert "the configured limit" in exc_info.value.detail["message"]
+    assert exc_info.value.detail["code"] == "approval_cfo_required"
+    assert exc_info.value.detail["params"]["limit"] is None
 
 
 @pytest.mark.parametrize("bad_threshold", ["abc", "10,000", "", {"nope": 1}])
@@ -539,7 +551,8 @@ async def test_malformed_max_amount_refuses_instead_of_500(bad_threshold):
 
     # A clean, actionable 422 — not InvalidOperation escaping as a 500.
     assert exc_info.value.status_code == 422
-    assert "max_invoice_amount" in exc_info.value.detail
+    assert "max_invoice_amount" in exc_info.value.detail["message"]
+    assert exc_info.value.detail["code"] == "approval_max_amount_misconfigured"
 
 
 @pytest.mark.asyncio

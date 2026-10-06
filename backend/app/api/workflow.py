@@ -18,6 +18,7 @@ from app.api.deps import (
 )
 from app.api.file_proxy import serve_owned_file
 from app.api.permissions import PERM_INVOICE_APPROVE
+from app.api.refusals import coded_refusal
 from app.database import get_control_db
 from app.models.invoice import Invoice, InvoiceExtractionResult, InvoiceStatus
 from app.models.organization import Organization
@@ -57,6 +58,10 @@ from app.tenant import (
 from app.utils.dates import utc_today
 
 router = APIRouter(prefix="/invoices", tags=["workflow"])
+
+#: `POST /invoices/{id}/complete` refused for blank required fields; `fields`
+#: names them (`vendor` / `invoice_number` / `amount`).
+INVOICE_REQUIRED_FIELDS_MISSING = "invoice_required_fields_missing"
 
 
 # ---------- Stage 1: Upload ----------
@@ -479,9 +484,17 @@ async def complete_invoice(
     if invoice.amount is None or invoice.amount <= 0:
         missing.append("amount")
     if missing:
+        # Coded (`api/refusals.coded_refusal`): the invoice modal suppresses this
+        # toast because its form already highlights the fields, and it decides
+        # that on the CODE — a substring match on the English broke the moment
+        # the sentence was localized.
         raise HTTPException(
             status_code=422,
-            detail=f"Required fields missing: {', '.join(missing)}",
+            detail=coded_refusal(
+                INVOICE_REQUIRED_FIELDS_MISSING,
+                f"Required fields missing: {', '.join(missing)}",
+                fields=missing,
+            ),
         )
 
     # Check workflow config for this invoice

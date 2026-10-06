@@ -709,6 +709,17 @@ enumerates nothing the English did not. `/profile` and the MFA login page map
 the codes through `m()` in `frontend/src/lib/api/authRefusals.ts`, which reads
 `ApiError.code` / `ApiError.params` (`frontend/src/lib/api.ts`).
 
+**A wrong code on a signed-in factor change is a `400`, not a `401`.** Confirming
+a new TOTP enrollment (`POST /api/auth/mfa/enroll/verify`, and the portal's
+`POST /api/portal/auth/mfa/verify`) and the portal's `POST /api/portal/auth/mfa/disable`
+take only a code, and used to refuse a wrong one with `401 "Invalid code"`. Both
+web clients read a 401 on a call that carried a token as an expired session —
+they clear it and bounce to the login page — so a mistyped code signed the user
+out. They now answer `400` with `detail = coded_refusal("mfa_code_invalid",
+"Invalid code")` (`api/refusals.MFA_CODE_INVALID_DETAIL`), exactly as specific as
+the sentence it replaced. The login challenge's own `/mfa/verify` "Invalid code"
+stays a `401`: there is no session yet, so nobody is signed out by it.
+
 **The profile page learns the rule from `/auth/me`.** `GET /api/auth/me`
 carries `password_sign_in_closed`, filled from
 `api/auth._org_closes_password_sign_in`, which is `is_sso_only`: the function
@@ -1178,10 +1189,16 @@ implicated actor already learns they are in the set from the identical refusal
 on the approval path, and a raiser is being told about their own act. Neither
 names the other actors, the uploader, the vendor, or the amount.
 
-| Axis | Single-row 403 `detail` | `/bulk/resolve` per-row `reason` |
+| Axis | Single-row 403 `detail.message` | `detail.code` = `/bulk/resolve` per-row `reason` |
 |---|---|---|
 | raiser | "Segregation of duties: the user whose action raised this exception cannot also clear it. Escalate it, or ask a different user to decide." | `segregation_raiser` |
 | implicated | "Segregation of duties: a user involved in creating this invoice cannot also clear an exception that blocks its payment. Escalate it, or ask a different user to decide." | `segregation_implicated` |
+
+The single-row 403 is a coded refusal (`api/refusals.coded_refusal`,
+`{code, message, params}`) whose `code` is the SAME string the bulk route reports
+for the row, so both doors name the refusal identically and each client keys one
+translation per axis (web `api/codedRefusals.ts`, mobile
+`lib/l10n/coded_refusal_messages.dart`), with the English `message` as fallback.
 
 A refusal in bulk is a per-**row** outcome, never a 409 for the batch — the
 queue is worked by selecting a filtered page, so one refused row must not take
@@ -1198,6 +1215,21 @@ an auditor needs is stronger than a refusal row anyway: every **successful**
 the ones that tripped. See [decisions.md](decisions.md) §169.
 
 ### Segregation of duties on a workflow's approval step
+
+**The approval path's refusals carry a code.** `check_segregation`'s 403 is
+`coded_refusal("approval_segregation", …)`; its siblings are
+`approval_not_named_approver` (`check_level_approver`), `approval_level_reuse`
+(one approver on two chain levels), and the money gates in
+`services/review._enforce_approval_thresholds` — `approval_cfo_required`,
+`approval_max_amount_exceeded` and `approval_max_amount_misconfigured`, whose
+params carry every figure the sentence names as an exact string beside its
+currency (`amount`/`currency`, `limit`/`limit_currency`, the structuring
+`recent_spend`/`aggregate_amount`/`window_days`, `expressible`,
+`measured_amount`). The web (`api/codedRefusals.ts`) and mobile
+(`lib/l10n/coded_refusal_messages.dart`) state them in the reader's language;
+server-side catchers (the exception agent's escalation rationale, the
+email-approval page, the bulk-approve skip reason) read the English through
+`utils/http.detail_text`.
 
 `check_segregation` is driven by the approval step's own
 `require_segregation` flag, and **the default is ON everywhere**:

@@ -134,7 +134,10 @@ async def test_the_uploader_cannot_resolve_a_payment_blocking_exception(realdb):
         )
 
     assert res.status_code == 403, res.text
-    assert "Segregation of duties" in res.json()["detail"]
+    assert "Segregation of duties" in res.json()["detail"]["message"]
+    # Coded with the SAME string `/bulk/resolve` reports for the row, so the
+    # single and bulk doors agree on what the refusal is called.
+    assert res.json()["detail"]["code"] == "segregation_implicated"
     # PII / third-party guard: the sentence is about the CALLER and names nobody.
     assert "Globex" not in res.text
     assert str(info.users["admin"]) not in res.text
@@ -377,7 +380,8 @@ async def test_the_bank_change_approver_cannot_clear_the_flag_they_raised(realdb
             json={"action": "resolve", "resolution": "I approved the change; it's fine."},
         )
     assert refused.status_code == 403, refused.text
-    assert "raised this exception" in refused.json()["detail"]
+    assert "raised this exception" in refused.json()["detail"]["message"]
+    assert refused.json()["detail"]["code"] == "segregation_raiser"
     assert await _status(mk, exc_id) == "open"
 
     # A different approver clears it, which is the whole point.

@@ -433,7 +433,8 @@ async def test_cfo_gate_cannot_be_dodged_by_splitting_across_currencies(realdb):
     async with realdb.client(key="a", role="ap_manager") as c:
         denied = await c.post(f"/api/expense-reports/{rid}/approve")
     assert denied.status_code == 403
-    assert "cfo" in denied.json()["detail"].lower()
+    assert "cfo" in denied.json()["detail"]["message"].lower()
+    assert denied.json()["detail"]["code"] == "expense_cfo_required"
 
     async with realdb.client(key="a", role="cfo") as c:
         ok = await c.post(f"/api/expense-reports/{rid}/approve")
@@ -458,7 +459,15 @@ async def test_cfo_gate_uses_the_reporting_currency_not_the_report_currency(real
     async with realdb.client(key="a", role="ap_manager") as c:
         denied = await c.post(f"/api/expense-reports/{rid}/approve")
     assert denied.status_code == 403, denied.text
-    assert "cfo" in denied.json()["detail"].lower()
+    assert "cfo" in denied.json()["detail"]["message"].lower()
+    assert denied.json()["detail"]["code"] == "expense_cfo_required"
+    # Every figure the sentence names, as an exact string beside its currency.
+    assert denied.json()["detail"]["params"] == {
+        "amount": "5326.09",
+        "currency": "USD",
+        "limit": "5000",
+        "report_currency": "EUR",
+    }
 
     async with realdb.client(key="a", role="cfo") as c:
         ok = await c.post(f"/api/expense-reports/{rid}/approve")
@@ -505,7 +514,8 @@ async def test_gate_fails_closed_when_the_reporting_figure_is_unavailable(realdb
     # A 10 EUR report is nowhere near 5000 — it is held purely because the
     # figure could not be established. Fail closed.
     assert denied.status_code == 403, denied.text
-    assert "cfo" in denied.json()["detail"].lower()
+    assert "cfo" in denied.json()["detail"]["message"].lower()
+    assert denied.json()["detail"]["code"] == "expense_cfo_required"
 
 
 async def test_same_currency_report_still_compares_at_face_value(realdb):

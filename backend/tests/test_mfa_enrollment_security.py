@@ -262,7 +262,10 @@ async def test_enroll_mfa_verify_with_wrong_code_keeps_mfa_disabled():
                 db=db,
             )
 
-    assert exc.value.status_code == 401
+    # A 400, not a 401: the session is valid, only the code is wrong — and a 401
+    # on an authenticated call makes the web client sign the user out.
+    assert exc.value.status_code == 400
+    assert exc.value.detail["code"] == "mfa_code_invalid"
     assert user.mfa_enabled is False, "wrong-code verify must not flip mfa_enabled"
     assert user.mfa_enrolled_at is None
     db.commit.assert_not_called()

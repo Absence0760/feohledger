@@ -36,6 +36,7 @@ from app.api.pagination import (
     PaginationParams,
     pagination_params,
 )
+from app.api.refusals import coded_refusal
 from app.api.sorting import SortParams, resolve_order_by, sort_params
 from app.models.expense import (
     CorporateCardTransaction,
@@ -68,7 +69,7 @@ from app.schemas.expense import (
     ExpenseSummaryResponse,
     ExpenseUpdate,
 )
-from app.schemas.money import json_money
+from app.schemas.money import json_money, json_money_string
 from app.services.approval_chain import check_segregation
 from app.services.audit_dispatch import dispatch_audit
 from app.services.currency_conversion import resolve_reporting_currency
@@ -1570,6 +1571,10 @@ async def attach_expenses(
 # Organization.settings.expense_approval.cfo_threshold.
 _DEFAULT_CFO_THRESHOLD = Decimal("5000")
 
+#: The expense-report CFO gate's refusal code (`api/refusals.coded_refusal`) —
+#: the report-side sibling of `services/review.APPROVAL_CFO_REQUIRED`.
+EXPENSE_CFO_REQUIRED = "expense_cfo_required"
+
 
 @reports_router.post("/{report_id}/submit", response_model=ExpenseReportResponse)
 async def submit_report(
@@ -1776,19 +1781,37 @@ async def approve_report(
         held = {r.name for r in user.roles} if user.roles else set()
         if ROLE_CFO not in held and ROLE_ADMIN not in held:
             threshold_dec = _to_decimal(cfo_threshold_raw)
+            if threshold_dec is not None and not threshold_dec.is_finite():
+                threshold_dec = None
             limit = f"{threshold_dec}" if threshold_dec is not None else "the configured limit"
+            report_currency = normalize_currency(report.currency)
             if gate_total is None:
-                detail = (
+                message = (
                     f"Report total cannot be expressed in {reporting_currency} "
-                    f"(no rate from {normalize_currency(report.currency)}), so it cannot be "
+                    f"(no rate from {report_currency}), so it cannot be "
                     f"cleared against the {limit} limit. CFO approval required."
                 )
             else:
-                detail = (
+                message = (
                     f"Report total {gate_total} {reporting_currency} exceeds {limit}. "
                     "CFO approval required."
                 )
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=detail)
+            # Coded (`api/refusals.coded_refusal`) so a client states it in the
+            # reader's language; every figure is an exact string beside its
+            # currency. `amount` is None exactly when the total could not be
+            # expressed in the reporting currency, `limit` when the threshold
+            # itself is malformed.
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=coded_refusal(
+                    EXPENSE_CFO_REQUIRED,
+                    message,
+                    amount=json_money_string(gate_total),
+                    currency=reporting_currency,
+                    limit=json_money_string(threshold_dec),
+                    report_currency=report_currency,
+                ),
+            )
 
     report.status = ExpenseReportStatus.approved
     report.approved_at = datetime.now(UTC)
