@@ -78,12 +78,20 @@ records). Per subject type:
   `virtual_cards` (the row stores `last_four` only; no PAN is ever persisted),
   `chat_messages`, `documents`, and `counts`.
 
-Every list-shaped collection is wrapped as
-`{ total, returned, truncated, items }` and capped at
-`privacy_export.MAX_EXPORT_ROWS` (1000). An export is a synchronous HTTP
-response; a user with three years of audit rows would otherwise build an
-unbounded JSON document in memory on the event loop. A truncated collection says
-so and reports its true total rather than silently shortening.
+The collections that can grow without bound for one subject — `audit_events`,
+`notifications`, `expense_reports`, `expenses`, `chat_messages`, `contracts`
+and `virtual_cards` — are wrapped as `{ total, returned, truncated, items }` and
+capped at `privacy_export.MAX_EXPORT_ROWS` (1000) per collection. An export is a
+synchronous HTTP response; a user with three years of audit rows would otherwise
+build an unbounded JSON document in memory on the event loop. A truncated
+collection says so and reports its true total rather than silently shortening,
+and the vendor bundle's `counts` carry the true totals too. (Until 2026-10-05
+`expenses`, `contracts` and `virtual_cards` were limited WITHOUT the wrapper — a
+short list that claimed to be complete, with `counts` reporting the truncated
+length; `tests/test_privacy.py::test_dsar_every_limited_collection_reports_its_truncation`
+pins the fix.) The rest are plain lists returned in full: a vendor's
+`related_invoices`, `related_payments` and `portal_users`, a user's `passkeys`
+and `push_devices`, and the `documents` manifest.
 
 #### Banking data in a DSAR bundle
 
