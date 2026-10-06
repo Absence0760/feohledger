@@ -1117,6 +1117,107 @@ async def _refuse_step_up(
     raise HTTPException(status_code=400, detail=STEP_UP_FAILURE_DETAIL)
 
 
+# --- Second-factor proof for a SENSITIVE action (not a factor change) --------
+#
+# The factor-management gate above admits the account password, because what it
+# protects is the factor itself and the password is a credential a stolen access
+# token does not carry. An action whose output is the asset — today, a DSAR
+# bundle with a supplier's full bank details in it — asks for more: proof from a
+# second factor. So this gate takes ONLY a current authenticator code or a
+# passkey assertion, never a password, in every tenant. That also makes the
+# SSO-only case need no special sentence: the password is not a proof here for
+# anyone, so there is nothing for such a tenant to be told is closed.
+#
+# Four refusals, each a coded detail the SPA localizes (`api/authRefusals.ts`):
+#
+# * `sensitive_step_up_required` (403) — no factor proof was offered. The SPA's
+#   cue to collect one and resend; nothing was attempted, so nothing is
+#   throttled or audited as a failure.
+# * `sensitive_step_up_failed` (400) — a proof was offered and did not verify.
+#   Throttled per account and audited like every other failed step-up.
+# * `sensitive_step_up_no_factor` (403) — the account has no second factor to
+#   prove. Refused, never exempted: exempting would make a password-only admin
+#   the one caller who skips the gate. The fix is enrolling one on /profile,
+#   which needs no step-up for a first factor.
+# * `sensitive_step_up_unavailable` (403) — the deployment has MFA switched off
+#   (`FEOH_MFA_ENABLED=false`) in a DEPLOYED environment, so no factor exists
+#   anywhere to prove. In local dev / CI the same switch-off skips the gate,
+#   exactly as it skips every other MFA challenge (guard rail 7); a deployed
+#   environment that forgot the switch fails closed instead.
+
+SENSITIVE_STEP_UP_REQUIRED_DETAIL = coded_refusal(
+    "sensitive_step_up_required",
+    "Confirm a current authenticator code or a registered passkey to continue.",
+)
+SENSITIVE_STEP_UP_FAILED_DETAIL = coded_refusal(
+    "sensitive_step_up_failed",
+    "That authenticator code or passkey could not be verified. Confirm a current "
+    "authenticator code or a registered passkey to continue.",
+)
+SENSITIVE_STEP_UP_NO_FACTOR_DETAIL = coded_refusal(
+    "sensitive_step_up_no_factor",
+    "This action needs a second factor. Set up an authenticator app or a passkey "
+    "on your profile first — a password alone cannot authorize it.",
+)
+SENSITIVE_STEP_UP_UNAVAILABLE_DETAIL = coded_refusal(
+    "sensitive_step_up_unavailable",
+    "This action needs two-factor authentication, which is not enabled on this deployment.",
+)
+
+#: What `require_sensitive_step_up` reports as the proof that satisfied it, for
+#: the caller's audit row. `mfa_off_local` names the local-dev skip outright so
+#: an incident review can never mistake it for a verified proof.
+SENSITIVE_PROOF_TOTP = "totp"
+SENSITIVE_PROOF_PASSKEY = "passkey"
+SENSITIVE_PROOF_MFA_OFF_LOCAL = "mfa_off_local"
+
+
+async def require_sensitive_step_up(
+    user: User,
+    body: MFAStepUpRequest | None,
+    *,
+    db: AsyncSession,
+    operation: str,
+    host: str | None,
+) -> str:
+    """Demand a second-factor proof for a sensitive action; return its kind.
+
+    `operation` must be one of `schemas.auth.STEP_UP_OPERATIONS`: a passkey
+    assertion only verifies against the challenge `POST /mfa/step-up/passkey`
+    minted for that same operation, so one collected for a factor change cannot
+    authorize this, nor the reverse. `db` is the CONTROL-plane session (the
+    passkey rows and the signature counter live there).
+
+    The proofs are tried separately rather than handed to `_step_up_satisfied`
+    together so the audit row can say WHICH one verified — and the password is
+    never forwarded at all.
+    """
+    if not settings.mfa_enabled:
+        if settings.is_deployed:
+            raise HTTPException(status_code=403, detail=SENSITIVE_STEP_UP_UNAVAILABLE_DETAIL)
+        return SENSITIVE_PROOF_MFA_OFF_LOCAL
+    has_totp = bool(user.mfa_enabled and user.mfa_secret)
+    if not has_totp and not await _user_passkeys(db, user.id):
+        raise HTTPException(status_code=403, detail=SENSITIVE_STEP_UP_NO_FACTOR_DETAIL)
+    code = body.code if body else None
+    assertion = body.assertion if body else None
+    if not code and not assertion:
+        raise HTTPException(status_code=403, detail=SENSITIVE_STEP_UP_REQUIRED_DETAIL)
+
+    await _throttle_step_up(user.id)
+    rp = await _relying_party(db, user.organization_id, host)
+    if code and await _step_up_satisfied(
+        db, user, MFAStepUpRequest(code=code), operation=operation, rp=rp
+    ):
+        return SENSITIVE_PROOF_TOTP
+    if assertion and await _step_up_satisfied(
+        db, user, MFAStepUpRequest(assertion=assertion), operation=operation, rp=rp
+    ):
+        return SENSITIVE_PROOF_PASSKEY
+    await _audit_step_up_failure(user, operation=operation)
+    raise HTTPException(status_code=400, detail=SENSITIVE_STEP_UP_FAILED_DETAIL)
+
+
 @router.post("/mfa/enroll", response_model=MFAEnrollStartResponse)
 async def enroll_mfa_start(
     body: MFAStepUpRequest | None = None,

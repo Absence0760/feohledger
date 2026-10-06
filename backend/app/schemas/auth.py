@@ -198,12 +198,21 @@ class WebAuthnAuthFinishRequest(BaseModel):
     credential: dict
 
 
-# The closed set of factor-management operations a step-up can authorize. A
-# step-up assertion is bound to exactly one of these (it selects the Redis
-# challenge slot), so an assertion obtained for one can't be replayed against
-# another. Keep in lockstep with the `operation=` literals passed to
-# `api/auth._require_mfa_step_up`.
-STEP_UP_OPERATIONS = ("totp_enroll", "totp_disable", "passkey_register", "passkey_delete")
+# The closed set of operations a step-up can authorize: the four factor changes
+# (`api/auth._require_mfa_step_up`) plus the sensitive actions gated by
+# `api/auth.require_sensitive_step_up` — today only the unmasked-banking DSAR
+# export. A step-up assertion is bound to exactly one of these (it selects the
+# Redis challenge slot), so an assertion obtained for one can't be replayed
+# against another. Keep in lockstep with the `operation=` literals at those
+# call sites and with the pattern below.
+STEP_UP_OPERATION_DSAR_UNMASKED = "dsar_unmasked_export"
+STEP_UP_OPERATIONS = (
+    "totp_enroll",
+    "totp_disable",
+    "passkey_register",
+    "passkey_delete",
+    STEP_UP_OPERATION_DSAR_UNMASKED,
+)
 
 
 class WebAuthnStepUpStartRequest(BaseModel):
@@ -217,7 +226,8 @@ class WebAuthnStepUpStartRequest(BaseModel):
     """
 
     operation: str = Field(
-        ..., pattern="^(totp_enroll|totp_disable|passkey_register|passkey_delete)$"
+        ...,
+        pattern="^(totp_enroll|totp_disable|passkey_register|passkey_delete|dsar_unmasked_export)$",
     )
 
 

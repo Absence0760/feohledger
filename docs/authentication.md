@@ -709,6 +709,28 @@ enumerates nothing the English did not. `/profile` and the MFA login page map
 the codes through `m()` in `frontend/src/lib/api/authRefusals.ts`, which reads
 `ApiError.code` / `ApiError.params` (`frontend/src/lib/api.ts`).
 
+**A sensitive ACTION asks for a second factor, never the password.** The step-up
+above protects the factors themselves, and admits the password because a stolen
+access token does not carry it. An action whose *output* is the asset asks for
+more: `api/auth.require_sensitive_step_up` accepts only a current authenticator
+code or a passkey assertion (minted by `POST /auth/mfa/step-up/passkey` for that
+action's own operation), in every tenant — so the SSO-only case needs no special
+sentence, because the password is a proof here for nobody. Its one caller today
+is the unmasked-banking DSAR export (`POST /api/privacy/dsar` with
+`include_banking`, operation `dsar_unmasked_export`). Four coded refusals:
+`sensitive_step_up_required` (`403`, no factor proof sent — the SPA's cue to
+collect one and resend; not throttled, not audited as a failure),
+`sensitive_step_up_failed` (`400`, a proof did not verify — throttled per account
+and audited `auth.mfa.step_up.failure` like every other step-up),
+`sensitive_step_up_no_factor` (`403`, the account has no TOTP and no passkey —
+**refused, never exempted**, because exempting would make a password-only admin
+the one caller who skips the gate; a first factor enrolls on `/profile` with no
+step-up) and `sensitive_step_up_unavailable` (`403`, `FEOH_MFA_ENABLED=false` in
+a *deployed* environment). With the master switch off in local dev / CI the gate
+is skipped, as every MFA challenge is, and the caller's audit row records the
+proof as `mfa_off_local` rather than passing for a verified one. The web prompt
+is `frontend/src/lib/components/ui/StepUpPrompt.svelte`.
+
 **The profile page learns the rule from `/auth/me`.** `GET /api/auth/me`
 carries `password_sign_in_closed`, filled from
 `api/auth._org_closes_password_sign_in`, which is `is_sso_only`: the function

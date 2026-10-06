@@ -773,6 +773,10 @@ async def test_dsar_include_banking_unmasks_and_writes_its_own_audit_row(realdb)
         details = unmasked[0].details
         assert details["disclosed"] == ["bank_details", "beneficial_owner_data"]
         assert "AP-99" in details["justification"]
+        # The MFA master switch is off in this environment (local / CI), so the
+        # second-factor gate was skipped — and the row says so rather than
+        # passing for a verified proof (`require_sensitive_step_up`).
+        assert details["step_up"] == "mfa_off_local"
         # PII-out-of-logs still holds: the audit row carries the justification,
         # never the value it justified.
         assert "000111222" not in str(details)

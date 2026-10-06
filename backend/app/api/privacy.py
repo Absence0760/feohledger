@@ -7,8 +7,9 @@ privilege) and both audited into the tenant's append-only trail:
   portable JSON bundle (GDPR Art. 15 / CCPA right-to-know). Audited
   ``privacy.dsar_export``. **Banking fields are masked by default**; an
   unmasked bundle needs ``include_banking`` + the
-  ``vendor.bank_change.approve`` permission + a written justification, and
-  writes its OWN audit row (``privacy.dsar_export.unmasked``).
+  ``vendor.bank_change.approve`` permission + a written justification + a
+  second-factor step-up proof, and writes its OWN audit row
+  (``privacy.dsar_export.unmasked``).
 - ``POST /privacy/erasure`` — irreversibly redact the subject's PII while
   PRESERVING the immutable financial + audit record (GDPR Art. 17 / CCPA
   right-to-delete). Legally-required retention wins for transactional rows: we
@@ -35,11 +36,13 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime
+from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, Header, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.auth import require_sensitive_step_up
 from app.api.deps import ROLE_ADMIN, require_roles
 from app.api.permissions import PERM_VENDOR_BANK_CHANGE_APPROVE
 from app.database import get_control_db
@@ -54,6 +57,7 @@ from app.models.data_subject_request import (
 )
 from app.models.organization import Organization
 from app.models.user import User
+from app.schemas.auth import STEP_UP_OPERATION_DSAR_UNMASKED
 from app.schemas.privacy import (
     DataSubjectRequestList,
     DataSubjectRequestSummary,
@@ -101,12 +105,13 @@ def _authorize_banking_disclosure(body: DSARRequest, user: User) -> None:
       bundle from an unmasked one.
 
     NOTE ON REACH: ``ROLE_ADMIN`` resolves to every permission in the catalogue,
-    so on the four stock system roles this gate admits exactly the callers the
-    route already admits. That is not a no-op — it is what makes the control
-    configurable: an org that splits duties with a custom admin-equivalent role
-    can now deny this without denying DSARs. The stronger gate (a step-up MFA
-    proof on the request) needs the SPA to collect that proof and is tracked in
-    ``docs/followups.md``.
+    so on the four stock system roles the permission admits exactly the callers
+    the route already admits — it is what makes the control configurable (an org
+    that splits duties with a custom admin-equivalent role can deny this without
+    denying DSARs), not what makes it bite. What makes it bite on a stock admin
+    is the second-factor proof the route demands next
+    (``api/auth.require_sensitive_step_up``): a stolen session, or a password
+    alone, cannot produce a full account number.
     """
     if not body.include_banking:
         return
@@ -132,6 +137,59 @@ def _authorize_banking_disclosure(body: DSARRequest, user: User) -> None:
         )
 
 
+# A missing proof is the routine first leg of every unmasked export — the SPA
+# sends without one and collects it on this refusal — so recording it would
+# bury the attempts that matter under every legitimate export.
+_UNAUDITED_STEP_UP_REFUSALS = frozenset({"sensitive_step_up_required"})
+
+
+async def _audit_refused_unmasked_export(
+    db: AsyncSession,
+    *,
+    org: Organization,
+    user: User,
+    body: DSARRequest,
+    exc: HTTPException,
+) -> None:
+    """Put a refused unmasked-banking export on the TENANT trail.
+
+    A failed proof already writes `auth.mfa.step_up.failure`, but that row lives
+    on the account's auth trail with no subject and no tenant, so "who kept
+    trying to pull this supplier's full account number" would otherwise leave
+    nothing an incident review of this tenant could find. One row per refused
+    attempt that reached the second-factor gate — a proof that did not verify,
+    an account with no factor, MFA unavailable — never the routine
+    proof-not-yet-sent prompt. PII-free: the refusal code and, for the
+    `vendor_contact` subject this path is restricted to, the vendor id when it
+    parses as one; never the justification's echo of anything else.
+    """
+    detail = exc.detail if isinstance(exc.detail, dict) else {}
+    code = detail.get("code")
+    if code in _UNAUDITED_STEP_UP_REFUSALS:
+        return
+    try:
+        vendor_id: uuid.UUID | None = uuid.UUID(body.identifier.strip())
+    except ValueError:
+        vendor_id = None
+    await dispatch_audit(
+        db,
+        correlation_id=uuid.uuid4(),
+        organization_id=org.id,
+        actor_id=user.id,
+        action="privacy.dsar_export.unmasked_refused",
+        # Keyed to the vendor asked about when the identifier names one, so the
+        # attempts against one supplier group together; else to the org.
+        entity_type="vendor" if vendor_id else "organization",
+        entity_id=vendor_id or org.id,
+        details={
+            "subject_type": body.subject_type,
+            "subject_id": str(vendor_id) if vendor_id else None,
+            "refusal": code,
+        },
+    )
+    await db.commit()
+
+
 @router.post("/dsar", response_model=DSARResponse)
 async def dsar_export(
     body: DSARRequest,
@@ -139,6 +197,7 @@ async def dsar_export(
     db: AsyncSession = Depends(get_tenant_db),
     control_db: AsyncSession = Depends(get_control_db),
     user: User = Depends(require_roles(ROLE_ADMIN)),
+    host: Annotated[str | None, Header()] = None,
 ):
     """Assemble a portable bundle of everything held about a data subject.
 
@@ -146,12 +205,28 @@ async def dsar_export(
     recorded in ``data_subject_requests`` — both PII-free (subject UUID + type +
     counts only). The bundle is returned in the body, never logged or stored.
 
-    Banking fields are MASKED unless ``include_banking`` is set and the caller
-    clears ``_authorize_banking_disclosure`` — in which case a second,
-    separately-actioned audit row records the disclosure and its justification.
+    Banking fields are MASKED unless ``include_banking`` is set, the caller
+    clears ``_authorize_banking_disclosure``, and ``body.step_up`` carries a
+    second-factor proof (``require_sensitive_step_up``) — in which case a
+    second, separately-actioned audit row records the disclosure, its
+    justification and which proof authorized it. Every check runs before any
+    subject data is read.
     """
     _validate_subject_type(body.subject_type)
     _authorize_banking_disclosure(body, user)
+    step_up_proof: str | None = None
+    if body.include_banking:
+        try:
+            step_up_proof = await require_sensitive_step_up(
+                user,
+                body.step_up,
+                db=control_db,
+                operation=STEP_UP_OPERATION_DSAR_UNMASKED,
+                host=host,
+            )
+        except HTTPException as exc:
+            await _audit_refused_unmasked_export(db, org=org, user=user, body=body, exc=exc)
+            raise
     now = datetime.now(UTC)
 
     try:
@@ -238,6 +313,10 @@ async def dsar_export(
                 "subject_id": str(subject_id),
                 "disclosed": ["bank_details", "beneficial_owner_data"],
                 "justification": (body.banking_justification or "").strip()[:500],
+                # Which second factor authorized it — `totp` / `passkey`, or
+                # `mfa_off_local` when a non-deployed environment runs with the
+                # MFA master switch off and the gate was skipped.
+                "step_up": step_up_proof,
             },
         )
     await db.commit()

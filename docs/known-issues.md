@@ -170,9 +170,12 @@ justification also rides the `data_subject_requests` row.
 `ROLE_ADMIN` resolves to every permission in the catalogue, so on the four stock
 system roles this admits exactly the callers the route already admits. What it
 adds is configurability — an org that splits duties with a custom
-admin-equivalent role can now deny it. The stronger gate (a step-up MFA proof on
-the request) needs the SPA to collect that proof and is tracked in
-`docs/followups.md`.
+admin-equivalent role can now deny it. *Closed 2026-10-05:* the route now also
+demands a second-factor proof (an authenticator code or a passkey assertion,
+never the password — `api/auth.require_sensitive_step_up`), and `/admin/privacy`
+collects it, so a stock admin's stolen session or password alone no longer
+produces a full account number (`backend/docs/privacy.md` § Banking data in a
+DSAR bundle).
 
 **Issue:** [#423](https://github.com/Absence0760/feohledger/issues/423)
 
