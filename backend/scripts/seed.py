@@ -90,7 +90,7 @@ from app.utils.passwords import pwd_context
 ROLE_DEFINITIONS: dict[str, str] = {
     ROLE_ADMIN: "Full access to all features and user management",
     ROLE_AP_MANAGER: "Review and approve invoices",
-    ROLE_AP_CLERK: "Prepare and look up: requisitions, intake, expenses, invoice and vendor reference",
+    ROLE_AP_CLERK: "Enter, code and match invoices; prepare requests and expenses",
     ROLE_CFO: "Approve high-value invoices and view reports",
 }
 
