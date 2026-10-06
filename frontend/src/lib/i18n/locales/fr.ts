@@ -225,6 +225,44 @@ export const messages = {
 		'Aucune clé d’accès enregistrée',
 	'authRefusal.portalStepUpFailed':
 		'Confirmez votre mot de passe ou un code actuel de votre application d’authentification pour modifier votre double authentification.',
+	'authRefusal.sensitiveStepUpRequired':
+		'Confirmez un code actuel de votre application d’authentification ou une clé d’accès enregistrée pour continuer.',
+	'authRefusal.sensitiveStepUpFailed':
+		'Ce code ou cette clé d’accès n’a pas pu être vérifié. Confirmez un code actuel de votre application d’authentification ou une clé d’accès enregistrée pour continuer.',
+	'authRefusal.sensitiveStepUpNoFactor':
+		'Cette action exige un second facteur. Configurez d’abord une application d’authentification ou une clé d’accès dans votre profil — un mot de passe seul ne peut pas l’autoriser.',
+	'authRefusal.sensitiveStepUpUnavailable':
+		'Cette action exige la double authentification, qui n’est pas activée sur ce déploiement.',
+	'stepUpPrompt.title':
+		'Confirmez votre identité',
+	'stepUpPrompt.codeLabel':
+		'Code d’authentification',
+	'stepUpPrompt.confirm':
+		'Confirmer',
+	'stepUpPrompt.confirming':
+		'Confirmation…',
+	'stepUpPrompt.usePasskey':
+		'Utiliser plutôt une clé d’accès',
+	'stepUpPrompt.cancel':
+		'Annuler',
+	'stepUpPrompt.failed':
+		'Confirmation impossible. Réessayez.',
+	'privacyDsar.includeBanking':
+		'Inclure les coordonnées bancaires complètes (non masquées)',
+	'privacyDsar.includeBankingHint':
+		'Les coordonnées bancaires sont masquées par défaut. Un export non masqué exige une justification écrite et une confirmation par second facteur, et il est consigné séparément dans la piste d’audit.',
+	'privacyDsar.justificationLabel':
+		'Motif de l’export non masqué',
+	'privacyDsar.justificationHint':
+		'Base légale ou référence de ticket. Elle est consignée dans la piste d’audit : n’y collez aucune donnée personnelle.',
+	'privacyDsar.stepUpHint':
+		'Un export non masqué révèle les numéros de compte complets d’un fournisseur. Saisissez un code actuel de votre application d’authentification ou utilisez une clé d’accès enregistrée.',
+	'privacyDsar.noFactor':
+		'Cet export exige un second facteur, et un mot de passe seul ne peut pas l’autoriser. {profile} d’abord.',
+	'privacyDsar.noFactorLink':
+		'Configurez une application d’authentification ou une clé d’accès dans votre profil',
+	'privacyDsar.unmaskedNotice':
+		'Les coordonnées bancaires de cet export ne sont pas masquées. Traitez-le en conséquence.',
 
 	'profile.sessions.heading': 'Appareils connectés',
 	'profile.sessions.hint':
@@ -439,6 +477,21 @@ export const messages = {
 	'invoices.warning.selfCorrectionLineItemMath': 'Ligne {lineNumber} : {quantity} × {unitPrice} = {expected}, mais le total est {total}.',
 	'invoices.warning.glCodesNotInChart': 'Comptes généraux suggérés par l’IA absents du plan comptable actif : {codes}',
 	'invoices.warning.glCodeStalePrior': 'Le compte général « {code} » mis en cache pour ce fournisseur n’est plus dans le plan comptable actif.',
+	'invoices.poMatch.issue.poNotFound': 'Commande {poNumber} introuvable',
+	'invoices.poMatch.issue.currencyMismatch': 'Devises différentes : facture en {invoiceCurrency}, commande en {poCurrency} — montants non comparés',
+	'invoices.poMatch.issue.amountMismatch': 'Écart de montant : facture {invoiceAmount} contre commande {poTotal} ({variancePct})',
+	'invoices.poMatch.issue.amountMismatchPoCurrencyUnknown': 'Écart de montant : facture {invoiceAmount} contre commande {poTotal} ({variancePct})',
+	'invoices.poMatch.issue.amountMismatchCurrencyUnknown': 'Écart de montant : facture {invoiceAmount} contre commande {poTotal} ({variancePct})',
+	'invoices.poMatch.issue.partialReceipt': 'Réception partielle : {receivedPct} de la quantité commandée reçue',
+	'invoices.poMatch.issue.overReceipt': 'Sur-réception : {receivedQuantity} reçues contre {orderedQuantity} commandées (+{excessQuantity})',
+	'invoices.poMatch.issue.inspectionFailed': 'Contrôle qualité échoué',
+	'invoices.poMatch.issue.inspectionFailedNotes': 'Contrôle qualité échoué : {notes}',
+	'invoices.poMatch.issue.partialAcceptance': 'Acceptation partielle : {acceptedQuantity} de la quantité commandée acceptées',
+	'invoices.poMatch.issue.partialAcceptanceUnquantified': 'Acceptation partielle : une partie de la quantité commandée acceptée',
+	'invoices.poMatch.issue.inspectionRequiredMissing': 'Contrôle qualité requis mais absent',
+	'exceptions.description.missingDataAfterExtraction': 'Champs obligatoires manquants après l’extraction',
+	'exceptions.description.priceVarianceFindings': 'Écart de prix par rapport à l’historique du fournisseur sur {count, plural, one {# ligne} other {# lignes}}',
+	'exceptions.description.contractNoncompliantFindings': '{count, plural, one {# constat de conformité au contrat} other {# constats de conformité au contrat}}',
 	'invoices.priorsTitle':
 		'Antécédents d’extraction : {cache, plural, one {# champ en cache fournisseur} other {# champs en cache fournisseur}}, {rag, plural, one {# voisin RAG} other {# voisins RAG}}',
 	'invoices.empty': 'Aucune facture ne correspond à vos filtres.',
@@ -1705,6 +1758,55 @@ export const messages = {
 	'org.security.mfaEnforcementInactive':
 		'Ce paramètre est enregistré, mais pas encore appliqué — l’authentification à deux facteurs est désactivée pour l’ensemble de la plateforme sur ce déploiement. Les utilisateurs n’y seront invités qu’une fois celle-ci activée.',
 	'org.security.save': 'Enregistrer',
+	// /organization -> Single Sign-On panel (PUT /api/organization/sso)
+	'orgSso.title': 'Authentification unique',
+	'orgSso.hint':
+		"Permettez aux membres de se connecter via votre fournisseur d'identité, en OpenID Connect ou SAML. Chaque modification ici est auditée.",
+	'orgSso.loading': 'Chargement des paramètres SSO…',
+	'orgSso.enabled': "Activer l'authentification unique",
+	'orgSso.field.protocol': 'Protocole',
+	'orgSso.field.provider': 'Bouton de connexion',
+	'orgSso.protocol.oidc': 'OpenID Connect (OIDC)',
+	'orgSso.protocol.saml': 'SAML 2.0',
+	'orgSso.provider.generic': 'Générique (« Se connecter avec le SSO »)',
+	'orgSso.field.discoveryUrl': 'URL de découverte',
+	'orgSso.field.clientId': 'ID client',
+	'orgSso.field.clientSecret': 'Secret client',
+	'orgSso.field.idpEntityId': "ID d'entité de l'IdP",
+	'orgSso.field.idpSsoUrl': "URL de connexion de l'IdP",
+	'orgSso.field.idpCert': "Certificat de signature de l'IdP",
+	'orgSso.field.idpCertMulti': 'Certificats de signature supplémentaires',
+	'orgSso.field.idpSloUrl': "URL de déconnexion de l'IdP (facultatif)",
+	'orgSso.field.spEntityId': "ID d'entité SP personnalisé (facultatif)",
+	'orgSso.field.allowedDomains': 'Domaines de messagerie autorisés',
+	'orgSso.domainsHint':
+		'Séparés par des virgules. Une première connexion SSO ne crée un compte que pour ces domaines. Laissez vide pour accepter tout domaine.',
+	'orgSso.secret.keepPlaceholder': 'Laissez vide pour conserver le secret enregistré',
+	'orgSso.secret.configured':
+		"Un secret client est enregistré. Il n'est plus jamais affiché ; saisissez-en un nouveau pour le remplacer.",
+	'orgSso.secret.notConfigured': "Aucun secret client n'est enregistré.",
+	'orgSso.secret.clear': 'Supprimer le secret client enregistré',
+	'orgSso.register.title': "Enregistrez cette application auprès de votre fournisseur d'identité",
+	'orgSso.register.hint':
+		"Copiez ces valeurs dans l'application que vous créez chez votre fournisseur d'identité.",
+	'orgSso.register.redirectUri': 'URI de redirection',
+	'orgSso.register.acsUrl': 'URL ACS',
+	'orgSso.register.spEntityId': "ID d'entité SP (audience)",
+	'orgSso.ssoOnly': 'Exiger le SSO (fermer la connexion par mot de passe)',
+	'orgSso.ssoOnlyHint':
+		"Les membres ne pourront alors se connecter que via le fournisseur d'identité. L'enregistrement n'est possible qu'une fois les paramètres du fournisseur ci-dessus complets. Si le fournisseur cesse ensuite de fonctionner, un opérateur de la plateforme peut rouvrir la connexion par mot de passe.",
+	'orgSso.status.passwordClosed':
+		'Le SSO exclusif est en vigueur : la connexion par mot de passe est fermée pour tous les membres.',
+	'orgSso.status.incomplete':
+		'Le SSO est activé, mais le bouton de connexion reste masqué tant que ces champs ne sont pas renseignés : {fields}.',
+	'orgSso.status.incompleteUnknown':
+		"Le SSO est activé, mais les paramètres du fournisseur d'identité sont incomplets, donc le bouton de connexion reste masqué.",
+	'orgSso.save': 'Enregistrer les paramètres SSO',
+	'orgSso.toast.loadFailed': 'Échec du chargement des paramètres SSO',
+	'orgSso.toast.saved': 'Paramètres SSO enregistrés',
+	'orgSso.toast.saveFailed': "Échec de l'enregistrement des paramètres SSO",
+	'orgSso.refusal.idpUnresolved':
+		"Exiger le SSO ferme la connexion par mot de passe : les paramètres du fournisseur d'identité doivent donc d'abord être complets. Manquant ou invalide : {fields}.",
 	'org.section.fraud': 'Détection de fraude',
 	'org.section.fraudSaved': 'Détection de fraude',
 	'org.fraud.hint': 'Chaque règle ci-dessous est vérifiée lorsqu\'une facture est créée ou mise à jour. Désactiver une règle supprime à la fois l\'avertissement et l\'exception générée automatiquement, gardant la file d\'attente propre.',
@@ -4392,11 +4494,11 @@ export const messages = {
 	'sweepHealth.title': 'État des tâches de fond',
 	'tax.action.manage': 'Gérer',
 	'tax.boxes.fallbackTag': 'Par défaut',
-	'tax.boxes.notReconciled': 'Les cases ne totalisent pas le montant déclarable ({residual} non affecté). Ne déposez pas avant résolution.',
+	'tax.boxes.notReconciled': 'Les cases ne totalisent pas le montant des 1099 obligatoires ({residual} non affecté). Ne déposez pas avant résolution.',
 	'tax.boxes.paymentCount': '{n, plural, one {# paiement} other {# paiements}}',
-	'tax.boxes.reconciled': 'Les cases totalisent le montant déclarable, au centime près.',
+	'tax.boxes.reconciled': 'Les cases totalisent le montant des 1099 obligatoires, au centime près.',
 	'tax.boxes.rowTitle': '{label} — {amount}',
-	'tax.boxes.subtitle': 'Répartition des dépenses déclarables entre les cases de l’IRS, d’après le compte général de chaque facture.',
+	'tax.boxes.subtitle': 'Répartition du montant figurant sur les 1099 obligatoires entre les cases de l’IRS, d’après le compte général de chaque facture. Une case d’un formulaire que le fournisseur n’a pas à recevoir n’est pas comptée.',
 	'tax.boxes.title': 'Répartition des cases 1099',
 	'tax.boxes.unmapped': '{amount} ne correspond à aucune règle de compte général et est déclaré dans {box}. Associez ces comptes dans les paramètres de l’organisation pour le répartir correctement.',
 	'tax.cardPaymentCount': '{n, plural, one {# paiement par carte} other {# paiements par carte}}',
@@ -4444,7 +4546,7 @@ export const messages = {
 	'tax.kpi.cardExcludedSub': 'Hors {amount} payé par carte — le processeur le déclare sur le 1099-K',
 	'tax.kpi.reportableOver': 'Déclarable (1099 + plus de {threshold} $)',
 	'tax.kpi.reportableWithoutW9': 'Déclarable sans W-9',
-	'tax.kpi.totalReportable': 'Total déclarable',
+	'tax.kpi.totalReportable': 'Total sur les 1099 obligatoires',
 	'tax.kpi.vendorsWithPayments': 'Fournisseurs avec paiements',
 	'tax.loadingReport': 'Chargement du rapport 1099 de {year}…',
 	'tax.reportMeta': 'Rapport généré le {generated}. Déclarable = fournisseurs éligibles au 1099 payés plus de {threshold} $ en paiements finalisés au cours de {year}.',
@@ -4652,6 +4754,35 @@ export const messages = {
 	'glChartRefusal.pickActive':
 		'Choisissez un compte actif dans le plan comptable propre à la facture : les comptes partagés plus ceux de son entité.',
 	'glChartRefusal.onLines': 'Lignes de facture : {reasons}',
+	// The coded money-path / MFA refusals (`api/codedRefusals.ts`), stated from
+	// their code + params. Money params arrive formatted with their currency.
+	'refusal.approvalSegregation': "Séparation des tâches : un utilisateur ayant participé à la création de cette facture ne peut pas aussi l'approuver.",
+	'refusal.approvalLevelReuse': "Vous avez déjà approuvé un niveau précédent de cette chaîne ; un autre approbateur est requis.",
+	'refusal.approvalNotNamedApprover': "Vous n'êtes pas un approbateur autorisé pour cette étape.",
+	'refusal.approvalMaxExceeded': "Le montant de la facture {amount} dépasse le maximum autorisé de {limit}.",
+	'refusal.approvalMaxMisconfigured': "L'étape d'approbation de ce workflow a un montant maximal de facture inutilisable. L'approbation est bloquée jusqu'à ce qu'un administrateur corrige la définition du workflow.",
+	'refusal.approvalCfoRequired': "Le montant de la facture {amount} dépasse {limit}. Approbation du CFO requise.",
+	'refusal.approvalCfoRequiredUnknownLimit': "Le montant de la facture {amount} dépasse la limite configurée. Approbation du CFO requise.",
+	'refusal.gateStructuring': "Cette facture seule est sous le seuil, mais cumulée avec {recent} d'autres factures récentes de ce fournisseur ({days, plural, one {dernier # jour} other {derniers # jours}}), elle totalise {aggregate}.",
+	'refusal.gateInexpressible': "Cette facture n'a pas pu être exprimée en {currency}, la devise de la limite ; elle ne peut donc pas être validée par rapport à celle-ci.",
+	'refusal.gateMeasured': "Mesuré à {measured} — la limite est fixée en {currency}.",
+	'refusal.expenseCfoRequired': "Le total de la note de frais {amount} dépasse {limit}. Approbation du CFO requise.",
+	'refusal.expenseCfoRequiredUnknownLimit': "Le total de la note de frais {amount} dépasse la limite configurée. Approbation du CFO requise.",
+	'refusal.expenseCfoInexpressible': "Le total de la note de frais ne peut pas être exprimé en {currency} (aucun taux depuis {reportCurrency}) ; il ne peut donc pas être validé par rapport à la limite de {limit}. Approbation du CFO requise.",
+	'refusal.expenseCfoInexpressibleUnknownLimit': "Le total de la note de frais ne peut pas être exprimé en {currency} (aucun taux depuis {reportCurrency}) ; il ne peut donc pas être validé par rapport à la limite configurée. Approbation du CFO requise.",
+	'refusal.exceptionSegregationRaiser': "Séparation des tâches : l'utilisateur dont l'action a déclenché cette exception ne peut pas aussi la résoudre. Escaladez-la ou demandez à un autre utilisateur de décider.",
+	'refusal.exceptionSegregationImplicated': "Séparation des tâches : un utilisateur ayant participé à la création de cette facture ne peut pas résoudre une exception qui bloque son paiement. Escaladez-la ou demandez à un autre utilisateur de décider.",
+	'refusal.creditMemoVendorMismatch': "Le fournisseur de l'avoir ne correspond pas au fournisseur de la facture.",
+	'refusal.creditMemoVendorUnresolved': "La facture n'a pas de fournisseur lié ; le fournisseur de l'avoir ne peut donc pas être vérifié. Résolvez d'abord le fournisseur de la facture (réenregistrez-le sur la facture), puis appliquez l'avoir.",
+	'refusal.creditMemoEntityMismatch': "L'avoir et la facture appartiennent à des entités différentes ; un avoir ne peut pas réduire la dette d'une autre filiale.",
+	'refusal.creditMemoCurrencyMismatch': "La devise de l'avoir ne correspond pas à la devise de la facture.",
+	'refusal.creditMemoInvoiceSettled': "La facture est au statut {status} : plus aucun paiement ne sera effectué sur elle, un avoir appliqué ne réduirait donc rien. Laissez l'avoir ouvert et appliquez-le à la prochaine facture du fournisseur.",
+	'refusal.creditMemoNotEditable': "Seul un avoir ouvert et jamais appliqué peut être modifié (celui-ci est au statut {status}).",
+	'refusal.creditMemoNotApplicable': "Un avoir au statut {status} ne peut pas être appliqué.",
+	'refusal.creditMemoExceedsBalance': "Le montant de l'avoir dépasse le solde créditable restant de la facture ({remaining}).",
+	'refusal.invoiceStaleEdit': "Cette facture a été modifiée depuis son chargement. Rechargez-la et réappliquez vos modifications.",
+	'refusal.invoiceRequiredFieldsMissing': "Champs obligatoires manquants : {fields}",
+	'refusal.mfaCodeInvalid': "Ce code n'est pas valide. Vérifiez votre application d'authentification et réessayez.",
 	'csvImport.result.summary': '{imported} importées, {skipped} ignorées',
 	'csvImport.toast.failed': 'Échec de l’importation',
 	'csvImport.toast.partial': '{imported} importées, {skipped} ignorées — voir les détails ci-dessous',

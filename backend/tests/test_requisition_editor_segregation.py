@@ -281,7 +281,8 @@ async def test_a_material_editor_cannot_approve_what_they_edited(realdb):
         assert (await c.post(f"/api/requisitions/{rid}/submit")).status_code == 200
         refused = await c.post(f"/api/requisitions/{rid}/approve")
     assert refused.status_code == 403, refused.text
-    assert "segregation" in refused.json()["detail"].lower()
+    assert "segregation" in refused.json()["detail"]["message"].lower()
+    assert refused.json()["detail"]["code"] == "approval_segregation"
     assert await _editors(realdb, rid) == [str(manager)]
     details = await _last_update_details(realdb, rid)
     assert details["material"] == ["line_items"]

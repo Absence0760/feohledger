@@ -17,6 +17,7 @@ from app.models.data_subject_request import (
     REQUEST_TYPES,
     SUBJECT_TYPES,
 )
+from app.schemas.auth import MFAStepUpRequest
 
 # Surfaced for the OpenAPI docs + validation error messages.
 SUBJECT_TYPE_VALUES = list(SUBJECT_TYPES)
@@ -33,8 +34,9 @@ class DSARRequest(BaseModel):
     ``include_banking`` opts a ``vendor_contact`` bundle out of the default
     masking of ``bank_details`` / ``beneficial_owner_data``. It is not a
     convenience flag: it needs the ``vendor.bank_change.approve`` permission, a
-    written ``banking_justification``, and it writes its own audit row. See
-    ``backend/docs/privacy.md`` § Banking data in a DSAR bundle.
+    written ``banking_justification``, a second-factor ``step_up`` proof, and it
+    writes its own audit row. See ``backend/docs/privacy.md`` § Banking data in
+    a DSAR bundle.
     """
 
     subject_type: str = Field(..., description=f"One of {SUBJECT_TYPE_VALUES}")
@@ -54,6 +56,16 @@ class DSARRequest(BaseModel):
             "Why an unmasked bundle is needed (legal basis / ticket reference). "
             "Required when include_banking is true. PII-free — it is recorded "
             "in the audit trail."
+        ),
+    )
+    step_up: MFAStepUpRequest | None = Field(
+        default=None,
+        description=(
+            "Second-factor proof for an unmasked export: a current authenticator "
+            "`code`, or a passkey `assertion` minted by POST "
+            "/api/auth/mfa/step-up/passkey for operation `dsar_unmasked_export`. "
+            "A `password` is ignored — it is not a second factor. Unused when "
+            "include_banking is false."
         ),
     )
 

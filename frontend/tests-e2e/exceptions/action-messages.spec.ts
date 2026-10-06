@@ -123,14 +123,19 @@ test.describe('/exceptions — action toasts and error text', () => {
 		await expect(modal).toBeVisible();
 	});
 
-	test('a segregation-of-duties refusal reaches the operator verbatim', async ({ page }) => {
-		// The sentence `exception_lifecycle.REFUSAL_MESSAGES` returns for an
-		// implicated actor — it names the way out (escalate, or another user),
-		// which is the whole point of showing it rather than "Action failed".
+	test('a segregation-of-duties refusal is stated from its code', async ({ page }) => {
+		// The refusal `exception_lifecycle.record_decision` raises for an
+		// implicated actor, in its coded shape (`api/refusals.coded_refusal`),
+		// with the SAME code `/bulk/resolve` reports per row. It names the way out
+		// (escalate, or another user), which is the whole point of showing it
+		// rather than "Action failed" — and it is stated from the code, so the
+		// server's English `message` never reaches the toast.
 		const refusal =
 			'Segregation of duties: a user involved in creating this invoice cannot also clear ' +
 			'an exception that blocks its payment. Escalate it, or ask a different user to decide.';
-		await stubResolve(page, 403, { detail: refusal });
+		await stubResolve(page, 403, {
+			detail: { code: 'segregation_implicated', message: 'server english', params: {} }
+		});
 		const modal = await openResolve(page);
 		await modal.locator('input[type="text"]').fill('e2e: my own invoice');
 		await modal.getByRole('button', { name: 'Resolve', exact: true }).click();

@@ -63,18 +63,21 @@ SECRET_VALUES = [
 # ---------- the pure projection ---------------------------------------------
 
 
-def test_admin_keeps_every_credential_except_the_write_only_one():
+def test_admin_keeps_every_credential_except_the_write_only_ones():
     """The admin settings page round-trips saved credentials through its form
-    fields, so an admin still sees them — all except the chat webhook URL,
-    whose only sanctioned management path is the audited endpoint."""
+    fields, so an admin still sees them — all except the chat webhook URL and
+    the SSO client secret, whose only sanctioned management paths are their
+    audited endpoints."""
     projected = settings_for_response(SECRETS, is_admin=True)
     assert projected["erp"]["client_secret"] == "erp-client-secret"
     assert projected["payments"]["webhook_secret"] == "pay-webhook-secret"
     assert projected["sso"]["scim_bearer_hash"] == "deadbeef"
-    # …but never this one, for any role.
+    # …but never these, for any role.
     assert "webhook_url" not in projected["chat_notifications"]
     assert projected["chat_notifications"]["provider"] == "slack"
     assert "zzTOPSECRETzz" not in str(projected)
+    assert "client_secret" not in projected["sso"]
+    assert "sso-client-secret" not in str(projected)
 
 
 def test_admin_projection_does_not_mutate_the_live_settings():
@@ -183,6 +186,12 @@ def test_always_redacted_covers_the_chat_webhook():
     assert ("chat_notifications", "webhook_url") in ALWAYS_REDACTED
 
 
+def test_always_redacted_covers_the_sso_client_secret():
+    """`PUT /api/organization/sso` keeps the stored secret on a blank field, so
+    no reader needs it back — and no response may carry it."""
+    assert ("sso", "client_secret") in ALWAYS_REDACTED
+
+
 # ---------- the endpoint -----------------------------------------------------
 
 
@@ -213,7 +222,8 @@ async def test_get_organization_redacts_credentials_for_non_admins(realdb, role)
 @pytest.mark.asyncio
 async def test_get_organization_keeps_admin_access_intact(realdb):
     """The settings page reads saved credentials back into its form fields, so
-    an admin must still get them — all but the write-only chat webhook URL."""
+    an admin must still get them — all but the write-only chat webhook URL and
+    SSO client secret."""
     await _seed_settings(realdb)
     async with realdb.client(key="a", role="admin") as c:
         resp = await c.get("/api/organization")
@@ -223,6 +233,8 @@ async def test_get_organization_keeps_admin_access_intact(realdb):
     assert settings["payments"]["webhook_secret"] == "pay-webhook-secret"
     assert "webhook_url" not in settings["chat_notifications"]
     assert "zzTOPSECRETzz" not in resp.text
+    assert settings["sso"]["scim_bearer_hash"] == "deadbeef"
+    assert "sso-client-secret" not in resp.text
 
 
 @pytest.mark.asyncio

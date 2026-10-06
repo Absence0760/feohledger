@@ -31,13 +31,8 @@ from app.services.data_residency import (
     resolve_region,
 )
 from app.services.org_settings_view import settings_for_response
-from app.services.sso import (
-    SSOConfigError,
-    check_sso_idp_config,
-    generate_scim_token,
-    sso_only_requested,
-)
-from app.tenant import get_tenant, normalize_custom_domain
+from app.services.sso import generate_scim_token
+from app.tenant import get_tenant, lock_organization, normalize_custom_domain
 from app.utils.tenant_urls import is_under_platform_domain
 
 logger = logging.getLogger(__name__)
@@ -221,38 +216,6 @@ def _validate_settings_patch(incoming: dict) -> None:
             )
 
 
-def _refuse_unresolvable_sso_only(merged_settings: dict) -> None:
-    """Refuse to save an `sso` block that asks for SSO-only but cannot deliver it.
-
-    `sso.enabled` + `sso.sso_only` is a request to close password sign-in. It is
-    honoured only when the selected protocol's IdP config resolves
-    (`services/sso.is_sso_only`). Otherwise the password stays open as the
-    escape hatch, because that tenant's login page has no SSO button. Saving
-    such a block would leave the admin believing SSO is enforced when it is
-    not, so it is refused here, where the admin can still fix it, rather than
-    discovered later (docs/decisions.md §204). `sso_only` with SSO switched off
-    is accepted, since an admin may stage the flag before the IdP is ready.
-
-    Checks the MERGED settings. The merge replaces the whole `sso` key, so this
-    is the block that would be stored. The 422 names the offending keys only,
-    never their values: the block holds the OIDC client secret.
-    """
-    if not sso_only_requested(merged_settings):
-        return
-    try:
-        check_sso_idp_config(merged_settings)
-    except SSOConfigError as exc:
-        names = ", ".join(f"sso.{name}" for name in exc.fields) or "the identity-provider settings"
-        raise HTTPException(
-            status_code=422,
-            detail=(
-                "sso.sso_only closes password sign-in, so it needs an identity-provider "
-                f"configuration that resolves. Missing or invalid: {names}. Complete them, "
-                "or save sso_only as false."
-            ),
-        ) from None
-
-
 @router.patch("", response_model=OrganizationResponse)
 async def update_organization(
     body: UpdateOrganizationRequest,
@@ -260,6 +223,10 @@ async def update_organization(
     user: User = Depends(require_roles(ROLE_ADMIN)),
     db: AsyncSession = Depends(get_control_db),
 ):
+    # The merge below writes the whole settings dict back, so read it under the
+    # row lock (`tenant.lock_organization`) or a concurrent audited writer —
+    # `PUT /organization/sso`, the SCIM group writes — is silently reverted.
+    org = await lock_organization(db, org)
     if body.name is not None:
         org.name = body.name
 
@@ -280,6 +247,20 @@ async def update_organization(
                     "/api/organization/chat-notifications (and its /webhook "
                     "sub-resource for the incoming-webhook URL), so that every "
                     "change to it is audited."
+                ),
+            )
+        # SSO has one sanctioned writer too — the audited
+        # `PUT /api/organization/sso`. The shallow `update()` below replaces the
+        # WHOLE `sso` key, so a `{"sso": {"client_secret": ...}}` PATCH used to
+        # drop `enabled`, `sso_only`, the rest of the IdP config and the SCIM
+        # group state, with no audit row. Refuse the key and name the endpoint.
+        if "sso" in body.settings:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    "sso is managed by /api/organization/sso, which keeps the stored "
+                    "client secret and the SCIM settings across a save and audits every "
+                    "change."
                 ),
             )
         # Custom domains have one sanctioned writer too — the audited
@@ -345,10 +326,6 @@ async def update_organization(
                 merged_brand = dict(merged_brand)
                 merged_brand["custom_domains"] = preserved
                 existing["brand"] = merged_brand
-        # Only when this PATCH writes `sso`: a stored block that is already
-        # unresolvable (a direct DB edit) must not block an unrelated save.
-        if "sso" in body.settings:
-            _refuse_unresolvable_sso_only(existing)
         org.settings = existing
 
     await db.commit()
@@ -418,6 +395,8 @@ async def update_data_residency(
             detail=f"Unsupported region '{body.region}'; valid: {list(SUPPORTED_REGIONS)}",
         )
 
+    # Serialise with every other settings writer (`lock_organization`).
+    org = await lock_organization(db, org)
     before = resolve_region(org)
 
     existing = dict(org.settings or {})
@@ -492,6 +471,8 @@ async def update_branding(
     tenant is built from (`app/utils/tenant_urls.py::tenant_base_url`); empty
     means "use the global `FEOH_TENANT_URL_TEMPLATE`".
     """
+    # Serialise with every other settings writer (`lock_organization`).
+    org = await lock_organization(db, org)
     existing = dict(org.settings or {})
     # Preserve `custom_domains` — it lives under `settings.brand` but is NOT a
     # `BrandConfig` field, so a naive `existing["brand"] = body.model_dump()`
@@ -662,6 +643,12 @@ async def update_custom_domains(
     await db.execute(
         text("SELECT pg_advisory_xact_lock(:k)").bindparams(k=_CUSTOM_DOMAINS_LOCK_KEY)
     )
+    # Then the org row, like every other settings writer (`lock_organization`),
+    # and re-read what we hold: a branding save may have committed since the
+    # request loaded it. Order is advisory lock → org row; nothing takes them
+    # the other way round.
+    org = await lock_organization(db, org)
+    before = _resolve_custom_domains(org)
 
     # Cross-org uniqueness: refuse a host already claimed by another org. Query
     # each candidate via the SAME JSONB containment the resolver uses, so the
@@ -788,6 +775,9 @@ async def mint_scim_token(
     """
     raw, digest = generate_scim_token()
 
+    # Under the row lock, like every settings writer: an unlocked read here could
+    # write back a stale `sso` block over a concurrent `PUT /organization/sso`.
+    org = await lock_organization(db, org)
     settings_dict = dict(org.settings or {})
     sso = dict(settings_dict.get("sso") or {})
     sso["scim_bearer_hash"] = digest

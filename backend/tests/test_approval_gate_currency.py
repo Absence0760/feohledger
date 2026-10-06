@@ -129,10 +129,19 @@ async def test_human_approval_demands_a_cfo_for_a_foreign_invoice_over_the_limit
             None, inv, {"ap_manager"}, org_settings=_USD, approval_config=_CONFIG
         )
     assert exc.value.status_code == 403
-    assert "CFO approval required" in exc.value.detail
+    assert "CFO approval required" in exc.value.detail["message"]
     # The message states what was measured and in which currency.
-    assert "11,403.00 USD" in exc.value.detail
-    assert "9,000.00 GBP" in exc.value.detail
+    assert "11,403.00 USD" in exc.value.detail["message"]
+    assert "9,000.00 GBP" in exc.value.detail["message"]
+    # ...and is coded, with every figure an exact string beside its currency,
+    # so a client states it in the reader's language (`api/refusals`).
+    assert exc.value.detail["code"] == "approval_cfo_required"
+    params = exc.value.detail["params"]
+    assert (params["amount"], params["currency"]) == ("9000", "GBP")
+    assert (params["limit"], params["limit_currency"]) == ("10000", "USD")
+    assert params["measured_amount"] == "11403.00"
+    assert params["expressible"] is True
+    assert params["recent_spend"] is None
 
 
 @pytest.mark.asyncio
@@ -153,7 +162,10 @@ async def test_human_approval_fails_closed_on_an_inexpressible_amount():
             None, inv, {"ap_manager"}, org_settings=_USD, approval_config=_CONFIG
         )
     assert exc.value.status_code == 422
-    assert "could not be expressed in USD" in exc.value.detail
+    assert "could not be expressed in USD" in exc.value.detail["message"]
+    assert exc.value.detail["code"] == "approval_max_amount_exceeded"
+    assert exc.value.detail["params"]["expressible"] is False
+    assert exc.value.detail["params"]["measured_amount"] is None
 
 
 @pytest.mark.asyncio
@@ -170,8 +182,8 @@ async def test_inexpressible_amount_demands_a_cfo_when_only_that_gate_is_set():
             approval_config={"require_cfo_above": "10000"},
         )
     assert exc.value.status_code == 403
-    assert "CFO approval required" in exc.value.detail
-    assert "could not be expressed in USD" in exc.value.detail
+    assert "CFO approval required" in exc.value.detail["message"]
+    assert "could not be expressed in USD" in exc.value.detail["message"]
 
     # ...and a real CFO still gets through, so the control escalates rather than
     # bricking the queue.
@@ -190,7 +202,7 @@ async def test_human_approval_max_gate_reads_the_converted_figure():
             None, inv, {"cfo"}, org_settings=_USD, approval_config=_CONFIG
         )
     assert exc.value.status_code == 422
-    assert "exceeds maximum allowed 50,000.00 USD" in exc.value.detail
+    assert "exceeds maximum allowed 50,000.00 USD" in exc.value.detail["message"]
 
 
 @pytest.mark.asyncio

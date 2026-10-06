@@ -112,18 +112,16 @@ async def _run(resolver):
 
 @pytest.mark.asyncio
 async def test_segregation_refusal_escalates_with_a_recorded_decision():
-    """The common trigger: the triggering user uploaded the invoice."""
-    exc, db, result = await _run(
-        _resolver_raising(
-            HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail=(
-                    "Segregation of duties: the user who uploaded this invoice "
-                    "cannot also approve it."
-                ),
-            )
-        )
-    )
+    """The common trigger: the triggering user uploaded the invoice. The
+    refusal is built by the REAL gate, so its coded shape (`{code, message,
+    params}`, `api/refusals.coded_refusal`) is what the coordinator reads."""
+    from app.services.approval_chain import check_segregation
+
+    actor = uuid.uuid4()
+    with pytest.raises(HTTPException) as refused:
+        check_segregation(SimpleNamespace(uploaded_by_id=actor), actor, {})
+    assert refused.value.detail["code"] == "approval_segregation"
+    exc, db, result = await _run(_resolver_raising(refused.value))
     assert exc.status == "escalated"
     assert result.decision.action_taken == "escalated"
     # The human picking it up reads WHY, in the queue.

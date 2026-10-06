@@ -226,6 +226,44 @@ export const messages = {
 		'Nenhuma chave de acesso registrada',
 	'authRefusal.portalStepUpFailed':
 		'Confirme sua senha ou um código atual do seu aplicativo autenticador para alterar suas configurações de duas etapas.',
+	'authRefusal.sensitiveStepUpRequired':
+		'Confirme um código atual do seu aplicativo autenticador ou uma chave de acesso registrada para continuar.',
+	'authRefusal.sensitiveStepUpFailed':
+		'Não foi possível verificar esse código ou essa chave de acesso. Confirme um código atual do seu aplicativo autenticador ou uma chave de acesso registrada para continuar.',
+	'authRefusal.sensitiveStepUpNoFactor':
+		'Esta ação exige um segundo fator. Configure primeiro um aplicativo autenticador ou uma chave de acesso no seu perfil — uma senha sozinha não pode autorizá-la.',
+	'authRefusal.sensitiveStepUpUnavailable':
+		'Esta ação exige a autenticação em duas etapas, que não está habilitada nesta instalação.',
+	'stepUpPrompt.title':
+		'Confirme que é você',
+	'stepUpPrompt.codeLabel':
+		'Código do autenticador',
+	'stepUpPrompt.confirm':
+		'Confirmar',
+	'stepUpPrompt.confirming':
+		'Confirmando…',
+	'stepUpPrompt.usePasskey':
+		'Usar uma chave de acesso',
+	'stepUpPrompt.cancel':
+		'Cancelar',
+	'stepUpPrompt.failed':
+		'Não foi possível confirmar. Tente novamente.',
+	'privacyDsar.includeBanking':
+		'Incluir os dados bancários completos (sem máscara)',
+	'privacyDsar.includeBankingHint':
+		'Os dados bancários são mascarados por padrão. Uma exportação sem máscara exige um motivo por escrito e uma confirmação com um segundo fator, e é registrada separadamente na trilha de auditoria.',
+	'privacyDsar.justificationLabel':
+		'Motivo da exportação sem máscara',
+	'privacyDsar.justificationHint':
+		'Base legal ou referência do chamado. Ela é registrada na trilha de auditoria, então não cole dados pessoais aqui.',
+	'privacyDsar.stepUpHint':
+		'Uma exportação sem máscara revela os números de conta completos de um fornecedor. Informe um código atual do seu aplicativo autenticador ou use uma chave de acesso registrada.',
+	'privacyDsar.noFactor':
+		'Esta exportação exige um segundo fator, e uma senha sozinha não pode autorizá-la. {profile} primeiro.',
+	'privacyDsar.noFactorLink':
+		'Configure um aplicativo autenticador ou uma chave de acesso no seu perfil',
+	'privacyDsar.unmaskedNotice':
+		'Os dados bancários desta exportação estão sem máscara. Trate-a de acordo.',
 
 	'profile.sessions.heading': 'Dispositivos conectados',
 	'profile.sessions.hint':
@@ -440,6 +478,21 @@ export const messages = {
 	'invoices.warning.selfCorrectionLineItemMath': 'Item {lineNumber}: {quantity} × {unitPrice} = {expected}, mas o total é {total}.',
 	'invoices.warning.glCodesNotInChart': 'Contas contábeis sugeridas pela IA que não estão no plano ativo: {codes}',
 	'invoices.warning.glCodeStalePrior': 'A conta contábil “{code}” em cache para o fornecedor não está mais no plano de contas ativo.',
+	'invoices.poMatch.issue.poNotFound': 'Pedido {poNumber} não encontrado',
+	'invoices.poMatch.issue.currencyMismatch': 'Divergência de moeda: nota em {invoiceCurrency}, pedido em {poCurrency} — valores não comparados',
+	'invoices.poMatch.issue.amountMismatch': 'Divergência de valor: nota {invoiceAmount} contra pedido {poTotal} ({variancePct})',
+	'invoices.poMatch.issue.amountMismatchPoCurrencyUnknown': 'Divergência de valor: nota {invoiceAmount} contra pedido {poTotal} ({variancePct})',
+	'invoices.poMatch.issue.amountMismatchCurrencyUnknown': 'Divergência de valor: nota {invoiceAmount} contra pedido {poTotal} ({variancePct})',
+	'invoices.poMatch.issue.partialReceipt': 'Recebimento parcial: {receivedPct} da quantidade pedida recebida',
+	'invoices.poMatch.issue.overReceipt': 'Recebimento em excesso: {receivedQuantity} recebidas contra {orderedQuantity} pedidas (+{excessQuantity})',
+	'invoices.poMatch.issue.inspectionFailed': 'Inspeção de qualidade reprovada',
+	'invoices.poMatch.issue.inspectionFailedNotes': 'Inspeção de qualidade reprovada: {notes}',
+	'invoices.poMatch.issue.partialAcceptance': 'Aceitação parcial: {acceptedQuantity} da quantidade pedida aceitas',
+	'invoices.poMatch.issue.partialAcceptanceUnquantified': 'Aceitação parcial: parte da quantidade pedida aceita',
+	'invoices.poMatch.issue.inspectionRequiredMissing': 'Inspeção de qualidade obrigatória, mas ausente',
+	'exceptions.description.missingDataAfterExtraction': 'Campos obrigatórios ausentes após a extração',
+	'exceptions.description.priceVarianceFindings': 'Variação de preço em relação ao histórico do fornecedor em {count, plural, one {# linha} other {# linhas}}',
+	'exceptions.description.contractNoncompliantFindings': '{count, plural, one {# constatação de conformidade contratual} other {# constatações de conformidade contratual}}',
 	'invoices.priorsTitle':
 		'Dados prévios de extração: {cache, plural, one {# campo em cache do fornecedor} other {# campos em cache do fornecedor}}, {rag, plural, one {# vizinho RAG} other {# vizinhos RAG}}',
 	'invoices.empty': 'Nenhuma fatura corresponde aos seus filtros.',
@@ -1706,6 +1759,55 @@ export const messages = {
 	'org.security.mfaEnforcementInactive':
 		'Isso foi salvo, mas ainda não está em vigor — a autenticação de dois fatores está desativada em toda a plataforma nesta implantação. Os usuários não serão solicitados até que ela seja ativada.',
 	'org.security.save': 'Salvar',
+	// /organization -> Single Sign-On panel (PUT /api/organization/sso)
+	'orgSso.title': 'Login único',
+	'orgSso.hint':
+		'Permita que os membros entrem pelo seu provedor de identidade, via OpenID Connect ou SAML. Toda alteração aqui é auditada.',
+	'orgSso.loading': 'Carregando as configurações de SSO…',
+	'orgSso.enabled': 'Ativar o login único',
+	'orgSso.field.protocol': 'Protocolo',
+	'orgSso.field.provider': 'Botão de login',
+	'orgSso.protocol.oidc': 'OpenID Connect (OIDC)',
+	'orgSso.protocol.saml': 'SAML 2.0',
+	'orgSso.provider.generic': 'Genérico (“Entrar com SSO”)',
+	'orgSso.field.discoveryUrl': 'URL de descoberta',
+	'orgSso.field.clientId': 'ID do cliente',
+	'orgSso.field.clientSecret': 'Segredo do cliente',
+	'orgSso.field.idpEntityId': 'ID de entidade do IdP',
+	'orgSso.field.idpSsoUrl': 'URL de login do IdP',
+	'orgSso.field.idpCert': 'Certificado de assinatura do IdP',
+	'orgSso.field.idpCertMulti': 'Certificados de assinatura adicionais',
+	'orgSso.field.idpSloUrl': 'URL de logout do IdP (opcional)',
+	'orgSso.field.spEntityId': 'ID de entidade do SP personalizado (opcional)',
+	'orgSso.field.allowedDomains': 'Domínios de e-mail permitidos',
+	'orgSso.domainsHint':
+		'Separados por vírgula. Um primeiro login por SSO cria conta apenas para esses domínios. Deixe vazio para aceitar qualquer domínio.',
+	'orgSso.secret.keepPlaceholder': 'Deixe em branco para manter o segredo armazenado',
+	'orgSso.secret.configured':
+		'Há um segredo do cliente armazenado. Ele nunca é exibido de novo; digite um novo para substituí-lo.',
+	'orgSso.secret.notConfigured': 'Nenhum segredo do cliente está armazenado.',
+	'orgSso.secret.clear': 'Remover o segredo do cliente armazenado',
+	'orgSso.register.title': 'Registre este app no seu provedor de identidade',
+	'orgSso.register.hint':
+		'Copie estes valores no aplicativo que você criar no seu provedor de identidade.',
+	'orgSso.register.redirectUri': 'URI de redirecionamento',
+	'orgSso.register.acsUrl': 'URL de ACS',
+	'orgSso.register.spEntityId': 'ID de entidade do SP (audiência)',
+	'orgSso.ssoOnly': 'Exigir SSO (fechar o login por senha)',
+	'orgSso.ssoOnlyHint':
+		'Os membros só poderão entrar pelo provedor de identidade. Só é possível salvar quando as configurações do provedor acima estiverem completas. Se o provedor parar de funcionar depois, um operador da plataforma pode reabrir o login por senha.',
+	'orgSso.status.passwordClosed':
+		'Somente SSO está em vigor: o login por senha está fechado para todos os membros.',
+	'orgSso.status.incomplete':
+		'O SSO está ativado, mas o botão de login fica oculto até que estes campos sejam preenchidos: {fields}.',
+	'orgSso.status.incompleteUnknown':
+		'O SSO está ativado, mas as configurações do provedor de identidade estão incompletas, então o botão de login fica oculto.',
+	'orgSso.save': 'Salvar configurações de SSO',
+	'orgSso.toast.loadFailed': 'Falha ao carregar as configurações de SSO',
+	'orgSso.toast.saved': 'Configurações de SSO salvas',
+	'orgSso.toast.saveFailed': 'Falha ao salvar as configurações de SSO',
+	'orgSso.refusal.idpUnresolved':
+		'Exigir SSO fecha o login por senha, então as configurações do provedor de identidade precisam estar completas primeiro. Ausente ou inválido: {fields}.',
 	'org.section.fraud': 'Detecção de fraude',
 	'org.section.fraudSaved': 'Detecção de fraude',
 	'org.fraud.hint': 'Cada regra abaixo é verificada quando uma fatura é criada ou atualizada. Desativar uma regra suprime tanto o aviso quanto a exceção gerada automaticamente, mantendo a fila limpa.',
@@ -4420,11 +4522,11 @@ export const messages = {
 	'sweepHealth.title': 'Saúde das rotinas de fundo',
 	'tax.action.manage': 'Gerenciar',
 	'tax.boxes.fallbackTag': 'Padrão',
-	'tax.boxes.notReconciled': 'As caixas não somam o total declarável ({residual} não alocado). Não envie até resolver isso.',
+	'tax.boxes.notReconciled': 'As caixas não somam o total dos 1099 obrigatórios ({residual} não alocado). Não envie até resolver isso.',
 	'tax.boxes.paymentCount': '{n, plural, one {# pagamento} other {# pagamentos}}',
-	'tax.boxes.reconciled': 'As caixas somam exatamente o total declarável, até o centavo.',
+	'tax.boxes.reconciled': 'As caixas somam exatamente o total dos 1099 obrigatórios, até o centavo.',
 	'tax.boxes.rowTitle': '{label} — {amount}',
-	'tax.boxes.subtitle': 'Como o gasto declarável se divide entre as caixas do IRS, a partir da conta contábil de cada fatura.',
+	'tax.boxes.subtitle': 'Como o valor nos 1099 obrigatórios se divide entre as caixas do IRS, a partir da conta contábil de cada fatura. Caixas de um formulário que o fornecedor não precisa receber não são contadas.',
 	'tax.boxes.title': 'Alocação de caixas do 1099',
 	'tax.boxes.unmapped': '{amount} não correspondeu a nenhuma regra de conta contábil e é declarado em {box}. Mapeie essas contas nas configurações da organização para dividir corretamente.',
 	'tax.cardPaymentCount': '{n, plural, one {# pagamento com cartão} other {# pagamentos com cartão}}',
@@ -4472,7 +4574,7 @@ export const messages = {
 	'tax.kpi.cardExcludedSub': 'Exclui {amount} pago com cartão — o processador declara isso no 1099-K',
 	'tax.kpi.reportableOver': 'Declarável (1099 + acima de ${threshold})',
 	'tax.kpi.reportableWithoutW9': 'Declarável sem W-9',
-	'tax.kpi.totalReportable': 'Total declarável',
+	'tax.kpi.totalReportable': 'Total nos 1099 obrigatórios',
 	'tax.kpi.vendorsWithPayments': 'Fornecedores com pagamentos',
 	'tax.loadingReport': 'Carregando o relatório 1099 de {year}…',
 	'tax.reportMeta': 'Relatório gerado em {generated}. Declarável = fornecedores elegíveis ao 1099 que receberam mais de ${threshold} em pagamentos concluídos durante {year}.',
@@ -4680,6 +4782,35 @@ export const messages = {
 	'glChartRefusal.pickActive':
 		'Escolha uma conta ativa do plano de contas próprio da fatura: as contas compartilhadas mais as da sua entidade.',
 	'glChartRefusal.onLines': 'Itens da fatura: {reasons}',
+	// The coded money-path / MFA refusals (`api/codedRefusals.ts`), stated from
+	// their code + params. Money params arrive formatted with their currency.
+	'refusal.approvalSegregation': "Segregação de funções: um usuário envolvido na criação desta fatura não pode também aprová-la.",
+	'refusal.approvalLevelReuse': "Você já aprovou um nível anterior desta cadeia; é necessário um aprovador diferente.",
+	'refusal.approvalNotNamedApprover': "Você não é um aprovador autorizado para esta etapa.",
+	'refusal.approvalMaxExceeded': "O valor da fatura {amount} excede o máximo permitido de {limit}.",
+	'refusal.approvalMaxMisconfigured': "A etapa de aprovação deste fluxo tem um valor máximo de fatura inutilizável. A aprovação está bloqueada até que um administrador corrija a definição do fluxo.",
+	'refusal.approvalCfoRequired': "O valor da fatura {amount} excede {limit}. Aprovação do CFO necessária.",
+	'refusal.approvalCfoRequiredUnknownLimit': "O valor da fatura {amount} excede o limite configurado. Aprovação do CFO necessária.",
+	'refusal.gateStructuring': "Esta fatura sozinha está abaixo do limite, mas somada a {recent} em outras faturas recentes deste fornecedor ({days, plural, one {último # dia} other {últimos # dias}}) totaliza {aggregate}.",
+	'refusal.gateInexpressible': "Esta fatura não pôde ser expressa em {currency}, a moeda em que o limite está definido, portanto não pode ser validada contra ele.",
+	'refusal.gateMeasured': "Medido como {measured} — o limite está definido em {currency}.",
+	'refusal.expenseCfoRequired': "O total do relatório {amount} excede {limit}. Aprovação do CFO necessária.",
+	'refusal.expenseCfoRequiredUnknownLimit': "O total do relatório {amount} excede o limite configurado. Aprovação do CFO necessária.",
+	'refusal.expenseCfoInexpressible': "O total do relatório não pode ser expresso em {currency} (sem taxa a partir de {reportCurrency}), portanto não pode ser validado contra o limite de {limit}. Aprovação do CFO necessária.",
+	'refusal.expenseCfoInexpressibleUnknownLimit': "O total do relatório não pode ser expresso em {currency} (sem taxa a partir de {reportCurrency}), portanto não pode ser validado contra o limite configurado. Aprovação do CFO necessária.",
+	'refusal.exceptionSegregationRaiser': "Segregação de funções: o usuário cuja ação gerou esta exceção não pode também resolvê-la. Escale-a ou peça a outro usuário para decidir.",
+	'refusal.exceptionSegregationImplicated': "Segregação de funções: um usuário envolvido na criação desta fatura não pode resolver uma exceção que bloqueia o pagamento dela. Escale-a ou peça a outro usuário para decidir.",
+	'refusal.creditMemoVendorMismatch': "O fornecedor da nota de crédito não corresponde ao fornecedor da fatura.",
+	'refusal.creditMemoVendorUnresolved': "A fatura não tem fornecedor vinculado, portanto o fornecedor da nota de crédito não pode ser verificado. Resolva primeiro o fornecedor da fatura (salve-o novamente na fatura) e depois aplique o crédito.",
+	'refusal.creditMemoEntityMismatch': "A nota de crédito e a fatura pertencem a entidades diferentes; um crédito não pode reduzir o valor a pagar de outra subsidiária.",
+	'refusal.creditMemoCurrencyMismatch': "A moeda da nota de crédito não corresponde à moeda da fatura.",
+	'refusal.creditMemoInvoiceSettled': "A fatura está com status {status}: nenhum pagamento será mais feito contra ela, então um crédito aplicado não reduziria nada. Deixe a nota de crédito em aberto e aplique-a à próxima fatura do fornecedor.",
+	'refusal.creditMemoNotEditable': "Só é possível editar uma nota de crédito em aberto que nunca foi aplicada (esta está com status {status}).",
+	'refusal.creditMemoNotApplicable': "Não é possível aplicar uma nota de crédito com status {status}.",
+	'refusal.creditMemoExceedsBalance': "O valor da nota de crédito excede o saldo creditável restante da fatura ({remaining}).",
+	'refusal.invoiceStaleEdit': "Esta fatura foi modificada depois que você a carregou. Recarregue e reaplique suas alterações.",
+	'refusal.invoiceRequiredFieldsMissing': "Campos obrigatórios ausentes: {fields}",
+	'refusal.mfaCodeInvalid': "Esse código não é válido. Verifique seu aplicativo autenticador e tente novamente.",
 	'csvImport.result.summary': '{imported} importados, {skipped} ignorados',
 	'csvImport.toast.failed': 'Falha na importação',
 	'csvImport.toast.partial': '{imported} importados, {skipped} ignorados — veja os detalhes abaixo',

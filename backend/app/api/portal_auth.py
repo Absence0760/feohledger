@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import create_vendor_access_token, decode_token
 from app.api.portal_deps import get_current_vendor_user
-from app.api.refusals import coded_refusal
+from app.api.refusals import MFA_CODE_INVALID_DETAIL, coded_refusal
 from app.config import settings
 from app.models.vendor import Vendor
 from app.models.vendor_user import VendorUser
@@ -757,7 +757,7 @@ async def portal_mfa_verify(
     if not pending:
         raise HTTPException(status_code=400, detail="Start enrollment first")
     if not await mfa.verify_totp(pending, body.code):
-        raise HTTPException(status_code=401, detail="Invalid code")
+        raise HTTPException(status_code=400, detail=MFA_CODE_INVALID_DETAIL)
 
     # Read before the write — afterwards every account looks freshly enrolled.
     replaced = bool(vu.mfa_enabled and vu.mfa_secret)
@@ -806,7 +806,7 @@ async def portal_mfa_disable(
     )
     if not await mfa.verify_totp(vu.mfa_secret, body.code):
         await _audit_portal_step_up_failure(vu, operation="totp_disable")
-        raise HTTPException(status_code=401, detail="Invalid code")
+        raise HTTPException(status_code=400, detail=MFA_CODE_INVALID_DETAIL)
 
     vu.mfa_secret = None
     vu.mfa_enabled = False

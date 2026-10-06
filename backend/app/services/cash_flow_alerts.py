@@ -89,6 +89,7 @@ from app.services.currency_conversion import resolve_reporting_currency
 from app.services.notification_dispatch import notify_event, resolve_role_user_ids
 from app.services.notification_templates import render_cash_shortfall
 from app.services.sweep_health import SWEEP_CASHFLOW_SHORTFALL, run_sweep_loop
+from app.tenant import lock_organization
 from app.utils.dates import utc_today
 
 logger = logging.getLogger(__name__)
@@ -295,6 +296,8 @@ async def _store_marker(org_id: uuid.UUID, *, period: str | None, sent_on: str |
         org = await ctrl.get(Organization, org_id)
         if org is None:
             return
+        # Serialise with every other settings writer (`app.tenant.lock_organization`).
+        org = await lock_organization(ctrl, org)
         org.settings = store_shortfall_alert_period(org.settings, period=period, sent_on=sent_on)
         await ctrl.commit()
 

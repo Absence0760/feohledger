@@ -662,9 +662,10 @@ resolve has no SSO button, because the config endpoints report SSO as off. If
 the password were closed there too, no member could start a session. So an
 unresolvable block leaves password sign-in open, and each password sign-in it
 lets through logs a warning naming the org, because a tenant that believes it
-enforces SSO and does not is an operator's problem to fix. `PATCH
-/api/organization` refuses to save that state in the first place: a `settings.sso`
-with `enabled` and `sso_only` whose block does not resolve is a `422` naming the
+enforces SSO and does not is an operator's problem to fix. `PUT
+/api/organization/sso` refuses to save that state in the first place: `enabled`
+and `sso_only` over a block that does not resolve is a `422` whose `detail` is
+the coded refusal `sso_only_idp_unresolved`, with `params.fields` naming the
 offending keys (never their values; the block holds the client secret).
 `sso_only` with SSO switched off is accepted. Only a direct DB edit can still
 produce the state, and the escape hatch covers it. Reasoning:
@@ -672,8 +673,14 @@ produce the state, and the escape hatch covers it. Reasoning:
 
 "Resolves" is a local completeness check. It does no DNS lookup and fetches no
 discovery document, which is what keeps it on the sign-in path. A complete block
-pointing at an IdP that is down, or holding a revoked client secret, still closes
-the password; recovering from that takes a platform operator.
+pointing at an IdP that is down, or holding an expired or revoked client secret,
+or trusting a signing certificate the IdP has rotated, still closes the password
+for every member, admins included. **Recovering from that is the operator
+break-glass**: `backend/scripts/sso_break_glass.py --slug <slug>` clears
+`sso_only` and nothing else (SSO stays enabled, the IdP config is untouched),
+after writing an `organization.sso_only_lifted` audit row — and changes nothing
+if that row cannot be written. The procedure, including verifying the request
+first, is [`founder-runbooks/sso-break-glass.md`](founder-runbooks/sso-break-glass.md).
 
 **The password is not a step-up proof there either.** Signing in is not the only
 thing the stored hash can authenticate: every change to a second factor (TOTP
@@ -708,6 +715,39 @@ code for a wrong password, a wrong code and a failed assertion alike — so it
 enumerates nothing the English did not. `/profile` and the MFA login page map
 the codes through `m()` in `frontend/src/lib/api/authRefusals.ts`, which reads
 `ApiError.code` / `ApiError.params` (`frontend/src/lib/api.ts`).
+
+**A sensitive ACTION asks for a second factor, never the password.** The step-up
+above protects the factors themselves, and admits the password because a stolen
+access token does not carry it. An action whose *output* is the asset asks for
+more: `api/auth.require_sensitive_step_up` accepts only a current authenticator
+code or a passkey assertion (minted by `POST /auth/mfa/step-up/passkey` for that
+action's own operation), in every tenant — so the SSO-only case needs no special
+sentence, because the password is a proof here for nobody. Its one caller today
+is the unmasked-banking DSAR export (`POST /api/privacy/dsar` with
+`include_banking`, operation `dsar_unmasked_export`). Four coded refusals:
+`sensitive_step_up_required` (`403`, no factor proof sent — the SPA's cue to
+collect one and resend; not throttled, not audited as a failure),
+`sensitive_step_up_failed` (`400`, a proof did not verify — throttled per account
+and audited `auth.mfa.step_up.failure` like every other step-up),
+`sensitive_step_up_no_factor` (`403`, the account has no TOTP and no passkey —
+**refused, never exempted**, because exempting would make a password-only admin
+the one caller who skips the gate; a first factor enrolls on `/profile` with no
+step-up) and `sensitive_step_up_unavailable` (`403`, `FEOH_MFA_ENABLED=false` in
+a *deployed* environment). With the master switch off in local dev / CI the gate
+is skipped, as every MFA challenge is, and the caller's audit row records the
+proof as `mfa_off_local` rather than passing for a verified one. The web prompt
+is `frontend/src/lib/components/ui/StepUpPrompt.svelte`.
+
+**A wrong code on a signed-in factor change is a `400`, not a `401`.** Confirming
+a new TOTP enrollment (`POST /api/auth/mfa/enroll/verify`, and the portal's
+`POST /api/portal/auth/mfa/verify`) and the portal's `POST /api/portal/auth/mfa/disable`
+take only a code, and used to refuse a wrong one with `401 "Invalid code"`. Both
+web clients read a 401 on a call that carried a token as an expired session —
+they clear it and bounce to the login page — so a mistyped code signed the user
+out. They now answer `400` with `detail = coded_refusal("mfa_code_invalid",
+"Invalid code")` (`api/refusals.MFA_CODE_INVALID_DETAIL`), exactly as specific as
+the sentence it replaced. The login challenge's own `/mfa/verify` "Invalid code"
+stays a `401`: there is no session yet, so nobody is signed out by it.
 
 **The profile page learns the rule from `/auth/me`.** `GET /api/auth/me`
 carries `password_sign_in_closed`, filled from
@@ -748,7 +788,69 @@ Consequences worth knowing:
   and there is no SSO that could close it.
 
 Reasoning: [decisions.md](decisions.md) §191, §201, §204. Tests: `backend/tests/test_sso_only.py`,
-`backend/tests/test_organization_settings_validation.py` (the write-time refusal).
+`backend/tests/test_organization_sso_settings.py` (the write-time refusal),
+`backend/tests/test_sso_break_glass.py` (the operator lift).
+
+### SSO configuration — one audited writer
+
+`settings.sso` is written by `PUT /api/organization/sso` (admin) and by nothing
+else a tenant can reach; `GET /api/organization/sso` (admin) serves the
+secret-free view the `/organization` **Single Sign-On** panel renders.
+`PATCH /api/organization` refuses an `sso` key and names the endpoint, the way it
+refuses `chat_notifications` and `brand.custom_domains`: its merge is per
+top-level key, so a `{"sso": {"client_secret": …}}` body used to replace the
+whole block — `enabled`, `sso_only`, the IdP config and the SCIM group state all
+went, with no audit row.
+
+The PUT states the whole IdP configuration, and a key it leaves out is removed,
+with three exceptions:
+
+- **The client secret is write-only.** Omitted or blank keeps the stored one;
+  `clear_client_secret: true` removes it. No response carries it —
+  `GET /api/organization` drops `sso.client_secret` for every role
+  (`services/org_settings_view.ALWAYS_REDACTED`), and the SSO view reports
+  `client_secret_configured` only.
+- **The SCIM state is carried.** `scim_bearer_hash` and `scim_groups` belong to
+  the SCIM machinery and survive every save; `scim_group_role_map` survives
+  unless the request names one, and a named map must reference roles the org
+  has. A changed map takes effect at the IdP's next membership push.
+- **`enabled` and `sso_only` must be stated.** An omitted flag is a `422`, not a
+  `false` — an omitted flag silently switching SSO off is the defect this
+  replaced. Every shape rule answers with a value-free `422`.
+
+**A malformed body never echoes its input.** FastAPI's default validation error
+carries each failure's `input`, and for a top-level shape error — a JSON array or
+string body — that input is the whole request, client secret included. So the
+PUT does not let FastAPI validate it: a dependency (`_sso_settings_body`) parses
+the JSON itself and answers an unparseable or non-object body with `422 "Request
+body must be a JSON object"`, and a field-type error with `422 "Invalid SSO
+settings: <locations>"` — dotted field locations only, never a value. The request
+model is all-optional, so an omitted field is never a validation error at all —
+the endpoint refuses an omitted flag itself. The OpenAPI request schema is published explicitly (`openapi_extra`), so the
+contract is unchanged.
+
+Each save writes `organization.sso_updated` with the changed key **names** and
+the resulting `enabled` / `sso_only` / `protocol` — never a value. **The row is
+written first, and no row means no change**: it goes through
+`audit_dispatch.record_auth_audit_or_raise`, which writes it into the tenant DB
+synchronously in every audit mode — `FEOH_AUDIT_MODE=lambda` included, where
+ordinary rows are only queued to SQS and a dead-lettered message would otherwise
+leave the policy changed with no record — and if it cannot be written the PUT
+rolls back and answers `503` without saving. A commit failing after the row
+leaves a row for a save that did not land, the safe direction to be wrong in. The
+break-glass lift's `organization.sso_only_lifted` row takes the same path. The
+save holds the org row lock (`app/tenant.lock_organization`, `SELECT … FOR
+UPDATE`) from before it reads `settings` until it commits, as does every other
+`settings` writer (guarded by `tests/test_settings_writers_lock_the_org_row.py`)
+— each rewrites the whole `settings` JSONB, so without it a branding save or a
+SCIM group push could silently revert a secret rotation, or the reverse.
+
+The view also carries the server's verdict (`password_sign_in_closed`, i.e. `is_sso_only`),
+the IdP keys the selected protocol still lacks (`idp_config_missing`), and the
+values to register at the IdP (`oidc_redirect_uri`, `saml_acs_url`,
+`saml_sp_entity_id`). Code: `api/organization_sso.py`, `services/sso_settings.py`;
+tests: `backend/tests/test_organization_sso_settings.py`,
+`frontend/tests-e2e/organization/sso.spec.ts`.
 
 ### An account can have no password at all — a separate bit from SSO-only
 
@@ -1178,10 +1280,16 @@ implicated actor already learns they are in the set from the identical refusal
 on the approval path, and a raiser is being told about their own act. Neither
 names the other actors, the uploader, the vendor, or the amount.
 
-| Axis | Single-row 403 `detail` | `/bulk/resolve` per-row `reason` |
+| Axis | Single-row 403 `detail.message` | `detail.code` = `/bulk/resolve` per-row `reason` |
 |---|---|---|
 | raiser | "Segregation of duties: the user whose action raised this exception cannot also clear it. Escalate it, or ask a different user to decide." | `segregation_raiser` |
 | implicated | "Segregation of duties: a user involved in creating this invoice cannot also clear an exception that blocks its payment. Escalate it, or ask a different user to decide." | `segregation_implicated` |
+
+The single-row 403 is a coded refusal (`api/refusals.coded_refusal`,
+`{code, message, params}`) whose `code` is the SAME string the bulk route reports
+for the row, so both doors name the refusal identically and each client keys one
+translation per axis (web `api/codedRefusals.ts`, mobile
+`lib/l10n/coded_refusal_messages.dart`), with the English `message` as fallback.
 
 A refusal in bulk is a per-**row** outcome, never a 409 for the batch — the
 queue is worked by selecting a filtered page, so one refused row must not take
@@ -1198,6 +1306,21 @@ an auditor needs is stronger than a refusal row anyway: every **successful**
 the ones that tripped. See [decisions.md](decisions.md) §169.
 
 ### Segregation of duties on a workflow's approval step
+
+**The approval path's refusals carry a code.** `check_segregation`'s 403 is
+`coded_refusal("approval_segregation", …)`; its siblings are
+`approval_not_named_approver` (`check_level_approver`), `approval_level_reuse`
+(one approver on two chain levels), and the money gates in
+`services/review._enforce_approval_thresholds` — `approval_cfo_required`,
+`approval_max_amount_exceeded` and `approval_max_amount_misconfigured`, whose
+params carry every figure the sentence names as an exact string beside its
+currency (`amount`/`currency`, `limit`/`limit_currency`, the structuring
+`recent_spend`/`aggregate_amount`/`window_days`, `expressible`,
+`measured_amount`). The web (`api/codedRefusals.ts`) and mobile
+(`lib/l10n/coded_refusal_messages.dart`) state them in the reader's language;
+server-side catchers (the exception agent's escalation rationale, the
+email-approval page, the bulk-approve skip reason) read the English through
+`utils/http.detail_text`.
 
 `check_segregation` is driven by the approval step's own
 `require_segregation` flag, and **the default is ON everywhere**:
@@ -1369,8 +1492,13 @@ whose requester is the intake's), so migration 0102 added
 `purchase_requisitions.material_editor_ids`, appended on a real change to a
 field in `models/procurement.REQUISITION_MATERIAL_EDIT_FIELDS`, and `approve`
 refuses requester ∪ editors (`backend/docs/procurement-requisitions.md` § Who
-an approval refuses). Expense reports and pre-approvals pass `None`: neither
-table records who *edited* a row, so there is no second actor to name.
+an approval refuses). Expense reports and pre-approvals pass `None`, for
+different reasons. A **report** has no second actor because nobody but its owner
+can author one: composing it, editing or deleting its lines, replacing their
+receipts, changing its fields and submitting it are all refused to anyone else
+(403 `expense_report_not_owner`, `backend/docs/expense-management.md` § Report
+ownership), so the owner is the complete author set without a column. A
+**pre-approval** records no editor and has no edit endpoint.
 
 The inter-company mirror (`POST /api/invoices/{id}/route-intercompany`)
 deliberately does **not** inherit the source invoice's set. Its segregation

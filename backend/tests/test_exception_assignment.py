@@ -18,6 +18,12 @@ from decimal import Decimal
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
+from app.services.invoice_warning_catalog import warning
+
+#: `_ensure_exception` takes a catalogue finding, never composed prose (the
+#: description is localized off its code — migration 0103).
+_FINDING = warning("future_invoice_date", "warning")
+
 # ---------- _ensure_exception: SLA + auto-assign --------------------------
 
 
@@ -60,7 +66,9 @@ def test_ensure_exception_writes_due_at_when_org_sla_set():
     db = _capture_db()
     org_settings = {"exceptions": {"default_sla_hours": 4}}
 
-    asyncio.run(_ensure_exception(db, inv, "fraud_flag", "warning", "x", org_settings=org_settings))
+    asyncio.run(
+        _ensure_exception(db, inv, "fraud_flag", "warning", _FINDING, org_settings=org_settings)
+    )
 
     persisted = _added_exception(db)
     assert persisted.due_at is not None
@@ -80,7 +88,9 @@ def test_ensure_exception_per_type_sla_overrides_default():
             "sla_hours_by_type": {"fraud_flag": 2},
         }
     }
-    asyncio.run(_ensure_exception(db, inv, "fraud_flag", "error", "x", org_settings=org_settings))
+    asyncio.run(
+        _ensure_exception(db, inv, "fraud_flag", "error", _FINDING, org_settings=org_settings)
+    )
 
     persisted = _added_exception(db)
     delta = persisted.due_at - datetime.now(UTC)
@@ -94,7 +104,7 @@ def test_ensure_exception_no_sla_leaves_due_at_null():
 
     inv = _invoice()
     db = _capture_db()
-    asyncio.run(_ensure_exception(db, inv, "duplicate", "warning", "x"))
+    asyncio.run(_ensure_exception(db, inv, "duplicate", "warning", _FINDING))
 
     persisted = _added_exception(db)
     assert persisted.due_at is None
@@ -107,7 +117,9 @@ def test_ensure_exception_auto_assigns_user_when_routing_set():
     db = _capture_db()
     target = uuid.uuid4()
     org_settings = {"exceptions": {"auto_assign_by_type": {"fraud_flag": str(target)}}}
-    asyncio.run(_ensure_exception(db, inv, "fraud_flag", "warning", "x", org_settings=org_settings))
+    asyncio.run(
+        _ensure_exception(db, inv, "fraud_flag", "warning", _FINDING, org_settings=org_settings)
+    )
 
     persisted = _added_exception(db)
     assert persisted.assigned_to_user_id == target
@@ -122,7 +134,9 @@ def test_ensure_exception_skips_invalid_assignee_uuid():
     db = _capture_db()
     org_settings = {"exceptions": {"auto_assign_by_type": {"fraud_flag": "not-a-uuid"}}}
 
-    asyncio.run(_ensure_exception(db, inv, "fraud_flag", "warning", "x", org_settings=org_settings))
+    asyncio.run(
+        _ensure_exception(db, inv, "fraud_flag", "warning", _FINDING, org_settings=org_settings)
+    )
     persisted = _added_exception(db)
     assert persisted.assigned_to_user_id is None
 
@@ -137,8 +151,35 @@ def test_ensure_exception_no_op_when_already_open():
     db.execute = AsyncMock(return_value=MagicMock(scalar=MagicMock(return_value=1)))
     db.add = MagicMock()
 
-    asyncio.run(_ensure_exception(db, inv, "fraud_flag", "warning", "x"))
+    asyncio.run(_ensure_exception(db, inv, "fraud_flag", "warning", _FINDING))
     db.add.assert_not_called()
+
+
+def test_ensure_exception_persists_the_finding_code_params_and_fallback():
+    """The row carries the catalogue code + params a client localizes on, and
+    the finding's English as `description` (migration 0103) — the SAME wording
+    as the warning on the invoice, with no hardcoded `$`."""
+    from app.services.invoice_warnings import _ensure_exception
+
+    flag = warning("round_amount", "info", amount=Decimal("5000"), currency="ZAR")
+    db = _capture_db()
+    asyncio.run(_ensure_exception(db, _invoice(), "fraud_flag", "info", flag))
+    persisted = _added_exception(db)
+    assert persisted.description_code == "round_amount"
+    assert persisted.description_params == {"amount": "5000.00", "currency": "ZAR"}
+    assert persisted.description == "Round amount: 5000.00 ZAR"
+    assert "$" not in persisted.description
+
+
+def test_ensure_exception_refuses_composed_prose():
+    """A string has no code, so the queue could only ever render it in English
+    — the defect this column pair exists to remove. Fail at the call site."""
+    import pytest
+
+    from app.services.invoice_warnings import _ensure_exception
+
+    with pytest.raises(TypeError):
+        asyncio.run(_ensure_exception(_capture_db(), _invoice(), "fraud_flag", "info", "prose"))
 
 
 # ---------- apply_resolution: time-to-resolution computation --------------
@@ -223,6 +264,8 @@ def test_exception_dict_marks_overdue_when_past_due_at():
         exception_type="fraud_flag",
         severity="warning",
         description="x",
+        description_code=None,
+        description_params=None,
         status="open",
         resolution=None,
         resolved_by=None,
@@ -249,6 +292,8 @@ def test_exception_dict_does_not_mark_terminal_states_overdue():
         exception_type="fraud_flag",
         severity="warning",
         description="x",
+        description_code=None,
+        description_params=None,
         status="resolved",
         resolution="x",
         resolved_by="Demo",
@@ -275,6 +320,8 @@ def test_exception_dict_carries_assignee_uuid():
         exception_type="fraud_flag",
         severity="warning",
         description="x",
+        description_code=None,
+        description_params=None,
         status="open",
         resolution=None,
         resolved_by=None,
@@ -288,6 +335,34 @@ def test_exception_dict_carries_assignee_uuid():
     body = _exception_dict(exc, None)
     assert body["assigned_to_user_id"] == str(target)
     assert body["assigned_to"] == "Demo Manager"
+
+
+def test_exception_dict_carries_the_description_code_and_params():
+    """The queue localizes on these; `description` stays as the fallback."""
+    from app.api.exceptions import _exception_dict
+
+    exc = SimpleNamespace(
+        id=uuid.uuid4(),
+        invoice_id=None,
+        exception_type="fraud_flag",
+        severity="info",
+        description="Round amount: 5000.00 ZAR",
+        description_code="round_amount",
+        description_params={"amount": "5000.00", "currency": "ZAR"},
+        status="open",
+        resolution=None,
+        resolved_by=None,
+        resolved_at=None,
+        assigned_to=None,
+        assigned_to_user_id=None,
+        due_at=None,
+        time_to_resolution_seconds=None,
+        created_at=datetime.now(UTC),
+    )
+    body = _exception_dict(exc, None)
+    assert body["description"] == "Round amount: 5000.00 ZAR"
+    assert body["description_code"] == "round_amount"
+    assert body["description_params"] == {"amount": "5000.00", "currency": "ZAR"}
 
 
 # ---------- get_exception: single-row detail endpoint ---------------------
@@ -304,6 +379,8 @@ def test_get_exception_returns_full_dict_for_found_row():
         exception_type="po_mismatch",
         severity="warning",
         description="amount off",
+        description_code=None,
+        description_params=None,
         status="open",
         resolution=None,
         resolved_by=None,
@@ -361,6 +438,8 @@ def _exc_row():
         exception_type="po_mismatch",
         severity="warning",
         description="x",
+        description_code=None,
+        description_params=None,
         status="open",
         resolution=None,
         resolved_by=None,

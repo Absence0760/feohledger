@@ -40,9 +40,16 @@ DO ANYTIME (parallel)
 ├── Insurance                 ← required before most procurement reviews
 │     └── insurance.md
 │
-└── Custom domains            ← per-customer, only when one asks for a vanity host
-      └── custom-domain-provisioning.md
+├── Custom domains            ← per-customer, only when one asks for a vanity host
+│     └── custom-domain-provisioning.md
+│
+└── SSO break-glass           ← per-incident, when an SSO-only tenant's IdP breaks
+      └── sso-break-glass.md
 ```
+
+`sso-break-glass.md` is per-incident too: the verified, audited way to
+reopen password sign-in for a tenant whose required identity provider has
+stopped working. Read it before the first tenant turns **Require SSO** on.
 
 `custom-domain-provisioning.md` is the odd one out: it isn't a
 one-time launch step but a **per-customer procedure**, run each time a

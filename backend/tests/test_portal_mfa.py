@@ -169,7 +169,10 @@ async def test_verify_wrong_code_rejected(mfa_on):
     db = _mock_db()
     with pytest.raises(HTTPException) as exc:
         await portal_mfa_verify(body=PortalMFAVerifyRequest(code="000000"), vu=vu, db=db)
-    assert exc.value.status_code == 401
+    # A 400, not a 401: the session is valid, only the code is wrong — and a
+    # 401 on an authenticated call makes the web client sign the user out.
+    assert exc.value.status_code == 400
+    assert exc.value.detail["code"] == "mfa_code_invalid"
     assert vu.mfa_enabled is False
     assert vu.mfa_secret is None
 
@@ -848,7 +851,10 @@ async def test_disable_wrong_code_rejected(mfa_on):
     db = _mock_db()
     with pytest.raises(HTTPException) as exc:
         await portal_mfa_disable(body=PortalMFADisableRequest(code="000000"), vu=vu, db=db)
-    assert exc.value.status_code == 401
+    # A 400, not a 401: the session is valid, only the code is wrong — and a
+    # 401 on an authenticated call makes the web client sign the user out.
+    assert exc.value.status_code == 400
+    assert exc.value.detail == {"code": "mfa_code_invalid", "message": "Invalid code", "params": {}}
     assert vu.mfa_enabled is True  # unchanged
 
 

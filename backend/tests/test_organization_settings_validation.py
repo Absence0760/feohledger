@@ -7,14 +7,11 @@ silently instead of being rejected at save. `_validate_settings_patch`
 (app/api/organization.py) closes just these two specific type-confusion holes
 — it is deliberately not a schema for the whole freeform settings bag.
 
-The `sso` block gets one refusal of its own: `sso_only` over an identity
-provider that does not resolve (`_refuse_unresolvable_sso_only`,
-docs/decisions.md §204).
+The `sso` key is refused outright: its one writer is the audited
+`PUT /api/organization/sso` (`test_organization_sso_settings.py`).
 """
 
 from __future__ import annotations
-
-import base64
 
 import pytest
 
@@ -124,132 +121,19 @@ async def test_null_cfo_threshold_accepted(realdb):
 
 
 # ---------------------------------------------------------------------------
-# `sso.sso_only` needs an identity provider that resolves (§204)
+# `sso` is not this endpoint's to write
 #
-# Password sign-in is closed only when the selected protocol's IdP block
-# resolves; otherwise the password stays open as the escape hatch, because the
-# login page has no SSO button to offer. Saving such a block would leave the
-# admin believing SSO is enforced when it is not, so the save is refused, with
-# the offending keys named and no value echoed.
+# `PUT /api/organization/sso` is its one sanctioned, audited writer. This merge
+# replaced the whole block per top-level key, so a secret-only PATCH dropped
+# `enabled`, `sso_only`, the IdP config and the SCIM group state, unaudited.
+# The `sso_only` refusal (§204) moved with it — see
+# `test_organization_sso_settings.py`.
 # ---------------------------------------------------------------------------
 
 _SECRET = "s3cr3t-client-value-that-must-not-echo"
-_OIDC_READY = {
-    "enabled": True,
-    "sso_only": True,
-    "discovery_url": "https://idp.example.com/.well-known/openid-configuration",
-    "client_id": "feoh",
-    "client_secret": _SECRET,
-}
-_SAML_READY = {
-    "enabled": True,
-    "sso_only": True,
-    "protocol": "saml",
-    "idp_entity_id": "https://idp.example.com/saml",
-    "idp_sso_url": "https://idp.example.com/saml/sso",
-    "idp_x509_cert": base64.b64encode(b"fake-but-valid-base64-der-bytes").decode(),
-}
 
 
-async def _patch_sso(realdb, block):
-    async with realdb.client(key="a", role="admin") as c:
-        return await c.patch("/api/organization", json={"settings": {"sso": block}})
-
-
-async def _stored_sso(realdb):
-    async with realdb.client(key="a", role="admin") as c:
-        resp = await c.get("/api/organization")
-    return resp.json()["settings"].get("sso")
-
-
-async def _clear_sso(realdb) -> None:
-    resp = await _patch_sso(realdb, {})
-    assert resp.status_code == 200, resp.text
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "block,named",
-    [
-        pytest.param(
-            {"enabled": True, "sso_only": True},
-            ["sso.discovery_url", "sso.client_id", "sso.client_secret"],
-            id="oidc-empty",
-        ),
-        pytest.param(
-            {k: v for k, v in _OIDC_READY.items() if k != "discovery_url"},
-            ["sso.discovery_url"],
-            id="oidc-one-missing",
-        ),
-        pytest.param(
-            {**_OIDC_READY, "discovery_url": "file:///etc/passwd"},
-            ["sso.discovery_url"],
-            id="oidc-not-a-url",
-        ),
-        pytest.param(
-            {"enabled": True, "sso_only": True, "protocol": "saml"},
-            ["sso.idp_entity_id", "sso.idp_sso_url", "sso.idp_x509_cert"],
-            id="saml-empty",
-        ),
-        pytest.param(
-            {**_SAML_READY, "idp_x509_cert": "not base64 !!"},
-            ["sso.idp_x509_cert"],
-            id="saml-bad-cert",
-        ),
-        pytest.param(
-            # A complete OIDC block does not satisfy a tenant set to SAML.
-            {**_OIDC_READY, "protocol": "saml"},
-            ["sso.idp_entity_id", "sso.idp_sso_url", "sso.idp_x509_cert"],
-            id="protocol-selects-the-block",
-        ),
-    ],
-)
-async def test_sso_only_over_an_unresolvable_idp_is_refused(realdb, block, named):
-    """Refused at save, naming every offending key and never a value, and the
-    stored block is left as it was."""
-    try:
-        before = await _stored_sso(realdb)
-        resp = await _patch_sso(realdb, block)
-        assert resp.status_code == 422, resp.text
-        detail = resp.json()["detail"]
-        assert isinstance(detail, str)
-        for name in named:
-            assert name in detail
-        assert "sso_only" in detail
-        assert _SECRET not in resp.text
-        assert await _stored_sso(realdb) == before
-    finally:
-        await _clear_sso(realdb)
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "block",
-    [
-        pytest.param(_OIDC_READY, id="oidc-complete"),
-        pytest.param(_SAML_READY, id="saml-complete"),
-        # Staging the flag before the IdP is ready closes nothing, so it is fine.
-        pytest.param({"enabled": False, "sso_only": True}, id="sso_only-with-sso-off"),
-        # An incomplete block that does NOT ask for SSO-only locks nobody out:
-        # the password form stays, and there is simply no SSO button yet.
-        pytest.param({"enabled": True, "client_id": "feoh"}, id="incomplete-without-sso_only"),
-    ],
-)
-async def test_an_sso_block_that_cannot_lock_anyone_out_is_accepted(realdb, block):
-    try:
-        resp = await _patch_sso(realdb, block)
-        assert resp.status_code == 200, resp.text
-        assert await _stored_sso(realdb) == block
-    finally:
-        await _clear_sso(realdb)
-
-
-@pytest.mark.asyncio
-async def test_a_stored_unresolvable_block_does_not_block_an_unrelated_save(realdb):
-    """The refusal applies to a PATCH that writes `sso`. A block that got into
-    the row some other way (a DB edit) is already harmless, because the
-    password stays open over it, and it must not hold every other setting
-    hostage."""
+async def _seed_sso(realdb, block: dict) -> None:
     from sqlalchemy import select
     from sqlalchemy.orm.attributes import flag_modified
 
@@ -259,9 +143,58 @@ async def test_a_stored_unresolvable_block_does_not_block_an_unrelated_save(real
         org = (
             await s.execute(select(Organization).where(Organization.id == realdb.info("a").org_id))
         ).scalar_one()
-        org.settings = {**(org.settings or {}), "sso": {"enabled": True, "sso_only": True}}
+        org.settings = {**(org.settings or {}), "sso": block}
         flag_modified(org, "settings")
         await s.commit()
+
+
+async def _stored_sso_raw(realdb) -> dict | None:
+    from sqlalchemy import select
+
+    from app.models.organization import Organization
+
+    async with realdb.control_sessionmaker()() as s:
+        org = (
+            await s.execute(select(Organization).where(Organization.id == realdb.info("a").org_id))
+        ).scalar_one()
+    return (org.settings or {}).get("sso")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "block",
+    [
+        pytest.param({"client_secret": "rotated"}, id="secret-only-rotation"),
+        pytest.param({}, id="empty-block"),
+        pytest.param(None, id="null"),
+    ],
+)
+async def test_patch_refuses_the_sso_key_and_names_its_endpoint(realdb, block):
+    stored = {
+        "enabled": True,
+        "sso_only": False,
+        "client_id": "feoh",
+        "client_secret": _SECRET,
+        "scim_groups": {"g1": {"displayName": "X", "members": []}},
+    }
+    await _seed_sso(realdb, stored)
+    async with realdb.client(key="a", role="admin") as c:
+        resp = await c.patch(
+            "/api/organization",
+            json={"name": "Renamed", "settings": {"sso": block}},
+        )
+    assert resp.status_code == 422, resp.text
+    assert "/api/organization/sso" in resp.json()["detail"]
+    assert _SECRET not in resp.text
+    assert await _stored_sso_raw(realdb) == stored
+
+
+@pytest.mark.asyncio
+async def test_a_stored_unresolvable_block_does_not_block_an_unrelated_save(realdb):
+    """A block that got into the row some other way (a DB edit) is already
+    harmless, because the password stays open over it, and it must not hold
+    every other setting hostage."""
+    await _seed_sso(realdb, {"enabled": True, "sso_only": True})
     try:
         async with realdb.client(key="a", role="admin") as c:
             resp = await c.patch(
@@ -269,6 +202,6 @@ async def test_a_stored_unresolvable_block_does_not_block_an_unrelated_save(real
                 json={"settings": {"invoice_defaults": {"currency": "EUR"}}},
             )
         assert resp.status_code == 200, resp.text
+        assert await _stored_sso_raw(realdb) == {"enabled": True, "sso_only": True}
     finally:
-        await _clear_sso(realdb)
         await _reset(realdb, "a")

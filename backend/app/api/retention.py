@@ -21,7 +21,7 @@ from app.models.organization import Organization
 from app.models.user import User
 from app.services.audit_dispatch import dispatch_auth_audit
 from app.services.retention_sweep import resolve_retention_months
-from app.tenant import get_tenant
+from app.tenant import get_tenant, lock_organization
 
 router = APIRouter(prefix="/retention-policy", tags=["retention"])
 
@@ -91,6 +91,8 @@ async def update_retention_policy(
                 detail=f"Retention months for '{cls}' must be a positive integer",
             )
 
+    # Serialise with every other settings writer (`lock_organization`).
+    org = await lock_organization(db, org)
     existing = dict(org.settings or {})
     retention = dict(existing.get("retention") or {})
     before = {cls: retention.get(f"{cls}_months") for cls in body.policy}

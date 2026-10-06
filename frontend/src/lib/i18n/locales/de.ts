@@ -222,6 +222,44 @@ export const messages = {
 		'Kein Passkey registriert',
 	'authRefusal.portalStepUpFailed':
 		'Bestätigen Sie Ihr Passwort oder einen aktuellen Code aus der Authenticator-App, um Ihre Zwei-Faktor-Einstellungen zu ändern.',
+	'authRefusal.sensitiveStepUpRequired':
+		'Bestätigen Sie einen aktuellen Code aus Ihrer Authenticator-App oder einen registrierten Passkey, um fortzufahren.',
+	'authRefusal.sensitiveStepUpFailed':
+		'Dieser Code oder Passkey konnte nicht bestätigt werden. Bestätigen Sie einen aktuellen Code aus Ihrer Authenticator-App oder einen registrierten Passkey, um fortzufahren.',
+	'authRefusal.sensitiveStepUpNoFactor':
+		'Diese Aktion erfordert einen zweiten Faktor. Richten Sie zuerst in Ihrem Profil eine Authenticator-App oder einen Passkey ein – ein Passwort allein kann sie nicht autorisieren.',
+	'authRefusal.sensitiveStepUpUnavailable':
+		'Diese Aktion erfordert die Zwei-Faktor-Authentifizierung, die in dieser Installation nicht aktiviert ist.',
+	'stepUpPrompt.title':
+		'Bestätigen Sie Ihre Identität',
+	'stepUpPrompt.codeLabel':
+		'Authenticator-Code',
+	'stepUpPrompt.confirm':
+		'Bestätigen',
+	'stepUpPrompt.confirming':
+		'Wird bestätigt…',
+	'stepUpPrompt.usePasskey':
+		'Stattdessen einen Passkey verwenden',
+	'stepUpPrompt.cancel':
+		'Abbrechen',
+	'stepUpPrompt.failed':
+		'Bestätigung fehlgeschlagen. Versuchen Sie es erneut.',
+	'privacyDsar.includeBanking':
+		'Vollständige Bankdaten einschließen (unmaskiert)',
+	'privacyDsar.includeBankingHint':
+		'Bankdaten sind standardmäßig maskiert. Ein unmaskierter Export erfordert eine schriftliche Begründung und eine Bestätigung mit einem zweiten Faktor und wird gesondert im Prüfprotokoll erfasst.',
+	'privacyDsar.justificationLabel':
+		'Grund für den unmaskierten Export',
+	'privacyDsar.justificationHint':
+		'Rechtsgrundlage oder Ticketnummer. Sie wird im Prüfprotokoll erfasst – fügen Sie hier keine personenbezogenen Daten ein.',
+	'privacyDsar.stepUpHint':
+		'Ein unmaskierter Export legt die vollständigen Kontonummern eines Lieferanten offen. Geben Sie einen aktuellen Code aus Ihrer Authenticator-App ein oder verwenden Sie einen registrierten Passkey.',
+	'privacyDsar.noFactor':
+		'Dieser Export erfordert einen zweiten Faktor, und ein Passwort allein kann ihn nicht autorisieren. {profile}, bevor Sie fortfahren.',
+	'privacyDsar.noFactorLink':
+		'Richten Sie in Ihrem Profil eine Authenticator-App oder einen Passkey ein',
+	'privacyDsar.unmaskedNotice':
+		'Die Bankdaten in diesem Export sind unmaskiert. Behandeln Sie ihn entsprechend.',
 
 	'profile.sessions.heading': 'Angemeldete Geräte',
 	'profile.sessions.hint':
@@ -436,6 +474,21 @@ export const messages = {
 	'invoices.warning.selfCorrectionLineItemMath': 'Position {lineNumber}: {quantity} × {unitPrice} = {expected}, die Summe lautet jedoch {total}.',
 	'invoices.warning.glCodesNotInChart': 'Von der KI vorgeschlagene Sachkonten fehlen im aktiven Kontenplan: {codes}',
 	'invoices.warning.glCodeStalePrior': 'Das zwischengespeicherte Sachkonto „{code}“ des Lieferanten ist nicht mehr im aktiven Kontenplan.',
+	'invoices.poMatch.issue.poNotFound': 'Bestellung {poNumber} nicht gefunden',
+	'invoices.poMatch.issue.currencyMismatch': 'Währungsabweichung: Rechnung in {invoiceCurrency}, Bestellung in {poCurrency} — Beträge nicht verglichen',
+	'invoices.poMatch.issue.amountMismatch': 'Betragsabweichung: Rechnung {invoiceAmount}, Bestellung {poTotal} ({variancePct})',
+	'invoices.poMatch.issue.amountMismatchPoCurrencyUnknown': 'Betragsabweichung: Rechnung {invoiceAmount}, Bestellung {poTotal} ({variancePct})',
+	'invoices.poMatch.issue.amountMismatchCurrencyUnknown': 'Betragsabweichung: Rechnung {invoiceAmount}, Bestellung {poTotal} ({variancePct})',
+	'invoices.poMatch.issue.partialReceipt': 'Teillieferung: {receivedPct} der bestellten Menge erhalten',
+	'invoices.poMatch.issue.overReceipt': 'Überlieferung: {receivedQuantity} geliefert gegenüber {orderedQuantity} bestellt (+{excessQuantity})',
+	'invoices.poMatch.issue.inspectionFailed': 'Qualitätsprüfung nicht bestanden',
+	'invoices.poMatch.issue.inspectionFailedNotes': 'Qualitätsprüfung nicht bestanden: {notes}',
+	'invoices.poMatch.issue.partialAcceptance': 'Teilannahme: {acceptedQuantity} der bestellten Menge angenommen',
+	'invoices.poMatch.issue.partialAcceptanceUnquantified': 'Teilannahme: ein Teil der bestellten Menge angenommen',
+	'invoices.poMatch.issue.inspectionRequiredMissing': 'Qualitätsprüfung erforderlich, aber nicht vorhanden',
+	'exceptions.description.missingDataAfterExtraction': 'Pflichtfelder fehlen nach der Extraktion',
+	'exceptions.description.priceVarianceFindings': 'Preisabweichung gegenüber der Lieferantenhistorie bei {count, plural, one {# Position} other {# Positionen}}',
+	'exceptions.description.contractNoncompliantFindings': '{count, plural, one {# Befund zur Vertragskonformität} other {# Befunde zur Vertragskonformität}}',
 	'invoices.priorsTitle':
 		'Extraktions-Vorgaben: {cache, plural, one {# Lieferanten-Cache-Feld} other {# Lieferanten-Cache-Felder}}, {rag, plural, one {# RAG-Nachbar} other {# RAG-Nachbarn}}',
 	'invoices.empty': 'Keine Rechnungen entsprechen Ihren Filtern.',
@@ -1705,6 +1758,55 @@ export const messages = {
 	'org.security.mfaEnforcementInactive':
 		'Dies ist gespeichert, wird aber noch nicht erzwungen – die Zwei-Faktor-Authentifizierung ist für dieses Deployment plattformweit deaktiviert. Nutzer werden erst dazu aufgefordert, wenn sie aktiviert wird.',
 	'org.security.save': 'Speichern',
+	// /organization -> Single Sign-On panel (PUT /api/organization/sso)
+	'orgSso.title': 'Single Sign-On',
+	'orgSso.hint':
+		'Mitglieder melden sich über Ihren Identitätsanbieter an, per OpenID Connect oder SAML. Jede Änderung hier wird protokolliert.',
+	'orgSso.loading': 'SSO-Einstellungen werden geladen…',
+	'orgSso.enabled': 'Single Sign-On aktivieren',
+	'orgSso.field.protocol': 'Protokoll',
+	'orgSso.field.provider': 'Anmeldeschaltfläche',
+	'orgSso.protocol.oidc': 'OpenID Connect (OIDC)',
+	'orgSso.protocol.saml': 'SAML 2.0',
+	'orgSso.provider.generic': 'Generisch („Mit SSO anmelden“)',
+	'orgSso.field.discoveryUrl': 'Discovery-URL',
+	'orgSso.field.clientId': 'Client-ID',
+	'orgSso.field.clientSecret': 'Client-Secret',
+	'orgSso.field.idpEntityId': 'IdP-Entity-ID',
+	'orgSso.field.idpSsoUrl': 'IdP-Anmelde-URL',
+	'orgSso.field.idpCert': 'IdP-Signaturzertifikat',
+	'orgSso.field.idpCertMulti': 'Weitere Signaturzertifikate',
+	'orgSso.field.idpSloUrl': 'IdP-Abmelde-URL (optional)',
+	'orgSso.field.spEntityId': 'SP-Entity-ID überschreiben (optional)',
+	'orgSso.field.allowedDomains': 'Zulässige E-Mail-Domains',
+	'orgSso.domainsHint':
+		'Durch Kommas getrennt. Eine erste SSO-Anmeldung legt nur für diese Domains ein Konto an. Leer lassen, um jede Domain zuzulassen.',
+	'orgSso.secret.keepPlaceholder': 'Leer lassen, um das gespeicherte Secret zu behalten',
+	'orgSso.secret.configured':
+		'Ein Client-Secret ist gespeichert. Es wird nie wieder angezeigt; geben Sie ein neues ein, um es zu ersetzen.',
+	'orgSso.secret.notConfigured': 'Es ist kein Client-Secret gespeichert.',
+	'orgSso.secret.clear': 'Gespeichertes Client-Secret entfernen',
+	'orgSso.register.title': 'Diese App bei Ihrem Identitätsanbieter registrieren',
+	'orgSso.register.hint':
+		'Übernehmen Sie diese Werte in die Anwendung, die Sie bei Ihrem Identitätsanbieter anlegen.',
+	'orgSso.register.redirectUri': 'Weiterleitungs-URI',
+	'orgSso.register.acsUrl': 'ACS-URL',
+	'orgSso.register.spEntityId': 'SP-Entity-ID (Audience)',
+	'orgSso.ssoOnly': 'SSO verlangen (Passwort-Anmeldung schließen)',
+	'orgSso.ssoOnlyHint':
+		'Mitglieder können sich dann nur noch über den Identitätsanbieter anmelden. Speichern ist erst möglich, wenn die Anbietereinstellungen oben vollständig sind. Fällt der Anbieter später aus, kann ein Plattformbetreiber die Passwort-Anmeldung wieder öffnen.',
+	'orgSso.status.passwordClosed':
+		'Nur SSO ist aktiv: Die Passwort-Anmeldung ist für alle Mitglieder geschlossen.',
+	'orgSso.status.incomplete':
+		'SSO ist aktiv, aber die Anmeldeschaltfläche bleibt verborgen, bis Folgendes gesetzt ist: {fields}.',
+	'orgSso.status.incompleteUnknown':
+		'SSO ist aktiv, aber die Einstellungen des Identitätsanbieters sind unvollständig, daher bleibt die Anmeldeschaltfläche verborgen.',
+	'orgSso.save': 'SSO-Einstellungen speichern',
+	'orgSso.toast.loadFailed': 'SSO-Einstellungen konnten nicht geladen werden',
+	'orgSso.toast.saved': 'SSO-Einstellungen gespeichert',
+	'orgSso.toast.saveFailed': 'SSO-Einstellungen konnten nicht gespeichert werden',
+	'orgSso.refusal.idpUnresolved':
+		'SSO zu verlangen schließt die Passwort-Anmeldung, daher müssen die Einstellungen des Identitätsanbieters zuerst vollständig sein. Fehlend oder ungültig: {fields}.',
 	'org.section.fraud': 'Betrugserkennung',
 	'org.section.fraudSaved': 'Betrugserkennung',
 	'org.fraud.hint': 'Jede Regel unten wird geprüft, wenn eine Rechnung erstellt oder aktualisiert wird. Das Deaktivieren einer Regel unterdrückt sowohl die Warnung als auch die automatisch erzeugte Ausnahme, damit die Warteschlange übersichtlich bleibt.',
@@ -4390,11 +4492,11 @@ export const messages = {
 	'sweepHealth.title': 'Zustand der Hintergrundläufe',
 	'tax.action.manage': 'Verwalten',
 	'tax.boxes.fallbackTag': 'Rückfall',
-	'tax.boxes.notReconciled': 'Die Felder ergeben nicht die meldepflichtige Gesamtsumme ({residual} nicht zugeordnet). Nicht einreichen, bevor das geklärt ist.',
+	'tax.boxes.notReconciled': 'Die Felder ergeben nicht die Summe auf den Pflicht-1099 ({residual} nicht zugeordnet). Nicht einreichen, bevor das geklärt ist.',
 	'tax.boxes.paymentCount': '{n, plural, one {# Zahlung} other {# Zahlungen}}',
-	'tax.boxes.reconciled': 'Die Felder ergeben centgenau die meldepflichtige Gesamtsumme.',
+	'tax.boxes.reconciled': 'Die Felder ergeben centgenau die Summe auf den Pflicht-1099.',
 	'tax.boxes.rowTitle': '{label} — {amount}',
-	'tax.boxes.subtitle': 'Wie sich die meldepflichtigen Ausgaben auf die IRS-Felder verteilen – abgeleitet aus dem Sachkonto jeder Rechnung.',
+	'tax.boxes.subtitle': 'Wie sich der Betrag auf den Pflicht-1099 auf die IRS-Felder verteilt – abgeleitet aus dem Sachkonto jeder Rechnung. Felder eines Formulars, das der Lieferant nicht erhalten muss, werden nicht gezählt.',
 	'tax.boxes.title': '1099-Feldzuordnung',
 	'tax.boxes.unmapped': 'Für {amount} greift keine Sachkonto-Regel; der Betrag wird in {box} gemeldet. Ordnen Sie diese Sachkonten in den Organisationseinstellungen zu, um korrekt aufzuteilen.',
 	'tax.cardPaymentCount': '{n, plural, one {# Kartenzahlung} other {# Kartenzahlungen}}',
@@ -4442,7 +4544,7 @@ export const messages = {
 	'tax.kpi.cardExcludedSub': 'Ohne {amount} per Karte gezahlt – der Abwickler meldet dies auf dem 1099-K',
 	'tax.kpi.reportableOver': 'Meldepflichtig (1099 + über ${threshold})',
 	'tax.kpi.reportableWithoutW9': 'Meldepflichtig ohne W-9',
-	'tax.kpi.totalReportable': 'Gesamt meldepflichtig',
+	'tax.kpi.totalReportable': 'Gesamt auf Pflicht-1099',
 	'tax.kpi.vendorsWithPayments': 'Lieferanten mit Zahlungen',
 	'tax.loadingReport': '1099-Bericht für {year} wird geladen…',
 	'tax.reportMeta': 'Bericht erstellt am {generated}. Meldepflichtig = 1099-berechtigte Lieferanten, an die im Jahr {year} mehr als ${threshold} in abgeschlossenen Zahlungen gezahlt wurde.',
@@ -4650,6 +4752,35 @@ export const messages = {
 	'glChartRefusal.pickActive':
 		'Wählen Sie ein aktives Konto aus dem eigenen Kontenplan der Rechnung – den gemeinsamen Konten plus denen ihrer Einheit.',
 	'glChartRefusal.onLines': 'Positionen: {reasons}',
+	// The coded money-path / MFA refusals (`api/codedRefusals.ts`), stated from
+	// their code + params. Money params arrive formatted with their currency.
+	'refusal.approvalSegregation': "Funktionstrennung: Wer an der Erstellung dieser Rechnung beteiligt war, darf sie nicht auch freigeben.",
+	'refusal.approvalLevelReuse': "Sie haben bereits eine frühere Stufe dieser Freigabekette freigegeben; eine andere Person muss freigeben.",
+	'refusal.approvalNotNamedApprover': "Sie sind für diesen Schritt nicht als Freigebende(r) berechtigt.",
+	'refusal.approvalMaxExceeded': "Der Rechnungsbetrag {amount} übersteigt den zulässigen Höchstbetrag {limit}.",
+	'refusal.approvalMaxMisconfigured': "Der Freigabeschritt dieses Workflows hat einen unbrauchbaren maximalen Rechnungsbetrag. Die Freigabe ist gesperrt, bis ein Admin die Workflow-Definition korrigiert.",
+	'refusal.approvalCfoRequired': "Der Rechnungsbetrag {amount} übersteigt {limit}. CFO-Freigabe erforderlich.",
+	'refusal.approvalCfoRequiredUnknownLimit': "Der Rechnungsbetrag {amount} übersteigt das konfigurierte Limit. CFO-Freigabe erforderlich.",
+	'refusal.gateStructuring': "Diese Rechnung allein liegt unter dem Schwellenwert, zusammen mit {recent} aus anderen aktuellen Rechnungen dieses Lieferanten ({days, plural, one {letzter # Tag} other {letzte # Tage}}) ergibt sie jedoch {aggregate}.",
+	'refusal.gateInexpressible': "Diese Rechnung konnte nicht in {currency} ausgedrückt werden, der Währung des Limits, und kann daher nicht dagegen geprüft werden.",
+	'refusal.gateMeasured': "Gemessen als {measured} – das Limit ist in {currency} festgelegt.",
+	'refusal.expenseCfoRequired': "Die Spesenabrechnung über {amount} übersteigt {limit}. CFO-Freigabe erforderlich.",
+	'refusal.expenseCfoRequiredUnknownLimit': "Die Spesenabrechnung über {amount} übersteigt das konfigurierte Limit. CFO-Freigabe erforderlich.",
+	'refusal.expenseCfoInexpressible': "Die Summe der Spesenabrechnung kann nicht in {currency} ausgedrückt werden (kein Kurs von {reportCurrency}) und daher nicht gegen das Limit von {limit} geprüft werden. CFO-Freigabe erforderlich.",
+	'refusal.expenseCfoInexpressibleUnknownLimit': "Die Summe der Spesenabrechnung kann nicht in {currency} ausgedrückt werden (kein Kurs von {reportCurrency}) und daher nicht gegen das konfigurierte Limit geprüft werden. CFO-Freigabe erforderlich.",
+	'refusal.exceptionSegregationRaiser': "Funktionstrennung: Wer diese Ausnahme durch die eigene Aktion ausgelöst hat, darf sie nicht auch auflösen. Eskalieren Sie sie oder bitten Sie eine andere Person um die Entscheidung.",
+	'refusal.exceptionSegregationImplicated': "Funktionstrennung: Wer an der Erstellung dieser Rechnung beteiligt war, darf keine Ausnahme auflösen, die ihre Zahlung blockiert. Eskalieren Sie sie oder bitten Sie eine andere Person um die Entscheidung.",
+	'refusal.creditMemoVendorMismatch': "Der Lieferant der Gutschrift stimmt nicht mit dem Lieferanten der Rechnung überein.",
+	'refusal.creditMemoVendorUnresolved': "Die Rechnung hat keinen verknüpften Lieferanten, daher kann der Lieferant der Gutschrift nicht geprüft werden. Klären Sie zuerst den Lieferanten der Rechnung (speichern Sie ihn in der Rechnung erneut) und wenden Sie dann die Gutschrift an.",
+	'refusal.creditMemoEntityMismatch': "Gutschrift und Rechnung gehören zu unterschiedlichen Einheiten; eine Gutschrift kann keine Verbindlichkeit einer anderen Tochtergesellschaft mindern.",
+	'refusal.creditMemoCurrencyMismatch': "Die Währung der Gutschrift stimmt nicht mit der Währung der Rechnung überein.",
+	'refusal.creditMemoInvoiceSettled': "Die Rechnung hat den Status {status}: Es wird keine Zahlung mehr darauf geleistet, eine angewendete Gutschrift würde also nichts mindern. Lassen Sie die Gutschrift offen und wenden Sie sie auf die nächste Rechnung des Lieferanten an.",
+	'refusal.creditMemoNotEditable': "Nur eine offene, nie angewendete Gutschrift kann bearbeitet werden (diese hat den Status {status}).",
+	'refusal.creditMemoNotApplicable': "Eine Gutschrift mit dem Status {status} kann nicht angewendet werden.",
+	'refusal.creditMemoExceedsBalance': "Der Gutschriftsbetrag übersteigt den verbleibenden gutschriftfähigen Saldo der Rechnung ({remaining}).",
+	'refusal.invoiceStaleEdit': "Diese Rechnung wurde geändert, seit Sie sie geladen haben. Laden Sie sie neu und übernehmen Sie Ihre Änderungen erneut.",
+	'refusal.invoiceRequiredFieldsMissing': "Pflichtfelder fehlen: {fields}",
+	'refusal.mfaCodeInvalid': "Dieser Code ist ungültig. Prüfen Sie Ihre Authenticator-App und versuchen Sie es erneut.",
 	'csvImport.result.summary': '{imported} importiert, {skipped} übersprungen',
 	'csvImport.toast.failed': 'Import fehlgeschlagen',
 	'csvImport.toast.partial': '{imported} importiert, {skipped} übersprungen — Details siehe unten',

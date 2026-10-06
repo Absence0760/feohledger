@@ -116,7 +116,73 @@ test.describe('/tax — 1099 box allocation (admin)', () => {
 		await expect(items.nth(2)).toContainText('$300.50');
 
 		// The reconciliation guarantee is stated, not assumed.
-		await expect(panel).toContainText('add up to the total reportable');
+		await expect(panel).toContainText('add up to the total on required 1099s');
+	});
+
+	test('the headline and the panel describe only the forms a vendor must receive', async ({
+		page
+	}) => {
+		// The 2026 law firm: $800 of attorney proceeds (MISC-10, $600 threshold)
+		// and $1,000 of fees (NEC-1, $2,000 threshold) — a MISC only. The backend
+		// derives the summary from the required form's boxes (pytest pins that:
+		// `test_total_reportable_counts_only_boxes_on_required_forms`); what is
+		// under test here is that the page labels the figure for what it is and
+		// keeps the vendor's own row whole.
+		const misc10 = {
+			box: 'MISC-10',
+			form_type: '1099-MISC',
+			box_number: '10',
+			label: 'Gross proceeds paid to an attorney',
+			amount: '800.00',
+			payment_count: 1,
+			fallback: false
+		};
+		const nec1 = { ...BOXES[0], amount: '1000.00', payment_count: 1, fallback: false };
+		await page.route('**/api/tax/1099-report**', async (route) => {
+			const resp = await route.fetch();
+			const body = await resp.json();
+			Object.assign(body, {
+				box_allocations: [misc10],
+				total_reportable: '800.00',
+				total_reportable_usd: '800.00',
+				vendor_count_eligible_over_threshold: 1,
+				total_unmapped: '0',
+				unmapped_payment_count: 0,
+				box_unallocated: '0.00',
+				box_allocation_reconciled: true
+			});
+			body.rows = body.rows.map((r: Json, i: number) =>
+				i === 0
+					? {
+							...r,
+							is_1099_eligible: true,
+							over_threshold: true,
+							ytd_paid: '1800.00',
+							payment_count: 2,
+							box_allocations: [nec1, misc10],
+							unmapped_paid: '0',
+							unmapped_payment_count: 0,
+							box_unallocated: '0.00',
+							required_forms: ['1099-MISC']
+						}
+					: { ...r, box_allocations: [], box_unallocated: '0.00', required_forms: [] }
+			);
+			await route.fulfill({ response: resp, json: body });
+		});
+		await page.goto('/tax');
+
+		const kpi = page.locator('.kpi', { hasText: 'Total on required 1099s' });
+		await expect(kpi.locator('.kpi-value')).toHaveText('$800.00', { timeout: 10_000 });
+
+		const panel = page.locator('.box-panel');
+		await expect(panel).toContainText('is not required to receive is not counted');
+		await expect(panel.locator('.box-item')).toHaveCount(1);
+		await expect(panel.locator('.box-item').first()).toContainText('MISC-10');
+		await expect(panel).toContainText('add up to the total on required 1099s');
+
+		// The vendor's own row still shows every box it was paid into.
+		const split = page.locator('.grid-container tbody tr').first().locator('.box-split');
+		await expect(split.locator('.box-split-item')).toHaveCount(2);
 	});
 
 	test('fallback money is called out with the box it landed in', async ({ page }) => {

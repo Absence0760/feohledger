@@ -138,6 +138,17 @@ class _WarningTile extends StatelessWidget {
   }
 }
 
+/// The PO-match status word in the reader's language. It was an English
+/// getter on the model (`PoMatch.statusLabel`), so the panel read "Mismatch"
+/// beside a translated title.
+String poMatchStatusLabel(AppLocalizations l, String status) =>
+    switch (status) {
+      'matched' => l.warningsPoMatchStatusMatched,
+      'mismatch' => l.warningsPoMatchStatusMismatch,
+      'partial' => l.warningsPoMatchStatusPartial,
+      _ => l.warningsPoMatchStatusNoPo,
+    };
+
 class _PoMatchTile extends StatelessWidget {
   final PoMatch match;
   const _PoMatchTile({required this.match});
@@ -166,15 +177,19 @@ class _PoMatchTile extends StatelessWidget {
             '${variance >= 0 ? '+' : ''}${variance.toStringAsFixed(1)}')
         : null;
 
+    final statusLabel = poMatchStatusLabel(l, match.status);
+    // Localized like the warnings above, so the panel never shows a German
+    // finding over an English issue; a pre-catalogue string renders as is.
+    final issues = [for (final i in match.issues) findingText(l, i)];
     final summary = [
       l.warningsMatchLabel(match.matchType),
-      match.statusLabel,
+      statusLabel,
       ?varianceText,
     ].join(', ');
 
     return Semantics(
-      label: 'PO match: $summary'
-          '${match.issues.isNotEmpty ? '. ${match.issues.join('. ')}' : ''}',
+      label: l.warningsPoMatchAnnouncement(summary) +
+          (issues.isNotEmpty ? '. ${issues.join('. ')}' : ''),
       excludeSemantics: true,
       child: Container(
         width: double.infinity,
@@ -201,7 +216,7 @@ class _PoMatchTile extends StatelessWidget {
                 ),
                 const SizedBox(width: 8),
                 Text(
-                  match.statusLabel,
+                  statusLabel,
                   style: TextStyle(color: style.fg, fontSize: 13),
                 ),
                 const Spacer(),
@@ -216,9 +231,9 @@ class _PoMatchTile extends StatelessWidget {
                   ),
               ],
             ),
-            if (match.issues.isNotEmpty) ...[
+            if (issues.isNotEmpty) ...[
               const SizedBox(height: 6),
-              for (final issue in match.issues)
+              for (final issue in issues)
                 Padding(
                   padding: const EdgeInsets.only(top: 2),
                   child: Text(

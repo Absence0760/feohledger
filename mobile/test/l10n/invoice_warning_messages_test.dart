@@ -4,6 +4,7 @@ import 'package:feohledger_mobile/l10n/gen/app_localizations.dart';
 import 'package:feohledger_mobile/l10n/gen/app_localizations_de.dart';
 import 'package:feohledger_mobile/l10n/gen/app_localizations_en.dart';
 import 'package:feohledger_mobile/l10n/invoice_warning_messages.dart';
+import 'package:feohledger_mobile/models/exception.dart';
 import 'package:feohledger_mobile/models/invoice.dart';
 import 'package:feohledger_mobile/utils/format_locale.dart';
 
@@ -269,5 +270,91 @@ void main() {
       );
       expect(text, isNot('server english'), reason: l.localeName);
     }
+  });
+
+  group('exception descriptions (migration 0103)', () {
+    ApException exc(Map<String, dynamic> extra) => ApException.fromJson({
+          'id': 'e1',
+          'exception_type': 'price_variance',
+          'severity': 'warning',
+          'status': 'open',
+          'created_at': '2026-01-01T00:00:00',
+          ...extra,
+        });
+
+    test('a human-written description (no code) renders as written', () {
+      final out = exceptionDescriptionText(
+        de,
+        exc({'description': 'Wrong PO, please resubmit'}),
+      );
+      expect(out?.summary, 'Wrong PO, please resubmit');
+      expect(out?.findings, isEmpty);
+    });
+
+    test('a coded single finding takes the warning wording, no hardcoded \$',
+        () {
+      final out = exceptionDescriptionText(
+        de,
+        exc({
+          'description': 'Round amount: 5000.00 ZAR',
+          'description_code': 'round_amount',
+          'description_params': {'amount': '5000.00', 'currency': 'ZAR'},
+        }),
+      );
+      expect(out?.summary, startsWith('Runder Betrag'));
+      expect(out?.summary, isNot(contains(r'$')));
+    });
+
+    test('a composite lists each finding, localized or its own English', () {
+      final out = exceptionDescriptionText(
+        de,
+        exc({
+          'description': 'joined fallback',
+          'description_code': 'exception.price_variance_findings',
+          'description_params': {
+            'count': 2,
+            'findings': [
+              {
+                'code': 'price_variance_over',
+                'params': {
+                  'deltaPct': '+20.0',
+                  'item': 'Widget',
+                  'unitPrice': '12.00',
+                  'baselineUnitPrice': '10.00',
+                  'currency': 'ZAR',
+                },
+                'message': 'english line',
+              },
+              {'code': 'from_the_future', 'params': {}, 'message': 'own'},
+            ],
+          },
+        }),
+      );
+      expect(out?.summary, contains('2 Positionen'));
+      expect(out?.findings, hasLength(2));
+      expect(out?.findings.first, startsWith('Einzelpreis'));
+      expect(out?.findings.last, 'own');
+    });
+
+    test('an unknown frame falls back whole, without a duplicate list', () {
+      final out = exceptionDescriptionText(
+        en,
+        exc({
+          'description': 'Frame from the future: A; B',
+          'description_code': 'exception.from_the_future',
+          'description_params': {
+            'findings': [
+              {'code': 'past_due', 'params': {}, 'message': 'A'},
+            ],
+          },
+        }),
+      );
+      expect(out?.summary, 'Frame from the future: A; B');
+      expect(out?.findings, isEmpty);
+    });
+
+    test('nothing to show is null', () {
+      expect(exceptionDescriptionText(en, exc({})), isNull);
+    });
   });
 }

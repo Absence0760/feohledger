@@ -143,3 +143,15 @@ export function invoiceWarningText(w: LocalizableWarning, translate: Translate):
 	const localized = localizeInvoiceWarning(w);
 	return localized ? translate(localized.key, localized.params) : w.message;
 }
+
+/**
+ * One `po_match.issues` entry, localized. Since the catalogue gained its
+ * `po_match.issue.*` family an entry is a `{code, params, message}` finding —
+ * but a match persisted BEFORE that is a list of bare English strings, and
+ * nothing backfills it (the next `refresh_warnings` re-derives the row). A
+ * string is therefore rendered as written: the normal path for an untouched
+ * invoice, not an error.
+ */
+export function poMatchIssueText(issue: string | LocalizableWarning, translate: Translate): string {
+	return typeof issue === 'string' ? issue : invoiceWarningText(issue, translate);
+}

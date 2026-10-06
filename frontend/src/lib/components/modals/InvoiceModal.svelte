@@ -7,6 +7,7 @@
 	import { auth } from '#lib/stores/auth.svelte.ts';
 	import { adminStore } from '#lib/stores/admin.svelte.ts';
 	import { api, ApiError } from '#lib/api.ts';
+	import { INVOICE_REQUIRED_FIELDS_MISSING, INVOICE_STALE_EDIT } from '#lib/api/codedRefusals.ts';
 	import { createRequestSequencer } from '#lib/utils/requestSequence.ts';
 	import { toast } from '#lib/components/ui/Toast.svelte';
 	import RowAction from '#lib/components/ui/RowAction.svelte';
@@ -14,7 +15,7 @@
 	import Badge from '#lib/components/ui/Badge.svelte';
 	import type { BadgeTone } from '#lib/components/ui/badgeTone.ts';
 	import { m } from '#lib/i18n/store.svelte.ts';
-	import { invoiceWarningText } from '#lib/api/invoiceWarnings.ts';
+	import { invoiceWarningText, poMatchIssueText } from '#lib/api/invoiceWarnings.ts';
 	import { formatDate } from '#lib/utils/time.ts';
 	import { formatList } from '#lib/utils/list.ts';
 	import type { MessageKey } from '#lib/i18n/messages.ts';
@@ -698,13 +699,14 @@
 	 * when `err` is the backend's stale-`expected_updated_at` 409: another user
 	 * saved this invoice after this modal loaded it. Distinguished from the
 	 * PATCH endpoint's OTHER 409s (immutable status, financially-locked fields)
-	 * by the backend's own detail text — same substring-match convention
-	 * `submitDone()`'s catch below already uses to tell a validation 409 apart
-	 * from a generic failure.
+	 * by the refusal's CODE, never its text: the text is localized at the
+	 * transport (`api/codedRefusals.ts`), so the English substring this used to
+	 * match was absent in five locales and a reworded server sentence would
+	 * have silently dropped the reload prompt in the sixth.
 	 */
 	function handleStaleConflict(err: unknown): boolean {
 		if (!(err instanceof ApiError) || err.status !== 409) return false;
-		if (!err.message.toLowerCase().includes('modified since you loaded it')) return false;
+		if (err.code !== INVOICE_STALE_EDIT) return false;
 		if (confirm(m('invoices.modal.staleConflict.confirm'))) {
 			// Discard this modal's stale edits and let the host reopen it fresh —
 			// nothing in this modal re-fetches a single invoice by id.
@@ -750,11 +752,10 @@
 			onclose();
 		} catch (err) {
 			if (handleStaleConflict(err)) return;
-			const msg = err instanceof Error ? err.message : m('invoices.modal.toast.submitFailed');
-			// Don't toast field validation errors — the form highlights them already
-			if (!msg.toLowerCase().includes('missing') && !msg.toLowerCase().includes('required field')) {
-				toast(msg, 'error');
-			}
+			// Don't toast the required-fields refusal — the form highlights those
+			// fields already. Keyed on the code, not the (localized) text.
+			if (err instanceof ApiError && err.code === INVOICE_REQUIRED_FIELDS_MISSING) return;
+			toast(err instanceof Error ? err.message : m('invoices.modal.toast.submitFailed'), 'error');
 		} finally {
 			submitting = false;
 		}
@@ -2149,9 +2150,13 @@
 								</div>
 							{/if}
 							{#if pm.issues.length > 0}
+								<!-- Localized like the warnings list above it, so the
+								     panel never shows a German finding over an English
+								     issue. A string entry is a match persisted before
+								     issues carried codes, and renders as written. -->
 								<ul class="po-match-issues">
 									{#each pm.issues as issue}
-										<li>{issue}</li>
+										<li>{poMatchIssueText(issue, m)}</li>
 									{/each}
 								</ul>
 							{/if}

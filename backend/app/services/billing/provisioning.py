@@ -46,6 +46,7 @@ from app.models.organization import Organization
 from app.models.user import User
 from app.services.billing_adapters import get_billing_adapter
 from app.services.billing_adapters.base import BillingAdapter
+from app.tenant import lock_organization
 
 logger = logging.getLogger(__name__)
 
@@ -119,7 +120,22 @@ async def provision_org_billing(
         mutated = True
 
     if mutated:
-        settings_dict["billing"] = billing
+        # The adapter calls above are network round trips, so the row is locked
+        # only now, and the ids are merged into what is stored THEN rather than
+        # written back over the snapshot read before them — a settings writer
+        # that committed meanwhile (`lock_organization`) is kept. An id a
+        # concurrent provisioning stored first wins; the provider calls are
+        # idempotent, so ours names the same object.
+        org = await lock_organization(control_db, org)
+        settings_dict = dict(org.settings or {})
+        stored = dict(settings_dict.get("billing") or {})
+        stored.setdefault("stripe_customer_id", customer_id)
+        stored_prices = dict(stored.get("plan_price_ids") or {})
+        stored_prices.setdefault(plan.code, price_id)
+        stored["plan_price_ids"] = stored_prices
+        customer_id = stored["stripe_customer_id"]
+        price_id = stored_prices[plan.code]
+        settings_dict["billing"] = stored
         org.settings = settings_dict
         flag_modified(org, "settings")
         await control_db.commit()

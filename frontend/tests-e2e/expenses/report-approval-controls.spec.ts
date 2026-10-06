@@ -279,6 +279,64 @@ test.describe('/expenses — WF3 report approval controls', () => {
 		}
 	});
 
+	// --- Only the owner composes or submits ---------------------------------
+
+	test('a manager is not offered Submit / Attach / Detach on a clerk-owned draft', async ({
+		page,
+		tenantManager,
+		tenantClerk
+	}) => {
+		// Report segregation refuses only the OWNER at approval, so composing or
+		// submitting is the owner's alone (403 `expense_report_not_owner`). The
+		// page must not offer a manager controls the server will refuse — and the
+		// server must refuse them when called anyway.
+		const reportNumber = `E2E-OWN-${Date.now()}`;
+		let reportId: string | null = null;
+		let expenseId: string | null = null;
+		try {
+			const clerkH = await roleHeaders(page, tenantClerk);
+			const expResp = await page.request.post(`${API_BASE}/api/expenses`, {
+				headers: clerkH,
+				data: { merchant: `E2E Own ${Date.now()}`, amount: '40.00', currency: 'USD', expense_date: '2026-03-01' }
+			});
+			expect(expResp.status()).toBe(201);
+			expenseId = ((await expResp.json()) as Created).id;
+			const rptResp = await page.request.post(`${API_BASE}/api/expense-reports`, {
+				headers: clerkH,
+				data: { report_number: reportNumber, title: 'Owner only', currency: 'USD' }
+			});
+			expect(rptResp.status()).toBe(201);
+			reportId = ((await rptResp.json()) as Created).id;
+			const attach = await page.request.post(
+				`${API_BASE}/api/expense-reports/${reportId}/expenses`,
+				{ headers: clerkH, data: { expense_ids: [expenseId], detach: false } }
+			);
+			expect(attach.status()).toBe(200);
+
+			const managerH = await roleHeaders(page, tenantManager);
+			const submit = await page.request.post(
+				`${API_BASE}/api/expense-reports/${reportId}/submit`,
+				{ headers: managerH, data: {} }
+			);
+			expect(submit.status()).toBe(403);
+			expect(((await submit.json()) as { detail: { code: string } }).detail.code).toBe(
+				'expense_report_not_owner'
+			);
+
+			await actAsInUi(page, tenantManager);
+			await page.getByRole('button', { name: `Open report ${reportNumber}` }).click();
+			await expect(page.locator('.report-title-block .badge')).toHaveText('Draft');
+			// The row is rendered (positive anchor) before the absence assertions.
+			await expect(page.locator('.report-detail tbody tr')).toHaveCount(1);
+			await expect(page.getByRole('button', { name: 'Submit', exact: true })).toHaveCount(0);
+			await expect(page.locator('.attach-row')).toHaveCount(0);
+			await expect(page.locator('.report-detail tbody .actions button')).toHaveCount(0);
+		} finally {
+			if (reportId) deleteReport(reportId);
+			if (expenseId) deleteExpense(expenseId);
+		}
+	});
+
 	// --- Reject returns children to draft -----------------------------------
 
 	test('rejecting a submitted report returns its child expenses to draft', async ({

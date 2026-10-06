@@ -327,6 +327,8 @@ def test_exception_payload_round_trips_a_cent_precise_amount():
         exception_type="duplicate",
         severity="high",
         description="d",
+        description_code=None,
+        description_params=None,
         status="open",
         resolution=None,
         resolved_by=None,

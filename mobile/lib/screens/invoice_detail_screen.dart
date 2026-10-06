@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import 'package:feohledger_mobile/api/api_client.dart';
 import 'package:feohledger_mobile/api/endpoints.dart';
+import 'package:feohledger_mobile/l10n/coded_refusal_messages.dart';
 import 'package:feohledger_mobile/l10n/gen/app_localizations.dart';
 import 'package:feohledger_mobile/l10n/gl_chart_refusal_messages.dart';
 import 'package:feohledger_mobile/models/audit_entry.dart';
@@ -143,7 +144,14 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
         await _load();
         _showSnack(l.invoiceDetailApproved);
       } else {
-        _showSnack(l.invoiceDetailApproveFailed);
+        // A coded refusal (segregation of duties, the CFO / max-amount gate,
+        // the named-approver gate) is the reason the approver has to act on —
+        // retrying changes nothing — so it is stated in the reader's language
+        // from its code. Anything else keeps the generic retry message.
+        _showSnack(
+          localizeCodedRefusal(l, InvoiceStore.instance.approveErrorDetail) ??
+              l.invoiceDetailApproveFailed,
+        );
       }
     } finally {
       if (mounted) setState(() => _submitting = false);

@@ -46,6 +46,7 @@ from app.schemas.scim import (
 )
 from app.services import scim_groups
 from app.services.sso import hash_scim_token
+from app.tenant import lock_organization
 from app.utils.emails import email_matches, normalize_email
 
 logger = logging.getLogger(__name__)
@@ -564,6 +565,8 @@ async def create_group(
     org: Organization = Depends(get_scim_tenant),
     db: AsyncSession = Depends(get_control_db),
 ):
+    # Serialise with every other settings writer (`tenant.lock_organization`).
+    org = await lock_organization(db, org)
     groups = scim_groups.get_groups(org.settings)
     # Idempotency: a group with the same displayName already exists → 409.
     if any(d.get("displayName") == body.displayName for d in groups.values()):
@@ -596,6 +599,8 @@ async def replace_group(
     org: Organization = Depends(get_scim_tenant),
     db: AsyncSession = Depends(get_control_db),
 ):
+    # Serialise with every other settings writer (`tenant.lock_organization`).
+    org = await lock_organization(db, org)
     groups = scim_groups.get_groups(org.settings)
     data = groups.get(group_id)
     if data is None:
@@ -625,6 +630,8 @@ async def patch_group(
     org: Organization = Depends(get_scim_tenant),
     db: AsyncSession = Depends(get_control_db),
 ):
+    # Serialise with every other settings writer (`tenant.lock_organization`).
+    org = await lock_organization(db, org)
     groups = scim_groups.get_groups(org.settings)
     data = groups.get(group_id)
     if data is None:
@@ -651,6 +658,8 @@ async def delete_group(
     org: Organization = Depends(get_scim_tenant),
     db: AsyncSession = Depends(get_control_db),
 ):
+    # Serialise with every other settings writer (`tenant.lock_organization`).
+    org = await lock_organization(db, org)
     groups = scim_groups.get_groups(org.settings)
     data = groups.pop(group_id, None)
     if data is None:

@@ -1,6 +1,5 @@
 // ignore: unused_import
 import 'package:intl/intl.dart' as intl;
-
 import 'app_localizations.dart';
 
 // ignore_for_file: type=lint
@@ -605,6 +604,68 @@ class AppLocalizationsJa extends AppLocalizations {
   String glChartRefusalOnLines(String reasons) {
     return '明細行: $reasons';
   }
+
+  @override
+  String get codedRefusalApprovalSegregation =>
+      '職務分掌：この請求書の作成に関与したユーザーは、承認することもできません。';
+
+  @override
+  String get codedRefusalApprovalLevelReuse =>
+      'このチェーンの前のレベルをすでに承認しています。別の承認者が必要です。';
+
+  @override
+  String get codedRefusalApprovalNotNamedApprover => 'このステップの承認者として認められていません。';
+
+  @override
+  String codedRefusalApprovalMaxExceeded(String amount, String limit) {
+    return '請求額 $amount が上限額 $limit を超えています。';
+  }
+
+  @override
+  String get codedRefusalApprovalMaxMisconfigured =>
+      'このワークフローの承認ステップの請求書上限額が使用できない値です。管理者がワークフロー定義を修正するまで承認はできません。';
+
+  @override
+  String codedRefusalApprovalCfoRequired(String amount, String limit) {
+    return '請求額 $amount が $limit を超えています。CFO の承認が必要です。';
+  }
+
+  @override
+  String codedRefusalApprovalCfoRequiredUnknownLimit(String amount) {
+    return '請求額 $amount が設定された上限を超えています。CFO の承認が必要です。';
+  }
+
+  @override
+  String codedRefusalGateStructuring(
+    String recent,
+    int days,
+    String aggregate,
+  ) {
+    String _temp0 = intl.Intl.pluralLogic(
+      days,
+      locale: localeName,
+      other: '過去 $days 日間',
+    );
+    return 'この請求書単体ではしきい値未満ですが、この仕入先の最近の他の請求書（$_temp0）の $recent と合わせると $aggregate になります。';
+  }
+
+  @override
+  String codedRefusalGateInexpressible(String currency) {
+    return 'この請求書は上限の通貨である $currency で表せないため、上限と照合できません。';
+  }
+
+  @override
+  String codedRefusalGateMeasured(String measured, String currency) {
+    return '$measured として測定しました。上限は $currency で設定されています。';
+  }
+
+  @override
+  String get codedRefusalExceptionSegregationRaiser =>
+      '職務分掌：この例外を発生させた操作のユーザーは、解消することもできません。エスカレーションするか、別のユーザーに判断を依頼してください。';
+
+  @override
+  String get codedRefusalExceptionSegregationImplicated =>
+      '職務分掌：この請求書の作成に関与したユーザーは、その支払いを止めている例外を解消できません。エスカレーションするか、別のユーザーに判断を依頼してください。';
 
   @override
   String get invoiceDetailApproved => '請求書を承認しました';
@@ -2706,5 +2767,120 @@ class AppLocalizationsJa extends AppLocalizations {
   @override
   String invoiceWarningGlCodeStalePrior(String code) {
     return 'この仕入先のキャッシュされた勘定科目「$code」は有効な勘定科目表にありません。';
+  }
+
+  @override
+  String invoicePoMatchIssuePoNotFound(String poNumber) {
+    return '発注 $poNumber が見つかりません';
+  }
+
+  @override
+  String invoicePoMatchIssueCurrencyMismatch(
+    String invoiceCurrency,
+    String poCurrency,
+  ) {
+    return '通貨の不一致: 請求は $invoiceCurrency、発注は $poCurrency — 金額は比較されていません';
+  }
+
+  @override
+  String invoicePoMatchIssueAmountMismatch(
+    String invoiceAmount,
+    String poTotal,
+    String variancePct,
+  ) {
+    return '金額の不一致: 請求 $invoiceAmount / 発注 $poTotal（$variancePct）';
+  }
+
+  @override
+  String invoicePoMatchIssueAmountMismatchPoCurrencyUnknown(
+    String invoiceAmount,
+    String poTotal,
+    String variancePct,
+  ) {
+    return '金額の不一致: 請求 $invoiceAmount / 発注 $poTotal（$variancePct）';
+  }
+
+  @override
+  String invoicePoMatchIssueAmountMismatchCurrencyUnknown(
+    String invoiceAmount,
+    String poTotal,
+    String variancePct,
+  ) {
+    return '金額の不一致: 請求 $invoiceAmount / 発注 $poTotal（$variancePct）';
+  }
+
+  @override
+  String invoicePoMatchIssuePartialReceipt(String receivedPct) {
+    return '一部入荷: 発注数量の $receivedPct を入荷';
+  }
+
+  @override
+  String invoicePoMatchIssueOverReceipt(
+    String receivedQuantity,
+    String orderedQuantity,
+    String excessQuantity,
+  ) {
+    return '過剰入荷: 発注 $orderedQuantity に対し $receivedQuantity 入荷（+$excessQuantity）';
+  }
+
+  @override
+  String get invoicePoMatchIssueInspectionFailed => '品質検査不合格';
+
+  @override
+  String invoicePoMatchIssueInspectionFailedNotes(String notes) {
+    return '品質検査不合格: $notes';
+  }
+
+  @override
+  String invoicePoMatchIssuePartialAcceptance(String acceptedQuantity) {
+    return '一部受入: 発注数量のうち $acceptedQuantity を受入';
+  }
+
+  @override
+  String get invoicePoMatchIssuePartialAcceptanceUnquantified =>
+      '一部受入: 発注数量の一部を受入';
+
+  @override
+  String get invoicePoMatchIssueInspectionRequiredMissing => '品質検査が必要ですが未実施です';
+
+  @override
+  String get exceptionDescriptionMissingDataAfterExtraction =>
+      '抽出後も必須項目が不足しています';
+
+  @override
+  String exceptionDescriptionPriceVarianceFindings(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count件の明細',
+    );
+    return '$_temp0で仕入先履歴との単価差異';
+  }
+
+  @override
+  String exceptionDescriptionContractNoncompliantFindings(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count件',
+    );
+    return '契約遵守に関する指摘 $_temp0';
+  }
+
+  @override
+  String get warningsPoMatchStatusMatched => '一致';
+
+  @override
+  String get warningsPoMatchStatusMismatch => '不一致';
+
+  @override
+  String get warningsPoMatchStatusPartial => '一部';
+
+  @override
+  String get warningsPoMatchStatusNoPo => '発注なし';
+
+  @override
+  String warningsPoMatchAnnouncement(String summary) {
+    return '発注照合: $summary';
   }
 }

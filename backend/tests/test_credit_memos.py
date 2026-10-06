@@ -336,7 +336,9 @@ async def test_apply_already_applied_409(realdb):
         # Re-applying an already-applied memo is a conflict, not a re-write.
         second = await c.post(f"/api/credit-memos/{memo_id}/apply", json={"invoice_id": invoice_id})
     assert second.status_code == 409
-    assert "applied" in second.json()["detail"]
+    assert second.json()["detail"]["code"] == "credit_memo_not_applicable"
+    assert second.json()["detail"]["params"] == {"status": "applied"}
+    assert "applied" in second.json()["detail"]["message"]
 
 
 async def test_apply_vendor_mismatch_409(realdb):
@@ -354,7 +356,8 @@ async def test_apply_vendor_mismatch_409(realdb):
             json={"invoice_id": invoice_id},
         )
     assert resp.status_code == 409
-    assert resp.json()["detail"] == "Credit memo vendor does not match invoice vendor"
+    assert resp.json()["detail"]["code"] == "credit_memo_vendor_mismatch"
+    assert resp.json()["detail"]["message"] == "Credit memo vendor does not match invoice vendor"
 
 
 async def test_apply_currency_mismatch_409(realdb):
@@ -382,7 +385,8 @@ async def test_apply_currency_mismatch_409(realdb):
             json={"invoice_id": invoice_id},
         )
     assert resp.status_code == 409, resp.text
-    assert "currency" in resp.json()["detail"].lower()
+    assert resp.json()["detail"]["code"] == "credit_memo_currency_mismatch"
+    assert "currency" in resp.json()["detail"]["message"].lower()
 
 
 async def test_create_with_invoice_currency_mismatch_409(realdb):
@@ -407,7 +411,8 @@ async def test_create_with_invoice_currency_mismatch_409(realdb):
             },
         )
     assert resp.status_code == 409, resp.text
-    assert "currency" in resp.json()["detail"].lower()
+    assert resp.json()["detail"]["code"] == "credit_memo_currency_mismatch"
+    assert "currency" in resp.json()["detail"]["message"].lower()
 
 
 async def test_apply_invoice_without_vendor_refused(realdb):
@@ -431,7 +436,8 @@ async def test_apply_invoice_without_vendor_refused(realdb):
             json={"invoice_id": invoice_id},
         )
     assert resp.status_code == 409, resp.text
-    assert "no linked vendor" in resp.json()["detail"]
+    assert resp.json()["detail"]["code"] == "credit_memo_vendor_unresolved"
+    assert "no linked vendor" in resp.json()["detail"]["message"]
 
     # The memo stayed open — nothing was credited.
     async with mk() as s:
@@ -476,7 +482,8 @@ async def test_apply_manually_created_invoice_of_other_vendor_refused(realdb):
             json={"invoice_id": invoice_id},
         )
     assert resp.status_code == 409, resp.text
-    assert resp.json()["detail"] == "Credit memo vendor does not match invoice vendor"
+    assert resp.json()["detail"]["code"] == "credit_memo_vendor_mismatch"
+    assert resp.json()["detail"]["message"] == "Credit memo vendor does not match invoice vendor"
 
     async with mk() as s:
         memo = (await s.execute(select(CreditMemo))).scalar_one()
@@ -532,7 +539,8 @@ async def test_create_applied_memo_against_unlinked_invoice_refused(realdb):
             },
         )
     assert resp.status_code == 409, resp.text
-    assert "no linked vendor" in resp.json()["detail"]
+    assert resp.json()["detail"]["code"] == "credit_memo_vendor_unresolved"
+    assert "no linked vendor" in resp.json()["detail"]["message"]
 
     # Nothing was persisted — the guard runs before the memo row is added.
     async with mk() as s:
@@ -588,7 +596,8 @@ async def test_clearing_the_vendor_name_clears_the_link_and_blocks_the_credit(re
 
         resp = await c.post(f"/api/credit-memos/{memo_id}/apply", json={"invoice_id": invoice_id})
     assert resp.status_code == 409, resp.text
-    assert "no linked vendor" in resp.json()["detail"]
+    assert resp.json()["detail"]["code"] == "credit_memo_vendor_unresolved"
+    assert "no linked vendor" in resp.json()["detail"]["message"]
 
 
 async def test_renaming_the_vendor_relinks_and_blocks_the_stale_memo(realdb):
@@ -609,7 +618,8 @@ async def test_renaming_the_vendor_relinks_and_blocks_the_stale_memo(realdb):
 
         resp = await c.post(f"/api/credit-memos/{memo_id}/apply", json={"invoice_id": invoice_id})
     assert resp.status_code == 409, resp.text
-    assert resp.json()["detail"] == "Credit memo vendor does not match invoice vendor"
+    assert resp.json()["detail"]["code"] == "credit_memo_vendor_mismatch"
+    assert resp.json()["detail"]["message"] == "Credit memo vendor does not match invoice vendor"
 
 
 # ---------------------------------------------------------------------------
@@ -1037,7 +1047,8 @@ async def test_explicit_currency_still_wins_and_still_guards(realdb):
             },
         )
     assert resp.status_code == 409, resp.text
-    assert "currency" in resp.json()["detail"].lower()
+    assert resp.json()["detail"]["code"] == "credit_memo_currency_mismatch"
+    assert "currency" in resp.json()["detail"]["message"].lower()
 
 
 # ---------------------------------------------------------------------------
@@ -1321,7 +1332,8 @@ async def test_create_refuses_to_credit_another_entitys_invoice(realdb):
             },
         )
     assert resp.status_code == 409, resp.text
-    assert "entities" in resp.json()["detail"]
+    assert resp.json()["detail"]["code"] == "credit_memo_entity_mismatch"
+    assert "entities" in resp.json()["detail"]["message"]
     async with realdb.sessionmaker("a")() as s:
         assert (await s.execute(select(func.count()).select_from(CreditMemo))).scalar() == 0
 
@@ -1334,7 +1346,8 @@ async def test_apply_refuses_to_credit_another_entitys_invoice(realdb):
         c.headers.pop("X-Entity-ID")  # consolidated: no header confines the invoice
         resp = await c.post(f"/api/credit-memos/{memo_id}/apply", json={"invoice_id": a_invoice})
     assert resp.status_code == 409, resp.text
-    assert "entities" in resp.json()["detail"]
+    assert resp.json()["detail"]["code"] == "credit_memo_entity_mismatch"
+    assert "entities" in resp.json()["detail"]["message"]
     async with realdb.sessionmaker("a")() as s:
         memo = await s.get(CreditMemo, uuid.UUID(memo_id))
         assert memo.status == "open" and memo.invoice_id is None
@@ -1442,7 +1455,9 @@ async def test_patch_refused_once_applied_and_leaves_the_record_untouched(realdb
         assert applied.status_code == 200, applied.text
         resp = await c.patch(f"/api/credit-memos/{memo_id}", json={"amount": "400.00"})
     assert resp.status_code == 409, resp.text
-    assert "applied" in resp.json()["detail"]
+    assert resp.json()["detail"]["code"] == "credit_memo_not_editable"
+    assert resp.json()["detail"]["params"] == {"status": "applied"}
+    assert "applied" in resp.json()["detail"]["message"]
     async with mk() as s:
         memo = await s.get(CreditMemo, uuid.UUID(memo_id))
         assert memo.amount == Decimal("40.00")
@@ -1457,7 +1472,8 @@ async def test_patch_refused_on_a_voided_memo(realdb):
         assert (await c.post(f"/api/credit-memos/{memo_id}/void")).status_code == 200
         resp = await c.patch(f"/api/credit-memos/{memo_id}", json={"reason": "undo"})
     assert resp.status_code == 409
-    assert "void" in resp.json()["detail"]
+    assert resp.json()["detail"]["code"] == "credit_memo_not_editable"
+    assert "void" in resp.json()["detail"]["message"]
 
 
 async def test_patch_refused_on_any_trace_of_an_application(realdb):
@@ -1705,7 +1721,12 @@ async def test_apply_reads_the_amount_a_concurrent_edit_committed(realdb):
             resp = await apply
 
     assert resp.status_code == 409, resp.text
-    assert "exceeds" in resp.json()["detail"]
+    assert resp.json()["detail"]["code"] == "credit_memo_exceeds_balance"
+    assert "exceeds" in resp.json()["detail"]["message"]
+    # The balance is named with its currency, as an exact string a client can
+    # format for the reader (`api/refusals.coded_refusal`).
+    assert resp.json()["detail"]["params"] == {"remaining": "500.00", "currency": "USD"}
+    assert "(500.00 USD)" in resp.json()["detail"]["message"]
     async with mk() as s:
         memo = await s.get(CreditMemo, memo_uuid)
         assert memo.status == "open"
@@ -1990,7 +2011,8 @@ async def test_eligible_invoices_are_scoped_like_the_memo_they_describe(realdb):
     assert out_of_entity.json()["detail"] == "Credit memo not found"
     assert vendor_out_of_entity.status_code == 404
     assert voided.status_code == 409
-    assert voided.json()["detail"] == "Cannot apply a credit memo in 'void' status"
+    assert voided.json()["detail"]["code"] == "credit_memo_not_applicable"
+    assert voided.json()["detail"]["message"] == "Cannot apply a credit memo in 'void' status"
     assert unknown.status_code == 404
     assert cross_tenant.status_code == 404
     assert cross_tenant_vendor.status_code == 404
@@ -2121,8 +2143,10 @@ async def test_a_settled_invoice_refuses_a_credit_on_both_paths(realdb):
             )
         for resp in (applied, linked):
             assert resp.status_code == 409, (settled, resp.text)
-            assert resp.json()["detail"].startswith(f"The invoice is '{settled.value}'")
-            assert "next invoice" in resp.json()["detail"]
+            assert resp.json()["detail"]["code"] == "credit_memo_invoice_settled"
+            assert resp.json()["detail"]["params"] == {"status": settled.value}
+            assert resp.json()["detail"]["message"].startswith(f"The invoice is '{settled.value}'")
+            assert "next invoice" in resp.json()["detail"]["message"]
         assert await _memo_count(mk) == before  # the linked create wrote nothing
         async with mk() as s:
             memo = await s.get(CreditMemo, uuid.UUID(memo_id))

@@ -1,7 +1,7 @@
 import { getApiBase, getTenantSlug } from '#lib/tenant.ts';
 import { getSelectedEntityId } from '#lib/entity.ts';
 import { apiErrorCode, formatApiDetail } from '#lib/utils/apiError.ts';
-import { localizeApiDetail } from '#lib/api/glChartRefusal.ts';
+import { localizeApiDetail } from '#lib/api/codedRefusals.ts';
 import { m } from '#lib/i18n/store.svelte.ts';
 
 // Re-exported so callers that already import from `#lib/api` (e.g. the
@@ -25,10 +25,11 @@ export class ApiError extends Error {
 	status: number;
 	/** The refusal's machine-readable code when the backend sent a coded
 	 *  `detail` (`{code, message, params}`), else `null`. `message` is the
-	 *  rendered sentence — localized already for a structured refusal
-	 *  `localizeApiDetail` knows (the GL-chart refusal), otherwise the server's
-	 *  English. Key a translation on this, falling back to `message` for a code
-	 *  this build predates (see `api/authRefusals.ts`). */
+	 *  rendered sentence — localized already for a refusal the
+	 *  `api/codedRefusals.ts` registry knows, otherwise the server's English.
+	 *  BRANCH on this, never on `message`: the message is localized, so a
+	 *  substring match on the English fails in every other locale
+	 *  (`InvoiceModal`'s stale-edit prompt keys on `INVOICE_STALE_EDIT`). */
 	code: string | null;
 	/** The coded refusal's params; empty when there are none. */
 	params: Record<string, unknown>;
@@ -54,7 +55,7 @@ export class ApiError extends Error {
 /**
  * Build the `ApiError` for a non-OK response body. The message is the
  * reader's-language sentence when the `detail` is a structured refusal this
- * build can localize (`api/glChartRefusal.ts::localizeApiDetail`), otherwise
+ * build can localize (`api/codedRefusals.ts::localizeApiDetail`), otherwise
  * `formatApiDetail`'s rendering of whatever the server sent — done HERE, once,
  * so every write path's toast is localized without a per-call-site change
  * (`frontend/CLAUDE.md` § Internationalization). Code / params / raw detail

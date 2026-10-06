@@ -773,6 +773,10 @@ async def test_dsar_include_banking_unmasks_and_writes_its_own_audit_row(realdb)
         details = unmasked[0].details
         assert details["disclosed"] == ["bank_details", "beneficial_owner_data"]
         assert "AP-99" in details["justification"]
+        # The MFA master switch is off in this environment (local / CI), so the
+        # second-factor gate was skipped — and the row says so rather than
+        # passing for a verified proof (`require_sensitive_step_up`).
+        assert details["step_up"] == "mfa_off_local"
         # PII-out-of-logs still holds: the audit row carries the justification,
         # never the value it justified.
         assert "000111222" not in str(details)
@@ -958,8 +962,10 @@ async def test_dsar_vendor_contact_bundle_reaches_contracts_cards_and_documents(
         )
     assert resp.status_code == 200, resp.text
     data = resp.json()["data"]
-    assert [x["contract_number"] for x in data["contracts"]] == ["C-100"]
-    assert [x["last_four"] for x in data["virtual_cards"]] == ["4242"]
+    assert [x["contract_number"] for x in data["contracts"]["items"]] == ["C-100"]
+    assert [x["last_four"] for x in data["virtual_cards"]["items"]] == ["4242"]
+    assert data["contracts"]["truncated"] is False
+    assert data["virtual_cards"]["total"] == 1
     # The W-9 is ENUMERATED with the disposition an erasure would apply.
     docs = data["documents"]["documents"]
     assert len(docs) == 1
@@ -970,6 +976,114 @@ async def test_dsar_vendor_contact_bundle_reaches_contracts_cards_and_documents(
 # ---------------------------------------------------------------------------
 # #424 — erasure reaches passkeys and live sessions
 # ---------------------------------------------------------------------------
+
+
+async def test_dsar_every_limited_collection_reports_its_truncation(realdb, monkeypatch):
+    """A `.limit()` with no `_capped` wrapper hands the subject a short list
+    that claims to be complete. Contracts, virtual cards and expenses were cut at
+    the row cap silently — and `counts` reported the truncated length — while
+    the published privacy policy promises the true total beside every cut."""
+    from datetime import date
+
+    from app.models.contract import Contract
+    from app.models.virtual_card import VirtualCard
+    from app.services import privacy_export
+
+    monkeypatch.setattr(privacy_export, "MAX_EXPORT_ROWS", 1)
+    tenant_mk = realdb.sessionmaker("a")
+    org_id = realdb.info("a").org_id
+    vendor_id, _, invoice_id = await _seed_vendor_with_records(tenant_mk, org_id)
+    async with tenant_mk() as s:
+        for n in (1, 2):
+            s.add(
+                Contract(
+                    id=uuid.uuid4(),
+                    organization_id=org_id,
+                    contract_number=f"C-CAP-{n}",
+                    title="Agreement",
+                    vendor_id=vendor_id,
+                    currency="USD",
+                    total_value=Decimal("100.00"),
+                    start_date=date(2026, 1, n),
+                )
+            )
+            s.add(
+                VirtualCard(
+                    id=uuid.uuid4(),
+                    organization_id=org_id,
+                    invoice_id=invoice_id,
+                    vendor_id=vendor_id,
+                    card_provider="mock",
+                    provider_card_id=f"mock_cap_{n}",
+                    last_four=f"000{n}",
+                    amount_limit=Decimal("10.00"),
+                    currency="USD",
+                    # One live card per invoice — the second is a cancelled one.
+                    status="created" if n == 1 else "cancelled",
+                )
+            )
+        await s.commit()
+
+    async with realdb.client(key="a", role="admin") as c:
+        resp = await c.post(
+            "/api/privacy/dsar",
+            json={"subject_type": "vendor_contact", "identifier": str(vendor_id)},
+        )
+    assert resp.status_code == 200, resp.text
+    data = resp.json()["data"]
+    for key in ("contracts", "virtual_cards"):
+        assert data[key]["total"] == 2, key
+        assert data[key]["returned"] == 1, key
+        assert data[key]["truncated"] is True, key
+        assert data["counts"][key] == 2, key
+
+
+async def test_dsar_user_expenses_report_their_truncation(realdb, monkeypatch):
+    from datetime import date
+
+    from app.models.expense import Expense, ExpenseReport
+    from app.services import privacy_export
+
+    monkeypatch.setattr(privacy_export, "MAX_EXPORT_ROWS", 1)
+    tenant_mk = realdb.sessionmaker("a")
+    org_id = realdb.info("a").org_id
+    user_id = realdb.info("a").users["admin"]
+    report_id = uuid.uuid4()
+    async with tenant_mk() as s:
+        s.add(
+            ExpenseReport(
+                id=report_id,
+                organization_id=org_id,
+                report_number=f"ER-CAP-{uuid.uuid4().hex[:8]}",
+                employee_user_id=user_id,
+                title="Cap trip",
+            )
+        )
+        await s.flush()
+        for n in (1, 2):
+            s.add(
+                Expense(
+                    id=uuid.uuid4(),
+                    organization_id=org_id,
+                    report_id=report_id,
+                    expense_date=date(2026, 3, n),
+                    merchant=f"Cafe {n}",
+                    amount=Decimal("5.00"),
+                    currency="USD",
+                )
+            )
+        await s.commit()
+
+    async with realdb.client(key="a", role="admin") as c:
+        resp = await c.post(
+            "/api/privacy/dsar",
+            json={"subject_type": "user", "identifier": realdb.email("a")},
+        )
+    assert resp.status_code == 200, resp.text
+    expenses = resp.json()["data"]["expenses"]
+    assert expenses["total"] >= 2
+    assert expenses["returned"] == 1
+    assert expenses["truncated"] is True
 
 
 async def test_erasure_user_deletes_passkeys_and_revokes_sessions(realdb, monkeypatch):

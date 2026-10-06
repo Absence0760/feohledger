@@ -313,11 +313,40 @@ void main() {
       final m = invoice.poMatch!;
       expect(m.matchType, '3-way');
       expect(m.status, 'mismatch');
-      expect(m.statusLabel, 'Mismatch');
       expect(m.variancePct, 12.5);
       expect(m.withinTolerance, isFalse);
-      expect(m.issues, ['Amount variance', 'Quantity mismatch']);
+      // Pre-catalogue string issues survive as code-less findings.
+      expect(m.issues.map((i) => i.message),
+          ['Amount variance', 'Quantity mismatch']);
+      expect(m.issues.every((i) => i.code == null), isTrue);
       expect(m.isNoPo, isFalse);
+    });
+
+    test('parses coded po_match issues, keeping params as wire strings', () {
+      final m = PoMatch.fromJson({
+        'match_type': '2-way',
+        'status': 'mismatch',
+        'issues': [
+          {
+            'code': 'po_match.issue.amount_mismatch',
+            'params': {
+              'invoiceAmount': '1200.00',
+              'poTotal': '1000.00',
+              'currency': 'GBP',
+              'variancePct': '+20.0',
+            },
+            'message':
+                'Amount mismatch: invoice 1200.00 GBP vs PO 1000.00 GBP (+20.0%)',
+          },
+          // Neither a string nor a finding map — dropped, not crashed on.
+          42,
+        ],
+      });
+      expect(m.issues, hasLength(1));
+      final issue = m.issues.single;
+      expect(issue.code, 'po_match.issue.amount_mismatch');
+      expect(issue.params['invoiceAmount'], '1200.00');
+      expect(issue.params['currency'], 'GBP');
     });
 
     test('reads the variance off the key the matcher writes', () {

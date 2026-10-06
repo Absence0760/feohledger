@@ -6,6 +6,7 @@ import {
 	createMatchedInvoice,
 	createPo,
 	exceptionsFor,
+	issueText,
 	uniq
 } from './setup';
 import { expectNoA11yViolations } from '../a11y/axe-helper';
@@ -168,7 +169,7 @@ test.describe('recording an inspection through /goods-receipts', () => {
 		expect(poMatch!.inspection_result).toBe('fail');
 		expect(poMatch!.status).toBe('mismatch');
 		// The notes typed into the form are what the reviewer reads on the issue.
-		expect(poMatch!.issues.join(' ')).toMatch(/Failed quality inspection: cracked units/i);
+		expect(issueText(poMatch!)).toMatch(/Failed quality inspection: cracked units/i);
 		expect(exceptionsFor(invoiceId)).toContain('quality_hold:error');
 	});
 
@@ -210,7 +211,7 @@ test.describe('recording an inspection through /goods-receipts', () => {
 		expect(poMatch!.inspection_result).toBe('partial');
 		expect(poMatch!.status).toBe('partial');
 		expect(poMatch!.inspection_accepted_quantity).toBeCloseTo(7, 4);
-		expect(poMatch!.issues.join(' ')).toMatch(/Partial acceptance: 7 of ordered quantity/i);
+		expect(issueText(poMatch!)).toMatch(/Partial acceptance: 7 of ordered quantity/i);
 		expect(exceptionsFor(invoiceId)).toContain('quality_hold:info');
 	});
 });

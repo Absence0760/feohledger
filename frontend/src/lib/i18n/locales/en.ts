@@ -260,6 +260,44 @@ export const en = {
 		'No passkey registered',
 	'authRefusal.portalStepUpFailed':
 		'Confirm your password or a current authenticator code to change your two-factor settings.',
+	'authRefusal.sensitiveStepUpRequired':
+		'Confirm a current authenticator code or a registered passkey to continue.',
+	'authRefusal.sensitiveStepUpFailed':
+		'That authenticator code or passkey could not be verified. Confirm a current authenticator code or a registered passkey to continue.',
+	'authRefusal.sensitiveStepUpNoFactor':
+		'This action needs a second factor. Set up an authenticator app or a passkey on your profile first — a password alone cannot authorize it.',
+	'authRefusal.sensitiveStepUpUnavailable':
+		'This action needs two-factor authentication, which is not enabled on this deployment.',
+	'stepUpPrompt.title':
+		'Confirm it’s you',
+	'stepUpPrompt.codeLabel':
+		'Authenticator code',
+	'stepUpPrompt.confirm':
+		'Confirm',
+	'stepUpPrompt.confirming':
+		'Confirming…',
+	'stepUpPrompt.usePasskey':
+		'Use a passkey instead',
+	'stepUpPrompt.cancel':
+		'Cancel',
+	'stepUpPrompt.failed':
+		'Could not confirm. Try again.',
+	'privacyDsar.includeBanking':
+		'Include full bank details (unmasked)',
+	'privacyDsar.includeBankingHint':
+		'Bank details are masked by default. An unmasked export needs a written reason and a second-factor confirmation, and is recorded separately in the audit trail.',
+	'privacyDsar.justificationLabel':
+		'Reason for the unmasked export',
+	'privacyDsar.justificationHint':
+		'Legal basis or ticket reference. It is recorded in the audit trail, so do not paste personal data here.',
+	'privacyDsar.stepUpHint':
+		'An unmasked export reveals a supplier’s full account numbers. Enter a current code from your authenticator app, or use a registered passkey.',
+	'privacyDsar.noFactor':
+		'This export needs a second factor, and a password alone cannot authorize it. {profile} first.',
+	'privacyDsar.noFactorLink':
+		'Set up an authenticator app or a passkey on your profile',
+	'privacyDsar.unmaskedNotice':
+		'Bank details in this export are unmasked. Handle it accordingly.',
 
 	// Profile → Signed-in devices card
 	'profile.sessions.heading': 'Signed-in devices',
@@ -515,6 +553,21 @@ export const en = {
 	'invoices.warning.selfCorrectionLineItemMath': 'Line {lineNumber}: {quantity} × {unitPrice} = {expected}, but total is {total}.',
 	'invoices.warning.glCodesNotInChart': 'AI suggested GL code(s) not in active chart: {codes}',
 	'invoices.warning.glCodeStalePrior': 'Cached vendor GL code “{code}” is no longer in the active chart of accounts.',
+	'invoices.poMatch.issue.poNotFound': 'PO {poNumber} not found',
+	'invoices.poMatch.issue.currencyMismatch': 'Currency mismatch: invoice in {invoiceCurrency}, PO in {poCurrency} — amounts not compared',
+	'invoices.poMatch.issue.amountMismatch': 'Amount mismatch: invoice {invoiceAmount} vs PO {poTotal} ({variancePct})',
+	'invoices.poMatch.issue.amountMismatchPoCurrencyUnknown': 'Amount mismatch: invoice {invoiceAmount} vs PO {poTotal} ({variancePct})',
+	'invoices.poMatch.issue.amountMismatchCurrencyUnknown': 'Amount mismatch: invoice {invoiceAmount} vs PO {poTotal} ({variancePct})',
+	'invoices.poMatch.issue.partialReceipt': 'Partial receipt: {receivedPct} of ordered quantity received',
+	'invoices.poMatch.issue.overReceipt': 'Over-receipt: {receivedQuantity} received against {orderedQuantity} ordered (+{excessQuantity})',
+	'invoices.poMatch.issue.inspectionFailed': 'Failed quality inspection',
+	'invoices.poMatch.issue.inspectionFailedNotes': 'Failed quality inspection: {notes}',
+	'invoices.poMatch.issue.partialAcceptance': 'Partial acceptance: {acceptedQuantity} of ordered quantity accepted',
+	'invoices.poMatch.issue.partialAcceptanceUnquantified': 'Partial acceptance: part of ordered quantity accepted',
+	'invoices.poMatch.issue.inspectionRequiredMissing': 'Quality inspection required but missing',
+	'exceptions.description.missingDataAfterExtraction': 'Required fields missing after extraction',
+	'exceptions.description.priceVarianceFindings': 'Line-item price variance vs vendor history on {count, plural, one {# line} other {# lines}}',
+	'exceptions.description.contractNoncompliantFindings': '{count, plural, one {# contract-compliance finding} other {# contract-compliance findings}}',
 	'invoices.priorsTitle':
 		'Extraction priors: {cache, plural, one {# vendor-cache field} other {# vendor-cache fields}}, {rag, plural, one {# RAG neighbor} other {# RAG neighbors}}',
 	'invoices.empty': 'No invoices match your filters.',
@@ -1861,6 +1914,55 @@ export const en = {
 	'org.security.mfaEnforcementInactive':
 		'This is saved, but not enforced yet — two-factor is off platform-wide for this deployment. Users will not be prompted until it is turned on.',
 	'org.security.save': 'Save',
+	// /organization -> Single Sign-On panel (PUT /api/organization/sso)
+	'orgSso.title': 'Single Sign-On',
+	'orgSso.hint':
+		'Let members sign in through your identity provider, over OpenID Connect or SAML. Every change here is audited.',
+	'orgSso.loading': 'Loading SSO settings…',
+	'orgSso.enabled': 'Enable single sign-on',
+	'orgSso.field.protocol': 'Protocol',
+	'orgSso.field.provider': 'Sign-in button',
+	'orgSso.protocol.oidc': 'OpenID Connect (OIDC)',
+	'orgSso.protocol.saml': 'SAML 2.0',
+	'orgSso.provider.generic': 'Generic (“Sign in with SSO”)',
+	'orgSso.field.discoveryUrl': 'Discovery URL',
+	'orgSso.field.clientId': 'Client ID',
+	'orgSso.field.clientSecret': 'Client secret',
+	'orgSso.field.idpEntityId': 'IdP entity ID',
+	'orgSso.field.idpSsoUrl': 'IdP sign-on URL',
+	'orgSso.field.idpCert': 'IdP signing certificate',
+	'orgSso.field.idpCertMulti': 'Additional signing certificates',
+	'orgSso.field.idpSloUrl': 'IdP sign-out URL (optional)',
+	'orgSso.field.spEntityId': 'SP entity ID override (optional)',
+	'orgSso.field.allowedDomains': 'Allowed email domains',
+	'orgSso.domainsHint':
+		'Comma-separated. A first SSO sign-in creates an account only for these domains. Leave empty to accept any domain.',
+	'orgSso.secret.keepPlaceholder': 'Leave blank to keep the stored secret',
+	'orgSso.secret.configured':
+		'A client secret is stored. It is never shown again; type a new one to replace it.',
+	'orgSso.secret.notConfigured': 'No client secret is stored.',
+	'orgSso.secret.clear': 'Remove the stored client secret',
+	'orgSso.register.title': 'Register this app at your identity provider',
+	'orgSso.register.hint':
+		'Copy these values into the application you create at your identity provider.',
+	'orgSso.register.redirectUri': 'Redirect URI',
+	'orgSso.register.acsUrl': 'ACS URL',
+	'orgSso.register.spEntityId': 'SP entity ID (audience)',
+	'orgSso.ssoOnly': 'Require SSO (close password sign-in)',
+	'orgSso.ssoOnlyHint':
+		'Members can then sign in only through the identity provider. It saves only once the provider settings above are complete. If the provider later stops working, a platform operator can reopen password sign-in.',
+	'orgSso.status.passwordClosed':
+		'SSO-only is in force: password sign-in is closed for every member.',
+	'orgSso.status.incomplete':
+		'SSO is on, but the sign-in button stays hidden until these are set: {fields}.',
+	'orgSso.status.incompleteUnknown':
+		'SSO is on, but the identity-provider settings are incomplete, so the sign-in button stays hidden.',
+	'orgSso.save': 'Save SSO Settings',
+	'orgSso.toast.loadFailed': 'Failed to load SSO settings',
+	'orgSso.toast.saved': 'SSO settings saved',
+	'orgSso.toast.saveFailed': 'Failed to save SSO settings',
+	'orgSso.refusal.idpUnresolved':
+		'Requiring SSO closes password sign-in, so the identity-provider settings must be complete first. Missing or invalid: {fields}.',
 	'org.section.fraud': 'Fraud Detection',
 	'org.section.fraudSaved': 'Fraud detection',
 	'org.fraud.hint':
@@ -4617,11 +4719,11 @@ export const en = {
 	'sweepHealth.title': 'Sweep Health',
 	'tax.action.manage': 'Manage',
 	'tax.boxes.fallbackTag': 'Fallback',
-	'tax.boxes.notReconciled': 'The boxes do not add up to the total reportable ({residual} unallocated). Do not file until this is resolved.',
+	'tax.boxes.notReconciled': 'The boxes do not add up to the total on required 1099s ({residual} unallocated). Do not file until this is resolved.',
 	'tax.boxes.paymentCount': '{n, plural, one {# payment} other {# payments}}',
-	'tax.boxes.reconciled': 'The boxes add up to the total reportable, to the cent.',
+	'tax.boxes.reconciled': 'The boxes add up to the total on required 1099s, to the cent.',
 	'tax.boxes.rowTitle': '{label} — {amount}',
-	'tax.boxes.subtitle': 'How reportable spend splits across IRS boxes, mapped from each invoice’s GL account.',
+	'tax.boxes.subtitle': 'How the amount on required 1099s splits across IRS boxes, mapped from each invoice’s GL account. A box on a form the vendor is not required to receive is not counted.',
 	'tax.boxes.title': '1099 box allocation',
 	'tax.boxes.unmapped': '{amount} matched no GL-account rule and is filed in {box}. Map those GL accounts in Organization settings to split it correctly.',
 	'tax.cardPaymentCount': '{n, plural, one {# card payment} other {# card payments}}',
@@ -4669,7 +4771,7 @@ export const en = {
 	'tax.kpi.cardExcludedSub': 'Excludes {amount} paid by card — the processor reports that on a 1099-K',
 	'tax.kpi.reportableOver': 'Reportable (1099 + over ${threshold})',
 	'tax.kpi.reportableWithoutW9': 'Reportable without W-9',
-	'tax.kpi.totalReportable': 'Total reportable',
+	'tax.kpi.totalReportable': 'Total on required 1099s',
 	'tax.kpi.vendorsWithPayments': 'Vendors with payments',
 	'tax.loadingReport': 'Loading {year} 1099 report…',
 	'tax.reportMeta': 'Report generated {generated}. Reportable = 1099-eligible vendors paid more than ${threshold} in completed payments during {year}.',
@@ -4879,6 +4981,35 @@ export const en = {
 	'glChartRefusal.pickActive':
 		"Choose an active code from the invoice's own chart — the shared accounts plus its entity's own.",
 	'glChartRefusal.onLines': 'Line items: {reasons}',
+	// The coded money-path / MFA refusals (`api/codedRefusals.ts`), stated from
+	// their code + params. Money params arrive formatted with their currency.
+	'refusal.approvalSegregation': "Segregation of duties: a user involved in creating this invoice cannot also approve it.",
+	'refusal.approvalLevelReuse': "You already approved an earlier level of this chain; a different approver is required.",
+	'refusal.approvalNotNamedApprover': "You are not an authorized approver for this step.",
+	'refusal.approvalMaxExceeded': "Invoice amount {amount} exceeds the maximum allowed {limit}.",
+	'refusal.approvalMaxMisconfigured': "This workflow's approval step has an unusable maximum invoice amount. Approval is blocked until an admin corrects the workflow definition.",
+	'refusal.approvalCfoRequired': "Invoice amount {amount} exceeds {limit}. CFO approval required.",
+	'refusal.approvalCfoRequiredUnknownLimit': "Invoice amount {amount} exceeds the configured limit. CFO approval required.",
+	'refusal.gateStructuring': "This invoice alone is under the threshold, but combined with {recent} in other recent invoices from this vendor ({days, plural, one {last # day} other {last # days}}) it totals {aggregate}.",
+	'refusal.gateInexpressible': "This invoice could not be expressed in {currency}, the currency the limit is set in, so it cannot be cleared against it.",
+	'refusal.gateMeasured': "Measured as {measured} — the limit is set in {currency}.",
+	'refusal.expenseCfoRequired': "Report total {amount} exceeds {limit}. CFO approval required.",
+	'refusal.expenseCfoRequiredUnknownLimit': "Report total {amount} exceeds the configured limit. CFO approval required.",
+	'refusal.expenseCfoInexpressible': "Report total cannot be expressed in {currency} (no rate from {reportCurrency}), so it cannot be cleared against the {limit} limit. CFO approval required.",
+	'refusal.expenseCfoInexpressibleUnknownLimit': "Report total cannot be expressed in {currency} (no rate from {reportCurrency}), so it cannot be cleared against the configured limit. CFO approval required.",
+	'refusal.exceptionSegregationRaiser': "Segregation of duties: the user whose action raised this exception cannot also clear it. Escalate it, or ask a different user to decide.",
+	'refusal.exceptionSegregationImplicated': "Segregation of duties: a user involved in creating this invoice cannot also clear an exception that blocks its payment. Escalate it, or ask a different user to decide.",
+	'refusal.creditMemoVendorMismatch': "The credit memo's vendor does not match the invoice's vendor.",
+	'refusal.creditMemoVendorUnresolved': "The invoice has no linked vendor, so the credit memo's vendor cannot be verified. Resolve the invoice's vendor first (re-save its vendor on the invoice), then apply the credit.",
+	'refusal.creditMemoEntityMismatch': "The credit memo and the invoice belong to different entities; a credit cannot reduce another subsidiary's payable.",
+	'refusal.creditMemoCurrencyMismatch': "The credit memo's currency does not match the invoice's currency.",
+	'refusal.creditMemoInvoiceSettled': "The invoice is {status}: no payment will be made against it any more, so a credit applied to it would reduce nothing. Leave the credit memo open and apply it to the vendor's next invoice.",
+	'refusal.creditMemoNotEditable': "Only an open credit memo that has never been applied can be edited (this one is {status}).",
+	'refusal.creditMemoNotApplicable': "A credit memo that is {status} cannot be applied.",
+	'refusal.creditMemoExceedsBalance': "The credit memo amount exceeds the invoice's remaining creditable balance ({remaining}).",
+	'refusal.invoiceStaleEdit': "This invoice was modified since you loaded it. Reload and reapply your changes.",
+	'refusal.invoiceRequiredFieldsMissing': "Required fields missing: {fields}",
+	'refusal.mfaCodeInvalid': "That code is not valid. Check your authenticator app and try again.",
 	'csvImport.result.summary': '{imported} imported, {skipped} skipped',
 	'csvImport.toast.failed': 'Import failed',
 	'csvImport.toast.partial': 'Imported {imported}, skipped {skipped} — see the details below',

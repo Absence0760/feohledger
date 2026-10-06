@@ -78,12 +78,20 @@ records). Per subject type:
   `virtual_cards` (the row stores `last_four` only; no PAN is ever persisted),
   `chat_messages`, `documents`, and `counts`.
 
-Every list-shaped collection is wrapped as
-`{ total, returned, truncated, items }` and capped at
-`privacy_export.MAX_EXPORT_ROWS` (1000). An export is a synchronous HTTP
-response; a user with three years of audit rows would otherwise build an
-unbounded JSON document in memory on the event loop. A truncated collection says
-so and reports its true total rather than silently shortening.
+The collections that can grow without bound for one subject — `audit_events`,
+`notifications`, `expense_reports`, `expenses`, `chat_messages`, `contracts`
+and `virtual_cards` — are wrapped as `{ total, returned, truncated, items }` and
+capped at `privacy_export.MAX_EXPORT_ROWS` (1000) per collection. An export is a
+synchronous HTTP response; a user with three years of audit rows would otherwise
+build an unbounded JSON document in memory on the event loop. A truncated
+collection says so and reports its true total rather than silently shortening,
+and the vendor bundle's `counts` carry the true totals too. (Until 2026-10-05
+`expenses`, `contracts` and `virtual_cards` were limited WITHOUT the wrapper — a
+short list that claimed to be complete, with `counts` reporting the truncated
+length; `tests/test_privacy.py::test_dsar_every_limited_collection_reports_its_truncation`
+pins the fix.) The rest are plain lists returned in full: a vendor's
+`related_invoices`, `related_payments` and `portal_users`, a user's `passkeys`
+and `push_devices`, and the `documents` manifest.
 
 #### Banking data in a DSAR bundle
 
@@ -103,8 +111,8 @@ deliberate act:
 |---|---|---|
 | Who | any admin | an admin **holding `vendor.bank_change.approve`** |
 | Subject | any | `vendor_contact` only (nothing else has bank details) |
-| Extra input | — | a non-blank `banking_justification` (PII-free) |
-| Audit | `privacy.dsar_export` | that, **plus** `privacy.dsar_export.unmasked` carrying the justification |
+| Extra input | — | a non-blank `banking_justification` (PII-free) **and** a second-factor `step_up` proof (`{code}` or `{assertion}`) |
+| Audit | `privacy.dsar_export` | that, **plus** `privacy.dsar_export.unmasked` carrying the justification and `step_up` (`totp` / `passkey` / `mfa_off_local`) |
 | Request row | `note: null` | `note: "unmasked banking disclosure: ..."` |
 | Response | `banking_disclosure: "masked"` | `banking_disclosure: "unmasked"` |
 
@@ -126,12 +134,38 @@ field is dropped rather than masked — a vendor's ultimate beneficial owner is 
 *different* natural person who did not ask for this export, and a last-4 of
 someone else's passport number is still someone else's passport number.
 
-**One honest limit.** `ROLE_ADMIN` resolves to every permission in the catalogue,
-so on the four stock system roles this gate admits exactly the callers the route
-already admits. What it adds is configurability: an org that splits duties with a
-custom admin-equivalent role can now deny an unmasked disclosure without denying
-DSARs. A step-up MFA proof on the request is the stronger gate; it needs the SPA
-to collect that proof and is tracked in `docs/followups.md`.
+**The second-factor proof is what makes the gate bite on a stock admin.**
+`ROLE_ADMIN` resolves to every permission in the catalogue, so on the four stock
+system roles the permission admits exactly the callers the route already admits
+— it is what makes the control configurable (an org that splits duties with a
+custom admin-equivalent role can deny an unmasked disclosure without denying
+DSARs), not what makes it a refusal. So the route also calls
+`api/auth.require_sensitive_step_up` (`docs/authentication.md`, "A sensitive ACTION asks for a second factor"), after
+the permission and justification checks and **before any subject data is
+read**. It accepts only a current authenticator code or a passkey assertion
+minted for operation `dsar_unmasked_export` — never the password, in any tenant
+— so a stolen session or a password alone cannot produce a full account number.
+The refusals are coded: `sensitive_step_up_required` (403; no proof sent — the
+page opens its prompt and resends), `sensitive_step_up_failed` (400; throttled
+and audited), `sensitive_step_up_no_factor` (403; an admin with no TOTP and no
+passkey is refused, not exempted — the page links them to `/profile` to enroll
+one) and `sensitive_step_up_unavailable` (403; MFA switched off in a deployed
+environment). With `FEOH_MFA_ENABLED=false` in local dev / CI the gate is
+skipped like every other MFA challenge, and the unmasked audit row says
+`step_up: "mfa_off_local"` so it can never be read as a verified proof. A
+refusal at the gate that is more than the routine prompt — a proof that did not
+verify, an account with no factor, MFA unavailable — also writes
+`privacy.dsar_export.unmasked_refused` to the **tenant** trail (keyed to the
+vendor asked about, carrying only the refusal code), because the
+`auth.mfa.step_up.failure` row a failed proof already writes sits on the
+account's auth trail with no subject; `sensitive_step_up_required` is not
+recorded, since every legitimate unmasked export passes through it once. A TOTP
+code is single-use (`mfa.verify_totp` claims it), so a replay inside its window
+is refused too. The
+`/admin/privacy` page offers the option only for a `vendor_contact` subject and
+only to a caller holding the permission. Guards:
+`tests/test_privacy_unmasked_step_up.py`,
+`frontend/tests-e2e/admin/privacy-unmasked-step-up.spec.ts`.
 
 ### `POST /api/privacy/erasure`
 

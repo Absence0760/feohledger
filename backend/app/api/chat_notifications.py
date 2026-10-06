@@ -60,7 +60,7 @@ from app.services.chat_notifications_config import (
     safe_status,
     webhook_host,
 )
-from app.tenant import get_tenant
+from app.tenant import get_tenant, lock_organization
 
 # No module logger on purpose: every value this router handles is either the
 # webhook credential or derived from it, and the safe derivation (its hostname)
@@ -224,6 +224,8 @@ async def update_chat_notifications(
     except ChatConfigError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from None
 
+    # Serialise with every other settings writer (`lock_organization`).
+    org = await lock_organization(db, org)
     before = _resolve_chat_config(org)
     updated = apply_config(before, enabled=body.enabled, provider=provider, events=events)
     _persist(org, updated)
@@ -285,6 +287,8 @@ async def rotate_chat_webhook(
         raise HTTPException(status_code=422, detail=REJECT_DETAIL)
     await _assert_public_webhook(url)
 
+    # Serialise with every other settings writer (`lock_organization`).
+    org = await lock_organization(db, org)
     before = _resolve_chat_config(org)
     previous_configured = is_webhook_configured(before)
     previous_host = webhook_host(before.get(WEBHOOK_URL_KEY))
@@ -322,6 +326,8 @@ async def revoke_chat_webhook(
     aggressive rotation, and an auditor reconstructing an incident should be
     able to follow the credential's whole lifecycle with one grep.
     """
+    # Serialise with every other settings writer (`lock_organization`).
+    org = await lock_organization(db, org)
     before = _resolve_chat_config(org)
     previous_configured = is_webhook_configured(before)
     previous_host = webhook_host(before.get(WEBHOOK_URL_KEY))

@@ -1,6 +1,5 @@
 // ignore: unused_import
 import 'package:intl/intl.dart' as intl;
-
 import 'app_localizations.dart';
 
 // ignore_for_file: type=lint
@@ -642,6 +641,70 @@ class AppLocalizationsEs extends AppLocalizations {
   String glChartRefusalOnLines(String reasons) {
     return 'Líneas de la factura: $reasons';
   }
+
+  @override
+  String get codedRefusalApprovalSegregation =>
+      'Segregación de funciones: un usuario que participó en la creación de esta factura no puede también aprobarla.';
+
+  @override
+  String get codedRefusalApprovalLevelReuse =>
+      'Ya aprobó un nivel anterior de esta cadena; se requiere un aprobador distinto.';
+
+  @override
+  String get codedRefusalApprovalNotNamedApprover =>
+      'No es un aprobador autorizado para este paso.';
+
+  @override
+  String codedRefusalApprovalMaxExceeded(String amount, String limit) {
+    return 'El importe de la factura $amount supera el máximo permitido de $limit.';
+  }
+
+  @override
+  String get codedRefusalApprovalMaxMisconfigured =>
+      'El paso de aprobación de este flujo tiene un importe máximo de factura no utilizable. La aprobación está bloqueada hasta que un administrador corrija la definición del flujo.';
+
+  @override
+  String codedRefusalApprovalCfoRequired(String amount, String limit) {
+    return 'El importe de la factura $amount supera $limit. Se requiere la aprobación del CFO.';
+  }
+
+  @override
+  String codedRefusalApprovalCfoRequiredUnknownLimit(String amount) {
+    return 'El importe de la factura $amount supera el límite configurado. Se requiere la aprobación del CFO.';
+  }
+
+  @override
+  String codedRefusalGateStructuring(
+    String recent,
+    int days,
+    String aggregate,
+  ) {
+    String _temp0 = intl.Intl.pluralLogic(
+      days,
+      locale: localeName,
+      other: 'últimos $days días',
+      one: 'último $days día',
+    );
+    return 'Esta factura por sí sola está por debajo del umbral, pero sumada a $recent de otras facturas recientes de este proveedor ($_temp0) totaliza $aggregate.';
+  }
+
+  @override
+  String codedRefusalGateInexpressible(String currency) {
+    return 'Esta factura no pudo expresarse en $currency, la moneda en la que está fijado el límite, por lo que no puede validarse frente a él.';
+  }
+
+  @override
+  String codedRefusalGateMeasured(String measured, String currency) {
+    return 'Medido como $measured: el límite está fijado en $currency.';
+  }
+
+  @override
+  String get codedRefusalExceptionSegregationRaiser =>
+      'Segregación de funciones: el usuario cuya acción generó esta excepción no puede también resolverla. Escálela o pida a otro usuario que decida.';
+
+  @override
+  String get codedRefusalExceptionSegregationImplicated =>
+      'Segregación de funciones: un usuario que participó en la creación de esta factura no puede resolver una excepción que bloquea su pago. Escálela o pida a otro usuario que decida.';
 
   @override
   String get invoiceDetailApproved => 'Factura aprobada';
@@ -2871,5 +2934,124 @@ class AppLocalizationsEs extends AppLocalizations {
   @override
   String invoiceWarningGlCodeStalePrior(String code) {
     return 'La cuenta contable «$code» guardada para el proveedor ya no está en el plan de cuentas activo.';
+  }
+
+  @override
+  String invoicePoMatchIssuePoNotFound(String poNumber) {
+    return 'No se encontró el pedido $poNumber';
+  }
+
+  @override
+  String invoicePoMatchIssueCurrencyMismatch(
+    String invoiceCurrency,
+    String poCurrency,
+  ) {
+    return 'Discrepancia de moneda: factura en $invoiceCurrency, pedido en $poCurrency; importes no comparados';
+  }
+
+  @override
+  String invoicePoMatchIssueAmountMismatch(
+    String invoiceAmount,
+    String poTotal,
+    String variancePct,
+  ) {
+    return 'Discrepancia de importe: factura $invoiceAmount frente a pedido $poTotal ($variancePct)';
+  }
+
+  @override
+  String invoicePoMatchIssueAmountMismatchPoCurrencyUnknown(
+    String invoiceAmount,
+    String poTotal,
+    String variancePct,
+  ) {
+    return 'Discrepancia de importe: factura $invoiceAmount frente a pedido $poTotal ($variancePct)';
+  }
+
+  @override
+  String invoicePoMatchIssueAmountMismatchCurrencyUnknown(
+    String invoiceAmount,
+    String poTotal,
+    String variancePct,
+  ) {
+    return 'Discrepancia de importe: factura $invoiceAmount frente a pedido $poTotal ($variancePct)';
+  }
+
+  @override
+  String invoicePoMatchIssuePartialReceipt(String receivedPct) {
+    return 'Recepción parcial: recibido el $receivedPct de la cantidad pedida';
+  }
+
+  @override
+  String invoicePoMatchIssueOverReceipt(
+    String receivedQuantity,
+    String orderedQuantity,
+    String excessQuantity,
+  ) {
+    return 'Exceso de recepción: $receivedQuantity recibidas frente a $orderedQuantity pedidas (+$excessQuantity)';
+  }
+
+  @override
+  String get invoicePoMatchIssueInspectionFailed =>
+      'Inspección de calidad no superada';
+
+  @override
+  String invoicePoMatchIssueInspectionFailedNotes(String notes) {
+    return 'Inspección de calidad no superada: $notes';
+  }
+
+  @override
+  String invoicePoMatchIssuePartialAcceptance(String acceptedQuantity) {
+    return 'Aceptación parcial: $acceptedQuantity de la cantidad pedida aceptadas';
+  }
+
+  @override
+  String get invoicePoMatchIssuePartialAcceptanceUnquantified =>
+      'Aceptación parcial: se aceptó parte de la cantidad pedida';
+
+  @override
+  String get invoicePoMatchIssueInspectionRequiredMissing =>
+      'Se requiere inspección de calidad, pero falta';
+
+  @override
+  String get exceptionDescriptionMissingDataAfterExtraction =>
+      'Faltan campos obligatorios tras la extracción';
+
+  @override
+  String exceptionDescriptionPriceVarianceFindings(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count líneas',
+      one: '$count línea',
+    );
+    return 'Variación de precio frente al historial del proveedor en $_temp0';
+  }
+
+  @override
+  String exceptionDescriptionContractNoncompliantFindings(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count incidencias de cumplimiento del contrato',
+      one: '$count incidencia de cumplimiento del contrato',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get warningsPoMatchStatusMatched => 'Coincide';
+
+  @override
+  String get warningsPoMatchStatusMismatch => 'Discrepancia';
+
+  @override
+  String get warningsPoMatchStatusPartial => 'Parcial';
+
+  @override
+  String get warningsPoMatchStatusNoPo => 'Sin pedido';
+
+  @override
+  String warningsPoMatchAnnouncement(String summary) {
+    return 'Conciliación con pedido: $summary';
   }
 }

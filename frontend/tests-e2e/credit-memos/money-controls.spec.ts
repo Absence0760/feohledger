@@ -27,6 +27,13 @@ interface Vendor {
 	name: string;
 }
 
+/** A coded refusal `detail` (`backend/app/api/refusals.py::coded_refusal`). */
+interface CodedDetail {
+	code: string;
+	message: string;
+	params: Record<string, unknown>;
+}
+
 async function firstVendor(page: import('@playwright/test').Page): Promise<Vendor> {
 	const resp = await page.request.get(`${API_BASE}/api/vendors`, {
 		headers: await authedTenantHeaders(page)
@@ -217,9 +224,10 @@ test.describe('credit-memo money controls (API)', () => {
 				{ headers, data: { invoice_id: invoiceId } }
 			);
 			expect(apply2.status()).toBe(409);
-			expect(((await apply2.json()) as { detail: string }).detail).toContain(
-				'remaining creditable balance'
-			);
+			// Coded (`api/refusals.coded_refusal`): the client localizes on `code`.
+			const refusal2 = ((await apply2.json()) as { detail: CodedDetail }).detail;
+			expect(refusal2.code).toBe('credit_memo_exceeds_balance');
+			expect(refusal2.message).toContain('remaining creditable balance');
 			// memo2 stays open — the blocked apply did not mutate it.
 			const memo2Get = await page.request.get(`${API_BASE}/api/credit-memos?status=open`, {
 				headers
@@ -264,9 +272,12 @@ test.describe('credit-memo money controls (API)', () => {
 				}
 			});
 			expect(resp.status()).toBe(409);
-			expect(((await resp.json()) as { detail: string }).detail).toContain(
-				'remaining creditable balance'
-			);
+			const refusal = ((await resp.json()) as { detail: CodedDetail }).detail;
+			expect(refusal.code).toBe('credit_memo_exceeds_balance');
+			expect(refusal.message).toContain('remaining creditable balance');
+			// The balance travels as an exact string beside its currency.
+			expect(refusal.params.remaining).toBe('80.00');
+			expect(refusal.params.currency).toMatch(/^[A-Z]{3}$/);
 		} finally {
 			cleanupInvoice(invoiceId);
 		}

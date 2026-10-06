@@ -47,6 +47,7 @@ from app.api import (
     invoices,
     notifications,
     organization,
+    organization_sso,
     partner,
     payments,
     peppol_inbound,
@@ -495,6 +496,8 @@ app.include_router(organization.router, prefix="/api")
 # Hangs off /api/organization/chat-notifications (its own module — see
 # api/chat_notifications.py; same shape as email_intake.admin_router).
 app.include_router(chat_notifications.router, prefix="/api")
+# Hangs off /api/organization/sso — the one audited writer of settings.sso.
+app.include_router(organization_sso.router, prefix="/api")
 app.include_router(partner.router, prefix="/api")
 app.include_router(payments.router, prefix="/api")
 app.include_router(signup.router, prefix="/api")

@@ -301,13 +301,19 @@ median creeps toward ~15 min again, double the shards; don't raise the cap.
 `pytest-split` partitions by a committed `backend/.test_durations` baseline when
 present; absent, it falls back to an even split by **test count** (still correct
 and deterministic — every test runs in exactly one shard — just less
-wall-clock-balanced). To regenerate the baseline for better balance (e.g. after a
-large test-surface change), run the full suite once with the DB stack up:
+wall-clock-balanced). To regenerate the baseline, rebuild it from CI rather
+than a laptop: every backend shard runs with `--store-durations
+--clean-durations` and uploads what it measured as `test-durations-shard-N`, so
+the eight artifacts of any run whose shards all finished union into a complete
+baseline measured on the hardware that runs it:
 
 ```bash
-# from backend/, stack up (docker compose up -d) and venv active
-pytest --store-durations          # writes backend/.test_durations
+pnpm gen:test-durations <run-id>   # gh run download + union → backend/.test_durations
+pnpm check:test-durations          # then lower MAX_MISSING_FRACTION to just above the new figure
 ```
+
+(`pytest --store-durations` against the local stack still works, but takes ~60
+min and measures laptop timings.)
 
 Commit the updated `.test_durations` alongside the test changes. Bumping the
 shard count means editing the `matrix.shard` list, the `--splits N` flag, and
@@ -315,7 +321,8 @@ both `name:` occurrences (the job's `shard N/8` and the test step's) together in
 `ci.yml`.
 
 **The baseline's decay is guarded, not trusted.** Nobody regenerates it as a
-matter of course — it has one commit in its whole history — so
+matter of course — it went a month and ~2,600 tests between its first commit
+and its first regeneration (2026-10-06, from CI) — so
 `scripts/check_test_durations.py` (`pnpm check:test-durations`, run in CI's
 `Backend lint` job) fails when the fraction of collected tests carrying no
 duration entry passes `MAX_MISSING_FRACTION`. A test the baseline has never seen
@@ -846,6 +853,12 @@ user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER))
   logging). Because it runs on every password sign-in, the resolvers must raise
   `SSOConfigError` and nothing else for any malformed block, and stay local (no
   DNS, no discovery fetch). `docs/decisions.md` §204.
+- **`settings.sso` has one writer: `PUT /api/organization/sso`** (`api/organization_sso.py`
+  over the pure `services/sso_settings.py`). `PATCH /api/organization` refuses
+  the key. The client secret is write-only (blank keeps it, never returned —
+  `org_settings_view.ALWAYS_REDACTED`), the SCIM keys are carried across, and
+  each save audits `organization.sso_updated` with key names only. The operator
+  way back into a locked-out SSO-only tenant is `scripts/sso_break_glass.py`.
 - Both protocols share the identity tail in `services/identity_provisioning.py`
   (`jit_provision` + `extract_and_check_email`) and the session-mint tail — only
   IdP-response *verification* differs.
@@ -898,6 +911,7 @@ Severity: `error`, `warning`, `info`. Auto-detected by `invoice_warnings.py`. `e
 | `scripts/seed_payable_invoices.py` | Tops up a tenant's payment queue with N approved invoices (`--tenant`, `--count`) — re-run after executing a payment run drains the queue. |
 | `scripts/create_tenant.py` | CLI wrapper around `services.tenant_provisioning.provision_tenant` — provisions a single tenant (org + admin user + DB + tables) |
 | `scripts/delete_tenant.py` | CLI wrapper around `services.tenant_deletion.delete_tenant` — deletes one tenant completely (object-storage prefix, tenant DB, control-plane rows), in that order. `--dry-run` inventories; otherwise it needs `--confirm <slug>` or `--yes`. Driven by `deploy/remove-tenant.sh`, which adds the Caddy and backup legs. The deletion `/legal/dpa` § 13 promises. |
+| `scripts/sso_break_glass.py` | CLI wrapper around `services.sso_break_glass.lift_sso_only` — clears `settings.sso.sso_only` (and nothing else) for one SSO-only tenant whose IdP has stopped working, after writing an `organization.sso_only_lifted` audit row; refuses to change anything if the row cannot be written. `--slug`, optional `--reason` (ticket ref, no PII). Procedure: `../docs/founder-runbooks/sso-break-glass.md` |
 | `scripts/migrate_all_tenants.py` | Runs `alembic upgrade head` on every tenant DB |
 
 ## Self-service tenant signup

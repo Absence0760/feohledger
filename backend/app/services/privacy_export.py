@@ -37,10 +37,17 @@ the router. See ``docs/decisions.md`` § 182.
 shared traversal in ``services/privacy_documents`` — the same walk the erasure
 leg deletes through — so the two can never disagree about what is held.
 
-**Every list is capped** at :data:`MAX_EXPORT_ROWS` with a ``truncated`` flag and
-the true total beside it. An export is a synchronous HTTP response; an AP user
-with three years of audit rows would otherwise build an unbounded JSON document
-in memory on the event loop.
+**Every collection that is capped says so.** The ones that can grow without
+bound for a single subject — audit events, notifications, expense reports and
+their expenses, chat messages, contracts, virtual cards — are cut at
+:data:`MAX_EXPORT_ROWS` and wrapped by :func:`_capped` with a ``truncated`` flag
+and the true total beside them. An export is a synchronous HTTP response; an AP
+user with three years of audit rows would otherwise build an unbounded JSON
+document in memory on the event loop. A ``.limit()`` without that wrapper is a
+silent truncation — the subject would receive a short list that claims to be
+complete — so every limited query goes through it. The vendor's own invoices and
+payments, its portal users, a user's passkeys and push devices, and the document
+manifest are returned in full (``tests/test_privacy.py`` pins the capped set).
 
 Pure-ish: the gather functions take the sessions and return plain dicts; the API
 layer owns the session lifecycle, the audit write, and the request-row insert.
@@ -262,6 +269,17 @@ async def build_user_bundle(
         )
     ).scalar_one()
     report_ids = [r.id for r in report_rows]
+    expense_total = (
+        await tenant_db.execute(
+            select(func.count())
+            .select_from(Expense)
+            .join(ExpenseReport, Expense.report_id == ExpenseReport.id)
+            .where(
+                ExpenseReport.employee_user_id == subject_id,
+                ExpenseReport.organization_id == organization_id,
+            )
+        )
+    ).scalar_one()
     expense_rows: list = []
     if report_ids:
         expense_rows = (
@@ -388,20 +406,23 @@ async def build_user_bundle(
             ],
             report_total,
         ),
-        "expenses": [
-            {
-                "id": str(e.id),
-                "report_id": str(e.report_id) if e.report_id else None,
-                "expense_date": _jsonable(e.expense_date),
-                "merchant": e.merchant,
-                "category": e.category,
-                "description": e.description,
-                "amount": _jsonable(e.amount),
-                "currency": e.currency,
-                "status": str(e.status),
-            }
-            for e in expense_rows
-        ],
+        "expenses": _capped(
+            [
+                {
+                    "id": str(e.id),
+                    "report_id": str(e.report_id) if e.report_id else None,
+                    "expense_date": _jsonable(e.expense_date),
+                    "merchant": e.merchant,
+                    "category": e.category,
+                    "description": e.description,
+                    "amount": _jsonable(e.amount),
+                    "currency": e.currency,
+                    "status": str(e.status),
+                }
+                for e in expense_rows
+            ],
+            expense_total,
+        ),
         # Passkey METADATA. `credential_id` and `public_key` are withheld: they
         # are the authenticator's handle and verification key, they identify the
         # subject's physical device, and neither is information the subject
@@ -595,14 +616,18 @@ async def build_vendor_contact_bundle(
             .all()
         )
 
+    contract_filter = (
+        Contract.vendor_id == subject_id,
+        Contract.organization_id == organization_id,
+    )
+    contract_total = (
+        await tenant_db.execute(select(func.count()).select_from(Contract).where(*contract_filter))
+    ).scalar_one()
     contracts = (
         (
             await tenant_db.execute(
                 select(Contract)
-                .where(
-                    Contract.vendor_id == subject_id,
-                    Contract.organization_id == organization_id,
-                )
+                .where(*contract_filter)
                 .order_by(Contract.created_at)
                 .limit(MAX_EXPORT_ROWS)
             )
@@ -614,14 +639,18 @@ async def build_vendor_contact_bundle(
     # Virtual cards issued to this vendor. The row stores `last_four` only — no
     # PAN has ever been persisted (`docs/virtual-cards.md`), so there is nothing
     # here to mask that is not already masked at rest.
+    card_filter = (
+        VirtualCard.vendor_id == subject_id,
+        VirtualCard.organization_id == organization_id,
+    )
+    card_total = (
+        await tenant_db.execute(select(func.count()).select_from(VirtualCard).where(*card_filter))
+    ).scalar_one()
     cards = (
         (
             await tenant_db.execute(
                 select(VirtualCard)
-                .where(
-                    VirtualCard.vendor_id == subject_id,
-                    VirtualCard.organization_id == organization_id,
-                )
+                .where(*card_filter)
                 .order_by(VirtualCard.created_at)
                 .limit(MAX_EXPORT_ROWS)
             )
@@ -683,37 +712,43 @@ async def build_vendor_contact_bundle(
         "portal_users": [
             {"id": str(r.id), "email": r.email, "full_name": r.full_name} for r in portal_users
         ],
-        "contracts": [
-            {
-                "id": str(c.id),
-                "contract_number": c.contract_number,
-                "title": c.title,
-                "contract_type": str(c.contract_type),
-                "status": str(c.status),
-                "currency": c.currency,
-                "total_value": _jsonable(c.total_value),
-                "start_date": _jsonable(c.start_date),
-                "end_date": _jsonable(c.end_date),
-                "signed_date": _jsonable(c.signed_date),
-                "created_at": _jsonable(c.created_at),
-            }
-            for c in contracts
-        ],
-        "virtual_cards": [
-            {
-                "id": str(c.id),
-                "invoice_id": str(c.invoice_id),
-                "card_provider": c.card_provider,
-                "last_four": c.last_four,
-                "amount_limit": _jsonable(c.amount_limit),
-                "amount_charged": _jsonable(c.amount_charged),
-                "currency": c.currency,
-                "status": c.status,
-                "expires_at": _jsonable(c.expires_at),
-                "created_at": _jsonable(c.created_at),
-            }
-            for c in cards
-        ],
+        "contracts": _capped(
+            [
+                {
+                    "id": str(c.id),
+                    "contract_number": c.contract_number,
+                    "title": c.title,
+                    "contract_type": str(c.contract_type),
+                    "status": str(c.status),
+                    "currency": c.currency,
+                    "total_value": _jsonable(c.total_value),
+                    "start_date": _jsonable(c.start_date),
+                    "end_date": _jsonable(c.end_date),
+                    "signed_date": _jsonable(c.signed_date),
+                    "created_at": _jsonable(c.created_at),
+                }
+                for c in contracts
+            ],
+            int(contract_total),
+        ),
+        "virtual_cards": _capped(
+            [
+                {
+                    "id": str(c.id),
+                    "invoice_id": str(c.invoice_id),
+                    "card_provider": c.card_provider,
+                    "last_four": c.last_four,
+                    "amount_limit": _jsonable(c.amount_limit),
+                    "amount_charged": _jsonable(c.amount_charged),
+                    "currency": c.currency,
+                    "status": c.status,
+                    "expires_at": _jsonable(c.expires_at),
+                    "created_at": _jsonable(c.created_at),
+                }
+                for c in cards
+            ],
+            int(card_total),
+        ),
         "chat_messages": _capped([_chat_message_entry(m) for m in chat_rows], int(chat_messages)),
         "documents": documents_manifest(documents),
         "counts": {
@@ -721,8 +756,8 @@ async def build_vendor_contact_bundle(
             "payments": len(payments_rows),
             "portal_users": len(portal_users),
             "chat_messages": chat_messages,
-            "contracts": len(contracts),
-            "virtual_cards": len(cards),
+            "contracts": int(contract_total),
+            "virtual_cards": int(card_total),
             "documents": len(documents),
         },
     }

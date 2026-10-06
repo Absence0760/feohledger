@@ -75,7 +75,7 @@ void main() {
           status: 'mismatch',
           variancePct: 12.5,
           withinTolerance: false,
-          issues: ['Amount variance of 12.5%'],
+          issues: [CatalogueFinding(message: 'Amount variance of 12.5%')],
         ),
       ),
     ));
@@ -84,7 +84,34 @@ void main() {
     expect(find.text('3-way match'), findsOneWidget);
     expect(find.text('Mismatch'), findsOneWidget);
     expect(find.text('+12.5% variance'), findsOneWidget);
+    // A pre-catalogue string issue renders exactly as persisted.
     expect(find.text('• Amount variance of 12.5%'), findsOneWidget);
+  });
+
+  testWidgets('localizes a coded PO-match issue and the status word',
+      (tester) async {
+    await tester.pumpWidget(_host(
+      const InvoiceWarningsPanel(
+        warnings: [],
+        poMatch: PoMatch(
+          matchType: '3-way',
+          status: 'partial',
+          issues: [
+            CatalogueFinding(
+              message: 'Partial receipt: 60% of ordered quantity received',
+              code: 'po_match.issue.partial_receipt',
+              params: {'receivedPct': '60'},
+            ),
+          ],
+        ),
+      ),
+      locale: const Locale('de'),
+    ));
+
+    // German status word — it was a hardcoded English getter on the model.
+    expect(find.text('Teilweise'), findsOneWidget);
+    expect(find.textContaining('Teillieferung'), findsOneWidget);
+    expect(find.textContaining('Partial receipt'), findsNothing);
   });
 
   testWidgets('exposes one merged semantics label per warning', (tester) async {

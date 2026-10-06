@@ -1,5 +1,5 @@
 import { expect, test } from '../fixtures/helpers';
-import { cleanup, createGr, createMatchedInvoice, createPo, exceptionsFor, recompute } from './setup';
+import { cleanup, createGr, createMatchedInvoice, createPo, exceptionsFor, issueCodes, issueText, recompute } from './setup';
 
 /**
  * 2-way (invoice↔PO) and 3-way (invoice↔PO↔GR) matching outcomes.
@@ -59,7 +59,7 @@ test.describe('2-way invoice↔PO matching', () => {
 		expect(poMatch!.status).toBe('mismatch');
 		expect(poMatch!.within_tolerance).toBe(false);
 		expect(poMatch!.amount_variance_pct).toBeCloseTo(6, 2);
-		expect(poMatch!.issues.join(' ')).toMatch(/Amount mismatch/i);
+		expect(issueText(poMatch!)).toMatch(/Amount mismatch/i);
 		// An over-tolerance invoice must surface a po_mismatch exception so it
 		// can be blocked before payment.
 		expect(exceptionsFor(invoiceId)).toContain('po_mismatch:warning');
@@ -84,7 +84,9 @@ test.describe('2-way invoice↔PO matching', () => {
 		expect(poMatch!.po_currency).toBe('USD');
 		expect(poMatch!.amount_variance).toBeNull();
 		expect(poMatch!.within_tolerance).toBe(false);
-		expect(poMatch!.issues.join(' ')).toMatch(/Currency mismatch: invoice in EUR, PO in USD/);
+		expect(issueText(poMatch!)).toMatch(/Currency mismatch: invoice in EUR, PO in USD/);
+		// The issue is a coded finding the modal localizes, not just English.
+		expect(issueCodes(poMatch!)).toContain('po_match.issue.currency_mismatch');
 		expect(exceptionsFor(invoiceId)).toContain('po_mismatch:warning');
 	});
 
@@ -114,7 +116,7 @@ test.describe('2-way invoice↔PO matching', () => {
 
 		expect(poMatch!.status).toBe('no_po');
 		expect(poMatch!.po_id).toBeNull();
-		expect(poMatch!.issues.join(' ')).toMatch(/not found/i);
+		expect(issueText(poMatch!)).toMatch(/not found/i);
 		expect(exceptionsFor(invoiceId)).toContain('po_mismatch:error');
 	});
 
@@ -176,7 +178,7 @@ test.describe('3-way invoice↔PO↔GR matching', () => {
 
 		expect(poMatch!.match_type).toBe('3-way');
 		expect(poMatch!.status).toBe('partial');
-		expect(poMatch!.issues.join(' ')).toMatch(/Partial receipt: 60% of ordered quantity/i);
+		expect(issueText(poMatch!)).toMatch(/Partial receipt: 60% of ordered quantity/i);
 		// Partial receipt is informational, not a hard block.
 		expect(exceptionsFor(invoiceId)).toContain('po_mismatch:info');
 	});

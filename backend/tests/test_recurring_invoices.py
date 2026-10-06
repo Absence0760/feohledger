@@ -1373,7 +1373,8 @@ async def test_template_author_cannot_approve_what_the_sweep_generated(realdb):
         resp = await c.post(f"/api/invoices/{invoice_id}/approve", json={})
 
     assert resp.status_code == 403, resp.text
-    assert "segregation" in resp.json()["detail"].lower()
+    assert "segregation" in resp.json()["detail"]["message"].lower()
+    assert resp.json()["detail"]["code"] == "approval_segregation"
 
 
 # --------------------------------------------------------------------------- #
@@ -1723,7 +1724,8 @@ async def test_a_template_editor_cannot_approve_what_the_sweep_generated(realdb)
     async with realdb.client(key="a", role="ap_manager") as c:
         refused = await c.post(f"/api/invoices/{invoice_id}/approve", json={})
     assert refused.status_code == 403, refused.text
-    assert "segregation" in refused.json()["detail"].lower()
+    assert "segregation" in refused.json()["detail"]["message"].lower()
+    assert refused.json()["detail"]["code"] == "approval_segregation"
 
     async with realdb.client(key="a", role="cfo") as c:
         allowed = await c.post(f"/api/invoices/{invoice_id}/approve", json={})

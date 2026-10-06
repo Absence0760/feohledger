@@ -1,6 +1,5 @@
 // ignore: unused_import
 import 'package:intl/intl.dart' as intl;
-
 import 'app_localizations.dart';
 
 // ignore_for_file: type=lint
@@ -642,6 +641,70 @@ class AppLocalizationsDe extends AppLocalizations {
   String glChartRefusalOnLines(String reasons) {
     return 'Positionen: $reasons';
   }
+
+  @override
+  String get codedRefusalApprovalSegregation =>
+      'Funktionstrennung: Wer an der Erstellung dieser Rechnung beteiligt war, darf sie nicht auch freigeben.';
+
+  @override
+  String get codedRefusalApprovalLevelReuse =>
+      'Sie haben bereits eine frühere Stufe dieser Freigabekette freigegeben; eine andere Person muss freigeben.';
+
+  @override
+  String get codedRefusalApprovalNotNamedApprover =>
+      'Sie sind für diesen Schritt nicht als Freigebende(r) berechtigt.';
+
+  @override
+  String codedRefusalApprovalMaxExceeded(String amount, String limit) {
+    return 'Der Rechnungsbetrag $amount übersteigt den zulässigen Höchstbetrag $limit.';
+  }
+
+  @override
+  String get codedRefusalApprovalMaxMisconfigured =>
+      'Der Freigabeschritt dieses Workflows hat einen unbrauchbaren maximalen Rechnungsbetrag. Die Freigabe ist gesperrt, bis ein Admin die Workflow-Definition korrigiert.';
+
+  @override
+  String codedRefusalApprovalCfoRequired(String amount, String limit) {
+    return 'Der Rechnungsbetrag $amount übersteigt $limit. CFO-Freigabe erforderlich.';
+  }
+
+  @override
+  String codedRefusalApprovalCfoRequiredUnknownLimit(String amount) {
+    return 'Der Rechnungsbetrag $amount übersteigt das konfigurierte Limit. CFO-Freigabe erforderlich.';
+  }
+
+  @override
+  String codedRefusalGateStructuring(
+    String recent,
+    int days,
+    String aggregate,
+  ) {
+    String _temp0 = intl.Intl.pluralLogic(
+      days,
+      locale: localeName,
+      other: 'letzte $days Tage',
+      one: 'letzter $days Tag',
+    );
+    return 'Diese Rechnung allein liegt unter dem Schwellenwert, zusammen mit $recent aus anderen aktuellen Rechnungen dieses Lieferanten ($_temp0) ergibt sie jedoch $aggregate.';
+  }
+
+  @override
+  String codedRefusalGateInexpressible(String currency) {
+    return 'Diese Rechnung konnte nicht in $currency ausgedrückt werden, der Währung des Limits, und kann daher nicht dagegen geprüft werden.';
+  }
+
+  @override
+  String codedRefusalGateMeasured(String measured, String currency) {
+    return 'Gemessen als $measured – das Limit ist in $currency festgelegt.';
+  }
+
+  @override
+  String get codedRefusalExceptionSegregationRaiser =>
+      'Funktionstrennung: Wer diese Ausnahme durch die eigene Aktion ausgelöst hat, darf sie nicht auch auflösen. Eskalieren Sie sie oder bitten Sie eine andere Person um die Entscheidung.';
+
+  @override
+  String get codedRefusalExceptionSegregationImplicated =>
+      'Funktionstrennung: Wer an der Erstellung dieser Rechnung beteiligt war, darf keine Ausnahme auflösen, die ihre Zahlung blockiert. Eskalieren Sie sie oder bitten Sie eine andere Person um die Entscheidung.';
 
   @override
   String get invoiceDetailApproved => 'Rechnung freigegeben';
@@ -2872,5 +2935,124 @@ class AppLocalizationsDe extends AppLocalizations {
   @override
   String invoiceWarningGlCodeStalePrior(String code) {
     return 'Das zwischengespeicherte Sachkonto „$code“ des Lieferanten ist nicht mehr im aktiven Kontenplan.';
+  }
+
+  @override
+  String invoicePoMatchIssuePoNotFound(String poNumber) {
+    return 'Bestellung $poNumber nicht gefunden';
+  }
+
+  @override
+  String invoicePoMatchIssueCurrencyMismatch(
+    String invoiceCurrency,
+    String poCurrency,
+  ) {
+    return 'Währungsabweichung: Rechnung in $invoiceCurrency, Bestellung in $poCurrency — Beträge nicht verglichen';
+  }
+
+  @override
+  String invoicePoMatchIssueAmountMismatch(
+    String invoiceAmount,
+    String poTotal,
+    String variancePct,
+  ) {
+    return 'Betragsabweichung: Rechnung $invoiceAmount, Bestellung $poTotal ($variancePct)';
+  }
+
+  @override
+  String invoicePoMatchIssueAmountMismatchPoCurrencyUnknown(
+    String invoiceAmount,
+    String poTotal,
+    String variancePct,
+  ) {
+    return 'Betragsabweichung: Rechnung $invoiceAmount, Bestellung $poTotal ($variancePct)';
+  }
+
+  @override
+  String invoicePoMatchIssueAmountMismatchCurrencyUnknown(
+    String invoiceAmount,
+    String poTotal,
+    String variancePct,
+  ) {
+    return 'Betragsabweichung: Rechnung $invoiceAmount, Bestellung $poTotal ($variancePct)';
+  }
+
+  @override
+  String invoicePoMatchIssuePartialReceipt(String receivedPct) {
+    return 'Teillieferung: $receivedPct der bestellten Menge erhalten';
+  }
+
+  @override
+  String invoicePoMatchIssueOverReceipt(
+    String receivedQuantity,
+    String orderedQuantity,
+    String excessQuantity,
+  ) {
+    return 'Überlieferung: $receivedQuantity geliefert gegenüber $orderedQuantity bestellt (+$excessQuantity)';
+  }
+
+  @override
+  String get invoicePoMatchIssueInspectionFailed =>
+      'Qualitätsprüfung nicht bestanden';
+
+  @override
+  String invoicePoMatchIssueInspectionFailedNotes(String notes) {
+    return 'Qualitätsprüfung nicht bestanden: $notes';
+  }
+
+  @override
+  String invoicePoMatchIssuePartialAcceptance(String acceptedQuantity) {
+    return 'Teilannahme: $acceptedQuantity der bestellten Menge angenommen';
+  }
+
+  @override
+  String get invoicePoMatchIssuePartialAcceptanceUnquantified =>
+      'Teilannahme: ein Teil der bestellten Menge angenommen';
+
+  @override
+  String get invoicePoMatchIssueInspectionRequiredMissing =>
+      'Qualitätsprüfung erforderlich, aber nicht vorhanden';
+
+  @override
+  String get exceptionDescriptionMissingDataAfterExtraction =>
+      'Pflichtfelder fehlen nach der Extraktion';
+
+  @override
+  String exceptionDescriptionPriceVarianceFindings(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count Positionen',
+      one: '$count Position',
+    );
+    return 'Preisabweichung gegenüber der Lieferantenhistorie bei $_temp0';
+  }
+
+  @override
+  String exceptionDescriptionContractNoncompliantFindings(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count Befunde zur Vertragskonformität',
+      one: '$count Befund zur Vertragskonformität',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get warningsPoMatchStatusMatched => 'Abgeglichen';
+
+  @override
+  String get warningsPoMatchStatusMismatch => 'Abweichung';
+
+  @override
+  String get warningsPoMatchStatusPartial => 'Teilweise';
+
+  @override
+  String get warningsPoMatchStatusNoPo => 'Keine Bestellung';
+
+  @override
+  String warningsPoMatchAnnouncement(String summary) {
+    return 'Bestellabgleich: $summary';
   }
 }

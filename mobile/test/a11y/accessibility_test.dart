@@ -487,7 +487,7 @@ void main() {
             status: 'mismatch',
             variancePct: 12.5,
             withinTolerance: false,
-            issues: ['Amount variance'],
+            issues: [CatalogueFinding(message: 'Amount variance')],
           ),
         ),
       ));

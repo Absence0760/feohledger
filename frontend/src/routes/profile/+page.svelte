@@ -20,6 +20,7 @@
 	} from '#lib/types/notification.ts';
 	import { roleLabelKey } from '#lib/types/admin.ts';
 	import { formatList } from '#lib/utils/list.ts';
+	import { isCompleteStepUpCode } from '#lib/utils/stepUpCode.ts';
 
 	interface EnrollResponse {
 		secret: string;
@@ -139,11 +140,9 @@
 	// somehow missing, matching the schema's own fail-open default.
 	const hasPassword = $derived(auth.user?.has_password ?? true);
 
-	/** The server's own shape for a TOTP code (6-8 digits); a shorter entry is a
-	 * 422, so a half-typed code must not count as an offered proof. */
-	function isCompleteCode(value: string): boolean {
-		return /^[0-9]{6,8}$/.test(value);
-	}
+	// The server's own shape for a TOTP code — one predicate shared with every
+	// step-up prompt (`#lib/utils/stepUpCode.ts`).
+	const isCompleteCode = isCompleteStepUpCode;
 
 	/** Package a typed proof under the field the server reads it from. */
 	function typedStepUpProof(kind: 'password' | 'code', value: string): StepUpProof {

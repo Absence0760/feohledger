@@ -160,7 +160,9 @@ jobs:
         run: python scripts/gen_invoice_warning_messages.py --check
 
       # The `backend-test` matrix below is partitioned by the committed
-      # `backend/.test_durations`, and nothing regenerates that file — it decays
+      # `backend/.test_durations`, and nothing regenerates that file on its own
+      # (each shard uploads what it measured; `pnpm gen:test-durations` turns a
+      # run's eight into a new baseline) — it decays
       # with every test added until a shard is reaped at the 40-minute cap, which
       # is how the 4-shard layout failed before #447 widened it to 8. This gives
       # the decay a voice while it is still cheap to fix.
@@ -353,7 +355,25 @@ jobs:
           FEOH_REQUIRE_REALDB: "1"
         # pytest-split partitions the suite into 8 deterministic slices; this
         # shard runs slice `matrix.shard`. See the job-level comment for balance.
-        run: pytest --splits 8 --group ${{ matrix.shard }}
+        #
+        # `--store-durations --clean-durations` overwrites this runner's copy of
+        # `.test_durations` with ONLY the durations this shard measured — after
+        # the split has already been read from the committed baseline, so it
+        # changes nothing about which tests run here. The step below uploads it,
+        # and `pnpm gen:test-durations <run-id>` unions the eight into a baseline
+        # measured on the hardware that runs it (see backend/CLAUDE.md).
+        run: pytest --splits 8 --group ${{ matrix.shard }} --store-durations --clean-durations
+
+      - name: Upload measured durations (shard ${{ matrix.shard }}/8)
+        # A failing shard's durations are still real measurements; only a
+        # cancelled run (no session finish, no file) is skipped.
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.0
+        with:
+          name: test-durations-shard-${{ matrix.shard }}
+          path: backend/.test_durations
+          include-hidden-files: true
+          retention-days: 14
 
   frontend:
     name: Frontend

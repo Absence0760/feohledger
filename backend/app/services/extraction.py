@@ -768,6 +768,10 @@ async def run_extraction(
                 exception_type="duplicate",
                 severity="warning",
                 description=duplicate_warning["message"],
+                # The warning's own code + params, so the queue localizes this
+                # exception in the warning's wording (migration 0103).
+                description_code=duplicate_warning["code"],
+                description_params=duplicate_warning["params"],
                 status="open",
                 organization_id=invoice_org_id,
                 invoice=invoice,  # exception follows its invoice (P2)

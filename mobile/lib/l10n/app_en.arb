@@ -293,6 +293,99 @@
       "reasons": { "type": "String" }
     }
   },
+  "codedRefusalApprovalSegregation": "Segregation of duties: a user involved in creating this invoice cannot also approve it.",
+  "@codedRefusalApprovalSegregation": {
+    "description": "Coded refusal (lib/l10n/coded_refusal_messages.dart) `approval_segregation`: the approver is implicated in the invoice."
+  },
+  "codedRefusalApprovalLevelReuse": "You already approved an earlier level of this chain; a different approver is required.",
+  "@codedRefusalApprovalLevelReuse": {
+    "description": "Coded refusal `approval_level_reuse`: the approver already signed an earlier chain level."
+  },
+  "codedRefusalApprovalNotNamedApprover": "You are not an authorized approver for this step.",
+  "@codedRefusalApprovalNotNamedApprover": {
+    "description": "Coded refusal `approval_not_named_approver`."
+  },
+  "codedRefusalApprovalMaxExceeded": "Invoice amount {amount} exceeds the maximum allowed {limit}.",
+  "@codedRefusalApprovalMaxExceeded": {
+    "description": "Coded refusal `approval_max_amount_exceeded`. {amount} / {limit} are formatted money with their currency.",
+    "placeholders": {
+      "amount": {
+        "type": "String"
+      },
+      "limit": {
+        "type": "String"
+      }
+    }
+  },
+  "codedRefusalApprovalMaxMisconfigured": "This workflow's approval step has an unusable maximum invoice amount. Approval is blocked until an admin corrects the workflow definition.",
+  "@codedRefusalApprovalMaxMisconfigured": {
+    "description": "Coded refusal `approval_max_amount_misconfigured`."
+  },
+  "codedRefusalApprovalCfoRequired": "Invoice amount {amount} exceeds {limit}. CFO approval required.",
+  "@codedRefusalApprovalCfoRequired": {
+    "description": "Coded refusal `approval_cfo_required`. {amount} / {limit} are formatted money with their currency.",
+    "placeholders": {
+      "amount": {
+        "type": "String"
+      },
+      "limit": {
+        "type": "String"
+      }
+    }
+  },
+  "codedRefusalApprovalCfoRequiredUnknownLimit": "Invoice amount {amount} exceeds the configured limit. CFO approval required.",
+  "@codedRefusalApprovalCfoRequiredUnknownLimit": {
+    "description": "Coded refusal `approval_cfo_required` when the threshold itself is malformed.",
+    "placeholders": {
+      "amount": {
+        "type": "String"
+      }
+    }
+  },
+  "codedRefusalGateStructuring": "This invoice alone is under the threshold, but combined with {recent} in other recent invoices from this vendor ({days, plural, one {last {days} day} other {last {days} days}}) it totals {aggregate}.",
+  "@codedRefusalGateStructuring": {
+    "description": "Money-gate note: the structuring aggregate. {recent} / {aggregate} are formatted money; {days} the window length.",
+    "placeholders": {
+      "recent": {
+        "type": "String"
+      },
+      "days": {
+        "type": "int"
+      },
+      "aggregate": {
+        "type": "String"
+      }
+    }
+  },
+  "codedRefusalGateInexpressible": "This invoice could not be expressed in {currency}, the currency the limit is set in, so it cannot be cleared against it.",
+  "@codedRefusalGateInexpressible": {
+    "description": "Money-gate note: the invoice could not be converted into the limit's currency {currency}.",
+    "placeholders": {
+      "currency": {
+        "type": "String"
+      }
+    }
+  },
+  "codedRefusalGateMeasured": "Measured as {measured} — the limit is set in {currency}.",
+  "@codedRefusalGateMeasured": {
+    "description": "Money-gate note: the converted figure {measured} that was compared.",
+    "placeholders": {
+      "measured": {
+        "type": "String"
+      },
+      "currency": {
+        "type": "String"
+      }
+    }
+  },
+  "codedRefusalExceptionSegregationRaiser": "Segregation of duties: the user whose action raised this exception cannot also clear it. Escalate it, or ask a different user to decide.",
+  "@codedRefusalExceptionSegregationRaiser": {
+    "description": "Coded refusal `segregation_raiser` on resolving an exception."
+  },
+  "codedRefusalExceptionSegregationImplicated": "Segregation of duties: a user involved in creating this invoice cannot also clear an exception that blocks its payment. Escalate it, or ask a different user to decide.",
+  "@codedRefusalExceptionSegregationImplicated": {
+    "description": "Coded refusal `segregation_implicated` on resolving an exception."
+  },
   "invoiceDetailApproved": "Invoice approved",
   "invoiceDetailApproveFailed": "Could not approve invoice — please try again",
   "invoiceDetailRejected": "Invoice rejected",
@@ -1928,6 +2021,137 @@
   "@invoiceWarningGlCodeStalePrior": {
     "placeholders": {
       "code": {
+        "type": "String"
+      }
+    }
+  },
+  "invoicePoMatchIssuePoNotFound": "PO {poNumber} not found",
+  "@invoicePoMatchIssuePoNotFound": {
+    "placeholders": {
+      "poNumber": {
+        "type": "String"
+      }
+    }
+  },
+  "invoicePoMatchIssueCurrencyMismatch": "Currency mismatch: invoice in {invoiceCurrency}, PO in {poCurrency} — amounts not compared",
+  "@invoicePoMatchIssueCurrencyMismatch": {
+    "placeholders": {
+      "invoiceCurrency": {
+        "type": "String"
+      },
+      "poCurrency": {
+        "type": "String"
+      }
+    }
+  },
+  "invoicePoMatchIssueAmountMismatch": "Amount mismatch: invoice {invoiceAmount} vs PO {poTotal} ({variancePct})",
+  "@invoicePoMatchIssueAmountMismatch": {
+    "placeholders": {
+      "invoiceAmount": {
+        "type": "String"
+      },
+      "poTotal": {
+        "type": "String"
+      },
+      "variancePct": {
+        "type": "String"
+      }
+    }
+  },
+  "invoicePoMatchIssueAmountMismatchPoCurrencyUnknown": "Amount mismatch: invoice {invoiceAmount} vs PO {poTotal} ({variancePct})",
+  "@invoicePoMatchIssueAmountMismatchPoCurrencyUnknown": {
+    "placeholders": {
+      "invoiceAmount": {
+        "type": "String"
+      },
+      "poTotal": {
+        "type": "String"
+      },
+      "variancePct": {
+        "type": "String"
+      }
+    }
+  },
+  "invoicePoMatchIssueAmountMismatchCurrencyUnknown": "Amount mismatch: invoice {invoiceAmount} vs PO {poTotal} ({variancePct})",
+  "@invoicePoMatchIssueAmountMismatchCurrencyUnknown": {
+    "placeholders": {
+      "invoiceAmount": {
+        "type": "String"
+      },
+      "poTotal": {
+        "type": "String"
+      },
+      "variancePct": {
+        "type": "String"
+      }
+    }
+  },
+  "invoicePoMatchIssuePartialReceipt": "Partial receipt: {receivedPct} of ordered quantity received",
+  "@invoicePoMatchIssuePartialReceipt": {
+    "placeholders": {
+      "receivedPct": {
+        "type": "String"
+      }
+    }
+  },
+  "invoicePoMatchIssueOverReceipt": "Over-receipt: {receivedQuantity} received against {orderedQuantity} ordered (+{excessQuantity})",
+  "@invoicePoMatchIssueOverReceipt": {
+    "placeholders": {
+      "receivedQuantity": {
+        "type": "String"
+      },
+      "orderedQuantity": {
+        "type": "String"
+      },
+      "excessQuantity": {
+        "type": "String"
+      }
+    }
+  },
+  "invoicePoMatchIssueInspectionFailed": "Failed quality inspection",
+  "invoicePoMatchIssueInspectionFailedNotes": "Failed quality inspection: {notes}",
+  "@invoicePoMatchIssueInspectionFailedNotes": {
+    "placeholders": {
+      "notes": {
+        "type": "String"
+      }
+    }
+  },
+  "invoicePoMatchIssuePartialAcceptance": "Partial acceptance: {acceptedQuantity} of ordered quantity accepted",
+  "@invoicePoMatchIssuePartialAcceptance": {
+    "placeholders": {
+      "acceptedQuantity": {
+        "type": "String"
+      }
+    }
+  },
+  "invoicePoMatchIssuePartialAcceptanceUnquantified": "Partial acceptance: part of ordered quantity accepted",
+  "invoicePoMatchIssueInspectionRequiredMissing": "Quality inspection required but missing",
+  "exceptionDescriptionMissingDataAfterExtraction": "Required fields missing after extraction",
+  "exceptionDescriptionPriceVarianceFindings": "Line-item price variance vs vendor history on {count, plural, one {{count} line} other {{count} lines}}",
+  "@exceptionDescriptionPriceVarianceFindings": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "exceptionDescriptionContractNoncompliantFindings": "{count, plural, one {{count} contract-compliance finding} other {{count} contract-compliance findings}}",
+  "@exceptionDescriptionContractNoncompliantFindings": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "warningsPoMatchStatusMatched": "Matched",
+  "warningsPoMatchStatusMismatch": "Mismatch",
+  "warningsPoMatchStatusPartial": "Partial",
+  "warningsPoMatchStatusNoPo": "No PO",
+  "warningsPoMatchAnnouncement": "PO match: {summary}",
+  "@warningsPoMatchAnnouncement": {
+    "placeholders": {
+      "summary": {
         "type": "String"
       }
     }

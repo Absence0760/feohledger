@@ -9,14 +9,18 @@ export interface Passkey {
 	last_used_at: string | null;
 }
 
-/** The factor-management actions a step-up can authorize. The server binds an
+/** The actions a step-up can authorize: the four factor changes, plus the
+ * sensitive actions that demand a second factor (`dsar_unmasked_export` — an
+ * unmasked-banking DSAR export, `ui/StepUpPrompt.svelte`). The server binds an
  * assertion to exactly one of these, so the value here is load-bearing — it
- * must match the operation of the call the proof is then sent with. */
+ * must match the operation of the call the proof is then sent with. Mirrors
+ * `backend/app/schemas/auth.py::STEP_UP_OPERATIONS`. */
 export type StepUpOperation =
 	| 'totp_enroll'
 	| 'totp_disable'
 	| 'passkey_register'
-	| 'passkey_delete';
+	| 'passkey_delete'
+	| 'dsar_unmasked_export';
 
 /** Re-proof of account control, sent with any change to an existing second
  * factor. Any ONE of the three satisfies the server: the account password, a

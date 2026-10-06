@@ -1,6 +1,5 @@
 // ignore: unused_import
 import 'package:intl/intl.dart' as intl;
-
 import 'app_localizations.dart';
 
 // ignore_for_file: type=lint
@@ -635,6 +634,70 @@ class AppLocalizationsEn extends AppLocalizations {
   String glChartRefusalOnLines(String reasons) {
     return 'Line items: $reasons';
   }
+
+  @override
+  String get codedRefusalApprovalSegregation =>
+      'Segregation of duties: a user involved in creating this invoice cannot also approve it.';
+
+  @override
+  String get codedRefusalApprovalLevelReuse =>
+      'You already approved an earlier level of this chain; a different approver is required.';
+
+  @override
+  String get codedRefusalApprovalNotNamedApprover =>
+      'You are not an authorized approver for this step.';
+
+  @override
+  String codedRefusalApprovalMaxExceeded(String amount, String limit) {
+    return 'Invoice amount $amount exceeds the maximum allowed $limit.';
+  }
+
+  @override
+  String get codedRefusalApprovalMaxMisconfigured =>
+      'This workflow\'s approval step has an unusable maximum invoice amount. Approval is blocked until an admin corrects the workflow definition.';
+
+  @override
+  String codedRefusalApprovalCfoRequired(String amount, String limit) {
+    return 'Invoice amount $amount exceeds $limit. CFO approval required.';
+  }
+
+  @override
+  String codedRefusalApprovalCfoRequiredUnknownLimit(String amount) {
+    return 'Invoice amount $amount exceeds the configured limit. CFO approval required.';
+  }
+
+  @override
+  String codedRefusalGateStructuring(
+    String recent,
+    int days,
+    String aggregate,
+  ) {
+    String _temp0 = intl.Intl.pluralLogic(
+      days,
+      locale: localeName,
+      other: 'last $days days',
+      one: 'last $days day',
+    );
+    return 'This invoice alone is under the threshold, but combined with $recent in other recent invoices from this vendor ($_temp0) it totals $aggregate.';
+  }
+
+  @override
+  String codedRefusalGateInexpressible(String currency) {
+    return 'This invoice could not be expressed in $currency, the currency the limit is set in, so it cannot be cleared against it.';
+  }
+
+  @override
+  String codedRefusalGateMeasured(String measured, String currency) {
+    return 'Measured as $measured — the limit is set in $currency.';
+  }
+
+  @override
+  String get codedRefusalExceptionSegregationRaiser =>
+      'Segregation of duties: the user whose action raised this exception cannot also clear it. Escalate it, or ask a different user to decide.';
+
+  @override
+  String get codedRefusalExceptionSegregationImplicated =>
+      'Segregation of duties: a user involved in creating this invoice cannot also clear an exception that blocks its payment. Escalate it, or ask a different user to decide.';
 
   @override
   String get invoiceDetailApproved => 'Invoice approved';
@@ -2851,5 +2914,123 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String invoiceWarningGlCodeStalePrior(String code) {
     return 'Cached vendor GL code “$code” is no longer in the active chart of accounts.';
+  }
+
+  @override
+  String invoicePoMatchIssuePoNotFound(String poNumber) {
+    return 'PO $poNumber not found';
+  }
+
+  @override
+  String invoicePoMatchIssueCurrencyMismatch(
+    String invoiceCurrency,
+    String poCurrency,
+  ) {
+    return 'Currency mismatch: invoice in $invoiceCurrency, PO in $poCurrency — amounts not compared';
+  }
+
+  @override
+  String invoicePoMatchIssueAmountMismatch(
+    String invoiceAmount,
+    String poTotal,
+    String variancePct,
+  ) {
+    return 'Amount mismatch: invoice $invoiceAmount vs PO $poTotal ($variancePct)';
+  }
+
+  @override
+  String invoicePoMatchIssueAmountMismatchPoCurrencyUnknown(
+    String invoiceAmount,
+    String poTotal,
+    String variancePct,
+  ) {
+    return 'Amount mismatch: invoice $invoiceAmount vs PO $poTotal ($variancePct)';
+  }
+
+  @override
+  String invoicePoMatchIssueAmountMismatchCurrencyUnknown(
+    String invoiceAmount,
+    String poTotal,
+    String variancePct,
+  ) {
+    return 'Amount mismatch: invoice $invoiceAmount vs PO $poTotal ($variancePct)';
+  }
+
+  @override
+  String invoicePoMatchIssuePartialReceipt(String receivedPct) {
+    return 'Partial receipt: $receivedPct of ordered quantity received';
+  }
+
+  @override
+  String invoicePoMatchIssueOverReceipt(
+    String receivedQuantity,
+    String orderedQuantity,
+    String excessQuantity,
+  ) {
+    return 'Over-receipt: $receivedQuantity received against $orderedQuantity ordered (+$excessQuantity)';
+  }
+
+  @override
+  String get invoicePoMatchIssueInspectionFailed => 'Failed quality inspection';
+
+  @override
+  String invoicePoMatchIssueInspectionFailedNotes(String notes) {
+    return 'Failed quality inspection: $notes';
+  }
+
+  @override
+  String invoicePoMatchIssuePartialAcceptance(String acceptedQuantity) {
+    return 'Partial acceptance: $acceptedQuantity of ordered quantity accepted';
+  }
+
+  @override
+  String get invoicePoMatchIssuePartialAcceptanceUnquantified =>
+      'Partial acceptance: part of ordered quantity accepted';
+
+  @override
+  String get invoicePoMatchIssueInspectionRequiredMissing =>
+      'Quality inspection required but missing';
+
+  @override
+  String get exceptionDescriptionMissingDataAfterExtraction =>
+      'Required fields missing after extraction';
+
+  @override
+  String exceptionDescriptionPriceVarianceFindings(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count lines',
+      one: '$count line',
+    );
+    return 'Line-item price variance vs vendor history on $_temp0';
+  }
+
+  @override
+  String exceptionDescriptionContractNoncompliantFindings(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count contract-compliance findings',
+      one: '$count contract-compliance finding',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get warningsPoMatchStatusMatched => 'Matched';
+
+  @override
+  String get warningsPoMatchStatusMismatch => 'Mismatch';
+
+  @override
+  String get warningsPoMatchStatusPartial => 'Partial';
+
+  @override
+  String get warningsPoMatchStatusNoPo => 'No PO';
+
+  @override
+  String warningsPoMatchAnnouncement(String summary) {
+    return 'PO match: $summary';
   }
 }

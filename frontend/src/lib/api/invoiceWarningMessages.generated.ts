@@ -10,6 +10,11 @@
 // decisions.md §155 shipped a localized frame around server-English
 // findings and named this as the fix: a label per `type` could not work,
 // because one type is up to five different sentences.
+//
+// Three families share the map, each namespaced in its wire code: the
+// warnings themselves, the PO-match panel's `po_match.issue.*` entries,
+// and the `exception.*` descriptions no warning states (an exception that
+// mirrors a warning carries the warning's own code).
 import type { MessageKey } from '#lib/i18n/messages.ts';
 
 /** What a warning parameter holds, and therefore how it renders. */
@@ -124,6 +129,36 @@ export const INVOICE_WARNING_MESSAGE_KEYS = {
 	'gl_codes_not_in_chart': 'invoices.warning.glCodesNotInChart',
 	// Cached vendor GL code '{code}' is no longer in the active chart of accounts.
 	'gl_code_stale_prior': 'invoices.warning.glCodeStalePrior',
+	// PO {poNumber} not found
+	'po_match.issue.po_not_found': 'invoices.poMatch.issue.poNotFound',
+	// Currency mismatch: invoice in {invoiceCurrency}, PO in {poCurrency} — amounts not compared
+	'po_match.issue.currency_mismatch': 'invoices.poMatch.issue.currencyMismatch',
+	// Amount mismatch: invoice {invoiceAmount} {currency} vs PO {poTotal} {currency} ({variancePct}%)
+	'po_match.issue.amount_mismatch': 'invoices.poMatch.issue.amountMismatch',
+	// Amount mismatch: invoice {invoiceAmount} {currency} vs PO {poTotal} ({variancePct}%)
+	'po_match.issue.amount_mismatch_po_currency_unknown': 'invoices.poMatch.issue.amountMismatchPoCurrencyUnknown',
+	// Amount mismatch: invoice {invoiceAmount} vs PO {poTotal} ({variancePct}%)
+	'po_match.issue.amount_mismatch_currency_unknown': 'invoices.poMatch.issue.amountMismatchCurrencyUnknown',
+	// Partial receipt: {receivedPct}% of ordered quantity received
+	'po_match.issue.partial_receipt': 'invoices.poMatch.issue.partialReceipt',
+	// Over-receipt: {receivedQuantity} received against {orderedQuantity} ordered (+{excessQuantity})
+	'po_match.issue.over_receipt': 'invoices.poMatch.issue.overReceipt',
+	// Failed quality inspection
+	'po_match.issue.inspection_failed': 'invoices.poMatch.issue.inspectionFailed',
+	// Failed quality inspection: {notes}
+	'po_match.issue.inspection_failed_notes': 'invoices.poMatch.issue.inspectionFailedNotes',
+	// Partial acceptance: {acceptedQuantity} of ordered quantity accepted
+	'po_match.issue.partial_acceptance': 'invoices.poMatch.issue.partialAcceptance',
+	// Partial acceptance: part of ordered quantity accepted
+	'po_match.issue.partial_acceptance_unquantified': 'invoices.poMatch.issue.partialAcceptanceUnquantified',
+	// Quality inspection required but missing
+	'po_match.issue.inspection_required_missing': 'invoices.poMatch.issue.inspectionRequiredMissing',
+	// Required fields missing after extraction
+	'exception.missing_data_after_extraction': 'exceptions.description.missingDataAfterExtraction',
+	// Line-item price variance vs vendor history on {count, plural, one {# line} other {# lines}}
+	'exception.price_variance_findings': 'exceptions.description.priceVarianceFindings',
+	// {count, plural, one {# contract-compliance finding} other {# contract-compliance findings}}
+	'exception.contract_noncompliant_findings': 'exceptions.description.contractNoncompliantFindings',
 } as const satisfies Record<string, MessageKey>;
 
 /**
@@ -185,6 +220,21 @@ export const INVOICE_WARNING_PARAM_KINDS = {
 	'self_correction_line_item_math': { lineNumber: 'count', quantity: 'number', unitPrice: 'number', expected: 'number', total: 'number' },
 	'gl_codes_not_in_chart': { codes: 'text' },
 	'gl_code_stale_prior': { code: 'text' },
+	'po_match.issue.po_not_found': { poNumber: 'text' },
+	'po_match.issue.currency_mismatch': { invoiceCurrency: 'text', poCurrency: 'text' },
+	'po_match.issue.amount_mismatch': { invoiceAmount: 'money', poTotal: 'money', currency: 'currency', variancePct: 'percent' },
+	'po_match.issue.amount_mismatch_po_currency_unknown': { invoiceAmount: 'money', poTotal: 'number', currency: 'currency', variancePct: 'percent' },
+	'po_match.issue.amount_mismatch_currency_unknown': { invoiceAmount: 'number', poTotal: 'number', variancePct: 'percent' },
+	'po_match.issue.partial_receipt': { receivedPct: 'percent' },
+	'po_match.issue.over_receipt': { receivedQuantity: 'number', orderedQuantity: 'number', excessQuantity: 'number' },
+	'po_match.issue.inspection_failed': {},
+	'po_match.issue.inspection_failed_notes': { notes: 'text' },
+	'po_match.issue.partial_acceptance': { acceptedQuantity: 'number' },
+	'po_match.issue.partial_acceptance_unquantified': {},
+	'po_match.issue.inspection_required_missing': {},
+	'exception.missing_data_after_extraction': {},
+	'exception.price_variance_findings': { count: 'count' },
+	'exception.contract_noncompliant_findings': { count: 'count' },
 } as const satisfies Record<
 	keyof typeof INVOICE_WARNING_MESSAGE_KEYS,
 	Record<string, WarningParamKind>

@@ -219,6 +219,44 @@ export const messages = {
 		'パスキーが登録されていません',
 	'authRefusal.portalStepUpFailed':
 		'二要素認証の設定を変更するには、パスワードまたは認証アプリの現在のコードで確認してください。',
+	'authRefusal.sensitiveStepUpRequired':
+		'続行するには、認証アプリの現在のコードまたは登録済みのパスキーで確認してください。',
+	'authRefusal.sensitiveStepUpFailed':
+		'そのコードまたはパスキーを確認できませんでした。続行するには、認証アプリの現在のコードまたは登録済みのパスキーで確認してください。',
+	'authRefusal.sensitiveStepUpNoFactor':
+		'この操作には第2要素が必要です。先にプロフィールで認証アプリまたはパスキーを設定してください。パスワードだけでは承認できません。',
+	'authRefusal.sensitiveStepUpUnavailable':
+		'この操作には二要素認証が必要ですが、この環境では有効になっていません。',
+	'stepUpPrompt.title':
+		'本人確認',
+	'stepUpPrompt.codeLabel':
+		'認証コード',
+	'stepUpPrompt.confirm':
+		'確認',
+	'stepUpPrompt.confirming':
+		'確認中…',
+	'stepUpPrompt.usePasskey':
+		'代わりにパスキーを使用',
+	'stepUpPrompt.cancel':
+		'キャンセル',
+	'stepUpPrompt.failed':
+		'確認できませんでした。もう一度お試しください。',
+	'privacyDsar.includeBanking':
+		'口座情報を完全な形で含める（マスクなし）',
+	'privacyDsar.includeBankingHint':
+		'口座情報は既定でマスクされます。マスクなしのエクスポートには記入済みの理由と第2要素による確認が必要で、監査証跡に別途記録されます。',
+	'privacyDsar.justificationLabel':
+		'マスクなしでエクスポートする理由',
+	'privacyDsar.justificationHint':
+		'法的根拠またはチケット番号。監査証跡に記録されるため、個人データは貼り付けないでください。',
+	'privacyDsar.stepUpHint':
+		'マスクなしのエクスポートでは、仕入先の口座番号がすべて表示されます。認証アプリの現在のコードを入力するか、登録済みのパスキーを使用してください。',
+	'privacyDsar.noFactor':
+		'このエクスポートには第2要素が必要で、パスワードだけでは承認できません。先に{profile}。',
+	'privacyDsar.noFactorLink':
+		'プロフィールで認証アプリまたはパスキーを設定してください',
+	'privacyDsar.unmaskedNotice':
+		'このエクスポートの口座情報はマスクされていません。取り扱いに注意してください。',
 
 	'profile.sessions.heading': 'サインイン中の端末',
 	'profile.sessions.hint':
@@ -431,6 +469,21 @@ export const messages = {
 	'invoices.warning.selfCorrectionLineItemMath': '明細 {lineNumber}: {quantity} × {unitPrice} = {expected} ですが、合計は {total} です。',
 	'invoices.warning.glCodesNotInChart': 'AI が提案した勘定科目が有効な勘定科目表にありません: {codes}',
 	'invoices.warning.glCodeStalePrior': 'この仕入先のキャッシュされた勘定科目「{code}」は有効な勘定科目表にありません。',
+	'invoices.poMatch.issue.poNotFound': '発注 {poNumber} が見つかりません',
+	'invoices.poMatch.issue.currencyMismatch': '通貨の不一致: 請求は {invoiceCurrency}、発注は {poCurrency} — 金額は比較されていません',
+	'invoices.poMatch.issue.amountMismatch': '金額の不一致: 請求 {invoiceAmount} / 発注 {poTotal}（{variancePct}）',
+	'invoices.poMatch.issue.amountMismatchPoCurrencyUnknown': '金額の不一致: 請求 {invoiceAmount} / 発注 {poTotal}（{variancePct}）',
+	'invoices.poMatch.issue.amountMismatchCurrencyUnknown': '金額の不一致: 請求 {invoiceAmount} / 発注 {poTotal}（{variancePct}）',
+	'invoices.poMatch.issue.partialReceipt': '一部入荷: 発注数量の {receivedPct} を入荷',
+	'invoices.poMatch.issue.overReceipt': '過剰入荷: 発注 {orderedQuantity} に対し {receivedQuantity} 入荷（+{excessQuantity}）',
+	'invoices.poMatch.issue.inspectionFailed': '品質検査不合格',
+	'invoices.poMatch.issue.inspectionFailedNotes': '品質検査不合格: {notes}',
+	'invoices.poMatch.issue.partialAcceptance': '一部受入: 発注数量のうち {acceptedQuantity} を受入',
+	'invoices.poMatch.issue.partialAcceptanceUnquantified': '一部受入: 発注数量の一部を受入',
+	'invoices.poMatch.issue.inspectionRequiredMissing': '品質検査が必要ですが未実施です',
+	'exceptions.description.missingDataAfterExtraction': '抽出後も必須項目が不足しています',
+	'exceptions.description.priceVarianceFindings': '{count, plural, other {#件の明細}}で仕入先履歴との単価差異',
+	'exceptions.description.contractNoncompliantFindings': '契約遵守に関する指摘 {count, plural, other {#件}}',
 	'invoices.priorsTitle':
 		'抽出の事前情報: {cache, plural, other {取引先キャッシュ項目 # 件}}、{rag, plural, other {RAG 近傍 # 件}}',
 	'invoices.empty': 'フィルターに一致する請求書はありません。',
@@ -1670,6 +1723,48 @@ export const messages = {
 	'org.security.mfaEnforcementInactive':
 		'この設定は保存されましたが、まだ適用されていません。このデプロイでは二要素認証がプラットフォーム全体で無効になっています。有効化されるまでユーザーに求められることはありません。',
 	'org.security.save': '保存',
+	// /organization -> Single Sign-On panel (PUT /api/organization/sso)
+	'orgSso.title': 'シングルサインオン',
+	'orgSso.hint': 'メンバーが OpenID Connect または SAML で ID プロバイダー経由でサインインできるようにします。ここでの変更はすべて監査されます。',
+	'orgSso.loading': 'SSO 設定を読み込み中…',
+	'orgSso.enabled': 'シングルサインオンを有効にする',
+	'orgSso.field.protocol': 'プロトコル',
+	'orgSso.field.provider': 'サインインボタン',
+	'orgSso.protocol.oidc': 'OpenID Connect (OIDC)',
+	'orgSso.protocol.saml': 'SAML 2.0',
+	'orgSso.provider.generic': '汎用（「SSO でサインイン」）',
+	'orgSso.field.discoveryUrl': 'ディスカバリー URL',
+	'orgSso.field.clientId': 'クライアント ID',
+	'orgSso.field.clientSecret': 'クライアントシークレット',
+	'orgSso.field.idpEntityId': 'IdP エンティティ ID',
+	'orgSso.field.idpSsoUrl': 'IdP サインオン URL',
+	'orgSso.field.idpCert': 'IdP 署名証明書',
+	'orgSso.field.idpCertMulti': '追加の署名証明書',
+	'orgSso.field.idpSloUrl': 'IdP サインアウト URL（任意）',
+	'orgSso.field.spEntityId': 'SP エンティティ ID の上書き（任意）',
+	'orgSso.field.allowedDomains': '許可するメールドメイン',
+	'orgSso.domainsHint': 'カンマ区切り。初回の SSO サインインでアカウントが作成されるのはこれらのドメインのみです。空欄にするとすべてのドメインを受け入れます。',
+	'orgSso.secret.keepPlaceholder': '保存済みのシークレットを維持する場合は空欄のまま',
+	'orgSso.secret.configured': 'クライアントシークレットが保存されています。再表示はされません。置き換えるには新しい値を入力してください。',
+	'orgSso.secret.notConfigured': 'クライアントシークレットは保存されていません。',
+	'orgSso.secret.clear': '保存済みのクライアントシークレットを削除する',
+	'orgSso.register.title': 'ID プロバイダーにこのアプリを登録する',
+	'orgSso.register.hint': 'ID プロバイダーで作成するアプリケーションに、これらの値をコピーしてください。',
+	'orgSso.register.redirectUri': 'リダイレクト URI',
+	'orgSso.register.acsUrl': 'ACS URL',
+	'orgSso.register.spEntityId': 'SP エンティティ ID（オーディエンス）',
+	'orgSso.ssoOnly': 'SSO を必須にする（パスワードでのサインインを無効化）',
+	'orgSso.ssoOnlyHint':
+		'メンバーは ID プロバイダー経由でのみサインインできるようになります。上のプロバイダー設定が揃うまで保存できません。後でプロバイダーが機能しなくなった場合は、プラットフォーム運用者がパスワードでのサインインを再開できます。',
+	'orgSso.status.passwordClosed': 'SSO 必須が有効です：全メンバーのパスワードでのサインインは無効です。',
+	'orgSso.status.incomplete': 'SSO は有効ですが、次の項目が設定されるまでサインインボタンは表示されません：{fields}。',
+	'orgSso.status.incompleteUnknown': 'SSO は有効ですが、ID プロバイダーの設定が不完全なため、サインインボタンは表示されません。',
+	'orgSso.save': 'SSO 設定を保存',
+	'orgSso.toast.loadFailed': 'SSO 設定を読み込めませんでした',
+	'orgSso.toast.saved': 'SSO 設定を保存しました',
+	'orgSso.toast.saveFailed': 'SSO 設定を保存できませんでした',
+	'orgSso.refusal.idpUnresolved':
+		'SSO を必須にするとパスワードでのサインインが無効になるため、先に ID プロバイダーの設定を揃える必要があります。不足または無効：{fields}。',
 	'org.section.fraud': '不正検知',
 	'org.section.fraudSaved': '不正検知',
 	'org.fraud.hint': '以下の各ルールは、請求書の作成または更新時にチェックされます。ルールを無効にすると、警告と自動生成された例外の両方が抑制され、キューが整理された状態を保ちます。',
@@ -4355,11 +4450,11 @@ export const messages = {
 	'sweepHealth.title': 'バックグラウンド処理の状態',
 	'tax.action.manage': '管理',
 	'tax.boxes.fallbackTag': '既定',
-	'tax.boxes.notReconciled': 'ボックスの合計が報告対象合計と一致しません（未配分 {residual}）。解決するまで申告しないでください。',
+	'tax.boxes.notReconciled': 'ボックスの合計が提出必須の1099の合計と一致しません（未配分 {residual}）。解決するまで申告しないでください。',
 	'tax.boxes.paymentCount': '{n, plural, other {支払 #件}}',
-	'tax.boxes.reconciled': 'ボックスの合計は報告対象合計と1セント単位で一致しています。',
+	'tax.boxes.reconciled': 'ボックスの合計は提出必須の1099の合計と1セント単位で一致しています。',
 	'tax.boxes.rowTitle': '{label} — {amount}',
-	'tax.boxes.subtitle': '報告対象の支出が IRS のどのボックスに分かれるか（各請求書の勘定科目から判定）。',
+	'tax.boxes.subtitle': '提出必須の1099に記載される金額が IRS のどのボックスに分かれるか（各請求書の勘定科目から判定）。仕入先への送付が不要なフォームのボックスは含みません。',
 	'tax.boxes.title': '1099 ボックス配分',
 	'tax.boxes.unmapped': '{amount} は勘定科目ルールに一致せず {box} で申告されます。正しく分けるには組織設定で該当の勘定科目を対応付けてください。',
 	'tax.cardPaymentCount': '{n, plural, other {カード決済 #件}}',
@@ -4407,7 +4502,7 @@ export const messages = {
 	'tax.kpi.cardExcludedSub': 'カード払いの {amount} を除く（決済事業者が 1099-K で報告します）',
 	'tax.kpi.reportableOver': '報告対象（1099 + ${threshold}超）',
 	'tax.kpi.reportableWithoutW9': 'W-9なしの報告対象',
-	'tax.kpi.totalReportable': '報告対象合計',
+	'tax.kpi.totalReportable': '提出必須の1099の合計',
 	'tax.kpi.vendorsWithPayments': '支払いのあるベンダー',
 	'tax.loadingReport': '{year}年の1099レポートを読み込み中…',
 	'tax.reportMeta': 'レポート生成日: {generated}。報告対象 = {year}年の完了済み支払いで ${threshold} を超えて支払われた1099対象ベンダー。',
@@ -4615,6 +4710,35 @@ export const messages = {
 	'glChartRefusal.pickActive':
 		'請求書自身の勘定科目表(共通の勘定科目と、その事業体独自の勘定科目)から有効なコードを選択してください。',
 	'glChartRefusal.onLines': '明細行: {reasons}',
+	// The coded money-path / MFA refusals (`api/codedRefusals.ts`), stated from
+	// their code + params. Money params arrive formatted with their currency.
+	'refusal.approvalSegregation': "職務分掌：この請求書の作成に関与したユーザーは、承認することもできません。",
+	'refusal.approvalLevelReuse': "このチェーンの前のレベルをすでに承認しています。別の承認者が必要です。",
+	'refusal.approvalNotNamedApprover': "このステップの承認者として認められていません。",
+	'refusal.approvalMaxExceeded': "請求額 {amount} が上限額 {limit} を超えています。",
+	'refusal.approvalMaxMisconfigured': "このワークフローの承認ステップの請求書上限額が使用できない値です。管理者がワークフロー定義を修正するまで承認はできません。",
+	'refusal.approvalCfoRequired': "請求額 {amount} が {limit} を超えています。CFO の承認が必要です。",
+	'refusal.approvalCfoRequiredUnknownLimit': "請求額 {amount} が設定された上限を超えています。CFO の承認が必要です。",
+	'refusal.gateStructuring': "この請求書単体ではしきい値未満ですが、この仕入先の最近の他の請求書（{days, plural, other {過去 # 日間}}）の {recent} と合わせると {aggregate} になります。",
+	'refusal.gateInexpressible': "この請求書は上限の通貨である {currency} で表せないため、上限と照合できません。",
+	'refusal.gateMeasured': "{measured} として測定しました。上限は {currency} で設定されています。",
+	'refusal.expenseCfoRequired': "経費精算の合計 {amount} が {limit} を超えています。CFO の承認が必要です。",
+	'refusal.expenseCfoRequiredUnknownLimit': "経費精算の合計 {amount} が設定された上限を超えています。CFO の承認が必要です。",
+	'refusal.expenseCfoInexpressible': "経費精算の合計を {currency} で表せない（{reportCurrency} からのレートがない）ため、上限 {limit} と照合できません。CFO の承認が必要です。",
+	'refusal.expenseCfoInexpressibleUnknownLimit': "経費精算の合計を {currency} で表せない（{reportCurrency} からのレートがない）ため、設定された上限と照合できません。CFO の承認が必要です。",
+	'refusal.exceptionSegregationRaiser': "職務分掌：この例外を発生させた操作のユーザーは、解消することもできません。エスカレーションするか、別のユーザーに判断を依頼してください。",
+	'refusal.exceptionSegregationImplicated': "職務分掌：この請求書の作成に関与したユーザーは、その支払いを止めている例外を解消できません。エスカレーションするか、別のユーザーに判断を依頼してください。",
+	'refusal.creditMemoVendorMismatch': "クレジットメモの仕入先が請求書の仕入先と一致しません。",
+	'refusal.creditMemoVendorUnresolved': "請求書に仕入先がリンクされていないため、クレジットメモの仕入先を確認できません。先に請求書の仕入先を解決し（請求書で仕入先を保存し直してください）、その後クレジットを適用してください。",
+	'refusal.creditMemoEntityMismatch': "クレジットメモと請求書は異なるエンティティに属しています。クレジットで別の子会社の買掛金を減らすことはできません。",
+	'refusal.creditMemoCurrencyMismatch': "クレジットメモの通貨が請求書の通貨と一致しません。",
+	'refusal.creditMemoInvoiceSettled': "請求書のステータスは {status} です。今後この請求書への支払いは行われないため、クレジットを適用しても何も減りません。クレジットメモは未適用のままにして、仕入先の次の請求書に適用してください。",
+	'refusal.creditMemoNotEditable': "編集できるのは、一度も適用されていない未適用のクレジットメモだけです（このメモのステータスは {status} です）。",
+	'refusal.creditMemoNotApplicable': "ステータスが {status} のクレジットメモは適用できません。",
+	'refusal.creditMemoExceedsBalance': "クレジットメモの金額が請求書の残りのクレジット可能残高（{remaining}）を超えています。",
+	'refusal.invoiceStaleEdit': "この請求書は読み込み後に変更されています。再読み込みして変更をもう一度適用してください。",
+	'refusal.invoiceRequiredFieldsMissing': "必須項目が入力されていません：{fields}",
+	'refusal.mfaCodeInvalid': "このコードは無効です。認証アプリを確認して、もう一度お試しください。",
 	'csvImport.result.summary': '{imported}件をインポート、{skipped}件をスキップ',
 	'csvImport.toast.failed': 'インポートに失敗しました',
 	'csvImport.toast.partial': '{imported}件をインポート、{skipped}件をスキップしました。詳細は下記をご覧ください',

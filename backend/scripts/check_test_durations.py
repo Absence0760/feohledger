@@ -8,9 +8,10 @@ defaults to that name in the working directory, which `ci.yml` sets to
 duration, so the split stays exhaustive but stops being weighted by anything
 real.
 
-Nothing regenerates that file. It has exactly one commit in its history
-(`aa3d47bd`, 2026-09-04), so it decays with every test added, and the first
-signal is a shard cancelled at the 40-minute cap. That is how the 4-shard
+Nothing regenerates that file automatically. It went from `aa3d47bd`
+(2026-09-04) to its first regeneration on 2026-10-06 untouched, decaying with
+every test added, and the first signal of decay is a shard cancelled at the
+40-minute cap. That is how the 4-shard
 layout failed — four runs across two days — before #447 widened it to 8.
 
 **This guard is preventive, not remedial.** Measured on 2026-09-17 the split is
@@ -42,11 +43,12 @@ current debt explicit rather than hidden. **It may only ever move down.**
 Raising it to get green is the one change this file exists to prevent — if the
 number trips, regenerate the baseline:
 
-    pytest --store-durations            # ~60 min, needs the full local stack
+    pnpm gen:test-durations <run-id>    # union of one CI run's eight shards
 
 A baseline measured on a CI runner is worth more than a laptop-measured one,
-since balance is only meaningful against the hardware that runs it; wiring that
-up is tracked in `docs/followups.md`.
+since balance is only meaningful against the hardware that runs it, so every
+backend shard uploads the durations it measured (`scripts/merge_test_durations.py`).
+`pytest --store-durations` against the full local stack (~60 min) still works.
 
 Usage: python scripts/check_test_durations.py [--durations PATH] [--quiet]
 """
@@ -64,9 +66,11 @@ from pathlib import Path
 BACKEND_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_DURATIONS = BACKEND_ROOT / ".test_durations"
 
-# Measured 20.13% (2,038 of 10,123) on 2026-09-17. Ratchet only downward — see
+# Measured 20.13% (2,038 of 10,123) on 2026-09-17, when this guard landed at
+# 0.25; it tripped at 25.12% on 2026-10-06 and the baseline was rebuilt from CI
+# run 37467328161's shards to 0.08% (9 of 10,802). Ratchet only downward — see
 # the module docstring.
-MAX_MISSING_FRACTION = 0.25
+MAX_MISSING_FRACTION = 0.05
 
 # How many per-file rows to print. A failure needs enough to see whether the
 # uncovered tests are spread thin or concentrated in one new expensive file;
@@ -140,7 +144,7 @@ def load_durations(path: Path) -> dict[str, float]:
             f"{path} is missing. pytest-split falls back to splitting by test COUNT, "
             "so every shard gets an equal number of tests regardless of cost and the "
             "realdb files land wherever they fall. Restore it from git, or regenerate "
-            "with `pytest --store-durations`."
+            "with `pnpm gen:test-durations <run-id>`."
         )
     try:
         data = json.loads(path.read_text())
@@ -189,7 +193,7 @@ def main() -> int:
             print(f"  … and {remaining} more files")
         print(
             "\nThe baseline no longer describes the suite well enough to balance it.\n"
-            "Regenerate it — `pytest --store-durations` against the full local stack —\n"
+            "Regenerate it from a green CI run — `pnpm gen:test-durations <run-id>` —\n"
             "and commit the result. Do NOT raise MAX_MISSING_FRACTION to get green;\n"
             "see this file's docstring for why that is the one forbidden fix."
         )

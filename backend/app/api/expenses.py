@@ -36,6 +36,7 @@ from app.api.pagination import (
     PaginationParams,
     pagination_params,
 )
+from app.api.refusals import coded_refusal
 from app.api.sorting import SortParams, resolve_order_by, sort_params
 from app.models.expense import (
     CorporateCardTransaction,
@@ -68,7 +69,7 @@ from app.schemas.expense import (
     ExpenseSummaryResponse,
     ExpenseUpdate,
 )
-from app.schemas.money import json_money
+from app.schemas.money import json_money, json_money_string
 from app.services.approval_chain import check_segregation
 from app.services.audit_dispatch import dispatch_audit
 from app.services.currency_conversion import resolve_reporting_currency
@@ -287,6 +288,38 @@ def _require_report_unlocked(report: ExpenseReport) -> None:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=f"Cannot modify a report in '{report.status}' state; its total is locked.",
+        )
+
+
+def _require_report_owner(report: ExpenseReport, user: User) -> None:
+    """Only a report's owner may compose it, edit its lines, or submit it.
+
+    Report SoD (``approve_report``) names exactly one implicated actor, the
+    owner (``employee_user_id``): the table records no other author. That is
+    only a complete control if nobody else CAN author the report, so every path
+    that writes what the approver will be asked to sign — attaching or
+    detaching a line, creating a line straight onto it, editing or deleting a
+    line on it, replacing a line's receipt, changing the report's own fields,
+    and submitting it — is refused to anyone but the owner, whatever their
+    role. Otherwise a manager could write or rewrite lines on a clerk's draft,
+    submit it, and approve it themselves, the hole the invoice path closed with
+    ``segregation_actor_ids`` (``docs/decisions.md`` §141, §152).
+
+    Deliberately NOT gated, because none of them is authorship of the claim:
+    approve / reject (the reviewer's acts; reject hands the lines back to the
+    owner), GL coding (``gl_account_id`` via PATCH or ``/bulk-gl-code`` — the
+    accountant's classification, done after approval), and card reconciliation
+    (``/corporate-card-transactions/{id}/match`` / ``/unmatch`` — evidence
+    from the card feed). ``backend/docs/expense-management.md`` § Report
+    ownership.
+    """
+    if report.employee_user_id != user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=coded_refusal(
+                "expense_report_not_owner",
+                "Only the report's owner can change its lines or submit it.",
+            ),
         )
 
 
@@ -675,6 +708,7 @@ async def create_expense(
         # derived from. Same rule as `attach_expenses` — a report only takes new
         # lines while it is a draft.
         _require_draft_report(report)
+        _require_report_owner(report, user)
     else:
         report = None
 
@@ -764,14 +798,18 @@ async def upload_receipt(
     # trip; the authoritative locked re-check runs after it, right before the
     # write (a submit that won the race in between still refuses it).
     if expense.report_id:
-        _require_report_unlocked(await _get_report_or_404(db, expense.report_id))
+        owning = await _get_report_or_404(db, expense.report_id)
+        _require_report_owner(owning, user)
+        _require_report_unlocked(owning)
     try:
         file_key, _file_url = await upload_expense_receipt(org_id, expense.id, file)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     await db.refresh(expense)
     if expense.report_id:
-        _require_report_unlocked(await _get_report_or_404(db, expense.report_id, for_update=True))
+        owning = await _get_report_or_404(db, expense.report_id, for_update=True)
+        _require_report_owner(owning, user)
+        _require_report_unlocked(owning)
     expense.receipt_file_key = file_key
     # A newly-attached receipt can clear a receipt_required violation.
     await _refresh_policy_violations(db, expense, org)
@@ -1064,6 +1102,10 @@ async def update_expense(
         await _lock_reports(db, (expense.report_id, new_report))
         if expense.report_id != new_report:
             if expense.report_id:
+                # Taking a line OFF a report changes what its owner submits.
+                _require_report_owner(
+                    await _get_report_or_404(db, expense.report_id, for_update=True), user
+                )
                 affected_reports.add(expense.report_id)
             if new_report:
                 # Moving an expense ONTO a report is an attach, and the target
@@ -1076,7 +1118,9 @@ async def update_expense(
                 # resubmitted, so the line just disappeared onto a dead row.
                 # Detaching (`report_id: null`) stays allowed from a terminal
                 # report — that is how its expenses get re-reported.
-                _require_draft_report(await _get_report_or_404(db, new_report, for_update=True))
+                target = await _get_report_or_404(db, new_report, for_update=True)
+                _require_draft_report(target)
+                _require_report_owner(target, user)
                 affected_reports.add(new_report)
             expense.report_id = new_report
 
@@ -1095,8 +1139,14 @@ async def update_expense(
     # the approver into one whose policy demands a pre-approval. `gl_account_id`
     # is deliberately not in `changed`: GL coding is the accountant's
     # classification, done after approval (`/bulk-gl-code` never gated on it).
+    #
+    # Editing any of those fields on a line that sits on a report is authoring
+    # the claim, so it is the owner's alone — `gl_account_id` stays open for the
+    # same reason it stays open on a locked report (`_require_report_owner`).
     if changed and expense.report_id:
-        _require_report_unlocked(await _get_report_or_404(db, expense.report_id, for_update=True))
+        owning = await _get_report_or_404(db, expense.report_id, for_update=True)
+        _require_report_owner(owning, user)
+        _require_report_unlocked(owning)
 
     # An amount / currency change ripples into the owning report's total — the
     # locked conversion describes the OLD amount+currency, so it must be re-locked.
@@ -1158,7 +1208,9 @@ async def delete_expense(
     # Deleting an expense off a locked report would silently shrink its total
     # below the total the CFO gate / approval signature ran against (issue #155).
     if owning_report:
-        _require_report_unlocked(await _get_report_or_404(db, owning_report, for_update=True))
+        report_row = await _get_report_or_404(db, owning_report, for_update=True)
+        _require_report_owner(report_row, user)
+        _require_report_unlocked(report_row)
     # A card-reconciled expense is the target of a real FK
     # (`corporate_card_transactions.matched_expense_id`), so Postgres refused
     # the DELETE and it surfaced as an unhandled `ForeignKeyViolationError` — a
@@ -1405,6 +1457,9 @@ async def update_report(
         db, ExpenseReport, report_id, entity_id, detail="Expense report not found"
     )
     report = await _get_report_or_404(db, report_id, for_update=True)
+    # Currency re-denominates every line and the total; title / notes are what
+    # the approver reads. All of it is the owner's to write.
+    _require_report_owner(report, user)
     # Report-level fields (currency in particular) reinterpret a locked total —
     # only editable while the report isn't locked in for approval (issue #155).
     _require_report_unlocked(report)
@@ -1493,8 +1548,10 @@ async def attach_expenses(
     )
     await _lock_reports(db, (report_id, *source_ids))
     report = await _get_report_or_404(db, report_id, for_update=True)
-    # The target report's composition can only change while it's a draft.
+    # The target report's composition can only change while it's a draft, and
+    # only its owner may change it (attach and detach alike).
     _require_draft_report(report)
+    _require_report_owner(report, user)
 
     # Track every *other* report an expense is moving off of, so its
     # total_amount is recomputed too — otherwise reassigning an expense from
@@ -1521,7 +1578,10 @@ async def attach_expenses(
     # Moving an expense off a locked report would silently drop its total —
     # block that too (the source report also loses composition).
     for rid in sorted(affected_reports):
-        _require_report_unlocked(await _get_report_or_404(db, rid, for_update=True))
+        source = await _get_report_or_404(db, rid, for_update=True)
+        # Pulling a line off someone else's report onto mine rewrites theirs.
+        _require_report_owner(source, user)
+        _require_report_unlocked(source)
 
     # Lock each newly-attached line into the report's currency before totalling.
     for expense in attached:
@@ -1570,6 +1630,10 @@ async def attach_expenses(
 # Organization.settings.expense_approval.cfo_threshold.
 _DEFAULT_CFO_THRESHOLD = Decimal("5000")
 
+#: The expense-report CFO gate's refusal code (`api/refusals.coded_refusal`) —
+#: the report-side sibling of `services/review.APPROVAL_CFO_REQUIRED`.
+EXPENSE_CFO_REQUIRED = "expense_cfo_required"
+
 
 @reports_router.post("/{report_id}/submit", response_model=ExpenseReportResponse)
 async def submit_report(
@@ -1597,6 +1661,9 @@ async def submit_report(
         db, ExpenseReport, report_id, entity_id, detail="Expense report not found"
     )
     report = await _get_report_or_404(db, report_id, for_update=True)
+    # "The owner submits" — and only the owner. A non-owner's submit would make
+    # them the report's author in every sense but the one column SoD reads.
+    _require_report_owner(report, user)
     if report.status != ExpenseReportStatus.draft:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
@@ -1746,10 +1813,12 @@ async def approve_report(
     check_segregation(
         SimpleNamespace(
             uploaded_by_id=report.employee_user_id,
-            # No editor-tracking column on this table, so there is no second
-            # implicated actor to name. Stated rather than left absent: a
-            # missing attribute on a fraud control reads as an oversight, and
-            # `violates_segregation`'s getattr default would silently supply it.
+            # No second implicated actor exists to name: only the owner may
+            # compose, edit or submit a report (`_require_report_owner`), so
+            # the owner IS the complete author set. Stated rather than left
+            # absent: a missing attribute on a fraud control reads as an
+            # oversight, and `violates_segregation`'s getattr default would
+            # silently supply it.
             segregation_actor_ids=None,
         ),
         user.id,
@@ -1776,19 +1845,37 @@ async def approve_report(
         held = {r.name for r in user.roles} if user.roles else set()
         if ROLE_CFO not in held and ROLE_ADMIN not in held:
             threshold_dec = _to_decimal(cfo_threshold_raw)
+            if threshold_dec is not None and not threshold_dec.is_finite():
+                threshold_dec = None
             limit = f"{threshold_dec}" if threshold_dec is not None else "the configured limit"
+            report_currency = normalize_currency(report.currency)
             if gate_total is None:
-                detail = (
+                message = (
                     f"Report total cannot be expressed in {reporting_currency} "
-                    f"(no rate from {normalize_currency(report.currency)}), so it cannot be "
+                    f"(no rate from {report_currency}), so it cannot be "
                     f"cleared against the {limit} limit. CFO approval required."
                 )
             else:
-                detail = (
+                message = (
                     f"Report total {gate_total} {reporting_currency} exceeds {limit}. "
                     "CFO approval required."
                 )
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=detail)
+            # Coded (`api/refusals.coded_refusal`) so a client states it in the
+            # reader's language; every figure is an exact string beside its
+            # currency. `amount` is None exactly when the total could not be
+            # expressed in the reporting currency, `limit` when the threshold
+            # itself is malformed.
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=coded_refusal(
+                    EXPENSE_CFO_REQUIRED,
+                    message,
+                    amount=json_money_string(gate_total),
+                    currency=reporting_currency,
+                    limit=json_money_string(threshold_dec),
+                    report_currency=report_currency,
+                ),
+            )
 
     report.status = ExpenseReportStatus.approved
     report.approved_at = datetime.now(UTC)

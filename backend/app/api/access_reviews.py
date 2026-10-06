@@ -41,7 +41,7 @@ from app.schemas.access_review import (
 from app.services.access_review import compute_access_review
 from app.services.audit_access import log_access
 from app.services.audit_dispatch import dispatch_audit
-from app.tenant import get_tenant_db
+from app.tenant import get_tenant_db, lock_organization
 
 router = APIRouter(prefix="/access-reviews", tags=["access-reviews"])
 
@@ -110,6 +110,9 @@ async def acknowledge_access_review(
     now = datetime.now(UTC)
 
     org = await control_db.get(Organization, user.organization_id)
+    # Serialise with every other settings writer, and refresh whatever snapshot
+    # the identity map handed back (`lock_organization`).
+    org = await lock_organization(control_db, org)
     # ``settings`` is JSONB; mutate a fresh dict so SQLAlchemy detects the change
     # (in-place JSONB mutation isn't tracked without a Mutable type).
     org_settings = dict(org.settings or {})

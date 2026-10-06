@@ -5,6 +5,7 @@ import {
 	createMatchedInvoice,
 	createPo,
 	exceptionsFor,
+	issueText,
 	recompute
 } from './setup';
 
@@ -109,7 +110,7 @@ test.describe('4-way Quality Inspection gate', () => {
 		expect(poMatch!.match_type).toBe('4-way');
 		expect(poMatch!.inspection_result).toBe('fail');
 		expect(poMatch!.status).toBe('mismatch');
-		expect(poMatch!.issues.join(' ')).toMatch(/Failed quality inspection: cracked units/i);
+		expect(issueText(poMatch!)).toMatch(/Failed quality inspection: cracked units/i);
 		expect(exceptionsFor(invoiceId)).toContain('quality_hold:error');
 	});
 
@@ -141,7 +142,7 @@ test.describe('4-way Quality Inspection gate', () => {
 		expect(poMatch!.inspection_result).toBe('partial');
 		expect(poMatch!.status).toBe('partial');
 		expect(poMatch!.inspection_accepted_quantity).toBeCloseTo(7, 4);
-		expect(poMatch!.issues.join(' ')).toMatch(/Partial acceptance: 7 of ordered quantity/i);
+		expect(issueText(poMatch!)).toMatch(/Partial acceptance: 7 of ordered quantity/i);
 		expect(exceptionsFor(invoiceId)).toContain('quality_hold:info');
 	});
 
@@ -238,7 +239,7 @@ test.describe('require_inspection rule (4-way gate when no inspection exists)', 
 
 		expect(poMatch!.inspection_required).toBe(true);
 		expect(poMatch!.inspection_result).toBeNull();
-		expect(poMatch!.issues.join(' ')).toMatch(/Quality inspection required but missing/i);
+		expect(issueText(poMatch!)).toMatch(/Quality inspection required but missing/i);
 		expect(exceptionsFor(invoiceId)).toContain('quality_hold:warning');
 
 		await setMatching(page, null);

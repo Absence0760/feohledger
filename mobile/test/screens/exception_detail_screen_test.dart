@@ -130,6 +130,52 @@ void main() {
     expect(find.text('Unassigned'), findsOneWidget);
   });
 
+  testWidgets('a coded composite description lists its localized findings',
+      (tester) async {
+    setTallSurface(tester);
+    ApiClient().debugConfigure(
+      client: MockClient(
+        (req) async => _json({
+          ..._detailJson(),
+          'exception_type': 'price_variance',
+          'type_label': 'Price Variance',
+          'description': 'server English fallback',
+          'description_code': 'exception.price_variance_findings',
+          'description_params': {
+            'count': 2,
+            'findings': [
+              {
+                'code': 'price_variance_over',
+                'params': {
+                  'deltaPct': '+20.0',
+                  'item': 'Widget',
+                  'unitPrice': '12.00',
+                  'baselineUnitPrice': '10.00',
+                  'currency': 'USD',
+                },
+                'message': 'english line',
+              },
+              {'code': 'from_the_future', 'params': {}, 'message': 'own'},
+            ],
+          },
+        }),
+      ),
+    );
+
+    await tester.pumpWidget(
+      _host(const ExceptionDetailScreen(exceptionId: '1')),
+    );
+    await _pumpUntil(tester, find.text('Price Variance'));
+
+    expect(
+      find.text('Line-item price variance vs vendor history on 2 lines'),
+      findsOneWidget,
+    );
+    expect(find.textContaining('for Widget'), findsOneWidget);
+    expect(find.text('• own'), findsOneWidget);
+    expect(find.text('server English fallback'), findsNothing);
+  });
+
   testWidgets('renders the error state on a 404 with a retry', (tester) async {
     ApiClient().debugConfigure(
       client: MockClient((req) async => _json({'detail': 'nope'}, 404)),
@@ -173,6 +219,46 @@ void main() {
     await _pumpUntilTrue(tester, () => sentAction != null);
 
     expect(sentAction, 'resolve');
+  });
+
+  testWidgets('a segregation refusal says why, not just that it failed',
+      (tester) async {
+    setTallSurface(tester);
+    // The queue's SoD 403 (`exception_lifecycle.record_decision`), coded with
+    // the same string the bulk route reports per skipped row.
+    ApiClient().debugConfigure(
+      client: MockClient((req) async {
+        if (req.method == 'POST' && req.url.path.endsWith('/resolve')) {
+          return _json({
+            'detail': {
+              'code': 'segregation_implicated',
+              'message': 'server english',
+              'params': <String, dynamic>{},
+            },
+          }, 403);
+        }
+        if (req.method == 'GET' &&
+            RegExp(r'/exceptions/[^/]+$').hasMatch(req.url.path)) {
+          return _json(_detailJson());
+        }
+        return _json({'items': [], 'total': 0, 'page': 1});
+      }),
+    );
+
+    await tester.pumpWidget(
+      _host(const ExceptionDetailScreen(exceptionId: '1')),
+    );
+    await _pumpUntil(tester, find.widgetWithText(FilledButton, 'Resolve'));
+
+    await tester.tap(find.widgetWithText(FilledButton, 'Resolve'));
+    await _pumpUntil(tester, find.textContaining('Segregation of duties'));
+
+    expect(find.textContaining('Segregation of duties'), findsOneWidget);
+    expect(find.text('Could not resolve the exception'), findsNothing);
+    expect(
+      ExceptionStore.instance.actionErrorDetail,
+      isA<Map<String, dynamic>>(),
+    );
   });
 
   testWidgets('admin can open the assignee picker and assign a user',

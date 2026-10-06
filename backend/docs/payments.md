@@ -317,7 +317,8 @@ pattern rather than assuming the status guard alone is enough.
 
 `execute_payment_run`'s per-payment loop is durable, not all-or-nothing: each
 payment is dispatched (via the internal `_execute_single_payment`) inside its
-own try/except catch-all, then committed immediately — a failure on payment N
+own SAVEPOINT and catch-all (`_dispatch_payment_guarded`, § A database error
+mid-dispatch is recorded, not lost), then committed immediately — a failure on payment N
 (including an uncaught error from a live FX/sanctions/processor adapter, not
 just the anticipated `InternationalPaymentError`) can only roll back payment
 N's own still-open attempt, never the payments already recorded before it.
@@ -476,6 +477,69 @@ wait is now bounded: `_lock_payment_invoice` takes the lock through
 Pinned by the "BOUNDED" section of `tests/test_payment_run_invoice_payability.py`,
 which holds the invoice lock from a second connection.
 
+### A database error mid-dispatch is recorded, not lost
+
+The bounded invoice lock removed one way for a database error to land inside a
+dispatch, not all of them: every write after `adapter.create_payment` returns —
+the `→ payment_scheduled` transition and its audit and notification rows, the
+discount capture, the card row — can still deadlock or fail a statement. In
+Postgres that aborts the transaction. The dispatch loop's broad `except` used to
+assume the session was still usable, so the `payment.*` audit write and the
+per-payment commit failed too: the request 500ed, the run stayed `executing`,
+and the processor's payment id existed only in memory. A `/resume` would then
+find the row still `pending` and send it again on the same idempotency key,
+which only some processors honour.
+
+`_dispatch_payment_guarded` now wraps every attempt — `/execute`, `/resume`,
+`/retry-failed` and `/compliance/release` all dispatch through it:
+
+- **Each attempt runs in its own SAVEPOINT, taken after the payment's row
+  lock.** A database error — raised, or swallowed by a best-effort helper and
+  only surfacing when the savepoint is released — rolls the attempt back to it.
+  The payment lock predates the savepoint, so it is still held: no other
+  dispatcher can claim the row while it is recorded.
+- **What the processor was sent and answered is kept outside the ORM.** The
+  rollback expires the `Payment` instance, so its in-memory
+  `provider_payment_id` would reload as the NULL on disk. `_ProcessorContact`
+  records the order fields (the FX leg's corridor `method` and rate lock) at the
+  moment of the call, and the provider, `provider_payment_id` and `reference`
+  from its reply; `_record_aborted_dispatch` writes them back. On the card leg
+  the minted card's `provider_card_id` becomes the payment's
+  `provider_payment_id`, because the `VirtualCard` row was rolled back with the
+  attempt and nothing else records the card.
+- **The row is `failed`, in doubt.** `db_error_after_processor_call:<Type>`
+  (or `dispatch_db_error:<Type>` before the call), plus the restored handle, so
+  `classify_payment_failure` answers IN_DOUBT and `/retry-failed` skips it as
+  `needs_reconciliation`. The invoice transition was rolled back with
+  everything else, so the invoice is still `approved`; a human reconciles the
+  order against the processor, or voids it. `completed_at` stays NULL — nobody
+  can show the order settled — and `submitted_at` is set.
+- **The invoice is blocked from a new run.** `failed` is a terminal status, so
+  the row no longer holds the invoice's live-payment slot, and an `approved`
+  invoice with a free slot is back in the queue: the next run would pay it
+  again under a fresh idempotency key. So the dispatch opens the same de-duped,
+  payment-blocking `payment_reconciliation` exception the reconciler opens on
+  an aged-out payment (`payment_reconciler.flag_payment_for_reconciliation`),
+  and a new run for that invoice is a 409 until a human resolves it.
+- **The run finishes.** The `payment.failed` audit row (which now carries
+  `provider_payment_id`) and the commit follow as for any other failure, and
+  the loop moves on to the next payment.
+- **A non-database exception is unchanged.** An adapter's `RuntimeError` or a
+  `validate_transition` 409 leaves the transaction usable, so the savepoint is
+  released, the attempt's writes stand, and the row is
+  `unexpected_error:<Type>` with any `provider_payment_id` still on it. If it
+  was raised after the money-moving call, an order may exist all the same, so
+  `completed_at` is cleared and the invoice is flagged exactly as above.
+- **If the savepoint itself cannot be rolled back** (the connection is gone),
+  the whole transaction is rolled back and the payment re-locked, which opens a
+  gap another dispatcher could use. The row is then written only if it still
+  reads `pending` (`pending_compliance` for a release); otherwise the other
+  outcome stands and this attempt's handles go into a
+  `payment.dispatch_unrecorded` audit row.
+
+Pinned by `tests/test_payment_dispatch_db_error.py`, which injects a real
+Postgres error on the dispatch session after the processor call.
+
 ### Why a payment failed, and retrying it
 
 `Payment.failure_reason` is written on every failure path — compliance refusal,
@@ -547,6 +611,8 @@ for a human to void or reconcile — when any of these hold:
 | `reconciler_max_age_exceeded*` | A genuinely `submitted` payment, real money in flight, that `payment_reconciler` gave up waiting on. **This is the case that made the old re-arm a double-pay.** |
 | `checkeeper_duplicate_suppressed` | The 48-hour print slot was already claimed — a cheque for this order was very likely already printed. |
 | `adapter_error:*` (card leg) | The card provider may have minted a card we never recorded. |
+| `db_error_after_processor_call:*` | The processor answered, then a database error aborted the dispatch transaction. The reply's handle is restored onto the row (§ A database error mid-dispatch). |
+| `dispatch_db_error:*` | The same abort before the processor call. This pass sent nothing, but the row may be a `/resume` of an earlier pass that did and crashed before its commit. |
 | blank / unrecognised reason | Fail-closed: a future adapter or a legacy row is not waved through. |
 
 Everything else — our own `compliance_refusal:` / `compliance_dismissed` /

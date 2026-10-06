@@ -68,6 +68,7 @@ from fastapi import status as http_status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.refusals import coded_refusal
 from app.models.exception import Exception as APException
 from app.models.invoice import Invoice
 from app.services.audit_dispatch import dispatch_audit
@@ -550,8 +551,12 @@ async def record_decision(
             exception.organization_id,
             via or "human",
         )
+        # Coded with the SAME string `/bulk/resolve` reports per row, so the
+        # single and bulk doors agree on what the refusal is called and a client
+        # keys one translation per axis (`api/refusals.coded_refusal`).
         raise HTTPException(
-            status_code=http_status.HTTP_403_FORBIDDEN, detail=refusal_message(refusal)
+            status_code=http_status.HTTP_403_FORBIDDEN,
+            detail=coded_refusal(refusal, refusal_message(refusal)),
         )
 
     old_status = exception.status
