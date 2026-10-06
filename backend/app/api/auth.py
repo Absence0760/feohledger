@@ -197,7 +197,31 @@ def _usable_passkeys(
     return [c for c in creds if webauthn_rp.usable_under(c.rp_id, rp)]
 
 
-def _wrong_host_detail(creds: list[WebAuthnCredential], rp: webauthn_rp.RelyingParty) -> str:
+def coded_refusal(code: str, message: str, **params: object) -> dict:
+    """The `detail` of a refusal a client must be able to localize.
+
+    `{"code", "message", "params"}`: a stable machine-readable `code` the client
+    keys a translated sentence on, the typed `params` that sentence needs, and
+    the English `message` as the fallback for a code the client predates. The
+    status code is unchanged — FastAPI serializes an object `detail` as-is, and
+    every client that flattens `detail` to text (`formatApiDetail` on the web)
+    already renders an object by its `message`. Server-composed English inside
+    a translated page is the defect this exists to close
+    (`frontend/CLAUDE.md` § Internationalization).
+
+    A code is only ever as specific as the English it replaces: it must never
+    distinguish cases the message deliberately folds together (a wrong password
+    from a wrong code, an unknown account from a known one).
+    """
+    return {"code": code, "message": message, "params": params}
+
+
+# An account with no passkey at all — kept opaque so the answer cannot be used
+# to probe which factors an account has enrolled.
+NO_PASSKEY_DETAIL = coded_refusal("passkey_not_registered", "No passkey registered")
+
+
+def _wrong_host_detail(creds: list[WebAuthnCredential], rp: webauthn_rp.RelyingParty) -> dict:
     """Why there is no usable passkey here, in words the account holder can act on.
 
     A passkey is bound to one registrable domain, so one registered on the
@@ -206,14 +230,20 @@ def _wrong_host_detail(creds: list[WebAuthnCredential], rp: webauthn_rp.RelyingP
     the user is told. The caller has already proved control of the account (an
     access token, or the post-password MFA challenge token), and the hosts named
     are the tenant's own, so this leaks nothing an opaque error would protect.
+
+    The hosts travel as params (`registered_hosts` a list, `host` the current
+    RP ID) so the client joins the list with its own locale's punctuation.
     """
     others = webauthn_rp.other_rp_ids([c.rp_id for c in creds], rp)
     if not others:
-        return "No passkey registered"
+        return NO_PASSKEY_DETAIL
     where = ", ".join(others)
-    return (
+    return coded_refusal(
+        "passkey_wrong_host",
         f"Your passkey is registered for {where}, not {rp.rp_id}. "
-        f"Sign in there, or register a passkey on {rp.rp_id}."
+        f"Sign in there, or register a passkey on {rp.rp_id}.",
+        registered_hosts=list(others),
+        host=rp.rp_id,
     )
 
 
@@ -929,9 +959,10 @@ async def _audit_step_up_failure(user: User, *, operation: str) -> None:
     )
 
 
-STEP_UP_FAILURE_DETAIL = (
+STEP_UP_FAILURE_DETAIL = coded_refusal(
+    "step_up_failed",
     "Confirm your password, a current authenticator code, or a registered "
-    "passkey to change your two-factor settings."
+    "passkey to change your two-factor settings.",
 )
 
 # The refusal an SSO-only tenant's member gets for ANY failed step-up. It names
@@ -941,9 +972,10 @@ STEP_UP_FAILURE_DETAIL = (
 # is what the profile page now sends there instead (§201). The tenant's
 # `sso_only` flag is already public through `/auth/{sso,saml}/config`, so it
 # tells the caller nothing about the account they did not already know.
-STEP_UP_SSO_ONLY_DETAIL = (
+STEP_UP_SSO_ONLY_DETAIL = coded_refusal(
+    "step_up_sso_only",
     "Your organization signs in with single sign-on, so only a current "
-    "authenticator code or a registered passkey can confirm this change."
+    "authenticator code or a registered passkey can confirm this change.",
 )
 
 
@@ -1452,7 +1484,7 @@ async def passkey_authenticate_start(
     creds = await _user_passkeys(db, claims.subject_id)
     if not creds:
         # No passkeys registered — opaque error (don't enumerate factors).
-        raise HTTPException(status_code=400, detail="No passkey registered")
+        raise HTTPException(status_code=400, detail=NO_PASSKEY_DETAIL)
     rp = await _relying_party_for_subject(db, claims.subject_id, host)
     usable = _usable_passkeys(creds, rp)
     if not usable:
@@ -1508,7 +1540,7 @@ async def passkey_step_up_start(
     )
     creds = await _user_passkeys(db, user.id)
     if not creds:
-        raise HTTPException(status_code=400, detail="No passkey registered")
+        raise HTTPException(status_code=400, detail=NO_PASSKEY_DETAIL)
     rp = await _relying_party(db, user.organization_id, host)
     usable = _usable_passkeys(creds, rp)
     if not usable:

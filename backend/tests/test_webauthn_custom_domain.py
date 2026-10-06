@@ -549,10 +549,15 @@ async def test_login_on_a_vanity_host_names_the_host_the_passkey_belongs_to():
                 host=VANITY_HOST,
             )
     assert exc.value.status_code == 400
-    # Legible, not opaque: names where the passkey lives and where they are.
-    assert RP_ID in exc.value.detail
-    assert VANITY_HOST in exc.value.detail
-    assert exc.value.detail != "No passkey registered"
+    # Legible, not opaque: names where the passkey lives and where they are —
+    # in the English fallback AND as params, so a client can say it in the
+    # reader's language without parsing the sentence.
+    detail = exc.value.detail
+    assert detail["code"] == "passkey_wrong_host"
+    assert detail["params"] == {"registered_hosts": [RP_ID], "host": VANITY_HOST}
+    assert RP_ID in detail["message"]
+    assert VANITY_HOST in detail["message"]
+    assert detail != auth_mod.NO_PASSKEY_DETAIL
 
 
 @pytest.mark.asyncio
@@ -576,7 +581,9 @@ async def test_step_up_on_a_vanity_host_names_the_host_too():
                 host=VANITY_HOST,
             )
     assert exc.value.status_code == 400
-    assert RP_ID in exc.value.detail
+    assert exc.value.detail["code"] == "passkey_wrong_host"
+    assert exc.value.detail["params"] == {"registered_hosts": [RP_ID], "host": VANITY_HOST}
+    assert RP_ID in exc.value.detail["message"]
 
 
 @pytest.mark.asyncio
@@ -603,7 +610,11 @@ async def test_an_account_with_no_passkey_at_all_stays_opaque():
                 db=db,
                 host=VANITY_HOST,
             )
-    assert exc.value.detail == "No passkey registered"
+    assert exc.value.detail == {
+        "code": "passkey_not_registered",
+        "message": "No passkey registered",
+        "params": {},
+    }
 
 
 @pytest.mark.asyncio
