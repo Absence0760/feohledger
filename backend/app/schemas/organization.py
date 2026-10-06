@@ -222,3 +222,73 @@ class OrganizationResponse(BaseModel):
 class UpdateOrganizationRequest(BaseModel):
     name: str | None = Field(default=None, max_length=255)
     settings: dict | None = None  # raw dict — merged into existing settings
+
+
+class SSOSettingsStatus(BaseModel):
+    """The **secret-free** view of `settings.sso`, for the admin SSO panel.
+
+    `client_secret` is deliberately absent and always will be: a save that
+    omits it keeps the stored one, so the panel never needs to read it back
+    (`services/sso_settings`). `client_secret_configured` answers the only
+    question the panel has. The certificate fields are the IdP's PUBLIC signing
+    certificates, not secrets.
+    """
+
+    enabled: bool = False
+    sso_only: bool = False
+    protocol: str = "oidc"
+    provider: str | None = None
+    allowed_email_domains: list[str] = Field(default_factory=list)
+    discovery_url: str | None = None
+    client_id: str | None = None
+    client_secret_configured: bool = False
+    idp_entity_id: str | None = None
+    idp_sso_url: str | None = None
+    idp_x509_cert: str | None = None
+    idp_x509_cert_multi: list[str] = Field(default_factory=list)
+    sp_entity_id: str | None = None
+    idp_slo_url: str | None = None
+    scim_group_role_map: dict[str, str] = Field(default_factory=dict)
+    scim_token_configured: bool = False
+    # The verdict sign-in uses (`services/sso.is_sso_only`), not the request.
+    password_sign_in_closed: bool = False
+    # IdP key names the selected protocol still lacks, as if SSO were on.
+    idp_config_missing: list[str] = Field(default_factory=list)
+    # What the admin registers at the IdP — computed, never stored.
+    oidc_redirect_uri: str = ""
+    saml_acs_url: str = ""
+    saml_sp_entity_id: str = ""
+
+
+class UpdateSSOSettingsRequest(BaseModel):
+    """The whole SSO configuration, for `PUT /api/organization/sso`.
+
+    Every field is optional **at the Pydantic layer on purpose**, and
+    `client_secret` is untyped. FastAPI's default `RequestValidationError` body
+    echoes the offending `input`, and for a missing required field that input is
+    the whole request object, client secret included. So `enabled` / `sso_only`
+    being required, and every shape rule, is enforced by
+    `services/sso_settings.build_sso_block`, which answers with a value-free 422.
+
+    Omitting `client_secret` (or sending it blank) keeps the stored one; set
+    `clear_client_secret` to remove it. Omitting `scim_group_role_map` keeps the
+    stored map. Every other key the request leaves out is removed — this is a
+    PUT of the IdP configuration, not a merge.
+    """
+
+    enabled: bool | None = None
+    sso_only: bool | None = None
+    protocol: str | None = None
+    provider: str | None = None
+    allowed_email_domains: list[str] | None = None
+    discovery_url: str | None = None
+    client_id: str | None = None
+    client_secret: object = None
+    clear_client_secret: bool = False
+    idp_entity_id: str | None = None
+    idp_sso_url: str | None = None
+    idp_x509_cert: str | None = None
+    idp_x509_cert_multi: list[str] | None = None
+    sp_entity_id: str | None = None
+    idp_slo_url: str | None = None
+    scim_group_role_map: dict[str, str] | None = None

@@ -1744,6 +1744,55 @@ export const messages = {
 	'org.security.mfaEnforcementInactive':
 		'Isso foi salvo, mas ainda não está em vigor — a autenticação de dois fatores está desativada em toda a plataforma nesta implantação. Os usuários não serão solicitados até que ela seja ativada.',
 	'org.security.save': 'Salvar',
+	// /organization -> Single Sign-On panel (PUT /api/organization/sso)
+	'orgSso.title': 'Login único',
+	'orgSso.hint':
+		'Permita que os membros entrem pelo seu provedor de identidade, via OpenID Connect ou SAML. Toda alteração aqui é auditada.',
+	'orgSso.loading': 'Carregando as configurações de SSO…',
+	'orgSso.enabled': 'Ativar o login único',
+	'orgSso.field.protocol': 'Protocolo',
+	'orgSso.field.provider': 'Botão de login',
+	'orgSso.protocol.oidc': 'OpenID Connect (OIDC)',
+	'orgSso.protocol.saml': 'SAML 2.0',
+	'orgSso.provider.generic': 'Genérico (“Entrar com SSO”)',
+	'orgSso.field.discoveryUrl': 'URL de descoberta',
+	'orgSso.field.clientId': 'ID do cliente',
+	'orgSso.field.clientSecret': 'Segredo do cliente',
+	'orgSso.field.idpEntityId': 'ID de entidade do IdP',
+	'orgSso.field.idpSsoUrl': 'URL de login do IdP',
+	'orgSso.field.idpCert': 'Certificado de assinatura do IdP',
+	'orgSso.field.idpCertMulti': 'Certificados de assinatura adicionais',
+	'orgSso.field.idpSloUrl': 'URL de logout do IdP (opcional)',
+	'orgSso.field.spEntityId': 'ID de entidade do SP personalizado (opcional)',
+	'orgSso.field.allowedDomains': 'Domínios de e-mail permitidos',
+	'orgSso.domainsHint':
+		'Separados por vírgula. Um primeiro login por SSO cria conta apenas para esses domínios. Deixe vazio para aceitar qualquer domínio.',
+	'orgSso.secret.keepPlaceholder': 'Deixe em branco para manter o segredo armazenado',
+	'orgSso.secret.configured':
+		'Há um segredo do cliente armazenado. Ele nunca é exibido de novo; digite um novo para substituí-lo.',
+	'orgSso.secret.notConfigured': 'Nenhum segredo do cliente está armazenado.',
+	'orgSso.secret.clear': 'Remover o segredo do cliente armazenado',
+	'orgSso.register.title': 'Registre este app no seu provedor de identidade',
+	'orgSso.register.hint':
+		'Copie estes valores no aplicativo que você criar no seu provedor de identidade.',
+	'orgSso.register.redirectUri': 'URI de redirecionamento',
+	'orgSso.register.acsUrl': 'URL de ACS',
+	'orgSso.register.spEntityId': 'ID de entidade do SP (audiência)',
+	'orgSso.ssoOnly': 'Exigir SSO (fechar o login por senha)',
+	'orgSso.ssoOnlyHint':
+		'Os membros só poderão entrar pelo provedor de identidade. Só é possível salvar quando as configurações do provedor acima estiverem completas. Se o provedor parar de funcionar depois, um operador da plataforma pode reabrir o login por senha.',
+	'orgSso.status.passwordClosed':
+		'Somente SSO está em vigor: o login por senha está fechado para todos os membros.',
+	'orgSso.status.incomplete':
+		'O SSO está ativado, mas o botão de login fica oculto até que estes campos sejam preenchidos: {fields}.',
+	'orgSso.status.incompleteUnknown':
+		'O SSO está ativado, mas as configurações do provedor de identidade estão incompletas, então o botão de login fica oculto.',
+	'orgSso.save': 'Salvar configurações de SSO',
+	'orgSso.toast.loadFailed': 'Falha ao carregar as configurações de SSO',
+	'orgSso.toast.saved': 'Configurações de SSO salvas',
+	'orgSso.toast.saveFailed': 'Falha ao salvar as configurações de SSO',
+	'orgSso.refusal.idpUnresolved':
+		'Exigir SSO fecha o login por senha, então as configurações do provedor de identidade precisam estar completas primeiro. Ausente ou inválido: {fields}.',
 	'org.section.fraud': 'Detecção de fraude',
 	'org.section.fraudSaved': 'Detecção de fraude',
 	'org.fraud.hint': 'Cada regra abaixo é verificada quando uma fatura é criada ou atualizada. Desativar uma regra suprime tanto o aviso quanto a exceção gerada automaticamente, mantendo a fila limpa.',

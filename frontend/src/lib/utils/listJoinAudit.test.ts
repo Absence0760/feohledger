@@ -93,6 +93,10 @@ const ALLOWED: Record<string, { count: number; why: string }> = {
 	'/src/routes/audit/+page.svelte': {
 		count: 1,
 		why: 'family 2 — raw audit-log field names off the wire'
+	},
+	'/src/routes/organization/+page.svelte': {
+		count: 1,
+		why: 'family 1 — SSO allowed email domains, re-parsed by `saveSso` splitting on "," / whitespace'
 	}
 };
 

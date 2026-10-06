@@ -1743,6 +1743,55 @@ export const messages = {
 	'org.security.mfaEnforcementInactive':
 		'Ce paramètre est enregistré, mais pas encore appliqué — l’authentification à deux facteurs est désactivée pour l’ensemble de la plateforme sur ce déploiement. Les utilisateurs n’y seront invités qu’une fois celle-ci activée.',
 	'org.security.save': 'Enregistrer',
+	// /organization -> Single Sign-On panel (PUT /api/organization/sso)
+	'orgSso.title': 'Authentification unique',
+	'orgSso.hint':
+		"Permettez aux membres de se connecter via votre fournisseur d'identité, en OpenID Connect ou SAML. Chaque modification ici est auditée.",
+	'orgSso.loading': 'Chargement des paramètres SSO…',
+	'orgSso.enabled': "Activer l'authentification unique",
+	'orgSso.field.protocol': 'Protocole',
+	'orgSso.field.provider': 'Bouton de connexion',
+	'orgSso.protocol.oidc': 'OpenID Connect (OIDC)',
+	'orgSso.protocol.saml': 'SAML 2.0',
+	'orgSso.provider.generic': 'Générique (« Se connecter avec le SSO »)',
+	'orgSso.field.discoveryUrl': 'URL de découverte',
+	'orgSso.field.clientId': 'ID client',
+	'orgSso.field.clientSecret': 'Secret client',
+	'orgSso.field.idpEntityId': "ID d'entité de l'IdP",
+	'orgSso.field.idpSsoUrl': "URL de connexion de l'IdP",
+	'orgSso.field.idpCert': "Certificat de signature de l'IdP",
+	'orgSso.field.idpCertMulti': 'Certificats de signature supplémentaires',
+	'orgSso.field.idpSloUrl': "URL de déconnexion de l'IdP (facultatif)",
+	'orgSso.field.spEntityId': "ID d'entité SP personnalisé (facultatif)",
+	'orgSso.field.allowedDomains': 'Domaines de messagerie autorisés',
+	'orgSso.domainsHint':
+		'Séparés par des virgules. Une première connexion SSO ne crée un compte que pour ces domaines. Laissez vide pour accepter tout domaine.',
+	'orgSso.secret.keepPlaceholder': 'Laissez vide pour conserver le secret enregistré',
+	'orgSso.secret.configured':
+		"Un secret client est enregistré. Il n'est plus jamais affiché ; saisissez-en un nouveau pour le remplacer.",
+	'orgSso.secret.notConfigured': "Aucun secret client n'est enregistré.",
+	'orgSso.secret.clear': 'Supprimer le secret client enregistré',
+	'orgSso.register.title': "Enregistrez cette application auprès de votre fournisseur d'identité",
+	'orgSso.register.hint':
+		"Copiez ces valeurs dans l'application que vous créez chez votre fournisseur d'identité.",
+	'orgSso.register.redirectUri': 'URI de redirection',
+	'orgSso.register.acsUrl': 'URL ACS',
+	'orgSso.register.spEntityId': "ID d'entité SP (audience)",
+	'orgSso.ssoOnly': 'Exiger le SSO (fermer la connexion par mot de passe)',
+	'orgSso.ssoOnlyHint':
+		"Les membres ne pourront alors se connecter que via le fournisseur d'identité. L'enregistrement n'est possible qu'une fois les paramètres du fournisseur ci-dessus complets. Si le fournisseur cesse ensuite de fonctionner, un opérateur de la plateforme peut rouvrir la connexion par mot de passe.",
+	'orgSso.status.passwordClosed':
+		'Le SSO exclusif est en vigueur : la connexion par mot de passe est fermée pour tous les membres.',
+	'orgSso.status.incomplete':
+		'Le SSO est activé, mais le bouton de connexion reste masqué tant que ces champs ne sont pas renseignés : {fields}.',
+	'orgSso.status.incompleteUnknown':
+		"Le SSO est activé, mais les paramètres du fournisseur d'identité sont incomplets, donc le bouton de connexion reste masqué.",
+	'orgSso.save': 'Enregistrer les paramètres SSO',
+	'orgSso.toast.loadFailed': 'Échec du chargement des paramètres SSO',
+	'orgSso.toast.saved': 'Paramètres SSO enregistrés',
+	'orgSso.toast.saveFailed': "Échec de l'enregistrement des paramètres SSO",
+	'orgSso.refusal.idpUnresolved':
+		"Exiger le SSO ferme la connexion par mot de passe : les paramètres du fournisseur d'identité doivent donc d'abord être complets. Manquant ou invalide : {fields}.",
 	'org.section.fraud': 'Détection de fraude',
 	'org.section.fraudSaved': 'Détection de fraude',
 	'org.fraud.hint': 'Chaque règle ci-dessous est vérifiée lorsqu\'une facture est créée ou mise à jour. Désactiver une règle supprime à la fois l\'avertissement et l\'exception générée automatiquement, gardant la file d\'attente propre.',

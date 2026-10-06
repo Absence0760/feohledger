@@ -26,6 +26,11 @@ pnpm dev           # backend :8000 + frontend :7777
 time). Run `python scripts/enable_keycloak_saml.py --disable` (from `backend/`)
 to turn it back off, or `pnpm idp:seed` to switch back to OIDC.
 
+Like `idp:seed`, this writes the row directly — a dev shortcut that skips the
+audited `PUT /api/organization/sso` the `/organization` → **Single Sign-On**
+panel uses. Pasting the same IdP entity ID, SSO URL and certificate into that
+panel is the product path (`docs/authentication.md` § SSO configuration).
+
 ## How it fits together
 
 ```

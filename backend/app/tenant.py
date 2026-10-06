@@ -177,6 +177,26 @@ async def get_tenant(
     return org
 
 
+async def lock_organization(db: AsyncSession, org: Organization) -> Organization:
+    """Re-read ``org`` under ``SELECT … FOR UPDATE`` and refresh it in place.
+
+    Every writer of ``Organization.settings`` reads the JSONB, changes one block
+    and writes the WHOLE dict back. Two such writers interleaving means the one
+    that commits second silently reverts the other — a SCIM group write undoing
+    an SSO secret rotation, or the reverse. Call this first, on the request's own
+    control-plane session (the one ``get_tenant`` / ``get_scim_tenant`` loaded
+    ``org`` on), before reading ``org.settings``; the lock is held to commit.
+    """
+    return (
+        await db.execute(
+            select(Organization)
+            .where(Organization.id == org.id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+    ).scalar_one()
+
+
 async def get_tenant_db(
     request: Request,
     tenant: Organization = Depends(get_tenant),

@@ -1899,6 +1899,55 @@ export const en = {
 	'org.security.mfaEnforcementInactive':
 		'This is saved, but not enforced yet — two-factor is off platform-wide for this deployment. Users will not be prompted until it is turned on.',
 	'org.security.save': 'Save',
+	// /organization -> Single Sign-On panel (PUT /api/organization/sso)
+	'orgSso.title': 'Single Sign-On',
+	'orgSso.hint':
+		'Let members sign in through your identity provider, over OpenID Connect or SAML. Every change here is audited.',
+	'orgSso.loading': 'Loading SSO settings…',
+	'orgSso.enabled': 'Enable single sign-on',
+	'orgSso.field.protocol': 'Protocol',
+	'orgSso.field.provider': 'Sign-in button',
+	'orgSso.protocol.oidc': 'OpenID Connect (OIDC)',
+	'orgSso.protocol.saml': 'SAML 2.0',
+	'orgSso.provider.generic': 'Generic (“Sign in with SSO”)',
+	'orgSso.field.discoveryUrl': 'Discovery URL',
+	'orgSso.field.clientId': 'Client ID',
+	'orgSso.field.clientSecret': 'Client secret',
+	'orgSso.field.idpEntityId': 'IdP entity ID',
+	'orgSso.field.idpSsoUrl': 'IdP sign-on URL',
+	'orgSso.field.idpCert': 'IdP signing certificate',
+	'orgSso.field.idpCertMulti': 'Additional signing certificates',
+	'orgSso.field.idpSloUrl': 'IdP sign-out URL (optional)',
+	'orgSso.field.spEntityId': 'SP entity ID override (optional)',
+	'orgSso.field.allowedDomains': 'Allowed email domains',
+	'orgSso.domainsHint':
+		'Comma-separated. A first SSO sign-in creates an account only for these domains. Leave empty to accept any domain.',
+	'orgSso.secret.keepPlaceholder': 'Leave blank to keep the stored secret',
+	'orgSso.secret.configured':
+		'A client secret is stored. It is never shown again; type a new one to replace it.',
+	'orgSso.secret.notConfigured': 'No client secret is stored.',
+	'orgSso.secret.clear': 'Remove the stored client secret',
+	'orgSso.register.title': 'Register this app at your identity provider',
+	'orgSso.register.hint':
+		'Copy these values into the application you create at your identity provider.',
+	'orgSso.register.redirectUri': 'Redirect URI',
+	'orgSso.register.acsUrl': 'ACS URL',
+	'orgSso.register.spEntityId': 'SP entity ID (audience)',
+	'orgSso.ssoOnly': 'Require SSO (close password sign-in)',
+	'orgSso.ssoOnlyHint':
+		'Members can then sign in only through the identity provider. It saves only once the provider settings above are complete. If the provider later stops working, a platform operator can reopen password sign-in.',
+	'orgSso.status.passwordClosed':
+		'SSO-only is in force: password sign-in is closed for every member.',
+	'orgSso.status.incomplete':
+		'SSO is on, but the sign-in button stays hidden until these are set: {fields}.',
+	'orgSso.status.incompleteUnknown':
+		'SSO is on, but the identity-provider settings are incomplete, so the sign-in button stays hidden.',
+	'orgSso.save': 'Save SSO Settings',
+	'orgSso.toast.loadFailed': 'Failed to load SSO settings',
+	'orgSso.toast.saved': 'SSO settings saved',
+	'orgSso.toast.saveFailed': 'Failed to save SSO settings',
+	'orgSso.refusal.idpUnresolved':
+		'Requiring SSO closes password sign-in, so the identity-provider settings must be complete first. Missing or invalid: {fields}.',
 	'org.section.fraud': 'Fraud Detection',
 	'org.section.fraudSaved': 'Fraud detection',
 	'org.fraud.hint':

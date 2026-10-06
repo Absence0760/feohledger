@@ -7,6 +7,7 @@
 	import { api } from '#lib/api.ts';
 	import { getApiBase, getTenantSlug } from '#lib/tenant.ts';
 	import { m } from '#lib/i18n/store.svelte.ts';
+	import { SSO_PROVIDER_LABELS } from '#lib/types/ssoSettings.ts';
 
 	interface SSOConfigPublic {
 		enabled: boolean;
@@ -26,14 +27,9 @@
 	// true alongside an enabled config, so a broken IdP can't lock everyone out.
 	let ssoOnly = $state(false);
 
-	const PROVIDER_LABELS: Record<string, string> = {
-		okta: 'Okta',
-		entra: 'Microsoft',
-		oidc: 'SSO',
-		saml: 'SSO',
-		adfs: 'ADFS',
-		onelogin: 'OneLogin',
-	};
+	// Shared with the `/organization` SSO panel's picker, so an admin can only
+	// pick a provider this page knows how to label.
+	const PROVIDER_LABELS = SSO_PROVIDER_LABELS;
 
 	// `?slug=` is now OPTIONAL on every SSO/SAML entry point: on a customer's
 	// vanity host there is no slug in the hostname (`#lib/hostRouting.ts`

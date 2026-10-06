@@ -662,9 +662,10 @@ resolve has no SSO button, because the config endpoints report SSO as off. If
 the password were closed there too, no member could start a session. So an
 unresolvable block leaves password sign-in open, and each password sign-in it
 lets through logs a warning naming the org, because a tenant that believes it
-enforces SSO and does not is an operator's problem to fix. `PATCH
-/api/organization` refuses to save that state in the first place: a `settings.sso`
-with `enabled` and `sso_only` whose block does not resolve is a `422` naming the
+enforces SSO and does not is an operator's problem to fix. `PUT
+/api/organization/sso` refuses to save that state in the first place: `enabled`
+and `sso_only` over a block that does not resolve is a `422` whose `detail` is
+the coded refusal `sso_only_idp_unresolved`, with `params.fields` naming the
 offending keys (never their values; the block holds the client secret).
 `sso_only` with SSO switched off is accepted. Only a direct DB edit can still
 produce the state, and the escape hatch covers it. Reasoning:
@@ -672,8 +673,14 @@ produce the state, and the escape hatch covers it. Reasoning:
 
 "Resolves" is a local completeness check. It does no DNS lookup and fetches no
 discovery document, which is what keeps it on the sign-in path. A complete block
-pointing at an IdP that is down, or holding a revoked client secret, still closes
-the password; recovering from that takes a platform operator.
+pointing at an IdP that is down, or holding an expired or revoked client secret,
+or trusting a signing certificate the IdP has rotated, still closes the password
+for every member, admins included. **Recovering from that is the operator
+break-glass**: `backend/scripts/sso_break_glass.py --slug <slug>` clears
+`sso_only` and nothing else (SSO stays enabled, the IdP config is untouched),
+after writing an `organization.sso_only_lifted` audit row — and changes nothing
+if that row cannot be written. The procedure, including verifying the request
+first, is [`founder-runbooks/sso-break-glass.md`](founder-runbooks/sso-break-glass.md).
 
 **The password is not a step-up proof there either.** Signing in is not the only
 thing the stored hash can authenticate: every change to a second factor (TOTP
@@ -781,7 +788,46 @@ Consequences worth knowing:
   and there is no SSO that could close it.
 
 Reasoning: [decisions.md](decisions.md) §191, §201, §204. Tests: `backend/tests/test_sso_only.py`,
-`backend/tests/test_organization_settings_validation.py` (the write-time refusal).
+`backend/tests/test_organization_sso_settings.py` (the write-time refusal),
+`backend/tests/test_sso_break_glass.py` (the operator lift).
+
+### SSO configuration — one audited writer
+
+`settings.sso` is written by `PUT /api/organization/sso` (admin) and by nothing
+else a tenant can reach; `GET /api/organization/sso` (admin) serves the
+secret-free view the `/organization` **Single Sign-On** panel renders.
+`PATCH /api/organization` refuses an `sso` key and names the endpoint, the way it
+refuses `chat_notifications` and `brand.custom_domains`: its merge is per
+top-level key, so a `{"sso": {"client_secret": …}}` body used to replace the
+whole block — `enabled`, `sso_only`, the IdP config and the SCIM group state all
+went, with no audit row.
+
+The PUT states the whole IdP configuration, and a key it leaves out is removed,
+with three exceptions:
+
+- **The client secret is write-only.** Omitted or blank keeps the stored one;
+  `clear_client_secret: true` removes it. No response carries it —
+  `GET /api/organization` drops `sso.client_secret` for every role
+  (`services/org_settings_view.ALWAYS_REDACTED`), and the SSO view reports
+  `client_secret_configured` only.
+- **The SCIM state is carried.** `scim_bearer_hash` and `scim_groups` belong to
+  the SCIM machinery and survive every save; `scim_group_role_map` survives
+  unless the request names one, and a named map must reference roles the org
+  has. A changed map takes effect at the IdP's next membership push.
+- **`enabled` and `sso_only` must be stated.** An omitted flag is a `422`, not a
+  `false` — an omitted flag silently switching SSO off is the defect this
+  replaced. Every shape rule answers with a value-free `422`; the request model
+  is deliberately all-optional so FastAPI's own validation error, which echoes
+  the request object for a missing field, can never carry the secret back.
+
+Each save writes `organization.sso_updated` with the changed key **names** and
+the resulting `enabled` / `sso_only` / `protocol` — never a value. The view also
+carries the server's verdict (`password_sign_in_closed`, i.e. `is_sso_only`),
+the IdP keys the selected protocol still lacks (`idp_config_missing`), and the
+values to register at the IdP (`oidc_redirect_uri`, `saml_acs_url`,
+`saml_sp_entity_id`). Code: `api/organization_sso.py`, `services/sso_settings.py`;
+tests: `backend/tests/test_organization_sso_settings.py`,
+`frontend/tests-e2e/organization/sso.spec.ts`.
 
 ### An account can have no password at all — a separate bit from SSO-only
 
