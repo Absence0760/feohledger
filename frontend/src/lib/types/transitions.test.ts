@@ -3,6 +3,7 @@ import {
 	ENTRY_BULK_STATUS_TARGETS,
 	VALID_TRANSITIONS,
 	commonTransitions,
+	extractionAllowed,
 	inInvoiceEntryWindow,
 	type InvoiceStatus
 } from './invoice';
@@ -90,5 +91,15 @@ describe('the AP clerk\'s entry reach (backend api/invoice_entry.py)', () => {
 		expect(inInvoiceEntryWindow('rejected', 'Some Approver', null)).toBe(false);
 		expect(inInvoiceEntryWindow('approved', 'Some Approver', '2026-01-02')).toBe(false);
 		expect(inInvoiceEntryWindow('done', null, null)).toBe(false);
+	});
+
+	it('never offers re-extraction once an invoice has been approved, for any role', () => {
+		expect(extractionAllowed('new', null, null)).toBe(true);
+		expect(extractionAllowed('failed', null, null)).toBe(true);
+		// An approved invoice whose ERP push failed: Retry ERP, not re-extract.
+		expect(extractionAllowed('failed', 'Some Approver', '2026-01-02')).toBe(false);
+		expect(extractionAllowed('failed', '', '2026-01-02')).toBe(false);
+		expect(extractionAllowed('rejected', null, null)).toBe(false);
+		expect(extractionAllowed('ready_for_review', null, null)).toBe(false);
 	});
 });

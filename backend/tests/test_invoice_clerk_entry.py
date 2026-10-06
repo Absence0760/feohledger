@@ -146,6 +146,25 @@ async def test_an_approved_invoice_whose_erp_push_failed_is_outside_the_clerk_wi
     assert row.amount == Decimal("500.00")
 
 
+async def test_nobody_re_extracts_an_approved_invoice_whose_erp_push_failed(realdb, monkeypatch):
+    """A manager is refused too: re-reading the document would rewrite content
+    an approver signed while `approved_by` still names them."""
+    dispatch = AsyncMock()
+    monkeypatch.setattr("app.services.extraction_dispatch.dispatch_extraction", dispatch)
+    async with realdb.client(key="a", role="ap_clerk") as c:
+        invoice_id = await _clerk_create(c, "MGR-ERPFAIL-001")
+        assert (
+            await c.post(f"/api/invoices/{invoice_id}/file", files={"file": PDF})
+        ).status_code == 201
+    await _force(realdb, invoice_id, status=InvoiceStatus.failed, approved_by="Approver")
+
+    async with realdb.client(key="a", role="ap_manager") as c:
+        extract = await c.post(f"/api/invoices/{invoice_id}/extract")
+        assert extract.status_code == 409, extract.text
+    dispatch.assert_not_awaited()
+    assert (await _row(realdb, invoice_id)).status == InvoiceStatus.failed
+
+
 async def test_clerk_can_extract_and_reset_a_never_approved_invoice(realdb, monkeypatch):
     dispatch = AsyncMock()
     monkeypatch.setattr("app.services.extraction_dispatch.dispatch_extraction", dispatch)

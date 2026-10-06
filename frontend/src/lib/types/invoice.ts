@@ -183,6 +183,20 @@ export function inInvoiceEntryWindow(
 	return ENTRY_WINDOW_STATUSES.has(status) && !approvedBy && !approvalDate;
 }
 
+/**
+ * Whether `/extract` will read this invoice's document — `new` or `failed`, and
+ * never once approved, for ANY role (`workflow.trigger_extraction`): an
+ * approved invoice whose ERP push failed sits at `failed`, and re-reading it
+ * would rewrite what the approver signed. Retry ERP is that invoice's path.
+ */
+export function extractionAllowed(
+	status: InvoiceStatus,
+	approvedBy: string | null | undefined,
+	approvalDate: string | null | undefined
+): boolean {
+	return (status === 'new' || status === 'failed') && !approvedBy && !approvalDate;
+}
+
 /** The bulk status targets an entry-only caller may set — `ENTRY_BULK_STATUS_TARGETS`. */
 export const ENTRY_BULK_STATUS_TARGETS: ReadonlySet<InvoiceStatus> = new Set([
 	'new',

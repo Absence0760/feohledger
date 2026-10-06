@@ -5,7 +5,8 @@
 		INVOICE_ENTRY_ROLES,
 		INVOICE_MANAGE_ROLES,
 		INVOICE_STATUS_LABEL_KEYS,
-		inInvoiceEntryWindow
+		inInvoiceEntryWindow,
+		extractionAllowed
 	} from '#lib/types/invoice.ts';
 	import { PERM_INVOICE_APPROVE } from '#lib/types/admin.ts';
 	import { formatMoney, isNegativeAmount, isPositiveAmount } from '#lib/utils/money.ts';
@@ -631,7 +632,9 @@
 	let canRetryErp = $derived(status === 'failed' && canManageInvoice && invoice.approved_by);
 	let retryingErp = $state(false);
 	let canExtract = $derived(
-		canWrite && (status === 'new' || status === 'failed') && currentFileUrl
+		canWrite &&
+			extractionAllowed(status, invoice.approved_by, invoice.approval_date) &&
+			currentFileUrl
 	);
 	let extracting = $state(false);
 	let canManageFile = $derived(canWrite && status !== 'done');

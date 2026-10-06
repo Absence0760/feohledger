@@ -24,6 +24,7 @@ from app.api.invoice_entry import (
     is_entry_only,
     refuse_entry_only_outside_window,
     stamp_entry_editor,
+    was_ever_approved,
 )
 from app.api.permissions import PERM_INVOICE_APPROVE
 from app.api.refusals import coded_refusal
@@ -204,6 +205,18 @@ async def trigger_extraction(
             status_code=409,
             detail=(
                 f"Cannot extract from '{invoice.status.value}' status. Must be 'new' or 'failed'."
+            ),
+        )
+    # The same holds for everyone, not only clerks: an approved invoice whose
+    # ERP push failed is `failed`, and re-reading its document would rewrite
+    # the vendor, amount and lines an approver signed while `approved_by`
+    # still names them. The remedy for a failed push is Retry ERP.
+    if was_ever_approved(invoice):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "This invoice has already been approved, so its document can't be read "
+                "again. Retry the ERP push, or reject it for rework."
             ),
         )
 
