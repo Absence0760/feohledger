@@ -204,6 +204,16 @@ one again to flip direction:
   `created_at desc`: the page passes `SortableHeader` the flipped order and
   maps its clicks back (`handleAgeSort`). Any column rendered as elapsed time
   over a timestamp key needs the same flip.
+- **A sort can always be cleared.** Pass `onclear` and the sorted column
+  shows a × ("Clear sort by Vendor") that returns the list to the default
+  order. Write each page's `handleClearSort` as a copy of its `handleSort`
+  with `clearSort()` in place of `toggleSort()`, so it keeps that page's
+  exact URL sync and refetch path. All seven sortable lists pass it, and a
+  new one must too: a sort that can only be flipped has no way back.
+  `<th>` carries `aria-label={label}`, so the × isn't read into every
+  cell's header. In specs, pick the sort button by name inside a header
+  (`.getByRole('button', { name: label, exact: true })`). The sorted column
+  holds two buttons. Guard: `tests-e2e/invoices/sort.spec.ts`.
 
 ### Search (`SearchBox`)
 

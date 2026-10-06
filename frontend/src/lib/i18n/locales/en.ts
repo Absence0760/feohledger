@@ -97,6 +97,7 @@ export const en = {
 	'common.unsaved.body': 'You have changes on this page that haven\'t been saved. If you leave now, they\'ll be lost.',
 	'common.unsaved.stay': 'Stay on page',
 	'common.unsaved.leave': 'Leave without saving',
+	'common.sort.clear': 'Clear sort by {column}',
 	'common.loading': 'Loading…',
 	'common.tryAgain': 'Try again',
 	'common.retrying': 'Retrying…',

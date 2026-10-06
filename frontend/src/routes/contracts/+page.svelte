@@ -30,7 +30,7 @@
 	import { toast } from '#lib/components/ui/Toast.svelte';
 	import { isRowOpenClick } from '#lib/utils/rowNav.ts';
 	import { pruneSelection } from '#lib/utils/selection.ts';
-	import { toggleSort, type SortOrder } from '#lib/utils/sort.ts';
+	import { clearSort, toggleSort, type SortOrder } from '#lib/utils/sort.ts';
 	import { type MatchingIdsResponse } from '#lib/utils/pagination.ts';
 	import { m } from '#lib/i18n/store.svelte.ts';
 	import { page } from '$app/state';
@@ -168,6 +168,15 @@
 
 	function handleSort(field: string) {
 		const next = toggleSort({ field: sortField, order: sortOrder }, field);
+		sortField = next.field;
+		sortOrder = next.order;
+		syncUrl();
+		contractStore.fetch(buildParams()).catch(() => {}); // noqa: raw-fetch-in-component — store method, routes through api client
+	}
+
+	// The × on the sorted column: back to the backend's default order.
+	function handleClearSort() {
+		const next = clearSort({ field: sortField, order: sortOrder });
 		sortField = next.field;
 		sortOrder = next.order;
 		syncUrl();
@@ -347,12 +356,12 @@
 						<input type="checkbox" aria-label={m('contracts.selectAllAria')} checked={allSelected} onchange={toggleSelectAll} />
 					</th>
 				{/if}
-				<SortableHeader field="contract_number" label={m('contracts.col.contractNumber')} active={sortField === 'contract_number'} order={sortOrder} onsort={handleSort} />
+				<SortableHeader field="contract_number" label={m('contracts.col.contractNumber')} active={sortField === 'contract_number'} order={sortOrder} onsort={handleSort} onclear={handleClearSort} />
 				<th scope="col">{m('contracts.col.vendor')}</th>
 				<th scope="col">{m('contracts.col.type')}</th>
-				<SortableHeader field="status" label={m('contracts.col.status')} active={sortField === 'status'} order={sortOrder} onsort={handleSort} />
-				<SortableHeader field="end_date" label={m('contracts.col.endDate')} active={sortField === 'end_date'} order={sortOrder} onsort={handleSort} />
-				<SortableHeader field="total_value" label={m('contracts.col.value')} class="right" active={sortField === 'total_value'} order={sortOrder} onsort={handleSort} />
+				<SortableHeader field="status" label={m('contracts.col.status')} active={sortField === 'status'} order={sortOrder} onsort={handleSort} onclear={handleClearSort} />
+				<SortableHeader field="end_date" label={m('contracts.col.endDate')} active={sortField === 'end_date'} order={sortOrder} onsort={handleSort} onclear={handleClearSort} />
+				<SortableHeader field="total_value" label={m('contracts.col.value')} class="right" active={sortField === 'total_value'} order={sortOrder} onsort={handleSort} onclear={handleClearSort} />
 				<th scope="col" class="right">{m('contracts.col.spend')} <HelpTip term="contract" /></th>
 			</tr>
 		{/snippet}

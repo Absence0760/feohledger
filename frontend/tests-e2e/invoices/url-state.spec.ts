@@ -44,7 +44,7 @@ test.describe('/invoices URL state', () => {
 				r.url().includes('order=asc') &&
 				r.url().includes('status=approved')
 		);
-		await page.getByRole('button', { name: /Amount/ }).click();
+		await page.getByRole('button', { name: /^Amount/ }).click();
 		await sorted;
 
 		await expect(page).toHaveURL(/status=approved/);
@@ -109,7 +109,7 @@ test.describe('/invoices URL state', () => {
 				r.url().includes('sort=amount') &&
 				r.url().includes('search=INV')
 		);
-		await page.getByRole('button', { name: /Amount/ }).click();
+		await page.getByRole('button', { name: /^Amount/ }).click();
 		await sorted;
 
 		// The sort write used to rebuild from a frozen URL with no `search=`.

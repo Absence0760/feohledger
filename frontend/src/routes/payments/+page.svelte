@@ -77,7 +77,7 @@
 	import { page } from '$app/state';
 	import { replaceState } from '$app/navigation';
 	import SortableHeader from '#lib/components/ui/SortableHeader.svelte';
-	import { toggleSort, type SortOrder } from '#lib/utils/sort.ts';
+	import { clearSort, toggleSort, type SortOrder } from '#lib/utils/sort.ts';
 
 	let RUNS_COLUMNS = $derived([
 		{ label: m('payments.col.run') },
@@ -168,6 +168,15 @@
 
 	function handleHistorySort(field: string) {
 		const next = toggleSort({ field: sortField, order: sortOrder }, field);
+		sortField = next.field;
+		sortOrder = next.order;
+		syncUrl();
+		paymentStore.fetch(buildParams()).catch(() => {}); // noqa: raw-fetch-in-component — store method; routes through api.get
+	}
+
+	// The × on the sorted column: back to the backend's default order.
+	function handleClearSort() {
+		const next = clearSort({ field: sortField, order: sortOrder });
 		sortField = next.field;
 		sortOrder = next.order;
 		syncUrl();
@@ -2167,11 +2176,11 @@
 				<tr>
 					<th scope="col">{m('payments.col.invoiceNumber')}</th>
 					<th scope="col">{m('payments.col.vendor')}</th>
-					<SortableHeader field="method" label={m('payments.col.method')} active={sortField === 'method'} order={sortOrder} onsort={handleHistorySort} />
-					<SortableHeader field="amount" label={m('payments.col.amount')} class="right" active={sortField === 'amount'} order={sortOrder} onsort={handleHistorySort} />
-					<SortableHeader field="status" label={m('payments.col.status')} active={sortField === 'status'} order={sortOrder} onsort={handleHistorySort} />
+					<SortableHeader field="method" label={m('payments.col.method')} active={sortField === 'method'} order={sortOrder} onsort={handleHistorySort} onclear={handleClearSort} />
+					<SortableHeader field="amount" label={m('payments.col.amount')} class="right" active={sortField === 'amount'} order={sortOrder} onsort={handleHistorySort} onclear={handleClearSort} />
+					<SortableHeader field="status" label={m('payments.col.status')} active={sortField === 'status'} order={sortOrder} onsort={handleHistorySort} onclear={handleClearSort} />
 					<th scope="col">{m('payments.col.reference')}</th>
-					<SortableHeader field="created_at" label={m('payments.col.date')} active={sortField === 'created_at'} order={sortOrder} onsort={handleHistorySort} />
+					<SortableHeader field="created_at" label={m('payments.col.date')} active={sortField === 'created_at'} order={sortOrder} onsort={handleHistorySort} onclear={handleClearSort} />
 					<th class="actions-col"></th>
 				</tr>
 			{/snippet}

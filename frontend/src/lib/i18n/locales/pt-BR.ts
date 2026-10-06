@@ -90,6 +90,7 @@ export const messages = {
 	'common.unsaved.body': 'Há alterações nesta página que ainda não foram salvas. Se você sair agora, elas serão perdidas.',
 	'common.unsaved.stay': 'Permanecer na página',
 	'common.unsaved.leave': 'Sair sem salvar',
+	'common.sort.clear': 'Remover a ordenação por {column}',
 	'common.loading': 'Carregando…',
 	'common.tryAgain': 'Tentar novamente',
 	'common.retrying': 'Tentando novamente…',

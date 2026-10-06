@@ -27,7 +27,7 @@
 	} from '#lib/types/exception.ts';
 	import type { ExceptionSeverity } from '#lib/types/exception.ts';
 	import type { ExceptionSummary } from '#lib/types/exceptionSummary.ts';
-	import { toggleSort, type SortOrder } from '#lib/utils/sort.ts';
+	import { clearSort, toggleSort, type SortOrder } from '#lib/utils/sort.ts';
 	import AgentDashboard from '#lib/components/exceptions/AgentDashboard.svelte';
 	import HelpTip from '#lib/components/help/HelpTip.svelte';
 	import { formatMoney, type MoneyAmount } from '#lib/utils/money.ts';
@@ -386,6 +386,12 @@
 
 	function handleSort(field: string) {
 		const next = toggleSort({ field: sortField, order: sortOrder }, field);
+		applySort(next.field, next.order);
+	}
+
+	// The × on the sorted column: back to the backend's default order.
+	function handleClearSort() {
+		const next = clearSort({ field: sortField, order: sortOrder });
 		applySort(next.field, next.order);
 	}
 
@@ -997,7 +1003,7 @@
 					label={m('exceptions.col.severity')}
 					active={sortField === 'severity'}
 					order={sortOrder}
-					onsort={handleSort}
+					onsort={handleSort} onclear={handleClearSort}
 				/>
 				<th scope="col">{m('exceptions.col.invoice')}</th>
 				<th scope="col">{m('exceptions.col.vendor')}</th>
@@ -1009,14 +1015,14 @@
 					label={m('exceptions.col.age')}
 					active={sortField === AGE_FIELD}
 					order={ageOrder}
-					onsort={handleAgeSort}
+					onsort={handleAgeSort} onclear={handleClearSort}
 				/>
 				<SortableHeader
 					field="due_at"
 					label={m('exceptions.col.due')}
 					active={sortField === 'due_at'}
 					order={sortOrder}
-					onsort={handleSort}
+					onsort={handleSort} onclear={handleClearSort}
 				/>
 				<th scope="col">{m('exceptions.col.status')}</th>
 				<th class="actions-col" scope="col"></th>

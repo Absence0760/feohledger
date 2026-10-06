@@ -89,6 +89,7 @@ export const messages = {
 	'common.unsaved.body': 'Cette page contient des modifications qui n\'ont pas été enregistrées. Si vous la quittez maintenant, elles seront perdues.',
 	'common.unsaved.stay': 'Rester sur la page',
 	'common.unsaved.leave': 'Quitter sans enregistrer',
+	'common.sort.clear': 'Retirer le tri par {column}',
 	'common.loading': 'Chargement…',
 	'common.tryAgain': 'Réessayer',
 	'common.retrying': 'Nouvelle tentative…',

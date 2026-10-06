@@ -33,7 +33,7 @@
 	import { afterNavigate, replaceState } from '$app/navigation';
 	import { untrack } from 'svelte';
 	import SortableHeader from '#lib/components/ui/SortableHeader.svelte';
-	import { toggleSort, type SortOrder } from '#lib/utils/sort.ts';
+	import { clearSort, toggleSort, type SortOrder } from '#lib/utils/sort.ts';
 
 	// Search + the quick status chips are URL-backed (`?search=&status=`)
 	// alongside `assigned_to_id`, sort and the `?id=` deep link, so a reload /
@@ -160,6 +160,15 @@
 
 	function handleSort(field: string) {
 		const next = toggleSort({ field: sortField, order: sortOrder }, field);
+		sortField = next.field;
+		sortOrder = next.order;
+		syncUrl();
+		invoiceStore.fetch(buildParams()).catch(() => {}); // noqa: raw-fetch-in-component — store method, routes through api client
+	}
+
+	// The × on the sorted column: back to the backend's default order.
+	function handleClearSort() {
+		const next = clearSort({ field: sortField, order: sortOrder });
 		sortField = next.field;
 		sortOrder = next.order;
 		syncUrl();
@@ -973,13 +982,13 @@
 		{#snippet header()}
 			<tr>
 				<th class="checkbox-col"><input type="checkbox" aria-label={m('invoices.selectAllAria')} checked={allSelected} onchange={toggleSelectAll} /></th>
-				<SortableHeader field="invoice_number" label={m('invoices.col.invoiceNumber')} active={sortField === 'invoice_number'} order={sortOrder} onsort={handleSort} />
-				<SortableHeader field="vendor_name" label={m('invoices.col.vendor')} active={sortField === 'vendor_name'} order={sortOrder} onsort={handleSort} />
+				<SortableHeader field="invoice_number" label={m('invoices.col.invoiceNumber')} active={sortField === 'invoice_number'} order={sortOrder} onsort={handleSort} onclear={handleClearSort} />
+				<SortableHeader field="vendor_name" label={m('invoices.col.vendor')} active={sortField === 'vendor_name'} order={sortOrder} onsort={handleSort} onclear={handleClearSort} />
 				<th>{m('invoices.col.description')}</th>
 				<th>{m('invoices.col.poNumber')}</th>
-				<SortableHeader field="amount" label={m('invoices.col.amount')} class="right" active={sortField === 'amount'} order={sortOrder} onsort={handleSort} />
-				<SortableHeader field="due_date" label={m('invoices.col.dueDate')} active={sortField === 'due_date'} order={sortOrder} onsort={handleSort} />
-				<SortableHeader field="status" label={m('invoices.col.status')} active={sortField === 'status'} order={sortOrder} onsort={handleSort} />
+				<SortableHeader field="amount" label={m('invoices.col.amount')} class="right" active={sortField === 'amount'} order={sortOrder} onsort={handleSort} onclear={handleClearSort} />
+				<SortableHeader field="due_date" label={m('invoices.col.dueDate')} active={sortField === 'due_date'} order={sortOrder} onsort={handleSort} onclear={handleClearSort} />
+				<SortableHeader field="status" label={m('invoices.col.status')} active={sortField === 'status'} order={sortOrder} onsort={handleSort} onclear={handleClearSort} />
 				<th>{m('invoices.col.assignedTo')}</th>
 				<th class="actions-col"></th>
 			</tr>

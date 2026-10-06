@@ -92,6 +92,7 @@ export const messages = {
 	'common.unsaved.body': 'このページには保存されていない変更があります。今移動すると、変更は失われます。',
 	'common.unsaved.stay': 'このページに留まる',
 	'common.unsaved.leave': '保存せずに移動',
+	'common.sort.clear': '{column}の並べ替えを解除',
 	'common.loading': '読み込み中…',
 	'common.tryAgain': '再試行',
 	'common.retrying': '再試行中…',

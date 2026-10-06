@@ -88,6 +88,7 @@ export const messages = {
 	'common.unsaved.body': 'Auf dieser Seite gibt es Änderungen, die noch nicht gespeichert wurden. Wenn Sie die Seite jetzt verlassen, gehen sie verloren.',
 	'common.unsaved.stay': 'Auf der Seite bleiben',
 	'common.unsaved.leave': 'Ohne Speichern verlassen',
+	'common.sort.clear': 'Sortierung nach {column} aufheben',
 	'common.loading': 'Wird geladen …',
 	'common.tryAgain': 'Erneut versuchen',
 	'common.retrying': 'Wird erneut versucht…',

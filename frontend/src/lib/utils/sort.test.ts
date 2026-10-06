@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { toggleSort } from './sort';
+import { clearSort, toggleSort } from './sort';
 
 describe('toggleSort', () => {
 	it('starts a newly-clicked column ascending', () => {
@@ -20,5 +20,19 @@ describe('toggleSort', () => {
 	it('clicking the already-active descending column flips it to ascending', () => {
 		const next = toggleSort({ field: 'amount', order: 'desc' }, 'amount');
 		expect(next).toEqual({ field: 'amount', order: 'asc' });
+	});
+});
+
+describe('clearSort', () => {
+	it('drops the field, returning the list to its default order', () => {
+		expect(clearSort({ field: 'vendor_name', order: 'desc' })).toEqual({
+			field: null,
+			order: 'desc',
+		});
+	});
+
+	it('leaves the next header click starting ascending', () => {
+		const cleared = clearSort({ field: 'amount', order: 'desc' });
+		expect(toggleSort(cleared, 'amount')).toEqual({ field: 'amount', order: 'asc' });
 	});
 });

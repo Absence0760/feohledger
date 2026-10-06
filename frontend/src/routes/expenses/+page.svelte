@@ -92,7 +92,7 @@
 	import { m } from '#lib/i18n/store.svelte.ts';
 	import { normalizeMoneyInput } from '#lib/utils/moneyInput.ts';
 	import SortableHeader from '#lib/components/ui/SortableHeader.svelte';
-	import { toggleSort, type SortOrder } from '#lib/utils/sort.ts';
+	import { clearSort, toggleSort, type SortOrder } from '#lib/utils/sort.ts';
 
 	const canCreate = $derived(auth.hasAnyRole('admin', 'ap_manager', 'ap_clerk'));
 	// Policy CRUD + report/pre-approval REJECT = admin | ap_manager.
@@ -351,6 +351,15 @@
 
 	function handleSort(field: string) {
 		const next = toggleSort({ field: sortField, order: sortOrder }, field);
+		sortField = next.field;
+		sortOrder = next.order;
+		syncUrl();
+		loadExpenses();
+	}
+
+	// The × on the sorted column: back to the backend's default order.
+	function handleClearSort() {
+		const next = clearSort({ field: sortField, order: sortOrder });
 		sortField = next.field;
 		sortOrder = next.order;
 		syncUrl();
@@ -1241,12 +1250,12 @@
 							onchange={toggleSelectAll}
 						/>
 					</th>
-					<SortableHeader field="expense_date" label={m('expenses.col.date')} active={sortField === 'expense_date'} order={sortOrder} onsort={handleSort} />
-					<SortableHeader field="merchant" label={m('expenses.col.merchant')} active={sortField === 'merchant'} order={sortOrder} onsort={handleSort} />
-					<SortableHeader field="category" label={m('expenses.col.category')} active={sortField === 'category'} order={sortOrder} onsort={handleSort} />
+					<SortableHeader field="expense_date" label={m('expenses.col.date')} active={sortField === 'expense_date'} order={sortOrder} onsort={handleSort} onclear={handleClearSort} />
+					<SortableHeader field="merchant" label={m('expenses.col.merchant')} active={sortField === 'merchant'} order={sortOrder} onsort={handleSort} onclear={handleClearSort} />
+					<SortableHeader field="category" label={m('expenses.col.category')} active={sortField === 'category'} order={sortOrder} onsort={handleSort} onclear={handleClearSort} />
 					<th>{m('expenses.col.method')}</th>
-					<SortableHeader field="amount" label={m('expenses.col.amount')} class="right" active={sortField === 'amount'} order={sortOrder} onsort={handleSort} />
-					<SortableHeader field="status" label={m('expenses.col.status')} active={sortField === 'status'} order={sortOrder} onsort={handleSort} />
+					<SortableHeader field="amount" label={m('expenses.col.amount')} class="right" active={sortField === 'amount'} order={sortOrder} onsort={handleSort} onclear={handleClearSort} />
+					<SortableHeader field="status" label={m('expenses.col.status')} active={sortField === 'status'} order={sortOrder} onsort={handleSort} onclear={handleClearSort} />
 					<th class="actions-col"></th>
 				</tr>
 			{/snippet}
