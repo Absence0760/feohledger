@@ -301,13 +301,19 @@ median creeps toward ~15 min again, double the shards; don't raise the cap.
 `pytest-split` partitions by a committed `backend/.test_durations` baseline when
 present; absent, it falls back to an even split by **test count** (still correct
 and deterministic — every test runs in exactly one shard — just less
-wall-clock-balanced). To regenerate the baseline for better balance (e.g. after a
-large test-surface change), run the full suite once with the DB stack up:
+wall-clock-balanced). To regenerate the baseline, rebuild it from CI rather
+than a laptop: every backend shard runs with `--store-durations
+--clean-durations` and uploads what it measured as `test-durations-shard-N`, so
+the eight artifacts of any run whose shards all finished union into a complete
+baseline measured on the hardware that runs it:
 
 ```bash
-# from backend/, stack up (docker compose up -d) and venv active
-pytest --store-durations          # writes backend/.test_durations
+pnpm gen:test-durations <run-id>   # gh run download + union → backend/.test_durations
+pnpm check:test-durations          # then lower MAX_MISSING_FRACTION to just above the new figure
 ```
+
+(`pytest --store-durations` against the local stack still works, but takes ~60
+min and measures laptop timings.)
 
 Commit the updated `.test_durations` alongside the test changes. Bumping the
 shard count means editing the `matrix.shard` list, the `--splits N` flag, and

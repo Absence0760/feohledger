@@ -42,11 +42,12 @@ current debt explicit rather than hidden. **It may only ever move down.**
 Raising it to get green is the one change this file exists to prevent — if the
 number trips, regenerate the baseline:
 
-    pytest --store-durations            # ~60 min, needs the full local stack
+    pnpm gen:test-durations <run-id>    # union of one CI run's eight shards
 
 A baseline measured on a CI runner is worth more than a laptop-measured one,
-since balance is only meaningful against the hardware that runs it; wiring that
-up is tracked in `docs/followups.md`.
+since balance is only meaningful against the hardware that runs it, so every
+backend shard uploads the durations it measured (`scripts/merge_test_durations.py`).
+`pytest --store-durations` against the full local stack (~60 min) still works.
 
 Usage: python scripts/check_test_durations.py [--durations PATH] [--quiet]
 """
@@ -140,7 +141,7 @@ def load_durations(path: Path) -> dict[str, float]:
             f"{path} is missing. pytest-split falls back to splitting by test COUNT, "
             "so every shard gets an equal number of tests regardless of cost and the "
             "realdb files land wherever they fall. Restore it from git, or regenerate "
-            "with `pytest --store-durations`."
+            "with `pnpm gen:test-durations <run-id>`."
         )
     try:
         data = json.loads(path.read_text())
@@ -189,7 +190,7 @@ def main() -> int:
             print(f"  … and {remaining} more files")
         print(
             "\nThe baseline no longer describes the suite well enough to balance it.\n"
-            "Regenerate it — `pytest --store-durations` against the full local stack —\n"
+            "Regenerate it from a green CI run — `pnpm gen:test-durations <run-id>` —\n"
             "and commit the result. Do NOT raise MAX_MISSING_FRACTION to get green;\n"
             "see this file's docstring for why that is the one forbidden fix."
         )

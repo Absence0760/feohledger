@@ -146,3 +146,41 @@ def test_the_committed_baseline_is_within_the_ceiling():
     report = g.analyze(list(durations), durations)
     assert report.ok
     assert report.missing == ()
+
+
+# ---------- merge_test_durations: rebuilding the baseline from CI shards ----------
+
+
+def _merger():
+    path = BACKEND_ROOT / "scripts" / "merge_test_durations.py"
+    spec = importlib.util.spec_from_file_location("merge_test_durations", path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_merge_unions_disjoint_shards():
+    m = _merger()
+    merged = m.merge({1: {"a::x": 1.0}, 2: {"b::y": 2.5}}, expected=2)
+    assert merged == {"a::x": 1.0, "b::y": 2.5}
+
+
+def test_merge_refuses_a_missing_shard():
+    """Seven-eighths of a baseline leaves one contiguous slice at the mean —
+    the shape the guard exists to catch — so it is refused, not written."""
+    m = _merger()
+    with pytest.raises(SystemExit, match=r"\[2\]"):
+        m.merge({1: {"a::x": 1.0}}, expected=2)
+
+
+def test_merge_refuses_overlapping_shards():
+    m = _merger()
+    with pytest.raises(SystemExit, match="two shards"):
+        m.merge({1: {"a::x": 1.0}, 2: {"a::x": 1.1}}, expected=2)
+
+
+def test_merge_refuses_empty_shards():
+    m = _merger()
+    with pytest.raises(SystemExit, match="no durations"):
+        m.merge({1: {}, 2: {}}, expected=2)
