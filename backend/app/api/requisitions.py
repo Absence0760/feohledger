@@ -166,10 +166,24 @@ async def _get_or_404(
         PurchaseRequisition,
         entity_id,
     )
-    # Lock the row for state-changing money paths (convert-to-PO) so two
-    # concurrent requests can't both read converted_po_id IS NULL and each
-    # create a PurchaseOrder — doubling committed spend. FOR UPDATE on the
-    # requisition row serializes them; the loser sees converted_po_id set.
+    # Every route that WRITES a requisition locks its row (`for_update=True`):
+    # PATCH, DELETE and each state-machine action. Each one reads the row, then
+    # writes something derived from what it read, so unlocked they race:
+    #   * convert-to-PO — two requests both read `converted_po_id IS NULL` and
+    #     each create a PurchaseOrder, doubling committed spend.
+    #   * PATCH vs PATCH — `material_editor_ids` is read-modify-write, so two
+    #     concurrent material edits both read the old set and the later commit
+    #     drops the earlier editor, who can then approve the lines they wrote.
+    #   * PATCH vs submit / approve — a PATCH that read `draft` committed after
+    #     a concurrent submit + approve, changing spend the approver had seen.
+    # Locked, the second request waits and re-reads the committed row (the
+    # `populate_existing` above makes the re-read win over the identity map).
+    #
+    # Lock order: requisition row FIRST, then the budget row
+    # (`_resolve_links` locks a budget when PATCH resolves a `budget_id`). The
+    # budget routes lock only the budget and never lock a requisition — their
+    # linked-requisition count is a plain read — so no path takes the two in
+    # the opposite order. Create locks only the budget (its row is new).
     if for_update:
         stmt = stmt.with_for_update(of=PurchaseRequisition)
     req = (await db.execute(stmt)).scalar_one_or_none()
@@ -398,7 +412,7 @@ async def update_requisition(
     A non-draft requisition is locked: editing after submission would let a
     requester change the spend the approver already saw. ``line_items``, when
     present, fully replaces the lines and the header ``total`` is recomputed."""
-    req = await _get_or_404(db, req_id, entity_id)
+    req = await _get_or_404(db, req_id, entity_id, for_update=True)
     if req.status != RequisitionStatus.draft:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
@@ -484,7 +498,7 @@ async def delete_requisition(
     org_id: uuid.UUID = Depends(get_org_id),
     entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
-    req = await _get_or_404(db, req_id, entity_id)
+    req = await _get_or_404(db, req_id, entity_id, for_update=True)
     # Refuse once the requisition has produced downstream artifacts, the way
     # `DELETE /api/recurring/{id}` refuses a template that has already
     # generated invoices. Two distinct failures, both reachable today:
@@ -554,7 +568,7 @@ async def submit_requisition(
     entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
     """Submit a draft requisition for approval: ``draft → pending_approval``."""
-    req = await _get_or_404(db, req_id, entity_id)
+    req = await _get_or_404(db, req_id, entity_id, for_update=True)
     guard_transition(req.status, RequisitionStatus.pending_approval)
     req.status = RequisitionStatus.pending_approval
     req.submitted_at = datetime.now(UTC)
@@ -576,7 +590,7 @@ async def approve_requisition(
     Segregation of duties: the approver must be neither the requester nor anyone
     who materially edited the draft (``material_editor_ids``) — reuses
     ``check_segregation`` → 403. Stamps ``approved_by`` / ``approved_at``."""
-    req = await _get_or_404(db, req_id, entity_id)
+    req = await _get_or_404(db, req_id, entity_id, for_update=True)
     guard_transition(req.status, RequisitionStatus.approved)
     # SoD — approver ∉ requester ∪ material editors. Reuse the invoice helper
     # via a tiny attribute shim so the rule + 403 detail stay shared with the
@@ -609,7 +623,7 @@ async def reject_requisition(
     entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
     """Reject a pending requisition: ``pending_approval → rejected``."""
-    req = await _get_or_404(db, req_id, entity_id)
+    req = await _get_or_404(db, req_id, entity_id, for_update=True)
     guard_transition(req.status, RequisitionStatus.rejected)
     req.status = RequisitionStatus.rejected
     req.rejection_reason = body.reason if body else None
@@ -636,7 +650,7 @@ async def cancel_requisition(
 ):
     """Cancel a requisition (any non-terminal, non-converted state): ``→
     cancelled``. A converted requisition is terminal and cannot be cancelled."""
-    req = await _get_or_404(db, req_id, entity_id)
+    req = await _get_or_404(db, req_id, entity_id, for_update=True)
     guard_transition(req.status, RequisitionStatus.cancelled)
     req.status = RequisitionStatus.cancelled
     await _audit_transition(
@@ -673,7 +687,7 @@ async def reopen_requisition(
     ``rejection_reason`` is deliberately left on the row — it is the brief for
     the rework, and a later rejection overwrites it.
     """
-    req = await _get_or_404(db, req_id, entity_id)
+    req = await _get_or_404(db, req_id, entity_id, for_update=True)
     guard_transition(req.status, RequisitionStatus.draft)
     req.status = RequisitionStatus.draft
     # The prior submission's clock no longer describes this row: it is a draft
