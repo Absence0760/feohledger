@@ -528,7 +528,9 @@ page boundary safe, and they are why the shape is a cursor rather than a cap.
 
 ## Frontend
 
-`/discounts` (`routes/discounts/+page.svelte`, gated to admin/ap_manager/cfo):
+`/discounts` (`routes/discounts/+page.svelte`, readable by all four roles —
+admin/ap_manager/ap_clerk/cfo, matching `_READ_ROLES`; accept / decline stay
+admin/ap_manager/cfo, `_ACCEPT_ROLES`):
 KPI cards (captured / missed / capture rate / projected savings / open offers),
 a status `FilterChips` filter, an offers `DataTable` (tiers via the new
 `ui/DiscountTierBar.svelte`, accept-tier `Modal`, decline action), and an

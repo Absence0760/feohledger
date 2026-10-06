@@ -14,7 +14,7 @@ Payment Scheduled          (auto or manual — based on due date & payment terms
 Payment Run Created        (batch of invoices grouped for execution)
     |
     v
-Payment Executed           (ACH, wire, check, or virtual card)
+Payment Executed           (on the run's rail — ACH, wire, check, virtual card, a UK rail, or an international corridor; see `method` below)
     |
     v
 Reconciled                 (matched against bank statement — future)
@@ -84,7 +84,7 @@ An individual payment record linked to a single invoice. Created when a payment 
 | payment_run_id | UUID | FK to the batch run (nullable for one-off payments) |
 | correlation_id | UUID | Links to the invoice's correlation ID |
 | amount | Decimal | Payment amount |
-| method | String | `ach`, `wire`, `check`, `virtual_card` |
+| method | String | Domestic: `ach`, `wire`, `check`, `rtp`, `virtual_card`, and the UK rails `bacs`, `faster_payments`, `chaps`. International corridors: `sepa`, `international_ach`, `international_wire` (chosen by `payment_corridor.pick_corridor`, never a default). The rail sets are `services/payment_methods.py`; the run-review dropdown offers `ach`, `wire`, `check`, `virtual_card`, `bacs`, `faster_payments`, `chaps` (`frontend/src/lib/types/payment.ts::PAYMENT_METHODS`) |
 | status | String | `pending` → `processing` → `completed` / `failed` / `cancelled` |
 | reference | String | External reference (check number, wire ref, ACH trace) |
 
@@ -108,7 +108,7 @@ The payments page (`/payments`) consolidates all payment activity — including 
 /payments
   ├── Summary Bar        — Total Paid, Pending, Ready to Pay, Payments, Rebates Earned
   ├── Tab: Queue         — invoices ready to pay (sorted by due date, overdue highlighted)
-  ├── Tab: History       — all payments in one table (ACH, wire, check, virtual card)
+  ├── Tab: History       — all payments in one table, every rail
   └── Tab: Runs          — payment batches
 ```
 
@@ -187,19 +187,20 @@ The flow is split into **create draft** and **execute** so a CFO can review what
 2. **Selects invoices** via checkboxes (select-all available)
 3. Action bar shows count and total: *"3 selected — $18,050.00"*
 4. Clicks **Review & Pay** — review panel slides in
-5. **Chooses payment method per invoice** (ACH, Wire, Check, Virtual Card) via dropdown
+5. **Chooses payment method per invoice** (ACH, Wire, Check, Virtual Card, BACS, Faster Payments, CHAPS) via dropdown
 6. Clicks **Create Draft Run · 3 Invoices** — this:
    - `POST /api/payments/runs` creates a `PaymentRun` with `status='draft'`
    - Pending payment rows are created (no money has moved)
    - The Run Detail modal opens automatically showing the draft
 7. Toast: *"Draft payment run created — review and execute"*
 8. In the **Run Detail modal** the user reviews the payments table and clicks **Execute**:
-   - `POST /api/payments/runs/{id}/execute` flips the run to `completed`
+   - `POST /api/payments/runs/{id}/execute` claims the run by flipping it to `executing`, then dispatches each payment to the processor
+   - When the loop finishes, the run's status is **derived from the processor results** (`rollup_payment_statuses` → `completed`, `partial`, `failed`, or `submitted` while any payment is still in flight) — it is not set straight to `completed`
    - Generates payment references (e.g., `ACH-20260406-001`)
    - Updates invoice statuses to `payment_scheduled`
    - **Triggers async ERP sync** in background
 9. Toast: *"Payment run executed — 3 payments completed. ERP sync in progress."*
-10. Queue clears, History/Runs/Summary update; the modal stays open showing the now-completed run
+10. Queue clears, History/Runs/Summary update; the modal stays open showing the run in its derived status
 
 The same Run Detail modal is reachable by clicking any row in the **Runs** tab — for completed runs it shows the payments + references; for stale drafts it offers Execute.
 
@@ -1983,10 +1984,22 @@ The invoice side of a payment is audited separately by
 | Action | Admin | AP Manager | AP Clerk | CFO |
 |---|---|---|---|---|
 | View payment queue | Yes | Yes | No | Yes |
-| Create payment run | Yes | Yes | No | No |
-| Execute payment run | Yes | No | No | Yes |
+| Create payment run | Yes | Yes | No | Yes |
+| Execute payment run | Yes | Yes | No | Yes |
+| CFO sign-off on a run above the threshold | No | No | No | Yes |
 | View payment history | Yes | Yes | No | Yes |
 | Void a payment | Yes | No | No | Yes |
+
+These are the system-role defaults of the granular permissions
+(`backend/app/api/permissions.py::ROLE_DEFAULT_PERMISSIONS`): create is
+`payment_run.approve`, execute / resume / retry are `payment.execute` (which
+`ap_manager` holds by default — the maker-checker rule below is what stops one
+person both creating and executing the same run), void is `payment.void`
+(admin + CFO), and the queue / history reads accept `payment.execute` or
+`payment.void`. A custom role can be granted any of them. CFO sign-off
+(`POST /runs/{id}/approve`) is the exception: it is `require_roles(ROLE_CFO)`,
+so it needs the actual CFO role — neither admin nor a custom-role permission
+satisfies it.
 
 CFO approval is required for executing payment runs above a configurable
 threshold (`Organization.settings.payments.cfo_approval_above`, a `Decimal`).

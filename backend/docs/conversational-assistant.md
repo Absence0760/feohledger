@@ -1,10 +1,10 @@
 # Conversational AP Assistant
 
 A per-user, per-tenant natural-language assistant over a **fixed, typed
-toolset** — five read-only tools that run only against the caller's current
-tenant. The assistant never exposes raw SQL and never reads another tenant's
-data; the model can only emit one of the five fixed tool calls with typed,
-clamped parameters.
+toolset** — ten read-only tools (five general, five cash-flow copilot) that
+run only against the caller's current tenant. The assistant never exposes raw
+SQL and never reads another tenant's data; the model can only emit one of the
+ten fixed tool calls with typed, clamped parameters.
 
 **Local-AI default.** `pnpm dev` ships with `FEOH_ASSISTANT_PROVIDER=ollama`
 (in `backend/.env.development`): the `ollama` adapter drives the assistant
@@ -79,7 +79,7 @@ inside the adapter instead.
 - **`claude_adapter.py`** — raw `httpx` POST to
   `https://api.anthropic.com/v1/messages` (house style; matches
   `extraction_adapters/claude_vision.py`), `thinking: {"type": "adaptive"}`,
-  the five tools as Anthropic tool schemas, and a manual tool-use loop capped at
+  the ten tools as Anthropic tool schemas, and a manual tool-use loop capped at
   `FEOH_ASSISTANT_MAX_TOOL_HOPS`. The model id resolves from config
   (`FEOH_ASSISTANT_MODEL` → falls back to `FEOH_EXTRACTION_MODEL`) — never
   hardcoded. Real `usage` tokens are summed across hops. **Streaming**: it also
@@ -87,7 +87,7 @@ inside the adapter instead.
   loop that forwards the Anthropic Messages SSE `text_delta`s as they arrive
   (true per-token passthrough) — see [Streaming (SSE)](#streaming-sse--post-apiassistantchatstream).
 - **`ollama_adapter.py`** (committed dev default) — raw `httpx` POST to a local
-  Ollama `/api/chat` with the five tools converted to OpenAI-style function
+  Ollama `/api/chat` with the ten tools converted to OpenAI-style function
   schemas, the same `FEOH_ASSISTANT_MAX_TOOL_HOPS` loop, and `prompt_eval_count` /
   `eval_count` summed as the usage tokens. Uses a dedicated **tool-capable text
   model** (`FEOH_ASSISTANT_OLLAMA_MODEL`, not the vision model used for
@@ -102,7 +102,7 @@ inside the adapter instead.
   400) — pick one that does (`qwen2.5*`, `llama3.1`, `mistral-nemo`, …); the
   fail-soft keeps the assistant answering regardless.
 
-## The five tools
+## The ten tools
 
 Each is an `async def(db, *, org_id, entity_id, current_user_id, params)` over
 the **current tenant** session, returning a Pydantic model. Money is `Decimal`
@@ -116,6 +116,25 @@ float). Params clamp limits so an odd model arg can't request an unbounded scan.
 | `list_pending_approvals` | `ready_for_review` invoices ⋈ active approval `WorkflowStep` | approval-queue rows (`assignee=me\|anyone`) |
 | `get_payment_forecast` | `services.analytics.bucket_outflows` (`_COMMITTED_STATUSES` + `_PENDING_STATUSES`) | due-dated outflow buckets + total |
 | `find_invoices_by_text` | `services.rag.retrieve_similar` (pgvector; mock embeddings by default) | similar invoices + non-PII snippet |
+| `get_cashflow_forecast` | cash-flow copilot (`tools/cashflow.py`) | projected outflow by period: committed / pending / discount-eligible |
+| `get_cash_position` | cash-flow copilot (`tools/cashflow.py`) | running balance per period + first shortfall |
+| `run_payment_whatif` | cash-flow copilot (`tools/cashflow.py`) | pay-early / on-time / late scenario comparison |
+| `optimize_discount_capture` | discount optimizer (`tools/optimizer.py`) | worthwhile discount offers ranked by annualized return |
+| `propose_payment_plan` | discount optimizer (`tools/optimizer.py`) | proposed plan: cash curve + discounts to capture (never moves money) |
+
+**What each caller can reach.** Every tool is org- and entity-scoped (below)
+and conversations are private to their author (next section). Beyond that,
+only the five cash-flow tools carry a per-tool role gate:
+`ToolSpec.allowed_roles = FINANCE_LEADER_ROLES` (`admin` / `ap_manager` /
+`cfo`), checked in the orchestrator's `run_tool` before any read, along with
+the `FEOH_CASHFLOW_COPILOT_ENABLED` master switch — a clerk, or a disabled
+deployment, gets a clean refusal tool result. The five general tools have no
+`allowed_roles`, so any of the four employee roles can call them.
+
+> **Note:** that includes `get_payment_forecast`, which returns the same
+> due-dated outflow figures the REST cash-flow forecast gates to admin / CFO —
+> see `docs/known-issues.md` § "The assistant's payment-forecast tool skips the
+> forecast's role gate".
 
 `list_invoices` re-builds the filter SELECT directly rather than importing from
 `app/api/invoices.py` (frozen during in-flight multi-entity work) — see

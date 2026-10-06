@@ -210,6 +210,8 @@ accepted quantity (pay-only-accepted); a `pass` is a clean gate. When
 flags `inspection_required` so the warnings layer can route a `quality_hold`
 exception.
 
+> **Note (2026-10-06):** the code does not currently enforce this — only `duplicate`, `fraud_flag`, `line_total_mismatch` and `payment_reconciliation` exceptions are payment-blocking today (`PAYMENT_BLOCKING_EXCEPTION_TYPES` in `backend/app/api/payments.py`); `po_mismatch` and `quality_hold` are not. See docs/followups.md § Surfaced by writing the help centre.
+
 **Both steps matter, and the second one used to be skipped whenever a GR
 existed.** `qms_sync` writes a PO-level inspection (`gr_id` NULL) any time the
 QMS knows the PO number but not the GR number — `_resolve_gr_id` returns `None`
@@ -295,6 +297,8 @@ Reviewers see the match status:
 ### Before Payment
 Mismatched invoices can be blocked from the payment queue until the mismatch is resolved (exception cleared).
 
+> **Note (2026-10-06):** the code does not currently enforce this — only `duplicate`, `fraud_flag`, `line_total_mismatch` and `payment_reconciliation` exceptions are payment-blocking today (`PAYMENT_BLOCKING_EXCEPTION_TYPES` in `backend/app/api/payments.py`); `po_mismatch` and `quality_hold` are not. See docs/followups.md § Surfaced by writing the help centre.
+
 ### Quality-hold exceptions
 The 4-way leg routes inspection outcomes to a dedicated `quality_hold`
 exception type (created by `invoice_warnings._refresh_po_match`):
@@ -305,6 +309,8 @@ exception type (created by `invoice_warnings._refresh_po_match`):
 | missing + `require_inspection` on | warning | created (warning) |
 | `partial` | info | created (info) — accepted quantity noted |
 | `pass` | — | none |
+
+> **Note (2026-10-06):** the code does not currently enforce this — only `duplicate`, `fraud_flag`, `line_total_mismatch` and `payment_reconciliation` exceptions are payment-blocking today (`PAYMENT_BLOCKING_EXCEPTION_TYPES` in `backend/app/api/payments.py`); `po_mismatch` and `quality_hold` are not. See docs/followups.md § Surfaced by writing the help centre.
 
 `quality_hold` is additive to `po_mismatch`, and the two never double-report
 one finding. `MatchResult.status` is shared by the legs — a failed inspection
@@ -398,7 +404,8 @@ than a UI preference:
   whoever works the resulting `quality_hold`. The three outcomes are a radio
   group, each labelled with what it does to the match (`pass` leaves it alone,
   `fail` drops it to `mismatch` and blocks payment, `partial` drops it to
-  `partial`).
+  `partial`). (Note, 2026-10-06: "blocks payment" is not enforced today — see
+  the note under [Before Payment](#before-payment).)
 - **A receipt is mandatory in the form**, even though `POST /api/inspections`
   accepts a body with neither `gr_id` nor `po_id`. The matcher only ever reads
   an inspection through the matched receipt's `gr_id`, or through a PO-level

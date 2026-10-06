@@ -12,7 +12,7 @@ Four roles are available. Users can have multiple roles.
 |---|---|
 | **Admin** | Full access to all features and user management |
 | **AP Manager** | Review and approve invoices |
-| **AP Clerk** | Upload invoices and enter data |
+| **AP Clerk** | Read-only on invoices: views and exports them, but cannot create, upload, edit, import or approve one (the seeded role description still reads "Upload invoices and enter data") |
 | **CFO** | Approve high-value invoices and view reports |
 
 Roles are enforced in the frontend UI. The `/api/auth/me` endpoint returns the user's roles, and the frontend restricts visibility and actions based on them.
@@ -43,16 +43,23 @@ matching `require_roles(ADMIN, AP_MANAGER)` on the write endpoints.
 
 | Feature | Admin | AP Manager | AP Clerk | CFO |
 |---|---|---|---|---|
+| Invoice: create / upload / attach file | Yes | Yes | No | Yes |
+| Invoice: CSV import | Yes | Yes | No | No |
 | Invoice: edit fields (Save) | Yes | Yes | No | Yes |
 | Invoice: submit for review (new) | Yes | Yes | No | Yes |
-| Invoice: approve/reject | Yes | Yes | No | No |
+| Invoice: approve/reject | Yes | Yes | No | Yes |
 | Invoice: delete | Yes | Yes | No | Yes |
 | Bulk: delete, status change | Yes | Yes | No | Yes |
 | Bulk: export | Yes | Yes | Yes | Yes |
 
-A clerk reads every invoice but changes none: `PATCH /api/invoices/{id}`,
+A clerk reads every invoice but creates or changes none: `POST /api/invoices`,
+`POST /api/invoices/upload`, `PATCH /api/invoices/{id}`,
 `POST /api/invoices/{id}/complete`, `/extract` and `/reset-extraction` are all
-`require_roles(ADMIN, AP_MANAGER, CFO)`, and the detail modal gates Save,
+`require_roles(ADMIN, AP_MANAGER, CFO)`, and `POST /api/invoices/import-csv` is
+narrower still (`require_roles(ADMIN, AP_MANAGER)`). Approve / reject are gated
+on the `invoice.approve` permission (`require_permission`), which admin, AP
+manager and CFO hold by default and a clerk does not
+(`backend/app/api/permissions.py::ROLE_DEFAULT_PERMISSIONS`). The detail modal gates Save,
 Submit, Extract and Reset on that same any-of list (`canWrite`). There is no
 status picker for any role — the modal shows status read-only, because `PATCH`
 does not accept `status`; a status moves only through the workflow actions
@@ -206,7 +213,4 @@ organizations
 
 - **Email invitations**: Send invite emails with a magic link or temp password via SMTP (admins currently hand temp passwords to invitees out-of-band)
 - **Password reset**: Self-service password reset via email (currently requires admin to reset)
-- **Approval thresholds**: Role-based invoice approval limits (e.g., CFO required above $10,000)
-- **Segregation of duties**: enforce approver ≠ creator on invoice approve (tracked in roadmap under RBAC)
 - **SCIM `/Groups`**: map IdP groups to our `Role` rows (`/Users` is shipped; group sync is not)
-- **WebAuthn / passkeys**: TOTP MFA shipped — passkeys are a separate code path tracked in roadmap

@@ -334,11 +334,25 @@ invoice still cannot clear unless an eligible escalation substitutes them — se
 
 ### Segregation of Duties
 
-`require_segregation: bool` on the approval step config. When enabled:
+`require_segregation: bool` on the approval step config. It is **default-on**:
+an absent key means enabled, and only an explicit `require_segregation: false`
+turns it off (`approval_chain.violates_segregation`). When enabled:
 
-- `Invoice.uploaded_by_id` tracks the user who uploaded the invoice.
-- If the approver is the same user who uploaded (`uploaded_by_id == current_user.id`), the approval is rejected with 403.
-- Skipped when `uploaded_by_id` is NULL (pre-existing invoices created before the field was added).
+- The approver must not be one of the payable's **implicated actors** —
+  `Invoice.uploaded_by_id` ∪ `Invoice.segregation_actor_ids`. The second column
+  names the other people who shaped the payable's terms: a recurring template's
+  author and material editors, or, on an inter-company mirror, the source
+  payable's whole implicated set.
+- An approver in that set is refused with 403.
+- With `uploaded_by_id` NULL **and** the set empty there is nothing to refuse.
+  That combination means the invoice came in through a channel with no employee
+  behind it — email intake, inbound PEPPOL, or the supplier portal — not
+  "pre-existing invoices": every path where a signed-in employee creates an
+  invoice stamps the uploader.
+
+Full rule, and why NULL is permissive rather than fail-closed: root `CLAUDE.md`
+§ RBAC roles ("Approver ≠ creator keys on a SET") and `docs/decisions.md` §141,
+§152, §192.
 
 ### Delegation / Out-of-Office
 

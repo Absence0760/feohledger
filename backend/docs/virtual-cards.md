@@ -964,11 +964,11 @@ backend/app/api/cards.py              # API endpoints (generate, list, cancel, d
 | Card API endpoints (generate, list, cancel, details, webhook, rebates) | Done |
 | Card config in organization settings UI | Done |
 | Region-based auto provider selection | Done |
-| Card list page frontend | Planned |
-| Card generation in payment run UI | Planned |
-| Vendor email notification | Planned |
+| Card list frontend (**Cards** tab on `/payments`, not a separate page) | Done |
+| Card generation in payment run UI (`virtual_card` method in the run review; issued on execute) | Done |
+| Vendor email notification (`card_issuance.notify_vendor_of_card` — single-use reveal link to `/portal/cards/{token}`) | Done |
 | Vendor card acceptance tracking | Planned |
-| Rebate dashboard UI | Planned |
+| Rebate UI (rebates table with confirm / mark-paid on `/payments`; Rebates Earned in the summary bar) | Done |
 | Supplier portal integration | Planned |
 | BIN sponsor graduation | Future (>$10M/month)
 
