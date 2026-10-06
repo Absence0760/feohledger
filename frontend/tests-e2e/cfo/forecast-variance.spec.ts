@@ -71,10 +71,12 @@ test('renders the partial-figure disclosure above the amounts it qualifies', asy
 	// unconverted outflows, not a tooltip nobody opens.
 	const notice = page.getByTestId('forecast-variance-unconverted');
 	await expect(notice).toBeVisible({ timeout: 15_000 });
-	await expect(notice).toHaveAttribute('role', 'alert');
-	await expect(notice).toContainText('2');
-	await expect(notice).toContainText('USD');
-	await expect(notice).toContainText(/floor/i);
+	// The alert is the message alone — the ⓘ HelpTip beside it is not part of
+	// the warning, so it sits outside the announced region.
+	const alert = notice.getByRole('alert');
+	await expect(alert).toContainText('2');
+	await expect(alert).toContainText('USD');
+	await expect(alert).toContainText(/floor/i);
 
 	// And it sits ABOVE the table it qualifies, not below it.
 	const noticeBox = await notice.boundingBox();

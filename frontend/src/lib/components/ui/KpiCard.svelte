@@ -69,7 +69,7 @@
 	     its own load. -->
 	<span class="kpi-value" aria-hidden={figure === 'pending' ? 'true' : undefined}>{shown}</span>
 	{#if figure === 'pending'}
-		<span class="visually-hidden">{m('common.loading')}</span>
+		<span class="visually-hidden kpi-loading">{m('common.loading')}</span>
 	{/if}
 	{#if helpTerm}
 		<span class="kpi-label-row"><span class="kpi-label">{label}</span><HelpTip term={helpTerm} /></span>

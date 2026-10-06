@@ -126,8 +126,11 @@ test.describe('/payments — reporting currency and FX exclusions', () => {
 		// an explanation.
 		await expect(notice).toContainText('2');
 		await expect(notice).toContainText('USD');
-		// Screen-reader parity with the /discounts + /cfo notices.
-		await expect(notice).toHaveAttribute('role', 'alert');
+		// Screen-reader parity with the /discounts + /cfo notices. The alert is
+		// the message alone — the ⓘ HelpTip beside it is not part of the warning.
+		const alert = notice.getByRole('alert');
+		await expect(alert).toContainText('2');
+		await expect(alert).toContainText('USD');
 	});
 
 	test('the queue says when its own totals leave rows out', async ({ page }) => {
