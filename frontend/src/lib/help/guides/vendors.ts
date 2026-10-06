@@ -55,7 +55,7 @@ export const VENDOR_GUIDES: Guide[] = [
 				blocks: [
 					{
 						type: 'p',
-						text: 'An unverified vendor was created from what was printed on an invoice, and nobody has confirmed it is a real supplier you do business with. Invoices from it carry a {ui:invoices.warning.unverifiedVendor} warning and an exception in the queue, so check it before you pay.'
+						text: 'An unverified vendor was created from what was printed on an invoice, and nobody has confirmed it is a real supplier you do business with. Invoices from it carry a {ui:invoices.warning.unverifiedVendor} warning and an exception in the queue, and it can\'t be paid, in a payment run or by card, until someone verifies it.'
 					},
 					{
 						type: 'steps',
@@ -391,7 +391,7 @@ export const VENDOR_GUIDES: Guide[] = [
 					},
 					{
 						type: 'p',
-						text: 'A pass leaves the match alone. A fail puts the invoice on a quality hold. A partial acceptance marks the match as partial and shows how much was accepted. If your organization uses a quality management system, {ui:goodsReceipts.inspections.action.sync} pulls inspections from it. A synced inspection marked {ui:goodsReceipts.inspections.unlinked} names no receipt or PO that FeohLedger holds, so matching never reads it.'
+						text: 'A pass leaves the match alone. A fail puts the invoice on a quality hold, which holds payment until a later inspection passes or someone resolves it. A partial acceptance marks the match as partial and shows how much was accepted. If your organization uses a quality management system, {ui:goodsReceipts.inspections.action.sync} pulls inspections from it. A synced inspection marked {ui:goodsReceipts.inspections.unlinked} names no receipt or PO that FeohLedger holds, so matching never reads it.'
 					},
 					{
 						type: 'note',

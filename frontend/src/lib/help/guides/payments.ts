@@ -492,7 +492,7 @@ export const PAYMENT_GUIDES: Guide[] = [
 					{
 						type: 'note',
 						tone: 'caution',
-						text: 'Accepting an offer doesn\'t reduce the payment by itself. A payment run pays the invoice amount minus applied credit memos. To pay the discounted amount, record the discount as a [[guide:credit-memos|credit memo]] on the invoice before the run. The offer is marked {ui:discounts.status.captured} only when a settled payment exactly matches the discounted amount.'
+						text: 'Once you accept an offer, the next payment for that invoice pays the discounted amount, as long as it is paid by the tier\'s pay-by date. The payment queue and the run show the accepted offer beside the invoice. You don\'t need a [[guide:credit-memos|credit memo]] for the discount; an applied memo for exactly the savings is treated as the discount already taken, so it is never deducted twice. If the pay-by date passes before a run is executed, that payment fails as changed rather than being re-priced, and you build a fresh run at the full amount. The offer is marked {ui:discounts.status.captured} when the discounted payment settles. A card from Generate cards is never discounted; cancel it if you want to take the discount through a run.'
 					},
 					{
 						type: 'list',

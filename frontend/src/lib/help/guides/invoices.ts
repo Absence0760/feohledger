@@ -382,7 +382,7 @@ export const INVOICE_GUIDES: Guide[] = [
 							'Check the PO number on the invoice first. A typo is the most common cause of {ui:invoices.modal.poMatch.notFound}.',
 							'For an amount difference, compare the invoice with the order in [[page:/purchase-orders]]. Correct the invoice if it was read wrongly; otherwise query the vendor.',
 							'For a partial receipt, check [[page:/goods-receipts]]. If the rest of the goods are on their way, the match updates once they are received.',
-							'A mismatch also opens a {ui:exceptions.type.poMismatch} exception. Resolve it with a note once you have settled the difference. See [[guide:work-exceptions|Work the exceptions queue]].'
+							'A mismatch that could over-pay (no PO found, a different currency, or billing above the PO or above what has been received, beyond tolerance) also opens a {ui:exceptions.type.poMismatch} exception, which holds payment. It lifts by itself once the goods are received or the invoice is corrected; otherwise resolve it with a note once you have settled the difference. See [[guide:work-exceptions|Work the exceptions queue]].'
 						]
 					}
 				]

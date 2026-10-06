@@ -285,7 +285,7 @@ export const GLOSSARY: GlossaryEntry[] = [
 	{
 		id: 'dynamic-discounting',
 		category: 'payments',
-		long: 'Paying a supplier early in return for a discount, with the terms agreed per offer rather than fixed on the invoice. An offer can slide with timing, such as 3% off if paid in five days or 2% in ten. Offers come from suppliers through the [[supplier-portal]] or from standard terms like 2/10 net 30.\n\nFeohLedger ranks open offers by their annualized return so you can see which ones beat your other uses of cash. Each offer moves from offered to accepted to captured, or ends declined or expired, and the savings are tracked in {ui:nav.discounts}.',
+		long: 'Paying a supplier early in return for a discount, with the terms agreed per offer rather than fixed on the invoice. An offer can slide with timing, such as 3% off if paid in five days or 2% in ten. Offers come from suppliers through the [[supplier-portal]] or from standard terms like 2/10 net 30.\n\nFeohLedger ranks open offers by their annualized return so you can see which ones beat your other uses of cash. Accepting an offer makes the next payment for that invoice pay the discounted amount, if it is paid by the deadline. Each offer moves from offered to accepted to captured, or ends declined or expired, and the savings are tracked in {ui:nav.discounts}.',
 		aliases: ['early payment discount', 'early-pay discount', '2/10 net 30', 'prompt payment discount', 'supply chain finance'],
 		related: ['payment-run', 'supplier-portal', 'void']
 	},
@@ -405,7 +405,7 @@ export const GLOSSARY: GlossaryEntry[] = [
 	{
 		id: 'payment-blocking-exception',
 		category: 'controls',
-		long: "An [[exception]] that stops an invoice from being paid while it is open or escalated. There are four: {ui:exceptions.type.duplicate}, {ui:exceptions.type.fraudFlag}, {ui:exceptions.type.lineTotalMismatch} and {ui:exceptions.type.paymentReconciliation}.\n\nApproving an invoice doesn't clear them, so resolving one is the sign-off that lets the money move. That is why nobody involved in creating or editing the payable, or who raised the flag, may resolve or dismiss it. They can escalate it instead.",
+		long: "An [[exception]] that stops an invoice from being paid while it is open or escalated. There are six: {ui:exceptions.type.duplicate}, {ui:exceptions.type.fraudFlag}, {ui:exceptions.type.lineTotalMismatch}, {ui:exceptions.type.paymentReconciliation}, {ui:exceptions.type.poMismatch} (only when the invoice could be over-paid against its purchase order) and {ui:exceptions.type.qualityHold}. A PO mismatch or quality hold also lifts by itself once receipts or a passing inspection catch up.\n\nApproving an invoice doesn't clear them, so resolving one is the sign-off that lets the money move. That is why nobody involved in creating or editing the payable, or who raised the flag, may resolve or dismiss it. They can escalate it instead.",
 		aliases: ['payment hold', 'blocking exception', 'payment block'],
 		related: ['exception', 'segregation-of-duties', 'payment-run', 'duplicate-invoice', 'fraud-flag', 'line-total-mismatch']
 	},

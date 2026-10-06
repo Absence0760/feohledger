@@ -273,11 +273,11 @@ export const CONCEPT_GUIDES: Guide[] = [
 				blocks: [
 					{
 						type: 'p',
-						text: 'A mismatch adds a warning to the invoice and opens an [[exception]] for someone to work. Receiving more than was ordered is flagged even when the amount agrees, because extra quantities are how an invoice for goods nobody authorized gets a receipt to support it. A failed inspection, or a missing one when your organization requires inspections, opens a quality hold.'
+						text: 'A mismatch adds a warning to the invoice. When paying it could pay more than the purchase order supports, it also opens a {ui:exceptions.type.poMismatch} [[payment-blocking-exception]]: the PO can\'t be found, the currencies differ, or the invoice bills more than the PO, or more than has been received so far, by more than your tolerance. Billing less than the PO (the first invoice on a split order, say) and differences inside the tolerance stay warnings and don\'t hold payment. Receiving more than was ordered is flagged as a warning even when the amount agrees, because extra quantities are how an invoice for goods nobody authorized gets a receipt to support it. A failed inspection, or a missing one when your organization requires inspections, opens a {ui:exceptions.type.qualityHold}, which also holds payment.'
 					},
 					{
 						type: 'p',
-						text: 'Match results inform the reviewer; they do not decide on their own. A reviewer sees the result before approving, and the exception stays in the queue until someone resolves it. Some PO mismatches can be worked by an AI exception agent if your organization has enabled them. See [[guide:ai-in-feohledger|AI in FeohLedger]].'
+						text: 'Match results inform the reviewer; they do not decide on their own. A reviewer sees the result before approving. A held invoice is released when someone resolves the exception, or on its own once the missing receipts or a passing inspection arrive and the check no longer finds a problem. A pass someone involved with the invoice typed in by hand doesn\'t release it on its own; a person has to. Some PO mismatches can be worked by an AI exception agent if your organization has enabled them. See [[guide:ai-in-feohledger|AI in FeohLedger]].'
 					},
 					{
 						type: 'note',
