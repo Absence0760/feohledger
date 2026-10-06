@@ -155,11 +155,109 @@ state of an untouched historical invoice, not an error — which is also why
 `message` stays on the payload permanently rather than being removed once the
 catalogue covers every code.
 
-## What is NOT localized by this
+## Two more families: PO-match issues and exception descriptions
 
-- **`Invoice.po_match.issues`** — the matcher's own composed sentences, rendered
-  verbatim in the modal's PO-match panel. A separate surface with a separate
-  vocabulary.
-- **`Exception.description`** — `_ensure_exception` is passed the same English
-  prose (sometimes the warning's own `message`). The exception queue renders it
-  raw.
+The PO-match panel's issue list and the exception queue's description used to
+be server English rendered verbatim. Both now speak the same catalogue rather
+than growing catalogues of their own, so one generator, one drift guard and one
+client reader cover all three families. Each family's wire code carries its
+namespace, and the generator derives the message key from it — a family can
+never borrow another's wording:
+
+| Family | Wire code | Built by | Web key / ARB method |
+|--------|-----------|----------|----------------------|
+| Invoice warnings | `round_amount` | `warning(code, severity, **params)` | `invoices.warning.*` / `invoiceWarning…` |
+| PO-match issues (`PO_MATCH_ISSUE_SPECS`) | `po_match.issue.partial_receipt` | `po_match_issue(code, **params)` | `invoices.poMatch.issue.*` / `invoicePoMatchIssue…` |
+| Exception-only descriptions (`EXCEPTION_DESCRIPTION_SPECS`) | `exception.missing_data_after_extraction` | `exception_finding(code, **params)` / `exception_findings(frame, findings)` | `exceptions.description.*` / `exceptionDescription…` |
+
+The two new builders take the BARE name (`"partial_receipt"`) and add the
+namespace themselves, and `warning()` refuses a code outside the warning family,
+so a finding cannot be keyed under the wrong family by mistake. Both emit
+`{code, params, message}` — a warning without `type` / `severity`.
+
+### `po_match.issues`
+
+`MatchResult.issues` (persisted as `invoice.po_match.issues`) is a list of
+`po_match.issue.*` findings — `po_not_found`, `currency_mismatch`, the three
+`amount_mismatch*` variants (both currencies known; the PO's unknown, so its
+total is a bare `number`; the invoice's own code invalid, so neither figure is
+labelled — `decisions.md` §197), `partial_receipt`, `over_receipt`,
+`inspection_failed{,_notes}`, `partial_acceptance{,_unquantified}` and
+`inspection_required_missing`. They read shorter than the matching
+`po_mismatch` / `quality_hold` warnings because they render inside the
+PO-match panel, which already names the PO.
+
+A match persisted before this holds **bare English strings**, and nothing
+backfills them — the next `refresh_warnings` re-derives the row. Every reader
+accepts both shapes: the web's `poMatchIssueText` (`api/invoiceWarnings.ts`)
+and mobile's `findingText` render a string as written.
+
+### Exception descriptions
+
+`Exception.description_code` (`varchar(100)`) and `description_params` (JSONB)
+were added by tenant migration 0103. `invoice_warnings._ensure_exception` now
+takes a catalogue finding dict, never a string — a non-dict or code-less
+argument raises `TypeError` — and stores its `message` as `description` (the
+English fallback), its `code` and its `params`. Which code:
+
+- **An exception that mirrors a warning carries that warning's own code**
+  (`round_amount`, `po_not_found`, `remit_to_changed`, …), so the queue and the
+  invoice state one finding in one wording. This is what retired the second,
+  drifting wording some sites used to compose — `"Suspicious round amount:
+  $5000.00"` beside the warning's `"Round amount: 5000.00 ZAR"`. Extraction's
+  duplicate exception (`services/extraction.py`) passes its duplicate warning's
+  code the same way.
+- **A sentence no warning states** gets an `exception.*` code — today
+  `exception.missing_data_after_extraction`.
+- **A composite** — one `price_variance` exception covering every flagged line,
+  one `contract_noncompliant` exception covering every breached term — is
+  built by `exception_findings(frame, findings)`. A single finding needs no
+  frame and is stored as itself. Two or more become a FRAME code
+  (`exception.price_variance_findings` / `exception.contract_noncompliant_findings`)
+  whose only template param is `count`, with the findings themselves — each a
+  `{code, params, message}` — as a list under the reserved
+  `params.findings` key (`FINDINGS_PARAM`; never a template placeholder). The
+  stored `description` is the frame's English followed by each finding's,
+  `"; "`-joined. Clients render the frame and then list the findings, each
+  localized on its own code; the server no longer joins localized text, which
+  also retired the `$` the price-variance summary stamped on every figure.
+
+Both columns stay **NULL** for a human-authored description (a rejection
+reason) and for every row raised before 0103 — no backfill, because the
+`$`-prefixed historical sentences recorded no currency, and parsing English back
+into params is the scraping this catalogue exists to retire. Clients render
+`description` then.
+
+The client readers (`frontend/src/lib/api/exceptionDescription.ts`, mobile's
+`exceptionDescriptionText` in `l10n/invoice_warning_messages.dart`) share one
+fallback order: no code → `description` as written; a code this build cannot
+render (unknown, or a param missing) → the whole `description` and **no**
+separate findings, because a composite's English fallback already contains every
+finding; one unrenderable finding inside a renderable composite → that finding's
+own English beside its localized siblings. `/exceptions` shows the summary in the
+row (summary and findings one per line in its `title`) and the summary plus a
+findings list in the resolve dialog; mobile's exception detail screen does the
+same.
+
+## What is NOT localized
+
+Exceptions raised outside `_ensure_exception` (and outside extraction's
+duplicate path) still call `exception_service.create_exception` with composed
+English and no code, so the queue renders them raw:
+
+| Site | Exception type | Description |
+|------|----------------|-------------|
+| `services/extraction.py` | `extraction_failed` | `Extraction failed: <error>` |
+| `api/erp_webhook.py` | `erp_reconciliation` | composed by the caller from the ERP's status report |
+| `api/positive_pay.py` | `fraud_flag` | `Positive Pay return: check <number> <reason>` — also the dedupe key (`description ==`), so keying it must move the dedupe too |
+| `api/vendors.py` (bank change) | `fraud_flag` | `Vendor bank details changed; verify before payment.` |
+| `api/payments.py` | `payment_compliance_hold` | the payment's `failure_reason` |
+| `services/payment_reconciler.py` | `payment_reconciliation` | the aged-out in-flight payment paragraph |
+| `services/payment_settlement_record.py` | `fraud_flag` | `describe_discrepancy(...)` |
+| `services/payment_erp_sync.py` | `erp_reconciliation` | the failed ERP sync-back paragraph |
+
+`services/review.py`'s `review_rejected` exception is not on this list on
+purpose: its description is the reviewer's own words, which have no code by
+nature. Keying any of the others means a catalogue spec per sentence and passing
+`description_code` / `description_params` through `create_exception`, exactly as
+the extraction duplicate site does.

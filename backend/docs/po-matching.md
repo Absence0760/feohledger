@@ -123,8 +123,12 @@ two bare numbers, so an invoice for EUR 1,000 against a USD 1,000 order read
 `MatchResult.po_currency` carries the PO's own code, and the invoice modal
 labels `po_total` with it — never with the invoice's currency. The variance is
 labelled with the invoice's currency only when `currency_check` is `same`; the
-matcher's `issues` sentences spell each figure's own code (they printed `$` on
-both, whatever either was in).
+matcher's `issues` label a figure only with a code that is its own (they printed
+`$` on both, whatever either was in). The out-of-tolerance issue is one of three
+codes for that reason — `po_match.issue.amount_mismatch` (both codes known, both
+figures `money`), `…_po_currency_unknown` (the PO total a bare `number`) and
+`…_currency_unknown` (the invoice's own code invalid, so neither figure is
+labelled).
 
 **The agents fail closed on `unknown`.** A human reviewer may accept a
 face-value match; an agent that rewrites the invoice amount, or links and
@@ -171,8 +175,9 @@ Only `received < ordered` was ever reported. More units booked in than were
 ordered passed the leg in silence — and an over-delivery is how an invoice for
 quantities nobody authorised acquires its supporting receipt. `received >
 ordered` now sets the additive `over_receipt` flag, mirrors it into `details`,
-and appends an issue (`Over-receipt: 14 received against 10 ordered (+4)`) that
-the invoice modal renders verbatim.
+and appends a `po_match.issue.over_receipt` issue (English fallback
+`Over-receipt: 14 received against 10 ordered (+4)`) that the invoice modal's
+PO-match panel renders in the reader's language.
 
 `status` is deliberately **unchanged** by an over-receipt and keeps its four
 values. `mismatch` is owned by the amount control, which is the gate that
@@ -250,9 +255,18 @@ MatchResult:
     inspection_accepted_quantity: float | None  # partial acceptance qty
     inspection_required: bool              # require_inspection on + inspection missing
     over_receipt: bool          # 3-way: received quantity EXCEEDS ordered
-    issues: list[str]           # human-readable issues
+    issues: list[dict]          # {code, params, message} — po_match.issue.* findings
     details: dict               # full match data for audit (has_inspection, inspection_result)
 ```
+
+Each `issues` entry is built by `invoice_warning_catalog.po_match_issue` — a
+`po_match.issue.*` code, its typed params and the English `message` fallback —
+so the web modal and the mobile PO-match panel localize it through the generated
+catalogue like any invoice warning (`backend/docs/invoice-warnings.md` § Two more
+families). A match persisted before the catalogue covered issues holds **bare
+English strings** instead; nothing backfills them (the next `refresh_warnings`
+re-derives the row), so every reader accepts both shapes and renders a string as
+written.
 
 `over_receipt` is **additive** on the persisted `invoice.po_match` JSONB shape —
 every pre-existing key keeps its meaning, and a row written before it landed
