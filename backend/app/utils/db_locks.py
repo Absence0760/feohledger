@@ -19,6 +19,8 @@ with the transaction still usable:
   the outer transaction, so without the restore the bound would leak onto
   whatever the caller does next — including statements after an irreversible
   external call, where a timeout is the one outcome that must not happen.
+
+Reasoning: `docs/decisions.md` §233.
 """
 
 from __future__ import annotations

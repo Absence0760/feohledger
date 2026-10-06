@@ -83,7 +83,7 @@ def _exception_dict(exc: APException, inv: Invoice | None) -> dict:
         # the web queue's `MoneyAmount`). A mobile build from BEFORE that
         # change parses `as num?` and throws on this — so a store-distributed
         # build older than it must be retired before this ships to its users
-        # (`docs/decisions.md`). No mobile release has been published yet.
+        # (`docs/decisions.md` §234). No mobile release has been published yet.
         "amount": json_money_string(inv.amount) if inv else None,
         # What `amount` above is DENOMINATED in. `ap_exceptions` has no money
         # column of its own — the figure IS the invoice's `amount` — so it only

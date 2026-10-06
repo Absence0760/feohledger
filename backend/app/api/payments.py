@@ -1772,7 +1772,7 @@ async def _lock_payment_invoice(db: AsyncSession, payment: Payment) -> Invoice |
     already holds — intact, so the caller can record a named refusal instead of
     an `unexpected_error` on an aborted session. The bound covers this one
     statement only and is restored before returning, so nothing the caller does
-    after its processor call can time out on a lock (`docs/decisions.md`).
+    after its processor call can time out on a lock (`docs/decisions.md` §233).
     """
     from app.config import settings as app_settings
 

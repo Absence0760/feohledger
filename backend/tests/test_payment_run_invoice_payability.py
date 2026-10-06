@@ -621,3 +621,66 @@ async def test_compliance_release_refuses_a_locked_invoice_with_409(realdb, monk
     # Left exactly where it was — not `failed`, so the operator just releases again.
     assert after.status == "pending_compliance"
     assert after.failure_reason == "compliance_hold: review"
+
+
+async def test_settlement_accept_refuses_a_locked_invoice_with_409(realdb, monkeypatch):
+    """`/settlement/accept` walks a held `payment_scheduled` invoice to `paid`.
+    Past the bound it must refuse by name and change nothing: no `→ paid`, the
+    payment untouched, no `payment.settlement_accepted` row."""
+    mk = realdb.sessionmaker("a")
+    invoice_id, run_id = await _book_run(realdb, mk, number="LOCKWAIT-ACCEPT", amount="90.00")
+    async with realdb.client(key="a", role="ap_manager") as c:
+        exec_resp = await c.post(f"/api/payments/runs/{run_id}/execute")
+        assert exec_resp.status_code == 200, exec_resp.text
+
+    # A short settlement the ERP sync holds at `payment_scheduled`.
+    async with mk() as s:
+        payment = (
+            await s.execute(select(Payment).where(Payment.invoice_id == uuid.UUID(invoice_id)))
+        ).scalar_one()
+        payment.settled_amount = Decimal("45.00")
+        payment.settled_currency = "USD"
+        invoice = (
+            await s.execute(select(Invoice).where(Invoice.id == uuid.UUID(invoice_id)))
+        ).scalar_one()
+        invoice.status = InvoiceStatus.payment_scheduled
+        await s.commit()
+        payment_id = payment.id
+        completed_at_before = payment.completed_at
+
+    _short_lock_bound(monkeypatch)
+    async with _HeldInvoiceLock(mk, invoice_id):
+        async with realdb.client(key="a", role="ap_manager") as c:
+            resp = await c.post(
+                f"/api/payments/{payment_id}/settlement/accept", json={"reason": "agreed short"}
+            )
+    assert resp.status_code == 409, resp.text
+    assert resp.json()["detail"].startswith("invoice_locked")
+
+    async with mk() as s:
+        after = (await s.execute(select(Payment).where(Payment.id == payment_id))).scalar_one()
+        invoice = (
+            await s.execute(select(Invoice).where(Invoice.id == uuid.UUID(invoice_id)))
+        ).scalar_one()
+        actions = (
+            (
+                await s.execute(
+                    text("SELECT action FROM audit_log WHERE entity_id = :id"), {"id": payment_id}
+                )
+            )
+            .scalars()
+            .all()
+        )
+    assert invoice.status == InvoiceStatus.payment_scheduled
+    assert after.status == "completed"
+    assert after.settled_amount == Decimal("45.00")
+    assert after.completed_at == completed_at_before
+    assert "payment.settlement_accepted" not in actions
+
+    # Once the holder is gone the same request goes through — the refusal was
+    # the lock, not the payment.
+    async with realdb.client(key="a", role="ap_manager") as c:
+        ok = await c.post(
+            f"/api/payments/{payment_id}/settlement/accept", json={"reason": "agreed short"}
+        )
+    assert ok.status_code == 200, ok.text
