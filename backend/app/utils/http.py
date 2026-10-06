@@ -1,8 +1,9 @@
-"""HTTP response header helpers.
+"""HTTP response helpers.
 
 Small, dependency-free builders for header values that interpolate
 untrusted / attacker-influenced strings (AI-extracted or user-entered
-fields), where a naive f-string is unsafe.
+fields), where a naive f-string is unsafe — plus ``detail_text``, which
+reads an ``HTTPException.detail`` back as text whatever its shape.
 """
 
 from __future__ import annotations
@@ -45,3 +46,22 @@ def content_disposition_attachment(filename: str) -> str:
     ascii_fallback = _UNSAFE_FILENAME_CHARS.sub("_", filename) or "download"
     encoded = quote(filename, safe="")
     return f"attachment; filename=\"{ascii_fallback}\"; filename*=UTF-8''{encoded}"
+
+
+def detail_text(detail: object) -> str | None:
+    """The human-readable text of an ``HTTPException.detail``, or None.
+
+    ``detail`` is usually a string, but a refusal a client localizes is an
+    OBJECT carrying a stable ``code`` beside its English ``message`` (the GL
+    chart refusal, ``services/gl_chart.ChartRefusal.body``). A server-side
+    catcher that turns a refusal into text — an escalation rationale, a bulk
+    skip reason, an HTML page — reads it here, so it gets the sentence rather
+    than a stringified dict or nothing at all.
+    """
+    if isinstance(detail, str):
+        return detail
+    if isinstance(detail, dict):
+        message = detail.get("message")
+        if isinstance(message, str):
+            return message
+    return None

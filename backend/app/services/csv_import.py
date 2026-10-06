@@ -198,6 +198,14 @@ _CORPORATE_CARD_COLUMNS = {
 class ImportRowError:
     row: int
     message: str
+    #: A row refused for a reason the client localizes carries that refusal's
+    #: structured body (``code`` + typed params — today only
+    #: ``gl_chart.ChartRefusal.body``), merged into the serialized error beside
+    #: ``row``. ``message`` stays the English fallback either way.
+    structured: dict | None = None
+
+    def to_dict(self) -> dict:
+        return {**(self.structured or {}), "row": self.row, "message": self.message}
 
 
 @dataclass
@@ -210,7 +218,7 @@ class ImportResult:
         return {
             "imported": self.imported,
             "skipped": self.skipped,
-            "errors": [{"row": e.row, "message": e.message} for e in self.errors],
+            "errors": [e.to_dict() for e in self.errors],
         }
 
 
@@ -500,7 +508,8 @@ async def import_invoices_csv(
             [gl_code], require_active=status_raw not in _HISTORICAL_INVOICE_STATUSES
         )
         if gl_refusal:
-            result.errors.append(ImportRowError(row=i, message=gl_refusal.detail()))
+            body = gl_refusal.body()
+            result.errors.append(ImportRowError(row=i, message=body["message"], structured=body))
             result.skipped += 1
             continue
 

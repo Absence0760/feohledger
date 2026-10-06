@@ -50,6 +50,7 @@ from app.services.email_action_token import (
     ActionToken,
     verify_action_token,
 )
+from app.utils.http import detail_text
 
 logger = logging.getLogger(__name__)
 
@@ -279,7 +280,7 @@ async def email_action_perform(
         # Threshold / CFO gate / segregation — the reviewer genuinely can't take
         # this action from email. Release the claim so they can sign in instead.
         await _release_jti(decoded)
-        return _info_page("Action not allowed", str(exc.detail))
+        return _info_page("Action not allowed", detail_text(exc.detail) or "")
     except Exception:  # noqa: BLE001 — never surface a stack trace on a public route
         logger.exception("email_action: unexpected failure for action=%s", decoded.action)
         await _release_jti(decoded)

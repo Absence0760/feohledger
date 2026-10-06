@@ -41,7 +41,12 @@ from app.models.gl_account import GLAccount
 from app.models.invoice import Invoice, InvoiceLineItem, InvoiceStatus
 from app.models.recurring_invoice import RecurringInvoiceTemplate
 from app.models.vendor import Vendor
-from app.services.gl_chart import ChartOwnership, ChartRefusal, InvoiceChart
+from app.services.gl_chart import (
+    GL_CODES_OUTSIDE_CHART,
+    ChartOwnership,
+    ChartRefusal,
+    InvoiceChart,
+)
 
 TENANT = "a"
 
@@ -54,21 +59,22 @@ A_RETIRED = "6800"  # A's own, retired — still A's (not "another entity's"), b
 UNKNOWN = "9999"  # in no chart at all
 
 # What a write of each code to an entity-A invoice must do, with the fixture
-# chart active. `None` = stored; otherwise the word the refusal must carry.
+# chart active. `None` = stored; otherwise the reason bucket of the structured
+# refusal (`ChartRefusal.body`) the code must land in.
 ACTIVE_CHART_VERDICTS: list[tuple[str, str | None]] = [
     (SHARED, None),
     (A_OWN, None),
     (BOTH, None),
     (A_RETIRED, "retired"),
-    (UNKNOWN, "not in this invoice's chart"),
-    (B_OWN, "another entity's chart"),
+    (UNKNOWN, "unknown"),
+    (B_OWN, "foreign"),
 ]
 # ...and with entity A's effective ACTIVE chart empty (`empty_chart`): nothing
 # to hold a code to, so only another entity's code is refused.
 EMPTY_CHART_VERDICTS: list[tuple[str, str | None]] = [
     (A_RETIRED, None),
     (UNKNOWN, None),
-    (B_OWN, "another entity's chart"),
+    (B_OWN, "foreign"),
 ]
 
 
@@ -273,12 +279,31 @@ def test_refusal_detail_names_each_code_with_its_reason():
         "invoice's. Choose a code from the invoice's own chart — the shared accounts plus "
         "its entity's own."
     )
-    both = ChartRefusal(retired=("6800", "6900"), unknown=(UNKNOWN,)).detail(where="Line items")
+    both = ChartRefusal(retired=("6800", "6900"), unknown=(UNKNOWN,)).detail(on_lines=True)
     assert both == (
         "Line items: GL accounts '6800', '6900' are retired in this invoice's chart; "
         f"GL account '{UNKNOWN}' is not in this invoice's chart of accounts. Choose an "
         "active code from the invoice's own chart — the shared accounts plus its entity's own."
     )
+
+
+def test_refusal_body_carries_a_stable_code_the_codes_by_reason_and_the_english_fallback():
+    """The 422 detail is structured so a client can state it in the reader's
+    language (`frontend/src/lib/api/glChartRefusal.ts`, mobile
+    `gl_chart_refusal_messages.dart`) and fall back to `message` otherwise."""
+    refusal = ChartRefusal(foreign=(B_OWN,), unknown=(UNKNOWN,))
+    assert refusal.body() == {
+        "code": "gl_codes_outside_chart",
+        "on_lines": False,
+        "foreign": [B_OWN],
+        "retired": [],
+        "unknown": [UNKNOWN],
+        "message": refusal.detail(),
+    }
+    lines = refusal.body(on_lines=True)
+    assert lines["on_lines"] is True
+    assert lines["message"] == refusal.detail(on_lines=True)
+    assert lines["message"].startswith("Line items: ")
 
 
 # ---------------------------------------------------------------------------
@@ -368,7 +393,8 @@ async def _write_csv_new(c, realdb, entity_id, code):
     assert resp.status_code == 200, resp.text
     errors = resp.json()["errors"]
     if errors:
-        return 422, errors[0]["message"], await _stored_by_number(realdb, number)
+        # A CSV row error carries the same structured body as the 422 detail.
+        return 422, errors[0], await _stored_by_number(realdb, number)
     return 200, None, await _stored_by_number(realdb, number)
 
 
@@ -392,7 +418,11 @@ async def _assert_verdicts(realdb, entity_id, write, verdicts):
                 assert stored == code, code
             else:
                 assert status == 422, (code, status, detail)
-                assert f"'{code}'" in detail and refused_because in detail, (code, detail)
+                assert detail["code"] == GL_CODES_OUTSIDE_CHART, (code, detail)
+                for bucket in ("foreign", "retired", "unknown"):
+                    expected = [code] if bucket == refused_because else []
+                    assert detail[bucket] == expected, (code, bucket, detail)
+                assert f"'{code}'" in detail["message"], (code, detail)
                 assert stored is None, f"a refused {code!r} must not be stored"
 
 
@@ -490,7 +520,7 @@ async def test_create_refuses_another_entitys_code(realdb, chart):
             headers={"X-Entity-ID": str(entity_a)},
         )
     assert resp.status_code == 422, resp.text
-    assert f"'{B_OWN}'" in resp.json()["detail"]
+    assert resp.json()["detail"]["foreign"] == [B_OWN]
     async with realdb.sessionmaker(TENANT)() as s:
         n = (
             await s.execute(
@@ -607,7 +637,8 @@ async def test_line_items_refuse_another_entitys_code(realdb, chart):
         )
     assert ok.status_code == 200, ok.text
     assert refused.status_code == 422, refused.text
-    assert refused.json()["detail"].startswith("Line items: ")
+    assert refused.json()["detail"]["on_lines"] is True
+    assert refused.json()["detail"]["message"].startswith("Line items: ")
     # The refusal ran before the delete-and-reinsert: the saved lines stand.
     assert await _line_codes(realdb, inv_id) == [A_OWN]
 
@@ -645,7 +676,7 @@ async def test_line_items_may_carry_over_a_code_the_lines_already_had(realdb, ch
         )
     assert resp.status_code == 200, resp.text
     assert refused.status_code == 422, refused.text
-    assert "'9998'" in refused.json()["detail"]
+    assert refused.json()["detail"]["unknown"] == ["9998"]
     assert await _line_codes(realdb, inv_id) == [legacy, A_OWN]
 
 
@@ -742,13 +773,14 @@ async def test_csv_history_rows_may_carry_a_gone_account_but_live_rows_may_not(r
 
     imported = {"GLH-DONE-RET", "GLH-DONE-UNK", "GLH-PAID-RET", "GLH-PAID-UNK", "GLH-REJ-OK"}
     assert body["imported"] == len(imported)
-    by_row = {e["row"]: e["message"] for e in body["errors"]}
+    by_row = {e["row"]: e for e in body["errors"]}
     refused_rows = {i + 2: r for i, r in enumerate(rows) if r[0] not in imported}
     assert set(by_row) == set(refused_rows)
     for row_no, (_, _, code) in refused_rows.items():
-        assert f"'{code}'" in by_row[row_no], by_row[row_no]
-    assert "another entity's chart" in by_row[6] and "another entity's chart" in by_row[7]
-    assert "retired" in by_row[8] and "not in this invoice's chart" in by_row[9]
+        assert by_row[row_no]["code"] == GL_CODES_OUTSIDE_CHART, by_row[row_no]
+        assert f"'{code}'" in by_row[row_no]["message"], by_row[row_no]
+    assert by_row[6]["foreign"] == [B_OWN] and by_row[7]["foreign"] == [B_OWN]
+    assert by_row[8]["retired"] == [A_RETIRED] and by_row[9]["unknown"] == [UNKNOWN]
 
     for number in imported:
         code = next(r[2] for r in rows if r[0] == number)
