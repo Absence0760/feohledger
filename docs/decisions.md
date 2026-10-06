@@ -9865,3 +9865,67 @@ places where the engineering docs or in-app copy disagree with what the app
 does. The guides follow the code. Pure doc drift and false in-app copy were
 corrected in the same change. The rest is filed in `docs/followups.md`
 (product calls and sized work) or `docs/known-issues.md` (diagnosed defects).
+
+## 245. Who may see the org's cash position is one answer, read off the routes
+
+The AP assistant is open to every employee, and its per-tool gate was set only
+on the five copilot tools. `get_payment_forecast` returns the same due-dated
+committed and pending outflow as the copilot's `get_cashflow_forecast`, with no
+gate, so a clerk could ask the assistant for a forecast the app refused them.
+It now carries `FINANCE_LEADER_ROLES`. The rule that keeps the next tool honest
+is a test, not a comment: `test_tool_allowed_roles_match_rest_gate` names each
+tool's REST counterpart, reads that route's actual `require_roles` set out of
+its dependency tree, and fails on a mismatch or on a tool without a row.
+
+Reading the gates that way showed a second disagreement. The REST forecast,
+what-if and cash position were `admin`/`cfo`, while AP managers already had the
+same figures from the copilot (§54) and from the `cashflow_forecast` CSV export.
+Narrowing the copilot would have taken away a planning surface built for AP
+managers; widening the three REST reads takes away nothing anyone relied on and
+makes every surface agree. They use `CASH_FORECAST_ROLES`, pinned to
+`COPILOT_ROLES` by the same route-reading helper. The rest of the CFO surface
+(`/analytics/cfo`, the drill-downs, forecast variance) stays `admin`/`cfo`, and
+so does the `/cfo` page in the sidebar: this is consistency of data access, not
+a new screen for AP managers.
+
+## 246. A CSV-imported invoice is checked for warnings when it is imported
+
+`import_invoices_csv` created rows at `new` without `refresh_warnings`, which
+manual create, upload and every PATCH call. Approval was still safe (submitting
+for review refreshes), but a duplicate imported by CSV sat unflagged in the list
+until someone submitted it. Rows imported at a live status (`new`, `rejected`)
+are now refreshed after the batch flush, in the request's transaction and with
+the org's fraud-rule settings, so the warnings and their exceptions commit with
+the invoices or not at all.
+
+Historical `done` and `paid` rows are deliberately not refreshed. They never
+reach a payment run, and flagging years of settled history on a Day-0 load would
+bury the exception queue under findings nobody can act on. They still count as
+the other side of the duplicate check, so a live row repeating one of them is
+flagged.
+
+## 247. Touchless rate means straight-through processing, defined once over the audit trail
+
+The dashboard's `touchless_rate` counted every invoice that cleared review,
+including the ones a person approved, so it measured cleared-vs-rejected under a
+name the industry uses for something much stricter. The experiments readout used
+a third rule (auto-approved with no changes on the approval row) under the same
+label. The definition chosen is the one AP benchmarks use: an invoice is
+touchless when it reached approval or later with an `invoice.auto_approved` row
+and no person intervened — no human review decision, no field, line-item or GL
+correction, and no exception a person resolved, dismissed or escalated. An
+exception agent's own decision is not a touch; that is the automation being
+measured. The denominator is every invoice that reached a review decision, with
+the existing evidence gate on `done`/`paid`/`failed` and CSV imports out of both
+legs.
+
+It lives in `services/touchless` as SQL predicates, and the dashboard and the
+experiments readout both use them, so the two figures cannot disagree. Renaming
+the KPI to what it used to measure was the alternative. It was rejected because
+the cleared-vs-rejected rate is close to 100% in any healthy tenant and tells a
+buyer nothing, while straight-through processing is the number they ask for.
+Because the true figure tops out far lower, the KPI turns green at 49% (Ardent
+Partners' 2025 best-in-class) rather than the old 80%. Every fact used was
+already recorded, so there is no migration. History older than the actions that
+record corrections (2026-06/07) and exception decisions (2026-08-15) can
+over-count an auto-approved invoice; `backend/docs/analytics.md` says so.
