@@ -451,6 +451,8 @@ async def test_no_audit_row_means_no_save(realdb, monkeypatch):
     "body",
     [
         pytest.param([SECRET], id="array-body"),
+        pytest.param(SECRET, id="string-body"),
+        pytest.param({**OIDC_READY, "client_id": [SECRET]}, id="field-error-beside-secret"),
         pytest.param({**OIDC_READY, "enabled": "maybe"}, id="enabled-wrong-type"),
         pytest.param({**OIDC_READY, "allowed_email_domains": "acme.com"}, id="domains-not-list"),
     ],

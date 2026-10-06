@@ -21,7 +21,8 @@ save changed already reaches the audit trail as key names.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
+from pydantic import ValidationError
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
@@ -139,9 +140,47 @@ async def get_sso_settings(
     return _status(org)
 
 
-@router.put("", response_model=SSOSettingsStatus)
+async def _sso_settings_body(request: Request) -> UpdateSSOSettingsRequest:
+    """Parse the PUT body without FastAPI's default validation.
+
+    `RequestValidationError`'s body echoes each failure's `input`, and when the
+    body itself is the wrong shape — a JSON array, a string — that input is the
+    whole request, OIDC client secret included. The schema keeps every field
+    optional so no *field* error can carry the secret (`UpdateSSOSettingsRequest`),
+    but nothing at the field level can stop a top-level one. So the body is read
+    here and every failure answers with field LOCATIONS only, never a value.
+    """
+    try:
+        raw = await request.json()
+    except ValueError:
+        raise HTTPException(status_code=422, detail="Request body must be a JSON object") from None
+    if not isinstance(raw, dict):
+        raise HTTPException(status_code=422, detail="Request body must be a JSON object")
+    try:
+        return UpdateSSOSettingsRequest.model_validate(raw)
+    except ValidationError as exc:
+        fields = sorted({".".join(str(part) for part in err["loc"]) for err in exc.errors()})
+        raise HTTPException(
+            status_code=422, detail=f"Invalid SSO settings: {', '.join(fields)}"
+        ) from None
+
+
+@router.put(
+    "",
+    response_model=SSOSettingsStatus,
+    # The body is parsed by `_sso_settings_body`, so FastAPI cannot infer the
+    # schema; publish it explicitly so the OpenAPI contract is unchanged.
+    openapi_extra={
+        "requestBody": {
+            "required": True,
+            "content": {
+                "application/json": {"schema": UpdateSSOSettingsRequest.model_json_schema()}
+            },
+        }
+    },
+)
 async def update_sso_settings(
-    body: UpdateSSOSettingsRequest,
+    body: UpdateSSOSettingsRequest = Depends(_sso_settings_body),
     org: Organization = Depends(get_tenant),
     user: User = Depends(require_roles(ROLE_ADMIN)),
     db: AsyncSession = Depends(get_control_db),
