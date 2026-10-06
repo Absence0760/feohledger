@@ -206,6 +206,8 @@ export type PoMatch = {
 	amount_variance: number | null;
 	amount_variance_pct: number | null;
 	within_tolerance: boolean;
+	/** 3-way: the invoice bills more than the received slice of the PO is worth. */
+	billed_beyond_receipt?: boolean;
 	inspection_id: string | null;
 	inspection_result: string | null;
 	inspection_accepted_quantity: number | null;

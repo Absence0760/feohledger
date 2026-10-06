@@ -54,7 +54,10 @@ function runDetail() {
 	};
 }
 
-async function openRun(page: Page) {
+// One stub per test: Playwright runs the most recently registered matching
+// handler first, so a test that layered its own detail stub under this one
+// would silently get the discounted fixture back.
+async function openRun(page: Page, detail: ReturnType<typeof runDetail> = runDetail()) {
 	await page.route(
 		(url) => url.pathname === RUNS_LIST_PATH,
 		(route) =>
@@ -85,7 +88,7 @@ async function openRun(page: Page) {
 			route.fulfill({
 				status: 200,
 				contentType: 'application/json',
-				body: JSON.stringify(runDetail())
+				body: JSON.stringify(detail)
 			})
 	);
 	await page.goto('/payments?tab=runs');
@@ -113,16 +116,7 @@ test.describe('Accepted early-payment discount — what the payer sees', () => {
 			discount_amount: null,
 			discount_offer_id: null
 		}));
-		await page.route(
-			(url) => url.pathname === `${RUNS_LIST_PATH}${RUN_ID}`,
-			(route) =>
-				route.fulfill({
-					status: 200,
-					contentType: 'application/json',
-					body: JSON.stringify(detail)
-				})
-		);
-		const dialog = await openRun(page);
+		const dialog = await openRun(page, detail);
 		await expect(dialog.getByTestId('run-payment-amount')).toBeVisible();
 		await expect(dialog.getByTestId('run-discount-total')).toHaveCount(0);
 		await expect(dialog.getByTestId('run-payment-discount')).toHaveCount(0);
