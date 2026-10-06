@@ -85,9 +85,10 @@ groups that exception's raise / assign / resolve rows together.
 - **`via: "agent"`** marks a non-interactive decision. `actor_id` still names
   the human who triggered the agent run — the agent has no identity of its own
   to hold accountable.
-- The exception **`description` is deliberately not copied**. It is generated
-  text that can name a vendor, the row already holds it, and the trail gains
-  nothing by duplicating it.
+- The exception **`description` is deliberately not copied** — nor its
+  `description_code` / `description_params`. It is generated text that can name
+  a vendor, the row already holds it, and the trail gains nothing by
+  duplicating it.
 
 ## One chokepoint, four callers
 
@@ -186,6 +187,30 @@ positional argument of `_ensure_exception`, and any `*_EXCEPTION_TYPE(S)`
 constant) rather than carrying a hand-maintained list. The list *was* the drift:
 the previous version of that guard passed for `line_total_mismatch`,
 `payment_compliance_hold` and `price_variance` while all three rendered raw.
+
+## The description — a catalogue code, with English as the fallback
+
+`exceptions.description` is English prose. Since tenant migration 0103 a
+detector-raised exception also carries `description_code` (`varchar(100)`) and
+`description_params` (JSONB), naming the same sentence in
+`services/invoice_warning_catalog` so the queue renders it in the reader's
+language. `invoice_warnings._ensure_exception` takes a catalogue finding dict —
+never a string, which raises `TypeError` — and stores all three: an exception
+that mirrors a warning carries **that warning's own code**, so the queue and the
+invoice state one finding in one wording; an `exception.*` code covers a
+sentence no warning states; and a `price_variance` or `contract_noncompliant`
+exception spanning several findings is a frame code with the findings listed
+under `params.findings`. Extraction's `duplicate` exception passes its warning's
+code the same way.
+
+Both columns are NULL — and clients render `description` — for a human-authored
+description (`review_rejected`'s reason), for every row raised before 0103 (no
+backfill), and for the `create_exception` sites still composing unkeyed English
+(ERP reconciliation, Positive Pay returns, the vendor bank-change flag, payment
+compliance holds, the reconciler's aged-out payment, settlement discrepancies,
+ERP sync-back failures, extraction failures). The code families, the composite
+convention and the client fallback order are in
+[invoice-warnings.md](invoice-warnings.md) § Exception descriptions.
 
 ## Where it surfaces
 

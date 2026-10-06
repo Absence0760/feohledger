@@ -134,7 +134,7 @@ decimal comparison rather than binary drift.
 - `payments` — individual payment records (amount, method, status, ref)
 
 #### Exceptions
-- `exceptions` — flagged issues (duplicate, mismatch, anomaly, resolution status)
+- `exceptions` — flagged issues (duplicate, mismatch, anomaly, resolution status). `description` is English; `description_code` (`varchar(100)`) + `description_params` (JSONB), added by migration 0103 and not backfilled, key it on the invoice-warning catalogue so clients localize it (`invoice-warnings.md` § Exception descriptions)
 
 Tenant tables have an `organization_id` column (plain UUID, no foreign key) for backward compatibility.
 
