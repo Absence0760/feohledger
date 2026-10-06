@@ -220,6 +220,8 @@ export const messages = {
 		'Ihr Passkey ist für {hosts} registriert, nicht für {host}. Melden Sie sich dort an oder registrieren Sie einen Passkey für {host}.',
 	'authRefusal.passkeyNotRegistered':
 		'Kein Passkey registriert',
+	'authRefusal.portalStepUpFailed':
+		'Bestätigen Sie Ihr Passwort oder einen aktuellen Code aus der Authenticator-App, um Ihre Zwei-Faktor-Einstellungen zu ändern.',
 
 	'profile.sessions.heading': 'Angemeldete Geräte',
 	'profile.sessions.hint':

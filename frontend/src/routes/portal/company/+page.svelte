@@ -3,6 +3,7 @@
 	import { portalAuth } from '#lib/stores/portalAuth.svelte.ts';
 	import { onMount } from 'svelte';
 	import { m } from '#lib/i18n/store.svelte.ts';
+	import { authErrorMessage } from '#lib/api/authRefusals.ts';
 
 	let email = $state('');
 	let phone = $state('');
@@ -31,7 +32,7 @@
 			mfaEnroll = { secret: res.secret, qr_code_data_url: res.qr_code_data_url };
 			mfaCode = '';
 		} catch (err) {
-			mfaErr = err instanceof Error ? err.message : m('portal.company.mfa.startFailed');
+			mfaErr = authErrorMessage(err, m, 'portal.company.mfa.startFailed');
 		} finally {
 			mfaBusy = false;
 		}

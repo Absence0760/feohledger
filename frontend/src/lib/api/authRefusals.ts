@@ -1,17 +1,18 @@
 /**
  * Localizing the backend's coded auth refusals — a refused factor-change
- * step-up, and a passkey ceremony with no usable credential.
+ * step-up (employee or supplier portal), and a passkey ceremony with no usable
+ * credential.
  *
  * The backend sends `detail = {code, message, params}` for these
- * (`backend/app/api/auth.py::coded_refusal`), and `api.ts` lifts `code` /
- * `params` onto the thrown `ApiError`. This module turns a known code into the
+ * (`backend/app/api/refusals.py::coded_refusal`), and `api.ts` /
+ * `portalApi.ts` lift `code` / `params` onto the thrown `ApiError`. This module turns a known code into the
  * reader's language; an unknown code — one this build predates — or no code at
  * all falls back to the server's English `message`, never to a blank toast.
  * Same arrangement as `einvoiceIssues.ts`: it imports nothing that pulls
  * `$app/*`, so the node vitest config can reach it, and `m` is passed in by the
  * caller rather than imported from the rune store.
  *
- * The table is hand-written rather than generated because it is four entries
+ * The table is hand-written rather than generated because it is five entries
  * that change only alongside a deliberate auth decision; `authRefusals.test.ts`
  * pins each code against the backend's literal so a rename on either side
  * fails there.
@@ -33,7 +34,8 @@ const KEYS: Record<string, MessageKey> = {
 	step_up_failed: 'authRefusal.stepUpFailed',
 	step_up_sso_only: 'authRefusal.stepUpSsoOnly',
 	passkey_wrong_host: 'authRefusal.passkeyWrongHost',
-	passkey_not_registered: 'authRefusal.passkeyNotRegistered'
+	passkey_not_registered: 'authRefusal.passkeyNotRegistered',
+	portal_step_up_failed: 'authRefusal.portalStepUpFailed'
 };
 
 /** The codes this build can state in the reader's language. */

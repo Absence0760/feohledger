@@ -258,6 +258,8 @@ export const en = {
 		'Your passkey is registered for {hosts}, not {host}. Sign in there, or register a passkey on {host}.',
 	'authRefusal.passkeyNotRegistered':
 		'No passkey registered',
+	'authRefusal.portalStepUpFailed':
+		'Confirm your password or a current authenticator code to change your two-factor settings.',
 
 	// Profile → Signed-in devices card
 	'profile.sessions.heading': 'Signed-in devices',

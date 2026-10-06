@@ -223,6 +223,8 @@ export const messages = {
 		'Votre clé d’accès est enregistrée pour {hosts}, et non pour {host}. Connectez-vous là-bas, ou enregistrez une clé d’accès sur {host}.',
 	'authRefusal.passkeyNotRegistered':
 		'Aucune clé d’accès enregistrée',
+	'authRefusal.portalStepUpFailed':
+		'Confirmez votre mot de passe ou un code actuel de votre application d’authentification pour modifier votre double authentification.',
 
 	'profile.sessions.heading': 'Appareils connectés',
 	'profile.sessions.hint':
