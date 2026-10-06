@@ -697,7 +697,7 @@ offered; the refusal path reads it every time, a throttled failure path.
 
 **The refusals carry a code, so the page can say them in the reader's
 language.** Each step-up / passkey refusal's `detail` is an object built by
-`api/auth.coded_refusal` — `{"code", "message", "params"}` — not a bare string:
+`api/refusals.coded_refusal` (shared with the supplier portal, whose refusal is `portal_step_up_failed`) — `{"code", "message", "params"}` — not a bare string:
 `step_up_failed` (the generic sentence), `step_up_sso_only` (the sentence
 above), `passkey_wrong_host` (params `registered_hosts`, a list, and `host`; see
 § Passkeys on a custom domain) and `passkey_not_registered`. The status stays

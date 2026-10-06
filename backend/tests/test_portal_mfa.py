@@ -203,6 +203,16 @@ async def test_enroll_over_a_live_factor_without_step_up_is_refused(mfa_on):
         await portal_mfa_enroll(vu=vu)
 
     assert exc.value.status_code == 400
+    # Coded, so the portal page states it in the supplier's language; the
+    # English stays as the fallback.
+    assert exc.value.detail == {
+        "code": "portal_step_up_failed",
+        "message": (
+            "Confirm your password or a current authenticator code to change "
+            "your two-factor settings."
+        ),
+        "params": {},
+    }
     assert vu.mfa_enabled is True, "a session-only caller must not strip the live factor"
     assert vu.mfa_secret == secret
     assert await mfa.read_pending_vendor_totp_secret(vu.id) is None
@@ -906,9 +916,12 @@ async def test_portal_step_up_failure_is_audited(mfa_on, monkeypatch):
     vu = _vendor_user(mfa_secret=secret, mfa_enabled=True, hashed_password="hash")
     monkeypatch.setattr("app.utils.passwords.pwd_context.verify", lambda *_a, **_k: False)
 
-    with pytest.raises(HTTPException):
+    with pytest.raises(HTTPException) as exc:
         await portal_mfa_enroll(body=PortalMFAStepUpRequest(password="guess"), vu=vu)
 
+    # A wrong password gets the very refusal a missing proof does: one code,
+    # so the code says nothing the English did not.
+    assert exc.value.detail["code"] == "portal_step_up_failed"
     audit.assert_awaited_once()
     kwargs = audit.await_args.kwargs
     assert kwargs["action"] == "portal.mfa.step_up.failure"

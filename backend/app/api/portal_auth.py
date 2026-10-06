@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import create_vendor_access_token, decode_token
 from app.api.portal_deps import get_current_vendor_user
+from app.api.refusals import coded_refusal
 from app.config import settings
 from app.models.vendor import Vendor
 from app.models.vendor_user import VendorUser
@@ -663,6 +664,16 @@ async def _audit_portal_step_up_failure(vu: VendorUser, *, operation: str) -> No
     )
 
 
+# The portal's own refusal sentence — it names only the two proofs a supplier has
+# (the portal has no passkeys), so it gets its own code rather than reusing the
+# employee `step_up_failed`, whose sentence offers a passkey. One code for a
+# wrong password and a wrong code alike, exactly as the English folds them.
+PORTAL_STEP_UP_FAILURE_DETAIL = coded_refusal(
+    "portal_step_up_failed",
+    "Confirm your password or a current authenticator code to change your two-factor settings.",
+)
+
+
 async def _require_portal_mfa_step_up(
     vu: VendorUser, body: PortalMFAStepUpRequest | None, *, operation: str
 ) -> None:
@@ -690,13 +701,7 @@ async def _require_portal_mfa_step_up(
     ):
         return
     await _audit_portal_step_up_failure(vu, operation=operation)
-    raise HTTPException(
-        status_code=400,
-        detail=(
-            "Confirm your password or a current authenticator code to change "
-            "your two-factor settings."
-        ),
-    )
+    raise HTTPException(status_code=400, detail=PORTAL_STEP_UP_FAILURE_DETAIL)
 
 
 @router.post("/mfa/enroll", response_model=PortalMFAEnrollStartResponse)
