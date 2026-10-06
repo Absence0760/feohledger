@@ -977,7 +977,10 @@ AWS_PROFILE=feohledger sops feohledger/prod.sops.yaml   # decrypts → $EDITOR �
   that the Python value stays exact, and that the one legitimate hop is
   greppable. A money-named field annotated `float` is the same defect written
   differently (pydantic fills it from a `Decimal` silently) and fails the same
-  guard: `tests/test_money_serialization_exact.py`. Percentages are **not** money
+  guard: `tests/test_money_serialization_exact.py`. A dict field whose clients
+  were made to accept a string goes further with `json_money_string` (exact
+  decimal string — the exception queue's `amount` is the first); moving a field
+  there is a coordinated client change, never a drive-by. Percentages are **not** money
   — they have their own pair in `schemas/percent.py`. Inbound money that decides
   where money goes uses `ExactMoneyInput` (a JSON number is already a float by
   the time pydantic sees it).
