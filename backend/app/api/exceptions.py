@@ -77,8 +77,8 @@ def _exception_dict(exc: APException, inv: Invoice | None) -> dict:
         "invoice_id": str(exc.invoice_id) if exc.invoice_id else None,
         "invoice_number": inv.invoice_number if inv else None,
         "vendor_name": inv.vendor_name if inv else None,
-        # An exact decimal STRING (`"1234.50"`), never a float — on the server
-        # or in the client. It was a JSON number until both clients accepted
+        # An exact decimal STRING (`"1234.50"`), never a float on the server or
+        # the wire. It was a JSON number until both clients accepted
         # either shape (`mobile/lib/models/exception.dart::exactMoneyFromJson`,
         # the web queue's `MoneyAmount`). A mobile build from BEFORE that
         # change parses `as num?` and throws on this — so a store-distributed

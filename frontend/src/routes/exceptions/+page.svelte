@@ -45,7 +45,7 @@
 		vendor_name: string | null;
 		// The joined invoice's amount: an exact decimal string (`"1234.50"`), or a
 		// JSON number from a backend predating that wire change — `MoneyAmount`
-		// takes both and `formatMoney` renders either without float arithmetic.
+		// takes both, and it is display-only: never added or compared here.
 		amount: MoneyAmount;
 		// What `amount` is denominated in — the joined invoice's own code, not the
 		// org's reporting currency (a GBP-reporting tenant holds USD invoices, so

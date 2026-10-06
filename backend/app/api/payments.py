@@ -3033,6 +3033,9 @@ async def _execute_single_payment(
     # on the invoice's status and the `→ payment_scheduled` transition lands
     # after the processor call, so the status must not move in between
     # (`_lock_payment_invoice`). Held until the caller's per-payment commit.
+    # MUST stay ahead of every adapter / card-provider call: its timeout
+    # (`InvoiceLockedError`) is recorded as the RETRY-SAFE `invoice_locked`,
+    # which is only true while no order can exist at the processor yet.
     invoice = await _lock_payment_invoice(db, payment)
 
     if invoice is None:

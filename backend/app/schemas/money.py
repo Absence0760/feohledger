@@ -87,7 +87,9 @@ def json_money_string(value: Decimal | None) -> str | None:
     """The ``Decimal`` → exact JSON **string** hop for a hand-built ``dict``.
 
     The stronger contract ``json_money`` stops short of: the figure never
-    becomes a binary float at all, on the server or in the client. Use it for a
+    becomes a binary float on the server or on the wire, and a client gets the
+    exact digits to keep (a display formatter may still go through a number to
+    render them, which is display, not arithmetic). Use it for a
     field whose clients have been made to accept a string (the move from
     number to string is a coordinated client change, never a drive-by — see
     ``docs/followups.md`` and the exception queue's ``amount``, the first field
