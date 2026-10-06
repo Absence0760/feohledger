@@ -29,10 +29,11 @@ function apiError(code: unknown, params: unknown, message: string): Error {
 
 describe('authRefusalText', () => {
 	it('pins every code the backend emits — a rename on either side fails here', () => {
-		// The literals `api/auth.py` passes to `coded_refusal`.
+		// The literals `api/auth.py` and `api/portal_auth.py` pass to `coded_refusal`.
 		expect([...AUTH_REFUSAL_CODES].sort()).toEqual([
 			'passkey_not_registered',
 			'passkey_wrong_host',
+			'portal_step_up_failed',
 			'step_up_failed',
 			'step_up_sso_only'
 		]);
@@ -41,12 +42,19 @@ describe('authRefusalText', () => {
 	it.each([
 		['step_up_failed', 'authRefusal.stepUpFailed'],
 		['step_up_sso_only', 'authRefusal.stepUpSsoOnly'],
-		['passkey_not_registered', 'authRefusal.passkeyNotRegistered']
+		['passkey_not_registered', 'authRefusal.passkeyNotRegistered'],
+		// The portal's own sentence: it must not offer a passkey, which a
+		// supplier account cannot have.
+		['portal_step_up_failed', 'authRefusal.portalStepUpFailed']
 	] as const)('maps %s to %s', (code, key) => {
 		const { t, calls } = recorder();
 		const out = authRefusalText({ code, params: {}, message: 'server English' }, t);
 		expect(calls.map((c) => c.key)).toEqual([key]);
 		expect(out).toBe(en[key]);
+	});
+
+	it('never offers a supplier the passkey their portal account cannot hold', () => {
+		expect(en['authRefusal.portalStepUpFailed'].toLowerCase()).not.toContain('passkey');
 	});
 
 	it('fills the wrong-host sentence from params, joining the hosts itself', () => {

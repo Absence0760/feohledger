@@ -217,6 +217,8 @@ export const messages = {
 		'パスキーは {host} ではなく {hosts} に登録されています。そちらでサインインするか、{host} でパスキーを登録してください。',
 	'authRefusal.passkeyNotRegistered':
 		'パスキーが登録されていません',
+	'authRefusal.portalStepUpFailed':
+		'二要素認証の設定を変更するには、パスワードまたは認証アプリの現在のコードで確認してください。',
 
 	'profile.sessions.heading': 'サインイン中の端末',
 	'profile.sessions.hint':

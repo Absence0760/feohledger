@@ -18,6 +18,7 @@ from app.api.deps import (
     get_current_user,
 )
 from app.api.permissions import effective_permissions
+from app.api.refusals import coded_refusal
 from app.config import settings
 from app.database import get_control_db
 from app.models.organization import Organization
@@ -195,25 +196,6 @@ def _usable_passkeys(
 ) -> list[WebAuthnCredential]:
     """The subset of an account's passkeys that can be presented under `rp`."""
     return [c for c in creds if webauthn_rp.usable_under(c.rp_id, rp)]
-
-
-def coded_refusal(code: str, message: str, **params: object) -> dict:
-    """The `detail` of a refusal a client must be able to localize.
-
-    `{"code", "message", "params"}`: a stable machine-readable `code` the client
-    keys a translated sentence on, the typed `params` that sentence needs, and
-    the English `message` as the fallback for a code the client predates. The
-    status code is unchanged — FastAPI serializes an object `detail` as-is, and
-    every client that flattens `detail` to text (`formatApiDetail` on the web)
-    already renders an object by its `message`. Server-composed English inside
-    a translated page is the defect this exists to close
-    (`frontend/CLAUDE.md` § Internationalization).
-
-    A code is only ever as specific as the English it replaces: it must never
-    distinguish cases the message deliberately folds together (a wrong password
-    from a wrong code, an unknown account from a known one).
-    """
-    return {"code": code, "message": message, "params": params}
 
 
 # An account with no passkey at all — kept opaque so the answer cannot be used

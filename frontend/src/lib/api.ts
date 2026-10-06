@@ -44,8 +44,13 @@ export class ApiError extends Error {
 }
 
 /** Build the `ApiError` for a non-OK response body — the rendered message plus
- *  whatever code / params the `detail` carried. */
-function errorFromBody(body: { detail?: unknown }, fallback: string, status: number): ApiError {
+ *  whatever code / params the `detail` carried. Shared with `portalApi.ts`, so
+ *  the two clients cannot disagree on how a `detail` becomes an error. */
+export function apiErrorFromBody(
+	body: { detail?: unknown },
+	fallback: string,
+	status: number
+): ApiError {
 	const { code, params } = apiErrorCode(body.detail);
 	return new ApiError(formatApiDetail(body.detail, fallback), status, code, params);
 }
@@ -100,12 +105,12 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 			window.location.href = '/login';
 		}
 		const body = await res.json().catch(() => ({}));
-		throw errorFromBody(body, 'Unauthorized', res.status);
+		throw apiErrorFromBody(body, 'Unauthorized', res.status);
 	}
 
 	if (!res.ok) {
 		const body = await res.json().catch(() => ({}));
-		throw errorFromBody(body, `API error ${res.status}`, res.status);
+		throw apiErrorFromBody(body, `API error ${res.status}`, res.status);
 	}
 
 	if (res.status === 204) return undefined as T;
@@ -131,7 +136,7 @@ async function blobFromResponse(res: Response): Promise<Blob> {
 	}
 	if (!res.ok) {
 		const body = await res.json().catch(() => ({}));
-		throw errorFromBody(body, `Failed to load file: ${res.status}`, res.status);
+		throw apiErrorFromBody(body, `Failed to load file: ${res.status}`, res.status);
 	}
 	return res.blob();
 }

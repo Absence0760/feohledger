@@ -222,6 +222,8 @@ export const messages = {
 		'Su clave de acceso está registrada para {hosts}, no para {host}. Inicie sesión allí o registre una clave de acceso en {host}.',
 	'authRefusal.passkeyNotRegistered':
 		'No hay ninguna clave de acceso registrada',
+	'authRefusal.portalStepUpFailed':
+		'Confirme su contraseña o un código actual de su app de autenticación para cambiar la verificación en dos pasos.',
 
 	'profile.sessions.heading': 'Dispositivos con sesión abierta',
 	'profile.sessions.hint':

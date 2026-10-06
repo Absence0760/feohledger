@@ -224,6 +224,8 @@ export const messages = {
 		'Sua chave de acesso está registrada para {hosts}, não para {host}. Entre por lá ou registre uma chave de acesso em {host}.',
 	'authRefusal.passkeyNotRegistered':
 		'Nenhuma chave de acesso registrada',
+	'authRefusal.portalStepUpFailed':
+		'Confirme sua senha ou um código atual do seu aplicativo autenticador para alterar suas configurações de duas etapas.',
 
 	'profile.sessions.heading': 'Dispositivos conectados',
 	'profile.sessions.hint':
