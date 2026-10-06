@@ -427,14 +427,52 @@ def row_requires_form(row: VendorReportRow, form_type: str) -> bool:
     return form_type in row.required_forms
 
 
-def aggregate_box_allocations(rows: Sequence[VendorReportRow]) -> list[BoxAllocation]:
-    """Roll per-vendor allocations up into one per-box total for a population.
+def filed_box_allocations(row: VendorReportRow) -> tuple[BoxAllocation, ...]:
+    """The boxes of ``row`` that land on a form the payee must receive.
 
+    Since the per-box thresholds a vendor can be required on one form and not
+    the other: a 2026 law firm paid $800 of attorney proceeds (MISC-10, $600)
+    and $1,000 of fees (NEC-1, $2,000) gets a MISC only, so its NEC-1 box is
+    reportable spend that is never filed. Everything that states "what will be
+    filed" reads through here (``row_filed_total``, the summary box panel) so
+    it agrees with ``row_requires_form``, which decides what the filing batch
+    actually sends."""
+    return tuple(a for a in row.box_allocations if row_requires_form(row, a.form_type))
+
+
+def row_filed_total(row: VendorReportRow) -> Decimal:
+    """The part of ``row``'s reportable total that will be filed.
+
+    The sum of ``filed_box_allocations``; a hand-built row with no allocation
+    files its whole ``ytd_paid`` when ``over_threshold`` (the same fallback
+    ``box_total_for_form`` / ``row_requires_form`` apply), else nothing."""
+    if not row.box_allocations:
+        return row.ytd_paid if row.over_threshold else Decimal("0")
+    return sum((a.amount for a in filed_box_allocations(row)), Decimal("0"))
+
+
+def _row_filed_unmapped(row: VendorReportRow) -> tuple[Decimal, int]:
+    """``row``'s fallback-box spend, if the fallback box's form is filed.
+
+    Unmapped money all lands in the ONE fallback box (``BoxMapping.resolve``),
+    so it is filed exactly when that box's form is required — counting it
+    otherwise would put money on the preparer's mapping worklist that no form
+    will ever carry."""
+    if any(a.fallback for a in filed_box_allocations(row)):
+        return row.unmapped_paid, row.unmapped_payment_count
+    return Decimal("0"), 0
+
+
+def aggregate_box_allocations(rows: Sequence[VendorReportRow]) -> list[BoxAllocation]:
+    """Roll per-vendor FILED allocations up into one per-box total.
+
+    Only boxes on a form each vendor must receive (``filed_box_allocations``)
+    are counted, so the panel describes what the filing batch will send.
     Exact-Decimal addition of figures already denominated in the reporting
     currency — no conversion, no rounding."""
     totals: dict[str, list] = {}
     for row in rows:
-        for alloc in row.box_allocations:
+        for alloc in filed_box_allocations(row):
             slot = totals.setdefault(alloc.box, [Decimal("0"), 0, False])
             slot[0] += alloc.amount
             slot[1] += alloc.payment_count
@@ -459,17 +497,21 @@ def aggregate_box_allocations(rows: Sequence[VendorReportRow]) -> list[BoxAlloca
 def _box_summary(rows: Sequence[VendorReportRow], total_reportable: Decimal) -> dict:
     """The summary-level box breakdown + its reconciliation proof.
 
-    ``box_unallocated`` is the residual between the filed total and the sum of
-    the boxes. It is zero by construction (whole-payment attribution), and it
-    is reported anyway — a reconciliation guarantee nobody can read is a
-    guarantee nobody can check."""
+    Both halves cover the same population — the boxes on forms each vendor
+    must receive — so ``box_unallocated``, the residual between the filed
+    total and the sum of the boxes, is zero by construction for every
+    aggregated row (whole-payment attribution). A hand-built row with no
+    allocation contributes its whole total and no boxes, and the residual
+    says so. It is reported either way — a reconciliation guarantee nobody can
+    read is a guarantee nobody can check."""
     allocations = aggregate_box_allocations(rows)
     allocated = sum((a.amount for a in allocations), Decimal("0"))
     residual = total_reportable - allocated
+    unmapped = [_row_filed_unmapped(r) for r in rows]
     return {
         "box_allocations": [a.to_dict() for a in allocations],
-        "total_unmapped": str(sum((r.unmapped_paid for r in rows), Decimal("0"))),
-        "unmapped_payment_count": sum(r.unmapped_payment_count for r in rows),
+        "total_unmapped": str(sum((u[0] for u in unmapped), Decimal("0"))),
+        "unmapped_payment_count": sum(u[1] for u in unmapped),
         "box_unallocated": str(residual),
         "box_allocation_reconciled": residual == 0,
     }
@@ -602,7 +644,9 @@ class Report1099:
 
     def summary(self) -> dict:
         eligible_over = [r for r in self.rows if r.is_1099_eligible and r.over_threshold]
-        total_reportable_dec = sum((r.ytd_paid for r in eligible_over), Decimal("0"))
+        # What will be FILED: boxes on forms each vendor must receive, not the
+        # whole ``ytd_paid`` (``row_filed_total``).
+        total_reportable_dec = sum((row_filed_total(r) for r in eligible_over), Decimal("0"))
         total_reportable = str(total_reportable_dec)
         return {
             "year": self.year,
@@ -621,7 +665,7 @@ class Report1099:
             "total_reportable_usd": total_reportable,
             "total_card_excluded": _total_card_excluded(self.rows),
             "unconverted_payment_count": _total_unconverted_payments(self.rows),
-            # Per-box split of exactly the population `total_reportable` covers.
+            # Per-box split of exactly the boxes `total_reportable` covers.
             **_box_summary(eligible_over, total_reportable_dec),
         }
 
@@ -880,7 +924,9 @@ class Dashboard1099:
     def summary(self) -> dict:
         eligible = [r for r in self.rows if r.is_1099_eligible]
         eligible_over = [r for r in eligible if r.over_threshold]
-        total_reportable_dec = sum((r.ytd_paid for r in eligible_over), Decimal("0"))
+        # What will be FILED: boxes on forms each vendor must receive, not the
+        # whole ``ytd_paid`` (``row_filed_total``).
+        total_reportable_dec = sum((row_filed_total(r) for r in eligible_over), Decimal("0"))
         total_reportable = str(total_reportable_dec)
         return {
             "year": self.year,

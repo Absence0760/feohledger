@@ -28,15 +28,17 @@ from app.models.vendor import Vendor
 from app.services.tax_1099 import (
     BOX_CATALOG,
     DEFAULT_FALLBACK_BOX,
-    THRESHOLD_USD,
     BoxAllocation,
+    Dashboard1099,
     GLSpendBucket,
     Report1099,
     VendorReportRow,
     allocate_boxes,
     box_total_for_form,
+    forms_requiring_filing,
     normalize_box_code,
     resolve_box_mapping,
+    row_filed_total,
 )
 from app.services.tax_1099_forms import FORM_MISC, FORM_NEC, build_form_context, render_1099_pdf
 from app.services.tax_filing_adapters.base import FilingFormPayload
@@ -221,46 +223,127 @@ def test_row_reports_zero_residual_and_serializes_exact_strings():
     assert d["box_allocations"][0]["label"] == "Nonemployee compensation"
 
 
-def test_summary_box_breakdown_covers_exactly_the_filed_population():
+def _aggregated_row(name, pairs, *, year=YEAR, eligible=True) -> VendorReportRow:
+    """A row shaped exactly as ``build_1099_report`` shapes one: allocated,
+    with ``required_forms`` from the per-box thresholds and ``over_threshold``
+    meaning "some form is required"."""
     mapping = resolve_box_mapping(_MAPPING)
+    buckets = _buckets(*pairs)
+    alloc = allocate_boxes(buckets, mapping, vendor_id=uuid.uuid4())
+    required = forms_requiring_filing(alloc.allocations, year)
+    return VendorReportRow(
+        vendor_id=uuid.uuid4(),
+        vendor_name=name,
+        tax_id=None,
+        tax_classification=None,
+        is_1099_eligible=eligible,
+        w9_received_date=None,
+        w9_on_file=False,
+        ytd_paid=sum((b.amount for b in buckets), Decimal("0")),
+        over_threshold=bool(required),
+        payment_count=sum(b.payment_count for b in buckets),
+        box_allocations=alloc.allocations,
+        unmapped_paid=alloc.unmapped_amount,
+        unmapped_payment_count=alloc.unmapped_payment_count,
+        required_forms=required,
+    )
 
-    def _row(name, gl, amount, *, eligible=True):
-        alloc = allocate_boxes(_buckets((gl, amount, 1)), mapping, vendor_id=uuid.uuid4())
-        return VendorReportRow(
-            vendor_id=uuid.uuid4(),
-            vendor_name=name,
-            tax_id=None,
-            tax_classification=None,
-            is_1099_eligible=eligible,
-            w9_received_date=None,
-            w9_on_file=False,
-            ytd_paid=Decimal(amount),
-            over_threshold=Decimal(amount) >= THRESHOLD_USD,
-            payment_count=1,
-            box_allocations=alloc.allocations,
-            unmapped_paid=alloc.unmapped_amount,
-            unmapped_payment_count=alloc.unmapped_payment_count,
-        )
 
+def test_summary_box_breakdown_covers_exactly_the_filed_population():
     report = Report1099(
         year=YEAR,
         generated_at=date(YEAR, 1, 31),
         rows=[
-            _row("Rent Co", "6010", "1000.00"),
-            _row("Legal Co", "7100", "2000.00"),
-            _row("Unmapped Co", "9999", "700.00"),
+            _aggregated_row("Rent Co", [("6010", "2500.00", 1)]),
+            _aggregated_row("Legal Co", [("7100", "2000.00", 1)]),
+            _aggregated_row("Unmapped Co", [("9999", "2100.00", 1)]),
             # Under threshold + ineligible rows must not reach the breakdown.
-            _row("Tiny Co", "6010", "10.00"),
-            _row("NotEligible Co", "6010", "5000.00", eligible=False),
+            _aggregated_row("Tiny Co", [("6010", "10.00", 1)]),
+            _aggregated_row("NotEligible Co", [("6010", "5000.00", 1)], eligible=False),
         ],
     )
     summary = report.summary()
-    assert summary["total_reportable"] == "3700.00"
+    assert summary["total_reportable"] == "6600.00"
     totals = {b["box"]: b["amount"] for b in summary["box_allocations"]}
-    assert totals == {"NEC-1": "700.00", "MISC-1": "1000.00", "MISC-10": "2000.00"}
-    assert summary["total_unmapped"] == "700.00"
+    assert totals == {"NEC-1": "2100.00", "MISC-1": "2500.00", "MISC-10": "2000.00"}
+    assert summary["total_unmapped"] == "2100.00"
     assert summary["box_unallocated"] == "0.00"
     assert summary["box_allocation_reconciled"] is True
+
+
+def test_total_reportable_counts_only_boxes_on_required_forms():
+    """The 2026 law firm: $800 of attorney proceeds (MISC-10, $600 threshold)
+    and $1,000 of fees (NEC-1, $2,000 threshold). Only the MISC is required,
+    and the filing batch files only the MISC — so the headline total, the
+    summary box panel and its reconciliation must all describe $800, not the
+    vendor's whole $1,800."""
+    row = _aggregated_row(
+        "Law Firm 2026 LLP", [("7100", "800.00", 1), ("6000", "1000.00", 1)], year=2026
+    )
+    assert row.required_forms == (FORM_MISC,)
+    assert row.over_threshold is True
+
+    for view in (
+        Report1099(year=2026, generated_at=date(2026, 12, 31), rows=[row]),
+        Dashboard1099(year=2026, generated_at=date(2026, 12, 31), rows=[row]),
+    ):
+        summary = view.summary()
+        assert summary["total_reportable"] == "800.00"
+        assert summary["total_reportable_usd"] == "800.00"
+        assert [(b["box"], b["amount"]) for b in summary["box_allocations"]] == [
+            ("MISC-10", "800.00")
+        ]
+        assert summary["box_unallocated"] == "0.00"
+        assert summary["box_allocation_reconciled"] is True
+
+    # The per-row figures stay whole: the row still reports every box it paid
+    # into, and its own residual is over the whole `ytd_paid`.
+    d = row.to_dict()
+    assert d["ytd_paid"] == "1800.00"
+    assert {b["box"] for b in d["box_allocations"]} == {"NEC-1", "MISC-10"}
+    assert d["box_unallocated"] == "0.00"
+    assert row_filed_total(row) == Decimal("800.00")
+
+
+def test_unmapped_spend_on_an_unfiled_form_is_not_on_the_summary_worklist():
+    """Unmapped money lands in the fallback box (NEC-1). When NEC is not
+    required that money is never filed, so it must not be reported as filed
+    spend that needs a GL rule either."""
+    row = _aggregated_row(
+        "Law Firm 2026 LLP", [("7100", "800.00", 1), ("9999", "1000.00", 2)], year=2026
+    )
+    assert row.unmapped_paid == Decimal("1000.00")
+    assert row.required_forms == (FORM_MISC,)
+    summary = Report1099(year=2026, generated_at=date(2026, 12, 31), rows=[row]).summary()
+    assert summary["total_unmapped"] == "0"
+    assert summary["unmapped_payment_count"] == 0
+    # ...but it is when the fallback form IS filed.
+    filed = _aggregated_row("Big Contractor", [("9999", "2500.00", 3)], year=2026)
+    summary = Report1099(year=2026, generated_at=date(2026, 12, 31), rows=[filed]).summary()
+    assert summary["total_unmapped"] == "2500.00"
+    assert summary["unmapped_payment_count"] == 3
+
+
+def test_hand_built_row_without_allocation_files_its_whole_total():
+    """A row no aggregation produced keeps the pre-allocation behaviour — its
+    whole total is filed — and the residual says no box carries it."""
+    bare = VendorReportRow(
+        vendor_id=uuid.uuid4(),
+        vendor_name="Bare",
+        tax_id=None,
+        tax_classification=None,
+        is_1099_eligible=True,
+        w9_received_date=None,
+        w9_on_file=True,
+        ytd_paid=Decimal("700.00"),
+        over_threshold=True,
+        payment_count=1,
+    )
+    summary = Report1099(year=2025, generated_at=date(2025, 12, 31), rows=[bare]).summary()
+    assert summary["total_reportable"] == "700.00"
+    assert summary["box_allocations"] == []
+    assert summary["box_unallocated"] == "700.00"
+    assert summary["box_allocation_reconciled"] is False
 
 
 def test_box_total_for_form_narrows_to_one_form():
