@@ -30,6 +30,7 @@ import {
 	tenantPsql
 } from '../fixtures/helpers';
 import type { Page } from '@playwright/test';
+import type { PoMatchIssue } from '#lib/types/invoice.ts';
 
 /** A single SQL statement against the worker's tenant DB, trimmed. */
 function sql(query: string): string {
@@ -209,9 +210,22 @@ export type PoMatch = {
 	inspection_result: string | null;
 	inspection_accepted_quantity: number | null;
 	inspection_required: boolean;
-	issues: string[];
+	/** `{code, params, message}` findings (`po_match.issue.*`); a match persisted
+	 *  before issues carried codes holds bare strings, so both are typed. */
+	issues: Array<string | PoMatchIssue>;
 	details: Record<string, unknown>;
 };
+
+/** The issues' English, one string — what the specs assert the wording on. A
+ *  coded issue contributes its `message` (the backend-rendered fallback). */
+export function issueText(match: PoMatch): string {
+	return match.issues.map((i) => (typeof i === 'string' ? i : i.message)).join(' ');
+}
+
+/** The issues' catalogue codes (`po_match.issue.*`), in order. */
+export function issueCodes(match: PoMatch): string[] {
+	return match.issues.map((i) => (typeof i === 'string' ? '' : i.code));
+}
 
 /** Fetch the open exception types for an invoice straight from the DB. */
 export function exceptionsFor(invoiceId: string): string[] {

@@ -208,8 +208,19 @@ export interface PoMatch {
 	inspection_result: 'pass' | 'fail' | 'partial' | null;
 	inspection_accepted_quantity: number | null;
 	inspection_required: boolean;
-	issues: string[];
+	/** One finding per entry: `{code, params, message}` from the catalogue's
+	 *  `po_match.issue.*` family — localize through `poMatchIssueText`. A match
+	 *  persisted before that family existed holds bare English strings, and
+	 *  nothing backfills it, so both shapes are normal. */
+	issues: Array<string | PoMatchIssue>;
 	details: Record<string, unknown>;
+}
+
+/** A `PoMatch.issues` finding. `message` is the server's English fallback. */
+export interface PoMatchIssue {
+	code: string;
+	params: Record<string, string | number>;
+	message: string;
 }
 
 export interface Invoice {

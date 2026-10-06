@@ -58,6 +58,8 @@ async def create_exception(
     assigned_to_user_id: uuid.UUID | None = None,
     due_at: datetime | None = None,
     raised_by_user_id: uuid.UUID | None = None,
+    description_code: str | None = None,
+    description_params: dict | None = None,
 ) -> APException:
     """Create + persist an ``Exception`` and best-effort emit ``exception.raised``.
 
@@ -78,6 +80,12 @@ async def create_exception(
     ``app/`` is required to state it by
     ``tests/test_exception_raiser_stamping.py``, and a literal ``None`` there
     must be declared with its reason.
+
+    ``description_code`` / ``description_params`` name ``description`` in
+    ``invoice_warning_catalog`` so a client can render it in the reader's
+    language; ``description`` is then the English fallback. Detector-raised
+    exceptions pass all three (``invoice_warnings._ensure_exception``); a
+    human-authored description (a rejection reason) passes neither.
     """
     resolved_invoice_id = invoice_id if invoice_id is not None else getattr(invoice, "id", None)
     resolved_entity_id = entity_id if entity_id is not None else getattr(invoice, "entity_id", None)
@@ -87,6 +95,8 @@ async def create_exception(
         exception_type=exception_type,
         severity=severity,
         description=description,
+        description_code=description_code,
+        description_params=description_params,
         status=status,
         organization_id=organization_id,
         entity_id=resolved_entity_id,

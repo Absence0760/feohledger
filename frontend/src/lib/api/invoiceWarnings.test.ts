@@ -9,7 +9,7 @@
  * case that would otherwise print `{amount}` at a reviewer.
  */
 import { afterEach, describe, expect, it } from 'vitest';
-import { invoiceWarningText, localizeInvoiceWarning } from './invoiceWarnings';
+import { invoiceWarningText, localizeInvoiceWarning, poMatchIssueText } from './invoiceWarnings';
 import {
 	INVOICE_WARNING_MESSAGE_KEYS,
 	INVOICE_WARNING_PARAM_KINDS
@@ -212,5 +212,52 @@ describe('invoiceWarningText', () => {
 		expect(
 			invoiceWarningText({ message: 'Something the server knows and we do not' }, translate)
 		).toBe('Something the server knows and we do not');
+	});
+});
+
+describe('poMatchIssueText', () => {
+	it('localizes a coded po_match.issue finding, money in its own currency', () => {
+		const text = poMatchIssueText(
+			{
+				message: 'Amount mismatch: invoice 1200.00 GBP vs PO 1000.00 GBP (+20.0%)',
+				code: 'po_match.issue.amount_mismatch',
+				params: { invoiceAmount: '1200.00', poTotal: '1000.00', currency: 'GBP', variancePct: '+20.0' }
+			},
+			translate
+		);
+		expect(text).toContain('£1,200.00');
+		expect(text).toContain('£1,000.00');
+		expect(text).toContain('+20.0%');
+		expect(text).not.toContain('$');
+	});
+
+	it('renders a PO total bare when the PO records no currency', () => {
+		const text = poMatchIssueText(
+			{
+				message: 'Amount mismatch: invoice 1200.00 GBP vs PO 1000.00 (+20.0%)',
+				code: 'po_match.issue.amount_mismatch_po_currency_unknown',
+				params: { invoiceAmount: '1200.00', poTotal: '1000.00', currency: 'GBP', variancePct: '+20.0' }
+			},
+			translate
+		);
+		expect(text).toContain('£1,200.00');
+		expect(text).toMatch(/PO 1,000\.00 /);
+	});
+
+	it('renders a pre-catalogue string issue exactly as persisted', () => {
+		// Matches persisted before issues carried codes hold bare English, and
+		// nothing backfills them — the normal path for an untouched invoice.
+		expect(poMatchIssueText('Partial receipt: 60% of ordered quantity received', translate)).toBe(
+			'Partial receipt: 60% of ordered quantity received'
+		);
+	});
+
+	it('falls back to the issue’s own message for a code this build predates', () => {
+		expect(
+			poMatchIssueText(
+				{ message: 'Server English', code: 'po_match.issue.from_the_future', params: {} },
+				translate
+			)
+		).toBe('Server English');
 	});
 });

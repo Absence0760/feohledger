@@ -38,6 +38,11 @@ import pytest
 from app.services.po_matching import MatchResult, match_invoice_to_po
 
 
+def _messages(result) -> list[str]:
+    """The English fallback of each `po_match.issue.*` finding."""
+    return [i["message"] for i in result.issues]
+
+
 def _invoice(**overrides):
     base = dict(
         id=uuid.uuid4(),
@@ -142,7 +147,7 @@ async def test_po_number_set_but_no_matching_po_returns_no_po_with_issue():
     inv = _invoice(po_number="PO-GHOST")
     result = await match_invoice_to_po(db, inv)
     assert result.status == "no_po"
-    assert any("PO-GHOST" in i for i in result.issues)
+    assert any("PO-GHOST" in i for i in _messages(result))
 
 
 # ---------------------------------------------------------------------------
@@ -186,7 +191,7 @@ async def test_invoice_outside_default_tolerance_is_mismatched():
     assert result.amount_variance == pytest.approx(100.0)
     assert result.amount_variance_pct == pytest.approx(10.0)
     # Each figure names its own currency — never a hardcoded `$` (decisions §197).
-    assert any("1100.00 USD" in i and "1000.00 USD" in i for i in result.issues)
+    assert any("1100.00 USD" in i and "1000.00 USD" in i for i in _messages(result))
 
 
 @pytest.mark.asyncio
@@ -303,7 +308,7 @@ async def test_partial_gr_downgrades_matched_status_to_partial():
     result = await match_invoice_to_po(db, _invoice(amount=Decimal("1000.00")))
     assert result.status == "partial"
     assert result.match_type == "3-way"
-    assert any("60%" in i and "Partial" in i for i in result.issues)
+    assert any("60%" in i and "Partial" in i for i in _messages(result))
 
 
 @pytest.mark.asyncio
@@ -324,7 +329,7 @@ async def test_partial_gr_does_not_promote_mismatch_to_partial():
     assert result.status == "mismatch"
     # Partial-receipt info still surfaces as an issue, so the AP
     # team sees both signals.
-    assert any("Partial" in i for i in result.issues)
+    assert any("Partial" in i for i in _messages(result))
 
 
 @pytest.mark.asyncio
@@ -531,7 +536,13 @@ async def test_invoice_in_another_currency_than_its_po_is_a_mismatch_with_no_var
     # read as a perfect match.
     assert result.amount_variance is None
     assert result.amount_variance_pct is None
-    assert result.issues == ["Currency mismatch: invoice in EUR, PO in USD — amounts not compared"]
+    assert result.issues == [
+        {
+            "code": "po_match.issue.currency_mismatch",
+            "params": {"invoiceCurrency": "EUR", "poCurrency": "USD"},
+            "message": "Currency mismatch: invoice in EUR, PO in USD — amounts not compared",
+        }
+    ]
     payload = result.to_json_dict()
     assert payload["amount_variance"] is None
     assert payload["details"]["currency_check"] == "different"
@@ -570,17 +581,70 @@ async def test_a_po_with_no_currency_is_compared_at_face_value_and_reported_unve
 
 @pytest.mark.asyncio
 async def test_amount_mismatch_issue_names_each_figures_own_currency():
-    """`issues` is rendered verbatim; it used to print `$` on both figures."""
+    """It used to print `$` on both figures; now each figure is labelled only
+    by a code that is its own — in the English fallback AND in the params the
+    client formats (a `money` param beside the one `currency`, or a bare
+    `number` when the PO records none)."""
     same = await match_invoice_to_po(
         _mk_db(po=_po(total=Decimal("1000.00"), currency="GBP")),
         _invoice(amount=Decimal("1200.00"), currency="GBP"),
     )
-    assert same.issues == ["Amount mismatch: invoice 1200.00 GBP vs PO 1000.00 GBP (+20.0%)"]
+    assert same.issues == [
+        {
+            "code": "po_match.issue.amount_mismatch",
+            "params": {
+                "invoiceAmount": "1200.00",
+                "poTotal": "1000.00",
+                "currency": "GBP",
+                "variancePct": "+20.0",
+            },
+            "message": "Amount mismatch: invoice 1200.00 GBP vs PO 1000.00 GBP (+20.0%)",
+        }
+    ]
 
     unknown = await match_invoice_to_po(
         _mk_db(po=_po(total=Decimal("1000.00"), currency=None)),
         _invoice(amount=Decimal("1200.00"), currency="GBP"),
     )
     # The PO's figure is bare — nothing says what it is in.
-    assert unknown.issues == ["Amount mismatch: invoice 1200.00 GBP vs PO 1000.00 (+20.0%)"]
-    assert all("$" not in issue for issue in same.issues + unknown.issues)
+    assert unknown.issues == [
+        {
+            "code": "po_match.issue.amount_mismatch_po_currency_unknown",
+            "params": {
+                "invoiceAmount": "1200.00",
+                "poTotal": "1000.00",
+                "currency": "GBP",
+                "variancePct": "+20.0",
+            },
+            "message": "Amount mismatch: invoice 1200.00 GBP vs PO 1000.00 (+20.0%)",
+        }
+    ]
+    assert all("$" not in issue for issue in _messages(same) + _messages(unknown))
+
+
+@pytest.mark.asyncio
+async def test_amount_mismatch_with_an_invalid_invoice_code_labels_neither_figure():
+    """The invoice's own code is not ISO either, so a `currency` param would
+    coerce it to USD and assert dollars. Both figures ride bare."""
+    result = await match_invoice_to_po(
+        _mk_db(po=_po(total=Decimal("1000.00"), currency=None)),
+        _invoice(amount=Decimal("1200.00"), currency="??"),
+    )
+    (issue,) = result.issues
+    assert issue["code"] == "po_match.issue.amount_mismatch_currency_unknown"
+    assert "currency" not in issue["params"]
+    assert issue["message"] == "Amount mismatch: invoice 1200.00 vs PO 1000.00 (+20.0%)"
+
+
+@pytest.mark.asyncio
+async def test_partial_acceptance_with_no_quantity_is_its_own_code_not_a_spliced_word():
+    """The matcher used to splice the English word "part" into the quantity
+    slot. A word in a sentence selects a code; it is never a parameter."""
+    po = _po(total=Decimal("1000.00"), currency="USD")
+    insp = SimpleNamespace(
+        id=uuid.uuid4(), result="partial", accepted_quantity=None, deviation_notes=None
+    )
+    result = await match_invoice_to_po(
+        _mk_db(po=po, inspection=insp), _invoice(amount=Decimal("1000.00"), currency="USD")
+    )
+    assert [i["code"] for i in result.issues] == ["po_match.issue.partial_acceptance_unquantified"]

@@ -44,6 +44,7 @@
 library;
 
 import 'package:feohledger_mobile/l10n/gen/app_localizations.dart';
+import 'package:feohledger_mobile/models/exception.dart';
 import 'package:feohledger_mobile/models/invoice.dart';
 import 'package:feohledger_mobile/utils/dates.dart';
 import 'package:feohledger_mobile/utils/money.dart';
@@ -68,6 +69,47 @@ String? localizeInvoiceWarning(AppLocalizations l, InvoiceWarning w) {
   // backend puts in the params beside it. Absent means the figure renders
   // bare — never a substituted default (`docs/decisions.md` §79/§82).
   return _localizeWarningCode(l, w.code, p, p['currency']);
+}
+
+/// One catalogue finding — a `po_match.issues` entry or one finding inside a
+/// composite exception description — localized when this build knows its
+/// code, otherwise its English [CatalogueFinding.message]. A pre-catalogue
+/// string issue has no code, so it renders as persisted.
+String findingText(AppLocalizations l, CatalogueFinding f) =>
+    _localizeWarningCode(l, f.code, f.params, f.params['currency']) ??
+    f.message;
+
+/// What an exception's description renders as: the sentence, plus any
+/// findings a composite lists beneath it.
+typedef ExceptionDescriptionText = ({String summary, List<String> findings});
+
+/// An exception's description in the reader's language, or `null` when it has
+/// none — the mobile twin of the web `api/exceptionDescription.ts`, with the
+/// same fallback order:
+///
+/// * **No code** (a human-written reason, or a row raised before migration
+///   0103) → the `description` as written.
+/// * **A code this build cannot render** → the WHOLE `description` and no
+///   separate findings: a composite's English fallback already contains every
+///   finding, so listing them as well would state each one twice.
+/// * **A finding this build cannot render, inside a renderable composite** →
+///   that finding's own English, beside its localized siblings.
+ExceptionDescriptionText? exceptionDescriptionText(
+  AppLocalizations l,
+  ApException exc,
+) {
+  final fallback = exc.description ?? '';
+  final ExceptionDescriptionText? plain =
+      fallback.isEmpty ? null : (summary: fallback, findings: const []);
+  if (exc.descriptionCode == null) return plain;
+  final p = exc.descriptionParams;
+  final summary =
+      _localizeWarningCode(l, exc.descriptionCode, p, p['currency']);
+  if (summary == null) return plain;
+  return (
+    summary: summary,
+    findings: [for (final f in exc.descriptionFindings) findingText(l, f)],
+  );
 }
 
 // Each formatter takes the same (raw, currency) pair so the generated arms can

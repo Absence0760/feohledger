@@ -64,9 +64,18 @@ def _sample_params(spec: cat.WarningSpec) -> dict:
 
 
 def test_codes_are_unique_and_snake_case():
+    """Snake case, with the family namespace (`po_match.issue.` /
+    `exception.`) as the only dots — the generator derives the message key
+    from that prefix, so an unknown one would land under the warning keys."""
     assert len(set(codes())) == len(codes())
     for code in codes():
-        assert re.fullmatch(r"[a-z][a-z0-9_]*", code), code
+        assert re.fullmatch(r"(po_match\.issue\.|exception\.)?[a-z][a-z0-9_]*", code), code
+    assert {s.code for s in cat.PO_MATCH_ISSUE_SPECS} == {
+        c for c in codes() if c.startswith(cat.PO_MATCH_ISSUE_PREFIX)
+    }
+    assert {s.code for s in cat.EXCEPTION_DESCRIPTION_SPECS} == {
+        c for c in codes() if c.startswith(cat.EXCEPTION_PREFIX)
+    }
 
 
 @pytest.mark.parametrize("spec", WARNING_SPECS, ids=lambda s: s.code)
@@ -83,11 +92,125 @@ def test_every_code_renders_a_complete_sentence(spec):
     assert ", plural," not in out["message"]
 
 
+@pytest.mark.parametrize(
+    ("spec", "build"),
+    [(s, cat.po_match_issue) for s in cat.PO_MATCH_ISSUE_SPECS]
+    + [(s, cat.exception_finding) for s in cat.EXCEPTION_DESCRIPTION_SPECS],
+    ids=lambda v: getattr(v, "code", ""),
+)
+def test_every_issue_and_exception_code_renders_a_complete_sentence(spec, build):
+    """The two non-warning families build through their own helpers, which
+    take the BARE name and add the namespace — and carry no `type`/`severity`,
+    since neither an issue nor an exception description is a warning."""
+    bare = spec.code.split(".")[-1]
+    out = build(bare, **_sample_params(spec))
+    assert out["code"] == spec.code
+    assert set(out) == {"code", "params", "message"}
+    assert set(out["params"]) == set(spec.params)
+    assert "{" not in out["message"] and "}" not in out["message"], out["message"]
+
+
+def test_the_families_cannot_be_crossed():
+    """`warning()` refuses an issue code and `po_match_issue()` a warning
+    code: either would key a finding under the wrong family's wording."""
+    with pytest.raises(KeyError):
+        warning("po_match.issue.inspection_failed", "info")
+    with pytest.raises(KeyError):
+        cat.po_match_issue("round_amount", amount="1", currency="USD")
+    with pytest.raises(KeyError):
+        cat.exception_finding("past_due")
+
+
+def test_a_single_finding_needs_no_frame():
+    """One price-variance line IS the description, in its warning wording."""
+    line = warning(
+        "price_variance_over",
+        "warning",
+        deltaPct="+20.0",
+        item="Widget",
+        unitPrice=Decimal("12"),
+        baselineUnitPrice=Decimal("10"),
+        currency="ZAR",
+    )
+    out = cat.exception_findings("price_variance_findings", [line])
+    assert out == {"code": line["code"], "params": line["params"], "message": line["message"]}
+
+
+def test_several_findings_are_decomposed_under_a_frame():
+    """Two lines become the frame (with their count) and the lines themselves
+    under `params.findings` — never a server-joined English summary, and never
+    a `$`, whatever the invoice's currency."""
+    lines = [
+        warning(
+            code,
+            "warning",
+            deltaPct=pct,
+            item=item,
+            unitPrice=Decimal("12"),
+            baselineUnitPrice=Decimal("10"),
+            currency="ZAR",
+        )
+        for code, pct, item in (
+            ("price_variance_over", "+20.0", "Widget"),
+            ("price_variance_under", "-15.0", "Bolt"),
+        )
+    ]
+    out = cat.exception_findings("price_variance_findings", lines)
+    assert out["code"] == "exception.price_variance_findings"
+    assert out["params"]["count"] == 2
+    assert [f["code"] for f in out["params"][cat.FINDINGS_PARAM]] == [
+        "price_variance_over",
+        "price_variance_under",
+    ]
+    assert out["message"].startswith("Line-item price variance vs vendor history on 2 lines: ")
+    assert "$" not in out["message"]
+    # A copy — mutating the description must never reach `invoice.warnings`.
+    out["params"][cat.FINDINGS_PARAM][0]["params"]["item"] = "changed"
+    assert lines[0]["params"]["item"] == "Widget"
+    with pytest.raises(ValueError):
+        cat.exception_findings("price_variance_findings", [])
+
+
 def test_every_code_has_a_call_site():
-    """A declared code nobody emits is a catalogue entry pretending to work."""
-    sources = "\n".join((_BACKEND / rel).read_text(encoding="utf-8") for rel in PRODUCER_MODULES)
+    """A declared code nobody emits is a catalogue entry pretending to work.
+
+    A namespaced code is emitted by its BARE name (`po_match_issue("over_receipt")`,
+    `exception_finding(...)`, `exception_findings("price_variance_findings", ...)`),
+    so that is what the scan looks for.
+    """
+    sources = "\n".join(
+        (_BACKEND / rel).read_text(encoding="utf-8")
+        for rel in (*PRODUCER_MODULES, "app/services/po_matching.py")
+    )
     for code in codes():
-        assert f'"{code}"' in sources or f"'{code}'" in sources, f"{code} has no call site"
+        name = code.split(".")[-1]
+        assert f'"{name}"' in sources or f"'{name}'" in sources, f"{code} has no call site"
+
+
+def test_every_ensure_exception_call_passes_a_finding_not_prose():
+    """`_ensure_exception`'s description argument is a catalogue finding.
+
+    A string literal, an f-string or a `"; ".join(...)` there carries no code,
+    so the queue could only ever render it in English — the defect migration
+    0103 exists to remove. The runtime `TypeError` catches it on the write
+    path; this catches it before the path is ever exercised.
+    """
+    offenders: list[str] = []
+    rel = "app/services/invoice_warnings.py"
+    tree = ast.parse((_BACKEND / rel).read_text(encoding="utf-8"), filename=rel)
+    for node in ast.walk(tree):
+        if not (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "_ensure_exception"
+        ):
+            continue
+        finding = node.args[4] if len(node.args) > 4 else None
+        if finding is None or isinstance(finding, (ast.Constant, ast.JoinedStr, ast.BinOp)):
+            offenders.append(f"{rel}:{node.lineno}")
+        elif isinstance(finding, ast.Call) and isinstance(finding.func, ast.Attribute):
+            offenders.append(f"{rel}:{node.lineno}")  # e.g. `"; ".join(...)`
+    assert not offenders, "composed prose handed to _ensure_exception: " + ", ".join(offenders)
 
 
 def test_no_producer_hand_rolls_a_warning_dict():
@@ -226,7 +349,7 @@ def test_the_check_goes_red_when_the_catalogue_gains_a_code(monkeypatch):
         *WARNING_SPECS,
         cat.WarningSpec("brand_new_rule", "fraud_flag", "A brand new finding", {}),
     )
-    monkeypatch.setattr(gen, "WARNING_SPECS", widened)
+    monkeypatch.setattr(gen, "SPECS", widened)
     assert gen.main(["--check"]) == 1
 
 
@@ -236,6 +359,19 @@ def test_every_message_key_is_derived_from_its_code():
     assert (
         gen.message_key("contract_spend_limit_exceeded_not_to_exceed")
         == "invoices.warning.contractSpendLimitExceededNotToExceed"
+    )
+    # Each family lands under its own namespace, never under the warnings'.
+    assert (
+        gen.message_key("po_match.issue.partial_receipt") == "invoices.poMatch.issue.partialReceipt"
+    )
+    assert (
+        gen.message_key("exception.missing_data_after_extraction")
+        == "exceptions.description.missingDataAfterExtraction"
+    )
+    assert gen.arb_method("po_match.issue.over_receipt") == "invoicePoMatchIssueOverReceipt"
+    assert (
+        gen.arb_method("exception.price_variance_findings")
+        == "exceptionDescriptionPriceVarianceFindings"
     )
     # Distinct codes cannot collapse onto one key — that would silently make
     # two different findings read as the same sentence.
@@ -376,7 +512,7 @@ def test_a_code_the_arb_does_not_state_yet_still_gets_an_arm(monkeypatch):
             {"days": "count", "poNumber": "text", "currency": "currency"},
         ),
     )
-    monkeypatch.setattr(gen, "WARNING_SPECS", widened)
+    monkeypatch.setattr(gen, "SPECS", widened)
     arm = _arm(gen.render_dart(), "brand_new_rule")
     assert "final days = _count(p['days']);" in arm
     assert "final poNumber = _text(p['poNumber'], currency);" in arm

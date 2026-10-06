@@ -1931,5 +1931,136 @@
         "type": "String"
       }
     }
+  },
+  "invoicePoMatchIssuePoNotFound": "PO {poNumber} not found",
+  "@invoicePoMatchIssuePoNotFound": {
+    "placeholders": {
+      "poNumber": {
+        "type": "String"
+      }
+    }
+  },
+  "invoicePoMatchIssueCurrencyMismatch": "Currency mismatch: invoice in {invoiceCurrency}, PO in {poCurrency} — amounts not compared",
+  "@invoicePoMatchIssueCurrencyMismatch": {
+    "placeholders": {
+      "invoiceCurrency": {
+        "type": "String"
+      },
+      "poCurrency": {
+        "type": "String"
+      }
+    }
+  },
+  "invoicePoMatchIssueAmountMismatch": "Amount mismatch: invoice {invoiceAmount} vs PO {poTotal} ({variancePct})",
+  "@invoicePoMatchIssueAmountMismatch": {
+    "placeholders": {
+      "invoiceAmount": {
+        "type": "String"
+      },
+      "poTotal": {
+        "type": "String"
+      },
+      "variancePct": {
+        "type": "String"
+      }
+    }
+  },
+  "invoicePoMatchIssueAmountMismatchPoCurrencyUnknown": "Amount mismatch: invoice {invoiceAmount} vs PO {poTotal} ({variancePct})",
+  "@invoicePoMatchIssueAmountMismatchPoCurrencyUnknown": {
+    "placeholders": {
+      "invoiceAmount": {
+        "type": "String"
+      },
+      "poTotal": {
+        "type": "String"
+      },
+      "variancePct": {
+        "type": "String"
+      }
+    }
+  },
+  "invoicePoMatchIssueAmountMismatchCurrencyUnknown": "Amount mismatch: invoice {invoiceAmount} vs PO {poTotal} ({variancePct})",
+  "@invoicePoMatchIssueAmountMismatchCurrencyUnknown": {
+    "placeholders": {
+      "invoiceAmount": {
+        "type": "String"
+      },
+      "poTotal": {
+        "type": "String"
+      },
+      "variancePct": {
+        "type": "String"
+      }
+    }
+  },
+  "invoicePoMatchIssuePartialReceipt": "Partial receipt: {receivedPct} of ordered quantity received",
+  "@invoicePoMatchIssuePartialReceipt": {
+    "placeholders": {
+      "receivedPct": {
+        "type": "String"
+      }
+    }
+  },
+  "invoicePoMatchIssueOverReceipt": "Over-receipt: {receivedQuantity} received against {orderedQuantity} ordered (+{excessQuantity})",
+  "@invoicePoMatchIssueOverReceipt": {
+    "placeholders": {
+      "receivedQuantity": {
+        "type": "String"
+      },
+      "orderedQuantity": {
+        "type": "String"
+      },
+      "excessQuantity": {
+        "type": "String"
+      }
+    }
+  },
+  "invoicePoMatchIssueInspectionFailed": "Failed quality inspection",
+  "invoicePoMatchIssueInspectionFailedNotes": "Failed quality inspection: {notes}",
+  "@invoicePoMatchIssueInspectionFailedNotes": {
+    "placeholders": {
+      "notes": {
+        "type": "String"
+      }
+    }
+  },
+  "invoicePoMatchIssuePartialAcceptance": "Partial acceptance: {acceptedQuantity} of ordered quantity accepted",
+  "@invoicePoMatchIssuePartialAcceptance": {
+    "placeholders": {
+      "acceptedQuantity": {
+        "type": "String"
+      }
+    }
+  },
+  "invoicePoMatchIssuePartialAcceptanceUnquantified": "Partial acceptance: part of ordered quantity accepted",
+  "invoicePoMatchIssueInspectionRequiredMissing": "Quality inspection required but missing",
+  "exceptionDescriptionMissingDataAfterExtraction": "Required fields missing after extraction",
+  "exceptionDescriptionPriceVarianceFindings": "Line-item price variance vs vendor history on {count, plural, one {{count} line} other {{count} lines}}",
+  "@exceptionDescriptionPriceVarianceFindings": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "exceptionDescriptionContractNoncompliantFindings": "{count, plural, one {{count} contract-compliance finding} other {{count} contract-compliance findings}}",
+  "@exceptionDescriptionContractNoncompliantFindings": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "warningsPoMatchStatusMatched": "Matched",
+  "warningsPoMatchStatusMismatch": "Mismatch",
+  "warningsPoMatchStatusPartial": "Partial",
+  "warningsPoMatchStatusNoPo": "No PO",
+  "warningsPoMatchAnnouncement": "PO match: {summary}",
+  "@warningsPoMatchAnnouncement": {
+    "placeholders": {
+      "summary": {
+        "type": "String"
+      }
+    }
   }
 }

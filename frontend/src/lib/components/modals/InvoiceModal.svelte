@@ -14,7 +14,7 @@
 	import Badge from '#lib/components/ui/Badge.svelte';
 	import type { BadgeTone } from '#lib/components/ui/badgeTone.ts';
 	import { m } from '#lib/i18n/store.svelte.ts';
-	import { invoiceWarningText } from '#lib/api/invoiceWarnings.ts';
+	import { invoiceWarningText, poMatchIssueText } from '#lib/api/invoiceWarnings.ts';
 	import { formatDate } from '#lib/utils/time.ts';
 	import { formatList } from '#lib/utils/list.ts';
 	import type { MessageKey } from '#lib/i18n/messages.ts';
@@ -2149,9 +2149,13 @@
 								</div>
 							{/if}
 							{#if pm.issues.length > 0}
+								<!-- Localized like the warnings list above it, so the
+								     panel never shows a German finding over an English
+								     issue. A string entry is a match persisted before
+								     issues carried codes, and renders as written. -->
 								<ul class="po-match-issues">
 									{#each pm.issues as issue}
-										<li>{issue}</li>
+										<li>{poMatchIssueText(issue, m)}</li>
 									{/each}
 								</ul>
 							{/if}

@@ -199,7 +199,12 @@ class PoMatch {
   final String status;
   final double? variancePct;
   final bool? withinTolerance;
-  final List<String> issues;
+
+  /// The matcher's findings, each a `po_match.issue.*` catalogue entry —
+  /// render through `findingText`, never `issue.message` directly. A match
+  /// persisted before issues carried codes holds bare English strings, which
+  /// arrive here as a finding with only a [CatalogueFinding.message].
+  final List<CatalogueFinding> issues;
 
   const PoMatch({
     required this.matchType,
@@ -217,20 +222,58 @@ class PoMatch {
       variancePct: (json['amount_variance_pct'] as num?)?.toDouble(),
       withinTolerance: json['within_tolerance'] as bool?,
       issues: issues is List
-          ? issues.map((e) => e.toString()).toList()
+          ? issues.map(CatalogueFinding.fromJson).nonNulls.toList()
           : const [],
     );
   }
 
   /// True when there's nothing useful to show (no PO on the invoice).
   bool get isNoPo => status == 'no_po';
+}
 
-  String get statusLabel => switch (status) {
-        'matched' => 'Matched',
-        'mismatch' => 'Mismatch',
-        'partial' => 'Partial',
-        _ => 'No PO',
-      };
+/// One server-composed finding from the backend's sentence catalogue
+/// (`invoice_warning_catalog.py`): a `po_match.issues` entry, or one finding
+/// inside a composite exception description. [code] + [params] are what a
+/// client localizes on; [message] is the English fallback.
+class CatalogueFinding {
+  final String message;
+  final String? code;
+
+  /// Kept as the exact strings the wire carried — money is `Decimal`
+  /// server-side and must not round-trip through a `double`.
+  final Map<String, String> params;
+
+  const CatalogueFinding({
+    required this.message,
+    this.code,
+    this.params = const {},
+  });
+
+  /// A `{code, params, message}` map, or a bare string — the shape every
+  /// `po_match.issues` entry had before issues carried codes. Anything else
+  /// is not a finding and yields `null`.
+  static CatalogueFinding? fromJson(Object? raw) {
+    if (raw is String) return CatalogueFinding(message: raw);
+    if (raw is! Map) return null;
+    final message = raw['message'];
+    if (message is! String) return null;
+    final code = raw['code'];
+    return CatalogueFinding(
+      message: message,
+      code: code is String ? code : null,
+      params: scalarParams(raw['params']),
+    );
+  }
+
+  /// The scalar entries of a params map, as strings. A list (a composite's
+  /// `findings`) or a nested map is not a sentence parameter and is skipped.
+  static Map<String, String> scalarParams(Object? raw) {
+    if (raw is! Map) return const {};
+    return {
+      for (final e in raw.entries)
+        if (e.value is String || e.value is num) '${e.key}': '${e.value}',
+    };
+  }
 }
 
 class Invoice {

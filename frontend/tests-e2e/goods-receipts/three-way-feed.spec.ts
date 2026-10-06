@@ -1,5 +1,5 @@
 import { expect, test } from '../fixtures/helpers';
-import { cleanup, createGr, createMatchedInvoice, createPo } from '../matching/setup';
+import { cleanup, createGr, createMatchedInvoice, createPo, issueText } from '../matching/setup';
 
 /**
  * Goods Receipts as the 3-way-match feeder.
@@ -60,6 +60,6 @@ test.describe('goods receipt drives the 3-way match leg', () => {
 		expect(poMatch!.match_type).toBe('3-way');
 		expect(poMatch!.status).toBe('partial');
 		// 3/8 = 37.5% → rounded "38%" in the issue text.
-		expect(poMatch!.issues.join(' ')).toMatch(/Partial receipt: 38% of ordered quantity/i);
+		expect(issueText(poMatch!)).toMatch(/Partial receipt: 38% of ordered quantity/i);
 	});
 });

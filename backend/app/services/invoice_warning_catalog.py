@@ -519,8 +519,183 @@ WARNING_SPECS: tuple[WarningSpec, ...] = (
 )
 
 
+# --------------------------------------------------------------------------- #
+# Two more sentence families, one vocabulary
+#
+# The PO-match panel's issue list and the exception queue's description were
+# the two surfaces `decisions.md` §155 / round 31 left as server English: one
+# panel below the keyed warnings, and the queue an auditor reads. They join the
+# catalogue rather than growing catalogues of their own, so one generator, one
+# drift guard and one client reader cover all three — and a finding that is a
+# warning AND an exception (a round amount, a missing PO) is stated in ONE
+# wording on both surfaces, because the exception reuses the warning's code.
+#
+# Each family's wire code carries its namespace (`po_match.issue.…`,
+# `exception.…`), which is also how the generator derives the message key: the
+# code is the identity, so a family can never borrow another's wording.
+# --------------------------------------------------------------------------- #
+
+#: Wire-code prefix of a `MatchResult.issues` entry.
+PO_MATCH_ISSUE_PREFIX = "po_match.issue."
+#: Wire-code prefix of an exception-only description (a sentence no warning
+#: states). Most exceptions reuse a warning code instead — see
+#: `invoice_warnings._ensure_exception`.
+EXCEPTION_PREFIX = "exception."
+
+#: The `type` every PO-match issue spec carries. Issues are not warnings — they
+#: never reach `invoice.warnings` — so the field only keeps the dataclass whole.
+PO_MATCH_ISSUE_TYPE = "po_match_issue"
+
+#: The matcher's own findings, one per sentence `po_matching` used to compose.
+#: They read shorter than the `po_mismatch` warnings because they render INSIDE
+#: the PO-match panel, which already names the PO.
+PO_MATCH_ISSUE_SPECS: tuple[WarningSpec, ...] = (
+    WarningSpec(
+        PO_MATCH_ISSUE_PREFIX + "po_not_found",
+        PO_MATCH_ISSUE_TYPE,
+        "PO {poNumber} not found",
+        {"poNumber": "text"},
+    ),
+    WarningSpec(
+        PO_MATCH_ISSUE_PREFIX + "currency_mismatch",
+        PO_MATCH_ISSUE_TYPE,
+        "Currency mismatch: invoice in {invoiceCurrency}, PO in {poCurrency} "
+        "— amounts not compared",
+        {"invoiceCurrency": "text", "poCurrency": "text"},
+    ),
+    # Both sides in one known currency — both figures are money in it.
+    WarningSpec(
+        PO_MATCH_ISSUE_PREFIX + "amount_mismatch",
+        PO_MATCH_ISSUE_TYPE,
+        "Amount mismatch: invoice {invoiceAmount} {currency} vs PO {poTotal} {currency} "
+        "({variancePct}%)",
+        {
+            "invoiceAmount": "money",
+            "poTotal": "money",
+            "currency": "currency",
+            "variancePct": "percent",
+        },
+    ),
+    # The PO records no currency, so its figure is a bare `number`: labelling
+    # it with the invoice's code would assert the PO is in it (decisions §197).
+    WarningSpec(
+        PO_MATCH_ISSUE_PREFIX + "amount_mismatch_po_currency_unknown",
+        PO_MATCH_ISSUE_TYPE,
+        "Amount mismatch: invoice {invoiceAmount} {currency} vs PO {poTotal} ({variancePct}%)",
+        {
+            "invoiceAmount": "money",
+            "poTotal": "number",
+            "currency": "currency",
+            "variancePct": "percent",
+        },
+    ),
+    # The invoice's own code is not a valid ISO code either. Neither figure may
+    # be labelled — a `currency` param would coerce the absent code to USD and
+    # assert dollars.
+    WarningSpec(
+        PO_MATCH_ISSUE_PREFIX + "amount_mismatch_currency_unknown",
+        PO_MATCH_ISSUE_TYPE,
+        "Amount mismatch: invoice {invoiceAmount} vs PO {poTotal} ({variancePct}%)",
+        {"invoiceAmount": "number", "poTotal": "number", "variancePct": "percent"},
+    ),
+    WarningSpec(
+        PO_MATCH_ISSUE_PREFIX + "partial_receipt",
+        PO_MATCH_ISSUE_TYPE,
+        "Partial receipt: {receivedPct}% of ordered quantity received",
+        {"receivedPct": "percent"},
+    ),
+    WarningSpec(
+        PO_MATCH_ISSUE_PREFIX + "over_receipt",
+        PO_MATCH_ISSUE_TYPE,
+        "Over-receipt: {receivedQuantity} received against {orderedQuantity} ordered "
+        "(+{excessQuantity})",
+        {"receivedQuantity": "number", "orderedQuantity": "number", "excessQuantity": "number"},
+    ),
+    WarningSpec(
+        PO_MATCH_ISSUE_PREFIX + "inspection_failed",
+        PO_MATCH_ISSUE_TYPE,
+        "Failed quality inspection",
+        {},
+    ),
+    WarningSpec(
+        PO_MATCH_ISSUE_PREFIX + "inspection_failed_notes",
+        PO_MATCH_ISSUE_TYPE,
+        "Failed quality inspection: {notes}",
+        {"notes": "text"},
+    ),
+    WarningSpec(
+        PO_MATCH_ISSUE_PREFIX + "partial_acceptance",
+        PO_MATCH_ISSUE_TYPE,
+        "Partial acceptance: {acceptedQuantity} of ordered quantity accepted",
+        {"acceptedQuantity": "number"},
+    ),
+    # The matcher used to splice the English word "part" into the quantity
+    # slot when the inspection recorded none — a word, so its own code.
+    WarningSpec(
+        PO_MATCH_ISSUE_PREFIX + "partial_acceptance_unquantified",
+        PO_MATCH_ISSUE_TYPE,
+        "Partial acceptance: part of ordered quantity accepted",
+        {},
+    ),
+    WarningSpec(
+        PO_MATCH_ISSUE_PREFIX + "inspection_required_missing",
+        PO_MATCH_ISSUE_TYPE,
+        "Quality inspection required but missing",
+        {},
+    ),
+)
+
+#: The reserved `params` key a composite exception description carries its
+#: findings under — a list of `{code, params, message}` entries, each itself a
+#: catalogue finding. Never a template placeholder.
+FINDINGS_PARAM = "findings"
+
+#: Exception descriptions no warning states. `type` is the exception type the
+#: description belongs to (`exception_lifecycle.EXCEPTION_TYPES`).
+#:
+#: The two `*_findings` codes are FRAMES: an exception that covers several
+#: findings at once (one `price_variance` for every flagged line, one
+#: `contract_noncompliant` for every breached term) used to join their English
+#: with `"; "` on the server. It now carries the findings themselves under
+#: `params.findings`, and the frame says how many there are; each client lists
+#: them in the reader's language. A single finding needs no frame and is stored
+#: as itself (see `exception_findings`).
+EXCEPTION_DESCRIPTION_SPECS: tuple[WarningSpec, ...] = (
+    WarningSpec(
+        EXCEPTION_PREFIX + "missing_data_after_extraction",
+        "missing_data",
+        "Required fields missing after extraction",
+        {},
+    ),
+    WarningSpec(
+        EXCEPTION_PREFIX + "price_variance_findings",
+        "price_variance",
+        "Line-item price variance vs vendor history on "
+        "{count, plural, one {# line} other {# lines}}",
+        {"count": "count"},
+    ),
+    WarningSpec(
+        EXCEPTION_PREFIX + "contract_noncompliant_findings",
+        "contract_noncompliant",
+        "{count, plural, one {# contract-compliance finding} "
+        "other {# contract-compliance findings}}",
+        {"count": "count"},
+    ),
+)
+
+#: Every sentence the catalogue declares, in generation order.
+ALL_SPECS: tuple[WarningSpec, ...] = (
+    *WARNING_SPECS,
+    *PO_MATCH_ISSUE_SPECS,
+    *EXCEPTION_DESCRIPTION_SPECS,
+)
+
+_WARNING_CODES = frozenset(s.code for s in WARNING_SPECS)
+_PO_MATCH_ISSUE_CODES = frozenset(s.code for s in PO_MATCH_ISSUE_SPECS)
+_EXCEPTION_CODES = frozenset(s.code for s in EXCEPTION_DESCRIPTION_SPECS)
+
 _BY_CODE: dict[str, WarningSpec] = {}
-for _spec in WARNING_SPECS:
+for _spec in ALL_SPECS:
     if _spec.code in _BY_CODE:
         raise RuntimeError(f"duplicate invoice-warning code: {_spec.code}")
     _declared = set(_PLACEHOLDER.findall(_spec.template))
@@ -538,8 +713,8 @@ def spec_for(code: str) -> WarningSpec:
 
 
 def codes() -> tuple[str, ...]:
-    """Every declared code, in catalogue order."""
-    return tuple(s.code for s in WARNING_SPECS)
+    """Every declared code across all three families, in catalogue order."""
+    return tuple(s.code for s in ALL_SPECS)
 
 
 # --------------------------------------------------------------------------- #
@@ -661,6 +836,75 @@ def _coerce(kind: ParamKind, value: object) -> str | int:
     return str(value)
 
 
+def _finding(code: str, params: dict[str, object]) -> dict:
+    """`{message, code, params}` for one declared sentence — the shared core."""
+    spec = _BY_CODE[code]
+    if set(params) != set(spec.params):
+        raise ValueError(
+            f"invoice-warning code {code}: got params {sorted(params)}, "
+            f"expected {sorted(spec.params)}"
+        )
+    values: dict[str, str | int] = {
+        name: _coerce(spec.params[name], value) for name, value in params.items()
+    }
+    return {"message": render(spec.template, values), "code": code, "params": values}
+
+
+def po_match_issue(code: str, /, **params: object) -> dict:
+    """One `MatchResult.issues` entry: `{code, params, message}`.
+
+    ``code`` is the bare name (`"partial_receipt"`); the wire code gains the
+    `po_match.issue.` namespace here, so a call site cannot put a warning code
+    in the issue list by mistake. ``message`` is the English fallback — and it
+    is the WHOLE of an issue persisted before this change, which is a bare
+    string rather than this dict. Every reader accepts both.
+    """
+    full = PO_MATCH_ISSUE_PREFIX + code
+    if full not in _PO_MATCH_ISSUE_CODES:
+        raise KeyError(full)
+    return _finding(full, params)
+
+
+def exception_finding(code: str, /, **params: object) -> dict:
+    """An exception-only description: a sentence no warning states.
+
+    ``code`` is the bare name; the `exception.` namespace is added here. An
+    exception that mirrors a warning passes that warning's own dict to
+    `_ensure_exception` instead, so the queue and the invoice state one
+    finding in one wording.
+    """
+    full = EXCEPTION_PREFIX + code
+    if full not in _EXCEPTION_CODES:
+        raise KeyError(full)
+    return _finding(full, params)
+
+
+def exception_findings(frame: str, findings: list[dict]) -> dict:
+    """One exception description covering ``findings`` (warning dicts).
+
+    A single finding IS the description — it needs no frame, and stating it in
+    its own warning wording keeps the queue and the invoice agreeing. Two or
+    more become the ``frame`` code (`price_variance_findings` /
+    `contract_noncompliant_findings`) with the count as its parameter and the
+    findings themselves under ``params.findings``: decomposed, so each client
+    lists them in its reader's language rather than receiving one server-joined
+    English string. ``message`` — the fallback, and what
+    ``Exception.description`` stores — is the frame followed by each finding's
+    own English.
+    """
+    if not findings:
+        raise ValueError("exception_findings needs at least one finding")
+    items = [
+        {"code": f["code"], "params": dict(f["params"]), "message": f["message"]} for f in findings
+    ]
+    if len(items) == 1:
+        return items[0]
+    head = exception_finding(frame, count=len(items))
+    head["params"][FINDINGS_PARAM] = items
+    head["message"] = f"{head['message']}: " + "; ".join(i["message"] for i in items)
+    return head
+
+
 def warning(code: str, severity: str, /, **params: object) -> dict:
     """One `invoice.warnings` entry: `{type, severity, message, code, params}`.
 
@@ -671,19 +915,9 @@ def warning(code: str, severity: str, /, **params: object) -> dict:
     programming errors in a literal argument, so failing on the write path is
     the honest outcome rather than a silently unkeyed warning.
     """
+    if code not in _WARNING_CODES:
+        # An issue or exception-only code is not a warning; letting one into
+        # `invoice.warnings` would key a finding under the wrong family.
+        raise KeyError(code)
     spec = _BY_CODE[code]
-    if set(params) != set(spec.params):
-        raise ValueError(
-            f"invoice-warning code {code}: got params {sorted(params)}, "
-            f"expected {sorted(spec.params)}"
-        )
-    values: dict[str, str | int] = {
-        name: _coerce(spec.params[name], value) for name, value in params.items()
-    }
-    return {
-        "type": spec.type,
-        "severity": severity,
-        "message": render(spec.template, values),
-        "code": code,
-        "params": values,
-    }
+    return {"type": spec.type, "severity": severity, **_finding(code, params)}

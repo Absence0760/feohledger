@@ -37,6 +37,11 @@
 	import { m } from '#lib/i18n/store.svelte.ts';
 	import type { MessageKey } from '#lib/i18n/messages.ts';
 	import { formatApiDetail } from '#lib/utils/apiError.ts';
+	import {
+		exceptionDescriptionText,
+		exceptionDescriptionTitle,
+		type ExceptionDescriptionText
+	} from '#lib/api/exceptionDescription.ts';
 
 	interface ExceptionItem {
 		id: string;
@@ -56,7 +61,12 @@
 		exception_type: string;
 		type_label: string;
 		severity: string;
+		// The English sentence — the FALLBACK since migration 0103. The code +
+		// params name it in the invoice-warning catalogue; both null for a
+		// human-written reason and for rows raised before 0103.
 		description: string | null;
+		description_code?: string | null;
+		description_params?: Record<string, unknown> | null;
 		status: string;
 		resolution: string | null;
 		resolved_by: string | null;
@@ -284,6 +294,17 @@
 		const key = exceptionTypeLabelKey(type);
 		if (key) return m(key);
 		return serverLabel || exceptionTypeFallback(type);
+	}
+
+	/**
+	 * The description in the reader's language — localized off the row's
+	 * `description_code` / `description_params` (the invoice's own warning
+	 * code, so the queue and the invoice agree in wording), with the server's
+	 * English `description` as the fallback. A composite (several
+	 * price-variance lines) comes back as a sentence plus its findings.
+	 */
+	function describe(exc: ExceptionItem): ExceptionDescriptionText | null {
+		return exceptionDescriptionText(exc, m);
 	}
 
 	// Two INDEPENDENT request streams — the queue itself and the chip-count
@@ -1023,9 +1044,13 @@
 						     for neither a keyboard nor a touch operator, and a
 						     queue could not be scanned without pointing at every
 						     row in turn. Clamped to two lines with the full text
-						     still in `title`. -->
-						{#if exc.description}
-							<span class="type-detail" title={exc.description}>{exc.description}</span>
+						     still in `title` — a composite's findings each on
+						     their own line there, the sentence alone in the cell. -->
+						{#if exc.description || exc.description_code}
+							{@const desc = describe(exc)}
+							{#if desc}
+								<span class="type-detail" title={exceptionDescriptionTitle(desc)}>{desc.summary}</span>
+							{/if}
 						{/if}
 					</td>
 					<td>
@@ -1105,8 +1130,18 @@
 			{#if resolveTarget.invoice_number}— {resolveTarget.invoice_number}{/if}
 			{#if resolveTarget.vendor_name}· {resolveTarget.vendor_name}{/if}
 		</p>
-		{#if resolveTarget.description}
-			<p class="modal-description">{resolveTarget.description}</p>
+		{@const desc = describe(resolveTarget)}
+		{#if desc}
+			<div class="modal-description" data-testid="exception-description">
+				<p>{desc.summary}</p>
+				{#if desc.findings.length > 0}
+					<ul>
+						{#each desc.findings as finding, i (i)}
+							<li>{finding}</li>
+						{/each}
+					</ul>
+				{/if}
+			</div>
 		{/if}
 		<!-- `data-testid` is the e2e suite's handle on this dialog, so a spec
 		     never has to name it by its accessible name — which is translated. -->
@@ -1357,6 +1392,15 @@
 		padding: 8px 10px;
 		background: var(--bg);
 		border-radius: 4px;
+	}
+
+	.modal-description p {
+		margin: 0;
+	}
+
+	.modal-description ul {
+		margin: 6px 0 0;
+		padding-left: 18px;
 	}
 
 	.modal input:focus {

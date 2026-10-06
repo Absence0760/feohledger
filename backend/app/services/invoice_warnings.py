@@ -14,7 +14,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.exception import Exception as APException
 from app.models.invoice import Invoice, InvoiceStatus
 from app.models.procurement import po_currency_code
-from app.services.invoice_warning_catalog import warning
+from app.services.invoice_warning_catalog import (
+    exception_finding,
+    exception_findings,
+    warning,
+)
 from app.services.matching_rules import resolve_match_rule
 from app.services.po_matching import (
     CURRENCY_DIFFERENT,
@@ -265,14 +269,10 @@ async def refresh_warnings(
             # the extra work is off the common path.
             is_duplicate = await _has_normalized_duplicate(db, invoice, vendor_match)
         if is_duplicate:
-            warnings.append(warning("duplicate_invoice_number", "warning"))
+            flag = warning("duplicate_invoice_number", "warning")
+            warnings.append(flag)
             await _ensure_exception(
-                db,
-                invoice,
-                "duplicate",
-                "warning",
-                "Duplicate invoice number for this vendor",
-                org_settings=org_settings,
+                db, invoice, "duplicate", "warning", flag, org_settings=org_settings
             )
 
     # Fraud: round amounts (configurable threshold). "Round" = no fractional
@@ -283,33 +283,21 @@ async def refresh_warnings(
         threshold = Decimal(str(cfg["round_amount_min"]))
         round_step = Decimal("100")
         if invoice.amount >= threshold and invoice.amount % round_step == 0:
-            warnings.append(
-                warning(
-                    "round_amount",
-                    "info",
-                    amount=invoice.amount,
-                    currency=invoice.currency,
-                )
-            )
+            # The exception states the warning's own sentence. It used to say
+            # "Suspicious round amount: $5000.00" — a second wording for one
+            # finding, with a dollar sign stamped on whatever currency it was.
+            flag = warning("round_amount", "info", amount=invoice.amount, currency=invoice.currency)
+            warnings.append(flag)
             await _ensure_exception(
-                db,
-                invoice,
-                "fraud_flag",
-                "info",
-                f"Suspicious round amount: ${invoice.amount}",
-                org_settings=org_settings,
+                db, invoice, "fraud_flag", "info", flag, org_settings=org_settings
             )
 
     # Fraud: future invoice date
     if cfg["future_date_enabled"] and invoice.invoice_date and invoice.invoice_date > utc_today():
-        warnings.append(warning("future_invoice_date", "warning"))
+        flag = warning("future_invoice_date", "warning")
+        warnings.append(flag)
         await _ensure_exception(
-            db,
-            invoice,
-            "fraud_flag",
-            "warning",
-            "Invoice date is in the future",
-            org_settings=org_settings,
+            db, invoice, "fraud_flag", "warning", flag, org_settings=org_settings
         )
 
     # Fraud: rush payment pattern. Very short window between invoice_date
@@ -324,10 +312,9 @@ async def refresh_warnings(
     ):
         days = (invoice.due_date - invoice.invoice_date).days
         flag = warning("rush_payment", "warning", days=days)
-        msg = flag["message"]
         warnings.append(flag)
         await _ensure_exception(
-            db, invoice, "fraud_flag", "warning", msg, org_settings=org_settings
+            db, invoice, "fraud_flag", "warning", flag, org_settings=org_settings
         )
 
     # Past-due flag (informational, not fraud — but lives in the same block).
@@ -349,14 +336,10 @@ async def refresh_warnings(
         if vendor is not None:
             # Unverified vendor (existing rule)
             if vendor.status == "unverified":
-                warnings.append(warning("unverified_vendor", "warning"))
+                flag = warning("unverified_vendor", "warning")
+                warnings.append(flag)
                 await _ensure_exception(
-                    db,
-                    invoice,
-                    "unverified_vendor",
-                    "warning",
-                    "Invoice linked to an unverified vendor",
-                    org_settings=org_settings,
+                    db, invoice, "unverified_vendor", "warning", flag, org_settings=org_settings
                 )
 
             # Personal-email-domain flag. The vendor's email is set during
@@ -368,10 +351,9 @@ async def refresh_warnings(
                 personal = {d.lower() for d in cfg["personal_email_domains"]}
                 if host and host in personal:
                     flag = warning("personal_email_domain", "warning", domain=host)
-                    msg = flag["message"]
                     warnings.append(flag)
                     await _ensure_exception(
-                        db, invoice, "fraud_flag", "warning", msg, org_settings=org_settings
+                        db, invoice, "fraud_flag", "warning", flag, org_settings=org_settings
                     )
 
             # New-vendor + large-amount. A brand-new vendor making a huge
@@ -390,10 +372,9 @@ async def refresh_warnings(
                         amount=invoice.amount,
                         currency=invoice.currency,
                     )
-                    msg = flag["message"]
                     warnings.append(flag)
                     await _ensure_exception(
-                        db, invoice, "fraud_flag", "warning", msg, org_settings=org_settings
+                        db, invoice, "fraud_flag", "warning", flag, org_settings=org_settings
                     )
 
             # Bank-account / remit-to change. We compare the incoming
@@ -422,10 +403,9 @@ async def refresh_warnings(
                 prior_remit = last_remit_q.scalar_one_or_none()
                 if prior_remit and prior_remit.strip() != (invoice.remit_to_address or "").strip():
                     flag = warning("remit_to_changed", "error")
-                    msg = flag["message"]
                     warnings.append(flag)
                     await _ensure_exception(
-                        db, invoice, "fraud_flag", "error", msg, org_settings=org_settings
+                        db, invoice, "fraud_flag", "error", flag, org_settings=org_settings
                     )
 
             # Statistical amount anomaly. Pull last N approved invoice
@@ -472,10 +452,9 @@ async def refresh_warnings(
                             mean=mean.quantize(Decimal("0.01")),
                             currency=invoice.currency,
                         )
-                        msg = flag["message"]
                         warnings.append(flag)
                         await _ensure_exception(
-                            db, invoice, "fraud_flag", "warning", msg, org_settings=org_settings
+                            db, invoice, "fraud_flag", "warning", flag, org_settings=org_settings
                         )
 
             # LLM anomaly detection (opt-in). Costs an LLM call; gated
@@ -493,7 +472,7 @@ async def refresh_warnings(
             invoice,
             "missing_data",
             "error",
-            "Required fields missing after extraction",
+            exception_finding("missing_data_after_extraction"),
             org_settings=org_settings,
         )
 
@@ -734,14 +713,13 @@ async def _refresh_line_total_reconciliation(
             headerAmount=mismatch["header_amount"],
             currency=mismatch["currency"],
         )
-        msg = flag["message"]
         warnings.append({**flag, **mismatch})
         await _ensure_exception(
             db,
             invoice,
             "line_total_mismatch",
             "error",
-            msg,
+            flag,
             org_settings=org_settings,
         )
     except Exception:  # noqa: BLE001 — best-effort; never break the save path
@@ -837,9 +815,10 @@ async def _refresh_price_variance(
         if not flags:
             return
 
+        line_flags: list[dict] = []
         for f in flags:
             label = f.description or f.item_key
-            warnings.append(
+            line_flags.append(
                 warning(
                     # `direction` is a WORD in the sentence, so it selects the
                     # code rather than riding as a param — a client cannot
@@ -853,23 +832,20 @@ async def _refresh_price_variance(
                     currency=invoice.currency,
                 )
             )
+        warnings.extend(line_flags)
 
         # One exception covers all flagged lines; severity escalates if any line
-        # cleared the escalate threshold ("warning"), else "info".
+        # cleared the escalate threshold ("warning"), else "info". Its
+        # description carries the per-line warnings THEMSELVES rather than a
+        # server-joined summary — which also stamped `$` on both figures of
+        # every line, whatever currency the invoice was in.
         worst = "warning" if any(f.severity == "warning" for f in flags) else "info"
-        summary = "; ".join(
-            (
-                f"{(f.description or f.item_key)}: {f.delta_pct:+.1f}% "
-                f"(${f.current_unit_price} vs ${f.baseline_unit_price})"
-            )
-            for f in flags
-        )
         await _ensure_exception(
             db,
             invoice,
             "price_variance",
             worst,
-            f"Line-item price variance vs vendor history — {summary}",
+            exception_findings("price_variance_findings", line_flags),
             org_settings=org_settings,
         )
     except Exception:  # noqa: BLE001 — best-effort; never break the save path
@@ -929,14 +905,10 @@ async def _refresh_po_match(
     invoice.po_match = match.to_json_dict()
 
     if match.status == "no_po":
-        warnings.append(warning("po_not_found", "error", poNumber=invoice.po_number))
+        flag = warning("po_not_found", "error", poNumber=invoice.po_number)
+        warnings.append(flag)
         await _ensure_exception(
-            db,
-            invoice,
-            "po_mismatch",
-            "error",
-            f"Invoice references PO {invoice.po_number} but no matching PO exists",
-            org_settings=org_settings,
+            db, invoice, "po_mismatch", "error", flag, org_settings=org_settings
         )
     elif match.status == "mismatch" and match.currency_check == CURRENCY_DIFFERENT:
         # The currency guard tripped: the two are in different currencies, so
@@ -950,10 +922,9 @@ async def _refresh_po_match(
             poNumber=match.po_number,
             poCurrency=match.po_currency or "",
         )
-        msg = flag["message"]
         warnings.append(flag)
         await _ensure_exception(
-            db, invoice, "po_mismatch", "warning", msg, org_settings=org_settings
+            db, invoice, "po_mismatch", "warning", flag, org_settings=org_settings
         )
     elif (
         match.status == "mismatch"
@@ -983,10 +954,9 @@ async def _refresh_po_match(
             )
         else:
             flag = warning("po_amount_variance", "warning", poTotal=match.po_total, **common)
-        msg = flag["message"]
         warnings.append(flag)
         await _ensure_exception(
-            db, invoice, "po_mismatch", "warning", msg, org_settings=org_settings
+            db, invoice, "po_mismatch", "warning", flag, org_settings=org_settings
         )
     elif (
         match.status == "partial"
@@ -1007,9 +977,8 @@ async def _refresh_po_match(
             matchType=match.match_type,
             poNumber=match.po_number,
         )
-        msg = flag["message"]
         warnings.append(flag)
-        await _ensure_exception(db, invoice, "po_mismatch", "info", msg, org_settings=org_settings)
+        await _ensure_exception(db, invoice, "po_mismatch", "info", flag, org_settings=org_settings)
 
     # 3-way: an OVER-receipt (more units booked in than were ordered).
     # Independent of the po-status handling above, and for the same reason the
@@ -1049,10 +1018,9 @@ async def _refresh_po_match(
             )
         else:
             flag = warning("po_over_receipt_unquantified", "warning", poNumber=po_ref)
-        msg = flag["message"]
         warnings.append(flag)
         await _ensure_exception(
-            db, invoice, "po_mismatch", "warning", msg, org_settings=org_settings
+            db, invoice, "po_mismatch", "warning", flag, org_settings=org_settings
         )
 
     # 4-way: quality-inspection outcomes route to a `quality_hold` exception.
@@ -1074,17 +1042,15 @@ async def _refresh_po_match(
             )
         else:
             flag = warning("quality_inspection_failed", "error", poNumber=po_ref)
-        msg = flag["message"]
         warnings.append(flag)
         await _ensure_exception(
-            db, invoice, "quality_hold", "error", msg, org_settings=org_settings
+            db, invoice, "quality_hold", "error", flag, org_settings=org_settings
         )
     elif match.inspection_required and match.inspection_result is None:
         flag = warning("quality_inspection_missing", "warning", poNumber=po_ref)
-        msg = flag["message"]
         warnings.append(flag)
         await _ensure_exception(
-            db, invoice, "quality_hold", "warning", msg, org_settings=org_settings
+            db, invoice, "quality_hold", "warning", flag, org_settings=org_settings
         )
     elif match.inspection_result == "partial":
         if match.inspection_accepted_quantity is not None:
@@ -1096,9 +1062,10 @@ async def _refresh_po_match(
             )
         else:
             flag = warning("quality_partial_acceptance_unquantified", "info", poNumber=po_ref)
-        msg = flag["message"]
         warnings.append(flag)
-        await _ensure_exception(db, invoice, "quality_hold", "info", msg, org_settings=org_settings)
+        await _ensure_exception(
+            db, invoice, "quality_hold", "info", flag, org_settings=org_settings
+        )
 
 
 async def _refresh_contract_compliance(
@@ -1124,7 +1091,7 @@ async def _refresh_contract_compliance(
         invoice,
         COMPLIANCE_EXCEPTION_TYPE,
         worst,
-        "; ".join(f["message"] for f in findings),
+        exception_findings("contract_noncompliant_findings", findings),
         org_settings=org_settings,
     )
 
@@ -1173,11 +1140,25 @@ async def _ensure_exception(
     invoice: Invoice,
     exception_type: str,
     severity: str,
-    description: str,
+    finding: dict,
     *,
     org_settings: dict | None = None,
 ) -> None:
-    """Create an exception if one doesn't already exist for this invoice + type."""
+    """Create an exception if one doesn't already exist for this invoice + type.
+
+    ``finding`` is a catalogue dict — the warning raised beside it
+    (`invoice_warning_catalog.warning`), an exception-only sentence
+    (`exception_finding`) or a composite (`exception_findings`) — never a
+    string. Its ``code`` / ``params`` are what the queue localizes on and its
+    ``message`` becomes ``description``, the English fallback. Passing the
+    warning's own dict is the point: the exception and the invoice then state
+    one finding in one wording, where composed prose used to drift ("Suspicious
+    round amount: $5000.00" beside "Round amount: 5000.00 ZAR").
+    """
+    if not isinstance(finding, dict) or not finding.get("code"):
+        # A programming error at a literal call site, not a data condition —
+        # raising beats persisting an unkeyed description nobody can localize.
+        raise TypeError("_ensure_exception needs a catalogue finding, not composed prose")
     existing = await db.execute(
         select(func.count()).where(
             APException.invoice_id == invoice.id,
@@ -1220,7 +1201,9 @@ async def _ensure_exception(
         db,
         exception_type=exception_type,
         severity=severity,
-        description=description,
+        description=finding["message"],
+        description_code=finding["code"],
+        description_params=finding.get("params") or {},
         status="open",
         organization_id=invoice.organization_id,
         invoice=invoice,  # exception follows its invoice (P2)
@@ -1300,8 +1283,7 @@ async def _llm_anomaly_check(
     result = await detect_anomaly(candidate, history, api_key=api_key)
     if result.is_anomaly and result.reason:
         flag = warning("llm_anomaly", "warning", reason=result.reason)
-        msg = flag["message"]
         warnings.append(flag)
         await _ensure_exception(
-            db, invoice, "fraud_flag", "warning", msg, org_settings=org_settings
+            db, invoice, "fraud_flag", "warning", flag, org_settings=org_settings
         )

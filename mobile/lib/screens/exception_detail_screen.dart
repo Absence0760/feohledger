@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import 'package:feohledger_mobile/api/endpoints.dart';
 import 'package:feohledger_mobile/l10n/gen/app_localizations.dart';
+import 'package:feohledger_mobile/l10n/invoice_warning_messages.dart';
 import 'package:feohledger_mobile/models/admin_user.dart';
 import 'package:feohledger_mobile/models/exception.dart';
 import 'package:feohledger_mobile/stores/auth_store.dart';
@@ -89,6 +90,9 @@ class _ExceptionDetailScreenState extends State<ExceptionDetailScreen> {
 
     final exc = _exception!;
     final canAct = exc.status.isActionable && !_submitting;
+    // Localized off the row's description code — the invoice's own warning
+    // wording — with the server's English as the fallback.
+    final description = exceptionDescriptionText(l, exc);
     return RefreshIndicator(
       onRefresh: _load,
       child: ListView(
@@ -96,8 +100,13 @@ class _ExceptionDetailScreenState extends State<ExceptionDetailScreen> {
         children: [
           _header(l, exc),
           const SizedBox(height: 16),
-          if (exc.description != null && exc.description!.isNotEmpty) ...[
-            _section(l.exceptionDetailSectionDescription, exc.description!),
+          if (description != null) ...[
+            _section(l.exceptionDetailSectionDescription, description.summary),
+            for (final finding in description.findings)
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Text('• $finding'),
+              ),
             const SizedBox(height: 16),
           ],
           _invoicePanel(l, exc),

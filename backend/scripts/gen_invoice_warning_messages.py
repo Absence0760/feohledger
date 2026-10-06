@@ -44,6 +44,13 @@ goes red. Once English exists, each surface's locale-parity test demands the
 other translations. Three guards per surface, each catching the step after the
 one before it.
 
+The catalogue holds three families of sentence and this generates all of them
+into the one map per client: the invoice warnings, the PO-match panel's issues
+(`po_match.issue.*` → `invoices.poMatch.issue.*` / `invoicePoMatchIssue…`) and
+the exception descriptions no warning states (`exception.*` →
+`exceptions.description.*` / `exceptionDescription…`). Each wire code carries
+its family's namespace, so one reader localizes any of them.
+
 The generated modules carry the parameter kinds because a label per code is not
 enough: `po_mismatch` alone is five sentences, and each embeds a PO number, a
 money figure or a variance. The kinds say what each placeholder IS, so the
@@ -67,7 +74,17 @@ from pathlib import Path
 if str(Path(__file__).resolve().parent.parent) not in sys.path:
     sys.path.insert(1, str(Path(__file__).resolve().parent.parent))
 
-from app.services.invoice_warning_catalog import WARNING_SPECS, WarningSpec  # noqa: E402
+from app.services.invoice_warning_catalog import (  # noqa: E402
+    ALL_SPECS,
+    EXCEPTION_PREFIX,
+    PO_MATCH_ISSUE_PREFIX,
+    WarningSpec,
+)
+
+#: Every sentence generated, across the three families (warnings, PO-match
+#: issues, exception-only descriptions). One map per client covers them all —
+#: the wire code carries its family's namespace, so the codes cannot collide.
+SPECS: tuple[WarningSpec, ...] = ALL_SPECS
 
 #: Where the generated modules land. Relative to the repo root so a worktree
 #: writes into its own frontend and mobile trees, never the primary checkout's.
@@ -81,19 +98,43 @@ MOBILE_ARB_PATH = Path("mobile/lib/l10n/app_en.arb")
 #: Namespace the invoice list + modal copy already lives under.
 _KEY_PREFIX = "invoices.warning."
 
+#: Wire-code prefix → (web message-key prefix, ARB method prefix). A code with
+#: none of these prefixes is a warning (`_KEY_PREFIX` / `invoiceWarning`).
+_FAMILIES: tuple[tuple[str, str, str], ...] = (
+    (PO_MATCH_ISSUE_PREFIX, "invoices.poMatch.issue.", "invoicePoMatchIssue"),
+    (EXCEPTION_PREFIX, "exceptions.description.", "exceptionDescription"),
+)
+
 
 def _repo_root() -> Path:
     return Path(__file__).resolve().parent.parent.parent
 
 
+def _split(code: str) -> tuple[str, str, str]:
+    """`(web key prefix, ARB method prefix, bare snake_case name)` for ``code``."""
+    for wire_prefix, key_prefix, arb_prefix in _FAMILIES:
+        if code.startswith(wire_prefix):
+            return key_prefix, arb_prefix, code.removeprefix(wire_prefix)
+    return _KEY_PREFIX, "invoiceWarning", code
+
+
+def _camel(snake: str) -> str:
+    head, *rest = snake.split("_")
+    return head + "".join(part.capitalize() for part in rest)
+
+
 def message_key(code: str) -> str:
-    """`round_amount` → `invoices.warning.roundAmount`.
+    """`round_amount` → `invoices.warning.roundAmount`;
+    `po_match.issue.partial_receipt` → `invoices.poMatch.issue.partialReceipt`;
+    `exception.missing_data_after_extraction` →
+    `exceptions.description.missingDataAfterExtraction`.
 
     Purely mechanical: the code IS the identity, so deriving the key from it
-    means a renamed code cannot keep pointing at the old wording.
+    means a renamed code cannot keep pointing at the old wording, and a family
+    cannot borrow another's.
     """
-    head, *rest = code.split("_")
-    return _KEY_PREFIX + head + "".join(part.capitalize() for part in rest)
+    key_prefix, _, name = _split(code)
+    return key_prefix + _camel(name)
 
 
 def render() -> str:
@@ -110,6 +151,11 @@ def render() -> str:
         "// decisions.md §155 shipped a localized frame around server-English",
         "// findings and named this as the fix: a label per `type` could not work,",
         "// because one type is up to five different sentences.",
+        "//",
+        "// Three families share the map, each namespaced in its wire code: the",
+        "// warnings themselves, the PO-match panel's `po_match.issue.*` entries,",
+        "// and the `exception.*` descriptions no warning states (an exception that",
+        "// mirrors a warning carries the warning's own code).",
         "import type { MessageKey } from '#lib/i18n/messages.ts';",
         "",
         "/** What a warning parameter holds, and therefore how it renders. */",
@@ -129,7 +175,7 @@ def render() -> str:
     # One reference comment per code carrying the backend's own English
     # template, so a reworded backend sentence surfaces here as a diff — the
     # signal that the six translations of that key are now stale.
-    for spec in WARNING_SPECS:
+    for spec in SPECS:
         lines.append(f"\t// {spec.template}")
         lines.append(f"\t'{spec.code}': '{message_key(spec.code)}',")
 
@@ -146,7 +192,7 @@ def render() -> str:
         " */",
         "export const INVOICE_WARNING_PARAM_KINDS = {",
     ]
-    for spec in WARNING_SPECS:
+    for spec in SPECS:
         if not spec.params:
             lines.append(f"\t'{spec.code}': {{}},")
             continue
@@ -189,14 +235,16 @@ class ArbMismatch(Exception):
 
 
 def arb_method(code: str) -> str:
-    """`round_amount` → `invoiceWarningRoundAmount`, the gen-l10n member name.
+    """`round_amount` → `invoiceWarningRoundAmount`, the gen-l10n member name
+    (`invoicePoMatchIssue…` / `exceptionDescription…` for the other families).
 
     The same mechanical derivation as :func:`message_key`, spelled the way an
     ARB key has to be (no dots), so the web key `invoices.warning.roundAmount`
     and this name can never name two different sentences.
     """
-    camel = message_key(code).removeprefix(_KEY_PREFIX)
-    return "invoiceWarning" + camel[0].upper() + camel[1:]
+    _, arb_prefix, name = _split(code)
+    camel = _camel(name)
+    return arb_prefix + camel[0].upper() + camel[1:]
 
 
 def _load_arb() -> dict:
@@ -288,7 +336,7 @@ def render_dart(arb: dict | None = None) -> str:
         "/// the reader instead of embedding en-US digits in a translated sentence.",
         "const Map<String, Map<String, String>> invoiceWarningParamKinds = {",
     ]
-    for spec in WARNING_SPECS:
+    for spec in SPECS:
         entries = [f"'{name}': '{kind}'" for name, kind in spec.params.items()]
         one_line = f"  '{spec.code}': {{{', '.join(entries)}}},"
         if len(one_line) <= 80:
@@ -311,7 +359,7 @@ def render_dart(arb: dict | None = None) -> str:
         ") {",
         "  switch (warningCode) {",
     ]
-    for spec in WARNING_SPECS:
+    for spec in SPECS:
         method = arb_method(spec.code)
         signature = _signature(spec, arb)
         # The backend's own English, so a reworded sentence surfaces here as a

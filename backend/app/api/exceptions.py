@@ -103,7 +103,15 @@ def _exception_dict(exc: APException, inv: Invoice | None) -> dict:
         "exception_type": exc.exception_type,
         "type_label": EXCEPTION_TYPE_LABELS.get(exc.exception_type, exc.exception_type),
         "severity": exc.severity,
+        # `description` is the English fallback; `description_code` +
+        # `description_params` name the same sentence in the invoice-warning
+        # catalogue so the queue renders it in the reader's language (and in
+        # the same wording as the invoice's own warning). Both NULL for a
+        # human-authored description and for every row raised before
+        # migration 0103 — clients render `description` then.
         "description": exc.description,
+        "description_code": exc.description_code,
+        "description_params": exc.description_params,
         "status": exc.status,
         "resolution": exc.resolution,
         "resolved_by": exc.resolved_by,
