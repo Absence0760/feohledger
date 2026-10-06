@@ -140,11 +140,12 @@ class ExceptionStore extends ChangeNotifier with SequencedFetch {
   Future<bool> escalate(
     String id, {
     String resolution = 'Escalated on mobile',
-  }) =>
-      _act(id, action: 'escalate', resolution: resolution);
+  }) => _act(id, action: 'escalate', resolution: resolution);
 
-  Future<bool> dismiss(String id, {String resolution = 'Dismissed on mobile'}) =>
-      _act(id, action: 'dismiss', resolution: resolution);
+  Future<bool> dismiss(
+    String id, {
+    String resolution = 'Dismissed on mobile',
+  }) => _act(id, action: 'dismiss', resolution: resolution);
 
   Future<bool> _act(
     String id, {
@@ -223,27 +224,35 @@ class ExceptionStore extends ChangeNotifier with SequencedFetch {
   }
 
   Map<String, dynamic> _exceptionToJson(ApException e) => {
-        'id': e.id,
-        'invoice_id': e.invoiceId,
-        'invoice_number': e.invoiceNumber,
-        'vendor_name': e.vendorName,
-        'amount': e.amount,
-        // Cached with the figure: without it an offline-rendered amount loses
-        // its symbol (the list falls back to a bare figure).
-        'currency': e.currency,
-        'exception_type': e.exceptionType,
-        'type_label': e.typeLabel,
-        'severity': e.severity.value,
-        'description': e.description,
-        'status': e.status.value,
-        'resolution': e.resolution,
-        'assigned_to': e.assignedTo,
-        'assigned_to_user_id': e.assignedToUserId,
-        'is_overdue': e.isOverdue,
-        'created_at': e.createdAt.toIso8601String(),
-        'resolved_by': e.resolvedBy,
-        'resolved_at': e.resolvedAt?.toIso8601String(),
-        'due_at': e.dueAt?.toIso8601String(),
-        'time_to_resolution_hours': e.timeToResolutionHours,
-      };
+    'id': e.id,
+    'invoice_id': e.invoiceId,
+    'invoice_number': e.invoiceNumber,
+    'vendor_name': e.vendorName,
+    'amount': e.amount,
+    // Cached with the figure: without it an offline-rendered amount loses
+    // its symbol (the list falls back to a bare figure).
+    'currency': e.currency,
+    'exception_type': e.exceptionType,
+    'type_label': e.typeLabel,
+    'severity': e.severity.value,
+    'description': e.description,
+    // The keyed description, so an offline-rendered one is still stated
+    // in the reader's language rather than falling back to the English.
+    'description_code': e.descriptionCode,
+    'description_params': {
+      ...e.descriptionParams,
+      if (e.descriptionFindings.isNotEmpty)
+        'findings': [for (final f in e.descriptionFindings) f.toJson()],
+    },
+    'status': e.status.value,
+    'resolution': e.resolution,
+    'assigned_to': e.assignedTo,
+    'assigned_to_user_id': e.assignedToUserId,
+    'is_overdue': e.isOverdue,
+    'created_at': e.createdAt.toIso8601String(),
+    'resolved_by': e.resolvedBy,
+    'resolved_at': e.resolvedAt?.toIso8601String(),
+    'due_at': e.dueAt?.toIso8601String(),
+    'time_to_resolution_hours': e.timeToResolutionHours,
+  };
 }

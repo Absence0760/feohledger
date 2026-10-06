@@ -10,31 +10,30 @@ import 'package:feohledger_mobile/services/offline_store.dart';
 import 'package:feohledger_mobile/stores/exception_store.dart';
 
 http.Response _list(List<Map<String, dynamic>> items) => http.Response(
-      jsonEncode({'items': items, 'total': items.length, 'page': 1}),
-      200,
-      headers: {'content-type': 'application/json'},
-    );
+  jsonEncode({'items': items, 'total': items.length, 'page': 1}),
+  200,
+  headers: {'content-type': 'application/json'},
+);
 
 Map<String, dynamic> _exceptionJson(
   String id, {
   String status = 'open',
   String type = 'duplicate',
   String severity = 'error',
-}) =>
-    {
-      'id': id,
-      'invoice_id': 'inv-$id',
-      'invoice_number': 'INV-$id',
-      'vendor_name': 'Acme',
-      'amount': 250,
-      'exception_type': type,
-      'type_label': 'Duplicate Invoice',
-      'severity': severity,
-      'description': 'Looks like a dupe',
-      'status': status,
-      'is_overdue': false,
-      'created_at': '2026-01-01T12:00:00',
-    };
+}) => {
+  'id': id,
+  'invoice_id': 'inv-$id',
+  'invoice_number': 'INV-$id',
+  'vendor_name': 'Acme',
+  'amount': 250,
+  'exception_type': type,
+  'type_label': 'Duplicate Invoice',
+  'severity': severity,
+  'description': 'Looks like a dupe',
+  'status': status,
+  'is_overdue': false,
+  'created_at': '2026-01-01T12:00:00',
+};
 
 void main() {
   final store = ExceptionStore.instance;
@@ -51,21 +50,23 @@ void main() {
   });
 
   group('fetch', () {
-    test('success populates exceptions and marks them live (not cached)',
-        () async {
-      ApiClient().debugConfigure(
-        client: MockClient((req) async => _list([_exceptionJson('1')])),
-      );
+    test(
+      'success populates exceptions and marks them live (not cached)',
+      () async {
+        ApiClient().debugConfigure(
+          client: MockClient((req) async => _list([_exceptionJson('1')])),
+        );
 
-      await store.fetch();
+        await store.fetch();
 
-      expect(store.exceptions, hasLength(1));
-      expect(store.exceptions.first.id, '1');
-      expect(store.exceptions.first.typeLabel, 'Duplicate Invoice');
-      expect(store.fromCache, isFalse);
-      expect(store.error, isNull);
-      expect(store.loading, isFalse);
-    });
+        expect(store.exceptions, hasLength(1));
+        expect(store.exceptions.first.id, '1');
+        expect(store.exceptions.first.typeLabel, 'Duplicate Invoice');
+        expect(store.fromCache, isFalse);
+        expect(store.error, isNull);
+        expect(store.loading, isFalse);
+      },
+    );
 
     test('falls back to the offline cache when the network fails', () async {
       ApiClient().debugConfigure(
@@ -86,13 +87,15 @@ void main() {
 
     test('the offline cache keeps the exact amount and its currency', () async {
       ApiClient().debugConfigure(
-        client: MockClient((req) async => _list([
-              {
-                ..._exceptionJson('1'),
-                'amount': '12345678901234.56',
-                'currency': 'ZAR',
-              },
-            ])),
+        client: MockClient(
+          (req) async => _list([
+            {
+              ..._exceptionJson('1'),
+              'amount': '12345678901234.56',
+              'currency': 'ZAR',
+            },
+          ]),
+        ),
       );
       await store.fetch();
 
@@ -108,40 +111,81 @@ void main() {
       expect(store.exceptions.first.currency, 'ZAR');
     });
 
-    test('surfaces an error when the network fails and no cache exists',
-        () async {
+    test('the offline cache keeps the keyed description', () async {
+      ApiClient().debugConfigure(
+        client: MockClient(
+          (req) async => _list([
+            {
+              ..._exceptionJson('1'),
+              'description_code': 'exception.price_variance',
+              'description_params': {
+                'count': 1,
+                'findings': [
+                  {
+                    'code': 'price_variance',
+                    'params': {'variance_pct': '12.5'},
+                    'message': 'Line 1 over PO price',
+                  },
+                ],
+              },
+            },
+          ]),
+        ),
+      );
+      await store.fetch();
+
       ApiClient().debugConfigure(
         client: MockClient((req) async => throw Exception('offline')),
       );
-
       await store.fetch();
 
-      expect(store.error, isNotNull);
-      expect(store.fromCache, isFalse);
-    });
-  });
-
-  group('filters', () {
-    test('setStatusFilter updates the getter and carries it into the request',
-        () async {
-      final sentStatus = Completer<String?>();
-      ApiClient().debugConfigure(
-        client: MockClient((req) async {
-          if (!sentStatus.isCompleted) {
-            sentStatus.complete(req.url.queryParameters['status']);
-          }
-          return _list([]);
-        }),
-      );
-
-      store.setStatusFilter('open');
-
-      expect(store.statusFilter, 'open');
-      expect(await sentStatus.future, 'open');
+      expect(store.fromCache, isTrue);
+      final e = store.exceptions.first;
+      expect(e.descriptionCode, 'exception.price_variance');
+      expect(e.descriptionParams, {'count': '1'});
+      expect(e.descriptionFindings, hasLength(1));
+      expect(e.descriptionFindings.first.code, 'price_variance');
+      expect(e.descriptionFindings.first.params, {'variance_pct': '12.5'});
+      expect(e.descriptionFindings.first.message, 'Line 1 over PO price');
     });
 
     test(
-        'a slow stale filter response landing after a faster later one is '
+      'surfaces an error when the network fails and no cache exists',
+      () async {
+        ApiClient().debugConfigure(
+          client: MockClient((req) async => throw Exception('offline')),
+        );
+
+        await store.fetch();
+
+        expect(store.error, isNotNull);
+        expect(store.fromCache, isFalse);
+      },
+    );
+  });
+
+  group('filters', () {
+    test(
+      'setStatusFilter updates the getter and carries it into the request',
+      () async {
+        final sentStatus = Completer<String?>();
+        ApiClient().debugConfigure(
+          client: MockClient((req) async {
+            if (!sentStatus.isCompleted) {
+              sentStatus.complete(req.url.queryParameters['status']);
+            }
+            return _list([]);
+          }),
+        );
+
+        store.setStatusFilter('open');
+
+        expect(store.statusFilter, 'open');
+        expect(await sentStatus.future, 'open');
+      },
+    );
+
+    test('a slow stale filter response landing after a faster later one is '
         'discarded (issue #182 request-sequencing guard)', () async {
       // Same race as InvoiceStore/VendorStore's regression test, but driven by
       // rapid status-filter chip taps rather than a search box — the guard is
@@ -174,9 +218,13 @@ void main() {
       await Future<void>.delayed(const Duration(milliseconds: 20));
 
       expect(store.exceptions, hasLength(1));
-      expect(store.exceptions.first.id, 'fresh',
-          reason: 'the earlier, slower response must not clobber the later, '
-              'faster one that already landed');
+      expect(
+        store.exceptions.first.id,
+        'fresh',
+        reason:
+            'the earlier, slower response must not clobber the later, '
+            'faster one that already landed',
+      );
     });
   });
 
@@ -264,33 +312,35 @@ void main() {
   });
 
   group('getById', () {
-    test('loads a single exception detail with the detail-only fields',
-        () async {
-      ApiClient().debugConfigure(
-        client: MockClient((req) async {
-          expect(req.url.path.endsWith('/exceptions/1'), isTrue);
-          return http.Response(
-            jsonEncode({
-              ..._exceptionJson('1'),
-              'assigned_to': 'Demo Manager',
-              'assigned_to_user_id': 'user-9',
-              'due_at': '2026-01-02T12:00:00',
-              'resolved_by': null,
-            }),
-            200,
-            headers: {'content-type': 'application/json'},
-          );
-        }),
-      );
+    test(
+      'loads a single exception detail with the detail-only fields',
+      () async {
+        ApiClient().debugConfigure(
+          client: MockClient((req) async {
+            expect(req.url.path.endsWith('/exceptions/1'), isTrue);
+            return http.Response(
+              jsonEncode({
+                ..._exceptionJson('1'),
+                'assigned_to': 'Demo Manager',
+                'assigned_to_user_id': 'user-9',
+                'due_at': '2026-01-02T12:00:00',
+                'resolved_by': null,
+              }),
+              200,
+              headers: {'content-type': 'application/json'},
+            );
+          }),
+        );
 
-      final exc = await store.getById('1');
+        final exc = await store.getById('1');
 
-      expect(exc, isNotNull);
-      expect(exc!.id, '1');
-      expect(exc.assignedTo, 'Demo Manager');
-      expect(exc.assignedToUserId, 'user-9');
-      expect(exc.dueAt, isNotNull);
-    });
+        expect(exc, isNotNull);
+        expect(exc!.id, '1');
+        expect(exc.assignedTo, 'Demo Manager');
+        expect(exc.assignedToUserId, 'user-9');
+        expect(exc.dueAt, isNotNull);
+      },
+    );
 
     test('returns null + records the error on a 404', () async {
       ApiClient().debugConfigure(
@@ -307,47 +357,49 @@ void main() {
   });
 
   group('assign', () {
-    test('posts {user_id} and patches the in-memory row with the new assignee',
-        () async {
-      // Seed a list so there's a row to patch in place.
-      ApiClient().debugConfigure(
-        client: MockClient((req) async => _list([_exceptionJson('1')])),
-      );
-      await store.fetch();
-      expect(store.exceptions.first.assignedTo, isNull);
+    test(
+      'posts {user_id} and patches the in-memory row with the new assignee',
+      () async {
+        // Seed a list so there's a row to patch in place.
+        ApiClient().debugConfigure(
+          client: MockClient((req) async => _list([_exceptionJson('1')])),
+        );
+        await store.fetch();
+        expect(store.exceptions.first.assignedTo, isNull);
 
-      String? sentUserId;
-      var sawKey = false;
-      ApiClient().debugConfigure(
-        client: MockClient((req) async {
-          if (req.method == 'POST' && req.url.path.endsWith('/assign')) {
-            final body = jsonDecode(req.body) as Map<String, dynamic>;
-            sawKey = body.containsKey('user_id');
-            sentUserId = body['user_id'] as String?;
-            return http.Response(
-              jsonEncode({
-                ..._exceptionJson('1'),
-                'assigned_to': 'Casey Clerk',
-                'assigned_to_user_id': 'user-42',
-              }),
-              200,
-              headers: {'content-type': 'application/json'},
-            );
-          }
-          return _list([]);
-        }),
-      );
+        String? sentUserId;
+        var sawKey = false;
+        ApiClient().debugConfigure(
+          client: MockClient((req) async {
+            if (req.method == 'POST' && req.url.path.endsWith('/assign')) {
+              final body = jsonDecode(req.body) as Map<String, dynamic>;
+              sawKey = body.containsKey('user_id');
+              sentUserId = body['user_id'] as String?;
+              return http.Response(
+                jsonEncode({
+                  ..._exceptionJson('1'),
+                  'assigned_to': 'Casey Clerk',
+                  'assigned_to_user_id': 'user-42',
+                }),
+                200,
+                headers: {'content-type': 'application/json'},
+              );
+            }
+            return _list([]);
+          }),
+        );
 
-      final updated = await store.assign('1', userId: 'user-42');
+        final updated = await store.assign('1', userId: 'user-42');
 
-      expect(sawKey, isTrue);
-      expect(sentUserId, 'user-42');
-      expect(updated, isNotNull);
-      expect(updated!.assignedTo, 'Casey Clerk');
-      // The in-memory list row reflects the change without a refetch.
-      expect(store.exceptions.first.assignedTo, 'Casey Clerk');
-      expect(store.exceptions.first.assignedToUserId, 'user-42');
-    });
+        expect(sawKey, isTrue);
+        expect(sentUserId, 'user-42');
+        expect(updated, isNotNull);
+        expect(updated!.assignedTo, 'Casey Clerk');
+        // The in-memory list row reflects the change without a refetch.
+        expect(store.exceptions.first.assignedTo, 'Casey Clerk');
+        expect(store.exceptions.first.assignedToUserId, 'user-42');
+      },
+    );
 
     test('unassign sends user_id: null', () async {
       String? sentUserId = 'sentinel';
@@ -391,72 +443,78 @@ void main() {
       expect(store.selectedCount, 0);
     });
 
-    test('bulkResolveSelected parses the partial-success {updated, skipped}',
-        () async {
-      store.enterSelectionMode('1');
-      store.toggleSelected('2');
+    test(
+      'bulkResolveSelected parses the partial-success {updated, skipped}',
+      () async {
+        store.enterSelectionMode('1');
+        store.toggleSelected('2');
 
-      List<dynamic>? sentIds;
-      String? sentAction;
-      ApiClient().debugConfigure(
-        client: MockClient((req) async {
-          if (req.method == 'POST' &&
-              req.url.path.endsWith('/exceptions/bulk/resolve')) {
-            final body = jsonDecode(req.body) as Map<String, dynamic>;
-            sentIds = body['ids'] as List?;
-            sentAction = body['action'] as String?;
-            return http.Response(
-              jsonEncode({
-                'updated': 1,
-                'skipped': [
-                  {'id': '2', 'reason': 'already_resolved'},
-                ],
-              }),
-              200,
-              headers: {'content-type': 'application/json'},
-            );
-          }
-          // The refetch after a successful bulk call.
-          return _list([]);
-        }),
-      );
+        List<dynamic>? sentIds;
+        String? sentAction;
+        ApiClient().debugConfigure(
+          client: MockClient((req) async {
+            if (req.method == 'POST' &&
+                req.url.path.endsWith('/exceptions/bulk/resolve')) {
+              final body = jsonDecode(req.body) as Map<String, dynamic>;
+              sentIds = body['ids'] as List?;
+              sentAction = body['action'] as String?;
+              return http.Response(
+                jsonEncode({
+                  'updated': 1,
+                  'skipped': [
+                    {'id': '2', 'reason': 'already_resolved'},
+                  ],
+                }),
+                200,
+                headers: {'content-type': 'application/json'},
+              );
+            }
+            // The refetch after a successful bulk call.
+            return _list([]);
+          }),
+        );
 
-      final result = await store.bulkResolveSelected(action: 'resolve');
+        final result = await store.bulkResolveSelected(action: 'resolve');
 
-      expect(result, isNotNull);
-      expect(result!.updated, 1);
-      expect(result.skippedCount, 1);
-      expect(result.skipped.first.id, '2');
-      expect(result.skipped.first.reason, 'already_resolved');
-      expect(sentAction, 'resolve');
-      expect(sentIds, containsAll(<String>['1', '2']));
-      // A successful bulk call exits selection mode.
-      expect(store.selectionMode, isFalse);
-    });
+        expect(result, isNotNull);
+        expect(result!.updated, 1);
+        expect(result.skippedCount, 1);
+        expect(result.skipped.first.id, '2');
+        expect(result.skipped.first.reason, 'already_resolved');
+        expect(sentAction, 'resolve');
+        expect(sentIds, containsAll(<String>['1', '2']));
+        // A successful bulk call exits selection mode.
+        expect(store.selectionMode, isFalse);
+      },
+    );
 
-    test('bulkResolveSelected is a no-op (null) with an empty selection',
-        () async {
-      ApiClient().debugConfigure(
-        client: MockClient((req) async => _list([])),
-      );
-      final result = await store.bulkResolveSelected();
-      expect(result, isNull);
-    });
+    test(
+      'bulkResolveSelected is a no-op (null) with an empty selection',
+      () async {
+        ApiClient().debugConfigure(
+          client: MockClient((req) async => _list([])),
+        );
+        final result = await store.bulkResolveSelected();
+        expect(result, isNull);
+      },
+    );
 
-    test('bulkResolveSelected returns null + records error on failure',
-        () async {
-      store.enterSelectionMode('1');
-      ApiClient().debugConfigure(
-        client: MockClient((req) async => http.Response('boom', 500)),
-      );
+    test(
+      'bulkResolveSelected returns null + records error on failure',
+      () async {
+        store.enterSelectionMode('1');
+        ApiClient().debugConfigure(
+          client: MockClient((req) async => http.Response('boom', 500)),
+        );
 
-      final result = await store.bulkResolveSelected();
+        final result = await store.bulkResolveSelected();
 
-      expect(result, isNull);
-      expect(store.error, isNotNull);
-      // Selection survives a failure so the user can retry.
-      expect(store.selectionMode, isTrue);
-    });
+        expect(result, isNull);
+        expect(store.error, isNotNull);
+        // Selection survives a failure so the user can retry.
+        expect(store.selectionMode, isTrue);
+      },
+    );
   });
 }
 

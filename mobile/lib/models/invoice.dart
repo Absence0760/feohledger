@@ -37,8 +37,7 @@ enum InvoiceStatus {
     InvoiceStatus.failed => 'Failed',
   };
 
-  bool get isActionable =>
-      this == InvoiceStatus.readyForReview;
+  bool get isActionable => this == InvoiceStatus.readyForReview;
 
   /// Whether the invoice's fields may be edited via `PATCH /api/invoices/{id}`.
   /// Mirrors the backend `IMMUTABLE_STATUSES` gate: once an invoice is en route
@@ -50,8 +49,7 @@ enum InvoiceStatus {
     InvoiceStatus.postedInErp ||
     InvoiceStatus.paymentScheduled ||
     InvoiceStatus.paid ||
-    InvoiceStatus.done =>
-      false,
+    InvoiceStatus.done => false,
     _ => true,
   };
 
@@ -105,9 +103,9 @@ const Set<String> kFinancialInvoiceFields = {
 /// amount) used to lose the description too. Omitting the frozen fields lets
 /// the legitimate half through instead of failing the write.
 Map<String, dynamic> stripFinancialFields(Map<String, dynamic> changes) => {
-      for (final entry in changes.entries)
-        if (!kFinancialInvoiceFields.contains(entry.key)) entry.key: entry.value,
-    };
+  for (final entry in changes.entries)
+    if (!kFinancialInvoiceFields.contains(entry.key)) entry.key: entry.value,
+};
 
 /// Severity of an invoice warning / fraud flag, mirroring the backend
 /// `invoice_warnings` severities (`error` | `warning` | `info`).
@@ -119,11 +117,8 @@ enum WarningSeverity {
   const WarningSeverity(this.value);
   final String value;
 
-  static WarningSeverity fromString(String? s) =>
-      WarningSeverity.values.firstWhere(
-        (e) => e.value == s,
-        orElse: () => WarningSeverity.info,
-      );
+  static WarningSeverity fromString(String? s) => WarningSeverity.values
+      .firstWhere((e) => e.value == s, orElse: () => WarningSeverity.info);
 }
 
 /// One invoice warning / fraud flag, as produced by
@@ -265,6 +260,13 @@ class CatalogueFinding {
     );
   }
 
+  /// The wire shape [fromJson] reads back — for the offline cache.
+  Map<String, dynamic> toJson() => {
+    'message': message,
+    'code': code,
+    'params': params,
+  };
+
   /// The scalar entries of a params map, as strings. A list (a composite's
   /// `findings`) or a nested map is not a sentence parameter and is skipped.
   static Map<String, String> scalarParams(Object? raw) {
@@ -334,9 +336,9 @@ class Invoice {
       createdAt: DateTime.parse(json['created_at'] as String),
       warnings: rawWarnings is List
           ? rawWarnings
-              .whereType<Map<String, dynamic>>()
-              .map(InvoiceWarning.fromJson)
-              .toList()
+                .whereType<Map<String, dynamic>>()
+                .map(InvoiceWarning.fromJson)
+                .toList()
           : const [],
       poMatch: rawPoMatch is Map<String, dynamic>
           ? PoMatch.fromJson(rawPoMatch)
