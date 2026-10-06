@@ -9973,3 +9973,90 @@ corrected; and keeping `ready_for_review` editable behind a chain-signoff
 check, which left level 0 and single-level approval open. Tying approval to the
 version the approver saw closes the same race for managers and is a tracked
 follow-up.
+
+## 249. A PO mismatch blocks payment only when it could over-pay, and a refresh may lift it (migration 0105)
+
+Three things the docs and in-app hints already claimed were not true: an
+unverified vendor could be paid, and neither a failed inspection nor a PO
+mismatch held payment. The product call was to make the claims true. A vendor
+that is unverified, inactive or rejected is now refused by run creation,
+`POST /api/payments`, compliance release and `/cards/generate`, through the one
+`inactive_vendor_statuses` rule. `po_mismatch` and `quality_hold` joined
+`PAYMENT_BLOCKING_EXCEPTION_TYPES`, and so the SoD-on-clearing set of §169–§170.
+
+Joining that list changed what may raise a `po_mismatch`. The first cut blocked
+every mismatch, and review showed that reversed §67 and held under-billing too:
+the matcher compares each invoice with the whole PO total, so the first invoice
+on a split or blanket PO reads as a large negative variance. A row is now raised
+only where paying could pay more than the PO supports: the cited PO doesn't
+exist, the currencies differ, the invoice bills above the PO beyond the match
+rule's tolerance, or it bills beyond the received share of the PO
+(`po_total × received / ordered`, exact Decimal, at the same tolerance).
+Billing under the PO and in-tolerance variances stay warnings. This supersedes
+the queue half of §67: an over-receipt is still flagged independently of
+status, but as a warning on the invoice, not a queue row, since §67 rejected
+blocking on a receiving discrepancy and the queue type now blocks.
+
+A blocking row that nobody can clear once the goods arrive would make receipts
+irrelevant, so a warnings refresh that no longer finds the problem closes the
+open or escalated row through `record_decision`, with a NULL actor and
+`via: po_match_refresh`. §169–§170 treat clearing as a human sign-off, and this
+is the deliberate exception, allowed only where nobody with a motive could have
+produced the evidence: the org's own settings must be present (never the 5%
+default); after approval the same PO must still be cited, and the finding must
+be gone even under the strictest rule any GL code could select, since
+`gl_account` stays editable; a cleared quality hold must rest on a QMS verdict
+or on a manual inspection whose recorder is known and not implicated in the
+invoice; and no agent may be mid-decision on the row. Exception agents match
+under the org's rules too, and if an agent's own change leaves the finding in
+place, the coordinator unwinds it and escalates.
+
+Who recorded an inspection could not be read from the audit log, because it
+fails open with `FEOH_AUDIT_MODE=lambda`, where no local row exists. Migration
+0105 adds `quality_inspections.source` (`manual`/`qms`) and
+`recorded_by_user_id`, written by the inspections API and the QMS sync (which
+also overwrites a manual row's PO and receipt links when it takes the row over,
+so a typed verdict can't pass as a synced one) and pinned by a stamping guard.
+Nothing is backfilled: a pre-0105 inspection has no honest recorder, so it
+stays held for a person.
+
+Rejected: a non-blocking queue type for over-receipts (the type roster is
+fixed); blocking on finding code rather than type (the per-type de-dupe lets a
+non-blocking row hide a later blocking finding); a one-off sweep of open rows
+(it goes stale the next day); freezing the match rule on the invoice (a schema
+change for what the strictest-rule check already secures). Per-line receipt
+valuation and cumulative billing against one PO are a follow-up.
+
+## 250. An accepted early-payment offer changes what is paid (migration 0104)
+
+Accepting an offer is the buyer agreeing to pay the discounted amount by the
+deadline, yet a run paid the full amount and the documented workaround was a
+credit memo for the discount. `payment_runs.payable_amounts` now nets applied
+credits and then deducts the accepted, invoice-scoped offer whose deadline the
+pay date meets. The run builder, `POST /api/payments`, dispatch and
+`/retry-failed` all book and re-check against that one figure. It is stored on
+the payment with the offer (migration 0104, both directions) rather than
+re-derived, because settlement verification, capture, void, FX and 1099 totals
+must key on what was authorized, and each booking writes a
+`discount_offer.applied` audit row.
+
+If the applicable offer differs at dispatch from the one booked — the deadline
+passed while the run waited, or an offer was accepted after booking — the
+payment fails `discount_changed` before the processor is called. Re-pricing
+would either short-pay a supplier who considers the offer dead or move money
+nobody approved; a fresh run is the remedy. An offer that can't be honoured
+(vendor-scoped, expired, in another currency, priced on an amount the invoice
+no longer has) pays in full rather than refusing. An applied memo for exactly
+the savings is read as the discount already taken, because the old workaround
+and the help text produced exactly such memos and deducting again would
+short-pay. That is an amount coincidence, resolved toward paying the supplier
+in full; linking memos to offers is a follow-up.
+
+Cards: a card is spendable up to its limit and nothing compares a charge with
+`Payment.amount`, so a discounted payment refuses to settle onto a card whose
+limit differs (`card_limit_exceeds_payment`), and `/cards/generate` mints net
+of credits and takes no discount. Both new foreign keys are `ON DELETE SET
+NULL`, not `RESTRICT`, because cancelling a draft run deletes its pending
+payments. Rejected: a calendar cutoff for the memo rule (it misfires for a
+tenant deployed late) and refusing such a booking as ambiguous (nothing could
+resolve it).

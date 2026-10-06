@@ -91,7 +91,7 @@ section carried its own `decisions.md` § reference, so nothing was lost by
 deleting it; that cross-reference is what makes the pruning safe, and writing
 one is what earns a future entry the right to be deleted.
 
-**68 open: 53 (c) · 9 (a) · 6 (b)** — re-derived from the file, never carried
+**70 open: 55 (c) · 9 (a) · 6 (b)** — re-derived from the file, never carried
 forward. The section heading is authoritative; where an entry also carries a
 `(c)`/`(a)`/`(b)` marker, the two agree.
 `grep -c '^- \[ \]' docs/followups.md`.
@@ -1027,24 +1027,6 @@ lands. Pure doc drift was corrected in the same PR. The two diagnosed defects
       Reviewed by a fluent finance reader per locale, not machine output.
       **Trigger:** the first customer contract in a non-English market, or a
       locale's tenants passing a share of active users worth the review cost.
-- [ ] **(c) PRODUCT CALL — should an unverified vendor block payment?**
-      `backend/docs/vendor-management.md` says unverified vendors are blocked
-      from payment runs. The code raises only an `unverified_vendor` warning
-      and exception, and that type is not in `PAYMENT_BLOCKING_EXCEPTION_TYPES`
-      (`backend/app/api/payments.py`). **Durable fix:** decide. Either add the
-      vendor-status check to run creation and compliance (with a test), or
-      delete the claim from the doc. The help guides currently say a warning and
-      an exception appear. **Trigger:** before the first production payment
-      run.
-- [ ] **(c) PRODUCT CALL — should a failed inspection or PO mismatch block
-      payment?** `backend/docs/po-matching.md` and the
-      `goodsReceipts.inspections.hint` UI string say a failed inspection
-      "blocks the invoice with a quality hold". `quality_hold` and
-      `po_mismatch` are not payment-blocking types, so neither stops a run.
-      **Durable fix:** decide, then either add them to
-      `PAYMENT_BLOCKING_EXCEPTION_TYPES` (and to the SoD-on-clearing set, which
-      keys on the same list) or correct the hint string in all six locales and
-      the doc. **Trigger:** same as above.
 - [ ] **(c) Nothing creates a goods receipt.** There is no create endpoint, ERP
       sync or UI for goods receipts; only seed data makes them. So three-way
       and four-way matching can't be fed in a real tenant. **Durable fix:**
@@ -1064,12 +1046,6 @@ lands. Pure doc drift was corrected in the same PR. The two diagnosed defects
       rejection won't find. **Durable fix:** a "Resubmit for review" action in
       the modal for a `rejected` invoice, behind the same role gate as the bulk
       action. **Trigger:** the next invoice-modal change.
-- [ ] **(c) PRODUCT CALL — accepting a discount offer does not reduce the
-      payment.** The documented workaround is a credit memo for the discount.
-      **Durable fix:** decide whether acceptance should set the payable amount
-      for the next run (with the capture/void reversal already built), or
-      keep the workaround and say so on the accept dialog. **Trigger:** the
-      first tenant that uses dynamic discounting with real suppliers.
 - [ ] **(c) Settings with a backend and no screen.** Approval delegation,
       per-vendor / per-GL match tolerance, exception-agent autonomy level, the
       SCIM bearer token, an admin revoking another user's sessions, and the
@@ -1131,6 +1107,38 @@ lands. Pure doc drift was corrected in the same PR. The two diagnosed defects
       non-clerk preparer role, add a non-sensitive permission tier the
       role-grant guards exempt, and move entry onto it. **Trigger:** the first
       customer asking for a custom preparer role.
+- [ ] **(c) Deactivating a vendor doesn't cancel its live virtual cards.** A
+      card minted before the vendor went inactive, rejected or merged stays
+      spendable; payment runs and `/cards/generate` refuse the vendor, but
+      nothing reaches cards already issued. **Durable fix:** cancel the
+      vendor's live cards when its status leaves `active`, with an audit row
+      per card. **Trigger:** the next vendor-lifecycle change.
+- [ ] **(c) The PO-match receipt leg is pro rata and not cumulative.** The
+      "billed beyond received" check values receipts as `po_total × received /
+      ordered`, so receiving nine cheap cables of a 900 server order reads as
+      most of the value received; and nothing subtracts what other invoices
+      already billed against the same PO, so two 400 invoices both pass
+      against 400 received (decisions §249). **Durable fix:** value receipts
+      per PO line (cheapest-first as a lower bound) and subtract other live or
+      paid invoices on the same PO in both the amount and receipt legs.
+      **Trigger:** the next PO-matching change, or the first customer relying
+      on split or blanket POs.
+- [ ] **(c) Nothing links a credit memo to a discount offer.** An applied memo
+      equal to an accepted offer's savings is read as the discount already
+      taken (decisions §250), so a return credit that happens to equal the
+      savings suppresses the discount and the offer is then recorded as
+      captured. **Durable fix:** `credit_memos.discount_offer_id` (or a typed
+      reason) and drop the amount match. **Trigger:** the next credit-memo or
+      discounting change.
+- [ ] **(c) The ERP payment sync posts no amount yet.** `payment_erp_sync`
+      only logs. **Durable fix:** when `post_payment` is implemented, send
+      `discount_amount` beside `amount` so the ERP books the discount taken.
+      **Trigger:** the first real ERP payment-posting adapter.
+- [ ] **(c) `/cards/generate` has no row lock between its checks and the
+      mint.** Pre-existing: two concurrent calls can both pass the vendor and
+      payable checks. **Durable fix:** lock the invoice rows `FOR UPDATE`
+      before checking and minting, with a concurrency test. **Trigger:** the
+      next card-issuance change.
 
 ## (a) Blocked on external credentials, accounts, or hardware
 
