@@ -7,6 +7,7 @@
 		INVOICE_STATUS_LABEL_KEYS,
 		inInvoiceEntryWindow
 	} from '#lib/types/invoice.ts';
+	import { PERM_INVOICE_APPROVE } from '#lib/types/admin.ts';
 	import { formatMoney, isNegativeAmount, isPositiveAmount } from '#lib/utils/money.ts';
 	import { invoiceStore } from '#lib/stores/invoices.svelte.ts';
 	import { auth } from '#lib/stores/auth.svelte.ts';
@@ -484,8 +485,11 @@
 
 	// Whether to show the approver picker on submit
 	let needsApproverSelect = $derived(
-		// `POST /{id}/assign` is admin/ap_manager; a clerk submits unassigned.
-		!auth.isClerkOnly &&
+		// `POST /{id}/assign` is admin/ap_manager; an entry-only caller (a clerk,
+		// or a custom role holding only entry) submits unassigned. Keyed on the
+		// manage roles like the server's `is_entry_only`, not on `isClerkOnly`,
+		// which a clerk with any second role fails.
+		auth.hasAnyRole(...INVOICE_MANAGE_ROLES) &&
 		status === 'new' &&
 		activeSteps.approval &&
 		activeSteps.approval_config?.approver_strategy === 'manual'
@@ -584,26 +588,22 @@
 			: m('invoices.modal.approverNone');
 	});
 
-	let isClerkOnly = $derived(auth.isClerkOnly);
 	// The role gates every invoice WRITE behind this modal carries on the
 	// server (`backend/app/api/invoice_entry.py`). `PATCH /api/invoices/{id}`
 	// (Save, and the pre-save inside Submit), `PUT /{id}/line-items`, the file
 	// routes, `POST /{id}/extract` and `/reset-extraction` take any ENTRY role
-	// — `ap_clerk` included — but hold an entry-only caller to the pre-approval
-	// window. Mirror the server's own any-of lists rather than their complement,
-	// so a custom-role user holding none of them is offered nothing that 403s.
+	// — `ap_clerk` included — but hold an entry-only caller (no manage role)
+	// to the entry window, which closes at submit. Mirror the server's own
+	// any-of lists rather than their complement, so a custom-role user holding
+	// none of them is offered nothing that 403s.
 	let canManageInvoice = $derived(auth.hasAnyRole(...INVOICE_MANAGE_ROLES));
 	let canEnterInvoice = $derived(auth.hasAnyRole(...INVOICE_ENTRY_ROLES));
-	// A chain level that has already signed also closes a clerk's window
-	// (`invoice_entry.refuse_entry_only_mid_chain`): `approved_by` is set only at
-	// final approval, and an edit would carry that sign-off over.
-	let chainHasSignoff = $derived(
-		status === 'ready_for_review' && chainLevels.some((lv) => (lv.approvals?.length ?? 0) > 0)
-	);
 	let inEntryWindow = $derived(
-		inInvoiceEntryWindow(status, invoice.approved_by) && !chainHasSignoff
+		inInvoiceEntryWindow(status, invoice.approved_by, invoice.approval_date)
 	);
-	let canWrite = $derived(canManageInvoice || (canEnterInvoice && inEntryWindow));
+	let canWrite = $derived(
+		canEnterInvoice && (canManageInvoice || inEntryWindow)
+	);
 	let isDone = $derived(status === 'done' || status === 'sent_to_erp');
 	let isExtracting = $derived(status === 'pending');
 	let resettingExtraction = $state(false);
@@ -627,7 +627,8 @@
 		status === 'sending_to_erp' || status === 'sent_to_erp' || status === 'posted_in_erp' ||
 		status === 'payment_scheduled' || status === 'paid'
 	);
-	let canRetryErp = $derived(status === 'failed' && !isClerkOnly && invoice.approved_by);
+	// `/retry-erp` and the contract link routes are admin/ap_manager/cfo.
+	let canRetryErp = $derived(status === 'failed' && canManageInvoice && invoice.approved_by);
 	let retryingErp = $state(false);
 	let canExtract = $derived(
 		canWrite && (status === 'new' || status === 'failed') && currentFileUrl
@@ -635,16 +636,20 @@
 	let extracting = $state(false);
 	let canManageFile = $derived(canWrite && status !== 'done');
 	let isReadyForReview = $derived(status === 'ready_for_review');
-	let canReview = $derived(isReadyForReview && !isClerkOnly && (
+	// `/approve` and `/reject` are `require_permission(invoice.approve)` — keyed
+	// on the permission, not on "clerk only", so a custom role that enters but
+	// cannot approve is not handed two buttons that 403.
+	let canReview = $derived(isReadyForReview && auth.can(PERM_INVOICE_APPROVE) && (
 		!invoice.assigned_to_id || invoice.assigned_to_id === auth.user?.id
 	));
 	// `POST /{id}/complete`: a manager advances `new` and `approved`; an
 	// entry-only caller only submits a `new` invoice for review — and only
 	// where the workflow has an approval step (the server refuses otherwise).
 	let canSubmitStatus = $derived(
-		canManageInvoice
-			? status === 'new' || status === 'approved'
-			: canEnterInvoice && status === 'new' && !!activeSteps.approval
+		canEnterInvoice &&
+			(canManageInvoice
+				? status === 'new' || status === 'approved'
+				: status === 'new' && inEntryWindow && !!activeSteps.approval)
 	);
 
 	let submitLabel = $derived.by(() => {
@@ -2073,12 +2078,12 @@
 						<span class="contract-label">{m('invoices.modal.contract.label')}</span>
 						{#if contractId}
 							<span class="contract-linked mono">{linkedContract?.contract_number ?? m('invoices.modal.contract.linked')}</span>
-							{#if !isClerkOnly}
+							{#if canManageInvoice}
 								<button type="button" class="btn-contract-unlink" disabled={linkingContract} onclick={unlinkContract}>
 									{linkingContract ? '…' : m('invoices.modal.contract.unlink')}
 								</button>
 							{/if}
-						{:else if isClerkOnly}
+						{:else if !canManageInvoice}
 							<span class="contract-empty">{m('invoices.modal.contract.empty')}</span>
 						{:else}
 							<select class="contract-select" aria-label={m('invoices.modal.contract.selectAria')} bind:value={pickContractId}>

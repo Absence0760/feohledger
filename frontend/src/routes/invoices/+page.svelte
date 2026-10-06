@@ -1,7 +1,7 @@
 <script lang="ts">
 	import HelpTip from '#lib/components/help/HelpTip.svelte';
 	import type { Invoice, InvoiceStatus, AdvancedSearchFilters } from '#lib/types/invoice.ts';
-	import { INVOICE_STATUSES, INVOICE_STATUS_LABEL_KEYS, EMPTY_ADVANCED_FILTERS, SYSTEM_MANAGED_STATUSES, IMMUTABLE_STATUSES, commonTransitions, ENTRY_BULK_STATUS_TARGETS, INVOICE_ENTRY_ROLES, INVOICE_MANAGE_ROLES } from '#lib/types/invoice.ts';
+	import { INVOICE_STATUSES, INVOICE_STATUS_LABEL_KEYS, EMPTY_ADVANCED_FILTERS, SYSTEM_MANAGED_STATUSES, IMMUTABLE_STATUSES, commonTransitions, ENTRY_BULK_STATUS_TARGETS, INVOICE_ENTRY_ROLES, INVOICE_IMPORT_ROLES, INVOICE_MANAGE_ROLES } from '#lib/types/invoice.ts';
 	import { invoiceStore } from '#lib/stores/invoices.svelte.ts';
 	import { auth } from '#lib/stores/auth.svelte.ts';
 	import { adminStore } from '#lib/stores/admin.svelte.ts';
@@ -784,10 +784,12 @@
 				{uploading ? uploadProgress || m('invoices.action.uploading') : m('invoices.action.upload')}
 			</button>
 		{/if}
-		{#if auth.hasAnyRole('admin', 'ap_manager', 'ap_clerk')}
-			<!-- `POST /api/invoices/import-csv` is require_roles(ADMIN,
-			     AP_MANAGER, AP_CLERK) — no CFO. A clerk's import lands open AP
-			     only (`new` / `rejected` rows). See backend/docs/csv-import.md. -->
+		{#if auth.hasAnyRole(...INVOICE_IMPORT_ROLES)}
+			<!-- `POST /api/invoices/import-csv` is INVOICE_IMPORT_ROLES (admin,
+			     AP manager, AP clerk — no CFO). Open AP (`new` / `rejected` rows)
+			     is entry; a historical `done` / `paid` row is refused per row
+			     unless the caller is admin / AP manager. See
+			     backend/docs/csv-import.md. -->
 			<button class="btn-secondary" onclick={() => (showImportCsv = true)}>
 				{m('invoices.action.importCsv')}
 			</button>

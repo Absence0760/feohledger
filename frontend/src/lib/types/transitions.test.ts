@@ -78,12 +78,17 @@ describe('the AP clerk\'s entry reach (backend api/invoice_entry.py)', () => {
 		}
 	});
 
-	it('closes the entry window at approval, including an approved invoice whose ERP push failed', () => {
-		expect(inInvoiceEntryWindow('new', null)).toBe(true);
-		expect(inInvoiceEntryWindow('ready_for_review', null)).toBe(true);
-		expect(inInvoiceEntryWindow('failed', null)).toBe(true);
-		expect(inInvoiceEntryWindow('failed', 'Some Approver')).toBe(false);
-		expect(inInvoiceEntryWindow('approved', 'Some Approver')).toBe(false);
-		expect(inInvoiceEntryWindow('done', null)).toBe(false);
+	it('closes the entry window at submit, and on any invoice ever approved', () => {
+		expect(inInvoiceEntryWindow('new', null, null)).toBe(true);
+		expect(inInvoiceEntryWindow('failed', null, null)).toBe(true);
+		expect(inInvoiceEntryWindow('rejected', null, null)).toBe(true);
+		// Submitted: the approver is reading it, and approval binds to no version.
+		expect(inInvoiceEntryWindow('ready_for_review', null, null)).toBe(false);
+		// An approved invoice whose ERP push failed, by name or by date alone.
+		expect(inInvoiceEntryWindow('failed', 'Some Approver', '2026-01-02')).toBe(false);
+		expect(inInvoiceEntryWindow('failed', '', '2026-01-02')).toBe(false);
+		expect(inInvoiceEntryWindow('rejected', 'Some Approver', null)).toBe(false);
+		expect(inInvoiceEntryWindow('approved', 'Some Approver', '2026-01-02')).toBe(false);
+		expect(inInvoiceEntryWindow('done', null, null)).toBe(false);
 	});
 });

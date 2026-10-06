@@ -146,30 +146,41 @@ export function commonTransitions(
  * Who may ENTER an invoice — mirror of `backend/app/api/invoice_entry.py`.
  *
  * `INVOICE_ENTRY_ROLES` gates create, upload, the source-file controls, field
- * and line-item edits, extract / reset, submit for review, resubmit, CSV
- * import (minus `cfo`, see the page) and the bulk status picker.
+ * and line-item edits, extract / reset, submit for review, resubmit and the
+ * bulk status picker; `INVOICE_IMPORT_ROLES` gates CSV import (no `cfo`).
  * `INVOICE_MANAGE_ROLES` is the reach past entry (delete, ERP, the `approved`
- * window). Approve / reject is the `invoice.approve` permission, not a role.
+ * metadata window); an entry role with none of them (`ap_clerk`) is
+ * ENTRY-ONLY and held to {@link inInvoiceEntryWindow}. Approve / reject is the
+ * `invoice.approve` permission, not a role.
  */
 export const INVOICE_MANAGE_ROLES = ['admin', 'ap_manager', 'cfo'] as const;
 export const INVOICE_ENTRY_ROLES = [...INVOICE_MANAGE_ROLES, 'ap_clerk'] as const;
+export const INVOICE_IMPORT_ROLES = ['admin', 'ap_manager', 'ap_clerk'] as const;
 
-/** Statuses an invoice can sit in before anyone approved it — `_ENTRY_WINDOW_STATUSES`. */
+/**
+ * Statuses an entry-only caller may change an invoice in — `_ENTRY_WINDOW_STATUSES`.
+ * No `ready_for_review`: once submitted, a correction goes through reject → rework.
+ */
 const ENTRY_WINDOW_STATUSES: ReadonlySet<InvoiceStatus> = new Set([
 	'new',
 	'pending',
 	'failed',
-	'ready_for_review',
 	'rejected'
 ]);
 
 /**
- * True while an entry-only caller (an AP clerk) may still act on the invoice —
- * `invoice_entry.in_entry_window`. `approvedBy` matters because an APPROVED
- * invoice whose ERP push failed sits at `failed` too.
+ * True while an entry-only caller (an AP clerk) may still change the invoice —
+ * `invoice_entry.in_entry_window`. The approval fields matter because an
+ * approved invoice whose ERP push failed sits at `failed`, and one approved
+ * then rejected at `rejected`; both are read because `approved_by` is a display
+ * name that can be empty.
  */
-export function inInvoiceEntryWindow(status: InvoiceStatus, approvedBy: string | null | undefined): boolean {
-	return ENTRY_WINDOW_STATUSES.has(status) && !approvedBy;
+export function inInvoiceEntryWindow(
+	status: InvoiceStatus,
+	approvedBy: string | null | undefined,
+	approvalDate: string | null | undefined
+): boolean {
+	return ENTRY_WINDOW_STATUSES.has(status) && !approvedBy && !approvalDate;
 }
 
 /** The bulk status targets an entry-only caller may set — `ENTRY_BULK_STATUS_TARGETS`. */

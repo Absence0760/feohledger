@@ -224,10 +224,6 @@ test.describe('RBAC at the API layer', () => {
 		}
 	});
 
-	// A clerk browses Catalogs (+ guided buying) to raise a requisition, so
-	// the catalogs read endpoint grants ap_clerk and the sidebar surfaces it
-	// (see rbac.spec.ts). Pin the backend side here so the two can't drift:
-	// if this 403s, the gate silently dropped clerk and the nav item lies.
 	// Entering invoices is the AP clerk's job (`backend/app/api/invoice_entry.py`);
 	// approving them is not. The toolbar's Create / Upload buttons show for a
 	// clerk, so pin that the backend takes the write — and still refuses the
@@ -251,6 +247,14 @@ test.describe('RBAC at the API layer', () => {
 			const submit = await request.post(`${API_BASE}/api/invoices/${id}/complete`, { headers });
 			expect(submit.status(), 'clerk submit for review').toBe(200);
 
+			// Submitted, the invoice is what the approver is reading: the clerk's
+			// entry window is closed (correction goes through reject → rework).
+			const lateEdit = await request.patch(`${API_BASE}/api/invoices/${id}`, {
+				headers,
+				data: { amount: '1.00' }
+			});
+			expect(lateEdit.status(), 'clerk edit after submit').toBe(403);
+
 			const approve = await request.post(`${API_BASE}/api/invoices/${id}/approve`, {
 				headers,
 				data: {}
@@ -261,6 +265,10 @@ test.describe('RBAC at the API layer', () => {
 		}
 	});
 
+	// A clerk browses Catalogs (+ guided buying) to raise a requisition, so
+	// the catalogs read endpoint grants ap_clerk and the sidebar surfaces it
+	// (see rbac.spec.ts). Pin the backend side here so the two can't drift:
+	// if this 403s, the gate silently dropped clerk and the nav item lies.
 	test('clerk CAN GET /api/catalogs (sidebar/backend RBAC parity)', async ({
 		page,
 		request,
