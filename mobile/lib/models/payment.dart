@@ -64,6 +64,15 @@ class Payment {
   /// a licence to substitute a default (`docs/decisions.md` §79/§82).
   final String? currency;
 
+  /// The accepted early-payment discount this payment TAKES, already deducted
+  /// from [amount] (`PaymentResponse.discount_amount`, migration 0104). `null`
+  /// when the payment moves the full net — never a zero standing in for "no
+  /// discount". Never add it back to [amount] on-device: [amount] is what was
+  /// authorized and what settlement is verified against. The offer's id
+  /// (`discount_offer_id`) is deliberately not parsed: no mobile screen links
+  /// to a discount offer.
+  final double? discountAmount;
+
   final PaymentMethod method;
   final PaymentStatus status;
   final String? reference;
@@ -74,6 +83,7 @@ class Payment {
     required this.invoiceId,
     required this.amount,
     this.currency,
+    this.discountAmount,
     required this.method,
     required this.status,
     this.reference,
@@ -86,6 +96,7 @@ class Payment {
       invoiceId: json['invoice_id'] as String,
       amount: (json['amount'] as num).toDouble(),
       currency: json['currency'] as String?,
+      discountAmount: (json['discount_amount'] as num?)?.toDouble(),
       method: PaymentMethod.fromString(json['method'] as String),
       status: PaymentStatus.fromString(json['status'] as String),
       reference: json['reference'] as String?,

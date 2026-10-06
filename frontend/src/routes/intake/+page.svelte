@@ -374,7 +374,7 @@
 	{/snippet}
 
 	<div class="kpi-row">
-		<KpiCard value={total} label={m('intake.kpi.requests')} />
+		<KpiCard value={total} label={m('intake.kpi.requests')} helpTerm="intake-request" />
 		<KpiCard value={openCount} label={m('intake.kpi.open')} />
 		<KpiCard value={reviewCount} label={m('intake.kpi.inReview')} highlight={reviewCount ? 'red' : null} />
 	</div>

@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { IntakeRequest, IntakeType } from '#lib/types/intake.ts';
+	import HelpTip from '#lib/components/help/HelpTip.svelte';
 	import {
 		INTAKE_TYPES,
 		intakeTypeLabelKey,
@@ -157,6 +158,7 @@
 				</Badge>
 				{#if intake!.converted_requisition_id}
 					<span class="converted-note">{m('intake.modal.requisitionCreatedNote')}</span>
+					<HelpTip term="requisition" />
 				{/if}
 			</div>
 		{/if}

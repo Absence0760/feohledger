@@ -26,7 +26,7 @@ from app.api.pagination import PaginationParams, paginated, pagination_params
 from app.database import get_control_db
 from app.models.organization import Organization
 from app.models.procurement import GoodsReceipt
-from app.models.quality_inspection import QualityInspection
+from app.models.quality_inspection import INSPECTION_SOURCE_MANUAL, QualityInspection
 from app.models.user import User
 from app.schemas.inspection import VALID_RESULTS, InspectionCreate
 from app.services.audit_dispatch import dispatch_audit
@@ -202,6 +202,10 @@ async def create_inspection(
         accepted_quantity=body.accepted_quantity,
         rejected_quantity=body.rejected_quantity,
         deviation_notes=body.deviation_notes,
+        # Who typed this verdict in: a hand-recorded `pass` from someone
+        # implicated in an invoice must not lift that invoice's quality hold.
+        source=INSPECTION_SOURCE_MANUAL,
+        recorded_by_user_id=user.id,
         organization_id=org_id,
         entity_id=entity_id,
     )
@@ -304,6 +308,7 @@ async def sync_inspections(
             qms_config=qms_config,
             entity_id=entity_id,
             actor_id=user.id,
+            org_settings=settings_blob or {},
         )
     except UnknownQmsProviderError as exc:
         # The org opted in with a provider we have no adapter for. An operator

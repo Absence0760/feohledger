@@ -73,6 +73,22 @@ enum InvoiceStatus {
   /// editable (GL coding, notes, addresses) — only the money and the payee are
   /// frozen.
   bool get isFinanciallyLocked => this == InvoiceStatus.approved || !isEditable;
+
+  /// The statuses an entry-only caller (an AP clerk) may change an invoice
+  /// in — a mirror of `_ENTRY_WINDOW_STATUSES` in
+  /// `backend/app/api/invoice_entry.py`. An explicit allowlist there too, so a
+  /// new status is outside a clerk's reach until someone decides otherwise.
+  /// No `readyForReview`: once submitted, the approver is reading it, and a
+  /// correction goes through reject → rework. Read with
+  /// [Invoice.inEntryWindow], never alone: an approved invoice whose ERP push
+  /// failed is `failed` too.
+  bool get isEntryStatus => switch (this) {
+    InvoiceStatus.newStatus ||
+    InvoiceStatus.pending ||
+    InvoiceStatus.failed ||
+    InvoiceStatus.rejected => true,
+    _ => false,
+  };
 }
 
 /// The invoice fields frozen once the invoice is financially locked — a mirror
@@ -291,6 +307,12 @@ class Invoice {
   final String? poNumber;
   final String? glAccount;
   final String? fileUrl;
+  /// Who signed the invoice off, and when — both set at final approval and
+  /// never cleared, so they tell an approved-then-ERP-failed invoice from one
+  /// that never reached approval (`invoice_entry.was_ever_approved`). Both are
+  /// read because `approvedBy` is a display name that can be empty.
+  final String? approvedBy;
+  final String? approvalDate;
   final DateTime createdAt;
   final List<InvoiceWarning> warnings;
   final PoMatch? poMatch;
@@ -308,6 +330,8 @@ class Invoice {
     this.poNumber,
     this.glAccount,
     this.fileUrl,
+    this.approvedBy,
+    this.approvalDate,
     required this.createdAt,
     this.warnings = const [],
     this.poMatch,
@@ -333,6 +357,8 @@ class Invoice {
       poNumber: json['po_number'] as String?,
       glAccount: json['gl_account'] as String?,
       fileUrl: json['file_url'] as String?,
+      approvedBy: json['approved_by'] as String?,
+      approvalDate: json['approval_date'] as String?,
       createdAt: DateTime.parse(json['created_at'] as String),
       warnings: rawWarnings is List
           ? rawWarnings
@@ -345,4 +371,11 @@ class Invoice {
           : null,
     );
   }
+
+  /// True while an entry-only caller (an AP clerk) may still edit this invoice
+  /// — `in_entry_window` in `backend/app/api/invoice_entry.py`.
+  bool get inEntryWindow =>
+      status.isEntryStatus &&
+      (approvedBy == null || approvedBy!.isEmpty) &&
+      approvalDate == null;
 }

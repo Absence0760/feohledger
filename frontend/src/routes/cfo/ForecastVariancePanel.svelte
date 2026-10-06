@@ -2,6 +2,7 @@
 	import { auth } from '#lib/stores/auth.svelte.ts';
 	import DataTable from '#lib/components/ui/DataTable.svelte';
 	import KpiCard from '#lib/components/ui/KpiCard.svelte';
+	import HelpTip from '#lib/components/help/HelpTip.svelte';
 	import Modal from '#lib/components/ui/Modal.svelte';
 	import Money from '#lib/components/ui/Money.svelte';
 	import { toast } from '#lib/components/ui/Toast.svelte';
@@ -113,11 +114,13 @@
 			     `role="alert"` treatment as the cash-position card's unconverted
 			     outflows and the budget rollup's excluded rows. -->
 			{#if result && unconverted > 0}
-				<p class="cf-skipped" role="alert" data-testid="forecast-variance-unconverted">
-					{m('cfo.forecastVariance.unconverted', {
+				<p class="cf-skipped" data-testid="forecast-variance-unconverted">
+					<!-- The alert is the message alone: the ⓘ beside it is not part of the warning. -->
+					<span role="alert">{m('cfo.forecastVariance.unconverted', {
 						n: unconverted,
 						currency: result.reporting_currency
-					})}
+					})}</span>
+					<HelpTip term="reporting-currency" />
 				</p>
 			{/if}
 			<!-- Rendered from the moment a comparison is SUBMITTED, not from the

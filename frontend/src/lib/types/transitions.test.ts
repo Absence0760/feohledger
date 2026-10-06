@@ -1,5 +1,12 @@
 import { describe, it, expect } from 'vitest';
-import { VALID_TRANSITIONS, commonTransitions, type InvoiceStatus } from './invoice';
+import {
+	ENTRY_BULK_STATUS_TARGETS,
+	VALID_TRANSITIONS,
+	commonTransitions,
+	extractionAllowed,
+	inInvoiceEntryWindow,
+	type InvoiceStatus
+} from './invoice';
 
 // The frontend transition map must mirror the backend workflow_engine
 // VALID_TRANSITIONS for the user-selectable manual moves. Offering a target
@@ -52,5 +59,47 @@ describe('commonTransitions', () => {
 
 	it('returns an empty list for an empty selection', () => {
 		expect(commonTransitions([])).toEqual([]);
+	});
+});
+
+describe('the AP clerk\'s entry reach (backend api/invoice_entry.py)', () => {
+	it('narrows bulk targets to submit / resubmit / back-to-draft', () => {
+		expect(commonTransitions(['new'], ENTRY_BULK_STATUS_TARGETS)).toEqual(['ready_for_review']);
+		expect(commonTransitions(['rejected'], ENTRY_BULK_STATUS_TARGETS).sort()).toEqual([
+			'new',
+			'ready_for_review'
+		]);
+		expect(commonTransitions(['ready_for_review'], ENTRY_BULK_STATUS_TARGETS)).toEqual([]);
+		expect(commonTransitions(['approved'], ENTRY_BULK_STATUS_TARGETS)).toEqual([]);
+	});
+
+	it('never lets a clerk set an approval or closing status in bulk', () => {
+		for (const s of ['approved', 'rejected', 'done', 'pending'] as InvoiceStatus[]) {
+			expect(ENTRY_BULK_STATUS_TARGETS.has(s)).toBe(false);
+		}
+	});
+
+	it('closes the entry window at submit, and on any invoice ever approved', () => {
+		expect(inInvoiceEntryWindow('new', null, null)).toBe(true);
+		expect(inInvoiceEntryWindow('failed', null, null)).toBe(true);
+		expect(inInvoiceEntryWindow('rejected', null, null)).toBe(true);
+		// Submitted: the approver is reading it, and approval binds to no version.
+		expect(inInvoiceEntryWindow('ready_for_review', null, null)).toBe(false);
+		// An approved invoice whose ERP push failed, by name or by date alone.
+		expect(inInvoiceEntryWindow('failed', 'Some Approver', '2026-01-02')).toBe(false);
+		expect(inInvoiceEntryWindow('failed', '', '2026-01-02')).toBe(false);
+		expect(inInvoiceEntryWindow('rejected', 'Some Approver', null)).toBe(false);
+		expect(inInvoiceEntryWindow('approved', 'Some Approver', '2026-01-02')).toBe(false);
+		expect(inInvoiceEntryWindow('done', null, null)).toBe(false);
+	});
+
+	it('never offers re-extraction once an invoice has been approved, for any role', () => {
+		expect(extractionAllowed('new', null, null)).toBe(true);
+		expect(extractionAllowed('failed', null, null)).toBe(true);
+		// An approved invoice whose ERP push failed: Retry ERP, not re-extract.
+		expect(extractionAllowed('failed', 'Some Approver', '2026-01-02')).toBe(false);
+		expect(extractionAllowed('failed', '', '2026-01-02')).toBe(false);
+		expect(extractionAllowed('rejected', null, null)).toBe(false);
+		expect(extractionAllowed('ready_for_review', null, null)).toBe(false);
 	});
 });

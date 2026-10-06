@@ -88,7 +88,9 @@ def violates_segregation(
       verbatim from the source payable, so it inherits the source's whole
       implicated set (:func:`implicated_actors`) —
       ``intercompany.route_intercompany_invoice`` stamps it. Every other
-      creation path has no second actor to name.
+      creation path has no second actor to name. After creation, an
+      entry-only caller (an AP clerk) who changes an invoice they did not
+      upload is added by ``api/invoice_entry.stamp_entry_editor``.
 
     A single column could only ever hold one of those. Stamping the editor
     *instead* of the author would have moved the exemption rather than closed

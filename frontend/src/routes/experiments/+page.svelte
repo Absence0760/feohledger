@@ -25,6 +25,7 @@
 	import Badge from '#lib/components/ui/Badge.svelte';
 	import PageHeader from '#lib/components/ui/PageHeader.svelte';
 	import FilterChips from '#lib/components/ui/FilterChips.svelte';
+	import HelpTip from '#lib/components/help/HelpTip.svelte';
 	import DataTable from '#lib/components/ui/DataTable.svelte';
 	import RowLink from '#lib/components/ui/RowLink.svelte';
 	import RowAction from '#lib/components/ui/RowAction.svelte';
@@ -378,7 +379,10 @@
 			<input id="exp-desc" type="text" bind:value={form.description} placeholder={m('experiments.modal.descriptionPlaceholder')} />
 		</div>
 		<div class="field">
-			<label for="exp-defn">{m('experiments.modal.workflowDefinition')} <em class="required">*</em></label>
+			<div class="help-row label-row">
+				<label for="exp-defn">{m('experiments.modal.workflowDefinition')} <em class="required">*</em></label>
+				<HelpTip term="workflow-experiment" />
+			</div>
 			<select id="exp-defn" bind:value={form.workflow_definition_id} onchange={onDefinitionChange}>
 				{#each definitions as d (d.id)}
 					<option value={d.id}>{d.name}</option>
@@ -506,6 +510,7 @@
 		max-width: 70ch;
 		margin: 0;
 	}
+
 	/* The status pill is `<Badge>` now — it had re-typed the shared recipe by
 	   hand, under classes that named the paint (green/amber/grey) rather than
 	   the status. The tone per status lives in `types/experiments`. */
@@ -514,9 +519,11 @@
 		color: var(--text-muted);
 		padding: 0.75rem 0;
 	}
+
 	.state.error {
 		color: var(--danger);
 	}
+
 	.state.error p {
 		margin: 0 0 8px;
 	}
@@ -525,6 +532,7 @@
 		color: var(--danger);
 		margin: 8px 0;
 	}
+
 	.field {
 		display: flex;
 		flex-direction: column;
@@ -532,42 +540,54 @@
 		margin-bottom: 12px;
 		flex: 1;
 	}
+
 	.field-row {
 		display: flex;
 		gap: 12px;
 	}
+
 	.field label {
 		font-size: 0.85rem;
 		color: var(--text-muted);
+	}
+	/* A field label's ⓘ row (global `.help-row`) sits tighter than a heading's. */
+	.label-row {
+		gap: 4px;
 	}
 	textarea.mono {
 		font-family: ui-monospace, monospace;
 		font-size: 0.8rem;
 	}
+
 	.readout .winner {
 		padding: 10px 14px;
 		border-radius: 8px;
 		background: color-mix(in srgb, var(--accent) 18%, transparent);
 		margin-bottom: 10px;
 	}
+
 	.readout .winner.tie,
 	.readout .winner.pending {
 		background: color-mix(in srgb, var(--text-muted) 18%, transparent);
 	}
+
 	.rationale {
 		color: var(--text-muted);
 		margin: 0 0 8px;
 	}
+
 	.notes {
 		color: var(--text-muted);
 		font-size: 0.85rem;
 		margin: 0 0 12px;
 	}
+
 	.variant-table {
 		width: 100%;
 		border-collapse: collapse;
 		margin-top: 8px;
 	}
+
 	.variant-table th,
 	.variant-table td {
 		padding: 6px 10px;
@@ -577,13 +597,16 @@
 	.variant-table .right {
 		text-align: right;
 	}
+
 	.variant-table tr.primary {
 		background: color-mix(in srgb, var(--accent) 12%, transparent);
 		font-weight: 600;
 	}
+
 	.hint {
 		color: var(--text-muted);
 		font-size: 0.8rem;
 		margin-top: 10px;
 	}
+
 </style>

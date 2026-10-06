@@ -24,6 +24,7 @@
 	import RowAction from '#lib/components/ui/RowAction.svelte';
 	import DiscountTierBar from '#lib/components/ui/DiscountTierBar.svelte';
 	import Badge from '#lib/components/ui/Badge.svelte';
+	import HelpTip from '#lib/components/help/HelpTip.svelte';
 	import BulkNegotiationModal from '#lib/components/modals/BulkNegotiationModal.svelte';
 	import {
 		getDiscountDashboard,
@@ -453,11 +454,13 @@
 		     below imply — honest, but silently so. Mirrors the /cfo cash-position
 		     card's unconverted-outflows notice. -->
 		{#if dashboard && dashboard.unconvertible_offer_count > 0}
-			<p class="disc-skipped" role="alert" data-testid="unconvertible-offers">
-				{m('discounts.unconvertibleOffers', {
+			<p class="disc-skipped" data-testid="unconvertible-offers">
+				<!-- The alert is the message alone: the ⓘ beside it is not part of the warning. -->
+				<span role="alert">{m('discounts.unconvertibleOffers', {
 					n: dashboard.unconvertible_offer_count,
 					currency: dashboard.currency
-				})}
+				})}</span>
+				<HelpTip term="reporting-currency" />
 			</p>
 		{/if}
 
@@ -482,7 +485,10 @@
 		<div class="opt-panel">
 			<div class="opt-head">
 				<div>
-					<h2>{m('discounts.opt.heading')}</h2>
+					<div class="help-row opt-title">
+						<h2>{m('discounts.opt.heading')}</h2>
+						<HelpTip term="dynamic-discounting" />
+					</div>
 					<p class="opt-sub">{m('discounts.opt.sub')}</p>
 				</div>
 				<form class="opt-form" onsubmit={(e) => { e.preventDefault(); runOptimize(); }}>
@@ -776,10 +782,12 @@
 		text-align: center;
 		padding: 20px;
 	}
+
 	.dash-error {
 		color: var(--danger);
 		font-weight: 500;
 	}
+
 	/* Amber, not red: the totals are still usable — they just don't cover every
 	   offer on screen. Same tone + weight as the /cfo cash-position card's
 	   `.cf-skipped` notice, which reports the mirror-image currency gap. */
@@ -800,12 +808,20 @@
 		flex-direction: column;
 		gap: 16px;
 	}
+
 	.opt-head {
 		display: flex;
 		justify-content: space-between;
 		align-items: flex-end;
 		gap: 18px;
 		flex-wrap: wrap;
+	}
+
+	.opt-title {
+		margin: 0 0 4px;
+	}
+	.opt-head .opt-title > h2 {
+		margin: 0;
 	}
 	.opt-head h2 {
 		font-size: 1rem;
@@ -817,16 +833,19 @@
 		margin: 0;
 		max-width: 52ch;
 	}
+
 	.opt-form {
 		display: flex;
 		align-items: flex-end;
 		gap: 10px;
 	}
+
 	.opt-field {
 		display: flex;
 		flex-direction: column;
 		gap: 6px;
 	}
+
 	.opt-label {
 		font-size: 0.72rem;
 		font-weight: 600;
@@ -834,6 +853,7 @@
 		letter-spacing: 0.05em;
 		color: var(--text-muted);
 	}
+
 	.opt-input {
 		padding: 8px 10px;
 		border: 1px solid var(--border);
@@ -844,6 +864,7 @@
 		font-size: 0.9rem;
 		width: 180px;
 	}
+
 	.opt-summary {
 		display: flex;
 		flex-wrap: wrap;
@@ -853,6 +874,7 @@
 		padding-top: 4px;
 		border-top: 1px solid var(--border);
 	}
+
 	.opt-summary strong {
 		color: var(--text);
 	}
@@ -866,6 +888,7 @@
 		grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
 		gap: 14px;
 	}
+
 	.scenario-card {
 		display: flex;
 		flex-direction: column;
@@ -874,32 +897,39 @@
 		border: 1px solid var(--border);
 		border-radius: 8px;
 	}
+
 	.scenario-card.best {
 		border-color: #2faa6a;
 		background: rgba(47, 170, 106, 0.06);
 	}
+
 	.scenario-title {
 		font-size: 0.85rem;
 		font-weight: 600;
 	}
+
 	.scenario-roi {
 		font-size: 1.3rem;
 		font-weight: 700;
 		font-variant-numeric: tabular-nums;
 	}
+
 	.scenario-roi.pos {
 		color: #1fa86a;
 	}
+
 	.scenario-sub {
 		font-size: 0.78rem;
 		color: var(--text-muted);
 	}
+
 	.scenario-flag {
 		margin-top: 4px;
 		font-size: 0.72rem;
 		font-weight: 600;
 		color: var(--text-muted);
 	}
+
 	.scenario-flag.selected {
 		color: #1fa86a;
 	}
@@ -912,12 +942,14 @@
 		padding-top: 14px;
 		border-top: 1px solid var(--border);
 	}
+
 	.unrankable-heading {
 		margin: 0 0 6px;
 		font-size: 0.85rem;
 		font-weight: 600;
 		color: var(--text);
 	}
+
 	/* Amber, same tone as `.disc-skipped`: this row's money is real, it just
 	   is not in the currency the totals above are stated in. */
 	.scenario-warn {
@@ -931,18 +963,22 @@
 		display: block;
 		font-weight: 500;
 	}
+
 	.secondary {
 		display: block;
 		font-size: 0.78rem;
 		color: var(--text-muted);
 	}
+
 	.mono {
 		font-variant-numeric: tabular-nums;
 		font-family: ui-monospace, 'SF Mono', 'Cascadia Code', Menlo, Consolas, monospace;
 	}
+
 	.muted {
 		color: var(--text-muted);
 	}
+
 	.scope-pill {
 		display: inline-block;
 		padding: 2px 8px;
@@ -953,17 +989,20 @@
 		text-transform: capitalize;
 		color: var(--text-muted);
 	}
+
 	.best-discount {
 		display: inline-flex;
 		flex-direction: column;
 		align-items: flex-end;
 		gap: 1px;
 	}
+
 	.best-pct {
 		font-size: 0.7rem;
 		color: #1fa86a;
 		font-weight: 600;
 	}
+
 	.rel {
 		display: block;
 		font-size: 0.72rem;
@@ -980,6 +1019,7 @@
 		flex-direction: column;
 		gap: 8px;
 	}
+
 	.tier-picker legend {
 		font-size: 0.72rem;
 		font-weight: 600;
@@ -995,6 +1035,7 @@
 		cursor: pointer;
 		font-size: 0.88rem;
 	}
+
 	.tier-option input {
 		accent-color: var(--accent);
 	}
@@ -1002,11 +1043,13 @@
 		display: flex;
 		flex-direction: column;
 	}
+
 	.tier-option-amt {
 		font-size: 0.78rem;
 		color: #1fa86a;
 		font-weight: 600;
 	}
+
 	.modal-hint {
 		font-size: 0.85rem;
 		color: var(--text-muted);
@@ -1018,12 +1061,15 @@
 			flex-direction: column;
 			align-items: stretch;
 		}
+
 		.opt-form {
 			flex-direction: column;
 			align-items: stretch;
 		}
+
 		.opt-input {
 			width: 100%;
 		}
+
 	}
 </style>

@@ -22,6 +22,7 @@
 	 * pair with a "Showing all N" claim.
 	 */
 	import { listGlAccounts, syncGlAccountsFromErp, updateGlAccount } from '#lib/api/glAccounts.ts';
+	import HelpTip from '#lib/components/help/HelpTip.svelte';
 	import type { GlAccount } from '#lib/types/glAccount.ts';
 	import {
 		GL_ACCOUNT_TYPES,
@@ -375,6 +376,7 @@
 			ariaLabel={m('glAccounts.search.aria')}
 		/>
 		<FilterChips chips={TYPE_CHIPS} bind:active={typeFilter} />
+		<HelpTip term="gl-coding" />
 		<label class="inactive-toggle">
 			<input type="checkbox" bind:checked={includeInactive} />
 			<span>{m('glAccounts.filter.includeInactive')}</span>

@@ -1,8 +1,9 @@
-# PEPPOL AS4 — outbound e-invoice transmission
+# PEPPOL AS4 — e-invoice transmission (send + receive)
 
 Transmits an approved invoice onto the PEPPOL network as a UBL 2.1 / BIS
-Billing 3.0 document. This is the **send** half of automated e-invoicing; the
-inbound (receive) half is the next slice and reuses everything here.
+Billing 3.0 document. This doc covers both halves of automated e-invoicing:
+the **send** half first, then the inbound (receive) half, which has shipped and
+reuses everything here — see [Inbound (AS4 receive)](#inbound-as4-receive).
 
 ## Four-corner model
 
@@ -28,7 +29,7 @@ class MyAdapter(PeppolAdapter):
     async def resolve_participant(self, pid: ParticipantId) -> ParticipantCapability: ...
     async def send(self, request: TransmissionRequest) -> TransmissionResult: ...
     async def test_connection(self) -> bool: ...
-    def parse_inbound(self, headers, body): ...   # inbound-ready stub
+    def parse_inbound(self, headers, body): ...   # inbound: verify + parse an AS4 delivery
 ```
 
 Registered:
@@ -156,7 +157,7 @@ is excluded from the index, so a legitimate retry is allowed and creates a
 fresh row.
 
 A second partial unique index dedupes the AP-assigned `message_id`
-(`WHERE message_id IS NOT NULL`) so the future inbound slice can dedupe
+(`WHERE message_id IS NOT NULL`) so the inbound receive path dedupes
 redeliveries the same way payment webhooks dedupe by `event_id`. A **failed**
 send never persists a `message_id` (nulled in both the adapter and the send
 service): the supported failed→retry reuses the same `business_message_id`, so

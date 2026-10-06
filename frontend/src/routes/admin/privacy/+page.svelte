@@ -1,4 +1,5 @@
 <script lang="ts">
+	import HelpTip from '#lib/components/help/HelpTip.svelte';
 	import { goto } from '$app/navigation';
 	import { formatDate } from '#lib/utils/time.ts';
 	import { auth } from '#lib/stores/auth.svelte.ts';
@@ -215,7 +216,7 @@
 
 <PageHeader title="Privacy & DSAR">
 	<p class="page-hint">
-		GDPR / CCPA data-subject rights. <strong>Export</strong> assembles a portable
+		GDPR / CCPA data-subject rights. <HelpTip term="dsar" /> <strong>Export</strong> assembles a portable
 		bundle of everything held about a subject (safe to re-run).
 		<strong>Erase</strong> irreversibly redacts their PII while preserving the
 		money trail and the append-only audit log — it cannot be undone.
@@ -257,7 +258,7 @@
 						/>
 						<span>{m('privacyDsar.includeBanking')}</span>
 					</label>
-					<p class="field-hint">{m('privacyDsar.includeBankingHint')}</p>
+					<p class="field-hint">{m('privacyDsar.includeBankingHint')} <HelpTip term="step-up" /></p>
 					{#if includeBanking}
 						<label for="privacy-banking-justification" class="justification-label">
 							{m('privacyDsar.justificationLabel')}

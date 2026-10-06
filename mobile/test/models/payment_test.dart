@@ -43,6 +43,32 @@ void main() {
       expect(payment.reference, 'WIRE-1');
     });
 
+    test('discount_amount is carried when a discount was taken, null otherwise',
+        () {
+      final discounted = Payment.fromJson({
+        'id': 'p2',
+        'invoice_id': 'inv2',
+        'amount': 980.0,
+        'discount_amount': 20,
+        'method': 'ach',
+        'status': 'pending',
+        'created_at': '2026-01-01T12:00:00',
+      });
+      expect(discounted.amount, 980.0);
+      expect(discounted.discountAmount, 20.0);
+
+      final full = Payment.fromJson({
+        'id': 'p3',
+        'invoice_id': 'inv3',
+        'amount': 1000.0,
+        'discount_amount': null,
+        'method': 'ach',
+        'status': 'pending',
+        'created_at': '2026-01-01T12:00:00',
+      });
+      expect(full.discountAmount, isNull);
+    });
+
     test('reference is optional', () {
       final payment = Payment.fromJson({
         'id': 'p1',

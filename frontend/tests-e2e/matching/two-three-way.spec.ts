@@ -163,7 +163,12 @@ test.describe('3-way invoice↔PO↔GR matching', () => {
 		expect(poMatch!.status).toBe('matched');
 	});
 
-	test('partial receipt → status partial + po_mismatch info exception', async ({ page }) => {
+	// Billing is measured against what arrived (`backend/docs/po-matching.md`
+	// § Short receipt): six of ten in with the whole PO billed asks to pay for
+	// four widgets nobody received, so it holds payment.
+	test('partial receipt billed in full → status partial + blocking po_mismatch', async ({
+		page
+	}) => {
 		const { poId, poNumber } = createPo({
 			total: 1000,
 			lines: [{ description: 'widget', quantity: 10, unitPrice: 100, total: 1000 }]
@@ -179,8 +184,32 @@ test.describe('3-way invoice↔PO↔GR matching', () => {
 		expect(poMatch!.match_type).toBe('3-way');
 		expect(poMatch!.status).toBe('partial');
 		expect(issueText(poMatch!)).toMatch(/Partial receipt: 60% of ordered quantity/i);
-		// Partial receipt is informational, not a hard block.
-		expect(exceptionsFor(invoiceId)).toContain('po_mismatch:info');
+		expect(exceptionsFor(invoiceId)).toContain('po_mismatch:warning');
+	});
+
+	test('partial receipt billed for what arrived → nothing held', async ({ page }) => {
+		const { poId, poNumber } = createPo({
+			total: 1000,
+			lines: [{ description: 'widget', quantity: 10, unitPrice: 100, total: 1000 }]
+		});
+		created.poIds.push(poId);
+		// 4 of 10 received, and the invoice bills those 4 — partial billing of a
+		// split delivery, which a short receipt on its own must not hold.
+		const { grId } = createGr({ poId, lines: [{ description: 'widget', quantityReceived: 4 }] });
+		created.grIds.push(grId);
+
+		const { invoiceId, poMatch } = await createMatchedInvoice(page, { poNumber, amount: 400 });
+		created.invoiceIds.push(invoiceId);
+
+		expect(poMatch!.match_type).toBe('3-way');
+		// Under-billing the PO total is still an amount variance (the matcher
+		// compares each invoice with the whole PO), and `partial` only ever
+		// downgrades a `matched` status — so this reads `mismatch`. It is a
+		// warning on the invoice, not a hold: only OVER-billing blocks.
+		expect(poMatch!.status).toBe('mismatch');
+		expect(poMatch!.billed_beyond_receipt).toBe(false);
+		expect(issueText(poMatch!)).toMatch(/Partial receipt: 40% of ordered quantity/i);
+		expect(exceptionsFor(invoiceId).filter((e) => e.startsWith('po_mismatch:'))).toEqual([]);
 	});
 
 	test('amount mismatch on a 3-way stays mismatch (amount wins over GR)', async ({ page }) => {

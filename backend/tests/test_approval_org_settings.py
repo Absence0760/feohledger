@@ -260,6 +260,10 @@ async def test_coordinator_threads_org_settings_into_resolver_apply():
         organization_id=uuid.uuid4(),
         status=InvoiceStatus.ready_for_review,
         amount=Decimal("100.00"),
+        # The implicated-actor set every real row carries: `po_mismatch` is
+        # payment-blocking, so the queue segregation pre-check reads it.
+        uploaded_by_id=None,
+        segregation_actor_ids=None,
     )
     exception = SimpleNamespace(
         id=uuid.uuid4(),

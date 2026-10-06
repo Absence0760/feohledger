@@ -124,6 +124,116 @@ def test_router_approved_status_is_list_not_queue():
 
 
 # ===========================================================================
+# Layer 1 — every tool's role gate matches the REST gate of the data it serves
+# ===========================================================================
+
+#: Each assistant tool → the REST route whose data it re-serves. The assistant
+#: is open to all four employee roles, so a tool with no ``allowed_roles`` hands
+#: its data to an ap_clerk; that is only right when the REST read is equally
+#: open. ``get_payment_forecast`` once drifted exactly this way (an AP clerk got
+#: the upcoming-payment forecast the app refuses them). The org-cash tools map
+#: to the cash-flow surface, whose ``COPILOT_ROLES`` is the documented single
+#: answer to "who may see this org's cash position".
+_TOOL_REST_COUNTERPART: dict[str, tuple[str, str]] = {
+    "list_invoices": ("GET", "/api/invoices"),
+    "list_pending_approvals": ("GET", "/api/invoices"),  # ?status=ready_for_review
+    "find_invoices_by_text": ("GET", "/api/invoices"),  # ?search=
+    "get_vendor_spend": ("GET", "/api/dashboard"),  # the top-vendors spend tile
+    "get_payment_forecast": ("POST", "/api/cash-flow/copilot"),
+    "get_cashflow_forecast": ("POST", "/api/cash-flow/copilot"),
+    "get_cash_position": ("POST", "/api/cash-flow/copilot"),
+    "run_payment_whatif": ("POST", "/api/cash-flow/copilot"),
+    "optimize_discount_capture": ("POST", "/api/cash-flow/copilot"),
+    "propose_payment_plan": ("POST", "/api/cash-flow/copilot"),
+}
+
+
+def _rest_role_gate(method: str, path: str) -> frozenset[str] | None:
+    """The role set the route's ``require_roles`` gate admits, or None when the
+    route admits every authenticated employee (``get_current_user`` only).
+
+    Identifies the gate by ``require_roles``' code object (every closure it
+    builds shares one) and reads the frozenset out of the closure, so the
+    assertion is about the ACTUAL gate, not a name match."""
+    from fastapi.routing import APIRoute, iter_route_contexts
+
+    from app.api.deps import require_roles
+    from app.main import app
+    from tests.permission_gates import iter_dependants
+
+    gate_code = require_roles("admin").__code__
+    # Included routers stay nested on `app.routes`; flatten them the way
+    # `test_rbac.py::_iter_api_routes` does.
+    matches = [
+        ctx.route
+        for ctx in iter_route_contexts(app.routes)
+        if isinstance(ctx.route, APIRoute) and ctx.path == path and method in (ctx.methods or ())
+    ]
+    assert len(matches) == 1, f"expected one {method} {path} route, found {len(matches)}"
+    gates: list[frozenset[str]] = []
+    for dep in iter_dependants(matches[0].dependant):
+        call = getattr(dep, "call", None)
+        if getattr(call, "__code__", None) is not gate_code:
+            continue
+        for cell in call.__closure__ or ():
+            val = cell.cell_contents
+            if isinstance(val, frozenset) and val and all(isinstance(v, str) for v in val):
+                gates.append(val)
+    assert len(gates) <= 1, f"{method} {path} has several role gates: {gates}"
+    return gates[0] if gates else None
+
+
+def test_every_assistant_tool_has_a_rest_counterpart_entry():
+    from app.services.assistant.tools import TOOLS
+
+    assert set(_TOOL_REST_COUNTERPART) == set(TOOLS), (
+        "a new assistant tool needs a row in _TOOL_REST_COUNTERPART naming the REST "
+        "read whose role gate it must match"
+    )
+
+
+@pytest.mark.parametrize("tool_name", sorted(_TOOL_REST_COUNTERPART))
+def test_tool_allowed_roles_match_rest_gate(tool_name):
+    from app.api.assistant import _ASSISTANT_ROLES
+    from app.services.assistant.tools import TOOLS
+
+    method, path = _TOOL_REST_COUNTERPART[tool_name]
+    rest_roles = _rest_role_gate(method, path)
+    spec = TOOLS[tool_name]
+    if rest_roles is None or rest_roles >= set(_ASSISTANT_ROLES):
+        assert spec.allowed_roles is None, (
+            f"{tool_name}: {method} {path} is open to every employee role, so the tool "
+            "should not narrow it"
+        )
+    else:
+        assert spec.allowed_roles is not None, (
+            f"{tool_name} has no allowed_roles, so every assistant role reaches data "
+            f"{method} {path} restricts to {sorted(rest_roles)}"
+        )
+        assert set(spec.allowed_roles) == set(rest_roles), (
+            f"{tool_name}: allowed_roles {sorted(spec.allowed_roles)} != "
+            f"{method} {path} gate {sorted(rest_roles)}"
+        )
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/api/analytics/cashflow_forecast",
+        "/api/analytics/cashflow_whatif",
+        "/api/analytics/cash_position",
+    ],
+)
+def test_analytics_cash_reads_admit_the_copilot_audience(path):
+    """The REST cash-flow trio and the copilot serve the same figures, so they
+    must agree on who may see them. Before this, AP managers got the forecast
+    from the copilot (and the CSV export) but a 403 from the REST read."""
+    copilot = _rest_role_gate("POST", "/api/cash-flow/copilot")
+    assert copilot is not None
+    assert _rest_role_gate("GET", path) == copilot
+
+
+# ===========================================================================
 # Layer 2 — realdb helpers
 # ===========================================================================
 
@@ -441,6 +551,57 @@ async def test_chat_forecast_prompt(realdb):
     call = resp.json()["tool_invocations"][0]
     assert call["tool"] == "get_payment_forecast"
     assert call["result"]["total"] == "300.00"
+
+
+async def test_chat_forecast_prompt_refuses_ap_clerk(realdb):
+    """The payment forecast is org cash exposure: an ap_clerk asking for it gets
+    the orchestrator's clean ``role_not_permitted`` refusal — no figures, no 500
+    — and the audit row records the refusal, not a read."""
+    from sqlalchemy import select
+
+    from app.models.workflow import AuditLog
+
+    a = realdb.info("a")
+    mk_a = realdb.sessionmaker("a")
+    async with mk_a() as sa:
+        ent_a = await _default_entity_id(sa, a.org_id)
+        await _seed_invoice(
+            sa,
+            a.org_id,
+            ent_a,
+            number="F-CLERK",
+            vendor_name="Due",
+            amount="300.00",
+            status="approved",
+            due_date=date.today() + timedelta(days=10),
+        )
+        await sa.commit()
+
+    async with realdb.client(key="a", role="ap_clerk") as c:
+        resp = await c.post(
+            "/api/assistant/chat",
+            json={"message": "what's my payment forecast next 30 days?"},
+        )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    call = body["tool_invocations"][0]
+    assert call["tool"] == "get_payment_forecast"
+    assert call["result"] is None, "a refused clerk must receive NO forecast data"
+    assert "permission" in call["error"].lower()
+    assert "300" not in resp.text
+
+    async with mk_a() as sa:
+        rows = (
+            (await sa.execute(select(AuditLog).where(AuditLog.action == "assistant.tool_invoked")))
+            .scalars()
+            .all()
+        )
+    assert len(rows) == 1
+    assert rows[0].details == {
+        "tool": "get_payment_forecast",
+        "args": {},
+        "error": "role_not_permitted",
+    }
 
 
 async def test_chat_free_text_search_prompt(realdb):

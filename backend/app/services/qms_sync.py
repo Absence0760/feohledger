@@ -58,7 +58,7 @@ from app.config import settings
 from app.database import _make_tenant_url, control_session_factory
 from app.models.organization import Organization
 from app.models.procurement import GoodsReceipt, PurchaseOrder
-from app.models.quality_inspection import QualityInspection
+from app.models.quality_inspection import INSPECTION_SOURCE_QMS, QualityInspection
 from app.schemas.inspection import VALID_RESULTS
 from app.services.audit_dispatch import dispatch_audit
 from app.services.qms_adapters import UnknownQmsProviderError, get_qms_adapter
@@ -207,15 +207,29 @@ def _apply_record(
         ("accepted_quantity", rec.accepted_quantity),
         ("rejected_quantity", rec.rejected_quantity),
         ("deviation_notes", rec.deviation_notes),
+        # The QMS's verdict now, whoever (if anyone) typed the row first — so a
+        # row the QMS re-asserts stops counting as hand-recorded (migration 0105).
+        ("source", INSPECTION_SOURCE_QMS),
+        ("recorded_by_user_id", None),
     ]
     # Backfill document links if the QMS now references docs that exist locally
     # (e.g. the PO/GR was imported after the first sync). Only ever set, never
     # cleared — an unresolvable number this tick is not evidence the earlier
     # resolution was wrong.
-    if po_id is not None:
-        updates.append(("po_id", po_id))
-    if gr_id is not None:
-        updates.append(("gr_id", gr_id))
+    #
+    # EXCEPT on a row that was not the QMS's: a hand-typed inspection (or one of
+    # unknown provenance) sharing a QMS inspection number. Its links were chosen
+    # by whoever typed it, and keeping them while the row turns `qms` would
+    # launder a typed verdict onto a PO the QMS never inspected — a "QMS" pass
+    # lifting a quality hold the typist was implicated in. The QMS's own
+    # resolution wins there, unresolved (NULL) included.
+    if row.source != INSPECTION_SOURCE_QMS:
+        updates.extend([("po_id", po_id), ("gr_id", gr_id)])
+    else:
+        if po_id is not None:
+            updates.append(("po_id", po_id))
+        if gr_id is not None:
+            updates.append(("gr_id", gr_id))
 
     for field_name, value in updates:
         if getattr(row, field_name) != value:
@@ -274,6 +288,7 @@ async def sync_tenant_inspections(
     entity_id: uuid.UUID | None = None,
     actor_id: uuid.UUID | None = None,
     since: datetime | None = None,
+    org_settings: dict | None = None,
 ) -> dict:
     """Pull inspections from the configured QMS and upsert them for one tenant.
 
@@ -353,6 +368,8 @@ async def sync_tenant_inspections(
                 rejected_quantity=rec.rejected_quantity,
                 deviation_notes=rec.deviation_notes,
                 status="completed",
+                source=INSPECTION_SOURCE_QMS,
+                recorded_by_user_id=None,
                 organization_id=org_id,
                 entity_id=entity_id,
             )
@@ -398,7 +415,7 @@ async def sync_tenant_inspections(
     # QualityInspection links to a PO/GR, not directly to an invoice, so we
     # rematch invoices that reference the affected PO numbers. Never fails the
     # sync.
-    await _best_effort_rematch(db, org_id, records)
+    await _best_effort_rematch(db, org_id, records, org_settings=org_settings)
 
     return {
         "fetched": len(records),
@@ -410,7 +427,11 @@ async def sync_tenant_inspections(
 
 
 async def _best_effort_rematch(
-    db: AsyncSession, org_id: uuid.UUID, records: list[QMSInspectionRecord]
+    db: AsyncSession,
+    org_id: uuid.UUID,
+    records: list[QMSInspectionRecord],
+    *,
+    org_settings: dict | None = None,
 ) -> None:
     """Re-run PO matching for invoices whose PO a synced inspection touched.
 
@@ -442,7 +463,11 @@ async def _best_effort_rematch(
                 .all()
             )
             for inv in invoices:
-                await refresh_warnings(db, inv)
+                # The org's own match rules: without them the refresh would
+                # judge under the platform defaults, and it may not close a
+                # payment-blocking hold on that basis
+                # (`invoice_warnings._close_cleared_po_exceptions`).
+                await refresh_warnings(db, inv, org_settings=org_settings)
     except Exception as exc:  # noqa: BLE001 — rematch is advisory, never fatal
         logger.warning(
             "[qms-sync] best-effort rematch skipped for org=%s: %s",
@@ -518,7 +543,9 @@ async def run_qms_sync_once(*, since: datetime | None = None) -> QMSSyncResult:
         org_since = since if since is not None else resolve_qms_sync_cursor(settings_blob)
         started_at = datetime.now(UTC)
         try:
-            summary = await _sweep_tenant(db_name, org_id, qms_config, since=org_since)
+            summary = await _sweep_tenant(
+                db_name, org_id, qms_config, since=org_since, org_settings=settings_blob or {}
+            )
             result.fetched += summary["fetched"]
             result.created += summary["created"]
             result.updated += summary["updated"]
@@ -596,7 +623,12 @@ async def _store_cursor(org_id: uuid.UUID, *, at: datetime | None) -> None:
 
 
 async def _sweep_tenant(
-    db_name: str, org_id: uuid.UUID, qms_config: dict, *, since: datetime | None = None
+    db_name: str,
+    org_id: uuid.UUID,
+    qms_config: dict,
+    *,
+    since: datetime | None = None,
+    org_settings: dict | None = None,
 ) -> dict:
     """Sync one tenant on its own short-lived engine; commits on success."""
     engine = create_async_engine(_make_tenant_url(db_name))
@@ -604,7 +636,11 @@ async def _sweep_tenant(
     try:
         async with factory() as db:
             summary = await sync_tenant_inspections(
-                db, org_id=org_id, qms_config=qms_config, since=since
+                db,
+                org_id=org_id,
+                qms_config=qms_config,
+                since=since,
+                org_settings=org_settings,
             )
             await db.commit()
             return summary

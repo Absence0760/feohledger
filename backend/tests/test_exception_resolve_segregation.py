@@ -42,7 +42,7 @@ from app.models.organization import Organization
 TENANT = "a"
 
 BLOCKING = "fraud_flag"
-NON_BLOCKING = "po_mismatch"
+NON_BLOCKING = "price_variance"
 
 
 # ---------------------------------------------------------------------------
@@ -289,8 +289,8 @@ async def test_an_invoice_less_exception_stays_resolvable(realdb):
 
 @pytest.mark.asyncio
 async def test_the_uploader_may_clear_a_non_blocking_exception(realdb):
-    """Clearing a ``po_mismatch`` releases nothing — approval does not gate on
-    it and neither does a payment run — so a refusal there would be friction
+    """Clearing a ``price_variance`` releases nothing — approval does not gate
+    on it and neither does a payment run — so a refusal there would be friction
     with no control behind it. Scope is ``is_payment_blocking``, the one
     definition of 'clearing this lets money move'."""
     info = realdb.info(TENANT)
@@ -303,7 +303,7 @@ async def test_the_uploader_may_clear_a_non_blocking_exception(realdb):
     async with realdb.client(key=TENANT, role="admin") as c:
         res = await c.post(
             f"/api/exceptions/{exc_id}/resolve",
-            json={"action": "resolve", "resolution": "Amended the PO."},
+            json={"action": "resolve", "resolution": "Price agreed with buyer."},
         )
     assert res.status_code == 200, res.text
 
@@ -669,4 +669,45 @@ async def test_releasing_a_compliance_hold_still_clears_its_exception(realdb):
             resolution="released",
         )
         await s.commit()
+    assert await _status(mk, exc_id) == "resolved"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("exception_type", ["po_mismatch", "quality_hold"])
+async def test_the_uploader_cannot_clear_a_po_mismatch_or_quality_hold(realdb, exception_type):
+    """``po_mismatch`` and ``quality_hold`` now stop a payment run, so clearing
+    one is the sign-off that lets money move — and the segregation control keys
+    on the same tuple. Whoever entered the invoice may not wave through its own
+    PO variance or failed inspection; they escalate it to someone else."""
+    info = realdb.info(TENANT)
+    mk = realdb.sessionmaker(TENANT)
+    inv = await _make_invoice(
+        mk,
+        info.org_id,
+        number=f"INV-SOD-{exception_type}",
+        uploaded_by_id=info.users["admin"],
+    )
+    exc_id = await _open_exception(mk, info.org_id, inv, exception_type=exception_type)
+
+    async with realdb.client(key=TENANT, role="admin") as c:
+        refused = await c.post(
+            f"/api/exceptions/{exc_id}/resolve",
+            json={"action": "resolve", "resolution": "Close enough."},
+        )
+        escalated = await c.post(
+            f"/api/exceptions/{exc_id}/resolve",
+            json={"action": "escalate", "resolution": "Needs a second pair of eyes."},
+        )
+
+    assert refused.status_code == 403, refused.text
+    assert refused.json()["detail"]["code"] == "segregation_implicated"
+    assert escalated.status_code == 200, escalated.text
+    assert await _status(mk, exc_id) == "escalated"
+
+    async with realdb.client(key=TENANT, role="ap_manager") as c2:
+        cleared = await c2.post(
+            f"/api/exceptions/{exc_id}/resolve",
+            json={"action": "resolve", "resolution": "Checked against the PO."},
+        )
+    assert cleared.status_code == 200, cleared.text
     assert await _status(mk, exc_id) == "resolved"

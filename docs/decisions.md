@@ -9799,3 +9799,264 @@ which tests run — and uploads what it measured; `pnpm gen:test-durations <run-
 unions a run's eight artifacts, refusing an incomplete or overlapping set. The
 first such baseline covers all but 0.08%, and the ratchet moved from 0.25 to
 0.05.
+
+## 244. Help is in the app, written per role, and its prose names the UI by catalogue key
+
+FeohLedger had no user-facing help: everything a new AP clerk or CFO needed to
+know lived in engineering docs they will never open. The help centre at `/help`
+(`frontend/docs/help-centre.md`) puts it where people already are, and three
+choices shape it.
+
+**Per role, not per feature.** The four system roles do different jobs and see
+different pages, so the landing page opens on a "your first week" guide for
+the reader's own role (their most senior one; `?role=` shows another), with
+that role's everyday tasks beside it. A guide's "Open …" button and the page
+directory both use `nav.ts::canSee`, the sidebar's own gate. That way help never
+sends someone to a page that would refuse them, and a page their role can't open
+is still listed and marked, so they know it exists and who to ask.
+
+**Help is reachable from where the question arises.** Every `PageHeader` links
+to "How this page works", resolved from the page directory (`PAGE_HELP`) with no
+per-route wiring. `content.test.ts` holds `PAGE_HELP` to `NAV`, so a new
+sidebar page can't ship without help. AP jargon gets an ⓘ `HelpTip` where it is
+used. The tip is a button-driven toggletip, not a hover tooltip, so it works by
+keyboard and touch. It shows the term's catalogued one-liner, a glossary link,
+and the guides that explain it. Those guides are fetched by dynamic `import()`
+on first open, because `PageHeader` and `HelpTip` render on every page and must
+not carry the guide prose into every route's bundle.
+
+**What is translated, and how the rest can't drift.** Rule one of
+`frontend/docs/i18n.md` is that no user-facing string is a literal. Translating
+around twenty-five guides into five languages, and keeping six copies in step
+on every edit, is a content programme rather than a catalogue backfill. Doing it
+badly (machine output nobody reviews) would be worse than an honest English
+original. So the split mirrors §174 (legal) but narrower:
+
+- **Catalogued, all six locales:** the chrome, every glossary term's name and
+  one-line definition (the in-app tooltip text), and every diagram label.
+- **English prose:** guide bodies, glossary long text and page-directory lines.
+  They render with `lang="en"` (WCAG 3.1.2) under a notice, in the reader's
+  language, saying the guides are in English for now. Translating them is a
+  tracked follow-up.
+
+The prose never types a UI label. `{ui:key}` renders the catalogue label, so a
+German reader sees *Freigeben* in the middle of an English sentence about
+approving, exactly as it appears on their screen. `content.test.ts` resolves
+every `{ui:}`, `[[term]]`, `[[guide:]]` and `[[page:]]` reference, rejects a
+key whose value has a placeholder, and enumerates `INVOICE_STATUSES` against the
+lifecycle walkthrough. A renamed button, a deleted route or a new workflow
+status fails CI instead of leaving a guide that describes an app that no longer
+exists. That is the failure mode help systems are known for.
+
+**Typed data, not markdown.** mdsvex is installed and would have made guides
+easier to type. It was not used because the references above need to be data a
+test can walk: a markdown link to `/payments` is a string nobody checks. A
+`{ui:}` label also has to render through `m()` at runtime. Guides are
+TypeScript objects with a ten-token inline grammar, rendered element by element
+(`RichText.svelte`), so the tree keeps its no-`{@html}` rule.
+
+**Illustrations are code.** Diagrams are inline-SVG Svelte components
+coloured from the `app.css` tokens, so they follow a white-label tenant's
+accent, and labelled from the catalogue, so they translate. A rendered
+PNG would have baked in English and one brand colour.
+
+Writing the guides against the code, not the docs, turned up a set of
+places where the engineering docs or in-app copy disagree with what the app
+does. The guides follow the code. Pure doc drift and false in-app copy were
+corrected in the same change. The rest is filed in `docs/followups.md`
+(product calls and sized work) or `docs/known-issues.md` (diagnosed defects).
+
+## 245. Who may see the org's cash position is one answer, read off the routes
+
+The AP assistant is open to every employee, and its per-tool gate was set only
+on the five copilot tools. `get_payment_forecast` returns the same due-dated
+committed and pending outflow as the copilot's `get_cashflow_forecast`, with no
+gate, so a clerk could ask the assistant for a forecast the app refused them.
+It now carries `FINANCE_LEADER_ROLES`. The rule that keeps the next tool honest
+is a test, not a comment: `test_tool_allowed_roles_match_rest_gate` names each
+tool's REST counterpart, reads that route's actual `require_roles` set out of
+its dependency tree, and fails on a mismatch or on a tool without a row.
+
+Reading the gates that way showed a second disagreement. The REST forecast,
+what-if and cash position were `admin`/`cfo`, while AP managers already had the
+same figures from the copilot (§54) and from the `cashflow_forecast` CSV export.
+Narrowing the copilot would have taken away a planning surface built for AP
+managers; widening the three REST reads takes away nothing anyone relied on and
+makes every surface agree. They use `CASH_FORECAST_ROLES`, pinned to
+`COPILOT_ROLES` by the same route-reading helper. The rest of the CFO surface
+(`/analytics/cfo`, the drill-downs, forecast variance) stays `admin`/`cfo`, and
+so does the `/cfo` page in the sidebar: this is consistency of data access, not
+a new screen for AP managers.
+
+## 246. A CSV-imported invoice is checked for warnings when it is imported
+
+`import_invoices_csv` created rows at `new` without `refresh_warnings`, which
+manual create, upload and every PATCH call. Approval was still safe (submitting
+for review refreshes), but a duplicate imported by CSV sat unflagged in the list
+until someone submitted it. Rows imported at a live status (`new`, `rejected`)
+are now refreshed after the batch flush, in the request's transaction and with
+the org's fraud-rule settings, so the warnings and their exceptions commit with
+the invoices or not at all.
+
+Historical `done` and `paid` rows are deliberately not refreshed. They never
+reach a payment run, and flagging years of settled history on a Day-0 load would
+bury the exception queue under findings nobody can act on. They still count as
+the other side of the duplicate check, so a live row repeating one of them is
+flagged.
+
+## 247. Touchless rate means straight-through processing, defined once over the audit trail
+
+The dashboard's `touchless_rate` counted every invoice that cleared review,
+including the ones a person approved, so it measured cleared-vs-rejected under a
+name the industry uses for something much stricter. The experiments readout used
+a third rule (auto-approved with no changes on the approval row) under the same
+label. The definition chosen is the one AP benchmarks use: an invoice is
+touchless when it reached approval or later with an `invoice.auto_approved` row
+and no person intervened — no human review decision, no field, line-item or GL
+correction, and no exception a person resolved, dismissed or escalated. An
+exception agent's own decision is not a touch; that is the automation being
+measured. The denominator is every invoice that reached a review decision, with
+the existing evidence gate on `done`/`paid`/`failed` and CSV imports out of both
+legs.
+
+It lives in `services/touchless` as SQL predicates, and the dashboard and the
+experiments readout both use them, so the two figures cannot disagree. Renaming
+the KPI to what it used to measure was the alternative. It was rejected because
+the cleared-vs-rejected rate is close to 100% in any healthy tenant and tells a
+buyer nothing, while straight-through processing is the number they ask for.
+Because the true figure tops out far lower, the KPI turns green at 49% (Ardent
+Partners' 2025 best-in-class) rather than the old 80%. Every fact used was
+already recorded, so there is no migration. History older than the actions that
+record corrections (2026-06/07) and exception decisions (2026-08-15) can
+over-count an auto-approved invoice; `backend/docs/analytics.md` says so.
+
+## 248. AP clerks enter invoices; entry is a role, and nothing a clerk does ends in an approval
+
+Standard AP practice gives intake, validation and GL coding to the clerk and
+keeps *approval and payment release* separate from it. Clerks could do none of
+the first, so `ap_clerk` joins `INVOICE_ENTRY_ROLES` (create, upload, the file
+routes, PATCH, line items, extract/reset, complete, resubmit, bulk status) and
+`INVOICE_IMPORT_ROLES` (CSV import of open AP only; historical `done`/`paid`
+rows, which assert a payment already happened, stay with admins and AP
+managers).
+
+Segregation stays at approval, where it already lived. Every create path stamps
+`uploaded_by_id`. An entry-only caller (a clerk with no admin, AP manager or CFO
+role) who changes the content of an invoice they did not upload is added to
+`segregation_actor_ids` (`invoice_entry.stamp_entry_editor`), so a clerk later
+granted approval can never approve figures they keyed. Manager edits are not
+stamped: approve-with-corrections is the approver editing what they sign, and
+stamping it would refuse a one-approver org's manager the approval of an
+invoice they fixed.
+
+The entry-only caller's window closes **at submit**, not at approval. Approval
+binds to no version, so an edit landing between the approver's read and click
+(re-pointing the payee re-links `vendor_id`) would be approved unseen; rework
+goes through reject. The window is also closed on any invoice ever approved
+(`approval_date` or `approved_by`), because an approved invoice whose ERP push
+failed sits at `failed`. Re-extracting such an invoice is refused for every
+role, not only clerks: re-reading the document would rewrite what the approver
+signed while `approved_by` still names them, and Retry ERP is that invoice's
+path. Nothing an entry-only caller does ends in an approval without a second
+person: their `/complete` skips the `auto_approve_below` floor whatever
+`require_segregation` says, and their upload and extract run with
+`suppress_auto_approve` (the flag §75's portal resubmit introduced).
+
+Entry was deliberately **not** made an `invoice.create` catalog permission. Both
+role-grant guards read catalog membership as "sensitive", so a clerk-held
+permission stopped a `user.manage`-only role from onboarding or managing
+clerks, and entry's control is per invoice at approval, not a role split. The
+cost is that a custom role cannot be granted entry; that is a follow-up for the
+first customer who needs a non-clerk preparer. Also rejected: stamping every
+editor, which would refuse a manager the approval of an invoice they
+corrected; and keeping `ready_for_review` editable behind a chain-signoff
+check, which left level 0 and single-level approval open. Tying approval to the
+version the approver saw closes the same race for managers and is a tracked
+follow-up.
+
+## 249. A PO mismatch blocks payment only when it could over-pay, and a refresh may lift it (migration 0105)
+
+Three things the docs and in-app hints already claimed were not true: an
+unverified vendor could be paid, and neither a failed inspection nor a PO
+mismatch held payment. The product call was to make the claims true. A vendor
+that is unverified, inactive or rejected is now refused by run creation,
+`POST /api/payments`, compliance release and `/cards/generate`, through the one
+`inactive_vendor_statuses` rule. `po_mismatch` and `quality_hold` joined
+`PAYMENT_BLOCKING_EXCEPTION_TYPES`, and so the SoD-on-clearing set of §169–§170.
+
+Joining that list changed what may raise a `po_mismatch`. The first cut blocked
+every mismatch, and review showed that reversed §67 and held under-billing too:
+the matcher compares each invoice with the whole PO total, so the first invoice
+on a split or blanket PO reads as a large negative variance. A row is now raised
+only where paying could pay more than the PO supports: the cited PO doesn't
+exist, the currencies differ, the invoice bills above the PO beyond the match
+rule's tolerance, or it bills beyond the received share of the PO
+(`po_total × received / ordered`, exact Decimal, at the same tolerance).
+Billing under the PO and in-tolerance variances stay warnings. This supersedes
+the queue half of §67: an over-receipt is still flagged independently of
+status, but as a warning on the invoice, not a queue row, since §67 rejected
+blocking on a receiving discrepancy and the queue type now blocks.
+
+A blocking row that nobody can clear once the goods arrive would make receipts
+irrelevant, so a warnings refresh that no longer finds the problem closes the
+open or escalated row through `record_decision`, with a NULL actor and
+`via: po_match_refresh`. §169–§170 treat clearing as a human sign-off, and this
+is the deliberate exception, allowed only where nobody with a motive could have
+produced the evidence: the org's own settings must be present (never the 5%
+default); after approval the same PO must still be cited, and the finding must
+be gone even under the strictest rule any GL code could select, since
+`gl_account` stays editable; a cleared quality hold must rest on a QMS verdict
+or on a manual inspection whose recorder is known and not implicated in the
+invoice; and no agent may be mid-decision on the row. Exception agents match
+under the org's rules too, and if an agent's own change leaves the finding in
+place, the coordinator unwinds it and escalates.
+
+Who recorded an inspection could not be read from the audit log, because it
+fails open with `FEOH_AUDIT_MODE=lambda`, where no local row exists. Migration
+0105 adds `quality_inspections.source` (`manual`/`qms`) and
+`recorded_by_user_id`, written by the inspections API and the QMS sync (which
+also overwrites a manual row's PO and receipt links when it takes the row over,
+so a typed verdict can't pass as a synced one) and pinned by a stamping guard.
+Nothing is backfilled: a pre-0105 inspection has no honest recorder, so it
+stays held for a person.
+
+Rejected: a non-blocking queue type for over-receipts (the type roster is
+fixed); blocking on finding code rather than type (the per-type de-dupe lets a
+non-blocking row hide a later blocking finding); a one-off sweep of open rows
+(it goes stale the next day); freezing the match rule on the invoice (a schema
+change for what the strictest-rule check already secures). Per-line receipt
+valuation and cumulative billing against one PO are a follow-up.
+
+## 250. An accepted early-payment offer changes what is paid (migration 0104)
+
+Accepting an offer is the buyer agreeing to pay the discounted amount by the
+deadline, yet a run paid the full amount and the documented workaround was a
+credit memo for the discount. `payment_runs.payable_amounts` now nets applied
+credits and then deducts the accepted, invoice-scoped offer whose deadline the
+pay date meets. The run builder, `POST /api/payments`, dispatch and
+`/retry-failed` all book and re-check against that one figure. It is stored on
+the payment with the offer (migration 0104, both directions) rather than
+re-derived, because settlement verification, capture, void, FX and 1099 totals
+must key on what was authorized, and each booking writes a
+`discount_offer.applied` audit row.
+
+If the applicable offer differs at dispatch from the one booked — the deadline
+passed while the run waited, or an offer was accepted after booking — the
+payment fails `discount_changed` before the processor is called. Re-pricing
+would either short-pay a supplier who considers the offer dead or move money
+nobody approved; a fresh run is the remedy. An offer that can't be honoured
+(vendor-scoped, expired, in another currency, priced on an amount the invoice
+no longer has) pays in full rather than refusing. An applied memo for exactly
+the savings is read as the discount already taken, because the old workaround
+and the help text produced exactly such memos and deducting again would
+short-pay. That is an amount coincidence, resolved toward paying the supplier
+in full; linking memos to offers is a follow-up.
+
+Cards: a card is spendable up to its limit and nothing compares a charge with
+`Payment.amount`, so a discounted payment refuses to settle onto a card whose
+limit differs (`card_limit_exceeds_payment`), and `/cards/generate` mints net
+of credits and takes no discount. Both new foreign keys are `ON DELETE SET
+NULL`, not `RESTRICT`, because cancelling a draft run deletes its pending
+payments. Rejected: a calendar cutoff for the memo rule (it misfires for a
+tenant deployed late) and refusing such a booking as ambiguous (nothing could
+resolve it).

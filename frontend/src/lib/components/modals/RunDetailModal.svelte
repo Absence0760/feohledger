@@ -4,6 +4,7 @@
 	import { api } from '#lib/api.ts';
 	import { toast } from '#lib/components/ui/Toast.svelte';
 	import Badge from '#lib/components/ui/Badge.svelte';
+	import HelpTip from '#lib/components/help/HelpTip.svelte';
 	import {
 		paymentMethodLabelKey,
 		paymentStatusLabelKey,
@@ -14,7 +15,7 @@
 	import type { PaymentStatus } from '#lib/types/payment.ts';
 	import { auth } from '#lib/stores/auth.svelte.ts';
 	import { PERM_PAYMENT_EXECUTE } from '#lib/types/admin.ts';
-	import { formatMoney } from '#lib/utils/money.ts';
+	import { formatMoney, isPositiveAmount } from '#lib/utils/money.ts';
 	// The bare (no-symbol) rendering `fmt` falls back to when the server could
 	// not establish a figure's currency — the same primitive `/payments` and
 	// `/discounts` use for their own unprovable-currency cases, so a change to
@@ -64,6 +65,15 @@
 		method: string | null;
 		status: string;
 		reference: string | null;
+		/**
+		 * The accepted early-payment discount this payment takes, already
+		 * deducted from `amount` (migration 0104), and the invoice amount it
+		 * was taken from. `null` when it pays the full net — never a zero
+		 * standing in for "no discount". Optional so an older backend parses.
+		 */
+		discount_amount?: string | null;
+		discount_offer_id?: string | null;
+		invoice_amount?: string | null;
 	}
 
 	interface RunDetail {
@@ -89,6 +99,9 @@
 		requires_cfo_approval: boolean;
 		cfo_approved_by: string | null;
 		cfo_approved_at: string | null;
+		/** Early-payment discounts the run's active payments take — already
+		 *  deducted from `total_amount`. Exact Decimal string. */
+		discount_total?: string;
 		payments: RunPayment[];
 	}
 
@@ -270,6 +283,7 @@
 		<header>
 			<div class="title-block">
 				<h2>{m('paymentRuns.runDetail.title')}</h2>
+				<HelpTip term="payment-run" />
 				{#if run}
 					<span class="run-id">{run.id.slice(0, 8)}</span>
 					<!-- `status-badge` is the e2e hook (tests-e2e/payments read it by
@@ -290,6 +304,13 @@
 				<dl class="meta">
 					<dt>{m('paymentRuns.runDetail.total')}</dt>
 					<dd class="total" data-testid="run-total">{fmt(run.total_amount, run.currency)}</dd>
+					{#if run.discount_total && isPositiveAmount(run.discount_total)}
+						<!-- Already deducted from the total above: what the accepted
+						     early-payment offers save, so the CFO signing the run sees why
+						     it is below the invoices it pays. -->
+						<dt>{m('paymentRuns.runDetail.discountTotal')}</dt>
+						<dd data-testid="run-discount-total">{fmt(run.discount_total, run.currency)}</dd>
+					{/if}
 					<dt>{m('paymentRuns.runDetail.payments')}</dt>
 					<dd>{run.payments.length}</dd>
 					<dt>{m('paymentRuns.runDetail.created')}</dt>
@@ -306,7 +327,7 @@
 							<th>{m('paymentRuns.runDetail.colInvoice')}</th>
 							<th>{m('paymentRuns.runDetail.colVendor')}</th>
 							<th class="right">{m('paymentRuns.runDetail.colAmount')}</th>
-							<th>{m('paymentRuns.runDetail.colMethod')}</th>
+							<th>{m('paymentRuns.runDetail.colMethod')} <HelpTip term="payment-rail" /></th>
 							<th>{m('paymentRuns.runDetail.colStatus')}</th>
 							<th>{m('paymentRuns.runDetail.colReference')}</th>
 						</tr>
@@ -318,6 +339,11 @@
 								<td>{p.vendor_name ?? '—'}</td>
 								<td class="right mono" data-testid="run-payment-amount">
 									{fmt(p.amount, p.currency)}
+									{#if p.discount_amount}
+										<div class="muted" data-testid="run-payment-discount">
+											{m('paymentRuns.runDetail.rowDiscount', { amount: fmt(p.discount_amount, p.currency) })}
+										</div>
+									{/if}
 								</td>
 								<td>{methodLabel(p.method)}</td>
 								<!-- No `?? 'neutral'`: the map is total over `PaymentStatus`,
@@ -343,6 +369,7 @@
 				{#if pendingCfo}
 					<p class="footer-note pending">
 						<strong>{m('paymentRuns.runDetail.pendingCfoStrong')}</strong> {m('paymentRuns.runDetail.pendingCfoBody')}
+						<HelpTip term="cfo-gate" />
 					</p>
 				{:else if cfoApproved}
 					<p class="footer-note approved">

@@ -383,8 +383,8 @@ test.describe('/invoices — e-invoice export (ap_clerk)', () => {
 });
 
 /** Seed a valid invoice with the tenant ADMIN's credentials while the browser
- *  is signed in as another role — `POST /api/invoices` and the line-item PUT
- *  are admin/ap_manager/cfo, so a clerk session cannot create its own fixture. */
+ *  is signed in as another role, so the fixture does not depend on which role
+ *  is under test (a clerk could create it too since entry opened to ap_clerk). */
 async function createValidInvoiceAsAdmin(page: Page): Promise<Inv> {
 	const slug = currentTenantSlug();
 	const login = await page.request.post(`${API_BASE}/api/auth/login`, {

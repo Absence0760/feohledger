@@ -139,7 +139,7 @@ async function expectRowPending(row: Locator, count: number): Promise<void> {
 		await expect(value).toHaveText(NO_FIGURE);
 		await expect(value).toHaveAttribute('aria-hidden', 'true');
 		// …and the loading text stands in its place.
-		await expect(cards.nth(i).locator('.visually-hidden')).toHaveText(LOADING);
+		await expect(cards.nth(i).locator('.kpi-loading')).toHaveText(LOADING);
 	}
 
 	// The tint is a verdict. There is no figure to have a verdict about, so a
@@ -184,7 +184,7 @@ async function expectRowSettled(row: Locator, count: number): Promise<void> {
 	// attribute keeps telling assistive tech the page is still working.
 	await expect(row.locator('.kpi[aria-busy]')).toHaveCount(0);
 	await expect(row.locator('.kpi-value[aria-hidden]')).toHaveCount(0);
-	await expect(row.locator('.visually-hidden')).toHaveCount(0);
+	await expect(row.locator('.kpi-loading')).toHaveCount(0);
 
 	const announced = await row.ariaSnapshot();
 	expect(announced, 'a settled card must not still announce a loading state').not.toContain(
@@ -303,7 +303,7 @@ test.describe('accessibility — KPI pending affordance (WCAG 4.1.2 / 1.3.1)', (
 		await expect(row.locator('.kpi[data-kpi-state="unavailable"]')).toHaveCount(5);
 		await expect(row.locator('.kpi[aria-busy]')).toHaveCount(0);
 		await expect(row.locator('.kpi-value[aria-hidden]')).toHaveCount(0);
-		await expect(row.locator('.visually-hidden')).toHaveCount(0);
+		await expect(row.locator('.kpi-loading')).toHaveCount(0);
 		// No verdict on a figure that never arrived, either.
 		await expect(row.locator('.kpi.highlight-green, .kpi.highlight-red')).toHaveCount(0);
 

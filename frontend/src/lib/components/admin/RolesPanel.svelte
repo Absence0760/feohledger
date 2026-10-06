@@ -1,4 +1,5 @@
 <script lang="ts">
+	import HelpTip from '#lib/components/help/HelpTip.svelte';
 	import { adminStore } from '#lib/stores/admin.svelte.ts';
 	import { toast } from '#lib/components/ui/Toast.svelte';
 	import RowAction from '#lib/components/ui/RowAction.svelte';
@@ -156,6 +157,7 @@
 		<h2>{m('admin.roles.system.heading')}</h2>
 		<p class="section-hint">
 			{m('admin.roles.system.hint')}
+			<HelpTip term="role" />
 		</p>
 	</div>
 	<DataTable
@@ -183,6 +185,8 @@
 			{m('admin.roles.custom.hintPre')}
 			<strong>{m('admin.roles.custom.hintPermissions')}</strong>
 			{m('admin.roles.custom.hintPost')}
+			<HelpTip term="permission" />
+			<HelpTip term="segregation-of-duties" />
 		</p>
 	</div>
 	<DataTable

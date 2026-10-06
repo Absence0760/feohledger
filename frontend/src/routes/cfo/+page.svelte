@@ -3,6 +3,7 @@
 	import PageHeader from '#lib/components/ui/PageHeader.svelte';
 	import KpiCard from '#lib/components/ui/KpiCard.svelte';
 	import Badge from '#lib/components/ui/Badge.svelte';
+	import HelpTip from '#lib/components/help/HelpTip.svelte';
 	import ByEntityBreakdown from '#lib/components/analytics/ByEntityBreakdown.svelte';
 	import CfoMetrics from '#lib/components/analytics/CfoMetrics.svelte';
 	import ScheduledReportsPanel from '#lib/components/analytics/ScheduledReportsPanel.svelte';
@@ -369,7 +370,10 @@
 		<!-- What-if scenarios -->
 		{#if whatif}
 			<div class="chart-card">
-				<h2>{m('cfo.whatif.title')}</h2>
+				<div class="help-row card-title">
+					<h2>{m('cfo.whatif.title')}</h2>
+					<HelpTip term="dynamic-discounting" />
+				</div>
 				<div class="scenario-grid">
 					{#each [['early', m('cfo.whatif.early')], ['on_time', m('cfo.whatif.onTime')], ['late', m('cfo.whatif.late')]] as [key, label] (key)}
 						{@const s = whatif.scenarios[key as 'early' | 'on_time' | 'late']}
@@ -390,7 +394,10 @@
 		<!-- Cash position -->
 		{#if position}
 			<div class="chart-card">
-				<h2>{m('cfo.position.title')}</h2>
+				<div class="help-row card-title">
+					<h2>{m('cfo.position.title')}</h2>
+					<HelpTip term="cash-position" />
+				</div>
 				<!-- "We have a bank balance and declined to use it" and "no bank is
 				     connected" are different facts with different remedies, and the
 				     page used to render both as the same enter-an-opening-balance
@@ -406,11 +413,13 @@
 				     balance below mixes currencies — and the balance carries forward,
 				     so one such row poisons the tail. -->
 				{#if position.unconverted_count > 0}
-					<p class="cf-skipped" role="alert" data-testid="unconverted-outflows">
-						{m('cfo.position.unconvertedOutflows', {
+					<p class="cf-skipped" data-testid="unconverted-outflows">
+						<!-- The alert is the message alone: the ⓘ beside it is not part of the warning. -->
+						<span role="alert">{m('cfo.position.unconvertedOutflows', {
 							n: position.unconverted_count,
 							currency: position.opening_balance_currency
-						})}
+						})}</span>
+						<HelpTip term="fx-rate" />
 					</p>
 				{/if}
 				{#if position.opening_balance_source === 'none'}
@@ -487,12 +496,18 @@
 	     cash-position card uses for its unconverted outflows. -->
 	{#if budgetRollupError}
 		<div class="chart-card" data-testid="budget-rollup">
-			<h2>{m('cfo.budgets.title')}</h2>
+			<div class="help-row card-title">
+				<h2>{m('cfo.budgets.title')}</h2>
+				<HelpTip term="budget" />
+			</div>
 			<p class="cf-error" role="alert">{m('cfo.budgets.loadFailed')}</p>
 		</div>
 	{:else if budgetRollup}
 		<div class="chart-card" data-testid="budget-rollup">
-			<h2>{m('cfo.budgets.title')}</h2>
+			<div class="help-row card-title">
+				<h2>{m('cfo.budgets.title')}</h2>
+				<HelpTip term="budget" />
+			</div>
 			<!-- The disclosure sits ABOVE the numbers it qualifies, not in a
 			     tooltip: a requisition / PO / invoice denominated in another
 			     currency than its budget is REFUSED by the spend legs (they
@@ -586,11 +601,13 @@
 		gap: 18px;
 		align-items: flex-end;
 	}
+
 	.control {
 		display: flex;
 		flex-direction: column;
 		gap: 6px;
 	}
+
 	.control-label {
 		font-size: 0.72rem;
 		font-weight: 600;
@@ -598,12 +615,14 @@
 		letter-spacing: 0.05em;
 		color: var(--text-muted);
 	}
+
 	.seg {
 		display: inline-flex;
 		border: 1px solid var(--border);
 		border-radius: 6px;
 		overflow: hidden;
 	}
+
 	.seg-btn {
 		padding: 7px 14px;
 		border: none;
@@ -614,10 +633,12 @@
 		font-size: 0.85rem;
 		text-transform: capitalize;
 	}
+
 	.seg-btn.active {
 		background: var(--accent-strong);
 		color: #fff;
 	}
+
 	.cf-input {
 		padding: 8px 10px;
 		border: 1px solid var(--border);
@@ -628,35 +649,47 @@
 		font-size: 0.9rem;
 		width: 180px;
 	}
+
 	.cf-error {
 		color: var(--danger);
 		font-weight: 500;
 	}
+
 	.chart-card {
 		background: var(--surface);
 		border: 1px solid var(--border);
 		border-radius: 10px;
 		padding: 20px;
 	}
+
 	.chart-card h2 {
 		font-size: 1rem;
 		margin: 0 0 16px;
+	}
+	.card-title {
+		margin: 0 0 16px;
+	}
+	.chart-card .card-title > h2 {
+		margin: 0;
 	}
 	.cf-bars {
 		display: flex;
 		flex-direction: column;
 		gap: 8px;
 	}
+
 	.cf-bar-row {
 		display: grid;
 		grid-template-columns: 90px 1fr 110px;
 		align-items: center;
 		gap: 12px;
 	}
+
 	.cf-bar-label {
 		font-size: 0.8rem;
 		color: var(--text-muted);
 	}
+
 	.cf-bar-bg {
 		display: flex;
 		height: 18px;
@@ -664,20 +697,25 @@
 		border-radius: 4px;
 		overflow: hidden;
 	}
+
 	.cf-bar {
 		height: 100%;
 	}
+
 	.cf-bar.committed {
 		background: #638cff;
 	}
+
 	.cf-bar.pending {
 		background: #b7c5f5;
 	}
+
 	.cf-bar-amount {
 		font-size: 0.82rem;
 		text-align: right;
 		font-variant-numeric: tabular-nums;
 	}
+
 	.cf-legend {
 		margin-top: 14px;
 		font-size: 0.78rem;
@@ -686,6 +724,7 @@
 		align-items: center;
 		gap: 6px;
 	}
+
 	.cf-dot {
 		display: inline-block;
 		width: 10px;
@@ -693,17 +732,21 @@
 		border-radius: 2px;
 		margin-left: 12px;
 	}
+
 	.cf-dot.committed {
 		background: #638cff;
 	}
+
 	.cf-dot.pending {
 		background: #b7c5f5;
 	}
+
 	.scenario-grid {
 		display: grid;
 		grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
 		gap: 14px;
 	}
+
 	.scenario-card {
 		display: flex;
 		flex-direction: column;
@@ -712,40 +755,48 @@
 		border: 1px solid var(--border);
 		border-radius: 8px;
 	}
+
 	.scenario-card.best {
 		border-color: #2faa6a;
 		background: rgba(47, 170, 106, 0.06);
 	}
+
 	.scenario-title {
 		font-size: 0.85rem;
 		font-weight: 600;
 		color: var(--text-muted);
 	}
+
 	.scenario-outflow {
 		font-size: 1.4rem;
 		font-weight: 700;
 		font-variant-numeric: tabular-nums;
 	}
+
 	.scenario-sub {
 		font-size: 0.72rem;
 		color: var(--text-muted);
 	}
+
 	.scenario-discount {
 		font-size: 0.82rem;
 		color: #2faa6a;
 		font-weight: 600;
 	}
+
 	.scenario-days {
 		font-size: 0.78rem;
 		color: var(--text-muted);
 		margin-top: 4px;
 	}
+
 	.cf-hint,
 	.cf-breach,
 	.cf-skipped {
 		font-size: 0.85rem;
 		margin: 0 0 12px;
 	}
+
 	/* Amber, not red: the projection is still usable — it just isn't seeded from
 	   the bank. Distinct from `.cf-hint` so "we declined your balance" can't be
 	   read as the ordinary "enter an opening balance" prompt. */
@@ -753,10 +804,12 @@
 		color: #d4940a;
 		font-weight: 600;
 	}
+
 	.cf-breach {
 		color: var(--danger);
 		font-weight: 600;
 	}
+
 	/* Secondary detail inside a table cell (the per-currency budget count) —
 	   muted on `--surface`, which clears 4.5:1 (see frontend/CLAUDE.md §
 	   Colour tokens). */
@@ -765,12 +818,14 @@
 		font-size: 0.78rem;
 		margin-left: 6px;
 	}
+
 	/* An overspent allocation. `--danger` is the on-a-dark-surface text token;
 	   never its `-strong` companion, which is a FILL. */
 	.cf-table td.num.over {
 		color: var(--danger);
 		font-weight: 600;
 	}
+
 	/* The table's own scroll container. `.chart-card` is a plain block with
 	   `overflow: visible`, so a four/six-column money table wider than the card
 	   used to push the DOCUMENT sideways rather than scroll inside the card —
@@ -779,11 +834,13 @@
 	.cf-table-scroll {
 		overflow-x: auto;
 	}
+
 	.cf-table {
 		width: 100%;
 		border-collapse: collapse;
 		font-size: 0.88rem;
 	}
+
 	.cf-table th,
 	.cf-table td {
 		padding: 8px 12px;
@@ -795,9 +852,11 @@
 		text-align: right;
 		font-variant-numeric: tabular-nums;
 	}
+
 	.cf-table td.closing {
 		font-weight: 600;
 	}
+
 	/* `<Badge>` owns colour and metrics; the caller owns placement. */
 	.cf-table td.closing :global(.below-minimum) {
 		margin-left: 6px;
@@ -810,4 +869,5 @@
 		text-align: center;
 		padding: 20px;
 	}
+
 </style>

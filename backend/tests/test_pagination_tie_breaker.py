@@ -24,6 +24,8 @@ from app.models.contract import Contract
 from app.models.expense import Expense
 from app.models.invoice import Invoice, InvoiceStatus
 from app.models.payment import Payment, PaymentRun
+from app.models.vendor import Vendor
+from app.services.payment_runs import PAYABLE_VENDOR_STATUS
 
 pytestmark = pytest.mark.asyncio
 
@@ -148,6 +150,14 @@ async def test_payment_list_pagination_survives_a_created_at_tie(realdb):
                     await s.execute(select(Invoice).where(Invoice.id == uuid.UUID(inv_id)))
                 ).scalar_one()
                 row.status = InvoiceStatus.approved
+                # A vendor created from an invoice starts unverified, and an
+                # unverified vendor can't be paid; this test is about paging.
+                if row.vendor_id is not None:
+                    await s.execute(
+                        update(Vendor)
+                        .where(Vendor.id == row.vendor_id)
+                        .values(status=PAYABLE_VENDOR_STATUS)
+                    )
                 await s.commit()
             pay = await c.post(
                 "/api/payments", json={"invoice_id": inv_id, "amount": "10.00", "method": "ach"}

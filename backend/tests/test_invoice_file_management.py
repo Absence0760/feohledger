@@ -203,7 +203,9 @@ async def test_delete_file_409_when_invoice_done(realdb):
     assert resp.status_code == 409
 
 
-async def test_ap_clerk_forbidden_on_replace_and_delete(realdb):
+async def test_ap_clerk_may_replace_and_delete_before_approval(realdb):
+    """A clerk fixes a wrongly-uploaded source document while the invoice is
+    still being entered (`api/invoice_entry`)."""
     async with realdb.client(key="a", role="admin") as c:
         invoice_id = await _create_invoice_with_file(c, "CLERK-FILE-001")
 
@@ -212,7 +214,35 @@ async def test_ap_clerk_forbidden_on_replace_and_delete(realdb):
             f"/api/invoices/{invoice_id}/file",
             files={"file": ("x.pdf", b"%PDF-1.4 x", "application/pdf")},
         )
+        assert replace.status_code == 200, replace.text
+
+        delete = await c.delete(f"/api/invoices/{invoice_id}/file")
+        assert delete.status_code == 200, delete.text
+
+
+async def test_ap_clerk_forbidden_on_replace_and_delete_once_approved(realdb):
+    """After sign-off the file is the evidence an approver signed against — a
+    clerk's entry window is closed, though a manager may still manage it."""
+    async with realdb.client(key="a", role="admin") as c:
+        invoice_id = await _create_invoice_with_file(c, "CLERK-FILE-002")
+
+    mk = realdb.sessionmaker("a")
+    async with mk() as s:
+        row = (await s.execute(select(Invoice).where(Invoice.id == invoice_id))).scalar_one()
+        row.status = InvoiceStatus.approved
+        row.approved_by = "Some Approver"
+        await s.commit()
+
+    async with realdb.client(key="a", role="ap_clerk") as c:
+        replace = await c.put(
+            f"/api/invoices/{invoice_id}/file",
+            files={"file": ("x.pdf", b"%PDF-1.4 x", "application/pdf")},
+        )
         assert replace.status_code == 403
+        assert replace.json()["detail"]["code"] == "invoice_entry_window_closed"
 
         delete = await c.delete(f"/api/invoices/{invoice_id}/file")
         assert delete.status_code == 403
+
+    row = await _get_invoice_row(realdb, invoice_id)
+    assert row.file_key is not None, "a refused delete must leave the file in place"

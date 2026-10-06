@@ -5,7 +5,18 @@ vendor list and a stack of open AP from whatever tool they're replacing.
 The CSV importers let you load both in a few minutes instead of
 hand-keying them or building a throw-away Bill.com → Better-AP ETL.
 
-Two endpoints, both `admin` / `ap_manager` only:
+Two endpoints. Vendor import is `vendor.manage` (`admin` / `ap_manager` by
+default); invoice import is `admin` / `ap_manager` / `ap_clerk`
+(`invoice_entry.INVOICE_IMPORT_ROLES` — no `cfo`). **Open AP** — rows at `new`
+or `rejected` — is entry: it goes through approval with the importer stamped as
+uploader. A **historical** `done` / `paid` row asserts a payment already
+happened and never meets approval, so it is refused per row unless the importer
+holds `admin` or `ap_manager` (`invoice_entry.HISTORICAL_IMPORT_ROLES`).
+Because a blank `status` defaults to `done`, a clerk's file needs an explicit
+`status` column. Vendors a row names
+that don't exist yet are auto-created as `unverified` stubs with no bank or tax
+details whoever imports — they still need `vendor.manage` to verify, and a
+payment to an unverified vendor is blocked. See `backend/app/api/invoice_entry.py`.
 
 | Endpoint | What it does |
 |---|---|
@@ -105,6 +116,33 @@ invoice write paths send as their 422 `detail` (`gl_chart.ChartRefusal.body`).
 The web import modal states it in the reader's language from `code` and falls
 back to `message`; every other row error is still just `{row, message}`.
 
+## Live rows are checked for warnings on import
+
+Every row the import lands at `new` or `rejected` — the two importable statuses
+that reach approval — runs through `invoice_warnings.refresh_warnings` before the
+import returns, exactly as a hand-keyed invoice and an upload without extraction
+do. So a duplicate, a round-amount or future-date fraud flag, an unverified
+vendor and the rest are on the row (`Invoice.warnings`), and their exceptions
+are open in the queue, from the moment it lands. A `duplicate` exception blocks
+a payment run, which is the point: a row that repeats an invoice already in the
+ledger used to sit clean at `new` until someone edited or submitted it.
+
+The refresh runs after the batch is flushed, so rows in the same file see each
+other, and inside the request's transaction, so the warnings and exceptions
+commit with the invoices or not at all. The org's fraud-rule settings apply.
+
+Historical `done` / `paid` rows are **not** refreshed. They never reach a
+payment run, and flagging years of settled history would bury the exception
+queue in findings nobody can act on. They still count as the other side of the
+duplicate check: a `new` row that repeats a `paid` one is flagged.
+
+The import's own dedup on `(vendor, invoice_number)` still runs first and skips
+an exact repeat of a row linked to the same vendor record. What reaches the
+warning check is what that key cannot see — an existing invoice with no linked
+vendor (emailed in or extracted, never matched), a different spelling of the
+number (`INV-001` vs `INV-1`), or the same supplier under a second vendor
+record.
+
 ## The importer is recorded as the uploader
 
 Every invoice the importer creates carries `Invoice.uploaded_by_id` — the AP
@@ -159,8 +197,9 @@ Every invoice row the importer creates is stamped, on the existing
 tenant used before; the workflow engine never ran on it. Metrics that describe
 *this platform's* automation therefore have to exclude it, and status cannot
 identify it — `done`, `paid` and `rejected` are each reachable both by import
-and natively. The first consumer is the dashboard's touchless rate, which
-subtracts marked rows from **both** its legs; see
+and natively. The first consumer is the touchless rate (`services/touchless`,
+shared by the dashboard and the experiments readout), which excludes marked
+rows from **both** its legs; see
 `backend/docs/analytics.md` § Imported rows are outside the metric.
 
 `imported_invoice_clause()` / `native_invoice_clause()` in
@@ -221,7 +260,8 @@ A direct caller of `import_vendors_csv` / `import_invoices_csv` that omits
   not upload the original PDF. If you need the file stored, upload it
   through the normal invoice upload endpoint after the row lands.
 - **No extraction.** No AI is run on imported rows. Confidence is
-  blank, line items are empty.
+  blank, line items are empty. (Rule-based warnings do run on live rows —
+  see § Live rows are checked for warnings on import.)
 - **No ERP sync.** Imported invoices stay local until they flow through
   the ERP-export step like any other invoice.
 - **No workflow instance.** Terminal-status imports (`done`, `paid`)

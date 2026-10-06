@@ -1,4 +1,5 @@
 <script lang="ts">
+	import HelpTip from '#lib/components/help/HelpTip.svelte';
 	import { goto } from '$app/navigation';
 	import { formatDate } from '#lib/utils/time.ts';
 	import { auth } from '#lib/stores/auth.svelte.ts';
@@ -85,6 +86,8 @@
 		custom role granting a fraud-sensitive permission) whose last <em>mutating</em>
 		privileged action is stale or absent — the periodic SOX access-control review.
 		A read (viewing a record) doesn't reset the clock; only a write does.
+		<HelpTip term="access-review" />
+		<HelpTip term="role" />
 	</p>
 
 	{#if lastAcknowledged}

@@ -1895,6 +1895,24 @@ abstract class AppLocalizations {
   /// **'Earlier payment unreconciled — may still be in flight'**
   String get payQueueBlockedPaymentReconciliation;
 
+  /// No description provided for @payQueueBlockedQualityHold.
+  ///
+  /// In en, this message translates to:
+  /// **'Quality hold — goods failed or await inspection'**
+  String get payQueueBlockedQualityHold;
+
+  /// No description provided for @payQueueBlockedPoMismatch.
+  ///
+  /// In en, this message translates to:
+  /// **'Doesn’t match its purchase order — unresolved'**
+  String get payQueueBlockedPoMismatch;
+
+  /// No description provided for @payQueueBlockedVendorNotActive.
+  ///
+  /// In en, this message translates to:
+  /// **'Vendor not verified or not active — verify the vendor first'**
+  String get payQueueBlockedVendorNotActive;
+
   /// No description provided for @payQueueBlockedAppliedCreditMismatch.
   ///
   /// In en, this message translates to:

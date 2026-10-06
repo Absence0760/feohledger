@@ -97,7 +97,16 @@ def _resolver_raising(exc_to_raise):
 
 async def _run(resolver):
     exc = _exception()
-    invoice = SimpleNamespace(id=exc.invoice_id, entity_id=None, correlation_id=uuid.uuid4())
+    invoice = SimpleNamespace(
+        id=exc.invoice_id,
+        entity_id=None,
+        correlation_id=uuid.uuid4(),
+        # The real row always carries the implicated-actor set; `po_mismatch`
+        # is payment-blocking, so the queue segregation check reads it.
+        uploaded_by_id=None,
+        segregation_actor_ids=None,
+        status="ready_for_review",
+    )
     db = _mock_db(exc, invoice)
     with patch("app.services.exception_agents.coordinator.get_resolver", return_value=resolver):
         result = await run_agent(
@@ -183,7 +192,15 @@ async def test_a_gl_chart_refusal_escalates_with_its_sentence():
 async def test_a_server_error_is_not_swallowed_as_an_escalation():
     """A 5xx is a fault, not a refusal — it must not be recorded as a decision."""
     exc = _exception()
-    invoice = SimpleNamespace(id=exc.invoice_id, entity_id=None, correlation_id=uuid.uuid4())
+    invoice = SimpleNamespace(
+        id=exc.invoice_id,
+        entity_id=None,
+        correlation_id=uuid.uuid4(),
+        # The real row always carries the implicated-actor set; `po_mismatch`
+        # is payment-blocking, so the queue segregation check reads it.
+        uploaded_by_id=None,
+        segregation_actor_ids=None,
+    )
     db = _mock_db(exc, invoice)
     with patch(
         "app.services.exception_agents.coordinator.get_resolver",
@@ -314,3 +331,34 @@ async def test_refusal_unwinds_the_apply_and_still_commits_the_escalation(realdb
         ).scalar_one()
         assert decision.action_taken == "escalated"
         assert "CFO approval" in decision.rationale
+
+
+@pytest.mark.asyncio
+async def test_a_finding_the_agents_own_change_left_in_place_escalates_and_unwinds():
+    """A resolver relinks the PO (or corrects the amount), re-runs the warnings,
+    and the PO match STILL finds the problem — over-billing against the newly
+    linked PO under the org's own rule. `_ensure_exception` folds that finding
+    into the very row being decided, so resolving it would clear a finding the
+    agent never evaluated. The refresh marks the `Decision` refound; the
+    coordinator unwinds the apply (approval included) and escalates."""
+    from app.services.exception_lifecycle import mark_refound
+
+    class _Resolver:
+        agent_type = "fake_v1"
+
+        async def evaluate(self, _db, *, exception, invoice, org_settings):
+            return AgentEvaluation(
+                recommended_action=ACTION_AUTO_RESOLVED,
+                confidence=Decimal("1"),
+                rationale="ok",
+                changes={},
+            )
+
+        async def apply(self, _db, *, exception, **kw):
+            mark_refound(exception.id)  # what the refresh inside apply does
+
+    exc, db, result = await _run(_Resolver())
+    assert exc.status == "escalated"
+    assert result.decision.action_taken == "escalated"
+    assert "still reports this finding" in result.decision.rationale
+    assert db.savepoint.rolled_back is True

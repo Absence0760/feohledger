@@ -114,7 +114,29 @@ env:
   # the app shell plus the heaviest route instead of every chunk — the same
   # distortion the 2026-09-15 entry corrected for locale catalogues applies to
   # route-split documents nobody loads together.
-  MAX_TOTAL_KB: 875
+  # 2026-10-06 — total 875 → 1075. The in-app help centre (PR #516) measured
+  # 974 on CI (976 locally) against main's ~850. About 125 KB of growth, and
+  # most of it is text nobody downloads unless they open /help:
+  #   - guide prose, one lazy chunk at ~67 KB that only /help routes import;
+  #   - the eight inline-SVG diagrams, ~14 KB, likewise /help-only;
+  #   - ~13 KB of catalogue growth (glossary term names, one-line tooltips
+  #     and diagram labels, in every locale), counted once under the
+  #     one-catalogue rule;
+  #   - the rest is the ⓘ HelpTip component on ~160 call sites and the UI
+  #     for the fixes the same PR shipped (clerk entry, payment holds,
+  #     discounted payment).
+  # The 2026-09-16 entry named its own trigger: "if this binds again from
+  # route chunks rather than shared weight, consider whether the total should
+  # count the app shell plus the heaviest route". It has fired — ~81 of the
+  # 125 KB is route-split help content no other page loads — so the metric
+  # change is filed in docs/followups.md rather than ratcheted past silently.
+  # ~10% headroom on 976, the same margin as the last three entries.
+  #
+  # Watch the OTHER ceiling: the largest chunk is now the ja catalogue at
+  # 95 KB of MAX_LARGEST_CHUNK_KB's 100. The next few hundred keys will bind
+  # it. The durable fix (also filed) is to load the help-only keys as their
+  # own lazy catalogue slice, not to raise the per-chunk ceiling.
+  MAX_TOTAL_KB: 1075
   MAX_LARGEST_CHUNK_KB: 100
 
 jobs:

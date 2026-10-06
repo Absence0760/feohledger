@@ -172,7 +172,12 @@ async def test_settlement_at_full_amount_does_not_falsely_capture(realdb):
     """Control: an accepted offer whose invoice is instead paid at the FULL
     (undiscounted) amount must NOT be captured — a false capture would
     misreport savings that were never actually realized, the same class of
-    bug this issue closes, just inverted."""
+    bug this issue closes, just inverted.
+
+    Since a run takes an accepted, unexpired discount itself
+    (`payment_runs.payable_amounts`), the full amount is paid only once the
+    offer's deadline has passed — so the offer is back-dated past its 10-day
+    tier before the run is built."""
     info = realdb.info("a")
     mk = realdb.sessionmaker("a")
     org_id = info.org_id
@@ -193,7 +198,13 @@ async def test_settlement_at_full_amount_does_not_falsely_capture(realdb):
         accept_resp = await c.post(f"/api/discounts/offers/{offer_id}/accept", json={})
         assert accept_resp.status_code == 200, accept_resp.text
 
-        # No credit memo this time — the run pays the full $500.00.
+    async with mk() as s:
+        offer = await s.get(DiscountOffer, uuid.UUID(offer_id))
+        offer.valid_from = date.today() - timedelta(days=30)
+        await s.commit()
+
+    async with realdb.client(key="a", role="ap_manager") as c:
+        # No credit memo, and the deadline has passed — the run pays $500.00.
         run_resp = await c.post(
             "/api/payments/runs",
             json={"items": [{"invoice_id": invoice_id, "method": "ach"}]},

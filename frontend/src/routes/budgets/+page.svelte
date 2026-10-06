@@ -297,6 +297,7 @@
 			value={allocatedTotal}
 			sub={allocatedRest}
 			label={m('budgets.kpi.totalAllocated')}
+			helpTerm="budget"
 		/>
 		<KpiCard value={total} label={m('budgets.kpi.budgets')} />
 		<KpiCard value={DIMENSION_CHIPS.length - 1} label={m('budgets.kpi.dimensions')} />

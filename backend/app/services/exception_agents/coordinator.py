@@ -23,7 +23,12 @@ from app.services.exception_agents.base import (
 )
 from app.services.exception_agents.registry import get_resolver
 from app.services.exception_agents.resolvers.amount_mismatch import NotApprovable
-from app.services.exception_lifecycle import record_decision, refusal_message, segregation_refusal
+from app.services.exception_lifecycle import (
+    deciding,
+    record_decision,
+    refusal_message,
+    segregation_refusal,
+)
 from app.utils.http import detail_text
 
 logger = logging.getLogger(__name__)
@@ -203,10 +208,11 @@ async def run_agent(
     # to fix. Every other way an apply can fail records a decision and
     # escalates; so does this.
     #
-    # Nothing today can reach it: `duplicate` and `fraud_flag` are escalate-only
-    # stubs, and `line_total_mismatch` / `payment_reconciliation` have no
-    # resolver at all, so no payment-blocking type has an auto-resolving agent.
-    # It is the gate a future one arrives behind, and it is tested as such.
+    # `po_mismatch` reaches it routinely: it is payment-blocking and has
+    # auto-resolving resolvers (amount, missing-PO, multi-PO split), so a run
+    # the invoice's uploader triggers escalates here. `duplicate` and
+    # `fraud_flag` are escalate-only stubs, and the other blocking types have no
+    # resolver at all.
     refusal = (
         segregation_refusal(
             exception, invoice, actor_id, action="resolve", org_settings=org_settings
@@ -243,21 +249,31 @@ async def run_agent(
             # so the gate sees the post-correction figure. Escalating after such
             # a refusal without unwinding would commit the agent's amount change
             # on an invoice nobody approved.
-            async with db.begin_nested():
-                await resolver.apply(
-                    db,
-                    exception=exception,
-                    invoice=invoice,
-                    evaluation=evaluation,
-                    actor_id=actor_id,
-                    actor_roles=actor_roles,
-                    # The tenant's OWN config, not the platform defaults. The
-                    # resolvers hand this to `approve_invoice` /
-                    # `refresh_warnings` exactly as every HTTP approval door
-                    # does — otherwise a fraud rule the org disabled still opens
-                    # a payment-blocking exception, unattended.
-                    org_settings=org_settings,
-                )
+            # `deciding` keeps THIS row out of the PO-match auto-close: a
+            # resolver that relinks or corrects the invoice re-runs
+            # `refresh_warnings`, which would otherwise close the row as "PO
+            # match" before the agent's own resolution below — losing the
+            # triggering actor from the audit row and resolving it twice.
+            with deciding(exception.id) as decision:
+                async with db.begin_nested():
+                    await resolver.apply(
+                        db,
+                        exception=exception,
+                        invoice=invoice,
+                        evaluation=evaluation,
+                        actor_id=actor_id,
+                        actor_roles=actor_roles,
+                        # The tenant's OWN config, not the platform defaults. The
+                        # resolvers hand this to `approve_invoice` /
+                        # `refresh_warnings` exactly as every HTTP approval door
+                        # does — otherwise a fraud rule the org disabled still opens
+                        # a payment-blocking exception, unattended.
+                        org_settings=org_settings,
+                    )
+                    if decision.refound:
+                        # Raised INSIDE the savepoint so the apply — relink,
+                        # amount change, approval — unwinds with it.
+                        raise _FindingPersists(invoice.status)
         except (NotApprovable, HTTPException) as exc:
             # Two families of refusal, one outcome — an escalation with a
             # recorded decision.
@@ -287,7 +303,17 @@ async def run_agent(
             # Reload it explicitly, on the async path, before anything reads it.
             await db.refresh(invoice)
 
-            if isinstance(exc, NotApprovable):
+            if isinstance(exc, _FindingPersists):
+                reason = (
+                    "The purchase-order match still reports this finding after the "
+                    "agent's change (re-checked under the org's own match rules). "
+                    "Escalated to a human."
+                )
+                logger.info(
+                    "Agent change left the PO-match finding in place on invoice %s; escalating",
+                    invoice.id,
+                )
+            elif isinstance(exc, NotApprovable):
                 reason = (
                     f"Could not auto-approve: invoice is '{exc.status}', not "
                     "ready_for_review. Escalated to a human."
@@ -381,6 +407,14 @@ async def _escalate(
         invoice=invoice,
         via="agent",
     )
+
+
+class _FindingPersists(NotApprovable):
+    """The refresh a resolver's own change triggered still reports the finding
+    of the exception being decided (``exception_lifecycle.Decision.refound``).
+    Resolving would let this row swallow a finding the agent never evaluated —
+    over-billing against a newly linked PO, for one — so the coordinator
+    unwinds the apply and escalates."""
 
 
 def _record(

@@ -129,7 +129,7 @@ async def test_sweep_passes_the_stored_mark_and_advances_it_for_the_next_tick():
     settings_blob: dict = {"qms": {"provider": "generic"}}
     calls: list = []
 
-    async def fake_sweep(db_name, oid, cfg, *, since=None):
+    async def fake_sweep(db_name, oid, cfg, *, since=None, org_settings=None):
         calls.append(since)
         return {"fetched": 1, "created": 1, "updated": 0, "unchanged": 0, "skipped": 0}
 
@@ -205,7 +205,7 @@ async def test_explicit_since_overrides_every_orgs_stored_mark():
     override = datetime(2020, 1, 1, tzinfo=UTC)
     calls: list = []
 
-    async def fake_sweep(db_name, oid, cfg, *, since=None):
+    async def fake_sweep(db_name, oid, cfg, *, since=None, org_settings=None):
         calls.append(since)
         return {"fetched": 0, "created": 0, "updated": 0, "unchanged": 0, "skipped": 0}
 
@@ -350,7 +350,7 @@ async def test_skipped_and_unchanged_are_surfaced_on_the_sweep_result():
     """
     org_id = uuid.uuid4()
 
-    async def fake_sweep(db_name, oid, cfg, *, since=None):
+    async def fake_sweep(db_name, oid, cfg, *, since=None, org_settings=None):
         return {"fetched": 5, "created": 1, "updated": 1, "unchanged": 1, "skipped": 2}
 
     with (

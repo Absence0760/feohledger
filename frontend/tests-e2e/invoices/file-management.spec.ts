@@ -2,6 +2,7 @@ import {
 	API_BASE,
 	authedTenantHeaders,
 	currentTenantSlug,
+	deleteInvoicesWhere,
 	expect,
 	signInAndWait,
 	tenantPsql,
@@ -20,10 +21,12 @@ import {
  *     `done`.
  *   - `DELETE /api/invoices/{id}/file` — delete the file. 200 on success,
  *     404 if there's no file, 409 once the invoice is `done`.
- *   Both gated to admin/ap_manager/cfo (ap_clerk gets 403).
+ *   Both take the entry roles, ap_clerk included — a clerk only inside the
+ *   entry window (`backend/app/api/invoice_entry.py`).
  *
  * Frontend contract (`InvoiceModal.svelte`): a file-management toolbar,
- * hidden entirely for ap_clerk or once the invoice is `done`.
+ * hidden once the invoice is `done`, and for an entry-only ap_clerk once it
+ * leaves the entry window (submitted, or ever approved).
  *   - No file yet  → one "Upload File" button (aria-label "Upload invoice
  *     file"). Selecting a file attaches it.
  *   - Has a file   → "Replace" (picks + swaps the file) + a two-click
@@ -129,24 +132,46 @@ test.describe('/invoices — Invoice detail file management', () => {
 		});
 	});
 
-	test('ap_clerk sees no file-management affordance on any invoice detail', async ({
+	// A clerk ENTERS invoices (`backend/app/api/invoice_entry.py`), so the file
+	// routes take them — but only inside the entry window, which closes at
+	// submit. The toolbar has to follow the same line: offered on a `new`
+	// invoice, gone once it is `ready_for_review`.
+	test('ap_clerk gets the file toolbar inside the entry window and loses it at submit', async ({
 		page,
 		tenantClerk
 	}) => {
-		await signInAndWait(page, tenantClerk);
-		await page.goto('/invoices');
+		const invoiceNumber = `E2E-FILEMGMT-CLERK-${Date.now()}`;
+		const create = await page.request.post(`${API_BASE}/api/invoices`, {
+			headers: await authedTenantHeaders(page),
+			data: { vendor: 'E2E File Mgmt Vendor', invoice_number: invoiceNumber, amount: '12.00' }
+		});
+		expect(create.status()).toBe(201);
+		const invoiceId = ((await create.json()) as { id: string }).id;
 
-		const firstRow = page.locator('table tbody tr').first();
-		await expect(firstRow).toBeVisible({ timeout: 10_000 });
-		await firstRow.getByRole('button', { name: 'Edit' }).click();
+		try {
+			await signInAndWait(page, tenantClerk);
+			await page.goto(`/invoices?id=${invoiceId}`);
+			const detail = page.locator('div.modal[role="dialog"]', { hasText: invoiceNumber });
+			await expect(detail.getByRole('button', { name: 'Upload invoice file' })).toBeVisible({
+				timeout: 10_000
+			});
 
-		const detail = page.locator('div.modal[role="dialog"]').first();
-		await expect(detail).toBeVisible();
-
-		await expect(detail.getByRole('button', { name: 'Upload invoice file' })).toHaveCount(0);
-		await expect(detail.getByRole('button', { name: 'Replace' })).toHaveCount(0);
-		await expect(detail.getByRole('button', { name: 'Delete File' })).toHaveCount(0);
-		await expect(detail.getByRole('button', { name: 'Confirm Delete' })).toHaveCount(0);
+			tenantPsql(
+				`UPDATE invoices SET status = 'ready_for_review' WHERE id = '${invoiceId}'`,
+				currentTenantSlug()
+			);
+			await page.reload();
+			// Positive anchor first, so the absence checks can't pass against a
+			// half-rendered modal.
+			await expect(detail.getByTestId('invoice-modal-status')).toHaveValue('Ready for Review', {
+				timeout: 10_000
+			});
+			await expect(detail.getByRole('button', { name: 'Upload invoice file' })).toHaveCount(0);
+			await expect(detail.getByRole('button', { name: 'Replace' })).toHaveCount(0);
+			await expect(detail.getByRole('button', { name: 'Delete File' })).toHaveCount(0);
+		} finally {
+			deleteInvoicesWhere(`id = '${invoiceId}'`, currentTenantSlug());
+		}
 	});
 
 	test('replace/delete are refused (409) once the invoice is done — bypassing the UI', async ({

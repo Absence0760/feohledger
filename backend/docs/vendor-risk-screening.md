@@ -139,8 +139,12 @@ Call sites:
   they controlled, sign in as it, stage the redirect and approve it alone. It
   now also refuses when `requester_provisioned_by_user_id` — frozen at staging
   from `vendor_users.provisioned_by_user_id` — equals the approver. The
-  `fraud_flag` above is a *signal*, not the second control: exception
-  resolution has no segregation check of its own. See
+  `fraud_flag` above is also a second control against the same actor: the
+  approver is stamped as each flag's `exceptions.raised_by_user_id`, and
+  `services/exception_lifecycle.segregation_refusal` refuses that raiser
+  resolving or dismissing it (escalating stays open), so whoever approved the
+  change cannot clear the holds it raised and pay the run
+  (`docs/decisions.md` §169–§170). See
   [`supplier-portal.md`](supplier-portal.md) § Credential provenance and the BEC
   dual control.
 - **Approved tax-ID change** (`api/vendors.py::approve_change_request`) —
@@ -159,7 +163,8 @@ Call sites:
 `check_payment_compliance` refuses a payment up front when
 `vendor.payments_blocked` is set — before FX lock and before any payment
 adapter is touched. A live sanctions `match` (from the pre-payment screen or a
-prior screen) keeps the vendor blocked until an admin explicitly unblocks via
+prior screen) keeps the vendor blocked until someone holding the `vendor.block`
+permission (admin and AP manager by default) explicitly unblocks via
 `POST /api/vendors/{id}/unblock`. `POST /api/vendors/{id}/block` is the manual
 override.
 
@@ -218,11 +223,11 @@ the control is hidden for a non-holder; re-screen is gated on
 
 ### The "Payments blocked" KPI is not derived from the queue
 
-The page's KPI row carries three whole-set figures. Two of them — *Sanctions
-matches* and *Needs review* — are counted off `items`, which is legitimate:
-the review queue is unpaginated and is **exactly** `screening_status IN
-('match','review')`, so the array IS the population those two describe. (If
-that endpoint ever paginates, both become the same defect described below.)
+The page's KPI row carries three whole-set figures, and all three come from
+`GET /api/vendors/counts`. *Sanctions matches* and *Needs review* were once
+counted off the loaded queue's `items`, which held only while the queue was
+unpaginated; it is paginated now, so they read `by_screening_status` instead
+(see [Review queue](#review-queue)).
 
 *Payments blocked* is not, and cannot be. `POST /api/vendors/{id}/block` sets
 `Vendor.payments_blocked` and deliberately never touches `screening_status`, so

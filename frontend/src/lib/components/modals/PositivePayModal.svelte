@@ -18,6 +18,7 @@
 	import { m } from '#lib/i18n/store.svelte.ts';
 	import { api } from '#lib/api.ts';
 	import Badge from '#lib/components/ui/Badge.svelte';
+	import HelpTip from '#lib/components/help/HelpTip.svelte';
 	import Modal from '#lib/components/ui/Modal.svelte';
 	import Money from '#lib/components/ui/Money.svelte';
 	import { toast } from '#lib/components/ui/Toast.svelte';
@@ -303,6 +304,7 @@
 				{:else}
 					{m('positivePay.modal.hintAchAuthorization')}
 				{/if}
+				<HelpTip term="positive-pay" />
 			</p>
 
 			<div class="modal-footer">
@@ -387,6 +389,7 @@
 						{m('positivePay.modal.fraudNotePre')}<a href="/exceptions?type=fraud_flag"
 							>{m('positivePay.modal.fraudNoteLink')}</a
 						>{m('positivePay.modal.fraudNotePost')}
+						<HelpTip term="payment-blocking-exception" />
 					</p>
 				{/if}
 			</div>

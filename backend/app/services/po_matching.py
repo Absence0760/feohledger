@@ -15,6 +15,7 @@ from app.models.invoice import Invoice
 from app.models.procurement import GoodsReceipt, PurchaseOrder, po_currency_code
 from app.models.quality_inspection import QualityInspection
 from app.services.invoice_warning_catalog import po_match_issue
+from app.services.matching_rules import resolve_match_rule
 from app.tenant import apply_entity_scope
 
 # Goods-receipt statuses that record a delivery which was undone or never
@@ -200,6 +201,17 @@ class MatchResult:
     #: `to_json_dict()` like every other figure here.
     ordered_quantity: Decimal | None = None
     received_quantity: Decimal | None = None
+    #: 3-way, SHORT receipt only: the slice of ``po_total`` the received units
+    #: cover (``po_total × received / ordered``), in the invoice's currency.
+    #: ``None`` when nothing is short, or the two currencies differ.
+    received_value: Decimal | None = None
+    #: The invoice bills MORE than ``received_value`` by more than the match
+    #: tolerance — paying it would pay for goods that have not arrived. This,
+    #: not a short receipt as such, is what opens a payment-blocking
+    #: ``po_mismatch``: an invoice for just the shipment that did arrive (a
+    #: split or blanket PO billed delivery by delivery) is partial BILLING, and
+    #: never blocks (``invoice_warnings._refresh_po_match``).
+    billed_beyond_receipt: bool = False
 
     #: One `{code, params, message}` entry per finding, built by
     #: `invoice_warning_catalog.po_match_issue` — the client localizes on
@@ -400,6 +412,18 @@ async def match_invoice_to_po(
                 )
                 if result.status == "matched":
                     result.status = "partial"
+                # Does the invoice bill beyond what arrived? Same exact-Decimal
+                # tolerance as the amount leg, measured against the received
+                # slice of the PO rather than its whole total. Skipped when the
+                # currencies differ — that is already a mismatch with no figure.
+                if result.currency_check != CURRENCY_DIFFERENT:
+                    received_value = po_total * gr_qty_total / po_qty_total
+                    result.received_value = received_value
+                    if received_value > 0:
+                        over_pct = (invoice_amount - received_value) / received_value * 100
+                        result.billed_beyond_receipt = over_pct > tolerance
+                    else:
+                        result.billed_beyond_receipt = invoice_amount > 0
             elif po_qty_total > 0 and gr_qty_total > po_qty_total:
                 # Over-receipt. The short side was flagged from the start; the
                 # long side never was, so more units booked in than were ever
@@ -502,8 +526,34 @@ async def match_invoice_to_po(
         "within_tolerance": result.within_tolerance,
         "has_gr": gr is not None,
         "over_receipt": result.over_receipt,
+        "billed_beyond_receipt": result.billed_beyond_receipt,
         "has_inspection": inspection is not None,
         "inspection_result": result.inspection_result,
     }
 
     return result
+
+
+async def match_invoice_under_org_rules(
+    db: AsyncSession, invoice: Invoice, org_settings: dict | None
+) -> MatchResult:
+    """:func:`match_invoice_to_po` under the org's OWN match rule for this
+    invoice (per-vendor / per-commodity tolerance and ``require_inspection``,
+    ``matching_rules.resolve_match_rule``).
+
+    The one way anything that DECIDES on a match should call the matcher.
+    ``po_mismatch`` blocks payment, so a caller judging "is this invoice clean"
+    at the platform-default 5 % while the org's rule for the vendor is 1 % can
+    clear an over-billing finding the org's own refresh would raise — which is
+    how an exception agent's post-check used to read ``matched`` on an invoice
+    still over-billed against its newly linked PO.
+    """
+    rule = resolve_match_rule(
+        org_settings, vendor_id=invoice.vendor_id, gl_account=invoice.gl_account
+    )
+    return await match_invoice_to_po(
+        db,
+        invoice,
+        tolerance_pct=rule.tolerance_pct,
+        require_inspection=rule.require_inspection,
+    )

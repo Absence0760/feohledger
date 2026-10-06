@@ -6,6 +6,7 @@
 	import KpiCard from '#lib/components/ui/KpiCard.svelte';
 	import Badge from '#lib/components/ui/Badge.svelte';
 	import EmptyState from '#lib/components/ui/EmptyState.svelte';
+	import HelpTip from '#lib/components/help/HelpTip.svelte';
 	import {
 		formatMoney,
 		isPositiveAmount,
@@ -31,6 +32,10 @@
 	// hand-maintained literal that drifted silently the moment the API gained
 	// a non-optional field. Exported, the fixtures `satisfies` it and
 	// `pnpm check:e2e` turns that drift into a compile error.
+
+	// Industry best-in-class touchless (straight-through) rate — Ardent
+	// Partners, 2025. The KPI turns green at or above it.
+	const TOUCHLESS_BEST_IN_CLASS_PCT = 49;
 
 	let data = $state<DashboardData | null>(null);
 	let loading = $state(true);
@@ -225,6 +230,7 @@
 			<KpiCard
 				value={data ? fmt(data.reporting.total_amount) : null}
 				label={m('dashboard.kpi.totalAmount')}
+				helpTerm="reporting-currency"
 				pending={loading}
 			/>
 			<KpiCard
@@ -237,10 +243,15 @@
 				label={m('dashboard.kpi.pending')}
 				pending={loading}
 			/>
+			<!-- Touchless = no person intervened (backend/docs/analytics.md §
+			     Touchless rate). Green from the industry's best-in-class figure
+			     (Ardent Partners 2025, ~49%) — the old 80% bar was set for a
+			     cleared-vs-rejected figure and is out of reach for a true one. -->
 			<KpiCard
 				value={data ? `${data.touchless_rate}%` : null}
 				label={m('dashboard.kpi.touchlessRate')}
-				highlight={data && data.touchless_rate >= 80 ? 'green' : null}
+				helpTerm="touchless-rate"
+				highlight={data && data.touchless_rate >= TOUCHLESS_BEST_IN_CLASS_PCT ? 'green' : null}
 				pending={loading}
 			/>
 			<!-- The five above are the row's spine: every tenant has those
@@ -258,12 +269,13 @@
 					</a>
 				{/if}
 				{#if data.stale_approvals > 0}
-					<KpiCard value={data.stale_approvals} label={m('dashboard.kpi.staleApprovals')} highlight="red" />
+					<KpiCard value={data.stale_approvals} label={m('dashboard.kpi.staleApprovals')} highlight="red" helpTerm="escalation" />
 				{/if}
 				{#if isPositiveAmount(data.total_rebates)}
 					<KpiCard
 						value={fmt(data.total_rebates)}
 						label={m('dashboard.kpi.rebatesEarned')}
+						helpTerm="card-rebate"
 						highlight="green"
 						sub={(data.excluded_rebate_count ?? 0) > 0
 							? m('dashboard.kpi.rebatesExcluded', {
@@ -339,7 +351,10 @@
 		<div class="charts-grid">
 			<!-- Invoice Pipeline -->
 			<div class="chart-card">
-				<h2>{m('dashboard.chart.pipeline')}</h2>
+				<div class="help-row title-row">
+					<h2>{m('dashboard.chart.pipeline')}</h2>
+					<HelpTip term="workflow" />
+				</div>
 				<div class="pipeline">
 					{#each PIPELINE_ORDER.filter(s => (data?.pipeline[s] ?? 0) > 0) as status}
 						{@const count = data?.pipeline[status] ?? 0}
@@ -398,7 +413,10 @@
 
 			<!-- Aging -->
 			<div class="chart-card">
-				<h2>{m('dashboard.chart.aging')}</h2>
+				<div class="help-row title-row">
+					<h2>{m('dashboard.chart.aging')}</h2>
+					<HelpTip term="invoice-aging" />
+				</div>
 				<!-- ONE notice for the band set, matching the single
 				     `aging_reporting.unconverted_count` the API returns: the
 				     actionable fact ("some of this is unconverted") is the same
@@ -474,7 +492,10 @@
 			     Amounts are the reporting-currency figures, labelled with the
 			     currency THIS payload names. -->
 			<div class="chart-card" data-testid="discount-capture">
-				<h2>{m('dashboard.chart.discountCapture')}</h2>
+				<div class="help-row title-row">
+					<h2>{m('dashboard.chart.discountCapture')}</h2>
+					<HelpTip term="dynamic-discounting" />
+				</div>
 				<!-- The disclosure sits with the figure, not in a tooltip: a
 				     non-zero count means some eligible rows entered the totals
 				     below at face value because no rate into the reporting
@@ -579,6 +600,15 @@
 		font-size: 0.88rem;
 		font-weight: 600;
 		color: var(--text);
+	}
+
+	/* A chart heading's ⓘ row (global `.help-row`) takes the heading's bottom
+	   margin; the scoped `h2` margin outranks the global reset, so zero it here. */
+	.title-row {
+		margin-bottom: 14px;
+	}
+	.title-row h2 {
+		margin: 0;
 	}
 
 	.loading {
@@ -700,6 +730,7 @@
 		.charts-grid {
 			grid-template-columns: 1fr;
 		}
+
 	}
 
 	.chart-card.wide {
@@ -994,5 +1025,6 @@
 		.kpi-row {
 			flex-direction: column;
 		}
+
 	}
 </style>

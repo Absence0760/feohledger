@@ -20,6 +20,7 @@
 	import type { ReconSourceFormat } from '#lib/types/vendorStatementRecon.ts';
 	import { auth } from '#lib/stores/auth.svelte.ts';
 	import Badge from '#lib/components/ui/Badge.svelte';
+	import HelpTip from '#lib/components/help/HelpTip.svelte';
 	import Modal from '#lib/components/ui/Modal.svelte';
 	import Money from '#lib/components/ui/Money.svelte';
 	import RowAction from '#lib/components/ui/RowAction.svelte';
@@ -467,6 +468,7 @@
 							confidence: formatExtractionConfidence(detail.extraction.confidence),
 							n: detail.extraction.line_count
 						})}
+						<HelpTip term="confidence-score" />
 					</p>
 					{#if ambiguousSkipCount(detail.extraction) > 0}
 						<!-- The reader saw these rows and refused to book them, so the
@@ -547,7 +549,7 @@
 						<th class="right">{m('vendorStatements.modal.thStatementAmount')}</th>
 						<th class="right">{m('vendorStatements.modal.thOurAmount')}</th>
 						<th class="right">{m('vendorStatements.modal.thDifference')}</th>
-						<th>{m('vendorStatements.modal.thClassification')}</th>
+						<th>{m('vendorStatements.modal.thClassification')} <HelpTip term="statement-reconciliation" /></th>
 						<th>{m('vendorStatements.modal.thResolution')}</th>
 					</tr>
 				</thead>

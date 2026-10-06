@@ -542,6 +542,15 @@ async def generate_cards(
         must have cleared AP approval. An invoice still in
         new/pending/ready_for_review/rejected/failed is filtered out before
         any card is minted.
+      - ``payment_runs.blocked_invoice_ids`` and the vendor's status — an
+        unresolved payment-blocking exception, or a vendor that is not
+        ``active`` (unverified / inactive / rejected), skips the invoice exactly
+        as a run refuses it; so does an applied credit that no longer pairs with
+        the invoice, or one covering all of it.
+      - The card is minted for the invoice net of applied credit memos, never
+        the gross, because the card is spendable up to its limit. An accepted
+        early-payment discount is NOT taken here — only a booked payment takes
+        one (``payment_runs.payable_amounts``).
       - ``check_payment_compliance`` — sanctions/KYC/AML screening. Card
         issuance moves money just like an ACH/wire, so a blocked or
         sanctioned vendor must not receive a card; a hold/refuse verdict
@@ -606,9 +615,38 @@ async def generate_cards(
         .all()
     )
 
+    # The payment gates a run enforces before money moves: an unresolved
+    # payment-blocking exception, or a vendor that is not verified and active.
+    # A minted card is spendable the moment it exists, so it is money moving
+    # and must not slip past what `POST /api/payments/runs` refuses — through
+    # the same shared predicates, so the two entry points can't drift.
+    from app.services.applied_credit_integrity import applied_credit_conflicts
+    from app.services.payment_runs import (
+        blocked_invoice_ids,
+        inactive_vendor_statuses,
+        net_payable_amounts,
+    )
+
+    blocked = await blocked_invoice_ids(db, [inv.id for inv in invoices])
+    vendor_refused = await inactive_vendor_statuses(db, invoices)
+    # The card is minted for the invoice net of applied credit memos — a card is
+    # spendable up to its limit, so one minted at the gross overpays the credit.
+    # It deliberately does NOT take an accepted early-payment discount: a card
+    # minted here is not a booked payment, so nothing would record the discount
+    # (no `discount_offer.applied` row, no capture) and the card would outlive
+    # the offer's deadline. Discounts flow only through booked payments; a run
+    # that books one refuses to converge on this card
+    # (`card_issuance.card_settlement_block` → `card_limit_exceeds_payment`).
+    credit_conflicts = await applied_credit_conflicts(db, invoices)
+    nets = await net_payable_amounts(db, invoices)
+
     cards: list[VirtualCard] = []
     for inv in invoices:
-        if inv.id in already_carded:
+        if inv.id in already_carded or inv.id in blocked or inv.id in vendor_refused:
+            continue
+        # A credit that no longer pairs with the invoice makes the net
+        # meaningless (decisions §214); a fully-credited invoice owes nothing.
+        if inv.id in credit_conflicts or nets[inv.id] <= 0:
             continue
 
         # Compliance gate: mirrors execute_payment_run's virtual_card leg. No
@@ -624,10 +662,10 @@ async def generate_cards(
         decision = await check_payment_compliance(
             db,
             vendor=vendor,
-            # `inv.amount` is in the invoice's own currency; the KYC threshold
-            # is a home-currency figure, so hand the gate the currency and let
-            # it fail closed when the two can't be compared.
-            payment_amount=inv.amount,
+            # In the invoice's own currency; the KYC threshold is a
+            # home-currency figure, so hand the gate the currency and let it
+            # fail closed when the two can't be compared.
+            payment_amount=nets[inv.id],
             payment_currency=inv.currency,
             payment_method="virtual_card",
             org_settings=org.settings or {},
@@ -643,6 +681,7 @@ async def generate_cards(
             organization_id=org_id,
             org_settings=org.settings or {},
             app_settings=app_settings,
+            amount=nets[inv.id],
         )
         if not issue.success or issue.card is None:
             continue  # skip failed cards, don't block the batch

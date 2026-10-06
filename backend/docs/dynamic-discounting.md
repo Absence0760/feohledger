@@ -404,7 +404,15 @@ every place a `Payment` reaches `completed` in `app/api/payments.py`:
   savings realized on a number in dispute. See
   [payments.md](payments.md) § Settlement-amount verification.
 
-Both call the shared `_capture_discount_offers` helper, which resolves any
+Both call the shared `_capture_discount_offers` helper →
+`discount_capture.capture_offer_for_settled_payment`. **A payment booked with a
+discount** (`Payment.discount_offer_id`, migration 0104 — § Paying the
+discounted amount below) captures exactly that offer, for exactly
+`Payment.discount_amount`, under a row lock, and stamps
+`DiscountOffer.captured_by_payment_id` with the payment — no matching, no
+guessing; an offer no longer `accepted` (already captured by a retried webhook)
+is left alone. **A payment booked without one** falls back to the amount match
+below (`capture_offers_for_settled_payment`), which resolves any
 still-`accepted` **invoice-scoped** `DiscountOffer` on the settled invoice and
 first checks the offer's `currency` against the invoice's own `currency`
 (case-insensitive) — `POST /api/discounts/offers` lets the caller set an
@@ -430,13 +438,36 @@ no single invoice's payment can be proven to BE that offer's settlement;
 those are left `accepted` for a future reconciliation pass rather than
 attributed to whichever invoice happened to pay first.
 
-**How AP actually pays the discounted amount today**: nothing in the payment
-run path automatically nets a `DiscountOffer`'s discount off `Payment.amount`
-— `create_payment_run_for_invoices` only nets *applied credit memos*. Paying
-at the discounted payoff means recording a credit memo for the discount
-amount (or otherwise adjusting the invoice) before scheduling the payment, so
-the existing credit-memo-netting math lands `Payment.amount` on the
-discounted figure. See `tests/test_discount_capture.py` for the exact flow.
+### Paying the discounted amount
+
+Accepting an offer is the buyer agreeing to pay the discounted amount before the
+deadline, so the payment path takes it: `payment_runs.payable_amounts` nets
+applied credit memos and then deducts the accepted invoice-scoped offer whose
+accepted tier's deadline the pay date meets (`discount_capture.applicable_discounts`).
+The run builder, the standalone `POST /api/payments`, dispatch and
+`/retry-failed` all book and re-check against it; the payment records
+`discount_offer_id` + `discount_amount` and a `discount_offer.applied` audit row
+is written. The **deadline** is `discount_offers.accepted_discount_deadline`: the
+offer's reference date (`valid_from`, else `created_at`) plus the accepted tier's
+`days`, capped at `valid_until` — the same `tier_deadline` every surface that
+names a "pay by" date reads. An offer that cannot be dated is not applied.
+
+Paid in full instead — never refused — when the offer is vendor-scoped, past its
+deadline, in another currency, struck on a `base_amount` that is no longer the
+invoice's amount, would leave nothing to pay, or was already deducted through an
+applied credit memo for exactly the savings (the way a discount was paid
+before this, and what the in-app help said; the memo is already in the net, and
+the settlement still captures the offer through the amount match). Nothing links
+a memo to an offer, so that is an amount coincidence, resolved toward paying the
+supplier in full whenever the memo was recorded: a return credit that happens to
+equal the savings costs the buyer one discount, where guessing the other way
+would short-pay the supplier. **Do not record a credit memo for an accepted
+discount any more**; the run takes it. A deadline that passes while a booked run
+waits, or an offer accepted after booking, fails dispatch `discount_changed`
+before any processor call (retry-safe; `/retry-failed` skips it) — never a silent
+re-price. Full money-path detail: [payments.md](payments.md) § An accepted
+early-payment discount is paid, not just reported. Tests:
+`tests/test_discounted_payment.py`.
 
 **Idempotent**: `capture_offers_for_settled_payment` only queries offers
 currently `accepted`, so a retried settlement or a reconciliation re-run over
@@ -464,9 +495,12 @@ used to stay `captured`, so the dashboard reported savings on an unpaid invoice
 and a re-payment at the discounted payoff could capture nothing.
 `discount_capture.reverse_captures_for_voided_payment` now moves the offer back
 to `accepted` (`discount_offers.reverse_capture`, clearing `captured_amount` /
-`captured_at`) and writes a `discount_offer.capture_reversed` audit row carrying
-`payment_id` and `reversed_amount`. `DiscountOffer` holds no payment id, so
-attribution is by elimination and both conditions must hold: the voided payment
+`captured_at` / `captured_by_payment_id`) and writes a
+`discount_offer.capture_reversed` audit row carrying `payment_id` and
+`reversed_amount`. A capture made since migration 0104 names its payment
+(`captured_by_payment_id`), so the void reverses exactly its own capture,
+whatever else the invoice carries. Only a capture made before that (NULL) is
+attributed by elimination, where both conditions must hold: the voided payment
 was `completed` (capture only runs there), and no **other** `completed` payment
 remains on the invoice (if one does, the capture may be its, and the offer is
 left alone rather than guessed at). Unlike the capture leg this one is **not**
@@ -495,7 +529,7 @@ are never duplicated.
 | Method + path | Purpose |
 |---|---|
 | `GET /portal/discount-offers` | offers scoped to the caller's own `vendor_id` **or** their own invoices; per-tier savings + best capturable tier today; `?status=` filter |
-| `POST /portal/discount-offers/{id}/accept` | accept at a tier (`tier_days` or best today); flips `offered → accepted` only — **never moves money** (CFO-gated payment run still funds it); re-accept is a `409`; foreign/unknown id `404` |
+| `POST /portal/discount-offers/{id}/accept` | accept at a tier (`tier_days` or best today); flips `offered → accepted` only — **never moves money** itself: the CFO-gated payment run still funds it, and pays the discounted amount if it runs by the deadline (§ Paying the discounted amount); re-accept is a `409`; foreign/unknown id `404` |
 | `POST /portal/discount-offers/{id}/decline` | decline; `409` if no longer `offered` |
 
 A vendor can never see another vendor's offers (cross-vendor / unknown id → 404,
@@ -515,8 +549,9 @@ See `supplier-portal.md` § Early-payment discount offers.
 | `FEOH_DISCOUNT_COST_OF_CAPITAL_PCT` | `8.0` | platform-default annual cost of capital; per-org override `settings.discounting.cost_of_capital_pct` |
 
 The ROI calculator, offer lifecycle, optimizer, dashboard **and offer expiry**
-run unconditionally; only the *auto-accept decision* is gated (and it never
-moves money). Local-first: the financing adapter defaults to `mock`, so
+run unconditionally; only the *auto-accept decision* is gated. It never moves
+money itself, but an accepted offer sets what the next payment run pays for that
+invoice (§ Paying the discounted amount). Local-first: the financing adapter defaults to `mock`, so
 `pnpm dev` needs no credential.
 
 The sweep reads a tenant's candidates a page at a time rather than in one
@@ -528,7 +563,9 @@ page boundary safe, and they are why the shape is a cursor rather than a cap.
 
 ## Frontend
 
-`/discounts` (`routes/discounts/+page.svelte`, gated to admin/ap_manager/cfo):
+`/discounts` (`routes/discounts/+page.svelte`, readable by all four roles —
+admin/ap_manager/ap_clerk/cfo, matching `_READ_ROLES`; accept / decline stay
+admin/ap_manager/cfo, `_ACCEPT_ROLES`):
 KPI cards (captured / missed / capture rate / projected savings / open offers),
 a status `FilterChips` filter, an offers `DataTable` (tiers via the new
 `ui/DiscountTierBar.svelte`, accept-tier `Modal`, decline action), and an
@@ -623,8 +660,8 @@ same way `payment_runs.create_payment_run_for_invoices` and the credit-memo
 path do. The offer is STAMPED with the caller's write entity, so without the
 scope filter an operator with subsidiary A selected could raise an offer under
 A against subsidiary B's invoice — visible in A's queue while pricing B's
-payable. Advisory data, never money, but the sibling money path was fixed for
-exactly this shape. An out-of-scope id is the same opaque 404 as a missing one.
+payable. Once accepted, the offer sets what a run pays for that invoice, so it
+is money — and the sibling money path was fixed for exactly this shape. An out-of-scope id is the same opaque 404 as a missing one.
 
 ## Currency integrity
 

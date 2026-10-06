@@ -456,6 +456,12 @@ export interface DashboardData {
 	 * rows whose reporting figure could not be established at all.
 	 */
 	excluded_rebate_count?: number;
+	/**
+	 * Share (0–100, one decimal) of DECIDED invoices that went straight
+	 * through with no person intervening: approved automatically, no field or
+	 * line-item correction, no exception a person decided. Same definition as
+	 * an experiment's `touchless_rate_pct` (backend `services/touchless`).
+	 */
 	touchless_rate: number;
 	stale_approvals: number;
 	open_exceptions: number;

@@ -128,14 +128,80 @@ export const VALID_TRANSITIONS: Record<InvoiceStatus, InvoiceStatus[]> = {
 };
 
 /**
- * Given a set of source statuses, return the status targets valid for ALL of them.
+ * Given a set of source statuses, return the status targets valid for ALL of
+ * them — narrowed to `allowed` when given (an AP clerk's bulk picker passes
+ * {@link ENTRY_BULK_STATUS_TARGETS}).
  */
-export function commonTransitions(statuses: InvoiceStatus[]): InvoiceStatus[] {
+export function commonTransitions(
+	statuses: InvoiceStatus[],
+	allowed?: ReadonlySet<InvoiceStatus>
+): InvoiceStatus[] {
 	if (statuses.length === 0) return [];
 	const sets = statuses.map((s) => new Set(VALID_TRANSITIONS[s]));
 	const first = sets[0];
-	return [...first].filter((t) => sets.every((s) => s.has(t)));
+	return [...first].filter((t) => sets.every((s) => s.has(t)) && (!allowed || allowed.has(t)));
 }
+
+/**
+ * Who may ENTER an invoice — mirror of `backend/app/api/invoice_entry.py`.
+ *
+ * `INVOICE_ENTRY_ROLES` gates create, upload, the source-file controls, field
+ * and line-item edits, extract / reset, submit for review, resubmit and the
+ * bulk status picker; `INVOICE_IMPORT_ROLES` gates CSV import (no `cfo`).
+ * `INVOICE_MANAGE_ROLES` is the reach past entry (delete, ERP, the `approved`
+ * metadata window); an entry role with none of them (`ap_clerk`) is
+ * ENTRY-ONLY and held to {@link inInvoiceEntryWindow}. Approve / reject is the
+ * `invoice.approve` permission, not a role.
+ */
+export const INVOICE_MANAGE_ROLES = ['admin', 'ap_manager', 'cfo'] as const;
+export const INVOICE_ENTRY_ROLES = [...INVOICE_MANAGE_ROLES, 'ap_clerk'] as const;
+export const INVOICE_IMPORT_ROLES = ['admin', 'ap_manager', 'ap_clerk'] as const;
+
+/**
+ * Statuses an entry-only caller may change an invoice in — `_ENTRY_WINDOW_STATUSES`.
+ * No `ready_for_review`: once submitted, a correction goes through reject → rework.
+ */
+const ENTRY_WINDOW_STATUSES: ReadonlySet<InvoiceStatus> = new Set([
+	'new',
+	'pending',
+	'failed',
+	'rejected'
+]);
+
+/**
+ * True while an entry-only caller (an AP clerk) may still change the invoice —
+ * `invoice_entry.in_entry_window`. The approval fields matter because an
+ * approved invoice whose ERP push failed sits at `failed`, and one approved
+ * then rejected at `rejected`; both are read because `approved_by` is a display
+ * name that can be empty.
+ */
+export function inInvoiceEntryWindow(
+	status: InvoiceStatus,
+	approvedBy: string | null | undefined,
+	approvalDate: string | null | undefined
+): boolean {
+	return ENTRY_WINDOW_STATUSES.has(status) && !approvedBy && !approvalDate;
+}
+
+/**
+ * Whether `/extract` will read this invoice's document — `new` or `failed`, and
+ * never once approved, for ANY role (`workflow.trigger_extraction`): an
+ * approved invoice whose ERP push failed sits at `failed`, and re-reading it
+ * would rewrite what the approver signed. Retry ERP is that invoice's path.
+ */
+export function extractionAllowed(
+	status: InvoiceStatus,
+	approvedBy: string | null | undefined,
+	approvalDate: string | null | undefined
+): boolean {
+	return (status === 'new' || status === 'failed') && !approvedBy && !approvalDate;
+}
+
+/** The bulk status targets an entry-only caller may set — `ENTRY_BULK_STATUS_TARGETS`. */
+export const ENTRY_BULK_STATUS_TARGETS: ReadonlySet<InvoiceStatus> = new Set([
+	'new',
+	'ready_for_review'
+]);
 
 export interface AdvancedSearchFilters {
 	vendor: string;

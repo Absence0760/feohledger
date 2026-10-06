@@ -1,4 +1,5 @@
 <script lang="ts">
+	import HelpTip from '#lib/components/help/HelpTip.svelte';
 	import { goto } from '$app/navigation';
 	import { auth } from '#lib/stores/auth.svelte.ts';
 	import PageHeader from '#lib/components/ui/PageHeader.svelte';
@@ -336,6 +337,7 @@
 
 	<p class="page-hint">
 		{m('admin.partner.hint')}
+		<HelpTip term="organization" />
 	</p>
 
 	<!-- Link-code panel: this workspace consents to being attached AS a child. A

@@ -1157,6 +1157,18 @@ class AppLocalizationsDe extends AppLocalizations {
       'Frühere Zahlung nicht abgestimmt — möglicherweise noch unterwegs';
 
   @override
+  String get payQueueBlockedQualityHold =>
+      'Qualitätssperre — Ware abgelehnt oder Prüfung ausstehend';
+
+  @override
+  String get payQueueBlockedPoMismatch =>
+      'Weicht von der Bestellung ab — ungeklärt';
+
+  @override
+  String get payQueueBlockedVendorNotActive =>
+      'Lieferant nicht verifiziert oder nicht aktiv — zuerst den Lieferanten verifizieren';
+
+  @override
   String get payQueueBlockedAppliedCreditMismatch =>
       'Eine verrechnete Gutschrift passt nicht mehr zu Lieferant oder Währung dieser Rechnung — Rechnung zuerst korrigieren';
 

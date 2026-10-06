@@ -1061,6 +1061,16 @@ class AppLocalizationsJa extends AppLocalizations {
       '過去の支払いが未照合 — 処理中の可能性があります';
 
   @override
+  String get payQueueBlockedQualityHold => '品質保留 — 検収不合格または検査待ち';
+
+  @override
+  String get payQueueBlockedPoMismatch => '発注書と一致しません — 未解決';
+
+  @override
+  String get payQueueBlockedVendorNotActive =>
+      '取引先が未確認または無効です — 先に取引先を確認してください';
+
+  @override
   String get payQueueBlockedAppliedCreditMismatch =>
       '適用済みのクレジットメモがこの請求書の仕入先または通貨と一致しなくなりました — 先に請求書を修正してください';
 

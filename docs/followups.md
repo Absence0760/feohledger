@@ -91,7 +91,7 @@ section carried its own `decisions.md` § reference, so nothing was lost by
 deleting it; that cross-reference is what makes the pruning safe, and writing
 one is what earns a future entry the right to be deleted.
 
-**52 open: 37 (c) · 9 (a) · 6 (b)** — re-derived from the file, never carried
+**72 open: 57 (c) · 9 (a) · 6 (b)** — re-derived from the file, never carried
 forward. The section heading is authoritative; where an entry also carries a
 `(c)`/`(a)`/`(b)` marker, the two agree.
 `grep -c '^- \[ \]' docs/followups.md`.
@@ -1007,6 +1007,154 @@ or is a sibling of a fix that needs its own pass.
       attach refused for a line someone else created.
       **Trigger:** the next change to expense ownership or the expense SoD check,
       or a persona-fraudster pass over expenses.
+
+### Surfaced by writing the help centre (2026-10-06, decisions §244)
+
+Writing the in-app guides against the code turned these up. The guides
+describe what the code does today; each item says what changes in help when it
+lands. Pure doc drift was corrected in the same PR. The two diagnosed defects
+(the assistant's forecast gate, expense Attach) are in
+[known-issues.md](known-issues.md).
+
+- [ ] **(c) Translate the help centre's guide prose.** Guide bodies, glossary
+      long text and page-directory lines are English, rendered `lang="en"`
+      under a translated notice. The chrome, term names, tooltips and diagram
+      labels are already in all six locales (`frontend/docs/help-centre.md`
+      § Translation). **Durable fix:** a per-locale overlay keyed by guide id
+      that carries a hash of the English source it was translated from, so a
+      guide edited after translation falls back to English rather than
+      showing a stale translation, plus a test that fails on a stale hash.
+      Reviewed by a fluent finance reader per locale, not machine output.
+      **Trigger:** the first customer contract in a non-English market, or a
+      locale's tenants passing a share of active users worth the review cost.
+- [ ] **(c) Nothing creates a goods receipt.** There is no create endpoint, ERP
+      sync or UI for goods receipts; only seed data makes them. So three-way
+      and four-way matching can't be fed in a real tenant. **Durable fix:**
+      ERP sync of receipts beside the PO sync (the adapter families already
+      sync POs), plus a manual "record receipt" form for tenants without one.
+      **Trigger:** the first tenant that turns on three-way matching.
+- [ ] **(c) A requisition can't be linked to a budget from the UI.** The
+      requisition form has no budget field and `checkBudget()` (the overspend
+      pre-check in the frontend API module) is never called, so a budget's
+      "Committed" figure can only be filled through the API. **Durable fix:** a
+      budget picker on the requisition form that calls `checkBudget()` and
+      shows the overspend warning before submit. **Trigger:** the next change
+      to requisitions or budgets.
+- [ ] **(c) A rejected invoice has no resubmit button on the web.** The web
+      invoice modal offers none. Resubmission happens through the bulk
+      status change or the supplier portal, which a clerk fixing their own
+      rejection won't find. **Durable fix:** a "Resubmit for review" action in
+      the modal for a `rejected` invoice, behind the same role gate as the bulk
+      action. **Trigger:** the next invoice-modal change.
+- [ ] **(c) Settings with a backend and no screen.** Approval delegation,
+      per-vendor / per-GL match tolerance, exception-agent autonomy level, the
+      SCIM bearer token, an admin revoking another user's sessions, and the
+      line-total-mismatch on/off switch (`settings.fraud_rules`) all
+      exist in the API with no UI, so help can describe their effect but can't
+      tell anyone where to change them. **Durable fix:** a panel each in
+      `/organization` (or the user row's actions for sessions), each with its
+      own help guide step. **Trigger:** the first customer asking to change
+      one, or SCIM onboarding for an enterprise tenant.
+- [ ] **(c) Pages still hardcoded in English.** The Report Builder page,
+      `/admin/access-review`, `/admin/privacy`, the vendors list's "Merge
+      duplicates" action and the budget dimension labels
+      (`lib/types/budget.ts`) carry literal English. Help has to name those
+      labels in bold rather than through `{ui:}`. **Durable fix:** extract them
+      to the catalogues and swap the guides' bold labels for `{ui:}`
+      references (`content.test.ts` will check them). **Trigger:** the next
+      i18n extraction slice.
+- [ ] **(c) Help for the mobile app and the supplier portal.** The help centre
+      covers the employee web app. Mobile users and suppliers get none.
+      **Durable fix:** a portal-side help section (suppliers are a separate
+      audience: submit, get paid, change bank details, card payments) reusing
+      the same content shapes and tests, and a Help row in the mobile app's
+      settings that opens the web help for the user's tenant. **Trigger:** the
+      first supplier onboarding at volume, or the first mobile-first customer.
+- [ ] **(c) Approval isn't tied to the version the approver saw.** An edit
+      that lands between an approver reading an invoice and clicking Approve
+      is approved unseen, for managers as well as clerks (a clerk's own window
+      now closes at submit, decisions §248). **Durable fix:** an
+      `expected_updated_at` on `ApproveRequest` and per row in bulk approve,
+      checked under the row lock, 409 on a mismatch, with the modal reloading
+      on 409. **Trigger:** the next change to the approve endpoints, or before
+      the first production tenant with more than one approver.
+- [ ] **(c) `bulk/delete` has no entity scope or row lock.** It has the shape
+      `bulk/status` had before the clerk-entry change fixed it there. Clerks
+      can't reach it. **Durable fix:** the same `apply_entity_scope` +
+      `FOR UPDATE` + missing-id-as-skip treatment `bulk/status` got, with a
+      cross-entity test. **Trigger:** the next change to bulk invoice actions.
+- [ ] **(c) Bulk `new → ready_for_review` skips `/complete`'s required-field
+      check**, for every role, so an invoice with no vendor or amount can reach
+      the approval queue from the bulk bar. **Durable fix:** run the same
+      required-field validation per row and report failures as skips.
+      **Trigger:** same as above.
+- [ ] **(c) CSV import resolves vendors across entities and defaults a blank
+      currency to USD.** A row can link another subsidiary's vendor, and a
+      blank currency cell becomes `"USD"` against the rule that a missing
+      currency stays missing. Its "records history" row error also has no
+      message code, so it reads in English in every locale. **Durable fix:**
+      scope vendor matching to the import's entity, refuse a blank currency
+      per row, and key the row errors through the message catalogue.
+      **Trigger:** the next change to CSV import.
+- [ ] **(c) A manager's extraction can auto-approve a document a clerk
+      swapped in.** A clerk's own upload or extract never auto-approves, but a
+      manager who re-extracts after a clerk replaced the file can still get
+      it auto-approved with no second look. **Durable fix:** suppress
+      auto-approve whenever `segregation_actor_ids` is non-empty, with a test.
+      **Trigger:** the next change to extraction dispatch or auto-approve.
+- [ ] **(c) A custom role can't be granted invoice entry.** Entry is a role
+      list by design (decisions §248). **Durable fix:** if a customer needs a
+      non-clerk preparer role, add a non-sensitive permission tier the
+      role-grant guards exempt, and move entry onto it. **Trigger:** the first
+      customer asking for a custom preparer role.
+- [ ] **(c) Deactivating a vendor doesn't cancel its live virtual cards.** A
+      card minted before the vendor went inactive, rejected or merged stays
+      spendable; payment runs and `/cards/generate` refuse the vendor, but
+      nothing reaches cards already issued. **Durable fix:** cancel the
+      vendor's live cards when its status leaves `active`, with an audit row
+      per card. **Trigger:** the next vendor-lifecycle change.
+- [ ] **(c) The PO-match receipt leg is pro rata and not cumulative.** The
+      "billed beyond received" check values receipts as `po_total × received /
+      ordered`, so receiving nine cheap cables of a 900 server order reads as
+      most of the value received; and nothing subtracts what other invoices
+      already billed against the same PO, so two 400 invoices both pass
+      against 400 received (decisions §249). **Durable fix:** value receipts
+      per PO line (cheapest-first as a lower bound) and subtract other live or
+      paid invoices on the same PO in both the amount and receipt legs.
+      **Trigger:** the next PO-matching change, or the first customer relying
+      on split or blanket POs.
+- [ ] **(c) Nothing links a credit memo to a discount offer.** An applied memo
+      equal to an accepted offer's savings is read as the discount already
+      taken (decisions §250), so a return credit that happens to equal the
+      savings suppresses the discount and the offer is then recorded as
+      captured. **Durable fix:** `credit_memos.discount_offer_id` (or a typed
+      reason) and drop the amount match. **Trigger:** the next credit-memo or
+      discounting change.
+- [ ] **(c) The ERP payment sync posts no amount yet.** `payment_erp_sync`
+      only logs. **Durable fix:** when `post_payment` is implemented, send
+      `discount_amount` beside `amount` so the ERP books the discount taken.
+      **Trigger:** the first real ERP payment-posting adapter.
+- [ ] **(c) `/cards/generate` has no row lock between its checks and the
+      mint.** Pre-existing: two concurrent calls can both pass the vendor and
+      payable checks. **Durable fix:** lock the invoice rows `FOR UPDATE`
+      before checking and minting, with a concurrency test. **Trigger:** the
+      next card-issuance change.
+- [ ] **(c) The web bundle total counts route-split content nobody loads
+      together.** `MAX_TOTAL_KB` sums every chunk (one locale catalogue), so
+      the help centre's lazy guide prose and diagrams (~81 KB, `/help` only)
+      raised it as if every visitor downloaded them; the 2026-09-16 ceiling
+      entry's trigger for this fired on PR #516 and the ceiling went to 1075.
+      **Durable fix:** measure the app shell plus the heaviest single route
+      (from the Vite manifest's import graph) as the gated total, and keep the
+      every-chunk sum as a reported, ungated figure. **Trigger:** the next
+      time `MAX_TOTAL_KB` binds, or the next change to the budget workflow.
+- [ ] **(c) The largest locale catalogue is 5 KB under its chunk ceiling.**
+      The ja catalogue is 95 KB of `MAX_LARGEST_CHUNK_KB`'s 100 after the
+      help centre's terms and tooltips. **Durable fix:** split the help-only
+      keys (`help.*`, diagram labels) into a second lazy catalogue loaded by
+      `/help` routes and HelpTip, with the locale key-parity test covering
+      both slices. **Trigger:** before the next feature that adds more than a
+      couple of hundred keys, or when the catalogue passes 97 KB.
 
 ## (a) Blocked on external credentials, accounts, or hardware
 

@@ -69,9 +69,14 @@ test.describe('/payments cards pagination', () => {
 		// Scoped to the cards table: the Cards tab also renders a rebates table
 		// above it, so an unscoped `table tbody tr` counts both and the page-size
 		// assertion silently measures the wrong thing.
+		//
+		// Counts go through `toHaveCount`, never a one-shot `.count()`: the
+		// response resolving is not the rows rendering, so a bare count taken
+		// right after it can read the previous page's rows (or none) and fail
+		// — or pass — on timing alone.
 		const cardsTable = page.getByTestId('cards-table');
-		const firstPageRows = await cardsTable.locator('tbody tr').count();
-		expect(firstPageRows).toBeLessThanOrEqual(20);
+		const rows = cardsTable.locator('tbody tr');
+		await expect(rows).toHaveCount(20);
 
 		const loadMore = page.getByRole('button', { name: /Load more/ });
 		await expect(loadMore).toBeVisible();
@@ -83,7 +88,7 @@ test.describe('/payments cards pagination', () => {
 		);
 		await loadMore.click();
 		await next;
-		expect(await cardsTable.locator('tbody tr').count()).toBeGreaterThan(firstPageRows);
+		await expect(rows).toHaveCount(Math.min(total, 40));
 	});
 
 	test('API default page size is 20', async ({ page }) => {

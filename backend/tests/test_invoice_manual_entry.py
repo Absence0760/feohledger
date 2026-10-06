@@ -142,15 +142,23 @@ async def test_manual_create_runs_duplicate_detection(realdb):
         assert rows[0].status == "open"
 
 
-async def test_ap_clerk_cannot_manually_create_an_invoice(realdb):
-    """`create_invoice` is gated to admin/ap_manager/cfo — an ap_clerk (the
-    role that normally just uploads/extracts) is refused."""
+async def test_ap_clerk_can_manually_create_an_invoice_and_is_its_uploader(realdb):
+    """Entering invoices is the AP clerk's job (`api/invoice_entry`), and a
+    clerk-keyed invoice carries the clerk as `uploaded_by_id` — the column
+    segregation of duties keys on — exactly as a manager-keyed one does."""
+    clerk_id = realdb.info("a").users["ap_clerk"]
     async with realdb.client(key="a", role="ap_clerk") as c:
         resp = await c.post(
             "/api/invoices",
             json={"vendor": "X", "invoice_number": "CLERK-001", "amount": "1.00"},
         )
-    assert resp.status_code == 403
+    assert resp.status_code == 201, resp.text
+
+    mk = realdb.sessionmaker("a")
+    async with mk() as s:
+        inv = (await s.execute(select(Invoice).where(Invoice.id == resp.json()["id"]))).scalar_one()
+    assert inv.uploaded_by_id == clerk_id
+    assert inv.status == InvoiceStatus.new
 
 
 async def test_attach_file_to_manual_invoice_succeeds_once(realdb):

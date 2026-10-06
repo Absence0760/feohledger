@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { m } from '#lib/i18n/store.svelte.ts';
 	import { kpiDisplayValue, kpiFigureState } from '#lib/utils/kpiValue.ts';
+	import HelpTip from '#lib/components/help/HelpTip.svelte';
 
 	type Props = {
 		/**
@@ -29,9 +30,15 @@
 		 * dash, so a placeholder is never read out as a value.
 		 */
 		pending?: boolean;
+		/**
+		 * A glossary id (`#lib/help/glossary.ts`): puts an ⓘ HelpTip beside the
+		 * label explaining what the figure measures. Beside, not inside, the
+		 * label span — the label's text stays exactly what specs select on.
+		 */
+		helpTerm?: string;
 	};
 
-	let { value, label, highlight = null, sub = null, pending = false }: Props = $props();
+	let { value, label, highlight = null, sub = null, pending = false, helpTerm }: Props = $props();
 
 	const figure = $derived(kpiFigureState(value, pending));
 	const shown = $derived(kpiDisplayValue(value, pending));
@@ -62,9 +69,13 @@
 	     its own load. -->
 	<span class="kpi-value" aria-hidden={figure === 'pending' ? 'true' : undefined}>{shown}</span>
 	{#if figure === 'pending'}
-		<span class="visually-hidden">{m('common.loading')}</span>
+		<span class="visually-hidden kpi-loading">{m('common.loading')}</span>
 	{/if}
-	<span class="kpi-label">{label}</span>
+	{#if helpTerm}
+		<span class="kpi-label-row"><span class="kpi-label">{label}</span><HelpTip term={helpTerm} /></span>
+	{:else}
+		<span class="kpi-label">{label}</span>
+	{/if}
 	{#if sub}
 		<span class="kpi-sub">{sub}</span>
 	{/if}
@@ -77,5 +88,10 @@
 	   this component used to carry a private copy of it. */
 	.kpi {
 		position: relative;
+	}
+	.kpi-label-row {
+		display: inline-flex;
+		align-items: center;
+		gap: 2px;
 	}
 </style>

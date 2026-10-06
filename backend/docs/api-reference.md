@@ -224,7 +224,7 @@ All three answer a bare `404` when `FEOH_SIGNUP_ENABLED` is off — before valid
 | Method | Path                              | Roles | Description |
 |--------|-----------------------------------|-------|-------------|
 | `POST` | `/api/invoices/upload`            | admin/manager/cfo | Multipart file upload. Creates invoice + optionally triggers extraction. |
-| `POST` | `/api/invoices/{id}/extract`      | admin/manager/cfo | Re-trigger extraction on `new` or `failed` invoices |
+| `POST` | `/api/invoices/{id}/extract`      | admin/manager/cfo/clerk | Re-trigger extraction on `new` or `failed` invoices never approved (an approved invoice whose ERP push failed is 409 for every role — use retry-erp) |
 | `POST` | `/api/invoices/{id}/reset-extraction` | admin/manager/cfo | Reset stuck `pending` extraction back to `new` |
 | `POST` | `/api/invoices/{id}/assign`       | admin/manager | Assign reviewer (body `{user_id}`). The reviewer is resolved **inside the caller's own org and must be active** — `users` is control-plane, so an unscoped by-id lookup reached every tenant's accounts: a foreign user could be stamped onto `Invoice.assigned_to_id` and then emailed this tenant's invoice number, vendor and amount, while the invoice sat owned by an account that can never act on it. Wrong-org, deactivated and unknown are the same opaque 404 (no enumeration); a malformed `user_id` is a 422. Same guard as `POST /api/exceptions/{id}/assign` and `POST /api/auth/delegation`, and it accepts exactly what `GET /api/invoices/assignable-reviewers` offers. |
 | `POST` | `/api/invoices/{id}/approve`      | admin/manager/cfo | Approve. Body may include field corrections. Its refusals are coded `{code, message, params}`: `approval_segregation` / `approval_not_named_approver` / `approval_level_reuse` (403), `approval_cfo_required` (403) and `approval_max_amount_exceeded` / `approval_max_amount_misconfigured` (422) — the money gates' params name every figure as an exact string beside its currency (`docs/authentication.md` § Segregation of duties on a workflow's approval step). |
@@ -665,9 +665,9 @@ CFO-grade aggregates beyond the basic dashboard, plus CSV/PDF export and recurri
 |--------|--------------------------------------------|-------|-------------|
 | `GET`  | `/api/analytics/spend`                      | cfo, admin, ap_manager | Aggregated spend by GL / vendor / cost center / time bucket |
 | `GET`  | `/api/analytics/dpo`                        | cfo, admin | Days-payable-outstanding rolling history |
-| `GET`  | `/api/analytics/cashflow_forecast`          | cfo, admin | Projected AP outflows bucketed day/week/month (committed vs pending) |
-| `GET`  | `/api/analytics/cashflow_whatif`            | cfo, admin | Payment-timing what-if: early vs on-time vs late, with discount capture |
-| `GET`  | `/api/analytics/cash_position`              | cfo, admin | Running cash position from a BYO opening balance + threshold-breach alerts |
+| `GET`  | `/api/analytics/cashflow_forecast`          | cfo, admin, ap_manager | Projected AP outflows bucketed day/week/month (committed vs pending) |
+| `GET`  | `/api/analytics/cashflow_whatif`            | cfo, admin, ap_manager | Payment-timing what-if: early vs on-time vs late, with discount capture |
+| `GET`  | `/api/analytics/cash_position`              | cfo, admin, ap_manager | Running cash position from a BYO opening balance + threshold-breach alerts |
 | `GET`  | `/api/analytics/export/{report}`            | cfo, admin, ap_manager | CSV export: invoice_register, vendor_spend, payment_register, aging_snapshot, cashflow_forecast |
 | `GET`  | `/api/analytics/scheduled-reports`          | cfo, admin | List scheduled-report definitions |
 | `POST` | `/api/analytics/scheduled-reports`          | cfo, admin | Create a recurring report (cron + recipients + format) |

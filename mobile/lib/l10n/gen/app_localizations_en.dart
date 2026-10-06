@@ -1153,6 +1153,18 @@ class AppLocalizationsEn extends AppLocalizations {
       'Earlier payment unreconciled — may still be in flight';
 
   @override
+  String get payQueueBlockedQualityHold =>
+      'Quality hold — goods failed or await inspection';
+
+  @override
+  String get payQueueBlockedPoMismatch =>
+      'Doesn’t match its purchase order — unresolved';
+
+  @override
+  String get payQueueBlockedVendorNotActive =>
+      'Vendor not verified or not active — verify the vendor first';
+
+  @override
   String get payQueueBlockedAppliedCreditMismatch =>
       'An applied credit memo no longer matches this invoice\'s vendor or currency — correct the invoice first';
 

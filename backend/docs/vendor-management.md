@@ -45,6 +45,28 @@ AI from Invoice ──> Unverified (draft) ──> Review ──> Active or Reje
 | `inactive` | Deactivated by admin | No |
 | `rejected` | Flagged as invalid or duplicate | No |
 
+Enforced at every point money can move, through one predicate —
+`services/payment_runs.inactive_vendor_statuses`, which names the one payable
+status (`active`, `PAYABLE_VENDOR_STATUS`) rather than listing the refused ones,
+so a status this build does not know (NULL included) is refused too:
+
+| Where | What happens |
+|---|---|
+| `POST /api/payments/runs` (and the Cash-Flow Copilot's draft run) | 409 naming the invoice; nothing booked |
+| `GET /api/payments/queue` | the row is `blocked` with reason code `vendor_not_active` (on every rail — it outranks the card-rail pin) and is not selectable |
+| `POST /api/payments` | 409 |
+| dispatch (`/execute`, `/resume`, `/compliance/release`) | a vendor rejected / deactivated / merged away after the run was built fails the payment `vendor_not_active:<status>` before the processor call (retry-safe) |
+| `/retry-failed` | skipped with `vendor_not_active` |
+| `POST /api/cards/generate` | no card is minted for the invoice |
+
+Verifying the vendor (`POST /api/vendors/{id}/verify`) is the sign-off that
+releases its invoices — the gate reads the vendor's current status, never the
+`unverified_vendor` exception, which verification does not close. An invoice
+with **no** vendor is not refused here: it cannot be screened either, and
+dispatch holds it at `pending_compliance` until AP links one
+([payments.md](payments.md) § Sanctions / compliance hold resolution).
+
+
 ## Vendor Matching
 
 When an invoice is extracted (via AI/OCR), the system attempts to match the extracted vendor name to an existing vendor. This avoids duplicate vendor creation and links invoices to the correct vendor record.
@@ -406,8 +428,17 @@ Unverified rows highlighted yellow. Rejected rows dimmed.
 | Edit vendor | Yes | Yes | No | No |
 | Verify vendor | Yes | Yes | No | No |
 | Reject vendor | Yes | Yes | No | No |
-| Sync from ERP | Yes | No | No | No |
-| Delete vendor | Yes | No | No | No |
+| Sync from ERP | Yes | Yes | No | No |
+| Delete vendor | Yes | Yes | No | No |
+| Block / unblock payments | Yes | Yes | No | No |
+| Approve a bank-detail change | Yes | Yes | No | No |
+
+Create / edit / verify / reject / sync / import / delete are all
+`require_permission(vendor.manage)`; block / unblock is `vendor.block`; a
+bank-change approval is `vendor.bank_change.approve` and refuses the proposer.
+`admin` and `ap_manager` hold all three by default, CFO and clerk none
+(`backend/app/api/permissions.py::ROLE_DEFAULT_PERMISSIONS`); a custom role can
+be granted any of them.
 
 ## Integration with Invoice Processing
 
@@ -419,6 +450,7 @@ Unverified rows highlighted yellow. Rejected rows dimmed.
 4. **Review** — reviewer sees the vendor (with unverified badge if new)
 5. **Payment** — only invoices linked to `active` vendors can be paid
    - Unverified vendors block the invoice from entering the payment queue
+
 
 This ensures no payment goes to a vendor that hasn't been verified, while still allowing the invoice processing pipeline to continue (extraction, review, approval) before verification.
 
@@ -438,4 +470,4 @@ This ensures no payment goes to a vendor that hasn't been verified, while still 
 | Real ERP vendor list fetch (via adapter) | Planned |
 | Two-way sync (push new vendors to ERP) | Planned |
 | Vendor deduplication UI | Planned |
-| Vendor bank detail change approval workflow | Planned |
+| Vendor bank detail change approval workflow (dual control — see [It travels the dual-control BEC gate](#it-travels-the-dual-control-bec-gate-like-every-other-banking-field)) | Done |

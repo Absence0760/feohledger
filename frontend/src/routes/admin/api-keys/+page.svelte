@@ -1,4 +1,5 @@
 <script lang="ts">
+	import HelpTip from '#lib/components/help/HelpTip.svelte';
 	import { goto } from '$app/navigation';
 	import { formatDate } from '#lib/utils/time.ts';
 	import { auth } from '#lib/stores/auth.svelte.ts';
@@ -174,6 +175,7 @@
 
 	<p class="page-hint">
 		{m('admin.apiKeys.hintPre')}<code>X-API-Key</code>{m('admin.apiKeys.hintPost')}
+		<HelpTip term="api-key" />
 	</p>
 
 	{#if loading}

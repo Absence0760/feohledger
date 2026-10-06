@@ -11,7 +11,8 @@ Each test seeds its own invoices (+ optional PaymentSchedule) directly into
 the tenant DB, then drives the endpoint through the ASGI client.
 
 Covers:
-  - RBAC: CFO + admin allowed; ap_clerk → 403; unauthenticated → 401
+  - RBAC: admin / ap_manager / CFO allowed (the copilot's audience); ap_clerk →
+    403; unauthenticated → 401
   - forecast happy path buckets committed vs pending; excludes terminal
   - whatif early captures discount; granularity validation → 422
   - cash_position BYO opening balance + threshold breaches + source flag
@@ -24,6 +25,8 @@ from __future__ import annotations
 import uuid
 from datetime import date, timedelta
 from decimal import Decimal
+
+import pytest
 
 from app.models.invoice import Invoice, InvoiceStatus
 from app.models.payment import PaymentSchedule
@@ -226,6 +229,22 @@ async def test_forecast_admin_allowed_clerk_forbidden(realdb):
         assert (await c.get("/api/analytics/cashflow_forecast")).status_code == 200
     async with realdb.client(key="a", role="ap_clerk") as c:
         assert (await c.get("/api/analytics/cashflow_forecast")).status_code == 403
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/api/analytics/cashflow_forecast",
+        "/api/analytics/cashflow_whatif",
+        "/api/analytics/cash_position",
+    ],
+)
+async def test_cash_reads_admit_ap_manager(realdb, path):
+    """AP managers already see these figures through the cash-flow copilot and
+    the forecast CSV export; the REST read must not be the one surface that
+    refuses them."""
+    async with realdb.client(key="a", role="ap_manager") as c:
+        assert (await c.get(path)).status_code == 200
 
 
 async def test_forecast_requires_auth(realdb):

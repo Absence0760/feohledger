@@ -530,23 +530,35 @@ def discount_capture_from_grouped_rows(groups: list[dict]) -> DiscountCaptureMet
 # Touchless (straight-through-processing) rate
 # ---------------------------------------------------------------------------
 #
-# DEFINITION (decided, not inherited — see `docs/analytics.md`):
-#   "passed review without human touch".
+# DEFINITION (one, shared by the dashboard and the experiments readout — see
+# `backend/docs/analytics.md` § Touchless rate):
 #
-# The population is every invoice that PROVABLY reached and finished the
-# review stage. The numerator is the ones that cleared it without a human
-# bouncing them back; the denominator adds the ones a human rejected. An
-# invoice that never entered review is in NEITHER leg — it is evidence
-# neither for nor against touchless processing.
+#   An invoice is TOUCHLESS when it reached approval-or-later with no human
+#   intervention at any step: it was approved AUTOMATICALLY (an
+#   `invoice.auto_approved` row, never `invoice.approved`), no person corrected
+#   a field or a line item, and no person decided an exception raised on it.
 #
-# The rate is a claim about how much work the machine did instead of a
-# person, so the numerator requires POSITIVE EVIDENCE that review happened.
-# A terminal status is not that evidence: `new -> done` is a legal
+# That is the industry's "straight-through processing" (Ardent Partners: an
+# invoice received, approved and scheduled for payment without any manual
+# intervention). The figure this used to publish counted every invoice that
+# CLEARED review — including the ones a person approved — so it measured
+# cleared-vs-rejected, not automation.
+#
+# The per-invoice classification is SQL and lives in `services/touchless`
+# (`touchless_clause` / `touchless_decided_clause`); this module owns only the
+# population's status legs below (pure, so they stay checkable against the
+# state machine) and the arithmetic.
+#
+# The DENOMINATOR is every invoice that reached a review decision: cleared
+# (approved or later) or rejected. An invoice still in flight — or one that
+# never entered review — is evidence neither for nor against touchless
+# processing and sits in neither leg.
+#
+# Being in the cleared leg needs POSITIVE EVIDENCE that review happened. A
+# terminal status is not that evidence: `new -> done` is a legal
 # `VALID_TRANSITIONS` edge that skips approval outright, and the Day-0 CSV
 # importer (`services/csv_import`) plants historical rows straight at `done`
 # (its default) or `paid` without the workflow engine running at all.
-# Counting those as "cleared review" inflates exactly the figure leadership
-# reads.
 
 # Statuses an invoice can ONLY be in because review finished and it cleared:
 # every `VALID_TRANSITIONS` edge into them originates at `approved`, and every
@@ -561,25 +573,21 @@ TOUCHLESS_CLEARED_STATUSES: tuple[str, ...] = (
 )
 
 # Statuses reachable EITHER through review or around it — status alone proves
-# nothing, so these count as cleared only with the approval stamp:
+# nothing, so these are in the cleared leg only with the approval stamp:
 #   `done`   — `new -> done` skips approval; CSV import's default landing state.
 #   `paid`   — normally only from `payment_scheduled`, but CSV-importable too.
 #   `failed` — from `pending` (extraction failed, never reviewed) OR from
 #              `sending_to_erp` (approved, then the ERP export blew up).
-# The caller supplies how many of these carry the durable `Invoice.approval_date`
-# stamp (written on every approval path, never cleared); the rest are out of the
-# population entirely.
+# The durable `Invoice.approval_date` stamp (written on every approval path,
+# never cleared) is the evidence; an unstamped row is out of the population.
 TOUCHLESS_REVIEW_EVIDENCE_STATUSES: tuple[str, ...] = ("done", "paid", "failed")
 
-# Review finished and the invoice did NOT clear — denominator only. There is
-# no approval stamp on a rejection (nothing writes one), so this leg cannot be
-# evidence-gated the way the cleared leg is; a rejected row IS the evidence
-# that a human touched it.
+# Review finished and the invoice did NOT clear — denominator only. A rejection
+# is a person's decision by construction, so it can never be touchless.
 #
-# That asymmetry is why provenance, not evidence, is what removes an IMPORTED
-# rejection: `services/csv_import` can plant a historical `rejected` row, and
-# gating this leg on an approval stamp would zero the bounced population
-# outright (no rejection ever carries one) rather than exclude the imports.
+# There is no approval stamp on a rejection (nothing writes one), so this leg
+# cannot be evidence-gated the way the cleared leg is. That asymmetry is why
+# provenance, not evidence, is what removes an IMPORTED rejection.
 TOUCHLESS_BOUNCED_STATUSES: tuple[str, ...] = ("rejected",)
 
 # ---------------------------------------------------------------------------
@@ -588,18 +596,11 @@ TOUCHLESS_BOUNCED_STATUSES: tuple[str, ...] = ("rejected",)
 #
 # A CSV-imported invoice is history migrated in from the tenant's previous
 # system; the workflow engine never ran on it. It is therefore evidence
-# neither for nor against this platform's automation, in either direction:
-#
-#   * an imported `done` / `paid` row would inflate the numerator (already
-#     handled, since it carries no approval stamp), and
-#   * an imported `rejected` row DEFLATES the rate — it lands in the bounced
-#     leg as though a reviewer here had sent it back.
-#
-# Provenance is what settles this, not status: `done`, `paid` and `rejected`
-# are each reachable BOTH natively and by import, so no status set can tell
-# them apart. `services/csv_import` stamps every row it creates with the
-# `meta["imported"]` marker (`imported_invoice_clause` is its SQL predicate);
-# the caller counts marked rows per status and passes them in.
+# neither for nor against this platform's automation, in either direction.
+# Provenance settles this, not status: `done`, `paid` and `rejected` are each
+# reachable BOTH natively and by import. `services/csv_import` stamps every row
+# it creates with the `meta["imported"]` marker (`native_invoice_clause` is the
+# complement `services/touchless` applies to the whole population).
 #
 # An UNMARKED row is treated as native, deliberately: the marker is written
 # only going forward and is never backfilled, so absence means "we do not
@@ -607,62 +608,28 @@ TOUCHLESS_BOUNCED_STATUSES: tuple[str, ...] = ("rejected",)
 # `docs/analytics.md` rather than papered over with an invented provenance.
 
 
-def _native_count(pipeline: dict, imported_pipeline: dict, statuses: tuple[str, ...]) -> int:
-    """Rows in `statuses` that carry no import marker.
+def compute_touchless_rate(*, touchless_count: int, decided_count: int) -> Decimal:
+    """Touchless share of decided invoices, as a percentage in [0, 100].
 
-    Subtracted per status and floored at zero, so a stale or mismatched
-    `imported_pipeline` can neither drive a leg negative nor let a surplus in
-    one status cancel real rows in another.
+    `touchless_count` and `decided_count` come from ONE query over the shared
+    predicates in `services/touchless` — the numerator is a filter of the
+    denominator, so it can never exceed it. The clamp below is belt-and-braces
+    against a caller that sourced the two figures separately: the rate stays in
+    [0, 100] rather than reporting an impossible value (BUG 9 was a negative
+    rate off exactly that kind of mismatch).
+
+    Exact `Decimal`, rounded half-up to one decimal place — the experiments
+    readout's `_rate` convention. `0.0` when nothing has been decided (no
+    ZeroDivisionError, and no claim either way). The dashboard's schema keeps
+    `touchless_rate` a float and converts this at the boundary.
     """
-    total = 0
-    for status in statuses:
-        present = int(pipeline.get(status, 0) or 0)
-        imported = int(imported_pipeline.get(status, 0) or 0)
-        total += max(0, present - imported)
-    return total
-
-
-def compute_touchless_rate(
-    pipeline: dict,
-    *,
-    review_cleared_count: int,
-    imported_pipeline: dict,
-) -> float:
-    """Straight-through-processing share, in [0, 100].
-
-    `pipeline` is the dashboard's `{status: count}` map over EVERY invoice.
-
-    `imported_pipeline` is the same `{status: count}` shape restricted to rows
-    that provably came from an import (`csv_import.imported_invoice_clause`).
-    Those rows are subtracted from BOTH legs: the workflow engine never ran on
-    them, so they are evidence neither for nor against this platform's
-    automation. It is REQUIRED for the same reason `review_cleared_count` is —
-    a caller that has not been updated must fail loudly rather than quietly
-    re-publish the old, wider population.
-
-    `review_cleared_count` is the number of NATIVE invoices sitting in a
-    `TOUCHLESS_REVIEW_EVIDENCE_STATUSES` status that carry a durable
-    `Invoice.approval_date` stamp — the positive evidence that the invoice
-    actually reached and cleared the approval step rather than arriving at a
-    terminal status around it. The caller excludes imported rows from this
-    count at the query, since an imported row's stamp (if a future importer
-    ever wrote one) would not be evidence of review HERE.
-
-    The numerator is a strict subset of the denominator, so the rate can
-    never go negative (BUG 9).
-    """
-    imported_pipeline = imported_pipeline or {}
-    cleared = _native_count(pipeline, imported_pipeline, TOUCHLESS_CLEARED_STATUSES)
-    bounced = _native_count(pipeline, imported_pipeline, TOUCHLESS_BOUNCED_STATUSES)
-    # Never claim more evidenced-cleared invoices than there are NATIVE
-    # invoices in those statuses (all three figures come from the same
-    # snapshot, so this is belt-and-braces against an unrelated count).
-    ambiguous_total = _native_count(pipeline, imported_pipeline, TOUCHLESS_REVIEW_EVIDENCE_STATUSES)
-    cleared += max(0, min(int(review_cleared_count or 0), ambiguous_total))
-    reviewed_total = cleared + bounced
-    if reviewed_total <= 0:
-        return 0.0
-    return round(cleared / reviewed_total * 100, 1)
+    decided = max(0, int(decided_count or 0))
+    if decided == 0:
+        return Decimal("0.0")
+    touchless = max(0, min(int(touchless_count or 0), decided))
+    return (Decimal(touchless) / Decimal(decided) * Decimal("100")).quantize(
+        Decimal("0.1"), rounding=ROUND_HALF_UP
+    )
 
 
 # ---------------------------------------------------------------------------

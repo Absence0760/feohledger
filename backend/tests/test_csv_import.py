@@ -57,6 +57,20 @@ class _StubSession:
         self.flushed += 1
 
 
+@pytest.fixture
+def stub_refresh_warnings(monkeypatch):
+    """The DB-free tests' stand-in for `invoice_warnings.refresh_warnings`.
+
+    The importer refreshes every row it lands at a live status, and the real
+    function's duplicate / fraud queries need a real session — what they find
+    is covered against Postgres in `test_import_live_row_flags_duplicate_on_import`.
+    Here it records which rows were refreshed, so the live-vs-history split is
+    asserted without a database."""
+    mock = AsyncMock(return_value=[])
+    monkeypatch.setattr(csv_import_module, "refresh_warnings", mock)
+    return mock
+
+
 # ---------------------------------------------------------------------------
 # Parsing helpers
 # ---------------------------------------------------------------------------
@@ -214,7 +228,7 @@ async def test_import_invoices_happy_path():
 
 
 @pytest.mark.asyncio
-async def test_import_invoices_stamps_the_importer_as_uploader():
+async def test_import_invoices_stamps_the_importer_as_uploader(stub_refresh_warnings):
     """`uploaded_by_id` is the segregation-of-duties key
     (`approval_chain.violates_segregation`), and it must land on EVERY row of a
     batch — not just the first — so a long import cannot smuggle an
@@ -289,12 +303,64 @@ async def test_import_invoices_rejects_live_pipeline_status():
 
 
 @pytest.mark.asyncio
-async def test_import_invoices_allows_safe_terminal_statuses():
+async def test_import_invoices_allows_safe_terminal_statuses(stub_refresh_warnings):
     db = _StubSession()
     for ok in ("new", "done", "paid", "rejected"):
         csv_text = f"invoice_number,vendor_name,amount,status\nINV-{ok},Acme,100.00,{ok}\n"
         result = await import_invoices_csv(db, uuid.uuid4(), csv_text)
         assert result.imported == 1, f"{ok}: {result.to_dict()}"
+
+
+@pytest.mark.asyncio
+async def test_import_invoices_refreshes_warnings_on_live_rows_only(stub_refresh_warnings):
+    """`new` and `rejected` both reach approval, so each gets its warnings (and
+    their exceptions) on import, as a hand-keyed invoice does. Historical
+    `done` / `paid` rows never reach a payment run and are not refreshed — an
+    exception raised on settled history is one nobody can act on. The org's
+    fraud-rule settings are threaded through."""
+    db = _StubSession()
+    settings = {"fraud_rules": {"round_amount_enabled": False}}
+    csv_text = (
+        "invoice_number,vendor_name,amount,status\n"
+        "INV-R1,Acme,100.00,new\n"
+        "INV-R2,Acme,200.00,done\n"
+        "INV-R3,Acme,300.00,paid\n"
+        "INV-R4,Acme,400.00,rejected\n"
+    )
+    result = await import_invoices_csv(db, uuid.uuid4(), csv_text, org_settings=settings)
+    assert result.imported == 4, result.to_dict()
+
+    refreshed = [call.args[1].invoice_number for call in stub_refresh_warnings.await_args_list]
+    assert refreshed == ["INV-R1", "INV-R4"]
+    for call in stub_refresh_warnings.await_args_list:
+        assert call.args[0] is db
+        assert call.kwargs == {"org_settings": settings}
+
+
+async def test_import_invoices_without_historical_refuses_done_and_paid(stub_refresh_warnings):
+    """`allow_historical=False` (an AP clerk's import) lands open AP only: a
+    `done` / `paid` row asserts a payment already happened, and a blank status
+    still means `done`, so it is refused rather than re-read as `new`. No vendor
+    stub is left behind for a refused row."""
+    from app.models.vendor import Vendor
+
+    db = _StubSession()
+    csv_text = (
+        "invoice_number,vendor_name,amount,status\n"
+        "INV-H1,Hist A,100.00,done\n"
+        "INV-H2,Hist B,100.00,paid\n"
+        "INV-H3,Hist C,100.00,\n"
+        "INV-O1,Open D,100.00,new\n"
+        "INV-O2,Open E,100.00,rejected\n"
+    )
+    result = await import_invoices_csv(db, uuid.uuid4(), csv_text, allow_historical=False)
+
+    assert result.imported == 2, result.to_dict()
+    assert result.skipped == 3
+    assert [e.row for e in result.errors] == [2, 3, 4]
+    assert all("records history" in e.message for e in result.errors)
+    vendors = sorted(o.name for o in db.added if isinstance(o, Vendor))
+    assert vendors == ["Open D", "Open E"]
 
 
 @pytest.mark.asyncio
@@ -606,6 +672,158 @@ async def test_import_then_self_approve_is_blocked_by_segregation(realdb):
     assert resp.json()["detail"]["code"] == "approval_segregation"
 
 
+async def _seed_existing_invoice(realdb, *, number, vendor_name, amount, status):
+    """An invoice already in the ledger with no `vendor_id` — the shape an
+    emailed-in or extracted invoice has before anyone links its vendor record,
+    and so one the importer's `(vendor_id, invoice_number)` dedup cannot see."""
+    from app.models.invoice import Invoice
+
+    a = realdb.info("a")
+    async with realdb.sessionmaker("a")() as s:
+        s.add(
+            Invoice(
+                organization_id=a.org_id,
+                invoice_number=number,
+                vendor_name=vendor_name,
+                amount=Decimal(amount),
+                currency="USD",
+                status=status,
+            )
+        )
+        await s.commit()
+
+
+async def test_import_live_row_flags_duplicate_on_import(realdb):
+    """A CSV row byte-identical to an invoice already in the ledger is flagged
+    the moment it lands — the `duplicate_invoice_number` warning on the row and
+    an open `duplicate` exception, which blocks a payment run — instead of
+    sitting clean at `new` until someone next edits or submits it."""
+    from sqlalchemy import select
+
+    from app.models.exception import Exception as ExceptionRecord
+    from app.models.invoice import Invoice
+
+    await _seed_existing_invoice(
+        realdb, number="DUP-77", vendor_name="Dupe Supplies", amount="1234.56", status="paid"
+    )
+    csv_bytes = b"invoice_number,vendor_name,amount,status\nDUP-77,Dupe Supplies,1234.56,new\n"
+    async with realdb.client(key="a", role="ap_manager") as c:
+        resp = await c.post(
+            "/api/invoices/import-csv",
+            files={"file": ("invoices.csv", csv_bytes, "text/csv")},
+        )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["imported"] == 1
+
+    async with realdb.sessionmaker("a")() as s:
+        imported = (
+            await s.execute(
+                select(Invoice).where(Invoice.invoice_number == "DUP-77", Invoice.status == "new")
+            )
+        ).scalar_one()
+        codes = [w.get("code") for w in imported.warnings or []]
+        assert "duplicate_invoice_number" in codes, imported.warnings
+        exc = (
+            await s.execute(
+                select(ExceptionRecord).where(
+                    ExceptionRecord.invoice_id == imported.id,
+                    ExceptionRecord.exception_type == "duplicate",
+                )
+            )
+        ).scalar_one()
+        assert exc.status == "open"
+
+
+async def test_import_historical_row_is_not_flagged(realdb):
+    """The same duplicate imported as settled history (`paid`) raises nothing:
+    it never reaches a payment run, and a Day-0 load of years of history must
+    not bury the exception queue."""
+    from sqlalchemy import func, select
+
+    from app.models.exception import Exception as ExceptionRecord
+    from app.models.invoice import Invoice
+
+    await _seed_existing_invoice(
+        realdb, number="DUP-78", vendor_name="Dupe Supplies", amount="99.10", status="paid"
+    )
+    csv_bytes = b"invoice_number,vendor_name,amount,status\nDUP-78,Dupe Supplies,99.10,paid\n"
+    async with realdb.client(key="a", role="ap_manager") as c:
+        resp = await c.post(
+            "/api/invoices/import-csv",
+            files={"file": ("invoices.csv", csv_bytes, "text/csv")},
+        )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["imported"] == 1
+
+    async with realdb.sessionmaker("a")() as s:
+        rows = (
+            (await s.execute(select(Invoice).where(Invoice.invoice_number == "DUP-78")))
+            .scalars()
+            .all()
+        )
+        assert len(rows) == 2
+        assert all(not r.warnings for r in rows)
+        count = (await s.execute(select(func.count()).select_from(ExceptionRecord))).scalar_one()
+        assert count == 0
+
+
+async def test_import_invoices_endpoint_ap_clerk_imports_open_ap_only(realdb):
+    """An AP clerk may import open AP (it then goes through approval with the
+    clerk stamped as uploader), but not historical `done` / `paid` rows."""
+    from sqlalchemy import select
+
+    from app.models.invoice import Invoice, InvoiceStatus
+
+    clerk_id = realdb.info("a").users["ap_clerk"]
+    csv_bytes = (
+        b"invoice_number,vendor_name,amount,status\n"
+        b"IMP-CLERK-1,Clerk Import Vendor,120.00,new\n"
+        b"IMP-CLERK-2,Clerk Import Vendor,80.00,paid\n"
+    )
+    async with realdb.client(key="a", role="ap_clerk") as c:
+        resp = await c.post(
+            "/api/invoices/import-csv",
+            files={"file": ("invoices.csv", csv_bytes, "text/csv")},
+        )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["imported"] == 1
+    assert body["skipped"] == 1
+
+    mk = realdb.sessionmaker("a")
+    async with mk() as s:
+        rows = (
+            (await s.execute(select(Invoice).where(Invoice.invoice_number.like("IMP-CLERK-%"))))
+            .scalars()
+            .all()
+        )
+    assert [(r.invoice_number, r.status, r.uploaded_by_id) for r in rows] == [
+        ("IMP-CLERK-1", InvoiceStatus.new, clerk_id)
+    ]
+
+
+async def test_import_invoices_endpoint_cfo_still_forbidden(realdb):
+    """Import opened to the AP clerk, not to the CFO (`INVOICE_IMPORT_ROLES`)."""
+    csv_bytes = b"invoice_number,vendor_name,amount,status\nIMP-CFO-1,V,1.00,new\n"
+    async with realdb.client(key="a", role="cfo") as c:
+        resp = await c.post(
+            "/api/invoices/import-csv",
+            files={"file": ("invoices.csv", csv_bytes, "text/csv")},
+        )
+    assert resp.status_code == 403
+
+
+async def test_import_invoices_endpoint_ap_manager_still_imports_history(realdb):
+    csv_bytes = b"invoice_number,vendor_name,amount,status\nIMP-MGR-H1,Mgr Hist Vendor,5.00,paid\n"
+    async with realdb.client(key="a", role="ap_manager") as c:
+        resp = await c.post(
+            "/api/invoices/import-csv",
+            files={"file": ("invoices.csv", csv_bytes, "text/csv")},
+        )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["imported"] == 1, resp.text
+
+
 async def test_import_invoices_endpoint_rejects_oversized_file(realdb):
     from app.services.csv_import import MAX_CSV_IMPORT_SIZE
 
@@ -688,7 +906,7 @@ async def test_corporate_card_import_validation_errors_count_as_skipped():
 
 
 @pytest.mark.asyncio
-async def test_import_invoices_stamps_provenance_on_every_row():
+async def test_import_invoices_stamps_provenance_on_every_row(stub_refresh_warnings):
     """Every invoice the importer creates carries the marker — whatever status
     the CSV asked for, and for every row of a multi-row batch (not just the
     first)."""

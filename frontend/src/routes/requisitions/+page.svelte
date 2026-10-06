@@ -450,7 +450,7 @@
 	<div class="kpi-row">
 		<KpiCard value={periodTotal} sub={periodTotalRest} label={m('requisitions.kpi.openTotal')} />
 		<KpiCard value={total} label={m('requisitions.kpi.requisitions')} />
-		<KpiCard value={pendingCount} label={m('requisitions.kpi.pendingApproval')} highlight={pendingCount ? 'red' : null} />
+		<KpiCard value={pendingCount} label={m('requisitions.kpi.pendingApproval')} helpTerm="requisition" highlight={pendingCount ? 'red' : null} />
 	</div>
 
 	<div class="filter-row">

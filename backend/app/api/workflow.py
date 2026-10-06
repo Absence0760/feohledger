@@ -17,6 +17,15 @@ from app.api.deps import (
     require_roles,
 )
 from app.api.file_proxy import serve_owned_file
+from app.api.invoice_entry import (
+    INVOICE_ENTRY_ROLES,
+    INVOICE_ENTRY_WINDOW_CLOSED,
+    in_entry_window,
+    is_entry_only,
+    refuse_entry_only_outside_window,
+    stamp_entry_editor,
+    was_ever_approved,
+)
 from app.api.permissions import PERM_INVOICE_APPROVE
 from app.api.refusals import coded_refusal
 from app.database import get_control_db
@@ -72,7 +81,7 @@ async def upload_invoice(
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_tenant_db),
     org: Organization = Depends(get_tenant),
-    user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER, ROLE_CFO)),
+    user: User = Depends(require_roles(*INVOICE_ENTRY_ROLES)),
     org_id: uuid.UUID = Depends(get_org_id),
     entity_id: uuid.UUID = Depends(get_write_entity_id),
 ):
@@ -126,7 +135,13 @@ async def upload_invoice(
             await db.refresh(invoice)
 
             print(f"[upload] Dispatching extraction for invoice {invoice.id}")
-            await dispatch_extraction(invoice.id, org_id, user.id)
+            # An entry-only caller's upload always lands at review: the
+            # unattended confidence / amount gates would otherwise approve a
+            # document they chose with no second person involved
+            # (`api/invoice_entry.py`).
+            await dispatch_extraction(
+                invoice.id, org_id, user.id, suppress_auto_approve=is_entry_only(user)
+            )
             print(f"[upload] Extraction dispatched for invoice {invoice.id}")
 
             # Log that extraction was dispatched
@@ -171,7 +186,7 @@ async def upload_invoice(
 async def trigger_extraction(
     invoice_id: uuid.UUID,
     db: AsyncSession = Depends(get_tenant_db),
-    user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER, ROLE_CFO)),
+    user: User = Depends(require_roles(*INVOICE_ENTRY_ROLES)),
     org_id: uuid.UUID = Depends(get_org_id),
     entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
@@ -181,6 +196,9 @@ async def trigger_extraction(
     """
     await ensure_in_entity_scope(db, Invoice, invoice_id, entity_id, detail="Invoice not found")
     invoice = await get_invoice_for_update(db, invoice_id)
+    # An approved invoice whose ERP push failed is `failed` too; re-extracting
+    # it would rewrite signed-off fields, so a clerk is held to the entry window.
+    refuse_entry_only_outside_window(user, invoice)
 
     if invoice.status not in (InvoiceStatus.new, InvoiceStatus.failed):
         raise HTTPException(
@@ -189,12 +207,27 @@ async def trigger_extraction(
                 f"Cannot extract from '{invoice.status.value}' status. Must be 'new' or 'failed'."
             ),
         )
+    # The same holds for everyone, not only clerks: an approved invoice whose
+    # ERP push failed is `failed`, and re-reading its document would rewrite
+    # the vendor, amount and lines an approver signed while `approved_by`
+    # still names them. The remedy for a failed push is Retry ERP.
+    if was_ever_approved(invoice):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "This invoice has already been approved, so its document can't be read "
+                "again. Retry the ERP push, or reject it for rework."
+            ),
+        )
 
     if not invoice.file_key:
         raise HTTPException(
             status_code=400, detail="No file attached to this invoice. Upload a file first."
         )
 
+    # Re-extraction rewrites the vendor, amount, dates and lines: a content
+    # change by whoever asked for it.
+    stamp_entry_editor(user, invoice)
     # Transition to pending
     await transition_invoice(
         db,
@@ -210,7 +243,11 @@ async def trigger_extraction(
     # Dispatch extraction
     from app.services.extraction_dispatch import dispatch_extraction
 
-    await dispatch_extraction(invoice.id, org_id, user.id)
+    # Same as upload: a clerk may have just attached or swapped the document,
+    # so their extraction never auto-approves.
+    await dispatch_extraction(
+        invoice.id, org_id, user.id, suppress_auto_approve=is_entry_only(user)
+    )
 
     return {
         "id": str(invoice.id),
@@ -223,13 +260,14 @@ async def trigger_extraction(
 async def reset_extraction(
     invoice_id: uuid.UUID,
     db: AsyncSession = Depends(get_tenant_db),
-    user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER, ROLE_CFO)),
+    user: User = Depends(require_roles(*INVOICE_ENTRY_ROLES)),
     org_id: uuid.UUID = Depends(get_org_id),
     entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
     """Reset a stuck extraction — moves invoice from 'pending' back to 'new'."""
     await ensure_in_entity_scope(db, Invoice, invoice_id, entity_id, detail="Invoice not found")
     invoice = await get_invoice_for_update(db, invoice_id)
+    refuse_entry_only_outside_window(user, invoice)
 
     if invoice.status != InvoiceStatus.pending:
         raise HTTPException(
@@ -381,11 +419,12 @@ async def reject_invoice(
 async def resubmit_invoice(
     invoice_id: uuid.UUID,
     db: AsyncSession = Depends(get_tenant_db),
-    user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER, ROLE_CFO)),
+    user: User = Depends(require_roles(*INVOICE_ENTRY_ROLES)),
     entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
     await ensure_in_entity_scope(db, Invoice, invoice_id, entity_id, detail="Invoice not found")
     invoice = await get_invoice_for_update(db, invoice_id)
+    refuse_entry_only_outside_window(user, invoice)
 
     await review_svc.resubmit_invoice(
         db,
@@ -461,7 +500,7 @@ async def complete_invoice(
     invoice_id: uuid.UUID,
     db: AsyncSession = Depends(get_tenant_db),
     org: Organization = Depends(get_tenant),
-    user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER, ROLE_CFO)),
+    user: User = Depends(require_roles(*INVOICE_ENTRY_ROLES)),
     org_id: uuid.UUID = Depends(get_org_id),
     entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
@@ -471,9 +510,34 @@ async def complete_invoice(
     - new + no approval → done
     - approved + ERP enabled → triggers ERP dispatch
     - approved + no ERP → done
+
+    An entry-only caller (an AP clerk) may take only the first: submitting a
+    `new` invoice for review is the end of entry, while closing an invoice with
+    no approval step, or pushing an approved one to the ERP, is past it. Their
+    submit ALWAYS lands at review — the amount-floor auto-approve below is
+    skipped for them, whatever the org's `require_segregation`. The floor's own
+    segregation degrade would usually catch a clerk (they are the uploader, or
+    `stamp_entry_editor` put them in the set), but an org that opted out of
+    segregation would then have the floor approve the clerk's own figures with
+    no second person involved; entry never ends in an approval.
     """
     await ensure_in_entity_scope(db, Invoice, invoice_id, entity_id, detail="Invoice not found")
     invoice = await get_invoice_for_update(db, invoice_id)
+
+    approval_enabled = await is_step_enabled(db, org_id, "approval", invoice_id=invoice.id)
+    entry_only = is_entry_only(user)
+    if entry_only and not (
+        invoice.status == InvoiceStatus.new and approval_enabled and in_entry_window(invoice)
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=coded_refusal(
+                INVOICE_ENTRY_WINDOW_CLOSED,
+                "AP clerks can submit a new invoice for review; completing it is "
+                "an AP manager's step.",
+                status=invoice.status.value,
+            ),
+        )
 
     # Validate required fields
     missing = []
@@ -498,7 +562,6 @@ async def complete_invoice(
         )
 
     # Check workflow config for this invoice
-    approval_enabled = await is_step_enabled(db, org_id, "approval", invoice_id=invoice.id)
     erp_enabled = await is_step_enabled(db, org_id, "erp_export", invoice_id=invoice.id)
 
     await refresh_warnings(db, invoice, org_settings=org.settings)
@@ -557,15 +620,19 @@ async def complete_invoice(
         # one fetched now. An invoice we can't express there fails closed: the
         # floor doesn't fire and the CFO / max gates do. Either way, a human.
         gate_amount = reporting_gate_amount(invoice, org_settings=org.settings)
-        if decide_auto_approve(
-            {},  # no extraction result here — see the note above
-            approval_config,
-            overall_confidence=0.0,
-            amount=gate_amount,
-            aggregate_amount=reporting_gate_amount(
-                invoice, amount=gate_aggregate, org_settings=org.settings
-            ),
-        ) and not violates_segregation(invoice, user.id, approval_config):
+        if (
+            decide_auto_approve(
+                {},  # no extraction result here — see the note above
+                approval_config,
+                overall_confidence=0.0,
+                amount=gate_amount,
+                aggregate_amount=reporting_gate_amount(
+                    invoice, amount=gate_aggregate, org_settings=org.settings
+                ),
+            )
+            and not entry_only
+            and not violates_segregation(invoice, user.id, approval_config)
+        ):
             invoice.approval_date = utc_today()
             invoice.approved_by = "system (below threshold)"
             await transition_invoice(

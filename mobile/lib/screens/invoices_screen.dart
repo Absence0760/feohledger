@@ -193,19 +193,22 @@ class _InvoicesScreenState extends State<InvoicesScreen> {
             );
           },
         ),
-        // Explicit label is the screen-reader name (tooltip alone isn't
-        // exposed as a semantics label on all platforms — WCAG 4.1.2).
-        Semantics(
-          label: l.invoicesCaptureInvoiceLabel,
-          button: true,
-          child: IconButton(
-            icon: const Icon(Icons.camera_alt),
-            tooltip: l.invoicesCaptureInvoice,
-            onPressed: () => Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => const CaptureScreen()),
+        // Capture uploads to POST /api/invoices/upload, which takes the entry
+        // roles (`ap_clerk` included) — not a custom-role-only user.
+        if (AuthStore.instance.canEnterInvoice)
+          // Explicit label is the screen-reader name (tooltip alone isn't
+          // exposed as a semantics label on all platforms — WCAG 4.1.2).
+          Semantics(
+            label: l.invoicesCaptureInvoiceLabel,
+            button: true,
+            child: IconButton(
+              icon: const Icon(Icons.camera_alt),
+              tooltip: l.invoicesCaptureInvoice,
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const CaptureScreen()),
+              ),
             ),
           ),
-        ),
       ],
       bottom: PreferredSize(
         preferredSize: const Size.fromHeight(56),

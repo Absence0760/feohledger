@@ -1,10 +1,11 @@
 """Fixed assistant toolset — registry, Anthropic specs, dispatch.
 
-Five typed read-only tools over the **current tenant** only. Each ``ToolSpec``
+Ten typed read-only tools over the **current tenant** only. Each ``ToolSpec``
 binds a name to its param/return Pydantic models, the async tool fn, and the
 Anthropic tool schema (auto-derived from the param model's JSON schema). The
-orchestrator runs the fn; the model can only emit one of these five calls with
-typed, clamped params — never raw SQL.
+orchestrator runs the fn; the model can only emit one of these calls with
+typed, clamped params — never raw SQL. A tool whose data the REST surface
+gates to a narrower role set carries that set as ``allowed_roles``.
 """
 
 from __future__ import annotations
@@ -29,10 +30,15 @@ from app.services.assistant.tools.optimizer import optimize_discount_capture
 from app.services.assistant.tools.text_search import find_invoices_by_text
 from app.services.assistant.tools.vendor_spend import get_vendor_spend
 
-# The cash-flow copilot tools read org-wide cash exposure — finance-leader
-# only. Stricter than the assistant's blanket four-role access; enforced
-# per-call by the orchestrator's run_tool closure (a clerk gets a clean
-# refusal tool result, never data and never a 500).
+# Tools that read org-wide cash exposure — the five cash-flow copilot tools and
+# `get_payment_forecast` — are finance-leader only: the audience
+# `api/cash_flow.COPILOT_ROLES` names as "who may see this org's cash position".
+# Stricter than the assistant's blanket four-role access; enforced per-call by
+# the orchestrator's run_tool closure (a clerk gets a clean refusal tool result,
+# never data and never a 500). `test_tool_allowed_roles_match_rest_gate` in
+# `tests/test_assistant.py` pins every tool's `allowed_roles` to the REST gate of
+# the read it mirrors, so a new tool cannot quietly serve a role the app itself
+# refuses.
 FINANCE_LEADER_ROLES = ("admin", "ap_manager", "cfo")
 
 
@@ -117,6 +123,9 @@ TOOLS: dict[str, ToolSpec] = {
         param_model=schemas.ForecastParams,
         return_model=schemas.ForecastResult,
         fn=get_payment_forecast,
+        # The same due-dated committed + pending outflow the copilot's
+        # `get_cashflow_forecast` returns, so the same gate — never wider.
+        allowed_roles=FINANCE_LEADER_ROLES,
     ),
     "find_invoices_by_text": ToolSpec(
         name="find_invoices_by_text",

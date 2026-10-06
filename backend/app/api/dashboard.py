@@ -19,12 +19,7 @@ from app.models.virtual_card import CardRebate, VirtualCard
 from app.schemas.dashboard import DashboardResponse
 from app.services.analytics import (
     OPEN_AP_STATUSES,
-    TOUCHLESS_REVIEW_EVIDENCE_STATUSES,
     compute_touchless_rate,
-)
-from app.services.csv_import import (
-    imported_invoice_clause,
-    native_invoice_clause,
 )
 from app.services.currency_conversion import (
     card_currency_sql,
@@ -34,6 +29,7 @@ from app.services.currency_conversion import (
     resolve_reporting_currency,
     rollup_from_grouped_rows,
 )
+from app.services.touchless import touchless_counts_select
 from app.tenant import apply_entity_scope, get_entity_id, get_tenant, get_tenant_db
 from app.utils.dates import utc_today
 
@@ -418,55 +414,20 @@ async def get_dashboard(
         if unconverted:
             upcoming_unconverted_count += 1
 
-    # Touchless rate — the share of invoices that PASSED REVIEW without a human
-    # touching them, out of every invoice that provably finished review. All
-    # three legs are defined once, in `services/analytics`
-    # (`TOUCHLESS_CLEARED_STATUSES` / `TOUCHLESS_REVIEW_EVIDENCE_STATUSES` /
-    # `TOUCHLESS_BOUNCED_STATUSES`), because the hand-written copy that used to
-    # live here had drifted.
-    #
-    # Several statuses the pipeline map reports cannot be classified by status
-    # alone — `done` (the `new -> done` shortcut skips approval outright, and
-    # it is the CSV importer's default landing state), `paid` (CSV-importable
-    # too) and `failed` (reachable from `pending` — extraction failed, never
-    # reviewed — as well as from `sending_to_erp`). The durable
-    # `Invoice.approval_date` stamp is the positive evidence that review
-    # actually happened; only the stamped ones count as cleared, and the rest
-    # sit in neither leg.
-    #
-    # The mirror hole is provenance, not evidence: a CSV-imported `rejected`
-    # row sits in the bounced leg as though a reviewer HERE sent it back, and
-    # no approval stamp can ever exclude it (nothing writes one on a
-    # rejection). So imported rows leave BOTH legs, identified by the marker
-    # `services/csv_import` stamps on every row it creates rather than
-    # inferred from status — `done`, `paid` and `rejected` are each reachable
-    # natively too. A row with no marker is treated as native (the marker is
-    # written only going forward and never backfilled), so rows imported
-    # before it shipped stay in the population; see `docs/analytics.md`.
-    imported_status_rows = await db.execute(
-        _inv(
-            select(Invoice.status, func.count(Invoice.id))
-            .where(imported_invoice_clause())
-            .group_by(Invoice.status)
-        )
-    )
-    imported_pipeline = {
-        str(row[0].value if hasattr(row[0], "value") else row[0]): row[1]
-        for row in imported_status_rows.all()
-    }
-    review_cleared_q = await db.execute(
-        _inv(
-            select(func.count()).where(
-                Invoice.status.in_(TOUCHLESS_REVIEW_EVIDENCE_STATUSES),
-                Invoice.approval_date.isnot(None),
-                native_invoice_clause(),
-            )
-        )
-    )
-    touchless_rate = compute_touchless_rate(
-        pipeline,
-        review_cleared_count=int(review_cleared_q.scalar() or 0),
-        imported_pipeline=imported_pipeline,
+    # Touchless rate — the share of DECIDED invoices that went straight
+    # through: approved automatically, no field or line-item correction, no
+    # exception a person decided. Classified entirely by the shared predicates
+    # in `services/touchless` (the experiments readout calls the same ones, so
+    # the two figures cannot disagree), counted in ONE query so the numerator
+    # is a filter of exactly the denominator. The population rules — the
+    # evidence-gated `done`/`paid`/`failed` legs and the exclusion of
+    # CSV-imported history from both legs — live there and in
+    # `services/analytics`; see `backend/docs/analytics.md` § Touchless rate.
+    touchless_count, decided_count = (await db.execute(_inv(touchless_counts_select()))).one()
+    # Percentages are not currency: the schema keeps this a float, and this is
+    # its single hop from the exact Decimal the helper computes.
+    touchless_rate = float(
+        compute_touchless_rate(touchless_count=touchless_count, decided_count=decided_count)
     )
 
     # Payment totals — separate queries to avoid complex CASE expressions

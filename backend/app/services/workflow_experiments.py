@@ -19,8 +19,9 @@ Two concerns, one module:
      instance so it survives recomputation.
 
   2. **Metrics** (``compute_experiment_results``) — per-variant aggregates over the
-     **assigned, completed** invoices: time-to-approval, touchless (auto-approved,
-     no human correction) rate, exception rate, rejection rate. A clear
+     **assigned, completed** invoices: time-to-approval, touchless rate (the ONE
+     definition in ``services/touchless``, shared with the dashboard KPI),
+     exception rate, rejection rate. A clear
      "not enough data yet" state guards every readout, and a winner is only
      called once both arms clear a minimum sample. The winner call is a simple,
      explainable, deterministic comparison on the configured primary metric — no
@@ -37,7 +38,7 @@ import hashlib
 from dataclasses import dataclass, field
 from decimal import ROUND_HALF_UP, Decimal
 
-from app.services.analytics import _avg, _quantile
+from app.services.analytics import _avg, _quantile, compute_touchless_rate
 
 __all__ = [
     "VARIANT_A",
@@ -119,7 +120,7 @@ class VariantMetrics:
     completed_count: int  # of those, the ones that reached a decided outcome
     approved_count: int
     rejected_count: int
-    touchless_count: int  # auto-approved AND unmodified (no human correction)
+    touchless_count: int  # straight-through: see services/touchless
     exception_count: int  # invoices that raised >= 1 exception
     # Decimal metrics (the comparison surface):
     median_time_to_approval_days: Decimal
@@ -159,12 +160,14 @@ def _variant_metrics(variant: str, rows: list) -> VariantMetrics:
     """Aggregate one variant's assigned invoice rows.
 
     A row is duck-typed (dict or object) with:
-      * ``status`` (str) — the invoice's current status.
-      * ``decision`` ("approved" | "rejected" | None) — the *terminal review
-        decision* for this invoice (None when still in flight / undecided).
-      * ``unmodified`` (bool) — the approval landed with no field corrections.
-      * ``auto_approved`` (bool) — the approval was made by the system, not a
-        human (no human approver). Touchless = ``auto_approved AND unmodified``.
+      * ``decision`` ("approved" | "rejected" | None) — the invoice's review
+        decision (None when still in flight / undecided). The caller derives it
+        from ``services/touchless``' population predicates, so "completed" here
+        is exactly the dashboard touchless rate's denominator.
+      * ``touchless`` (bool) — ``services/touchless.touchless_clause`` held:
+        approved automatically, no human correction, no exception a person
+        decided. Only counted on an approved row (a rejection is a person's
+        decision by construction).
       * ``time_to_approval_days`` (Decimal | None) — None for rejections / in-flight.
       * ``had_exception`` (bool) — the invoice raised >= 1 exception.
 
@@ -180,7 +183,7 @@ def _variant_metrics(variant: str, rows: list) -> VariantMetrics:
         decision = _get(r, "decision")
         if decision == "approved":
             approved += 1
-            if _get(r, "auto_approved") and _get(r, "unmodified"):
+            if _get(r, "touchless"):
                 touchless += 1
             ttd = _get(r, "time_to_approval_days")
             if ttd is not None:
@@ -203,7 +206,9 @@ def _variant_metrics(variant: str, rows: list) -> VariantMetrics:
         exception_count=exception,
         median_time_to_approval_days=median_ttd,
         avg_time_to_approval_days=avg_ttd,
-        touchless_rate_pct=_rate(touchless, completed),
+        touchless_rate_pct=compute_touchless_rate(
+            touchless_count=touchless, decided_count=completed
+        ),
         exception_rate_pct=_rate(exception, assigned),
         rejection_rate_pct=_rate(rejected, completed),
     )

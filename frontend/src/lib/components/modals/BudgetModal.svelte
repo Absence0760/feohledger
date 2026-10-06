@@ -157,6 +157,7 @@
 				<KpiCard
 					value={spend ? formatMoney(spend.committed, { currency: spend.currency }) : null}
 					label={m('budgets.modal.kpi.committed')}
+					helpTerm="budget"
 					pending={spendLoading}
 				/>
 				<KpiCard

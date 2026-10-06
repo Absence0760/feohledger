@@ -2,6 +2,7 @@
 	import { api } from '#lib/api.ts';
 	import DataTable from '#lib/components/ui/DataTable.svelte';
 	import KpiCard from '#lib/components/ui/KpiCard.svelte';
+	import HelpTip from '#lib/components/help/HelpTip.svelte';
 	import MoneyByCurrency from '#lib/components/ui/MoneyByCurrency.svelte';
 	import type { CurrencyFigure } from '#lib/components/ui/moneyByCurrency.ts';
 	import { formatMoney, isNegativeAmount } from '#lib/utils/money.ts';
@@ -163,17 +164,22 @@
 		<p class="empty">{m('cfoMetrics.loading')}</p>
 	{:else if data}
 		{#if data.reporting_accounts_payable_balance.unconverted_count > 0}
-			<p class="cfm-skipped" role="alert" data-testid="unconverted-ap-balance">
-				{m('cfoMetrics.apBalance.unconverted', {
+			<p class="cfm-skipped" data-testid="unconverted-ap-balance">
+				<!-- The alert is the message alone: the ⓘ beside it is not part of the warning. -->
+				<span role="alert">{m('cfoMetrics.apBalance.unconverted', {
 					n: data.reporting_accounts_payable_balance.unconverted_count,
 					currency: data.reporting_accounts_payable_balance.reporting_currency
-				})}
+				})}</span>
+				<HelpTip term="reporting-currency" />
 			</p>
 		{/if}
 
 		{#if data.dpo_trend.length > 0}
 			<div class="cfm-subsection">
-				<h3>{m('cfoMetrics.dpoTrend.title')}</h3>
+				<div class="help-row">
+					<h3>{m('cfoMetrics.dpoTrend.title')}</h3>
+					<HelpTip term="days-payable-outstanding" />
+				</div>
 				<p class="cfm-trend-hint">{m('cfoMetrics.dpoTrend.hint')}</p>
 				<div class="cf-bars">
 					{#each data.dpo_trend as r (r.month)}
@@ -302,7 +308,10 @@
 
 		{#if data.unrealized_fx.available && data.unrealized_fx.by_currency.length > 0}
 			<div class="cfm-subsection">
-				<h3>{m('cfoMetrics.fx.title')}</h3>
+				<div class="help-row cfm-title">
+					<h3>{m('cfoMetrics.fx.title')}</h3>
+					<HelpTip term="fx-rate" />
+				</div>
 				<!-- Open foreign invoices with no locked rate are EXCLUDED from the
 				     exposure rather than booked at face value: the mark-to-market leg
 				     converts the same original amount at today's rate, so a face-value
@@ -373,6 +382,7 @@
 		border-radius: 10px;
 		padding: 20px;
 	}
+
 	.chart-card h2 {
 		font-size: 1rem;
 		margin: 0 0 16px;
@@ -382,16 +392,19 @@
 		flex-direction: column;
 		gap: 8px;
 	}
+
 	.cf-bar-row {
 		display: grid;
 		grid-template-columns: 90px 1fr 110px;
 		align-items: center;
 		gap: 12px;
 	}
+
 	.cf-bar-label {
 		font-size: 0.8rem;
 		color: var(--text-muted);
 	}
+
 	.cf-bar-bg {
 		display: flex;
 		height: 18px;
@@ -399,20 +412,25 @@
 		border-radius: 4px;
 		overflow: hidden;
 	}
+
 	.cf-bar {
 		height: 100%;
 	}
+
 	.cf-bar.committed {
 		background: #638cff;
 	}
+
 	.cf-bar.pending {
 		background: #b7c5f5;
 	}
+
 	.cf-bar-amount {
 		font-size: 0.82rem;
 		text-align: right;
 		font-variant-numeric: tabular-nums;
 	}
+
 	.empty {
 		color: var(--text-muted);
 		text-align: center;
@@ -433,6 +451,12 @@
 		font-weight: 600;
 		color: var(--text-muted);
 		margin: 0 0 10px;
+	}
+	.cfm-title {
+		margin: 0 0 10px;
+	}
+	.cfm-subsection .cfm-title > h3 {
+		margin: 0;
 	}
 
 	.cfm-trend-hint {
@@ -481,6 +505,7 @@
 	.cfm-alert {
 		color: var(--danger);
 	}
+
 	/* Amber, not red — the exposure below is still usable, it just doesn't
 	   cover every open foreign invoice. Same treatment as `/cfo`'s
 	   `.cf-skipped`, which carries the sibling outflow-side caveat. */
@@ -490,6 +515,7 @@
 		font-weight: 600;
 		margin: 0 0 12px;
 	}
+
 	/* Muted, not amber: "this month has no rate" is a fact about the data,
 	   not a warning about the figure beside it. */
 	.cfm-note {
@@ -497,7 +523,9 @@
 		font-size: 0.78rem;
 		margin: 10px 0 0;
 	}
+
 	.cfm-unknown {
 		color: var(--text-muted);
 	}
+
 </style>

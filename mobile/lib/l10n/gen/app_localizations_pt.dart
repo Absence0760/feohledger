@@ -1162,6 +1162,18 @@ class AppLocalizationsPt extends AppLocalizations {
       'Pagamento anterior não conciliado — pode ainda estar em trânsito';
 
   @override
+  String get payQueueBlockedQualityHold =>
+      'Retenção de qualidade — mercadoria reprovada ou aguardando inspeção';
+
+  @override
+  String get payQueueBlockedPoMismatch =>
+      'Não confere com o pedido de compra — não resolvido';
+
+  @override
+  String get payQueueBlockedVendorNotActive =>
+      'Fornecedor não verificado ou inativo — verifique o fornecedor primeiro';
+
+  @override
   String get payQueueBlockedAppliedCreditMismatch =>
       'Uma nota de crédito aplicada não corresponde mais ao fornecedor ou à moeda desta fatura — corrija a fatura primeiro';
 
@@ -4212,6 +4224,18 @@ class AppLocalizationsPtBr extends AppLocalizationsPt {
   @override
   String get payQueueBlockedPaymentReconciliation =>
       'Pagamento anterior não conciliado — pode ainda estar em trânsito';
+
+  @override
+  String get payQueueBlockedQualityHold =>
+      'Retenção de qualidade — mercadoria reprovada ou aguardando inspeção';
+
+  @override
+  String get payQueueBlockedPoMismatch =>
+      'Não confere com o pedido de compra — não resolvido';
+
+  @override
+  String get payQueueBlockedVendorNotActive =>
+      'Fornecedor não verificado ou inativo — verifique o fornecedor primeiro';
 
   @override
   String get payQueueBlockedAppliedCreditMismatch =>

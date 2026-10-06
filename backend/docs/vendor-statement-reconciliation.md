@@ -77,7 +77,7 @@ One row per reconciliation outcome the engine produced.
 | `amount_difference` | numeric(18,2) | Signed `statement_amount − ledger_amount`, for the `amount_mismatch` view. |
 | `match_method` | varchar(40) | `invoice_number` \| `amount_date` — how the engine matched this line. |
 | `resolution_status` | varchar(20) | `unresolved` (default) \| `resolved` \| `ignored`. |
-| `resolution_note` / `resolved_by` / `resolved_at` | the clerk's disposition | |
+| `resolution_note` / `resolved_by` / `resolved_at` | the resolver's disposition (admin / AP manager) | |
 | `raw` | jsonb | The original parsed statement line, for audit replay. |
 | `entity_id` | uuid FK → entities | From `EntityMixin`. |
 | `created_at` | timestamptz | |
@@ -249,7 +249,7 @@ ledger amount of every matched / amount-mismatch invoice.
 | `missing_on_their_side` | We have an open invoice the statement omitted | No |
 
 The two **actionable** classes (`missing_on_our_side` + `amount_mismatch`) are
-what a clerk must clear before the run flips to `resolved`, and they're the only
+what an admin or AP manager must clear before the run flips to `resolved`, and they're the only
 ones that contribute to close-readiness materiality. `missing_on_their_side` is
 informational — the supplier simply hasn't listed an invoice we're tracking (a
 timing difference, usually); it carries no unreconciled money toward the
@@ -282,8 +282,8 @@ invoice-less fraud exceptions), so the constraint is no longer the blocker — b
 the recon line remains the right home regardless, for the reasons below:
 
 - **It describes a missing invoice and feeds intake.** The recon line is a
-  durable work item that *points at* an invoice we should create; once the clerk
-  creates the real invoice, they resolve the line.
+  durable work item that *points at* an invoice we should create; once the real
+  invoice exists, an admin or AP manager resolves the line.
 
 - **The run is the unit of work, not the invoice.** Exceptions hang off a single
   invoice; a statement reconciliation is a vendor-and-period-scoped batch whose
@@ -311,7 +311,7 @@ is entity-scoped.
 | `GET /vendor-statements/close-readiness` | Period-close gate (see below). Declared **before** `/{recon_id}` so the literal path wins |
 | `GET /vendor-statements/{recon_id}` | Detail — the run + all its lines (with each matched invoice's number, fetched in one query, no N+1) |
 | `GET /vendor-statements/{recon_id}/file` | Download the archived supplier document this run was built from. Read roles; entity-scoped run lookup **and** an org-prefix check on the stored key; the same opaque 404 for an unknown run and a run with no document |
-| `POST /vendor-statements/{recon_id}/lines/{line_id}/resolve` | Resolve / ignore / re-open one line (`resolution_status` ∈ `resolved` / `ignored` / `unresolved`, optional note); recomputes the run status |
+| `POST /vendor-statements/{recon_id}/lines/{line_id}/resolve` | Resolve / ignore / re-open one line (`resolution_status` ∈ `resolved` / `ignored` / `unresolved`, optional note); recomputes the run status. Write roles only — admin / AP manager (`_WRITE_ROLES`); clerks and CFOs can read a run but not resolve its lines |
 | `DELETE /vendor-statements/{recon_id}` | Delete the run (cascade removes its lines) |
 
 The candidate ledger for a run is **that vendor's** invoices in the entity scope

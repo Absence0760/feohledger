@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { api } from '#lib/api.ts';
+	import HelpTip from '#lib/components/help/HelpTip.svelte';
 	import { appendUnique } from '#lib/utils/pagination.ts';
 	import SearchBox from '#lib/components/ui/SearchBox.svelte';
 	import PageHeader from '#lib/components/ui/PageHeader.svelte';
@@ -380,6 +381,7 @@
 		<header class="modal-header">
 			<div class="title-block">
 				<h2>{m('purchaseOrders.modal.title')}</h2>
+				<HelpTip term="purchase-order" />
 				{#if detail}
 					<span class="po-number-badge">{detail.po_number}</span>
 					<Badge tone={STATUS_TONES[detail.status] ?? 'neutral'} variant={detail.status}>{detail.status}</Badge>
@@ -423,7 +425,10 @@
 				</tbody>
 			</table>
 
-			<h3>{m('purchaseOrders.modal.linkedInvoices', { count: detail.linked_invoices.length })}</h3>
+			<div class="help-row title-row">
+				<h3>{m('purchaseOrders.modal.linkedInvoices', { count: detail.linked_invoices.length })}</h3>
+				<HelpTip term="three-way-match" />
+			</div>
 			<table class="line-table">
 				<thead>
 					<tr>
@@ -462,6 +467,7 @@
 		cursor: pointer;
 		font-family: inherit;
 	}
+
 	.btn-outline:hover:not(:disabled) {
 		border-color: var(--accent);
 		color: var(--accent);
@@ -480,11 +486,13 @@
 		border-bottom: 1px solid var(--border);
 		margin: -24px -24px 0;
 	}
+
 	.title-block {
 		display: flex;
 		align-items: center;
 		gap: 12px;
 	}
+
 	.modal-header h2 {
 		margin: 0;
 		font-size: 1.1rem;
@@ -495,6 +503,7 @@
 		font-size: 0.85rem;
 		color: var(--text-muted);
 	}
+
 	.close-btn {
 		background: none;
 		border: none;
@@ -504,6 +513,7 @@
 		line-height: 1;
 		padding: 0 4px;
 	}
+
 	.close-btn:hover {
 		color: var(--text);
 	}
@@ -512,6 +522,7 @@
 		overflow-y: auto;
 		flex: 1;
 	}
+
 	.modal-body h3 {
 		margin: 18px 0 8px;
 		font-size: 0.85rem;
@@ -528,6 +539,7 @@
 		padding-bottom: 14px;
 		border-bottom: 1px solid var(--border);
 	}
+
 	dt {
 		font-size: 0.75rem;
 		text-transform: uppercase;
@@ -543,11 +555,13 @@
 		font-family: 'SF Mono', 'Cascadia Code', monospace;
 		font-size: 0.82rem;
 	}
+
 	.line-table {
 		width: 100%;
 		border-collapse: collapse;
 		font-size: 0.85rem;
 	}
+
 	.line-table th {
 		background: var(--bg);
 		text-align: left;
@@ -565,18 +579,28 @@
 	.line-table .right {
 		text-align: right;
 	}
+
 	.line-table .mono {
 		font-family: 'SF Mono', 'Cascadia Code', monospace;
 		font-size: 0.82rem;
 	}
+
 	.line-table .empty {
 		text-align: center;
 		padding: 40px;
 		color: var(--text-muted);
 	}
+
 	.loading {
 		padding: 40px;
 		text-align: center;
 		color: var(--text-muted);
+	}
+
+	.title-row {
+		margin: 18px 0 8px;
+	}
+	.modal-body .title-row h3 {
+		margin: 0;
 	}
 </style>

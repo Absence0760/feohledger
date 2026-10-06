@@ -1,4 +1,5 @@
 <script lang="ts">
+	import HelpTip from '#lib/components/help/HelpTip.svelte';
 	import type {
 		Contract,
 		ContractType,
@@ -334,6 +335,7 @@
 		{#if !isCreate}
 			<div class="status-row">
 				<Badge tone={STATUS_TONES[status]} variant={status}>{statusLabel}</Badge>
+				<HelpTip term="contract" />
 				{#if contract!.auto_renew}<span class="meta-pill">{m('contracts.modal.autoRenewPill')}</span>{/if}
 			</div>
 		{/if}
@@ -555,7 +557,7 @@
 		<!-- Create PO sub-form -->
 		{#if showCreatePo}
 			<div class="sub-form">
-				<div class="sub-form-title">{m('contracts.modal.createPo.title')}</div>
+				<div class="sub-form-title">{m('contracts.modal.createPo.title')} <HelpTip term="purchase-order" /></div>
 				<div class="sub-form-grid">
 					<label>
 						<span>{m('contracts.modal.createPo.poNumber')}</span>

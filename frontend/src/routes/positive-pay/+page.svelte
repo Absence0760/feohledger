@@ -17,6 +17,7 @@
 	} from '#lib/api/positivePay.ts';
 	import type { PositivePaySummary } from '#lib/types/positivePay.ts';
 	import Badge from '#lib/components/ui/Badge.svelte';
+	import HelpTip from '#lib/components/help/HelpTip.svelte';
 	import PageHeader from '#lib/components/ui/PageHeader.svelte';
 	import SearchBox from '#lib/components/ui/SearchBox.svelte';
 	import FilterChips from '#lib/components/ui/FilterChips.svelte';
@@ -344,6 +345,7 @@
 	<div class="filter-row">
 		<SearchBox bind:value={search} placeholder={m('positivePay.search.placeholder')} ariaLabel={m('positivePay.search.aria')} />
 		<FilterChips chips={TYPE_CHIPS} bind:active={typeFilter} />
+		<HelpTip term="positive-pay" />
 	</div>
 
 	<DataTable

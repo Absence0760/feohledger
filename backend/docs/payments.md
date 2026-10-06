@@ -14,7 +14,7 @@ Payment Scheduled          (auto or manual — based on due date & payment terms
 Payment Run Created        (batch of invoices grouped for execution)
     |
     v
-Payment Executed           (ACH, wire, check, or virtual card)
+Payment Executed           (on the run's rail — ACH, wire, check, virtual card, a UK rail, or an international corridor; see `method` below)
     |
     v
 Reconciled                 (matched against bank statement — future)
@@ -83,8 +83,10 @@ An individual payment record linked to a single invoice. Created when a payment 
 | invoice_id | UUID | FK to the invoice being paid |
 | payment_run_id | UUID | FK to the batch run (nullable for one-off payments) |
 | correlation_id | UUID | Links to the invoice's correlation ID |
-| amount | Decimal | Payment amount |
-| method | String | `ach`, `wire`, `check`, `virtual_card` |
+| amount | Decimal | Payment amount — the invoice net of applied credit memos, minus any accepted early-payment discount (`discount_amount`) |
+| discount_offer_id | UUID | The accepted invoice-scoped `DiscountOffer` this payment takes (migration 0104); NULL when it pays the full net |
+| discount_amount | Decimal | The exact savings deducted under that offer; NULL — never 0 — when none |
+| method | String | Domestic: `ach`, `wire`, `check`, `rtp`, `virtual_card`, and the UK rails `bacs`, `faster_payments`, `chaps`. International corridors: `sepa`, `international_ach`, `international_wire` (chosen by `payment_corridor.pick_corridor`, never a default). The rail sets are `services/payment_methods.py`; the run-review dropdown offers `ach`, `wire`, `check`, `virtual_card`, `bacs`, `faster_payments`, `chaps` (`frontend/src/lib/types/payment.ts::PAYMENT_METHODS`) |
 | status | String | `pending` → `processing` → `completed` / `failed` / `cancelled` |
 | reference | String | External reference (check number, wire ref, ACH trace) |
 
@@ -108,7 +110,7 @@ The payments page (`/payments`) consolidates all payment activity — including 
 /payments
   ├── Summary Bar        — Total Paid, Pending, Ready to Pay, Payments, Rebates Earned
   ├── Tab: Queue         — invoices ready to pay (sorted by due date, overdue highlighted)
-  ├── Tab: History       — all payments in one table (ACH, wire, check, virtual card)
+  ├── Tab: History       — all payments in one table, every rail
   └── Tab: Runs          — payment batches
 ```
 
@@ -187,19 +189,20 @@ The flow is split into **create draft** and **execute** so a CFO can review what
 2. **Selects invoices** via checkboxes (select-all available)
 3. Action bar shows count and total: *"3 selected — $18,050.00"*
 4. Clicks **Review & Pay** — review panel slides in
-5. **Chooses payment method per invoice** (ACH, Wire, Check, Virtual Card) via dropdown
+5. **Chooses payment method per invoice** (ACH, Wire, Check, Virtual Card, BACS, Faster Payments, CHAPS) via dropdown
 6. Clicks **Create Draft Run · 3 Invoices** — this:
    - `POST /api/payments/runs` creates a `PaymentRun` with `status='draft'`
    - Pending payment rows are created (no money has moved)
    - The Run Detail modal opens automatically showing the draft
 7. Toast: *"Draft payment run created — review and execute"*
 8. In the **Run Detail modal** the user reviews the payments table and clicks **Execute**:
-   - `POST /api/payments/runs/{id}/execute` flips the run to `completed`
+   - `POST /api/payments/runs/{id}/execute` claims the run by flipping it to `executing`, then dispatches each payment to the processor
+   - When the loop finishes, the run's status is **derived from the processor results** (`rollup_payment_statuses` → `completed`, `partial`, `failed`, or `submitted` while any payment is still in flight) — it is not set straight to `completed`
    - Generates payment references (e.g., `ACH-20260406-001`)
    - Updates invoice statuses to `payment_scheduled`
    - **Triggers async ERP sync** in background
 9. Toast: *"Payment run executed — 3 payments completed. ERP sync in progress."*
-10. Queue clears, History/Runs/Summary update; the modal stays open showing the now-completed run
+10. Queue clears, History/Runs/Summary update; the modal stays open showing the run in its derived status
 
 The same Run Detail modal is reachable by clicking any row in the **Runs** tab — for completed runs it shows the payments + references; for stale drafts it offers Execute.
 
@@ -388,6 +391,73 @@ credit applied there would be consumed while reducing nothing. A
 and the rebuilt run pays net (`docs/decisions.md` §202). Pinned by
 `tests/test_payment_create_credit_memo_netting.py` (standalone) and
 `tests/test_payment_run_credit_memo_netting.py` (runs).
+
+### An accepted early-payment discount is paid, not just reported
+
+Accepting a `DiscountOffer` is the buyer agreeing to pay the discounted amount
+before the deadline, so it has to change what is paid.
+`services/payment_runs.payable_amounts(db, invoices, pay_date=…)` is the one
+answer every money path books and re-checks against: the run builder, the
+standalone `POST /api/payments`, dispatch and `/retry-failed`. It nets applied
+credit memos first, then deducts the accepted invoice-scoped offer whose
+accepted tier's deadline `pay_date` meets
+(`discount_capture.applicable_discounts`). The figure is exact Decimal —
+`discount_offers.discount_savings(base_amount, accepted_tier)`, cent-quantized
+half-up — and is booked on the payment (`discount_offer_id`,
+`discount_amount`), with a `discount_offer.applied` audit row carrying the
+invoice amount, the net before the discount, the deduction, the payment amount
+and the pay-by date.
+
+An offer is **not** applied, and the invoice is paid in full, when it is
+vendor-scoped (no single payment can be shown to settle a bulk offer), its
+deadline has passed, its currency is not the invoice's, its `base_amount` is no
+longer the invoice's `amount` (the bargain was struck on a different figure),
+the deduction would leave nothing to pay, or the savings were already taken
+through an applied credit memo for exactly that figure — the documented way to
+pay a discount before this, which is already inside the net and must not come
+off twice (an amount coincidence, resolved toward paying the supplier in full). Several accepted offers on one invoice: the earliest accepted is
+taken.
+
+**The deadline is re-checked on the day the money moves.** Dispatch re-asks
+`payable_amount(pay_date=today)` immediately before the adapter call. If the
+answer names a different offer than the one booked — the deadline passed while a
+draft waited for CFO sign-off, or an offer was accepted (or withdrawn) after
+booking — the payment fails **`discount_changed`**, before any order exists at
+the processor and therefore retry-safe; `/retry-failed` skips it with the same
+reason. Paying either figure would move money nobody approved: the discounted
+one short-pays a supplier who considers the offer dead, the full one ignores a
+reduction the supplier agreed. A fresh run books what is owed now. A
+`net_amount_changed` refusal covers the same offer with a different net.
+
+Downstream, everything reads the booked figure, which is what makes the
+discount real rather than a label: the run total and its CFO threshold, the
+FX conversion of an international leg (`prepare_international_payment(amount=)`
+converts what is sent, not the invoice total), settlement verification (the
+processor is expected to settle the discounted amount), the settlement capture
+(§ Voiding below and [dynamic-discounting.md](dynamic-discounting.md) § Capture),
+and the 1099 totals, which sum `Payment.amount` — what was actually paid. The ERP
+payment sync posts no amount today (`payment_erp_sync` logs and transitions); a
+real `post_payment` must send `discount_amount` beside `amount` so the ERP
+records the bill as settled with a discount taken rather than short-paid.
+
+**Cards.** A card is spendable up to its limit and nothing on the card webhook
+compares a charge with `Payment.amount`, so the `virtual_card` leg will not
+converge a payment onto an existing card whose limit differs from what the
+payment moves — `card_issuance.card_settlement_block` refuses a too-large limit
+as `card_limit_exceeds_payment` (retry-safe; cancel the card and the next run
+mints one at the booked amount), beside the existing too-small refusal.
+`POST /api/cards/generate` mints for the invoice net of applied credits — never
+the gross — and skips an invoice whose applied credit no longer pairs or covers
+it entirely. It takes no accepted discount: a card minted outside a run is not a
+booked payment, so nothing would record or capture the discount and the card
+would outlive the offer's deadline. A discounted run refuses to converge on such
+a card; cancel it, or pay without the pre-minted card.
+
+The queue row carries `accepted_discount_amount`, `accepted_discount_pay_by` and
+`payable_amount` (what a run built today would move, net of credits too) beside
+the invoice's static `discount_*` term; the run detail carries each payment's
+`discount_amount` / `invoice_amount` and the run's `discount_total`. Pinned by
+`tests/test_discounted_payment.py`.
 
 ### The invoice's payability is re-checked before the adapter call
 
@@ -636,18 +706,25 @@ re-sent.
 - `invoice_not_payable` — the invoice is voided, re-rejected or already `done`,
   so paying it would move money against something nobody currently approves.
 - `invoice_has_blocking_exception` — an unresolved
-  `PAYMENT_BLOCKING_EXCEPTION_TYPES` flag (`duplicate` / `fraud_flag` /
-  `line_total_mismatch`). Run creation refuses these outright; this endpoint
+  `PAYMENT_BLOCKING_EXCEPTION_TYPES` flag (any member — see § Financial-integrity
+  exception gate). Run creation refuses these outright; this endpoint
   re-dispatches money days or weeks later, so a `fraud_flag` raised in the
   interim (a BEC bank-detail swap, an altered or never-issued cheque off a
   Positive Pay return) has to stop the re-send here too. Both callers share
   `services/payment_runs.blocked_invoice_ids` so they can't drift.
+- `vendor_not_active` — the invoice's vendor is not `active` (unverified, rejected,
+  deactivated or merged away since the run was built); the run builder's refusal of
+  the same name, through `services/payment_runs.inactive_vendor_statuses`.
 - `net_amount_changed` — a credit memo applied while the payment sat `failed`
   (`credit_memos.py` refuses only a `paid` or `done` invoice, and never looks at
   an existing payment) means the failed row's `amount` is no longer what the
   vendor is owed. The retry re-derives `net_payable_amount` and **skips**; the amount is never
   silently adjusted, so the operator builds a fresh run through the full gate
   set.
+- `discount_changed` — the accepted early-payment discount the failed row was
+  booked with no longer applies today (its deadline passed), or one now applies
+  that it was not booked with (§ An accepted early-payment discount is paid).
+  Same rule as `net_amount_changed`: never re-priced here.
 - `invoice_locked` is retry-safe and needs no skip rule: it only means another
   request held the invoice row past the bound when dispatch tried (§ Bounded
   wait for the invoice lock), so the retry simply re-attempts it.
@@ -767,8 +844,12 @@ share.
 When the voided payment was `completed` and had captured an early-pay
 `DiscountOffer`, the void moves that offer back to `accepted` in the same
 transaction and audits `discount_offer.capture_reversed` — nothing was paid,
-so nothing was saved, and a re-payment at the discounted payoff captures it
-again. See [dynamic-discounting.md](dynamic-discounting.md) § Capture.
+so nothing was saved. A capture made since migration 0104 names its payment
+(`DiscountOffer.captured_by_payment_id`), so the void reverses exactly its own
+capture; only an older capture falls back to attribution by elimination. The
+invoice returns to the queue, and a re-payment takes the discount again only if
+its deadline still holds. See [dynamic-discounting.md](dynamic-discounting.md)
+§ Capture.
 
 ### Voiding a card payment cancels the card
 
@@ -1076,8 +1157,9 @@ MORE than we authorized**, matching `bank_reconciliation.match_variance`.
   on `(invoice_id, fraud_flag, open|escalated)`, the same rule Positive Pay's
   own return processing uses.
 - The **discount capture is skipped**.
-  `discount_capture.capture_offers_for_settled_payment` matches an accepted
-  offer's discounted payoff against `payment.amount` — our authorized figure,
+  `discount_capture.capture_offer_for_settled_payment` captures the booked
+  offer for `payment.discount_amount` (or matches an accepted offer's
+  discounted payoff against `payment.amount`) — our authorized figure,
   which the rail has just contradicted — so capturing would permanently mark
   savings realized on a number that is in dispute and misreport them to the CFO.
 - The **ERP sync still runs**, and the invoice still transitions to `paid`.
@@ -1887,7 +1969,10 @@ The payment queue highlights discount opportunities:
 - Sorts discount-eligible invoices to the top when the discount window is closing
 - The savings are calculated as `invoice.amount * discount_percent / 100`
 
-This helps AP teams prioritize payments that save money.
+This helps AP teams prioritize payments that save money. These static terms are
+advisory: they never change what a run pays. An ACCEPTED dynamic-discounting
+offer does — see § An accepted early-payment discount is paid, not just
+reported.
 
 ## Integration Points
 
@@ -1983,10 +2068,22 @@ The invoice side of a payment is audited separately by
 | Action | Admin | AP Manager | AP Clerk | CFO |
 |---|---|---|---|---|
 | View payment queue | Yes | Yes | No | Yes |
-| Create payment run | Yes | Yes | No | No |
-| Execute payment run | Yes | No | No | Yes |
+| Create payment run | Yes | Yes | No | Yes |
+| Execute payment run | Yes | Yes | No | Yes |
+| CFO sign-off on a run above the threshold | No | No | No | Yes |
 | View payment history | Yes | Yes | No | Yes |
 | Void a payment | Yes | No | No | Yes |
+
+These are the system-role defaults of the granular permissions
+(`backend/app/api/permissions.py::ROLE_DEFAULT_PERMISSIONS`): create is
+`payment_run.approve`, execute / resume / retry are `payment.execute` (which
+`ap_manager` holds by default — the maker-checker rule below is what stops one
+person both creating and executing the same run), void is `payment.void`
+(admin + CFO), and the queue / history reads accept `payment.execute` or
+`payment.void`. A custom role can be granted any of them. CFO sign-off
+(`POST /runs/{id}/approve`) is the exception: it is `require_roles(ROLE_CFO)`,
+so it needs the actual CFO role — neither admin nor a custom-role permission
+satisfies it.
 
 CFO approval is required for executing payment runs above a configurable
 threshold (`Organization.settings.payments.cfo_approval_above`, a `Decimal`).
@@ -2060,11 +2157,17 @@ between the manual and copilot-driven paths:
 | `fraud_flag` | a bank-detail swap, rush payment, statistical anomaly, an altered / never-issued cheque from a Positive Pay return, or a processor settlement that didn't reconcile against what AP authorized (§ Settlement-amount verification) |
 | `line_total_mismatch` | a header `amount` that openly disagrees with the invoice's own line items — the run pays the header, and the header is never silently recomputed from the lines (see `line-total-reconciliation.md`) |
 | `payment_reconciliation` | a second payment for money that may already be moving — the reconciler aged a still-`submitted` payment out to `failed`, which frees the invoice's live-payment slot while the rail has never confirmed either way (§ The reconciler backstop) |
+| `quality_hold` | payment for goods that failed inspection, were only partly accepted, or have no inspection on record where the match rule requires one — a four-way match exists so failed quality acceptance stops payment (`po-matching.md` § Quality-hold exceptions) |
+| `po_mismatch` | payment of more than the invoice's PO supports — the PO doesn't exist, the currencies differ, the invoice bills above the PO beyond tolerance, or it bills beyond the share of the PO actually received. Billing less than the PO (a split / blanket PO invoiced delivery by delivery), an in-tolerance variance and an over-receipt on its own never raise one, and a refresh that no longer finds the problem closes the row (`po-matching.md` § Before Payment). An ERP sets a payment block on the same price / quantity variance |
 
-Each is raised as an `error`-severity advisory flag, and **approval does not gate
-on any of them** — nothing in `services/review.py` or `workflow_engine.py` reads
-warning severity, so all three can be approved straight past. Payment-run
-creation is the gate that stops the money.
+Each is an advisory flag at whatever severity its detector chose, and **approval
+does not gate on any of them** — nothing in `services/review.py` or
+`workflow_engine.py` reads warning severity, so every one can be approved straight
+past. The tuple keys on the TYPE, so a `po_mismatch` / `quality_hold` blocks at
+any severity (a partial quality acceptance is `info`, but paying in full pays for
+goods the business refused) — which is why the PO-match detector opens a
+`po_mismatch` only for a finding that should block. Payment-run creation is the
+gate that stops the money.
 
 Resolving or dismissing the exception is the human sign-off that clears it and
 makes the invoice payable again; `escalated` still blocks, because it means a
@@ -2114,7 +2217,8 @@ types already did.
 
 | Refusal | Reason code | On the queue |
 |---------|-------------|--------------|
-| an unresolved (`open`/`escalated`) payment-blocking exception | the exception **type** (`duplicate` / `fraud_flag` / `line_total_mismatch` / `payment_reconciliation`) | `blocked: true` |
+| an unresolved (`open`/`escalated`) payment-blocking exception | the exception **type** (`duplicate` / `fraud_flag` / `line_total_mismatch` / `payment_reconciliation` / `quality_hold` / `po_mismatch`) | `blocked: true` |
+| the invoice's vendor is not `active` — unverified, inactive or rejected (`payment_runs.inactive_vendor_statuses`; `vendor-management.md` § Vendor Lifecycle). Refused on every rail, so it outranks the card-rail pin. `POST /api/payments` 409s; dispatch fails a payment whose vendor stopped being active after booking as `vendor_not_active:<status>`, before the processor call and retry-safe; `/retry-failed` skips it | `vendor_not_active` | `blocked: true` |
 | an applied credit memo's vendor or currency no longer matches the invoice (a background re-extraction rewrote it after the apply) — netting it would credit the wrong supplier or subtract across currencies (`services/applied_credit_integrity`, decisions §214). Checked before `fully_credited`, whose net is computed from that same credit. `POST /api/payments` refuses it with a 409, and dispatch fails a payment booked before the change as `applied_credit_mismatch:<vendor\|currency>`, before the processor call and retry-safe. `/retry-failed` skips it. | `applied_credit_mismatch` | `blocked: true` |
 | applied credit memos cover the whole invoice — a `$0` payment a real rail rejects as `failed` | `fully_credited` | `blocked: true` |
 | a live virtual card already claims the invoice (`POST /api/cards/generate` mints one with no `Payment` row behind it) | `live_virtual_card` | `blocked: false`, `required_method: "virtual_card"` |

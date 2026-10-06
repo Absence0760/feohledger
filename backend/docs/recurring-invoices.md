@@ -100,8 +100,9 @@ the sweep). Each tick:
 3. For each, compute the `period_key`, generate the next `Invoice` (pre-coded
    from the template: vendor, amount, currency, GL / cost-center / department /
    project / PO / terms, `entity_id`), stamp `recurring_template_id` +
-   `recurring_period_key`, and land it in the approval queue (status `new` →
-   the normal workflow pipeline takes over).
+   `recurring_period_key`, and land it directly in the approval queue (status
+   `ready_for_review` — it is already coded, so it skips extraction — and the
+   normal workflow pipeline takes over from approval).
 4. Advance the template: bump `generated_count`, set `last_period_key` /
    `last_generated_at`, and roll `next_run_on` forward by one cadence step
    (nulled once it passes `end_date`).

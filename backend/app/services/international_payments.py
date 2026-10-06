@@ -141,8 +141,16 @@ async def prepare_international_payment(
     invoice_id: uuid.UUID | None = None,
     correlation_id: uuid.UUID | None = None,
     requested_method: str | None = None,
+    amount: Decimal | None = None,
 ) -> PreparedPayment:
     """Build a Payment row for a (potentially) international invoice.
+
+    ``amount`` is what the payment actually moves, in the invoice's currency —
+    the booked ``Payment.amount``, which is net of applied credit memos and any
+    accepted early-payment discount. It defaults to ``invoice.amount`` for a
+    caller pricing the whole invoice. Converting the full invoice amount for a
+    payment that moves less would lock a home-currency debit (``source_amount``)
+    larger than the money sent.
 
     Picks the corridor, fetches and locks the FX rate, applies the
     rate to compute the source-side outflow in the org's home
@@ -201,7 +209,8 @@ async def prepare_international_payment(
     # FX lookup. Skipped when the corridor doesn't need a conversion
     # (domestic / same-currency).
     fx_rate: FXRate | None = None
-    source_amount = invoice.amount
+    pay_amount = invoice.amount if amount is None else amount
+    source_amount = pay_amount
     fx_rate_decimal: Decimal | None = None
     fx_locked_at: datetime | None = None
 
@@ -214,7 +223,7 @@ async def prepare_international_payment(
             )
         # invoice.amount is in target_currency; source_amount = target / rate
         # e.g. invoice = 1000 EUR, USD→EUR = 0.92 → source = 1000 / 0.92 USD
-        source_amount = _quantize_money(invoice.amount / fx_rate.rate)
+        source_amount = _quantize_money(pay_amount / fx_rate.rate)
         fx_rate_decimal = fx_rate.rate
         fx_locked_at = fx_rate.as_of
 
@@ -223,7 +232,7 @@ async def prepare_international_payment(
         correlation_id=correlation_id or invoice.correlation_id,
         # Payment lands in the same entity as the invoice it settles (P2).
         entity_id=invoice.entity_id,
-        amount=invoice.amount,  # paid in invoice currency
+        amount=pay_amount,  # paid in invoice currency
         method=corridor.method,
         status="pending",
         source_currency=source_currency,

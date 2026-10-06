@@ -46,6 +46,7 @@ from app.models.invoice import Invoice, InvoiceStatus
 from app.models.vendor import Vendor
 from app.services.audit_dispatch import dispatch_audit
 from app.services.gl_chart import load_invoice_chart
+from app.services.invoice_warnings import refresh_warnings
 from app.services.numeric_bounds import MONEY_NUMERIC, fits_numeric
 from app.utils.dates import parse_ambiguous_date
 
@@ -118,7 +119,7 @@ _HISTORICAL_INVOICE_STATUSES = frozenset({"done", "paid"})
 # An imported invoice is a HISTORICAL row copied in from whatever the tenant
 # used before us. The workflow engine never ran on it, so it is evidence
 # neither for nor against anything this platform did — and metrics that
-# describe our own work (the touchless rate in `services/analytics`) have to
+# describe our own work (the touchless rate in `services/touchless`) have to
 # be able to tell it apart from an invoice we actually processed.
 #
 # Status cannot answer that question: `done`, `paid` and `rejected` are all
@@ -413,6 +414,8 @@ async def import_invoices_csv(
     entity_id: uuid.UUID | None = None,
     day_first: bool = False,
     actor_id: uuid.UUID | None = None,
+    org_settings: dict | None = None,
+    allow_historical: bool = True,
 ) -> ImportResult:
     """Import historical invoices. Vendor resolution: code > name. Missing vendors
     get an auto-created stub with status='unverified' so the row still lands.
@@ -429,7 +432,25 @@ async def import_invoices_csv(
     ``vendor.imported_csv`` row for each vendor stub auto-created along the way,
     and — because an invoice imported at ``new`` still has to be approved — on
     ``Invoice.uploaded_by_id``, which is what segregation of duties is keyed on
-    (``services/approval_chain.violates_segregation``)."""
+    (``services/approval_chain.violates_segregation``).
+
+    Every row imported at a LIVE status (``new`` / ``rejected`` — the two that
+    reach approval) gets ``invoice_warnings.refresh_warnings`` before the
+    import returns, exactly as manual create and upload-without-extraction do,
+    so a duplicate or fraud flag is on the row — and its exception in the queue
+    — from the moment it lands, not from whenever someone next edits it.
+    ``org_settings`` drives the configurable fraud rules, as it does there.
+    Historical ``done`` / ``paid`` rows are not refreshed: they never reach a
+    payment run, and flagging years of settled history would bury the queue in
+    exceptions nobody can act on. They still count as the *other* side of a
+    duplicate check, so a live row that repeats a paid one is flagged.
+
+    ``allow_historical=False`` refuses every row at a ``_HISTORICAL_INVOICE_STATUSES``
+    status — the endpoint passes it for a caller without an admin / AP manager
+    role (`invoice_entry.HISTORICAL_IMPORT_ROLES`), who may import open AP for
+    approval but not rows asserting a payment that already happened. A blank
+    ``status`` cell still defaults to ``done``, so such a row is refused too
+    rather than silently re-read as ``new``."""
     result = ImportResult()
     try:
         rows = _read_rows(csv_text)
@@ -497,6 +518,19 @@ async def import_invoices_csv(
                         f"status not importable: {status_raw!r}; "
                         f"allowed: {', '.join(sorted(_IMPORTABLE_INVOICE_STATUSES))} "
                         "(import open AP as 'new' so it goes through approval)"
+                    ),
+                )
+            )
+            result.skipped += 1
+            continue
+        if not allow_historical and status_raw in _HISTORICAL_INVOICE_STATUSES:
+            result.errors.append(
+                ImportRowError(
+                    row=i,
+                    message=(
+                        f"status {status_raw!r} records history and needs an AP manager "
+                        "or admin to import; import open AP as 'new' (a blank status "
+                        "means 'done')"
                     ),
                 )
             )
@@ -595,6 +629,13 @@ async def import_invoices_csv(
                 "source": IMPORT_PROVENANCE_SOURCE,
             },
         )
+    # After the flush, so every row of the batch is visible to every other
+    # row's duplicate check, and inside the caller's transaction like the other
+    # create paths: the warnings and their exceptions commit with the invoices.
+    for invoice in created:
+        if getattr(invoice.status, "value", invoice.status) in _HISTORICAL_INVOICE_STATUSES:
+            continue
+        await refresh_warnings(db, invoice, org_settings=org_settings)
     return result
 
 
