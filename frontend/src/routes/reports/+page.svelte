@@ -6,6 +6,7 @@
 	// exported (CSV / PDF). See `#lib/api/reports.ts` + the API contract.
 	import { page } from '$app/state';
 	import { replaceState } from '$app/navigation';
+	import { guardUnsavedChanges } from '#lib/stores/unsavedChanges.svelte.ts';
 	import { auth } from '#lib/stores/auth.svelte.ts';
 	import {
 		createReport,
@@ -150,6 +151,8 @@
 	const dirtySinceLoad = $derived(
 		loadedId ? JSON.stringify(specForCompare()) !== loadedSnapshot : false
 	);
+	// Leaving a saved report with unsaved edits asks first (the app-wide dialog).
+	guardUnsavedChanges(() => dirtySinceLoad && !savingReport);
 
 	// Reset the whole builder to a fresh spec on the given source.
 	function selectSource(key: string) {

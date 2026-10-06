@@ -623,6 +623,30 @@ centred dialog with backdrop-click + Esc to close:
   If you find yourself writing `position: fixed; inset: 0` or
   `role="dialog"` in a component, stop and use `<Modal>`.
 
+### Unsaved changes (`guardUnsavedChanges`)
+
+A page with an editable form that can be left half-done calls the shared
+guard **once**, during component init:
+
+```svelte
+import { guardUnsavedChanges } from '#lib/stores/unsavedChanges.svelte.ts';
+guardUnsavedChanges(() => dirty && !saving);
+```
+
+While that returns true, any in-app navigation away is held, and the one
+`UnsavedChangesDialog` (mounted in the root layout) asks **Stay on page**
+or **Leave without saving**. That covers sidebar and tab links, `goto`, and
+Back/Forward. Leaving replays the exact navigation, including the same
+history step for Back. A reload, a tab close or a typed URL gets the
+browser's own prompt, the only one browsers allow there.
+
+- Never use `confirm()` or a page-local dialog for this. One dialog, one
+  copy.
+- Exclude an in-flight save from the predicate, so a save that redirects
+  is never held.
+- Users today: the workflow editor, `/admin/retention`, and the Report
+  Builder (an edited saved report). Guard: `tests-e2e/unsaved-changes.spec.ts`.
+
 ### Per-row actions
 
 Use the shared `<RowAction>` component (`#lib/components/ui/RowAction.svelte`)

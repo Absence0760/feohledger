@@ -1,6 +1,7 @@
 <script lang="ts">
 	import HelpTip from '#lib/components/help/HelpTip.svelte';
 	import { goto } from '$app/navigation';
+	import { guardUnsavedChanges } from '#lib/stores/unsavedChanges.svelte.ts';
 	import { auth } from '#lib/stores/auth.svelte.ts';
 	import PageHeader from '#lib/components/ui/PageHeader.svelte';
 	import Badge from '#lib/components/ui/Badge.svelte';
@@ -44,6 +45,8 @@
 	const dirty = $derived(
 		RETENTION_RECORD_CLASSES.some((cls) => policy[cls] !== savedPolicy[cls])
 	);
+	// Leaving with an edited window asks first (the app-wide dialog).
+	guardUnsavedChanges(() => dirty && !saving);
 
 	async function load() {
 		loading = true;

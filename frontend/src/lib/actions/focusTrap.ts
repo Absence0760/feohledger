@@ -89,9 +89,11 @@ export const focusTrap: Action<HTMLElement, FocusTrapParams | undefined> = (node
 	}
 
 	// Move focus into the dialog once its content is in the DOM (next microtask).
+	// A dialog whose first control is NOT the safe default (a confirm laid out
+	// "Leave · Stay") marks the one that is with `data-autofocus`.
 	queueMicrotask(() => {
 		const items = focusable();
-		(items[0] ?? node).focus();
+		(items.find((el) => el.hasAttribute('data-autofocus')) ?? items[0] ?? node).focus();
 	});
 	node.addEventListener('keydown', onKey);
 

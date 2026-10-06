@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { page } from '$app/state';
-	import { beforeNavigate, goto } from '$app/navigation';
+	import { goto } from '$app/navigation';
+	import { guardUnsavedChanges } from '#lib/stores/unsavedChanges.svelte.ts';
 	import { auth } from '#lib/stores/auth.svelte.ts';
 	import { workflowStore } from '#lib/stores/workflows.svelte.ts';
 	import { adminStore } from '#lib/stores/admin.svelte.ts';
@@ -47,29 +48,10 @@
 	let saving = $state(false);
 	let dirty = $state(false);
 
-	// Unsaved-changes guard. Editing the canvas sets `dirty`; without this, a
-	// click on another nav link or a tab reload silently discarded all edits.
-	// `beforeNavigate` covers in-app navigation; the `beforeunload` listener
-	// covers a browser reload / tab close. `saving` is exempt so a successful
-	// save (which clears `dirty` right after) never trips the prompt.
-	beforeNavigate((nav) => {
-		if (dirty && !saving) {
-			if (!confirm(m('workflows.builder.unsavedConfirm'))) {
-				nav.cancel();
-			}
-		}
-	});
-
-	$effect(() => {
-		function onBeforeUnload(e: BeforeUnloadEvent) {
-			if (dirty) {
-				e.preventDefault();
-				e.returnValue = '';
-			}
-		}
-		window.addEventListener('beforeunload', onBeforeUnload);
-		return () => window.removeEventListener('beforeunload', onBeforeUnload);
-	});
+	// Unsaved-changes guard: leaving with edits on the canvas asks first, in the
+	// app-wide dialog. `saving` is exempt so a successful save (which clears
+	// `dirty` right after) never trips it.
+	guardUnsavedChanges(() => dirty && !saving);
 	let editingName = $state(false);
 	let nameInput = $state('');
 	let descInput = $state('');
