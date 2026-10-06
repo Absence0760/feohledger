@@ -512,14 +512,24 @@ which only some processors honour.
   `classify_payment_failure` answers IN_DOUBT and `/retry-failed` skips it as
   `needs_reconciliation`. The invoice transition was rolled back with
   everything else, so the invoice is still `approved`; a human reconciles the
-  order against the processor, or voids it.
+  order against the processor, or voids it. `completed_at` stays NULL — nobody
+  can show the order settled — and `submitted_at` is set.
+- **The invoice is blocked from a new run.** `failed` is a terminal status, so
+  the row no longer holds the invoice's live-payment slot, and an `approved`
+  invoice with a free slot is back in the queue: the next run would pay it
+  again under a fresh idempotency key. So the dispatch opens the same de-duped,
+  payment-blocking `payment_reconciliation` exception the reconciler opens on
+  an aged-out payment (`payment_reconciler.flag_payment_for_reconciliation`),
+  and a new run for that invoice is a 409 until a human resolves it.
 - **The run finishes.** The `payment.failed` audit row (which now carries
   `provider_payment_id`) and the commit follow as for any other failure, and
   the loop moves on to the next payment.
 - **A non-database exception is unchanged.** An adapter's `RuntimeError` or a
   `validate_transition` 409 leaves the transaction usable, so the savepoint is
   released, the attempt's writes stand, and the row is
-  `unexpected_error:<Type>` with any `provider_payment_id` still on it.
+  `unexpected_error:<Type>` with any `provider_payment_id` still on it. If it
+  was raised after the money-moving call, an order may exist all the same, so
+  `completed_at` is cleared and the invoice is flagged exactly as above.
 - **If the savepoint itself cannot be rolled back** (the connection is gone),
   the whole transaction is rolled back and the payment re-locked, which opens a
   gap another dispatcher could use. The row is then written only if it still

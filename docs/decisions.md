@@ -9770,7 +9770,20 @@ attempt now runs in a savepoint taken after the payment row lock. A database
 error rolls back to it, and the payment is recorded `failed` with the provider
 id, reference and order fields restored from a record kept outside the ORM, so
 `classify_payment_failure` reads it as **in doubt** and `/retry-failed` never
-re-sends it; the reconciler resolves it. The run then finishes. Compliance
+re-sends it. The run then finishes.
+
+That alone would have traded a stranded run for a double payment. `failed` is a
+terminal status, so the row stops holding the invoice's live-payment slot, and
+the rollback left the invoice `approved` — back in the queue for the next run,
+under a fresh idempotency key the processor treats as a new order. Before this
+change the same error left the row `pending`, which at least kept the slot. So
+the dispatch opens the payment-blocking `payment_reconciliation` exception the
+reconciler already opens when it ages out an in-flight payment, through one
+shared helper, and a new run for the invoice is refused until a human has
+reconciled the order. The same holds when a non-database exception is raised
+after the money-moving call, which had the hole before this batch.
+`completed_at` stays NULL on an in-doubt row: it is the settlement timestamp,
+and nobody can show this order settled. Compliance
 release takes the same guard. If the savepoint itself cannot be rolled back,
 the dispatch falls back to a full rollback and re-lock before recording.
 

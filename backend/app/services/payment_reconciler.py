@@ -248,23 +248,29 @@ async def _audit_reconcile_transition(
 AGED_OUT_EXCEPTION_TYPE = "payment_reconciliation"
 
 
-async def _flag_aged_out_payment(
+async def flag_payment_for_reconciliation(
     db,
     *,
-    org: Organization,
+    organization_id,
     payment: Payment,
-    age: timedelta,
+    description: str,
+    log_tag: str,
 ) -> None:
-    """Open a de-duped ``payment_reconciliation`` exception for an aged-out payment.
+    """Open a de-duped ``payment_reconciliation`` exception on ``payment``'s invoice.
+
+    For a payment recorded ``failed`` although the processor may hold an order
+    for it. ``failed`` is in ``LIVE_PAYMENT_TERMINAL_STATUSES``, so that row no
+    longer holds the invoice's live-payment slot; this payment-blocking
+    exception is what stops a fresh run paying the invoice a second time until a
+    human has reconciled the rail (``api/payments.PAYMENT_BLOCKING_EXCEPTION_TYPES``).
 
     **De-duped** on an already-open/escalated ``payment_reconciliation`` for the
     invoice, so a tenant whose rail is down doesn't accumulate a row per sweep.
-
-    **PII-free**: the payment id, the run id, the age in hours and the invoice's
-    current status — never the vendor, the amount's payee, or any bank field.
+    ``description`` must be **PII-free**: ids, ages and statuses — never the
+    vendor, the payee, or any bank field.
 
     Best-effort in the same sense as ``payment_erp_sync._flag_sync_failure``: a
-    flagging failure must not lose the transition the sweep just decided. It is
+    flagging failure must not lose the transition the caller just decided. It is
     NOT swallowed silently, though — the caller commits right after, so a raise
     here would roll the transition back too; hence the try/except, and hence the
     warning that names the class only.
@@ -288,33 +294,54 @@ async def _flag_aged_out_payment(
             return
 
         invoice = await db.get(Invoice, payment.invoice_id)
-        current_status = invoice.status.value if invoice else "?"
-        hours = age.total_seconds() / 3600
         await create_exception(
             db,
             exception_type=AGED_OUT_EXCEPTION_TYPE,
             severity="error",
-            description=(
-                f"Payment {payment.id} was still in flight after {hours:.1f}h and the "
-                f"reconciler marked it failed; the rail never confirmed, so the money "
-                f"may or may not have moved. The invoice is '{current_status}'. Confirm "
-                f"with the processor and void or re-pay — this invoice is blocked from "
-                f"a new payment run until this is resolved."
-            ),
+            description=description,
             status="open",
-            # The reconciler sweep aged this payment out. No human is in scope,
-            # and nobody's act is what the flag asks to be reviewed.
+            # Raised by the system on an outcome nobody chose; no human's act
+            # is what the flag asks to be reviewed.
             raised_by_user_id=None,
-            organization_id=org.id,
+            organization_id=organization_id,
             invoice=invoice,
             invoice_id=payment.invoice_id,
         )
     except Exception as exc:  # noqa: BLE001
         logger.warning(
-            "[payment-reconciler] could not flag aged-out payment %s: %s",
+            "[%s] could not flag payment %s for reconciliation: %s",
+            log_tag,
             payment.id,
             exc.__class__.__name__,
         )
+
+
+async def _flag_aged_out_payment(
+    db,
+    *,
+    org: Organization,
+    payment: Payment,
+    age: timedelta,
+) -> None:
+    """Flag a payment the reconciler aged out (``flag_payment_for_reconciliation``)."""
+    if payment.invoice_id is None:
+        return
+    invoice = await db.get(Invoice, payment.invoice_id)
+    current_status = invoice.status.value if invoice else "?"
+    hours = age.total_seconds() / 3600
+    await flag_payment_for_reconciliation(
+        db,
+        organization_id=org.id,
+        payment=payment,
+        description=(
+            f"Payment {payment.id} was still in flight after {hours:.1f}h and the "
+            f"reconciler marked it failed; the rail never confirmed, so the money "
+            f"may or may not have moved. The invoice is '{current_status}'. Confirm "
+            f"with the processor and void or re-pay — this invoice is blocked from "
+            f"a new payment run until this is resolved."
+        ),
+        log_tag="payment-reconciler",
+    )
 
 
 async def reconcile_once(*, now: datetime | None = None) -> ReconcileResult:

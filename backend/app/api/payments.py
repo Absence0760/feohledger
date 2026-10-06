@@ -1960,8 +1960,41 @@ async def _record_aborted_dispatch(
     prefix = DB_ERROR_AFTER_PROCESSOR_REASON if contact.called else DISPATCH_DB_ERROR_REASON
     payment.status = "failed"
     payment.failure_reason = f"{prefix}:{exc.__class__.__name__}"
-    payment.completed_at = now
+    # `completed_at` is the settlement timestamp, and nobody can show this one
+    # settled: an order the processor accepted has an unknown outcome. The
+    # reconciler leaves it NULL on its in-flight → failed move for the same
+    # reason; `submitted_at` above is the stamp that is true.
+    if not contact.called:
+        payment.completed_at = now
+    # Both prefixes class IN_DOUBT, and the rollback above returned the invoice
+    # to `approved` while `failed` frees the live-payment slot — so without a
+    # payment-blocking flag the next run would pay it again under a fresh
+    # idempotency key.
+    await _flag_in_doubt_dispatch(db, org_id=org_id, payment=payment)
     return True, full_rollback
+
+
+async def _flag_in_doubt_dispatch(db: AsyncSession, *, org_id: uuid.UUID, payment: Payment) -> None:
+    """Block the invoice from a new run until a human reconciles ``payment``.
+
+    For a dispatch recorded ``failed`` although the processor may hold an order
+    for it — see `services/payment_reconciler.flag_payment_for_reconciliation`.
+    """
+    from app.services.payment_reconciler import flag_payment_for_reconciliation
+
+    await flag_payment_for_reconciliation(
+        db,
+        organization_id=org_id,
+        payment=payment,
+        description=(
+            f"Payment {payment.id} failed during dispatch "
+            f"({payment.failure_reason}) after the processor may already have "
+            f"accepted it, so the money may or may not have moved. Confirm with "
+            f"the processor and void or re-pay — this invoice is blocked from a "
+            f"new payment run until this is resolved."
+        ),
+        log_tag="payment-dispatch",
+    )
 
 
 async def _dispatch_payment_guarded(
@@ -2041,7 +2074,16 @@ async def _dispatch_payment_guarded(
                 )
             payment.status = "failed"
             payment.failure_reason = f"unexpected_error:{exc.__class__.__name__}"
-            payment.completed_at = now
+            if contact.called:
+                # Raised after the money-moving call: an order may exist at the
+                # processor, so the same in-doubt handling as an aborted dispatch.
+                # The attempt's writes stand on this path, and a processor that
+                # answered `completed` had the settlement stamp set already —
+                # cleared, since the row is now `failed` with an unknown outcome.
+                payment.completed_at = None
+                await _flag_in_doubt_dispatch(db, org_id=org.id, payment=payment)
+            else:
+                payment.completed_at = now
             return True, False
         return await _record_aborted_dispatch(
             db,
@@ -2248,6 +2290,11 @@ async def release_compliance_hold(
         details={
             "new_status": payment.status,
             "amount": str(payment.amount),
+            # The processor's handle and the outcome's reason, so an in-doubt
+            # release (a database error after the call) reconciles from the
+            # trail alone, as the run loop's `payment.failed` row does.
+            "provider_payment_id": payment.provider_payment_id,
+            "failure_reason": payment.failure_reason,
         },
     )
 

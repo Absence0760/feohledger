@@ -253,6 +253,13 @@ async def test_unexpected_adapter_error_fails_only_that_payment():
         patch("app.api.payments.get_payment_adapter", return_value=adapter),
         patch("app.services.payment_erp_sync.dispatch_payment_sync", AsyncMock()),
         patch("app.api.payments.transition_invoice", new_callable=AsyncMock),
+        # The adapter raised mid-call, so an order may exist: the payment is
+        # flagged for reconciliation (its invoice blocked from a new run). The
+        # flag queries the session, which this hand-built mock can't answer.
+        patch(
+            "app.services.payment_reconciler.flag_payment_for_reconciliation",
+            new_callable=AsyncMock,
+        ) as flag,
         patch(
             "app.services.compliance.check_payment_compliance",
             new_callable=AsyncMock,
@@ -264,6 +271,8 @@ async def test_unexpected_adapter_error_fails_only_that_payment():
 
     assert bad_payment.status == "failed"
     assert "unexpected_error" in bad_payment.failure_reason
+    assert [c.kwargs["payment"] for c in flag.await_args_list] == [bad_payment]
+    assert bad_payment.completed_at is None
     assert good_payment.status == "completed"
     assert result["status"] == "partial"
     assert result["payments_completed"] == 1
@@ -315,6 +324,13 @@ async def test_dispatch_failure_logs_and_stores_class_name_only(caplog):
         patch("app.api.payments.get_payment_adapter", return_value=adapter),
         patch("app.services.payment_erp_sync.dispatch_payment_sync", AsyncMock()),
         patch("app.api.payments.transition_invoice", new_callable=AsyncMock),
+        # The adapter raised mid-call, so an order may exist: the payment is
+        # flagged for reconciliation (its invoice blocked from a new run). The
+        # flag queries the session, which this hand-built mock can't answer.
+        patch(
+            "app.services.payment_reconciler.flag_payment_for_reconciliation",
+            new_callable=AsyncMock,
+        ) as flag,
         patch(
             "app.services.compliance.check_payment_compliance",
             new_callable=AsyncMock,
@@ -327,6 +343,8 @@ async def test_dispatch_failure_logs_and_stores_class_name_only(caplog):
     # The DB column: exact class-name-only shape, never the raw message.
     assert bad_payment.failure_reason == "unexpected_error:RuntimeError"
     assert sensitive_message not in bad_payment.failure_reason
+    # The flag's description names the class-only reason, never the message.
+    assert sensitive_message not in str(flag.await_args.kwargs)
 
     # The log sink: the class name is logged, the raw message and any
     # traceback text are not. `logger.exception`/`exc_info=True` would have

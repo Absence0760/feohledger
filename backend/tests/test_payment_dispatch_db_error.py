@@ -30,6 +30,7 @@ from sqlalchemy import select, text
 from sqlalchemy.exc import DBAPIError, OperationalError
 
 from app.api import payments as payments_api
+from app.models.exception import Exception as APException
 from app.models.invoice import Invoice, InvoiceStatus
 from app.models.payment import Payment, PaymentRun
 from app.models.vendor import Vendor
@@ -207,7 +208,8 @@ async def test_a_db_error_after_the_processor_call_is_recorded_in_doubt(
     assert payment.provider_payment_id == calls[0]
     assert payment.provider == "mock"
     assert payment.submitted_at is not None
-    assert payment.completed_at is not None
+    # Nobody can show it settled: the order's outcome is unknown.
+    assert payment.completed_at is None
     assert payment.failure_reason.startswith("db_error_after_processor_call:")
     assert (
         classify_payment_failure(
@@ -229,6 +231,66 @@ async def test_a_db_error_after_the_processor_call_is_recorded_in_doubt(
     assert len(calls) == 1, "the in-doubt payment was sent to the processor a second time"
     payments_after, _, _, _ = await _state(realdb, invoice_id, run_id)
     assert len(payments_after) == 1, retry.text
+
+    # `failed` frees the invoice's live-payment slot and the rollback left it
+    # `approved`, so only the payment-blocking flag stops a NEW run paying it
+    # a second time under a fresh idempotency key.
+    async with realdb.sessionmaker("a")() as s:
+        flags = (
+            (
+                await s.execute(
+                    select(APException).where(
+                        APException.invoice_id == uuid.UUID(invoice_id),
+                        APException.exception_type == "payment_reconciliation",
+                        APException.status == "open",
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+    assert len(flags) == 1
+    async with realdb.client(key="a", role="admin") as c:
+        rerun = await c.post(
+            "/api/payments/runs", json={"items": [{"invoice_id": invoice_id, "method": "ach"}]}
+        )
+    assert rerun.status_code == 409, rerun.text
+    assert "payment_reconciliation" in rerun.text, rerun.text
+    payments_final, _, _, _ = await _state(realdb, invoice_id, run_id)
+    assert len(payments_final) == 1
+    assert len(calls) == 1
+
+
+async def test_a_non_db_error_after_the_processor_call_blocks_a_new_run(realdb, monkeypatch):
+    """The same slot hole without a database error: an adapter-side or
+    application exception raised after the order was placed leaves the row
+    `failed` (which frees the slot) and the invoice `approved`."""
+    calls = _count_adapter_calls(monkeypatch)
+
+    async def failing(db, invoice, *args, **kwargs):
+        raise RuntimeError("post-processor hiccup")
+
+    monkeypatch.setattr(payments_api, "transition_invoice", failing)
+    invoice_id, run_id = await _book_run(realdb, number="DBERR-NONDB")
+
+    async with realdb.client(key="a", role="ap_manager") as c:
+        resp = await c.post(f"/api/payments/runs/{run_id}/execute")
+    assert resp.status_code == 200, resp.text
+    assert len(calls) == 1
+
+    [payment], invoice, _, _ = await _state(realdb, invoice_id, run_id)
+    assert payment.status == "failed"
+    assert payment.failure_reason.startswith("unexpected_error:")
+    assert payment.completed_at is None
+    assert invoice.status == InvoiceStatus.approved
+
+    async with realdb.client(key="a", role="admin") as c:
+        rerun = await c.post(
+            "/api/payments/runs", json={"items": [{"invoice_id": invoice_id, "method": "ach"}]}
+        )
+    assert rerun.status_code == 409, rerun.text
+    assert "payment_reconciliation" in rerun.text, rerun.text
+    assert len(calls) == 1
 
 
 async def test_a_db_error_before_the_processor_call_is_recorded_without_a_send(realdb, monkeypatch):
@@ -363,7 +425,10 @@ async def test_compliance_release_records_a_post_processor_db_error_in_doubt(rea
     assert payment.provider_payment_id == calls[0]
     assert payment.failure_reason.startswith("db_error_after_processor_call:")
     assert invoice.status == InvoiceStatus.approved
-    assert "payment.compliance_released" in {a.action for a in audit}
+    [released] = [a for a in audit if a.action == "payment.compliance_released"]
+    # Reconcilable from the trail alone, like the run loop's `payment.failed`.
+    assert released.details["provider_payment_id"] == calls[0]
+    assert released.details["failure_reason"].startswith("db_error_after_processor_call:")
 
 
 # ---------------------------------------------------------------------------
