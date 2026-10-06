@@ -64,7 +64,7 @@ from app.services.audit_dispatch import dispatch_audit
 from app.services.qms_adapters import UnknownQmsProviderError, get_qms_adapter
 from app.services.qms_adapters.base import QMSInspectionRecord
 from app.services.sweep_health import SWEEP_QMS_SYNC, run_sweep_loop
-from app.tenant import resolve_default_entity_id
+from app.tenant import lock_organization, resolve_default_entity_id
 
 logger = logging.getLogger(__name__)
 
@@ -583,6 +583,8 @@ async def _store_cursor(org_id: uuid.UUID, *, at: datetime | None) -> None:
             org = await ctrl.get(Organization, org_id)
             if org is None:
                 return
+            # Serialise with every other settings writer (`lock_organization`).
+            org = await lock_organization(ctrl, org)
             org.settings = store_qms_sync_cursor(org.settings, at=at)
             await ctrl.commit()
     except Exception as exc:  # noqa: BLE001 — a marker write must not fail the sweep

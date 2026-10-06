@@ -40,7 +40,7 @@ from app.schemas.organization import BrandConfig
 from app.services.audit_dispatch import dispatch_auth_audit
 from app.services.partner_link_token import build_link_code, verify_link_code
 from app.services.tenant_provisioning import provision_tenant
-from app.tenant import get_tenant
+from app.tenant import get_tenant, lock_organization
 from app.utils.emails import looks_like_email
 from app.utils.passwords import generate_temp_password
 from app.utils.slug import SlugError, ensure_slug_available, validate_slug_format
@@ -203,6 +203,8 @@ async def update_child_branding(
     attributable) — PII-free, booleans only.
     """
     child = await _resolve_child(db, partner_id=org.id, child_id=child_id)
+    # Serialise with every other writer of the CHILD's settings (`lock_organization`).
+    child = await lock_organization(db, child)
 
     existing = dict(child.settings or {})
     prior_brand = existing.get("brand")

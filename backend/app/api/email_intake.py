@@ -35,6 +35,7 @@ from app.services.email_intake import (
     verify_signature,
 )
 from app.services.email_intake_adapters import get_parser
+from app.tenant import lock_organization
 
 logger = logging.getLogger(__name__)
 
@@ -212,6 +213,8 @@ async def rotate_intake_token(
 ):
     """Generate a new token; the old address stops accepting email immediately."""
     org = await _get_org_or_404(ctrl_db, org_id)
+    # Serialise with every other settings writer (`lock_organization`).
+    org = await lock_organization(ctrl_db, org)
     provision_intake_token(org)
     await ctrl_db.commit()
     await ctrl_db.refresh(org)

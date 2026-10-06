@@ -75,7 +75,13 @@ from app.services.currency_conversion import (
     vendor_spend_grouped_select,
 )
 from app.services.fx_adapters import get_fx_adapter
-from app.tenant import apply_entity_scope, get_entity_id, get_tenant, get_tenant_db
+from app.tenant import (
+    apply_entity_scope,
+    get_entity_id,
+    get_tenant,
+    get_tenant_db,
+    lock_organization,
+)
 from app.utils.dates import utc_today
 
 logger = logging.getLogger(__name__)
@@ -659,6 +665,8 @@ async def update_cash_position_settings(
     keys already on the `cashflow` block (e.g. a manually set `opening_balance`).
     Audit details record the new threshold only — no PII."""
     thresholds = CashThresholds(min_balance_threshold=body.min_balance_threshold)
+    # Serialise with every other settings writer (`lock_organization`).
+    org = await lock_organization(db, org)
     org.settings = store_cash_thresholds(org.settings, thresholds)
     # Mutating nested JSONB in-place doesn't mark the column dirty on its own.
     flag_modified(org, "settings")

@@ -395,6 +395,8 @@ async def update_data_residency(
             detail=f"Unsupported region '{body.region}'; valid: {list(SUPPORTED_REGIONS)}",
         )
 
+    # Serialise with every other settings writer (`lock_organization`).
+    org = await lock_organization(db, org)
     before = resolve_region(org)
 
     existing = dict(org.settings or {})
@@ -469,6 +471,8 @@ async def update_branding(
     tenant is built from (`app/utils/tenant_urls.py::tenant_base_url`); empty
     means "use the global `FEOH_TENANT_URL_TEMPLATE`".
     """
+    # Serialise with every other settings writer (`lock_organization`).
+    org = await lock_organization(db, org)
     existing = dict(org.settings or {})
     # Preserve `custom_domains` — it lives under `settings.brand` but is NOT a
     # `BrandConfig` field, so a naive `existing["brand"] = body.model_dump()`
@@ -639,6 +643,12 @@ async def update_custom_domains(
     await db.execute(
         text("SELECT pg_advisory_xact_lock(:k)").bindparams(k=_CUSTOM_DOMAINS_LOCK_KEY)
     )
+    # Then the org row, like every other settings writer (`lock_organization`),
+    # and re-read what we hold: a branding save may have committed since the
+    # request loaded it. Order is advisory lock → org row; nothing takes them
+    # the other way round.
+    org = await lock_organization(db, org)
+    before = _resolve_custom_domains(org)
 
     # Cross-org uniqueness: refuse a host already claimed by another org. Query
     # each candidate via the SAME JSONB containment the resolver uses, so the
