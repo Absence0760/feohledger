@@ -1,7 +1,12 @@
 <script lang="ts">
 	import { focusTrap } from '#lib/actions/focusTrap.ts';
 	import type { Invoice, AuditSummary } from '#lib/types/invoice.ts';
-	import { INVOICE_STATUS_LABEL_KEYS } from '#lib/types/invoice.ts';
+	import {
+		INVOICE_ENTRY_ROLES,
+		INVOICE_MANAGE_ROLES,
+		INVOICE_STATUS_LABEL_KEYS,
+		inInvoiceEntryWindow
+	} from '#lib/types/invoice.ts';
 	import { formatMoney, isNegativeAmount, isPositiveAmount } from '#lib/utils/money.ts';
 	import { invoiceStore } from '#lib/stores/invoices.svelte.ts';
 	import { auth } from '#lib/stores/auth.svelte.ts';
@@ -479,6 +484,8 @@
 
 	// Whether to show the approver picker on submit
 	let needsApproverSelect = $derived(
+		// `POST /{id}/assign` is admin/ap_manager; a clerk submits unassigned.
+		!auth.isClerkOnly &&
 		status === 'new' &&
 		activeSteps.approval &&
 		activeSteps.approval_config?.approver_strategy === 'manual'
@@ -578,16 +585,25 @@
 	});
 
 	let isClerkOnly = $derived(auth.isClerkOnly);
-	// The role gate every invoice WRITE behind this modal's footer carries on
-	// the server: `PATCH /api/invoices/{id}` (Save, and the pre-save inside
-	// Submit), `POST /{id}/complete` (Submit for review / Send to ERP / Mark
-	// complete), `POST /{id}/extract` and `/reset-extraction` are all
-	// `require_roles(ADMIN, AP_MANAGER, CFO)`. Those buttons were gated on
-	// `!isClerkOnly` — or, for Submit, offered to a clerk on purpose — so a
-	// clerk was handed four controls that could only 403, and a custom-role
-	// user (not "clerk only", holding none of the three) got them all too.
-	// Mirror the server's own any-of list rather than its complement.
-	let canWrite = $derived(auth.hasAnyRole('admin', 'ap_manager', 'cfo'));
+	// The role gates every invoice WRITE behind this modal carries on the
+	// server (`backend/app/api/invoice_entry.py`). `PATCH /api/invoices/{id}`
+	// (Save, and the pre-save inside Submit), `PUT /{id}/line-items`, the file
+	// routes, `POST /{id}/extract` and `/reset-extraction` take any ENTRY role
+	// — `ap_clerk` included — but hold an entry-only caller to the pre-approval
+	// window. Mirror the server's own any-of lists rather than their complement,
+	// so a custom-role user holding none of them is offered nothing that 403s.
+	let canManageInvoice = $derived(auth.hasAnyRole(...INVOICE_MANAGE_ROLES));
+	let canEnterInvoice = $derived(auth.hasAnyRole(...INVOICE_ENTRY_ROLES));
+	// A chain level that has already signed also closes a clerk's window
+	// (`invoice_entry.refuse_entry_only_mid_chain`): `approved_by` is set only at
+	// final approval, and an edit would carry that sign-off over.
+	let chainHasSignoff = $derived(
+		status === 'ready_for_review' && chainLevels.some((lv) => (lv.approvals?.length ?? 0) > 0)
+	);
+	let inEntryWindow = $derived(
+		inInvoiceEntryWindow(status, invoice.approved_by) && !chainHasSignoff
+	);
+	let canWrite = $derived(canManageInvoice || (canEnterInvoice && inEntryWindow));
 	let isDone = $derived(status === 'done' || status === 'sent_to_erp');
 	let isExtracting = $derived(status === 'pending');
 	let resettingExtraction = $state(false);
@@ -617,12 +633,19 @@
 		canWrite && (status === 'new' || status === 'failed') && currentFileUrl
 	);
 	let extracting = $state(false);
-	let canManageFile = $derived(!isClerkOnly && status !== 'done');
+	let canManageFile = $derived(canWrite && status !== 'done');
 	let isReadyForReview = $derived(status === 'ready_for_review');
 	let canReview = $derived(isReadyForReview && !isClerkOnly && (
 		!invoice.assigned_to_id || invoice.assigned_to_id === auth.user?.id
 	));
-	let canSubmitStatus = $derived(canWrite && (status === 'new' || status === 'approved'));
+	// `POST /{id}/complete`: a manager advances `new` and `approved`; an
+	// entry-only caller only submits a `new` invoice for review — and only
+	// where the workflow has an approval step (the server refuses otherwise).
+	let canSubmitStatus = $derived(
+		canManageInvoice
+			? status === 'new' || status === 'approved'
+			: canEnterInvoice && status === 'new' && !!activeSteps.approval
+	);
 
 	let submitLabel = $derived.by(() => {
 		if (status === 'new' && activeSteps.approval) return m('invoices.modal.submit.forReview');
@@ -663,6 +686,8 @@
 		'done',
 	];
 	let financiallyLocked = $derived(FINANCIALLY_LOCKED_STATUSES.includes(status));
+	// `PUT /{id}/line-items`: an entry role, refused once financially locked.
+	let canEditLines = $derived(canWrite && !financiallyLocked);
 
 	function invoiceFieldPayload(): Record<string, unknown> {
 		const payload: Record<string, unknown> = {
@@ -1949,7 +1974,9 @@
 					<div class="line-items-section">
 						<div class="line-items-header">
 							<span class="line-items-title">{m('invoices.modal.lineItems.title')}</span>
-							<button type="button" class="btn-add-line" onclick={addLineItem}>{m('invoices.modal.lineItems.addLine')}</button>
+							{#if canEditLines}
+								<button type="button" class="btn-add-line" onclick={addLineItem}>{m('invoices.modal.lineItems.addLine')}</button>
+							{/if}
 						</div>
 						{#if lineItems.length > 0}
 							<div class="line-items-scroll">
@@ -1996,7 +2023,9 @@
 											{/if}
 										</td>
 											<td>
+												{#if canEditLines}
 												<button type="button" class="li-delete" aria-label={m('invoices.modal.lineItems.removeAria', { n: idx + 1 })} onclick={() => removeLineItem(idx)}>&times;</button>
+												{/if}
 											</td>
 										</tr>
 									{/each}
@@ -2006,7 +2035,7 @@
 						{:else}
 							<p class="line-items-empty">{m('invoices.modal.lineItems.empty')}</p>
 						{/if}
-						{#if lineItemsDirty}
+						{#if lineItemsDirty && canEditLines}
 							<div class="line-items-actions">
 								<button type="button" class="btn-save-lines" disabled={savingLines} onclick={saveLineItems}>
 									{savingLines ? m('invoices.modal.lineItems.saving') : m('invoices.modal.lineItems.save')}

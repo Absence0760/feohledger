@@ -73,6 +73,20 @@ enum InvoiceStatus {
   /// editable (GL coding, notes, addresses) — only the money and the payee are
   /// frozen.
   bool get isFinanciallyLocked => this == InvoiceStatus.approved || !isEditable;
+
+  /// The statuses an invoice can sit in before anyone approved it — a mirror
+  /// of `_ENTRY_WINDOW_STATUSES` in `backend/app/api/invoice_entry.py`. An
+  /// explicit allowlist there too, so a new status is outside an AP clerk's
+  /// reach until someone decides otherwise. Read with [Invoice.inEntryWindow],
+  /// never alone: an approved invoice whose ERP push failed is `failed` too.
+  bool get isPreApproval => switch (this) {
+    InvoiceStatus.newStatus ||
+    InvoiceStatus.pending ||
+    InvoiceStatus.failed ||
+    InvoiceStatus.readyForReview ||
+    InvoiceStatus.rejected => true,
+    _ => false,
+  };
 }
 
 /// The invoice fields frozen once the invoice is financially locked — a mirror
@@ -291,6 +305,10 @@ class Invoice {
   final String? poNumber;
   final String? glAccount;
   final String? fileUrl;
+  /// Who signed the invoice off — set at final approval and never cleared, so
+  /// it is what tells an approved-then-ERP-failed invoice from one that never
+  /// reached approval (`invoice_entry.in_entry_window`).
+  final String? approvedBy;
   final DateTime createdAt;
   final List<InvoiceWarning> warnings;
   final PoMatch? poMatch;
@@ -308,6 +326,7 @@ class Invoice {
     this.poNumber,
     this.glAccount,
     this.fileUrl,
+    this.approvedBy,
     required this.createdAt,
     this.warnings = const [],
     this.poMatch,
@@ -333,6 +352,7 @@ class Invoice {
       poNumber: json['po_number'] as String?,
       glAccount: json['gl_account'] as String?,
       fileUrl: json['file_url'] as String?,
+      approvedBy: json['approved_by'] as String?,
       createdAt: DateTime.parse(json['created_at'] as String),
       warnings: rawWarnings is List
           ? rawWarnings
@@ -345,4 +365,8 @@ class Invoice {
           : null,
     );
   }
+
+  /// True while an entry-only caller (an AP clerk) may still edit this invoice
+  /// — `in_entry_window` in `backend/app/api/invoice_entry.py`.
+  bool get inEntryWindow => status.isPreApproval && approvedBy == null;
 }

@@ -12,7 +12,7 @@ Four roles are available. Users can have multiple roles.
 |---|---|
 | **Admin** | Full access to all features and user management |
 | **AP Manager** | Review and approve invoices |
-| **AP Clerk** | Read-only on invoices: views and exports them, but cannot create, upload, edit, import or approve one (the seeded role description still reads "Upload invoices and enter data") |
+| **AP Clerk** | Enters invoices — creates, uploads, codes, edits, extracts, imports open AP and submits for review — up to approval; cannot approve, reject, delete, pay or push to the ERP |
 | **CFO** | Approve high-value invoices and view reports |
 
 Roles are enforced in the frontend UI. The `/api/auth/me` endpoint returns the user's roles, and the frontend restricts visibility and actions based on them.
@@ -43,24 +43,49 @@ matching `require_roles(ADMIN, AP_MANAGER)` on the write endpoints.
 
 | Feature | Admin | AP Manager | AP Clerk | CFO |
 |---|---|---|---|---|
-| Invoice: create / upload / attach file | Yes | Yes | No | Yes |
-| Invoice: CSV import | Yes | Yes | No | No |
-| Invoice: edit fields (Save) | Yes | Yes | No | Yes |
-| Invoice: submit for review (new) | Yes | Yes | No | Yes |
+| Invoice: create / upload / attach, replace or remove file | Yes | Yes | Yes¹ | Yes |
+| Invoice: CSV import | Yes | Yes | Open AP only² | No |
+| Invoice: edit fields + line items (Save) | Yes | Yes | Yes¹ | Yes |
+| Invoice: extract / reset extraction | Yes | Yes | Yes¹ | Yes |
+| Invoice: submit for review (new) / resubmit (rejected) | Yes | Yes | Yes | Yes |
+| Invoice: mark complete / send to ERP (approved) | Yes | Yes | No | Yes |
 | Invoice: approve/reject | Yes | Yes | No | Yes |
 | Invoice: delete | Yes | Yes | No | Yes |
-| Bulk: delete, status change | Yes | Yes | No | Yes |
+| Bulk: delete | Yes | Yes | No | Yes |
+| Bulk: status change | Yes | Yes | Ready for Review / New only | Yes |
 | Bulk: export | Yes | Yes | Yes | Yes |
 
-A clerk reads every invoice but creates or changes none: `POST /api/invoices`,
-`POST /api/invoices/upload`, `PATCH /api/invoices/{id}`,
-`POST /api/invoices/{id}/complete`, `/extract` and `/reset-extraction` are all
-`require_roles(ADMIN, AP_MANAGER, CFO)`, and `POST /api/invoices/import-csv` is
-narrower still (`require_roles(ADMIN, AP_MANAGER)`). Approve / reject are gated
-on the `invoice.approve` permission (`require_permission`), which admin, AP
-manager and CFO hold by default and a clerk does not
-(`backend/app/api/permissions.py::ROLE_DEFAULT_PERMISSIONS`). The detail modal gates Save,
-Submit, Extract and Reset on that same any-of list (`canWrite`). There is no
+¹ Until the invoice is approved. ² `new` / `rejected` rows; a historical
+`done` / `paid` row is refused per row.
+
+**The AP clerk enters invoices; segregation of duties sits at approval.** That
+is standard AP practice — intake, validation and GL coding are the clerk's job,
+and the duty that must be separated from them is approval and payment release.
+The app enforces that half where it lives: `approval_chain.violates_segregation`
+refuses the invoice's uploader (∪ `segregation_actor_ids`) as its approver, and
+every entry path a clerk uses stamps `uploaded_by_id` with the clerk.
+
+The gates live in `backend/app/api/invoice_entry.py`: `INVOICE_ENTRY_ROLES`
+(admin, AP manager, AP clerk, CFO) on `POST /api/invoices`,
+`POST /api/invoices/upload`, the `/{id}/file` routes, `PATCH /api/invoices/{id}`,
+`PUT /{id}/line-items`, `/extract`, `/reset-extraction`, `/resubmit`,
+`/complete` and `POST /api/invoices/bulk/status`; `import-csv` is admin, AP
+manager and AP clerk. A caller holding `ap_clerk` and none of admin / AP manager
+/ CFO is **entry-only**: those routes refuse them with a 403
+`invoice_entry_window_closed` once the invoice has been approved — read off
+`approved_by` as well as the status, because an approved invoice whose ERP push
+failed sits at `failed`, and once any level of a multi-level chain has signed —
+and `/complete` and bulk status take only the entry transitions (submit `new`
+for review, resubmit, send a rejected invoice back to `new`; a bulk batch skips
+anything not `new` / `rejected`). A clerk's submit always lands at review: the
+workflow's `auto_approve_below` floor does not fire for it, because a clerk may
+have just re-keyed the amount of an invoice with no recorded uploader (email
+intake, PEPPOL), where segregation has nobody to bind. Approve / reject are gated on the `invoice.approve` permission
+(`require_permission`), which admin, AP manager and CFO hold by default and a
+clerk does not (`backend/app/api/permissions.py::ROLE_DEFAULT_PERMISSIONS`).
+The detail modal mirrors this with `canWrite` (a manage role, or an entry role
+inside the window) for Save, the line-item editor, the file controls, Extract
+and Reset; a clerk's Submit is offered on a `new` invoice only. There is no
 status picker for any role — the modal shows status read-only, because `PATCH`
 does not accept `status`; a status moves only through the workflow actions
 (Submit, Approve / Reject, Retry) or the list's bulk Change Status, whose
@@ -156,7 +181,7 @@ Response (201):
   "is_active": true,
   "roles": [
     { "id": "uuid", "name": "ap_manager", "description": "Review and approve invoices" },
-    { "id": "uuid", "name": "ap_clerk", "description": "Upload invoices and enter data" }
+    { "id": "uuid", "name": "ap_clerk", "description": "Enter, code and match invoices; prepare requests and expenses" }
   ],
   "created_at": "2026-04-05T...",
   "temporary_password": "aB3kLm9xPq2R"

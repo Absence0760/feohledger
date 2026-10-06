@@ -907,7 +907,7 @@ Set `FEOH_SECRET_KEY` to a strong, random value in production.
 The database supports four roles:
 - **admin** — full access to all features, user management, workflow configuration
 - **ap_manager** — review and approve invoices, manage vendors and payments
-- **ap_clerk** — read invoices and the work around them (cannot upload, edit, submit, approve, delete, or change status — every invoice write is `require_roles(ADMIN, AP_MANAGER, CFO)` or narrower)
+- **ap_clerk** — enter invoices: create, upload, code, edit, extract, import open AP and submit for review, up to approval (`backend/app/api/invoice_entry.py`); cannot approve, reject, delete, pay or push to the ERP
 - **cfo** — approve high-value invoices, view reports, manage vendors and payments
 
 Roles are returned by `GET /api/auth/me` in the `roles` array, and the user's
@@ -2216,9 +2216,11 @@ It describes the **endpoints**, and in two places the nav is deliberately narrow
 | `/gl-accounts` create / sync-erp | any-authenticated (read) | admin · ap_manager |
 | `/purchase-orders` sync-erp | any-authenticated (read) | admin · ap_manager |
 | `/invoices/{id}/assign` (route to a reviewer) | — | admin · ap_manager |
-| `/invoices` mutate (create / patch / delete / line-items / bulk) | any-authenticated (read) | admin · ap_manager · cfo |
-| `/invoices/{id}/upload`, `/extract`, `/reset-extraction` | — | admin · ap_manager · cfo |
-| `/invoices/{id}/approve`, `/reject`, `/resubmit`, `/complete`, `/send-to-erp`, `/retry-erp` | — | admin · ap_manager · cfo |
+| `/invoices` entry (create / `upload` / `{id}/file` / patch / line-items / `extract` / `reset-extraction` / `resubmit` / `complete` / `bulk/status`) | any-authenticated (read) | admin · ap_manager · cfo · ap_clerk (clerk: pre-approval only, and only the entry transitions — `api/invoice_entry.py`) |
+| `/invoices/import-csv` | — | admin · ap_manager · ap_clerk (clerk: open AP rows only) |
+| `/invoices` delete / `bulk/delete` | — | admin · ap_manager · cfo |
+| `/invoices/{id}/approve`, `/reject` | — | `invoice.approve` (admin · ap_manager · cfo by default) |
+| `/invoices/{id}/send-to-erp`, `/retry-erp` | — | admin · ap_manager · cfo |
 | `/payments/*` (incl. runs create + execute) | admin · ap_manager · cfo | admin · ap_manager · cfo |
 | `/cards` (list / dashboard / generate / cancel / details / rebates) | admin · ap_manager · cfo | admin · ap_manager · cfo |
 | `/dashboard` | any-authenticated | — |
@@ -2226,7 +2228,7 @@ It describes the **endpoints**, and in two places the nav is deliberately narrow
 
 ### "Read open to all authenticated" surfaces
 
-Invoices, workflow definitions list/active-steps, GL accounts list, and POs list are readable by every authenticated user (including pure clerks). Clerks can see the work; they just can't take action on it. This matches the frontend, where the invoice list page is visible to clerks but write controls are hidden.
+Invoices, workflow definitions list/active-steps, GL accounts list, and POs list are readable by every authenticated user (including pure clerks). A clerk enters and codes invoices up to approval and cannot sign them off or release payment; the frontend shows them the entry controls and hides the rest.
 
 The org settings read is open too, but its `settings` payload is **projected by role** — `backend/app/services/org_settings_view.py::NON_ADMIN_SETTINGS` is an allow-list, so a non-admin gets `company`, `invoice_defaults`, `reporting_currency`, `payments.home_currency`, `brand` and `erp.integration_method`, and never the tenant's third-party credentials (ERP client secret, processor credentials, card API key, the SSO client secret). The `/organization` page is therefore read-only for a non-admin **and says which panels it cannot fill**, rather than rendering the platform defaults its fields fall back to; widening the projection to populate them would re-open the leak that module closed (`docs/decisions.md` §153).
 

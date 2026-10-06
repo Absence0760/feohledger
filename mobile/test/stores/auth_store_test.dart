@@ -6,6 +6,7 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 
 import 'package:feohledger_mobile/api/api_client.dart';
+import 'package:feohledger_mobile/models/invoice.dart';
 import 'package:feohledger_mobile/services/offline_store.dart';
 import 'package:feohledger_mobile/stores/auth_store.dart';
 
@@ -130,6 +131,32 @@ void main() {
       expect(store.canApprove, isFalse);
       expect(store.canViewPayments, isFalse);
       expect(store.isClerkOnly, isTrue);
+    });
+
+    test('ap_clerk enters invoices only before approval '
+        '(mirrors backend api/invoice_entry.py)', () async {
+      Invoice inv(String status, {String? approvedBy}) => Invoice.fromJson({
+            'id': 'i1',
+            'status': status,
+            'approved_by': approvedBy,
+            'created_at': '2026-01-01T12:00:00',
+          });
+
+      await loginAs(['ap_clerk']);
+      expect(store.canEditInvoice, isFalse);
+      expect(store.canEnterInvoice, isTrue);
+      expect(store.canApproveInvoice, isFalse);
+      expect(store.canEditInvoiceRow(inv('new')), isTrue);
+      expect(store.canEditInvoiceRow(inv('rejected')), isTrue);
+      expect(store.canEditInvoiceRow(inv('failed')), isTrue);
+      expect(
+          store.canEditInvoiceRow(inv('approved', approvedBy: 'A')), isFalse);
+      expect(store.canEditInvoiceRow(inv('failed', approvedBy: 'A')), isFalse);
+      expect(store.canEditInvoiceRow(inv('paid', approvedBy: 'A')), isFalse);
+
+      await loginAs(['ap_manager']);
+      expect(store.canEditInvoiceRow(inv('approved', approvedBy: 'A')), isTrue);
+      expect(store.canEditInvoiceRow(inv('paid', approvedBy: 'A')), isFalse);
     });
 
     test('cash flow forecast is admin/cfo only (mirrors backend _CFO_ROLES)',

@@ -413,6 +413,7 @@ async def import_invoices_csv(
     entity_id: uuid.UUID | None = None,
     day_first: bool = False,
     actor_id: uuid.UUID | None = None,
+    allow_historical: bool = True,
 ) -> ImportResult:
     """Import historical invoices. Vendor resolution: code > name. Missing vendors
     get an auto-created stub with status='unverified' so the row still lands.
@@ -429,7 +430,13 @@ async def import_invoices_csv(
     ``vendor.imported_csv`` row for each vendor stub auto-created along the way,
     and — because an invoice imported at ``new`` still has to be approved — on
     ``Invoice.uploaded_by_id``, which is what segregation of duties is keyed on
-    (``services/approval_chain.violates_segregation``)."""
+    (``services/approval_chain.violates_segregation``).
+
+    ``allow_historical=False`` refuses every row at a ``_HISTORICAL_INVOICE_STATUSES``
+    status — the endpoint passes it for an AP clerk, who may import open AP for
+    approval but not rows asserting a payment that already happened. A blank
+    ``status`` cell still defaults to ``done``, so such a row is refused too
+    rather than silently re-read as ``new``."""
     result = ImportResult()
     try:
         rows = _read_rows(csv_text)
@@ -497,6 +504,19 @@ async def import_invoices_csv(
                         f"status not importable: {status_raw!r}; "
                         f"allowed: {', '.join(sorted(_IMPORTABLE_INVOICE_STATUSES))} "
                         "(import open AP as 'new' so it goes through approval)"
+                    ),
+                )
+            )
+            result.skipped += 1
+            continue
+        if not allow_historical and status_raw in _HISTORICAL_INVOICE_STATUSES:
+            result.errors.append(
+                ImportRowError(
+                    row=i,
+                    message=(
+                        f"status {status_raw!r} records history and needs an AP manager "
+                        "or admin to import; import open AP as 'new' (a blank status "
+                        "means 'done')"
                     ),
                 )
             )

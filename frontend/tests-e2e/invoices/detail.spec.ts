@@ -159,8 +159,9 @@ test.describe('/invoices invoice detail modal', () => {
  *   accept `status`, so a pick was never saved — and because every gate in the
  *   modal reads it, picking e.g. Ready for Review conjured Approve/Reject on a
  *   `new` invoice (a guaranteed 409).
- * - A pure clerk gets no Save and no Submit: `PATCH` and `POST /{id}/complete`
- *   are both `require_roles(ADMIN, AP_MANAGER, CFO)`, so each was a 403.
+ * - A pure clerk ENTERS invoices (`backend/app/api/invoice_entry.py`): on a
+ *   `new` invoice they get Save and Submit for Review, both of which the
+ *   server takes — but never Approve / Reject, which need `invoice.approve`.
  */
 test.describe('/invoices detail modal — controls match the server', () => {
 	const MARKER = `E2E-MODALGATE-${Date.now()}`;
@@ -191,7 +192,7 @@ test.describe('/invoices detail modal — controls match the server', () => {
 		await expect(modal.getByRole('button', { name: 'Submit for Review' })).toBeVisible();
 	});
 
-	test('a clerk is offered neither Save nor Submit', async ({ page, tenantClerk }) => {
+	test('a clerk is offered Save and Submit for Review on a new invoice', async ({ page, tenantClerk }) => {
 		await signInAndWait(page, tenantClerk);
 		await page.goto(`/invoices?id=${invoiceId}`);
 		const modal = page.locator('div.modal[role="dialog"]');
@@ -200,7 +201,8 @@ test.describe('/invoices detail modal — controls match the server', () => {
 		// half-rendered footer.
 		await expect(modal.getByRole('button', { name: 'Cancel', exact: true })).toBeVisible();
 
-		await expect(modal.getByRole('button', { name: 'Save', exact: true })).toHaveCount(0);
-		await expect(modal.getByRole('button', { name: 'Submit for Review' })).toHaveCount(0);
+		await expect(modal.getByRole('button', { name: 'Save', exact: true })).toBeVisible();
+		await expect(modal.getByRole('button', { name: 'Submit for Review' })).toBeVisible();
+		await expect(modal.getByRole('button', { name: 'Approve', exact: true })).toHaveCount(0);
 	});
 });

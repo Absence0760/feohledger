@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import 'package:feohledger_mobile/api/api_client.dart';
 import 'package:feohledger_mobile/api/endpoints.dart';
 import 'package:feohledger_mobile/config.dart';
+import 'package:feohledger_mobile/models/invoice.dart';
 import 'package:feohledger_mobile/models/mfa_challenge.dart';
 import 'package:feohledger_mobile/models/user.dart';
 import 'package:feohledger_mobile/services/session.dart';
@@ -79,12 +80,24 @@ class AuthStore extends ChangeNotifier {
   // grant themselves is not a sign-off. Mirrors the web app's
   // `auth.hasRole('cfo')` on the same button.
   bool get canApprovePaymentRun => isCfo;
-  // Invoice field editing — mirrors the backend PATCH /api/invoices/{id} gate
-  // (admin / ap_manager / cfo). Clerks are read-only here.
+  // Invoice field editing at any editable status — the manage roles
+  // (admin / ap_manager / cfo) of `backend/app/api/invoice_entry.py`.
   bool get canEditInvoice => isAdmin || isManager || isCfo;
-  // Bulk invoice operations (delete / status change) — mirrors the backend
-  // gate on POST /api/invoices/bulk/{delete,status}
-  // (require_roles(ROLE_ADMIN, ROLE_AP_MANAGER, ROLE_CFO)). Clerks excluded.
+  // Invoice ENTRY — PATCH /api/invoices/{id}, upload and the other entry
+  // routes take `ap_clerk` too, but hold a caller with none of the manage
+  // roles to the pre-approval window ([Invoice.inEntryWindow]). Use
+  // [canEditInvoiceRow] for a specific invoice.
+  bool get canEnterInvoice =>
+      canEditInvoice || (_user?.hasRole('ap_clerk') ?? false);
+  // Whether the edit affordance applies to [invoice]: a manager edits up to
+  // the immutable statuses, an entry-only clerk only before approval.
+  bool canEditInvoiceRow(Invoice invoice) =>
+      invoice.status.isEditable &&
+      (canEditInvoice || (canEnterInvoice && invoice.inEntryWindow));
+  // Bulk invoice operations — mobile's selection mode carries delete and the
+  // full status-target list, so it is gated on the manage roles
+  // (POST /api/invoices/bulk/delete is admin/ap_manager/cfo). A clerk's
+  // narrower bulk/status reach (submit / resubmit only) is web-only.
   bool get canBulkEditInvoices => isAdmin || isManager || isCfo;
   // Admin surfaces — user management + organization settings. Both backend
   // surfaces (/api/admin/*, PATCH /api/organization) are admin-only.

@@ -1,6 +1,7 @@
 import {
 	API_BASE,
 	currentTenantSlug,
+	deleteInvoicesWhere,
 	escapeRegExp,
 	expect,
 	tenantBase,
@@ -22,6 +23,8 @@ test.use({ storageState: { cookies: [], origins: [] } });
  *   admin-only:    POST /api/admin/users, DELETE /api/admin/users/{id}
  *   admin/manager: POST /api/vendors, DELETE /api/vendors/{id}
  *   CFO-only:      POST /api/payments/runs/{id}/approve
+ *   entry roles:   POST /api/invoices (ap_clerk included), but
+ *                  POST /api/invoices/{id}/approve stays off-limits to it
  *   any-role read: GET /api/dashboard (positive control)
  *
  * For each gate we hit it with a *lower-privilege* token and assert
@@ -225,6 +228,39 @@ test.describe('RBAC at the API layer', () => {
 	// the catalogs read endpoint grants ap_clerk and the sidebar surfaces it
 	// (see rbac.spec.ts). Pin the backend side here so the two can't drift:
 	// if this 403s, the gate silently dropped clerk and the nav item lies.
+	// Entering invoices is the AP clerk's job (`backend/app/api/invoice_entry.py`);
+	// approving them is not. The toolbar's Create / Upload buttons show for a
+	// clerk, so pin that the backend takes the write — and still refuses the
+	// sign-off on the very invoice the clerk just keyed.
+	test('clerk CAN POST /api/invoices but cannot approve it', async ({
+		page,
+		request,
+		tenantClerk
+	}) => {
+		const marker = `E2E-RBAC-CLERK-ENTRY-${Date.now()}`;
+		try {
+			const token = await tokenAfterLogin(page, tenantClerk);
+			const headers = { Authorization: `Bearer ${token}`, 'X-Tenant-Slug': currentTenantSlug() };
+			const created = await request.post(`${API_BASE}/api/invoices`, {
+				headers,
+				data: { vendor: 'E2E Clerk Entry Vendor', invoice_number: marker, amount: '42.00' }
+			});
+			expect(created.status(), 'clerk POST /invoices').toBe(201);
+			const { id } = (await created.json()) as { id: string };
+
+			const submit = await request.post(`${API_BASE}/api/invoices/${id}/complete`, { headers });
+			expect(submit.status(), 'clerk submit for review').toBe(200);
+
+			const approve = await request.post(`${API_BASE}/api/invoices/${id}/approve`, {
+				headers,
+				data: {}
+			});
+			expectRoleDeny(approve.status(), 'clerk approve invoice');
+		} finally {
+			await deleteInvoicesWhere(`invoice_number = '${marker}'`);
+		}
+	});
+
 	test('clerk CAN GET /api/catalogs (sidebar/backend RBAC parity)', async ({
 		page,
 		request,

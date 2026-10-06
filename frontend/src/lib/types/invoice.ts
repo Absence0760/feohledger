@@ -128,14 +128,55 @@ export const VALID_TRANSITIONS: Record<InvoiceStatus, InvoiceStatus[]> = {
 };
 
 /**
- * Given a set of source statuses, return the status targets valid for ALL of them.
+ * Given a set of source statuses, return the status targets valid for ALL of
+ * them — narrowed to `allowed` when given (an AP clerk's bulk picker passes
+ * {@link ENTRY_BULK_STATUS_TARGETS}).
  */
-export function commonTransitions(statuses: InvoiceStatus[]): InvoiceStatus[] {
+export function commonTransitions(
+	statuses: InvoiceStatus[],
+	allowed?: ReadonlySet<InvoiceStatus>
+): InvoiceStatus[] {
 	if (statuses.length === 0) return [];
 	const sets = statuses.map((s) => new Set(VALID_TRANSITIONS[s]));
 	const first = sets[0];
-	return [...first].filter((t) => sets.every((s) => s.has(t)));
+	return [...first].filter((t) => sets.every((s) => s.has(t)) && (!allowed || allowed.has(t)));
 }
+
+/**
+ * Who may ENTER an invoice — mirror of `backend/app/api/invoice_entry.py`.
+ *
+ * `INVOICE_ENTRY_ROLES` gates create, upload, the source-file controls, field
+ * and line-item edits, extract / reset, submit for review, resubmit, CSV
+ * import (minus `cfo`, see the page) and the bulk status picker.
+ * `INVOICE_MANAGE_ROLES` is the reach past entry (delete, ERP, the `approved`
+ * window). Approve / reject is the `invoice.approve` permission, not a role.
+ */
+export const INVOICE_MANAGE_ROLES = ['admin', 'ap_manager', 'cfo'] as const;
+export const INVOICE_ENTRY_ROLES = [...INVOICE_MANAGE_ROLES, 'ap_clerk'] as const;
+
+/** Statuses an invoice can sit in before anyone approved it — `_ENTRY_WINDOW_STATUSES`. */
+const ENTRY_WINDOW_STATUSES: ReadonlySet<InvoiceStatus> = new Set([
+	'new',
+	'pending',
+	'failed',
+	'ready_for_review',
+	'rejected'
+]);
+
+/**
+ * True while an entry-only caller (an AP clerk) may still act on the invoice —
+ * `invoice_entry.in_entry_window`. `approvedBy` matters because an APPROVED
+ * invoice whose ERP push failed sits at `failed` too.
+ */
+export function inInvoiceEntryWindow(status: InvoiceStatus, approvedBy: string | null | undefined): boolean {
+	return ENTRY_WINDOW_STATUSES.has(status) && !approvedBy;
+}
+
+/** The bulk status targets an entry-only caller may set — `ENTRY_BULK_STATUS_TARGETS`. */
+export const ENTRY_BULK_STATUS_TARGETS: ReadonlySet<InvoiceStatus> = new Set([
+	'new',
+	'ready_for_review'
+]);
 
 export interface AdvancedSearchFilters {
 	vendor: string;

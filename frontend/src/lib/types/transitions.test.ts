@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { VALID_TRANSITIONS, commonTransitions, type InvoiceStatus } from './invoice';
+import {
+	ENTRY_BULK_STATUS_TARGETS,
+	VALID_TRANSITIONS,
+	commonTransitions,
+	inInvoiceEntryWindow,
+	type InvoiceStatus
+} from './invoice';
 
 // The frontend transition map must mirror the backend workflow_engine
 // VALID_TRANSITIONS for the user-selectable manual moves. Offering a target
@@ -52,5 +58,32 @@ describe('commonTransitions', () => {
 
 	it('returns an empty list for an empty selection', () => {
 		expect(commonTransitions([])).toEqual([]);
+	});
+});
+
+describe('the AP clerk\'s entry reach (backend api/invoice_entry.py)', () => {
+	it('narrows bulk targets to submit / resubmit / back-to-draft', () => {
+		expect(commonTransitions(['new'], ENTRY_BULK_STATUS_TARGETS)).toEqual(['ready_for_review']);
+		expect(commonTransitions(['rejected'], ENTRY_BULK_STATUS_TARGETS).sort()).toEqual([
+			'new',
+			'ready_for_review'
+		]);
+		expect(commonTransitions(['ready_for_review'], ENTRY_BULK_STATUS_TARGETS)).toEqual([]);
+		expect(commonTransitions(['approved'], ENTRY_BULK_STATUS_TARGETS)).toEqual([]);
+	});
+
+	it('never lets a clerk set an approval or closing status in bulk', () => {
+		for (const s of ['approved', 'rejected', 'done', 'pending'] as InvoiceStatus[]) {
+			expect(ENTRY_BULK_STATUS_TARGETS.has(s)).toBe(false);
+		}
+	});
+
+	it('closes the entry window at approval, including an approved invoice whose ERP push failed', () => {
+		expect(inInvoiceEntryWindow('new', null)).toBe(true);
+		expect(inInvoiceEntryWindow('ready_for_review', null)).toBe(true);
+		expect(inInvoiceEntryWindow('failed', null)).toBe(true);
+		expect(inInvoiceEntryWindow('failed', 'Some Approver')).toBe(false);
+		expect(inInvoiceEntryWindow('approved', 'Some Approver')).toBe(false);
+		expect(inInvoiceEntryWindow('done', null)).toBe(false);
 	});
 });

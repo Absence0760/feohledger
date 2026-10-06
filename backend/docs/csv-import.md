@@ -5,7 +5,13 @@ vendor list and a stack of open AP from whatever tool they're replacing.
 The CSV importers let you load both in a few minutes instead of
 hand-keying them or building a throw-away Bill.com → Better-AP ETL.
 
-Two endpoints, both `admin` / `ap_manager` only:
+Two endpoints. Vendor import is `admin` / `ap_manager`; invoice import is
+`admin` / `ap_manager` / `ap_clerk`. An AP clerk (with no manager role) may
+import **open AP only** — rows at `new` or `rejected`, which then go through
+approval with the clerk stamped as uploader. A historical `done` / `paid` row
+asserts a payment already happened, so it is refused per row for a clerk (and
+because a blank `status` defaults to `done`, a clerk's file needs an explicit
+`status` column). See `backend/app/api/invoice_entry.py`.
 
 | Endpoint | What it does |
 |---|---|
