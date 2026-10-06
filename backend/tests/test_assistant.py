@@ -216,6 +216,23 @@ def test_tool_allowed_roles_match_rest_gate(tool_name):
         )
 
 
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/api/analytics/cashflow_forecast",
+        "/api/analytics/cashflow_whatif",
+        "/api/analytics/cash_position",
+    ],
+)
+def test_analytics_cash_reads_admit_the_copilot_audience(path):
+    """The REST cash-flow trio and the copilot serve the same figures, so they
+    must agree on who may see them. Before this, AP managers got the forecast
+    from the copilot (and the CSV export) but a 403 from the REST read."""
+    copilot = _rest_role_gate("POST", "/api/cash-flow/copilot")
+    assert copilot is not None
+    assert _rest_role_gate("GET", path) == copilot
+
+
 # ===========================================================================
 # Layer 2 — realdb helpers
 # ===========================================================================

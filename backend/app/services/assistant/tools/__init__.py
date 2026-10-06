@@ -35,9 +35,10 @@ from app.services.assistant.tools.vendor_spend import get_vendor_spend
 # `api/cash_flow.COPILOT_ROLES` names as "who may see this org's cash position".
 # Stricter than the assistant's blanket four-role access; enforced per-call by
 # the orchestrator's run_tool closure (a clerk gets a clean refusal tool result,
-# never data and never a 500). `tests/test_assistant_tool_roles.py` pins every
-# tool's `allowed_roles` to the REST gate of the read it mirrors, so a new tool
-# cannot quietly serve a role the app itself refuses.
+# never data and never a 500). `test_tool_allowed_roles_match_rest_gate` in
+# `tests/test_assistant.py` pins every tool's `allowed_roles` to the REST gate of
+# the read it mirrors, so a new tool cannot quietly serve a role the app itself
+# refuses.
 FINANCE_LEADER_ROLES = ("admin", "ap_manager", "cfo")
 
 

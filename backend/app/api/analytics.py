@@ -94,6 +94,15 @@ router = APIRouter(prefix="/analytics", tags=["analytics"])
 # unless the org explicitly grants them.
 _CFO_ROLES = (ROLE_ADMIN, ROLE_CFO)
 
+# The cash-flow trio (forecast / what-if / cash position) is the one exception:
+# the same figures are already served to AP managers by the cash-flow copilot
+# (`api/cash_flow.COPILOT_ROLES`) and by the `cashflow_forecast` CSV export
+# below, so refusing them here only made the REST read disagree with the
+# copilot about who may see the org's cash position. Not imported from
+# `cash_flow` (that module imports this one through the assistant tools); kept
+# equal to it by `tests/test_cash_flow_alerts.py`'s drift guard instead.
+CASH_FORECAST_ROLES = (ROLE_ADMIN, ROLE_AP_MANAGER, ROLE_CFO)
+
 
 # ---------------------------------------------------------------------------
 # Predictive cash-flow forecasting
@@ -369,7 +378,7 @@ async def get_cashflow_forecast(
     include_pending: bool = Query(True),
     db: AsyncSession = Depends(get_tenant_db),
     org: Organization = Depends(get_tenant),
-    user: User = Depends(require_roles(*_CFO_ROLES)),
+    user: User = Depends(require_roles(*CASH_FORECAST_ROLES)),
     entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
     """Projected AP cash outflows bucketed by `day` / `week` / `month`
@@ -430,7 +439,7 @@ async def get_cashflow_whatif(
     grace_days: int = Query(15, ge=0, le=90),
     db: AsyncSession = Depends(get_tenant_db),
     org: Organization = Depends(get_tenant),
-    user: User = Depends(require_roles(*_CFO_ROLES)),
+    user: User = Depends(require_roles(*CASH_FORECAST_ROLES)),
     entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
     """Payment-timing what-if: compares paying every open commitment
@@ -501,7 +510,7 @@ async def get_cash_position(
     seed_balance: bool = Query(True),
     db: AsyncSession = Depends(get_tenant_db),
     org: Organization = Depends(get_tenant),
-    user: User = Depends(require_roles(*_CFO_ROLES)),
+    user: User = Depends(require_roles(*CASH_FORECAST_ROLES)),
     entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
     """Running cash-position projection: opening balance carried forward

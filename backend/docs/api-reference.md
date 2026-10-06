@@ -665,9 +665,9 @@ CFO-grade aggregates beyond the basic dashboard, plus CSV/PDF export and recurri
 |--------|--------------------------------------------|-------|-------------|
 | `GET`  | `/api/analytics/spend`                      | cfo, admin, ap_manager | Aggregated spend by GL / vendor / cost center / time bucket |
 | `GET`  | `/api/analytics/dpo`                        | cfo, admin | Days-payable-outstanding rolling history |
-| `GET`  | `/api/analytics/cashflow_forecast`          | cfo, admin | Projected AP outflows bucketed day/week/month (committed vs pending) |
-| `GET`  | `/api/analytics/cashflow_whatif`            | cfo, admin | Payment-timing what-if: early vs on-time vs late, with discount capture |
-| `GET`  | `/api/analytics/cash_position`              | cfo, admin | Running cash position from a BYO opening balance + threshold-breach alerts |
+| `GET`  | `/api/analytics/cashflow_forecast`          | cfo, admin, ap_manager | Projected AP outflows bucketed day/week/month (committed vs pending) |
+| `GET`  | `/api/analytics/cashflow_whatif`            | cfo, admin, ap_manager | Payment-timing what-if: early vs on-time vs late, with discount capture |
+| `GET`  | `/api/analytics/cash_position`              | cfo, admin, ap_manager | Running cash position from a BYO opening balance + threshold-breach alerts |
 | `GET`  | `/api/analytics/export/{report}`            | cfo, admin, ap_manager | CSV export: invoice_register, vendor_spend, payment_register, aging_snapshot, cashflow_forecast |
 | `GET`  | `/api/analytics/scheduled-reports`          | cfo, admin | List scheduled-report definitions |
 | `POST` | `/api/analytics/scheduled-reports`          | cfo, admin | Create a recurring report (cron + recipients + format) |
