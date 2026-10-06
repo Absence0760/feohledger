@@ -926,6 +926,47 @@ row's status — not an invoice, payment, approval, or vendor — so the
 append-only-audit invariant (which is about those regulated status changes) does
 not apply.
 
+## Seed data
+
+`scripts/seed_automation.py` gives the acme demo tenant a history that every
+panel on `/adaptive` and `/experiments` can compute from. Without it, nothing in
+the main seed writes approval or auto-approval audit rows, so each panel sits
+below its minimum sample. `seed.py` runs it after the tenant loop, in full mode
+only. To top up a tenant that's already seeded, run
+`python scripts/seed_automation.py --tenant feoh_acme`. It's additive, and it's a
+no-op once its first invoice exists.
+
+It writes **history, not results**. Every panel still computes on read, from
+about 100 back-dated acme invoices. Each carries the audit trail the app writes
+for its path: uploaded, extraction completed, approved (signed with
+`FEOH_APPROVAL_SIGNING_KEY` when it is set), payment scheduled, paid, completed.
+Rejections, resubmissions and voids appear where the plan calls for them. The
+plan is shaped to clear each gate:
+
+| Panel | What the history gives it |
+|---|---|
+| Approval patterns | Marcus (fast), Alice, and Frank (slow, CFO) approve. Clara uploads and never approves. |
+| Suggestions / threshold | Cloud Services, Office Supplies and Facility Services have 12+ spotless approvals each (3 qualifying vendors). Marketing and Legal carry corrections and rejections, and don't qualify. |
+| Feedback loop | 24 auto-approvals, one of them voided. That is a measured overturn rate of about 4%, under the 5% brake, so the raise still stands. |
+| Routing down-weight | One of Frank's approvals is later voided. |
+| Experiments | *Auto-approve under $500* is concluded, with B winning on touchless rate. *CFO sign-off above $10,000* is running. *Raise auto-approve to $1,000* is a draft. |
+
+Experiment assignment uses the real `assign_variant` hash over uuid5 ids, so the
+split is identical on every run. Each invoice's history follows its variant's
+config, which is frozen onto its workflow instance. The auto-approvals above are
+exactly the concluded test's B-arm invoices under $500.
+
+**The running experiment is live.** It sits on acme's default workflow, so a new
+acme invoice is assigned to it like any other. Variant B adds a CFO gate over
+$10,000 to that invoice's snapshot. B only ever adds a control, never removes
+one. Stop or conclude the experiment on `/experiments` to end it. The e2e
+tenants never get this seed, since their specs count invoices.
+
+`backend/tests/test_seed_automation.py` runs the seed into a real tenant and
+reads every panel back through its endpoint. It also replays each invoice's
+trail through `VALID_TRANSITIONS` and checks that nobody approved an invoice
+they uploaded. A gate change that would empty a panel fails there.
+
 ## Deferred follow-ups
 
 - **Smart routing — apply path.** ✅ **Shipped** — `POST /routing-suggestion/apply`
