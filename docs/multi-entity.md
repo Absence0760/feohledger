@@ -449,6 +449,13 @@ chart. Both halves are now closed.
   for the entity the new invoice will land under (`entityStore.writeEntityId`,
   the frontend mirror of `get_write_entity_id`). A NULL-entity invoice sees the
   shared chart alone, the rule `gl_recode._ActiveChart` already applied.
+  **The recurring-template form does the same**: `RecurringTemplateResponse`
+  carries the template's `entity_id`, and `RecurringModal`'s GL field is a
+  picker over that entity's chart on edit and over `writeEntityId`'s on create,
+  falling back to free text only when the chart is empty
+  (`tests-e2e/recurring/gl-picker-entity-chart.spec.ts`). It is the one GL field
+  whose mistake is repeated on a schedule, so it is the last place a free-text
+  box should invite a code the save would refuse.
 
 See `docs/decisions.md` §194.
 
@@ -465,6 +472,18 @@ same rule now holds every manual write (`docs/decisions.md` §199):
   so the server refuses what a `<select>` would not have offered. Every path
   §194 covers refuses a retired or unknown code the same way, and the 422 names
   each code with its reason (another entity's / retired / not in the chart).
+  **The refusal is structured**, so it is stated in the reader's language
+  rather than as server English: the `detail` (and a CSV import's per-row
+  error, beside `row`) is `ChartRefusal.body` —
+  `{code: "gl_codes_outside_chart", on_lines, foreign: [...], retired: [...],
+  unknown: [...], message}` — where `message` is the English sentence every
+  client falls back to. The web localizes it once, at the transport
+  (`api.ts` → `api/glChartRefusal.ts::localizeApiDetail`), so every toast on
+  every GL write path gets it, plus `ImportCsvModal`'s row list; mobile does it
+  on the invoice edit sheet's snackbar (`lib/l10n/gl_chart_refusal_messages.dart`).
+  A server-side catcher that needs the refusal as text — the GL-coding agent's
+  escalation rationale, a bulk-status skip reason, the email-approval page —
+  reads it through `utils/http.detail_text`, never `str(exc.detail)`.
 - **An empty active chart holds nothing to.** A subsidiary whose chart is not
   built yet (no active own account, no active shared one) accepts any code
   except another entity's, as before — the pickers are free text there too.

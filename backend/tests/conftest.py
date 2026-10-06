@@ -181,6 +181,34 @@ def _autouse_fake_redis(monkeypatch):
 
 
 @pytest.fixture
+def mock_session_lock_wait(monkeypatch):
+    """Let a MOCK session through `api/payments._lock_payment_invoice`'s bound.
+
+    The money paths take the invoice lock inside `utils/db_locks.bounded_lock_wait`,
+    which opens a SAVEPOINT and sets/restores `lock_timeout` around the locking
+    SELECT. A hand-built `AsyncMock` session models neither: its
+    `begin_nested()` is not an async context manager, and the two extra
+    statements would shift every `execute` side-effect list the dispatch tests
+    script. Those tests exercise dispatch decisions, not lock waits, so this
+    swaps the bound for a pass-through — the locking SELECT itself still runs
+    against the mock. What the bound does against a real Postgres (a held lock
+    refused as `invoice_locked`, the timeout not outliving the lock) is pinned by
+    the realdb cases in `tests/test_payment_run_invoice_payability.py`.
+
+    Never use this from a `realdb` test.
+    """
+    import contextlib
+
+    from app.api import payments as payments_api
+
+    @contextlib.asynccontextmanager
+    async def _pass_through(db, timeout_ms):  # noqa: ARG001
+        yield
+
+    monkeypatch.setattr(payments_api, "bounded_lock_wait", _pass_through)
+
+
+@pytest.fixture
 def temp_payment_adapter():
     """Register throwaway payment adapters, then restore the real registry.
 

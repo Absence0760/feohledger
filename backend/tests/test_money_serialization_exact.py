@@ -45,7 +45,7 @@ import pytest
 from fastapi.encoders import jsonable_encoder
 from pydantic import BaseModel
 
-from app.schemas.money import MoneyAmount, OptionalMoneyAmount, json_money
+from app.schemas.money import MoneyAmount, OptionalMoneyAmount, json_money, json_money_string
 
 APP_DIR = pathlib.Path(__file__).resolve().parents[1] / "app"
 
@@ -346,9 +346,24 @@ def test_exception_payload_round_trips_a_cent_precise_amount():
 
     payload = _exception_dict(exc, invoice)
 
-    # Exact cents, and still a JSON *number* — the shape both clients parse.
-    assert json.dumps(jsonable_encoder(payload)["amount"]) == json.dumps(12345.67)
+    # An exact decimal STRING — no float hop on either side of the wire. Both
+    # clients accept it (and the legacy number) since the coordinated change.
+    assert jsonable_encoder(payload)["amount"] == "12345.67"
     assert payload["currency"] == "ZAR"
+
+    # Scale survives, and past double precision nothing is rounded.
+    invoice.amount = Decimal("250.00")
+    assert _exception_dict(exc, invoice)["amount"] == "250.00"
+    invoice.amount = Decimal("1234567890123456.78")
+    assert _exception_dict(exc, invoice)["amount"] == "1234567890123456.78"
 
     # No invoice joined → no amount, and no substituted default.
     assert _exception_dict(exc, None)["amount"] is None
+
+
+def test_json_money_string_is_fixed_point_and_keeps_scale():
+    """The exact-string hop: never scientific notation, never normalised."""
+    assert json_money_string(None) is None
+    assert json_money_string(Decimal("0.00")) == "0.00"
+    assert json_money_string(Decimal("1E+3")) == "1000"
+    assert json_money_string(Decimal("-12.50")) == "-12.50"

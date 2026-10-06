@@ -39,7 +39,14 @@ and an audit that re-derived both found the copy stale at nearly every sync
 transcription was retired rather than corrected again. Add a follow-up here; add
 a GitHub issue only when one warrants its own thread.
 
-**Last reconciled:** 2026-10-05 — the bug-hunt, UX, a11y and perf PRs of that
+**Last reconciled:** 2026-10-05 (evening) — a five-agent issues batch closed
+**ten** (c) entries and opened three, taking the file from 66 → 59: the legal
+table scrollers' names and the consent banner over the contents rail (decisions
+§230), step-up refusals on `/profile` plus its hand-rolled shell (§231), the
+English-only GL-chart refusal and the recurring form's free-text GL field
+(§232), the unbounded invoice-lock wait in payment dispatch (§233), the
+exception `amount` on the wire (§234), requisition material editors (§235) and
+the budget-delete race (§236). Before that, 2026-10-05 — the bug-hunt, UX, a11y and perf PRs of that
 day (#484–#509) landed together and took the file from 53 → 66: sixteen (c)
 entries opened across them and three closed (#508 the mobile multi-select entry
 #487 opened, #505 the two by-id entity-scope entries #500 opened). Merging #484
@@ -76,7 +83,7 @@ section carried its own `decisions.md` § reference, so nothing was lost by
 deleting it; that cross-reference is what makes the pruning safe, and writing
 one is what earns a future entry the right to be deleted.
 
-**66 open: 51 (c) · 9 (a) · 6 (b)** — re-derived from the file, never carried
+**59 open: 44 (c) · 9 (a) · 6 (b)** — re-derived from the file, never carried
 forward. The section heading is authoritative; where an entry also carries a
 `(c)`/`(a)`/`(b)` marker, the two agree.
 `grep -c '^- \[ \]' docs/followups.md`.
@@ -238,25 +245,6 @@ nobody re-reads outlives the thing it describes.
       the code silently — what is still missing is telling customers when they
       change.
       **Trigger:** before adding or changing any sub-processor.
-
-- [ ] **The legal pages' table scrollers are anonymous tab stops.** Every
-      `.table-scroll` wrapper under `src/routes/legal/` (19 across privacy,
-      cookies, sub-processors and the DPA) carries `tabindex="0"` so the
-      keyboard can pan a table too wide for a 320px viewport (WCAG 2.1.1) — but
-      no `role` and no name, so a screen reader announces an unnamed stop with
-      nothing to say what it holds (4.1.2). The app's own tables were fixed
-      2026-10-05: `<DataTable>` already named its container, and `/cfo`'s two
-      hand-rolled scrollers now do too, guarded by
-      `src/lib/a11y/tableScrollRegion.test.ts`, which excludes the legal tree
-      by path and says why.
-      **Durable fix:** `role="region"` plus an `aria-labelledby` pointing at the
-      heading each table sits under (most already carry an `id` for the
-      in-page anchors) or an `aria-label` where none does, then drop the
-      legal-tree exclusion from that test so it covers every page. It is held
-      here rather than done in the a11y sweep because naming a table is an edit
-      to the published legal text, which is English-only and reviewed as a
-      document (`docs/decisions.md` §174), not a UI-copy change.
-      **Trigger:** the next edit to any legal page, or a legal-text review.
 
 ### The pricing page and the billing code describe different products
 
@@ -715,15 +703,6 @@ reliable part of it.
       **Trigger:** the first request to rename or merge a GL account, or any work on
       cross-entity coding.
 
-- [ ] **(c) The exception `amount` still crosses the wire as a JSON number.** Round 26 made
-      every money serializer exact (51 sites) but deliberately preserved the wire shape.
-      Moving `amount` to an exact string is blocked on the clients:
-      `mobile/lib/models/exception.dart:131` parses `(json['amount'] as num?)?.toDouble()`
-      and would throw at runtime on a string.
-      **Durable fix:** a coordinated backend + web + mobile change, one field at a time,
-      each client tolerant of both shapes before the server switches.
-      **Trigger:** the next deliberate wire-format slice — not a drive-by.
-
 - [ ] **(c) Breakpoints are ad hoc — the deferred half of [#432](https://github.com/Absence0760/feohledger/issues/432).**
       Round 26 closed #432's two engineering parts (the `/organization` 320px failure and a
       reflow guard widened from 5 routes to 45) and deliberately did **not** make the
@@ -833,62 +812,6 @@ or is a sibling of a fix that needs its own pass.
       templates so the operator can re-code them in bulk.
       **Trigger:** the first tenant that retires an account a live template codes to,
       or the next change to recurring generation.
-
-- [ ] **(c) The recurring-template form's GL field is still free text, so §199 refuses what it let you type.**
-      Both invoice GL pickers became a `<select>` scoped to the invoice's own chart
-      (§194), and §199 made the server refuse anything they would not have offered.
-      `RecurringModal.svelte` still renders `gl_account` as a bare `<input>`: the
-      refusal arrives as a toast carrying the server's sentence (which is correct and
-      actionable), but the form let the user type a code it could have known was
-      wrong — and every invoice the template raises inherits that code, so it is the
-      one GL field where a mistake is repeated on a schedule.
-      **Durable fix:** expose `entity_id` on `RecurringTemplateResponse` (the
-      template already carries the column; the response does not), then reuse
-      `api/glAccounts.ts::listInvoiceChart` exactly as `InvoiceModal` /
-      `CreateInvoiceModal` do — the template's own entity on edit,
-      `entityStore.writeEntityId` on create — falling back to free text when the
-      chart is empty. An e2e in `tests-e2e/recurring/` pinning that the select offers
-      the tenant's chart and not another entity's.
-      **Trigger:** the next `/recurring` UI slice, or the first report of a template
-      refused on save.
-
-- [ ] **(c) The GL-chart refusal is English-only, against the repo's own rule for server-composed sentences.**
-      `frontend/CLAUDE.md` § Internationalization says a sentence the backend
-      composed is localized from a stable CODE plus typed params, with the server's
-      prose as the fallback (the worked examples are e-invoice refusals and invoice
-      warnings). §194's refusal and §199's extension are a plain string `detail`, so
-      the web toast, the CSV import's per-row error list and the mobile snackbar all
-      render English into a translated frame. The web pickers make it rare on that
-      surface; CSV import and the mobile free-text GL field are where a non-English
-      operator actually meets it.
-      **Durable fix:** give `services/gl_chart.ChartRefusal` a structured body —
-      `{code: "gl_codes_outside_chart", foreign: [...], retired: [...], unknown: [...],
-      message: "<English>"}` — raised as the 422 `detail` object (`formatApiDetail`
-      already renders an object carrying `message`, so nothing breaks while the
-      clients catch up), then a message key per reason on web and in the mobile ARBs,
-      keyed on `code` with `message` as the fallback. Check the same pass whether the
-      other hand-written 422/409 sentences on the invoice path deserve the same
-      treatment, or whether this one is genuinely the outlier.
-      **Trigger:** the first non-English tenant importing a CSV, or the next i18n pass
-      over server-composed text.
-
-- [ ] **(c) Step-up refusals on `/profile` render the server's English sentence in every locale.**
-      A refused factor-change step-up toasts `err.message`, which is the backend's `detail`
-      verbatim: `STEP_UP_FAILURE_DETAIL`, `STEP_UP_SSO_ONLY_DETAIL`, or the wrong-host
-      passkey sentence. A `de` / `ja` member reads English inside a translated page.
-      `frontend/CLAUDE.md` § Internationalization says a server-composed sentence is not
-      exempt: the backend should send a stable code and the client should key on it, with
-      the prose as fallback. §201 makes the SSO-only sentence the answer to every refused
-      step-up in such a tenant, so this is now the sentence those members see most.
-      **Durable fix:** add a machine-readable `code` to the step-up refusals
-      (`step_up_failed`, `step_up_sso_only`, `passkey_wrong_host` with the host as a param).
-      FastAPI's `detail` can carry an object, so the 400 can stay a 400. Map the codes
-      through `m()` on `/profile`, following `api/einvoiceIssues.ts`, and keep the English
-      as the fallback for a code the build predates. Pin it in `test_sso_only.py` and the
-      profile e2e.
-      **Trigger:** the next i18n slice that touches `/profile`. (The Change-password
-      entry that shared this trigger closed as decisions §209; its two new strings
-      went through `m()`, so this is now the only server English left on the page.)
 
 - [ ] **(c) Dependabot auto-merges bumps to production images that no CI job runs.**
       Since §203, a `docker-compose` PR is tested on the images it bumps *when CI starts
@@ -1037,45 +960,6 @@ or is a sibling of a fix that needs its own pass.
       **Trigger:** the next change that touches more than one panel of
       `frontend/src/routes/organization/+page.svelte`.
 
-- [ ] **(c) `/profile` hand-rolls the page shell that `PageHeader` owns.** It
-      opens with its own `<div class="workspace"><header class="toolbar">` and
-      carries its own copy of the `.workspace` CSS, which
-      `frontend/docs/ui-patterns.md` § Page layout explicitly says not to do any
-      more ("Don't hand-roll … `PageHeader` … the shell still produces this
-      layout"). It predates the component. Noticed while adding the section rail
-      and left alone on purpose: swapping it in also means deleting the
-      duplicated `.workspace` / `.toolbar` rules, and that is an unrelated
-      refactor with its own spec risk to bundle into a navigation change.
-      **Durable fix:** wrap the body in `<PageHeader title={m('shell.profileAndSecurity')}>`
-      and delete the local `.workspace` + `.toolbar` blocks, checking the specs
-      that select `.workspace` on this route first.
-      **Trigger:** the next change to `frontend/src/routes/profile/+page.svelte`'s
-      header or page frame.
-
-- [ ] **(c) The consent banner can sit over the bottom of the legal contents
-      rail, so focus lands behind it (WCAG 2.4.11).** The six legal documents
-      now carry a sticky table-of-contents rail
-      (`frontend/src/lib/legal/LegalPage.svelte`, `docs/decisions.md` §205). At
-      short viewport heights the fixed, not-yet-dismissed `ConsentBanner`
-      overlays its last entry or two, so tabbing down the contents can move
-      focus to a link the reader cannot see. The banner already covers the
-      bottom of the document *text* on every page, which is pre-existing — but a
-      **focusable** control behind it is new, because the rail is new, and 2.4.11
-      Focus Not Obscured (Minimum) is a AA criterion this project targets.
-      Deliberately flagged rather than patched: the honest fix changes
-      `ConsentBanner`'s contract, and that component is the ePrivacy Art. 5(3)
-      consent gate with its own specs, which is not something to alter inside a
-      navigation change.
-      **Durable fix:** have `ConsentBanner` publish its presence and measured
-      height while mounted (a `data-consent-visible` attribute plus a
-      `--consent-banner-height` custom property on the root), and have the rail
-      subtract it from its `max-height` only while that is set — so the space is
-      reclaimed the moment the banner is dismissed, rather than reserved
-      permanently, which is why a fixed bottom gap was rejected.
-      **Trigger:** the next change to `ConsentBanner.svelte`, or the next
-      accessibility pass over `/legal` (`/a11y-hunt`, or the manual
-      screen-reader pass `docs/accessibility.md` still has open).
-
 ### Surfaced by the invoices / exceptions UX hunt (2026-10-05)
 
 - [ ] **(c) An approved or paid invoice's source document can still be
@@ -1156,64 +1040,59 @@ or is a sibling of a fix that needs its own pass.
       **Trigger:** the next perf pass on budgets/procurement, or any report of
       `/budgets/check` latency.
 
-- [ ] **(c) A budget delete or currency change can race a requisition linking
-      to it.** `api/budgets.py` counts linked requisitions and then deletes or
-      re-denominates in the same transaction without locking the budget row. A
-      requisition created or re-linked between the count and the commit gets
-      through. For a delete, the FK still refuses at commit, but that comes back
-      as the old 500 instead of the 409. For a currency change, the result is a
-      requisition linked to a budget in another currency. The rollup excludes it
-      and discloses it through `excluded_row_count`, so nothing is summed wrong,
-      but the 422 that should have prevented it never fires.
-      **Durable fix:** take `SELECT … FOR UPDATE` on the budget row in
-      `update_budget` / `delete_budget`, and the same lock in
-      `api/requisitions._resolve_links` whenever it resolves a `budget_id`, so the
-      two sides serialise. Map a residual FK `IntegrityError` on delete to the
-      same 409.
-      **Trigger:** any change to either guard, or a seen
-      `purchase_requisitions_budget_id_fkey` violation.
-
-- [ ] **(c) Requisition approval checks only the requester, not whoever edited
-      the draft.** `PATCH /api/requisitions/{id}` lets any admin / ap_manager /
-      ap_clerk rewrite another user's `draft`: lines, amounts and vendor. That
-      includes a requisition an ap_manager has just created through
-      `POST /intake/{id}/convert-to-requisition`, whose `requester_user_id` is
-      the intake's requester, not the converter. The editor can then submit it
-      and approve it, because `approve_requisition`'s SoD shim names only
-      `requester_user_id` (`segregation_actor_ids=None`). This is the gap that
-      `recurring_invoice_templates.material_editor_ids` closed for recurring
-      invoices (`docs/decisions.md` §141, §152): one column names one person,
-      and the spend can be shaped by several.
-      **Durable fix:** a `material_editor_ids` JSONB column on
-      `purchase_requisitions` (migration, fanned out to every tenant), appended
-      by `update_requisition` when a material field changes (lines, `currency`,
-      `vendor_id`, `budget_id`). Pass it as `segregation_actor_ids` in the
-      approve shim, plus a stamping guard test in the shape of
-      `tests/test_invoice_uploader_stamping.py`. Not backfilled: no honest
-      editor history exists to recover.
-      **Trigger:** the next change to requisition approval or the intake →
-      requisition conversion. It is a migration, so land it outside a parallel
-      batch.
-
 ### Surfaced by the payment-path bug hunt (2026-10-05, decisions §214)
 
-- [ ] **(c) Payment dispatch holds row locks across the processor call with no `lock_timeout`.**
-      `_execute_single_payment` locks the payment row (as it always has) and now
-      also the invoice row (`_lock_payment_invoice`, `FOR NO KEY UPDATE`, §214
-      batch). It holds both until the per-payment commit, which comes after
-      `adapter.create_payment` returns, and the void does the same across
-      `adapter.void_payment`. Every locked invoice writer (send-to-erp, approve,
-      `PATCH`, `payment_erp_sync`, `POST /api/payments`) therefore waits out a
-      slow processor. Nothing in `app/` sets `lock_timeout` or
-      `statement_timeout`, so the wait is unbounded. A deadlock or
-      lock-timeout error raised inside the loop is also caught by
-      `_dispatch_run_payments`' broad `except` and recorded as `failed` on an
-      aborted session. That is pre-existing behaviour, but this lock adds a way
-      to reach it. **Durable fix:** set a `SET LOCAL lock_timeout` on the
-      dispatch and void transactions, and treat a `LockNotAvailable` before the
-      adapter call as a named, retry-safe refusal (`invoice_locked`) rather than
-      `unexpected_error`. **Trigger:** the first report of a request stalled
-      behind a payment run, or the next change to `_dispatch_run_payments`.
+- [ ] **(c) A resumed dispatch refused before the adapter call is classed retry-safe even if an earlier pass reached the processor.**
+      `_dispatch_run_payments` also serves `/resume`, where a `pending` row can be one
+      whose earlier pass called `adapter.create_payment` and then crashed before the
+      commit. If the resume refuses it for a pre-adapter reason — `invoice_locked`
+      (decisions §233), `invoice_not_payable`, `invoice_blocked:` — the row becomes
+      `failed` with a RETRY_SAFE reason, and `/retry-failed` mints a fresh
+      `correlation_id`, i.e. a second order under a new idempotency key. Pre-existing
+      for the older reasons; `invoice_locked` makes it likelier because it is
+      transient by design.
+      **Durable fix:** stamp a dispatch-attempt marker on the payment row (committed)
+      before the adapter call, and have `payment_runs.classify_payment_failure`
+      return IN_DOUBT for any marked row regardless of reason, so the reconciler — not
+      a retry — resolves it.
+      **Trigger:** the next change to `/resume`, `/retry-failed` or
+      `classify_payment_failure`, or the first resumed run seen after a mid-dispatch
+      crash.
+
+- [ ] **(c) A database error after the processor call leaves the dispatch session aborted.**
+      A deadlock or other database error raised *after* `adapter.create_payment`
+      returns (for example inside `transition_invoice`) is caught by the broad
+      `except` in `_dispatch_run_payments`. The session is already aborted, so the
+      audit write and the commit fail with it, the request returns 500, and the run
+      stays `executing` with the processor's payment id held only in memory. The
+      invoice-lock wait can no longer reach this (it is bounded and refused before
+      the adapter call, decisions §233), but every later write in the loop still can.
+      **Durable fix:** in that `except`, test whether the session is still usable;
+      if not, keep the provider id and reference, roll back, re-lock the payment and,
+      if it is still `pending`, record it `failed` with the provider id kept, so the
+      reconciler classes it as in doubt rather than never-sent.
+      **Trigger:** the next change to `_dispatch_run_payments`, or the first run seen
+      stuck `executing` after a database error.
+
+### Surfaced by the 2026-10-05 issues batch (decisions §230–§236)
+
+- [ ] **(c) Invoice-path refusals the client depends on are still matched by their English text.**
+      The GL-chart refusal (§232) and the step-up / portal step-up refusals (§231)
+      now carry a stable `code`; the rest of the server-composed sentences on the
+      invoice and approval path do not. Two matter: `InvoiceModal.svelte` detects
+      the stale-edit 409 with `err.message.includes('modified since you loaded it')`,
+      so rewording the server sentence silently breaks the reload prompt; and the
+      approval-threshold, CFO-gate and segregation refusals (`services/review.py`,
+      `services/approval_chain.py`) render English, with amounts, in every locale.
+      The supplier portal's `POST /portal/auth/mfa/disable` "Invalid code" 401 is
+      the same shape on a smaller surface.
+      **Durable fix:** a `code` plus typed params on each (amounts as exact strings
+      with their currency), built through `api/refusals.coded_refusal`, localized in
+      `api.ts::apiErrorFromBody` via `localizeApiDetail` (web) and the mobile
+      `ApiException.detail` path, with the English `message` as fallback. The
+      stale-edit 409 first, because a client branches on it.
+      **Trigger:** the next change to any of those messages, or the next i18n pass
+      over server-composed text.
 
 ### Surfaced by the auth bug hunt, round 3 (2026-10-05)
 

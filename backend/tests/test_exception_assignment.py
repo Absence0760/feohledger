@@ -316,7 +316,9 @@ def test_get_exception_returns_full_dict_for_found_row():
     )
     # `currency` too: a real `Invoice` always carries one, and it is what the
     # queue formats the amount against.
-    inv = SimpleNamespace(invoice_number="INV-100", vendor_name="Acme", amount=250, currency="USD")
+    inv = SimpleNamespace(
+        invoice_number="INV-100", vendor_name="Acme", amount=Decimal("250.00"), currency="USD"
+    )
 
     db = AsyncMock()
     db.execute = AsyncMock(return_value=MagicMock(first=MagicMock(return_value=(exc, inv))))
@@ -327,7 +329,7 @@ def test_get_exception_returns_full_dict_for_found_row():
     assert body["id"] == str(exc.id)
     assert body["invoice_number"] == "INV-100"
     assert body["vendor_name"] == "Acme"
-    assert body["amount"] == 250.0
+    assert body["amount"] == "250.00"
     assert body["exception_type"] == "po_mismatch"
     assert body["assigned_to"] == "Demo Manager"
 
@@ -391,7 +393,7 @@ def test_exception_dict_names_the_invoice_currency_beside_the_amount():
     )
     body = _exception_dict(_exc_row(), inv)
 
-    assert body["amount"] == 250.0
+    assert body["amount"] == "250.00"
     assert body["currency"] == "EUR"
 
 

@@ -49,7 +49,7 @@ class ExceptionListTile extends StatelessWidget {
   /// The related invoice's amount, in the related invoice's currency —
   /// `/api/exceptions` joins the code through for this row.
   String get _amount =>
-      formatMoney(exception.amount, currency: exception.currency);
+      formatMoneyString(exception.amount, currency: exception.currency);
 
   @override
   Widget build(BuildContext context) {

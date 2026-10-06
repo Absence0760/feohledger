@@ -247,6 +247,20 @@ export const en = {
 	'profile.passkeys.removed': 'Passkey removed',
 	'profile.passkeys.removeFailed': 'Failed to remove passkey',
 
+	// Coded auth refusals — a refused factor-change step-up, or a passkey
+	// ceremony with no usable credential. Keyed by the backend's `code`
+	// (api/authRefusals.ts); the server's English is the fallback.
+	'authRefusal.stepUpFailed':
+		'Confirm your password, a current authenticator code, or a registered passkey to change your two-factor settings.',
+	'authRefusal.stepUpSsoOnly':
+		'Your organization signs in with single sign-on, so only a current authenticator code or a registered passkey can confirm this change.',
+	'authRefusal.passkeyWrongHost':
+		'Your passkey is registered for {hosts}, not {host}. Sign in there, or register a passkey on {host}.',
+	'authRefusal.passkeyNotRegistered':
+		'No passkey registered',
+	'authRefusal.portalStepUpFailed':
+		'Confirm your password or a current authenticator code to change your two-factor settings.',
+
 	// Profile → Signed-in devices card
 	'profile.sessions.heading': 'Signed-in devices',
 	'profile.sessions.hint':
@@ -4852,6 +4866,19 @@ export const en = {
 	'csvImport.invoices.hint.status': 'status: only new, done, paid, or rejected are importable — an in-flight pipeline status is rejected per row. Use done/paid for historical invoices, new for open AP.',
 	'csvImport.invoices.hint.vendor': 'vendor_code is tried first, then falls back to a case-insensitive vendor_name match.',
 	'csvImport.result.rowError': 'Row {row}: {message}',
+	// The GL-chart refusal (`api/glChartRefusal.ts`), stated from its code and
+	// params. `{codes}` is the quoted, comma-joined code list; `{n}` its length.
+	'glChartRefusal.foreign':
+		"{n, plural, one {GL account} other {GL accounts}} {codes} {n, plural, one {belongs to} other {belong to}} another entity's chart of accounts, not this invoice's.",
+	'glChartRefusal.retired':
+		"{n, plural, one {GL account} other {GL accounts}} {codes} {n, plural, one {is retired} other {are retired}} in this invoice's chart.",
+	'glChartRefusal.unknown':
+		"{n, plural, one {GL account} other {GL accounts}} {codes} {n, plural, one {is not} other {are not}} in this invoice's chart of accounts.",
+	'glChartRefusal.pick':
+		"Choose a code from the invoice's own chart — the shared accounts plus its entity's own.",
+	'glChartRefusal.pickActive':
+		"Choose an active code from the invoice's own chart — the shared accounts plus its entity's own.",
+	'glChartRefusal.onLines': 'Line items: {reasons}',
 	'csvImport.result.summary': '{imported} imported, {skipped} skipped',
 	'csvImport.toast.failed': 'Import failed',
 	'csvImport.toast.partial': 'Imported {imported}, skipped {skipped} — see the details below',

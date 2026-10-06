@@ -95,7 +95,7 @@ ApException _exception() => ApException(
       invoiceId: 'inv1',
       invoiceNumber: 'INV-001',
       vendorName: 'Acme Supplies',
-      amount: 1500,
+      amount: '1500.00',
       exceptionType: 'duplicate',
       typeLabel: 'Duplicate Invoice',
       severity: ApExceptionSeverity.error,

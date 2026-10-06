@@ -212,6 +212,17 @@ export const messages = {
 	'profile.passkeys.removed': 'Passkey entfernt',
 	'profile.passkeys.removeFailed': 'Passkey konnte nicht entfernt werden',
 
+	'authRefusal.stepUpFailed':
+		'Bestätigen Sie Ihr Passwort, einen aktuellen Code aus der Authenticator-App oder einen registrierten Passkey, um Ihre Zwei-Faktor-Einstellungen zu ändern.',
+	'authRefusal.stepUpSsoOnly':
+		'Ihre Organisation meldet sich per Single Sign-on an, daher kann nur ein aktueller Code aus der Authenticator-App oder ein registrierter Passkey diese Änderung bestätigen.',
+	'authRefusal.passkeyWrongHost':
+		'Ihr Passkey ist für {hosts} registriert, nicht für {host}. Melden Sie sich dort an oder registrieren Sie einen Passkey für {host}.',
+	'authRefusal.passkeyNotRegistered':
+		'Kein Passkey registriert',
+	'authRefusal.portalStepUpFailed':
+		'Bestätigen Sie Ihr Passwort oder einen aktuellen Code aus der Authenticator-App, um Ihre Zwei-Faktor-Einstellungen zu ändern.',
+
 	'profile.sessions.heading': 'Angemeldete Geräte',
 	'profile.sessions.hint':
 		'Alle Browser und Apps, die derzeit bei Ihrem Konto angemeldet sind. Wenn Sie eines nicht erkennen — oder sich auf einem Gerät angemeldet haben, das Sie nicht mehr besitzen — melden Sie es hier ab. Es verliert sofort seine Gültigkeit.',
@@ -4628,6 +4639,17 @@ export const messages = {
 	'csvImport.invoices.hint.status': 'status: Nur new, done, paid oder rejected können importiert werden — ein laufender Pipeline-Status wird pro Zeile abgelehnt. Verwenden Sie done/paid für historische Rechnungen, new für offene Verbindlichkeiten.',
 	'csvImport.invoices.hint.vendor': 'Zuerst wird vendor_code versucht, danach wird auf eine Groß-/Kleinschreibung ignorierende Übereinstimmung mit vendor_name zurückgegriffen.',
 	'csvImport.result.rowError': 'Zeile {row}: {message}',
+	'glChartRefusal.foreign':
+		'{n, plural, one {Das Sachkonto} other {Die Sachkonten}} {codes} {n, plural, one {gehört zum} other {gehören zum}} Kontenplan einer anderen Einheit, nicht zu dem dieser Rechnung.',
+	'glChartRefusal.retired':
+		'{n, plural, one {Das Sachkonto} other {Die Sachkonten}} {codes} {n, plural, one {ist im} other {sind im}} Kontenplan dieser Rechnung stillgelegt.',
+	'glChartRefusal.unknown':
+		'{n, plural, one {Das Sachkonto} other {Die Sachkonten}} {codes} {n, plural, one {ist nicht} other {sind nicht}} im Kontenplan dieser Rechnung enthalten.',
+	'glChartRefusal.pick':
+		'Wählen Sie ein Konto aus dem eigenen Kontenplan der Rechnung – den gemeinsamen Konten plus denen ihrer Einheit.',
+	'glChartRefusal.pickActive':
+		'Wählen Sie ein aktives Konto aus dem eigenen Kontenplan der Rechnung – den gemeinsamen Konten plus denen ihrer Einheit.',
+	'glChartRefusal.onLines': 'Positionen: {reasons}',
 	'csvImport.result.summary': '{imported} importiert, {skipped} übersprungen',
 	'csvImport.toast.failed': 'Import fehlgeschlagen',
 	'csvImport.toast.partial': '{imported} importiert, {skipped} übersprungen — Details siehe unten',

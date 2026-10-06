@@ -164,6 +164,24 @@ async def test_a_non_string_detail_still_yields_a_usable_rationale():
 
 
 @pytest.mark.asyncio
+async def test_a_gl_chart_refusal_escalates_with_its_sentence():
+    """The GL-chart refusal is a STRUCTURED detail (a code plus params, for the
+    clients to localize). The GL-coding agent approves through the same door,
+    so its escalation must still carry the refusal's own sentence — which
+    code, and why — not the generic one."""
+    from app.services.gl_chart import ChartRefusal
+
+    refusal = ChartRefusal(retired=("6800",))
+    exc, _db, result = await _run(
+        _resolver_raising(HTTPException(status_code=422, detail=refusal.body()))
+    )
+    assert exc.status == "escalated"
+    assert result.decision.rationale == (
+        f"Could not auto-approve: {refusal.detail()} Escalated to a human."
+    )
+
+
+@pytest.mark.asyncio
 async def test_a_server_error_is_not_swallowed_as_an_escalation():
     """A 5xx is a fault, not a refusal — it must not be recorded as a decision."""
     exc = _exception()

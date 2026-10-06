@@ -221,6 +221,14 @@ class Settings(BaseSettings):
     payment_reconcile_interval_seconds: int = 300
     payment_reconcile_after_minutes: int = 10
     payment_reconcile_max_age_hours: int = 72
+    # How long a payment dispatch, void or settlement acceptance waits for the
+    # INVOICE row lock before refusing as `invoice_locked` (retry-safe — taken
+    # before any processor call). Every other invoice writer holds that lock for
+    # milliseconds; a longer wait means another money path holds it across a
+    # processor call, and queueing behind it is the unbounded stall this caps.
+    # `0` = wait indefinitely (Postgres's own meaning). See
+    # backend/docs/payments.md § Bounded wait for the invoice lock.
+    payment_invoice_lock_timeout_ms: int = 5000
     # Run Tesseract OSD on rendered PDF pages before sending to vision adapters,
     # rotating 90/180/270-off-upright scans back to upright. Safe to leave on —
     # a missing ``pytesseract`` / ``tesseract`` binary degrades to a silent no-op.

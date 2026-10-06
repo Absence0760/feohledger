@@ -573,6 +573,70 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
+  String glChartRefusalForeign(int count, String codes) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'GL accounts',
+      one: 'GL account',
+    );
+    String _temp1 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'belong to',
+      one: 'belongs to',
+    );
+    return '$_temp0 $codes $_temp1 another entity\'s chart of accounts, not this invoice\'s.';
+  }
+
+  @override
+  String glChartRefusalRetired(int count, String codes) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'GL accounts',
+      one: 'GL account',
+    );
+    String _temp1 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'are retired',
+      one: 'is retired',
+    );
+    return '$_temp0 $codes $_temp1 in this invoice\'s chart.';
+  }
+
+  @override
+  String glChartRefusalUnknown(int count, String codes) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'GL accounts',
+      one: 'GL account',
+    );
+    String _temp1 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'are not',
+      one: 'is not',
+    );
+    return '$_temp0 $codes $_temp1 in this invoice\'s chart of accounts.';
+  }
+
+  @override
+  String get glChartRefusalPick =>
+      'Choose a code from the invoice\'s own chart — the shared accounts plus its entity\'s own.';
+
+  @override
+  String get glChartRefusalPickActive =>
+      'Choose an active code from the invoice\'s own chart — the shared accounts plus its entity\'s own.';
+
+  @override
+  String glChartRefusalOnLines(String reasons) {
+    return 'Line items: $reasons';
+  }
+
+  @override
   String get invoiceDetailApproved => 'Invoice approved';
 
   @override

@@ -209,6 +209,17 @@ export const messages = {
 	'profile.passkeys.removed': 'パスキーを削除しました',
 	'profile.passkeys.removeFailed': 'パスキーを削除できませんでした',
 
+	'authRefusal.stepUpFailed':
+		'二要素認証の設定を変更するには、パスワード、認証アプリの現在のコード、または登録済みのパスキーで確認してください。',
+	'authRefusal.stepUpSsoOnly':
+		'組織はシングルサインオン（SSO）でサインインするため、この変更を確認できるのは認証アプリの現在のコードまたは登録済みのパスキーのみです。',
+	'authRefusal.passkeyWrongHost':
+		'パスキーは {host} ではなく {hosts} に登録されています。そちらでサインインするか、{host} でパスキーを登録してください。',
+	'authRefusal.passkeyNotRegistered':
+		'パスキーが登録されていません',
+	'authRefusal.portalStepUpFailed':
+		'二要素認証の設定を変更するには、パスワードまたは認証アプリの現在のコードで確認してください。',
+
 	'profile.sessions.heading': 'サインイン中の端末',
 	'profile.sessions.hint':
 		'現在このアカウントにサインインしているブラウザーとアプリの一覧です。見覚えのないものがある場合、または手元にない端末でサインインした場合は、ここからサインアウトしてください。ただちに無効になります。',
@@ -4593,6 +4604,17 @@ export const messages = {
 	'csvImport.invoices.hint.status': 'status: new、done、paid、rejected のみインポート可能です。進行中のパイプラインステータスは行ごとに拒否されます。過去の請求書には done/paid を、未払いのAPには new を使用してください。',
 	'csvImport.invoices.hint.vendor': 'まず vendor_code が試され、次に大文字小文字を区別しない vendor_name の一致にフォールバックします。',
 	'csvImport.result.rowError': '行{row}: {message}',
+	'glChartRefusal.foreign':
+		'勘定科目 {codes} はこの請求書ではなく、別の事業体の勘定科目表に属しています。',
+	'glChartRefusal.retired':
+		'勘定科目 {codes} はこの請求書の勘定科目表で廃止されています。',
+	'glChartRefusal.unknown':
+		'勘定科目 {codes} はこの請求書の勘定科目表にありません。',
+	'glChartRefusal.pick':
+		'請求書自身の勘定科目表(共通の勘定科目と、その事業体独自の勘定科目)からコードを選択してください。',
+	'glChartRefusal.pickActive':
+		'請求書自身の勘定科目表(共通の勘定科目と、その事業体独自の勘定科目)から有効なコードを選択してください。',
+	'glChartRefusal.onLines': '明細行: {reasons}',
 	'csvImport.result.summary': '{imported}件をインポート、{skipped}件をスキップ',
 	'csvImport.toast.failed': 'インポートに失敗しました',
 	'csvImport.toast.partial': '{imported}件をインポート、{skipped}件をスキップしました。詳細は下記をご覧ください',

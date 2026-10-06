@@ -87,7 +87,11 @@ secret generation, provisioning URI, QR, and `verify_totp` (±1 step skew).
   surface via the shared `services/mfa.step_up_verified`. Without it a stolen
   vendor session could silently strip or swap the supplier's second factor. A
   **first** enrollment needs no step-up, so onboarding stays frictionless.
-  Missing / wrong credential ⇒ 400 with a generic, account-agnostic message.
+  Missing / wrong credential ⇒ 400 with a generic, account-agnostic message,
+  sent coded (`detail = {code: "portal_step_up_failed", message, params}`, via
+  `api/refusals.coded_refusal`) so the portal company page states it in the
+  supplier's language through `frontend/src/lib/api/authRefusals.ts`. One code
+  for a missing, wrong-password and wrong-code proof alike.
   The check is throttled 5/min keyed on the vendor USER (not the client IP —
   an attacker holding a stolen portal token can rotate IPs freely) and a
   failure writes a PII-free `portal.mfa.step_up.failure` audit row carrying

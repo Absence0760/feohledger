@@ -418,3 +418,269 @@ async def test_settlement_accept_holds_the_invoice_lock_until_the_transition(rea
             await s.execute(select(Invoice).where(Invoice.id == uuid.UUID(invoice_id)))
         ).scalar_one()
     assert invoice.status == InvoiceStatus.paid
+
+
+# ---------------------------------------------------------------------------
+# realdb — the wait for the invoice lock is BOUNDED, and refuses by name
+# ---------------------------------------------------------------------------
+#
+# Each case holds the invoice row lock from a second connection — what a
+# concurrent `send-to-erp` / `PATCH` / another money path's processor call does
+# — for longer than the (shortened) bound, and proves the money path refuses as
+# `invoice_locked` BEFORE the processor is called: no order exists, nothing is
+# recorded as `unexpected_error`, and the session that refused is still usable.
+
+
+class _HeldInvoiceLock:
+    """Hold `FOR UPDATE` on one invoice from its own transaction until exit."""
+
+    def __init__(self, mk, invoice_id: str):
+        self._mk = mk
+        self._invoice_id = uuid.UUID(invoice_id)
+
+    async def __aenter__(self):
+        self._session = self._mk()
+        await self._session.execute(
+            text("SELECT id FROM invoices WHERE id = :id FOR UPDATE"), {"id": self._invoice_id}
+        )
+        return self
+
+    async def __aexit__(self, *exc):
+        await self._session.rollback()
+        await self._session.close()
+
+
+def _short_lock_bound(monkeypatch, ms: int = 200) -> None:
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "payment_invoice_lock_timeout_ms", ms)
+
+
+def _count_adapter_calls(monkeypatch, name: str) -> list:
+    from app.services.payment_adapters.mock_adapter import MockPaymentAdapter
+
+    calls: list = []
+    original = getattr(MockPaymentAdapter, name)
+
+    async def counting(self, *args, **kwargs):
+        calls.append(args)
+        return await original(self, *args, **kwargs)
+
+    monkeypatch.setattr(MockPaymentAdapter, name, counting)
+    return calls
+
+
+def test_invoice_locked_is_retry_safe_only_without_a_provider_handle():
+    assert (
+        classify_payment_failure(failure_reason="invoice_locked", provider_payment_id=None)
+        == RETRY_SAFE
+    )
+    assert (
+        classify_payment_failure(failure_reason="invoice_locked", provider_payment_id="pp_1")
+        == IN_DOUBT
+    )
+
+
+async def test_dispatch_refuses_a_locked_invoice_by_name_before_the_processor(realdb, monkeypatch):
+    _short_lock_bound(monkeypatch)
+    calls = _count_adapter_calls(monkeypatch, "create_payment")
+    mk = realdb.sessionmaker("a")
+    invoice_id, run_id = await _book_run(realdb, mk, number="LOCKWAIT-RUN", amount="210.00")
+
+    async with _HeldInvoiceLock(mk, invoice_id):
+        async with realdb.client(key="a", role="ap_manager") as c:
+            resp = await c.post(f"/api/payments/runs/{run_id}/execute")
+    # The run completed its loop and rolled up — the refusal did not abort the
+    # session (an aborted one would fail the audit write and commit after it).
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["payments_failed"] == 1, resp.text
+    assert calls == [], "the processor must never be called for a locked invoice"
+
+    async with mk() as s:
+        payment = (
+            await s.execute(select(Payment).where(Payment.invoice_id == uuid.UUID(invoice_id)))
+        ).scalar_one()
+        invoice = (
+            await s.execute(select(Invoice).where(Invoice.id == uuid.UUID(invoice_id)))
+        ).scalar_one()
+        audit_actions = (
+            (
+                await s.execute(
+                    text("SELECT action FROM audit_log WHERE entity_id = :id"), {"id": payment.id}
+                )
+            )
+            .scalars()
+            .all()
+        )
+    assert payment.status == "failed"
+    assert payment.failure_reason == "invoice_locked"
+    assert payment.provider_payment_id is None
+    assert invoice.status == InvoiceStatus.approved
+    assert "payment.failed" in audit_actions
+
+    # Retry-safe in practice, not just by classification: once the holder is
+    # gone, `/retry-failed` re-sends it and it settles.
+    async with realdb.client(key="a", role="ap_manager") as c:
+        retry = await c.post(f"/api/payments/runs/{run_id}/retry-failed")
+    assert retry.status_code == 200, retry.text
+    assert len(calls) == 1
+    async with mk() as s:
+        statuses = (
+            (
+                await s.execute(
+                    select(Payment.status).where(Payment.invoice_id == uuid.UUID(invoice_id))
+                )
+            )
+            .scalars()
+            .all()
+        )
+    assert "completed" in statuses, statuses
+
+
+async def test_the_lock_bound_does_not_outlive_the_invoice_lock(realdb, monkeypatch):
+    """The bound is scoped to the one locking statement. Everything after the
+    processor call — the `→ payment_scheduled` transition, its audit row — must
+    run under the session's own `lock_timeout`: a timeout there would abort a
+    transaction holding an order the processor already accepted."""
+    from app.api import payments as payments_api
+
+    _short_lock_bound(monkeypatch, 1234)
+    mk = realdb.sessionmaker("a")
+    invoice_id, run_id = await _book_run(realdb, mk, number="LOCKWAIT-SCOPE", amount="33.00")
+
+    async with mk() as s:
+        session_default = (await s.execute(text("SHOW lock_timeout"))).scalar_one()
+    assert session_default != "1234ms"
+
+    seen: list[str] = []
+    original = payments_api.transition_invoice
+
+    async def transition_and_report(db, inv, target, **kwargs):
+        seen.append((await db.execute(text("SHOW lock_timeout"))).scalar_one())
+        return await original(db, inv, target, **kwargs)
+
+    monkeypatch.setattr(payments_api, "transition_invoice", transition_and_report)
+
+    async with realdb.client(key="a", role="ap_manager") as c:
+        resp = await c.post(f"/api/payments/runs/{run_id}/execute")
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["payments_completed"] == 1, resp.text
+    assert seen == [session_default]
+
+
+async def test_void_refuses_a_locked_invoice_with_409_before_the_processor(realdb, monkeypatch):
+    mk = realdb.sessionmaker("a")
+    invoice_id, run_id = await _book_run(realdb, mk, number="LOCKWAIT-VOID", amount="44.00")
+    async with realdb.client(key="a", role="ap_manager") as c:
+        exec_resp = await c.post(f"/api/payments/runs/{run_id}/execute")
+        assert exec_resp.status_code == 200, exec_resp.text
+    async with mk() as s:
+        payment = (
+            await s.execute(select(Payment).where(Payment.invoice_id == uuid.UUID(invoice_id)))
+        ).scalar_one()
+    assert payment.status == "completed" and payment.provider_payment_id
+
+    _short_lock_bound(monkeypatch)
+    calls = _count_adapter_calls(monkeypatch, "void_payment")
+    async with _HeldInvoiceLock(mk, invoice_id):
+        async with realdb.client(key="a", role="admin") as c:
+            resp = await c.post(f"/api/payments/{payment.id}/void", json={"reason": "dup"})
+    assert resp.status_code == 409, resp.text
+    assert resp.json()["detail"].startswith("invoice_locked")
+    assert calls == []
+
+    async with mk() as s:
+        after = (await s.execute(select(Payment).where(Payment.id == payment.id))).scalar_one()
+    assert after.status == "completed"
+    assert after.completed_at == payment.completed_at
+
+
+async def test_compliance_release_refuses_a_locked_invoice_with_409(realdb, monkeypatch):
+    mk = realdb.sessionmaker("a")
+    invoice_id, _ = await _book_run(realdb, mk, number="LOCKWAIT-RELEASE", amount="55.00")
+    async with mk() as s:
+        payment = (
+            await s.execute(select(Payment).where(Payment.invoice_id == uuid.UUID(invoice_id)))
+        ).scalar_one()
+        payment.status = "pending_compliance"
+        payment.failure_reason = "compliance_hold: review"
+        await s.commit()
+        payment_id = payment.id
+
+    _short_lock_bound(monkeypatch)
+    calls = _count_adapter_calls(monkeypatch, "create_payment")
+    async with _HeldInvoiceLock(mk, invoice_id):
+        async with realdb.client(key="a", role="ap_manager") as c:
+            resp = await c.post(f"/api/payments/{payment_id}/compliance/release")
+    assert resp.status_code == 409, resp.text
+    assert resp.json()["detail"].startswith("invoice_locked")
+    assert calls == []
+
+    async with mk() as s:
+        after = (await s.execute(select(Payment).where(Payment.id == payment_id))).scalar_one()
+    # Left exactly where it was — not `failed`, so the operator just releases again.
+    assert after.status == "pending_compliance"
+    assert after.failure_reason == "compliance_hold: review"
+
+
+async def test_settlement_accept_refuses_a_locked_invoice_with_409(realdb, monkeypatch):
+    """`/settlement/accept` walks a held `payment_scheduled` invoice to `paid`.
+    Past the bound it must refuse by name and change nothing: no `→ paid`, the
+    payment untouched, no `payment.settlement_accepted` row."""
+    mk = realdb.sessionmaker("a")
+    invoice_id, run_id = await _book_run(realdb, mk, number="LOCKWAIT-ACCEPT", amount="90.00")
+    async with realdb.client(key="a", role="ap_manager") as c:
+        exec_resp = await c.post(f"/api/payments/runs/{run_id}/execute")
+        assert exec_resp.status_code == 200, exec_resp.text
+
+    # A short settlement the ERP sync holds at `payment_scheduled`.
+    async with mk() as s:
+        payment = (
+            await s.execute(select(Payment).where(Payment.invoice_id == uuid.UUID(invoice_id)))
+        ).scalar_one()
+        payment.settled_amount = Decimal("45.00")
+        payment.settled_currency = "USD"
+        invoice = (
+            await s.execute(select(Invoice).where(Invoice.id == uuid.UUID(invoice_id)))
+        ).scalar_one()
+        invoice.status = InvoiceStatus.payment_scheduled
+        await s.commit()
+        payment_id = payment.id
+        completed_at_before = payment.completed_at
+
+    _short_lock_bound(monkeypatch)
+    async with _HeldInvoiceLock(mk, invoice_id):
+        async with realdb.client(key="a", role="ap_manager") as c:
+            resp = await c.post(
+                f"/api/payments/{payment_id}/settlement/accept", json={"reason": "agreed short"}
+            )
+    assert resp.status_code == 409, resp.text
+    assert resp.json()["detail"].startswith("invoice_locked")
+
+    async with mk() as s:
+        after = (await s.execute(select(Payment).where(Payment.id == payment_id))).scalar_one()
+        invoice = (
+            await s.execute(select(Invoice).where(Invoice.id == uuid.UUID(invoice_id)))
+        ).scalar_one()
+        actions = (
+            (
+                await s.execute(
+                    text("SELECT action FROM audit_log WHERE entity_id = :id"), {"id": payment_id}
+                )
+            )
+            .scalars()
+            .all()
+        )
+    assert invoice.status == InvoiceStatus.payment_scheduled
+    assert after.status == "completed"
+    assert after.settled_amount == Decimal("45.00")
+    assert after.completed_at == completed_at_before
+    assert "payment.settlement_accepted" not in actions
+
+    # Once the holder is gone the same request goes through — the refusal was
+    # the lock, not the payment.
+    async with realdb.client(key="a", role="ap_manager") as c:
+        ok = await c.post(
+            f"/api/payments/{payment_id}/settlement/accept", json={"reason": "agreed short"}
+        )
+    assert ok.status_code == 200, ok.text

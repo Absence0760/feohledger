@@ -98,6 +98,13 @@ account, its code must be one of them, exactly as a hand-keyed invoice's must
 (`docs/decisions.md` §199). Re-code open AP to a current account before
 importing it, or leave the column blank and code it in the app.
 
+A row refused for its GL code carries the refusal **structured**, beside its
+`row` and English `message`: `{row, message, code: "gl_codes_outside_chart",
+on_lines, foreign: [...], retired: [...], unknown: [...]}` — the same body the
+invoice write paths send as their 422 `detail` (`gl_chart.ChartRefusal.body`).
+The web import modal states it in the reader's language from `code` and falls
+back to `message`; every other row error is still just `{row, message}`.
+
 ## The importer is recorded as the uploader
 
 Every invoice the importer creates carries `Invoice.uploaded_by_id` — the AP

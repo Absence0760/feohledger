@@ -428,7 +428,12 @@
 	   WCAG 2.1.1 Keyboard — axe reports it as `scrollable-region-focusable`.
 	   It surfaced in CI rather than locally because the rule only fires once the
 	   table actually overflows its container, which depends on how wide the
-	   font renders. Making the region a tab stop lets arrow keys scroll it. */
+	   font renders. Making the region a tab stop lets arrow keys scroll it.
+
+	   A tab stop then has to say what it is (WCAG 4.1.2), so each wrapper is
+	   also `role="region"` with `aria-labelledby` pointing at the heading the
+	   table sits under — `lib/a11y/tableScrollRegion.test.ts` fails on one that
+	   is unnamed or names an id that is not in the file. */
 	.legal-page :global(.table-scroll) {
 		overflow-x: auto;
 		margin: 0 0 16px;
@@ -617,6 +622,23 @@
 			max-height: calc(100vh - 6rem);
 			overflow-y: auto;
 			overscroll-behavior: contain;
+		}
+
+		/* While the consent banner is up it is fixed over the bottom of the
+		   viewport, and a pinned rail cannot scroll clear of it the way the
+		   document can — so its last entries sat behind the banner and Tab
+		   could move focus to a link the reader could not see (WCAG 2.4.11).
+		   `ConsentBanner` publishes the band it occupies as
+		   `--consent-banner-height` and flags itself with
+		   `data-consent-visible` only while mounted, so the list gives that
+		   band back the moment the banner is dismissed. A permanent bottom
+		   gap was rejected: it would cost every reader who already chose.
+		   No `var()` fallback: the banner sets and removes the attribute and
+		   the property in the same synchronous effect, so this rule never
+		   matches without the property — and a fallback for a token assigned
+		   only from script reads as a dead token to `tokenPairing.test.ts`. */
+		:global(html[data-consent-visible]) .contents-list {
+			max-height: calc(100vh - 6rem - var(--consent-banner-height));
 		}
 	}
 </style>

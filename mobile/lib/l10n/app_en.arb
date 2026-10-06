@@ -263,6 +263,36 @@
       "error": { "type": "String" }
     }
   },
+  "glChartRefusalForeign": "{count, plural, one {GL account} other {GL accounts}} {codes} {count, plural, one {belongs to} other {belong to}} another entity's chart of accounts, not this invoice's.",
+  "@glChartRefusalForeign": {
+    "description": "GL-chart refusal (lib/l10n/gl_chart_refusal_messages.dart): codes that belong to another entity's chart. {codes} is the quoted, comma-joined code list; {count} its length.",
+    "placeholders": {
+      "count": { "type": "int" },
+      "codes": { "type": "String" }
+    }
+  },
+  "glChartRefusalRetired": "{count, plural, one {GL account} other {GL accounts}} {codes} {count, plural, one {is retired} other {are retired}} in this invoice's chart.",
+  "@glChartRefusalRetired": {
+    "placeholders": {
+      "count": { "type": "int" },
+      "codes": { "type": "String" }
+    }
+  },
+  "glChartRefusalUnknown": "{count, plural, one {GL account} other {GL accounts}} {codes} {count, plural, one {is not} other {are not}} in this invoice's chart of accounts.",
+  "@glChartRefusalUnknown": {
+    "placeholders": {
+      "count": { "type": "int" },
+      "codes": { "type": "String" }
+    }
+  },
+  "glChartRefusalPick": "Choose a code from the invoice's own chart — the shared accounts plus its entity's own.",
+  "glChartRefusalPickActive": "Choose an active code from the invoice's own chart — the shared accounts plus its entity's own.",
+  "glChartRefusalOnLines": "Line items: {reasons}",
+  "@glChartRefusalOnLines": {
+    "placeholders": {
+      "reasons": { "type": "String" }
+    }
+  },
   "invoiceDetailApproved": "Invoice approved",
   "invoiceDetailApproveFailed": "Could not approve invoice — please try again",
   "invoiceDetailRejected": "Invoice rejected",

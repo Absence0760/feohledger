@@ -182,6 +182,13 @@ def _codes_clause(codes: tuple[str, ...], singular: str, plural: str) -> str:
     return f"{noun} {listed} {singular if len(codes) == 1 else plural}"
 
 
+#: The stable code a GL-chart refusal carries, so a client states it in the
+#: reader's language (web ``frontend/src/lib/api/glChartRefusal.ts``, mobile
+#: ``lib/l10n/gl_chart_refusal_messages.dart``) and falls back to ``message`` —
+#: the English sentence — only for a code its build predates.
+GL_CODES_OUTSIDE_CHART = "gl_codes_outside_chart"
+
+
 @dataclass(frozen=True)
 class ChartRefusal:
     """The codes a write may not store, by reason. Falsy when there are none."""
@@ -193,11 +200,33 @@ class ChartRefusal:
     def __bool__(self) -> bool:
         return bool(self.foreign or self.retired or self.unknown)
 
-    def detail(self, where: str = "") -> str:
-        """The refusal a caller sees. Names the codes — chart-of-accounts
-        configuration, not PII — because they are exactly what has to change,
-        and says WHY each is refused, since the fix differs (pick this entity's
-        account; reactivate or re-code; correct a typo)."""
+    def body(self, *, on_lines: bool = False) -> dict:
+        """The structured refusal — the 422 ``detail`` object and, with a
+        ``row`` beside it, a CSV import's per-row error.
+
+        ``code`` is stable and the refused codes come BY REASON, which are the
+        typed params a client composes its own sentence from
+        (``frontend/CLAUDE.md`` § Internationalization); ``on_lines`` says they
+        were line-item codes rather than the header field. ``message`` is the
+        English sentence, kept so a client that reads only a ``{message}``
+        detail — the web's ``formatApiDetail``, mobile's ``errorMessage``, a
+        server-side catcher via ``utils/http.detail_text`` — still has it.
+        """
+        return {
+            "code": GL_CODES_OUTSIDE_CHART,
+            "on_lines": on_lines,
+            "foreign": list(self.foreign),
+            "retired": list(self.retired),
+            "unknown": list(self.unknown),
+            "message": self.detail(on_lines=on_lines),
+        }
+
+    def detail(self, *, on_lines: bool = False) -> str:
+        """The refusal as one English sentence — :meth:`body`'s ``message``.
+        Names the codes — chart-of-accounts configuration, not PII — because
+        they are exactly what has to change, and says WHY each is refused,
+        since the fix differs (pick this entity's account; reactivate or
+        re-code; correct a typo)."""
         clauses = []
         if self.foreign:
             clauses.append(
@@ -216,7 +245,7 @@ class ChartRefusal:
         # Only a non-empty active chart can refuse a retired or unknown code, so
         # "an active code" is always something the caller can actually pick.
         pick = "an active code" if (self.retired or self.unknown) else "a code"
-        prefix = f"{where}: " if where else ""
+        prefix = "Line items: " if on_lines else ""
         return (
             f"{prefix}{'; '.join(clauses)}. Choose {pick} from the invoice's own chart — the "
             "shared accounts plus its entity's own."
@@ -292,7 +321,7 @@ async def refuse_gl_codes_outside_chart(
     organization_id: uuid.UUID,
     entity_id: uuid.UUID | None,
     codes: Iterable[str | None],
-    where: str = "",
+    on_lines: bool = False,
 ) -> None:
     """Raise 422 unless every one of ``codes`` may be stored on an invoice filed
     under ``entity_id``: never another entity's (§194), and an active account
@@ -302,6 +331,11 @@ async def refuse_gl_codes_outside_chart(
     re-saving a code the row already carries is not a coding decision, and
     refusing it would make an invoice uneditable the day its account moved or
     was retired. Blank / ``None`` codes (clearing the field) always pass.
+
+    The 422 ``detail`` is :meth:`ChartRefusal.body` — an object, not a string
+    — and ``on_lines`` marks the refused codes as line-item codes. A
+    server-side catcher that needs the refusal as text reads it through
+    ``utils/http.detail_text``, never ``str(exc.detail)``.
     """
     wanted = [c for c in codes if c]
     if not wanted:
@@ -309,4 +343,4 @@ async def refuse_gl_codes_outside_chart(
     chart = await load_invoice_chart(db, organization_id, entity_id, wanted)
     refusal = chart.judge(wanted)
     if refusal:
-        raise HTTPException(status_code=422, detail=refusal.detail(where))
+        raise HTTPException(status_code=422, detail=refusal.body(on_lines=on_lines))

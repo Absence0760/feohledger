@@ -112,27 +112,64 @@ describe('DataTable scroll region (WCAG 2.1.1)', () => {
 		// screen reader then announces an anonymous stop with no role and no
 		// name — the CFO page did exactly that until both tables were named.
 		//
-		// The published legal pages are excluded, not exempt: their 19
-		// `.table-scroll` wrappers share the defect and are tracked in
-		// docs/followups.md, because naming each table is an edit to the legal
-		// text (decisions §174) rather than to UI copy.
-		const LEGAL = /^(routes\/legal\/|lib\/legal\/)/;
+		// The published legal pages are held to the same rule. Their 19
+		// `.table-scroll` wrappers were excluded here until each was named by
+		// the heading it sits under, and that exclusion is what let them ship
+		// as anonymous stops in the first place.
 		const offenders: string[] = [];
+		const dangling: string[] = [];
 		for (const f of files) {
-			if (LEGAL.test(f.path)) continue;
 			const ast = parse(f.source, { modern: true });
-			for (const el of collectElements(ast.fragment)) {
+			const elements = collectElements(ast.fragment);
+			const ids = new Set(
+				elements
+					.map((el) => attr(el, 'id'))
+					.map((a) => (a ? staticValue(a) : null))
+					.filter((v): v is string => v !== null)
+			);
+			for (const el of elements) {
 				const tabindex = attr(el, 'tabindex');
 				if (!tabindex || staticValue(tabindex) !== '0') continue;
 				const role = attr(el, 'role');
 				// An element given an interactive role (StepNode's role="button")
 				// is a control, named by its content; this rule is about regions.
 				if (role && staticValue(role) !== 'region') continue;
-				const named = attr(el, 'aria-label') || attr(el, 'aria-labelledby');
+				const labelledby = attr(el, 'aria-labelledby');
+				const named = attr(el, 'aria-label') || labelledby;
 				if (!role || !named) offenders.push(`${f.path} <${el.name}>`);
+				// `aria-labelledby` naming an id that is not there yields an
+				// EMPTY name, which is the defect this rule exists to catch
+				// wearing an attribute that hides it. A static reference must
+				// resolve to an element in the same file.
+				const refs = labelledby ? staticValue(labelledby) : null;
+				for (const ref of refs?.split(/\s+/).filter(Boolean) ?? []) {
+					if (!ids.has(ref)) dangling.push(`${f.path} <${el.name}> → #${ref}`);
+				}
 			}
 		}
-		expect(offenders, 'give the tab stop role="region" and an aria-label').toEqual([]);
+		expect(dangling, 'aria-labelledby must point at an id in the same file').toEqual([]);
+		expect(
+			offenders,
+			'give the tab stop role="region" and an aria-label or aria-labelledby'
+		).toEqual([]);
+	});
+
+	it('the legal tree is in the scan, not silently outside it', () => {
+		// The rule above used to skip `routes/legal/` by path. Pin that its
+		// scrollers are now among the elements it actually inspects, so a glob
+		// or path change that drops them fails here instead of passing empty.
+		const legalStops = files
+			.filter((f) => f.path.startsWith('routes/legal/'))
+			.flatMap((f) => collectElements(parse(f.source, { modern: true }).fragment))
+			.filter((el) => {
+				const cls = attr(el, 'class');
+				return cls !== undefined && staticValue(cls) === 'table-scroll';
+			});
+		expect(legalStops.length).toBeGreaterThanOrEqual(19);
+		for (const el of legalStops) {
+			expect(attr(el, 'role') && staticValue(attr(el, 'role')!)).toBe('region');
+			expect(attr(el, 'aria-labelledby')).toBeDefined();
+		}
 	});
 
 	it('no other file hand-rolls a .grid-container', () => {

@@ -214,7 +214,7 @@ class _ExceptionDetailScreenState extends State<ExceptionDetailScreen> {
             _row(l.exceptionDetailFieldVendor, exc.vendorName!),
           if (exc.amount != null)
             _row(l.exceptionDetailFieldAmount,
-                formatMoney(exc.amount, currency: exc.currency)),
+                formatMoneyString(exc.amount, currency: exc.currency)),
         ],
         _row(l.exceptionDetailFieldSeverity, exc.severity.label),
       ],

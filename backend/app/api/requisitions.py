@@ -35,6 +35,7 @@ from app.api.deps import (
 from app.api.pagination import PaginationParams, pagination_params
 from app.models.contract import Contract
 from app.models.procurement import (
+    REQUISITION_MATERIAL_EDIT_FIELDS,
     Budget,
     IntakeRequest,
     PurchaseOrder,
@@ -60,7 +61,10 @@ from app.services.requisition_service import (
     build_line_items,
     convert_requisition_to_po,
     guard_transition,
+    implicated_editor_ids,
+    line_items_differ,
     recompute_total,
+    record_material_editor,
 )
 from app.tenant import (
     apply_entity_scope,
@@ -162,10 +166,24 @@ async def _get_or_404(
         PurchaseRequisition,
         entity_id,
     )
-    # Lock the row for state-changing money paths (convert-to-PO) so two
-    # concurrent requests can't both read converted_po_id IS NULL and each
-    # create a PurchaseOrder — doubling committed spend. FOR UPDATE on the
-    # requisition row serializes them; the loser sees converted_po_id set.
+    # Every route that WRITES a requisition locks its row (`for_update=True`):
+    # PATCH, DELETE and each state-machine action. Each one reads the row, then
+    # writes something derived from what it read, so unlocked they race:
+    #   * convert-to-PO — two requests both read `converted_po_id IS NULL` and
+    #     each create a PurchaseOrder, doubling committed spend.
+    #   * PATCH vs PATCH — `material_editor_ids` is read-modify-write, so two
+    #     concurrent material edits both read the old set and the later commit
+    #     drops the earlier editor, who can then approve the lines they wrote.
+    #   * PATCH vs submit / approve — a PATCH that read `draft` committed after
+    #     a concurrent submit + approve, changing spend the approver had seen.
+    # Locked, the second request waits and re-reads the committed row (the
+    # `populate_existing` above makes the re-read win over the identity map).
+    #
+    # Lock order: requisition row FIRST, then the budget row
+    # (`_resolve_links` locks a budget when PATCH resolves a `budget_id`). The
+    # budget routes lock only the budget and never lock a requisition — their
+    # linked-requisition count is a plain read — so no path takes the two in
+    # the opposite order. Create locks only the budget (its row is new).
     if for_update:
         stmt = stmt.with_for_update(of=PurchaseRequisition)
     req = (await db.execute(stmt)).scalar_one_or_none()
@@ -394,7 +412,7 @@ async def update_requisition(
     A non-draft requisition is locked: editing after submission would let a
     requester change the spend the approver already saw. ``line_items``, when
     present, fully replaces the lines and the header ``total`` is recomputed."""
-    req = await _get_or_404(db, req_id, entity_id)
+    req = await _get_or_404(db, req_id, entity_id, for_update=True)
     if req.status != RequisitionStatus.draft:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
@@ -436,9 +454,22 @@ async def update_requisition(
                 changed.append(field)
 
     if body.line_items is not None:
-        req.line_items = build_line_items(body.line_items)
-        recompute_total(req)
-        changed.append("line_items")
+        proposed = build_line_items(body.line_items)
+        # Compared, not assumed: the edit modal re-sends every line on every
+        # save, so presence in the payload is no evidence the lines changed.
+        if line_items_differ(req.line_items, proposed):
+            req.line_items = proposed
+            recompute_total(req)
+            changed.append("line_items")
+
+    # Segregation of duties: whoever changed a TERM of the spend on this draft
+    # (lines, vendor, currency, budget — `REQUISITION_MATERIAL_EDIT_FIELDS`)
+    # has shaped what an approval releases as completely as the requester did,
+    # and `approve_requisition` refuses them through this set. Keyed off
+    # `changed`, so a re-sent identical value implicates nobody.
+    material = sorted(REQUISITION_MATERIAL_EDIT_FIELDS & set(changed))
+    if material:
+        record_material_editor(req, user.id)
 
     if changed:
         await dispatch_audit(
@@ -449,7 +480,10 @@ async def update_requisition(
             action="requisition.updated",
             entity_type="requisition",
             entity_id=req.id,
-            details={"fields": changed},
+            # `material` says why the editor joined the approval's refused set —
+            # without it the trail shows a wider SoD block with nothing
+            # explaining which edit earned it.
+            details={"fields": changed, "material": material},
         )
     await db.commit()
     fresh = await _get_or_404(db, req.id, entity_id)
@@ -464,7 +498,7 @@ async def delete_requisition(
     org_id: uuid.UUID = Depends(get_org_id),
     entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
-    req = await _get_or_404(db, req_id, entity_id)
+    req = await _get_or_404(db, req_id, entity_id, for_update=True)
     # Refuse once the requisition has produced downstream artifacts, the way
     # `DELETE /api/recurring/{id}` refuses a template that has already
     # generated invoices. Two distinct failures, both reachable today:
@@ -534,7 +568,7 @@ async def submit_requisition(
     entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
     """Submit a draft requisition for approval: ``draft → pending_approval``."""
-    req = await _get_or_404(db, req_id, entity_id)
+    req = await _get_or_404(db, req_id, entity_id, for_update=True)
     guard_transition(req.status, RequisitionStatus.pending_approval)
     req.status = RequisitionStatus.pending_approval
     req.submitted_at = datetime.now(UTC)
@@ -553,20 +587,20 @@ async def approve_requisition(
 ):
     """Approve a pending requisition: ``pending_approval → approved``.
 
-    Segregation of duties: the approver must differ from the requester (reuses
-    ``check_segregation`` → 403). Stamps ``approved_by`` / ``approved_at``."""
-    req = await _get_or_404(db, req_id, entity_id)
+    Segregation of duties: the approver must be neither the requester nor anyone
+    who materially edited the draft (``material_editor_ids``) — reuses
+    ``check_segregation`` → 403. Stamps ``approved_by`` / ``approved_at``."""
+    req = await _get_or_404(db, req_id, entity_id, for_update=True)
     guard_transition(req.status, RequisitionStatus.approved)
-    # SoD — approver ≠ requester. Reuse the invoice helper via a tiny attribute
-    # shim so the rule + 403 detail stay shared with the invoice/expense paths.
+    # SoD — approver ∉ requester ∪ material editors. Reuse the invoice helper
+    # via a tiny attribute shim so the rule + 403 detail stay shared with the
+    # invoice/expense paths. The editor set is what stops an ap_manager who
+    # rewrote someone else's draft (or the intake-converted requisition they
+    # then edited) from approving the spend they wrote.
     check_segregation(
         SimpleNamespace(
             uploaded_by_id=req.requester_user_id,
-            # No editor-tracking column on this table, so there is no second
-            # implicated actor to name. Stated rather than left absent: a
-            # missing attribute on a fraud control reads as an oversight, and
-            # `violates_segregation`'s getattr default would silently supply it.
-            segregation_actor_ids=None,
+            segregation_actor_ids=implicated_editor_ids(req),
         ),
         user.id,
         {"require_segregation": True},
@@ -589,7 +623,7 @@ async def reject_requisition(
     entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
     """Reject a pending requisition: ``pending_approval → rejected``."""
-    req = await _get_or_404(db, req_id, entity_id)
+    req = await _get_or_404(db, req_id, entity_id, for_update=True)
     guard_transition(req.status, RequisitionStatus.rejected)
     req.status = RequisitionStatus.rejected
     req.rejection_reason = body.reason if body else None
@@ -616,7 +650,7 @@ async def cancel_requisition(
 ):
     """Cancel a requisition (any non-terminal, non-converted state): ``→
     cancelled``. A converted requisition is terminal and cannot be cancelled."""
-    req = await _get_or_404(db, req_id, entity_id)
+    req = await _get_or_404(db, req_id, entity_id, for_update=True)
     guard_transition(req.status, RequisitionStatus.cancelled)
     req.status = RequisitionStatus.cancelled
     await _audit_transition(
@@ -653,7 +687,7 @@ async def reopen_requisition(
     ``rejection_reason`` is deliberately left on the row — it is the brief for
     the rework, and a later rejection overwrites it.
     """
-    req = await _get_or_404(db, req_id, entity_id)
+    req = await _get_or_404(db, req_id, entity_id, for_update=True)
     guard_transition(req.status, RequisitionStatus.draft)
     req.status = RequisitionStatus.draft
     # The prior submission's clock no longer describes this row: it is a draft
@@ -817,16 +851,21 @@ async def _resolve_links(
         resolved[field] = value
         if value is None:
             continue
-        row = (
-            await db.execute(
-                apply_entity_scope(
-                    select(model).where(model.id == value, model.organization_id == org_id),
-                    model,
-                    entity_id,
-                    include_shared=True,
-                )
-            )
-        ).scalar_one_or_none()
+        stmt = apply_entity_scope(
+            select(model).where(model.id == value, model.organization_id == org_id),
+            model,
+            entity_id,
+            include_shared=True,
+        )
+        if field == "budget_id":
+            # Row-lock the budget for the rest of this transaction.
+            # `PATCH` / `DELETE /api/budgets/{id}` take the same lock around
+            # their linked-requisition guards (a count, then a re-denominate or
+            # a delete), so a link made here either lands before the guard
+            # counts it or waits and then sees the budget's new currency (422)
+            # or its absence (404) — never slips in between.
+            stmt = stmt.with_for_update(of=model).execution_options(populate_existing=True)
+        row = (await db.execute(stmt)).scalar_one_or_none()
         if row is None:
             raise HTTPException(status_code=404, detail=f"{label} not found")
         if field == "budget_id" and (row.currency or "").upper() != (currency or "").upper():

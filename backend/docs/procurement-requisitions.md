@@ -31,9 +31,10 @@ re-opened back to `draft`.
 
 - **submit** (`draft → pending_approval`) — stamps `submitted_at`.
 - **approve** (`pending_approval → approved`) — stamps `approved_by` /
-  `approved_at`. Enforces **segregation of duties**: the approver must differ
-  from `requester_user_id` (reuses `approval_chain.check_segregation` via an
-  attribute shim → **403** on self-approval).
+  `approved_at`. Enforces **segregation of duties**: the approver must be
+  neither `requester_user_id` nor anyone in `material_editor_ids` (reuses
+  `approval_chain.check_segregation` via an attribute shim → **403**). See
+  [Who an approval refuses](#who-an-approval-refuses) below.
 - **reject** (`pending_approval → rejected`) — records `rejection_reason`.
 - **cancel** (`draft` / `submitted` / `pending_approval` / `approved →
   cancelled`).
@@ -66,6 +67,51 @@ constructor (`POST`/`PATCH`, punch-out cart conversion, intake conversion).
 `PunchoutCartItem.line_total` uses the same convention so a cart's stored
 `cart_total` agrees with the requisition it converts into. Editing is allowed on **draft only**; a submitted/approved requisition is
 locked (so the approver can't have the spend changed under them).
+
+### Who an approval refuses
+
+`PATCH` lets any admin / ap_manager / ap_clerk rewrite **another user's**
+draft — including a requisition an ap_manager just created through
+`POST /intake/{id}/convert-to-requisition`, whose requester is the intake's
+requester. So the requester alone is not everyone who shaped the spend.
+`purchase_requisitions.material_editor_ids` (migration 0102, JSONB set of
+control-plane user ids) records everyone else who did, and `approve` refuses
+requester ∪ editors. Same shape as the recurring template's editor set
+(`docs/decisions.md` §141, §152).
+
+- **Material** (`models/procurement.REQUISITION_MATERIAL_EDIT_FIELDS`):
+  `line_items`, `vendor_id`, `currency`, `budget_id`. The editor joins the set
+  only when one of these **actually changes value**. Lines are compared by
+  content (`requisition_service.line_items_differ`), because the edit modal
+  re-sends every field and line on every save. A title fix therefore implicates
+  nobody, and the `requisition.updated` audit row no longer claims the lines
+  changed when they didn't.
+- **Cosmetic** (`REQUISITION_COSMETIC_EDIT_FIELDS`): number, title,
+  justification, notes, `department` (requisitions reach a budget only through
+  `budget_id`), `needed_by`, `contract_id` (copied nowhere: not onto the PO,
+  not into any rollup). The two sets must cover every `RequisitionUpdate` field.
+- The requester is never added (already refused through `requester_user_id`).
+- `requisition.updated` audit rows carry `material: [...]`, naming the edit
+  that put the actor in the set.
+- **Intake conversion implicates nobody by itself.** It copies the approved
+  intake's terms verbatim and accepts only cosmetic overrides (`department`,
+  `needed_by`). The converter joins the set the moment they make a material
+  edit. A guard fails if the conversion body ever grows a material field.
+- **Every writing route locks the requisition row** (`_get_or_404(...,
+  for_update=True)`): PATCH, DELETE, submit, approve, reject, cancel, reopen
+  and convert-to-PO. The editor set is read-modify-write, and approve reads
+  what PATCH writes. Without the lock, two concurrent material edits both read
+  the old set and the later commit dropped the earlier editor. A PATCH that
+  read `draft` could also commit after a concurrent submit + approve. Lock
+  order is **requisition row first, then budget row** (PATCH resolving a
+  `budget_id`). The budget routes lock only the budget and only *read*
+  requisitions, so no path takes the two in the opposite order.
+- Not backfilled: edits before migration 0102 implicate nobody (no honest
+  editor history exists to recover), and NULL reads as "nobody beyond the
+  requester".
+
+Tests: `tests/test_requisition_editor_segregation.py` (classification coverage,
+the approve shim passes a real value, the set has one writer, plus behaviour).
 
 ## Convert-to-PO contract + idempotency
 

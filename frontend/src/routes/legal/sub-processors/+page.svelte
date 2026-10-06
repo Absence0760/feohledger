@@ -111,7 +111,7 @@
 		and the rest of the table is unconditional.
 	</p>
 
-	<div class="table-scroll" tabindex="0">
+	<div class="table-scroll" tabindex="0" role="region" aria-labelledby="engaged-today">
 		<table>
 			<caption class="visually-hidden">Sub-processors engaged for every customer</caption>
 			<thead>
@@ -270,7 +270,7 @@
 		option and sends nothing off the machine at all.
 	</p>
 
-	<div class="table-scroll" tabindex="0">
+	<div class="table-scroll" tabindex="0" role="region" aria-labelledby="ai">
 		<table>
 			<caption class="visually-hidden">AI and document-processing providers</caption>
 			<thead>
@@ -300,7 +300,7 @@
 
 	<h3 id="erp">3.2 ERP and accounting</h3>
 
-	<div class="table-scroll" tabindex="0">
+	<div class="table-scroll" tabindex="0" role="region" aria-labelledby="erp">
 		<table>
 			<caption class="visually-hidden">ERP connectivity providers</caption>
 			<thead>
@@ -354,7 +354,7 @@
 		one genuine departure, and has its own row.
 	</p>
 
-	<div class="table-scroll" tabindex="0">
+	<div class="table-scroll" tabindex="0" role="region" aria-labelledby="payments">
 		<table>
 			<caption class="visually-hidden">Payment providers</caption>
 			<thead>
@@ -408,7 +408,7 @@
 
 	<h3 id="cards">3.4 Virtual cards</h3>
 
-	<div class="table-scroll" tabindex="0">
+	<div class="table-scroll" tabindex="0" role="region" aria-labelledby="cards">
 		<table>
 			<caption class="visually-hidden">Virtual card issuers</caption>
 			<thead>
@@ -467,7 +467,7 @@
 		as good as whatever keeps it true after the page is written.
 	</p>
 
-	<div class="table-scroll" tabindex="0">
+	<div class="table-scroll" tabindex="0" role="region" aria-labelledby="screening">
 		<table>
 			<caption class="visually-hidden">Sanctions screening providers</caption>
 			<thead>
@@ -521,7 +521,7 @@
 		identifier leave the service.
 	</p>
 
-	<div class="table-scroll" tabindex="0">
+	<div class="table-scroll" tabindex="0" role="region" aria-labelledby="tax">
 		<table>
 			<caption class="visually-hidden">Tax filing providers</caption>
 			<thead>
@@ -545,7 +545,7 @@
 
 	<h3 id="email">3.7 Email</h3>
 
-	<div class="table-scroll" tabindex="0">
+	<div class="table-scroll" tabindex="0" role="region" aria-labelledby="email">
 		<table>
 			<caption class="visually-hidden">Email providers</caption>
 			<thead>
@@ -595,7 +595,7 @@
 
 	<h3 id="chat">3.8 Chat notifications</h3>
 
-	<div class="table-scroll" tabindex="0">
+	<div class="table-scroll" tabindex="0" role="region" aria-labelledby="chat">
 		<table>
 			<caption class="visually-hidden">Chat notification providers</caption>
 			<thead>
@@ -625,7 +625,7 @@
 
 	<h3 id="lookups">3.9 Reference-data lookups</h3>
 
-	<div class="table-scroll" tabindex="0">
+	<div class="table-scroll" tabindex="0" role="region" aria-labelledby="lookups">
 		<table>
 			<caption class="visually-hidden">Reference-data lookup providers</caption>
 			<thead>
@@ -661,7 +661,7 @@
 
 	<h3 id="einvoicing">3.10 E-invoicing</h3>
 
-	<div class="table-scroll" tabindex="0">
+	<div class="table-scroll" tabindex="0" role="region" aria-labelledby="einvoicing">
 		<table>
 			<caption class="visually-hidden">E-invoicing providers</caption>
 			<thead>
@@ -848,7 +848,7 @@
 
 	<h2 id="change-log">10. Change log</h2>
 
-	<div class="table-scroll" tabindex="0">
+	<div class="table-scroll" tabindex="0" role="region" aria-labelledby="change-log">
 		<table>
 			<caption class="visually-hidden">History of changes to this register</caption>
 			<thead>

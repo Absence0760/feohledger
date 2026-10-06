@@ -55,6 +55,12 @@ class InvoiceStore extends ChangeNotifier with SequencedFetch {
   bool _loading = false;
   String? _error;
 
+  /// The raw `detail` of the last refused [update], for a screen that states a
+  /// structured refusal in the reader's language
+  /// (`lib/l10n/gl_chart_refusal_messages.dart`). [error] stays the English
+  /// fallback. Null after a successful update or a non-API failure.
+  Object? _updateErrorDetail;
+
   // ----- Approvals queue -----
   // The Approvals tab's list is fetched SEPARATELY, server-filtered to
   // `ready_for_review`, and never shares the Invoices tab's filter, list or
@@ -85,6 +91,7 @@ class InvoiceStore extends ChangeNotifier with SequencedFetch {
   List<Invoice> get invoices => _invoices;
   bool get loading => _loading;
   String? get error => _error;
+  Object? get updateErrorDetail => _updateErrorDetail;
   String? get statusFilter => _statusFilter;
   InvoiceSearchFilters get filters => _filters;
   bool get fromCache => _fromCache;
@@ -109,6 +116,7 @@ class InvoiceStore extends ChangeNotifier with SequencedFetch {
     _invoices = [];
     _loading = false;
     _error = null;
+    _updateErrorDetail = null;
     _pending = [];
     _pendingLoading = false;
     _pendingError = null;
@@ -342,12 +350,14 @@ class InvoiceStore extends ChangeNotifier with SequencedFetch {
   /// the server's own `detail` sentence (see [describeApiError]) for the
   /// screen to show, never the raw `ApiException(422): …` form.
   Future<Invoice?> update(String id, Map<String, dynamic> changes) async {
+    _updateErrorDetail = null;
     try {
       final updated = await InvoiceApi.update(id, changes);
       await _refreshAfterMutation();
       return updated;
     } catch (e) {
       _error = describeApiError(e);
+      _updateErrorDetail = e is ApiException ? e.detail : null;
       notifyListeners();
       return null;
     }

@@ -216,6 +216,17 @@ export const messages = {
 	'profile.passkeys.removed': 'Chave de acesso removida',
 	'profile.passkeys.removeFailed': 'Não foi possível remover a chave de acesso',
 
+	'authRefusal.stepUpFailed':
+		'Confirme sua senha, um código atual do seu aplicativo autenticador ou uma chave de acesso registrada para alterar suas configurações de duas etapas.',
+	'authRefusal.stepUpSsoOnly':
+		'Sua organização entra por login único (SSO), portanto somente um código atual do seu aplicativo autenticador ou uma chave de acesso registrada pode confirmar esta alteração.',
+	'authRefusal.passkeyWrongHost':
+		'Sua chave de acesso está registrada para {hosts}, não para {host}. Entre por lá ou registre uma chave de acesso em {host}.',
+	'authRefusal.passkeyNotRegistered':
+		'Nenhuma chave de acesso registrada',
+	'authRefusal.portalStepUpFailed':
+		'Confirme sua senha ou um código atual do seu aplicativo autenticador para alterar suas configurações de duas etapas.',
+
 	'profile.sessions.heading': 'Dispositivos conectados',
 	'profile.sessions.hint':
 		'Todos os navegadores e aplicativos conectados à sua conta neste momento. Se você não reconhecer algum — ou entrou em um dispositivo que não tem mais — desconecte-o aqui. Ele para de funcionar imediatamente.',
@@ -4658,6 +4669,17 @@ export const messages = {
 	'csvImport.invoices.hint.status': 'status: apenas new, done, paid ou rejected são importáveis — um status de fluxo em andamento é rejeitado por linha. Use done/paid para faturas históricas, new para contas a pagar em aberto.',
 	'csvImport.invoices.hint.vendor': 'vendor_code é tentado primeiro, depois recorre a uma correspondência de vendor_name sem distinção entre maiúsculas e minúsculas.',
 	'csvImport.result.rowError': 'Linha {row}: {message}',
+	'glChartRefusal.foreign':
+		'{n, plural, one {A conta contábil} other {As contas contábeis}} {codes} {n, plural, one {pertence ao} other {pertencem ao}} plano de contas de outra entidade, não ao desta fatura.',
+	'glChartRefusal.retired':
+		'{n, plural, one {A conta contábil} other {As contas contábeis}} {codes} {n, plural, one {está desativada} other {estão desativadas}} no plano de contas desta fatura.',
+	'glChartRefusal.unknown':
+		'{n, plural, one {A conta contábil} other {As contas contábeis}} {codes} {n, plural, one {não está} other {não estão}} no plano de contas desta fatura.',
+	'glChartRefusal.pick':
+		'Escolha uma conta do plano de contas próprio da fatura: as contas compartilhadas mais as da sua entidade.',
+	'glChartRefusal.pickActive':
+		'Escolha uma conta ativa do plano de contas próprio da fatura: as contas compartilhadas mais as da sua entidade.',
+	'glChartRefusal.onLines': 'Itens da fatura: {reasons}',
 	'csvImport.result.summary': '{imported} importados, {skipped} ignorados',
 	'csvImport.toast.failed': 'Falha na importação',
 	'csvImport.toast.partial': '{imported} importados, {skipped} ignorados — veja os detalhes abaixo',
