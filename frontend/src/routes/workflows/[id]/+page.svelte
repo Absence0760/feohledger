@@ -2,6 +2,7 @@
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
 	import { guardUnsavedChanges } from '#lib/stores/unsavedChanges.svelte.ts';
+	import { renumberSteps } from '#lib/utils/workflowSteps.ts';
 	import { auth } from '#lib/stores/auth.svelte.ts';
 	import { workflowStore } from '#lib/stores/workflows.svelte.ts';
 	import { adminStore } from '#lib/stores/admin.svelte.ts';
@@ -151,9 +152,6 @@
 
 	let selectedStep = $derived(steps[selectedIndex] ?? null);
 
-	function renumber(arr: WorkflowStep[]): WorkflowStep[] {
-		return arr.map((s, i) => ({ ...s, number: i + 1 }));
-	}
 
 	function makeStep(type: WorkflowStepType): WorkflowStep {
 		return {
@@ -166,7 +164,7 @@
 	}
 
 	function addStep(type: WorkflowStepType) {
-		const next = renumber([...steps, makeStep(type)]);
+		const next = renumberSteps([...steps, makeStep(type)]);
 		steps = next;
 		selectedIndex = next.length - 1;
 		markDirty();
@@ -176,7 +174,7 @@
 		const clamped = Math.max(0, Math.min(index, steps.length));
 		const arr = [...steps];
 		arr.splice(clamped, 0, makeStep(type));
-		steps = renumber(arr);
+		steps = renumberSteps(arr);
 		selectedIndex = clamped;
 		markDirty();
 	}
@@ -186,14 +184,14 @@
 		const arr = [...steps];
 		const [moved] = arr.splice(from, 1);
 		arr.splice(to, 0, moved);
-		steps = renumber(arr);
+		steps = renumberSteps(arr);
 		selectedIndex = to;
 		markDirty();
 	}
 
 	function removeStep(index: number) {
 		if (steps.length <= 1) return;
-		steps = renumber(steps.filter((_, i) => i !== index));
+		steps = renumberSteps(steps.filter((_, i) => i !== index));
 		if (selectedIndex >= steps.length) selectedIndex = steps.length - 1;
 		markDirty();
 	}
