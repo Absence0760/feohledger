@@ -1391,8 +1391,13 @@ whose requester is the intake's), so migration 0102 added
 `purchase_requisitions.material_editor_ids`, appended on a real change to a
 field in `models/procurement.REQUISITION_MATERIAL_EDIT_FIELDS`, and `approve`
 refuses requester ∪ editors (`backend/docs/procurement-requisitions.md` § Who
-an approval refuses). Expense reports and pre-approvals pass `None`: neither
-table records who *edited* a row, so there is no second actor to name.
+an approval refuses). Expense reports and pre-approvals pass `None`, for
+different reasons. A **report** has no second actor because nobody but its owner
+can author one: composing it, editing or deleting its lines, replacing their
+receipts, changing its fields and submitting it are all refused to anyone else
+(403 `expense_report_not_owner`, `backend/docs/expense-management.md` § Report
+ownership), so the owner is the complete author set without a column. A
+**pre-approval** records no editor and has no edit endpoint.
 
 The inter-company mirror (`POST /api/invoices/{id}/route-intercompany`)
 deliberately does **not** inherit the source invoice's set. Its segregation

@@ -276,6 +276,17 @@ IN_DOUBT = "in_doubt"
 #   reconciler_max_age_exceeded*
 #                             a genuinely `submitted` payment (real money in
 #                             flight) the reconciler gave up waiting on
+#   `db_error_after_processor_call:*`
+#                             the processor answered and a database error then
+#                             aborted the dispatch transaction; the reply's
+#                             `provider_payment_id` is restored onto the row
+#                             (`api/payments._record_aborted_dispatch`), so it
+#                             is in doubt on that alone
+#   `dispatch_db_error:*`     the same abort BEFORE the processor call. This
+#                             pass sent nothing, but the row may be a `/resume`
+#                             of an earlier pass that did and then crashed
+#                             before its commit, so it is not provably
+#                             never-sent
 _RETRY_SAFE_FAILURE_PREFIXES = (
     # We refused it ourselves, before the adapter was ever called.
     "compliance_refusal:",
