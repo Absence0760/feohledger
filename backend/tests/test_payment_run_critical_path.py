@@ -50,6 +50,12 @@ from app.models.invoice import InvoiceStatus
 from app.models.payment import PaymentRun
 from app.services.payment_adapters import PaymentStatus
 
+# These tests drive the payment money paths over a hand-built `AsyncMock`
+# session, which cannot model the invoice lock's SAVEPOINT-scoped bound — see
+# the `mock_session_lock_wait` fixture in conftest.py.
+pytestmark = pytest.mark.usefixtures("mock_session_lock_wait")
+
+
 # ---------------------------------------------------------------------------
 # Shared fakes (mirror the sibling payment tests' shapes)
 # ---------------------------------------------------------------------------

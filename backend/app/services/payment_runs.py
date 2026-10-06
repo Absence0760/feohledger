@@ -312,6 +312,10 @@ _RETRY_SAFE_FAILURE_PREFIXES = (
     # A live virtual card claimed the invoice after the run was built —
     # refused before the adapter call, and `/retry-failed` re-checks it.
     "invoice_has_live_card",
+    # Another request held the invoice row lock past
+    # `settings.payment_invoice_lock_timeout_ms`. `_lock_payment_invoice` is the
+    # first thing dispatch does, so this is refused before any processor call.
+    "invoice_locked",
 )
 
 # Per-adapter pre-flight refusals — checked before any HTTP call is made.
