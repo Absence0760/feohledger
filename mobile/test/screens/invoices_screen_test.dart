@@ -51,6 +51,29 @@ Map<String, dynamic> _me(List<String> roles) => {
       'roles': roles,
     };
 
+/// Signs the singleton [AuthStore] in as a user with [roles], then hands later
+/// requests to [rest].
+Future<void> _signInAs(
+  List<String> roles, {
+  required Future<http.Response> Function(http.Request) rest,
+}) async {
+  final me = _me(roles);
+  ApiClient().debugConfigure(
+    client: MockClient((req) async {
+      if (req.url.path == '/api/auth/login') {
+        return http.Response(jsonEncode({'access_token': 'tok'}), 200,
+            headers: {'content-type': 'application/json'});
+      }
+      if (req.url.path == '/api/auth/me') {
+        return http.Response(jsonEncode(me), 200,
+            headers: {'content-type': 'application/json'});
+      }
+      return rest(req);
+    }),
+  );
+  await AuthStore.instance.login('demo@acme.com', 'demo', 'acme');
+}
+
 // Wraps a screen with the localization delegates it now needs. No explicit
 // `locale` → defaults to `en`, so the English assertions below still hold.
 Widget _localized(Widget home) => MaterialApp(
@@ -178,9 +201,9 @@ void main() {
 
   testWidgets('renders the search bar, status filter chips and camera action',
       (tester) async {
-    ApiClient().debugConfigure(
-      client: MockClient((req) async => _list([])),
-    );
+    // A clerk: entering invoices (capture → POST /api/invoices/upload) is
+    // open to ap_clerk (backend api/invoice_entry.py).
+    await _signInAs(['ap_clerk'], rest: (_) async => _list([]));
 
     await tester.pumpWidget(_localized(const InvoicesScreen()));
     await _pumpUntil(tester, find.text('No invoices found'));
@@ -193,6 +216,16 @@ void main() {
     expect(find.byIcon(Icons.camera_alt), findsOneWidget);
     // Advanced search action is present.
     expect(find.byIcon(Icons.tune), findsOneWidget);
+  });
+
+  testWidgets('hides the camera action from a custom-role-only user',
+      (tester) async {
+    await _signInAs(['Read Only'], rest: (_) async => _list([]));
+
+    await tester.pumpWidget(_localized(const InvoicesScreen()));
+    await _pumpUntil(tester, find.text('No invoices found'));
+
+    expect(find.byIcon(Icons.camera_alt), findsNothing);
   });
 
   testWidgets('opening advanced search and applying filters refetches',

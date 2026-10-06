@@ -133,12 +133,14 @@ void main() {
       expect(store.isClerkOnly, isTrue);
     });
 
-    test('ap_clerk enters invoices only before approval '
+    test('ap_clerk enters invoices only until submit '
         '(mirrors backend api/invoice_entry.py)', () async {
-      Invoice inv(String status, {String? approvedBy}) => Invoice.fromJson({
+      Invoice inv(String status, {String? approvedBy, String? approvalDate}) =>
+          Invoice.fromJson({
             'id': 'i1',
             'status': status,
             'approved_by': approvedBy,
+            'approval_date': approvalDate,
             'created_at': '2026-01-01T12:00:00',
           });
 
@@ -149,9 +151,16 @@ void main() {
       expect(store.canEditInvoiceRow(inv('new')), isTrue);
       expect(store.canEditInvoiceRow(inv('rejected')), isTrue);
       expect(store.canEditInvoiceRow(inv('failed')), isTrue);
+      // Submitted: the approver is reading it; rework goes through reject.
+      expect(store.canEditInvoiceRow(inv('ready_for_review')), isFalse);
       expect(
           store.canEditInvoiceRow(inv('approved', approvedBy: 'A')), isFalse);
       expect(store.canEditInvoiceRow(inv('failed', approvedBy: 'A')), isFalse);
+      // A blank approver name still carries the approval date.
+      expect(
+          store.canEditInvoiceRow(
+              inv('failed', approvedBy: '', approvalDate: '2026-01-02')),
+          isFalse);
       expect(store.canEditInvoiceRow(inv('paid', approvedBy: 'A')), isFalse);
 
       await loginAs(['ap_manager']);

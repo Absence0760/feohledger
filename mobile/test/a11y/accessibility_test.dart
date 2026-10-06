@@ -598,9 +598,30 @@ void main() {
     testWidgets('the capture-invoice app-bar action exposes a label',
         (tester) async {
       final handle = tester.ensureSemantics();
+      // The action shows to an entry role (capture uploads to
+      // POST /api/invoices/upload), so sign in as a clerk.
       ApiClient().debugConfigure(
-        client: MockClient((req) async => _list([])),
+        client: MockClient((req) async {
+          if (req.url.path == '/api/auth/login') {
+            return http.Response(jsonEncode({'access_token': 'tok'}), 200,
+                headers: {'content-type': 'application/json'});
+          }
+          if (req.url.path.endsWith('/auth/me')) {
+            return http.Response(
+                jsonEncode({
+                  'id': 'u1',
+                  'email': 'demo@acme.com',
+                  'full_name': 'Demo User',
+                  'organization_id': 'org1',
+                  'roles': ['ap_clerk'],
+                }),
+                200,
+                headers: {'content-type': 'application/json'});
+          }
+          return _list([]);
+        }),
       );
+      await AuthStore.instance.login('demo@acme.com', 'demo', 'acme');
 
       await tester.pumpWidget(MaterialApp(
         localizationsDelegates: AppLocalizations.localizationsDelegates,

@@ -574,10 +574,25 @@ void main() {
   });
 
   // Entering and coding invoices is the AP clerk's job
-  // (`backend/app/api/invoice_entry.py`): PATCH takes ap_clerk, but only
-  // before the invoice is approved. `failed` with an approver is an
-  // approved invoice whose ERP push failed — outside the window too.
-  testWidgets('shows the Edit action to a clerk before approval',
+  // (`backend/app/api/invoice_entry.py`): PATCH takes ap_clerk, but
+  // an entry-only caller only until they submit. `failed` with an approver is
+  // an approved invoice whose ERP push failed — outside the window too.
+  testWidgets('shows the Edit action to a clerk on an invoice in entry',
+      (tester) async {
+    await _arrange(_detailClient(
+      _invoiceJson('1', status: 'new'),
+      roles: ['ap_clerk'],
+    ));
+
+    await tester.pumpWidget(
+      _localized(),
+    );
+    await _pumpUntil(tester, find.text('Acme Corp'));
+
+    expect(find.byTooltip('Edit'), findsOneWidget);
+  });
+
+  testWidgets('hides the Edit action from a clerk once submitted for review',
       (tester) async {
     await _arrange(_detailClient(
       _invoiceJson('1', status: 'ready_for_review'),
@@ -589,7 +604,7 @@ void main() {
     );
     await _pumpUntil(tester, find.text('Acme Corp'));
 
-    expect(find.byTooltip('Edit'), findsOneWidget);
+    expect(find.byTooltip('Edit'), findsNothing);
   });
 
   testWidgets('hides the Edit action from a clerk once approved',

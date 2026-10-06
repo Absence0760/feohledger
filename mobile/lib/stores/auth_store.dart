@@ -84,16 +84,17 @@ class AuthStore extends ChangeNotifier {
   // (admin / ap_manager / cfo) of `backend/app/api/invoice_entry.py`.
   bool get canEditInvoice => isAdmin || isManager || isCfo;
   // Invoice ENTRY — PATCH /api/invoices/{id}, upload and the other entry
-  // routes take `ap_clerk` too, but hold a caller with none of the manage
-  // roles to the pre-approval window ([Invoice.inEntryWindow]). Use
-  // [canEditInvoiceRow] for a specific invoice.
+  // routes take `ap_clerk` too (INVOICE_ENTRY_ROLES), but hold a caller with
+  // none of the manage roles to the entry window ([Invoice.inEntryWindow]),
+  // which closes at submit. Use [canEditInvoiceRow] for a specific invoice.
   bool get canEnterInvoice =>
       canEditInvoice || (_user?.hasRole('ap_clerk') ?? false);
   // Whether the edit affordance applies to [invoice]: a manager edits up to
-  // the immutable statuses, an entry-only clerk only before approval.
+  // the immutable statuses, an entry-only caller only inside the window.
   bool canEditInvoiceRow(Invoice invoice) =>
       invoice.status.isEditable &&
-      (canEditInvoice || (canEnterInvoice && invoice.inEntryWindow));
+      canEnterInvoice &&
+      (canEditInvoice || invoice.inEntryWindow);
   // Bulk invoice operations — mobile's selection mode carries delete and the
   // full status-target list, so it is gated on the manage roles
   // (POST /api/invoices/bulk/delete is admin/ap_manager/cfo). A clerk's
