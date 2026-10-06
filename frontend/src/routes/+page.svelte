@@ -33,6 +33,10 @@
 	// a non-optional field. Exported, the fixtures `satisfies` it and
 	// `pnpm check:e2e` turns that drift into a compile error.
 
+	// Industry best-in-class touchless (straight-through) rate — Ardent
+	// Partners, 2025. The KPI turns green at or above it.
+	const TOUCHLESS_BEST_IN_CLASS_PCT = 49;
+
 	let data = $state<DashboardData | null>(null);
 	let loading = $state(true);
 	let error = $state(false);
@@ -239,11 +243,15 @@
 				label={m('dashboard.kpi.pending')}
 				pending={loading}
 			/>
+			<!-- Touchless = no person intervened (backend/docs/analytics.md §
+			     Touchless rate). Green from the industry's best-in-class figure
+			     (Ardent Partners 2025, ~49%) — the old 80% bar was set for a
+			     cleared-vs-rejected figure and is out of reach for a true one. -->
 			<KpiCard
 				value={data ? `${data.touchless_rate}%` : null}
 				label={m('dashboard.kpi.touchlessRate')}
 				helpTerm="touchless-rate"
-				highlight={data && data.touchless_rate >= 80 ? 'green' : null}
+				highlight={data && data.touchless_rate >= TOUCHLESS_BEST_IN_CLASS_PCT ? 'green' : null}
 				pending={loading}
 			/>
 			<!-- The five above are the row's spine: every tenant has those
