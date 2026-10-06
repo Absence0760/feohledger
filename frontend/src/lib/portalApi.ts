@@ -3,6 +3,7 @@
  * separate token key so the AP app and the portal can't stomp on each other's
  * localStorage (opening both in the same browser would otherwise clobber one).
  */
+import { apiErrorFromBody } from '#lib/api.ts';
 import { getApiBase, getTenantSlug } from '#lib/tenant.ts';
 
 // Resolved per request, not frozen at module load — see the note in
@@ -53,12 +54,12 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 			throw new Error('Unauthorized');
 		}
 		const body = await res.json().catch(() => ({}));
-		throw new Error(body.detail || 'Invalid credentials');
+		throw apiErrorFromBody(body, 'Invalid credentials', res.status);
 	}
 
 	if (!res.ok) {
 		const body = await res.json().catch(() => ({}));
-		throw new Error(body.detail || `API error ${res.status}`);
+		throw apiErrorFromBody(body, `API error ${res.status}`, res.status);
 	}
 
 	if (res.status === 204) return undefined as T;
@@ -83,7 +84,7 @@ async function download(path: string): Promise<Blob> {
 	}
 	if (!res.ok) {
 		const body = await res.json().catch(() => ({}));
-		throw new Error(body.detail || `API error ${res.status}`);
+		throw apiErrorFromBody(body, `API error ${res.status}`, res.status);
 	}
 	return res.blob();
 }
