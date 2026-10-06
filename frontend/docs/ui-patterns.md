@@ -710,6 +710,12 @@ accessible:
 - Lists with **no per-row detail view** (vendors, exceptions, credit
   memos, payments history/cards) keep their existing conditional
   `RowAction` buttons — there's no single "open" destination to wire.
+- **Never `stopPropagation()` on a link's click.** SvelteKit's router
+  catches link clicks by delegation higher up the document, so a stopped
+  click falls through to the browser and reloads the whole app. RowLink's
+  `<a>` used to do exactly that. The row handler doesn't need the help:
+  `isRowOpenClick` already ignores clicks that start on an `<a>`. Guard:
+  `tests-e2e/workflows/row-link-client-nav.spec.ts`.
 
 ### Contextual help (`HelpTip`, the page help link)
 

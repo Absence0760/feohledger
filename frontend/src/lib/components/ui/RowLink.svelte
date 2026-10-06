@@ -25,7 +25,11 @@
 </script>
 
 {#if href}
-	<a class="row-link" {href} aria-label={ariaLabel} onclick={(e) => e.stopPropagation()}>
+	<!-- No stopPropagation here, unlike the button: SvelteKit's router catches
+	     link clicks by delegation higher up the document, so stopping the click
+	     here made every row link a FULL page reload. The parent row's handler
+	     already ignores clicks that start on an `<a>` (`isRowOpenClick`). -->
+	<a class="row-link" {href} aria-label={ariaLabel}>
 		{@render children()}
 	</a>
 {:else}
