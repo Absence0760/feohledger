@@ -9637,3 +9637,152 @@ Serializable isolation was rejected because it turns the race into retry errors
 every route would have to handle; locking only the requisition side cannot cover a
 link that does not exist yet. The FK stays as the last guard, and a residual
 violation on delete maps to the same 409.
+
+## 237. An unmasked DSAR export needs a second factor, never the password
+
+`POST /api/privacy/dsar` with `include_banking` already needed the
+`vendor.bank_change.approve` permission and a written justification (§182). But
+`ROLE_ADMIN` resolves to the whole permission catalogue, so on the stock roles
+that gate admitted exactly the callers the route already admitted, and a stolen
+admin session alone could pull a supplier's full account number. The route now
+also calls `api/auth.require_sensitive_step_up`, after the permission and
+justification checks and before any subject data is read. It accepts a current
+authenticator code or a passkey assertion minted for the `dsar_unmasked_export`
+operation, and **never the password**: the password is what a stolen session
+was obtained with, and refusing it means an SSO-only tenant needs no special
+case. An account with no second factor is refused (`sensitive_step_up_no_factor`),
+not exempted, because exempting it would make "has no MFA" the cheapest way past
+the gate. With the MFA master switch off (local dev, CI) the gate is skipped like
+every other MFA challenge, and the audit row records `step_up: mfa_off_local`
+so it can never be read as a verified proof.
+
+Shipped with it: the DSAR collections that were cut with a bare `.limit()` now go
+through `_capped` with their true totals, since a silent cut hands the subject a
+short list claiming to be complete; `/legal/privacy` §12 and the DPA now state the
+retain-vs-delete split exactly; and the 1099 `total_reportable` headline and box
+panel range only over boxes on forms the vendor must receive, which is what the
+filing batch files, while each row keeps its whole `ytd_paid` so the preparer
+still sees the unfiled box.
+
+## 238. A refusal a user acts on carries a code; the client states it
+
+The approval-path refusals — segregation, the CFO and max-amount gates, the named
+approver, the credit-memo application refusals, the expense CFO gate, the
+invoice stale-edit 409 and the required-fields refusal — now return
+`detail = {code, message, params}` via `api/refusals.coded_refusal`, and the web
+(`api/codedRefusals.ts`) and mobile (`coded_refusal_messages.dart`) clients
+state them in the reader's language. Every figure is an exact decimal string
+beside its own currency, so the sentence is formatted for the reader, not the
+server; a note that does not apply is `null` rather than absent, so a client can
+tell "not applicable" from "malformed". A client that cannot state a refusal
+completely returns nothing and shows the English `message`, never a
+half-localized sentence. An invoice that names no currency sends `currency: null`
+and its figures render bare — the §160 / §196 rule — never in the `USD` stand-in
+the gate compares with. A malformed or non-finite threshold sends `limit: null`
+and the sentence names "the configured limit"; the gate still fails closed.
+
+`InvoiceModal` now branches on `invoice_stale_edit`, not on the English text it
+used to substring-match, so rewording the server sentence can no longer break
+the reload prompt. A wrong code on employee enroll-verify and on portal MFA
+enroll / disable is now a 400 `mfa_code_invalid` instead of a 401, which both
+web clients treat as session expiry and answered by signing the user out.
+Deliberately not done in this pass (followups): the bulk-status skip reasons,
+the payment-run SoD / CFO refusals, and the sign-in MFA challenge.
+
+## 239. `settings.sso` has one audited writer, which writes its row first
+
+`PATCH /api/organization` merged per top-level key with no audit row, so the
+`{"sso": {"client_secret": …}}` rotation the runbook once prescribed replaced the
+whole block and dropped `enabled`, `sso_only`, the IdP configuration and the
+SCIM group state, unrecorded. `GET/PUT /api/organization/sso` (admin) now own the
+block and the PATCH refuses the key, the arrangement `chat_notifications` and
+custom domains already had. The PUT states the whole configuration
+(`enabled` / `sso_only` required, an omission refused rather than read as
+false), keeps the stored client secret unless a new one is sent or
+`clear_client_secret` is set, and carries the SCIM digest and groups across. The
+secret is never returned by any endpoint for any role.
+
+Two properties are what make it the *sanctioned* writer rather than merely a
+second one. **The audit row comes first:** a sign-in policy change with no record
+is worse than a refused one, so `organization.sso_updated` (key names and
+posture, never values) is written before the save, and a row that cannot be
+written is a 503 with nothing saved. `record_auth_audit_or_raise` writes it
+synchronously to the tenant DB in every audit mode — in `lambda` mode the
+ordinary path only enqueues, which would make "first" mean "SQS accepted it".
+**Every settings writer takes the org row lock** (`tenant.lock_organization`):
+each rewrites the whole JSONB, so a single unlocked writer — a branding save, a
+sweep's cursor — silently reverts a concurrent secret rotation. That held for
+five writers when the endpoint landed and a review found eleven more, so
+`tests/test_settings_writers_lock_the_org_row.py` now fails on any writer
+without it. A malformed PUT body is parsed by the endpoint itself and refused
+with field locations only, because FastAPI's default 422 echoes a non-object
+body whole, client secret included.
+
+`is_sso_only` closes the password whenever the IdP block resolves — a local
+completeness check, by design (§204) — so an IdP outage or an expired client
+secret locks every member out with the fix behind the sign-in it blocks.
+`scripts/sso_break_glass.py --slug` is the operator's way back: it clears
+`sso_only` and nothing else, after writing `organization.sso_only_lifted` the
+same audit-first way, and exits non-zero having changed nothing if it cannot.
+
+## 240. Exception descriptions and PO-match issues are catalogue findings (migration 0103)
+
+The exception queue and the PO-match panel printed server-composed English
+beneath labels that were already localized, so one finding read in two
+languages and two wordings in the same dialog. Both now carry the
+`invoice_warning_catalog` shape (§157): `exceptions.description_code` /
+`description_params` (tenant fan-out, idempotent, nullable) beside the kept
+`description`, and `po_match.issues` entries of `{code, params, message}` under
+`po_match.issue.*`. A finding that summarizes several lines (price variance,
+contract terms) is a frame code with its parts under `params.findings`, rather
+than a `"; "`-joined sentence the client could not decompose.
+
+**No backfill.** An old row's English is the only record of what it said, and
+re-deriving a code from prose would guess; every reader falls back to the stored
+text when the code is absent, and a legacy bare-string issue is still accepted.
+`_ensure_exception` raises on a bare string, so a new site cannot regress
+silently. The direct `create_exception` callers outside it (extraction failure,
+the payment and ERP paths, Positive Pay, the bank-change exception) are not
+keyed yet and are tracked in `docs/followups.md`.
+
+## 241. Only a report's owner composes, edits or submits it
+
+Report SoD refused `employee_user_id` and nobody else, while attach,
+create-onto-a-report, line edits and submit had no ownership check — so a
+manager could write or rewrite lines on a clerk's draft, submit it, and approve
+it. Two fixes were open: record every line author on the report (the
+`segregation_actor_ids` route the invoice path took in §141 / §152), or make the
+owner the only author. The second was chosen because it makes the existing
+check complete instead of widening it, needs no migration, and matches what the
+docs already claimed ("the owner submits"). Everything else stays open to
+reviewers: approve, reject, GL coding (the accountant's classification) and
+card reconciliation (evidence, not an edit). The refusal is coded
+`expense_report_not_owner`. What it leaves is a line on no report, which has no
+owner column at all; that is a followup.
+
+## 242. A database error after the processor call is recorded, not stranded
+
+A deadlock or other database error raised after `adapter.create_payment`
+returned aborted the dispatch session: the audit write and commit failed with
+it, the request 500'd, the run stayed `executing`, and the processor's payment id
+lived only in memory — so nothing could tell that payment had been sent. Each
+attempt now runs in a savepoint taken after the payment row lock. A database
+error rolls back to it, and the payment is recorded `failed` with the provider
+id, reference and order fields restored from a record kept outside the ORM, so
+`classify_payment_failure` reads it as **in doubt** and `/retry-failed` never
+re-sends it; the reconciler resolves it. The run then finishes. Compliance
+release takes the same guard. If the savepoint itself cannot be rolled back,
+the dispatch falls back to a full rollback and re-lock before recording.
+
+## 243. The pytest-split baseline is measured by the shards that use it
+
+`backend/.test_durations` went from its first commit to 25.12% of the suite
+unweighted without once being regenerated, and the guard that watches it
+(`check_test_durations.py`) tripped on this PR. Regenerating it with
+`pytest --store-durations` on a laptop costs an hour and measures the wrong
+hardware. Every backend shard now runs with `--store-durations
+--clean-durations` — after the split has been read, so it changes nothing about
+which tests run — and uploads what it measured; `pnpm gen:test-durations <run-id>`
+unions a run's eight artifacts, refusing an incomplete or overlapping set. The
+first such baseline covers all but 0.08%, and the ratchet moved from 0.25 to
+0.05.

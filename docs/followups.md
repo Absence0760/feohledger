@@ -39,7 +39,15 @@ and an audit that re-derived both found the copy stale at nearly every sync
 transcription was retired rather than corrected again. Add a follow-up here; add
 a GitHub issue only when one warrants its own thread.
 
-**Last reconciled:** 2026-10-05 (evening) — a five-agent issues batch closed
+**Last reconciled:** 2026-10-06 — the round-2 issues batch (PR #514) closed
+**twelve** (c) entries and opened five, taking the file from 59 → 52: the unmasked
+DSAR export's step-up, the stale `/legal/privacy` §12 and the 1099 headline total
+(decisions §237), the English-only money-path refusals in both entries that
+tracked them (§238), the unaudited `settings.sso` writer and the missing
+break-glass (§239), exception descriptions and PO-match issues in server English
+(§240), report SoD naming only the owner (§241), the dispatch session a database
+error aborted (§242), and the pytest-split baseline nothing regenerated (§243).
+Before that, 2026-10-05 (evening) — a five-agent issues batch closed
 **ten** (c) entries and opened three, taking the file from 66 → 59: the legal
 table scrollers' names and the consent banner over the contents rail (decisions
 §230), step-up refusals on `/profile` plus its hand-rolled shell (§231), the
@@ -83,7 +91,7 @@ section carried its own `decisions.md` § reference, so nothing was lost by
 deleting it; that cross-reference is what makes the pruning safe, and writing
 one is what earns a future entry the right to be deleted.
 
-**59 open: 44 (c) · 9 (a) · 6 (b)** — re-derived from the file, never carried
+**52 open: 37 (c) · 9 (a) · 6 (b)** — re-derived from the file, never carried
 forward. The section heading is authoritative; where an entry also carries a
 `(c)`/`(a)`/`(b)` marker, the two agree.
 `grep -c '^- \[ \]' docs/followups.md`.
@@ -437,24 +445,6 @@ plus two product-fit gaps in the section below. Both are category **(c)**.
       **Trigger:** a decision to support UK/EU VAT properly (a prerequisite for
       the UK-business go-to-market).
 
-- [ ] **The 1099 `total_reportable` KPI still counts boxes on forms a vendor is
-      not required to receive.** Since the per-box, per-year thresholds
-      (`tax_1099.forms_requiring_filing`, PR #504) a vendor can be required on
-      one form and not the other — a 2026 law firm paid $800 of attorney
-      proceeds (MISC-10, $600) and $1,000 of fees (NEC-1, $2,000) gets a MISC
-      only, and the filing batch files exactly that. But `Report1099.summary`
-      still sums the vendor's whole `ytd_paid` into `total_reportable`, and the
-      summary box panel reconciles against that same figure, so the KPI
-      overstates what will be filed by the not-required form's boxes. Filing is
-      correct; the headline number is not.
-      **Durable fix:** derive `total_reportable` and the summary
-      `box_allocations` from the boxes on each vendor's `required_forms` only,
-      keeping the reconciliation residual computed over that same population
-      (the per-row `box_unallocated` stays whole-`ytd_paid`), and update the
-      `/tax` KPI copy + `box-allocation.spec.ts`.
-      **Trigger:** the next change to the `/tax` summary panel, or before the
-      2026 filing season (January 2027).
-
 **Investigated, deliberately not changed (recorded so it isn't re-litigated):**
 
 - `approve_payment_run` stays on `require_roles(ROLE_CFO)` rather than
@@ -526,77 +516,6 @@ honestly be folded into the slice that surfaced it.
       threshold apply should stay web-only until its refusal has somewhere to
       live. **Trigger:** a request for either control on mobile.
 
-### Surfaced while closing the exception-queue segregation entry (2026-09-14)
-
-- [ ] **(c) A backend refusal sentence reaches a localized page in English.**
-      The new segregation refusal on `POST /api/exceptions/{id}/resolve` returns a
-      403 whose `detail` the queue renders through `extractError(err)` verbatim —
-      so a `de` / `es` / `fr` / `ja` / `pt-BR` operator gets one English sentence
-      inside an otherwise-translated page. This is **not** new with that change:
-      it is how `approval_chain.check_segregation`'s identical 403 has always
-      surfaced on the approval path, and how every other backend `detail` reaches
-      every page. The bulk half *is* localized, because `/bulk/resolve` returns a
-      machine code per row (`segregation_raiser` / `segregation_implicated`) that
-      `exceptions.bulk.segregationSkipped` renders in all six locales — which is
-      the shape the fix wants, and the proof it is affordable.
-      **Durable fix:** a stable machine `code` alongside `detail` on the refusals
-      a user is expected to *act* on (the two SoD paths, the CFO / max-amount
-      gates, the named-approver gate, the credit-memo application refusals), plus
-      a frontend code→`MessageKey` map that degrades to the server's sentence for
-      an unknown code — the same tolerant pattern `exceptionTypeLabelKey` and
-      `screeningCategoryLabelKey` already use, and the same conclusion §149 and
-      §138 reached about rendering a raw server string. Deliberately **not** done inside the segregation slice: it
-      is a cross-cutting error-contract change touching every refusal on the
-      money path, and doing only the one new refusal would have left the page
-      inconsistent with the older identical one beside it.
-      **Trigger:** the next change to any approval-path refusal message, or the
-      first non-English tenant on the approval queue.
-
-### Surfaced by the round-31 batch (2026-09-14)
-
-Eighteen entries were opened by round 31 (sixteen from the slices, two from its
-own CI run); two remain after the 2026-09-22 follow-up batch, one of them
-narrowed, grouped by the slice that surfaced them. The lesson the round recorded
-is in the header above and applies to every entry here: **an entry's file list and its counts are the least
-reliable part of it, and a durable fix stated in one sentence has usually not
-been tried.** Several of the round's entries were found to describe the code
-wrongly in the 2026-09-17 pass; assume the two below are no better and re-derive
-before implementing.
-
-#### Opened by the invoice-warning catalogue
-
-- [ ] **(c) `Invoice.po_match.issues` is still server English rendered verbatim.** The PO-match
-      panel in `InvoiceModal` prints the matcher's own composed sentences ("Partial receipt: 60% of
-      ordered quantity received", "Amount mismatch: invoice 150.00 USD vs PO 100.00 USD (+50.0%)")
-      one per row, and the mobile panel renders the same list. Round 31 keyed the `po_mismatch`
-      *warnings* beside them, so the same dialog shows a German finding above an English issue list
-      — a narrower version of the §155 mismatch, one panel down.
-      Narrowed 2026-09-22 (§197): the hardcoded `$` is gone — each figure now names its own
-      currency code, and the currency guard's own sentence is keyed (`po_currency_mismatch`),
-      so what is left is the English prose itself, not a wrong label inside it.
-      **Durable fix:** `po_matching.py` already carries every figure those sentences embed as a
-      structured field (`ordered_quantity` / `received_quantity` / `inspection_deviation_notes`,
-      and now `po_currency` / `currency_check`), so the issues become `{code, params}` entries in
-      `invoice_warning_catalog` — a `po_match.issue.*` key namespace reusing the generator and
-      drift guard already wired. `issues` is `list[str]` on the persisted JSONB, the frontend
-      `PoMatch` type and the mobile model, so the wire shape changes and all three renderers move
-      with it.
-      **Trigger:** the next change that touches the PO-match panel or `MatchResult.issues`.
-
-- [ ] **(c) `Exception.description` reaches the exception queue as server English.** `_ensure_exception`
-      is handed composed prose at every call site — often the warning's own `message`, sometimes a
-      different sentence for the same finding ("Suspicious round amount: $5000.00" against the
-      warning's "Round amount: 5000.00 ZAR"), and for `price_variance` a `"; "`-joined summary over
-      every flagged line. `/exceptions` renders it raw, so the queue and the invoice modal can
-      describe one finding in two languages and two wordings. The hardcoded `$` survives here too.
-      **Durable fix:** give the exception description the same `{code, params}` treatment — a
-      `description_code` / `description_params` pair on the `Exception` row (a migration that must
-      fan out to every tenant DB) with `description` kept as the fallback, and the per-line
-      `price_variance` summary decomposed rather than joined server-side. The exception-type LABEL is
-      already keyed (`EXCEPTION_TYPE_LABEL_KEYS`, §155); this is the sentence beneath it.
-      **Trigger:** the next slice that touches `_ensure_exception` or the `/exceptions` detail panel —
-      or sooner, since it is the surface an auditor reads.
-
 ### Surfaced by wiring the FeohLedger AWS account (2026-09-14)
 
 - [ ] **(c) The GitHub deploy role exists but can do nothing.** The estate
@@ -622,56 +541,6 @@ before implementing.
       (this repo is on immutable subject claims). That half is fixed; what is
       left there is dispatching `AWS OIDC preflight` to prove the assume, which
       does not need this policy.
-
-### Surfaced by fixing the three privacy defects (2026-09-16, issues #423/#424/#425)
-
-- [ ] **(c) The unmasked-DSAR gate does not bite on a stock admin.**
-      `POST /api/privacy/dsar` now masks banking by default and gates
-      `include_banking` on the `vendor.bank_change.approve` permission plus a
-      written justification, with its own `privacy.dsar_export.unmasked` audit
-      row (`docs/decisions.md` §182). But `ROLE_ADMIN` resolves to the entire
-      permission catalogue, so on the four stock system roles that gate admits
-      exactly the callers `require_roles(ROLE_ADMIN)` already admits — it only
-      becomes a real refusal once an org defines an admin-equivalent **custom**
-      role without that permission. The routine path is fixed (no admin gets a
-      full account number by accident any more); what is not yet true is that
-      producing one requires proving who you are. **Durable fix:** require a
-      **step-up MFA proof** on the request when `include_banking` is set —
-      `api/auth._require_mfa_step_up` / `_step_up_satisfied` already implement
-      TOTP, email-OTP and WebAuthn proofs for exactly this shape, so the backend
-      half is a dependency and a schema field. It is deferred because the other
-      half is the SPA collecting that proof before it posts the DSAR, which is a
-      frontend change this backend-scoped batch could not make, and a
-      half-landed gate that 403s every unmasked export until the UI catches up
-      would be worse than the one that ships. **Trigger:** the next change that
-      touches `frontend/src/routes/organization` privacy surfaces, or the first
-      org that asks to split the privacy-officer duty from vendor bank-change
-      approval.
-
-- [ ] **(c) `/legal/privacy` §12 now understates what erasure and export do.**
-      That section lists "four gaps we are not going to describe around": the
-      export returns counts rather than content and omits passkeys / expense
-      reports / contracts / virtual cards; it does not include uploaded
-      documents; erasure does not delete stored documents; erasure does not
-      revoke passkeys or terminate sessions. **Three and a half of the four are
-      no longer true** as of 2026-09-16 — the export returns the content and all
-      of those categories plus a document manifest, erasure deletes the
-      sole-subject documents, and it deletes passkey rows and revokes sessions.
-      What remains true is narrower and worth saying precisely: erasure
-      deliberately RETAINS transaction evidence (invoice PDFs, contract
-      documents, expense receipts, vendor statements) on the same basis as the
-      invoice rows, and each collection in the export is capped at 1000 rows. The
-      page is more conservative than the product, so nothing published is
-      untrue — but a privacy page that understates the automated path sends data
-      subjects to a manual process that no longer needs to exist, and the DPA's
-      deletion clause (`docs/founder-runbooks/dpa-template.md` § Annex II, already
-      corrected) now disagrees with it. **Durable fix:** rewrite §12 to state the
-      retain-vs-delete split (`backend/docs/privacy.md` § Stored documents) and
-      the row cap, and re-check the DPA page's deletion clause against it.
-      Deferred only because it lives under `frontend/`, which the backend batch
-      that made it stale was scoped out of. **Trigger:** the next change that
-      touches `frontend/src/routes/legal/`, or a customer DPA review — whichever
-      comes first.
 
 ### Surfaced by the round-26 parallel batch (2026-09-17)
 
@@ -838,77 +707,6 @@ or is a sibling of a fix that needs its own pass.
       **Trigger:** before the minimal VM serves its first customer, or the first
       auto-merged Dependabot compose PR that touches `deploy/compose.prod.yml`.
 
-- [ ] **(c) `settings.sso` has no sanctioned, audited writer, and a partial PATCH silently switches SSO off.**
-      Turning `sso_only` on or off, swapping the IdP, and rotating the OIDC client secret
-      all go through the generic `PATCH /api/organization`, which writes no audit row.
-      Its merge is per top-level key, so a `{"sso": {"client_secret": "…"}}` PATCH
-      replaces the whole block. The runbook in `docs/secrets-rotation.md` told admins to
-      send exactly that until §204 corrected the text. That PATCH drops `enabled`,
-      `sso_only`, the rest of the IdP config and the SCIM group mappings
-      (`scim_groups`, `scim_group_role_map`), and nothing is recorded. §204's `422` covers
-      only a block that keeps both flags and loses an IdP key. The chat webhook and custom
-      domains each got a dedicated audited endpoint, and the PATCH refuses their keys, for
-      the same reason. There is also no SSO panel on `/organization`, so the raw API is
-      the only way to configure SSO at all.
-      **Durable fix:** add `PUT /api/organization/sso` (admin). It validates with
-      `services/sso.check_sso_idp_config` whenever `sso_only` is requested, keeps the
-      stored client secret when the field is omitted ("leave blank to keep"), and carries
-      the SCIM keys across. It audits `organization.sso_updated` with the changed key
-      names only, never values. `PATCH /api/organization` then refuses an `sso` key and
-      names the endpoint, as it does for `chat_notifications`. Add the `/organization`
-      panel on top of it.
-      **Trigger:** before the first tenant configures SSO in production, or the next SSO
-      slice, whichever comes first.
-
-- [ ] **(c) An SSO-only tenant whose complete IdP config stops working has no way back in without a DB edit.**
-      §204 keeps the password open only while the IdP block does not resolve, and
-      "resolves" is a local completeness check on purpose: probing the IdP from the
-      sign-in path would put its latency and outages on our login. So a complete block
-      whose IdP is down, whose client secret has expired (Entra secrets expire after one
-      to two years) or whose signing cert has rotated still closes the password. The
-      SSO button then fails at the IdP. Every member, the admins included, is locked out,
-      and the setting that would reopen the password is behind the sign-in it blocks.
-      Today the only recovery is a platform operator editing `organizations.settings`
-      by hand, with no runbook and no audit row.
-      **Durable fix:** an operator break-glass script, `scripts/sso_break_glass.py --slug
-      <slug>`, that clears `sso_only` (and nothing else) and writes an
-      `organization.sso_only_lifted` audit row. Document it in
-      `docs/founder-runbooks/` next to the other operator procedures, and link it from
-      `docs/authentication.md` § SSO-only mode. Optionally warn admins ahead of a known
-      client-secret or cert expiry.
-      **Trigger:** before the first production tenant turns `sso_only` on.
-
-### Surfaced by widening the backend shard matrix (2026-09-17, issue #444)
-
-- [ ] **(c) The `pytest-split` baseline is stale, and regenerating it is the half
-      that is still unbuilt.** `backend/.test_durations` has exactly one commit in
-      its history (`aa3d47bd`, 2026-09-04): 8,143 entries against 10,123 collected
-      tests, so **20.1% of the suite is partitioned at the *mean* test duration**
-      rather than its own, 58 entries name tests that no longer exist, and its
-      absolute figures (1,628s) understate the real ~60 min of CI pytest by ~2.2x.
-      **The drift now has a voice** — `scripts/check_test_durations.py`
-      (`pnpm check:test-durations`) fails past a ratcheted ceiling and runs in CI's
-      `Backend lint` job, which is the "cheap guard" half of this entry's original
-      durable fix. What is left is the baseline itself.
-      **This is balance, not breakage.** Two independent 8-shard runs measured
-      7m58s–10m36s, a **1.33x spread** with ~3.8x headroom under the 40-minute cap;
-      the 4-shard layout it replaced was **1.12x** (16m16s–18m17s) and failed only
-      because ~17 min against a 40-minute cap leaves nothing for a slow runner. The
-      one 16m46s outlier on #447's own run was a degraded runner, not slice
-      composition — every other shard on that run matches main within ~40s.
-      Coverage also overstates the risk on its own: the uncovered tests are
-      overwhelmingly cheap parametrized meta-tests (`test_migration_model_index_parity.py`
-      alone is 229 of them), for which the ~0.2s mean is about right. The dangerous
-      shape is a contiguous block of *slow* tests going uncovered, because
-      pytest-split cuts contiguous slices — that is what put the realdb hot zone
-      (`test_e*`–`test_i*`) on a single shard.
-      **Durable fix:** regenerate with `pytest --store-durations`, ideally on a CI
-      runner rather than a laptop (balance is only meaningful against the hardware
-      that runs it) — a `workflow_dispatch` job that stores durations and uploads
-      the file. Then lower `MAX_MISSING_FRACTION` to match. **Never raise it.**
-      **Trigger:** the guard firing, or a shard's median approaching ~15 min (where
-      the documented 3x runner headroom runs out under a 40-minute cap).
-
 ### Surfaced by retiring the stale archive PRs (2026-09-18, PRs #453/#454)
 
 - [ ] **(c) The dashboard has no greeting, and the only draft of one never
@@ -1004,22 +802,6 @@ or is a sibling of a fix that needs its own pass.
       **Trigger:** the next change to pre-approval cover or the policy engine's
       `preapproval_required` rule, or a product call on pre-approval semantics.
 
-- [ ] **(c) Report SoD names only the report owner, not who wrote its lines.**
-      `approve_report` refuses `employee_user_id` (the authenticated creator)
-      and nobody else, passing `segregation_actor_ids=None` because the table has
-      no editor tracking. But attach, create-with-`report_id` and expense PATCH
-      carry no ownership check, so a manager can author or rewrite lines on a
-      clerk's draft report — or submit it — and then approve it themselves. The
-      invoice path closed exactly this with `segregation_actor_ids`
-      (`docs/decisions.md` §141, §152).
-      **Durable fix:** either restrict composition and submit of a report to its
-      owner (simplest; matches the docs' "the owner submits"), or record every
-      material author/editor of a line on the report (a JSONB actor set, like
-      `invoices.segregation_actor_ids`) and pass it to `check_segregation`.
-      Tenant migration if the latter.
-      **Trigger:** the next change to report approval / SoD, or a persona-approver
-      or persona-fraudster pass over expenses.
-
 ### Surfaced by the procurement bug hunt (2026-10-05, PR #498)
 
 - [ ] **(c) The budget PO-relief join reads `invoices.po_number`, which has no
@@ -1058,41 +840,6 @@ or is a sibling of a fix that needs its own pass.
       **Trigger:** the next change to `/resume`, `/retry-failed` or
       `classify_payment_failure`, or the first resumed run seen after a mid-dispatch
       crash.
-
-- [ ] **(c) A database error after the processor call leaves the dispatch session aborted.**
-      A deadlock or other database error raised *after* `adapter.create_payment`
-      returns (for example inside `transition_invoice`) is caught by the broad
-      `except` in `_dispatch_run_payments`. The session is already aborted, so the
-      audit write and the commit fail with it, the request returns 500, and the run
-      stays `executing` with the processor's payment id held only in memory. The
-      invoice-lock wait can no longer reach this (it is bounded and refused before
-      the adapter call, decisions §233), but every later write in the loop still can.
-      **Durable fix:** in that `except`, test whether the session is still usable;
-      if not, keep the provider id and reference, roll back, re-lock the payment and,
-      if it is still `pending`, record it `failed` with the provider id kept, so the
-      reconciler classes it as in doubt rather than never-sent.
-      **Trigger:** the next change to `_dispatch_run_payments`, or the first run seen
-      stuck `executing` after a database error.
-
-### Surfaced by the 2026-10-05 issues batch (decisions §230–§236)
-
-- [ ] **(c) Invoice-path refusals the client depends on are still matched by their English text.**
-      The GL-chart refusal (§232) and the step-up / portal step-up refusals (§231)
-      now carry a stable `code`; the rest of the server-composed sentences on the
-      invoice and approval path do not. Two matter: `InvoiceModal.svelte` detects
-      the stale-edit 409 with `err.message.includes('modified since you loaded it')`,
-      so rewording the server sentence silently breaks the reload prompt; and the
-      approval-threshold, CFO-gate and segregation refusals (`services/review.py`,
-      `services/approval_chain.py`) render English, with amounts, in every locale.
-      The supplier portal's `POST /portal/auth/mfa/disable` "Invalid code" 401 is
-      the same shape on a smaller surface.
-      **Durable fix:** a `code` plus typed params on each (amounts as exact strings
-      with their currency), built through `api/refusals.coded_refusal`, localized in
-      `api.ts::apiErrorFromBody` via `localizeApiDetail` (web) and the mobile
-      `ApiException.detail` path, with the English `message` as fallback. The
-      stale-edit 409 first, because a client branches on it.
-      **Trigger:** the next change to any of those messages, or the next i18n pass
-      over server-composed text.
 
 ### Surfaced by the auth bug hunt, round 3 (2026-10-05)
 
@@ -1187,6 +934,79 @@ or is a sibling of a fix that needs its own pass.
       (plus `test_event_claim_exists_reads_without_claiming` with the helper).
       **Trigger:** the dedup TTL (`DEFAULT_DEDUP_TTL_SECONDS`, 72h) has elapsed
       since PR #509 was deployed to every environment.
+
+### Surfaced by the round-2 issues batch (2026-10-06, PR #514, decisions §237–§243)
+
+- [ ] **(c) Eight `create_exception` sites still write an unkeyed English description.**
+      §240 keyed every `_ensure_exception` finding, but the direct `create_exception`
+      callers were outside it: `extraction_failed` in `services/extraction.py` (which
+      also embeds `str(exc)`), `api/erp_webhook.py`, `api/positive_pay.py`,
+      `api/vendors.py` (the bank-change exception), `api/payments.py`,
+      `services/payment_reconciler.py`, `services/payment_settlement_record.py` and
+      `services/payment_erp_sync.py`. Their rows have no `description_code`, so the
+      queue renders them in server English beside localized ones
+      (`backend/docs/invoice-warnings.md` § What is NOT localized lists them).
+      **Durable fix:** an `exception.*` catalogue code per site, built through
+      `invoice_warning_catalog.warning`, with the generator re-run for both clients.
+      Positive Pay de-duplicates on `APException.description == description`, so its
+      dedup key has to move to the code + params first. `extraction_failed` should
+      carry the exception class name as a param, never `str(exc)`.
+      **Trigger:** the next change to any of those sites, or the next i18n pass over
+      the exception queue.
+
+- [ ] **(c) Three refusals a user acts on are still English-only.** §238 coded the
+      approval, CFO / max-amount, credit-memo, expense and stale-edit refusals. Not
+      done: the per-row skip reasons `POST /api/invoices/bulk-status` returns
+      (built by `api/invoices._skip_reason`), the payment-run SoD and CFO sign-off
+      refusals in `api/payments.py`, and the sign-in MFA challenge's
+      `401 "Invalid code"` (`POST /api/auth/mfa/verify`) — the same sentence §238
+      coded on enroll-verify, still bare on the step every MFA user meets.
+      **Durable fix:** `api/refusals.coded_refusal` on each, registered in
+      `frontend/src/lib/api/codedRefusals.ts` and the mobile
+      `coded_refusal_messages.dart`; the bulk skip reasons as per-row codes like
+      `/exceptions/bulk/resolve` already returns. The sign-in MFA refusal carries
+      the `mfa_code_invalid` code; whether its status moves to 400 is decided
+      against the login throttle and the client's 401 handling there, which
+      §238's enroll-verify change did not have to consider.
+      **Trigger:** the next change to any of those messages, or the first
+      non-English tenant running payment runs.
+
+- [ ] **(c) The DSAR export returns a vendor's invoices and payments uncapped.**
+      §237's truncation fix wrapped every `.limit()` collection in `_capped`, but
+      `services/privacy_export` returns a vendor subject's own invoices and payments
+      (and its portal users, a user's passkeys and push devices, and the document
+      manifest) in full. A supplier with years of volume builds one unbounded JSON
+      document in memory, in a synchronous response, on the event loop.
+      **Durable fix:** cap invoices and payments through `_capped` like the other
+      high-volume collections, and move a large export to an asynchronous job that
+      writes the bundle to object storage and hands back a signed URL. Paging a
+      DSAR response would not do, because the subject is owed the whole set.
+      **Trigger:** the first DSAR for a vendor with more than a few thousand
+      invoices, or the next change to `privacy_export`.
+
+- [ ] **(c) `/admin/privacy` is still mostly hardcoded English.** The step-up
+      prompt it gained in §237 is localized (`StepUpPrompt`), but the page's own
+      headings, form labels, help text and result summaries are literal English
+      strings in `frontend/src/routes/admin/privacy/+page.svelte`.
+      **Durable fix:** move every string into the six locale files under a
+      `privacy.admin.*` namespace, with the result summaries built from the export's
+      typed counts rather than server sentences.
+      **Trigger:** the next change to that page, or the first non-English privacy
+      officer.
+
+- [ ] **(c) An expense that sits on no report has no owner, so anyone can rewrite it.**
+      §241 made a report's lines owner-only, but `expenses` has no creator column.
+      A loose line stays editable by any `admin` / `ap_manager` / `ap_clerk` until a
+      report owner attaches it, and attaching adopts it. A manager can therefore
+      edit a clerk's loose line, and the clerk then attaches and submits it unaware.
+      The approver ≠ owner check still holds, but the line's real author is not in
+      the set it checks.
+      **Durable fix:** `expenses.created_by_user_id` (tenant migration, NULL for
+      existing rows, which no honest author exists to backfill — §141's reasoning),
+      stamped on create; claim-field edits of a loose line restricted to its creator;
+      attach refused for a line someone else created.
+      **Trigger:** the next change to expense ownership or the expense SoD check,
+      or a persona-fraudster pass over expenses.
 
 ## (a) Blocked on external credentials, accounts, or hardware
 
