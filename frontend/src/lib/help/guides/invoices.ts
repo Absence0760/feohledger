@@ -11,7 +11,7 @@ export const INVOICE_GUIDES: Guide[] = [
 		summary:
 			'Upload invoice files, give vendors an email address to send to, import open AP from a spreadsheet, and know what happens to each invoice next.',
 		kind: 'howto',
-		roles: ['admin', 'ap_manager', 'cfo'],
+		roles: ['admin', 'ap_manager', 'ap_clerk', 'cfo'],
 		route: '/invoices',
 		sections: [
 			{
@@ -33,7 +33,7 @@ export const INVOICE_GUIDES: Guide[] = [
 					{
 						type: 'note',
 						tone: 'role',
-						text: 'Uploading and creating invoices is open to admins, AP managers and CFOs. An AP clerk can see the invoice list and open any invoice, but cannot add or change invoices.'
+						text: 'Admins, AP managers, CFOs and AP clerks can upload and create invoices. An invoice an AP clerk brings in always goes to a person for approval, even if your workflow would otherwise approve it automatically, and the clerk can never approve it themselves.'
 					}
 				]
 			},
@@ -78,7 +78,7 @@ export const INVOICE_GUIDES: Guide[] = [
 					{
 						type: 'note',
 						tone: 'role',
-						text: 'CSV import is limited to admins and AP managers.'
+						text: 'Admins, AP managers and AP clerks can import. An AP clerk can import only open invoices ({ui:invoices.status.new} or {ui:invoices.status.rejected}); rows that record past payments (paid or done, which is also what a blank status means) are refused for them. CFOs can\'t import.'
 					}
 				]
 			},
@@ -124,7 +124,7 @@ export const INVOICE_GUIDES: Guide[] = [
 		summary:
 			'Check what was read from an invoice, fix fields and line items, code it to the right GL accounts, and understand the warnings before sending it for approval.',
 		kind: 'howto',
-		roles: ['admin', 'ap_manager', 'cfo'],
+		roles: ['admin', 'ap_manager', 'ap_clerk', 'cfo'],
 		route: '/invoices',
 		sections: [
 			{
@@ -143,6 +143,11 @@ export const INVOICE_GUIDES: Guide[] = [
 						type: 'note',
 						tone: 'tip',
 						text: 'If a reading looks badly off, you can ask FeohLedger to read the file again with {ui:invoices.modal.extract} (or {ui:invoices.modal.reExtract} after a failed reading) while the invoice is still new or failed — or simply type the right values in.'
+					},
+					{
+						type: 'note',
+						tone: 'role',
+						text: 'AP clerks can correct and code an invoice while it is {ui:invoices.status.new}, {ui:invoices.status.pending}, {ui:invoices.status.failed} or {ui:invoices.status.rejected}, until they submit it. After that, an AP manager, CFO or admin corrects it or rejects it back. A clerk who changes an invoice someone else brought in is recorded on it, so they can never approve it later.'
 					}
 				]
 			},

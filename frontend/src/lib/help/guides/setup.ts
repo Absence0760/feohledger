@@ -159,7 +159,7 @@ export const SETUP_GUIDES: Guide[] = [
 							'Admin: everything, including users, roles, organization settings, workflows and every sensitive permission.',
 							'AP Manager: approves invoices, approves and executes payment runs, manages vendors, approves vendor bank changes and works the exception queue. Voiding a payment is not included by default.',
 							'CFO: approves invoices, including those above the CFO thresholds, approves, executes and voids payments, and sees the finance dashboards and governance pages.',
-							'AP Clerk: a mostly read-only view of invoices and the work around them. A clerk cannot upload, edit, submit or approve invoices and holds none of the sensitive permissions.'
+							'AP Clerk: enters and prepares invoices (upload, create, import open invoices, correct and code them, submit for review) and sees the work around them. A clerk can change an invoice only until it is submitted, can never approve or pay, and holds none of the sensitive permissions.'
 						]
 					},
 					{

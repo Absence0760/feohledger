@@ -126,7 +126,7 @@ export const START_GUIDES: Guide[] = [
 				blocks: [
 					{
 						type: 'p',
-						text: 'As an AP clerk you have a look-up-and-prepare role. You can see every [[invoice]] and the documents around it, track where each one is in its lifecycle, prepare purchasing requests and expenses, and answer questions from suppliers. Creating, editing, approving and paying invoices belongs to AP managers, CFOs and admins.'
+						text: 'As an AP clerk you bring invoices in and get them ready for approval. You upload, create or import [[invoice|invoices]], check and correct what was read, code them to GL accounts, and submit them for review. You can also see every invoice and the documents around it, prepare purchasing requests and expenses, and answer questions from suppliers. Approving and paying invoices belongs to AP managers, CFOs and admins.'
 					},
 					{
 						type: 'p',
@@ -143,6 +143,7 @@ export const START_GUIDES: Guide[] = [
 							'Read [[guide:getting-around|Getting around FeohLedger]] and set up two-factor sign-in with [[guide:secure-your-account|Secure your account]].',
 							'Learn the stages an invoice moves through in [[guide:invoice-lifecycle|The invoice lifecycle]], so a status like {ui:invoices.status.readyForReview} or {ui:invoices.status.approved} tells you who acts next.',
 							'Open [[page:/invoices]] and practise finding an invoice by vendor, status or amount. Save the views you use as bookmarks.',
+							'Bring invoices in with [[guide:capture-invoices|Capture invoices]], then check, correct and code each one before submitting it: [[guide:review-invoice|Review an invoice]].',
 							'When an invoice is held on a match, look up its order and delivery on [[page:/purchase-orders]] and [[page:/goods-receipts]]. [[guide:how-matching-works|How matching works]] explains what is being compared.',
 							'Look up GL codes on [[page:/gl-accounts]] when someone asks how a cost should be coded.',
 							'Raise a purchase request with [[guide:raise-requisition|Raise a requisition]], and claim your own spending with [[guide:submit-expenses|Submit expenses]].',
@@ -161,7 +162,7 @@ export const START_GUIDES: Guide[] = [
 					{
 						type: 'note',
 						tone: 'caution',
-						text: 'You cannot approve invoices, create payment runs or change vendor bank details, and [[page:/payments]], [[page:/vendors]] and [[page:/exceptions]] do not appear in your sidebar. This is [[segregation-of-duties]]: the people who prepare and look up AP work are kept apart from the people who sign it off and send money, so no single person can push a payment through alone.'
+						text: 'Once you submit an invoice for review you can no longer change it; if it needs fixing, the reviewer corrects it or rejects it back to you. An invoice you brought in always goes to someone else for approval. You cannot approve invoices, create payment runs or change vendor bank details, and [[page:/payments]], [[page:/vendors]] and [[page:/exceptions]] do not appear in your sidebar. This is [[segregation-of-duties]]: the people who prepare and look up AP work are kept apart from the people who sign it off and send money, so no single person can push a payment through alone.'
 					},
 					{
 						type: 'note',
@@ -172,7 +173,7 @@ export const START_GUIDES: Guide[] = [
 			}
 		],
 		terms: ['invoice', 'purchase-order', 'gl-coding', 'requisition', 'segregation-of-duties'],
-		related: ['getting-around', 'invoice-lifecycle', 'raise-requisition', 'submit-expenses']
+		related: ['getting-around', 'invoice-lifecycle', 'capture-invoices', 'raise-requisition', 'submit-expenses']
 	},
 	{
 		id: 'start-ap-manager',
