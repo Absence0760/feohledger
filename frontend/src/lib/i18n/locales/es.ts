@@ -224,6 +224,44 @@ export const messages = {
 		'No hay ninguna clave de acceso registrada',
 	'authRefusal.portalStepUpFailed':
 		'Confirme su contraseña o un código actual de su app de autenticación para cambiar la verificación en dos pasos.',
+	'authRefusal.sensitiveStepUpRequired':
+		'Confirme un código actual de su app de autenticación o una llave de acceso registrada para continuar.',
+	'authRefusal.sensitiveStepUpFailed':
+		'No se pudo verificar ese código o esa llave de acceso. Confirme un código actual de su app de autenticación o una llave de acceso registrada para continuar.',
+	'authRefusal.sensitiveStepUpNoFactor':
+		'Esta acción requiere un segundo factor. Configure primero una app de autenticación o una llave de acceso en su perfil: una contraseña sola no puede autorizarla.',
+	'authRefusal.sensitiveStepUpUnavailable':
+		'Esta acción requiere la verificación en dos pasos, que no está habilitada en esta instalación.',
+	'stepUpPrompt.title':
+		'Confirme que es usted',
+	'stepUpPrompt.codeLabel':
+		'Código de autenticación',
+	'stepUpPrompt.confirm':
+		'Confirmar',
+	'stepUpPrompt.confirming':
+		'Confirmando…',
+	'stepUpPrompt.usePasskey':
+		'Usar una llave de acceso',
+	'stepUpPrompt.cancel':
+		'Cancelar',
+	'stepUpPrompt.failed':
+		'No se pudo confirmar. Inténtelo de nuevo.',
+	'privacyDsar.includeBanking':
+		'Incluir los datos bancarios completos (sin enmascarar)',
+	'privacyDsar.includeBankingHint':
+		'Los datos bancarios se enmascaran por defecto. Una exportación sin enmascarar requiere un motivo por escrito y una confirmación con un segundo factor, y se registra por separado en el registro de auditoría.',
+	'privacyDsar.justificationLabel':
+		'Motivo de la exportación sin enmascarar',
+	'privacyDsar.justificationHint':
+		'Base legal o referencia del ticket. Queda registrada en el registro de auditoría, así que no pegue datos personales aquí.',
+	'privacyDsar.stepUpHint':
+		'Una exportación sin enmascarar revela los números de cuenta completos de un proveedor. Introduzca un código actual de su app de autenticación o use una llave de acceso registrada.',
+	'privacyDsar.noFactor':
+		'Esta exportación requiere un segundo factor y una contraseña sola no puede autorizarla. {profile} primero.',
+	'privacyDsar.noFactorLink':
+		'Configure una app de autenticación o una llave de acceso en su perfil',
+	'privacyDsar.unmaskedNotice':
+		'Los datos bancarios de esta exportación no están enmascarados. Trátela en consecuencia.',
 
 	'profile.sessions.heading': 'Dispositivos con sesión abierta',
 	'profile.sessions.hint':

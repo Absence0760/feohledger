@@ -226,6 +226,44 @@ export const messages = {
 		'Nenhuma chave de acesso registrada',
 	'authRefusal.portalStepUpFailed':
 		'Confirme sua senha ou um código atual do seu aplicativo autenticador para alterar suas configurações de duas etapas.',
+	'authRefusal.sensitiveStepUpRequired':
+		'Confirme um código atual do seu aplicativo autenticador ou uma chave de acesso registrada para continuar.',
+	'authRefusal.sensitiveStepUpFailed':
+		'Não foi possível verificar esse código ou essa chave de acesso. Confirme um código atual do seu aplicativo autenticador ou uma chave de acesso registrada para continuar.',
+	'authRefusal.sensitiveStepUpNoFactor':
+		'Esta ação exige um segundo fator. Configure primeiro um aplicativo autenticador ou uma chave de acesso no seu perfil — uma senha sozinha não pode autorizá-la.',
+	'authRefusal.sensitiveStepUpUnavailable':
+		'Esta ação exige a autenticação em duas etapas, que não está habilitada nesta instalação.',
+	'stepUpPrompt.title':
+		'Confirme que é você',
+	'stepUpPrompt.codeLabel':
+		'Código do autenticador',
+	'stepUpPrompt.confirm':
+		'Confirmar',
+	'stepUpPrompt.confirming':
+		'Confirmando…',
+	'stepUpPrompt.usePasskey':
+		'Usar uma chave de acesso',
+	'stepUpPrompt.cancel':
+		'Cancelar',
+	'stepUpPrompt.failed':
+		'Não foi possível confirmar. Tente novamente.',
+	'privacyDsar.includeBanking':
+		'Incluir os dados bancários completos (sem máscara)',
+	'privacyDsar.includeBankingHint':
+		'Os dados bancários são mascarados por padrão. Uma exportação sem máscara exige um motivo por escrito e uma confirmação com um segundo fator, e é registrada separadamente na trilha de auditoria.',
+	'privacyDsar.justificationLabel':
+		'Motivo da exportação sem máscara',
+	'privacyDsar.justificationHint':
+		'Base legal ou referência do chamado. Ela é registrada na trilha de auditoria, então não cole dados pessoais aqui.',
+	'privacyDsar.stepUpHint':
+		'Uma exportação sem máscara revela os números de conta completos de um fornecedor. Informe um código atual do seu aplicativo autenticador ou use uma chave de acesso registrada.',
+	'privacyDsar.noFactor':
+		'Esta exportação exige um segundo fator, e uma senha sozinha não pode autorizá-la. {profile} primeiro.',
+	'privacyDsar.noFactorLink':
+		'Configure um aplicativo autenticador ou uma chave de acesso no seu perfil',
+	'privacyDsar.unmaskedNotice':
+		'Os dados bancários desta exportação estão sem máscara. Trate-a de acordo.',
 
 	'profile.sessions.heading': 'Dispositivos conectados',
 	'profile.sessions.hint':

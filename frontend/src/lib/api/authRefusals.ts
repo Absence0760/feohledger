@@ -12,8 +12,8 @@
  * `$app/*`, so the node vitest config can reach it, and `m` is passed in by the
  * caller rather than imported from the rune store.
  *
- * The table is hand-written rather than generated because it is five entries
- * that change only alongside a deliberate auth decision; `authRefusals.test.ts`
+ * The table is hand-written rather than generated because it is a handful of
+ * entries that change only alongside a deliberate auth decision; `authRefusals.test.ts`
  * pins each code against the backend's literal so a rename on either side
  * fails there.
  */
@@ -35,7 +35,12 @@ const KEYS: Record<string, MessageKey> = {
 	step_up_sso_only: 'authRefusal.stepUpSsoOnly',
 	passkey_wrong_host: 'authRefusal.passkeyWrongHost',
 	passkey_not_registered: 'authRefusal.passkeyNotRegistered',
-	portal_step_up_failed: 'authRefusal.portalStepUpFailed'
+	portal_step_up_failed: 'authRefusal.portalStepUpFailed',
+	// The second-factor gate on a sensitive action (`api/auth.require_sensitive_step_up`).
+	sensitive_step_up_required: 'authRefusal.sensitiveStepUpRequired',
+	sensitive_step_up_failed: 'authRefusal.sensitiveStepUpFailed',
+	sensitive_step_up_no_factor: 'authRefusal.sensitiveStepUpNoFactor',
+	sensitive_step_up_unavailable: 'authRefusal.sensitiveStepUpUnavailable'
 };
 
 /** The codes this build can state in the reader's language. */

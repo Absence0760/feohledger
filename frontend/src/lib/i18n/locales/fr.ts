@@ -225,6 +225,44 @@ export const messages = {
 		'Aucune clé d’accès enregistrée',
 	'authRefusal.portalStepUpFailed':
 		'Confirmez votre mot de passe ou un code actuel de votre application d’authentification pour modifier votre double authentification.',
+	'authRefusal.sensitiveStepUpRequired':
+		'Confirmez un code actuel de votre application d’authentification ou une clé d’accès enregistrée pour continuer.',
+	'authRefusal.sensitiveStepUpFailed':
+		'Ce code ou cette clé d’accès n’a pas pu être vérifié. Confirmez un code actuel de votre application d’authentification ou une clé d’accès enregistrée pour continuer.',
+	'authRefusal.sensitiveStepUpNoFactor':
+		'Cette action exige un second facteur. Configurez d’abord une application d’authentification ou une clé d’accès dans votre profil — un mot de passe seul ne peut pas l’autoriser.',
+	'authRefusal.sensitiveStepUpUnavailable':
+		'Cette action exige la double authentification, qui n’est pas activée sur ce déploiement.',
+	'stepUpPrompt.title':
+		'Confirmez votre identité',
+	'stepUpPrompt.codeLabel':
+		'Code d’authentification',
+	'stepUpPrompt.confirm':
+		'Confirmer',
+	'stepUpPrompt.confirming':
+		'Confirmation…',
+	'stepUpPrompt.usePasskey':
+		'Utiliser plutôt une clé d’accès',
+	'stepUpPrompt.cancel':
+		'Annuler',
+	'stepUpPrompt.failed':
+		'Confirmation impossible. Réessayez.',
+	'privacyDsar.includeBanking':
+		'Inclure les coordonnées bancaires complètes (non masquées)',
+	'privacyDsar.includeBankingHint':
+		'Les coordonnées bancaires sont masquées par défaut. Un export non masqué exige une justification écrite et une confirmation par second facteur, et il est consigné séparément dans la piste d’audit.',
+	'privacyDsar.justificationLabel':
+		'Motif de l’export non masqué',
+	'privacyDsar.justificationHint':
+		'Base légale ou référence de ticket. Elle est consignée dans la piste d’audit : n’y collez aucune donnée personnelle.',
+	'privacyDsar.stepUpHint':
+		'Un export non masqué révèle les numéros de compte complets d’un fournisseur. Saisissez un code actuel de votre application d’authentification ou utilisez une clé d’accès enregistrée.',
+	'privacyDsar.noFactor':
+		'Cet export exige un second facteur, et un mot de passe seul ne peut pas l’autoriser. {profile} d’abord.',
+	'privacyDsar.noFactorLink':
+		'Configurez une application d’authentification ou une clé d’accès dans votre profil',
+	'privacyDsar.unmaskedNotice':
+		'Les coordonnées bancaires de cet export ne sont pas masquées. Traitez-le en conséquence.',
 
 	'profile.sessions.heading': 'Appareils connectés',
 	'profile.sessions.hint':

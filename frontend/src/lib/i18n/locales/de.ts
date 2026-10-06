@@ -222,6 +222,44 @@ export const messages = {
 		'Kein Passkey registriert',
 	'authRefusal.portalStepUpFailed':
 		'Bestätigen Sie Ihr Passwort oder einen aktuellen Code aus der Authenticator-App, um Ihre Zwei-Faktor-Einstellungen zu ändern.',
+	'authRefusal.sensitiveStepUpRequired':
+		'Bestätigen Sie einen aktuellen Code aus Ihrer Authenticator-App oder einen registrierten Passkey, um fortzufahren.',
+	'authRefusal.sensitiveStepUpFailed':
+		'Dieser Code oder Passkey konnte nicht bestätigt werden. Bestätigen Sie einen aktuellen Code aus Ihrer Authenticator-App oder einen registrierten Passkey, um fortzufahren.',
+	'authRefusal.sensitiveStepUpNoFactor':
+		'Diese Aktion erfordert einen zweiten Faktor. Richten Sie zuerst in Ihrem Profil eine Authenticator-App oder einen Passkey ein – ein Passwort allein kann sie nicht autorisieren.',
+	'authRefusal.sensitiveStepUpUnavailable':
+		'Diese Aktion erfordert die Zwei-Faktor-Authentifizierung, die in dieser Installation nicht aktiviert ist.',
+	'stepUpPrompt.title':
+		'Bestätigen Sie Ihre Identität',
+	'stepUpPrompt.codeLabel':
+		'Authenticator-Code',
+	'stepUpPrompt.confirm':
+		'Bestätigen',
+	'stepUpPrompt.confirming':
+		'Wird bestätigt…',
+	'stepUpPrompt.usePasskey':
+		'Stattdessen einen Passkey verwenden',
+	'stepUpPrompt.cancel':
+		'Abbrechen',
+	'stepUpPrompt.failed':
+		'Bestätigung fehlgeschlagen. Versuchen Sie es erneut.',
+	'privacyDsar.includeBanking':
+		'Vollständige Bankdaten einschließen (unmaskiert)',
+	'privacyDsar.includeBankingHint':
+		'Bankdaten sind standardmäßig maskiert. Ein unmaskierter Export erfordert eine schriftliche Begründung und eine Bestätigung mit einem zweiten Faktor und wird gesondert im Prüfprotokoll erfasst.',
+	'privacyDsar.justificationLabel':
+		'Grund für den unmaskierten Export',
+	'privacyDsar.justificationHint':
+		'Rechtsgrundlage oder Ticketnummer. Sie wird im Prüfprotokoll erfasst – fügen Sie hier keine personenbezogenen Daten ein.',
+	'privacyDsar.stepUpHint':
+		'Ein unmaskierter Export legt die vollständigen Kontonummern eines Lieferanten offen. Geben Sie einen aktuellen Code aus Ihrer Authenticator-App ein oder verwenden Sie einen registrierten Passkey.',
+	'privacyDsar.noFactor':
+		'Dieser Export erfordert einen zweiten Faktor, und ein Passwort allein kann ihn nicht autorisieren. {profile}, bevor Sie fortfahren.',
+	'privacyDsar.noFactorLink':
+		'Richten Sie in Ihrem Profil eine Authenticator-App oder einen Passkey ein',
+	'privacyDsar.unmaskedNotice':
+		'Die Bankdaten in diesem Export sind unmaskiert. Behandeln Sie ihn entsprechend.',
 
 	'profile.sessions.heading': 'Angemeldete Geräte',
 	'profile.sessions.hint':

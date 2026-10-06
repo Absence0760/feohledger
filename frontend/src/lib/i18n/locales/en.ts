@@ -260,6 +260,44 @@ export const en = {
 		'No passkey registered',
 	'authRefusal.portalStepUpFailed':
 		'Confirm your password or a current authenticator code to change your two-factor settings.',
+	'authRefusal.sensitiveStepUpRequired':
+		'Confirm a current authenticator code or a registered passkey to continue.',
+	'authRefusal.sensitiveStepUpFailed':
+		'That authenticator code or passkey could not be verified. Confirm a current authenticator code or a registered passkey to continue.',
+	'authRefusal.sensitiveStepUpNoFactor':
+		'This action needs a second factor. Set up an authenticator app or a passkey on your profile first — a password alone cannot authorize it.',
+	'authRefusal.sensitiveStepUpUnavailable':
+		'This action needs two-factor authentication, which is not enabled on this deployment.',
+	'stepUpPrompt.title':
+		'Confirm it’s you',
+	'stepUpPrompt.codeLabel':
+		'Authenticator code',
+	'stepUpPrompt.confirm':
+		'Confirm',
+	'stepUpPrompt.confirming':
+		'Confirming…',
+	'stepUpPrompt.usePasskey':
+		'Use a passkey instead',
+	'stepUpPrompt.cancel':
+		'Cancel',
+	'stepUpPrompt.failed':
+		'Could not confirm. Try again.',
+	'privacyDsar.includeBanking':
+		'Include full bank details (unmasked)',
+	'privacyDsar.includeBankingHint':
+		'Bank details are masked by default. An unmasked export needs a written reason and a second-factor confirmation, and is recorded separately in the audit trail.',
+	'privacyDsar.justificationLabel':
+		'Reason for the unmasked export',
+	'privacyDsar.justificationHint':
+		'Legal basis or ticket reference. It is recorded in the audit trail, so do not paste personal data here.',
+	'privacyDsar.stepUpHint':
+		'An unmasked export reveals a supplier’s full account numbers. Enter a current code from your authenticator app, or use a registered passkey.',
+	'privacyDsar.noFactor':
+		'This export needs a second factor, and a password alone cannot authorize it. {profile} first.',
+	'privacyDsar.noFactorLink':
+		'Set up an authenticator app or a passkey on your profile',
+	'privacyDsar.unmaskedNotice':
+		'Bank details in this export are unmasked. Handle it accordingly.',
 
 	// Profile → Signed-in devices card
 	'profile.sessions.heading': 'Signed-in devices',

@@ -7,8 +7,14 @@
 	import Modal from '#lib/components/ui/Modal.svelte';
 	import Badge from '#lib/components/ui/Badge.svelte';
 	import RowAction from '#lib/components/ui/RowAction.svelte';
+	import StepUpPrompt from '#lib/components/ui/StepUpPrompt.svelte';
+	import LinkedMessage from '#lib/components/ui/LinkedMessage.svelte';
 	import { toast } from '#lib/components/ui/Toast.svelte';
 	import { submitDsar, submitErasure, listPrivacyRequests } from '#lib/api/privacy.ts';
+	import { authErrorMessage } from '#lib/api/authRefusals.ts';
+	import { m } from '#lib/i18n/store.svelte.ts';
+	import { PERM_VENDOR_BANK_CHANGE_APPROVE } from '#lib/types/admin.ts';
+	import type { StepUpProof } from '#lib/stores/auth.svelte.ts';
 	import {
 		SUBJECT_TYPES,
 		SUBJECT_TYPE_LABELS,
@@ -65,17 +71,76 @@
 	let dsarResult = $state<DSARResponse | null>(null);
 	let dsarCopied = $state(false);
 
-	async function handleExport() {
+	// ── Unmasked banking (vendor_contact only) ───────────────────────────
+	// Bank details are masked unless the admin opts in, states a reason, holds
+	// the bank-change-approve permission AND proves a second factor — the server
+	// enforces all four (`api/privacy.py`, `api/auth.require_sensitive_step_up`).
+	// The option is offered only where the first three can hold, so it is never
+	// a control the server is guaranteed to refuse.
+	const canUnmask = $derived(
+		subjectType === 'vendor_contact' && auth.can(PERM_VENDOR_BANK_CHANGE_APPROVE)
+	);
+	let includeBanking = $state(false);
+	let bankingJustification = $state('');
+	const unmasking = $derived(canUnmask && includeBanking);
+	// The server's verdict on the second factor drives the prompt: it answers
+	// `sensitive_step_up_required` when no proof was sent, which is the cue to
+	// collect one. Asking the server rather than guessing keeps a local stack
+	// with the MFA master switch off working without a prompt it would ignore.
+	let stepUpOpen = $state(false);
+	let stepUpError = $state<string | null>(null);
+	let noFactor = $state(false);
+
+	function refusalCode(e: unknown): string | null {
+		const code = (e as { code?: unknown } | null)?.code;
+		return typeof code === 'string' ? code : null;
+	}
+
+	async function handleExport(stepUp?: StepUpProof) {
 		const id = identifier.trim();
 		if (!id) return;
+		if (unmasking && !bankingJustification.trim()) return;
 		dsarSubmitting = true;
+		noFactor = false;
 		try {
-			const res = await submitDsar({ subject_type: subjectType, identifier: id });
+			const res = await submitDsar({
+				subject_type: subjectType,
+				identifier: id,
+				...(unmasking
+					? {
+							include_banking: true,
+							banking_justification: bankingJustification.trim(),
+							...(stepUp ? { step_up: stepUp } : {})
+						}
+					: {})
+			});
+			stepUpOpen = false;
+			stepUpError = null;
 			dsarResult = res;
 			dsarCopied = false;
 			await loadRequests();
 		} catch (e) {
-			toast(e instanceof Error ? e.message : 'Failed to export the subject’s data.', 'error');
+			const code = refusalCode(e);
+			if (code === 'sensitive_step_up_required') {
+				stepUpError = null;
+				stepUpOpen = true;
+			} else if (code === 'sensitive_step_up_failed' && stepUpOpen) {
+				stepUpError = authErrorMessage(e, m, 'stepUpPrompt.failed');
+			} else if (code === 'sensitive_step_up_no_factor') {
+				stepUpOpen = false;
+				noFactor = true;
+			} else {
+				stepUpOpen = false;
+				// A coded refusal this build can state renders in the reader's
+				// language (`sensitive_step_up_unavailable`); anything else is the
+				// error's own message, exactly as before.
+				toast(
+					e instanceof Error
+						? authErrorMessage(e, m, 'stepUpPrompt.failed')
+						: 'Failed to export the subject’s data.',
+					'error'
+				);
+			}
 		} finally {
 			dsarSubmitting = false;
 		}
@@ -182,8 +247,50 @@
 				/>
 				<p class="field-hint">{SUBJECT_IDENTIFIER_HINTS[subjectType]}</p>
 			</div>
+			{#if canUnmask}
+				<div class="form-row unmask-row">
+					<label class="checkbox-line">
+						<input
+							type="checkbox"
+							bind:checked={includeBanking}
+							data-testid="dsar-include-banking"
+						/>
+						<span>{m('privacyDsar.includeBanking')}</span>
+					</label>
+					<p class="field-hint">{m('privacyDsar.includeBankingHint')}</p>
+					{#if includeBanking}
+						<label for="privacy-banking-justification" class="justification-label">
+							{m('privacyDsar.justificationLabel')}
+						</label>
+						<textarea
+							id="privacy-banking-justification"
+							bind:value={bankingJustification}
+							rows="2"
+							maxlength="500"
+							required
+						></textarea>
+						<p class="field-hint">{m('privacyDsar.justificationHint')}</p>
+					{/if}
+					{#if noFactor}
+						<p class="unmask-refusal" role="alert" data-testid="dsar-no-factor">
+							<LinkedMessage
+								text={m('privacyDsar.noFactor')}
+								links={{
+									profile: { href: '/profile?section=mfa', label: m('privacyDsar.noFactorLink') }
+								}}
+							/>
+						</p>
+					{/if}
+				</div>
+			{/if}
 			<div class="form-actions">
-				<button type="submit" class="btn-primary" disabled={dsarSubmitting || !identifier.trim()}>
+				<button
+					type="submit"
+					class="btn-primary"
+					disabled={dsarSubmitting ||
+						!identifier.trim() ||
+						(unmasking && !bankingJustification.trim())}
+				>
 					{dsarSubmitting ? 'Exporting…' : 'Export data (DSAR)'}
 				</button>
 				<button
@@ -260,6 +367,11 @@
 				minute: 'numeric'
 			})}. This bundle is not stored — copy it now if you need it.
 		</p>
+		{#if dsarResult.banking_disclosure === 'unmasked'}
+			<p class="unmask-refusal" data-testid="dsar-unmasked-notice">
+				{m('privacyDsar.unmaskedNotice')}
+			</p>
+		{/if}
 		<div class="json-view-wrap">
 			<pre class="json-view" data-testid="dsar-bundle">{JSON.stringify(dsarResult.data, null, 2)}</pre>
 		</div>
@@ -271,6 +383,20 @@
 		</div>
 	{/if}
 </Modal>
+
+<!-- Second-factor proof for an unmasked export -->
+<StepUpPrompt
+	open={stepUpOpen}
+	operation="dsar_unmasked_export"
+	hint={m('privacyDsar.stepUpHint')}
+	busy={dsarSubmitting}
+	error={stepUpError}
+	onproof={(proof) => handleExport(proof)}
+	oncancel={() => {
+		stepUpOpen = false;
+		stepUpError = null;
+	}}
+/>
 
 <!-- Erasure confirm-then-act (irreversible) -->
 <Modal open={erasing} ariaLabel="Erase subject data" width="md" onclose={closeErasureConfirm}>
@@ -510,6 +636,20 @@
 
 	.ack-line {
 		margin-bottom: 0.25rem;
+	}
+
+	.unmask-row textarea {
+		margin-bottom: 0;
+	}
+
+	.justification-label {
+		margin-top: 0.75rem;
+	}
+
+	.unmask-refusal {
+		margin: 0.5rem 0 0;
+		color: var(--danger);
+		font-size: 0.85rem;
 	}
 
 	/* The request-form fields live in the page body, outside `.modal` (which

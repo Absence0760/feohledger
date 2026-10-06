@@ -1,5 +1,6 @@
 // Types for the GDPR/CCPA privacy surface (`/admin/privacy`). Mirrors
 // `backend/app/schemas/privacy.py` + `backend/app/models/data_subject_request.py`.
+import type { StepUpProof } from '#lib/stores/auth.svelte.ts';
 
 export const SUBJECT_TYPES = ['user', 'vendor_user', 'vendor_contact'] as const;
 export type SubjectType = (typeof SUBJECT_TYPES)[number];
@@ -18,9 +19,18 @@ export const SUBJECT_IDENTIFIER_HINTS: Record<SubjectType, string> = {
 	vendor_contact: 'The Vendor UUID (from the vendor detail view or the URL).'
 };
 
+/** A second-factor proof for an unmasked export — the server reads `code` or
+ *  `assertion` and ignores a password (`require_sensitive_step_up`). */
+export type DSARStepUp = StepUpProof;
+
 export interface DSARRequest {
 	subject_type: SubjectType;
 	identifier: string;
+	/** Return bank details unmasked — `vendor_contact` only, needs the
+	 *  `vendor.bank_change.approve` permission, a justification and `step_up`. */
+	include_banking?: boolean;
+	banking_justification?: string;
+	step_up?: DSARStepUp;
 }
 
 export interface DSARResponse {
@@ -28,6 +38,7 @@ export interface DSARResponse {
 	subject_type: string;
 	subject_id: string;
 	generated_at: string;
+	banking_disclosure: 'masked' | 'unmasked';
 	// Loosely typed by design — a heterogeneous portable PII bundle.
 	data: Record<string, unknown>;
 }

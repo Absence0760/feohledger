@@ -219,6 +219,44 @@ export const messages = {
 		'パスキーが登録されていません',
 	'authRefusal.portalStepUpFailed':
 		'二要素認証の設定を変更するには、パスワードまたは認証アプリの現在のコードで確認してください。',
+	'authRefusal.sensitiveStepUpRequired':
+		'続行するには、認証アプリの現在のコードまたは登録済みのパスキーで確認してください。',
+	'authRefusal.sensitiveStepUpFailed':
+		'そのコードまたはパスキーを確認できませんでした。続行するには、認証アプリの現在のコードまたは登録済みのパスキーで確認してください。',
+	'authRefusal.sensitiveStepUpNoFactor':
+		'この操作には第2要素が必要です。先にプロフィールで認証アプリまたはパスキーを設定してください。パスワードだけでは承認できません。',
+	'authRefusal.sensitiveStepUpUnavailable':
+		'この操作には二要素認証が必要ですが、この環境では有効になっていません。',
+	'stepUpPrompt.title':
+		'本人確認',
+	'stepUpPrompt.codeLabel':
+		'認証コード',
+	'stepUpPrompt.confirm':
+		'確認',
+	'stepUpPrompt.confirming':
+		'確認中…',
+	'stepUpPrompt.usePasskey':
+		'代わりにパスキーを使用',
+	'stepUpPrompt.cancel':
+		'キャンセル',
+	'stepUpPrompt.failed':
+		'確認できませんでした。もう一度お試しください。',
+	'privacyDsar.includeBanking':
+		'口座情報を完全な形で含める（マスクなし）',
+	'privacyDsar.includeBankingHint':
+		'口座情報は既定でマスクされます。マスクなしのエクスポートには記入済みの理由と第2要素による確認が必要で、監査証跡に別途記録されます。',
+	'privacyDsar.justificationLabel':
+		'マスクなしでエクスポートする理由',
+	'privacyDsar.justificationHint':
+		'法的根拠またはチケット番号。監査証跡に記録されるため、個人データは貼り付けないでください。',
+	'privacyDsar.stepUpHint':
+		'マスクなしのエクスポートでは、仕入先の口座番号がすべて表示されます。認証アプリの現在のコードを入力するか、登録済みのパスキーを使用してください。',
+	'privacyDsar.noFactor':
+		'このエクスポートには第2要素が必要で、パスワードだけでは承認できません。先に{profile}。',
+	'privacyDsar.noFactorLink':
+		'プロフィールで認証アプリまたはパスキーを設定してください',
+	'privacyDsar.unmaskedNotice':
+		'このエクスポートの口座情報はマスクされていません。取り扱いに注意してください。',
 
 	'profile.sessions.heading': 'サインイン中の端末',
 	'profile.sessions.hint':

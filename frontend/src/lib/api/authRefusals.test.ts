@@ -34,6 +34,10 @@ describe('authRefusalText', () => {
 			'passkey_not_registered',
 			'passkey_wrong_host',
 			'portal_step_up_failed',
+			'sensitive_step_up_failed',
+			'sensitive_step_up_no_factor',
+			'sensitive_step_up_required',
+			'sensitive_step_up_unavailable',
 			'step_up_failed',
 			'step_up_sso_only'
 		]);
@@ -45,12 +49,27 @@ describe('authRefusalText', () => {
 		['passkey_not_registered', 'authRefusal.passkeyNotRegistered'],
 		// The portal's own sentence: it must not offer a passkey, which a
 		// supplier account cannot have.
-		['portal_step_up_failed', 'authRefusal.portalStepUpFailed']
+		['portal_step_up_failed', 'authRefusal.portalStepUpFailed'],
+		['sensitive_step_up_required', 'authRefusal.sensitiveStepUpRequired'],
+		['sensitive_step_up_failed', 'authRefusal.sensitiveStepUpFailed'],
+		['sensitive_step_up_no_factor', 'authRefusal.sensitiveStepUpNoFactor'],
+		['sensitive_step_up_unavailable', 'authRefusal.sensitiveStepUpUnavailable']
 	] as const)('maps %s to %s', (code, key) => {
 		const { t, calls } = recorder();
 		const out = authRefusalText({ code, params: {}, message: 'server English' }, t);
 		expect(calls.map((c) => c.key)).toEqual([key]);
 		expect(out).toBe(en[key]);
+	});
+
+	it('never offers the password as a second factor for a sensitive action', () => {
+		// `require_sensitive_step_up` ignores an offered password in every tenant;
+		// a sentence that asked for one would send the reader to a dead end.
+		for (const key of [
+			'authRefusal.sensitiveStepUpRequired',
+			'authRefusal.sensitiveStepUpFailed'
+		] as const) {
+			expect(en[key].toLowerCase()).not.toContain('password');
+		}
 	});
 
 	it('never offers a supplier the passkey their portal account cannot hold', () => {
