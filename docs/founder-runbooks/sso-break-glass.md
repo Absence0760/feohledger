@@ -28,7 +28,12 @@ This is a **per-incident operator procedure**, not a launch step.
 - writes an `organization.sso_only_lifted` row to the tenant's audit trail
   **before** it changes anything, with `actor_id` null, `source:
   operator_break_glass`, whether the password was actually closed, and your
-  `--reason`. If that row cannot be written, nothing is changed (exit code 2);
+  `--reason`. If that row cannot be written, nothing is changed (exit code 2).
+  The row goes straight into the tenant database in **every** audit mode,
+  `FEOH_AUDIT_MODE=lambda` included (`audit_dispatch.record_auth_audit_or_raise`):
+  in lambda mode ordinary audit rows are only queued to SQS, and "queued" is
+  not "recorded" — a dead-lettered message would leave the lift made with no
+  row. So "nothing changed without a row" holds in lambda mode too;
 - does nothing, and writes nothing, if the tenant does not have `sso_only` set.
 
 It does not sign anyone in, reset any password, or touch any other tenant.
@@ -68,8 +73,9 @@ Cleared sso_only for tenant 'acme'; audited as organization.sso_only_lifted.
 
 Exit codes: `0` lifted (or nothing to lift), `1` no tenant with that slug,
 `2` the audit row could not be written, so nothing changed — fix the audit path
-(tenant database reachable? `FEOH_AUDIT_MODE=lambda` with SQS reachable?) and
-re-run.
+and re-run. That path is the tenant database itself (reachable, migrated,
+`audit_log` writable) whatever `FEOH_AUDIT_MODE` says; SQS is not involved, so
+an SQS outage cannot cause exit 2 and a healthy SQS does not rule it out.
 
 If it also prints *"the IdP block did not resolve, so password sign-in was
 already open"*, the password was never closed and the lockout has another cause
@@ -88,7 +94,9 @@ Tell the admin:
    back on — and keep this tab signed in while you do.
 
 Every save on that panel is audited as `organization.sso_updated`, so the trail
-shows the lift, the fix and the re-enable in order.
+shows the lift, the fix and the re-enable in order. That row is written the same
+way as the lift's — first, synchronously into the tenant database in every audit
+mode — and a save whose row cannot be written answers `503` and changes nothing.
 
 ## Reference
 

@@ -816,13 +816,36 @@ with three exceptions:
   has. A changed map takes effect at the IdP's next membership push.
 - **`enabled` and `sso_only` must be stated.** An omitted flag is a `422`, not a
   `false` — an omitted flag silently switching SSO off is the defect this
-  replaced. Every shape rule answers with a value-free `422`; the request model
-  is deliberately all-optional so FastAPI's own validation error, which echoes
-  the request object for a missing field, can never carry the secret back.
+  replaced. Every shape rule answers with a value-free `422`.
+
+**A malformed body never echoes its input.** FastAPI's default validation error
+carries each failure's `input`, and for a top-level shape error — a JSON array or
+string body — that input is the whole request, client secret included. So the
+PUT does not let FastAPI validate it: a dependency (`_sso_settings_body`) parses
+the JSON itself and answers an unparseable or non-object body with `422 "Request
+body must be a JSON object"`, and a field-type error with `422 "Invalid SSO
+settings: <locations>"` — dotted field locations only, never a value. The request
+model is all-optional, so an omitted field is never a validation error at all —
+the endpoint refuses an omitted flag itself. The OpenAPI request schema is published explicitly (`openapi_extra`), so the
+contract is unchanged.
 
 Each save writes `organization.sso_updated` with the changed key **names** and
-the resulting `enabled` / `sso_only` / `protocol` — never a value. The view also
-carries the server's verdict (`password_sign_in_closed`, i.e. `is_sso_only`),
+the resulting `enabled` / `sso_only` / `protocol` — never a value. **The row is
+written first, and no row means no change**: it goes through
+`audit_dispatch.record_auth_audit_or_raise`, which writes it into the tenant DB
+synchronously in every audit mode — `FEOH_AUDIT_MODE=lambda` included, where
+ordinary rows are only queued to SQS and a dead-lettered message would otherwise
+leave the policy changed with no record — and if it cannot be written the PUT
+rolls back and answers `503` without saving. A commit failing after the row
+leaves a row for a save that did not land, the safe direction to be wrong in. The
+break-glass lift's `organization.sso_only_lifted` row takes the same path. The
+save holds the org row lock (`app/tenant.lock_organization`, `SELECT … FOR
+UPDATE`) from before it reads `settings` until it commits, as do
+`PATCH /api/organization`, the SCIM token mint and the SCIM group writes — each
+rewrites the whole `settings` JSONB, so without it a SCIM group push could
+silently revert a secret rotation, or the reverse.
+
+The view also carries the server's verdict (`password_sign_in_closed`, i.e. `is_sso_only`),
 the IdP keys the selected protocol still lacks (`idp_config_missing`), and the
 values to register at the IdP (`oidc_redirect_uri`, `saml_acs_url`,
 `saml_sp_entity_id`). Code: `api/organization_sso.py`, `services/sso_settings.py`;
