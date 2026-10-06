@@ -368,6 +368,18 @@
 		a confirmation by us that funds have moved.
 	</p>
 
+	<p>
+		We do not initiate, transmit, execute or settle payments to the Customer's suppliers,
+		and we have no relationship with those suppliers in respect of any payment. Where the
+		Customer pays a supplier outside the Service — from its own bank, its ERP or
+		accounting system, or by any other means — the Service only records that payment.
+		A payment shown as made, scheduled or paid because the Customer's ERP reported it, or
+		because an Authorised User entered it, is the Customer's own record; we do not verify
+		that it was made, that it reached the right account, or that it was for the right
+		amount. Any claim by a supplier about whether, when or how much it was paid is a matter
+		between the Customer and that supplier.
+	</p>
+
 	<h3>7.3 Sanctions screening is a screening aid, not a compliance determination</h3>
 	<p>
 		The vendor sanctions and watchlist screening in the Service is a screening aid. A
@@ -600,7 +612,8 @@
 	<p>
 		Without limiting clause 13.1, and to the fullest extent permitted by law, we are not
 		liable for any loss arising from: a payment the Customer or an Authorised User
-		authorised or approved; an invoice, expense, credit memo or vendor bank detail the
+		authorised or approved, or made outside the Service; a payment status recorded from
+		the Customer's ERP or entered by an Authorised User; an invoice, expense, credit memo or vendor bank detail the
 		Customer accepted, whether or not the Service flagged it; a compliance, tax,
 		accounting or sanctions determination the Customer made; or the Customer's reliance on
 		an automated or AI-assisted output without the human review
