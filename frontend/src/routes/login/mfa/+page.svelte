@@ -5,6 +5,7 @@
 	import { goto } from '$app/navigation';
 	import { onMount } from 'svelte';
 	import { m } from '#lib/i18n/store.svelte.ts';
+	import { authErrorMessage } from '#lib/api/authRefusals.ts';
 
 	type Method = 'totp' | 'passkey' | 'email';
 
@@ -41,7 +42,7 @@
 			sessionStorage.removeItem('mfa_challenge');
 			goto(challenge.must_enroll ? '/profile' : '/');
 		} catch (err) {
-			error = err instanceof Error ? err.message : m('auth.mfa.error.passkey');
+			error = authErrorMessage(err, m, 'auth.mfa.error.passkey');
 		} finally {
 			loading = false;
 		}

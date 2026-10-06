@@ -218,6 +218,119 @@ test.describe('/profile — step-up in an SSO-only tenant', () => {
 	});
 });
 
+/**
+ * Answer a mutating factor call with a CODED 400 — the shape
+ * `backend/app/api/auth.py::coded_refusal` sends (`{code, message, params}`).
+ */
+async function refuseCoded(
+	page: Page,
+	method: string,
+	pathname: string,
+	detail: { code: string; message: string; params: Record<string, unknown> }
+): Promise<void> {
+	await page.route(
+		(url) => url.pathname === pathname,
+		async (route) => {
+			if (route.request().method() !== method) return route.fallback();
+			await route.fulfill({ status: 400, json: { detail } });
+		}
+	);
+}
+
+const SSO_ONLY_ENGLISH =
+	'Your organization signs in with single sign-on, so only a current authenticator code or a registered passkey can confirm this change.';
+
+test.describe('/profile — step-up refusals in the reader’s language', () => {
+	// A returning German member: the picker's own storage key, set before any
+	// app code runs. The refusal used to toast the server's English verbatim.
+	test.beforeEach(async ({ page }) => {
+		await page.addInitScript(() => {
+			localStorage.setItem('feoh_locale', 'de');
+		});
+	});
+
+	test('a coded step-up refusal toasts the German sentence, not the English', async ({
+		page
+	}) => {
+		await stubFactors(page, { passwordClosed: true, totp: true, passkeys: 0 });
+		await refuseCoded(page, 'POST', '/api/auth/mfa/disable', {
+			code: 'step_up_sso_only',
+			message: SSO_ONLY_ENGLISH,
+			params: {}
+		});
+
+		await page.goto('/profile?section=mfa');
+		const code = page.getByLabel(
+			'Aktuellen Code aus der Authenticator-App eingeben, um MFA zu deaktivieren'
+		);
+		await code.fill('123456');
+		await page.getByRole('button', { name: 'Zwei-Faktor deaktivieren' }).click();
+
+		const toast = page.locator('.toast.error');
+		await expect(toast).toContainText(
+			'Ihre Organisation meldet sich per Single Sign-on an, daher kann nur ein aktueller Code'
+		);
+		await expect(toast).not.toContainText('single sign-on, so only');
+	});
+
+	test('the wrong-host refusal names both hosts inside the German sentence', async ({ page }) => {
+		await stubFactors(page, { passwordClosed: true, totp: false, passkeys: 1 });
+		await refuseCoded(page, 'POST', '/api/auth/mfa/step-up/passkey', {
+			code: 'passkey_wrong_host',
+			message: 'Your passkey is registered for acme.localhost, not ap.acme.test. …',
+			params: { registered_hosts: ['acme.localhost'], host: 'ap.acme.test' }
+		});
+
+		await page.goto('/profile?section=passkeys');
+		await page.getByRole('button', { name: 'Passkey hinzufügen' }).click();
+
+		const toast = page.locator('.toast.error');
+		await expect(toast).toContainText(
+			'Ihr Passkey ist für acme.localhost registriert, nicht für ap.acme.test.'
+		);
+	});
+
+	test('disabling with a passkey reports a refused ceremony instead of swallowing it', async ({
+		page
+	}) => {
+		// "Confirm with a passkey" used to await the ceremony OUTSIDE the
+		// disable handler's try, so a refusal from its start call escaped as an
+		// unhandled rejection and the member saw nothing at all.
+		await stubFactors(page, { passwordClosed: true, totp: true, passkeys: 1 });
+		await refuseCoded(page, 'POST', '/api/auth/mfa/step-up/passkey', {
+			code: 'passkey_wrong_host',
+			message: 'Your passkey is registered for acme.localhost, not ap.acme.test. …',
+			params: { registered_hosts: ['acme.localhost'], host: 'ap.acme.test' }
+		});
+
+		await page.goto('/profile?section=mfa');
+		await page.getByRole('button', { name: 'Mit einem Passkey bestätigen' }).click();
+
+		await expect(page.locator('.toast.error')).toContainText(
+			'Ihr Passkey ist für acme.localhost registriert, nicht für ap.acme.test.'
+		);
+		// And the form is usable again, not stuck mid-request.
+		await expect(page.getByRole('button', { name: 'Mit einem Passkey bestätigen' })).toBeEnabled();
+	});
+
+	test("a code this build predates falls back to the server's English", async ({ page }) => {
+		await stubFactors(page, { passwordClosed: true, totp: true, passkeys: 0 });
+		await refuseCoded(page, 'POST', '/api/auth/mfa/disable', {
+			code: 'step_up_from_a_newer_backend',
+			message: 'A sentence from a newer backend.',
+			params: {}
+		});
+
+		await page.goto('/profile?section=mfa');
+		await page
+			.getByLabel('Aktuellen Code aus der Authenticator-App eingeben, um MFA zu deaktivieren')
+			.fill('123456');
+		await page.getByRole('button', { name: 'Zwei-Faktor deaktivieren' }).click();
+
+		await expect(page.locator('.toast.error')).toContainText('A sentence from a newer backend.');
+	});
+});
+
 test.describe('/profile — step-up where the password is still a proof', () => {
 	test('TOTP + passkey: both cards keep the password field', async ({ page }) => {
 		await stubFactors(page, { passwordClosed: false, totp: true, passkeys: 1 });

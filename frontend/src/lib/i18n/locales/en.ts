@@ -247,6 +247,18 @@ export const en = {
 	'profile.passkeys.removed': 'Passkey removed',
 	'profile.passkeys.removeFailed': 'Failed to remove passkey',
 
+	// Coded auth refusals — a refused factor-change step-up, or a passkey
+	// ceremony with no usable credential. Keyed by the backend's `code`
+	// (api/authRefusals.ts); the server's English is the fallback.
+	'authRefusal.stepUpFailed':
+		'Confirm your password, a current authenticator code, or a registered passkey to change your two-factor settings.',
+	'authRefusal.stepUpSsoOnly':
+		'Your organization signs in with single sign-on, so only a current authenticator code or a registered passkey can confirm this change.',
+	'authRefusal.passkeyWrongHost':
+		'Your passkey is registered for {hosts}, not {host}. Sign in there, or register a passkey on {host}.',
+	'authRefusal.passkeyNotRegistered':
+		'No passkey registered',
+
 	// Profile → Signed-in devices card
 	'profile.sessions.heading': 'Signed-in devices',
 	'profile.sessions.hint':

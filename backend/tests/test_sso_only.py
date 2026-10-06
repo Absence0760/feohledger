@@ -267,6 +267,9 @@ async def test_a_password_is_no_step_up_proof_in_an_sso_only_tenant(offered):
 
     assert exc.value.status_code == 400
     assert exc.value.detail == STEP_UP_SSO_ONLY_DETAIL
+    # Machine-readable, so the profile page states it in the reader's language.
+    assert exc.value.detail["code"] == "step_up_sso_only"
+    assert exc.value.detail["params"] == {}
     verify.assert_not_awaited()
     # Still a failed step-up on the trail, PII-free as ever.
     (call,) = audit.await_args_list
@@ -558,9 +561,11 @@ async def test_a_refused_code_names_only_the_proofs_the_tenant_accepts(
     assert exc.value.status_code == 400
     if expected == "sso_only":
         assert exc.value.detail == STEP_UP_SSO_ONLY_DETAIL
-        assert "password" not in exc.value.detail.lower()
+        assert exc.value.detail["code"] == "step_up_sso_only"
+        assert "password" not in exc.value.detail["message"].lower()
     else:
         assert exc.value.detail == STEP_UP_FAILURE_DETAIL
+        assert exc.value.detail["code"] == "step_up_failed"
     assert user.mfa_enabled is True
     assert user.mfa_secret == TOTP_SECRET
 

@@ -1,6 +1,6 @@
 import { getApiBase, getTenantSlug } from '#lib/tenant.ts';
 import { getSelectedEntityId } from '#lib/entity.ts';
-import { formatApiDetail } from '#lib/utils/apiError.ts';
+import { apiErrorCode, formatApiDetail } from '#lib/utils/apiError.ts';
 
 // Re-exported so callers that already import from `#lib/api` (e.g. the
 // hand-rolled fetch in `api/expenses.ts`) don't need a second import path.
@@ -21,11 +21,33 @@ export { formatApiDetail };
  *  everything routed through the shared `request()` helper. */
 export class ApiError extends Error {
 	status: number;
-	constructor(message: string, status: number) {
+	/** The refusal's machine-readable code when the backend sent a coded
+	 *  `detail` (`{code, message, params}`), else `null`. `message` is still
+	 *  the server's English sentence — key a translation on this instead, and
+	 *  fall back to `message` for a code this build predates (see
+	 *  `api/authRefusals.ts`). */
+	code: string | null;
+	/** The coded refusal's params; empty when there are none. */
+	params: Record<string, unknown>;
+	constructor(
+		message: string,
+		status: number,
+		code: string | null = null,
+		params: Record<string, unknown> = {}
+	) {
 		super(message);
 		this.name = 'ApiError';
 		this.status = status;
+		this.code = code;
+		this.params = params;
 	}
+}
+
+/** Build the `ApiError` for a non-OK response body — the rendered message plus
+ *  whatever code / params the `detail` carried. */
+function errorFromBody(body: { detail?: unknown }, fallback: string, status: number): ApiError {
+	const { code, params } = apiErrorCode(body.detail);
+	return new ApiError(formatApiDetail(body.detail, fallback), status, code, params);
 }
 
 function getToken(): string | null {
@@ -78,12 +100,12 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 			window.location.href = '/login';
 		}
 		const body = await res.json().catch(() => ({}));
-		throw new ApiError(formatApiDetail(body.detail, 'Unauthorized'), res.status);
+		throw errorFromBody(body, 'Unauthorized', res.status);
 	}
 
 	if (!res.ok) {
 		const body = await res.json().catch(() => ({}));
-		throw new ApiError(formatApiDetail(body.detail, `API error ${res.status}`), res.status);
+		throw errorFromBody(body, `API error ${res.status}`, res.status);
 	}
 
 	if (res.status === 204) return undefined as T;
@@ -109,10 +131,7 @@ async function blobFromResponse(res: Response): Promise<Blob> {
 	}
 	if (!res.ok) {
 		const body = await res.json().catch(() => ({}));
-		throw new ApiError(
-			formatApiDetail(body.detail, `Failed to load file: ${res.status}`),
-			res.status
-		);
+		throw errorFromBody(body, `Failed to load file: ${res.status}`, res.status);
 	}
 	return res.blob();
 }

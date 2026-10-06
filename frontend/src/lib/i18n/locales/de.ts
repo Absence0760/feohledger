@@ -212,6 +212,15 @@ export const messages = {
 	'profile.passkeys.removed': 'Passkey entfernt',
 	'profile.passkeys.removeFailed': 'Passkey konnte nicht entfernt werden',
 
+	'authRefusal.stepUpFailed':
+		'Bestätigen Sie Ihr Passwort, einen aktuellen Code aus der Authenticator-App oder einen registrierten Passkey, um Ihre Zwei-Faktor-Einstellungen zu ändern.',
+	'authRefusal.stepUpSsoOnly':
+		'Ihre Organisation meldet sich per Single Sign-on an, daher kann nur ein aktueller Code aus der Authenticator-App oder ein registrierter Passkey diese Änderung bestätigen.',
+	'authRefusal.passkeyWrongHost':
+		'Ihr Passkey ist für {hosts} registriert, nicht für {host}. Melden Sie sich dort an oder registrieren Sie einen Passkey für {host}.',
+	'authRefusal.passkeyNotRegistered':
+		'Kein Passkey registriert',
+
 	'profile.sessions.heading': 'Angemeldete Geräte',
 	'profile.sessions.hint':
 		'Alle Browser und Apps, die derzeit bei Ihrem Konto angemeldet sind. Wenn Sie eines nicht erkennen — oder sich auf einem Gerät angemeldet haben, das Sie nicht mehr besitzen — melden Sie es hier ab. Es verliert sofort seine Gültigkeit.',

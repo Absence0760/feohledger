@@ -695,6 +695,20 @@ longer shows. The code and passkey-assertion proofs are untouched, and the
 successful step-up paths load the org only when a password was actually
 offered; the refusal path reads it every time, a throttled failure path.
 
+**The refusals carry a code, so the page can say them in the reader's
+language.** Each step-up / passkey refusal's `detail` is an object built by
+`api/auth.coded_refusal` — `{"code", "message", "params"}` — not a bare string:
+`step_up_failed` (the generic sentence), `step_up_sso_only` (the sentence
+above), `passkey_wrong_host` (params `registered_hosts`, a list, and `host`; see
+§ Passkeys on a custom domain) and `passkey_not_registered`. The status stays
+`400`; `message` is the English sentence, which a client that predates a code
+renders as-is (`formatApiDetail` on the web already flattens an object to its
+`message`). A code is never more specific than the sentence it replaces — one
+code for a wrong password, a wrong code and a failed assertion alike — so it
+enumerates nothing the English did not. `/profile` and the MFA login page map
+the codes through `m()` in `frontend/src/lib/api/authRefusals.ts`, which reads
+`ApiError.code` / `ApiError.params` (`frontend/src/lib/api.ts`).
+
 **The profile page learns the rule from `/auth/me`.** `GET /api/auth/me`
 carries `password_sign_in_closed`, filled from
 `api/auth._org_closes_password_sign_in`, which is `is_sso_only`: the function
@@ -1698,7 +1712,7 @@ Three things make that safe:
 A passkey registered against the platform RP ID genuinely cannot be presented on a vanity host. That is the protocol, not a defect to code around — so the goal is to make it **legible** rather than silent. `webauthn_credentials.rp_id` (migration `0091`, control-plane, nullable, backfilled to the configured global RP ID, which is provably what every pre-existing row was registered under) records where each credential lives, and:
 
 - `GET /api/auth/mfa/passkey` lists **every** passkey with its `rp_id` and a derived `usable_here` flag, so the security page can show "registered for `ap.acmecorp.com`" instead of offering a credential whose ceremony is guaranteed to fail.
-- `POST /api/auth/mfa/passkey/authenticate` and `POST /api/auth/mfa/step-up/passkey` narrow `allowCredentials` to the credentials this host can challenge, and when that leaves none they say *which* host the account's passkeys belong to. The caller has already proved control of the account (an access token, or the post-password MFA challenge token) and the hosts named are the tenant's own, so this leaks nothing. An account with **no** passkey at all keeps the old opaque `No passkey registered`, so the message can't be used to probe factor enrollment.
+- `POST /api/auth/mfa/passkey/authenticate` and `POST /api/auth/mfa/step-up/passkey` narrow `allowCredentials` to the credentials this host can challenge, and when that leaves none they say *which* host the account's passkeys belong to. The caller has already proved control of the account (an access token, or the post-password MFA challenge token) and the hosts named are the tenant's own, so this leaks nothing. Both answers carry a machine-readable code (`passkey_wrong_host`, with the hosts as params so the client joins the list in its own locale; see § The refusals carry a code). An account with **no** passkey at all keeps the old opaque `No passkey registered` (code `passkey_not_registered`), so the message can't be used to probe factor enrollment.
 - The login `methods` list omits `passkey` on a host where none is usable — but the **MFA gate itself still counts every passkey**, so a vanity-host passkey remains a second factor on the platform host. `email` is always offered, so narrowing the menu can never strand an account.
 - **Deleting** a passkey is deliberately *not* host-scoped: a user must be able to remove a credential from wherever they happen to be signed in.
 

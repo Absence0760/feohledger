@@ -215,6 +215,15 @@ export const messages = {
 	'profile.passkeys.removed': 'Clé d’accès supprimée',
 	'profile.passkeys.removeFailed': 'Impossible de supprimer la clé d’accès',
 
+	'authRefusal.stepUpFailed':
+		'Confirmez votre mot de passe, un code actuel de votre application d’authentification ou une clé d’accès enregistrée pour modifier votre double authentification.',
+	'authRefusal.stepUpSsoOnly':
+		'Votre organisation se connecte par authentification unique (SSO) : seul un code actuel de votre application d’authentification ou une clé d’accès enregistrée peut confirmer cette modification.',
+	'authRefusal.passkeyWrongHost':
+		'Votre clé d’accès est enregistrée pour {hosts}, et non pour {host}. Connectez-vous là-bas, ou enregistrez une clé d’accès sur {host}.',
+	'authRefusal.passkeyNotRegistered':
+		'Aucune clé d’accès enregistrée',
+
 	'profile.sessions.heading': 'Appareils connectés',
 	'profile.sessions.hint':
 		'Tous les navigateurs et applications actuellement connectés à votre compte. Si vous n’en reconnaissez pas un — ou si vous vous êtes connecté sur un appareil que vous n’avez plus — déconnectez-le ici. Il cesse de fonctionner immédiatement.',

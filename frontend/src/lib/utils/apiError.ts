@@ -75,3 +75,36 @@ export function formatApiDetail(detail: unknown, fallback: string): string {
 
 	return fallback;
 }
+
+/** The machine-readable half of a coded refusal. */
+export interface ApiErrorCode {
+	/** Stable identifier the client keys a translated sentence on, or `null`
+	 *  when the detail carried none (every plain-string detail). */
+	code: string | null;
+	/** Typed values the translated sentence needs. Empty when there are none. */
+	params: Record<string, unknown>;
+}
+
+/**
+ * Read the `code` + `params` out of a coded refusal's `detail`.
+ *
+ * The backend's coded shape is `{code, message, params}` (`api/auth.py::
+ * coded_refusal`): `message` is the English fallback `formatApiDetail` already
+ * renders, and `code` is what lets a page say the same thing in the reader's
+ * language instead (`frontend/CLAUDE.md` § Internationalization). Anything
+ * else — a string, a validation list, an object with no string `code` — yields
+ * `{code: null, params: {}}`, so a caller can always fall back to the message.
+ * A non-object `params` is dropped rather than trusted.
+ */
+export function apiErrorCode(detail: unknown): ApiErrorCode {
+	if (!detail || typeof detail !== 'object' || Array.isArray(detail)) {
+		return { code: null, params: {} };
+	}
+	const { code, params } = detail as { code?: unknown; params?: unknown };
+	if (typeof code !== 'string' || !code) return { code: null, params: {} };
+	const safeParams =
+		params && typeof params === 'object' && !Array.isArray(params)
+			? (params as Record<string, unknown>)
+			: {};
+	return { code, params: safeParams };
+}

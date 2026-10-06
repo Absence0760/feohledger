@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatApiDetail } from './apiError';
+import { apiErrorCode, formatApiDetail } from './apiError';
 
 /**
  * Regression guard for the "[object Object]" toast.
@@ -67,5 +67,52 @@ describe('formatApiDetail', () => {
 		expect(formatApiDetail([{ type: 'x' }], FALLBACK)).toBe(FALLBACK);
 		expect(formatApiDetail({ unrelated: 1 }, FALLBACK)).toBe(FALLBACK);
 		expect(formatApiDetail(42, FALLBACK)).toBe(FALLBACK);
+	});
+});
+
+/**
+ * A coded refusal (`backend/app/api/auth.py::coded_refusal`) is
+ * `{code, message, params}`: `formatApiDetail` must keep rendering its English
+ * `message` for every caller that only reads `ApiError.message`, while
+ * `apiErrorCode` hands the code + params to the callers that localize.
+ */
+describe('coded refusal details', () => {
+	const coded = {
+		code: 'passkey_wrong_host',
+		message: 'Your passkey is registered for a.example, not b.example.',
+		params: { registered_hosts: ['a.example'], host: 'b.example' }
+	};
+
+	it('still flattens to the English message', () => {
+		expect(formatApiDetail(coded, 'API error 400')).toBe(coded.message);
+	});
+
+	it('exposes the code and params', () => {
+		expect(apiErrorCode(coded)).toEqual({ code: coded.code, params: coded.params });
+	});
+
+	it('reports no code for every uncoded shape', () => {
+		for (const detail of [
+			undefined,
+			null,
+			'Plain string',
+			[{ loc: ['body', 'x'], msg: 'bad' }],
+			{ message: 'no code' },
+			{ code: 42, message: 'numeric code' },
+			{ code: '', message: 'empty code' }
+		]) {
+			expect(apiErrorCode(detail)).toEqual({ code: null, params: {} });
+		}
+	});
+
+	it('drops params that are not an object', () => {
+		expect(apiErrorCode({ code: 'step_up_failed', params: ['x'] })).toEqual({
+			code: 'step_up_failed',
+			params: {}
+		});
+		expect(apiErrorCode({ code: 'step_up_failed' })).toEqual({
+			code: 'step_up_failed',
+			params: {}
+		});
 	});
 });
