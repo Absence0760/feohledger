@@ -18,12 +18,14 @@ keeps growing: the day someone adds a provider block, the leak is the default.
 Here, exposure requires a deliberate edit to this file, and each entry has to
 name a real non-admin consumer.
 
-**`ALWAYS_REDACTED` — dropped for every role, admin included.** One value is
+**`ALWAYS_REDACTED` — dropped for every role, admin included.** Two values are
 write-only by design rather than by privilege: the chat incoming-webhook URL is
 a bearer capability whose only management path is the audited
-`/api/organization/chat-notifications/webhook`. Leaving it readable here would
-make "no endpoint ever returns it" false and give the settings page a silent,
-unaudited second way to see it.
+`/api/organization/chat-notifications/webhook`, and the OIDC client secret's
+only writer is the audited `PUT /api/organization/sso`, which keeps the stored
+value when the field is left blank. Leaving either readable here would make "no
+endpoint ever returns it" false and give the settings page a silent, unaudited
+second way to see it.
 
 Admins otherwise still get the settings **verbatim** — the `/organization` page
 reads saved credentials back into its form fields, so redacting for them would
@@ -75,7 +77,13 @@ NON_ADMIN_SETTINGS: dict[str, set[str] | None] = {
 # (block, key) pairs stripped for EVERY role, admin included — see the module
 # docstring. Keep this tiny: it is for values whose only sanctioned read is
 # "is one set?", not for general credential hygiene.
-ALWAYS_REDACTED: tuple[tuple[str, str], ...] = (("chat_notifications", "webhook_url"),)
+ALWAYS_REDACTED: tuple[tuple[str, str], ...] = (
+    ("chat_notifications", "webhook_url"),
+    # The OIDC client secret. Its one writer, `PUT /api/organization/sso`, keeps
+    # the stored value when the field is left blank, so no page needs to read it
+    # back; `GET /api/organization/sso` reports `client_secret_configured` only.
+    ("sso", "client_secret"),
+)
 
 
 def _without_always_redacted(settings: dict) -> dict:
