@@ -604,7 +604,7 @@ export const CONCEPT_GUIDES: Guide[] = [
 				blocks: [
 					{
 						type: 'p',
-						text: 'The [[ai-assistant]] on [[page:/assistant]] answers plain-language questions such as "what is waiting for my approval?" or "what do we owe next month?". It can only look things up: it lists invoices, finds invoices by description, shows vendor spend, shows the approval queue and forecasts upcoming payments. It cannot change anything.'
+						text: 'The [[ai-assistant]] on [[page:/assistant]] answers plain-language questions such as "what is waiting for my approval?" or "what do we owe next month?". It can only look things up: it lists invoices, finds invoices by description, shows vendor spend, shows the approval queue and, for admins, AP managers and CFOs, forecasts upcoming payments. It cannot change anything.'
 					},
 					{
 						type: 'p',

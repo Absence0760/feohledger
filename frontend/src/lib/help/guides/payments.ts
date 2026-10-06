@@ -746,7 +746,7 @@ export const PAYMENT_GUIDES: Guide[] = [
 					{
 						type: 'note',
 						tone: 'role',
-						text: 'Everyone can use the assistant. Its cash-planning questions (cash position, payment what-ifs, discount and payment plans) are limited to admins, AP managers and CFOs, and it declines them for anyone else.'
+						text: 'Everyone can use the assistant. Its cash questions (upcoming-payment forecasts, cash position, payment what-ifs, discount and payment plans) are limited to admins, AP managers and CFOs, and it declines them for anyone else.'
 					}
 				]
 			},

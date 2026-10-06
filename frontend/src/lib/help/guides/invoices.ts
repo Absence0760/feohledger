@@ -102,7 +102,7 @@ export const INVOICE_GUIDES: Guide[] = [
 						type: 'diagram',
 						id: 'capture-channels',
 						caption:
-							'Uploads, emailed invoices and supplier-portal submissions are read by [[extraction]]; a [[peppol|PEPPOL]] e-invoice is read from its own data. A CSV import arrives already typed in, so nothing is read; its [[duplicate-invoice|duplicate]] and fraud checks run when you submit it for review, not on import.'
+							'Uploads, emailed invoices and supplier-portal submissions are read by [[extraction]]; a [[peppol|PEPPOL]] e-invoice is read from its own data. A CSV import arrives already typed in, so nothing is read; its [[duplicate-invoice|duplicate]] and fraud checks run as it’s imported. Rows imported as already paid or done are history and aren’t checked.'
 					},
 					{
 						type: 'p',

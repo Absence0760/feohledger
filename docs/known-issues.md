@@ -5,9 +5,12 @@ names the root cause, the evidence, blast radius, and a recommended fix
 approach — this is a staging area for real problems, not a place to let them
 go stale. See root `CLAUDE.md` guard rail 6 (no dangling deferred findings).
 
-**Four entries are open**: the `all`-mode approval-chain segregation deadlock,
+**Five entries are open**: the expense-report Attach dead end found while
+writing the help centre, the `all`-mode approval-chain segregation deadlock,
 the legal-contents smooth-scroll race and the e2e cleanup race directly below,
-and the `payments/` local-e2e flake near the bottom. The `queue-blocked` entry
+and the `payments/` local-e2e flake near the bottom. The assistant
+payment-forecast role gap, found in the same help-centre pass, was struck on
+2026-10-06. The `queue-blocked` entry
 beside it was struck on 2026-10-04. Its defect, a spec helper that counted
 DataTable's loading placeholder as a row, had been fixed on 2026-09-09 by #390,
 but nobody struck the entry, so the file over-reported by one for a month. The
@@ -17,7 +20,7 @@ this note has now warned about twice. Two defects were **fixed on 2026-09-17**:
 the `/organization` 320px reflow defect (issue #432), along with six more routes
 that failed the same criterion and had no entry at all because nothing measured
 them; and the local-e2e `alembic` drift, which now has a pre-run guard that
-refuses to start against a stale database. Sixteen of the twenty `##`
+refuses to start against a stale database. Seventeen of the twenty-two `##`
 entries are now `~~struck-through~~` resolved stubs. (This line said "the other
 fifteen" while the file held fifteen struck in total, the two above included.)
 They are kept because the *diagnosis* is the
@@ -42,7 +45,20 @@ goes to [decisions.md](decisions.md).
 
 ---
 
-## The assistant's payment-forecast tool skips the forecast's role gate
+## ~~The assistant's payment-forecast tool skips the forecast's role gate~~ — FIXED 2026-10-06
+
+**Resolved.** `get_payment_forecast` now carries
+`allowed_roles=FINANCE_LEADER_ROLES`, the copilot's audience, so a clerk gets the
+orchestrator's `role_not_permitted` refusal. `test_tool_allowed_roles_match_rest_gate`
+in `backend/tests/test_assistant.py` reads every tool's REST counterpart's actual
+`require_roles` set and fails on a mismatch or on a tool with no row; the other
+four general tools were audited and mirror routes open to every employee. The
+REST cash reads (`/analytics/cashflow_forecast`, `/cashflow_whatif`,
+`/cash_position`) were widened to the same audience in the same pass, because
+AP managers already had those figures through the copilot and the CSV export
+(`CASH_FORECAST_ROLES`, pinned to `COPILOT_ROLES`). The original diagnosis is
+kept below.
+
 
 **Root cause.** The REST cash-flow forecast (`GET /api/analytics/…forecast`,
 `app/api/analytics.py::get_cashflow_forecast`) is `require_roles(*_CFO_ROLES)`,

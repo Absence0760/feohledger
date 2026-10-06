@@ -91,7 +91,7 @@ section carried its own `decisions.md` § reference, so nothing was lost by
 deleting it; that cross-reference is what makes the pruning safe, and writing
 one is what earns a future entry the right to be deleted.
 
-**64 open: 49 (c) · 9 (a) · 6 (b)** — re-derived from the file, never carried
+**62 open: 47 (c) · 9 (a) · 6 (b)** — re-derived from the file, never carried
 forward. The section heading is authoritative; where an entry also carries a
 `(c)`/`(a)`/`(b)` marker, the two agree.
 `grep -c '^- \[ \]' docs/followups.md`.
@@ -1087,30 +1087,6 @@ lands. Pure doc drift was corrected in the same PR. The two diagnosed defects
       to the catalogues and swap the guides' bold labels for `{ui:}`
       references (`content.test.ts` will check them). **Trigger:** the next
       i18n extraction slice.
-- [ ] **(c) A CSV-imported invoice shows no warnings until it is submitted.**
-      `services/csv_import.py::import_invoices_csv` creates rows at `new`
-      without calling `refresh_warnings`, which manual create, upload without
-      extraction, and every PATCH do. The checks still run before approval
-      (the submit-for-review step in `api/workflow.py` refreshes them), so no
-      unchecked invoice can reach an approver. But a duplicate imported by CSV
-      sits in the list unflagged until someone submits it. **Durable fix:**
-      call `refresh_warnings` per created invoice inside the import, with a
-      test that imports a byte-identical copy of an existing invoice and
-      asserts the duplicate warning on import. **Trigger:** the next change to
-      CSV import, or the first tenant bulk-loading invoices that way.
-- [ ] **(c) PRODUCT CALL — the dashboard's "touchless rate" is a
-      cleared-vs-rejected rate.** `backend/docs/analytics.md` defines it as
-      invoices that passed review without a human touching them, but
-      `compute_touchless_rate` counts every invoice in approved through
-      payment_scheduled (plus approval-stamped done/paid/failed) as cleared,
-      including ones a person approved; only rejections count against it.
-      The experiments readout uses a different definition (auto-approved
-      with no field changes) under the same label. The glossary entry
-      describes the code. **Durable fix:** decide what the KPI should mean,
-      then either compute it from the audit trail (no human approval and no
-      field edit) or rename it to what it measures, and give both screens one
-      definition. **Trigger:** before the KPI is used in a sales or
-      board-reporting context.
 - [ ] **(c) Help for the mobile app and the supplier portal.** The help centre
       covers the employee web app. Mobile users and suppliers get none.
       **Durable fix:** a portal-side help section (suppliers are a separate
