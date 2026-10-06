@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { Catalog, CatalogItem, CatalogType } from '#lib/types/catalog.ts';
+	import HelpTip from '#lib/components/help/HelpTip.svelte';
 	import { CATALOG_TYPES, CATALOG_TYPE_LABEL_KEYS } from '#lib/types/catalog.ts';
 	import { auth } from '#lib/stores/auth.svelte.ts';
 	import Modal from '#lib/components/ui/Modal.svelte';
@@ -212,6 +213,7 @@
 		{#if catalog_type === 'punchout'}
 			<p class="hint">
 				{m('catalogs.modal.punchoutHint')}
+				<HelpTip term="punch-out" />
 			</p>
 		{/if}
 

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import HelpTip from '#lib/components/help/HelpTip.svelte';
 	import { page } from '$app/state';
 	import { api, ApiError } from '#lib/api.ts';
 	import { toast } from '#lib/components/ui/Toast.svelte';
@@ -1678,7 +1679,7 @@
 				{#if section === 'defaults'}
 					<section class="card" id="org-defaults">
 						<h2>{m('org.section.defaults')}</h2>
-						<p class="card-hint">{m('org.defaults.hint')}</p>
+						<p class="card-hint">{m('org.defaults.hint')} <HelpTip term="reporting-currency" /></p>
 						<div class="form-grid">
 							<label>
 								<span>{m('org.defaults.currency')}</span>
@@ -2052,7 +2053,10 @@
 
 				{#if section === 'email-intake'}
 					<section class="card" id="org-email-intake">
-						<h2>{m('org.section.emailIntake')}</h2>
+						<div class="help-row">
+							<h2>{m('org.section.emailIntake')}</h2>
+							<HelpTip term="email-intake" />
+						</div>
 						<p class="card-hint">{m('org.emailIntake.hint')}</p>
 
 						{#if !userLoaded || loadingIntake}
@@ -2133,7 +2137,10 @@
 
 				{#if section === 'residency'}
 					<section class="card">
-						<h2>{m('org.section.dataResidency')}</h2>
+						<div class="help-row">
+							<h2>{m('org.section.dataResidency')}</h2>
+							<HelpTip term="data-residency" />
+						</div>
 						<p class="card-hint">{m('org.residency.hint')}</p>
 
 						{#if loadingResidency}
@@ -2226,7 +2233,10 @@
 					     workflow builder's ERP hint, which still reads it.
 					     decisions §153. -->
 					<section class="card">
-						<h2>{m('org.section.extraction')}</h2>
+						<div class="help-row">
+							<h2>{m('org.section.extraction')}</h2>
+							<HelpTip term="extraction" />
+						</div>
 						<p class="card-hint">{m('org.extraction.hint')}</p>
 						{#if readOnly}
 							<p class="card-hint" data-testid="extraction-admin-only">
@@ -2326,7 +2336,10 @@
 
 				{#if section === 'erp'}
 					<section class="card">
-						<h2>{m('org.section.erp')}</h2>
+						<div class="help-row">
+							<h2>{m('org.section.erp')}</h2>
+							<HelpTip term="erp-sync" />
+						</div>
 						<p class="card-hint">{m('org.erp.hint')}</p>
 						{#if readOnly}
 							<p class="card-hint" data-testid="erp-admin-only">
@@ -2456,7 +2469,10 @@
 
 				{#if section === 'payments'}
 					<section class="card" id="org-payments">
-						<h2>{m('org.section.payments')}</h2>
+						<div class="help-row">
+							<h2>{m('org.section.payments')}</h2>
+							<HelpTip term="payment-rail" />
+						</div>
 						<p class="card-hint">
 							{m('org.payments.hint')}
 						</p>
@@ -2522,6 +2538,8 @@
 							</div>
 							<p class="card-hint">
 								{m('org.payments.cfoHint')}
+								<HelpTip term="cfo-gate" />
+								<HelpTip term="reporting-currency" />
 							</p>
 
 							<div class="section-footer">
@@ -2549,7 +2567,10 @@
 
 				{#if section === 'cards'}
 					<section class="card">
-						<h2>{m('org.section.cards')}</h2>
+						<div class="help-row">
+							<h2>{m('org.section.cards')}</h2>
+							<HelpTip term="virtual-card" />
+						</div>
 						<p class="card-hint">{m('org.cards.hint')}</p>
 						{#if readOnly}
 							<p class="card-hint" data-testid="cards-admin-only">
@@ -2894,6 +2915,7 @@
 							<h2>{m('org.section.fraud')}</h2>
 							<p class="card-hint">
 								{m('org.fraud.hint')}
+								<HelpTip term="exception" />
 							</p>
 							{#if readOnly}
 								<p class="card-hint" data-testid="fraud-admin-only">
@@ -3096,7 +3118,10 @@
 					     It keeps its place because this is where the ERP connection is
 					     configured, so "now where do I pull it?" is asked here. -->
 					<section class="card">
-						<h2>{m('org.section.dataSync')}</h2>
+						<div class="help-row">
+							<h2>{m('org.section.dataSync')}</h2>
+							<HelpTip term="erp-sync" />
+						</div>
 						<p class="card-hint">{m('org.dataSync.hint')}</p>
 
 						<div class="sync-grid">
@@ -3199,6 +3224,7 @@
 			   tall as the row, which leaves it nothing to stick within. */
 			align-items: start;
 		}
+
 	}
 
 	.sections {
@@ -3963,11 +3989,14 @@
 		.form-grid {
 			grid-template-columns: 1fr;
 		}
+
 		.threshold-row {
 			grid-template-columns: 1fr;
 		}
+
 		.sso-register {
 			grid-template-columns: 1fr;
 		}
+
 	}
 </style>

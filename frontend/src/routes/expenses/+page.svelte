@@ -1,4 +1,5 @@
 <script lang="ts">
+	import HelpTip from '#lib/components/help/HelpTip.svelte';
 	import type {
 		Expense,
 		ExpenseStatus,
@@ -1331,6 +1332,7 @@
 					<div class="report-title-block">
 						<h2>{activeReport.report_number}</h2>
 						<Badge tone={EXPENSE_REPORT_STATUS_TONES[activeReport.status as ExpenseReportStatus]} variant={activeReport.status}>{reportStatusLabel(activeReport.status)}</Badge>
+						<HelpTip term="expense-report" />
 					</div>
 					<div class="report-detail-actions">
 						<button class="btn-secondary" onclick={exportReportCsv}>{m('expenses.reports.exportCsv')}</button>
@@ -1411,11 +1413,13 @@
 					hoisted out it wrapped nothing else.
 				-->
 				{#if activeSummary && activeSummary.unconverted_count > 0}
-					<div class="unconverted-panel" role="alert">
-						{m('expenses.reports.unconverted', {
+					<div class="unconverted-panel">
+						<!-- The alert is the message alone: the ⓘ beside it is not part of the warning. -->
+						<span role="alert">{m('expenses.reports.unconverted', {
 							count: activeSummary.unconverted_count,
 							currency: activeSummary.currency
-						})}
+						})}</span>
+						<HelpTip term="fx-rate" />
 					</div>
 				{/if}
 
@@ -1625,6 +1629,7 @@
 
 		<div class="filter-row">
 			<FilterChips chips={RECON_CHIPS} bind:active={reconFilter} />
+			<HelpTip term="virtual-card" />
 		</div>
 
 		<DataTable

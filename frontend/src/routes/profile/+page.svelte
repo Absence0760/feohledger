@@ -1,4 +1,5 @@
 <script lang="ts">
+	import HelpTip from '#lib/components/help/HelpTip.svelte';
 	import { untrack } from 'svelte';
 	import { page } from '$app/state';
 	import { auth } from '#lib/stores/auth.svelte.ts';
@@ -721,7 +722,7 @@
 			{#if section === 'mfa'}
 				<section class="card">
 					<h2>{m('profile.mfa.heading')}</h2>
-					<p class="hint">{m('profile.mfa.hint')}</p>
+					<p class="hint">{m('profile.mfa.hint')} <HelpTip term="mfa" /></p>
 
 					{#if auth.user?.mfa_enabled}
 						<div class="status enabled">

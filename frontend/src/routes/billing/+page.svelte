@@ -8,6 +8,7 @@
 	import Money from '#lib/components/ui/Money.svelte';
 	import SubscriptionBadge from '#lib/components/ui/SubscriptionBadge.svelte';
 	import Badge from '#lib/components/ui/Badge.svelte';
+	import HelpTip from '#lib/components/help/HelpTip.svelte';
 	import type { BadgeTone } from '#lib/components/ui/badgeTone.ts';
 	import {
 		changeBillingPlan,
@@ -417,7 +418,10 @@
 		     org with no subscription gets its per-currency rebate cards IN the
 		     row, one with a plan gets the note below it. -->
 		<section class="usage-section" aria-label={m('billing.usage.aria')}>
-			<h3>{m('billing.usage.heading')} <span class="period">({data?.period ?? '—'})</span></h3>
+			<div class="help-row usage-title">
+				<h3>{m('billing.usage.heading')} <span class="period">({data?.period ?? '—'})</span></h3>
+				<HelpTip term="extraction" />
+			</div>
 			<div class="kpi-row">
 				<KpiCard
 					value={data ? asCount(data.usage.extractions) : null}
@@ -454,6 +458,7 @@
 							? ', '
 							: ''}<Money amount={group.total} currency={group.currency} />{/each}
 					{m('billing.usage.informational')}
+					<HelpTip term="card-rebate" />
 				</p>
 			{/if}
 		</section>
@@ -942,6 +947,12 @@
 
 	.usage-section h3 {
 		margin: 0 0 0.75rem;
+	}
+	.usage-title {
+		margin: 0 0 0.75rem;
+	}
+	.usage-section .usage-title > h3 {
+		margin: 0;
 	}
 
 	.period {

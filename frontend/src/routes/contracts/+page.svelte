@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { Contract, ContractStatus, ContractType } from '#lib/types/contract.ts';
+	import HelpTip from '#lib/components/help/HelpTip.svelte';
 	import {
 		CONTRACT_STATUSES,
 		contractStatusLabelKey,
@@ -352,7 +353,7 @@
 				<SortableHeader field="status" label={m('contracts.col.status')} active={sortField === 'status'} order={sortOrder} onsort={handleSort} />
 				<SortableHeader field="end_date" label={m('contracts.col.endDate')} active={sortField === 'end_date'} order={sortOrder} onsort={handleSort} />
 				<SortableHeader field="total_value" label={m('contracts.col.value')} class="right" active={sortField === 'total_value'} order={sortOrder} onsort={handleSort} />
-				<th scope="col" class="right">{m('contracts.col.spend')}</th>
+				<th scope="col" class="right">{m('contracts.col.spend')} <HelpTip term="contract" /></th>
 			</tr>
 		{/snippet}
 		{#snippet body()}

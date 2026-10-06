@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { api } from '#lib/api.ts';
+	import HelpTip from '#lib/components/help/HelpTip.svelte';
 	import { appendUnique } from '#lib/utils/pagination.ts';
 	import type { MatchingIdsResponse } from '#lib/utils/pagination.ts';
 	import { createRequestSequencer } from '#lib/utils/requestSequence.ts';
@@ -621,10 +622,10 @@
 				<SortableHeader field="code" label={m('vendors.col.code')} active={sortField === 'code'} order={sortOrder} onsort={handleSort} />
 				<th scope="col">{m('vendors.col.email')}</th>
 				<SortableHeader field="status" label={m('vendors.col.status')} active={sortField === 'status'} order={sortOrder} onsort={handleSort} />
-				<th scope="col">{m('vendors.col.screening')}</th>
+				<th scope="col">{m('vendors.col.screening')} <HelpTip term="sanctions-screening" /></th>
 				<th scope="col">{m('vendors.col.source')}</th>
 				<th scope="col">{m('vendors.col.invoices')}</th>
-				<th scope="col">{m('vendors.col.erp')}</th>
+				<th scope="col">{m('vendors.col.erp')} <HelpTip term="erp-sync" /></th>
 				<th class="actions-col"></th>
 			</tr>
 		{/snippet}
@@ -837,7 +838,10 @@
 	onclose={() => (bankEditing = null)}
 >
 	{#if bankEditing}
-		<h2>{m('vendors.bank.title', { vendor: bankEditing.name })}</h2>
+		<div class="help-row">
+			<h2>{m('vendors.bank.title', { vendor: bankEditing.name })}</h2>
+			<HelpTip term="bank-change-request" />
+		</div>
 		<p class="modal-hint">
 			These values bridge to your payment processor (e.g. Modern Treasury). The
 			<code>counterparty_id</code> is the processor's identifier; the last4s are stored
@@ -965,6 +969,7 @@
 		font-size: 0.8rem;
 		color: var(--text-muted);
 	}
+
 	.dual-control-hint a {
 		color: var(--accent);
 	}
@@ -984,6 +989,7 @@
 	.unverified {
 		background: rgba(212, 148, 10, 0.04);
 	}
+
 	/* De-emphasize rejected rows with a subtle tint rather than a blanket
 	   opacity (which would composite every cell's text below the WCAG
 	   1.4.3 4.5:1 contrast floor). The red "Rejected" status badge carries
@@ -994,6 +1000,7 @@
 	.vendor-name {
 		font-weight: 500;
 	}
+
 	.source-badge {
 		display: inline-block;
 		padding: 2px 8px;
@@ -1003,6 +1010,7 @@
 		background: var(--bg);
 		color: var(--text-muted);
 	}
+
 	.erp-linked {
 		color: #1fa86a;
 		display: inline-flex;
@@ -1024,6 +1032,7 @@
 		grid-template-columns: 1fr 1fr;
 		gap: 12px;
 	}
+
 	.modal h3 {
 		margin: 4px 0 0;
 		font-size: 0.95rem;
@@ -1043,6 +1052,7 @@
 		font-family: inherit;
 		white-space: nowrap;
 	}
+
 	.bulk-action-btn:hover:not(:disabled) {
 		filter: brightness(1.1);
 	}
@@ -1054,27 +1064,32 @@
 		background: transparent;
 		color: var(--accent-strong);
 	}
+
 	.bulk-all-matching-note {
 		font-size: 0.82rem;
 		color: var(--text-muted);
 		white-space: nowrap;
 	}
+
 	.bulk-divider {
 		width: 1px;
 		height: 20px;
 		background: var(--border);
 	}
+
 	.invite-sent-body {
 		margin: 0 0 1rem;
 		font-size: 0.9rem;
 		color: var(--text-muted);
 	}
+
 	.invite-sent-meta {
 		display: grid;
 		grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
 		gap: 0.75rem;
 		margin: 0 0 0.5rem;
 	}
+
 	.invite-sent-meta dt {
 		font-size: 0.72rem;
 		text-transform: uppercase;
@@ -1090,4 +1105,5 @@
 		font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 		font-size: 0.85rem;
 	}
+
 </style>

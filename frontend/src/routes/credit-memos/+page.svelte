@@ -9,6 +9,7 @@
 	import RowAction from '#lib/components/ui/RowAction.svelte';
 	import PageHeader from '#lib/components/ui/PageHeader.svelte';
 	import FilterChips from '#lib/components/ui/FilterChips.svelte';
+	import HelpTip from '#lib/components/help/HelpTip.svelte';
 	import SearchBox from '#lib/components/ui/SearchBox.svelte';
 	import SortableHeader from '#lib/components/ui/SortableHeader.svelte';
 	import DataTable from '#lib/components/ui/DataTable.svelte';
@@ -635,7 +636,10 @@
 			placeholder={m('creditMemos.search.placeholder')}
 			ariaLabel={m('creditMemos.search.aria')}
 		/>
-		<FilterChips chips={STATUS_CHIPS} bind:active={statusFilter} />
+		<div class="help-row">
+			<FilterChips chips={STATUS_CHIPS} bind:active={statusFilter} />
+			<HelpTip term="credit-memo" />
+		</div>
 	</div>
 
 	{#if showOnboarding}
@@ -873,7 +877,12 @@
 			<span class="modal-subject-vendor">{applyMemo.vendor_name ?? '—'}</span>
 		</p>
 	{/if}
-	<p class="modal-hint">{m('creditMemos.applyModal.hint')}</p>
+	<!-- The hint says which invoices qualify; the tip says why the rest are
+	     refused (same vendor, entity and currency — never a paid invoice). -->
+	<div class="hint-row">
+		<p class="modal-hint">{m('creditMemos.applyModal.hint')}</p>
+		<HelpTip term="credit-memo" />
+	</div>
 	<form onsubmit={(e) => { e.preventDefault(); handleApply(); }}>
 		<!-- Exactly the invoices the apply will accept, asked of the server when
 		     this dialog opens. The picker's count line says so if there are none
@@ -895,6 +904,20 @@
 </Modal>
 
 <style>
+	/* The apply dialog's hint with its ⓘ HelpTip beside it, never inside it.
+	   Deliberately not the global `.help-row`: the tip is top-aligned to a
+	   paragraph that may wrap, and the paragraph keeps its `.modal-hint`
+	   bottom margin, which `.help-row` would zero. */
+	.hint-row {
+		display: flex;
+		align-items: flex-start;
+		gap: 6px;
+	}
+
+	.hint-row .modal-hint {
+		flex: 1;
+	}
+
 	/* Page-specific bits not covered by the global design-system CSS in app.css. */
 	/* An applied or voided memo is de-emphasised by the shared `.row-muted`
 	   recipe in app.css (a muted colour token). It used to be `opacity: 0.6` on
@@ -941,8 +964,10 @@
 		font-weight: 600;
 		color: var(--text);
 	}
+
 	.modal-subject-vendor {
 		font-weight: 400;
 		color: var(--text-muted);
 	}
+
 </style>

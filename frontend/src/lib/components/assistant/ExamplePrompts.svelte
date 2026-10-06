@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { EXAMPLE_PROMPTS } from '#lib/types/assistant.ts';
 	import { m } from '#lib/i18n/store.svelte.ts';
+	import HelpTip from '#lib/components/help/HelpTip.svelte';
 
 	// Clicking a prompt fills + sends it (the page wires `onpick`).
 	let { onpick }: { onpick: (prompt: string) => void } = $props();
@@ -12,7 +13,10 @@
 			<path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" />
 		</svg>
 	</div>
-	<h2>{m('assistant.empty.heading')}</h2>
+	<div class="help-row">
+		<h2>{m('assistant.empty.heading')}</h2>
+		<HelpTip term="ai-assistant" />
+	</div>
 	<p class="empty-sub">
 		{m('assistant.empty.sub')}
 	</p>
@@ -36,9 +40,11 @@
 		max-width: 560px;
 		margin: 0 auto;
 	}
+
 	.empty-icon {
 		color: var(--accent);
 	}
+
 	.empty-state h2 {
 		margin: 0;
 		font-size: 1.3rem;
@@ -49,6 +55,7 @@
 		font-size: 0.9rem;
 		line-height: 1.5;
 	}
+
 	.prompt-list {
 		display: flex;
 		flex-direction: column;
@@ -56,6 +63,7 @@
 		width: 100%;
 		margin-top: 12px;
 	}
+
 	.prompt-btn {
 		width: 100%;
 		text-align: left;
@@ -69,6 +77,7 @@
 		cursor: pointer;
 		transition: all 0.12s;
 	}
+
 	.prompt-btn:hover {
 		border-color: var(--accent);
 		color: var(--accent);

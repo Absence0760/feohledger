@@ -29,6 +29,7 @@
 	import type { ExceptionSummary } from '#lib/types/exceptionSummary.ts';
 	import { toggleSort, type SortOrder } from '#lib/utils/sort.ts';
 	import AgentDashboard from '#lib/components/exceptions/AgentDashboard.svelte';
+	import HelpTip from '#lib/components/help/HelpTip.svelte';
 	import { formatMoney, type MoneyAmount } from '#lib/utils/money.ts';
 	import { formatDate, timeAgo } from '#lib/utils/time.ts';
 	import { getActiveFormatLocale } from '#lib/i18n/formatLocale.ts';
@@ -904,7 +905,10 @@
 		</div>
 	{:else}
 	<div id="exc-panel-queue" role="tabpanel" aria-labelledby="exc-tab-queue">
-		<FilterChips chips={statusChips} bind:active={statusFilter} />
+		<div class="help-row">
+			<FilterChips chips={statusChips} bind:active={statusFilter} />
+			<HelpTip term="exception" />
+		</div>
 
 		{#if typeChipEntries.length > 0}
 			<!-- `aria-pressed` mirrors `ui/FilterChips`: the status row announces
@@ -934,6 +938,9 @@
 						{typeLabel(type)}{#if count !== undefined}{' '}<span class="count">{count}</span>{/if}
 					</button>
 				{/each}
+				<!-- Which of these types stop a payment run is the question the
+				     row of types raises; the tip answers it. -->
+				<HelpTip term="payment-blocking-exception" />
 			</nav>
 		{/if}
 
@@ -1121,7 +1128,10 @@
 	onclose={() => (resolveTarget = null)}
 >
 	{#if resolveTarget}
-		<h2>{m('exceptions.resolveModal.title')}</h2>
+		<div class="help-row title-row">
+			<h2>{m('exceptions.resolveModal.title')}</h2>
+			<HelpTip term="segregation-of-duties" />
+		</div>
 		<p class="modal-hint">
 			<!-- `typeLabel`, not the server's `type_label`: the row badge one
 			     click away is translated, and naming the same type two ways
@@ -1247,7 +1257,18 @@
 	.type-filters {
 		display: flex;
 		flex-wrap: wrap;
+		align-items: center;
 		gap: 6px;
+	}
+
+	/* The resolve dialog's heading row (global `.help-row`) keeps the
+	   heading's spacing; the heading's own modal margin is zeroed below. */
+	.title-row {
+		margin-bottom: 4px;
+	}
+
+	.title-row h2 {
+		margin: 0;
 	}
 
 	.type-chip {

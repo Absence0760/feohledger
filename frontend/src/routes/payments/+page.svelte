@@ -15,6 +15,7 @@
 	import { toast } from '#lib/components/ui/Toast.svelte';
 	import RunDetailModal from '#lib/components/modals/RunDetailModal.svelte';
 	import RowAction from '#lib/components/ui/RowAction.svelte';
+	import HelpTip from '#lib/components/help/HelpTip.svelte';
 	import RowLink from '#lib/components/ui/RowLink.svelte';
 	import { isRowOpenClick } from '#lib/utils/rowNav.ts';
 	import { pruneSelection } from '#lib/utils/selection.ts';
@@ -1779,11 +1780,13 @@
 		     cash-position card's unconverted outflows — all three read alike on
 		     purpose. -->
 		{#if (summary.unconverted_payment_count ?? 0) > 0}
-			<p class="fx-skipped" role="alert" data-testid="unconverted-payments">
-				{m('payments.summary.unconvertedPayments', {
+			<p class="fx-skipped" data-testid="unconverted-payments">
+				<!-- The alert is the message alone: the ⓘ beside it is not part of the warning. -->
+				<span role="alert">{m('payments.summary.unconvertedPayments', {
 					n: summary.unconverted_payment_count ?? 0,
 					currency: summary.currency ?? ''
-				})}
+				})}</span>
+				<HelpTip term="reporting-currency" />
 			</p>
 		{/if}
 		<!-- Its own notice, not folded into the one above: a rebate excluded for
@@ -1890,14 +1893,17 @@
 
 		{#if showReview && selectedQueue.size > 0}
 			<div class="review-panel">
-				<div class="review-title">{m('payments.queue.reviewTitle')}</div>
+				<div class="help-row review-title-row">
+					<div class="review-title">{m('payments.queue.reviewTitle')}</div>
+					<HelpTip term="payment-run" />
+				</div>
 				<table class="review-table">
 					<thead>
 						<tr>
 							<th>{m('payments.col.invoice')}</th>
 							<th>{m('payments.col.vendor')}</th>
 							<th class="right">{m('payments.col.amount')}</th>
-							<th>{m('payments.col.method')}</th>
+							<th>{m('payments.col.method')} <HelpTip term="payment-rail" /></th>
 						</tr>
 					</thead>
 					<tbody>
@@ -1973,6 +1979,7 @@
 		{#if queueBlockedTotal > 0}
 			<p class="blocked-banner" role="status" data-testid="queue-blocked-banner">
 				{m('payments.queue.blockedCount', { n: queueBlockedTotal })}
+				<HelpTip term="payment-blocking-exception" />
 			</p>
 		{/if}
 
@@ -2001,7 +2008,7 @@
 					<th>{m('payments.col.vendor')}</th>
 					<th class="right">{m('payments.col.amount')}</th>
 					<th>{m('payments.col.dueDate')}</th>
-					<th>{m('payments.col.discount')}</th>
+					<th>{m('payments.col.discount')} <HelpTip term="dynamic-discounting" /></th>
 					<th>{m('payments.col.terms')}</th>
 					<th>{m('payments.col.status')}</th>
 					{#if canCompareRoutes()}
@@ -2331,7 +2338,10 @@
 		     grew. Advancing a rebate RECORDS what the processor already did on
 		     its own statement — it never moves money, which is why the dialog
 		     says so before either action can be taken. -->
-		<h2 class="section-heading">{m('payments.rebates.title')}</h2>
+		<div class="help-row section-title-row">
+			<h2 class="section-heading">{m('payments.rebates.title')}</h2>
+			<HelpTip term="card-rebate" />
+		</div>
 		<p class="section-note">{m('payments.rebates.subtitle')}</p>
 
 		{#if rebateExcludedCount > 0}
@@ -2431,7 +2441,10 @@
 			</p>
 		{/if}
 
-		<h2 class="section-heading">{m('payments.rebates.cardsTitle')}</h2>
+		<div class="help-row section-title-row">
+			<h2 class="section-heading">{m('payments.rebates.cardsTitle')}</h2>
+			<HelpTip term="virtual-card" />
+		</div>
 
 		<!-- The Cards tab stacks TWO tables (rebates above, cards here), so a
 		     page-wide `table tbody tr` count reads both. This wrapper is the
@@ -2663,6 +2676,7 @@
 		{:else}
 			<p class="modal-warn">
 				{m('payments.void.warning')}
+				<HelpTip term="void" />
 			</p>
 			<form onsubmit={(e) => { e.preventDefault(); commitVoid(); }}>
 				<label>
@@ -2715,6 +2729,7 @@
 			{complianceMode === 'release'
 				? m('payments.compliance.release.warning')
 				: m('payments.compliance.dismiss.warning')}
+			<HelpTip term="compliance-hold" />
 		</p>
 		<form onsubmit={(e) => { e.preventDefault(); commitCompliance(); }}>
 			{#if complianceMode === 'dismiss'}
@@ -2813,6 +2828,7 @@
 		{:else}
 			<p class="modal-warn" data-testid="settlement-warning">
 				{m('payments.settlement.warning')}
+				<HelpTip term="settlement" />
 			</p>
 			{#if settlementError}
 				<p class="state error" role="alert" data-testid="settlement-error">{settlementError}</p>
@@ -2866,6 +2882,7 @@
 			{m('payments.summary.payments')}
 			{#if erpSyncTarget.total_amount}·
 				{formatCurrency(erpSyncTarget.total_amount, erpSyncTarget.currency)}{/if}
+			<HelpTip term="erp-sync" />
 		</p>
 
 		{#if erpSyncResult}
@@ -2976,14 +2993,17 @@
 					{m('payments.quotes.mode.fastest')}
 				</button>
 			</div>
-			<label class="quote-method">
-				<span>{m('payments.quotes.methodLabel')}</span>
-				<select bind:value={quoteMethod} data-testid="quotes-method" onchange={() => runQuotes()}>
-					{#each QUOTE_METHODS as opt (opt.value)}
-						<option value={opt.value}>{m(opt.key)}</option>
-					{/each}
-				</select>
-			</label>
+			<div class="quote-method-row">
+				<label class="quote-method">
+					<span>{m('payments.quotes.methodLabel')}</span>
+					<select bind:value={quoteMethod} data-testid="quotes-method" onchange={() => runQuotes()}>
+						{#each QUOTE_METHODS as opt (opt.value)}
+							<option value={opt.value}>{m(opt.key)}</option>
+						{/each}
+					</select>
+				</label>
+				<HelpTip term="payment-rail" />
+			</div>
 		</div>
 
 		{#if quoteBusy}
@@ -3081,9 +3101,11 @@
 		color: var(--text-muted);
 		padding: 0.75rem 0;
 	}
+
 	.state.error {
 		color: var(--danger);
 	}
+
 	.state.error p {
 		margin: 0 0 8px;
 	}
@@ -3679,6 +3701,28 @@
 	/* Cards-tab section structure. The tab stacks two tables (rebates, then
 	   the cards themselves) under one `<h1>`, so each gets a real `<h2>` —
 	   heading structure, not bold text (WCAG 1.3.1). */
+	.section-title-row {
+		margin: 24px 0 4px;
+	}
+
+	.section-title-row > .section-heading {
+		margin: 0;
+	}
+
+	.review-title-row {
+		margin-bottom: 10px;
+	}
+
+	.review-title-row > .review-title {
+		margin-bottom: 0;
+	}
+
+	.quote-method-row {
+		display: flex;
+		align-items: flex-end;
+		gap: 6px;
+	}
+
 	.section-heading {
 		font-size: 0.95rem;
 		font-weight: 600;
@@ -3772,6 +3816,7 @@
 			flex-direction: column;
 			align-items: stretch;
 		}
+
 	}
 
 	/* --- Corridor quote comparison (advisory) --- */
@@ -3881,4 +3926,5 @@
 	.quote-unranked-reason {
 		color: var(--text-muted);
 	}
+
 </style>

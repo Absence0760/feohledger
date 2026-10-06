@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { Catalog, GuidedBuyingSuggestion } from '#lib/types/catalog.ts';
+	import HelpTip from '#lib/components/help/HelpTip.svelte';
 	import { catalogTypeLabelKey, guidedBuyingReasonLabelKey } from '#lib/types/catalog.ts';
 	import { auth } from '#lib/stores/auth.svelte.ts';
 	import {
@@ -260,7 +261,10 @@
 					</div>
 
 					<div class="guided-col">
-						<h4>{m('catalogs.guided.inContractVendors')}</h4>
+						<div class="help-row">
+							<h4>{m('catalogs.guided.inContractVendors')}</h4>
+							<HelpTip term="contract" />
+						</div>
 						{#if guided.in_contract_vendors.length === 0}
 							<p class="muted">{m('catalogs.guided.noContractVendors')}</p>
 						{:else}
@@ -404,9 +408,11 @@
 		color: var(--text-muted);
 		padding: 0.75rem 0;
 	}
+
 	.state.error {
 		color: var(--danger);
 	}
+
 	.state.error p {
 		margin: 0 0 8px;
 	}
@@ -428,6 +434,7 @@
 		padding: 14px 16px;
 		background: var(--surface);
 	}
+
 	.guided-controls {
 		display: flex;
 		gap: 8px;
@@ -435,6 +442,7 @@
 		align-items: center;
 		margin-bottom: 12px;
 	}
+
 	.guided-controls input {
 		padding: 7px 9px;
 		border-radius: 5px;
@@ -450,6 +458,7 @@
 		grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
 		gap: 14px;
 	}
+
 	.guided-col h4 {
 		margin: 0 0 8px;
 		font-size: 0.85rem;
@@ -467,17 +476,20 @@
 		margin-bottom: 8px;
 		font-size: 0.85rem;
 	}
+
 	.item-head {
 		display: flex;
 		align-items: center;
 		gap: 8px;
 		justify-content: space-between;
 	}
+
 	.reasons {
 		display: flex;
 		gap: 4px;
 		flex-wrap: wrap;
 	}
+
 	.reason {
 		display: inline-block;
 		padding: 1px 7px;
@@ -487,12 +499,15 @@
 		background: rgba(31, 168, 106, 0.15);
 		color: #1fa86a;
 	}
+
 	.sub {
 		color: var(--text-muted);
 		font-size: 0.78rem;
 	}
+
 	.muted {
 		color: var(--text-muted);
 		font-size: 0.82rem;
 	}
+
 </style>

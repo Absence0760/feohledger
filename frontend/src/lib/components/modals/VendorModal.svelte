@@ -6,6 +6,7 @@
 	// unblock) default to admin / ap_manager and emit the updated vendor (or
 	// refreshed risk) back to the parent list.
 	import { auth } from '#lib/stores/auth.svelte.ts';
+	import HelpTip from '#lib/components/help/HelpTip.svelte';
 	import { PERM_VENDOR_BLOCK, PERM_VENDOR_MANAGE } from '#lib/types/admin.ts';
 	import { toast } from '#lib/components/ui/Toast.svelte';
 	import Modal from '#lib/components/ui/Modal.svelte';
@@ -276,7 +277,7 @@
 
 		<div class="kv-grid">
 			<div class="kv">
-				<span class="kv-label">{m('vendors.modal.screeningStatus')}</span>
+				<span class="kv-label">{m('vendors.modal.screeningStatus')} <HelpTip term="sanctions-screening" /></span>
 				<span class="kv-value">
 					<ScreeningBadge screening={vendor.screening_status} blocked={vendor.payments_blocked} />
 				</span>
@@ -286,7 +287,7 @@
 				<span class="kv-value">{fmt(vendor.last_screened_at)}</span>
 			</div>
 			<div class="kv">
-				<span class="kv-label">{m('vendors.modal.riskLevel')}</span>
+				<span class="kv-label">{m('vendors.modal.riskLevel')} <HelpTip term="vendor-risk" /></span>
 				<span class="kv-value">
 					{riskLabel(vendor.risk_level)}{#if vendor.risk_score}
 						<span class="muted"> · {vendor.risk_score}</span>

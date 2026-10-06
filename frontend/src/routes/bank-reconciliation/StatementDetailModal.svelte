@@ -34,6 +34,7 @@
 	} from '#lib/types/bankReconciliation.ts';
 	import { getOutstandingItems, resolveBankTransaction } from '#lib/api/bankReconciliation.ts';
 	import Badge from '#lib/components/ui/Badge.svelte';
+	import HelpTip from '#lib/components/help/HelpTip.svelte';
 	import DataTable from '#lib/components/ui/DataTable.svelte';
 	import Modal from '#lib/components/ui/Modal.svelte';
 	import Money from '#lib/components/ui/Money.svelte';
@@ -209,6 +210,7 @@
 				count: detail.transaction_count
 			})}
 		</span>
+		<HelpTip term="bank-reconciliation" />
 		{#if needsDecisionCount > 0}
 			<Badge tone="warning" variant="needs-review">
 				{m('bankRecon.detail.needsReview', { count: needsDecisionCount })}

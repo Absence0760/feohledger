@@ -1,4 +1,5 @@
 <script lang="ts">
+	import HelpTip from '#lib/components/help/HelpTip.svelte';
 	import { goto } from '$app/navigation';
 	import { auth } from '#lib/stores/auth.svelte.ts';
 	import PageHeader from '#lib/components/ui/PageHeader.svelte';
@@ -96,10 +97,10 @@
 
 <PageHeader title="Retention Policy">
 	<p class="page-hint">
-		SOX records-management windows, per record class. A background sweep
+		SOX records-management windows, per record class. <HelpTip term="retention-policy" /> A background sweep
 		enforces these — it soft-archives terminal invoices past their window and
 		verifies the audit log has been WORM-shipped, and it never deletes an
-		audit row. Enforcement sweep:
+		audit row. <HelpTip term="audit-trail" /> Enforcement sweep:
 		<Badge tone={sweepEnabled ? 'success' : 'muted'}>
 			{sweepEnabled ? 'Enabled' : 'Disabled'}
 		</Badge>

@@ -2,6 +2,7 @@
 	import { focusTrap } from '#lib/actions/focusTrap.ts';
 	import { api } from '#lib/api.ts';
 	import { toast } from '#lib/components/ui/Toast.svelte';
+	import HelpTip from '#lib/components/help/HelpTip.svelte';
 
 	interface Props {
 		onclose: () => void;
@@ -116,7 +117,10 @@
 >
 	<div use:focusTrap={{ onEscape: onclose }} class="modal" role="dialog" aria-label="Bulk re-code GL" tabindex="-1">
 		<header class="modal-header">
-			<h2>Bulk Re-code GL Codes</h2>
+			<div class="help-row">
+				<h2>Bulk Re-code GL Codes</h2>
+				<HelpTip term="gl-coding" />
+			</div>
 			<button class="close-btn" onclick={onclose} aria-label="Close">&times;</button>
 		</header>
 
@@ -235,6 +239,7 @@
 		z-index: 100;
 		backdrop-filter: blur(2px);
 	}
+
 	.modal {
 		background: var(--surface);
 		border: 1px solid var(--border);
@@ -245,6 +250,7 @@
 		flex-direction: column;
 		box-shadow: 0 16px 48px rgba(0, 0, 0, 0.3);
 	}
+
 	.modal-header {
 		display: flex;
 		justify-content: space-between;
@@ -252,6 +258,7 @@
 		padding: 16px 20px;
 		border-bottom: 1px solid var(--border);
 	}
+
 	.modal h2 {
 		margin: 0;
 		font-size: 1.1rem;
@@ -266,6 +273,7 @@
 		line-height: 1;
 		padding: 0 4px;
 	}
+
 	.modal-body {
 		padding: 20px;
 		overflow-y: auto;
@@ -274,15 +282,18 @@
 		flex-direction: column;
 		gap: 16px;
 	}
+
 	.intro {
 		margin: 0;
 		font-size: 0.85rem;
 		color: var(--text-muted);
 	}
+
 	.filters {
 		display: flex;
 		gap: 12px;
 	}
+
 	.filters label {
 		display: flex;
 		flex-direction: column;
@@ -308,16 +319,19 @@
 		gap: 8px;
 		font-size: 0.85rem;
 	}
+
 	.ai-warning {
 		color: var(--text-muted);
 		font-size: 0.78rem;
 	}
+
 	.actions {
 		display: flex;
 		justify-content: flex-end;
 		gap: 8px;
 		margin-top: 8px;
 	}
+
 	.btn-cancel,
 	.btn-primary {
 		padding: 8px 16px;
@@ -327,15 +341,18 @@
 		cursor: pointer;
 		border: 1px solid var(--border);
 	}
+
 	.btn-cancel {
 		background: var(--surface);
 		color: var(--text);
 	}
+
 	.btn-primary {
 		background: var(--accent-strong);
 		color: white;
 		border-color: var(--accent-strong);
 	}
+
 	.btn-primary:disabled,
 	.btn-cancel:disabled {
 		opacity: 0.5;
@@ -351,6 +368,7 @@
 		border-radius: 6px;
 		border: 1px solid var(--border);
 	}
+
 	.summary dt {
 		font-size: 0.78rem;
 		color: var(--text-muted);
@@ -363,11 +381,13 @@
 	.summary dd.emph {
 		color: var(--accent);
 	}
+
 	.summary .hint {
 		font-size: 0.72rem;
 		color: var(--text-muted);
 		margin-left: 6px;
 	}
+
 	.report h3 {
 		margin: 6px 0 4px;
 		font-size: 0.78rem;
@@ -381,6 +401,7 @@
 		border: 1px solid var(--border);
 		border-radius: 6px;
 	}
+
 	.changes table {
 		width: 100%;
 		border-collapse: collapse;
@@ -402,21 +423,25 @@
 	.mono {
 		font-family: 'SF Mono', 'Cascadia Code', monospace;
 	}
+
 	.muted {
 		color: var(--text-muted);
 	}
+
 	.more {
 		text-align: center;
 		padding: 6px;
 		font-size: 0.78rem;
 		color: var(--text-muted);
 	}
+
 	.empty {
 		text-align: center;
 		padding: 18px;
 		color: var(--text-muted);
 		font-size: 0.85rem;
 	}
+
 	.src {
 		display: inline-block;
 		padding: 1px 8px;
@@ -424,12 +449,15 @@
 		font-size: 0.7rem;
 		font-weight: 500;
 	}
+
 	.src-vendor_prior {
 		background: rgba(31, 168, 106, 0.15);
 		color: #1fa86a;
 	}
+
 	.src-ai {
 		background: var(--accent-tint);
 		color: var(--accent-on-tint);
 	}
+
 </style>

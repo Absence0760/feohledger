@@ -12,6 +12,7 @@
 	import type { AdminUser } from '#lib/types/admin.ts';
 	import { m } from '#lib/i18n/store.svelte.ts';
 	import { orgCurrency } from '#lib/stores/orgSettings.svelte.ts';
+	import HelpTip from '#lib/components/help/HelpTip.svelte';
 
 	type Props = {
 		chain: ApprovalLevelConfig[];
@@ -172,9 +173,15 @@
 			</div>
 
 			<div class="row">
-				<label class="field">
-					<span>{m('approvalMatrix.minAmount', { currency: orgCurrency.label })}</span>
+				<!-- An explicit `for` label (not a wrapping one) so the HelpTip can sit
+				     beside the text without becoming part of the input's name. -->
+				<div class="field">
+					<div class="help-row label-row">
+						<label class="field-label" for="matrix-min-{levelIdx}">{m('approvalMatrix.minAmount', { currency: orgCurrency.label })}</label>
+						<HelpTip term="approval-threshold" />
+					</div>
 					<input
+						id="matrix-min-{levelIdx}"
 						type="number"
 						step="0.01"
 						min="0"
@@ -185,7 +192,7 @@
 								min_amount: e.currentTarget.value.trim() || null,
 							})}
 					/>
-				</label>
+				</div>
 				<label class="field">
 					<span>{m('approvalMatrix.maxAmount', { currency: orgCurrency.label })}</span>
 					<input
@@ -203,7 +210,10 @@
 			</div>
 
 			<div class="field">
-				<span class="field-label">{m('approvalMatrix.approvers')}</span>
+				<div class="help-row label-row">
+					<span class="field-label">{m('approvalMatrix.approvers')}</span>
+					<HelpTip term="segregation-of-duties" />
+				</div>
 				<div class="user-chips">
 					{#each users.filter((u) => u.is_active) as u}
 						<button
@@ -302,9 +312,13 @@
 			</div>
 
 			<div class="row">
-				<label class="field">
-					<span>{m('approvalMatrix.escalateAfter')}</span>
+				<div class="field">
+					<div class="help-row label-row">
+						<label class="field-label" for="matrix-escalate-{levelIdx}">{m('approvalMatrix.escalateAfter')}</label>
+						<HelpTip term="escalation" />
+					</div>
 					<input
+						id="matrix-escalate-{levelIdx}"
 						type="number"
 						min="1"
 						placeholder={m('approvalMatrix.disabled')}
@@ -316,7 +330,7 @@
 									: null,
 							})}
 					/>
-				</label>
+				</div>
 			</div>
 
 			{#if level.escalation_hours}
@@ -456,6 +470,11 @@
 		justify-content: space-between;
 	}
 
+	/* A field label's ⓘ row (global `.help-row`) sits tighter than a heading's. */
+	.label-row {
+		gap: 4px;
+	}
+
 	.field input,
 	.field select {
 		/* base look (border/radius/colour/font/chevron) from the global recipe */
@@ -559,4 +578,5 @@
 		color: var(--text-muted);
 		margin: 4px 0 0 0;
 	}
+
 </style>

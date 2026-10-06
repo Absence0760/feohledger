@@ -3,6 +3,7 @@
 	import { m } from '#lib/i18n/store.svelte.ts';
 	import DataTable from '#lib/components/ui/DataTable.svelte';
 	import Money from '#lib/components/ui/Money.svelte';
+	import HelpTip from '#lib/components/help/HelpTip.svelte';
 	import MoneyByCurrency from '#lib/components/ui/MoneyByCurrency.svelte';
 	import { entityStore } from '#lib/stores/entity.svelte.ts';
 	import type { AnalyticsByEntity } from '#lib/types/analytics.ts';
@@ -76,7 +77,10 @@
 
 {#if entityStore.multiEntity}
 	<div class="chart-card" data-testid="by-entity-section">
-		<h2>{m('byEntity.heading')}</h2>
+		<div class="help-row be-title">
+			<h2>{m('byEntity.heading')}</h2>
+			<HelpTip term="entity" />
+		</div>
 		{#if error}
 			<p class="be-error" role="alert">{error}</p>
 		{:else if loading && !data}
@@ -162,6 +166,14 @@
 {/if}
 
 <style>
+	/* The heading sits in the global `.help-row`, which zeroes its margin.
+	   This component's h2 has never had a scoped style, so it rendered with
+	   the browser's default h2 margin; keep that until the heading is styled
+	   to match the CFO page's other `.chart-card` titles. */
+	.be-title > h2 {
+		margin: 0.83em 0;
+	}
+
 	.be-error {
 		color: var(--danger);
 	}

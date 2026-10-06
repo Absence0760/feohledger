@@ -39,6 +39,7 @@
 	import Badge from '#lib/components/ui/Badge.svelte';
 	import type { BadgeTone } from '#lib/components/ui/badgeTone.ts';
 	import KpiCard from '#lib/components/ui/KpiCard.svelte';
+	import HelpTip from '#lib/components/help/HelpTip.svelte';
 	import Money from '#lib/components/ui/Money.svelte';
 	import RowAction from '#lib/components/ui/RowAction.svelte';
 	import RowLink from '#lib/components/ui/RowLink.svelte';
@@ -443,7 +444,10 @@
 			role="tabpanel"
 			aria-labelledby="adaptive-tab-suggestions"
 		>
-			<h2>{m('adaptive.suggestions.heading')}</h2>
+			<div class="help-row title-row">
+				<h2>{m('adaptive.suggestions.heading')}</h2>
+				<HelpTip term="adaptive-workflow" />
+			</div>
 			<p class="hint">{m('adaptive.suggestions.intro')}</p>
 
 			<div class="panel-controls">
@@ -511,7 +515,10 @@
 			role="tabpanel"
 			aria-labelledby="adaptive-tab-threshold"
 		>
-			<h2>{m('adaptive.threshold.heading')}</h2>
+			<div class="help-row title-row">
+				<h2>{m('adaptive.threshold.heading')}</h2>
+				<HelpTip term="approval-threshold" />
+			</div>
 			<p class="hint">{m('adaptive.threshold.intro')}</p>
 
 			<!-- The stale-value guard's own state. Persistent (not a toast) —
@@ -646,7 +653,10 @@
 		<!-- ------------------------------------------------------------------ -->
 	{:else if activeTab === 'routing'}
 		<div class="panel" id="adaptive-panel-routing" role="tabpanel" aria-labelledby="adaptive-tab-routing">
-			<h2>{m('adaptive.routing.heading')}</h2>
+			<div class="help-row title-row">
+				<h2>{m('adaptive.routing.heading')}</h2>
+				<HelpTip term="adaptive-workflow" />
+			</div>
 			<p class="hint">{m('adaptive.routing.intro')}</p>
 
 			<div class="panel-controls">
@@ -1011,6 +1021,7 @@
 		max-width: 70ch;
 		margin: 0;
 	}
+
 	.advisory {
 		color: var(--text-muted);
 		max-width: 70ch;
@@ -1019,12 +1030,21 @@
 		border-left: 3px solid var(--accent);
 		padding-left: 10px;
 	}
+
 	.panel {
 		margin-top: 16px;
 	}
+
 	h2 {
 		font-size: 1.05rem;
 		margin: 0 0 4px;
+	}
+	/* A tab heading's ⓘ row (global `.help-row`) takes the heading's margin. */
+	.title-row {
+		margin-bottom: 4px;
+	}
+	.title-row h2 {
+		margin: 0;
 	}
 	h3 {
 		font-size: 0.95rem;
@@ -1041,11 +1061,13 @@
 		margin: 0 0 8px;
 		max-width: 80ch;
 	}
+
 	.sub {
 		display: block;
 		color: var(--text-muted);
 		font-size: 0.8rem;
 	}
+
 	/* The unconverted-approvals disclosure. Amber and emphatic — this is not a
 	   hint, it is the caveat that makes the average beside it readable — and the
 	   same token `/cfo` and the by-entity breakdown use for the identical
@@ -1057,6 +1079,7 @@
 		margin: 0 0 8px;
 		max-width: 80ch;
 	}
+
 	/* The currency-less fallback render — matches `<Money mono>` so a table
 	   column doesn't change metrics when one row can't be labelled. */
 	.money.mono {
@@ -1064,13 +1087,16 @@
 		font-variant-numeric: tabular-nums;
 		font-family: ui-monospace, 'SF Mono', 'Cascadia Code', Menlo, Consolas, monospace;
 	}
+
 	.state {
 		color: var(--text-muted);
 		padding: 0.75rem 0;
 	}
+
 	.state.error {
 		color: var(--danger);
 	}
+
 	.state.error p {
 		margin: 0 0 8px;
 	}
@@ -1083,6 +1109,7 @@
 		border-radius: 6px;
 		color: var(--text);
 	}
+
 	.state.changed p {
 		margin: 4px 0 0;
 		font-size: 0.9rem;
@@ -1094,6 +1121,7 @@
 		margin: 10px 0;
 		flex-wrap: wrap;
 	}
+
 	.panel-controls label {
 		font-size: 0.85rem;
 		color: var(--text-muted);
@@ -1101,23 +1129,27 @@
 	.panel-actions {
 		margin-top: 12px;
 	}
+
 	.kpi-row {
 		display: flex;
 		gap: 12px;
 		flex-wrap: wrap;
 		margin: 10px 0;
 	}
+
 	.rationale {
 		color: var(--text-muted);
 		max-width: 80ch;
 		margin: 4px 0 0;
 	}
+
 	.evidence,
 	.metrics,
 	.candidates {
 		margin: 0;
 		padding-left: 18px;
 	}
+
 	.evidence li,
 	.metrics li,
 	.candidates li {
@@ -1127,44 +1159,54 @@
 		list-style: none;
 		padding-left: 0;
 	}
+
 	.metric-value {
 		font-weight: 600;
 		font-variant-numeric: tabular-nums;
 	}
+
 	.metric-value.muted {
 		font-weight: 500;
 		color: var(--text-muted);
 	}
+
 	.candidates {
 		list-style: none;
 		padding-left: 0;
 	}
+
 	.cand-head {
 		display: flex;
 		align-items: baseline;
 		gap: 8px;
 	}
+
 	.cand-head .rank {
 		color: var(--text-muted);
 		font-variant-numeric: tabular-nums;
 	}
+
 	.cand-head .score {
 		margin-left: auto;
 		font-variant-numeric: tabular-nums;
 		font-weight: 600;
 	}
+
 	.rec-pair {
 		display: flex;
 		gap: 24px;
 		flex-wrap: wrap;
 	}
+
 	.rec-pair > div {
 		flex: 1 1 260px;
 	}
 	.flag {
 		margin-bottom: 4px;
 	}
+
 	.mono {
 		font-variant-numeric: tabular-nums;
 	}
+
 </style>

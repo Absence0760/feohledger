@@ -78,6 +78,7 @@
 		type PeppolTransmissionSummary,
 	} from '#lib/api/einvoice.ts';
 	import EInvoiceIssueList from '#lib/components/EInvoiceIssueList.svelte';
+	import HelpTip from '#lib/components/help/HelpTip.svelte';
 
 	/*
 	 * There is still no HAND-WRITTEN code→prose map here, and there never will
@@ -1750,7 +1751,10 @@
 					{:else if summary}
 						<section class="audit-summary" data-testid="audit-summary" aria-label={m('invoices.modal.summaryAria')}>
 							<div class="audit-summary-head">
-								<span class="audit-summary-label">{m('invoices.modal.summary')}</span>
+								<span class="help-row">
+									<span class="audit-summary-label">{m('invoices.modal.summary')}</span>
+									<HelpTip term="confidence-score" />
+								</span>
 								{#if canRegenerateSummary}
 									<button
 										type="button"
@@ -1895,7 +1899,10 @@
 					{#if codingSuggestions.length > 0 || appliedSuggestionFields.length > 0}
 						<section class="coding-suggestions" data-testid="coding-suggestions" aria-label={m('invoices.modal.suggestions.aria')}>
 							<div class="coding-suggestions-head">
-								<span class="coding-suggestions-title">{m('invoices.modal.suggestions.title')}</span>
+								<span class="help-row">
+									<span class="coding-suggestions-title">{m('invoices.modal.suggestions.title')}</span>
+									<HelpTip term="gl-coding" />
+								</span>
 							</div>
 							<p class="coding-suggestions-hint">{m('invoices.modal.suggestions.hint')}</p>
 							{#each codingSuggestions as s (s.field)}
@@ -2067,6 +2074,7 @@
 								<!-- Same resolver as the `/invoices` row icon, so a finding cannot
 								     read as German in the list and English in the tooltip. -->
 								{invoiceWarningText(w, m)}
+								{#if w.type === 'duplicate'}<HelpTip term="duplicate-invoice" />{/if}
 							</div>
 							{/each}
 						</div>
@@ -2076,7 +2084,16 @@
 						{@const pm = invoice.po_match}
 						<div class="po-match {pm.status}">
 							<div class="po-match-header">
-								<span class="po-match-title">{m('invoices.modal.poMatch.title')}</span>
+								<span class="help-row po-match-title-row">
+									<span class="po-match-title">{m('invoices.modal.poMatch.title')}</span>
+									<HelpTip
+										term={pm.match_type === '2-way'
+											? 'two-way-match'
+											: pm.match_type === '4-way'
+												? 'four-way-match'
+												: 'three-way-match'}
+									/>
+								</span>
 								<span class="po-match-status {pm.status}">
 									{#if pm.status === 'matched'}{m('invoices.modal.poMatch.matched')}
 									{:else if pm.status === 'mismatch'}{m('invoices.modal.poMatch.mismatch')}
@@ -2109,7 +2126,10 @@
 										     a face-value difference, so it is shown bare. A currency
 										     mismatch has no variance at all (`null`). -->
 										<div>
-											<span class="po-match-label">{m('invoices.modal.poMatch.variance')}</span>
+											<span class="help-row">
+												<span class="po-match-label">{m('invoices.modal.poMatch.variance')}</span>
+												<HelpTip term="match-tolerance" />
+											</span>
 											<span
 												class="po-match-value mono"
 												class:variance-pos={isPositiveAmount(pm.amount_variance)}
@@ -2132,6 +2152,7 @@
 							{#if pm.match_type === '4-way' || pm.inspection_result || pm.inspection_required}
 								<div class="po-match-inspection">
 									<span class="po-match-label">{m('invoices.modal.poMatch.qualityInspection')}</span>
+									<HelpTip term="quality-inspection" />
 									{#if pm.inspection_result}
 										<Badge tone={INSPECTION_TONES[pm.inspection_result]} variant={pm.inspection_result}>
 											{#if pm.inspection_result === 'pass'}{m('invoices.modal.poMatch.passed')}
@@ -2202,12 +2223,16 @@
 							formatProgress={chainProgressLabel}
 							anyApproverLabel={m('invoices.modal.chain.anyApprover')}
 							title={m('invoices.modal.chain.title')}
+							helpTerm="approval-chain"
 						/>
 					{/if}
 
 					{#if isErpStatus || (status === 'failed' && erpInfo)}
 						<div class="erp-section">
-							<div class="erp-title">{m('invoices.modal.erp.title')}</div>
+							<div class="help-row erp-title-row">
+								<div class="erp-title">{m('invoices.modal.erp.title')}</div>
+								<HelpTip term="erp-sync" />
+							</div>
 							<div class="erp-details">
 								{#if erpInfo?.erp_reference}
 									<div class="erp-row">
@@ -2239,7 +2264,10 @@
 
 					{#if canRouteIntercompany && entityStore.multiEntity}
 						<section class="ic-section" data-testid="intercompany">
-							<div class="ic-title">{m('invoices.modal.intercompany.title')}</div>
+							<div class="help-row">
+								<div class="ic-title">{m('invoices.modal.intercompany.title')}</div>
+								<HelpTip term="intercompany" />
+							</div>
 							{#if mirrorInvoiceId}
 								<!-- Already routed. The pairing is settled: the backend only
 								     stamps a counterparty while unrouted and returns the same
@@ -2435,7 +2463,10 @@
 					     standards-compliant XML from the invoice's data, in the dialect
 					     the receiver's jurisdiction expects. -->
 					<div class="einvoice-section" data-testid="einvoice-section">
-						<div class="review-title">{m('invoices.modal.einvoice.title')}</div>
+						<div class="help-row review-title-row">
+							<div class="review-title">{m('invoices.modal.einvoice.title')}</div>
+							<HelpTip term="e-invoice" />
+						</div>
 						<p class="einvoice-hint">{m('invoices.modal.einvoice.hint')}</p>
 
 						<div class="export-wrapper">
@@ -2493,7 +2524,10 @@
 
 						{#if canSendPeppol}
 							<div class="peppol-block">
-								<div class="peppol-title">{m('invoices.modal.peppol.title')}</div>
+								<div class="help-row peppol-title-row">
+									<div class="peppol-title">{m('invoices.modal.peppol.title')}</div>
+									<HelpTip term="peppol" />
+								</div>
 								{#if !peppolStatusReady}
 									<p class="einvoice-hint" data-testid="peppol-not-sendable">
 										{m('invoices.modal.peppol.notSendable')}
@@ -2620,7 +2654,10 @@
 
 					{#if canReview}
 						<div class="review-section">
-							<div class="review-title">{m('invoices.modal.review.title')}</div>
+							<div class="help-row review-title-row">
+								<div class="review-title">{m('invoices.modal.review.title')}</div>
+								<HelpTip term="segregation-of-duties" />
+							</div>
 							{#if showRejectForm}
 								<div class="reject-form">
 									<textarea
@@ -3911,7 +3948,29 @@
 		text-transform: uppercase;
 		letter-spacing: 0.04em;
 		color: var(--text-muted);
+	}
+
+	/* Section titles with their ⓘ HelpTip beside them use the global
+	   `.help-row`; these carry only each row's local spacing. A title's own
+	   bottom margin moves to the row (and is zeroed on the title, since a
+	   scoped margin outranks the global reset) so the tip stays centred on
+	   the text. */
+	.po-match-title-row {
 		margin-right: auto;
+	}
+	.erp-title-row {
+		margin-bottom: 8px;
+	}
+	.review-title-row {
+		margin-bottom: 10px;
+	}
+	.peppol-title-row {
+		margin-bottom: 4px;
+	}
+	.help-row > .erp-title,
+	.help-row > .review-title,
+	.help-row > .peppol-title {
+		margin-bottom: 0;
 	}
 
 	.po-match-status {

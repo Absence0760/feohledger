@@ -26,6 +26,7 @@
 	import PageHeader from '#lib/components/ui/PageHeader.svelte';
 	import SearchBox from '#lib/components/ui/SearchBox.svelte';
 	import FilterChips from '#lib/components/ui/FilterChips.svelte';
+	import HelpTip from '#lib/components/help/HelpTip.svelte';
 	import KpiCard from '#lib/components/ui/KpiCard.svelte';
 	import DataTable from '#lib/components/ui/DataTable.svelte';
 	import RowLink from '#lib/components/ui/RowLink.svelte';
@@ -393,7 +394,10 @@
 
 	<div class="filter-row">
 		<SearchBox bind:value={search} placeholder={m('recurring.search.placeholder')} ariaLabel={m('recurring.search.aria')} />
-		<FilterChips chips={STATUS_CHIPS} bind:active={statusFilter} />
+		<div class="help-row">
+			<FilterChips chips={STATUS_CHIPS} bind:active={statusFilter} />
+			<HelpTip term="recurring-invoice" />
+		</div>
 	</div>
 
 	<DataTable
@@ -533,17 +537,21 @@
 		font-variant-numeric: tabular-nums;
 		font-family: ui-monospace, 'SF Mono', 'Cascadia Code', Menlo, Consolas, monospace;
 	}
+
 	.muted {
 		color: var(--text-muted);
 	}
+
 	.cadence {
 		font-weight: 500;
 	}
+
 	.cadence-day {
 		display: block;
 		font-size: 0.72rem;
 		color: var(--text-muted);
 	}
+
 	.rel {
 		display: block;
 		font-size: 0.72rem;
@@ -560,4 +568,5 @@
 		gap: 6px;
 		flex-wrap: wrap;
 	}
+
 </style>

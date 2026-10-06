@@ -1,5 +1,6 @@
 <script lang="ts">
 	import Modal from '#lib/components/ui/Modal.svelte';
+	import HelpTip from '#lib/components/help/HelpTip.svelte';
 	import Money from '#lib/components/ui/Money.svelte';
 	import { toast } from '#lib/components/ui/Toast.svelte';
 	import { m } from '#lib/i18n/store.svelte.ts';
@@ -201,6 +202,7 @@
 	<p class="ytd-line">
 		{m('tax.vendorModal.ytdLine', { year })}
 		<strong><Money amount={row.ytd_paid} {currency} /></strong>
+		<HelpTip term="form-1099" />
 	</p>
 
 	<form onsubmit={(e) => { e.preventDefault(); saveFields(); }}>

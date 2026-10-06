@@ -3,6 +3,7 @@
 	import { INVOICE_STATUSES, INVOICE_STATUS_LABEL_KEYS } from '#lib/types/invoice.ts';
 	import type { AdvancedSearchFilters, InvoiceStatus } from '#lib/types/invoice.ts';
 	import { m } from '#lib/i18n/store.svelte.ts';
+	import HelpTip from '#lib/components/help/HelpTip.svelte';
 
 	let {
 		filters,
@@ -110,6 +111,9 @@
 						{m(INVOICE_STATUS_LABEL_KEYS[s])}
 					</button>
 				{/each}
+				<!-- After the chips, never in the <legend>: the statuses are the
+				     workflow's stages, and the tip says what moves an invoice. -->
+				<HelpTip term="workflow" />
 			</div>
 		</fieldset>
 
@@ -162,6 +166,7 @@
 
 	.status-chips {
 		display: flex;
+		align-items: center;
 		gap: 6px;
 		flex-wrap: wrap;
 	}

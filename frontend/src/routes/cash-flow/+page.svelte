@@ -2,6 +2,7 @@
 	import { onMount, tick } from 'svelte';
 	import { api, streamCashFlowCopilot, AssistantBudgetError } from '#lib/api.ts';
 	import PageHeader from '#lib/components/ui/PageHeader.svelte';
+	import HelpTip from '#lib/components/help/HelpTip.svelte';
 	import UsageMeter from '#lib/components/assistant/UsageMeter.svelte';
 	import CopilotChatMessage from '#lib/components/cash-flow/CopilotChatMessage.svelte';
 	import SavedPlansPanel from '#lib/components/cash-flow/SavedPlansPanel.svelte';
@@ -243,10 +244,13 @@
 		<aside class="side-rail">
 			<UsageMeter {usage} />
 
-			<label class="rail-toggle">
-				<input type="checkbox" bind:checked={consolidated} disabled={busy} />
-				<span>{m('cashFlow.consolidated.label')}</span>
-			</label>
+			<div class="help-row">
+				<label class="rail-toggle">
+					<input type="checkbox" bind:checked={consolidated} disabled={busy} />
+					<span>{m('cashFlow.consolidated.label')}</span>
+				</label>
+				<HelpTip term="entity" />
+			</div>
 			<p class="rail-hint">{m('cashFlow.consolidated.hint')}</p>
 
 			<SavedPlansPanel {consolidated} />
@@ -259,7 +263,10 @@
 			<div class="chat-scroll" bind:this={scrollEl} role="log" aria-live="polite" aria-busy={busy}>
 				{#if isEmpty}
 					<div class="empty-state">
-						<h2>{m('cashFlow.empty.heading')}</h2>
+						<div class="help-row">
+							<h2>{m('cashFlow.empty.heading')}</h2>
+							<HelpTip term="ai-assistant" />
+						</div>
 						<p class="empty-sub">{m('cashFlow.empty.sub')}</p>
 						<div class="prompt-list">
 							{#each EXAMPLES as prompt (prompt)}
@@ -313,6 +320,7 @@
 		flex: 1 1 auto;
 		min-height: 0;
 	}
+
 	.side-rail {
 		display: flex;
 		flex-direction: column;
@@ -325,6 +333,7 @@
 		max-height: calc(100vh - 140px);
 		overflow-y: auto;
 	}
+
 	.rail-head {
 		font-size: 0.7rem;
 		font-weight: 600;
@@ -334,12 +343,14 @@
 		padding-top: 4px;
 		border-top: 1px solid var(--border);
 	}
+
 	.rail-hint {
 		font-size: 0.82rem;
 		color: var(--text-muted);
 		margin: 0;
 		line-height: 1.5;
 	}
+
 	.rail-toggle {
 		display: flex;
 		align-items: center;
@@ -348,6 +359,7 @@
 		color: var(--text);
 		cursor: pointer;
 	}
+
 	.rail-toggle input:disabled {
 		cursor: not-allowed;
 	}
@@ -361,6 +373,7 @@
 		background: var(--bg);
 		overflow: hidden;
 	}
+
 	.chat-scroll {
 		flex: 1 1 auto;
 		min-height: 420px;
@@ -368,11 +381,13 @@
 		overflow-y: auto;
 		padding: 20px;
 	}
+
 	.msg-stream {
 		display: flex;
 		flex-direction: column;
 		gap: 18px;
 	}
+
 	.empty-state {
 		display: flex;
 		flex-direction: column;
@@ -383,6 +398,7 @@
 		max-width: 560px;
 		margin: 0 auto;
 	}
+
 	.empty-state h2 {
 		margin: 0;
 		font-size: 1.3rem;
@@ -393,6 +409,7 @@
 		font-size: 0.9rem;
 		line-height: 1.5;
 	}
+
 	.prompt-list {
 		display: flex;
 		flex-direction: column;
@@ -400,6 +417,7 @@
 		width: 100%;
 		margin-top: 12px;
 	}
+
 	.prompt-btn {
 		width: 100%;
 		text-align: left;
@@ -413,6 +431,7 @@
 		cursor: pointer;
 		transition: all 0.12s;
 	}
+
 	.prompt-btn:hover {
 		border-color: var(--accent);
 		color: var(--accent);
@@ -427,6 +446,7 @@
 		color: var(--danger);
 		font-size: 0.85rem;
 	}
+
 	.composer {
 		display: flex;
 		gap: 10px;
@@ -434,6 +454,7 @@
 		padding: 14px 16px;
 		border-top: 1px solid var(--border);
 	}
+
 	.composer textarea {
 		flex: 1 1 auto;
 		resize: none;
@@ -463,6 +484,7 @@
 		font-weight: 500;
 		cursor: pointer;
 	}
+
 	.btn-secondary:hover:not(:disabled) {
 		border-color: var(--accent);
 		color: var(--accent);
@@ -481,8 +503,10 @@
 		.copilot-layout {
 			grid-template-columns: 1fr;
 		}
+
 		.side-rail {
 			max-height: none;
 		}
+
 	}
 </style>

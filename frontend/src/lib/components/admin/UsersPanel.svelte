@@ -1,4 +1,5 @@
 <script lang="ts">
+	import HelpTip from '#lib/components/help/HelpTip.svelte';
 	import type { AdminUser } from '#lib/types/admin.ts';
 	import { roleLabelKey } from '#lib/types/admin.ts';
 	import { adminStore } from '#lib/stores/admin.svelte.ts';
@@ -313,7 +314,7 @@
 			</th>
 			<th>{m('admin.users.col.name')}</th>
 			<th>{m('admin.users.col.email')}</th>
-			<th>{m('admin.users.col.roles')}</th>
+			<th>{m('admin.users.col.roles')} <HelpTip term="role" /></th>
 			<th>{m('admin.users.col.status')}</th>
 			<th>{m('admin.users.col.created')}</th>
 			<th></th>

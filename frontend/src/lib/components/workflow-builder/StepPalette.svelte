@@ -2,6 +2,7 @@
 	import type { WorkflowStepType } from '#lib/types/workflow.ts';
 	import { STEP_TYPE_LABELS, STEP_TYPE_DESCRIPTIONS } from '#lib/types/workflow.ts';
 	import { m } from '#lib/i18n/store.svelte.ts';
+	import HelpTip from '#lib/components/help/HelpTip.svelte';
 
 	type Props = {
 		ondragtype: (type: WorkflowStepType) => void;
@@ -44,7 +45,10 @@
 
 <div class="palette">
 	<div class="palette-header">
-		<span class="palette-label">{m('workflows.builder.palette.title')}</span>
+		<div class="help-row palette-title-row">
+			<span class="palette-label">{m('workflows.builder.palette.title')}</span>
+			<HelpTip term="workflow" />
+		</div>
 		<p class="palette-hint">{m('workflows.builder.palette.hint')}</p>
 	</div>
 	<div class="palette-list">
@@ -93,6 +97,11 @@
 	.palette-header {
 		padding: 12px 14px;
 		border-bottom: 1px solid var(--border);
+	}
+
+	/* The palette title's ⓘ row (global `.help-row`) sits at the label gap. */
+	.palette-title-row {
+		gap: 4px;
 	}
 
 	.palette-label {
@@ -167,4 +176,5 @@
 		color: var(--text-muted);
 		line-height: 1.3;
 	}
+
 </style>

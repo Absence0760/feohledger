@@ -23,6 +23,7 @@
 	 * no button; `require_roles` refuses the write regardless.
 	 */
 	import { api } from '#lib/api.ts';
+	import HelpTip from '#lib/components/help/HelpTip.svelte';
 	import { MAX_PAGE_SIZE, appendUnique } from '#lib/utils/pagination.ts';
 	import { createRequestSequencer } from '#lib/utils/requestSequence.ts';
 	import PageHeader from '#lib/components/ui/PageHeader.svelte';
@@ -552,6 +553,8 @@
 			     Recording one always feeds the 4-way leg either way. -->
 			<p class="panel-hint muted" data-testid="inspections-hint">
 				{m('goodsReceipts.inspections.hint')}
+				<HelpTip term="quality-inspection" />
+				<HelpTip term="four-way-match" />
 			</p>
 
 			<DataTable
@@ -630,6 +633,7 @@
 		<header class="modal-header">
 			<div class="title-block">
 				<h2>{m('goodsReceipts.modal.title')}</h2>
+				<HelpTip term="goods-receipt" />
 				{#if detail}
 					<span class="num-badge">{detail.gr_number}</span>
 					<Badge tone={goodsReceiptTone(detail.status)} variant={detail.status}>{detail.status}</Badge>
@@ -672,7 +676,10 @@
 			     most recent of these rows (by `created_at`), so the list is
 			     ordered newest-first to match what the matcher would pick. -->
 			<div class="section-head">
-				<h3>{m('goodsReceipts.modal.inspections')}</h3>
+				<div class="help-row">
+					<h3>{m('goodsReceipts.modal.inspections')}</h3>
+					<HelpTip term="quality-inspection" />
+				</div>
 				{#if canMutate}
 					<button
 						class="btn-inline"
@@ -754,11 +761,13 @@
 		border-bottom: 1px solid var(--border);
 		margin: -24px -24px 0;
 	}
+
 	.title-block {
 		display: flex;
 		align-items: center;
 		gap: 12px;
 	}
+
 	.modal-header h2 {
 		margin: 0;
 		font-size: 1.1rem;
@@ -769,6 +778,7 @@
 		font-size: 0.85rem;
 		color: var(--text-muted);
 	}
+
 	.close-btn {
 		background: none;
 		border: none;
@@ -778,6 +788,7 @@
 		line-height: 1;
 		padding: 0 4px;
 	}
+
 	.close-btn:hover {
 		color: var(--text);
 	}
@@ -785,6 +796,7 @@
 		padding: 20px 0 0;
 		overflow-y: auto;
 	}
+
 	.modal-body h3 {
 		margin: 18px 0 8px;
 		font-size: 0.85rem;
@@ -799,6 +811,7 @@
 		justify-content: space-between;
 		gap: 12px;
 	}
+
 	.btn-inline {
 		background: none;
 		border: 1px solid var(--border);
@@ -809,6 +822,7 @@
 		color: var(--text);
 		cursor: pointer;
 	}
+
 	.btn-inline:hover {
 		border-color: var(--accent);
 		color: var(--accent);
@@ -829,6 +843,7 @@
 		font-family: inherit;
 		white-space: nowrap;
 	}
+
 	.btn-outline:hover:not(:disabled) {
 		border-color: var(--accent);
 		color: var(--accent);
@@ -843,6 +858,7 @@
 		line-height: 1.5;
 		max-width: 78ch;
 	}
+
 	dl.meta {
 		display: grid;
 		grid-template-columns: 90px 1fr 90px 1fr;
@@ -851,6 +867,7 @@
 		padding-bottom: 14px;
 		border-bottom: 1px solid var(--border);
 	}
+
 	dt {
 		font-size: 0.75rem;
 		text-transform: uppercase;
@@ -867,6 +884,7 @@
 		border-collapse: collapse;
 		font-size: 0.85rem;
 	}
+
 	.line-table th {
 		text-align: left;
 		padding: 6px 10px;
@@ -884,23 +902,28 @@
 		font-family: 'SF Mono', 'Cascadia Code', monospace;
 		font-size: 0.82rem;
 	}
+
 	.line-table .right {
 		text-align: right;
 	}
+
 	.line-table .empty {
 		text-align: center;
 		padding: 40px;
 		color: var(--text-muted);
 	}
+
 	.notes {
 		max-width: 32ch;
 		overflow: hidden;
 		text-overflow: ellipsis;
 		white-space: nowrap;
 	}
+
 	.loading {
 		padding: 40px;
 		text-align: center;
 		color: var(--text-muted);
 	}
+
 </style>

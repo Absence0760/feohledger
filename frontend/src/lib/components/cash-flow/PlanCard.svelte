@@ -1,5 +1,6 @@
 <script lang="ts">
 	import Money from '#lib/components/ui/Money.svelte';
+	import HelpTip from '#lib/components/help/HelpTip.svelte';
 	import { formatMoney } from '#lib/utils/money.ts';
 	import { formatDate, formatPeriod } from '#lib/utils/time.ts';
 	import { m } from '#lib/i18n/store.svelte.ts';
@@ -205,7 +206,10 @@
 
 	{#if selected.length > 0}
 		<div class="plan-section">
-			<h4 class="plan-subhead">{m('cashFlow.plan.discountsHeading')}</h4>
+			<div class="help-row plan-subhead-row">
+				<h4 class="plan-subhead">{m('cashFlow.plan.discountsHeading')}</h4>
+				<HelpTip term="dynamic-discounting" />
+			</div>
 			<table class="mini-table">
 				<thead>
 					<tr>
@@ -295,6 +299,7 @@
 		padding: 14px 16px 12px;
 		background: var(--surface);
 	}
+
 	.plan-cap {
 		display: flex;
 		align-items: baseline;
@@ -303,6 +308,7 @@
 		flex-wrap: wrap;
 		margin-bottom: 8px;
 	}
+
 	.plan-title {
 		font-size: 0.82rem;
 		font-weight: 700;
@@ -310,11 +316,13 @@
 		letter-spacing: 0.04em;
 		color: var(--text);
 	}
+
 	.plan-meta {
 		font-size: 0.76rem;
 		color: var(--text-muted);
 		font-variant-numeric: tabular-nums;
 	}
+
 	.plan-breach {
 		margin: 0 0 10px;
 		padding: 8px 12px;
@@ -324,26 +332,39 @@
 		color: var(--danger);
 		font-size: 0.82rem;
 	}
+
 	.breach-when {
 		color: var(--text-muted);
 	}
+
 	.plan-healthy {
 		margin: 0 0 10px;
 		font-size: 0.82rem;
 		color: var(--text-muted);
 	}
+
 	.plan-savings {
 		margin: 0 0 12px;
 		font-size: 0.88rem;
 		font-weight: 600;
 		color: var(--text);
 	}
+
 	.plan-section {
 		margin-bottom: 12px;
 	}
+
 	.plan-section:last-of-type {
 		margin-bottom: 8px;
 	}
+	.plan-subhead-row {
+		gap: 4px;
+		margin: 0 0 6px;
+	}
+	.plan-subhead-row > .plan-subhead {
+		margin: 0;
+	}
+
 	.plan-subhead {
 		margin: 0 0 6px;
 		font-size: 0.72rem;
@@ -352,16 +373,19 @@
 		letter-spacing: 0.03em;
 		color: var(--text-muted);
 	}
+
 	.plan-empty {
 		color: var(--text-muted);
 		font-size: 0.85rem;
 		margin: 0;
 	}
+
 	.mini-table {
 		width: 100%;
 		border-collapse: collapse;
 		font-size: 0.82rem;
 	}
+
 	.mini-table th {
 		text-align: left;
 		font-weight: 600;
@@ -382,6 +406,7 @@
 	.mini-table .num {
 		text-align: right;
 	}
+
 	.mini-table tr.below td {
 		color: var(--danger);
 	}
@@ -390,12 +415,14 @@
 		font-size: 0.76rem;
 		color: var(--text-muted);
 	}
+
 	.plan-actions {
 		display: flex;
 		flex-wrap: wrap;
 		gap: 8px;
 		margin: 0 0 8px;
 	}
+
 	.plan-action-btn {
 		padding: 7px 14px;
 		border-radius: 8px;
@@ -407,6 +434,7 @@
 		font-weight: 500;
 		cursor: pointer;
 	}
+
 	.plan-action-btn:hover:not(:disabled) {
 		border-color: var(--accent);
 		color: var(--accent);
@@ -420,20 +448,24 @@
 		background: rgba(240, 70, 70, 0.1);
 		color: var(--danger);
 	}
+
 	.plan-action-result {
 		margin: 0 0 6px;
 		font-size: 0.78rem;
 		color: var(--text);
 	}
+
 	.plan-action-error {
 		margin: 0 0 6px;
 		font-size: 0.78rem;
 		color: var(--danger);
 	}
+
 	.plan-disclaimer {
 		margin: 0;
 		font-size: 0.74rem;
 		color: var(--text-muted);
 		font-style: italic;
 	}
+
 </style>

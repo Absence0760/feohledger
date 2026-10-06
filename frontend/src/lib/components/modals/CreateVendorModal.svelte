@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { Vendor } from '#lib/types/vendor.ts';
+	import HelpTip from '#lib/components/help/HelpTip.svelte';
 	import { createVendor } from '#lib/api/vendors.ts';
 	import Modal from '#lib/components/ui/Modal.svelte';
 	import { toast } from '#lib/components/ui/Toast.svelte';
@@ -83,7 +84,7 @@
 			</label>
 		</div>
 
-		<p class="hint">{m('vendors.createModal.bankHint')}</p>
+		<p class="hint">{m('vendors.createModal.bankHint')} <HelpTip term="bank-change-request" /></p>
 
 		<div class="modal-footer">
 			<button type="button" class="btn-cancel" onclick={onclose}>{m('common.cancel')}</button>

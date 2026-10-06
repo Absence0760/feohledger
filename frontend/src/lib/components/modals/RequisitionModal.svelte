@@ -1,4 +1,5 @@
 <script lang="ts">
+	import HelpTip from '#lib/components/help/HelpTip.svelte';
 	import type {
 		Requisition,
 		RequisitionLineItemInput,
@@ -219,6 +220,7 @@
 				<Badge tone={REQUISITION_STATUS_TONES[statusKey] ?? 'neutral'} variant={status}>
 					{statusLabel}
 				</Badge>
+				<HelpTip term="requisition" />
 				{#if requisition?.converted_po_id}
 					<span class="muted">{m('requisitions.modal.poCreatedNote')}</span>
 				{/if}
@@ -278,7 +280,7 @@
 							<th class="right">{m('requisitions.modal.col.qty')}</th>
 							<th class="right">{m('requisitions.modal.col.unitPrice')}</th>
 							<th>{m('requisitions.modal.col.uom')}</th>
-							<th>{m('requisitions.modal.col.gl')}</th>
+							<th>{m('requisitions.modal.col.gl')} <HelpTip term="gl-coding" /></th>
 							<th class="right">{m('requisitions.modal.col.total')}</th>
 							{#if editable}<th></th>{/if}
 						</tr>

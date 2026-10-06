@@ -8,6 +8,7 @@
 	import Modal from '#lib/components/ui/Modal.svelte';
 	import RowAction from '#lib/components/ui/RowAction.svelte';
 	import Badge from '#lib/components/ui/Badge.svelte';
+	import HelpTip from '#lib/components/help/HelpTip.svelte';
 	import VendorTaxModal from '#lib/components/modals/VendorTaxModal.svelte';
 	import { toast } from '#lib/components/ui/Toast.svelte';
 	import { formatMoney, isPositiveAmount, sumMoney } from '#lib/utils/money.ts';
@@ -351,7 +352,10 @@
 	{:else if report}
 		{#if report.box_allocations.length > 0}
 			<section class="box-panel" aria-labelledby="box-panel-title">
-				<h2 id="box-panel-title">{m('tax.boxes.title')}</h2>
+				<div class="help-row">
+					<h2 id="box-panel-title">{m('tax.boxes.title')}</h2>
+					<HelpTip term="form-1099" />
+				</div>
 				<p class="box-panel-sub">{m('tax.boxes.subtitle')}</p>
 				<ul class="box-list">
 					{#each report.box_allocations as b (b.box)}
@@ -428,6 +432,9 @@
 				]}
 				bind:active={rowFilter}
 			/>
+			<!-- The two filters a 1099 filer acts on: no W-9 on file, TIN not verified. -->
+			<HelpTip term="form-w9" />
+			<HelpTip term="tin-verification" />
 			<SearchBox bind:value={search} placeholder={m('tax.searchPlaceholder')} ariaLabel={m('tax.searchAria')} />
 		</div>
 
@@ -584,7 +591,7 @@
 				amount: formatMoney(filableTotalForForm, { currency: report.currency })
 			})}
 		</p>
-		<p class="modal-hint">{m('tax.fileModal.formTypeHint')}</p>
+		<p class="modal-hint">{m('tax.fileModal.formTypeHint')} <HelpTip term="form-1099" /></p>
 		<p class="modal-warn">{m('tax.fileModal.warning')}</p>
 		{#if fileArmed}
 			<p class="modal-warn armed" role="alert">{m('tax.fileModal.armedNote')}</p>

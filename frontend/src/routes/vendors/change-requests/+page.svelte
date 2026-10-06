@@ -19,6 +19,7 @@
 	// row says so instead of offering a button that can only fail — and the 403
 	// is still mapped to the specific message, because the UI is not the gate.
 	import { goto } from '$app/navigation';
+	import HelpTip from '#lib/components/help/HelpTip.svelte';
 	import { api, ApiError } from '#lib/api.ts';
 	import { auth } from '#lib/stores/auth.svelte.ts';
 	import { PERM_VENDOR_BANK_CHANGE_APPROVE } from '#lib/types/admin.ts';
@@ -400,7 +401,11 @@
 		</button>
 	{/snippet}
 
-	<p class="intro">{m('vendors.changeRequests.intro')}</p>
+	<p class="intro">
+		{m('vendors.changeRequests.intro')}
+		<HelpTip term="bank-change-request" />
+		<HelpTip term="segregation-of-duties" />
+	</p>
 	{#if !canApprove}
 		<p class="no-perm-note">{m('vendors.changeRequests.noPermissionNote')}</p>
 	{/if}

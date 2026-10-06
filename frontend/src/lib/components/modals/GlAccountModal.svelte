@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { createGlAccount, updateGlAccount, type GlAccountUpdate } from '#lib/api/glAccounts.ts';
+	import HelpTip from '#lib/components/help/HelpTip.svelte';
 	import { GL_ACCOUNT_TYPES, glAccountTypeLabelKey, type GlAccount } from '#lib/types/glAccount.ts';
 	import Modal from '#lib/components/ui/Modal.svelte';
 	import { toast } from '#lib/components/ui/Toast.svelte';
@@ -177,7 +178,7 @@
 			<p class="hint" id="gl-code-fixed">{m('glAccounts.editModal.codeFixed')}</p>
 		{/if}
 		{#if scopeHint}
-			<p class="hint">{scopeHint}</p>
+			<p class="hint">{scopeHint} <HelpTip term="entity" /></p>
 		{/if}
 		{#if saveError}
 			<p class="error" role="alert" data-testid="gl-account-save-error">{saveError}</p>

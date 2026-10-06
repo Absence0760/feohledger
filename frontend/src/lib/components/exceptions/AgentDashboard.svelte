@@ -4,6 +4,7 @@
 	// GET /api/exceptions/agent-stats + /agent-decisions (admin/ap_manager-gated).
 	import { onMount } from 'svelte';
 	import KpiCard from '#lib/components/ui/KpiCard.svelte';
+	import HelpTip from '#lib/components/help/HelpTip.svelte';
 	import DataTable from '#lib/components/ui/DataTable.svelte';
 	import Modal from '#lib/components/ui/Modal.svelte';
 	import RowAction from '#lib/components/ui/RowAction.svelte';
@@ -305,6 +306,7 @@
 		<KpiCard
 			value={stats ? pct(stats.escalation_rate) : null}
 			label={m('exceptions.agents.kpi.escalationRate')}
+			helpTerm="escalation"
 			pending={loading}
 		/>
 		<!-- The two count cards carry the ACTION labels rather than labels of their
@@ -343,7 +345,10 @@
 
 	<section class="log-section" data-testid="agent-run-panel">
 		<header class="log-head">
-			<h2>{m('exceptions.agents.run.heading')}</h2>
+			<div class="help-row">
+				<h2>{m('exceptions.agents.run.heading')}</h2>
+				<HelpTip term="exception-agent" />
+			</div>
 			<button class="filter-chip" onclick={loadCandidates} disabled={candidatesLoading}>
 				{candidatesLoading
 					? m('exceptions.agents.run.refreshing')
@@ -735,4 +740,5 @@
 	.state.error {
 		color: var(--danger);
 	}
+
 </style>

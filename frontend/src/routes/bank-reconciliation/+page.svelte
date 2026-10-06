@@ -40,6 +40,7 @@
 	} from '#lib/api/bankReconciliation.ts';
 	import type { OutstandingItems } from '#lib/types/bankReconciliation.ts';
 	import Badge from '#lib/components/ui/Badge.svelte';
+	import HelpTip from '#lib/components/help/HelpTip.svelte';
 	import DataTable from '#lib/components/ui/DataTable.svelte';
 	import EmptyState from '#lib/components/ui/EmptyState.svelte';
 	import FilterChips from '#lib/components/ui/FilterChips.svelte';
@@ -518,6 +519,7 @@
 					ariaLabel={m('bankRecon.search.aria')}
 				/>
 				<FilterChips chips={AGE_CHIPS} bind:active={ageChip} />
+				<HelpTip term="bank-reconciliation" />
 				{#if outstanding}
 					<span class="as-of muted">{m('bankRecon.asOf', { date: formatDate(outstanding.as_of) })}</span>
 				{/if}
@@ -536,7 +538,10 @@
 				<!-- Bucket 1 — we sent it; no bank line claims it. -->
 				<section class="bucket">
 					<header class="bucket-head">
-						<h2>{m('bankRecon.section.uncleared')}</h2>
+						<div class="help-row">
+							<h2>{m('bankRecon.section.uncleared')}</h2>
+							<HelpTip term="settlement" />
+						</div>
 						<!-- Each total in its own currency; one the backend reported
 						     under `""` (no currency established) renders bare rather
 						     than joining the org's (decisions §200). Only the EMPTY
@@ -840,12 +845,15 @@
 		gap: 12px;
 		flex-wrap: wrap;
 	}
+
 	.as-of {
 		font-size: 0.8rem;
 	}
+
 	.bucket {
 		margin-top: 24px;
 	}
+
 	.bucket-head {
 		display: flex;
 		align-items: baseline;
@@ -853,6 +861,7 @@
 		gap: 12px;
 		flex-wrap: wrap;
 	}
+
 	.bucket-head h2 {
 		margin: 0;
 		font-size: 1rem;
@@ -862,30 +871,37 @@
 		font-size: 0.85rem;
 		color: var(--text-muted);
 	}
+
 	.bucket-help {
 		margin: 2px 0 10px;
 		font-size: 0.8rem;
 		line-height: 1.45;
 	}
+
 	.state-note {
 		margin: 20px 0;
 		font-size: 0.9rem;
 	}
+
 	.truncated {
 		margin: 6px 0 0;
 		font-size: 0.78rem;
 	}
+
 	.pay-status {
 		margin-left: 6px;
 		font-size: 0.75rem;
 	}
+
 	.muted {
 		color: var(--text-muted);
 	}
+
 	.mono {
 		font-variant-numeric: tabular-nums;
 		font-family: var(--font-mono);
 	}
+
 	.link-btn {
 		background: none;
 		border: none;
@@ -895,4 +911,5 @@
 		cursor: pointer;
 		font: inherit;
 	}
+
 </style>

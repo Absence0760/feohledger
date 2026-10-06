@@ -29,6 +29,7 @@
 	 */
 	import { auth } from '#lib/stores/auth.svelte.ts';
 	import Modal from '#lib/components/ui/Modal.svelte';
+	import HelpTip from '#lib/components/help/HelpTip.svelte';
 	import Money from '#lib/components/ui/Money.svelte';
 	import { m } from '#lib/i18n/store.svelte.ts';
 	import { scaleMoney } from '#lib/utils/money.ts';
@@ -206,7 +207,7 @@
 				submit();
 			}}
 		>
-			<p class="modal-hint">{m('discounts.bulk.intro')}</p>
+			<p class="modal-hint">{m('discounts.bulk.intro')} <HelpTip term="dynamic-discounting" /></p>
 
 			<div class="form-grid">
 				<VendorPicker

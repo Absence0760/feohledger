@@ -1,4 +1,5 @@
 <script lang="ts">
+	import HelpTip from '#lib/components/help/HelpTip.svelte';
 	import { goto } from '$app/navigation';
 	import { auth } from '#lib/stores/auth.svelte.ts';
 	import { entityStore } from '#lib/stores/entity.svelte.ts';
@@ -202,7 +203,11 @@
 		<button class="btn-primary" onclick={openCreate}>{m('admin.entities.createEntity')}</button>
 	{/snippet}
 
-	<p class="page-hint">{m('admin.entities.hint')}</p>
+	<p class="page-hint">
+		{m('admin.entities.hint')}
+		<HelpTip term="entity" />
+		<HelpTip term="intercompany" />
+	</p>
 
 	{#if loading}
 		<p class="state" data-testid="entities-loading">{m('admin.entities.loading')}</p>

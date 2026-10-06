@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { Catalog, PunchoutSession } from '#lib/types/catalog.ts';
+	import HelpTip from '#lib/components/help/HelpTip.svelte';
 	import { punchoutStatusLabelKey, punchoutStatusTone } from '#lib/types/catalog.ts';
 	import { auth } from '#lib/stores/auth.svelte.ts';
 	import Badge from '#lib/components/ui/Badge.svelte';
@@ -98,6 +99,7 @@
 		{#if !session}
 			<p class="muted">
 				{m('catalogs.punchout.intro')}
+				<HelpTip term="punch-out" />
 			</p>
 			{#if canAct}
 				<button class="btn-primary" onclick={start} disabled={starting}>

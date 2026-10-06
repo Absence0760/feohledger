@@ -1,4 +1,5 @@
 <script lang="ts">
+	import HelpTip from '#lib/components/help/HelpTip.svelte';
 	// Sanctions-screening review queue — the vendors flagged `match` / `review`
 	// by the screening engine, awaiting a human decision. A separate sub-route
 	// from the vendors LIST page (/vendors) so the two don't collide.
@@ -442,6 +443,7 @@
 		<KpiCard
 			value={matchCount ?? '—'}
 			label={m('vendors.screening.queue.kpi.matches')}
+			helpTerm="sanctions-screening"
 			highlight={matchCount !== null && matchCount > 0 ? 'red' : null}
 			sub={matchCount === null ? m('vendors.screening.queue.kpi.unavailable') : null}
 		/>
@@ -555,11 +557,11 @@
 
 		<dl class="meta">
 			<div>
-				<dt>{m('vendors.screening.queue.modal.screeningStatus')}</dt>
+				<dt>{m('vendors.screening.queue.modal.screeningStatus')} <HelpTip term="sanctions-screening" /></dt>
 				<dd>{screeningLabel(selected.screening_status)}</dd>
 			</div>
 			<div>
-				<dt>{m('vendors.screening.queue.modal.riskLevel')}</dt>
+				<dt>{m('vendors.screening.queue.modal.riskLevel')} <HelpTip term="vendor-risk" /></dt>
 				<dd>{riskWithScore(selected.risk_level, selected.risk_score)}</dd>
 			</div>
 			<!-- Three of these `<dt>`s label the same field as a table column

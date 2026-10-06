@@ -18,6 +18,7 @@
 	import ConditionBuilder from '#lib/components/workflow-builder/ConditionBuilder.svelte';
 	import ParallelBranchEditor from '#lib/components/workflow-builder/ParallelBranchEditor.svelte';
 	import CustomStepConfig from '#lib/components/workflow-builder/CustomStepConfig.svelte';
+	import HelpTip from '#lib/components/help/HelpTip.svelte';
 	import type {
 		WorkflowDefinition,
 		WorkflowStep,
@@ -460,7 +461,10 @@
 
 							{#if cfg.auto_approve_enabled}
 								<div class="field">
-									<label for="threshold">{m('workflows.builder.extraction.confidenceThreshold')}</label>
+									<div class="help-row label-row">
+										<label for="threshold">{m('workflows.builder.extraction.confidenceThreshold')}</label>
+										<HelpTip term="confidence-score" />
+									</div>
 									<div class="range-row">
 										<input
 											id="threshold"
@@ -595,7 +599,10 @@
 
 							{#if cfg.approver_strategy === 'chain'}
 								<div class="field">
-									<label for="approval-matrix">{m('workflows.builder.approval.matrix')}</label>
+									<div class="help-row label-row">
+										<label for="approval-matrix">{m('workflows.builder.approval.matrix')}</label>
+										<HelpTip term="approval-chain" />
+									</div>
 									<p class="field-hint">
 										{m('workflows.builder.approval.matrixHint')}
 									</p>
@@ -609,7 +616,10 @@
 							{/if}
 
 							<div class="field-divider"></div>
-							<h4 class="field-section-title">{m('workflows.builder.approval.thresholdsTitle')}</h4>
+							<div class="help-row section-title-row">
+								<h4 class="field-section-title">{m('workflows.builder.approval.thresholdsTitle')}</h4>
+								<HelpTip term="approval-threshold" />
+							</div>
 
 							<div class="field">
 								<label for="auto-approve-below">{m('workflows.builder.approval.autoApproveBelow', { currency: orgCurrency.label })}</label>
@@ -626,7 +636,10 @@
 							</div>
 
 							<div class="field">
-								<label for="require-cfo-above">{m('workflows.builder.approval.requireCfoAbove', { currency: orgCurrency.label })}</label>
+								<div class="help-row label-row">
+									<label for="require-cfo-above">{m('workflows.builder.approval.requireCfoAbove', { currency: orgCurrency.label })}</label>
+									<HelpTip term="cfo-gate" />
+								</div>
 								<input
 									id="require-cfo-above"
 									type="number"
@@ -666,9 +679,12 @@
 							-->
 							{@const segregation = cfg.require_segregation ?? true}
 							<div class="field toggle-field">
-								<label id="approval-segregation-label" for="approval-segregation">
-									{m('workflows.builder.approval.requireSegregation')}
-								</label>
+								<div class="help-row label-row">
+									<label id="approval-segregation-label" for="approval-segregation">
+										{m('workflows.builder.approval.requireSegregation')}
+									</label>
+									<HelpTip term="segregation-of-duties" />
+								</div>
 								<button
 									id="approval-segregation"
 									class="toggle"
@@ -695,7 +711,10 @@
 							<p class="field-hint">{m('workflows.builder.erp.credentialsHintPre')}<a href="/organization">{m('workflows.builder.erp.credentialsHintLink')}</a>{m('workflows.builder.erp.credentialsHintPost')}</p>
 
 							<div class="field toggle-field">
-								<label id="auto-send-label" for="auto-send">{m('workflows.builder.erp.autoSend')}</label>
+								<div class="help-row label-row">
+									<label id="auto-send-label" for="auto-send">{m('workflows.builder.erp.autoSend')}</label>
+									<HelpTip term="erp-sync" />
+								</div>
 								<button
 									id="auto-send"
 									class="toggle"
@@ -1201,6 +1220,27 @@
 		margin-bottom: 0;
 	}
 
+	/* A field label or section title's ⓘ row (global `.help-row`), at the
+	   tighter label gap. The label's bottom margin moves to the row. */
+	.label-row {
+		gap: 4px;
+		margin-bottom: 5px;
+	}
+
+	.label-row label,
+	.toggle-field .label-row {
+		margin-bottom: 0;
+	}
+
+	.section-title-row {
+		gap: 4px;
+		margin: 0 0 4px;
+	}
+
+	.section-title-row .field-section-title {
+		margin: 0;
+	}
+
 	.toggle {
 		position: relative;
 		width: 40px;
@@ -1314,5 +1354,6 @@
 		.editor {
 			grid-template-columns: 1fr;
 		}
+
 	}
 </style>

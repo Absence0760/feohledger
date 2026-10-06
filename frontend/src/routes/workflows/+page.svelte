@@ -16,6 +16,7 @@
 	import PageHeader from '#lib/components/ui/PageHeader.svelte';
 	import DataTable from '#lib/components/ui/DataTable.svelte';
 	import Modal from '#lib/components/ui/Modal.svelte';
+	import HelpTip from '#lib/components/help/HelpTip.svelte';
 	import { toast } from '#lib/components/ui/Toast.svelte';
 	import { m } from '#lib/i18n/store.svelte.ts';
 	import { formatDate } from '#lib/utils/time.ts';
@@ -360,7 +361,10 @@
 	onclose={() => (showCreate = false)}
 >
 	{#snippet header()}
-		<h3>{m('workflows.list.modal.title')}</h3>
+		<div class="help-row modal-title-row">
+			<h3>{m('workflows.list.modal.title')}</h3>
+			<HelpTip term="workflow" />
+		</div>
 	{/snippet}
 	<div class="form-group">
 		<label for="wf-name">{m('workflows.list.modal.name')}</label>
@@ -514,6 +518,16 @@
 	/* Create-workflow modal: custom h3 heading + labelled form fields. */
 	.modal h3 {
 		margin: 0 0 18px;
+		font-size: 1.05rem;
+		color: var(--text);
+	}
+
+	/* The heading's ⓘ row (global `.help-row`) takes the heading's margin. */
+	.modal-title-row {
+		margin-bottom: 18px;
+	}
+	.modal-title-row h3 {
+		margin: 0;
 		font-size: 1.05rem;
 		color: var(--text);
 	}

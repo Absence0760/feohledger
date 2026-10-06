@@ -17,6 +17,7 @@
 	} from '#lib/api/vendorStatementRecon.ts';
 	import type { ReconciliationSummary } from '#lib/types/vendorStatementRecon.ts';
 	import Badge from '#lib/components/ui/Badge.svelte';
+	import HelpTip from '#lib/components/help/HelpTip.svelte';
 	import PageHeader from '#lib/components/ui/PageHeader.svelte';
 	import SearchBox from '#lib/components/ui/SearchBox.svelte';
 	import FilterChips from '#lib/components/ui/FilterChips.svelte';
@@ -353,6 +354,7 @@
 	<div class="filter-row">
 		<SearchBox bind:value={search} placeholder={m('vendorStatements.searchPlaceholder')} ariaLabel={m('vendorStatements.searchAria')} />
 		<FilterChips chips={STATUS_CHIPS} bind:active={statusFilter} />
+		<HelpTip term="statement-reconciliation" />
 	</div>
 
 	<DataTable

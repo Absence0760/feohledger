@@ -1,4 +1,5 @@
 <script lang="ts">
+	import HelpTip from '#lib/components/help/HelpTip.svelte';
 	import type { Invoice, InvoiceStatus, AdvancedSearchFilters } from '#lib/types/invoice.ts';
 	import { INVOICE_STATUSES, INVOICE_STATUS_LABEL_KEYS, EMPTY_ADVANCED_FILTERS, SYSTEM_MANAGED_STATUSES, IMMUTABLE_STATUSES, commonTransitions } from '#lib/types/invoice.ts';
 	import { invoiceStore } from '#lib/stores/invoices.svelte.ts';
@@ -820,6 +821,7 @@
 			>
 				{m('invoices.filter.myApprovals')}
 			</button>
+			<HelpTip term="approval-chain" />
 			<select
 				class="assignee-select"
 				bind:value={assignedToId}
@@ -851,6 +853,7 @@
 					{m(INVOICE_STATUS_LABEL_KEYS[s])} <span class="count">{statusCount(s)}</span>
 				</button>
 			{/each}
+			<HelpTip term="workflow" />
 		</nav>
 	</div>
 

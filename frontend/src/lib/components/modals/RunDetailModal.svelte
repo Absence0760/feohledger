@@ -4,6 +4,7 @@
 	import { api } from '#lib/api.ts';
 	import { toast } from '#lib/components/ui/Toast.svelte';
 	import Badge from '#lib/components/ui/Badge.svelte';
+	import HelpTip from '#lib/components/help/HelpTip.svelte';
 	import {
 		paymentMethodLabelKey,
 		paymentStatusLabelKey,
@@ -270,6 +271,7 @@
 		<header>
 			<div class="title-block">
 				<h2>{m('paymentRuns.runDetail.title')}</h2>
+				<HelpTip term="payment-run" />
 				{#if run}
 					<span class="run-id">{run.id.slice(0, 8)}</span>
 					<!-- `status-badge` is the e2e hook (tests-e2e/payments read it by
@@ -306,7 +308,7 @@
 							<th>{m('paymentRuns.runDetail.colInvoice')}</th>
 							<th>{m('paymentRuns.runDetail.colVendor')}</th>
 							<th class="right">{m('paymentRuns.runDetail.colAmount')}</th>
-							<th>{m('paymentRuns.runDetail.colMethod')}</th>
+							<th>{m('paymentRuns.runDetail.colMethod')} <HelpTip term="payment-rail" /></th>
 							<th>{m('paymentRuns.runDetail.colStatus')}</th>
 							<th>{m('paymentRuns.runDetail.colReference')}</th>
 						</tr>
@@ -343,6 +345,7 @@
 				{#if pendingCfo}
 					<p class="footer-note pending">
 						<strong>{m('paymentRuns.runDetail.pendingCfoStrong')}</strong> {m('paymentRuns.runDetail.pendingCfoBody')}
+						<HelpTip term="cfo-gate" />
 					</p>
 				{:else if cfoApproved}
 					<p class="footer-note approved">

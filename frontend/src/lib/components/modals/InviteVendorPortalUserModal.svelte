@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { inviteVendorPortalUser, type PortalInviteResult } from '#lib/api/vendors.ts';
+	import HelpTip from '#lib/components/help/HelpTip.svelte';
 	import Modal from '#lib/components/ui/Modal.svelte';
 	import { toast } from '#lib/components/ui/Toast.svelte';
 	import { m } from '#lib/i18n/store.svelte.ts';
@@ -58,7 +59,7 @@
 			handleSubmit();
 		}}
 	>
-		<p class="hint">{m('vendors.invite.hint')}</p>
+		<p class="hint">{m('vendors.invite.hint')} <HelpTip term="supplier-portal" /></p>
 		<div class="fields">
 			<label>
 				<span>{m('vendors.invite.field.fullName')} <em class="required">*</em></span>

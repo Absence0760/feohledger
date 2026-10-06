@@ -1,4 +1,5 @@
 <script lang="ts">
+	import HelpTip from '#lib/components/help/HelpTip.svelte';
 	import { auth } from '#lib/stores/auth.svelte.ts';
 	import { getAuditExport, downloadAuditExportCsv } from '#lib/api/audit.ts';
 	import {
@@ -262,6 +263,7 @@
 				onclick={() => (mode = 'invoice')}>{m('audit.mode.byInvoice')}</button
 			>
 		</div>
+		<HelpTip term="audit-trail" />
 
 		{#if mode === 'range'}
 			<label>
@@ -385,6 +387,7 @@
 				<KpiCard
 					value={report ? String(report.approvals_checked) : null}
 					label={m('audit.verify.kpi.checked')}
+					helpTerm="approval-chain"
 					pending={verifyLoading}
 				/>
 				<KpiCard

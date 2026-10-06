@@ -1,4 +1,5 @@
 <script lang="ts">
+	import HelpTip from '#lib/components/help/HelpTip.svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { formatDate } from '#lib/utils/time.ts';
@@ -462,6 +463,7 @@
 	<p class="page-hint">
 		{m('admin.webhooks.hintPre')}
 		<code>X-Webhook-Signature</code> {m('admin.webhooks.hintPost')}
+		<HelpTip term="webhook" />
 	</p>
 
 	<section aria-labelledby="subs-heading">

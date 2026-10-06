@@ -9,6 +9,7 @@
 	// namespace (see frontend/CLAUDE.md § `ui/` primitives).
 	import type { ChainLevelState } from '#lib/types/workflowInstance.ts';
 	import { distinctApprovedCount } from '#lib/types/workflowInstance.ts';
+	import HelpTip from '#lib/components/help/HelpTip.svelte';
 
 	let {
 		levels,
@@ -18,6 +19,7 @@
 		statusLabel,
 		anyApproverLabel,
 		title,
+		helpTerm,
 	}: {
 		levels: ChainLevelState[];
 		/** Index of the level still collecting approvals. `>= levels.length`
@@ -28,6 +30,8 @@
 		statusLabel: (status: 'done' | 'current' | 'pending') => string;
 		anyApproverLabel: string;
 		title: string;
+		/** Glossary id for an ⓘ HelpTip beside the title (`#lib/help/glossary.ts`). */
+		helpTerm?: string;
 	} = $props();
 
 	function levelStatus(index: number): 'done' | 'current' | 'pending' {
@@ -38,7 +42,10 @@
 </script>
 
 <div class="chain-progress" data-testid="approval-chain-progress">
-	<div class="chain-progress-title">{title}</div>
+	<div class="help-row chain-progress-head">
+		<div class="chain-progress-title">{title}</div>
+		{#if helpTerm}<HelpTip term={helpTerm} />{/if}
+	</div>
 	<ol class="chain-levels">
 		{#each levels as level, i (level.level ?? i)}
 			{@const st = levelStatus(i)}
@@ -78,13 +85,16 @@
 		margin-top: 12px;
 	}
 
+	.chain-progress-head {
+		margin-bottom: 8px;
+	}
+
 	.chain-progress-title {
 		font-size: 0.72rem;
 		font-weight: 600;
 		text-transform: uppercase;
 		letter-spacing: 0.04em;
 		color: var(--text-muted);
-		margin-bottom: 8px;
 	}
 
 	.chain-levels {
@@ -211,4 +221,5 @@
 		margin-top: 4px;
 		font-style: italic;
 	}
+
 </style>
