@@ -294,6 +294,57 @@ class Budget(Base, EntityMixin, TimestampMixin):
     )
 
 
+# --- Segregation of duties: who has shaped a requisition ---------------------
+#
+# ``approve_requisition`` refuses the requester. It must also refuse anyone who
+# rewrote the spend on someone else's draft: ``PATCH /api/requisitions/{id}``
+# lets any admin / ap_manager / ap_clerk replace another user's lines, vendor
+# and currency, and the editor could then submit and approve what they had just
+# written. ``requester_user_id`` can name only one person, so the editors live
+# in their own set (``PurchaseRequisition.material_editor_ids``) and the approve
+# shim passes requester ∪ editors to ``approval_chain.check_segregation`` — the
+# same shape as ``recurring_invoice.MATERIAL_EDIT_FIELDS`` (decisions §141,
+# §152).
+#
+# "Material" means a term of the spend the approval releases: what is bought,
+# in what quantity, at what price and on which GL account (``line_items``), from
+# whom (``vendor_id``), in what currency, and against which budget's headroom
+# (``budget_id``). ``update_requisition`` appends the actor when, and only when,
+# one of these actually changes value — a re-sent identical field or line set
+# implicates nobody, which matters because the edit modal re-sends every field
+# and every line on every save.
+#
+# Deliberately cosmetic, and why:
+#   * ``requisition_number`` / ``title`` / ``justification`` / ``notes`` — prose.
+#   * ``department`` — a label here. Requisitions reach a budget only through
+#     ``budget_id`` (``services/budget_service``); nothing sums or routes on a
+#     requisition's department.
+#   * ``needed_by`` — a delivery date; it changes no amount and no payee.
+#   * ``contract_id`` — copied nowhere: not onto the PO
+#     (``requisition_service.convert_requisition_to_po``) and not into any
+#     rollup, so repointing it changes no term the approval releases. If a
+#     contract link ever starts pricing or routing the spend, move it across.
+#
+# The two sets must between them cover every ``RequisitionUpdate`` field;
+# ``tests/test_requisition_editor_segregation.py`` fails until a new field
+# lands in exactly one, so an unclassified money-shaped field cannot default to
+# "cosmetic" and silently widen the exemption.
+REQUISITION_MATERIAL_EDIT_FIELDS: frozenset[str] = frozenset(
+    {"line_items", "vendor_id", "currency", "budget_id"}
+)
+REQUISITION_COSMETIC_EDIT_FIELDS: frozenset[str] = frozenset(
+    {
+        "requisition_number",
+        "title",
+        "justification",
+        "notes",
+        "department",
+        "needed_by",
+        "contract_id",
+    }
+)
+
+
 class PurchaseRequisition(Base, EntityMixin, TimestampMixin):
     """A purchase request raised by a buyer, routed for approval, then converted
     to a PurchaseOrder. ``converted_po_id`` links the resulting PO once approved
@@ -339,6 +390,18 @@ class PurchaseRequisition(Base, EntityMixin, TimestampMixin):
     converted_po_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("purchase_orders.id"), index=True
     )
+
+    # Every control-plane ``User`` who made a MATERIAL edit to this requisition
+    # (``REQUISITION_MATERIAL_EDIT_FIELDS`` above) — a set, stored as a sorted
+    # JSONB array of stringified UUIDs. No ForeignKey for the same reason
+    # ``requester_user_id`` has none: ``users`` is control-plane. Read by
+    # ``approve_requisition`` as the shim's ``segregation_actor_ids``.
+    #
+    # Nullable and never backfilled (migration 0102), for decisions §141's
+    # reason: ``updated_at`` records *that* a draft was edited, never who, and
+    # every proxy (the last updater, the org admin) manufactures either a
+    # refusal or an absolution. NULL reads as "nobody beyond the requester".
+    material_editor_ids: Mapped[list | None] = mapped_column(JSONB)
 
     organization_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), nullable=False, index=True

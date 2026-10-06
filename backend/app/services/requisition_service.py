@@ -133,6 +133,67 @@ def build_line_items(rows: list) -> list[RequisitionLineItem]:
     return out
 
 
+def _line_signature(lines: list[RequisitionLineItem]) -> list[tuple]:
+    """What a set of requisition lines commits to, in comparable form.
+
+    Every column a line carries except its id and the derived ``total``
+    (``line_total`` of quantity x price, so it adds nothing). Decimals compare by
+    value, so the ``Numeric(12, 4)`` ``2.0000`` a loaded row holds equals the
+    ``2`` a payload sends."""
+    return [
+        (
+            li.line_number,
+            li.catalog_item_id,
+            li.item_code,
+            li.description,
+            None if li.quantity is None else Decimal(li.quantity),
+            None if li.unit_price is None else Decimal(li.unit_price),
+            li.gl_account_id,
+            li.uom,
+        )
+        for li in sorted(lines, key=lambda x: x.line_number or 0)
+    ]
+
+
+def line_items_differ(
+    current: list[RequisitionLineItem], proposed: list[RequisitionLineItem]
+) -> bool:
+    """True when ``proposed`` would change what the requisition's lines commit to.
+
+    The edit modal re-sends every line on every save, so "``line_items`` was in
+    the payload" is not evidence of an edit. Treating it as one would put a
+    title-fixer into the requisition's material-editor set and refuse them as an
+    approver for a spend they never touched — and would write a
+    ``requisition.updated`` row claiming the lines changed when they did not."""
+    return _line_signature(current) != _line_signature(proposed)
+
+
+def record_material_editor(req: PurchaseRequisition, user_id: uuid.UUID) -> None:
+    """Add ``user_id`` to the requisition's material-editor set. Idempotent.
+
+    The requester is not added: ``approve_requisition`` already refuses them
+    through ``requester_user_id``, and naming one person in both places tells a
+    later reader the two disagree about something.
+
+    Reassigns a NEW sorted list rather than appending: the column is plain
+    ``JSONB`` (no ``MutableList``), so an in-place ``append`` is invisible to
+    SQLAlchemy's dirty check and would silently not persist — the trap
+    ``recurring_invoices.record_material_editor`` documents."""
+    if user_id == req.requester_user_id:
+        return
+    existing = {str(x) for x in (req.material_editor_ids or [])}
+    if str(user_id) in existing:
+        return
+    req.material_editor_ids = sorted(existing | {str(user_id)})
+
+
+def implicated_editor_ids(req: PurchaseRequisition) -> list[str] | None:
+    """The requisition's material editors, for the approve shim's
+    ``segregation_actor_ids``. ``None`` — not ``[]`` — when there are none, the
+    same "nobody beyond the primary actor" shape every other subject passes."""
+    return sorted({str(x) for x in (req.material_editor_ids or [])}) or None
+
+
 def next_requisition_number(existing_count: int) -> str:
     """Deterministic-ish requisition number when the client doesn't supply one.
 

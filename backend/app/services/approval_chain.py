@@ -130,11 +130,16 @@ def violates_segregation(
     not always an ``Invoice``: expense reports, requisitions and expense
     pre-approvals reuse this rule through ``check_segregation`` with a
     ``SimpleNamespace`` attribute shim, so the 403 wording and the opt-out stay
-    shared. Those shims pass the attribute explicitly as ``None`` — none of
-    those three tables records who edited a row, so there is no second actor to
-    name — and the ``getattr`` default is what keeps a *future* subject that
-    forgets from raising ``AttributeError`` on the approval path, where the cost
-    of a 500 is an outage on the control rather than a bypass of it.
+    shared. Each shim passes the attribute explicitly. The requisition shim
+    passes the draft's material editors
+    (``purchase_requisitions.material_editor_ids``, migration 0102 —
+    ``PATCH`` lets another user rewrite a draft's lines, vendor, currency and
+    budget, then approve what they wrote). The expense-report and pre-approval
+    shims pass ``None``: neither table records who edited a row, so there is no
+    second actor to name. The ``getattr`` default is what keeps a *future*
+    subject that forgets from raising ``AttributeError`` on the approval path,
+    where the cost of a 500 is an outage on the control rather than a bypass of
+    it.
 
     The pure predicate is shared by ``check_segregation`` (which raises) and by
     the amount-floor auto-approve path (which degrades to human review rather
