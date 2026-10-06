@@ -9618,6 +9618,13 @@ fixed a typo and discredit the control. An intake conversion records nobody on i
 own — it copies approved terms and accepts only cosmetic overrides — and a guard
 test fails if the conversion body ever gains a material field.
 
+Every route that writes a requisition (PATCH, DELETE, submit, approve, reject,
+cancel, reopen, convert-to-PO) locks the row with `SELECT … FOR UPDATE`, because
+the editor set is read-modify-write and approve reads what PATCH writes: without
+the lock two concurrent material edits silently dropped one editor, and a PATCH
+could commit after a concurrent submit + approve. Lock order is requisition row
+first, then budget row (§236); no path takes them the other way round.
+
 ## 236. Budget guards and requisition links serialise on the budget row
 
 `update_budget` / `delete_budget` counted linked requisitions and then wrote with no
