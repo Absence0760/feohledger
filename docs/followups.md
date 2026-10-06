@@ -91,7 +91,7 @@ section carried its own `decisions.md` § reference, so nothing was lost by
 deleting it; that cross-reference is what makes the pruning safe, and writing
 one is what earns a future entry the right to be deleted.
 
-**70 open: 55 (c) · 9 (a) · 6 (b)** — re-derived from the file, never carried
+**72 open: 57 (c) · 9 (a) · 6 (b)** — re-derived from the file, never carried
 forward. The section heading is authoritative; where an entry also carries a
 `(c)`/`(a)`/`(b)` marker, the two agree.
 `grep -c '^- \[ \]' docs/followups.md`.
@@ -1139,6 +1139,22 @@ lands. Pure doc drift was corrected in the same PR. The two diagnosed defects
       payable checks. **Durable fix:** lock the invoice rows `FOR UPDATE`
       before checking and minting, with a concurrency test. **Trigger:** the
       next card-issuance change.
+- [ ] **(c) The web bundle total counts route-split content nobody loads
+      together.** `MAX_TOTAL_KB` sums every chunk (one locale catalogue), so
+      the help centre's lazy guide prose and diagrams (~81 KB, `/help` only)
+      raised it as if every visitor downloaded them; the 2026-09-16 ceiling
+      entry's trigger for this fired on PR #516 and the ceiling went to 1075.
+      **Durable fix:** measure the app shell plus the heaviest single route
+      (from the Vite manifest's import graph) as the gated total, and keep the
+      every-chunk sum as a reported, ungated figure. **Trigger:** the next
+      time `MAX_TOTAL_KB` binds, or the next change to the budget workflow.
+- [ ] **(c) The largest locale catalogue is 5 KB under its chunk ceiling.**
+      The ja catalogue is 95 KB of `MAX_LARGEST_CHUNK_KB`'s 100 after the
+      help centre's terms and tooltips. **Durable fix:** split the help-only
+      keys (`help.*`, diagram labels) into a second lazy catalogue loaded by
+      `/help` routes and HelpTip, with the locale key-parity test covering
+      both slices. **Trigger:** before the next feature that adds more than a
+      couple of hundred keys, or when the catalogue passes 97 KB.
 
 ## (a) Blocked on external credentials, accounts, or hardware
 
