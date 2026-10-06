@@ -73,15 +73,15 @@ def test_uncovered_tests_are_named_so_a_failure_is_actionable():
 
 def test_the_ceiling_is_what_decides_pass_or_fail():
     g = _guard()
-    covered = {f"tests/test_a.py::test_{i}": 0.1 for i in range(80)}
-    collected = list(covered) + [f"tests/test_new.py::test_{i}" for i in range(20)]
+    # Exactly at the ceiling passes (it is inclusive); one more uncovered test fails.
+    at_ceiling = round(g.MAX_MISSING_FRACTION * 1000)
+    covered = {f"tests/test_a.py::test_{i}": 0.1 for i in range(1000 - at_ceiling)}
+    collected = list(covered) + [f"tests/test_new.py::test_{i}" for i in range(at_ceiling)]
 
-    # 20% missing, against a 25% ceiling.
-    assert g.analyze(collected, covered).missing_fraction == pytest.approx(0.20)
+    assert g.analyze(collected, covered).missing_fraction == pytest.approx(g.MAX_MISSING_FRACTION)
     assert g.analyze(collected, covered).ok
 
-    collected += [f"tests/test_newer.py::test_{i}" for i in range(20)]
-    # 33% missing — past the ceiling.
+    collected.append("tests/test_newer.py::test_0")
     assert not g.analyze(collected, covered).ok
 
 
@@ -131,7 +131,7 @@ def test_the_ceiling_may_only_ratchet_downward():
     so a change to it has to change this line too — which puts it in a diff a
     reviewer reads rather than in a constant nobody looks at.
     """
-    assert _guard().MAX_MISSING_FRACTION == 0.25
+    assert _guard().MAX_MISSING_FRACTION == 0.05
 
 
 def test_the_committed_baseline_is_within_the_ceiling():

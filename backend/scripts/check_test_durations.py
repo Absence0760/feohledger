@@ -8,9 +8,10 @@ defaults to that name in the working directory, which `ci.yml` sets to
 duration, so the split stays exhaustive but stops being weighted by anything
 real.
 
-Nothing regenerates that file. It has exactly one commit in its history
-(`aa3d47bd`, 2026-09-04), so it decays with every test added, and the first
-signal is a shard cancelled at the 40-minute cap. That is how the 4-shard
+Nothing regenerates that file automatically. It went from `aa3d47bd`
+(2026-09-04) to its first regeneration on 2026-10-06 untouched, decaying with
+every test added, and the first signal of decay is a shard cancelled at the
+40-minute cap. That is how the 4-shard
 layout failed — four runs across two days — before #447 widened it to 8.
 
 **This guard is preventive, not remedial.** Measured on 2026-09-17 the split is
@@ -65,9 +66,11 @@ from pathlib import Path
 BACKEND_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_DURATIONS = BACKEND_ROOT / ".test_durations"
 
-# Measured 20.13% (2,038 of 10,123) on 2026-09-17. Ratchet only downward — see
+# Measured 20.13% (2,038 of 10,123) on 2026-09-17, when this guard landed at
+# 0.25; it tripped at 25.12% on 2026-10-06 and the baseline was rebuilt from CI
+# run 37467328161's shards to 0.08% (9 of 10,802). Ratchet only downward — see
 # the module docstring.
-MAX_MISSING_FRACTION = 0.25
+MAX_MISSING_FRACTION = 0.05
 
 # How many per-file rows to print. A failure needs enough to see whether the
 # uncovered tests are spread thin or concentrated in one new expensive file;

@@ -321,7 +321,8 @@ both `name:` occurrences (the job's `shard N/8` and the test step's) together in
 `ci.yml`.
 
 **The baseline's decay is guarded, not trusted.** Nobody regenerates it as a
-matter of course — it has one commit in its whole history — so
+matter of course — it went a month and ~2,600 tests between its first commit
+and its first regeneration (2026-10-06, from CI) — so
 `scripts/check_test_durations.py` (`pnpm check:test-durations`, run in CI's
 `Backend lint` job) fails when the fraction of collected tests carrying no
 duration entry passes `MAX_MISSING_FRACTION`. A test the baseline has never seen
