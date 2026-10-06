@@ -209,6 +209,15 @@ export const messages = {
 	'profile.passkeys.removed': 'パスキーを削除しました',
 	'profile.passkeys.removeFailed': 'パスキーを削除できませんでした',
 
+	'authRefusal.stepUpFailed':
+		'二要素認証の設定を変更するには、パスワード、認証アプリの現在のコード、または登録済みのパスキーで確認してください。',
+	'authRefusal.stepUpSsoOnly':
+		'組織はシングルサインオン（SSO）でサインインするため、この変更を確認できるのは認証アプリの現在のコードまたは登録済みのパスキーのみです。',
+	'authRefusal.passkeyWrongHost':
+		'パスキーは {host} ではなく {hosts} に登録されています。そちらでサインインするか、{host} でパスキーを登録してください。',
+	'authRefusal.passkeyNotRegistered':
+		'パスキーが登録されていません',
+
 	'profile.sessions.heading': 'サインイン中の端末',
 	'profile.sessions.hint':
 		'現在このアカウントにサインインしているブラウザーとアプリの一覧です。見覚えのないものがある場合、または手元にない端末でサインインした場合は、ここからサインアウトしてください。ただちに無効になります。',

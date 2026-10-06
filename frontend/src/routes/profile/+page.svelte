@@ -3,6 +3,7 @@
 	import { page } from '$app/state';
 	import { auth } from '#lib/stores/auth.svelte.ts';
 	import { api } from '#lib/api.ts';
+	import { authErrorMessage } from '#lib/api/authRefusals.ts';
 	import { toast } from '#lib/components/ui/Toast.svelte';
 	import SettingsRail from '#lib/components/ui/SettingsRail.svelte';
 	import { SUPPORTED_LOCALES, LOCALE_LABELS, type Locale } from '#lib/i18n/locale.ts';
@@ -218,7 +219,7 @@
 			enrollment = await api.post<EnrollResponse>('/api/auth/mfa/enroll', proof);
 			verifyCode = '';
 		} catch (err) {
-			toast(err instanceof Error ? err.message : m('profile.mfa.enrollFailed'), 'error');
+			toast(authErrorMessage(err, m, 'profile.mfa.enrollFailed'), 'error');
 		} finally {
 			loading = false;
 		}
@@ -243,7 +244,11 @@
 	/** Turning MFA off with a passkey rather than a typed proof — for an account
 	 * with no password to type, or one whose org no longer accepts it. */
 	async function disableWithPasskey() {
-		await disable(await auth.passkeyStepUp('totp_disable'));
+		// The ceremony runs INSIDE `disable`'s try: its start call is where a
+		// wrong-host / no-passkey refusal arrives, and a cancelled browser prompt
+		// throws too. Awaited out here, either escaped as an unhandled rejection
+		// with no toast at all.
+		await disable(() => auth.passkeyStepUp('totp_disable'));
 	}
 
 	/** The kind of proof the disable form asks for. The factor being turned off
@@ -253,15 +258,18 @@
 		disableProofKind === 'code' ? isCompleteCode(disableProof) : Boolean(disableProof),
 	);
 
-	async function disable(proof: StepUpProof = typedStepUpProof(disableProofKind, disableProof)) {
+	async function disable(
+		getProof: () => StepUpProof | Promise<StepUpProof> = () =>
+			typedStepUpProof(disableProofKind, disableProof),
+	) {
 		loading = true;
 		try {
-			await api.post('/api/auth/mfa/disable', proof);
+			await api.post('/api/auth/mfa/disable', await getProof());
 			await auth.fetchUser();
 			disableProof = '';
 			toast(m('profile.mfa.disabledToast'), 'success');
 		} catch (err) {
-			toast(err instanceof Error ? err.message : m('profile.mfa.disableFailed'), 'error');
+			toast(authErrorMessage(err, m, 'profile.mfa.disableFailed'), 'error');
 		} finally {
 			loading = false;
 		}
@@ -398,7 +406,7 @@
 			toast(m('profile.passkeys.added'), 'success');
 		} catch (err) {
 			// A user cancelling the browser prompt throws too — show a soft message.
-			toast(err instanceof Error ? err.message : m('profile.passkeys.addFailed'), 'error');
+			toast(authErrorMessage(err, m, 'profile.passkeys.addFailed'), 'error');
 		} finally {
 			registeringPasskey = false;
 		}
@@ -413,7 +421,7 @@
 			await loadPasskeys();
 			toast(m('profile.passkeys.removed'), 'success');
 		} catch (err) {
-			toast(err instanceof Error ? err.message : m('profile.passkeys.removeFailed'), 'error');
+			toast(authErrorMessage(err, m, 'profile.passkeys.removeFailed'), 'error');
 		}
 	}
 

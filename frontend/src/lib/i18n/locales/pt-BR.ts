@@ -216,6 +216,15 @@ export const messages = {
 	'profile.passkeys.removed': 'Chave de acesso removida',
 	'profile.passkeys.removeFailed': 'Não foi possível remover a chave de acesso',
 
+	'authRefusal.stepUpFailed':
+		'Confirme sua senha, um código atual do seu aplicativo autenticador ou uma chave de acesso registrada para alterar suas configurações de duas etapas.',
+	'authRefusal.stepUpSsoOnly':
+		'Sua organização entra por login único (SSO), portanto somente um código atual do seu aplicativo autenticador ou uma chave de acesso registrada pode confirmar esta alteração.',
+	'authRefusal.passkeyWrongHost':
+		'Sua chave de acesso está registrada para {hosts}, não para {host}. Entre por lá ou registre uma chave de acesso em {host}.',
+	'authRefusal.passkeyNotRegistered':
+		'Nenhuma chave de acesso registrada',
+
 	'profile.sessions.heading': 'Dispositivos conectados',
 	'profile.sessions.hint':
 		'Todos os navegadores e aplicativos conectados à sua conta neste momento. Se você não reconhecer algum — ou entrou em um dispositivo que não tem mais — desconecte-o aqui. Ele para de funcionar imediatamente.',
