@@ -29,7 +29,7 @@
 	import type { ExceptionSummary } from '#lib/types/exceptionSummary.ts';
 	import { toggleSort, type SortOrder } from '#lib/utils/sort.ts';
 	import AgentDashboard from '#lib/components/exceptions/AgentDashboard.svelte';
-	import { formatMoney } from '#lib/utils/money.ts';
+	import { formatMoney, type MoneyAmount } from '#lib/utils/money.ts';
 	import { formatDate, timeAgo } from '#lib/utils/time.ts';
 	import { getActiveFormatLocale } from '#lib/i18n/formatLocale.ts';
 	import { pruneSelection } from '#lib/utils/selection.ts';
@@ -43,7 +43,10 @@
 		invoice_id: string | null;
 		invoice_number: string | null;
 		vendor_name: string | null;
-		amount: number | null;
+		// The joined invoice's amount: an exact decimal string (`"1234.50"`), or a
+		// JSON number from a backend predating that wire change — `MoneyAmount`
+		// takes both and `formatMoney` renders either without float arithmetic.
+		amount: MoneyAmount;
 		// What `amount` is denominated in — the joined invoice's own code, not the
 		// org's reporting currency (a GBP-reporting tenant holds USD invoices, so
 		// labelling the row with the rollup code is a different wrong answer).
@@ -716,7 +719,7 @@
 	// placeholder for a null amount before it looks at the code, and the payload
 	// nulls both together, so the unprovable-currency case this cannot label is
 	// exactly the case with no figure to label.
-	function formatCurrency(n: number | null, currency: string | null): string {
+	function formatCurrency(n: MoneyAmount, currency: string | null): string {
 		return formatMoney(n, { currency: currency ?? undefined });
 	}
 

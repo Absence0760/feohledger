@@ -110,6 +110,9 @@ test.describe('/exceptions load states', () => {
 							invoice_id: 'inv_1',
 							invoice_number: 'EXC-STUB-1',
 							vendor_name: 'Stub Vendor',
+							// The legacy JSON-number shape, kept on purpose: the queue
+							// must still render it (the other exception stubs send the
+							// exact decimal string the backend emits now).
 							amount: 100.0,
 							exception_type: 'duplicate',
 							type_label: 'Duplicate',

@@ -31,7 +31,7 @@ function exceptionRow(n: number) {
 		invoice_id: null,
 		invoice_number: `E2E-MSG-${n}`,
 		vendor_name: 'Message Vendor',
-		amount: 100,
+		amount: '100.00',
 		currency: 'USD',
 		exception_type: 'fraud_flag',
 		type_label: 'Fraud Flag',
