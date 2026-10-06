@@ -821,24 +821,30 @@
 			document stays retrievable through the download route that already checks who is asking.
 		</li>
 		<li>
-			<strong>Two things are deliberately withheld or capped.</strong> Where an audit entry was
-			written by someone else about their own activity, the entry is listed without its detail,
-			because that detail carries another person's identifiers and Article 15(4) does not let
-			your copy override their rights. And a very large collection is cut at one thousand entries,
-			with the true total stated beside it, so you can see what was trimmed and ask for the rest.
+			<strong>Two things are deliberately withheld or capped.</strong> The audit entries you
+			wrote yourself are listed — what you did, to which record, and when — but without the detail
+			each entry recorded, because an entry about an action you took on someone else's record
+			carries that other person's identifiers, and Article 15(4) does not let your copy override
+			their rights. And seven kinds of record that can run long for one person — audit entries,
+			notifications, expense reports, expenses, chat messages, contracts and virtual cards — are
+			each cut at one thousand entries, with the true total stated beside the cut, so you can see
+			what was trimmed and ask for the rest. Everything else in the export, including the list of
+			your documents, is returned in full.
 		</li>
 	</ul>
 
 	<p>
 		Erasure also keeps some documents on purpose, which is not a gap but a choice worth stating
-		plainly. It deletes the ones that are yours alone — your signed W-9 or W-8, the attachments you
-		sent through the supplier portal, and the payment-instruction files that carry account numbers
-		in the clear. It keeps the ones that are evidence behind a financial record it is already
-		required to preserve: the invoice PDF, which <em>is</em> the invoice; the contract that
-		authorised the spend; the receipt behind a reimbursement that was paid. Destroying those would
-		leave a preserved money trail with its supporting evidence gone, which is the outcome the
+		plainly. It deletes the ones that are yours alone — your signed W-9 or W-8 and the attachments
+		you sent through the supplier portal — and also the Positive Pay files that name your account:
+		those are instructions sent to a bank, they carry account numbers in the clear, and the payment
+		records they describe are kept without them. It keeps the ones that are evidence behind a
+		financial record it is already required to preserve: the invoice PDF, which <em>is</em> the
+		invoice; the contract that authorised the spend; the receipt behind a reimbursement that was
+		paid; the statement a supplier sent that was reconciled against our records. Destroying those
+		would leave a preserved money trail with its supporting evidence gone, which is the outcome the
 		record-keeping rule exists to prevent. Erasure of a user account also removes any registered
-		passkey and ends every live session.
+		passkey and any mobile push registration, and ends every live session.
 	</p>
 
 	<p>

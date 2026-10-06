@@ -280,8 +280,10 @@ promise that it does would be unperformable:
 1. **In-product erasure reaches uploaded documents SELECTIVELY, by design.**
    As of 2026-09-16 (`docs/decisions.md` §183) `services/privacy_erasure` walks
    object storage through `services/privacy_documents` and deletes the documents
-   whose sole subject is the erased party — the W-9/W-8, their supplier-portal
-   chat attachments, and the Positive Pay file naming their account. It
+   whose sole subject is the erased party — the W-9/W-8 and their supplier-portal
+   chat attachments — plus any Positive Pay file naming their account (a
+   multi-payee bank instruction, deleted because it carries account numbers in
+   the clear and is not evidence; the payment rows stay). It
    deliberately does NOT delete transaction evidence: the invoice PDF, the
    contract document, the expense receipt and the archived vendor statement stay,
    on the same legal basis as the invoice and payment ROWS the same clause

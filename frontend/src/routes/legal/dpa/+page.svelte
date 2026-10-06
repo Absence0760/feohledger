@@ -456,8 +456,15 @@
 		<li>
 			<strong>Access and portability.</strong> An administrator in your tenant can
 			produce a subject-access bundle for one of your users, one supplier-portal user, or
-			one supplier contact — profile data, the related invoice and payment summary with
-			exact decimal amounts, portal accounts and activity counts — as structured JSON.
+			one supplier contact as structured JSON: profile data, the related invoice and payment
+			summary with exact decimal amounts, portal accounts, the content of the subject's audit
+			entries (without the detail, which can identify someone else), notifications, expense
+			reports and expenses, contracts, virtual-card records (last four digits only), chat
+			messages, passkey metadata, and a manifest of the stored documents held about them with
+			what an erasure would do to each. Bank details are masked unless an administrator
+			separately requests and justifies an unmasked copy, which is audited on its own. A
+			collection that can run long is cut at one thousand entries with its true total stated
+			beside it.
 		</li>
 		<li>
 			<strong>Rectification.</strong> The supplier, invoice, expense, contract and user
@@ -469,7 +476,7 @@
 			<strong>Erasure.</strong> An administrator can irreversibly redact a subject's
 			personal data in place. Contact details, tax identifiers, bank details,
 			beneficial-owner data, authentication secrets and supplier-authored chat bodies are
-			replaced with non-identifying tombstones. Please read the three limits in the next
+			replaced with non-identifying tombstones. Please read the two limits in the next
 			paragraph, because they are the ones that matter.
 		</li>
 		<li>
@@ -504,14 +511,17 @@
 		defence of legal claims, and an AP ledger you can erase retrospectively is not an AP
 		ledger. Second, and for the same reason, <strong>erasure applies that rule to stored
 		documents rather than deleting all of them</strong>: it removes the objects belonging
-		to the data subject alone — their signed W-9 or W-8, the attachments they sent through
-		the supplier portal, and the payment-instruction files carrying account numbers in the
-		clear — and retains the invoice PDF, the contract and the receipt behind a paid
-		reimbursement, which are the evidence for financial records the same erasure preserves.
+		to the data subject alone — their signed W-9 or W-8 and the attachments they sent
+		through the supplier portal — together with the Positive Pay files naming their account,
+		which are bank instructions carrying account numbers in the clear rather than evidence;
+		and it retains the invoice PDF, the contract, the receipt behind a paid reimbursement and
+		the archived vendor statement, which are the evidence for financial records the same
+		erasure preserves.
 		Where a request requires one of those retained documents to be deleted anyway, raise it
 		at <a href="mailto:{CONTACT.privacy}">{CONTACT.privacy}</a> and we will perform that
 		deletion for you within the timeframe in <a href="#deletion">section 13</a>. Erasure of
-		a user account clears every registered passkey and ends every live session. We would
+		a user account clears every registered passkey and mobile push registration and ends
+		every live session. We would
 		rather tell you where each seam is than let you discover one in the middle of a
 		regulator's deadline.
 	</p>
@@ -1379,7 +1389,7 @@
 						Subject-access export and erasure are built into the product, restricted to
 						administrators in your own tenant, scoped so a subject in another tenant is
 						neither visible nor erasable, and audited. See
-						<a href="#data-subject-rights">section 9</a>, including its three stated limits.
+						<a href="#data-subject-rights">section 9</a>, including its two stated limits.
 					</td>
 				</tr>
 				<tr>
