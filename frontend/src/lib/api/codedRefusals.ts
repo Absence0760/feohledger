@@ -83,6 +83,18 @@ function money(params: Params, amountKey: string, currencyKey: string): string |
 	return formatMoney(amount, { currency: code });
 }
 
+/**
+ * A figure in the INVOICE's own currency, which is `null` for an invoice that
+ * names none. Then the figure renders bare (the `formatMoney` rule), never with
+ * a borrowed symbol; only a currency that is present but malformed falls back.
+ */
+function invoiceMoney(params: Params, amountKey: string, currencyKey: string): string | null {
+	const raw = params[currencyKey];
+	if (raw !== null && raw !== undefined) return money(params, amountKey, currencyKey);
+	const amount = moneyStr(params, amountKey);
+	return amount === null ? null : formatMoney(amount, { currency: null });
+}
+
 /** A status named inside a sentence: its label when this build knows it,
  *  otherwise the raw value (visible and searchable, never blank). */
 function statusLabel(
@@ -111,8 +123,8 @@ const CREDIT_MEMO_STATUS_KEYS: Record<string, MessageKey> = {
 function gateNotes(params: Params, t: Translate): string[] | null {
 	const notes: string[] = [];
 	if (params.recent_spend !== null && params.recent_spend !== undefined) {
-		const recent = money(params, 'recent_spend', 'currency');
-		const aggregate = money(params, 'aggregate_amount', 'currency');
+		const recent = invoiceMoney(params, 'recent_spend', 'currency');
+		const aggregate = invoiceMoney(params, 'aggregate_amount', 'currency');
 		const days = params.window_days;
 		if (recent === null || aggregate === null) return null;
 		if (typeof days !== 'number' || !Number.isInteger(days) || days < 0) return null;
@@ -136,7 +148,7 @@ function approvalGate(
 	withLimit: MessageKey,
 	withoutLimit: MessageKey | null
 ): string | null {
-	const amount = money(params, 'amount', 'currency');
+	const amount = invoiceMoney(params, 'amount', 'currency');
 	if (amount === null) return null;
 	let head: string;
 	if (params.limit === null || params.limit === undefined) {
@@ -229,15 +241,8 @@ const BUILDERS: Record<string, Builder> = {
 				});
 	},
 	credit_memo_exceeds_balance: (p, t) => {
-		// The currency is null only for an invoice that names none — then the
-		// figure renders bare, the `formatMoney` rule, never a borrowed symbol.
-		const remaining = moneyStr(p, 'remaining');
-		if (remaining === null) return null;
-		const code = p.currency === null || p.currency === undefined ? null : currency(p, 'currency');
-		if (code === null && p.currency !== null && p.currency !== undefined) return null;
-		return t('refusal.creditMemoExceedsBalance', {
-			remaining: formatMoney(remaining, { currency: code })
-		});
+		const remaining = invoiceMoney(p, 'remaining', 'currency');
+		return remaining === null ? null : t('refusal.creditMemoExceedsBalance', { remaining });
 	},
 	// `api/invoices.py` / `api/workflow.py`
 	[INVOICE_STALE_EDIT]: fixed('refusal.invoiceStaleEdit'),

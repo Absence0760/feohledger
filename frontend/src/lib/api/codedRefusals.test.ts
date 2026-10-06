@@ -144,6 +144,25 @@ describe('codedRefusalText', () => {
 		expect(out).not.toContain('Measured as');
 	});
 
+	it('states a code-less invoice bare, never in a borrowed currency', () => {
+		setActiveFormatLocale('en-US');
+		const out =
+			codedRefusalText(
+				'approval_cfo_required',
+				gateParams({
+					amount: '4000.00',
+					currency: null,
+					recent_spend: '7000.00',
+					aggregate_amount: '11000.00',
+					window_days: 30
+				}),
+				enT
+			) ?? '';
+		expect(out).toContain('Invoice amount 4,000.00 exceeds $10,000.00.');
+		expect(out).toContain('combined with 7,000.00');
+		expect(out).toContain('it totals 11,000.00.');
+	});
+
 	it('a malformed CFO threshold names the configured limit', () => {
 		const out = codedRefusalText('approval_cfo_required', gateParams({ limit: null }), enT);
 		expect(out).toContain('exceeds the configured limit. CFO approval required.');

@@ -106,6 +106,28 @@ void main() {
     expect(out, contains('could not be expressed in USD'));
   });
 
+  test('a code-less invoice is stated bare, never in a borrowed currency', () {
+    final out = localizeCodedRefusal(
+      en,
+      refusal(
+        'approval_cfo_required',
+        gate({
+          'amount': '4000.00',
+          'currency': null,
+          'recent_spend': '7000.00',
+          'aggregate_amount': '11000.00',
+          'window_days': 30,
+        }),
+      ),
+    )!;
+    expect(out, contains('4000.00'));
+    expect(out, contains('7000.00'));
+    expect(out, contains('11000.00'));
+    expect(out, contains(r'$10,000.00'));
+    expect(out, isNot(contains(r'$4')));
+    expect(out, isNot(contains('server english')));
+  });
+
   test('a malformed CFO threshold names the configured limit', () {
     expect(
       localizeCodedRefusal(

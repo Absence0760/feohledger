@@ -46,13 +46,25 @@ String? _money(Map params, String amountKey, String currencyKey) {
   return formatMoneyString(amount, currency: code);
 }
 
+/// A figure in the INVOICE's own currency, which is `null` for an invoice
+/// that names none. Then it renders bare (the `formatMoneyString` rule), never
+/// with a borrowed symbol; only a present-but-malformed currency falls back.
+String? _invoiceMoney(Map params, String amountKey, String currencyKey) {
+  if (params[currencyKey] != null) {
+    return _money(params, amountKey, currencyKey);
+  }
+  final amount = _str(params, amountKey);
+  if (amount == null || !_exactDecimal.hasMatch(amount)) return null;
+  return formatMoneyString(amount);
+}
+
 /// The structuring and measured-figure notes a money-gate refusal carries
 /// after its sentence, or `null` when one of them is malformed.
 List<String>? _gateNotes(AppLocalizations l, Map params) {
   final notes = <String>[];
   if (params['recent_spend'] != null) {
-    final recent = _money(params, 'recent_spend', 'currency');
-    final aggregate = _money(params, 'aggregate_amount', 'currency');
+    final recent = _invoiceMoney(params, 'recent_spend', 'currency');
+    final aggregate = _invoiceMoney(params, 'aggregate_amount', 'currency');
     final days = params['window_days'];
     if (recent == null || aggregate == null) return null;
     if (days is! int || days < 0) return null;
@@ -71,7 +83,7 @@ List<String>? _gateNotes(AppLocalizations l, Map params) {
 }
 
 String? _approvalGate(AppLocalizations l, Map params, {required bool cfo}) {
-  final amount = _money(params, 'amount', 'currency');
+  final amount = _invoiceMoney(params, 'amount', 'currency');
   if (amount == null) return null;
   final String head;
   if (params['limit'] == null) {
