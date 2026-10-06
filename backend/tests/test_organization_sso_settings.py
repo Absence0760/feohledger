@@ -447,6 +447,25 @@ async def test_no_audit_row_means_no_save(realdb, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_the_row_is_durable_before_the_save_in_lambda_audit_mode(realdb, monkeypatch):
+    """In lambda mode the ordinary audit path only enqueues; writing first
+    would then mean "SQS accepted it". The sign-in policy row is written to the
+    tenant DB synchronously in every mode, and nothing is enqueued for it."""
+    from app.services import audit_dispatch
+
+    sent: list[dict] = []
+    monkeypatch.setattr(settings, "audit_mode", "lambda")
+    monkeypatch.setattr(audit_dispatch, "_send_to_sqs", lambda **kw: sent.append(kw))
+
+    await _seed(realdb, {**OIDC_READY, "sso_only": False})
+    resp = await _put(realdb, {**OIDC_READY, "client_secret": SECRET_2})
+    assert resp.status_code == 200, resp.text
+    assert sent == []
+    rows = await _audit_rows(realdb)
+    assert [r.action for r in rows] == ["organization.sso_updated"]
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "body",
     [

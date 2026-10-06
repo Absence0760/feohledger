@@ -79,8 +79,14 @@ async def _write_auth_audit(
     entity_id: uuid.UUID | None = None,
     entity_type: str = "auth",
     details: dict | None = None,
+    durable: bool = False,
 ) -> None:
     """The actual control-plane-originated audit write. **Raises on failure.**
+
+    ``durable=True`` writes the row to the tenant DB before returning even in
+    ``lambda`` audit mode, where the default only hands it to SQS: the Lambda
+    (`services/audit_lambda`) writes the same row through the same `log_action`
+    later, so this changes when the row exists, never what it says.
 
     Split out from :func:`dispatch_auth_audit` so a caller that runs this OFF
     the response path (:func:`queue_auth_audit`) can see — and escalate — a
@@ -91,7 +97,7 @@ async def _write_auth_audit(
     # AuditLog.entity_id is nullable, but most writers pass one. Fall back to
     # the correlation_id so dashboards that GROUP BY entity_id still work.
     _entity_id = entity_id or correlation_id
-    if settings.audit_mode == "lambda":
+    if settings.audit_mode == "lambda" and not durable:
         tenant_db_name = await _resolve_tenant_db_name(organization_id)
         # Off the event loop — see `_send_to_sqs`. This is the LOGIN path
         # (`api/auth.py` writes an auth audit row on every attempt), the
@@ -199,10 +205,16 @@ async def record_auth_audit_or_raise(
 ) -> None:
     """Write a control-plane-originated audit row and **raise** if it fails.
 
-    For an operator tool, not a request path: there an unrecorded change is
-    worse than a refused one, so the caller writes this row first and makes its
-    change only once the row exists (`services/sso_break_glass`). Request paths
-    keep :func:`dispatch_auth_audit`, which must never fail the request.
+    For a change where an unrecorded one is worse than a refused one: the caller
+    writes this row first and makes its change only once the row exists — the
+    operator break-glass (`services/sso_break_glass`) and the sign-in policy
+    save (`PUT /api/organization/sso`, which answers 503 instead). Everything
+    else keeps :func:`dispatch_auth_audit`, which must never fail its request.
+
+    The row is written to the tenant DB **synchronously in every audit mode**.
+    In ``lambda`` mode the ordinary path only enqueues it, so "the row exists"
+    would mean "SQS accepted it", and a dead-lettered message would leave the
+    change made with no row — exactly what writing first is meant to rule out.
     """
     await _write_auth_audit(
         organization_id=organization_id,
@@ -211,6 +223,7 @@ async def record_auth_audit_or_raise(
         entity_id=entity_id,
         entity_type=entity_type,
         details=details,
+        durable=True,
     )
 
 
