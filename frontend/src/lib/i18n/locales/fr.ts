@@ -4630,6 +4630,17 @@ export const messages = {
 	'csvImport.invoices.hint.status': 'status : seuls new, done, paid ou rejected sont importables — un statut de pipeline en cours est rejeté ligne par ligne. Utilisez done/paid pour les factures historiques, new pour les créances ouvertes.',
 	'csvImport.invoices.hint.vendor': 'vendor_code est essayé en premier, puis on revient à une correspondance vendor_name insensible à la casse.',
 	'csvImport.result.rowError': 'Ligne {row} : {message}',
+	'glChartRefusal.foreign':
+		"{n, plural, one {Le compte général} other {Les comptes généraux}} {codes} {n, plural, one {appartient au} other {appartiennent au}} plan comptable d'une autre entité, pas à celui de cette facture.",
+	'glChartRefusal.retired':
+		'{n, plural, one {Le compte général} other {Les comptes généraux}} {codes} {n, plural, one {est désactivé} other {sont désactivés}} dans le plan comptable de cette facture.',
+	'glChartRefusal.unknown':
+		"{n, plural, one {Le compte général} other {Les comptes généraux}} {codes} {n, plural, one {ne figure pas} other {ne figurent pas}} dans le plan comptable de cette facture.",
+	'glChartRefusal.pick':
+		'Choisissez un compte dans le plan comptable propre à la facture : les comptes partagés plus ceux de son entité.',
+	'glChartRefusal.pickActive':
+		'Choisissez un compte actif dans le plan comptable propre à la facture : les comptes partagés plus ceux de son entité.',
+	'glChartRefusal.onLines': 'Lignes de facture : {reasons}',
 	'csvImport.result.summary': '{imported} importées, {skipped} ignorées',
 	'csvImport.toast.failed': 'Échec de l’importation',
 	'csvImport.toast.partial': '{imported} importées, {skipped} ignorées — voir les détails ci-dessous',

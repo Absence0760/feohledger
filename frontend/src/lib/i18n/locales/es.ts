@@ -4655,6 +4655,17 @@ export const messages = {
 	'csvImport.invoices.hint.status': 'status: solo se pueden importar new, done, paid o rejected — un estado de flujo en curso se rechaza por fila. Use done/paid para facturas históricas, new para cuentas por pagar abiertas.',
 	'csvImport.invoices.hint.vendor': 'Primero se intenta con vendor_code, luego se recurre a una coincidencia de vendor_name sin distinguir mayúsculas y minúsculas.',
 	'csvImport.result.rowError': 'Fila {row}: {message}',
+	'glChartRefusal.foreign':
+		'{n, plural, one {La cuenta contable} other {Las cuentas contables}} {codes} {n, plural, one {pertenece al} other {pertenecen al}} plan de cuentas de otra entidad, no al de esta factura.',
+	'glChartRefusal.retired':
+		'{n, plural, one {La cuenta contable} other {Las cuentas contables}} {codes} {n, plural, one {está dada de baja} other {están dadas de baja}} en el plan de cuentas de esta factura.',
+	'glChartRefusal.unknown':
+		'{n, plural, one {La cuenta contable} other {Las cuentas contables}} {codes} {n, plural, one {no está} other {no están}} en el plan de cuentas de esta factura.',
+	'glChartRefusal.pick':
+		'Elija una cuenta del plan de cuentas propio de la factura: las cuentas compartidas más las de su entidad.',
+	'glChartRefusal.pickActive':
+		'Elija una cuenta activa del plan de cuentas propio de la factura: las cuentas compartidas más las de su entidad.',
+	'glChartRefusal.onLines': 'Líneas de la factura: {reasons}',
 	'csvImport.result.summary': '{imported} importadas, {skipped} omitidas',
 	'csvImport.toast.failed': 'Error al importar',
 	'csvImport.toast.partial': '{imported} importadas, {skipped} omitidas — vea los detalles abajo',

@@ -1,6 +1,8 @@
 import { getApiBase, getTenantSlug } from '#lib/tenant.ts';
 import { getSelectedEntityId } from '#lib/entity.ts';
 import { formatApiDetail } from '#lib/utils/apiError.ts';
+import { localizeApiDetail } from '#lib/api/glChartRefusal.ts';
+import { m } from '#lib/i18n/store.svelte.ts';
 
 // Re-exported so callers that already import from `#lib/api` (e.g. the
 // hand-rolled fetch in `api/expenses.ts`) don't need a second import path.
@@ -21,11 +23,29 @@ export { formatApiDetail };
  *  everything routed through the shared `request()` helper. */
 export class ApiError extends Error {
 	status: number;
-	constructor(message: string, status: number) {
+	/** The response's raw `detail`, for a caller that needs its STRUCTURE
+	 *  (`message` is already the rendered sentence). `undefined` when the body
+	 *  carried none. */
+	detail: unknown;
+	constructor(message: string, status: number, detail?: unknown) {
 		super(message);
 		this.name = 'ApiError';
 		this.status = status;
+		this.detail = detail;
 	}
+}
+
+/**
+ * The error message for a non-OK body: the reader's-language sentence when the
+ * `detail` is a structured refusal this build can localize (a stable `code`
+ * plus typed params — `api/glChartRefusal.ts::localizeApiDetail`), otherwise
+ * `formatApiDetail`'s rendering of whatever the server sent. Done HERE, once,
+ * so every toast on every write path that can receive such a refusal states it
+ * localized without a per-call-site change (`frontend/CLAUDE.md` §
+ * Internationalization).
+ */
+function errorMessage(detail: unknown, fallback: string): string {
+	return localizeApiDetail(detail, m) ?? formatApiDetail(detail, fallback);
 }
 
 function getToken(): string | null {
@@ -78,12 +98,12 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 			window.location.href = '/login';
 		}
 		const body = await res.json().catch(() => ({}));
-		throw new ApiError(formatApiDetail(body.detail, 'Unauthorized'), res.status);
+		throw new ApiError(errorMessage(body.detail, 'Unauthorized'), res.status, body.detail);
 	}
 
 	if (!res.ok) {
 		const body = await res.json().catch(() => ({}));
-		throw new ApiError(formatApiDetail(body.detail, `API error ${res.status}`), res.status);
+		throw new ApiError(errorMessage(body.detail, `API error ${res.status}`), res.status, body.detail);
 	}
 
 	if (res.status === 204) return undefined as T;

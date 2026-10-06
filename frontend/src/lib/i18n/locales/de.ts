@@ -4628,6 +4628,17 @@ export const messages = {
 	'csvImport.invoices.hint.status': 'status: Nur new, done, paid oder rejected können importiert werden — ein laufender Pipeline-Status wird pro Zeile abgelehnt. Verwenden Sie done/paid für historische Rechnungen, new für offene Verbindlichkeiten.',
 	'csvImport.invoices.hint.vendor': 'Zuerst wird vendor_code versucht, danach wird auf eine Groß-/Kleinschreibung ignorierende Übereinstimmung mit vendor_name zurückgegriffen.',
 	'csvImport.result.rowError': 'Zeile {row}: {message}',
+	'glChartRefusal.foreign':
+		'{n, plural, one {Das Sachkonto} other {Die Sachkonten}} {codes} {n, plural, one {gehört zum} other {gehören zum}} Kontenplan einer anderen Einheit, nicht zu dem dieser Rechnung.',
+	'glChartRefusal.retired':
+		'{n, plural, one {Das Sachkonto} other {Die Sachkonten}} {codes} {n, plural, one {ist im} other {sind im}} Kontenplan dieser Rechnung stillgelegt.',
+	'glChartRefusal.unknown':
+		'{n, plural, one {Das Sachkonto} other {Die Sachkonten}} {codes} {n, plural, one {ist nicht} other {sind nicht}} im Kontenplan dieser Rechnung enthalten.',
+	'glChartRefusal.pick':
+		'Wählen Sie ein Konto aus dem eigenen Kontenplan der Rechnung – den gemeinsamen Konten plus denen ihrer Einheit.',
+	'glChartRefusal.pickActive':
+		'Wählen Sie ein aktives Konto aus dem eigenen Kontenplan der Rechnung – den gemeinsamen Konten plus denen ihrer Einheit.',
+	'glChartRefusal.onLines': 'Positionen: {reasons}',
 	'csvImport.result.summary': '{imported} importiert, {skipped} übersprungen',
 	'csvImport.toast.failed': 'Import fehlgeschlagen',
 	'csvImport.toast.partial': '{imported} importiert, {skipped} übersprungen — Details siehe unten',

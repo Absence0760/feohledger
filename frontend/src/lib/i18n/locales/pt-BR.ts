@@ -4658,6 +4658,17 @@ export const messages = {
 	'csvImport.invoices.hint.status': 'status: apenas new, done, paid ou rejected são importáveis — um status de fluxo em andamento é rejeitado por linha. Use done/paid para faturas históricas, new para contas a pagar em aberto.',
 	'csvImport.invoices.hint.vendor': 'vendor_code é tentado primeiro, depois recorre a uma correspondência de vendor_name sem distinção entre maiúsculas e minúsculas.',
 	'csvImport.result.rowError': 'Linha {row}: {message}',
+	'glChartRefusal.foreign':
+		'{n, plural, one {A conta contábil} other {As contas contábeis}} {codes} {n, plural, one {pertence ao} other {pertencem ao}} plano de contas de outra entidade, não ao desta fatura.',
+	'glChartRefusal.retired':
+		'{n, plural, one {A conta contábil} other {As contas contábeis}} {codes} {n, plural, one {está desativada} other {estão desativadas}} no plano de contas desta fatura.',
+	'glChartRefusal.unknown':
+		'{n, plural, one {A conta contábil} other {As contas contábeis}} {codes} {n, plural, one {não está} other {não estão}} no plano de contas desta fatura.',
+	'glChartRefusal.pick':
+		'Escolha uma conta do plano de contas próprio da fatura: as contas compartilhadas mais as da sua entidade.',
+	'glChartRefusal.pickActive':
+		'Escolha uma conta ativa do plano de contas próprio da fatura: as contas compartilhadas mais as da sua entidade.',
+	'glChartRefusal.onLines': 'Itens da fatura: {reasons}',
 	'csvImport.result.summary': '{imported} importados, {skipped} ignorados',
 	'csvImport.toast.failed': 'Falha na importação',
 	'csvImport.toast.partial': '{imported} importados, {skipped} ignorados — veja os detalhes abaixo',
