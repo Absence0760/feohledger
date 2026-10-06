@@ -5,6 +5,7 @@
 	import { api } from '#lib/api.ts';
 	import { authErrorMessage } from '#lib/api/authRefusals.ts';
 	import { toast } from '#lib/components/ui/Toast.svelte';
+	import PageHeader from '#lib/components/ui/PageHeader.svelte';
 	import SettingsRail from '#lib/components/ui/SettingsRail.svelte';
 	import { SUPPORTED_LOCALES, LOCALE_LABELS, type Locale } from '#lib/i18n/locale.ts';
 	import { currentLocale, setLocale, m } from '#lib/i18n/store.svelte.ts';
@@ -588,11 +589,7 @@
 	</label>
 {/snippet}
 
-<div class="workspace">
-	<header class="toolbar">
-		<h1>{m('shell.profileAndSecurity')}</h1>
-	</header>
-
+<PageHeader title={m('shell.profileAndSecurity')}>
 	<div class="settings-layout">
 		<SettingsRail groups={railGroups} active={section} label={m('profile.rail.label')} />
 
@@ -1066,19 +1063,9 @@
 			{/if}
 		</div>
 	</div>
-</div>
+</PageHeader>
 
 <style>
-	.workspace {
-		max-width: 1800px;
-		margin: 0 auto;
-		padding: 24px 20px;
-		display: flex;
-		flex-direction: column;
-		gap: 16px;
-		min-height: 100vh;
-	}
-
 	/* Rail beside panel — the same shape `/organization` uses, and the same
 	   reason for `minmax(0, 1fr)`: a grid item's default `min-width: auto` is
 	   its content width, so the widest panel (the notification-preference grid)
@@ -1109,22 +1096,10 @@
 		}
 	}
 
-	.toolbar {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-	}
-
 	.sections {
 		display: flex;
 		flex-direction: column;
 		gap: 16px;
-	}
-
-	h1 {
-		margin: 0;
-		font-size: 1.3rem;
-		font-weight: 700;
 	}
 
 	h2 {
