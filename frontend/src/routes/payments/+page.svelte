@@ -232,6 +232,15 @@
 		// discount_percent is a rate, not money — stays a JSON number.
 		discount_percent: number | null;
 		discount_amount: string | null;
+		// An ACCEPTED early-payment offer a run built today would take
+		// (`payment_runs.payable_amounts`): the deduction, its pay-by date, and
+		// what the payment would then move. Distinct from `discount_*` above —
+		// the invoice's static "2/10 net 30" term, which is only advisory. All
+		// optional so an older backend leaves the row as it was; `payable_amount`
+		// is also net of applied credit memos.
+		accepted_discount_amount?: string | null;
+		accepted_discount_pay_by?: string | null;
+		payable_amount?: string;
 		// --- What a payment run would refuse ---------------------------------
 		// `services/payment_runs.run_refusal_reasons` is the ONE predicate set
 		// `create_payment_run_for_invoices` enforces, and the queue reports its
@@ -1920,7 +1929,20 @@
 								<!-- The queue row above this panel already renders `item.currency`;
 								     dropping it here made the review step — the last screen before a
 								     run is staged — the one place the figure lost its code. -->
-								<td class="right mono">{formatCurrency(item.amount, item.currency)}</td>
+								<td class="right mono">
+									{formatCurrency(item.amount, item.currency)}
+									{#if item.accepted_discount_amount && item.payable_amount}
+										<!-- The run takes the accepted offer, so it moves less than
+										     the invoice amount — say so on the last screen before it
+										     is staged rather than let the run total disagree. -->
+										<div class="muted" data-testid="review-accepted-discount">
+											{m('payments.queue.acceptedDiscount', {
+												amount: formatCurrency(item.payable_amount, item.currency),
+												date: formatDate(item.accepted_discount_pay_by)
+											})}
+										</div>
+									{/if}
+								</td>
 								<td>
 									<!-- A rail-pinned row (a live virtual card already claims the
 									     invoice) offers only that rail: every other one is a 409
@@ -2065,7 +2087,14 @@
 							</span>
 						</td>
 						<td>
-							{#if item.discount_eligible && item.discount_amount && item.discount_percent}
+							{#if item.accepted_discount_amount && item.payable_amount}
+								<span class="discount-chip" data-testid="queue-accepted-discount">
+									{m('payments.queue.acceptedDiscount', {
+										amount: formatCurrency(item.payable_amount, item.currency),
+										date: formatDate(item.accepted_discount_pay_by)
+									})}
+								</span>
+							{:else if item.discount_eligible && item.discount_amount && item.discount_percent}
 								<span
 									class="discount-chip"
 									title="{item.discount_percent}% discount expires {formatDate(item.discount_date)}"

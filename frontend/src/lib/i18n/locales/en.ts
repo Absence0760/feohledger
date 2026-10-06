@@ -626,6 +626,7 @@ export const en = {
 	'payments.queue.blocked.generic': 'Unresolved exception blocks payment',
 	'payments.queue.discountSave': 'Save {amount}',
 	'payments.queue.discountBy': '{percent}% by {date}',
+	'payments.queue.acceptedDiscount': 'Accepted offer: pays {amount} by {date}',
 	'payments.queue.loadMore': 'Load more ({shown} of {total})',
 	'payments.queue.showingAll':
 		'{total, plural, one {Showing all # invoice} other {Showing all # invoices}}',
@@ -5841,6 +5842,8 @@ export const en = {
 	'paymentRuns.runDetail.pendingCfoStrong': 'Pending CFO approval.',
 	'paymentRuns.runDetail.title': 'Payment Run',
 	'paymentRuns.runDetail.total': 'Total',
+	'paymentRuns.runDetail.discountTotal': 'Early-payment discounts taken',
+	'paymentRuns.runDetail.rowDiscount': '{amount} discount taken',
 	// Payment-RUN status labels — the /payments Runs table + RunDetailModal's
 	// header pill (#lib/types/payment.ts::RUN_STATUS_LABEL_KEYS)
 	'paymentRuns.status.draft': 'Draft',

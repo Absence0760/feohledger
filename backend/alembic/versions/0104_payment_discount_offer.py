@@ -82,7 +82,10 @@ def _add_fk(table: str, name: str, column: str, target: str) -> None:
         f"""
         DO $$
         BEGIN
-            IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = '{name}') THEN
+            IF NOT EXISTS (
+                SELECT 1 FROM pg_constraint
+                WHERE conname = '{name}' AND conrelid = '{table}'::regclass
+            ) THEN
                 ALTER TABLE {table}
                     ADD CONSTRAINT {name} FOREIGN KEY ({column})
                     REFERENCES {target} (id) ON DELETE SET NULL;

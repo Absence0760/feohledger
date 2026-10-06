@@ -547,6 +547,7 @@ export const messages = {
 	'payments.queue.blocked.generic': 'Ungeklärte Ausnahme blockiert die Zahlung',
 	'payments.queue.discountSave': '{amount} sparen',
 	'payments.queue.discountBy': '{percent}% bis {date}',
+	'payments.queue.acceptedDiscount': 'Angenommenes Angebot: zahlt {amount} bis {date}',
 	'payments.queue.loadMore': 'Mehr laden ({shown} von {total})',
 	'payments.queue.showingAll':
 		'{total, plural, one {Alle # Rechnung angezeigt} other {Alle # Rechnungen angezeigt}}',
@@ -5611,6 +5612,8 @@ export const messages = {
 	'paymentRuns.runDetail.pendingCfoStrong': 'CFO-Genehmigung ausstehend.',
 	'paymentRuns.runDetail.title': 'Zahlungslauf',
 	'paymentRuns.runDetail.total': 'Gesamt',
+	'paymentRuns.runDetail.discountTotal': 'Abgezogene Skonti',
+	'paymentRuns.runDetail.rowDiscount': '{amount} Skonto abgezogen',
 	'paymentRuns.status.draft': 'Entwurf',
 	'paymentRuns.status.executing': 'Wird ausgeführt',
 	'paymentRuns.status.submitted': 'Eingereicht',

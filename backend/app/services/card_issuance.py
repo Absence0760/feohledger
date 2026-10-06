@@ -170,6 +170,13 @@ def card_settlement_block(card: VirtualCard, amount, *, now: datetime | None = N
       no charge anywhere to reconcile against.
     - **Limit too small.** A live, unspent card that cannot cover this payable is
       not what settles it.
+    - **Limit too large.** A card is spendable up to its limit, and nothing on
+      the card webhook compares a charge with ``Payment.amount``. Converging a
+      payment for less than the limit — net of a credit memo, or of an accepted
+      early-payment discount — records the smaller figure as paid (and the
+      discount as captured) while the vendor can still charge the whole limit.
+      Refused as ``card_limit_exceeds_payment`` before anything moves; cancel the
+      card and the next run mints one for the booked amount.
 
     ``now`` is injectable so the expiry boundary is testable without freezing the
     clock; it defaults to the current UTC time. A card with no ``expires_at`` is
@@ -192,6 +199,8 @@ def card_settlement_block(card: VirtualCard, amount, *, now: datetime | None = N
             return "card_expired"
     if card.amount_limit is None or card.amount_limit < amount:
         return "card_already_issued_insufficient_limit"
+    if card.amount_limit > amount:
+        return "card_limit_exceeds_payment"
     return None
 
 

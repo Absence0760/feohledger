@@ -406,3 +406,64 @@ async def test_an_invoice_with_a_payment_blocking_exception_is_not_minted_a_card
     assert resp.json()["total"] == 1
     assert await _cards_for(mk, held) == []
     assert len(await _cards_for(mk, clean)) == 1
+
+
+@pytest.mark.asyncio
+async def test_the_card_is_minted_net_of_credits_and_takes_no_discount(realdb):
+    """Net of applied credit memos — a card is spendable up to its limit, so the
+    gross would overpay the credit — but NOT of an accepted early-payment
+    discount: a card minted outside a run is no booked payment, so nothing
+    would record or capture the discount, and it would outlive the deadline."""
+    from datetime import timedelta
+
+    from app.models.credit_memo import CreditMemo
+    from app.models.discount import DiscountOffer
+    from app.utils.dates import utc_today
+
+    org_id = realdb.info(TENANT).org_id
+    mk = realdb.sessionmaker(TENANT)
+    await _enable_cards(realdb, org_id=org_id)
+    vendor_id = await _seed_vendor(mk, org_id)
+    inv_id = await _seed_invoice(
+        mk, org_id, status=InvoiceStatus.approved, vendor_id=vendor_id, number="CARDNET"
+    )
+    async with mk() as s:
+        inv = await s.get(Invoice, inv_id)
+        s.add(
+            CreditMemo(
+                memo_number="CM-CARDNET",
+                vendor_id=vendor_id,
+                invoice_id=inv_id,
+                amount=Decimal("50.00"),
+                currency="USD",
+                status="applied",
+                organization_id=org_id,
+            )
+        )
+        s.add(
+            DiscountOffer(
+                organization_id=org_id,
+                entity_id=inv.entity_id,
+                scope="invoice",
+                invoice_id=inv_id,
+                vendor_id=vendor_id,
+                base_amount=Decimal("250.00"),
+                currency="USD",
+                tiers=[{"days": 10, "percent": "2.00"}],
+                status="accepted",
+                accepted_tier={"days": 10, "percent": "2.00"},
+                valid_from=utc_today() - timedelta(days=1),
+            )
+        )
+        await s.commit()
+
+    async with realdb.client(key=TENANT, role="admin") as c:
+        resp = await c.post("/api/cards/generate", json={"invoice_ids": [str(inv_id)]})
+    assert resp.status_code in (200, 201), resp.text
+
+    async with mk() as s:
+        card = (
+            await s.execute(select(VirtualCard).where(VirtualCard.invoice_id == inv_id))
+        ).scalar_one()
+    # 250.00 - 50.00 credit; the accepted 2 % offer is left to a booked payment.
+    assert card.amount_limit == Decimal("200.00")

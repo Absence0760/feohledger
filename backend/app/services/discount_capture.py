@@ -43,6 +43,7 @@ from decimal import Decimal
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.credit_memo import CreditMemo
 from app.models.discount import (
     OFFER_SCOPE_INVOICE,
     OFFER_STATUS_ACCEPTED,
@@ -80,7 +81,8 @@ async def applicable_discounts(
     net_amounts: dict[uuid.UUID, Decimal],
 ) -> dict[uuid.UUID, AppliedDiscount]:
     """Which of ``invoices`` an ACCEPTED early-pay discount applies to if paid
-    on ``pay_date`` — and for how much. One query for the batch.
+    on ``pay_date`` — and for how much. Two queries for the whole batch at
+    most (the offers, then the applied memos of only the invoices carrying one).
 
     An offer applies only when every one of these holds, and otherwise the
     invoice is paid in full (never refused — the supplier is owed the whole
@@ -94,13 +96,26 @@ async def applicable_discounts(
       is not applied — a deduction the supplier may consider expired is a
       short payment;
     * its ``currency`` is the invoice's (a payment is denominated in the
-      invoice's currency; a figure in another one is not a deduction from it);
+      invoice's currency; a figure in another one is not a deduction from it).
+      An invoice that records no currency takes no discount;
     * its ``base_amount`` is still the invoice's ``amount``. An invoice whose
       amount moved after the offer was made no longer matches the terms the
       supplier accepted, and recomputing them would be pricing a bargain nobody
       struck; the invoice is paid in full and the mismatch logged;
     * the deduction leaves something to pay: ``savings < net_amounts[id]``
-      (the invoice net of applied credit memos).
+      (the invoice net of applied credit memos);
+    * the discount has not ALREADY been taken through a credit memo. Before
+      this function existed, recording an applied credit memo for the savings
+      was the documented way to pay the discounted figure (and the in-app help
+      said so), and such a memo is already inside ``net_amounts``. An applied
+      memo on the invoice, in its currency, for exactly the savings is read as
+      that deduction — whenever it was recorded — and the offer is not deducted
+      a second time; the settlement still captures it through the amount-match
+      leg (:func:`capture_offers_for_settled_payment`). Nothing links a memo to
+      an offer, so this is an amount coincidence, and it is resolved toward
+      paying the supplier in full: a return credit that happens to equal the
+      savings costs the buyer one discount, where guessing the other way would
+      short-pay the supplier by it.
 
     Several accepted offers on one invoice (a re-sent offer, both accepted):
     the earliest accepted is the one taken — one payment realizes one discount,
@@ -127,6 +142,20 @@ async def applicable_discounts(
     by_invoice: dict[uuid.UUID, list[DiscountOffer]] = {}
     for offer in offers:
         by_invoice.setdefault(offer.invoice_id, []).append(offer)
+    # Applied memos on the invoices that carry an offer — the manual-deduction
+    # check below. Skipped entirely (no query) when no invoice has an offer.
+    memos_by_invoice: dict[uuid.UUID, list[tuple[Decimal, str]]] = {}
+    if by_invoice:
+        memo_rows = await db.execute(
+            select(CreditMemo.invoice_id, CreditMemo.amount, CreditMemo.currency).where(
+                CreditMemo.invoice_id.in_(list(by_invoice)),
+                CreditMemo.status == "applied",
+            )
+        )
+        for invoice_id, memo_amount, memo_currency in memo_rows.all():
+            memos_by_invoice.setdefault(invoice_id, []).append(
+                (Decimal(memo_amount).quantize(_CENTS), (memo_currency or "").upper())
+            )
 
     out: dict[uuid.UUID, AppliedDiscount] = {}
     for inv in rows:
@@ -136,7 +165,8 @@ async def applicable_discounts(
             deadline = offers_svc.accepted_discount_deadline(offer)
             if deadline is None or pay_date > deadline:
                 continue
-            if (offer.currency or "").upper() != (inv.currency or "").upper():
+            # An invoice with no currency cannot be shown to share the offer's.
+            if not inv.currency or (offer.currency or "").upper() != inv.currency.upper():
                 continue
             base = Decimal(offer.base_amount).quantize(_CENTS)
             if inv.amount is None or base != Decimal(inv.amount).quantize(_CENTS):
@@ -149,6 +179,13 @@ async def applicable_discounts(
             savings = offers_svc.discount_savings(base, offer.accepted_tier)
             if savings <= 0 or savings >= net_amounts.get(inv.id, Decimal("0")):
                 continue
+            if (savings, inv.currency.upper()) in memos_by_invoice.get(inv.id, ()):
+                logger.info(
+                    "discount offer %s already deducted through an applied credit memo; "
+                    "not deducting it again",
+                    offer.id,
+                )
+                break
             out[inv.id] = AppliedDiscount(offer_id=offer.id, amount=savings, deadline=deadline)
             break
     return out

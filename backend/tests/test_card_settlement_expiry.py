@@ -32,7 +32,7 @@ from app.services.card_issuance import card_settlement_block
 _NOW = datetime(2026, 6, 1, 12, 0, tzinfo=UTC)
 
 
-def _card(*, status="active", limit="1000.00", expires_at=None):
+def _card(*, status="active", limit="500.00", expires_at=None):
     return SimpleNamespace(
         status=status,
         amount_limit=Decimal(limit),
@@ -73,12 +73,13 @@ def test_naive_expiry_is_compared_as_utc_rather_than_raising():
     """The column is timezone-aware, but a row built by an adapter that dropped
     tzinfo must not raise inside the money path."""
     naive_past = (_NOW - timedelta(days=1)).replace(tzinfo=None)
-    assert card_settlement_block(_card(expires_at=naive_past), Decimal("1.00"), now=_NOW) == (
+    assert card_settlement_block(_card(expires_at=naive_past), Decimal("500.00"), now=_NOW) == (
         "card_expired"
     )
 
     naive_future = (_NOW + timedelta(days=1)).replace(tzinfo=None)
-    assert card_settlement_block(_card(expires_at=naive_future), Decimal("1.00"), now=_NOW) is None
+    card = _card(expires_at=naive_future)
+    assert card_settlement_block(card, Decimal("500.00"), now=_NOW) is None
 
 
 @pytest.mark.parametrize("spent_status", ["charged", "completed"])
@@ -87,7 +88,7 @@ def test_spent_status_still_wins_over_expiry(spent_status):
     expired is reported as spent, which is the more actionable fact (the money
     did move, and against which payment)."""
     card = _card(status=spent_status, expires_at=_NOW - timedelta(days=1))
-    assert card_settlement_block(card, Decimal("1.00"), now=_NOW) == "card_already_charged"
+    assert card_settlement_block(card, Decimal("500.00"), now=_NOW) == "card_already_charged"
 
 
 def test_expiry_is_checked_before_the_limit():
@@ -107,16 +108,16 @@ def test_limit_check_survives_for_a_live_card():
 def test_now_defaults_to_the_current_clock():
     """The injectable `now` is a testing seam, not a required argument — the
     money path calls this with one argument."""
-    assert card_settlement_block(_card(expires_at=None), Decimal("1.00")) is None
+    assert card_settlement_block(_card(expires_at=None), Decimal("500.00")) is None
     long_past = datetime(2000, 1, 1, tzinfo=UTC)
-    assert card_settlement_block(_card(expires_at=long_past), Decimal("1.00")) == "card_expired"
+    assert card_settlement_block(_card(expires_at=long_past), Decimal("500.00")) == "card_expired"
 
 
 def test_reason_is_pii_free():
     """Returned strings become `Payment.failure_reason`, which is
     operator-facing — no PAN, no last four."""
     card = _card(expires_at=_NOW - timedelta(days=1))
-    reason = card_settlement_block(card, Decimal("1.00"), now=_NOW)
+    reason = card_settlement_block(card, Decimal("500.00"), now=_NOW)
     assert reason == "card_expired"
     assert reason.replace("_", "").isalpha()
 
@@ -149,14 +150,14 @@ def test_expiry_is_compared_as_an_instant_across_timezones():
     # 2026-06-01 23:00+14:00 == 2026-06-01 09:00 UTC, three hours BEFORE _NOW.
     ahead = datetime(2026, 6, 1, 23, 0, tzinfo=timezone(timedelta(hours=14)))
     assert ahead < _NOW
-    assert card_settlement_block(_card(expires_at=ahead), Decimal("1.00"), now=_NOW) == (
+    assert card_settlement_block(_card(expires_at=ahead), Decimal("500.00"), now=_NOW) == (
         "card_expired"
     )
 
     # And the mirror: 2026-06-01 06:00-11:00 == 17:00 UTC, five hours AFTER.
     behind = datetime(2026, 6, 1, 6, 0, tzinfo=timezone(timedelta(hours=-11)))
     assert behind > _NOW
-    assert card_settlement_block(_card(expires_at=behind), Decimal("1.00"), now=_NOW) is None
+    assert card_settlement_block(_card(expires_at=behind), Decimal("500.00"), now=_NOW) is None
 
 
 def test_an_expired_card_with_no_limit_at_all_reports_the_expiry():
@@ -165,13 +166,13 @@ def test_an_expired_card_with_no_limit_at_all_reports_the_expiry():
     unusable reports the fact that cannot be fixed by raising a limit."""
     card = _card(expires_at=_NOW - timedelta(days=1))
     card.amount_limit = None
-    assert card_settlement_block(card, Decimal("1.00"), now=_NOW) == "card_expired"
+    assert card_settlement_block(card, Decimal("500.00"), now=_NOW) == "card_expired"
 
 
 def test_a_live_card_with_no_limit_still_reports_the_limit():
     card = _card(expires_at=_NOW + timedelta(days=1))
     card.amount_limit = None
-    assert card_settlement_block(card, Decimal("1.00"), now=_NOW) == (
+    assert card_settlement_block(card, Decimal("500.00"), now=_NOW) == (
         "card_already_issued_insufficient_limit"
     )
 
@@ -258,3 +259,27 @@ def test_the_money_path_never_injects_its_own_clock():
         assert not call.keywords, "the money path must use the ambient UTC clock"
         assert len(call.args) == 2
         assert ast.unparse(call.args[1]) == "payment.amount"
+
+
+def test_a_card_whose_limit_exceeds_the_payment_is_refused():
+    """A card is spendable up to its limit, and nothing compares a charge with
+    `Payment.amount`. Converging a 490.00 payment (net of a credit or an
+    accepted discount) onto a 500.00 card would record 490 paid while 500 can
+    still go out."""
+    card = _card(expires_at=_NOW + timedelta(days=30))
+    assert card_settlement_block(card, Decimal("490.00"), now=_NOW) == (
+        "card_limit_exceeds_payment"
+    )
+
+
+def test_a_card_limit_mismatch_is_retry_safe():
+    """Refused before anything moved: a re-send after the card is cancelled
+    mints one at the booked figure."""
+    from app.services.payment_runs import RETRY_SAFE, classify_payment_failure
+
+    assert (
+        classify_payment_failure(
+            failure_reason="card_limit_exceeds_payment", provider_payment_id=None
+        )
+        == RETRY_SAFE
+    )

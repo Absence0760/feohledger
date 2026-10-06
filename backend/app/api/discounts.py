@@ -336,8 +336,9 @@ async def create_offer(
         # STAMPED with); without this filter an operator with subsidiary A
         # selected could raise an offer stamped A against subsidiary B's
         # invoice — the offer then shows in A's queue while pricing B's
-        # payable. Advisory data, never money, but the sibling money path was
-        # fixed for exactly this shape and the two must not diverge. An
+        # payable. Once accepted, the offer sets what a payment run pays for
+        # that invoice (`payment_runs.payable_amounts`), so this is money, and
+        # the sibling money path was fixed for exactly this shape. An
         # out-of-scope id is the same opaque 404 as a missing one, so the
         # response can't enumerate another entity's invoices.
         invoice = (

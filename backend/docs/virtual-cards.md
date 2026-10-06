@@ -113,7 +113,7 @@ Card Auto-Expires                (single-use, no further charges possible)
 | card_provider | String | `stripe`, `marqeta`, `lithic` |
 | provider_card_id | String | External card ID from the provider |
 | last_four | String(4) | Last 4 digits of card number |
-| amount_limit | Decimal | Spending limit (= invoice amount) |
+| amount_limit | Decimal | Spending limit — the booked payment amount on the run leg (net of credits and any accepted early-payment discount); the invoice net of applied credits for `POST /api/cards/generate`, which takes no discount |
 | amount_charged | Decimal | Actual charge amount (nullable until charged) |
 | currency | String(3) | Card currency |
 | status | String | Card lifecycle status |
@@ -879,8 +879,18 @@ onto a card it did **not** mint, and is deliberately separate from
   a provider card the index then refuses to persist — an orphaned spendable card.
 - `card_settlement_block` answers *"can that card be what settles this
   payment?"* — `None` if yes, else a `Payment.failure_reason`. It rejects a
-  card in `CARD_SPENT_STATUSES` (`charged`/`completed`) and one whose
-  `amount_limit` cannot cover the payable.
+  card in `CARD_SPENT_STATUSES` (`charged`/`completed`), an expired one, one
+  whose `amount_limit` cannot cover the payable, and — `card_limit_exceeds_payment`
+  — one whose limit is LARGER than the payment. Nothing on the card webhook
+  compares a charge with `Payment.amount`, so converging a payment net of a
+  credit or an accepted discount onto a card minted at the gross would record
+  the smaller figure as paid while the vendor can still charge the whole limit.
+  Retry-safe: cancel the card and the next run mints one at the booked amount.
+  One consequence to know: a card minted by `POST /api/cards/generate` (net of
+  credits, never discounted) before an early-payment offer is accepted leaves
+  the invoice payable only on that card until someone cancels it, and the
+  discount can lapse meanwhile. It fails safe — the supplier is never paid less
+  than the booked figure — but AP has to cancel the card to take the discount.
 
 The spend check is the load-bearing one: `amount_limit` is the authorization
 ceiling and is **not** reduced by spend (a charge only sets `amount_charged`),

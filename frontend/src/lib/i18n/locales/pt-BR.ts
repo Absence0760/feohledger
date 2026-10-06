@@ -551,6 +551,7 @@ export const messages = {
 	'payments.queue.blocked.generic': 'Uma exceção não resolvida bloqueia o pagamento',
 	'payments.queue.discountSave': 'Economize {amount}',
 	'payments.queue.discountBy': '{percent}% até {date}',
+	'payments.queue.acceptedDiscount': 'Oferta aceita: paga {amount} até {date}',
 	'payments.queue.loadMore': 'Carregar mais ({shown} de {total})',
 	'payments.queue.showingAll':
 		'{total, plural, one {Mostrando # fatura} other {Mostrando todas as # faturas}}',
@@ -5638,6 +5639,8 @@ export const messages = {
 	'paymentRuns.runDetail.pendingCfoStrong': 'Aprovação do diretor financeiro pendente.',
 	'paymentRuns.runDetail.title': 'Lote de pagamento',
 	'paymentRuns.runDetail.total': 'Total',
+	'paymentRuns.runDetail.discountTotal': 'Descontos por pagamento antecipado aplicados',
+	'paymentRuns.runDetail.rowDiscount': 'Desconto de {amount} aplicado',
 	'paymentRuns.status.draft': 'Rascunho',
 	'paymentRuns.status.executing': 'Executando',
 	'paymentRuns.status.submitted': 'Enviado',

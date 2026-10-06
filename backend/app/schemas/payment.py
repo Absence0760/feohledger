@@ -205,10 +205,8 @@ class PaymentResponse(BaseModel):
             completed_at=p.completed_at.isoformat() if p.completed_at else None,
             settled_amount=p.settled_amount,
             settled_currency=p.settled_currency,
-            discount_amount=getattr(p, "discount_amount", None),
-            discount_offer_id=(
-                str(p.discount_offer_id) if getattr(p, "discount_offer_id", None) else None
-            ),
+            discount_amount=p.discount_amount,
+            discount_offer_id=str(p.discount_offer_id) if p.discount_offer_id else None,
             vendor_name=invoice.vendor_name if invoice else None,
             invoice_number=invoice.invoice_number if invoice else None,
             # Never `or "USD"`: an unset invoice currency is unknown, and a

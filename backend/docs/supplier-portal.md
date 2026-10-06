@@ -559,7 +559,7 @@ show a "pending AP approval" banner (read from `GET /portal/company`'s
 - [x] Bank-detail changes with AP admin approval workflow (fraud mitigation)
 - [x] W-9 / W-8 upload + storage (self-service; reuses `Vendor.w9_file_key` / `w9_received_date`, no migration — see *W-9 / W-8 tax-form upload* above)
 - [x] Dynamic-discount offers — vendor accepts/declines early-payment discounts
-  (ties into the dynamic-discounting engine; accept never moves money)
+  (ties into the dynamic-discounting engine; accept never moves money itself, but the payment run then pays the discounted amount by the deadline)
 - [x] In-app per-invoice chat between vendor and AP team
 - [x] Notification preferences (email-on-paid, email-on-rejected) — per-portal-user, vendor-controlled; wired into the `transition_invoice` dispatch chokepoint
 - [x] Virtual card viewing (secure, single-use reveal token) — `GET /portal/cards/{token}` consumes a one-time `CardRevealToken` atomically (`UPDATE … WHERE used_at IS NULL … RETURNING`), committed before the provider call; see *Single-use virtual-card reveal* above

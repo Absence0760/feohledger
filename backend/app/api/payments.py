@@ -189,16 +189,20 @@ SCHEDULABLE_INVOICE_STATUSES = tuple(
 #                          requires is not on record. A four-way match exists so
 #                          that failed quality acceptance stops payment; paying
 #                          past it pays for goods the business refused.
-#   po_mismatch          — the invoice disagrees with its purchase order beyond
-#                          tolerance: the cited PO doesn't exist, the currencies
-#                          differ, the amount is outside the match rule's
-#                          tolerance, fewer units were received than ordered, or
-#                          more were received than ordered while the invoice
-#                          bills above the PO. Only an out-of-tolerance finding
-#                          raises one (`invoice_warnings._refresh_po_match`); an
-#                          in-tolerance invoice never carries it, so this blocks
-#                          no good invoice. Same rule as an ERP's price/quantity
-#                          variance payment block.
+#   po_mismatch          — paying the invoice would pay more than its purchase
+#                          order supports: the cited PO doesn't exist, the
+#                          currencies differ (nothing could be compared), it
+#                          bills ABOVE the PO beyond the match rule's tolerance,
+#                          or it bills beyond the share of the PO actually
+#                          received. Only those raise one
+#                          (`invoice_warnings._refresh_po_match`): billing LESS
+#                          than the PO (a split / blanket PO invoiced delivery by
+#                          delivery), an in-tolerance variance and an
+#                          over-receipt on its own (decisions §67) stay warnings
+#                          on the invoice and never hold it. A refresh that no
+#                          longer finds the problem closes the row again. Same
+#                          rule as an ERP's price/quantity variance payment
+#                          block.
 #
 # Resolving/dismissing the exception is the human sign-off that clears it. The
 # same tuple also scopes segregation of duties on that sign-off
@@ -2711,7 +2715,11 @@ async def create_payment(
     # An accepted early-payment discount whose deadline today meets is taken
     # here exactly as a run takes it — the two money paths must not disagree
     # about what an invoice is worth.
-    payable = await payable_amount(db, invoice, pay_date=utc_today())
+    payable = (
+        await payable_amounts(
+            db, [invoice], pay_date=utc_today(), net_amounts={invoice.id: net_amount}
+        )
+    )[invoice.id]
     net_amount = payable.amount
     if body.amount is not None and Decimal(str(body.amount)) != net_amount:
         raise HTTPException(
@@ -3379,9 +3387,12 @@ async def _capture_discount_offers(
     rail confirms instantly or days later. Both callers already hold the
     `Invoice` and pass it in; `invoice=None` falls back to resolving it from
     `payment.invoice_id` for any future caller that doesn't. No invoice found
-    is a no-op (nothing to match against); a payment amount that doesn't
-    match a discounted payoff exactly is also a no-op (see
-    `discount_capture.capture_offers_for_settled_payment`).
+    is a no-op (nothing to match against). A payment BOOKED with a discount
+    (`Payment.discount_offer_id`, migration 0104) captures exactly that offer
+    for exactly `Payment.discount_amount`; one booked without falls back to the
+    exact-payoff match, which is how a discount taken the old way — through a
+    credit memo — is still recognized (see
+    `discount_capture.capture_offer_for_settled_payment`).
 
     NOT called when the settlement verifier flagged a discrepancy — the
     payoff match runs against OUR authorized amount, which a divergent
@@ -4735,9 +4746,26 @@ async def retry_failed_payments(
                 "payment_id": str(payment.id),
                 "retry_payment_id": str(retry_payment.id),
                 "amount": str(retry_payment.amount),
+                # The same early-payment discount the failed attempt was booked
+                # with — a retry never changes it (`discount_changed` above).
+                "discount_amount": (
+                    str(retry_payment.discount_amount)
+                    if retry_payment.discount_amount is not None
+                    else None
+                ),
                 "method": retry_payment.method,
                 "previous_failure_reason": payment.failure_reason,
             },
+        )
+        # A new payment row booking the discount gets its own applied row, the
+        # same evidence the run builder and the standalone payment write.
+        await audit_applied_discount(
+            db,
+            organization_id=org.id,
+            actor_id=user.id,
+            payment=retry_payment,
+            invoice=invoices[payment.invoice_id],
+            payable=payable,
         )
 
     from app.services.audit_dispatch import dispatch_audit

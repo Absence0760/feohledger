@@ -204,6 +204,16 @@ def _create_run_db(
     memo_pair_sel = MagicMock()
     memo_pair_sel.all = MagicMock(return_value=[])
 
+    # (6b) `payable_amounts` → `discount_capture.applicable_discounts`: the
+    # accepted invoice-scoped offers on the batch, `.scalars().all()`. None
+    # here, so the run pays the net (and the applied-memo follow-up query,
+    # issued only for invoices that carry an offer, never runs). The invoices
+    # carry no `vendor_id`, so `inactive_vendor_statuses` issues no query.
+    offers_sel = MagicMock()
+    offers_scalars = MagicMock()
+    offers_scalars.all = MagicMock(return_value=[])
+    offers_sel.scalars = MagicMock(return_value=offers_scalars)
+
     db = AsyncMock()
 
     # (7) `_run_currencies`, after the commit. Resolved lazily off `db.added`
@@ -224,7 +234,16 @@ def _create_run_db(
     )
 
     db.execute = AsyncMock(
-        side_effect=[sel, credit_sel, block_sel, card_sel, live_sel, memo_pair_sel, currency_sel]
+        side_effect=[
+            sel,
+            credit_sel,
+            block_sel,
+            card_sel,
+            live_sel,
+            memo_pair_sel,
+            offers_sel,
+            currency_sel,
+        ]
     )
     db.commit = AsyncMock()
     db.flush = AsyncMock()
@@ -533,10 +552,14 @@ async def test_get_run_detail_serialises_money_as_strings_not_floats():
         cfo_approved_by=None,
         cfo_approved_at=None,
     )
+    # Booked with an accepted early-payment discount: 250.00 invoice, 5.00 off.
+    offer_id = uuid.uuid4()
     pay = SimpleNamespace(
         id=uuid.uuid4(),
         invoice_id=uuid.uuid4(),
-        amount=Decimal("250.00"),
+        amount=Decimal("245.00"),
+        discount_amount=Decimal("5.00"),
+        discount_offer_id=offer_id,
         method="ach",
         status="pending",
         reference=None,
@@ -560,8 +583,14 @@ async def test_get_run_detail_serialises_money_as_strings_not_floats():
 
     assert result["total_amount"] == "250.00"
     assert isinstance(result["total_amount"], str)
-    assert result["payments"][0]["amount"] == "250.00"
+    assert result["payments"][0]["amount"] == "245.00"
     assert isinstance(result["payments"][0]["amount"], str)
+    # The discount, the invoice it came off, and the run's discount total are
+    # exact Decimal strings too.
+    assert result["payments"][0]["discount_amount"] == "5.00"
+    assert result["payments"][0]["discount_offer_id"] == str(offer_id)
+    assert result["payments"][0]["invoice_amount"] == "250.00"
+    assert result["discount_total"] == "5.00"
 
 
 @pytest.mark.asyncio
@@ -1022,6 +1051,13 @@ def _execute_db(run, payments, invoice_by_id, vendor_by_invoice=None, completing
             blocking_res = MagicMock()
             blocking_res.all = MagicMock(return_value=[])
             per_pay_results.append(blocking_res)
+            # `inactive_vendor_statuses` — the vendor must still be `active`.
+            # Issued only for an invoice that names a vendor; `.all()` of
+            # `(vendor_id, status)`.
+            if getattr(inv, "vendor_id", None):
+                vendor_status_res = MagicMock()
+                vendor_status_res.all = MagicMock(return_value=[(inv.vendor_id, "active")])
+                per_pay_results.append(vendor_status_res)
             card_claim_res = MagicMock()
             card_claim_scalars = MagicMock()
             card_claim_scalars.all = MagicMock(return_value=[])
@@ -1040,8 +1076,16 @@ def _execute_db(run, payments, invoice_by_id, vendor_by_invoice=None, completing
             # Only fires when the invoice resolved — mirrors the guard in
             # `_execute_single_payment`.
             credit_res = MagicMock()
-            credit_res.scalar_one = MagicMock(return_value=Decimal("0"))
+            credit_res.all = MagicMock(return_value=[])
             per_pay_results.append(credit_res)
+            # ...and any accepted early-payment discount whose deadline today
+            # meets (`payment_runs.payable_amount` → `applicable_discounts`):
+            # `.scalars().all()` of the accepted offers. None here.
+            offers_res = MagicMock()
+            offers_scalars = MagicMock()
+            offers_scalars.all = MagicMock(return_value=[])
+            offers_res.scalars = MagicMock(return_value=offers_scalars)
+            per_pay_results.append(offers_res)
         # For any invoice with a vendor_id the executor issues two follow-on
         # SELECTs, in order: (1) the vendor's bank_details (for the payload /
         # intl-leg detection) and (2) the full Vendor row for the compliance
@@ -1104,6 +1148,9 @@ def _payment(amount: Decimal = Decimal("10000.00")):
         fx_locked_at=None,
         corridor=None,
         target_country=None,
+        # Migration 0104: the early-payment discount the row was booked with.
+        discount_offer_id=None,
+        discount_amount=None,
     )
 
 

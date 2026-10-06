@@ -667,6 +667,8 @@ async def test_execute_payment_run_refuses_sanctions_matched_vendor_without_call
         fx_locked_at=None,
         corridor=None,
         target_country=None,
+        discount_offer_id=None,
+        discount_amount=None,
     )
     full_vendor = SimpleNamespace(
         id=vendor_id,
@@ -719,6 +721,14 @@ async def test_execute_payment_run_refuses_sanctions_matched_vendor_without_call
     memo_pair_res = MagicMock()
     memo_pair_res.all = MagicMock(return_value=[])
 
+    # `inactive_vendor_statuses` — the vendor is still `active`, so dispatch
+    # carries on to the compliance gate this test is about.
+    vendor_status_res = MagicMock()
+    vendor_status_res.all = MagicMock(return_value=[(vendor_id, "active")])
+    # `payable_amount` → `applicable_discounts`: no accepted offer.
+    offers_res = MagicMock()
+    offers_res.scalars = MagicMock(return_value=MagicMock(all=MagicMock(return_value=[])))
+
     db = AsyncMock()
     db.execute = AsyncMock(
         side_effect=[
@@ -726,9 +736,11 @@ async def test_execute_payment_run_refuses_sanctions_matched_vendor_without_call
             pay_res,
             inv_res,
             blocking_res,
+            vendor_status_res,
             card_claim_res,
             memo_pair_res,
             credit_res,
+            offers_res,
             bank_res,
             vendor_lookup_res,
             trailing_spend_res,
@@ -834,6 +846,8 @@ async def test_execute_payment_run_holds_virtual_card_for_null_vendor_invoice():
         fx_locked_at=None,
         corridor=None,
         target_country=None,
+        discount_offer_id=None,
+        discount_amount=None,
     )
 
     run_res = MagicMock()
@@ -874,12 +888,17 @@ async def test_execute_payment_run_holds_virtual_card_for_null_vendor_invoice():
     memo_pair_res = MagicMock()
     memo_pair_res.all = MagicMock(return_value=[])
 
+    # `payable_amount` → `applicable_discounts`: no accepted offer.
+    offers_res = MagicMock()
+    offers_res.scalars = MagicMock(return_value=MagicMock(all=MagicMock(return_value=[])))
+
     db = AsyncMock()
-    # Five queries fire before the hold: run lookup, payments fan-out, invoice
-    # lookup, the blocking-exception re-check, the net-payable SUM, then the
-    # compliance-hold-exception dedupe check. The vendor .bank_details lookup
-    # is skipped (vendor_id NULL) and no compliance/card query runs. The final
-    # rollup query then re-reads every payment on the run.
+    # Queries before the hold: run lookup, payments fan-out, invoice lookup, the
+    # blocking-exception re-check, the applied-credit pairing, the net-payable
+    # SUM, the accepted-discount lookup, then the compliance-hold-exception
+    # dedupe check. `inactive_vendor_statuses` and the vendor .bank_details
+    # lookup are skipped (vendor_id NULL) and no compliance/card query runs.
+    # The final rollup query then re-reads every payment on the run.
     db.execute = AsyncMock(
         side_effect=[
             run_res,
@@ -888,6 +907,7 @@ async def test_execute_payment_run_holds_virtual_card_for_null_vendor_invoice():
             blocking_res,
             memo_pair_res,
             credit_res,
+            offers_res,
             no_existing_exception,
             rollup_res,
         ]

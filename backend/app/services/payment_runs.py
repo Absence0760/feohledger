@@ -334,6 +334,10 @@ _RETRY_SAFE_FAILURE_PREFIXES = (
     # A live virtual card claimed the invoice after the run was built —
     # refused before the adapter call, and `/retry-failed` re-checks it.
     "invoice_has_live_card",
+    # A `virtual_card` payment met an existing card whose limit exceeds what it
+    # pays (`card_issuance.card_settlement_block`) — refused before anything
+    # moved; a re-send after the card is cancelled mints one at the right figure.
+    "card_limit_exceeds_payment",
     # Another request held the invoice row lock past
     # `settings.payment_invoice_lock_timeout_ms`. `_lock_payment_invoice` is the
     # first thing dispatch does, so this is refused before any processor call.
@@ -933,9 +937,17 @@ async def _existing_run_for_plan(db: AsyncSession, plan_id: str) -> PaymentRunCr
         return None
     count, discount_total = (
         await db.execute(
-            select(func.count(), func.coalesce(func.sum(Payment.discount_amount), 0)).where(
-                Payment.payment_run_id == existing.id
-            )
+            select(
+                func.count(),
+                # The discounts still being taken: a cancelled or voided leg
+                # deducts nothing.
+                func.coalesce(
+                    func.sum(Payment.discount_amount).filter(
+                        Payment.status.notin_(("cancelled", "voided"))
+                    ),
+                    0,
+                ),
+            ).where(Payment.payment_run_id == existing.id)
         )
     ).one()
     return PaymentRunCreationResult(
