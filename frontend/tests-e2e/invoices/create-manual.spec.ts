@@ -212,17 +212,18 @@ test.describe('/invoices — Create Invoice modal', () => {
 		}
 	});
 
-	test('ap_clerk does not see the toolbar button', async ({ page, tenantClerk }) => {
+	test('ap_clerk sees the toolbar button (entry is a clerk duty)', async ({ page, tenantClerk }) => {
 		await signInAndWait(page, tenantClerk);
-		// The toolbar gates on `auth.hasAnyRole(...)`, which is only populated once
-		// GET /api/auth/me lands. Asserting the absence before that would pass for
-		// the wrong reason (nobody has any role yet), so wait on the identity fetch
-		// itself rather than on a quiet network.
+		// `POST /api/invoices` takes every entry role, ap_clerk included
+		// (`backend/app/api/invoice_entry.py`). The toolbar gates on
+		// `auth.hasAnyRole(...)`, populated once GET /api/auth/me lands, so wait
+		// on the identity fetch itself rather than on a quiet network.
 		const me = page.waitForResponse(
 			(r) => r.url().includes('/api/auth/me') && r.request().method() === 'GET'
 		);
 		await page.goto('/invoices');
 		await me;
-		await expect(page.getByRole('button', { name: 'Create Invoice' })).toHaveCount(0);
+		await expect(page.getByRole('button', { name: 'Create Invoice' })).toBeVisible();
+		await expect(page.getByRole('button', { name: 'Upload' })).toBeVisible();
 	});
 });

@@ -907,7 +907,7 @@ Set `FEOH_SECRET_KEY` to a strong, random value in production.
 The database supports four roles:
 - **admin** — full access to all features, user management, workflow configuration
 - **ap_manager** — review and approve invoices, manage vendors and payments
-- **ap_clerk** — read invoices and the work around them (cannot upload, edit, submit, approve, delete, or change status — every invoice write is `require_roles(ADMIN, AP_MANAGER, CFO)` or narrower)
+- **ap_clerk** — enter invoices: create, upload, code, edit, extract, import open AP and submit for review, until the invoice is submitted (`backend/app/api/invoice_entry.py`); cannot approve, reject, delete, pay or push to the ERP
 - **cfo** — approve high-value invoices, view reports, manage vendors and payments
 
 Roles are returned by `GET /api/auth/me` in the `roles` array, and the user's
@@ -956,6 +956,15 @@ exactly as before.
   `GET /api/auth/me`'s `permissions` array, and enforced by
   `require_permission(*perms)` (any-of semantics, 403 on miss, WARN log; typos
   rejected at import time).
+- **Invoice entry is deliberately NOT in the catalog.** The entry routes
+  (`backend/app/api/invoice_entry.py`) take a role list, `INVOICE_ENTRY_ROLES`
+  (admin · ap_manager · cfo · ap_clerk). The catalog is the fraud-sensitive
+  set, and the two role-grant guards below read catalog membership as
+  "sensitive": were entry a permission, the baseline `ap_clerk` role would
+  carry one, and a user-manager without it could no longer grant — or edit a
+  holder of — `ap_clerk`. Entry's segregation-of-duties control is per
+  invoice, at approval (uploader ∪ `segregation_actor_ids`), and needs no role
+  split. The cost: a custom role cannot be granted entry.
 - **Migrated endpoints** — only the splittable sensitive set moved to
   `require_permission`: payment-run create (`payment_run.approve`) — its
   sibling `POST /api/payments/runs/{id}/approve` (the CFO sign-off above the
@@ -1066,8 +1075,10 @@ exactly as before.
   `VendorConsolidationModal.svelte`), the bank-change-approval queue's
   Approve button (`vendor.bank_change.approve` — `/vendors/change-requests/
   +page.svelte`; its Reject button stays on the page's role-based
-  `auth.isManager` gate, matching the backend), and the Users page/nav entry
-  (`user.manage`). The `/admin/roles` editor renders permission checkboxes
+  `auth.isManager` gate, matching the backend), the Users page/nav entry
+  (`user.manage`), and `InvoiceModal`'s Approve / Reject (`invoice.approve`).
+  Invoice entry is role-gated (`INVOICE_ENTRY_ROLES` in `#lib/types/invoice.ts`,
+  `AuthStore.canEnterInvoice` on mobile), not a permission — see above. The `/admin/roles` editor renders permission checkboxes
   from the catalog and shows each custom role's grants. This composes with
   the instance-level SoD check (`check_segregation`, approver ≠ creator),
   which is unchanged.
@@ -2216,9 +2227,11 @@ It describes the **endpoints**, and in two places the nav is deliberately narrow
 | `/gl-accounts` create / sync-erp | any-authenticated (read) | admin · ap_manager |
 | `/purchase-orders` sync-erp | any-authenticated (read) | admin · ap_manager |
 | `/invoices/{id}/assign` (route to a reviewer) | — | admin · ap_manager |
-| `/invoices` mutate (create / patch / delete / line-items / bulk) | any-authenticated (read) | admin · ap_manager · cfo |
-| `/invoices/{id}/upload`, `/extract`, `/reset-extraction` | — | admin · ap_manager · cfo |
-| `/invoices/{id}/approve`, `/reject`, `/resubmit`, `/complete`, `/send-to-erp`, `/retry-erp` | — | admin · ap_manager · cfo |
+| `/invoices` entry (create / `upload` / `{id}/file` / patch / line-items / `extract` / `reset-extraction` / `resubmit` / `complete` / `bulk/status`) | any-authenticated (read) | admin · ap_manager · cfo · ap_clerk (clerk: until submitted, and only the entry transitions — `api/invoice_entry.py`) |
+| `/invoices/import-csv` | — | admin · ap_manager · ap_clerk (clerk: open AP rows only; historical `done` / `paid` rows are admin · ap_manager) |
+| `/invoices` delete / `bulk/delete` | — | admin · ap_manager · cfo |
+| `/invoices/{id}/approve`, `/reject` | — | `invoice.approve` (admin · ap_manager · cfo by default) |
+| `/invoices/{id}/send-to-erp`, `/retry-erp` | — | admin · ap_manager · cfo |
 | `/payments/*` (incl. runs create + execute) | admin · ap_manager · cfo | admin · ap_manager · cfo |
 | `/cards` (list / dashboard / generate / cancel / details / rebates) | admin · ap_manager · cfo | admin · ap_manager · cfo |
 | `/dashboard` | any-authenticated | — |
@@ -2226,7 +2239,7 @@ It describes the **endpoints**, and in two places the nav is deliberately narrow
 
 ### "Read open to all authenticated" surfaces
 
-Invoices, workflow definitions list/active-steps, GL accounts list, and POs list are readable by every authenticated user (including pure clerks). Clerks can see the work; they just can't take action on it. This matches the frontend, where the invoice list page is visible to clerks but write controls are hidden.
+Invoices, workflow definitions list/active-steps, GL accounts list, and POs list are readable by every authenticated user (including pure clerks). A clerk enters and codes invoices until they submit them, and cannot sign them off or release payment; the frontend shows them the entry controls and hides the rest.
 
 The org settings read is open too, but its `settings` payload is **projected by role** — `backend/app/services/org_settings_view.py::NON_ADMIN_SETTINGS` is an allow-list, so a non-admin gets `company`, `invoice_defaults`, `reporting_currency`, `payments.home_currency`, `brand` and `erp.integration_method`, and never the tenant's third-party credentials (ERP client secret, processor credentials, card API key, the SSO client secret). The `/organization` page is therefore read-only for a non-admin **and says which panels it cannot fill**, rather than rendering the platform defaults its fields fall back to; widening the projection to populate them would re-open the leak that module closed (`docs/decisions.md` §153).
 

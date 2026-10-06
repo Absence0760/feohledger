@@ -1,7 +1,7 @@
 <script lang="ts">
 	import HelpTip from '#lib/components/help/HelpTip.svelte';
 	import type { Invoice, InvoiceStatus, AdvancedSearchFilters } from '#lib/types/invoice.ts';
-	import { INVOICE_STATUSES, INVOICE_STATUS_LABEL_KEYS, EMPTY_ADVANCED_FILTERS, SYSTEM_MANAGED_STATUSES, IMMUTABLE_STATUSES, commonTransitions } from '#lib/types/invoice.ts';
+	import { INVOICE_STATUSES, INVOICE_STATUS_LABEL_KEYS, EMPTY_ADVANCED_FILTERS, SYSTEM_MANAGED_STATUSES, IMMUTABLE_STATUSES, commonTransitions, ENTRY_BULK_STATUS_TARGETS, INVOICE_ENTRY_ROLES, INVOICE_IMPORT_ROLES, INVOICE_MANAGE_ROLES } from '#lib/types/invoice.ts';
 	import { invoiceStore } from '#lib/stores/invoices.svelte.ts';
 	import { auth } from '#lib/stores/auth.svelte.ts';
 	import { adminStore } from '#lib/stores/admin.svelte.ts';
@@ -559,7 +559,18 @@
 		return [...statuses];
 	});
 
-	let validBulkTransitions = $derived(commonTransitions(selectedStatuses));
+	// Role gates mirroring `backend/app/api/invoice_entry.py`: entry (create,
+	// upload, bulk submit-for-review) is open to `ap_clerk`; delete and the
+	// approve / reject / close bulk targets are not.
+	let canEnterInvoices = $derived(auth.hasAnyRole(...INVOICE_ENTRY_ROLES));
+	let canManageInvoices = $derived(auth.hasAnyRole(...INVOICE_MANAGE_ROLES));
+	let validBulkTransitions = $derived(
+		canManageInvoices
+			? commonTransitions(selectedStatuses)
+			: canEnterInvoices
+				? commonTransitions(selectedStatuses, ENTRY_BULK_STATUS_TARGETS)
+				: []
+	);
 
 	// Reset bulkStatusValue when the valid options change
 	$effect(() => {
@@ -760,26 +771,25 @@
 				{m('invoices.action.bulkRecode')}
 			</button>
 		{/if}
-		{#if auth.hasAnyRole('admin', 'ap_manager', 'cfo')}
+		{#if canEnterInvoices}
 			<button class="btn-secondary" onclick={() => (showCreate = true)}>
 				{m('invoices.action.create')}
 			</button>
 		{/if}
 		<!-- Same gate as Create above, because it is the same capability: both
-		     create an invoice, and `POST /api/invoices/upload` is
-		     `require_roles(ADMIN, AP_MANAGER, CFO)` exactly like `POST
-		     /api/invoices`. Ungated, a clerk (who reaches this page — /invoices
-		     carries no `roles` in nav.ts) picked files and watched every one
-		     fail. -->
-		{#if auth.hasAnyRole('admin', 'ap_manager', 'cfo')}
+		     create an invoice, and `POST /api/invoices/upload` takes the same
+		     entry roles as `POST /api/invoices` (`api/invoice_entry.py`). -->
+		{#if canEnterInvoices}
 			<button class="btn-upload" disabled={uploading} onclick={() => fileInput.click()}>
 				{uploading ? uploadProgress || m('invoices.action.uploading') : m('invoices.action.upload')}
 			</button>
 		{/if}
-		{#if auth.isManager}
-			<!-- Day-0 bulk load — `POST /api/invoices/import-csv` is
-			     require_roles(ADMIN, AP_MANAGER), narrower than Create/Upload
-			     above (no CFO). See backend/docs/csv-import.md. -->
+		{#if auth.hasAnyRole(...INVOICE_IMPORT_ROLES)}
+			<!-- `POST /api/invoices/import-csv` is INVOICE_IMPORT_ROLES (admin,
+			     AP manager, AP clerk — no CFO). Open AP (`new` / `rejected` rows)
+			     is entry; a historical `done` / `paid` row is refused per row
+			     unless the caller is admin / AP manager. See
+			     backend/docs/csv-import.md. -->
 			<button class="btn-secondary" onclick={() => (showImportCsv = true)}>
 				{m('invoices.action.importCsv')}
 			</button>
@@ -872,7 +882,7 @@
 			<button class="bulk-clear" onclick={() => { selected = new Set(); selectedAllMatching = false; }}>{m('common.clear')}</button>
 			<div class="bulk-divider"></div>
 
-			{#if !auth.isClerkOnly}
+			{#if canManageInvoices}
 				<!-- svelte-ignore a11y_no_static_element_interactions -->
 				<span class="bulk-btn-wrap" title={hasImmutableSelected ? m('invoices.bulk.cannotDelete') : ''}>
 					<button
@@ -897,7 +907,9 @@
 						{/if}
 					</button>
 				</span>
+			{/if}
 
+			{#if canEnterInvoices}
 				<div class="bulk-status-wrapper">
 					<!-- svelte-ignore a11y_no_static_element_interactions -->
 					<span class="bulk-btn-wrap" title={validBulkTransitions.length === 0 ? m('invoices.bulk.noTransitions') : ''}>
@@ -950,7 +962,7 @@
 			icon="📄"
 			heading={m('emptyState.invoices.heading')}
 			description={m('emptyState.invoices.description')}
-			actionLabel={auth.hasAnyRole('admin', 'ap_manager', 'cfo')
+			actionLabel={canEnterInvoices
 				? m('emptyState.invoices.action')
 				: undefined}
 			onaction={() => fileInput.click()}
@@ -1033,7 +1045,7 @@
 					<td><StatusBadge status={invoice.status} /></td>
 					<td class="assignee">{invoice.assigned_to || '—'}</td>
 					<td class="actions">
-						{#if !auth.isClerkOnly && !IMMUTABLE_STATUSES.has(invoice.status)}
+						{#if canManageInvoices && !IMMUTABLE_STATUSES.has(invoice.status)}
 							<RowAction
 								variant="danger"
 								armed={confirmDeleteId === invoice.id}

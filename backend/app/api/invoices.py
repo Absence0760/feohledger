@@ -27,6 +27,18 @@ from app.api.deps import (
     require_roles,
 )
 from app.api.file_proxy import serve_owned_file
+from app.api.invoice_entry import (
+    ENTRY_BULK_STATUS_SOURCES,
+    ENTRY_BULK_STATUS_TARGETS,
+    INVOICE_ENTRY_ROLES,
+    INVOICE_ENTRY_WINDOW_CLOSED,
+    INVOICE_IMPORT_ROLES,
+    in_entry_window,
+    is_entry_only,
+    may_import_history,
+    refuse_entry_only_outside_window,
+    stamp_entry_editor,
+)
 from app.api.money_filters import snap_lower_bound, snap_upper_bound
 from app.api.pagination import (
     MAX_SELECT_ALL_IDS,
@@ -1099,7 +1111,7 @@ async def save_invoice_line_items(
     body: list[_LineItemInput],
     db: AsyncSession = Depends(get_tenant_db),
     org: Organization = Depends(get_tenant),
-    user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER, ROLE_CFO)),
+    user: User = Depends(require_roles(*INVOICE_ENTRY_ROLES)),
     entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
     """Replace all line items for an invoice.
@@ -1124,6 +1136,7 @@ async def save_invoice_line_items(
     # Row-lock the invoice: the delete-and-reinsert below is not atomic on its
     # own, and the status guard right after must not be read from a stale row.
     invoice = await get_invoice_for_update(db, invoice_id)
+    refuse_entry_only_outside_window(user, invoice)
     # Line items are financial content — frozen once the invoice is approved
     # (the approved amount was signed off; payment reads it). Re-coding lines
     # after sign-off requires reject → re-approve. See _FINANCIALLY_LOCKED_STATUSES.
@@ -1222,6 +1235,7 @@ async def save_invoice_line_items(
     # `bulk_recode_gl` records). Written whenever ANY column moved, even when
     # the count and the total are unchanged.
     if _canonical_lines(before_rows) != _canonical_lines(after_rows):
+        stamp_entry_editor(user, invoice)
         field_diff = build_field_diff(
             before, after, ["line_item_count", "line_items_total", "gl_accounts"]
         )
@@ -1255,7 +1269,7 @@ async def create_invoice(
     body: InvoiceCreate,
     db: AsyncSession = Depends(get_tenant_db),
     org: Organization = Depends(get_tenant),
-    user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER, ROLE_CFO)),
+    user: User = Depends(require_roles(*INVOICE_ENTRY_ROLES)),
     entity_id: uuid.UUID = Depends(get_write_entity_id),
 ):
     # The code is resolved against the chart of the entity this invoice lands
@@ -1369,7 +1383,7 @@ async def attach_invoice_file(
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_tenant_db),
     org: Organization = Depends(get_tenant),
-    user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER, ROLE_CFO)),
+    user: User = Depends(require_roles(*INVOICE_ENTRY_ROLES)),
     org_id: uuid.UUID = Depends(get_org_id),
     entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
@@ -1384,7 +1398,10 @@ async def attach_invoice_file(
     Management).
     """
     await ensure_in_entity_scope(db, Invoice, invoice_id, entity_id, detail="Invoice not found")
-    invoice = await _load_invoice_or_404(db, invoice_id)
+    # Row-locked: the entry-window guard and the editor stamp below must not
+    # be read from a row a concurrent approval or edit is changing.
+    invoice = await get_invoice_for_update(db, invoice_id)
+    refuse_entry_only_outside_window(user, invoice)
     if invoice.file_key:
         raise HTTPException(status_code=409, detail="Invoice already has a file attached.")
 
@@ -1395,6 +1412,7 @@ async def attach_invoice_file(
 
     invoice.file_key = file_key
     invoice.file_url = file_url
+    stamp_entry_editor(user, invoice)
     await dispatch_audit(
         db,
         correlation_id=invoice.correlation_id,
@@ -1421,7 +1439,7 @@ async def replace_invoice_file(
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_tenant_db),
     org: Organization = Depends(get_tenant),
-    user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER, ROLE_CFO)),
+    user: User = Depends(require_roles(*INVOICE_ENTRY_ROLES)),
     org_id: uuid.UUID = Depends(get_org_id),
     entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
@@ -1434,7 +1452,11 @@ async def replace_invoice_file(
     to match the rest of the file-mutation gating in this file.
     """
     await ensure_in_entity_scope(db, Invoice, invoice_id, entity_id, detail="Invoice not found")
-    invoice = await _load_invoice_or_404(db, invoice_id)
+    # Row-locked for the same reason as attach.
+    invoice = await get_invoice_for_update(db, invoice_id)
+    # A clerk may swap a wrongly-uploaded document before submitting; after it,
+    # the file is the evidence an approver reviews and signs against.
+    refuse_entry_only_outside_window(user, invoice)
     if not invoice.file_key:
         raise HTTPException(status_code=404, detail="No file to replace. Use upload to attach one.")
     if invoice.status == DBInvoiceStatus.done:
@@ -1450,6 +1472,7 @@ async def replace_invoice_file(
 
     invoice.file_key = file_key
     invoice.file_url = file_url
+    stamp_entry_editor(user, invoice)
     await dispatch_audit(
         db,
         correlation_id=invoice.correlation_id,
@@ -1489,12 +1512,13 @@ async def delete_invoice_file(
     invoice_id: uuid.UUID,
     db: AsyncSession = Depends(get_tenant_db),
     org: Organization = Depends(get_tenant),
-    user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER, ROLE_CFO)),
+    user: User = Depends(require_roles(*INVOICE_ENTRY_ROLES)),
     entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
     """Delete an invoice's file without replacing it."""
     await ensure_in_entity_scope(db, Invoice, invoice_id, entity_id, detail="Invoice not found")
-    invoice = await _load_invoice_or_404(db, invoice_id)
+    invoice = await get_invoice_for_update(db, invoice_id)
+    refuse_entry_only_outside_window(user, invoice)
     if not invoice.file_key:
         raise HTTPException(status_code=404, detail="No file to delete.")
     if invoice.status == DBInvoiceStatus.done:
@@ -1506,6 +1530,7 @@ async def delete_invoice_file(
     file_key_to_delete = invoice.file_key
     invoice.file_key = None
     invoice.file_url = None
+    stamp_entry_editor(user, invoice)
     await dispatch_audit(
         db,
         correlation_id=invoice.correlation_id,
@@ -1535,7 +1560,7 @@ async def update_invoice(
     body: InvoiceUpdate,
     db: AsyncSession = Depends(get_tenant_db),
     org: Organization = Depends(get_tenant),
-    user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER, ROLE_CFO)),
+    user: User = Depends(require_roles(*INVOICE_ENTRY_ROLES)),
     entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
     await ensure_in_entity_scope(db, Invoice, invoice_id, entity_id, detail="Invoice not found")
@@ -1548,6 +1573,9 @@ async def update_invoice(
     invoice = await get_invoice_for_update(db, invoice_id)
     if invoice.status in IMMUTABLE_STATUSES:
         raise HTTPException(status_code=409, detail="Cannot update invoice in this status")
+    # A clerk enters and codes an invoice until they submit it; the metadata clean-up
+    # a manager may still do in the `approved` window is not theirs.
+    refuse_entry_only_outside_window(user, invoice)
 
     update_data = body.model_dump(exclude_unset=True)
     # Optimistic-concurrency guard (If-Unmodified-Since style). Omitted
@@ -1657,6 +1685,7 @@ async def update_invoice(
 
     field_diff = build_field_diff(before, after, diff_fields)
     if field_diff:
+        stamp_entry_editor(user, invoice)
         await dispatch_audit(
             db,
             correlation_id=invoice.correlation_id,
@@ -2451,7 +2480,7 @@ def _invoice_to_export_dict(inv: Invoice) -> dict:
 async def import_invoices_from_csv(
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_tenant_db),
-    user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER)),
+    user: User = Depends(require_roles(*INVOICE_IMPORT_ROLES)),
     org_id: uuid.UUID = Depends(get_org_id),
     entity_id: uuid.UUID = Depends(get_write_entity_id),
     org: Organization = Depends(get_tenant),
@@ -2463,6 +2492,11 @@ async def import_invoices_from_csv(
     always land. Duplicate detection: ``(vendor, invoice_number)``. Imported
     rows land under the selected (or default) entity. See
     ``backend/docs/csv-import.md`` for the column list and template.
+
+    ``INVOICE_IMPORT_ROLES`` (admin / AP manager / AP clerk). Open AP (``new`` /
+    ``rejected``) is entry and goes through approval with the importer stamped
+    as uploader; a historical ``done`` / ``paid`` row is refused per row unless
+    the caller holds a ``HISTORICAL_IMPORT_ROLES`` role (admin / AP manager).
     """
     raw = await file.read()
     if len(raw) > MAX_CSV_IMPORT_SIZE:
@@ -2483,6 +2517,7 @@ async def import_invoices_from_csv(
         day_first=resolve_day_first_preference(org.settings or {}),
         actor_id=user.id,
         org_settings=org.settings,
+        allow_historical=may_import_history(user),
     )
 
     await db.commit()
@@ -2581,7 +2616,8 @@ async def bulk_status_change(
     body: BulkStatusRequest,
     db: AsyncSession = Depends(get_tenant_db),
     org: Organization = Depends(get_tenant),
-    user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER, ROLE_CFO)),
+    user: User = Depends(require_roles(*INVOICE_ENTRY_ROLES)),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
     target = DBInvoiceStatus(body.status.value)
     if target not in BULK_STATUS_TARGETS:
@@ -2589,6 +2625,17 @@ async def bulk_status_change(
         raise HTTPException(
             status_code=422,
             detail=(f"Bulk status change cannot set '{target.value}' — {reason}."),
+        )
+    # A clerk may bulk-submit for review, resubmit and send back to draft —
+    # never approve, reject or close (`invoice_entry.ENTRY_BULK_STATUS_TARGETS`).
+    if is_entry_only(user) and target not in ENTRY_BULK_STATUS_TARGETS:
+        raise HTTPException(
+            status_code=403,
+            detail=coded_refusal(
+                INVOICE_ENTRY_WINDOW_CLOSED,
+                f"AP clerks cannot bulk-set invoices to '{target.value}'.",
+                status=target.value,
+            ),
         )
 
     reason_text = (body.reason or "").strip()
@@ -2602,11 +2649,23 @@ async def bulk_status_change(
         )
 
     ids = [uuid.UUID(i) for i in body.ids]
-    result = await db.execute(select(Invoice).where(Invoice.id.in_(ids)))
+    # Scoped to the selected entity like the single-invoice routes, and
+    # row-locked in id order: every status read below decides a transition, so
+    # it must not come from a row a concurrent approval or edit is changing.
+    result = await db.execute(
+        apply_entity_scope(select(Invoice).where(Invoice.id.in_(ids)), Invoice, entity_id)
+        .order_by(Invoice.id)
+        .with_for_update()
+    )
     invoices = result.scalars().all()
 
     updated = 0
-    skipped: list[BulkStatusSkip] = []
+    # An id that does not exist, or sits outside the selected entity, is
+    # reported rather than silently dropped from the batch.
+    found = {inv.id for inv in invoices}
+    skipped: list[BulkStatusSkip] = [
+        BulkStatusSkip(id=str(i), reason="invoice not found") for i in ids if i not in found
+    ]
     # Bulk-approving must NOT bypass the approval controls. Routing a transition
     # straight to `approved` skipped segregation-of-duties, the max-amount cap,
     # and the CFO gate — so an AP manager could bulk-approve their own uploads or
@@ -2623,7 +2682,21 @@ async def bulk_status_change(
     # pre-correction approval as still valid. `review.reject_invoice` is the
     # single chokepoint that clears it.
     actor_roles = {r.name for r in user.roles}
+    entry_only = is_entry_only(user)
     for inv in invoices:
+        # A clerk's batch moves only invoices still in entry: from `new` or
+        # `rejected`, never approved before (same skip-and-report contract).
+        if entry_only and (inv.status not in ENTRY_BULK_STATUS_SOURCES or not in_entry_window(inv)):
+            skipped.append(
+                BulkStatusSkip(
+                    id=str(inv.id),
+                    reason=(
+                        f"AP clerks can bulk-change only new or rejected invoices "
+                        f"that were never approved ({inv.status.value})"
+                    ),
+                )
+            )
+            continue
         if inv.status in IMMUTABLE_STATUSES:
             skipped.append(
                 BulkStatusSkip(

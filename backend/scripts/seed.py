@@ -90,7 +90,7 @@ from app.utils.passwords import pwd_context
 ROLE_DEFINITIONS: dict[str, str] = {
     ROLE_ADMIN: "Full access to all features and user management",
     ROLE_AP_MANAGER: "Review and approve invoices",
-    ROLE_AP_CLERK: "Enter, code and match invoices; prepare requests and expenses",
+    ROLE_AP_CLERK: "Enter and code invoices; prepare requisitions, intake and expenses",
     ROLE_CFO: "Approve high-value invoices and view reports",
 }
 
@@ -465,6 +465,11 @@ async def seed_control_plane():
                 .first()
             )
             if existing is not None:
+                # A system role's description is ours, not the tenant's: keep a
+                # re-seeded control plane in step when what the role may do
+                # changes (ap_clerk gained invoice entry).
+                if existing.description != ROLE_DEFINITIONS[name]:
+                    existing.description = ROLE_DEFINITIONS[name]
                 return existing
             role = Role(name=name, description=ROLE_DEFINITIONS[name])
             session.add(role)

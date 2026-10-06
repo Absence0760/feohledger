@@ -415,6 +415,7 @@ async def import_invoices_csv(
     day_first: bool = False,
     actor_id: uuid.UUID | None = None,
     org_settings: dict | None = None,
+    allow_historical: bool = True,
 ) -> ImportResult:
     """Import historical invoices. Vendor resolution: code > name. Missing vendors
     get an auto-created stub with status='unverified' so the row still lands.
@@ -442,7 +443,14 @@ async def import_invoices_csv(
     Historical ``done`` / ``paid`` rows are not refreshed: they never reach a
     payment run, and flagging years of settled history would bury the queue in
     exceptions nobody can act on. They still count as the *other* side of a
-    duplicate check, so a live row that repeats a paid one is flagged."""
+    duplicate check, so a live row that repeats a paid one is flagged.
+
+    ``allow_historical=False`` refuses every row at a ``_HISTORICAL_INVOICE_STATUSES``
+    status — the endpoint passes it for a caller without an admin / AP manager
+    role (`invoice_entry.HISTORICAL_IMPORT_ROLES`), who may import open AP for
+    approval but not rows asserting a payment that already happened. A blank
+    ``status`` cell still defaults to ``done``, so such a row is refused too
+    rather than silently re-read as ``new``."""
     result = ImportResult()
     try:
         rows = _read_rows(csv_text)
@@ -510,6 +518,19 @@ async def import_invoices_csv(
                         f"status not importable: {status_raw!r}; "
                         f"allowed: {', '.join(sorted(_IMPORTABLE_INVOICE_STATUSES))} "
                         "(import open AP as 'new' so it goes through approval)"
+                    ),
+                )
+            )
+            result.skipped += 1
+            continue
+        if not allow_historical and status_raw in _HISTORICAL_INVOICE_STATUSES:
+            result.errors.append(
+                ImportRowError(
+                    row=i,
+                    message=(
+                        f"status {status_raw!r} records history and needs an AP manager "
+                        "or admin to import; import open AP as 'new' (a blank status "
+                        "means 'done')"
                     ),
                 )
             )

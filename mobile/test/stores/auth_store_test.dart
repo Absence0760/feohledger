@@ -6,6 +6,7 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 
 import 'package:feohledger_mobile/api/api_client.dart';
+import 'package:feohledger_mobile/models/invoice.dart';
 import 'package:feohledger_mobile/services/offline_store.dart';
 import 'package:feohledger_mobile/stores/auth_store.dart';
 
@@ -130,6 +131,41 @@ void main() {
       expect(store.canApprove, isFalse);
       expect(store.canViewPayments, isFalse);
       expect(store.isClerkOnly, isTrue);
+    });
+
+    test('ap_clerk enters invoices only until submit '
+        '(mirrors backend api/invoice_entry.py)', () async {
+      Invoice inv(String status, {String? approvedBy, String? approvalDate}) =>
+          Invoice.fromJson({
+            'id': 'i1',
+            'status': status,
+            'approved_by': approvedBy,
+            'approval_date': approvalDate,
+            'created_at': '2026-01-01T12:00:00',
+          });
+
+      await loginAs(['ap_clerk']);
+      expect(store.canEditInvoice, isFalse);
+      expect(store.canEnterInvoice, isTrue);
+      expect(store.canApproveInvoice, isFalse);
+      expect(store.canEditInvoiceRow(inv('new')), isTrue);
+      expect(store.canEditInvoiceRow(inv('rejected')), isTrue);
+      expect(store.canEditInvoiceRow(inv('failed')), isTrue);
+      // Submitted: the approver is reading it; rework goes through reject.
+      expect(store.canEditInvoiceRow(inv('ready_for_review')), isFalse);
+      expect(
+          store.canEditInvoiceRow(inv('approved', approvedBy: 'A')), isFalse);
+      expect(store.canEditInvoiceRow(inv('failed', approvedBy: 'A')), isFalse);
+      // A blank approver name still carries the approval date.
+      expect(
+          store.canEditInvoiceRow(
+              inv('failed', approvedBy: '', approvalDate: '2026-01-02')),
+          isFalse);
+      expect(store.canEditInvoiceRow(inv('paid', approvedBy: 'A')), isFalse);
+
+      await loginAs(['ap_manager']);
+      expect(store.canEditInvoiceRow(inv('approved', approvedBy: 'A')), isTrue);
+      expect(store.canEditInvoiceRow(inv('paid', approvedBy: 'A')), isFalse);
     });
 
     test('cash flow forecast is admin/cfo only (mirrors backend _CFO_ROLES)',

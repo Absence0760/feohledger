@@ -195,9 +195,7 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
 
   bool get _canEdit {
     final inv = _invoice;
-    return inv != null &&
-        inv.status.isEditable &&
-        AuthStore.instance.canEditInvoice;
+    return inv != null && AuthStore.instance.canEditInvoiceRow(inv);
   }
 
   @override

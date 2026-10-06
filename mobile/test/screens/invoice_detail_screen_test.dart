@@ -53,6 +53,7 @@ Map<String, dynamic> _invoiceJson(
   String? description,
   String? fileUrl,
   String? glAccount,
+  String? approvedBy,
   List<Map<String, dynamic>>? warnings,
   Map<String, dynamic>? poMatch,
 }) =>
@@ -67,6 +68,7 @@ Map<String, dynamic> _invoiceJson(
       'description': description,
       'file_url': fileUrl,
       'gl_account': glAccount,
+      'approved_by': approvedBy,
       'warnings': warnings,
       'po_match': poMatch,
       'created_at': '2026-01-01T12:00:00',
@@ -571,7 +573,27 @@ void main() {
     expect(find.byTooltip('Edit'), findsOneWidget);
   });
 
-  testWidgets('hides the Edit action for a clerk', (tester) async {
+  // Entering and coding invoices is the AP clerk's job
+  // (`backend/app/api/invoice_entry.py`): PATCH takes ap_clerk, but
+  // an entry-only caller only until they submit. `failed` with an approver is
+  // an approved invoice whose ERP push failed — outside the window too.
+  testWidgets('shows the Edit action to a clerk on an invoice in entry',
+      (tester) async {
+    await _arrange(_detailClient(
+      _invoiceJson('1', status: 'new'),
+      roles: ['ap_clerk'],
+    ));
+
+    await tester.pumpWidget(
+      _localized(),
+    );
+    await _pumpUntil(tester, find.text('Acme Corp'));
+
+    expect(find.byTooltip('Edit'), findsOneWidget);
+  });
+
+  testWidgets('hides the Edit action from a clerk once submitted for review',
+      (tester) async {
     await _arrange(_detailClient(
       _invoiceJson('1', status: 'ready_for_review'),
       roles: ['ap_clerk'],
@@ -583,6 +605,51 @@ void main() {
     await _pumpUntil(tester, find.text('Acme Corp'));
 
     expect(find.byTooltip('Edit'), findsNothing);
+  });
+
+  testWidgets('hides the Edit action from a clerk once approved',
+      (tester) async {
+    await _arrange(_detailClient(
+      _invoiceJson('1', status: 'approved', approvedBy: 'Some Approver'),
+      roles: ['ap_clerk'],
+    ));
+
+    await tester.pumpWidget(
+      _localized(),
+    );
+    await _pumpUntil(tester, find.text('Acme Corp'));
+
+    expect(find.byTooltip('Edit'), findsNothing);
+  });
+
+  testWidgets('hides the Edit action from a clerk after an ERP failure',
+      (tester) async {
+    await _arrange(_detailClient(
+      _invoiceJson('1', status: 'failed', approvedBy: 'Some Approver'),
+      roles: ['ap_clerk'],
+    ));
+
+    await tester.pumpWidget(
+      _localized(),
+    );
+    await _pumpUntil(tester, find.text('Acme Corp'));
+
+    expect(find.byTooltip('Edit'), findsNothing);
+  });
+
+  testWidgets('a manager keeps the Edit action on an approved invoice',
+      (tester) async {
+    await _arrange(_detailClient(
+      _invoiceJson('1', status: 'approved', approvedBy: 'Some Approver'),
+      roles: ['ap_manager'],
+    ));
+
+    await tester.pumpWidget(
+      _localized(),
+    );
+    await _pumpUntil(tester, find.text('Acme Corp'));
+
+    expect(find.byTooltip('Edit'), findsOneWidget);
   });
 
   testWidgets('hides the Edit action for an immutable-status invoice',

@@ -337,6 +337,32 @@ async def test_import_invoices_refreshes_warnings_on_live_rows_only(stub_refresh
         assert call.kwargs == {"org_settings": settings}
 
 
+async def test_import_invoices_without_historical_refuses_done_and_paid(stub_refresh_warnings):
+    """`allow_historical=False` (an AP clerk's import) lands open AP only: a
+    `done` / `paid` row asserts a payment already happened, and a blank status
+    still means `done`, so it is refused rather than re-read as `new`. No vendor
+    stub is left behind for a refused row."""
+    from app.models.vendor import Vendor
+
+    db = _StubSession()
+    csv_text = (
+        "invoice_number,vendor_name,amount,status\n"
+        "INV-H1,Hist A,100.00,done\n"
+        "INV-H2,Hist B,100.00,paid\n"
+        "INV-H3,Hist C,100.00,\n"
+        "INV-O1,Open D,100.00,new\n"
+        "INV-O2,Open E,100.00,rejected\n"
+    )
+    result = await import_invoices_csv(db, uuid.uuid4(), csv_text, allow_historical=False)
+
+    assert result.imported == 2, result.to_dict()
+    assert result.skipped == 3
+    assert [e.row for e in result.errors] == [2, 3, 4]
+    assert all("records history" in e.message for e in result.errors)
+    vendors = sorted(o.name for o in db.added if isinstance(o, Vendor))
+    assert vendors == ["Open D", "Open E"]
+
+
 @pytest.mark.asyncio
 async def test_import_invoices_dedupes_existing_invoice():
     """If stubbed session returns an existing invoice, the row is skipped."""
@@ -739,6 +765,63 @@ async def test_import_historical_row_is_not_flagged(realdb):
         assert all(not r.warnings for r in rows)
         count = (await s.execute(select(func.count()).select_from(ExceptionRecord))).scalar_one()
         assert count == 0
+
+
+async def test_import_invoices_endpoint_ap_clerk_imports_open_ap_only(realdb):
+    """An AP clerk may import open AP (it then goes through approval with the
+    clerk stamped as uploader), but not historical `done` / `paid` rows."""
+    from sqlalchemy import select
+
+    from app.models.invoice import Invoice, InvoiceStatus
+
+    clerk_id = realdb.info("a").users["ap_clerk"]
+    csv_bytes = (
+        b"invoice_number,vendor_name,amount,status\n"
+        b"IMP-CLERK-1,Clerk Import Vendor,120.00,new\n"
+        b"IMP-CLERK-2,Clerk Import Vendor,80.00,paid\n"
+    )
+    async with realdb.client(key="a", role="ap_clerk") as c:
+        resp = await c.post(
+            "/api/invoices/import-csv",
+            files={"file": ("invoices.csv", csv_bytes, "text/csv")},
+        )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["imported"] == 1
+    assert body["skipped"] == 1
+
+    mk = realdb.sessionmaker("a")
+    async with mk() as s:
+        rows = (
+            (await s.execute(select(Invoice).where(Invoice.invoice_number.like("IMP-CLERK-%"))))
+            .scalars()
+            .all()
+        )
+    assert [(r.invoice_number, r.status, r.uploaded_by_id) for r in rows] == [
+        ("IMP-CLERK-1", InvoiceStatus.new, clerk_id)
+    ]
+
+
+async def test_import_invoices_endpoint_cfo_still_forbidden(realdb):
+    """Import opened to the AP clerk, not to the CFO (`INVOICE_IMPORT_ROLES`)."""
+    csv_bytes = b"invoice_number,vendor_name,amount,status\nIMP-CFO-1,V,1.00,new\n"
+    async with realdb.client(key="a", role="cfo") as c:
+        resp = await c.post(
+            "/api/invoices/import-csv",
+            files={"file": ("invoices.csv", csv_bytes, "text/csv")},
+        )
+    assert resp.status_code == 403
+
+
+async def test_import_invoices_endpoint_ap_manager_still_imports_history(realdb):
+    csv_bytes = b"invoice_number,vendor_name,amount,status\nIMP-MGR-H1,Mgr Hist Vendor,5.00,paid\n"
+    async with realdb.client(key="a", role="ap_manager") as c:
+        resp = await c.post(
+            "/api/invoices/import-csv",
+            files={"file": ("invoices.csv", csv_bytes, "text/csv")},
+        )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["imported"] == 1, resp.text
 
 
 async def test_import_invoices_endpoint_rejects_oversized_file(realdb):
