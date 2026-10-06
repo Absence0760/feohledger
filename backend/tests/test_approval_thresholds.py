@@ -442,7 +442,7 @@ async def test_string_max_amount_rejects_without_500():
 
 @pytest.mark.parametrize(
     "bad_threshold",
-    ["abc", "10,000", "", "5000 USD", {"nope": 1}, [1, 2], "NaN"],
+    ["abc", "10,000", "", "5000 USD", {"nope": 1}, [1, 2], "NaN", "Infinity", "-Infinity"],
 )
 @pytest.mark.asyncio
 async def test_malformed_cfo_threshold_blocks_non_cfo(bad_threshold):

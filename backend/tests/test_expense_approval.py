@@ -19,6 +19,7 @@ import asyncio
 import uuid
 from decimal import Decimal
 
+import pytest
 from sqlalchemy import select, text, update
 
 from app.models.entity import Entity
@@ -331,7 +332,8 @@ async def test_cfo_threshold_custom_override(realdb):
             await s.commit()
 
 
-async def test_cfo_threshold_malformed_fails_closed(realdb):
+@pytest.mark.parametrize("bad_threshold", ["5,000", "Infinity"])
+async def test_cfo_threshold_malformed_fails_closed(realdb, bad_threshold):
     # A garbage `cfo_threshold` (settings typo / tampered value) must FAIL CLOSED:
     # the gate demands CFO/admin sign-off rather than silently skipping (which
     # would let a manager approve any report) or 500-ing the endpoint.
@@ -342,7 +344,8 @@ async def test_cfo_threshold_malformed_fails_closed(realdb):
     async with ctrl() as s:
         org = (await s.execute(select(Organization).where(Organization.id == org_id))).scalar_one()
         settings_dict = dict(org.settings or {})
-        settings_dict["expense_approval"] = {"cfo_threshold": "5,000"}  # comma → unparseable
+        # A comma is unparseable; Infinity parses but is no usable limit.
+        settings_dict["expense_approval"] = {"cfo_threshold": bad_threshold}
         org.settings = settings_dict
         flag_modified(org, "settings")
         await s.commit()
@@ -356,7 +359,13 @@ async def test_cfo_threshold_malformed_fails_closed(realdb):
         # Not a 500 — a clean 403 demanding CFO sign-off.
         assert denied.status_code == 403, denied.text
         assert "cfo" in denied.json()["detail"]["message"].lower()
-        assert denied.json()["detail"]["code"] == "expense_cfo_required"
+        detail = denied.json()["detail"]
+        assert detail["code"] == "expense_cfo_required"
+        # No usable figure to name, so the typed limit is null and the sentence
+        # names the configured limit — never "Infinity" rendered as a figure.
+        assert detail["params"]["limit"] is None
+        assert "the configured limit" in detail["message"]
+        assert "Infinity" not in detail["message"]
 
         # A CFO can still approve past the fail-closed gate (not bricked).
         async with realdb.client(key="a", role="cfo") as c:
