@@ -4,6 +4,7 @@ import asyncio
 import logging
 import uuid
 from collections.abc import Sequence
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from decimal import ROUND_HALF_UP, Decimal
 from types import SimpleNamespace
@@ -12,7 +13,7 @@ from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from pydantic import BaseModel, Field
 from sqlalchemy import case, exists, func, not_, or_, select
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import (
@@ -1809,6 +1810,274 @@ INVOICE_LOCKED_DETAIL = (
     "was sent to the processor; retry in a moment"
 )
 
+#: `Payment` columns that describe the ORDER sent to the processor. The FX leg
+#: writes them just before the adapter call (the corridor can change `method`,
+#: the rate lock fills the rest), so a recovery that rolls the attempt back has
+#: to put them back — they are what the processor was actually asked to do.
+_ORDER_FIELDS = (
+    "method",
+    "source_currency",
+    "source_amount",
+    "fx_rate",
+    "fx_locked_at",
+    "corridor",
+    "target_country",
+)
+
+#: `failure_reason` prefixes for a dispatch whose database transaction aborted.
+#: Neither is in `payment_runs._RETRY_SAFE_FAILURE_PREFIXES`, so both class
+#: IN_DOUBT. After the processor call that is the only honest answer; before
+#: it, the row could still be a `/resume` of a pass that DID reach the
+#: processor and crashed, so it is not provably never-sent either.
+DB_ERROR_AFTER_PROCESSOR_REASON = "db_error_after_processor_call"
+DISPATCH_DB_ERROR_REASON = "dispatch_db_error"
+
+
+@dataclass
+class _ProcessorContact:
+    """What one dispatch attempt sent to, and heard back from, the processor.
+
+    Held OUTSIDE the ORM on purpose. A database error after
+    `adapter.create_payment` returns aborts the transaction, and rolling it back
+    expires the `Payment` instance — its in-memory `provider_payment_id` and
+    rate lock would reload as the NULLs on disk, erasing the only handles anyone
+    has for the order the processor just accepted. This survives the rollback,
+    so `_record_aborted_dispatch` can write them back (decisions §214, §233).
+    """
+
+    called: bool = False
+    order: dict = field(default_factory=dict)
+    provider: str | None = None
+    provider_payment_id: str | None = None
+    reference: str | None = None
+
+    def mark_called(self, payment: Payment) -> None:
+        """Set immediately BEFORE a money-moving provider call (processor or
+        card issuer): from here on an order may exist over there."""
+        self.called = True
+        self.order = {name: getattr(payment, name) for name in _ORDER_FIELDS}
+
+
+def _is_database_error(exc: BaseException) -> bool:
+    """Did this exception come out of the database (or wrap one that did)?
+
+    Every Postgres error aborts the (sub)transaction it ran in, and SQLAlchemy
+    refuses further work after a failed flush, so either way nothing more can
+    be written until the attempt's SAVEPOINT is rolled back. Follows the
+    explicit `__cause__` chain only — an implicit `__context__` can be a DB
+    error some helper already caught and recovered from.
+    """
+    seen: BaseException | None = exc
+    while seen is not None:
+        if isinstance(seen, SQLAlchemyError):
+            return True
+        seen = seen.__cause__
+    return False
+
+
+async def _record_aborted_dispatch(
+    db: AsyncSession,
+    savepoint,
+    *,
+    payment: Payment,
+    contact: _ProcessorContact,
+    exc: BaseException,
+    now: datetime,
+    expected_status: str,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+) -> tuple[bool, bool]:
+    """Record a dispatch attempt whose transaction a database error aborted.
+
+    Rolls the attempt's SAVEPOINT back — everything it wrote (the invoice
+    transition, discount capture, card row, compliance exception) goes with it
+    — and records the payment `failed` with whatever the processor handed back
+    restored from ``contact``. A populated `provider_payment_id`, or either
+    reason here, makes `payment_runs.classify_payment_failure` answer IN_DOUBT,
+    so `/retry-failed` will never re-send it under a fresh idempotency key; a
+    human reconciles it against the processor, as with every in-doubt row.
+
+    The payment's row lock was taken BEFORE the savepoint, so rolling back to it
+    keeps the lock: no other dispatcher can claim the still-`pending` row in
+    between. Only when the savepoint itself cannot be rolled back (the
+    connection is gone) does this fall back to a full rollback and a fresh
+    lock — and then the row may have been claimed in the gap, so it is only
+    written if it still reads ``expected_status``.
+
+    Returns ``(recorded, full_rollback)``. ``recorded`` is False when the row
+    had moved on; the attempt's provider handles then go into a
+    `payment.dispatch_unrecorded` audit row instead of over someone else's
+    outcome. ``full_rollback`` tells the caller every other instance in the
+    session was expired too.
+    """
+    full_rollback = False
+    try:
+        await savepoint.rollback()
+        await db.refresh(payment)
+    except SQLAlchemyError:
+        full_rollback = True
+        await db.rollback()
+        await db.refresh(payment, with_for_update=True)
+
+    from app.services.audit_dispatch import dispatch_audit
+
+    if payment.status != expected_status:
+        logger.error(
+            "payment %s: dispatch aborted by a database error and the row moved to %s "
+            "before it could be recorded; provider handles kept in the audit trail",
+            payment.id,
+            payment.status,
+        )
+        await dispatch_audit(
+            db,
+            correlation_id=payment.correlation_id or payment.id,
+            organization_id=org_id,
+            actor_id=actor_id,
+            action="payment.dispatch_unrecorded",
+            entity_type="payment",
+            entity_id=payment.id,
+            details={
+                "error": exc.__class__.__name__,
+                "processor_called": contact.called,
+                "provider": contact.provider,
+                "provider_payment_id": contact.provider_payment_id,
+                "reference": contact.reference,
+                "status_found": payment.status,
+            },
+        )
+        return False, full_rollback
+
+    if contact.called:
+        for name, value in contact.order.items():
+            setattr(payment, name, value)
+        payment.submitted_at = now
+        if contact.provider is not None:
+            payment.provider = contact.provider
+        if contact.provider_payment_id is not None:
+            payment.provider_payment_id = contact.provider_payment_id
+        if contact.reference is not None:
+            payment.reference = contact.reference
+    prefix = DB_ERROR_AFTER_PROCESSOR_REASON if contact.called else DISPATCH_DB_ERROR_REASON
+    payment.status = "failed"
+    payment.failure_reason = f"{prefix}:{exc.__class__.__name__}"
+    payment.completed_at = now
+    return True, full_rollback
+
+
+async def _dispatch_payment_guarded(
+    db: AsyncSession,
+    *,
+    payment: Payment,
+    org: Organization,
+    adapter,
+    user: User,
+    now: datetime,
+    expected_status: str,
+    context: str,
+) -> tuple[bool, bool]:
+    """`_execute_single_payment` inside its own SAVEPOINT, with every failure
+    recorded on the payment instead of unwinding the caller's transaction.
+
+    The caller already holds the payment's row lock and re-checked it reads
+    ``expected_status``. Three outcomes:
+
+    - a clean return — the savepoint is released and the attempt stands;
+    - a non-database exception (an adapter's `RuntimeError`, an `httpx`
+      timeout, a 409 out of `validate_transition`) — the transaction is still
+      usable, so the attempt's writes stand and the payment is marked
+      `failed / unexpected_error:<Type>` with any `provider_payment_id` the
+      adapter returned still on it;
+    - a database error (a deadlock in `transition_invoice`, a constraint in a
+      later flush), or a release that fails because one was swallowed — the
+      transaction is aborted, so `_record_aborted_dispatch` rolls the attempt
+      back and records it from the out-of-ORM `_ProcessorContact`.
+
+    `InvoiceLockedError` propagates, its own savepoint already rolled back and
+    ours released, for the caller to answer in its own way.
+
+    Returns `_record_aborted_dispatch`'s ``(recorded, full_rollback)``;
+    ``(True, False)`` on the first two paths.
+    """
+    contact = _ProcessorContact()
+    # Read before the attempt: a failed flush expires the instance, and touching
+    # an expired attribute on an aborted transaction raises all over again.
+    payment_id = payment.id
+    savepoint = await db.begin_nested()
+    try:
+        await _execute_single_payment(
+            db, payment=payment, org=org, adapter=adapter, user=user, now=now, contact=contact
+        )
+    except InvoiceLockedError:
+        await savepoint.commit()
+        raise
+    except Exception as exc:  # noqa: BLE001
+        # Log the exception TYPE only, never `str(exc)` / `exc_info` — a live
+        # FX/sanctions/processor adapter can embed a partial account number,
+        # IBAN, or PAN in its error string, and that must never reach the log
+        # sink or this row (PII/banking-data-out-of-logs invariant). Mirrors
+        # `card_issuance.py` / `payment_erp_sync.py`.
+        logger.warning(
+            "payment %s raised during %s; marking failed: %s",
+            payment_id,
+            context,
+            exc.__class__.__name__,
+        )
+        if not _is_database_error(exc):
+            try:
+                await savepoint.commit()
+            except SQLAlchemyError as release_exc:
+                # The adapter's error masked a database error something below
+                # had swallowed: the transaction is aborted after all.
+                return await _record_aborted_dispatch(
+                    db,
+                    savepoint,
+                    payment=payment,
+                    contact=contact,
+                    exc=release_exc,
+                    now=now,
+                    expected_status=expected_status,
+                    org_id=org.id,
+                    actor_id=user.id,
+                )
+            payment.status = "failed"
+            payment.failure_reason = f"unexpected_error:{exc.__class__.__name__}"
+            payment.completed_at = now
+            return True, False
+        return await _record_aborted_dispatch(
+            db,
+            savepoint,
+            payment=payment,
+            contact=contact,
+            exc=exc,
+            now=now,
+            expected_status=expected_status,
+            org_id=org.id,
+            actor_id=user.id,
+        )
+    try:
+        await savepoint.commit()
+    except SQLAlchemyError as release_exc:
+        # A helper swallowed a database error (best-effort notifications do),
+        # so the attempt "succeeded" on an aborted transaction.
+        logger.warning(
+            "payment %s: %s returned on an aborted transaction; marking failed: %s",
+            payment_id,
+            context,
+            release_exc.__class__.__name__,
+        )
+        return await _record_aborted_dispatch(
+            db,
+            savepoint,
+            payment=payment,
+            contact=contact,
+            exc=release_exc,
+            now=now,
+            expected_status=expected_status,
+            org_id=org.id,
+            actor_id=user.id,
+        )
+    return True, False
+
 
 async def _recompute_parent_run_status(db: AsyncSession, payment: Payment) -> None:
     """Re-derive the parent `PaymentRun.status` after a payment's status changed.
@@ -1922,39 +2191,49 @@ async def release_compliance_hold(
     # payment still `pending_compliance`, never a 500 mid-dispatch.
     adapter = _require_payment_adapter(org)
     now = datetime.now(UTC)
+    # Same guard `_dispatch_run_payments` puts round this call, for the same
+    # reason: a live FX / sanctions / processor adapter can raise anything, and
+    # a write after the processor call can hit a database error. Unguarded, the
+    # exception unwound the request — FastAPI 500ed, the session rolled back,
+    # and the payment reverted to `pending_compliance` with no
+    # `provider_payment_id` recorded even if the processor had already accepted
+    # the order (and, on the card leg, a rollback after `persist_card`
+    # discarded the `VirtualCard` row while a real spendable card existed at the
+    # provider). Recording the attempt as `failed` is what keeps that from being
+    # invisible; the reused `correlation_id` is the processor's idempotency key,
+    # not a substitute for the record.
     try:
-        await _execute_single_payment(
-            db, payment=payment, org=org, adapter=adapter, user=user, now=now
+        recorded, _ = await _dispatch_payment_guarded(
+            db,
+            payment=payment,
+            org=org,
+            adapter=adapter,
+            user=user,
+            now=now,
+            expected_status="pending_compliance",
+            context="compliance release",
         )
     except InvoiceLockedError:
         # Refused before the processor call: the payment stays
         # `pending_compliance` (the request rolls back) and the operator can
         # simply release again — unlike a run, there is no batch to keep going.
         raise HTTPException(status_code=409, detail=INVOICE_LOCKED_DETAIL) from None
-    except Exception as exc:  # noqa: BLE001
-        # Same guard `_dispatch_run_payments` puts round this call, for the
-        # same reason: a live FX / sanctions / processor adapter can raise
-        # anything. Unguarded, the exception unwound the request — FastAPI
-        # 500ed, the session rolled back, and the payment reverted to
-        # `pending_compliance` with no `provider_payment_id` recorded even if
-        # the processor had already accepted the order (and, on the card leg,
-        # a rollback after `persist_card` discarded the `VirtualCard` row while
-        # a real spendable card existed at the provider). Recording the attempt
-        # as `failed` is what keeps that from being invisible; the reused
-        # `correlation_id` is the processor's idempotency key, not a substitute
-        # for the record.
-        #
-        # Log the exception TYPE only, never `str(exc)` / `exc_info` — an
-        # adapter can embed a partial account number, IBAN or PAN in its error
-        # string (PII/banking-data-out-of-logs invariant).
-        logger.warning(
-            "payment %s raised during compliance release; marking failed: %s",
-            payment.id,
-            exc.__class__.__name__,
+    if not recorded:
+        # The connection dropped mid-release and another request moved the
+        # payment before it could be re-locked. What this attempt sent is in
+        # `payment.dispatch_unrecorded`; keep that, report the conflict.
+        await db.commit()
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "The payment changed while this release was being recorded; "
+                "reload it and check its status before acting again."
+            ),
         )
-        payment.status = "failed"
-        payment.failure_reason = f"unexpected_error:{exc.__class__.__name__}"
-        payment.completed_at = now
+    if invoice is not None:
+        # The guarded dispatch may have rolled its attempt back, expiring the
+        # invoice this handler loaded first; re-read it before using it below.
+        await db.refresh(invoice)
 
     from app.services.audit_dispatch import dispatch_audit
 
@@ -3020,6 +3299,7 @@ async def _execute_single_payment(
     adapter,
     user: User,
     now: datetime,
+    contact: _ProcessorContact | None = None,
 ) -> None:
     """Dispatch ONE payment to its processor (or the card adapter), mutating
     it to a terminal or in-flight status in place.
@@ -3028,7 +3308,14 @@ async def _execute_single_payment(
     committed durably right after this call returns (see the caller) — a
     problem with payment N (including this raising) must only ever affect
     payment N, never roll back payments the loop already committed earlier.
+
+    ``contact`` is filled in as the attempt reaches the processor (see
+    `_ProcessorContact`), so a caller can still record what was sent and what
+    came back after a database error has rolled this function's writes away.
+    Callers go through `_dispatch_payment_guarded`, which supplies it.
     """
+    if contact is None:
+        contact = _ProcessorContact()
     # Resolve invoice + vendor for the payload. Locked: every gate below decides
     # on the invoice's status and the `→ payment_scheduled` transition lands
     # after the processor call, so the status must not move in between
@@ -3233,6 +3520,7 @@ async def _execute_single_payment(
         card = await find_live_card_for_invoice(db, invoice.id)
         minted = False
         if card is None:
+            contact.mark_called(payment)
             issue = await issue_card_for_invoice(
                 db=db,
                 invoice=invoice,
@@ -3247,6 +3535,16 @@ async def _execute_single_payment(
                 payment.failure_reason = issue.failure_reason or "card_issuance_failed"
                 payment.completed_at = now
                 return
+            # The provider minted a real, spendable card. If the transaction
+            # aborts below, its `VirtualCard` row goes with it — so the card's
+            # handle is kept here, and becomes the payment's
+            # `provider_payment_id` if this attempt has to be recorded from it.
+            minted_card = issue.card
+            contact.provider = minted_card.card_provider
+            contact.provider_payment_id = minted_card.provider_card_id
+            contact.reference = (
+                f"CARD-{minted_card.card_provider.upper()}-{minted_card.last_four or '????'}"
+            )
             # Savepoint-guarded flush (we need card.id for the reveal-token
             # row). A racer that committed the invoice's live card between the
             # pre-check and here trips the unique index; containing that in a
@@ -3511,7 +3809,11 @@ async def _execute_single_payment(
         target_country=payment.target_country,
     )
 
+    contact.mark_called(payment)
     result_obj = await adapter.create_payment(payload)
+    contact.provider = adapter.provider_name
+    contact.provider_payment_id = result_obj.provider_payment_id
+    contact.reference = result_obj.reference
     payment.provider = adapter.provider_name
     payment.provider_payment_id = result_obj.provider_payment_id
     payment.reference = result_obj.reference or payment.reference
@@ -3607,9 +3909,22 @@ async def _dispatch_run_payments(
         await db.refresh(payment, with_for_update=True)
         if payment.status != "pending":
             continue
+        # A live FX / sanctions / processor adapter can raise anything on a
+        # network or API hiccup, and any write after the processor call can hit
+        # a database error. Either way only THIS payment is recorded `failed` —
+        # the exception never unwinds the request, which is what keeps the
+        # other payments in this run from being lost to a rollback and the run
+        # from being stranded `executing` (`_dispatch_payment_guarded`).
         try:
-            await _execute_single_payment(
-                db, payment=payment, org=org, adapter=adapter, user=user, now=now
+            recorded, full_rollback = await _dispatch_payment_guarded(
+                db,
+                payment=payment,
+                org=org,
+                adapter=adapter,
+                user=user,
+                now=now,
+                expected_status="pending",
+                context="payment-run dispatch",
             )
         except InvoiceLockedError:
             # Another request held the invoice row past the bound. Raised by
@@ -3618,38 +3933,33 @@ async def _dispatch_run_payments(
             # its savepoint rolled back, so this transaction (and the payment
             # row lock) is intact and the refusal is recorded like every other
             # pre-adapter one: named and retry-safe, never `unexpected_error`.
+            recorded, full_rollback = True, False
             payment.status = "failed"
             payment.failure_reason = INVOICE_LOCKED_REASON
             payment.completed_at = now
-        except Exception as exc:  # noqa: BLE001
-            # A live FX / sanctions / processor adapter can raise anything on
-            # a network or API hiccup (bare RuntimeError, httpx errors, ...).
-            # Recording THIS payment as failed — instead of letting the
-            # exception unwind the whole request — is what keeps the other
-            # payments in this run from being lost to a rollback.
-            #
-            # Log the exception TYPE only, never `str(exc)` / `exc_info` — a
-            # live FX/sanctions/processor adapter can embed a partial account
-            # number, IBAN, or PAN in its error string, and that must never
-            # reach the log sink or this row (PII/banking-data-out-of-logs
-            # invariant). Mirrors `card_issuance.py` / `payment_erp_sync.py`.
-            logger.warning(
-                "payment %s raised during payment-run dispatch; marking failed: %s",
-                payment.id,
-                exc.__class__.__name__,
-            )
-            payment.status = "failed"
-            payment.failure_reason = f"unexpected_error:{exc.__class__.__name__}"
-            payment.completed_at = now
+        if full_rollback:
+            # The connection was lost mid-attempt and the whole transaction
+            # rolled back, expiring the run too (its status was committed by
+            # the caller, so this only re-reads it).
+            await db.refresh(run)
+        if not recorded:
+            # Another dispatcher recorded this payment in the gap a full
+            # rollback opens; `payment.dispatch_unrecorded` already holds what
+            # this attempt sent. Never overwrite their outcome.
+            await db.commit()
+            continue
 
         # Append-only audit trail for the money-movement event (project
         # invariant: every payment status transition writes a log row, and a
         # change that touches a regulated timestamp like `completed_at` is
         # Critical without one). PII-free: only ids, status, and the Decimal
         # amount as a string ever enter `details` — never bank/account values.
+        # `provider_payment_id` is the processor's own handle, recorded so an
+        # in-doubt row (a populated id on a `failed` payment) can be reconciled
+        # from the trail alone.
         await dispatch_audit(
             db,
-            correlation_id=payment.correlation_id or run.id,
+            correlation_id=payment.correlation_id or run_id,
             organization_id=org.id,
             actor_id=user.id,
             action=f"payment.{payment.status}",
@@ -3660,7 +3970,8 @@ async def _dispatch_run_payments(
                 "method": payment.method,
                 "amount": str(payment.amount),
                 "reference": payment.reference,
-                "payment_run_id": str(run.id),
+                "provider_payment_id": payment.provider_payment_id,
+                "payment_run_id": str(run_id),
             },
         )
 
