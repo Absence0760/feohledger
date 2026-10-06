@@ -60,7 +60,12 @@ class ApException {
   final String? invoiceId;
   final String? invoiceNumber;
   final String? vendorName;
-  final double? amount;
+
+  /// The related invoice's amount as an **exact decimal string** (`"1234.50"`)
+  /// — display only, never arithmetic. Render it with `formatMoneyString`.
+  /// `null` when no invoice is joined. See [exactMoneyFromJson] for the two
+  /// wire shapes it is read from.
+  final String? amount;
 
   /// What [amount] is denominated in — the related INVOICE's currency, since
   /// the figure is that invoice's amount. `null` when no invoice is joined, or
@@ -128,7 +133,7 @@ class ApException {
       invoiceId: json['invoice_id'] as String?,
       invoiceNumber: json['invoice_number'] as String?,
       vendorName: json['vendor_name'] as String?,
-      amount: (json['amount'] as num?)?.toDouble(),
+      amount: exactMoneyFromJson(json['amount']),
       currency: json['currency'] as String?,
       exceptionType: type,
       typeLabel: json['type_label'] as String? ?? type,
@@ -148,4 +153,26 @@ class ApException {
           (json['time_to_resolution_hours'] as num?)?.toDouble(),
     );
   }
+}
+
+/// Read a money field that may arrive as either wire shape.
+///
+/// `/api/exceptions` sends `amount` as an exact decimal STRING; a backend that
+/// predates that change — or an offline cache written by an older build —
+/// sends a JSON number. Both are accepted, so the client never depends on
+/// which side of the change the server is:
+///
+/// * a string passes through verbatim (trimmed), never via `double`, so no
+///   digit of the server's figure can be rounded away;
+/// * a number is rendered to the column's two decimal places
+///   (`Numeric(15, 2)`), which is the string the newer backend would have
+///   sent for it — so `250` and `"250.00"` display identically;
+/// * `null`, an empty string, or any other type reads as no figure.
+String? exactMoneyFromJson(Object? raw) {
+  if (raw is String) {
+    final text = raw.trim();
+    return text.isEmpty ? null : text;
+  }
+  if (raw is num) return raw.toStringAsFixed(2);
+  return null;
 }

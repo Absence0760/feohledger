@@ -215,6 +215,9 @@ class ExceptionStore extends ChangeNotifier with SequencedFetch {
         'invoice_number': e.invoiceNumber,
         'vendor_name': e.vendorName,
         'amount': e.amount,
+        // Cached with the figure: without it an offline-rendered amount loses
+        // its symbol (the list falls back to a bare figure).
+        'currency': e.currency,
         'exception_type': e.exceptionType,
         'type_label': e.typeLabel,
         'severity': e.severity.value,
