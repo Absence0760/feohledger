@@ -4,7 +4,7 @@
 	import { toast } from '#lib/components/ui/Toast.svelte';
 	import { m } from '#lib/i18n/store.svelte.ts';
 	import type { ImportResult } from '#lib/types/csvImport.ts';
-	import { localizeApiDetail } from '#lib/api/glChartRefusal.ts';
+	import { localizeApiDetail } from '#lib/api/codedRefusals.ts';
 
 	// Generic Day-0 CSV import flow shared by `/vendors` and `/invoices`:
 	// pick a file, upload it, show the skip-and-report result (every bad row

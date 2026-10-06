@@ -183,7 +183,7 @@ async def test_a_failed_enrollment_verify_writes_no_enrolled_row(audit):
                 body=MFAEnrollVerifyRequest(code="000000"), user=user, db=_db_returning(None)
             )
 
-    assert exc.value.status_code == 401
+    assert exc.value.status_code == 400
     assert "auth.mfa.enrolled" not in _actions(audit)
 
 

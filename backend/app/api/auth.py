@@ -18,7 +18,7 @@ from app.api.deps import (
     get_current_user,
 )
 from app.api.permissions import effective_permissions
-from app.api.refusals import coded_refusal
+from app.api.refusals import MFA_CODE_INVALID_DETAIL, coded_refusal
 from app.config import settings
 from app.database import get_control_db
 from app.models.organization import Organization
@@ -1282,7 +1282,7 @@ async def enroll_mfa_verify(
     if not pending:
         raise HTTPException(status_code=400, detail="Start enrollment first")
     if not await mfa.verify_totp(pending, body.code):
-        raise HTTPException(status_code=401, detail="Invalid code")
+        raise HTTPException(status_code=400, detail=MFA_CODE_INVALID_DETAIL)
 
     # Read before the write — afterwards every account looks freshly enrolled.
     replaced = bool(user.mfa_enabled and user.mfa_secret)

@@ -1,6 +1,5 @@
 // ignore: unused_import
 import 'package:intl/intl.dart' as intl;
-
 import 'app_localizations.dart';
 
 // ignore_for_file: type=lint
@@ -645,6 +644,70 @@ class AppLocalizationsFr extends AppLocalizations {
   String glChartRefusalOnLines(String reasons) {
     return 'Lignes de facture : $reasons';
   }
+
+  @override
+  String get codedRefusalApprovalSegregation =>
+      'Séparation des tâches : un utilisateur ayant participé à la création de cette facture ne peut pas aussi l\'approuver.';
+
+  @override
+  String get codedRefusalApprovalLevelReuse =>
+      'Vous avez déjà approuvé un niveau précédent de cette chaîne ; un autre approbateur est requis.';
+
+  @override
+  String get codedRefusalApprovalNotNamedApprover =>
+      'Vous n\'êtes pas un approbateur autorisé pour cette étape.';
+
+  @override
+  String codedRefusalApprovalMaxExceeded(String amount, String limit) {
+    return 'Le montant de la facture $amount dépasse le maximum autorisé de $limit.';
+  }
+
+  @override
+  String get codedRefusalApprovalMaxMisconfigured =>
+      'L\'étape d\'approbation de ce workflow a un montant maximal de facture inutilisable. L\'approbation est bloquée jusqu\'à ce qu\'un administrateur corrige la définition du workflow.';
+
+  @override
+  String codedRefusalApprovalCfoRequired(String amount, String limit) {
+    return 'Le montant de la facture $amount dépasse $limit. Approbation du CFO requise.';
+  }
+
+  @override
+  String codedRefusalApprovalCfoRequiredUnknownLimit(String amount) {
+    return 'Le montant de la facture $amount dépasse la limite configurée. Approbation du CFO requise.';
+  }
+
+  @override
+  String codedRefusalGateStructuring(
+    String recent,
+    int days,
+    String aggregate,
+  ) {
+    String _temp0 = intl.Intl.pluralLogic(
+      days,
+      locale: localeName,
+      other: 'derniers $days jours',
+      one: 'dernier $days jour',
+    );
+    return 'Cette facture seule est sous le seuil, mais cumulée avec $recent d\'autres factures récentes de ce fournisseur ($_temp0), elle totalise $aggregate.';
+  }
+
+  @override
+  String codedRefusalGateInexpressible(String currency) {
+    return 'Cette facture n\'a pas pu être exprimée en $currency, la devise de la limite ; elle ne peut donc pas être validée par rapport à celle-ci.';
+  }
+
+  @override
+  String codedRefusalGateMeasured(String measured, String currency) {
+    return 'Mesuré à $measured — la limite est fixée en $currency.';
+  }
+
+  @override
+  String get codedRefusalExceptionSegregationRaiser =>
+      'Séparation des tâches : l\'utilisateur dont l\'action a déclenché cette exception ne peut pas aussi la résoudre. Escaladez-la ou demandez à un autre utilisateur de décider.';
+
+  @override
+  String get codedRefusalExceptionSegregationImplicated =>
+      'Séparation des tâches : un utilisateur ayant participé à la création de cette facture ne peut pas résoudre une exception qui bloque son paiement. Escaladez-la ou demandez à un autre utilisateur de décider.';
 
   @override
   String get invoiceDetailApproved => 'Facture approuvée';

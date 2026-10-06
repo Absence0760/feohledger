@@ -471,6 +471,35 @@ void main() {
     expect(find.textContaining('Could not approve'), findsOneWidget);
   });
 
+  testWidgets('a coded approval refusal is stated from its code, not retried',
+      (tester) async {
+    // The backend's segregation-of-duties 403 (`approval_chain`), coded via
+    // `api/refusals.coded_refusal`. "Try again" would be wrong advice: the
+    // reason is the approver's own involvement.
+    final client = _detailClient(
+      _invoiceJson('1', status: 'ready_for_review'),
+      onApprove: (req) => _json({
+        'detail': {
+          'code': 'approval_segregation',
+          'message': 'server english',
+          'params': <String, dynamic>{},
+        },
+      }, 403),
+    );
+    ApiClient().debugConfigure(client: client);
+    await AuthStore.instance.login('demo@acme.com', 'demo', 'acme');
+
+    await tester.pumpWidget(_localized());
+    await _pumpUntil(tester, find.text('Approve'));
+
+    await tester.tap(find.widgetWithText(FilledButton, 'Approve'));
+    await _pumpUntil(tester, find.textContaining('Segregation of duties'));
+
+    expect(find.textContaining('Segregation of duties'), findsOneWidget);
+    expect(find.textContaining('Could not approve'), findsNothing);
+    expect(find.textContaining('server english'), findsNothing);
+  });
+
   testWidgets('tapping Reject opens the reason dialog with Cancel/Reject',
       (tester) async {
     await _arrange(

@@ -12,9 +12,10 @@
  * (`frontend/CLAUDE.md` § Internationalization).
  *
  * The same object arrives two ways: as the 422 `detail` (handled at the
- * transport by `localizeApiDetail`, so every toast on every write path gets it
- * without a per-site change) and as a CSV import's per-row error, which is that
- * body plus `row`.
+ * transport by `api/codedRefusals.ts::localizeApiDetail`, the registry this is
+ * the first entry of, so every toast on every write path gets it without a
+ * per-site change) and as a CSV import's per-row error, which is that body
+ * plus `row`.
  *
  * Safe to render on skew, in both directions: a body this build does not
  * recognise — another code, a missing or non-string-array bucket, every bucket
@@ -109,16 +110,4 @@ export function localizeGlChartRefusal(refusal: GlChartRefusal, m: Translate): s
 	);
 	const sentence = parts.join(' ');
 	return refusal.on_lines ? m('glChartRefusal.onLines', { reasons: sentence }) : sentence;
-}
-
-/**
- * The localized sentence for a structured error body this build recognises —
- * a 422 `detail` or a CSV row error — or `null`, in which case the caller
- * renders the server's text. The one entry point `api.ts` and the CSV import
- * modal call, so a second localized refusal joins here rather than at every
- * call site.
- */
-export function localizeApiDetail(detail: unknown, m: Translate): string | null {
-	const refusal = parseGlChartRefusal(detail);
-	return refusal ? localizeGlChartRefusal(refusal, m) : null;
 }

@@ -666,7 +666,8 @@ async def test_patch_stale_expected_updated_at_is_refused_409(realdb):
             json={"notes": "editor B's clobber attempt", "expected_updated_at": stale_token},
         )
         assert second.status_code == 409, second.text
-        assert "modified since you loaded it" in second.json()["detail"]
+        assert "modified since you loaded it" in second.json()["detail"]["message"]
+        assert second.json()["detail"]["code"] == "invoice_stale_edit"
 
     mk = realdb.sessionmaker("a")
     async with mk() as s:

@@ -18,6 +18,7 @@ from app.api.deps import (
 )
 from app.api.invoices import _invoice_list_filters
 from app.api.pagination import PaginationParams, pagination_params
+from app.api.refusals import coded_refusal
 from app.api.sorting import SortParams, resolve_order_by, sort_params
 from app.models.credit_memo import CREDIT_MEMO_STATUSES, CreditMemo
 from app.models.invoice import Invoice, InvoiceStatus
@@ -34,6 +35,7 @@ from app.schemas.credit_memo import (
     EligibleInvoiceListResponse,
     EligibleInvoiceResponse,
 )
+from app.schemas.money import json_money_string
 from app.services.audit_access import build_field_diff
 from app.services.audit_dispatch import dispatch_audit
 from app.services.currency_conversion import resolve_reporting_currency
@@ -46,25 +48,78 @@ router = APIRouter(prefix="/credit-memos", tags=["credit-memos"])
 # Shared by both application paths (create-with-invoice_id and /apply) so the
 # two can't drift. Neither names the vendor — an authenticated AP user already
 # knows the invoice, and the detail only has to say what to fix.
-_VENDOR_MISMATCH_DETAIL = "Credit memo vendor does not match invoice vendor"
-_VENDOR_UNRESOLVED_DETAIL = (
+#
+# Every refusal here is coded (`api/refusals.coded_refusal`): the operator is
+# expected to act on it, so the web (`api/codedRefusals.ts`) states it in the
+# reader's language from the code, with the English `message` as the fallback.
+# Params carry only what the sentence itself names.
+CREDIT_MEMO_VENDOR_MISMATCH = "credit_memo_vendor_mismatch"
+CREDIT_MEMO_VENDOR_UNRESOLVED = "credit_memo_vendor_unresolved"
+CREDIT_MEMO_ENTITY_MISMATCH = "credit_memo_entity_mismatch"
+CREDIT_MEMO_CURRENCY_MISMATCH = "credit_memo_currency_mismatch"
+CREDIT_MEMO_INVOICE_SETTLED = "credit_memo_invoice_settled"
+CREDIT_MEMO_NOT_EDITABLE = "credit_memo_not_editable"
+CREDIT_MEMO_NOT_APPLICABLE = "credit_memo_not_applicable"
+CREDIT_MEMO_EXCEEDS_BALANCE = "credit_memo_exceeds_balance"
+
+_VENDOR_MISMATCH_DETAIL = coded_refusal(
+    CREDIT_MEMO_VENDOR_MISMATCH, "Credit memo vendor does not match invoice vendor"
+)
+_VENDOR_UNRESOLVED_DETAIL = coded_refusal(
+    CREDIT_MEMO_VENDOR_UNRESOLVED,
     "The invoice has no linked vendor, so the credit memo's vendor cannot be "
     "verified. Resolve the invoice's vendor first (re-save its vendor on the "
-    "invoice), then apply the credit."
+    "invoice), then apply the credit.",
 )
-_ENTITY_MISMATCH_DETAIL = (
+_ENTITY_MISMATCH_DETAIL = coded_refusal(
+    CREDIT_MEMO_ENTITY_MISMATCH,
     "The credit memo and the invoice belong to different entities; a credit "
-    "cannot reduce another subsidiary's payable"
+    "cannot reduce another subsidiary's payable",
 )
-_CURRENCY_MISMATCH_DETAIL = "Credit memo currency does not match invoice currency"
-_INVOICE_SETTLED_DETAIL = (
-    "The invoice is '{status}': no payment will be made against it any more, so a "
-    "credit applied to it would reduce nothing. Leave the credit memo open and apply "
-    "it to the vendor's next invoice."
+_CURRENCY_MISMATCH_DETAIL = coded_refusal(
+    CREDIT_MEMO_CURRENCY_MISMATCH, "Credit memo currency does not match invoice currency"
 )
-_NOT_EDITABLE_DETAIL = (
-    "Only an open credit memo that has never been applied can be edited (this one is '{status}')"
-)
+
+
+def _invoice_settled_detail(status: str) -> dict:
+    return coded_refusal(
+        CREDIT_MEMO_INVOICE_SETTLED,
+        f"The invoice is '{status}': no payment will be made against it any more, so a "
+        "credit applied to it would reduce nothing. Leave the credit memo open and apply "
+        "it to the vendor's next invoice.",
+        status=status,
+    )
+
+
+def _not_editable_detail(status: str) -> dict:
+    return coded_refusal(
+        CREDIT_MEMO_NOT_EDITABLE,
+        "Only an open credit memo that has never been applied can be edited "
+        f"(this one is '{status}')",
+        status=status,
+    )
+
+
+def _not_applicable_detail(status: str) -> dict:
+    return coded_refusal(
+        CREDIT_MEMO_NOT_APPLICABLE,
+        f"Cannot apply a credit memo in '{status}' status",
+        status=status,
+    )
+
+
+def _exceeds_balance_detail(remaining: Decimal, currency: str | None) -> dict:
+    """The over-application refusal, naming the balance with its currency — the
+    invoice's, which the currency guard has already proved the memo shares."""
+    currency = (currency or "").strip().upper() or None
+    figure = f"{remaining} {currency}" if currency else f"{remaining}"
+    return coded_refusal(
+        CREDIT_MEMO_EXCEEDS_BALANCE,
+        f"Credit memo amount exceeds the invoice's remaining creditable balance ({figure})",
+        remaining=json_money_string(remaining),
+        currency=currency,
+    )
+
 
 # `sort=` allowlist for `GET /credit-memos` — see `api/sorting.py`. `.id` is
 # always appended as the final tie-break regardless of which column is picked
@@ -148,9 +203,7 @@ def _assert_creditable_status(invoice: Invoice) -> None:
     """
     current = InvoiceStatus(invoice.status)
     if current not in CREDITABLE_INVOICE_STATUSES:
-        raise HTTPException(
-            status_code=409, detail=_INVOICE_SETTLED_DETAIL.format(status=current.value)
-        )
+        raise HTTPException(status_code=409, detail=_invoice_settled_detail(current.value))
 
 
 def _assert_vendor_matches(invoice: Invoice, vendor_id: uuid.UUID) -> None:
@@ -221,7 +274,7 @@ def _assert_editable(memo: CreditMemo) -> None:
     record editable: any trace of an application refuses the edit.
     """
     if memo.status != "open" or memo.invoice_id is not None or memo.applied_at is not None:
-        raise HTTPException(status_code=409, detail=_NOT_EDITABLE_DETAIL.format(status=memo.status))
+        raise HTTPException(status_code=409, detail=_not_editable_detail(memo.status))
 
 
 #: What Python's `str.strip()` removes from an ASCII string. `btrim` with no
@@ -238,10 +291,7 @@ def _assert_applicable(memo: CreditMemo) -> None:
     invoices none of which the apply could accept.
     """
     if memo.status != "open":
-        raise HTTPException(
-            status_code=409,
-            detail=f"Cannot apply a credit memo in '{memo.status}' status",
-        )
+        raise HTTPException(status_code=409, detail=_not_applicable_detail(memo.status))
 
 
 def _creditable_balance(exclude_memo_id: uuid.UUID | None):
@@ -694,11 +744,7 @@ async def create_credit_memo(
         remaining = invoice.amount - already_applied
         if body.amount > remaining:
             raise HTTPException(
-                status_code=409,
-                detail=(
-                    "Credit memo amount exceeds the invoice's remaining creditable "
-                    f"balance ({remaining})"
-                ),
+                status_code=409, detail=_exceeds_balance_detail(remaining, invoice.currency)
             )
         invoice_number = invoice.invoice_number
 
@@ -870,11 +916,7 @@ async def apply_credit_memo(
     remaining = invoice.amount - already_applied
     if memo.amount > remaining:
         raise HTTPException(
-            status_code=409,
-            detail=(
-                "Credit memo amount exceeds the invoice's remaining creditable "
-                f"balance ({remaining})"
-            ),
+            status_code=409, detail=_exceeds_balance_detail(remaining, invoice.currency)
         )
 
     memo.invoice_id = invoice_uuid

@@ -413,6 +413,10 @@ test.describe('/invoices lifecycle — RBAC + segregation of duties on approval'
 			// Same user (the uploader) tries to approve → 403 SoD.
 			const selfApprove = await action(page, inv.id, 'approve');
 			expect(selfApprove.status()).toBe(403);
+			// Coded (`api/refusals.coded_refusal`), so a client states it in the
+			// reader's language rather than rendering the server's English.
+			const refusal = ((await selfApprove.json()) as { detail: { code: string } }).detail;
+			expect(refusal.code).toBe('approval_segregation');
 			await expectStatus(page, inv.id, 'ready_for_review');
 
 			// A different approver (the manager) is allowed → 200.

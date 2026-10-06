@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 
+import 'package:feohledger_mobile/api/api_client.dart';
 import 'package:feohledger_mobile/api/endpoints.dart';
 import 'package:feohledger_mobile/models/exception.dart';
 import 'package:feohledger_mobile/services/offline_store.dart';
@@ -12,6 +13,14 @@ class ExceptionStore extends ChangeNotifier with SequencedFetch {
   List<ApException> _exceptions = [];
   bool _loading = false;
   String? _error;
+
+  /// The raw `detail` of the last refused resolve / escalate / dismiss — the
+  /// queue's segregation-of-duties refusal is coded (`segregation_raiser` /
+  /// `segregation_implicated`, the same codes the bulk route reports per row),
+  /// so a screen states it in the reader's language through
+  /// `lib/l10n/coded_refusal_messages.dart`. Null after a successful action or
+  /// a non-API failure.
+  Object? _actionErrorDetail;
   String? _statusFilter;
   bool _fromCache = false;
 
@@ -23,6 +32,7 @@ class ExceptionStore extends ChangeNotifier with SequencedFetch {
   List<ApException> get exceptions => _exceptions;
   bool get loading => _loading;
   String? get error => _error;
+  Object? get actionErrorDetail => _actionErrorDetail;
   String? get statusFilter => _statusFilter;
   bool get fromCache => _fromCache;
 
@@ -39,6 +49,7 @@ class ExceptionStore extends ChangeNotifier with SequencedFetch {
     _exceptions = [];
     _loading = false;
     _error = null;
+    _actionErrorDetail = null;
     _statusFilter = null;
     _fromCache = false;
     _selectionMode = false;
@@ -140,12 +151,14 @@ class ExceptionStore extends ChangeNotifier with SequencedFetch {
     required String action,
     required String resolution,
   }) async {
+    _actionErrorDetail = null;
     try {
       await ExceptionApi.act(id, action: action, resolution: resolution);
       await fetch();
       return true;
     } catch (e) {
       _error = e.toString();
+      _actionErrorDetail = e is ApiException ? e.detail : null;
       notifyListeners();
       return false;
     }

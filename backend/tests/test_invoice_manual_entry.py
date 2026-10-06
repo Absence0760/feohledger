@@ -86,7 +86,8 @@ async def test_manual_create_then_self_approve_is_blocked_by_segregation(realdb)
 
         resp = await c.post(f"/api/invoices/{invoice_id}/approve", json={})
     assert resp.status_code == 403, resp.text
-    assert "segregation" in resp.json()["detail"].lower()
+    assert "segregation" in resp.json()["detail"]["message"].lower()
+    assert resp.json()["detail"]["code"] == "approval_segregation"
 
 
 async def test_manual_create_runs_duplicate_detection(realdb):

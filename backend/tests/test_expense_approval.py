@@ -210,7 +210,8 @@ async def test_approve_self_blocked_by_segregation(realdb):
         await c.post(f"/api/expense-reports/{rid}/submit")
         resp = await c.post(f"/api/expense-reports/{rid}/approve")
     assert resp.status_code == 403
-    assert "segregation" in resp.json()["detail"].lower()
+    assert "segregation" in resp.json()["detail"]["message"].lower()
+    assert resp.json()["detail"]["code"] == "approval_segregation"
 
 
 async def test_report_employee_is_the_caller_not_a_client_supplied_id(realdb):
@@ -246,7 +247,8 @@ async def test_report_employee_is_the_caller_not_a_client_supplied_id(realdb):
         # The same manager must still be refused — SoD anchors on the caller.
         resp = await c.post(f"/api/expense-reports/{rid}/approve")
     assert resp.status_code == 403, resp.text
-    assert "segregation" in resp.json()["detail"].lower()
+    assert "segregation" in resp.json()["detail"]["message"].lower()
+    assert resp.json()["detail"]["code"] == "approval_segregation"
 
 
 async def test_different_manager_approves(realdb):
@@ -285,7 +287,8 @@ async def test_cfo_threshold_default_gates_manager(realdb):
     async with realdb.client(key="a", role="ap_manager") as c:
         denied = await c.post(f"/api/expense-reports/{rid}/approve")
     assert denied.status_code == 403
-    assert "cfo" in denied.json()["detail"].lower()
+    assert "cfo" in denied.json()["detail"]["message"].lower()
+    assert denied.json()["detail"]["code"] == "expense_cfo_required"
 
     async with realdb.client(key="a", role="cfo") as c:
         ok = await c.post(f"/api/expense-reports/{rid}/approve")
@@ -352,7 +355,8 @@ async def test_cfo_threshold_malformed_fails_closed(realdb):
             denied = await c.post(f"/api/expense-reports/{rid}/approve")
         # Not a 500 — a clean 403 demanding CFO sign-off.
         assert denied.status_code == 403, denied.text
-        assert "cfo" in denied.json()["detail"].lower()
+        assert "cfo" in denied.json()["detail"]["message"].lower()
+        assert denied.json()["detail"]["code"] == "expense_cfo_required"
 
         # A CFO can still approve past the fail-closed gate (not bricked).
         async with realdb.client(key="a", role="cfo") as c:

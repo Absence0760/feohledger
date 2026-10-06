@@ -20,11 +20,20 @@ from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.refusals import coded_refusal
 from app.models.invoice import Invoice
 from app.models.user import User
 from app.models.workflow import WorkflowInstance
 
 logger = logging.getLogger(__name__)
+
+# Stable codes for the approval path's refusals (`api/refusals.coded_refusal`):
+# each identifies ONE sentence, which the web (`api/codedRefusals.ts`) and
+# mobile (`l10n/coded_refusal_messages.dart`) state in the reader's language,
+# falling back to the English `message` for a code a client predates.
+APPROVAL_SEGREGATION = "approval_segregation"
+APPROVAL_LEVEL_REUSE = "approval_level_reuse"
+APPROVAL_NOT_NAMED_APPROVER = "approval_not_named_approver"
 
 # ------------------------------------------------------------------
 # Segregation of duties
@@ -169,9 +178,10 @@ def check_segregation(
     if violates_segregation(invoice, actor_id, approval_config):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail=(
+            detail=coded_refusal(
+                APPROVAL_SEGREGATION,
                 "Segregation of duties: a user involved in creating this invoice "
-                "cannot also approve it."
+                "cannot also approve it.",
             ),
         )
 
@@ -813,7 +823,9 @@ async def check_level_approver(approver_ids: list[str], actor_id: uuid.UUID) -> 
     if actor_str not in authorized:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="You are not an authorized approver for this step.",
+            detail=coded_refusal(
+                APPROVAL_NOT_NAMED_APPROVER, "You are not an authorized approver for this step."
+            ),
         )
 
 
@@ -867,8 +879,11 @@ def advance_approval_chain(
         if any(a.get("user_id") == actor_str for a in lvl.get("approvals", [])):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="You already approved an earlier level of this chain; "
-                "a different approver is required.",
+                detail=coded_refusal(
+                    APPROVAL_LEVEL_REUSE,
+                    "You already approved an earlier level of this chain; "
+                    "a different approver is required.",
+                ),
             )
 
     # Record this approval

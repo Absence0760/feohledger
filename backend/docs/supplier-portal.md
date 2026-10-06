@@ -57,8 +57,8 @@ uses `get_current_vendor_user` (except `/portal/auth/login`,
 | POST   | `/portal/auth/mfa/challenge`     | **Public** — trade the login-issued challenge token + a code (`method` totp\|email) for an access token |
 | POST   | `/portal/auth/mfa/challenge/email` | **Public** — email the on-demand OTP backup code to the enrolled vendor; 204-silent (no enumeration) |
 | POST   | `/portal/auth/mfa/enroll`        | Mint a CANDIDATE TOTP secret + QR (parked in Redis until verified). Optional `{password?, code?}` step-up — required once a factor is already live |
-| POST   | `/portal/auth/mfa/verify`        | Verify a code to promote the candidate + activate MFA (`mfa_enabled=true`)     |
-| POST   | `/portal/auth/mfa/disable`       | Turn MFA off — re-verifies a current code first                              |
+| POST   | `/portal/auth/mfa/verify`        | Verify a code to promote the candidate + activate MFA (`mfa_enabled=true`). A wrong code is `400` `mfa_code_invalid` (coded), not a 401 — see below |
+| POST   | `/portal/auth/mfa/disable`       | Turn MFA off — re-verifies a current code first; a wrong one is `400` `mfa_code_invalid` |
 
 ### MFA (two-factor) — `portal_auth.py`
 
@@ -80,6 +80,11 @@ secret generation, provisioning URI, QR, and `verify_totp` (±1 step skew).
   abandoned enrollment can never leave the supplier without the factor they
   already had. The secret is never echoed back after activation.
   `POST /mfa/disable` re-verifies a current code before clearing the columns.
+  A wrong code on either signed-in call is a `400` with
+  `detail = {code: "mfa_code_invalid", message: "Invalid code", params: {}}`
+  (`api/refusals.MFA_CODE_INVALID_DETAIL`), not the `401` it used to be:
+  `portalApi.ts` reads a 401 on a call that carried a token as an expired
+  session, so a mistyped code signed the supplier out of the portal.
 - **Re-enrollment is a step-up.** Once a factor is live, `POST /mfa/enroll`
   requires an optional-body credential — `{password}` (the portal password, via
   the shared `pwd_context`) or `{code}` (a code from the CURRENTLY enrolled

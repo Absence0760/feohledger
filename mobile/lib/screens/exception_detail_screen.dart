@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'package:feohledger_mobile/api/endpoints.dart';
+import 'package:feohledger_mobile/l10n/coded_refusal_messages.dart';
 import 'package:feohledger_mobile/l10n/gen/app_localizations.dart';
 import 'package:feohledger_mobile/models/admin_user.dart';
 import 'package:feohledger_mobile/models/exception.dart';
@@ -360,9 +361,13 @@ class _ExceptionDetailScreenState extends State<ExceptionDetailScreen> {
       A11y.announce(context, successMsg);
       Navigator.of(context).pop(true);
     } else {
-      A11y.announce(context, failMsg);
+      // The segregation refusal says WHY and what to do instead (escalate, or
+      // ask someone else) — stated from its code, not the generic failure.
+      final message =
+          localizeCodedRefusal(l, store.actionErrorDetail) ?? failMsg;
+      A11y.announce(context, message);
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(failMsg)),
+        SnackBar(content: Text(message)),
       );
     }
   }

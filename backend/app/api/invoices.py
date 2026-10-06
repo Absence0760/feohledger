@@ -35,6 +35,7 @@ from app.api.pagination import (
     pagination_params,
 )
 from app.api.permissions import PERM_INVOICE_APPROVE, effective_permissions
+from app.api.refusals import coded_refusal
 from app.api.sorting import SortParams, resolve_order_by, sort_params
 from app.database import get_control_db
 from app.models.agent_decision import AgentDecision
@@ -178,6 +179,11 @@ router = APIRouter(prefix="/invoices", tags=["invoices"])
 # sends one of these keys; the raw value is never interpolated into SQL. `.id`
 # is always appended as the final tie-break regardless of which column is
 # picked (same reasoning as the pre-existing `created_at, id` default order).
+#: The optimistic-concurrency refusal on `PATCH /invoices/{id}`. A client
+#: BRANCHES on it — the web invoice modal turns it into a reload prompt — so it
+#: is keyed on this code, never on the sentence (`api/refusals.coded_refusal`).
+INVOICE_STALE_EDIT = "invoice_stale_edit"
+
 INVOICE_SORTABLE_COLUMNS: dict[str, object] = {
     "created_at": Invoice.created_at,
     "due_date": Invoice.due_date,
@@ -1563,9 +1569,10 @@ async def update_invoice(
         if expected_updated_at != invoice.updated_at:
             raise HTTPException(
                 status_code=409,
-                detail=(
+                detail=coded_refusal(
+                    INVOICE_STALE_EDIT,
                     "This invoice was modified since you loaded it. "
-                    "Reload and reapply your changes."
+                    "Reload and reapply your changes.",
                 ),
             )
     # An approved invoice is financially frozen — the signed-off amount is what
@@ -2540,9 +2547,10 @@ def _skip_reason(exc: HTTPException, fallback: str) -> str:
     """The human-readable cause a bulk-status skip is reported with.
 
     `approve_invoice` / `reject_invoice` / `resubmit_invoice` /
-    `transition_invoice` all raise `HTTPException` with a plain-string
-    `detail` (segregation-of-duties, the CFO gate, the max-amount cap, the
-    state-machine's own "cannot transition" message) — that string IS the
+    `transition_invoice` raise `HTTPException` whose `detail` is either a
+    plain string (the state-machine's own "cannot transition" message) or a
+    coded refusal object (segregation of duties, the CFO gate, the max-amount
+    cap — `api/refusals.coded_refusal`) — its sentence IS the
     real cause, and it's what should reach the caller instead of a generic
     label that can't distinguish an authorization refusal from a data
     problem. A structured detail (the GL-chart refusal is an object carrying

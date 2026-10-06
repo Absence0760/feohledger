@@ -7,8 +7,10 @@ from decimal import Decimal
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.refusals import coded_refusal
 from app.config import settings
 from app.models.invoice import Invoice, InvoiceStatus
+from app.schemas.money import json_money_string
 from app.services.rag import store_embedding
 from app.services.vendor_priors import record_corrections
 from app.services.workflow_engine import (
@@ -22,6 +24,14 @@ from app.services.workflow_engine import (
 from app.utils.dates import utc_today
 
 _log = logging.getLogger(__name__)
+
+# The approval money gates' refusal codes (`api/refusals.coded_refusal`). The
+# two "exceeded" refusals carry every figure their sentence names as typed
+# params (`_enforce_approval_thresholds._gate_params`); the misconfigured one
+# names none. Siblings of `approval_chain.APPROVAL_*`.
+APPROVAL_MAX_AMOUNT_EXCEEDED = "approval_max_amount_exceeded"
+APPROVAL_MAX_AMOUNT_MISCONFIGURED = "approval_max_amount_misconfigured"
+APPROVAL_CFO_REQUIRED = "approval_cfo_required"
 
 
 async def _fetch_invoice_bytes(invoice: Invoice) -> bytes | None:
@@ -119,6 +129,12 @@ async def _enforce_approval_thresholds(
     aggregate_amount = amount
     recent_spend = Decimal(0)
     invoice_currency = (getattr(invoice, "currency", None) or "").strip().upper() or "USD"
+    # The code the refusal's typed params name: the invoice's OWN currency, or
+    # None when it carries none. `invoice_currency`'s "USD" stand-in stays out
+    # of them — a typed field is formatted with a symbol by both clients, so a
+    # guessed code would render a code-less invoice as dollars (decisions
+    # §160 / §196); a None figure renders bare.
+    params_currency = (getattr(invoice, "currency", None) or "").strip().upper() or None
     vendor_id = getattr(invoice, "vendor_id", None)
     structuring_window_days = 0
     if vendor_id is not None:
@@ -155,14 +171,22 @@ async def _enforce_approval_thresholds(
     gate_amount = reporting_gate_amount(invoice, amount=aggregate_amount, org_settings=org_settings)
     gate_currency = gate_amount.currency
 
+    def _structuring_applies(threshold_dec: Decimal) -> bool:
+        return recent_spend > 0 and amount <= threshold_dec
+
     def _structuring_note(threshold_dec: Decimal) -> str:
-        if recent_spend <= 0 or amount > threshold_dec:
+        if not _structuring_applies(threshold_dec):
             return ""
         return (
             f" This invoice alone is under the threshold, but combined with "
             f"{recent_spend:,.2f} {invoice_currency} in other recent invoices from this "
             f"vendor (last {structuring_window_days} days) it totals "
             f"{aggregate_amount:,.2f} {invoice_currency}."
+        )
+
+    def _measured_differs() -> bool:
+        return gate_amount.expressible and not (
+            gate_amount.amount == aggregate_amount and invoice_currency == gate_currency
         )
 
     def _compared_note() -> str:
@@ -172,12 +196,33 @@ async def _enforce_approval_thresholds(
                 f" This invoice could not be expressed in {gate_currency}, the currency the "
                 f"limit is set in, so it cannot be cleared against it."
             )
-        if gate_amount.amount == aggregate_amount and invoice_currency == gate_currency:
+        if not _measured_differs():
             return ""
         return (
             f" Measured as {gate_amount.amount:,.2f} {gate_currency} — the limit is set in "
             f"{gate_currency}."
         )
+
+    def _gate_params(threshold_dec: Decimal | None) -> dict:
+        """The typed half of a money-gate refusal — every figure its sentence
+        names, as an exact string beside its currency, so a client states the
+        sentence (and its two optional notes) in the reader's language and
+        number format. A `None` is a note that does not apply; `limit` is
+        `None` only when the threshold itself is malformed."""
+        structuring = threshold_dec is not None and _structuring_applies(threshold_dec)
+        return {
+            "amount": json_money_string(amount),
+            "currency": params_currency,
+            "limit": json_money_string(threshold_dec) if threshold_dec is not None else None,
+            "limit_currency": gate_currency,
+            "recent_spend": json_money_string(recent_spend) if structuring else None,
+            "aggregate_amount": json_money_string(aggregate_amount) if structuring else None,
+            "window_days": structuring_window_days if structuring else None,
+            "expressible": gate_amount.expressible,
+            "measured_amount": (
+                json_money_string(gate_amount.amount) if _measured_differs() else None
+            ),
+        }
 
     # Both money gates below read the config through the shared fail-CLOSED
     # parsers in `approval_chain`. `steps_config` is a JSONB blob and
@@ -197,16 +242,19 @@ async def _enforce_approval_thresholds(
     if max_amount_gate_applies(max_amount, gate_amount):
         max_amount_dec = _to_decimal(max_amount)
         if max_amount_dec is None or not max_amount_dec.is_finite():
-            detail = (
+            detail = coded_refusal(
+                APPROVAL_MAX_AMOUNT_MISCONFIGURED,
                 "This workflow's approval step has an unusable 'max_invoice_amount'. "
-                "Approval is blocked until an admin corrects the workflow definition."
+                "Approval is blocked until an admin corrects the workflow definition.",
             )
         else:
-            detail = (
+            detail = coded_refusal(
+                APPROVAL_MAX_AMOUNT_EXCEEDED,
                 f"Invoice amount {amount:,.2f} {invoice_currency} exceeds maximum allowed "
                 f"{max_amount_dec:,.2f} {gate_currency}."
                 + _structuring_note(max_amount_dec)
-                + _compared_note()
+                + _compared_note(),
+                **_gate_params(max_amount_dec),
             )
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=detail)
 
@@ -221,6 +269,8 @@ async def _enforce_approval_thresholds(
     # vendor) can't walk under it either.
     if cfo_gate_applies(cfo_threshold, gate_amount) and "cfo" not in actor_roles:
         threshold_dec = _to_decimal(cfo_threshold)
+        if threshold_dec is not None and not threshold_dec.is_finite():
+            threshold_dec = None
         limit = (
             f"{threshold_dec:,.2f} {gate_currency}"
             if threshold_dec is not None
@@ -231,9 +281,11 @@ async def _enforce_approval_thresholds(
         note = _structuring_note(threshold_dec) if threshold_dec is not None else ""
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail=(
+            detail=coded_refusal(
+                APPROVAL_CFO_REQUIRED,
                 f"Invoice amount {amount:,.2f} {invoice_currency} exceeds {limit}. "
-                f"CFO approval required." + note + _compared_note()
+                f"CFO approval required." + note + _compared_note(),
+                **_gate_params(threshold_dec),
             ),
         )
 

@@ -123,7 +123,9 @@ Clearing a payment-**blocking** exception is a money-path authorisation, so
 (`exceptions.raised_by_user_id`, migration `0098`). `resolve` and `dismiss`
 only — `escalate` is the refused actor's exit and an escalated row still blocks
 the run. NULL on both axes is permissive; `settings.exceptions
-.require_segregation: false` is the explicit per-org opt-out. Full rules,
+.require_segregation: false` is the explicit per-org opt-out. The single-row
+403 is a coded refusal whose `code` is the same `segregation_raiser` /
+`segregation_implicated` string `/bulk/resolve` reports per skipped row. Full rules,
 including what each refusal says and why a refusal is logged rather than
 audited: [`docs/authentication.md`](../../docs/authentication.md) § Segregation
 of duties on the exception queue, and `docs/decisions.md` §169–§170.

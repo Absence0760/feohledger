@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 
+import 'package:feohledger_mobile/l10n/coded_refusal_messages.dart';
 import 'package:feohledger_mobile/l10n/gen/app_localizations.dart';
 import 'package:feohledger_mobile/models/invoice.dart';
 import 'package:feohledger_mobile/screens/invoice_detail_screen.dart';
@@ -131,6 +132,21 @@ class _ApprovalsScreenState extends State<ApprovalsScreen> {
                               // row vanishing is not announced on its own
                               // (WCAG 4.1.3).
                               A11y.announce(context, l.approvalApproved);
+                            } else if (!ok && context.mounted) {
+                              // A refused swipe used to snap the row back
+                              // with no word of why. A coded refusal (SoD,
+                              // CFO / max gate, named approver) says so in
+                              // the reader's language.
+                              final reason = localizeCodedRefusal(
+                                l,
+                                InvoiceStore.instance.approveErrorDetail,
+                              );
+                              if (reason != null) {
+                                A11y.announce(context, reason);
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(content: Text(reason)),
+                                );
+                              }
                             }
                             return ok;
                           }

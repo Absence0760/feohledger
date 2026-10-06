@@ -8,10 +8,10 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import {
 	GL_CODES_OUTSIDE_CHART,
-	localizeApiDetail,
 	localizeGlChartRefusal,
 	parseGlChartRefusal
 } from './glChartRefusal';
+import { localizeApiDetail } from './codedRefusals';
 import { en } from '../i18n/locales/en';
 import { messages as de } from '../i18n/locales/de';
 import { interpolate } from '../i18n/interpolate';
