@@ -94,11 +94,32 @@
 	// the banner, once as a gap above it.
 	const inset = $derived(visible && height > 0 ? height + EDGE_PX * 2 : 0);
 
+	// The same footprint, published on the root for layouts that pin their own
+	// content to the viewport and so cannot scroll clear of the banner the way
+	// the document does: `data-consent-visible` says the banner is up, and
+	// `--consent-banner-height` is the band it occupies at the bottom of the
+	// viewport (its height plus the edge offset below and the gap above — the
+	// figure to subtract, not the box alone). The legal contents rail
+	// (`lib/legal/LegalPage.svelte`) is the consumer: it is `position: sticky`
+	// with a viewport-relative `max-height`, so without this its last links
+	// sat behind the banner and keyboard focus could land on one unseen
+	// (WCAG 2.4.11). `bind:offsetHeight` is ResizeObserver-backed, so `inset`
+	// — and with it all three values — tracks the banner as it reflows (Manage
+	// expands it; a narrow viewport wraps it) and is removed the moment it
+	// unmounts, so no layout reserves space for a banner that has gone.
+	//
+	// Presentation only: none of this reads or writes the consent choice.
 	$effect(() => {
 		if (inset === 0) return;
 		const root = document.documentElement;
 		root.style.scrollPaddingBottom = `${inset}px`;
-		return () => root.style.removeProperty('scroll-padding-bottom');
+		root.style.setProperty('--consent-banner-height', `${inset}px`);
+		root.setAttribute('data-consent-visible', '');
+		return () => {
+			root.style.removeProperty('scroll-padding-bottom');
+			root.style.removeProperty('--consent-banner-height');
+			root.removeAttribute('data-consent-visible');
+		};
 	});
 
 	function record(value: ConsentChoice) {

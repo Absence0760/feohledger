@@ -257,6 +257,70 @@ test.describe('legal pages', () => {
 		expect(stacked.y, 'the contents sits below the text it indexes').toBeLessThan(narrow.y);
 	});
 
+	test('the consent banner never hides a focused contents entry, and gives the space back', async ({
+		page
+	}) => {
+		// WCAG 2.4.11 Focus Not Obscured. The rail is pinned beside the text, so
+		// unlike the document it cannot scroll out from under the fixed banner:
+		// at a short viewport its last entries sat behind it, and Tab reached
+		// them unseen. The banner publishes the band it occupies while mounted
+		// and the rail's list subtracts it — only while it is there.
+		const banner = page.getByRole('region', { name: 'Cookie and privacy consent' });
+		const html = page.locator('html');
+		const list = page.locator(`${CONTENTS} .contents-list`);
+		const entries = page.locator(`${CONTENTS} a`);
+
+		// Wide enough for the rail, short enough that the DPA's twenty-one
+		// entries overflow it — and the 920px banner, centred, spans the rail.
+		await page.setViewportSize({ width: 1400, height: 640 });
+		await page.goto('/legal/dpa');
+		await expect(banner).toBeVisible();
+		await expect(html).toHaveAttribute('data-consent-visible', '');
+		const inset = await html.evaluate((el) =>
+			getComputedStyle(el).getPropertyValue('--consent-banner-height').trim()
+		);
+		expect(inset, 'the banner publishes the band it occupies').toMatch(/^[1-9]\d*(\.\d+)?px$/);
+
+		// Get the rail stuck to the viewport — the state a reader tabbing
+		// through it from mid-document is in.
+		const target = page.locator('.legal-page h2#transfers');
+		await page.locator(`${CONTENTS} a[href="#transfers"]`).click();
+		await expect(target).toBeInViewport();
+
+		const last = entries.last();
+		await last.focus();
+		await expect(last).toBeFocused();
+
+		const bannerBox = (await banner.boundingBox())!;
+		const lastBox = (await last.boundingBox())!;
+		const listBox = (await list.boundingBox())!;
+		expect(
+			lastBox.y + lastBox.height,
+			'the focused contents entry is behind the consent banner'
+		).toBeLessThanOrEqual(bannerBox.y);
+		expect(
+			listBox.y + listBox.height,
+			'the contents list extends behind the consent banner'
+		).toBeLessThanOrEqual(bannerBox.y);
+		const shortened = listBox.height;
+
+		// Dismissing hands the band back at once — no space is reserved for a
+		// banner that has gone.
+		await page.getByRole('button', { name: 'Reject non-essential' }).click();
+		await expect(banner).toHaveCount(0);
+		await expect(html).not.toHaveAttribute('data-consent-visible');
+		expect(
+			await html.evaluate((el) =>
+				getComputedStyle(el).getPropertyValue('--consent-banner-height').trim()
+			)
+		).toBe('');
+		await expect
+			.poll(async () => (await list.boundingBox())!.height, {
+				message: 'the contents list did not reclaim the space after dismissal'
+			})
+			.toBeGreaterThan(shortened);
+	});
+
 	test('the index links every document', async ({ page }) => {
 		await page.goto('/legal');
 		await expect(page.getByRole('heading', { level: 1, name: 'Legal' })).toBeVisible();

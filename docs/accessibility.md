@@ -235,7 +235,14 @@ The current build implements:
   spacer lets any page scroll clear of it, and `scroll-padding-bottom` stops
   keyboard focus above it rather than behind it. Without that, at 1280×720 it
   hid the reset-password submit button on a page with nothing to scroll.
-  Guarded by `frontend/tests-e2e/consent-banner.spec.ts`.
+  Guarded by `frontend/tests-e2e/consent-banner.spec.ts`. Content pinned to
+  the viewport cannot scroll clear the same way, so the banner also publishes
+  its footprint on the root while mounted — `data-consent-visible` plus a
+  `--consent-banner-height` custom property, removed on dismissal — and the
+  legal documents' sticky contents rail subtracts it from its `max-height`, so
+  Tab never lands on a contents entry behind the banner and the space comes
+  back the moment a choice is made. Guarded by
+  `frontend/tests-e2e/legal/pages.spec.ts` (the consent-banner rail test).
 - **Live-region announcements** for toasts and async status (`aria-live`).
 - **Labelled form fields** — every input has an associated `<label>`;
   required fields are marked.
