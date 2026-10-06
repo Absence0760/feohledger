@@ -27,17 +27,19 @@ Two halves:
 from __future__ import annotations
 
 import ast
+import asyncio
 import uuid
 from decimal import Decimal
 from pathlib import Path
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 
 from app.models.procurement import (
     REQUISITION_COSMETIC_EDIT_FIELDS,
     REQUISITION_MATERIAL_EDIT_FIELDS,
     PurchaseRequisition,
     RequisitionLineItem,
+    RequisitionStatus,
 )
 from app.models.workflow import AuditLog
 from app.schemas.intake import IntakeConvertRequest
@@ -367,3 +369,130 @@ async def test_intake_converter_who_edits_the_requisition_cannot_approve_it(real
         refused = await c.post(f"/api/requisitions/{rid}/approve")
     assert refused.status_code == 403, refused.text
     assert await _editors(realdb, rid) == [str(realdb.info("a").users["ap_manager"])]
+
+
+# ---------------------------------------------------------------------------
+# Concurrency — PATCH / submit / approve serialise on the requisition row
+#
+# `material_editor_ids` is read-modify-write, and approval reads the set the
+# PATCH writes, so every writing route takes `SELECT … FOR UPDATE` on the row.
+# Each test holds that row lock in its own session (standing in for a
+# concurrent request), starts the competing request as a task, waits for a REAL
+# signal — a backend on the tenant DB waiting on a lock in `pg_stat_activity` —
+# then commits the holder's write. Without the lock the request reads the row
+# before the holder commits, and its later write either overwrites the
+# holder's or acts on stale state; each assertion below fails in that case.
+# ---------------------------------------------------------------------------
+
+
+async def _wait_for_lock_waiter(realdb, key="a", timeout_s: float = 15.0) -> None:
+    db_name = realdb.info(key).db_name
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout_s
+    async with realdb.sessionmaker(key)() as probe:
+        while True:
+            waiting = (
+                await probe.execute(
+                    text(
+                        "SELECT count(*) FROM pg_stat_activity "
+                        "WHERE datname = :d AND wait_event_type = 'Lock'"
+                    ),
+                    {"d": db_name},
+                )
+            ).scalar()
+            await probe.rollback()
+            if waiting:
+                return
+            assert loop.time() < deadline, "the request never blocked on the requisition row"
+            await asyncio.sleep(0.02)
+
+
+async def _lock_requisition(session, rid: str) -> PurchaseRequisition:
+    return (
+        await session.execute(
+            select(PurchaseRequisition)
+            .where(PurchaseRequisition.id == uuid.UUID(rid))
+            .with_for_update()
+        )
+    ).scalar_one()
+
+
+async def test_concurrent_material_edits_both_land_in_the_editor_set(realdb):
+    """Editor B (the holder) changes the vendor-side terms and records itself
+    while editor A's PATCH replaces the lines. Unlocked, A read the NULL set
+    before B committed and its write dropped B — who could then approve."""
+    rid = await _create_as_clerk(realdb)
+    admin = realdb.info("a").users["admin"]
+    manager = realdb.info("a").users["ap_manager"]
+    async with realdb.sessionmaker("a")() as holder:
+        req = await _lock_requisition(holder, rid)
+        async with realdb.client(key="a", role="ap_manager") as c:
+            task = asyncio.create_task(
+                c.patch(
+                    f"/api/requisitions/{rid}",
+                    json={
+                        "line_items": [
+                            {"description": "Laptop", "quantity": "9", "unit_price": "1000.00"}
+                        ]
+                    },
+                )
+            )
+            await _wait_for_lock_waiter(realdb)
+            req.currency = "EUR"
+            record_material_editor(req, admin)
+            await holder.commit()
+            resp = await task
+    assert resp.status_code == 200, resp.text
+    assert await _editors(realdb, rid) == sorted([str(admin), str(manager)])
+
+
+async def test_a_patch_waiting_behind_a_submit_is_refused(realdb):
+    """A PATCH that had read `draft` used to commit after a concurrent submit,
+    changing the spend the approver was about to see. Locked, it re-reads the
+    row after the submit commits and gets the non-draft 422."""
+    rid = await _create_as_clerk(realdb)
+    async with realdb.sessionmaker("a")() as holder:
+        req = await _lock_requisition(holder, rid)
+        async with realdb.client(key="a", role="ap_manager") as c:
+            task = asyncio.create_task(
+                c.patch(
+                    f"/api/requisitions/{rid}",
+                    json={
+                        "line_items": [
+                            {"description": "Laptop", "quantity": "50", "unit_price": "1000.00"}
+                        ]
+                    },
+                )
+            )
+            await _wait_for_lock_waiter(realdb)
+            req.status = RequisitionStatus.pending_approval
+            await holder.commit()
+            resp = await task
+    assert resp.status_code == 422, resp.text
+    async with realdb.sessionmaker("a")() as s:
+        total = (
+            await s.execute(
+                select(PurchaseRequisition.total).where(PurchaseRequisition.id == uuid.UUID(rid))
+            )
+        ).scalar_one()
+    assert total == Decimal("2300.00")
+    assert await _editors(realdb, rid) is None
+
+
+async def test_an_approve_waiting_behind_a_material_edit_sees_the_editor(realdb):
+    """The approve reads the editor set it checks. Unlocked, it read the set
+    before a concurrent material edit by the same person committed, passed the
+    check, and approved spend that person had just shaped."""
+    rid = await _create_as_clerk(realdb)
+    async with realdb.client(key="a", role="ap_clerk") as c:
+        assert (await c.post(f"/api/requisitions/{rid}/submit")).status_code == 200
+    manager = realdb.info("a").users["ap_manager"]
+    async with realdb.sessionmaker("a")() as holder:
+        req = await _lock_requisition(holder, rid)
+        async with realdb.client(key="a", role="ap_manager") as c:
+            task = asyncio.create_task(c.post(f"/api/requisitions/{rid}/approve"))
+            await _wait_for_lock_waiter(realdb)
+            record_material_editor(req, manager)
+            await holder.commit()
+            resp = await task
+    assert resp.status_code == 403, resp.text

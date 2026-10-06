@@ -97,6 +97,15 @@ requester ∪ editors. Same shape as the recurring template's editor set
   intake's terms verbatim and accepts only cosmetic overrides (`department`,
   `needed_by`). The converter joins the set the moment they make a material
   edit. A guard fails if the conversion body ever grows a material field.
+- **Every writing route locks the requisition row** (`_get_or_404(...,
+  for_update=True)`): PATCH, DELETE, submit, approve, reject, cancel, reopen
+  and convert-to-PO. The editor set is read-modify-write, and approve reads
+  what PATCH writes. Without the lock, two concurrent material edits both read
+  the old set and the later commit dropped the earlier editor. A PATCH that
+  read `draft` could also commit after a concurrent submit + approve. Lock
+  order is **requisition row first, then budget row** (PATCH resolving a
+  `budget_id`). The budget routes lock only the budget and only *read*
+  requisitions, so no path takes the two in the opposite order.
 - Not backfilled: edits before migration 0102 implicate nobody (no honest
   editor history exists to recover), and NULL reads as "nobody beyond the
   requester".
