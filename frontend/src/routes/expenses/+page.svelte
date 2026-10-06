@@ -778,6 +778,15 @@
 		return canApproveReports && r.status === 'submitted' && auth.user?.id !== r.employee_user_id;
 	}
 
+	// Composition (attach / detach) and submit are the OWNER's alone
+	// (`employee_user_id`), whatever the viewer's role: report segregation refuses
+	// only the owner at approval, so a manager who could build or submit a
+	// clerk's report could then approve it. The server refuses a non-owner with
+	// 403 `expense_report_not_owner`; this only stops offering the buttons.
+	function canComposeReport(r: ExpenseReport): boolean {
+		return canCreate && r.status === 'draft' && auth.user?.id === r.employee_user_id;
+	}
+
 	function exportReportCsv() {
 		if (!activeReport) return;
 		exportExpensesCsv({ report_id: activeReport.id });
@@ -1325,7 +1334,7 @@
 					</div>
 					<div class="report-detail-actions">
 						<button class="btn-secondary" onclick={exportReportCsv}>{m('expenses.reports.exportCsv')}</button>
-						{#if canCreate && activeReport.status === 'draft'}
+						{#if canComposeReport(activeReport)}
 							<button class="btn-primary" disabled={reportBusy} onclick={submitReport}>{m('expenses.reports.submit')}</button>
 						{/if}
 						{#if canApproveReport(activeReport)}
@@ -1410,7 +1419,7 @@
 					</div>
 				{/if}
 
-				{#if canCreate && activeReport.status === 'draft'}
+				{#if canComposeReport(activeReport)}
 					<div class="attach-row">
 						<input
 							type="text"
@@ -1452,7 +1461,7 @@
 									</span>
 								</td>
 								<td class="actions">
-									{#if canCreate && activeReport?.status === 'draft'}
+									{#if activeReport && canComposeReport(activeReport)}
 										<RowAction variant="default" onclick={() => detachFromReport(exp.id)}>{m('expenses.reports.detach')}</RowAction>
 									{/if}
 								</td>
