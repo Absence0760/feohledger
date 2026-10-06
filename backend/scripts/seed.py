@@ -2429,6 +2429,20 @@ async def seed(lean: bool = False):
         await tenant_seeder(db_name, org_id, label)
         await finalize_entities(db_name, org_id)
 
+    if not lean:
+        # Back-dated approval history + A/B experiments for /adaptive and
+        # /experiments (scripts/seed_automation.py). Acme only: it is the tenant
+        # with a user in every role, and the e2e tenants must not get it — their
+        # specs count invoices, and a running experiment re-routes every new
+        # invoice on the default workflow. Runs after finalize_entities, so the
+        # rows stamp the Default entity themselves. Bare import for the same
+        # reason as seed_extras.
+        from seed_automation import seed_automation_tenant
+
+        acme_db, acme_org_id, acme_label = base_tenants[0]
+        print(f"\n=== Seeding automation history: {acme_label} ({acme_db}) ===")
+        await seed_automation_tenant(acme_db, acme_org_id)
+
     await control_engine.dispose()
 
     print(f"\nDone! {2 + len(e2e_tenants)} tenants ready:")
