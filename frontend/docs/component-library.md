@@ -185,9 +185,14 @@ The visual styling for all of the above lives **globally in `src/app.css`** (cla
   (`data-testid="usage-meter"`). Budget `0` = unlimited (running total, no bar);
   amber ≥80%, red at/over budget.
 
-**`workflow-builder/`** — drag-and-drop no-code builder canvas for the
-`/workflows/[id]` editor (step palette, canvas nodes, SVG connectors;
-native HTML5 drag-and-drop, no svelte-flow).
+**`workflow-builder/`** — the no-code builder canvas for the
+`/workflows/[id]` editor (step palette, canvas nodes, SVG connectors; no
+svelte-flow). The palette adds a step by click. The canvas reorders by a
+pointer drag (`WorkflowCanvas`): the held step follows the cursor while the
+others slide into place, so it is already in position on release. The
+ordering rule is the pure `utils/workflowSort.ts::previewOrder`, and
+renumbering keeps condition branches on their steps
+(`utils/workflowSteps.ts::renumberSteps`).
 
 **`workflow-mgmt/`** — no-code builder management dialogs mounted on the
 `/workflows` list page: `TemplateLibraryModal` (start from a template),

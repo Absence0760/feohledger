@@ -147,6 +147,114 @@ test.describe('no-code workflow builder management', () => {
 		}
 	});
 
+	/**
+	 * A throwaway workflow holding three named approval steps, opened in the
+	 * editor. Returns its name for the `finally` cleanup.
+	 */
+	async function openWorkflowWithSteps(page: Page, label: string): Promise<string> {
+		const name = `${MARKER}${label} ${Date.now()}`;
+		await page.goto('/workflows');
+		await page.getByRole('button', { name: '+ New Workflow' }).click();
+		await page.locator('#wf-name').fill(name);
+		await page.getByRole('button', { name: /^Create$/ }).click();
+		await page.waitForURL(/\/workflows\/[a-f0-9-]{36}/);
+		const id = page.url().match(/\/workflows\/([a-f0-9-]{36})/)![1];
+		const patch = await page.request.patch(`${API_BASE}/api/workflows/${id}`, {
+			headers: await authedTenantHeaders(page),
+			data: {
+				steps: ['Alpha', 'Beta', 'Gamma'].map((n, i) => ({
+					number: i + 1,
+					type: 'approval',
+					name: `Step ${n}`,
+					enabled: true,
+					config: {},
+				})),
+			},
+		});
+		expect(patch.ok()).toBeTruthy();
+		await page.reload();
+		await expect(page.locator('.canvas .node')).toHaveCount(3, { timeout: 10_000 });
+		return name;
+	}
+
+	const stepNames = (page: Page) => page.locator('.canvas .node .node-name').allTextContents();
+
+	/** Press on a step's handle and move to `toY` without releasing. */
+	async function holdAndMove(page: Page, index: number, toY: (boxes: { y: number; height: number }[]) => number) {
+		const nodes = page.locator('.canvas .node');
+		const boxes = [];
+		for (let i = 0; i < 3; i++) boxes.push((await nodes.nth(i).boundingBox())!);
+		const handle = (await nodes.nth(index).locator('.drag-handle').boundingBox())!;
+		await page.mouse.move(handle.x + handle.width / 2, handle.y + handle.height / 2);
+		await page.mouse.down();
+		await page.mouse.move(handle.x + handle.width / 2, toY(boxes), { steps: 15 });
+	}
+
+	test('dragging a step reorders the canvas live, before the release', async ({ page }) => {
+		const name = await openWorkflowWithSteps(page, 'Drag WF');
+		try {
+			// Carry Alpha down past Gamma's middle.
+			await holdAndMove(page, 0, (b) => b[2].y + b[2].height * 0.8);
+
+			// Still held: the other steps have already slid into their new places,
+			// and Alpha's slot shows where it will land.
+			await expect.poll(() => stepNames(page)).toEqual(['Step Beta', 'Step Gamma', 'Step Alpha']);
+			await expect(page.locator('.canvas .item.placeholder')).toHaveCount(1);
+			await expect(page.locator('.canvas .item-body.lifted')).toContainText('Step Alpha');
+
+			await page.mouse.up();
+			await expect(page.locator('.canvas .item.placeholder')).toHaveCount(0);
+			expect(await stepNames(page)).toEqual(['Step Beta', 'Step Gamma', 'Step Alpha']);
+			// Renumbered, and the editor knows there is something to save.
+			await expect(page.locator('.canvas .node .node-number')).toHaveText(['1', '2', '3']);
+			await expect(page.getByRole('button', { name: 'Save', exact: true })).toBeEnabled();
+		} finally {
+			await page.mouse.up().catch(() => {});
+			await deleteWorkflowByName(page, name);
+		}
+	});
+
+	test('Escape while dragging puts the step back', async ({ page }) => {
+		const name = await openWorkflowWithSteps(page, 'Drag Cancel WF');
+		try {
+			await holdAndMove(page, 2, (b) => b[0].y + 4);
+			await expect.poll(() => stepNames(page)).toEqual(['Step Gamma', 'Step Alpha', 'Step Beta']);
+
+			await page.keyboard.press('Escape');
+			await page.mouse.up();
+			expect(await stepNames(page)).toEqual(['Step Alpha', 'Step Beta', 'Step Gamma']);
+			await expect(page.getByRole('button', { name: 'Save', exact: true })).toBeDisabled();
+		} finally {
+			await deleteWorkflowByName(page, name);
+		}
+	});
+
+	test('a click on a step still selects it — a drag starts only after real movement', async ({
+		page,
+	}) => {
+		const name = await openWorkflowWithSteps(page, 'Click WF');
+		try {
+			await page.locator('.canvas .node').nth(1).click();
+			await expect(page.locator('.canvas .node').nth(1)).toHaveClass(/selected/);
+			expect(await stepNames(page)).toEqual(['Step Alpha', 'Step Beta', 'Step Gamma']);
+		} finally {
+			await deleteWorkflowByName(page, name);
+		}
+	});
+
+	test('the step library adds by click and is not draggable', async ({ page }) => {
+		const name = await openWorkflowWithSteps(page, 'Palette WF');
+		try {
+			const item = page.locator('.palette-item[data-palette-type="delay"]');
+			await expect(item).not.toHaveAttribute('draggable', 'true');
+			await item.click();
+			await expect(page.locator('.canvas .node')).toHaveCount(4);
+			await expect(page.locator('.canvas .node').nth(3)).toHaveClass(/selected/);
+		} finally {
+			await deleteWorkflowByName(page, name);
+		}
+	});
+
 	test('version history shows ≥1 version after an edit', async ({ page }) => {
 		const name = `${MARKER}Versioned WF ${Date.now()}`;
 		// Create via the standard create modal (no template dependency).

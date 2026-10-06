@@ -59,8 +59,6 @@
 	let approverSearch = $state('');
 	let approverDropdownOpen = $state(false);
 	let erpMethod = $state<string>('merge_dev');
-	// Set while a palette item is being dragged, so the canvas can show drop slots.
-	let paletteDragType = $state<WorkflowStepType | null>(null);
 
 	const id = $derived(page.params.id ?? '');
 
@@ -167,15 +165,6 @@
 		const next = renumberSteps([...steps, makeStep(type)]);
 		steps = next;
 		selectedIndex = next.length - 1;
-		markDirty();
-	}
-
-	function addStepAt(type: WorkflowStepType, index: number) {
-		const clamped = Math.max(0, Math.min(index, steps.length));
-		const arr = [...steps];
-		arr.splice(clamped, 0, makeStep(type));
-		steps = renumberSteps(arr);
-		selectedIndex = clamped;
 		markDirty();
 	}
 
@@ -360,12 +349,8 @@
 		</div>
 
 		<div class="editor">
-			<!-- Left: draggable step library -->
-			<StepPalette
-				ondragtype={(type) => (paletteDragType = type)}
-				ondragend={() => (paletteDragType = null)}
-				onadd={addStep}
-			/>
+			<!-- Left: step library (click to add) -->
+			<StepPalette onadd={addStep} />
 
 			<!-- Centre: flow canvas -->
 			<div class="canvas-pane">
@@ -375,10 +360,8 @@
 				<WorkflowCanvas
 					{steps}
 					{selectedIndex}
-					paletteType={paletteDragType}
 					onselect={(i) => (selectedIndex = i)}
 					onreorder={reorderStep}
-					onaddat={addStepAt}
 					ontoggle={toggleStep}
 					ondelete={removeStep}
 				/>
