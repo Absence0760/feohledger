@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:feohledger_mobile/api/api_client.dart';
 import 'package:feohledger_mobile/api/endpoints.dart';
 import 'package:feohledger_mobile/l10n/gen/app_localizations.dart';
+import 'package:feohledger_mobile/l10n/gl_chart_refusal_messages.dart';
 import 'package:feohledger_mobile/models/audit_entry.dart';
 import 'package:feohledger_mobile/models/invoice.dart';
 import 'package:feohledger_mobile/stores/auth_store.dart';
@@ -117,9 +118,14 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
         // The server's sentence, not a generic "try again": an edit is refused
         // for a reason the user has to act on (a GL code outside the invoice's
         // chart, a field frozen by approval), and retrying changes nothing.
-        _showSnack(
-          l.invoiceDetailUpdateFailed(InvoiceStore.instance.error ?? ''),
-        );
+        // A GL-chart refusal is stated in the reader's language from its code
+        // (`gl_chart_refusal_messages.dart`); anything else is the server's
+        // own sentence.
+        final store = InvoiceStore.instance;
+        final reason = localizeGlChartRefusal(l, store.updateErrorDetail) ??
+            store.error ??
+            '';
+        _showSnack(l.invoiceDetailUpdateFailed(reason));
       }
     } finally {
       if (mounted) setState(() => _submitting = false);

@@ -351,6 +351,43 @@ void main() {
         fail('expected an ApiException');
       } on ApiException catch (e) {
         expect(e.message, 'Request failed (502)');
+        expect(e.detail, isNull);
+      }
+    });
+
+    test(
+        'a structured `detail` yields its `message` and keeps the structure '
+        'on the exception', () async {
+      // The GL-chart refusal: a stable code + params for the screen to state
+      // in the reader's language, and the English `message` as the fallback.
+      final detail = {
+        'code': 'gl_codes_outside_chart',
+        'on_lines': false,
+        'foreign': ['6000'],
+        'retired': <String>[],
+        'unknown': <String>[],
+        'message': "GL account '6000' belongs to another entity's chart.",
+      };
+      ApiClient().debugConfigure(
+        client: MockClient(
+          (req) async => http.Response(
+            jsonEncode({'detail': detail}),
+            422,
+            headers: {'content-type': 'application/json'},
+          ),
+        ),
+        timeout: const Duration(milliseconds: 50),
+      );
+
+      try {
+        await ApiClient().patch('/things', {'gl_account': '6000'});
+        fail('expected an ApiException');
+      } on ApiException catch (e) {
+        expect(
+          e.message,
+          "GL account '6000' belongs to another entity's chart.",
+        );
+        expect(e.detail, detail);
       }
     });
   });

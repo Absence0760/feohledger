@@ -1,6 +1,8 @@
 import { getApiBase, getTenantSlug } from '#lib/tenant.ts';
 import { getSelectedEntityId } from '#lib/entity.ts';
 import { apiErrorCode, formatApiDetail } from '#lib/utils/apiError.ts';
+import { localizeApiDetail } from '#lib/api/glChartRefusal.ts';
+import { m } from '#lib/i18n/store.svelte.ts';
 
 // Re-exported so callers that already import from `#lib/api` (e.g. the
 // hand-rolled fetch in `api/expenses.ts`) don't need a second import path.
@@ -22,37 +24,51 @@ export { formatApiDetail };
 export class ApiError extends Error {
 	status: number;
 	/** The refusal's machine-readable code when the backend sent a coded
-	 *  `detail` (`{code, message, params}`), else `null`. `message` is still
-	 *  the server's English sentence — key a translation on this instead, and
-	 *  fall back to `message` for a code this build predates (see
-	 *  `api/authRefusals.ts`). */
+	 *  `detail` (`{code, message, params}`), else `null`. `message` is the
+	 *  rendered sentence — localized already for a structured refusal
+	 *  `localizeApiDetail` knows (the GL-chart refusal), otherwise the server's
+	 *  English. Key a translation on this, falling back to `message` for a code
+	 *  this build predates (see `api/authRefusals.ts`). */
 	code: string | null;
 	/** The coded refusal's params; empty when there are none. */
 	params: Record<string, unknown>;
+	/** The response's raw `detail`, for a caller that needs its STRUCTURE.
+	 *  `undefined` when the body carried none. */
+	detail: unknown;
 	constructor(
 		message: string,
 		status: number,
 		code: string | null = null,
-		params: Record<string, unknown> = {}
+		params: Record<string, unknown> = {},
+		detail?: unknown
 	) {
 		super(message);
 		this.name = 'ApiError';
 		this.status = status;
 		this.code = code;
 		this.params = params;
+		this.detail = detail;
 	}
 }
 
-/** Build the `ApiError` for a non-OK response body — the rendered message plus
- *  whatever code / params the `detail` carried. Shared with `portalApi.ts`, so
- *  the two clients cannot disagree on how a `detail` becomes an error. */
+/**
+ * Build the `ApiError` for a non-OK response body. The message is the
+ * reader's-language sentence when the `detail` is a structured refusal this
+ * build can localize (`api/glChartRefusal.ts::localizeApiDetail`), otherwise
+ * `formatApiDetail`'s rendering of whatever the server sent — done HERE, once,
+ * so every write path's toast is localized without a per-call-site change
+ * (`frontend/CLAUDE.md` § Internationalization). Code / params / raw detail
+ * ride along. Shared with `portalApi.ts`, so the two clients cannot disagree on
+ * how a `detail` becomes an error.
+ */
 export function apiErrorFromBody(
 	body: { detail?: unknown },
 	fallback: string,
 	status: number
 ): ApiError {
 	const { code, params } = apiErrorCode(body.detail);
-	return new ApiError(formatApiDetail(body.detail, fallback), status, code, params);
+	const message = localizeApiDetail(body.detail, m) ?? formatApiDetail(body.detail, fallback);
+	return new ApiError(message, status, code, params, body.detail);
 }
 
 function getToken(): string | null {

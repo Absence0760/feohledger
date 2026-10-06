@@ -564,6 +564,49 @@ class AppLocalizationsJa extends AppLocalizations {
   }
 
   @override
+  String glChartRefusalForeign(int count, String codes) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '勘定科目',
+    );
+    return '$_temp0 $codes はこの請求書ではなく、別の事業体の勘定科目表に属しています。';
+  }
+
+  @override
+  String glChartRefusalRetired(int count, String codes) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '勘定科目',
+    );
+    return '$_temp0 $codes はこの請求書の勘定科目表で廃止されています。';
+  }
+
+  @override
+  String glChartRefusalUnknown(int count, String codes) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '勘定科目',
+    );
+    return '$_temp0 $codes はこの請求書の勘定科目表にありません。';
+  }
+
+  @override
+  String get glChartRefusalPick =>
+      '請求書自身の勘定科目表(共通の勘定科目と、その事業体独自の勘定科目)からコードを選択してください。';
+
+  @override
+  String get glChartRefusalPickActive =>
+      '請求書自身の勘定科目表(共通の勘定科目と、その事業体独自の勘定科目)から有効なコードを選択してください。';
+
+  @override
+  String glChartRefusalOnLines(String reasons) {
+    return '明細行: $reasons';
+  }
+
+  @override
   String get invoiceDetailApproved => '請求書を承認しました';
 
   @override

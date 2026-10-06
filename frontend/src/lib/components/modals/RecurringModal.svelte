@@ -22,6 +22,9 @@
 	import { m } from '#lib/i18n/store.svelte.ts';
 	import { formatDate } from '#lib/utils/time.ts';
 	import { normalizeMoneyInput } from '#lib/utils/moneyInput.ts';
+	import { listGlAccounts, listInvoiceChart } from '#lib/api/glAccounts.ts';
+	import { glAccountOptionLabel, type GlAccountOption } from '#lib/types/glAccount.ts';
+	import { entityStore } from '#lib/stores/entity.svelte.ts';
 	import {
 		createRecurring,
 		updateRecurring,
@@ -75,6 +78,35 @@
 
 	let saving = $state(false);
 	let busy = $state(false);
+
+	// The GL chart this template may be coded against. Every invoice it raises
+	// is coded with this string and lands under the template's entity, and the
+	// backend refuses — on save, once — any code that is not an active account
+	// of THAT entity's chart (`services/gl_chart`, decisions §194/§199). So the
+	// picker offers exactly that chart: the template's own entity on edit, the
+	// entity a create lands under (`writeEntityId` — the selection, else the
+	// default) on create. Same arrangement as `CreateInvoiceModal` /
+	// `InvoiceModal`; empty → free text, so a tenant with no synced chart can
+	// still type a code.
+	let glAccounts = $state<GlAccountOption[]>([]);
+
+	$effect(() => {
+		(async () => {
+			await entityStore.ensureLoaded();
+			try {
+				if (template) {
+					glAccounts = await listInvoiceChart(template.entity_id);
+				} else {
+					const target = entityStore.writeEntityId;
+					// Unknown only when the entity list failed to load: fall back to
+					// the header-scoped list and let the backend's check decide.
+					glAccounts = target ? await listInvoiceChart(target) : await listGlAccounts();
+				}
+			} catch {
+				// The chart is a convenience dropdown — fall back to free text.
+			}
+		})();
+	});
 
 	const status = $derived(template?.status ?? 'active');
 
@@ -287,7 +319,31 @@
 			</label>
 			<label>
 				<span>{m('recurring.modal.field.glAccount')}</span>
-				<input type="text" bind:value={gl_account} disabled={!canEdit} />
+				{#if glAccounts.length > 0}
+					<select bind:value={gl_account} disabled={!canEdit} data-testid="recurring-gl-select">
+						<option value="">{m('invoices.modal.field.glSelect')}</option>
+						<!-- A stored code the chart no longer offers (retired, or coded
+						     before the rule existed) keeps its own option, or the select
+						     would render blank while the form still holds the value. The
+						     backend accepts it back unchanged. -->
+						{#if gl_account && !glAccounts.some((a) => a.code === gl_account)}
+							<option value={gl_account}>{gl_account}</option>
+						{/if}
+						<!-- Keyed by `id`, not `code`: shared ∪ the entity's own may hold
+						     two rows with one code. The bound value stays the code — the
+						     template's `gl_account` is a String, like the invoice's. -->
+						{#each glAccounts as acct (acct.id)}
+							<option value={acct.code}>
+								{glAccountOptionLabel(acct, entityStore, {
+									withName: true,
+									unknownEntity: m('glAccounts.scope.unknownEntity')
+								})}
+							</option>
+						{/each}
+					</select>
+				{:else}
+					<input type="text" bind:value={gl_account} disabled={!canEdit} />
+				{/if}
 			</label>
 			<label>
 				<span>{m('recurring.modal.field.costCenter')}</span>

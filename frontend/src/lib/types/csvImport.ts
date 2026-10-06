@@ -7,7 +7,14 @@
 export interface ImportRowError {
 	/** The row's literal line number in the uploaded file — header is line 1, so the first data row is 2. */
 	row: number;
+	/** The server's English sentence — the fallback rendering. */
 	message: string;
+	/** Present when the row was refused for a reason the client localizes: the
+	 *  refusal's structured body sits beside `row` (today only the GL-chart
+	 *  refusal — `code: 'gl_codes_outside_chart'` plus its params; see
+	 *  `api/glChartRefusal.ts`). Render through `localizeApiDetail(error, m) ??
+	 *  error.message`. */
+	code?: string;
 }
 
 export interface ImportResult {

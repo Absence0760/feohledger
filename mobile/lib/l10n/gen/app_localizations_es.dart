@@ -580,6 +580,70 @@ class AppLocalizationsEs extends AppLocalizations {
   }
 
   @override
+  String glChartRefusalForeign(int count, String codes) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Las cuentas contables',
+      one: 'La cuenta contable',
+    );
+    String _temp1 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'pertenecen al',
+      one: 'pertenece al',
+    );
+    return '$_temp0 $codes $_temp1 plan de cuentas de otra entidad, no al de esta factura.';
+  }
+
+  @override
+  String glChartRefusalRetired(int count, String codes) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Las cuentas contables',
+      one: 'La cuenta contable',
+    );
+    String _temp1 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'están dadas de baja',
+      one: 'está dada de baja',
+    );
+    return '$_temp0 $codes $_temp1 en el plan de cuentas de esta factura.';
+  }
+
+  @override
+  String glChartRefusalUnknown(int count, String codes) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Las cuentas contables',
+      one: 'La cuenta contable',
+    );
+    String _temp1 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'no están',
+      one: 'no está',
+    );
+    return '$_temp0 $codes $_temp1 en el plan de cuentas de esta factura.';
+  }
+
+  @override
+  String get glChartRefusalPick =>
+      'Elija una cuenta del plan de cuentas propio de la factura: las cuentas compartidas más las de su entidad.';
+
+  @override
+  String get glChartRefusalPickActive =>
+      'Elija una cuenta activa del plan de cuentas propio de la factura: las cuentas compartidas más las de su entidad.';
+
+  @override
+  String glChartRefusalOnLines(String reasons) {
+    return 'Líneas de la factura: $reasons';
+  }
+
+  @override
   String get invoiceDetailApproved => 'Factura aprobada';
 
   @override

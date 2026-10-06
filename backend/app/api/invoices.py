@@ -118,7 +118,7 @@ from app.tenant import (
     get_write_entity_id,
 )
 from app.utils.dates import resolve_day_first_preference
-from app.utils.http import content_disposition_attachment
+from app.utils.http import content_disposition_attachment, detail_text
 from app.utils.search import ilike_contains
 
 IMMUTABLE_STATUSES = {
@@ -1160,7 +1160,7 @@ async def save_invoice_line_items(
         organization_id=invoice.organization_id,
         entity_id=invoice.entity_id,
         codes={item.gl_account for item in body if item.gl_account} - set(before["gl_accounts"]),
-        where="Line items",
+        on_lines=True,
     )
 
     # Delete existing line items
@@ -2545,11 +2545,12 @@ def _skip_reason(exc: HTTPException, fallback: str) -> str:
     state-machine's own "cannot transition" message) — that string IS the
     real cause, and it's what should reach the caller instead of a generic
     label that can't distinguish an authorization refusal from a data
-    problem. `detail` is typed `Any` on `HTTPException`, so a non-string
-    (a future caller that raises a structured detail) falls back rather than
+    problem. A structured detail (the GL-chart refusal is an object carrying
+    a `code` and a `message`) contributes its `message` via
+    `utils/http.detail_text`; any other shape falls back rather than
     handing the client a stringified dict.
     """
-    return exc.detail if isinstance(exc.detail, str) else fallback
+    return detail_text(exc.detail) or fallback
 
 
 # Targets a human may legitimately drive in bulk. Each is routed below through

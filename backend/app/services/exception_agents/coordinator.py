@@ -24,6 +24,7 @@ from app.services.exception_agents.base import (
 from app.services.exception_agents.registry import get_resolver
 from app.services.exception_agents.resolvers.amount_mismatch import NotApprovable
 from app.services.exception_lifecycle import record_decision, refusal_message, segregation_refusal
+from app.utils.http import detail_text
 
 logger = logging.getLogger(__name__)
 
@@ -57,7 +58,7 @@ _REFUSAL_DETAIL_LIMIT = 300
 
 def _refusal_reason(exc: HTTPException) -> str:
     """Turn an approval refusal into the rationale the escalation carries."""
-    detail = exc.detail if isinstance(exc.detail, str) else ""
+    detail = detail_text(exc.detail) or ""
     detail = detail.strip()[:_REFUSAL_DETAIL_LIMIT]
     if not detail:
         detail = "The approval was refused."

@@ -11,7 +11,13 @@ class ApiException implements Exception {
   final int statusCode;
   final String message;
 
-  ApiException(this.statusCode, this.message);
+  /// The response's raw decoded `detail`, when a caller needs its structure —
+  /// a structured refusal carries a stable `code` the client localizes from
+  /// (`lib/l10n/gl_chart_refusal_messages.dart`), with [message] as the
+  /// English fallback.
+  final Object? detail;
+
+  ApiException(this.statusCode, this.message, {this.detail});
 
   @override
   String toString() => 'ApiException($statusCode): $message';
@@ -124,6 +130,11 @@ class ApiClient {
   /// up as `{"detail":"This run exceeds..."}` in the UI. Falls back to a plain
   /// status line rather than echoing an un-decodable body (an HTML error page
   /// is worse than saying nothing).
+  ///
+  /// A structured refusal (`{code, …, message}` — the GL-chart refusal) yields
+  /// its English `message` here; a screen that can state it in the reader's
+  /// language reads [ApiException.detail] instead (see
+  /// `lib/l10n/gl_chart_refusal_messages.dart`).
   static String errorMessage(http.Response response) {
     final body = response.body;
     if (body.isNotEmpty) {
@@ -132,6 +143,10 @@ class ApiClient {
         if (decoded is Map<String, dynamic>) {
           final detail = decoded['detail'];
           if (detail is String && detail.trim().isNotEmpty) return detail;
+          if (detail is Map<String, dynamic>) {
+            final message = detail['message'];
+            if (message is String && message.trim().isNotEmpty) return message;
+          }
           // 422 validation errors: `detail` is a list of {loc, msg, type}.
           if (detail is List) {
             final messages = detail
@@ -148,6 +163,25 @@ class ApiClient {
     }
     return 'Request failed (${response.statusCode})';
   }
+
+  /// The response's raw `detail`, decoded — for a caller that needs its
+  /// STRUCTURE rather than [errorMessage]'s sentence. `null` when the body is
+  /// empty, not JSON, or carries no `detail`.
+  static Object? errorDetail(http.Response response) {
+    if (response.body.isEmpty) return null;
+    try {
+      final decoded = jsonDecode(response.body);
+      return decoded is Map<String, dynamic> ? decoded['detail'] : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static ApiException _failure(http.Response response) => ApiException(
+        response.statusCode,
+        errorMessage(response),
+        detail: errorDetail(response),
+      );
 
   /// Auth + tenant headers for JSON requests.
   Map<String, String> get _headers {
@@ -297,7 +331,7 @@ class ApiClient {
       throw ApiException(401, 'Unauthorized');
     }
     if (response.statusCode >= 400) {
-      throw ApiException(response.statusCode, errorMessage(response));
+      throw _failure(response);
     }
     return (
       bytes: response.bodyBytes,
@@ -327,7 +361,7 @@ class ApiClient {
       throw ApiException(401, 'Unauthorized');
     }
     if (response.statusCode >= 400) {
-      throw ApiException(response.statusCode, errorMessage(response));
+      throw _failure(response);
     }
   }
 
@@ -341,7 +375,7 @@ class ApiClient {
       throw ApiException(401, 'Unauthorized');
     }
     if (response.statusCode >= 400) {
-      throw ApiException(response.statusCode, errorMessage(response));
+      throw _failure(response);
     }
     if (response.body.isEmpty) return {};
     return jsonDecode(response.body) as Map<String, dynamic>;
@@ -353,7 +387,7 @@ class ApiClient {
       throw ApiException(401, 'Unauthorized');
     }
     if (response.statusCode >= 400) {
-      throw ApiException(response.statusCode, errorMessage(response));
+      throw _failure(response);
     }
     if (response.body.isEmpty) return [];
     final decoded = jsonDecode(response.body);

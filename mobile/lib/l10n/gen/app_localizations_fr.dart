@@ -583,6 +583,70 @@ class AppLocalizationsFr extends AppLocalizations {
   }
 
   @override
+  String glChartRefusalForeign(int count, String codes) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Les comptes généraux',
+      one: 'Le compte général',
+    );
+    String _temp1 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'appartiennent au',
+      one: 'appartient au',
+    );
+    return '$_temp0 $codes $_temp1 plan comptable d\'une autre entité, pas à celui de cette facture.';
+  }
+
+  @override
+  String glChartRefusalRetired(int count, String codes) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Les comptes généraux',
+      one: 'Le compte général',
+    );
+    String _temp1 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'sont désactivés',
+      one: 'est désactivé',
+    );
+    return '$_temp0 $codes $_temp1 dans le plan comptable de cette facture.';
+  }
+
+  @override
+  String glChartRefusalUnknown(int count, String codes) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Les comptes généraux',
+      one: 'Le compte général',
+    );
+    String _temp1 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'ne figurent pas',
+      one: 'ne figure pas',
+    );
+    return '$_temp0 $codes $_temp1 dans le plan comptable de cette facture.';
+  }
+
+  @override
+  String get glChartRefusalPick =>
+      'Choisissez un compte dans le plan comptable propre à la facture : les comptes partagés plus ceux de son entité.';
+
+  @override
+  String get glChartRefusalPickActive =>
+      'Choisissez un compte actif dans le plan comptable propre à la facture : les comptes partagés plus ceux de son entité.';
+
+  @override
+  String glChartRefusalOnLines(String reasons) {
+    return 'Lignes de facture : $reasons';
+  }
+
+  @override
   String get invoiceDetailApproved => 'Facture approuvée';
 
   @override
