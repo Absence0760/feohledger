@@ -224,8 +224,13 @@ variance within a tight tolerance: adjust the invoice amount to the PO total and
 approve.
 
 - **Data source:** the **live** `PurchaseOrder` row, re-matched via
-  `match_invoice_to_po` inside `evaluate` (and again under the invoice row lock
-  in `apply`). The resolver does **not** trust the `invoice.po_match` JSONB
+  `po_matching.match_invoice_under_org_rules` — under the org's own
+  per-vendor / per-commodity tolerance, never the 5 % default — inside
+  `evaluate` (and again under the invoice row lock in `apply`). All three
+  `po_mismatch` resolvers match this way; a resolver whose own change leaves
+  the PO-match finding in place (the refresh inside `apply` re-finds it) is
+  unwound and escalated by the coordinator (`exception_lifecycle.deciding` →
+  `Decision.refound`). The resolver does **not** trust the `invoice.po_match` JSONB
   snapshot — that snapshot can be stale (PO re-synced/edited after it was
   written) and it doesn't distinguish a clean amount variance from a `partial`
   3-way receipt. Re-matching closes both gaps in one read.

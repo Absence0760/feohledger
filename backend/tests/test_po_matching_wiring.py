@@ -57,6 +57,19 @@ def test_match_result_serialises_to_jsonb_friendly_dict():
 # ---------- _refresh_po_match integration ---------------------------------
 
 
+@pytest.fixture(autouse=True)
+def _no_reconcile():
+    """These tests pin what `_refresh_po_match` RAISES against a mocked
+    session; closing rows a refresh no longer finds is its own step, proven
+    against real rows in `test_po_match_exception_reconciliation.py`. Patched
+    here so a bare `AsyncMock` db is never asked for a result set, and exposed
+    so a test can assert which types the refresh reported as still found."""
+    from app.services import invoice_warnings
+
+    with patch.object(invoice_warnings, "_reconcile_po_exceptions", AsyncMock()) as close:
+        yield close
+
+
 def _fake_invoice(
     *, po_number="PO-001", amount=100.0, status_value="ready_for_review", currency="USD"
 ):
@@ -336,74 +349,27 @@ async def test_a_partial_acceptance_on_a_full_receipt_is_not_a_partial_receipt()
     assert [call.args[2] for call in ensure.await_args_list] == ["quality_hold"]
 
 
-# ---------- over-receipt reaches the exception queue -----------------------
+# ---------- over-receipt: a warning on the invoice, never a hold -----------
 
 
 @pytest.mark.asyncio
-async def test_refresh_po_match_raises_on_over_receipt():
-    """An over-receipt must reach the exception queue, not just the modal.
+@pytest.mark.parametrize("variance", [Decimal("4.00"), Decimal("0.00"), Decimal("-3.00")])
+async def test_refresh_po_match_over_receipt_warns_but_opens_no_exception(variance, _no_reconcile):
+    """An over-receipt must reach the reviewer, and must not block payment.
 
-    The matcher flags `received > ordered` on `po_match.over_receipt` and
-    renders it into the invoice modal, but nothing here raised it — so no
-    exception row was ever opened and no clerk was asked about quantities
-    nobody ordered. `warning`, not the `info` a partial receipt gets: a short
-    delivery is routinely benign (goods in transit), whereas an over-delivery
-    cannot be explained by timing, and it is how an invoice for unauthorised
-    quantities acquires its supporting receipt.
+    The matcher flags `received > ordered` on `po_match.over_receipt`; this
+    lands it on `invoice.warnings` (`warning`, not the `info` a partial receipt
+    gets — quantities nobody ordered cannot be explained by timing). It is
+    raised INDEPENDENTLY of `status`, which the amount control owns, so it rides
+    alongside a perfectly `matched` invoice.
 
-    It is raised INDEPENDENTLY of `status` — the amount control owns `status`,
-    so an over-receipt rides alongside a perfectly `matched` invoice, which is
-    exactly the case that used to disappear.
+    But `po_mismatch` blocks payment, and decisions §67 is explicit that an
+    over-receipt with an in-tolerance amount is a receiving discrepancy that
+    must not — including when the invoice bills a little ABOVE the PO (+4 %
+    here) inside the tolerance that exists to absorb exactly that. An invoice
+    billing the extra units beyond tolerance is held by the amount leg on its
+    own figure (`..._rides_alongside_an_amount_mismatch` below).
     """
-    from app.services import invoice_warnings
-    from app.services.po_matching import MatchResult
-
-    inv = _fake_invoice()
-    warnings: list[dict] = []
-    fake_match = MatchResult(
-        match_type="3-way",
-        status="matched",
-        po_number="PO-001",
-        po_total=100.0,
-        # Billed 4 % above the PO — inside the amount tolerance, so the amount
-        # leg is silent, but the over-delivered units are being charged for.
-        amount_variance=Decimal("4.00"),
-        amount_variance_pct=Decimal("4.0"),
-        within_tolerance=True,
-        over_receipt=True,
-        ordered_quantity=Decimal("10"),
-        received_quantity=Decimal("14"),
-        issues=["Over-receipt: 14 received against 10 ordered (+4)"],
-    )
-
-    with (
-        patch.object(invoice_warnings, "match_invoice_to_po", AsyncMock(return_value=fake_match)),
-        patch.object(invoice_warnings, "_ensure_exception", AsyncMock()) as ensure,
-    ):
-        await invoice_warnings._refresh_po_match(db=AsyncMock(), invoice=inv, warnings=warnings)
-
-    assert len(warnings) == 1, warnings
-    assert warnings[0]["type"] == "po_mismatch"
-    assert warnings[0]["severity"] == "warning"
-    # The matcher's own composed detail is reused verbatim, plus the PO ref.
-    assert "Over-receipt: 14 received against 10 ordered (+4)" in warnings[0]["message"]
-    assert "PO-001" in warnings[0]["message"]
-
-    ensure.assert_awaited_once()
-    assert ensure.await_args.args[2] == "po_mismatch"
-    assert ensure.await_args.args[3] == "warning"
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("variance", [Decimal("0.00"), Decimal("-3.00")])
-async def test_refresh_po_match_over_receipt_billing_at_or_under_the_po_raises_no_exception(
-    variance,
-):
-    """`po_mismatch` is payment-blocking, so it must only exist where paying
-    would pay for something nobody ordered. An invoice billing the PO total or
-    less pays exactly what was ordered; the surplus delivery is a receiving-side
-    discrepancy (decisions §67). The warning still lands on the invoice — the
-    approver reads it there — but no exception holds the payable."""
     from app.services import invoice_warnings
     from app.services.po_matching import MatchResult
 
@@ -429,8 +395,135 @@ async def test_refresh_po_match_over_receipt_billing_at_or_under_the_po_raises_n
     ):
         await invoice_warnings._refresh_po_match(db=AsyncMock(), invoice=inv, warnings=warnings)
 
-    assert [w["type"] for w in warnings] == ["po_mismatch"]
+    assert len(warnings) == 1, warnings
+    assert warnings[0]["type"] == "po_mismatch"
+    assert warnings[0]["severity"] == "warning"
+    assert "Over-receipt: 14 received against 10 ordered (+4)" in warnings[0]["message"]
+    assert "PO-001" in warnings[0]["message"]
     ensure.assert_not_awaited()
+    # Nothing found, so any open PO-match row is offered for closing.
+    assert _no_reconcile.await_args.kwargs["found"] == set()
+
+
+# ---------- only OVER-billing blocks ----------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_refresh_po_match_under_billing_out_of_tolerance_warns_but_never_holds(
+    _no_reconcile,
+):
+    """An invoice for half the PO — the first delivery of a split or blanket PO,
+    billed on its own — is far outside the ±5 % band, but on the LOW side. The
+    matcher compares each invoice with the whole PO total and cannot tell it
+    from a short-billed one, so holding it would hold every correctly-billed
+    partial delivery. It warns (the reviewer still sees the variance) and opens
+    no payment-blocking row."""
+    from app.services import invoice_warnings
+    from app.services.po_matching import MatchResult
+
+    inv = _fake_invoice(amount=Decimal("50.00"))
+    warnings: list[dict] = []
+    fake_match = MatchResult(
+        match_type="2-way",
+        status="mismatch",
+        po_number="PO-001",
+        po_total=Decimal("100.00"),
+        currency_check="same",
+        amount_variance=Decimal("-50.00"),
+        amount_variance_pct=Decimal("-50.0"),
+        within_tolerance=False,
+    )
+
+    with (
+        patch.object(invoice_warnings, "match_invoice_to_po", AsyncMock(return_value=fake_match)),
+        patch.object(invoice_warnings, "_ensure_exception", AsyncMock()) as ensure,
+    ):
+        await invoice_warnings._refresh_po_match(db=AsyncMock(), invoice=inv, warnings=warnings)
+
+    assert [w["code"] for w in warnings] == ["po_amount_variance"]
+    ensure.assert_not_awaited()
+    assert "po_mismatch" not in _no_reconcile.await_args.kwargs["found"]
+
+
+@pytest.mark.asyncio
+async def test_refresh_po_match_partial_receipt_billed_in_proportion_never_holds(_no_reconcile):
+    """Six of ten units arrived and the invoice bills for six: partial billing
+    against a partial receipt. The info warning lands; nothing blocks."""
+    from app.services import invoice_warnings
+    from app.services.po_matching import MatchResult
+
+    inv = _fake_invoice(amount=Decimal("60.00"))
+    warnings: list[dict] = []
+    fake_match = MatchResult(
+        match_type="3-way",
+        status="mismatch",
+        po_number="PO-001",
+        po_total=Decimal("100.00"),
+        currency_check="same",
+        amount_variance=Decimal("-40.00"),
+        amount_variance_pct=Decimal("-40.0"),
+        within_tolerance=False,
+        ordered_quantity=Decimal("10"),
+        received_quantity=Decimal("6"),
+        received_value=Decimal("60.00"),
+        billed_beyond_receipt=False,
+    )
+
+    with (
+        patch.object(invoice_warnings, "match_invoice_to_po", AsyncMock(return_value=fake_match)),
+        patch.object(invoice_warnings, "_ensure_exception", AsyncMock()) as ensure,
+    ):
+        await invoice_warnings._refresh_po_match(db=AsyncMock(), invoice=inv, warnings=warnings)
+
+    ensure.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("status", "variance"),
+    [
+        # Bills the full PO with six of ten units in: amount leg clean.
+        ("partial", Decimal("0.00")),
+        # Bills half the PO with three of ten in: under the PO (the amount leg
+        # stays silent on that), and still over what arrived.
+        ("mismatch", Decimal("-50.00")),
+    ],
+)
+async def test_refresh_po_match_billing_beyond_the_receipt_holds(status, variance):
+    """The 3-way control's whole point: don't pay for what hasn't arrived. An
+    invoice asking for more than the received slice of the PO is worth
+    (`billed_beyond_receipt`) opens the blocking row, whatever the amount leg
+    said — and carries the partial-receipt sentence so the reviewer sees why."""
+    from app.services import invoice_warnings
+    from app.services.po_matching import MatchResult
+
+    inv = _fake_invoice()
+    warnings: list[dict] = []
+    fake_match = MatchResult(
+        match_type="3-way",
+        status=status,
+        po_number="PO-001",
+        po_total=Decimal("100.00"),
+        currency_check="same",
+        amount_variance=variance,
+        amount_variance_pct=variance,
+        within_tolerance=variance == 0,
+        ordered_quantity=Decimal("10"),
+        received_quantity=Decimal("6") if status == "partial" else Decimal("3"),
+        billed_beyond_receipt=True,
+    )
+
+    with (
+        patch.object(invoice_warnings, "match_invoice_to_po", AsyncMock(return_value=fake_match)),
+        patch.object(invoice_warnings, "_ensure_exception", AsyncMock()) as ensure,
+    ):
+        await invoice_warnings._refresh_po_match(db=AsyncMock(), invoice=inv, warnings=warnings)
+
+    assert "po_partial_receipt" in [w["code"] for w in warnings]
+    assert [w["code"] for w in warnings].count("po_partial_receipt") == 1
+    ensure.assert_awaited_once()
+    assert ensure.await_args.args[2:4] == ("po_mismatch", "warning")
+    assert ensure.await_args.args[4]["code"] == "po_partial_receipt"
 
 
 @pytest.mark.asyncio
@@ -589,3 +682,68 @@ def test_status_str_handles_simplenamespace_mock():
     from app.services.invoice_warnings import _status_str
 
     assert _status_str(SimpleNamespace(value="approved")) == "approved"
+
+
+# ---------- the raise rules and the pure predicate agree ---------------------
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "fields",
+    [
+        {"status": "no_po"},
+        {
+            "status": "mismatch",
+            "currency_check": "different",
+            "amount_variance": None,
+            "amount_variance_pct": None,
+        },
+        {
+            "status": "mismatch",
+            "amount_variance": Decimal("20"),
+            "amount_variance_pct": Decimal("20"),
+            "within_tolerance": False,
+        },
+        {
+            "status": "mismatch",
+            "amount_variance": Decimal("-50"),
+            "amount_variance_pct": Decimal("-50"),
+            "within_tolerance": False,
+        },
+        {"status": "matched", "within_tolerance": True, "over_receipt": True},
+        {
+            "status": "partial",
+            "within_tolerance": True,
+            "ordered_quantity": Decimal("10"),
+            "received_quantity": Decimal("6"),
+            "billed_beyond_receipt": True,
+        },
+        {
+            "status": "partial",
+            "within_tolerance": True,
+            "ordered_quantity": Decimal("10"),
+            "received_quantity": Decimal("6"),
+        },
+        {"status": "mismatch", "within_tolerance": True, "inspection_result": "fail"},
+        {"status": "matched", "within_tolerance": True, "inspection_required": True},
+        {"status": "partial", "within_tolerance": True, "inspection_result": "partial"},
+        {"status": "matched", "within_tolerance": True},
+    ],
+)
+async def test_blocking_finding_types_matches_what_the_refresh_raises(fields):
+    """The post-approval close re-judges a match through the pure
+    `blocking_finding_types`; it must name exactly the types `_refresh_po_match`
+    raises for the same match, or the two would disagree on what blocks."""
+    from app.services import invoice_warnings
+    from app.services.po_matching import MatchResult
+
+    match = MatchResult(po_number="PO-001", po_total=Decimal("100"), **fields)
+    with (
+        patch.object(invoice_warnings, "match_invoice_to_po", AsyncMock(return_value=match)),
+        patch.object(invoice_warnings, "_ensure_exception", AsyncMock()) as ensure,
+    ):
+        await invoice_warnings._refresh_po_match(
+            db=AsyncMock(), invoice=_fake_invoice(), warnings=[]
+        )
+    raised = {call.args[2] for call in ensure.await_args_list}
+    assert raised == invoice_warnings.blocking_finding_types(match)

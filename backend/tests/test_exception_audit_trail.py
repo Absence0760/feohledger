@@ -108,7 +108,7 @@ async def test_create_exception_writes_raised_audit_row_on_the_invoice_trail(rea
     assert details["severity"] == "error"
     assert details["invoice_id"] == str(inv.id)
     assert details["new_status"] == "open"
-    # `duplicate` is one of the three types that blocks a payment run.
+    # `duplicate` is one of the types that blocks a payment run.
     assert details["payment_blocking"] is True
     # The generated description can name a vendor; the exception row holds it,
     # the trail does not duplicate it.
@@ -126,11 +126,12 @@ async def test_non_blocking_exception_type_is_flagged_as_such(realdb):
 
     async with mk() as s:
         row = await s.get(Invoice, inv.id)
+        # `missing_data` is not on `PAYMENT_BLOCKING_EXCEPTION_TYPES`.
         await create_exception(
             s,
-            exception_type="po_mismatch",
+            exception_type="missing_data",
             severity="warning",
-            description="PO total differs",
+            description="Required fields missing",
             organization_id=org_id,
             invoice=row,
         )
@@ -154,7 +155,11 @@ async def test_payment_blocking_flag_tracks_the_real_gate():
 
     for exception_type in PAYMENT_BLOCKING_EXCEPTION_TYPES:
         assert is_payment_blocking(exception_type) is True
-    assert is_payment_blocking("po_mismatch") is False
+    # The two PO-match types joined the gate (a quality hold or an
+    # out-of-tolerance over-billing must stop the money); `missing_data` did not.
+    assert is_payment_blocking("po_mismatch") is True
+    assert is_payment_blocking("quality_hold") is True
+    assert is_payment_blocking("missing_data") is False
     assert is_payment_blocking("totally_unknown_type") is False
 
 

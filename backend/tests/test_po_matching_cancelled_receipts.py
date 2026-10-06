@@ -251,20 +251,15 @@ async def _po_mismatch_rows(s, invoice_id):
 
 
 @pytest.mark.asyncio
-async def test_over_receipt_billed_above_the_po_opens_an_exception_end_to_end(realdb):
-    """The whole chain: real rows -> matcher -> refresh_warnings -> queue.
-
-    `tests/test_po_matching_wiring.py` proves `_refresh_po_match` routes an
-    over-receipt to a `po_mismatch` warning + exception with the matcher
-    patched out. This proves the two halves actually meet against real
-    Postgres rows — the flag reaches the exception queue a clerk works, not
-    only the invoice modal.
+async def test_over_receipt_billed_inside_tolerance_is_a_warning_not_a_hold(realdb):
+    """The whole chain: real rows -> matcher -> refresh_warnings -> invoice.
 
     The invoice bills 1,040 against a 1,000 PO — inside the 5 % amount
-    tolerance, so the amount leg is silent — while 14 units arrived against 10
-    ordered. That is the shape an over-delivery takes when it is supporting a
-    charge for units nobody ordered, and `po_mismatch` blocks payment, so it
-    must be raised here.
+    tolerance — while 14 units arrived against 10 ordered. `po_mismatch` blocks
+    payment, and decisions §67 is explicit that an over-receipt with an
+    in-tolerance amount is a receiving discrepancy that must not: absorbing a
+    variance this size is what the tolerance is FOR. So the finding lands on the
+    invoice, where the approver reads it, and opens no exception.
     """
     from app.services.invoice_warnings import refresh_warnings
 
@@ -287,11 +282,34 @@ async def test_over_receipt_billed_above_the_po_opens_an_exception_end_to_end(re
             w["type"] == "po_mismatch" and "Over-receipt" in w["message"]
             for w in (inv.warnings or [])
         ), inv.warnings
+        assert await _po_mismatch_rows(s, inv.id) == []
+
+
+@pytest.mark.asyncio
+async def test_over_receipt_billed_beyond_tolerance_holds_on_the_amount_leg(realdb):
+    """When the over-delivered units ARE billed beyond tolerance (1,400 against
+    a 1,000 PO), the amount leg opens the blocking row on its own figure — the
+    over-receipt never needed a route of its own to stop the money."""
+    from app.services.invoice_warnings import refresh_warnings
+
+    org_id = realdb.info(TENANT).org_id
+    mk = realdb.sessionmaker(TENANT)
+    number = f"PO-E2EO-{uuid.uuid4().hex[:6]}"
+    async with mk() as s:
+        ent = await _default_entity_id(s)
+        po = await _add_po(s, org_id, ent, po_number=number, total="1000.00", lines=["10"])
+        await _add_gr(s, org_id, ent, po.id, status="received", received=["14"])
+        inv = await _add_invoice(s, org_id, ent, po_number=number, amount="1400.00")
+        await s.commit()
+
+        await refresh_warnings(s, inv)
+        await s.commit()
 
         rows = await _po_mismatch_rows(s, inv.id)
         assert len(rows) == 1, rows
-        assert rows[0].severity == "warning"
-        assert "Over-receipt" in rows[0].description
+        # `_add_po` records no currency, so it is the face-value variant.
+        assert rows[0].description_code.startswith("po_amount_variance")
+        assert rows[0].status == "open"
 
 
 @pytest.mark.asyncio

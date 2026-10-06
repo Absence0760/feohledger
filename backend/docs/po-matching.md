@@ -190,23 +190,41 @@ the way the 4-way inspection block already does — so it lands on a perfectly
 `matched` invoice, which is exactly the case that would otherwise disappear. It
 becomes a `po_mismatch` warning at **`warning`** severity (not the `info` a
 partial receipt gets: a short delivery is routinely benign — goods in transit —
-whereas quantities nobody ordered cannot be explained by timing) plus — when
-the invoice bills **above the PO total** (or no comparable variance exists) — a
-`po_mismatch` exception. `po_mismatch` blocks payment, so an over-receipt on an
-invoice billing the PO total or less (it pays exactly what was ordered) stays a
-warning on the invoice and opens no exception: the surplus is a receiving-side
-discrepancy, and holding a correctly-billed payable over it would block a good
-invoice. Billing above the PO, even inside the amount tolerance, is the shape an
-over-delivery takes when it is supporting a charge for units nobody ordered.
-When the amount leg has already opened one,
-`_ensure_exception` de-dupes per `(invoice, type, open)` and the exception call
-is a no-op — the warning still lands, and the amount branch's own message is
-left untouched.
+whereas quantities nobody ordered cannot be explained by timing). It lands on
+`invoice.warnings`, where the approver reads it, and **opens no exception**:
+`po_mismatch` blocks payment, and decisions §67 is explicit that an over-receipt
+with an in-tolerance amount is a receiving discrepancy that must not — including
+an invoice billing a little above the PO *inside* the tolerance that exists to
+absorb exactly that. When the extra units are billed beyond tolerance, the
+amount leg opens the blocking row on its own figure.
+
+### Short receipt — billing measured against what arrived
+
+A short receipt (`received < ordered`) is routinely benign: goods in transit, or
+a split / blanket PO invoiced delivery by delivery. What the 3-way control must
+stop is **paying for what hasn't arrived**, so the matcher measures the invoice
+against the slice of the PO the received units cover —
+`received_value = po_total × received / ordered` — in exact Decimal, at the same
+match-rule tolerance as the amount leg. `MatchResult.billed_beyond_receipt` is
+`True` when the invoice exceeds `received_value` by more than the tolerance
+(both are additive fields on the persisted `po_match`). Skipped when the
+currencies differ, which is already a mismatch with no figure.
+
+So six of ten units in with the whole PO billed holds (`po_partial_receipt`
+warning + a payment-blocking `po_mismatch`), while four of ten in with four
+tenths billed is partial billing and holds nothing — the warnings still name
+both the amount variance and the short receipt.
+
+The proportional value assumes one unit price across the PO's lines (the
+matcher aggregates quantities, not priced lines), and it does not subtract
+what earlier invoices against the same PO already billed — a second invoice
+for the first shipment is caught by duplicate detection, not here.
 
 Covered by `backend/tests/test_po_matching_cancelled_receipts.py` (matcher +
-end-to-end through `refresh_warnings` to the exception row) and
+end-to-end through `refresh_warnings` to the exception row),
 `backend/tests/test_po_matching_wiring.py` (the routing, with the matcher
-patched out).
+patched out) and `backend/tests/test_po_match_exception_reconciliation.py`
+(partial billing, the receipt-value boundary, and the auto-close).
 
 The 4-way leg runs **after** the 3-way GR block. It looks up the most recent
 `QualityInspection` in two steps: the matched receipt's own (`gr_id == gr.id`),
@@ -312,18 +330,87 @@ run was built, and `/retry-failed`, `POST /api/payments` and
 variance outside tolerance sets a payment block until it is resolved, and a
 four-way match exists so that failed quality acceptance stops payment.
 
-Every `po_mismatch` source is an out-of-tolerance finding — the cited PO does not
-exist, the currencies differ, the amount is outside the match rule's tolerance,
-fewer units were received than ordered, or more were received while the invoice
-bills above the PO. An in-tolerance invoice never carries one, so the block
-holds no good invoice. Resolving or dismissing the exception is the sign-off that
+A `po_mismatch` is raised only where paying the invoice would pay more than
+its PO supports — the cited PO does not exist, the currencies differ (nothing
+could be compared), the invoice bills **above** the PO beyond the match rule's
+tolerance, or it bills beyond the share of the PO that has been received
+(§ Short receipt). **Billing less than the PO never blocks**: the matcher
+compares each invoice with the whole PO total, so the first invoice against a
+split or blanket PO reads as a large negative variance, and holding it would
+hold every correctly-billed partial delivery. An in-tolerance variance and an
+over-receipt on its own never block either. All of those still land as warnings
+on the invoice. Resolving or dismissing the exception is the sign-off that
 releases it, and **segregation of duties applies**: the invoice's uploader (or
 anyone in its `segregation_actor_ids`) may not clear it, and an exception agent
 run they trigger escalates instead of auto-resolving
-([exception-lifecycle.md](exception-lifecycle.md)). An exception is not closed
-automatically when the condition clears (the rest of a short delivery arriving,
-an inspection re-recorded as `pass`) — a human resolves it.
+([exception-lifecycle.md](exception-lifecycle.md)).
 
+**A hold lifts when the evidence catches up.** Each refresh closes any open or
+escalated `po_mismatch` / `quality_hold` row whose finding it no longer reports
+(`invoice_warnings._close_cleared_po_exceptions`): the rest of a short delivery
+arriving, a newer inspection passing, an amount corrected before approval. The
+close goes through `exception_lifecycle.record_decision` like any resolution —
+an `exception.resolved` audit row with no `actor_id` (a detector observed it,
+nobody decided it), `resolved_by: "PO match"` and `via: "po_match_refresh"`.
+A detector clearing a payment block is only sound where nobody with a motive
+could have produced the evidence, so it leaves the row for a human in each case
+where somebody could:
+
+- **No org settings, no close.** A refresh called without the org's settings
+  (the supplier-portal paths) judges under the platform default rule — 5 %, no
+  required inspection — and a hold the org's stricter per-vendor rule raised
+  would read as gone. Such a refresh may raise findings but never clears one.
+  The QMS sync threads the org's settings so a synced pass does lift a hold.
+- **A different PO, past approval.** If the invoice now cites a PO other than
+  the one the row names (its `poNumber` parameter), the close happens only
+  while the invoice is still pre-approval (`new` / `pending` /
+  `ready_for_review` / `rejected`) **and** its approval step enforces
+  segregation (`review.resolve_approval_config` → `require_segregation`), i.e.
+  while an approver who did not create it still reviews the corrected invoice.
+  Otherwise re-pointing `po_number` at a PO that happens to match would let
+  whoever edited it release the payment. A row with no recorded PO counts as a
+  different one, and removing the PO number closes nothing.
+- **Past approval, not on a rule the GL code chose.** The match rule is picked
+  by vendor and by header GL account (the commodity), and `gl_account` stays
+  editable on an approved invoice. Re-coding to a commodity with a looser rule
+  would make a finding vanish, so past approval a row closes only if the
+  finding is also gone under the strictest rule any GL code could select
+  (`matching_rules.strictest_rule_for_any_commodity`, judged through the pure
+  `invoice_warnings.blocking_finding_types`, which a test pins to what the
+  refresh raises). This applies to every post-approval close, not only after a
+  re-code: an invoice inside its own commodity's tolerance but outside the
+  strictest one does not auto-close when its receipt arrives — a person clears
+  it. That is the safe direction.
+- **A hand-typed pass does not lift a quality hold unless someone else typed
+  it.** Receipts only arrive from the ERP sync, but `POST /api/inspections`
+  lets an admin / AP manager record an inspection by hand.
+  `QualityInspection.source` / `recorded_by_user_id` (migration 0105) say where
+  a verdict came from: a `qms` one lifts the hold; a `manual` one only when its
+  recorder is known and not implicated in the invoice
+  (`approval_chain.violates_segregation`); one of unknown provenance (a manual
+  row with no recorder, or a row predating the columns) never — fail closed.
+  Not the audit log: in `FEOH_AUDIT_MODE=lambda` no local row exists, so an
+  audit-based check would fail open. When the QMS sync takes over a row that
+  was not its own (same inspection number), it also replaces the typed PO / GR
+  links with its own resolution — NULL included — so a typed verdict cannot be
+  laundered into a "QMS" pass on a PO the QMS never inspected.
+- **A row an agent is deciding is left to the agent.** A resolver that relinks
+  or corrects the invoice re-runs the refresh inside
+  `exception_lifecycle.deciding`, so the row is resolved once, as the agent,
+  with the triggering actor on the audit row. If that refresh still FINDS the
+  row's type — over-billing against the newly linked PO, say, which
+  `_ensure_exception` folds into the same open row — the decision is marked
+  `refound` and the coordinator unwinds the apply and escalates. Resolvers also
+  judge the live match under the org's own rule
+  (`po_matching.match_invoice_under_org_rules`), never the 5 % default.
+
+The org's `settings.exceptions.require_segregation: false` opt-out lifts the two
+segregation limits, as it does on the queue.
+
+Refreshes run on every invoice save, approval-with-corrections, QMS sync and
+the other `refresh_warnings` callers; nothing re-evaluates an untouched invoice
+on a schedule, so a receipt booked against the PO lifts the hold the next time
+the invoice is refreshed.
 
 ### Quality-hold exceptions
 The 4-way leg routes inspection outcomes to a dedicated `quality_hold`
