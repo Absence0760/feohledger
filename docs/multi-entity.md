@@ -478,7 +478,7 @@ same rule now holds every manual write (`docs/decisions.md` §199):
   `{code: "gl_codes_outside_chart", on_lines, foreign: [...], retired: [...],
   unknown: [...], message}` — where `message` is the English sentence every
   client falls back to. The web localizes it once, at the transport
-  (`api.ts` → `api/glChartRefusal.ts::localizeApiDetail`), so every toast on
+  (`api.ts` → `api/codedRefusals.ts::localizeApiDetail`, whose first entry is `api/glChartRefusal.ts`), so every toast on
   every GL write path gets it, plus `ImportCsvModal`'s row list; mobile does it
   on the invoice edit sheet's snackbar (`lib/l10n/gl_chart_refusal_messages.dart`).
   A server-side catcher that needs the refusal as text — the GL-coding agent's
