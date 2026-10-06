@@ -6,8 +6,8 @@ own — that's what these tests pin.
 
 Bucket boundaries matter for AR reporting and stay-current
 dashboards; getting the inclusive/exclusive ends wrong is a classic
-off-by-one. Touchless rate is a board-deck metric — its denominator
-must include rejected invoices, or the number lies.
+off-by-one. Touchless rate is a board-deck metric — it must be a share
+of DECIDED invoices, rejections included, or the number lies.
 """
 
 from __future__ import annotations
@@ -82,15 +82,10 @@ def _mk_db(*results):
 #   5.  aging rows (bucket, sum, sum_rep) — SQL-bucketed → .all()
 #   6.  trend rows (month, count, sum, sum_rep) — SQL group → .all()
 #   7.  upcoming payment rows (+ currency/reporting cols)  → .all()
-#   7a. CSV-IMPORTED invoice counts per status              → .all()
-#       (rows carrying `meta["imported"]` — migrated history the workflow
-#       engine never ran on, subtracted from BOTH touchless legs; status
-#       cannot identify them, since `done`/`paid`/`rejected` are each
-#       reachable natively too)
-#   7b. NATIVE invoices in an AMBIGUOUS status carrying an approval stamp
-#       → .scalar() (the touchless-rate numerator's evidence — `done`, `paid`
-#       and `failed` are each reachable both through review and around it, see
-#       `analytics.compute_touchless_rate`)
+#   7a. touchless counts                  → .one() → (touchless, decided)
+#       (`services/touchless.touchless_counts_select` — the per-invoice
+#       classification is SQL over the audit trail, so it is pinned against
+#       Postgres in `test_dashboard_aggregates.py`, not here)
 #   8.  total paid                        → .scalar()
 #   9.  total pending                     → .scalar()
 #  10.  reporting total paid              → .one() → (amount, unconverted_count)
@@ -116,8 +111,7 @@ def _full_results(
     aging=(),
     trend=(),
     upcoming=(),
-    imported_pipeline=(),
-    review_cleared=0,
+    touchless=(0, 0),
     paid=Decimal("0"),
     pending=Decimal("0"),
     reporting_paid=(Decimal("0"), 0),
@@ -136,8 +130,7 @@ def _full_results(
         _r(all_=list(aging)),
         _r(all_=list(trend)),
         _r(all_=list(upcoming)),
-        _r(all_=list(imported_pipeline)),
-        _r(scalar=review_cleared),
+        _r(one=touchless),
         _r(scalar=paid),
         _r(scalar=pending),
         _r(one=reporting_paid),
@@ -167,109 +160,47 @@ def _full_results(
 
 
 # ---------------------------------------------------------------------------
-# Touchless rate — straight-through-processing share. Numerator = invoices
-# that PASSED REVIEW untouched; denominator = numerator + rejected (everything
-# that provably finished review). The numerator is a strict subset of the
-# denominator, so the rate is ALWAYS in [0, 100] and can never go negative
-# (BUG 9 regression — the old formula subtracted rejected from a numerator
-# whose base didn't include rejected, yielding e.g. -4900%).
-#
-# These pin the ARITHMETIC. The numerator's POPULATION — which statuses need
-# the `Invoice.approval_date` stamp before they count as cleared — is pinned
-# in `test_touchless_rate_population.py`.
+# Touchless rate — straight-through-processing share. The numerator and the
+# denominator come from ONE query over `services/touchless`' predicates (the
+# numerator is a filter of the denominator); the endpoint only divides. What
+# makes an invoice touchless — and who is in the population — is pinned against
+# a real Postgres in `test_dashboard_aggregates.py` § 3–3c. These pin the
+# endpoint's arithmetic and its float hop.
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_touchless_rate_counts_rejected_in_denominator():
-    """80 reached a post-approval state, 20 were rejected (manual rework).
-    auto_processed = 80
-    reviewed_total = 80 + 20 = 100
-    rate = 80 / 100 * 100 = 80%
-
-    The 30 `paid`/`done` invoices all carry the approval stamp, so all 80 are
-    evidenced — `review_cleared=30`. (Strip that evidence and the numerator
-    correctly drops to the 50 that are mid-pipeline; see
-    `test_touchless_rate_population.py`.)
-    """
-    pipeline_rows = [
-        (InvoiceStatus.approved, 30),
-        (InvoiceStatus.posted_in_erp, 20),
-        (InvoiceStatus.paid, 20),
-        (InvoiceStatus.done, 10),
-        (InvoiceStatus.rejected, 20),
-    ]
-    db = _mk_db(*_full_results(pipeline=pipeline_rows, review_cleared=30))
+async def test_touchless_rate_divides_touchless_by_decided():
+    """20 of 100 decided invoices went straight through → 20.0%. The pipeline
+    card is a different figure (every invoice, by status) and is untouched."""
+    pipeline_rows = [(InvoiceStatus.approved, 80), (InvoiceStatus.rejected, 20)]
+    db = _mk_db(*_full_results(pipeline=pipeline_rows, touchless=(20, 100)))
     result = await get_dashboard(db=db, org=_org(), user=_user())
-    assert result["touchless_rate"] == 80.0
+    assert result["touchless_rate"] == 20.0
+    assert isinstance(result["touchless_rate"], float)
     assert result["pipeline"]["rejected"] == 20
 
 
 @pytest.mark.asyncio
 async def test_touchless_rate_never_goes_negative_with_many_rejections():
-    """The exact BUG 9 reproduction: {approved: 1, rejected: 50}. The old
-    formula `(1 - 50) / 1 * 100` returned -4900%. The coherent formula is
-    `1 / (1 + 50) * 100 ≈ 1.96%` — small, but never negative."""
-    pipeline_rows = [
-        (InvoiceStatus.approved, 1),
-        (InvoiceStatus.rejected, 50),
-    ]
-    db = _mk_db(*_full_results(pipeline=pipeline_rows))
+    """BUG 9: the old formula `(1 - 50) / 1 * 100` returned -4900%. One touchless
+    invoice out of 51 decided is ≈ 2.0% — small, never negative."""
+    db = _mk_db(*_full_results(touchless=(1, 51)))
     result = await get_dashboard(db=db, org=_org(), user=_user())
-    assert result["touchless_rate"] >= 0
-    assert result["touchless_rate"] == round(1 / 51 * 100, 1)  # ≈ 2.0
+    assert result["touchless_rate"] == 2.0
 
 
 @pytest.mark.asyncio
-async def test_touchless_rate_is_100_with_no_rejections():
-    """Every invoice that finished review was auto-processed → 100%. The five
-    `paid` ones carry the approval stamp (`review_cleared=5`)."""
-    pipeline_rows = [
-        (InvoiceStatus.approved, 5),
-        (InvoiceStatus.paid, 5),
-    ]
-    db = _mk_db(*_full_results(pipeline=pipeline_rows, review_cleared=5))
+async def test_touchless_rate_is_100_when_everything_went_straight_through():
+    db = _mk_db(*_full_results(touchless=(10, 10)))
     result = await get_dashboard(db=db, org=_org(), user=_user())
     assert result["touchless_rate"] == 100.0
 
 
 @pytest.mark.asyncio
-async def test_touchless_rate_subtracts_imported_rows_from_both_legs():
-    """Day-0 migration shape: 20 real invoices (18 cleared, 2 bounced) buried
-    under 500 CSV-imported historical rows, 100 of which were rejected in the
-    tenant's PREVIOUS system.
-
-    Those 100 used to land in the bounced leg as though a reviewer here had
-    sent them back: 18 / (18 + 102) = 15.0%. Subtracting the imported rows
-    from both legs gives the honest 18 / 20 = 90.0%. The imported `done` rows
-    were already outside the numerator (no approval stamp) and are now outside
-    the denominator too.
-    """
-    pipeline_rows = [
-        (InvoiceStatus.approved, 18),
-        (InvoiceStatus.rejected, 102),
-        (InvoiceStatus.done, 400),
-    ]
-    imported = [(InvoiceStatus.rejected, 100), (InvoiceStatus.done, 400)]
-
-    # Without the provenance split, the migrated history dominates.
-    db = _mk_db(*_full_results(pipeline=pipeline_rows))
-    assert (await get_dashboard(db=db, org=_org(), user=_user()))["touchless_rate"] == 15.0
-
-    db = _mk_db(*_full_results(pipeline=pipeline_rows, imported_pipeline=imported))
-    result = await get_dashboard(db=db, org=_org(), user=_user())
-    assert result["touchless_rate"] == 90.0
-    # The rows are excluded from the METRIC, not from the tenant's data — the
-    # pipeline card still reports every invoice.
-    assert result["pipeline"]["rejected"] == 102
-    assert result["pipeline"]["done"] == 400
-
-
-@pytest.mark.asyncio
-async def test_touchless_rate_is_zero_when_no_invoices_processed():
-    """No invoices have finished review — touchless rate must be
-    0, not a ZeroDivisionError."""
-    db = _mk_db(*_full_results(pipeline=[(InvoiceStatus.new, 5)]))
+async def test_touchless_rate_is_zero_when_no_invoices_decided():
+    """Nothing decided yet — 0, not a ZeroDivisionError."""
+    db = _mk_db(*_full_results(pipeline=[(InvoiceStatus.new, 5)], touchless=(0, 0)))
     result = await get_dashboard(db=db, org=_org(), user=_user())
     assert result["touchless_rate"] == 0
 

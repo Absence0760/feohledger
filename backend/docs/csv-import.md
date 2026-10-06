@@ -159,8 +159,9 @@ Every invoice row the importer creates is stamped, on the existing
 tenant used before; the workflow engine never ran on it. Metrics that describe
 *this platform's* automation therefore have to exclude it, and status cannot
 identify it — `done`, `paid` and `rejected` are each reachable both by import
-and natively. The first consumer is the dashboard's touchless rate, which
-subtracts marked rows from **both** its legs; see
+and natively. The first consumer is the touchless rate (`services/touchless`,
+shared by the dashboard and the experiments readout), which excludes marked
+rows from **both** its legs; see
 `backend/docs/analytics.md` § Imported rows are outside the metric.
 
 `imported_invoice_clause()` / `native_invoice_clause()` in

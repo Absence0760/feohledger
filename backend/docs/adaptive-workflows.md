@@ -545,21 +545,32 @@ definition is a config mistake, not a compounded split.
 
 `compute_experiment_results(rows_a, rows_b, primary_metric,
 min_sample_per_variant)` aggregates per-variant metrics over the **recorded
-assignments** (the API resolves each assigned invoice's terminal decision,
-touchless signals, time-to-approval leg, and exception presence from the
-audit_log + Exception rows):
+assignments**. The API resolves each assigned invoice's review decision and
+touchless flag with `services/touchless.touchless_classification_select` — the
+**same predicates the dashboard's `touchless_rate` counts with** — and its
+time-to-approval leg and exception presence from the audit_log + Exception
+rows:
 
 - **median / avg time-to-approval (days)** — over approved invoices, clock-start
   = the invoice's `ready_for_review` transition (fallback `created_at`), clamped
   ≥ 0 (reuses the adaptive `_decimal_days` leg).
-- **touchless rate** — auto-approved (`invoice.auto_approved`, no human) **and**
-  unmodified (no `details.changes`), over completed invoices.
+- **touchless rate** — the one platform-wide definition
+  (`backend/docs/analytics.md` § Touchless rate): approved automatically
+  (`invoice.auto_approved`, and no `invoice.approved` / `approval_step` /
+  `rejected` row), no field or line-item correction (`invoice.edited` /
+  `line_items_edited` / `gl_recoded`), and no exception a person resolved,
+  dismissed or escalated — over completed invoices. Until 2026-10 this readout
+  used a narrower rule under the same label (auto-approved with no
+  `details.changes` on the approval row) while the dashboard used a much wider
+  one; the two can no longer disagree.
 - **exception rate** — invoices that raised ≥ 1 exception, over **all assigned**
   (not just completed) — exposure is over all work routed to the arm.
 - **rejection rate** — rejected over completed.
 
-"Completed" = the invoice reached a terminal review decision (approved OR
-rejected). A clear **"not enough data yet"** state guards the readout: until
+"Completed" = the invoice reached a review decision — the touchless rate's
+shared denominator: cleared review (approved or later, evidence-gated for
+`done` / `paid` / `failed`) or currently `rejected`. A rejection resubmitted
+back into review is in flight again, and CSV-imported rows are never completed. A clear **"not enough data yet"** state guards the readout: until
 *both* arms have `≥ min_sample_per_variant` completed invoices, `enough_data` is
 False and `winner` is `null` (with per-arm `notes` saying how many more are
 needed). Past the threshold a **winner** is called by a plain, explainable
@@ -576,9 +587,11 @@ should survive — and `.get(...)` on it used to raise `AttributeError` out of t
 endpoint as a 500, losing the whole experiment's evidence over one row. It is
 read as carrying nothing, matching `approval_signature.check_approval_row`,
 which absorbs the same shape by counting the row rather than failing the period.
-Deliberately nothing more: a malformed blob is not evidence that a human changed
-a field, so the row is not re-read as "corrections present". Guarded by
-`tests/test_experiment_results_malformed_details.py`.
+The decision and touchless flag no longer read `details` in Python at all — they
+come from the shared SQL classification. Guarded by
+`tests/test_experiment_results_malformed_details.py`; the dashboard/experiments
+agreement by `tests/test_dashboard_aggregates.py`
+(`test_experiments_readout_and_dashboard_agree_on_the_same_invoices`).
 
 ### Endpoints
 
