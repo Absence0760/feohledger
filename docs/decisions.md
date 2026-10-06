@@ -9929,3 +9929,47 @@ Partners' 2025 best-in-class) rather than the old 80%. Every fact used was
 already recorded, so there is no migration. History older than the actions that
 record corrections (2026-06/07) and exception decisions (2026-08-15) can
 over-count an auto-approved invoice; `backend/docs/analytics.md` says so.
+
+## 248. AP clerks enter invoices; entry is a role, and nothing a clerk does ends in an approval
+
+Standard AP practice gives intake, validation and GL coding to the clerk and
+keeps *approval and payment release* separate from it. Clerks could do none of
+the first, so `ap_clerk` joins `INVOICE_ENTRY_ROLES` (create, upload, the file
+routes, PATCH, line items, extract/reset, complete, resubmit, bulk status) and
+`INVOICE_IMPORT_ROLES` (CSV import of open AP only; historical `done`/`paid`
+rows, which assert a payment already happened, stay with admins and AP
+managers).
+
+Segregation stays at approval, where it already lived. Every create path stamps
+`uploaded_by_id`. An entry-only caller (a clerk with no admin, AP manager or CFO
+role) who changes the content of an invoice they did not upload is added to
+`segregation_actor_ids` (`invoice_entry.stamp_entry_editor`), so a clerk later
+granted approval can never approve figures they keyed. Manager edits are not
+stamped: approve-with-corrections is the approver editing what they sign, and
+stamping it would refuse a one-approver org's manager the approval of an
+invoice they fixed.
+
+The entry-only caller's window closes **at submit**, not at approval. Approval
+binds to no version, so an edit landing between the approver's read and click
+(re-pointing the payee re-links `vendor_id`) would be approved unseen; rework
+goes through reject. The window is also closed on any invoice ever approved
+(`approval_date` or `approved_by`), because an approved invoice whose ERP push
+failed sits at `failed`. Re-extracting such an invoice is refused for every
+role, not only clerks: re-reading the document would rewrite what the approver
+signed while `approved_by` still names them, and Retry ERP is that invoice's
+path. Nothing an entry-only caller does ends in an approval without a second
+person: their `/complete` skips the `auto_approve_below` floor whatever
+`require_segregation` says, and their upload and extract run with
+`suppress_auto_approve` (the flag §75's portal resubmit introduced).
+
+Entry was deliberately **not** made an `invoice.create` catalog permission. Both
+role-grant guards read catalog membership as "sensitive", so a clerk-held
+permission stopped a `user.manage`-only role from onboarding or managing
+clerks, and entry's control is per invoice at approval, not a role split. The
+cost is that a custom role cannot be granted entry; that is a follow-up for the
+first customer who needs a non-clerk preparer. Also rejected: stamping every
+editor, which would refuse a manager the approval of an invoice they
+corrected; and keeping `ready_for_review` editable behind a chain-signoff
+check, which left level 0 and single-level approval open. Tying approval to the
+version the approver saw closes the same race for managers and is a tracked
+follow-up.

@@ -91,7 +91,7 @@ section carried its own `decisions.md` § reference, so nothing was lost by
 deleting it; that cross-reference is what makes the pruning safe, and writing
 one is what earns a future entry the right to be deleted.
 
-**62 open: 47 (c) · 9 (a) · 6 (b)** — re-derived from the file, never carried
+**68 open: 53 (c) · 9 (a) · 6 (b)** — re-derived from the file, never carried
 forward. The section heading is authoritative; where an entry also carries a
 `(c)`/`(a)`/`(b)` marker, the two agree.
 `grep -c '^- \[ \]' docs/followups.md`.
@@ -1094,6 +1094,43 @@ lands. Pure doc drift was corrected in the same PR. The two diagnosed defects
       the same content shapes and tests, and a Help row in the mobile app's
       settings that opens the web help for the user's tenant. **Trigger:** the
       first supplier onboarding at volume, or the first mobile-first customer.
+- [ ] **(c) Approval isn't tied to the version the approver saw.** An edit
+      that lands between an approver reading an invoice and clicking Approve
+      is approved unseen, for managers as well as clerks (a clerk's own window
+      now closes at submit, decisions §248). **Durable fix:** an
+      `expected_updated_at` on `ApproveRequest` and per row in bulk approve,
+      checked under the row lock, 409 on a mismatch, with the modal reloading
+      on 409. **Trigger:** the next change to the approve endpoints, or before
+      the first production tenant with more than one approver.
+- [ ] **(c) `bulk/delete` has no entity scope or row lock.** It has the shape
+      `bulk/status` had before the clerk-entry change fixed it there. Clerks
+      can't reach it. **Durable fix:** the same `apply_entity_scope` +
+      `FOR UPDATE` + missing-id-as-skip treatment `bulk/status` got, with a
+      cross-entity test. **Trigger:** the next change to bulk invoice actions.
+- [ ] **(c) Bulk `new → ready_for_review` skips `/complete`'s required-field
+      check**, for every role, so an invoice with no vendor or amount can reach
+      the approval queue from the bulk bar. **Durable fix:** run the same
+      required-field validation per row and report failures as skips.
+      **Trigger:** same as above.
+- [ ] **(c) CSV import resolves vendors across entities and defaults a blank
+      currency to USD.** A row can link another subsidiary's vendor, and a
+      blank currency cell becomes `"USD"` against the rule that a missing
+      currency stays missing. Its "records history" row error also has no
+      message code, so it reads in English in every locale. **Durable fix:**
+      scope vendor matching to the import's entity, refuse a blank currency
+      per row, and key the row errors through the message catalogue.
+      **Trigger:** the next change to CSV import.
+- [ ] **(c) A manager's extraction can auto-approve a document a clerk
+      swapped in.** A clerk's own upload or extract never auto-approves, but a
+      manager who re-extracts after a clerk replaced the file can still get
+      it auto-approved with no second look. **Durable fix:** suppress
+      auto-approve whenever `segregation_actor_ids` is non-empty, with a test.
+      **Trigger:** the next change to extraction dispatch or auto-approve.
+- [ ] **(c) A custom role can't be granted invoice entry.** Entry is a role
+      list by design (decisions §248). **Durable fix:** if a customer needs a
+      non-clerk preparer role, add a non-sensitive permission tier the
+      role-grant guards exempt, and move entry onto it. **Trigger:** the first
+      customer asking for a custom preparer role.
 
 ## (a) Blocked on external credentials, accounts, or hardware
 
