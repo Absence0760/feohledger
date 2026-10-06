@@ -40,7 +40,7 @@ transcription was retired rather than corrected again. Add a follow-up here; add
 a GitHub issue only when one warrants its own thread.
 
 **Last reconciled:** 2026-10-05 (evening) — a five-agent issues batch closed
-**ten** (c) entries and opened two, taking the file from 66 → 58: the legal
+**ten** (c) entries and opened three, taking the file from 66 → 59: the legal
 table scrollers' names and the consent banner over the contents rail (decisions
 §230), step-up refusals on `/profile` plus its hand-rolled shell (§231), the
 English-only GL-chart refusal and the recurring form's free-text GL field
@@ -83,7 +83,7 @@ section carried its own `decisions.md` § reference, so nothing was lost by
 deleting it; that cross-reference is what makes the pruning safe, and writing
 one is what earns a future entry the right to be deleted.
 
-**58 open: 43 (c) · 9 (a) · 6 (b)** — re-derived from the file, never carried
+**59 open: 44 (c) · 9 (a) · 6 (b)** — re-derived from the file, never carried
 forward. The section heading is authoritative; where an entry also carries a
 `(c)`/`(a)`/`(b)` marker, the two agree.
 `grep -c '^- \[ \]' docs/followups.md`.
@@ -1041,6 +1041,23 @@ or is a sibling of a fix that needs its own pass.
       `/budgets/check` latency.
 
 ### Surfaced by the payment-path bug hunt (2026-10-05, decisions §214)
+
+- [ ] **(c) A resumed dispatch refused before the adapter call is classed retry-safe even if an earlier pass reached the processor.**
+      `_dispatch_run_payments` also serves `/resume`, where a `pending` row can be one
+      whose earlier pass called `adapter.create_payment` and then crashed before the
+      commit. If the resume refuses it for a pre-adapter reason — `invoice_locked`
+      (decisions §233), `invoice_not_payable`, `invoice_blocked:` — the row becomes
+      `failed` with a RETRY_SAFE reason, and `/retry-failed` mints a fresh
+      `correlation_id`, i.e. a second order under a new idempotency key. Pre-existing
+      for the older reasons; `invoice_locked` makes it likelier because it is
+      transient by design.
+      **Durable fix:** stamp a dispatch-attempt marker on the payment row (committed)
+      before the adapter call, and have `payment_runs.classify_payment_failure`
+      return IN_DOUBT for any marked row regardless of reason, so the reconciler — not
+      a retry — resolves it.
+      **Trigger:** the next change to `/resume`, `/retry-failed` or
+      `classify_payment_failure`, or the first resumed run seen after a mid-dispatch
+      crash.
 
 - [ ] **(c) A database error after the processor call leaves the dispatch session aborted.**
       A deadlock or other database error raised *after* `adapter.create_payment`
