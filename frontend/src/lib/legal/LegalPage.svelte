@@ -633,10 +633,12 @@
 		   `data-consent-visible` only while mounted, so the list gives that
 		   band back the moment the banner is dismissed. A permanent bottom
 		   gap was rejected: it would cost every reader who already chose.
-		   The `0px` fallback is for the instant between the attribute and the
-		   property, which the banner sets together. */
+		   No `var()` fallback: the banner sets and removes the attribute and
+		   the property in the same synchronous effect, so this rule never
+		   matches without the property — and a fallback for a token assigned
+		   only from script reads as a dead token to `tokenPairing.test.ts`. */
 		:global(html[data-consent-visible]) .contents-list {
-			max-height: calc(100vh - 6rem - var(--consent-banner-height, 0px));
+			max-height: calc(100vh - 6rem - var(--consent-banner-height));
 		}
 	}
 </style>
