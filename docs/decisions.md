@@ -9494,3 +9494,139 @@ already did under adapter-static, so behaviour is unchanged.
 `PUBLIC_API_URL` stays required (a build without it fails, as before);
 `PUBLIC_PLATFORM_DOMAINS` and `PUBLIC_SITE_URL` stay optional, each for the
 reason its entry gives.
+
+## 230. The consent banner publishes its footprint, and the legal contents rail reads it only while it is there
+
+The legal contents rail (§205) is pinned to the viewport with a viewport-relative
+height, so unlike the document it cannot scroll out from under the fixed consent
+banner, and tabbing down it could land focus on a link the banner hid (WCAG 2.4.11).
+The banner already reserved its own space for the document (spacer plus
+`scroll-padding-bottom`). For viewport-pinned content it now also sets
+`data-consent-visible` and `--consent-banner-height` (the whole band: height plus
+both 16px offsets) on the root element while mounted, from the same resize-tracked
+measurement, and removes them on dismissal; the rail subtracts the band only under
+that attribute. A fixed bottom gap was rejected because it takes space from every
+reader who has already chosen; having the rail measure the banner was rejected
+because a page would then reach into the consent component's DOM. The banner owns
+its geometry and announces it; consumers only read it. The consent gate itself is
+untouched.
+
+Each legal table scroller is a `role="region"` named with `aria-labelledby` on the
+heading its table sits under, not a new `aria-label`. That reuses text already in
+the reviewed English legal document (§174), so naming the regions adds no legal
+wording and no catalogue entries. `tableScrollRegion.test.ts` now covers the legal
+tree and fails a dangling `aria-labelledby`.
+
+## 231. Step-up and passkey refusals carry a code, never more specific than the sentence it replaces
+
+A refused factor-change step-up, or a passkey check with no usable credential,
+answers 400 with `detail = {code, message, params}`, built by
+`api/refusals.coded_refusal` (shared by the employee and supplier-portal routers).
+The status stays 400 and the English stays as `message`: every client already
+flattens an object `detail` to its `message`, so text readers do not break and a
+build older than a code still shows a complete sentence. Params are data — the
+wrong-host refusal sends its hosts as a list so the browser joins them with the
+reader's punctuation.
+
+The auth rule that keeps this safe: a code is never more specific than the sentence
+it replaces. `step_up_failed` covers a wrong password, a wrong authenticator code
+and a failed passkey alike, and `passkey_not_registered` is as uninformative as the
+old "No passkey registered". The portal gets its own `portal_step_up_failed`
+rather than reusing the employee code, because a code identifies one sentence and
+the portal's offers no passkey. The web mapping (`api/authRefusals.ts`) is
+hand-written rather than generated: it has five entries that change only with a
+deliberate auth decision, and a unit test pins each code to the backend's spelling.
+Fixing the portal surfaced that `portalApi.ts` threw `new Error(body.detail || …)`,
+rendering every portal 422 list as "[object Object]"; it now builds errors through
+the same `apiErrorFromBody` as `api.ts`.
+
+## 232. A structured server refusal is localized once, at the transport
+
+The GL-chart refusal (§194, §199) became a 422 `detail` object,
+`{code: "gl_codes_outside_chart", on_lines, foreign, retired, unknown, message}`,
+rather than a sentence. Codes are grouped by reason so a client builds its own
+sentence, `on_lines` replaces a free-text "Line items:" prefix, and `message`
+keeps the English for any client or catcher that only reads text. A refused CSV
+row carries the same fields beside `row`, so one parser serves both.
+
+On the web it is translated inside `api.ts::apiErrorFromBody`, before
+`formatApiDetail`, not at each toast: at least six write paths can receive it, and
+fixing call sites would miss the next one while the transport sees every response.
+A second structured refusal joins `localizeApiDetail`, never a call site.
+Server-side catchers that turned the refusal back into text (the exception agent's
+escalation rationale, the bulk-status skip reason, the email-approval page) read it
+through `utils/http.detail_text`, because `str(exc.detail)` on an object prints a
+dict repr. The recurring-template form's GL field became the same entity-scoped
+picker the invoice forms use, which needed `entity_id` on
+`RecurringTemplateResponse`; it falls back to free text when the chart is empty.
+
+## 233. A money path's wait for the invoice lock is bounded, scoped to one statement, and refused by name
+
+Dispatch, void, settlement accept and compliance release lock the invoice row
+(§214), and the wait was unbounded, so every invoice writer could queue behind a
+slow processor. Each caller takes that lock before any processor call, so a
+timeout there is always retry-safe — but only if it can never fire later. The bound
+(`utils/db_locks`, `FEOH_PAYMENT_INVOICE_LOCK_TIMEOUT_MS`, default 5000) therefore
+runs inside a SAVEPOINT and restores the previous `lock_timeout` before release: a
+setting left in place would survive to the end of the transaction, onto the writes
+after an accepted processor order, where a timeout would roll back the only record
+that money moved. The savepoint also keeps the outer transaction usable, so
+dispatch records `failed` / `invoice_locked` (retry-safe) on a live session instead
+of `unexpected_error` on an aborted one.
+
+The request paths answer 409 rather than recording `failed`: a human is there to
+retry, and failing a held payment would push it through the retry-run flow for
+nothing. Two waits are deliberately not bounded: the dispatch loop's payment-row
+lock (only another dispatcher holds it, so waiting then skipping is correct), and
+other invoice writers waiting out a dispatch's processor call (bounded by the
+adapters' HTTP timeouts). The remaining abort-after-processor case is tracked in
+`docs/followups.md`.
+
+## 234. A money field moves from JSON number to exact string clients-first; the exception queue's `amount` is the first
+
+Round 26 made every money serializer exact but kept the wire shape. The exception
+queue's `amount` now crosses as an exact decimal string via a shared
+`schemas/money.json_money_string` (no scientific notation, scale kept), so later
+fields move by changing one call. Both clients accept either shape first — web
+types it `MoneyAmount`, mobile reads it with `exactMoneyFromJson` and formats a
+legacy number to the column's two decimals — so deploy order does not matter. A
+mobile build from before the change would throw on the string; none has been
+distributed (no release has been published, so `mobile-release.yml` has never
+run), but once one is, a server switch of the next field must wait for the
+tolerant build to be the oldest in use. The `exception.raised` webhook already
+sent a string, and `/api/v1` exposes no exceptions, so no published contract
+changed.
+
+## 235. Requisition approval refuses material editors, keyed on a set (migration 0102)
+
+`PATCH /api/requisitions/{id}` lets any admin, ap_manager or ap_clerk rewrite
+another user's draft — lines, vendor, currency, budget — including one an
+ap_manager just converted from an intake, whose requester is the intake's. The
+approve check named only `requester_user_id`, so the editor could approve the spend
+they had written: the gap §141 / §152 closed for recurring templates, closed the
+same way. `purchase_requisitions.material_editor_ids` (nullable JSONB, tenant
+fan-out) is filled only by a material change, never holds the requester, and is
+passed to the approve check as `segregation_actor_ids`. It is not backfilled, for
+§141's reason: nothing records who edited a draft, and any guess either refuses an
+innocent approver or absolves the editor.
+
+"Material" is defined once in `models/procurement.py`: lines, vendor, currency,
+budget. `department` and `contract_id` are cosmetic because nothing sums or copies
+them into spend. Lines are compared by content, not presence, because the edit
+modal re-sends every line on every save; counting presence would refuse anyone who
+fixed a typo and discredit the control. An intake conversion records nobody on its
+own — it copies approved terms and accepts only cosmetic overrides — and a guard
+test fails if the conversion body ever gains a material field.
+
+## 236. Budget guards and requisition links serialise on the budget row
+
+`update_budget` / `delete_budget` counted linked requisitions and then wrote with no
+lock in between, so a requisition linking in that window got past the guard: a
+delete then failed at the FK with a 500, and a currency change left a requisition
+linked in the old currency. Both routes and `api/requisitions._resolve_links`
+(whenever it resolves a `budget_id`) now `SELECT … FOR UPDATE` the budget row,
+the one row both sides already touch, so the second arrival waits and re-reads.
+Serializable isolation was rejected because it turns the race into retry errors
+every route would have to handle; locking only the requisition side cannot cover a
+link that does not exist yet. The FK stays as the last guard, and a residual
+violation on delete maps to the same 409.
