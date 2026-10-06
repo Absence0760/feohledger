@@ -46,6 +46,7 @@ from app.models.invoice import Invoice, InvoiceStatus
 from app.models.vendor import Vendor
 from app.services.audit_dispatch import dispatch_audit
 from app.services.gl_chart import load_invoice_chart
+from app.services.invoice_warnings import refresh_warnings
 from app.services.numeric_bounds import MONEY_NUMERIC, fits_numeric
 from app.utils.dates import parse_ambiguous_date
 
@@ -413,6 +414,7 @@ async def import_invoices_csv(
     entity_id: uuid.UUID | None = None,
     day_first: bool = False,
     actor_id: uuid.UUID | None = None,
+    org_settings: dict | None = None,
 ) -> ImportResult:
     """Import historical invoices. Vendor resolution: code > name. Missing vendors
     get an auto-created stub with status='unverified' so the row still lands.
@@ -429,7 +431,18 @@ async def import_invoices_csv(
     ``vendor.imported_csv`` row for each vendor stub auto-created along the way,
     and — because an invoice imported at ``new`` still has to be approved — on
     ``Invoice.uploaded_by_id``, which is what segregation of duties is keyed on
-    (``services/approval_chain.violates_segregation``)."""
+    (``services/approval_chain.violates_segregation``).
+
+    Every row imported at a LIVE status (``new`` / ``rejected`` — the two that
+    reach approval) gets ``invoice_warnings.refresh_warnings`` before the
+    import returns, exactly as manual create and upload-without-extraction do,
+    so a duplicate or fraud flag is on the row — and its exception in the queue
+    — from the moment it lands, not from whenever someone next edits it.
+    ``org_settings`` drives the configurable fraud rules, as it does there.
+    Historical ``done`` / ``paid`` rows are not refreshed: they never reach a
+    payment run, and flagging years of settled history would bury the queue in
+    exceptions nobody can act on. They still count as the *other* side of a
+    duplicate check, so a live row that repeats a paid one is flagged."""
     result = ImportResult()
     try:
         rows = _read_rows(csv_text)
@@ -595,6 +608,13 @@ async def import_invoices_csv(
                 "source": IMPORT_PROVENANCE_SOURCE,
             },
         )
+    # After the flush, so every row of the batch is visible to every other
+    # row's duplicate check, and inside the caller's transaction like the other
+    # create paths: the warnings and their exceptions commit with the invoices.
+    for invoice in created:
+        if getattr(invoice.status, "value", invoice.status) in _HISTORICAL_INVOICE_STATUSES:
+            continue
+        await refresh_warnings(db, invoice, org_settings=org_settings)
     return result
 
 

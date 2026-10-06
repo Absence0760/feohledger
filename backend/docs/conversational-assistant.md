@@ -123,18 +123,32 @@ float). Params clamp limits so an odd model arg can't request an unbounded scan.
 | `propose_payment_plan` | discount optimizer (`tools/optimizer.py`) | proposed plan: cash curve + discounts to capture (never moves money) |
 
 **What each caller can reach.** Every tool is org- and entity-scoped (below)
-and conversations are private to their author (next section). Beyond that,
-only the five cash-flow tools carry a per-tool role gate:
-`ToolSpec.allowed_roles = FINANCE_LEADER_ROLES` (`admin` / `ap_manager` /
-`cfo`), checked in the orchestrator's `run_tool` before any read, along with
-the `FEOH_CASHFLOW_COPILOT_ENABLED` master switch — a clerk, or a disabled
-deployment, gets a clean refusal tool result. The five general tools have no
-`allowed_roles`, so any of the four employee roles can call them.
+and conversations are private to their author (next section). On top of that,
+a tool carries a per-tool role gate whenever the REST surface gates the same
+data more narrowly than the assistant's four roles: `ToolSpec.allowed_roles`,
+checked in the orchestrator's `run_tool` before any param validation or read.
+A refused caller gets a clean tool result — `error` set, `result` null, never
+data and never a 500 — and the audit row records `error: "role_not_permitted"`
+instead of the arg shape.
 
-> **Note:** that includes `get_payment_forecast`, which returns the same
-> due-dated outflow figures the REST cash-flow forecast gates to admin / CFO —
-> see `docs/known-issues.md` § "The assistant's payment-forecast tool skips the
-> forecast's role gate".
+| Tool | `allowed_roles` | REST gate it mirrors |
+|------|-----------------|----------------------|
+| `list_invoices`, `list_pending_approvals`, `find_invoices_by_text` | none (all four) | `GET /api/invoices` — any employee |
+| `get_vendor_spend` | none (all four) | `GET /api/dashboard` top-vendors spend tile — any employee |
+| `get_payment_forecast` + the five cash-flow tools | `FINANCE_LEADER_ROLES` (`admin` / `ap_manager` / `cfo`) | `/api/cash-flow/*` — `COPILOT_ROLES`, the org-cash-position audience |
+
+`get_payment_forecast` returns the same due-dated committed + pending outflow
+the copilot's `get_cashflow_forecast` does, so it carries the same gate — an AP
+clerk asking "what do we owe this month?" gets the refusal. The five cash-flow
+tools are additionally behind the `FEOH_CASHFLOW_COPILOT_ENABLED` master switch
+(a disabled deployment refuses them with "This tool is not available.");
+`get_payment_forecast` is a general tool and is not.
+
+`tests/test_assistant.py::test_tool_allowed_roles_match_rest_gate` is the drift
+guard: a table maps every tool to the REST route whose data it serves, reads
+that route's actual `require_roles` set out of its dependency tree, and fails
+when the tool's `allowed_roles` differs — and a companion test fails when a new
+tool is registered without a row in that table.
 
 `list_invoices` re-builds the filter SELECT directly rather than importing from
 `app/api/invoices.py` (frozen during in-flight multi-entity work) — see
