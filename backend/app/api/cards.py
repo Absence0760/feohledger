@@ -542,6 +542,10 @@ async def generate_cards(
         must have cleared AP approval. An invoice still in
         new/pending/ready_for_review/rejected/failed is filtered out before
         any card is minted.
+      - ``payment_runs.blocked_invoice_ids`` and the vendor's status — an
+        unresolved payment-blocking exception, or a vendor that is not
+        ``active`` (unverified / inactive / rejected), skips the invoice exactly
+        as a run refuses it.
       - ``check_payment_compliance`` — sanctions/KYC/AML screening. Card
         issuance moves money just like an ACH/wire, so a blocked or
         sanctioned vendor must not receive a card; a hold/refuse verdict
@@ -606,9 +610,21 @@ async def generate_cards(
         .all()
     )
 
+    # The payment gates a run enforces before money moves: an unresolved
+    # payment-blocking exception, or a vendor that is not verified and active.
+    # A minted card is spendable the moment it exists, so it is money moving
+    # and must not slip past what `POST /api/payments/runs` refuses — through
+    # the same shared predicates, so the two entry points can't drift.
+    from app.services.payment_runs import (
+        PAYABLE_VENDOR_STATUS,
+        blocked_invoice_ids,
+    )
+
+    blocked = await blocked_invoice_ids(db, [inv.id for inv in invoices])
+
     cards: list[VirtualCard] = []
     for inv in invoices:
-        if inv.id in already_carded:
+        if inv.id in already_carded or inv.id in blocked:
             continue
 
         # Compliance gate: mirrors execute_payment_run's virtual_card leg. No
@@ -619,7 +635,7 @@ async def generate_cards(
         vendor = (
             await db.execute(select(Vendor).where(Vendor.id == inv.vendor_id))
         ).scalar_one_or_none()
-        if vendor is None:
+        if vendor is None or vendor.status != PAYABLE_VENDOR_STATUS:
             continue
         decision = await check_payment_compliance(
             db,

@@ -7,7 +7,7 @@ both humans and agents run on.
 
 ## Why an exception is a control, not a note
 
-Four exception types block a payment run outright —
+Six exception types block a payment run outright —
 `api/payments.PAYMENT_BLOCKING_EXCEPTION_TYPES`:
 
 | Type | Raised by |
@@ -16,6 +16,8 @@ Four exception types block a payment run outright —
 | `fraud_flag` | fraud rules, Positive Pay returns |
 | `line_total_mismatch` | line-total reconciliation (see [line-total-reconciliation.md](line-total-reconciliation.md)) |
 | `payment_reconciliation` | `services/payment_reconciler.flag_payment_for_reconciliation` — a payment recorded `failed` that the processor may still hold an order for (e.g. aged out by the reconciler backstop) |
+| `quality_hold` | the 4-way leg of PO matching — a failed, partial or missing-but-required inspection (see [po-matching.md](po-matching.md)) |
+| `po_mismatch` | PO matching — missing PO, currency mismatch, amount outside tolerance, short receipt, or an over-receipt billed above the PO (see [po-matching.md](po-matching.md) § Before Payment) |
 
 Invoice **approval gates on none of them**. So clearing one of these is the
 human sign-off that lets the money move — the last control between a flagged

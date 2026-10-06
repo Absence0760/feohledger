@@ -189,14 +189,17 @@ reads in the queue. The org opt-out
 (`settings.exceptions.require_segregation: false`) is read from the same place,
 so an org that disabled the control does not find the agent still refusing.
 
-**Nothing in the shipped registry can reach the gate today**: `duplicate` and
-`fraud_flag` are escalate-only stubs (§ Deferred) and `line_total_mismatch` /
-`payment_reconciliation` have no resolver at all, so no payment-blocking type
-has an auto-resolving agent. That is why
-`tests/test_exception_agent_queue_segregation.py` registers a probe resolver to
-test it — a gate written *after* the first such resolver lands, lands as a
-bypass — and why a companion test fails the moment a real auto-resolving
-resolver appears for a blocking type.
+**`po_mismatch` is the one payment-blocking type with shipped auto-resolving
+resolvers** (amount-within-tolerance, missing-PO, multi-PO split). They joined the
+gate when `po_mismatch` became payment-blocking, so a run the invoice's uploader
+triggers escalates rather than clearing their own PO variance
+(`test_a_po_mismatch_agent_run_triggered_by_the_uploader_escalates`). `duplicate`
+and `fraud_flag` are escalate-only stubs (§ Deferred) and the remaining blocking
+types have no resolver at all. That is why
+`tests/test_exception_agent_queue_segregation.py` also registers a probe resolver
+for `fraud_flag` — a gate written *after* the first such resolver lands, lands as
+a bypass — and why a companion test fails the moment a real auto-resolving
+resolver appears for any other blocking type.
 
 ## Autonomy → threshold
 

@@ -637,12 +637,15 @@ re-sent.
 - `invoice_not_payable` — the invoice is voided, re-rejected or already `done`,
   so paying it would move money against something nobody currently approves.
 - `invoice_has_blocking_exception` — an unresolved
-  `PAYMENT_BLOCKING_EXCEPTION_TYPES` flag (`duplicate` / `fraud_flag` /
-  `line_total_mismatch`). Run creation refuses these outright; this endpoint
+  `PAYMENT_BLOCKING_EXCEPTION_TYPES` flag (any member — see § Financial-integrity
+  exception gate). Run creation refuses these outright; this endpoint
   re-dispatches money days or weeks later, so a `fraud_flag` raised in the
   interim (a BEC bank-detail swap, an altered or never-issued cheque off a
   Positive Pay return) has to stop the re-send here too. Both callers share
   `services/payment_runs.blocked_invoice_ids` so they can't drift.
+- `vendor_not_active` — the invoice's vendor is not `active` (unverified, rejected,
+  deactivated or merged away since the run was built); the run builder's refusal of
+  the same name, through `services/payment_runs.inactive_vendor_statuses`.
 - `net_amount_changed` — a credit memo applied while the payment sat `failed`
   (`credit_memos.py` refuses only a `paid` or `done` invoice, and never looks at
   an existing payment) means the failed row's `amount` is no longer what the
@@ -2073,10 +2076,15 @@ between the manual and copilot-driven paths:
 | `fraud_flag` | a bank-detail swap, rush payment, statistical anomaly, an altered / never-issued cheque from a Positive Pay return, or a processor settlement that didn't reconcile against what AP authorized (§ Settlement-amount verification) |
 | `line_total_mismatch` | a header `amount` that openly disagrees with the invoice's own line items — the run pays the header, and the header is never silently recomputed from the lines (see `line-total-reconciliation.md`) |
 | `payment_reconciliation` | a second payment for money that may already be moving — the reconciler aged a still-`submitted` payment out to `failed`, which frees the invoice's live-payment slot while the rail has never confirmed either way (§ The reconciler backstop) |
+| `quality_hold` | payment for goods that failed inspection, were only partly accepted, or have no inspection on record where the match rule requires one — a four-way match exists so failed quality acceptance stops payment (`po-matching.md` § Quality-hold exceptions) |
+| `po_mismatch` | payment against an invoice that disagrees with its PO beyond tolerance — the PO doesn't exist, the currencies differ, the amount is outside tolerance, or the receipt is short (or over, while the invoice bills above the PO). An ERP sets a payment block on the same price / quantity variance. Only an out-of-tolerance finding raises one (`po-matching.md` § Before Payment) |
 
-Each is raised as an `error`-severity advisory flag, and **approval does not gate
-on any of them** — nothing in `services/review.py` or `workflow_engine.py` reads
-warning severity, so all three can be approved straight past. Payment-run
+Each is an advisory flag at whatever severity its detector chose, and **approval
+does not gate on any of them** — nothing in `services/review.py` or
+`workflow_engine.py` reads warning severity, so every one can be approved straight
+past. The tuple keys on the TYPE, so a `po_mismatch` / `quality_hold` blocks at
+any severity (a short receipt is `info`, but paying it pays for goods that have
+not arrived). Payment-run
 creation is the gate that stops the money.
 
 Resolving or dismissing the exception is the human sign-off that clears it and
@@ -2127,7 +2135,8 @@ types already did.
 
 | Refusal | Reason code | On the queue |
 |---------|-------------|--------------|
-| an unresolved (`open`/`escalated`) payment-blocking exception | the exception **type** (`duplicate` / `fraud_flag` / `line_total_mismatch` / `payment_reconciliation`) | `blocked: true` |
+| an unresolved (`open`/`escalated`) payment-blocking exception | the exception **type** (`duplicate` / `fraud_flag` / `line_total_mismatch` / `payment_reconciliation` / `quality_hold` / `po_mismatch`) | `blocked: true` |
+| the invoice's vendor is not `active` — unverified, inactive or rejected (`payment_runs.inactive_vendor_statuses`; `vendor-management.md` § Vendor Lifecycle). Refused on every rail, so it outranks the card-rail pin. `POST /api/payments` 409s; dispatch fails a payment whose vendor stopped being active after booking as `vendor_not_active:<status>`, before the processor call and retry-safe; `/retry-failed` skips it | `vendor_not_active` | `blocked: true` |
 | an applied credit memo's vendor or currency no longer matches the invoice (a background re-extraction rewrote it after the apply) — netting it would credit the wrong supplier or subtract across currencies (`services/applied_credit_integrity`, decisions §214). Checked before `fully_credited`, whose net is computed from that same credit. `POST /api/payments` refuses it with a 409, and dispatch fails a payment booked before the change as `applied_credit_mismatch:<vendor\|currency>`, before the processor call and retry-safe. `/retry-failed` skips it. | `applied_credit_mismatch` | `blocked: true` |
 | applied credit memos cover the whole invoice — a `$0` payment a real rail rejects as `failed` | `fully_credited` | `blocked: true` |
 | a live virtual card already claims the invoice (`POST /api/cards/generate` mints one with no `Payment` row behind it) | `live_virtual_card` | `blocked: false`, `required_method: "virtual_card"` |

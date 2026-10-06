@@ -111,6 +111,26 @@ async def _book_payment(mk, invoice_id: uuid.UUID, *, status: str = "submitted")
         await s.commit()
 
 
+async def _link_vendor(mk, org_id, invoice_id: uuid.UUID, *, status: str) -> uuid.UUID:
+    from app.models.vendor import Vendor
+
+    vendor_id = uuid.uuid4()
+    async with mk() as s:
+        s.add(
+            Vendor(
+                id=vendor_id,
+                organization_id=org_id,
+                name=f"Queue Vendor {status} {vendor_id.hex[:6]}",
+                status=status,
+            )
+        )
+        await s.flush()
+        inv = await s.get(Invoice, invoice_id)
+        inv.vendor_id = vendor_id
+        await s.commit()
+    return vendor_id
+
+
 async def _queue_result(realdb, mk):
     from app.api.payments import payment_queue
 
@@ -147,17 +167,17 @@ async def test_open_blocking_exception_marks_the_row(realdb):
 
 
 async def test_non_blocking_exception_does_not_mark_the_row(realdb):
-    """`po_mismatch` is a real exception the queue must keep offering — a run
-    does not refuse it, so marking the row would make an payable invoice
+    """`price_variance` is a real exception the queue must keep offering — a run
+    does not refuse it, so marking the row would make a payable invoice
     unpayable from the UI."""
     mk = realdb.sessionmaker(TENANT)
     org_id = realdb.info(TENANT).org_id
-    inv_id = await _seed_invoice(mk, org_id, number="Q-POMM")
-    await _add_exception(mk, org_id, inv_id, exception_type="po_mismatch")
+    inv_id = await _seed_invoice(mk, org_id, number="Q-PRICEVAR")
+    await _add_exception(mk, org_id, inv_id, exception_type="price_variance")
 
     rows = await _queue(realdb, mk)
-    assert rows["Q-POMM"]["blocked"] is False
-    assert rows["Q-POMM"]["blocked_reason"] is None
+    assert rows["Q-PRICEVAR"]["blocked"] is False
+    assert rows["Q-PRICEVAR"]["blocked_reason"] is None
 
 
 async def test_escalated_blocking_exception_still_blocks(realdb):
@@ -605,6 +625,10 @@ async def test_the_queues_sql_selectable_set_matches_the_python_verdict(realdb):
     card_id = await _seed_invoice(mk, org_id, number="Q-SQL-CARD")
     live_id = await _seed_invoice(mk, org_id, number="Q-SQL-LIVE")
     mismatch_id = await _seed_invoice(mk, org_id, number="Q-SQL-MISMATCH")
+    unverified_id = await _seed_invoice(mk, org_id, number="Q-SQL-UNVERIFIED")
+    active_id = await _seed_invoice(mk, org_id, number="Q-SQL-ACTIVE-VENDOR")
+    await _link_vendor(mk, org_id, unverified_id, status="unverified")
+    await _link_vendor(mk, org_id, active_id, status="active")
     await _add_exception(mk, org_id, exc_id, exception_type="fraud_flag")
     await _apply_credit(mk, org_id, credited_id, amount="200.00")
     await _apply_credit(mk, org_id, mismatch_id, amount="50.00")
@@ -614,7 +638,16 @@ async def test_the_queues_sql_selectable_set_matches_the_python_verdict(realdb):
 
     selectable = await _selectable_ids(realdb, mk)
 
-    seeded = [clean_id, exc_id, credited_id, card_id, live_id, mismatch_id]
+    seeded = [
+        clean_id,
+        exc_id,
+        credited_id,
+        card_id,
+        live_id,
+        mismatch_id,
+        unverified_id,
+        active_id,
+    ]
     async with mk() as db:
         invoices = (
             (await db.execute(sa_select(InvoiceModel).where(InvoiceModel.id.in_(seeded))))
@@ -629,11 +662,14 @@ async def test_the_queues_sql_selectable_set_matches_the_python_verdict(realdb):
     assert verdicts[card_id].reason == "live_virtual_card"
     assert verdicts[live_id].reason == "live_payment"
     assert verdicts[mismatch_id].reason == "applied_credit_mismatch"
+    assert verdicts[unverified_id].reason == "vendor_not_active"
     assert clean_id not in verdicts
+    assert active_id not in verdicts
 
     # SQL: the selectable set is exactly the rows with no refusal.
     assert str(clean_id) in selectable
-    for refused in (exc_id, credited_id, card_id, live_id, mismatch_id):
+    assert str(active_id) in selectable
+    for refused in (exc_id, credited_id, card_id, live_id, mismatch_id, unverified_id):
         assert str(refused) not in selectable, refused
 
 
@@ -646,6 +682,7 @@ async def test_every_queue_reason_code_is_one_the_run_builder_can_actually_raise
     from app.services import payment_runs
 
     non_exception = {
+        payment_runs.REFUSAL_VENDOR_NOT_ACTIVE,
         payment_runs.REFUSAL_LIVE_VIRTUAL_CARD,
         payment_runs.REFUSAL_APPLIED_CREDIT_MISMATCH,
         payment_runs.REFUSAL_FULLY_CREDITED,
@@ -894,3 +931,21 @@ async def test_a_rail_that_reports_submitted_removes_the_invoice_from_the_queue(
             db=db, org=_org(org_id), user=_user(admin_id), entity_id=None
         )
     assert str(inv_id) not in set(ids_resp["ids"])
+
+
+async def test_a_not_active_vendor_outranks_the_card_rail_pin(realdb):
+    """An invoice whose vendor may not be paid is refused on EVERY rail, the
+    converging card rail included — so the row must read `blocked`, not merely
+    pinned to `virtual_card`. Were the card claim reported first the queue
+    would offer a working checkbox the builder then 409s."""
+    mk = realdb.sessionmaker(TENANT)
+    org_id = realdb.info(TENANT).org_id
+    inv_id = await _seed_invoice(mk, org_id, number="Q-VND-CARD")
+    await _link_vendor(mk, org_id, inv_id, status="rejected")
+    await _mint_card(mk, org_id, inv_id)
+
+    result = await _queue_result(realdb, mk)
+    row = next(i for i in result["items"] if i["invoice_number"] == "Q-VND-CARD")
+    assert row["blocked"] is True
+    assert row["blocked_reason"] == "vendor_not_active"
+    assert row["required_method"] is None

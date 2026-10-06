@@ -190,8 +190,15 @@ the way the 4-way inspection block already does — so it lands on a perfectly
 `matched` invoice, which is exactly the case that would otherwise disappear. It
 becomes a `po_mismatch` warning at **`warning`** severity (not the `info` a
 partial receipt gets: a short delivery is routinely benign — goods in transit —
-whereas quantities nobody ordered cannot be explained by timing) plus a
-`po_mismatch` exception. When the amount leg has already opened one,
+whereas quantities nobody ordered cannot be explained by timing) plus — when
+the invoice bills **above the PO total** (or no comparable variance exists) — a
+`po_mismatch` exception. `po_mismatch` blocks payment, so an over-receipt on an
+invoice billing the PO total or less (it pays exactly what was ordered) stays a
+warning on the invoice and opens no exception: the surplus is a receiving-side
+discrepancy, and holding a correctly-billed payable over it would block a good
+invoice. Billing above the PO, even inside the amount tolerance, is the shape an
+over-delivery takes when it is supporting a charge for units nobody ordered.
+When the amount leg has already opened one,
 `_ensure_exception` de-dupes per `(invoice, type, open)` and the exception call
 is a no-op — the warning still lands, and the amount branch's own message is
 left untouched.
@@ -210,7 +217,6 @@ accepted quantity (pay-only-accepted); a `pass` is a clean gate. When
 flags `inspection_required` so the warnings layer can route a `quality_hold`
 exception.
 
-> **Note (2026-10-06):** the code does not currently enforce this — only `duplicate`, `fraud_flag`, `line_total_mismatch` and `payment_reconciliation` exceptions are payment-blocking today (`PAYMENT_BLOCKING_EXCEPTION_TYPES` in `backend/app/api/payments.py`); `po_mismatch` and `quality_hold` are not. See docs/followups.md § Surfaced by writing the help centre.
 
 **Both steps matter, and the second one used to be skipped whenever a GR
 existed.** `qms_sync` writes a PO-level inspection (`gr_id` NULL) any time the
@@ -295,9 +301,29 @@ Reviewers see the match status:
 - **No PO** (gray) — no PO number on invoice, or PO not found
 
 ### Before Payment
-Mismatched invoices can be blocked from the payment queue until the mismatch is resolved (exception cleared).
+An unresolved (`open` / `escalated`) `po_mismatch` or `quality_hold` exception
+blocks payment — both are members of
+`api/payments.PAYMENT_BLOCKING_EXCEPTION_TYPES`, so the run builder refuses the
+invoice, the payment queue marks the row blocked (reason code `po_mismatch` /
+`quality_hold`), dispatch refuses a payment whose invoice picked one up after the
+run was built, and `/retry-failed`, `POST /api/payments` and
+`POST /api/cards/generate` all refuse it too ([payments.md](payments.md)
+§ Financial-integrity exception gate). This is the ERP rule: a price / quantity
+variance outside tolerance sets a payment block until it is resolved, and a
+four-way match exists so that failed quality acceptance stops payment.
 
-> **Note (2026-10-06):** the code does not currently enforce this — only `duplicate`, `fraud_flag`, `line_total_mismatch` and `payment_reconciliation` exceptions are payment-blocking today (`PAYMENT_BLOCKING_EXCEPTION_TYPES` in `backend/app/api/payments.py`); `po_mismatch` and `quality_hold` are not. See docs/followups.md § Surfaced by writing the help centre.
+Every `po_mismatch` source is an out-of-tolerance finding — the cited PO does not
+exist, the currencies differ, the amount is outside the match rule's tolerance,
+fewer units were received than ordered, or more were received while the invoice
+bills above the PO. An in-tolerance invoice never carries one, so the block
+holds no good invoice. Resolving or dismissing the exception is the sign-off that
+releases it, and **segregation of duties applies**: the invoice's uploader (or
+anyone in its `segregation_actor_ids`) may not clear it, and an exception agent
+run they trigger escalates instead of auto-resolving
+([exception-lifecycle.md](exception-lifecycle.md)). An exception is not closed
+automatically when the condition clears (the rest of a short delivery arriving,
+an inspection re-recorded as `pass`) — a human resolves it.
+
 
 ### Quality-hold exceptions
 The 4-way leg routes inspection outcomes to a dedicated `quality_hold`
@@ -310,7 +336,6 @@ exception type (created by `invoice_warnings._refresh_po_match`):
 | `partial` | info | created (info) — accepted quantity noted |
 | `pass` | — | none |
 
-> **Note (2026-10-06):** the code does not currently enforce this — only `duplicate`, `fraud_flag`, `line_total_mismatch` and `payment_reconciliation` exceptions are payment-blocking today (`PAYMENT_BLOCKING_EXCEPTION_TYPES` in `backend/app/api/payments.py`); `po_mismatch` and `quality_hold` are not. See docs/followups.md § Surfaced by writing the help centre.
 
 `quality_hold` is additive to `po_mismatch`, and the two never double-report
 one finding. `MatchResult.status` is shared by the legs — a failed inspection
@@ -404,8 +429,7 @@ than a UI preference:
   whoever works the resulting `quality_hold`. The three outcomes are a radio
   group, each labelled with what it does to the match (`pass` leaves it alone,
   `fail` drops it to `mismatch` and blocks payment, `partial` drops it to
-  `partial`). (Note, 2026-10-06: "blocks payment" is not enforced today — see
-  the note under [Before Payment](#before-payment).)
+  `partial`).
 - **A receipt is mandatory in the form**, even though `POST /api/inspections`
   accepts a body with neither `gr_id` nor `po_id`. The matcher only ever reads
   an inspection through the matched receipt's `gr_id`, or through a PO-level

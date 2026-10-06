@@ -86,6 +86,7 @@ from app.services.payment_controls import (
 )
 from app.services.payment_runs import (
     CARD_CLAIM_ONLY_METHOD,
+    PAYABLE_VENDOR_STATUS,
     PaymentRunItemInput,
     active_run_payments,
     blocked_invoice_ids,
@@ -93,6 +94,7 @@ from app.services.payment_runs import (
     card_claimed_invoice_ids,
     create_payment_run_for_invoices,
     derive_run_status,
+    inactive_vendor_statuses,
     is_retry_safe,
     net_payable_amount,
     one_currency,
@@ -178,13 +180,36 @@ SCHEDULABLE_INVOICE_STATUSES = tuple(
 #                          exception is what stops a fresh run paying the same
 #                          invoice a second time until a human has reconciled
 #                          the rail (see `services/payment_reconciler.py`).
+#   quality_hold         — the 4-way leg: the goods failed inspection, were only
+#                          partly accepted, or an inspection the match rule
+#                          requires is not on record. A four-way match exists so
+#                          that failed quality acceptance stops payment; paying
+#                          past it pays for goods the business refused.
+#   po_mismatch          — the invoice disagrees with its purchase order beyond
+#                          tolerance: the cited PO doesn't exist, the currencies
+#                          differ, the amount is outside the match rule's
+#                          tolerance, fewer units were received than ordered, or
+#                          more were received than ordered while the invoice
+#                          bills above the PO. Only an out-of-tolerance finding
+#                          raises one (`invoice_warnings._refresh_po_match`); an
+#                          in-tolerance invoice never carries it, so this blocks
+#                          no good invoice. Same rule as an ERP's price/quantity
+#                          variance payment block.
 #
-# Resolving/dismissing the exception is the human sign-off that clears it.
+# Resolving/dismissing the exception is the human sign-off that clears it. The
+# same tuple also scopes segregation of duties on that sign-off
+# (`services/exception_lifecycle.segregation_refusal`): someone implicated in
+# creating the invoice may not clear a flag that blocks its payment.
+#
+# Order is the precedence a row's `blocked_reason` reports when an invoice
+# carries several (`services/payment_runs.blocking_exception_types`).
 PAYMENT_BLOCKING_EXCEPTION_TYPES = (
     "duplicate",
     "fraud_flag",
     "line_total_mismatch",
     "payment_reconciliation",
+    "quality_hold",
+    "po_mismatch",
 )
 
 # Terminal payment states — a payment in one of these no longer represents a
@@ -468,6 +493,20 @@ def _queue_blocking_exists():
     )
 
 
+def _queue_vendor_not_active():
+    """SQL EXISTS — the invoice's vendor may not be paid (status other than
+    ``active``, NULL included), the SAME condition
+    ``services/payment_runs.inactive_vendor_statuses`` resolves. An invoice
+    with no vendor row matches nothing here, exactly as that helper reports
+    nothing for it. Correlated on ``Invoice.vendor_id``."""
+    return exists(
+        select(1).where(
+            Vendor.id == Invoice.vendor_id,
+            Vendor.status.is_distinct_from(PAYABLE_VENDOR_STATUS),
+        )
+    )
+
+
 def _live_payment_invoice_ids():
     """Sub-query: invoice ids already claimed by a LIVE payment — anything not
     in ``LIVE_PAYMENT_TERMINAL_STATUSES``, the SAME definition the run builder's
@@ -547,6 +586,7 @@ def _queue_selectable_where() -> list:
     return [
         *_queue_base_where(),
         not_(_queue_blocking_exists()),
+        not_(_queue_vendor_not_active()),
         not_(applied_credit_conflict_exists()),
         not_(_queue_fully_credited()),
         not_(_queue_live_card_exists()),
@@ -569,6 +609,7 @@ def _queue_blocked_on_every_rail():
     """
     clauses = [
         _queue_blocking_exists(),
+        _queue_vendor_not_active(),
         applied_credit_conflict_exists(),
         _queue_fully_credited(),
     ]
@@ -2571,9 +2612,8 @@ async def create_payment(
 
     # Financial-integrity gate — the SAME one `POST /api/payments/runs` and
     # `/retry-failed` run, via the same shared helper so the three can't drift.
-    # `PAYMENT_BLOCKING_EXCEPTION_TYPES` (duplicate / fraud_flag /
-    # line_total_mismatch) are `error`-severity flags that invoice APPROVAL does
-    # not gate on, so every path that books money has to re-check them —
+    # `PAYMENT_BLOCKING_EXCEPTION_TYPES` are financial-integrity flags that
+    # invoice APPROVAL does not gate on, so every path that books money has to re-check them —
     # otherwise an invoice the run path refuses with a 409 can be paid by
     # posting it here instead, which is exactly what this endpoint did. A
     # settlement-amount mismatch, a Positive Pay altered cheque and a BEC
@@ -2590,6 +2630,19 @@ async def create_payment(
                 "Invoice has an unresolved payment-blocking exception "
                 f"({_blocking[invoice.id]}) and can't be paid until it's cleared: "
                 f"{invoice.invoice_number}"
+            ),
+        )
+
+    # The vendor must be verified and active — the run builder's
+    # `vendor_not_active` refusal, through the same shared helper, so posting
+    # here can't pay an unverified / inactive / rejected vendor the run path
+    # refuses.
+    if invoice.id in await inactive_vendor_statuses(db, [invoice]):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Invoice's vendor is not active (unverified, inactive or rejected) — "
+                f"verify or reactivate the vendor before paying: {invoice.invoice_number}"
             ),
         )
 
@@ -3419,12 +3472,12 @@ async def _execute_single_payment(
         return
 
     # A payment-blocking exception raised AFTER the run was built must stop
-    # dispatch. `create_payment_run_for_invoices` refuses `duplicate` /
-    # `fraud_flag` / `line_total_mismatch` / `payment_reconciliation` at
-    # creation, but nothing freezes the invoice while a draft run waits for CFO
-    # sign-off or a payment sits `pending_compliance` — and the single sharpest
-    # case is an approved BEC bank-detail swap, which raises a `fraud_flag`
-    # ("Vendor bank details changed; verify before payment") and whose new
+    # dispatch. `create_payment_run_for_invoices` refuses every
+    # `PAYMENT_BLOCKING_EXCEPTION_TYPES` member at creation, but nothing
+    # freezes the invoice while a draft run waits for CFO sign-off or a
+    # payment sits `pending_compliance` — and the single sharpest case is an
+    # approved BEC bank-detail swap, which raises a `fraud_flag` ("Vendor bank
+    # details changed; verify before payment") and whose new
     # `Vendor.bank_details` this function then re-reads two blocks down.
     # `/retry-failed` already re-runs this gate before a days-later re-send; so
     # must `/execute`, `/resume` and `/compliance/release`. Same shared
@@ -3435,6 +3488,18 @@ async def _execute_single_payment(
     if invoice.id in _blocked:
         payment.status = "failed"
         payment.failure_reason = f"invoice_blocked:{_blocked[invoice.id]}"
+        payment.completed_at = now
+        return
+
+    # The vendor must still be verified and active. The run builder refuses an
+    # unverified / inactive / rejected vendor, but a vendor can be deactivated,
+    # rejected or merged away while a draft run waits for CFO sign-off. Same
+    # shared predicate (`inactive_vendor_statuses`), refused BEFORE the adapter
+    # call so it is retry-safe; `/retry-failed` re-checks it before a re-send.
+    _vendor_refused = await inactive_vendor_statuses(db, [invoice])
+    if invoice.id in _vendor_refused:
+        payment.status = "failed"
+        payment.failure_reason = f"vendor_not_active:{_vendor_refused[invoice.id]}"
         payment.completed_at = now
         return
 
@@ -4371,12 +4436,14 @@ async def retry_failed_payments(
       `done`, so paying it would move money against something nobody currently
       approves;
     - `invoice_has_blocking_exception` — an unresolved
-      `PAYMENT_BLOCKING_EXCEPTION_TYPES` flag (duplicate / fraud_flag /
-      line_total_mismatch). Run creation refuses these outright; this endpoint
-      re-dispatches money days or weeks later, so a `fraud_flag` raised in the
-      interim (a BEC bank-detail swap, an altered cheque off a Positive Pay
-      return) has to stop the re-send here too. Same shared query
+      `PAYMENT_BLOCKING_EXCEPTION_TYPES` flag. Run creation refuses these
+      outright; this endpoint re-dispatches money days or weeks later, so a
+      `fraud_flag` raised in the interim (a BEC bank-detail swap, an altered
+      cheque off a Positive Pay return) has to stop the re-send here too. Same shared query
       (`payment_runs.blocked_invoice_ids`) so the two can't drift;
+    - `vendor_not_active` — the invoice's vendor has since been rejected,
+      deactivated or merged away (or was never verified), the run builder's
+      `vendor_not_active` refusal (`payment_runs.inactive_vendor_statuses`);
     - `needs_reconciliation` — we cannot prove the processor never accepted the
       original order (`classify_payment_failure`): a populated
       `provider_payment_id`, an `unexpected_error:*` / `*_transport_error:*` /
@@ -4474,6 +4541,7 @@ async def retry_failed_payments(
     card_claimed_ids: set[uuid.UUID] = set()
     occupied_ids: set[uuid.UUID] = set()
     credit_conflict_ids: set[uuid.UUID] = set()
+    vendor_refused_ids: set[uuid.UUID] = set()
     if invoice_ids:
         invoices = {
             inv.id: inv
@@ -4485,6 +4553,7 @@ async def retry_failed_payments(
             iid for iid, inv in invoices.items() if inv.status.value in PAYABLE_INVOICE_STATUSES
         }
         blocked_ids = await blocked_invoice_ids(db, invoice_ids)
+        vendor_refused_ids = set(await inactive_vendor_statuses(db, invoices.values()))
         credit_conflict_ids = set(await applied_credit_conflicts(db, invoices.values()))
         # A live virtual card minted since the run was built claims the invoice
         # on a rail this retry isn't using. Same shared gate the run builder and
@@ -4514,6 +4583,9 @@ async def retry_failed_payments(
             continue
         if payment.invoice_id in blocked_ids:
             skipped.append("invoice_has_blocking_exception")
+            continue
+        if payment.invoice_id in vendor_refused_ids:
+            skipped.append("vendor_not_active")
             continue
         if payment.invoice_id in card_claimed_ids:
             skipped.append("invoice_has_live_card")

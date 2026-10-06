@@ -1019,9 +1019,19 @@ async def _refresh_po_match(
         else:
             flag = warning("po_over_receipt_unquantified", "warning", poNumber=po_ref)
         warnings.append(flag)
-        await _ensure_exception(
-            db, invoice, "po_mismatch", "warning", flag, org_settings=org_settings
-        )
+        # `po_mismatch` blocks payment (`api/payments.PAYMENT_BLOCKING_EXCEPTION_TYPES`),
+        # so it is raised only when the over-delivery can actually inflate what
+        # is paid: the invoice bills ABOVE the PO total (the extra units are
+        # being charged for, even if inside the amount tolerance), or there is
+        # no comparable variance to rule that out. An invoice billing the PO
+        # total or less is paying exactly what was ordered; the surplus is a
+        # receiving-side discrepancy (decisions §67), so it stays a warning on
+        # the invoice — the reviewer still reads it at approval — and never
+        # holds a correctly-billed payable.
+        if match.amount_variance is None or match.amount_variance > 0:
+            await _ensure_exception(
+                db, invoice, "po_mismatch", "warning", flag, org_settings=org_settings
+            )
 
     # 4-way: quality-inspection outcomes route to a `quality_hold` exception.
     # Independent of the po-status handling above — a quality failure can ride

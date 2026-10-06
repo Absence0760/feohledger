@@ -322,3 +322,87 @@ async def test_minted_card_follows_the_invoice_entity(realdb):
             await s.execute(select(VirtualCard).where(VirtualCard.invoice_id == invoice_id))
         ).scalar_one()
     assert card.entity_id == sub_id
+
+
+async def _cards_for(mk, invoice_id):
+    async with mk() as s:
+        return (
+            (await s.execute(select(VirtualCard).where(VirtualCard.invoice_id == invoice_id)))
+            .scalars()
+            .all()
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("vendor_status", ["unverified", "inactive", "rejected"])
+async def test_a_vendor_that_is_not_active_is_not_minted_a_card(realdb, vendor_status):
+    """A minted card is spendable the moment it exists, so it is a payment.
+    A run refuses an invoice whose vendor is not verified and active; this
+    entry point must not mint around that refusal."""
+    org_id = realdb.info(TENANT).org_id
+    mk = realdb.sessionmaker(TENANT)
+    await _enable_cards(realdb, org_id=org_id)
+
+    async with mk() as s:
+        ent = await _default_entity_id(s)
+        vendor = Vendor(
+            organization_id=org_id,
+            entity_id=ent,
+            name=f"Vendor {vendor_status}",
+            status=vendor_status,
+        )
+        s.add(vendor)
+        await s.commit()
+        vendor_id = vendor.id
+
+    invoice_id = await _seed_invoice(
+        mk,
+        org_id,
+        status=InvoiceStatus.approved,
+        vendor_id=vendor_id,
+        number=f"VND-{vendor_status}",
+    )
+
+    async with realdb.client(key=TENANT, role="admin") as c:
+        resp = await c.post("/api/cards/generate", json={"invoice_ids": [str(invoice_id)]})
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["total"] == 0
+    assert await _cards_for(mk, invoice_id) == []
+
+
+@pytest.mark.asyncio
+async def test_an_invoice_with_a_payment_blocking_exception_is_not_minted_a_card(realdb):
+    """Same gate a run applies: an unresolved payment-blocking exception (here
+    a failed quality inspection) stops the mint, while a clean invoice in the
+    same batch is still carded."""
+    from app.models.exception import Exception as APException
+
+    org_id = realdb.info(TENANT).org_id
+    mk = realdb.sessionmaker(TENANT)
+    await _enable_cards(realdb, org_id=org_id)
+    vendor_id = await _seed_vendor(mk, org_id, name="Card Vendor Blocked Exc")
+    held = await _seed_invoice(
+        mk, org_id, status=InvoiceStatus.approved, vendor_id=vendor_id, number="QHOLD"
+    )
+    clean = await _seed_invoice(
+        mk, org_id, status=InvoiceStatus.approved, vendor_id=vendor_id, number="QCLEAN"
+    )
+    async with mk() as s:
+        s.add(
+            APException(
+                organization_id=org_id,
+                invoice_id=held,
+                exception_type="quality_hold",
+                severity="error",
+                description="seeded by test",
+                status="open",
+            )
+        )
+        await s.commit()
+
+    async with realdb.client(key=TENANT, role="admin") as c:
+        resp = await c.post("/api/cards/generate", json={"invoice_ids": [str(held), str(clean)]})
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["total"] == 1
+    assert await _cards_for(mk, held) == []
+    assert len(await _cards_for(mk, clean)) == 1

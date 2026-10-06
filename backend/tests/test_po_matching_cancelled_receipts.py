@@ -235,8 +235,23 @@ async def test_over_receipt_survives_the_json_boundary(realdb):
         assert key in payload
 
 
+async def _po_mismatch_rows(s, invoice_id):
+    return (
+        (
+            await s.execute(
+                select(APException).where(
+                    APException.invoice_id == invoice_id,
+                    APException.exception_type == "po_mismatch",
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+
 @pytest.mark.asyncio
-async def test_over_receipt_opens_an_exception_end_to_end(realdb):
+async def test_over_receipt_billed_above_the_po_opens_an_exception_end_to_end(realdb):
     """The whole chain: real rows -> matcher -> refresh_warnings -> queue.
 
     `tests/test_po_matching_wiring.py` proves `_refresh_po_match` routes an
@@ -244,12 +259,53 @@ async def test_over_receipt_opens_an_exception_end_to_end(realdb):
     patched out. This proves the two halves actually meet against real
     Postgres rows — the flag reaches the exception queue a clerk works, not
     only the invoice modal.
+
+    The invoice bills 1,040 against a 1,000 PO — inside the 5 % amount
+    tolerance, so the amount leg is silent — while 14 units arrived against 10
+    ordered. That is the shape an over-delivery takes when it is supporting a
+    charge for units nobody ordered, and `po_mismatch` blocks payment, so it
+    must be raised here.
     """
     from app.services.invoice_warnings import refresh_warnings
 
     org_id = realdb.info(TENANT).org_id
     mk = realdb.sessionmaker(TENANT)
     number = f"PO-E2E-{uuid.uuid4().hex[:6]}"
+    async with mk() as s:
+        ent = await _default_entity_id(s)
+        po = await _add_po(s, org_id, ent, po_number=number, total="1000.00", lines=["10"])
+        await _add_gr(s, org_id, ent, po.id, status="received", received=["14"])
+        inv = await _add_invoice(s, org_id, ent, po_number=number, amount="1040.00")
+        await s.commit()
+
+        await refresh_warnings(s, inv)
+        await s.commit()
+
+        assert inv.po_match["over_receipt"] is True
+        assert inv.po_match["within_tolerance"] is True
+        assert any(
+            w["type"] == "po_mismatch" and "Over-receipt" in w["message"]
+            for w in (inv.warnings or [])
+        ), inv.warnings
+
+        rows = await _po_mismatch_rows(s, inv.id)
+        assert len(rows) == 1, rows
+        assert rows[0].severity == "warning"
+        assert "Over-receipt" in rows[0].description
+
+
+@pytest.mark.asyncio
+async def test_over_receipt_on_an_invoice_billing_the_po_total_is_a_warning_only(realdb):
+    """An over-delivery on an invoice that bills exactly what was ordered pays
+    exactly what was ordered — a receiving-side discrepancy (decisions §67), not
+    a billing one. `po_mismatch` blocks payment, so raising one here would hold
+    a correctly-billed payable; the finding stays a warning on the invoice,
+    where the approver still reads it."""
+    from app.services.invoice_warnings import refresh_warnings
+
+    org_id = realdb.info(TENANT).org_id
+    mk = realdb.sessionmaker(TENANT)
+    number = f"PO-E2EW-{uuid.uuid4().hex[:6]}"
     async with mk() as s:
         ent = await _default_entity_id(s)
         po = await _add_po(s, org_id, ent, po_number=number, total="1000.00", lines=["10"])
@@ -265,22 +321,7 @@ async def test_over_receipt_opens_an_exception_end_to_end(realdb):
             w["type"] == "po_mismatch" and "Over-receipt" in w["message"]
             for w in (inv.warnings or [])
         ), inv.warnings
-
-        rows = (
-            (
-                await s.execute(
-                    select(APException).where(
-                        APException.invoice_id == inv.id,
-                        APException.exception_type == "po_mismatch",
-                    )
-                )
-            )
-            .scalars()
-            .all()
-        )
-        assert len(rows) == 1, rows
-        assert rows[0].severity == "warning"
-        assert "Over-receipt" in rows[0].description
+        assert await _po_mismatch_rows(s, inv.id) == []
 
 
 @pytest.mark.asyncio

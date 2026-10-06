@@ -365,6 +365,10 @@ async def test_refresh_po_match_raises_on_over_receipt():
         status="matched",
         po_number="PO-001",
         po_total=100.0,
+        # Billed 4 % above the PO — inside the amount tolerance, so the amount
+        # leg is silent, but the over-delivered units are being charged for.
+        amount_variance=Decimal("4.00"),
+        amount_variance_pct=Decimal("4.0"),
         within_tolerance=True,
         over_receipt=True,
         ordered_quantity=Decimal("10"),
@@ -388,6 +392,45 @@ async def test_refresh_po_match_raises_on_over_receipt():
     ensure.assert_awaited_once()
     assert ensure.await_args.args[2] == "po_mismatch"
     assert ensure.await_args.args[3] == "warning"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("variance", [Decimal("0.00"), Decimal("-3.00")])
+async def test_refresh_po_match_over_receipt_billing_at_or_under_the_po_raises_no_exception(
+    variance,
+):
+    """`po_mismatch` is payment-blocking, so it must only exist where paying
+    would pay for something nobody ordered. An invoice billing the PO total or
+    less pays exactly what was ordered; the surplus delivery is a receiving-side
+    discrepancy (decisions §67). The warning still lands on the invoice — the
+    approver reads it there — but no exception holds the payable."""
+    from app.services import invoice_warnings
+    from app.services.po_matching import MatchResult
+
+    inv = _fake_invoice()
+    warnings: list[dict] = []
+    fake_match = MatchResult(
+        match_type="3-way",
+        status="matched",
+        po_number="PO-001",
+        po_total=100.0,
+        amount_variance=variance,
+        amount_variance_pct=variance,
+        within_tolerance=True,
+        over_receipt=True,
+        ordered_quantity=Decimal("10"),
+        received_quantity=Decimal("14"),
+        issues=["Over-receipt: 14 received against 10 ordered (+4)"],
+    )
+
+    with (
+        patch.object(invoice_warnings, "match_invoice_to_po", AsyncMock(return_value=fake_match)),
+        patch.object(invoice_warnings, "_ensure_exception", AsyncMock()) as ensure,
+    ):
+        await invoice_warnings._refresh_po_match(db=AsyncMock(), invoice=inv, warnings=warnings)
+
+    assert [w["type"] for w in warnings] == ["po_mismatch"]
+    ensure.assert_not_awaited()
 
 
 @pytest.mark.asyncio

@@ -1164,6 +1164,18 @@ class AppLocalizationsFr extends AppLocalizations {
       'Paiement antérieur non rapproché — peut-être encore en cours';
 
   @override
+  String get payQueueBlockedQualityHold =>
+      'Blocage qualité — marchandises refusées ou inspection en attente';
+
+  @override
+  String get payQueueBlockedPoMismatch =>
+      'Ne correspond pas au bon de commande — non résolu';
+
+  @override
+  String get payQueueBlockedVendorNotActive =>
+      'Fournisseur non vérifié ou inactif — vérifiez d’abord le fournisseur';
+
+  @override
   String get payQueueBlockedAppliedCreditMismatch =>
       'Un avoir imputé ne correspond plus au fournisseur ou à la devise de cette facture — corrigez d\'abord la facture';
 

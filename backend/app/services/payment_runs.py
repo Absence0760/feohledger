@@ -320,6 +320,10 @@ _RETRY_SAFE_FAILURE_PREFIXES = (
     # the adapter call; `/retry-failed` re-runs the same gate and keeps
     # skipping until a human clears the flag.
     "invoice_blocked:",
+    # The invoice's vendor stopped being `active` (rejected, deactivated,
+    # merged away) after the run was built — refused before the adapter call,
+    # and `/retry-failed` re-checks it.
+    "vendor_not_active:",
     # A live virtual card claimed the invoice after the run was built —
     # refused before the adapter call, and `/retry-failed` re-checks it.
     "invoice_has_live_card",
@@ -421,16 +425,65 @@ async def blocking_exception_types(
 async def blocked_invoice_ids(db: AsyncSession, invoice_ids: list[uuid.UUID]) -> set[uuid.UUID]:
     """Which of ``invoice_ids`` carry an UNRESOLVED payment-blocking exception.
 
-    `PAYMENT_BLOCKING_EXCEPTION_TYPES` (duplicate / fraud_flag /
-    line_total_mismatch / payment_reconciliation) are `error`-severity
-    financial-integrity flags that invoice approval does NOT gate on, so a run
-    must refuse them and so must anything that re-dispatches money later — a
-    `fraud_flag` raised between run creation and a `/retry-failed` days
-    afterwards (a BEC bank-detail swap, an altered cheque off a Positive Pay
-    return) has to stop the re-send. Shared by both callers precisely so they
-    can't drift.
+    `PAYMENT_BLOCKING_EXCEPTION_TYPES` are financial-integrity flags that
+    invoice approval does NOT gate on, so a run must refuse them and so must
+    anything that re-dispatches money later — a `fraud_flag` raised between
+    run creation and a `/retry-failed` days afterwards (a BEC bank-detail
+    swap, an altered cheque off a Positive Pay return) has to stop the
+    re-send. Shared by both callers precisely so they can't drift.
     """
     return set(await blocking_exception_types(db, invoice_ids))
+
+
+#: The only ``Vendor.status`` a payment may go to. ``unverified`` (an
+#: AI-extracted or email-intake vendor nobody has reviewed), ``inactive``
+#: (deactivated, or retired by a merge) and ``rejected`` (flagged invalid or a
+#: duplicate) are all refused — and so is any value this build does not know,
+#: including NULL: the gate names the one status that may be paid rather than
+#: listing the ones that may not, so a status added later is refused until
+#: someone decides otherwise (``backend/docs/vendor-management.md``).
+PAYABLE_VENDOR_STATUS = "active"
+
+
+async def inactive_vendor_statuses(
+    db: AsyncSession, invoices: Iterable[Invoice]
+) -> dict[uuid.UUID, str]:
+    """Map each invoice whose linked vendor may not be paid → that vendor's status.
+
+    Verifying a new vendor's identity and bank account is a PRE-payment
+    control: the money must not go to a payee nobody has confirmed exists or
+    owns the account. The vendor-management lifecycle has always promised that
+    an ``unverified`` vendor is "blocked from payment runs"; this is the
+    predicate that makes it true, shared by the run builder (and through it the
+    payment queue), the standalone ``POST /api/payments``, dispatch and
+    ``/retry-failed`` so none of them can drift.
+
+    An invoice with NO vendor (``vendor_id`` NULL, or the row deleted) is not
+    reported here. It cannot be screened either, and dispatch already holds it
+    at ``pending_compliance`` until AP links and verifies one
+    (``api/payments._execute_single_payment`` — "no screenable vendor"); that
+    is the documented path for it and this gate does not second-guess it.
+
+    The status string returned is a fixed, PII-free vocabulary — never the
+    vendor's name.
+    """
+    from app.models.vendor import Vendor
+
+    rows = list(invoices)
+    vendor_ids = {inv.vendor_id for inv in rows if inv.vendor_id is not None}
+    if not vendor_ids:
+        return {}
+    statuses = dict(
+        (await db.execute(select(Vendor.id, Vendor.status).where(Vendor.id.in_(vendor_ids)))).all()
+    )
+    out: dict[uuid.UUID, str] = {}
+    for inv in rows:
+        if inv.vendor_id is None or inv.vendor_id not in statuses:
+            continue
+        status = statuses[inv.vendor_id]
+        if status != PAYABLE_VENDOR_STATUS:
+            out[inv.id] = status or "unknown"
+    return out
 
 
 #: The only rail that can legitimately pay an invoice already holding a live
@@ -624,6 +677,9 @@ REFUSAL_FULLY_CREDITED = "fully_credited"
 #: credit the wrong supplier or subtract across currencies.
 REFUSAL_APPLIED_CREDIT_MISMATCH = "applied_credit_mismatch"
 REFUSAL_LIVE_PAYMENT = "live_payment"
+#: The invoice's vendor is not ``active`` — unverified, inactive or rejected
+#: (:func:`inactive_vendor_statuses`). Refused on every rail.
+REFUSAL_VENDOR_NOT_ACTIVE = "vendor_not_active"
 
 #: The single rail a card-claimed invoice CAN still be paid on, derived from
 #: ``CARD_CONVERGING_METHODS`` rather than restated, so the two cannot drift.
@@ -658,9 +714,12 @@ class RunRefusal:
 #: rather than whichever predicate happened to run first.
 #:
 #: Blocking exception types come first (they are the human-sign-off gate),
-#: then the card claim, then a fully-credited invoice, then the live-payment
-#: backstop.
+#: then a vendor that may not be paid (refused on EVERY rail, so it must
+#: outrank the rail-conditional card claim — otherwise the queue would offer a
+#: card-pinned row the builder then refuses), then the card claim, then a
+#: fully-credited invoice, then the live-payment backstop.
 _REFUSAL_ORDER: tuple[str, ...] = (
+    REFUSAL_VENDOR_NOT_ACTIVE,
     REFUSAL_LIVE_VIRTUAL_CARD,
     REFUSAL_APPLIED_CREDIT_MISMATCH,
     REFUSAL_FULLY_CREDITED,
@@ -711,6 +770,7 @@ async def run_refusal_reasons(
     method_by_id = methods or {}
 
     exception_types = await blocking_exception_types(db, ids)
+    vendor_refused = await inactive_vendor_statuses(db, rows)
     # Method-aware: goes through the same helper the builder's own card gate
     # used, so `CARD_CONVERGING_METHODS` stays the one owner of "may this rail
     # converge onto an existing card".
@@ -727,6 +787,8 @@ async def run_refusal_reasons(
         exception_type = exception_types.get(inv.id)
         if exception_type is not None:
             out[inv.id] = RunRefusal(exception_type)
+        elif inv.id in vendor_refused:
+            out[inv.id] = RunRefusal(REFUSAL_VENDOR_NOT_ACTIVE)
         elif inv.id in card_refused:
             out[inv.id] = RunRefusal(REFUSAL_LIVE_VIRTUAL_CARD, only_method=CARD_CLAIM_ONLY_METHOD)
         elif inv.id in credit_conflicts:
@@ -761,6 +823,10 @@ async def _existing_run_for_plan(db: AsyncSession, plan_id: str) -> PaymentRunCr
 #: renders, so a reason gains its operator-facing message here and its label in
 #: the frontend catalogue, and nowhere else.
 _REFUSAL_MESSAGES: dict[str, str] = {
+    REFUSAL_VENDOR_NOT_ACTIVE: (
+        "Invoice(s) are from a vendor that is not active (unverified, inactive or "
+        "rejected) — verify or reactivate the vendor before paying: {numbers}"
+    ),
     REFUSAL_LIVE_VIRTUAL_CARD: (
         "Invoice(s) already have a live virtual card issued against them — "
         "pay them by card, or cancel the card first: {numbers}"
