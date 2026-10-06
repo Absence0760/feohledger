@@ -5,13 +5,18 @@ vendor list and a stack of open AP from whatever tool they're replacing.
 The CSV importers let you load both in a few minutes instead of
 hand-keying them or building a throw-away Bill.com → Better-AP ETL.
 
-Two endpoints. Vendor import is `admin` / `ap_manager`; invoice import is
-`admin` / `ap_manager` / `ap_clerk`. An AP clerk (with no manager role) may
-import **open AP only** — rows at `new` or `rejected`, which then go through
-approval with the clerk stamped as uploader. A historical `done` / `paid` row
-asserts a payment already happened, so it is refused per row for a clerk (and
-because a blank `status` defaults to `done`, a clerk's file needs an explicit
-`status` column). See `backend/app/api/invoice_entry.py`.
+Two endpoints. Vendor import is `vendor.manage` (`admin` / `ap_manager` by
+default); invoice import is `admin` / `ap_manager` / `ap_clerk`
+(`invoice_entry.INVOICE_IMPORT_ROLES` — no `cfo`). **Open AP** — rows at `new`
+or `rejected` — is entry: it goes through approval with the importer stamped as
+uploader. A **historical** `done` / `paid` row asserts a payment already
+happened and never meets approval, so it is refused per row unless the importer
+holds `admin` or `ap_manager` (`invoice_entry.HISTORICAL_IMPORT_ROLES`).
+Because a blank `status` defaults to `done`, a clerk's file needs an explicit
+`status` column. Vendors a row names
+that don't exist yet are auto-created as `unverified` stubs with no bank or tax
+details whoever imports — they still need `vendor.manage` to verify, and a
+payment to an unverified vendor is blocked. See `backend/app/api/invoice_entry.py`.
 
 | Endpoint | What it does |
 |---|---|
