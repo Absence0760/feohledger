@@ -10504,7 +10504,11 @@ upgrade resumes it untouched. Turning a feature OFF is never refused.
   (send / retry / the completion leg, refused before the transition so the
   invoice stays `approved` and payable) but the ERP webhook and the
   `payment_erp_sync` sync-back of a payment already in flight are left alone —
-  a downgrade must never strand money mid-path.
+  a downgrade must never strand money mid-path. An invoice whose push had already
+  `failed` is refused a retry too; its way forward is the org's own — upgrade,
+  or clear the live ERP config (switching to `mock` is never refused), after
+  which the retry runs. Nothing is stuck behind the gate that a setting the
+  tenant controls cannot release.
 - **Public API.** Key minting, webhook creation and configuration are gated;
   revoking keys, switching a webhook off and rotating its signing secret are
   not — rotation is how a leak is remediated, and a downgraded tenant must
