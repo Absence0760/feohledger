@@ -5,7 +5,9 @@ names the root cause, the evidence, blast radius, and a recommended fix
 approach — this is a staging area for real problems, not a place to let them
 go stale. See root `CLAUDE.md` guard rail 6 (no dangling deferred findings).
 
-**Five entries are open**: the expense-report Attach dead end found while
+**Six entries are open**: the direct ERP adapters posting bills without the
+ERP's vendor and account ids (found scoping QuickBooks, 2026-10-07, at the top),
+the expense-report Attach dead end found while
 writing the help centre, the `all`-mode approval-chain segregation deadlock,
 the legal-contents smooth-scroll race and the e2e cleanup race directly below,
 and the `payments/` local-e2e flake near the bottom. The assistant
@@ -20,7 +22,7 @@ this note has now warned about twice. Two defects were **fixed on 2026-09-17**:
 the `/organization` 320px reflow defect (issue #432), along with six more routes
 that failed the same criterion and had no entry at all because nothing measured
 them; and the local-e2e `alembic` drift, which now has a pre-run guard that
-refuses to start against a stale database. Seventeen of the twenty-two `##`
+refuses to start against a stale database. Seventeen of the twenty-three `##`
 entries are now `~~struck-through~~` resolved stubs. (This line said "the other
 fifteen" while the file held fifteen struck in total, the two above included.)
 They are kept because the *diagnosis* is the
@@ -44,6 +46,43 @@ goes to [followups.md](followups.md). Reasoning behind a deliberate design call
 goes to [decisions.md](decisions.md).
 
 ---
+
+## The direct ERP adapters post bills without the ERP's vendor and account ids
+
+**Found 2026-10-07** while scoping the QuickBooks Online adapter
+(`backend/docs/quickbooks-online-adapter.md`, Phase 0).
+
+**Root cause.** `services/erp._build_payload` fills `InvoicePayload` with
+`vendor_name` and the GL account **code**. `InvoicePayload` has no field for
+the ERP's own vendor id or account id, though the vendor and GL syncs already
+store both (`vendors.erp_vendor_id`, `gl_accounts.erp_account_id`). Real ERPs
+post a bill against internal references:
+
+- **NetSuite** (`erp_adapters/netsuite.py::post_invoice`) sends **no vendor at
+  all**. A `vendorBill` requires `entity`. Lines send
+  `account: {refName: <code>}` rather than the account's internal id, so it
+  works only if NetSuite resolves that reference text to the right account.
+- **Business Central** (`erp_adapters/dynamics_365_bc.py::post_invoice`) sends
+  the vendor's display **name** in `vendorNumber`, which holds the vendor's
+  number (`V00010`), not its name.
+
+**Why the tests are green.** `tools/fake-erp` accepts both bodies, and the
+adapter tests assert request shape against our own expectation. Nothing has run
+these adapters against a real NetSuite or Business Central.
+
+**Blast radius.** No customer is on either direct adapter yet. The first one
+would see every push fail (HTTP 400 → `invalid_request`), or, on Business
+Central, a bill attached to the wrong vendor when a vendor number happens to
+equal another vendor's name. Merge.dev is not affected; its adapter resolves
+the vendor itself.
+
+**Fix.** Add `vendor_erp_id` to `InvoicePayload` and `gl_account_erp_id` to it
+and `LineItemPayload`. Resolve both in `_build_payload` (vendor from
+`invoice.vendor_id`; account from the entity-scoped chart). Direct adapters
+refuse a payload with no vendor reference (`vendor_not_linked`) instead of
+falling back to a name. Then send `entity: {id}` / `account: {id}` (NetSuite)
+and `vendorId` (Business Central), and teach fake-erp to reject the old shapes
+so the e2e suite proves it.
 
 ## ~~The assistant's payment-forecast tool skips the forecast's role gate~~ — FIXED 2026-10-06
 
