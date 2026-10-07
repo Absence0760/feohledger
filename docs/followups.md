@@ -1238,32 +1238,21 @@ lands. Pure doc drift was corrected in the same PR. The two diagnosed defects
 
 ### Surfaced by moving the database onto RDS (2026-10-07, docs/minimal-deployment.md § Database)
 
-- [ ] **(c) ⚠️ The published legal set still places the databases on the VM's
-      disk.** `/legal/sub-processors` § 2's *Amazon Web Services — EC2* row says
-      "The databases run on the instance's own encrypted disk, not on a managed
-      database service", and `docs/sub-processors.md` (the internal register it
-      must agree with) says the same — **false once the RDS instance holds
-      customer data**, and the register's own § 9 makes "a change to what an
-      existing provider receives" a 30-days'-notice event with a § 10
-      change-log row. Beside it, the recovery wording undersells rather than
-      misstates: `/legal/dpa` Annex II *Availability and restoration* and
+- [ ] **(c) The DPA does not name RDS's own backups.** `/legal/sub-processors`
+      § 2 and `docs/sub-processors.md` § 20 now carry the RDS row (2026-10-07,
+      § 10 change-log row; no customers yet, so no notice was owed). What is
+      left is the recovery wording, which undersells rather than misstates:
+      `/legal/dpa` Annex II *Availability and restoration* and
       `docs/backup-disaster-recovery.md` § Targets describe nightly dumps and a
       24-hour RPO (still true, and still the published floor), and DPA § 13
-      covers RDS's whole-instance automated backups only through its
-      conditional "volume-level snapshot … coarse fallback" sentence, without
-      naming them or their retention period. Not edited here because the
-      timing is the decision: the page must not claim RDS before it exists, and
-      must say so before (or, with notice, when) it starts holding data.
-      **Durable fix:** one change that moves the EC2 row's database clause into
-      a new *Amazon Web Services — RDS* row (PostgreSQL databases, everything
-      the service holds, us-east-1, encrypted at rest, TLS in transit), adds the
-      § 10 change-log row and the last-updated date, mirrors it in
-      `docs/sub-processors.md`, and — with a deliberate call on the published
-      RPO/RTO for the RDS path — updates DPA Annex II and § 13 (naming RDS
-      automated backups and their retention as a residue that ages out) and
-      `remove-tenant.sh`'s confirmation if the wording moves. **Trigger:**
-      before the RDS instance holds any customer's data (for a register with
-      live customers, 30 days before).
+      covers RDS's 7-day automated backups only through its conditional
+      "volume-level snapshot … coarse fallback" sentence, without naming them
+      or their retention. **Durable fix:** a deliberate call on the published
+      RPO/RTO for the RDS path (counsel / the #428 review), then DPA Annex II
+      and § 13 name RDS automated backups and their retention as a residue that
+      ages out, and `remove-tenant.sh`'s confirmation follows if the wording
+      moves. **Trigger:** the #428 counsel review, or before the first customer
+      signs the DPA, whichever comes first.
 - [ ] **(c) `pg_isready` over the socket reports the initdb server as ready, in
       dev and CI.** On a fresh data volume the Postgres image runs a temporary
       socket-only server for its init scripts; a `pg_isready -U postgres`

@@ -125,8 +125,14 @@
 			<tbody>
 				<tr>
 					<th scope="row">Amazon Web Services — EC2</th>
-					<td>The virtual machine the application, its PostgreSQL databases and its Redis instance run on.</td>
-					<td>Everything the service holds: invoices, suppliers, payments, users and the audit trail. The databases run on the instance's own encrypted disk, not on a managed database service.</td>
+					<td>The virtual machine the application and its Redis instance run on.</td>
+					<td>Everything the service processes, in memory while it handles a request. Its own encrypted disk holds Redis's sign-in session records and the application's logs; the databases are on RDS, below.</td>
+					<td>United States (us-east-1)</td>
+				</tr>
+				<tr>
+					<th scope="row">Amazon Web Services — RDS</th>
+					<td>The managed PostgreSQL service the application's databases run on.</td>
+					<td>Everything the service holds: invoices, suppliers, payments, users and the audit trail. Encrypted at rest, and the application connects to it over verified TLS. RDS also keeps its own automated backups, for seven days, to restore the database to a point in time.</td>
 					<td>United States (us-east-1)</td>
 				</tr>
 				<tr>
@@ -860,6 +866,10 @@
 				<tr>
 					<th scope="row">15 September 2026</th>
 					<td>Initial publication of the sub-processor register.</td>
+				</tr>
+				<tr>
+					<th scope="row">7 October 2026</th>
+					<td>The databases move from the EC2 instance's own disk to Amazon RDS, in the same region. RDS is added to § 2; the EC2 row no longer holds the databases.</td>
 				</tr>
 			</tbody>
 		</table>
