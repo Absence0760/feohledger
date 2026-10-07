@@ -10459,3 +10459,60 @@ VPC path, for no saving — the bundle costs nothing); running the dump tools
 from the `postgres` service with `run --no-deps` (it mounts the data volume and
 carries the container's password contract); a second compose file for RDS (two
 files to keep in step, where a profile is one line).
+## 258. The plan feature gates, and what a downgrade keeps (2026-10-07)
+
+§253 named the features; this is how each is enforced and — the real design
+call — what a tenant that drops to a cheaper plan keeps. Every gate answers
+with one coded refusal, `402 plan_feature_required` with `params.feature`
+(`api/deps.py::plan_feature_refusal`), so the SPA can name the tier; SCIM
+alone answers in the RFC 7644 error shape an IdP parses. The full route table
+is `backend/docs/billing.md` § Entitlement gating.
+
+**The rule: a downgrade removes the ability to turn a feature ON, never data,
+and never anyone's way in.** Stored configuration is not rewritten, so an
+upgrade resumes it untouched. Turning a feature OFF is never refused.
+
+- **SSO.** Sign-in reads the org's settings through its plan
+  (`services/sso_plan.plan_scoped_settings`): without `sso` the stored block
+  reads as switched off (no IdP button; the handshake answers as for an
+  unconfigured tenant, re-checked at the callback / ACS), and without
+  `sso_enforcement` `sso_only` reads as off. **Password sign-in reopens**
+  rather than the tenant being locked out. Considered and rejected: honouring
+  `sso_only` after the plan dropped SSO (nobody can sign in — the outcome §204
+  already rules out for an unresolvable IdP block); keeping SSO working on
+  Free until an admin turns it off (a paid feature given away indefinitely,
+  and an admin who never logs in never turns it off); rewriting the stored
+  block on downgrade (destroys configuration the customer paid to set up, and
+  `change_plan` would grow a side effect on tenant settings). Accounts that
+  have no password — JIT- or SCIM-provisioned — set one through the ordinary
+  forgot-password flow, which never required SSO to be off.
+- **SCIM.** Reads and deprovisioning stay open on every plan; provisioning and
+  grants need `scim`. A leaver the IdP cannot deactivate stays active, and on
+  a plan without SSO that account's password sign-in is open — so refusing
+  the deprovision would turn a billing state into a security hole. A PUT with
+  `active: false` applies the deactivation alone.
+- **Entities.** Only creating one is gated; every existing entity keeps
+  working, because invoices, payments and GL rows are scoped to it.
+- **ERP.** Only a LIVE adapter is gated; `mock` stays open on every plan
+  (guard rail 7). A downgraded tenant's stored live ERP refuses new pushes
+  (send / retry / the completion leg, refused before the transition so the
+  invoice stays `approved` and payable) but the ERP webhook and the
+  `payment_erp_sync` sync-back of a payment already in flight are left alone —
+  a downgrade must never strand money mid-path.
+- **Public API.** Key minting, webhook creation and configuration are gated;
+  revoking keys and switching a webhook off are not. `_emit` queues nothing
+  for an unentitled org; deliveries already queued finish.
+
+The `realdb` harness's orgs hold no subscription — which reads exactly like
+`free` — and a test of a gated surface arranges its own plan
+(`realdb.subscribe`, `@pytest.mark.plan`). Entitling every test org by default
+was rejected: it would hide a gate accidentally placed on a core AP route,
+which is the failure §253's "never block accounts payable" exists to prevent.
+The seed puts `acme` and every e2e worker on `scale` (all workers alike, so
+they stay interchangeable) and keeps `techflow` on `free`; e2e covers the free
+and growth prompts by stubbing `/api/auth/me`'s `entitlements`, never by moving
+a worker's subscription.
+
+`audit_siem_export` gates nothing yet: there is no tenant-configurable SIEM
+destination, only the operator's platform shipper. Tracked in
+`docs/followups.md`; the SOX auditor export stays ungated regardless.

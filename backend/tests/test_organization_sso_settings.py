@@ -37,6 +37,11 @@ from app.config import settings
 from app.models.organization import Organization
 from app.models.workflow import AuditLog
 
+# Plan-gated surface (docs/decisions.md §253/§258): realdb tests run with the
+# harness orgs on a plan granting it; DB-free tests answer the plan lookup via
+# the `all_plan_features` fixture.
+pytestmark = pytest.mark.plan("scale")
+
 URL = "/api/organization/sso"
 SECRET = "s3cr3t-client-value-that-must-not-echo"
 SECRET_2 = "r0tated-client-value-that-must-not-echo"

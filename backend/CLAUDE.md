@@ -468,6 +468,14 @@ its seatbelt is derived from `DEFAULT_PLAN_CATALOG` so a free-form WHERE can't
 empty the catalogue every entitlement lookup reads. Guarded by
 `tests/test_realdb_harness.py`.
 
+**The harness's orgs hold no subscription, which reads exactly like `free`.** A
+test of a plan-gated surface (`docs/decisions.md` §258) arranges its own plan —
+`await realdb.subscribe("a", "scale")`, or `@pytest.mark.plan("scale")` on the
+test / `pytestmark` on the module, which subscribes both tenants before the test
+runs. Teardown clears it with the other billing rows. Never default every test
+org onto a paid plan: that would hide a gate accidentally placed on a core AP
+route.
+
 It does **not** delete extra control-plane `users` rows a test creates — those
 accumulate, so a test must not assume a fixed user count for a test org.
 
@@ -857,6 +865,12 @@ user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER))
   logging). Because it runs on every password sign-in, the resolvers must raise
   `SSOConfigError` and nothing else for any malformed block, and stay local (no
   DNS, no discovery fetch). `docs/decisions.md` §204.
+- **Every sign-in reader passes the settings through the org's PLAN first**
+  (`services/sso_plan.plan_scoped_settings` / `sign_in_settings`): without the
+  `sso` feature the block reads as off, without `sso_enforcement` `sso_only`
+  does — so a downgrade reopens the password, never locks the tenant out
+  (`docs/decisions.md` §258). Never hand `org.settings` straight to a resolver
+  on a sign-in path.
 - **`settings.sso` has one writer: `PUT /api/organization/sso`** (`api/organization_sso.py`
   over the pure `services/sso_settings.py`). `PATCH /api/organization` refuses
   the key. The client secret is write-only (blank keeps it, never returned —

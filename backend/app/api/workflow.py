@@ -11,6 +11,7 @@ from app.api.deps import (
     ROLE_ADMIN,
     ROLE_AP_MANAGER,
     ROLE_CFO,
+    ensure_live_erp_entitled,
     get_current_user,
     get_org_id,
     require_permission,
@@ -444,7 +445,12 @@ async def send_to_erp(
     user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER, ROLE_CFO)),
     org_id: uuid.UUID = Depends(get_org_id),
     entity_id: uuid.UUID | None = Depends(get_entity_id),
+    org: Organization = Depends(get_tenant),
+    control_db: AsyncSession = Depends(get_control_db),
 ):
+    # Pushing to a LIVE ERP is a Growth feature (decisions §253/§258); the
+    # local-first `mock` ERP and an org with no ERP configured are never gated.
+    await ensure_live_erp_entitled(control_db, org.id, (org.settings or {}).get("erp"))
     await ensure_in_entity_scope(db, Invoice, invoice_id, entity_id, detail="Invoice not found")
     invoice = await get_invoice_for_update(db, invoice_id)
 
@@ -475,7 +481,12 @@ async def retry_erp(
     user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER, ROLE_CFO)),
     org_id: uuid.UUID = Depends(get_org_id),
     entity_id: uuid.UUID | None = Depends(get_entity_id),
+    org: Organization = Depends(get_tenant),
+    control_db: AsyncSession = Depends(get_control_db),
 ):
+    # Pushing to a LIVE ERP is a Growth feature (decisions §253/§258); the
+    # local-first `mock` ERP and an org with no ERP configured are never gated.
+    await ensure_live_erp_entitled(control_db, org.id, (org.settings or {}).get("erp"))
     await ensure_in_entity_scope(db, Invoice, invoice_id, entity_id, detail="Invoice not found")
     invoice = await get_invoice_for_update(db, invoice_id)
 
@@ -503,6 +514,7 @@ async def complete_invoice(
     user: User = Depends(require_roles(*INVOICE_ENTRY_ROLES)),
     org_id: uuid.UUID = Depends(get_org_id),
     entity_id: uuid.UUID | None = Depends(get_entity_id),
+    control_db: AsyncSession = Depends(get_control_db),
 ):
     """Advance an invoice to the next logical step based on the workflow.
 
@@ -689,6 +701,10 @@ async def complete_invoice(
         }
 
     if invoice.status == InvoiceStatus.approved and erp_enabled:
+        # A live ERP push needs the plan (§258). Refused BEFORE the transition,
+        # so the invoice stays `approved` — still payable directly — rather
+        # than parking in `sending_to_erp` for a push that will never run.
+        await ensure_live_erp_entitled(control_db, org.id, (org.settings or {}).get("erp"))
         # Trigger ERP dispatch
         await transition_invoice(
             db,

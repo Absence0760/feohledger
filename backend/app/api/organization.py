@@ -8,7 +8,13 @@ from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
 
-from app.api.deps import ROLE_ADMIN, get_current_user, require_roles
+from app.api.deps import (
+    ROLE_ADMIN,
+    ensure_live_erp_entitled,
+    get_current_user,
+    require_entitlement,
+    require_roles,
+)
 from app.config import settings
 from app.database import get_control_db
 from app.models.organization import Organization
@@ -22,6 +28,7 @@ from app.schemas.organization import (
     UpdateOrganizationRequest,
 )
 from app.services.audit_dispatch import dispatch_auth_audit
+from app.services.billing.plan_catalog import FEATURE_SCIM
 from app.services.currency_conversion import resolve_reporting_currency
 from app.services.data_residency import (
     DEFAULT_REGION,
@@ -255,6 +262,13 @@ async def update_organization(
 
     if body.settings is not None:
         _validate_settings_patch(body.settings)
+
+        # Saving a LIVE ERP adapter is a Growth feature (decisions §258). Only
+        # the `erp` key this PATCH carries is checked: re-saving the company
+        # profile on a downgraded tenant whose stored ERP is live must still
+        # work, and clearing the key or choosing `mock` is never refused.
+        if "erp" in body.settings:
+            await ensure_live_erp_entitled(db, org.id, body.settings.get("erp"))
 
         # The chat webhook URL has one sanctioned writer — the audited
         # `PUT /api/organization/chat-notifications/webhook`. This generic merge
@@ -731,11 +745,17 @@ async def test_erp_connection(
     request: dict | None = None,
     org: Organization = Depends(get_tenant),
     user: User = Depends(require_roles(ROLE_ADMIN)),
+    db: AsyncSession = Depends(get_control_db),
 ):
-    """Test the ERP connection. Uses request body config if provided, otherwise saved config."""
+    """Test the ERP connection. Uses request body config if provided, otherwise saved config.
+
+    A live adapter needs ``FEATURE_ERP_INTEGRATIONS`` (decisions §258) — a test
+    reaches the real ERP with the tenant's credentials. ``mock`` stays open.
+    """
     erp_config = request if request and request.get("type") else (org.settings or {}).get("erp")
     if not erp_config:
         raise HTTPException(status_code=400, detail="No ERP configuration provided")
+    await ensure_live_erp_entitled(db, org.id, erp_config)
 
     # Import adapters to trigger registration
     import app.services.erp_adapters.dynamics_365_bc  # noqa: F401
@@ -777,6 +797,7 @@ async def test_erp_connection(
 async def mint_scim_token(
     org: Organization = Depends(get_tenant),
     user: User = Depends(require_roles(ROLE_ADMIN)),
+    _entitled: User = Depends(require_entitlement(FEATURE_SCIM)),
     db: AsyncSession = Depends(get_control_db),
 ):
     """Mint a fresh SCIM bearer token for this tenant.

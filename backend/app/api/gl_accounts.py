@@ -10,10 +10,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import (
     ROLE_ADMIN,
     ROLE_AP_MANAGER,
+    ensure_live_erp_entitled,
     get_current_user,
     get_org_id,
     require_roles,
 )
+from app.database import get_control_db
 from app.models.entity import Entity
 from app.models.gl_account import GLAccount
 from app.models.organization import Organization
@@ -472,6 +474,7 @@ async def sync_gl_accounts_from_erp(
     user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER)),
     org_id: uuid.UUID = Depends(get_org_id),
     entity_id: uuid.UUID | None = Depends(get_entity_id),
+    control_db: AsyncSession = Depends(get_control_db),
 ):
     """Pull chart of accounts from the connected ERP via its adapter.
 
@@ -486,6 +489,8 @@ async def sync_gl_accounts_from_erp(
     erp_config = (org.settings or {}).get("erp")
     if not erp_config:
         raise HTTPException(status_code=400, detail="No ERP configured")
+    # A sync reaches the live ERP — a Growth feature; `mock` stays open (§258).
+    await ensure_live_erp_entitled(control_db, org.id, erp_config)
 
     # Lazy-import adapter modules so the @register_adapter decorator
     # populates the dispatcher registry. Same pattern as vendors.py

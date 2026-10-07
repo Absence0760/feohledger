@@ -37,6 +37,35 @@ def register_adapter(erp_type: str):
     return wrapper
 
 
+MOCK_ADAPTER_KEY = "mock"
+
+
+def resolve_adapter_key(erp_config: dict) -> str:
+    """The registry key ``get_erp_adapter`` would select for ``erp_config``.
+
+    ``integration_method`` defaults to ``merge_dev``, which wins regardless of
+    ``type``; otherwise the ``type`` names a direct adapter, ``mock`` when
+    blank. The one statement of the rule, shared by the dispatcher and the
+    plan gate below so the two can never disagree about which ERP is in play.
+    """
+    if erp_config.get("integration_method", "merge_dev") == "merge_dev":
+        return "merge_dev"
+    return erp_config.get("type") or MOCK_ADAPTER_KEY
+
+
+def erp_config_is_live(erp_config: object) -> bool:
+    """Does ``erp_config`` select a real ERP (anything but the ``mock`` adapter)?
+
+    The ``FEATURE_ERP_INTEGRATIONS`` gate keys on this (decisions §258): the
+    mock ERP is the local-first default (guard rail 7) and stays open on every
+    plan. An absent or empty config selects nothing — callers already answer
+    "no ERP configured" for it — so it is not live either.
+    """
+    if not isinstance(erp_config, dict) or not erp_config:
+        return False
+    return resolve_adapter_key(erp_config) != MOCK_ADAPTER_KEY
+
+
 def get_erp_adapter(erp_config: dict) -> ErpAdapter:
     """Create the appropriate adapter based on org ERP config.
 
@@ -68,14 +97,7 @@ def get_erp_adapter(erp_config: dict) -> ErpAdapter:
     per-org DB settings, so the refusal lives at the dispatcher. Same call as
     `payment_adapters.dispatcher`; see `decisions.md` §29.
     """
-    integration_method = erp_config.get("integration_method", "merge_dev")
-    erp_type = erp_config.get("type") or "mock"
-
-    if integration_method == "merge_dev":
-        adapter_key = "merge_dev"
-    else:
-        adapter_key = erp_type
-
+    adapter_key = resolve_adapter_key(erp_config)
     adapter_cls = _ADAPTER_REGISTRY.get(adapter_key)
     if adapter_cls is None:
         raise UnknownErpAdapterError(adapter_key)

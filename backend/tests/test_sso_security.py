@@ -33,6 +33,11 @@ import pytest
 from joserfc import jwt
 from joserfc.jwk import OctKey, RSAKey
 
+# Plan-gated surface (docs/decisions.md §253/§258): realdb tests run with the
+# harness orgs on a plan granting it; DB-free tests answer the plan lookup via
+# the `all_plan_features` fixture.
+pytestmark = pytest.mark.usefixtures("all_plan_features")
+
 
 class _FakeRedis:
     def __init__(self):

@@ -76,6 +76,11 @@ class UserResponse(BaseModel):
     # list). Drives the frontend `can(perm)` gate for the split sensitive
     # controls; `roles` still drives everything not yet migrated to permissions.
     permissions: list[str] = []
+    # The plan features (`plan_catalog.FEATURE_*` keys) the organization's live
+    # plan grants. Drives the SPA's upgrade prompt on a gated setting, so an
+    # admin sees "available on Growth / Scale" instead of a control that 402s.
+    # Advisory only — every gate is enforced server-side (decisions §258).
+    entitlements: list[str] = []
     # Account-level email-language preference (NULL = English fallback). Drives
     # outbound email copy only — NOT in-app UI (the frontend's per-device locale
     # picker owns that). See docs/notifications.md § Localized email.

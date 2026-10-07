@@ -342,12 +342,22 @@ default entity the consolidated view would otherwise write under (§226).
 | Method | Path | Role | Purpose |
 |--------|------|------|---------|
 | GET | `/api/entities` | any authenticated | list (default first); `?active_only` |
-| POST | `/api/entities` | admin | create (validates slug, 409 on dup) |
+| POST | `/api/entities` | admin + plan `multi_entity` | create (validates slug, 409 on dup; **402** `plan_feature_required` without the plan feature) |
 | PATCH | `/api/entities/{id}` | admin | rename / currency / (de)activate — can't deactivate the default |
 | POST | `/api/entities/{id}/set-default` | admin | make this entity the tenant's default (see below) |
 
 Reads are open to all roles because the Phase 2 entity selector needs the list.
 Every mutation is admin-only and is driven from `/admin/entities`.
+
+**Multiple entities are a Scale feature** (`plan_catalog.FEATURE_MULTI_ENTITY`,
+decisions §253). Every tenant is provisioned with its one default entity, so
+the gate sits on `POST /api/entities` alone — any entity it creates is a second
+one. **Only creation is gated** (§258): a tenant that drops below Scale keeps
+every entity it already has fully working — reads, `X-Entity-ID` scoping,
+rename, (de)activate, set-default — because the invoices, payments and GL rows
+scoped to them must stay reachable. `/admin/entities` swaps its create button
+for the shared upgrade prompt (`ui/PlanUpgradeNotice.svelte`) when `/auth/me`'s
+`entitlements` lacks the feature.
 
 ### Changing the default entity
 

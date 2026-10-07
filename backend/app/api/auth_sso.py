@@ -61,6 +61,7 @@ from app.services.sso import (
     resolve_sso_tenant_slug,
     validate_id_token,
 )
+from app.services.sso_plan import sign_in_settings
 
 logger = logging.getLogger(__name__)
 
@@ -151,15 +152,16 @@ async def sso_config(
     `slug` is optional: on a tenant's vanity host the SPA has no slug, so the
     tenant is resolved from the request `Host` instead."""
     org, _slug = await _resolve_org(slug, host, db)
+    # Read through the plan (decisions §258): a tenant whose plan lacks `sso`
+    # gets no button, and one lacking `sso_enforcement` keeps the password form.
+    scoped = await sign_in_settings(db, org)
     try:
-        config = resolve_sso_config(org.settings)
+        config = resolve_sso_config(scoped)
     except SSOConfigError:
         return SSOConfigPublic(enabled=False)
     if config is None:
         return SSOConfigPublic(enabled=False)
-    return SSOConfigPublic(
-        enabled=True, provider=config.provider, sso_only=is_sso_only(org.settings)
-    )
+    return SSOConfigPublic(enabled=True, provider=config.provider, sso_only=is_sso_only(scoped))
 
 
 @router.get("/authorize")
@@ -178,7 +180,7 @@ async def sso_authorize(
     from fastapi.responses import RedirectResponse
 
     org, slug = await _resolve_org(slug, host, db)
-    config = _resolve_sso_or_none(org.settings)
+    config = _resolve_sso_or_none(await sign_in_settings(db, org))
     if config is None:
         raise HTTPException(status_code=400, detail="SSO is not configured for this tenant.")
 
@@ -253,7 +255,9 @@ async def sso_callback(
     expected_nonce = bound["nonce"]
 
     org = await _fetch_org_by_slug(tenant_slug, db)
-    config = _resolve_sso_or_none(org.settings)
+    # Re-read through the plan here too, not only at /authorize: a plan that
+    # lost `sso` between the two legs must not complete a sign-in.
+    config = _resolve_sso_or_none(await sign_in_settings(db, org))
     if config is None:
         raise HTTPException(status_code=400, detail="SSO is not configured for this tenant.")
 

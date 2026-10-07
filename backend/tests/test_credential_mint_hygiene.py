@@ -83,6 +83,7 @@ async def test_admin_created_user_temp_password_satisfies_the_policy(realdb):
             await s.commit()
 
 
+@pytest.mark.plan("scale")  # minting a SCIM token is a Scale feature (decisions §258)
 async def test_minting_a_scim_token_writes_a_secret_free_audit_row(realdb, scim_hash_restored):
     async with realdb.client(key="a", role="admin") as c:
         resp = await c.post("/api/organization/sso/scim-token")

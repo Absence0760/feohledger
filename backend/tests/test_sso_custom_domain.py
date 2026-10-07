@@ -52,6 +52,11 @@ from app.config import settings as app_settings
 from app.models.organization import Organization
 from app.services import sso as sso_module
 
+# Plan-gated surface (docs/decisions.md §253/§258): realdb tests run with the
+# harness orgs on a plan granting it; DB-free tests answer the plan lookup via
+# the `all_plan_features` fixture.
+pytestmark = pytest.mark.plan("scale")
+
 VANITY_HOST = "sso.acmecorp.test"
 OTHER_HOST = "sso.othercorp.test"
 UNREGISTERED_HOST = "sso.attacker.test"

@@ -114,8 +114,8 @@ DB), so a cross-tenant id is simply "not found", never leaked.
 ## Trying it locally
 
 The public API is entitlement-gated, so it needs a tenant on a plan that grants
-`public_api`. `scripts/seed.py` provides one: **`acme` is seeded on `growth`**,
-which grants it. Nothing else is required — no cloud account, no Stripe key, no
+`public_api`. `scripts/seed.py` provides one: **`acme` is seeded on `scale`**,
+which grants it (with every other plan feature). Nothing else is required — no cloud account, no Stripe key, no
 hand-editing of the control plane (guard rail 7).
 
 ```bash
@@ -133,22 +133,23 @@ curl -s -i http://localhost:8000/api/v1/invoices?page_size=1 -H "X-API-Key: $KEY
 `200`, with the tenant's invoices. The mint response is the only place the
 plaintext key ever appears, so capture it in that same step.
 
-**`techflow` stays on `free` on purpose.** Run the same three commands against
-`techflow` / `admin@techflow.com` and `/api/v1` answers
-`402 {"detail":"Your plan does not include this feature."}` — the refusal path
+**`techflow` stays on `free` on purpose.** Run the same commands against
+`techflow` / `admin@techflow.com` and the key mint itself answers `402` with the
+coded `plan_feature_required` refusal (`params.feature: "public_api"`) — minting
+a key is gated too, since a key the plan cannot use would only 402 on every
+call (decisions §258). The refusal path
 stays exercisable locally instead of being something only a paying customer
 could ever hit. Move a tenant across the gate with
 `POST /api/billing/change-plan {"plan_code": "growth"}` (the `mock` billing
 adapter handles it with no Stripe key).
 
-Every `e2e<N>` Playwright worker tenant is on `free` too, deliberately — see
-`docs/billing.md` § Which plan the seed lands each tenant on for why the demo
-tenant, and not a worker tenant, is the entitled one.
+Every `e2e<N>` Playwright worker tenant is on `scale` — see
+`docs/billing.md` § Which plan the seed lands each tenant on.
 
 ## `/api/v1` read surface
 
 All routes are behind `require_api_scope("read")` (→ `get_api_key_principal`)
-**and** `require_api_entitlement("public_api")` — the public API is a
+**and** `require_api_entitlement(FEATURE_PUBLIC_API)` — the public API is a
 paid-plan feature, 402 without it — and read through `get_api_key_db` (the
 tenant session resolved from the key).
 

@@ -8,6 +8,14 @@ a specific prefix.
 Related: `backend/docs/api-reference.md` (request/response shapes),
 `.claude/commands/endpoint-inventory.md` (generated route inventory).
 
+**Plan gates sit on top of RBAC.** SSO / SAML configuration and sign-in, SCIM,
+creating a second entity, live-ERP configuration and pushes, API-key minting
+and outbound webhooks also need the org's plan to grant the matching
+`plan_catalog.FEATURE_*` — a coded `402 plan_feature_required` otherwise (SCIM:
+an RFC 7644-shaped 402). The per-route table, and what stays open on a
+downgraded plan, is `backend/docs/billing.md` § Entitlement gating
+(decisions §253–§258); the rows below describe RBAC only.
+
 ## Routers
 
 | Prefix | Purpose |

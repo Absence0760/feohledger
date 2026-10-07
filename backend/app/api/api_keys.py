@@ -17,13 +17,14 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import ROLE_ADMIN, require_roles
+from app.api.deps import ROLE_ADMIN, require_entitlement, require_roles
 from app.database import get_control_db
 from app.models.api_key import ApiKey, ApiKeyUsage
 from app.models.organization import Organization
 from app.models.user import User
 from app.services.api_keys import generate_api_key
 from app.services.audit_dispatch import dispatch_auth_audit
+from app.services.billing.plan_catalog import FEATURE_PUBLIC_API
 from app.tenant import get_tenant
 from app.utils.dates import utc_today
 
@@ -83,6 +84,10 @@ async def create_api_key(
     body: CreateApiKeyRequest,
     org: Organization = Depends(get_tenant),
     user: User = Depends(require_roles(ROLE_ADMIN)),
+    # A key is only good for `/api/v1`, which is itself plan-gated — minting one
+    # the plan cannot use would hand out a credential that 402s on every call.
+    # Listing, usage and revocation stay open on every plan (decisions §258).
+    _entitled: User = Depends(require_entitlement(FEATURE_PUBLIC_API)),
     db: AsyncSession = Depends(get_control_db),
 ) -> ApiKeyCreatedResponse:
     """Mint a new read-scoped API key for this org. Returns the plaintext once."""
