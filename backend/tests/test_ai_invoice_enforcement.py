@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import uuid
+from datetime import UTC, datetime
 from decimal import Decimal
 from unittest.mock import AsyncMock, patch
 
@@ -73,9 +74,9 @@ def _audit_engine_on_loop(monkeypatch, realdb):
     )
 
 
-async def _seed_counted(realdb, org_id, n, *, invoice_ids=()):
+async def _seed_counted(realdb, org_id, n, *, invoice_ids=(), period=None):
     """``n`` counted AI reads this period (plus the given invoice ids)."""
-    period = period_of()
+    period = period or period_of()
     ids = [*invoice_ids, *(uuid.uuid4() for _ in range(n - len(invoice_ids)))]
     async with realdb.sessionmaker("a")() as s:
         s.add_all(
@@ -286,7 +287,7 @@ async def test_paid_overage_reads_bills_one_event_and_sends_the_100_percent_noti
     assert [e.identifier for e in events] == [f"ai-overage:{org_id}:{period_of()}:1"]
     assert events[0].value == "1"
     billing = await _billing_settings(realdb, org_id)
-    assert billing[REPORTED_KEY][period_of()] == 1
+    assert billing[REPORTED_KEY][period_of()]["units"] == 1
     # 80% and 100% are both due; ONE notice goes out, for the more severe.
     assert billing[NOTICES_KEY][period_of()] == ["80", "100"]
     notices = await _ai_notices(realdb)
@@ -346,6 +347,79 @@ async def test_free_reports_no_overage(realdb):
     async with realdb.sessionmaker("a")() as s:
         report = await report_ai_overage(s, organization_id=org_id)
     assert report.newly_reported == 0 and mock_adapter.RECORDED_METER_EVENTS == []
+
+
+# A closed month is priced on the terms it was used under (decisions §259).
+_OPEN = datetime(2026, 10, 15, 12, tzinfo=UTC)
+_CLOSED = datetime(2026, 11, 2, 12, tzinfo=UTC)
+
+
+async def test_a_downgrade_after_the_month_closes_does_not_reprice_it(realdb):
+    """2,000 reads on Scale (3,000 included) owe nothing. Re-pricing October
+    against Growth (500 included) after a Nov 2 downgrade billed 1,500 units."""
+    org_id = realdb.info("a").org_id
+    await _subscribe(realdb, org_id, "scale")
+    await _seed_counted(realdb, org_id, 2000, period="2026-10")
+    async with realdb.sessionmaker("a")() as s:
+        assert (await report_ai_overage(s, organization_id=org_id, now=_OPEN)).newly_reported == 0
+
+    await _subscribe(realdb, org_id, "growth")
+    result = await run_ai_overage_reconcile_once(now=_CLOSED)
+
+    assert result.failures == 0
+    assert [e for e in mock_adapter.RECORDED_METER_EVENTS if str(org_id) in e.identifier] == []
+
+
+async def test_raising_the_cap_after_the_month_closes_bills_nothing_more(realdb):
+    org_id = realdb.info("a").org_id
+    await _subscribe(realdb, org_id, "growth")
+    await _set_billing(realdb, org_id, monthly_spend_cap="1.00")  # 10 units at 0.10
+    await _seed_counted(realdb, org_id, 513, period="2026-10")  # the gate let 3 slip past
+    async with realdb.sessionmaker("a")() as s:
+        report = await report_ai_overage(s, organization_id=org_id, now=_OPEN)
+    assert report.newly_reported == 10
+
+    await _set_billing(realdb, org_id, monthly_spend_cap="100.00")
+    async with realdb.sessionmaker("a")() as s:
+        late = await report_ai_overage(s, organization_id=org_id, period="2026-10", now=_CLOSED)
+
+    assert late.newly_reported == 0 and late.target_units == 10
+
+
+async def test_a_closed_month_nobody_priced_is_refused_not_priced_today(realdb):
+    org_id = realdb.info("a").org_id
+    await _subscribe(realdb, org_id, "growth")
+    await _seed_counted(realdb, org_id, 600, period="2026-10")
+    async with realdb.sessionmaker("a")() as s:
+        report = await report_ai_overage(s, organization_id=org_id, period="2026-10", now=_CLOSED)
+    assert report.failed and mock_adapter.RECORDED_METER_EVENTS == []
+
+
+async def test_a_resend_after_a_lost_marker_is_the_identical_event(realdb):
+    """A crash between the provider accepting a unit and the marker being
+    stored re-sends it. Stamped with a fresh timestamp it was a different
+    request — refused by the provider's idempotency, then double-billed once
+    the window lapsed. The unit's timestamp is fixed before the first send."""
+    org_id = realdb.info("a").org_id
+    await _subscribe(realdb, org_id, "growth")
+    await _seed_counted(realdb, org_id, 501, period="2026-10")
+    async with realdb.sessionmaker("a")() as s:
+        assert (await report_ai_overage(s, organization_id=org_id, now=_OPEN)).newly_reported == 1
+    sent = list(mock_adapter.RECORDED_METER_EVENTS)
+
+    # Lose the accepted count, as a crash before `_store_reported` would.
+    billing = await _billing_settings(realdb, org_id)
+    marker = dict(billing[REPORTED_KEY]["2026-10"])
+    marker["units"] = 0
+    marker["batches"] = [[1, sent[0].timestamp]]
+    await _set_billing(realdb, org_id, **{REPORTED_KEY: {"2026-10": marker}})
+
+    later = _OPEN.replace(hour=13)
+    async with realdb.sessionmaker("a")() as s:
+        again = await report_ai_overage(s, organization_id=org_id, now=later)
+
+    assert again.newly_reported == 1 and not again.failed
+    assert mock_adapter.RECORDED_METER_EVENTS == sent  # replayed, not a second event
 
 
 async def test_reconcile_sweep_reports_what_the_post_read_leg_missed(realdb):

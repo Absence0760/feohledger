@@ -117,8 +117,18 @@ class MockBillingAdapter(BillingAdapter):
         """Record the event in-process so tests (and a curious dev) can see
         exactly what WOULD have been billed. Deduped on ``identifier``, the
         same idempotency the live provider gives a retried event — so a test
-        asserting "reported once" means the same thing against both."""
-        if any(e.identifier == event.identifier for e in RECORDED_METER_EVENTS):
+        asserting "reported once" means the same thing against both.
+
+        Like Stripe, a replay is only a replay when the parameters match: the
+        same identifier with a different payload (a resend stamped with a new
+        timestamp, say) is refused rather than silently absorbed, so a test
+        cannot pass on a retry the live provider would reject."""
+        prior = next((e for e in RECORDED_METER_EVENTS if e.identifier == event.identifier), None)
+        if prior is not None:
+            if prior != event:
+                raise ValueError(
+                    "mock billing: meter event identifier reused with different parameters"
+                )
             return None
         RECORDED_METER_EVENTS.append(event)
         return None

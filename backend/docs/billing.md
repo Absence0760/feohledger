@@ -304,16 +304,32 @@ cap)` and reports units `reported+1 … target`, one **meter event per overage
 invoice**, value `"1"`, event name `ai_invoice_overage`, identifier
 `ai-overage:<org>:<YYYY-MM>:<n>` — an **ordinal**, not an invoice id, because
 which invoice is "the 501st" is not stable while concurrent extractions commit
-out of order, but how many there are is. Included reads are never reported. The
-highest accepted unit is max-merged into
-`settings.billing.ai_overage_reported[period]` under `lock_organization`;
-a failure part-way keeps the progress made. Free (no overage price) reports
-nothing, ever.
+out of order, but how many there are is. Included reads are never reported.
+`settings.billing.ai_overage_reported[period]` is the period's marker
+(`ai_overage.PeriodMarker`, written only under `lock_organization`):
 
-The event timestamp is now while the period is current, else the period's last
-second (so a late report bills into the month it was used in); a period whose
-last second is older than 34 days can no longer be reported and is logged at
-ERROR with the unit count.
+- `units` — the highest unit the provider accepted, max-merged; a failure
+  part-way keeps the progress made.
+- `batches` — `[[to_unit, timestamp], …]`, the timestamp each not-yet-accepted
+  unit is sent with, **written before the first send**. A crash between the
+  provider accepting a unit and `units` being stored re-sends it; Stripe
+  replays the original success only for an *identical* request, so a resend
+  stamped with a fresh timestamp was refused for 24 h and then billed twice.
+  Reusing the stored timestamp makes the resend identical.
+- `terms` — the allowance, unit price, plan and cap the period is priced on,
+  refreshed on every pass while it is open. **A closed period is priced only
+  from these**: a downgrade or a raised cap after the month ends never
+  re-prices a month already used, and a closed period with usage but no
+  recorded terms is refused at ERROR rather than priced on today's plan
+  (decisions §259). A plan change *inside* the month applies from the next
+  pass; units already reported are never withdrawn.
+
+Free (no overage price) reports nothing, ever.
+
+A new batch's timestamp is now while the period is current, else the period's
+last second (so a late report bills into the month it was used in); a period
+whose last second is older than 34 days can no longer be reported and is logged
+at ERROR with the unit count.
 
 **Why per-unit, not graduated.** The Stripe price is a per-unit **metered**
 price at `overage_unit_price` on the `ai_invoice_overage` meter — not a
@@ -329,7 +345,10 @@ with `sweep_health` as `billing-ai-overage`. For every org it reports anything
 the post-read leg missed, for the current period and the previous one while
 still reportable, and re-runs the notice check. Hourly keeps a re-send after a
 lost marker write inside Stripe's 24 h idempotency window, where it replays the
-original success. See `background-sweeps.md`.
+original success. **A deployment with a live billing provider must turn it
+on** (`deploy/prod.sops.yaml.example` does): without it the only retry is the
+org's next billable read, which can land outside that window. See
+`background-sweeps.md`.
 
 ### Spending cap endpoint
 

@@ -140,3 +140,13 @@ FEOH_APPROVAL_SIGNING_KEY: ""
 FEOH_SIGNUP_ENABLED: "false"
 # FEOH_HCAPTCHA_SECRET: ""
 # FEOH_HCAPTCHA_SITEKEY: ""
+
+# ── Platform billing (our own billing of each tenant) ──
+# The AI-read overage backstop: reports any overage unit the post-read leg
+# missed, and keeps a re-send after a lost marker write inside Stripe's 24 h
+# idempotency window (backend/docs/billing.md § Overage billing). Usage
+# reporting only, never a charge — and with the default `mock` provider it
+# bills nothing — so it stays on in every deployment.
+FEOH_BILLING_AI_OVERAGE_SWEEP_ENABLED: "true"
+# FEOH_BILLING_PROVIDER: "stripe_billing"
+# FEOH_BILLING_STRIPE_API_KEY: ""

@@ -29,15 +29,30 @@ still never passes the cap — the overshoot is a free read on us.
 
 Exactly-once, as far as it can be
 ---------------------------------
-``Organization.settings.billing.ai_overage_reported[period]`` records how many
-units the provider has accepted. A run reports ``reported+1 … target``, one at
-a time, and stores the highest unit accepted (max-merge under
-``lock_organization``, so a racing reporter can only move it forward). A
-failure part-way keeps everything accepted before it. The remaining gap is a
-crash between the provider accepting an event and the marker being stored: the
-next run re-sends that identifier, which the provider replays as the original
-success inside its idempotency window (24 h) — the backstop sweep runs hourly
-by default, well inside it.
+``Organization.settings.billing.ai_overage_reported[period]`` is a
+:class:`PeriodMarker`: how many units the provider has accepted, the timestamp
+each not-yet-accepted unit will be sent with, and the period's pricing terms. A
+run reports ``reported+1 … target``, one at a time, and stores the highest unit
+accepted (max-merge under ``lock_organization``, so a racing reporter can only
+move it forward). A failure part-way keeps everything accepted before it.
+
+The remaining gap is a crash between the provider accepting an event and the
+marker being stored: the next run re-sends that identifier. The provider
+replays the original success only for an IDENTICAL request inside its
+idempotency window (24 h) — a resend stamped with a new timestamp is refused
+for the window and then accepted as a second event. So the timestamp of every
+unit is fixed and persisted (``batches``) BEFORE the first send, and a resend
+reuses it. The backstop sweep (hourly when enabled — deployments must enable
+it, ``docs/billing.md``) keeps the resend inside the window.
+
+A period is priced on its own terms
+-----------------------------------
+While a period is open, its overage is computed from the org's live plan and
+cap, and each pass records those terms on the marker. Once it closes, it is
+priced ONLY from the recorded terms — a downgrade or a raised cap after the
+month ended must never re-price a month already used (decisions §259). A closed
+period with usage but no recorded terms is refused loudly rather than priced on
+whatever the org holds today.
 
 Two callers: ``after_ai_read`` (best-effort, right after the extraction's
 tenant transaction commits) and the reconciliation sweep
@@ -53,8 +68,9 @@ from __future__ import annotations
 
 import calendar
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -65,6 +81,7 @@ from app.database import control_session_factory, get_tenant_engine
 from app.models.organization import Organization
 from app.services.billing.ai_invoice_meter import (
     BILLING_SETTINGS_KEY,
+    AiAllowance,
     allowance_for_plan,
     billable_overage_units,
     count_ai_invoices,
@@ -78,7 +95,8 @@ from app.tenant import lock_organization
 
 logger = logging.getLogger(__name__)
 
-#: ``settings.billing`` key: ``{period: units the provider has accepted}``.
+#: ``settings.billing`` key: ``{period: PeriodMarker.as_json()}``. (A bare int —
+#: units accepted — is read as a marker with no batches and no terms.)
 REPORTED_KEY = "ai_overage_reported"
 
 #: How many periods of per-period markers to keep. The current month and the
@@ -137,30 +155,137 @@ def _oldest_kept_period(now: datetime) -> str:
     return f"{year:04d}-{month:02d}"
 
 
-def reported_units(org_settings: dict | None, period: str) -> int:
+@dataclass
+class PeriodMarker:
+    """One period's reporting state (see the module docstring).
+
+    ``batches`` is ``[[to_unit, timestamp], …]`` ascending: unit *u* is sent
+    with the timestamp of the first batch whose ``to_unit >= u``. A batch is
+    written before any of its units is sent and dropped once every unit in it
+    is accepted. ``terms`` is :func:`terms_of` for the period's pricing.
+    """
+
+    units: int = 0
+    batches: list[list[int]] = field(default_factory=list)
+    terms: dict | None = None
+
+    @classmethod
+    def parse(cls, raw) -> PeriodMarker:
+        if isinstance(raw, dict):
+            try:
+                units = max(0, int(raw.get("units") or 0))
+                batches = [[int(to), int(ts)] for to, ts in (raw.get("batches") or [])]
+            except (TypeError, ValueError):
+                logger.error("[ai-overage] unreadable period marker; treating it as empty")
+                return cls()
+            terms = raw.get("terms")
+            return cls(units, sorted(batches), terms if isinstance(terms, dict) else None)
+        try:
+            return cls(units=max(0, int(raw or 0)))
+        except (TypeError, ValueError):
+            return cls()
+
+    def as_json(self) -> dict:
+        return {"units": self.units, "batches": self.batches, "terms": self.terms}
+
+    def timestamp_for(self, unit: int) -> int:
+        for to_unit, ts in self.batches:
+            if to_unit >= unit:
+                return ts
+        raise LookupError(f"no batch covers overage unit {unit}")
+
+
+def read_marker(org_settings: dict | None, period: str) -> PeriodMarker:
     billing = (org_settings or {}).get(BILLING_SETTINGS_KEY) or {}
-    try:
-        return max(0, int((billing.get(REPORTED_KEY) or {}).get(period, 0)))
-    except (TypeError, ValueError):
-        return 0
+    return PeriodMarker.parse((billing.get(REPORTED_KEY) or {}).get(period))
 
 
-async def _store_reported(organization_id, period: str, units: int, *, now: datetime) -> None:
-    """Max-merge ``units`` into the org's reported marker, under the org lock."""
+def reported_units(org_settings: dict | None, period: str) -> int:
+    return read_marker(org_settings, period).units
+
+
+def terms_of(allowance: AiAllowance, cap: Decimal | None) -> dict:
+    """The pricing a period's overage is computed from, as JSON-safe strings."""
+    return {
+        "included": allowance.included,
+        "overage_unit_price": (
+            str(allowance.overage_unit_price) if allowance.overage_unit_price is not None else None
+        ),
+        "plan_code": allowance.plan_code,
+        "spend_cap": str(cap) if cap is not None else None,
+    }
+
+
+def priced_from_terms(terms: dict) -> tuple[AiAllowance, Decimal | None]:
+    """Inverse of :func:`terms_of`."""
+    price = terms.get("overage_unit_price")
+    cap = terms.get("spend_cap")
+    return (
+        AiAllowance(
+            included=terms.get("included"),
+            overage_unit_price=Decimal(price) if price is not None else None,
+            plan_code=terms.get("plan_code"),
+        ),
+        Decimal(cap) if cap is not None else None,
+    )
+
+
+async def _update_marker(
+    organization_id, period: str, *, now: datetime, mutate
+) -> PeriodMarker | None:
+    """Apply ``mutate(marker)`` to the org's ``period`` marker under the org
+    lock and store it. Returns the stored marker (``None`` for a missing org)."""
     async with control_session_factory() as ctrl:
         org = await ctrl.get(Organization, organization_id)
         if org is None:
-            return
+            return None
         org = await lock_organization(ctrl, org)
         settings_dict = dict(org.settings or {})
         billing = dict(settings_dict.get(BILLING_SETTINGS_KEY) or {})
         markers = _prune(dict(billing.get(REPORTED_KEY) or {}), _oldest_kept_period(now))
-        markers[period] = max(units, reported_units(settings_dict, period))
+        marker = PeriodMarker.parse(markers.get(period))
+        mutate(marker)
+        markers[period] = marker.as_json()
         billing[REPORTED_KEY] = markers
         settings_dict[BILLING_SETTINGS_KEY] = billing
         org.settings = settings_dict
         flag_modified(org, "settings")
         await ctrl.commit()
+        return marker
+
+
+async def _store_reported(organization_id, period: str, units: int, *, now: datetime) -> None:
+    """Max-merge ``units`` into the period's accepted count; drop spent batches."""
+
+    def _accept(marker: PeriodMarker) -> None:
+        marker.units = max(marker.units, units)
+        marker.batches = [b for b in marker.batches if b[0] > marker.units]
+
+    await _update_marker(organization_id, period, now=now, mutate=_accept)
+
+
+async def _store_terms(organization_id, period: str, terms: dict, *, now: datetime) -> None:
+    def _record(marker: PeriodMarker) -> None:
+        marker.terms = terms
+
+    await _update_marker(organization_id, period, now=now, mutate=_record)
+
+
+async def _assign_timestamps(
+    organization_id, period: str, target: int, timestamp: int, *, now: datetime
+) -> PeriodMarker | None:
+    """Fix the timestamp of every unit up to ``target`` BEFORE any is sent.
+
+    Units already covered keep the timestamp they were first assigned — that
+    is what makes a resend identical. Only units past the last batch get
+    ``timestamp``."""
+
+    def _assign(marker: PeriodMarker) -> None:
+        covered = marker.batches[-1][0] if marker.batches else marker.units
+        if target > covered:
+            marker.batches.append([target, timestamp])
+
+    return await _update_marker(organization_id, period, now=now, mutate=_assign)
 
 
 @dataclass(frozen=True)
@@ -192,6 +317,7 @@ async def report_ai_overage(
     """
     moment = now or datetime.now(UTC)
     target_period = period or period_of(moment)
+    period_open = moment < period_bounds(target_period)[1]
 
     # Control-plane facts in one short session — the extraction worker's
     # control pool is a single connection, so nothing below holds it open
@@ -202,13 +328,41 @@ async def report_ai_overage(
             return OverageReport()
         active = await get_active_subscription(ctrl, organization_id)
         org_settings = dict(org.settings or {})
-    allowance = allowance_for_plan(active[1] if active else None)
+    marker = read_marker(org_settings, target_period)
+
+    if period_open:
+        allowance = allowance_for_plan(active[1] if active else None)
+        cap = parse_spend_cap(org_settings)
+        terms = terms_of(allowance, cap)
+        if marker.terms != terms:
+            # Recorded for every plan, Free included: an org that was on Free
+            # all month and upgrades after it closes must still owe nothing.
+            await _store_terms(organization_id, target_period, terms, now=moment)
+    elif marker.terms is not None:
+        allowance, cap = priced_from_terms(marker.terms)
+    else:
+        used = await count_ai_invoices(
+            tenant_db, organization_id=organization_id, period=target_period
+        )
+        if used == 0:
+            return OverageReport()
+        # Usage in a closed month that no reporter priced while it was open.
+        # Pricing it on today's plan and cap is exactly the re-pricing this
+        # marker exists to prevent, so refuse loudly. Counts only.
+        logger.error(
+            "[ai-overage] org=%s period=%s: %d AI read(s) in a closed period with no "
+            "recorded terms; not billing it",
+            organization_id,
+            target_period,
+            used,
+        )
+        return OverageReport(failed=True)
     if not allowance.bills_overage:
         return OverageReport()
 
     used = await count_ai_invoices(tenant_db, organization_id=organization_id, period=target_period)
-    target = billable_overage_units(used, allowance, parse_spend_cap(org_settings))
-    already = reported_units(org_settings, target_period)
+    target = billable_overage_units(used, allowance, cap)
+    already = marker.units
     if target <= already:
         return OverageReport(target_units=target, previously_reported=already)
 
@@ -227,6 +381,11 @@ async def report_ai_overage(
 
     from app.services.billing.provisioning import _adapter_for
 
+    assigned = await _assign_timestamps(
+        organization_id, target_period, target, timestamp, now=moment
+    )
+    if assigned is None:
+        return OverageReport(target_units=target, previously_reported=already)
     adapter = _adapter_for(_OrgView(org_settings))
     customer_id = (org_settings.get(BILLING_SETTINGS_KEY) or {}).get("stripe_customer_id")
     accepted = already
@@ -238,7 +397,7 @@ async def report_ai_overage(
                     customer_id=customer_id,
                     value="1",
                     identifier=overage_identifier(organization_id, target_period, unit),
-                    timestamp=timestamp,
+                    timestamp=assigned.timestamp_for(unit),
                 )
             )
             accepted = unit

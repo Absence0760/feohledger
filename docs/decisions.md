@@ -10518,3 +10518,38 @@ a worker's subscription.
 `audit_siem_export` gates nothing yet: there is no tenant-configurable SIEM
 destination, only the operator's platform shipper. Tracked in
 `docs/followups.md`; the SOX auditor export stays ungated regardless.
+
+## 259. A month's AI-read overage is priced on the terms it was used under (2026-10-07)
+
+**Context.** `report_ai_overage` (§255) recomputed every period it touched from
+the org's plan and spending cap *as they stood at report time*, and the
+backstop re-runs the previous month until its last second ages out of the
+provider's window. So a month already used could be re-priced after it ended:
+2,000 reads on Scale (3,000 included, owed nothing) became 1,500 Growth
+overage units after a Nov 2 downgrade, and a cap raised after month end
+billed past the cap that was in force when the reads ran. Separately, a resend
+after a lost marker was stamped with a fresh timestamp, which Stripe treats as
+a *different* request under the same idempotency key — refused for 24 h, then
+accepted as a second event.
+
+**Decision.**
+
+- Each period's marker records its pricing **terms** (allowance, unit price,
+  plan, cap), refreshed on every pass while the period is open. A **closed**
+  period is priced only from its recorded terms. A closed period with usage
+  but no recorded terms is refused and logged, never priced on today's plan.
+- A plan or cap change **inside** the month applies from the next pass. Units
+  already reported are never withdrawn, so an upgrade mid-month stops further
+  overage but does not credit what was already billed. Credits are an
+  operator action at the provider, not something the reporter infers.
+- Every unit's event **timestamp is fixed and stored before the first send**
+  (`batches`), so any resend is byte-identical and the provider replays it.
+- The backstop sweep is turned on in the deploy template; the 24 h window is
+  only a guarantee when something retries inside it.
+
+**Rejected.** *A single timestamp per period* (first-of-month, or the first
+report's instant): stateless, but it shrinks the late-report window from ~34
+days after month end to as little as a few days, and a first-of-month instant
+precedes a subscription that started mid-month. *Pricing a mid-month change
+retroactively from its effective date*: it would need per-read plan
+attribution the meter does not have, for a few cents either way at pilot scale.
