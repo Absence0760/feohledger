@@ -19,9 +19,8 @@ and are not metered, and reads ("CorePlus") are free up to 500,000 a month on
 the App Partner Program's Builder tier. Over the cap, calls are **blocked**,
 not billed. One status poll per open bill per day stays far below that.
 
-Merge stays for the long tail (Sage Intacct, MYOB, the rest), priced as a
-Scale/Enterprise feature or a pass-through add-on. That pricing call is a
-product decision, recorded in `docs/decisions.md` when it is made.
+Merge stays for the long tail (Sage Intacct, MYOB, the rest) as a Scale-only
+feature (`docs/decisions.md` §256).
 
 ## Phase 0 — prerequisite, shared by every direct adapter
 
@@ -229,6 +228,8 @@ is a question for that audit.
 
 ## Open questions (product calls, not engineering)
 
+Three remain open.
+
 1. **"Void" on a QuickBooks bill means delete.** Allow it only while no
    payment is applied (`Balance == TotalAmt`) and refuse otherwise? Or never
    delete, and tell the operator to handle it in QuickBooks?
@@ -238,8 +239,9 @@ is a question for that audit.
 3. **Early-pay discounts.** BillPayment has no discount field. Book the
    discount as a vendor credit applied in the same payment, or post the net
    amount and leave the difference open? It has to be decided before Phase 4.
-4. **Merge for Growth customers.** Once QuickBooks (and later Xero) are direct,
-   is Merge still offered on Growth?
+4. ~~**Merge for Growth customers.**~~ Decided (`docs/decisions.md` §256):
+   Merge-routed ERPs become a Scale-only `erp_merge` feature, and Growth's
+   `erp_integrations` covers the direct adapters.
 
 **Total: about three weeks of engineering** (Phases 0–4), plus Intuit review
 time. Phase 0 is worth doing first on its own: it fixes the two adapters that

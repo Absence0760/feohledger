@@ -99,7 +99,7 @@ section carried its own `decisions.md` § reference, so nothing was lost by
 deleting it; that cross-reference is what makes the pruning safe, and writing
 one is what earns a future entry the right to be deleted.
 
-**77 open: 62 (c) · 9 (a) · 6 (b)** — re-derived from the file, never carried
+**78 open: 63 (c) · 9 (a) · 6 (b)** — re-derived from the file, never carried
 forward. The section heading is authoritative; where an entry also carries a
 `(c)`/`(a)`/`(b)` marker, the two agree.
 `grep -c '^- \[ \]' docs/followups.md`.
@@ -1203,10 +1203,21 @@ lands. Pure doc drift was corrected in the same PR. The two diagnosed defects
       `backend/docs/quickbooks-online-adapter.md`: shared ERP references in the
       payload (also `known-issues.md`), an OAuth authorization-code connect flow
       reusable for Xero, the adapter, CloudEvents webhooks plus a CDC
-      reconciliation sweep, and `post_payment` → BillPayment. Four product calls
-      in that doc's open questions come first. **Trigger:** the first pilot
+      reconciliation sweep, and `post_payment` → BillPayment. Three product
+      calls in that doc's open questions come first. **Trigger:** the first pilot
       customer on QuickBooks, or before Growth is sold with ERP integrations,
       whichever comes first.
+- [ ] **(c) Merge-routed ERPs need a Scale-only `erp_merge` feature.**
+      Decided in `docs/decisions.md` §256: Growth's `erp_integrations` covers the
+      direct adapters, and Merge (`integration_method: merge_dev`) is Scale-only,
+      because Merge's $65 per connection exceeds Growth's $49. **Durable fix:**
+      add `FEATURE_ERP_MERGE` to `plan_catalog` (Scale), a migration rewriting
+      the catalog rows' `entitlements` (as `0107` did), a gate on saving a
+      `merge_dev` config and on the Merge push, and regenerate the pricing page
+      (`pnpm gen:pricing`). Land it with the entitlement-enforcement fix in
+      `known-issues.md`, since that gate is the one this extends. **Trigger:**
+      before the first paid Growth customer, or the fourth Merge connection
+      (the first three are free), whichever comes first.
 - [ ] **(c) ERP credentials are plaintext in `Organization.settings`.** The
       `erp` block (client secrets, API keys, Merge account tokens) is stored as
       plain JSONB, protected only by RDS storage encryption, and admins read it

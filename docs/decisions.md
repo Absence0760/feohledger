@@ -10372,3 +10372,43 @@ lock before the send and released if nobody was reached; at most once, because
 the check runs after every billable read and a duplicated billing email reads
 as a billing error. (`cash_flow_alerts` sends first and accepts a duplicate; its
 check runs once a day, this one many times a minute.)
+
+## 256. ERP through Merge.dev is a Scale feature; QuickBooks Online and Xero go direct (2026-10-07)
+
+§253 put "ERP integrations" in Growth ($49/mo). Every non-mock ERP config
+routes through Merge.dev by default (`erp_adapters/dispatcher`:
+`integration_method` defaults to `merge_dev`). Merge's Launch plan
+(merge.dev/pricing, read 2026-10-07) is free for the first 3 production linked
+accounts, then $650/month for up to 10, then $65 per linked account. One tenant
+is one linked account, since an org holds one `settings.erp`. Past three
+customers, a Growth tenant on Merge costs at least $65 a month against $49 of
+revenue.
+
+**Decision.** Split the entitlement:
+
+- `erp_integrations` (Growth and Scale) covers the **direct** adapters:
+  QuickBooks Online and Xero once built (`backend/docs/quickbooks-online-adapter.md`),
+  plus the existing NetSuite and Business Central adapters.
+- A new `erp_merge` feature (**Scale only**) covers `integration_method:
+  merge_dev`, the long tail: Sage Intacct, MYOB, SAP and the rest. A customer
+  on one of those systems is usually a Scale-sized company anyway.
+
+**Rejected:**
+- **A $50 Merge add-on on Growth.** It is below Merge's $65 marginal cost, so it
+  loses money on every connection past the free three, before card fees or the
+  support load of a sync we cannot fix ourselves.
+- **A ~$99 add-on.** That price would cover the cost, but the billing model has
+  no add-ons (plans are a flat price plus `entitlements`, §253). Building one
+  means a Stripe price, proration and pricing-page support in money-path code,
+  which isn't worth it before anyone asks. Revisit if Growth customers on
+  long-tail ERPs ask for Merge.
+- **Merge everywhere, absorbing the cost.** Margin goes negative at exactly the
+  scale where the business is supposed to work.
+
+The first three Merge connections are free, so pilot customers on long-tail
+ERPs cost nothing while demand is tested.
+
+**Not yet enforced.** No route checks `erp_integrations` today (see
+`docs/known-issues.md`), and `erp_merge` doesn't exist yet. Both are tracked in
+`docs/followups.md`. Until they land, this records the intended plan shape and
+the pricing page must not advertise Merge-routed ERPs on Growth.
