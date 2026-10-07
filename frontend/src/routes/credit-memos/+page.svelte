@@ -2,7 +2,7 @@
 	import { api } from '#lib/api.ts';
 	import { appendUnique } from '#lib/utils/pagination.ts';
 	import { createRequestSequencer } from '#lib/utils/requestSequence.ts';
-	import { toggleSort, type SortOrder } from '#lib/utils/sort.ts';
+	import { clearSort, toggleSort, type SortOrder } from '#lib/utils/sort.ts';
 	import { untrack } from 'svelte';
 	import { page as urlStore } from '$app/state';
 	import { replaceState } from '$app/navigation';
@@ -301,6 +301,15 @@
 
 	function handleSort(field: string) {
 		const next = toggleSort({ field: sortField, order: sortOrder }, field);
+		sortField = next.field;
+		sortOrder = next.order;
+		syncUrl();
+		loadMemos();
+	}
+
+	// The × on the sorted column: back to the backend's default order.
+	function handleClearSort() {
+		const next = clearSort({ field: sortField, order: sortOrder });
 		sortField = next.field;
 		sortOrder = next.order;
 		syncUrl();
@@ -660,7 +669,7 @@
 						label={m('creditMemos.col.memoNumber')}
 						active={sortField === 'memo_number'}
 						order={sortOrder}
-						onsort={handleSort}
+						onsort={handleSort} onclear={handleClearSort}
 					/>
 					<th scope="col">{m('creditMemos.col.vendor')}</th>
 					<SortableHeader
@@ -669,14 +678,14 @@
 						class="right"
 						active={sortField === 'amount'}
 						order={sortOrder}
-						onsort={handleSort}
+						onsort={handleSort} onclear={handleClearSort}
 					/>
 					<SortableHeader
 						field="issued_date"
 						label={m('creditMemos.col.issued')}
 						active={sortField === 'issued_date'}
 						order={sortOrder}
-						onsort={handleSort}
+						onsort={handleSort} onclear={handleClearSort}
 					/>
 					<th scope="col">{m('creditMemos.col.appliedTo')}</th>
 					<!-- The create form captures a reason and nothing in the product

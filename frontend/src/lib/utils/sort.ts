@@ -22,3 +22,13 @@ export function toggleSort(current: SortState, field: string): SortState {
 	if (current.field !== field) return { field, order: 'asc' };
 	return { field, order: current.order === 'asc' ? 'desc' : 'asc' };
 }
+
+/**
+ * Clearing a column sort returns the list to the backend's own default order
+ * (`field: null`) — the state a page starts in before any header is clicked.
+ * The direction is kept but unused while no field is set, so the next header
+ * click still starts ascending (`toggleSort`).
+ */
+export function clearSort(current: SortState): SortState {
+	return { field: null, order: current.order };
+}

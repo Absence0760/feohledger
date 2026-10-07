@@ -5,7 +5,7 @@
 	import type { MatchingIdsResponse } from '#lib/utils/pagination.ts';
 	import { createRequestSequencer } from '#lib/utils/requestSequence.ts';
 	import { pruneSelection } from '#lib/utils/selection.ts';
-	import { toggleSort, type SortOrder } from '#lib/utils/sort.ts';
+	import { clearSort, toggleSort, type SortOrder } from '#lib/utils/sort.ts';
 	import { untrack } from 'svelte';
 	// Aliased: this page already has a local `page` variable for the loaded
 	// vendor-list page number (below) — `$app/state`'s page is the URL/route
@@ -367,6 +367,15 @@
 		fetchVendors();
 	}
 
+	// The × on the sorted column: back to the backend's default order.
+	function handleClearSort() {
+		const next = clearSort({ field: sortField, order: sortOrder });
+		sortField = next.field;
+		sortOrder = next.order;
+		syncUrl();
+		fetchVendors();
+	}
+
 	// Resolve and select EVERY vendor matching the current filters (not just
 	// the loaded page) via `GET /api/vendors/ids` — mirrors the identical
 	// "select all N matching" affordance on /invoices and /expenses.
@@ -618,10 +627,10 @@
 				<th class="checkbox-col">
 					<input type="checkbox" aria-label={m('vendors.selectAllAria')} checked={allSelected} onchange={toggleSelectAll} />
 				</th>
-				<SortableHeader field="name" label={m('vendors.col.vendor')} active={sortField === 'name'} order={sortOrder} onsort={handleSort} />
-				<SortableHeader field="code" label={m('vendors.col.code')} active={sortField === 'code'} order={sortOrder} onsort={handleSort} />
+				<SortableHeader field="name" label={m('vendors.col.vendor')} active={sortField === 'name'} order={sortOrder} onsort={handleSort} onclear={handleClearSort} />
+				<SortableHeader field="code" label={m('vendors.col.code')} active={sortField === 'code'} order={sortOrder} onsort={handleSort} onclear={handleClearSort} />
 				<th scope="col">{m('vendors.col.email')}</th>
-				<SortableHeader field="status" label={m('vendors.col.status')} active={sortField === 'status'} order={sortOrder} onsort={handleSort} />
+				<SortableHeader field="status" label={m('vendors.col.status')} active={sortField === 'status'} order={sortOrder} onsort={handleSort} onclear={handleClearSort} />
 				<th scope="col">{m('vendors.col.screening')} <HelpTip term="sanctions-screening" /></th>
 				<th scope="col">{m('vendors.col.source')}</th>
 				<th scope="col">{m('vendors.col.invoices')}</th>

@@ -204,6 +204,16 @@ one again to flip direction:
   `created_at desc`: the page passes `SortableHeader` the flipped order and
   maps its clicks back (`handleAgeSort`). Any column rendered as elapsed time
   over a timestamp key needs the same flip.
+- **A sort can always be cleared.** Pass `onclear` and the sorted column
+  shows a × ("Clear sort by Vendor") that returns the list to the default
+  order. Write each page's `handleClearSort` as a copy of its `handleSort`
+  with `clearSort()` in place of `toggleSort()`, so it keeps that page's
+  exact URL sync and refetch path. All seven sortable lists pass it, and a
+  new one must too: a sort that can only be flipped has no way back.
+  `<th>` carries `aria-label={label}`, so the × isn't read into every
+  cell's header. In specs, pick the sort button by name inside a header
+  (`.getByRole('button', { name: label, exact: true })`). The sorted column
+  holds two buttons. Guard: `tests-e2e/invoices/sort.spec.ts`.
 
 ### Search (`SearchBox`)
 
@@ -623,6 +633,30 @@ centred dialog with backdrop-click + Esc to close:
   If you find yourself writing `position: fixed; inset: 0` or
   `role="dialog"` in a component, stop and use `<Modal>`.
 
+### Unsaved changes (`guardUnsavedChanges`)
+
+A page with an editable form that can be left half-done calls the shared
+guard **once**, during component init:
+
+```svelte
+import { guardUnsavedChanges } from '#lib/stores/unsavedChanges.svelte.ts';
+guardUnsavedChanges(() => dirty && !saving);
+```
+
+While that returns true, any in-app navigation away is held, and the one
+`UnsavedChangesDialog` (mounted in the root layout) asks **Stay on page**
+or **Leave without saving**. That covers sidebar and tab links, `goto`, and
+Back/Forward. Leaving replays the exact navigation, including the same
+history step for Back. A reload, a tab close or a typed URL gets the
+browser's own prompt, the only one browsers allow there.
+
+- Never use `confirm()` or a page-local dialog for this. One dialog, one
+  copy.
+- Exclude an in-flight save from the predicate, so a save that redirects
+  is never held.
+- Users today: the workflow editor, `/admin/retention`, and the Report
+  Builder (an edited saved report). Guard: `tests-e2e/unsaved-changes.spec.ts`.
+
 ### Per-row actions
 
 Use the shared `<RowAction>` component (`#lib/components/ui/RowAction.svelte`)
@@ -710,6 +744,12 @@ accessible:
 - Lists with **no per-row detail view** (vendors, exceptions, credit
   memos, payments history/cards) keep their existing conditional
   `RowAction` buttons — there's no single "open" destination to wire.
+- **Never `stopPropagation()` on a link's click.** SvelteKit's router
+  catches link clicks by delegation higher up the document, so a stopped
+  click falls through to the browser and reloads the whole app. RowLink's
+  `<a>` used to do exactly that. The row handler doesn't need the help:
+  `isRowOpenClick` already ignores clicks that start on an `<a>`. Guard:
+  `tests-e2e/workflows/row-link-client-nav.spec.ts`.
 
 ### Contextual help (`HelpTip`, the page help link)
 

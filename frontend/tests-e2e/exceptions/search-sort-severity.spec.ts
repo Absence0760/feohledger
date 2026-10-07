@@ -227,7 +227,10 @@ test.describe('/exceptions — search, sort and severity', () => {
 					new URL(r.url()).searchParams.get('sort') === sort &&
 					new URL(r.url()).searchParams.get('order') === order
 			);
-			await page.getByRole('columnheader', { name: label, exact: true }).getByRole('button').click();
+			await page
+				.getByRole('columnheader', { name: label, exact: true })
+				.getByRole('button', { name: label, exact: true })
+				.click();
 			await req;
 		}
 
@@ -324,7 +327,9 @@ test.describe('/exceptions — search, sort and severity', () => {
 				new URL(r.url()).searchParams.get('sort') === 'severity' &&
 				new URL(r.url()).searchParams.get('order') === 'desc'
 		);
-		const sev = page.getByRole('columnheader', { name: 'Sev', exact: true }).getByRole('button');
+		const sev = page
+			.getByRole('columnheader', { name: 'Sev', exact: true })
+			.getByRole('button', { name: 'Sev', exact: true });
 		await sev.click();
 		await sev.click();
 		const body = (await (await sorted).json()) as { items: { severity: string }[] };

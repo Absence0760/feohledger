@@ -22,7 +22,7 @@ test.describe('/invoices column sort (acme admin)', () => {
 				r.url().includes('sort=amount') &&
 				r.url().includes('order=asc')
 		);
-		await page.getByRole('button', { name: /Amount/ }).click();
+		await page.getByRole('button', { name: /^Amount/ }).click();
 		await ascRequest;
 		await expect(page).toHaveURL(/sort=amount/);
 		await expect(page).toHaveURL(/order=asc/);
@@ -33,7 +33,7 @@ test.describe('/invoices column sort (acme admin)', () => {
 				r.url().includes('sort=amount') &&
 				r.url().includes('order=desc')
 		);
-		await page.getByRole('button', { name: /Amount/ }).click();
+		await page.getByRole('button', { name: /^Amount/ }).click();
 		await descRequest;
 		await expect(page).toHaveURL(/order=desc/);
 	});
@@ -42,7 +42,7 @@ test.describe('/invoices column sort (acme admin)', () => {
 		await page.goto('/invoices');
 		await expect(page.locator('table tbody tr').first()).toBeVisible();
 
-		await page.getByRole('button', { name: /Amount/ }).click();
+		await page.getByRole('button', { name: /^Amount/ }).click();
 		await page.waitForResponse((r) => r.url().includes('sort=amount'));
 
 		const vendorAsc = page.waitForResponse(
@@ -61,7 +61,7 @@ test.describe('/invoices column sort (acme admin)', () => {
 		await page.goto('/invoices');
 		await expect(page.locator('table tbody tr').first()).toBeVisible();
 
-		await page.getByRole('button', { name: /Due Date/ }).click();
+		await page.getByRole('button', { name: /^Due Date/ }).click();
 		await page.waitForResponse((r) => r.url().includes('sort=due_date'));
 
 		const url = page.url();

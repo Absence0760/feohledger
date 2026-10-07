@@ -1,6 +1,8 @@
 <script lang="ts">
 	import { page } from '$app/state';
-	import { beforeNavigate, goto } from '$app/navigation';
+	import { goto } from '$app/navigation';
+	import { guardUnsavedChanges } from '#lib/stores/unsavedChanges.svelte.ts';
+	import { renumberSteps } from '#lib/utils/workflowSteps.ts';
 	import { auth } from '#lib/stores/auth.svelte.ts';
 	import { workflowStore } from '#lib/stores/workflows.svelte.ts';
 	import { adminStore } from '#lib/stores/admin.svelte.ts';
@@ -47,37 +49,16 @@
 	let saving = $state(false);
 	let dirty = $state(false);
 
-	// Unsaved-changes guard. Editing the canvas sets `dirty`; without this, a
-	// click on another nav link or a tab reload silently discarded all edits.
-	// `beforeNavigate` covers in-app navigation; the `beforeunload` listener
-	// covers a browser reload / tab close. `saving` is exempt so a successful
-	// save (which clears `dirty` right after) never trips the prompt.
-	beforeNavigate((nav) => {
-		if (dirty && !saving) {
-			if (!confirm(m('workflows.builder.unsavedConfirm'))) {
-				nav.cancel();
-			}
-		}
-	});
-
-	$effect(() => {
-		function onBeforeUnload(e: BeforeUnloadEvent) {
-			if (dirty) {
-				e.preventDefault();
-				e.returnValue = '';
-			}
-		}
-		window.addEventListener('beforeunload', onBeforeUnload);
-		return () => window.removeEventListener('beforeunload', onBeforeUnload);
-	});
+	// Unsaved-changes guard: leaving with edits on the canvas asks first, in the
+	// app-wide dialog. `saving` is exempt so a successful save (which clears
+	// `dirty` right after) never trips it.
+	guardUnsavedChanges(() => dirty && !saving);
 	let editingName = $state(false);
 	let nameInput = $state('');
 	let descInput = $state('');
 	let approverSearch = $state('');
 	let approverDropdownOpen = $state(false);
 	let erpMethod = $state<string>('merge_dev');
-	// Set while a palette item is being dragged, so the canvas can show drop slots.
-	let paletteDragType = $state<WorkflowStepType | null>(null);
 
 	const id = $derived(page.params.id ?? '');
 
@@ -169,9 +150,6 @@
 
 	let selectedStep = $derived(steps[selectedIndex] ?? null);
 
-	function renumber(arr: WorkflowStep[]): WorkflowStep[] {
-		return arr.map((s, i) => ({ ...s, number: i + 1 }));
-	}
 
 	function makeStep(type: WorkflowStepType): WorkflowStep {
 		return {
@@ -184,18 +162,9 @@
 	}
 
 	function addStep(type: WorkflowStepType) {
-		const next = renumber([...steps, makeStep(type)]);
+		const next = renumberSteps([...steps, makeStep(type)]);
 		steps = next;
 		selectedIndex = next.length - 1;
-		markDirty();
-	}
-
-	function addStepAt(type: WorkflowStepType, index: number) {
-		const clamped = Math.max(0, Math.min(index, steps.length));
-		const arr = [...steps];
-		arr.splice(clamped, 0, makeStep(type));
-		steps = renumber(arr);
-		selectedIndex = clamped;
 		markDirty();
 	}
 
@@ -204,14 +173,14 @@
 		const arr = [...steps];
 		const [moved] = arr.splice(from, 1);
 		arr.splice(to, 0, moved);
-		steps = renumber(arr);
+		steps = renumberSteps(arr);
 		selectedIndex = to;
 		markDirty();
 	}
 
 	function removeStep(index: number) {
 		if (steps.length <= 1) return;
-		steps = renumber(steps.filter((_, i) => i !== index));
+		steps = renumberSteps(steps.filter((_, i) => i !== index));
 		if (selectedIndex >= steps.length) selectedIndex = steps.length - 1;
 		markDirty();
 	}
@@ -380,12 +349,8 @@
 		</div>
 
 		<div class="editor">
-			<!-- Left: draggable step library -->
-			<StepPalette
-				ondragtype={(type) => (paletteDragType = type)}
-				ondragend={() => (paletteDragType = null)}
-				onadd={addStep}
-			/>
+			<!-- Left: step library (click to add) -->
+			<StepPalette onadd={addStep} />
 
 			<!-- Centre: flow canvas -->
 			<div class="canvas-pane">
@@ -395,10 +360,8 @@
 				<WorkflowCanvas
 					{steps}
 					{selectedIndex}
-					paletteType={paletteDragType}
 					onselect={(i) => (selectedIndex = i)}
 					onreorder={reorderStep}
-					onaddat={addStepAt}
 					ontoggle={toggleStep}
 					ondelete={removeStep}
 				/>

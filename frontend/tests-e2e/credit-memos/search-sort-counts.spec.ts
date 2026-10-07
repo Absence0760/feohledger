@@ -169,14 +169,14 @@ test.describe('/credit-memos — search, sort and chip counts', () => {
 		await expect(amountHeader).toHaveAttribute('aria-sort', 'none');
 
 		let sent = listRequest({ sort: 'amount', order: 'asc' });
-		await amountHeader.getByRole('button').click();
+		await amountHeader.getByRole('button', { name: /^Amount/ }).click();
 		await sent;
 		await expect(amountHeader).toHaveAttribute('aria-sort', 'ascending');
 		await expect(page).toHaveURL(/sort=amount&order=asc/);
 
 		// The active column flips; the others stay unsorted.
 		sent = listRequest({ sort: 'amount', order: 'desc' });
-		await amountHeader.getByRole('button').click();
+		await amountHeader.getByRole('button', { name: /^Amount/ }).click();
 		await sent;
 		await expect(amountHeader).toHaveAttribute('aria-sort', 'descending');
 
@@ -191,10 +191,10 @@ test.describe('/credit-memos — search, sort and chip counts', () => {
 
 		// The other two sortable columns send their own keys.
 		sent = listRequest({ sort: 'issued_date', order: 'asc' });
-		await page.getByRole('columnheader', { name: /Issued/ }).getByRole('button').click();
+		await page.getByRole('columnheader', { name: /Issued/ }).getByRole('button', { name: /^Issued/ }).click();
 		await sent;
 		sent = listRequest({ sort: 'memo_number', order: 'asc' });
-		await page.getByRole('columnheader', { name: /Memo #/ }).getByRole('button').click();
+		await page.getByRole('columnheader', { name: /Memo #/ }).getByRole('button', { name: /^Memo #/ }).click();
 		await sent;
 	});
 

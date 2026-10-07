@@ -4,6 +4,7 @@
 	import Sidebar from '#lib/components/layout/Sidebar.svelte';
 	import SectionTabs from '#lib/components/layout/SectionTabs.svelte';
 	import Toast from '#lib/components/ui/Toast.svelte';
+	import UnsavedChangesDialog from '#lib/components/ui/UnsavedChangesDialog.svelte';
 	import ConsentBanner from '#lib/components/ConsentBanner.svelte';
 	import { sidebar } from '#lib/stores/sidebar.svelte.ts';
 	import { auth } from '#lib/stores/auth.svelte.ts';
@@ -179,6 +180,9 @@
 {/if}
 
 <Toast />
+
+<!-- The one unsaved-changes dialog; pages opt in with `guardUnsavedChanges`. -->
+<UnsavedChangesDialog />
 
 <!--
 	Consent banner is mounted here, outside the routed `<slot />`, so it renders

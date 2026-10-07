@@ -4,13 +4,13 @@
 	import { m } from '#lib/i18n/store.svelte.ts';
 	import HelpTip from '#lib/components/help/HelpTip.svelte';
 
+	// Click-to-add only. Steps are dragged once they're ON the canvas, where
+	// the order lives; dragging from here was a second, worse way to add one.
 	type Props = {
-		ondragtype: (type: WorkflowStepType) => void;
-		ondragend: () => void;
 		onadd: (type: WorkflowStepType) => void;
 	};
 
-	let { ondragtype, ondragend, onadd }: Props = $props();
+	let { onadd }: Props = $props();
 
 	const PALETTE: WorkflowStepType[] = [
 		'extraction',
@@ -33,14 +33,6 @@
 		email: 'M4 4h16v16H4zM4 6l8 6 8-6',
 		delay: 'M12 6v6l4 2m5-2a9 9 0 1 1-18 0 9 9 0 0 1 18 0z',
 	};
-
-	function handleDragStart(e: DragEvent, type: WorkflowStepType) {
-		if (e.dataTransfer) {
-			e.dataTransfer.effectAllowed = 'copy';
-			e.dataTransfer.setData('text/plain', `palette:${type}`);
-		}
-		ondragtype(type);
-	}
 </script>
 
 <div class="palette">
@@ -56,9 +48,6 @@
 			<button
 				type="button"
 				class="palette-item"
-				draggable="true"
-				ondragstart={(e) => handleDragStart(e, type)}
-				ondragend={ondragend}
 				onclick={() => onadd(type)}
 				data-palette-type={type}
 				title={STEP_TYPE_DESCRIPTIONS[type]}
@@ -131,10 +120,12 @@
 		align-items: flex-start;
 		gap: 10px;
 		padding: 9px 10px;
-		border: 1px dashed var(--border);
+		/* Solid border and a pointer cursor: these are buttons that add a step.
+		   (Dashed + grab was the old "drag me" affordance.) */
+		border: 1px solid var(--border);
 		border-radius: 6px;
 		background: var(--bg);
-		cursor: grab;
+		cursor: pointer;
 		width: 100%;
 		text-align: left;
 		font: inherit;
@@ -146,11 +137,11 @@
 
 	.palette-item:hover {
 		border-color: var(--accent);
-		border-style: solid;
 	}
 
-	.palette-item:active {
-		cursor: grabbing;
+	.palette-item:focus-visible {
+		outline: 2px solid var(--accent);
+		outline-offset: 2px;
 	}
 
 	.palette-icon {

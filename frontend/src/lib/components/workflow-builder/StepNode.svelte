@@ -10,8 +10,8 @@
 		/** True for the first / last node — disables the matching move button. */
 		isFirst: boolean;
 		isLast: boolean;
-		ondragstart: (e: DragEvent) => void;
-		ondragend: () => void;
+		/** Starts the canvas's pointer drag-to-reorder (see WorkflowCanvas). */
+		onpointerdown: (e: PointerEvent) => void;
 		onselect: () => void;
 		ontoggle: () => void;
 		ondelete: () => void;
@@ -26,8 +26,7 @@
 		selected,
 		isFirst,
 		isLast,
-		ondragstart,
-		ondragend,
+		onpointerdown,
 		onselect,
 		ontoggle,
 		ondelete,
@@ -56,9 +55,7 @@
 	class="node"
 	class:selected
 	class:disabled={!step.enabled}
-	draggable="true"
-	ondragstart={ondragstart}
-	ondragend={ondragend}
+	{onpointerdown}
 	onclick={onselect}
 	onkeydown={(e) => {
 		// Only the node's own Enter/Space selects it — when focus is on a child
@@ -174,6 +171,8 @@
 			border-color 0.15s,
 			box-shadow 0.15s;
 		box-sizing: border-box;
+		/* A press can become a drag: no text selection under the pointer. */
+		user-select: none;
 	}
 
 	.node:hover {
@@ -195,6 +194,8 @@
 		color: var(--text-muted);
 		cursor: grab;
 		flex-shrink: 0;
+		/* Touch drags start here; the browser must not claim the gesture to scroll. */
+		touch-action: none;
 	}
 
 	.drag-handle:active {
