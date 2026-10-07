@@ -36,7 +36,9 @@ from app.models.invoice import Invoice, InvoiceStatus
 from app.models.payment import Payment, PaymentRun
 from app.models.vendor import Vendor
 
-pytestmark = pytest.mark.asyncio
+# Multi-entity is a plan-gated feature (docs/decisions.md §258) and every test
+# here stands up a second entity, so the harness orgs run on Scale.
+pytestmark = [pytest.mark.asyncio, pytest.mark.plan("scale")]
 
 TENANT = "a"
 

@@ -16,6 +16,8 @@ from __future__ import annotations
 import uuid
 from datetime import date
 
+import pytest
+
 from app.models.procurement import GoodsReceipt, GRLineItem, POLineItem, PurchaseOrder
 
 
@@ -346,6 +348,8 @@ async def _two_entities(realdb) -> tuple[str, str]:
     return default_id, other_id
 
 
+# Creates a second entity: multi-entity is plan-gated (docs/decisions.md §258).
+@pytest.mark.plan("scale")
 async def test_get_detail_is_entity_scoped(realdb):
     """`GET /goods-receipts/{id}` resolved on the primary key alone.
 

@@ -118,6 +118,8 @@ async def test_create_requires_role(realdb):
     assert resp.status_code == 403, resp.text
 
 
+# Creates a second entity: multi-entity is plan-gated (docs/decisions.md §258).
+@pytest.mark.plan("scale")
 async def test_list_scopes_by_entity(realdb):
     async with realdb.client(key="a", role="admin") as c:
         us = await _create_entity(c, name="US Inc", slug="us")

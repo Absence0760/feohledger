@@ -19,6 +19,7 @@ from __future__ import annotations
 import uuid
 from decimal import Decimal
 
+import pytest
 from sqlalchemy import func, select
 
 from app.models.invoice import Invoice, InvoiceStatus
@@ -86,6 +87,8 @@ async def test_list_workflows_requires_auth(realdb):
 # ---------------------------------------------------------------------------
 
 
+# Creates a second entity: multi-entity is plan-gated (docs/decisions.md §258).
+@pytest.mark.plan("scale")
 async def test_list_workflows_scopes_by_entity(realdb):
     """POST /api/workflows doesn't (yet) resolve entity_id on create, so this
     inserts the two definitions directly via ORM — mirrors the entity-scoping
@@ -526,6 +529,8 @@ async def _entities(c):
     return uuid.UUID(default_id), uuid.UUID(us)
 
 
+# Creates a second entity: multi-entity is plan-gated (docs/decisions.md §258).
+@pytest.mark.plan("scale")
 async def test_activating_entity_workflow_leaves_other_entities_active(realdb):
     """Activating subsidiary A's definition must not deactivate subsidiary B's,
     nor the shared org-wide one — the peer-deactivation UPDATE was org-wide with
@@ -589,6 +594,8 @@ async def test_activating_entity_workflow_leaves_other_entities_active(realdb):
     assert rows[other_id] is True
 
 
+# Creates a second entity: multi-entity is plan-gated (docs/decisions.md §258).
+@pytest.mark.plan("scale")
 async def test_activating_entity_workflow_deactivates_only_its_own_entity_peer(realdb):
     org_id = realdb.info("a").org_id
     mk = realdb.sessionmaker("a")
@@ -664,6 +671,8 @@ async def test_deactivating_the_last_active_workflow_is_refused(realdb):
         assert created.status_code == 201, created.text
 
 
+# Creates a second entity: multi-entity is plan-gated (docs/decisions.md §258).
+@pytest.mark.plan("scale")
 async def test_deactivating_entity_workflow_allowed_when_shared_fallback_remains(realdb):
     """An entity legitimately falls back to the shared org-wide definition, so
     deactivating its own is fine as long as that fallback is active."""
@@ -711,6 +720,8 @@ async def test_deactivating_entity_workflow_allowed_when_shared_fallback_remains
     assert resp.json()["is_active"] is False
 
 
+# Creates a second entity: multi-entity is plan-gated (docs/decisions.md §258).
+@pytest.mark.plan("scale")
 async def test_deactivating_last_shared_workflow_refused_even_with_entity_actives(realdb):
     """A subsidiary with no definition of its own falls through to the shared
     bucket; emptying it strands that subsidiary on the lazy stub."""
@@ -740,6 +751,8 @@ async def test_deactivating_last_shared_workflow_refused_even_with_entity_active
     assert resp.status_code == 409, resp.text
 
 
+# Creates a second entity: multi-entity is plan-gated (docs/decisions.md §258).
+@pytest.mark.plan("scale")
 async def test_new_entity_inherits_the_org_default_instead_of_minting_a_stub(realdb):
     """An entity with no definition of its own — and no shared fallback — must
     inherit the org's existing default, not get a fresh auto-created one.

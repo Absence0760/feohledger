@@ -29,11 +29,16 @@ import uuid
 from datetime import date
 from decimal import Decimal
 
+import pytest
 from sqlalchemy import select
 
 from app.models.contract import Contract
 from app.models.procurement import Budget, PurchaseRequisition
 from app.models.vendor import Vendor
+
+# Multi-entity is a plan-gated feature (docs/decisions.md §258) and every test
+# here stands up a second entity, so the harness orgs run on Scale.
+pytestmark = pytest.mark.plan("scale")
 
 TENANT = "a"
 

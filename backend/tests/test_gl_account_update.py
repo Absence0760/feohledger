@@ -148,6 +148,8 @@ async def test_patch_rejects_a_blank_name(realdb):
     assert (await _row(realdb, TENANT, account_id)).name == "Real Name"
 
 
+# Creates a second entity: multi-entity is plan-gated (docs/decisions.md §258).
+@pytest.mark.plan("scale")
 async def test_code_and_entity_id_are_not_patchable(realdb, entities):
     """The two immutable fields. Pydantic ignores unknown keys, so the assertion
     that matters is that the values did NOT move — a silently-accepted `code`
@@ -367,6 +369,8 @@ async def test_an_unknown_parent_code_is_allowed(realdb):
 # ---------------------------------------------------------------------------
 
 
+# Creates a second entity: multi-entity is plan-gated (docs/decisions.md §258).
+@pytest.mark.plan("scale")
 async def test_an_entity_context_cannot_edit_a_shared_account(realdb, entities):
     """A shared row (`entity_id IS NULL`) is visible in every entity's chart, so
     the read rule would let subsidiary B retire an account subsidiary A depends
@@ -391,6 +395,8 @@ async def test_an_entity_context_cannot_edit_a_shared_account(realdb, entities):
     assert (await _row(realdb, TENANT, account_id)).is_active is True
 
 
+# Creates a second entity: multi-entity is plan-gated (docs/decisions.md §258).
+@pytest.mark.plan("scale")
 async def test_an_entity_context_can_edit_its_own_account(realdb, entities):
     _default_id, sub_id = entities
     account_id = await _add_account(
@@ -408,6 +414,8 @@ async def test_an_entity_context_can_edit_its_own_account(realdb, entities):
     assert resp.json()["name"] == "Sub Own Fixed"
 
 
+# Creates a second entity: multi-entity is plan-gated (docs/decisions.md §258).
+@pytest.mark.plan("scale")
 async def test_an_entity_context_cannot_edit_another_entitys_account(realdb, entities):
     default_id, sub_id = entities
     account_id = await _add_account(
@@ -424,6 +432,8 @@ async def test_an_entity_context_cannot_edit_another_entitys_account(realdb, ent
     assert resp.status_code == 403
 
 
+# Creates a second entity: multi-entity is plan-gated (docs/decisions.md §258).
+@pytest.mark.plan("scale")
 async def test_the_consolidated_view_can_edit_any_row(realdb, entities):
     """So a typo in a subsidiary's chart is fixable without switching entity."""
     _default_id, sub_id = entities

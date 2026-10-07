@@ -512,6 +512,8 @@ async def _move_run_to_entity(mk, run_id: str, invoice_id: str, entity_id: str) 
         await s.commit()
 
 
+# Creates a second entity: multi-entity is plan-gated (docs/decisions.md §258).
+@pytest.mark.plan("scale")
 async def test_consolidated_view_reaches_a_subsidiarys_run_and_files_under_it(realdb):
     """The run and file lookups are by-id READS, so they resolve within the
     selected entity — and the consolidated view reaches every subsidiary.

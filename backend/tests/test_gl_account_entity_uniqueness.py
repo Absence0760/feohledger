@@ -40,6 +40,10 @@ from sqlalchemy.exc import IntegrityError
 from app.models.gl_account import GLAccount
 from app.models.organization import Organization
 
+# Multi-entity is a plan-gated feature (docs/decisions.md §258) and every test
+# here stands up a second entity, so the harness orgs run on Scale.
+pytestmark = pytest.mark.plan("scale")
+
 TENANT = "a"
 _MIGRATION_PATH = (
     Path(__file__).resolve().parent.parent

@@ -171,6 +171,8 @@ async def test_counts_and_ids_resolve_the_same_set_as_the_list(realdb):
     assert ids.json()["total"] == 5
 
 
+# Creates a second entity: multi-entity is plan-gated (docs/decisions.md §258).
+@pytest.mark.plan("scale")
 @pytest.mark.asyncio
 async def test_vendor_id_does_not_widen_the_entity_scope_or_the_role_gate(realdb):
     """A new narrowing leg must not become a way around either existing one.

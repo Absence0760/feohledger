@@ -19,6 +19,10 @@ from sqlalchemy import select
 from app.models.invoice import Invoice, InvoiceStatus
 from app.models.vendor import Vendor
 
+# Multi-entity is a plan-gated feature (docs/decisions.md §258) and every test
+# here stands up a second entity, so the harness orgs run on Scale.
+pytestmark = pytest.mark.plan("scale")
+
 
 async def _create_entity(c, *, name: str, slug: str) -> str:
     resp = await c.post("/api/entities", json={"name": name, "slug": slug})

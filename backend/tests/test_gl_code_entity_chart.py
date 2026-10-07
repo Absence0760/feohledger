@@ -48,6 +48,10 @@ from app.services.gl_chart import (
     InvoiceChart,
 )
 
+# Multi-entity is a plan-gated feature (docs/decisions.md §258) and every test
+# here stands up a second entity, so the harness orgs run on Scale.
+pytestmark = pytest.mark.plan("scale")
+
 TENANT = "a"
 
 # The fixture chart. `A` is the tenant's default entity, `B` a subsidiary.

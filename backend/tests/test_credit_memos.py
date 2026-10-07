@@ -13,6 +13,7 @@ import uuid
 from datetime import UTC, datetime
 from decimal import Decimal
 
+import pytest
 from sqlalchemy import func, select, text, update
 
 from app.models.credit_memo import CreditMemo
@@ -873,6 +874,8 @@ async def _seed_scoped_vendor_invoice(mk, org_id, *, entity_id, number: str) -> 
         return str(v.id), str(inv.id)
 
 
+# Creates a second entity: multi-entity is plan-gated (docs/decisions.md §258).
+@pytest.mark.plan("scale")
 async def test_credit_memo_mutations_are_entity_scoped(realdb):
     """Applying a credit reduces what a payment run pays, so naming another
     subsidiary's ids must not reach across the entity boundary.
@@ -1181,6 +1184,8 @@ async def test_summary_describes_exactly_the_rows_the_list_returns(realdb):
                 assert count == listed, (term, status_key)
 
 
+# Creates a second entity: multi-entity is plan-gated (docs/decisions.md §258).
+@pytest.mark.plan("scale")
 async def test_summary_is_entity_scoped(realdb):
     mk = realdb.sessionmaker("a")
     org_id = realdb.info("a").org_id
@@ -1319,6 +1324,8 @@ async def _cross_entity_pair(realdb) -> tuple[str, str, str]:
         return b_vendor, str(inv.id), other_id
 
 
+# Creates a second entity: multi-entity is plan-gated (docs/decisions.md §258).
+@pytest.mark.plan("scale")
 async def test_create_refuses_to_credit_another_entitys_invoice(realdb):
     b_vendor, a_invoice, _ = await _cross_entity_pair(realdb)
     async with realdb.client(key="a", role="admin") as c:  # consolidated view
@@ -1338,6 +1345,8 @@ async def test_create_refuses_to_credit_another_entitys_invoice(realdb):
         assert (await s.execute(select(func.count()).select_from(CreditMemo))).scalar() == 0
 
 
+# Creates a second entity: multi-entity is plan-gated (docs/decisions.md §258).
+@pytest.mark.plan("scale")
 async def test_apply_refuses_to_credit_another_entitys_invoice(realdb):
     b_vendor, a_invoice, other_id = await _cross_entity_pair(realdb)
     async with realdb.client(key="a", role="admin") as c:
@@ -1498,6 +1507,8 @@ async def test_patch_refused_on_any_trace_of_an_application(realdb):
             assert resp.status_code == 409, memo_id
 
 
+# Creates a second entity: multi-entity is plan-gated (docs/decisions.md §258).
+@pytest.mark.plan("scale")
 async def test_patch_vendor_is_validated_like_create_and_entity_follows_it(realdb):
     mk = realdb.sessionmaker("a")
     org_id = realdb.info("a").org_id
@@ -1596,6 +1607,8 @@ async def test_patch_rbac_matches_create(realdb):
             assert (await c.patch(url, json={"reason": role})).status_code == 200, role
 
 
+# Creates a second entity: multi-entity is plan-gated (docs/decisions.md §258).
+@pytest.mark.plan("scale")
 async def test_patch_is_entity_and_tenant_scoped(realdb):
     mk = realdb.sessionmaker("a")
     org_id = realdb.info("a").org_id
@@ -1957,6 +1970,8 @@ async def test_the_create_picker_without_an_amount_offers_every_invoice_with_bal
     assert Decimal(str(offered[targets["CREDITED"]]["creditable_balance"])) == Decimal("50.00")
 
 
+# Creates a second entity: multi-entity is plan-gated (docs/decisions.md §258).
+@pytest.mark.plan("scale")
 async def test_the_apply_picker_never_crosses_an_entity(realdb):
     """Under the consolidated view nothing confines the invoice, and a vendor
     id carried by another entity's invoice is the drift case the entity guard
@@ -1975,6 +1990,8 @@ async def test_the_apply_picker_never_crosses_an_entity(realdb):
     assert set(consolidated) == set(home) and len(home) == 1
 
 
+# Creates a second entity: multi-entity is plan-gated (docs/decisions.md §258).
+@pytest.mark.plan("scale")
 async def test_eligible_invoices_are_scoped_like_the_memo_they_describe(realdb):
     """Opaque 404 for a memo outside the caller's entity or tenant, the apply's
     own 409 for one that is no longer open, 404 for a vendor out of scope."""

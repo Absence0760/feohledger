@@ -132,6 +132,8 @@ def _expected(ref) -> dict:
     }
 
 
+# Creates a second entity: multi-entity is plan-gated (docs/decisions.md §258).
+@pytest.mark.plan("scale")
 async def test_processing_time_matches_the_reference_and_scopes_by_entity(realdb):
     info = realdb.info(TENANT)
     mk = realdb.sessionmaker(TENANT)

@@ -23,6 +23,7 @@ from __future__ import annotations
 import uuid
 from decimal import Decimal
 
+import pytest
 from sqlalchemy import select
 
 from app.models.gl_account import GLAccount
@@ -40,6 +41,10 @@ from app.models.procurement import (
 )
 from app.models.vendor import Vendor
 from tests.entity_scope_probe import assert_out_of_scope_404, two_entities
+
+# Multi-entity is a plan-gated feature (docs/decisions.md §258) and every test
+# here stands up a second entity, so the harness orgs run on Scale.
+pytestmark = pytest.mark.plan("scale")
 
 TENANT = "a"
 
