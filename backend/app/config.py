@@ -305,7 +305,21 @@ class Settings(BaseSettings):
 
     # AI Extraction (platform-level key — used when customers choose "Platform" extraction)
     anthropic_api_key: str = ""  # your Anthropic API key for Claude Vision
-    extraction_model: str = "claude-sonnet-4-20250514"
+    # Sonnet, not Opus, by the operator's explicit choice on cost grounds: the
+    # metered unit is an AI-read invoice (docs/decisions.md §253) and model calls
+    # are nearly its whole marginal cost. Sonnet 5.5 is $2 / $10 per MTok against
+    # Opus 5.5's $4 / $20. The previous default, `claude-sonnet-4-20250514`, is
+    # deprecated by Anthropic. This is also the fallback model for the assistant,
+    # the audit summary and the exception-agent rationale (each has its own
+    # override). See backend/docs/ai-extraction.md § Model choice.
+    extraction_model: str = "claude-sonnet-5-5"
+    # `output_config.effort` sent with PLATFORM-mode Claude extraction. `low` is
+    # Anthropic's recommended starting point for extraction on Sonnet 5.5: it
+    # keeps adaptive thinking short, and thinking tokens bill as output. Empty →
+    # the field is omitted and the model's own default (`high`) applies. Only
+    # ever sent when set, because older models (Haiku 4.5, Sonnet 4.5) reject
+    # the field; a BYOK org sets its own via `settings.extraction.effort`.
+    extraction_effort: str = "low"
     # Operator override for the adapter PLATFORM-mode extraction runs on. Empty
     # (the code default) means "derive": a configured platform key selects
     # `claude_vision`, and a keyless NON-deployed environment falls back to the
@@ -359,7 +373,7 @@ class Settings(BaseSettings):
     # `pnpm dev` never requires a real credential. Reuses the extraction key — no
     # new secret.
     assistant_provider: str = "mock"  # "mock" (local-first default) | "claude"
-    # Empty → falls back to `extraction_model` (claude-opus-4-8 family) at
+    # Empty → falls back to `extraction_model` (claude-sonnet-5-5) at
     # request time; never hardcoded in the adapter.
     assistant_model: str = ""
     # Per-org / per-month token budget. 0 disables the cap (matching the

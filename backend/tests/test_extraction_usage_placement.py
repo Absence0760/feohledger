@@ -362,3 +362,107 @@ async def test_a_meter_row_round_trips_through_the_tenant_session(realdb):
     assert row is not None
     assert row.success is True
     assert row.organization_id == org_id
+
+
+# ---------------------------------------------------------------------------
+# Token usage rides the meter row (migration 0108_extraction_usage_tokens)
+# ---------------------------------------------------------------------------
+
+
+def _usage():
+    from app.services.extraction_adapters.base import ExtractionTokenUsage
+
+    return ExtractionTokenUsage(
+        input_tokens=2400,
+        output_tokens=850,
+        cache_read_input_tokens=0,
+        cache_creation_input_tokens=0,
+        model="claude-sonnet-5-5",
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_successful_meter_row_carries_the_providers_token_usage():
+    from app.models.usage import ExtractionUsage
+    from app.services.extraction import run_extraction
+
+    result = _successful_extraction_result()
+    result.usage = _usage()
+    db = _make_db()
+
+    with _patch_extraction_internals(result):
+        await run_extraction(db, _make_invoice())
+
+    (row,) = [c.args[0] for c in db.add.call_args_list if isinstance(c.args[0], ExtractionUsage)]
+    assert (row.input_tokens, row.output_tokens) == (2400, 850)
+    assert (row.cache_read_input_tokens, row.cache_creation_input_tokens) == (0, 0)
+    assert row.model == "claude-sonnet-5-5"
+    # The token columns are additive: what the row COUNTS as is unchanged.
+    assert row.success is True
+
+
+@pytest.mark.asyncio
+async def test_a_failed_read_the_provider_still_billed_carries_its_tokens():
+    """An unparseable or refused read cost tokens; the failure row must say so."""
+    from app.models.usage import ExtractionUsage
+    from app.services.extraction import run_extraction
+
+    invoice = _make_invoice()
+    re_fetched = _make_invoice()
+    re_fetched.id = invoice.id
+    re_fetched.organization_id = invoice.organization_id
+    db = _make_db(re_fetch_invoice=re_fetched)
+
+    failed = _failing_extraction_result()
+    failed.usage = _usage()
+    with _patch_extraction_internals(failed):
+        await run_extraction(db, invoice)
+
+    (row,) = [c.args[0] for c in db.add.call_args_list if isinstance(c.args[0], ExtractionUsage)]
+    assert row.success is False
+    assert row.output_tokens == 850
+    assert row.model == "claude-sonnet-5-5"
+
+
+@pytest.mark.asyncio
+async def test_an_adapter_with_no_usage_report_leaves_the_token_columns_empty():
+    from app.models.usage import ExtractionUsage
+    from app.services.extraction import run_extraction
+
+    db = _make_db()
+    with _patch_extraction_internals(_successful_extraction_result()):
+        await run_extraction(db, _make_invoice())
+
+    (row,) = [c.args[0] for c in db.add.call_args_list if isinstance(c.args[0], ExtractionUsage)]
+    assert row.input_tokens is None and row.output_tokens is None and row.model is None
+
+
+@pytest.mark.asyncio
+async def test_token_columns_round_trip_through_the_tenant_session(realdb):
+    """The 0108 columns exist on the tenant table and persist what is written."""
+    from datetime import UTC, datetime
+
+    from sqlalchemy import select
+
+    from app.models.usage import ExtractionUsage
+
+    invoice_id = uuid.uuid4()
+    async with realdb.sessionmaker("a")() as s:
+        s.add(
+            ExtractionUsage(
+                invoice_id=invoice_id,
+                provider="claude_vision",
+                program_type="platform",
+                period=datetime.now(UTC).strftime("%Y-%m"),
+                success=True,
+                organization_id=realdb.info("a").org_id,
+                **_usage().as_columns(),
+            )
+        )
+        await s.commit()
+
+    async with realdb.sessionmaker("a")() as s:
+        row = await s.scalar(
+            select(ExtractionUsage).where(ExtractionUsage.invoice_id == invoice_id)
+        )
+    assert (row.input_tokens, row.output_tokens, row.model) == (2400, 850, "claude-sonnet-5-5")

@@ -149,6 +149,7 @@ def _resolve_extraction_config(org_settings: dict | None, *, announce: bool = Tr
         "platform_provider_reason": reason,
         "api_key": settings.anthropic_api_key,
         "model": settings.extraction_model,
+        "effort": settings.extraction_effort,
     }
 
 
@@ -407,6 +408,10 @@ async def run_extraction(
     # fields land on the row (see `skip_vendor_match` above).
     preserved_vendor_id = invoice.vendor_id
     preserved_vendor_name = invoice.vendor_name
+    # The provider's token usage for this attempt, once the adapter has
+    # answered. Held outside the `try` so the FAILURE meter row can carry it
+    # too: a refused or unparseable read was still billed by the provider.
+    token_usage = None
 
     try:
         config = _resolve_extraction_config(org_settings)
@@ -538,6 +543,7 @@ async def run_extraction(
             file_key=file_key,
             mime_type=extract_mime_type,
         )
+        token_usage = result.usage
 
         if not result.success:
             # Don't log result.error: adapters build it from the raw provider
@@ -832,6 +838,7 @@ async def run_extraction(
                 period=datetime.now(UTC).strftime("%Y-%m"),
                 success=True,
                 organization_id=invoice.organization_id,
+                **(token_usage.as_columns() if token_usage else {}),
             )
         )
 
@@ -950,6 +957,7 @@ async def run_extraction(
                     period=datetime.now(UTC).strftime("%Y-%m"),
                     success=False,
                     organization_id=invoice_org_id,
+                    **(token_usage.as_columns() if token_usage else {}),
                 )
             )
         except Exception:

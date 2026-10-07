@@ -9,6 +9,7 @@ from app.services.extraction_adapters.base import (
     ExtractedLineItem,
     ExtractionAdapter,
     ExtractionResult,
+    ExtractionTokenUsage,
 )
 from app.services.extraction_adapters.claude_vision import EXTRACTION_PROMPT, _parse_field
 from app.services.extraction_adapters.dispatcher import register_extraction_adapter
@@ -92,6 +93,7 @@ class OpenAIVisionAdapter(ExtractionAdapter):
                 )
 
             resp_data = resp.json()
+            usage = ExtractionTokenUsage.from_openai(resp_data, model)
             text_content = resp_data.get("choices", [{}])[0].get("message", {}).get("content", "")
 
             json_str = text_content.strip()
@@ -108,6 +110,7 @@ class OpenAIVisionAdapter(ExtractionAdapter):
                     success=False,
                     error="Failed to parse JSON from OpenAI response",
                     provider=self.provider_name,
+                    usage=usage,
                 )
 
             result = ExtractionResult(
@@ -130,6 +133,7 @@ class OpenAIVisionAdapter(ExtractionAdapter):
                 suggested_cost_center=_parse_field(data, "suggested_cost_center"),
                 raw_response=data,
                 provider=self.provider_name,
+                usage=usage,
             )
 
             for li in data.get("line_items", []):
@@ -204,6 +208,7 @@ class OpenAIVisionAdapter(ExtractionAdapter):
             )
 
         resp_data = resp.json()
+        usage = ExtractionTokenUsage.from_openai(resp_data, model)
         text_content = resp_data.get("choices", [{}])[0].get("message", {}).get("content", "")
 
         json_str = text_content.strip()
@@ -220,6 +225,7 @@ class OpenAIVisionAdapter(ExtractionAdapter):
                 success=False,
                 error="Failed to parse JSON from OpenAI response",
                 provider=self.provider_name,
+                usage=usage,
             )
 
         result = ExtractionResult(
@@ -242,6 +248,7 @@ class OpenAIVisionAdapter(ExtractionAdapter):
             suggested_cost_center=_parse_field(data, "suggested_cost_center"),
             raw_response=data,
             provider=self.provider_name,
+            usage=usage,
         )
 
         for li in data.get("line_items", []):

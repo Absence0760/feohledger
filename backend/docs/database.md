@@ -101,7 +101,7 @@ decimal comparison rather than binary drift.
 - `roles` — role definitions (admin, ap_manager, ap_clerk, cfo)
 - `user_roles` — many-to-many join table
 - `email_verifications` — pending self-service signups (token, email, slug, admin_name, expires_at, consumed_at). Created by `POST /api/signup/start`, consumed by `POST /api/signup/complete`.
-- `extraction_usage` — billing rows: invoice_id, provider, program_type, period (used for tracking platform-extraction usage)
+- `extraction_usage` — billing rows: invoice_id, provider, program_type, period (used for tracking platform-extraction usage), plus the provider's token usage — input_tokens, output_tokens, cache_read_input_tokens, cache_creation_input_tokens, model (all nullable, migration 0108; `backend/docs/ai-extraction.md` § Token tracking)
 - `card_rebates` — billing rows: virtual_card_id, amount, rate, status, period
 
 ### Tenant Tables
