@@ -1,5 +1,6 @@
 // ignore: unused_import
 import 'package:intl/intl.dart' as intl;
+
 import 'app_localizations.dart';
 
 // ignore_for_file: type=lint
@@ -2669,6 +2670,21 @@ class AppLocalizationsDe extends AppLocalizations {
 
   @override
   String get invoiceWarningPastDue => 'Die Rechnung ist überfällig';
+
+  @override
+  String invoiceWarningAiAllowanceReached(int included) {
+    String _temp0 = intl.Intl.pluralLogic(
+      included,
+      locale: localeName,
+      other: '$included KI-gelesenen Rechnungen',
+      one: '$included KI-gelesenen Rechnung',
+    );
+    return 'KI-Erfassung pausiert: Das Monatskontingent von $_temp0 ist aufgebraucht. Erfassen Sie die Angaben manuell oder wechseln Sie auf der Seite „Abrechnung“ in einen höheren Tarif.';
+  }
+
+  @override
+  String get invoiceWarningAiSpendCapReached =>
+      'KI-Erfassung pausiert: Das KI-Ausgabenlimit für diesen Monat ist erreicht. Erfassen Sie die Angaben manuell oder erhöhen Sie das Limit auf der Seite „Abrechnung“.';
 
   @override
   String get invoiceWarningUnverifiedVendor =>

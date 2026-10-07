@@ -48,6 +48,8 @@ const Map<String, Map<String, String>> invoiceWarningParamKinds = {
   'future_invoice_date': {},
   'rush_payment': {'days': 'count'},
   'past_due': {},
+  'ai_allowance_reached': {'included': 'count'},
+  'ai_spend_cap_reached': {},
   'unverified_vendor': {},
   'personal_email_domain': {'domain': 'text'},
   'new_vendor_large_amount': {
@@ -313,6 +315,14 @@ String? _localizeWarningCode(
     // Invoice is past due
     case 'past_due':
       return l.invoiceWarningPastDue;
+    // AI reading is paused: this month's {included, plural, one {# AI-read invoice is} other {# AI-read invoices are}} used. Enter the details manually, or upgrade your plan on the Billing page.
+    case 'ai_allowance_reached':
+      final included = _count(p['included']);
+      if (included == null) return null;
+      return l.invoiceWarningAiAllowanceReached(included);
+    // AI reading is paused: this month's AI spending cap is reached. Enter the details manually, or raise the cap on the Billing page.
+    case 'ai_spend_cap_reached':
+      return l.invoiceWarningAiSpendCapReached;
     // Vendor is unverified
     case 'unverified_vendor':
       return l.invoiceWarningUnverifiedVendor;

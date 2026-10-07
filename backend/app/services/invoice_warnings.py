@@ -97,6 +97,9 @@ UPSTREAM_WARNING_TYPES = frozenset(
         "extraction_self_correction",
         "gl_account_invalid",
         "duplicate_similar",
+        # `run_extraction`'s AI-reading pause (decisions §253): written before
+        # the manual-entry fallback, and nothing here could re-derive it.
+        "ai_reading_paused",
     }
 )
 

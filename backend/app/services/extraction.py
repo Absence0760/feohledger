@@ -153,6 +153,79 @@ def _resolve_extraction_config(org_settings: dict | None, *, announce: bool = Tr
     }
 
 
+#: `InvoiceWarning.type` of the AI-reading pause notice (decisions §253). Listed
+#: in `invoice_warnings.UPSTREAM_WARNING_TYPES` so a later warning refresh keeps it.
+AI_READING_PAUSED_TYPE = "ai_reading_paused"
+
+
+async def _pause_ai_reading(
+    db: AsyncSession,
+    invoice: Invoice,
+    decision,
+    *,
+    actor_id: uuid.UUID | None,
+    org_settings: dict | None,
+) -> None:
+    """Land an invoice for manual entry because AI reading is paused.
+
+    The model is NOT called. The invoice goes back to ``new`` — the draft state
+    an extraction-disabled upload is left in, inside the entry window — rather
+    than ``failed``: nothing broke, and ``failed`` leads only to re-extraction,
+    which would pause again. It carries a coded, localizable warning saying why
+    and what to do (upgrade the plan, or raise the spending cap). Everything
+    after entry — submit, approval, matching, payment — is untouched, because
+    reaching a limit must never block accounts payable (§253).
+
+    An invoice not in ``pending`` (a re-extraction the GL re-code drives on an
+    already-triaged invoice) keeps its status; only the warning is added.
+    """
+    from app.services.billing.ai_invoice_meter import PAUSE_SPEND_CAP_REACHED
+    from app.services.invoice_warnings import refresh_warnings
+
+    # Read before the commit: a session that expires on commit would make these
+    # an async lazy-load afterwards.
+    invoice_id = invoice.id
+    organization_id = invoice.organization_id
+
+    if decision.reason == PAUSE_SPEND_CAP_REACHED:
+        finding = warning("ai_spend_cap_reached", "warning")
+    else:
+        finding = warning(
+            "ai_allowance_reached", "warning", included=decision.allowance.included or 0
+        )
+    kept = [w for w in (invoice.warnings or []) if w.get("type") != AI_READING_PAUSED_TYPE]
+    invoice.warnings = [*kept, finding]
+    # The same pass an extraction-disabled upload gets, so missing-field and
+    # duplicate warnings are in place for the person keying it.
+    await refresh_warnings(db, invoice, org_settings=org_settings)
+
+    if invoice.status == InvoiceStatus.pending:
+        await transition_invoice(
+            db,
+            invoice,
+            InvoiceStatus.new,
+            actor_id=actor_id,
+            action_name="invoice.ai_reading_paused",
+            details={"reason": decision.reason, "ai_reads_used": decision.used},
+        )
+    logger.info(
+        "[extraction] AI reading paused for invoice %s (%s); left for manual entry",
+        invoice_id,
+        decision.reason,
+    )
+    await db.commit()
+
+    # A pause can be the first time this org has hit the threshold behind it —
+    # an admin lowering the cap below this month's usage, say — so the notice
+    # check runs here too. Best-effort, after the commit.
+    try:
+        from app.services.billing.ai_usage_notices import send_due_ai_usage_notices
+
+        await send_due_ai_usage_notices(db, organization_id=organization_id)
+    except Exception as exc:  # noqa: BLE001 — never fails the pause; class only
+        logger.warning("[extraction] AI usage notice check failed: %s", exc.__class__.__name__)
+
+
 def decide_auto_approve(
     ext_cfg: dict,
     approval_cfg: dict,
@@ -459,6 +532,26 @@ async def run_extraction(
             )
             logger.info("[extraction] Structured e-invoice detected: %s", structured_format)
 
+        # AI-read allowance gate (decisions §253) — BEFORE the model is called,
+        # so a paused org never spends a read. Only a billable read (platform
+        # key + a paid provider) can be refused: BYOK, a structured e-invoice
+        # (`einvoice` above), `mock` and `ollama` pass straight through, and a
+        # re-read of an invoice already counted this month is always allowed.
+        from app.services.billing.ai_invoice_meter import check_ai_read
+
+        decision = await check_ai_read(
+            db,
+            organization_id=invoice_org_id,
+            invoice_id=invoice_id,
+            program_type=config.get("program_type"),
+            provider=config.get("provider"),
+        )
+        if not decision.allowed:
+            await _pause_ai_reading(
+                db, invoice, decision, actor_id=actor_id, org_settings=org_settings
+            )
+            return
+
         # RAG: embed the invoice text and fetch similar past extractions to
         # prime the adapter. No-op when rag_enabled=False, text layer empty,
         # or the tenant has no embeddings yet.
@@ -566,6 +659,14 @@ async def run_extraction(
 
         # Apply extracted fields to invoice
         _apply_extraction(invoice, result, amount_convention, org_settings=org_settings)
+
+        # A read that ran supersedes an earlier pause notice. `refresh_warnings`
+        # carries `ai_reading_paused` forward as an upstream type, so nothing
+        # else would ever clear it.
+        if invoice.warnings:
+            invoice.warnings = [
+                w for w in invoice.warnings if w.get("type") != AI_READING_PAUSED_TYPE
+            ] or None
 
         if skip_vendor_match:
             # Restore the bound payee's identity immediately: `_apply_extraction`
@@ -918,6 +1019,20 @@ async def run_extraction(
                 await advance_workflow(db, instance, "review", action="extracted")
 
         await db.commit()
+
+        # Billing follow-ups for a read that counted (decisions §253): report
+        # any new overage to the billing provider and send a newly reached
+        # 80% / 100% / cap notice. AFTER the commit, so the count includes this
+        # read and no lock is held across the provider round trip; best-effort
+        # (never raises), with the reconciliation sweep as the backstop.
+        from app.services.billing.ai_invoice_meter import is_billable_read
+
+        if is_billable_read(
+            program_type=program_type, provider=result.provider or config.get("provider")
+        ):
+            from app.services.billing.ai_overage import after_ai_read
+
+            await after_ai_read(db, organization_id=invoice_org_id)
 
     except Exception as exc:
         # Log the exception CLASS only, never the raw message: a vision/OCR SDK

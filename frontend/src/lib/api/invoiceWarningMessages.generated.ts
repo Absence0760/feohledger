@@ -55,6 +55,10 @@ export const INVOICE_WARNING_MESSAGE_KEYS = {
 	'rush_payment': 'invoices.warning.rushPayment',
 	// Invoice is past due
 	'past_due': 'invoices.warning.pastDue',
+	// AI reading is paused: this month's {included, plural, one {# AI-read invoice is} other {# AI-read invoices are}} used. Enter the details manually, or upgrade your plan on the Billing page.
+	'ai_allowance_reached': 'invoices.warning.aiAllowanceReached',
+	// AI reading is paused: this month's AI spending cap is reached. Enter the details manually, or raise the cap on the Billing page.
+	'ai_spend_cap_reached': 'invoices.warning.aiSpendCapReached',
 	// Vendor is unverified
 	'unverified_vendor': 'invoices.warning.unverifiedVendor',
 	// Vendor email uses personal domain: {domain}
@@ -183,6 +187,8 @@ export const INVOICE_WARNING_PARAM_KINDS = {
 	'future_invoice_date': {},
 	'rush_payment': { days: 'count' },
 	'past_due': {},
+	'ai_allowance_reached': { included: 'count' },
+	'ai_spend_cap_reached': {},
 	'unverified_vendor': {},
 	'personal_email_domain': { domain: 'text' },
 	'new_vendor_large_amount': { days: 'count', amount: 'money', currency: 'currency' },

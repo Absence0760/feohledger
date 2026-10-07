@@ -678,6 +678,17 @@ class Settings(BaseSettings):
     # sweep cancels it. Stripe's own retry schedule normally drives the status
     # via webhooks; this is the backstop when a provider webhook never arrives.
     billing_dunning_grace_days: int = 14
+    # Master switch for the AI-read-invoice OVERAGE reconciliation sweep
+    # (`services/billing/ai_overage.py`, decisions §253). OFF by default like
+    # every sweep; flip on in deployed envs alongside a live billing provider.
+    # The primary report runs right after each billable extraction commits —
+    # this is the backstop for what that best-effort leg missed (a provider
+    # outage, a killed process, lambda extraction mode), and it re-checks the
+    # 80% / 100% / spending-cap notices. Reports usage only; never charges.
+    billing_ai_overage_sweep_enabled: bool = False
+    # Hourly by default: well inside the provider's 24 h idempotency window, so
+    # an event re-sent after a lost marker write replays as the original.
+    billing_ai_overage_sweep_interval_seconds: int = 3600
 
     # SAML 2.0 SSO (Service-Provider side). Additive, separate code path from
     # OIDC; like OIDC it is gated PER-TENANT via Organization.settings.sso

@@ -13,6 +13,12 @@ Meters in this first slice:
   * ``extractions`` — count of ``extraction_usage`` rows in the period (the
     primary usage driver; ``program_type='platform'`` rows are the billable
     ones, but the count is exposed wholesale and a ``platform`` breakdown too).
+    Informational: neither is what a plan prices.
+  * ``ai_invoices`` — THE priced meter (decisions §253): distinct invoices
+    AI-read on the platform's paid model key this UTC month. Read through
+    ``ai_invoice_meter.count_ai_invoices``, the single owner of that rule
+    (``mock`` / ``ollama`` / ``einvoice`` and BYOK never count). Raw rows
+    differ from it: a re-read is one invoice, a failed read is none.
   * ``card_rebate_totals`` — rebate amounts in the period, **grouped by the
     currency they are denominated in** (informational — rebates accrue to the
     customer; surfaced so the billing statement can net them later, NOT billed
@@ -29,8 +35,9 @@ Meters in this first slice:
     that one sits beside entity-scoped outflows an operator reconciles it
     against — same table, different question.)
 
-Later slices add payment-volume meters + per-meter overage pricing using the
-``Plan.usage_components`` decimal-string config.
+The ``ai_invoices`` overage is priced from ``Plan.usage_components`` by
+``ai_invoice_meter`` and reported by ``ai_overage``, not here — this module
+stays a pure read.
 """
 
 from __future__ import annotations
@@ -44,6 +51,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.models.usage import ExtractionUsage
 from app.models.virtual_card import CardRebate, VirtualCard
+from app.services.billing.ai_invoice_meter import count_ai_invoices
+from app.services.billing.plan_catalog import METER_AI_INVOICES
 from app.services.currency_conversion import card_currency_sql
 
 
@@ -68,6 +77,10 @@ class UsageRollup:
     period: str
     extractions: int = 0
     extractions_platform: int = 0
+    #: The PRICED meter (decisions §253): distinct invoices AI-read on the
+    #: platform's paid model key. Counted by `ai_invoice_meter.count_ai_invoices`
+    #: — the one definition — so it never disagrees with the gate or the bill.
+    ai_invoices: int = 0
     #: Sorted by currency code, so the meter map's key order is stable across
     #: calls (a provider diffing meter events should not see churn from
     #: Postgres' grouping order).
@@ -90,6 +103,7 @@ class UsageRollup:
         meters = {
             "extractions": str(self.extractions),
             "extractions_platform": str(self.extractions_platform),
+            METER_AI_INVOICES: str(self.ai_invoices),
         }
         for total in self.card_rebate_totals:
             meters[f"card_rebate_total.{total.currency}"] = str(total.amount)
@@ -164,4 +178,5 @@ async def rollup_usage(
         ),
         extractions=int(extractions_total or 0),
         extractions_platform=int(extractions_platform or 0),
+        ai_invoices=await count_ai_invoices(db, organization_id=organization_id, period=period),
     )

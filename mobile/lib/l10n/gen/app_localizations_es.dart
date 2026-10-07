@@ -1,5 +1,6 @@
 // ignore: unused_import
 import 'package:intl/intl.dart' as intl;
+
 import 'app_localizations.dart';
 
 // ignore_for_file: type=lint
@@ -2668,6 +2669,21 @@ class AppLocalizationsEs extends AppLocalizations {
 
   @override
   String get invoiceWarningPastDue => 'La factura está vencida';
+
+  @override
+  String invoiceWarningAiAllowanceReached(int included) {
+    String _temp0 = intl.Intl.pluralLogic(
+      included,
+      locale: localeName,
+      other: '$included facturas leídas por IA',
+      one: '$included factura leída por IA',
+    );
+    return 'Lectura con IA en pausa: se ha agotado el cupo mensual de $_temp0. Introduzca los datos manualmente o mejore su plan en la página Facturación.';
+  }
+
+  @override
+  String get invoiceWarningAiSpendCapReached =>
+      'Lectura con IA en pausa: se ha alcanzado el límite de gasto en IA de este mes. Introduzca los datos manualmente o aumente el límite en la página Facturación.';
 
   @override
   String get invoiceWarningUnverifiedVendor =>
