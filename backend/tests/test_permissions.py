@@ -29,6 +29,7 @@ from app.api.permissions import (
     ALL_PERMISSIONS,
     PERM_INVOICE_APPROVE,
     PERM_PAYMENT_EXECUTE,
+    PERM_PAYMENT_RECORD_EXTERNAL,
     PERM_PAYMENT_RUN_APPROVE,
     PERM_PAYMENT_VOID,
     PERM_USER_MANAGE,
@@ -60,12 +61,15 @@ def test_admin_has_every_permission():
 
 def test_ap_manager_default_matches_prior_role_matrix():
     """ap_manager held: invoice approve, run create+execute, vendor bank-change
-    approve, vendor block, vendor manage — but NOT payment void (admin/cfo only)."""
+    approve, vendor block, vendor manage — but NOT payment void (admin/cfo only).
+    `payment.record_external` (issue #517) has no prior route; it goes to the
+    same holders as execute."""
     assert ROLE_DEFAULT_PERMISSIONS[ROLE_AP_MANAGER] == frozenset(
         {
             PERM_INVOICE_APPROVE,
             PERM_PAYMENT_RUN_APPROVE,
             PERM_PAYMENT_EXECUTE,
+            PERM_PAYMENT_RECORD_EXTERNAL,
             PERM_VENDOR_BANK_CHANGE_APPROVE,
             PERM_VENDOR_BLOCK,
             PERM_VENDOR_MANAGE,
@@ -84,6 +88,7 @@ def test_cfo_default_matches_prior_role_matrix():
             PERM_PAYMENT_RUN_APPROVE,
             PERM_PAYMENT_EXECUTE,
             PERM_PAYMENT_VOID,
+            PERM_PAYMENT_RECORD_EXTERNAL,
         }
     )
     assert PERM_VENDOR_BANK_CHANGE_APPROVE not in ROLE_DEFAULT_PERMISSIONS[ROLE_CFO]

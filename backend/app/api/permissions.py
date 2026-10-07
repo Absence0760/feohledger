@@ -44,6 +44,12 @@ PERM_INVOICE_APPROVE = "invoice.approve"
 PERM_PAYMENT_EXECUTE = "payment.execute"  # execute a draft payment run (sends money)
 PERM_PAYMENT_VOID = "payment.void"  # reverse / void a payment
 PERM_PAYMENT_RUN_APPROVE = "payment_run.approve"  # approve a payment run before execution
+# Record a payment the customer made OUTSIDE FeohLedger (cheque, bank portal, a
+# bank file it uploaded itself) — the no-rail pilot's path to `paid`
+# (`services/external_payment.py`, decisions §251). Its own permission rather
+# than `payment.execute`: recording moves no money, so an org that keeps
+# sending payments with a few people can still let others book what they paid.
+PERM_PAYMENT_RECORD_EXTERNAL = "payment.record_external"
 
 # Vendor master-data control — the BEC / bank-redirect fraud surface.
 PERM_VENDOR_BANK_CHANGE_APPROVE = "vendor.bank_change.approve"  # approve a staged bank/tax change
@@ -61,6 +67,7 @@ ALL_PERMISSIONS: tuple[str, ...] = (
     PERM_PAYMENT_RUN_APPROVE,
     PERM_PAYMENT_EXECUTE,
     PERM_PAYMENT_VOID,
+    PERM_PAYMENT_RECORD_EXTERNAL,
     PERM_VENDOR_BANK_CHANGE_APPROVE,
     PERM_VENDOR_BLOCK,
     PERM_VENDOR_MANAGE,
@@ -76,6 +83,7 @@ PERMISSION_LABELS: dict[str, str] = {
     PERM_PAYMENT_RUN_APPROVE: "Approve payment runs",
     PERM_PAYMENT_EXECUTE: "Execute payment runs (move money)",
     PERM_PAYMENT_VOID: "Void / reverse payments",
+    PERM_PAYMENT_RECORD_EXTERNAL: "Record payments made outside FeohLedger",
     PERM_VENDOR_BANK_CHANGE_APPROVE: "Approve vendor bank / tax changes",
     PERM_VENDOR_BLOCK: "Block / unblock vendor payments",
     PERM_VENDOR_MANAGE: "Manage vendors",
@@ -105,6 +113,10 @@ PERMISSION_LABELS: dict[str, str] = {
 #   vendor manage (create/edit/verify) require_roles(ADMIN, AP_MANAGER)
 #   user manage                        require_roles(ADMIN)
 #   invoice approve                    require_roles(ADMIN, AP_MANAGER, CFO)  (review path)
+#   payment record-outside             NEW (no prior route) — granted to the
+#     same set as payment execute: the people who already close an invoice
+#     out as paid. Its supporting reads (the payments list / queue / runs) OR
+#     it in beside execute/void, the way they already OR the two of those.
 #
 # ap_clerk holds NONE of the sensitive permissions — exactly as today (a clerk
 # can upload + enter data but cannot approve or pay).
@@ -129,6 +141,7 @@ ROLE_DEFAULT_PERMISSIONS: dict[str, frozenset[str]] = {
             PERM_INVOICE_APPROVE,
             PERM_PAYMENT_RUN_APPROVE,
             PERM_PAYMENT_EXECUTE,
+            PERM_PAYMENT_RECORD_EXTERNAL,
             PERM_VENDOR_BANK_CHANGE_APPROVE,
             PERM_VENDOR_BLOCK,
             PERM_VENDOR_MANAGE,
@@ -140,6 +153,7 @@ ROLE_DEFAULT_PERMISSIONS: dict[str, frozenset[str]] = {
             PERM_PAYMENT_RUN_APPROVE,
             PERM_PAYMENT_EXECUTE,
             PERM_PAYMENT_VOID,
+            PERM_PAYMENT_RECORD_EXTERNAL,
         }
     ),
     ROLE_AP_CLERK: frozenset(),  # clerk holds no sensitive permission

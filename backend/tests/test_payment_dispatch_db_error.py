@@ -297,14 +297,21 @@ async def test_a_db_error_before_the_processor_call_is_recorded_without_a_send(r
     """Same recovery when the abort lands before any order exists — the run
     still completes, nothing is sent, and the row is named for what happened."""
     calls = _count_adapter_calls(monkeypatch)
-    original = payments_api.blocking_exception_types
+    # The pre-adapter checks live in `payment_runs.dispatch_preflight` (shared
+    # with the NACHA export and the run-level paid-outside record), so the
+    # injected failure goes on the name that function resolves.
+    from app.services import payment_runs
+
+    original = payment_runs.blocking_exception_types
 
     async def failing(db, invoice_ids):
         await db.execute(text("SELECT 1/0"))
         return await original(db, invoice_ids)
 
-    monkeypatch.setattr(payments_api, "blocking_exception_types", failing)
+    # Booked first: run creation resolves the same name, and the failure is
+    # meant for the dispatch pass only.
     invoice_id, run_id = await _book_run(realdb, number="DBERR-PRE")
+    monkeypatch.setattr(payment_runs, "blocking_exception_types", failing)
 
     async with realdb.client(key="a", role="ap_manager") as c:
         resp = await c.post(f"/api/payments/runs/{run_id}/execute")
