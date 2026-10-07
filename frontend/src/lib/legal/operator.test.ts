@@ -93,7 +93,7 @@ describe('operator facts', () => {
 	});
 
 	test('no registered entity and no published postal address are decided, not pending', () => {
-		// A sole proprietor (decisions §251) has no company to name and may
+		// A sole proprietor (decisions §252) has no company to name and may
 		// publish email as its only contact. Both are real answers the pages
 		// state outright; reading them as pending would keep "[… to be
 		// confirmed]" on every page for a question that is closed.

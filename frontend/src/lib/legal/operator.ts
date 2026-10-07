@@ -48,7 +48,7 @@ export type DpoStatus = LegalRepresentative | false | null;
  * - a string — the registered company the Service is operated through;
  * - `false`  — decided: there is no separate registered entity, and the
  *              individual in `controllerDescription` is the party to every
- *              agreement (sole proprietor — `docs/decisions.md` §251);
+ *              agreement (sole proprietor — `docs/decisions.md` §252);
  * - `null`   — not yet decided. Renders as pending.
  */
 export type LegalEntityStatus = string | false | null;
@@ -147,7 +147,7 @@ export const LAST_UPDATED = '2026-10-07';
  * The live operator facts.
  *
  * Pending entries are deliberate, not oversights — see the module docstring.
- * The operator trades as a sole proprietor (`docs/decisions.md` §251), so there
+ * The operator trades as a sole proprietor (`docs/decisions.md` §252), so there
  * is deliberately no registered entity, and contact is by email rather than a
  * published postal address. Both are decided values (`false`), not gaps.
  */
