@@ -344,6 +344,13 @@ def _resolve_summary_config(org_settings: dict | None) -> dict:
     model = settings.audit_summary_model or settings.extraction_model
 
     if program_type == "byok":
+        # Only a `claude_vision` org's key is an Anthropic key. Any other BYOK
+        # provider's secret must never be posted to api.anthropic.com, and the
+        # platform key is no fallback (it would engage Anthropic for an org that
+        # chose another provider) — the template path, as in
+        # `llm_fraud_detection.resolve_anomaly_llm_config`.
+        if extraction.get("provider") != "claude_vision":
+            return {"api_key": "", "model": ""}
         return {
             "api_key": extraction.get("api_key", ""),
             "model": extraction.get("model") or model,

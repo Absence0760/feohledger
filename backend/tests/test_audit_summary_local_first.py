@@ -24,6 +24,8 @@ sub-processor (`/legal/sub-processors`), not a performance setting.
 
 from __future__ import annotations
 
+import pytest
+
 from app.config import Settings
 from app.services import audit_summary
 
@@ -74,10 +76,31 @@ def test_enabled_still_resolves_a_byok_org_key(monkeypatch):
     monkeypatch.setattr(audit_summary.settings, "audit_summary_enabled", True)
     monkeypatch.setattr(audit_summary.settings, "extraction_model", "claude-opus-5")
     org_settings = {
-        "extraction": {"program_type": "byok", "api_key": "sk-ant-org", "model": "claude-haiku-4-5"}
+        "extraction": {
+            "program_type": "byok",
+            "provider": "claude_vision",
+            "api_key": "sk-ant-org",
+            "model": "claude-haiku-4-5",
+        }
     }
 
     config = audit_summary._resolve_summary_config(org_settings)
 
     assert config["api_key"] == "sk-ant-org"
     assert config["model"] == "claude-haiku-4-5"
+
+
+@pytest.mark.parametrize("provider", ["openai_vision", None])
+def test_a_byok_key_for_another_provider_never_goes_to_anthropic(monkeypatch, provider):
+    """Only a `claude_vision` org holds an Anthropic key. An OpenAI (or
+    unspecified) BYOK secret used to be posted to api.anthropic.com as
+    `x-api-key`; the platform key is no fallback either."""
+    monkeypatch.setattr(audit_summary.settings, "audit_summary_enabled", True)
+    monkeypatch.setattr(audit_summary.settings, "anthropic_api_key", "sk-ant-platform")
+    org_settings = {
+        "extraction": {"program_type": "byok", "provider": provider, "api_key": "sk-openai-org"}
+    }
+
+    config = audit_summary._resolve_summary_config(org_settings)
+
+    assert config["api_key"] == ""

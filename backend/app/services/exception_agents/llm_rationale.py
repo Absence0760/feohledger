@@ -41,6 +41,11 @@ def _resolve_config(org_settings: dict | None) -> dict:
 
     extraction = (org_settings or {}).get("extraction", {})
     if extraction.get("program_type") == "byok":
+        # Only a `claude_vision` org's key is an Anthropic key; another
+        # provider's secret must never reach api.anthropic.com, and the platform
+        # key is no fallback (`llm_fraud_detection.resolve_anomaly_llm_config`).
+        if extraction.get("provider") != "claude_vision":
+            return {"api_key": "", "model": ""}
         return {
             "api_key": extraction.get("api_key", ""),
             "model": extraction.get("model") or settings.extraction_model,

@@ -25,6 +25,8 @@ different outcome.
 
 from __future__ import annotations
 
+import pytest
+
 from app.config import Settings
 from app.services.exception_agents import llm_rationale
 
@@ -70,10 +72,31 @@ def test_enabled_still_resolves_a_byok_org_key(monkeypatch):
     monkeypatch.setattr(llm_rationale.settings, "exception_agent_rationale_enabled", True)
     monkeypatch.setattr(llm_rationale.settings, "extraction_model", "claude-opus-5")
     org_settings = {
-        "extraction": {"program_type": "byok", "api_key": "sk-ant-org", "model": "claude-haiku-4-5"}
+        "extraction": {
+            "program_type": "byok",
+            "provider": "claude_vision",
+            "api_key": "sk-ant-org",
+            "model": "claude-haiku-4-5",
+        }
     }
 
     config = llm_rationale._resolve_config(org_settings)
 
     assert config["api_key"] == "sk-ant-org"
     assert config["model"] == "claude-haiku-4-5"
+
+
+@pytest.mark.parametrize("provider", ["openai_vision", None])
+def test_a_byok_key_for_another_provider_never_goes_to_anthropic(monkeypatch, provider):
+    """Only a `claude_vision` org holds an Anthropic key. An OpenAI (or
+    unspecified) BYOK secret used to be posted to api.anthropic.com as
+    `x-api-key`; the platform key is no fallback either."""
+    monkeypatch.setattr(llm_rationale.settings, "exception_agent_rationale_enabled", True)
+    monkeypatch.setattr(llm_rationale.settings, "anthropic_api_key", "sk-ant-platform")
+    org_settings = {
+        "extraction": {"program_type": "byok", "provider": provider, "api_key": "sk-openai-org"}
+    }
+
+    config = llm_rationale._resolve_config(org_settings)
+
+    assert config["api_key"] == ""

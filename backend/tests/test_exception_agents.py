@@ -25,6 +25,8 @@ import uuid
 from decimal import Decimal
 from unittest.mock import MagicMock
 
+import pytest
+
 from app.models.agent_decision import AgentDecision
 from app.models.exception import Exception as APException
 from app.models.invoice import Invoice, InvoiceStatus
@@ -138,7 +140,14 @@ async def test_build_rationale_request_leaves_room_for_thinking(monkeypatch):
         return resp
 
     out = await build_rationale(
-        {"extraction": {"program_type": "byok", "api_key": "k", "model": "claude-sonnet-5-5"}},
+        {
+            "extraction": {
+                "program_type": "byok",
+                "provider": "claude_vision",
+                "api_key": "k",
+                "model": "claude-sonnet-5-5",
+            }
+        },
         template="draft",
         facts={},
         http_post=_post,
@@ -635,6 +644,8 @@ async def _seed_agent_decision(
         return decision.id
 
 
+# Creates a second entity: multi-entity is plan-gated (docs/decisions.md §258).
+@pytest.mark.plan("scale")
 async def test_agent_decisions_list_scopes_by_entity(realdb):
     async with realdb.client(key="a", role="admin") as c:
         r = await c.post("/api/entities", json={"name": "US Inc", "slug": "us"})
@@ -671,6 +682,8 @@ async def test_agent_decisions_list_scopes_by_entity(realdb):
         assert allv.json()["total"] == 3
 
 
+# Creates a second entity: multi-entity is plan-gated (docs/decisions.md §258).
+@pytest.mark.plan("scale")
 async def test_agent_stats_scopes_by_entity(realdb):
     async with realdb.client(key="a", role="admin") as c:
         r = await c.post("/api/entities", json={"name": "US Inc", "slug": "us"})
