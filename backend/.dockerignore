@@ -19,7 +19,8 @@
 # Everything the running container needs stays: app/, alembic/,
 # alembic.ini, main.py, pyproject.toml, requirements.lock, and scripts/
 # (deploy/deploy.sh runs migrate_all_tenants.py and deploy/add-tenant.sh
-# runs create_tenant.py inside this image).
+# runs create_tenant.py inside this image), plus certs/ — the RDS CA bundle
+# the Dockerfile's PGSSLROOTCERT names for database TLS.
 
 # --- secrets: never in a layer ---
 .env
