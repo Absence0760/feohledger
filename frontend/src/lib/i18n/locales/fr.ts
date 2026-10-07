@@ -99,6 +99,52 @@ export const messages = {
 
 	// Cookie / consent banner (lib/components/ConsentBanner.svelte) — see en.ts.
 
+	// Public pricing page (lib/components/marketing/Pricing.svelte). Every figure
+	// it shows comes from the generated plan catalogue (lib/marketing/
+	// plans.generated.ts) through {placeholders}; these strings carry no figure
+	// of their own, which lib/marketing/pricing.test.ts enforces (decisions §253).
+	'marketing.pricing.eyebrow': 'Tarifs',
+	'marketing.pricing.heading': 'Des offres simples. Sans appel commercial.',
+	'marketing.pricing.lede': 'Chaque offre inclut un nombre illimité d’utilisateurs et tout le circuit d’approbation, de rapprochement et de paiement. Vous payez le nombre de factures que notre IA lit pour vous, pas des sièges.',
+	'marketing.pricing.perMonth': 'par espace de travail et par mois',
+	'marketing.pricing.unlimitedUsers': 'Utilisateurs illimités',
+	'marketing.pricing.included': '{count} {n, plural, one {facture lue} other {factures lues}} par l’IA par mois',
+	'marketing.pricing.pastLimit.pause': 'Au-delà, la lecture par l’IA est suspendue. Tout le reste continue de fonctionner.',
+	'marketing.pricing.pastLimit.overage': 'Puis {price} par facture supplémentaire lue par l’IA.',
+	'marketing.pricing.tagline.free': 'Pour essayer et pour un faible volume de factures.',
+	'marketing.pricing.tagline.growth': 'Pour les équipes qui connectent leur ERP et leur fournisseur d’identité.',
+	'marketing.pricing.tagline.scale': 'Pour les équipes financières qui gèrent plusieurs entités.',
+	'marketing.pricing.tagline.enterprise': 'Pour un volume et des conditions contractuelles négociés.',
+	'marketing.pricing.coreHeading': 'L’essentiel de la comptabilité fournisseurs :',
+	'marketing.pricing.core.capture': 'Saisie des factures par téléversement, e-mail et facture électronique',
+	'marketing.pricing.core.approvals': 'Circuits d’approbation avec séparation des tâches',
+	'marketing.pricing.core.matching': 'Rapprochement avec les bons de commande et file d’exceptions',
+	'marketing.pricing.core.payments': 'Lots de paiement et piste d’audit complète',
+	'marketing.pricing.buildsOn': 'Tout ce que contient {plan}, plus :',
+	'marketing.pricing.feature.publicApi': 'API publique et webhooks',
+	'marketing.pricing.feature.erpIntegrations': 'Intégrations ERP (NetSuite, Dynamics 365, Merge.dev)',
+	'marketing.pricing.feature.sso': 'Authentification unique (SAML et OIDC)',
+	'marketing.pricing.feature.scim': 'Provisionnement des utilisateurs par SCIM',
+	'marketing.pricing.feature.ssoEnforcement': 'Imposer l’authentification unique à tous les utilisateurs',
+	'marketing.pricing.feature.multiEntity': 'Plusieurs entités juridiques',
+	'marketing.pricing.feature.auditSiemExport': 'Export du journal d’audit vers votre SIEM',
+	'marketing.pricing.enterprise.name': 'Entreprise',
+	'marketing.pricing.enterprise.price': 'Sur mesure',
+	'marketing.pricing.enterprise.unit': 'contrat négocié',
+	'marketing.pricing.enterprise.allowance': 'Un volume de factures lues par l’IA adapté à votre activité',
+	'marketing.pricing.enterprise.terms': 'Tarifs et conditions contractuelles négociés',
+	'marketing.pricing.enterprise.security': 'Accompagnement pour votre revue de sécurité',
+	'marketing.pricing.cta.free': 'Commencer gratuitement',
+	'marketing.pricing.cta.upgrade': 'Commencer gratuitement, passer à {plan}',
+	'marketing.pricing.cta.enterprise': 'Contacter l’équipe commerciale',
+	'marketing.pricing.startsOnFree': 'Chaque espace de travail démarre avec {plan}. Changez d’offre depuis Facturation quand vous le souhaitez.',
+	'marketing.pricing.aiRead.heading': 'Qu’est-ce qu’une facture lue par l’IA ?',
+	'marketing.pricing.aiRead.body': 'Une facture que notre IA lit avec succès pour vous à partir d’un PDF ou d’une photo, comptée une fois par mois civil, quel que soit le nombre de relectures. Les factures électroniques structurées (PEPPOL, UBL, Factur-X), les imports CSV et les factures lues avec votre propre clé de fournisseur d’IA ne comptent jamais.',
+	'marketing.pricing.more': 'Besoin de plus que ce que comprend {plan}, ou d’un contrat ? {sales}.',
+	'marketing.pricing.moreLink': 'Parlez à notre équipe commerciale',
+	'marketing.pricing.selfHost': 'Vous préférez l’héberger vous-même ? FeohLedger est sous licence MIT : {source}.',
+	'marketing.pricing.selfHostLink': 'consultez le code source sur GitHub',
+
 	'consent.ariaLabel': 'Consentement aux cookies et à la confidentialité',
 	'consent.title': 'Vos choix de confidentialité',
 	'consent.bodyNecessary':

@@ -40,7 +40,7 @@ const SECTION_HEADINGS = [
 	'Invoice to ledger, in three steps.',
 	'Built for finance, not marketed at them.',
 	'Simple plans. No sales call required.',
-	'Spin up your workspace in 30 seconds.'
+	'Spin up your workspace in minutes.'
 ];
 
 /** The lowest computed opacity on the element or any ancestor — what the reader actually sees. */
@@ -203,8 +203,11 @@ test.describe('landing — navigation', () => {
 		await page.emulateMedia({ reducedMotion: 'reduce' });
 		await gotoLanding(page);
 
-		const target = page.getByRole('link', { name: 'View on GitHub' });
-		const after = page.getByRole('link', { name: 'Start free', exact: true });
+		// Two adjacent cards' calls to action on the pricing grid: nothing
+		// focusable sits between the Free card's link and the next card's.
+		const pricing = page.locator('#pricing');
+		const target = pricing.locator('[data-plan="free"] a.plan-cta');
+		const after = pricing.locator('.plan').nth(1).locator('a.plan-cta');
 		// Focus first (without scrolling), THEN park the page, so nothing about
 		// placing focus can move the scroll position the test depends on.
 		await after.evaluate((el) => (el as HTMLElement).focus({ preventScroll: true }));

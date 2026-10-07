@@ -98,6 +98,52 @@ export const messages = {
 
 	// Cookie / consent banner (lib/components/ConsentBanner.svelte) — see en.ts.
 
+	// Public pricing page (lib/components/marketing/Pricing.svelte). Every figure
+	// it shows comes from the generated plan catalogue (lib/marketing/
+	// plans.generated.ts) through {placeholders}; these strings carry no figure
+	// of their own, which lib/marketing/pricing.test.ts enforces (decisions §253).
+	'marketing.pricing.eyebrow': 'Preise',
+	'marketing.pricing.heading': 'Einfache Tarife. Ohne Verkaufsgespräch.',
+	'marketing.pricing.lede': 'Jeder Tarif umfasst unbegrenzt viele Benutzer und den vollständigen Freigabe-, Abgleich- und Zahlungsablauf. Sie zahlen dafür, wie viele Rechnungen unsere KI für Sie liest, nicht pro Benutzer.',
+	'marketing.pricing.perMonth': 'pro Arbeitsbereich und Monat',
+	'marketing.pricing.unlimitedUsers': 'Unbegrenzt viele Benutzer',
+	'marketing.pricing.included': '{count} {n, plural, one {KI-gelesene Rechnung} other {KI-gelesene Rechnungen}} pro Monat',
+	'marketing.pricing.pastLimit.pause': 'Darüber hinaus pausiert das Lesen per KI. Alles andere funktioniert weiter.',
+	'marketing.pricing.pastLimit.overage': 'Danach {price} je weiterer KI-gelesener Rechnung.',
+	'marketing.pricing.tagline.free': 'Zum Ausprobieren und für geringes Rechnungsvolumen.',
+	'marketing.pricing.tagline.growth': 'Für Teams, die ihr ERP und ihren Identitätsanbieter anbinden.',
+	'marketing.pricing.tagline.scale': 'Für Finanzteams mit mehreren Gesellschaften.',
+	'marketing.pricing.tagline.enterprise': 'Für verhandeltes Volumen und Vertragsbedingungen.',
+	'marketing.pricing.coreHeading': 'Kern der Kreditorenbuchhaltung:',
+	'marketing.pricing.core.capture': 'Rechnungserfassung per Upload, E-Mail und E-Rechnung',
+	'marketing.pricing.core.approvals': 'Freigabe-Workflows mit Funktionstrennung',
+	'marketing.pricing.core.matching': 'Bestellabgleich und eine Ausnahmen-Warteschlange',
+	'marketing.pricing.core.payments': 'Zahlungsläufe und ein vollständiger Prüfpfad',
+	'marketing.pricing.buildsOn': 'Alles aus {plan}, dazu:',
+	'marketing.pricing.feature.publicApi': 'Öffentliche API und Webhooks',
+	'marketing.pricing.feature.erpIntegrations': 'ERP-Integrationen (NetSuite, Dynamics 365, Merge.dev)',
+	'marketing.pricing.feature.sso': 'Single Sign-on (SAML und OIDC)',
+	'marketing.pricing.feature.scim': 'SCIM-Benutzerbereitstellung',
+	'marketing.pricing.feature.ssoEnforcement': 'Single Sign-on für alle Benutzer vorschreiben',
+	'marketing.pricing.feature.multiEntity': 'Mehrere Gesellschaften',
+	'marketing.pricing.feature.auditSiemExport': 'Export des Prüfprotokolls an Ihr SIEM',
+	'marketing.pricing.enterprise.name': 'Enterprise',
+	'marketing.pricing.enterprise.price': 'Individuell',
+	'marketing.pricing.enterprise.unit': 'verhandelter Vertrag',
+	'marketing.pricing.enterprise.allowance': 'Ein auf Ihr Volumen zugeschnittenes Kontingent an KI-gelesenen Rechnungen',
+	'marketing.pricing.enterprise.terms': 'Verhandelte Preise und Vertragsbedingungen',
+	'marketing.pricing.enterprise.security': 'Unterstützung bei Ihrer Sicherheitsprüfung',
+	'marketing.pricing.cta.free': 'Kostenlos starten',
+	'marketing.pricing.cta.upgrade': 'Kostenlos starten, auf {plan} upgraden',
+	'marketing.pricing.cta.enterprise': 'Vertrieb kontaktieren',
+	'marketing.pricing.startsOnFree': 'Jeder Arbeitsbereich beginnt mit {plan}. Upgraden Sie unter Abrechnung, wann immer Sie bereit sind.',
+	'marketing.pricing.aiRead.heading': 'Was zählt als KI-gelesene Rechnung?',
+	'marketing.pricing.aiRead.body': 'Eine Rechnung, die unsere KI erfolgreich aus einem PDF oder Foto für Sie liest. Sie zählt einmal pro Kalendermonat, egal wie oft sie erneut gelesen wird. Strukturierte E-Rechnungen (PEPPOL, UBL, Factur-X), CSV-Importe und mit Ihrem eigenen KI-Anbieterschlüssel gelesene Rechnungen zählen nie.',
+	'marketing.pricing.more': 'Sie brauchen mehr, als {plan} enthält, oder einen Vertrag? {sales}.',
+	'marketing.pricing.moreLink': 'Sprechen Sie mit dem Vertrieb',
+	'marketing.pricing.selfHost': 'Lieber selbst betreiben? FeohLedger steht unter der MIT-Lizenz: {source}.',
+	'marketing.pricing.selfHostLink': 'Quellcode auf GitHub ansehen',
+
 	'consent.ariaLabel': 'Cookie- und Datenschutzeinwilligung',
 	'consent.title': 'Ihre Datenschutz-Einstellungen',
 	'consent.bodyNecessary':

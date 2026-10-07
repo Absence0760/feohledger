@@ -100,6 +100,52 @@ export const messages = {
 
 	// Cookie / consent banner (lib/components/ConsentBanner.svelte) — see en.ts.
 
+	// Public pricing page (lib/components/marketing/Pricing.svelte). Every figure
+	// it shows comes from the generated plan catalogue (lib/marketing/
+	// plans.generated.ts) through {placeholders}; these strings carry no figure
+	// of their own, which lib/marketing/pricing.test.ts enforces (decisions §253).
+	'marketing.pricing.eyebrow': 'Preços',
+	'marketing.pricing.heading': 'Planos simples. Sem ligação de vendas.',
+	'marketing.pricing.lede': 'Todo plano tem usuários ilimitados e o fluxo completo de aprovação, conciliação e pagamento. Você paga pela quantidade de faturas que nossa IA lê por você, não por usuário.',
+	'marketing.pricing.perMonth': 'por espaço de trabalho, por mês',
+	'marketing.pricing.unlimitedUsers': 'Usuários ilimitados',
+	'marketing.pricing.included': '{count} {n, plural, one {fatura lida} other {faturas lidas}} por IA por mês',
+	'marketing.pricing.pastLimit.pause': 'Depois disso, a leitura por IA é pausada. Todo o resto continua funcionando.',
+	'marketing.pricing.pastLimit.overage': 'Depois, {price} por fatura extra lida por IA.',
+	'marketing.pricing.tagline.free': 'Para experimentar e para baixo volume de faturas.',
+	'marketing.pricing.tagline.growth': 'Para equipes que conectam seu ERP e seu provedor de identidade.',
+	'marketing.pricing.tagline.scale': 'Para equipes financeiras com várias entidades.',
+	'marketing.pricing.tagline.enterprise': 'Para volume e termos contratuais negociados.',
+	'marketing.pricing.coreHeading': 'O essencial de contas a pagar:',
+	'marketing.pricing.core.capture': 'Captura de faturas por upload, e-mail e fatura eletrônica',
+	'marketing.pricing.core.approvals': 'Fluxos de aprovação com segregação de funções',
+	'marketing.pricing.core.matching': 'Conciliação com pedidos de compra e fila de exceções',
+	'marketing.pricing.core.payments': 'Lotes de pagamento e trilha de auditoria completa',
+	'marketing.pricing.buildsOn': 'Tudo do {plan}, e mais:',
+	'marketing.pricing.feature.publicApi': 'API pública e webhooks',
+	'marketing.pricing.feature.erpIntegrations': 'Integrações com ERP (NetSuite, Dynamics 365, Merge.dev)',
+	'marketing.pricing.feature.sso': 'Login único (SAML e OIDC)',
+	'marketing.pricing.feature.scim': 'Provisionamento de usuários via SCIM',
+	'marketing.pricing.feature.ssoEnforcement': 'Exigir login único para todos os usuários',
+	'marketing.pricing.feature.multiEntity': 'Várias entidades jurídicas',
+	'marketing.pricing.feature.auditSiemExport': 'Exportação do log de auditoria para seu SIEM',
+	'marketing.pricing.enterprise.name': 'Enterprise',
+	'marketing.pricing.enterprise.price': 'Sob medida',
+	'marketing.pricing.enterprise.unit': 'contrato negociado',
+	'marketing.pricing.enterprise.allowance': 'Uma franquia de faturas lidas por IA dimensionada para o seu volume',
+	'marketing.pricing.enterprise.terms': 'Preços e termos contratuais negociados',
+	'marketing.pricing.enterprise.security': 'Apoio na sua revisão de segurança',
+	'marketing.pricing.cta.free': 'Começar grátis',
+	'marketing.pricing.cta.upgrade': 'Começar grátis, mudar para {plan}',
+	'marketing.pricing.cta.enterprise': 'Falar com vendas',
+	'marketing.pricing.startsOnFree': 'Todo espaço de trabalho começa no {plan}. Mude de plano em Faturamento quando quiser.',
+	'marketing.pricing.aiRead.heading': 'O que conta como fatura lida por IA?',
+	'marketing.pricing.aiRead.body': 'Uma fatura que nossa IA lê com sucesso para você a partir de um PDF ou foto, contada uma vez por mês civil, não importa quantas vezes seja lida de novo. Faturas eletrônicas estruturadas (PEPPOL, UBL, Factur-X), importações CSV e faturas lidas com sua própria chave de provedor de IA nunca contam.',
+	'marketing.pricing.more': 'Precisa de mais do que o {plan} inclui, ou de um contrato? {sales}.',
+	'marketing.pricing.moreLink': 'Fale com vendas',
+	'marketing.pricing.selfHost': 'Prefere hospedar você mesmo? O FeohLedger tem licença MIT: {source}.',
+	'marketing.pricing.selfHostLink': 'veja o código-fonte no GitHub',
+
 	'consent.ariaLabel': 'Consentimento de cookies e privacidade',
 	'consent.title': 'Suas escolhas de privacidade',
 	'consent.bodyNecessary':

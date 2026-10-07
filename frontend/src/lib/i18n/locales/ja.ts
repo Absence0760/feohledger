@@ -102,6 +102,52 @@ export const messages = {
 
 	// Cookie / consent banner (lib/components/ConsentBanner.svelte) — see en.ts.
 
+	// Public pricing page (lib/components/marketing/Pricing.svelte). Every figure
+	// it shows comes from the generated plan catalogue (lib/marketing/
+	// plans.generated.ts) through {placeholders}; these strings carry no figure
+	// of their own, which lib/marketing/pricing.test.ts enforces (decisions §253).
+	'marketing.pricing.eyebrow': '料金',
+	'marketing.pricing.heading': 'シンプルなプラン。営業との打ち合わせは不要です。',
+	'marketing.pricing.lede': 'すべてのプランでユーザー数は無制限、承認・照合・支払いのワークフローをすべて利用できます。お支払いはユーザー数ではなく、AI が読み取った請求書の数に応じて発生します。',
+	'marketing.pricing.perMonth': 'ワークスペースごと・月額',
+	'marketing.pricing.unlimitedUsers': 'ユーザー数無制限',
+	'marketing.pricing.included': '{n, plural, other {AI 読み取り請求書}} 月 {count} 件',
+	'marketing.pricing.pastLimit.pause': '上限を超えると AI による読み取りが一時停止します。その他の機能はすべて引き続き利用できます。',
+	'marketing.pricing.pastLimit.overage': '以降は AI 読み取り請求書ごとに {price}。',
+	'marketing.pricing.tagline.free': 'お試しや少量の請求書処理に。',
+	'marketing.pricing.tagline.growth': 'ERP や ID プロバイダーと連携するチームに。',
+	'marketing.pricing.tagline.scale': '複数の法人を運営する財務チームに。',
+	'marketing.pricing.tagline.enterprise': '取扱量と契約条件を個別に交渉したい場合に。',
+	'marketing.pricing.coreHeading': '買掛金管理の基本機能:',
+	'marketing.pricing.core.capture': 'アップロード、メール、電子請求書による請求書の取り込み',
+	'marketing.pricing.core.approvals': '職務分掌に対応した承認ワークフロー',
+	'marketing.pricing.core.matching': '発注書との照合と例外キュー',
+	'marketing.pricing.core.payments': '支払いバッチと完全な監査証跡',
+	'marketing.pricing.buildsOn': '{plan} のすべての機能に加えて:',
+	'marketing.pricing.feature.publicApi': '公開 API と Webhook',
+	'marketing.pricing.feature.erpIntegrations': 'ERP 連携 (NetSuite、Dynamics 365、Merge.dev)',
+	'marketing.pricing.feature.sso': 'シングルサインオン (SAML と OIDC)',
+	'marketing.pricing.feature.scim': 'SCIM によるユーザープロビジョニング',
+	'marketing.pricing.feature.ssoEnforcement': 'すべてのユーザーにシングルサインオンを必須化',
+	'marketing.pricing.feature.multiEntity': '複数の法人',
+	'marketing.pricing.feature.auditSiemExport': '監査ログの SIEM へのエクスポート',
+	'marketing.pricing.enterprise.name': 'Enterprise',
+	'marketing.pricing.enterprise.price': '個別見積もり',
+	'marketing.pricing.enterprise.unit': '個別契約',
+	'marketing.pricing.enterprise.allowance': '取扱量に合わせた AI 読み取り請求書の上限',
+	'marketing.pricing.enterprise.terms': '個別に交渉する料金と契約条件',
+	'marketing.pricing.enterprise.security': 'セキュリティ審査へのサポート',
+	'marketing.pricing.cta.free': '無料で始める',
+	'marketing.pricing.cta.upgrade': '無料で始めて {plan} にアップグレード',
+	'marketing.pricing.cta.enterprise': '営業に問い合わせる',
+	'marketing.pricing.startsOnFree': 'すべてのワークスペースは {plan} から始まります。準備ができたら請求画面からアップグレードできます。',
+	'marketing.pricing.aiRead.heading': 'AI 読み取り請求書とは?',
+	'marketing.pricing.aiRead.body': 'AI が PDF や写真から読み取りに成功した請求書のことです。同じ暦月内であれば何度読み直しても一度だけ数えます。構造化された電子請求書 (PEPPOL、UBL、Factur-X)、CSV インポート、お客様ご自身の AI プロバイダーキーで読み取った請求書は数えません。',
+	'marketing.pricing.more': '{plan} の内容では足りない場合や、契約をご希望の場合は {sales}。',
+	'marketing.pricing.moreLink': '営業にご相談ください',
+	'marketing.pricing.selfHost': 'ご自身で運用したい場合は? FeohLedger は MIT ライセンスです: {source}。',
+	'marketing.pricing.selfHostLink': 'GitHub でソースコードを見る',
+
 	'consent.ariaLabel': 'Cookie とプライバシーに関する同意',
 	'consent.title': 'プライバシーの選択',
 	'consent.bodyNecessary':
