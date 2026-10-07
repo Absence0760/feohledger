@@ -10177,6 +10177,25 @@ a claim nobody could act on, so `operator.ts` gained decided states instead:
 only, `location` stated), and `dataProtectionOfficer: false`. Counsel should
 confirm the email-only position when reviewing the set.
 
+The same day the operator set the remaining domestic facts: the Terms and the
+DPA are governed by the law, and disputes go to the courts, of **the
+Commonwealth of Virginia** (the SCCs keep Irish law, which Clause 17 requires
+to be an EU member state's); customer data is hosted in **AWS `us-east-1`**,
+the region `infra/` already deploys to; and `supervisoryAuthority: false`,
+because a controller with no EU establishment has no lead authority under the
+Art 56 one-stop shop — a data subject complains wherever they live or work,
+which the policy already says. That leaves only the EU and UK Art 27
+representatives pending, and they are owed only once the Service is offered to
+people there.
+
+A foreign customer does not change the governing law: the contract stays under
+Virginia law whoever signs it — that is what choosing one is for. What a
+foreign customer brings is that country's data-protection law, which applies
+by where the people are, not by what the contract says. The EU/UK machinery
+(DPA, SCCs, Art 27 representatives) is already written; any other country is
+assessed when its first customer appears, as a counsel question, not
+pre-built.
+
 What it costs. Liability is personal and unlimited. The Terms' cap binds only
 customers, not suppliers or regulators, and preserves gross negligence, wilful
 misconduct, fraud and confidentiality breach (§13.4) — and the product holds

@@ -860,12 +860,18 @@
 		If you think we have handled your personal data unlawfully, you can complain to a data
 		protection supervisory authority. You may complain in the EU Member State of your habitual
 		residence, your place of work, or the place of the alleged infringement (Article 77 GDPR); in
-		the UK the authority is the Information Commissioner's Office, at ico.org.uk. Our lead
-		supervisory authority is
-		<Fact
-			value={OPERATOR.supervisoryAuthority}
-			label="the lead supervisory authority for complaints"
-		/>. You also have a right to an effective judicial remedy (Articles 78 and 79) and to
+		the UK the authority is the Information Commissioner's Office, at ico.org.uk.
+		{#if OPERATOR.supervisoryAuthority === false}
+			We have no establishment in the EU, so no single authority leads on our processing: any
+			of those authorities can hear your complaint.
+		{:else}
+			Our lead supervisory authority is
+			<Fact
+				value={OPERATOR.supervisoryAuthority}
+				label="the lead supervisory authority for complaints"
+			/>.
+		{/if}
+		You also have a right to an effective judicial remedy (Articles 78 and 79) and to
 		compensation for damage caused by an infringement (Article 82).
 	</p>
 

@@ -83,10 +83,14 @@ export interface OperatorFacts {
 	/** Governing law + venue for the Terms, e.g. "the State of Delaware, USA". */
 	governingLaw: string | null;
 	/**
-	 * The lead supervisory authority a complaint goes to (Art 13(2)(d)). Only
-	 * meaningful once the establishment is known, hence pending with the entity.
+	 * The lead supervisory authority a complaint goes to (Art 13(2)(d)). `false`
+	 * is decided: with no establishment in the EU there is no lead authority
+	 * under the Art 56 one-stop shop, and the page says so — a data subject
+	 * complains to the authority where they live or work, which it already
+	 * explains. Naming an authority we have no establishment under would be
+	 * the fabricated fact this module exists to prevent.
 	 */
-	supervisoryAuthority: string | null;
+	supervisoryAuthority: string | false | null;
 	/** Art 27 EU representative — required of a non-EU controller serving EU residents. */
 	euRepresentative: LegalRepresentative | null;
 	/** UK GDPR Art 27 representative — the separate UK appointment. */
@@ -95,9 +99,11 @@ export interface OperatorFacts {
 	dataProtectionOfficer: DpoStatus;
 	/**
 	 * Where customer data is physically hosted, named as a region a reader can
-	 * check (e.g. "AWS eu-west-1 (Ireland)"). Pending until the workload stack
-	 * is actually deployed — `infra/` defines the security substrate only, so
-	 * naming a region today would describe infrastructure that does not run.
+	 * check (e.g. "AWS eu-west-1 (Ireland)"). Set 2026-10-07 to `us-east-1`,
+	 * the region `infra/` already deploys to (`aws_region` default) and the one
+	 * the workload stack must use. Before the pages are served publicly the
+	 * stack has to actually run there — if it ever moves, change this in the
+	 * same commit, or the pages state a region the data is not in.
 	 */
 	hostingRegion: string | null;
 }
@@ -152,12 +158,12 @@ export const OPERATOR: OperatorFacts = {
 	legalEntity: false,
 	location: 'Virginia, United States',
 	postalAddress: false,
-	governingLaw: null,
-	supervisoryAuthority: null,
+	governingLaw: 'the Commonwealth of Virginia, United States',
+	supervisoryAuthority: false,
 	euRepresentative: null,
 	ukRepresentative: null,
 	dataProtectionOfficer: false,
-	hostingRegion: null,
+	hostingRegion: 'AWS us-east-1 (Northern Virginia, United States)',
 };
 
 /**

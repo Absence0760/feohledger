@@ -97,8 +97,14 @@ describe('operator facts', () => {
 		// publish email as its only contact. Both are real answers the pages
 		// state outright; reading them as pending would keep "[… to be
 		// confirmed]" on every page for a question that is closed.
-		const soleTrader = { ...complete, legalEntity: false, postalAddress: false } as OperatorFacts;
+		const soleTrader = {
+			...complete,
+			legalEntity: false,
+			postalAddress: false,
+			supervisoryAuthority: false,
+		} as OperatorFacts;
 		expect(isPending(soleTrader, 'legalEntity')).toBe(false);
+		expect(isPending(soleTrader, 'supervisoryAuthority')).toBe(false);
 		expect(isPending(soleTrader, 'postalAddress')).toBe(false);
 		expect(operatorFactsComplete(soleTrader)).toBe(true);
 		expect(isPending({ ...complete, legalEntity: null }, 'legalEntity')).toBe(true);

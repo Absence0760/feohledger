@@ -245,10 +245,9 @@
 	<p>
 		Everything above sits in a single region. The hosting region for customer
 		data is
-		<Fact value={OPERATOR.hostingRegion} label="hosting region" />, because the
-		workload stack that will hold it is not yet deployed; the infrastructure
-		that exists today — the storage buckets, the encryption key and the DNS
-		zone — is configured in AWS <code>us-east-1</code>, in the United States.
+		<Fact value={OPERATOR.hostingRegion} label="hosting region" />, the same
+		AWS region as the rest of our infrastructure — the storage buckets, the
+		encryption key and the DNS zone.
 		See § 8 on transfers.
 	</p>
 
