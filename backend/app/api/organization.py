@@ -300,6 +300,21 @@ async def update_organization(
                     "change."
                 ),
             )
+        # `billing` is the platform's own billing of THIS tenant, not a tenant
+        # preference, and every value in it now drives a charge: the provider
+        # overage is reported to, the spending cap, and the per-period
+        # reported-overage markers that stop a unit being billed twice (decisions
+        # §255). A tenant admin must not set any of it — the shallow `update()`
+        # below would also replace the whole block and drop the markers. The cap
+        # has its own audited writer; the rest is server- or operator-owned.
+        if "billing" in body.settings:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    "billing is not a tenant setting. The spending cap is managed by "
+                    "PUT /api/billing/spending-cap; the rest is set by the platform."
+                ),
+            )
         # Custom domains have one sanctioned writer too — the audited
         # `PUT /api/organization/branding/custom-domains`, which normalizes each
         # host through the tenant resolver's own `normalize_custom_domain`, takes

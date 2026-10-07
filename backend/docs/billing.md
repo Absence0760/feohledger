@@ -244,8 +244,11 @@ The allowance comes from the live plan's `usage_components["ai_invoices"]`
   a plan row must not pause a paying customer or bill an overage nobody priced.
 
 The customer's **monthly spending cap** is
-`Organization.settings.billing.monthly_spend_cap`, an exact USD decimal string
-(no migration). It caps **overage** only; `0.00` means "never bill overage" —
+`Organization.settings.billing.monthly_spend_cap`, an exact decimal string in
+the plan's currency (no migration). Its one writer is `PUT
+/api/billing/spending-cap`: `PATCH /api/organization` refuses the whole
+`billing` key, because the provider, the cap and the reported-overage markers in
+it all decide what gets charged. It caps **overage** only; `0.00` means "never bill overage" —
 the paid tier then pauses at its allowance exactly like Free. The cap buys
 `floor(cap / overage_unit_price)` overage reads (`cap_units`) — floor, so the
 bill never passes it.
