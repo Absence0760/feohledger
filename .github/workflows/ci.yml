@@ -159,6 +159,14 @@ jobs:
       - name: Invoice-warning message catalogue is in sync with the catalogue
         run: python scripts/gen_invoice_warning_messages.py --check
 
+      # And the public pricing page: every price, AI-read allowance, overage
+      # rate and feature it shows is GENERATED from
+      # `app/services/billing/plan_catalog.py` (decisions.md §253). The page
+      # once sold a per-seat plan the billing code never modelled (issue #426);
+      # this makes a catalogue change a red check until the page says the same.
+      - name: Pricing page is in sync with the plan catalogue
+        run: python scripts/gen_pricing_catalog.py --check
+
       # The `backend-test` matrix below is partitioned by the committed
       # `backend/.test_durations`, and nothing regenerates that file on its own
       # (each shard uploads what it measured; `pnpm gen:test-durations` turns a
