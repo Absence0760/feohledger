@@ -10500,7 +10500,9 @@ upgrade resumes it untouched. Turning a feature OFF is never refused.
   `payment_erp_sync` sync-back of a payment already in flight are left alone —
   a downgrade must never strand money mid-path.
 - **Public API.** Key minting, webhook creation and configuration are gated;
-  revoking keys and switching a webhook off are not. `_emit` queues nothing
+  revoking keys, switching a webhook off and rotating its signing secret are
+  not — rotation is how a leak is remediated, and a downgraded tenant must
+  not have to delete the delivery log to do it. `_emit` queues nothing
   for an unentitled org; deliveries already queued finish.
 
 The `realdb` harness's orgs hold no subscription — which reads exactly like

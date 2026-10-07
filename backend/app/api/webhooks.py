@@ -351,10 +351,13 @@ async def rotate_subscription_secret(
     body: RotateSecretRequest,
     org: Organization = Depends(get_tenant),
     user: User = Depends(require_roles(ROLE_ADMIN)),
-    _entitled: User = Depends(require_entitlement(FEATURE_PUBLIC_API)),
     db: AsyncSession = Depends(get_control_db),
 ) -> SecretRotatedResponse:
     """Replace a subscription's signing secret, keeping its id and history.
+
+    Open on every plan, like switching a subscription off (decisions §258): a
+    rotation is incident remediation, and a downgraded tenant with a leaked
+    secret must not have to choose between the 402 and deleting the log.
 
     The secret is the customer's verification key, and anyone holding it can
     forge a signed `invoice.approved` / `payment.settled` payload into their

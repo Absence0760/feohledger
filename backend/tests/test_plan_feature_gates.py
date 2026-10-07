@@ -700,8 +700,11 @@ async def test_webhook_subscriptions_follow_the_public_api_feature(realdb, monke
             FEATURE_PUBLIC_API,
         )
         off = await c.patch(f"/api/webhooks/{sub_id}", json={"active": False})
+        # Rotating a (possibly leaked) signing secret is remediation, not use.
+        rotated = await c.post(f"/api/webhooks/{sub_id}/rotate-secret", json={})
     assert off.status_code == 200, off.text
     assert off.json()["active"] is False
+    assert rotated.status_code == 200, rotated.text
 
 
 @pytest.mark.asyncio

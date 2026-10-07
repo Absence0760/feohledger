@@ -37,7 +37,7 @@
 #     database `feohledger`, and NO query string (TLS is PGSSLMODE's job, which
 #     the app and the backup tools both read). PGSSLMODE must be verify-full
 #     (require / verify-ca warn; anything weaker is refused).
-FEOH_DATABASE_URL: "postgresql+asyncpg://feohadmin:<password>@<instance>.<id>.<region>.rds.amazonaws.com:5432/feohledger"
+FEOH_DATABASE_URL: "postgresql+asyncpg://postgres:<password>@<instance>.<id>.<region>.rds.amazonaws.com:5432/feohledger"
 PGSSLMODE: "verify-full"
 POSTGRES_PASSWORD: ""
 #
