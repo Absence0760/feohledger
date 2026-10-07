@@ -10212,3 +10212,55 @@ a business — #446 §2, decisions §251), raising money, or revenue or exposure
 that insurance no longer comfortably covers. Rejected: incorporating
 pre-emptively — it costs ~$550+/yr recurring and weeks of calendar time to
 solve problems the no-rail pilot does not have.
+
+## 253. Pricing: three tiers metered on AI-read invoices, unlimited users (2026-10-07)
+
+The operator chose the tiers after a competitor and practice review (Bill.com
+and Ramp price per user; Dext sells ~250 documents for ~$38; usage plans churn
+on bill shock; the "SSO tax" is resented and the top-tier paywall has moved to
+SCIM). Issue #426 — the pricing page selling a product the billing code did not
+model — closes with this.
+
+| | Free | Growth | Scale | Enterprise |
+|---|---|---|---|---|
+| Price | $0 | $49/mo | $199/mo | negotiated contract |
+| Users | unlimited | unlimited | unlimited | unlimited |
+| AI-read invoices included | 100/mo | 500/mo | 3,000/mo | negotiated |
+| Past the allowance | AI reading pauses | $0.10 each | $0.07 each | negotiated |
+| Features | core AP | + ERP integrations, public API + webhooks, SSO (OIDC/SAML) | + SCIM, "require SSO", multiple entities, audit-log SIEM export | — |
+
+**The metered unit is an AI-read invoice**: a distinct invoice whose extraction
+ran on the *platform's* model key and succeeded, counted per calendar month in
+UTC. BYOK extractions are the customer's own model bill and never count;
+structured e-invoices (PEPPOL, UBL/Factur-X, CSV import) use no model and never
+count; re-reading one invoice in the same month counts once. That is the unit
+because model calls are nearly the whole marginal cost (~$0.02–0.08 an invoice);
+users and storage are noise beside it, which is why users are unlimited — a
+direct contrast with per-seat competitors.
+
+**Reaching a limit never blocks accounts payable.** On Free, and on a paid tier
+whose customer-set monthly spending cap is reached, *only AI reading pauses*:
+the invoice is still created and lands for manual entry, and approval, matching
+and payment recording keep working. Hard-stopping a tool a business pays its
+suppliers through is the failure the usage-pricing literature is unanimous on.
+Paid tiers bill overage instead of stopping, with 80% and 100% notices so the
+bill is never a surprise.
+
+**Gating spelling.** Features are `plan_catalog.FEATURE_*` constants, granted by
+a truthy key in `Plan.entitlements`; allowances live in `Plan.usage_components`
+under `plan_catalog.METER_AI_INVOICES` as `{"included": int,
+"overage_unit_price": decimal-string | null}`. `null` overage means "pause at
+the limit". Enterprise is not a catalog plan: an operator configures a
+negotiated plan per customer, and the pricing page shows it as contact-sales.
+
+Migration `0107_plan_catalog_v2` rewrites `entitlements` and
+`usage_components` on the three existing catalog rows from the catalog itself,
+once — `ensure_plan_catalog` deliberately never touches an existing row, so
+without it a control plane provisioned earlier would keep the v1 grants forever.
+Prices and trial days are left alone.
+
+Rejected: per-seat pricing (punishes the AP teams the product is for, and is
+not where the cost is); a hard stop at the paid tiers' allowance (bill shock in
+reverse — an outage the customer did not choose); SSO as Scale-only (an SSO tax
+on a feature that costs little to serve); counting re-reads and failed
+extractions (charging for our own retries).

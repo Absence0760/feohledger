@@ -27,32 +27,84 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.billing import Plan, Subscription
 from app.services.billing.period import add_months
 
-# Stable machine codes referenced throughout backend/docs/billing.md (its
-# `GET /api/billing/subscription` example uses exactly this "growth" /
-# $49.00 / 14-trial-day shape). `free` is the default new tenants land on;
-# `public_api` (the only entitlement gated in the app today) is a paid-plan
-# feature, so it's withheld on `free` by design — an org upgrades via
-# `POST /api/billing/change-plan` to unlock it.
+# ---------------------------------------------------------------------------
+# Feature entitlements (decisions §253). One name per gated capability; a plan
+# grants a feature by carrying its key with a truthy value. These constants are
+# the single spelling — gates call ``require_entitlement(FEATURE_SSO)``, never a
+# string literal, so a typo cannot silently fail a gate closed.
+# ---------------------------------------------------------------------------
+FEATURE_PUBLIC_API = "public_api"  # /api/v1 + API keys + outbound webhooks
+FEATURE_ERP_INTEGRATIONS = "erp_integrations"  # live ERP adapters (mock stays open)
+FEATURE_SSO = "sso"  # OIDC + SAML sign-in
+FEATURE_SCIM = "scim"  # SCIM 2.0 user provisioning
+FEATURE_SSO_ENFORCEMENT = "sso_enforcement"  # "require SSO" for every user
+FEATURE_MULTI_ENTITY = "multi_entity"  # more than the one default entity
+FEATURE_AUDIT_SIEM_EXPORT = "audit_siem_export"  # audit-log shipping to a SIEM
+
+ALL_FEATURES: tuple[str, ...] = (
+    FEATURE_PUBLIC_API,
+    FEATURE_ERP_INTEGRATIONS,
+    FEATURE_SSO,
+    FEATURE_SCIM,
+    FEATURE_SSO_ENFORCEMENT,
+    FEATURE_MULTI_ENTITY,
+    FEATURE_AUDIT_SIEM_EXPORT,
+)
+
+# ---------------------------------------------------------------------------
+# Usage components (decisions §253). The one metered unit is an **AI-read
+# invoice**: a distinct invoice whose extraction ran on the PLATFORM's model
+# key and succeeded, in a calendar month (UTC). BYOK extractions are the
+# customer's own model bill and never count; structured e-invoices (PEPPOL,
+# UBL, CSV import) use no model and never count; re-reading the same invoice in
+# the same month counts once.
+#
+#   included            — AI-read invoices covered by the monthly price.
+#   overage_unit_price  — decimal string charged per AI-read invoice past
+#                         ``included``, or ``None`` for "no overage: AI reading
+#                         pauses at the limit" (the Free tier). Pausing never
+#                         blocks anything else — manual entry, approval and
+#                         payment recording keep working.
+# ---------------------------------------------------------------------------
+METER_AI_INVOICES = "ai_invoices"
+
+# Stable machine codes referenced throughout backend/docs/billing.md. `free` is
+# the default every new tenant lands on. Enterprise is not a catalog plan: it is
+# a negotiated contract an operator sets up per customer, so the pricing page
+# shows it as "contact sales" rather than rendering it from here.
 DEFAULT_PLAN_CATALOG: tuple[dict, ...] = (
     {
         "code": "free",
         "name": "Free",
         "monthly_price": Decimal("0.00"),
         "entitlements": {},
+        "usage_components": {
+            METER_AI_INVOICES: {"included": 100, "overage_unit_price": None},
+        },
         "trial_days": 0,
     },
     {
         "code": "growth",
         "name": "Growth",
         "monthly_price": Decimal("49.00"),
-        "entitlements": {"public_api": True},
+        "entitlements": {
+            FEATURE_PUBLIC_API: True,
+            FEATURE_ERP_INTEGRATIONS: True,
+            FEATURE_SSO: True,
+        },
+        "usage_components": {
+            METER_AI_INVOICES: {"included": 500, "overage_unit_price": "0.10"},
+        },
         "trial_days": 14,
     },
     {
         "code": "scale",
         "name": "Scale",
         "monthly_price": Decimal("199.00"),
-        "entitlements": {"public_api": True},
+        "entitlements": {feature: True for feature in ALL_FEATURES},
+        "usage_components": {
+            METER_AI_INVOICES: {"included": 3000, "overage_unit_price": "0.07"},
+        },
         "trial_days": 14,
     },
 )
@@ -79,6 +131,7 @@ async def ensure_plan_catalog(session: AsyncSession) -> dict[str, Plan]:
             monthly_price=spec["monthly_price"],
             currency="USD",
             entitlements=spec["entitlements"],
+            usage_components=spec["usage_components"],
             trial_days=spec["trial_days"],
         )
         session.add(plan)
