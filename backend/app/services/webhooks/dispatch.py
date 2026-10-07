@@ -45,6 +45,8 @@ from app.models.webhook import (
     WebhookDelivery,
     WebhookSubscription,
 )
+from app.services.billing.entitlements import get_entitlements, has_entitlement
+from app.services.billing.plan_catalog import FEATURE_PUBLIC_API
 
 logger = logging.getLogger(__name__)
 
@@ -162,6 +164,16 @@ async def _emit(
         # row to show for it. That fired on exactly the replay the dedupe exists
         # to make safe (a re-emitted occurrence).
         target_ids = [sub.id for sub in subs if event_type in (sub.event_types or [])]
+
+        # Outbound webhooks are part of the public-API feature (decisions §253).
+        # A tenant that downgraded keeps its subscriptions — re-upgrading
+        # resumes them — but nothing new is queued while the plan lacks the
+        # feature. Checked only when there is something to send, so the
+        # common no-subscription emit costs no extra query.
+        if target_ids and not has_entitlement(
+            await get_entitlements(db, organization_id), FEATURE_PUBLIC_API
+        ):
+            target_ids = []
 
         if target_ids:
             # One statement, and the dedupe is the DB's `uq_webhook_delivery_sub_event`

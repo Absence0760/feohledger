@@ -39,7 +39,10 @@ and an audit that re-derived both found the copy stale at nearly every sync
 transcription was retired rather than corrected again. Add a follow-up here; add
 a GitHub issue only when one warrants its own thread.
 
-**Last reconciled:** 2026-10-06 — the no-rail pilot (issue #517, decisions §251)
+**Last reconciled:** 2026-10-07 — enforcing the plan feature gates (decisions
+§254) opened one (c) entry — the per-tenant audit-log SIEM export the Scale plan
+lists but nothing implements — taking the file from 76 → 77. Before that,
+2026-10-06 — the no-rail pilot (issue #517, decisions §251)
 opened three (c) entries — mobile record-only parity, the balanced NACHA file and
 the ERP-reported payment date — taking the file from 72 → 75. Before that, 2026-10-06 — the round-2 issues batch (PR #514) closed
 **twelve** (c) entries and opened five, taking the file from 59 → 52: the unmasked
@@ -93,7 +96,7 @@ section carried its own `decisions.md` § reference, so nothing was lost by
 deleting it; that cross-reference is what makes the pruning safe, and writing
 one is what earns a future entry the right to be deleted.
 
-**76 open: 61 (c) · 9 (a) · 6 (b)** — re-derived from the file, never carried
+**77 open: 62 (c) · 9 (a) · 6 (b)** — re-derived from the file, never carried
 forward. The section heading is authoritative; where an entry also carries a
 `(c)`/`(a)`/`(b)` marker, the two agree.
 `grep -c '^- \[ \]' docs/followups.md`.
@@ -1209,6 +1212,27 @@ lands. Pure doc drift was corrected in the same PR. The two diagnosed defects
       that, when present, appends one debit entry for the batch total and switches
       the batch to service class 200, with builder tests on the control totals.
       **Trigger:** a pilot customer's bank rejects or asks for a balanced file.
+
+### Surfaced by enforcing the plan feature gates (2026-10-07, decisions §254)
+
+- [ ] **(c) The Scale plan sells an audit-log SIEM export that does not exist
+      per tenant.** `plan_catalog.FEATURE_AUDIT_SIEM_EXPORT` is granted by
+      `scale` and listed on the pricing page, but there is nothing to gate: the
+      only audit shipping is the platform shipper
+      (`services/audit_log_shipper.py`), configured by the OPERATOR through
+      `FEOH_AUDIT_SHIPPING_PROVIDERS` and shipping every tenant's trail to the
+      operator's WORM sinks. A tenant cannot point its own trail at its own SIEM.
+      The SOX auditor export (`GET /api/audit/export`) is a different, ungated
+      surface and stays that way. **Durable fix:** a per-tenant destination in
+      `Organization.settings` (one audited writer, like `PUT
+      /api/organization/sso`) — e.g. an HTTPS/HEC or syslog-over-TLS target with
+      a write-only token, SSRF-guarded like webhook targets — shipped by a
+      per-tenant leg of the shipper that reuses its poison-row isolation, with
+      `require_entitlement(FEATURE_AUDIT_SIEM_EXPORT)` on the config writer and
+      the leg skipped for an org whose plan lacks it. **Trigger:** the first
+      Scale customer who asks for it, or before the pricing page next lists it
+      — whichever is first; until then the listing should be qualified or
+      dropped (owned by the pricing-page work, issue #426).
 
 ## (a) Blocked on external credentials, accounts, or hardware
 
