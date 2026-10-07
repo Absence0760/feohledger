@@ -105,7 +105,7 @@ section carried its own `decisions.md` § reference, so nothing was lost by
 deleting it; that cross-reference is what makes the pruning safe, and writing
 one is what earns a future entry the right to be deleted.
 
-**81 open: 66 (c) · 9 (a) · 6 (b)** — re-derived from the file, never carried
+**82 open: 67 (c) · 9 (a) · 6 (b)** — re-derived from the file, never carried
 forward. The section heading is authoritative; where an entry also carries a
 `(c)`/`(a)`/`(b)` marker, the two agree.
 `grep -c '^- \[ \]' docs/followups.md`.
@@ -1288,6 +1288,19 @@ lands. Pure doc drift was corrected in the same PR. The two diagnosed defects
       Scale customer who asks for it, or before the pricing page next lists it
       — whichever is first; until then the listing should be qualified or
       dropped (owned by the pricing-page work, issue #426).
+- [ ] **(c) A SCIM deactivation writes no audit row.** `api/scim.py`'s PUT
+      (`active: false`), PATCH (`active` replace / remove) and DELETE all set
+      `User.is_active = False` with no `user.deactivated`-style audit row, where
+      the admin path (`/api/admin/users`) audits the same change. Access is
+      still cut at once — `get_current_user` refuses an inactive user, so the
+      leaver's live JWTs stop working — so this is a SOX trail gap, not an
+      access gap. Pre-existing; the plan-gate review noticed it because §258
+      keeps deprovisioning open on every plan. **Durable fix:** one helper in
+      `api/scim.py` that every deactivating branch calls, writing a PII-free
+      audit row (actor `None`, `details.source: "scim"`) through
+      `dispatch_auth_audit`, plus `revoke_user_sessions` for parity with the
+      admin path; a test per branch. **Trigger:** the next change to
+      `api/scim.py`, or before the first SCIM-provisioned customer.
 
 ## (a) Blocked on external credentials, accounts, or hardware
 
