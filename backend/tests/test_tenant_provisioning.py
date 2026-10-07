@@ -231,7 +231,10 @@ async def test_create_postgres_database_url_parse_defaults_port_5432():
         c.close = AsyncMock()
         return c
 
-    # No explicit port in the URL -> default 5432.
+    # No explicit port in the URL -> no port argument, exactly as the engine's
+    # dialect passes none, so asyncpg applies the same default to both
+    # connections (PGPORT if set, else 5432) rather than this one hardcoding
+    # 5432 while the engine honours PGPORT.
     test_url = "postgresql+asyncpg://u:p@localhost/feohledger"
     with patch.object(settings, "database_url", test_url):
         with patch(
@@ -241,7 +244,13 @@ async def test_create_postgres_database_url_parse_defaults_port_5432():
             await _create_postgres_database("feoh_defaultport")
 
     assert captured["host"] == "localhost"
-    assert captured["port"] == 5432
+    assert "port" not in captured
+    from sqlalchemy.engine import make_url
+
+    from app.database import control_engine
+
+    _, engine_kwargs = control_engine.dialect.create_connect_args(make_url(test_url))
+    assert "port" not in engine_kwargs
 
 
 # ---------------------------------------------------------------------------
@@ -868,3 +877,145 @@ async def test_organization_slug_exists_precheck(realdb, throwaway_slug, _provis
         assert await organization_slug_exists(slug)
     finally:
         await _cleanup_org(slug)
+
+
+# ---------------------------------------------------------------------------
+# asyncpg_connect_kwargs — the raw-connection half of "every DB path gets TLS"
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("url", "expected"),
+    [
+        (
+            "postgresql+asyncpg://postgres:pw@postgres:5432/feohledger",
+            {"host": "postgres", "port": 5432, "user": "postgres", "password": "pw"},
+        ),
+        # The query string used to be dropped — a TLS option on FEOH_DATABASE_URL
+        # reached every engine but never the CREATE/DROP DATABASE connection.
+        (
+            "postgresql+asyncpg://u:pw@db.rds.amazonaws.com:5432/feohledger?ssl=verify-full",
+            {
+                "host": "db.rds.amazonaws.com",
+                "port": 5432,
+                "user": "u",
+                "password": "pw",
+                "ssl": "verify-full",
+            },
+        ),
+        # A percent-encoded password is decoded, as the engine decodes it.
+        (
+            "postgresql+asyncpg://u:p%40ss%2Fw@h/feohledger",
+            {"host": "h", "user": "u", "password": "p@ss/w"},
+        ),
+        # Dialect-only keys are the dialect's — asyncpg.connect would TypeError.
+        (
+            "postgresql+asyncpg://u:pw@h:6543/feohledger?prepared_statement_cache_size=0",
+            {"host": "h", "port": 6543, "user": "u", "password": "pw"},
+        ),
+    ],
+)
+def test_asyncpg_connect_kwargs_matches_the_engine_parse(url, expected):
+    from app.services.tenant_provisioning import asyncpg_connect_kwargs
+
+    assert asyncpg_connect_kwargs(url, database="postgres") == {**expected, "database": "postgres"}
+
+
+def test_asyncpg_connect_kwargs_keeps_the_urls_database_by_default():
+    from app.services.tenant_provisioning import asyncpg_connect_kwargs
+
+    kwargs = asyncpg_connect_kwargs("postgresql+asyncpg://u:pw@h/feoh_acme?ssl=require")
+    assert kwargs["database"] == "feoh_acme"
+    assert kwargs["ssl"] == "require"
+
+
+def test_maintenance_dsn_targets_the_postgres_db_on_the_configured_server(monkeypatch):
+    monkeypatch.setattr(
+        settings,
+        "database_url",
+        "postgresql+asyncpg://u:pw@rds.example:5432/feohledger?ssl=require",
+    )
+    assert tenant_provisioning._parse_maintenance_dsn() == {
+        "host": "rds.example",
+        "port": 5432,
+        "user": "u",
+        "password": "pw",
+        "database": "postgres",
+        "ssl": "require",
+    }
+
+
+def test_asyncpg_connect_kwargs_are_accepted_by_asyncpg():
+    """Every key it emits is a real ``asyncpg.connect`` parameter — checked
+    against asyncpg's own signature, so a renamed kwarg fails here rather than
+    as a TypeError on the first tenant provisioned against RDS."""
+    import inspect
+
+    import asyncpg
+
+    from app.services.tenant_provisioning import asyncpg_connect_kwargs
+
+    params = inspect.signature(asyncpg.connect).parameters
+    kwargs = asyncpg_connect_kwargs(
+        "postgresql+asyncpg://u:pw@h:5432/feohledger?ssl=verify-full", database="postgres"
+    )
+    assert set(kwargs) <= set(params)
+
+
+def test_asyncpg_honours_pgsslmode_when_the_url_names_no_ssl(monkeypatch):
+    """The deployed stack's TLS mechanism, pinned against the asyncpg we lock.
+
+    Neither SQLAlchemy's engines nor ``asyncpg_connect_kwargs`` pass an ``ssl``
+    argument unless the URL carries one, so asyncpg falls back to
+    ``PGSSLMODE`` / ``PGSSLROOTCERT`` — which is what compose.prod.yml sets for
+    RDS (docs/minimal-deployment.md § Database TLS). This drives asyncpg's own
+    parameter resolution (no connection) so an upgrade that stopped reading the
+    variables fails here instead of as a plaintext-refused boot on RDS.
+    """
+    import ssl as ssl_module
+    from pathlib import Path as _Path
+
+    from asyncpg import connect_utils
+
+    def resolve(kwargs: dict):
+        """asyncpg's own parameter resolution for these kwargs — no connection."""
+        _addrs, params = connect_utils._parse_connect_dsn_and_args(
+            dsn=None,
+            host=kwargs["host"],
+            port=kwargs["port"],
+            user=kwargs["user"],
+            password=kwargs["password"],
+            passfile=None,
+            database=kwargs["database"],
+            ssl=kwargs.get("ssl"),
+            service=None,
+            servicefile=None,
+            direct_tls=None,
+            server_settings=None,
+            target_session_attrs=None,
+            krbsrvname=None,
+            gsslib=None,
+        )
+        return params
+
+    bundle = _Path(__file__).resolve().parents[1] / "certs" / "rds-global-bundle.pem"
+    monkeypatch.setenv("PGSSLMODE", "verify-full")
+    monkeypatch.setenv("PGSSLROOTCERT", str(bundle))
+    params = resolve(
+        tenant_provisioning.asyncpg_connect_kwargs(
+            "postgresql+asyncpg://u:pw@db.rds.amazonaws.com:5432/feohledger", database="postgres"
+        )
+    )
+    assert params.sslmode == connect_utils.SSLMode.verify_full
+    assert isinstance(params.ssl, ssl_module.SSLContext)
+    assert params.ssl.check_hostname is True
+    assert params.ssl.verify_mode == ssl_module.CERT_REQUIRED
+
+    # And the local-container default: `prefer` keeps today's behaviour.
+    monkeypatch.setenv("PGSSLMODE", "prefer")
+    params = resolve(
+        tenant_provisioning.asyncpg_connect_kwargs(
+            "postgresql+asyncpg://postgres:pw@postgres:5432/feohledger"
+        )
+    )
+    assert params.sslmode == connect_utils.SSLMode.prefer
