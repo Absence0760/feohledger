@@ -540,11 +540,10 @@
 	 * describes. Same split decisions §47 made for Badge: the semantic class
 	 * is an identity for tests to select on, never the thing that paints. */
 
+	/* Not `display: flex` — that makes the <td> stop being a table cell, and its
+	   bottom border drifted out of line with the row's. */
 	.name-cell {
 		font-weight: 500;
-		display: flex;
-		align-items: center;
-		gap: 8px;
 	}
 
 	/* Not `<Badge>`: a tiny "this row is you" marker tucked beside the name in
@@ -552,6 +551,8 @@
 	   the class itself is an e2e hook: three specs locate the current user's
 	   row by it.) Only the colour literals are retired to the palette pair. */
 	.you-badge {
+		margin-left: 8px;
+		vertical-align: middle;
 		font-size: 0.68rem;
 		font-weight: 600;
 		padding: 1px 6px;

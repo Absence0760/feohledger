@@ -429,10 +429,12 @@
 	.item-table td.mono {
 		font-family: var(--font-mono);
 	}
+	/* A real cell: `display: flex` would take the <td> out of the table model. */
 	.item-table td.actions {
-		display: flex;
-		gap: 6px;
 		white-space: nowrap;
+	}
+	.item-table td.actions > * + * {
+		margin-left: 6px;
 	}
 
 	.add-item {

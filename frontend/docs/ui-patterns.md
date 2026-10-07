@@ -154,6 +154,22 @@ grid page instead of hand-rolling `<div class="grid-container"><table>`:
 - Opt-in `fixed` (`table-layout: fixed`, pair with `<th>` widths) and
   `stickyHeader`. These two MUST be props (they target DataTable-owned
   `<table>`/`<thead>`, which a page-scoped selector can't reach).
+- **A `fixed` table needs widths, or every column gets an equal share.**
+  Before this rule, `/vendors` gave its checkbox column as much room as Email,
+  and a long address ran under the Status badge. Give the predictable columns
+  (checkbox, codes, badges, counts, actions) fixed widths sized to their widest
+  content, and leave the one or two text columns without one, so they share
+  the rest. Add a `min-width` on the table so those columns stay readable; past
+  it, the table scrolls inside its region. A long single-line value
+  (email, code) gets `overflow: hidden; text-overflow: ellipsis; white-space:
+  nowrap` plus a `title` with the full value. Reference: `/vendors`, whose
+  widths are scoped under a page wrapper because `SortableHeader` renders the
+  `<th>` from another component.
+- **Never make a `<td>` / `<th>` `display: flex` (or grid).** It stops being a
+  table cell: the column no longer sizes it, so content overflows the table,
+  and its border drifts out of line with the row. Lay out inline children with
+  margins (the global `td.actions` does), or flex an element *inside* the cell.
+  Guard: `src/lib/a11y/tableCellDisplay.test.ts`.
 - `ariaLabel` names the scroll region (see § Accessibility patterns →
   DataTable); omit it and the generic `common.tableRegion` applies.
 

@@ -22,18 +22,20 @@ test.describe('/vendors status filter (acme admin)', () => {
 			(r) => isVendorListResponse(r.url(), 'status=unverified')
 		);
 		await page.locator('.filter-chip', { hasText: /^Unverified/ }).click();
-		await filtered;
+		const body = (await (await filtered).json()) as { items: unknown[] };
 
 		await expect(page.locator('.filter-chip', { hasText: /^Unverified/ })).toHaveClass(
 			/active/
 		);
-		const after = await page.locator('table tbody tr').count();
-		expect(after).toBeGreaterThan(0);
-		expect(after).toBeLessThanOrEqual(beforeRows);
-		// Every visible row carries the .unverified class on the <tr>.
+		// The table re-renders AFTER the response lands. Counting rows straight
+		// away read the old, longer list, and the loop then walked indices the
+		// narrowed list no longer had. Wait for exactly the rows it carried.
 		const rows = page.locator('table tbody tr');
-		const total = await rows.count();
-		for (let i = 0; i < total; i++) {
+		await expect(rows).toHaveCount(body.items.length);
+		expect(body.items.length).toBeGreaterThan(0);
+		expect(body.items.length).toBeLessThanOrEqual(beforeRows);
+		// Every visible row carries the .unverified class on the <tr>.
+		for (let i = 0; i < body.items.length; i++) {
 			await expect(rows.nth(i)).toHaveClass(/unverified/);
 		}
 	});
