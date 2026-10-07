@@ -266,6 +266,14 @@ async def _run_local(
             if not org:
                 logger.warning("[extraction] Organization %s not found", org_id)
                 return
+            # Hand the connection back NOW. `ctrl_engine` is a ONE-connection
+            # pool and this session would otherwise hold it (its autobegun
+            # read transaction) for the whole extraction — so every control-plane
+            # session opened underneath (`control_session_factory()` in the
+            # notification / audit hooks, and the AI-read allowance gate that
+            # must run before the model call) waited out the 30 s pool timeout
+            # and failed. `org`'s loaded attributes stay readable once detached.
+            await ctrl_db.close()
 
             # Create a fresh tenant engine for this thread
             tenant_url = _make_tenant_url(org.db_name)
