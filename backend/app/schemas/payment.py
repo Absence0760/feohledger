@@ -113,7 +113,8 @@ class RecordPaymentOutsideRequest(BaseModel):
     paid_on: date
     # Optional cross-check, exactly like `PaymentCreate.amount`: the server
     # binds the figure to what the invoice owes and 422s a disagreeing one.
-    amount: OptionalExactMoneyInput = None
+    # Digits match `payments.amount` Numeric(15, 2).
+    amount: OptionalExactMoneyInput = Field(default=None, ge=0, max_digits=15, decimal_places=2)
 
     @field_validator("method")
     @classmethod

@@ -246,6 +246,10 @@ async def test_an_open_payment_blocking_exception_refuses(realdb):
     ("over", "status_code"),
     [
         ({"amount": "249.99"}, 422),  # not what the invoice owes
+        # Past `payments.amount` Numeric(15, 2): a schema 422, never a DB overflow 500.
+        ({"amount": "1" + "0" * 15}, 422),
+        ({"amount": "250.001"}, 422),
+        ({"amount": "-250.00"}, 422),
         ({"paid_on": (utc_today() + timedelta(days=3)).isoformat()}, 422),
         ({"method": "virtual_card"}, 422),
         ({"reference": "   "}, 422),
@@ -300,6 +304,15 @@ async def test_an_undispatched_standalone_booking_is_completed_in_place(realdb):
     assert payment.status == "completed"
     assert payment.provider == EXTERNAL_PAYMENT_PROVIDER
     assert payment.method == "check"
+    # The handler is exempt from the direct-audit scan on the strength of the
+    # service auditing BOTH write branches; this is the convert-in-place one.
+    async with mk() as s:
+        actions = set(
+            (await s.execute(select(AuditLog.action).where(AuditLog.entity_id == pay_id)))
+            .scalars()
+            .all()
+        )
+    assert "payment.recorded_outside" in actions
 
 
 async def test_a_dispatched_payment_refuses(realdb):

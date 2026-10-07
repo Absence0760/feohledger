@@ -329,6 +329,10 @@ _TENANT_MUTATORS_WITHOUT_DIRECT_AUDIT: dict[tuple[str, str], str] = {
     ("app.api.payments", "create_payment_run"): (
         "audits via services/payment_runs.create_payment_run_for_invoices"
     ),
+    ("app.api.payments", "record_payment_outside"): (
+        "audits via services/external_payment.record_invoice_paid_outside "
+        "(`payment.recorded_outside`, plus the invoice transitions)"
+    ),
     ("app.api.portal", "resubmit_invoice"): (
         "audits via workflow_engine.transition_invoice + exception_lifecycle.record_decision"
     ),
