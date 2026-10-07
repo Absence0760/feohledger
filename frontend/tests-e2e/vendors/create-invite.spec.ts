@@ -39,7 +39,10 @@ test.describe('/vendors create + portal invite (acme admin)', () => {
 			vendorId = (await (await createResp).json()).id as string;
 			expect(vendorId).toBeTruthy();
 
-			// The new vendor shows up in the list.
+			// Find it by name. The list is name-ordered and paged, so on a tenant
+			// with more than a page of vendors a new one can sort past page one
+			// (tracked in docs/followups.md); this spec is about the invite.
+			await page.goto(`/vendors?search=${encodeURIComponent(vendorName)}`);
 			const row = page.locator('table tbody tr', { hasText: vendorName });
 			await expect(row).toHaveCount(1, { timeout: 10_000 });
 

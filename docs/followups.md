@@ -91,7 +91,7 @@ section carried its own `decisions.md` § reference, so nothing was lost by
 deleting it; that cross-reference is what makes the pruning safe, and writing
 one is what earns a future entry the right to be deleted.
 
-**72 open: 57 (c) · 9 (a) · 6 (b)** — re-derived from the file, never carried
+**73 open: 58 (c) · 9 (a) · 6 (b)** — re-derived from the file, never carried
 forward. The section heading is authoritative; where an entry also carries a
 `(c)`/`(a)`/`(b)` marker, the two agree.
 `grep -c '^- \[ \]' docs/followups.md`.
@@ -779,6 +779,22 @@ or is a sibling of a fix that needs its own pass.
       versioning the key instead of deleting it, so the evidence chain
       survives. **Trigger:** the product call, or the next change to either
       file route.
+
+### Surfaced by the vendors table column fix (2026-10-06)
+
+- [ ] **(c) A vendor you've just created can be invisible in the list.**
+      `/vendors` is ordered by name (`api/vendors.py`, `default=[Vendor.name.asc(),
+      …]`) and pages 25 at a time, and `CreateVendorModal`'s `onsaved` only
+      refetches page one. On a tenant with more than a page of vendors, a new
+      vendor whose name sorts past page one doesn't appear after you create it,
+      with no sign it was saved except the closed modal.
+      `tests-e2e/vendors/create-invite.spec.ts` hit this on a well-used e2e
+      tenant. It now searches for its vendor, since its subject is the invite,
+      not list placement. **Durable fix:** a product call between opening the
+      new vendor's detail view after save, pinning it at the top of the list
+      until the next reload, or filtering the list to it. Opening the detail is
+      the smallest change, and matches how a create usually ends. **Trigger:**
+      the next change to the vendors list or `CreateVendorModal`.
 
 ### Surfaced by the expense-management bug hunt (2026-10-05, round 2)
 
