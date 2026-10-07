@@ -208,8 +208,11 @@ MAX_SPEND_CAP = Decimal("1000000.00")
 
 class SpendCapRequest(BaseModel):
     # Exact decimal STRING in the plan's currency; null removes the cap. A JSON
-    # number is refused (it is already a float by the time it arrives).
-    monthly_spend_cap: OptionalExactMoneyInput = None
+    # number is refused (it is already a float by the time it arrives). Whole
+    # cents between 0.00 and MAX_SPEND_CAP — an out-of-range value is a 422.
+    monthly_spend_cap: OptionalExactMoneyInput = Field(
+        default=None, ge=0, le=MAX_SPEND_CAP, max_digits=9, decimal_places=2
+    )
 
 
 class SpendCapResponse(BaseModel):
@@ -236,11 +239,6 @@ async def set_spending_cap(
     """
     cap = body.monthly_spend_cap
     if cap is not None:
-        if cap < 0 or cap > MAX_SPEND_CAP or cap.as_tuple().exponent < -2:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-                detail="The spending cap must be between 0.00 and 1000000.00, in whole cents.",
-            )
         cap = cap.quantize(Decimal("0.01"))
 
     # Serialise with every other settings writer (`lock_organization`).

@@ -250,12 +250,15 @@ async def report_ai_overage(
     )
 
 
+@dataclass(frozen=True)
 class _OrgView:
     """The slice of ``Organization`` ``provisioning._adapter_for`` reads, built
-    from a settings snapshot so no ORM row outlives its (closed) session."""
+    from a settings snapshot so no ORM row outlives its (closed) session.
 
-    def __init__(self, org_settings: dict):
-        self.settings = org_settings
+    Read-only on purpose: it is not a row, so it can never write
+    ``Organization.settings`` (and so needs no ``lock_organization``)."""
+
+    settings: dict
 
 
 # ---------------------------------------------------------------------------
