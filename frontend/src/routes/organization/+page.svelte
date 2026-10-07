@@ -281,7 +281,7 @@
 	// briefly disabled under them.
 	const userLoaded = $derived(auth.user !== null);
 	const readOnly = $derived(userLoaded && !auth.isAdmin);
-	// Plan gates (decisions §253/§254). The server refuses each with a 402
+	// Plan gates (decisions §253/§258). The server refuses each with a 402
 	// (`plan_feature_required`) whatever this page shows; these only swap a
 	// control that would be refused for the upgrade prompt. What a save would
 	// turn OFF is never gated, so a downgraded tenant can still switch SSO or

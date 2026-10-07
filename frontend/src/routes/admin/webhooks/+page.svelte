@@ -51,7 +51,7 @@
 		if (userLoaded && !allowed) goto('/');
 	});
 
-	// Plan gate (decisions §254): the server refuses this with a 402 when the
+	// Plan gate (decisions §258): the server refuses this with a 402 when the
 	// plan lacks it, so the page shows the upgrade prompt instead of the
 	// create control (the notice waits for `auth.user`, so nothing flashes
 	// before /me loads).

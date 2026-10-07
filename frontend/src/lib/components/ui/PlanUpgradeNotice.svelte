@@ -3,7 +3,7 @@
 	 * "Available on Growth / Scale — upgrade": rendered IN PLACE of a setting
 	 * the org's plan does not include, so an admin learns why and where to go
 	 * instead of filling a form the server refuses with a 402
-	 * (`plan_feature_required`, docs/decisions.md §254).
+	 * (`plan_feature_required`, docs/decisions.md §258).
 	 *
 	 * Read the gate from `auth.hasFeature(feature)` at the call site and render
 	 * this when it is false. The server stays the authority — this only spares

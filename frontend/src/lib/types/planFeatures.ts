@@ -1,7 +1,7 @@
 /**
  * Plan features — the client's copy of `backend/app/services/billing/
  * plan_catalog.py`'s `FEATURE_*` keys and which catalog tier first grants each
- * (docs/decisions.md §253; the gates themselves are §254).
+ * (docs/decisions.md §253; the gates themselves are §258).
  *
  * The server is the authority: every gated route refuses with a coded 402
  * (`plan_feature_required`, `params.feature`) whatever the client shows. This

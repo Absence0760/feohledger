@@ -130,7 +130,7 @@ TECHFLOW_PLAN_CODE = "free"
 
 # Every e2e worker tenant lands on `scale` too: the Playwright suite drives SSO
 # settings, SCIM tokens, entity creation, ERP adapters, API keys and webhooks on
-# its worker's tenant, and each of those is now plan-gated (§254). All workers
+# its worker's tenant, and each of those is now plan-gated (§258). All workers
 # share the one plan, so they stay interchangeable — which shard draws which
 # tenant is still unobservable — and `frontend/tests-e2e/billing/billing.spec.ts`
 # still parks and restores whatever live subscription the worker's org holds.

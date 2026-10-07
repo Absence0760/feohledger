@@ -1,7 +1,7 @@
 """``scripts/seed.py`` — which plan each seeded tenant lands on.
 
 The seed used to put every org on ``free``, whose entitlements are ``{}``. With
-the public API, and since decisions §254 SSO, SCIM, multiple entities, live
+the public API, and since decisions §258 SSO, SCIM, multiple entities, live
 ERPs and outbound webhooks too, behind a plan gate, that made whole product
 surfaces unreachable on a fresh clone without hand-editing the control plane —
 the local-first promise (guard rail 7) broken.

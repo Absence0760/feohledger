@@ -5,7 +5,7 @@ import { expectNoA11yViolations } from '../a11y/axe-helper';
 
 /**
  * Plan-gated settings show an upgrade prompt instead of a control the server
- * would refuse with a 402 (docs/decisions.md §253 the tiers, §254 the gates).
+ * would refuse with a 402 (docs/decisions.md §253 the tiers, §258 the gates).
  *
  * Every e2e worker tenant is seeded on `scale`, which grants every feature, so
  * the real `/api/auth/me` drives the "entitled" side. The FREE and GROWTH sides

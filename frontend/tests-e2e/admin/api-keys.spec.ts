@@ -193,7 +193,7 @@ test.describe('/admin/api-keys (admin)', () => {
 	 * was counted (the key did not authenticate), so it is named rather than
 	 * left to surface as a confusing "expected 3, received 0".
 	 *
-	 * Every `e2eN` worker is seeded on `scale` (decisions §254 — minting this
+	 * Every `e2eN` worker is seeded on `scale` (decisions §258 — minting this
 	 * key is itself plan-gated now), so these calls come back 200; the
 	 * assertion stays on the count rather than the status because the count is
 	 * what this test is about, and it would hold just the same for a 402. Do

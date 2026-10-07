@@ -28,6 +28,7 @@ from __future__ import annotations
 import base64
 import json
 import time
+import uuid
 
 import pytest
 from joserfc import jwt
@@ -627,6 +628,7 @@ def _broken_oidc_org(slug: str = "acme"):
     from types import SimpleNamespace
 
     return SimpleNamespace(
+        id=uuid.uuid4(),
         slug=slug,
         settings={
             "sso": {

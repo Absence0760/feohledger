@@ -370,7 +370,7 @@ const BUILDERS: Record<string, Builder> = {
 	nacha_payment_not_payable: nachaForInvoice('refusal.nachaPaymentNotPayable'),
 	nacha_already_exported: fixed('refusal.nachaAlreadyExported'),
 	// `api/deps.py::plan_feature_refusal` — every plan-feature gate (decisions
-	// §254). `params.feature` is a `FEATURE_*` key; one this build does not
+	// §258). `params.feature` is a `FEATURE_*` key; one this build does not
 	// know (a newer backend) falls back to the server's sentence.
 	[PLAN_FEATURE_REQUIRED]: (p, t) => {
 		const feature = p.feature;

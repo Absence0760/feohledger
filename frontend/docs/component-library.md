@@ -91,7 +91,7 @@ Grouped into subfolders by role. Import with the full path, e.g.
 - `PlanUpgradeNotice.svelte` — "Available on Growth / Scale — upgrade",
   rendered IN PLACE of a setting the org's plan does not include, so an admin
   is not handed a control the server refuses with `402 plan_feature_required`
-  (`docs/decisions.md` §254). `<PlanUpgradeNotice feature={FEATURE_X} testId? />`
+  (`docs/decisions.md` §258). `<PlanUpgradeNotice feature={FEATURE_X} testId? />`
   with a key from `#lib/types/planFeatures.ts`; the call site decides when,
   from `auth.hasFeature(FEATURE_X)` (`/auth/me`'s `entitlements`) — and waits
   for `auth.user` so nothing flashes before it loads. Names the feature and the

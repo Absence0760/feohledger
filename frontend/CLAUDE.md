@@ -370,7 +370,7 @@ Grouped into subfolders by role; import with the full path
 component the second time you would duplicate one.**
 
 - `help/` — `HelpTip` (the ⓘ toggletip: `<HelpTip term="glossary-id" />`; `KpiCard helpTerm` / DataTable column `help` forward one) `RichText` `HelpNav` `HelpCrumbs` `InvoiceLifecycle` `EnglishNotice` `diagrams/` — placement rules in `docs/ui-patterns.md` § Contextual help
-- `ui/` — primitives: `PageHeader` (renders the page's "How this page works" link) `DataTable` `FilterChips` `Modal` `KpiCard` `Badge` `EmptyState` `Money` `SectionTabs` `Tabs` `SettingsRail` `FieldWarning` `SecretReveal` `BrandMark` `PlanUpgradeNotice` (a setting the plan lacks — decisions §254)
+- `ui/` — primitives: `PageHeader` (renders the page's "How this page works" link) `DataTable` `FilterChips` `Modal` `KpiCard` `Badge` `EmptyState` `Money` `SectionTabs` `Tabs` `SettingsRail` `FieldWarning` `SecretReveal` `BrandMark` `PlanUpgradeNotice` (a setting the plan lacks — decisions §258)
 - domain: `InvoiceModal` `VendorModal` `VendorPicker` `InvoicePicker` (both over `ui/SearchPicker`) `RunDetailModal` `ApprovalMatrixEditor` `BulkRecodeGLModal` `AdvancedSearchModal` `ScreeningBadge` `SubscriptionBadge` `SpendBarChart` `UsageMeter` `PortalListFilters`
 - chrome: `Sidebar` `NotificationBell` `EntitySwitcher`
 - chat/assistant: `SupplierChatThread` `ChatMessage` `ExamplePrompts` `ToolResultView`
