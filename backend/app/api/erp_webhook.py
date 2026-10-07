@@ -270,6 +270,24 @@ async def erp_webhook(
                         event_id=event_id,
                     )
                     await db.commit()
+                elif target_status is InvoiceStatus.paid and current in ERP_PAID_RECORDABLE:
+                    # The ERP paid an invoice FeohLedger never paid — the
+                    # ERP-led half of the no-rail model (issue #517). The state
+                    # machine has no `posted_in_erp → paid` edge because `paid`
+                    # needs a payment behind it; recording the ERP's payment
+                    # supplies one, through the same service a user's "paid
+                    # outside FeohLedger" goes through. Before this the report
+                    # was dropped here, and a tenant with no rail had no
+                    # automatic path to `paid` at all.
+                    await _record_erp_reported_payment(
+                        db,
+                        invoice,
+                        org=org,
+                        erp_type=erp_type,
+                        erp_document_id=erp_document_id,
+                        event_id=event_id,
+                    )
+                    await db.commit()
                 return  # silent 204 on every forbidden-transition path
 
             # `payment_scheduled → paid` is a legal edge, but it is the exact
@@ -373,12 +391,114 @@ async def erp_webhook(
             return _retry_please()
 
 
+#: Invoice statuses from which an ERP `Paid` report is RECORDED as a payment
+#: made outside FeohLedger rather than dropped. `payment_scheduled` is absent on
+#: purpose: it already has a FeohLedger payment behind it, and the legal
+#: `payment_scheduled → paid` edge (with its settlement-coverage hold) handles it.
+ERP_PAID_RECORDABLE = frozenset(
+    {InvoiceStatus.approved, InvoiceStatus.sent_to_erp, InvoiceStatus.posted_in_erp}
+)
+
+
+#: Refusals meaning FeohLedger still holds its own claim on paying the invoice
+#: (`services/external_payment`). Raised as the BLOCKING `payment_reconciliation`
+#: type, because that claim proceeding after the ERP paid is a double payment.
+DOUBLE_PAY_REFUSALS = frozenset(
+    {
+        "external_payment_in_run",
+        "external_payment_payment_live",
+        "external_payment_card_live",
+    }
+)
+
+
+async def _record_erp_reported_payment(
+    db: AsyncSession,
+    invoice: Invoice,
+    *,
+    org: Organization,
+    erp_type: str,
+    erp_document_id: str | None,
+    event_id: str | None,
+) -> None:
+    """Book the ERP's `Paid` as a payment made outside FeohLedger.
+
+    Through `services/external_payment.record_invoice_paid_outside` — the same
+    gates a user's record goes through, minus segregation of duties (no human
+    actor). A refusal (an open payment-blocking exception, a live FeohLedger
+    payment or card that would make this a double payment, a credit we can't
+    net) is never silent: it opens an `erp_reconciliation` exception naming the
+    refusal code, so a human decides. Never commits.
+    """
+    from app.services.external_payment import (
+        ExternalPaymentRefused,
+        record_invoice_paid_outside,
+    )
+    from app.utils.dates import utc_today
+
+    if invoice.status == InvoiceStatus.sent_to_erp:
+        # The ERP can only have paid a bill it holds: the `posted_in_erp` report
+        # was lost or arrived out of order. Apply it first so the trail reads in
+        # the order things happened.
+        await transition_invoice(
+            db,
+            invoice,
+            InvoiceStatus.posted_in_erp,
+            action_name="invoice.erp_status_posted_in_erp",
+            details={
+                "erp_type": erp_type,
+                "erp_status": "implied_by_paid",
+                "erp_document_id": erp_document_id,
+                "event_id": event_id,
+            },
+        )
+
+    reference = (erp_document_id or (f"erp-event:{event_id}" if event_id else None) or erp_type)[
+        :255
+    ]
+    try:
+        await record_invoice_paid_outside(
+            db,
+            org=org,
+            invoice=invoice,
+            method=None,
+            reference=reference,
+            paid_on=utc_today(),
+            actor_id=None,
+            source="erp",
+        )
+    except ExternalPaymentRefused as exc:
+        # When FeohLedger itself still has a claim on paying this invoice — a
+        # live payment, a draft/exported run, a live card — the ERP has just
+        # paid it, so letting that claim proceed pays the supplier TWICE.
+        # `erp_reconciliation` is not payment-blocking, so for those refusals
+        # the flag is the blocking `payment_reconciliation`, which the run
+        # builder and every dispatch (`dispatch_preflight`) refuse on. Any other
+        # refusal is a question for a human, not a double-pay risk.
+        double_pay = exc.refusal.code in DOUBLE_PAY_REFUSALS
+        await _open_erp_reconciliation_exception(
+            db,
+            invoice,
+            org_id=org.id,
+            exception_type=(
+                "payment_reconciliation" if double_pay else ERP_RECONCILIATION_EXCEPTION_TYPE
+            ),
+            description=(
+                f"ERP reported 'Paid' via {erp_type} for an invoice FeohLedger has not "
+                f"paid, but it could not be recorded ({exc.refusal.code}). Resolve the "
+                f"cause, then record it via POST /api/payments/record-outside "
+                f"(erp_document_id={erp_document_id or '-'}, event={event_id or '-'})."
+            ),
+        )
+
+
 async def _open_erp_reconciliation_exception(
     db: AsyncSession,
     invoice: Invoice,
     *,
     org_id,
     description: str,
+    exception_type: str = ERP_RECONCILIATION_EXCEPTION_TYPE,
 ) -> None:
     """Open ONE ``erp_reconciliation`` Exception for human review, PII-free.
 
@@ -394,8 +514,8 @@ async def _open_erp_reconciliation_exception(
     existing = await db.execute(
         select(func.count()).where(
             APException.invoice_id == invoice.id,
-            APException.exception_type == ERP_RECONCILIATION_EXCEPTION_TYPE,
-            APException.status == "open",
+            APException.exception_type == exception_type,
+            APException.status.in_(("open", "escalated")),
         )
     )
     if (existing.scalar() or 0) > 0:
@@ -403,7 +523,7 @@ async def _open_erp_reconciliation_exception(
 
     await create_exception(
         db,
-        exception_type=ERP_RECONCILIATION_EXCEPTION_TYPE,
+        exception_type=exception_type,
         severity="error",
         description=description,
         status="open",

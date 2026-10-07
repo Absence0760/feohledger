@@ -205,6 +205,29 @@ def _validate_settings_patch(incoming: dict) -> None:
             )
 
     payments_cfg = incoming.get("payments")
+    if isinstance(payments_cfg, dict) and "mode" in payments_cfg:
+        # An unknown mode resolves record-only anyway (fail closed —
+        # `services/payment_execution_mode`), but a typo the admin can't see
+        # take effect is worse than a 422 that names the two values.
+        from app.services.payment_execution_mode import PAYMENT_MODES
+
+        if payments_cfg["mode"] is not None and payments_cfg["mode"] not in PAYMENT_MODES:
+            raise HTTPException(
+                status_code=422,
+                detail=f"payments.mode must be one of: {', '.join(PAYMENT_MODES)}.",
+            )
+    if isinstance(payments_cfg, dict) and payments_cfg.get("nacha") is not None:
+        # The NACHA originator block (`services/nacha`). Validated at save so a
+        # bad company ID or a mistyped routing number surfaces here, not as a
+        # file the customer's bank rejects. Field names only in the message.
+        from app.services.nacha import originator_problems
+
+        problems = originator_problems(payments_cfg["nacha"])
+        if problems:
+            raise HTTPException(
+                status_code=422,
+                detail=f"payments.nacha has invalid fields: {', '.join(problems)}.",
+            )
     if isinstance(payments_cfg, dict) and "cfo_approval_above" in payments_cfg:
         threshold = payments_cfg["cfo_approval_above"]
         if threshold is not None and (

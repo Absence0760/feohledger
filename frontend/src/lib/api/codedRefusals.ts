@@ -17,7 +17,9 @@
  * 2. the money-path refusals below — approval segregation and the named
  *    approver / chain-reuse gates, the CFO and max-amount gates (invoice and
  *    expense report), the exception queue's segregation refusal, credit-memo
- *    application, the invoice stale-edit 409 and a wrong authenticator code;
+ *    application, the invoice stale-edit 409, a wrong authenticator code, and
+ *    the no-rail pilot's refusals (a record-only tenant's dispatch refusal,
+ *    recording a payment made outside FeohLedger, the NACHA bank file);
  * 3. the auth step-up / passkey refusals (`api/authRefusals.ts`).
  *
  * **Anything this build cannot state → `null`**, and the caller renders the
@@ -35,6 +37,9 @@
 import type { MessageKey } from '#lib/i18n/messages.ts';
 import { formatMoney } from '#lib/utils/money.ts';
 import { invoiceStatusLabelKey } from '#lib/types/invoice.ts';
+import { paymentStatusLabelKey } from '#lib/types/payment.ts';
+import { exceptionTypeFallback, exceptionTypeLabelKey } from '#lib/types/exception.ts';
+import { nachaFieldLabelKey } from '#lib/types/paymentExecution.ts';
 import { localizeGlChartRefusal, parseGlChartRefusal } from '#lib/api/glChartRefusal.ts';
 import { authRefusalText } from '#lib/api/authRefusals.ts';
 import { apiErrorCode } from '#lib/utils/apiError.ts';
@@ -185,6 +190,44 @@ function expenseCfoGate(params: Params, t: Translate): string | null {
 		: t('refusal.expenseCfoRequired', { amount, limit });
 }
 
+// --- the no-rail pilot (issue #517) -------------------------------------------
+
+/**
+ * A recording refusal, stated for one invoice or for a whole run. The run-level
+ * door (`POST /runs/{id}/record-outside`) refuses the run on its first bad
+ * payment and adds `params.invoice_number`, so the sentence is prefixed with
+ * the invoice it names. That key PRESENT but null (an invoice with no number —
+ * the server then names its id in the English) falls back to the server's
+ * sentence rather than dropping which invoice it was.
+ */
+const forInvoice =
+	(build: Builder): Builder =>
+	(params, t) => {
+		const sentence = build(params, t);
+		if (sentence === null || !('invoice_number' in params)) return sentence;
+		const invoice = str(params, 'invoice_number');
+		return invoice === null ? null : t('refusal.externalPaymentForInvoice', { invoice, reason: sentence });
+	};
+
+/** A NACHA refusal that names the invoice whose payment the file can't carry. */
+const nachaForInvoice =
+	(key: MessageKey): Builder =>
+	(params, t) => {
+		const invoice = str(params, 'invoice_number');
+		return invoice === null ? null : t(key, { invoice });
+	};
+
+function nachaNotConfigured(params: Params, t: Translate): string | null {
+	const missing = params.missing;
+	if (!Array.isArray(missing) || missing.length === 0) return null;
+	if (!missing.every((f) => typeof f === 'string' && f)) return null;
+	const labels = (missing as string[]).map((f) => {
+		const key = nachaFieldLabelKey(f);
+		return key ? t(key) : f;
+	});
+	return t('refusal.nachaNotConfigured', { fields: formatList(labels) });
+}
+
 // --- the table ---------------------------------------------------------------
 
 type Builder = (params: Params, t: Translate) => string | null;
@@ -256,7 +299,71 @@ const BUILDERS: Record<string, Builder> = {
 		return t('refusal.invoiceRequiredFieldsMissing', { fields: formatList(labels) });
 	},
 	// `api/auth.py` + `api/portal_auth.py` — a signed-in factor change
-	mfa_code_invalid: fixed('refusal.mfaCodeInvalid')
+	mfa_code_invalid: fixed('refusal.mfaCodeInvalid'),
+	// `api/payments.py::_refuse_record_only` — every dispatching endpoint on a
+	// tenant whose payments are recorded, never sent. `params.reason` says why
+	// the mode resolved so; the sentence is the same for every reason.
+	payments_record_only: fixed('refusal.paymentsRecordOnly'),
+	// `services/external_payment.py` (+ `api/payments.py` for the date) — both
+	// `POST /record-outside` and the run-level door.
+	external_payment_not_payable: forInvoice((p, t) => {
+		const status = str(p, 'status');
+		return status === null
+			? null
+			: t('refusal.externalPaymentNotPayable', {
+					status: statusLabel(status, invoiceStatusLabelKey, t)
+				});
+	}),
+	external_payment_segregation: forInvoice(fixed('refusal.externalPaymentSegregation')),
+	external_payment_blocking_exception: forInvoice((p, t) => {
+		const type = str(p, 'exception_type');
+		if (type === null) return null;
+		const key = exceptionTypeLabelKey(type);
+		return t('refusal.externalPaymentBlockingException', {
+			type: key ? t(key) : exceptionTypeFallback(type)
+		});
+	}),
+	external_payment_card_live: forInvoice(fixed('refusal.externalPaymentCardLive')),
+	external_payment_credit_conflict: forInvoice(fixed('refusal.externalPaymentCreditConflict')),
+	external_payment_nothing_to_pay: forInvoice(fixed('refusal.externalPaymentNothingToPay')),
+	external_payment_payment_live: forInvoice((p, t) => {
+		const status = str(p, 'payment_status');
+		return status === null
+			? null
+			: t('refusal.externalPaymentPaymentLive', {
+					status: statusLabel(status, paymentStatusLabelKey, t)
+				});
+	}),
+	external_payment_in_run: forInvoice((p, t) => {
+		const run = str(p, 'payment_run_id');
+		return run === null ? null : t('refusal.externalPaymentInRun', { run: run.slice(0, 8) });
+	}),
+	external_payment_amount_mismatch: forInvoice((p, t) => {
+		const amount = invoiceMoney(p, 'amount', 'currency');
+		return amount === null ? null : t('refusal.externalPaymentAmountMismatch', { amount });
+	}),
+	// The run-level door only (it always adds `invoice_number`): what the
+	// invoice owes moved since the run was staged.
+	external_payment_amount_changed: forInvoice((p, t) => {
+		const staged = invoiceMoney(p, 'staged_amount', 'currency');
+		const amount = invoiceMoney(p, 'amount', 'currency');
+		return staged === null || amount === null
+			? null
+			: t('refusal.externalPaymentAmountChanged', { staged, amount });
+	}),
+	external_payment_paid_on_future: fixed('refusal.externalPaymentPaidOnFuture'),
+	// `api/payments.py` — `GET /runs/{id}/nacha` (`services/nacha.py`)
+	nacha_requires_record_only: fixed('refusal.nachaRequiresRecordOnly'),
+	nacha_not_configured: nachaNotConfigured,
+	nacha_payment_not_ach: nachaForInvoice('refusal.nachaPaymentNotAch'),
+	nacha_vendor_bank_missing: nachaForInvoice('refusal.nachaVendorBankMissing'),
+	nacha_currency_not_usd: nachaForInvoice('refusal.nachaCurrencyNotUsd'),
+	nacha_amount_too_large: nachaForInvoice('refusal.nachaAmountTooLarge'),
+	// `params.reason` is the dispatcher's machine code (`invoice_blocked:…`,
+	// `net_amount_changed`, …) — not prose, so it is not shown; the sentence
+	// names the invoice and the one remedy, which is the same for every reason.
+	nacha_payment_not_payable: nachaForInvoice('refusal.nachaPaymentNotPayable'),
+	nacha_already_exported: fixed('refusal.nachaAlreadyExported')
 };
 
 /** The codes this registry states (the money-path + MFA table; the GL-chart

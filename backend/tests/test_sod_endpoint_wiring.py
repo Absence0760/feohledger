@@ -50,6 +50,7 @@ from app.api.permissions import (
     ALL_PERMISSIONS,
     PERM_INVOICE_APPROVE,
     PERM_PAYMENT_EXECUTE,
+    PERM_PAYMENT_RECORD_EXTERNAL,
     PERM_PAYMENT_RUN_APPROVE,
     PERM_PAYMENT_VOID,
     PERM_USER_MANAGE,
@@ -158,7 +159,14 @@ async def _call_checker(route, user):
 
 _EXECUTE = frozenset({PERM_PAYMENT_EXECUTE})
 _VOID = frozenset({PERM_PAYMENT_VOID})
-_EXECUTE_OR_VOID = frozenset({PERM_PAYMENT_EXECUTE, PERM_PAYMENT_VOID})
+# The payments page's reads also admit `payment.record_external` (issue #517):
+# a role that only records payments made outside FeohLedger still has to reach
+# the queue it records them from.
+_EXECUTE_OR_VOID = frozenset(
+    {PERM_PAYMENT_EXECUTE, PERM_PAYMENT_VOID, PERM_PAYMENT_RECORD_EXTERNAL}
+)
+_RECORD_EXTERNAL = frozenset({PERM_PAYMENT_RECORD_EXTERNAL})
+_EXECUTE_OR_RECORD = frozenset({PERM_PAYMENT_EXECUTE, PERM_PAYMENT_RECORD_EXTERNAL})
 _RUN_APPROVE = frozenset({PERM_PAYMENT_RUN_APPROVE})
 _INVOICE_APPROVE = frozenset({PERM_INVOICE_APPROVE})
 _VENDOR_MANAGE = frozenset({PERM_VENDOR_MANAGE})
@@ -246,10 +254,21 @@ CASES = [
     ("/api/payments/summary", "GET", _EXECUTE_OR_VOID),
     ("/api/payments/queue", "GET", _EXECUTE_OR_VOID),
     ("/api/payments/queue/ids", "GET", _EXECUTE_OR_VOID),
-    # The run reads gate on `payment.execute` alone: a void-only role acts on
+    # The run reads gate on `payment.execute` (or `payment.record_external`,
+    # which records a whole run paid outside): a void-only role acts on
     # individual payments, not on runs.
-    ("/api/payments/runs/", "GET", _EXECUTE),
-    ("/api/payments/runs/{run_id}", "GET", _EXECUTE),
+    ("/api/payments/runs/", "GET", _EXECUTE_OR_RECORD),
+    ("/api/payments/runs/{run_id}", "GET", _EXECUTE_OR_RECORD),
+    # --- payment.record_external: the no-rail pilot (issue #517). Recording a
+    # payment the customer made itself, a whole run it paid through its bank,
+    # The mode read is display-only. ---
+    ("/api/payments/execution-mode", "GET", _EXECUTE_OR_VOID),
+    ("/api/payments/record-outside", "POST", _RECORD_EXTERNAL),
+    ("/api/payments/runs/{run_id}/record-outside", "POST", _RECORD_EXTERNAL),
+    # The NACHA export is the counterpart of `/execute` — uploading the file is
+    # the money moving — so it gates on `payment.execute`, not on recording.
+    ("/api/payments/runs/{run_id}/nacha", "GET", _EXECUTE),
+    ("/api/payments/runs/{run_id}/nacha/void", "POST", _EXECUTE),
     # --- vendor.manage: create / edit / verify / reject / delete a vendor, and
     # the bulk-import paths that do the same thing at volume. ---
     ("/api/vendors", "POST", _VENDOR_MANAGE),

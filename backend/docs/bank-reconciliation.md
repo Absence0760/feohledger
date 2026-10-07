@@ -356,6 +356,16 @@ hit), the transaction stays unmatched. Better to leave unmatched
 than to credit the wrong invoice — the AP team triages from the
 exceptions queue.
 
+### Payments recorded outside FeohLedger
+
+A payment recorded as paid outside FeohLedger (`backend/docs/payments.md`
+§ Record-only mode) is `completed` with `submitted_at = completed_at` on the
+paid-on date and the user's reference (cheque number, bank confirmation) in
+`Payment.reference`, so it matches by reference, or by amount + date, exactly as
+a rail-settled payment does. A run recorded from a NACHA upload shares one batch
+reference across its payments; that reference is ambiguous by construction, so
+those lines fall through to the amount + date strategy.
+
 ### Ambiguous references
 
 Neither lookup column is unique. `Payment.reference` is free text a caller

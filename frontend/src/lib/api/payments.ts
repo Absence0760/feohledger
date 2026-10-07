@@ -13,7 +13,9 @@
 // See `backend/docs/payments.md` § ERP Payment Sync + § Settlement-amount
 // verification + § Voiding a card payment.
 import { api } from '#lib/api.ts';
-import type { Payment } from '#lib/types/payment.ts';
+import type { Payment, PaymentMethod } from '#lib/types/payment.ts';
+import type { ExecutionModeResponse, NachaSecCode } from '#lib/types/paymentExecution.ts';
+import { triggerDownload } from '#lib/utils/download.ts';
 
 /**
  * What `POST /api/payments/runs/{run_id}/sync-erp` returns.
@@ -101,4 +103,125 @@ export function voidPayment(paymentId: string, reason: string): Promise<Payment>
  */
 export function retryVoidCardCancel(paymentId: string): Promise<Payment> {
 	return api.post<Payment>(`/api/payments/${paymentId}/void/retry-card-cancel`, {});
+}
+
+// ── The no-rail pilot (issue #517, `docs/decisions.md` §251) ──────────────
+//
+// A tenant's payments are either SENT by FeohLedger (`processor`) or only
+// RECORDED here after the customer paid from its own bank or ERP
+// (`record_only`). The helpers below are the record half; none of them moves
+// money. `payment.record_external` (`PERM_PAYMENT_RECORD_EXTERNAL`) gates the
+// two record writes; the NACHA file and its void are `payment.execute`, since
+// uploading the file is what sends the money. The mode read admits any of
+// execute / void / record_external.
+// See `backend/docs/payments.md` § Paying outside FeohLedger.
+
+/** Whether FeohLedger sends this tenant's payments or only records them. */
+export function getExecutionMode(): Promise<ExecutionModeResponse> {
+	return api.get<ExecutionModeResponse>('/api/payments/execution-mode');
+}
+
+/** `POST /api/payments/record-outside`. */
+export interface RecordPaymentOutsideBody {
+	invoice_id: string;
+	method: PaymentMethod;
+	/** The cheque number / bank confirmation. 1–255 characters. */
+	reference: string;
+	/** `YYYY-MM-DD`, not in the future (the server allows one day past UTC
+	 *  today, so the reader's local "today" always passes). */
+	paid_on: string;
+	/**
+	 * Optional exact-decimal STRING cross-check. The server binds the amount to
+	 * what the invoice owes on `paid_on` (net of credit memos and any accepted
+	 * early-pay discount) and 422s a disagreeing figure — omit it to record the
+	 * amount owed, which is what the queue's dialog does.
+	 */
+	amount?: string;
+}
+
+/**
+ * Record one invoice as paid outside FeohLedger. Available in BOTH execution
+ * modes (a processor tenant can still pay one invoice by cheque). Idempotent:
+ * replaying the same reference + date returns the existing payment (200)
+ * rather than booking a second one (201). Refusals arrive coded
+ * (`external_payment_*`) and are localized by `api/codedRefusals.ts`.
+ */
+export function recordPaymentOutside(body: RecordPaymentOutsideBody): Promise<Payment> {
+	return api.post<Payment>('/api/payments/record-outside', body);
+}
+
+/** What `POST /api/payments/runs/{id}/record-outside` returns. */
+export interface RecordRunOutsideResult {
+	id: string;
+	status: string;
+	payment_count: number;
+	/** Exact decimal string, in the run's own currency. */
+	total_amount: string;
+}
+
+/**
+ * Record a whole `draft` or `exported` run as paid by the customer's own bank —
+ * typically after uploading the run's NACHA file (which left it `exported`). One refusal refuses the whole run (nothing is
+ * recorded) and names the invoice in `params.invoice_number`; maker-checker and
+ * CFO sign-off apply exactly as they do to Execute.
+ */
+export function recordRunOutside(
+	runId: string,
+	body: { reference: string; paid_on: string }
+): Promise<RecordRunOutsideResult> {
+	return api.post<RecordRunOutsideResult>(`/api/payments/runs/${runId}/record-outside`, body);
+}
+
+/** The authenticated path of a run's NACHA ACH file. `regenerate` is required
+ *  to fetch a SECOND file for an already-`exported` run. */
+export function runNachaPath(
+	runId: string,
+	effectiveDate: string,
+	secCode: NachaSecCode,
+	regenerate = false
+): string {
+	const qs = new URLSearchParams({ effective_date: effectiveDate, sec_code: secCode });
+	if (regenerate) qs.set('regenerate', 'true');
+	return `/api/payments/runs/${runId}/nacha?${qs.toString()}`;
+}
+
+/**
+ * Fetch a run's NACHA file and save it. Gated on `payment.execute`, not
+ * `payment.record_external`: uploading the file is what moves the money.
+ *
+ * **The first export claims the run** (`draft → exported`): it can no longer be
+ * executed or cancelled until it is recorded as paid or the export is voided
+ * ({@link voidRunNachaExport}). A second file for an `exported` run needs
+ * `regenerate` — without it the server 409s `nacha_already_exported`, because
+ * uploading two files pays every supplier twice.
+ *
+ * Through `api.downloadBlob` (a bare `<a href>` can't carry the Bearer / tenant
+ * / entity headers), so a coded refusal (`nacha_*`) surfaces as a localized
+ * `ApiError`. The file carries the vendors' bank account numbers — it is handed
+ * straight to the browser's download and never kept in page state.
+ */
+export async function downloadRunNacha(
+	runId: string,
+	effectiveDate: string,
+	secCode: NachaSecCode,
+	regenerate = false
+): Promise<void> {
+	const blob = await api.downloadBlob(runNachaPath(runId, effectiveDate, secCode, regenerate));
+	triggerDownload(blob, `payment-run-${runId.slice(0, 8)}-${effectiveDate}.ach`);
+}
+
+/**
+ * The bank rejected (or never received) the exported file: release the run
+ * back to `draft` so it can be re-exported, cancelled or executed. An
+ * attestation FeohLedger cannot check, so `reason` is required (≤ 500
+ * characters) and lands on the audit trail. `payment.execute`; 409 unless the
+ * run is `exported`.
+ */
+export function voidRunNachaExport(
+	runId: string,
+	reason: string
+): Promise<{ id: string; status: string }> {
+	return api.post<{ id: string; status: string }>(`/api/payments/runs/${runId}/nacha/void`, {
+		reason
+	});
 }

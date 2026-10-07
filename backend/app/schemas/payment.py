@@ -1,9 +1,11 @@
+import uuid
+from datetime import date
 from decimal import Decimal
 from enum import StrEnum
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
-from app.schemas.money import MoneyAmount, OptionalMoneyAmount
+from app.schemas.money import MoneyAmount, OptionalExactMoneyInput, OptionalMoneyAmount
 from app.services.card_issuance import CardCancelDisposition
 
 
@@ -44,6 +46,11 @@ class PaymentRunStatus(StrEnum):
     """
 
     draft = "draft"
+    # A record-only tenant's run whose NACHA file has been handed to the
+    # customer (`GET /runs/{id}/nacha`). A claim: the money may be moving at
+    # the customer's bank, so nothing may execute, cancel or re-stage it. Exits
+    # are `/record-outside` (paid) and `/nacha/void` (the bank rejected it).
+    exported = "exported"
     executing = "executing"
     submitted = "submitted"
     processing = "processing"
@@ -85,6 +92,60 @@ class PaymentCreate(BaseModel):
     # its own per-payment CFO check; there is no legitimate caller. No
     # first-party client ever sent the field, and Pydantic ignores an unknown
     # key, so a stray one is simply not honoured rather than 422-ing.
+
+
+class RecordPaymentOutsideRequest(BaseModel):
+    """`POST /api/payments/record-outside` — an invoice the customer paid themselves.
+
+    `services/external_payment.py` owns the rules; see it for why each gate is
+    (or deliberately is not) applied.
+    """
+
+    invoice_id: uuid.UUID
+    # How the customer paid — it decides 1099 treatment (`payment_methods`).
+    # `virtual_card` is FeohLedger's own card program, never a way to pay
+    # outside it.
+    method: PaymentMethod
+    # The cheque number / bank-portal confirmation. Required: it is what bank
+    # reconciliation matches the statement line on, and the only evidence the
+    # record carries.
+    reference: str = Field(min_length=1, max_length=255)
+    paid_on: date
+    # Optional cross-check, exactly like `PaymentCreate.amount`: the server
+    # binds the figure to what the invoice owes and 422s a disagreeing one.
+    # Digits match `payments.amount` Numeric(15, 2).
+    amount: OptionalExactMoneyInput = Field(default=None, ge=0, max_digits=15, decimal_places=2)
+
+    @field_validator("method")
+    @classmethod
+    def _not_card(cls, v: PaymentMethod) -> PaymentMethod:
+        if v == PaymentMethod.virtual_card:
+            raise ValueError("virtual_card is not a way to pay outside FeohLedger")
+        return v
+
+    @field_validator("reference")
+    @classmethod
+    def _strip_reference(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("reference must not be blank")
+        return v
+
+
+class RecordRunOutsideRequest(BaseModel):
+    """`POST /api/payments/runs/{id}/record-outside` — a draft run the customer
+    paid through its own bank (typically by uploading the run's NACHA file)."""
+
+    reference: str = Field(min_length=1, max_length=255)
+    paid_on: date
+
+    @field_validator("reference")
+    @classmethod
+    def _strip_reference(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("reference must not be blank")
+        return v
 
 
 class PaymentResponse(BaseModel):

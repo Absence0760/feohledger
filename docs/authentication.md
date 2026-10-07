@@ -935,8 +935,9 @@ exactly as before.
 
 - **Catalog** — a small, deliberately-scoped set of *splittable* permission
   constants (dotted strings): `invoice.approve`, `payment_run.approve`,
-  `payment.execute`, `payment.void`, `vendor.bank_change.approve`,
-  `vendor.block`, `vendor.manage`, `user.manage`. `GET /api/admin/permissions`
+  `payment.execute`, `payment.void`, `payment.record_external`,
+  `vendor.bank_change.approve`, `vendor.block`, `vendor.manage`, `user.manage`.
+  `GET /api/admin/permissions`
   returns the catalog (key + label) for the role editor — gated `user.manage`
   (see below), same as its sibling reads. Everything not in the catalog stays
   on `require_roles`.
@@ -944,7 +945,13 @@ exactly as before.
   reproduces today's matrix exactly: `admin` holds all; `ap_manager` holds
   invoice approve + run approve/execute + vendor bank-change/block/manage (NOT
   payment void); `cfo` holds invoice approve + run approve/execute + payment
-  void; `ap_clerk` holds none.
+  void; `ap_clerk` holds none. `payment.record_external` (record a payment the
+  customer made outside FeohLedger — issue #517, `backend/docs/payments.md`
+  § Record-only mode) had no prior route; it goes to the same holders as
+  `payment.execute` (admin, ap_manager, cfo) and is OR'd into the payments
+  page's reads beside execute/void. Its own permission rather than
+  `payment.execute` because recording moves no money: an org can keep sending
+  payments with a few people and let others book what they paid.
 - **Custom-role permissions** — a control-plane JSONB column `roles.permissions`
   (migration `0062_role_permissions`, control-plane-only — `roles` is
   control-plane). System roles leave it NULL (they resolve via the default map);

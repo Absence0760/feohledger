@@ -176,6 +176,7 @@ COLUMN_FOR: dict[tuple[str, str, str], tuple[str, str]] = {
     ("invoice", "InvoiceUpdate", "tax_rate"): ("invoices", "tax_rate"),
     # --- payments ---------------------------------------------------------
     ("payment", "PaymentCreate", "amount"): ("payments", "amount"),
+    ("payment", "RecordPaymentOutsideRequest", "amount"): ("payments", "amount"),
     # --- recurring / subscription invoices --------------------------------
     ("recurring_invoice", "RecurringTemplateCreate", "amount"): (
         "recurring_invoice_templates",

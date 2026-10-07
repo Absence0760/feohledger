@@ -31,7 +31,24 @@ each step.
         tested against the `mock` provider; what is left below is operator work
   - [ ] Webhook live
   - [ ] First test charge works
-- [ ] **Payment rails** — `payment-rails-onboarding.md` _(start early — 4–8 week lead time)_
+- [x] **Pilot payment model: no rail** — decided in
+      [#517](https://github.com/Absence0760/feohledger/issues/517). FeohLedger does
+      not move money for the pilot: customers pay suppliers from their own bank or
+      ERP and FeohLedger records it (ERP `Paid` webhook, "record as paid outside",
+      or a NACHA file the customer uploads to its own bank). Deployed tenants with
+      no processor are forced into record-only mode, so a stray Execute can't mark
+      invoices paid. The operator stays a sole proprietor for now. This takes the
+      **Payment rails** section below off the pilot's critical path —
+      `payment-rails-onboarding.md` § Before any of this
+  - [ ] Counsel review of Terms §7.2 / §13.2 (the "records, never makes, supplier
+        payments" clauses) — part of the #428 / #446 §4 pass
+  - [ ] E&O / professional liability + cyber cover bound (see **Insurance**) — the
+        main protection for a sole proprietor while no entity exists
+  - [ ] Form an entity before signing customer #1, **or** record an explicit
+        decision to sign the pilot as a sole proprietor (personal liability;
+        procurement teams and SOC 2 / insurance contracts expect a company).
+        No longer needed for KYB
+- [ ] **Payment rails** — `payment-rails-onboarding.md` _(deferred: not pilot-blocking under the no-rail model above; comes back when a signed customer wants FeohLedger to send payments)_
   - [ ] MT intro call done — **the only box here that is startable today**;
         everything below it needs formation docs, an EIN and beneficial owners,
         so this section and **Legal foundation** above are one serial chain, not
@@ -70,9 +87,10 @@ each step.
 ## Pilot-customer gate
 
 Before signing with customer #1, all of the above must be checked
-OR explicitly accepted as a pilot-only risk (e.g. direct-funding
-payment model means you might defer MSB licensing if pilot stays
-under the state de-minimis thresholds).
+OR explicitly accepted as a pilot-only risk. **Payment rails is accepted
+that way** under the no-rail model (#517): with FeohLedger moving no money,
+KYB, Third-Party Sender registration, the ACH Rules Compliance Audit, ACH
+fraud monitoring and the money-transmitter opinion don't apply.
 
 ## First-customer checklist (once the above is done)
 
@@ -86,6 +104,10 @@ under the state de-minimis thresholds).
       `custom-domain-provisioning.md` — pick the slug to match the
       hostname *before* provisioning the tenant)
 - [ ] Their AP team onboarded + trained (1h call usually enough)
+- [ ] Tenant's payment mode confirmed `record_only` (Settings → Payments;
+      forced automatically when no processor is configured) and, if they want the
+      bank file, the NACHA originator fields filled in from their bank
 - [ ] First invoice processed end-to-end
-- [ ] First payment executed
+- [ ] First payment recorded as paid (ERP webhook, "paid outside", or a NACHA
+      file uploaded to their bank)
 - [ ] First real invoice sent to them (Stripe)

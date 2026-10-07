@@ -934,7 +934,13 @@ the main seed writes approval or auto-approval audit rows, so each panel sits
 below its minimum sample. `seed.py` runs it after the tenant loop, in full mode
 only. To top up a tenant that's already seeded, run
 `python scripts/seed_automation.py --tenant feoh_acme`. It's additive, and it's a
-no-op once its first invoice exists.
+no-op once its concluded experiment ("Auto-approve invoices under $500") exists.
+
+Its ids are fixed uuid5s that do **not** include the org id, so every tenant
+gets the identical history. The experiment split hashes those ids, and when they
+carried the org id, about one tenant in fourteen seeded too few touchless
+invoices for the concluded test to call a winner. The seed tests failed
+intermittently in CI for the same reason.
 
 It writes **history, not results**. Every panel still computes on read, from
 about 100 back-dated acme invoices. Each carries the audit trail the app writes

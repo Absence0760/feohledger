@@ -1860,6 +1860,200 @@ Matching payments against bank statement entries:
 - Manual match for unmatched entries
 - Flag discrepancies
 
+## Record-only mode: FeohLedger records payments, the customer makes them
+
+For the pilot (issue #517, `docs/decisions.md` §251) **FeohLedger does not move
+money**. The customer pays its suppliers from its own bank or ERP; FeohLedger
+captures, matches, approves, keeps the audit trail and *records* that the
+payment happened. Three paths reach `paid` without a FeohLedger rail:
+
+| Path | How | Reaches `paid` via |
+|---|---|---|
+| **ERP-led** | Approve → export to the ERP → the customer pays there → the ERP webhook reports `Paid` | `api/erp_webhook._record_erp_reported_payment` |
+| **Bank file** | Stage a draft run → `GET /runs/{id}/nacha` → the customer uploads the file to its bank → `POST /runs/{id}/record-outside` | `services/external_payment.record_run_payment_paid_outside` |
+| **Paid outside** | A user records one invoice paid by cheque / bank portal with a reference | `POST /api/payments/record-outside` |
+
+All three go through `services/external_payment.py`, so they cannot disagree
+about what "recorded as paid" means.
+
+### Execution mode — `settings.payments.mode`
+
+`services/payment_execution_mode.resolve_execution_mode` decides whether a
+tenant's payments are dispatched (`processor`) or only recorded
+(`record_only`). It **fails closed**, because the hazard is the `mock` adapter,
+which reports every payment `completed` without moving money:
+
+| `settings.payments` | Local dev / CI | Deployed (`FEOH_ENVIRONMENT` not dev/test/ci) |
+|---|---|---|
+| `mode: "record_only"` | record-only | record-only |
+| `mode` absent or `"processor"`, provider absent / `mock` | processor (the honest local mock — guard rail 7) | **record-only** (`no_processor_in_deployed_environment`) |
+| `mode` absent or `"processor"`, a real provider | processor | processor |
+| any other `mode` value | record-only (`unknown_mode`) | record-only (`unknown_mode`) |
+
+There is no setting that makes `mock` a rail in a deployed environment.
+`PATCH /api/organization` 422s an unknown `mode`.
+
+On a record-only tenant every dispatching endpoint — `/runs/{id}/execute`,
+`/resume`, `/retry-failed`, `/{id}/compliance/release` and the standalone
+`POST /api/payments` — returns **409 `payments_record_only`** before anything is
+claimed: the run stays `draft`, nothing is dispatched. The refusal lives in
+`api/payments._require_payment_adapter`, the chokepoint every dispatcher already
+resolves its adapter through (`tests/test_payment_execution_mode.py` pins that
+each one does). `GET /api/payments/execution-mode` tells the SPA which controls
+to show.
+
+### Recording a payment made outside FeohLedger
+
+`POST /api/payments/record-outside` `{invoice_id, method, reference, paid_on, amount?}`,
+gated on the granular permission **`payment.record_external`** (default: admin,
+ap_manager, cfo). Available in both modes — a processor tenant can still pay one
+invoice by cheque.
+
+It books a `Payment` in `completed` with `provider = "external"`,
+`submitted_at = completed_at = paid_on` at midnight UTC, and
+`settled_amount`/`settled_currency` = the amount in the invoice's currency, then
+walks the invoice `→ payment_scheduled → paid`. That is the shape every reader
+already understands, so **bank reconciliation** matches it (by reference, or by
+amount + date), the **1099 YTD** aggregate counts it (by `completed_at` year and
+`method`), and the invoice's `paid` status takes it out of **aging** — with no
+reader special-casing it. No realized FX is booked: FeohLedger never saw the
+home-currency outflow.
+
+Controls (all in `services/external_payment.py`):
+
+- **Segregation of duties, the approval rule** — the recorder may not be anyone
+  implicated in creating the payable (`approval_chain.violates_segregation`:
+  `uploaded_by_id` ∪ `segregation_actor_ids`). 403
+  `external_payment_segregation`. The single-operator opt-out is the same
+  `settings.payments.require_run_segregation: false` every payment-side SoD
+  check honours.
+- **Payment-blocking exceptions refuse** (`external_payment_blocking_exception`)
+  — marking the invoice paid would bury a duplicate / fraud flag under a closed
+  item.
+- A **live virtual card**, an **applied credit that no longer pairs**, or
+  **another live payment** (dispatched, or held in a run) refuses — each is a
+  double-pay risk or an amount we can't state. An invoice inside a draft run is
+  refused with `external_payment_in_run` and pointed at the run-level record.
+- A `pending` standalone payment FeohLedger booked but **never dispatched** is
+  completed in place rather than left holding the live-payment slot.
+- The **amount** is what the invoice owes — net of applied credit memos and any
+  accepted early-pay discount at `paid_on`. A stated `amount` must equal it
+  (422 `external_payment_amount_mismatch`); partial payments aren't supported.
+- `paid_on` can't be more than a day past today's UTC date (the day of slack
+  is for users east of UTC); `method` can't be `virtual_card`; `reference` is
+  required (it's what reconciliation matches on).
+- An accepted early-payment discount applies only to a payment dated **on or
+  after the offer's acceptance**. `payable_amounts` checks the date against the
+  offer's deadline only — right for a run, which pays today — but a recorded
+  `paid_on` is the caller's word, and backdating it into the window would book
+  a saving the supplier never granted.
+- The insert runs in a savepoint: run creation doesn't take the invoice lock,
+  so a run booking the invoice at the same moment surfaces as
+  `external_payment_payment_live`, not a 500.
+- **Idempotent**: the same reference + paid-on date against an invoice it already
+  paid returns the existing payment with 200 and writes nothing.
+
+Deliberately **not** gated: the vendor's verification status and the CFO
+threshold. Both exist to stop FeohLedger *sending* money; here it already left
+the customer's bank, and refusing to record it would only leave the ledger
+wrong. (Approval already applied the CFO threshold.)
+
+Audit: `payment.recorded_outside` (source `user` / `erp`, amount, currency,
+method, reference, paid-on date — never bank data) plus the invoice's
+`invoice.payment_scheduled` and `invoice.paid_outside` /
+`invoice.paid_via_erp_report` transitions.
+
+### The bank file — NACHA export and the run-level record
+
+`GET /api/payments/runs/{id}/nacha?effective_date=&sec_code=CCD|PPD[&regenerate=true]`
+writes a NACHA ACH credit file (`services/nacha.py`) for a run, for the customer
+to upload to its own bank — it is the originator under its own bank agreement.
+One batch, credits only (service class 220), CCD by default (PPD for a consumer
+payee), unbalanced (no offsetting debit), padded to whole blocks of ten.
+
+Uploading the file is the money moving, so the export is treated as the
+dispatch step:
+
+- **Gated on `payment.execute`**, not `payment.record_external` — an org that
+  hands recording to a wider bookkeeping role has not handed it payment-file
+  origination.
+- **Record-only tenants only** (`nacha_requires_record_only`): on a processor
+  tenant the file plus an Execute would pay every supplier twice.
+- **It claims the run.** The first export flips `draft → exported`, a claim
+  state (`payment_runs.CLAIM_RUN_STATUSES`) that `/execute`, `/cancel` and
+  re-staging all refuse — so a second file, a cancel-and-restage, or a later
+  switch to processor mode can't pay the same suppliers again. A second file for
+  an `exported` run needs `regenerate=true` (else 409 `nacha_already_exported`)
+  and carries the next file-ID modifier (A, B, C… — counted on
+  `payment_runs.nacha_export_count`, migration 0106), so the bank's
+  duplicate-file check can tell them apart. If the bank rejected the file,
+  `POST /runs/{id}/nacha/void {reason}` (`payment.execute`, audited
+  `payment_run.nacha_export_voided`) returns the run to `draft`.
+- **Every dispatch-time check runs** — `payment_runs.dispatch_preflight`, the
+  same function `/execute` calls before each payment: still payable, no
+  payment-blocking exception raised since staging (a BEC bank-detail swap's
+  `fraud_flag` is the sharpest case — the file would carry the new account),
+  vendor still active, no live card, applied credits still pairing, and the
+  staged amount still exactly what the invoice owes on the effective date.
+  A failure refuses the file as `nacha_payment_not_payable` with the
+  dispatcher's reason code.
+- Maker-checker and CFO sign-off apply, as for `/execute`.
+- The originator comes from `settings.payments.nacha`
+  `{company_name ≤16, company_id (10 chars, as the bank assigned it — usually
+  "1" + EIN; it is also the immediate-origin field), odfi_routing (the customer's
+  bank's ABA), bank_name? ≤23}`, validated at save; missing →
+  `nacha_not_configured` naming the fields. It is org-wide, so a subsidiary's
+  run is debited from the one configured account — the same as the processor
+  path.
+- Every payment must be `ach`, in USD, ≤ $99,999,999.99, to a vendor whose
+  `bank_details` carry a valid ABA `routing_number` and an `account_number`
+  (`account_type: "savings"` selects transaction code 32, otherwise 22). The
+  effective date must be a business day (bank holidays are not checked).
+  Anything else refuses the whole file naming the invoice — never the bank data.
+- Each export writes `payment_run.nacha_exported` with counts, total, SEC code,
+  effective date, file-ID modifier and the file's SHA-256 — not the file.
+
+Once the bank has taken the file, `POST /api/payments/runs/{id}/record-outside`
+`{reference, paid_on}` records every pending payment of the `exported` (or
+`draft`, if the customer paid some other way) run as paid outside, keeping each
+payment's own rail, rolls the run up to `completed`, and writes
+`payment_run.recorded_outside`. Maker-checker and CFO sign-off apply. It checks
+**every** payment before writing **any** (in `lambda` audit mode an audit row
+leaves the process at once and a rollback can't recall it), runs the
+per-invoice gates, and refuses `external_payment_amount_changed` if what an
+invoice owes on `paid_on` is no longer the staged figure — booking the staged
+amount over a credit applied since would record both. One refusal refuses the
+whole run, naming the invoice. Locks are taken run → invoices → payments, the
+same invoice-before-payment order as the single record.
+
+### The ERP reports an invoice paid that FeohLedger never paid
+
+`posted_in_erp → paid` is not an edge of the state machine — a `paid` invoice
+needs a payment behind it — so an ERP `Paid` webhook for an `approved`,
+`sent_to_erp` or `posted_in_erp` invoice used to be dropped silently. It is now
+recorded through the same service (`source: "erp"`, method unknown → NULL, which
+counts as 1099-reportable; reference = the ERP document id; paid on the day the
+report arrives). A `sent_to_erp` invoice is first moved to `posted_in_erp`, since
+the ERP can only have paid a bill it holds. A refusal (an open payment-blocking
+exception, a live FeohLedger payment or card) is never silent. When FeohLedger
+still holds its own claim on paying the invoice — a live payment, a draft or
+exported run, a live card (`erp_webhook.DOUBLE_PAY_REFUSALS`) — that claim
+proceeding would pay the supplier twice, so the flag is the **payment-blocking**
+`payment_reconciliation`, which `dispatch_preflight` refuses on; any other
+refusal opens the non-blocking `erp_reconciliation`. Both name the refusal code.
+Segregation of duties doesn't apply — there is no human actor. The payment is
+dated the day the report arrives, not the ERP's own payment date (the webhook
+carries none). `payment_erp_sync` skips `provider = "external"` payments, so a
+payment the customer made in its own ERP is never pushed back to it as a bill
+payment.
+
+### Nothing else moves money on a record-only tenant
+
+`POST /api/cards/generate` refuses with the same `payments_record_only`: a
+minted virtual card is spendable, so it is a payment by another door.
+
+
+
 ## API Endpoints
 
 ### Implemented
@@ -1885,6 +2079,11 @@ Matching payments against bank statement entries:
 | `POST` | `/api/payments/{id}/compliance/release` | Re-run compliance-then-adapter for a payment stuck `pending_compliance`. `payment.execute`-gated, 409 outside that status. See § Sanctions / compliance hold resolution. |
 | `POST` | `/api/payments/{id}/compliance/dismiss` | Give up on a payment stuck `pending_compliance` — flips it to `failed` with a required `{reason}`, never reaches the adapter. `payment.void`-gated, 409 outside that status. See § Sanctions / compliance hold resolution. |
 | `POST` | `/api/payments/{id}/settlement/accept` | Accept a short / unverifiable settlement as final and release the held invoice to `paid`, recording the required `{reason}` + figures on the append-only trail. `payment.execute`-gated; 409 when the payment isn't `completed` or when its settlement already covers the invoice. See § An under-settlement holds the invoice short of `paid`. |
+| `GET` | `/api/payments/execution-mode` | `{mode: processor \| record_only, reason}` — whether this tenant's payments are dispatched or only recorded. Display only; every dispatcher enforces it. See § Record-only mode. |
+| `POST` | `/api/payments/record-outside` | Record one invoice as paid outside FeohLedger (`payment.record_external`). 201 new / 200 idempotent replay. See § Recording a payment made outside FeohLedger. |
+| `POST` | `/api/payments/runs/{id}/record-outside` | Record a whole `exported` (or `draft`) run as paid through the customer's bank (`payment.record_external`). All-or-nothing; maker-checker + CFO sign-off; refuses a changed amount. |
+| `GET` | `/api/payments/runs/{id}/nacha` | NACHA ACH credit file for a run (`payment.execute`, record-only tenants only). Claims the run (`draft → exported`); a second file needs `regenerate=true`. Runs `dispatch_preflight`. Audited `payment_run.nacha_exported`. See § The bank file. |
+| `POST` | `/api/payments/runs/{id}/nacha/void` | The bank rejected the file: `exported → draft`, required `{reason}`, `payment.execute`, audited `payment_run.nacha_export_voided`. |
 
 **Query parameters for `GET /api/payments`:**
 

@@ -299,6 +299,14 @@ async def _sync_one_leg(
         # sync once the in-flight payment settles.
         if payment.status != "completed":
             return _SKIPPED, False
+        # A payment recorded as made OUTSIDE FeohLedger (`services/external_payment`)
+        # was made in the customer's own bank or ERP — the ERP already holds it,
+        # or the customer enters it there. Pushing it as a bill payment would
+        # book it twice in their ledger, and its invoice is already `paid`.
+        from app.services.external_payment import EXTERNAL_PAYMENT_PROVIDER
+
+        if payment.provider == EXTERNAL_PAYMENT_PROVIDER:
+            return _SKIPPED, False
 
         # Resolve the ERP adapter for THIS leg, before taking the invoice lock.
         # `get_erp_adapter` fails closed on a `settings.erp` type it has no

@@ -1,7 +1,8 @@
 # Payment rails — paying your customers' vendors
 
-**Why this matters**: This is the longest-lead-time item on the
-critical path. Real ACH out of a real bank takes 3–6 weeks of KYB +
+**Why this matters**: Once a customer wants FeohLedger to send its
+payments, this is the longest-lead-time item on the critical path (for the
+no-rail pilot it is off it — see § Before any of this). Real ACH out of a real bank takes 3–6 weeks of KYB +
 bank onboarding. Start this in **week 1** even if everything else is
 parallel.
 
@@ -12,6 +13,47 @@ runbook are one serial chain, not two parallel ones — the issue
 tracker presents them as separate sections and that is the trap. Book
 the call now anyway: it is free, and what the KYB packet asks for
 tells you what the incorporation has to produce.
+
+## Before any of this: the pilot runs with no rail
+
+**Decided in [#517](https://github.com/Absence0760/feohledger/issues/517):
+for the pilot, FeohLedger does not move money.** Customers pay their suppliers
+from their own bank or ERP; FeohLedger captures, extracts, matches, approves,
+keeps the audit trail and *records* that the payment happened. Every
+obligation in the rest of this runbook — KYB, NACHA Third-Party Sender
+registration, the annual ACH Rules Compliance Audit, mandatory ACH fraud
+monitoring, the money-transmitter legal opinion — exists only because
+FeohLedger would be moving customers' money. With no rail, none of them apply,
+so this runbook is **deferred and not pilot-blocking**.
+
+What a pilot customer does instead (`backend/docs/payments.md` § Record-only
+mode):
+
+| Path | What the customer does |
+|---|---|
+| **ERP-led** | Approve in FeohLedger → export to their ERP → pay there. The ERP webhook reports `Paid` and FeohLedger records it. |
+| **Bank file** | Stage a payment run → download the NACHA file → upload it to *their own* bank (they are the originator under their own bank agreement) → record the run as paid. Needs the NACHA originator fields in Settings → Payments (company name, the company ID their bank assigned, their bank's routing number). |
+| **Paid outside** | Pay by cheque or bank portal, then "Record as paid outside FeohLedger" with the cheque number / confirmation. |
+
+Operator checklist for a no-rail tenant:
+
+1. Leave `settings.payments.provider` unset (or `mock`). In production that
+   alone forces **record-only** mode — Execute is refused, so nobody can mark
+   invoices paid that nothing paid. Setting `mode: record_only` explicitly in
+   Settings → Payments makes the intent visible and survives someone later
+   adding sandbox processor credentials.
+2. If the customer wants the bank file, fill in the NACHA originator fields from
+   their bank's ACH origination agreement, and confirm with their bank whether it
+   wants a balanced file (FeohLedger writes an unbalanced, credits-only file —
+   what most banks expect from a corporate originator).
+3. The Terms (§7.2, §13.2) already say the Service records, but never makes,
+   supplier payments, and that a recorded paid status is the customer's own
+   record. Counsel review of those clauses rides the #428 / #446 §4 pass.
+
+**Trigger to come back to the rest of this runbook:** a signed customer who
+wants FeohLedger to send the payments itself. At that point the entity, KYB,
+Third-Party Sender registration and money-transmitter opinion all return — and
+the tenant moves to `mode: processor` with a real provider.
 
 ## Current state
 

@@ -1,11 +1,12 @@
 """Payment endpoints."""
 
 import asyncio
+import hashlib
 import logging
 import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 from types import SimpleNamespace
 from typing import Literal
@@ -33,9 +34,11 @@ from app.api.pagination import (
 )
 from app.api.permissions import (
     PERM_PAYMENT_EXECUTE,
+    PERM_PAYMENT_RECORD_EXTERNAL,
     PERM_PAYMENT_RUN_APPROVE,
     PERM_PAYMENT_VOID,
 )
+from app.api.refusals import coded_refusal
 from app.api.sorting import SortParams, resolve_order_by, sort_params
 from app.models.credit_memo import CreditMemo
 from app.models.exception import Exception as APException
@@ -51,6 +54,8 @@ from app.schemas.payment import (
     PaymentResponse,
     PaymentRunListResponse,
     PaymentRunResponse,
+    RecordPaymentOutsideRequest,
+    RecordRunOutsideRequest,
 )
 from app.services.applied_credit_integrity import (
     applied_credit_conflict_exists,
@@ -66,10 +71,24 @@ from app.services.currency_conversion import (
     resolve_reporting_currency,
 )
 from app.services.exception_lifecycle import record_decision
+from app.services.external_payment import (
+    ExternalPaymentRefused,
+    paid_on_timestamp,
+    record_invoice_paid_outside,
+    record_run_payment_paid_outside,
+    run_payment_refusal,
+)
 from app.services.international_payments import (
     is_international_payment,
     normalize_currency_code,
     resolve_home_currency,
+)
+from app.services.nacha import MAX_ENTRY_AMOUNT as NACHA_MAX_ENTRY_AMOUNT
+from app.services.nacha import (
+    build_nacha_file,
+    entry_from_bank_details,
+    originator_from_settings,
+    originator_problems,
 )
 from app.services.payment_adapters import (
     PaymentAdapter,
@@ -84,6 +103,7 @@ from app.services.payment_controls import (
     cfo_approval_decision,
     check_run_segregation,
 )
+from app.services.payment_execution_mode import resolve_execution_mode
 from app.services.payment_runs import (
     CARD_CLAIM_ONLY_METHOD,
     PAYABLE_VENDOR_STATUS,
@@ -96,6 +116,7 @@ from app.services.payment_runs import (
     card_claimed_invoice_ids,
     create_payment_run_for_invoices,
     derive_run_status,
+    dispatch_preflight,
     inactive_vendor_statuses,
     is_retry_safe,
     net_payable_amount,
@@ -113,7 +134,11 @@ from app.services.payment_settlement_record import (
     open_settlement_mismatch_exception,
     record_completion,
 )
-from app.services.workflow_engine import VALID_TRANSITIONS, transition_invoice
+from app.services.workflow_engine import (
+    VALID_TRANSITIONS,
+    get_invoice_for_update,
+    transition_invoice,
+)
 from app.tenant import (
     apply_entity_scope,
     get_entity_id,
@@ -228,6 +253,33 @@ PAYMENT_BLOCKING_EXCEPTION_TYPES = (
 LIVE_PAYMENT_TERMINAL_STATUSES = ("voided", "failed", "cancelled")
 
 
+#: `detail.code` of the refusal a record-only tenant gets from every
+#: money-dispatching endpoint (`services/payment_execution_mode`).
+PAYMENTS_RECORD_ONLY = "payments_record_only"
+
+
+def refuse_record_only(org: Organization) -> None:
+    """409 when this tenant's payments are recorded, never dispatched.
+
+    Called before anything is claimed or dispatched, so a refused run stays
+    `draft` (or a held payment `pending_compliance`) and nothing moves. The
+    message names the two honest paths to `paid` instead: the customer's ERP
+    reporting it, or a user recording a payment made outside FeohLedger.
+    """
+    resolved = resolve_execution_mode(org.settings)
+    if resolved.record_only:
+        raise HTTPException(
+            status_code=409,
+            detail=coded_refusal(
+                PAYMENTS_RECORD_ONLY,
+                "FeohLedger does not send payments for this organization. Pay the "
+                "supplier from your bank or ERP, then record the payment as paid "
+                "outside FeohLedger (or let your ERP report it paid).",
+                reason=resolved.reason,
+            ),
+        )
+
+
 def _require_payment_adapter(org: Organization) -> PaymentAdapter:
     """Resolve the org's payment processor, or refuse before anything moves.
 
@@ -237,7 +289,14 @@ def _require_payment_adapter(org: Organization) -> PaymentAdapter:
     through here FIRST, so the refusal lands as an actionable 409 with the
     run still in `draft` and no payment dispatched, rather than as a 500 with
     the run stranded `executing`.
+
+    It is also where a **record-only** tenant is refused
+    (:func:`refuse_record_only`, `services/payment_execution_mode`): the
+    pilot's no-rail model, and — fail-closed — any deployed tenant whose
+    processor would resolve to `mock`, which reports every payment `completed`
+    without moving money.
     """
+    refuse_record_only(org)
     try:
         return get_payment_adapter((org.settings or {}).get("payments") or {})
     except UnknownPaymentProviderError as exc:
@@ -423,7 +482,9 @@ async def list_payments(
     # `require_roles(ADMIN, AP_MANAGER, CFO)` exactly for the four system
     # roles and additionally opens it to a custom role granted only one of
     # the two.
-    user: User = Depends(require_permission(PERM_PAYMENT_EXECUTE, PERM_PAYMENT_VOID)),
+    user: User = Depends(
+        require_permission(PERM_PAYMENT_EXECUTE, PERM_PAYMENT_VOID, PERM_PAYMENT_RECORD_EXTERNAL)
+    ),
     entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
     _filters = {
@@ -759,7 +820,9 @@ async def payment_queue(
     pagination: PaginationParams = Depends(pagination_params),
     db: AsyncSession = Depends(get_tenant_db),
     org: Organization = Depends(get_tenant),
-    user: User = Depends(require_permission(PERM_PAYMENT_EXECUTE, PERM_PAYMENT_VOID)),
+    user: User = Depends(
+        require_permission(PERM_PAYMENT_EXECUTE, PERM_PAYMENT_VOID, PERM_PAYMENT_RECORD_EXTERNAL)
+    ),
     entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
     """A page of approved invoices ready for payment (no live payment yet).
@@ -960,7 +1023,9 @@ async def payment_queue(
 async def payment_queue_ids(
     db: AsyncSession = Depends(get_tenant_db),
     org: Organization = Depends(get_tenant),
-    user: User = Depends(require_permission(PERM_PAYMENT_EXECUTE, PERM_PAYMENT_VOID)),
+    user: User = Depends(
+        require_permission(PERM_PAYMENT_EXECUTE, PERM_PAYMENT_VOID, PERM_PAYMENT_RECORD_EXTERNAL)
+    ),
     entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
     """The invoice ids of every SELECTABLE (non-blocked) queue row — the
@@ -1027,7 +1092,9 @@ PENDING_PAYMENT_STATUSES = ("pending", "processing", "submitted", "pending_compl
 async def payment_summary(
     db: AsyncSession = Depends(get_tenant_db),
     org: Organization = Depends(get_tenant),
-    user: User = Depends(require_permission(PERM_PAYMENT_EXECUTE, PERM_PAYMENT_VOID)),
+    user: User = Depends(
+        require_permission(PERM_PAYMENT_EXECUTE, PERM_PAYMENT_VOID, PERM_PAYMENT_RECORD_EXTERNAL)
+    ),
     entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
     """KPIs for the payments page summary bar. Scoped to the selected entity.
@@ -1266,6 +1333,27 @@ async def compare_corridor_quotes(
     }
 
 
+@router.get("/execution-mode")
+async def get_execution_mode(
+    org: Organization = Depends(get_tenant),
+    # Same gate as the rest of the page's reads: whoever can reach /payments
+    # needs to know whether its Execute controls exist.
+    user: User = Depends(
+        require_permission(PERM_PAYMENT_EXECUTE, PERM_PAYMENT_VOID, PERM_PAYMENT_RECORD_EXTERNAL)
+    ),
+):
+    """Whether FeohLedger sends this tenant's payments or only records them.
+
+    The SPA hides Execute / Resume / Retry on a `record_only` tenant and offers
+    "Record as paid outside FeohLedger" instead. Display only — every
+    dispatching endpoint enforces the same resolution server-side
+    (`refuse_record_only`). `reason` is a fixed, PII-free vocabulary
+    (`services/payment_execution_mode`).
+    """
+    resolved = resolve_execution_mode(org.settings)
+    return {"mode": resolved.mode, "reason": resolved.reason}
+
+
 @router.get("/counts")
 async def payment_status_counts(
     method: str | None = None,
@@ -1278,7 +1366,9 @@ async def payment_status_counts(
     # only one of the two permissions could read the History list and got a 403
     # here, at which point the page falls back to the page-scoped tally this
     # endpoint exists to replace — reintroducing the undercount for that user.
-    user: User = Depends(require_permission(PERM_PAYMENT_EXECUTE, PERM_PAYMENT_VOID)),
+    user: User = Depends(
+        require_permission(PERM_PAYMENT_EXECUTE, PERM_PAYMENT_VOID, PERM_PAYMENT_RECORD_EXTERNAL)
+    ),
     entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
     """Per-status payment tallies for the History-tab filter chips.
@@ -1387,7 +1477,9 @@ async def get_payment(
     # Same any-of as the list above — the single-payment companion of a
     # resource a `payment.execute`/`payment.void` custom-role holder can
     # already list.
-    user: User = Depends(require_permission(PERM_PAYMENT_EXECUTE, PERM_PAYMENT_VOID)),
+    user: User = Depends(
+        require_permission(PERM_PAYMENT_EXECUTE, PERM_PAYMENT_VOID, PERM_PAYMENT_RECORD_EXTERNAL)
+    ),
     entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
     p = await _get_scoped_payment(db, payment_id, entity_id)
@@ -2603,6 +2695,12 @@ async def create_payment(
     user: User = Depends(require_permission(PERM_PAYMENT_EXECUTE)),
     entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
+    # A standalone booking is a payment FeohLedger is to send. A record-only
+    # tenant has nothing to send it with, and a `pending` row nothing will ever
+    # advance would hold the invoice's live-payment slot — so refuse it here and
+    # point at `POST /api/payments/record-outside`, the honest path.
+    refuse_record_only(org)
+
     # Verify invoice exists and has cleared approval. Recording a payment
     # against a pre-approval invoice (new/pending/ready_for_review/rejected/
     # failed) would book money against something nobody signed off on.
@@ -2869,6 +2967,91 @@ async def create_payment(
     return PaymentResponse.from_db(payment, invoice)
 
 
+def _external_refusal_http(exc: ExternalPaymentRefused) -> HTTPException:
+    r = exc.refusal
+    return HTTPException(
+        status_code=r.http_status,
+        detail=coded_refusal(r.code, r.message, **(r.params or {})),
+    )
+
+
+def _refuse_future_paid_on(paid_on) -> None:
+    # One day of slack past the UTC date: a user east of UTC (up to UTC+14)
+    # recording "today" is already on tomorrow's UTC-calendar date for part of
+    # every day, and refusing their honest date would be the bug.
+    if paid_on > utc_today() + timedelta(days=1):
+        raise HTTPException(
+            status_code=422,
+            detail=coded_refusal(
+                EXTERNAL_PAYMENT_PAID_ON_FUTURE,
+                "The paid-on date can't be in the future.",
+            ),
+        )
+
+
+#: `detail.code` when a recorded payment is dated after today (UTC).
+EXTERNAL_PAYMENT_PAID_ON_FUTURE = "external_payment_paid_on_future"
+
+
+@router.post("/record-outside", response_model=PaymentResponse)
+async def record_payment_outside(
+    body: RecordPaymentOutsideRequest,
+    response: Response,
+    db: AsyncSession = Depends(get_tenant_db),
+    org: Organization = Depends(get_tenant),
+    user: User = Depends(require_permission(PERM_PAYMENT_RECORD_EXTERNAL)),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
+):
+    """Record that the customer paid this invoice outside FeohLedger.
+
+    The no-rail pilot's path to `paid` (issue #517, decisions §251). Books a
+    `completed` payment with `provider = "external"` and walks the invoice to
+    `paid`, so bank reconciliation, 1099 YTD and aging see it exactly as they
+    see a rail-settled payment. Every rule — segregation of duties, the
+    payment-blocking exception gate, the amount — lives in
+    `services/external_payment.py`.
+
+    Available in BOTH execution modes: a processor tenant can still pay one
+    invoice by cheque. **Idempotent**: replaying the same reference and paid-on
+    date returns the existing payment with 200 and writes nothing; a new record
+    is 201.
+    """
+    _refuse_future_paid_on(body.paid_on)
+    # Entity-scoped like every by-id money route here, and locked FOR UPDATE so
+    # a double-click serializes: the second request wakes to a `paid` invoice
+    # and resolves as the idempotent replay.
+    invoice = (
+        await db.execute(
+            apply_entity_scope(
+                select(Invoice).where(Invoice.id == body.invoice_id), Invoice, entity_id
+            ).with_for_update()
+        )
+    ).scalar_one_or_none()
+    if invoice is None:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+
+    try:
+        recorded = await record_invoice_paid_outside(
+            db,
+            org=org,
+            invoice=invoice,
+            method=body.method.value,
+            reference=body.reference,
+            paid_on=body.paid_on,
+            actor_id=user.id,
+            source="user",
+            amount=body.amount,
+        )
+    except ExternalPaymentRefused as exc:
+        raise _external_refusal_http(exc) from exc
+
+    if recorded.created:
+        await db.commit()
+        response.status_code = status.HTTP_201_CREATED
+    await db.refresh(recorded.payment)
+    return PaymentResponse.from_db(recorded.payment, invoice)
+
+
 # ── Payment Runs ─────────────────────────────────────────────────────
 
 
@@ -2907,7 +3090,7 @@ async def list_payment_runs(
     # RunDetailModal (where the Execute button lives). Exact match: default
     # holders are ADMIN, AP_MANAGER, CFO — the same set `require_roles`
     # granted, AP_CLERK excluded either way.
-    user: User = Depends(require_permission(PERM_PAYMENT_EXECUTE)),
+    user: User = Depends(require_permission(PERM_PAYMENT_EXECUTE, PERM_PAYMENT_RECORD_EXTERNAL)),
     entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
     query = apply_entity_scope(select(PaymentRun), PaymentRun, entity_id)
@@ -3071,7 +3254,7 @@ async def get_payment_run(
     # `RunDetailModal.svelte` fetches this on open — it's the load-bearing
     # read that puts the Execute button (itself gated on `payment.execute`)
     # on screen at all. Same exact-match reasoning as the list above.
-    user: User = Depends(require_permission(PERM_PAYMENT_EXECUTE)),
+    user: User = Depends(require_permission(PERM_PAYMENT_EXECUTE, PERM_PAYMENT_RECORD_EXTERNAL)),
     entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
     """Get a payment run with its individual payments.
@@ -3505,119 +3688,23 @@ async def _execute_single_payment(
         payment.completed_at = now
         return
 
-    # Is the invoice still PAYABLE now, immediately before the adapter call?
-    #
-    # The run was built against `PAYABLE_INVOICE_STATUSES`, but nothing freezes
-    # the invoice between booking and dispatch: `POST /api/invoices/{id}/send-to-erp`
-    # happily walks an invoice holding a `pending` run payment
-    # `approved → sending_to_erp → sent_to_erp`, and `sent_to_erp` can only
-    # advance to `posted_in_erp` / `done` — `payment_scheduled` is NOT a legal
-    # successor (`workflow_engine.VALID_TRANSITIONS`).
-    #
-    # Without this guard the mismatch surfaced in the worst possible place: the
-    # `transition_invoice` call sits AFTER `adapter.create_payment` returned and
-    # `provider_payment_id` was assigned, so `validate_transition`'s 409 unwound
-    # into `_dispatch_run_payments`' generic `except`, which recorded
-    # `failed / unexpected_error:HTTPException` on a payment the processor had
-    # already accepted. `classify_payment_failure` then read the populated
-    # `provider_payment_id` as IN_DOUBT (correctly — `/retry-failed` must not
-    # re-send), the webhook refuses to advance an already-terminal payment and
-    # the reconciler only polls `submitted`/`processing`, so nothing ever
-    # corrected it: the money moved and no surface said so.
-    #
-    # Refusing HERE — before any order exists at the processor — turns that into
-    # a named, retry-safe refusal (`invoice_not_payable:<status>`), exactly like
-    # the `net_amount_changed` guard below. A fresh run re-derives the payment
-    # once the ERP push completes (`posted_in_erp` is payable).
-    if invoice.status.value not in PAYABLE_INVOICE_STATUSES:
+    # Every check that must hold immediately before money moves — still
+    # payable, no payment-blocking exception raised since booking (the BEC
+    # bank-detail swap's `fraud_flag` is the sharpest case), vendor still
+    # active, no live card claiming the invoice on another rail, applied
+    # credits still pairing, and the booked amount (credits + accepted
+    # discount) still exactly what the invoice owes today. One shared function
+    # (`payment_runs.dispatch_preflight`) because the NACHA export and the
+    # run-level "paid outside" record release money too, and must not run a
+    # smaller set. Each refusal is made BEFORE any order exists at the
+    # processor, so each is retry-safe (`_RETRY_SAFE_FAILURE_PREFIXES`); the
+    # reasoning per check is in that function's docstring and in
+    # `backend/docs/payments.md` § The invoice's payability is re-checked
+    # before the adapter call.
+    refusal = await dispatch_preflight(db, payment, invoice, as_of=now.date())
+    if refusal is not None:
         payment.status = "failed"
-        payment.failure_reason = f"invoice_not_payable:{invoice.status.value}"
-        payment.completed_at = now
-        return
-
-    # A payment-blocking exception raised AFTER the run was built must stop
-    # dispatch. `create_payment_run_for_invoices` refuses every
-    # `PAYMENT_BLOCKING_EXCEPTION_TYPES` member at creation, but nothing
-    # freezes the invoice while a draft run waits for CFO sign-off or a
-    # payment sits `pending_compliance` — and the single sharpest case is an
-    # approved BEC bank-detail swap, which raises a `fraud_flag` ("Vendor bank
-    # details changed; verify before payment") and whose new
-    # `Vendor.bank_details` this function then re-reads two blocks down.
-    # `/retry-failed` already re-runs this gate before a days-later re-send; so
-    # must `/execute`, `/resume` and `/compliance/release`. Same shared
-    # predicate (`blocking_exception_types`), refused BEFORE the adapter call so
-    # it is retry-safe and a fresh run re-derives the payment once the human
-    # clears the flag.
-    _blocked = await blocking_exception_types(db, [invoice.id])
-    if invoice.id in _blocked:
-        payment.status = "failed"
-        payment.failure_reason = f"invoice_blocked:{_blocked[invoice.id]}"
-        payment.completed_at = now
-        return
-
-    # The vendor must still be verified and active. The run builder refuses an
-    # unverified / inactive / rejected vendor, but a vendor can be deactivated,
-    # rejected or merged away while a draft run waits for CFO sign-off. Same
-    # shared predicate (`inactive_vendor_statuses`), refused BEFORE the adapter
-    # call so it is retry-safe; `/retry-failed` re-checks it before a re-send.
-    _vendor_refused = await inactive_vendor_statuses(db, [invoice])
-    if invoice.id in _vendor_refused:
-        payment.status = "failed"
-        payment.failure_reason = f"vendor_not_active:{_vendor_refused[invoice.id]}"
-        payment.completed_at = now
-        return
-
-    # A live virtual card minted for this invoice since the run was built claims
-    # it on a rail this payment isn't using (`card_claimed_invoice_ids` returns
-    # nothing for a `virtual_card` payment, which legitimately CONVERGES on that
-    # card). Paying now on any other rail is a second, independent outflow —
-    # the same gate the run builder and `/retry-failed` run.
-    if await card_claimed_invoice_ids(db, [(invoice.id, payment.method)]):
-        payment.status = "failed"
-        payment.failure_reason = "invoice_has_live_card"
-        payment.completed_at = now
-        return
-
-    # What the invoice is worth NOW, immediately before the adapter call.
-    # `payment.amount` was netted against applied credit memos when the row was
-    # booked (`payment_runs.payable_amounts`), but `credit_memos.py` gates an
-    # application on neither invoice status nor an existing payment — so a
-    # credit recorded between booking and dispatch (a run sitting `draft`
-    # awaiting CFO sign-off, a payment held `pending_compliance`) leaves the
-    # row's amount stale and would overpay the vendor by the credit.
-    #
-    # The amount is never silently adjusted here — re-pricing money nobody
-    # re-approved is its own defect — so refuse and let a fresh run re-derive
-    # it through the full gate set. This mirrors `/retry-failed`'s
-    # `net_amount_changed` skip exactly, and is a refusal made BEFORE the
-    # adapter is called, hence retry-safe (`_RETRY_SAFE_FAILURE_PREFIXES`).
-    # The applied credits must still pair with the invoice: a re-extraction
-    # can rewrite its vendor or currency after booking, and the net below would
-    # then credit the wrong supplier or subtract across currencies. Refused
-    # BEFORE the adapter call, so retry-safe (decisions §214).
-    _credit_conflict = (await applied_credit_conflicts(db, [invoice])).get(invoice.id)
-    if _credit_conflict is not None:
-        payment.status = "failed"
-        payment.failure_reason = f"applied_credit_mismatch:{_credit_conflict}"
-        payment.completed_at = now
-        return
-
-    # The same question for an accepted early-payment discount, asked on the
-    # day the money actually moves: the row was booked with the discount its
-    # booking date earned, and a draft can wait past the offer's deadline for
-    # CFO sign-off (or a discount can be accepted after booking). Moving a
-    # different amount than the one approved is the re-pricing this function
-    # refuses, so it fails retry-safe as `discount_changed` and a fresh run
-    # books what is owed now — the full amount once the deadline has passed.
-    current = await payable_amount(db, invoice, pay_date=now.date())
-    if booked_discount_mismatch(payment, current):
-        payment.status = "failed"
-        payment.failure_reason = "discount_changed"
-        payment.completed_at = now
-        return
-    if current.amount != payment.amount:
-        payment.status = "failed"
-        payment.failure_reason = "net_amount_changed"
+        payment.failure_reason = refusal
         payment.completed_at = now
         return
 
@@ -4304,6 +4391,437 @@ async def execute_payment_run(
     return await _dispatch_run_payments(
         db, run=run, run_id=run_id, org=org, user=user, adapter=adapter
     )
+
+
+@router.post("/runs/{run_id}/record-outside")
+async def record_run_paid_outside(
+    run_id: uuid.UUID,
+    body: RecordRunOutsideRequest,
+    db: AsyncSession = Depends(get_tenant_db),
+    org: Organization = Depends(get_tenant),
+    user: User = Depends(require_permission(PERM_PAYMENT_RECORD_EXTERNAL)),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
+):
+    """Record a whole draft run as paid by the customer's own bank.
+
+    The bank-file half of the no-rail pilot: the customer downloads the run's
+    NACHA file (`GET /runs/{id}/nacha`), uploads it to its bank — it is the
+    originator under its own bank agreement — and records the run here once the
+    bank has taken it. Nothing is dispatched.
+
+    The run's own controls hold exactly as they do for `/execute`, because this
+    is the step that closes the run out: maker-checker (the run's creator may
+    not record it) and CFO sign-off above the threshold. Each payment then goes
+    through `services/external_payment` — segregation of duties against the
+    invoice, the payment-blocking exception gate — and **one refusal refuses the
+    whole run**, naming the invoice, so a run is never left half-recorded.
+    """
+    _refuse_future_paid_on(body.paid_on)
+    run = await _get_scoped_run(db, run_id, entity_id, for_update=True)
+    # `exported` is the normal case — the customer uploaded the run's NACHA file
+    # and its bank took it. `draft` covers a run the customer paid some other
+    # way (its own bank portal, a file it built itself).
+    if run.status not in ("draft", "exported"):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Only a 'draft' or 'exported' run can be recorded as paid, not '{run.status}'"
+            ),
+        )
+    check_run_segregation(
+        run.initiated_by,
+        user.id,
+        (org.settings or {}).get("payments"),
+        action="record as paid",
+    )
+    if run.requires_cfo_approval and run.cfo_approved_at is None:
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "This run exceeds the org's CFO-approval threshold and is awaiting "
+                "sign-off from a user with the CFO role."
+            ),
+        )
+
+    # Lock order: run → invoices → payments, the order the per-invoice record
+    # takes (invoice → its payments), so the two can't deadlock on a shared
+    # invoice. Read the payments once unlocked to learn which invoices to lock.
+    payment_query = (
+        select(Payment)
+        .where(Payment.payment_run_id == run.id)
+        .order_by(Payment.created_at.asc(), Payment.id.asc())
+    )
+    staged = (await db.execute(payment_query)).scalars().all()
+    for invoice_id in dict.fromkeys(p.invoice_id for p in staged):
+        await get_invoice_for_update(db, invoice_id)
+    payments = active_run_payments(
+        (await db.execute(payment_query.with_for_update())).scalars().all()
+    )
+    pending = [p for p in payments if p.status == "pending"]
+    if not pending:
+        raise HTTPException(status_code=409, detail="This run has no payments left to record")
+
+    # Two passes. Lock and check EVERY invoice first, so one refusal refuses
+    # the run before anything is written — including an audit row, which in
+    # `lambda` audit mode leaves the process at once and a rollback cannot
+    # recall (`external_payment.run_payment_refusal`). Locks are taken in the
+    # run's payment order, the same order every pass uses.
+    invoices: dict[uuid.UUID, Invoice] = {}
+    for payment in pending:
+        invoice = await get_invoice_for_update(db, payment.invoice_id)
+        invoices[payment.id] = invoice
+        refusal = await run_payment_refusal(
+            db,
+            org=org,
+            invoice=invoice,
+            payment=payment,
+            actor_id=user.id,
+            paid_on=body.paid_on,
+        )
+        if refusal is not None:
+            # Nothing written: the whole run stays `draft` and untouched.
+            raise HTTPException(
+                status_code=refusal.http_status,
+                detail=coded_refusal(
+                    refusal.code,
+                    f"{invoice.invoice_number or invoice.id}: {refusal.message}",
+                    invoice_number=invoice.invoice_number,
+                    **(refusal.params or {}),
+                ),
+            )
+    for payment in pending:
+        await record_run_payment_paid_outside(
+            db,
+            org=org,
+            invoice=invoices[payment.id],
+            payment=payment,
+            reference=body.reference,
+            paid_on=body.paid_on,
+            actor_id=user.id,
+        )
+
+    # A claim state (`draft`) passes straight through `derive_run_status`, so
+    # roll the run up explicitly: every payment is now terminal.
+    run.status = rollup_payment_statuses(p.status for p in payments).run_status
+    run.executed_at = paid_on_timestamp(body.paid_on)
+
+    from app.services.audit_dispatch import dispatch_audit
+
+    await dispatch_audit(
+        db,
+        correlation_id=uuid.uuid4(),
+        organization_id=org.id,
+        actor_id=user.id,
+        action="payment_run.recorded_outside",
+        entity_type="payment_run",
+        entity_id=run.id,
+        details={
+            "payment_count": len(pending),
+            "total_amount": str(sum((p.amount for p in pending), Decimal("0"))),
+            "reference": body.reference,
+            "paid_on": body.paid_on.isoformat(),
+            "status": run.status,
+        },
+    )
+    await db.commit()
+    return {
+        "id": str(run.id),
+        "status": run.status,
+        "payment_count": len(pending),
+        "total_amount": str(sum((p.amount for p in pending), Decimal("0"))),
+    }
+
+
+#: `detail.code`s of the NACHA export's refusals (`export_run_nacha`).
+NACHA_REQUIRES_RECORD_ONLY = "nacha_requires_record_only"
+NACHA_NOT_CONFIGURED = "nacha_not_configured"
+NACHA_PAYMENT_NOT_ACH = "nacha_payment_not_ach"
+NACHA_VENDOR_BANK_MISSING = "nacha_vendor_bank_missing"
+NACHA_CURRENCY_NOT_USD = "nacha_currency_not_usd"
+NACHA_AMOUNT_TOO_LARGE = "nacha_amount_too_large"
+NACHA_PAYMENT_NOT_PAYABLE = "nacha_payment_not_payable"
+NACHA_ALREADY_EXPORTED = "nacha_already_exported"
+
+#: File-ID modifiers in issue order (NACHA: A-Z, then 0-9).
+NACHA_FILE_ID_MODIFIERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+
+
+def _next_business_day(today: date) -> date:
+    nxt = today + timedelta(days=1)
+    while nxt.weekday() >= 5:
+        nxt += timedelta(days=1)
+    return nxt
+
+
+@router.get("/runs/{run_id}/nacha")
+async def export_run_nacha(
+    run_id: uuid.UUID,
+    effective_date: date | None = Query(None),
+    sec_code: Literal["CCD", "PPD"] = Query("CCD"),
+    regenerate: bool = Query(False),
+    db: AsyncSession = Depends(get_tenant_db),
+    org: Organization = Depends(get_tenant),
+    # The counterpart of `/execute`: uploading this file is what moves the
+    # money, so it gates on `payment.execute`, NOT `payment.record_external` —
+    # an org that hands recording to a wider bookkeeping role must not have
+    # handed it payment-file origination with it.
+    user: User = Depends(require_permission(PERM_PAYMENT_EXECUTE)),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
+):
+    """A NACHA ACH credit file for a run, for the customer to upload to its bank.
+
+    The bank-file path of the no-rail pilot (issue #517, decisions §251;
+    builder: `services/nacha.py`). The customer is the originator under its own
+    bank agreement; FeohLedger moves nothing itself — but the upload does, so
+    this endpoint is treated as the dispatch step:
+
+    * **Record-only tenants only.** On a processor tenant the same run could be
+      executed through the rail as well.
+    * **It claims the run.** The first export flips `draft → exported`, which
+      `/execute`, `/cancel` and re-staging all refuse, so the same suppliers
+      can't be paid twice by a second file, a cancelled-and-restaged run, or a
+      later switch to processor mode. A second file for an `exported` run needs
+      `regenerate=true` and carries the next file-ID modifier (A, B, C, …), so
+      the bank's duplicate-file check can tell them apart. If the bank rejected
+      the file, `POST /runs/{id}/nacha/void` returns the run to `draft`.
+    * **Every dispatch-time check runs** — `payment_runs.dispatch_preflight`,
+      the set `/execute` runs before each payment: still payable, no
+      payment-blocking exception raised since staging (a BEC bank-detail swap's
+      `fraud_flag`), vendor still active, no live card, applied credits still
+      pairing, and the staged amount still exactly what the invoice owes on the
+      effective date. Plus maker-checker and CFO sign-off.
+    * Every payment must be `ach`, in USD, to a vendor with a valid ABA routing
+      and account number. Any refusal refuses the whole file, naming the
+      invoice — never the bank data.
+
+    Each export writes a `payment_run.nacha_exported` audit row carrying counts,
+    the total, the file-ID modifier and the file's SHA-256 — not its contents.
+    """
+    if not resolve_execution_mode(org.settings).record_only:
+        raise HTTPException(
+            status_code=409,
+            detail=coded_refusal(
+                NACHA_REQUIRES_RECORD_ONLY,
+                "A bank file can only be exported when FeohLedger records payments rather "
+                "than sending them — otherwise the run could be paid twice.",
+            ),
+        )
+    nacha_cfg = ((org.settings or {}).get("payments") or {}).get("nacha")
+    problems = originator_problems(nacha_cfg)
+    if problems:
+        raise HTTPException(
+            status_code=409,
+            detail=coded_refusal(
+                NACHA_NOT_CONFIGURED,
+                "Set up the bank file in Settings → Payments first (company name, company "
+                "ID and your bank's routing number).",
+                missing=problems,
+            ),
+        )
+    originator = originator_from_settings(nacha_cfg)
+
+    today = utc_today()
+    if effective_date is None:
+        effective_date = _next_business_day(today)
+    elif effective_date < today:
+        raise HTTPException(status_code=422, detail="effective_date can't be in the past")
+    elif effective_date.weekday() >= 5:
+        raise HTTPException(
+            status_code=422, detail="effective_date must be a business day, not a weekend"
+        )
+
+    run = await _get_scoped_run(db, run_id, entity_id, for_update=True)
+    if run.status == "exported":
+        if not regenerate:
+            raise HTTPException(
+                status_code=409,
+                detail=coded_refusal(
+                    NACHA_ALREADY_EXPORTED,
+                    "This run's bank file was already exported. Uploading a second file "
+                    "would pay these suppliers twice. Regenerate only if your bank never "
+                    "took the first one.",
+                ),
+            )
+    elif run.status != "draft":
+        raise HTTPException(
+            status_code=409,
+            detail=f"Only a 'draft' run can be exported as a bank file, not '{run.status}'",
+        )
+    check_run_segregation(
+        run.initiated_by,
+        user.id,
+        (org.settings or {}).get("payments"),
+        action="export",
+    )
+    if run.requires_cfo_approval and run.cfo_approved_at is None:
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "This run exceeds the org's CFO-approval threshold and is awaiting "
+                "sign-off from a user with the CFO role."
+            ),
+        )
+
+    payments = list(
+        (
+            await db.execute(
+                select(Payment)
+                .where(Payment.payment_run_id == run.id, Payment.status == "pending")
+                .order_by(Payment.created_at.asc(), Payment.id.asc())
+            )
+        )
+        .scalars()
+        .all()
+    )
+    if not payments:
+        raise HTTPException(status_code=409, detail="This run has no payments left to export")
+
+    def _refuse(code: str, message: str, invoice: Invoice, **params) -> HTTPException:
+        number = invoice.invoice_number or str(invoice.id)
+        return HTTPException(
+            status_code=409,
+            detail=coded_refusal(code, f"{number}: {message}", invoice_number=number, **params),
+        )
+
+    entries = []
+    for payment in payments:
+        # Locked like the dispatcher locks it: the checks below decide on the
+        # invoice's state, which must not move until this request commits.
+        invoice = await get_invoice_for_update(db, payment.invoice_id)
+        refusal = await dispatch_preflight(db, payment, invoice, as_of=effective_date)
+        if refusal is not None:
+            raise _refuse(
+                NACHA_PAYMENT_NOT_PAYABLE,
+                "this payment can no longer be sent as staged "
+                f"({refusal}). Cancel the run and stage it again.",
+                invoice,
+                reason=refusal,
+            )
+        if (payment.method or "") != "ach":
+            raise _refuse(
+                NACHA_PAYMENT_NOT_ACH, "only ACH payments can go in a NACHA file.", invoice
+            )
+        if (invoice.currency or "").upper() != "USD":
+            raise _refuse(NACHA_CURRENCY_NOT_USD, "a NACHA file carries USD only.", invoice)
+        if payment.amount > NACHA_MAX_ENTRY_AMOUNT:
+            raise _refuse(
+                NACHA_AMOUNT_TOO_LARGE, "the amount is too large for one ACH entry.", invoice
+            )
+        vendor = await db.get(Vendor, invoice.vendor_id) if invoice.vendor_id else None
+        entry = entry_from_bank_details(
+            vendor.bank_details if vendor is not None else None,
+            amount=payment.amount,
+            individual_id=invoice.invoice_number or str(invoice.id)[:15],
+            name=(vendor.name if vendor is not None else None) or invoice.vendor_name or "",
+        )
+        if entry is None:
+            raise _refuse(
+                NACHA_VENDOR_BANK_MISSING,
+                "the vendor has no valid ACH routing and account number on file.",
+                invoice,
+            )
+        entries.append(entry)
+
+    from app.services.audit_dispatch import dispatch_audit
+
+    # File-ID modifier: A for the first file of this run, B for a regenerated
+    # second, … — a bank's duplicate check keys on it together with the date.
+    # Counted on the run (migration 0106), under the run's row lock.
+    prior = run.nacha_export_count or 0
+    modifier = NACHA_FILE_ID_MODIFIERS[prior % len(NACHA_FILE_ID_MODIFIERS)]
+    run.nacha_export_count = prior + 1
+
+    now = datetime.now(UTC)
+    content = build_nacha_file(
+        originator,
+        entries,
+        sec_code=sec_code,
+        effective_date=effective_date,
+        created_at=now,
+        file_id_modifier=modifier,
+    )
+    total = sum((p.amount for p in payments), Decimal("0"))
+    previous_status = run.status
+    run.status = "exported"
+
+    await dispatch_audit(
+        db,
+        correlation_id=uuid.uuid4(),
+        organization_id=org.id,
+        actor_id=user.id,
+        action="payment_run.nacha_exported",
+        entity_type="payment_run",
+        entity_id=run.id,
+        details={
+            # Counts, the total and a digest — never the file, which carries
+            # vendor account numbers.
+            "payment_count": len(entries),
+            "total_amount": str(total),
+            "sec_code": sec_code,
+            "effective_date": effective_date.isoformat(),
+            "file_id_modifier": modifier,
+            "regenerated": previous_status == "exported",
+            "file_sha256": hashlib.sha256(content.encode("ascii")).hexdigest(),
+        },
+    )
+    await db.commit()
+    filename = f"payment-run-{str(run.id)[:8]}-{effective_date.isoformat()}-{modifier}.ach"
+    return Response(
+        content=content,
+        media_type="text/plain; charset=us-ascii",
+        headers={
+            "Content-Disposition": content_disposition_attachment(filename),
+            "Cache-Control": "no-store",
+        },
+    )
+
+
+class VoidNachaExportRequest(BaseModel):
+    reason: str = Field(min_length=1, max_length=500)
+
+
+@router.post("/runs/{run_id}/nacha/void")
+async def void_nacha_export(
+    run_id: uuid.UUID,
+    body: VoidNachaExportRequest,
+    db: AsyncSession = Depends(get_tenant_db),
+    org: Organization = Depends(get_tenant),
+    user: User = Depends(require_permission(PERM_PAYMENT_EXECUTE)),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
+):
+    """Release an `exported` run back to `draft`: the bank never took the file.
+
+    The one exit from the export's claim other than recording the run paid. It
+    is an attestation — FeohLedger cannot see the customer's bank — so the
+    reason is required and lands on the append-only trail
+    (`payment_run.nacha_export_voided`). Once back in `draft` the run can be
+    cancelled, re-exported or (on a processor tenant) executed.
+    """
+    reason = body.reason.strip()
+    if not reason:
+        raise HTTPException(status_code=422, detail="reason must not be blank")
+    run = await _get_scoped_run(db, run_id, entity_id, for_update=True)
+    if run.status != "exported":
+        raise HTTPException(
+            status_code=409,
+            detail=f"Only an 'exported' run's bank file can be voided, not '{run.status}'",
+        )
+    run.status = "draft"
+
+    from app.services.audit_dispatch import dispatch_audit
+
+    await dispatch_audit(
+        db,
+        correlation_id=uuid.uuid4(),
+        organization_id=org.id,
+        actor_id=user.id,
+        action="payment_run.nacha_export_voided",
+        entity_type="payment_run",
+        entity_id=run.id,
+        details={"reason": reason},
+    )
+    await db.commit()
+    return {"id": str(run.id), "status": run.status}
 
 
 @router.post("/runs/{run_id}/resume")

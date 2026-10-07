@@ -568,6 +568,13 @@ async def generate_cards(
             status_code=400,
             detail="Virtual cards are not enabled. Configure in Organization Settings.",
         )
+    # A minted card is spendable — issuing one moves money exactly as a run's
+    # card leg does, and that leg is already refused on a record-only tenant
+    # (`api/payments._require_payment_adapter`). This door must refuse too, or
+    # "FeohLedger moves no money" (issue #517, decisions §251) has an exception.
+    from app.api.payments import refuse_record_only
+
+    refuse_record_only(org)
 
     from app.api.payments import PAYABLE_INVOICE_STATUSES
     from app.config import settings as app_settings

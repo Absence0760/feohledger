@@ -143,11 +143,12 @@ def one_currency(codes: Iterable[str | None]) -> str | None:
 
 #: Run statuses that describe a CLAIM on the run, not an outcome of its
 #: payments. `draft` = never dispatched, `executing` = a dispatch pass holds it,
-#: `cancelled` = abandoned (its payments were deleted). `derive_run_status`
-#: passes these straight through: re-deriving them from payment rows would let
+#: `cancelled` = abandoned (its payments were deleted), `exported` = its
+#: NACHA file was handed to the customer's bank (money may be moving there).
+#: `derive_run_status` passes these straight through: re-deriving them from payment rows would let
 #: a rollup un-claim a run mid-dispatch, and `/execute` / `/resume` gate on
 #: exactly these values.
-CLAIM_RUN_STATUSES: tuple[str, ...] = ("draft", "executing", "cancelled")
+CLAIM_RUN_STATUSES: tuple[str, ...] = ("draft", "exported", "executing", "cancelled")
 
 
 def derive_run_status(persisted_status: str | None, rollup: PaymentRunRollup) -> str:
@@ -1360,3 +1361,49 @@ async def create_payment_run_for_invoices(
         created=True,
         discount_total=discount_total,
     )
+
+
+async def dispatch_preflight(
+    db: AsyncSession, payment: Payment, invoice: Invoice, *, as_of: date
+) -> str | None:
+    """Why ``payment`` must not move money on ``as_of``, or ``None`` if it may.
+
+    The checks `api/payments._execute_single_payment` runs immediately before
+    the adapter call, lifted here so every step that releases money runs the
+    SAME set: the rail dispatch itself, the NACHA file export (the customer's
+    upload is the money moving) and closing a run out as paid outside
+    FeohLedger (`services/external_payment`). A run sits `draft` for as long as
+    it likes, and anything below can change underneath it — most sharply an
+    approved BEC bank-detail swap, which raises a `fraud_flag` and rewrites the
+    very account a file would carry.
+
+    Returns the failure reason in the dispatcher's vocabulary
+    (``invoice_not_payable:<status>``, ``invoice_blocked:<type>``,
+    ``vendor_not_active:<status>``, ``invoice_has_live_card``,
+    ``applied_credit_mismatch:<why>``, ``discount_changed``,
+    ``net_amount_changed``) — each a refusal made before any money moved, so
+    each is retry-safe. The amount is never silently re-priced: a payment whose
+    booked figure is no longer what the invoice owes on ``as_of`` is refused,
+    and a fresh run re-derives it. The caller holds ``invoice`` FOR UPDATE.
+    """
+    from app.api.payments import PAYABLE_INVOICE_STATUSES
+
+    if invoice.status.value not in PAYABLE_INVOICE_STATUSES:
+        return f"invoice_not_payable:{invoice.status.value}"
+    blocked = await blocking_exception_types(db, [invoice.id])
+    if invoice.id in blocked:
+        return f"invoice_blocked:{blocked[invoice.id]}"
+    vendor_refused = await inactive_vendor_statuses(db, [invoice])
+    if invoice.id in vendor_refused:
+        return f"vendor_not_active:{vendor_refused[invoice.id]}"
+    if await card_claimed_invoice_ids(db, [(invoice.id, payment.method)]):
+        return "invoice_has_live_card"
+    credit_conflict = (await applied_credit_conflicts(db, [invoice])).get(invoice.id)
+    if credit_conflict is not None:
+        return f"applied_credit_mismatch:{credit_conflict}"
+    current = await payable_amount(db, invoice, pay_date=as_of)
+    if booked_discount_mismatch(payment, current):
+        return "discount_changed"
+    if current.amount != payment.amount:
+        return "net_amount_changed"
+    return None

@@ -107,7 +107,8 @@ describe('PAYMENT_STATUSES', () => {
  * every neighbouring cell is translated.
  *
  * Sources (backend `services/payment_runs.py`):
- *   - `CLAIM_RUN_STATUSES` — draft, executing, cancelled.
+ *   - `CLAIM_RUN_STATUSES` — draft, exported (the NACHA bank-file claim,
+ *     issue #517), executing, cancelled.
  *   - `PaymentRunRollup.run_status` — failed, partial, submitted, draft,
  *     executing, completed.
  */
@@ -117,6 +118,7 @@ describe('RUN_STATUS_LABEL_KEYS', () => {
 	// rung — this list is the assertion, not a restatement of the map.
 	const BACKEND_RUN_STATUSES = [
 		'draft',
+		'exported',
 		'executing',
 		'cancelled',
 		'submitted',

@@ -72,6 +72,11 @@ export const PAYMENT_GUIDES: Guide[] = [
 					{
 						type: 'p',
 						text: 'Changed your mind before executing? {ui:paymentRuns.runDetail.cancelRun} discards the draft and returns its invoices to the queue.'
+					},
+					{
+						type: 'note',
+						tone: 'tip',
+						text: 'Don\'t see **Execute**? Your organization pays its suppliers from its own bank or ERP, and FeohLedger only records the payments ([[record-only]]). See [[guide:pay-outside-feohledger|Record payments made outside FeohLedger]].'
 					}
 				]
 			},
@@ -124,7 +129,103 @@ export const PAYMENT_GUIDES: Guide[] = [
 			}
 		],
 		terms: ['payment-run', 'payment-rail', 'cfo-gate', 'segregation-of-duties', 'payment-blocking-exception', 'settlement', 'compliance-hold'],
-		related: ['void-payment', 'how-payments-work', 'work-exceptions', 'virtual-cards']
+		related: ['void-payment', 'how-payments-work', 'work-exceptions', 'virtual-cards', 'pay-outside-feohledger']
+	},
+
+	// ---------------------------------------------------------------------------
+	{
+		id: 'pay-outside-feohledger',
+		title: 'Record payments made outside FeohLedger',
+		summary:
+			'Pay suppliers from your own bank or ERP and record the payments in FeohLedger: one invoice at a time, or a whole run through a NACHA bank file.',
+		kind: 'howto',
+		roles: ['admin', 'ap_manager', 'cfo'],
+		route: '/payments',
+		sections: [
+			{
+				heading: 'Sending payments, or only recording them',
+				blocks: [
+					{
+						type: 'p',
+						text: 'FeohLedger can work in two ways. Either it sends your payments through a connected payment processor, or your organization pays suppliers itself, from its own bank or ERP, and FeohLedger only records each payment ([[record-only]]). In record-only mode FeohLedger never moves money, and **Execute** is not offered anywhere.'
+					},
+					{
+						type: 'steps',
+						items: [
+							'An admin opens the Payments section of [[page:/organization|organization settings]].',
+							'Under {ui:org.payments.mode}, choose {ui:org.payments.modeRecordOnly}.',
+							'If you will upload bank files, fill in the {ui:org.payments.nachaHeading} your bank gave you, then click {ui:org.payments.save}.'
+						]
+					},
+					{
+						type: 'note',
+						tone: 'caution',
+						text: 'A live environment with no real payment processor configured always runs record-only, whatever the setting says. FeohLedger will not report a payment as sent when nothing could have sent it.'
+					}
+				]
+			},
+			{
+				heading: 'Record one invoice you paid',
+				blocks: [
+					{
+						type: 'p',
+						text: 'Use this for an invoice you have already paid by bank transfer or cheque. It works in both modes, so an organization that normally sends payments through FeohLedger can still record a cheque.'
+					},
+					{
+						type: 'steps',
+						items: [
+							'Open [[page:/payments]] and stay on the {ui:payments.tab.queue} tab.',
+							'On the invoice\'s row, click {ui:payments.recordOutside.action}.',
+							'Choose {ui:payments.recordOutside.method}, enter the {ui:payments.recordOutside.reference} (the cheque number or your bank\'s confirmation number) and the {ui:payments.recordOutside.paidOn} date.',
+							'Click {ui:payments.recordOutside.submit}. The invoice leaves the queue and moves to {ui:invoices.status.paid}.'
+						]
+					},
+					{
+						type: 'p',
+						text: 'FeohLedger records the full amount the invoice owes, net of applied [[credit-memo|credit memos]] and any accepted early-payment discount still open on the paid-on date. Partial payments can\'t be recorded. On the {ui:payments.tab.history} tab the payment shows {ui:payments.provider.external}, and [[bank-reconciliation]] matches it on the reference you entered.'
+					},
+					{
+						type: 'note',
+						tone: 'caution',
+						text: 'The same controls apply as for any payment. If [[segregation-of-duties]] is on, someone who created or edited the invoice can\'t record its payment. An open [[payment-blocking-exception]] has to be resolved first, and an invoice with a live virtual card or already in a payment run can\'t be recorded this way.'
+					}
+				]
+			},
+			{
+				heading: 'Pay a whole run with a bank file',
+				blocks: [
+					{
+						type: 'p',
+						text: 'For a batch, build a draft [[payment-run]] from the queue as usual, then let your bank send it from a [[nacha-file]].'
+					},
+					{
+						type: 'steps',
+						items: [
+							'Create the draft run from the {ui:payments.tab.queue} tab and get any CFO sign-off it needs.',
+							'In the run, pick the {ui:paymentRuns.runDetail.nachaEffectiveDate} (the next business day by default) and the {ui:paymentRuns.runDetail.nachaSecCode}: {ui:paymentRuns.runDetail.nachaSecCcd} for companies, {ui:paymentRuns.runDetail.nachaSecPpd} for individuals.',
+							'Click {ui:paymentRuns.runDetail.nachaDownload} and upload the file to your bank\'s ACH service. The run now shows {ui:paymentRuns.status.exported}: it can\'t be executed or cancelled while the bank has the file.',
+							'When the bank has taken it, click {ui:paymentRuns.runDetail.recordOpen}, enter the {ui:paymentRuns.runDetail.recordReference} and the date, and confirm. Every payment in the run is recorded and its invoice moves to {ui:invoices.status.paid}.'
+						]
+					},
+					{
+						type: 'p',
+						text: 'If the bank rejected the file, click {ui:paymentRuns.runDetail.nachaReject} and say what happened. The run goes back to {ui:paymentRuns.status.draft}, so you can fix the problem and export it again, or cancel it. {ui:paymentRuns.runDetail.nachaRegenerate} produces a second file for an exported run. Use it only if the bank never took the first one: uploading both pays every supplier twice.'
+					},
+					{
+						type: 'note',
+						tone: 'caution',
+						text: 'A bank file can only carry ACH payments in US dollars to vendors with a bank routing and account number on file, with a weekday effective date. Every payment is checked again before the file is written, just as it would be before FeohLedger sent it: if one no longer qualifies (an exception was raised, a credit memo was applied, the vendor was blocked), the download names the invoice and nothing is produced. The file contains your suppliers\' account numbers, so keep it private.'
+					},
+					{
+						type: 'note',
+						tone: 'role',
+						text: 'Recording payments needs the record-external-payments [[permission]]. Downloading a bank file, or releasing one the bank rejected, needs the execute-payments permission instead, because uploading the file is what sends the money. Admins, AP managers and CFOs have both by default. With maker-checker on (the default), the person who created a run can\'t record it as paid or download its bank file, and a run above the CFO threshold needs CFO sign-off first, exactly as for **Execute**. If anything in the run is refused, nothing in it is recorded.'
+					}
+				]
+			}
+		],
+		terms: ['record-only', 'nacha-file', 'payment-run', 'segregation-of-duties', 'payment-blocking-exception', 'bank-reconciliation'],
+		related: ['run-payments', 'reconcile-bank', 'void-payment']
 	},
 
 	// ---------------------------------------------------------------------------

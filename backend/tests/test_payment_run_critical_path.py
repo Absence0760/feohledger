@@ -405,7 +405,9 @@ async def test_standalone_payment_rejects_an_unapproved_invoice():
 
     body = PaymentCreate(invoice_id=str(inv.id), amount=Decimal("100.00"), method="ach")
     with pytest.raises(HTTPException) as exc:
-        await create_payment(body=body, db=db, user=_user())
+        # `org` is read first: a record-only tenant refuses before any lookup
+        # (`refuse_record_only`). An unconfigured org in local dev is processor.
+        await create_payment(body=body, db=db, org=SimpleNamespace(settings={}), user=_user())
     assert exc.value.status_code == 409
     db.flush.assert_not_awaited()
 

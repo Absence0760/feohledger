@@ -45,6 +45,10 @@ class PaymentRun(Base, EntityMixin, TimestampMixin):
 
     # See the partial unique index above. NULL for every manually-created run.
     plan_id: Mapped[str | None] = mapped_column(String(64))
+    # NACHA files exported for this run (`GET /api/payments/runs/{id}/nacha`,
+    # migration 0106). Drives the file-ID modifier — A for the first, B for a
+    # regenerated second — so the customer's bank can tell them apart.
+    nacha_export_count: Mapped[int] = mapped_column(default=0, server_default="0", nullable=False)
 
     organization_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), nullable=False, index=True

@@ -306,24 +306,56 @@ async def test_void_redelivery_is_event_deduped_no_second_exception(fake_redis):
 
 @pytest.mark.asyncio
 async def test_forbidden_nonvoid_transition_is_pure_silent_204(fake_redis):
-    """`posted_in_erp → paid` was permitted by the old local map but is NOT in
-    the canonical machine (`posted_in_erp` → payment_scheduled | done). Since it
-    is a NON-void forbidden transition it must stay a PURE silent no-op — no
-    transition AND no reconciliation exception (that would be noise)."""
+    """A stale `Open` (→ posted_in_erp) for an invoice already `paid` is NOT in
+    the canonical machine. Since it is a NON-void forbidden transition it must
+    stay a PURE silent no-op — no transition AND no reconciliation exception
+    (that would be noise).
+
+    This used to be pinned with `posted_in_erp` + `Paid`, which is no longer a
+    no-op: the ERP paying an invoice FeohLedger never paid is now recorded as a
+    payment made outside FeohLedger (issue #517) — see the next test."""
     org = _org_with_erp_secret("erp-secret")
     invoice = SimpleNamespace(
-        id=uuid.uuid4(), correlation_id=uuid.uuid4(), status=InvoiceStatus.posted_in_erp
+        id=uuid.uuid4(), correlation_id=uuid.uuid4(), status=InvoiceStatus.paid
     )
 
     result, db, transition_calls = await _post(
-        org=org, invoice=invoice, status_value="paidInFull", event_id="ev_paid"
+        org=org, invoice=invoice, status_value="Open", event_id="ev_open_stale"
     )
 
     assert result is None
-    assert invoice.status is InvoiceStatus.posted_in_erp
+    assert invoice.status is InvoiceStatus.paid
     assert transition_calls == []
     db.add.assert_not_called()  # no exception created for a non-void forbidden edge
     db.commit.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "current", [InvoiceStatus.posted_in_erp, InvoiceStatus.sent_to_erp, InvoiceStatus.approved]
+)
+async def test_erp_paid_for_an_invoice_feohledger_never_paid_is_recorded(fake_redis, current):
+    """The ERP-led half of the no-rail pilot: `posted_in_erp → paid` is not an
+    edge (a `paid` invoice needs a payment behind it), so the handler records the
+    ERP's payment through `_record_erp_reported_payment` — which supplies one —
+    and commits. It used to drop the report silently, leaving a no-rail tenant
+    with no automatic path to `paid`."""
+    org = _org_with_erp_secret("erp-secret")
+    invoice = SimpleNamespace(id=uuid.uuid4(), correlation_id=uuid.uuid4(), status=current)
+
+    recorded = AsyncMock()
+    with patch("app.api.erp_webhook._record_erp_reported_payment", recorded):
+        result, db, transition_calls = await _post(
+            org=org, invoice=invoice, status_value="Paid", event_id=f"ev_paid_{current.value}"
+        )
+
+    assert result is None
+    recorded.assert_awaited_once()
+    kwargs = recorded.await_args.kwargs
+    assert kwargs["org"] is org
+    assert kwargs["erp_document_id"] == "doc_1"
+    assert transition_calls == []  # the record path owns the transitions
+    db.commit.assert_awaited()
 
 
 @pytest.mark.asyncio

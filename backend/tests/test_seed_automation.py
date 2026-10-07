@@ -19,7 +19,6 @@ import copy
 import uuid
 from types import SimpleNamespace
 
-import pytest
 from sqlalchemy import func, select
 
 from app.models.invoice import Invoice, InvoiceStatus
@@ -29,10 +28,10 @@ from app.models.workflow import AuditLog, WorkflowDefinition, WorkflowInstance
 from app.models.workflow_experiment import WorkflowExperiment
 from app.services.workflow_engine import VALID_TRANSITIONS
 from app.services.workflow_experiments import VARIANT_B, assign_variant
-from scripts.seed import ACME_ORG_ID, TECH_ORG_ID
 from scripts.seed_automation import (
     _AUTO_PER_SMALL_VENDOR,
     _CLEAN,
+    _EXP_AUTO_NAME,
     _NOISY,
     _SMALL,
     _id,
@@ -73,10 +72,10 @@ _DEFAULT_STEPS = {
 }
 
 
-async def _seeded(realdb) -> dict:
-    """Give tenant "a" what the full demo seed would have, then run the module."""
-    mk = realdb.sessionmaker("a")
-    org_id = realdb.info("a").org_id
+async def _seeded(realdb, key: str = "a") -> dict:
+    """Give a tenant what the full demo seed would have, then run the module."""
+    mk = realdb.sessionmaker(key)
+    org_id = realdb.info(key).org_id
     async with mk() as s:
         s.add(
             WorkflowDefinition(
@@ -206,10 +205,7 @@ async def test_history_keeps_the_apps_own_rules(realdb):
 
 async def test_a_second_run_is_a_no_op(realdb):
     first = await _seeded(realdb)
-    small = sum(
-        p.count
-        for p in _sized_small_plans(realdb.info("a").org_id, _auto_test(realdb.info("a").org_id))
-    )
+    small = sum(p.count for p in _sized_small_plans(_auto_test()))
     assert first["invoices"] == sum(p.count for p in (*_CLEAN, *_NOISY)) + small
 
     mk = realdb.sessionmaker("a")
@@ -221,28 +217,22 @@ async def test_a_second_run_is_a_no_op(realdb):
     assert count == first["invoices"]
 
 
-def _auto_test(org_id: uuid.UUID) -> SimpleNamespace:
+def _auto_test() -> SimpleNamespace:
     """The concluded auto-approve experiment's identity, as the seed mints it."""
-    return SimpleNamespace(id=_id(org_id, "experiment", "auto-below-500"), split_a_pct=50)
+    return SimpleNamespace(id=_id("experiment", "auto-below-500"), split_a_pct=50)
 
 
-@pytest.mark.parametrize(
-    "org_id",
-    [ACME_ORG_ID, TECH_ORG_ID, *(uuid.uuid5(uuid.NAMESPACE_DNS, f"org-{n}") for n in range(40))],
-)
-def test_every_org_gets_the_same_auto_approval_population(org_id):
-    """The arm an invoice lands in is a hash of org-derived ids, so a fixed
-    invoice count gave each org a different number of auto-approvals. Acme got
-    20, which with the one void sat exactly on the feedback loop's 5% brake and
-    withheld the threshold raise the demo exists to show. Sizing per org pins
-    the population for every org, acme's included."""
-    exp = _auto_test(org_id)
-    plans = _sized_small_plans(org_id, exp)
+def test_the_small_ticket_vendors_are_sized_to_the_auto_approval_population():
+    """A fixed invoice count once gave each org a different number of
+    auto-approvals: acme got 20, which with the one void sat exactly on the
+    feedback loop's 5% brake and withheld the threshold raise the demo exists
+    to show. The count is derived from the split instead, so the population is
+    pinned whatever the ids hash to."""
+    exp = _auto_test()
+    plans = _sized_small_plans(exp)
     for plan in plans:
         arms = {
-            i: assign_variant(
-                str(_id(org_id, "invoice", f"{plan.code}-{i}")), str(exp.id), split_a_pct=50
-            )
+            i: assign_variant(str(_id("invoice", f"{plan.code}-{i}")), str(exp.id), split_a_pct=50)
             for i in range(plan.count)
         }
         auto = [i for i, v in arms.items() if v == VARIANT_B]
@@ -255,3 +245,64 @@ def test_every_org_gets_the_same_auto_approval_population(org_id):
             assert plan.corrected
     # One void over the whole population stays under the 5% brake.
     assert 1 / (_AUTO_PER_SMALL_VENDOR * len(plans)) < 0.05
+
+
+async def test_a_tenant_seeded_under_the_old_ids_is_still_recognised(realdb):
+    """Before the ids stopped carrying the org id, a seeded tenant held different
+    ids. An id-keyed "already seeded?" probe would miss those and write the
+    whole history a second time, so the guard is the experiment's name: its
+    presence, under any id, means seeded."""
+    mk = realdb.sessionmaker("a")
+    org_id = realdb.info("a").org_id
+    async with mk() as s:
+        definition = WorkflowDefinition(
+            organization_id=org_id,
+            name="Default Workflow",
+            is_active=True,
+            is_default=True,
+            steps_config=copy.deepcopy(_DEFAULT_STEPS),
+        )
+        s.add(definition)
+        await s.flush()
+        s.add(
+            WorkflowExperiment(
+                id=uuid.uuid4(),
+                organization_id=org_id,
+                workflow_definition_id=definition.id,
+                name=_EXP_AUTO_NAME,
+                config_a=copy.deepcopy(_DEFAULT_STEPS),
+                config_b=copy.deepcopy(_DEFAULT_STEPS),
+                status="concluded",
+            )
+        )
+        await s.commit()
+        again = await seed_automation(s, org_id, control_factory=realdb.control_sessionmaker())
+        count = (await s.execute(select(func.count()).select_from(Invoice))).scalar()
+    assert again == {}
+    assert count == 0
+
+
+async def test_the_history_does_not_depend_on_the_org_id(realdb):
+    """Two tenants, two random org ids, one identical history.
+
+    The experiment split hashes the invoice and experiment ids. When those were
+    keyed on the org id, the B arm was a fresh draw per tenant and about one org
+    id in fourteen seeded too few touchless invoices for the concluded test to
+    call a winner — an intermittent CI failure, and a demo tenant whose
+    `/experiments` page could come up empty.
+    """
+    assert realdb.info("a").org_id != realdb.info("b").org_id
+    a = await _seeded(realdb, "a")
+    b = await _seeded(realdb, "b")
+    assert a == b
+
+    async def arms(key: str) -> dict:
+        async with realdb.sessionmaker(key)() as s:
+            exp = (
+                await s.execute(
+                    select(WorkflowExperiment).where(WorkflowExperiment.status == "concluded")
+                )
+            ).scalar_one()
+            return exp.assignments
+
+    assert await arms("a") == await arms("b")
