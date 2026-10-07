@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import uuid
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -431,7 +431,7 @@ async def test_non_dry_run_invokes_ai_for_no_prior_invoices_only():
     inv_priored = _make_invoice(vendor_id=vendor_with_prior, gl_account=None)
     inv_no_prior = _make_invoice(vendor_id=vendor_without_prior, gl_account=None)
 
-    async def fake_ai_runner(db_, inv, *, actor_id, org_settings, ctrl_db):
+    async def fake_ai_runner(db_, inv, *, actor_id, org_settings):
         inv.gl_account = "6100"
 
     ai_mock = AsyncMock(side_effect=fake_ai_runner)
@@ -457,6 +457,35 @@ async def test_non_dry_run_invokes_ai_for_no_prior_invoices_only():
     assert sources == ["ai", "vendor_prior"]
     assert report.by_source == {"vendor_prior": 1, "ai": 1}
     assert report.ai_candidates == 0  # only populated in dry-run
+
+
+@pytest.mark.asyncio
+async def test_the_default_ai_runner_is_called_the_way_run_extraction_accepts():
+    """The injected fakes accepted any kwargs, so nothing noticed the default
+    runner was called with a `ctrl_db=` that `run_extraction` does not take:
+    every real AI re-code raised TypeError and was reported as `ai_failed`.
+    An autospec of the REAL function refuses a call it could not accept."""
+    from unittest.mock import create_autospec
+
+    from app.services import extraction
+
+    vendor_id = uuid.uuid4()
+    inv = _make_invoice(vendor_id=vendor_id, gl_account=None)
+    db = _make_db_for(active_codes=["6100"], eligible_invoices=[inv], priors={})
+    runner = create_autospec(extraction.run_extraction)
+
+    with patch.object(extraction, "run_extraction", runner):
+        report = await bulk_recode_gl(
+            db,
+            organization_id=uuid.uuid4(),
+            filt=RecodeFilter(),
+            dry_run=False,
+            include_ai_fallback=True,
+            ctrl_db=AsyncMock(),
+        )
+
+    assert runner.await_count == 1
+    assert report.skipped_ai_failed == 0
 
 
 @pytest.mark.asyncio

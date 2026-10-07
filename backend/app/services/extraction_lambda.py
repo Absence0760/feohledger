@@ -73,6 +73,11 @@ async def _process_message(body: dict) -> None:
                 db,
                 invoice,
                 actor_id=actor_id,
+                # The org's settings decide BYOK vs platform (and so whether
+                # this read is billable — decisions §253), the GL chart hints
+                # and the auto-approve config. Omitted, every lambda-mode
+                # extraction ran as `platform` on our key, a BYOK org included.
+                org_settings=org.settings,
                 skip_vendor_match=options.skip_vendor_match,
                 suppress_auto_approve=options.suppress_auto_approve,
             )

@@ -320,7 +320,8 @@ async def bulk_recode_gl(
     """Run the bulk GL re-code pass. See module docstring for details.
 
     `ai_runner` is an optional injected coroutine (signature:
-    `async (db, invoice, *, actor_id, org_settings, ctrl_db) -> None`)
+    `async (db, invoice, *, actor_id, org_settings) -> None` — exactly what
+    `run_extraction` accepts)
     used when `include_ai_fallback=True`. Defaults to
     `services.extraction.run_extraction`. Tests inject a fake to avoid
     spinning up the real S3 / vision-adapter machinery.
@@ -414,17 +415,24 @@ async def bulk_recode_gl(
                     # Reuses the full extraction pipeline (chart-of-
                     # accounts injection + RAG + post-extraction
                     # validation), so the AI re-code lands inside the
-                    # same guardrails as a fresh upload. Persists usage
-                    # to ctrl_db when provided.
+                    # same guardrails as a fresh upload — including the
+                    # AI-read allowance gate and meter (decisions §253),
+                    # which write through the tenant session `run_extraction`
+                    # already has. It takes no control-plane session: passing
+                    # `ctrl_db=` here raised TypeError on every invoice, so
+                    # every AI re-code was reported as `ai_failed`.
                     await ai_runner(
                         db,
                         inv,
                         actor_id=actor_id,
                         org_settings=org_settings,
-                        ctrl_db=ctrl_db,
                     )
-                except Exception:
-                    logger.exception("AI re-code failed for invoice %s", inv.id)
+                except Exception as exc:
+                    # Class only — an extraction exception can carry document
+                    # PII, and a traceback would put it in the log sink.
+                    logger.warning(
+                        "AI re-code failed for invoice %s: %s", inv.id, exc.__class__.__name__
+                    )
                     report.skipped_ai_failed += 1
                     continue
 

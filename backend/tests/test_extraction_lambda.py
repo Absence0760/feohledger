@@ -26,6 +26,7 @@ import pytest
 from app.services import extraction_lambda
 
 BASE_URL = "postgresql+asyncpg://u:p@host:5432/feohledger"
+_TENANT_DB = "feoh_" + "acme"
 
 
 def _body(**overrides) -> dict:
@@ -101,7 +102,7 @@ def _harness(*, org, invoice, run_extraction: AsyncMock | None = None):
 async def test_process_message_runs_extraction_for_resolved_tenant():
     body = _body()
     invoice = SimpleNamespace(id=uuid.UUID(body["invoice_id"]))
-    org = SimpleNamespace(id=uuid.UUID(body["org_id"]), db_name="feoh_acme")
+    org = SimpleNamespace(id=uuid.UUID(body["org_id"]), db_name="feoh_acme", settings={})
     with _harness(org=org, invoice=invoice) as h:
         await extraction_lambda._process_message(body)
 
@@ -115,7 +116,7 @@ async def test_process_message_runs_extraction_for_resolved_tenant():
 async def test_process_message_connects_to_org_db_name_not_control():
     body = _body()
     invoice = SimpleNamespace(id=uuid.UUID(body["invoice_id"]))
-    org = SimpleNamespace(id=uuid.UUID(body["org_id"]), db_name="feoh_acme")
+    org = SimpleNamespace(id=uuid.UUID(body["org_id"]), db_name="feoh_acme", settings={})
     with _harness(org=org, invoice=invoice) as h:
         await extraction_lambda._process_message(body)
     # Second engine is the tenant one; URL swaps only the db name.
@@ -135,7 +136,7 @@ async def test_process_message_honours_the_re_extraction_options_on_the_body():
     is the failure this pins."""
     body = _body(skip_vendor_match=True, suppress_auto_approve=True)
     invoice = SimpleNamespace(id=uuid.UUID(body["invoice_id"]))
-    org = SimpleNamespace(id=uuid.UUID(body["org_id"]), db_name="feoh_acme")
+    org = SimpleNamespace(id=uuid.UUID(body["org_id"]), db_name="feoh_acme", settings={})
     with _harness(org=org, invoice=invoice) as h:
         await extraction_lambda._process_message(body)
 
@@ -144,12 +145,29 @@ async def test_process_message_honours_the_re_extraction_options_on_the_body():
     assert kwargs["suppress_auto_approve"] is True
 
 
+async def test_process_message_passes_the_orgs_settings_to_run_extraction():
+    """`lambda` mode must extract under the org's OWN settings.
+
+    Without them `run_extraction` resolves `program_type` to its `platform`
+    default, so a BYOK org's documents were read on the platform's model key —
+    our bill, and (decisions §253) a counted AI read against that org's plan
+    allowance for a read it was supposed to pay its own provider for."""
+    body = _body()
+    invoice = SimpleNamespace(id=uuid.UUID(body["invoice_id"]))
+    byok = {"extraction": {"program_type": "byok", "provider": "openai_vision"}}
+    org = SimpleNamespace(id=uuid.UUID(body["org_id"]), db_name=_TENANT_DB, settings=byok)
+    with _harness(org=org, invoice=invoice) as h:
+        await extraction_lambda._process_message(body)
+
+    assert h.run_extraction.await_args.kwargs["org_settings"] == byok
+
+
 async def test_process_message_defaults_the_options_off_for_a_legacy_body():
     """A message enqueued before the flags existed must decode to today's
     behaviour, not to the guarded one — an absent key is False, never True."""
     body = _body()
     invoice = SimpleNamespace(id=uuid.UUID(body["invoice_id"]))
-    org = SimpleNamespace(id=uuid.UUID(body["org_id"]), db_name="feoh_acme")
+    org = SimpleNamespace(id=uuid.UUID(body["org_id"]), db_name="feoh_acme", settings={})
     with _harness(org=org, invoice=invoice) as h:
         await extraction_lambda._process_message(body)
 
@@ -174,7 +192,7 @@ async def test_process_message_org_not_found_disposes_and_returns():
 
 
 async def test_process_message_invoice_not_found_disposes_both_engines():
-    org = SimpleNamespace(id=uuid.uuid4(), db_name="feoh_acme")
+    org = SimpleNamespace(id=uuid.uuid4(), db_name="feoh_acme", settings={})
     with _harness(org=org, invoice=None) as h:
         await extraction_lambda._process_message(_body())
     h.run_extraction.assert_not_awaited()
@@ -188,7 +206,7 @@ async def test_process_message_invoice_not_found_disposes_both_engines():
 
 
 async def test_process_message_rolls_back_and_reraises_on_extraction_error():
-    org = SimpleNamespace(id=uuid.uuid4(), db_name="feoh_acme")
+    org = SimpleNamespace(id=uuid.uuid4(), db_name="feoh_acme", settings={})
     invoice = SimpleNamespace(id=uuid.uuid4())
     boom = AsyncMock(side_effect=RuntimeError("extract failed"))
     with _harness(org=org, invoice=invoice, run_extraction=boom) as h:
