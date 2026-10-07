@@ -353,7 +353,7 @@ These were open gaps in a prior revision of this doc and have since shipped — 
 **SMB-to-mid-market PLG segment (20-1,000 employees)** that wants:
 - AI-first invoice processing with transparent learning (not legacy OCR, not black-box "AI")
 - Strong ERP integration without enterprise pricing or sales cycles
-- Self-service onboarding — spin up a workspace in 30 seconds without talking to sales
+- Self-service onboarding — spin up a workspace in minutes without talking to sales
 - Virtual card rebates that offset or exceed platform cost
 - Tenant-isolated security (database-per-tenant) for compliance without enterprise-tier pricing
 - Native mobile with offline/biometric for approvers
