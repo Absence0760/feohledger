@@ -68,6 +68,11 @@ ALL_FEATURES: tuple[str, ...] = (
 # ---------------------------------------------------------------------------
 METER_AI_INVOICES = "ai_invoices"
 
+# Every catalog plan is priced in this currency. Named once so the public
+# pricing page (generated from this module by
+# ``scripts/gen_pricing_catalog.py``) states the same code the rows carry.
+CATALOG_CURRENCY = "USD"
+
 # Stable machine codes referenced throughout backend/docs/billing.md. `free` is
 # the default every new tenant lands on. Enterprise is not a catalog plan: it is
 # a negotiated contract an operator sets up per customer, so the pricing page
@@ -129,7 +134,7 @@ async def ensure_plan_catalog(session: AsyncSession) -> dict[str, Plan]:
             code=spec["code"],
             name=spec["name"],
             monthly_price=spec["monthly_price"],
-            currency="USD",
+            currency=CATALOG_CURRENCY,
             entitlements=spec["entitlements"],
             usage_components=spec["usage_components"],
             trial_days=spec["trial_days"],
