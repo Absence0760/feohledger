@@ -100,6 +100,21 @@ that were never a real `Plan.code`). `free` grants no entitlements by design —
 `public_api` is a paid-tier feature; an org reaches it via
 `POST /api/billing/change-plan` to `growth` or `scale`.
 
+#### The public pricing page is generated from this catalog
+
+`DEFAULT_PLAN_CATALOG` is also what the marketing site sells. `pnpm gen:pricing`
+(`scripts/gen_pricing_catalog.py`) writes every tier's price, currency
+(`CATALOG_CURRENCY`), AI-read allowance, overage rate and feature keys to
+`frontend/src/lib/marketing/plans.generated.ts`, and `Pricing.svelte` renders
+only that. `pnpm check:pricing` runs in CI's Backend lint job, so **editing a
+catalog entry fails CI until the module is regenerated** — commit both
+together. Generation refuses an entitlement outside `ALL_FEATURES`, a usage
+component other than `ai_invoices`, and a float or malformed price, rather than
+describing them by guess. It reads the catalog constant, not the `plans` table:
+an operator's per-row edit, or a negotiated Enterprise plan, is not a public
+price. Issue #426 / `docs/decisions.md` §253; guard tests in
+`tests/test_pricing_catalog_generation.py`.
+
 #### Which plan the seed lands each tenant on
 
 `scripts/seed.py` gives every tenant a real, working billing baseline, but not
