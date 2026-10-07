@@ -804,11 +804,18 @@ input[type='week']:hover::-webkit-calendar-picker-indicator {
 	padding: 40px 14px;
 	color: var(--text-muted);
 }
+/* A real table cell, never `display: flex`: a flex <td> stops being a cell,
+ * so its row border drifts out of line with the rest of the row and its
+ * contents overflow the column instead of being sized by it (both visible on
+ * /vendors before this). The buttons are inline, so spacing comes from margin. */
 .grid-container td.actions {
-	display: flex;
-	align-items: center;
-	gap: 6px;
 	white-space: nowrap;
+}
+.grid-container td.actions > * {
+	vertical-align: middle;
+}
+.grid-container td.actions > * + * {
+	margin-left: 6px;
 }
 .grid-container td.muted {
 	color: var(--text-muted);
