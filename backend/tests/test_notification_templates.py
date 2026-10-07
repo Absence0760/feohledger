@@ -75,6 +75,24 @@ def test_every_event_renders():
             assert rendered.body_text
             assert "2026-W05" in rendered.body_text
             continue
+        if event_type == "ai_invoice_usage":
+            # Plan-usage context (decisions §253), pre-rendered by its own
+            # function — never an invoice's.
+            from app.services.notification_templates import render_ai_invoice_usage
+
+            for notice in ("80", "100", "cap"):
+                rendered = render_ai_invoice_usage(
+                    notice=notice,
+                    period="2026-10",
+                    used=400,
+                    included=500,
+                    overage_unit_price=Decimal("0.10"),
+                    spend_cap=Decimal("5.00"),
+                )
+                assert rendered.title
+                assert "2026-10" in rendered.title
+                assert rendered.body_text
+            continue
         rendered = render(event_type, _ctx())
         assert rendered.title
         assert rendered.body_text

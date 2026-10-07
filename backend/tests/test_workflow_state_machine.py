@@ -80,6 +80,10 @@ def test_no_outgoing_edges_target_a_predecessor_other_than_explicit_resets():
         # to `approved` so it re-enters the payment queue.
         (InvoiceStatus.payment_scheduled, InvoiceStatus.approved),
         (InvoiceStatus.paid, InvoiceStatus.approved),
+        # AI reading paused (decisions §253/§254): the extraction worker lands
+        # the invoice back at draft for manual entry instead of calling the
+        # model. Refused to humans by `POST /bulk/status`.
+        (InvoiceStatus.pending, InvoiceStatus.new),
     }
 
     # Build a notion of "linear progress" order. Anything that goes
