@@ -48,40 +48,26 @@ goes to [decisions.md](decisions.md).
 
 ---
 
-## Six of the seven plan features are sold but not enforced
+## ~~Six of the seven plan features are sold but not enforced~~ — FIXED 2026-10-07
 
 **Found 2026-10-07** while deciding Merge's plan placement (`docs/decisions.md`
 §256).
 
-**Root cause.** §253 gates features through `Plan.entitlements`, checked by
-`api/deps.require_entitlement` (JWT routes) and `require_api_entitlement` (API
-keys). Only `public_api` is wired, on `/api/v1`. `require_entitlement` has no
-caller at all, so these features work on every plan, Free included:
-`erp_integrations`, `sso`, `scim`, `sso_enforcement`, `multi_entity`,
-`audit_siem_export`.
+**Root cause (was).** §253 gated features through `Plan.entitlements`, but only
+`public_api` was wired; `require_entitlement` had no caller, so
+`erp_integrations`, `sso`, `scim`, `sso_enforcement` and `multi_entity` worked
+on every plan, Free included, and the pricing page sold Growth and Scale on
+features Free already had.
 
-**Blast radius.** Revenue, not data: the public pricing page
-(`plans.generated.ts`) sells Growth and Scale on features Free already gets.
-No security boundary depends on these gates.
-
-**Why it isn't a one-line fix.** `get_entitlements` fails closed to `{}` for an
-org with no live subscription, so enforcing a gate removes the feature from any
-tenant without one. Gating `sso` or `sso_enforcement` on the sign-in path could
-lock an SSO-only tenant out. Enforcement has to be preceded by an audit that
-every existing tenant holds a subscription to a plan that grants what it uses,
-or a grandfathering rule.
-
-**Fix.** Per feature, put `require_entitlement(FEATURE_…)` on the routes that
-configure or use it, and decide what a downgraded tenant keeps:
-- ERP: refuse saving a live ERP config and refuse a push; the mock stays open.
-- SSO: refuse enabling it; never break an already-enabled sign-in, which would
-  be an outage. Flag it to an admin instead.
-- SCIM: refuse the bearer token.
-- Multi-entity: refuse creating a second entity.
-- SIEM export: refuse configuring it.
-
-Pin each gate with a test that a Free org is refused and a Scale org passes.
-`erp_merge` (§256) joins the same pass.
+**Fix.** Decisions §258 gates each one — live ERP config and push, SSO,
+require-SSO, SCIM, a second entity, API keys and webhooks — with one coded 402,
+and fixes what a downgrade keeps: the password reopens rather than locking an
+SSO tenant out, SCIM deprovisioning, existing entities, revoking keys and
+switching off or rotating a webhook stay open. `tests/test_plan_feature_gates.py`
+pins a Free refusal and a paid pass per gate. Two pieces remain, tracked in
+`docs/followups.md`: `audit_siem_export` has no tenant-configurable destination
+to gate, and Merge-routed ERPs are not yet split out as Scale-only `erp_merge`
+(§256) — `erp_integrations` admits them on Growth today.
 
 ## The direct ERP adapters post bills without the ERP's vendor and account ids
 

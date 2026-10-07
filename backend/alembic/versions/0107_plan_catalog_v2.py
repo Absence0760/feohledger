@@ -12,10 +12,11 @@ before §253 would keep the old `{}` / `{"public_api": true}` entitlements and
 empty `usage_components` forever. This revision rewrites those two columns on
 the three stable codes, once, from the catalog itself.
 
-It imports `DEFAULT_PLAN_CATALOG` rather than copying the values, so the
-migration and fresh provisioning cannot disagree. Prices and trial days are not
-touched: the catalog's prices are unchanged, and an operator who edited a price
-keeps it.
+The values are FROZEN here as they stood at this revision, not imported from
+`DEFAULT_PLAN_CATALOG`: a revision must write the same thing whenever it is
+replayed, and a later catalog edit belongs in a later revision. Prices and
+trial days are not touched: the catalog's prices are unchanged, and an
+operator who edited a price keeps it.
 
 Revision ID: 0107_plan_catalog_v2
 Revises: 0106_run_nacha_export_count
@@ -36,6 +37,35 @@ revision = "0107_plan_catalog_v2"
 down_revision = "0106_run_nacha_export_count"
 branch_labels = None
 depends_on = None
+
+_ALL_V2_FEATURES = (
+    "public_api",
+    "erp_integrations",
+    "sso",
+    "scim",
+    "sso_enforcement",
+    "multi_entity",
+    "audit_siem_export",
+)
+
+#: ``(code, entitlements, usage_components)`` exactly as §253 set them.
+_V2_PLANS = (
+    (
+        "free",
+        {},
+        {"ai_invoices": {"included": 100, "overage_unit_price": None}},
+    ),
+    (
+        "growth",
+        {"public_api": True, "erp_integrations": True, "sso": True},
+        {"ai_invoices": {"included": 500, "overage_unit_price": "0.10"}},
+    ),
+    (
+        "scale",
+        {feature: True for feature in _ALL_V2_FEATURES},
+        {"ai_invoices": {"included": 3000, "overage_unit_price": "0.07"}},
+    ),
+)
 
 _V1_ENTITLEMENTS = {
     "free": {},
@@ -60,20 +90,14 @@ def _has_plans_table() -> bool:
 def upgrade() -> None:
     if not _has_plans_table():
         return
-    from app.services.billing.plan_catalog import DEFAULT_PLAN_CATALOG
-
     bind = op.get_bind()
-    for spec in DEFAULT_PLAN_CATALOG:
+    for code, entitlements, usage_components in _V2_PLANS:
         bind.execute(
             text(
                 "UPDATE plans SET entitlements = CAST(:ent AS jsonb), "
                 "usage_components = CAST(:usage AS jsonb) WHERE code = :code"
             ),
-            {
-                "ent": json.dumps(spec["entitlements"]),
-                "usage": json.dumps(spec["usage_components"]),
-                "code": spec["code"],
-            },
+            {"ent": json.dumps(entitlements), "usage": json.dumps(usage_components), "code": code},
         )
 
 

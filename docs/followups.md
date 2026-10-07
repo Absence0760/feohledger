@@ -1220,8 +1220,9 @@ lands. Pure doc drift was corrected in the same PR. The two diagnosed defects
       add `FEATURE_ERP_MERGE` to `plan_catalog` (Scale), a migration rewriting
       the catalog rows' `entitlements` (as `0107` did), a gate on saving a
       `merge_dev` config and on the Merge push, and regenerate the pricing page
-      (`pnpm gen:pricing`). Land it with the entitlement-enforcement fix in
-      `known-issues.md`, since that gate is the one this extends. **Trigger:**
+      (`pnpm gen:pricing`). It extends `api/deps.ensure_live_erp_entitled`
+      (decisions §258), which already shares `resolve_adapter_key` with the
+      dispatcher, so the gate itself is one more check. **Trigger:**
       before the first paid Growth customer, or the fourth Merge connection
       (the first three are free), whichever comes first.
 - [ ] **(c) ERP credentials are plaintext in `Organization.settings`.** The

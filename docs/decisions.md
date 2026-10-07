@@ -10412,6 +10412,11 @@ ERPs cost nothing while demand is tested.
 `docs/known-issues.md`), and `erp_merge` doesn't exist yet. Both are tracked in
 `docs/followups.md`. Until they land, this records the intended plan shape and
 the pricing page must not advertise Merge-routed ERPs on Growth.
+
+*Update 2026-10-07:* §258 now enforces `erp_integrations`. `erp_merge` is still
+not built, so a Growth tenant can save and push a Merge-routed config; the
+follow-up's trigger (the first paid Growth customer or the fourth Merge
+connection) is unchanged.
 ## 257. The single-VM database is RDS, reached over verify-full TLS set by PGSSLMODE (2026-10-07)
 
 The operator chose the single-VM deployment with Postgres on **RDS for
