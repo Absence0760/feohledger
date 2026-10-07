@@ -1596,6 +1596,15 @@
     }
   },
   "invoiceWarningPastDue": "Invoice is past due",
+  "invoiceWarningAiAllowanceReached": "AI reading is paused: this month's {included, plural, one {{included} AI-read invoice is} other {{included} AI-read invoices are}} used. Enter the details manually, or upgrade your plan on the Billing page.",
+  "@invoiceWarningAiAllowanceReached": {
+    "placeholders": {
+      "included": {
+        "type": "int"
+      }
+    }
+  },
+  "invoiceWarningAiSpendCapReached": "AI reading is paused: this month's AI spending cap is reached. Enter the details manually, or raise the cap on the Billing page.",
   "invoiceWarningUnverifiedVendor": "Vendor is unverified",
   "invoiceWarningPersonalEmailDomain": "Vendor email uses personal domain: {domain}",
   "@invoiceWarningPersonalEmailDomain": {

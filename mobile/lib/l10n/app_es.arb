@@ -712,6 +712,8 @@
   "invoiceWarningFutureInvoiceDate": "La fecha de la factura está en el futuro",
   "invoiceWarningRushPayment": "Pago urgente: vence en {days, plural, one {{days} día} other {{days} días}} desde la fecha de la factura",
   "invoiceWarningPastDue": "La factura está vencida",
+  "invoiceWarningAiAllowanceReached": "Lectura con IA en pausa: se ha agotado el cupo mensual de {included, plural, one {{included} factura leída por IA} other {{included} facturas leídas por IA}}. Introduzca los datos manualmente o mejore su plan en la página Facturación.",
+  "invoiceWarningAiSpendCapReached": "Lectura con IA en pausa: se ha alcanzado el límite de gasto en IA de este mes. Introduzca los datos manualmente o aumente el límite en la página Facturación.",
   "invoiceWarningUnverifiedVendor": "El proveedor no está verificado",
   "invoiceWarningPersonalEmailDomain": "El correo del proveedor usa un dominio personal: {domain}",
   "invoiceWarningNewVendorLargeAmount": "Proveedor nuevo (creado hace {days, plural, one {{days} día} other {{days} días}}) que presenta una factura elevada de {amount}",

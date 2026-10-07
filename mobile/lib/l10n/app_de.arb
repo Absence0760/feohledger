@@ -712,6 +712,8 @@
   "invoiceWarningFutureInvoiceDate": "Das Rechnungsdatum liegt in der Zukunft",
   "invoiceWarningRushPayment": "Eilzahlung: fällig innerhalb von {days, plural, one {{days} Tag} other {{days} Tagen}} nach dem Rechnungsdatum",
   "invoiceWarningPastDue": "Die Rechnung ist überfällig",
+  "invoiceWarningAiAllowanceReached": "KI-Erfassung pausiert: Das Monatskontingent von {included, plural, one {{included} KI-gelesenen Rechnung} other {{included} KI-gelesenen Rechnungen}} ist aufgebraucht. Erfassen Sie die Angaben manuell oder wechseln Sie auf der Seite „Abrechnung“ in einen höheren Tarif.",
+  "invoiceWarningAiSpendCapReached": "KI-Erfassung pausiert: Das KI-Ausgabenlimit für diesen Monat ist erreicht. Erfassen Sie die Angaben manuell oder erhöhen Sie das Limit auf der Seite „Abrechnung“.",
   "invoiceWarningUnverifiedVendor": "Der Lieferant ist nicht verifiziert",
   "invoiceWarningPersonalEmailDomain": "Die E-Mail-Adresse des Lieferanten nutzt eine private Domain: {domain}",
   "invoiceWarningNewVendorLargeAmount": "Neuer Lieferant (vor {days, plural, one {{days} Tag} other {{days} Tagen}} angelegt) stellt eine hohe Rechnung über {amount}",

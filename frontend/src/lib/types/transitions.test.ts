@@ -15,7 +15,9 @@ import {
 // from `ready_for_review`).
 const BACKEND_TRANSITIONS: Record<string, string[]> = {
 	new: ['pending', 'ready_for_review', 'approved', 'done'],
-	pending: ['ready_for_review', 'approved', 'failed'],
+	// `new` is the extraction worker's AI-reading pause (decisions §253); it is
+	// deliberately NOT offered as a manual move (VALID_TRANSITIONS.pending is []).
+	pending: ['ready_for_review', 'approved', 'failed', 'new'],
 	ready_for_review: ['approved', 'rejected'],
 	approved: ['sending_to_erp', 'payment_scheduled', 'done'],
 	rejected: ['ready_for_review', 'new'],

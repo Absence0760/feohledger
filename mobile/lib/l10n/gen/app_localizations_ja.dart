@@ -1,5 +1,6 @@
 // ignore: unused_import
 import 'package:intl/intl.dart' as intl;
+
 import 'app_localizations.dart';
 
 // ignore_for_file: type=lint
@@ -2502,6 +2503,20 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get invoiceWarningPastDue => '請求書が支払期限を過ぎています';
+
+  @override
+  String invoiceWarningAiAllowanceReached(int included) {
+    String _temp0 = intl.Intl.pluralLogic(
+      included,
+      locale: localeName,
+      other: '$included件',
+    );
+    return 'AI読み取りを一時停止しました: 今月のAI読み取り枠（$_temp0）を使い切りました。手動で入力するか、請求ページでプランをアップグレードしてください。';
+  }
+
+  @override
+  String get invoiceWarningAiSpendCapReached =>
+      'AI読み取りを一時停止しました: 今月のAI利用上限額に達しました。手動で入力するか、請求ページで上限額を引き上げてください。';
 
   @override
   String get invoiceWarningUnverifiedVendor => '仕入先が未検証です';

@@ -1,5 +1,6 @@
 // ignore: unused_import
 import 'package:intl/intl.dart' as intl;
+
 import 'app_localizations.dart';
 
 // ignore_for_file: type=lint
@@ -2668,6 +2669,21 @@ class AppLocalizationsPt extends AppLocalizations {
 
   @override
   String get invoiceWarningPastDue => 'A nota está vencida';
+
+  @override
+  String invoiceWarningAiAllowanceReached(int included) {
+    String _temp0 = intl.Intl.pluralLogic(
+      included,
+      locale: localeName,
+      other: '$included notas lidas por IA',
+      one: '$included nota lida por IA',
+    );
+    return 'Leitura por IA pausada: a cota mensal de $_temp0 foi usada. Insira os dados manualmente ou faça upgrade do plano na página Faturamento.';
+  }
+
+  @override
+  String get invoiceWarningAiSpendCapReached =>
+      'Leitura por IA pausada: o limite de gastos com IA deste mês foi atingido. Insira os dados manualmente ou aumente o limite na página Faturamento.';
 
   @override
   String get invoiceWarningUnverifiedVendor =>
@@ -5732,6 +5748,21 @@ class AppLocalizationsPtBr extends AppLocalizationsPt {
 
   @override
   String get invoiceWarningPastDue => 'A nota está vencida';
+
+  @override
+  String invoiceWarningAiAllowanceReached(int included) {
+    String _temp0 = intl.Intl.pluralLogic(
+      included,
+      locale: localeName,
+      other: '$included notas lidas por IA',
+      one: '$included nota lida por IA',
+    );
+    return 'Leitura por IA pausada: a cota mensal de $_temp0 foi usada. Insira os dados manualmente ou faça upgrade do plano na página Faturamento.';
+  }
+
+  @override
+  String get invoiceWarningAiSpendCapReached =>
+      'Leitura por IA pausada: o limite de gastos com IA deste mês foi atingido. Insira os dados manualmente ou aumente o limite na página Faturamento.';
 
   @override
   String get invoiceWarningUnverifiedVendor =>

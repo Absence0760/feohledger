@@ -4236,6 +4236,18 @@ abstract class AppLocalizations {
   /// **'Invoice is past due'**
   String get invoiceWarningPastDue;
 
+  /// No description provided for @invoiceWarningAiAllowanceReached.
+  ///
+  /// In en, this message translates to:
+  /// **'AI reading is paused: this month\'s {included, plural, one {{included} AI-read invoice is} other {{included} AI-read invoices are}} used. Enter the details manually, or upgrade your plan on the Billing page.'**
+  String invoiceWarningAiAllowanceReached(int included);
+
+  /// No description provided for @invoiceWarningAiSpendCapReached.
+  ///
+  /// In en, this message translates to:
+  /// **'AI reading is paused: this month\'s AI spending cap is reached. Enter the details manually, or raise the cap on the Billing page.'**
+  String get invoiceWarningAiSpendCapReached;
+
   /// No description provided for @invoiceWarningUnverifiedVendor.
   ///
   /// In en, this message translates to:

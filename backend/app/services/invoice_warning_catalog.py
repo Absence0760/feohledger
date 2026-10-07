@@ -173,6 +173,28 @@ WARNING_SPECS: tuple[WarningSpec, ...] = (
         {"days": "count"},
     ),
     WarningSpec("past_due", "past_due", "Invoice is past due", {}),
+    # ---- ai_reading_paused (decisions §253) -------------------------------
+    #
+    # The plan's monthly AI-read allowance (or the customer's spending cap) is
+    # used, so `run_extraction` did NOT call the model: the invoice is back at
+    # `new` for manual entry. Two codes because the remedy differs — upgrade the
+    # plan vs raise the cap. No money param: the cap is in USD while a warning's
+    # money kind formats in the INVOICE's currency.
+    WarningSpec(
+        "ai_allowance_reached",
+        "ai_reading_paused",
+        "AI reading is paused: this month's "
+        "{included, plural, one {# AI-read invoice is} other {# AI-read invoices are}} "
+        "used. Enter the details manually, or upgrade your plan on the Billing page.",
+        {"included": "count"},
+    ),
+    WarningSpec(
+        "ai_spend_cap_reached",
+        "ai_reading_paused",
+        "AI reading is paused: this month's AI spending cap is reached. Enter the "
+        "details manually, or raise the cap on the Billing page.",
+        {},
+    ),
     WarningSpec("unverified_vendor", "unverified_vendor", "Vendor is unverified", {}),
     WarningSpec(
         "personal_email_domain",

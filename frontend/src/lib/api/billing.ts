@@ -9,8 +9,18 @@ import type {
 	BillingPlanChangeResponse,
 	BillingPlansResponse,
 	BillingSetupIntentResponse,
+	BillingSpendCapResponse,
 	BillingSubscriptionResponse
 } from '#lib/types/billing.ts';
+
+/** Set (exact decimal string) or clear (`null`) the org's monthly AI-read
+ *  overage spending cap. Admin only. Returns the cap as stored plus this
+ *  month's AI usage re-priced under it. */
+export function setBillingSpendCap(cap: string | null): Promise<BillingSpendCapResponse> {
+	return api.put<BillingSpendCapResponse>('/api/billing/spending-cap', {
+		monthly_spend_cap: cap
+	});
+}
 
 /** Current plan + subscription status + usage-to-date for the active period.
  *  `plan`/`subscription` are null when the org has no live subscription. */

@@ -29,9 +29,11 @@ from decimal import ROUND_HALF_UP, Decimal
 import httpx
 
 from app.services.billing_adapters.base import (
+    AI_INVOICE_OVERAGE_EVENT,
     BillingAdapter,
     BillingWebhookEvent,
     CreateSubscriptionRequest,
+    MeterEvent,
     ProviderInvoice,
     ProviderPaymentMethod,
     ProviderSetupIntent,
@@ -222,6 +224,12 @@ class StripeBillingAdapter(BillingAdapter):
             "customer": str(customer),
             "items[0][price]": str(price),
         }
+        # A plan that bills AI-read overage needs its metered price on the
+        # subscription too, or Stripe records the meter events and invoices none
+        # of them (`provisioning.provision_org_billing` resolves it).
+        overage_price = (self.config or {}).get("stripe_overage_price_id")
+        if overage_price:
+            form["items[1][price]"] = str(overage_price)
         if request.trial_days > 0:
             form["trial_period_days"] = str(request.trial_days)
         request_headers = {}
@@ -328,6 +336,92 @@ class StripeBillingAdapter(BillingAdapter):
                 }
                 resp = await client.post("/v1/billing/meter_events", data=form)
                 self._json_or_raise(resp, "report_usage")
+
+    async def _ensure_overage_meter(self, client: httpx.AsyncClient) -> str:
+        """Resolve-or-create the Billing Meter the overage events are reported to.
+
+        A meter's ``event_name`` is unique among ACTIVE meters at Stripe, so the
+        lookup is by name first; the create carries a stable ``Idempotency-Key``
+        so two concurrent provisionings return one meter. ``sum`` aggregation:
+        every event carries value ``"1"``, so the period's sum IS the number of
+        overage invoices.
+        """
+        resp = await client.get("/v1/billing/meters", params={"status": "active", "limit": "100"})
+        listing = self._json_or_raise(resp, "list_meters")
+        for meter in listing.get("data") or []:
+            if isinstance(meter, dict) and meter.get("event_name") == AI_INVOICE_OVERAGE_EVENT:
+                return str(meter["id"])
+        form = {
+            "display_name": "AI-read invoices past the plan allowance",
+            "event_name": AI_INVOICE_OVERAGE_EVENT,
+            "default_aggregation[formula]": "sum",
+            "customer_mapping[type]": "by_id",
+            "customer_mapping[event_payload_key]": "stripe_customer_id",
+            "value_settings[event_payload_key]": "value",
+        }
+        headers = {"Idempotency-Key": f"feohledger-meter-{AI_INVOICE_OVERAGE_EVENT}"}
+        resp = await client.post("/v1/billing/meters", data=form, headers=headers)
+        return str(self._json_or_raise(resp, "create_meter")["id"])
+
+    async def ensure_overage_price(
+        self, *, plan_code: str, unit_price: Decimal, currency: str = "USD"
+    ) -> str:
+        """Resolve-or-create the plan's per-unit METERED overage price.
+
+        ``billing_scheme`` is Stripe's default ``per_unit``, deliberately NOT a
+        graduated tier with the allowance free: the allowance is applied by our
+        own calendar-month count (``ai_invoice_meter``), and only invoices past
+        it are ever reported. A graduated price would apply the allowance a
+        second time, over STRIPE's billing period — which is anchored on the
+        subscription's start day, not the UTC calendar month the meter counts
+        in — so the two windows would disagree on which reads were free.
+
+        ``unit_amount_decimal`` is the unit price in minor units as an exact
+        decimal string (``0.07`` → ``"7"``), so a sub-cent price stays exact.
+        """
+        self._require_key()
+        cur = currency.lower()
+        minor = format((unit_price * 100).normalize(), "f")
+        async with self._client() as client:
+            meter_id = await self._ensure_overage_meter(client)
+            form = {
+                "currency": cur,
+                "unit_amount_decimal": minor,
+                "recurring[interval]": "month",
+                "recurring[usage_type]": "metered",
+                "recurring[meter]": meter_id,
+                "product_data[name]": f"{plan_code} AI-read invoice overage",
+                "metadata[plan_code]": plan_code,
+                "metadata[meter_event]": AI_INVOICE_OVERAGE_EVENT,
+            }
+            headers = {"Idempotency-Key": f"feohledger-ai-overage-price-{plan_code}-{minor}-{cur}"}
+            resp = await client.post("/v1/prices", data=form, headers=headers)
+            payload = self._json_or_raise(resp, "ensure_overage_price")
+        return str(payload["id"])
+
+    async def report_meter_event(self, event: MeterEvent) -> None:
+        """POST one Billing Meter Event.
+
+        Sent with BOTH ``identifier`` (Stripe's event-level uniqueness) and an
+        ``Idempotency-Key`` equal to it: a retry inside Stripe's idempotency
+        window replays the original success instead of failing as a duplicate,
+        so a retried report is a no-op rather than an error that would stall
+        the caller's reported-so-far marker.
+        """
+        self._require_key()
+        if not event.customer_id:
+            raise BillingNotConfigured("Stripe report_meter_event requires a customer id")
+        form = {
+            "event_name": event.event_name,
+            "payload[stripe_customer_id]": str(event.customer_id),
+            "payload[value]": str(event.value),
+            "identifier": event.identifier,
+            "timestamp": str(int(event.timestamp)),
+        }
+        headers = {"Idempotency-Key": event.identifier}
+        async with self._client() as client:
+            resp = await client.post("/v1/billing/meter_events", data=form, headers=headers)
+        self._json_or_raise(resp, "report_meter_event")
 
     async def create_setup_intent(self, customer_id: str | None) -> ProviderSetupIntent | None:
         """Create a Stripe SetupIntent so the org can save/replace a card.

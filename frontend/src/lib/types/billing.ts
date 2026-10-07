@@ -95,6 +95,36 @@ export function rebateMeterGroups(usage: BillingUsage | null | undefined): Rebat
 	return groups;
 }
 
+/** Why AI reading is paused. Mirrors `ai_invoice_meter.PAUSE_*`. */
+export type AiPauseReason = 'allowance_reached' | 'spend_cap_reached';
+
+/**
+ * This month's AI-read invoices against the plan allowance (decisions §253).
+ * Mirrors `AiUsageView` in `backend/app/api/billing.py`. Money arrives as exact
+ * decimal STRINGS in `currency`; counts are numbers.
+ */
+export interface BillingAiUsage {
+	/** UTC calendar month, `YYYY-MM`. */
+	period: string;
+	/** Distinct invoices AI-read on the platform's model key this month. */
+	used: number;
+	/** Included in the plan; null = the plan does not meter AI reads. */
+	included: number | null;
+	/** Per-invoice overage price; null = the plan pauses instead of billing. */
+	overage_unit_price: string | null;
+	currency: string;
+	/** Overage billed so far (clamped to the cap). */
+	overage_units: number;
+	overage_amount: string;
+	/** Overage at this month's daily pace, clamped to the cap. */
+	projected_overage_amount: string;
+	/** Monthly overage spending cap; null = no cap. */
+	spend_cap: string | null;
+	/** Whether the next new AI read would be refused. */
+	paused: boolean;
+	pause_reason: AiPauseReason | null;
+}
+
 export interface BillingSubscriptionResponse {
 	/** Active billing adapter (e.g. `mock`, `stripe_billing`). */
 	provider: string;
@@ -105,6 +135,51 @@ export interface BillingSubscriptionResponse {
 	/** The period the usage is rolled up for, `YYYY-MM`. */
 	period: string;
 	usage: BillingUsage;
+	ai_usage: BillingAiUsage;
+}
+
+/** Result of `PUT /api/billing/spending-cap`. */
+export interface BillingSpendCapResponse {
+	monthly_spend_cap: string | null;
+	ai_usage: BillingAiUsage;
+}
+
+/** How full this month's allowance is, 0–100; null when the plan is unmetered. */
+export function aiUsagePercent(usage: BillingAiUsage | null | undefined): number | null {
+	if (!usage || usage.included === null) return null;
+	if (usage.included <= 0) return usage.used > 0 ? 100 : 0;
+	return Math.min(100, Math.max(0, Math.round((usage.used / usage.included) * 100)));
+}
+
+/** The meter's colour: past 80% amber, at the limit (or paused) red. */
+export function aiUsageTone(usage: BillingAiUsage | null | undefined): 'ok' | 'warning' | 'danger' {
+	if (!usage) return 'ok';
+	if (usage.paused) return 'danger';
+	const pct = aiUsagePercent(usage);
+	if (pct === null) return 'ok';
+	if (pct >= 100) return 'danger';
+	return pct >= 80 ? 'warning' : 'ok';
+}
+
+/** Largest cap the backend accepts (`api/billing.MAX_SPEND_CAP`). */
+const MAX_SPEND_CAP_CENTS = 100_000_000n;
+
+/**
+ * Validate a typed spending cap WITHOUT turning it into a float: the value goes
+ * to the server as the exact decimal string the user typed (trimmed). Blank
+ * means "no cap". Whole cents only, 0.00 – 1,000,000.00 — the same rule the
+ * backend enforces, checked here so the form can say so before the round trip.
+ */
+export function parseSpendCapInput(
+	raw: string
+): { ok: true; value: string | null } | { ok: false } {
+	const text = raw.trim();
+	if (text === '') return { ok: true, value: null };
+	const match = /^(\d{1,7})(?:\.(\d{1,2}))?$/.exec(text);
+	if (!match) return { ok: false };
+	const cents = BigInt(match[1]) * 100n + BigInt((match[2] ?? '').padEnd(2, '0'));
+	if (cents > MAX_SPEND_CAP_CENTS) return { ok: false };
+	return { ok: true, value: text };
 }
 
 /** Settlement state of a past billing invoice / receipt. */

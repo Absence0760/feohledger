@@ -2705,6 +2705,18 @@ async def bulk_status_change(
                 )
             )
             continue
+        if inv.status == DBInvoiceStatus.pending and target == DBInvoiceStatus.new:
+            # `pending → new` exists for the extraction worker's AI-reading
+            # pause only (decisions §253). A `pending` invoice is mid-read: sent
+            # back to draft by hand, the still-running extraction would then
+            # land its own transition on top of whatever was keyed meanwhile.
+            skipped.append(
+                BulkStatusSkip(
+                    id=str(inv.id),
+                    reason="the invoice is still being read; wait for extraction to finish",
+                )
+            )
+            continue
         if target == DBInvoiceStatus.approved:
             from app.services.review import approve_invoice
 

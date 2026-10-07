@@ -167,3 +167,72 @@ def render_cash_shortfall(
         f"{more}{caveat} Review the cash-flow forecast before scheduling more payments."
     )
     return RenderedNotification(title=title, body_text=body, body_html=f"<p>{body}</p>")
+
+
+#: The AI-read-invoice usage notices (decisions §253), mildest first.
+AI_NOTICE_80 = "80"
+AI_NOTICE_100 = "100"
+AI_NOTICE_CAP = "cap"
+
+
+def render_ai_invoice_usage(
+    *,
+    notice: str,
+    period: str,
+    used: int,
+    included: int,
+    overage_unit_price: Decimal | None,
+    spend_cap: Decimal | None,
+    currency: str = "USD",
+) -> RenderedNotification:
+    """Render an AI-read-invoice usage notice (80% / 100% / spending cap).
+
+    Org-level counts and the plan's own prices only — no invoice, vendor or
+    person is named, so nothing PII-bearing reaches the email. Money formats
+    straight off the ``Decimal``. ``overage_unit_price is None`` is the Free
+    tier, where the limit pauses AI reading instead of billing.
+    """
+    pauses = overage_unit_price is None
+    if notice == AI_NOTICE_CAP:
+        cap_text = f"{currency} {spend_cap:,.2f}" if spend_cap is not None else "your cap"
+        title = f"AI spending cap reached for {period}"
+        body = (
+            f"This month's AI-read invoice overage has reached your spending cap of {cap_text}. "
+            "AI reading is paused until next month: new invoices are still created and wait "
+            "for manual entry, and approvals and payments are unaffected. Raise the cap on "
+            "the Billing page to resume AI reading now."
+        )
+    elif notice == AI_NOTICE_100:
+        title = f"All {included:,} AI-read invoices for {period} are used"
+        if pauses:
+            tail = (
+                "AI reading is now paused until next month: new invoices are still created "
+                "and wait for manual entry, and approvals and payments are unaffected. "
+                "Upgrade your plan on the Billing page to keep AI reading on."
+            )
+        else:
+            tail = (
+                f"Each further AI-read invoice this month is billed at {currency} "
+                f"{overage_unit_price}. Set or review a monthly spending cap on the Billing page."
+            )
+        body = (
+            f"Your organization has used all {included:,} AI-read invoices included "
+            f"this month. {tail}"
+        )
+    else:
+        title = f"80% of this month's AI-read invoices are used ({period})"
+        if pauses:
+            tail = (
+                "When the allowance is used, AI reading pauses until next month and new "
+                "invoices wait for manual entry. Upgrade your plan on the Billing page to avoid it."
+            )
+        else:
+            tail = (
+                f"Past the allowance, each AI-read invoice is billed at {currency} "
+                f"{overage_unit_price}."
+            )
+        body = (
+            f"Your organization has used {used:,} of the {included:,} AI-read invoices "
+            f"included this month. {tail}"
+        )
+    return RenderedNotification(title=title, body_text=body, body_html=f"<p>{body}</p>")

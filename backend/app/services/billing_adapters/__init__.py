@@ -10,9 +10,11 @@ Select via ``FEOH_BILLING_PROVIDER`` or the per-org
 from app.services.billing_adapters import mock_adapter as _mock  # noqa: F401
 from app.services.billing_adapters import stripe_billing as _stripe  # noqa: F401
 from app.services.billing_adapters.base import (
+    AI_INVOICE_OVERAGE_EVENT,
     BillingAdapter,
     BillingWebhookEvent,
     CreateSubscriptionRequest,
+    MeterEvent,
     ProviderInvoice,
     ProviderPaymentMethod,
     ProviderSetupIntent,
@@ -26,9 +28,11 @@ from app.services.billing_adapters.dispatcher import (
 )
 
 __all__ = [
+    "AI_INVOICE_OVERAGE_EVENT",
     "BillingAdapter",
     "BillingWebhookEvent",
     "CreateSubscriptionRequest",
+    "MeterEvent",
     "ProviderInvoice",
     "ProviderPaymentMethod",
     "ProviderSetupIntent",

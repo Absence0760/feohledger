@@ -22,7 +22,8 @@ export type NotificationEventType =
 	| 'invoice_paid'
 	| 'contract_renewal_due'
 	| 'chat_message'
-	| 'cash_shortfall_projected';
+	| 'cash_shortfall_projected'
+	| 'ai_invoice_usage';
 
 export interface Notification {
 	id: string;
@@ -98,7 +99,8 @@ export const EVENT_LABELS: Record<NotificationEventType, string> = {
 	invoice_paid: 'Invoice paid',
 	contract_renewal_due: 'Contract renewal due',
 	chat_message: 'New supplier chat message',
-	cash_shortfall_projected: 'Projected cash shortfall'
+	cash_shortfall_projected: 'Projected cash shortfall',
+	ai_invoice_usage: 'AI-read invoice usage'
 };
 
 /**
@@ -114,7 +116,8 @@ export const EVENT_LABEL_KEYS: Record<NotificationEventType, MessageKey> = {
 	invoice_paid: 'profile.notifications.event.invoicePaid',
 	contract_renewal_due: 'profile.notifications.event.contractRenewalDue',
 	chat_message: 'profile.notifications.event.chatMessage',
-	cash_shortfall_projected: 'profile.notifications.event.cashShortfallProjected'
+	cash_shortfall_projected: 'profile.notifications.event.cashShortfallProjected',
+	ai_invoice_usage: 'profile.notifications.event.aiInvoiceUsage'
 };
 
 /**
@@ -130,5 +133,6 @@ export const EVENT_ORDER: NotificationEventType[] = [
 	'invoice_paid',
 	'contract_renewal_due',
 	'chat_message',
-	'cash_shortfall_projected'
+	'cash_shortfall_projected',
+	'ai_invoice_usage'
 ];

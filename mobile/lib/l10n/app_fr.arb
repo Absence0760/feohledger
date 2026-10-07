@@ -712,6 +712,8 @@
   "invoiceWarningFutureInvoiceDate": "La date de facture est dans le futur",
   "invoiceWarningRushPayment": "Paiement urgent : échéance sous {days, plural, one {{days} jour} other {{days} jours}} après la date de facture",
   "invoiceWarningPastDue": "La facture est en retard de paiement",
+  "invoiceWarningAiAllowanceReached": "Lecture IA en pause : le quota mensuel de {included, plural, one {{included} facture lue par IA} other {{included} factures lues par IA}} est épuisé. Saisissez les informations manuellement ou passez à une offre supérieure sur la page Facturation.",
+  "invoiceWarningAiSpendCapReached": "Lecture IA en pause : le plafond de dépenses IA de ce mois est atteint. Saisissez les informations manuellement ou relevez le plafond sur la page Facturation.",
   "invoiceWarningUnverifiedVendor": "Le fournisseur n’est pas vérifié",
   "invoiceWarningPersonalEmailDomain": "L’e-mail du fournisseur utilise un domaine personnel : {domain}",
   "invoiceWarningNewVendorLargeAmount": "Nouveau fournisseur (créé il y a {days, plural, one {{days} jour} other {{days} jours}}) présentant une facture élevée de {amount}",

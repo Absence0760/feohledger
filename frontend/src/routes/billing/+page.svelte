@@ -9,6 +9,7 @@
 	import SubscriptionBadge from '#lib/components/ui/SubscriptionBadge.svelte';
 	import Badge from '#lib/components/ui/Badge.svelte';
 	import HelpTip from '#lib/components/help/HelpTip.svelte';
+	import AiUsagePanel from '#lib/components/billing/AiUsagePanel.svelte';
 	import type { BadgeTone } from '#lib/components/ui/badgeTone.ts';
 	import {
 		changeBillingPlan,
@@ -462,6 +463,20 @@
 				</p>
 			{/if}
 		</section>
+
+		<!-- The priced meter (decisions §253): AI-read invoices against the plan
+		     allowance, the overage + its projection, the spending cap and the
+		     pause state. Rendered for an org with no subscription too — it is on
+		     the Free allowance. Only an admin edits the cap (the endpoint is
+		     admin-only); a CFO sees it read-only. -->
+		<AiUsagePanel
+			usage={data?.ai_usage ?? null}
+			pending={loading}
+			canEditCap={auth.isAdmin}
+			onUsageChange={(ai) => {
+				if (data) data = { ...data, ai_usage: ai };
+			}}
+		/>
 	{/if}
 
 	<!-- Payment methods — the org's saved cards (PII-safe metadata only). Loaded

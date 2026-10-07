@@ -48,6 +48,32 @@ class UsageReport:
     external_subscription_id: str | None = None
 
 
+#: The provider-side meter every AI-read-invoice OVERAGE event is reported to
+#: (decisions §253). One event per overage invoice, value "1" — the price on the
+#: meter is the plan's per-unit overage price. Included reads are never
+#: reported: the allowance is applied by OUR count, not by provider tiers
+#: (see `services/billing/ai_overage.py`).
+AI_INVOICE_OVERAGE_EVENT = "ai_invoice_overage"
+
+
+@dataclass(frozen=True)
+class MeterEvent:
+    """One usage event for a provider billing meter.
+
+    ``identifier`` is stable for the unit it reports, so a retry of the same
+    report is recognised as the same event by the provider (and by the mock).
+    ``value`` is an exact decimal STRING — never a float on a billing surface.
+    """
+
+    event_name: str
+    customer_id: str | None
+    value: str
+    identifier: str
+    #: Unix seconds the usage belongs to (the provider bills it into the period
+    #: containing this instant).
+    timestamp: int
+
+
 @dataclass(frozen=True)
 class ProviderInvoice:
     """Normalized view of a provider-side billing invoice / receipt.
@@ -158,6 +184,20 @@ class BillingAdapter:
         return []
 
     async def report_usage(self, report: UsageReport) -> None:
+        raise NotImplementedError
+
+    async def ensure_overage_price(
+        self, *, plan_code: str, unit_price: Decimal, currency: str = "USD"
+    ) -> str:
+        """Resolve-or-create the per-unit METERED price a plan's AI-read overage
+        bills at (attached to the :data:`AI_INVOICE_OVERAGE_EVENT` meter).
+        Returns its provider id. Idempotent at the provider."""
+        raise NotImplementedError
+
+    async def report_meter_event(self, event: MeterEvent) -> None:
+        """Report one usage event. Idempotent on ``event.identifier``: a retry of
+        an event the provider already accepted must not count twice. Raises on
+        failure so the caller does not advance its reported-so-far marker."""
         raise NotImplementedError
 
     async def create_setup_intent(self, customer_id: str | None) -> ProviderSetupIntent | None:

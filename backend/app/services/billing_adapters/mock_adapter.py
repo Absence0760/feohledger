@@ -19,6 +19,7 @@ from app.services.billing_adapters.base import (
     BillingAdapter,
     BillingWebhookEvent,
     CreateSubscriptionRequest,
+    MeterEvent,
     ProviderInvoice,
     ProviderPaymentMethod,
     ProviderSetupIntent,
@@ -26,6 +27,10 @@ from app.services.billing_adapters.base import (
     UsageReport,
 )
 from app.services.billing_adapters.dispatcher import register_billing_adapter
+
+#: Every meter event the mock has accepted, process-wide (adapter instances are
+#: built per call, so instance state would vanish). Tests clear it themselves.
+RECORDED_METER_EVENTS: list[MeterEvent] = []
 
 
 @register_billing_adapter("mock")
@@ -101,6 +106,21 @@ class MockBillingAdapter(BillingAdapter):
     async def report_usage(self, report: UsageReport) -> None:
         # No-op: nothing to bill locally. Kept so the call site is identical to
         # the live adapter.
+        return None
+
+    async def ensure_overage_price(
+        self, *, plan_code: str, unit_price: Decimal, currency: str = "USD"
+    ) -> str:
+        return f"mock_overage_price_{plan_code}"
+
+    async def report_meter_event(self, event: MeterEvent) -> None:
+        """Record the event in-process so tests (and a curious dev) can see
+        exactly what WOULD have been billed. Deduped on ``identifier``, the
+        same idempotency the live provider gives a retried event — so a test
+        asserting "reported once" means the same thing against both."""
+        if any(e.identifier == event.identifier for e in RECORDED_METER_EVENTS):
+            return None
+        RECORDED_METER_EVENTS.append(event)
         return None
 
     async def create_setup_intent(self, customer_id: str | None) -> ProviderSetupIntent | None:

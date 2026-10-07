@@ -878,6 +878,8 @@
   "invoiceWarningFutureInvoiceDate": "請求日が未来の日付です",
   "invoiceWarningRushPayment": "至急支払い: 請求日から{days, plural, other {{days}日}}以内に支払期限が到来します",
   "invoiceWarningPastDue": "請求書が支払期限を過ぎています",
+  "invoiceWarningAiAllowanceReached": "AI読み取りを一時停止しました: 今月のAI読み取り枠（{included, plural, other {{included}件}}）を使い切りました。手動で入力するか、請求ページでプランをアップグレードしてください。",
+  "invoiceWarningAiSpendCapReached": "AI読み取りを一時停止しました: 今月のAI利用上限額に達しました。手動で入力するか、請求ページで上限額を引き上げてください。",
   "invoiceWarningUnverifiedVendor": "仕入先が未検証です",
   "invoiceWarningPersonalEmailDomain": "仕入先のメールアドレスが個人向けドメインです: {domain}",
   "invoiceWarningNewVendorLargeAmount": "新規仕入先（{days, plural, other {{days}日}}前に登録）が高額請求 {amount} を提出しています",

@@ -39,6 +39,13 @@ VALID_TRANSITIONS: dict[InvoiceStatus, set[InvoiceStatus]] = {
         InvoiceStatus.ready_for_review,
         InvoiceStatus.approved,
         InvoiceStatus.failed,
+        # AI reading paused (decisions §253): the plan's allowance or the
+        # customer's spending cap is used, so the extraction never called the
+        # model and the invoice goes back to draft for manual entry — the state
+        # an extraction-disabled upload is left in. Not `failed`: nothing broke,
+        # and `failed` only leads back to re-extraction. `POST /bulk/status`
+        # refuses this edge for a human (an invoice in `pending` is mid-read).
+        InvoiceStatus.new,
     },
     InvoiceStatus.ready_for_review: {InvoiceStatus.approved, InvoiceStatus.rejected},
     InvoiceStatus.approved: {
