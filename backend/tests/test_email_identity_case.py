@@ -137,6 +137,8 @@ async def test_sso_jit_links_the_existing_account_instead_of_minting_a_second(
     assert await _accounts_for(realdb, email) == [user_id]
 
 
+# SCIM provisioning is plan-gated (decisions §258); the harness org reads as free.
+@pytest.mark.plan("scale")
 async def test_scim_create_of_a_case_variant_is_a_409_not_a_duplicate(realdb, mixed_case_user):
     _user_id, email = await mixed_case_user()
     org = await _org_a(realdb)

@@ -435,7 +435,7 @@ async def test_enroll_and_disable_mfa_write_audit_actions():
         _patch.object(
             auth_mod, "_load_user_org", AsyncMock(return_value=SimpleNamespace(settings={}))
         ),
-        _patch.object(auth_mod, "_user_response", lambda u, o: {"ok": True}),
+        _patch.object(auth_mod, "_user_response", AsyncMock(return_value={"ok": True})),
         _patch.object(auth_mod, "_relying_party", AsyncMock(return_value=None)),
         _patch.object(auth_mod, "_throttle_step_up", AsyncMock()),
         _patch.object(auth_mod, "_step_up_satisfied", AsyncMock(return_value=True)),

@@ -50,6 +50,11 @@ from app.services.webhooks.rotation import (
 )
 from app.services.webhooks.signing import generate_signing_secret, sign_payload
 
+# Outbound webhooks are plan-gated (decisions §258) — both the subscription CRUD
+# and dispatch, which queues nothing for an org without the feature — and the
+# realdb harness orgs hold no subscription (= free), so bind both to Scale.
+pytestmark = pytest.mark.plan("scale")
+
 
 @pytest_asyncio.fixture(autouse=True)
 async def _reap_subscriptions_this_file_creates(realdb):

@@ -348,9 +348,12 @@ async def test_sso_only_account_starts_totp_enrollment_with_an_assertion():
 
 
 @pytest.mark.asyncio
-async def test_passwordless_account_disables_totp_with_an_assertion():
+async def test_passwordless_account_disables_totp_with_an_assertion(all_plan_features):
     """`/mfa/disable` used to demand a password, which an SSO-only account does
-    not have — so a passkey-holding SSO account could never turn TOTP off."""
+    not have — so a passkey-holding SSO account could never turn TOTP off.
+
+    `all_plan_features`: the response's `_user_response` reads the org's plan,
+    which `_CredDB` cannot answer (decisions §258)."""
     from app.api import auth as auth_mod
     from app.schemas.auth import MFADisableRequest
 
