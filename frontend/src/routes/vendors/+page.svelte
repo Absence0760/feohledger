@@ -621,20 +621,21 @@
 			onaction={canManageVendors ? () => (showCreateVendor = true) : undefined}
 		/>
 	{:else}
+	<div class="vendor-table">
 	<DataTable isEmpty={vendors.length === 0} empty={emptyMessage} colspan={10} fixed>
 		{#snippet header()}
 			<tr>
 				<th class="checkbox-col">
 					<input type="checkbox" aria-label={m('vendors.selectAllAria')} checked={allSelected} onchange={toggleSelectAll} />
 				</th>
-				<SortableHeader field="name" label={m('vendors.col.vendor')} active={sortField === 'name'} order={sortOrder} onsort={handleSort} onclear={handleClearSort} />
-				<SortableHeader field="code" label={m('vendors.col.code')} active={sortField === 'code'} order={sortOrder} onsort={handleSort} onclear={handleClearSort} />
-				<th scope="col">{m('vendors.col.email')}</th>
-				<SortableHeader field="status" label={m('vendors.col.status')} active={sortField === 'status'} order={sortOrder} onsort={handleSort} onclear={handleClearSort} />
-				<th scope="col">{m('vendors.col.screening')} <HelpTip term="sanctions-screening" /></th>
-				<th scope="col">{m('vendors.col.source')}</th>
-				<th scope="col">{m('vendors.col.invoices')}</th>
-				<th scope="col">{m('vendors.col.erp')} <HelpTip term="erp-sync" /></th>
+				<SortableHeader class="col-vendor" field="name" label={m('vendors.col.vendor')} active={sortField === 'name'} order={sortOrder} onsort={handleSort} onclear={handleClearSort} />
+				<SortableHeader class="col-code" field="code" label={m('vendors.col.code')} active={sortField === 'code'} order={sortOrder} onsort={handleSort} onclear={handleClearSort} />
+				<th scope="col" class="col-email">{m('vendors.col.email')}</th>
+				<SortableHeader class="col-status" field="status" label={m('vendors.col.status')} active={sortField === 'status'} order={sortOrder} onsort={handleSort} onclear={handleClearSort} />
+				<th scope="col" class="col-screening">{m('vendors.col.screening')} <HelpTip term="sanctions-screening" /></th>
+				<th scope="col" class="col-source">{m('vendors.col.source')}</th>
+				<th scope="col" class="col-invoices">{m('vendors.col.invoices')}</th>
+				<th scope="col" class="col-erp">{m('vendors.col.erp')} <HelpTip term="erp-sync" /></th>
 				<th class="actions-col"></th>
 			</tr>
 		{/snippet}
@@ -663,8 +664,10 @@
 								{v.name}
 							</RowLink>
 						</td>
-					<td class="mono muted">{v.code ?? '—'}</td>
-					<td class="muted">{v.email ?? '—'}</td>
+					<td class="mono muted cell-clip" title={v.code ?? undefined}>{v.code ?? '—'}</td>
+					<!-- Clipped to its column with an ellipsis; the full address is the
+					     tooltip (and in the vendor's detail view). -->
+					<td class="muted cell-clip" title={v.email ?? undefined}>{v.email ?? '—'}</td>
 					<td>
 						<Badge
 							tone={VENDOR_STATUS_TONES[v.status] ?? 'neutral'}
@@ -724,6 +727,7 @@
 			{/each}
 		{/snippet}
 	</DataTable>
+	</div>
 
 	{#if hasMore}
 		<div class="load-more-row">
@@ -1006,8 +1010,40 @@
 	.rejected td {
 		background: rgba(224, 64, 64, 0.04);
 	}
+	/* Column widths. The table is `table-layout: fixed`, so with no widths every
+	   column got an equal share: the checkbox column was as wide as Email, and
+	   a long address spilled into Status. The predictable columns get fixed
+	   widths sized to their widest content (the "UNVERIFIED" badge, "Unscreened",
+	   "AI Extracted", four action buttons); Vendor and Email share the rest. The
+	   min-width keeps those two readable, so on a narrow window the table
+	   scrolls inside its region rather than crushing them. */
+	.vendor-table :global(table) {
+		/* The fixed columns total ~1,030px; this leaves Vendor and Email ~215px
+		   each before the table scrolls inside its region. */
+		min-width: 1460px;
+	}
+	.vendor-table :global(th.checkbox-col) { width: 44px; }
+	.vendor-table :global(th.col-code) { width: 96px; }
+	.vendor-table :global(th.col-status) { width: 140px; }
+	.vendor-table :global(th.col-screening) { width: 140px; }
+	.vendor-table :global(th.col-source) { width: 130px; }
+	.vendor-table :global(th.col-invoices) { width: 100px; }
+	.vendor-table :global(th.col-erp) { width: 76px; }
+	.vendor-table :global(th.actions-col) { width: 300px; }
+	/* Vendor and Email carry no width: they share what is left equally. */
+
+	/* One line, clipped to the column: an email or code longer than its column
+	   ends in "…" instead of running under the next one. */
+	.cell-clip {
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
 	.vendor-name {
 		font-weight: 500;
+		/* Names wrap; one unbroken run (a pasted ID) still breaks inside the column. */
+		overflow-wrap: anywhere;
 	}
 
 	.source-badge {
