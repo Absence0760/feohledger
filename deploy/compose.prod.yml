@@ -8,6 +8,17 @@
 # compose network. S3 is real AWS S3 (no MinIO here — FEOH_S3_ENDPOINT_URL and
 # the static keys are set empty in the sops env, so boto3 uses the instance
 # profile).
+#
+# Two database modes (docs/minimal-deployment.md § Database), chosen by whether
+# the sops env sets FEOH_DATABASE_URL — decided in ONE place, deploy/lib.sh,
+# which every deploy script sources:
+#   - external (the documented path: Amazon RDS) — FEOH_DATABASE_URL set,
+#     PGSSLMODE verify-full; the `postgres` service below never starts.
+#   - local (the cheaper alternative) — FEOH_DATABASE_URL unset; the `postgres`
+#     service runs under the `localdb` profile, which lib.sh activates.
+# Ad-hoc compose commands go through deploy/compose.sh, which applies the same
+# choice — a bare `docker compose -f compose.prod.yml up` would leave a
+# local-mode stack without its database.
 
 name: feoh-prod
 
@@ -32,6 +43,10 @@ services:
     # production run one image, and backend/tests/test_container_supply_chain.py
     # fails if a bump moves one file without the other.
     image: pgvector/pgvector:0.8.7-pg16@sha256:7b822b0aac60967beb1ea5e576b8602c94c300a157d187f385ae3e0da199b90a
+    # Local-database mode only: deploy/lib.sh activates `localdb` when the sops
+    # env leaves FEOH_DATABASE_URL unset. With an external database (RDS) this
+    # container never starts — no wasted RAM, no second database to confuse.
+    profiles: [localdb]
     restart: unless-stopped
     logging: *default-logging
     # Docker's default /dev/shm is 64 MB; Postgres parallel workers and
@@ -40,12 +55,22 @@ services:
     shm_size: 256mb
     environment:
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set in deploy/.env (via sops)}
+      # NOT `:?`: compose interpolates every service, profiled-out ones too, so
+      # a required-variable guard here would refuse the whole file in RDS mode,
+      # where POSTGRES_PASSWORD is legitimately empty. decrypt-env.sh owns the
+      # check instead — required in local mode, before any deploy step runs.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-}
       POSTGRES_DB: feohledger
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      # Over TCP, not the socket: on a fresh volume the image's entrypoint runs
+      # a temporary socket-only server for initdb, which `pg_isready` over the
+      # socket reports ready — the container went "healthy" and then shut that
+      # server down under the first client (deploy.sh's migrations on a first
+      # deploy: "the database system is shutting down"). The real server is
+      # the only one listening on TCP.
+      test: ["CMD-SHELL", "pg_isready -U postgres -h 127.0.0.1"]
       interval: 5s
       timeout: 5s
       retries: 12
@@ -75,11 +100,22 @@ services:
     environment:
       # Defaults derive from the local containers so the DB password lives in
       # exactly one sops entry (keep POSTGRES_PASSWORD URL-safe, e.g.
-      # `openssl rand -hex 24`). These are the UPGRADE SEAMS: setting
-      # FEOH_DATABASE_URL / FEOH_REDIS_URL in the sops env overrides them, which
-      # is the whole migration to RDS / ElastiCache later — no compose edit.
+      # `openssl rand -hex 24`). These are the OVERRIDE SEAMS: setting
+      # FEOH_DATABASE_URL / FEOH_REDIS_URL in the sops env replaces them — the
+      # RDS deployment sets FEOH_DATABASE_URL (which also switches the stack to
+      # external-database mode, see the header), ElastiCache would set the
+      # other. No compose edit either way.
       FEOH_DATABASE_URL: ${FEOH_DATABASE_URL:-postgresql+asyncpg://postgres:${POSTGRES_PASSWORD}@postgres:5432/feohledger}
       FEOH_REDIS_URL: ${FEOH_REDIS_URL:-redis://redis:6379}
+      # Database TLS, read by asyncpg for every connection the app opens —
+      # engines, tenant engines, the raw CREATE/DROP DATABASE connection — as
+      # none of them passes an `ssl` argument (docs/minimal-deployment.md
+      # § Database TLS). `prefer` is asyncpg's own default and today's
+      # behaviour against the local container, which serves no TLS. For RDS
+      # the sops env sets `verify-full` (decrypt-env.sh refuses anything
+      # weaker), checked against PGSSLROOTCERT, the RDS CA bundle the image
+      # carries (backend/Dockerfile).
+      PGSSLMODE: ${PGSSLMODE:-prefer}
       # boto3 (S3 / SES) resolves credentials from the EC2 instance profile;
       # the region must be explicit. NOTE: IMDSv2 needs hop limit 2 for
       # containers — see deploy/README.md.
@@ -92,8 +128,13 @@ services:
       # Same override seam as the URLs above (e.g. an external LB in front).
       FEOH_TRUSTED_PROXY_CIDRS: ${FEOH_TRUSTED_PROXY_CIDRS:-172.28.0.0/16}
     depends_on:
+      # `required: false` (compose >= 2.20; bootstrap-vm.sh pins 2.32.4): in
+      # local mode the `localdb` profile is active and the api waits for a
+      # healthy database exactly as before; with an external database the
+      # service is not in the project and the dependency is skipped.
       postgres:
         condition: service_healthy
+        required: false
       redis:
         condition: service_healthy
     # Lets `deploy.sh` roll out with `up -d --wait`: the deploy fails loudly
@@ -132,6 +173,33 @@ services:
       - caddy_config:/config
     depends_on:
       - api
+
+  # One-shot Postgres client tools (pg_dump / pg_dumpall / psql / pg_restore)
+  # for an EXTERNAL database: backup.sh and restore.sh run it as
+  # `docker compose run --rm -T pgtools <tool> …` in RDS mode. The same pinned
+  # image as `postgres`, so the tools match the server major (16). Local mode
+  # never uses it — those scripts `exec` into the
+  # running `postgres` container as before. The `tools` profile keeps `up`
+  # from starting it; naming it in `run` activates it.
+  #
+  # Connection: lib.sh passes PGHOST / PGPORT / PGUSER (not secret) with
+  # `run -e NAME=value`, and PGPASSWORD with a bare `run -e PGPASSWORD`, so the
+  # password travels through the environment and never appears in any
+  # process's argv. TLS: the same PGSSLMODE the api gets, verified against the
+  # RDS CA bundle mounted from the repo (the file backend/Dockerfile bakes in).
+  pgtools:
+    # Spelled out, not a YAML anchor: Dependabot matches `image: <ref>` lines,
+    # and an anchor between the key and the ref would hide the postgres line
+    # from it. It bumps both declarations together; tests/test_deploy_db_mode.py
+    # fails if they ever differ.
+    image: pgvector/pgvector:0.8.7-pg16@sha256:7b822b0aac60967beb1ea5e576b8602c94c300a157d187f385ae3e0da199b90a
+    profiles: [tools]
+    logging: *default-logging
+    environment:
+      PGSSLMODE: ${PGSSLMODE:-prefer}
+      PGSSLROOTCERT: /certs/rds-global-bundle.pem
+    volumes:
+      - ../backend/certs/rds-global-bundle.pem:/certs/rds-global-bundle.pem:ro
 
   # The one-shot production frontend build: deploy.sh runs it as
   # `docker compose run --rm frontend-build`, and the `build` profile keeps

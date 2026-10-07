@@ -40,12 +40,52 @@ MANGLED=$(grep -E '^[A-Za-z_][A-Za-z0-9_]*=.*([[:space:]]#|\$|\\n)' .env.tmp | c
 [ -z "$MANGLED" ] ||
 	die "compose would silently change the value of: ${MANGLED}(a ' #', a '\$' or a line break) — fix them in prod.sops.yaml."
 
+env_value() {
+	grep -E "^$1=" .env.tmp | tail -1 | cut -d= -f2- || true
+}
+
 # Everything compose interpolation / the app cannot default sensibly, plus
 # the vars the app hard-refuses to boot without in a deployed env
 # (FEOH_ENVIRONMENT=production arms those boot checks) and the two S3 buckets
 # uploads/backups silently need.
-REQUIRED_VARS=(POSTGRES_PASSWORD APP_DOMAIN API_DOMAIN ACME_EMAIL AWS_REGION
+REQUIRED_VARS=(APP_DOMAIN API_DOMAIN ACME_EMAIL AWS_REGION
 	FEOH_SECRET_KEY FEOH_ENVIRONMENT FEOH_S3_BUCKET BACKUP_S3_BUCKET)
+
+# ── Database mode: the same decision deploy/lib.sh makes for every script ────
+# FEOH_DATABASE_URL set → an external database (RDS): it must parse under the
+# contract lib.sh's pg tools rely on, and TLS must be on and verified.
+# Unset → the local Postgres container, whose password compose derives the
+# app's URL from — compose no longer refuses it empty itself (it interpolates
+# the profiled-out service too, so `:?` would break RDS mode), so this is the
+# check.
+# shellcheck source=lib.sh
+. ./lib.sh
+DB_URL=$(env_value FEOH_DATABASE_URL)
+SSLMODE=$(env_value PGSSLMODE)
+if [ -z "$DB_URL" ]; then
+	REQUIRED_VARS+=(POSTGRES_PASSWORD)
+	case "$SSLMODE" in
+	"" | disable | allow | prefer) ;;
+	*) die "PGSSLMODE='${SSLMODE}' with the local Postgres container, which serves no TLS — every connection would fail. Remove PGSSLMODE (or set FEOH_DATABASE_URL for an external database)." ;;
+	esac
+else
+	case "$DB_URL" in
+	postgresql+asyncpg://*) ;;
+	*) die "FEOH_DATABASE_URL must start with postgresql+asyncpg:// (the app's driver)." ;;
+	esac
+	case "$DB_URL" in
+	*\?*) die "FEOH_DATABASE_URL carries a query string — set TLS with PGSSLMODE instead, which the app (asyncpg) and the backup tools (libpq) both read; a URL option reaches only the app." ;;
+	esac
+	[[ "$DB_URL" =~ $FEOH_EXTERNAL_DB_URL_RE ]] ||
+		die "FEOH_DATABASE_URL is not postgresql+asyncpg://USER:PASSWORD@HOST[:PORT]/DATABASE with the RDS endpoint host name (verify-full checks the certificate against it) and user/password in URL-unreserved characters or %XX escapes (openssl rand -hex 24 needs none). Its value is not printed."
+	case "$SSLMODE" in
+	verify-full) ;;
+	verify-ca | require)
+		echo "WARN: PGSSLMODE=${SSLMODE} encrypts and checks the CA chain but not the hostname; verify-full is the documented setting for RDS." >&2 ;;
+	"") die "PGSSLMODE is required with an external database (FEOH_DATABASE_URL set) — use verify-full (RDS enforces TLS with rds.force_ssl=1; anything weaker than require is refused here)." ;;
+	*) die "PGSSLMODE='${SSLMODE}' would allow an unencrypted or unverified connection to the external database — use verify-full." ;;
+	esac
+fi
 # FEOH_HCAPTCHA_SECRET is one of those boot checks only while self-service
 # signup is on (config.py _require_captcha_in_deployed_envs): with
 # FEOH_SIGNUP_ENABLED false the signup routes 404 and there is nothing for a

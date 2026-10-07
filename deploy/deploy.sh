@@ -12,7 +12,8 @@ set -euo pipefail
 cd "$(dirname "$0")"
 REPO_ROOT=$(cd .. && pwd)
 
-COMPOSE=(docker compose -f compose.prod.yml)
+# shellcheck source=lib.sh
+. ./lib.sh
 
 die() {
 	echo "deploy.sh: $*" >&2
@@ -46,6 +47,11 @@ fi
 # script writes from here on is owner-only.
 umask 077
 ./decrypt-env.sh
+
+# Local Postgres container or external database (RDS)? Decided once, from the
+# .env just written (deploy/lib.sh) — it picks the compose profile below.
+feoh_load_db_mode || die "could not determine the database mode from deploy/.env."
+echo "==> database: ${DB_MODE}"
 
 # Per-VM tenant host list for Caddy (gitignored) — seed from the example so
 # the Caddyfile's `import tenants.caddy` always resolves.
@@ -83,7 +89,9 @@ fi
 if [ "$DO_BACKEND" = 1 ]; then
 	echo "==> building backend image"
 	"${COMPOSE[@]}" build api
-	"${COMPOSE[@]}" up -d postgres redis
+	# Local mode starts the Postgres container here; with an external database
+	# there is none to start — the migration below is the first thing to reach it.
+	"${COMPOSE[@]}" up -d "${DB_SERVICES[@]}" redis
 	echo "==> running migrations (control plane + every tenant DB)"
 	"${COMPOSE[@]}" run --rm api sh -c \
 		"alembic upgrade head && python scripts/migrate_all_tenants.py"
@@ -105,5 +113,14 @@ docker image prune -f >/dev/null ||
 	echo "WARN: dangling-image prune failed (non-fatal — the deploy itself succeeded)" >&2
 docker builder prune -f --keep-storage 5g >/dev/null ||
 	echo "WARN: builder-cache prune failed (non-fatal; check 'docker builder prune' flags)" >&2
+
+# Switching a VM from the local container to RDS leaves the old container
+# running: `up` never stops a service whose profile is no longer active. Say so
+# rather than stop it — until the RDS cut-over is verified it is the fallback,
+# and its volume is the data you migrated from.
+if [ "$DB_MODE" = external ] &&
+	[ -n "$(docker ps -q --filter label=com.docker.compose.project=feoh-prod --filter label=com.docker.compose.service=postgres)" ]; then
+	echo "NOTE: the local postgres container is still running, but the API now uses the external database. Once the cut-over is verified: ./compose.sh --profile localdb stop postgres" >&2
+fi
 
 echo "deploy complete — API healthcheck passed."
