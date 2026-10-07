@@ -85,7 +85,7 @@
 	// the markup — the animation replaces it and puts it back — so a visitor with
 	// reduced motion, a crawler and a failed bundle all read the real figure.
 	const stats = [
-		{ value: '7', label: 'payment rails, ACH to CHAPS' },
+		{ value: '11', label: 'payment rails, ACH to CHAPS' },
 		{ value: '9', label: 'workflow step types' },
 		{ value: '6', label: 'languages, fully localized' },
 		{ value: '1–2%', label: 'typical rebate on card payments' },

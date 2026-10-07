@@ -89,7 +89,7 @@ test.describe('landing — scroll reveal', () => {
 		await gotoLanding(page);
 		const values = page.locator('.stat-value');
 		await values.first().scrollIntoViewIfNeeded();
-		await expect(values).toHaveText(['7', '9', '6', '1–2%']);
+		await expect(values).toHaveText(['11', '9', '6', '1–2%']);
 	});
 });
 
