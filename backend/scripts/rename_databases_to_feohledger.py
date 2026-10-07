@@ -185,8 +185,9 @@ async def main() -> int:
     except (OSError, asyncpg.PostgresError) as exc:
         # Operator-facing script: a stack trace here is noise. The actionable
         # information is the endpoint we tried and that it didn't answer.
+        endpoint = f"{dsn.get('host')}:{dsn.get('port', 5432)}"
         print(
-            f"Cannot reach Postgres at {dsn['host']}:{dsn['port']} as {dsn['user']!r}: {exc}\n"
+            f"Cannot reach Postgres at {endpoint} as {dsn.get('user')!r}: {exc}\n"
             "Check FEOH_DATABASE_URL and that the server is running "
             "(local dev: `pnpm db:up`).",
             file=sys.stderr,
@@ -195,7 +196,7 @@ async def main() -> int:
 
     mode = "APPLY" if args.apply else "DRY RUN (pass --apply to execute)"
     print(f"FeohLedger database rename — {mode}")
-    print(f"  host={dsn['host']}:{dsn['port']} user={dsn['user']}\n")
+    print(f"  host={dsn.get('host')}:{dsn.get('port', 5432)} user={dsn.get('user')}\n")
 
     conflicts = 0
     try:

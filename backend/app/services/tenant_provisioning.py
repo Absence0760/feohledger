@@ -16,6 +16,7 @@ from dataclasses import dataclass
 
 import asyncpg
 from sqlalchemy import select, text
+from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from app.config import settings
@@ -95,19 +96,47 @@ class ProvisioningResult:
     db_name: str
 
 
+#: Query keys SQLAlchemy's asyncpg dialect consumes itself and never forwards to
+#: ``asyncpg.connect`` (``AsyncAdapt_asyncpg_dbapi.connect``) — passing one to a
+#: raw ``asyncpg.connect`` would be a TypeError.
+_SQLALCHEMY_ONLY_QUERY_KEYS = frozenset(
+    {"prepared_statement_cache_size", "prepared_statement_name_func"}
+)
+
+
+def asyncpg_connect_kwargs(url: str, *, database: str | None = None) -> dict:
+    """``asyncpg.connect`` keyword arguments for a ``postgresql+asyncpg://`` URL.
+
+    Parsed with SQLAlchemy's own ``make_url`` — the parser every engine in the
+    app uses — so a raw asyncpg connection reaches exactly the server, as
+    exactly the user, an engine on the same URL would: the password is
+    percent-decoded, a missing port is left to asyncpg's default, and the URL's
+    query string is forwarded the way the dialect forwards it (``ssl=`` and
+    friends become connect kwargs). Before this, a hand-rolled split dropped the
+    query outright, so a TLS option set on ``FEOH_DATABASE_URL`` reached every
+    engine but never the CREATE/DROP DATABASE connection.
+
+    With no ``ssl`` key in the URL, asyncpg falls back to ``PGSSLMODE`` /
+    ``PGSSLROOTCERT`` from the environment — the mechanism the deployed stack
+    uses (docs/minimal-deployment.md § Database TLS) — exactly as an engine does.
+
+    ``database`` overrides the URL's database (``"postgres"`` for maintenance).
+    """
+    parsed = make_url(url)
+    kwargs: dict = {
+        key: value for key, value in parsed.query.items() if key not in _SQLALCHEMY_ONLY_QUERY_KEYS
+    }
+    kwargs.update(parsed.translate_connect_args(username="user"))
+    if database is not None:
+        kwargs["database"] = database
+    return kwargs
+
+
 def _parse_maintenance_dsn() -> dict:
-    """Parse host/port/user/password out of the configured async URL, for an
-    asyncpg connection to the 'postgres' maintenance DB."""
-    url = settings.database_url.replace("postgresql+asyncpg://", "")
-    userpass, hostdb = url.split("@", 1)
-    user, password = userpass.split(":", 1)
-    host_port, _ = hostdb.rsplit("/", 1)
-    if ":" in host_port:
-        host, port_str = host_port.split(":", 1)
-        port = int(port_str)
-    else:
-        host, port = host_port, 5432
-    return {"host": host, "port": port, "user": user, "password": password, "database": "postgres"}
+    """``asyncpg.connect`` kwargs for the 'postgres' maintenance DB on the
+    configured server (CREATE / DROP DATABASE cannot run in a transaction, so
+    they need a raw connection rather than an engine)."""
+    return asyncpg_connect_kwargs(settings.database_url, database="postgres")
 
 
 async def _create_postgres_database(db_name: str) -> bool:

@@ -101,6 +101,84 @@ def test_a_query_string_free_base_with_a_path_port_is_handled():
     assert make_tenant_url("postgresql+asyncpg://h/feohledger", "feoh_x").endswith("/feoh_x")
 
 
+@pytest.mark.parametrize(
+    ("base", "expected"),
+    [
+        # A TLS option on the control-plane URL must reach every tenant engine —
+        # the old `rsplit("/")` glued it onto the dropped database name.
+        (
+            "postgresql+asyncpg://u:p@db.example.rds.amazonaws.com:5432/feohledger?ssl=verify-full",
+            "postgresql+asyncpg://u:p@db.example.rds.amazonaws.com:5432/feoh_acme?ssl=verify-full",
+        ),
+        # A `/` inside the query: rsplit split INSIDE the query string.
+        (
+            "postgresql+asyncpg://u:p@h:5432/feohledger?sslrootcert=/etc/ca.pem&ssl=require",
+            "postgresql+asyncpg://u:p@h:5432/feoh_acme?sslrootcert=/etc/ca.pem&ssl=require",
+        ),
+        # No database in the base: one is added rather than the host being eaten.
+        ("postgresql+asyncpg://u:p@h:5432", "postgresql+asyncpg://u:p@h:5432/feoh_acme"),
+        (
+            "postgresql+asyncpg://u:p@h:5432?ssl=require",
+            "postgresql+asyncpg://u:p@h:5432/feoh_acme?ssl=require",
+        ),
+        # A password may hold `/` and `?` (SQLAlchemy's grammar: it runs to `@`).
+        (
+            "postgresql+asyncpg://u:pa/ss?x@h/fl?a=b",
+            "postgresql+asyncpg://u:pa/ss?x@h/feoh_acme?a=b",
+        ),
+        (
+            "postgresql+asyncpg://u:p@[::1]:5432/fl?x=1",
+            "postgresql+asyncpg://u:p@[::1]:5432/feoh_acme?x=1",
+        ),
+        # An empty query is still a query — preserved, not dropped.
+        ("postgresql+asyncpg://u:p@h/fl?", "postgresql+asyncpg://u:p@h/feoh_acme?"),
+    ],
+)
+def test_a_query_string_survives_and_the_name_lands_in_the_path(base, expected):
+    assert make_tenant_url(base, "feoh_acme") == expected
+
+
+@pytest.mark.parametrize(
+    "base",
+    [
+        BASE,
+        "postgresql+asyncpg://u:p@host:5432/feohledger?ssl=require",
+        "postgresql+asyncpg://u:p@host/feohledger?sslrootcert=/etc/ca.pem&ssl=verify-full",
+        "postgresql+asyncpg://u:p%2Fq@host:5432/fl",
+        "postgresql+asyncpg://u:pa/ss?x@host:5432/fl?a=b&c=d",
+        "postgresql+asyncpg://h/feohledger",
+        "postgresql+asyncpg://h",
+        "postgresql+asyncpg://u:p@h:5432?ssl=require",
+        "postgresql+asyncpg://u:p@[::1]:5432/fl?x=1",
+        "postgresql+asyncpg://u@h:5432/fl",
+        "postgresql+asyncpg://h:5432/db?application_name=a@b",
+    ],
+)
+def test_the_split_agrees_with_the_parser_the_engine_uses(base):
+    """`make_tenant_url` hand-rolls SQLAlchemy's URL grammar (the module may not
+    import it), so hold it to SQLAlchemy's own parse: the result must be the base
+    URL in every respect except the database name."""
+    from sqlalchemy.engine import make_url
+
+    got, want = make_url(make_tenant_url(base, "feoh_acme")), make_url(base)
+    assert got.database == "feoh_acme"
+    fields = ("drivername", "username", "password", "host", "port", "query")
+    assert {f: getattr(got, f) for f in fields} == {f: getattr(want, f) for f in fields}
+
+
+def test_split_database_url_reports_absent_parts_as_none():
+    from app.tenant_url import split_database_url
+
+    assert split_database_url("postgresql+asyncpg://u:p@h:5432/fl?ssl=require") == (
+        "postgresql+asyncpg://u:p@h:5432",
+        "fl",
+        "ssl=require",
+    )
+    assert split_database_url("postgresql+asyncpg://h") == ("postgresql+asyncpg://h", None, None)
+    with pytest.raises(ValueError):
+        split_database_url("not-a-url")
+
+
 def test_it_is_the_body_app_database_binds():
     """`app.database._make_tenant_url` is this function plus `settings.database_url`.
 

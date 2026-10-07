@@ -51,8 +51,9 @@ def make_tenant_url(base_url: str, db_name: str) -> str:
     """Swap the database name in ``base_url`` for ``db_name``.
 
     ``base_url`` is the control-plane URL — everything that identifies the
-    server (driver, credentials, host, port, query string) is kept; only the
-    trailing database name is replaced. ``db_name`` must come from a resolved
+    server (driver, credentials, host, port) and its query string (connection
+    options such as ``ssl=``) is kept; only the database name is replaced, and
+    one is added when the base names none. ``db_name`` must come from a resolved
     ``Organization`` row: this function cannot check that (no static or runtime
     rule can), which is exactly why every caller routes through one place a
     reviewer can look at.
@@ -68,4 +69,56 @@ def make_tenant_url(base_url: str, db_name: str) -> str:
         # The offending value is not echoed: it may be attacker-supplied, and
         # this string can reach a log.
         raise ValueError("tenant database name contains URL-structural characters")
-    return base_url.rsplit("/", 1)[0] + "/" + db_name
+    server, _database, query = split_database_url(base_url)
+    return f"{server}/{db_name}" + (f"?{query}" if query is not None else "")
+
+
+def split_database_url(url: str) -> tuple[str, str | None, str | None]:
+    """Split a database URL into ``(server, database, query)``.
+
+    ``server`` is everything up to the database path — driver, credentials,
+    host, port — with no trailing ``/``. ``database`` and ``query`` are ``None``
+    when the URL has none (a ``?`` with nothing after it is an empty query, not
+    an absent one, and is preserved as such).
+
+    The grammar is SQLAlchemy's own ``make_url`` pattern, hand-rolled because
+    this module may not import (module docstring): a username runs to the
+    first ``:``, ``/`` or ``@``; a password runs to the first ``@`` and may
+    hold ``/`` or ``?``; the host and port run to the first ``/`` or ``?``; the
+    database runs to the first ``?``. A naive ``rsplit("/")`` gets two real URLs
+    wrong — a query string containing ``/`` (``?sslrootcert=/etc/ca.pem``)
+    splits inside the query, and any query is glued onto the database name or
+    dropped — so a TLS option on the control-plane URL silently never reached a
+    tenant engine. ``tests/test_tenant_url.py`` checks this split against
+    ``sqlalchemy.engine.make_url`` itself.
+    """
+    scheme_end = url.find("://")
+    if scheme_end < 0:
+        raise ValueError("database URL has no '<driver>://' scheme")
+    rest_start = scheme_end + 3
+
+    # Userinfo: present only if a `user[:password]@` prefix parses.
+    authority_start = rest_start
+    i = rest_start
+    while i < len(url) and url[i] not in ":/@":
+        i += 1
+    if i < len(url) and url[i] == "@":
+        authority_start = i + 1
+    elif i < len(url) and url[i] == ":":
+        at = url.find("@", i + 1)
+        if at >= 0:
+            authority_start = at + 1
+
+    # Host[:port] runs to the first `/` (database) or `?` (query).
+    j = authority_start
+    while j < len(url) and url[j] not in "/?":
+        j += 1
+    server = url[:j]
+    if j == len(url):
+        return server, None, None
+    if url[j] == "?":
+        return server, None, url[j + 1 :]
+    q = url.find("?", j + 1)
+    if q < 0:
+        return server, url[j + 1 :], None
+    return server, url[j + 1 : q], url[q + 1 :]
