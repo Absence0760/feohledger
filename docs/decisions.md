@@ -10159,11 +10159,23 @@ Stripe, insurers, the EU/UK Art 27 representatives, the SCCs with each
 sub-processor, a SOC 2 vendor and counsel can all be engaged now, in the
 operator's own name trading as FeohLedger. The C-corp steps — formation, the
 83(b), founder vesting, Delaware franchise tax, a registered agent — leave the
-path. What replaces them is smaller: register FeohLedger as a trade name
-(DBA / assumed name), take an EIN so the operator's SSN goes on nothing a
-customer or processor sees, open a separate business bank account, and publish
-a mailing address that is not the operator's home, since the privacy notice
-must name one. The procedure is `docs/founder-runbooks/legal-entity.md`.
+path. Nothing is required to replace them: the operator contracts and bills in their
+own name, "Jared Howard", with FeohLedger as the product's name, so no trade-name
+(DBA) filing is needed — that is only required to transact *under* a name other
+than your own. A DBA, an EIN (to keep the SSN off customer W-9s and Stripe) and a
+separate bank account are optional conveniences
+(`docs/founder-runbooks/legal-entity.md`).
+
+The legal pages publish no postal address. They state the operator's location
+(Virginia, United States) and make email the contact channel for every request
+and notice. GDPR Art 13(1)(a) asks for "contact details", which an email
+address satisfies; the US state privacy laws that would ask for more (CCPA,
+VCDPA) apply only above size thresholds this pilot is far below. Rendering
+"Virginia" where the pages said "postal mail reaches us at …" would have been
+a claim nobody could act on, so `operator.ts` gained decided states instead:
+`legalEntity: false` (no separate company), `postalAddress: false` (email
+only, `location` stated), and `dataProtectionOfficer: false`. Counsel should
+confirm the email-only position when reviewing the set.
 
 What it costs. Liability is personal and unlimited. The Terms' cap binds only
 customers, not suppliers or regulators, and preserves gross negligence, wilful

@@ -8,19 +8,28 @@ purposes — it just has no separate legal person behind it.
 ## Current path: sole proprietor (decisions §252)
 
 **Decided 2026-10-07: the pilot is signed by the operator as a sole
-proprietor trading as FeohLedger.** Every contract on the critical path —
-Stripe, insurance, the EU/UK Art 27 representatives, the SCCs with each
-sub-processor, a SOC 2 vendor, counsel — can be signed in your own name
-now. Nothing waits on incorporation.
+proprietor, in their own name — "Jared Howard" — with FeohLedger as the
+product's name.** Every contract on the critical path — Stripe, insurance,
+the EU/UK Art 27 representatives, the SCCs with each sub-processor, a SOC 2
+vendor, counsel — can be signed in your own name now. Nothing waits on
+incorporation.
+
+The legal pages already reflect this (`frontend/src/lib/legal/operator.ts`):
+no separate company, no published postal address — they state "based in
+Virginia, United States" and make email the contact channel — and no DPO.
+
+**Required:** only E&O + cyber insurance, before customer #1, and a local
+business licence if your city or county requires one. **Everything else in
+the table is optional.**
 
 | Step | Why | Notes |
 |---|---|---|
-| Register **FeohLedger** as a trade name (DBA / "assumed name") | Lets you trade, invoice and bank under the name rather than your own | County clerk or state, depending on your state. Usually $10–100 and a newspaper notice in some states |
-| Get an **EIN** from the IRS | Keeps your SSN off customer W-9s, Stripe and the bank | Free, online, minutes. Optional for a sole proprietor with no employees — get it anyway |
-| Open a **separate business bank account** in the DBA name | Clean books, and Stripe payouts land somewhere that is not personal | Most banks want the DBA certificate + EIN |
-| Get a **mailing address that is not your home** | `/legal/privacy` must publish a controller address (`postalAddress` in `operator.ts`) | Virtual mailbox or PO box. Ask counsel whether a PO box satisfies GDPR Art 13 for you |
-| Bind **E&O + cyber insurance** — **hard gate before customer #1** | With no entity, a claim outside the Terms' cap reaches personal assets | See `insurance.md`. Tell the broker you are a sole proprietor |
-| State/local business licence, if your city or state requires one | Varies | Check your city and state |
+| Bind **E&O + cyber insurance** — **required, hard gate before customer #1** | With no entity, a claim outside the Terms' cap reaches personal assets | See `insurance.md`. Tell the broker you are a sole proprietor |
+| State/local business licence — **required only if** your city or county requires one | Varies | Check with your city/county |
+| _Optional:_ register **FeohLedger** as a trade name (DBA / "assumed name") | Needed only if you invoice, contract or bank **as "FeohLedger"** rather than in your own name | County clerk or state. Usually $10–100. Not needed while contracts and invoices say "Jared Howard" |
+| _Optional:_ get an **EIN** from the IRS | Keeps your SSN off customer W-9s, Stripe and the bank | Free, online, minutes |
+| _Optional:_ open a **separate business bank account** | Clean books; Stripe payouts land somewhere that is not personal | A personal-name account works without a DBA |
+| _Optional:_ a **mailing address** that is not your home | Only if you later want to publish one — the pages are email-only today | Virtual mailbox or PO box; then set `postalAddress` in `operator.ts` |
 | Sales-tax nexus review | Same as for a company | See Step 2 below — not urgent for pilot #1 |
 
 Steps 3 (contracts) and 4 (lawyer review) below apply unchanged. Steps 1,
@@ -142,12 +151,10 @@ Budget annually, not once:
 
 Sole-proprietor path (current — decisions §252):
 
-- [ ] FeohLedger registered as a trade name (DBA / assumed name)
-- [ ] EIN issued
-- [ ] Business bank account opened in the DBA name
-- [ ] Non-home mailing address set up → `postalAddress` in `operator.ts`
+- [x] Legal pages name the operator, location (Virginia) and email-only contact (`operator.ts`)
 - [ ] E&O + cyber cover bound (hard gate before customer #1)
 - [ ] Local business licence, if required
+- [ ] _Optional:_ EIN, separate bank account, DBA (only to trade as "FeohLedger")
 - [ ] TOS + Privacy + DPA published on the marketing site
 - [ ] MSA + Order Form templates ready to send
 - [ ] Startup lawyer on retainer (or flat-fee relationship)
@@ -161,16 +168,16 @@ Company path (only when a §252 trigger fires):
 - [ ] March 1 franchise tax + annual report reminder in the calendar
 - [ ] Customer agreements assigned to the entity (Terms §1)
 
-Sole-proprietor path: a DBA filing (~$10–100 one-time) and a mailbox
-subscription (~$10–30/month), plus the insurance premium and the eventual
-lawyer. No franchise tax, no registered agent.
+Sole-proprietor path: nothing required beyond the insurance premium, a local
+licence if one applies, and the eventual lawyer. No franchise tax, no
+registered agent.
 
 Company path total cost: ~$500–1500 one-time, plus **~$550+/yr recurring** (franchise
 tax + annual report + registered agent), plus the eventual lawyer retainer.
 This footer read "one-time" only until 2026-09-17, which is how the
 franchise tax becomes a surprise.
-Total time: about a week for the sole-proprietor path (the DBA filing is
-the slow part); 1–3 weeks for a company.
+Total time: days for the sole-proprietor path (insurance quotes are the
+slow part); 1–3 weeks for a company.
 
 ## Sources
 

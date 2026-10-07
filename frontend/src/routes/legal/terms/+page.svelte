@@ -18,13 +18,21 @@
 	</p>
 
 	<p>
-		{OPERATOR.serviceName} is operated by {OPERATOR.controllerDescription}. Where these
-		Terms refer to our registered legal entity, that entity is
-		<Fact value={OPERATOR.legalEntity} label="registered legal entity" />. Until
-		incorporation is complete the counterparty to this agreement is the individual named
-		above, who provides the Service personally; on incorporation we may assign these
-		Terms to the company formed to operate the Service, as described in
-		<a href="#general">section 20</a>.
+		{#if OPERATOR.legalEntity === false}
+			{OPERATOR.serviceName} is operated by {OPERATOR.controllerDescription}, based in
+			{OPERATOR.location}. There is no separate registered company: the counterparty to
+			this agreement is the individual named above, who provides the Service personally. If
+			a company is later formed to operate the Service, we may assign these Terms to it, as
+			described in <a href="#general">section 20</a>.
+		{:else}
+			{OPERATOR.serviceName} is operated by {OPERATOR.controllerDescription}. Where these
+			Terms refer to our registered legal entity, that entity is
+			<Fact value={OPERATOR.legalEntity} label="registered legal entity" />. Until
+			incorporation is complete the counterparty to this agreement is the individual named
+			above, who provides the Service personally; on incorporation we may assign these
+			Terms to the company formed to operate the Service, as described in
+			<a href="#general">section 20</a>.
+		{/if}
 	</p>
 
 	<p>
@@ -825,9 +833,10 @@
 	<h3>20.3 Notices</h3>
 	<p>
 		Notices to us must be in writing and sent to
-		<a href="mailto:{CONTACT.legal}">{CONTACT.legal}</a>; where a notice must also be sent
-		by post, the address is
-		<Fact value={OPERATOR.postalAddress} label="postal address for notices" />. Notices to
+		<a href="mailto:{CONTACT.legal}">{CONTACT.legal}</a>{#if OPERATOR.postalAddress === false}.
+			We do not publish a postal address, so notices to us are given by email.{:else}; where a
+			notice must also be sent by post, the address is
+			<Fact value={OPERATOR.postalAddress} label="postal address for notices" />.{/if} Notices to
 		the Customer are sent to the administrator contact addresses on its account, or given
 		in the application. An emailed notice is deemed given on the next business day after
 		it is sent, unless the sender receives a delivery failure. It is the Customer's

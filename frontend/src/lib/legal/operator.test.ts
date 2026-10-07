@@ -33,6 +33,7 @@ const complete: OperatorFacts = {
 	serviceName: 'FeohLedger',
 	controllerDescription: 'Test operator',
 	legalEntity: 'Example Holdings LLC',
+	location: 'Delaware, United States',
 	postalAddress: '1 Example Way, Wilmington, DE, USA',
 	governingLaw: 'the State of Delaware, USA',
 	supervisoryAuthority: 'the Irish Data Protection Commission',
@@ -89,6 +90,25 @@ describe('operator facts', () => {
 			true
 		);
 		expect(operatorFactsComplete({ ...complete, dataProtectionOfficer: false })).toBe(true);
+	});
+
+	test('no registered entity and no published postal address are decided, not pending', () => {
+		// A sole proprietor (decisions §251) has no company to name and may
+		// publish email as its only contact. Both are real answers the pages
+		// state outright; reading them as pending would keep "[… to be
+		// confirmed]" on every page for a question that is closed.
+		const soleTrader = { ...complete, legalEntity: false, postalAddress: false } as OperatorFacts;
+		expect(isPending(soleTrader, 'legalEntity')).toBe(false);
+		expect(isPending(soleTrader, 'postalAddress')).toBe(false);
+		expect(operatorFactsComplete(soleTrader)).toBe(true);
+		expect(isPending({ ...complete, legalEntity: null }, 'legalEntity')).toBe(true);
+		expect(isPending({ ...complete, postalAddress: null }, 'postalAddress')).toBe(true);
+	});
+
+	test('the operator location is always stated', () => {
+		// It stands where an address would when postalAddress is false, so an
+		// empty location would leave "based in ." on the page.
+		expect(OPERATOR.location.trim()).toBeTruthy();
 	});
 
 	test('an appointed DPO is also decided', () => {

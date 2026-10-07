@@ -14,8 +14,9 @@ on the critical path.
 CRITICAL PATH
 │
 ├── 1. Legal foundation       ← can't invoice without it
-│     └── legal-entity.md      (sole proprietor — DBA, EIN, bank;
-│                               no incorporation, decisions §252)
+│     └── legal-entity.md      (sole proprietor in own name —
+│                               insurance required, no incorporation
+│                               or DBA, decisions §252)
 │
 ├── 2. Production deployment  ← can't demo to a buyer without it
 │     └── production-deployment.md

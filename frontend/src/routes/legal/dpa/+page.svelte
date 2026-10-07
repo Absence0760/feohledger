@@ -54,9 +54,12 @@
 
 	<p>
 		<strong>Processor</strong> — {OPERATOR.serviceName}, operated by
-		{OPERATOR.controllerDescription}, registered as
-		<Fact value={OPERATOR.legalEntity} label="registered legal entity" />, of
-		<Fact value={OPERATOR.postalAddress} label="postal address" />. Referred to below as
+		{OPERATOR.controllerDescription}{#if OPERATOR.legalEntity !== false}, registered as
+			<Fact value={OPERATOR.legalEntity} label="registered legal entity" />{/if}, of
+		{#if OPERATOR.postalAddress === false}{OPERATOR.location}{:else}<Fact
+				value={OPERATOR.postalAddress}
+				label="postal address"
+			/>{/if}. Referred to below as
 		<strong>we</strong>, <strong>us</strong> or <strong>our</strong>.
 	</p>
 
@@ -1039,9 +1042,12 @@
 				<tr>
 					<td><strong>Data importer / Processor</strong></td>
 					<td>
-						{OPERATOR.serviceName}, operated by {OPERATOR.controllerDescription},
-						registered as <Fact value={OPERATOR.legalEntity} label="registered legal entity" />,
-						of <Fact value={OPERATOR.postalAddress} label="postal address" />. Activities
+						{OPERATOR.serviceName}, operated by {OPERATOR.controllerDescription}{#if OPERATOR.legalEntity !== false},
+							registered as <Fact value={OPERATOR.legalEntity} label="registered legal entity" />{/if},
+						of {#if OPERATOR.postalAddress === false}{OPERATOR.location}{:else}<Fact
+								value={OPERATOR.postalAddress}
+								label="postal address"
+							/>{/if}. Activities
 						relevant to the transfer: providing the accounts-payable platform described in
 						the Agreement. Role: processor. Contact:
 						<a href="mailto:{CONTACT.privacy}">{CONTACT.privacy}</a>.

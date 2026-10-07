@@ -13,12 +13,13 @@ each step.
 ## Critical path
 
 - [ ] **Legal foundation** — `legal-entity.md` _(sole proprietor — decisions §252)_
-  - [x] Business form decided: sole proprietor trading as FeohLedger
-        (2026-10-07). No incorporation or 83(b) on this path; a company
+  - [x] Business form decided: sole proprietor contracting as Jared Howard
+        (2026-10-07). No incorporation, 83(b) or DBA on this path; a company
         comes back only on a §252 trigger
-  - [ ] FeohLedger registered as a trade name (DBA)
-  - [ ] EIN + business bank account
-  - [ ] Non-home mailing address (published on `/legal/privacy`)
+  - [x] Legal pages name the operator, location (Virginia) and email-only
+        contact — no postal address published
+  - [ ] Local business licence, if your city/county requires one
+  - _Optional:_ EIN, separate bank account
   - [ ] TOS + Privacy + DPA + MSA templates ready
 - [ ] **Production deployment** — `production-deployment.md`
   - [ ] AWS prod account

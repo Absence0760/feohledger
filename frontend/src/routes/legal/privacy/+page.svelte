@@ -13,10 +13,12 @@
 	<p>
 		{OPERATOR.serviceName} is a business-to-business accounts-payable platform. Companies use it to
 		receive supplier invoices, code and approve them, and pay them. It is operated by
-		{OPERATOR.controllerDescription}, at
-		<Fact value={OPERATOR.postalAddress} label="a postal address for the controller" />.
+		{OPERATOR.controllerDescription}, based in {OPERATOR.location}{#if OPERATOR.postalAddress !== false},
+			at <Fact value={OPERATOR.postalAddress} label="a postal address for the controller" />{/if}.
 		{#if OPERATOR.legalEntity}
 			The registered legal entity is {OPERATOR.legalEntity}.
+		{:else if OPERATOR.legalEntity === false}
+			There is no separate registered company: the individual named above is the controller.
 		{:else}
 			Once the business has a registered legal entity, it is named here:
 			<Fact value={OPERATOR.legalEntity} label="the registered legal entity" />.
@@ -1044,10 +1046,14 @@
 
 	<p>
 		Write to <a href="mailto:{CONTACT.privacy}">{CONTACT.privacy}</a> for anything in this policy:
-		a question, an access or erasure request, a correction, an objection, or a complaint. Postal
-		mail reaches
-		{OPERATOR.controllerDescription} at
-		<Fact value={OPERATOR.postalAddress} label="a postal address for the controller" />.
+		a question, an access or erasure request, a correction, an objection, or a complaint.
+		{#if OPERATOR.postalAddress === false}
+			We do not publish a postal address; every request this policy describes can be made by
+			email, and it is handled the same way as a letter would be.
+		{:else}
+			Postal mail reaches {OPERATOR.controllerDescription} at
+			<Fact value={OPERATOR.postalAddress} label="a postal address for the controller" />.
+		{/if}
 	</p>
 
 	<p>

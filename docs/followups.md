@@ -1312,12 +1312,14 @@ as oversights.
       Ref: [decisions.md](decisions.md) §175. Tracker:
       [#446](https://github.com/Absence0760/feohledger/issues/446) § 3.
 
-- [ ] **Fill the operator facts and get counsel to review the legal set.** ([#428](https://github.com/Absence0760/feohledger/issues/428)) Eight
+- [ ] **Fill the operator facts and get counsel to review the legal set.** ([#428](https://github.com/Absence0760/feohledger/issues/428)) Five
       facts in `frontend/src/lib/legal/operator.ts` are `null` and render as
-      `[… to be confirmed]` on every page: the registered legal entity, a postal
-      address, the governing law and venue, the lead supervisory authority, EU
-      and UK Art 27 representatives, whether a DPO is appointed, and the hosting
-      region. The documents are complete and operative as written — these are
+      `[… to be confirmed]`: the governing law and venue, the lead supervisory
+      authority, EU and UK Art 27 representatives, and the hosting region. The
+      other three were decided 2026-10-07 ([decisions.md](decisions.md) §252):
+      no separate registered entity, no published postal address (location
+      Virginia, contact by email), no DPO — counsel should confirm the
+      email-only contact position. The documents are complete and operative as written — these are
       the facts only the operator can supply.
       **Durable fix:** set each value in that one file (the pending notice and
       every inline marker disappear with no other edit), then have a lawyer read
