@@ -39,7 +39,13 @@ and an audit that re-derived both found the copy stale at nearly every sync
 transcription was retired rather than corrected again. Add a follow-up here; add
 a GitHub issue only when one warrants its own thread.
 
-**Last reconciled:** 2026-10-06 — the no-rail pilot (issue #517, decisions §251)
+**Last reconciled:** 2026-10-07 — the public pricing page now renders the plan
+catalogue it is generated from (`pnpm gen:pricing` / `check:pricing`, decisions
+§253, issue #426) and every remaining public figure has a derivation in
+[marketing-substantiation.md](marketing-substantiation.md), closing **two** (c)
+entries — the pricing page describing a different product than the billing
+code, and the missing substantiation file — taking the file from 76 → 74. Before
+that, 2026-10-06 — the no-rail pilot (issue #517, decisions §251)
 opened three (c) entries — mobile record-only parity, the balanced NACHA file and
 the ERP-reported payment date — taking the file from 72 → 75. Before that, 2026-10-06 — the round-2 issues batch (PR #514) closed
 **twelve** (c) entries and opened five, taking the file from 59 → 52: the unmasked
@@ -93,7 +99,7 @@ section carried its own `decisions.md` § reference, so nothing was lost by
 deleting it; that cross-reference is what makes the pruning safe, and writing
 one is what earns a future entry the right to be deleted.
 
-**76 open: 61 (c) · 9 (a) · 6 (b)** — re-derived from the file, never carried
+**74 open: 59 (c) · 9 (a) · 6 (b)** — re-derived from the file, never carried
 forward. The section heading is authoritative; where an entry also carries a
 `(c)`/`(a)`/`(b)` marker, the two agree.
 `grep -c '^- \[ \]' docs/followups.md`.
@@ -255,53 +261,6 @@ nobody re-reads outlives the thing it describes.
       the code silently — what is still missing is telling customers when they
       change.
       **Trigger:** before adding or changing any sub-processor.
-
-### The pricing page and the billing code describe different products
-
-- [ ] **Marketing prices do not match the plan catalogue.** ([#426](https://github.com/Absence0760/feohledger/issues/426))
-      `frontend/src/lib/components/marketing/Pricing.svelte` sells "Pro" at
-      $29/seat/month ($24 annual, 5-seat minimum) with a monthly/annual toggle.
-      `backend/app/services/billing/plan_catalog.py` has flat monthly plans —
-      `free` $0, `growth` $49, `scale` $199 — with no seat pricing and no annual
-      interval (`services/billing/period.py` is months-only). The free tier's
-      advertised "50 invoices/month, 2 seats" caps are not enforced anywhere
-      (`free` carries `entitlements: {}`).
-      The claims that were outright false were corrected in the legal-pages change
-      — a "SOC 2 attestation" and a "99.9% uptime SLA" that do not exist, a
-      `sales@feohledger.example` CTA on the reserved `.example` TLD, a
-      "Start 14-day trial" button that routes to the same signup as the free plan
-      (`tenant_provisioning._provision_into` binds every new org to `free`, and
-      there is no plan selection anywhere in signup), and two fabricated landing
-      statistics ("3.2s avg. extraction time", "97% field accuracy" — the latter
-      traceable to Basware's published *touchless processing rate* quoted in
-      `docs/competitive-analysis.md`, i.e. a competitor's number for a different
-      metric).
-      **What remains is the pricing model itself, which is a product decision.**
-      Two halves: the prices and interval above, and the fact that **no
-      plan-differentiation claim on that page is enforced anywhere in the
-      backend.** `require_entitlement` gates exactly one thing (`public_api`);
-      SSO, SAML and SCIM carry no entitlement check at all, so a Free tenant can
-      turn on the feature the page sells as Enterprise-only, and the advertised
-      "50 invoices / month" and seat counts are not enforced either (`free`
-      carries `entitlements: {}`). Selling a premium feature everyone already has
-      is the sharper half — a paying customer has a claim.
-      **Durable fix:** decide the real pricing, make one of the two sides match
-      (rendering the grid from `plan_catalog` would stop it drifting again), and
-      implement the entitlement checks the page implies — or describe only what
-      `Plan.entitlements` actually gates.
-      **Trigger:** before billing is switched off the `mock` adapter, or before
-      any real traffic reaches the pricing page — whichever is first.
-
-- [ ] **No substantiation file backs the remaining marketing numbers.** The two
-      invented statistics are gone and the rest are now countable from source
-      (7 payment rails, 9 workflow step types, 6 locales, the 1% default rebate
-      rate in `api/cards.py`), with a comment in `Landing.svelte` saying so. But
-      a specific numeric claim is an objectively verifiable factual claim, and
-      the durable habit is a file that records how each was derived, so a
-      challenge is answered from a record rather than a re-derivation.
-      **Durable fix:** a short substantiation note per public number, refreshed
-      whenever the underlying count moves — and a real extraction-accuracy
-      benchmark before any accuracy figure is published again.
 
 ### One adapter family still ships code no caller reaches
 
