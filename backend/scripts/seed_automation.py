@@ -62,7 +62,7 @@ import copy
 import math
 import sys
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
@@ -164,20 +164,56 @@ _NOISY = (
                 rejected_first=frozenset({3}), voided=frozenset({5})),
 )  # fmt: skip
 
-# Small-ticket vendors, all inside the concluded experiment's window, so about
-# half land in its auto-approve arm. One auto-approved Catering payment is
-# voided — the single overturn the feedback loop measures. The human-reviewed
-# half carries a few GL corrections. Without them that half is spotless too, and
-# these vendors would join the clean set the threshold is argued from.
-# (A correction index that lands in the auto-approve arm is simply unused.)
+# Small-ticket vendors, all inside the concluded experiment's window and all
+# under `_AUTO_BELOW`, so each one in its auto-approve arm is auto-approved.
+# `_sized_small_plans` replaces each `count` per org (see there). One
+# auto-approved Catering payment is voided: the single overturn the feedback
+# loop measures.
 _SMALL = (
     _VendorPlan("Transport Logistics", "TRL", "6700", 24, Decimal("150"), Decimal("480"),
-                ("ap_manager",), (2, 14), first_day=169, last_day=77,
-                corrected=frozenset({2, 9, 15, 21})),
+                ("ap_manager",), (2, 14), first_day=169, last_day=77),
     _VendorPlan("Catering Solutions", "CAT", "6800", 24, Decimal("160"), Decimal("470"),
-                ("ap_manager",), (2, 14), first_day=168, last_day=76,
-                corrected=frozenset({4, 12, 18})),
+                ("ap_manager",), (2, 14), first_day=168, last_day=76),
 )  # fmt: skip
+
+# Auto-approvals per small-ticket vendor. Two vendors → 24, with one voided:
+# a ~4.2% overturn rate, under the feedback loop's 5% brake, so the threshold
+# raise still stands. 20 with one void is exactly 5.0%, and the brake engages.
+_AUTO_PER_SMALL_VENDOR = 12
+
+
+def _sized_small_plans(org_id: uuid.UUID, auto_test: WorkflowExperiment) -> list[_VendorPlan]:
+    """`_SMALL`, each vendor sized so EXACTLY `_AUTO_PER_SMALL_VENDOR` of its
+    invoices land in the concluded test's auto-approve arm.
+
+    Which arm an invoice lands in is `assign_variant`'s hash of the invoice and
+    experiment ids, both uuid5s over the org id. A fixed count therefore gave
+    each org a different number of auto-approvals: 24 in one tenant, 20 on acme,
+    which put acme's overturn rate exactly on the brake. The hash needs no
+    database, so each vendor walks its candidate ids and stops at the one that
+    fills the arm; the human-reviewed arm gets whatever fell there first (about
+    as many, on average).
+
+    The human-reviewed invoices carry the GL corrections, chosen from that arm
+    by construction. Spotless, a vendor with 12+ of them would join the clean
+    set the threshold is argued from, and every 4th one from the second on
+    guarantees a correction in exactly that case. A fixed index list could land
+    wholly in the auto arm for some org.
+    """
+    sized = []
+    for plan in _SMALL:
+        auto: list[int] = []
+        human: list[int] = []
+        while len(auto) < _AUTO_PER_SMALL_VENDOR:
+            i = len(auto) + len(human)
+            assert i < 10 * plan.count, "assign_variant stopped splitting"
+            inv_id = _id(org_id, "invoice", f"{plan.code}-{i}")
+            variant = assign_variant(
+                str(inv_id), str(auto_test.id), split_a_pct=auto_test.split_a_pct
+            )
+            (auto if variant == VARIANT_B else human).append(i)
+        sized.append(replace(plan, count=len(auto) + len(human), corrected=frozenset(human[1::4])))
+    return sized
 
 
 def _scatter(plan: _VendorPlan, i: int) -> Decimal:
@@ -442,6 +478,7 @@ async def seed_automation(
     experiments = (exp_auto, exp_cfo, exp_draft)
     session.add_all(experiments)
     await session.flush()
+    plans = (*_CLEAN, *_NOISY, *_sized_small_plans(org_id, exp_auto))
 
     w = _Writer(session, org_id=org_id, entity_id=entity_id, users=users, now=now)
     voided_auto = False
