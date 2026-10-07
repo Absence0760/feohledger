@@ -326,3 +326,5 @@ always `backend/app/config.py`.
 | `FEOH_BILLING_DUNNING_ENABLED` | `false` | Master switch for the dunning / past-due automation sweep — cancels subscriptions overdue past the grace window (NEVER moves money). OFF by default; flip on in deployed envs. |
 | `FEOH_BILLING_DUNNING_INTERVAL_SECONDS` | `3600` | Dunning sweep tick interval. |
 | `FEOH_BILLING_DUNNING_GRACE_DAYS` | `14` | Grace window (days from `current_period_end`) a subscription may sit `past_due` before the dunning sweep cancels it. |
+| `FEOH_BILLING_AI_OVERAGE_SWEEP_ENABLED` | `false` | Master switch for the AI-read-invoice overage reconciliation sweep (decisions §253, §255) — reports any overage the post-read leg missed to the billing provider and re-checks the 80% / 100% / spending-cap notices. Usage only, never a charge. OFF by default like every sweep (and the `mock` provider bills nothing); flip on in deployed envs with a live billing provider. See `backend/docs/billing.md` § AI-read invoice metering. |
+| `FEOH_BILLING_AI_OVERAGE_SWEEP_INTERVAL_SECONDS` | `3600` | That sweep's tick. Hourly keeps a re-sent event inside Stripe's 24 h idempotency window. |

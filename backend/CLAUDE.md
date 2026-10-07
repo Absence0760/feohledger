@@ -586,7 +586,7 @@ relying on it acknowledged writes that weren't durable yet. Consequences:
 ```python
 VALID_TRANSITIONS = {
     new:                {pending, ready_for_review, approved, done},
-    pending:            {ready_for_review, approved, failed},
+    pending:            {ready_for_review, approved, failed, new},  # new = AI reading paused
     ready_for_review:   {approved, rejected},
     approved:           {sending_to_erp, payment_scheduled, done},
     rejected:           {ready_for_review, new},
@@ -602,7 +602,10 @@ VALID_TRANSITIONS = {
 
 `payment_scheduled → approved` and `paid → approved` are back-edges
 used by the void-payment path (`POST /api/payments/{id}/void`) to
-re-enter the payment queue. Everything else is forward-only.
+re-enter the payment queue. `pending → new` is the extraction worker landing an
+invoice for manual entry when AI reading is paused (plan allowance or spending
+cap used — `docs/billing.md` § AI-read invoice metering); `POST /bulk/status`
+refuses it for a human. Everything else is forward-only.
 
 Step types: `extraction` → `approval` → `erp_export` → `done`
 
@@ -614,7 +617,7 @@ Step types: `extraction` → `approval` → `erp_export` → `done`
 
 ## Key background services
 
-Fourteen long-lived asyncio tasks start in `app/main.py`'s lifespan, each behind
+Fifteen long-lived asyncio tasks start in `app/main.py`'s lifespan, each behind
 its own `FEOH_*_ENABLED` gate. **What each one does, plus the shared loop runner,
 health registry and locking rules: `backend/docs/background-sweeps.md`.**
 

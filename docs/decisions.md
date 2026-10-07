@@ -10310,3 +10310,65 @@ Rejected: Multi-AZ RDS (doubles the database cost; a variable flips it on when
 a customer needs an uptime commitment); ElastiCache (Redis holds only
 ephemeral state on this stack); the account's default VPC (all-public subnets,
 and not reproducible from code).
+## 255. AI-read metering: one count, an unlocked gate, per-unit overage billed by ordinal (2026-10-07)
+
+§253 set the unit and the prices. This is how the code enforces and bills them
+(`backend/docs/billing.md` § AI-read invoice metering).
+
+**One owner of the count.** `services/billing/ai_invoice_meter.count_ai_invoices`
+is the only definition: distinct invoices with a successful `platform` usage row
+from a *billable* provider in the UTC month. Billable is "costs the platform a
+per-document charge" — `claude_vision`, `openai_vision`, `aws_textract`. `mock`
+(the keyless dev/e2e reader; counting it would trip Free on every e2e tenant),
+`ollama` (self-hosted, no per-call cost) and `einvoice` (structured e-invoices,
+which still write a `platform` row) are declared non-billable, and a test fails
+until every registered adapter is in one of the two sets. An unlisted provider
+is not counted: undercounting costs us cents, overcounting bills a customer for
+something nobody decided was billable. No live subscription reads as the Free
+allowance; a plan with no component — or a malformed one — reads as unmetered,
+because an operator's typo must not pause a paying customer.
+
+**The gate runs before the model and is deliberately unlocked.** A paused read
+sends the invoice `pending → new` (a new edge, refused to humans by
+`POST /bulk/status`) with a coded `ai_reading_paused` warning — not `failed`,
+which leads only back to re-extraction and would pause again. Two reads at the
+boundary can both pass. Rejected: a per-org lock held across a 5–30 s model call
+(one read at a time per tenant, to protect a few cents) and a reservation row
+(a schema change for the same few cents). The overshoot is bounded by concurrent
+workers, is our cost, and cannot reach the bill — see the cap below.
+
+**Overage is reported per unit, by ordinal, against a per-unit metered price —
+not a graduated "first N free" price.** The task brief suggested a graduated
+Stripe price with one event per newly-counted invoice. Rejected because
+Stripe's billing period is anchored on the subscription's start day while the
+allowance is a UTC calendar month: a graduated price applies the allowance a
+second time over a different window, so the two would disagree about which
+reads were free whenever the anchor is not the 1st. Instead OUR count applies
+the allowance and only overage is reported, one event (value `"1"`) per unit,
+identified `ai-overage:<org>:<month>:<n>`. The identifier is the ordinal, not
+the invoice id: which invoice is "the 501st" can change while concurrent
+extractions commit out of `created_at` order; how many there are cannot, so a
+re-run computes the same identifiers and the provider's idempotency
+(`Idempotency-Key` = identifier, 24 h) absorbs a resend. Progress is a
+max-merged marker on `settings.billing.ai_overage_reported[month]`; the hourly
+backstop sweep stays inside the idempotency window.
+
+**The cap is enforced twice.** The gate pauses at it, and the reporter bills
+`min(overage, floor(cap / price))` on its own — so the customer's bill never
+passes the cap even when the unlocked gate let a read through. A cap of `0.00`
+turns a paid tier into "pause at the allowance".
+
+**Follow-ups run after `commit()` returns, not from `after_commit`.** The
+`post_commit` hook fires before SQLAlchemy releases the session's connection,
+and an extraction worker's tenant pool is a single connection — a job reading
+the tenant DB from it would wait on itself. The same single-connection pools
+exposed a latent defect fixed here: `extraction_dispatch._run_local` held its
+one control connection for the whole extraction, so every control-plane session
+opened underneath (notification and audit hooks, now the gate) waited out the
+30 s pool timeout.
+
+**Notices are claimed, then sent.** A threshold key is added under the org row
+lock before the send and released if nobody was reached; at most once, because
+the check runs after every billable read and a duplicated billing email reads
+as a billing error. (`cash_flow_alerts` sends first and accepts a duplicate; its
+check runs once a day, this one many times a minute.)

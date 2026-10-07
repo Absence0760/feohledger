@@ -141,6 +141,14 @@ Resolve Config
     └── BYOK → use customer's key from org.settings.extraction
     |
     v
+Structured e-invoice? → `einvoice` adapter (no model, never billed)
+    |
+    v
+AI-read allowance gate (billable platform reads only — see below)
+    ├── allowed → continue
+    └── paused  → coded warning, pending → new (manual entry), STOP — no model call
+    |
+    v
 Adapter.extract(file_url, file_key, mime_type)
     |
     v
@@ -359,7 +367,7 @@ The same guard runs again right after `apply_priors_to_invoice` overlays a cache
 `POST /api/invoices/bulk-recode-gl` (admin-only) re-applies GL codes to a date / vendor scoped slice of invoices using two strategies:
 
 1. **Vendor priors** — for each invoice, look up the cached `gl_account` correction for its vendor. Apply when it validates against the active chart. Free, fast, idempotent.
-2. **AI fallback** (opt-in via `include_ai_fallback=true`) — for invoices with no usable prior, re-run `services.extraction.run_extraction` end-to-end. Reuses the chart-of-accounts injection + RAG + post-extraction validation pipeline; produces an `ExtractionUsage` row per invoice.
+2. **AI fallback** (opt-in via `include_ai_fallback=true`) — for invoices with no usable prior, re-run `services.extraction.run_extraction` end-to-end. Reuses the chart-of-accounts injection + RAG + post-extraction validation pipeline; produces an `ExtractionUsage` row per invoice, so each is an AI read against the plan allowance (and is paused like any other read once it is used up). The runner is called with exactly the arguments `run_extraction` accepts — it used to be passed a `ctrl_db=` it does not take, so every AI re-code raised and reported `ai_failed`; `tests/test_gl_recode.py` now drives an autospec of the real function.
 
 Eligibility: invoices in `IMMUTABLE_STATUSES` (sending_to_erp through paid) are skipped — re-coding a posted invoice would create reconciliation drift with the ERP.
 
@@ -424,9 +432,11 @@ ExtractionResult:
 
 ## Usage Tracking & Billing
 
-Every extraction (success or failure) creates an `ExtractionUsage` record.
-
-> **Note:** `ExtractionUsage` is a **tenant** table — it lives in each `feoh_<slug>` DB, never the control plane, and `run_extraction()` writes it through the tenant session on the extraction's own commit (`docs/decisions.md` §57; `tests/test_extraction_usage_placement.py`).
+Every extraction that reaches an adapter (success or failure) creates an
+`ExtractionUsage` record, written through the **tenant** session in the same
+commit as the extraction result. `extraction_usage` is a tenant table, not a
+control-plane one (`docs/decisions.md` §57), and `run_extraction` takes no
+control-plane session for it.
 
 | Field | Description |
 |---|---|
@@ -442,18 +452,41 @@ Every extraction (success or failure) creates an `ExtractionUsage` record.
 | cache_creation_input_tokens | Prompt-cache writes (nullable) |
 | model | Model id the provider reports it served (nullable) |
 
-**Billing logic:**
-- Platform extractions are billable (you charge the customer)
-- BYOK extractions are free (customer pays their own AI provider)
-- Failed extractions are tracked but not billable
+**What is billed is an AI-read invoice, not a row** (decisions §253): a
+distinct invoice read successfully on the platform's key by a paid provider
+(`claude_vision`, `openai_vision`, `aws_textract`) in a UTC month. BYOK, the
+`mock` reader, self-hosted `ollama`, structured e-invoices (`einvoice`) and
+failed reads never count, and a re-read in the same month counts once. Never
+query the table for it — `services/billing/ai_invoice_meter.count_ai_invoices`
+is the one definition. See `billing.md` § AI-read invoice metering.
 
-Query for monthly billing:
-```sql
-SELECT organization_id, period, count(*) as extractions
-FROM extraction_usage
-WHERE program_type = 'platform' AND success = true
-GROUP BY organization_id, period;
-```
+### AI reading pauses at the plan limit
+
+Before the model is called, `run_extraction` asks
+`ai_invoice_meter.check_ai_read` whether this read may run. It is refused only
+for a billable read of an invoice NOT already counted this month, when the plan
+allowance is used and either the plan has no overage price (Free) or the next
+read would take the month's overage past the customer's spending cap
+(`settings.billing.monthly_spend_cap`).
+
+A refused read is **not a failure**. The invoice:
+
+- is not sent to any model, and writes no `ExtractionUsage` row;
+- gets a coded, localizable warning — `ai_allowance_reached` (with the
+  allowance as `included`) or `ai_spend_cap_reached`, type
+  `ai_reading_paused` — telling the user AI reading is paused and how to resume
+  (upgrade the plan / raise the cap on the Billing page);
+- transitions `pending → new` (`invoice.ai_reading_paused` audit row) — the
+  draft state an extraction-disabled upload is left in — so it is keyed by hand
+  and then submitted, approved, matched and paid like any other invoice.
+
+Re-running extraction on it later (next month, or after an upgrade) reads it
+normally and removes the warning. Everything else in accounts payable keeps
+working throughout. A gate failure (control plane unreachable) travels the
+normal failure path to `failed`, so it can be retried.
+
+`mock` is never billable, so local dev and every e2e tenant (all on `free`,
+all extracting through `mock`) can never trip the limit.
 
 ## Organization Settings
 

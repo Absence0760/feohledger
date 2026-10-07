@@ -99,7 +99,7 @@ section carried its own `decisions.md` § reference, so nothing was lost by
 deleting it; that cross-reference is what makes the pruning safe, and writing
 one is what earns a future entry the right to be deleted.
 
-**74 open: 59 (c) · 9 (a) · 6 (b)** — re-derived from the file, never carried
+**75 open: 60 (c) · 9 (a) · 6 (b)** — re-derived from the file, never carried
 forward. The section heading is authoritative; where an entry also carries a
 `(c)`/`(a)`/`(b)` marker, the two agree.
 `grep -c '^- \[ \]' docs/followups.md`.
@@ -261,6 +261,30 @@ nobody re-reads outlives the thing it describes.
       the code silently — what is still missing is telling customers when they
       change.
       **Trigger:** before adding or changing any sub-processor.
+
+### Live Stripe billing has no subscription to invoice against
+
+- [ ] **Nothing creates the customer's Stripe subscription, so live AI-read
+      overage has nowhere to be invoiced.** AI-read metering ships end to end
+      against the `mock` adapter (decisions §253, §255): the gate, the pause, the
+      cap, the notices, and overage meter events reported per unit with an
+      idempotent ordinal identifier. `provision_org_billing` also resolves the
+      `ai_invoice_overage` meter and each paid plan's per-unit metered price
+      (`settings.billing.ai_overage_price_ids`). But `StripeBillingAdapter
+      .create_subscription` — which adds that metered price as `items[1]` — has
+      no caller: plan changes repoint our `Subscription` row and never create or
+      amend one at Stripe. Stripe records meter events against the customer
+      either way, but invoices them only for a subscription carrying the
+      metered price, so today the overage would be reported and never billed.
+      **Durable fix:** on a move onto a paid plan, create (or amend) the Stripe
+      subscription with the base price + the metered overage price, billing
+      cycle anchored on the 1st (UTC), and persist
+      `Subscription.external_subscription_id`; a `customer.subscription.*`
+      webhook then keeps the status in sync. Until then an operator does this by
+      hand per paid customer in the Stripe dashboard.
+      **Trigger:** before `FEOH_BILLING_PROVIDER=stripe_billing` is set for any
+      org on a paid tier.
+      Ref: [billing.md](../backend/docs/billing.md) § What the operator configures in Stripe.
 
 ### One adapter family still ships code no caller reaches
 

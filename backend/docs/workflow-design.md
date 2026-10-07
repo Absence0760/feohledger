@@ -42,6 +42,7 @@ new ──────────────> done                     (no wor
 pending ──────────> ready_for_review         (extraction succeeded)
 pending ──────────> approved                 (auto-approve over threshold)
 pending ──────────> failed                   (extraction failed / reaper)
+pending ──────────> new                      (AI reading paused — plan allowance / spend cap used; manual entry, see billing.md)
 ready_for_review ─> approved                 (reviewer approves)
 ready_for_review ─> rejected                 (reviewer rejects)
 rejected ─────────> ready_for_review         (re-submitted after edits)
