@@ -177,10 +177,65 @@ def test_backend_dockerignore_keeps_what_the_container_runs() -> None:
         for line in dockerignore.read_text().splitlines()
         if line.strip() and not line.strip().startswith("#")
     }
-    for kept in ("app", "alembic", "alembic.ini", "main.py", "scripts", "requirements.lock"):
+    for kept in (
+        "app",
+        "alembic",
+        "alembic.ini",
+        "main.py",
+        "scripts",
+        "requirements.lock",
+        "certs",
+    ):
         assert kept not in patterns, (
             f"backend/.dockerignore excludes {kept!r}, which the running container needs"
         )
+
+
+# ── The RDS CA bundle: the database TLS trust anchor ─────────────────────────
+
+RDS_CA_BUNDLE = REPO_ROOT / "backend" / "certs" / "rds-global-bundle.pem"
+#: sha256 of https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem as
+#: committed (111 CA certificates, fetched 2026-10-07). A bump is a reviewed diff
+#: of a public file: re-download it, check it parses, update this pin.
+RDS_CA_BUNDLE_SHA256 = "fe45bbebf92ad3e27a583bbb2ddd1553c521ed4d49af5514dc0a40372ea5395c"
+
+
+def test_rds_ca_bundle_is_the_pinned_file() -> None:
+    """The bundle `PGSSLMODE=verify-full` checks RDS against is committed, not
+    downloaded at build time — so it is pinned here the way a base image is."""
+    import hashlib
+
+    digest = hashlib.sha256(RDS_CA_BUNDLE.read_bytes()).hexdigest()
+    assert digest == RDS_CA_BUNDLE_SHA256, (
+        "backend/certs/rds-global-bundle.pem changed. If you refreshed it from AWS on "
+        "purpose, update RDS_CA_BUNDLE_SHA256; otherwise restore it."
+    )
+
+
+def test_rds_ca_bundle_is_a_loadable_set_of_ca_certificates() -> None:
+    """What asyncpg does with it: `SSLContext.load_verify_locations(cafile=…)`."""
+    import ssl
+
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    context.load_verify_locations(cafile=str(RDS_CA_BUNDLE))
+    stats = context.cert_store_stats()
+    assert stats["x509_ca"] == stats["x509"] > 0
+    assert "PRIVATE KEY" not in RDS_CA_BUNDLE.read_text()
+    subjects = [dict(x[0] for x in cert["subject"]) for cert in context.get_ca_certs()]
+    assert all(s.get("organizationalUnitName") == "Amazon RDS" for s in subjects)
+
+
+def test_backend_image_points_libpq_and_asyncpg_at_the_bundle() -> None:
+    """`ENV PGSSLROOTCERT` is the path `COPY . .` lands the committed bundle at."""
+    envs = [
+        line
+        for line in _instructions(REPO_ROOT / "backend" / "Dockerfile")
+        if line.startswith("ENV ")
+    ]
+    assert "ENV PGSSLROOTCERT=/app/certs/rds-global-bundle.pem" in envs, envs
+    assert any(
+        line == "WORKDIR /app" for line in _instructions(REPO_ROOT / "backend" / "Dockerfile")
+    )
 
 
 # ── Compose images, and everything that runs them outside compose ────────────
