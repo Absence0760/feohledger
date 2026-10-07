@@ -39,7 +39,11 @@ and an audit that re-derived both found the copy stale at nearly every sync
 transcription was retired rather than corrected again. Add a follow-up here; add
 a GitHub issue only when one warrants its own thread.
 
-**Last reconciled:** 2026-10-07 — the public pricing page now renders the plan
+**Last reconciled:** 2026-10-07 — moving the database onto RDS (docs/minimal-deployment.md
+§ Database) opened two (c) entries — the published sub-processor register and
+DPA still placing the databases on the VM's disk, and the socket-form
+`pg_isready` left in dev and CI — taking the file from
+74 → 76. Before that, 2026-10-07 — the public pricing page now renders the plan
 catalogue it is generated from (`pnpm gen:pricing` / `check:pricing`, decisions
 §253, issue #426) and every remaining public figure has a derivation in
 [marketing-substantiation.md](marketing-substantiation.md), closing **two** (c)
@@ -99,7 +103,7 @@ section carried its own `decisions.md` § reference, so nothing was lost by
 deleting it; that cross-reference is what makes the pruning safe, and writing
 one is what earns a future entry the right to be deleted.
 
-**78 open: 63 (c) · 9 (a) · 6 (b)** — re-derived from the file, never carried
+**80 open: 65 (c) · 9 (a) · 6 (b)** — re-derived from the file, never carried
 forward. The section heading is authoritative; where an entry also carries a
 `(c)`/`(a)`/`(b)` marker, the two agree.
 `grep -c '^- \[ \]' docs/followups.md`.
@@ -1229,6 +1233,48 @@ lands. Pure doc drift was corrected in the same PR. The two diagnosed defects
       audited endpoints like the SSO client secret, and migrate the existing
       `erp`, `payments.credentials` and `cards.api_key` values. **Trigger:** the
       QuickBooks connect flow (Phase 1) — its token must not land in plain JSONB.
+
+### Surfaced by moving the database onto RDS (2026-10-07, docs/minimal-deployment.md § Database)
+
+- [ ] **(c) ⚠️ The published legal set still places the databases on the VM's
+      disk.** `/legal/sub-processors` § 2's *Amazon Web Services — EC2* row says
+      "The databases run on the instance's own encrypted disk, not on a managed
+      database service", and `docs/sub-processors.md` (the internal register it
+      must agree with) says the same — **false once the RDS instance holds
+      customer data**, and the register's own § 9 makes "a change to what an
+      existing provider receives" a 30-days'-notice event with a § 10
+      change-log row. Beside it, the recovery wording undersells rather than
+      misstates: `/legal/dpa` Annex II *Availability and restoration* and
+      `docs/backup-disaster-recovery.md` § Targets describe nightly dumps and a
+      24-hour RPO (still true, and still the published floor), and DPA § 13
+      covers RDS's whole-instance automated backups only through its
+      conditional "volume-level snapshot … coarse fallback" sentence, without
+      naming them or their retention period. Not edited here because the
+      timing is the decision: the page must not claim RDS before it exists, and
+      must say so before (or, with notice, when) it starts holding data.
+      **Durable fix:** one change that moves the EC2 row's database clause into
+      a new *Amazon Web Services — RDS* row (PostgreSQL databases, everything
+      the service holds, us-east-1, encrypted at rest, TLS in transit), adds the
+      § 10 change-log row and the last-updated date, mirrors it in
+      `docs/sub-processors.md`, and — with a deliberate call on the published
+      RPO/RTO for the RDS path — updates DPA Annex II and § 13 (naming RDS
+      automated backups and their retention as a residue that ages out) and
+      `remove-tenant.sh`'s confirmation if the wording moves. **Trigger:**
+      before the RDS instance holds any customer's data (for a register with
+      live customers, 30 days before).
+- [ ] **(c) `pg_isready` over the socket reports the initdb server as ready, in
+      dev and CI.** On a fresh data volume the Postgres image runs a temporary
+      socket-only server for its init scripts; a `pg_isready -U postgres`
+      healthcheck (no `-h`) answers "ready" against it, the container goes
+      healthy, and the first client then meets "the database system is
+      shutting down". Reproduced against `deploy/compose.prod.yml`, which now
+      checks over TCP (`-h 127.0.0.1`). `backend/docker-compose.yml`'s
+      `postgres` (and `authentik-postgres`) and the five `--health-cmd` lines
+      in `.github/workflows/ci.yml` / `sso-e2e.yml` keep the socket form, where
+      it can surface as a first-boot migration or seed failure that reads as a
+      flake. **Durable fix:** the same `-h 127.0.0.1` on each, in one change.
+      **Trigger:** the next change to either compose file or CI's service
+      containers, or the first unexplained "shutting down" on a fresh volume.
 
 ## (a) Blocked on external credentials, accounts, or hardware
 

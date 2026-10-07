@@ -10412,3 +10412,50 @@ ERPs cost nothing while demand is tested.
 `docs/known-issues.md`), and `erp_merge` doesn't exist yet. Both are tracked in
 `docs/followups.md`. Until they land, this records the intended plan shape and
 the pricing page must not advertise Merge-routed ERPs on Growth.
+## 257. The single-VM database is RDS, reached over verify-full TLS set by PGSSLMODE (2026-10-07)
+
+The operator chose the single-VM deployment with Postgres on **RDS for
+PostgreSQL 16** (`db.t4g.micro`, PITR, `rds.force_ssl = 1`) from day one, wired
+through the override seam the compose file already had (`FEOH_DATABASE_URL` in
+the sops env). The container stays as the documented cheaper alternative
+(`docs/minimal-deployment.md` § Database). Four calls followed:
+
+- **TLS is set by `PGSSLMODE` / `PGSSLROOTCERT`, not by the URL.** Verified
+  against the pinned asyncpg (0.31.0): with no `ssl` argument it reads
+  `PGSSLMODE`, and nothing in the app passes one — SQLAlchemy forwards only the
+  URL's query, and the raw `asyncpg.connect` calls now parse the URL with the
+  same `make_url` (`tenant_provisioning.asyncpg_connect_kwargs`). libpq reads
+  the same two variables, so one setting covers the app, Alembic, the Lambda
+  handlers and `pg_dump`. A `?ssl=` on the URL would reach asyncpg and not
+  libpq, so the deploy contract refuses a query string outright.
+  (`make_tenant_url` and Alembic's tenant URL still had to stop dropping a query
+  string — a latent bug for any option on the URL, fixed at the builder.)
+- **`verify-full`, against a committed CA bundle.** `require` encrypts but
+  accepts any certificate; verification needs the RDS CA set in the image.
+  It is committed at `backend/certs/rds-global-bundle.pem` and sha256-pinned in
+  `tests/test_container_supply_chain.py` rather than downloaded in the
+  Dockerfile at a pinned checksum: one file serves both the api image
+  (`ENV PGSSLROOTCERT`) and the `pgtools` container (bind mount), the build
+  needs no network for it, and a refresh is a reviewed diff. Not added to the
+  system trust store — these CAs are for the database, not every HTTPS call.
+- **One place decides the mode.** `deploy/lib.sh` reads `FEOH_DATABASE_URL`
+  from `deploy/.env` (shell env first, as compose does) and every script
+  sources it; the `postgres` service sits under a `localdb` profile with the
+  api's dependency `required: false`, so on RDS it never starts. Compose
+  interpolates profiled-out services too, so the old `${POSTGRES_PASSWORD:?}`
+  guard had to go — `decrypt-env.sh` now requires the password in container
+  mode only.
+- **Dumps continue on RDS, through a `pgtools` one-shot of the same image.**
+  PITR is the primary recovery; the nightly dumps stay as the copy that
+  survives losing the instance, its snapshots or the account. The password
+  reaches the container as a bare `docker compose run -e PGPASSWORD` from the
+  script's environment — never an argv `ps` shows. Restores into RDS skip the
+  role globals and use `--no-owner --no-acl`: the app's one role is the master
+  user, which is `rds_superuser`, not a superuser, and cannot recreate a
+  container dump's `postgres` SUPERUSER.
+
+Rejected: `sslmode=require` (no protection against a man-in-the-middle on the
+VPC path, for no saving — the bundle costs nothing); running the dump tools
+from the `postgres` service with `run --no-deps` (it mounts the data volume and
+carries the container's password contract); a second compose file for RDS (two
+files to keep in step, where a profile is one line).

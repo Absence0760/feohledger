@@ -208,6 +208,13 @@ below surfaced.
     `docker compose run --rm frontend-build`. Dependabot bumps its minor and
     patch and ignores its major, which moves only with every `setup-node`
     `node-version:` in the workflows (`frontend/CLAUDE.md` § The Node floor).
+  - **Production's Postgres client tools** — the one-shot `pgtools` service
+    in `deploy/compose.prod.yml` (`tools` profile), which `backup.sh` /
+    `restore.sh` run against RDS. It pins the `postgres` service's exact ref,
+    spelled out rather than through a YAML anchor (an anchor between `image:`
+    and the ref would hide the line from Dependabot's matcher); one Dependabot
+    PR bumps both declarations, and `backend/tests/test_deploy_db_mode.py`
+    fails if they differ — the tools must match the server major.
 
   The payoff is that **a Dependabot compose PR is tested by its own CI run on
   the images it bumps**, which is what makes `dependabot-auto-merge.yml`
