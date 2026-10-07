@@ -6042,6 +6042,7 @@ export const messages = {
 	'help.term.workflow-experiment.short': 'ワークフローのルールの2つのバージョンを比べ、どちらが請求書をうまく処理するかを測るA/Bテストです。',
 	// No-rail pilot (issue #517): record-only mode, paying outside FeohLedger, NACHA bank file
 	'refusal.paymentsRecordOnly': "この組織では FeohLedger は支払いを送金しません。銀行または ERP から仕入先に支払い、その後 FeohLedger 外で支払済みとして記録してください。",
+	'refusal.planFeatureRequired': "{feature} はご利用のプランに含まれていません。{plan} プランで利用できます。請求からプランをアップグレードしてください。",
 	'refusal.externalPaymentForInvoice': "請求書 {invoice}：{reason}",
 	'refusal.externalPaymentNotPayable': "支払済みとして記録できるのは、承認済みで未払いの請求書だけです（この請求書のステータスは {status} です）。",
 	'refusal.externalPaymentSegregation': "職務分掌：あなたはこの請求書を作成または編集したため、支払いの記録は別のユーザーが行う必要があります。",
@@ -6129,4 +6130,19 @@ export const messages = {
 	'paymentRuns.runDetail.nachaRejecting': "解放中…",
 	'paymentRuns.runDetail.nachaRejectedToast': "バッチは下書きに戻りました",
 	'paymentRuns.runDetail.nachaRejectFailed': "バッチを解放できませんでした",
+
+	// Plan features + upgrade prompt (#lib/types/planFeatures.ts, ui/PlanUpgradeNotice.svelte)
+	'planFeature.publicApi': "公開 API と Webhook",
+	'planFeature.erpIntegrations': "ERP 連携",
+	'planFeature.sso': "シングルサインオン（OIDC / SAML）",
+	'planFeature.scim': "SCIM によるユーザープロビジョニング",
+	'planFeature.ssoEnforcement': "シングルサインオンの必須化",
+	'planFeature.multiEntity': "複数の事業体",
+	'planFeature.auditSiemExport': "監査ログの SIEM へのエクスポート",
+	'planTier.growth': "Growth",
+	'planTier.scale': "Scale",
+	'planUpgrade.title': "{plan} プランで利用可能",
+	'planUpgrade.body': "{feature} は {plan} プランの機能です。組織の現在のプランには含まれていません。",
+	'planUpgrade.cta': "{plan} にアップグレード",
+	'planUpgrade.askAdmin': "プランのアップグレードを管理者に依頼してください。",
 } satisfies Messages;

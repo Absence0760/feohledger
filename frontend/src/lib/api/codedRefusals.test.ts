@@ -16,6 +16,7 @@ import {
 	CODED_REFUSAL_CODES,
 	INVOICE_REQUIRED_FIELDS_MISSING,
 	INVOICE_STALE_EDIT,
+	PLAN_FEATURE_REQUIRED,
 	codedRefusalText,
 	localizeApiDetail
 } from './codedRefusals';
@@ -405,5 +406,22 @@ describe('localizeApiDetail', () => {
 		expect(localizeApiDetail('plain string detail', enT)).toBeNull();
 		expect(localizeApiDetail(detail('from_a_newer_backend'), enT)).toBeNull();
 		expect(localizeApiDetail(undefined, enT)).toBeNull();
+	});
+});
+
+describe('the plan-feature refusal', () => {
+	it('names the feature and the tier that grants it, in the reader’s language', () => {
+		expect(codedRefusalText(PLAN_FEATURE_REQUIRED, { feature: 'scim' }, enT)).toBe(
+			'SCIM user provisioning is not included in your plan. It is available on the Scale ' +
+				'plan — upgrade in Billing to use it.'
+		);
+		const out = codedRefusalText(PLAN_FEATURE_REQUIRED, { feature: 'sso' }, deT) ?? '';
+		expect(out).toContain(de['planFeature.sso']);
+		expect(out).toContain('Growth');
+	});
+
+	it('falls back to the server sentence for a feature this build does not know', () => {
+		expect(codedRefusalText(PLAN_FEATURE_REQUIRED, { feature: 'teleportation' }, enT)).toBeNull();
+		expect(codedRefusalText(PLAN_FEATURE_REQUIRED, {}, enT)).toBeNull();
 	});
 });

@@ -6134,6 +6134,7 @@ export const messages = {
 	'help.term.workflow-experiment.short': 'Um teste A/B de duas versões das regras de um fluxo de trabalho, medindo qual processa melhor as faturas.',
 	// No-rail pilot (issue #517): record-only mode, paying outside FeohLedger, NACHA bank file
 	'refusal.paymentsRecordOnly': "O FeohLedger não envia pagamentos para esta organização. Pague o fornecedor pelo seu banco ou ERP e depois registre o pagamento como pago fora do FeohLedger.",
+	'refusal.planFeatureRequired': "{feature} não está incluído no seu plano. Está disponível no plano {plan} — faça o upgrade em Faturamento para usar.",
 	'refusal.externalPaymentForInvoice': "Fatura {invoice}: {reason}",
 	'refusal.externalPaymentNotPayable': "Somente uma fatura aprovada e ainda não paga pode ser registrada como paga (esta está com status {status}).",
 	'refusal.externalPaymentSegregation': "Segregação de funções: você criou ou alterou esta fatura, então outro usuário deve registrar o pagamento.",
@@ -6221,4 +6222,19 @@ export const messages = {
 	'paymentRuns.runDetail.nachaRejecting': "Liberando…",
 	'paymentRuns.runDetail.nachaRejectedToast': "O lote voltou a ser um rascunho",
 	'paymentRuns.runDetail.nachaRejectFailed': "Não foi possível liberar o lote",
+
+	// Plan features + upgrade prompt (#lib/types/planFeatures.ts, ui/PlanUpgradeNotice.svelte)
+	'planFeature.publicApi': "API pública e webhooks",
+	'planFeature.erpIntegrations': "Integrações com ERP",
+	'planFeature.sso': "Login único (OIDC / SAML)",
+	'planFeature.scim': "Provisionamento de usuários por SCIM",
+	'planFeature.ssoEnforcement': "Exigir login único",
+	'planFeature.multiEntity': "Várias entidades",
+	'planFeature.auditSiemExport': "Exportação do log de auditoria para um SIEM",
+	'planTier.growth': "Growth",
+	'planTier.scale': "Scale",
+	'planUpgrade.title': "Disponível no {plan}",
+	'planUpgrade.body': "{feature} faz parte do plano {plan}, e o plano atual da sua organização não o inclui.",
+	'planUpgrade.cta': "Fazer upgrade para o {plan}",
+	'planUpgrade.askAdmin': "Peça a um administrador para fazer o upgrade do plano.",
 } satisfies Messages;

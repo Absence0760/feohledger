@@ -6107,6 +6107,7 @@ export const messages = {
 	'help.term.workflow-experiment.short': 'Un test A/B de deux versions des règles d\'un flux de travail, pour mesurer laquelle traite le mieux les factures.',
 	// No-rail pilot (issue #517): record-only mode, paying outside FeohLedger, NACHA bank file
 	'refusal.paymentsRecordOnly': "FeohLedger n'envoie pas de paiements pour cette organisation. Payez le fournisseur depuis votre banque ou votre ERP, puis enregistrez le paiement comme payé en dehors de FeohLedger.",
+	'refusal.planFeatureRequired': "{feature} n'est pas inclus dans votre formule. Disponible avec la formule {plan} — passez à la formule supérieure dans Facturation pour l'utiliser.",
 	'refusal.externalPaymentForInvoice': "Facture {invoice} : {reason}",
 	'refusal.externalPaymentNotPayable': "Seule une facture approuvée et non payée peut être enregistrée comme payée (celle-ci est au statut {status}).",
 	'refusal.externalPaymentSegregation': "Séparation des tâches : vous avez créé ou modifié cette facture, un autre utilisateur doit donc enregistrer son paiement.",
@@ -6194,4 +6195,19 @@ export const messages = {
 	'paymentRuns.runDetail.nachaRejecting': "Libération…",
 	'paymentRuns.runDetail.nachaRejectedToast': "Le lot est de nouveau un brouillon",
 	'paymentRuns.runDetail.nachaRejectFailed': "Impossible de libérer le lot",
+
+	// Plan features + upgrade prompt (#lib/types/planFeatures.ts, ui/PlanUpgradeNotice.svelte)
+	'planFeature.publicApi': "API publique et webhooks",
+	'planFeature.erpIntegrations': "Intégrations ERP",
+	'planFeature.sso': "Authentification unique (OIDC / SAML)",
+	'planFeature.scim': "Provisionnement des utilisateurs par SCIM",
+	'planFeature.ssoEnforcement': "Imposer l'authentification unique",
+	'planFeature.multiEntity': "Plusieurs entités",
+	'planFeature.auditSiemExport': "Export du journal d'audit vers un SIEM",
+	'planTier.growth': "Growth",
+	'planTier.scale': "Scale",
+	'planUpgrade.title': "Disponible avec {plan}",
+	'planUpgrade.body': "{feature} fait partie de la formule {plan}, que la formule actuelle de votre organisation n'inclut pas.",
+	'planUpgrade.cta': "Passer à {plan}",
+	'planUpgrade.askAdmin': "Demandez à un administrateur de faire évoluer votre formule.",
 } satisfies Messages;

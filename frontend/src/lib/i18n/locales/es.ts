@@ -6134,6 +6134,7 @@ export const messages = {
 	'help.term.workflow-experiment.short': 'Una prueba A/B de dos versiones de las reglas de un flujo de trabajo para medir cuál procesa mejor las facturas.',
 	// No-rail pilot (issue #517): record-only mode, paying outside FeohLedger, NACHA bank file
 	'refusal.paymentsRecordOnly': "FeohLedger no envía pagos para esta organización. Pague al proveedor desde su banco o ERP y luego registre el pago como pagado fuera de FeohLedger.",
+	'refusal.planFeatureRequired': "{feature} no está incluido en su plan. Está disponible en el plan {plan}: actualice el plan en Facturación para usarlo.",
 	'refusal.externalPaymentForInvoice': "Factura {invoice}: {reason}",
 	'refusal.externalPaymentNotPayable': "Solo una factura aprobada que no se haya pagado puede registrarse como pagada (esta está en estado {status}).",
 	'refusal.externalPaymentSegregation': "Segregación de funciones: usted creó o modificó esta factura, por lo que otro usuario debe registrar su pago.",
@@ -6221,4 +6222,19 @@ export const messages = {
 	'paymentRuns.runDetail.nachaRejecting': "Liberando…",
 	'paymentRuns.runDetail.nachaRejectedToast': "El lote vuelve a ser un borrador",
 	'paymentRuns.runDetail.nachaRejectFailed': "No se pudo liberar el lote",
+
+	// Plan features + upgrade prompt (#lib/types/planFeatures.ts, ui/PlanUpgradeNotice.svelte)
+	'planFeature.publicApi': "API pública y webhooks",
+	'planFeature.erpIntegrations': "Integraciones con ERP",
+	'planFeature.sso': "Inicio de sesión único (OIDC / SAML)",
+	'planFeature.scim': "Aprovisionamiento de usuarios por SCIM",
+	'planFeature.ssoEnforcement': "Exigir el inicio de sesión único",
+	'planFeature.multiEntity': "Varias entidades",
+	'planFeature.auditSiemExport': "Exportación del registro de auditoría a un SIEM",
+	'planTier.growth': "Growth",
+	'planTier.scale': "Scale",
+	'planUpgrade.title': "Disponible en {plan}",
+	'planUpgrade.body': "{feature} forma parte del plan {plan} y el plan actual de su organización no lo incluye.",
+	'planUpgrade.cta': "Actualizar a {plan}",
+	'planUpgrade.askAdmin': "Pida a un administrador que actualice el plan.",
 } satisfies Messages;

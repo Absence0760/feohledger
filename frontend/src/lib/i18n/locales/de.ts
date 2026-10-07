@@ -6107,6 +6107,7 @@ export const messages = {
 	'help.term.workflow-experiment.short': 'Ein A/B-Test zweier Versionen der Regeln eines Workflows, der misst, welche Rechnungen besser bearbeitet.',
 	// No-rail pilot (issue #517): record-only mode, paying outside FeohLedger, NACHA bank file
 	'refusal.paymentsRecordOnly': "FeohLedger versendet für diese Organisation keine Zahlungen. Bezahlen Sie den Lieferanten über Ihre Bank oder Ihr ERP und erfassen Sie die Zahlung dann als außerhalb von FeohLedger bezahlt.",
+	'refusal.planFeatureRequired': "{feature} ist in Ihrem Tarif nicht enthalten. Verfügbar ab dem Tarif {plan} — führen Sie unter Abrechnung ein Upgrade durch, um die Funktion zu nutzen.",
 	'refusal.externalPaymentForInvoice': "Rechnung {invoice}: {reason}",
 	'refusal.externalPaymentNotPayable': "Nur eine freigegebene, noch nicht bezahlte Rechnung kann als bezahlt erfasst werden (diese hat den Status {status}).",
 	'refusal.externalPaymentSegregation': "Funktionstrennung: Sie haben diese Rechnung erstellt oder mitgestaltet, daher muss ein anderer Benutzer ihre Zahlung erfassen.",
@@ -6194,4 +6195,19 @@ export const messages = {
 	'paymentRuns.runDetail.nachaRejecting': "Wird freigegeben…",
 	'paymentRuns.runDetail.nachaRejectedToast': "Der Lauf ist wieder ein Entwurf",
 	'paymentRuns.runDetail.nachaRejectFailed': "Der Lauf konnte nicht freigegeben werden",
+
+	// Plan features + upgrade prompt (#lib/types/planFeatures.ts, ui/PlanUpgradeNotice.svelte)
+	'planFeature.publicApi': "Öffentliche API und Webhooks",
+	'planFeature.erpIntegrations': "ERP-Integrationen",
+	'planFeature.sso': "Single Sign-on (OIDC / SAML)",
+	'planFeature.scim': "SCIM-Benutzerbereitstellung",
+	'planFeature.ssoEnforcement': "Single Sign-on verpflichtend machen",
+	'planFeature.multiEntity': "Mehrere Gesellschaften",
+	'planFeature.auditSiemExport': "Export des Prüfprotokolls an ein SIEM",
+	'planTier.growth': "Growth",
+	'planTier.scale': "Scale",
+	'planUpgrade.title': "Verfügbar im Tarif {plan}",
+	'planUpgrade.body': "{feature} gehört zum Tarif {plan}; der aktuelle Tarif Ihrer Organisation enthält diese Funktion nicht.",
+	'planUpgrade.cta': "Auf {plan} upgraden",
+	'planUpgrade.askAdmin': "Bitten Sie eine Administratorin oder einen Administrator, den Tarif zu upgraden.",
 } satisfies Messages;

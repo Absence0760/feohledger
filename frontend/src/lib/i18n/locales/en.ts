@@ -6339,6 +6339,7 @@ export const en = {
 	'help.term.workflow-experiment.short': 'An A/B test of two versions of a workflow\'s rules, measuring which one handles invoices better.',
 	// No-rail pilot (issue #517): record-only mode, paying outside FeohLedger, NACHA bank file
 	'refusal.paymentsRecordOnly': "FeohLedger does not send payments for this organization. Pay the supplier from your bank or ERP, then record the payment as paid outside FeohLedger.",
+	'refusal.planFeatureRequired': "{feature} is not included in your plan. It is available on the {plan} plan — upgrade in Billing to use it.",
 	'refusal.externalPaymentForInvoice': "Invoice {invoice}: {reason}",
 	'refusal.externalPaymentNotPayable': "Only an approved invoice that has not been paid can be recorded as paid (this one is {status}).",
 	'refusal.externalPaymentSegregation': "Segregation of duties: you created or shaped this invoice, so a different user must record its payment.",
@@ -6426,4 +6427,19 @@ export const en = {
 	'paymentRuns.runDetail.nachaRejecting': "Releasing…",
 	'paymentRuns.runDetail.nachaRejectedToast': "The run is a draft again",
 	'paymentRuns.runDetail.nachaRejectFailed': "Could not release the run",
+
+	// Plan features + upgrade prompt (#lib/types/planFeatures.ts, ui/PlanUpgradeNotice.svelte)
+	'planFeature.publicApi': "Public API and webhooks",
+	'planFeature.erpIntegrations': "ERP integrations",
+	'planFeature.sso': "Single sign-on (OIDC / SAML)",
+	'planFeature.scim': "SCIM user provisioning",
+	'planFeature.ssoEnforcement': "Requiring single sign-on",
+	'planFeature.multiEntity': "Multiple entities",
+	'planFeature.auditSiemExport': "Audit-log SIEM export",
+	'planTier.growth': "Growth",
+	'planTier.scale': "Scale",
+	'planUpgrade.title': "Available on {plan}",
+	'planUpgrade.body': "{feature} is part of the {plan} plan, and your organization's current plan doesn't include it.",
+	'planUpgrade.cta': "Upgrade to {plan}",
+	'planUpgrade.askAdmin': "Ask an administrator to upgrade your plan.",
 } satisfies Record<string, string>;
