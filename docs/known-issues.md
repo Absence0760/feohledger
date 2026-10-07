@@ -5,8 +5,9 @@ names the root cause, the evidence, blast radius, and a recommended fix
 approach — this is a staging area for real problems, not a place to let them
 go stale. See root `CLAUDE.md` guard rail 6 (no dangling deferred findings).
 
-**Six entries are open**: the direct ERP adapters posting bills without the
-ERP's vendor and account ids (found scoping QuickBooks, 2026-10-07, at the top),
+**Seven entries are open**: the paid-plan features no route enforces and the
+direct ERP adapters posting bills without the ERP's vendor and account ids (both
+found scoping QuickBooks, 2026-10-07, at the top),
 the expense-report Attach dead end found while
 writing the help centre, the `all`-mode approval-chain segregation deadlock,
 the legal-contents smooth-scroll race and the e2e cleanup race directly below,
@@ -22,7 +23,7 @@ this note has now warned about twice. Two defects were **fixed on 2026-09-17**:
 the `/organization` 320px reflow defect (issue #432), along with six more routes
 that failed the same criterion and had no entry at all because nothing measured
 them; and the local-e2e `alembic` drift, which now has a pre-run guard that
-refuses to start against a stale database. Seventeen of the twenty-three `##`
+refuses to start against a stale database. Seventeen of the twenty-four `##`
 entries are now `~~struck-through~~` resolved stubs. (This line said "the other
 fifteen" while the file held fifteen struck in total, the two above included.)
 They are kept because the *diagnosis* is the
@@ -46,6 +47,41 @@ goes to [followups.md](followups.md). Reasoning behind a deliberate design call
 goes to [decisions.md](decisions.md).
 
 ---
+
+## Six of the seven plan features are sold but not enforced
+
+**Found 2026-10-07** while deciding Merge's plan placement (`docs/decisions.md`
+§256).
+
+**Root cause.** §253 gates features through `Plan.entitlements`, checked by
+`api/deps.require_entitlement` (JWT routes) and `require_api_entitlement` (API
+keys). Only `public_api` is wired, on `/api/v1`. `require_entitlement` has no
+caller at all, so these features work on every plan, Free included:
+`erp_integrations`, `sso`, `scim`, `sso_enforcement`, `multi_entity`,
+`audit_siem_export`.
+
+**Blast radius.** Revenue, not data: the public pricing page
+(`plans.generated.ts`) sells Growth and Scale on features Free already gets.
+No security boundary depends on these gates.
+
+**Why it isn't a one-line fix.** `get_entitlements` fails closed to `{}` for an
+org with no live subscription, so enforcing a gate removes the feature from any
+tenant without one. Gating `sso` or `sso_enforcement` on the sign-in path could
+lock an SSO-only tenant out. Enforcement has to be preceded by an audit that
+every existing tenant holds a subscription to a plan that grants what it uses,
+or a grandfathering rule.
+
+**Fix.** Per feature, put `require_entitlement(FEATURE_…)` on the routes that
+configure or use it, and decide what a downgraded tenant keeps:
+- ERP: refuse saving a live ERP config and refuse a push; the mock stays open.
+- SSO: refuse enabling it; never break an already-enabled sign-in, which would
+  be an outage. Flag it to an admin instead.
+- SCIM: refuse the bearer token.
+- Multi-entity: refuse creating a second entity.
+- SIEM export: refuse configuring it.
+
+Pin each gate with a test that a Free org is refused and a Scale org passes.
+`erp_merge` (§256) joins the same pass.
 
 ## The direct ERP adapters post bills without the ERP's vendor and account ids
 
