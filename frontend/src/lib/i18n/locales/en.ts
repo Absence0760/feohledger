@@ -120,6 +120,52 @@ export const en = {
 	// that is the `…Pre`/`…Post` shape `i18n/segments.ts` exists to avoid — so a
 	// translator still controls word order everywhere it matters.
 
+	// Public pricing page (lib/components/marketing/Pricing.svelte). Every figure
+	// it shows comes from the generated plan catalogue (lib/marketing/
+	// plans.generated.ts) through {placeholders}; these strings carry no figure
+	// of their own, which lib/marketing/pricing.test.ts enforces (decisions §253).
+	'marketing.pricing.eyebrow': 'Pricing',
+	'marketing.pricing.heading': 'Simple plans. No sales call required.',
+	'marketing.pricing.lede': 'Every plan has unlimited users and the full approval, matching and payment workflow. You pay for how many invoices our AI reads for you, not for seats.',
+	'marketing.pricing.perMonth': 'per workspace, per month',
+	'marketing.pricing.unlimitedUsers': 'Unlimited users',
+	'marketing.pricing.included': '{count} {n, plural, one {AI-read invoice} other {AI-read invoices}} a month',
+	'marketing.pricing.pastLimit.pause': 'Past that, AI reading pauses. Everything else keeps working.',
+	'marketing.pricing.pastLimit.overage': 'Then {price} per extra AI-read invoice.',
+	'marketing.pricing.tagline.free': 'For trying it out and light invoice volume.',
+	'marketing.pricing.tagline.growth': 'For teams connecting their ERP and identity provider.',
+	'marketing.pricing.tagline.scale': 'For finance teams running several entities.',
+	'marketing.pricing.tagline.enterprise': 'For negotiated volume and contract terms.',
+	'marketing.pricing.coreHeading': 'Core accounts payable:',
+	'marketing.pricing.core.capture': 'Invoice capture by upload, email and e-invoice',
+	'marketing.pricing.core.approvals': 'Approval workflows with segregation of duties',
+	'marketing.pricing.core.matching': 'PO matching and an exception queue',
+	'marketing.pricing.core.payments': 'Payment runs and a full audit trail',
+	'marketing.pricing.buildsOn': 'Everything in {plan}, plus:',
+	'marketing.pricing.feature.publicApi': 'Public API and webhooks',
+	'marketing.pricing.feature.erpIntegrations': 'ERP integrations (NetSuite, Dynamics 365, Merge.dev)',
+	'marketing.pricing.feature.sso': 'Single sign-on (SAML and OIDC)',
+	'marketing.pricing.feature.scim': 'SCIM user provisioning',
+	'marketing.pricing.feature.ssoEnforcement': 'Require single sign-on for every user',
+	'marketing.pricing.feature.multiEntity': 'Multiple legal entities',
+	'marketing.pricing.feature.auditSiemExport': 'Audit-log export to your SIEM',
+	'marketing.pricing.enterprise.name': 'Enterprise',
+	'marketing.pricing.enterprise.price': 'Custom',
+	'marketing.pricing.enterprise.unit': 'negotiated contract',
+	'marketing.pricing.enterprise.allowance': 'An AI-read allowance sized to your volume',
+	'marketing.pricing.enterprise.terms': 'Negotiated pricing and contract terms',
+	'marketing.pricing.enterprise.security': 'Help with your security review',
+	'marketing.pricing.cta.free': 'Start free',
+	'marketing.pricing.cta.upgrade': 'Start free, upgrade to {plan}',
+	'marketing.pricing.cta.enterprise': 'Contact sales',
+	'marketing.pricing.startsOnFree': 'Every workspace starts on {plan}. Upgrade from Billing whenever you are ready.',
+	'marketing.pricing.aiRead.heading': 'What counts as an AI-read invoice?',
+	'marketing.pricing.aiRead.body': 'An invoice our AI successfully reads for you from a PDF or a photo, counted once per calendar month however often it is read again. Structured e-invoices (PEPPOL, UBL, Factur-X), CSV imports and invoices read with your own AI provider key never count.',
+	'marketing.pricing.more': 'Need more than {plan} includes, or a contract? {sales}.',
+	'marketing.pricing.moreLink': 'Talk to sales',
+	'marketing.pricing.selfHost': 'Prefer to run it yourself? FeohLedger is MIT-licensed: {source}.',
+	'marketing.pricing.selfHostLink': 'view the source on GitHub',
+
 	'consent.ariaLabel': 'Cookie and privacy consent',
 	'consent.title': 'Your privacy choices',
 	'consent.bodyNecessary':

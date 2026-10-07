@@ -9,6 +9,10 @@
 // a catalogue change is a red CI check until this file is regenerated.
 // Money is an exact decimal STRING — format it with formatMoney, never
 // parse it into arithmetic.
+//
+// Pure by design — no imports — so tests-e2e may VALUE-import it (the
+// narrow exception in frontend/CLAUDE.md) and check the rendered page
+// against the same figures.
 
 /** The ISO 4217 code every catalog plan is priced in. */
 export const PLAN_CURRENCY = 'USD';

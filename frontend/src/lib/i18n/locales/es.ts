@@ -98,6 +98,52 @@ export const messages = {
 
 	// Cookie / consent banner (lib/components/ConsentBanner.svelte) — see en.ts.
 
+	// Public pricing page (lib/components/marketing/Pricing.svelte). Every figure
+	// it shows comes from the generated plan catalogue (lib/marketing/
+	// plans.generated.ts) through {placeholders}; these strings carry no figure
+	// of their own, which lib/marketing/pricing.test.ts enforces (decisions §253).
+	'marketing.pricing.eyebrow': 'Precios',
+	'marketing.pricing.heading': 'Planes sencillos. Sin llamadas comerciales.',
+	'marketing.pricing.lede': 'Todos los planes incluyen usuarios ilimitados y el flujo completo de aprobación, conciliación y pago. Pagas por cuántas facturas lee nuestra IA por ti, no por puestos.',
+	'marketing.pricing.perMonth': 'por espacio de trabajo, al mes',
+	'marketing.pricing.unlimitedUsers': 'Usuarios ilimitados',
+	'marketing.pricing.included': '{count} {n, plural, one {factura leída} other {facturas leídas}} por IA al mes',
+	'marketing.pricing.pastLimit.pause': 'A partir de ahí, la lectura con IA se pausa. Todo lo demás sigue funcionando.',
+	'marketing.pricing.pastLimit.overage': 'Después, {price} por cada factura adicional leída por IA.',
+	'marketing.pricing.tagline.free': 'Para probarlo y para un volumen de facturas bajo.',
+	'marketing.pricing.tagline.growth': 'Para equipos que conectan su ERP y su proveedor de identidad.',
+	'marketing.pricing.tagline.scale': 'Para equipos financieros con varias entidades.',
+	'marketing.pricing.tagline.enterprise': 'Para volumen y condiciones contractuales negociados.',
+	'marketing.pricing.coreHeading': 'Lo esencial de cuentas por pagar:',
+	'marketing.pricing.core.capture': 'Captura de facturas por carga, correo y factura electrónica',
+	'marketing.pricing.core.approvals': 'Flujos de aprobación con segregación de funciones',
+	'marketing.pricing.core.matching': 'Conciliación con órdenes de compra y cola de excepciones',
+	'marketing.pricing.core.payments': 'Lotes de pago y un registro de auditoría completo',
+	'marketing.pricing.buildsOn': 'Todo lo de {plan}, y además:',
+	'marketing.pricing.feature.publicApi': 'API pública y webhooks',
+	'marketing.pricing.feature.erpIntegrations': 'Integraciones con ERP (NetSuite, Dynamics 365, Merge.dev)',
+	'marketing.pricing.feature.sso': 'Inicio de sesión único (SAML y OIDC)',
+	'marketing.pricing.feature.scim': 'Aprovisionamiento de usuarios por SCIM',
+	'marketing.pricing.feature.ssoEnforcement': 'Exigir inicio de sesión único a todos los usuarios',
+	'marketing.pricing.feature.multiEntity': 'Varias entidades legales',
+	'marketing.pricing.feature.auditSiemExport': 'Exportación del registro de auditoría a tu SIEM',
+	'marketing.pricing.enterprise.name': 'Enterprise',
+	'marketing.pricing.enterprise.price': 'A medida',
+	'marketing.pricing.enterprise.unit': 'contrato negociado',
+	'marketing.pricing.enterprise.allowance': 'Un cupo de facturas leídas por IA a la medida de tu volumen',
+	'marketing.pricing.enterprise.terms': 'Precios y condiciones contractuales negociados',
+	'marketing.pricing.enterprise.security': 'Ayuda con tu revisión de seguridad',
+	'marketing.pricing.cta.free': 'Empezar gratis',
+	'marketing.pricing.cta.upgrade': 'Empezar gratis, pasar a {plan}',
+	'marketing.pricing.cta.enterprise': 'Contactar con ventas',
+	'marketing.pricing.startsOnFree': 'Todo espacio de trabajo empieza en {plan}. Cambia de plan desde Facturación cuando quieras.',
+	'marketing.pricing.aiRead.heading': '¿Qué cuenta como factura leída por IA?',
+	'marketing.pricing.aiRead.body': 'Una factura que nuestra IA lee correctamente por ti a partir de un PDF o una foto, contada una vez por mes natural aunque se vuelva a leer. Las facturas electrónicas estructuradas (PEPPOL, UBL, Factur-X), las importaciones CSV y las facturas leídas con tu propia clave de proveedor de IA nunca cuentan.',
+	'marketing.pricing.more': '¿Necesitas más de lo que incluye {plan}, o un contrato? {sales}.',
+	'marketing.pricing.moreLink': 'Habla con ventas',
+	'marketing.pricing.selfHost': '¿Prefieres alojarlo tú mismo? FeohLedger tiene licencia MIT: {source}.',
+	'marketing.pricing.selfHostLink': 'consulta el código fuente en GitHub',
+
 	'consent.ariaLabel': 'Consentimiento de cookies y privacidad',
 	'consent.title': 'Sus opciones de privacidad',
 	'consent.bodyNecessary':
