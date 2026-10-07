@@ -1,12 +1,19 @@
 # Root Terraform entrypoint.
 #
-# The AWS stack is still being built out — see docs/production-deployment.md
-# for the planned shape (ECS, ALB, CloudFront, RDS). What lives here today is
-# the security substrate needed as a SOC 2 engineering prerequisite:
+# What lives here: the security substrate needed as a SOC 2 engineering
+# prerequisite, the platform domain, its mail DNS and a cost budget, and the
+# single-VM + RDS workload stack the app runs on (docs/minimal-deployment.md,
+# docs/decisions.md §254):
 #
-#   - kms.tf  : customer-managed KMS key for at-rest encryption, auto-rotated
-#   - s3.tf   : buckets for invoice files and audit-log shipping, with
-#               versioning + Object Lock
+#   - kms.tf      : customer-managed KMS key for at-rest encryption, auto-rotated
+#   - s3.tf       : buckets for invoice files, audit-log shipping and backups
+#   - network.tf  : the workload VPC (public subnets for the VM, private for RDS)
+#   - compute.tf  : the app VM, its instance role, Elastic IP and DNS records
+#   - database.tf : RDS Postgres 16
+#   - monitoring.tf : alarms
+#
+# The scale-up architecture (ECS, ALB, CloudFront) is
+# docs/production-deployment.md and is not built.
 #
 # The `terraform` block pins versions and keeps state in the S3 bucket the
 # estate account bootstrap created in the FeohLedger AWS account.

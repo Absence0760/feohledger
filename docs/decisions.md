@@ -10264,3 +10264,49 @@ not where the cost is); a hard stop at the paid tiers' allowance (bill shock in
 reverse — an outage the customer did not choose); SSO as Scale-only (an SSO tax
 on a feature that costs little to serve); counting re-reads and failed
 extractions (charging for our own retries).
+
+## 254. The pilot runs on one VM with the database on RDS (2026-10-07)
+
+The workload stack is the single VM of `docs/minimal-deployment.md` — Docker
+Compose running Caddy, the API and Redis — with **one change: the database is
+RDS for PostgreSQL 16, not a container on the VM.** Defined in
+`infra/network.tf`, `compute.tf`, `database.tf` and `monitoring.tf`; roughly
+$45–55 a month against ~$22 for everything on the VM and $120–200+ for the ECS
+build-out in `docs/production-deployment.md`.
+
+Why not the cheaper all-on-the-VM shape: its recovery story is the nightly
+`pg_dump`, so a lost VM loses up to a day of approvals, audit rows and payment
+records. For an accounts-payable system that is the one failure a pilot customer
+does not forgive. RDS gives point-in-time restore to within about five minutes
+for ~$15/month, and makes the VM disposable — replacing it costs a rebuild, not
+data. The compose stack already treated `FEOH_DATABASE_URL` as the override seam
+for exactly this, so the app needed no redesign.
+
+Why not the ECS build-out yet: it buys multi-instance scaling, automatic deploys
+and a CDN — none of which a handful of pilot tenants need — at three to four
+times the monthly cost and several days of build. Each piece graduates on its
+own trigger (`docs/minimal-deployment.md` § What's left out) and the same image,
+env contract, database and S3 layout move across unchanged.
+
+Choices inside the stack:
+
+- **Its own VPC, no NAT gateway.** Public subnets for the VM, private subnets
+  with no internet route for RDS. A NAT gateway would cost ~$33/month to serve
+  subnets that need no outbound traffic.
+- **No SSH.** Session Manager only: no port 22, no key pair, every session an
+  IAM-authorized CloudTrail event.
+- **The RDS master password never enters Terraform state.** It is an ephemeral
+  variable feeding the write-only `password_wo`, supplied from `infra-secrets`
+  at apply time. The previously documented plan — a `carlpett/sops` data
+  source — was rejected because a data source's value is written to state in
+  plaintext.
+- **TLS forced on the database** (`rds.force_ssl`), deletion protection on, a
+  final snapshot on delete, 7 days of point-in-time restore plus the 90-day
+  nightly logical dumps.
+- **t4g.medium, not t4g.small.** AI extraction and PDF rendering now run
+  in-process beside the API, Redis and Caddy; 2 GB leaves no headroom.
+
+Rejected: Multi-AZ RDS (doubles the database cost; a variable flips it on when
+a customer needs an uptime commitment); ElastiCache (Redis holds only
+ephemeral state on this stack); the account's default VPC (all-public subnets,
+and not reproducible from code).

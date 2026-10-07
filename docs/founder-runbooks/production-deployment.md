@@ -15,12 +15,13 @@ on fire.
 
 `infra/` holds the account substrate — the app KMS key, the S3 buckets, the
 `feohledger.com` certificate, a cost budget and the domain's registration
-settings — and it was **applied to the FeohLedger account on 2026-09-15**. The
-workload stack (the single VM in `docs/minimal-deployment.md`, or VPC, ECS, RDS
-and CloudFront) is not built yet, so **the app itself is not deployed**. No
-deployed secret has been authored yet — they will live
-sops-encrypted in the private `infra-secrets` repo (`feohledger/`),
-never in this public repo.
+settings — **applied to the FeohLedger account on 2026-09-15**. The workload
+stack — one VM plus an RDS database (`docs/decisions.md` §254) — is now
+**defined** in `infra/network.tf`, `compute.tf`, `database.tf` and
+`monitoring.tf` but **not yet applied**, so **the app itself is not deployed**.
+The apply needs the RDS master password created in the private `infra-secrets`
+repo first; the exact steps are `infra/README.md` § Workload stack, then
+`deploy/README.md` for the VM.
 
 ## What you need
 
