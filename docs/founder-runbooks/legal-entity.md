@@ -1,11 +1,45 @@
 # Legal entity + contracts
 
-**Why this matters**: You cannot legally invoice a customer until you
-exist as a business. You cannot accept payments into a personal bank
-account without material tax pain. You cannot sign a SOC 2 auditor
-engagement letter as a natural person.
+**Why this matters**: you cannot legally invoice a customer until you
+exist as a business, and you should not take customer payments into a
+personal bank account. A sole proprietor *is* a business for both
+purposes — it just has no separate legal person behind it.
 
-## Step 1 — Incorporate
+## Current path: sole proprietor (decisions §252)
+
+**Decided 2026-10-07: the pilot is signed by the operator as a sole
+proprietor trading as FeohLedger.** Every contract on the critical path —
+Stripe, insurance, the EU/UK Art 27 representatives, the SCCs with each
+sub-processor, a SOC 2 vendor, counsel — can be signed in your own name
+now. Nothing waits on incorporation.
+
+| Step | Why | Notes |
+|---|---|---|
+| Register **FeohLedger** as a trade name (DBA / "assumed name") | Lets you trade, invoice and bank under the name rather than your own | County clerk or state, depending on your state. Usually $10–100 and a newspaper notice in some states |
+| Get an **EIN** from the IRS | Keeps your SSN off customer W-9s, Stripe and the bank | Free, online, minutes. Optional for a sole proprietor with no employees — get it anyway |
+| Open a **separate business bank account** in the DBA name | Clean books, and Stripe payouts land somewhere that is not personal | Most banks want the DBA certificate + EIN |
+| Get a **mailing address that is not your home** | `/legal/privacy` must publish a controller address (`postalAddress` in `operator.ts`) | Virtual mailbox or PO box. Ask counsel whether a PO box satisfies GDPR Art 13 for you |
+| Bind **E&O + cyber insurance** — **hard gate before customer #1** | With no entity, a claim outside the Terms' cap reaches personal assets | See `insurance.md`. Tell the broker you are a sole proprietor |
+| State/local business licence, if your city or state requires one | Varies | Check your city and state |
+| Sales-tax nexus review | Same as for a company | See Step 2 below — not urgent for pilot #1 |
+
+Steps 3 (contracts) and 4 (lawyer review) below apply unchanged. Steps 1,
+5 and 6 apply only if you form a company.
+
+**When to form an entity** (decisions §252): a customer's procurement
+requires it; a customer wants FeohLedger to move money itself (payment-rail
+KYB needs a business — `payment-rails-onboarding.md`); you raise money; or
+your exposure outgrows what insurance comfortably covers. A **single-member
+LLC** is the cheap step (state filing ~$50–500, taxed as a sole proprietor
+by default); the Delaware C-corp below is for fundraising. Terms §1 already
+allows assigning customer agreements to a company formed later.
+
+---
+
+The rest of this runbook is the **company** path, kept for when one of
+those triggers fires.
+
+## Step 1 — Incorporate _(company path only)_
 
 Default choice for a US SaaS: **Delaware C-corp**, formed through
 Clerky or Stripe Atlas.
@@ -64,7 +98,7 @@ $2–5K to review:
 Startup-friendly firms: Cooley GO, Fenwick, Wilson Sonsini, Gunderson.
 Most will do flat-fee first-round reviews.
 
-## Step 5 — Founder paperwork
+## Step 5 — Founder paperwork _(company path only)_
 
 Don't skip these — they have one-way consequences.
 
@@ -75,7 +109,7 @@ Don't skip these — they have one-way consequences.
   expectations if a co-founder ever joins.
 - **Operating agreement / bylaws** — Clerky/Atlas generate them.
 
-## Step 6 — The recurring costs this runbook used to omit
+## Step 6 — The recurring costs this runbook used to omit _(company path only)_
 
 A Delaware C-corp is not a one-time fee, and the bill that surprises
 founders is the franchise tax. Delaware offers two calculation methods and
@@ -106,21 +140,37 @@ Budget annually, not once:
 
 ## Checklist
 
-- [ ] Entity incorporated (DE C-corp)
+Sole-proprietor path (current — decisions §252):
+
+- [ ] FeohLedger registered as a trade name (DBA / assumed name)
 - [ ] EIN issued
-- [ ] Business bank account opened
-- [ ] 83(b) filed
+- [ ] Business bank account opened in the DBA name
+- [ ] Non-home mailing address set up → `postalAddress` in `operator.ts`
+- [ ] E&O + cyber cover bound (hard gate before customer #1)
+- [ ] Local business licence, if required
 - [ ] TOS + Privacy + DPA published on the marketing site
 - [ ] MSA + Order Form templates ready to send
 - [ ] Startup lawyer on retainer (or flat-fee relationship)
+
+Company path (only when a §252 trigger fires):
+
+- [ ] Entity formed (single-member LLC, or DE C-corp if fundraising)
+- [ ] EIN issued for the entity, bank account moved to it
+- [ ] 83(b) filed (C-corp only)
 - [ ] Franchise-tax method chosen (Assumed Par Value, almost certainly)
 - [ ] March 1 franchise tax + annual report reminder in the calendar
+- [ ] Customer agreements assigned to the entity (Terms §1)
 
-Total cost: ~$500–1500 one-time, plus **~$550+/yr recurring** (franchise
+Sole-proprietor path: a DBA filing (~$10–100 one-time) and a mailbox
+subscription (~$10–30/month), plus the insurance premium and the eventual
+lawyer. No franchise tax, no registered agent.
+
+Company path total cost: ~$500–1500 one-time, plus **~$550+/yr recurring** (franchise
 tax + annual report + registered agent), plus the eventual lawyer retainer.
 This footer read "one-time" only until 2026-09-17, which is how the
 franchise tax becomes a surprise.
-Total time: 1–3 weeks.
+Total time: about a week for the sole-proprietor path (the DBA filing is
+the slow part); 1–3 weeks for a company.
 
 ## Sources
 

@@ -10145,3 +10145,39 @@ through a few people may still want others to book what they paid.
 The trigger to revisit is a signed customer who wants FeohLedger to send payments.
 Then the entity, KYB, Third-Party Sender registration and the money-transmitter
 opinion return (`docs/founder-runbooks/payment-rails-onboarding.md`).
+## 252. The pilot is signed by a sole proprietor, not a company (2026-10-07)
+
+The operator is trading as a sole proprietor and will sign customer #1 that way.
+This settles the open choice in #517 ("form an entity before customer #1, **or**
+record an explicit decision to sign the pilot as a sole proprietor"); this
+section is the record. `OPERATOR.controllerDescription` in
+`frontend/src/lib/legal/operator.ts` already said so.
+
+What it changes. Incorporation was the keystone of the founder critical path
+(#446 §1) only because a contract needs a party, and a sole proprietor is one:
+Stripe, insurers, the EU/UK Art 27 representatives, the SCCs with each
+sub-processor, a SOC 2 vendor and counsel can all be engaged now, in the
+operator's own name trading as FeohLedger. The C-corp steps — formation, the
+83(b), founder vesting, Delaware franchise tax, a registered agent — leave the
+path. What replaces them is smaller: register FeohLedger as a trade name
+(DBA / assumed name), take an EIN so the operator's SSN goes on nothing a
+customer or processor sees, open a separate business bank account, and publish
+a mailing address that is not the operator's home, since the privacy notice
+must name one. The procedure is `docs/founder-runbooks/legal-entity.md`.
+
+What it costs. Liability is personal and unlimited. The Terms' cap binds only
+customers, not suppliers or regulators, and preserves gross negligence, wilful
+misconduct, fraud and confidentiality breach (§13.4) — and the product holds
+supplier bank details. So **E&O and cyber cover become a hard gate before
+customer #1**, not a parallel nice-to-have: for a sole proprietor they are the
+only protection between a claim and personal assets. Some procurement teams
+will not contract with an individual; Terms §1 already permits assignment to a
+company formed later, so that is a migration, not a re-papering.
+
+Triggers to form an entity (a single-member LLC is the cheap step; the C-corp
+path stays documented for fundraising): a customer whose procurement requires
+it, a customer who wants FeohLedger to move money itself (payment-rail KYB needs
+a business — #446 §2, decisions §251), raising money, or revenue or exposure
+that insurance no longer comfortably covers. Rejected: incorporating
+pre-emptively — it costs ~$550+/yr recurring and weeks of calendar time to
+solve problems the no-rail pilot does not have.

@@ -1227,8 +1227,9 @@ reconciled when an item closes.
       models both as pending and the Privacy Policy renders all branches, so
       filling them is a one-line edit per representative.
       **Why blocked:** it needs a paid engagement with a representative firm in
-      each jurisdiction, which needs an entity to contract as.
-      **Durable fix:** incorporate, engage both, then set `euRepresentative` and
+      each jurisdiction. No longer waits on incorporation — the operator
+      contracts as a sole proprietor ([decisions.md](decisions.md) §252).
+      **Durable fix:** engage both, then set `euRepresentative` and
       `ukRepresentative`.
       **Trigger:** before marketing to, or onboarding, an EU or UK customer.
       Ref: [decisions.md](decisions.md) §175.
@@ -1241,9 +1242,9 @@ reconciled when an item closes.
       signing the Clauses with each sub-processor that receives personal data
       outside the EEA/UK (`/legal/sub-processors` is the list) and completing
       their annexes, plus the transfer-impact assessment *Schrems II* requires.
-      **Why blocked:** a contract needs a party, so this waits on incorporation
-      exactly as the representatives above do.
-      **Durable fix:** incorporate, execute the Clauses provider by provider,
+      **Why blocked:** operator work with each provider; no longer waits on
+      incorporation — the sole proprietor is the party ([decisions.md](decisions.md) §252).
+      **Durable fix:** execute the Clauses provider by provider,
       and keep the signed set where the privacy mailbox can answer from it.
       **Trigger:** before the first EEA or UK customer, and before anyone acts
       on the copy offer in §9.
