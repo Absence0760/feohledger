@@ -10490,7 +10490,8 @@ upgrade resumes it untouched. Turning a feature OFF is never refused.
   block on downgrade (destroys configuration the customer paid to set up, and
   `change_plan` would grow a side effect on tenant settings). Accounts that
   have no password — JIT- or SCIM-provisioned — set one through the ordinary
-  forgot-password flow, which never required SSO to be off.
+  forgot-password flow, which never required SSO to be off
+  (`tests/test_forgot_reset_password.py` pins it on a plan-less tenant).
 - **SCIM.** Reads and deprovisioning stay open on every plan; provisioning and
   grants need `scim`. A leaver the IdP cannot deactivate stays active, and on
   a plan without SSO that account's password sign-in is open — so refusing

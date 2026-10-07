@@ -57,7 +57,7 @@ async def _login(client, email: str, password: str):
     return await client.post("/api/auth/login", json={"email": email, "password": password})
 
 
-async def _create_throwaway_user(realdb, key: str, *, password: str) -> str:
+async def _create_throwaway_user(realdb, key: str, *, password: str | None) -> str:
     """Insert a standalone control-plane User (no roles needed — plain
     password login doesn't read them) so a password-mutating test never
     touches one of the four persistent seeded role accounts. Returns the
@@ -70,7 +70,7 @@ async def _create_throwaway_user(realdb, key: str, *, password: str) -> str:
                 id=uuid.uuid4(),
                 email=email,
                 full_name="Reset Test User",
-                hashed_password=pwd_context.hash(password),
+                hashed_password=pwd_context.hash(password) if password is not None else None,
                 is_active=True,
                 organization_id=realdb.info(key).org_id,
                 must_change_password=False,
@@ -135,6 +135,58 @@ async def test_forgot_password_happy_path_and_old_password_stops_working(
         # New password works.
         new_resp = await _login(c, email, new_password)
         assert new_resp.status_code == 200, new_resp.text
+
+
+@pytest.mark.asyncio
+async def test_a_passwordless_sso_user_can_set_a_password_once_the_plan_drops_sso(
+    realdb, fake_redis, monkeypatch
+):
+    """Decisions §258: when a tenant's plan stops granting SSO the password
+    reopens. An account the IdP provisioned (JIT or SCIM) has NO password, so
+    "reopens" only holds if forgot-password can give it one. The harness org
+    holds no subscription — the plan a cancelled tenant falls back to."""
+    from sqlalchemy.orm.attributes import flag_modified
+
+    from app.config import settings as cfg
+    from app.models.organization import Organization
+    from app.services.email_adapters.console_adapter import ConsoleAdapter
+
+    monkeypatch.setattr(cfg, "tenant_url_template", "https://{slug}.feohledger.test", raising=True)
+    sent: list = []
+
+    async def _fake_send(self, message):  # noqa: ANN001
+        sent.append(message)
+
+    monkeypatch.setattr(ConsoleAdapter, "send", _fake_send, raising=True)
+
+    async with realdb.control_sessionmaker()() as s:
+        org = await s.get(Organization, realdb.info(TENANT).org_id)
+        org.settings = {
+            **(org.settings or {}),
+            "sso": {
+                "enabled": True,
+                "sso_only": True,
+                "provider": "entra",
+                "discovery_url": "https://login.example.com/.well-known/openid-configuration",
+                "client_id": "feoh",
+                "client_secret": "s3cret-not-echoed",
+            },
+        }
+        flag_modified(org, "settings")
+        await s.commit()
+    email = await _create_throwaway_user(realdb, TENANT, password=None)
+
+    async with realdb.client(key=TENANT, role=None) as c:
+        assert (await c.post("/api/auth/forgot-password", json={"email": email})).status_code == 200
+        assert len(sent) == 1
+        token = sent[0].body_text.split("token=")[1].split("\n")[0].strip()
+        new_password = "BrandNewPassw0rd!42"
+        reset = await c.post(
+            "/api/auth/reset-password", json={"token": token, "new_password": new_password}
+        )
+        assert reset.status_code == 200, reset.text
+        signed_in = await _login(c, email, new_password)
+    assert signed_in.status_code == 200, signed_in.text
 
 
 @pytest.mark.asyncio
