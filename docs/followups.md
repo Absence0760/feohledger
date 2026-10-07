@@ -39,7 +39,9 @@ and an audit that re-derived both found the copy stale at nearly every sync
 transcription was retired rather than corrected again. Add a follow-up here; add
 a GitHub issue only when one warrants its own thread.
 
-**Last reconciled:** 2026-10-06 — the round-2 issues batch (PR #514) closed
+**Last reconciled:** 2026-10-06 — the no-rail pilot (issue #517, decisions §251)
+opened three (c) entries — mobile record-only parity, the balanced NACHA file and
+the ERP-reported payment date — taking the file from 72 → 75. Before that, 2026-10-06 — the round-2 issues batch (PR #514) closed
 **twelve** (c) entries and opened five, taking the file from 59 → 52: the unmasked
 DSAR export's step-up, the stale `/legal/privacy` §12 and the 1099 headline total
 (decisions §237), the English-only money-path refusals in both entries that
@@ -91,7 +93,7 @@ section carried its own `decisions.md` § reference, so nothing was lost by
 deleting it; that cross-reference is what makes the pruning safe, and writing
 one is what earns a future entry the right to be deleted.
 
-**73 open: 58 (c) · 9 (a) · 6 (b)** — re-derived from the file, never carried
+**76 open: 61 (c) · 9 (a) · 6 (b)** — re-derived from the file, never carried
 forward. The section heading is authoritative; where an entry also carries a
 `(c)`/`(a)`/`(b)` marker, the two agree.
 `grep -c '^- \[ \]' docs/followups.md`.
@@ -1170,7 +1172,43 @@ lands. Pure doc drift was corrected in the same PR. The two diagnosed defects
       keys (`help.*`, diagram labels) into a second lazy catalogue loaded by
       `/help` routes and HelpTip, with the locale key-parity test covering
       both slices. **Trigger:** before the next feature that adds more than a
-      couple of hundred keys, or when the catalogue passes 97 KB.
+      couple of hundred keys, or when the catalogue passes 97 KB. **Fired
+      2026-10-06:** the no-rail pilot (issue #517) added 87 keys and the largest
+      catalogue measured 98 KB of 100 (total 989 of 1075) — still green, but
+      the next feature with real copy will bind. Do this split next.
+
+### Surfaced by the no-rail pilot (2026-10-06, issue #517, decisions §251)
+
+- [ ] **(c) The mobile app has no record-only mode.** It still offers Execute on a
+      draft run; on a record-only tenant the server refuses with
+      `payments_record_only` and the app shows that message, so nothing is paid
+      by mistake — but there is no "record as paid outside FeohLedger" and no
+      run-level record on mobile, so a mobile-only approver has to switch to the
+      web to close an invoice out. **Durable fix:** read
+      `GET /api/payments/execution-mode` in the payments store, hide Execute /
+      Resume / Retry on `record_only`, and add the single-invoice and run-level
+      record flows (the endpoints are the web's, so no backend change), with
+      widget tests and the l10n strings in every ARB. **Trigger:** the first pilot
+      customer whose approvers use the mobile app, or the next mobile payments
+      change, whichever comes first.
+- [ ] **(c) An ERP-reported payment is dated the day the webhook arrives.** The
+      inbound `Paid` payload carries no payment date, so
+      `erp_webhook._record_erp_reported_payment` books `paid_on = utc_today()` and
+      `method = NULL` (reportable). A bill paid on 31 December and reported on
+      2 January lands in the wrong 1099 year, and a card payment made in the ERP
+      would be counted as reportable. **Durable fix:** accept an optional
+      `paid_on` and `payment_method` in the ERP webhook body (and map them in each
+      ERP adapter's status poll), validate them like the user endpoint does, and
+      fall back to the arrival date only when absent. **Trigger:** the first
+      ERP-led pilot customer, or the first year-end with ERP-reported payments.
+- [ ] **(c) The NACHA file is always unbalanced.** `services/nacha.py` writes
+      credits only, which most ODFIs expect from a corporate originator, but some
+      banks require a balanced file (an offsetting debit to the originator's own
+      account). **Durable fix:** an optional `settings.payments.nacha` block for
+      the offset account (`offset_routing`, `offset_account`, `offset_account_type`)
+      that, when present, appends one debit entry for the batch total and switches
+      the batch to service class 200, with builder tests on the control totals.
+      **Trigger:** a pilot customer's bank rejects or asks for a balanced file.
 
 ## (a) Blocked on external credentials, accounts, or hardware
 

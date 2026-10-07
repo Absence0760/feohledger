@@ -246,6 +246,18 @@ The webhook handler:
 5. Transitions the invoice (e.g., `sent_to_erp` → `posted_in_erp`)
 6. Writes an audit log entry
 
+**The ERP paying an invoice FeohLedger never paid is recorded, not dropped.**
+`posted_in_erp → paid` is not a state-machine edge (a `paid` invoice needs a
+payment behind it), so a `Paid` report for an `approved` / `sent_to_erp` /
+`posted_in_erp` invoice used to be a silent no-op — which left the ERP-led path
+of the no-rail pilot (issue #517) with no way to reach `paid`. The handler now
+records the ERP's payment through `services/external_payment` (a `completed`
+`provider="external"` payment, reference = the ERP document id), moving a
+`sent_to_erp` invoice to `posted_in_erp` first. A refusal — an open
+payment-blocking exception, a live FeohLedger payment or card — opens an
+`erp_reconciliation` exception naming the refusal code instead. See
+`backend/docs/payments.md` § The ERP reports an invoice paid that FeohLedger never paid.
+
 **Dedup key is `event_id` only — no fallback to `erp_document_id` /
 `correlation_id`.** Both of those are constant for an invoice's entire
 lifecycle, so falling back to either would let the FIRST status delivery's

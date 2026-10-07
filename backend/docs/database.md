@@ -129,7 +129,7 @@ decimal comparison rather than binary drift.
 - `audit_log` — immutable event log (actor, action, entity, timestamp)
 
 #### Payments
-- `payment_runs` — batch payment execution records
+- `payment_runs` — batch payment execution records. `nacha_export_count` (`integer NOT NULL DEFAULT 0`, migration 0106, not backfilled) counts the NACHA files exported for a run and drives each file's file-ID modifier (`payments.md` § The bank file); a run whose file is out sits in the `exported` claim status.
 - `payment_schedules` — due dates, early-pay discount windows
 - `payments` — individual payment records (amount, method, status, ref). `discount_offer_id` (FK `discount_offers`, `SET NULL`) + `discount_amount` (`numeric(15,2)`), added by migration 0104 and not backfilled, record the accepted early-payment discount the payment takes; `discount_offers.captured_by_payment_id` (FK `payments`, `SET NULL`) names the settled payment that realized a capture (`dynamic-discounting.md` § Paying the discounted amount). `quality_inspections.source` (`manual` / `qms`) + `recorded_by_user_id` (control-plane id, no FK), migration 0105, not backfilled — who a verdict came from, which decides whether a PO-match refresh may lift a quality hold (`po-matching.md` § Before Payment)
 

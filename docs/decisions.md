@@ -10060,3 +10060,88 @@ NULL`, not `RESTRICT`, because cancelling a draft run deletes its pending
 payments. Rejected: a calendar cutoff for the memo rule (it misfires for a
 tenant deployed late) and refusing such a booking as ambiguous (nothing could
 resolve it).
+
+## 251. The pilot moves no money: record-only mode, "paid outside", and a NACHA file (issue #517)
+
+For the pilot, customers pay their suppliers from their own bank or ERP and
+FeohLedger records it. That takes payment-rail KYB, NACHA Third-Party Sender
+registration, the annual ACH Rules Compliance Audit, ACH fraud monitoring and
+the money-transmitter opinion off the critical path, because each exists only
+if FeohLedger moves customers' money. The code had to change in three places to
+make that model honest.
+
+**Execute had to be impossible, not just unused.** With no processor configured
+the adapter is `mock`, which reports every payment `completed`; one Execute click
+would have marked invoices `paid` with nothing sent.
+`services/payment_execution_mode` resolves each tenant to `processor` or
+`record_only`, and `api/payments._require_payment_adapter` — which every
+dispatcher already called — refuses `record_only` with 409
+`payments_record_only` before anything is claimed. It fails closed: an unknown
+`mode`, and any **deployed** environment whose provider is absent or `mock`,
+resolve record-only even if the admin set `mode: processor`. Local dev keeps the
+mock (guard rail 7); the mock is honest where no real money exists. Rejected: a
+per-tenant switch alone (a tenant that never set it would still be one click
+from fake payments) and refusing `mock` everywhere (breaks local-first).
+
+**`paid` needed an honest writer.** The rail was the only automatic path to
+`paid`, and the ERP-led path the issue described as working did not: `posted_in_erp
+→ paid` is not an edge, so the ERP's `Paid` was dropped silently (pinned by a
+test as intended). `services/external_payment` now records a payment made
+outside FeohLedger as a `completed` `Payment` with `provider = "external"`,
+dated on the paid-on day at midnight UTC, and walks the invoice through
+`payment_scheduled` to `paid`. The user endpoint, the run-level endpoint and the
+ERP webhook all use it. A real `Payment` row, rather than a status flag on the
+invoice, is the point: bank reconciliation, the 1099 YTD aggregate and aging
+already read completed payments, so none of them needed a special case. Rejected:
+adding a `posted_in_erp → paid` edge (it would make `paid` mean "something said
+so" with no amount behind it, and 1099 would miss the money).
+
+Which controls carry over follows from what each protects. Approval-style
+segregation of duties applies (the payable's creator may not record its payment),
+with the existing single-operator opt-out. Payment-blocking exceptions refuse,
+because closing the item would bury a duplicate or fraud flag. A live card or
+another live payment refuses, because each is a double-pay risk. The CFO
+threshold and vendor verification do **not** apply: both stop FeohLedger from
+*sending* money, and refusing to record money already sent leaves the ledger
+wrong without un-sending it. An ERP report that hits a refusal opens an
+`erp_reconciliation` exception rather than vanishing. Partial payments are
+refused, not approximated; the amount must equal the net payable.
+
+**The bank file stays the customer's origination.** `GET /runs/{id}/nacha`
+writes a standard unbalanced CCD/PPD credit file from a draft run, which the
+customer uploads to its own bank as originator. It is allowed only on record-only
+tenants, because on a processor tenant the file plus an Execute would pay twice.
+It keeps the run's maker-checker and CFO sign-off, since the upload is the step
+that moves money. It audits a SHA-256 of the file, never its contents. The run is
+then closed with `POST /runs/{id}/record-outside`, which refuses the whole run on
+one bad invoice rather than leave it half-recorded.
+
+**A money-path review tightened the bank file before it landed.** The first cut
+treated the export as a read, and that was wrong in three ways. It checked less
+than `/execute`: a `fraud_flag` raised by a bank-detail swap approved after
+staging, or a credit applied since, would have reached the file, carrying the new
+account or the stale amount. `/execute`'s pre-adapter checks therefore moved into
+`payment_runs.dispatch_preflight`, which the dispatcher, the export and the
+run-level record now all call. The export also left the run `draft`, so a second
+file, a cancel-and-restage, or a later switch to processor mode could each pay
+the same suppliers twice. The first export now claims the run (`exported`, a
+claim state execute and cancel refuse). A second file needs `regenerate=true` and
+carries the next file-ID modifier, counted on the run (migration 0106). Counting
+audit rows was rejected because in `lambda` mode they land late. A reasoned
+`/nacha/void` is the bank-rejected exit. Finally, the export was gated on
+recording when it is the money moving, so it is now gated on `payment.execute`.
+
+Two neighbouring gaps closed in the same pass. An ERP `Paid` for an invoice
+FeohLedger still means to pay itself — in a run, with a live payment or card —
+now raises the blocking `payment_reconciliation`. The non-blocking
+`erp_reconciliation` it raised before would have let the run pay the supplier a
+second time. Direct card minting refuses on a record-only tenant, because a card
+is a payment by another door.
+
+Recording gets its own permission, `payment.record_external`, rather than reusing
+`payment.execute`. Recording moves no money, and an org that sends payments
+through a few people may still want others to book what they paid.
+
+The trigger to revisit is a signed customer who wants FeohLedger to send payments.
+Then the entity, KYB, Third-Party Sender registration and the money-transmitter
+opinion return (`docs/founder-runbooks/payment-rails-onboarding.md`).
