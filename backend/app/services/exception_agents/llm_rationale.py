@@ -106,7 +106,9 @@ async def build_rationale(
     model = cfg.get("model") or settings.extraction_model
     body = {
         "model": model,
-        "max_tokens": 300,
+        # Sized for adaptive thinking as well as the one sentence — thinking
+        # counts toward this cap on current models (see audit_summary).
+        "max_tokens": 4096,
         "messages": [
             {"role": "user", "content": [{"type": "text", "text": _build_prompt(template, facts)}]}
         ],

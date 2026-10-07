@@ -306,6 +306,126 @@ async def test_streaming_tool_use_loop_runs_tool_and_sums_usage(monkeypatch):
     assert hop2_messages[-1]["content"][0]["type"] == "tool_result"
 
 
+def _thinking_then_tool_use_stream() -> str:
+    """Hop 1 on a thinking-on model: a thinking block (text + signature
+    streamed as deltas), then a tool_use block."""
+    frames = [
+        _sse(
+            "message_start",
+            {"type": "message_start", "message": {"usage": {"input_tokens": 40}}},
+        ),
+        _sse(
+            "content_block_start",
+            {
+                "type": "content_block_start",
+                "index": 0,
+                "content_block": {"type": "thinking", "thinking": "", "signature": ""},
+            },
+        ),
+        _sse(
+            "content_block_delta",
+            {
+                "type": "content_block_delta",
+                "index": 0,
+                "delta": {"type": "thinking_delta", "thinking": "Need vendor "},
+            },
+        ),
+        _sse(
+            "content_block_delta",
+            {
+                "type": "content_block_delta",
+                "index": 0,
+                "delta": {"type": "thinking_delta", "thinking": "spend."},
+            },
+        ),
+        _sse(
+            "content_block_delta",
+            {
+                "type": "content_block_delta",
+                "index": 0,
+                "delta": {"type": "signature_delta", "signature": "EqQBCkgsig=="},
+            },
+        ),
+        _sse("content_block_stop", {"type": "content_block_stop", "index": 0}),
+        _sse(
+            "content_block_start",
+            {
+                "type": "content_block_start",
+                "index": 1,
+                "content_block": {
+                    "type": "tool_use",
+                    "id": "toolu_t",
+                    "name": "get_vendor_spend",
+                    "input": {},
+                },
+            },
+        ),
+        _sse(
+            "content_block_delta",
+            {
+                "type": "content_block_delta",
+                "index": 1,
+                "delta": {"type": "input_json_delta", "partial_json": '{"period": "ytd"}'},
+            },
+        ),
+        _sse("content_block_stop", {"type": "content_block_stop", "index": 1}),
+        _sse(
+            "message_delta",
+            {
+                "type": "message_delta",
+                "delta": {"stop_reason": "tool_use"},
+                "usage": {"output_tokens": 30},
+            },
+        ),
+        _sse("message_stop", {"type": "message_stop"}),
+    ]
+    return "".join(frames)
+
+
+async def test_streamed_thinking_block_is_echoed_back_with_its_signature(monkeypatch):
+    """Current models think by default. The tool-use hop must replay the
+    thinking block exactly — text AND signature — or the API rejects hop 2."""
+    rec = _StreamRecorder(
+        [
+            _thinking_then_tool_use_stream(),
+            _text_only_stream(tokens=["Done."], input_tokens=60, output_tokens=4),
+        ]
+    )
+    _patch_client(monkeypatch, rec)
+
+    async def run_tool(tool_name: str, raw_args: dict) -> ToolInvocation:
+        return ToolInvocation(tool=tool_name, args=raw_args, result={"ok": True}, error=None)
+
+    events = await _collect(
+        _adapter().respond_streaming(
+            message="spend?",
+            history=[],
+            tool_specs=[{"name": "get_vendor_spend"}],
+            run_tool=run_tool,
+        )
+    )
+
+    # Thinking text is never forwarded to the user as answer text.
+    assert "".join(e.text for e in events if isinstance(e, TextDelta)) == "Done."
+    echoed = rec.requests[1]["messages"][-2]
+    assert echoed["role"] == "assistant"
+    assert echoed["content"][0] == {
+        "type": "thinking",
+        "thinking": "Need vendor spend.",
+        "signature": "EqQBCkgsig==",
+    }
+    assert echoed["content"][1]["type"] == "tool_use"
+    assert echoed["content"][1]["input"] == {"period": "ytd"}
+
+
+def test_request_body_leaves_room_for_thinking_and_sends_no_rejected_fields():
+    body = _adapter()._request_body("claude-sonnet-5-5", [], [])
+    assert body["max_tokens"] >= 16000
+    assert body["thinking"] == {"type": "adaptive"}
+    for field in ("temperature", "top_p", "top_k", "tool_choice"):
+        assert field not in body
+
+
 # ===========================================================================
 # Fail-soft: mid-stream transport error → error TextDelta + StreamDone, no raise
 # ===========================================================================

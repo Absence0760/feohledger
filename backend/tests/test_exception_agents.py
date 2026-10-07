@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import uuid
 from decimal import Decimal
+from unittest.mock import MagicMock
 
 from app.models.agent_decision import AgentDecision
 from app.models.exception import Exception as APException
@@ -116,6 +117,36 @@ async def test_build_rationale_byok_empty_key_returns_template():
     )
     assert out == template
     assert called is False
+
+
+async def test_build_rationale_request_leaves_room_for_thinking(monkeypatch):
+    """Current models think by default and thinking counts toward max_tokens —
+    the old 300 could end the turn before the sentence and silently fall back
+    to the template."""
+    from app.config import settings as app_settings
+
+    monkeypatch.setattr(app_settings, "exception_agent_rationale_enabled", True)
+    captured = {}
+
+    async def _post(*, json, headers):
+        captured["body"] = json
+        resp = MagicMock()
+        resp.status_code = 200
+        resp.json = MagicMock(
+            return_value={"content": [{"type": "text", "text": '{"rationale": "Polished."}'}]}
+        )
+        return resp
+
+    out = await build_rationale(
+        {"extraction": {"program_type": "byok", "api_key": "k", "model": "claude-sonnet-5-5"}},
+        template="draft",
+        facts={},
+        http_post=_post,
+    )
+    assert out == "Polished."
+    assert captured["body"]["max_tokens"] >= 4096
+    for field in ("temperature", "top_p", "top_k", "tool_choice", "thinking"):
+        assert field not in captured["body"]
 
 
 # ---------------------------------------------------------------------------

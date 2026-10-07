@@ -291,6 +291,7 @@ def test_summarize_happy_path_parses_llm_text():
     async def fake_post(*, json, headers):
         captured["model"] = json["model"]
         captured["x-api-key"] = headers["x-api-key"]
+        captured["body"] = json
         return _http_response(
             200,
             '{"text": "LLM paragraph.", "confidence_context": "auto-extracted at 95% confidence"}',
@@ -309,6 +310,12 @@ def test_summarize_happy_path_parses_llm_text():
     assert result.confidence_context == "auto-extracted at 95% confidence"
     assert captured["x-api-key"] == "org-key"
     assert captured["model"] == "claude-x"
+    # Current models think by default and thinking counts toward max_tokens:
+    # the old 600 could end the turn before any text and silently fall back
+    # to the template. Nothing a current model rejects is sent either.
+    assert captured["body"]["max_tokens"] >= 4096
+    for field in ("temperature", "top_p", "top_k", "tool_choice", "thinking"):
+        assert field not in captured["body"]
 
 
 def test_summarize_non_200_falls_back_to_template():
