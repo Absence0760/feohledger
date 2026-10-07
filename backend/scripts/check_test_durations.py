@@ -68,8 +68,9 @@ DEFAULT_DURATIONS = BACKEND_ROOT / ".test_durations"
 
 # Measured 20.13% (2,038 of 10,123) on 2026-09-17, when this guard landed at
 # 0.25; it tripped at 25.12% on 2026-10-06 and the baseline was rebuilt from CI
-# run 37467328161's shards to 0.08% (9 of 10,802). Ratchet only downward — see
-# the module docstring.
+# run 37467328161's shards to 0.08% (9 of 10,802); it tripped again at 5.17% on
+# 2026-10-07 (PR #523) and was rebuilt from run 37693064331 to 0.11% (12 of
+# 11,314). Ratchet only downward — see the module docstring.
 MAX_MISSING_FRACTION = 0.05
 
 # How many per-file rows to print. A failure needs enough to see whether the
