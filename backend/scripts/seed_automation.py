@@ -35,9 +35,13 @@ CFO has one overturned approval, so routing has something to rank on.
 `tests/test_seed_automation.py` pins those minimums, so a change to a gate or to
 this plan cannot silently put a panel back into its empty state.
 
-Invoice, experiment and payment ids are uuid5s over the org id. That keeps
-`assign_variant`'s split (a hash of the two ids) identical on every run, so the
-seeded results are reproducible.
+Invoice, experiment and payment ids are fixed uuid5s, deliberately NOT keyed on the org
+id. `assign_variant` splits on a hash of the two ids, so keying them on the org
+made the experiment's B arm — and with it the touchless count, the winner and
+the threshold recommendation — a fresh binomial draw per tenant: about 7% of
+org ids seeded fewer than the 20 touchless invoices the results need. Each
+tenant has its own database, so a fixed id never collides, and every tenant
+now gets the same, pinned history.
 
 **Demo tenants only.** `seed.py` calls this for acme, never for the e2e worker
 tenants: those specs count invoices, and a running experiment re-routes every
@@ -101,14 +105,17 @@ _ROLES = ("admin", "ap_manager", "ap_clerk", "cfo")
 _EXP_AUTO_START, _EXP_AUTO_END = 171, 75
 _EXP_CFO_START = 62
 
+# The concluded test's name — also what marks a tenant as already seeded.
+_EXP_AUTO_NAME = "Auto-approve invoices under $500"
+
 # The concluded test's variant B auto-approves at or under this amount.
 _AUTO_BELOW = Decimal("500.00")
 # The running test's variant B routes anything over this to the CFO.
 _CFO_ABOVE = Decimal("10000.00")
 
 
-def _id(org_id: uuid.UUID, kind: str, key: object) -> uuid.UUID:
-    return uuid.uuid5(_NS, f"{org_id}:{kind}:{key}")
+def _id(kind: str, key: object) -> uuid.UUID:
+    return uuid.uuid5(_NS, f"{kind}:{key}")
 
 
 def _q(amount: Decimal) -> Decimal:
@@ -166,7 +173,7 @@ _NOISY = (
 
 # Small-ticket vendors, all inside the concluded experiment's window and all
 # under `_AUTO_BELOW`, so each one in its auto-approve arm is auto-approved.
-# `_sized_small_plans` replaces each `count` per org (see there). One
+# `_sized_small_plans` replaces each `count` (see there). One
 # auto-approved Catering payment is voided: the single overturn the feedback
 # loop measures.
 _SMALL = (
@@ -182,17 +189,19 @@ _SMALL = (
 _AUTO_PER_SMALL_VENDOR = 12
 
 
-def _sized_small_plans(org_id: uuid.UUID, auto_test: WorkflowExperiment) -> list[_VendorPlan]:
+def _sized_small_plans(auto_test: WorkflowExperiment) -> list[_VendorPlan]:
     """`_SMALL`, each vendor sized so EXACTLY `_AUTO_PER_SMALL_VENDOR` of its
     invoices land in the concluded test's auto-approve arm.
 
     Which arm an invoice lands in is `assign_variant`'s hash of the invoice and
-    experiment ids, both uuid5s over the org id. A fixed count therefore gave
+    experiment ids. When those were uuid5s over the org id, a fixed count gave
     each org a different number of auto-approvals: 24 in one tenant, 20 on acme,
-    which put acme's overturn rate exactly on the brake. The hash needs no
-    database, so each vendor walks its candidate ids and stops at the one that
-    fills the arm; the human-reviewed arm gets whatever fell there first (about
-    as many, on average).
+    which put acme's overturn rate exactly on the brake. The ids are fixed now,
+    so every tenant gets the same split either way, but the count is still
+    derived rather than chosen: the hash needs no database, so each vendor walks
+    its candidate ids and stops at the one that fills the arm, and the overturn
+    rate stays pinned under the brake through any change to the id scheme. The
+    human-reviewed arm gets whatever fell there first (about as many, on average).
 
     The human-reviewed invoices carry the GL corrections, chosen from that arm
     by construction. Spotless, a vendor with 12+ of them would join the clean
@@ -207,7 +216,7 @@ def _sized_small_plans(org_id: uuid.UUID, auto_test: WorkflowExperiment) -> list
         while len(auto) < _AUTO_PER_SMALL_VENDOR:
             i = len(auto) + len(human)
             assert i < 10 * plan.count, "assign_variant stopped splitting"
-            inv_id = _id(org_id, "invoice", f"{plan.code}-{i}")
+            inv_id = _id("invoice", f"{plan.code}-{i}")
             variant = assign_variant(
                 str(inv_id), str(auto_test.id), split_a_pct=auto_test.split_a_pct
             )
@@ -334,7 +343,7 @@ class _Writer:
     def _schedule(self, inv: Invoice, at: datetime, *, ref: str) -> None:
         self.move(inv, at, "invoice.payment_scheduled", "ap_manager", "payment_scheduled")
         self._payment = Payment(
-            id=_id(self.org_id, "payment", ref),
+            id=_id("payment", ref),
             correlation_id=uuid.uuid4(),
             invoice_id=inv.id,
             amount=inv.amount,
@@ -396,8 +405,11 @@ async def seed_automation(
     harness passes its own per-slot one.
     """
     now = now or datetime.now(UTC)
-    first_id = _id(org_id, "invoice", f"{_CLEAN[0].code}-0")
-    if (await session.execute(select(Invoice.id).where(Invoice.id == first_id))).first():
+    # Keyed on the experiment's NAME, not a derived id: a tenant seeded before
+    # the ids stopped carrying the org id holds different ids, and an id probe
+    # would read it as unseeded and write the whole history a second time.
+    already = select(WorkflowExperiment.id).where(WorkflowExperiment.name == _EXP_AUTO_NAME)
+    if (await session.execute(already)).first():
         print("  Automation history already seeded — skipping")
         return {}
 
@@ -438,7 +450,7 @@ async def seed_automation(
         entity_id,
         default_def,
         key="auto-below-500",
-        name="Auto-approve invoices under $500",
+        name=_EXP_AUTO_NAME,
         description=(
             "Does letting low-value invoices skip manual review raise the touchless "
             "rate without letting bad invoices through?"
@@ -478,7 +490,7 @@ async def seed_automation(
     experiments = (exp_auto, exp_cfo, exp_draft)
     session.add_all(experiments)
     await session.flush()
-    plans = (*_CLEAN, *_NOISY, *_sized_small_plans(org_id, exp_auto))
+    plans = (*_CLEAN, *_NOISY, *_sized_small_plans(exp_auto))
 
     w = _Writer(session, org_id=org_id, entity_id=entity_id, users=users, now=now)
     voided_auto = False
@@ -489,7 +501,7 @@ async def seed_automation(
             created = created.replace(hour=9 + (i % 7))
             amount = _amount(plan, i)
             inv = Invoice(
-                id=_id(org_id, "invoice", f"{plan.code}-{i}"),
+                id=_id("invoice", f"{plan.code}-{i}"),
                 organization_id=org_id,
                 entity_id=entity_id,
                 invoice_number=f"{plan.code}-{created:%y%m}-{i + 1:03d}",
@@ -645,7 +657,7 @@ def _experiment(
         primary_metric=primary_metric,
     )
     exp = WorkflowExperiment(
-        id=_id(org_id, "experiment", key),
+        id=_id("experiment", key),
         organization_id=org_id,
         entity_id=entity_id,
         name=body.name,
