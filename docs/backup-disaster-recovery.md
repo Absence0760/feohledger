@@ -4,7 +4,7 @@ How we back up customer data, what we'd do if it was destroyed, and how often we
 
 This is a SOC 2 prerequisite (`docs/soc2-readiness.md` § Backup, recovery, and continuity). The auditor reads this doc, asks the security officer when the last restore test was, and expects to see a recent record.
 
-**What this describes is the deployment in `docs/minimal-deployment.md`:** a single EC2 VM running Postgres, Redis, the API and Caddy under Docker Compose, with S3 for uploaded files and for the database dumps. There is **no RDS, no ElastiCache and no managed backup service** — `infra/` provisions four S3 buckets, one KMS key, ACM, Route 53 and a cost budget, and nothing else (`infra/README.md:3`: "Real AWS workload resources (ECS, ALB, RDS, CloudFront) are not yet defined here"). Every mechanism below is either a script in `deploy/` or an S3 lifecycle rule in `infra/s3.tf`. Production uses real AWS S3 for uploaded files, not MinIO — `deploy/compose.prod.yml:8` and the empty `FEOH_S3_ENDPOINT_URL` in `deploy/prod.sops.yaml.example:57` are what select it.
+**What this describes is the deployment in `docs/minimal-deployment.md`:** a single EC2 VM running Redis, the API and Caddy under Docker Compose, with S3 for uploaded files and for the database dumps, and Postgres in one of two modes (`docs/minimal-deployment.md` § Database): **RDS for PostgreSQL 16** — the documented path, chosen by setting `FEOH_DATABASE_URL` in the secrets file — or, as the cheaper alternative, a **Postgres container on the VM**. The mode changes the database's recovery story, so each section below says which it describes. There is no ElastiCache. Every mechanism below is a script in `deploy/`, an S3 lifecycle rule in `infra/s3.tf`, or — on the RDS path — the instance's own automated backups. Production uses real AWS S3 for uploaded files, not MinIO — `deploy/compose.prod.yml:8` and the empty `FEOH_S3_ENDPOINT_URL` in `deploy/prod.sops.yaml.example:57` are what select it.
 
 **This document is the one the published DPA points at.** Annex II's *Availability and restoration* row tells customers "a written backup and disaster-recovery procedure exists and is maintained alongside the code" — this is that procedure — and DPA § 13 rests a customer-facing promise on the mechanism described here: that we delete a tenant's backup objects within 60 days, because each tenant's dump is its own object rather than part of a whole-system image. DPA § 12 then commits us to make available "all information necessary to demonstrate compliance with Article 28", which is the route by which an auditor asks for this file. **So a claim here is a claim a customer can check against the repo, and a wrong one contradicts a published commitment.**
 
@@ -22,7 +22,7 @@ This is a SOC 2 prerequisite (`docs/soc2-readiness.md` § Backup, recovery, and 
 
 **RTO** = max acceptable time from "incident detected" to "service restored." **RPO** = max acceptable data loss measured backward from the incident. The numbers above are what we tell customers; document any gap honestly.
 
-**The 24-hour RPO is the backup schedule, not an aspiration.** `deploy/backup.sh` runs once a night at 03:17 UTC (`/etc/cron.d/feoh-backup`, written by `deploy/bootstrap-vm.sh:92`), so the worst case is a failure at 03:16 that loses a full day of invoices, approvals and payments. There is no continuous archiving and no point-in-time recovery: those come with a managed database, which `docs/minimal-deployment.md` § What's left out records as the trigger to adopt RDS. **Do not publish a sub-24-hour RPO while this is the mechanism.** The 4-hour RTO is provisioning a replacement VM plus `deploy/restore.sh`; it has not been measured against a real incident (see § Test cadence).
+**The 24-hour RPO is the container-mode backup schedule, and stays the published figure.** In container mode `deploy/backup.sh` runs once a night at 03:17 UTC (`/etc/cron.d/feoh-backup`, written by `deploy/bootstrap-vm.sh`), so the worst case is a failure at 03:16 that loses a full day of invoices, approvals and payments — there is no continuous archiving and no point-in-time recovery. **On the RDS path** the instance's automated backups add point-in-time restore with transaction logs shipped about every five minutes, so the database's technical RPO is minutes, and losing the VM loses no database data at all. The table above deliberately still says 24 hours: it is what customers are told (DPA Annex II), it must hold in either mode, and tightening it is a decision to publish, not an inference from the mechanism — tracked in `docs/followups.md`. The 4-hour RTO is provisioning a replacement VM plus `deploy/restore.sh` (container mode) or a PITR (RDS); neither has been measured against a real incident (see § Test cadence).
 
 Redis holds the JWT blocklist, MFA OTPs, SSO state, and signup rate-limit counters. All have short TTLs and are recoverable from re-login. **A Redis loss revives revoked tokens** until they expire (≤ 30 min) — accepted risk; documented. Redis runs with AOF persistence onto a Docker volume (`deploy/compose.prod.yml:52`), so it survives a container restart — but nothing ships that volume anywhere, so it does not survive the VM.
 
@@ -30,11 +30,15 @@ Redis holds the JWT blocklist, MFA OTPs, SSO state, and signup rate-limit counte
 
 ## Backup strategy
 
+### PostgreSQL on RDS (automated backups + point-in-time restore)
+
+The RDS path only. The instance takes a daily storage snapshot and ships transaction logs about every five minutes, both kept for its **backup retention period** — which is therefore the point-in-time-restore window. A restore always creates a **new** instance; the commands, and how to switch the app onto it, are `docs/minimal-deployment.md` § Point-in-time restore. These backups live in the same account and region as the instance and are deleted with it (unless a final snapshot is taken), which is why the nightly dumps below continue on this path as the long-retention, provider-independent copy. They are whole-instance and not selectively editable — the DPA § 13 sentence about a "volume-level snapshot" kept "as a coarse fallback" is the one that covers them, and `deploy/remove-tenant.sh` names them in its confirmation on this path.
+
 ### PostgreSQL (nightly logical dumps to S3)
 
-There is no managed database, so there are no automated snapshots and no WAL to replay. The whole mechanism is one script.
+In container mode there is no managed database, so there are no automated snapshots and no WAL to replay — the whole mechanism is one script. On the RDS path the same script is the second layer.
 
-- **Nightly dump** — `deploy/backup.sh`, run from cron at 03:17 UTC. It takes `pg_dumpall --globals-only` (roles) plus a `pg_dump -Fc` of the control plane and **every `feoh_*` tenant database**, discovered at run time from `pg_database` so a newly provisioned tenant is included without touching the script. Each stream is piped straight to S3 — nothing is written to the VM's disk.
+- **Nightly dump** — `deploy/backup.sh`, run from cron at 03:17 UTC. It takes `pg_dumpall --globals-only` (roles; `--no-role-passwords` on RDS, whose master user cannot read `pg_authid`) plus a `pg_dump -Fc` of the control plane and **every `feoh_*` tenant database**, discovered at run time from `pg_database` so a newly provisioned tenant is included without touching the script. Each stream is piped straight to S3 — nothing is written to the VM's disk. In container mode the tools run inside the `postgres` container; on RDS, in the one-shot `pgtools` container over `verify-full` TLS.
 - **Key layout** — `s3://<backups-bucket>/pg/<YYYY-MM-DD>/`, containing `globals.sql.gz` and one `<database>.dump` per database. **One object per tenant** is the property that makes per-tenant deletion from backups an ordinary S3 delete rather than surgery on a monolithic image.
 - **Retention — 90 days.** Enforced by the `expire-old-backups` lifecycle rule on the backups bucket (`infra/s3.tf:483-503`), from `var.backup_retention_days` (`infra/variables.tf:57-61`, default `90`). The script prunes nothing itself; the lifecycle rule *is* the retention policy, which is why that bucket deliberately carries **no** Object Lock (a lock would fight the expiry — `infra/s3.tf:419-431`). Noncurrent versions expire after 30 days and expired delete markers are reaped. **This 90 days is the figure the DPA publishes** (`/legal/dpa` § 13 and Annex II); change one and change the other.
 - **Encryption** — the bucket's default SSE-KMS under the application key (`infra/s3.tf:448-458`) and TLS in transit, enforced by a bucket policy that denies plain HTTP (`infra/s3.tf:522-549`). The script does no client-side encryption of its own.
@@ -88,11 +92,13 @@ Everything in this section lives only on the VM. None of it is in S3, none of it
 
 ## Restore procedures
 
-Both database scenarios run through the same script: **`deploy/restore.sh <YYYY-MM-DD> [--force] [db …]`**, on the VM, from `deploy/`. It streams each object from S3 (nothing lands on local disk), restores the role globals first, then each database via `pg_restore --create`. It stops the `api` container for the duration — open connections block `DROP`/`CREATE DATABASE` — and brings the stack back up at the end. **A database that already exists is skipped unless you pass `--force`**, which drops and recreates it.
+**On the RDS path, a point-in-time restore comes first** (Scenario A below); the dumps are the fallback. Restoring from the dumps runs through one script in either mode: **`deploy/restore.sh <YYYY-MM-DD> [--force] [db …]`**, on the VM, from `deploy/`. It streams each object from S3 (nothing lands on local disk) and restores each database via `pg_restore --create` — in container mode after replaying the role globals; on RDS without them and with `--no-owner --no-acl`, so every object belongs to the master user the app connects as. It stops the `api` container for the duration — open connections block `DROP`/`CREATE DATABASE` — and brings the stack back up at the end. **A database that already exists is skipped unless you pass `--force`**, which drops and recreates it. For ad-hoc SQL in either mode use `deploy/psql.sh`, and for compose commands `deploy/compose.sh` (both apply the database mode).
 
 ### Scenario A — accidental table drop or bad migration
 
-1. Identify the day the data was last good (audit log, error log, customer report). Granularity is a **whole night's dump**, not a timestamp — there is no PITR.
+**RDS path:** restore the instance to a moment before the damage (`docs/minimal-deployment.md` § Point-in-time restore) — granularity is seconds, not a night. PITR rolls back **every** database on the instance, so if only one tenant is affected, restore to a new instance and copy just that database across, as that section describes, rather than switching the app over. Then validate (step 3) and reconcile (step 4) as below. **Container mode** (or an RDS loss beyond the retention window) uses the dumps:
+
+1. Identify the day the data was last good (audit log, error log, customer report). Granularity is a **whole night's dump**, not a timestamp — there is no PITR in container mode.
 2. **Don't roll back the migration.** Restore the affected databases from the last good dump. Restore only what you need to, by naming the databases:
    ```bash
    cd deploy && ./restore.sh 2026-04-19 --force feohledger feoh_acme
@@ -105,20 +111,20 @@ Both database scenarios run through the same script: **`deploy/restore.sh <YYYY-
 
 1. Provision a replacement instance and run `deploy/bootstrap-vm.sh` (Docker, Compose, the AWS CLI, sops, the backup cron, swap, IMDSv2 hop limit).
 2. Restore the sops env and bring the stack up: `deploy/decrypt-env.sh`, then `deploy/deploy.sh`.
-3. Restore the databases from the most recent date prefix:
+3. **RDS path: skip to step 5** — the database was never on the VM, and the new VM's `deploy.sh` (step 2) connected straight to it. **Container mode:** restore the databases from the most recent date prefix:
    ```bash
    aws s3 ls s3://<backups-bucket>/pg/          # find the latest date
    cd deploy && ./restore.sh <YYYY-MM-DD>
    ```
-4. Bring every restored database up to the current schema head. The migration commands run **inside the api container**, not on the host — there is no venv on the VM. This is the same pair `deploy/deploy.sh:88-89` runs:
+4. (Container mode.) Bring every restored database up to the current schema head. The migration commands run **inside the api container**, not on the host — there is no venv on the VM. This is the same pair `deploy/deploy.sh` runs:
    ```bash
-   docker compose -f compose.prod.yml run --rm api sh -c "alembic upgrade head && python scripts/migrate_all_tenants.py"
+   ./compose.sh run --rm api sh -c "alembic upgrade head && python scripts/migrate_all_tenants.py"
    ```
    Step 2 already ran these once, but it ran them against an empty cluster — the restore in step 3 is what put the tenant databases there, so they need it again.
-5. Rebuild `deploy/tenants.caddy`. A fresh VM has the empty seeded copy, so **every tenant subdomain is unserved until its block is back**. List the slugs from the restored control plane and append one block each, then reload Caddy without a restart:
+5. Rebuild `deploy/tenants.caddy`. A fresh VM has the empty seeded copy, so **every tenant subdomain is unserved until its block is back**. List the slugs from the control plane and append one block each, then reload Caddy without a restart:
    ```bash
-   docker compose -f compose.prod.yml exec -T postgres psql -U postgres -d feohledger -Atc "SELECT slug FROM organizations ORDER BY slug"
-   docker compose -f compose.prod.yml exec caddy caddy reload --config /etc/caddy/Caddyfile
+   ./psql.sh -d feohledger -Atc "SELECT slug FROM organizations ORDER BY slug"
+   ./compose.sh exec caddy caddy reload --config /etc/caddy/Caddyfile
    ```
    Each block is the three lines in `deploy/tenants.caddy.example` — `<slug>.<APP_DOMAIN> { import spa }`. **Do not use `deploy/add-tenant.sh` for this**: it provisions a *new* tenant — database, organization and admin user — and appending a Caddy block is only its last step.
 6. Re-point DNS at the new instance. With the recommended wildcard record (`*.<APP_DOMAIN>`) there is no per-tenant DNS step; Caddy still issues a per-host certificate over HTTP-01 on first request, so expect the first hit on each tenant host to be slow and watch for Let's Encrypt rate limiting if there are many.

@@ -150,7 +150,10 @@ data volume. Changing the value in sops alone therefore changes nothing in the
 database — and the API's DSN, which `compose.prod.yml` derives from the same
 variable, stops matching the role on the next deploy. Change the role first:
 
-1. On the VM, from `deploy/`: `docker compose -f compose.prod.yml exec postgres psql -U postgres`,
+This section is the container-mode database (`docs/minimal-deployment.md`
+§ Database); the RDS master password is the next section.
+
+1. On the VM, from `deploy/`: `./compose.sh exec postgres psql -U postgres`,
    then `\password postgres` and type the new value at the prompt (it never reaches shell history).
 2. In `infra-secrets`: `AWS_PROFILE=feohledger sops feohledger/prod.sops.yaml`, set
    `POSTGRES_PASSWORD`, save and commit; copy the file onto the VM as `deploy/prod.sops.yaml`.
@@ -159,6 +162,25 @@ variable, stops matching the role on the next deploy. Change the role first:
 
 `backup.sh` and `restore.sh` connect over the container's local socket and are
 unaffected.
+
+### RDS master password (the password in `FEOH_DATABASE_URL`)
+
+The RDS path's only database credential: the app, the migrations and
+`backup.sh` / `restore.sh` (through `pgtools`) all connect as the master user.
+Generate the new value URL-safe in your own terminal (`openssl rand -hex 24` —
+it is embedded in the URL, and `decrypt-env.sh` refuses characters it would
+have to decode). Changing it on the instance immediately breaks every new
+connection made with the old one, so keep the window short:
+
+1. Set it on the instance — through the Terraform in `infra/` if that owns the
+   password, otherwise
+   `aws rds modify-db-instance --profile feohledger --db-instance-identifier <instance> --master-user-password <new> --apply-immediately`
+   (run it from your own terminal: the value is on that command line).
+2. In `infra-secrets`: `AWS_PROFILE=feohledger sops feohledger/prod.sops.yaml`, replace the
+   password inside `FEOH_DATABASE_URL`, save and commit; copy the file onto the VM as
+   `deploy/prod.sops.yaml`.
+3. `./deploy.sh --no-pull --backend-only` — recreates the api with the new URL. The
+   nightly backup reads the URL from `deploy/.env` per run, so it needs nothing else.
 
 ### HMAC signing keys (`FEOH_APPROVAL_SIGNING_KEY`, `FEOH_EMAIL_ACTION_SIGNING_KEY`, `FEOH_PARTNER_LINK_SIGNING_KEY`, `FEOH_EMAIL_INTAKE_SIGNING_SECRET`)
 
