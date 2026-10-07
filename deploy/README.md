@@ -4,7 +4,7 @@ Operational files for the single-VM deployment described in
 [`docs/minimal-deployment.md`](../docs/minimal-deployment.md) (read that
 first — it holds the architecture, cost model, and the how-to-add-it-later
 paths for everything this footprint leaves out). The database is Amazon RDS
-(~$36/month all in) or, as the cheaper alternative, a Postgres container on
+(~$45–55/month all in) or, as the cheaper alternative, a Postgres container on
 the VM (~$22/month); one key in the secrets file picks, and `lib.sh` is the
 one place every script reads the choice from
 ([§ Database](../docs/minimal-deployment.md#database)).

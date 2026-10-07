@@ -1,6 +1,6 @@
 # Minimal-cost deployment
 
-How to get the whole app on the public internet for **~$36/month** with the
+How to get the whole app on the public internet for **~$45–55/month** with the
 database on Amazon RDS — or **~$22/month** with Postgres in a container on the
 same VM ([§ Database](#database)) — without building any of the reference AWS
 architecture in [`production-deployment.md`](production-deployment.md). That
@@ -11,7 +11,7 @@ footprint.
 Postgres 16 for the databases, real S3 for files, everything else in-process.**
 
 ```
-        *.feohledger.com  ──────────► one VM (EC2 t4g.small)
+        *.feohledger.com  ──────────► one VM (EC2 t4g.medium)
                                  ├── Caddy         — TLS, static frontend, /api reverse-proxy
                                  ├── FastAPI       — backend container (uvicorn)
                                  └── Redis 7       — token blocklist, rate limits, MFA state
@@ -57,7 +57,7 @@ when each piece graduates.
 
 | Item | Monthly (us-east-1, on-demand) |
 |---|---|
-| EC2 `t4g.small` (2 vCPU ARM, 2 GB) | ~$12.30 |
+| EC2 `t4g.medium` (2 vCPU ARM, 4 GB) | ~$24.50 |
 | EBS 30 GB gp3 | ~$2.40 |
 | Public IPv4 address | ~$3.65 |
 | Route 53 hosted zone | $0.50 |
@@ -65,9 +65,13 @@ when each piece graduates.
 | S3 (files + backups, pilot volume) + SES | ~$1 |
 | RDS `db.t4g.micro` Postgres 16, single-AZ (2 vCPU burstable, 1 GB) | ~$11.70 |
 | RDS storage 20 GB gp3 (backup storage up to the DB's size is free) | ~$2.30 |
-| **Total** | **~$36** |
+| VPC flow logs (rejected traffic only) + CloudWatch alarms | ~$1–2 |
+| **Total** | **~$45–55** |
 
-**Postgres on the VM instead of RDS** drops the two RDS rows: **~$22**. What
+This is the stack `infra/` defines (`docs/decisions.md` §254). Both instances are
+burstable in unlimited credit mode, so sustained load adds surplus-CPU charges on
+top. **Postgres on the VM instead of RDS** (and a `t4g.small`) drops the two RDS
+rows: **~$22**. What
 that gives up is the managed recovery — automated backups, point-in-time
 restore, a database that outlives the VM ([§ Database](#database)). Check
 current prices before quoting any of these: they are list prices at the time
@@ -84,8 +88,10 @@ S3/KMS instead of role-based credentials, and it sits outside the AWS-org
 guardrails. The AWS path is recommended because the estate tooling (org
 sub-account, sops KMS key, OIDC role) already automates it.
 
-If 2 GB gets tight (OCR/extraction spikes), `t4g.medium` (4 GB) is ~$24.50 —
-resize is a stop → change-type → start. Add 2 GB of swap either way.
+`t4g.medium` rather than `t4g.small` because AI extraction and PDF rendering
+run in-process beside the API, Redis and Caddy, and 2 GB leaves no headroom.
+Resizing is a change to `app_instance_type` in the tfvars (a stop → change-type
+→ start). Add 2 GB of swap either way.
 
 ## Key decisions
 
@@ -141,7 +147,10 @@ resize is a stop → change-type → start. Add 2 GB of swap either way.
 
 ### 1. VM
 
-- EC2 `t4g.small`, Amazon Linux 2023 arm64, 30 GB gp3, security group: 80/443
+- **Defined in Terraform** (`infra/compute.tf`; apply steps in `infra/README.md`
+  § Workload stack) — the bullets below describe what it creates, and are the
+  checklist if you ever build the VM by hand instead.
+- EC2 `t4g.medium`, Amazon Linux 2023 arm64, 30 GB gp3, security group: 80/443
   from anywhere (TCP, plus UDP 443 — Caddy serves HTTP/3; without the UDP
   rule browsers silently fall back to HTTP/2), 22 from your IP (or SSM
   Session Manager and no 22 at all).
@@ -415,7 +424,7 @@ is the one place every deploy script reads that choice from:
 | TLS | `PGSSLMODE=verify-full` against the RDS CA bundle | none (compose network only); `PGSSLMODE` defaults to `prefer` |
 | Primary recovery | automated backups + point-in-time restore | the nightly dumps |
 | Nightly dumps | yes — `pgtools` container, long-retention copy | yes — `exec` into `postgres` |
-| Cost | ~$36/month | ~$22/month |
+| Cost | ~$45–55/month | ~$22/month |
 
 Ad-hoc compose commands on the VM go through **`deploy/compose.sh`**, which
 applies the same choice — `./compose.sh logs api`, `./compose.sh up -d
