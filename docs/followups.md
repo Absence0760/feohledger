@@ -99,7 +99,7 @@ section carried its own `decisions.md` § reference, so nothing was lost by
 deleting it; that cross-reference is what makes the pruning safe, and writing
 one is what earns a future entry the right to be deleted.
 
-**75 open: 60 (c) · 9 (a) · 6 (b)** — re-derived from the file, never carried
+**77 open: 62 (c) · 9 (a) · 6 (b)** — re-derived from the file, never carried
 forward. The section heading is authoritative; where an entry also carries a
 `(c)`/`(a)`/`(b)` marker, the two agree.
 `grep -c '^- \[ \]' docs/followups.md`.
@@ -1192,6 +1192,32 @@ lands. Pure doc drift was corrected in the same PR. The two diagnosed defects
       that, when present, appends one debit entry for the batch total and switches
       the batch to service class 200, with builder tests on the control totals.
       **Trigger:** a pilot customer's bank rejects or asks for a balanced file.
+
+### Surfaced by scoping the QuickBooks Online adapter (2026-10-07)
+
+- [ ] **(c) Build a direct QuickBooks Online adapter.** Merge.dev costs $65 per
+      linked account above a $650/month base (merge.dev/pricing, 2026-10-07),
+      more than the $49 Growth plan that includes ERP integrations, and QuickBooks
+      is the ERP most of the target segment runs. Intuit's API is free at these
+      volumes. **Durable fix:** the five phases in
+      `backend/docs/quickbooks-online-adapter.md`: shared ERP references in the
+      payload (also `known-issues.md`), an OAuth authorization-code connect flow
+      reusable for Xero, the adapter, CloudEvents webhooks plus a CDC
+      reconciliation sweep, and `post_payment` → BillPayment. Four product calls
+      in that doc's open questions come first. **Trigger:** the first pilot
+      customer on QuickBooks, or before Growth is sold with ERP integrations,
+      whichever comes first.
+- [ ] **(c) ERP credentials are plaintext in `Organization.settings`.** The
+      `erp` block (client secrets, API keys, Merge account tokens) is stored as
+      plain JSONB, protected only by RDS storage encryption, and admins read it
+      back verbatim (`services/org_settings_view`). `erp-integration.md` used to
+      call this "encrypted at rest", which overstated it. A QuickBooks refresh
+      token (five-year lifetime, full read/write on the customer's books) would
+      make it worse. **Durable fix:** hold provider credentials in a tenant table
+      encrypted with the app KMS key (envelope encryption), write-only through
+      audited endpoints like the SSO client secret, and migrate the existing
+      `erp`, `payments.credentials` and `cards.api_key` values. **Trigger:** the
+      QuickBooks connect flow (Phase 1) — its token must not land in plain JSONB.
 
 ## (a) Blocked on external credentials, accounts, or hardware
 

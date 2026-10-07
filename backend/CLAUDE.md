@@ -18,6 +18,7 @@ Deep-dive docs live in `backend/docs/`:
 | Conversational AP assistant | `docs/conversational-assistant.md` |
 | AI Cash-Flow Copilot (Phases 1–2 — read-only cash tools + proposed plans + `/api/cash-flow` façade) | `../docs/cash-flow-copilot.md` (repo-root `docs/`) |
 | ERP adapters (Merge.dev + direct) | `docs/erp-integration.md` |
+| QuickBooks Online direct adapter (scope, not built) | `docs/quickbooks-online-adapter.md` |
 | Workflow state machine | `docs/workflow-design.md` |
 | Workflow snapshot semantics | `docs/workflow-snapshots.md` |
 | Payment runs + ERP sync | `docs/payments.md` |
