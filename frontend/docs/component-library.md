@@ -88,6 +88,19 @@ Grouped into subfolders by role. Import with the full path, e.g.
   (transient, on submit) and from the `role="alert"` refusal panels (a request
   the server rejected). First use: the brand strong-accent contrast advisory on
   `/organization` + `/admin/partner`.
+- `PlanUpgradeNotice.svelte` — "Available on Growth / Scale — upgrade",
+  rendered IN PLACE of a setting the org's plan does not include, so an admin
+  is not handed a control the server refuses with `402 plan_feature_required`
+  (`docs/decisions.md` §254). `<PlanUpgradeNotice feature={FEATURE_X} testId? />`
+  with a key from `#lib/types/planFeatures.ts`; the call site decides when,
+  from `auth.hasFeature(FEATURE_X)` (`/auth/me`'s `entitlements`) — and waits
+  for `auth.user` so nothing flashes before it loads. Names the feature and the
+  cheapest tier that grants it, links admin/CFO to `/billing` (the roles that
+  page admits) and tells anyone else to ask an administrator. Localized itself
+  (`planUpgrade.*`) and on `untranslatedCopy.test.ts`'s roster. Used by the SSO
+  panel's enable and "require SSO" toggles, the ERP section, `/admin/entities`,
+  `/admin/api-keys` and `/admin/webhooks`. Turning a feature OFF is never gated,
+  so a toggle a downgraded tenant still has ON stays usable.
 - `MoneyByCurrency.svelte` — several figures that must NOT be added together, one per currency, one per line: `<MoneyByCurrency figures={row.open_po_by_currency} mono />`, where each `{currency, amount}` renders through `Money` in its OWN code and a `currency: null` entry renders bare (`docs/decisions.md` §196, §197). An empty list renders a bare `0` — the rollup ran and found nothing, which is a real zero in no currency. Its `CurrencyFigure` type lives in `moneyByCurrency.ts` beside it (the `badgeTone.ts` rule: e2e fixtures type payloads with it). Used by `/cfo`'s accruals card and by-entity's Open POs column, whose servers group by currency because the legs never convert.
 - `Money.svelte` — locale-aware currency display. `<Money amount={row.amount} currency={row.currency} />`. Opt-in `whole` (no decimals), `accounting` (parenthesised negatives), `mono` (tabular-nums). Over `utils/money.ts::formatMoney`; see *Money formatting* above. Use this (or `formatMoney` in script) for every currency value — don't write `Intl.NumberFormat` inline.
 - `EmptyState.svelte` — the first-run / zero-data affordance: an optional

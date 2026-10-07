@@ -19,7 +19,8 @@
  *    expense report), the exception queue's segregation refusal, credit-memo
  *    application, the invoice stale-edit 409, a wrong authenticator code, and
  *    the no-rail pilot's refusals (a record-only tenant's dispatch refusal,
- *    recording a payment made outside FeohLedger, the NACHA bank file);
+ *    recording a payment made outside FeohLedger, the NACHA bank file), and
+ *    the plan-feature 402 every tier gate answers with;
  * 3. the auth step-up / passkey refusals (`api/authRefusals.ts`).
  *
  * **Anything this build cannot state → `null`**, and the caller renders the
@@ -44,9 +45,13 @@ import { localizeGlChartRefusal, parseGlChartRefusal } from '#lib/api/glChartRef
 import { authRefusalText } from '#lib/api/authRefusals.ts';
 import { apiErrorCode } from '#lib/utils/apiError.ts';
 import { formatList } from '#lib/utils/list.ts';
+import { isPlanFeature, planFeatureLabelKey, planTierLabelKey } from '#lib/types/planFeatures.ts';
 
 type Translate = (key: MessageKey, params?: Record<string, string | number>) => string;
 type Params = Record<string, unknown>;
+
+/** A plan-feature gate's 402 (`backend/app/api/deps.py::PLAN_FEATURE_REQUIRED`). */
+export const PLAN_FEATURE_REQUIRED = 'plan_feature_required';
 
 /** `PATCH /api/invoices/{id}`'s optimistic-concurrency 409
  *  (`backend/app/api/invoices.py::INVOICE_STALE_EDIT`). */
@@ -363,7 +368,18 @@ const BUILDERS: Record<string, Builder> = {
 	// `net_amount_changed`, …) — not prose, so it is not shown; the sentence
 	// names the invoice and the one remedy, which is the same for every reason.
 	nacha_payment_not_payable: nachaForInvoice('refusal.nachaPaymentNotPayable'),
-	nacha_already_exported: fixed('refusal.nachaAlreadyExported')
+	nacha_already_exported: fixed('refusal.nachaAlreadyExported'),
+	// `api/deps.py::plan_feature_refusal` — every plan-feature gate (decisions
+	// §254). `params.feature` is a `FEATURE_*` key; one this build does not
+	// know (a newer backend) falls back to the server's sentence.
+	[PLAN_FEATURE_REQUIRED]: (p, t) => {
+		const feature = p.feature;
+		if (!isPlanFeature(feature)) return null;
+		return t('refusal.planFeatureRequired', {
+			feature: t(planFeatureLabelKey(feature)),
+			plan: t(planTierLabelKey(feature))
+		});
+	}
 };
 
 /** The codes this registry states (the money-path + MFA table; the GL-chart
