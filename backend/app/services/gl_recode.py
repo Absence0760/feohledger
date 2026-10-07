@@ -7,15 +7,21 @@ Re-applies GL codes to a scoped set of invoices using two strategies:
      when it validates against the active chart.
 
   2. **AI fallback** (billed, opt-in) — for invoices with no usable
-     prior, re-fetches the file from S3 and runs the configured
-     extraction adapter end-to-end. Used only when the caller opts
-     in via `include_ai_fallback=True`.
+     prior, re-fetches the file from S3, asks the configured
+     extraction adapter to read it against the invoice's own chart, and
+     applies its `suggested_gl_account` — and NOTHING else
+     (:func:`recode_gl_with_ai`). Used only when the caller opts in via
+     `include_ai_fallback=True`.
 
-The AI fallback path produces an `ExtractionUsage` row on the control-
-plane DB for every invoice it touches, identical to the regular
-extraction flow (see `services.extraction`). Audit log entries are
-written for each persisted change so the activity is traceable in the
-invoice's history.
+The AI fallback is GL-only on purpose. It used to run the whole
+`run_extraction` pipeline, which re-applies every extracted field and
+transitions the invoice: a hand-keyed `new` invoice had its amount,
+currency and vendor overwritten and could auto-approve, a `rejected` one
+went back to review. A re-code changes the GL code. It still passes the
+AI-read allowance gate and writes the `ExtractionUsage` meter row (tenant
+DB), because it is still a billable read. Audit log entries are written
+for each persisted change so the activity is traceable in the invoice's
+history.
 
 Eligibility
 -----------
@@ -57,6 +63,89 @@ _IMMUTABLE_STATUSES: frozenset[InvoiceStatus] = frozenset(
         InvoiceStatus.done,
     }
 )
+
+
+class AiRecodeRefused(RuntimeError):
+    """The GL-only AI read did not run or did not answer (paused by the AI-read
+    allowance, no file, a provider failure). Carries no document content."""
+
+
+async def recode_gl_with_ai(
+    db: AsyncSession,
+    invoice: Invoice,
+    *,
+    actor_id: uuid.UUID | None = None,
+    org_settings: dict | None = None,
+) -> None:
+    """Read ``invoice``'s document and set ONLY its ``gl_account``.
+
+    The model's ``suggested_gl_account`` lands when it is confident (the same
+    0.7 bar full extraction uses) and the invoice's chart admits it
+    (``extraction.InvoiceGlChart.refused``). Amount, currency, vendor, line
+    items, warnings and status are never touched, and nothing is committed —
+    the caller's single commit carries the code and the meter row together.
+    Raises :class:`AiRecodeRefused` when the read cannot run or fails.
+    """
+    from app.services.billing.ai_invoice_meter import check_ai_read
+    from app.services.extraction import (
+        _detect_structured_format,
+        _resolve_extraction_config,
+        load_invoice_gl_chart,
+    )
+    from app.services.extraction_adapters import get_extraction_adapter
+    from app.services.storage import _get_object
+
+    del actor_id  # nothing is transitioned or attributed; the caller audits the change
+    if not invoice.file_key:
+        raise AiRecodeRefused("no document to read")
+
+    config = _resolve_extraction_config(org_settings, announce=False)
+    file_bytes, _content_type = await _get_object(invoice.file_key)
+    if _detect_structured_format(file_bytes, invoice.file_key) is not None:
+        # A structured e-invoice carries no model suggestion to re-read.
+        raise AiRecodeRefused("structured e-invoice")
+
+    decision = await check_ai_read(
+        db,
+        organization_id=invoice.organization_id,
+        invoice_id=invoice.id,
+        program_type=config.get("program_type"),
+        provider=config.get("provider"),
+    )
+    if not decision.allowed:
+        raise AiRecodeRefused(f"AI reading paused ({decision.reason})")
+
+    chart = await load_invoice_gl_chart(db, invoice.organization_id, invoice.entity_id)
+    if chart.catalog:
+        config["gl_account_catalog"] = chart.catalog
+    result = await get_extraction_adapter(config).extract(
+        file_bytes=file_bytes, file_key=invoice.file_key, mime_type="application/pdf"
+    )
+
+    from app.models.usage import ExtractionUsage
+
+    usage = result.usage
+    db.add(
+        ExtractionUsage(
+            invoice_id=invoice.id,
+            provider=result.provider or config.get("provider", "unknown"),
+            program_type=config.get("program_type", "platform"),
+            period=datetime.now(UTC).strftime("%Y-%m"),
+            success=bool(result.success),
+            organization_id=invoice.organization_id,
+            **(usage.as_columns() if usage else {}),
+        )
+    )
+    if not result.success:
+        raise AiRecodeRefused("the extraction adapter returned a failure")
+
+    suggested = result.suggested_gl_account.value
+    if (
+        suggested
+        and result.suggested_gl_account.confidence >= 0.7
+        and not await chart.refused(db, suggested)
+    ):
+        invoice.gl_account = suggested
 
 
 @dataclass
@@ -321,9 +410,8 @@ async def bulk_recode_gl(
 
     `ai_runner` is an optional injected coroutine (signature:
     `async (db, invoice, *, actor_id, org_settings) -> None` — exactly what
-    `run_extraction` accepts)
-    used when `include_ai_fallback=True`. Defaults to
-    `services.extraction.run_extraction`. Tests inject a fake to avoid
+    :func:`recode_gl_with_ai` accepts) used when `include_ai_fallback=True`.
+    Defaults to :func:`recode_gl_with_ai`. Tests inject a fake to avoid
     spinning up the real S3 / vision-adapter machinery.
     """
     report = RecodeReport(dry_run=dry_run)
@@ -391,12 +479,11 @@ async def bulk_recode_gl(
     # Second pass: AI fallback for invoices with no usable prior — an absent
     # prior and a rejected one both qualify.
     #
-    # Critical: in dry-run mode we DO NOT call the AI runner at all.
-    # `run_extraction` writes line items, vendor priors, RAG entries,
-    # audit rows, and may transition the invoice's status — none of
-    # that is cleanly reversible by restoring `inv.gl_account`. A
-    # dry-run that secretly mutates the DB is a worse default than
-    # one that doesn't try. Operators get an `ai_candidates` count
+    # Critical: in dry-run mode we DO NOT call the AI runner at all. Every
+    # call is a billable model read that counts against the AI-read
+    # allowance and writes a meter row — a dry run that silently spends
+    # the customer's allowance is a worse default than one that doesn't
+    # try. Operators get an `ai_candidates` count
     # so they know what a non-dry pass would attempt; if that number
     # looks reasonable they re-issue with `dry_run=false`.
     needs_ai: list[Invoice] = [*no_prior, *invalid_prior]
@@ -405,22 +492,14 @@ async def bulk_recode_gl(
             report.ai_candidates = len(needs_ai)
         else:
             if ai_runner is None:
-                from app.services.extraction import run_extraction as _runner
-
-                ai_runner = _runner
+                ai_runner = recode_gl_with_ai
 
             for inv in needs_ai:
                 old_gl = inv.gl_account
                 try:
-                    # Reuses the full extraction pipeline (chart-of-
-                    # accounts injection + RAG + post-extraction
-                    # validation), so the AI re-code lands inside the
-                    # same guardrails as a fresh upload — including the
-                    # AI-read allowance gate and meter (decisions §253),
-                    # which write through the tenant session `run_extraction`
-                    # already has. It takes no control-plane session: passing
-                    # `ctrl_db=` here raised TypeError on every invoice, so
-                    # every AI re-code was reported as `ai_failed`.
+                    # GL-only (`recode_gl_with_ai`): the invoice's own chart
+                    # judges the code, the AI-read gate and meter apply
+                    # (decisions §253), and no other field or status moves.
                     await ai_runner(
                         db,
                         inv,

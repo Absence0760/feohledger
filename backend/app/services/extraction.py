@@ -6,12 +6,15 @@ Uses the extraction adapter pattern — supports platform (Claude Vision) and BY
 Tracks usage for billing when platform mode is used.
 """
 
+import functools
 import logging
 import uuid
+from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from decimal import Decimal
 
 from sqlalchemy import delete as sa_delete
+from sqlalchemy import select as sa_select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -427,6 +430,78 @@ async def resolve_gate_aggregate(
     return amount + recent
 
 
+@dataclass
+class InvoiceGlChart:
+    """The chart of accounts an automated GL code is judged against for one
+    invoice: shared accounts (``entity_id`` NULL) ∪ the invoice's own entity.
+
+    ``catalog`` is the prompt hint (empty when the chart has no active account);
+    :meth:`refused` is the one rule for whether an automated code may land —
+    used by full extraction and by the GL-only AI re-code alike."""
+
+    organization_id: uuid.UUID
+    entity_id: uuid.UUID | None
+    codes: set[str]
+    catalog: str
+    _ownership: object | None = None
+
+    async def refused(self, db: AsyncSession, code: str) -> bool:
+        """Whether an automated GL code may NOT land on this invoice.
+
+        With an active chart, anything outside it (unknown, retired, or
+        another entity's). With none, only a code that belongs to ANOTHER
+        entity's chart — never right for this invoice whether or not its own
+        chart has been synced yet (decisions §194/§199). That branch reads the
+        tenant's whole chart ownership once, lazily: the vendor-prior overlay
+        lands a code only after the document's own codes were judged, so the
+        codes cannot be listed up front.
+        """
+        if self.codes:
+            return code not in self.codes
+        if self._ownership is None:
+            from app.services.gl_chart import load_chart_ownership
+
+            self._ownership = await load_chart_ownership(db, self.organization_id, None)
+        return self._ownership.belongs_elsewhere(code, self.entity_id)
+
+
+async def load_invoice_gl_chart(
+    db: AsyncSession, organization_id: uuid.UUID, entity_id: uuid.UUID | None
+) -> InvoiceGlChart:
+    """Load the invoice's effective chart (see :class:`InvoiceGlChart`). A
+    single-entity tenant has all accounts shared or under the one entity, so
+    the scoping is a no-op there (docs/multi-entity.md § Chart of accounts)."""
+    from sqlalchemy import or_
+
+    from app.models.gl_account import GLAccount
+
+    gl_accounts = (
+        (
+            await db.execute(
+                sa_select(GLAccount)
+                .where(
+                    GLAccount.organization_id == organization_id,
+                    GLAccount.is_active == True,  # noqa: E712
+                    or_(GLAccount.entity_id == entity_id, GLAccount.entity_id.is_(None)),
+                )
+                .order_by(GLAccount.code)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    catalog = "\n".join(
+        f"{gl.code} \u2014 {gl.name}" + (f" [{gl.account_type}]" if gl.account_type else "")
+        for gl in gl_accounts
+    )
+    return InvoiceGlChart(
+        organization_id=organization_id,
+        entity_id=entity_id,
+        codes={gl.code for gl in gl_accounts},
+        catalog=catalog,
+    )
+
+
 async def run_extraction(
     db: AsyncSession,
     invoice: Invoice,
@@ -570,63 +645,11 @@ async def run_extraction(
 
         # GL catalog: inject org-specific chart of accounts so the AI
         # uses real codes instead of the hardcoded default list.
-        from sqlalchemy import or_
-        from sqlalchemy import select as sa_select
-
-        from app.models.gl_account import GLAccount
-
-        # Scope the catalog hint to the invoice's effective chart: shared
-        # accounts (entity_id NULL, available to every entity) ∪ the invoice's
-        # own entity. A single-entity tenant has all accounts shared or under
-        # the one entity, so this is a no-op there. See docs/multi-entity.md
-        # § Chart of accounts.
-        gl_result = await db.execute(
-            sa_select(GLAccount)
-            .where(
-                GLAccount.organization_id == invoice_org_id,
-                GLAccount.is_active == True,  # noqa: E712
-                or_(
-                    GLAccount.entity_id == invoice_entity_id,
-                    GLAccount.entity_id.is_(None),
-                ),
-            )
-            .order_by(GLAccount.code)
-        )
-        gl_accounts = gl_result.scalars().all()
-        # Set of valid codes used post-extraction to validate AI suggestions
-        # against the invoice's actual chart. Empty when that chart has no
-        # active account yet — in that mode there is no membership to
-        # check, and see `gl_code_refused` below for what is still refused.
-        active_gl_codes: set[str] = {gl.code for gl in gl_accounts}
-        tenant_chart_ownership = None
-
-        async def gl_code_refused(code: str) -> bool:
-            """Whether an automated GL code may NOT land on this invoice.
-
-            With an active chart, anything outside it (unknown, retired, or
-            another entity's). With none, only a code that belongs to ANOTHER
-            entity's chart — never right for this invoice whether or not
-            its own chart has been synced yet (decisions §194/§199).
-            That branch reads the tenant's whole chart ownership once, lazily:
-            the vendor-prior overlay lands a code only after the document's
-            own codes were judged, so the codes cannot be listed up front.
-            """
-            nonlocal tenant_chart_ownership
-            if active_gl_codes:
-                return code not in active_gl_codes
-            if tenant_chart_ownership is None:
-                from app.services.gl_chart import load_chart_ownership
-
-                tenant_chart_ownership = await load_chart_ownership(db, invoice_org_id, None)
-            return tenant_chart_ownership.belongs_elsewhere(code, invoice_entity_id)
-
-        if gl_accounts:
-            gl_lines = [
-                f"{gl.code} \u2014 {gl.name}" + (f" [{gl.account_type}]" if gl.account_type else "")
-                for gl in gl_accounts
-            ]
-            config["gl_account_catalog"] = "\n".join(gl_lines)
-            logger.info("[extraction] GL catalog: %s accounts injected", len(gl_accounts))
+        gl_chart = await load_invoice_gl_chart(db, invoice_org_id, invoice_entity_id)
+        gl_code_refused = functools.partial(gl_chart.refused, db)
+        if gl_chart.catalog:
+            config["gl_account_catalog"] = gl_chart.catalog
+            logger.info("[extraction] GL catalog: %s accounts injected", len(gl_chart.codes))
 
         # Build a fresh adapter now that config is fully populated.
         adapter = get_extraction_adapter(config)
@@ -1044,8 +1067,6 @@ async def run_extraction(
         await db.rollback()
 
         # Re-fetch invoice after rollback (the old object is expired)
-        from sqlalchemy import select as sa_select
-
         from app.models.invoice import Invoice as InvoiceModel
 
         result = await db.execute(sa_select(InvoiceModel).where(InvoiceModel.id == invoice_id))
