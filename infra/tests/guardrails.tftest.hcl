@@ -115,7 +115,7 @@ variables {
   backups_bucket_name       = "feohledger-backups-test"
   budget_alert_emails       = ["ops@feohledger.test"]
   alert_emails              = ["ops@feohledger.test"]
-  db_master_password        = "0123456789abcdef0123456789abcdef"
+  db_master_password        = "testonlynotarealdbpassword"
 }
 
 run "budget_alerts_every_address_on_actual_and_forecast" {
