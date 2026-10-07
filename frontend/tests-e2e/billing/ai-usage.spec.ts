@@ -9,14 +9,16 @@ import { expect, signInAndWait, test } from '../fixtures/helpers';
 /**
  * /billing — the AI-read invoice meter (decisions §253).
  *
- * The first test reads the REAL backend: an e2e tenant is on `free` and
+ * The first test reads the REAL backend: an e2e tenant is seeded on `scale`
+ * (every plan-gated surface the suite drives needs it — decisions §258) and
  * extracts through the `mock` reader, which is deliberately not a billable
- * provider — so its meter must read 0 of 100 no matter how many invoices the
- * rest of the suite has extracted. If `mock` ever started counting, the whole
- * e2e suite would trip the Free limit; this is the canary.
+ * provider — so its meter must read 0 of 3,000 no matter how many invoices the
+ * rest of the suite has extracted. If `mock` ever started counting, the suite
+ * would run the meter up and, on a Free tenant, trip the limit; this is the
+ * canary.
  *
- * The paid-tier tests stub `GET /api/billing/subscription` (a paid plan with
- * overage and a cap is not something a fresh tenant has) and the cap PUT, and
+ * The other tests stub `GET /api/billing/subscription` (Free, and a paid plan
+ * at its cap, are not states a seeded tenant is in) and the cap PUT, and
  * assert both what is drawn and the exact string the form sends.
  */
 
@@ -42,17 +44,34 @@ function paidUsage(extra: Partial<BillingAiUsage> = {}): BillingAiUsage {
 	} satisfies BillingAiUsage;
 }
 
-function paidSubscription(ai: BillingAiUsage): BillingSubscriptionResponse {
+function freeUsage(): BillingAiUsage {
+	return paidUsage({
+		used: 0,
+		included: 100,
+		overage_unit_price: null,
+		overage_units: 0,
+		overage_amount: '0.00',
+		projected_overage_amount: '0.00',
+		spend_cap: null,
+		paused: false,
+		pause_reason: null
+	});
+}
+
+function paidSubscription(
+	ai: BillingAiUsage,
+	plan: BillingSubscriptionResponse['plan'] = {
+		code: 'growth',
+		name: 'Growth',
+		monthly_price: '49.00',
+		currency: 'USD',
+		entitlements: {},
+		trial_days: 14
+	}
+): BillingSubscriptionResponse {
 	return {
 		provider: 'mock',
-		plan: {
-			code: 'growth',
-			name: 'Growth',
-			monthly_price: '49.00',
-			currency: 'USD',
-			entitlements: {},
-			trial_days: 14
-		},
+		plan,
 		subscription: {
 			status: 'active',
 			current_period_start: '2026-10-01T00:00:00Z',
@@ -70,7 +89,27 @@ test.beforeEach(async ({ page }) => {
 	await signInAndWait(page);
 });
 
-test('a Free e2e tenant reads 0 of 100 — the mock reader never counts', async ({ page }) => {
+test('the e2e tenant reads 0 of 3,000 — the mock reader never counts', async ({ page }) => {
+	await page.goto('/billing');
+	const panel = page.getByTestId('billing-ai-usage');
+	await expect(panel.getByTestId('billing-ai-used')).toHaveText('0 of 3,000 used');
+	await expect(panel.getByRole('meter', { name: 'AI-read invoices used this month' })).toBeVisible();
+	await expect(panel.getByTestId('billing-ai-paused')).toHaveCount(0);
+});
+
+test('Free pauses at the allowance and offers no cap', async ({ page }) => {
+	await page.route(isSubscription, (route) =>
+		route.fulfill({
+			json: paidSubscription(freeUsage(), {
+				code: 'free',
+				name: 'Free',
+				monthly_price: '0.00',
+				currency: 'USD',
+				entitlements: {},
+				trial_days: 0
+			})
+		})
+	);
 	await page.goto('/billing');
 	const panel = page.getByTestId('billing-ai-usage');
 	await expect(panel.getByTestId('billing-ai-used')).toHaveText('0 of 100 used');
