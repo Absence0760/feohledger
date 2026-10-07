@@ -23,6 +23,10 @@ export const PERM_INVOICE_APPROVE = 'invoice.approve';
 export const PERM_PAYMENT_RUN_APPROVE = 'payment_run.approve';
 export const PERM_PAYMENT_EXECUTE = 'payment.execute';
 export const PERM_PAYMENT_VOID = 'payment.void';
+/** Record a payment the customer made OUTSIDE FeohLedger (its own bank / ERP) —
+ *  the no-rail pilot's path to `paid`. Moves no money, so it is split from
+ *  `payment.execute` (issue #517). */
+export const PERM_PAYMENT_RECORD_EXTERNAL = 'payment.record_external';
 export const PERM_VENDOR_BANK_CHANGE_APPROVE = 'vendor.bank_change.approve';
 export const PERM_VENDOR_BLOCK = 'vendor.block';
 export const PERM_VENDOR_MANAGE = 'vendor.manage';

@@ -10,7 +10,12 @@ import {
 	type NavLink,
 	type NavGroup,
 } from './nav';
-import { PERM_PAYMENT_EXECUTE, PERM_PAYMENT_VOID, PERM_USER_MANAGE } from './types/admin';
+import {
+	PERM_PAYMENT_EXECUTE,
+	PERM_PAYMENT_RECORD_EXTERNAL,
+	PERM_PAYMENT_VOID,
+	PERM_USER_MANAGE
+} from './types/admin';
 
 const links = NAV.filter((e): e is NavLink => e.kind === 'link');
 const link = (href: string): NavLink => links.find((l) => l.href === href)!;
@@ -57,7 +62,10 @@ const NAV_GATES: Record<string, { roles: string[] | null; permissions?: string[]
 	// top-level links
 	'/': { roles: null },
 	'/invoices': { roles: null },
-	'/payments': { roles: NOT_CLERK, permissions: [PERM_PAYMENT_EXECUTE, PERM_PAYMENT_VOID] },
+	'/payments': {
+		roles: NOT_CLERK,
+		permissions: [PERM_PAYMENT_EXECUTE, PERM_PAYMENT_VOID, PERM_PAYMENT_RECORD_EXTERNAL]
+	},
 	'/vendors': { roles: NOT_CLERK },
 	'/vendors/screening': { roles: ALL_FOUR },
 	'/vendors/change-requests': { roles: ['admin', 'ap_manager'] },
@@ -249,13 +257,17 @@ test('a page whose API 403s a clerk still hides its row', () => {
 	}
 });
 
-test('the Payments row is reachable by role OR by holding payment.execute/payment.void', () => {
+test('the Payments row is reachable by role OR by holding payment.execute/void/record_external', () => {
 	// Closes the finding: a custom role granted ONLY `payment.execute` (or
 	// only `payment.void`), with none of admin/ap_manager/cfo, must still see
 	// the sidebar row — the supporting reads it needs (GET /api/payments,
 	// GET /api/payments/runs/, …) are permission-gated for exactly this.
 	const payments = link('/payments');
-	expect(payments.permissions).toEqual([PERM_PAYMENT_EXECUTE, PERM_PAYMENT_VOID]);
+	expect(payments.permissions).toEqual([
+		PERM_PAYMENT_EXECUTE,
+		PERM_PAYMENT_VOID,
+		PERM_PAYMENT_RECORD_EXTERNAL
+	]);
 
 	const hasNoRole = () => false;
 	const canNothing = () => false;
@@ -266,6 +278,12 @@ test('the Payments row is reachable by role OR by holding payment.execute/paymen
 
 	const canVoidOnly = (perm: string) => perm === PERM_PAYMENT_VOID;
 	expect(canSee(payments.roles, hasNoRole, payments.permissions, canVoidOnly)).toBe(true);
+
+	// The no-rail pilot (issue #517): a custom role that may only RECORD
+	// payments made outside FeohLedger reaches the page too — every read it
+	// makes (queue, summary, runs, execution-mode) admits that permission.
+	const canRecordOnly = (perm: string) => perm === PERM_PAYMENT_RECORD_EXTERNAL;
+	expect(canSee(payments.roles, hasNoRole, payments.permissions, canRecordOnly)).toBe(true);
 
 	// The pre-existing role-only path is untouched: a cfo with no granted
 	// permissions still sees it.
@@ -433,7 +451,11 @@ test('the Payments nav row admits a permission-only role its backend now serves'
 	// `tests/test_sod_endpoint_wiring.py` pins it), which reproduces the prior
 	// matrix exactly for the four system roles.
 	const payments = link('/payments');
-	expect(payments.permissions).toEqual([PERM_PAYMENT_EXECUTE, PERM_PAYMENT_VOID]);
+	expect(payments.permissions).toEqual([
+		PERM_PAYMENT_EXECUTE,
+		PERM_PAYMENT_VOID,
+		PERM_PAYMENT_RECORD_EXTERNAL
+	]);
 	const noRoles = () => false;
 	const onlyVoid = (perm: string) => perm === PERM_PAYMENT_VOID;
 	expect(canSee(payments.roles, noRoles, payments.permissions, onlyVoid)).toBe(true);

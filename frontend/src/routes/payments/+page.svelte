@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { Payment, PaymentStatus } from '#lib/types/payment.ts';
+	import type { Payment, PaymentMethod, PaymentStatus } from '#lib/types/payment.ts';
 	import {
 		PAYMENT_STATUSES,
 		paymentStatusLabelKey,
@@ -51,14 +51,27 @@
 	import { formatDate } from '#lib/utils/time.ts';
 	import { orgCurrency } from '#lib/stores/orgSettings.svelte.ts';
 	import { auth } from '#lib/stores/auth.svelte.ts';
-	import { PERM_PAYMENT_EXECUTE, PERM_PAYMENT_VOID } from '#lib/types/admin.ts';
+	import {
+		PERM_PAYMENT_EXECUTE,
+		PERM_PAYMENT_RECORD_EXTERNAL,
+		PERM_PAYMENT_VOID
+	} from '#lib/types/admin.ts';
 	import {
 		acceptPaymentSettlement,
+		getExecutionMode,
+		recordPaymentOutside,
 		retryRunErpSync,
 		retryVoidCardCancel,
 		voidPayment,
 		type RunErpSyncResult
 	} from '#lib/api/payments.ts';
+	import {
+		EXTERNAL_PAYMENT_METHODS,
+		canDispatchPayments,
+		isExternalPayment,
+		localToday,
+		type PaymentExecutionMode
+	} from '#lib/types/paymentExecution.ts';
 	import {
 		confirmCardRebate,
 		listCardRebates,
@@ -669,6 +682,102 @@
 		}
 	}
 
+	// --- Payment execution mode (the no-rail pilot, issue #517) --------------
+	// `processor`: FeohLedger sends payments. `record_only`: the customer pays
+	// from its own bank / ERP and records the payment here. `null` until the
+	// read lands — and it STAYS null if the read fails, which every send control
+	// reads as record-only (`canDispatchPayments` fails closed). The
+	// record-outside path works in both modes, so nothing is stranded.
+	let executionMode = $state<PaymentExecutionMode | null>(null);
+
+	async function loadExecutionMode() {
+		try {
+			executionMode = (await getExecutionMode()).mode;
+		} catch {
+			// Fail closed (see above). No toast: the page is fully usable, and
+			// the server enforces the mode on every dispatching call anyway.
+			executionMode = null;
+		}
+	}
+
+	// --- Record a payment made outside FeohLedger ---------------------------
+	// Per queue row, for `payment.record_external`. Offered in BOTH modes — a
+	// processor tenant can still record a cheque. Hidden on a row the run
+	// builder would refuse on every rail (`isBlocked`) and on a rail-pinned row
+	// (a live virtual card claims it): the server refuses both
+	// (`external_payment_blocking_exception` / `_card_live`), and a control that
+	// can only 409 is worse than none. Every other refusal is the server's,
+	// localized by `api/codedRefusals.ts`.
+	let recordTarget = $state<QueueItem | null>(null);
+	let recordMethod = $state<PaymentMethod>('ach');
+	let recordReference = $state('');
+	let recordPaidOn = $state('');
+	let recording = $state(false);
+	let recordError = $state('');
+	// The latest paid-on date offered: the reader's own calendar day. The
+	// server allows one day past the UTC date for exactly this reader, so a
+	// local "today" always passes and a later date is in the future anywhere.
+	let recordMaxDate = $state(localToday());
+
+	function canRecordOutside(): boolean {
+		return !!auth.user && auth.can(PERM_PAYMENT_RECORD_EXTERNAL);
+	}
+
+	function canRecordRow(item: QueueItem): boolean {
+		return canRecordOutside() && !isBlocked(item) && !requiredMethod(item);
+	}
+
+	function openRecordOutside(item: QueueItem) {
+		recordTarget = item;
+		recordMethod = 'ach';
+		recordReference = '';
+		recordMaxDate = localToday();
+		recordPaidOn = recordMaxDate;
+		recordError = '';
+	}
+
+	function closeRecordOutside() {
+		recordTarget = null;
+		recordError = '';
+	}
+
+	async function commitRecordOutside() {
+		if (!recordTarget) return;
+		const reference = recordReference.trim();
+		if (!reference || !recordPaidOn) return;
+		const target = recordTarget;
+		recording = true;
+		recordError = '';
+		try {
+			// No `amount`: the server binds it to what the invoice owes on
+			// `paid_on` (net of credits, and of an accepted discount only while
+			// its pay-by date holds). Sending the queue row's figure would 422 a
+			// legitimate payment dated after the discount lapsed.
+			await recordPaymentOutside({
+				invoice_id: target.id,
+				method: recordMethod,
+				reference,
+				paid_on: recordPaidOn
+			});
+			toast(m('payments.recordOutside.recorded', { invoice: target.invoice_number }), 'success');
+			recordTarget = null;
+			// The selection may hold the row that just left the queue.
+			if (selectedQueue.has(target.id)) {
+				const next = new Set(selectedQueue);
+				next.delete(target.id);
+				selectedQueue = next;
+			}
+			await Promise.all([loadSummary(), loadQueue()]);
+		} catch (err) {
+			// Kept in the dialog (role="alert") as well as toasted: a coded
+			// refusal names what to fix, and the toast fades.
+			recordError = err instanceof Error ? err.message : m('payments.recordOutside.failed');
+			toast(recordError, 'error');
+		} finally {
+			recording = false;
+		}
+	}
+
 	// Void modal — cfo/admin can void a completed or in-flight payment.
 	let voidTarget = $state<Payment | null>(null);
 	let voidReason = $state('');
@@ -802,8 +911,15 @@
 	let complianceBusy = $state(false);
 
 	function canReleaseHold(p: Payment): boolean {
+		// Release re-runs the gate AND dispatches, so a record-only tenant —
+		// or one whose mode hasn't resolved yet (fail closed) — is never offered
+		// it: the server 409s `payments_record_only`. Dismiss stays, because it
+		// moves nothing.
 		return (
-			p.status === 'pending_compliance' && !!auth.user && auth.can(PERM_PAYMENT_EXECUTE)
+			p.status === 'pending_compliance' &&
+			!!auth.user &&
+			auth.can(PERM_PAYMENT_EXECUTE) &&
+			canDispatchPayments(executionMode)
 		);
 	}
 
@@ -1110,6 +1226,7 @@
 		orgCurrency.ensureLoaded();
 		loadSummary();
 		loadQueue();
+		loadExecutionMode();
 	});
 
 	$effect(() => {
@@ -1828,6 +1945,17 @@
 		{/if}
 	{/if}
 
+	{#if executionMode === 'record_only'}
+		<!-- Only on a CONFIRMED record-only tenant: an unresolved mode hides the
+		     send controls (fail closed) but is not evidence of this, so it says
+		     nothing. A status, not an alert — it describes the page, it does not
+		     report a failure. -->
+		<p class="mode-note" role="status" data-testid="record-only-banner">
+			{m('payments.mode.recordOnlyBanner')}
+			<HelpTip term="record-only" />
+		</p>
+	{/if}
+
 	<Tabs
 		tabs={tabBar}
 		active={activeTab}
@@ -1968,7 +2096,12 @@
 											<option value="ach">ACH</option>
 											<option value="wire">Wire</option>
 											<option value="check">Check</option>
-											<option value="virtual_card">Virtual Card</option>
+											{#if canDispatchPayments(executionMode)}
+												<!-- Executing a card leg MINTS a card, which a record-only
+												     tenant's server refuses (`payments_record_only`); and a
+												     card is never a way to pay outside FeohLedger. -->
+												<option value="virtual_card">Virtual Card</option>
+											{/if}
 										</select>
 									{/if}
 								</td>
@@ -2036,7 +2169,7 @@
 				: queueErrored
 					? m('payments.queue.empty.errored')
 					: m('payments.queue.empty')}
-			colspan={canCompareRoutes() ? 9 : 8}
+			colspan={8 + (canCompareRoutes() ? 1 : 0) + (canRecordOutside() ? 1 : 0)}
 		>
 			{#snippet header()}
 				<tr>
@@ -2050,6 +2183,10 @@
 					<th>{m('payments.col.status')}</th>
 					{#if canCompareRoutes()}
 						<th class="right">{m('payments.col.routes')}</th>
+					{/if}
+					{#if canRecordOutside()}
+						<!-- Row action: record a payment made outside FeohLedger. -->
+						<th class="actions-col"></th>
 					{/if}
 				</tr>
 			{/snippet}
@@ -2147,6 +2284,20 @@
 								</RowAction>
 							</td>
 						{/if}
+						{#if canRecordOutside()}
+							<td class="actions">
+								{#if canRecordRow(item)}
+									<RowAction
+										ariaLabel={m('payments.recordOutside.actionAria', {
+											invoice: item.invoice_number
+										})}
+										onclick={() => openRecordOutside(item)}
+									>
+										{m('payments.recordOutside.action')}
+									</RowAction>
+								{/if}
+							</td>
+						{/if}
 					</tr>
 				{/each}
 			{/snippet}
@@ -2199,6 +2350,14 @@
 									<span class="card-meta">•••• {p.card_last_four}</span>
 								{/if}
 							</Badge>
+							{#if isExternalPayment(p)}
+								<!-- Recorded, not sent: the customer paid from its own bank
+								     or ERP (issue #517). Labelled, never the raw `external`
+								     provider tag. -->
+								<span class="external-note" data-testid="payment-external">
+									{m('payments.provider.external')}
+								</span>
+							{/if}
 						</td>
 						<td class="right mono">
 							{formatCurrency(p.amount, p.currency)}
@@ -2556,6 +2715,7 @@
 {#if activeRunId}
 	<RunDetailModal
 		runId={activeRunId}
+		{executionMode}
 		onclose={() => (activeRunId = null)}
 		onchange={onRunChanged}
 	/>
@@ -2647,6 +2807,84 @@
 						: m('payments.rebates.dialog.markPaidCta')}
 			</button>
 		</div>
+	{/if}
+</Modal>
+
+<!-- Record a payment made outside FeohLedger (issue #517). Moves no money: it
+     books what the customer already paid from its own bank or ERP, so the
+     intro says so before anything else. -->
+<Modal
+	open={recordTarget !== null}
+	ariaLabel={m('payments.recordOutside.title')}
+	title={m('payments.recordOutside.title')}
+	onclose={closeRecordOutside}
+>
+	{#if recordTarget}
+		<p class="modal-hint">
+			<strong>{recordTarget.invoice_number}</strong>
+			· {recordTarget.vendor_name}
+		</p>
+		<p class="modal-note">{m('payments.recordOutside.intro')}</p>
+		<form onsubmit={(e) => { e.preventDefault(); commitRecordOutside(); }}>
+			<div class="record-owed">
+				<span class="record-owed-label">{m('payments.recordOutside.amountOwed')}</span>
+				<!-- What the queue says a payment today would move; the server is
+				     the authority on the figure it books (see `commitRecordOutside`). -->
+				<strong class="mono" data-testid="record-amount-owed">
+					{formatCurrency(recordTarget.payable_amount ?? recordTarget.amount, recordTarget.currency)}
+				</strong>
+				<span class="record-owed-hint">{m('payments.recordOutside.amountHint')}</span>
+			</div>
+			<label>
+				<span>{m('payments.recordOutside.method')}</span>
+				<select bind:value={recordMethod} data-testid="record-method">
+					{#each EXTERNAL_PAYMENT_METHODS as method (method)}
+						<option value={method}>{methodLabel(method)}</option>
+					{/each}
+				</select>
+			</label>
+			<label>
+				<span>{m('payments.recordOutside.reference')}</span>
+				<input
+					type="text"
+					bind:value={recordReference}
+					maxlength="255"
+					required
+					aria-describedby="record-reference-hint"
+					data-testid="record-reference"
+				/>
+			</label>
+			<p class="field-hint" id="record-reference-hint">{m('payments.recordOutside.referenceHint')}</p>
+			<label>
+				<span>{m('payments.recordOutside.paidOn')}</span>
+				<input
+					type="date"
+					bind:value={recordPaidOn}
+					max={recordMaxDate}
+					required
+					data-testid="record-paid-on"
+				/>
+			</label>
+			{#if recordError}
+				<p class="review-error" role="alert" data-testid="record-error">{recordError}</p>
+			{/if}
+			<div class="modal-footer">
+				<button type="button" class="btn-cancel" onclick={closeRecordOutside}>
+					{m('common.cancel')}
+				</button>
+				<button
+					type="submit"
+					class="btn-primary"
+					data-testid="record-confirm"
+					disabled={recording ||
+						!recordReference.trim() ||
+						!recordPaidOn ||
+						recordPaidOn > recordMaxDate}
+				>
+					{recording ? m('payments.recordOutside.submitting') : m('payments.recordOutside.submit')}
+				</button>
+			</div>
+		</form>
 	{/if}
 </Modal>
 
@@ -3654,6 +3892,54 @@
 	.btn-execute:disabled {
 		opacity: 0.5;
 		cursor: not-allowed;
+	}
+
+	/* --- Record-only mode + record-outside dialog (issue #517) --- */
+
+	/* Neutral, like `.modal-note`: describes how this organization pays, it
+	   reports no failure. */
+	.mode-note {
+		margin: 0 0 14px;
+		padding: 10px 14px;
+		border: 1px solid var(--border);
+		border-radius: 6px;
+		background: var(--surface-2);
+		color: var(--text);
+		font-size: 0.85rem;
+		line-height: 1.4;
+	}
+
+	.external-note {
+		display: block;
+		margin-top: 4px;
+		font-size: 0.75rem;
+		color: var(--text-muted);
+	}
+
+	.record-owed {
+		display: flex;
+		flex-direction: column;
+		gap: 2px;
+	}
+
+	.record-owed-label {
+		font-size: 0.78rem;
+		font-weight: 500;
+		color: var(--text-muted);
+		text-transform: uppercase;
+		letter-spacing: 0.03em;
+	}
+
+	.record-owed-hint,
+	.field-hint {
+		margin: 0;
+		font-size: 0.75rem;
+		color: var(--text-muted);
+		line-height: 1.4;
+	}
+
+	.field-hint {
+		margin-top: -8px;
 	}
 
 	/* --- Void modal --- */

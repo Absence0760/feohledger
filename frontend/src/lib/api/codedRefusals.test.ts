@@ -237,6 +237,150 @@ describe('codedRefusalText', () => {
 	});
 });
 
+describe('the no-rail pilot refusals (issue #517)', () => {
+	it.each([
+		['payments_record_only', 'refusal.paymentsRecordOnly'],
+		['external_payment_segregation', 'refusal.externalPaymentSegregation'],
+		['external_payment_card_live', 'refusal.externalPaymentCardLive'],
+		['external_payment_credit_conflict', 'refusal.externalPaymentCreditConflict'],
+		['external_payment_nothing_to_pay', 'refusal.externalPaymentNothingToPay'],
+		['external_payment_paid_on_future', 'refusal.externalPaymentPaidOnFuture'],
+		['nacha_requires_record_only', 'refusal.nachaRequiresRecordOnly'],
+		['nacha_already_exported', 'refusal.nachaAlreadyExported']
+	] as [string, MessageKey][])('%s is the fixed sentence %s', (code, key) => {
+		expect(codedRefusalText(code, {}, deT)).toBe(de[key]);
+	});
+
+	it('states the record-only refusal whatever the reason it resolved for', () => {
+		for (const reason of ['configured', 'unknown_mode', 'no_processor_in_deployed_environment']) {
+			expect(codedRefusalText('payments_record_only', { reason }, enT)).toBe(
+				en['refusal.paymentsRecordOnly']
+			);
+		}
+	});
+
+	it('names the invoice status, the payment status and the exception type by their labels', () => {
+		expect(
+			codedRefusalText('external_payment_not_payable', { status: 'paid' }, enT)
+		).toContain(`(this one is ${en['invoices.status.paid']})`);
+		expect(
+			codedRefusalText('external_payment_payment_live', { payment_status: 'submitted' }, enT)
+		).toContain(`(${en['payments.status.submitted']})`);
+		expect(
+			codedRefusalText('external_payment_blocking_exception', { exception_type: 'duplicate' }, enT)
+		).toContain(`unresolved ${en['exceptions.type.duplicate']} exception`);
+		// A type this build predates renders readably rather than falling back.
+		expect(
+			codedRefusalText('external_payment_blocking_exception', { exception_type: 'brand_new_kind' }, enT)
+		).toContain('brand new kind');
+	});
+
+	it('names the run an invoice is already in by its short id', () => {
+		expect(
+			codedRefusalText(
+				'external_payment_in_run',
+				{ payment_run_id: '0f9e8d7c-1111-2222-3333-444455556666' },
+				enT
+			)
+		).toContain('payment run 0f9e8d7c.');
+	});
+
+	it('states the amount owed with its currency, or bare without one', () => {
+		setActiveFormatLocale('en-US');
+		expect(
+			codedRefusalText('external_payment_amount_mismatch', { amount: '980.00', currency: 'USD' }, enT)
+		).toContain('($980.00)');
+		expect(
+			codedRefusalText('external_payment_amount_mismatch', { amount: '980.00', currency: null }, enT)
+		).toContain('(980.00)');
+	});
+
+	it('prefixes the invoice a whole-run refusal names', () => {
+		// `POST /runs/{id}/record-outside` adds `invoice_number` to the same codes.
+		expect(
+			codedRefusalText(
+				'external_payment_segregation',
+				{ invoice_number: 'INV-77' },
+				deT
+			)
+		).toBe(
+			interpolate(de['refusal.externalPaymentForInvoice'], {
+				invoice: 'INV-77',
+				reason: de['refusal.externalPaymentSegregation']
+			}, 'de')
+		);
+		expect(
+			codedRefusalText(
+				'external_payment_not_payable',
+				{ invoice_number: 'INV-78', status: 'approved' },
+				enT
+			)
+		).toMatch(/^Invoice INV-78: Only an approved invoice/);
+	});
+
+	it('states a staged amount that changed, with both figures, for the invoice', () => {
+		setActiveFormatLocale('en-US');
+		const out = codedRefusalText(
+			'external_payment_amount_changed',
+			{ invoice_number: 'INV-5', staged_amount: '1000.00', amount: '980.00', currency: 'USD' },
+			enT
+		);
+		expect(out).toMatch(/^Invoice INV-5: /);
+		expect(out).toContain('($1,000.00 staged, $980.00 owed now)');
+		expect(
+			codedRefusalText(
+				'external_payment_amount_changed',
+				{ invoice_number: 'INV-5', staged_amount: '1000.00', amount: 980, currency: 'USD' },
+				enT
+			)
+		).toBeNull();
+	});
+
+	it('names the invoice a NACHA file cannot carry', () => {
+		for (const [code, key] of [
+			['nacha_payment_not_ach', 'refusal.nachaPaymentNotAch'],
+			['nacha_vendor_bank_missing', 'refusal.nachaVendorBankMissing'],
+			['nacha_currency_not_usd', 'refusal.nachaCurrencyNotUsd'],
+			['nacha_amount_too_large', 'refusal.nachaAmountTooLarge'],
+			// `params.reason` is a dispatcher machine code — never shown.
+			['nacha_payment_not_payable', 'refusal.nachaPaymentNotPayable']
+		] as [string, MessageKey][]) {
+			expect(
+				codedRefusalText(code, { invoice_number: 'INV-9', reason: 'invoice_blocked:fraud_flag' }, deT)
+			).toBe(
+				interpolate(de[key], { invoice: 'INV-9' }, 'de')
+			);
+		}
+	});
+
+	it('labels the bank-file settings that are missing', () => {
+		const out = codedRefusalText(
+			'nacha_not_configured',
+			{ missing: ['company_id', 'odfi_routing', 'a_field_from_the_future'] },
+			enT
+		);
+		expect(out).toContain(en['org.payments.nachaField.companyId']);
+		expect(out).toContain(en['org.payments.nachaField.odfiRouting']);
+		expect(out).toContain('a_field_from_the_future');
+	});
+
+	it.each([
+		['a not-payable refusal with no status', 'external_payment_not_payable', {}],
+		['a blocking refusal with no type', 'external_payment_blocking_exception', {}],
+		['an in-run refusal with no run', 'external_payment_in_run', {}],
+		['an amount that is not an exact decimal', 'external_payment_amount_mismatch', { amount: 980, currency: 'USD' }],
+		['an amount with a malformed currency', 'external_payment_amount_mismatch', { amount: '1.00', currency: 'dollars' }],
+		// The run door sends `invoice_number: null` for an invoice with no number;
+		// the server's English names it by id, so that is the better sentence.
+		['a run refusal whose invoice has no number', 'external_payment_card_live', { invoice_number: null }],
+		['a NACHA refusal with no invoice', 'nacha_payment_not_ach', {}],
+		['an empty missing-field list', 'nacha_not_configured', { missing: [] }],
+		['a missing-field list that is not strings', 'nacha_not_configured', { missing: [1] }]
+	])('is null for %s, so the server sentence renders', (_label, code, params) => {
+		expect(codedRefusalText(code, params as Record<string, unknown>, enT)).toBeNull();
+	});
+});
+
 describe('localizeApiDetail', () => {
 	it('reaches the money-path table from a raw detail', () => {
 		expect(localizeApiDetail(detail('approval_segregation'), deT)).toBe(

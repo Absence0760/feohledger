@@ -262,6 +262,20 @@ export const GLOSSARY: GlossaryEntry[] = [
 		related: ['payment-run', 'settlement', 'audit-trail', 'virtual-card']
 	},
 	{
+		id: 'record-only',
+		category: 'payments',
+		long: "A way of running FeohLedger where you pay suppliers yourself, from your own bank or ERP, and FeohLedger records each payment. It never sends money. An admin chooses it under {ui:org.payments.mode} on the Payments section of [[page:/organization|organization settings]].\n\nIn this mode **Execute** is not offered. Instead you use {ui:payments.recordOutside.action} on an invoice in the payment queue, or build a [[payment-run]], download its [[nacha-file]] and record the whole run as paid. The payment shows {ui:payments.provider.external} and its invoice moves to {ui:invoices.status.paid}, so [[bank-reconciliation]], 1099 totals and aging treat it like any other payment. Segregation of duties and [[payment-blocking-exception|payment-blocking exceptions]] still apply.\n\nAn organization that does send payments through FeohLedger can still record a single invoice it paid another way, such as by cheque.",
+		aliases: ['paid outside', 'record payment', 'manual payment', 'external payment', 'no-rail', 'mark as paid'],
+		related: ['nacha-file', 'payment-run', 'bank-reconciliation', 'settlement']
+	},
+	{
+		id: 'nacha-file',
+		category: 'payments',
+		long: "The standard file format US banks accept for a batch of ACH payments. On a [[record-only]] organization, a draft [[payment-run]] can be downloaded as a NACHA file of ACH credits, one per payment, to upload to your own bank's ACH service. Your organization stays the originator under its own agreement with the bank; FeohLedger never touches the money.\n\nDownloading the file marks the run {ui:paymentRuns.status.exported}, so it can't also be executed or cancelled while the bank has it. A second file for the same run has to be asked for explicitly, because uploading both would pay every supplier twice; if the bank rejected the file, release the run back to {ui:paymentRuns.status.draft}.\n\nEvery payment in the run has to be an ACH payment in US dollars to a vendor with a bank routing and account number on file. The file holds those account numbers, so keep it private. After the bank has taken the file, record the run as paid with the bank's batch reference. An admin enters the company name, company ID and the bank's routing number the file needs on the Payments section of [[page:/organization|organization settings]].",
+		aliases: ['NACHA', 'ACH file', 'bank file', 'payment file', 'CCD', 'PPD'],
+		related: ['record-only', 'payment-run', 'payment-rail', 'positive-pay']
+	},
+	{
 		id: 'positive-pay',
 		category: 'payments',
 		long: "A fraud control run with your bank. You send the bank a file listing the checks you actually issued, with their numbers and amounts. When a check is presented, the bank compares it to the file and refuses anything that doesn't match, such as an altered amount or a check you never wrote. A second file type lists the companies allowed to debit your account by ACH.\n\nFeohLedger generates the check-issue file from a [[payment-run]], and can raise a fraud exception when the bank reports a check that isn't on file. Because the file holds full account numbers, it is deleted after a short retention period.",

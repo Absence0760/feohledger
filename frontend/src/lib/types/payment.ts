@@ -116,6 +116,10 @@ export const PAYMENT_STATUS_TONES: Record<PaymentStatus, BadgeTone> = {
  */
 export type PaymentRunStatus =
 	| 'draft'
+	// Claimed by its NACHA bank file (issue #517): the customer has the file
+	// to upload, so the run can be neither executed nor cancelled until it is
+	// recorded as paid or the export is voided back to `draft`.
+	| 'exported'
 	| 'executing'
 	| 'submitted'
 	| 'completed'
@@ -125,6 +129,7 @@ export type PaymentRunStatus =
 
 export const PAYMENT_RUN_STATUSES: PaymentRunStatus[] = [
 	'draft',
+	'exported',
 	'executing',
 	'submitted',
 	'completed',
@@ -153,6 +158,8 @@ export const PAYMENT_RUN_STATUSES: PaymentRunStatus[] = [
  */
 export const RUN_STATUS_TONES: Record<PaymentRunStatus, BadgeTone> = {
 	draft: 'neutral',
+	// Waiting on the customer's bank, like `executing` waits on a processor.
+	exported: 'accent',
 	executing: 'accent',
 	submitted: 'accent',
 	completed: 'success',
@@ -181,6 +188,7 @@ export function runStatusTone(status: string): BadgeTone {
  */
 export const RUN_STATUS_LABEL_KEYS: Record<PaymentRunStatus, MessageKey> = {
 	draft: 'paymentRuns.status.draft',
+	exported: 'paymentRuns.status.exported',
 	executing: 'paymentRuns.status.executing',
 	submitted: 'paymentRuns.status.submitted',
 	completed: 'paymentRuns.status.completed',
@@ -265,6 +273,14 @@ export interface Payment {
 	method: PaymentMethod | null;
 	status: PaymentStatus;
 	reference: string | null;
+	/**
+	 * The processor that carried the payment (`schemas/payment.py::
+	 * PaymentResponse.provider`). `"external"` marks a payment the customer
+	 * made OUTSIDE FeohLedger and recorded here (issue #517) — label it with
+	 * `payments.provider.external`, never the raw tag. Optional so an older
+	 * backend parses.
+	 */
+	provider?: string | null;
 	created_at: string;
 	updated_at: string | null;
 	/**

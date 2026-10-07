@@ -14,7 +14,20 @@
 	} from '#lib/types/payment.ts';
 	import type { PaymentStatus } from '#lib/types/payment.ts';
 	import { auth } from '#lib/stores/auth.svelte.ts';
-	import { PERM_PAYMENT_EXECUTE } from '#lib/types/admin.ts';
+	import { PERM_PAYMENT_EXECUTE, PERM_PAYMENT_RECORD_EXTERNAL } from '#lib/types/admin.ts';
+	import { downloadRunNacha, recordRunOutside, voidRunNachaExport } from '#lib/api/payments.ts';
+	import {
+		NACHA_SEC_CODES,
+		canDispatchPayments,
+		canDownloadBankFile,
+		isBusinessDay,
+		isExternalPayment,
+		localToday,
+		nextBusinessDay,
+		utcToday,
+		type NachaSecCode,
+		type PaymentExecutionMode
+	} from '#lib/types/paymentExecution.ts';
 	import { formatMoney, isPositiveAmount } from '#lib/utils/money.ts';
 	// The bare (no-symbol) rendering `fmt` falls back to when the server could
 	// not establish a figure's currency — the same primitive `/payments` and
@@ -27,11 +40,20 @@
 		runId,
 		onclose,
 		onchange,
+		executionMode = null,
 	}: {
 		runId: string;
 		onclose: () => void;
 		// Fired after Execute completes so the parent can refresh queue + summary + runs list.
 		onchange?: () => void;
+		/**
+		 * The tenant's payment execution mode (`GET /api/payments/execution-mode`,
+		 * issue #517), read once by the page. `null` = not known yet, or the read
+		 * failed — and Execute is hidden then too (`canDispatchPayments` fails
+		 * closed): the server would 409 a record-only tenant's execute, and the
+		 * record-outside path below works in either mode.
+		 */
+		executionMode?: PaymentExecutionMode | null;
 	} = $props();
 
 	// Freeze background page scroll while the dialog is open (restored on close),
@@ -65,6 +87,8 @@
 		method: string | null;
 		status: string;
 		reference: string | null;
+		/** `"external"` once the run was recorded as paid outside FeohLedger. */
+		provider?: string | null;
 		/**
 		 * The accepted early-payment discount this payment takes, already
 		 * deducted from `amount` (migration 0104), and the invoice amount it
@@ -127,6 +151,139 @@
 	function arm(which: 'execute' | 'cancel') {
 		confirmExecute = which === 'execute';
 		confirmCancel = which === 'cancel';
+	}
+
+	// --- Paying the run outside FeohLedger (issue #517) -----------------------
+	// A record-only tenant's run is paid by the customer's own bank: the
+	// operator downloads the run's NACHA file (which CLAIMS the run,
+	// `draft → exported`), uploads it, and records the run as paid — or, if the
+	// bank rejected the file, releases the run back to `draft`. Recording is
+	// also offered on a processor tenant's draft (Execute stays the primary
+	// there).
+	//
+	// Two permissions, deliberately split by the backend: the file and its void
+	// are `payment.execute` (uploading the file is what moves the money), the
+	// record is `payment.record_external`. Maker-checker and CFO sign-off apply
+	// server-side to all of them exactly as they do to Execute.
+	const canRecord = $derived(auth.can(PERM_PAYMENT_RECORD_EXTERNAL));
+	const showExecute = $derived(auth.can(PERM_PAYMENT_EXECUTE) && canDispatchPayments(executionMode));
+	const showBankFile = $derived(
+		auth.can(PERM_PAYMENT_EXECUTE) && canDownloadBankFile(executionMode)
+	);
+
+	// The UTC date bounds the effective date (the server refuses one before
+	// it); the reader's LOCAL date bounds paid-on (the server allows a day of
+	// slack past UTC for exactly that reader). Both refreshed when a form opens.
+	let todayUtc = $state(utcToday());
+	let todayLocal = $state(localToday());
+
+	let nachaEffectiveDate = $state(nextBusinessDay());
+	let nachaSecCode = $state<NachaSecCode>('CCD');
+	let downloadingNacha = $state(false);
+	let nachaError = $state('');
+	// A second file for an exported run is armed: uploading both pays twice.
+	let confirmRegenerate = $state(false);
+
+	const nachaDateOk = $derived(
+		!!nachaEffectiveDate && nachaEffectiveDate >= todayUtc && isBusinessDay(nachaEffectiveDate)
+	);
+
+	async function downloadBankFile(regenerate: boolean) {
+		if (!run || !nachaDateOk) return;
+		if (regenerate ? run.status !== 'exported' : run.status !== 'draft') return;
+		downloadingNacha = true;
+		nachaError = '';
+		try {
+			await downloadRunNacha(run.id, nachaEffectiveDate, nachaSecCode, regenerate);
+			if (!regenerate) toast(m('paymentRuns.runDetail.nachaExportedToast'), 'success');
+			// The first export moved the run to `exported`; a regenerate bumped
+			// its file-ID modifier. Either way the server's view is the truth.
+			await load();
+			onchange?.();
+		} catch (err) {
+			nachaError = err instanceof Error ? err.message : m('paymentRuns.runDetail.nachaFailed');
+			toast(nachaError, 'error');
+		} finally {
+			downloadingNacha = false;
+			confirmRegenerate = false;
+		}
+	}
+
+	// "Bank rejected the file": release an exported run back to draft. An
+	// attestation FeohLedger can't check, so the reason is required.
+	let rejectOpen = $state(false);
+	let rejectReason = $state('');
+	let rejecting = $state(false);
+	let rejectError = $state('');
+
+	function openReject() {
+		confirmRegenerate = false;
+		recordOpen = false;
+		rejectReason = '';
+		rejectError = '';
+		rejectOpen = true;
+	}
+
+	async function rejectExport() {
+		if (!run || run.status !== 'exported') return;
+		const reason = rejectReason.trim();
+		if (!reason) return;
+		rejecting = true;
+		rejectError = '';
+		try {
+			await voidRunNachaExport(run.id, reason);
+			toast(m('paymentRuns.runDetail.nachaRejectedToast'), 'success');
+			rejectOpen = false;
+			await load();
+			onchange?.();
+		} catch (err) {
+			rejectError = err instanceof Error ? err.message : m('paymentRuns.runDetail.nachaRejectFailed');
+			toast(rejectError, 'error');
+		} finally {
+			rejecting = false;
+		}
+	}
+
+	let recordOpen = $state(false);
+	let recordReference = $state('');
+	let recordPaidOn = $state(localToday());
+	let recordingRun = $state(false);
+	let recordError = $state('');
+
+	function openRecord() {
+		// Opening the record form retracts every armed commit: only one is ever
+		// one click away.
+		confirmExecute = false;
+		confirmCancel = false;
+		confirmRegenerate = false;
+		rejectOpen = false;
+		todayLocal = localToday();
+		recordPaidOn = todayLocal;
+		recordReference = '';
+		recordError = '';
+		recordOpen = true;
+	}
+
+	async function recordRunPaid() {
+		if (!run || (run.status !== 'draft' && run.status !== 'exported')) return;
+		const reference = recordReference.trim();
+		if (!reference || !recordPaidOn) return;
+		recordingRun = true;
+		recordError = '';
+		try {
+			const result = await recordRunOutside(run.id, { reference, paid_on: recordPaidOn });
+			toast(m('paymentRuns.runDetail.recordedToast', { n: result.payment_count }), 'success');
+			recordOpen = false;
+			await load();
+			onchange?.();
+		} catch (err) {
+			// A coded refusal names the invoice that stopped the WHOLE run
+			// (nothing was recorded), so it stays on screen beside the form.
+			recordError = err instanceof Error ? err.message : m('paymentRuns.runDetail.recordFailed');
+			toast(recordError, 'error');
+		} finally {
+			recordingRun = false;
+		}
 	}
 
 	async function load() {
@@ -345,7 +502,14 @@
 										</div>
 									{/if}
 								</td>
-								<td>{methodLabel(p.method)}</td>
+								<td>
+									{methodLabel(p.method)}
+									{#if isExternalPayment(p)}
+										<div class="muted" data-testid="run-payment-external">
+											{m('payments.provider.external')}
+										</div>
+									{/if}
+								</td>
 								<!-- No `?? 'neutral'`: the map is total over `PaymentStatus`,
 								     and a value off the union lands on `Badge`'s own `tone`
 								     default — which IS neutral — rather than a fallback
@@ -358,6 +522,226 @@
 						{/each}
 					</tbody>
 				</table>
+
+				{#if run.status === 'draft' || run.status === 'exported'}
+					{@const pendingCfo = run.requires_cfo_approval && !run.cfo_approved_at}
+					{@const exported = run.status === 'exported'}
+					{#if showBankFile}
+						<section class="outside-panel" aria-labelledby="run-nacha-heading" data-testid="run-nacha-panel">
+							<div class="panel-title-row">
+								<h3 id="run-nacha-heading">{m('paymentRuns.runDetail.nachaHeading')}</h3>
+								<HelpTip term="nacha-file" />
+							</div>
+							<p class="panel-hint">{m('paymentRuns.runDetail.nachaHint')}</p>
+							{#if !exported}
+								<p class="panel-hint">{m('paymentRuns.runDetail.nachaClaimNote')}</p>
+							{/if}
+							{#if !exported || confirmRegenerate}
+								<div class="panel-fields">
+									<label>
+										<span>{m('paymentRuns.runDetail.nachaEffectiveDate')}</span>
+										<input
+											type="date"
+											bind:value={nachaEffectiveDate}
+											min={todayUtc}
+											required
+											aria-invalid={!nachaDateOk}
+											aria-describedby={nachaDateOk ? undefined : 'run-nacha-date-error'}
+											data-testid="nacha-effective-date"
+										/>
+									</label>
+									<label>
+										<span>{m('paymentRuns.runDetail.nachaSecCode')}</span>
+										<select bind:value={nachaSecCode} data-testid="nacha-sec-code">
+											{#each NACHA_SEC_CODES as code (code)}
+												<option value={code}>
+													{code === 'CCD'
+														? m('paymentRuns.runDetail.nachaSecCcd')
+														: m('paymentRuns.runDetail.nachaSecPpd')}
+												</option>
+											{/each}
+										</select>
+									</label>
+								</div>
+								{#if !nachaDateOk}
+									<p class="panel-hint warn" id="run-nacha-date-error">
+										{m('paymentRuns.runDetail.nachaNotBusinessDay')}
+									</p>
+								{/if}
+							{/if}
+							{#if confirmRegenerate}
+								<!-- Announced the moment Regenerate arms: the next click
+								     produces a SECOND file for money already on its way. -->
+								<p class="panel-error" role="alert" data-testid="nacha-regenerate-warning">
+									{m('paymentRuns.runDetail.nachaRegenerateWarning')}
+								</p>
+							{/if}
+							{#if nachaError}
+								<p class="panel-error" role="alert" data-testid="nacha-error">{nachaError}</p>
+							{/if}
+							{#if rejectOpen}
+								<form class="reject-form" onsubmit={(e) => { e.preventDefault(); rejectExport(); }}>
+									<p class="panel-hint">{m('paymentRuns.runDetail.nachaRejectIntro')}</p>
+									<label>
+										<span>{m('paymentRuns.runDetail.nachaRejectReason')}</span>
+										<input
+											type="text"
+											bind:value={rejectReason}
+											maxlength="500"
+											required
+											data-testid="nacha-reject-reason"
+										/>
+									</label>
+									{#if rejectError}
+										<p class="panel-error" role="alert" data-testid="nacha-reject-error">{rejectError}</p>
+									{/if}
+									<div class="panel-actions">
+										<button type="button" class="btn-cancel" onclick={() => (rejectOpen = false)}>
+											{m('common.cancel')}
+										</button>
+										<button
+											type="submit"
+											class="btn-discard armed"
+											disabled={rejecting || !rejectReason.trim()}
+											data-testid="nacha-reject-confirm"
+										>
+											{rejecting
+												? m('paymentRuns.runDetail.nachaRejecting')
+												: m('paymentRuns.runDetail.nachaRejectConfirm')}
+										</button>
+									</div>
+								</form>
+							{:else}
+								<div class="panel-actions">
+									{#if !exported}
+										<button
+											type="button"
+											class="btn-secondary"
+											disabled={downloadingNacha || pendingCfo || !nachaDateOk}
+											title={pendingCfo ? m('paymentRuns.runDetail.awaitingCfo') : ''}
+											onclick={() => downloadBankFile(false)}
+										>
+											{downloadingNacha
+												? m('paymentRuns.runDetail.nachaDownloading')
+												: m('paymentRuns.runDetail.nachaDownload')}
+										</button>
+									{:else}
+										<button
+											type="button"
+											class="btn-discard"
+											disabled={downloadingNacha}
+											onclick={openReject}
+										>
+											{m('paymentRuns.runDetail.nachaReject')}
+										</button>
+										{#if confirmRegenerate}
+											<button
+												type="button"
+												class="btn-discard armed"
+												disabled={downloadingNacha || !nachaDateOk}
+												onclick={() => downloadBankFile(true)}
+											>
+												{downloadingNacha
+													? m('paymentRuns.runDetail.nachaDownloading')
+													: m('paymentRuns.runDetail.nachaConfirmRegenerate')}
+											</button>
+										{:else}
+											<button
+												type="button"
+												class="btn-secondary"
+												disabled={downloadingNacha}
+												onclick={() => {
+													recordOpen = false;
+													confirmRegenerate = true;
+												}}
+											>
+												{m('paymentRuns.runDetail.nachaRegenerate')}
+											</button>
+										{/if}
+									{/if}
+								</div>
+							{/if}
+						</section>
+					{/if}
+
+					{#if canRecord}
+						<section class="outside-panel" aria-labelledby="run-record-heading" data-testid="run-record-panel">
+							<div class="panel-title-row">
+								<h3 id="run-record-heading">{m('paymentRuns.runDetail.recordHeading')}</h3>
+								<HelpTip term="record-only" />
+							</div>
+							{#if recordOpen}
+								<p class="panel-hint">{m('paymentRuns.runDetail.recordIntro')}</p>
+								<form onsubmit={(e) => { e.preventDefault(); recordRunPaid(); }}>
+									<div class="panel-fields">
+										<label>
+											<span>{m('paymentRuns.runDetail.recordReference')}</span>
+											<input
+												type="text"
+												bind:value={recordReference}
+												maxlength="255"
+												required
+												aria-describedby="run-record-reference-hint"
+												data-testid="run-record-reference"
+											/>
+										</label>
+										<label>
+											<span>{m('paymentRuns.runDetail.recordPaidOn')}</span>
+											<input
+												type="date"
+												bind:value={recordPaidOn}
+												max={todayLocal}
+												required
+												data-testid="run-record-paid-on"
+											/>
+										</label>
+									</div>
+									<p class="panel-hint" id="run-record-reference-hint">
+										{m('paymentRuns.runDetail.recordReferenceHint')}
+									</p>
+									{#if recordError}
+										<p class="panel-error" role="alert" data-testid="run-record-error">{recordError}</p>
+									{/if}
+									<div class="panel-actions">
+										<button type="button" class="btn-cancel" onclick={() => (recordOpen = false)}>
+											{m('common.cancel')}
+										</button>
+										<button
+											type="submit"
+											class="btn-approve"
+											disabled={recordingRun ||
+												pendingCfo ||
+												!recordReference.trim() ||
+												!recordPaidOn ||
+												recordPaidOn > todayLocal}
+											title={pendingCfo ? m('paymentRuns.runDetail.awaitingCfo') : ''}
+											data-testid="run-record-confirm"
+										>
+											{recordingRun
+												? m('paymentRuns.runDetail.recordSubmitting')
+												: m('paymentRuns.runDetail.recordSubmit', {
+														amount: fmt(run.total_amount, run.currency)
+													})}
+										</button>
+									</div>
+								</form>
+							{:else}
+								<div class="panel-actions">
+									<!-- Once the file is out, recording the run is THE next step,
+									     so it becomes the primary control. -->
+									<button
+										type="button"
+										class={exported ? 'btn-approve' : 'btn-secondary'}
+										disabled={executing || cancelling || downloadingNacha || rejecting}
+										onclick={openRecord}
+									>
+										{m('paymentRuns.runDetail.recordOpen')}
+									</button>
+								</div>
+							{/if}
+						</section>
+					{/if}
+				{/if}
 			{/if}
 		</div>
 
@@ -374,6 +758,10 @@
 				{:else if cfoApproved}
 					<p class="footer-note approved">
 						{m('paymentRuns.runDetail.cfoApprovedNote', { date: fmtDate(run.cfo_approved_at) })}
+					</p>
+				{:else if executionMode === 'record_only'}
+					<p class="footer-note" data-testid="run-record-only-note">
+						{m('paymentRuns.runDetail.recordOnlyNote')}
 					</p>
 				{:else}
 					<p class="footer-note">
@@ -427,7 +815,12 @@
 							{approving ? m('paymentRuns.runDetail.approving') : m('paymentRuns.runDetail.approveAsCfo')}
 						</button>
 					{/if}
-					{#if auth.can(PERM_PAYMENT_EXECUTE)}
+					<!-- Execute only where FeohLedger actually sends payments. On a
+					     record-only tenant (or before the mode is known — fail
+					     closed) it is not rendered at all: the server would refuse it
+					     with `payments_record_only`, and the record path above is the
+					     way to `paid`. -->
+					{#if showExecute}
 						{#if confirmExecute}
 							<!-- Armed. The label is deliberately DISTINCT from the
 							     unarmed one ("Confirm execute · …" vs "Execute · …")
@@ -448,9 +841,12 @@
 						{:else}
 							<button
 								class="btn-execute"
-								disabled={executing || cancelling || pendingCfo}
+								disabled={executing || cancelling || pendingCfo || recordingRun}
 								title={pendingCfo ? m('paymentRuns.runDetail.awaitingCfo') : ''}
-								onclick={() => arm('execute')}
+								onclick={() => {
+									recordOpen = false;
+									arm('execute');
+								}}
 							>
 								{m('paymentRuns.runDetail.executeAmount', {
 									amount: fmt(run.total_amount, run.currency)
@@ -458,6 +854,16 @@
 							</button>
 						{/if}
 					{/if}
+				</div>
+			{:else if run?.status === 'exported'}
+				<!-- Claimed by its bank file: no Execute, no Cancel run. The two
+				     exits — record as paid, or the bank rejected the file — are
+				     in the panels above. -->
+				<p class="footer-note" data-testid="run-exported-note">
+					{m('paymentRuns.runDetail.exportedNote')}
+				</p>
+				<div class="actions">
+					<button class="btn-cancel" onclick={onclose}>{m('paymentRuns.runDetail.close')}</button>
 				</div>
 			{:else}
 				<div class="actions">
@@ -721,6 +1127,96 @@
 	}
 
 	.btn-discard:disabled {
+		opacity: 0.5;
+		cursor: not-allowed;
+	}
+
+	/* --- Paying the run outside FeohLedger --- */
+	.outside-panel {
+		margin-top: 18px;
+		padding-top: 14px;
+		border-top: 1px solid var(--border);
+	}
+
+	.panel-title-row {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+	}
+
+	h3 {
+		margin: 0;
+		font-size: 0.95rem;
+		font-weight: 600;
+	}
+
+	.panel-hint {
+		margin: 6px 0 10px;
+		font-size: 0.8rem;
+		color: var(--text-muted);
+		line-height: 1.4;
+	}
+
+	.panel-fields {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 12px;
+	}
+
+	.panel-fields label {
+		flex: 1 1 200px;
+		min-width: 0;
+	}
+
+	.panel-hint.warn {
+		color: var(--danger);
+	}
+
+	.reject-form {
+		display: flex;
+		flex-direction: column;
+		gap: 8px;
+		margin-top: 8px;
+	}
+
+	.panel-error {
+		margin: 8px 0 0;
+		padding: 8px 10px;
+		border: 1px solid var(--danger);
+		border-radius: 4px;
+		background: var(--danger-tint);
+		color: var(--text);
+		font-size: 0.82rem;
+		line-height: 1.4;
+	}
+
+	.panel-actions {
+		display: flex;
+		justify-content: flex-end;
+		flex-wrap: wrap;
+		gap: 8px;
+		margin-top: 10px;
+	}
+
+	.btn-secondary {
+		padding: 8px 16px;
+		border-radius: 4px;
+		/* --accent for text on the surface (--accent-strong is a FILL token only,
+		   and fails 4.5:1 as text on --surface — app.css). */
+		border: 1px solid var(--accent);
+		background: var(--surface);
+		color: var(--accent);
+		font-size: 0.85rem;
+		font-weight: 500;
+		cursor: pointer;
+		font-family: inherit;
+	}
+
+	.btn-secondary:hover:not(:disabled) {
+		background: var(--bg);
+	}
+
+	.btn-secondary:disabled {
 		opacity: 0.5;
 		cursor: not-allowed;
 	}

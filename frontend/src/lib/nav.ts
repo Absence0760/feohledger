@@ -40,7 +40,12 @@
  */
 
 import type { MessageKey } from '#lib/i18n/messages.ts';
-import { PERM_PAYMENT_EXECUTE, PERM_PAYMENT_VOID, PERM_USER_MANAGE } from '#lib/types/admin.ts';
+import {
+	PERM_PAYMENT_EXECUTE,
+	PERM_PAYMENT_RECORD_EXTERNAL,
+	PERM_PAYMENT_VOID,
+	PERM_USER_MANAGE
+} from '#lib/types/admin.ts';
 
 /**
  * Every icon key `Sidebar.svelte` can draw. A union rather than `string` so a
@@ -111,8 +116,8 @@ export const NAV: NavEntry[] = [
 	{ kind: 'link', label: 'Dashboard', labelKey: 'nav.dashboard', href: '/', icon: 'dashboard' },
 	{ kind: 'link', label: 'Invoices', labelKey: 'nav.invoices', href: '/invoices', icon: 'invoices' },
 	// `permissions` OR's in a custom role holding ONLY `payment.execute` /
-	// `payment.void` (no `admin`/`ap_manager`/`cfo` role) — those are the two
-	// granular permissions whose supporting read endpoints
+	// `payment.void` / `payment.record_external` (no `admin`/`ap_manager`/`cfo`
+	// role) — those are the granular permissions whose supporting read endpoints
 	// (GET /api/payments, GET /api/payments/{id}, GET /api/payments/runs/,
 	// GET /api/payments/runs/{id}) are gated with `require_permission` for
 	// exactly this reason. Without this the sidebar row — the only way to
@@ -125,7 +130,7 @@ export const NAV: NavEntry[] = [
 		href: '/payments',
 		icon: 'payments',
 		roles: ['admin', 'ap_manager', 'cfo'],
-		permissions: [PERM_PAYMENT_EXECUTE, PERM_PAYMENT_VOID]
+		permissions: [PERM_PAYMENT_EXECUTE, PERM_PAYMENT_VOID, PERM_PAYMENT_RECORD_EXTERNAL]
 	},
 	{ kind: 'link', label: 'Vendors', labelKey: 'nav.vendors', href: '/vendors', icon: 'vendors', roles: ['admin', 'ap_manager', 'cfo'] },
 	// Sanctions-screening review queue (a sub-route of /vendors). Reuses the

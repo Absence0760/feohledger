@@ -32,6 +32,12 @@
 		type SsoSettingsStatus
 	} from '#lib/types/ssoSettings.ts';
 	import { formatList } from '#lib/utils/list.ts';
+	import {
+		NACHA_FIELD_LABEL_KEYS,
+		nachaForSave,
+		nachaProblems,
+		type PaymentExecutionMode
+	} from '#lib/types/paymentExecution.ts';
 
 	interface CompanyProfile {
 		address: string;
@@ -492,6 +498,7 @@
 				| Record<string, unknown>
 				| undefined;
 			if (pmt) {
+				loadPaymentsExtras(pmt);
 				paymentsProvider = (pmt.provider as string) || 'mock';
 				paymentsProgramType = (pmt.program_type as string) || 'byok';
 				paymentsApiKey = (pmt.api_key as string) || '';
@@ -606,6 +613,53 @@
 	let paymentsSandbox = $state(true);
 	let paymentsCfoThreshold = $state<number | null>(null);
 	let savingPayments = $state(false);
+
+	// --- Payment execution mode + NACHA bank file (issue #517) ----------------
+	// `mode` absent means "processor" by default, but the backend still forces
+	// record-only on a deployed tenant with no real processor
+	// (`services/payment_execution_mode`) — so an absent mode is re-sent absent
+	// unless the admin changes it, rather than written as an explicit choice
+	// nobody made. An unknown stored value shows as record-only, which is what
+	// the server resolves it to (fail closed).
+	let paymentsMode = $state<PaymentExecutionMode>('processor');
+	let paymentsModeStored = $state<string | null>(null);
+	let nachaCompanyName = $state('');
+	let nachaCompanyId = $state('');
+	let nachaOdfiRouting = $state('');
+	let nachaBankName = $state('');
+	// Every OTHER key of the stored `settings.payments` block. The save is a
+	// shallow replace of the whole block, so a key this form does not manage —
+	// `require_run_segregation`, `home_currency`, anything newer than this
+	// build — would be erased by a save that did not carry it back.
+	let paymentsExtras = $state<Record<string, unknown>>({});
+
+	const PAYMENTS_FORM_KEYS = new Set([
+		'provider',
+		'program_type',
+		'api_key',
+		'org_id',
+		'originating_account_id',
+		'webhook_secret',
+		'sandbox',
+		'cfo_approval_above',
+		'mode',
+		'nacha'
+	]);
+
+	function loadPaymentsExtras(pmt: Record<string, unknown>) {
+		paymentsExtras = Object.fromEntries(
+			Object.entries(pmt).filter(([key]) => !PAYMENTS_FORM_KEYS.has(key))
+		);
+		const mode = pmt.mode;
+		paymentsModeStored = typeof mode === 'string' ? mode : null;
+		paymentsMode =
+			paymentsModeStored === null || paymentsModeStored === 'processor' ? 'processor' : 'record_only';
+		const nacha = (pmt.nacha ?? {}) as Record<string, unknown>;
+		nachaCompanyName = typeof nacha.company_name === 'string' ? nacha.company_name : '';
+		nachaCompanyId = typeof nacha.company_id === 'string' ? nacha.company_id : '';
+		nachaOdfiRouting = typeof nacha.odfi_routing === 'string' ? nacha.odfi_routing : '';
+		nachaBankName = typeof nacha.bank_name === 'string' ? nacha.bank_name : '';
+	}
 	let testingPayments = $state(false);
 	let paymentsTestResult = $state<{ success: boolean; message: string } | null>(null);
 
@@ -800,10 +854,35 @@
 	}
 
 	async function savePayments() {
+		const nacha = nachaForSave({
+			company_name: nachaCompanyName,
+			company_id: nachaCompanyId,
+			odfi_routing: nachaOdfiRouting,
+			bank_name: nachaBankName
+		});
+		if (nacha) {
+			// The server 422s the same fields (`services/nacha.originator_problems`);
+			// naming them here keeps the admin on the form with the reason.
+			const problems = nachaProblems(nacha);
+			if (problems.length > 0) {
+				toast(
+					m('org.payments.nachaInvalid', {
+						fields: formatList(problems.map((f) => m(NACHA_FIELD_LABEL_KEYS[f])))
+					}),
+					'error'
+				);
+				return;
+			}
+		}
+		// Re-send an absent mode as absent unless the admin chose one.
+		const sendMode = paymentsModeStored !== null || paymentsMode !== 'processor';
 		savingPayments = true;
 		try {
 			await patchSettings(m('org.section.paymentsSaved'), {
 				payments: {
+					...paymentsExtras,
+					...(sendMode ? { mode: paymentsMode } : {}),
+					nacha,
 					provider: paymentsProvider,
 					program_type: paymentsProgramType,
 					api_key: paymentsApiKey,
@@ -814,6 +893,7 @@
 					cfo_approval_above: paymentsCfoThreshold,
 				},
 			});
+			if (sendMode) paymentsModeStored = paymentsMode;
 		} catch (err) {
 			toast(err instanceof Error ? err.message : m('org.toast.saveFailed'), 'error');
 		} finally {
@@ -2481,6 +2561,75 @@
 								{m('org.readOnly.sectionAdminOnly')}
 							</p>
 						{:else}
+							<div class="form-grid">
+								<label>
+									<span>{m('org.payments.mode')}</span>
+									<select
+										bind:value={paymentsMode}
+										aria-describedby="org-payments-mode-hint"
+										data-testid="payments-mode"
+									>
+										<option value="processor">{m('org.payments.modeProcessor')}</option>
+										<option value="record_only">{m('org.payments.modeRecordOnly')}</option>
+									</select>
+								</label>
+							</div>
+							<p class="card-hint" id="org-payments-mode-hint">
+								{m('org.payments.modeHint')}
+								<HelpTip term="record-only" />
+							</p>
+
+							{#if paymentsMode === 'record_only'}
+								<div class="help-row">
+									<h3 class="chat-subhead">{m('org.payments.nachaHeading')}</h3>
+									<HelpTip term="nacha-file" />
+								</div>
+								<p class="card-hint" id="org-payments-nacha-hint">{m('org.payments.nachaHint')}</p>
+								<div class="form-grid" data-testid="payments-nacha">
+									<label>
+										<span>{m('org.payments.nachaField.companyName')}</span>
+										<input
+											type="text"
+											bind:value={nachaCompanyName}
+											maxlength="16"
+											autocomplete="off"
+											aria-describedby="org-payments-nacha-hint"
+										/>
+									</label>
+									<label>
+										<span>{m('org.payments.nachaField.companyId')}</span>
+										<input
+											type="text"
+											bind:value={nachaCompanyId}
+											maxlength="10"
+											autocomplete="off"
+											aria-describedby="org-payments-nacha-hint"
+										/>
+									</label>
+									<label>
+										<span>{m('org.payments.nachaField.odfiRouting')}</span>
+										<input
+											type="text"
+											inputmode="numeric"
+											bind:value={nachaOdfiRouting}
+											maxlength="9"
+											autocomplete="off"
+											aria-describedby="org-payments-nacha-hint"
+										/>
+									</label>
+									<label>
+										<span>{m('org.payments.nachaField.bankName')}</span>
+										<input
+											type="text"
+											bind:value={nachaBankName}
+											maxlength="23"
+											autocomplete="off"
+											aria-describedby="org-payments-nacha-hint"
+										/>
+									</label>
+								</div>
+							{/if}
+
 							<div class="form-grid">
 								<label>
 									<span>{m('org.payments.provider')}</span>
