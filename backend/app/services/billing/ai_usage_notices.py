@@ -50,6 +50,7 @@ from app.services.billing.ai_invoice_meter import (
     period_of,
 )
 from app.services.billing.entitlements import get_active_subscription
+from app.services.billing.plan_catalog import CATALOG_CURRENCY
 from app.services.notification_templates import (
     AI_NOTICE_80,
     AI_NOTICE_100,
@@ -157,9 +158,13 @@ async def send_due_ai_usage_notices(
             return []
         active = await get_active_subscription(ctrl, organization_id)
         org_settings = dict(org.settings or {})
-    allowance = allowance_for_plan(active[1] if active else None)
+    plan = active[1] if active else None
+    allowance = allowance_for_plan(plan)
     if not allowance.metered:
         return []
+    # The unit price and the cap are both in the plan's currency; a negotiated
+    # non-USD plan must not read "USD" in its notice.
+    currency = plan.currency if plan is not None else CATALOG_CURRENCY
     cap = parse_spend_cap(org_settings)
 
     used = await count_ai_invoices(tenant_db, organization_id=organization_id, period=period)
@@ -187,6 +192,7 @@ async def send_due_ai_usage_notices(
                 included=allowance.included,
                 overage_unit_price=allowance.overage_unit_price,
                 spend_cap=cap,
+                currency=currency,
             )
             notified = await notify_event(
                 tenant_db,

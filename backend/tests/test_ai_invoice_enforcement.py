@@ -387,6 +387,29 @@ async def test_each_threshold_is_announced_once(realdb):
     assert any("paused" in n.body for n in after), "Free's 100% notice says reading pauses"
 
 
+async def test_a_notice_prices_in_the_plans_own_currency(realdb):
+    """A negotiated non-USD plan must not read "USD" in its overage notice."""
+    from app.models.billing import Plan
+
+    org_id = realdb.info("a").org_id
+    await _subscribe(realdb, org_id, "growth")
+    async with realdb.control_sessionmaker()() as s:
+        plan = (await s.execute(select(Plan).where(Plan.code == "growth"))).scalar_one()
+        plan.currency = "EUR"
+        await s.commit()
+    try:
+        await _seed_counted(realdb, org_id, 500)  # Growth: 100%
+        async with realdb.sessionmaker("a")() as s:
+            assert await send_due_ai_usage_notices(s, organization_id=org_id) == ["80", "100"]
+        bodies = [n.body for n in await _ai_notices(realdb)]
+        assert bodies and all("EUR 0.10" in b and "USD" not in b for b in bodies)
+    finally:
+        async with realdb.control_sessionmaker()() as s:
+            plan = (await s.execute(select(Plan).where(Plan.code == "growth"))).scalar_one()
+            plan.currency = "USD"
+            await s.commit()
+
+
 async def test_a_notice_that_reached_nobody_is_not_marked_sent(realdb):
     org_id = realdb.info("a").org_id
     await _seed_counted(realdb, org_id, 80)

@@ -55,7 +55,8 @@ Allowance + spending cap
 The allowance comes from the live plan's ``usage_components[METER_AI_INVOICES]``
 (``{"included": int, "overage_unit_price": decimal-string | null}``). The
 customer's optional monthly overage cap lives on
-``Organization.settings.billing.monthly_spend_cap`` (a USD decimal string), and
+``Organization.settings.billing.monthly_spend_cap`` (a decimal string in the
+plan's currency — it is compared against the plan's unit price), and
 :func:`decide` is the pure function that turns (used, already-counted, allowance,
 cap) into "read" or "pause, because …".
 
