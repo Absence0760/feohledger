@@ -16,7 +16,10 @@ each invoice holds at most one live payment.
 from __future__ import annotations
 
 import copy
+import uuid
+from types import SimpleNamespace
 
+import pytest
 from sqlalchemy import func, select
 
 from app.models.invoice import Invoice, InvoiceStatus
@@ -25,7 +28,17 @@ from app.models.vendor import Vendor
 from app.models.workflow import AuditLog, WorkflowDefinition, WorkflowInstance
 from app.models.workflow_experiment import WorkflowExperiment
 from app.services.workflow_engine import VALID_TRANSITIONS
-from scripts.seed_automation import _CLEAN, _NOISY, _SMALL, seed_automation
+from app.services.workflow_experiments import VARIANT_B, assign_variant
+from scripts.seed import ACME_ORG_ID, TECH_ORG_ID
+from scripts.seed_automation import (
+    _AUTO_PER_SMALL_VENDOR,
+    _CLEAN,
+    _NOISY,
+    _SMALL,
+    _id,
+    _sized_small_plans,
+    seed_automation,
+)
 
 # The default workflow `scripts/seed.py` gives every full-seed tenant.
 _DEFAULT_STEPS = {
@@ -118,7 +131,7 @@ async def test_every_adaptive_panel_clears_its_minimum(realdb):
     # A measured overturn rate, below the 5% brake, so the raise still stands.
     outcomes = feedback["outcomes"]
     assert outcomes["insufficient_data"] is False
-    assert outcomes["auto_approved_count"] >= 20
+    assert outcomes["auto_approved_count"] == _AUTO_PER_SMALL_VENDOR * len(_SMALL)
     assert outcomes["overturned_count"] == outcomes["voided_count"] == 1
     assert float(outcomes["overturn_rate_pct"]) < 5
     assert feedback["adjusted_recommendation"]["should_raise"] is True
@@ -139,7 +152,7 @@ async def test_experiments_cover_every_status_with_results(realdb):
     assert concluded["enough_data"] is True
     assert concluded["winner"] == "B"
     assert concluded["variant_a"]["touchless_count"] == 0
-    assert concluded["variant_b"]["touchless_count"] >= 20
+    assert concluded["variant_b"]["touchless_count"] == _AUTO_PER_SMALL_VENDOR * len(_SMALL)
 
     # The running test has invoices in both arms; the draft has none yet.
     assert running["variant_a"]["completed_count"] > 0
@@ -193,7 +206,11 @@ async def test_history_keeps_the_apps_own_rules(realdb):
 
 async def test_a_second_run_is_a_no_op(realdb):
     first = await _seeded(realdb)
-    assert first["invoices"] == sum(p.count for p in (*_CLEAN, *_NOISY, *_SMALL))
+    small = sum(
+        p.count
+        for p in _sized_small_plans(realdb.info("a").org_id, _auto_test(realdb.info("a").org_id))
+    )
+    assert first["invoices"] == sum(p.count for p in (*_CLEAN, *_NOISY)) + small
 
     mk = realdb.sessionmaker("a")
     org_id = realdb.info("a").org_id
@@ -202,3 +219,39 @@ async def test_a_second_run_is_a_no_op(realdb):
         count = (await s.execute(select(func.count()).select_from(Invoice))).scalar()
     assert again == {}
     assert count == first["invoices"]
+
+
+def _auto_test(org_id: uuid.UUID) -> SimpleNamespace:
+    """The concluded auto-approve experiment's identity, as the seed mints it."""
+    return SimpleNamespace(id=_id(org_id, "experiment", "auto-below-500"), split_a_pct=50)
+
+
+@pytest.mark.parametrize(
+    "org_id",
+    [ACME_ORG_ID, TECH_ORG_ID, *(uuid.uuid5(uuid.NAMESPACE_DNS, f"org-{n}") for n in range(40))],
+)
+def test_every_org_gets_the_same_auto_approval_population(org_id):
+    """The arm an invoice lands in is a hash of org-derived ids, so a fixed
+    invoice count gave each org a different number of auto-approvals. Acme got
+    20, which with the one void sat exactly on the feedback loop's 5% brake and
+    withheld the threshold raise the demo exists to show. Sizing per org pins
+    the population for every org, acme's included."""
+    exp = _auto_test(org_id)
+    plans = _sized_small_plans(org_id, exp)
+    for plan in plans:
+        arms = {
+            i: assign_variant(
+                str(_id(org_id, "invoice", f"{plan.code}-{i}")), str(exp.id), split_a_pct=50
+            )
+            for i in range(plan.count)
+        }
+        auto = [i for i, v in arms.items() if v == VARIANT_B]
+        assert len(auto) == _AUTO_PER_SMALL_VENDOR
+        # Corrections only ever sit on human-reviewed invoices...
+        assert all(arms[i] != VARIANT_B for i in plan.corrected)
+        # ...and a vendor with enough of those to qualify as clean always has one.
+        human = plan.count - len(auto)
+        if human >= 12:
+            assert plan.corrected
+    # One void over the whole population stays under the 5% brake.
+    assert 1 / (_AUTO_PER_SMALL_VENDOR * len(plans)) < 0.05
