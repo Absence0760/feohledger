@@ -185,6 +185,19 @@ The visual styling for all of the above lives **globally in `src/app.css`** (cla
   (`data-testid="usage-meter"`). Budget `0` = unlimited (running total, no bar);
   amber ≥80%, red at/over budget.
 
+**`billing/`** — platform-billing panels for `/billing`.
+
+- `AiUsagePanel.svelte` — this month's AI-read invoices against the plan
+  allowance (decisions §253). `<AiUsagePanel usage={data?.ai_usage ?? null}
+  pending={loading} canEditCap={auth.isAdmin} onUsageChange={…} />`. A
+  `role="meter"` bar (amber ≥80%, red at the limit or while paused — tone from
+  `types/billing.ts::aiUsageTone`), the plan's overage price or "pauses at the
+  allowance", overage / projection / cap `KpiCard`s on a plan that bills
+  overage, a pause banner naming the remedy, and (admin) the spending-cap form
+  — the typed string is checked by `parseSpendCapInput` and sent unchanged,
+  never through a float. Testids: `billing-ai-usage`, `billing-ai-used`,
+  `billing-ai-paused`, `billing-ai-cap-input`, `-save`, `-remove`.
+
 **`workflow-builder/`** — the no-code builder canvas for the
 `/workflows/[id]` editor (step palette, canvas nodes, SVG connectors; no
 svelte-flow). The palette adds a step by click. The canvas reorders by a

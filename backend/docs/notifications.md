@@ -79,6 +79,7 @@ transaction.
 | `invoice_rejected` | `transition_invoice → rejected` | invoice uploader |
 | `invoice_paid` | `transition_invoice → paid` (payment webhook / ERP webhook / ERP-sync) | invoice uploader + every `ap_manager` in the org |
 | `chat_message` | supplier posts on the portal → every `ap_manager`; AP posts with @mentions → the mentioned AP users (poster excluded) | see below |
+| `ai_invoice_usage` | the org crosses 80% / 100% of its plan's monthly AI-read-invoice allowance, or its AI spending cap (`services/billing/ai_usage_notices.py`, checked after every billable read and by the `billing-ai-overage` sweep) | every org `admin` — once per threshold per UTC month, claimed under the org row lock (`billing.md` § Notices). `entity_type="billing"`, `entity_id` NULL |
 
 `ap_manager` recipients are resolved against the control plane via
 `notification_dispatch.resolve_role_user_ids(org_id, "ap_manager")`.
@@ -375,7 +376,8 @@ User-global, stored on the control-plane `users.notification_prefs` JSONB:
   "invoice_paid":             { "email": true, "in_app": true },
   "contract_renewal_due":     { "email": true, "in_app": true },
   "chat_message":             { "email": true, "in_app": true },
-  "cash_shortfall_projected": { "email": true, "in_app": true }
+  "cash_shortfall_projected": { "email": true, "in_app": true },
+  "ai_invoice_usage":         { "email": true, "in_app": true }
 }
 ```
 
