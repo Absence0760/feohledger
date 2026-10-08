@@ -306,8 +306,9 @@ a no-op, so the sweep can run on a tight interval and across overlapping
 replicas.
 
 **A target who could not approve is never added.** Segregation of duties refuses
-the payable's implicated actors (`uploaded_by_id` ∪ `segregation_actor_ids`,
-unless the approval step sets `require_segregation: false`), and
+the payable's implicated actors (`uploaded_by_id` ∪ `segregation_actor_ids`)
+and whoever recorded a goods receipt it is billed against (unless the approval
+step sets `require_segregation: false`), and
 `advance_approval_chain` refuses anyone who already approved a different level.
 `apply_escalation` filters both out of the targets (`ineligible=` from
 `approval_chain.escalation_ineligible`, plus the chain's own earlier approvals).
@@ -357,6 +358,11 @@ turns it off (`approval_chain.violates_segregation`). When enabled:
   author and material editors, or, on an inter-company mirror, the source
   payable's whole implicated set.
 - An approver in that set is refused with 403.
+- The approver must also not have hand-recorded a live goods receipt on the
+  invoice's PO (`approval_chain.receipt_recorders` →
+  `check_receiving_segregation`, 403 `approval_segregation_receiver`) —
+  receiving and approving are different duties. Checked after any
+  corrections; not part of the implicated set (decisions §267).
 - With `uploaded_by_id` NULL **and** the set empty there is nothing to refuse.
   That combination means the invoice came in through a channel with no employee
   behind it — email intake, inbound PEPPOL, or the supplier portal — not

@@ -2,6 +2,7 @@
 
 import logging
 import uuid
+from collections.abc import Collection
 from decimal import Decimal
 
 from sqlalchemy import select
@@ -303,12 +304,26 @@ async def approve_invoice(
     actor_roles: set[str] | None = None,
     corrections: dict | None = None,
     org_settings: dict | None = None,
+    receipt_recorders: Collection[str] | None = None,
 ) -> Invoice:
+    """Approve ``invoice`` as ``actor_id`` — the one door every approval path
+    (in-app single and bulk, email / Slack / Teams links, mobile, the exception
+    agents) goes through, so every control below holds on all of them.
+
+    ``receipt_recorders`` lets bulk approve hand in the batch's
+    ``approval_chain.receipt_recorders_by_invoice`` resolved up front; ``None``
+    looks it up here. Either way it is re-read after a correction, which can
+    re-point the invoice at another PO.
+    """
     from app.services.approval_chain import (
         advance_approval_chain,
         check_level_approver,
+        check_receiving_segregation,
         check_segregation,
         get_chain_progress,
+    )
+    from app.services.approval_chain import (
+        receipt_recorders as lookup_receipt_recorders,
     )
 
     # Read the approval config: the invoice's frozen snapshot, falling back —
@@ -433,6 +448,16 @@ async def approve_invoice(
             await refresh_warnings(db, invoice, org_settings=org_settings)
         except Exception as exc:  # noqa: BLE001
             _log.warning("refresh_warnings after corrections failed for %s: %s", invoice.id, exc)
+
+    # Receiving ≠ approving: whoever hand-recorded a live goods receipt on the
+    # invoice's PO may not approve it (decisions §267). After the corrections,
+    # so a `po_number` correction cannot re-point the invoice at a PO the
+    # approver received and slip past a set read for the old one.
+    # (Not looked up at all when the step opted out of segregation.)
+    if approval_config.get("require_segregation", True) is not False:
+        if receipt_recorders is None or corrections:
+            receipt_recorders = await lookup_receipt_recorders(db, invoice)
+        check_receiving_segregation(actor_id, receipt_recorders, approval_config)
 
     # Threshold enforcement — runs against the now-corrected invoice amount, and
     # against the SAME approval config the segregation / named-approver gates

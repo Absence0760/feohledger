@@ -1368,6 +1368,7 @@ the ones that tripped. See [decisions.md](decisions.md) §169.
 
 **The approval path's refusals carry a code.** `check_segregation`'s 403 is
 `coded_refusal("approval_segregation", …)`; its siblings are
+`approval_segregation_receiver` (receiving ≠ approving, below),
 `approval_not_named_approver` (`check_level_approver`), `approval_level_reuse`
 (one approver on two chain levels), and the money gates in
 `services/review._enforce_approval_thresholds` — `approval_cfo_required`,
@@ -1380,6 +1381,23 @@ currency (`amount`/`currency`, `limit`/`limit_currency`, the structuring
 server-side catchers (the exception agent's escalation rationale, the
 email-approval page, the bulk-approve skip reason) read the English through
 `utils/http.detail_text`.
+
+**Receiving ≠ approving.** Whoever hand-recorded a live goods receipt on the
+invoice's PO cannot approve it: `review.approve_invoice` reads
+`approval_chain.receipt_recorders` (live = status outside
+`CANCELLED_GR_STATUSES`; `source = manual` with a named recorder; the POs the
+invoice's `po_number` names under the matcher's entity/vendor scope, plus the
+stored match's `po_id` / `po_ids`; receipts in the invoice's own entity) and
+`check_receiving_segregation` refuses with 403 `approval_segregation_receiver`.
+It runs after any corrections, so a `po_number` correction cannot slip past it,
+and on every door because every door calls `approve_invoice`; bulk approve
+resolves the whole batch in two queries up front. The same
+`require_segregation: false` opt-out lifts it, and the escalation sweep never
+targets a receiver (`escalation_ineligible`). Receivers are deliberately **not**
+in `implicated_actors`: that set is also what `receipts_clear_hold` measures a
+receipt's recorder against, so folding them in would make every typed receipt
+implicate its own recorder. They are not refused clearing exceptions either.
+See [decisions.md](decisions.md) §267.
 
 `check_segregation` is driven by the approval step's own
 `require_segregation` flag, and **the default is ON everywhere**:
