@@ -4,6 +4,7 @@ import {
 	groupProviders,
 	initialValues,
 	missingRequired,
+	OAUTH_ERROR_KEYS,
 	readOAuthReturn,
 	secretIsSaved,
 	selectedProviderKey,
@@ -167,5 +168,18 @@ describe('readOAuthReturn', () => {
 		const long = readOAuthReturn(new URLSearchParams(`erp_error=${'x'.repeat(500)}`));
 		expect(long?.kind === 'error' && long.code.length).toBe(64);
 		expect(readOAuthReturn(new URLSearchParams('section=erp'))).toBeNull();
+	});
+});
+
+describe('OAUTH_ERROR_KEYS', () => {
+	it('explains every actionable callback code in every locale', async () => {
+		const { CATALOGUE_LOADERS } = await import('#lib/i18n/catalogues.ts');
+		for (const [locale, load] of Object.entries(CATALOGUE_LOADERS)) {
+			const messages = await load();
+			for (const key of Object.values(OAUTH_ERROR_KEYS)) {
+				expect(messages[key], `${locale}: ${key}`).toBeTruthy();
+			}
+		}
+		expect(OAUTH_ERROR_KEYS.no_external_tenant).toBe('org.erp.oauth.error.noExternalTenant');
 	});
 });

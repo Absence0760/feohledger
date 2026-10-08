@@ -37,6 +37,7 @@
 		groupProviders,
 		initialValues,
 		missingRequired,
+		OAUTH_ERROR_KEYS,
 		readOAuthReturn,
 		secretIsSaved,
 		selectedProviderKey,
@@ -175,7 +176,14 @@
 			const p = catalog?.providers.find((x) => x.key === ret.provider);
 			setStatus(m('org.erp.oauth.returnConnected', { erp: p ? providerLabel(p) : ret.provider }), 'success');
 		} else {
-			setStatus(m('org.erp.oauth.returnError', { code: ret.code }), 'failure');
+			const p = catalog?.providers.find((x) => x.key === selectedKey);
+			const key = OAUTH_ERROR_KEYS[ret.code as keyof typeof OAUTH_ERROR_KEYS];
+			setStatus(
+				key
+					? m(key, { erp: p ? providerLabel(p) : m('org.erp.oauth.yourErp') })
+					: m('org.erp.oauth.returnError', { code: ret.code }),
+				'failure'
+			);
 		}
 	});
 

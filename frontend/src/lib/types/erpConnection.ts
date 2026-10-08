@@ -173,6 +173,19 @@ export type OAuthReturn =
 	| { kind: 'error'; code: string }
 	| null;
 
+/** The OAuth callback's `erp_error` codes an admin can act on, each with its
+ * own explanation. Any other code falls back to the generic message. */
+export const OAUTH_ERROR_KEYS = {
+	state_expired: 'org.erp.oauth.error.stateExpired',
+	access_denied: 'org.erp.oauth.error.accessDenied',
+	not_authorized: 'org.erp.oauth.error.notAuthorized',
+	plan_required: 'org.erp.oauth.error.planRequired',
+	provider_unavailable: 'org.erp.oauth.error.providerUnavailable',
+	token_exchange_failed: 'org.erp.oauth.error.tokenExchangeFailed',
+	no_external_tenant: 'org.erp.oauth.error.noExternalTenant',
+	already_linked: 'org.erp.oauth.error.alreadyLinked',
+} as const satisfies Record<string, MessageKey>;
+
 /** Bounded so a crafted URL can't put a paragraph into the status line. */
 const RETURN_PARAM_LIMIT = 64;
 
