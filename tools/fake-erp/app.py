@@ -602,16 +602,19 @@ async def netsuite_suiteql(request: Request, limit: int = 1000, offset: int = 0)
     if request.headers.get("prefer", "").lower() != "transient":
         raise _netsuite_error(400, "USER_ERROR", "Prefer: transient header is required.")
     body = await request.json()
-    if not _SUITEQL_ACCOUNT_Q.match(str(body.get("q", ""))):
+    # The vendor and purchase-order tables are resolved by
+    # `_netsuite_suiteql_table` (the NetSuite block at the end of this file).
+    table = _netsuite_suiteql_table(str(body.get("q", "")))
+    if table is None:
         raise _netsuite_error(400, "INVALID_SEARCH", "Unsupported query.")
-    rows = NETSUITE_ACCOUNT_FIXTURES[offset : offset + max(limit, 0)]
+    rows = table[offset : offset + max(limit, 0)]
     return {
         "links": [],
         "count": len(rows),
-        "hasMore": offset + len(rows) < len(NETSUITE_ACCOUNT_FIXTURES),
+        "hasMore": offset + len(rows) < len(table),
         "items": copy.deepcopy(rows),
         "offset": offset,
-        "totalResults": len(NETSUITE_ACCOUNT_FIXTURES),
+        "totalResults": len(table),
     }
 
 
@@ -731,6 +734,8 @@ async def d365_create_purchase_invoice(
         )
     if vendor is None:
         raise _d365_error(400, "Internal_RecordNotFound", "The Vendor does not exist.")
+    # Lines must name a posting account by id (the BC block at the end).
+    _d365_check_invoice_lines(body.get("purchaseInvoiceLines") or [])
     STATE["counters"]["d365"] += 1
     n = STATE["counters"]["d365"]
     record = {
@@ -2040,6 +2045,272 @@ async def blackbaud_set_status(body: dict) -> dict:
 
 
 app.include_router(blackbaud)
+
+
+# Business Central + NetSuite: chart / PO / vendor syncs and void
+# ---------------------------------------------------------------------------
+#
+# The first BC and NetSuite routers above are already mounted, so these routes
+# go on second routers with the same prefixes. Two hooks reach in from the
+# handlers above: `_netsuite_suiteql_table` (which table a SuiteQL query reads)
+# and `_d365_check_invoice_lines` (a purchaseInvoice line must name a posting
+# account by id).
+
+# BC `accounts`. `id` is what a purchaseInvoice line's `accountId` takes; only
+# the three Posting accounts can carry a line. The heading and the blocked
+# account are there so the adapter's skip rules are exercised end to end.
+D365_ACCOUNT_FIXTURES: list[dict] = [
+    {
+        "id": "a6100000-0000-0000-0000-000000006100",
+        "number": "6100",
+        "displayName": "Fake BC Office Supplies",
+        "category": "Expense",
+        "accountType": "Posting",
+        "blocked": False,
+    },
+    {
+        "id": "a6200000-0000-0000-0000-000000006200",
+        "number": "6200",
+        "displayName": "Fake BC Software",
+        "category": "Expense",
+        "accountType": "Posting",
+        "blocked": False,
+    },
+    {
+        "id": "a6300000-0000-0000-0000-000000006300",
+        "number": "6300",
+        "displayName": "Fake BC Consulting",
+        "category": "Cost of Goods Sold",
+        "accountType": "Posting",
+        "blocked": False,
+    },
+    {
+        "id": "a6000000-0000-0000-0000-000000006000",
+        "number": "6000",
+        "displayName": "Fake BC Operating Expenses",
+        "category": "Expense",
+        "accountType": "Heading",
+        "blocked": False,
+    },
+    {
+        "id": "a6900000-0000-0000-0000-000000006900",
+        "number": "6900",
+        "displayName": "Fake BC Retired",
+        "category": "Expense",
+        "accountType": "Posting",
+        "blocked": True,
+    },
+]
+
+# BC `purchaseOrders` with `purchaseOrderLines` expanded. BC leaves
+# `currencyCode` blank for the company's local currency and renders a blank
+# date as 0001-01-01; PO-FAKE-BC-401 carries both.
+D365_PO_FIXTURES: list[dict] = [
+    {
+        "id": "b4010000-0000-0000-0000-000000000401",
+        "number": "PO-FAKE-BC-401",
+        "vendorName": "Fake BC Vendor A",
+        "currencyCode": "",
+        "requestedReceiptDate": "0001-01-01",
+        "totalAmountIncludingTax": 1500.25,
+        "status": "Open",
+        "purchaseOrderLines": [
+            {
+                "lineType": "Account",
+                "lineObjectNumber": "6100",
+                "description": "Fake BC paper",
+                "quantity": 5,
+                "directUnitCost": 300.05,
+                "netAmountIncludingTax": 1500.25,
+            },
+            {"lineType": "Comment", "description": "Deliver to dock 2"},
+        ],
+    },
+    {
+        "id": "b4020000-0000-0000-0000-000000000402",
+        "number": "PO-FAKE-BC-402",
+        "vendorName": "Fake BC Vendor A",
+        "currencyCode": "EUR",
+        "requestedReceiptDate": "2026-05-20",
+        "totalAmountIncludingTax": 820.00,
+        "status": "Draft",
+        "purchaseOrderLines": [
+            {
+                "lineType": "Account",
+                "lineObjectNumber": "6200",
+                "description": "Fake BC licences",
+                "quantity": 2,
+                "directUnitCost": 410.00,
+                "netAmountIncludingTax": 820.00,
+            }
+        ],
+    },
+]
+
+_D365_POSTING_ACCOUNT_IDS = {
+    a["id"] for a in D365_ACCOUNT_FIXTURES if a["accountType"] == "Posting" and not a["blocked"]
+}
+
+
+def _d365_check_invoice_lines(lines: list[dict]) -> None:
+    """Like BC: an Account line needs a posting account, here by `accountId`
+    (a No. in `lineObjectNumber` instead, or a heading / blocked one, is a 400)."""
+    if not lines:
+        raise _d365_error(400, "BadRequest", "A purchase invoice needs at least one line.")
+    for line in lines:
+        if line.get("lineType") == "Account" and line.get("accountId") not in _D365_POSTING_ACCOUNT_IDS:
+            raise _d365_error(400, "Internal_RecordNotFound", "The G/L Account does not exist.")
+
+
+def _d365_page(request: Request, rows: list[dict]) -> dict:
+    """Server-driven paging: honours `Prefer: odata.maxpagesize` and `$skiptoken`
+    (an offset here), returning `@odata.nextLink` while rows remain."""
+    match = re.search(r"odata\.maxpagesize=(\d+)", request.headers.get("prefer", ""))
+    size = int(match.group(1)) if match else 20000
+    skip = int(request.query_params.get("$skiptoken", "0") or 0)
+    page = rows[skip : skip + size]
+    body: dict = {"value": copy.deepcopy(page)}
+    if skip + size < len(rows):
+        params = dict(request.query_params)
+        params["$skiptoken"] = str(skip + size)
+        body["@odata.nextLink"] = str(request.url.replace_query_params(**params))
+    return body
+
+
+d365_sync = APIRouter(prefix="/d365")
+
+
+@d365_sync.get("/{environment}/api/v2.0/companies({company_id})/accounts")
+async def d365_list_accounts(request: Request, environment: str, company_id: str) -> dict:
+    _require_d365_auth(request)
+    return _d365_page(request, D365_ACCOUNT_FIXTURES)
+
+
+@d365_sync.get("/{environment}/api/v2.0/companies({company_id})/purchaseOrders")
+async def d365_list_purchase_orders(request: Request, environment: str, company_id: str) -> dict:
+    _require_d365_auth(request)
+    rows = copy.deepcopy(D365_PO_FIXTURES)
+    if "purchaseOrderLines" not in request.query_params.get("$expand", ""):
+        for row in rows:
+            row.pop("purchaseOrderLines", None)
+    return _d365_page(request, rows)
+
+
+@d365_sync.delete("/{environment}/api/v2.0/companies({company_id})/purchaseInvoices({doc_id})")
+async def d365_delete_purchase_invoice(
+    request: Request, environment: str, company_id: str, doc_id: str
+) -> Response:
+    """Like BC: If-Match is required, and only an unposted (Draft) invoice can
+    be deleted — a posted one is a posted document."""
+    _require_d365_auth(request)
+    if not request.headers.get("if-match"):
+        raise _d365_error(428, "Precondition_Required", "If-Match header is required.")
+    record = STATE["d365_invoices"].get(doc_id)
+    if record is None:
+        raise _d365_error(404, "BadRequest_NotFound", f"No purchaseInvoice with id {doc_id}.")
+    if record.get("status") != "Draft":
+        raise _d365_error(400, "Application_DialogException", "A posted invoice cannot be deleted.")
+    del STATE["d365_invoices"][doc_id]
+    return Response(status_code=204)
+
+
+app.include_router(d365_sync)
+
+
+# NetSuite SuiteQL `vendor` rows (lower-case columns). The ids match
+# NETSUITE_VENDOR_FIXTURES, which `vendorBill.entity` is checked against; the
+# inactive vendor is never synced.
+NETSUITE_SUITEQL_VENDOR_FIXTURES: list[dict] = [
+    {
+        "id": "25",
+        "entityid": "Fake NetSuite Vendor A",
+        "companyname": "Fake NetSuite Vendor A",
+        "email": "ap@fake-ns-a.example",
+        "phone": "+1-555-0125",
+        "terms": "Net 30",
+        "isinactive": "F",
+    },
+    {
+        "id": "26",
+        "entityid": "Fake NetSuite Vendor B",
+        "companyname": "Fake NetSuite Vendor B",
+        "email": None,
+        "phone": None,
+        "terms": None,
+        "isinactive": "F",
+    },
+    {
+        "id": "27",
+        "entityid": "Fake NetSuite Vendor Retired",
+        "companyname": "Fake NetSuite Vendor Retired",
+        "email": None,
+        "phone": None,
+        "terms": None,
+        "isinactive": "T",
+    },
+]
+
+# SuiteQL purchase-order rows: `status` is the PurchOrd status letter
+# (B = Pending Receipt, H = Closed), `currency` the currency's ISO symbol.
+NETSUITE_SUITEQL_PO_FIXTURES: list[dict] = [
+    {
+        "id": "501",
+        "tranid": "PO-FAKE-NS-501",
+        "status": "B",
+        "vendorname": "Fake NetSuite Vendor A",
+        "foreigntotal": 2100.50,
+        "currency": "USD",
+        "duedate": "2026-06-01",
+    },
+    {
+        "id": "502",
+        "tranid": "PO-FAKE-NS-502",
+        "status": "H",
+        "vendorname": "Fake NetSuite Vendor B",
+        "foreigntotal": 640.00,
+        "currency": "GBP",
+        "duedate": None,
+    },
+]
+
+_SUITEQL_VENDOR_Q = re.compile(r"^\s*SELECT\b.*\bFROM\s+vendor\b", re.IGNORECASE | re.DOTALL)
+_SUITEQL_PO_Q = re.compile(
+    r"^\s*SELECT\b.*\bFROM\s+transaction\b.*\btype\s*=\s*'PurchOrd'", re.IGNORECASE | re.DOTALL
+)
+
+
+def _netsuite_suiteql_table(query: str) -> list[dict] | None:
+    """The fixture rows a SuiteQL query reads, or None for one the fake
+    doesn't answer (a 400, as real SuiteQL gives an invalid query)."""
+    if _SUITEQL_ACCOUNT_Q.match(query):
+        return NETSUITE_ACCOUNT_FIXTURES
+    if _SUITEQL_VENDOR_Q.match(query):
+        return NETSUITE_SUITEQL_VENDOR_FIXTURES
+    if _SUITEQL_PO_Q.match(query):
+        return NETSUITE_SUITEQL_PO_FIXTURES
+    return None
+
+
+netsuite_void = APIRouter(prefix="/netsuite/services/rest/record/v1")
+
+
+@netsuite_void.delete("/vendorBill/{doc_id}")
+async def netsuite_delete_vendor_bill(request: Request, doc_id: str) -> Response:
+    """REST record delete → 204. The fake refuses an approved (Open / paid)
+    bill so a test can't pass by deleting posted history; the adapter only
+    asks for a Pending Approval one."""
+    _require_netsuite_auth(request)
+    record = STATE["netsuite_bills"].get(doc_id)
+    if record is None:
+        raise _netsuite_error(404, "NONEXISTENT_ID", f"That record does not exist. id: {doc_id}")
+    status = str((record.get("status") or {}).get("id") or "").replace(" ", "").lower()
+    if status != "pendingapproval":
+        raise _netsuite_error(400, "USER_ERROR", "This bill has been approved and cannot be deleted.")
+    del STATE["netsuite_bills"][doc_id]
+    return Response(status_code=204)
+
+
+app.include_router(netsuite_void)
 
 
 if __name__ == "__main__":

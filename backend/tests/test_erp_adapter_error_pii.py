@@ -302,8 +302,32 @@ def _coded_line(**overrides) -> LineItemPayload:
             "Merge.dev",
             _payload(line_items=[_coded_line(gl_account_erp_id=None)]),
         ),
+        # Business Central posts every line on `accountId`, the same rules.
+        (
+            lambda: BusinessCentralAdapter(_BC_CONFIG),
+            "Business Central",
+            _payload(line_items=[_coded_line(gl_account_erp_id=None)]),
+        ),
+        (
+            lambda: BusinessCentralAdapter(_BC_CONFIG),
+            "Business Central",
+            _payload(line_items=[], gl_account_erp_id=None),
+        ),
+        (
+            lambda: BusinessCentralAdapter(_BC_CONFIG),
+            "Business Central",
+            _payload(line_items=[_coded_line(gl_account=None)], gl_account_erp_id=None),
+        ),
     ],
-    ids=["netsuite-line", "netsuite-header-only", "netsuite-uncoded-line", "merge-line"],
+    ids=[
+        "netsuite-line",
+        "netsuite-header-only",
+        "netsuite-uncoded-line",
+        "merge-line",
+        "bc-line",
+        "bc-header-only",
+        "bc-uncoded-line",
+    ],
 )
 def test_unlinked_account_is_refused_before_any_http_call(adapter, provider, payload):
     """A GL code is never posted as text where the ERP wants an account id,

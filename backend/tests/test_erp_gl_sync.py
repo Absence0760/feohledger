@@ -3,15 +3,14 @@
 Mirrors `test_erp_po_sync.py` — the mock adapter's catalogue is the
 contract `/api/gl-accounts/sync-erp` relies on, the Merge.dev adapter
 is HTTP-mocked to lock the request shape and the response→payload
-mapping, and the unimplemented adapters inherit the empty-list default.
+mapping; NetSuite (SuiteQL) and Business Central (`accounts`) likewise.
 """
 
 from __future__ import annotations
 
 import asyncio
+import json
 from unittest.mock import AsyncMock, MagicMock, patch
-
-import pytest
 
 # Trigger @register_adapter side effects on these modules so tests
 # can resolve adapters by type via the dispatcher.
@@ -64,20 +63,139 @@ def test_mock_adapter_list_gl_accounts_returns_independent_payloads():
     assert second[0].name != "MUTATED"
 
 
-# ---------- Default empty-list inheritance --------------------------------
+# ---------- Business Central (API v2.0 `accounts`) ------------------------
+
+_BC_API = "http://fake-erp:12112/d365"
 
 
-@pytest.mark.parametrize("erp_type", ["dynamics_365_bc"])
-def test_unimplemented_adapter_list_gl_accounts_returns_empty(erp_type: str):
-    """Adapters without a `list_gl_accounts` override inherit the
-    base's []. Anything else (raise, None) breaks /api/gl-accounts/
-    sync-erp for tenants on those ERPs and the operator gets a 502
-    when the right outcome is "synced 0 new accounts"."""
-    from app.services.erp_adapters.dispatcher import _ADAPTER_REGISTRY
+def _bc_adapter(monkeypatch):
+    from app.config import settings
+    from app.services.erp_adapters.dynamics_365_bc import BusinessCentralAdapter
 
-    cls = _ADAPTER_REGISTRY[erp_type]
-    adapter = cls({"type": erp_type, "integration_method": "direct"})
-    assert _run(adapter.list_gl_accounts()) == []
+    # Operator override: keeps the SSRF guard's DNS lookup out of a unit test.
+    monkeypatch.setattr(settings, "erp_d365_api_base", _BC_API)
+    monkeypatch.setattr(settings, "erp_d365_token_url", f"{_BC_API}/oauth2/token")
+    return BusinessCentralAdapter(
+        {"client_id": "c", "client_secret": "s", "environment": "sandbox", "company_id": "co"}
+    )
+
+
+def test_bc_list_gl_accounts_maps_accounts_into_payloads(monkeypatch):
+    """`erp_account_id` is BC's account GUID — what `post_invoice` sends as a
+    line's `accountId` — and `code` is the account No. Headings / totals and
+    blocked accounts are skipped: BC refuses a line on either."""
+    body = {
+        "value": [
+            {
+                "id": "g-6100",
+                "number": "6100",
+                "displayName": "Office Supplies",
+                "category": "Expense",
+                "accountType": "Posting",
+                "blocked": False,
+            },
+            {
+                "id": "g-2100",
+                "number": "2100",
+                "displayName": "Accounts Payable",
+                "category": "Liabilities",
+                "accountType": "Posting",
+                "blocked": False,
+            },
+            {
+                "id": "g-1000",
+                "number": "1000",
+                "displayName": "Cash",
+                "category": "Assets",
+                "accountType": "Posting",
+            },
+            {"id": "g-3000", "number": "3000", "displayName": "Capital", "category": "Equity"},
+            {"id": "g-4000", "number": "4000", "displayName": "Sales", "category": "Income"},
+            {
+                "id": "g-5000",
+                "number": "5000",
+                "displayName": "COGS",
+                "category": "Cost of Goods Sold",
+                "accountType": "Posting",
+            },
+            # Blank category -> unclassified, still synced.
+            {"id": "g-9000", "number": "9000", "displayName": "Misc", "category": " "},
+            {"id": "g-6000", "number": "6000", "displayName": "Opex", "accountType": "Heading"},
+            {"id": "g-6999", "number": "6999", "displayName": "Total", "accountType": "End-Total"},
+            {"id": "g-6900", "number": "6900", "displayName": "Old", "blocked": True},
+            {"id": None, "number": "7000", "displayName": "No id"},
+            {"id": "g-x", "number": "", "displayName": "No number"},
+        ]
+    }
+    with patch("httpx.AsyncClient") as cm:
+        client = cm.return_value.__aenter__.return_value
+        client.post = AsyncMock(return_value=_mock_response(200, {"access_token": "tok"}))
+        client.get = AsyncMock(return_value=_mock_response(200, body))
+        out = _run(_bc_adapter(monkeypatch).list_gl_accounts())
+
+    assert [(a.code, a.name, a.account_type, a.erp_account_id) for a in out] == [
+        ("6100", "Office Supplies", "expense", "g-6100"),
+        ("2100", "Accounts Payable", "liability", "g-2100"),
+        ("1000", "Cash", "asset", "g-1000"),
+        ("3000", "Capital", "equity", "g-3000"),
+        ("4000", "Sales", "revenue", "g-4000"),
+        ("5000", "COGS", "expense", "g-5000"),
+        ("9000", "Misc", None, "g-9000"),
+    ]
+    url = client.get.await_args.args[0]
+    assert url == f"{_BC_API}/sandbox/api/v2.0/companies(co)/accounts"
+    headers = client.get.await_args.kwargs["headers"]
+    assert headers["Authorization"] == "Bearer tok"
+    assert headers["Prefer"] == "odata.maxpagesize=100"
+
+
+def test_bc_list_gl_accounts_follows_next_link_and_caps_at_1000_rows(monkeypatch):
+    """`@odata.nextLink` is followed, but never past 1000 rows (10 pages of
+    100), however many pages BC says remain."""
+
+    def page(n: int) -> MagicMock:
+        rows = [
+            {"id": f"g-{n}-{i}", "number": f"{n:02d}{i:03d}", "displayName": "A"}
+            for i in range(100)
+        ]
+        return _mock_response(200, {"value": rows, "@odata.nextLink": f"{_BC_API}/next/{n + 1}"})
+
+    with patch("httpx.AsyncClient") as cm:
+        client = cm.return_value.__aenter__.return_value
+        client.post = AsyncMock(return_value=_mock_response(200, {"access_token": "tok"}))
+        client.get = AsyncMock(side_effect=[page(n) for n in range(12)])
+        out = _run(_bc_adapter(monkeypatch).list_gl_accounts())
+
+    assert len(out) == 1000
+    assert client.get.await_count == 10
+    assert client.get.await_args_list[1].args[0] == f"{_BC_API}/next/1"
+
+
+def test_bc_list_gl_accounts_degrades_on_error_keeping_what_it_read(monkeypatch):
+    import httpx
+
+    first = _mock_response(
+        200,
+        {
+            "value": [{"id": "g-1", "number": "6100", "displayName": "A"}],
+            "@odata.nextLink": f"{_BC_API}/next",
+        },
+    )
+    with patch("httpx.AsyncClient") as cm:
+        client = cm.return_value.__aenter__.return_value
+        client.post = AsyncMock(return_value=_mock_response(200, {"access_token": "tok"}))
+        client.get = AsyncMock(side_effect=[first, _mock_response(500, {"error": "x"})])
+        assert [a.code for a in _run(_bc_adapter(monkeypatch).list_gl_accounts())] == ["6100"]
+
+        client.get = AsyncMock(side_effect=httpx.ConnectError("dns"))
+        assert _run(_bc_adapter(monkeypatch).list_gl_accounts()) == []
+
+        bad_token = _mock_response(401, {"error": "invalid_client"})
+        bad_token.raise_for_status = MagicMock(side_effect=RuntimeError("401"))
+        client.post = AsyncMock(return_value=bad_token)
+        client.get = AsyncMock()
+        assert _run(_bc_adapter(monkeypatch).list_gl_accounts()) == []
+        client.get.assert_not_awaited()
 
 
 # ---------- NetSuite (SuiteQL) --------------------------------------------
@@ -194,9 +312,12 @@ def test_netsuite_list_gl_accounts_follows_has_more_and_degrades_on_error():
 def _mock_response(status: int, body: dict | None) -> MagicMock:
     resp = MagicMock()
     resp.status_code = status
-    resp.content = b"{}" if body is not None else b""
+    # Real bytes: the BC / NetSuite list syncs parse `content` with
+    # `loads_exact_json` (money as Decimal), not `.json()`.
+    resp.content = json.dumps(body).encode() if body is not None else b""
     resp.json = MagicMock(return_value=body or {})
     resp.headers = {"content-type": "application/json"}
+    resp.raise_for_status = MagicMock()
     return resp
 
 

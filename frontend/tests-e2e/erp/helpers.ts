@@ -118,6 +118,44 @@ export async function syncErpGlAccounts(page: Page): Promise<void> {
 	expect(resp.status(), 'GL account sync').toBe(200);
 }
 
+/** A PO as `GET /api/purchase-orders` lists it. */
+export type SyncedPo = {
+	po_number: string;
+	total: number | string;
+	currency: string | null;
+	status: string;
+};
+
+/** Pull the configured ERP's purchase orders (`POST /api/purchase-orders/sync-erp`)
+ *  and return the sync's adapter plus the tenant's PO list afterwards. Callers
+ *  assert presence by number, since earlier runs may already hold the rows. */
+export async function syncErpPurchaseOrders(
+	page: Page
+): Promise<{ adapter: string; pos: SyncedPo[] }> {
+	const headers = await authedTenantHeaders(page);
+	const sync = await page.request.post(`${API_BASE}/api/purchase-orders/sync-erp`, { headers });
+	expect(sync.status(), 'PO sync').toBe(200);
+	const { adapter } = (await sync.json()) as { adapter: string };
+	const list = await page.request.get(`${API_BASE}/api/purchase-orders?page_size=100`, {
+		headers
+	});
+	expect(list.status(), 'PO list').toBe(200);
+	const { items } = (await list.json()) as { items: SyncedPo[] };
+	return { adapter, pos: items };
+}
+
+/** Pull the configured ERP's chart and return the tenant's GL accounts. */
+export async function syncAndListGlAccounts(
+	page: Page
+): Promise<Array<{ code: string; name: string }>> {
+	await syncErpGlAccounts(page);
+	const list = await page.request.get(`${API_BASE}/api/gl-accounts`, {
+		headers: await authedTenantHeaders(page)
+	});
+	expect(list.status(), 'GL account list').toBe(200);
+	return (await list.json()) as Array<{ code: string; name: string }>;
+}
+
 /** The `details.error` the push recorded on the append-only
  *  `invoice.erp_failed` audit row — the PII-free reason a failed post gives. */
 export async function erpFailureFromAudit(page: Page, invoiceId: string): Promise<string> {

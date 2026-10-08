@@ -232,6 +232,31 @@ def test_d365_api_url_admin_config_localhost_still_raises(monkeypatch):
         _run(adapter._api_url("purchaseInvoices"))
 
 
+@pytest.mark.parametrize("method", ["list_gl_accounts", "list_pos", "list_vendors"])
+def test_d365_list_syncs_keep_the_ssrf_guard_on_admin_config(monkeypatch, method):
+    """The chart / PO / vendor syncs build their URL through `_api_url` too:
+    an admin `base_url` pointing inside the network is refused before any
+    request is sent to it (and the refusal is raised, not swallowed into an
+    empty "synced 0" result)."""
+    monkeypatch.setattr(settings, "erp_d365_api_base", "")
+    monkeypatch.setattr(settings, "erp_d365_token_url", FAKE_D365_TOKEN)
+    adapter = BusinessCentralAdapter(
+        {
+            "base_url": "http://169.254.169.254/latest",
+            "client_id": "c",
+            "client_secret": "s",
+            "company_id": "c-1",
+        }
+    )
+    with patch("httpx.AsyncClient") as cm:
+        client = cm.return_value.__aenter__.return_value
+        client.post = AsyncMock(return_value=_mock_response(200, {"access_token": "tok"}))
+        client.get = AsyncMock()
+        with pytest.raises(UnsafeUrlError):
+            _run(getattr(adapter, method)())
+    client.get.assert_not_awaited()
+
+
 def test_d365_api_url_override_takes_precedence_over_admin_config(monkeypatch):
     """Both set → the operator env wins (and the admin value is never fetched)."""
     monkeypatch.setattr(settings, "erp_d365_api_base", FAKE_D365 + "/")  # rstrip

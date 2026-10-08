@@ -247,3 +247,20 @@ and a non-empty `Bb-Api-Subscription-Key`, as the real gateway does.
   `backgroundProcess/{id}/result` → `{"record_id"}`.
   `GET /accountspayable/v1/invoices/{id}` returns `status` / `amount` / `balance`.
 - `POST /blackbaud/__set-status` — test hook `{"invoice_id", "status", "balance"}`.
+
+
+## Business Central + NetSuite syncs and void
+
+- **D365** `GET …/accounts` — `6100` / `6200` / `6300` Posting accounts (ids
+  `a6100000-…`), plus heading `6000` and blocked `6900` (the adapter skips
+  both). `GET …/purchaseOrders` (lines with `$expand=purchaseOrderLines`) —
+  `PO-FAKE-BC-401` 1500.25, blank `currencyCode`, blank date `0001-01-01`;
+  `PO-FAKE-BC-402` 820.00 EUR. Every collection honours
+  `Prefer: odata.maxpagesize` and returns `@odata.nextLink` (`$skiptoken`).
+  `DELETE …/purchaseInvoices({id})` needs `If-Match` and deletes only a `Draft`.
+  A purchaseInvoice `Account` line must carry a posting account's `accountId`.
+- **NetSuite** SuiteQL also answers `SELECT … FROM vendor` (`25`, `26`, and
+  inactive `27`) and `SELECT … FROM transaction … type = 'PurchOrd'`
+  (`PO-FAKE-NS-501` 2100.50 USD open, `PO-FAKE-NS-502` 640.00 GBP closed).
+  `DELETE /vendorBill/{id}` → 204 for a `pendingApproval` bill only
+  (`/__set-status` with `"pendingApproval"`).

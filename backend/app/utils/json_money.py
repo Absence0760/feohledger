@@ -38,7 +38,7 @@ import json
 from decimal import Decimal
 from typing import Any
 
-__all__ = ["dumps_exact_json", "exact_number_literal"]
+__all__ = ["dumps_exact_json", "exact_number_literal", "loads_exact_json"]
 
 
 def exact_number_literal(value: Decimal) -> str:
@@ -83,3 +83,17 @@ def dumps_exact_json(obj: Any) -> str:
     if isinstance(obj, (list, tuple)):
         return "[" + ",".join(dumps_exact_json(item) for item in obj) + "]"
     return json.dumps(obj, ensure_ascii=False, allow_nan=False)
+
+
+def loads_exact_json(raw: bytes | str) -> Any:
+    """``json.loads`` for an INBOUND ERP body that carries money.
+
+    Every JSON number with a fraction or exponent parses straight to a
+    ``Decimal`` (``parse_float=Decimal``), so a total the ERP sent as
+    ``99999999999999.99`` is read as exactly that and never via a binary float
+    — the read-side twin of :func:`dumps_exact_json`. Integers stay ``int``.
+    An empty body is ``{}``.
+    """
+    if not raw:
+        return {}
+    return json.loads(raw, parse_float=Decimal)

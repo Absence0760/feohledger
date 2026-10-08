@@ -53,7 +53,7 @@ from app.services.erp_adapters.base import InvoicePayload, LineItemPayload
 from app.services.erp_adapters.dynamics_365_bc import BusinessCentralAdapter
 from app.services.erp_adapters.merge_dev import MergeDevAdapter
 from app.services.erp_adapters.netsuite import NetSuiteAdapter
-from app.utils.json_money import dumps_exact_json, exact_number_literal
+from app.utils.json_money import dumps_exact_json, exact_number_literal, loads_exact_json
 
 ERP_ADAPTER_DIR = pathlib.Path(__file__).resolve().parents[1] / "app" / "services" / "erp_adapters"
 
@@ -202,6 +202,19 @@ def test_dumps_exact_json_still_refuses_unserialisable_values():
         dumps_exact_json({"when": date(2026, 1, 1)})
 
 
+def test_loads_exact_json_reads_money_without_a_float_hop():
+    """The read-side twin: an ERP total parses straight to Decimal, so the
+    cent a float would drop and the scale it would flatten both survive."""
+    body = loads_exact_json(
+        f'{{"total": {LOSSY_AMOUNT}, "scaled": {SCALED_AMOUNT}, "n": 3, "s": "x"}}'.encode()
+    )
+    assert body["total"] == LOSSY_AMOUNT and isinstance(body["total"], Decimal)
+    assert str(body["scaled"]) == "1250.00"
+    assert body["n"] == 3 and isinstance(body["n"], int)
+    assert body["s"] == "x"
+    assert loads_exact_json(b"") == {}
+
+
 # ---------------------------------------------------------------------------
 # merge_dev
 # ---------------------------------------------------------------------------
@@ -341,8 +354,43 @@ def test_d365_posts_exact_decimal_unit_costs(monkeypatch):
     # call 0 is the token exchange (form-encoded); call 1 is the create.
     body = _posted_body_text(client, call_index=1)
     _assert_exact(body, "unitCost")
-    assert '"quantity":3.5000' in body
+    # 3.5 x 1250.00 is not the line's total, so the line goes as 1 x its
+    # total: BC computes the bill from quantity x unitCost, and the bill must
+    # come to the approved amount, not 3.5 x 1250.00.
+    assert f'"quantity":1,"unitCost":{LOSSY_AMOUNT}' in body
+    assert '"accountId":"ERP-6000"' in body
     assert client.post.await_args_list[1].kwargs["headers"]["Content-Type"] == "application/json"
+
+
+def test_d365_keeps_quantity_and_unit_cost_when_they_make_the_line_total(monkeypatch):
+    monkeypatch.setattr(settings, "erp_d365_api_base", "http://fake-erp:12112/d365")
+    monkeypatch.setattr(settings, "erp_d365_token_url", "http://fake-erp:12112/token")
+    line = LineItemPayload(
+        line_number=1,
+        description="Widgets",
+        quantity=Decimal("3.5000"),
+        unit_price=SCALED_AMOUNT,
+        total=Decimal("4375.000000"),
+        gl_account="6000",
+        gl_account_erp_id="ERP-6000",
+    )
+    with patch("httpx.AsyncClient") as cm:
+        client = cm.return_value.__aenter__.return_value
+        client.get = AsyncMock(return_value=_mock_response(200, {"value": []}))
+        client.post = AsyncMock(
+            side_effect=[
+                _mock_response(200, {"access_token": "tok"}),
+                _mock_response(201, {"id": "bc-3", "number": "PI-3"}),
+                _mock_response(204, None),
+            ]
+        )
+        result = _run(
+            _bc_adapter().post_invoice(_payload(amount=Decimal("4375.00"), line_items=[line]))
+        )
+
+    assert result.success
+    body = _posted_body_text(client, call_index=1)
+    assert f'"quantity":3.5000,"unitCost":{SCALED_AMOUNT}' in body
 
 
 def test_d365_header_only_invoice_posts_the_exact_amount(monkeypatch):
