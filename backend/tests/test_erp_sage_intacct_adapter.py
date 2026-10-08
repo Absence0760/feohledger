@@ -231,15 +231,17 @@ def test_lines_post_per_line_when_they_sum_to_the_header_amount():
     ]
 
 
-def test_lines_that_do_not_sum_to_the_header_fall_back_to_one_line():
-    """Never post a bill whose total differs from the approved amount."""
+def test_lines_that_do_not_sum_to_the_header_are_refused():
+    """Never post a bill whose total differs from the approved amount — and
+    never fold coded lines onto the header's account to make it fit (the
+    one-header-line fallback this replaced moved line 1's 6200 expense to
+    6100, an account the approver never saw)."""
     lines = [LineItemPayload(line_number=1, total=Decimal("90.00"), gl_account_erp_id="6200")]
     fake = FakeIntacct()
-    _run(fake, lambda: SageIntacctAdapter(CONFIG).post_invoice(_payload(line_items=lines)))
-    body, _ = _create_json(fake)
-    assert body["lines"] == [
-        {"glAccount": {"id": "6100"}, "txnAmount": "100.00", "memo": "Office supplies"}
-    ]
+    result = _run(fake, lambda: SageIntacctAdapter(CONFIG).post_invoice(_payload(line_items=lines)))
+    assert not result.success and result.retryable is False
+    assert result.message == "Sage Intacct post refused: amount_mismatch"
+    assert fake.of("POST", "/objects/accounts-payable/bill") == []
 
 
 def test_location_id_scopes_every_call_to_the_entity():
@@ -514,3 +516,74 @@ def test_bill_lines_puts_an_uncoded_line_on_the_header_account():
         ("6200", Decimal("60.00")),
         ("6100", Decimal("40.00")),
     ]
+
+
+def test_bill_lines_refuses_a_line_with_no_amount():
+    """Same rule as ``bill_allocation``: a line with neither a total nor
+    quantity x unit price is refused, never replaced by one header line."""
+    from app.services.erp_adapters.bill_lines import bill_lines
+
+    payload = _payload(
+        line_items=[
+            LineItemPayload(line_number=1, total=Decimal("60.00"), gl_account_erp_id="6200"),
+            LineItemPayload(line_number=2, description="no amount"),
+        ]
+    )
+    assert bill_lines(payload) == "line_amount_missing"
+
+
+def test_bill_lines_derives_an_amount_from_quantity_and_unit_price():
+    from app.services.erp_adapters.bill_lines import bill_lines
+
+    payload = _payload(
+        line_items=[
+            LineItemPayload(
+                line_number=1,
+                quantity=Decimal("3"),
+                unit_price=Decimal("20.00"),
+                gl_account_erp_id="6200",
+            ),
+            LineItemPayload(line_number=2, total=Decimal("40.00")),
+        ]
+    )
+    assert [(gl, amt) for gl, amt, _ in bill_lines(payload)] == [
+        ("6200", Decimal("60.00")),
+        ("6100", Decimal("40.00")),
+    ]
+
+
+def test_bill_lines_grosses_up_tax_exclusive_lines_with_their_stated_tax():
+    """Lines + tax_amount == amount: each line posts its own gross, so the
+    coding survives and the total is still exactly the approved amount."""
+    from app.services.erp_adapters.bill_lines import bill_lines
+
+    payload = _payload(
+        tax_amount=Decimal("15.00"),
+        amount=Decimal("115.00"),
+        line_items=[
+            LineItemPayload(
+                line_number=1, total=Decimal("60.00"), tax=Decimal("9.00"), gl_account_erp_id="6200"
+            ),
+            LineItemPayload(line_number=2, total=Decimal("40.00"), tax=Decimal("6.00")),
+        ],
+    )
+    lines = bill_lines(payload)
+    assert [(gl, amt) for gl, amt, _ in lines] == [
+        ("6200", Decimal("69.00")),
+        ("6100", Decimal("46.00")),
+    ]
+    assert sum(amt for _, amt, _ in lines) == payload.amount
+
+
+def test_bill_lines_refuses_unitemised_tax_on_several_exclusive_lines():
+    from app.services.erp_adapters.bill_lines import bill_lines
+
+    payload = _payload(
+        tax_amount=Decimal("15.00"),
+        amount=Decimal("115.00"),
+        line_items=[
+            LineItemPayload(line_number=1, total=Decimal("60.00"), gl_account_erp_id="6200"),
+            LineItemPayload(line_number=2, total=Decimal("40.00")),
+        ],
+    )
+    assert bill_lines(payload) == "tax_not_itemised"

@@ -21,8 +21,15 @@ Fail-closed rules on ``post_invoice`` (each a stable reason code in the
 message, never a guess):
 
 * ``vendor_not_linked`` — no ``vendor_erp_id``. Never a lookup by name.
-* ``account_not_linked`` — a line with no QuickBooks account id.
-* ``amount_mismatch`` — the lines don't sum to the header ``amount``.
+The lines come from the shared ``bill_lines`` helper (see its "which helper
+when" note), so the line rules and their codes are the other adapters':
+
+* ``account_not_linked`` — a line coded to an account with no QuickBooks id
+  (never moved onto the header's account), or an uncoded line / header-only
+  bill with no linked header account.
+* ``line_amount_missing`` — a line with neither a total nor quantity x price.
+* ``amount_mismatch`` / ``tax_not_itemised`` — the lines (tax-inclusive, or
+  tax-exclusive plus their stated tax) don't sum to the header ``amount``.
   QuickBooks derives ``TotalAmt`` from the lines, and our header amount is
   never recomputed from lines; posting would book a different total.
 * ``doc_number_too_long`` — QuickBooks' ``DocNumber`` holds 21 characters.
@@ -30,6 +37,11 @@ message, never a guess):
 * ``currency_not_enabled`` — a bill in a foreign currency when multicurrency
   is off. Never posted in the home currency instead. ``currency_unknown`` when
   the company's preferences name no home currency.
+
+After the create, QuickBooks' own ``TotalAmt`` must equal ``amount``
+(``posted_total.check_posted_total``): a different total deletes the bill just
+created and fails ``posted_total_mismatch``; a missing one fails
+``posted_total_unconfirmed``. Both are non-retryable.
 """
 
 from __future__ import annotations
@@ -43,6 +55,7 @@ import httpx
 from app.config import settings
 from app.services import erp_oauth
 from app.services.erp_adapters.base import (
+    NOT_CONNECTED,
     VENDOR_NOT_LINKED,
     ErpInvoiceStatus,
     ErpPostResult,
@@ -54,14 +67,20 @@ from app.services.erp_adapters.base import (
     erp_failure_message,
     erp_refusal,
 )
+from app.services.erp_adapters.bill_lines import bill_lines
 from app.services.erp_adapters.dispatcher import register_adapter
 from app.services.erp_adapters.oauth_base import OAuthErpAdapter, OAuthProviderSpec
+from app.services.erp_adapters.posted_total import check_posted_total
 from app.utils.json_money import dumps_exact_json
 
 PROVIDER = "QuickBooks Online"
 MINOR_VERSION = "75"
 #: Intuit's DocNumber limit (Bill entity reference: max 21 characters).
 DOC_NUMBER_MAX = 21
+#: Stable refusal reasons of this adapter (beside the shared ones in ``base``).
+DOC_NUMBER_TOO_LONG = "doc_number_too_long"
+CURRENCY_UNKNOWN = "currency_unknown"
+CURRENCY_NOT_ENABLED = "currency_not_enabled"
 _PAGE_SIZE = 1000
 _MAX_PAGES = 50
 _PRODUCTION_BASE = "https://quickbooks.api.intuit.com"
@@ -192,43 +211,26 @@ class QuickBooksOnlineAdapter(OAuthErpAdapter):
 
     # -- post --------------------------------------------------------------
 
-    def _bill_lines(self, payload: InvoicePayload) -> list[dict] | str:
-        """The ``Line`` array, or a refusal reason code."""
-        lines: list[dict] = []
-        if payload.line_items:
-            for li in payload.line_items:
-                amount = li.total
-                if amount is None and li.quantity is not None and li.unit_price is not None:
-                    amount = li.quantity * li.unit_price
-                if amount is None:
-                    return "amount_mismatch"
-                account = li.gl_account_erp_id or payload.gl_account_erp_id
-                if not account:
-                    return "account_not_linked"
-                lines.append(
-                    {
-                        "DetailType": "AccountBasedExpenseLineDetail",
-                        "Amount": amount,
-                        "Description": li.description or "",
-                        "AccountBasedExpenseLineDetail": {"AccountRef": {"value": account}},
-                    }
-                )
-        else:
-            if not payload.gl_account_erp_id:
-                return "account_not_linked"
-            lines.append(
-                {
-                    "DetailType": "AccountBasedExpenseLineDetail",
-                    "Amount": payload.amount,
-                    "Description": payload.description or "",
-                    "AccountBasedExpenseLineDetail": {
-                        "AccountRef": {"value": payload.gl_account_erp_id}
-                    },
-                }
-            )
-        if sum((line["Amount"] for line in lines), Decimal(0)) != payload.amount:
-            return "amount_mismatch"
-        return lines
+    @staticmethod
+    def _bill_lines(payload: InvoicePayload) -> list[dict] | str:
+        """The ``Line`` array, or a refusal reason code.
+
+        The lines come from the shared ``bill_lines`` helper (gross per line,
+        summing to exactly ``payload.amount``, a coded line only ever on its own
+        account), mapped onto ``AccountBasedExpenseLineDetail``.
+        """
+        lines = bill_lines(payload)
+        if isinstance(lines, str):
+            return lines
+        return [
+            {
+                "DetailType": "AccountBasedExpenseLineDetail",
+                "Amount": amount,
+                "Description": memo,
+                "AccountBasedExpenseLineDetail": {"AccountRef": {"value": account}},
+            }
+            for account, amount, memo in lines
+        ]
 
     async def _currency_check(self, currency: str) -> tuple[str | None, bool]:
         """``(refusal reason or None, is_foreign)`` for a bill in ``currency``."""
@@ -239,11 +241,11 @@ class QuickBooksOnlineAdapter(OAuthErpAdapter):
         home = str((prefs.get("HomeCurrency") or {}).get("value") or "").upper()
         if not home:
             # Can't tell what the books are kept in — refuse rather than guess.
-            return "currency_unknown", False
+            return CURRENCY_UNKNOWN, False
         if not currency or currency.upper() == home:
             return None, False
         if not prefs.get("MultiCurrencyEnabled"):
-            return "currency_not_enabled", True
+            return CURRENCY_NOT_ENABLED, True
         return None, True
 
     async def _find_existing(self, payload: InvoicePayload) -> dict | None:
@@ -266,7 +268,7 @@ class QuickBooksOnlineAdapter(OAuthErpAdapter):
         if not payload.vendor_erp_id:
             return erp_refusal(PROVIDER, VENDOR_NOT_LINKED)
         if len(payload.invoice_number or "") > DOC_NUMBER_MAX:
-            return erp_refusal(PROVIDER, "doc_number_too_long")
+            return erp_refusal(PROVIDER, DOC_NUMBER_TOO_LONG)
         lines = self._bill_lines(payload)
         if isinstance(lines, str):
             return erp_refusal(PROVIDER, lines)
@@ -278,6 +280,18 @@ class QuickBooksOnlineAdapter(OAuthErpAdapter):
 
             existing = await self._find_existing(payload)
             if existing:
+                # Our earlier attempt; it counts only if QuickBooks booked the
+                # approved total (an unconfirmed first attempt lands here).
+                problem = await check_posted_total(
+                    self,
+                    PROVIDER,
+                    payload,
+                    posted_total=_dec(existing.get("TotalAmt")),
+                    document_id=str(existing.get("Id")),
+                    document_number=existing.get("DocNumber") or payload.invoice_number,
+                )
+                if problem:
+                    return problem
                 return ErpPostResult(
                     success=True,
                     erp_document_id=str(existing.get("Id")),
@@ -313,7 +327,7 @@ class QuickBooksOnlineAdapter(OAuthErpAdapter):
         except erp_oauth.ErpNotConnectedError:
             # Never connected, revoked, or past its lifetime: retrying cannot
             # help, so the refusal is non-retryable.
-            return erp_refusal(PROVIDER, "not_connected")
+            return erp_refusal(PROVIDER, NOT_CONNECTED)
         except QboRequestError as exc:
             return ErpPostResult(success=False, message=str(exc))
         except httpx.HTTPError:
@@ -324,10 +338,25 @@ class QuickBooksOnlineAdapter(OAuthErpAdapter):
                 success=False, message=erp_failure_message(PROVIDER, resp.status_code)
             )
         bill = _json(resp).get("Bill") or {}
+        document_id = str(bill.get("Id")) if bill.get("Id") is not None else None
+        document_number = bill.get("DocNumber") or payload.invoice_number
+        # QuickBooks computes TotalAmt itself (a company's default tax code can
+        # add tax to the lines we sent); only the approved amount counts.
+        problem = await check_posted_total(
+            self,
+            PROVIDER,
+            payload,
+            posted_total=_dec(bill.get("TotalAmt")),
+            document_id=document_id,
+            document_number=document_number,
+            raw_response=bill,
+        )
+        if problem:
+            return problem
         return ErpPostResult(
             success=True,
-            erp_document_id=str(bill.get("Id")) if bill.get("Id") is not None else None,
-            erp_document_number=bill.get("DocNumber") or payload.invoice_number,
+            erp_document_id=document_id,
+            erp_document_number=document_number,
             message="Posted to QuickBooks Online",
             raw_response=bill,
         )

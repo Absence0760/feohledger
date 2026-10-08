@@ -19,9 +19,20 @@ this plan:
   OAuth ERP registers one redirect URI.
 - Open question 1 is answered conservatively: `void_invoice` deletes only a
   bill with no payment applied (`Balance == TotalAmt`).
-- Open question 2 is not answered: lines must sum to the header amount, so a
-  bill whose tax is carried only in the header is refused as
-  `amount_mismatch`.
+- Open question 2 is answered by the shared line rules: the lines come from
+  `erp_adapters/bill_lines.py` (erp-integration.md § Bill lines: one rule set,
+  two views), so each line posts its tax-inclusive gross on its own account and
+  no tax code is sent. Tax-exclusive lines are grossed up by their stated tax
+  (per line, or all of it on a single line); several tax-exclusive lines with
+  header-only tax are refused `tax_not_itemised`; lines that sum to neither are
+  refused `amount_mismatch`. A coded line whose account has no QuickBooks id is
+  refused `account_not_linked`, never posted on the header's account.
+- QuickBooks still computes `TotalAmt` itself, and a company's default tax code
+  can add tax on top of those lines. So after the create, a `TotalAmt` other
+  than `amount` deletes the bill just created and fails non-retryable
+  `posted_total_mismatch`; a create with no `TotalAmt` fails non-retryable
+  `posted_total_unconfirmed` (`erp_adapters/posted_total.py`). The idempotent
+  re-find applies the same check before reporting an earlier bill as posted.
 - The `x_refresh_token_expires_in` expiry is recorded and shown on `/status`,
   but nothing yet notifies an admin 30 days before it.
 
@@ -154,7 +165,9 @@ were retired in August 2025, so earlier versions are served as 75 anyway.
   from the lines, and our invariant is that the header `amount` is never
   recomputed from lines. If the lines (plus tax, as posted) don't sum to
   `amount`, refuse with `amount_mismatch` rather than post a different total
-  into the customer's books.
+  into the customer's books. (Built: the shared `bill_lines` helper, plus a
+  check of the `TotalAmt` QuickBooks reports back — see the status notes at
+  the top.)
 - **`DocNumber`: 21 characters** is the limit integrators report; verify it
   against Intuit's entity reference. Refuse when it is exceeded
   (`doc_number_too_long`), and never truncate. QuickBooks' own duplicate

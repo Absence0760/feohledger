@@ -1,8 +1,22 @@
 """Split an :class:`InvoicePayload` into net / tax / gross bill lines, exactly.
 
-Xero and Sage Business Cloud Accounting both derive a bill's total from its
-lines. Our invariant is the opposite: ``Invoice.amount`` is what a payment run
-pays and is **never recomputed from line items**
+**Which helper when.** This module is the one statement of how an invoice's
+lines become bill lines: which lines, on which account, for what amount, and
+every refusal. Two views of its result exist:
+
+* :func:`allocate_bill_lines` (here) — net, tax and gross per line, for the ERPs
+  that **derive the bill total from lines plus tax** (Xero, Sage Business Cloud
+  Accounting v3.1).
+* ``bill_lines.bill_lines`` — the same lines projected to ``(account, gross,
+  memo)``, for the ERPs that **take tax separately or not at all** (Sage
+  Intacct, SYSPRO, Sage Accounting ZA, Blackbaud FE NXT, QuickBooks Online).
+
+Both therefore agree on the amount of a line (its ``total``, else ``quantity *
+unit_price``), on its account (its own ERP id when coded, the header's only when
+uncoded), and on the refusal codes.
+
+Our invariant is that ``Invoice.amount`` is what a payment run pays and is
+**never recomputed from line items**
 (``backend/docs/line-total-reconciliation.md``). So before an adapter posts, the
 lines it sends must provably add up to ``payload.amount``, or the adapter
 refuses rather than book a different total into the customer's ledger.
@@ -25,10 +39,7 @@ tax-inclusive lines come back with ``tax=None`` (``inclusive_unsplit``) for an
 ERP that can derive the split from its own tax rate while keeping the gross
 exact (Xero); tax-exclusive lines are refused with ``tax_not_itemised``.
 
-Not to be confused with ``bill_lines``, which picks the GL lines for the
-adapters that take tax separately (Sage Intacct, SYSPRO).
-
-Pure — no I/O — so both adapters and their tests share one statement of it.
+Pure — no I/O — so every adapter and its tests share one statement of it.
 """
 
 from __future__ import annotations
@@ -36,14 +47,32 @@ from __future__ import annotations
 from dataclasses import dataclass
 from decimal import Decimal
 
-from app.services.erp_adapters.base import ACCOUNT_NOT_LINKED, InvoicePayload
+from app.services.erp_adapters.base import (
+    ACCOUNT_NOT_LINKED,
+    AMOUNT_MISMATCH,
+    LINE_AMOUNT_MISSING,
+    InvoicePayload,
+)
 
-# Stable, PII-free refusal reasons beyond base.VENDOR_NOT_LINKED /
-# ACCOUNT_NOT_LINKED. A refusal never reaches the ERP.
-AMOUNT_MISMATCH = "amount_mismatch"
+__all__ = [
+    "ACCOUNT_NOT_LINKED",
+    "AMOUNT_MISMATCH",
+    "DUPLICATE_DOCUMENT_NUMBER",
+    "LINE_AMOUNT_MISSING",
+    "MISSING_DATES",
+    "TAX_NOT_ITEMISED",
+    "TAX_RATE_UNRESOLVED",
+    "BillAllocation",
+    "BillLine",
+    "BillRefusal",
+    "allocate_bill_lines",
+]
+
+# Stable, PII-free refusal reasons beyond the shared ones in ``base``
+# (VENDOR_NOT_LINKED, ACCOUNT_NOT_LINKED, AMOUNT_MISMATCH, LINE_AMOUNT_MISSING).
+# A refusal never reaches the ERP.
 TAX_NOT_ITEMISED = "tax_not_itemised"
 TAX_RATE_UNRESOLVED = "tax_rate_unresolved"
-LINE_AMOUNT_MISSING = "line_amount_missing"
 MISSING_DATES = "missing_dates"
 DUPLICATE_DOCUMENT_NUMBER = "duplicate_document_number"
 

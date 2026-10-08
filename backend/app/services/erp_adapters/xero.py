@@ -55,6 +55,7 @@ from app.services.erp_adapters.bill_allocation import (
 )
 from app.services.erp_adapters.dispatcher import register_adapter
 from app.services.erp_adapters.oauth_base import OAuthErpAdapter, OAuthProviderSpec
+from app.services.erp_adapters.posted_total import check_posted_total
 from app.services.erp_oauth import register_oauth_provider
 from app.utils.json_money import dumps_exact_json
 
@@ -367,6 +368,19 @@ class XeroAdapter(OAuthErpAdapter):
         if resp.status_code not in (200, 201):
             return _failure(resp)
         created = (_json(resp).get("Invoices") or [{}])[0]
+        # Xero computes Total from the lines and their tax types; only the
+        # approved amount counts as posted.
+        problem = await check_posted_total(
+            self,
+            PROVIDER,
+            payload,
+            posted_total=_decimal(created.get("Total")),
+            document_id=created.get("InvoiceID"),
+            document_number=created.get("InvoiceNumber") or payload.invoice_number,
+            raw_response=created,
+        )
+        if problem:
+            return problem
         return ErpPostResult(
             success=True,
             erp_document_id=created.get("InvoiceID"),

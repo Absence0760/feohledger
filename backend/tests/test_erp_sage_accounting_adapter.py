@@ -175,7 +175,11 @@ def test_posts_purchase_invoice_with_exact_explicit_amounts_and_business_header(
     with patch("httpx.AsyncClient") as cm:
         client = _client(cm)
         client.get = _router(lookup=_resp(200, _page([])), ledger=_resp(200, _ledger()))
-        client.post = AsyncMock(return_value=_resp(201, {"id": "pi-1", "displayed_as": "BILL-77"}))
+        client.post = AsyncMock(
+            return_value=_resp(
+                201, {"id": "pi-1", "displayed_as": "BILL-77", "total_amount": 1150.10}
+            )
+        )
         result = _run(_adapter().post_invoice(payload))
 
     assert result.success, result.message
@@ -211,7 +215,7 @@ def test_tax_inclusive_single_line_is_split_from_the_invoice_not_a_rate(token):
     with patch("httpx.AsyncClient") as cm:
         client = _client(cm)
         client.get = _router(lookup=_resp(200, _page([])), ledger=_resp(200, _ledger("ZA_STD")))
-        client.post = AsyncMock(return_value=_resp(201, {"id": "pi-2"}))
+        client.post = AsyncMock(return_value=_resp(201, {"id": "pi-2", "total_amount": 1150.00}))
         result = _run(_adapter().post_invoice(payload))
     assert result.success
     (line,) = _post_body(client)["invoice_lines"]
@@ -227,7 +231,7 @@ def test_untaxed_invoice_sends_no_tax_rate_and_skips_the_ledger_lookup(token):
     with patch("httpx.AsyncClient") as cm:
         client = _client(cm)
         client.get = _router(lookup=_resp(200, _page([])))
-        client.post = AsyncMock(return_value=_resp(201, {"id": "pi-3"}))
+        client.post = AsyncMock(return_value=_resp(201, {"id": "pi-3", "total_amount": 80.00}))
         result = _run(_adapter().post_invoice(_payload(amount=Decimal("80.00"), tax_amount=None)))
     assert result.success
     (line,) = _post_body(client)["invoice_lines"]
@@ -246,7 +250,7 @@ def test_ledger_without_a_tax_rate_is_refused_unless_a_default_is_configured(tok
     with patch("httpx.AsyncClient") as cm:
         client = _client(cm)
         client.get = _router(lookup=_resp(200, _page([])), ledger=_resp(200, _ledger(None)))
-        client.post = AsyncMock(return_value=_resp(201, {"id": "pi-4"}))
+        client.post = AsyncMock(return_value=_resp(201, {"id": "pi-4", "total_amount": 1150.00}))
         result = _run(_adapter(default_tax_rate_id="GB_REDUCED").post_invoice(_payload()))
     assert result.success
     assert _post_body(client)["invoice_lines"][0]["tax_rate_id"] == "GB_REDUCED"
@@ -258,6 +262,7 @@ def test_existing_invoice_carrying_our_marker_short_circuits(token):
         "vendor_reference": "BILL-77",
         "notes": "FeohLedger corr-sage-1",
         "status": {"id": "UNPAID"},
+        "total_amount": 1150.00,
     }
     with patch("httpx.AsyncClient") as cm:
         client = _client(cm)
@@ -270,6 +275,47 @@ def test_existing_invoice_carrying_our_marker_short_circuits(token):
     params = client.get.await_args.kwargs["params"]
     assert params["contact_id"] == VENDOR
     assert params["from_date"] == params["to_date"] == "2026-09-01"
+
+
+def test_a_total_sage_changed_voids_the_invoice_and_is_not_retried(token):
+    """Sage recalculates total_amount; a different one is never reported as
+    posted, and the invoice just created is voided."""
+    created = {"id": "pi-9", "total_amount": 1170.00}
+
+    async def get(url, params=None, headers=None):
+        if url.endswith("/purchase_invoices"):
+            return _resp(200, _page([]))
+        if "/ledger_accounts/" in url:
+            return _resp(200, _ledger())
+        if url.endswith("/purchase_invoices/pi-9"):
+            return _resp(
+                200,
+                {"status": {"id": "UNPAID"}, "total_amount": 1170.0, "outstanding_amount": 1170.0},
+            )
+        raise AssertionError(f"unexpected GET {url}")
+
+    with patch("httpx.AsyncClient") as cm:
+        client = _client(cm)
+        client.get = AsyncMock(side_effect=get)
+        client.post = AsyncMock(return_value=_resp(201, created))
+        client.delete = AsyncMock(return_value=httpx.Response(204))
+        result = _run(_adapter().post_invoice(_payload()))
+
+    assert not result.success and result.retryable is False
+    assert result.message == (
+        "Sage Accounting post failed: posted_total_mismatch (the bill was voided)"
+    )
+    assert client.delete.await_args.args[0].endswith("/purchase_invoices/pi-9")
+
+
+def test_a_created_invoice_with_no_total_is_unconfirmed_not_success(token):
+    with patch("httpx.AsyncClient") as cm:
+        client = _client(cm)
+        client.get = _router(lookup=_resp(200, _page([])), ledger=_resp(200, _ledger()))
+        client.post = AsyncMock(return_value=_resp(201, {"id": "pi-9"}))
+        result = _run(_adapter().post_invoice(_payload()))
+    assert not result.success and result.retryable is False
+    assert result.message.startswith("Sage Accounting post unconfirmed: posted_total_unconfirmed")
 
 
 def test_existing_invoice_without_our_marker_is_refused_not_adopted(token):
@@ -287,7 +333,7 @@ def test_a_voided_namesake_does_not_block_the_post(token):
     with patch("httpx.AsyncClient") as cm:
         client = _client(cm)
         client.get = _router(lookup=_resp(200, _page([voided])), ledger=_resp(200, _ledger()))
-        client.post = AsyncMock(return_value=_resp(201, {"id": "pi-new"}))
+        client.post = AsyncMock(return_value=_resp(201, {"id": "pi-new", "total_amount": 1150.00}))
         result = _run(_adapter().post_invoice(_payload()))
     assert result.success and result.erp_document_id == "pi-new"
 

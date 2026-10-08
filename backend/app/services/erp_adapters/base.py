@@ -68,6 +68,11 @@ class InvoicePayload:
     #: The ERP's own id for the header ``gl_account``; see ``LineItemPayload``.
     gl_account_erp_id: str | None = None
     line_items: list[LineItemPayload] = field(default_factory=list)
+    #: The ERP background job an earlier attempt queued but could not confirm
+    #: (:attr:`ErpPostResult.pending_job_id`, persisted by ``services/erp``).
+    #: An adapter with asynchronous creates checks this job before queueing
+    #: another, so a retry while the first is still running cannot post twice.
+    pending_job_id: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -138,6 +143,27 @@ VENDOR_NOT_LINKED = "vendor_not_linked"
 #: books the expense somewhere the approver never saw.
 ACCOUNT_NOT_LINKED = "account_not_linked"
 
+#: Stable reason code: an OAuth ERP with no usable connection (never connected,
+#: revoked, or past its refresh lifetime). Retrying cannot help.
+NOT_CONNECTED = "not_connected"
+
+#: Stable reason code: the bill's lines do not add up to the approved
+#: ``payload.amount`` (tax-inclusive, or tax-exclusive plus ``tax_amount``).
+#: The header amount is never recomputed from lines, so the bill is refused.
+AMOUNT_MISMATCH = "amount_mismatch"
+
+#: Stable reason code: a line has neither a ``total`` nor a ``quantity`` and
+#: ``unit_price`` to derive one from. Never filled from the header.
+LINE_AMOUNT_MISSING = "line_amount_missing"
+
+#: Stable reason code: the ERP computed the bill's total itself and it differs
+#: from the approved ``payload.amount`` (a default tax code added tax, say).
+POSTED_TOTAL_MISMATCH = "posted_total_mismatch"
+
+#: Stable reason code: the ERP created the bill but did not report the total it
+#: booked, so we cannot confirm it equals ``payload.amount``. Never success.
+POSTED_TOTAL_UNCONFIRMED = "posted_total_unconfirmed"
+
 
 def erp_refusal_message(provider: str, reason: str) -> str:
     """Build the PII-free ``ErpPostResult.message`` for a payload an adapter
@@ -185,6 +211,10 @@ class ErpPostResult:
     #: then fails the invoice at once instead of spending its backoff budget
     #: re-sending the same refused bill.
     retryable: bool = True
+    #: The id of an ERP background job this attempt queued but could not see
+    #: finish. ``services/erp`` persists it and hands it back as
+    #: :attr:`InvoicePayload.pending_job_id` on the next attempt; None clears it.
+    pending_job_id: str | None = None
 
 
 @dataclass

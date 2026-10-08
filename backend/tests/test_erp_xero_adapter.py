@@ -169,7 +169,12 @@ def test_posts_accpay_bill_with_exact_amounts_and_tenant_headers(token):
         )
         client.put = AsyncMock(
             return_value=_resp(
-                200, {"Invoices": [{"InvoiceID": "inv-1", "InvoiceNumber": "SUP-1001"}]}
+                200,
+                {
+                    "Invoices": [
+                        {"InvoiceID": "inv-1", "InvoiceNumber": "SUP-1001", "Total": 1150.10}
+                    ]
+                },
             )
         )
         result = _run(_adapter().post_invoice(payload))
@@ -208,7 +213,9 @@ def test_no_tax_posts_notax_and_skips_the_account_lookup(token):
     with patch("httpx.AsyncClient") as cm:
         client = _client(cm)
         client.get = _get_router(lookup=_resp(200, {"Invoices": []}))
-        client.put = AsyncMock(return_value=_resp(200, {"Invoices": [{"InvoiceID": "inv-2"}]}))
+        client.put = AsyncMock(
+            return_value=_resp(200, {"Invoices": [{"InvoiceID": "inv-2", "Total": 500.00}]})
+        )
         result = _run(_adapter(bill_status="draft").post_invoice(payload))
 
     assert result.success
@@ -231,7 +238,9 @@ def test_header_only_tax_on_inclusive_lines_lets_xero_split_but_keeps_the_total(
         client.get = _get_router(
             lookup=_resp(200, {"Invoices": []}), accounts=_resp(200, _accounts())
         )
-        client.put = AsyncMock(return_value=_resp(200, {"Invoices": [{"InvoiceID": "inv-3"}]}))
+        client.put = AsyncMock(
+            return_value=_resp(200, {"Invoices": [{"InvoiceID": "inv-3", "Total": 1150.00}]})
+        )
         result = _run(_adapter().post_invoice(payload))
 
     assert result.success
@@ -239,6 +248,48 @@ def test_header_only_tax_on_inclusive_lines_lets_xero_split_but_keeps_the_total(
     assert body["LineAmountTypes"] == "Inclusive"
     assert sum(li["LineAmount"] for li in body["LineItems"]) == payload.amount
     assert all("TaxAmount" not in li for li in body["LineItems"])
+
+
+def test_a_total_xero_changed_voids_the_bill_and_is_not_retried(token):
+    """Xero computes Total itself; a different one (an account's tax type added
+    tax) is never reported as posted, and the bill just created is voided."""
+    created = {"InvoiceID": "inv-9", "Status": "AUTHORISED", "Total": 1322.50}
+
+    async def get(url, params=None, headers=None):
+        if url.endswith("/Invoices"):
+            return _resp(200, {"Invoices": []})
+        if url.endswith("/Accounts"):
+            return _resp(200, _accounts())
+        if url.endswith("/Invoices/inv-9"):
+            return _resp(200, {"Invoices": [{**created, "AmountPaid": 0, "AmountCredited": 0}]})
+        raise AssertionError(f"unexpected GET {url}")
+
+    with patch("httpx.AsyncClient") as cm:
+        client = _client(cm)
+        client.get = AsyncMock(side_effect=get)
+        client.put = AsyncMock(return_value=_resp(200, {"Invoices": [created]}))
+        client.post = AsyncMock(return_value=_resp(200, {"Invoices": [{"Status": "VOIDED"}]}))
+        result = _run(_adapter().post_invoice(_payload()))
+
+    assert not result.success and result.retryable is False
+    assert result.message == "Xero post failed: posted_total_mismatch (the bill was voided)"
+    assert result.erp_document_id == "inv-9"
+    sent = json.loads(client.post.await_args.kwargs["content"])
+    assert sent == {"Invoices": [{"InvoiceID": "inv-9", "Status": "VOIDED"}]}
+
+
+def test_a_created_bill_with_no_total_is_unconfirmed_not_success(token):
+    with patch("httpx.AsyncClient") as cm:
+        client = _client(cm)
+        client.get = _get_router(
+            lookup=_resp(200, {"Invoices": []}), accounts=_resp(200, _accounts())
+        )
+        client.put = AsyncMock(return_value=_resp(200, {"Invoices": [{"InvoiceID": "inv-9"}]}))
+        client.post = AsyncMock(side_effect=AssertionError("an unconfirmed bill is not voided"))
+        result = _run(_adapter().post_invoice(_payload()))
+    assert not result.success and result.retryable is False
+    assert result.message.startswith("Xero post unconfirmed: posted_total_unconfirmed")
+    assert result.erp_document_id == "inv-9"
 
 
 def test_account_without_tax_type_is_refused_unless_a_default_is_configured(token):
@@ -256,7 +307,9 @@ def test_account_without_tax_type_is_refused_unless_a_default_is_configured(toke
         client.get = _get_router(
             lookup=_resp(200, {"Invoices": []}), accounts=_resp(200, _accounts(None))
         )
-        client.put = AsyncMock(return_value=_resp(200, {"Invoices": [{"InvoiceID": "inv-4"}]}))
+        client.put = AsyncMock(
+            return_value=_resp(200, {"Invoices": [{"InvoiceID": "inv-4", "Total": 1150.00}]})
+        )
         result = _run(_adapter(default_tax_type="TAX001").post_invoice(_payload()))
     assert result.success
     assert _put_body(client)["LineItems"][0]["TaxType"] == "TAX001"

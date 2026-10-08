@@ -65,6 +65,7 @@ from app.services.erp_adapters.bill_allocation import (
 )
 from app.services.erp_adapters.dispatcher import register_adapter
 from app.services.erp_adapters.oauth_base import OAuthErpAdapter, OAuthProviderSpec
+from app.services.erp_adapters.posted_total import check_posted_total
 from app.services.erp_oauth import register_oauth_provider
 from app.utils.json_money import dumps_exact_json
 
@@ -306,6 +307,18 @@ class SageAccountingAdapter(OAuthErpAdapter):
                 return _refused(refusal.reason)
             if existing is not None:
                 if _marker(payload.correlation_id) in (existing.get("notes") or ""):
+                    # Our earlier attempt; it counts only if Sage booked the
+                    # approved total (an unconfirmed first attempt lands here).
+                    problem = await check_posted_total(
+                        self,
+                        PROVIDER,
+                        payload,
+                        posted_total=_decimal(existing.get("total_amount")),
+                        document_id=existing.get("id"),
+                        document_number=existing.get("vendor_reference"),
+                    )
+                    if problem:
+                        return problem
                     return ErpPostResult(
                         success=True,
                         erp_document_id=existing.get("id"),
@@ -352,6 +365,19 @@ class SageAccountingAdapter(OAuthErpAdapter):
         if resp.status_code not in (200, 201):
             return _failure(resp)
         created = _json(resp)
+        # Sage recalculates total_amount from the lines; only the approved
+        # amount counts as posted.
+        problem = await check_posted_total(
+            self,
+            PROVIDER,
+            payload,
+            posted_total=_decimal(created.get("total_amount")),
+            document_id=created.get("id"),
+            document_number=created.get("displayed_as") or payload.invoice_number,
+            raw_response=created,
+        )
+        if problem:
+            return problem
         return ErpPostResult(
             success=True,
             erp_document_id=created.get("id"),

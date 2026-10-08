@@ -58,12 +58,24 @@ def _prefs(home: str = "USD", multi: bool = False) -> dict:
 class _Qbo:
     """Routes `client.request(method, url, params=…, content=…, headers=…)`."""
 
-    def __init__(self, *, prefs=None, existing_bills=None, post=None, bill=None):
+    def __init__(
+        self, *, prefs=None, existing_bills=None, post=None, bill=None, total_shift=Decimal(0)
+    ):
         self.calls: list[dict] = []
         self.prefs = prefs or _prefs()
         self.existing_bills = existing_bills or []
-        self.post = post or _resp(200, {"Bill": {"Id": "145", "DocNumber": "INV-1"}})
+        self.post = post
         self.bill = bill
+        # Added to the TotalAmt QuickBooks reports, as a default tax code would.
+        self.total_shift = total_shift
+
+    def _created(self, content: str) -> MagicMock:
+        """Like QuickBooks: TotalAmt is computed from the lines it was sent."""
+        body = json.loads(content, parse_float=Decimal)
+        total = sum((line["Amount"] for line in body["Line"]), Decimal(0)) + self.total_shift
+        bill = {"Id": "145", "DocNumber": body["DocNumber"], "SyncToken": "0", "TotalAmt": total}
+        self.bill = {**bill, "Balance": total}
+        return _resp(200, {"Bill": bill})
 
     async def request(self, method, url, params=None, content=None, headers=None):
         self.calls.append(
@@ -75,7 +87,11 @@ class _Qbo:
         if path == "query":
             return _resp(200, {"QueryResponse": {"Bill": self.existing_bills}})
         if method == "POST" and path == "bill":
-            return self.post
+            if self.post is not None:
+                return self.post
+            if (params or {}).get("operation") == "delete":
+                return _resp(200, {"Bill": {"Id": "145", "status": "Deleted"}})
+            return self._created(content)
         if path.startswith("bill/"):
             return _resp(200, {"Bill": self.bill}) if self.bill else _resp(400, {})
         if path.startswith("companyinfo/"):
@@ -83,7 +99,14 @@ class _Qbo:
         raise AssertionError(f"unexpected {method} {url}")
 
     def posts(self):
-        return [c for c in self.calls if c["method"] == "POST"]
+        return [
+            c
+            for c in self.calls
+            if c["method"] == "POST" and (c["params"] or {}).get("operation") != "delete"
+        ]
+
+    def deletes(self):
+        return [c for c in self.calls if (c["params"] or {}).get("operation") == "delete"]
 
 
 @pytest.fixture
@@ -204,6 +227,7 @@ def test_retry_finds_the_bill_already_posted(token, no_override):
         "DocNumber": "INV-1",
         "VendorRef": {"value": "56"},
         "PrivateNote": "FeohLedger corr-7d1f",
+        "TotalAmt": Decimal("100.10"),
     }
     qbo = _Qbo(existing_bills=[existing])
     result = _run_with(qbo, lambda: _adapter().post_invoice(_payload()))
@@ -238,6 +262,54 @@ def test_doc_number_quotes_are_escaped_in_the_query(token, no_override):
     assert query["params"]["query"] == "select * from Bill where DocNumber = 'O\\'Brien-1'"
 
 
+def test_a_total_quickbooks_changed_deletes_the_bill_and_is_not_retried(token, no_override):
+    """A default tax code added tax: QuickBooks' TotalAmt is not the approved
+    amount, so the bill just created is deleted and the push fails for good."""
+    qbo = _Qbo(total_shift=Decimal("8.01"))
+    result = _run_with(qbo, lambda: _adapter().post_invoice(_payload()))
+    assert not result.success and result.retryable is False
+    assert result.message == (
+        "QuickBooks Online post failed: posted_total_mismatch (the bill was voided)"
+    )
+    assert result.erp_document_id == "145"
+    (delete,) = qbo.deletes()
+    assert json.loads(delete["content"]) == {"Id": "145", "SyncToken": "0"}
+
+
+def test_a_created_bill_with_no_total_is_unconfirmed_not_success(token, no_override):
+    qbo = _Qbo(post=_resp(200, {"Bill": {"Id": "145", "DocNumber": "INV-1"}}))
+    result = _run_with(qbo, lambda: _adapter().post_invoice(_payload()))
+    assert not result.success and result.retryable is False
+    assert result.message.startswith("QuickBooks Online post unconfirmed: posted_total_unconfirmed")
+    assert result.erp_document_id == "145"
+
+
+def test_an_earlier_bill_with_a_different_total_is_not_reported_as_posted(token, no_override):
+    existing = {
+        "Id": "145",
+        "DocNumber": "INV-1",
+        "VendorRef": {"value": "56"},
+        "PrivateNote": "FeohLedger corr-7d1f",
+        "TotalAmt": Decimal("108.11"),
+    }
+    qbo = _Qbo(existing_bills=[existing], bill={**existing, "Balance": Decimal("108.11")})
+    result = _run_with(qbo, lambda: _adapter().post_invoice(_payload()))
+    assert not result.success and result.retryable is False
+    assert "posted_total_mismatch" in result.message
+    assert qbo.posts() == []
+
+
+def test_not_connected_is_a_non_retryable_refusal(no_override):
+    with patch.object(
+        erp_oauth,
+        "get_access_token",
+        new=AsyncMock(side_effect=erp_oauth.ErpNotConnectedError("quickbooks_online")),
+    ):
+        result = _run_with(_Qbo(), lambda: _adapter().post_invoice(_payload()))
+    assert result.message == "QuickBooks Online post refused: not_connected"
+    assert result.retryable is False
+
+
 # ---------------------------------------------------------------------------
 # post_invoice — fail-closed refusals (no HTTP at all for the payload ones)
 # ---------------------------------------------------------------------------
@@ -255,7 +327,19 @@ def test_doc_number_quotes_are_escaped_in_the_query(token, no_override):
         ),
         (
             {"line_items": [LineItemPayload(line_number=1, description="no amount")]},
-            "amount_mismatch",
+            "line_amount_missing",
+        ),
+        # A coded line whose account has no QuickBooks id is refused, never
+        # moved onto the (linked) header account.
+        (
+            {
+                "line_items": [
+                    LineItemPayload(
+                        line_number=1, total=Decimal("100.10"), gl_account="6300-Travel"
+                    )
+                ]
+            },
+            "account_not_linked",
         ),
         (
             {
@@ -419,9 +503,9 @@ def test_status_unknown_when_bill_missing(token, no_override):
 
 def test_void_deletes_an_untouched_bill(token, no_override):
     bill = {"Id": "145", "SyncToken": "3", "Balance": 100.1, "TotalAmt": 100.1}
-    qbo = _Qbo(bill=bill, post=_resp(200, {"Bill": {"Id": "145", "status": "Deleted"}}))
+    qbo = _Qbo(bill=bill)
     assert _run_with(qbo, lambda: _adapter().void_invoice("145")) is True
-    (post,) = qbo.posts()
+    (post,) = qbo.deletes()
     assert post["params"] == {"minorversion": "75", "operation": "delete"}
     assert json.loads(post["content"]) == {"Id": "145", "SyncToken": "3"}
 
