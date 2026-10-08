@@ -551,7 +551,7 @@ async def test_a_qms_pass_releases_the_hold_whoever_uploaded(realdb):
 async def test_a_hand_entered_receipt_releases_a_hold_only_from_an_unimplicated_recorder(
     realdb, recorder_is, closes
 ):
-    """The receipt twin of the inspection rule (decisions §253): six of ten in,
+    """The receipt twin of the inspection rule (decisions §261): six of ten in,
     the full PO billed — held; the missing four are then recorded BY HAND. The
     hold lifts only if whoever recorded them is known and not implicated."""
     org_id = realdb.info(TENANT).org_id

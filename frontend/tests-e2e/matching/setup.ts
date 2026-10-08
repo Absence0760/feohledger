@@ -11,7 +11,7 @@
  *      `tenantPsql` is the documented escape hatch. Receipts and inspections
  *      DO have POST routes; `createGr` still seeds directly because these specs
  *      need a receipt with no recorder (one from "elsewhere", the shape every
- *      pre-0107 receipt has) — `goods-receipts/record-receipt.spec.ts` drives
+ *      pre-0109 receipt has) — `goods-receipts/record-receipt.spec.ts` drives
  *      the real `POST /api/goods-receipts`.
  *   2. create an Invoice via the API with the PO number, status `pending`
  *      (NOT `new` — `_refresh_po_match` short-circuits draft `new` invoices).

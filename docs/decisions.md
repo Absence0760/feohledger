@@ -10615,7 +10615,7 @@ that, and the next feature would hit it again); trimming the new receipt copy
 (a worse form to save a kilobyte); per-route catalogues (a reorganisation of
 6,000 keys for a problem one prefix solved).
 
-## 253. A goods receipt can be typed in, and the person who typed it cannot release their own invoice with it (migration 0107)
+## 261. A goods receipt can be typed in, and the person who typed it cannot release their own invoice with it (migration 0109)
 
 Nothing in the app could write a goods receipt — `scripts/seed.py` was the only
 writer and no ERP adapter pulls them — so the 3-way leg and the "billed beyond
@@ -10632,7 +10632,7 @@ closes by itself. It is coarse on purpose — it does not work out which finding
 receipt cleared — because leaving a row for a person is the safe error.
 Cancelling only reduces what counts as received, so it can raise a hold but
 never lift one and needs no check. Unlike an inspection, a receipt with **no**
-source is trusted, not held: before 0107 no app user could type one in, so a
+source is trusted, not held: before 0109 no app user could type one in, so a
 NULL row was written by the seed script or an import, and holding them would
 have frozen every existing hold that a real delivery should lift. That asymmetry
 is why `tests/test_goods_receipt_source_stamping.py` exists — a new in-app
@@ -10652,7 +10652,7 @@ so the form can show ordered / received / outstanding; the matcher still sums
 the receipt as a whole, and per-line valuation remains §249's follow-up.
 
 Rejected: holding NULL-source receipts like NULL-source inspections (it would
-strand every pre-0107 hold); allowing only managers to receive (the
+strand every pre-0109 hold); allowing only managers to receive (the
 self-service segment's receiving is done by whoever opens the box); a
 best-effort rematch (a silent failure leaves an invoice payable that the
 receipt says is over-billed); per-line segregation (which receipt cleared which

@@ -378,7 +378,7 @@ async def match_invoice_to_po(
     # business recorded that the goods did not arrive. Reading it as absence let
     # cancelling the only receipt turn an over-billed invoice into a clean 2-way
     # `matched`, which closed its payment hold — and receipts can be cancelled
-    # in the app, by the person who keyed the invoice (decisions §253).
+    # in the app, by the person who keyed the invoice (decisions §261).
     gr_query = (
         select(GoodsReceipt)
         .where(

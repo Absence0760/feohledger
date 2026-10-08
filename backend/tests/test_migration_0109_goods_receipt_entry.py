@@ -1,6 +1,6 @@
-"""Migration 0107 runs against a real tenant database: down, up, and up again.
+"""Migration 0109 runs against a real tenant database: down, up, and up again.
 
-The realdb harness builds tenants with `create_all`, so the columns 0107 adds
+The realdb harness builds tenants with `create_all`, so the columns 0109 adds
 exist there without the revision ever executing — nothing else proves its DDL
 runs, re-runs (`IF NOT EXISTS`), reverses, and no-ops on the control plane.
 The revision is driven through Alembic's `Operations` on the test tenant's own
@@ -16,7 +16,7 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 
-REVISION = Path(__file__).resolve().parents[1] / "alembic/versions/0107_goods_receipt_entry.py"
+REVISION = Path(__file__).resolve().parents[1] / "alembic/versions/0109_goods_receipt_entry.py"
 
 _COLUMNS = (
     ("goods_receipts", "source"),
@@ -28,7 +28,7 @@ _INDEXES = ("uq_goods_receipts_org_idempotency_key", "ix_gr_line_items_po_line_i
 
 
 def _load():
-    spec = importlib.util.spec_from_file_location("_mig_0107", REVISION)
+    spec = importlib.util.spec_from_file_location("_mig_0109", REVISION)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -69,7 +69,7 @@ async def _schema(engine) -> tuple[set, set]:
 
 
 @pytest.mark.asyncio
-async def test_0107_downgrades_upgrades_and_reruns_on_a_tenant(realdb):
+async def test_0109_downgrades_upgrades_and_reruns_on_a_tenant(realdb):
     from app.database import _make_tenant_url
 
     mig = _load()
@@ -104,7 +104,7 @@ async def test_0107_downgrades_upgrades_and_reruns_on_a_tenant(realdb):
 
 
 @pytest.mark.asyncio
-async def test_0107_is_a_no_op_on_the_control_plane(realdb):
+async def test_0109_is_a_no_op_on_the_control_plane(realdb):
     mig = _load()
     engine = create_async_engine(realdb.control_db_url())
     try:

@@ -24,10 +24,10 @@ No backfill
 -----------
 Existing rows keep ``source`` NULL. Before this revision no app user could type
 a receipt in, so NULL means "written by something other than the API", which
-the hold's auto-close continues to trust as it always has (decisions §253).
+the hold's auto-close continues to trust as it always has (decisions §261).
 
-Revision ID: 0107_goods_receipt_entry
-Revises: 0106_run_nacha_export_count
+Revision ID: 0109_goods_receipt_entry
+Revises: 0108_extraction_usage_tokens
 Create Date: 2026-10-07
 
 24 characters (``alembic_version.version_num`` is ``VARCHAR(32)``).
@@ -42,8 +42,8 @@ from sqlalchemy import text
 
 from alembic import op
 
-revision = "0107_goods_receipt_entry"
-down_revision = "0106_run_nacha_export_count"
+revision = "0109_goods_receipt_entry"
+down_revision = "0108_extraction_usage_tokens"
 branch_labels = None
 depends_on = None
 

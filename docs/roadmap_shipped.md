@@ -999,7 +999,7 @@ Per-tenant theming so resellers, banks, and ERP partners can offer the platform 
 ## Priority 14: Receiving, ERP depth & commerce sync
 
 ### 1. Goods-receipt entry (receive against a PO)
-**Status:** Done — `POST /api/goods-receipts` + cancel, `/goods-receipts` → Record receipt, migration 0107, decisions §253. See [po-matching.md](../backend/docs/po-matching.md) § Recording a goods receipt.
+**Status:** Done — `POST /api/goods-receipts` + cancel, `/goods-receipts` → Record receipt, migration 0109, decisions §261. See [po-matching.md](../backend/docs/po-matching.md) § Recording a goods receipt.
 
 - [x] `POST /api/goods-receipts` — receive against a PO, line by line (ordered vs already-received vs this delivery), partial and zero-quantity lines, entity taken from the PO
 - [x] Record who entered a receipt (`source` + `recorded_by_user_id`), and refuse the auto-close of a `po_mismatch` hold when the receipt that cleared it was typed in by someone implicated in the invoice — the inspection rule of §249, applied to receipts

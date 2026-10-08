@@ -1,6 +1,6 @@
 """Goods-receipt entry: record a delivery against a PO, or cancel one.
 
-Why it is shaped this way (decisions §253):
+Why it is shaped this way (decisions §261):
 
 * The PO row is locked for the whole write, so receipts on one PO serialise and
   the idempotency replay and the ``GR-<po_number>-<n>`` auto-number are safe.

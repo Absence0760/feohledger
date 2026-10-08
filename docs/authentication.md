@@ -1138,12 +1138,12 @@ exactly as before.
     `require_roles(ADMIN, AP_MANAGER, CFO)`. Those five rows shared one
     admin/ap_manager/cfo list, so an `ap_clerk` was hidden from two pages
     whose own code says a clerk reads them. A clerk sees every inspection and
-    no inspection control; since migration 0107 they DO get **Record receipt**:
+    no inspection control; since migration 0109 they DO get **Record receipt**:
     receiving is entry work, so `RECEIPT_ENTRY_ROLES` (admin / ap_manager /
     ap_clerk) is a role list, not a granular permission — the same reasoning
     as `INVOICE_ENTRY_ROLES`. What stops anyone releasing their own invoice
     with a receipt is the recorder stamp the payment hold's auto-close checks
-    (`docs/decisions.md` §253), not the role list. `src/lib/nav.test.ts`
+    (`docs/decisions.md` §261), not the role list. `src/lib/nav.test.ts`
     now pins the exact link set each system role sees in that group.
   - **Exception: a permission-gated control is unreachable if the nav row
     that leads to it is still role-only.** `NavLink`/`NavChild` take an

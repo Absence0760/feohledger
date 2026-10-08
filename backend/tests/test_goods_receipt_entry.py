@@ -13,7 +13,7 @@ write a receipt, so the 3-way leg and the "billed beyond receipt" payment hold
   * idempotency — a replayed key returns the same receipt with 200;
   * the matching consequence — a receipt recorded by someone else lifts the
     hold in the same request; one recorded by the invoice's own uploader does
-    not (decisions §253); cancelling a receipt raises it again;
+    not (decisions §261); cancelling a receipt raises it again;
   * the PO detail's per-line received quantities, which the form reads.
 """
 
@@ -481,7 +481,7 @@ async def test_a_receipt_from_elsewhere_cannot_be_cancelled_here(realdb):
 
 
 # --------------------------------------------------------------------------- #
-# The matching consequence (decisions §249, §253)
+# The matching consequence (decisions §249, §261)
 # --------------------------------------------------------------------------- #
 
 
@@ -741,7 +741,7 @@ async def test_cancel_is_scoped_like_every_other_read(realdb):
 
 @pytest.mark.asyncio
 async def test_the_po_total_counts_receipt_lines_that_name_no_po_line(realdb):
-    """A receipt written before 0107 has no `po_line_item_id`. The per-line
+    """A receipt written before 0109 has no `po_line_item_id`. The per-line
     figure cannot attribute it; the total — the figure the 3-way leg reads —
     still counts it."""
     po_id, _, (li,) = await _po(realdb)

@@ -108,10 +108,10 @@ class POLineItem(Base, TimestampMixin):
     purchase_order: Mapped[PurchaseOrder] = relationship(back_populates="line_items")
 
 
-#: ``GoodsReceipt.source`` — how the receipt reached us (migration 0107).
+#: ``GoodsReceipt.source`` — how the receipt reached us (migration 0109).
 #: ``manual`` = typed in through ``POST /api/goods-receipts``, recorder stamped.
 #: NULL = written by something other than the API (the seed script, a direct
-#: import) — before 0107 no in-app path could create a receipt at all, so a NULL
+#: import) — before 0109 no in-app path could create a receipt at all, so a NULL
 #: row is by construction not one an app user typed in.
 GR_SOURCE_MANUAL = "manual"
 
@@ -144,11 +144,11 @@ class GoodsReceipt(Base, EntityMixin, TimestampMixin):
     received_date: Mapped[date | None] = mapped_column(Date)
     status: Mapped[str] = mapped_column(String(30), default="received")
     # Where the receipt came from and, for one typed in, who typed it
-    # (migration 0107). A receipt is the evidence that lifts a "billed beyond
+    # (migration 0109). A receipt is the evidence that lifts a "billed beyond
     # receipt" `po_mismatch` payment hold on its own
     # (`invoice_warnings._close_cleared_po_exceptions`), so a receipt recorded by
     # someone implicated in the invoice must not be what releases it — the
-    # same rule a hand-entered inspection is held to (decisions §249, §253).
+    # same rule a hand-entered inspection is held to (decisions §249, §261).
     # Control-plane user id, so no FK.
     source: Mapped[str | None] = mapped_column(String(20))
     recorded_by_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
@@ -170,7 +170,7 @@ class GRLineItem(Base, TimestampMixin):
     gr_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("goods_receipts.id"), nullable=False, index=True
     )
-    # The PO line this quantity was received against (migration 0107). NULL on
+    # The PO line this quantity was received against (migration 0109). NULL on
     # a receipt for a PO that carries no lines, and on rows written before the
     # column existed. The 3-way leg still sums the receipt as a whole; this is
     # what lets the entry form show ordered / received / remaining per line.

@@ -40,7 +40,7 @@ from app.utils.dates import utc_today
 #: clerk is included alongside the managers (the invoice-entry split,
 #: `api/invoice_entry.INVOICE_ENTRY_ROLES`). What keeps a clerk — or anyone —
 #: from releasing their own invoice with a receipt is not this list but the
-#: recorder stamp the payment hold's auto-close checks (decisions §253).
+#: recorder stamp the payment hold's auto-close checks (decisions §261).
 RECEIPT_ENTRY_ROLES = (ROLE_ADMIN, ROLE_AP_MANAGER, ROLE_AP_CLERK)
 
 #: How far ahead of the server's UTC date a received date may be. One day,

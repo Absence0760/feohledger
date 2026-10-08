@@ -433,7 +433,7 @@ class _ReceiptsImplicated(NotApprovable):
     """The live match the agent's change leaves behind counts a hand-entered
     receipt recorded by someone implicated in the invoice (or by nobody known).
     The PO-match auto-close refuses to release on that evidence
-    (``invoice_warnings.receipts_clear_hold``, decisions §253); an agent run
+    (``invoice_warnings.receipts_clear_hold``, decisions §261); an agent run
     must not either, whoever triggered it — so the apply unwinds and the row
     escalates."""
 
