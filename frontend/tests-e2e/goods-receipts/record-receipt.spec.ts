@@ -138,7 +138,7 @@ test.describe('record a goods receipt', () => {
 		await signInAndWait(page, tenantCfo);
 		await page.goto('/goods-receipts');
 		await expect(page.getByRole('heading', { name: 'Goods Receipts' })).toBeVisible();
-		await expect(page.locator('table tbody tr').first()).toBeVisible();
+		await expect(page.locator('table tbody tr.clickable').first()).toBeVisible();
 		await expect(page.getByTestId('record-receipt')).toHaveCount(0);
 
 		const resp = await page.request.post(`${API_BASE}/api/goods-receipts`, {

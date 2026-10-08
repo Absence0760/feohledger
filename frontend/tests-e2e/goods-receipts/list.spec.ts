@@ -14,7 +14,9 @@ test.describe('/goods-receipts', () => {
 
 	test('renders the seeded goods receipts with their PO numbers', async ({ page }) => {
 		await expect(page.getByRole('heading', { name: 'Goods Receipts' })).toBeVisible();
-		const rows = page.locator('table tbody tr');
+		// `tr.clickable` is a real receipt row — the bare `tbody tr` also
+		// matches DataTable's "Loading…" placeholder before the list lands.
+		const rows = page.locator('table tbody tr.clickable');
 		await expect(rows.first()).toBeVisible({ timeout: 5_000 });
 		const total = await rows.count();
 		expect(total).toBeGreaterThan(0);
@@ -26,7 +28,7 @@ test.describe('/goods-receipts', () => {
 	});
 
 	test('clicking a row opens the detail modal with line items', async ({ page }) => {
-		await page.locator('table tbody tr').first().click();
+		await page.locator('table tbody tr.clickable').first().click();
 
 		const modal = page.locator('div.modal[role="dialog"][aria-label="Goods receipt"]');
 		await expect(modal).toBeVisible({ timeout: 5_000 });
