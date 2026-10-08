@@ -2313,6 +2313,263 @@ async def netsuite_delete_vendor_bill(request: Request, doc_id: str) -> Response
 app.include_router(netsuite_void)
 
 
+# ---------------------------------------------------------------------------
+# QuickBooks Online  (/qbo) — OAuth authorize/token/revoke stub + REST v3
+# ---------------------------------------------------------------------------
+#
+# Lets the whole connect flow run locally: GET /qbo/oauth2/authorize 302s
+# straight back to the redirect_uri with a code + realmId (no consent screen),
+# the token endpoint issues and ROTATES refresh tokens the way Intuit does (a
+# spent refresh token is refused with invalid_grant), and the v3 routes cover
+# what the backend adapter calls. State lives under STATE["qbo"], created
+# lazily so the global /__reset clears it too.
+
+qbo = APIRouter(prefix="/qbo")
+
+QBO_CLIENT_ID = "fake-qbo-client"
+QBO_CLIENT_SECRET = "fake-qbo-secret"
+QBO_REALM = "fake-realm-1"
+
+
+def _qbo() -> dict[str, Any]:
+    if "qbo" not in STATE:
+        STATE["qbo"] = {
+            "codes": set(),
+            "access_tokens": set(),
+            "refresh_token": None,  # only the latest is valid (rotation)
+            "bills": {},
+            "requestids": {},
+            "counter": 0,
+            "token_counter": 0,
+        }
+    return STATE["qbo"]
+
+
+def _qbo_fault(status: int, code: str, message: str) -> ProviderError:
+    return ProviderError(
+        status,
+        {"Fault": {"Error": [{"Message": message, "code": code}], "type": "ValidationFault"}},
+    )
+
+
+def _qbo_client_ok(request: Request) -> bool:
+    import base64
+
+    header = request.headers.get("authorization", "")
+    if not header.lower().startswith("basic "):
+        return False
+    try:
+        cid, _, secret = base64.b64decode(header[6:]).decode().partition(":")
+    except Exception:  # noqa: BLE001
+        return False
+    return cid == QBO_CLIENT_ID and secret == QBO_CLIENT_SECRET
+
+
+def _qbo_issue() -> dict:
+    st = _qbo()
+    st["token_counter"] += 1
+    n = st["token_counter"]
+    access, refresh = f"fake-qbo-access-{n}", f"fake-qbo-refresh-{n}"
+    st["access_tokens"].add(access)
+    st["refresh_token"] = refresh
+    return {
+        "access_token": access,
+        "refresh_token": refresh,
+        "token_type": "bearer",
+        "expires_in": 3600,
+        "x_refresh_token_expires_in": 8726400,
+    }
+
+
+@qbo.get("/oauth2/authorize")
+async def qbo_authorize(redirect_uri: str, state: str, client_id: str = "") -> Response:
+    from urllib.parse import urlencode
+
+    from fastapi.responses import RedirectResponse
+
+    if client_id != QBO_CLIENT_ID:
+        raise ProviderError(400, {"error": "invalid_client"})
+    st = _qbo()
+    st["counter"] += 1
+    code = f"fake-qbo-code-{st['counter']}"
+    st["codes"].add(code)
+    sep = "&" if "?" in redirect_uri else "?"
+    query = urlencode({"code": code, "state": state, "realmId": QBO_REALM})
+    return RedirectResponse(f"{redirect_uri}{sep}{query}", status_code=302)
+
+
+@qbo.post("/oauth2/token")
+async def qbo_token(request: Request) -> dict:
+    if not _qbo_client_ok(request):
+        raise ProviderError(401, {"error": "invalid_client"})
+    raw = (await request.body()).decode("utf-8", errors="replace")
+    form = {k: v[0] for k, v in parse_qs(raw).items()}
+    st = _qbo()
+    if form.get("grant_type") == "authorization_code":
+        code = form.get("code", "")
+        if code not in st["codes"]:
+            raise ProviderError(400, {"error": "invalid_grant"})
+        st["codes"].discard(code)  # single use
+        return _qbo_issue()
+    if form.get("grant_type") == "refresh_token":
+        if not form.get("refresh_token") or form.get("refresh_token") != st["refresh_token"]:
+            raise ProviderError(400, {"error": "invalid_grant"})
+        return _qbo_issue()
+    raise ProviderError(400, {"error": "unsupported_grant_type"})
+
+
+@qbo.post("/oauth2/revoke")
+async def qbo_revoke(request: Request) -> Response:
+    if not _qbo_client_ok(request):
+        raise ProviderError(401, {"error": "invalid_client"})
+    st = _qbo()
+    st["refresh_token"] = None
+    st["access_tokens"].clear()
+    return Response(status_code=200)
+
+
+def _require_qbo_auth(request: Request, realm: str) -> None:
+    token = request.headers.get("authorization", "").removeprefix("Bearer ")
+    if token not in _qbo()["access_tokens"]:
+        raise _qbo_fault(401, "3200", "AuthenticationFailed")
+    if realm != QBO_REALM:
+        raise _qbo_fault(403, "3100", "ApplicationAuthorizationFailed")
+
+
+# FIXED fixtures — e2e tests may assert these literals.
+QBO_VENDORS = [
+    {
+        "Id": "56",
+        "DisplayName": "Fake ERP Vendor A",
+        "PrimaryEmailAddr": {"Address": "ap@vendor-a.test"},
+    },
+    {"Id": "57", "DisplayName": "Fake ERP Vendor B"},
+]
+QBO_ACCOUNTS = [
+    {"Id": "7", "Name": "Office Expenses", "AcctNum": "6100", "Classification": "Expense"},
+    {"Id": "33", "Name": "Accounts Payable (A/P)", "Classification": "Liability"},
+]
+QBO_POS = [
+    {
+        "Id": "130",
+        "DocNumber": "PO-QBO-1001",
+        "POStatus": "Open",
+        "TotalAmt": 250.00,
+        "VendorRef": {"value": "56", "name": "Fake ERP Vendor A"},
+        "CurrencyRef": {"value": "USD"},
+        "Line": [
+            {
+                "Amount": 250.00,
+                "Description": "Fake widgets",
+                "DetailType": "AccountBasedExpenseLineDetail",
+                "AccountBasedExpenseLineDetail": {"AccountRef": {"value": "7", "name": "6100"}},
+            }
+        ],
+    }
+]
+
+
+@qbo.get("/v3/company/{realm}/companyinfo/{realm_id}")
+async def qbo_company_info(request: Request, realm: str, realm_id: str) -> dict:
+    _require_qbo_auth(request, realm)
+    return {"CompanyInfo": {"Id": "1", "CompanyName": "Fake QBO Co", "Country": "US"}}
+
+
+@qbo.get("/v3/company/{realm}/preferences")
+async def qbo_preferences(request: Request, realm: str) -> dict:
+    _require_qbo_auth(request, realm)
+    return {
+        "Preferences": {
+            "CurrencyPrefs": {"HomeCurrency": {"value": "USD"}, "MultiCurrencyEnabled": False}
+        }
+    }
+
+
+_QBO_SELECT = re.compile(r"select \* from (\w+)(.*)$", re.IGNORECASE)
+_QBO_DOCNUMBER = re.compile(r"where DocNumber = '((?:[^'\\]|\\.)*)'", re.IGNORECASE)
+
+
+@qbo.get("/v3/company/{realm}/query")
+async def qbo_query(request: Request, realm: str, query: str) -> dict:
+    _require_qbo_auth(request, realm)
+    match = _QBO_SELECT.match(query.strip())
+    if not match:
+        raise _qbo_fault(400, "4000", "QueryParserError")
+    entity, rest = match.group(1), match.group(2)
+    if entity == "Bill":
+        doc = _QBO_DOCNUMBER.search(rest)
+        rows = list(_qbo()["bills"].values())
+        if doc:
+            wanted = re.sub(r"\\(.)", r"\1", doc.group(1))
+            rows = [b for b in rows if b.get("DocNumber") == wanted]
+    else:
+        fixtures = {"Vendor": QBO_VENDORS, "Account": QBO_ACCOUNTS, "PurchaseOrder": QBO_POS}
+        rows = fixtures.get(entity, [])
+        # One page holds everything; a STARTPOSITION past it is an empty page.
+        start = re.search(r"STARTPOSITION (\d+)", rest, re.IGNORECASE)
+        if start and int(start.group(1)) > 1:
+            rows = []
+    return {"QueryResponse": {entity: copy.deepcopy(rows)} if rows else {}}
+
+
+@qbo.post("/v3/company/{realm}/bill")
+async def qbo_create_bill(request: Request, realm: str) -> dict:
+    from decimal import Decimal
+
+    _require_qbo_auth(request, realm)
+    st = _qbo()
+    body = await request.json()
+    if request.query_params.get("operation") == "delete":
+        bill = st["bills"].get(str(body.get("Id")))
+        if bill is None:
+            raise _qbo_fault(400, "610", "Object Not Found")
+        if str(body.get("SyncToken")) != bill["SyncToken"]:
+            raise _qbo_fault(400, "5010", "Stale Object Error")
+        del st["bills"][bill["Id"]]
+        return {"Bill": {"Id": bill["Id"], "status": "Deleted"}}
+
+    request_id = request.query_params.get("requestid")
+    if request_id and request_id in st["requestids"]:
+        return copy.deepcopy(st["requestids"][request_id])
+    if not (body.get("VendorRef") or {}).get("value"):
+        raise _qbo_fault(400, "2020", "Required param missing: VendorRef")
+    st["counter"] += 1
+    total = float(sum(Decimal(str(line.get("Amount") or 0)) for line in body.get("Line") or []))
+    bill = {**body, "Id": str(500 + st["counter"]), "SyncToken": "0", "TotalAmt": total}
+    bill["Balance"] = total
+    st["bills"][bill["Id"]] = bill
+    response = {"Bill": copy.deepcopy(bill)}
+    if request_id:
+        st["requestids"][request_id] = response
+    return response
+
+
+@qbo.get("/v3/company/{realm}/bill/{bill_id}")
+async def qbo_get_bill(request: Request, realm: str, bill_id: str) -> dict:
+    _require_qbo_auth(request, realm)
+    bill = _qbo()["bills"].get(bill_id)
+    if bill is None:
+        raise _qbo_fault(400, "610", "Object Not Found")
+    return {"Bill": copy.deepcopy(bill)}
+
+
+@app.post("/__qbo/set-balance")
+async def qbo_set_balance(body: dict) -> dict:
+    """Test hook: set a bill's Balance (0 = paid) so an e2e can drive status.
+
+    Body: {"id": "<bill Id>", "balance": <number>}.
+    """
+    bill = _qbo()["bills"].get(str(body.get("id", "")))
+    if bill is None:
+        raise ProviderError(404, {"detail": "unknown bill"})
+    bill["Balance"] = body.get("balance", 0)
+    bill["SyncToken"] = str(int(bill["SyncToken"]) + 1)
+    return {"status": "ok"}
+
+
+app.include_router(qbo)
+
+
 if __name__ == "__main__":
     import uvicorn
 
