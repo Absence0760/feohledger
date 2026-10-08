@@ -63,13 +63,17 @@ async def fetch_provider_balance(payment_config: dict | None) -> ProviderBalance
     """
     # Import here (not module top) so this service has no import-time dependency
     # on the adapter registry; matches the lazy-import posture elsewhere.
-    from app.services.payment_adapters import get_payment_adapter
+    from app.services.payment_adapters import get_payment_adapter, list_available_providers
 
     try:
         adapter = get_payment_adapter(payment_config)
         result = await adapter.get_balance()
     except Exception:  # noqa: BLE001 — a provider failure must not break the dashboard
-        provider = (payment_config or {}).get("provider", "mock")
+        # `payment_config` carries the unsealed credentials (decisions §266), so
+        # nothing read from it reaches the log: the name logged is the
+        # registry's own string, matched against the configured one.
+        configured = (payment_config or {}).get("provider") or "mock"
+        provider = next((n for n in list_available_providers() if n == configured), "unregistered")
         logger.warning("cash-position balance fetch failed for provider %s", provider)
         return None
 
