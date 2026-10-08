@@ -145,6 +145,11 @@ in `frontend/tests-e2e/README.md` § Running from a worktree.
 | `FEOH_ERP_SAGE_ACCOUNTING_API_BASE` | (empty) | Sage Business Cloud Accounting API base override. Empty → `https://api.accounting.sage.com/v3.1`; set → used verbatim (operator-trusted). Dev value: `http://localhost:12112/sage/v3.1`. |
 | `FEOH_ERP_SAGE_ACCOUNTING_CLIENT_ID` / `FEOH_ERP_SAGE_ACCOUNTING_CLIENT_SECRET` | (empty) | The platform's Sage developer app (one app, every tenant). Empty → Sage Accounting is unavailable unless the tenant brings its own `settings.erp.client_id`/`client_secret`; no fallback. Secret lives in sops (`infra-secrets`). |
 | `FEOH_ERP_SAGE_ZA_API_BASE` | (empty) | Sage Business Cloud Accounting (South Africa) API v2.0.0 base override. Empty → the admin-config `base_url` (https-only + SSRF guard) or, absent that, `https://accounting.sageone.co.za/api/2.0.0`; set → used verbatim (operator-trusted, guards skipped). Dev value: `http://localhost:12112/sageza/api/2.0.0`. |
+| `FEOH_ERP_BLACKBAUD_CLIENT_ID` | (empty) | Platform SKY API application id for Blackbaud Financial Edge NXT (OAuth authorization code). A tenant may bring its own in `settings.erp.client_id`. Empty in both → the provider is unavailable. |
+| `FEOH_ERP_BLACKBAUD_CLIENT_SECRET` | (empty) | **Secret.** The platform SKY application's secret (sops). No fallback; a tenant may set `settings.erp.client_secret` instead. |
+| `FEOH_ERP_BLACKBAUD_SUBSCRIPTION_KEY` | (empty) | **Secret.** SKY developer subscription key, sent as `Bb-Api-Subscription-Key` on every call (sops). A tenant may override it with `settings.erp.subscription_key`; empty in both → every Blackbaud post refuses (`subscription_key_missing`) before any call. |
+| `FEOH_ERP_BLACKBAUD_API_BASE` | (empty) | SKY API base override. Empty → `https://api.sky.blackbaud.com`; set → used verbatim (operator-trusted). Dev value: `http://localhost:12112/blackbaud`. |
+| `FEOH_ERP_BLACKBAUD_TOKEN_URL` | (empty) | SKY OAuth token endpoint override, read once at import into the provider spec. Empty → `https://oauth2.sky.blackbaud.com/token`. Dev value: `http://localhost:12112/blackbaud/oauth2/token`. |
 | `FEOH_AUDIT_MODE`       | `local`                                                                  | `local` or `lambda` for audit log writes |
 | `FEOH_SQS_EXTRACTION_QUEUE_URL` | (empty)                                                          | Required when `FEOH_EXTRACTION_MODE=lambda` |
 | `FEOH_SQS_ERP_QUEUE_URL` | (empty)                                                                 | Required when `FEOH_ERP_MODE=lambda` |
@@ -245,6 +250,9 @@ always `backend/app/config.py`.
 | `FEOH_ERP_SAGE_ACCOUNTING_API_BASE` | (empty) | Sage Accounting v3.1 base override — empty → `https://api.accounting.sage.com/v3.1`. Dev value targets fake-erp |
 | `FEOH_ERP_SAGE_ACCOUNTING_CLIENT_ID` / `_SECRET` | (empty) | Platform Sage developer app credentials — empty fails closed (no fallback) |
 | `FEOH_ERP_SAGE_ZA_API_BASE` | (empty) | Sage Accounting (South Africa) API base override — empty → admin-config https `base_url` + SSRF guard, else `https://accounting.sageone.co.za/api/2.0.0`; set → used verbatim (operator-trusted). Dev value targets fake-erp |
+| `FEOH_ERP_BLACKBAUD_CLIENT_ID` / `_CLIENT_SECRET` | (empty) | Platform SKY API application for Blackbaud FE NXT (secret via sops; no fallback) |
+| `FEOH_ERP_BLACKBAUD_SUBSCRIPTION_KEY` | (empty) | SKY `Bb-Api-Subscription-Key` (secret via sops); tenant override `settings.erp.subscription_key`; empty in both → fails closed |
+| `FEOH_ERP_BLACKBAUD_API_BASE` / `_TOKEN_URL` | (empty) | SKY API base / token URL overrides — empty → `https://api.sky.blackbaud.com` / `https://oauth2.sky.blackbaud.com/token`. Dev values target fake-erp |
 | `FEOH_ANTHROPIC_API_KEY` | (empty) | Claude Vision for platform extraction |
 | `FEOH_EXTRACTION_MODEL` | `claude-sonnet-5-5` | AI model for extraction |
 | `FEOH_EXTRACTION_EFFORT` | `low` | `output_config.effort` for platform Claude extraction; empty omits it |

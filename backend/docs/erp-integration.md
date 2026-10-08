@@ -1332,3 +1332,78 @@ pages) and filter with `$filter`.
 
 Tests: `backend/tests/test_erp_sage_accounting_za_adapter.py`. fake-erp surface:
 `/sageza/api/2.0.0` (`FEOH_ERP_SAGE_ZA_API_BASE`).
+
+## Blackbaud Financial Edge NXT direct adapter (`blackbaud_fe_nxt`)
+
+`erp_adapters/blackbaud_fe_nxt.py`, selected by `settings.erp = {"type":
+"blackbaud_fe_nxt", "integration_method": "direct", ...}`. Financial Edge NXT
+is Blackbaud's fund-accounting system for nonprofits, reached through the **SKY
+API** (`https://api.sky.blackbaud.com`). It is the first adapter on the shared
+OAuth 2.0 authorization-code flow: it subclasses `OAuthErpAdapter`, registers
+its `OAuthProviderSpec` with `services/erp_oauth` at import, and gets every
+bearer token from `await self.access_token()` — it never reads, refreshes or
+stores a token.
+
+Every call carries **two** credentials: the bearer token, and the SKY developer
+subscription key as `Bb-Api-Subscription-Key`. The key belongs to the developer
+account, not to a customer environment, so one platform key serves every
+tenant; the environment is burned into the token.
+
+| Setting | Secret | Meaning |
+|---|---|---|
+| `FEOH_ERP_BLACKBAUD_CLIENT_ID` / `_CLIENT_SECRET` | secret: yes | Platform SKY application (one app, every tenant). Empty → unavailable |
+| `FEOH_ERP_BLACKBAUD_SUBSCRIPTION_KEY` | **yes** | Platform subscription key. Empty and no tenant key → every post refuses `subscription_key_missing` before any call |
+| `settings.erp.ap_account_number` | no | AP liability account (`01-2000-00`) the invoice's Credit distribution posts to — **required** |
+| `settings.erp.currency` | no | ISO code of the FE NXT ledger — **required**; an invoice in another currency is refused |
+| `settings.erp.subscription_key` | **yes** (optional) | Tenant key overriding the platform one |
+| `settings.erp.client_id` / `client_secret` | secret: yes (optional) | Tenant-owned SKY application (read by `erp_oauth`) |
+| `settings.erp.project_id` | no (optional) | FE NXT project (`ui_project_id`) on every distribution split |
+| `settings.erp.transaction_code_values` | no (optional) | `[{"id", "value"}, …]` on every split, in FE NXT's code order |
+| `settings.erp.approval_status` | no (optional) | `Pending` / `Approved`; omitted otherwise (FE NXT's default applies) |
+| `settings.erp.oauth` | **yes** | Written only by `erp_oauth`; `external_tenant_id` = the token response's `environment_id` |
+
+| Operation | Call |
+|---|---|
+| `post_invoice` | pre-flight refusals → `GET /accountspayable/v1/invoices?search_text=<number>` → `POST /accountspayable/v1/invoices/process` → `GET …/backgroundProcess/{id}/status` (≤ 10 reads, 1 s apart) → `…/result` |
+| `get_invoice_status` | `GET /accountspayable/v1/invoices/{id}`: `Pending` draft, `Approved` open (balance 0 ⇒ paid), `PartiallyPaid`, `Paid`, `Deleted` cancelled |
+| `void_invoice` | not automated (`False`): the AP API has no invoice delete, and cancelling a posted payable is an adjustment in an open period |
+| `list_vendors` / `list_pos` | `GET /accountspayable/v1/vendors` / `/purchaseorders`, 100 × 10 pages; template and deleted POs skipped; PO `currency` stays NULL |
+| `list_gl_accounts` | `GET /generalledger/v1/accounts`, keyed by `account_number` (what AP distributions take); `prevent_data_entry` accounts skipped; `account_type` unclassified (FE NXT's `class` is a net-asset class) |
+| `test_connection` | an `environment_id` was captured at consent + `GET /accountspayable/v1/vendors?limit=1` |
+
+Request rules worth knowing:
+
+- **Balanced distributions (fund accounting).** One `Debit` per line from
+  `bill_lines.bill_lines` (a negative line becomes the same amount on the
+  `Credit` side) plus one `Credit` of `payload.amount` to `ap_account_number`.
+  Each distribution has one split at `percent: 100`. Project and transaction
+  codes are sent only as configured — never derived from `cost_center` or
+  guessed; when FE NXT's account setup requires one we lack, its 400
+  (`invalid_request`) surfaces and the fix is tenant config.
+- **Dates.** `invoice_date` and `due_date` are required by FE NXT and refused
+  when missing; `post_date` is the invoice date. `payment_details` is sent
+  empty, so the vendor's payment defaults apply.
+- **Asynchronous create.** The synchronous `POST /invoices` is deprecated in
+  favour of the background-process job. Once FE NXT has accepted a job, any
+  outcome we cannot confirm — still running after the bounded poll, or a
+  429 / 403-quota / error while asking — is **non-retryable** `job_unconfirmed`:
+  `services/erp` backs off for seconds and a re-submit while the first job runs
+  would create a second invoice. A job that reports canceled/failed is
+  retryable. An operator's later retry is safe: the lookup finds the invoice.
+- **Idempotency.** `correlation_id` rides in the description as
+  `[feoh:<id>]` (description bounded to 60 characters so the marker survives).
+  A row with the same vendor and invoice number, not `Deleted`, carrying our
+  marker is the earlier attempt; one without it is refused as
+  `duplicate_invoice_number`. A failed or truncated lookup is a failure.
+- **Rate limits.** 429, and 403 with `Retry-After` (SKY's quota signal), map to
+  `rate_limited` from status and headers only. Nothing sleeps on them.
+- **Money** goes out through `dumps_exact_json` and is read back with
+  `parse_float=Decimal`.
+- **Refusal reasons:** `vendor_not_linked` (also a non-numeric vendor id),
+  `account_not_linked`, `subscription_key_missing`,
+  `ap_account_not_configured`, `currency_not_configured`, `currency_mismatch`,
+  `invoice_date_missing`, `due_date_missing`, `amount_not_positive`,
+  `duplicate_invoice_number`.
+
+Tests: `backend/tests/test_erp_blackbaud_adapter.py`. fake-erp surface:
+`/blackbaud` (`FEOH_ERP_BLACKBAUD_API_BASE`, `FEOH_ERP_BLACKBAUD_TOKEN_URL`).
