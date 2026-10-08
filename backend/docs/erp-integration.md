@@ -1086,6 +1086,36 @@ integrations. That is why QuickBooks Online is scoped as a direct adapter
 | Test connection button in UI | Done |
 | ERP status display in invoice modal | Planned |
 
+## Bill lines: one rule set, two views
+
+Every direct adapter that posts line detail takes its lines from
+`erp_adapters/bill_allocation.allocate_bill_lines`, which is the single
+statement of the rules; each module's docstring opens with this "which helper
+when" note:
+
+| View | Shape | Used by | Why |
+|---|---|---|---|
+| `bill_allocation.allocate_bill_lines` | net, tax and gross per line | Xero, Sage Business Cloud Accounting v3.1 | the ERP derives the bill total from lines **plus tax** |
+| `bill_lines.bill_lines` | `(account, gross, memo)` | Sage Intacct, SYSPRO, Sage Accounting ZA, Blackbaud FE NXT, QuickBooks Online | the ERP takes tax separately (or not at all; Sage ZA splits VAT out of the gross by the account's rate) |
+
+`bill_lines` is a projection of the allocation, so the two cannot disagree:
+
+- **Amount** — a line's `total`, else `quantity × unit_price`, else
+  `line_amount_missing`. An invoice with no lines is one header line.
+- **Account** — a coded line posts on its own account's ERP id; coded but
+  unlinked → `account_not_linked`, never moved onto the header's account. Only
+  an uncoded line takes the header's (none → `account_not_linked`).
+- **Total** — the gross lines sum to exactly `payload.amount`: tax-inclusive
+  lines as given, tax-exclusive lines plus their stated tax (each line's own
+  `tax` when they add up to `tax_amount`, or all of it on a single line).
+  Anything else → `amount_mismatch`; several tax-exclusive lines with
+  header-only tax → `tax_not_itemised` (never pro-rated). There is no fallback
+  to one line on the header account.
+
+The shared reason codes (`account_not_linked`, `amount_mismatch`,
+`line_amount_missing`, `not_connected`, `posted_total_mismatch`,
+`posted_total_unconfirmed`) are constants in `erp_adapters/base.py`.
+
 ## Sage Intacct direct adapter (`sage_intacct`)
 
 `erp_adapters/sage_intacct.py`, selected by `settings.erp = {"type":
@@ -1123,11 +1153,17 @@ form. JSON throughout — no XML parser on this path.
 Request rules worth knowing:
 
 - **Lines.** `bill_lines.bill_lines` posts one Intacct line per invoice line
-  only when every line has a total, every line resolves a GL account ERP id
-  (its own; only an uncoded line takes the header's, and a coded line with no
-  id refuses `account_not_linked`) and the totals sum to exactly
-  `payload.amount`; otherwise one line for `payload.amount` against the header
-  account. The header amount is never recomputed from lines.
+  (one header line when the invoice has none) at its tax-inclusive gross. It is
+  a projection of `bill_allocation.allocate_bill_lines`, so the rules are the
+  ones every direct adapter shares (see § Bill lines: one rule set, two views):
+  a line's amount is its total, else quantity × unit price, else
+  `line_amount_missing`; a coded line posts on its own account's ERP id and an
+  unlinked one refuses `account_not_linked` (only an uncoded line takes the
+  header's); the lines must sum to exactly `payload.amount` (tax-inclusive, or
+  tax-exclusive plus their stated tax), else `amount_mismatch` /
+  `tax_not_itemised`. There is no one-header-line fallback: the header amount is
+  never recomputed from lines, and coded expense is never moved to the header
+  account to make the lines fit.
 - **Money** goes as fixed-point decimal strings (`format(d, "f")`): no float,
   no exponent form, scale preserved.
 - **Idempotency.** The pre-create lookup by `referenceNumber`; a *failed*
@@ -1240,9 +1276,11 @@ which apps created on or after 2026-03-02 must use.
 
 - **Refusals, before any HTTP call** (`"Xero post refused: <reason>"`):
   `vendor_not_linked` (no `vendor_erp_id`; never a name lookup),
-  `missing_dates`, `account_not_linked` (a line with no `gl_account_erp_id`,
-  header fallback), `amount_mismatch` / `tax_not_itemised` /
-  `line_amount_missing` (from `erp_adapters/bill_allocation.py`, shared with Sage).
+  `missing_dates`, `account_not_linked` (a coded line whose account has no
+  `gl_account_erp_id` — never moved onto the header's — or an uncoded line /
+  header-only bill with no linked header account), `amount_mismatch` /
+  `tax_not_itemised` / `line_amount_missing` (from
+  `erp_adapters/bill_allocation.py`, shared with every direct adapter).
 - **The total is never re-derived.** `bill_allocation.allocate_bill_lines`
   classifies lines as tax-inclusive (they sum to `amount`) or tax-exclusive
   (they plus `tax_amount` sum to `amount`) and refuses anything else. Per-line
@@ -1265,6 +1303,12 @@ which apps created on or after 2026-03-02 must use.
   `Reference` is ACCREC-only in Xero, so no bill field can carry our
   correlation id; the create also sends `Idempotency-Key: <correlation_id>`
   (Xero replays the original response).
+- **The posted total is checked.** Xero computes `Total` from the lines and
+  their tax types; a `Total` other than `amount` voids (AUTHORISED) or deletes
+  (DRAFT) the bill just created and fails non-retryable
+  `posted_total_mismatch`, and a create that reports no `Total` fails
+  non-retryable `posted_total_unconfirmed` — never success
+  (`erp_adapters/posted_total.py`).
 - **Rate limits** (60/min, 5,000/day per tenant): HTTP 429 →
   `"Xero post failed: HTTP 429 (rate_limited)"`, `Retry-After` kept in the
   in-memory `raw_response`. No sleep loop; `services/erp`'s retry backoff
@@ -1329,7 +1373,12 @@ complete its consent flow. A ZA Sage adapter is separate work.
   invoice with the same `vendor_reference`: carrying our marker → adopted;
   without it → `duplicate_document_number`. A failed lookup fails closed, and a
   lookup that runs past the page cap is refused
-  `idempotency_lookup_incomplete`.
+  `idempotency_lookup_incomplete`. An adopted invoice must carry the approved
+  `total_amount` too (the check below).
+- **The posted total is checked.** Sage recalculates `total_amount`; one other
+  than `amount` voids/deletes the invoice just created and fails non-retryable
+  `posted_total_mismatch`, and a create that reports none fails non-retryable
+  `posted_total_unconfirmed` (`erp_adapters/posted_total.py`).
 - 429 → `rate_limited` (no sleep loop); failures through
   `erp_failure_message`.
 
@@ -1352,7 +1401,7 @@ separate product with its own API, `https://accounting.sageone.co.za/api/2.0.0`
 | `username` | no | The Sage login email of the user the app acts as |
 | `password` | **yes** | That user's Sage password |
 | `company_id` | no | Numeric Sage company id (`Company/Get` lists them) |
-| `base_url` | no (optional) | API base; default `https://accounting.sageone.co.za/api/2.0.0`. Admin-supplied, so https-only and SSRF-guarded |
+| `base_url` | no (optional) | API base; default `https://accounting.sageone.co.za/api/2.0.0`. Admin-supplied and handed the API key and the Sage password, so https-only, on `accounting.sageone.co.za` only (any other host or port → `SageZaConfigError`), and SSRF-guarded. The operator override `FEOH_ERP_SAGE_ZA_API_BASE` (fake-erp) skips all three |
 | `home_currency` | no (optional) | ISO code of the company's home currency, default `ZAR` — the API reports currencies only as numeric ids and a symbol |
 
 Every call is `<Resource>/<Method>?apikey=…&companyid=…` with the Sage login in
@@ -1377,19 +1426,27 @@ pages) and filter with `$filter`.
   type → `tax_type_not_resolved`. When the payload carries `tax_amount` and
   Sage's VAT would differ by more than a cent per line → `tax_mismatch` (a
   zero-rated invoice coded to a standard-rated account would otherwise claim
-  input VAT never charged).
+  input VAT never charged). A payload with **no** `tax_amount` states no VAT,
+  which is not "any VAT": it posts only when every line's resolved rate is 0%,
+  else `tax_not_stated`.
 - **Idempotency**: `Reference` carries our `correlation_id`. The lookup filters
   `SupplierId eq N and (Reference eq '<corr>' or DocumentNumber eq '<inv>')`
   (OData quotes doubled). Our reference with the same `Total` is adopted; with
   another total → `correlation_total_mismatch`; the same invoice number under
   another reference → `duplicate_invoice_number`. A failed lookup is a
   retryable failure, never read as "not posted". If Sage saves a different
-  `Total` than approved → non-retryable `posted_total_mismatch`.
+  `Total` than approved, the invoice just saved is deleted (when nothing is
+  allocated to it) and the push fails non-retryable `posted_total_mismatch`; a
+  save that reports no `Total` fails non-retryable `posted_total_unconfirmed`
+  (never success — `erp_adapters/posted_total.py`, shared with QuickBooks, Xero
+  and Sage v3.1).
 - **Refusal reasons** (all non-retryable): `vendor_not_linked`,
   `account_not_linked` (also an unknown or inactive account),
   `currency_not_supported`, `foreign_currency_supplier`,
-  `tax_type_not_resolved`, `tax_mismatch`, `correlation_total_mismatch`,
-  `duplicate_invoice_number`.
+  `tax_type_not_resolved`, `tax_mismatch`, `tax_not_stated`,
+  `correlation_total_mismatch`, `duplicate_invoice_number`, plus the shared
+  line codes `line_amount_missing` / `amount_mismatch` / `tax_not_itemised`
+  from `bill_lines`.
 - **Credentials.** The API key rides in the query string, so the module
   registers `apikey=` with the shared `erp_adapters/log_redaction.py` filter on
   the `httpx` logger (the same filter SYSPRO uses): any logged URL containing it
@@ -1457,7 +1514,13 @@ Request rules worth knowing:
   429 / 403-quota / error while asking — is **non-retryable** `job_unconfirmed`:
   `services/erp` backs off for seconds and a re-submit while the first job runs
   would create a second invoice. A job that reports canceled/failed is
-  retryable. An operator's later retry is safe: the lookup finds the invoice.
+  retryable. The unconfirmed result carries the job's `process_id` as
+  `ErpPostResult.pending_job_id`; `services/erp._call_erp` keeps it on
+  `WorkflowInstance.state_data["erp_pending_job_id"]` and hands it back as
+  `InvoicePayload.pending_job_id` on the next attempt. An operator's retry
+  therefore polls that job first: completed → its invoice is the result (and
+  the stored job is cleared); still running or unreadable → `job_unconfirmed`
+  again, nothing queued; canceled/failed → the normal lookup-then-post path.
 - **Idempotency.** `correlation_id` rides in the description as
   `[feoh:<id>]` (description bounded to 60 characters so the marker survives).
   A row with the same vendor and invoice number, not `Deleted`, carrying our
@@ -1498,10 +1561,11 @@ overriding a shared one, would post against whatever BC account happens to hold
 that No. — or fail inside BC instead of refusing up front. The id also survives
 a renumbering in BC. Lines follow NetSuite's account rule (uncoded → header
 account; coded but unlinked → `account_not_linked`) and the amount rule of
-`bill_lines`: per line only when every line has an amount (total, else
-quantity × unit price) and they sum to exactly the approved amount, otherwise
-one line for the amount on the header account — BC totals the bill from its
-lines, so lines that disagree would post a different figure. A line keeps its
+its own amount rule (in `dynamics_365_bc.py`, not the shared `bill_lines`): per
+line only when every line has an amount (total, else quantity × unit price) and
+they sum to exactly the approved amount, otherwise one line for the amount on
+the header account — BC totals the bill from its lines, so lines that disagree
+would post a different figure. A line keeps its
 quantity and unit cost only when they multiply to its amount exactly; otherwise
 it goes as 1 × amount.
 
@@ -1617,9 +1681,15 @@ or `body`. An empty `scopes` sends no `scope`. Operator URL overrides
 
 **QuickBooks Online** (`erp_adapters/quickbooks_online.py`). It refuses before
 any post, with `QuickBooks Online post refused: <reason>`: `vendor_not_linked`,
-`account_not_linked`, `amount_mismatch` (the lines must sum to the header
-amount, because QuickBooks re-totals from lines), `doc_number_too_long` (21
-characters), `currency_not_enabled`, `currency_unknown`, `not_connected`.
+`doc_number_too_long` (21 characters), `currency_not_enabled`,
+`currency_unknown`, `not_connected`, and the shared line codes from
+`bill_lines` — `account_not_linked` (a coded line is never moved onto the
+header's account), `line_amount_missing`, `amount_mismatch` /
+`tax_not_itemised` (the lines must sum to the header amount, because QuickBooks
+re-totals from lines). After the create, QuickBooks' own `TotalAmt` must equal
+the approved amount: a different one deletes the bill just created and fails
+non-retryable `posted_total_mismatch`; a missing one fails non-retryable
+`posted_total_unconfirmed`. The idempotent re-find applies the same check.
 Posting is idempotent through `requestid=<correlation id>` plus a pre-check on
 DocNumber + vendor + `PrivateNote: "FeohLedger <correlation id>"`. A 401
 refreshes once and retries. `void_invoice` deletes only a bill with no payment
