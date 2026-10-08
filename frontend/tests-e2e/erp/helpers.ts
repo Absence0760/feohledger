@@ -96,6 +96,44 @@ async function loginAsSecondActor(page: Page): Promise<Record<string, string>> {
 	return tenantHeaders(access_token, slug);
 }
 
+/** Pull the configured ERP's vendors (`POST /api/vendors/sync-erp`). A direct
+ *  adapter posts a bill against the vendor's ERP id, which only this sync
+ *  stores — an invoice whose vendor never synced is refused
+ *  (`vendor_not_linked`), never posted by name. Idempotent, so every spec that
+ *  sends can call it without caring what a previous spec synced. */
+export async function syncErpVendors(page: Page): Promise<void> {
+	const resp = await page.request.post(`${API_BASE}/api/vendors/sync-erp`, {
+		headers: await authedTenantHeaders(page)
+	});
+	expect(resp.status(), 'vendor sync').toBe(200);
+}
+
+/** Pull the configured ERP's chart (`POST /api/gl-accounts/sync-erp`) — the
+ *  only writer of `gl_accounts.erp_account_id`, which NetSuite's expense lines
+ *  are posted against. Idempotent. */
+export async function syncErpGlAccounts(page: Page): Promise<void> {
+	const resp = await page.request.post(`${API_BASE}/api/gl-accounts/sync-erp`, {
+		headers: await authedTenantHeaders(page)
+	});
+	expect(resp.status(), 'GL account sync').toBe(200);
+}
+
+/** The `details.error` the push recorded on the append-only
+ *  `invoice.erp_failed` audit row — the PII-free reason a failed post gives. */
+export async function erpFailureFromAudit(page: Page, invoiceId: string): Promise<string> {
+	const resp = await page.request.get(`${API_BASE}/api/invoices/${invoiceId}/audit-log`, {
+		headers: await authedTenantHeaders(page)
+	});
+	expect(resp.status()).toBe(200);
+	const rows = (await resp.json()) as Array<{
+		action: string;
+		details: { error?: string } | null;
+	}>;
+	const failed = rows.find((r) => r.action === 'invoice.erp_failed');
+	expect(failed, 'audit trail has an invoice.erp_failed row').toBeTruthy();
+	return failed?.details?.error ?? '';
+}
+
 /** Create a fresh invoice via the API and approve it directly (`new →
  *  approved` is a legal edge in VALID_TRANSITIONS — the manual-entry
  *  fast path). Deliberately does NOT go through `/complete`: complete's
@@ -112,7 +150,7 @@ async function loginAsSecondActor(page: Page): Promise<Record<string, string>> {
  *  review flow. */
 export async function createApprovedInvoice(
 	page: Page,
-	opts: { prefix: string; amount?: string; vendor?: string }
+	opts: { prefix: string; amount?: string; vendor?: string; glAccount?: string }
 ): Promise<Inv> {
 	const unique = `${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
 	const headers = await authedTenantHeaders(page);
@@ -124,7 +162,8 @@ export async function createApprovedInvoice(
 			vendor: opts.vendor ?? 'Fake ERP Vendor A',
 			amount: opts.amount ?? '1234.56',
 			currency: 'USD',
-			status: 'new'
+			status: 'new',
+			...(opts.glAccount ? { gl_account: opts.glAccount } : {})
 		}
 	});
 	if (created.status() !== 201) {

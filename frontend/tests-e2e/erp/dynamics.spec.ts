@@ -15,6 +15,7 @@ import {
 	resetFakeErp,
 	sendToErpAndAwaitTerminal,
 	setErpSettings,
+	syncErpVendors,
 	testErpConnection
 } from './helpers';
 
@@ -34,9 +35,12 @@ import {
  *
  * Coverage:
  *   1. test_connection — token exchange + GET companies(fake-co)/vendors.
- *   2. Full send — an approved invoice posts as a purchaseInvoice through the
- *      async ERP dispatch (create 201 → Microsoft.NAV.post finalize) and
- *      lands `done` with a BC-shaped document id (d365-inv-N).
+ *   2. Full send — after the vendor sync stores the BC vendor's id, an
+ *      approved invoice posts as a purchaseInvoice through the async ERP
+ *      dispatch (create 201 → Microsoft.NAV.post finalize) and lands `done`
+ *      with a BC-shaped document id (d365-inv-N). The fake 400s a
+ *      `vendorId` / `vendorNumber` naming no vendor, as BC does, so `done`
+ *      proves the adapter posted by the synced id rather than the name.
  */
 
 // The exact settings.erp shape the adapter reads: get_erp_adapter passes the
@@ -91,7 +95,12 @@ test.describe('/erp dynamics_365_bc adapter against fake-erp', () => {
 	test('full send: approved invoice posts as a purchaseInvoice and completes', async ({
 		page
 	}) => {
-		const inv = await createApprovedInvoice(page, { prefix: 'E2E-D365', amount: '3120.40' });
+		await syncErpVendors(page);
+		const inv = await createApprovedInvoice(page, {
+			prefix: 'E2E-D365',
+			amount: '3120.40',
+			vendor: 'Fake BC Vendor A'
+		});
 		try {
 			const terminal = await sendToErpAndAwaitTerminal(page, inv.id);
 			expect(terminal).toBe('done');

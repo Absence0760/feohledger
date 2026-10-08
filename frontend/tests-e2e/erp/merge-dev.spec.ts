@@ -15,6 +15,7 @@ import {
 	resetFakeErp,
 	sendToErpAndAwaitTerminal,
 	setErpSettings,
+	syncErpVendors,
 	testErpConnection
 } from './helpers';
 
@@ -40,8 +41,10 @@ import {
  *      address, tax id, payment terms — including the bare-string
  *      `payment_term` shape one fixture exercises), not just that the sync
  *      call didn't error.
- *   5. Full send — an approved invoice posts through the async ERP dispatch
- *      and lands `done` with a Merge-shaped erp_document_id (merge-inv-N).
+ *   5. Full send — after the vendor sync stores the vendor's Merge id, an
+ *      approved invoice posts through the async ERP dispatch with that id as
+ *      its `contact` (the fake 400s an unknown one) and lands `done` with a
+ *      Merge-shaped erp_document_id (merge-inv-N).
  */
 
 // FIXED fixtures served by tools/fake-erp/app.py — the fake's README marks
@@ -298,7 +301,14 @@ test.describe('/erp merge_dev adapter against fake-erp', () => {
 	test('full send: approved invoice posts to the fake Merge.dev and completes', async ({
 		page
 	}) => {
-		const inv = await createApprovedInvoice(page, { prefix: 'E2E-MERGE', amount: '1985.25' });
+		// Merge references the vendor (`contact`) by its Merge id, which only
+		// the vendor sync stores; the fake 400s an unknown contact.
+		await syncErpVendors(page);
+		const inv = await createApprovedInvoice(page, {
+			prefix: 'E2E-MERGE',
+			amount: '1985.25',
+			vendor: 'Fake Merge Vendor Co'
+		});
 		try {
 			const terminal = await sendToErpAndAwaitTerminal(page, inv.id);
 			expect(terminal).toBe('done');

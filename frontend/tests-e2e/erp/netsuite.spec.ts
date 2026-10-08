@@ -11,10 +11,13 @@ import { SERVICES, skipUnlessReachable } from '../fixtures/services';
 import {
 	createApprovedInvoice,
 	deleteInvoice,
+	erpFailureFromAudit,
 	erpReferenceFromAudit,
 	resetFakeErp,
 	sendToErpAndAwaitTerminal,
 	setErpSettings,
+	syncErpGlAccounts,
+	syncErpVendors,
 	testErpConnection
 } from './helpers';
 
@@ -31,10 +34,15 @@ import {
  *   1. test_connection — GET /vendor?limit=1 with the full `Authorization:
  *      OAuth ...` TBA header (consumer key/token/nonce/HMAC signature); the
  *      fake 401s any request missing the OAuth params.
- *   2. Full send — an approved invoice posts as a vendorBill through the
- *      async ERP dispatch: the fake answers 204 + a Location header, the
- *      adapter parses the record id out of it (NetSuite's contract), and the
- *      invoice lands `done` with that numeric NetSuite-shaped document id.
+ *   2. Full send — after the vendor + chart syncs (the only writers of the
+ *      ERP ids a bill is posted against), an approved invoice posts as a
+ *      vendorBill through the async ERP dispatch. The fake 400s a bill whose
+ *      `entity` or expense-line `account` is not a known internal id, exactly
+ *      as NetSuite does, so `done` proves the adapter posted by id. It answers
+ *      204 + a Location header, and the adapter parses the record id out of it.
+ *   3. Fail closed — an invoice whose vendor never synced is refused with the
+ *      stable `vendor_not_linked` reason before any request reaches NetSuite;
+ *      it is never posted by name.
  */
 
 // The exact settings.erp shape the adapter reads: get_erp_adapter passes the
@@ -90,7 +98,14 @@ test.describe('/erp netsuite adapter against fake-erp', () => {
 	});
 
 	test('full send: approved invoice posts as a vendorBill and completes', async ({ page }) => {
-		const inv = await createApprovedInvoice(page, { prefix: 'E2E-NS', amount: '2450.75' });
+		await syncErpVendors(page);
+		await syncErpGlAccounts(page);
+		const inv = await createApprovedInvoice(page, {
+			prefix: 'E2E-NS',
+			amount: '2450.75',
+			vendor: 'Fake NetSuite Vendor A',
+			glAccount: '6100'
+		});
 		try {
 			const terminal = await sendToErpAndAwaitTerminal(page, inv.id);
 			expect(terminal).toBe('done');
@@ -101,6 +116,25 @@ test.describe('/erp netsuite adapter against fake-erp', () => {
 			// adapter (not the mock) parsed the Location contract.
 			const erpRef = await erpReferenceFromAudit(page, inv.id);
 			expect(erpRef).toMatch(/^\d+$/);
+		} finally {
+			await deleteInvoice(page, inv.id);
+		}
+	});
+
+	test('an invoice whose vendor never synced is refused, not posted by name', async ({
+		page
+	}) => {
+		await syncErpGlAccounts(page);
+		const inv = await createApprovedInvoice(page, {
+			prefix: 'E2E-NS-UNLINKED',
+			vendor: `Unlinked Vendor ${Date.now()}`,
+			glAccount: '6100'
+		});
+		try {
+			expect(await sendToErpAndAwaitTerminal(page, inv.id)).toBe('failed');
+			expect(await erpFailureFromAudit(page, inv.id)).toBe(
+				'NetSuite post refused: vendor_not_linked'
+			);
 		} finally {
 			await deleteInvoice(page, inv.id);
 		}

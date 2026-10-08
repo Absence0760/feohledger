@@ -35,7 +35,10 @@ surfaces:
 - **NetSuite**: `POST /vendorBill` → **204** with the new numeric id (`1001`,
   `1002`, …) in the `Location` header, status `Open`;
   `GET /vendorBill/{id}` → `{"status": {"refName": "Open"}}`;
-  `GET /vendor?limit=1` (test_connection).
+  `GET /vendor?limit=1` (test_connection);
+  `POST /netsuite/services/rest/query/v1/suiteql` (requires
+  `Prefer: transient`; answers only `SELECT … FROM account`, paged by
+  `limit`/`offset`/`hasMore`) — the chart sync.
 - **D365**: `POST …/companies({id})/purchaseInvoices` → 201 `d365-inv-<n>`
   status `Draft`; `POST …/purchaseInvoices({id})/Microsoft.NAV.post` → 204,
   flips status to `Open`; `GET …/purchaseInvoices({id})`;
@@ -63,6 +66,28 @@ Vendors (`GET /merge/api/accounting/v1/vendors`):
 3. "Fake Merge Services Co" — Net 60 (`payment_term` as a bare string, not an
    object — exercises that branch of `_merge_vendor_to_payload`), tax id
    `73-3456789`
+
+### References are enforced by id, as the real ERPs do
+
+A bill naming its vendor or account by anything but a known id is a **400**, so
+the e2e suite proves the adapters post the ids the syncs stored
+(`backend/docs/erp-integration.md` § ERP references):
+
+- **Merge** `POST /invoices`: `contact` must be a fixture vendor id
+  (`merge-vendor-701` …); a non-null line `account` must be a fixture account id
+  (`merge-acct-6100` …).
+- **NetSuite** `POST /vendorBill`: `entity.id` must be a vendor id (`25`, `26`);
+  the `expense` sublist must be non-empty with each `account.id` an account id;
+  an `item` sublist is refused.
+- **D365** `POST …/purchaseInvoices`: `vendorId` (or `vendorNumber`) must name a
+  fixture vendor.
+
+NetSuite vendors (`GET /vendor`): `25` "Fake NetSuite Vendor A", `26` "Fake
+NetSuite Vendor B". NetSuite accounts (SuiteQL): `120` → `6100`, `121` →
+`6200`, `122` → `6300`. D365 vendor (`GET …/vendors`): id
+`5d115c9c-44e3-ea11-bb43-000d3a2feca1`, number `V0001`, "Fake BC Vendor A".
+Each provider's vendor names are distinct, so one e2e tenant syncing all three
+never links one provider's vendor id onto another's vendor row.
 
 ## Test hooks
 

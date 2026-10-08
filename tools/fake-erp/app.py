@@ -350,12 +350,25 @@ async def merge_create_invoice(request: Request) -> JSONResponse:
         if cached is not None:
             return JSONResponse(cached, status_code=200)
 
+    # Like real Merge, the vendor (`contact`) and each line's `account` are
+    # Merge object ids. A name or a GL code in either is a 400, not a bill
+    # filed against nothing.
+    merge_vendor_ids = {v["id"] for v in MERGE_VENDOR_FIXTURES}
+    merge_account_ids = {a["id"] for a in MERGE_ACCOUNT_FIXTURES}
+    if model.get("contact") not in merge_vendor_ids:
+        raise ProviderError(400, {"model": {"contact": ["Unknown contact id."]}})
+    for line in model.get("line_items") or []:
+        account = line.get("account")
+        if account is not None and account not in merge_account_ids:
+            raise ProviderError(400, {"model": {"line_items": ["Unknown account id."]}})
+
     STATE["counters"]["merge"] += 1
     n = STATE["counters"]["merge"]
     record = {
         "id": f"merge-inv-{n}",
         "remote_id": f"fake-remote-inv-{n}",
         "type": model.get("type", "ACCOUNTS_PAYABLE"),
+        "contact": model.get("contact"),
         "number": model.get("number"),
         "status": "OPEN",
         "issue_date": model.get("issue_date"),
@@ -439,13 +452,44 @@ def _require_netsuite_auth(request: Request) -> None:
             raise _netsuite_error(401, "INVALID_LOGIN", "Invalid login attempt.")
 
 
+# Vendor and account internal ids. A vendorBill must reference both BY ID —
+# like real NetSuite, an unknown id (or a name / `refName` in its place) is a
+# 400 — so the e2e suite proves the adapter posts the ids the syncs stored.
+NETSUITE_VENDOR_FIXTURES: list[dict] = [
+    {"links": [], "id": "25", "entityId": "Fake NetSuite Vendor A"},
+    {"links": [], "id": "26", "entityId": "Fake NetSuite Vendor B"},
+]
+
+# SuiteQL `account` rows (lower-case columns, "T"/"F" booleans).
+NETSUITE_ACCOUNT_FIXTURES: list[dict] = [
+    {
+        "id": "120",
+        "acctnumber": "6100",
+        "fullname": "Fake NS Office Supplies",
+        "accttype": "Expense",
+        "isinactive": "F",
+    },
+    {
+        "id": "121",
+        "acctnumber": "6200",
+        "fullname": "Fake NS Software",
+        "accttype": "Expense",
+        "isinactive": "F",
+    },
+    {
+        "id": "122",
+        "acctnumber": "6300",
+        "fullname": "Fake NS Consulting",
+        "accttype": "Expense",
+        "isinactive": "F",
+    },
+]
+
+
 @netsuite.get("/vendor")
 async def netsuite_list_vendors(request: Request, limit: int = 1000) -> dict:
     _require_netsuite_auth(request)
-    items = [
-        {"links": [], "id": "25", "entityId": "Fake ERP Vendor A"},
-        {"links": [], "id": "26", "entityId": "Fake ERP Vendor B"},
-    ][: max(limit, 0)]
+    items = copy.deepcopy(NETSUITE_VENDOR_FIXTURES)[: max(limit, 0)]
     return {
         "links": [],
         "count": len(items),
@@ -487,10 +531,29 @@ async def netsuite_list_vendor_bills(request: Request, q: str | None = None) -> 
     }
 
 
+def _netsuite_invalid_ref(field: str) -> ProviderError:
+    return _netsuite_error(400, "INVALID_KEY_OR_REF", f"Invalid {field} reference key.")
+
+
 @netsuite.post("/vendorBill")
 async def netsuite_create_vendor_bill(request: Request) -> Response:
     _require_netsuite_auth(request)
     body = await request.json()
+    # `entity` (the vendor) is mandatory and must be a vendor's internal id.
+    entity = body.get("entity") or {}
+    if entity.get("id") not in {v["id"] for v in NETSUITE_VENDOR_FIXTURES}:
+        raise _netsuite_invalid_ref("entity")
+    # GL-coded lines are EXPENSE lines, each on an account's internal id. The
+    # `item` sublist needs an item record we never send.
+    if body.get("item"):
+        raise _netsuite_invalid_ref("item")
+    lines = (body.get("expense") or {}).get("items") or []
+    if not lines:
+        raise _netsuite_error(400, "USER_ERROR", "You must enter at least one line item.")
+    account_ids = {a["id"] for a in NETSUITE_ACCOUNT_FIXTURES}
+    for line in lines:
+        if (line.get("account") or {}).get("id") not in account_ids:
+            raise _netsuite_invalid_ref("account")
     STATE["counters"]["netsuite"] += 1
     doc_id = str(STATE["counters"]["netsuite"])  # numeric-string ids, "1001", "1002", ...
     STATE["netsuite_bills"][doc_id] = {
@@ -501,7 +564,8 @@ async def netsuite_create_vendor_bill(request: Request) -> Response:
         "memo": body.get("memo"),
         "externalId": body.get("externalId"),
         "currency": body.get("currency"),
-        "item": body.get("item"),
+        "entity": body.get("entity"),
+        "expense": body.get("expense"),
         "status": {"id": "open", "refName": "Open"},
     }
     # Real NetSuite responds 204 No Content with the new record URL in Location.
@@ -521,6 +585,35 @@ async def netsuite_get_vendor_bill(request: Request, doc_id: str) -> dict:
 
 
 app.include_router(netsuite)
+
+# SuiteQL sits beside the record API: /services/rest/query/v1/suiteql.
+netsuite_query = APIRouter(prefix="/netsuite/services/rest/query/v1")
+
+_SUITEQL_ACCOUNT_Q = re.compile(r"^\s*SELECT\b.*\bFROM\s+account\b", re.IGNORECASE | re.DOTALL)
+
+
+@netsuite_query.post("/suiteql")
+async def netsuite_suiteql(request: Request, limit: int = 1000, offset: int = 0) -> dict:
+    """Only the ``SELECT … FROM account`` query the adapter's chart sync sends.
+    Real SuiteQL requires ``Prefer: transient``; so does the fake."""
+    _require_netsuite_auth(request)
+    if request.headers.get("prefer", "").lower() != "transient":
+        raise _netsuite_error(400, "USER_ERROR", "Prefer: transient header is required.")
+    body = await request.json()
+    if not _SUITEQL_ACCOUNT_Q.match(str(body.get("q", ""))):
+        raise _netsuite_error(400, "INVALID_SEARCH", "Unsupported query.")
+    rows = NETSUITE_ACCOUNT_FIXTURES[offset : offset + max(limit, 0)]
+    return {
+        "links": [],
+        "count": len(rows),
+        "hasMore": offset + len(rows) < len(NETSUITE_ACCOUNT_FIXTURES),
+        "items": copy.deepcopy(rows),
+        "offset": offset,
+        "totalResults": len(NETSUITE_ACCOUNT_FIXTURES),
+    }
+
+
+app.include_router(netsuite_query)
 
 # ---------------------------------------------------------------------------
 # Dynamics 365 Business Central OData  (/d365)
@@ -578,14 +671,22 @@ async def d365_token_tenant(request: Request, tenant_id: str) -> dict:
     return await _d365_token(request)
 
 
+# BC vendors: `id` is the GUID a purchaseInvoice's `vendorId` takes; `number`
+# is the vendor No. `vendorNumber` takes. Either must name a real vendor —
+# like real BC, an unknown one is a 400.
+D365_VENDOR_FIXTURES: list[dict] = [
+    {
+        "id": "5d115c9c-44e3-ea11-bb43-000d3a2feca1",
+        "number": "V0001",
+        "displayName": "Fake BC Vendor A",
+    },
+]
+
+
 @d365.get("/{environment}/api/v2.0/companies({company_id})/vendors")
 async def d365_list_vendors(request: Request, environment: str, company_id: str) -> dict:
     _require_d365_auth(request)
-    return {
-        "value": [
-            {"id": "d365-vendor-1", "number": "V0001", "displayName": "Fake ERP Vendor A"},
-        ]
-    }
+    return {"value": copy.deepcopy(D365_VENDOR_FIXTURES)}
 
 
 _D365_EXTERNAL_DOC_FILTER = re.compile(r"externalDocumentNumber\s+eq\s+'([^']*)'", re.IGNORECASE)
@@ -619,13 +720,23 @@ async def d365_create_purchase_invoice(
 ) -> JSONResponse:
     _require_d365_auth(request)
     body = await request.json()
+    vendor = None
+    if body.get("vendorId"):
+        vendor = next((v for v in D365_VENDOR_FIXTURES if v["id"] == body["vendorId"]), None)
+    elif body.get("vendorNumber"):
+        vendor = next(
+            (v for v in D365_VENDOR_FIXTURES if v["number"] == body["vendorNumber"]), None
+        )
+    if vendor is None:
+        raise _d365_error(400, "Internal_RecordNotFound", "The Vendor does not exist.")
     STATE["counters"]["d365"] += 1
     n = STATE["counters"]["d365"]
     record = {
         "id": f"d365-inv-{n}",
         "number": f"PI-{100000 + n}",
         "status": "Draft",
-        "vendorNumber": body.get("vendorNumber"),
+        "vendorId": vendor["id"],
+        "vendorNumber": vendor["number"],
         "vendorInvoiceNumber": body.get("vendorInvoiceNumber"),
         "externalDocumentNumber": body.get("externalDocumentNumber"),
         "invoiceDate": body.get("invoiceDate"),
