@@ -1034,12 +1034,6 @@ lands. Pure doc drift was corrected in the same PR. The two diagnosed defects
       Reviewed by a fluent finance reader per locale, not machine output.
       **Trigger:** the first customer contract in a non-English market, or a
       locale's tenants passing a share of active users worth the review cost.
-- [ ] **(c) Nothing creates a goods receipt.** There is no create endpoint, ERP
-      sync or UI for goods receipts; only seed data makes them. So three-way
-      and four-way matching can't be fed in a real tenant. **Durable fix:**
-      ERP sync of receipts beside the PO sync (the adapter families already
-      sync POs), plus a manual "record receipt" form for tenants without one.
-      **Trigger:** the first tenant that turns on three-way matching.
 - [ ] **(c) A requisition can't be linked to a budget from the UI.** The
       requisition form has no budget field and `checkBudget()` (the overspend
       pre-check in the frontend API module) is never called, so a budget's
@@ -1300,16 +1294,27 @@ lands. Pure doc drift was corrected in the same PR. The two diagnosed defects
 Three separate PRs, in this order. Inventory tracking and selling are out of
 scope (§260) — do not fold them into any of these.
 
-- [ ] **(c) Nobody can record a goods receipt.** `/api/goods-receipts` is
-      read-only, no ERP adapter pulls receipts, and `scripts/seed.py` is the
-      only writer — so the 3-way match and the "billed beyond receipt"
-      `po_mismatch` hold (§249) run on demo data or nothing. A real customer
-      receiving a short delivery has no way to say so.
-      **Durable fix:** `POST /api/goods-receipts` (line-by-line against the PO,
-      entity from the PO), a recorder stamp (`source`, `recorded_by_user_id`)
-      that the hold's auto-close checks the way it checks a manual inspection,
-      a cancel path, a rematch of the PO's invoices, and the web entry form.
-      **Trigger:** now — PR 1 of roadmap Priority 14.
+- [ ] **(c) Whoever records a goods receipt can still approve the invoice it
+      supports.** Receipt entry (PR 1, decisions §262) stops an implicated
+      person's receipt from *releasing* a payment hold, but the classic
+      control — receiving and approving are different people — is not
+      enforced: a manager can record the delivery and then approve the
+      invoice billed against it. **Durable fix:** include the recorders of
+      live hand-entered receipts on the invoice's PO in the approval
+      segregation check (`approval_chain.violates_segregation` gets them from
+      `goods_receipts.recorded_by_user_id`), honouring the existing
+      `require_segregation` opt-out, with the refusal coded like the other
+      approval refusals. **Trigger:** the first tenant that turns on three-way
+      matching with more than one approver, or the next change to the approval
+      chain.
+- [ ] **(c) Mobile has no goods-receipt entry.** `/goods-receipts` → Record
+      receipt is web-only; mobile reads receipts only for the inspection
+      picker. A warehouse or shop-floor user would naturally record a delivery
+      on a phone. **Durable fix:** a receipts screen with the same PO picker,
+      per-line outstanding quantities and the endpoints the web form uses (no
+      backend change), quantities sent as strings, widget tests and ARB strings
+      in every locale. **Trigger:** the first tenant receiving goods without a
+      desk, or the next mobile procurement change.
 - [ ] **(c) Direct ERP adapters stop at Business Central and NetSuite, and no
       adapter pulls receipts.** Everything else rides Merge.dev.
       **Durable fix:** add a receipt pull to the `erp_adapters` interface, then

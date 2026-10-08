@@ -540,6 +540,78 @@ async def test_a_qms_pass_releases_the_hold_whoever_uploaded(realdb):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("recorder_is", "closes"),
+    [
+        ("uploader", False),  # the invoice's own creator typed the receipt in
+        ("unknown", False),  # typed in, recorder unknown — fail closed
+        ("someone_else", True),
+    ],
+)
+async def test_a_hand_entered_receipt_releases_a_hold_only_from_an_unimplicated_recorder(
+    realdb, recorder_is, closes
+):
+    """The receipt twin of the inspection rule (decisions §262): six of ten in,
+    the full PO billed — held; the missing four are then recorded BY HAND. The
+    hold lifts only if whoever recorded them is known and not implicated."""
+    org_id = realdb.info(TENANT).org_id
+    mk = realdb.sessionmaker(TENANT)
+    uploader = uuid.uuid4()
+    recorder = {"uploader": uploader, "unknown": None, "someone_else": uuid.uuid4()}[recorder_is]
+    number = f"PO-GSOD-{uuid.uuid4().hex[:6]}"
+    async with mk() as s:
+        ent = await _default_entity_id(s)
+        po = await _add_po(s, org_id, ent, po_number=number, total="1037.00", qty="10")
+        await _add_gr(s, org_id, ent, po.id, received="6")
+        inv = await _add_invoice(s, org_id, ent, po_number=number, amount="1037.00")
+        inv.uploaded_by_id = uploader
+        await s.commit()
+        await _refresh(s, inv)
+        await s.commit()
+        (row,) = await _rows(s, inv.id)
+        assert row.status == "open"
+
+        gr = await _add_gr(s, org_id, ent, po.id, received="4")
+        gr.source = "manual"
+        gr.recorded_by_user_id = recorder
+        inv.status = InvoiceStatus.approved
+        await s.commit()
+        await _refresh(s, inv)
+        await s.commit()
+        (row,) = await _rows(s, inv.id)
+    assert row.status == ("resolved" if closes else "open")
+
+
+@pytest.mark.asyncio
+async def test_a_cancelled_hand_entered_receipt_no_longer_holds_the_close_back(realdb):
+    """Only receipts the matcher still counts are vetted: an implicated
+    receipt that was cancelled is not evidence for anything."""
+    org_id = realdb.info(TENANT).org_id
+    mk = realdb.sessionmaker(TENANT)
+    uploader = uuid.uuid4()
+    number = f"PO-GSOD-{uuid.uuid4().hex[:6]}"
+    async with mk() as s:
+        ent = await _default_entity_id(s)
+        po = await _add_po(s, org_id, ent, po_number=number, total="1037.00", qty="10")
+        await _add_gr(s, org_id, ent, po.id, received="6")
+        stale = await _add_gr(s, org_id, ent, po.id, received="0")
+        stale.source = "manual"
+        stale.recorded_by_user_id = uploader
+        stale.status = "cancelled"
+        inv = await _add_invoice(s, org_id, ent, po_number=number, amount="1037.00")
+        inv.uploaded_by_id = uploader
+        await s.commit()
+        await _refresh(s, inv)
+        await s.commit()
+        await _add_gr(s, org_id, ent, po.id, received="4")
+        await s.commit()
+        await _refresh(s, inv)
+        await s.commit()
+        (row,) = await _rows(s, inv.id)
+    assert row.status == "resolved"
+
+
+@pytest.mark.asyncio
 async def test_without_org_settings_a_refresh_never_clears_a_hold(realdb):
     """A refresh with no org settings judges under the platform default rule
     (5 %). The org's 1 % vendor rule raised this hold on a 3 % over-billing; a

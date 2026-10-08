@@ -277,7 +277,7 @@ export const CONCEPT_GUIDES: Guide[] = [
 					},
 					{
 						type: 'p',
-						text: 'Match results inform the reviewer; they do not decide on their own. A reviewer sees the result before approving. A held invoice is released when someone resolves the exception, or on its own once the missing receipts or a passing inspection arrive and the check no longer finds a problem. A pass someone involved with the invoice typed in by hand doesn\'t release it on its own; a person has to. Some PO mismatches can be worked by an AI exception agent if your organization has enabled them. See [[guide:ai-in-feohledger|AI in FeohLedger]].'
+						text: 'Match results inform the reviewer; they do not decide on their own. A reviewer sees the result before approving. A held invoice is released when someone resolves the exception, or on its own once the missing receipts or a passing inspection arrive and the check no longer finds a problem. A pass or a receipt that someone involved with the invoice typed in by hand doesn\'t release it on its own; another person has to. Some PO mismatches can be worked by an AI exception agent if your organization has enabled them. See [[guide:ai-in-feohledger|AI in FeohLedger]].'
 					},
 					{
 						type: 'note',

@@ -7,7 +7,7 @@ status names exactly what, and every one of those items is tracked with its
 category, durable fix, and trigger in [followups.md](followups.md).
 
 Fully-shipped areas were moved to [roadmap_shipped.md](roadmap_shipped.md) —
-verbatim, nothing summarized away. 45 of the 54 sections live there. Look for
+verbatim, nothing summarized away. 46 of the 54 sections live there. Look for
 prior art in the archive before assuming a capability doesn't exist.
 
 **Related:** diagnosed-but-unfixed defects in
@@ -222,17 +222,8 @@ receivables) are a different product and are **not** being built here — a
 business like a sports retailer runs its POS / inventory system *beside* the AP
 tool, and item 3 below is how the two meet. Reasoning: [decisions.md](decisions.md) §260.
 
-Each item ships as **its own PR**.
-
-### 1. Goods-receipt entry (receive against a PO)
-**Status:** Planned
-**Open:** There is no way to record a delivery in the app. `/api/goods-receipts` is list + detail only, no ERP adapter pulls receipts, and the only writer of `goods_receipts` is `scripts/seed.py` — so the 3-way match (and the "billed beyond receipt" payment hold, decisions §249) has no real input. *(c)* Tracked in [followups.md](followups.md).
-
-- [ ] `POST /api/goods-receipts` — receive against a PO, line by line (ordered vs already-received vs this delivery), partial and zero-quantity lines, entity taken from the PO
-- [ ] Record who entered a receipt (`source` + `recorded_by_user_id`), and refuse the auto-close of a `po_mismatch` hold when the receipt that cleared it was typed in by someone implicated in the invoice — the inspection rule of §249, applied to receipts
-- [ ] Cancel a hand-entered receipt (a cancelled receipt already stops counting in the matcher)
-- [ ] Re-run matching on every invoice citing the PO, so a hold lifts (or is raised) when the receipt lands
-- [ ] Web: "Record receipt" on `/goods-receipts`
+Each item ships as **its own PR**. Item 1 (goods-receipt entry) has shipped — see
+[roadmap_shipped.md](roadmap_shipped.md) § Priority 14.
 
 ### 2. Direct ERP adapters — largest providers first
 **Status:** Partial — Merge.dev (unified API) is the default; direct adapters exist for Business Central and NetSuite
@@ -244,7 +235,7 @@ Each item ships as **its own PR**.
 
 ### 3. Commerce / inventory platform adapter (Shopify first)
 **Status:** Planned
-**Open:** A new adapter family that pushes received merchandise into the business's commerce / inventory system. Depends on item 1 (receipts) and on PO / receipt lines carrying an item identity (SKU). *(c)* Tracked in [followups.md](followups.md).
+**Open:** A new adapter family that pushes received merchandise into the business's commerce / inventory system. Builds on item 1 (receipts, shipped) and needs PO / receipt lines to carry an item identity (SKU). *(c)* Tracked in [followups.md](followups.md).
 
 - [ ] Item identity on PO and receipt lines — link to `catalog_items` (SKU) so a received quantity names *what* arrived, not just free text
 - [ ] `commerce_adapters` family (`mock` default, registry + decorator like every other family): on a goods receipt, adjust the mapped SKU's available quantity at the mapped location; idempotent per receipt line

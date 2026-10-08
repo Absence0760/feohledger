@@ -370,9 +370,15 @@ async def match_invoice_to_po(
     # goods in hand: it kept the receipt leg at 100%, held the invoice at
     # `matched` instead of `partial`, and — because the whole point of the
     # 3-way control is "don't pay for what didn't arrive" — cleared an invoice
-    # for goods the business had explicitly recorded as not received. A PO whose
-    # only receipt is cancelled now falls back to a 2-way match, which is the
-    # honest answer: there is no receipt evidence.
+    # for goods the business had explicitly recorded as not received.
+    #
+    # A PO whose receipts are ALL cancelled is a 3-way match with nothing
+    # received — not a 2-way match. It once fell back to 2-way on the reading
+    # "there is no receipt evidence", but a cancelled receipt IS evidence: the
+    # business recorded that the goods did not arrive. Reading it as absence let
+    # cancelling the only receipt turn an over-billed invoice into a clean 2-way
+    # `matched`, which closed its payment hold — and receipts can be cancelled
+    # in the app, by the person who keyed the invoice (decisions §262).
     gr_query = (
         select(GoodsReceipt)
         .where(
@@ -388,14 +394,24 @@ async def match_invoice_to_po(
     grs = (await db.execute(gr_query)).scalars().all()
     gr = grs[0] if grs else None
 
-    if gr:
+    all_receipts_cancelled = False
+    if gr is None:
+        any_receipt = apply_entity_scope(
+            select(GoodsReceipt.id).where(GoodsReceipt.po_id == po.id).limit(1),
+            GoodsReceipt,
+            entity_id,
+        )
+        all_receipts_cancelled = (await db.execute(any_receipt)).scalar_one_or_none() is not None
+
+    if gr or all_receipts_cancelled:
         result.match_type = "3-way"
-        result.gr_id = str(gr.id)
+        result.gr_id = str(gr.id) if gr else None
 
         # Compare received vs ordered quantity, aggregating receipts across ALL
-        # GRs for the PO. Only when the PO has line items and at least one GR
-        # carries received lines (an empty GR header has nothing to verify).
-        if po.line_items and any(g.line_items for g in grs):
+        # live GRs for the PO. Only when the PO has line items and at least one
+        # GR carries received lines (an empty GR header has nothing to verify)
+        # — or every receipt was cancelled, which is zero received.
+        if po.line_items and (all_receipts_cancelled or any(g.line_items for g in grs)):
             po_qty_total = sum((_to_decimal(li.quantity) for li in po.line_items), Decimal("0"))
             gr_qty_total = sum(
                 (_to_decimal(li.quantity_received) for g in grs for li in g.line_items),
@@ -525,6 +541,7 @@ async def match_invoice_to_po(
         "tolerance_pct": tolerance,
         "within_tolerance": result.within_tolerance,
         "has_gr": gr is not None,
+        "all_receipts_cancelled": all_receipts_cancelled,
         "over_receipt": result.over_receipt,
         "billed_beyond_receipt": result.billed_beyond_receipt,
         "has_inspection": inspection is not None,

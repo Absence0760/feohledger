@@ -310,6 +310,12 @@ _TENANT_MUTATORS_WITHOUT_DIRECT_AUDIT: dict[tuple[str, str], str] = {
     ("app.api.exceptions", "assign_exception"): "audits via exception_lifecycle.record_assignment",
     ("app.api.exceptions", "bulk_resolve"): "audits via exception_lifecycle.record_decision",
     ("app.api.exceptions", "resolve_exception"): "audits via exception_lifecycle.record_decision",
+    ("app.api.goods_receipts", "cancel_receipt"): (
+        "audits via services/goods_receipts.cancel_goods_receipt (`goods_receipt.cancelled`)"
+    ),
+    ("app.api.goods_receipts", "record_goods_receipt"): (
+        "audits via services/goods_receipts.create_goods_receipt (`goods_receipt.created`)"
+    ),
     ("app.api.inspections", "sync_inspections"): (
         "audits via services/qms_sync (`quality_inspection.synced`)"
     ),

@@ -25,6 +25,7 @@ from app.models.user import User
 from app.models.vendor import Vendor
 from app.schemas.money import json_money
 from app.services.audit_dispatch import dispatch_audit
+from app.services.goods_receipts import received_quantities
 from app.tenant import (
     apply_entity_scope,
     get_entity_id,
@@ -267,6 +268,7 @@ async def get_purchase_order(
     boundary.
     """
     po = await _get_scoped_po(db, po_id, entity_id)
+    received_per_line, received_total = await received_quantities(db, po)
 
     vendor_name: str | None = None
     if po.vendor_id:
@@ -304,7 +306,19 @@ async def get_purchase_order(
         # Labels `total` AND every line figure — lines carry no code of their own.
         "currency": po.currency,
         "status": po.status,
-        "line_items": [_line_item_dict(li) for li in po.line_items],
+        "line_items": [
+            {
+                **_line_item_dict(li),
+                # Received so far against this line, across live receipts that
+                # name it — what the receipt form subtracts to show what is left.
+                "quantity_received": float(received_per_line.get(li.id, 0)),
+            }
+            for li in po.line_items
+        ],
+        # Every live receipt line, linked or not: the figure the 3-way leg
+        # compares with the ordered quantity. Differs from the per-line sum only
+        # when an older receipt names no PO line.
+        "quantity_received_total": float(received_total),
         "linked_invoices": linked_invoices,
         "created_at": po.created_at.isoformat() if po.created_at else "",
     }

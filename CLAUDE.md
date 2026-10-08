@@ -186,7 +186,7 @@ before changing any router; the summaries below are only an index.
 | `/corporate-card-transactions` | Corporate-card import + reconciliation, match suggestions, create-expense |
 | `/intake`, `/requisitions` | Procurement — non-PO spend intake forms; purchase requisitions → PO |
 | `/catalogs`, `/budgets` | Procurement — supplier catalogs + punch-out; budget tracking (spend computed on read) |
-| `/purchase-orders`, `/goods-receipts` | PO + goods-receipt list/detail (3-way match feeders). Read is role-open |
+| `/purchase-orders`, `/goods-receipts` | PO + goods-receipt list/detail (3-way match feeders). Read is role-open; receipts are recorded / cancelled by admin, ap_manager, ap_clerk |
 | `/gl-accounts` | GL account CRUD, ERP sync |
 | `/credit-memos` | Credit-memo list (search / sort) + status counts, eligible invoices (exactly what apply / a linked create accepts — decisions §202), create, edit (open + never-applied only), apply, void. Fail-closed on vendor + entity + currency; never onto a `paid` / `done` invoice |
 | `/tax`, `/international-tax` | 1099 tracking (card rails excluded); VAT / GST / withholding + period report |

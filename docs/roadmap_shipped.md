@@ -6,7 +6,7 @@ is summarized — the full original entry, its checkbox detail, and its competit
 notes are preserved, because that detail is what makes the archive useful when
 someone asks "does the platform already do X?".
 
-**Read this before building.** 45 of 51 roadmap sections are here. Prior art for
+**Read this before building.** 46 of 54 roadmap sections are here. Prior art for
 most capabilities — matching, payments, e-invoicing, procurement, RBAC — lives in
 this file and in `backend/docs/`.
 
@@ -993,5 +993,21 @@ Per-tenant theming so resellers, banks, and ERP partners can offer the platform 
 - [x] Partner/reseller admin — a parent org administers a set of branded **child** tenants. Control-plane self-FK `Organization.parent_org_id` (migration `0065_org_parent`, control-plane-only); "partner" is **derived** (referenced by ≥1 child — can't be self-claimed). `/api/partner` (admin-gated) lists children + reads/writes each child's `settings.brand`, scoped at the SQL layer to `parent_org_id == caller org` (the `get_tenant` org-claim cross-check still gates; a non-child id is an opaque 404 — no enumeration); child-branding writes preserve `custom_domains` + audit into the **child's** trail PII-free. Frontend `/admin/partner` panel. **Link provisioning shipped (round 2):** attaching an *existing* tenant uses **two-sided consent** — the prospective child's own admin mints a short-lived HMAC-signed single-use link code (`POST /api/partner/link-code`), the partner's admin redeems it (`POST /api/partner/children`); a partner can't forge a code or adopt a non-consenting org, no re-parent without detach, single-use via Redis `jti`, `DELETE /api/partner/children/{id}` detaches (scoped to own children), both mutations audited PII-free on both org trails, gated by `FEOH_PARTNER_LINK_SIGNING_KEY` (fail-closed, no fallback; non-secret dev value committed). No migration (stateless token + existing column). **New-tenant provisioning shipped (this slice):** `POST /api/partner/children/provision` (admin-only) is the thin wrapper over `services/tenant_provisioning.provision_tenant` that creates a brand-**new** tenant already parented to the caller — no `parent_org_id` input (always the caller's org, so a partner can only create a child under itself), validates slug (format/reserved/availability) + admin-email shape like signup, reuses `provision_tenant`'s orphan-DB rollback (clean 409 on a slug race, never a half-create), audits `partner.child_provisioned`/`partner.parent_linked` PII-free on both trails, and returns a one-time temp password for the new admin. `/admin/partner` "Create child tenant" modal drives it; no migration. The TLS/DNS automation for the new tenant's vanity domain stays an infra-owned follow-up. See `docs/white-label.md § Partner / reseller admin`
 
 **Competitors:** AvidXchange + several bank-channel AP products ship white-label; a distribution lever more than a feature
+
+---
+
+## Priority 14: Receiving, ERP depth & commerce sync
+
+### 1. Goods-receipt entry (receive against a PO)
+**Status:** Done — `POST /api/goods-receipts` + cancel, `/goods-receipts` → Record receipt, migration 0109, decisions §262. See [po-matching.md](../backend/docs/po-matching.md) § Recording a goods receipt.
+
+- [x] `POST /api/goods-receipts` — receive against a PO, line by line (ordered vs already-received vs this delivery), partial and zero-quantity lines, entity taken from the PO
+- [x] Record who entered a receipt (`source` + `recorded_by_user_id`), and refuse the auto-close of a `po_mismatch` hold when the receipt that cleared it was typed in by someone implicated in the invoice — the inspection rule of §249, applied to receipts
+- [x] Cancel a hand-entered receipt (a cancelled receipt already stops counting in the matcher)
+- [x] Re-run matching on every invoice citing the PO, so a hold lifts (or is raised) when the receipt lands
+- [x] Web: "Record receipt" on `/goods-receipts`
+- [x] A PO whose receipts are all cancelled reads as a 3-way match with nothing received, so cancelling a receipt can never release a hold; exception agents escalate rather than clear a `po_mismatch` resting on an implicated receipt (both from the pre-merge money-path review)
+
+Still open from this work, tracked in [followups.md](followups.md): the person who records a receipt can still approve the invoice it supports, and mobile has no receipt entry.
 
 ---

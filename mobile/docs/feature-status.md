@@ -83,7 +83,10 @@ Parity direction is set in `frontend/CLAUDE.md` § Web vs Mobile feature parity.
   admin / ap_manager only. Reached from **Settings → Procurement**. QMS sync is
   deliberately web-only — it is an operator action against org-level config that
   409s unless `settings.qms` is set. Not offline-cached: a stale pass/fail is a
-  wrong answer about whether an invoice can be paid
+  wrong answer about whether an invoice can be paid. **Recording a goods
+  receipt** (`POST /api/goods-receipts`, web `/goods-receipts` → Record receipt)
+  is web-only for now — there is no receipts screen on mobile; tracked in
+  `docs/followups.md`
 - Adaptive AI workflows (read-first) — `AdaptiveScreen` + `AdaptiveStore` over
   `GET /api/adaptive/{suggestions,approval-patterns,anomalies}`, three tabs each
   with its own loading / error / empty state and its own request sequence (a

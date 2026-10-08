@@ -415,12 +415,20 @@ All require `admin`.
 
 ## Goods Receipts
 
-Used by 3-way matching. `admin` / `ap_manager` / `ap_clerk`.
+Used by 3-way matching. Reads are open to every role; recording and
+cancelling are `admin` / `ap_manager` / `ap_clerk` (`RECEIPT_ENTRY_ROLES`).
+Every refusal is a coded `detail = {code, message, params}`. Full rules:
+`po-matching.md` § Recording a goods receipt.
 
 | Method | Path                                    | Description |
 |--------|-----------------------------------------|-------------|
-| `GET`  | `/api/goods-receipts`                   | List goods receipts (paginated, entity-scoped; filters by `po_id`, `status`) |
-| `GET`  | `/api/goods-receipts/{id}`              | Single GR with line items (entity-scoped — out-of-scope id is a 404) |
+| `GET`  | `/api/goods-receipts`                   | List goods receipts (paginated, entity-scoped; filters by `po_id`, `status`). Each row carries `source` (`manual` = recorded in FeohLedger, `null` = recorded elsewhere) |
+| `GET`  | `/api/goods-receipts/{id}`              | Single GR with line items (each with `po_line_item_id`) and `source` (entity-scoped — out-of-scope id is a 404) |
+| `POST` | `/api/goods-receipts`                   | Record a delivery: `{po_id, received_date, gr_number?, lines: [{po_line_item_id?, description?, quantity_received}]}`, quantities as decimal strings. Optional `Idempotency-Key` header — a replay of the same request returns the receipt with **200**, the key reused for a different one is a 409. 201 otherwise. Refusals: 404 PO not found; 409 `goods_receipt_po_cancelled` (`poNumber`), `goods_receipt_number_taken` (`grNumber`), `goods_receipt_idempotency_reused`; 422 `goods_receipt_line_not_on_po`, `goods_receipt_line_duplicated`, `goods_receipt_line_required`, `goods_receipt_nothing_received`, or a received date more than a day ahead. Re-matches every invoice citing the PO in the same transaction |
+| `POST` | `/api/goods-receipts/{id}/cancel`       | Cancel a receipt recorded in FeohLedger. 409 `goods_receipt_not_manual` for one recorded elsewhere, `goods_receipt_already_cancelled` (`grNumber`) on a second cancel. Re-matches like a create |
+
+`GET /api/purchase-orders/{id}` carries `quantity_received` on each line and
+`quantity_received_total` on the PO, from live receipts.
 
 ## Credit Memos
 

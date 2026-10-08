@@ -2,11 +2,14 @@
 	let {
 		value = $bindable(''),
 		placeholder = 'Search...',
-		ariaLabel = 'Search'
+		ariaLabel = 'Search',
+		testid
 	}: {
 		value?: string;
 		placeholder?: string;
 		ariaLabel?: string;
+		/** `data-testid` for the input, for a page with more than one search. */
+		testid?: string;
 	} = $props();
 </script>
 
@@ -15,7 +18,7 @@
 		<circle cx="11" cy="11" r="8" />
 		<path d="m21 21-4.35-4.35" />
 	</svg>
-	<input type="text" {placeholder} aria-label={ariaLabel} bind:value />
+	<input type="text" {placeholder} aria-label={ariaLabel} bind:value data-testid={testid} />
 </div>
 
 <style>

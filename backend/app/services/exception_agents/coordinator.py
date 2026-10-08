@@ -274,6 +274,8 @@ async def run_agent(
                         # Raised INSIDE the savepoint so the apply — relink,
                         # amount change, approval — unwinds with it.
                         raise _FindingPersists(invoice.status)
+                    if await _receipts_implicated(db, exception, invoice, org_settings):
+                        raise _ReceiptsImplicated(invoice.status)
         except (NotApprovable, HTTPException) as exc:
             # Two families of refusal, one outcome — an escalation with a
             # recorded decision.
@@ -303,7 +305,17 @@ async def run_agent(
             # Reload it explicitly, on the async path, before anything reads it.
             await db.refresh(invoice)
 
-            if isinstance(exc, _FindingPersists):
+            if isinstance(exc, _ReceiptsImplicated):
+                reason = (
+                    "A goods receipt on the matched purchase order was recorded by "
+                    "someone involved in this invoice, so it cannot be what clears "
+                    "the hold. Escalated to a human."
+                )
+                logger.info(
+                    "Agent resolution rests on an implicated receipt on invoice %s; escalating",
+                    invoice.id,
+                )
+            elif isinstance(exc, _FindingPersists):
                 reason = (
                     "The purchase-order match still reports this finding after the "
                     "agent's change (re-checked under the org's own match rules). "
@@ -415,6 +427,28 @@ class _FindingPersists(NotApprovable):
     Resolving would let this row swallow a finding the agent never evaluated —
     over-billing against a newly linked PO, for one — so the coordinator
     unwinds the apply and escalates."""
+
+
+class _ReceiptsImplicated(NotApprovable):
+    """The live match the agent's change leaves behind counts a hand-entered
+    receipt recorded by someone implicated in the invoice (or by nobody known).
+    The PO-match auto-close refuses to release on that evidence
+    (``invoice_warnings.receipts_clear_hold``, decisions §262); an agent run
+    must not either, whoever triggered it — so the apply unwinds and the row
+    escalates."""
+
+
+async def _receipts_implicated(db, exception, invoice, org_settings) -> bool:
+    if exception.exception_type != "po_mismatch":
+        return False
+    from app.services.exception_lifecycle import exception_segregation_enabled
+    from app.services.invoice_warnings import receipts_clear_hold
+    from app.services.po_matching import match_invoice_under_org_rules
+
+    if not exception_segregation_enabled(org_settings):
+        return False
+    live = await match_invoice_under_org_rules(db, invoice, org_settings)
+    return not await receipts_clear_hold(db, invoice, live.po_id)
 
 
 def _record(

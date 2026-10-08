@@ -20,7 +20,8 @@
  *    application, the invoice stale-edit 409, a wrong authenticator code, and
  *    the no-rail pilot's refusals (a record-only tenant's dispatch refusal,
  *    recording a payment made outside FeohLedger, the NACHA bank file), and
- *    the plan-feature 402 every tier gate answers with;
+ *    the plan-feature 402 every tier gate answers with, and recording or
+ *    cancelling a goods receipt;
  * 3. the auth step-up / passkey refusals (`api/authRefusals.ts`).
  *
  * **Anything this build cannot state → `null`**, and the caller renders the
@@ -379,6 +380,25 @@ const BUILDERS: Record<string, Builder> = {
 			feature: t(planFeatureLabelKey(feature)),
 			plan: t(planTierLabelKey(feature))
 		});
+	},
+	// `services/goods_receipts.py` — recording / cancelling a delivery
+	goods_receipt_po_cancelled: (p, t) => {
+		const poNumber = str(p, 'poNumber');
+		return poNumber === null ? null : t('refusal.goodsReceiptPoCancelled', { poNumber });
+	},
+	goods_receipt_number_taken: (p, t) => {
+		const grNumber = str(p, 'grNumber');
+		return grNumber === null ? null : t('refusal.goodsReceiptNumberTaken', { grNumber });
+	},
+	goods_receipt_line_not_on_po: fixed('refusal.goodsReceiptLineNotOnPo'),
+	goods_receipt_line_duplicated: fixed('refusal.goodsReceiptLineDuplicated'),
+	goods_receipt_line_required: fixed('refusal.goodsReceiptLineRequired'),
+	goods_receipt_nothing_received: fixed('refusal.goodsReceiptNothingReceived'),
+	goods_receipt_idempotency_reused: fixed('refusal.goodsReceiptIdempotencyReused'),
+	goods_receipt_not_manual: fixed('refusal.goodsReceiptNotManual'),
+	goods_receipt_already_cancelled: (p, t) => {
+		const grNumber = str(p, 'grNumber');
+		return grNumber === null ? null : t('refusal.goodsReceiptAlreadyCancelled', { grNumber });
 	}
 };
 

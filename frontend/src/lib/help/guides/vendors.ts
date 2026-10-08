@@ -336,7 +336,7 @@ export const VENDOR_GUIDES: Guide[] = [
 	{
 		id: 'purchase-orders-receipts',
 		title: 'Work with purchase orders and goods receipts',
-		summary: 'Find purchase orders and the invoices billed against them, check what was delivered, and record the quality inspections behind 4-way matching.',
+		summary: 'Find purchase orders and the invoices billed against them, record and check what was delivered, and record the quality inspections behind 4-way matching.',
 		kind: 'howto',
 		route: '/purchase-orders',
 		sections: [
@@ -358,17 +358,30 @@ export const VENDOR_GUIDES: Guide[] = [
 				]
 			},
 			{
-				heading: 'Check goods receipts',
+				heading: 'Record and check goods receipts',
 				blocks: [
 					{
 						type: 'p',
-						text: 'A [[goods-receipt]] records what was actually delivered against a purchase order. When an invoice\'s PO has receipts, matching compares the invoiced quantities with everything received, across every delivery. That is a [[three-way-match]]. You can\'t create or edit receipts on this page; it shows the receipts FeohLedger holds.'
+						text: 'A [[goods-receipt]] records what was actually delivered against a purchase order. When an invoice\'s PO has receipts, matching compares the invoiced quantities with everything received, across every delivery. That is a [[three-way-match]]. Receipts can be recorded here, or arrive from another system; the receipt shows which.'
 					},
 					{
 						type: 'steps',
 						items: [
-							'Open [[page:/goods-receipts]]. The {ui:goodsReceipts.tabs.receipts} tab lists deliveries with their PO.',
-							'Open a receipt to see the {ui:goodsReceipts.modal.lineItemsReceived} and any {ui:goodsReceipts.modal.inspections} recorded for it.'
+							'Open [[page:/goods-receipts]] and select {ui:goodsReceipts.record.action}.',
+							'Search for the purchase order and pick it. Each line shows what was {ui:goodsReceipts.record.ordered}, {ui:goodsReceipts.record.alreadyReceived} and what is {ui:goodsReceipts.record.outstanding}.',
+							'Enter {ui:goodsReceipts.record.thisDelivery} for each line that arrived. It starts at the outstanding quantity. Leave a line blank if it wasn\'t in this delivery, or enter 0 if it was expected but didn\'t come.',
+							'Set the date it arrived and, if the supplier sent one, the {ui:goodsReceipts.record.number}. Then select {ui:goodsReceipts.record.submit}.'
+						]
+					},
+					{
+						type: 'p',
+						text: 'Invoices that quote the PO are matched again straight away. An invoice that billed for more than had arrived is released once the rest is received, unless you are the person who entered that invoice: a receipt you record yourself doesn\'t release your own invoice, and someone else has to. Receiving more than is outstanding is allowed, but the match flags it as an over-receipt.'
+					},
+					{
+						type: 'steps',
+						items: [
+							'To see a delivery, open it from the {ui:goodsReceipts.tabs.receipts} tab: the {ui:goodsReceipts.modal.lineItemsReceived} and any {ui:goodsReceipts.modal.inspections} recorded for it.',
+							'To undo a receipt that was entered by mistake, open it and select {ui:goodsReceipts.modal.cancelReceipt}, then confirm. Matching stops counting it. Only receipts recorded in FeohLedger can be cancelled here.'
 						]
 					}
 				]
