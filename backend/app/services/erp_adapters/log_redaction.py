@@ -8,8 +8,10 @@ the credential to stdout and on to the log shipper.
 
 An adapter calls :func:`redact_query_strings_containing` once, at import, with
 a marker that identifies its URLs (a path fragment, or a query-parameter name
-such as ``"apikey="``). One filter on the ``httpx`` logger then replaces the
-query of any logged URL containing a registered marker with ``?[redacted]``.
+such as ``"apikey="``). One filter on the ``httpx`` logger and on each
+``httpcore`` logger (:data:`REDACTED_LOGGERS`; httpcore's DEBUG trace lines
+carry the request target) then replaces the query of any logged URL containing
+a registered marker with ``?[redacted]``.
 Matching is case-insensitive. Not an adapter itself — it registers nothing.
 """
 
@@ -52,9 +54,32 @@ class ErpQueryRedactor(logging.Filter):
         return True
 
 
+#: Every logger that writes a request URL. ``httpx`` logs it at INFO; at DEBUG
+#: httpcore's trace lines carry the request target (query included) too.
+#: A logger's filters apply only to records logged ON it, never to its
+#: children's, so each httpcore sub-logger is named rather than ``httpcore``
+#: alone (``tests/test_erp_log_redaction.py`` checks this list against the
+#: loggers the installed httpcore actually creates).
+REDACTED_LOGGERS: tuple[str, ...] = (
+    "httpx",
+    "httpcore",
+    "httpcore.connection",
+    "httpcore.http11",
+    "httpcore.http2",
+    "httpcore.proxy",
+    "httpcore.socks",
+)
+
+
+def install() -> None:
+    """Attach the filter to every logger in :data:`REDACTED_LOGGERS` (idempotent)."""
+    for name in REDACTED_LOGGERS:
+        target = logging.getLogger(name)
+        if not any(isinstance(f, ErpQueryRedactor) for f in target.filters):
+            target.addFilter(ErpQueryRedactor())
+
+
 def redact_query_strings_containing(marker: str) -> None:
-    """Register ``marker`` and make sure the ``httpx`` logger carries the filter."""
+    """Register ``marker`` and make sure every URL-logging logger carries the filter."""
     _markers.add(marker.lower())
-    httpx_logger = logging.getLogger("httpx")
-    if not any(isinstance(f, ErpQueryRedactor) for f in httpx_logger.filters):
-        httpx_logger.addFilter(ErpQueryRedactor())
+    install()

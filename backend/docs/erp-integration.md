@@ -1466,9 +1466,11 @@ pages) and filter with `$filter`.
   line codes `line_amount_missing` / `amount_mismatch` / `tax_not_itemised`
   from `bill_lines`.
 - **Credentials.** The API key rides in the query string, so the module
-  registers `apikey=` with the shared `erp_adapters/log_redaction.py` filter on
-  the `httpx` logger (the same filter SYSPRO uses): any logged URL containing it
-  has its query replaced with `?[redacted]`. Transport errors are re-raised as
+  registers `apikey=` with the shared `erp_adapters/log_redaction.py` filter
+  (the same filter SYSPRO uses), which sits on the `httpx` logger and on each
+  `httpcore` logger by name (`REDACTED_LOGGERS` — a logger's filters never see
+  its children's records), installed by `app/main.py` at import: any logged URL
+  containing it has its query replaced with `?[redacted]`. Transport errors are re-raised as
   `SageZaError("Sage Accounting (ZA) <step> failed: <ExceptionClass>")` from
   `None`. The password only travels in the basic-auth header. Failure messages
   use `erp_failure_message` and never echo a response body.
@@ -1691,6 +1693,11 @@ and calls `await self.access_token()`.
 
 Connect and disconnect audit `organization.erp_connected` /
 `organization.erp_disconnected` (provider and client source, no tokens).
+
+The callback's query (`code`, `state`, `realmId`) never reaches the uvicorn
+access log: `app/utils/access_log.py` strips the query of every path in
+`SENSITIVE_QUERY_PATHS` from `uvicorn.access` records, installed by
+`app/main.py` where app logging is configured (`tests/test_access_log_redaction.py`).
 
 **Which app.** The tenant's own (`settings.erp.client_id` / `client_secret`
 while `settings.erp.type` names the provider) wins over the platform's `FEOH_`
