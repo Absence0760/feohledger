@@ -1341,7 +1341,7 @@ reconciled when an item closes.
       filling them is a one-line edit per representative.
       **Why blocked:** it needs a paid engagement with a representative firm in
       each jurisdiction. No longer waits on incorporation — the operator
-      contracts as a sole proprietor ([decisions.md](decisions.md) §260).
+      contracts as a sole proprietor ([decisions.md](decisions.md) §252).
       **Durable fix:** engage both, then set `euRepresentative` and
       `ukRepresentative`.
       **Trigger:** before marketing to, or onboarding, an EU or UK customer.
@@ -1356,7 +1356,7 @@ reconciled when an item closes.
       outside the EEA/UK (`/legal/sub-processors` is the list) and completing
       their annexes, plus the transfer-impact assessment *Schrems II* requires.
       **Why blocked:** operator work with each provider; no longer waits on
-      incorporation — the sole proprietor is the party ([decisions.md](decisions.md) §260).
+      incorporation — the sole proprietor is the party ([decisions.md](decisions.md) §252).
       **Durable fix:** execute the Clauses provider by provider,
       and keep the signed set where the privacy mailbox can answer from it.
       **Trigger:** before the first EEA or UK customer, and before anyone acts
@@ -1432,7 +1432,7 @@ as oversights.
       facts in `frontend/src/lib/legal/operator.ts` are still `null` and render
       as `[… to be confirmed]`: the EU and UK Art 27 representatives (tracked
       separately above). The rest were set 2026-10-07
-      ([decisions.md](decisions.md) §260): no separate registered entity, no
+      ([decisions.md](decisions.md) §252): no separate registered entity, no
       published postal address (location Virginia, contact by email), no DPO,
       Virginia governing law and courts, hosting in AWS `us-east-1`, and no
       lead supervisory authority (no EU establishment). Counsel should confirm
