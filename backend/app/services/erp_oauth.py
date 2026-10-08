@@ -90,6 +90,8 @@ import logging
 import secrets
 import time
 import uuid
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -119,6 +121,7 @@ REFRESH_MARGIN = timedelta(seconds=120)
 
 _STATE_PREFIX = "erp:oauth:state:"
 _LOCK_PREFIX = "erp:oauth:refresh-lock:"
+_REALM_LOCK_PREFIX = "erp:oauth:realm-claim:"
 _LOCK_TTL_SECONDS = 30
 _LOCK_WAIT_SECONDS = 20.0
 _LOCK_POLL_SECONDS = 0.1
@@ -612,7 +615,35 @@ async def _release_lock(key: str, token: str) -> None:
         if held == token:
             await r.delete(key)
     except Exception:  # noqa: BLE001 — the lock's TTL reaps it
-        logger.warning("erp_oauth: refresh-lock release failed; TTL will reap it")
+        logger.warning("erp_oauth: lock release failed; TTL will reap it")
+
+
+def realm_claim_lock_key(provider: str, external_tenant_id: str) -> str:
+    return f"{_REALM_LOCK_PREFIX}{provider}:{external_tenant_id}"
+
+
+@asynccontextmanager
+async def realm_claim(provider: str, external_tenant_id: str) -> AsyncIterator[bool]:
+    """Serialise "is this company linked elsewhere? → link it" across tenants.
+
+    The callback's uniqueness check runs under ITS org's row lock, which does
+    not stop a second tenant's callback for the same provider company running
+    the same check at the same moment: both would see "unclaimed" and both
+    would link it. This is a Redis lock keyed on ``(provider, company id)``
+    (``SET NX EX``) held from the check through the commit. Yields False when
+    another connect holds it — the caller refuses as ``already_linked`` rather
+    than waiting, since the holder is about to claim the company. Released in
+    ``finally``; the TTL reaps a crashed holder.
+    """
+    key = realm_claim_lock_key(provider, external_tenant_id)
+    token = await _acquire_lock(key)
+    if token is None:
+        yield False
+        return
+    try:
+        yield True
+    finally:
+        await _release_lock(key, token)
 
 
 async def get_access_token(

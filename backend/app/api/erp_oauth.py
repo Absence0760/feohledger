@@ -346,11 +346,38 @@ async def oauth_callback(request: Request, db: AsyncSession = Depends(get_contro
     if not external_tenant_id:
         return fail("no_external_tenant")
 
-    org = await lock_organization(db, org)
-    if await _realm_claimed_elsewhere(db, spec.key, external_tenant_id, org.id):
-        await db.rollback()
-        return fail("already_linked")
+    # The check-and-write must be atomic ACROSS tenants: the org row lock below
+    # serialises this tenant only, so two tenants' callbacks for one company
+    # would both pass the check. `realm_claim` holds a Redis lock on
+    # (provider, company) from the check through the commit.
+    async with erp_oauth.realm_claim(spec.key, external_tenant_id) as claimed:
+        if not claimed:
+            return fail("already_linked")
+        org = await lock_organization(db, org)
+        if await _realm_claimed_elsewhere(db, spec.key, external_tenant_id, org.id):
+            await db.rollback()
+            return fail("already_linked")
+        prior_erp = _link(org, spec, token_response, external_tenant_id, creds.source)
+        await db.commit()
 
+    await dispatch_auth_audit(
+        organization_id=org.id,
+        actor_id=user.id,
+        action="organization.erp_connected",
+        entity_id=org.id,
+        entity_type="organization",
+        details={
+            "provider": spec.key,
+            "client_source": creds.source,
+            "replaced_type": prior_erp.get("type") if prior_erp.get("type") != spec.key else None,
+        },
+    )
+    return _home(slug, org.settings, erp_connected=spec.key)
+
+
+def _link(org: Organization, spec, token_response: dict, external_tenant_id: str, source: str):
+    """Write the new connection into ``org.settings`` (uncommitted). Returns the
+    prior ``settings.erp`` for the audit row."""
     current = dict(org.settings or {})
     prior_erp = current.get("erp")
     prior_erp = dict(prior_erp) if isinstance(prior_erp, dict) else {}
@@ -368,23 +395,9 @@ async def oauth_callback(request: Request, db: AsyncSession = Depends(get_contro
         token_response=token_response,
         external_tenant_id=external_tenant_id,
         org_id=org.id,
-        client_source=creds.source,
+        client_source=source,
     )
     current["erp"] = erp
     org.settings = current
     flag_modified(org, "settings")
-    await db.commit()
-
-    await dispatch_auth_audit(
-        organization_id=org.id,
-        actor_id=user.id,
-        action="organization.erp_connected",
-        entity_id=org.id,
-        entity_type="organization",
-        details={
-            "provider": spec.key,
-            "client_source": creds.source,
-            "replaced_type": prior_erp.get("type") if prior_erp.get("type") != spec.key else None,
-        },
-    )
-    return _home(slug, org.settings, erp_connected=spec.key)
+    return prior_erp

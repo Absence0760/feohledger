@@ -493,6 +493,56 @@ async def test_callback_refuses_a_company_linked_to_another_tenant(realdb, platf
 
 
 @pytest.mark.plan("scale")
+async def test_callback_refuses_a_company_another_tenant_is_claiming_right_now(
+    realdb, platform_app, provider
+):
+    """The race: tenant B's callback for the same company is between its
+    "unclaimed?" check and its commit (it holds the realm lock). Tenant A's
+    callback must not also pass the check and link the company."""
+    from app import redis as app_redis
+
+    provider.handler = lambda url, data: _resp(200, _token_body())
+    state = _state_of(await _authorize(realdb))
+    key = erp_oauth.realm_claim_lock_key(PROVIDER, REALM)
+    r = await app_redis.get_redis()
+    await r.set(key, "tenant-b-in-flight", ex=30)
+    try:
+        resp = await _callback(realdb, {"code": "c", "state": state, "realmId": REALM})
+    finally:
+        await r.delete(key)
+    assert resp.headers["location"].endswith("erp_error=already_linked")
+    assert "oauth" not in ((await _org_settings(realdb)).get("erp") or {})
+    assert await _audit_actions(realdb) == []
+
+
+@pytest.mark.plan("scale")
+async def test_callback_releases_the_realm_lock(realdb, platform_app, provider):
+    from app import redis as app_redis
+
+    provider.handler = lambda url, data: _resp(200, _token_body())
+    state = _state_of(await _authorize(realdb))
+    resp = await _callback(realdb, {"code": "c", "state": state, "realmId": REALM})
+    assert resp.headers["location"].endswith(f"erp_connected={PROVIDER}")
+    r = await app_redis.get_redis()
+    assert await r.get(erp_oauth.realm_claim_lock_key(PROVIDER, REALM)) is None
+
+
+async def test_realm_claim_is_exclusive_and_released_on_error():
+    async with erp_oauth.realm_claim("p", "realm-x") as first:
+        assert first is True
+        async with erp_oauth.realm_claim("p", "realm-x") as second:
+            assert second is False
+        async with erp_oauth.realm_claim("p", "realm-other") as other:
+            assert other is True
+    with pytest.raises(RuntimeError):
+        async with erp_oauth.realm_claim("p", "realm-x") as held:
+            assert held is True
+            raise RuntimeError("boom")
+    async with erp_oauth.realm_claim("p", "realm-x") as again:
+        assert again is True
+
+
+@pytest.mark.plan("scale")
 async def test_callback_refuses_a_user_no_longer_admin(realdb, platform_app, provider):
     """The state names the admin who started it; one demoted (or deactivated)
     before the provider redirects back cannot complete the connect."""
