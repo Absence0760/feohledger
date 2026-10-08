@@ -1,6 +1,11 @@
 <script lang="ts">
 	import HelpTip from '#lib/components/help/HelpTip.svelte';
-	import type { Invoice, InvoiceStatus, AdvancedSearchFilters } from '#lib/types/invoice.ts';
+	import type {
+		Invoice,
+		InvoiceStatus,
+		AdvancedSearchFilters,
+		InvoiceMatchingIdsResponse
+	} from '#lib/types/invoice.ts';
 	import { INVOICE_STATUSES, INVOICE_STATUS_LABEL_KEYS, EMPTY_ADVANCED_FILTERS, SYSTEM_MANAGED_STATUSES, IMMUTABLE_STATUSES, commonTransitions, ENTRY_BULK_STATUS_TARGETS, INVOICE_ENTRY_ROLES, INVOICE_IMPORT_ROLES, INVOICE_MANAGE_ROLES } from '#lib/types/invoice.ts';
 	import { invoiceStore } from '#lib/stores/invoices.svelte.ts';
 	import { auth } from '#lib/stores/auth.svelte.ts';
@@ -19,7 +24,6 @@
 	import { formatList } from '#lib/utils/list.ts';
 	import { invoiceWarningText } from '#lib/api/invoiceWarnings.ts';
 	import { pruneSelection } from '#lib/utils/selection.ts';
-	import type { MatchingIdsResponse } from '#lib/utils/pagination.ts';
 	import SearchBox from '#lib/components/ui/SearchBox.svelte';
 	import PageHeader from '#lib/components/ui/PageHeader.svelte';
 	import DataTable from '#lib/components/ui/DataTable.svelte';
@@ -515,6 +519,10 @@
 
 	// --- Selection & bulk ops ---
 	let selected = $state<Set<string>>(new Set());
+	// Each "select all matching" id's version when it was selected — the rows
+	// beyond the loaded page have no `updated_at` of their own to bind a bulk
+	// approval to. A loaded row's own version wins (it is what was shown).
+	let matchingVersions = $state<Record<string, string>>({});
 	let bulkBusy = $state(false);
 	let bulkStatusValue = $state<InvoiceStatus>('approved');
 	// `POST /api/invoices/bulk/status` 422s a `rejected` target with no
@@ -621,8 +629,9 @@
 		try {
 			const params = new URLSearchParams(buildParams());
 			params.set('exclude_status', [...SYSTEM_MANAGED_STATUSES].join(','));
-			const res = await api.get<MatchingIdsResponse>(`/api/invoices/ids?${params}`);
+			const res = await api.get<InvoiceMatchingIdsResponse>(`/api/invoices/ids?${params}`);
 			selected = new Set(res.ids);
+			matchingVersions = res.versions;
 			selectedAllMatching = true;
 			if (res.truncated) {
 				toast(
@@ -658,6 +667,19 @@
 		}
 	}
 
+	/** `{id: updated_at}` for the selection — the version of each row the
+	 *  approver saw. A bulk approval sends it, and the server skips any row that
+	 *  changed since rather than approving it unseen. */
+	function selectedVersions(): Record<string, string> {
+		const loaded = new Map(invoiceStore.all.map((inv) => [inv.id, inv.updated_at]));
+		const versions: Record<string, string> = {};
+		for (const id of selected) {
+			const seen = loaded.get(id) ?? matchingVersions[id];
+			if (seen) versions[id] = seen;
+		}
+		return versions;
+	}
+
 	async function bulkStatusChange() {
 		bulkBusy = true;
 		try {
@@ -665,6 +687,7 @@
 				ids: [...selected],
 				status: bulkStatusValue,
 				...(bulkNeedsReason ? { reason: bulkRejectReason.trim() } : {}),
+				...(bulkStatusValue === 'approved' ? { expected_updated_at: selectedVersions() } : {}),
 			})) as { updated: number; skipped: { id: string; reason: string }[] };
 			await invoiceStore.fetch(buildParams()); // noqa: raw-fetch-in-component — store method, routes through api client
 			await invoiceStore.fetchCounts(buildParams());

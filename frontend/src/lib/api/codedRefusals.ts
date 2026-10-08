@@ -55,8 +55,13 @@ type Params = Record<string, unknown>;
 export const PLAN_FEATURE_REQUIRED = 'plan_feature_required';
 
 /** `PATCH /api/invoices/{id}`'s optimistic-concurrency 409
- *  (`backend/app/api/invoices.py::INVOICE_STALE_EDIT`). */
+ *  (`backend/app/api/invoice_version.py::INVOICE_STALE_EDIT`). */
 export const INVOICE_STALE_EDIT = 'invoice_stale_edit';
+
+/** Approval's version check: the invoice changed after the approver loaded it
+ *  (`backend/app/api/invoice_version.py::INVOICE_STALE_APPROVAL`). The invoice
+ *  modal branches on it to drop the stale copy and reopen the current one. */
+export const INVOICE_STALE_APPROVAL = 'invoice_stale_approval';
 
 /** `POST /api/invoices/{id}/complete` refused for blank required fields
  *  (`backend/app/api/workflow.py::INVOICE_REQUIRED_FIELDS_MISSING`). */
@@ -295,6 +300,7 @@ const BUILDERS: Record<string, Builder> = {
 	},
 	// `api/invoices.py` / `api/workflow.py`
 	[INVOICE_STALE_EDIT]: fixed('refusal.invoiceStaleEdit'),
+	[INVOICE_STALE_APPROVAL]: fixed('refusal.invoiceStaleApproval'),
 	[INVOICE_REQUIRED_FIELDS_MISSING]: (p, t) => {
 		const fields = p.fields;
 		if (!Array.isArray(fields) || fields.length === 0) return null;

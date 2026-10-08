@@ -15,6 +15,7 @@ import type { MessageKey } from '../i18n/messages';
 import {
 	CODED_REFUSAL_CODES,
 	INVOICE_REQUIRED_FIELDS_MISSING,
+	INVOICE_STALE_APPROVAL,
 	INVOICE_STALE_EDIT,
 	PLAN_FEATURE_REQUIRED,
 	codedRefusalText,
@@ -91,6 +92,7 @@ describe('codedRefusalText', () => {
 		['credit_memo_entity_mismatch', 'refusal.creditMemoEntityMismatch'],
 		['credit_memo_currency_mismatch', 'refusal.creditMemoCurrencyMismatch'],
 		[INVOICE_STALE_EDIT, 'refusal.invoiceStaleEdit'],
+		[INVOICE_STALE_APPROVAL, 'refusal.invoiceStaleApproval'],
 		['mfa_code_invalid', 'refusal.mfaCodeInvalid']
 	] as [string, MessageKey][])('%s is the fixed sentence %s', (code, key) => {
 		expect(codedRefusalText(code, {}, deT)).toBe(de[key]);

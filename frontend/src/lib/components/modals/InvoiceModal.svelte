@@ -14,7 +14,11 @@
 	import { auth } from '#lib/stores/auth.svelte.ts';
 	import { adminStore } from '#lib/stores/admin.svelte.ts';
 	import { api, ApiError } from '#lib/api.ts';
-	import { INVOICE_REQUIRED_FIELDS_MISSING, INVOICE_STALE_EDIT } from '#lib/api/codedRefusals.ts';
+	import {
+		INVOICE_REQUIRED_FIELDS_MISSING,
+		INVOICE_STALE_APPROVAL,
+		INVOICE_STALE_EDIT
+	} from '#lib/api/codedRefusals.ts';
 	import { createRequestSequencer } from '#lib/utils/requestSequence.ts';
 	import { toast } from '#lib/components/ui/Toast.svelte';
 	import RowAction from '#lib/components/ui/RowAction.svelte';
@@ -214,6 +218,13 @@
 	}
 
 	/* eslint-disable svelte/state-referenced-locally -- modal receives a snapshot, intentional */
+	// The version of the invoice this modal is showing — sent as
+	// `expected_updated_at` by Save and Approve, so neither lands on a version
+	// someone else changed meanwhile (`backend/app/api/invoice_version.py`).
+	// Moved forward only by this modal's OWN writes that return the new version
+	// (a file attach / replace, a line-items save), since after those the user
+	// is looking at the result; any other change is a stale-version refusal.
+	let loadedVersion = $state(invoice.updated_at);
 	let vendor = $state(invoice.vendor);
 	let invoice_number = $state(invoice.invoice_number);
 	let amount = $state(invoice.amount);
@@ -718,7 +729,7 @@
 			// above). Sent back VERBATIM as captured, never round-tripped
 			// through a JS `Date` (see the field's own doc in `types/invoice.ts`
 			// for why that would false-positive every save).
-			expected_updated_at: invoice.updated_at,
+			expected_updated_at: loadedVersion,
 		};
 		if (!financiallyLocked) {
 			payload.vendor = vendor;
@@ -799,7 +810,12 @@
 		reviewing = true;
 		try {
 			const prevStatus = status;
-			const result = await api.post<Invoice>(`/api/invoices/${invoice.id}/approve`, {});
+			// The version this modal loaded: the server refuses the approval if
+			// the invoice changed since, rather than signing figures the approver
+			// never saw (`backend/app/api/invoice_version.py`).
+			const result = await api.post<Invoice>(`/api/invoices/${invoice.id}/approve`, {
+				expected_updated_at: loadedVersion
+			});
 			// A multi-level approval chain (services/review.py::approve_invoice)
 			// stays in `ready_for_review` until every level is satisfied — the
 			// backend recorded this approval on the current level (writing an
@@ -830,6 +846,15 @@
 			// Every close-then-refresh handler below follows this shape.
 			onclose();
 		} catch (err) {
+			if (err instanceof ApiError && err.code === INVOICE_STALE_APPROVAL) {
+				// Nothing was approved. This modal's copy is the stale one and
+				// nothing here re-fetches a single invoice by id, so drop it and
+				// let the host reopen the current version for a fresh review.
+				toast(err.message, 'error');
+				refreshList();
+				onclose();
+				return;
+			}
 			toast(err instanceof Error ? err.message : m('invoices.modal.toast.approveFailed'), 'error');
 		} finally {
 			reviewing = false;
@@ -997,6 +1022,7 @@
 				isReplace ? 'PUT' : 'POST'
 			);
 			currentFileUrl = response.file_url;
+			loadedVersion = response.updated_at;
 			invoiceStore.patchLocal(invoice.id, { file_url: response.file_url });
 			toast(isReplace ? m('invoices.modal.toast.fileReplaced') : m('invoices.modal.toast.fileUploaded'), 'success');
 			await loadAuditLog();
@@ -1219,6 +1245,8 @@
 		line_items_total: string;
 		header_amount: string;
 		reconciles_with_header: boolean;
+		/** The invoice's version after the save (`loadedVersion`). */
+		updated_at: string;
 	}
 
 	// Set when the last save came back NOT reconciling. The `invoice` prop is
@@ -1343,6 +1371,7 @@
 				total: li.total,
 				gl_account: li.gl_account,
 			})));
+			loadedVersion = res.updated_at;
 			const editedDuringSave = lineItemsSequence.wasSupersededByEdit(saveToken);
 			// Clearing `lineItemsDirty` over an edit made mid-save is the worse
 			// half of the bug: it loses the edit AND removes the Save button
