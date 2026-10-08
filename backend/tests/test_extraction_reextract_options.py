@@ -260,6 +260,9 @@ def _db():
     db.add = MagicMock()
     result = MagicMock()
     result.scalar_one_or_none = MagicMock(return_value=None)
+    # The locked re-read before an approval (`_locked_auto_approve_suppression`)
+    # finds no row, so these tests decide from the invoice double itself.
+    result.one_or_none = MagicMock(return_value=None)
     db.execute.return_value = result
     return db
 

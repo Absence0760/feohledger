@@ -237,6 +237,36 @@ async def _pause_ai_reading(
 AUTO_APPROVE_SUPPRESSED_BY_CALLER = "requested_by_caller"
 AUTO_APPROVE_SUPPRESSED_SEGREGATION_ACTORS = "segregation_actors"
 AUTO_APPROVE_SUPPRESSED_UPLOADED_BY_ANOTHER_USER = "uploaded_by_another_user"
+AUTO_APPROVE_SUPPRESSED_DOCUMENT_REPLACED = "document_replaced_during_read"
+
+
+async def _locked_auto_approve_suppression(
+    db: AsyncSession,
+    invoice_id: uuid.UUID,
+    *,
+    actor_id: uuid.UUID | None,
+    read_file_key: str | None,
+) -> str | None:
+    """:func:`auto_approve_suppression` over the row as it stands under
+    ``FOR UPDATE``, plus "the file was replaced after this pass read it".
+
+    Columns only, so the session's in-memory invoice — already carrying the
+    extracted fields — is not refreshed over. A row that has vanished keeps
+    the caller's earlier answer (it cannot be approved anyway).
+    """
+    row = (
+        await db.execute(
+            sa_select(Invoice.uploaded_by_id, Invoice.segregation_actor_ids, Invoice.file_key)
+            .where(Invoice.id == invoice_id)
+            .with_for_update()
+        )
+    ).one_or_none()
+    if row is None:
+        return None
+    reason = auto_approve_suppression(row, actor_id=actor_id)
+    if reason is None and row.file_key != read_file_key:
+        return AUTO_APPROVE_SUPPRESSED_DOCUMENT_REPLACED
+    return reason
 
 
 def auto_approve_suppression(
@@ -631,6 +661,9 @@ async def run_extraction(
     suppression_reason = auto_approve_suppression(
         invoice, actor_id=actor_id, requested=suppress_auto_approve
     )
+    # The document this pass downloads; compared under the lock before any
+    # approval (`_locked_auto_approve_suppression`).
+    read_file_key = invoice.file_key
     # The provider's token usage for this attempt, once the adapter has
     # answered. Held outside the `try` so the FAILURE meter row can carry it
     # too: a refused or unparseable read was still billed by the provider.
@@ -1078,6 +1111,18 @@ async def run_extraction(
         # Recorded only when the gates fired: "suppressed" means a person was
         # required where the policy alone would have approved.
         recorded_suppression = None
+        if auto_approved and suppression_reason is None:
+            # The reason above was read when the worker started, unlocked, and
+            # the file download and the provider call sit between it and here.
+            # A clerk may replace the file on a `pending` invoice in that
+            # window (it is inside the entry window), so the answer that
+            # approves is re-read under the row lock, which the file routes
+            # also take: a swap either committed before this read (and is
+            # seen) or waits until this transaction has approved (and is then
+            # refused — the entry window closes on an approved invoice).
+            suppression_reason = await _locked_auto_approve_suppression(
+                db, invoice_id, actor_id=actor_id, read_file_key=read_file_key
+            )
         if suppression_reason is not None and auto_approved:
             # A human already rejected this document, an entry-only caller
             # supplied it, or someone other than the reader chose or shaped it

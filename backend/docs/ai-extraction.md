@@ -311,6 +311,15 @@ row itself, so it holds in both dispatch modes whoever dispatched the read:
 | `requested_by_caller` | The dispatcher set `suppress_auto_approve` (an entry-only clerk's upload / extract, a supplier resubmission). |
 | `segregation_actors` | `Invoice.segregation_actor_ids` is non-empty — a clerk edited, attached, replaced or removed the file, or re-extracted it; a recurring template's author / editors; an inter-company mirror's source set. Unconditional, even when the reader is in the set. |
 | `uploaded_by_another_user` | `uploaded_by_id` is set and is not the actor asking for the read. A clerk replacing the file on their **own** upload is never stamped (they are already the uploader), so this is what stops a manager's re-extract approving that swap. |
+| `document_replaced_during_read` | `file_key` changed between the download and the decision — the approval would attach a file the figures were not read from. |
+
+The first look is unlocked and the provider call sits between it and the
+decision, while a `pending` invoice is still inside a clerk's entry window. So
+before approving, `run_extraction` re-reads `uploaded_by_id`,
+`segregation_actor_ids` and `file_key` **under `FOR UPDATE`**
+(`_locked_auto_approve_suppression`) — the lock the file routes also take. A
+swap committed during the read is seen; one that arrives later waits, and then
+meets an approved invoice the entry window refuses.
 
 An unattended approval is sound only when no employee supplied the document
 (email intake, PEPPOL, the portal) or the person asking for the read did, and
