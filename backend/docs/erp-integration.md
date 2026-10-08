@@ -754,6 +754,67 @@ response body echoing tax id / addresses / IBAN and asserts none of it reaches
 `message`, plus an AST scan of `erp_adapters/` that fails if any adapter
 interpolates `.text` / `.content` / `.json()` into a `message=` f-string again.
 
+## ERP references: a bill is posted by id, never by name
+
+Every real ERP posts a bill against the vendor's and the account's **internal
+ids**. The payload carries them (`InvoicePayload.vendor_erp_id`,
+`InvoicePayload.gl_account_erp_id`, `LineItemPayload.gl_account_erp_id`), and
+`services/erp._resolve_erp_refs` fills them before every push:
+
+- **Vendor** — `vendors.erp_vendor_id` of the invoice's resolved `vendor_id`
+  link. An invoice whose vendor never matched has none; there is no lookup by
+  `vendor_name`.
+- **Accounts** — `gl_accounts.erp_account_id` for each GL code on the header and
+  the lines, resolved by `gl_chart.resolve_erp_account_ids` against the
+  invoice's own chart: shared (`entity_id IS NULL`) ∪ the invoice entity's own,
+  with the entity's row winning when both define the code (the override
+  precedence `_sync_match_query` applies). Another entity's account never
+  resolves.
+- **Bounded** — two queries per push whatever the line count (one vendor read,
+  one chart read for every distinct code). Only the vendor and chart syncs write
+  these ids, so a tenant has to run them before its first push.
+
+**Fail closed, before any HTTP call.** An adapter that needs an id the payload
+lacks returns `ErpPostResult(success=False, message=erp_refusal_message(provider,
+reason))`, e.g. `NetSuite post refused: vendor_not_linked`. The reason codes are
+stable constants in `erp_adapters/base.py`: `VENDOR_NOT_LINKED` and
+`ACCOUNT_NOT_LINKED`. The message is PII-free for the same reason as
+`erp_failure_message` (it lands on the append-only `invoice.erp_failed` row). A
+name or code fallback was rejected: a name picks the wrong "Acme" the first time
+two vendors share one, and Business Central's `vendorNumber` holds a vendor
+*number*, so the name we used to send there matched nothing, or matched another
+vendor whose number happened to equal it.
+
+| Adapter | Vendor | Accounts |
+|---|---|---|
+| `netsuite` | `entity: {id}`; refuses `vendor_not_linked` | GL-coded lines go on the **`expense`** sublist (`account: {id}`, `amount` = the line total, or quantity × unit price when it has none), since the `item` sublist needs an item record we never send. An uncoded line takes the header account. A coded line with no id, or a bill with no account at all, refuses `account_not_linked`. A coded line is never moved onto the header account. |
+| `dynamics_365_bc` | `vendorId`; refuses `vendor_not_linked` | Lines stay on `lineObjectNumber` = the G/L account No., BC's primary key for an account and the code our chart holds. This adapter has no chart sync, so `gl_account_erp_id` would be another ERP's id or the code itself. |
+| `merge_dev` | `contact` (Merge object id); refuses `vendor_not_linked` | A line's `account` is the Merge account id. A coded line with no id refuses `account_not_linked`; an uncoded line sends none (Merge allows it). |
+
+**NetSuite chart sync.** `NetSuiteAdapter.list_gl_accounts` pulls the chart
+with one SuiteQL query (`POST …/services/rest/query/v1/suiteql`,
+`Prefer: transient`, `SELECT id, acctnumber, fullname, accttype, isinactive FROM
+account`), paged by `offset` / `hasMore` up to 1,000 rows. It skips inactive
+accounts, and skips an account whose name would have to stand in for a missing
+number but is longer than the 50-character code column, because truncating
+could merge two accounts onto one code. The REST record collection (`GET
+/account`) returns only ids and links, so it would cost one request per
+account.
+
+The fake ERP enforces the same rules: NetSuite returns a 400 for an unknown `entity` or
+expense-line `account` id, or for an `item` sublist. Business Central returns
+a 400 for a `vendorId` / `vendorNumber` that names no vendor, and Merge does
+the same for an unknown `contact` / line `account`. So the `tests-e2e/erp/`
+specs prove the ids reach the wire: each one syncs first, then sends.
+`netsuite.spec.ts` also proves the refusal end to end.
+
+Tests: `tests/test_erp_push_flow.py` (resolution, entity override vs shared
+fallback against a real tenant, the two-query bound, refusal and NetSuite body
+through `_call_erp`), `tests/test_erp_adapter_error_pii.py` (every refusal, for
+every adapter, before any HTTP call), `tests/test_erp_adapter_idempotency.py`
+(NetSuite / BC body shape), `tests/test_erp_adapter_money_exact.py`,
+`tests/test_erp_gl_sync.py` (SuiteQL mapping + paging).
+
 ## Idempotency (retry-safe pushes)
 
 `_call_erp`'s 3-attempt retry loop (`services/erp.py`) means a client-side
