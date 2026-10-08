@@ -1846,6 +1846,10 @@ export const messages = {
 		"Un secret client est enregistré. Il n'est plus jamais affiché ; saisissez-en un nouveau pour le remplacer.",
 	'orgSso.secret.notConfigured': "Aucun secret client n'est enregistré.",
 	'orgSso.secret.clear': 'Supprimer le secret client enregistré',
+	'org.secret.keepPlaceholder': 'Laissez vide pour conserver la valeur enregistrée',
+	'org.secret.configured': "Une valeur est enregistrée. Elle n'est plus jamais affichée ; saisissez-en une nouvelle pour la remplacer.",
+	'org.secret.notConfigured': "Rien n'est encore enregistré.",
+	'org.secret.clear': 'Supprimer la valeur enregistrée',
 	'orgSso.register.title': "Enregistrez cette application auprès de votre fournisseur d'identité",
 	'orgSso.register.hint':
 		"Copiez ces valeurs dans l'application que vous créez chez votre fournisseur d'identité.",

@@ -1,23 +1,15 @@
-import { execFileSync } from 'node:child_process';
 import { createHmac, randomUUID } from 'node:crypto';
+
+import type { APIRequestContext } from '@playwright/test';
 
 import {
 	API_BASE,
 	authedTenantHeaders,
-	currentTenantSlug,
 	expect,
+	putProviderCredentials,
 	tenantPsql,
 	test
 } from '../fixtures/helpers';
-
-/** psql against the CONTROL-plane DB where `organizations` lives. */
-function controlPsql(query: string): string {
-	return execFileSync(
-		'psql',
-		['-h', 'localhost', '-U', 'postgres', '-p', '5432', '-d', 'feohledger', '-tAc', query],
-		{ env: { ...process.env, PGPASSWORD: 'postgres' }, stdio: ['ignore', 'pipe', 'pipe'] }
-	).toString();
-}
 
 /**
  * Rebate math correctness (exact Decimal) + tenant isolation on the card
@@ -36,20 +28,14 @@ function controlPsql(query: string): string {
 const SECRET = 'wh_secret_rebate_e2e_0002';
 const TOKEN = `e2e-rebate-${randomUUID()}`;
 
-function slug(): string {
-	return currentTenantSlug();
+// The signing secret is sealed in `provider_credentials`, not the settings
+// JSONB, so it is set through its one writer (see `putProviderCredentials`).
+function setSigningSecret(request: APIRequestContext): Promise<void> {
+	return putProviderCredentials(request, 'cards', { set: { webhook_signing_secret: SECRET } });
 }
 
-function setSigningSecret(): void {
-	controlPsql(
-		`UPDATE organizations SET settings = jsonb_set(settings, '{cards,webhook_signing_secret}', '"${SECRET}"'::jsonb) WHERE slug = '${slug()}'`
-	);
-}
-
-function clearSigningSecret(): void {
-	controlPsql(
-		`UPDATE organizations SET settings = (settings #- '{cards,webhook_signing_secret}') WHERE slug = '${slug()}'`
-	);
+function clearSigningSecret(request: APIRequestContext): Promise<void> {
+	return putProviderCredentials(request, 'cards', { clear: ['webhook_signing_secret'] });
 }
 
 /** Seed a charged card with a known amount_charged so the settlement
@@ -84,7 +70,7 @@ function sign(rawBody: string): string {
 
 test.describe('card rebate math + tenant isolation', () => {
 	test('settlement creates an exact-Decimal rebate at 1%', async ({ request }) => {
-		setSigningSecret();
+		await setSigningSecret(request);
 		const cardId = seedChargedCard('1234.56');
 		try {
 			const body = settleBody(randomUUID());
@@ -106,7 +92,7 @@ test.describe('card rebate math + tenant isolation', () => {
 			expect(rate).toBe('0.0100');
 		} finally {
 			purge(cardId);
-			clearSigningSecret();
+			await clearSigningSecret(request);
 		}
 	});
 

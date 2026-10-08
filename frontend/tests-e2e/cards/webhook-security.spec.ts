@@ -1,16 +1,14 @@
-import { execFileSync } from 'node:child_process';
 import { createHmac, randomUUID } from 'node:crypto';
 
-import { API_BASE, currentTenantSlug, expect, tenantPsql, test } from '../fixtures/helpers';
+import type { APIRequestContext } from '@playwright/test';
 
-/** psql against the CONTROL-plane DB where `organizations` lives. */
-function controlPsql(query: string): string {
-	return execFileSync(
-		'psql',
-		['-h', 'localhost', '-U', 'postgres', '-p', '5432', '-d', 'feohledger', '-tAc', query],
-		{ env: { ...process.env, PGPASSWORD: 'postgres' }, stdio: ['ignore', 'pipe', 'pipe'] }
-	).toString();
-}
+import {
+	API_BASE,
+	expect,
+	putProviderCredentials,
+	tenantPsql,
+	test
+} from '../fixtures/helpers';
 
 /**
  * Card-webhook invariant coverage (project invariant #9): every inbound
@@ -30,20 +28,14 @@ const SECRET = 'wh_secret_for_e2e_card_tests_0001';
 // but the webhook scans *every* tenant) never collide on the token.
 const TOKEN = `e2e-wh-${randomUUID()}`;
 
-function slug(): string {
-	return currentTenantSlug();
+// The signing secret is sealed in `provider_credentials`, not the settings
+// JSONB, so it is set through its one writer (see `putProviderCredentials`).
+function setSigningSecret(request: APIRequestContext, secret: string): Promise<void> {
+	return putProviderCredentials(request, 'cards', { set: { webhook_signing_secret: secret } });
 }
 
-function setSigningSecret(secret: string): void {
-	controlPsql(
-		`UPDATE organizations SET settings = jsonb_set(settings, '{cards,webhook_signing_secret}', '"${secret}"'::jsonb) WHERE slug = '${slug()}'`
-	);
-}
-
-function clearSigningSecret(): void {
-	controlPsql(
-		`UPDATE organizations SET settings = (settings #- '{cards,webhook_signing_secret}') WHERE slug = '${slug()}'`
-	);
+function clearSigningSecret(request: APIRequestContext): Promise<void> {
+	return putProviderCredentials(request, 'cards', { clear: ['webhook_signing_secret'] });
 }
 
 /** Seed one active card with our unique provider token, against any
@@ -97,8 +89,8 @@ function sign(rawBody: string, secret = SECRET): string {
 }
 
 test.describe('card webhook HMAC + dedup', () => {
-	test.beforeEach(() => setSigningSecret(SECRET));
-	test.afterEach(() => clearSigningSecret());
+	test.beforeEach(({ request }) => setSigningSecret(request, SECRET));
+	test.afterEach(({ request }) => clearSigningSecret(request));
 
 	test('forged signature is rejected (204) and does not move money', async ({ request }) => {
 		const cardId = seedCard();

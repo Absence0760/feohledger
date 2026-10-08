@@ -40,6 +40,9 @@ from app.services.payment_adapters.base import PaymentAdapter
 from app.services.payment_adapters.dwolla import DwollaAdapter
 from app.services.payment_adapters.mock_adapter import MockPaymentAdapter
 
+# Fake orgs carry their provider secrets inline; see the fixture.
+pytestmark = pytest.mark.usefixtures("provider_store_from_settings")
+
 # ---------------------------------------------------------------------------
 # The optional-capability contract
 # ---------------------------------------------------------------------------

@@ -292,7 +292,10 @@ and a failed live payment with nothing in the response explaining why:
 
 `backend/docs/payments.md` § Payment processor adapters is the
 authoritative shape; this block is a copy and defers to it on any
-disagreement. Two notes on keys you may see elsewhere: `sandbox` is
+disagreement. It is the shape the ADAPTER receives: `api_key` and
+`webhook_secret` are entered in **Organization → Payments** (or
+`PUT /api/organization/credentials/payments`), which stores them encrypted;
+`PATCH /api/organization` refuses them. Two notes on keys you may see elsewhere: `sandbox` is
 **inert on the payments path** (MT selects sandbox by credential set,
 not by URL or flag — the card adapters are what actually read a
 `sandbox` key), and `program_type` is not read by any payment adapter

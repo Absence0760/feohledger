@@ -64,6 +64,11 @@ BACKUP_S3_BUCKET: ""
 FEOH_ENVIRONMENT: "production"
 # openssl rand -hex 32
 FEOH_SECRET_KEY: ""
+# The app KMS key that seals tenant ERP / payment / card credentials
+# (`terraform output app_kms_key_alias`). Not a secret. Required: a deployed env
+# refuses to boot without it, and migration 0110 seals existing credentials with
+# it, so set it BEFORE the first deploy that carries that migration.
+FEOH_CREDENTIAL_KMS_KEY_ID: "alias/feohledger-app-production"
 # FEOH_REDIS_URL defaults to the local Redis container (derived in
 # compose.prod.yml). Setting it overrides the default — the whole move to
 # ElastiCache later, no compose edit needed. (FEOH_DATABASE_URL: § Database above.)

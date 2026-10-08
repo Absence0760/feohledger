@@ -452,6 +452,7 @@ gate fails if a model is added without being classified.
    - `Role` — name (admin, ap_manager, ap_clerk, cfo)
    - `UserRole` — junction table
    - `WebAuthnCredential` — registered passkey (credential_id, public_key, sign_count, transports) per `user_id`; the WebAuthn second factor (migration 0063)
+   - `ProviderCredential` — `provider_credentials`: one row per (organization, settings block `erp` / `payments` / `cards`) holding that block's secrets as ONE envelope-encrypted JSON map (`ciphertext`, `wrapped_key`, `key_provider` `kms`/`local`, `key_id`) plus the stored path NAMES (`secret_fields`, so "is it set?" needs no decrypt); unique `(organization_id, block)`, plain FK to `organizations` (swept by `tenant_deletion`). Control-plane, beside the `Organization.settings` it was moved out of, so migration 0110 could copy-and-strip in one transaction. See `services/provider_credentials.py` and `erp-integration.md` § Where the credentials live
    - `AssistantUsage` — billing: per-org/month assistant token meter. The
      *only* usage meter that is control-plane; `ExtractionUsage` and
      `CardRebate` read like control-plane data but are tenant-local (see

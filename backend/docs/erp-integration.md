@@ -276,7 +276,9 @@ different event.
 
 ## Organization ERP Configuration
 
-Stored in `Organization.settings` JSONB under the key `erp`:
+The block's CONFIGURATION is stored in `Organization.settings` JSONB under
+the key `erp`; its SECRETS are not (see § Where the credentials live, below).
+An illustrative shape, secrets included as the adapters receive them:
 
 ```json
 {
@@ -301,10 +303,50 @@ Stored in `Organization.settings` JSONB under the key `erp`:
 }
 ```
 
-The ERP type determines which adapter is used. Credentials are stored as plain
-JSONB in `Organization.settings`, protected only by the database's storage
-encryption, and admins read them back verbatim (`services/org_settings_view`).
-Application-level encryption is tracked in `docs/followups.md`.
+The ERP type determines which adapter is used.
+
+### Where the credentials live
+
+The secret fields of the block — `api_key` and `account_token` (Merge.dev),
+`client_secret` (Business Central), `consumer_secret` and `token_secret`
+(NetSuite TBA) and `webhook_signing_secret` (inbound ERP webhooks) — are **not**
+in `Organization.settings`. They are envelope-encrypted in the control-plane
+`provider_credentials` table, one sealed row per org and block
+(`services/provider_credentials.py`, catalogue `SECRET_FIELDS`;
+`services/credential_crypto.py` for the crypto):
+
+- **Sealing.** Each write draws a fresh AES-256 data key, encrypts the block's
+  secrets with AES-256-GCM, and stores the data key wrapped by the app KMS key
+  (`FEOH_CREDENTIAL_KMS_KEY_ID`, AWS KMS `GenerateDataKey`/`Decrypt`). The
+  organization id and block are bound in as the KMS encryption context and the
+  GCM associated data, so a row copied to another tenant does not open. With
+  the variable unset — local dev and CI only; a deployed env refuses to boot —
+  the data key is wrapped by a key derived from `FEOH_SECRET_KEY` instead.
+- **Reading.** Every adapter, connection test and webhook verifier gets the
+  block through ONE accessor, `provider_credentials.provider_config(org,
+  "erp")`, which merges the decrypted secrets into the configuration exactly as
+  the adapters always received it. A secret-named key that is somehow still in
+  the JSONB is ignored. An unwrapped KMS data key is cached in-process for five
+  minutes, so a webhook burst is not a KMS call per event.
+- **Writing.** Only `PUT /api/organization/credentials/erp` (admin, audited
+  `organization.credentials_updated` with path NAMES, written before the save —
+  a 503 if it cannot be). `PATCH /api/organization` refuses a non-blank secret
+  in the block and names that endpoint; it drops blank ones, which is what the
+  settings form's "leave blank to keep" fields send.
+- **Never read back.** `GET /api/organization/credentials` reports which paths
+  are stored, by name. No endpoint returns a value, for any role.
+- **Connection test.** `POST /api/organization/test-erp` with a form body uses
+  the STORED secrets only when the body's configuration equals the saved one;
+  otherwise only the secrets typed into the body. A test can therefore never
+  send a sealed credential to a base URL that has been typed but not saved.
+- **A configuration change is audited too** (`organization.provider_config_updated`,
+  key names only), because where a stored credential is sent — a base URL, an
+  environment — is decided by the configuration.
+
+Migration `0110_provider_credentials` moved every pre-existing plaintext value
+into the table and deleted it from the JSONB. It used to be stated here that the
+credentials were "encrypted at rest via PostgreSQL column encryption"; they were
+plain JSONB under RDS storage encryption until that migration.
 
 ## Per-ERP Integration Details
 
@@ -790,11 +832,10 @@ Manual retry available via `POST /api/invoices/{id}/retry-erp` (resets the attem
 
 ## Security
 
-- ERP credentials stored in `Organization.settings` JSONB (encrypted at rest via PostgreSQL column encryption — future)
+- ERP credentials are envelope-encrypted under the app KMS key in `provider_credentials`, write-only (§ Where the credentials live)
 - Webhook endpoints validate requests via signature/secret or IP whitelist
 - All ERP communication uses HTTPS
 - Credentials are never logged or included in audit trail details
-- Future: integrate with AWS Secrets Manager or HashiCorp Vault
 
 ## Testing
 
@@ -920,7 +961,10 @@ backend/app/api/erp_webhook.py        # POST /api/erp/webhook/{erp_type}
 1. Go to **Organization > ERP Integration**
 2. Select the ERP system (e.g., Business Central)
 3. Change method to "Direct API Connection"
-4. Enter the ERP-specific credentials (shown dynamically based on ERP type)
+4. Enter the ERP-specific credentials (shown dynamically based on ERP type).
+   A secret field is always empty when the page loads and says whether a value
+   is stored; leave it blank to keep the stored one, or tick "Remove the stored
+   value" to delete it.
 5. Save
 
 ### Merge.dev Pricing

@@ -37,6 +37,7 @@ from app.services.payment_settlement_record import (
     open_settlement_mismatch_exception,
     record_completion,
 )
+from app.services.provider_credentials import provider_config
 from app.services.sweep_health import SWEEP_PAYMENT_RECONCILER, run_sweep_loop
 
 logger = logging.getLogger(__name__)
@@ -399,10 +400,13 @@ async def _reconcile_tenant(org: Organization, now: datetime) -> dict[str, int]:
     settle_after = timedelta(minutes=settings.payment_reconcile_after_minutes)
     max_age = timedelta(hours=settings.payment_reconcile_max_age_hours)
 
-    payment_config = (org.settings or {}).get("payments") or {}
-    if not payment_config.get("provider"):
+    if not ((org.settings or {}).get("payments") or {}).get("provider"):
         # Org hasn't configured a processor; nothing to poll.
         return {"polled": 0, "resolved": 0, "aged_out": 0, "payment_failures": 0}
+    # The processor's credentials are sealed; the accessor merges them in. A
+    # credential that cannot be opened raises, and `reconcile_once` counts the
+    # tenant as a failure — the same visibility an unsupported provider gets.
+    payment_config = await provider_config(org, "payments") or {}
 
     # An unsupported provider name raises (see `get_payment_adapter`). Let it
     # propagate: `reconcile_once` counts the tenant as a failure, which is what

@@ -39,6 +39,10 @@ dependencies = [
     "bcrypt>=5.0.0,<6",
     "redis>=8.1.0,<9",
     "python-jose[cryptography]>=3.5.0,<4",
+    # AES-256-GCM + HKDF for the provider-credential envelope encryption
+    # (services/credential_crypto). Already transitive via python-jose; declared
+    # because that module imports it directly.
+    "cryptography>=50.0.0,<51",
     "httpx>=0.28.1,<1",
     "PyMuPDF>=1.28.2,<2",
     "pgvector>=0.5.0,<1",

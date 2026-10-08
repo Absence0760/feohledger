@@ -63,6 +63,7 @@ from app.services.applied_credit_integrity import (
 )
 from app.services.audit_access import log_access
 from app.services.card_issuance import card_cancel_disposition
+from app.services.credential_crypto import CredentialCryptoError
 from app.services.currency_conversion import (
     card_currency_sql,
     invoice_reporting_amount_sql,
@@ -134,6 +135,7 @@ from app.services.payment_settlement_record import (
     open_settlement_mismatch_exception,
     record_completion,
 )
+from app.services.provider_credentials import provider_config, settings_with_secrets
 from app.services.workflow_engine import (
     VALID_TRANSITIONS,
     get_invoice_for_update,
@@ -280,7 +282,7 @@ def refuse_record_only(org: Organization) -> None:
         )
 
 
-def _require_payment_adapter(org: Organization) -> PaymentAdapter:
+async def _require_payment_adapter(org: Organization) -> PaymentAdapter:
     """Resolve the org's payment processor, or refuse before anything moves.
 
     `get_payment_adapter` fails closed on a provider name it has no adapter
@@ -297,8 +299,10 @@ def _require_payment_adapter(org: Organization) -> PaymentAdapter:
     without moving money.
     """
     refuse_record_only(org)
+    # The processor credentials are sealed; the one accessor merges them back.
+    payment_config = await provider_config(org, "payments") or {}
     try:
-        return get_payment_adapter((org.settings or {}).get("payments") or {})
+        return get_payment_adapter(payment_config)
     except UnknownPaymentProviderError as exc:
         # The provider name is the org's own admin-entered settings value and
         # is bounded by the exception — echoing it is what makes the error
@@ -1295,7 +1299,9 @@ async def compare_corridor_quotes(
     )
 
     try:
-        ranking = await compare_quotes(payload, org.settings, mode=body.mode)
+        ranking = await compare_quotes(
+            payload, await settings_with_secrets(org, "payments"), mode=body.mode
+        )
     except NoEligibleCorridorError as exc:
         # PII-free by construction: the message names the method, currency,
         # target country and each provider's machine reason — never a bank
@@ -1583,7 +1589,9 @@ async def _cancel_card_for_void(
         return "card_already_charged"
 
     outcome = await cancel_card_at_provider(
-        card=card, org_settings=org.settings or {}, app_settings=app_settings
+        card=card,
+        org_settings=await settings_with_secrets(org, "cards"),
+        app_settings=app_settings,
     )
     if outcome != "cancelled":
         return outcome
@@ -1669,13 +1677,18 @@ async def void_payment(
     # operator the rail was never asked (rather than the old behaviour, which
     # called `mock.void_payment` — it returns True unconditionally — and
     # recorded a `voided_upstream` that never happened).
-    payment_config = (org.settings or {}).get("payments") or {}
     adapter_outcome: str | None = None
     try:
-        adapter = get_payment_adapter(payment_config)
+        adapter = get_payment_adapter(await provider_config(org, "payments") or {})
     except UnknownPaymentProviderError:
         adapter = None
         adapter_outcome = "provider_not_supported"
+    except CredentialCryptoError:
+        # The sealed processor credentials could not be opened. Same rule as an
+        # unsupported provider: the accounting void still lands, and the audit
+        # row says the rail was never asked.
+        adapter = None
+        adapter_outcome = "credentials_unavailable"
     if adapter is not None and payment.provider_payment_id:
         try:
             void_fn = getattr(adapter, "void_payment", None)
@@ -2388,7 +2401,7 @@ async def release_compliance_hold(
     # Releasing dispatches to the processor exactly like /execute, so it takes
     # the same pre-flight: an unsupported provider refuses here with the
     # payment still `pending_compliance`, never a 500 mid-dispatch.
-    adapter = _require_payment_adapter(org)
+    adapter = await _require_payment_adapter(org)
     now = datetime.now(UTC)
     # Same guard `_dispatch_run_payments` puts round this call, for the same
     # reason: a live FX / sanctions / processor adapter can raise anything, and
@@ -3795,7 +3808,7 @@ async def _execute_single_payment(
                 db=db,
                 invoice=invoice,
                 organization_id=org.id,
-                org_settings=org.settings or {},
+                org_settings=await settings_with_secrets(org, "cards"),
                 app_settings=app_settings,
                 payment_id=payment.id,
                 amount=payment.amount,
@@ -4380,7 +4393,7 @@ async def execute_payment_run(
     # `settings.payments.provider` can dispatch nothing, so refusing here
     # leaves the run in `draft` and re-runnable once settings are fixed —
     # rather than stranding it `executing` behind a 500.
-    adapter = _require_payment_adapter(org)
+    adapter = await _require_payment_adapter(org)
 
     # Claim the run: flip it to an in-flight status and commit so the lock
     # releases and any concurrent caller blocked above wakes to a non-draft
@@ -4879,7 +4892,7 @@ async def resume_payment_run(
 
     # Same pre-flight as /execute: refuse an unsupported processor before the
     # loop rather than 500-ing partway through it.
-    adapter = _require_payment_adapter(org)
+    adapter = await _require_payment_adapter(org)
 
     # Release the row lock before the (potentially slow) per-payment loop —
     # no status change needed here, the run is already `executing`.
@@ -5121,7 +5134,7 @@ async def retry_failed_payments(
 
     # Same pre-flight as /execute and /resume: a run whose processor can't be
     # resolved retries nothing, so refuse before booking any retry attempt row.
-    adapter = _require_payment_adapter(org)
+    adapter = await _require_payment_adapter(org)
 
     all_run_payments = (
         (await db.execute(select(Payment).where(Payment.payment_run_id == run_id))).scalars().all()
@@ -5419,12 +5432,19 @@ async def payment_webhook(tenant_slug: str, provider: str, request: Request):
             select(Organization).where(Organization.slug == tenant_slug)
         )
         org = org_result.scalar_one_or_none()
-    if org is None:
-        return
-
-    payment_config = (org.settings or {}).get("payments") or {}
-    if payment_config.get("provider") != provider:
-        return  # wrong adapter for this tenant
+        if org is None:
+            return
+        if ((org.settings or {}).get("payments") or {}).get("provider") != provider:
+            return  # wrong adapter for this tenant
+        # The webhook secret is sealed (`services/provider_credentials`). Not
+        # being able to open it is OUR failure, not a verdict on this event, so
+        # the processor is asked to retry (bodyless 503) rather than have a
+        # status update dropped — the same split `erp_webhook` makes.
+        try:
+            payment_config = await provider_config(org, "payments", db=ctrl_db) or {}
+        except CredentialCryptoError:
+            logger.error("Payment webhook: the tenant's payment credentials could not be opened")
+            return Response(status_code=503)
 
     try:
         adapter = get_payment_adapter(payment_config)

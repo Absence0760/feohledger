@@ -370,12 +370,20 @@ def test_config_requires_captcha_in_deployed_env():
 
     # A deployed env with no captcha secret must blow up at construction.
     with pytest.raises(ValidationError):
-        Settings(environment="production", hcaptcha_secret="", secret_key=strong_key)
+        Settings(
+            environment="production",
+            credential_kms_key_id="alias/test-app",
+            hcaptcha_secret="",
+            secret_key=strong_key,
+        )
 
     # ...and is satisfied once the captcha secret is provided.
     assert (
         Settings(
-            environment="production", hcaptcha_secret="0xabc", secret_key=strong_key
+            environment="production",
+            credential_kms_key_id="alias/test-app",
+            hcaptcha_secret="0xabc",
+            secret_key=strong_key,
         ).is_deployed
         is True
     )
@@ -663,12 +671,20 @@ def test_a_deployed_env_with_signup_closed_needs_no_captcha_secret():
 
     strong_key = "x" * 32
     closed = Settings(
-        environment="production", hcaptcha_secret="", secret_key=strong_key, signup_enabled=False
+        environment="production",
+        credential_kms_key_id="alias/test-app",
+        hcaptcha_secret="",
+        secret_key=strong_key,
+        signup_enabled=False,
     )
     assert closed.is_deployed is True
     assert closed.signup_enabled is False
 
     with pytest.raises(ValidationError, match="FEOH_SIGNUP_ENABLED"):
         Settings(
-            environment="production", hcaptcha_secret="", secret_key=strong_key, signup_enabled=True
+            environment="production",
+            credential_kms_key_id="alias/test-app",
+            hcaptcha_secret="",
+            secret_key=strong_key,
+            signup_enabled=True,
         )

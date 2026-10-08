@@ -403,15 +403,15 @@ async def test_the_expired_refusal_is_reached_before_any_money_state_changes(rea
 
 
 async def _set_card_settings(realdb, org_id, **extra) -> None:
+    from app.services.provider_credentials import update_secrets
+
     async with realdb.control_sessionmaker()() as s:
         org = (await s.execute(select(Organization).where(Organization.id == org_id))).scalar_one()
         settings = dict(org.settings or {})
-        settings["cards"] = {
-            **(settings.get("cards") or {}),
-            "webhook_signing_secret": _SECRET,
-            **extra,
-        }
+        settings["cards"] = {**(settings.get("cards") or {}), **extra}
         org.settings = settings
+        # The signing secret is sealed, not settings (services/provider_credentials).
+        await update_secrets(s, org_id, "cards", {"webhook_signing_secret": _SECRET}, [])
         await s.commit()
 
 

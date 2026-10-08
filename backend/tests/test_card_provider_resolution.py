@@ -54,6 +54,9 @@ from app.services.card_adapters.nium import NiumAdapter
 from app.services.card_issuance import cancel_card_at_provider, issue_card_for_invoice
 from app.services.payment_runs import RETRY_SAFE, classify_payment_failure
 
+# Fake orgs carry their provider secrets inline; see the fixture.
+pytestmark = pytest.mark.usefixtures("provider_store_from_settings")
+
 TENANT = "a"
 
 # The fixture PAN the mock adapter hands out. It must never reach a caller that

@@ -1846,6 +1846,10 @@ export const messages = {
 		'Ein Client-Secret ist gespeichert. Es wird nie wieder angezeigt; geben Sie ein neues ein, um es zu ersetzen.',
 	'orgSso.secret.notConfigured': 'Es ist kein Client-Secret gespeichert.',
 	'orgSso.secret.clear': 'Gespeichertes Client-Secret entfernen',
+	'org.secret.keepPlaceholder': 'Leer lassen, um den gespeicherten Wert zu behalten',
+	'org.secret.configured': 'Ein Wert ist gespeichert. Er wird nie wieder angezeigt; geben Sie einen neuen ein, um ihn zu ersetzen.',
+	'org.secret.notConfigured': 'Es ist noch nichts gespeichert.',
+	'org.secret.clear': 'Gespeicherten Wert entfernen',
 	'orgSso.register.title': 'Diese App bei Ihrem Identitätsanbieter registrieren',
 	'orgSso.register.hint':
 		'Übernehmen Sie diese Werte in die Anwendung, die Sie bei Ihrem Identitätsanbieter anlegen.',

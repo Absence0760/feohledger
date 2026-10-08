@@ -29,6 +29,7 @@ returns only an opaque ``account_ref`` label, never a full PAN/account number).
 from __future__ import annotations
 
 import logging
+import uuid
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 
@@ -129,6 +130,7 @@ async def resolve_opening_balance(
     reporting_currency: str,
     explicit_opening: Decimal | None = None,
     use_provider: bool = True,
+    org_id: uuid.UUID | None,
 ) -> OpeningBalance:
     """Resolve the cash-position opening balance, first hit wins:
 
@@ -153,6 +155,13 @@ async def resolve_opening_balance(
 
     Never raises: a malformed persisted value degrades to the next link, and
     ``fetch_provider_balance`` already swallows a bank-link outage.
+
+    ``org_id`` lets the provider link authenticate: the processor's API key is
+    sealed (`services/provider_credentials`) and is merged into the payments
+    block only through that module's accessor. It is REQUIRED (no default) so a
+    caller cannot silently drop the provider link — pass ``None`` only where
+    there is genuinely no org (a pure test). A credential that cannot be opened
+    degrades like a bank-link outage.
     """
     settings_dict = org_settings or {}
     currency = _normalize_currency(reporting_currency) or "USD"
@@ -162,6 +171,14 @@ async def resolve_opening_balance(
 
     provider_skipped: str | None = None
     payments_config = settings_dict.get("payments")
+    if use_provider and payments_config and org_id is not None:
+        from app.services.provider_credentials import resolve_block
+
+        try:
+            payments_config = await resolve_block(org_id, settings_dict, "payments")
+        except Exception:  # noqa: BLE001 — never raises; degrade to the next link
+            logger.warning("cash-position: the payments credentials could not be opened")
+            payments_config = None
     if use_provider and payments_config:
         provider_balance = await fetch_provider_balance(payments_config)
         if provider_balance is not None:

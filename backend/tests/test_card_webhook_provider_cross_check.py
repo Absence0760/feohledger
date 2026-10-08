@@ -25,7 +25,6 @@ import pytest
 from sqlalchemy import select
 
 from app.models.invoice import Invoice, InvoiceStatus
-from app.models.organization import Organization
 from app.models.virtual_card import CardRebate, VirtualCard
 
 TENANT = "a"
@@ -39,12 +38,12 @@ async def _default_entity_id(s):
 
 
 async def _set_webhook_secret(realdb, *, org_id):
+    # The signing secret is sealed, not settings (services/provider_credentials).
+    from app.services.provider_credentials import update_secrets
+
     ctrl_mk = realdb.control_sessionmaker()
     async with ctrl_mk() as s:
-        org = await s.get(Organization, org_id)
-        settings = dict(org.settings or {})
-        settings["cards"] = {**(settings.get("cards") or {}), "webhook_signing_secret": _SECRET}
-        org.settings = settings
+        await update_secrets(s, org_id, "cards", {"webhook_signing_secret": _SECRET}, [])
         await s.commit()
 
 

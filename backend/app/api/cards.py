@@ -5,7 +5,7 @@ import uuid
 from datetime import UTC, datetime
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from sqlalchemy import case, extract, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -36,11 +36,13 @@ from app.schemas.virtual_card import (
     RebateResponse,
     RebateStatusBreakdown,
 )
+from app.services.credential_crypto import CredentialCryptoError
 from app.services.currency_conversion import (
     card_currency_sql,
     resolve_reporting_currency,
 )
 from app.services.payment_adapters.base import minor_units_to_decimal
+from app.services.provider_credentials import provider_config, settings_with_secrets
 from app.tenant import (
     apply_entity_scope,
     ensure_in_entity_scope,
@@ -170,15 +172,19 @@ def resolve_rebate_base(
     return Decimal("0"), "unknown"
 
 
-def _resolve_card_config(org: Organization) -> dict:
+def _resolve_card_config(org_settings: dict) -> dict:
     """Build card adapter config based on program type.
 
     - "platform": use platform-level keys from app settings (you earn rebates)
     - "byok": use customer's own keys from org settings (they earn rebates)
+
+    ``org_settings`` must carry the RESOLVED cards block — BYOK keys are sealed
+    and reach it only through `services/provider_credentials` (see
+    :func:`_require_card_adapter`).
     """
     from app.services.card_issuance import _coerce_expiry_days
 
-    org_cards = (org.settings or {}).get("cards", {})
+    org_cards = (org_settings or {}).get("cards") or {}
     program_type = org_cards.get("program_type", "platform")
     region = org_cards.get("region", "US")
     expiry_days = _coerce_expiry_days(org_cards.get("default_expiry_days"))
@@ -242,7 +248,7 @@ def _resolve_card_config(org: Organization) -> dict:
             }
 
 
-def _require_card_adapter(org: Organization):
+async def _require_card_adapter(org: Organization):
     """Resolve the org's card adapter or 409 naming the unregistered provider.
 
     `get_card_adapter` refuses a NAMED provider it has no adapter for rather
@@ -262,7 +268,7 @@ def _require_card_adapter(org: Organization):
     from app.services.card_adapters import UnknownCardProviderError, get_card_adapter
     from app.services.card_adapters.dispatcher import list_available_providers
 
-    card_config = _resolve_card_config(org)
+    card_config = _resolve_card_config(await settings_with_secrets(org, "cards"))
     try:
         return get_card_adapter(card_config)
     except UnknownCardProviderError as exc:
@@ -601,7 +607,7 @@ async def generate_cards(
     # is how a settings typo stayed invisible. Naming the bad value here is the
     # same call `/organization/test-erp` makes (`decisions.md` §29); it is admin
     # config, never a credential.
-    _require_card_adapter(org)
+    await _require_card_adapter(org)
 
     # Only invoices that have cleared AP approval are eligible.
     # PAYABLE_INVOICE_STATUSES is the single source of truth shared with the
@@ -626,6 +632,9 @@ async def generate_cards(
 
     cards: list[VirtualCard] = []
     lock_refused = 0
+    # The cards block with its sealed BYOK keys merged back (decisions §266),
+    # opened once for the whole batch rather than per card.
+    card_settings = await settings_with_secrets(org, "cards")
     for invoice_id in sorted({uuid.UUID(i) for i in body.invoice_ids}):
         try:
             locked = await lock_invoices_for_mint(
@@ -648,6 +657,7 @@ async def generate_cards(
             org_id=org_id,
             user=user,
             app_settings=app_settings,
+            card_settings=card_settings,
         )
         # Releases this invoice's locks before the next one is taken, and makes
         # a card the provider already issued durable before anything else runs.
@@ -677,6 +687,7 @@ async def _mint_one_locked(
     org_id: uuid.UUID,
     user: User,
     app_settings,
+    card_settings: dict,
 ) -> VirtualCard | None:
     """Run every gate on one invoice the caller holds locked, then mint.
 
@@ -769,7 +780,7 @@ async def _mint_one_locked(
         db=db,
         invoice=inv,
         organization_id=org_id,
-        org_settings=org.settings or {},
+        org_settings=card_settings,
         app_settings=app_settings,
         amount=net,
     )
@@ -834,7 +845,7 @@ async def get_card_details(
     # Refuses (409) when the org names an unregistered provider — otherwise the
     # mock adapter would hand this route the fixture PAN 4242424242424242 and
     # the caller would have no way to tell it apart from the real thing.
-    adapter = _require_card_adapter(org)
+    adapter = await _require_card_adapter(org)
     details = await adapter.get_card_details(card.provider_card_id)
 
     return CardDetailsResponse(
@@ -890,7 +901,7 @@ async def cancel_card(
     # Refuses (409) when the org names an unregistered provider — the mock's
     # `cancel_card` returns True unconditionally, so the row would be marked
     # cancelled while the real card stayed live and chargeable.
-    adapter = _require_card_adapter(org)
+    adapter = await _require_card_adapter(org)
     # Cancel at the provider FIRST, then reflect it in the DB — never the other
     # way round. The fail-safe direction is "dead at the provider, maybe stale
     # in the DB"; the dangerous direction is a card the AP team believes is
@@ -1054,7 +1065,13 @@ async def card_webhook(provider: str, request: Request):
                 # We've identified the owning tenant. Verify HMAC
                 # against that tenant's signing secret before doing
                 # anything else.
-                card_config = (org_obj.settings or {}).get("cards") or {}
+                # The signing secret is sealed. Failing to open it is OUR
+                # failure, not a verdict on the event: ask for a retry.
+                try:
+                    card_config = await provider_config(org_obj, "cards") or {}
+                except CredentialCryptoError:
+                    logger.error("Card webhook: the tenant's card credentials could not be opened")
+                    return Response(status_code=503)
                 signing_secret = card_config.get("webhook_signing_secret", "")
                 provided_sig = extract_signature_header(
                     dict(request.headers),

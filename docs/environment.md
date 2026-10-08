@@ -95,6 +95,7 @@ in `frontend/tests-e2e/README.md` § Running from a worktree.
 | `FEOH_DATABASE_URL`     | `postgresql+asyncpg://postgres:postgres@localhost:5432/feohledger` | Control-plane DB connection      |
 | `FEOH_TENANT_DB_PREFIX` | `feoh_`                                                                    | Prefix for tenant database names |
 | `FEOH_SECRET_KEY`       | `change-me-in-production`                                                | JWT signing key                  |
+| `FEOH_CREDENTIAL_KMS_KEY_ID` | (empty)                                                            | KMS key (id, ARN or alias) that wraps the data keys sealing tenant ERP / payment / card credentials. Empty = local provider (key derived from `FEOH_SECRET_KEY`) — dev/CI only; a deployed env refuses to boot |
 | `FEOH_S3_ENDPOINT_URL`  | `http://localhost:9000`                                                  | MinIO/S3 endpoint. Set **empty** in deployed envs → real AWS S3 |
 | `FEOH_S3_ACCESS_KEY`    | `minioadmin`                                                             | MinIO/S3 access key. Set **empty** (with the secret key) → boto3 default credential chain (instance/task role) |
 | `FEOH_S3_SECRET_KEY`    | `minioadmin`                                                             | MinIO/S3 secret key. Set **empty** with the access key |
@@ -224,6 +225,7 @@ always `backend/app/config.py`.
 |----------|---------|---------|
 | `FEOH_DATABASE_URL` | `postgresql+asyncpg://...localhost:5432/feohledger` | Control plane DB |
 | `FEOH_SECRET_KEY` | `change-me-in-production` | JWT signing (HS256) |
+| `FEOH_CREDENTIAL_KMS_KEY_ID` | (empty) | Provider-credential envelope key (`services/credential_crypto`). Set it in every deployed env to the app key (`terraform output app_kms_key_alias`, e.g. `alias/feohledger-app-production`); the VM role already holds `kms:GenerateDataKey` + `kms:Decrypt` on it. **Empty selects the local provider** — the data key is wrapped by an HKDF derivation of `FEOH_SECRET_KEY`, which is what lets a laptop and CI run with no AWS account (guard rail 7). It is a convenience, not a control, so `FEOH_ENVIRONMENT` set to a deployed value with this empty refuses to boot (and `alembic` with it, before migration 0110 can seal anything), and an envelope sealed locally is refused rather than opened in a deployed env. Not a secret. To exercise the KMS provider locally, point it at LocalStack with `FEOH_AWS_ENDPOINT_URL` + `AWS_DEFAULT_REGION`. |
 | `FEOH_S3_ENDPOINT_URL` | `http://localhost:9000` | MinIO/S3 |
 | `FEOH_EXTRACTION_MODE` | `local` | `local` or `lambda` |
 | `FEOH_ERP_MODE` | `local` | `local` or `lambda` |

@@ -27,7 +27,7 @@ from app.schemas.organization import (
     OrganizationResponse,
     UpdateOrganizationRequest,
 )
-from app.services.audit_dispatch import dispatch_auth_audit
+from app.services.audit_dispatch import dispatch_auth_audit, record_auth_audit_or_raise
 from app.services.billing.plan_catalog import FEATURE_SCIM
 from app.services.currency_conversion import resolve_reporting_currency
 from app.services.data_residency import (
@@ -38,6 +38,12 @@ from app.services.data_residency import (
     resolve_region,
 )
 from app.services.org_settings_view import settings_for_response
+from app.services.provider_credentials import (
+    CREDENTIAL_BLOCKS,
+    config_for_connection_test,
+    extract_secrets,
+    strip_secrets,
+)
 from app.services.sso import generate_scim_token
 from app.tenant import get_tenant, lock_organization, normalize_custom_domain
 from app.utils.tenant_urls import is_under_platform_domain
@@ -246,6 +252,13 @@ def _validate_settings_patch(incoming: dict) -> None:
             )
 
 
+def _changed_key_names(before: object, after: object) -> list[str]:
+    """Top-level key names whose value differs between two settings blocks."""
+    b = before if isinstance(before, dict) else {}
+    a = after if isinstance(after, dict) else {}
+    return sorted(k for k in set(b) | set(a) if b.get(k) != a.get(k))
+
+
 @router.patch("", response_model=OrganizationResponse)
 async def update_organization(
     body: UpdateOrganizationRequest,
@@ -259,6 +272,7 @@ async def update_organization(
     org = await lock_organization(db, org)
     if body.name is not None:
         org.name = body.name
+    credential_changes: dict[str, list[str]] = {}
 
     if body.settings is not None:
         _validate_settings_patch(body.settings)
@@ -355,10 +369,34 @@ async def update_organization(
                 org.id,
             )
 
+        # Provider credentials have one sanctioned, audited writer —
+        # `PUT /api/organization/credentials/{block}` — and are stored sealed,
+        # never in this JSONB (`services/provider_credentials`). A non-blank
+        # secret here is refused, naming the paths (never the values); blank
+        # ones are dropped, since "leave blank to keep" is what the form sends.
+        incoming_settings = dict(body.settings)
+        for block in CREDENTIAL_BLOCKS:
+            if block not in incoming_settings:
+                continue
+            secrets_sent = sorted(extract_secrets(block, incoming_settings[block]))
+            if secrets_sent:
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        f"{block} credentials ({', '.join(secrets_sent)}) are managed by "
+                        f"PUT /api/organization/credentials/{block}, which stores them "
+                        "encrypted and audits every change."
+                    ),
+                )
+            incoming_settings[block] = strip_secrets(block, incoming_settings[block])
+            changed = _changed_key_names((org.settings or {}).get(block), incoming_settings[block])
+            if changed:
+                credential_changes[block] = changed
+
         # Merge incoming keys into existing settings (don't replace the whole dict)
         existing = dict(org.settings or {})
         prior_brand = existing.get("brand")
-        existing.update(body.settings)
+        existing.update(incoming_settings)
         # ...and carry the stored domain list across a `brand` replacement, the
         # same way `PUT /branding` does. Refusing the key above is not enough on
         # its own: a brand PATCH that simply omits `custom_domains` would still
@@ -380,6 +418,27 @@ async def update_organization(
                 existing["brand"] = merged_brand
         org.settings = existing
 
+    # Where an ERP / payment / card credential is SENT is decided by this block's
+    # configuration (a base URL, an environment, the provider), so a change to it
+    # is recorded the way a change to the credential itself is — key names, never
+    # values, and FIRST: a row that cannot be written is a 503 with nothing saved
+    # (the `PUT /organization/credentials` and `/sso` rule, decisions §239).
+    for block, changed in credential_changes.items():
+        try:
+            await record_auth_audit_or_raise(
+                organization_id=org.id,
+                actor_id=user.id,
+                action="organization.provider_config_updated",
+                entity_type="organization",
+                entity_id=org.id,
+                details={"block": block, "changed": changed},
+            )
+        except Exception:
+            await db.rollback()
+            raise HTTPException(
+                status_code=503,
+                detail="The change could not be recorded in the audit trail, so it was not saved.",
+            ) from None
     await db.commit()
     # Admin-only endpoint, so the response is the admin projection.
     return _org_response(org, is_admin=True)
@@ -767,7 +826,11 @@ async def test_erp_connection(
     A live adapter needs ``FEATURE_ERP_INTEGRATIONS`` (decisions §258) — a test
     reaches the real ERP with the tenant's credentials. ``mock`` stays open.
     """
-    erp_config = request if request and request.get("type") else (org.settings or {}).get("erp")
+    # Stored secrets join the test only when the form's configuration is the
+    # saved one (`provider_credentials.config_for_connection_test`).
+    erp_config = await config_for_connection_test(
+        org, "erp", request if request and request.get("type") else None, db=db
+    )
     if not erp_config:
         raise HTTPException(status_code=400, detail="No ERP configuration provided")
     await ensure_live_erp_entitled(db, org.id, erp_config)
@@ -868,14 +931,17 @@ async def test_payment_connection(
     request: dict | None = None,
     org: Organization = Depends(get_tenant),
     user: User = Depends(require_roles(ROLE_ADMIN)),
+    db: AsyncSession = Depends(get_control_db),
 ):
     """Test the payment processor connection.
 
     Uses request body if provided (for the "Test Connection" button before
-    saving), otherwise the saved org settings.
+    saving), otherwise the saved org settings. Stored secrets join a request
+    body only when its configuration is the saved one
+    (`provider_credentials.config_for_connection_test`).
     """
-    config = (
-        request if request and request.get("provider") else (org.settings or {}).get("payments")
+    config = await config_for_connection_test(
+        org, "payments", request if request and request.get("provider") else None, db=db
     )
     if not config:
         raise HTTPException(status_code=400, detail="No payment processor configuration provided")

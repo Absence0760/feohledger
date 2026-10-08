@@ -50,6 +50,7 @@ from app.models.procurement import (
     RequisitionLineItem,
     RequisitionStatus,
 )
+from app.models.provider_credential import ProviderCredential
 from app.models.quality_inspection import QualityInspection
 from app.models.recurring_invoice import RecurringInvoiceTemplate
 from app.models.report_definition import ReportDefinition
@@ -86,6 +87,7 @@ __all__ = [
     "Plan",
     "Subscription",
     "Organization",
+    "ProviderCredential",
     "User",
     "Role",
     "UserRole",

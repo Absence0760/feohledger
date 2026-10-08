@@ -2002,6 +2002,10 @@ export const en = {
 		'A client secret is stored. It is never shown again; type a new one to replace it.',
 	'orgSso.secret.notConfigured': 'No client secret is stored.',
 	'orgSso.secret.clear': 'Remove the stored client secret',
+	'org.secret.keepPlaceholder': 'Leave blank to keep the stored value',
+	'org.secret.configured': 'A value is stored. It is never shown again; type a new one to replace it.',
+	'org.secret.notConfigured': 'Nothing is stored yet.',
+	'org.secret.clear': 'Remove the stored value',
 	'orgSso.register.title': 'Register this app at your identity provider',
 	'orgSso.register.hint':
 		'Copy these values into the application you create at your identity provider.',

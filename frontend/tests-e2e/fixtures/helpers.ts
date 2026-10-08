@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import {
 	expect,
 	test as base,
+	type APIRequestContext,
 	type Browser,
 	type Locator,
 	type Page
@@ -592,6 +593,39 @@ export function controlPsql(query: string): string {
 		{ env: { ...process.env, PGPASSWORD: 'postgres' }, stdio: ['ignore', 'pipe', 'pipe'] }
 	);
 	return out.toString();
+}
+
+/**
+ * Seal (or clear) the current worker tenant's provider credentials through
+ * their one writer, `PUT /api/organization/credentials/{block}`, signed in as
+ * the worker's tenant admin.
+ *
+ * ERP / payment / card secrets do not live in `organizations.settings` any
+ * more — they are envelope-encrypted in the control-plane
+ * `provider_credentials` table (backend `services/provider_credentials`), and
+ * the accessor ignores a plaintext value left in the JSONB. So a spec cannot
+ * `jsonb_set` a webhook signing secret into place; it stores it here. Takes an
+ * `APIRequestContext` so a page-less webhook spec can call it.
+ */
+export async function putProviderCredentials(
+	request: APIRequestContext,
+	block: 'erp' | 'payments' | 'cards',
+	body: { set?: Record<string, string>; clear?: string[] }
+): Promise<void> {
+	const slug = currentTenantSlug();
+	const login = await request.post(`${_API_BASE}/api/auth/login`, {
+		headers: { 'X-Tenant-Slug': slug, 'Content-Type': 'application/json' },
+		data: _currentWorkerAdmin()
+	});
+	expect(login.ok(), `admin login for credentials failed (${login.status()})`).toBe(true);
+	const { access_token } = (await login.json()) as { access_token: string };
+	const resp = await request.put(`${_API_BASE}/api/organization/credentials/${block}`, {
+		headers: { ...tenantHeaders(access_token, slug), 'Content-Type': 'application/json' },
+		data: body
+	});
+	expect(resp.ok(), `PUT /api/organization/credentials/${block} failed (${resp.status()})`).toBe(
+		true
+	);
 }
 
 /**
