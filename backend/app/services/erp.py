@@ -244,12 +244,6 @@ async def _call_erp(db: AsyncSession, invoice: Invoice, erp_config: dict | None 
     """
     config = erp_config or {"type": "mock", "integration_method": "direct"}
 
-    # Import adapters to trigger registration
-    import app.services.erp_adapters.dynamics_365_bc  # noqa: F401
-    import app.services.erp_adapters.merge_dev  # noqa: F401
-    import app.services.erp_adapters.mock_adapter  # noqa: F401
-    import app.services.erp_adapters.netsuite  # noqa: F401
-
     adapter = get_erp_adapter(config)
     line_items = await _fetch_line_items(db, invoice.id)
     payload = _build_payload(invoice, line_items)

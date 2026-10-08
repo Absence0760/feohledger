@@ -772,11 +772,6 @@ async def test_erp_connection(
         raise HTTPException(status_code=400, detail="No ERP configuration provided")
     await ensure_live_erp_entitled(db, org.id, erp_config)
 
-    # Import adapters to trigger registration
-    import app.services.erp_adapters.dynamics_365_bc  # noqa: F401
-    import app.services.erp_adapters.merge_dev  # noqa: F401
-    import app.services.erp_adapters.mock_adapter  # noqa: F401
-    import app.services.erp_adapters.netsuite  # noqa: F401
     from app.services.erp_adapters import UnknownErpAdapterError, get_erp_adapter
 
     try:

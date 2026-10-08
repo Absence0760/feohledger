@@ -899,7 +899,7 @@ backend/app/api/erp_webhook.py        # POST /api/erp/webhook/{erp_type}
 1. Create `backend/app/services/erp_adapters/your_erp.py`
 2. Subclass `ErpAdapter` and implement `post_invoice`, `get_invoice_status`, `void_invoice`, `test_connection`. Optionally override `list_pos` if the ERP supports listing purchase orders (otherwise the default `[]` is used and `/api/purchase-orders/sync-erp` reports zero new POs)
 3. Decorate the class with `@register_adapter("your_erp_type")`
-4. Import the module in `_call_erp()` in `erp.py` to trigger registration
+4. Add the module to `BUILTIN_ADAPTER_MODULES` in `erp_adapters/dispatcher.py` — the one list every caller loads the registry from (`tests/test_erp_adapter_registry.py` fails if it is missing)
 5. Add the ERP type to the frontend `ERP_TYPES` array in the organization page
 6. Add conditional credential fields in the ERP config UI
 

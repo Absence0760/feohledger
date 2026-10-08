@@ -340,12 +340,6 @@ async def sync_pos_from_erp(
     # A sync reaches the live ERP — a Growth feature; `mock` stays open (§258).
     await ensure_live_erp_entitled(control_db, org.id, erp_config)
 
-    # Lazy-import adapter modules so the @register_adapter decorator
-    # populates the dispatcher registry. Same pattern as vendors.py.
-    import app.services.erp_adapters.dynamics_365_bc  # noqa: F401
-    import app.services.erp_adapters.merge_dev  # noqa: F401
-    import app.services.erp_adapters.mock_adapter  # noqa: F401
-    import app.services.erp_adapters.netsuite  # noqa: F401
     from app.services.erp_adapters import UnknownErpAdapterError, get_erp_adapter
 
     try:

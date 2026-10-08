@@ -1541,10 +1541,6 @@ async def sync_vendors_from_erp_endpoint(
     await ensure_live_erp_entitled(control_db, org.id, erp_config)
 
     # Use ERP adapter to fetch vendors
-    import app.services.erp_adapters.dynamics_365_bc  # noqa: F401
-    import app.services.erp_adapters.merge_dev  # noqa: F401
-    import app.services.erp_adapters.mock_adapter  # noqa: F401
-    import app.services.erp_adapters.netsuite  # noqa: F401
     from app.services.erp_adapters import UnknownErpAdapterError, get_erp_adapter
 
     try:
