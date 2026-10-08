@@ -25,6 +25,7 @@ References (checked 2026-10-08):
 
 from __future__ import annotations
 
+import base64
 import json
 from datetime import date
 from decimal import Decimal
@@ -112,6 +113,31 @@ _ACCOUNT_CLASS_MAP = {
 _PAGE_CAP = 10
 
 
+def _connections_url() -> str:
+    """Xero's tenant-connections endpoint, which sits beside (not under) the
+    accounting API base: ``https://api.xero.com/connections``."""
+    base = _api_base()
+    suffix = "/api.xro/2.0"
+    root = base[: -len(suffix)] if base.endswith(suffix) else base
+    return f"{root}/connections"
+
+
+def _auth_event_id(access_token: str) -> str | None:
+    """The ``authentication_event_id`` claim of a Xero access token (a JWT).
+
+    Read only to pick, among the organisations a user has connected, the ones
+    this consent just authorised. Not verified: it selects a row Xero itself
+    returned for this token, and grants nothing.
+    """
+    try:
+        payload = access_token.split(".")[1]
+        claims = json.loads(base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4)))
+    except (IndexError, ValueError):
+        return None
+    value = claims.get("authentication_event_id") if isinstance(claims, dict) else None
+    return str(value) if value else None
+
+
 def _api_base() -> str:
     # OPERATOR-controlled override (env/process level, not tenant-admin config)
     # so local dev + e2e can point the adapter at fake-erp. Trusted, so no SSRF
@@ -151,6 +177,35 @@ class XeroAdapter(OAuthErpAdapter):
 
     erp_type = "xero"
     oauth_provider = XERO_OAUTH
+
+    @classmethod
+    async def resolve_external_tenant_id(
+        cls, *, access_token: str, token_response: dict, callback_params: dict[str, str]
+    ) -> str | None:
+        """The Xero organisation this consent connected (``GET /connections``).
+
+        A user may have connected several organisations over time; only the
+        ones authorised by THIS consent (matching ``authEventId``) count. More
+        than one organisation left → None (``no_external_tenant``): we never
+        pick one of a customer's ledgers for them.
+        """
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.get(
+                _connections_url(),
+                headers={"Authorization": f"Bearer {access_token}", "Accept": "application/json"},
+            )
+        if resp.status_code != 200:
+            return None
+        rows = resp.json()
+        if not isinstance(rows, list):
+            return None
+        orgs = [r for r in rows if isinstance(r, dict) and r.get("tenantType") == "ORGANISATION"]
+        event = _auth_event_id(access_token)
+        if event:
+            orgs = [r for r in orgs if r.get("authEventId") == event] or orgs
+        if len(orgs) != 1 or not orgs[0].get("tenantId"):
+            return None
+        return str(orgs[0]["tenantId"])
 
     async def _headers(self, *, json_body: bool = False) -> dict[str, str]:
         headers = {

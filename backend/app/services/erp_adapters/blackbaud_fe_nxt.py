@@ -182,9 +182,11 @@ BLACKBAUD_OAUTH = register_oauth_provider(
         key="blackbaud_fe_nxt",
         display_name="Blackbaud Financial Edge NXT",
         authorize_url=AUTHORIZE_URL,
-        # Read once at import: the connect / callback routes use the spec as a
-        # static description. An operator override needs a process restart.
-        token_url=settings.erp_blackbaud_token_url or DEFAULT_TOKEN_URL,
+        token_url=DEFAULT_TOKEN_URL,
+        # Operator override (fake-erp), read on every call by services/erp_oauth.
+        token_url_setting="erp_blackbaud_token_url",
+        # The SKY token response names the environment the admin approved.
+        external_tenant_id_token_field="environment_id",
         # SKY applications have no per-request scopes: the API products an app
         # can reach are fixed by its subscription and the environment admin's
         # approval, so the authorize redirect carries no `scope`.

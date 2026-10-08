@@ -43,6 +43,7 @@ import httpx
 from app.config import settings
 from app.services import erp_oauth
 from app.services.erp_adapters.base import (
+    VENDOR_NOT_LINKED,
     ErpInvoiceStatus,
     ErpPostResult,
     GLAccountPayload,
@@ -51,6 +52,7 @@ from app.services.erp_adapters.base import (
     PoPayload,
     VendorPayload,
     erp_failure_message,
+    erp_refusal,
 )
 from app.services.erp_adapters.dispatcher import register_adapter
 from app.services.erp_adapters.oauth_base import OAuthErpAdapter, OAuthProviderSpec
@@ -82,14 +84,6 @@ QBO_OAUTH = erp_oauth.register_oauth_provider(
         revoke_url_setting="erp_qbo_revoke_url",
     )
 )
-
-# TODO(merge): use base.erp_refusal_message (worker 1) and base.VENDOR_NOT_LINKED.
-VENDOR_NOT_LINKED = "vendor_not_linked"
-
-
-def _refusal(reason: str) -> str:
-    """PII-free message for a payload we refuse before calling QuickBooks."""
-    return f"{PROVIDER} refused: {reason}"
 
 
 class QboRequestError(RuntimeError):
@@ -270,17 +264,17 @@ class QuickBooksOnlineAdapter(OAuthErpAdapter):
 
     async def post_invoice(self, payload: InvoicePayload) -> ErpPostResult:
         if not payload.vendor_erp_id:
-            return ErpPostResult(success=False, message=_refusal(VENDOR_NOT_LINKED))
+            return erp_refusal(PROVIDER, VENDOR_NOT_LINKED)
         if len(payload.invoice_number or "") > DOC_NUMBER_MAX:
-            return ErpPostResult(success=False, message=_refusal("doc_number_too_long"))
+            return erp_refusal(PROVIDER, "doc_number_too_long")
         lines = self._bill_lines(payload)
         if isinstance(lines, str):
-            return ErpPostResult(success=False, message=_refusal(lines))
+            return erp_refusal(PROVIDER, lines)
 
         try:
             currency_refusal, foreign = await self._currency_check(payload.currency or "")
             if currency_refusal:
-                return ErpPostResult(success=False, message=_refusal(currency_refusal))
+                return erp_refusal(PROVIDER, currency_refusal)
 
             existing = await self._find_existing(payload)
             if existing:
@@ -318,9 +312,8 @@ class QuickBooksOnlineAdapter(OAuthErpAdapter):
             return ErpPostResult(success=False, message=str(exc))
         except erp_oauth.ErpNotConnectedError:
             # Never connected, revoked, or past its lifetime: retrying cannot
-            # help. TODO(merge): return base.erp_refusal(PROVIDER, "not_connected")
-            # so services/erp stops after one attempt.
-            return ErpPostResult(success=False, message=_refusal("not_connected"))
+            # help, so the refusal is non-retryable.
+            return erp_refusal(PROVIDER, "not_connected")
         except QboRequestError as exc:
             return ErpPostResult(success=False, message=str(exc))
         except httpx.HTTPError:

@@ -1616,7 +1616,7 @@ or `body`. An empty `scopes` sends no `scope`. Operator URL overrides
 (`*_url_setting`) are read on every call.
 
 **QuickBooks Online** (`erp_adapters/quickbooks_online.py`). It refuses before
-any post, with `QuickBooks Online refused: <reason>`: `vendor_not_linked`,
+any post, with `QuickBooks Online post refused: <reason>`: `vendor_not_linked`,
 `account_not_linked`, `amount_mismatch` (the lines must sum to the header
 amount, because QuickBooks re-totals from lines), `doc_number_too_long` (21
 characters), `currency_not_enabled`, `currency_unknown`, `not_connected`.

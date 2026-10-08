@@ -84,6 +84,8 @@ SAGE_ACCOUNTING_OAUTH = register_oauth_provider(
         client_secret_setting="erp_sage_accounting_client_secret",
         # Routes the consent screen to the v3.1 (multi-region) API.
         extra_authorize_params={"filter": "apiv3.1"},
+        # Sage's token endpoint takes client_id / client_secret as form fields.
+        token_auth="body",
     )
 )
 
@@ -171,6 +173,30 @@ class SageAccountingAdapter(OAuthErpAdapter):
 
     erp_type = "sage_accounting"
     oauth_provider = SAGE_ACCOUNTING_OAUTH
+
+    @classmethod
+    async def resolve_external_tenant_id(
+        cls, *, access_token: str, token_response: dict, callback_params: dict[str, str]
+    ) -> str | None:
+        """The business this consent connected (``GET /businesses``).
+
+        A Sage login can reach several businesses; with exactly one, that is
+        the business. With several → None (``no_external_tenant``): we never
+        pick one of a customer's ledgers for them.
+        """
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.get(
+                f"{_api_base()}/businesses",
+                headers={"Authorization": f"Bearer {access_token}", "Accept": "application/json"},
+            )
+        if resp.status_code != 200:
+            return None
+        body = resp.json()
+        rows = body.get("$items", body) if isinstance(body, dict) else body
+        if not isinstance(rows, list) or len(rows) != 1 or not isinstance(rows[0], dict):
+            return None
+        business_id = rows[0].get("id")
+        return str(business_id) if business_id else None
 
     async def _headers(self) -> dict[str, str]:
         return {

@@ -276,9 +276,7 @@ MERGE_DEV_LONG_TAIL: list[dict[str, str]] = [
 
 #: Catalogue keys whose adapter another branch is still building. The
 #: registry test accepts these as unregistered; empty it as each adapter lands.
-PENDING_ADAPTERS: frozenset[str] = frozenset(
-    {"quickbooks_online"}
-)
+PENDING_ADAPTERS: frozenset[str] = frozenset()
 
 #: ``settings.erp`` keys that are secrets but no form field names: the inbound
 #: webhook's HMAC key (``api/erp_webhook``) and its older spelling.

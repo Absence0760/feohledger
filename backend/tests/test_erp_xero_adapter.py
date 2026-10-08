@@ -602,3 +602,76 @@ def test_api_base_defaults_to_live_xero_and_honours_the_override(token, monkeypa
         client.get = AsyncMock(return_value=_resp(200, {"Organisations": [{"Name": "x"}]}))
         assert _run(_adapter().test_connection()) is True
     assert client.get.await_args.args[0] == "http://localhost:12112/xero/api.xro/2.0/Organisation"
+
+
+def _transport_client(handler):
+    """``httpx.AsyncClient`` stand-in answering every request via ``handler``."""
+    real = httpx.AsyncClient
+
+    def factory(*args, **kwargs):
+        kwargs.pop("transport", None)
+        return real(*args, transport=httpx.MockTransport(handler), **kwargs)
+
+    return factory
+
+
+def _jwt(claims: dict) -> str:
+    import base64
+
+    body = base64.urlsafe_b64encode(json.dumps(claims).encode()).decode().rstrip("=")
+    return f"h.{body}.s"
+
+
+def _resolve_xero(rows, token: str = "opaque"):
+    seen = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, json=rows)
+
+    with patch("httpx.AsyncClient", _transport_client(handler)):
+        tenant = _run(
+            XeroAdapter.resolve_external_tenant_id(
+                access_token=token, token_response={}, callback_params={}
+            )
+        )
+    return tenant, seen
+
+
+def test_resolve_tenant_reads_the_one_connected_organisation(monkeypatch):
+    monkeypatch.setattr(settings, "erp_xero_api_base", "")
+    tenant, seen = _resolve_xero(
+        [
+            {"tenantId": "t-org", "tenantType": "ORGANISATION", "authEventId": "e1"},
+            {"tenantId": "t-prac", "tenantType": "PRACTICEMANAGER", "authEventId": "e1"},
+        ]
+    )
+    assert tenant == "t-org"
+    assert str(seen[0].url) == "https://api.xero.com/connections"
+    assert seen[0].headers["authorization"] == "Bearer opaque"
+
+
+def test_resolve_tenant_picks_the_organisation_this_consent_authorised(monkeypatch):
+    monkeypatch.setattr(settings, "erp_xero_api_base", "")
+    rows = [
+        {"tenantId": "t-old", "tenantType": "ORGANISATION", "authEventId": "e-old"},
+        {"tenantId": "t-new", "tenantType": "ORGANISATION", "authEventId": "e-new"},
+    ]
+    tenant, _ = _resolve_xero(rows, token=_jwt({"authentication_event_id": "e-new"}))
+    assert tenant == "t-new"
+
+
+def test_resolve_tenant_never_picks_among_several_organisations(monkeypatch):
+    monkeypatch.setattr(settings, "erp_xero_api_base", "")
+    rows = [
+        {"tenantId": "t-a", "tenantType": "ORGANISATION", "authEventId": "e1"},
+        {"tenantId": "t-b", "tenantType": "ORGANISATION", "authEventId": "e1"},
+    ]
+    tenant, _ = _resolve_xero(rows, token=_jwt({"authentication_event_id": "e1"}))
+    assert tenant is None
+
+
+def test_resolve_tenant_uses_the_operator_base_for_connections(monkeypatch):
+    monkeypatch.setattr(settings, "erp_xero_api_base", "http://localhost:12112/xero/api.xro/2.0")
+    _, seen = _resolve_xero([{"tenantId": "t", "tenantType": "ORGANISATION"}])
+    assert str(seen[0].url) == "http://localhost:12112/xero/connections"

@@ -588,3 +588,16 @@ def test_not_connected_propagates_from_access_token(monkeypatch):
     monkeypatch.setattr(BlackbaudFeNxtAdapter, "access_token", not_connected)
     with pytest.raises(erp_oauth.ErpNotConnectedError):
         _post(FakeSky())
+
+
+def test_oauth_spec_reads_the_environment_and_a_call_time_token_override():
+    from app.services.erp_adapters.blackbaud_fe_nxt import BLACKBAUD_OAUTH
+
+    assert BLACKBAUD_OAUTH.external_tenant_id_token_field == "environment_id"
+    assert BLACKBAUD_OAUTH.token_url_setting == "erp_blackbaud_token_url"
+    tenant = asyncio.run(
+        BlackbaudFeNxtAdapter.resolve_external_tenant_id(
+            access_token="t", token_response={"environment_id": "p-env-1"}, callback_params={}
+        )
+    )
+    assert tenant == "p-env-1"

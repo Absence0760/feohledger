@@ -515,3 +515,43 @@ def test_api_base_defaults_to_live_sage_and_honours_the_override(token, monkeypa
         client.get = AsyncMock(return_value=_resp(200, {}))
         assert _run(_adapter().test_connection()) is True
     assert client.get.await_args.args[0] == "http://localhost:12112/sage/v3.1/business_settings"
+
+
+def _transport_client(handler):
+    """``httpx.AsyncClient`` stand-in answering every request via ``handler``."""
+    real = httpx.AsyncClient
+
+    def factory(*args, **kwargs):
+        kwargs.pop("transport", None)
+        return real(*args, transport=httpx.MockTransport(handler), **kwargs)
+
+    return factory
+
+
+def _resolve_sage(body, status: int = 200):
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path.endswith("/businesses")
+        return httpx.Response(status, json=body)
+
+    with patch("httpx.AsyncClient", _transport_client(handler)):
+        return asyncio.run(
+            SageAccountingAdapter.resolve_external_tenant_id(
+                access_token="tok", token_response={}, callback_params={}
+            )
+        )
+
+
+def test_resolve_business_reads_the_one_business():
+    assert _resolve_sage({"$items": [{"id": "biz-1", "name": "Acme"}]}) == "biz-1"
+
+
+def test_resolve_business_never_picks_among_several():
+    assert _resolve_sage({"$items": [{"id": "biz-1"}, {"id": "biz-2"}]}) is None
+
+
+def test_resolve_business_failure_is_not_connected():
+    assert _resolve_sage({"$message": "nope"}, status=401) is None
+
+
+def test_sage_token_endpoint_takes_credentials_in_the_body():
+    assert SageAccountingAdapter.oauth_provider.token_auth == "body"

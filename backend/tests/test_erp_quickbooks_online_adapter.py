@@ -270,7 +270,7 @@ def test_payload_refusals_never_call_quickbooks(token, no_override, overrides, r
     qbo = _Qbo()
     result = _run_with(qbo, lambda: _adapter().post_invoice(_payload(**overrides)))
     assert not result.success
-    assert result.message == f"QuickBooks Online refused: {reason}"
+    assert result.message == f"QuickBooks Online post refused: {reason}"
     assert qbo.calls == []
 
 
@@ -284,7 +284,7 @@ def test_foreign_currency_without_multicurrency_is_refused(token, no_override):
     qbo = _Qbo(prefs=_prefs("USD", multi=False))
     result = _run_with(qbo, lambda: _adapter().post_invoice(_payload(currency="EUR")))
     assert not result.success
-    assert result.message == "QuickBooks Online refused: currency_not_enabled"
+    assert result.message == "QuickBooks Online post refused: currency_not_enabled"
     assert qbo.posts() == []
 
 
@@ -299,7 +299,7 @@ def test_foreign_currency_with_multicurrency_names_the_currency(token, no_overri
 def test_unknown_home_currency_is_refused(token, no_override):
     qbo = _Qbo(prefs={"Preferences": {"CurrencyPrefs": {}}})
     result = _run_with(qbo, lambda: _adapter().post_invoice(_payload()))
-    assert result.message == "QuickBooks Online refused: currency_unknown"
+    assert result.message == "QuickBooks Online post refused: currency_unknown"
 
 
 # ---------------------------------------------------------------------------
@@ -373,7 +373,8 @@ def test_not_connected_is_a_failed_result(no_override):
     ):
         result = _run_with(qbo, lambda: _adapter().post_invoice(_payload()))
     assert not result.success
-    assert result.message == "QuickBooks Online refused: not_connected"
+    assert result.message == "QuickBooks Online post refused: not_connected"
+    assert result.retryable is False
     assert qbo.calls == []
 
 
@@ -384,6 +385,7 @@ def test_token_refresh_outage_is_a_plain_retryable_failure(no_override):
         result = _run_with(qbo, lambda: _adapter().post_invoice(_payload()))
     assert not result.success
     assert result.message == "quickbooks_online: token refresh failed (HTTP 503)"
+    assert result.retryable is True
 
 
 def test_no_realm_is_not_connected(no_override):
