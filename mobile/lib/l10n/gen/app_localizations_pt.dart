@@ -648,6 +648,10 @@ class AppLocalizationsPt extends AppLocalizations {
       'Segregação de funções: um usuário envolvido na criação desta fatura não pode também aprová-la.';
 
   @override
+  String get codedRefusalApprovalSegregationReceiver =>
+      'Segregação de funções: um utilizador que registou uma receção de mercadorias faturada nesta fatura não pode também aprová-la.';
+
+  @override
   String get codedRefusalInvoiceStaleApproval =>
       'Esta fatura foi alterada depois de a ter carregado. Recarregue-a e reveja a versão atual antes de a aprovar.';
 
@@ -3729,6 +3733,10 @@ class AppLocalizationsPtBr extends AppLocalizationsPt {
   @override
   String get codedRefusalApprovalSegregation =>
       'Segregação de funções: um usuário envolvido na criação desta fatura não pode também aprová-la.';
+
+  @override
+  String get codedRefusalApprovalSegregationReceiver =>
+      'Segregação de funções: um usuário que registrou um recebimento de mercadorias faturado nesta fatura não pode também aprová-la.';
 
   @override
   String get codedRefusalInvoiceStaleApproval =>

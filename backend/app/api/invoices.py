@@ -2748,6 +2748,14 @@ async def bulk_status_change(
     # single chokepoint that clears it.
     actor_roles = {r.name for r in user.roles}
     entry_only = is_entry_only(user)
+    # Who received each invoice's goods, for the receiving ≠ approving gate in
+    # `approve_invoice` — resolved for the whole batch in two queries rather
+    # than twice per row.
+    receivers: dict[uuid.UUID, frozenset[str]] = {}
+    if target == DBInvoiceStatus.approved:
+        from app.services.approval_chain import receipt_recorders_by_invoice
+
+        receivers = await receipt_recorders_by_invoice(db, invoices)
     for inv in invoices:
         # A clerk's batch moves only invoices still in entry: from `new` or
         # `rejected`, never approved before (same skip-and-report contract).
@@ -2804,6 +2812,7 @@ async def bulk_status_change(
                         actor_name=user.full_name,
                         actor_roles=actor_roles,
                         org_settings=org.settings,
+                        receipt_recorders=receivers.get(inv.id, frozenset()),
                     )
             except HTTPException as exc:
                 # Segregation / threshold / CFO-gate violation — skip this one,

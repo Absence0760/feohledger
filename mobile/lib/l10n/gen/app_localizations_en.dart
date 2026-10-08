@@ -641,6 +641,10 @@ class AppLocalizationsEn extends AppLocalizations {
       'Segregation of duties: a user involved in creating this invoice cannot also approve it.';
 
   @override
+  String get codedRefusalApprovalSegregationReceiver =>
+      'Segregation of duties: a user who recorded a goods receipt this invoice is billed against cannot also approve it.';
+
+  @override
   String get codedRefusalInvoiceStaleApproval =>
       'This invoice was changed after you loaded it. Reload it and review the current version before approving.';
 

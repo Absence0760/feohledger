@@ -171,6 +171,7 @@
   "glChartRefusalPickActive": "Escolha uma conta ativa do plano de contas próprio da fatura: as contas compartilhadas mais as da sua entidade.",
   "glChartRefusalOnLines": "Itens da fatura: {reasons}",
   "codedRefusalApprovalSegregation": "Segregação de funções: um usuário envolvido na criação desta fatura não pode também aprová-la.",
+  "codedRefusalApprovalSegregationReceiver": "Segregação de funções: um utilizador que registou uma receção de mercadorias faturada nesta fatura não pode também aprová-la.",
   "codedRefusalInvoiceStaleApproval": "Esta fatura foi alterada depois de a ter carregado. Recarregue-a e reveja a versão atual antes de a aprovar.",
   "codedRefusalApprovalLevelReuse": "Você já aprovou um nível anterior desta cadeia; é necessário um aprovador diferente.",
   "codedRefusalApprovalNotNamedApprover": "Você não é um aprovador autorizado para esta etapa.",

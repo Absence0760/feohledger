@@ -904,6 +904,49 @@ async def test_escalation_never_targets_the_invoices_uploader(realdb):
     assert notes == []
 
 
+async def test_escalation_never_targets_whoever_received_the_goods(realdb):
+    """Whoever hand-recorded a live goods receipt on the invoice's PO is refused
+    at approval time too (`approval_segregation_receiver`), so the sweep must
+    not make them a level's approver either."""
+    from decimal import Decimal
+
+    from app.models.invoice import Invoice
+    from app.models.procurement import GoodsReceipt, PurchaseOrder
+    from app.models.workflow import WorkflowInstance
+    from app.services.approval_chain import get_chain_progress
+    from app.services.approval_escalation import _escalate_tenant
+
+    info = realdb.info("a")
+    receiver = info.users["ap_manager"]
+    inst_id, _ = await _seed_unapproved_chain(realdb, review_age_hours=48, target=str(receiver))
+    number = f"PO-ESC-{uuid.uuid4().hex[:6]}"
+    async with realdb.sessionmaker("a")() as s:
+        inst = await s.get(WorkflowInstance, inst_id)
+        invoice = await s.get(Invoice, inst.invoice_id)
+        invoice.po_number = number
+        po = PurchaseOrder(po_number=number, total=Decimal("100.00"), organization_id=info.org_id)
+        s.add(po)
+        await s.flush()
+        s.add(
+            GoodsReceipt(
+                gr_number=f"GR-{uuid.uuid4().hex[:6]}",
+                po_id=po.id,
+                status="received",
+                source="manual",
+                recorded_by_user_id=receiver,
+                organization_id=info.org_id,
+            )
+        )
+        await s.commit()
+
+    await _escalate_tenant(info.db_name, datetime.now(UTC), org_id=info.org_id)
+
+    async with realdb.sessionmaker("a")() as s:
+        inst = await s.get(WorkflowInstance, inst_id)
+    chain = get_chain_progress(inst)
+    assert not chain or str(receiver) not in chain["levels"][0]["approver_ids"]
+
+
 async def test_escalated_chain_is_rerouted_when_the_first_approver_corrects_the_amount(realdb):
     """Sweep escalates level 0 of a $100 invoice (one level applies); the
     escalation target then approves with the amount corrected to $50,000, which
