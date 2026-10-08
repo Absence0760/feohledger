@@ -300,6 +300,23 @@ class Settings(BaseSettings):
     # https://api.sky.blackbaud.com and https://oauth2.sky.blackbaud.com/token.
     erp_blackbaud_api_base: str = ""
     erp_blackbaud_token_url: str = ""
+    # ERP OAuth authorization-code connections (QuickBooks Online, Xero, Sage
+    # Accounting — services/erp_oauth.py). Lifetime of the signed, single-use
+    # `state` carried across the provider's consent redirect.
+    erp_oauth_state_ttl_seconds: int = 600
+    # QuickBooks Online platform app (one Intuit app serves every tenant; a
+    # tenant may bring its own via settings.erp.client_id/client_secret).
+    # Secrets: sops in infra-secrets. Empty (the default) = no platform app —
+    # QuickBooks is available only to a tenant that brings its own (fail closed).
+    erp_qbo_client_id: str = ""
+    erp_qbo_client_secret: str = ""
+    # OPERATOR-controlled QuickBooks overrides, same shape as erp_d365_*: empty
+    # = the real Intuit endpoints (API base chosen by settings.erp.environment).
+    # Set to fake-erp in backend/.env.development for local dev + e2e.
+    erp_qbo_api_base: str = ""
+    erp_qbo_authorize_url: str = ""
+    erp_qbo_token_url: str = ""
+    erp_qbo_revoke_url: str = ""
 
     # Audit
     audit_mode: str = "local"  # "local" = in-process, "lambda" = dispatch to SQS
