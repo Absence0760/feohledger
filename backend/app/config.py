@@ -38,6 +38,16 @@ class Settings(BaseSettings):
     # Auth / JWT
     secret_key: str = "change-me-in-production"
     access_token_expire_minutes: int = 30
+
+    # Provider-credential envelope encryption (`services/credential_crypto`).
+    # The ERP / payment-rail / card-issuer secrets an admin enters are sealed
+    # under a per-value data key that this KMS key wraps — set it to the app key
+    # (`terraform output app_kms_key_alias`, e.g. `alias/feohledger-app-production`).
+    # Empty selects the LOCAL key provider (a key derived from FEOH_SECRET_KEY),
+    # which is what makes a dev laptop work with no AWS account; a deployed
+    # environment refuses to boot with it empty (see the validator below). Not a
+    # secret — a key id names a key, it does not grant use of it.
+    credential_kms_key_id: str = ""
     # Maximum concurrent sessions per user. When a user logs in and already
     # has this many active sessions, the oldest JTI is evicted onto the Redis
     # blocklist. Set to 0 to disable the cap. Default 5 — a reasonable mix of
@@ -995,6 +1005,20 @@ class Settings(BaseSettings):
                 "FEOH_SECRET_KEY must be set to a cryptographically random value of "
                 f"at least 32 chars when FEOH_ENVIRONMENT is deployed ({self.environment!r}); "
                 "refusing to boot with the default / weak JWT signing key."
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _require_credential_kms_key_in_deployed_envs(self) -> "Settings":
+        # Without a KMS key id, tenant provider credentials would be sealed under
+        # a key derived from FEOH_SECRET_KEY — a dev convenience, not a control,
+        # and one that would tie every stored ERP / payment / card secret to the
+        # JWT key's rotation. Refuse to boot rather than fall back to it.
+        if self.is_deployed and not self.credential_kms_key_id.strip():
+            raise ValueError(
+                "FEOH_CREDENTIAL_KMS_KEY_ID must be set when FEOH_ENVIRONMENT is deployed "
+                f"({self.environment!r}); refusing to boot with tenant provider credentials "
+                "sealed under the local development key."
             )
         return self
 

@@ -177,6 +177,7 @@ async def _project_tenant(
     db_name: str,
     org_settings: dict | None,
     ref_today: date,
+    org_id: uuid.UUID | None = None,
 ) -> ShortfallProjection | None:
     """Compute one org's projection. ``None`` = the org opted out (no persisted
     minimum-balance threshold), so nothing is alerted and no marker is touched.
@@ -190,6 +191,7 @@ async def _project_tenant(
         org_settings=org_settings,
         reporting_currency=currency,
         explicit_opening=None,
+        org_id=org_id,
     )
 
     engine = create_async_engine(_make_tenant_url(db_name))
@@ -320,6 +322,7 @@ async def run_shortfall_alerts_once(*, today: date | None = None) -> ShortfallAl
                 db_name=db_name,
                 org_settings=org_settings,
                 ref_today=ref_today,
+                org_id=org_id,
             )
             if projection is None:
                 continue  # no threshold configured — org opted out

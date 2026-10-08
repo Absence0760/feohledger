@@ -26,6 +26,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+# The fake org's settings carry the webhook secrets; see the fixture.
+pytestmark = pytest.mark.usefixtures("provider_store_from_settings")
+
 # ---------------------------------------------------------------------------
 # Primitive: verify_hmac_sha256
 # ---------------------------------------------------------------------------

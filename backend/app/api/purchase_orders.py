@@ -26,6 +26,7 @@ from app.models.vendor import Vendor
 from app.schemas.money import json_money
 from app.services.audit_dispatch import dispatch_audit
 from app.services.goods_receipts import received_quantities
+from app.services.provider_credentials import provider_config
 from app.tenant import (
     apply_entity_scope,
     get_entity_id,
@@ -334,7 +335,7 @@ async def sync_pos_from_erp(
     control_db: AsyncSession = Depends(get_control_db),
 ):
     """Pull purchase orders from the connected ERP via its adapter."""
-    erp_config = (org.settings or {}).get("erp")
+    erp_config = await provider_config(org, "erp", db=control_db)
     if not erp_config:
         raise HTTPException(status_code=400, detail="No ERP configured")
     # A sync reaches the live ERP — a Growth feature; `mock` stays open (§258).
