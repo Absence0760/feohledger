@@ -7,7 +7,7 @@ status names exactly what, and every one of those items is tracked with its
 category, durable fix, and trigger in [followups.md](followups.md).
 
 Fully-shipped areas were moved to [roadmap_shipped.md](roadmap_shipped.md) —
-verbatim, nothing summarized away. 45 of the 51 sections live there. Look for
+verbatim, nothing summarized away. 45 of the 54 sections live there. Look for
 prior art in the archive before assuming a capability doesn't exist.
 
 **Related:** diagnosed-but-unfixed defects in
@@ -210,5 +210,45 @@ Legally required, not optional: the **EU Accessibility Act** is in force (June 2
 - [x] `prefers-reduced-motion` respected (global app.css rule + component-scoped guards; mobile uses default Material transitions which honor the platform setting). Manual **screen-reader pass** (VoiceOver / NVDA / TalkBack) on the invoice → approve → pay flow + supplier portal is the tracked outstanding VPAT item (the supporting semantics — labels, roles, live regions — are in place)
 
 **Competitors:** enterprise suites (Coupa, SAP Ariba, Basware) ship VPATs; a clean ACR is increasingly a procurement gate, especially for public-sector + EU buyers
+
+---
+
+## Priority 14: Receiving, ERP depth & commerce sync
+**Competitive gap: 3-way matching needs receipts, and a merchandise buyer's stock lives in a commerce platform**
+
+Scope boundary: FeohLedger records what was **ordered, received, billed and
+paid**. Stock on hand, valuation, and selling to customers (POS, sales orders,
+receivables) are a different product and are **not** being built here — a
+business like a sports retailer runs its POS / inventory system *beside* the AP
+tool, and item 3 below is how the two meet. Reasoning: [decisions.md](decisions.md) §260.
+
+Each item ships as **its own PR**.
+
+### 1. Goods-receipt entry (receive against a PO)
+**Status:** Planned
+**Open:** There is no way to record a delivery in the app. `/api/goods-receipts` is list + detail only, no ERP adapter pulls receipts, and the only writer of `goods_receipts` is `scripts/seed.py` — so the 3-way match (and the "billed beyond receipt" payment hold, decisions §249) has no real input. *(c)* Tracked in [followups.md](followups.md).
+
+- [ ] `POST /api/goods-receipts` — receive against a PO, line by line (ordered vs already-received vs this delivery), partial and zero-quantity lines, entity taken from the PO
+- [ ] Record who entered a receipt (`source` + `recorded_by_user_id`), and refuse the auto-close of a `po_mismatch` hold when the receipt that cleared it was typed in by someone implicated in the invoice — the inspection rule of §249, applied to receipts
+- [ ] Cancel a hand-entered receipt (a cancelled receipt already stops counting in the matcher)
+- [ ] Re-run matching on every invoice citing the PO, so a hold lifts (or is raised) when the receipt lands
+- [ ] Web: "Record receipt" on `/goods-receipts`
+
+### 2. Direct ERP adapters — largest providers first
+**Status:** Partial — Merge.dev (unified API) is the default; direct adapters exist for Business Central and NetSuite
+**Open:** Direct adapters for the remaining large ERPs, one PR per ERP, largest first; and receipts pulled from the ERP alongside POs. *(c)* Tracked in [followups.md](followups.md).
+
+- [ ] Extend the `erp_adapters` interface with a goods-receipt pull, next to the PO sync, so an ERP that owns receiving feeds the 3-way match (Business Central + NetSuite first, since they already exist)
+- [ ] SAP S/4HANA (OData) · Oracle Fusion Cloud ERP · Microsoft Dynamics 365 Finance & Operations · Sage Intacct · Infor CloudSuite · Epicor Kinetic — each with a fake-erp route set (`pnpm erp:up`) and a `tests-e2e/erp/` spec, mock-by-default (guard rail 7)
+- [ ] SMB ledgers — QuickBooks Online, Xero — already decided as **direct** adapters on Growth (decisions §256, `backend/docs/quickbooks-online-adapter.md`, and the "Build a direct QuickBooks Online adapter" follow-up); the large-ERP order above has to be reconciled with §256, which routes the long tail (SAP, Sage Intacct, …) through Merge.dev on Scale — settle which large ERPs earn a direct adapter before starting
+
+### 3. Commerce / inventory platform adapter (Shopify first)
+**Status:** Planned
+**Open:** A new adapter family that pushes received merchandise into the business's commerce / inventory system. Depends on item 1 (receipts) and on PO / receipt lines carrying an item identity (SKU). *(c)* Tracked in [followups.md](followups.md).
+
+- [ ] Item identity on PO and receipt lines — link to `catalog_items` (SKU) so a received quantity names *what* arrived, not just free text
+- [ ] `commerce_adapters` family (`mock` default, registry + decorator like every other family): on a goods receipt, adjust the mapped SKU's available quantity at the mapped location; idempotent per receipt line
+- [ ] Shopify (Admin GraphQL inventory adjust) first; then Lightspeed, Square, Cin7, WooCommerce
+- [ ] Per-org SKU ↔ product-variant and location mapping; a local fake for e2e; sub-processor registers updated (`pnpm check:subprocessors`)
 
 ---

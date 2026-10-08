@@ -10563,3 +10563,29 @@ days after month end to as little as a few days, and a first-of-month instant
 precedes a subscription that started mid-month. *Pricing a mid-month change
 retroactively from its effective date*: it would need per-read plan
 attribution the meter does not have, for a few cents either way at pilot scale.
+
+
+## 260. Inventory and sales stay out of the AP product; receiving and a commerce sync come in
+
+Asked whether a merchandise buyer (a sports retailer ordering ten tennis
+rackets) could track ordering, stock and sales here, the answer was that the
+buying half exists — requisition, catalog, budget, PO, invoice capture, PO
+matching, approval, payment, stored documents — and the stock and selling half
+does not: no item quantities, stock movements, valuation, POS, sales orders or
+receivables. The call is to keep it that way. Those are a separate product
+category (Shopify POS, Lightspeed, Square, Cin7, or an ERP's inventory module),
+none of the AP competitors carry them, and doing them properly means costing
+methods, multi-location stock, returns and sales tax — a second product, not a
+feature.
+
+What comes in instead, as three separate PRs (roadmap Priority 14): goods-receipt
+entry, because 3-way matching is advertised but nothing could write a receipt;
+direct ERP adapters for the largest ERPs, with a receipt pull; and a commerce
+adapter family that pushes received merchandise into the business's own
+inventory system. The AP side stays the record of what was ordered, received,
+billed and paid; the commerce platform stays the record of what is on the shelf.
+
+Rejected: a lightweight on-hand counter here (it would be a second, drifting
+copy of the number the POS owns); waiting for the ERP adapters before receipt
+entry (most of the self-serve segment has no ERP that owns receiving).
+
