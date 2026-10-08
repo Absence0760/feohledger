@@ -19,7 +19,7 @@ from app.api.deps import (
     require_roles,
 )
 from app.api.pagination import PaginationParams, pagination_params
-from app.api.permissions import PERM_PAYMENT_VOID
+from app.api.permissions import PERM_PAYMENT_EXECUTE, PERM_PAYMENT_VOID
 from app.config import settings
 from app.models.invoice import Invoice
 from app.models.organization import Organization
@@ -526,7 +526,11 @@ async def generate_cards(
     body: GenerateCardsRequest,
     db: AsyncSession = Depends(get_tenant_db),
     org: Organization = Depends(get_tenant),
-    user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER, ROLE_CFO)),
+    # `payment.execute`, not a role list: minting a card funds the invoice the
+    # same as executing a run does, so an org that withholds the duty from a
+    # custom role must be able to withhold this door too. Every system role the
+    # role list admitted (admin, ap_manager, cfo) holds it by default.
+    user: User = Depends(require_permission(PERM_PAYMENT_EXECUTE)),
     org_id: uuid.UUID = Depends(get_org_id),
     entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
