@@ -1,6 +1,6 @@
 """Pydantic schemas for workflow action endpoints."""
 
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Literal
 
@@ -374,6 +374,11 @@ class ApproveRequest(BaseModel):
     due_date: date | None = None
     gl_account: str | None = Field(default=None, max_length=100)
     cost_center: str | None = Field(default=None, max_length=100)
+    # The `updated_at` of the invoice the approver loaded (`InvoiceResponse.
+    # updated_at`). Supplied and stale → 409 `invoice_stale_approval` instead of
+    # approving a version they never saw. Not a correction: the endpoint pops
+    # it before the corrections reach the review service. `api/invoice_version`.
+    expected_updated_at: datetime | None = None
 
 
 class RejectRequest(BaseModel):

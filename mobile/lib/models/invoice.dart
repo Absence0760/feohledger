@@ -307,6 +307,7 @@ class Invoice {
   final String? poNumber;
   final String? glAccount;
   final String? fileUrl;
+
   /// Who signed the invoice off, and when — both set at final approval and
   /// never cleared, so they tell an approved-then-ERP-failed invoice from one
   /// that never reached approval (`invoice_entry.was_ever_approved`). Both are
@@ -314,6 +315,13 @@ class Invoice {
   final String? approvedBy;
   final String? approvalDate;
   final DateTime createdAt;
+
+  /// The row's version (`InvoiceResponse.updated_at`), kept as the server's
+  /// exact string rather than parsed: it is a token echoed back as
+  /// `expected_updated_at` so an approval binds the version this screen showed
+  /// (`backend/app/api/invoice_version.py`), and a re-serialised [DateTime]
+  /// is not guaranteed to round-trip it.
+  final String? updatedAt;
   final List<InvoiceWarning> warnings;
   final PoMatch? poMatch;
 
@@ -333,6 +341,7 @@ class Invoice {
     this.approvedBy,
     this.approvalDate,
     required this.createdAt,
+    this.updatedAt,
     this.warnings = const [],
     this.poMatch,
   });
@@ -360,6 +369,7 @@ class Invoice {
       approvedBy: json['approved_by'] as String?,
       approvalDate: json['approval_date'] as String?,
       createdAt: DateTime.parse(json['created_at'] as String),
+      updatedAt: json['updated_at'] as String?,
       warnings: rawWarnings is List
           ? rawWarnings
                 .whereType<Map<String, dynamic>>()

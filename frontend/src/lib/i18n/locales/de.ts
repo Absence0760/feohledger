@@ -4900,6 +4900,7 @@ export const messages = {
 	'refusal.creditMemoNotApplicable': "Eine Gutschrift mit dem Status {status} kann nicht angewendet werden.",
 	'refusal.creditMemoExceedsBalance': "Der Gutschriftsbetrag übersteigt den verbleibenden gutschriftfähigen Saldo der Rechnung ({remaining}).",
 	'refusal.invoiceStaleEdit': "Diese Rechnung wurde geändert, seit Sie sie geladen haben. Laden Sie sie neu und übernehmen Sie Ihre Änderungen erneut.",
+	'refusal.invoiceStaleApproval': "Diese Rechnung wurde geändert, nachdem Sie sie geladen haben. Laden Sie sie neu und prüfen Sie die aktuelle Fassung, bevor Sie sie genehmigen.",
 	'refusal.invoiceRequiredFieldsMissing': "Pflichtfelder fehlen: {fields}",
 	'refusal.mfaCodeInvalid': "Dieser Code ist ungültig. Prüfen Sie Ihre Authenticator-App und versuchen Sie es erneut.",
 	'csvImport.result.summary': '{imported} importiert, {skipped} übersprungen',

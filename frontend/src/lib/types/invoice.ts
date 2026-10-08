@@ -1,3 +1,4 @@
+import type { MatchingIdsResponse } from '#lib/utils/pagination.ts';
 import type { MessageKey } from '#lib/i18n/messages.ts';
 import type { MoneyAmount } from '#lib/utils/money.ts';
 
@@ -381,4 +382,15 @@ export interface AuditSummary {
 	confidence_context: string | null;
 	generated_at: string | null;
 	stale: boolean;
+}
+
+
+/**
+ * `GET /api/invoices/ids` — the shared {@link MatchingIdsResponse} plus each
+ * id's `updated_at` at selection time. A "select all matching" set reaches rows
+ * the list never loaded, so a bulk approval binds to these versions instead of
+ * a loaded row's (`backend/app/api/invoice_version.py`).
+ */
+export interface InvoiceMatchingIdsResponse extends MatchingIdsResponse {
+	versions: Record<string, string>;
 }

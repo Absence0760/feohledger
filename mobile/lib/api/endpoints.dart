@@ -134,8 +134,14 @@ class InvoiceApi {
     return Invoice.fromJson(data);
   }
 
-  static Future<Invoice> approve(String id) async {
-    final data = await _api.post('/invoices/$id/approve');
+  /// `POST /api/invoices/{id}/approve`. [expectedUpdatedAt] is the version of
+  /// the invoice the approver was shown ([Invoice.updatedAt]); the server
+  /// refuses with `invoice_stale_approval` if it changed since, rather than
+  /// approving figures nobody on this screen saw.
+  static Future<Invoice> approve(String id, {String? expectedUpdatedAt}) async {
+    final data = await _api.post('/invoices/$id/approve', {
+      'expected_updated_at': ?expectedUpdatedAt,
+    });
     return Invoice.fromJson(data);
   }
 
@@ -184,15 +190,20 @@ class InvoiceApi {
   /// a reasonless bulk rejection, because `review.reject_invoice` records the
   /// reason on the audit row and on the `review_rejected` exception the
   /// supplier corrects from. Omitted from the body when null.
+  ///
+  /// [expectedUpdatedAt] maps each id to the version the user saw; sent for an
+  /// `approved` target so a row edited since is skipped, not approved unseen.
   static Future<BulkResult> bulkStatus(
     List<String> ids,
     String status, {
     String? reason,
+    Map<String, String>? expectedUpdatedAt,
   }) async {
     final data = await _api.post('/invoices/bulk/status', {
       'ids': ids,
       'status': status,
       'reason': ?reason,
+      'expected_updated_at': ?expectedUpdatedAt,
     });
     return BulkResult.fromJson(data, countKey: 'updated');
   }

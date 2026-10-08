@@ -323,19 +323,29 @@ class InvoiceStore extends ChangeNotifier with SequencedFetch {
     if (_pendingLoaded) await fetchPending();
   }
 
-  Future<bool> approve(String id) async {
+  /// [expectedUpdatedAt] is the [Invoice.updatedAt] the caller showed — see
+  /// [InvoiceApi.approve].
+  Future<bool> approve(String id, {String? expectedUpdatedAt}) async {
     _approveErrorDetail = null;
     try {
-      await InvoiceApi.approve(id);
+      await InvoiceApi.approve(id, expectedUpdatedAt: expectedUpdatedAt);
       await _refreshAfterMutation();
       return true;
     } catch (e) {
       _error = describeApiError(e);
       _approveErrorDetail = e is ApiException ? e.detail : null;
+      // The list holds the version the server just refused; refetch it, or
+      // the next swipe on the same row is refused again for the same reason.
+      if (isStaleApproval(_approveErrorDetail)) await _refreshAfterMutation();
       notifyListeners();
       return false;
     }
   }
+
+  /// Whether [detail] is the approval version check's refusal — the invoice
+  /// changed after the screen loaded it (`invoice_stale_approval`).
+  static bool isStaleApproval(Object? detail) =>
+      detail is Map && detail['code'] == 'invoice_stale_approval';
 
   Future<bool> reject(String id, String reason) async {
     try {
@@ -410,9 +420,22 @@ class InvoiceStore extends ChangeNotifier with SequencedFetch {
   }) async {
     if (_selectedIds.isEmpty) return null;
     final ids = _selectedIds.toList();
+    // A bulk approval binds each row to the version this list showed.
+    Map<String, String>? versions;
+    if (status == 'approved') {
+      versions = {
+        for (final inv in _invoices)
+          if (_selectedIds.contains(inv.id) && inv.updatedAt != null)
+            inv.id: inv.updatedAt!,
+      };
+    }
     try {
-      final result =
-          await InvoiceApi.bulkStatus(ids, status, reason: reason);
+      final result = await InvoiceApi.bulkStatus(
+        ids,
+        status,
+        reason: reason,
+        expectedUpdatedAt: versions,
+      );
       exitSelectionMode();
       await _refreshAfterMutation();
       return result;

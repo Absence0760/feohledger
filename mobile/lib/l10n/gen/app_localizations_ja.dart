@@ -611,6 +611,10 @@ class AppLocalizationsJa extends AppLocalizations {
       '職務分掌：この請求書の作成に関与したユーザーは、承認することもできません。';
 
   @override
+  String get codedRefusalInvoiceStaleApproval =>
+      'この請求書は読み込み後に変更されています。再読み込みし、最新の内容を確認してから承認してください。';
+
+  @override
   String get codedRefusalApprovalLevelReuse =>
       'このチェーンの前のレベルをすでに承認しています。別の承認者が必要です。';
 

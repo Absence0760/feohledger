@@ -4858,6 +4858,7 @@ export const messages = {
 	'refusal.creditMemoNotApplicable': "ステータスが {status} のクレジットメモは適用できません。",
 	'refusal.creditMemoExceedsBalance': "クレジットメモの金額が請求書の残りのクレジット可能残高（{remaining}）を超えています。",
 	'refusal.invoiceStaleEdit': "この請求書は読み込み後に変更されています。再読み込みして変更をもう一度適用してください。",
+	'refusal.invoiceStaleApproval': "この請求書は読み込み後に変更されています。再読み込みし、最新の内容を確認してから承認してください。",
 	'refusal.invoiceRequiredFieldsMissing': "必須項目が入力されていません：{fields}",
 	'refusal.mfaCodeInvalid': "このコードは無効です。認証アプリを確認して、もう一度お試しください。",
 	'csvImport.result.summary': '{imported}件をインポート、{skipped}件をスキップ',

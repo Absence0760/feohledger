@@ -4927,6 +4927,7 @@ export const messages = {
 	'refusal.creditMemoNotApplicable': "No se puede aplicar una nota de crédito en estado {status}.",
 	'refusal.creditMemoExceedsBalance': "El importe de la nota de crédito supera el saldo acreditable restante de la factura ({remaining}).",
 	'refusal.invoiceStaleEdit': "Esta factura se modificó después de que la cargara. Vuelva a cargarla y aplique de nuevo sus cambios.",
+	'refusal.invoiceStaleApproval': "Esta factura se modificó después de que la cargara. Vuelva a cargarla y revise la versión actual antes de aprobarla.",
 	'refusal.invoiceRequiredFieldsMissing': "Faltan campos obligatorios: {fields}",
 	'refusal.mfaCodeInvalid': "Ese código no es válido. Compruebe su aplicación de autenticación e inténtelo de nuevo.",
 	'csvImport.result.summary': '{imported} importadas, {skipped} omitidas',

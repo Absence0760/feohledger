@@ -28,6 +28,7 @@ Map<String, dynamic> _invoiceJson(
       'currency': 'USD',
       'status': status,
       'created_at': '2026-01-01T12:00:00',
+      'updated_at': '2026-01-02T08:30:00.123456+00:00',
     };
 
 void main() {
@@ -273,6 +274,61 @@ void main() {
 
       expect(ok, isFalse);
       expect(store.error, isNotNull);
+    });
+
+    test('approve sends the version the screen showed', () async {
+      Map<String, dynamic>? sentBody;
+      ApiClient().debugConfigure(
+        client: MockClient((req) async {
+          if (req.method == 'POST' && req.url.path.endsWith('/approve')) {
+            sentBody = jsonDecode(req.body) as Map<String, dynamic>;
+            return http.Response(
+              jsonEncode(_invoiceJson('1', status: 'approved')),
+              200,
+              headers: {'content-type': 'application/json'},
+            );
+          }
+          return _list([]);
+        }),
+      );
+
+      await store.approve('1', expectedUpdatedAt: 'v-seen');
+
+      expect(sentBody!['expected_updated_at'], 'v-seen');
+    });
+
+    test('a stale-version refusal is recorded and the list is refetched',
+        () async {
+      var listCalls = 0;
+      ApiClient().debugConfigure(
+        client: MockClient((req) async {
+          if (req.method == 'POST' && req.url.path.endsWith('/approve')) {
+            return http.Response(
+              jsonEncode({
+                'detail': {
+                  'code': 'invoice_stale_approval',
+                  'message': 'changed',
+                  'params': {},
+                },
+              }),
+              409,
+              headers: {'content-type': 'application/json'},
+            );
+          }
+          listCalls++;
+          return _list([_invoiceJson('1', status: 'ready_for_review')]);
+        }),
+      );
+
+      final ok = await store.approve('1', expectedUpdatedAt: 'v-old');
+
+      expect(ok, isFalse);
+      expect(InvoiceStore.isStaleApproval(store.approveErrorDetail), isTrue);
+      expect(
+        listCalls,
+        1,
+        reason: 'the refused version is replaced, so a retry sees the new one',
+      );
     });
 
     test('reject posts the reason and refetches', () async {
@@ -528,6 +584,39 @@ void main() {
       expect(sentBody!['ids'], ['1']);
       expect(sentBody!.containsKey('reason'), isFalse,
           reason: 'no reason key unless one was given');
+    });
+
+    test('a bulk approval binds each selected row to the version listed',
+        () async {
+      final bodies = <Map<String, dynamic>>[];
+      ApiClient().debugConfigure(
+        client: MockClient((req) async {
+          if (req.method == 'POST' && req.url.path.endsWith('/bulk/status')) {
+            bodies.add(jsonDecode(req.body) as Map<String, dynamic>);
+            return http.Response(
+              jsonEncode({'updated': 1, 'skipped': []}),
+              200,
+              headers: {'content-type': 'application/json'},
+            );
+          }
+          return _list([_invoiceJson('1'), _invoiceJson('2')]);
+        }),
+      );
+      await store.fetch();
+
+      store.enterSelectionMode('1');
+      await store.bulkStatusSelected('approved');
+      store.enterSelectionMode('2');
+      await store.bulkStatusSelected('rejected', reason: 'Duplicate');
+
+      expect(bodies[0]['expected_updated_at'], {
+        '1': '2026-01-02T08:30:00.123456+00:00',
+      });
+      expect(
+        bodies[1].containsKey('expected_updated_at'),
+        isFalse,
+        reason: 'only an approval is bound to a version',
+      );
     });
 
     test('bulkStatusSelected carries the rejection reason the backend requires',

@@ -414,3 +414,206 @@ async def test_one_illegal_transition_is_skipped_not_a_batch_abort(realdb):
         bad = (await s.execute(select(Invoice).where(Invoice.id == bad_id))).scalar_one()
     assert ok.status == InvoiceStatus.done, "the legal transition must survive the batch"
     assert bad.status == InvoiceStatus.ready_for_review, "the refused one must not move"
+
+
+# ---------------------------------------------------------------------------
+# Bulk approve is bound to the version each row had when the approver saw it
+# (decisions §263): the `expected_updated_at` map the list sends. A row edited
+# after the list loaded is skipped, not approved unseen.
+# ---------------------------------------------------------------------------
+
+
+async def _version(c, inv_id) -> str:
+    resp = await c.get(f"/api/invoices/{inv_id}")
+    assert resp.status_code == 200, resp.text
+    return resp.json()["updated_at"]
+
+
+@pytest.mark.asyncio
+async def test_bulk_approve_skips_a_row_edited_after_the_list_loaded(realdb):
+    info = realdb.info("a")
+    mk = realdb.sessionmaker("a")
+    fresh = await _seed(mk, info.org_id, number="BULK-VER-FRESH")
+    edited = await _seed(mk, info.org_id, number="BULK-VER-EDITED")
+
+    async with realdb.client(key="a", role="ap_manager") as c:
+        versions = {str(fresh): await _version(c, fresh), str(edited): await _version(c, edited)}
+        async with realdb.client(key="a", role="admin") as editor:
+            patched = await editor.patch(f"/api/invoices/{edited}", json={"amount": "9999.00"})
+            assert patched.status_code == 200, patched.text
+
+        resp = await c.post(
+            "/api/invoices/bulk/status",
+            json={
+                "ids": [str(fresh), str(edited)],
+                "status": "approved",
+                "expected_updated_at": versions,
+            },
+        )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["updated"] == 1
+    assert [s["id"] for s in body["skipped"]] == [str(edited)]
+    assert "changed after you loaded it" in body["skipped"][0]["reason"]
+
+    async with mk() as s:
+        rows = {
+            r.id: r.status
+            for r in (
+                await s.execute(select(Invoice).where(Invoice.id.in_([fresh, edited])))
+            ).scalars()
+        }
+    assert rows == {fresh: InvoiceStatus.approved, edited: InvoiceStatus.ready_for_review}
+
+
+@pytest.mark.asyncio
+async def test_bulk_approve_skips_a_row_the_supplied_map_does_not_bind(realdb):
+    """Once a client sends the map, an id missing from it is one it cannot
+    vouch for — skipped like a stale row, not approved unbound."""
+    info = realdb.info("a")
+    mk = realdb.sessionmaker("a")
+    bound = await _seed(mk, info.org_id, number="BULK-VER-BOUND")
+    unbound = await _seed(mk, info.org_id, number="BULK-VER-UNBOUND")
+
+    async with realdb.client(key="a", role="ap_manager") as c:
+        resp = await c.post(
+            "/api/invoices/bulk/status",
+            json={
+                "ids": [str(bound), str(unbound)],
+                "status": "approved",
+                "expected_updated_at": {str(bound): await _version(c, bound)},
+            },
+        )
+    body = resp.json()
+    assert body["updated"] == 1
+    assert [s["id"] for s in body["skipped"]] == [str(unbound)]
+
+
+@pytest.mark.asyncio
+async def test_bulk_approve_refuses_a_map_keyed_by_something_other_than_ids(realdb):
+    info = realdb.info("a")
+    inv = await _seed(realdb.sessionmaker("a"), info.org_id, number="BULK-VER-BADKEY")
+    async with realdb.client(key="a", role="ap_manager") as c:
+        resp = await c.post(
+            "/api/invoices/bulk/status",
+            json={
+                "ids": [str(inv)],
+                "status": "approved",
+                "expected_updated_at": {"INV-1": "2026-10-07T00:00:00+00:00"},
+            },
+        )
+    assert resp.status_code == 422, resp.text
+
+
+@pytest.mark.asyncio
+async def test_bulk_submit_skips_an_invoice_missing_required_fields(realdb):
+    """`new → ready_for_review` from the bulk bar runs `/complete`'s own
+    required-field check, so it can't queue for approval an invoice the
+    single-invoice submit would refuse."""
+    info = realdb.info("a")
+    mk = realdb.sessionmaker("a")
+    complete = await _seed(mk, info.org_id, number="BULK-SUBMIT-OK", status=InvoiceStatus.new)
+    blank_id = uuid.uuid4()
+    async with mk() as s:
+        s.add(
+            Invoice(
+                id=blank_id,
+                organization_id=info.org_id,
+                invoice_number="BULK-SUBMIT-BLANK",
+                vendor_name="  ",
+                amount=Decimal("0.00"),
+                currency="USD",
+                status=InvoiceStatus.new,
+            )
+        )
+        await s.commit()
+
+    async with realdb.client(key="a", role="ap_manager") as c:
+        resp = await c.post(
+            "/api/invoices/bulk/status",
+            json={"ids": [str(complete), str(blank_id)], "status": "ready_for_review"},
+        )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["updated"] == 1
+    assert body["skipped"] == [
+        {"id": str(blank_id), "reason": "Required fields missing: vendor, amount"}
+    ]
+
+    async with mk() as s:
+        blank = (await s.execute(select(Invoice).where(Invoice.id == blank_id))).scalar_one()
+    assert blank.status == InvoiceStatus.new
+
+
+@pytest.mark.asyncio
+async def test_a_refused_bulk_approval_leaves_no_chain_state_behind(realdb):
+    """`approve_invoice` routes the approval chain into `state_data` before the
+    named-approver check refuses, and the bulk batch commits at the end — so a
+    skipped row used to keep a chain it was never approved against. Each row
+    now runs in a savepoint, like the single door's whole-request rollback."""
+    from app.models.workflow import WorkflowDefinition
+
+    info = realdb.info("a")
+    mk = realdb.sessionmaker("a")
+    snapshot = {
+        "steps": [
+            {
+                "number": 2,
+                "type": "approval",
+                "enabled": True,
+                # Level 0 names someone else, so the acting manager is refused.
+                "config": {
+                    "approver_strategy": "chain",
+                    "approval_chain": [{"name": "L0", "approver_ids": [str(uuid.uuid4())]}],
+                },
+            }
+        ]
+    }
+    inv_id = uuid.uuid4()
+    async with mk() as s:
+        defn = WorkflowDefinition(
+            name="Bulk WF savepoint",
+            steps_config=snapshot,
+            is_active=False,
+            is_default=False,
+            organization_id=info.org_id,
+        )
+        s.add(defn)
+        await s.flush()
+        inv = Invoice(
+            id=inv_id,
+            organization_id=info.org_id,
+            invoice_number="BULK-SAVEPOINT",
+            vendor_name="Chain Vendor",
+            amount=Decimal("500.00"),
+            currency="USD",
+            status=InvoiceStatus.ready_for_review,
+        )
+        s.add(inv)
+        await s.flush()
+        s.add(
+            WorkflowInstance(
+                correlation_id=inv.correlation_id,
+                definition_id=defn.id,
+                invoice_id=inv.id,
+                current_step=1,
+                state="active",
+                steps_config_snapshot=snapshot,
+                state_data={},
+            )
+        )
+        await s.commit()
+
+    async with realdb.client(key="a", role="ap_manager") as c:
+        resp = await c.post(
+            "/api/invoices/bulk/status", json={"ids": [str(inv_id)], "status": "approved"}
+        )
+    body = resp.json()
+    assert body["updated"] == 0
+    assert "not an authorized approver" in body["skipped"][0]["reason"]
+
+    async with mk() as s:
+        instance = (
+            await s.execute(select(WorkflowInstance).where(WorkflowInstance.invoice_id == inv_id))
+        ).scalar_one()
+    assert instance.state_data == {}, "a refused approval must not leave a routed chain"

@@ -4902,6 +4902,7 @@ export const messages = {
 	'refusal.creditMemoNotApplicable': "Un avoir au statut {status} ne peut pas être appliqué.",
 	'refusal.creditMemoExceedsBalance': "Le montant de l'avoir dépasse le solde créditable restant de la facture ({remaining}).",
 	'refusal.invoiceStaleEdit': "Cette facture a été modifiée depuis son chargement. Rechargez-la et réappliquez vos modifications.",
+	'refusal.invoiceStaleApproval': "Cette facture a été modifiée après son chargement. Rechargez-la et vérifiez la version actuelle avant de l’approuver.",
 	'refusal.invoiceRequiredFieldsMissing': "Champs obligatoires manquants : {fields}",
 	'refusal.mfaCodeInvalid': "Ce code n'est pas valide. Vérifiez votre application d'authentification et réessayez.",
 	'csvImport.result.summary': '{imported} importées, {skipped} ignorées',

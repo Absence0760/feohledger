@@ -15,6 +15,19 @@ credential: there is no JWT and no session. The token binds, under an
 HMAC-SHA256 signature, the exact facts the action will run against:
 
     tenant_slug + invoice_id + actor_id (the reviewer) + action + expiry + jti
+    + facts (a digest of the invoice the message displayed)
+
+The ``facts`` claim is what ties a decision to the version the reviewer was
+shown. A message can sit in an inbox or channel for days, and the invoice can be
+edited meanwhile; an Approve link that still worked would sign figures nobody
+looked at. :func:`digest_of_invoice` hashes what the message renders — the
+invoice number, vendor name and amount + currency — plus what decides the
+payment it releases (vendor id, payment method, due date, entity). The
+notification computes it from the row it announces; the endpoint recomputes it
+from the row under the lock and refuses an approval that no longer matches
+(the in-app counterpart is ``api/invoice_version.py``). A token without the
+claim does not verify at all: it was minted before the claim existed, and
+failing it closed costs a reviewer one sign-in.
 
 Because the platform holds the signing key (sops + KMS in deployed envs), the
 token cannot be forged or tampered with — flipping the action, the invoice, or
@@ -85,6 +98,8 @@ class ActionToken:
     action: str
     jti: str
     exp: int
+    #: :func:`digest_of_invoice` of the invoice the message displayed.
+    facts: str
     channel: str = CHANNEL_EMAIL
     #: The pair id shared by the Approve + Reject tokens of one message, or
     #: ``None`` for a token minted on its own.
@@ -95,6 +110,61 @@ class ActionToken:
         """What the single-use consume claims: the message's pair, so redeeming
         either of its links spends both; the token's own ``jti`` otherwise."""
         return f"pair:{self.pair_id}" if self.pair_id else self.jti
+
+
+def digest_of_invoice(invoice) -> str:
+    """The digest an approval message's tokens bind: what the message showed
+    about the invoice, plus what decides who is paid, how and when.
+
+    Displayed: invoice number, vendor name, amount + currency. Not displayed
+    but bound, because each changes the payment the approval releases: the
+    vendor id (a re-pointed payee with an identical name), the payment method
+    (the rail, international included), the due date (timing) and the entity
+    (which subsidiary pays). Deliberately NOT bound: GL coding and cost centre
+    (accounting, not cash — the in-app version check covers them) and the
+    vendor's bank details (a vendor-level, dual-controlled record read at
+    payment time; binding them would void every pending link on a legitimate
+    approved change).
+
+    One function for both sides — the notification computes it from the row
+    it is announcing, the endpoint from the row it has locked — so the two can
+    only disagree when the invoice did. Duck-typed: this module stays free of
+    model imports. The amount is the exact two-place decimal string, never a
+    float; an absent value is an empty string, never a default.
+    """
+    amount = invoice.amount
+    canonical = json.dumps(
+        [
+            invoice.invoice_number or "",
+            invoice.vendor_name or "",
+            str(invoice.vendor_id) if invoice.vendor_id else "",
+            f"{amount:.2f}" if amount is not None else "",
+            invoice.currency or "",
+            invoice.payment_method or "",
+            invoice.due_date.isoformat() if invoice.due_date else "",
+            str(invoice.entity_id) if invoice.entity_id else "",
+        ],
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:32]
+
+
+#: What every out-of-app door says when an Approve token's facts no longer
+#: match the invoice. The reviewer's remedy is the same on all three surfaces.
+FACTS_CHANGED_MESSAGE = (
+    "This invoice changed after this message was sent. Sign in to the app to "
+    "review the current version."
+)
+
+
+def approval_facts_changed(decoded: ActionToken, invoice) -> bool:
+    """True when an APPROVE token no longer describes ``invoice``.
+
+    Reject is deliberately not bound: sending an invoice back for correction
+    is safe whatever it now says, and a reviewer who saw something wrong in the
+    message should still be able to bounce it.
+    """
+    return decoded.action == ACTION_APPROVE and decoded.facts != digest_of_invoice(invoice)
 
 
 def _b64url_encode(raw: bytes) -> str:
@@ -117,6 +187,7 @@ def build_action_token(
     invoice_id: uuid.UUID,
     actor_id: uuid.UUID,
     action: str,
+    facts: str,
     signing_key: str,
     ttl_hours: int,
     channel: str = CHANNEL_EMAIL,
@@ -138,8 +209,11 @@ def build_action_token(
     message) so the endpoint can consume them as one — see the module
     docstring. The ``build_*`` helpers below always pass one; it is signed like
     every other claim.
+
+    ``facts`` is :func:`digest_of_invoice` of what the message shows; with
+    none there is nothing to bind the decision to, so no token is minted.
     """
-    if not signing_key or action not in _VALID_ACTIONS:
+    if not signing_key or action not in _VALID_ACTIONS or not facts:
         return None
     issued = now if now is not None else time.time()
     payload = {
@@ -147,6 +221,7 @@ def build_action_token(
         "i": str(invoice_id),
         "a": str(actor_id),
         "act": action,
+        "f": facts,
         "ch": channel,
         "exp": int(issued) + ttl_hours * 3600,
         "jti": secrets.token_urlsafe(9),
@@ -173,7 +248,8 @@ def verify_action_token(
     """Verify signature + expiry and return the decoded facts, or ``None``.
 
     Returns ``None`` — never raises — on an empty key, a malformed token, a bad
-    signature, an unknown action, a malformed payload, a channel mismatch, or an
+    signature, an unknown action, a malformed payload (including a token
+    minted before the ``facts`` claim existed), a channel mismatch, or an
     expired token, so every rejection path surfaces as a friendly
     "invalid/expired link" rather than a 500. Constant-time signature comparison
     via ``hmac.compare_digest``.
@@ -208,6 +284,7 @@ def verify_action_token(
             action=action,
             jti=str(data["jti"]),
             exp=exp,
+            facts=str(data["f"]),
             channel=channel,
             pair_id=str(pair_id) if pair_id else None,
         )
@@ -225,6 +302,7 @@ def build_email_action_links(
     tenant_slug: str,
     invoice_id: uuid.UUID,
     actor_id: uuid.UUID,
+    facts: str,
     signing_key: str,
     ttl_hours: int,
     now: float | None = None,
@@ -243,6 +321,7 @@ def build_email_action_links(
         invoice_id=invoice_id,
         actor_id=actor_id,
         action=ACTION_APPROVE,
+        facts=facts,
         signing_key=signing_key,
         ttl_hours=ttl_hours,
         pair_id=pair_id,
@@ -253,6 +332,7 @@ def build_email_action_links(
         invoice_id=invoice_id,
         actor_id=actor_id,
         action=ACTION_REJECT,
+        facts=facts,
         signing_key=signing_key,
         ttl_hours=ttl_hours,
         pair_id=pair_id,
@@ -286,6 +366,7 @@ def build_slack_action_tokens(
     tenant_slug: str,
     invoice_id: uuid.UUID,
     actor_id: uuid.UUID,
+    facts: str,
     signing_key: str,
     ttl_hours: int,
     now: float | None = None,
@@ -294,9 +375,10 @@ def build_slack_action_tokens(
 
     Returns ``None`` when the feature is disabled (no key) so the Slack adapter
     simply omits the interactive ``actions`` block. Each token binds the same
-    facts as the email link — tenant + invoice + the intended approver + action
-    + expiry — but on the ``slack`` channel, so it can only be redeemed at the
-    Slack interactivity endpoint, not the email-confirm one.
+    claims as the email link — tenant + invoice + the intended approver + action
+    + expiry + the displayed-facts digest — but on the ``slack`` channel, so it
+    can only be redeemed at the Slack interactivity endpoint, not the
+    email-confirm one.
     """
     pair_id = new_pair_id()
     approve = build_action_token(
@@ -304,6 +386,7 @@ def build_slack_action_tokens(
         invoice_id=invoice_id,
         actor_id=actor_id,
         action=ACTION_APPROVE,
+        facts=facts,
         signing_key=signing_key,
         ttl_hours=ttl_hours,
         channel=CHANNEL_SLACK,
@@ -315,6 +398,7 @@ def build_slack_action_tokens(
         invoice_id=invoice_id,
         actor_id=actor_id,
         action=ACTION_REJECT,
+        facts=facts,
         signing_key=signing_key,
         ttl_hours=ttl_hours,
         channel=CHANNEL_SLACK,
@@ -331,6 +415,7 @@ def build_teams_action_tokens(
     tenant_slug: str,
     invoice_id: uuid.UUID,
     actor_id: uuid.UUID,
+    facts: str,
     signing_key: str,
     ttl_hours: int,
     now: float | None = None,
@@ -339,9 +424,10 @@ def build_teams_action_tokens(
 
     Returns ``None`` when the feature is disabled (no key) so the Teams adapter
     simply omits the interactive Action.Http buttons. Each token binds the same
-    facts as the email / Slack link — tenant + invoice + the intended approver +
-    action + expiry — but on the ``teams`` channel, so it can only be redeemed at
-    the Teams interactivity endpoint, not the email-confirm or Slack one.
+    claims as the email / Slack link — tenant + invoice + the intended approver +
+    action + expiry + the displayed-facts digest — but on the ``teams`` channel,
+    so it can only be redeemed at the Teams interactivity endpoint, not the
+    email-confirm or Slack one.
     """
     pair_id = new_pair_id()
     approve = build_action_token(
@@ -349,6 +435,7 @@ def build_teams_action_tokens(
         invoice_id=invoice_id,
         actor_id=actor_id,
         action=ACTION_APPROVE,
+        facts=facts,
         signing_key=signing_key,
         ttl_hours=ttl_hours,
         channel=CHANNEL_TEAMS,
@@ -360,6 +447,7 @@ def build_teams_action_tokens(
         invoice_id=invoice_id,
         actor_id=actor_id,
         action=ACTION_REJECT,
+        facts=facts,
         signing_key=signing_key,
         ttl_hours=ttl_hours,
         channel=CHANNEL_TEAMS,

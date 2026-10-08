@@ -184,6 +184,7 @@
   "glChartRefusalPickActive": "Choisissez un compte actif dans le plan comptable propre à la facture : les comptes partagés plus ceux de son entité.",
   "glChartRefusalOnLines": "Lignes de facture : {reasons}",
   "codedRefusalApprovalSegregation": "Séparation des tâches : un utilisateur ayant participé à la création de cette facture ne peut pas aussi l'approuver.",
+  "codedRefusalInvoiceStaleApproval": "Cette facture a été modifiée après son chargement. Rechargez-la et vérifiez la version actuelle avant de l’approuver.",
   "codedRefusalApprovalLevelReuse": "Vous avez déjà approuvé un niveau précédent de cette chaîne ; un autre approbateur est requis.",
   "codedRefusalApprovalNotNamedApprover": "Vous n'êtes pas un approbateur autorisé pour cette étape.",
   "codedRefusalApprovalMaxExceeded": "Le montant de la facture {amount} dépasse le maximum autorisé de {limit}.",

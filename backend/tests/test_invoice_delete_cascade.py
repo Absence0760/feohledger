@@ -293,3 +293,62 @@ async def test_bulk_delete_audits_each_invoice_it_actually_deletes(realdb):
 
     assert len(await _deletion_rows(mk, deletable)) == 1
     assert await _deletion_rows(mk, blocked_id) == []
+
+
+# ---------------------------------------------------------------------------
+# An approved invoice is not immutable, but it can already be in a payment run
+# — exported to the bank, even. Deleting it cascaded the live payment away
+# while the bank still paid it, so the ledger stopped matching the money that
+# moved. Both delete doors now refuse it; the way out is cancel / void.
+# ---------------------------------------------------------------------------
+
+
+async def _with_pending_payment(mk, invoice_id: str) -> None:
+    from app.models.payment import Payment
+
+    async with mk() as s:
+        s.add(
+            Payment(
+                invoice_id=uuid.UUID(invoice_id),
+                amount=Decimal("500.00"),
+                method="ach",
+                status="pending",
+                correlation_id=uuid.uuid4(),
+            )
+        )
+        await s.commit()
+
+
+async def _still_there(mk, invoice_id: str) -> bool:
+    async with mk() as s:
+        row = await s.execute(select(Invoice.id).where(Invoice.id == uuid.UUID(invoice_id)))
+        return row.scalar_one_or_none() is not None
+
+
+@pytest.mark.asyncio
+async def test_delete_refuses_an_invoice_with_a_live_payment(realdb):
+    mk = realdb.sessionmaker(TENANT)
+    inv_id = await _seed_invoice(mk, realdb.info(TENANT).org_id, number="DEL-LIVE-PAY-1")
+    await _with_pending_payment(mk, inv_id)
+
+    async with realdb.client(key=TENANT, role="admin") as c:
+        resp = await c.delete(f"/api/invoices/{inv_id}")
+    assert resp.status_code == 409, resp.text
+    assert "payment run" in resp.json()["detail"]
+    assert await _still_there(mk, inv_id)
+
+
+@pytest.mark.asyncio
+async def test_bulk_delete_skips_an_invoice_with_a_live_payment(realdb):
+    mk = realdb.sessionmaker(TENANT)
+    org_id = realdb.info(TENANT).org_id
+    paying = await _seed_invoice(mk, org_id, number="DEL-LIVE-PAY-2")
+    free = await _seed_invoice(mk, org_id, number="DEL-LIVE-PAY-3")
+    await _with_pending_payment(mk, paying)
+
+    async with realdb.client(key=TENANT, role="admin") as c:
+        resp = await c.post("/api/invoices/bulk/delete", json={"ids": [paying, free]})
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == {"deleted": 1, "skipped": [paying]}
+    assert await _still_there(mk, paying)
+    assert not await _still_there(mk, free)

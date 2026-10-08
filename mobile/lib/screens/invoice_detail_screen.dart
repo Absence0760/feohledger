@@ -138,12 +138,23 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
     final l = AppLocalizations.of(context);
     setState(() => _submitting = true);
     try {
-      final success = await InvoiceStore.instance.approve(widget.invoiceId);
+      final success = await InvoiceStore.instance.approve(
+        widget.invoiceId,
+        expectedUpdatedAt: _invoice?.updatedAt,
+      );
       if (!mounted) return;
       if (success) {
         await _load();
         _showSnack(l.invoiceDetailApproved);
       } else {
+        // Refused because the invoice changed since this screen loaded it:
+        // show the current version so the approver reviews what is there now.
+        if (InvoiceStore.isStaleApproval(
+          InvoiceStore.instance.approveErrorDetail,
+        )) {
+          await _load();
+          if (!mounted) return;
+        }
         // A coded refusal (segregation of duties, the CFO / max-amount gate,
         // the named-approver gate) is the reason the approver has to act on —
         // retrying changes nothing — so it is stated in the reader's language

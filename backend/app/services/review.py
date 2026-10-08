@@ -730,6 +730,7 @@ async def assign_reviewer(
     # is the one notifiable event that does not flow through transition_invoice,
     # so it's dispatched explicitly here. Never breaks the assignment.
     from app.models.notification import EVENT_INVOICE_ASSIGNED
+    from app.services.email_action_token import digest_of_invoice
     from app.services.notification_dispatch import notify_event
     from app.services.notification_templates import InvoiceContext
 
@@ -751,6 +752,7 @@ async def assign_reviewer(
                 amount=invoice.amount,
                 currency=invoice.currency or "USD",
             ),
+            action_facts=digest_of_invoice(invoice),
             actor_id=actor_id,
         )
     except Exception:  # noqa: BLE001 — never let a notification bug break assignment

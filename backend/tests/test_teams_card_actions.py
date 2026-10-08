@@ -268,7 +268,7 @@ def test_inbound_extracts_token_from_the_rendered_action_body(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def _tokens_for(provider: str, monkeypatch, *, recipients=None):
+def _tokens_for(provider: str, monkeypatch, *, recipients=None, facts="f" * 32):
     from app.services import notification_dispatch as nd
 
     _configure(monkeypatch)
@@ -278,6 +278,7 @@ def _tokens_for(provider: str, monkeypatch, *, recipients=None):
         slug="acme",
         invoice_id=uuid.uuid4(),
         recipient_user_ids=[uuid.uuid4()] if recipients is None else recipients,
+        facts=facts,
     )
 
 
@@ -324,7 +325,13 @@ def test_dispatch_mints_nothing_without_the_action_signing_key(monkeypatch):
         slug="acme",
         invoice_id=uuid.uuid4(),
         recipient_user_ids=[uuid.uuid4()],
+        facts="f" * 32,
     ) == (None, None)
+
+
+def test_dispatch_mints_nothing_without_the_displayed_facts(monkeypatch):
+    """No invoice context → nothing to bind the decision to → no buttons."""
+    assert _tokens_for("teams", monkeypatch, facts=None) == (None, None)
 
 
 def test_dispatch_mints_nothing_for_a_non_assigned_event(monkeypatch):
@@ -337,4 +344,5 @@ def test_dispatch_mints_nothing_for_a_non_assigned_event(monkeypatch):
         slug="acme",
         invoice_id=uuid.uuid4(),
         recipient_user_ids=[uuid.uuid4()],
+        facts="f" * 32,
     ) == (None, None)

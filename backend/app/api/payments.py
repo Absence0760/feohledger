@@ -4446,13 +4446,16 @@ async def record_run_paid_outside(
     # Lock order: run → invoices → payments, the order the per-invoice record
     # takes (invoice → its payments), so the two can't deadlock on a shared
     # invoice. Read the payments once unlocked to learn which invoices to lock.
+    # The invoices themselves are locked in ID order — the order `bulk/status`
+    # and `bulk/delete` take them in — or a bulk action over two invoices of
+    # this run, taken the other way round, deadlocks against it.
     payment_query = (
         select(Payment)
         .where(Payment.payment_run_id == run.id)
         .order_by(Payment.created_at.asc(), Payment.id.asc())
     )
     staged = (await db.execute(payment_query)).scalars().all()
-    for invoice_id in dict.fromkeys(p.invoice_id for p in staged):
+    for invoice_id in sorted({p.invoice_id for p in staged}):
         await get_invoice_for_update(db, invoice_id)
     payments = active_run_payments(
         (await db.execute(payment_query.with_for_update())).scalars().all()
@@ -4684,6 +4687,12 @@ async def export_run_nacha(
         )
 
     entries = []
+    # Every invoice is locked up front, in ID order — the order `bulk/status`,
+    # `bulk/delete` and record-as-paid take them in — so a bulk action over two
+    # of this run's invoices cannot deadlock against the export. The per-
+    # payment lock below is then already held.
+    for invoice_id in sorted({p.invoice_id for p in payments}):
+        await get_invoice_for_update(db, invoice_id)
     for payment in payments:
         # Locked like the dispatcher locks it: the checks below decide on the
         # invoice's state, which must not move until this request commits.

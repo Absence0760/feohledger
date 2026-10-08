@@ -125,8 +125,10 @@ class _ApprovalsScreenState extends State<ApprovalsScreen> {
                         ),
                         confirmDismiss: (direction) async {
                           if (direction == DismissDirection.startToEnd) {
-                            final ok = await InvoiceStore.instance
-                                .approve(invoice.id);
+                            final ok = await InvoiceStore.instance.approve(
+                              invoice.id,
+                              expectedUpdatedAt: invoice.updatedAt,
+                            );
                             if (ok && context.mounted) {
                               // Announce the result for assistive tech — the
                               // row vanishing is not announced on its own

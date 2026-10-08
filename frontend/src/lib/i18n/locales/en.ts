@@ -5129,6 +5129,7 @@ export const en = {
 	'refusal.creditMemoNotApplicable': "A credit memo that is {status} cannot be applied.",
 	'refusal.creditMemoExceedsBalance': "The credit memo amount exceeds the invoice's remaining creditable balance ({remaining}).",
 	'refusal.invoiceStaleEdit': "This invoice was modified since you loaded it. Reload and reapply your changes.",
+	'refusal.invoiceStaleApproval': "This invoice was changed after you loaded it. Reload it and review the current version before approving.",
 	'refusal.invoiceRequiredFieldsMissing': "Required fields missing: {fields}",
 	'refusal.mfaCodeInvalid': "That code is not valid. Check your authenticator app and try again.",
 	'csvImport.result.summary': '{imported} imported, {skipped} skipped',

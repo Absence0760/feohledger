@@ -4930,6 +4930,7 @@ export const messages = {
 	'refusal.creditMemoNotApplicable': "Não é possível aplicar uma nota de crédito com status {status}.",
 	'refusal.creditMemoExceedsBalance': "O valor da nota de crédito excede o saldo creditável restante da fatura ({remaining}).",
 	'refusal.invoiceStaleEdit': "Esta fatura foi modificada depois que você a carregou. Recarregue e reaplique suas alterações.",
+	'refusal.invoiceStaleApproval': "Esta fatura foi alterada depois que você a carregou. Recarregue-a e revise a versão atual antes de aprová-la.",
 	'refusal.invoiceRequiredFieldsMissing': "Campos obrigatórios ausentes: {fields}",
 	'refusal.mfaCodeInvalid': "Esse código não é válido. Verifique seu aplicativo autenticador e tente novamente.",
 	'csvImport.result.summary': '{imported} importados, {skipped} ignorados',

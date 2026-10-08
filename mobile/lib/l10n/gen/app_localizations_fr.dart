@@ -651,6 +651,10 @@ class AppLocalizationsFr extends AppLocalizations {
       'Séparation des tâches : un utilisateur ayant participé à la création de cette facture ne peut pas aussi l\'approuver.';
 
   @override
+  String get codedRefusalInvoiceStaleApproval =>
+      'Cette facture a été modifiée après son chargement. Rechargez-la et vérifiez la version actuelle avant de l’approuver.';
+
+  @override
   String get codedRefusalApprovalLevelReuse =>
       'Vous avez déjà approuvé un niveau précédent de cette chaîne ; un autre approbateur est requis.';
 

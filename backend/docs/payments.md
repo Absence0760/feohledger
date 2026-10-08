@@ -509,6 +509,15 @@ retry-safe for the same reason (no order exists at the processor):
 
 Pinned by `tests/test_payment_run_invoice_payability.py`.
 
+**Several invoices in one request are locked in invoice-ID order.** Record-as-
+paid over a run and the NACHA export lock every invoice of the run up front,
+sorted by id, before their per-payment work; `POST /api/invoices/bulk/status`
+and `/bulk/delete` lock their batch the same way. Two paths taking a shared
+pair in opposite orders is a Postgres deadlock (40P01) and a 500 on one side,
+so a new multi-invoice locker sorts too. Bulk delete never meets a run's
+payments at all: it skips any invoice with a live payment (`docs/decisions.md`
+§263).
+
 ### Bounded wait for the invoice lock
 
 Nothing in `app/` sets a session-wide `lock_timeout`, so a money path waiting on
