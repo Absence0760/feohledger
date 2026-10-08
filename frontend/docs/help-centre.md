@@ -111,6 +111,12 @@ small page directory only), and `HelpTip` needs only catalogue keys
 (`terms.ts`), fetching the guide index with a dynamic `import()` the first time
 any tip opens. `content.test.ts` § bundle boundaries pins both.
 
+The glossary, help-route and diagram **strings** are their own lazy catalogue
+slice too (`src/lib/i18n/locales/help/<locale>.ts`, decisions §261): the /help
+layout and each `HelpTip` call `ensureHelpCatalogue()` on mount, and English
+shows until the reader's slice lands. Add a new `help.*` key there, in all six
+locales — only `help.pageLink` and `help.tip.*` stay in the main catalogue.
+
 ## Tests
 
 - `src/lib/help/content.test.ts` — every reference in every piece of prose

@@ -10,13 +10,13 @@
 	 * `#lib/help/types.ts`); group names and the reference links are UI copy.
 	 */
 	import { page } from '$app/state';
-	import type { MessageKey } from '#lib/i18n/messages.ts';
+	import type { AnyMessageKey } from '#lib/i18n/messages.ts';
 	import { m, currentLocale } from '#lib/i18n/store.svelte.ts';
 	import { CONCEPT_GUIDES } from '#lib/help/guides/concepts.ts';
 	import { START_GUIDES } from '#lib/help/guides/start.ts';
 	import { HOWTO_GROUPS, type Guide } from '#lib/help/content.ts';
 
-	type Group = { id: string; key: MessageKey; links: { href: string; label: string; english: boolean }[] };
+	type Group = { id: string; key: AnyMessageKey; links: { href: string; label: string; english: boolean }[] };
 
 	const guideLinks = (guides: Guide[]) =>
 		guides.map((g) => ({ href: `/help/guides/${g.id}`, label: g.title, english: true }));

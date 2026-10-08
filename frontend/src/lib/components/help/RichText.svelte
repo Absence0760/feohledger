@@ -10,7 +10,7 @@
 	 * prose around them is English; each is marked with the UI's own `lang`
 	 * so a screen reader switches voice at the boundary (WCAG 3.1.2).
 	 */
-	import type { MessageKey } from '#lib/i18n/messages.ts';
+	import type { AnyMessageKey } from '#lib/i18n/messages.ts';
 	import { m, currentLocale } from '#lib/i18n/store.svelte.ts';
 	import { inline } from '#lib/help/inline.ts';
 	import { navPageFor, termHref, termKey } from '#lib/help/content.ts';
@@ -24,7 +24,7 @@
 
 {#each parts as part, i (i)}{#if part.kind === 'strong'}<strong>{part.text}</strong
 		>{:else if part.kind === 'em'}<em>{part.text}</em
-		>{:else if part.kind === 'ui'}<strong class="ui-label" lang={uiLang}>{m(part.key as MessageKey)}</strong
+		>{:else if part.kind === 'ui'}<strong class="ui-label" lang={uiLang}>{m(part.key as AnyMessageKey)}</strong
 		>{:else if part.kind === 'term'}<a href={termHref(part.id)} lang={part.label ? undefined : uiLang}
 			>{part.label ?? m(termKey(part.id))}</a
 		>{:else if part.kind === 'guide'}<a href="/help/guides/{part.id}">{part.label}</a

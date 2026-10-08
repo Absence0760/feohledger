@@ -6,7 +6,7 @@
 // Pure (no `$app`, no store): search takes a `label` resolver so the caller
 // passes m(), and vitest can drive it with the English catalogue.
 
-import type { MessageKey } from '#lib/i18n/messages.ts';
+import type { AnyMessageKey } from '#lib/i18n/messages.ts';
 import { NAV } from '#lib/nav.ts';
 import { GLOSSARY } from './glossary.ts';
 import { CONCEPT_GUIDES } from './guides/concepts.ts';
@@ -38,14 +38,14 @@ export const CONCEPT_GUIDES_LIST: Guide[] = CONCEPT_GUIDES;
 
 export const GUIDE_KINDS: GuideKind[] = ['start', 'howto', 'concept'];
 
-export const GUIDE_KIND_KEYS: Record<GuideKind, MessageKey> = {
+export const GUIDE_KIND_KEYS: Record<GuideKind, AnyMessageKey> = {
 	start: 'help.kind.start',
 	howto: 'help.kind.howto',
 	concept: 'help.kind.concept'
 };
 
 /** The how-tos, grouped as the contents list shows them. */
-export const HOWTO_GROUPS: { key: MessageKey; guides: Guide[] }[] = [
+export const HOWTO_GROUPS: { key: AnyMessageKey; guides: Guide[] }[] = [
 	{ key: 'help.area.invoices', guides: INVOICE_GUIDES },
 	{ key: 'help.area.payments', guides: PAYMENT_GUIDES },
 	{ key: 'help.area.vendors', guides: VENDOR_GUIDES },
@@ -62,7 +62,7 @@ export const GLOSSARY_CATEGORIES: GlossaryCategory[] = [
 	'platform'
 ];
 
-export const CATEGORY_KEYS: Record<GlossaryCategory, MessageKey> = {
+export const CATEGORY_KEYS: Record<GlossaryCategory, AnyMessageKey> = {
 	invoices: 'help.cat.invoices',
 	matching: 'help.cat.matching',
 	approvals: 'help.cat.approvals',
@@ -106,11 +106,11 @@ export const termFor = (id: string): GlossaryEntry | undefined => termsById.get(
 
 export interface NavPage {
 	href: string;
-	labelKey: MessageKey;
+	labelKey: AnyMessageKey;
 	roles?: string[];
 	permissions?: string[];
 	/** The group's label key, for a page folded into a sidebar group. */
-	groupKey?: MessageKey;
+	groupKey?: AnyMessageKey;
 }
 
 /** Every sidebar destination, in sidebar order. */
@@ -129,7 +129,7 @@ export { pageHelpFor, pageHelpHref } from './routeHelp.ts';
 // Search
 // ---------------------------------------------------------------------------
 
-export type Label = (key: MessageKey) => string;
+export type Label = (key: AnyMessageKey) => string;
 
 export type SearchHit =
 	| { kind: 'guide'; guide: Guide; score: number }
@@ -145,7 +145,7 @@ const norm = (s: string) =>
 /** Resolve inline references to the words a reader sees. */
 function resolver(label: Label) {
 	return (p: Extract<InlinePart, { kind: 'ui' | 'term' | 'page' }>) => {
-		if (p.kind === 'ui') return label(p.key as MessageKey);
+		if (p.kind === 'ui') return label(p.key as AnyMessageKey);
 		if (p.kind === 'term') return label(termKey(p.id));
 		const nav = navPageFor(p.href);
 		return nav ? label(nav.labelKey) : '';

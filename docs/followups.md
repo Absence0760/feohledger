@@ -105,7 +105,7 @@ section carried its own `decisions.md` § reference, so nothing was lost by
 deleting it; that cross-reference is what makes the pruning safe, and writing
 one is what earns a future entry the right to be deleted.
 
-**85 open: 70 (c) · 9 (a) · 6 (b)** — re-derived from the file, never carried
+**84 open: 69 (c) · 9 (a) · 6 (b)** — re-derived from the file, never carried
 forward. The section heading is authoritative; where an entry also carries a
 `(c)`/`(a)`/`(b)` marker, the two agree.
 `grep -c '^- \[ \]' docs/followups.md`.
@@ -1155,17 +1155,10 @@ lands. Pure doc drift was corrected in the same PR. The two diagnosed defects
       (from the Vite manifest's import graph) as the gated total, and keep the
       every-chunk sum as a reported, ungated figure. **Trigger:** the next
       time `MAX_TOTAL_KB` binds, or the next change to the budget workflow.
-- [ ] **(c) The largest locale catalogue is 5 KB under its chunk ceiling.**
-      The ja catalogue is 95 KB of `MAX_LARGEST_CHUNK_KB`'s 100 after the
-      help centre's terms and tooltips. **Durable fix:** split the help-only
-      keys (`help.*`, diagram labels) into a second lazy catalogue loaded by
-      `/help` routes and HelpTip, with the locale key-parity test covering
-      both slices. **Trigger:** before the next feature that adds more than a
-      couple of hundred keys, or when the catalogue passes 97 KB. **Fired
-      2026-10-06:** the no-rail pilot (issue #517) added 87 keys and the largest
-      catalogue measured 98 KB of 100 (total 989 of 1075) — still green, but
-      the next feature with real copy will bind. Do this split next.
-
+      **Fired 2026-10-08, deliberately not taken:** the help-catalogue split
+      (decisions §261) changed the workflow only to count one help slice like
+      one catalogue; the total measured 1005 of 1075, so the every-chunk sum is
+      not binding and this stays the next budget change's job.
 ### Surfaced by the no-rail pilot (2026-10-06, issue #517, decisions §251)
 
 - [ ] **(c) The mobile app has no record-only mode.** It still offers Execute on a

@@ -12,11 +12,17 @@
 	import type { Snippet } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
-	import { m } from '#lib/i18n/store.svelte.ts';
+	import { m, ensureHelpCatalogue } from '#lib/i18n/store.svelte.ts';
 	import { MediaQuery } from 'svelte/reactivity';
 	import HelpNav from '#lib/components/help/HelpNav.svelte';
 
 	let { children }: { children: Snippet } = $props();
+
+	// Every /help route reads the help-centre catalogue slice, which is not
+	// part of the main catalogue (decisions §261); English shows until it lands.
+	$effect(() => {
+		void ensureHelpCatalogue();
+	});
 
 	const onSearch = $derived(page.url.pathname.replace(/\/$/, '') === '/help/search');
 	let q = $state(page.url.searchParams.get('q') ?? '');

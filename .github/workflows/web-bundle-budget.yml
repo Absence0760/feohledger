@@ -39,7 +39,8 @@ env:
   # IMPORTANT: the total counts lazily-imported chunks too. Code-splitting a
   # dependency therefore does NOT lower this number — only removing weight
   # does. The one exception is the lazy locale catalogues: a visitor fetches at
-  # most one, so only the largest is counted (see the 2026-09-15 entry). The
+  # most one, so only the largest is counted (see the 2026-09-15 entry) — and,
+  # since 2026-10-08, likewise only the largest help-centre slice. The
   # total is summed in bytes and rounded once, so the number of chunks has no
   # effect on it.
   #
@@ -136,6 +137,14 @@ env:
   # 95 KB of MAX_LARGEST_CHUNK_KB's 100. The next few hundred keys will bind
   # it. The durable fix (also filed) is to load the help-only keys as their
   # own lazy catalogue slice, not to raise the per-chunk ceiling.
+  # 2026-10-08 — no ceiling change: the durable fix above landed. Goods-receipt
+  # entry (PR #535) took the ja catalogue to 101 KB, over the per-chunk 100. The
+  # `help.*` keys (all but `help.pageLink` / `help.tip.*`) moved to a second lazy
+  # slice per locale, `locales/help/<l>.ts`, loaded by /help and the ⓘ HelpTips
+  # (decisions §261). Measured locally on main + the split: largest catalogue
+  # 92 KB, largest help slice 10 KB, total 1005 KB of 1075. The total now adds
+  # the largest help slice the way it adds the largest catalogue — a visitor
+  # downloads at most one of each.
   MAX_TOTAL_KB: 1075
   MAX_LARGEST_CHUNK_KB: 100
 
@@ -189,8 +198,22 @@ jobs:
 
           # The lazily imported locale catalogues (src/lib/i18n/catalogues.ts).
           # English is a static import, so it sits in the entry chunks and is
-          # counted like any other code.
+          # counted like any other code. There are two lazy slices per locale —
+          # the main catalogue (locales/<l>.ts) and the help-centre slice
+          # (locales/help/<l>.ts, decisions §261) — and a visitor downloads at
+          # most one of EACH, so each slice adds only its largest file.
           declare -A catalogue=()
+          declare -A help_catalogue=()
+          while IFS= read -r file; do
+            if [ ! -f "$BUILD_DIR/$file" ]; then
+              echo "::error::$MANIFEST names $file, which is not in $BUILD_DIR: the manifest and the build disagree."
+              exit 1
+            fi
+            help_catalogue["$BUILD_DIR/$file"]=1
+          done < <(jq -r 'to_entries[]
+            | select(.value.isDynamicEntry == true)
+            | select((.value.src // .key) | test("^src/lib/i18n/locales/help/[^/]+\\.ts$"))
+            | .value.file' "$MANIFEST")
           while IFS= read -r file; do
             if [ ! -f "$BUILD_DIR/$file" ]; then
               echo "::error::$MANIFEST names $file, which is not in $BUILD_DIR: the manifest and the build disagree."
@@ -205,11 +228,17 @@ jobs:
             echo "::error::No lazy locale catalogue found in $MANIFEST. If the catalogues moved or stopped being lazy, the one-catalogue rule below no longer describes a visitor; update this step."
             exit 1
           fi
+          if [ "${#help_catalogue[@]}" -eq 0 ]; then
+            echo "::error::No lazy help-centre catalogue found in $MANIFEST. If locales/help/ moved or stopped being lazy, the one-slice rule below no longer describes a visitor; update this step."
+            exit 1
+          fi
 
           shipped_bytes=0    # every JS + CSS file the build emits
           counted_bytes=0    # every file except the catalogues...
           catalogue_bytes=0  # ...plus the largest catalogue, added after the loop
           catalogue_path=""
+          help_bytes=0       # ...plus the largest help-centre slice
+          help_path=""
           largest_bytes=0
           largest_path=""
           file_count=0
@@ -222,7 +251,12 @@ jobs:
               largest_bytes="$gz_bytes"
               largest_path="$f"
             fi
-            if [ -n "${catalogue[$f]:-}" ]; then
+            if [ -n "${help_catalogue[$f]:-}" ]; then
+              if [ "$gz_bytes" -gt "$help_bytes" ]; then
+                help_bytes="$gz_bytes"
+                help_path="$f"
+              fi
+            elif [ -n "${catalogue[$f]:-}" ]; then
               if [ "$gz_bytes" -gt "$catalogue_bytes" ]; then
                 catalogue_bytes="$gz_bytes"
                 catalogue_path="$f"
@@ -231,7 +265,7 @@ jobs:
               counted_bytes=$(( counted_bytes + gz_bytes ))
             fi
           done < <(find "$BUILD_DIR" \( -name '*.js' -o -name '*.css' \) -print0)
-          counted_bytes=$(( counted_bytes + catalogue_bytes ))
+          counted_bytes=$(( counted_bytes + catalogue_bytes + help_bytes ))
 
           # Summed in bytes, rounded up once. Rounding each file up first added
           # up to 1 KB per file, so splitting code into more chunks raised the
@@ -246,6 +280,7 @@ jobs:
           echo "Total gzipped JS+CSS: ${total_kb} KB (budget ${MAX_TOTAL_KB} KB): every chunk, one catalogue"
           echo "Shipped, not gated:   ${shipped_kb} KB: every chunk, every catalogue"
           echo "Largest catalogue:    ${catalogue_kb} KB — ${catalogue_path}"
+          echo "Largest help slice:   $(kb "$help_bytes") KB — ${help_path:-none}"
           echo "Largest chunk:        ${largest_kb} KB — ${largest_path} (budget ${MAX_LARGEST_CHUNK_KB} KB)"
 
           {
