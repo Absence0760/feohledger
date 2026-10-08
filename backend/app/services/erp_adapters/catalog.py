@@ -155,6 +155,9 @@ ERP_PROVIDERS: list[dict[str, Any]] = [
             _field("username", help_key="org.erp.help.sageZaUsername"),
             _field("password", secret=True),
             _field("company_id"),
+            # The API reports currency only as numeric ids, so this is the one
+            # place an ISO code for the company's own currency comes from.
+            _field("home_currency", required=False, placeholder="ZAR"),
         ],
         "docs_url": "https://accounting.sageone.co.za/api/2.0.0/Help",
     },
@@ -168,6 +171,14 @@ ERP_PROVIDERS: list[dict[str, Any]] = [
             # Blackbaud's SKY API subscription key, sent with every call when
             # the tenant brings its own app.
             _field("subscription_key", secret=True, required=False),
+            # The AP liability account each invoice's credit line posts to, and
+            # the ledger's ISO currency; the adapter refuses without either.
+            _field("ap_account_number"),
+            _field("currency", placeholder="USD"),
+            _field("project_id", required=False),
+            _field("approval_status", required=False, options=["Pending", "Approved"]),
+            # ``transaction_code_values`` (a list of {id, value}) is set through
+            # the API, not this form: it has no single-input shape.
         ],
         "docs_url": "https://developer.blackbaud.com/skyapi",
     },
@@ -266,7 +277,7 @@ MERGE_DEV_LONG_TAIL: list[dict[str, str]] = [
 #: Catalogue keys whose adapter another branch is still building. The
 #: registry test accepts these as unregistered; empty it as each adapter lands.
 PENDING_ADAPTERS: frozenset[str] = frozenset(
-    {"quickbooks_online", "xero", "sage_accounting", "sage_accounting_za", "blackbaud_fe_nxt"}
+    {"quickbooks_online"}
 )
 
 #: ``settings.erp`` keys that are secrets but no form field names: the inbound
