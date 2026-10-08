@@ -55,6 +55,7 @@ BUILTIN_ADAPTER_MODULES: tuple[str, ...] = (
     "app.services.erp_adapters.syspro",
     "app.services.erp_adapters.sage_accounting",
     "app.services.erp_adapters.xero",
+    "app.services.erp_adapters.blackbaud_fe_nxt",
 )
 
 

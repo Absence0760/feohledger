@@ -286,6 +286,20 @@ class Settings(BaseSettings):
     # admin-config base_url (https-only, SSRF guard) or, absent that, the real
     # https://accounting.sageone.co.za/api/2.0.0.
     erp_sage_za_api_base: str = ""
+    # Blackbaud Financial Edge NXT (SKY API). The platform's registered SKY
+    # application (one app serves every tenant; a tenant may bring its own via
+    # settings.erp.client_id / client_secret) and the developer subscription
+    # key sent as `Bb-Api-Subscription-Key` on every call (a tenant may override
+    # it with settings.erp.subscription_key). All three are secrets with no
+    # fallback: empty in both places = the provider is unavailable and fails
+    # closed.
+    erp_blackbaud_client_id: str = ""
+    erp_blackbaud_client_secret: str = ""
+    erp_blackbaud_subscription_key: str = ""
+    # Operator overrides for fake-erp. Empty = the real
+    # https://api.sky.blackbaud.com and https://oauth2.sky.blackbaud.com/token.
+    erp_blackbaud_api_base: str = ""
+    erp_blackbaud_token_url: str = ""
 
     # Audit
     audit_mode: str = "local"  # "local" = in-process, "lambda" = dispatch to SQS
