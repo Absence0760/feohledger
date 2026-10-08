@@ -297,6 +297,10 @@
   "@codedRefusalApprovalSegregation": {
     "description": "Coded refusal (lib/l10n/coded_refusal_messages.dart) `approval_segregation`: the approver is implicated in the invoice."
   },
+  "codedRefusalInvoiceStaleApproval": "This invoice was changed after you loaded it. Reload it and review the current version before approving.",
+  "@codedRefusalInvoiceStaleApproval": {
+    "description": "Coded refusal (lib/l10n/coded_refusal_messages.dart) `invoice_stale_approval`: the invoice changed after the approver loaded it, so nothing was approved."
+  },
   "codedRefusalApprovalLevelReuse": "You already approved an earlier level of this chain; a different approver is required.",
   "@codedRefusalApprovalLevelReuse": {
     "description": "Coded refusal `approval_level_reuse`: the approver already signed an earlier chain level."

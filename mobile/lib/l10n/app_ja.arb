@@ -171,6 +171,7 @@
   "glChartRefusalPickActive": "請求書自身の勘定科目表(共通の勘定科目と、その事業体独自の勘定科目)から有効なコードを選択してください。",
   "glChartRefusalOnLines": "明細行: {reasons}",
   "codedRefusalApprovalSegregation": "職務分掌：この請求書の作成に関与したユーザーは、承認することもできません。",
+  "codedRefusalInvoiceStaleApproval": "この請求書は読み込み後に変更されています。再読み込みし、最新の内容を確認してから承認してください。",
   "codedRefusalApprovalLevelReuse": "このチェーンの前のレベルをすでに承認しています。別の承認者が必要です。",
   "codedRefusalApprovalNotNamedApprover": "このステップの承認者として認められていません。",
   "codedRefusalApprovalMaxExceeded": "請求額 {amount} が上限額 {limit} を超えています。",

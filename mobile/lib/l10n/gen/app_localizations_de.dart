@@ -648,6 +648,10 @@ class AppLocalizationsDe extends AppLocalizations {
       'Funktionstrennung: Wer an der Erstellung dieser Rechnung beteiligt war, darf sie nicht auch freigeben.';
 
   @override
+  String get codedRefusalInvoiceStaleApproval =>
+      'Diese Rechnung wurde geändert, nachdem Sie sie geladen haben. Laden Sie sie neu und prüfen Sie die aktuelle Fassung, bevor Sie sie genehmigen.';
+
+  @override
   String get codedRefusalApprovalLevelReuse =>
       'Sie haben bereits eine frühere Stufe dieser Freigabekette freigegeben; eine andere Person muss freigeben.';
 

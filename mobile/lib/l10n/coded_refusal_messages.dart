@@ -112,6 +112,7 @@ const codedRefusalCodes = <String>{
   'approval_cfo_required',
   'segregation_raiser',
   'segregation_implicated',
+  'invoice_stale_approval',
 };
 
 /// The localized refusal for [detail] (a decoded error `detail`), or `null`
@@ -140,6 +141,9 @@ String? localizeCodedRefusal(AppLocalizations l, Object? detail) {
       return l.codedRefusalExceptionSegregationRaiser;
     case 'segregation_implicated':
       return l.codedRefusalExceptionSegregationImplicated;
+    // The invoice changed after this screen loaded it; nothing was approved.
+    case 'invoice_stale_approval':
+      return l.codedRefusalInvoiceStaleApproval;
   }
   return null;
 }

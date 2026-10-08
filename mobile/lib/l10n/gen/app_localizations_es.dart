@@ -648,6 +648,10 @@ class AppLocalizationsEs extends AppLocalizations {
       'Segregación de funciones: un usuario que participó en la creación de esta factura no puede también aprobarla.';
 
   @override
+  String get codedRefusalInvoiceStaleApproval =>
+      'Esta factura se modificó después de que la cargara. Vuelva a cargarla y revise la versión actual antes de aprobarla.';
+
+  @override
   String get codedRefusalApprovalLevelReuse =>
       'Ya aprobó un nivel anterior de esta cadena; se requiere un aprobador distinto.';
 

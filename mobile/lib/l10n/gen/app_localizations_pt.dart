@@ -648,6 +648,10 @@ class AppLocalizationsPt extends AppLocalizations {
       'Segregação de funções: um usuário envolvido na criação desta fatura não pode também aprová-la.';
 
   @override
+  String get codedRefusalInvoiceStaleApproval =>
+      'Esta fatura foi alterada depois de a ter carregado. Recarregue-a e reveja a versão atual antes de a aprovar.';
+
+  @override
   String get codedRefusalApprovalLevelReuse =>
       'Você já aprovou um nível anterior desta cadeia; é necessário um aprovador diferente.';
 
@@ -3725,6 +3729,10 @@ class AppLocalizationsPtBr extends AppLocalizationsPt {
   @override
   String get codedRefusalApprovalSegregation =>
       'Segregação de funções: um usuário envolvido na criação desta fatura não pode também aprová-la.';
+
+  @override
+  String get codedRefusalInvoiceStaleApproval =>
+      'Esta fatura foi alterada depois que você a carregou. Recarregue-a e revise a versão atual antes de aprová-la.';
 
   @override
   String get codedRefusalApprovalLevelReuse =>

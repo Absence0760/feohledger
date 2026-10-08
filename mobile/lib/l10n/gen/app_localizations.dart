@@ -1133,6 +1133,12 @@ abstract class AppLocalizations {
   /// **'Segregation of duties: a user involved in creating this invoice cannot also approve it.'**
   String get codedRefusalApprovalSegregation;
 
+  /// Coded refusal (lib/l10n/coded_refusal_messages.dart) `invoice_stale_approval`: the invoice changed after the approver loaded it, so nothing was approved.
+  ///
+  /// In en, this message translates to:
+  /// **'This invoice was changed after you loaded it. Reload it and review the current version before approving.'**
+  String get codedRefusalInvoiceStaleApproval;
+
   /// Coded refusal `approval_level_reuse`: the approver already signed an earlier chain level.
   ///
   /// In en, this message translates to:

@@ -68,6 +68,10 @@ void main() {
       localizeCodedRefusal(de, refusal('segregation_implicated')),
       de.codedRefusalExceptionSegregationImplicated,
     );
+    expect(
+      localizeCodedRefusal(de, refusal('invoice_stale_approval')),
+      de.codedRefusalInvoiceStaleApproval,
+    );
   });
 
   test('the CFO gate names both figures and what was measured', () {
