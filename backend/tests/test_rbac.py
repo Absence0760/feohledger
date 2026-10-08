@@ -463,6 +463,12 @@ ALTERNATE_AUTH: dict[tuple[str, str], AlternateGate] = {
         "consume_reveal_token claims it atomically before the PAN is fetched.",
         symbols=("consume_reveal_token",),
     ),
+    # --- ERP OAuth connect (api/erp_oauth.py) -------------------------------
+    ("GET", "/erp/oauth/callback"): AlternateGate(
+        "Server-minted, HMAC-signed, single-use state (org + user + provider) "
+        "carries the tenant; the user is re-checked as an active admin of it.",
+        symbols=("consume_state",),
+    ),
 }
 
 

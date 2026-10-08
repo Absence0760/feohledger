@@ -79,9 +79,10 @@ the adapter.
     lock). Two workers refreshing at once must not each persist a different
     token.
   - Cache access tokens (60 minutes) per realm in Redis.
-  - Add `("erp", "refresh_token")` and `("erp", "access_token")` to
-    `org_settings_view.ALWAYS_REDACTED`. Admins never read them back; the only
-    writers are the callback and the refresher.
+  - Never read back: every read of `settings.erp.oauth` is masked to
+    `{"connected": bool}` (`erp_adapters/catalog.mask_erp_config`), and a
+    settings save never takes it from the request. The only writers are the
+    callback, the refresher and disconnect.
   - Better: hold them outside `Organization.settings` entirely, in a
     tenant-table row encrypted with the app KMS key. ERP credentials are
     plaintext JSONB today, encrypted only at the RDS storage layer (see the

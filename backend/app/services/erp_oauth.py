@@ -30,7 +30,11 @@ Stored state — ``Organization.settings.erp.oauth``
     }
 
 Only this module writes it (the callback, the refresher, disconnect).
-``org_settings_view.ALWAYS_REDACTED`` drops the whole block from every read.
+Every read sees it masked to ``{"connected": bool}``
+(``erp_adapters/catalog.mask_erp_config``), and a settings save never takes
+it from the request and keeps the stored one (``catalog.merge_erp_update``),
+even across a switch of ERP type: the block names its ``provider``, and
+:func:`get_access_token` refuses any other.
 
 How the refresher finds the org — and why it can't be pointed at another one
 ---------------------------------------------------------------------------
@@ -682,26 +686,3 @@ async def get_access_token(
         return str(stored["access_token"])
     finally:
         await _release_lock(lock_key, lock)
-
-
-# ---------------------------------------------------------------------------
-# PATCH /organization helper
-# ---------------------------------------------------------------------------
-
-
-def carry_oauth_across_erp_replacement(prior_erp: Any, incoming_erp: Any) -> Any:
-    """Keep the stored ``erp.oauth`` when a settings save replaces ``erp``.
-
-    ``PATCH /api/organization`` replaces the whole ``erp`` block, and the
-    settings page never sees ``oauth`` (``ALWAYS_REDACTED``), so a save would
-    silently disconnect the ERP. Callers also refuse an incoming ``oauth`` key
-    (this module is its only writer); here it is simply discarded. The stored
-    block is kept only while the save still selects the same provider.
-    """
-    if not isinstance(incoming_erp, dict):
-        return incoming_erp
-    merged = {k: v for k, v in incoming_erp.items() if k != "oauth"}
-    prior_oauth = prior_erp.get("oauth") if isinstance(prior_erp, dict) else None
-    if isinstance(prior_oauth, dict) and prior_oauth.get("provider") == merged.get("type"):
-        merged["oauth"] = prior_oauth
-    return merged
