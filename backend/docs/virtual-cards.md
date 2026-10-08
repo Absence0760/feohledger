@@ -96,7 +96,7 @@ Card Auto-Expires                (single-use, no further charges possible)
 | `charged` | Vendor charged the card, payment processing |
 | `completed` | Charge settled, payment confirmed |
 | `expired` | Card expired without being charged (auto-expire after N days) |
-| `cancelled` | Card manually cancelled before use |
+| `cancelled` | Card cancelled before use — manually, by a payment void, or because its vendor stopped being payable |
 | `declined` | Charge attempted but declined (over limit, wrong merchant, etc.) |
 
 ## Data Model
@@ -690,7 +690,9 @@ float.
 |---|---|---|
 | `card.details_viewed` | PAN reveal (`GET /{id}/details`) | `last_four` |
 | `card.revealed_via_token` | vendor-facing single-use PAN reveal (`GET /portal/cards/{token}`) — written when the token is **claimed**, committed before the provider is called, `actor_id=None` (no internal user) | `last_four` |
-| `card.cancelled` | manual cancel (`POST /{id}/cancel`) | `last_four`, `from`, `to` |
+| `card.cancelled` | manual cancel (`POST /{id}/cancel`); payment void (`via: payment_void`); vendor made un-payable (`via: vendor_ineligible`) | `last_four`, `from`, `to`; void adds `payment_id`; vendor adds `vendor_id`, `trigger` |
+| `card.cancel_failed` | vendor made un-payable, but the provider did not confirm the close — the card is **still live** | `last_four`, `vendor_id`, `trigger`, `outcome`, `status` |
+| `card.cancel_deferred_to_void` | vendor made un-payable, card is behind a live payment — left for the payment void | `last_four`, `vendor_id`, `trigger`, `payment_id` |
 | `card.charged` | authorization webhook applies a charge | `last_four`, `from`, `to`, `amount_charged` (string Decimal) |
 | `card.settled` | settlement webhook completes + accrues the rebate | `last_four`, `from`, `to`, `rebate_amount`, `rebate_rate`, `rebate_base` (string Decimals), `rebate_base_source` (`settled` \| `charged` \| `unknown` — which figure the rebate priced off, see § Rebate base), `rebate_created` (bool — `false` if the one-per-card unique index skipped a duplicate) |
 | `card_rebate.confirmed` | `POST /rebates/{id}/confirm` (`pending` → `confirmed`) | `amount` (string Decimal), `from`, `to` |
@@ -794,6 +796,19 @@ transient, so a later `flush`/`commit` cannot re-attempt the failed insert.
 savepoints are deliberately identical in shape.) Regression coverage:
 `tests/test_payment_card_duplicate_recovery.py` (both entry points, against a
 real Postgres so the partial index actually fires).
+
+### A vendor that stops being payable takes its live cards with it
+
+Rejecting, deactivating, blocking, sanctions-matching or merging a vendor onto
+an un-payable canonical cancels the vendor's live, **unbooked** cards in the
+same transaction (`services/vendor_card_revocation.py`). Same provider-first
+leg as the void (`card_issuance.cancel_card_at_provider`), same outcome
+vocabulary. A card behind a live payment is left for the payment void and
+reported `requires_payment_void`; a card the provider did not confirm closed is
+reported `not_closed` and stays live until `POST /api/vendors/{id}/cancel-cards`
+succeeds. Full table of doors and outcomes:
+[vendor-management.md](vendor-management.md) § Leaving `active` cancels the
+vendor's live cards.
 
 ### Cancel (`POST /{id}/cancel`) — provider-first + idempotent
 

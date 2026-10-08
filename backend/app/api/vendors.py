@@ -71,6 +71,7 @@ from app.schemas.vendor import (
     VendorBulkStatusRequest,
     VendorBulkStatusResponse,
     VendorBulkStatusSkip,
+    VendorCardRevocationResponse,
     VendorChangeRequestResponse,
     VendorChangeReviewRequest,
     VendorCreate,
@@ -88,6 +89,7 @@ from app.services.sanctions_categories import (
     categories_from_raw_response,
     has_adverse_media,
 )
+from app.services.vendor_card_revocation import revoke_vendor_cards
 from app.services.vendor_screening import screen_best_effort, screen_vendor_record
 from app.services.vendor_sync import sync_vendors_from_erp
 from app.services.vendor_tax_id import rekey_tax_id
@@ -488,6 +490,7 @@ _VENDOR_BULK_STATUS_STARTING: dict[str, set[str]] = {
 async def bulk_vendor_status(
     body: VendorBulkStatusRequest,
     db: AsyncSession = Depends(get_tenant_db),
+    org: Organization = Depends(get_tenant),
     user: User = Depends(require_permission(PERM_VENDOR_MANAGE)),
     org_id: uuid.UUID = Depends(get_org_id),
 ):
@@ -505,6 +508,7 @@ async def bulk_vendor_status(
     starting = _VENDOR_BULK_STATUS_STARTING[body.status]
     updated = 0
     skipped: list[VendorBulkStatusSkip] = []
+    card_revocations: list[VendorCardRevocationResponse] = []
     for raw in body.ids:
         try:
             vid = uuid.UUID(raw)
@@ -541,10 +545,24 @@ async def bulk_vendor_status(
             entity_id=vendor.id,
             details={"status": {"old": prev_status, "new": body.status}},
         )
+        # Same card leg as the single-row `/reject` — a bulk call can't do
+        # less than the endpoint it mirrors. A no-op for an `active` target.
+        revocation = await revoke_vendor_cards(
+            db,
+            vendor=vendor,
+            organization_id=org_id,
+            org_settings=org.settings,
+            actor_id=user.id,
+            trigger="vendor.rejected",
+        )
+        if revocation is not None and revocation.cards:
+            card_revocations.append(VendorCardRevocationResponse.from_result(revocation))
         updated += 1
 
     await db.commit()
-    return VendorBulkStatusResponse(updated=updated, skipped=skipped)
+    return VendorBulkStatusResponse(
+        updated=updated, skipped=skipped, card_revocations=card_revocations
+    )
 
 
 @router.post("/bulk/screen", response_model=VendorBulkScreenResponse)
@@ -566,6 +584,7 @@ async def bulk_screen_vendors(
     (same `screen_vendor_record` call, same foreground failure handling)."""
     screened = 0
     skipped: list[VendorBulkScreenSkip] = []
+    card_revocations: list[VendorCardRevocationResponse] = []
     for raw in body.ids:
         try:
             vid = uuid.UUID(raw)
@@ -579,7 +598,7 @@ async def bulk_screen_vendors(
             continue
 
         try:
-            await screen_vendor_record(
+            outcome = await screen_vendor_record(
                 db,
                 vendor=vendor,
                 organization_id=org_id,
@@ -600,10 +619,16 @@ async def bulk_screen_vendors(
                 VendorBulkScreenSkip(id=raw, reason="sanctions provider screening failed")
             )
             continue
+        if outcome.card_revocation is not None and outcome.card_revocation.cards:
+            card_revocations.append(
+                VendorCardRevocationResponse.from_result(outcome.card_revocation)
+            )
         screened += 1
 
     await db.commit()
-    return VendorBulkScreenResponse(screened=screened, skipped=skipped)
+    return VendorBulkScreenResponse(
+        screened=screened, skipped=skipped, card_revocations=card_revocations
+    )
 
 
 @router.post("/bulk/export")
@@ -1137,12 +1162,28 @@ async def update_vendor(
         details={"changes": changes},
     )
 
+    # A status write that leaves the vendor un-payable must also reach the
+    # cards already minted for it — the run / `/cards/generate` gates only stop
+    # the next one (`services/vendor_card_revocation`).
+    card_revocation = None
+    if "status" in payload:
+        card_revocation = await revoke_vendor_cards(
+            db,
+            vendor=vendor,
+            organization_id=org_id,
+            org_settings=org.settings,
+            actor_id=user.id,
+            trigger="vendor.status_changed",
+        )
+
     if identity_changed:
         await _screen_best_effort(
             db, vendor=vendor, org=org, org_id=org_id, check_type="initial", actor_id=user.id
         )
 
-    return VendorResponse.from_db(vendor)
+    resp = VendorResponse.from_db(vendor)
+    resp.card_revocation = VendorCardRevocationResponse.from_optional(card_revocation)
+    return resp
 
 
 @router.post(
@@ -1302,7 +1343,7 @@ async def screen_vendor(
         raise HTTPException(status_code=404, detail="Vendor not found")
 
     try:
-        await screen_vendor_record(
+        outcome = await screen_vendor_record(
             db,
             vendor=vendor,
             organization_id=org_id,
@@ -1323,7 +1364,9 @@ async def screen_vendor(
 
     await db.commit()
     await db.refresh(vendor)
-    return VendorResponse.from_db(vendor)
+    resp = VendorResponse.from_db(vendor)
+    resp.card_revocation = VendorCardRevocationResponse.from_optional(outcome.card_revocation)
+    return resp
 
 
 @router.get("/{vendor_id}/screening-history", response_model=list[SanctionsCheckResponse])
@@ -1373,6 +1416,7 @@ async def block_vendor_payments(
     vendor_id: uuid.UUID,
     body: VendorBlockRequest | None = None,
     db: AsyncSession = Depends(get_tenant_db),
+    org: Organization = Depends(get_tenant),
     user: User = Depends(require_permission(PERM_VENDOR_BLOCK)),
     org_id: uuid.UUID = Depends(get_org_id),
     entity_id: uuid.UUID | None = Depends(get_entity_id),
@@ -1400,9 +1444,21 @@ async def block_vendor_payments(
         entity_id=vendor.id,
         details={"reason": reason},
     )
+    # The block refuses every future payment; a card already minted is a
+    # payment the block cannot otherwise reach.
+    card_revocation = await revoke_vendor_cards(
+        db,
+        vendor=vendor,
+        organization_id=org_id,
+        org_settings=org.settings,
+        actor_id=user.id,
+        trigger="vendor.payment_blocked",
+    )
     await db.commit()
     await db.refresh(vendor)
-    return VendorResponse.from_db(vendor)
+    resp = VendorResponse.from_db(vendor)
+    resp.card_revocation = VendorCardRevocationResponse.from_optional(card_revocation)
+    return resp
 
 
 @router.post("/{vendor_id}/unblock", response_model=VendorResponse)
@@ -1485,6 +1541,7 @@ async def verify_vendor(
 async def reject_vendor(
     vendor_id: uuid.UUID,
     db: AsyncSession = Depends(get_tenant_db),
+    org: Organization = Depends(get_tenant),
     user: User = Depends(require_permission(PERM_VENDOR_MANAGE)),
     org_id: uuid.UUID = Depends(get_org_id),
     entity_id: uuid.UUID | None = Depends(get_entity_id),
@@ -1515,8 +1572,60 @@ async def reject_vendor(
         entity_id=vendor.id,
         details={"status": {"old": prev_status, "new": "rejected"}},
     )
+    card_revocation = await revoke_vendor_cards(
+        db,
+        vendor=vendor,
+        organization_id=org_id,
+        org_settings=org.settings,
+        actor_id=user.id,
+        trigger="vendor.rejected",
+    )
     await db.commit()
-    return VendorResponse.from_db(vendor)
+    resp = VendorResponse.from_db(vendor)
+    resp.card_revocation = VendorCardRevocationResponse.from_optional(card_revocation)
+    return resp
+
+
+@router.post("/{vendor_id}/cancel-cards", response_model=VendorCardRevocationResponse)
+async def cancel_vendor_cards(
+    vendor_id: uuid.UUID,
+    db: AsyncSession = Depends(get_tenant_db),
+    org: Organization = Depends(get_tenant),
+    # Either duty that can make a vendor un-payable may finish its card leg.
+    user: User = Depends(require_permission(PERM_VENDOR_MANAGE, PERM_VENDOR_BLOCK)),
+    org_id: uuid.UUID = Depends(get_org_id),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
+):
+    """Retry the card leg of a vendor deactivation / block / sanctions match.
+
+    Re-runs `vendor_card_revocation.revoke_vendor_cards`: every live, unbooked
+    card still open on the vendor is cancelled provider-first with an audit row
+    per card. Idempotent — a card already closed is not touched again. A card
+    behind a live payment is still reported as `requires_payment_void`; this
+    endpoint never closes booked money (that is `POST /api/payments/{id}/void`).
+
+    409 when the vendor is still payable: a card on an active, unblocked vendor
+    is legitimately live, and cancelling it is `POST /api/cards/{id}/cancel`.
+    """
+    await ensure_in_entity_scope(
+        db, Vendor, vendor_id, entity_id, detail="Vendor not found", include_shared=True
+    )
+    vendor = await _get_vendor_or_404(db, vendor_id)
+    revocation = await revoke_vendor_cards(
+        db,
+        vendor=vendor,
+        organization_id=org_id,
+        org_settings=org.settings,
+        actor_id=user.id,
+        trigger="vendor.cancel_cards_retry",
+    )
+    if revocation is None:
+        raise HTTPException(
+            status_code=409,
+            detail="Vendor is active and not payment-blocked; its cards are not revoked.",
+        )
+    await db.commit()
+    return VendorCardRevocationResponse.from_result(revocation)
 
 
 @router.post("/sync-erp")
