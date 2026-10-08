@@ -1612,6 +1612,218 @@ async def sage_set_status(body: dict) -> dict:
 app.include_router(sage)
 
 
+# ---------------------------------------------------------------------------
+# Sage Business Cloud Accounting, South Africa  (/sageza/api/2.0.0)
+# ---------------------------------------------------------------------------
+#
+# The SA Accounting API v2.0.0: `apikey` + `companyid` query parameters, HTTP
+# basic auth, `<Resource>/Get` paging envelopes with the OData subset the
+# adapter sends ($top / $skip, and `$filter` as `ID eq N or ...` or the
+# supplier-invoice idempotency filter). State lives under STATE["sageza"],
+# created on first use (reset-safe).
+
+sageza = APIRouter(prefix="/sageza/api/2.0.0")
+
+SAGEZA_COMPANY_ID = 4711
+SAGEZA_COMPANIES: list[dict] = [
+    {"ID": SAGEZA_COMPANY_ID, "Name": "Fake Sage ZA Co", "HomeCurrencyId": 1, "CurrencyId": 1}
+]
+SAGEZA_SUPPLIERS: list[dict] = [
+    {"ID": 101, "Name": "Fake Sage ZA Supplier A", "Active": True, "CurrencyId": None},
+    {"ID": 102, "Name": "Fake Sage ZA Supplier B", "Active": True, "CurrencyId": None},
+]
+SAGEZA_TAX_TYPES: list[dict] = [
+    {"ID": 1, "Name": "Standard Rate", "Percentage": 15, "IsDefault": True, "Active": True},
+    {"ID": 2, "Name": "Zero Rated", "Percentage": 0, "IsDefault": False, "Active": True},
+]
+SAGEZA_ACCOUNTS: list[dict] = [
+    {
+        "ID": 6100,
+        "Name": "Fake Office Supplies",
+        "Active": True,
+        "DefaultTaxTypeId": 1,
+        "Category": {"ID": 9, "Description": "Expenses"},
+    },
+    {
+        "ID": 6200,
+        "Name": "Fake Software",
+        "Active": True,
+        "DefaultTaxTypeId": 1,
+        "Category": {"ID": 9, "Description": "Expenses"},
+    },
+    {
+        "ID": 2000,
+        "Name": "Fake Trade Payables",
+        "Active": True,
+        "DefaultTaxTypeId": None,
+        "Category": {"ID": 4, "Description": "Current Liabilities"},
+    },
+]
+SAGEZA_POS: list[dict] = [
+    {
+        "ID": 501,
+        "DocumentNumber": "PO-SAGEZA-501",
+        "SupplierName": "Fake Sage ZA Supplier A",
+        "Total": 1150.0,
+        "Status": "Unprocessed",
+        "DeliveryDate": "2026-12-01T00:00:00",
+    }
+]
+
+
+def _sageza_state() -> dict[str, Any]:
+    return STATE.setdefault("sageza", {"invoices": {}, "next_id": 9000})
+
+
+def _sageza_auth(request: Request, company: bool = True) -> None:
+    params = request.query_params
+    auth = request.headers.get("authorization", "")
+    if not params.get("apikey") or not auth.startswith("Basic "):
+        raise ProviderError(401, {"Message": "Authorization has been denied for this request."})
+    if company and params.get("companyid") != str(SAGEZA_COMPANY_ID):
+        raise ProviderError(401, {"Message": "Invalid company."})
+
+
+def _sageza_page(request: Request, rows: list[dict]) -> dict:
+    flt = request.query_params.get("$filter", "")
+    ids = {int(m) for m in re.findall(r"\bID eq (\d+)", flt)}
+    if ids:
+        rows = [r for r in rows if r.get("ID") in ids]
+    skip = int(request.query_params.get("$skip") or 0)
+    top = int(request.query_params.get("$top") or 100)
+    page = copy.deepcopy(rows[skip : skip + top])
+    return {"TotalResults": len(rows), "ReturnedResults": len(page), "Results": page}
+
+
+@sageza.get("/Company/Get")
+async def sageza_companies(request: Request) -> dict:
+    _sageza_auth(request, company=False)
+    return _sageza_page(request, SAGEZA_COMPANIES)
+
+
+@sageza.get("/Company/Get/{company_id}")
+async def sageza_company(request: Request, company_id: int) -> dict:
+    _sageza_auth(request)
+    return copy.deepcopy(SAGEZA_COMPANIES[0])
+
+
+@sageza.get("/Supplier/Get")
+async def sageza_suppliers(request: Request) -> dict:
+    _sageza_auth(request)
+    return _sageza_page(request, SAGEZA_SUPPLIERS)
+
+
+@sageza.get("/Supplier/Get/{supplier_id}")
+async def sageza_supplier(request: Request, supplier_id: int) -> dict:
+    _sageza_auth(request)
+    for supplier in SAGEZA_SUPPLIERS:
+        if supplier["ID"] == supplier_id:
+            return copy.deepcopy(supplier)
+    raise ProviderError(404, {"Message": "Supplier not found."})
+
+
+@sageza.get("/Account/Get")
+async def sageza_accounts(request: Request) -> dict:
+    _sageza_auth(request)
+    return _sageza_page(request, SAGEZA_ACCOUNTS)
+
+
+@sageza.get("/TaxType/Get")
+async def sageza_tax_types(request: Request) -> dict:
+    _sageza_auth(request)
+    return _sageza_page(request, SAGEZA_TAX_TYPES)
+
+
+@sageza.get("/PurchaseOrder/Get")
+async def sageza_pos(request: Request) -> dict:
+    _sageza_auth(request)
+    return _sageza_page(request, SAGEZA_POS)
+
+
+@sageza.get("/SupplierInvoice/Get")
+async def sageza_invoices(request: Request) -> dict:
+    _sageza_auth(request)
+    rows = list(_sageza_state()["invoices"].values())
+    flt = request.query_params.get("$filter", "")
+    supplier = re.search(r"SupplierId eq (\d+)", flt)
+    if supplier:
+        literals = {v.replace("''", "'") for v in re.findall(r"eq '((?:[^']|'')*)'", flt)}
+        rows = [
+            r
+            for r in rows
+            if str(r["SupplierId"]) == supplier.group(1)
+            and (r["Reference"] in literals or r["DocumentNumber"] in literals)
+        ]
+    return _sageza_page(request, rows)
+
+
+@sageza.get("/SupplierInvoice/Get/{invoice_id}")
+async def sageza_invoice(request: Request, invoice_id: int) -> dict:
+    _sageza_auth(request)
+    invoice = _sageza_state()["invoices"].get(invoice_id)
+    if invoice is None:
+        raise ProviderError(404, {"Message": "Supplier invoice not found."})
+    return copy.deepcopy(invoice)
+
+
+@sageza.post("/SupplierInvoice/Save", status_code=201)
+async def sageza_save_invoice(request: Request) -> dict:
+    _sageza_auth(request)
+    body = json.loads(await request.body(), parse_float=Decimal)
+    if body.get("SupplierId") not in {s["ID"] for s in SAGEZA_SUPPLIERS}:
+        raise ProviderError(400, {"Message": "Invalid supplier."})
+    lines = body.get("Lines") or []
+    if not lines:
+        raise ProviderError(400, {"Message": "A document needs at least one line."})
+    accounts = {a["ID"] for a in SAGEZA_ACCOUNTS}
+    taxes = {t["ID"] for t in SAGEZA_TAX_TYPES}
+    total = Decimal(0)
+    for line in lines:
+        if line.get("LineType") != 1 or line.get("SelectionId") not in accounts:
+            raise ProviderError(400, {"Message": "Invalid account."})
+        if line.get("TaxTypeId") not in taxes:
+            raise ProviderError(400, {"Message": "Invalid tax type."})
+        total += Decimal(str(line.get("Total")))
+    state = _sageza_state()
+    state["next_id"] += 1
+    invoice = {
+        "ID": state["next_id"],
+        "SupplierId": body["SupplierId"],
+        "DocumentNumber": body.get("DocumentNumber"),
+        "Reference": body.get("Reference"),
+        "Total": str(total),
+        "AmountDue": str(total),
+        "Paid": False,
+        "Locked": False,
+    }
+    state["invoices"][invoice["ID"]] = invoice
+    return {**invoice, "Total": float(total), "AmountDue": float(total)}
+
+
+@sageza.delete("/SupplierInvoice/Delete/{invoice_id}")
+async def sageza_delete_invoice(request: Request, invoice_id: int) -> Response:
+    _sageza_auth(request)
+    invoices = _sageza_state()["invoices"]
+    if invoice_id not in invoices:
+        raise ProviderError(404, {"Message": "Supplier invoice not found."})
+    del invoices[invoice_id]
+    return Response(status_code=204)
+
+
+@sageza.post("/__set-amount-due")
+async def sageza_set_amount_due(body: dict) -> dict:
+    """Test hook: {"id": 9001, "amount_due": "0"} — e.g. "0" for paid."""
+    invoice = _sageza_state()["invoices"].get(int(body.get("id", 0)))
+    if invoice is None:
+        raise ProviderError(404, {"detail": "unknown invoice"})
+    invoice["AmountDue"] = str(body.get("amount_due", invoice["AmountDue"]))
+    invoice["Paid"] = Decimal(invoice["AmountDue"]) == 0
+    return {"status": "ok"}
+
+
+app.include_router(sageza)
+
+
 if __name__ == "__main__":
     import uvicorn
 

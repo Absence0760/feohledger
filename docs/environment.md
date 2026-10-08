@@ -144,6 +144,7 @@ in `frontend/tests-e2e/README.md` § Running from a worktree.
 | `FEOH_ERP_XERO_CLIENT_ID` / `FEOH_ERP_XERO_CLIENT_SECRET` | (empty) | The platform's Xero OAuth app (one app, every tenant). Empty → Xero is unavailable unless the tenant brings its own `settings.erp.client_id`/`client_secret`; no fallback. Secret lives in sops (`infra-secrets`). |
 | `FEOH_ERP_SAGE_ACCOUNTING_API_BASE` | (empty) | Sage Business Cloud Accounting API base override. Empty → `https://api.accounting.sage.com/v3.1`; set → used verbatim (operator-trusted). Dev value: `http://localhost:12112/sage/v3.1`. |
 | `FEOH_ERP_SAGE_ACCOUNTING_CLIENT_ID` / `FEOH_ERP_SAGE_ACCOUNTING_CLIENT_SECRET` | (empty) | The platform's Sage developer app (one app, every tenant). Empty → Sage Accounting is unavailable unless the tenant brings its own `settings.erp.client_id`/`client_secret`; no fallback. Secret lives in sops (`infra-secrets`). |
+| `FEOH_ERP_SAGE_ZA_API_BASE` | (empty) | Sage Business Cloud Accounting (South Africa) API v2.0.0 base override. Empty → the admin-config `base_url` (https-only + SSRF guard) or, absent that, `https://accounting.sageone.co.za/api/2.0.0`; set → used verbatim (operator-trusted, guards skipped). Dev value: `http://localhost:12112/sageza/api/2.0.0`. |
 | `FEOH_AUDIT_MODE`       | `local`                                                                  | `local` or `lambda` for audit log writes |
 | `FEOH_SQS_EXTRACTION_QUEUE_URL` | (empty)                                                          | Required when `FEOH_EXTRACTION_MODE=lambda` |
 | `FEOH_SQS_ERP_QUEUE_URL` | (empty)                                                                 | Required when `FEOH_ERP_MODE=lambda` |
@@ -243,6 +244,7 @@ always `backend/app/config.py`.
 | `FEOH_ERP_XERO_CLIENT_ID` / `_SECRET` | (empty) | Platform Xero OAuth app credentials — empty fails closed (no fallback) |
 | `FEOH_ERP_SAGE_ACCOUNTING_API_BASE` | (empty) | Sage Accounting v3.1 base override — empty → `https://api.accounting.sage.com/v3.1`. Dev value targets fake-erp |
 | `FEOH_ERP_SAGE_ACCOUNTING_CLIENT_ID` / `_SECRET` | (empty) | Platform Sage developer app credentials — empty fails closed (no fallback) |
+| `FEOH_ERP_SAGE_ZA_API_BASE` | (empty) | Sage Accounting (South Africa) API base override — empty → admin-config https `base_url` + SSRF guard, else `https://accounting.sageone.co.za/api/2.0.0`; set → used verbatim (operator-trusted). Dev value targets fake-erp |
 | `FEOH_ANTHROPIC_API_KEY` | (empty) | Claude Vision for platform extraction |
 | `FEOH_EXTRACTION_MODEL` | `claude-sonnet-5-5` | AI model for extraction |
 | `FEOH_EXTRACTION_EFFORT` | `low` | `output_config.effort` for platform Claude extraction; empty omits it |

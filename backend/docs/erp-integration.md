@@ -1267,3 +1267,68 @@ complete its consent flow. A ZA Sage adapter is separate work.
 
 Tests: `backend/tests/test_erp_sage_accounting_adapter.py`. Fake surface:
 `tools/fake-erp/README.md` § Sage Business Cloud Accounting.
+
+## Sage Business Cloud Accounting — South Africa (`sage_accounting_za`)
+
+`erp_adapters/sage_accounting_za.py`, selected by `settings.erp = {"type":
+"sage_accounting_za", "integration_method": "direct", ...}`. Sage Business Cloud
+Accounting is the cloud successor to Sage Pastel and the leading SA-native SME
+ledger. **South African companies are not served by Sage's global v3.1
+Accounting API** (its Swagger lists CA/DE/ES/FR/UK/IE/US only); they run on a
+separate product with its own API, `https://accounting.sageone.co.za/api/2.0.0`
+(specification: `https://accounting.sageone.co.za/api/2.0.0/Help`).
+
+| `settings.erp` key | Secret | Meaning |
+|---|---|---|
+| `api_key` | **yes** | Integrator API key from Sage's developer programme |
+| `username` | no | The Sage login email of the user the app acts as |
+| `password` | **yes** | That user's Sage password |
+| `company_id` | no | Numeric Sage company id (`Company/Get` lists them) |
+| `base_url` | no (optional) | API base; default `https://accounting.sageone.co.za/api/2.0.0`. Admin-supplied, so https-only and SSRF-guarded |
+| `home_currency` | no (optional) | ISO code of the company's home currency, default `ZAR` — the API reports currencies only as numeric ids and a symbol |
+
+Every call is `<Resource>/<Method>?apikey=…&companyid=…` with the Sage login in
+HTTP basic auth. List methods page with OData `$top` / `$skip` (100 rows, 10
+pages) and filter with `$filter`.
+
+| Operation | Calls |
+|---|---|
+| `post_invoice` | refuse pre-flight without a numeric `vendor_erp_id` (SupplierId) / numeric GL account ids, or in a non-home currency → `SupplierInvoice/Get` idempotency lookup → `Supplier/Get/{id}` (+ `Company/Get/{id}`) currency check → `Account/Get` + `TaxType/Get` → `SupplierInvoice/Save` |
+| `get_invoice_status` | `SupplierInvoice/Get/{id}` — `AmountDue` 0 ⇒ paid, below `Total` ⇒ partially paid, else open |
+| `void_invoice` | `SupplierInvoice/Delete/{id}`, only when `AmountDue == Total` and the invoice is neither `Locked` nor `Paid`; otherwise `False` (reverse it in Sage with its payment) |
+| `list_vendors` / `list_gl_accounts` / `list_pos` | `Supplier/Get` / `Account/Get` (active only; category → asset/liability/equity/revenue/expense, unknown → unclassified) / `PurchaseOrder/Get` (`currency` left NULL — decisions §197) |
+| `test_connection` | `Company/Get` answers *and* lists the configured `company_id` |
+
+- **Lines** are `LineType` 1 (account) with `SelectionId` = the account id, one
+  per `bill_lines` line, posted **VAT-inclusive** (`Inclusive: true`, quantity 1,
+  the gross as `UnitPriceInclusive`, exclusive rounded half-up with the tax the
+  remainder, so each line adds back exactly). Decimals go on the wire as exact
+  JSON number literals, never through `float`.
+- **VAT** uses the account's `DefaultTaxTypeId`, else the company's default
+  `TaxType`; the percentage is always Sage's. No resolvable (non-manual) tax
+  type → `tax_type_not_resolved`. When the payload carries `tax_amount` and
+  Sage's VAT would differ by more than a cent per line → `tax_mismatch` (a
+  zero-rated invoice coded to a standard-rated account would otherwise claim
+  input VAT never charged).
+- **Idempotency**: `Reference` carries our `correlation_id`. The lookup filters
+  `SupplierId eq N and (Reference eq '<corr>' or DocumentNumber eq '<inv>')`
+  (OData quotes doubled). Our reference with the same `Total` is adopted; with
+  another total → `correlation_total_mismatch`; the same invoice number under
+  another reference → `duplicate_invoice_number`. A failed lookup is a
+  retryable failure, never read as "not posted". If Sage saves a different
+  `Total` than approved → non-retryable `posted_total_mismatch`.
+- **Refusal reasons** (all non-retryable): `vendor_not_linked`,
+  `account_not_linked` (also an unknown or inactive account),
+  `currency_not_supported`, `foreign_currency_supplier`,
+  `tax_type_not_resolved`, `tax_mismatch`, `correlation_total_mismatch`,
+  `duplicate_invoice_number`.
+- **Credentials.** The API key rides in the query string, so the module
+  registers `apikey=` with the shared `erp_adapters/log_redaction.py` filter on
+  the `httpx` logger (the same filter SYSPRO uses): any logged URL containing it
+  has its query replaced with `?[redacted]`. Transport errors are re-raised as
+  `SageZaError("Sage Accounting (ZA) <step> failed: <ExceptionClass>")` from
+  `None`. The password only travels in the basic-auth header. Failure messages
+  use `erp_failure_message` and never echo a response body.
+
+Tests: `backend/tests/test_erp_sage_accounting_za_adapter.py`. fake-erp surface:
+`/sageza/api/2.0.0` (`FEOH_ERP_SAGE_ZA_API_BASE`).

@@ -282,6 +282,10 @@ class Settings(BaseSettings):
     erp_sage_accounting_api_base: str = ""
     erp_sage_accounting_client_id: str = ""
     erp_sage_accounting_client_secret: str = ""
+    # Sage Business Cloud Accounting (South Africa) API base. Empty = the
+    # admin-config base_url (https-only, SSRF guard) or, absent that, the real
+    # https://accounting.sageone.co.za/api/2.0.0.
+    erp_sage_za_api_base: str = ""
 
     # Audit
     audit_mode: str = "local"  # "local" = in-process, "lambda" = dispatch to SQS
