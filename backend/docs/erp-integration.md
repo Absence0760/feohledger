@@ -317,16 +317,23 @@ No response carries an ERP secret, admin included:
   `integration_method`.
 - **Write.** `PATCH /api/organization` runs `catalog.merge_erp_update`: a secret
   sent blank, as `********`, or omitted keeps the stored value **while the ERP
-  selection (`type` + routing) is unchanged**. Switching ERP never carries one
-  ERP's secret into another's field of the same name. An explicit `null` clears
+  selection (`type` + routing) and its destination are unchanged**. Switching
+  ERP never carries one ERP's secret into another's field of the same name, and
+  changing any of `catalog.DESTINATION_KEYS` (`base_url`, `tenant_id`,
+  `account_id`, `company_id`, `environment` — what an adapter builds its host or
+  target books from) is a new connection: every outbound secret must be typed
+  again, so a stored password can never be pointed at a host the save just
+  named. Only the inbound webhook HMAC key (`webhook_signing_secret`), which is
+  never sent anywhere, survives a destination change. An explicit `null` clears
   a secret. `erp.oauth` is never taken from the body, so the OAuth callback stays
   its only writer, and even `{"erp": null}` keeps it (only the OAuth disconnect
   removes it). Every change writes `organization.erp_updated` (changed key
   names, `type`, `integration_method`, never a value) before the save commits;
   if that row can't be written the save is a `503` and nothing changes.
 - **Test.** `POST /api/organization/test-erp` with an unsaved form config fills
-  each masked or blank secret from the stored config the same way, so "Test
-  connection" works on a form that shows only masks.
+  each masked or blank secret from the stored config the same way — and under
+  the same destination rule — so "Test connection" works on a form that shows
+  only masks but cannot send a stored secret to a new `base_url`.
 
 ## Provider catalogue
 

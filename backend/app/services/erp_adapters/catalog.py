@@ -10,7 +10,9 @@ It is also the authority for **which ``settings.erp`` keys are secrets**.
 Every field marked ``secret`` here, plus :data:`EXTRA_SECRET_KEYS`, is
 write-only: :func:`mask_erp_config` replaces a stored value with
 :data:`SECRET_MASK` on every read, and :func:`merge_erp_update` keeps the stored
-value when a save sends it back blank or masked. ``settings.erp.oauth`` (the
+value when a save sends it back blank or masked, but only while the save still
+names the same ERP at the same destination (:data:`DESTINATION_KEYS`).
+``settings.erp.oauth`` (the
 token block ``services/erp_oauth`` writes) is never readable and never writable
 through the settings API: reads see ``{"connected": bool}``, writes keep the
 stored block.
@@ -360,20 +362,78 @@ def _is_blank(value: Any) -> bool:
     return value == SECRET_MASK or (isinstance(value, str) and not value.strip())
 
 
+#: ``settings.erp`` keys that say WHERE the stored credentials are sent: the
+#: host itself (``base_url``), or a value an adapter builds the host or the
+#: target books from (NetSuite's ``account_id`` is a hostname label; Business
+#: Central's ``tenant_id`` / ``environment`` / ``company_id`` are URL path
+#: segments; QuickBooks' ``environment`` picks its API host; SYSPRO and Intacct
+#: log in to ``company_id``). A save that changes any of them is a NEW
+#: connection: a blank, masked or omitted secret is not carried forward and has
+#: to be typed again (the inbound webhook key, :data:`EXTRA_SECRET_KEYS`, is
+#: never sent outbound and so survives). Without this, ``{"type": "syspro", "base_url":
+#: "https://attacker.tld", "operator_password": "********"}`` from an admin (or
+#: a stolen admin token) sent the stored password to attacker.tld through
+#: ``POST /organization/test-erp`` or a settings PATCH. A catalogue field that
+#: names a host belongs here: ``tests/test_erp_catalog.py`` fails on any
+#: ``*_url`` / ``*host*`` field left out.
+DESTINATION_KEYS: frozenset[str] = frozenset(
+    {"base_url", "tenant_id", "account_id", "company_id", "environment"}
+)
+
+
+def _destination_value(value: Any) -> Any:
+    """A destination key's value for comparison: blank and absent are the same."""
+    if isinstance(value, str):
+        return value.strip() or None
+    return value
+
+
+def _same_erp(stored: Any, incoming: Any) -> bool:
+    if not isinstance(stored, dict) or not isinstance(incoming, dict):
+        return False
+    return catalog_key(stored) == catalog_key(incoming) and stored.get("type") == incoming.get(
+        "type"
+    )
+
+
+def same_connection(stored: Any, incoming: Any) -> bool:
+    """Does ``incoming`` name the same ERP, at the same destination, as ``stored``?
+
+    The one condition under which a stored secret may be carried into
+    ``incoming`` (:func:`merge_erp_update`).
+    """
+    if not _same_erp(stored, incoming):
+        return False
+    return all(
+        _destination_value(stored.get(key)) == _destination_value(incoming.get(key))
+        for key in DESTINATION_KEYS
+    )
+
+
 def merge_erp_update(stored: Any, incoming: dict) -> dict:
     """The ``settings.erp`` block a save of ``incoming`` produces.
 
     * Non-secret keys come from ``incoming`` (the block is replaced, as before).
     * A secret sent blank, as :data:`SECRET_MASK`, or omitted keeps the stored
-      value, **only while the ERP selection is unchanged**: switching from
+      value **only while** :func:`same_connection` holds: switching from
       Business Central to Xero must not carry one ERP's ``client_secret`` into
-      the other's app credentials. An explicit ``null`` clears it.
-    * ``oauth`` is never taken from ``incoming``; the stored block is kept.
+      the other's app credentials, and pointing SYSPRO at a new ``base_url``
+      must not send the stored password to that host. An explicit ``null``
+      clears it.
+    * ``oauth`` is never taken from ``incoming``; the stored block is kept. Its
+      tokens cannot follow a changed destination: adapters and the refresher
+      read the stored block, bound to its provider and ``connection_id``
+      (``services/erp_oauth``), and send it only to the provider's own hosts.
     """
     stored = stored if isinstance(stored, dict) else {}
-    same_erp = catalog_key(stored) == catalog_key(incoming) and stored.get("type") == incoming.get(
-        "type"
-    )
+    same_erp = _same_erp(stored, incoming)
+    same_dest = same_erp and same_connection(stored, incoming)
+
+    def carry(key: str) -> bool:
+        # The inbound webhook's HMAC key is never sent anywhere — it verifies
+        # what the ERP sends US — so a changed destination need not drop it.
+        return bool(stored.get(key)) and (same_dest or (same_erp and key in EXTRA_SECRET_KEYS))
+
     merged: dict[str, Any] = {}
     for key, value in incoming.items():
         if key == OAUTH_KEY:
@@ -382,14 +442,13 @@ def merge_erp_update(stored: Any, incoming: dict) -> dict:
             if value is None:
                 continue
             if _is_blank(value):
-                if same_erp and stored.get(key):
+                if carry(key):
                     merged[key] = stored[key]
                 continue
         merged[key] = value
-    if same_erp:
-        for key in SECRET_KEYS:
-            if key not in incoming and stored.get(key):
-                merged[key] = stored[key]
+    for key in SECRET_KEYS:
+        if key not in incoming and carry(key):
+            merged[key] = stored[key]
     if OAUTH_KEY in stored:
         merged[OAUTH_KEY] = stored[OAUTH_KEY]
     return merged

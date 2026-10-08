@@ -176,7 +176,9 @@ def test_merge_keeps_a_blank_or_masked_secret(blank):
 
 
 def test_merge_keeps_an_omitted_secret_for_the_same_erp():
-    merged = catalog.merge_erp_update(STORED, {"type": "netsuite", "integration_method": "direct"})
+    merged = catalog.merge_erp_update(
+        STORED, {"type": "netsuite", "integration_method": "direct", "account_id": "123"}
+    )
     assert merged["webhook_signing_secret"] == "whs-STORED"
     assert merged["consumer_secret"] == "cs-STORED"
 
@@ -202,6 +204,78 @@ def test_merge_does_not_carry_secrets_to_a_different_erp():
         d365, {"type": "xero", "integration_method": "direct", "client_secret": catalog.SECRET_MASK}
     )
     assert "client_secret" not in masked
+
+
+SYSPRO_STORED = {
+    "type": "syspro",
+    "integration_method": "direct",
+    "base_url": "https://syspro.example.com/Rest",
+    "operator": "op",
+    "operator_password": "opw-STORED",
+    "company_id": "1",
+    "company_password": "cpw-STORED",
+    "webhook_signing_secret": "whs-STORED",
+}
+
+
+@pytest.mark.parametrize("blank", ["", catalog.SECRET_MASK, None])
+@pytest.mark.parametrize(
+    "key, new_value",
+    [
+        ("base_url", "https://attacker.tld"),
+        ("company_id", "2"),
+        ("environment", "sandbox"),
+        ("tenant_id", "other-tenant"),
+        ("account_id", "attacker"),
+    ],
+)
+def test_merge_does_not_carry_secrets_to_a_changed_destination(key, new_value, blank):
+    """Same ERP type, new destination: a masked, blank or omitted secret is NOT
+    carried — the stored password must never reach a host the save just named."""
+    incoming = {**catalog.mask_erp_config(SYSPRO_STORED), key: new_value}
+    if blank is None:
+        incoming.pop("operator_password")
+        incoming.pop("company_password")
+    else:
+        incoming["operator_password"] = blank
+        incoming["company_password"] = blank
+    merged = catalog.merge_erp_update(SYSPRO_STORED, incoming)
+    assert "operator_password" not in merged
+    assert "company_password" not in merged
+    assert merged[key] == new_value
+    # The inbound webhook HMAC key is never sent outbound, so it survives.
+    assert merged["webhook_signing_secret"] == "whs-STORED"
+
+
+def test_merge_takes_a_secret_retyped_for_a_changed_destination():
+    merged = catalog.merge_erp_update(
+        SYSPRO_STORED,
+        {**SYSPRO_STORED, "base_url": "https://new.example.com", "operator_password": "opw-NEW"},
+    )
+    assert merged["operator_password"] == "opw-NEW"
+
+
+def test_merge_keeps_secrets_while_the_destination_is_unchanged():
+    """Blank vs absent and surrounding whitespace are the same destination."""
+    incoming = {
+        **catalog.mask_erp_config(SYSPRO_STORED),
+        "base_url": " https://syspro.example.com/Rest ",
+        "environment": "",
+        "posting_period": "C",
+    }
+    merged = catalog.merge_erp_update(SYSPRO_STORED, incoming)
+    assert merged["operator_password"] == "opw-STORED"
+    assert merged["company_password"] == "cpw-STORED"
+
+
+def test_destination_keys_cover_every_host_naming_catalogue_field():
+    """A catalogue field naming a host must be a destination key, or a stored
+    secret could be redirected to it."""
+    for entry in catalog.all_providers():
+        for f in entry["fields"]:
+            name = f["name"]
+            if name.endswith("_url") or "host" in name or name == "url":
+                assert name in catalog.DESTINATION_KEYS, name
 
 
 def test_merge_never_takes_oauth_from_the_request_and_keeps_the_stored_block():
@@ -292,12 +366,12 @@ async def test_patch_round_trip_keeps_masked_secrets_and_the_oauth_block(realdb)
         # The form sends back exactly what it was shown, one field edited.
         resp = await c.patch(
             "/api/organization",
-            json={"settings": {"erp": {**shown, "account_id": "999", "consumer_secret": ""}}},
+            json={"settings": {"erp": {**shown, "token_id": "tid-2", "consumer_secret": ""}}},
         )
     assert resp.status_code == 200, resp.text
     assert "cs-STORED" not in resp.text
     stored = await _stored_erp(realdb)
-    assert stored["account_id"] == "999"
+    assert stored["token_id"] == "tid-2"
     assert stored["consumer_secret"] == "cs-STORED"
     assert stored["token_secret"] == "ts-STORED"
     assert stored["webhook_signing_secret"] == "whs-STORED"
@@ -389,3 +463,68 @@ async def test_test_erp_fills_masked_secrets_from_the_stored_config(realdb, monk
     assert resp.json()["success"] is True
     assert seen["consumer_secret"] == "cs-STORED"
     assert seen["token_secret"] == "ts-STORED"
+
+
+@pytest.mark.asyncio
+@pytest.mark.plan("scale")
+async def test_test_erp_does_not_send_a_stored_secret_to_a_changed_base_url(realdb, monkeypatch):
+    """The redirect attack: same type, attacker's base_url, masked password.
+    The adapter must receive no stored secret at all."""
+    from app.services.erp_adapters import syspro
+
+    seen: dict = {}
+
+    async def fake_test_connection(self):
+        seen.update(self.config)
+        return False
+
+    monkeypatch.setattr(syspro.SysproAdapter, "test_connection", fake_test_connection)
+    await _seed_erp(realdb, dict(SYSPRO_STORED))
+    async with realdb.client(key="a", role="admin") as c:
+        shown = (await c.get("/api/organization")).json()["settings"]["erp"]
+        resp = await c.post(
+            "/api/organization/test-erp", json={**shown, "base_url": "https://attacker.tld"}
+        )
+    assert resp.status_code == 200, resp.text
+    assert seen["base_url"] == "https://attacker.tld"
+    assert "operator_password" not in seen
+    assert "company_password" not in seen
+    assert "opw-STORED" not in str(seen) and "cpw-STORED" not in str(seen)
+
+
+@pytest.mark.asyncio
+@pytest.mark.plan("scale")
+async def test_test_erp_keeps_stored_secrets_for_an_unchanged_destination(realdb, monkeypatch):
+    from app.services.erp_adapters import syspro
+
+    seen: dict = {}
+
+    async def fake_test_connection(self):
+        seen.update(self.config)
+        return True
+
+    monkeypatch.setattr(syspro.SysproAdapter, "test_connection", fake_test_connection)
+    await _seed_erp(realdb, dict(SYSPRO_STORED))
+    async with realdb.client(key="a", role="admin") as c:
+        shown = (await c.get("/api/organization")).json()["settings"]["erp"]
+        resp = await c.post("/api/organization/test-erp", json=shown)
+    assert resp.status_code == 200, resp.text
+    assert seen["operator_password"] == "opw-STORED"
+
+
+@pytest.mark.asyncio
+@pytest.mark.plan("scale")
+async def test_patch_with_a_changed_destination_drops_masked_secrets(realdb):
+    await _seed_erp(realdb, dict(STORED))
+    async with realdb.client(key="a", role="admin") as c:
+        shown = (await c.get("/api/organization")).json()["settings"]["erp"]
+        resp = await c.patch(
+            "/api/organization",
+            json={"settings": {"erp": {**shown, "account_id": "attacker"}}},
+        )
+    assert resp.status_code == 200, resp.text
+    stored = await _stored_erp(realdb)
+    assert stored["account_id"] == "attacker"
+    assert "consumer_secret" not in stored
+    assert "token_secret" not in stored
+    assert stored["webhook_signing_secret"] == "whs-STORED"
