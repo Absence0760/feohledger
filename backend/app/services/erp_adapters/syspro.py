@@ -52,9 +52,10 @@ Every call logs on, does its work and logs off in a ``finally``, so a session
 never outlives the operation — an orphaned session holds a SYSPRO licence seat.
 
 Because SYSPRO takes the operator password, the session id and the business
-object XML in the **query string**, this module installs a filter on the
-``httpx`` logger that strips the query from any logged SYSPRO URL (httpx logs
-every request URL at INFO, and the app's root logger is at INFO).
+object XML in the **query string**, this module registers its URLs with the
+shared ``log_redaction`` filter on the ``httpx`` logger, which strips the query
+from any logged SYSPRO URL (httpx logs every request URL at INFO, and the app's
+root logger is at INFO).
 """
 
 from __future__ import annotations
@@ -86,6 +87,7 @@ from app.services.erp_adapters.base import (
 )
 from app.services.erp_adapters.bill_lines import bill_lines
 from app.services.erp_adapters.dispatcher import register_adapter
+from app.services.erp_adapters.log_redaction import redact_query_strings_containing
 
 logger = logging.getLogger(__name__)
 
@@ -119,35 +121,9 @@ class SysproConfigError(ValueError):
     """``settings.erp`` is missing a field the adapter needs. Names the key only."""
 
 
-# ---------------------------------------------------------------------------
-# Log redaction — the query string carries credentials
-# ---------------------------------------------------------------------------
-
-
-def _redact(value: object) -> object:
-    text = str(value)
-    if REST_SUFFIX.lower() not in text.lower() or "?" not in text:
-        return value
-    return text.split("?", 1)[0] + "?[redacted]"
-
-
-class _SysproQueryRedactor(logging.Filter):
-    """Strip the query string from any SYSPRO URL in an ``httpx`` log record."""
-
-    def filter(self, record: logging.LogRecord) -> bool:
-        if isinstance(record.args, tuple):
-            record.args = tuple(_redact(a) for a in record.args)
-        record.msg = _redact(record.msg)
-        return True
-
-
-def _install_log_redaction() -> None:
-    httpx_logger = logging.getLogger("httpx")
-    if not any(isinstance(f, _SysproQueryRedactor) for f in httpx_logger.filters):
-        httpx_logger.addFilter(_SysproQueryRedactor())
-
-
-_install_log_redaction()
+# The operator password, session id and XML travel in the query string; keep
+# them out of httpx's INFO request log (shared filter, ``log_redaction``).
+redact_query_strings_containing(REST_SUFFIX)
 
 
 # ---------------------------------------------------------------------------
