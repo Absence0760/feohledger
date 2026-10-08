@@ -271,7 +271,7 @@ def test_refuses_without_any_gl_account_erp_id():
         fake, lambda: SageIntacctAdapter(CONFIG).post_invoice(_payload(gl_account_erp_id=None))
     )
     assert not result.success
-    assert result.message == "Sage Intacct post refused: gl_account_not_linked"
+    assert result.message == "Sage Intacct post refused: account_not_linked"
     assert fake.requests == []
 
 

@@ -8,9 +8,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from app.services.erp_adapters.base import InvoicePayload
-
-GL_ACCOUNT_NOT_LINKED = "gl_account_not_linked"
+from app.services.erp_adapters.base import ACCOUNT_NOT_LINKED, InvoicePayload
 
 
 def bill_lines(payload: InvoicePayload) -> list[tuple[str, Decimal, str]] | str:
@@ -31,5 +29,5 @@ def bill_lines(payload: InvoicePayload) -> list[tuple[str, Decimal, str]] | str:
                 (gl, li.total, li.description or payload.description or "") for gl, li in resolved
             ]
     if not header_gl:
-        return GL_ACCOUNT_NOT_LINKED
+        return ACCOUNT_NOT_LINKED
     return [(header_gl, payload.amount, payload.description or "")]

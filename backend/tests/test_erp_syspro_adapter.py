@@ -273,7 +273,7 @@ def test_refuses_without_gl_account_erp_id_before_any_http():
     result = _run(
         fake, lambda: SysproAdapter(CONFIG).post_invoice(_payload(gl_account_erp_id=None))
     )
-    assert result.message == "SYSPRO post refused: gl_account_not_linked"
+    assert result.message == "SYSPRO post refused: account_not_linked"
     assert fake.requests == []
 
 

@@ -51,6 +51,7 @@ import httpx
 
 from app.config import settings
 from app.services.erp_adapters.base import (
+    VENDOR_NOT_LINKED,
     ErpAdapter,
     ErpInvoiceStatus,
     ErpPostResult,
@@ -59,6 +60,7 @@ from app.services.erp_adapters.base import (
     PoPayload,
     VendorPayload,
     erp_failure_message,
+    erp_refusal,
 )
 from app.services.erp_adapters.bill_lines import bill_lines
 from app.services.erp_adapters.dispatcher import register_adapter
@@ -75,18 +77,12 @@ GL_ACCOUNT_OBJECT = "general-ledger/account"
 _PAGE_SIZE = 100
 _MAX_PAGES = 10
 
-VENDOR_NOT_LINKED = "vendor_not_linked"
 
 _PO_FIELDS = ["key", "documentNumber", "vendor.name", "state", "txnTotal", "currency.txnCurrency"]
 
 
 class IntacctConfigError(ValueError):
     """``settings.erp`` is missing a field the adapter needs. Names the key only."""
-
-
-def _refusal_message(provider: str, reason: str) -> str:
-    # TODO(merge): use base.erp_refusal_message
-    return f"{provider} post refused: {reason}"
 
 
 def _money(value: Decimal) -> str:
@@ -258,12 +254,10 @@ class SageIntacctAdapter(ErpAdapter):
 
     async def post_invoice(self, payload: InvoicePayload) -> ErpPostResult:
         if not payload.vendor_erp_id:
-            return ErpPostResult(
-                success=False, message=_refusal_message(PROVIDER, VENDOR_NOT_LINKED)
-            )
+            return erp_refusal(PROVIDER, VENDOR_NOT_LINKED)
         lines = bill_lines(payload)
         if isinstance(lines, str):
-            return ErpPostResult(success=False, message=_refusal_message(PROVIDER, lines))
+            return erp_refusal(PROVIDER, lines)
 
         async with httpx.AsyncClient(timeout=30) as client:
             token = await self._token(client)
