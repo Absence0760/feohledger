@@ -199,6 +199,15 @@ class ErpPostRefusedError(RuntimeError):
     """The adapter refused the payload before calling the ERP; never retried."""
 
 
+def _is_final(exc: BaseException) -> bool:
+    """Would a re-send fail the same way? Then the push is not retried."""
+    from app.services.erp_oauth import ErpNotConnectedError, ErpTokenRefreshError
+
+    if isinstance(exc, ErpPostRefusedError):
+        return True
+    return isinstance(exc, ErpNotConnectedError) and not isinstance(exc, ErpTokenRefreshError)
+
+
 async def send_to_erp_internal(
     db: AsyncSession,
     invoice: Invoice,
@@ -267,9 +276,11 @@ async def send_to_erp_internal(
             return
 
         except Exception as exc:
-            # A pre-flight refusal (vendor or account not linked to the ERP)
-            # fails at once: re-sending the same payload is refused the same way.
-            if attempt + 1 < MAX_RETRIES and not isinstance(exc, ErpPostRefusedError):
+            # A pre-flight refusal (vendor or account not linked to the ERP) or
+            # an OAuth ERP with no usable connection fails at once: neither
+            # changes on a re-send. A provider outage while refreshing a token
+            # (ErpTokenRefreshError) is transient and keeps the backoff.
+            if attempt + 1 < MAX_RETRIES and not _is_final(exc):
                 if instance:
                     instance.state_data = {
                         **(instance.state_data or {}),

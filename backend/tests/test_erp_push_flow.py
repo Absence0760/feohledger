@@ -267,6 +267,44 @@ async def test_send_to_erp_fails_a_refused_payload_at_once_without_backoff():
     assert fail_row["details"]["retries"] == 1
 
 
+@pytest.mark.asyncio
+async def test_send_to_erp_fails_a_missing_oauth_connection_at_once():
+    """An OAuth ERP with no usable connection (never consented, revoked) raising
+    out of an adapter is final: no re-send can connect it."""
+    from app.services.erp_oauth import ErpNotConnectedError
+
+    inv = _invoice(status=InvoiceStatus.sending_to_erp)
+    call_erp = AsyncMock(side_effect=ErpNotConnectedError("xero"))
+    sleep_mock = AsyncMock()
+    with (
+        patch("app.services.workflow_engine.dispatch_audit", new=_AuditRecorder()),
+        patch("app.services.erp._call_erp", call_erp),
+        patch("app.services.erp.get_workflow_instance", AsyncMock(return_value=_instance())),
+        patch("app.services.erp.asyncio.sleep", sleep_mock),
+    ):
+        await send_to_erp_internal(AsyncMock(), inv)
+    assert inv.status == InvoiceStatus.failed
+    assert call_erp.await_count == 1
+    sleep_mock.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_send_to_erp_retries_a_token_refresh_outage():
+    """A provider outage while refreshing is transient: the backoff still runs."""
+    from app.services.erp_oauth import ErpTokenRefreshError
+
+    inv = _invoice(status=InvoiceStatus.sending_to_erp)
+    call_erp = AsyncMock(side_effect=ErpTokenRefreshError("xero", "HTTP 503"))
+    with (
+        patch("app.services.workflow_engine.dispatch_audit", new=_AuditRecorder()),
+        patch("app.services.erp._call_erp", call_erp),
+        patch("app.services.erp.get_workflow_instance", AsyncMock(return_value=_instance())),
+        patch("app.services.erp.asyncio.sleep", AsyncMock()),
+    ):
+        await send_to_erp_internal(AsyncMock(), inv)
+    assert call_erp.await_count == 3
+
+
 # ---------------------------------------------------------------------------
 # send_to_erp_internal — resumes from persisted retry count.
 # ---------------------------------------------------------------------------
