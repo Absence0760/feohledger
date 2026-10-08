@@ -105,7 +105,7 @@ section carried its own `decisions.md` § reference, so nothing was lost by
 deleting it; that cross-reference is what makes the pruning safe, and writing
 one is what earns a future entry the right to be deleted.
 
-**82 open: 67 (c) · 9 (a) · 6 (b)** — re-derived from the file, never carried
+**85 open: 70 (c) · 9 (a) · 6 (b)** — re-derived from the file, never carried
 forward. The section heading is authoritative; where an entry also carries a
 `(c)`/`(a)`/`(b)` marker, the two agree.
 `grep -c '^- \[ \]' docs/followups.md`.
@@ -1302,6 +1302,38 @@ lands. Pure doc drift was corrected in the same PR. The two diagnosed defects
       admin path; a test per branch. **Trigger:** the next change to
       `api/scim.py`, or before the first SCIM-provisioned customer.
 
+### Receiving, ERP depth and commerce sync (2026-10-07, roadmap Priority 14, decisions §260)
+
+Three separate PRs, in this order. Inventory tracking and selling are out of
+scope (§260) — do not fold them into any of these.
+
+- [ ] **(c) Nobody can record a goods receipt.** `/api/goods-receipts` is
+      read-only, no ERP adapter pulls receipts, and `scripts/seed.py` is the
+      only writer — so the 3-way match and the "billed beyond receipt"
+      `po_mismatch` hold (§249) run on demo data or nothing. A real customer
+      receiving a short delivery has no way to say so.
+      **Durable fix:** `POST /api/goods-receipts` (line-by-line against the PO,
+      entity from the PO), a recorder stamp (`source`, `recorded_by_user_id`)
+      that the hold's auto-close checks the way it checks a manual inspection,
+      a cancel path, a rematch of the PO's invoices, and the web entry form.
+      **Trigger:** now — PR 1 of roadmap Priority 14.
+- [ ] **(c) Direct ERP adapters stop at Business Central and NetSuite, and no
+      adapter pulls receipts.** Everything else rides Merge.dev.
+      **Durable fix:** add a receipt pull to the `erp_adapters` interface, then
+      one direct adapter per PR, largest ERP first (SAP S/4HANA, Oracle Fusion,
+      Dynamics 365 F&O, Sage Intacct, Infor, Epicor), each with fake-erp routes
+      and an e2e spec; QuickBooks Online / Xero sized separately for the SMB
+      segment — QuickBooks Online and Xero are already their own entry above
+      (decisions §256), and §256 routes the long tail through Merge.dev on Scale,
+      so which large ERPs get a direct adapter is decided against it first.
+      **Trigger:** after PR 1 lands (receipts need somewhere to go).
+- [ ] **(c) Received merchandise never reaches the business's commerce /
+      inventory platform.** **Durable fix:** SKU identity on PO + receipt lines
+      (link to `catalog_items`), then a `commerce_adapters` family (`mock`
+      default) that adjusts the mapped variant's quantity on each receipt,
+      idempotent per receipt line — Shopify first. **Trigger:** after PR 1
+      lands; independent of the ERP work.
+
 ## (a) Blocked on external credentials, accounts, or hardware
 
 Categories (a) and (b) are operator work, not engineering work. Both are
@@ -1320,7 +1352,7 @@ reconciled when an item closes.
       filling them is a one-line edit per representative.
       **Why blocked:** it needs a paid engagement with a representative firm in
       each jurisdiction. No longer waits on incorporation — the operator
-      contracts as a sole proprietor ([decisions.md](decisions.md) §252).
+      contracts as a sole proprietor ([decisions.md](decisions.md) §260).
       **Durable fix:** engage both, then set `euRepresentative` and
       `ukRepresentative`.
       **Trigger:** before marketing to, or onboarding, an EU or UK customer.
@@ -1335,7 +1367,7 @@ reconciled when an item closes.
       outside the EEA/UK (`/legal/sub-processors` is the list) and completing
       their annexes, plus the transfer-impact assessment *Schrems II* requires.
       **Why blocked:** operator work with each provider; no longer waits on
-      incorporation — the sole proprietor is the party ([decisions.md](decisions.md) §252).
+      incorporation — the sole proprietor is the party ([decisions.md](decisions.md) §260).
       **Durable fix:** execute the Clauses provider by provider,
       and keep the signed set where the privacy mailbox can answer from it.
       **Trigger:** before the first EEA or UK customer, and before anyone acts
@@ -1408,7 +1440,7 @@ as oversights.
       facts in `frontend/src/lib/legal/operator.ts` are still `null` and render
       as `[… to be confirmed]`: the EU and UK Art 27 representatives (tracked
       separately above). The rest were set 2026-10-07
-      ([decisions.md](decisions.md) §252): no separate registered entity, no
+      ([decisions.md](decisions.md) §260): no separate registered entity, no
       published postal address (location Virginia, contact by email), no DPO,
       Virginia governing law and courts, hosting in AWS `us-east-1`, and no
       lead supervisory authority (no EU establishment). Counsel should confirm
