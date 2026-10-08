@@ -177,3 +177,25 @@ body starting `ERROR`, as SYSPRO's are.
   balance to `InvoiceAmount`.
 - `POST /syspro/SYSPROWCFService/Rest/__set-balance` — test hook
   `{"supplier", "invoice", "balance"}` (`"0"` = paid).
+## Xero (`/xero/api.xro/2.0`)
+
+Backs `erp_adapters/xero.py`. Auth is shape-only: any non-empty
+`Authorization: Bearer …` plus a non-empty `Xero-Tenant-Id` (401 / 403
+otherwise). Point the backend at it with
+`FEOH_ERP_XERO_API_BASE=http://localhost:12112/xero/api.xro/2.0`.
+
+- `GET /Organisation` — `Fake Xero Org` (ZAR, ZA).
+- `GET /Contacts?where=IsSupplier==true` — `xero-contact-1` *Fake Xero
+  Supplier Co* (the customer `xero-contact-2` is filtered out).
+- `GET /Accounts` — `xero-acc-6100` / `6200` (default tax type `INPUT`) and
+  `xero-acc-6300` (no default tax type: a taxed bill is refused unless the org
+  sets `default_tax_type`).
+- `GET /PurchaseOrders` — `PO-XERO-401` (1250.00, AUTHORISED → open),
+  `PO-XERO-402` (980.50, BILLED → closed).
+- `GET /Invoices` with `InvoiceNumbers` / `ContactIDs` / `Statuses` filters
+  (the pre-create idempotency lookup); `PUT /Invoices` creates `xero-inv-<n>`
+  and replays the original response for a repeated `Idempotency-Key`;
+  `GET /Invoices/{id}`; `POST /Invoices/{id}` changes status (DELETED only
+  from DRAFT/SUBMITTED, VOIDED only from unpaid AUTHORISED).
+- Test hook `POST /xero/api.xro/2.0/__set-status {"id", "status",
+  "amount_paid"?}`. `POST /__reset` clears this state too.

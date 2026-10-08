@@ -1141,3 +1141,67 @@ query-string parameters, which is how the WCF REST host takes them:
 
 Tests: `backend/tests/test_erp_syspro_adapter.py`. fake-erp surface:
 `/syspro/SYSPROWCFService/Rest` (`FEOH_ERP_SYSPRO_API_BASE`).
+## Xero (direct, OAuth 2.0)
+
+`erp_adapters/xero.py`, `@register_adapter("xero")`, `integration_method:
+"direct"`. Subclasses `OAuthErpAdapter`: the bearer token comes only from
+`self.access_token()` (`services/erp_oauth` owns consent, refresh and
+storage), and every call sends `Xero-Tenant-Id: <external_tenant_id>`, the
+organisation picked at consent. Base `https://api.xero.com/api.xro/2.0`,
+overridable with `FEOH_ERP_XERO_API_BASE` (fake-erp in dev). Platform app
+credentials: `FEOH_ERP_XERO_CLIENT_ID` / `_SECRET` (empty → unavailable, no
+fallback). Scopes are Xero's granular set (`accounting.invoices`,
+`accounting.contacts.read`, `accounting.settings.read`, `offline_access`),
+which apps created on or after 2026-03-02 must use.
+
+**`settings.erp` keys:** `oauth` (written by `erp_oauth` only),
+`bill_status` (`AUTHORISED` default, or `DRAFT`), `default_tax_type`
+(optional fallback, below).
+
+| Method | Xero call | Notes |
+|---|---|---|
+| `test_connection` | `GET Organisation` | |
+| `list_vendors` | `GET Contacts?where=IsSupplier==true` | paged, 100/page, 10-page cap |
+| `list_gl_accounts` | `GET Accounts` | `Class` → account_type; archived skipped |
+| `list_pos` | `GET PurchaseOrders` | `BILLED` → closed, `DELETED` → cancelled |
+| `post_invoice` | `PUT Invoices` (`Type: ACCPAY`) | below |
+| `get_invoice_status` | `GET Invoices/{id}` | DRAFT/SUBMITTED → draft; AUTHORISED → open, or partially_paid when `AmountPaid > 0`; PAID → paid; VOIDED/DELETED → cancelled |
+| `void_invoice` | `POST Invoices/{id}` | DRAFT/SUBMITTED → `DELETED`; unpaid, uncredited AUTHORISED → `VOIDED`; anything with money applied → `False` |
+
+**`post_invoice`:**
+
+- **Refusals, before any HTTP call** (`"Xero post refused: <reason>"`):
+  `vendor_not_linked` (no `vendor_erp_id`; never a name lookup),
+  `missing_dates`, `account_not_linked` (a line with no `gl_account_erp_id`,
+  header fallback), `amount_mismatch` / `tax_not_itemised` /
+  `line_amount_missing` (from `erp_adapters/bill_allocation.py`, shared with Sage).
+- **The total is never re-derived.** `bill_allocation.allocate_bill_lines`
+  classifies lines as tax-inclusive (they sum to `amount`) or tax-exclusive
+  (they plus `tax_amount` sum to `amount`) and refuses anything else. Per-line
+  tax comes only from the invoice: each line's own `tax` when they sum to
+  `tax_amount`, or all of it on a single line. Several tax-exclusive lines with
+  header-only tax are refused, not pro-rated.
+- **Tax.** No tax → `LineAmountTypes: NoTax`. Itemised tax →
+  `Exclusive` with an explicit `TaxAmount` per line (Xero honours the
+  override, so the total is exactly `amount`). Tax-inclusive lines with
+  header-only tax → `Inclusive` with no `TaxAmount`: Xero splits net/tax by the
+  rate, and the gross total is still exact. The `TaxType` is the line
+  account's own default from `GET Accounts` (the customer's chart, e.g. a ZA
+  org's 15% input VAT type); `settings.erp.default_tax_type` is used only for
+  an account with none; neither → `tax_rate_unresolved`. Rates are never
+  hardcoded.
+- **Idempotency, two layers.** A pre-create
+  `GET Invoices?InvoiceNumbers=…&ContactIDs=<vendor>&Statuses=DRAFT,SUBMITTED,AUTHORISED,PAID`:
+  a live bill with the same total is adopted (idempotent success); a different
+  total is refused `duplicate_document_number`. A failed lookup fails closed.
+  `Reference` is ACCREC-only in Xero, so no bill field can carry our
+  correlation id; the create also sends `Idempotency-Key: <correlation_id>`
+  (Xero replays the original response).
+- **Rate limits** (60/min, 5,000/day per tenant): HTTP 429 →
+  `"Xero post failed: HTTP 429 (rate_limited)"`, `Retry-After` kept in the
+  in-memory `raw_response`. No sleep loop; `services/erp`'s retry backoff
+  owns the timing.
+- Failures go through `erp_failure_message`; no response body is persisted.
+
+Tests: `backend/tests/test_erp_xero_adapter.py`. Fake surface:
+`tools/fake-erp/README.md` § Xero.

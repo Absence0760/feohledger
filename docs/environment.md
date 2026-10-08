@@ -140,6 +140,8 @@ in `frontend/tests-e2e/README.md` § Running from a worktree.
 | `FEOH_ERP_D365_TOKEN_URL` | (empty)                                                                 | D365 OAuth token endpoint override. Empty → `https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token`. Dev value: `http://localhost:12112/d365/oauth2/token`. |
 | `FEOH_ERP_INTACCT_API_BASE` | (empty) | Sage Intacct REST base override (token at `<base>/oauth2/token`). Empty → the real `https://api.intacct.com/ia/api/v1`; set → used verbatim (operator-trusted). Dev value: `http://localhost:12112/intacct/ia/api/v1`. |
 | `FEOH_ERP_SYSPRO_API_BASE` | (empty) | SYSPRO e.net REST base override (`/SYSPROWCFService/Rest` is appended when absent). Empty → the admin-config `base_url`, which must be https and passes the SSRF guard; set → used verbatim (operator-trusted, guard skipped). Dev value: `http://localhost:12112/syspro`. |
+| `FEOH_ERP_XERO_API_BASE` | (empty) | Xero Accounting API base override. Empty → `https://api.xero.com/api.xro/2.0`; set → used verbatim (operator-trusted). Dev value: `http://localhost:12112/xero/api.xro/2.0`. |
+| `FEOH_ERP_XERO_CLIENT_ID` / `FEOH_ERP_XERO_CLIENT_SECRET` | (empty) | The platform's Xero OAuth app (one app, every tenant). Empty → Xero is unavailable unless the tenant brings its own `settings.erp.client_id`/`client_secret`; no fallback. Secret lives in sops (`infra-secrets`). |
 | `FEOH_AUDIT_MODE`       | `local`                                                                  | `local` or `lambda` for audit log writes |
 | `FEOH_SQS_EXTRACTION_QUEUE_URL` | (empty)                                                          | Required when `FEOH_EXTRACTION_MODE=lambda` |
 | `FEOH_SQS_ERP_QUEUE_URL` | (empty)                                                                 | Required when `FEOH_ERP_MODE=lambda` |
@@ -235,6 +237,8 @@ always `backend/app/config.py`.
 | `FEOH_ERP_D365_TOKEN_URL` | (empty) | D365 OAuth token URL override — empty → `https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token`. Dev value targets fake-erp |
 | `FEOH_ERP_INTACCT_API_BASE` | (empty) | Sage Intacct REST base override — empty → `https://api.intacct.com/ia/api/v1`; set → used verbatim (operator-trusted). Dev value targets fake-erp |
 | `FEOH_ERP_SYSPRO_API_BASE` | (empty) | SYSPRO e.net REST base override — empty → admin-config https `base_url` + SSRF guard; set → used verbatim (operator-trusted). Dev value targets fake-erp |
+| `FEOH_ERP_XERO_API_BASE` | (empty) | Xero API base override — empty → `https://api.xero.com/api.xro/2.0`. Dev value targets fake-erp |
+| `FEOH_ERP_XERO_CLIENT_ID` / `_SECRET` | (empty) | Platform Xero OAuth app credentials — empty fails closed (no fallback) |
 | `FEOH_ANTHROPIC_API_KEY` | (empty) | Claude Vision for platform extraction |
 | `FEOH_EXTRACTION_MODEL` | `claude-sonnet-5-5` | AI model for extraction |
 | `FEOH_EXTRACTION_EFFORT` | `low` | `output_config.effort` for platform Claude extraction; empty omits it |

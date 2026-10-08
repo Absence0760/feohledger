@@ -1135,6 +1135,258 @@ async def syspro_set_balance(body: dict) -> dict:
 app.include_router(syspro)
 
 
+# ---------------------------------------------------------------------------
+# Xero Accounting API  (/xero/api.xro/2.0)
+# ---------------------------------------------------------------------------
+# Backs backend/app/services/erp_adapters/xero.py. Auth is shape-only: any
+# non-empty bearer plus a non-empty Xero-Tenant-Id (the OAuth handshake that
+# mints the bearer is not faked in this section). State lives under
+# STATE["xero"], created lazily so the shared POST /__reset clears it too.
+# Test hook: POST /xero/api.xro/2.0/__set-status {"id", "status", "amount_paid"?}.
+
+import json as _xero_json
+from decimal import Decimal as _XeroDecimal
+
+from fastapi.encoders import jsonable_encoder as _xero_encode
+
+xero = APIRouter(prefix="/xero/api.xro/2.0")
+
+XERO_TENANT_ID = "fake-xero-tenant"
+# FIXED fixtures — e2e tests may assert these literals.
+XERO_CONTACTS = [
+    {
+        "ContactID": "xero-contact-1",
+        "Name": "Fake Xero Supplier Co",
+        "AccountNumber": "FXS01",
+        "EmailAddress": "ap@fake-xero-supplier.test",
+        "IsSupplier": True,
+        "PaymentTerms": {"Bills": {"Day": 30, "Type": "DAYSAFTERBILLDATE"}},
+    },
+    {"ContactID": "xero-contact-2", "Name": "Fake Xero Customer Co", "IsSupplier": False},
+]
+XERO_ACCOUNTS = [
+    {
+        "AccountID": "xero-acc-6100",
+        "Code": "6100",
+        "Name": "Fake Office Supplies",
+        "Class": "EXPENSE",
+        "Status": "ACTIVE",
+        "TaxType": "INPUT",
+    },
+    {
+        "AccountID": "xero-acc-6200",
+        "Code": "6200",
+        "Name": "Fake Software",
+        "Class": "EXPENSE",
+        "Status": "ACTIVE",
+        "TaxType": "INPUT",
+    },
+    # No default tax type: a taxed bill against it is refused unless the org
+    # configures `default_tax_type`.
+    {
+        "AccountID": "xero-acc-6300",
+        "Code": "6300",
+        "Name": "Fake Consulting",
+        "Class": "EXPENSE",
+        "Status": "ACTIVE",
+    },
+]
+XERO_PURCHASE_ORDERS = [
+    {
+        "PurchaseOrderID": "xero-po-1",
+        "PurchaseOrderNumber": "PO-XERO-401",
+        "Contact": {"ContactID": "xero-contact-1", "Name": "Fake Xero Supplier Co"},
+        "Total": 1250.00,
+        "Status": "AUTHORISED",
+        "CurrencyCode": "ZAR",
+        "DeliveryDateString": "2026-11-01T00:00:00",
+        "LineItems": [
+            {
+                "Description": "Fake paper",
+                "Quantity": 10,
+                "UnitAmount": 125.00,
+                "LineAmount": 1250.00,
+                "AccountCode": "6100",
+            }
+        ],
+    },
+    {
+        "PurchaseOrderID": "xero-po-2",
+        "PurchaseOrderNumber": "PO-XERO-402",
+        "Contact": {"ContactID": "xero-contact-1", "Name": "Fake Xero Supplier Co"},
+        "Total": 980.50,
+        "Status": "BILLED",
+        "CurrencyCode": "ZAR",
+        "LineItems": [],
+    },
+]
+
+
+def _xero_state() -> dict[str, Any]:
+    return STATE.setdefault("xero", {"invoices": {}, "idempotency": {}, "counter": 0})
+
+
+def _xero_error(status: int, message: str) -> ProviderError:
+    return ProviderError(status, {"Title": message, "Status": status, "Detail": message})
+
+
+def _require_xero_auth(request: Request) -> None:
+    auth = request.headers.get("authorization", "")
+    if not auth.startswith("Bearer ") or not auth[len("Bearer ") :].strip():
+        raise _xero_error(401, "Unauthorized")
+    if not request.headers.get("xero-tenant-id", "").strip():
+        raise _xero_error(403, "Missing Xero-Tenant-Id")
+
+
+def _xero_response(body: Any, status: int = 200) -> JSONResponse:
+    return JSONResponse(_xero_encode(body), status_code=status)
+
+
+@xero.get("/Organisation")
+async def xero_organisation(request: Request) -> JSONResponse:
+    _require_xero_auth(request)
+    return _xero_response(
+        {
+            "Organisations": [
+                {
+                    "OrganisationID": XERO_TENANT_ID,
+                    "Name": "Fake Xero Org",
+                    "BaseCurrency": "ZAR",
+                    "CountryCode": "ZA",
+                }
+            ]
+        }
+    )
+
+
+@xero.get("/Contacts")
+async def xero_contacts(request: Request, page: int = 1) -> JSONResponse:
+    _require_xero_auth(request)
+    rows = XERO_CONTACTS
+    if request.query_params.get("where", "").replace(" ", "") == "IsSupplier==true":
+        rows = [c for c in rows if c.get("IsSupplier")]
+    return _xero_response({"Contacts": copy.deepcopy(rows) if page == 1 else []})
+
+
+@xero.get("/Accounts")
+async def xero_accounts(request: Request) -> JSONResponse:
+    _require_xero_auth(request)
+    return _xero_response({"Accounts": copy.deepcopy(XERO_ACCOUNTS)})
+
+
+@xero.get("/PurchaseOrders")
+async def xero_purchase_orders(request: Request, page: int = 1) -> JSONResponse:
+    _require_xero_auth(request)
+    rows = copy.deepcopy(XERO_PURCHASE_ORDERS) if page == 1 else []
+    return _xero_response({"PurchaseOrders": rows})
+
+
+@xero.get("/Invoices")
+async def xero_list_invoices(request: Request) -> JSONResponse:
+    """Supports the InvoiceNumbers / ContactIDs / Statuses filters the adapter's
+    pre-create idempotency lookup sends."""
+    _require_xero_auth(request)
+    q = request.query_params
+    numbers = {n for n in q.get("InvoiceNumbers", "").split(",") if n}
+    contacts = {c for c in q.get("ContactIDs", "").split(",") if c}
+    statuses = {s for s in q.get("Statuses", "").split(",") if s}
+    rows = [
+        inv
+        for inv in _xero_state()["invoices"].values()
+        if (not numbers or inv["InvoiceNumber"] in numbers)
+        and (not contacts or inv["Contact"]["ContactID"] in contacts)
+        and (not statuses or inv["Status"] in statuses)
+    ]
+    return _xero_response({"Invoices": copy.deepcopy(rows)})
+
+
+@xero.put("/Invoices")
+async def xero_create_invoices(request: Request) -> JSONResponse:
+    """Create bills. A repeated Idempotency-Key returns the original response."""
+    _require_xero_auth(request)
+    state = _xero_state()
+    key = request.headers.get("idempotency-key")
+    if key and key in state["idempotency"]:
+        return _xero_response(copy.deepcopy(state["idempotency"][key]))
+    body = _xero_json.loads(await request.body(), parse_float=_XeroDecimal)
+    contact_ids = {c["ContactID"] for c in XERO_CONTACTS}
+    account_ids = {a["AccountID"] for a in XERO_ACCOUNTS}
+    created = []
+    for inv in body.get("Invoices") or []:
+        contact_id = (inv.get("Contact") or {}).get("ContactID")
+        if contact_id not in contact_ids:
+            raise _xero_error(400, "Contact not found")
+        mode = inv.get("LineAmountTypes", "Exclusive")
+        total = _XeroDecimal(0)
+        for li in inv.get("LineItems") or []:
+            if li.get("AccountID") not in account_ids:
+                raise _xero_error(400, "Account not found")
+            total += _XeroDecimal(str(li.get("LineAmount", 0)))
+            if mode == "Exclusive":
+                total += _XeroDecimal(str(li.get("TaxAmount", 0)))
+        state["counter"] += 1
+        record = {
+            "InvoiceID": f"xero-inv-{state['counter']}",
+            "InvoiceNumber": inv.get("InvoiceNumber"),
+            "Type": inv.get("Type"),
+            "Contact": {"ContactID": contact_id},
+            "Status": inv.get("Status", "DRAFT"),
+            "CurrencyCode": inv.get("CurrencyCode"),
+            "LineAmountTypes": mode,
+            "LineItems": inv.get("LineItems") or [],
+            "Total": total,
+            "AmountPaid": _XeroDecimal(0),
+            "AmountCredited": _XeroDecimal(0),
+        }
+        state["invoices"][record["InvoiceID"]] = record
+        created.append(record)
+    response = {"Invoices": copy.deepcopy(created)}
+    if key:
+        state["idempotency"][key] = response
+    return _xero_response(response)
+
+
+@xero.get("/Invoices/{invoice_id}")
+async def xero_get_invoice(request: Request, invoice_id: str) -> JSONResponse:
+    _require_xero_auth(request)
+    record = _xero_state()["invoices"].get(invoice_id)
+    if record is None:
+        raise _xero_error(404, "Invoice not found")
+    return _xero_response({"Invoices": [copy.deepcopy(record)]})
+
+
+@xero.post("/Invoices/{invoice_id}")
+async def xero_update_invoice(request: Request, invoice_id: str) -> JSONResponse:
+    """Status change only (DELETED for drafts, VOIDED for unpaid authorised bills)."""
+    _require_xero_auth(request)
+    record = _xero_state()["invoices"].get(invoice_id)
+    if record is None:
+        raise _xero_error(404, "Invoice not found")
+    body = await request.json()
+    target = ((body.get("Invoices") or [{}])[0]).get("Status")
+    if target == "DELETED" and record["Status"] not in ("DRAFT", "SUBMITTED"):
+        raise _xero_error(400, "Only draft or submitted invoices can be deleted")
+    if target == "VOIDED" and (record["Status"] != "AUTHORISED" or record["AmountPaid"] != 0):
+        raise _xero_error(400, "Only unpaid authorised invoices can be voided")
+    if target:
+        record["Status"] = target
+    return _xero_response({"Invoices": [copy.deepcopy(record)]})
+
+
+@xero.post("/__set-status")
+async def xero_set_status(body: dict) -> dict:
+    record = _xero_state()["invoices"].get(str(body.get("id", "")))
+    if record is None or not body.get("status"):
+        raise ProviderError(404, {"detail": "unknown id or missing status"})
+    record["Status"] = body["status"]
+    if body.get("amount_paid") is not None:
+        record["AmountPaid"] = _XeroDecimal(str(body["amount_paid"]))
+    return {"status": "ok"}
+
+
+app.include_router(xero)
+
+
 if __name__ == "__main__":
     import uvicorn
 

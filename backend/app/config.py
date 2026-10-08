@@ -268,6 +268,17 @@ class Settings(BaseSettings):
     # SYSPRO e.net REST base URL. Empty = the admin-supplied config base_url,
     # https-only and behind the SSRF guard (SYSPRO is customer-hosted).
     erp_syspro_api_base: str = ""
+    # Xero + Sage Business Cloud Accounting (OAuth 2.0 authorization-code
+    # adapters, `erp_adapters/xero.py` / `sage_accounting.py`). The API bases
+    # follow the overrides above: empty = the live provider API; set = used
+    # verbatim (fake-erp in local dev). The client id/secret pairs are the
+    # PLATFORM app registered once with each provider and serving every
+    # tenant; empty = the provider is unavailable and fails closed (no
+    # fallback). A tenant may bring its own app via `settings.erp.client_id` /
+    # `client_secret` instead (see `erp_adapters/oauth_base.py`).
+    erp_xero_api_base: str = ""
+    erp_xero_client_id: str = ""
+    erp_xero_client_secret: str = ""
 
     # Audit
     audit_mode: str = "local"  # "local" = in-process, "lambda" = dispatch to SQS

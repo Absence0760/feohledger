@@ -52,6 +52,7 @@ BUILTIN_ADAPTER_MODULES: tuple[str, ...] = (
     "app.services.erp_adapters.netsuite",
     "app.services.erp_adapters.sage_intacct",
     "app.services.erp_adapters.syspro",
+    "app.services.erp_adapters.xero",
 )
 
 
