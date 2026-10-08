@@ -27,6 +27,10 @@ class LineItemPayload:
     tax: Decimal | None = None
     total: Decimal | None = None
     gl_account: str | None = None
+    #: The ERP's own id for ``gl_account`` (``gl_accounts.erp_account_id``),
+    #: resolved from the invoice entity's chart. None when the line has no
+    #: account or the account was never synced from this ERP.
+    gl_account_erp_id: str | None = None
 
 
 @dataclass
@@ -55,6 +59,14 @@ class InvoicePayload:
     bill_to_address: str | None = None
     remit_to_address: str | None = None
     vendor_address: str | None = None
+    #: The ERP's own vendor id (``vendors.erp_vendor_id``). Every real ERP posts
+    #: a bill against this, never a name. **A direct adapter refuses a payload
+    #: without it** (``ErpPostResult(success=False, message=...
+    #: "vendor_not_linked")``) and never falls back to a name lookup, which
+    #: picks the wrong "Acme" the first time two vendors share one.
+    vendor_erp_id: str | None = None
+    #: The ERP's own id for the header ``gl_account``; see ``LineItemPayload``.
+    gl_account_erp_id: str | None = None
     line_items: list[LineItemPayload] = field(default_factory=list)
 
 
