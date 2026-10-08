@@ -39,7 +39,13 @@ and an audit that re-derived both found the copy stale at nearly every sync
 transcription was retired rather than corrected again. Add a follow-up here; add
 a GitHub issue only when one warrants its own thread.
 
-**Last reconciled:** 2026-10-07 — a re-validation pass checked all 82 open
+**Last reconciled:** 2026-10-08 — the cards / receiving-SoD /
+provider-credentials batch closed **five** (c) entries — a vendor leaving
+`active` keeping its live cards (decisions §264), `/cards/generate`'s unlocked
+checks (§265), ERP / payment / card credentials in plain JSONB (§266), the
+goods-receipt recorder approving the invoice (§267), and a manager's
+re-extraction auto-approving a clerk's swapped file (§268) — and opened seven
+under their own heading, taking the file from 80 → 82. Before that, 2026-10-07 — a re-validation pass checked all 82 open
 entries against the code on `main` (`02f7387b`) rather than against their own
 text. One had landed without being pruned — the void reversing a captured
 discount by elimination, fixed by `discount_offers.captured_by_payment_id`
@@ -119,7 +125,7 @@ section carried its own `decisions.md` § reference, so nothing was lost by
 deleting it; that cross-reference is what makes the pruning safe, and writing
 one is what earns a future entry the right to be deleted.
 
-**80 open: 65 (c) · 9 (a) · 6 (b)** — re-derived from the file, never carried
+**82 open: 67 (c) · 9 (a) · 6 (b)** — re-derived from the file, never carried
 forward. The section heading is authoritative; where an entry also carries a
 `(c)`/`(a)`/`(b)` marker, the two agree.
 `grep -c '^- \[ \]' docs/followups.md`.
@@ -1088,23 +1094,11 @@ lands. Pure doc drift was corrected in the same PR. The two diagnosed defects
       scope vendor matching to the import's entity, refuse a blank currency
       per row, and key the row errors through the message catalogue.
       **Trigger:** the next change to CSV import.
-- [ ] **(c) A manager's extraction can auto-approve a document a clerk
-      swapped in.** A clerk's own upload or extract never auto-approves, but a
-      manager who re-extracts after a clerk replaced the file can still get
-      it auto-approved with no second look. **Durable fix:** suppress
-      auto-approve whenever `segregation_actor_ids` is non-empty, with a test.
-      **Trigger:** the next change to extraction dispatch or auto-approve.
 - [ ] **(c) A custom role can't be granted invoice entry.** Entry is a role
       list by design (decisions §248). **Durable fix:** if a customer needs a
       non-clerk preparer role, add a non-sensitive permission tier the
       role-grant guards exempt, and move entry onto it. **Trigger:** the first
       customer asking for a custom preparer role.
-- [ ] **(c) Deactivating a vendor doesn't cancel its live virtual cards.** A
-      card minted before the vendor went inactive, rejected or merged stays
-      spendable; payment runs and `/cards/generate` refuse the vendor, but
-      nothing reaches cards already issued. **Durable fix:** cancel the
-      vendor's live cards when its status leaves `active`, with an audit row
-      per card. **Trigger:** the next vendor-lifecycle change.
 - [ ] **(c) The PO-match receipt leg is pro rata and not cumulative.** The
       "billed beyond received" check values receipts as `po_total × received /
       ordered`, so receiving nine cheap cables of a 900 server order reads as
@@ -1126,11 +1120,6 @@ lands. Pure doc drift was corrected in the same PR. The two diagnosed defects
       only logs. **Durable fix:** when `post_payment` is implemented, send
       `discount_amount` beside `amount` so the ERP books the discount taken.
       **Trigger:** the first real ERP payment-posting adapter.
-- [ ] **(c) `/cards/generate` has no row lock between its checks and the
-      mint.** Pre-existing: two concurrent calls can both pass the vendor and
-      payable checks. **Durable fix:** lock the invoice rows `FOR UPDATE`
-      before checking and minting, with a concurrency test. **Trigger:** the
-      next card-issuance change.
 - [ ] **(c) The web bundle total counts route-split content nobody loads
       together.** `MAX_TOTAL_KB` sums every chunk (one locale catalogue), so
       the help centre's lazy guide prose and diagrams (~81 KB, `/help` only)
@@ -1203,17 +1192,6 @@ lands. Pure doc drift was corrected in the same PR. The two diagnosed defects
       dispatcher, so the gate itself is one more check. **Trigger:**
       before the first paid Growth customer, or the fourth Merge connection
       (the first three are free), whichever comes first.
-- [ ] **(c) ERP credentials are plaintext in `Organization.settings`.** The
-      `erp` block (client secrets, API keys, Merge account tokens) is stored as
-      plain JSONB, protected only by RDS storage encryption, and admins read it
-      back verbatim (`services/org_settings_view`). `erp-integration.md` used to
-      call this "encrypted at rest", which overstated it. A QuickBooks refresh
-      token (five-year lifetime, full read/write on the customer's books) would
-      make it worse. **Durable fix:** hold provider credentials in a tenant table
-      encrypted with the app KMS key (envelope encryption), write-only through
-      audited endpoints like the SSO client secret, and migrate the existing
-      `erp`, `payments.credentials` and `cards.api_key` values. **Trigger:** the
-      QuickBooks connect flow (Phase 1) — its token must not land in plain JSONB.
 
 ### Surfaced by moving the database onto RDS (2026-10-07, docs/minimal-deployment.md § Database)
 
@@ -1285,19 +1263,6 @@ lands. Pure doc drift was corrected in the same PR. The two diagnosed defects
 Three separate PRs, in this order. Inventory tracking and selling are out of
 scope (§260) — do not fold them into any of these.
 
-- [ ] **(c) Whoever records a goods receipt can still approve the invoice it
-      supports.** Receipt entry (PR 1, decisions §262) stops an implicated
-      person's receipt from *releasing* a payment hold, but the classic
-      control — receiving and approving are different people — is not
-      enforced: a manager can record the delivery and then approve the
-      invoice billed against it. **Durable fix:** include the recorders of
-      live hand-entered receipts on the invoice's PO in the approval
-      segregation check (`approval_chain.violates_segregation` gets them from
-      `goods_receipts.recorded_by_user_id`), honouring the existing
-      `require_segregation` opt-out, with the refusal coded like the other
-      approval refusals. **Trigger:** the first tenant that turns on three-way
-      matching with more than one approver, or the next change to the approval
-      chain.
 - [ ] **(c) Mobile has no goods-receipt entry.** `/goods-receipts` → Record
       receipt is web-only; mobile reads receipts only for the inspection
       picker. A warehouse or shop-floor user would naturally record a delivery
@@ -1322,6 +1287,74 @@ scope (§260) — do not fold them into any of these.
       default) that adjusts the mapped variant's quantity on each receipt,
       idempotent per receipt line — Shopify first. **Trigger:** after PR 1
       lands; independent of the ERP work.
+
+### Surfaced by the cards / receiving-SoD / provider-credentials batch (2026-10-08, decisions §264–§268)
+
+- [ ] **(c) Approving first and recording the receipt second still works.**
+      §267 refuses a receiver at approval, but the reverse order is open: a
+      manager approves the invoice, then records the goods receipt that lifts
+      its "billed beyond receipt" hold. `receipts_clear_hold` and the agent
+      coordinator's `_receipts_implicated` cannot refuse the approver because
+      nothing records who approved by id — only the `approved_by` display name,
+      and the audit log, which fails open in lambda mode.
+      **Durable fix:** a tenant migration adding `invoices.approved_by_user_id`
+      (NULL for history — no honest backfill, §141's reasoning), stamped in
+      `review.approve_invoice`; `receipts_clear_hold` and
+      `_receipts_implicated` refuse a recorder who approved the invoice, with
+      tests on both doors. **Trigger:** the next change to receipt entry or the
+      approval chain, or the first tenant running three-way matching with more
+      than one approver.
+- [ ] **(c) A multi-PO split's `po_ids` vanish on the next warning refresh, and
+      the receiver check with them.** `approval_chain.receipt_recorders` reads
+      the split's PO ids from `po_match.po_ids`, but `refresh_warnings`
+      rewrites `po_match` and the combined `po_number` resolves to no PO, so a
+      receiver of one leg of a split can approve after any later edit.
+      **Durable fix:** persist the split's PO links outside the recomputed
+      `po_match` (a link table or a column the matcher only appends to) and
+      read the receiver set from it. **Trigger:** the next PO-matching change
+      touching multi-PO splits, or the first customer splitting invoices across
+      POs.
+- [ ] **(c) `/cards/generate` does not say why an invoice was skipped.** The
+      response is `total: 0` whether the invoice was ineligible, already
+      carded, already being paid, or timed out on its lock, and a retry
+      returns `total: 0` rather than the existing card.
+      **Durable fix:** per-invoice skip codes on the response (`already_carded`
+      with the card id, `live_payment`, `blocked`, `vendor_not_payable`,
+      `lock_timeout`, …) keyed through the message catalogue, and the web
+      action surfacing them. **Trigger:** the next change to the card-generate
+      UI or response shape.
+- [ ] **(c) Extraction BYOK keys are still plain JSONB.**
+      `settings.extraction.api_key` / `aws_secret_access_key` were not in §266's
+      scope and are admin-readable. **Durable fix:** add an `extraction` block
+      to `services/provider_credentials.SECRET_FIELDS`, move its readers onto
+      `provider_config`, and seal existing values in a control-plane
+      migration, as 0110 did. **Trigger:** the next extraction-adapter or BYOK
+      change, or before the first BYOK extraction customer.
+- [ ] **(c) `sso.client_secret` is plain JSONB.** It is write-only
+      (`org_settings_view.ALWAYS_REDACTED`) but not sealed;
+      `docs/secrets-rotation.md` used to claim it was encrypted and is
+      corrected. **Durable fix:** an `sso` block in `provider_credentials`,
+      read by `services/sso` through `provider_config`, written only by
+      `PUT /api/organization/sso`, with a migration sealing existing values.
+      **Trigger:** the next change to `api/organization_sso.py`, or before the
+      first SSO customer in production.
+- [ ] **(c) Switching ERP or payment provider keeps the old provider's sealed
+      secret.** Changing `erp.type` or `payments.provider` leaves the previous
+      provider's stored key in place, and the next call sends it to the new
+      provider's host. The change is audited (`organization.provider_config_updated`)
+      but nothing clears it. **Durable fix:** when the provider identity of a
+      block changes, drop that block's sealed secrets in the same transaction
+      (or refuse the switch until new secrets are supplied), with a test.
+      **Trigger:** the next change to `provider_credentials` or the
+      organization settings writers — ideally before the QuickBooks connect
+      flow lands.
+- [ ] **(c) A sealed value that can no longer be opened has no in-app
+      recovery.** If the KMS key is disabled or (in dev) `FEOH_SECRET_KEY`
+      changes, every save for that block returns 503, because the writer opens
+      the existing value to merge into it. **Durable fix:** an admin "clear
+      unreadable credentials" action on `/api/organization/credentials/{block}`,
+      audited, that replaces the row without opening it. **Trigger:** the first
+      key rotation or environment where it happens.
 
 ## (a) Blocked on external credentials, accounts, or hardware
 
