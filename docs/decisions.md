@@ -10615,3 +10615,71 @@ that, and the next feature would hit it again); trimming the new receipt copy
 (a worse form to save a kilobyte); per-route catalogues (a reorganisation of
 6,000 keys for a problem one prefix solved).
 
+## 253. A goods receipt can be typed in, and the person who typed it cannot release their own invoice with it (migration 0107)
+
+Nothing in the app could write a goods receipt — `scripts/seed.py` was the only
+writer and no ERP adapter pulls them — so the 3-way leg and the "billed beyond
+receipt" payment hold of §249 ran on demo data or nothing. `POST
+/api/goods-receipts` (`services/goods_receipts.py`) and the `/goods-receipts`
+form add the entry path; `POST /{id}/cancel` undoes a mistaken one.
+
+A receipt is the evidence that lifts a `po_mismatch` on its own (§249's
+auto-close), so the inspection rule of §249 is applied to receipts: each one
+records `source = manual` and `recorded_by_user_id`, and while any live manual
+receipt on the matched PO has an unknown recorder or one implicated in the
+invoice (`approval_chain.violates_segregation`), no `po_mismatch` row on it
+closes by itself. It is coarse on purpose — it does not work out which finding a
+receipt cleared — because leaving a row for a person is the safe error.
+Cancelling only reduces what counts as received, so it can raise a hold but
+never lift one and needs no check. Unlike an inspection, a receipt with **no**
+source is trusted, not held: before 0107 no app user could type one in, so a
+NULL row was written by the seed script or an import, and holding them would
+have frozen every existing hold that a real delivery should lift. That asymmetry
+is why `tests/test_goods_receipt_source_stamping.py` exists — a new in-app
+creation site that forgot the stamp would fail open, not closed.
+
+The clerk may record receipts. Receiving is entry work, and the segregation
+check — not the role list — is what stops a clerk releasing an invoice they
+keyed. The CFO may not; nothing about signing off spend involves counting boxes.
+
+The re-match runs in the same transaction and is **not** best-effort, unlike the
+QMS sync's: a receipt that landed without the hold it should raise is worse than
+a refused receipt, while the sync is a batch whose rows are the contract. The PO
+row is locked for the whole write, which serialises receipts per PO and makes
+the idempotency-key replay and the `GR-<po>-<n>` auto-number race-free. Receipt
+lines name the PO line they receive against (`gr_line_items.po_line_item_id`)
+so the form can show ordered / received / outstanding; the matcher still sums
+the receipt as a whole, and per-line valuation remains §249's follow-up.
+
+Rejected: holding NULL-source receipts like NULL-source inspections (it would
+strand every pre-0107 hold); allowing only managers to receive (the
+self-service segment's receiving is done by whoever opens the box); a
+best-effort rematch (a silent failure leaves an invoice payable that the
+receipt says is over-billed); per-line segregation (which receipt cleared which
+finding is not recoverable from the match result, and guessing would be a
+release on a guess).
+
+**Amended before landing, from the money-path review.** Two holes the first
+cut left open:
+
+* *Cancelling a receipt could lift a hold.* The matcher read a PO whose only
+  receipt was cancelled as "no receipt evidence" and fell back to a 2-way
+  match, so cancelling the manager's six-of-ten receipt turned the clerk's
+  full-PO invoice into a clean `matched` and the hold closed itself. A
+  cancelled receipt is evidence that the goods did not arrive: a PO whose
+  receipts are all cancelled is now a 3-way match with nothing received. This
+  reverses the "falls back to 2-way, the honest answer" reading in
+  `po-matching.md` § Cancelled receipts.
+* *An exception agent could clear what the auto-close refuses.* The agent
+  coordinator's gate vets only the human who triggered the run, so a
+  colleague's run could resolve a `po_mismatch` resting on the uploader's own
+  receipt. After the resolver's change the coordinator re-matches under the
+  org's rules and escalates when `receipts_clear_hold` refuses.
+
+An idempotency key now replays only the same request (PO, date, lines);
+reused for anything else, including raced onto a second PO, it is a 409.
+
+Still open, and tracked in `docs/followups.md`: whoever records a receipt can
+still approve the invoice it supports — receiving is not yet one of the duties
+segregated from approval — and mobile has no receipt entry.
+

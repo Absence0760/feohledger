@@ -164,10 +164,17 @@ whose shortfall is "covered" by a cancelled GR: the downgrade to `partial`
 never fired, so no `po_mismatch` info exception was raised on the part that
 never arrived.
 
-A PO whose only receipt is cancelled falls back to a **2-way** match — the
-honest answer, since there is no receipt evidence at all. The representative
-`gr_id` and the 4-way inspection lookup follow the same filter, so a cancelled
-receipt's inspection can't stand in for a live one either.
+A PO whose receipts are **all** cancelled is a **3-way match with nothing
+received** (`details.all_receipts_cancelled`, `gr_id` null): `partial`, and
+`billed_beyond_receipt` for any amount billed. It used to fall back to a 2-way
+match on the reading "there is no receipt evidence", but a cancelled receipt
+*is* evidence — the business recorded that the goods did not arrive — and the
+fallback let cancelling the only receipt turn an over-billed invoice into a
+clean 2-way `matched`, which closed its payment hold. Once receipts could be
+cancelled in the app, by the person who keyed the invoice, that was a
+self-release (decisions §253). The representative `gr_id` and the 4-way
+inspection lookup follow the same filter, so a cancelled receipt's inspection
+can't stand in for a live one either.
 
 ### Over-receipt
 
@@ -252,6 +259,47 @@ also carries this `po_id`; letting it stand in for the receipt being matched
 would substitute one masking bug for another (shipment 2 passed, so shipment 1
 reads inspected). Covered by
 `backend/tests/test_po_matching_critical_path.py` § 4-way leg.
+
+### Recording a goods receipt
+
+`POST /api/goods-receipts` (`services/goods_receipts.py`) is the one in-app
+writer of `goods_receipts`; before it, receipts came only from
+`scripts/seed.py`, so the 3-way leg had no real input (decisions §252–§253).
+`RECEIPT_ENTRY_ROLES` — admin, AP manager **and AP clerk**, because receiving is
+entry work; the CFO cannot. The web form is `/goods-receipts` → **Record
+receipt**.
+
+| Rule | Why |
+|---|---|
+| The PO row is locked (`SELECT … FOR UPDATE`) for the whole write | Two receipts for one PO can't both read the same "already received", and the idempotency replay and auto-number are race-free |
+| The PO resolves inside the caller's `X-Entity-ID` (opaque 404 otherwise); the receipt is booked to the **PO's** entity | The matcher looks receipts up in the invoice's entity, which is the PO's |
+| A PO with lines is received line by line: each line names one of *this* PO's lines (`gr_line_items.po_line_item_id`), at most once, and its description is the PO line's, never the client's. A PO with no lines takes described free-text lines | The form can show ordered / received / outstanding per line; a receipt can't claim goods the order never named |
+| At least one unit received; `quantity_received` ≥ 0 in `Numeric(12, 4)`; a 0 line is a recorded short shipment | A receipt of nothing is not evidence of anything |
+| Over-receipt is **allowed** | It happened; the matcher flags it (`over_receipt`) |
+| Nothing against a cancelled PO (`CANCELLED_PO_STATUSES`, case-folded) | 409 `goods_receipt_po_cancelled` |
+| `received_date` no later than the server's UTC date + 1 day | A user east of UTC is already on tomorrow; a future receipt would satisfy the 3-way leg for goods not yet here |
+| `gr_number` optional (the delivery-note number), unique per org case-folded; blank → `GR-<po_number>-<n>` | 409 `goods_receipt_number_taken` |
+| `Idempotency-Key` header: a replay of the **same** request (PO, date, lines) returns the same receipt with **200**; the key reused for anything else is a 409 `goods_receipt_idempotency_reused` — including the same key raced onto two POs, which the partial unique index `uq_goods_receipts_org_idempotency_key` catches inside a SAVEPOINT | A duplicate receipt doubles the received quantity and could lift a hold; a reused key answered with a receipt that says something else would be a lie |
+| `source = "manual"`, `recorded_by_user_id` stamped | The auto-close's segregation check above |
+| Audit `goods_receipt.created` — number, PO number, line count, total quantity, date; no free text | The procurement audit shape |
+| Every invoice citing the PO is re-matched **in the same transaction, not best-effort** | A receipt that landed without the holds it should raise (or lift) would be worse than no receipt; the QMS sync's rematch stays best-effort because it is a batch |
+
+`POST /api/goods-receipts/{id}/cancel` moves a **manual** receipt to
+`cancelled` (one of `CANCELLED_GR_STATUSES`, so the matcher stops counting it),
+audits `goods_receipt.cancelled` and re-matches the same way. A receipt from
+elsewhere is a 409 `goods_receipt_not_manual` — it belongs to its own system —
+and a second cancel is a 409. Cancelling only reduces what counts as received,
+so it can raise a hold but never lift one — including cancelling a PO's last
+receipt, which leaves a 3-way match with nothing received, not a 2-way
+fallback (§ Cancelled receipts) — and needs no segregation check.
+
+`GET /api/purchase-orders/{id}` carries `quantity_received` per line (live
+receipts that name the line) and `quantity_received_total` (every live receipt
+line, linked or not — the figure the 3-way leg compares); the form subtracts
+the per-line figure to show what is outstanding.
+
+Refusals are coded (`api/refusals.coded_refusal`) and stated in the reader's
+language by `frontend/src/lib/api/codedRefusals.ts`.
 
 ## Tolerance
 
@@ -382,8 +430,8 @@ where somebody could:
   strictest one does not auto-close when its receipt arrives — a person clears
   it. That is the safe direction.
 - **A hand-typed pass does not lift a quality hold unless someone else typed
-  it.** Receipts only arrive from the ERP sync, but `POST /api/inspections`
-  lets an admin / AP manager record an inspection by hand.
+  it.** `POST /api/inspections` lets an admin / AP manager record an
+  inspection by hand.
   `QualityInspection.source` / `recorded_by_user_id` (migration 0105) say where
   a verdict came from: a `qms` one lifts the hold; a `manual` one only when its
   recorder is known and not implicated in the invoice
@@ -394,6 +442,25 @@ where somebody could:
   was not its own (same inspection number), it also replaces the typed PO / GR
   links with its own resolution — NULL included — so a typed verdict cannot be
   laundered into a "QMS" pass on a PO the QMS never inspected.
+- **A hand-typed receipt does not lift a `po_mismatch` unless someone else
+  typed it.** The receipt twin of the rule above (decisions §253): a receipt
+  is the evidence that clears "billed beyond receipt", and
+  `POST /api/goods-receipts` lets a clerk or manager record one. While any
+  live `manual` receipt on the matched PO has an unknown recorder or one
+  implicated in the invoice, no `po_mismatch` row on it closes
+  (`invoice_warnings._receipts_clear_hold`). Deliberately coarse — it does not
+  work out which finding a receipt cleared, because leaving a row for a person
+  is the safe error — and limited to receipts the matcher still counts, so a
+  cancelled one is not evidence for anything. A receipt with no `source`
+  predates receipt entry (before migration 0107 no app user could type one
+  in), so it is trusted as it always was; `tests/test_goods_receipt_source_stamping.py`
+  fails on an in-app construction site that forgets the stamp.
+- **An exception agent is held to the same receipt rule.** The agent
+  coordinator's own segregation gate only vets the human who triggered the
+  run, so after a resolver's change it re-matches under the org's rules and,
+  if `receipts_clear_hold` refuses, unwinds the change and escalates
+  (`exception_agents/coordinator._receipts_implicated`) — an agent cannot clear
+  a `po_mismatch` on evidence the auto-close would not accept.
 - **A row an agent is deciding is left to the agent.** A resolver that relinks
   or corrects the invoice re-runs the refresh inside
   `exception_lifecycle.deciding`, so the row is resolved once, as the agent,
@@ -407,10 +474,12 @@ where somebody could:
 The org's `settings.exceptions.require_segregation: false` opt-out lifts the two
 segregation limits, as it does on the queue.
 
-Refreshes run on every invoice save, approval-with-corrections, QMS sync and
-the other `refresh_warnings` callers; nothing re-evaluates an untouched invoice
-on a schedule, so a receipt booked against the PO lifts the hold the next time
-the invoice is refreshed.
+Refreshes run on every invoice save, approval-with-corrections, QMS sync,
+**recording or cancelling a goods receipt** and the other `refresh_warnings`
+callers. A receipt re-matches every invoice that cites its PO in the same
+transaction (`invoice_warnings.refresh_invoices_citing_pos`), so the hold lifts
+— or is raised — the moment the receipt lands. Nothing re-evaluates an
+untouched invoice on a schedule.
 
 ### Quality-hold exceptions
 The 4-way leg routes inspection outcomes to a dedicated `quality_hold`
@@ -742,8 +811,8 @@ The procurement models already exist:
 |---|---|
 | `purchase_orders` | PO header (po_number, vendor_id, total, currency, status) — `currency` nullable, no default (migration 0099) |
 | `po_line_items` | PO lines (description, quantity, unit_price, total) |
-| `goods_receipts` | GR header (gr_number, po_id, received_date, status) |
-| `gr_line_items` | GR lines (description, quantity_received) |
+| `goods_receipts` | GR header (gr_number, po_id, received_date, status, source, recorded_by_user_id, idempotency_key — the last three migration 0107) |
+| `gr_line_items` | GR lines (po_line_item_id — migration 0107, NULL on older rows and on a PO with no lines; description, quantity_received) |
 | `quality_inspections` | Inspection header (inspection_number, po_id, gr_id, result, accepted/rejected_quantity, deviation_notes) — the 4-way leg |
 
 ## API
@@ -794,6 +863,15 @@ PATCH→`refresh_warnings`→`match_invoice_to_po` path (PO/GR rows seeded via
 
 `goods-receipts/three-way-feed.spec.ts` proves a GR actually changes the match
 outcome (presence → 3-way; short receipt → `partial`).
+`goods-receipts/record-receipt.spec.ts` drives the **Record receipt** form: a
+partial delivery booked line by line and then cancelled, the over-receipt note,
+the cancelled-PO refusal, the role gate (CFO refused by button and API, clerk
+admitted) and an axe scan of the dialog. The hold consequences — a receipt
+lifting it in the same request, the uploader's own receipt not lifting it, the
+segregation opt-out, a cancel raising it again, the receipt and rematch rolling
+back together — are in `backend/tests/test_goods_receipt_entry.py`, with the
+unknown-recorder and cancelled-receipt cases in
+`tests/test_po_match_exception_reconciliation.py`.
 
 ## Implementation Status
 
@@ -813,6 +891,8 @@ outcome (presence → 3-way; short receipt → `partial`).
 | Tolerance configuration | Done (5% default) |
 | Vendor-aware matching (match PO by vendor_id) | Done |
 | Goods receipt quantity comparison | Done |
+| Goods-receipt **entry** (`POST /api/goods-receipts`, cancel, `/goods-receipts` → Record receipt) | Done (migration 0107, decisions §253) |
+| Goods receipts pulled from an ERP | Planned — roadmap Priority 14, item 2 |
 | Procurement models (PO, GR) | Done (existed) |
 | Wired into extraction + invoice-mutation pipeline (`services.invoice_warnings.refresh_warnings`) | Done |
 | Persisted on `invoice.po_match` (JSONB, alembic 0006) | Done |

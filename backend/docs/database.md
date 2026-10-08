@@ -119,7 +119,7 @@ decimal comparison rather than binary drift.
 #### Procurement (for 3-way matching)
 - `purchase_orders` — PO header (vendor, total, **currency**, status). `currency` is nullable with no default (migration 0099): the code the PO's source knew, NULL when none said — see `docs/decisions.md` §197
 - `po_line_items` — PO lines
-- `goods_receipts` — GR header
+- `goods_receipts` — GR header. `source` (`manual` = recorded via `POST /api/goods-receipts`; NULL = written elsewhere), `recorded_by_user_id` (control-plane id, no FK) and `idempotency_key` (partial unique index per org) — migration 0107, not backfilled; `gr_line_items.po_line_item_id` (FK → `po_line_items`) names the PO line a quantity was received against. See `po-matching.md` § Recording a goods receipt.
 - `gr_line_items` — GR lines
 
 #### Workflow Engine
@@ -465,8 +465,8 @@ gate fails if a model is added without being classified.
    - `Vendor` — name, code, tax_id, status (active/unverified/inactive/rejected), source (manual/erp_sync/ai_extracted)
    - `PurchaseOrder` — po_number, vendor_id, total, currency (nullable, no default — migration 0099), status
    - `POLineItem` — po_id, description, quantity, unit_price, total
-   - `GoodsReceipt` — gr_number, po_id, received_date, status
-   - `GRLineItem` — gr_id, description, quantity_received
+   - `GoodsReceipt` — gr_number, po_id, received_date, status, source, recorded_by_user_id, idempotency_key
+   - `GRLineItem` — gr_id, po_line_item_id (migration 0107), description, quantity_received
    - `QualityInspection` — inspection_number, po_id, gr_id, result (pass/fail/partial), accepted_quantity, rejected_quantity, deviation_notes — the 4-way match leg (see `docs/po-matching.md`)
    - `GLAccount` — code, name, account_type, parent_code, erp_account_id
    - `PaymentRun` — status, total_amount, initiated_by, executed_at
