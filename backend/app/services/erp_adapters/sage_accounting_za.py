@@ -46,7 +46,9 @@ Required ``settings.erp`` config (``type: "sage_accounting_za"``,
 Optional:
 
     base_url:       API base (default ``https://accounting.sageone.co.za/api/2.0.0``);
-                    admin-supplied, so https-only and behind the SSRF guard
+                    admin-supplied, so https-only, on Sage's own API host
+                    (``accounting.sageone.co.za``) only, and behind the SSRF
+                    guard — it receives the API key and the Sage password
     home_currency:  ISO 4217 code of the company's home currency (default
                     ``ZAR``). The API reports currencies only as numeric ids and
                     a display symbol, never an ISO code, so this is the one place
@@ -62,7 +64,15 @@ password only ever travels in the basic-auth header, which httpx does not log.
 **VAT.** Lines are posted VAT-inclusive (our approved amount is the gross),
 against the account's own default tax type, falling back to the company's
 default tax type. The percentage always comes from Sage's ``TaxType`` — no rate
-is hardcoded here.
+is hardcoded here. The VAT that split books must be the VAT the invoice states
+(``tax_mismatch``); an invoice that states no VAT at all posts only when every
+line's resolved rate is 0% (``tax_not_stated``), so input VAT the supplier never
+charged is never claimed.
+
+**Posted total.** Sage recalculates ``Total`` on save. A different total deletes
+the invoice just saved and fails ``posted_total_mismatch``; a save that reports
+no total fails ``posted_total_unconfirmed``. Both are non-retryable
+(``posted_total.check_posted_total``).
 """
 
 from __future__ import annotations
@@ -91,9 +101,13 @@ from app.services.erp_adapters.base import (
 from app.services.erp_adapters.bill_lines import bill_lines
 from app.services.erp_adapters.dispatcher import register_adapter
 from app.services.erp_adapters.log_redaction import redact_query_strings_containing
+from app.services.erp_adapters.posted_total import check_posted_total
 
 PROVIDER = "Sage Accounting (ZA)"
 DEFAULT_API_BASE = "https://accounting.sageone.co.za/api/2.0.0"
+#: The only host an admin-supplied ``base_url`` may name: it receives the API
+#: key (query string) and the Sage login (basic auth).
+SAGE_ZA_API_HOST = "accounting.sageone.co.za"
 DEFAULT_HOME_CURRENCY = "ZAR"
 
 #: ``CommercialDocumentLine.LineType`` — 1 posts the line against a GL account.
@@ -107,7 +121,7 @@ DUPLICATE_INVOICE_NUMBER = "duplicate_invoice_number"
 CORRELATION_TOTAL_MISMATCH = "correlation_total_mismatch"
 TAX_TYPE_NOT_RESOLVED = "tax_type_not_resolved"
 TAX_MISMATCH = "tax_mismatch"
-POSTED_TOTAL_MISMATCH = "posted_total_mismatch"
+TAX_NOT_STATED = "tax_not_stated"
 
 #: Sage returns at most 100 rows per request; 10 pages = the 1000-row bound
 #: every other adapter's list sync uses.
@@ -273,8 +287,13 @@ class SageAccountingZaAdapter(ErpAdapter):
             return DEFAULT_API_BASE
         # The API key travels in this URL's query string and the password in
         # its basic-auth header, so a plain-http endpoint would leak both.
-        if urlsplit(base).scheme.lower() != "https":
+        parts = urlsplit(base)
+        if parts.scheme.lower() != "https":
             raise SageZaConfigError(f"{PROVIDER} base_url must use https")
+        # Only Sage's own API host: any other host, public or not, would be
+        # handed the API key and the Sage password on the first call.
+        if (parts.hostname or "").lower() != SAGE_ZA_API_HOST or parts.port not in (None, 443):
+            raise SageZaConfigError(f"{PROVIDER} base_url must be on {SAGE_ZA_API_HOST}")
         # SSRF guard: base_url is admin-supplied config — refuse an internal
         # host before it's interpolated into a server-side request.
         from app.utils.url_safety import assert_public_url_async
@@ -486,8 +505,13 @@ class SageAccountingZaAdapter(ErpAdapter):
             # The VAT Sage would book must be the VAT on the invoice we approved:
             # a zero-rated invoice coded to a standard-rated account would
             # otherwise claim input VAT that was never charged.
-            tolerance = _CENT * len(account_lines)
-            if payload.tax_amount is not None and abs(tax_total - payload.tax_amount) > tolerance:
+            if payload.tax_amount is None:
+                # "No tax stated" is not "any tax is fine": unless every line's
+                # rate is 0%, Sage would book input VAT the supplier never
+                # charged.
+                if any(_decimal(t.get("Percentage")) != 0 for t in taxes.values()):
+                    return erp_refusal(PROVIDER, TAX_NOT_STATED)
+            elif abs(tax_total - payload.tax_amount) > _CENT * len(account_lines):
                 return erp_refusal(PROVIDER, TAX_MISMATCH)
 
             resp = await self._call(client, base, "POST", "SupplierInvoice/Save", "post", body=body)
@@ -498,20 +522,22 @@ class SageAccountingZaAdapter(ErpAdapter):
             )
         saved = _json(resp)
         saved = saved if isinstance(saved, dict) else {}
-        posted_total = _decimal(saved.get("Total"))
-        if posted_total is not None and posted_total != payload.amount:
-            # Sage recalculated a different total. The invoice exists in Sage
-            # but does not match what was approved; an accountant must look.
-            return ErpPostResult(
-                success=False,
-                erp_document_id=str(saved.get("ID")) if saved.get("ID") is not None else None,
-                message=f"{PROVIDER} post failed: {POSTED_TOTAL_MISMATCH}",
-                retryable=False,
-            )
-        doc_id = saved.get("ID")
+        doc_id = str(saved.get("ID")) if saved.get("ID") is not None else None
+        # Sage recalculates the total on save; only the approved amount counts.
+        # A missing total is unconfirmed, never success.
+        problem = await check_posted_total(
+            self,
+            PROVIDER,
+            payload,
+            posted_total=_decimal(saved.get("Total")),
+            document_id=doc_id,
+            document_number=payload.invoice_number,
+        )
+        if problem:
+            return problem
         return ErpPostResult(
             success=True,
-            erp_document_id=str(doc_id) if doc_id is not None else None,
+            erp_document_id=doc_id,
             erp_document_number=payload.invoice_number,
             message=f"Posted to {PROVIDER}",
         )

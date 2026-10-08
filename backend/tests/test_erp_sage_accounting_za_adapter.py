@@ -104,6 +104,7 @@ class FakeSage:
         self.company = {"ID": 4711, "Name": "Our Co", "HomeCurrencyId": 1, "CurrencyId": 1}
         self.status: dict[str, int] = {}
         self.save_total_override: str | None = None
+        self.save_drops_total = False
         self.save_raises: Exception | None = None
         self.save_body = None
 
@@ -129,7 +130,7 @@ class FakeSage:
             )
         if path.startswith("SupplierInvoice/Get/"):
             doc = next((i for i in self.invoices if str(i["ID"]) == path.rsplit("/", 1)[1]), None)
-            return httpx.Response(200, json=doc) if doc else httpx.Response(404)
+            return httpx.Response(200, content=_dumps(doc)) if doc else httpx.Response(404)
         if path.startswith("SupplierInvoice/Delete/"):
             self.invoices = [i for i in self.invoices if str(i["ID"]) != path.rsplit("/", 1)[1]]
             return httpx.Response(200)
@@ -138,9 +139,13 @@ class FakeSage:
                 raise self.save_raises
             self.save_body = request.content.decode()
             body = json.loads(request.content, parse_float=Decimal)
-            saved = {**body, "ID": 9001, "AmountDue": body["Total"]}
+            saved = {**body, "ID": 9001}
             if self.save_total_override:
                 saved["Total"] = self.save_total_override
+            if self.save_drops_total:
+                del saved["Total"]
+            saved["AmountDue"] = saved.get("Total")
+            self.invoices.append(saved)
             return httpx.Response(201, content=_dumps(saved))
         if path == "Account/Get":
             ids = {int(p.split(" eq ")[1]) for p in flt.split(" or ")} if flt else None
@@ -200,6 +205,7 @@ def _payload(**overrides) -> InvoicePayload:
         invoice_number="INV-1",
         vendor_name="Acme",
         amount=Decimal("115.00"),
+        tax_amount=Decimal("15.00"),
         currency="ZAR",
         invoice_date=date(2026, 1, 1),
         due_date=date(2026, 1, 31),
@@ -411,7 +417,40 @@ def test_sage_recalculating_another_total_is_a_non_retryable_failure():
     fake.save_total_override = "115.01"
     result = _post(fake)
     assert not result.success and not result.retryable
-    assert result.message.endswith("posted_total_mismatch")
+    assert result.message == (
+        "Sage Accounting (ZA) post failed: posted_total_mismatch (the bill was voided)"
+    )
+    # The invoice it saved with the wrong total is deleted, not left in Sage.
+    assert "SupplierInvoice/Delete/9001" in fake.paths()
+    assert fake.invoices == []
+
+
+def test_a_save_that_reports_no_total_is_unconfirmed_not_success():
+    fake = FakeSage()
+    fake.save_drops_total = True
+    result = _post(fake)
+    assert not result.success and not result.retryable
+    assert result.message.startswith(
+        "Sage Accounting (ZA) post unconfirmed: posted_total_unconfirmed"
+    )
+    assert result.erp_document_id == "9001"
+
+
+def test_an_invoice_stating_no_vat_is_refused_on_a_standard_rated_account():
+    """tax_amount None means "no tax stated", not "any tax is fine": posting
+    would claim 15% input VAT the supplier never charged."""
+    fake = FakeSage()
+    result = _post(fake, _payload(tax_amount=None))
+    assert not result.success and not result.retryable
+    assert result.message == "Sage Accounting (ZA) post refused: tax_not_stated"
+    assert "SupplierInvoice/Save" not in fake.paths()
+
+
+def test_an_invoice_stating_no_vat_posts_on_a_zero_rated_account():
+    fake = FakeSage()
+    result = _post(fake, _payload(tax_amount=None, gl_account_erp_id="6200"))
+    assert result.success, result.message
+    assert json.loads(fake.save_body, parse_float=Decimal)["Tax"] == Decimal("0.00")
 
 
 # ---------------------------------------------------------------------------
@@ -538,12 +577,38 @@ def test_admin_base_url_must_be_https(monkeypatch):
 
 
 @pytest.mark.parametrize(
-    "base_url", ["https://127.0.0.1/api", "https://10.1.2.3", "https://169.254.169.254"]
+    "base_url",
+    [
+        "https://127.0.0.1/api",
+        "https://10.1.2.3",
+        "https://169.254.169.254",
+        # Public, https, passes the SSRF guard — and would still be handed the
+        # API key and the Sage password.
+        "https://sage-proxy.example.com/api/2.0.0",
+        "https://accounting.sageone.co.za.example.com/api/2.0.0",
+        "https://accounting.sageone.co.za:8443/api/2.0.0",
+    ],
 )
-def test_admin_base_url_behind_the_ssrf_guard(monkeypatch, base_url):
+def test_admin_base_url_must_be_the_sage_sa_api_host(monkeypatch, base_url):
     monkeypatch.setattr(settings, "erp_sage_za_api_base", "")
     fake = FakeSage()
     adapter = SageAccountingZaAdapter({**CONFIG, "base_url": base_url})
+    with pytest.raises(SageZaConfigError, match="accounting.sageone.co.za"):
+        _run(fake, lambda: adapter.post_invoice(_payload()))
+    assert fake.requests == []
+
+
+def test_admin_base_url_on_the_sage_host_still_passes_the_ssrf_guard(monkeypatch):
+    monkeypatch.setattr(settings, "erp_sage_za_api_base", "")
+
+    async def _unsafe(url):
+        raise UnsafeUrlError("resolves to a private address")
+
+    monkeypatch.setattr("app.utils.url_safety.assert_public_url_async", _unsafe)
+    fake = FakeSage()
+    adapter = SageAccountingZaAdapter(
+        {**CONFIG, "base_url": "https://accounting.sageone.co.za/api/2.0.0"}
+    )
     with pytest.raises(UnsafeUrlError):
         _run(fake, lambda: adapter.post_invoice(_payload()))
     assert fake.requests == []
