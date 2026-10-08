@@ -1,8 +1,31 @@
 # QuickBooks Online direct adapter — scope
 
-**Status: scoped, not started (2026-10-07).** Tracked in `docs/followups.md`
-(c). This is the plan; `erp-integration.md` stays the description of what is
-built until code lands.
+**Status (2026-10-08): Phases 1 and 2 built; Phases 3–5 open.** The OAuth
+connect flow (`services/erp_oauth.py`, `api/erp_oauth.py`) and the adapter
+(`erp_adapters/quickbooks_online.py`) are described as built in
+`erp-integration.md` § Connecting an OAuth ERP. Where the build departs from
+this plan:
+
+- Tokens live in `settings.erp.oauth` (ALWAYS_REDACTED), not yet in a
+  KMS-encrypted tenant row. That follow-up still applies.
+- There is no `erp_connections` realm index table. A company already connected
+  to another tenant is refused at connect time by a JSONB query; the Phase 3
+  webhook still needs the index.
+- Access tokens are not cached in Redis: each call reads the stored block (one
+  primary-key select). Refreshes are serialised by a Redis lock plus a
+  compare-and-swap write.
+- Routes are `GET /api/organization/erp/oauth/{provider}/authorize` (JSON
+  `authorize_url`) and one shared `GET /api/erp/oauth/callback`, so every
+  OAuth ERP registers one redirect URI.
+- Open question 1 is answered conservatively: `void_invoice` deletes only a
+  bill with no payment applied (`Balance == TotalAmt`).
+- Open question 2 is not answered: lines must sum to the header amount, so a
+  bill whose tax is carried only in the header is refused as
+  `amount_mismatch`.
+- The `x_refresh_token_expires_in` expiry is recorded and shown on `/status`,
+  but nothing yet notifies an admin 30 days before it.
+
+The rest of this file is the original plan.
 
 ## Why direct, not through Merge.dev
 

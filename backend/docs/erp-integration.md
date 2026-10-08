@@ -1080,7 +1080,8 @@ integrations. That is why QuickBooks Online is scoped as a direct adapter
 | ERP config UI in org settings | Done (catalogue-driven, write-only secrets) |
 | Post-ERP statuses (posted_in_erp, payment_scheduled, paid) | Done |
 | Polling job for status sync | Planned |
-| QuickBooks Online direct adapter | Scoped — `quickbooks-online-adapter.md` |
+| OAuth authorization-code connect flow (`services/erp_oauth`) | Done — § Connecting an OAuth ERP |
+| QuickBooks Online direct adapter | Done (Phases 1–2) — `quickbooks-online-adapter.md`; webhooks and BillPayment write-back still scoped |
 | Remaining direct adapters (SAP, Epicor, etc.) | Use Merge.dev |
 | Test connection button in UI | Done |
 | ERP status display in invoice modal | Planned |
@@ -1123,7 +1124,8 @@ Request rules worth knowing:
 
 - **Lines.** `bill_lines.bill_lines` posts one Intacct line per invoice line
   only when every line has a total, every line resolves a GL account ERP id
-  (its own, else the header's) and the totals sum to exactly
+  (its own; only an uncoded line takes the header's, and a coded line with no
+  id refuses `account_not_linked`) and the totals sum to exactly
   `payload.amount`; otherwise one line for `payload.amount` against the header
   account. The header amount is never recomputed from lines.
 - **Money** goes as fixed-point decimal strings (`format(d, "f")`): no float,
@@ -1567,3 +1569,60 @@ Tests: `test_erp_gl_sync.py`, `test_erp_po_sync.py`,
 `test_erp_adapter_idempotency.py` (BC lines, failed lookups),
 `test_erp_adapter_error_pii.py` (BC `account_not_linked`),
 `test_erp_base_url_overrides.py` (SSRF guard on the BC list syncs).
+## Connecting an OAuth ERP (QuickBooks Online, Xero, Sage Accounting, Blackbaud)
+
+These ERPs have no client-credentials grant: the customer's admin consents in
+the provider's UI. One flow serves all of them (`services/erp_oauth.py`,
+routes in `api/erp_oauth.py`). An adapter subclasses
+`erp_adapters/oauth_base.OAuthErpAdapter`, registers an `OAuthProviderSpec`,
+and calls `await self.access_token()`.
+
+**Routes**
+
+| Route | Auth | Contract |
+|---|---|---|
+| `GET /api/organization/erp/oauth/{provider}/authorize` | admin + `erp_integrations` plan | `200 {"authorize_url"}`; the page navigates the browser to it. `404` unknown provider, `409` no app configured, `402` plan. |
+| `GET /api/erp/oauth/callback` | public; signed single-use `state` | Exchanges the code, writes `settings.erp = {type, integration_method: "direct", oauth}`, and 302s to `<tenant origin>/organization?section=erp&erp_connected=<provider>` or `&erp_error=<code>`. Codes: `invalid_state` (forged: plain 400, no redirect), `state_expired` (replayed or expired), `access_denied`, `not_authorized` (the admin who started it is no longer an active admin), `plan_required`, `missing_code`, `provider_unavailable`, `token_exchange_failed`, `no_external_tenant`, `already_linked` (the company is connected to another tenant), `unknown_provider`. |
+| `POST /api/organization/erp/oauth/disconnect` | admin (not plan-gated) | Clears `settings.erp.oauth`, then revokes best-effort: `{"disconnected", "revoked"}`. |
+| `GET /api/organization/erp/oauth/status` | admin | `{provider, connected, needs_reconnect, external_tenant_id, expires_at, refresh_token_expires_at, connected_at, redirect_uri, providers: [{key, display_name, available, client_source}]}`. Never a token. |
+
+Connect and disconnect audit `organization.erp_connected` /
+`organization.erp_disconnected` (provider and client source, no tokens).
+
+**Which app.** The tenant's own (`settings.erp.client_id` / `client_secret`
+while `settings.erp.type` names the provider) wins over the platform's `FEOH_`
+app. With neither, the provider is unavailable. The consent's source is
+recorded, and the refresher uses the same one.
+
+**Storage and refresh.** `settings.erp.oauth` holds the tokens plus `provider`,
+`org_id` and a random `connection_id`. It is `ALWAYS_REDACTED` from the
+settings response, refused on `PATCH /api/organization`, and carried across an
+`erp` save that keeps the same type. The refresher re-reads the stored block
+(never the config's copy) and requires the config's `provider` and
+`connection_id` to match it, so an admin-supplied `test-erp` config naming
+another org's id reaches nothing. It serialises refreshes per connection with
+a Redis lock and persists the rotated refresh token by compare-and-swap. A
+provider `invalid_grant` marks `needs_reconnect`. An outage raises
+`ErpTokenRefreshError` and leaves the connection alone.
+
+**Per-provider hooks on the spec.** The company id comes from
+`external_tenant_id_param` (a callback query parameter: QBO `realmId`), from
+`external_tenant_id_token_field` (a token-response field: Blackbaud
+`environment_id`), or from an override of
+`OAuthErpAdapter.resolve_external_tenant_id` (Xero `GET /connections`, Sage's
+business lookup). `extra_token_headers(erp_settings)` adds headers to every
+token and revoke call (Blackbaud's subscription key). `token_auth` is `basic`
+or `body`. An empty `scopes` sends no `scope`. Operator URL overrides
+(`*_url_setting`) are read on every call.
+
+**QuickBooks Online** (`erp_adapters/quickbooks_online.py`). It refuses before
+any post, with `QuickBooks Online refused: <reason>`: `vendor_not_linked`,
+`account_not_linked`, `amount_mismatch` (the lines must sum to the header
+amount, because QuickBooks re-totals from lines), `doc_number_too_long` (21
+characters), `currency_not_enabled`, `currency_unknown`, `not_connected`.
+Posting is idempotent through `requestid=<correlation id>` plus a pre-check on
+DocNumber + vendor + `PrivateNote: "FeohLedger <correlation id>"`. A 401
+refreshes once and retries. `void_invoice` deletes only a bill with no payment
+applied. Locally, `pnpm erp:up` starts fake-erp, which serves `/qbo/oauth2/*`
+(with rotating refresh tokens) and `/qbo/v3/company/fake-realm-1/*`;
+`POST /__qbo/set-balance` marks a bill paid.
