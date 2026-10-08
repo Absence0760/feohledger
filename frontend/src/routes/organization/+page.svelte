@@ -6,6 +6,16 @@
 	import PageHeader from '#lib/components/ui/PageHeader.svelte';
 	import Badge from '#lib/components/ui/Badge.svelte';
 	import SecretReveal from '#lib/components/ui/SecretReveal.svelte';
+	import SecretField from '#lib/components/ui/SecretField.svelte';
+	import {
+		getProviderCredentials,
+		updateProviderCredentials
+	} from '#lib/api/providerCredentials.ts';
+	import {
+		credentialUpdate,
+		type CredentialBlock,
+		type ProviderCredentialStatus
+	} from '#lib/types/providerCredentials.ts';
 	import SettingsRail from '#lib/components/ui/SettingsRail.svelte';
 	import { m } from '#lib/i18n/store.svelte.ts';
 	import { auth } from '#lib/stores/auth.svelte.ts';
@@ -63,23 +73,21 @@
 		default_cost_center: string;
 	}
 
+	// The ERP block's CONFIGURATION. Its secrets (Merge API key + account token,
+	// client / consumer / token secrets) are write-only and never arrive on the
+	// read — see `creds` and `#lib/types/providerCredentials.ts`.
 	interface ErpConfig {
 		type: string;
 		integration_method: string;
-		api_key: string;
-		account_token: string;
 		// Direct adapter fields
 		base_url: string;
 		tenant_id: string;
 		client_id: string;
-		client_secret: string;
 		environment: string;
 		company_id: string;
 		account_id: string;
 		consumer_key: string;
-		consumer_secret: string;
 		token_id: string;
-		token_secret: string;
 	}
 
 	interface FraudRules {
@@ -166,6 +174,55 @@
 	let erpTokenId = $state('');
 	let erpTokenSecret = $state('');
 	let testingConnection = $state(false);
+	// Provider credentials are write-only (`/api/organization/credentials`). Each
+	// secret input on the ERP, payments and cards panels starts EMPTY and holds
+	// only what the admin types — a blank one keeps the stored value. `creds`
+	// lists which paths the server holds (names only); `secretClear` is each
+	// field's "remove" toggle, keyed `block.path`.
+	let creds = $state<ProviderCredentialStatus | null>(null);
+	// Every key a `SecretField` binds is present from the start: Svelte 5 refuses
+	// `bind:` of `undefined` to a prop that declares a fallback.
+	let secretClear = $state<Record<string, boolean>>({
+		'erp.api_key': false,
+		'erp.account_token': false,
+		'erp.client_secret': false,
+		'erp.consumer_secret': false,
+		'erp.token_secret': false,
+		'payments.api_key': false,
+		'payments.webhook_secret': false,
+		'cards.api_key': false,
+		'cards.client_secret': false
+	});
+	const isStored = (block: CredentialBlock, path: string): boolean =>
+		creds?.[block].includes(path) ?? false;
+
+	async function loadCredentials() {
+		try {
+			creds = await getProviderCredentials();
+		} catch {
+			// Non-fatal: the fields then say nothing is stored, and a blank field
+			// still keeps whatever is — the server decides, not this flag.
+		}
+	}
+
+	/**
+	 * Save one block's typed secrets / remove toggles, after its configuration
+	 * PATCH. No request when nothing secret changed; throws (for the caller's
+	 * toast) when the server refuses, leaving the typed values in place.
+	 */
+	async function saveSecrets(block: CredentialBlock, typed: Record<string, string>): Promise<void> {
+		const body = credentialUpdate(
+			Object.fromEntries(
+				Object.entries(typed).map(([path, value]) => [
+					path,
+					{ value, clear: secretClear[`${block}.${path}`] ?? false }
+				])
+			)
+		);
+		if (!body) return;
+		creds = await updateProviderCredentials(block, body);
+		for (const path of Object.keys(typed)) secretClear[`${block}.${path}`] = false;
+	}
 	// Extraction
 	let extractionProgramType = $state('platform');
 	let extractionProvider = $state('claude_vision');
@@ -463,19 +520,14 @@
 			if (erp) {
 				erpType = erp.type || 'dynamics_365_bc';
 				erpMethod = erp.integration_method || 'merge_dev';
-				erpApiKey = erp.api_key || '';
-				erpAccountToken = erp.account_token || '';
 				erpBaseUrl = erp.base_url || '';
 				erpTenantId = erp.tenant_id || '';
 				erpClientId = erp.client_id || '';
-				erpClientSecret = erp.client_secret || '';
 				erpEnvironment = erp.environment || 'production';
 				erpCompanyId = erp.company_id || '';
 				erpAccountId = erp.account_id || '';
 				erpConsumerKey = erp.consumer_key || '';
-				erpConsumerSecret = erp.consumer_secret || '';
 				erpTokenId = erp.token_id || '';
-				erpTokenSecret = erp.token_secret || '';
 			}
 			// Cards
 			const cards = (data.settings as unknown as Record<string, unknown>).cards as Record<string, unknown> | undefined;
@@ -484,9 +536,7 @@
 				cardsProgramType = (cards.program_type as string) || 'platform';
 				cardsProvider = (cards.provider as string) || '';
 				cardsRegion = (cards.region as string) || 'US';
-				cardsApiKey = (cards.api_key as string) || '';
 				cardsClientId = (cards.client_id as string) || '';
-				cardsClientSecret = (cards.client_secret as string) || '';
 				cardsCustomerHashId = (cards.customer_hash_id as string) || '';
 				cardsWalletHashId = (cards.wallet_hash_id as string) || '';
 				cardsExpiryDays = (cards.default_expiry_days as number) || 30;
@@ -515,10 +565,8 @@
 				loadPaymentsExtras(pmt);
 				paymentsProvider = (pmt.provider as string) || 'mock';
 				paymentsProgramType = (pmt.program_type as string) || 'byok';
-				paymentsApiKey = (pmt.api_key as string) || '';
 				paymentsOrgId = (pmt.org_id as string) || '';
 				paymentsOriginatingAccount = (pmt.originating_account_id as string) || '';
-				paymentsWebhookSecret = (pmt.webhook_secret as string) || '';
 				paymentsSandbox = (pmt.sandbox as boolean) ?? true;
 				paymentsCfoThreshold = (pmt.cfo_approval_above as number | null) ?? null;
 			}
@@ -603,6 +651,13 @@
 		// `once()` — the panel can be revisited without refetching.
 		if (section !== 'fraud' || !userLoaded || !auth.isAdmin || fraudDefaults) return;
 		loadFraudDefaults();
+	});
+
+	$effect(() => {
+		// Admin-only, like the fraud defaults: a clerk sees the read-only banner
+		// and has no secret field to describe.
+		if (!userLoaded || !auth.isAdmin || creds) return;
+		loadCredentials();
 	});
 
 	async function loadFraudDefaults() {
@@ -761,21 +816,24 @@
 				erp: {
 					type: erpType,
 					integration_method: erpMethod,
-					api_key: erpApiKey,
-					account_token: erpAccountToken,
 					base_url: erpBaseUrl,
 					tenant_id: erpTenantId,
 					client_id: erpClientId,
-					client_secret: erpClientSecret,
 					environment: erpEnvironment,
 					company_id: erpCompanyId,
 					account_id: erpAccountId,
 					consumer_key: erpConsumerKey,
-					consumer_secret: erpConsumerSecret,
 					token_id: erpTokenId,
-					token_secret: erpTokenSecret,
 				},
 			});
+			await saveSecrets('erp', {
+				api_key: erpApiKey,
+				account_token: erpAccountToken,
+				client_secret: erpClientSecret,
+				consumer_secret: erpConsumerSecret,
+				token_secret: erpTokenSecret
+			});
+			erpApiKey = erpAccountToken = erpClientSecret = erpConsumerSecret = erpTokenSecret = '';
 		} catch (err) {
 			toast(err instanceof Error ? err.message : m('org.toast.saveFailed'), 'error');
 		} finally {
@@ -814,15 +872,15 @@
 					program_type: cardsProgramType,
 					provider: cardsProvider || autoProvider,
 					region: cardsRegion,
-					api_key: cardsApiKey,
 					client_id: cardsClientId,
-					client_secret: cardsClientSecret,
 					customer_hash_id: cardsCustomerHashId,
 					wallet_hash_id: cardsWalletHashId,
 					default_expiry_days: cardsExpiryDays,
 					sandbox: cardsSandbox,
 				},
 			});
+			await saveSecrets('cards', { api_key: cardsApiKey, client_secret: cardsClientSecret });
+			cardsApiKey = cardsClientSecret = '';
 		} catch (err) {
 			toast(err instanceof Error ? err.message : m('org.toast.saveFailed'), 'error');
 		} finally {
@@ -899,15 +957,18 @@
 					nacha,
 					provider: paymentsProvider,
 					program_type: paymentsProgramType,
-					api_key: paymentsApiKey,
 					org_id: paymentsOrgId,
 					originating_account_id: paymentsOriginatingAccount,
-					webhook_secret: paymentsWebhookSecret,
 					sandbox: paymentsSandbox,
 					cfo_approval_above: paymentsCfoThreshold,
 				},
 			});
 			if (sendMode) paymentsModeStored = paymentsMode;
+			await saveSecrets('payments', {
+				api_key: paymentsApiKey,
+				webhook_secret: paymentsWebhookSecret
+			});
+			paymentsApiKey = paymentsWebhookSecret = '';
 		} catch (err) {
 			toast(err instanceof Error ? err.message : m('org.toast.saveFailed'), 'error');
 		} finally {
@@ -2464,14 +2525,24 @@
 
 							{#if erpMethod === 'merge_dev'}
 								<div class="form-grid" style="margin-top: 14px;">
-									<label>
-										<span>{m('org.erp.mergeApiKey')}</span>
-										<input type="password" bind:value={erpApiKey} placeholder="test_..." />
-									</label>
-									<label>
-										<span>{m('org.erp.accountToken')}</span>
-										<input type="password" bind:value={erpAccountToken} placeholder={m('org.erp.accountTokenPlaceholder')} />
-									</label>
+									<SecretField
+										id="erp-api-key"
+										label={m('org.erp.mergeApiKey')}
+										bind:value={erpApiKey}
+										bind:clear={secretClear['erp.api_key']}
+										configured={isStored('erp', 'api_key')}
+										placeholder="test_..."
+										testId="erp-api-key"
+									/>
+									<SecretField
+										id="erp-account-token"
+										label={m('org.erp.accountToken')}
+										bind:value={erpAccountToken}
+										bind:clear={secretClear['erp.account_token']}
+										configured={isStored('erp', 'account_token')}
+										placeholder={m('org.erp.accountTokenPlaceholder')}
+										testId="erp-account-token"
+									/>
 								</div>
 								<p class="card-hint" style="margin-top: 8px;">{m('org.erp.mergeHintPre')} <a href="https://app.merge.dev" target="_blank" rel="noopener">{m('org.erp.mergeDashboard')}</a>{m('org.erp.mergeHintPost')}</p>
 							{:else if erpType === 'dynamics_365_bc'}
@@ -2492,10 +2563,14 @@
 										<span>{m('org.erp.clientId')}</span>
 										<input type="text" bind:value={erpClientId} />
 									</label>
-									<label>
-										<span>{m('org.erp.clientSecret')}</span>
-										<input type="password" bind:value={erpClientSecret} />
-									</label>
+									<SecretField
+										id="erp-client-secret"
+										label={m('org.erp.clientSecret')}
+										bind:value={erpClientSecret}
+										bind:clear={secretClear['erp.client_secret']}
+										configured={isStored('erp', 'client_secret')}
+										testId="erp-client-secret"
+									/>
 									<label>
 										<span>{m('org.erp.companyId')}</span>
 										<input type="text" bind:value={erpCompanyId} />
@@ -2511,18 +2586,26 @@
 										<span>{m('org.erp.consumerKey')}</span>
 										<input type="text" bind:value={erpConsumerKey} />
 									</label>
-									<label>
-										<span>{m('org.erp.consumerSecret')}</span>
-										<input type="password" bind:value={erpConsumerSecret} />
-									</label>
+									<SecretField
+										id="erp-consumer-secret"
+										label={m('org.erp.consumerSecret')}
+										bind:value={erpConsumerSecret}
+										bind:clear={secretClear['erp.consumer_secret']}
+										configured={isStored('erp', 'consumer_secret')}
+										testId="erp-consumer-secret"
+									/>
 									<label>
 										<span>{m('org.erp.tokenId')}</span>
 										<input type="text" bind:value={erpTokenId} />
 									</label>
-									<label>
-										<span>{m('org.erp.tokenSecret')}</span>
-										<input type="password" bind:value={erpTokenSecret} />
-									</label>
+									<SecretField
+										id="erp-token-secret"
+										label={m('org.erp.tokenSecret')}
+										bind:value={erpTokenSecret}
+										bind:clear={secretClear['erp.token_secret']}
+										configured={isStored('erp', 'token_secret')}
+										testId="erp-token-secret"
+									/>
 								</div>
 							{:else}
 								<div class="form-grid" style="margin-top: 14px;">
@@ -2534,10 +2617,13 @@
 										<span>{m('org.erp.apiKeyClientId')}</span>
 										<input type="password" bind:value={erpClientId} />
 									</label>
-									<label>
-										<span>{m('org.erp.apiSecretClientSecret')}</span>
-										<input type="password" bind:value={erpClientSecret} />
-									</label>
+									<SecretField
+										id="erp-generic-client-secret"
+										label={m('org.erp.apiSecretClientSecret')}
+										bind:value={erpClientSecret}
+										bind:clear={secretClear['erp.client_secret']}
+										configured={isStored('erp', 'client_secret')}
+									/>
 								</div>
 								<p class="card-hint" style="margin-top: 8px;">{m('org.erp.directSoonHint', { erp: ERP_TYPES.find(e => e.value === erpType)?.label ?? erpType })}</p>
 							{/if}
@@ -2664,18 +2750,27 @@
 										<span>{m('org.payments.orgId')}</span>
 										<input type="text" bind:value={paymentsOrgId} placeholder="org_..." />
 									</label>
-									<label>
-										<span>{m('org.payments.apiKey')}</span>
-										<input type="password" bind:value={paymentsApiKey} placeholder="••••••••" autocomplete="off" />
-									</label>
+									<SecretField
+										id="payments-api-key"
+										label={m('org.payments.apiKey')}
+										bind:value={paymentsApiKey}
+										bind:clear={secretClear['payments.api_key']}
+										configured={isStored('payments', 'api_key')}
+										testId="payments-api-key"
+									/>
 									<label>
 										<span>{m('org.payments.originatingAccount')}</span>
 										<input type="text" bind:value={paymentsOriginatingAccount} placeholder={m('org.payments.originatingAccountPlaceholder')} />
 									</label>
-									<label>
-										<span>{m('org.payments.webhookSecret')}</span>
-										<input type="password" bind:value={paymentsWebhookSecret} placeholder={m('org.payments.webhookSecretPlaceholder')} autocomplete="off" />
-									</label>
+									<SecretField
+										id="payments-webhook-secret"
+										label={m('org.payments.webhookSecret')}
+										bind:value={paymentsWebhookSecret}
+										bind:clear={secretClear['payments.webhook_secret']}
+										configured={isStored('payments', 'webhook_secret')}
+										placeholder={m('org.payments.webhookSecretPlaceholder')}
+										testId="payments-webhook-secret"
+									/>
 									<label class="switch-row">
 										<input type="checkbox" bind:checked={paymentsSandbox} />
 										<span>{m('org.payments.sandbox')}</span>
@@ -2791,10 +2886,15 @@
 
 								{#if effectiveProvider === 'lithic'}
 									<div class="form-grid" style="margin-top: 14px;">
-										<label>
-											<span>{m('org.cards.lithicApiKey')}</span>
-											<input type="password" bind:value={cardsApiKey} placeholder="api-key-..." />
-										</label>
+										<SecretField
+											id="cards-api-key"
+											label={m('org.cards.lithicApiKey')}
+											bind:value={cardsApiKey}
+											bind:clear={secretClear['cards.api_key']}
+											configured={isStored('cards', 'api_key')}
+											placeholder="api-key-..."
+											testId="cards-api-key"
+										/>
 										<label>
 											<span>{m('org.cards.sandboxMode')}</span>
 											<select bind:value={cardsSandbox}>
@@ -2809,10 +2909,14 @@
 											<span>{m('org.cards.clientId')}</span>
 											<input type="text" bind:value={cardsClientId} />
 										</label>
-										<label>
-											<span>{m('org.cards.clientSecret')}</span>
-											<input type="password" bind:value={cardsClientSecret} />
-										</label>
+										<SecretField
+											id="cards-client-secret"
+											label={m('org.cards.clientSecret')}
+											bind:value={cardsClientSecret}
+											bind:clear={secretClear['cards.client_secret']}
+											configured={isStored('cards', 'client_secret')}
+											testId="cards-client-secret"
+										/>
 										<label>
 											<span>{m('org.cards.customerHashId')}</span>
 											<input type="text" bind:value={cardsCustomerHashId} />

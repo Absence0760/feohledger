@@ -1847,6 +1847,10 @@ export const messages = {
 		'Há um segredo do cliente armazenado. Ele nunca é exibido de novo; digite um novo para substituí-lo.',
 	'orgSso.secret.notConfigured': 'Nenhum segredo do cliente está armazenado.',
 	'orgSso.secret.clear': 'Remover o segredo do cliente armazenado',
+	'org.secret.keepPlaceholder': 'Deixe em branco para manter o valor armazenado',
+	'org.secret.configured': 'Há um valor armazenado. Ele nunca é exibido de novo; digite um novo para substituí-lo.',
+	'org.secret.notConfigured': 'Nada está armazenado ainda.',
+	'org.secret.clear': 'Remover o valor armazenado',
 	'orgSso.register.title': 'Registre este app no seu provedor de identidade',
 	'orgSso.register.hint':
 		'Copie estes valores no aplicativo que você criar no seu provedor de identidade.',
