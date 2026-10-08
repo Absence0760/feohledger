@@ -17,10 +17,12 @@
 	 * An inspection is tied to a goods receipt, which is why it lives here and
 	 * not on its own route.
 	 *
-	 * RBAC mirrors `api/inspections.py`: reading the list is open to any
-	 * authenticated user, while recording one and running the QMS sync are
-	 * admin / ap_manager (`auth.isManager`). A clerk sees every inspection and
-	 * no button; `require_roles` refuses the write regardless.
+	 * RBAC mirrors the two routers. Reading either list is open to any
+	 * authenticated user. Recording or cancelling a RECEIPT is
+	 * `RECEIPT_ENTRY_ROLES` (admin / ap_manager / ap_clerk — receiving is entry
+	 * work); recording an inspection and running the QMS sync are admin /
+	 * ap_manager (`auth.isManager`). `require_roles` refuses either write
+	 * regardless of what the page shows.
 	 */
 	import { api } from '#lib/api.ts';
 	import HelpTip from '#lib/components/help/HelpTip.svelte';
@@ -30,6 +32,7 @@
 	import DataTable from '#lib/components/ui/DataTable.svelte';
 	import Modal from '#lib/components/ui/Modal.svelte';
 	import RowLink from '#lib/components/ui/RowLink.svelte';
+	import RowAction from '#lib/components/ui/RowAction.svelte';
 	import Badge from '#lib/components/ui/Badge.svelte';
 	import type { BadgeTone } from '#lib/components/ui/badgeTone.ts';
 	import Tabs from '#lib/components/ui/Tabs.svelte';
@@ -43,12 +46,20 @@
 	import type { Inspection } from '#lib/api/inspections.ts';
 	import { isInspectionResult, listInspections, syncInspections } from '#lib/api/inspections.ts';
 	import RecordInspectionModal from './RecordInspectionModal.svelte';
+	import RecordReceiptModal from './RecordReceiptModal.svelte';
+	import { cancelGoodsReceipt, type GoodsReceiptDetail } from '#lib/api/goodsReceipts.ts';
+	import {
+		GR_SOURCE_MANUAL,
+		RECEIPT_ENTRY_ROLES,
+		isCancelledGoodsReceipt
+	} from '#lib/types/goodsReceipt.ts';
 	import type { InspectableReceipt } from './RecordInspectionModal.svelte';
 	import { page as pageStore } from '$app/state';
 	import { replaceState } from '$app/navigation';
 	import { untrack } from 'svelte';
 
 	const canMutate = $derived(auth.isManager);
+	const canRecordReceipt = $derived(auth.hasAnyRole(...RECEIPT_ENTRY_ROLES));
 
 	const COLUMNS = $derived([
 		{ label: m('goodsReceipts.col.grNumber') },
@@ -71,6 +82,7 @@
 
 	interface GRLine {
 		id: string;
+		po_line_item_id: string | null;
 		description: string | null;
 		quantity_received: number | null;
 	}
@@ -82,6 +94,8 @@
 		po_number: string | null;
 		received_date: string | null;
 		status: string;
+		/** `manual` = recorded in FeohLedger; null = arrived some other way. */
+		source: string | null;
 		line_count: number;
 		created_at: string;
 	}
@@ -151,6 +165,11 @@
 	/** Set when the record form is opened from a receipt's detail — the subject
 	 *  is already decided and the form renders it read-only. */
 	let recordFor = $state<InspectableReceipt | null>(null);
+	let receiptOpen = $state(false);
+	/** Two-click cancel on the receipt detail: the first click arms the button,
+	 *  the second confirms — the `/credit-memos` void pattern. */
+	let cancelArmed = $state(false);
+	let cancelling = $state(false);
 
 	// Two INDEPENDENT request streams, so two sequencers — a shared counter
 	// would let a detail open mark the list's in-flight response un-committable
@@ -184,6 +203,12 @@
 			void ensureInspections();
 			void ensurePickerReceipts();
 		});
+	});
+
+	$effect(() => {
+		// A different receipt (or none) disarms a half-confirmed cancel.
+		void detailId;
+		cancelArmed = false;
 	});
 
 	$effect(() => {
@@ -413,6 +438,43 @@
 		if (detailId) void loadDetailInspections(detailId);
 	}
 
+	function onReceiptRecorded(created: GoodsReceiptDetail) {
+		receiptOpen = false;
+		toast(m('goodsReceipts.toast.recorded', { number: created.gr_number }), 'success');
+		// Re-read from page 1 — the new receipt is the newest — and open it, so
+		// the user sees exactly what was booked.
+		pickerReceipts = [];
+		void loadGRs();
+		detailId = created.id;
+	}
+
+	const canCancelDetail = $derived(
+		canRecordReceipt &&
+			detail !== null &&
+			detail.source === GR_SOURCE_MANUAL &&
+			!isCancelledGoodsReceipt(detail.status)
+	);
+
+	async function cancelDetail() {
+		if (!detail || cancelling) return;
+		if (!cancelArmed) {
+			cancelArmed = true;
+			return;
+		}
+		cancelling = true;
+		try {
+			const updated = await cancelGoodsReceipt(detail.id);
+			toast(m('goodsReceipts.toast.cancelled', { number: updated.gr_number }), 'success');
+			cancelArmed = false;
+			void loadGRs();
+			void loadDetail(updated.id);
+		} catch (err) {
+			toast(err instanceof Error ? err.message : m('goodsReceipts.toast.cancelFailed'), 'error');
+		} finally {
+			cancelling = false;
+		}
+	}
+
 	async function runSync() {
 		if (syncing) return;
 		syncing = true;
@@ -460,8 +522,26 @@
 	}
 </script>
 
+<svelte:window
+	onclick={(e) => {
+		// Outside-click disarms a pending cancel — the `/credit-memos` void rule.
+		if (cancelArmed && !(e.target as HTMLElement)?.closest?.('.row-action')) {
+			cancelArmed = false;
+		}
+	}}
+/>
+
 <PageHeader title={m('goodsReceipts.title')}>
 	{#snippet actions()}
+		{#if tab === 'receipts' && canRecordReceipt}
+			<button
+				class="btn-primary"
+				onclick={() => (receiptOpen = true)}
+				data-testid="record-receipt"
+			>
+				{m('goodsReceipts.record.action')}
+			</button>
+		{/if}
 		{#if tab === 'inspections' && canMutate}
 			<button
 				class="btn-outline"
@@ -650,7 +730,35 @@
 			<dl class="meta">
 				<dt>{m('goodsReceipts.modal.po')}</dt><dd class="mono">{detail.po_number ?? '—'}</dd>
 				<dt>{m('goodsReceipts.modal.received')}</dt><dd>{formatDate(detail.received_date)}</dd>
+				<dt>{m('goodsReceipts.modal.source')}</dt>
+				<dd data-testid="receipt-source">
+					{detail.source === GR_SOURCE_MANUAL
+						? m('goodsReceipts.modal.sourceManual')
+						: m('goodsReceipts.modal.sourceExternal')}
+				</dd>
 			</dl>
+
+			{#if canCancelDetail}
+				<div class="cancel-row">
+					<RowAction
+						variant="danger"
+						armed={cancelArmed}
+						disabled={cancelling}
+						onclick={cancelDetail}
+					>
+						<span data-testid="cancel-receipt">
+							{cancelArmed
+								? m('goodsReceipts.modal.confirmCancel')
+								: m('goodsReceipts.modal.cancelReceipt')}
+						</span>
+					</RowAction>
+					<!-- Always rendered, so the armed hint is announced when it
+					     appears (WCAG 4.1.3) rather than inserted with its region. -->
+					<small class="muted" role="status">
+						{cancelArmed ? m('goodsReceipts.modal.cancelHint') : ''}
+					</small>
+				</div>
+			{/if}
 
 			<h3>{m('goodsReceipts.modal.lineItemsReceived')}</h3>
 			<table class="line-table">
@@ -731,6 +839,10 @@
 		{/if}
 	</div>
 </Modal>
+
+{#if receiptOpen}
+	<RecordReceiptModal onclose={() => (receiptOpen = false)} onrecorded={onReceiptRecorded} />
+{/if}
 
 {#if recordOpen}
 	<RecordInspectionModal
@@ -827,6 +939,14 @@
 		border-color: var(--accent);
 		color: var(--accent);
 	}
+
+	.cancel-row {
+		display: flex;
+		align-items: center;
+		gap: 10px;
+		margin: -6px 0 12px;
+	}
+
 	/* Secondary header action (Sync from QMS), matching /vendors' ERP-sync
 	   button — the primary action beside it is recording an inspection. */
 	.btn-outline {

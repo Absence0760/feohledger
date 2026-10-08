@@ -7,9 +7,12 @@
  * `InvoiceResponse`. These specs exercise the real matcher end-to-end:
  *
  *   1. seed a PurchaseOrder (+ optional line items / GR / QualityInspection)
- *      directly in the tenant DB — there is no create-PO / create-GR HTTP API,
- *      so `tenantPsql` is the documented escape hatch for state the API can't
- *      build (inspections DO have a POST route and use it).
+ *      directly in the tenant DB — there is no create-PO HTTP API, so
+ *      `tenantPsql` is the documented escape hatch. Receipts and inspections
+ *      DO have POST routes; `createGr` still seeds directly because these specs
+ *      need a receipt with no recorder (one from "elsewhere", the shape every
+ *      pre-0107 receipt has) — `goods-receipts/record-receipt.spec.ts` drives
+ *      the real `POST /api/goods-receipts`.
  *   2. create an Invoice via the API with the PO number, status `pending`
  *      (NOT `new` — `_refresh_po_match` short-circuits draft `new` invoices).
  *      `POST /api/invoices` does NOT run the matcher, so po_match is null here.

@@ -37,3 +37,32 @@ export function isCancelledGoodsReceipt(status: string | null | undefined): bool
 export function goodsReceiptTone(status: string | null | undefined): 'success' | 'muted' {
 	return isCancelledGoodsReceipt(status) ? 'muted' : 'success';
 }
+
+/** Mirrors `backend/app/api/goods_receipts.py::RECEIPT_ENTRY_ROLES`. Receiving
+ *  is entry work, so the clerk is in it; what stops anyone releasing their own
+ *  invoice with a receipt is the server-side recorder check, not this list. */
+export const RECEIPT_ENTRY_ROLES = ['admin', 'ap_manager', 'ap_clerk'] as const;
+
+/** `GoodsReceipt.source` for a receipt recorded in FeohLedger — the only kind
+ *  that can be cancelled here. Mirrors `models/procurement.GR_SOURCE_MANUAL`. */
+export const GR_SOURCE_MANUAL = 'manual';
+
+/** Mirrors `services/goods_receipts.CANCELLED_PO_STATUSES` — a PO nothing can be
+ *  received against. The picker still lists such a PO (hiding it would read as
+ *  "no such PO"), and the form explains why it cannot be received. */
+const CANCELLED_PO_STATUSES = new Set(['cancelled', 'canceled', 'void', 'voided']);
+
+export function isCancelledPO(status: string | null | undefined): boolean {
+	return CANCELLED_PO_STATUSES.has((status ?? '').trim().toLowerCase());
+}
+
+/** What is still outstanding on a PO line — never negative (an over-receipt
+ *  leaves nothing outstanding, it does not owe the supplier units back).
+ *
+ *  Worked in ten-thousandths, the column's scale, so `10 - 9.3` is `0.7` and
+ *  not `0.6999999999999993` — this figure pre-fills an input the user submits. */
+export function remainingQuantity(line: { quantity: number | null; quantity_received: number }): number {
+	if (line.quantity === null) return 0;
+	const scaled = Math.round(line.quantity * 10_000) - Math.round(line.quantity_received * 10_000);
+	return Math.max(0, scaled) / 10_000;
+}

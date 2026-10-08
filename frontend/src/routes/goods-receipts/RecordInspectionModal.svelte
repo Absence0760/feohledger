@@ -22,6 +22,8 @@
 	import { createInspection, INSPECTION_RESULTS } from '#lib/api/inspections.ts';
 	import type { Inspection } from '#lib/api/inspections.ts';
 	import Modal from '#lib/components/ui/Modal.svelte';
+	import QuantityInput from '#lib/components/ui/QuantityInput.svelte';
+	import { parseQuantity } from '#lib/utils/quantity.ts';
 	import { m } from '#lib/i18n/store.svelte.ts';
 	import type { MessageKey } from '#lib/i18n/messages.ts';
 
@@ -93,22 +95,17 @@
 	const needsAcceptedQuantity = $derived(result === 'partial');
 	const quantitiesShown = $derived(result !== 'pass');
 
-	/**
-	 * A quantity is kept as the RAW TEXT the inspector typed and validated by
-	 * shape, never by round-tripping through `Number` — the column is
-	 * `Numeric(12, 4)` and the API takes the string, so parsing it here would
-	 * introduce a float in the one place the digits are supposed to survive
-	 * untouched. (This is also why the fields are `type="text"`: Svelte's
-	 * `bind:value` on `type="number"` hands back a NUMBER, which both defeats
-	 * that and breaks a `string`-typed handler outright.)
-	 *
-	 * Empty is valid — a quantity is optional on every result except `partial`,
-	 * which `canSubmit` requires separately.
-	 */
-	const QUANTITY_SHAPE = /^\d{1,8}(\.\d{1,4})?$/;
-
+	/** A quantity is the raw text typed, in the reader's own notation, read by
+	 *  `utils/quantity.parseQuantity` (shared with the receipt form) and sent as
+	 *  a dot-normalised string — never through a JS number. Empty is valid; a
+	 *  `partial` requires an accepted quantity separately. */
 	function quantityValid(raw: string): boolean {
-		return raw.trim() === '' || QUANTITY_SHAPE.test(raw.trim());
+		return parseQuantity(raw).kind !== 'invalid';
+	}
+
+	function normalized(raw: string): string {
+		const parsed = parseQuantity(raw);
+		return parsed.kind === 'valid' ? parsed.value : raw.trim();
 	}
 
 	const canSubmit = $derived(
@@ -147,9 +144,9 @@
 			if (inspectedDate) body.inspected_date = inspectedDate;
 			if (inspector.trim()) body.inspector = inspector.trim();
 			if (quantitiesShown && acceptedQuantity.trim())
-				body.accepted_quantity = acceptedQuantity.trim();
+				body.accepted_quantity = normalized(acceptedQuantity);
 			if (quantitiesShown && rejectedQuantity.trim())
-				body.rejected_quantity = rejectedQuantity.trim();
+				body.rejected_quantity = normalized(rejectedQuantity);
 			if (deviationNotes.trim()) body.deviation_notes = deviationNotes.trim();
 			const created = await createInspection(body);
 			onrecorded(created);
@@ -238,24 +235,15 @@
 								title={m('goodsReceipts.inspections.record.requiredForPartial')}>*</abbr
 							>{/if}
 					</span>
-					<input
-						type="text"
-						inputmode="decimal"
+					<QuantityInput
 						bind:value={acceptedQuantity}
-						aria-invalid={quantityValid(acceptedQuantity) ? undefined : 'true'}
 						required={needsAcceptedQuantity}
-						data-testid="inspection-accepted-quantity"
+						testid="inspection-accepted-quantity"
 					/>
 				</label>
 				<label class="field">
 					<span>{m('goodsReceipts.inspections.record.rejectedQuantity')}</span>
-					<input
-						type="text"
-						inputmode="decimal"
-						bind:value={rejectedQuantity}
-						aria-invalid={quantityValid(rejectedQuantity) ? undefined : 'true'}
-						data-testid="inspection-rejected-quantity"
-					/>
+					<QuantityInput bind:value={rejectedQuantity} testid="inspection-rejected-quantity" />
 				</label>
 			</div>
 		{/if}

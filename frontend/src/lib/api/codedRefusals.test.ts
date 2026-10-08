@@ -425,3 +425,39 @@ describe('the plan-feature refusal', () => {
 		expect(codedRefusalText(PLAN_FEATURE_REQUIRED, {}, enT)).toBeNull();
 	});
 });
+
+describe('the goods-receipt refusals', () => {
+	const t = (key: string, params?: Record<string, string | number>) =>
+		params ? `${key} ${JSON.stringify(params)}` : key;
+
+	it('names the PO or the receipt number the refusal is about', () => {
+		expect(codedRefusalText('goods_receipt_po_cancelled', { poNumber: 'PO-1042' }, t)).toBe(
+			'refusal.goodsReceiptPoCancelled {"poNumber":"PO-1042"}'
+		);
+		expect(codedRefusalText('goods_receipt_number_taken', { grNumber: 'DN-7' }, t)).toBe(
+			'refusal.goodsReceiptNumberTaken {"grNumber":"DN-7"}'
+		);
+		expect(codedRefusalText('goods_receipt_already_cancelled', { grNumber: 'GR-1' }, t)).toBe(
+			'refusal.goodsReceiptAlreadyCancelled {"grNumber":"GR-1"}'
+		);
+	});
+
+	it('falls back to the server sentence when the number is missing', () => {
+		expect(codedRefusalText('goods_receipt_po_cancelled', {}, t)).toBeNull();
+		expect(codedRefusalText('goods_receipt_number_taken', { grNumber: '' }, t)).toBeNull();
+	});
+
+	it('states the line refusals', () => {
+		for (const code of [
+			'goods_receipt_line_not_on_po',
+			'goods_receipt_line_duplicated',
+			'goods_receipt_line_required',
+			'goods_receipt_nothing_received',
+			'goods_receipt_idempotency_reused',
+			'goods_receipt_not_manual'
+		]) {
+			expect(codedRefusalText(code, {}, t), code).toMatch(/^refusal\.goodsReceipt/);
+		}
+	});
+});
+
