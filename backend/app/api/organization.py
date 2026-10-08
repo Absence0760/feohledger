@@ -27,7 +27,7 @@ from app.schemas.organization import (
     OrganizationResponse,
     UpdateOrganizationRequest,
 )
-from app.services.audit_dispatch import dispatch_auth_audit
+from app.services.audit_dispatch import dispatch_auth_audit, record_auth_audit_or_raise
 from app.services.billing.plan_catalog import FEATURE_SCIM
 from app.services.currency_conversion import resolve_reporting_currency
 from app.services.data_residency import (
@@ -37,6 +37,7 @@ from app.services.data_residency import (
     get_region_placement,
     resolve_region,
 )
+from app.services.erp_adapters import catalog as erp_catalog
 from app.services.org_settings_view import settings_for_response
 from app.services.sso import generate_scim_token
 from app.tenant import get_tenant, lock_organization, normalize_custom_domain
@@ -267,8 +268,29 @@ async def update_organization(
         # the `erp` key this PATCH carries is checked: re-saving the company
         # profile on a downgraded tenant whose stored ERP is live must still
         # work, and clearing the key or choosing `mock` is never refused.
+        # `settings.erp` secrets are write-only (`erp_adapters/catalog`): a
+        # blank or masked secret keeps the stored one, and the OAuth token block
+        # is never taken from a PATCH — `services/erp_oauth` is its only writer.
+        # Resolve the block to what will actually be stored BEFORE the plan
+        # gate, so the gate judges the real config.
+        erp_before = (org.settings or {}).get("erp")
+        erp_changed: list[str] | None = None
         if "erp" in body.settings:
+            incoming_erp = body.settings.get("erp")
+            if incoming_erp is not None and not isinstance(incoming_erp, dict):
+                raise HTTPException(status_code=422, detail="erp must be an object.")
+            if isinstance(incoming_erp, dict):
+                merged_erp = erp_catalog.merge_erp_update(erp_before, incoming_erp)
+                body.settings["erp"] = merged_erp
+            else:
+                # Clearing the ERP still keeps the OAuth block: only the OAuth
+                # disconnect removes it (it revokes at the provider first).
+                merged_erp = {}
+                if isinstance(erp_before, dict) and erp_catalog.OAUTH_KEY in erp_before:
+                    merged_erp[erp_catalog.OAUTH_KEY] = erp_before[erp_catalog.OAUTH_KEY]
+                body.settings["erp"] = merged_erp or None
             await ensure_live_erp_entitled(db, org.id, body.settings.get("erp"))
+            erp_changed = erp_catalog.changed_keys(erp_before, merged_erp)
 
         # The chat webhook URL has one sanctioned writer — the audited
         # `PUT /api/organization/chat-notifications/webhook`. This generic merge
@@ -379,6 +401,34 @@ async def update_organization(
                 merged_brand["custom_domains"] = preserved
                 existing["brand"] = merged_brand
         org.settings = existing
+
+        # Audit an ERP change with key NAMES only, written before the commit: a
+        # credential change with no audit row is refused, not made (the same
+        # shape as `PUT /organization/sso`).
+        if erp_changed:
+            stored_erp = existing.get("erp") if isinstance(existing.get("erp"), dict) else {}
+            try:
+                await record_auth_audit_or_raise(
+                    organization_id=org.id,
+                    actor_id=user.id,
+                    action="organization.erp_updated",
+                    entity_type="organization",
+                    entity_id=org.id,
+                    details={
+                        "changed": erp_changed,
+                        "type": str(stored_erp.get("type") or "")[:50] or None,
+                        "integration_method": str(stored_erp.get("integration_method") or "")[:50]
+                        or None,
+                    },
+                )
+            except Exception:
+                await db.rollback()
+                raise HTTPException(
+                    status_code=503,
+                    detail=(
+                        "The change could not be recorded in the audit trail, so it was not saved."
+                    ),
+                ) from None
 
     await db.commit()
     # Admin-only endpoint, so the response is the admin projection.
@@ -755,6 +805,29 @@ async def update_custom_domains(
     return CustomDomainsConfig(custom_domains=normalized)
 
 
+@router.get("/erp/providers")
+async def list_erp_providers(
+    user: User = Depends(require_roles(ROLE_ADMIN)),
+):
+    """The ERP setup form's catalogue (`erp_adapters/catalog`).
+
+    `available` is whether the adapter is registered in this build; the form
+    shows an unavailable entry as not yet selectable rather than letting a save
+    land on `UnknownErpAdapterError`.
+    """
+    from app.services.erp_adapters import list_available_adapters
+
+    registered = set(list_available_adapters())
+    return {
+        "providers": [
+            {**entry, "available": entry["key"] in registered}
+            for entry in erp_catalog.all_providers()
+        ],
+        "merge_dev_long_tail": erp_catalog.MERGE_DEV_LONG_TAIL,
+        "secret_mask": erp_catalog.SECRET_MASK,
+    }
+
+
 @router.post("/test-erp")
 async def test_erp_connection(
     request: dict | None = None,
@@ -767,7 +840,14 @@ async def test_erp_connection(
     A live adapter needs ``FEATURE_ERP_INTEGRATIONS`` (decisions §258) — a test
     reaches the real ERP with the tenant's credentials. ``mock`` stays open.
     """
-    erp_config = request if request and request.get("type") else (org.settings or {}).get("erp")
+    stored_erp = (org.settings or {}).get("erp")
+    if request and request.get("type"):
+        # The form sends what it shows, and it shows secrets masked: fill each
+        # blank / masked secret from the stored config (same ERP only) and the
+        # stored OAuth block, exactly as a save would.
+        erp_config = erp_catalog.merge_erp_update(stored_erp, request)
+    else:
+        erp_config = stored_erp
     if not erp_config:
         raise HTTPException(status_code=400, detail="No ERP configuration provided")
     await ensure_live_erp_entitled(db, org.id, erp_config)

@@ -27,15 +27,23 @@ value when the field is left blank. Leaving either readable here would make "no
 endpoint ever returns it" false and give the settings page a silent, unaudited
 second way to see it.
 
-Admins otherwise still get the settings **verbatim** — the `/organization` page
-reads saved credentials back into its form fields, so redacting for them would
-blank a live config on the next save. Narrowing what an admin sees needs a
-"leave blank to keep" contract on the write path; that is a separate change.
+**`settings.erp` is masked for admins too.** Its write path keeps a stored
+secret when a save sends it back blank or masked (`erp_adapters/catalog.
+merge_erp_update`), so the ERP form no longer needs the values back: every
+secret the catalogue names reads as `catalog.SECRET_MASK`, and the OAuth token
+block (`settings.erp.oauth`) reads as `{"connected": bool}`.
+
+Admins otherwise still get the settings **verbatim** — the other credential
+panels on `/organization` read saved values back into their form fields, so
+redacting them would blank a live config on the next save until each gains the
+same "leave blank to keep" contract.
 
 Pure: no DB, no request, no I/O.
 """
 
 from __future__ import annotations
+
+from app.services.erp_adapters.catalog import mask_erp_config
 
 # Top-level settings blocks a NON-ADMIN may read.
 #
@@ -111,7 +119,11 @@ def settings_for_response(settings: dict | None, *, is_admin: bool) -> dict:
     """
     raw = settings or {}
     if is_admin:
-        return _without_always_redacted(raw)
+        out = _without_always_redacted(raw)
+        if isinstance(out.get("erp"), dict):
+            # Copy before replacing the one key, so the live ORM dict is untouched.
+            out = {**out, "erp": mask_erp_config(out["erp"])}
+        return out
 
     projected: dict = {}
     for block, allowed_keys in NON_ADMIN_SETTINGS.items():

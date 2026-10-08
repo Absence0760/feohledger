@@ -20,6 +20,7 @@ from sqlalchemy import select
 
 from app.config import settings
 from app.models.organization import Organization
+from app.services.erp_adapters.catalog import SECRET_MASK
 from app.services.org_settings_view import (
     ALWAYS_REDACTED,
     NON_ADMIN_SETTINGS,
@@ -69,7 +70,13 @@ def test_admin_keeps_every_credential_except_the_write_only_ones():
     the SSO client secret, whose only sanctioned management paths are their
     audited endpoints."""
     projected = settings_for_response(SECRETS, is_admin=True)
-    assert projected["erp"]["client_secret"] == "erp-client-secret"
+    # `settings.erp` is write-only for admins too (keep-on-blank on the write
+    # path — `erp_adapters/catalog`): every secret reads as the mask.
+    assert projected["erp"]["client_secret"] == SECRET_MASK
+    assert projected["erp"]["webhook_signing_secret"] == SECRET_MASK
+    assert projected["erp"]["type"] == "netsuite"
+    assert "erp-client-secret" not in str(projected)
+    assert "erp-webhook-secret" not in str(projected)
     assert projected["payments"]["webhook_secret"] == "pay-webhook-secret"
     assert projected["sso"]["scim_bearer_hash"] == "deadbeef"
     # …but never these, for any role.
@@ -229,7 +236,8 @@ async def test_get_organization_keeps_admin_access_intact(realdb):
         resp = await c.get("/api/organization")
     assert resp.status_code == 200
     settings = resp.json()["settings"]
-    assert settings["erp"]["client_secret"] == "erp-client-secret"
+    assert settings["erp"]["client_secret"] == SECRET_MASK  # write-only (catalog)
+    assert settings["erp"]["type"] == "netsuite"
     assert settings["payments"]["webhook_secret"] == "pay-webhook-secret"
     assert "webhook_url" not in settings["chat_notifications"]
     assert "zzTOPSECRETzz" not in resp.text

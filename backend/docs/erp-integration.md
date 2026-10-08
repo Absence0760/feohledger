@@ -303,8 +303,60 @@ Stored in `Organization.settings` JSONB under the key `erp`:
 
 The ERP type determines which adapter is used. Credentials are stored as plain
 JSONB in `Organization.settings`, protected only by the database's storage
-encryption, and admins read them back verbatim (`services/org_settings_view`).
-Application-level encryption is tracked in `docs/followups.md`.
+encryption. Application-level encryption is tracked in `docs/followups.md`.
+
+### Secrets are write-only
+
+No response carries an ERP secret, admin included:
+
+- **Read.** `GET /api/organization` returns every key in
+  `erp_adapters/catalog.SECRET_KEYS` (each catalogue field marked `secret`, plus
+  `webhook_signing_secret` / `webhook_secret`) as `********` when set and `""`
+  when not, and replaces `erp.oauth` (the token block `services/erp_oauth`
+  writes) with `{"connected": bool}`. Non-admins still see only
+  `integration_method`.
+- **Write.** `PATCH /api/organization` runs `catalog.merge_erp_update`: a secret
+  sent blank, as `********`, or omitted keeps the stored value **while the ERP
+  selection (`type` + routing) is unchanged**. Switching ERP never carries one
+  ERP's secret into another's field of the same name. An explicit `null` clears
+  a secret. `erp.oauth` is never taken from the body, so the OAuth callback stays
+  its only writer, and even `{"erp": null}` keeps it (only the OAuth disconnect
+  removes it). Every change writes `organization.erp_updated` (changed key
+  names, `type`, `integration_method`, never a value) before the save commits;
+  if that row can't be written the save is a `503` and nothing changes.
+- **Test.** `POST /api/organization/test-erp` with an unsaved form config fills
+  each masked or blank secret from the stored config the same way, so "Test
+  connection" works on a form that shows only masks.
+
+## Provider catalogue
+
+`backend/app/services/erp_adapters/catalog.py` is the single source of truth for
+the Organization → ERP form, served at `GET /api/organization/erp/providers`
+(admin). Each entry carries `key`, `label`, `regions` (`US`, `ZA`), `auth`
+(`credentials` | `oauth`), `fields` (`name`, `label_key` — a frontend i18n
+`MessageKey`, `secret`, `required`, optional `placeholder` / `help_key` /
+`options`) and `docs_url`; the endpoint adds `available` (adapter registered in
+this build). The response also carries `merge_dev_long_tail` (the ERPs offered
+inside the "Other ERP via Merge.dev" choice, Scale plan per `docs/decisions.md`
+§256) and `secret_mask`.
+
+| Key | ERP | Regions | Auth |
+|---|---|---|---|
+| `quickbooks_online` | QuickBooks Online | US | OAuth (optional BYO app; `environment`) |
+| `xero` | Xero | US, ZA | OAuth (optional BYO app; `bill_status`, `default_tax_type`) |
+| `sage_accounting` | Sage Business Cloud Accounting (v3.1: US, UK, IE, CA) | US | OAuth (optional BYO app) |
+| `sage_accounting_za` | Sage Business Cloud Accounting (South Africa) | ZA | API key + Sage login + company |
+| `blackbaud_fe_nxt` | Blackbaud Financial Edge NXT | US | OAuth (optional BYO app + SKY API subscription key) |
+| `sage_intacct` | Sage Intacct | US, ZA | REST API client credentials + company / user |
+| `netsuite` | Oracle NetSuite | US, ZA | TBA (OAuth 1.0a) tokens |
+| `dynamics_365_bc` | Business Central | US, ZA | Azure AD client credentials |
+| `syspro` | SYSPRO | ZA | Operator + company (https base URL) |
+| `merge_dev` | Other ERP via Merge.dev | — | Merge API key + account token |
+
+`catalog.PENDING_ADAPTERS` lists catalogue keys whose adapter has not landed;
+`tests/test_erp_catalog.py` fails if a catalogue key is neither registered nor
+pending, if a registered direct adapter has no catalogue entry, or if a
+`label_key` / `help_key` is missing from the frontend's English catalogue.
 
 ## Per-ERP Integration Details
 
@@ -975,28 +1027,32 @@ backend/app/api/erp_webhook.py        # POST /api/erp/webhook/{erp_type}
 2. Subclass `ErpAdapter` and implement `post_invoice`, `get_invoice_status`, `void_invoice`, `test_connection`. Optionally override `list_pos` if the ERP supports listing purchase orders (otherwise the default `[]` is used and `/api/purchase-orders/sync-erp` reports zero new POs)
 3. Decorate the class with `@register_adapter("your_erp_type")`
 4. Add the module to `BUILTIN_ADAPTER_MODULES` in `erp_adapters/dispatcher.py` — the one list every caller loads the registry from (`tests/test_erp_adapter_registry.py` fails if it is missing)
-5. Add the ERP type to the frontend `ERP_TYPES` array in the organization page
-6. Add conditional credential fields in the ERP config UI
+5. Add (or un-pend) its entry in `erp_adapters/catalog.py`: `key` = the registry key, its `regions`, `auth`, and one `_field(...)` per config key the adapter reads, with `secret=True` on every credential. That is the whole UI change: the Organization → ERP form renders from the catalogue. Remove the key from `PENDING_ADAPTERS` if it was there (`tests/test_erp_catalog.py` enforces both)
+6. Add any new `org.erp.field.<name>` / `help_key` label to all six frontend locale catalogues (`frontend/src/lib/i18n/locales/*.ts`)
 
 ## Setup Guide
 
-### Using Merge.dev (Recommended)
-
-1. Create a [Merge.dev](https://merge.dev) account
-2. Get your API key from the Merge dashboard
-3. Have your customer connect their ERP via Merge Link — this creates an account token
-4. In your app: go to **Organization > ERP Integration**
-5. Select your ERP system, keep "Merge.dev (Unified API)" as the method
-6. Enter the API key and account token
-7. Save
-
-### Using Direct Adapters
+### Direct ERP (QuickBooks Online, Xero, Sage, NetSuite, Business Central, SYSPRO)
 
 1. Go to **Organization > ERP Integration**
-2. Select the ERP system (e.g., Business Central)
-3. Change method to "Direct API Connection"
-4. Enter the ERP-specific credentials (shown dynamically based on ERP type)
-5. Save
+2. Pick your ERP from the dropdown. It leads with the ERPs popular in the
+   United States and in South Africa
+3. Enter the fields the form shows for it. Saved secrets show as "saved, leave
+   blank to keep"; type a new value only to replace one
+4. Save, then **Test connection**
+5. For an OAuth ERP (QuickBooks Online, Xero, Sage Business Cloud Accounting),
+   optionally enter your own app's client ID and secret, save, then click
+   **Connect to <ERP>** and approve access in the ERP. You return to the ERP
+   section with a connected status, and can **Disconnect** there
+
+### Other ERP via Merge.dev (Scale plan)
+
+1. Create a [Merge.dev](https://merge.dev) account and get your API key
+2. Have your customer connect their ERP via Merge Link, which creates an
+   account token
+3. In **Organization > ERP Integration**, choose **Other ERP via Merge.dev**,
+   pick the ERP from the second dropdown, enter the API key and account token,
+   then save and test
 
 ### Merge.dev Pricing
 
@@ -1021,12 +1077,12 @@ integrations. That is why QuickBooks Online is scoped as a direct adapter
 | Business Central direct adapter | Done |
 | NetSuite direct adapter | Done |
 | Webhook endpoint | Done |
-| ERP config UI in org settings | Done |
+| ERP config UI in org settings | Done (catalogue-driven, write-only secrets) |
 | Post-ERP statuses (posted_in_erp, payment_scheduled, paid) | Done |
 | Polling job for status sync | Planned |
 | QuickBooks Online direct adapter | Scoped — `quickbooks-online-adapter.md` |
 | Remaining direct adapters (SAP, Epicor, etc.) | Use Merge.dev |
-| Test connection button in UI | Planned |
+| Test connection button in UI | Done |
 | ERP status display in invoice modal | Planned |
 
 ## Sage Intacct direct adapter (`sage_intacct`)
