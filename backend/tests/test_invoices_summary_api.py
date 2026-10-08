@@ -179,7 +179,7 @@ async def test_summary_cache_fill_never_rolls_back_a_concurrent_edit(realdb):
     unconditionally — so an edit committed between that read and that write
     kept its new amount but lost its new version, and an approver still
     holding the old version passed the stale-approval check against figures
-    they never saw (decisions §260; caught by the stale-approval e2e). The
+    they never saw (decisions §263; caught by the stale-approval e2e). The
     write is now a compare-and-swap: a row that moved is left alone."""
     from sqlalchemy import select
     from sqlalchemy.orm import selectinload

@@ -2,7 +2,7 @@ import { deleteInvoicesWhere, expect, tenantPsql, test } from '../fixtures/helpe
 
 /**
  * Approval is bound to the version the approver loaded (`docs/decisions.md`
- * §260). `InvoiceModal` sends the `updated_at` it opened with as
+ * §263). `InvoiceModal` sends the `updated_at` it opened with as
  * `expected_updated_at`; an edit that lands while the modal is open makes the
  * server refuse the approval (409 `invoice_stale_approval`) instead of signing
  * figures nobody on this screen saw. The modal then drops its stale copy: it

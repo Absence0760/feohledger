@@ -222,7 +222,7 @@ async def notify_event(
     an ``invoice_assigned`` message announces, computed by the caller from the
     row it holds. The message's Approve / Reject actions bind it, so they act
     only on the version the message describes; without it no action is offered
-    (decisions §260).
+    (decisions §263).
 
     Pass either ``invoice_ctx`` (the dispatcher renders the invoice template)
     or a pre-``rendered`` notification (for non-invoice events like contract

@@ -1,5 +1,5 @@
 """`api/invoice_version.matches_loaded_version` — the one comparison behind the
-PATCH guard, single approve and bulk approve (decisions §260).
+PATCH guard, single approve and bulk approve (decisions §263).
 
 The token is our own `InvoiceResponse.updated_at` round-tripped by the client,
 so the comparison must be exact on the instant and indifferent to how the

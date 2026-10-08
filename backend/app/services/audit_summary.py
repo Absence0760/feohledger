@@ -560,7 +560,7 @@ async def get_or_build_summary(
     # `updated_at` back unconditionally ROLLED BACK any edit that committed
     # between this read and this write: the row kept the new amount but got
     # the old version, so an approver still holding that version passed the
-    # stale-approval check and signed figures they never saw (decisions §260).
+    # stale-approval check and signed figures they never saw (decisions §263).
     # `meta` built from the stale read was a lost update for the same reason.
     # If the row moved, the cache fill is simply skipped — the summary below
     # is still returned, and the next open regenerates against the new row.

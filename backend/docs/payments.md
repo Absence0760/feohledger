@@ -516,7 +516,7 @@ and `/bulk/delete` lock their batch the same way. Two paths taking a shared
 pair in opposite orders is a Postgres deadlock (40P01) and a 500 on one side,
 so a new multi-invoice locker sorts too. Bulk delete never meets a run's
 payments at all: it skips any invoice with a live payment (`docs/decisions.md`
-§260).
+§263).
 
 ### Bounded wait for the invoice lock
 

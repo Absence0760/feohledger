@@ -418,7 +418,7 @@ async def test_one_illegal_transition_is_skipped_not_a_batch_abort(realdb):
 
 # ---------------------------------------------------------------------------
 # Bulk approve is bound to the version each row had when the approver saw it
-# (decisions §260): the `expected_updated_at` map the list sends. A row edited
+# (decisions §263): the `expected_updated_at` map the list sends. A row edited
 # after the list loaded is skipped, not approved unseen.
 # ---------------------------------------------------------------------------
 

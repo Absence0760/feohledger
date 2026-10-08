@@ -120,7 +120,7 @@ async def test_ids_empty_tenant(realdb):
 async def test_ids_returns_each_rows_version_for_a_bound_bulk_approval(realdb):
     """A "select all matching" set reaches rows the page never loaded, so
     `/ids` hands back each one's `updated_at` — the version a bulk approval of
-    that set is then bound to (decisions §260)."""
+    that set is then bound to (decisions §263)."""
     mk = realdb.sessionmaker("a")
     org_id = realdb.info("a").org_id
     created = await _add_invoices(mk, org_id, InvoiceStatus.ready_for_review, 3, vendor="Ver")

@@ -34,7 +34,7 @@ nothing — the reviewer signs in and reviews the current version. Reject is not
 bound: sending an invoice back is safe whatever it now says. A token without the
 claim (minted before it existed) does not verify at all. The in-app counterpart
 is `expected_updated_at` on `POST /api/invoices/{id}/approve`
-(`docs/decisions.md` §260).
+(`docs/decisions.md` §263).
 
 Because the signing key is held only by the platform (sops + KMS in deployed
 envs), the token cannot be forged, and flipping the action, the invoice, or the

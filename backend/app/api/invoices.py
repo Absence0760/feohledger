@@ -1262,7 +1262,7 @@ async def save_invoice_line_items(
         # header column and `onupdate` never fires. Move the version by hand:
         # it is what an approval is bound to (`api/invoice_version.py`), and an
         # approver holding the pre-edit version must be refused, not approve
-        # these lines unseen (decisions §260).
+        # these lines unseen (decisions §263).
         invoice.updated_at = func.now()
         field_diff = build_field_diff(
             before, after, ["line_item_count", "line_items_total", "gl_accounts"]

@@ -10683,3 +10683,61 @@ Still open, and tracked in `docs/followups.md`: whoever records a receipt can
 still approve the invoice it supports — receiving is not yet one of the duties
 segregated from approval — and mobile has no receipt entry.
 
+## 263. Approval is bound to the version the approver saw (2026-10-07)
+
+**Context.** Every approval door ran `review.approve_invoice` against the row as
+it stood when Approve was clicked. An edit that landed between an approver
+reading an invoice and clicking Approve — a manager correcting the amount, a
+re-pointed vendor — was signed unseen, and the approval signature then
+certified figures nobody had looked at. The out-of-app doors were worse: an
+email, Slack or Teams message can sit for days, and its Approve token bound the
+invoice id and nothing about what the message showed. Clerks were already held
+out (their window closes at submit, §248); managers and every out-of-app link
+were not.
+
+**Decision.**
+
+- **In-app, the token is `updated_at`.** `POST /invoices/{id}/approve` takes
+  `expected_updated_at`; supplied and not current under the row lock → 409
+  `invoice_stale_approval`, nothing written. Bulk approve takes an
+  `{id: updated_at}` map and skips a stale row, or one missing from a supplied
+  map. `GET /invoices/ids` returns each id's version, so a "select all
+  matching" set binds the version at selection time. One helper
+  (`api/invoice_version.py`) serves this and the PATCH guard.
+- **Out of app, the token is a digest of the invoice the message announced**
+  — what it displayed (invoice number, vendor name, amount + currency) plus
+  what decides the payment it releases (vendor id, payment method, due date,
+  entity). One function, `email_action_token.digest_of_invoice`, computes it
+  from the row on both sides: the notifying caller passes it as
+  `notify_event(action_facts=...)`, the endpoint recomputes it under the lock.
+  GL coding and the vendor's bank details are deliberately not bound (the
+  first is accounting, not cash; the second is a dual-controlled vendor record
+  whose legitimate change would void every pending link). `updated_at` was
+  rejected here: any metadata write (a warnings refresh, an assignment) would
+  have killed a still-accurate link. Reject is not bound; a token without the
+  claim does not verify.
+- **Everything that changes the invoice has to move its version, and nothing
+  may move it back.** A line-items save changes no header column, so it bumps
+  `updated_at` by hand. The audit-summary cache fill, which writes `meta` while
+  preserving `updated_at` so opening an invoice is not an edit, became a
+  compare-and-swap: it wrote the version it had READ back unconditionally, so
+  an edit committed in between kept its new amount and lost its new version —
+  the stale-approval e2e caught an approval passing on exactly that.
+- **The modal binds what it shows.** Its own file and line-item writes adopt
+  the version they return; nothing else does.
+- **Alongside, on the same paths:** a refused bulk approval runs in a savepoint
+  so it leaves no routed chain behind, as the single door's rollback already
+  ensured; an invoice with a live payment (an approved one in an exported run)
+  can no longer be deleted out from under the bank, singly or in bulk; and every
+  multi-invoice locker takes invoices in id order.
+- **The field is optional on the wire**, as PATCH's is, and every first-party
+  client (web modal, web bulk bar, mobile detail, swipe and bulk) sends it. The
+  threat is an honest approver signing figures they were not shown; a caller
+  able to omit it already holds `invoice.approve` and could approve the current
+  version directly.
+
+**Rejected.** *Making the token mandatory*: it adds nothing against a caller
+who can approve anyway, and would break every API client and ~140 tests for no
+gain in the threat this answers. *A content hash for the in-app path*: the
+client already holds `updated_at`, and an approver looking at the full modal
+saw every field, not a chosen subset.

@@ -414,7 +414,7 @@ async def test_assigned_email_includes_action_links(
 
     # End to end, with no hand-built digest anywhere: the link the
     # notification minted approves the invoice it announced, unchanged
-    # (decisions §260). A drift between how the two sides digest the row
+    # (decisions §263). A drift between how the two sides digest the row
     # would refuse every real link, and this is what would catch it.
     async with realdb.client(key="a", role=None) as c:
         resp = await c.post(f"/api/invoices/email-action/{token}/confirm")
@@ -531,7 +531,7 @@ async def test_custom_role_without_invoice_approve_is_still_refused(
 
 
 # ---------------------------------------------------------------------------
-# An Approve link approves only the figures its message showed (decisions §260)
+# An Approve link approves only the figures its message showed (decisions §263)
 # ---------------------------------------------------------------------------
 
 

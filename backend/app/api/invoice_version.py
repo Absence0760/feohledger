@@ -13,7 +13,7 @@ Two writes are bound this way:
 - Approval — `POST /invoices/{id}/approve` and the `approved` target of
   `POST /invoices/bulk/status`. An edit landing between an approver reading an
   invoice and clicking Approve would otherwise be approved unseen, for managers
-  as well as clerks (`INVOICE_STALE_APPROVAL`; `docs/decisions.md` §260).
+  as well as clerks (`INVOICE_STALE_APPROVAL`; `docs/decisions.md` §263).
 
 The token is optional on the wire, matching the PATCH precedent: the threat it
 answers is an honest approver signing figures they were not shown, and every

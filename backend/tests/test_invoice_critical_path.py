@@ -698,7 +698,7 @@ async def test_patch_fresh_expected_updated_at_succeeds(realdb):
 
 
 # ---------------------------------------------------------------------------
-# Approval is bound to the version the approver loaded (decisions §260). An
+# Approval is bound to the version the approver loaded (decisions §263). An
 # edit that landed between the approver's read and their click used to be
 # approved unseen — for managers as well as clerks. The same token as the PATCH
 # guard, refused with its own code because the remedy is a re-review.
@@ -962,7 +962,7 @@ async def test_a_line_item_edit_moves_the_version_an_approval_is_bound_to(realdb
     """Lines are financial content, and a re-coded or re-described line with
     the same totals changes no header column. The version still has to move,
     or an approver holding the pre-edit version approves the new lines unseen
-    (decisions §260)."""
+    (decisions §263)."""
     info = realdb.info("a")
     inv_id = await _seed_invoice(
         realdb.sessionmaker("a"),

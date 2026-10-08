@@ -39,7 +39,12 @@ and an audit that re-derived both found the copy stale at nearly every sync
 transcription was retired rather than corrected again. Add a follow-up here; add
 a GitHub issue only when one warrants its own thread.
 
-**Last reconciled:** 2026-10-07 — enforcing the plan feature gates (decisions
+**Last reconciled:** 2026-10-07 — binding approval to the version the
+approver saw (decisions §263) closed **three** (c) entries — approval not tied
+to the loaded version (in-app, bulk, and the email / Slack / Teams links),
+`bulk/delete` with no entity scope or row lock, and bulk `new →
+ready_for_review` skipping `/complete`'s required-field check — taking the
+file from 84 → 81. Before that, 2026-10-07 — enforcing the plan feature gates (decisions
 §258) opened one (c) entry — the per-tenant audit-log SIEM export the Scale plan
 lists but nothing implements. Before that, 2026-10-07 — moving the database onto RDS (docs/minimal-deployment.md
 § Database) opened two (c) entries — the published sub-processor register and
@@ -105,7 +110,7 @@ section carried its own `decisions.md` § reference, so nothing was lost by
 deleting it; that cross-reference is what makes the pruning safe, and writing
 one is what earns a future entry the right to be deleted.
 
-**84 open: 69 (c) · 9 (a) · 6 (b)** — re-derived from the file, never carried
+**81 open: 66 (c) · 9 (a) · 6 (b)** — re-derived from the file, never carried
 forward. The section heading is authoritative; where an entry also carries a
 `(c)`/`(a)`/`(b)` marker, the two agree.
 `grep -c '^- \[ \]' docs/followups.md`.
@@ -964,7 +969,10 @@ or is a sibling of a fix that needs its own pass.
 - [ ] **(c) Three refusals a user acts on are still English-only.** §238 coded the
       approval, CFO / max-amount, credit-memo, expense and stale-edit refusals. Not
       done: the per-row skip reasons `POST /api/invoices/bulk-status` returns
-      (built by `api/invoices._skip_reason`), the payment-run SoD and CFO sign-off
+      (built by `api/invoices._skip_reason`, plus the two §263 added — a row
+      changed since the approver loaded it, which the single approve already
+      codes as `invoice_stale_approval`, and "Required fields missing", which
+      `/complete` codes as `invoice_required_fields_missing`), the payment-run SoD and CFO sign-off
       refusals in `api/payments.py`, and the sign-in MFA challenge's
       `401 "Invalid code"` (`POST /api/auth/mfa/verify`) — the same sentence §238
       coded on enroll-verify, still bare on the step every MFA user meets.
@@ -1071,24 +1079,6 @@ lands. Pure doc drift was corrected in the same PR. The two diagnosed defects
       the same content shapes and tests, and a Help row in the mobile app's
       settings that opens the web help for the user's tenant. **Trigger:** the
       first supplier onboarding at volume, or the first mobile-first customer.
-- [ ] **(c) Approval isn't tied to the version the approver saw.** An edit
-      that lands between an approver reading an invoice and clicking Approve
-      is approved unseen, for managers as well as clerks (a clerk's own window
-      now closes at submit, decisions §248). **Durable fix:** an
-      `expected_updated_at` on `ApproveRequest` and per row in bulk approve,
-      checked under the row lock, 409 on a mismatch, with the modal reloading
-      on 409. **Trigger:** the next change to the approve endpoints, or before
-      the first production tenant with more than one approver.
-- [ ] **(c) `bulk/delete` has no entity scope or row lock.** It has the shape
-      `bulk/status` had before the clerk-entry change fixed it there. Clerks
-      can't reach it. **Durable fix:** the same `apply_entity_scope` +
-      `FOR UPDATE` + missing-id-as-skip treatment `bulk/status` got, with a
-      cross-entity test. **Trigger:** the next change to bulk invoice actions.
-- [ ] **(c) Bulk `new → ready_for_review` skips `/complete`'s required-field
-      check**, for every role, so an invoice with no vendor or amount can reach
-      the approval queue from the bulk bar. **Durable fix:** run the same
-      required-field validation per row and report failures as skips.
-      **Trigger:** same as above.
 - [ ] **(c) CSV import resolves vendors across entities and defaults a blank
       currency to USD.** A row can link another subsidiary's vendor, and a
       blank currency cell becomes `"USD"` against the rule that a missing

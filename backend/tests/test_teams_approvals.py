@@ -597,7 +597,7 @@ async def test_rejecting_burns_the_sibling_approve_token(realdb, teams_keys):
 
 
 # ---------------------------------------------------------------------------
-# An Approve action approves only the figures its message showed (decisions §260)
+# An Approve action approves only the figures its message showed (decisions §263)
 # ---------------------------------------------------------------------------
 
 
