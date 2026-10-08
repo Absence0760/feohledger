@@ -555,9 +555,18 @@ async def get_or_build_summary(
     # `expected_updated_at` (captured moments earlier from the same GET)
     # goes stale before the user touches anything, and the very next
     # PATCH/approve/complete 409s as a phantom conflict.
+    #
+    # The write is a compare-and-swap on the version it read. Writing
+    # `updated_at` back unconditionally ROLLED BACK any edit that committed
+    # between this read and this write: the row kept the new amount but got
+    # the old version, so an approver still holding that version passed the
+    # stale-approval check and signed figures they never saw (decisions §260).
+    # `meta` built from the stale read was a lost update for the same reason.
+    # If the row moved, the cache fill is simply skipped — the summary below
+    # is still returned, and the next open regenerates against the new row.
     await db.execute(
         update(Invoice)
-        .where(Invoice.id == invoice.id)
+        .where(Invoice.id == invoice.id, Invoice.updated_at == invoice.updated_at)
         .values(meta=new_meta, updated_at=invoice.updated_at)
     )
     await db.commit()

@@ -85,6 +85,7 @@ async def _notify_escalated_approvers(
     written in this same transaction — never raises."""
     from app.models.invoice import Invoice
     from app.models.notification import EVENT_INVOICE_ASSIGNED
+    from app.services.email_action_token import digest_of_invoice
     from app.services.notification_dispatch import notify_event
     from app.services.notification_templates import InvoiceContext
 
@@ -111,6 +112,7 @@ async def _notify_escalated_approvers(
                 amount=invoice.amount,
                 currency=invoice.currency or "USD",
             ),
+            action_facts=digest_of_invoice(invoice),
             actor_id=None,  # system-initiated sweep
         )
     except Exception:  # noqa: BLE001 — never let a notification bug break escalation

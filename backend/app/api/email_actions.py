@@ -47,7 +47,9 @@ from app.models.user import User
 from app.services import review as review_svc
 from app.services.email_action_token import (
     ACTION_APPROVE,
+    FACTS_CHANGED_MESSAGE,
     ActionToken,
+    approval_facts_changed,
     verify_action_token,
 )
 from app.utils.http import detail_text
@@ -221,6 +223,10 @@ async def email_action_confirm_page(
             "This invoice is no longer awaiting review — it may already have been "
             "approved, rejected, or reassigned. Sign in to the app to see its status.",
         )
+    # The page shows the invoice as it is NOW; an Approve link minted for other
+    # figures must not ask the reviewer to confirm these ones.
+    if approval_facts_changed(decoded, invoice):
+        return _info_page("Invoice has changed", FACTS_CHANGED_MESSAGE)
     return _confirm_page(token, decoded.action, invoice)
 
 
@@ -328,6 +334,10 @@ async def _apply_action(
                 "been approved, rejected, or reassigned.",
             ),
         )
+    # Re-checked under the row lock: the confirm page's check ran on a read
+    # that an edit may have overtaken since.
+    if approval_facts_changed(decoded, invoice):
+        return _ActionResult(False, _info_page("Invoice has changed", FACTS_CHANGED_MESSAGE))
 
     if decoded.action == ACTION_APPROVE:
         await review_svc.approve_invoice(

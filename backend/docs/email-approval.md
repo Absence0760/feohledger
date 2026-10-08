@@ -18,8 +18,23 @@ binds — under an HMAC-SHA256 signature the platform alone can produce — the 
 facts the action will run against:
 
 ```
-tenant_slug + invoice_id + actor_id (the reviewer) + action + expiry + jti
+tenant_slug + invoice_id + actor_id (the reviewer) + action + expiry + jti + facts
 ```
+
+`facts` is a digest of the invoice the email announced — what it displayed
+(invoice number, vendor name, amount + currency) plus what decides the payment
+(vendor id, payment method, due date, entity) — computed from the row by
+`email_action_token.digest_of_invoice` and handed to `notify_event` as
+`action_facts` by the caller that sends the assignment. An email can sit in an inbox for
+days, and the invoice can be edited meanwhile; the Approve link approves **only
+the figures its message showed**. Both the confirmation page and the POST
+recompute the digest from the invoice (the POST under the row lock) and, on a
+mismatch, render "This invoice changed after this message was sent" and approve
+nothing — the reviewer signs in and reviews the current version. Reject is not
+bound: sending an invoice back is safe whatever it now says. A token without the
+claim (minted before it existed) does not verify at all. The in-app counterpart
+is `expected_updated_at` on `POST /api/invoices/{id}/approve`
+(`docs/decisions.md` §260).
 
 Because the signing key is held only by the platform (sops + KMS in deployed
 envs), the token cannot be forged, and flipping the action, the invoice, or the

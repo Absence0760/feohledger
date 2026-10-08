@@ -22,8 +22,13 @@ primitive the email-approval link uses. It binds, under an HMAC-SHA256 signature
 the platform alone can produce, the exact facts the action will run against:
 
 ```
-tenant_slug + invoice_id + actor_id (the intended approver) + action + channel + expiry + jti
+tenant_slug + invoice_id + actor_id (the intended approver) + action + channel + expiry + jti + facts
 ```
+
+`facts` binds an Approve to the figures the post displayed — see
+[email-approval.md](email-approval.md) § Why a token, not a login. An edit since
+the message was sent acks "This invoice changed after this message was sent"
+and approves nothing.
 
 The new `channel` claim (`email` / `slack`) is what makes the surfaces distinct:
 

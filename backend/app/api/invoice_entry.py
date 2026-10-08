@@ -48,9 +48,10 @@ INVOICE_ENTRY_WINDOW_CLOSED = "invoice_entry_window_closed"
 
 # An explicit allowlist, so a status added later is outside the window until
 # someone decides otherwise. `ready_for_review` is NOT in it: once submitted,
-# the content is what the approver is looking at, and approval binds to no
-# version — an edit landing between their read and their click would be
-# approved unseen. A correction after submit goes through reject → rework.
+# the content is what the approver is looking at, and a correction after
+# submit goes through reject → rework. (A manager may still edit at this stage;
+# approval refuses any version the approver did not load, so such an edit is
+# re-reviewed rather than approved unseen — `api/invoice_version.py`.)
 # `failed` is in it only for an invoice never approved (see `in_entry_window`).
 _ENTRY_WINDOW_STATUSES = frozenset(
     {
@@ -95,6 +96,24 @@ def in_entry_window(invoice: Invoice) -> bool:
     approved then rejected sits at `rejected` — hence the approval read.
     """
     return invoice.status in _ENTRY_WINDOW_STATUSES and not was_ever_approved(invoice)
+
+
+def missing_required_fields(invoice: Invoice) -> list[str]:
+    """The fields an invoice needs before it may leave entry, by wire name.
+
+    `POST /invoices/{id}/complete` refuses on a non-empty list, and the bulk
+    `new → ready_for_review` submit reports each such invoice as a skip — one
+    definition, so the bulk bar cannot put a vendorless or amountless invoice
+    in the approval queue that the single-invoice submit would have refused.
+    """
+    missing: list[str] = []
+    if not invoice.vendor_name or not invoice.vendor_name.strip():
+        missing.append("vendor")
+    if not invoice.invoice_number or not invoice.invoice_number.strip():
+        missing.append("invoice_number")
+    if invoice.amount is None or invoice.amount <= 0:
+        missing.append("amount")
+    return missing
 
 
 def refuse_entry_only_outside_window(user: User, invoice: Invoice) -> None:

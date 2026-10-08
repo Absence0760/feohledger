@@ -171,3 +171,51 @@ async def test_regenerate_forbidden_for_clerk(realdb):
     async with realdb.client(key="a", role="ap_clerk") as c:
         resp = await c.post(f"/api/invoices/{inv_id}/summary/regenerate", json={})
     assert resp.status_code == 403
+
+
+async def test_summary_cache_fill_never_rolls_back_a_concurrent_edit(realdb):
+    """The cache fill preserves `updated_at` so opening an invoice doesn't
+    bump its version. It used to do that by writing the version it READ back
+    unconditionally — so an edit committed between that read and that write
+    kept its new amount but lost its new version, and an approver still
+    holding the old version passed the stale-approval check against figures
+    they never saw (decisions §260; caught by the stale-approval e2e). The
+    write is now a compare-and-swap: a row that moved is left alone."""
+    from sqlalchemy import select
+    from sqlalchemy.orm import selectinload
+
+    from app.services.audit_summary import get_or_build_summary
+
+    mk = realdb.sessionmaker("a")
+    org_id = realdb.info("a").org_id
+    inv_id, _ = await _add_invoice(mk, org_id, number="INV-SUM-RACE")
+    inv_uuid = uuid.UUID(inv_id)
+
+    async with mk() as reader, realdb.control_sessionmaker()() as control:
+        # The summary request has read the invoice...
+        # Loaded the way the endpoint loads it (`get_invoice`).
+        stale = (
+            await reader.execute(
+                select(Invoice)
+                .where(Invoice.id == inv_uuid)
+                .options(selectinload(Invoice.extraction_results))
+            )
+        ).scalar_one()
+        seen_version = stale.updated_at
+
+        # ...when someone else's edit commits.
+        async with mk() as editor:
+            row = (await editor.execute(select(Invoice).where(Invoice.id == inv_uuid))).scalar_one()
+            row.amount = Decimal("9500.00")
+            await editor.commit()
+            await editor.refresh(row)
+            edited_version = row.updated_at
+        assert edited_version != seen_version
+
+        result = await get_or_build_summary(reader, control, stale)
+        assert result["text"], "the summary is still served"
+
+    async with mk() as s:
+        after = (await s.execute(select(Invoice).where(Invoice.id == inv_uuid))).scalar_one()
+    assert after.amount == Decimal("9500.00")
+    assert after.updated_at == edited_version, "the edit's version must survive"

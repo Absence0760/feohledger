@@ -335,6 +335,12 @@ class BulkStatusRequest(BaseModel):
     # through `review.reject_invoice`, which records the reason on the audit row
     # and on the `review_rejected` exception. Ignored for every other target.
     reason: str | None = Field(default=None, max_length=1000)
+    # `{invoice_id: updated_at}` — the version of each row the approver saw
+    # (`InvoiceResponse.updated_at`, or `GET /invoices/ids`' `versions` for a
+    # "select all matching" set). Read for the `approved` target only: a stale
+    # row, or one missing from a supplied map, is skipped instead of approved
+    # unseen (`api/invoice_version.py`). Omitted → no check.
+    expected_updated_at: dict[str, datetime] | None = None
 
 
 class BulkStatusSkip(BaseModel):

@@ -39,6 +39,7 @@ from app.services.email_action_token import (
     CHANNEL_SLACK,
     CHANNEL_TEAMS,
     build_action_token,
+    digest_of_invoice,
     verify_action_token,
 )
 
@@ -65,6 +66,18 @@ def teams_keys(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
+#: The displayed-facts digest of every invoice `_make_invoice` wrote, so a
+#: token minted here binds the version the test seeded — what the assignment
+#: message would have shown (`email_action_token.digest_of_invoice`).
+_SEEDED_FACTS: dict[uuid.UUID, str] = {}
+
+
+def _facts(invoice_id: uuid.UUID) -> str:
+    # An id no test seeded (a token for a missing invoice) gets a placeholder;
+    # those tests fail before the facts are ever compared.
+    return _SEEDED_FACTS.get(invoice_id, "0" * 32)
+
+
 async def _make_invoice(
     realdb,
     *,
@@ -86,6 +99,7 @@ async def _make_invoice(
         )
         s.add(inv)
         await s.commit()
+        _SEEDED_FACTS[inv.id] = digest_of_invoice(inv)
         return inv.id
 
 
@@ -104,6 +118,7 @@ def _teams_token(
     return build_action_token(
         tenant_slug=info.slug,
         invoice_id=invoice_id,
+        facts=_facts(invoice_id),
         actor_id=info.users[role],
         action=action,
         signing_key=key,
@@ -384,6 +399,7 @@ def test_teams_token_rejected_with_email_expected_channel():
     token = build_action_token(
         tenant_slug="acme",
         invoice_id=inv,
+        facts=_facts(inv),
         actor_id=actor,
         action=ACTION_APPROVE,
         signing_key=_ACTION_KEY,
@@ -408,6 +424,7 @@ def test_build_teams_action_tokens_returns_none_without_key():
         build_teams_action_tokens(
             tenant_slug="acme",
             invoice_id=uuid.uuid4(),
+            facts=_facts(uuid.uuid4()),
             actor_id=uuid.uuid4(),
             signing_key="",
             ttl_hours=1,
@@ -422,6 +439,7 @@ def test_build_teams_action_tokens_are_teams_channel():
     approve, reject = build_teams_action_tokens(
         tenant_slug="acme",
         invoice_id=uuid.uuid4(),
+        facts=_facts(uuid.uuid4()),
         actor_id=uuid.uuid4(),
         signing_key=_ACTION_KEY,
         ttl_hours=1,
@@ -458,6 +476,7 @@ def _rendered_actions(realdb, invoice_id):
         slug=info.slug,
         invoice_id=invoice_id,
         recipient_user_ids=[info.users["ap_manager"]],
+        facts=_facts(invoice_id),
     )
     assert approve_token and reject_token
     msg = render_chat_message(
@@ -554,6 +573,7 @@ async def test_rejecting_burns_the_sibling_approve_token(realdb, teams_keys):
     approve, reject = build_teams_action_tokens(
         tenant_slug=info.slug,
         invoice_id=inv_id,
+        facts=_facts(inv_id),
         actor_id=info.users["ap_manager"],
         signing_key=_ACTION_KEY,
         ttl_hours=168,
@@ -573,4 +593,28 @@ async def test_rejecting_burns_the_sibling_approve_token(realdb, teams_keys):
         body = _payload_body(approve)
         replay = await c.post(_INTERACTIVITY_URL, content=body, headers=_signed_headers(body))
     assert "already" in replay.json()["text"].lower(), replay.json()
+    assert await _status(realdb, inv_id) == InvoiceStatus.ready_for_review
+
+
+# ---------------------------------------------------------------------------
+# An Approve action approves only the figures its message showed (decisions §260)
+# ---------------------------------------------------------------------------
+
+
+async def test_approve_action_refuses_when_the_invoice_changed_after_the_post(realdb, teams_keys):
+    admin = realdb.info("a").users["admin"]
+    inv_id = await _make_invoice(realdb, uploaded_by_id=admin)
+    token = _teams_token(realdb, inv_id, action=ACTION_APPROVE)
+    mk = realdb.sessionmaker("a")
+    async with mk() as s:
+        inv = (await s.execute(select(Invoice).where(Invoice.id == inv_id))).scalar_one()
+        inv.amount = Decimal("9500.00")
+        await s.commit()
+
+    body = _payload_body(token)
+    async with realdb.client(key="a", role=None) as c:
+        resp = await c.post(_INTERACTIVITY_URL, content=body, headers=_signed_headers(body))
+
+    assert resp.status_code == 200
+    assert "changed after this message was sent" in resp.json()["text"]
     assert await _status(realdb, inv_id) == InvoiceStatus.ready_for_review

@@ -176,6 +176,51 @@ async def test_invoice_by_id_routes_are_entity_scoped(realdb):
         assert (await c.get(f"/api/audit/invoice/{iid}", headers=own)).status_code == 200
 
 
+async def test_invoice_bulk_delete_is_entity_scoped(realdb):
+    """`POST /bulk/delete` takes ids too, and resolved them on the primary key
+    alone — so a caller scoped to one subsidiary could delete another's invoice
+    by id. It now scopes and row-locks like `bulk/status`; an out-of-scope id
+    is reported as skipped exactly like an unknown one, and survives."""
+    async with realdb.client(key=TENANT, role="admin") as c:
+        org_id, mk, default_id, other_id, dflt = await _setup(realdb, c, "bulkdel")
+        theirs = await _add(
+            mk,
+            Invoice(
+                invoice_number=f"INV-{_tag()}",
+                vendor_name="Acme Supplies",
+                amount=Decimal("250.00"),
+                status=InvoiceStatus.new,
+                organization_id=org_id,
+                entity_id=dflt,
+            ),
+        )
+        mine = await _add(
+            mk,
+            Invoice(
+                invoice_number=f"INV-{_tag()}",
+                vendor_name="Acme Supplies",
+                amount=Decimal("250.00"),
+                status=InvoiceStatus.new,
+                organization_id=org_id,
+                entity_id=uuid.UUID(other_id),
+            ),
+        )
+        unknown = uuid.uuid4()
+
+        resp = await c.post(
+            "/api/invoices/bulk/delete",
+            json={"ids": [str(theirs), str(mine), str(unknown)]},
+            headers={"X-Entity-ID": other_id},
+        )
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["deleted"] == 1
+        assert sorted(body["skipped"]) == sorted([str(theirs), str(unknown)])
+
+    assert await _reload(mk, Invoice, theirs) is not None, "another entity's invoice survives"
+    assert await _reload(mk, Invoice, mine) is None
+
+
 async def test_vendor_by_id_routes_are_entity_scoped(realdb):
     async with realdb.client(key=TENANT, role="admin") as c:
         org_id, mk, default_id, other_id, dflt = await _setup(realdb, c, "ven")

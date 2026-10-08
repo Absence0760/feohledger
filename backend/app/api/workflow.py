@@ -23,9 +23,15 @@ from app.api.invoice_entry import (
     INVOICE_ENTRY_WINDOW_CLOSED,
     in_entry_window,
     is_entry_only,
+    missing_required_fields,
     refuse_entry_only_outside_window,
     stamp_entry_editor,
     was_ever_approved,
+)
+from app.api.invoice_version import (
+    INVOICE_STALE_APPROVAL,
+    STALE_APPROVAL_MESSAGE,
+    matches_loaded_version,
 )
 from app.api.permissions import PERM_INVOICE_APPROVE
 from app.api.refusals import coded_refusal
@@ -370,7 +376,17 @@ async def approve_invoice(
 ):
     await ensure_in_entity_scope(db, Invoice, invoice_id, entity_id, detail="Invoice not found")
     invoice = await get_invoice_for_update(db, invoice_id)
-    corrections = body.model_dump(exclude_unset=True) if body else None
+    corrections = body.model_dump(exclude_unset=True) if body else {}
+    # The version the approver loaded, compared under the row lock above: an
+    # edit that landed after they read the invoice is refused, not signed
+    # (`api/invoice_version.py`). A request token, not a correction — popped
+    # before `corrections` reaches the review service.
+    expected_updated_at = corrections.pop("expected_updated_at", None)
+    if expected_updated_at is not None and not matches_loaded_version(invoice, expected_updated_at):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=coded_refusal(INVOICE_STALE_APPROVAL, STALE_APPROVAL_MESSAGE),
+        )
 
     actor_roles = {r.name for r in user.roles} if user.roles else set()
     # `org_settings` is not optional detail on this path — it carries the org's
@@ -551,14 +567,7 @@ async def complete_invoice(
             ),
         )
 
-    # Validate required fields
-    missing = []
-    if not invoice.vendor_name or not invoice.vendor_name.strip():
-        missing.append("vendor")
-    if not invoice.invoice_number or not invoice.invoice_number.strip():
-        missing.append("invoice_number")
-    if invoice.amount is None or invoice.amount <= 0:
-        missing.append("amount")
+    missing = missing_required_fields(invoice)
     if missing:
         # Coded (`api/refusals.coded_refusal`): the invoice modal suppresses this
         # toast because its form already highlights the fields, and it decides

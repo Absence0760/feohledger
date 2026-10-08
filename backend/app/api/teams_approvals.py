@@ -61,6 +61,8 @@ from app.services import review as review_svc
 from app.services.email_action_token import (
     ACTION_APPROVE,
     CHANNEL_TEAMS,
+    FACTS_CHANGED_MESSAGE,
+    approval_facts_changed,
     verify_action_token,
 )
 from app.services.teams_signature import CARD_SIGNATURE_HEADER, verify_body
@@ -278,6 +280,10 @@ async def _apply_teams_action(
     invoice = await get_invoice_for_update(db, decoded.invoice_id)
     if invoice.status != InvoiceStatus.ready_for_review:
         return False, "This invoice is no longer awaiting review."
+    # The message's figures, checked against the row under the lock — an edit
+    # since the post was sent is re-reviewed in the app, not approved from chat.
+    if approval_facts_changed(decoded, invoice):
+        return False, FACTS_CHANGED_MESSAGE
 
     if decoded.action == ACTION_APPROVE:
         await review_svc.approve_invoice(

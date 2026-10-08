@@ -36,8 +36,14 @@ from app.api.invoice_entry import (
     in_entry_window,
     is_entry_only,
     may_import_history,
+    missing_required_fields,
     refuse_entry_only_outside_window,
     stamp_entry_editor,
+)
+from app.api.invoice_version import (
+    INVOICE_STALE_EDIT,
+    STALE_APPROVAL_MESSAGE,
+    matches_loaded_version,
 )
 from app.api.money_filters import snap_lower_bound, snap_upper_bound
 from app.api.pagination import (
@@ -103,6 +109,7 @@ from app.services.csv_import import MAX_CSV_IMPORT_SIZE, import_invoices_csv
 from app.services.gl_chart import refuse_gl_codes_outside_chart
 from app.services.gl_recode import RecodeFilter, bulk_recode_gl
 from app.services.invoice_warnings import reconcile_line_totals, refresh_warnings
+from app.services.payment_runs import live_payment_invoices
 from app.services.report_export import csv_safe_cell
 from app.services.storage import delete_file, upload_chat_file, upload_invoice_file
 from app.services.supplier_chat import (
@@ -191,11 +198,6 @@ router = APIRouter(prefix="/invoices", tags=["invoices"])
 # sends one of these keys; the raw value is never interpolated into SQL. `.id`
 # is always appended as the final tie-break regardless of which column is
 # picked (same reasoning as the pre-existing `created_at, id` default order).
-#: The optimistic-concurrency refusal on `PATCH /invoices/{id}`. A client
-#: BRANCHES on it — the web invoice modal turns it into a reload prompt — so it
-#: is keyed on this code, never on the sentence (`api/refusals.coded_refusal`).
-INVOICE_STALE_EDIT = "invoice_stale_edit"
-
 INVOICE_SORTABLE_COLUMNS: dict[str, object] = {
     "created_at": Invoice.created_at,
     "due_date": Invoice.due_date,
@@ -430,7 +432,20 @@ async def invoice_counts(
 
 # Registered BEFORE the parametric `/{invoice_id}` route — same reason
 # `/counts` sits above it.
-@router.get("/ids", response_model=MatchingIdsResponse)
+class InvoiceMatchingIdsResponse(MatchingIdsResponse):
+    """`MatchingIdsResponse` plus each id's version.
+
+    A "select all matching" set reaches rows the page never loaded, so the
+    client has no `updated_at` of its own to bind a bulk approval to. `versions`
+    is the version at selection time — what the approver chose to act on — and
+    `POST /bulk/status` skips any row that changed after it
+    (`api/invoice_version.py`).
+    """
+
+    versions: dict[str, str]
+
+
+@router.get("/ids", response_model=InvoiceMatchingIdsResponse)
 async def list_invoice_ids(
     status: str | None = None,
     vendor: str | None = None,
@@ -461,7 +476,7 @@ async def list_invoice_ids(
     the same set) plus `exclude_status`, used by the frontend to drop the
     system-managed statuses a row's checkbox is already disabled for.
     """
-    query = apply_entity_scope(select(Invoice.id), Invoice, entity_id)
+    query = apply_entity_scope(select(Invoice.id, Invoice.updated_at), Invoice, entity_id)
     query = _invoice_list_filters(
         query,
         status=status,
@@ -481,8 +496,14 @@ async def list_invoice_ids(
 
     total = (await db.execute(select(func.count()).select_from(query.subquery()))).scalar() or 0
     query = query.order_by(Invoice.created_at.desc(), Invoice.id.desc()).limit(MAX_SELECT_ALL_IDS)
-    ids = [str(row) for row in (await db.execute(query)).scalars().all()]
-    return MatchingIdsResponse(ids=ids, total=int(total), truncated=int(total) > len(ids))
+    rows = (await db.execute(query)).all()
+    ids = [str(row.id) for row in rows]
+    return InvoiceMatchingIdsResponse(
+        ids=ids,
+        total=int(total),
+        truncated=int(total) > len(ids),
+        versions={str(row.id): row.updated_at.isoformat() for row in rows},
+    )
 
 
 class AssignableReviewerResponse(BaseModel):
@@ -1236,6 +1257,13 @@ async def save_invoice_line_items(
     # the count and the total are unchanged.
     if _canonical_lines(before_rows) != _canonical_lines(after_rows):
         stamp_entry_editor(user, invoice)
+        # The lines are this invoice's content, but they live in another table,
+        # so a re-coded or re-described line with the same totals moves no
+        # header column and `onupdate` never fires. Move the version by hand:
+        # it is what an approval is bound to (`api/invoice_version.py`), and an
+        # approver holding the pre-edit version must be refused, not approve
+        # these lines unseen (decisions §260).
+        invoice.updated_at = func.now()
         field_diff = build_field_diff(
             before, after, ["line_item_count", "line_items_total", "gl_accounts"]
         )
@@ -1255,12 +1283,16 @@ async def save_invoice_line_items(
         )
 
     await db.commit()
+    await db.refresh(invoice, ["updated_at", "amount"])
     return {
         "saved": len(body),
         # Exact decimal strings — never float (project invariant: money is exact).
         "line_items_total": str(new_total) if new_total is not None else None,
         "header_amount": str(invoice.amount),
         "reconciles_with_header": mismatch is None,
+        # The invoice's version after this save, so a client that edited the
+        # lines can keep approving the invoice it now shows.
+        "updated_at": invoice.updated_at.isoformat(),
     }
 
 
@@ -1587,14 +1619,7 @@ async def update_invoice(
     # `setattr(invoice, field, value)` loop below has no idea it isn't one.
     expected_updated_at = update_data.pop("expected_updated_at", None)
     if expected_updated_at is not None:
-        # `invoice.updated_at` is always tz-aware (Postgres `timestamptz`); a
-        # client that sent a naive ISO timestamp (no offset) is assumed UTC
-        # rather than raising on a naive/aware comparison — this field is a
-        # concurrency token round-tripped from our own response, not
-        # user-authored input worth rejecting over a missing `Z`.
-        if expected_updated_at.tzinfo is None:
-            expected_updated_at = expected_updated_at.replace(tzinfo=UTC)
-        if expected_updated_at != invoice.updated_at:
+        if not matches_loaded_version(invoice, expected_updated_at):
             raise HTTPException(
                 status_code=409,
                 detail=coded_refusal(
@@ -2328,6 +2353,17 @@ async def reopen_invoice_chat(
     return await _chat_thread_response(db, invoice)
 
 
+#: An `approved` invoice is not in `IMMUTABLE_STATUSES`, yet it can already sit
+#: in a payment run with a live `Payment` — one exported to the bank as a NACHA
+#: file, say. Deleting it cascades that payment away while the bank still pays
+#: it, so the ledger stops matching the money that moved. Its payment has to be
+#: cancelled or voided first, which is the audited way out of a run.
+LIVE_PAYMENT_DELETE_REFUSAL = (
+    "This invoice has a payment in a payment run. Cancel or void that payment "
+    "before deleting the invoice."
+)
+
+
 @router.delete("/{invoice_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_invoice(
     invoice_id: uuid.UUID,
@@ -2336,12 +2372,14 @@ async def delete_invoice(
     entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
     await ensure_in_entity_scope(db, Invoice, invoice_id, entity_id, detail="Invoice not found")
-    result = await db.execute(select(Invoice).where(Invoice.id == invoice_id))
-    invoice = result.scalar_one_or_none()
-    if not invoice:
-        raise HTTPException(status_code=404, detail="Invoice not found")
+    # Row-locked: the status and live-payment reads below decide a hard delete,
+    # and the lock is what serialises them against a payment run inserting a
+    # payment for this invoice (the FK takes a share lock on this row).
+    invoice = await get_invoice_for_update(db, invoice_id)
     if invoice.status in IMMUTABLE_STATUSES:
         raise HTTPException(status_code=409, detail="Cannot delete invoice in this status")
+    if await live_payment_invoices(db, [invoice.id]):
+        raise HTTPException(status_code=409, detail=LIVE_PAYMENT_DELETE_REFUSAL)
     # Audit BEFORE the cascade: afterwards there is no row left to describe.
     # `_delete_invoice_cascade` deliberately does not touch `audit_log`, so this
     # row (and the invoice's whole prior trail) survives the delete — which is
@@ -2529,15 +2567,30 @@ async def bulk_delete(
     body: BulkDeleteRequest,
     db: AsyncSession = Depends(get_tenant_db),
     user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER, ROLE_CFO)),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
     ids = [uuid.UUID(i) for i in body.ids]
-    result = await db.execute(select(Invoice).where(Invoice.id.in_(ids)))
+    # The same treatment `bulk/status` has: scoped to the selected entity like
+    # the single-invoice DELETE, and row-locked in id order so the status and
+    # live-payment reads below cannot come from a row a concurrent approval is
+    # changing or a payment run is inserting a payment for. Without the scope,
+    # another subsidiary's invoice could be deleted by id from a view that
+    # never showed it.
+    result = await db.execute(
+        apply_entity_scope(select(Invoice).where(Invoice.id.in_(ids)), Invoice, entity_id)
+        .order_by(Invoice.id)
+        .with_for_update()
+    )
     invoices = result.scalars().all()
 
     deleted = 0
-    skipped: list[str] = []
+    # An id that does not exist, or sits outside the selected entity, is
+    # reported as skipped rather than silently dropped from the count.
+    found = {inv.id for inv in invoices}
+    skipped: list[str] = [str(i) for i in ids if i not in found]
+    in_a_run = await live_payment_invoices(db, found)
     for inv in invoices:
-        if inv.status in IMMUTABLE_STATUSES:
+        if inv.status in IMMUTABLE_STATUSES or inv.id in in_a_run:
             skipped.append(str(inv.id))
         else:
             await _audit_invoice_deleted(db, inv, actor_id=user.id, bulk=True)
@@ -2649,6 +2702,18 @@ async def bulk_status_change(
         )
 
     ids = [uuid.UUID(i) for i in body.ids]
+    # The version of each row the approver saw, keyed by invoice id. Only the
+    # `approved` target reads it (`api/invoice_version.py`); once supplied, a
+    # row missing from it is skipped like a stale one — the client opted in,
+    # so an id it did not bind is one it cannot vouch for.
+    expected_versions: dict[uuid.UUID, datetime] | None = None
+    if body.expected_updated_at is not None:
+        try:
+            expected_versions = {uuid.UUID(k): v for k, v in body.expected_updated_at.items()}
+        except ValueError:
+            raise HTTPException(
+                status_code=422, detail="expected_updated_at keys must be invoice ids."
+            ) from None
     # Scoped to the selected entity like the single-invoice routes, and
     # row-locked in id order: every status read below decides a transition, so
     # it must not come from a row a concurrent approval or edit is changing.
@@ -2720,15 +2785,26 @@ async def bulk_status_change(
         if target == DBInvoiceStatus.approved:
             from app.services.review import approve_invoice
 
+            if expected_versions is not None:
+                seen = expected_versions.get(inv.id)
+                if seen is None or not matches_loaded_version(inv, seen):
+                    skipped.append(BulkStatusSkip(id=str(inv.id), reason=STALE_APPROVAL_MESSAGE))
+                    continue
             try:
-                await approve_invoice(
-                    db,
-                    inv,
-                    actor_id=user.id,
-                    actor_name=user.full_name,
-                    actor_roles=actor_roles,
-                    org_settings=org.settings,
-                )
+                # A savepoint per row: `approve_invoice` can write before a
+                # control refuses (the approval-chain routing in `state_data`,
+                # the embedding), and the batch commits at the end. The single
+                # door and the email / chat doors roll a refused approval back
+                # whole; this makes a skipped row leave nothing behind too.
+                async with db.begin_nested():
+                    await approve_invoice(
+                        db,
+                        inv,
+                        actor_id=user.id,
+                        actor_name=user.full_name,
+                        actor_roles=actor_roles,
+                        org_settings=org.settings,
+                    )
             except HTTPException as exc:
                 # Segregation / threshold / CFO-gate violation — skip this one,
                 # keep processing the rest of the batch. The service's own
@@ -2775,6 +2851,19 @@ async def bulk_status_change(
             await refresh_warnings(db, inv, org_settings=org.settings)
             updated += 1
         else:
+            if target == DBInvoiceStatus.ready_for_review:
+                # The `/complete` submit's own required-field check, so the bulk
+                # bar can't queue an invoice with no vendor, number or amount
+                # for approval that the single-invoice submit would refuse.
+                missing = missing_required_fields(inv)
+                if missing:
+                    skipped.append(
+                        BulkStatusSkip(
+                            id=str(inv.id),
+                            reason=f"Required fields missing: {', '.join(missing)}",
+                        )
+                    )
+                    continue
             # Same partial-success contract as the three branches above.
             # `transition_invoice` 409s on a transition the state machine
             # refuses, and an uncaught 409 here aborted the WHOLE request — so a

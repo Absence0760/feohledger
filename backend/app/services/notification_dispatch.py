@@ -214,8 +214,15 @@ async def notify_event(
     rendered: RenderedNotification | None = None,
     actor_id: uuid.UUID | None = None,
     entity_type: str = "invoice",
+    action_facts: str | None = None,
 ) -> int:
     """Notify each recipient of `event_type`, gated by their preferences.
+
+    ``action_facts`` is ``email_action_token.digest_of_invoice`` of the invoice
+    an ``invoice_assigned`` message announces, computed by the caller from the
+    row it holds. The message's Approve / Reject actions bind it, so they act
+    only on the version the message describes; without it no action is offered
+    (decisions §260).
 
     Pass either ``invoice_ctx`` (the dispatcher renders the invoice template)
     or a pre-``rendered`` notification (for non-invoice events like contract
@@ -333,6 +340,7 @@ async def notify_event(
             and entity_type == "invoice"
             and settings.email_action_signing_key
             and entity_id is not None
+            and action_facts is not None
         ):
             try:
                 tenant_slug = await _resolve_org_slug(organization_id)
@@ -365,6 +373,7 @@ async def notify_event(
                     tenant_slug=tenant_slug,
                     invoice_id=entity_id,
                     actor_id=recipient_id,
+                    facts=action_facts,
                     signing_key=settings.email_action_signing_key,
                     ttl_hours=settings.email_action_ttl_hours,
                 )
@@ -394,6 +403,7 @@ async def notify_event(
                 invoice_ctx=invoice_ctx,
                 invoice_id=entity_id,
                 recipient_user_ids=recipient_user_ids,
+                action_facts=action_facts,
             )
 
     enqueue_post_commit(db, _outbound, name=f"notify-{event_type}")
@@ -459,6 +469,7 @@ def _build_chat_action_tokens(
     slug: str | None,
     invoice_id: uuid.UUID | None,
     recipient_user_ids: list[uuid.UUID] | None,
+    facts: str | None,
 ) -> tuple[str | None, str | None]:
     """Build the (approve, reject) action tokens for the org's chat provider.
 
@@ -490,7 +501,7 @@ def _build_chat_action_tokens(
     builder = builders.get(provider)
     if builder is None:
         return None, None
-    if not settings.email_action_signing_key or slug is None or invoice_id is None:
+    if not settings.email_action_signing_key or slug is None or invoice_id is None or not facts:
         return None, None
 
     approvers = [uid for uid in (recipient_user_ids or []) if uid is not None]
@@ -503,6 +514,7 @@ def _build_chat_action_tokens(
         tenant_slug=slug,
         invoice_id=invoice_id,
         actor_id=approvers[0],
+        facts=facts,
         signing_key=settings.email_action_signing_key,
         ttl_hours=settings.email_action_ttl_hours,
     )
@@ -518,6 +530,7 @@ async def _send_chat_best_effort(
     invoice_ctx,
     invoice_id: uuid.UUID | None,
     recipient_user_ids: list[uuid.UUID] | None = None,
+    action_facts: str | None = None,
 ) -> None:
     """Post one approval event to the org's chat channel (Slack/Teams).
 
@@ -567,6 +580,7 @@ async def _send_chat_best_effort(
         slug=slug,
         invoice_id=invoice_id,
         recipient_user_ids=recipient_user_ids,
+        facts=action_facts,
     )
 
     message = render_chat_message(

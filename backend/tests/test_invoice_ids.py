@@ -113,4 +113,22 @@ async def test_ids_empty_tenant(realdb):
         resp = await c.get("/api/invoices/ids")
     assert resp.status_code == 200
     body = resp.json()
-    assert body == {"ids": [], "total": 0, "truncated": False}
+    assert body == {"ids": [], "total": 0, "truncated": False, "versions": {}}
+
+
+@pytest.mark.asyncio
+async def test_ids_returns_each_rows_version_for_a_bound_bulk_approval(realdb):
+    """A "select all matching" set reaches rows the page never loaded, so
+    `/ids` hands back each one's `updated_at` — the version a bulk approval of
+    that set is then bound to (decisions §260)."""
+    mk = realdb.sessionmaker("a")
+    org_id = realdb.info("a").org_id
+    created = await _add_invoices(mk, org_id, InvoiceStatus.ready_for_review, 3, vendor="Ver")
+
+    async with realdb.client(key="a") as c:
+        resp = await c.get("/api/invoices/ids", params={"status": "ready_for_review"})
+        body = resp.json()
+        assert set(body["versions"]) == set(body["ids"]) >= set(created)
+        for inv_id in created:
+            detail = (await c.get(f"/api/invoices/{inv_id}")).json()
+            assert body["versions"][inv_id] == detail["updated_at"]

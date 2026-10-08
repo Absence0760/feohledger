@@ -697,6 +697,98 @@ async def test_patch_fresh_expected_updated_at_succeeds(realdb):
         assert resp.json()["notes"] == "up to date"
 
 
+# ---------------------------------------------------------------------------
+# Approval is bound to the version the approver loaded (decisions §260). An
+# edit that landed between the approver's read and their click used to be
+# approved unseen — for managers as well as clerks. The same token as the PATCH
+# guard, refused with its own code because the remedy is a re-review.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_approve_with_a_stale_version_is_refused_and_nothing_is_signed(realdb):
+    info = realdb.info("a")
+    mk = realdb.sessionmaker("a")
+    inv_id = await _seed_invoice(
+        mk, info.org_id, status=InvoiceStatus.ready_for_review, number="CP-APPROVE-STALE"
+    )
+
+    async with realdb.client(key="a", role="ap_manager") as approver:
+        loaded = await approver.get(f"/api/invoices/{inv_id}")
+        seen = loaded.json()["updated_at"]
+
+        # Someone else changes the payable while the approver is reading it.
+        async with realdb.client(key="a", role="admin") as editor:
+            edit = await editor.patch(f"/api/invoices/{inv_id}", json={"amount": "9500.00"})
+            assert edit.status_code == 200, edit.text
+
+        resp = await approver.post(
+            f"/api/invoices/{inv_id}/approve", json={"expected_updated_at": seen}
+        )
+        assert resp.status_code == 409, resp.text
+        assert resp.json()["detail"]["code"] == "invoice_stale_approval"
+
+    async with mk() as s:
+        inv = (await s.execute(select(Invoice).where(Invoice.id == inv_id))).scalar_one()
+        assert inv.status == InvoiceStatus.ready_for_review
+        assert inv.approved_by is None and inv.approval_date is None
+        signed = (
+            (
+                await s.execute(
+                    select(AuditLog).where(
+                        AuditLog.correlation_id == inv.correlation_id,
+                        AuditLog.action == "invoice.approved",
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert signed == [], "a refused approval must write no approval row"
+
+
+@pytest.mark.asyncio
+async def test_approve_with_the_current_version_approves(realdb):
+    info = realdb.info("a")
+    inv_id = await _seed_invoice(
+        realdb.sessionmaker("a"),
+        info.org_id,
+        status=InvoiceStatus.ready_for_review,
+        number="CP-APPROVE-CURRENT",
+    )
+
+    async with realdb.client(key="a", role="ap_manager") as c:
+        seen = (await c.get(f"/api/invoices/{inv_id}")).json()["updated_at"]
+        resp = await c.post(f"/api/invoices/{inv_id}/approve", json={"expected_updated_at": seen})
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["status"] == "approved"
+
+
+@pytest.mark.asyncio
+async def test_approve_with_corrections_still_binds_the_loaded_version(realdb):
+    """The token rides beside the corrections and is never applied as one: a
+    current token plus a correction approves with the correction; a stale one
+    applies neither."""
+    info = realdb.info("a")
+    mk = realdb.sessionmaker("a")
+    inv_id = await _seed_invoice(
+        mk, info.org_id, status=InvoiceStatus.ready_for_review, number="CP-APPROVE-CORR"
+    )
+
+    async with realdb.client(key="a", role="ap_manager") as c:
+        seen = (await c.get(f"/api/invoices/{inv_id}")).json()["updated_at"]
+        resp = await c.post(
+            f"/api/invoices/{inv_id}/approve",
+            json={"expected_updated_at": seen, "description": "corrected at approval"},
+        )
+        assert resp.status_code == 200, resp.text
+
+    async with mk() as s:
+        inv = (await s.execute(select(Invoice).where(Invoice.id == inv_id))).scalar_one()
+        assert inv.status == InvoiceStatus.approved
+        assert inv.description == "corrected at approval"
+
+
 @pytest.mark.asyncio
 async def test_patch_without_expected_updated_at_is_backward_compatible(realdb):
     """Omitting the field entirely (every caller that predates this guard)
@@ -863,3 +955,38 @@ async def test_patch_can_still_repoint_the_payee_before_approval(realdb):
     async with mk() as s:
         inv = (await s.execute(select(Invoice).where(Invoice.id == inv_id))).scalar_one()
         assert inv.vendor_id == other_id, "pre-approval vendor correction must still link"
+
+
+@pytest.mark.asyncio
+async def test_a_line_item_edit_moves_the_version_an_approval_is_bound_to(realdb):
+    """Lines are financial content, and a re-coded or re-described line with
+    the same totals changes no header column. The version still has to move,
+    or an approver holding the pre-edit version approves the new lines unseen
+    (decisions §260)."""
+    info = realdb.info("a")
+    inv_id = await _seed_invoice(
+        realdb.sessionmaker("a"),
+        info.org_id,
+        status=InvoiceStatus.ready_for_review,
+        amount="100.00",
+        number="CP-LINES-VERSION",
+    )
+    line = {"description": "hosting", "quantity": "1", "unit_price": "100.00", "total": "100.00"}
+
+    async with realdb.client(key="a", role="ap_manager") as approver:
+        first = await approver.put(f"/api/invoices/{inv_id}/line-items", json=[line])
+        assert first.status_code == 200, first.text
+        seen = (await approver.get(f"/api/invoices/{inv_id}")).json()["updated_at"]
+
+        async with realdb.client(key="a", role="admin") as editor:
+            again = await editor.put(
+                f"/api/invoices/{inv_id}/line-items",
+                json=[{**line, "description": "consulting"}],
+            )
+            assert again.status_code == 200, again.text
+
+        resp = await approver.post(
+            f"/api/invoices/{inv_id}/approve", json={"expected_updated_at": seen}
+        )
+    assert resp.status_code == 409, resp.text
+    assert resp.json()["detail"]["code"] == "invoice_stale_approval"
