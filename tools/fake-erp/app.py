@@ -1824,6 +1824,224 @@ async def sageza_set_amount_due(body: dict) -> dict:
 app.include_router(sageza)
 
 
+# ---------------------------------------------------------------------------
+# Blackbaud Financial Edge NXT — SKY API  (/blackbaud)
+# ---------------------------------------------------------------------------
+#
+# The SKY token endpoint (authorization_code + refresh_token grants, answering
+# with `environment_id`) and the AP / GL routes the blackbaud_fe_nxt adapter
+# calls. Every API route requires BOTH `Authorization: Bearer` and
+# `Bb-Api-Subscription-Key`, like the real gateway. Invoice creation is the
+# asynchronous /invoices/process job; this fake completes it immediately.
+# State lives under STATE["blackbaud"], created on first use (reset-safe).
+
+import json
+
+blackbaud = APIRouter(prefix="/blackbaud")
+
+BLACKBAUD_TOKEN = "fake-blackbaud-token"
+BLACKBAUD_ENVIRONMENT_ID = "p-fake-env-1"
+
+BLACKBAUD_VENDOR_FIXTURES: list[dict] = [
+    {"vendor_id": 136, "vendor_name": "Fake Blackbaud Vendor A", "ui_defined_id": "BBV-A",
+     "vendor_status": "Active", "payment_defaults": {"payment_terms": "Net 30"}},
+    {"vendor_id": 137, "vendor_name": "Fake Blackbaud Vendor B", "ui_defined_id": "BBV-B",
+     "vendor_status": "Active"},
+]
+BLACKBAUD_ACCOUNT_FIXTURES: list[dict] = [
+    {"account_id": 1, "account_number": "01-5000-00", "description": "Fake Program Supplies",
+     "class": "Unrestricted Net Assets", "prevent_data_entry": False},
+    {"account_id": 2, "account_number": "01-5100-00", "description": "Fake Software",
+     "class": "Unrestricted Net Assets", "prevent_data_entry": False},
+    {"account_id": 3, "account_number": "01-2000-00", "description": "Fake Accounts Payable",
+     "class": "Unrestricted Net Assets", "prevent_data_entry": False},
+]
+BLACKBAUD_PO_FIXTURES: list[dict] = [
+    {"purchase_order_id": 501, "order_number": 1001, "vendor_id": 136,
+     "vendor_name": "Fake Blackbaud Vendor A", "type": "Regular", "order_total": 1250.00,
+     "order_status": "OpenPurchaseOrder"},
+    {"purchase_order_id": 502, "order_number": 1002, "vendor_id": 137,
+     "vendor_name": "Fake Blackbaud Vendor B", "type": "Regular", "order_total": 980.50,
+     "order_status": "ClosedOrder"},
+]
+
+
+def _blackbaud_state() -> dict[str, Any]:
+    return STATE.setdefault(
+        "blackbaud", {"invoices": {}, "jobs": {}, "next_invoice": 4970, "next_job": 840}
+    )
+
+
+def _require_blackbaud_auth(request: Request) -> None:
+    if not request.headers.get("bb-api-subscription-key", "").strip():
+        raise ProviderError(
+            401, {"statusCode": 401, "message": "Access denied due to missing subscription key."}
+        )
+    if request.headers.get("authorization", "") != f"Bearer {BLACKBAUD_TOKEN}":
+        raise ProviderError(401, {"statusCode": 401, "message": "Invalid access token."})
+
+
+def _blackbaud_json(record: dict) -> Response:
+    """Emit stored exact-string amounts as JSON numbers, as the real API does."""
+    numbers = {"amount", "balance"}
+    parts = [
+        f"{json.dumps(k)}: {v if k in numbers else json.dumps(v)}" for k, v in record.items()
+    ]
+    return Response(content="{" + ", ".join(parts) + "}", media_type="application/json")
+
+
+def _blackbaud_page(request: Request, rows: list[dict]) -> dict:
+    offset = int(request.query_params.get("offset") or 0)
+    limit = min(int(request.query_params.get("limit") or 100), 500)
+    return {"count": len(rows), "value": copy.deepcopy(rows[offset : offset + limit])}
+
+
+@blackbaud.post("/oauth2/token")
+async def blackbaud_token(request: Request) -> dict:
+    raw = (await request.body()).decode("utf-8", errors="replace")
+    form = {k: v[0] for k, v in parse_qs(raw).items()}
+    grant = form.get("grant_type")
+    authorization = grant == "authorization_code" and form.get("code") and form.get("redirect_uri")
+    refresh = grant == "refresh_token" and form.get("refresh_token")
+    if not (authorization or refresh):
+        raise ProviderError(400, {"error": "invalid_grant"})
+    return {
+        "access_token": BLACKBAUD_TOKEN,
+        "token_type": "bearer",
+        "expires_in": 3600,
+        "refresh_token": "fake-blackbaud-refresh",
+        "refresh_token_expires_in": 31536000,
+        "environment_id": BLACKBAUD_ENVIRONMENT_ID,
+        "environment_name": "Fake FE NXT Environment",
+        "legal_entity_id": "p-fake-legal-entity",
+        "legal_entity_name": "Fake Nonprofit",
+    }
+
+
+@blackbaud.get("/accountspayable/v1/vendors")
+async def blackbaud_vendors(request: Request) -> dict:
+    _require_blackbaud_auth(request)
+    return _blackbaud_page(request, BLACKBAUD_VENDOR_FIXTURES)
+
+
+@blackbaud.get("/accountspayable/v1/purchaseorders")
+async def blackbaud_purchase_orders(request: Request) -> dict:
+    _require_blackbaud_auth(request)
+    return _blackbaud_page(request, BLACKBAUD_PO_FIXTURES)
+
+
+@blackbaud.get("/generalledger/v1/accounts")
+async def blackbaud_accounts(request: Request) -> dict:
+    _require_blackbaud_auth(request)
+    return _blackbaud_page(request, BLACKBAUD_ACCOUNT_FIXTURES)
+
+
+@blackbaud.get("/accountspayable/v1/invoices")
+async def blackbaud_list_invoices(request: Request) -> dict:
+    _require_blackbaud_auth(request)
+    needle = (request.query_params.get("search_text") or "").lower()
+    rows = [
+        r
+        for r in _blackbaud_state()["invoices"].values()
+        if not needle
+        or needle in str(r.get("invoice_number", "")).lower()
+        or needle in str(r.get("description", "")).lower()
+    ]
+    return _blackbaud_page(request, rows)
+
+
+def _blackbaud_invalid(detail: str) -> ProviderError:
+    return ProviderError(400, {"Error": "Failed to save invoice", "Details": [detail]})
+
+
+@blackbaud.post("/accountspayable/v1/invoices/process")
+async def blackbaud_create_invoice(request: Request) -> dict:
+    _require_blackbaud_auth(request)
+    body = json.loads(await request.body(), parse_float=Decimal)
+    for field in ("vendor_id", "amount", "distributions", "due_date", "invoice_date",
+                  "payment_details", "post_date"):
+        if field not in body:
+            raise _blackbaud_invalid(f"{field} is required.")
+    if body["vendor_id"] not in {v["vendor_id"] for v in BLACKBAUD_VENDOR_FIXTURES}:
+        raise _blackbaud_invalid("The vendor could not be found.")
+    known = {a["account_number"] for a in BLACKBAUD_ACCOUNT_FIXTURES}
+    debits = credits = Decimal(0)
+    for dist in body["distributions"]:
+        if dist.get("account_number") not in known:
+            raise _blackbaud_invalid("The account number is not valid.")
+        splits = dist.get("distribution_splits") or []
+        if not splits or any("transaction_code_values" not in sp for sp in splits):
+            raise _blackbaud_invalid("Distribution splits are required.")
+        if sum(Decimal(str(sp.get("percent", 0))) for sp in splits) != 100:
+            raise _blackbaud_invalid("The total percent distributed must equal 100%.")
+        amount = Decimal(str(dist.get("amount", 0)))
+        if dist.get("type_code") == "Debit":
+            debits += amount
+        elif dist.get("type_code") == "Credit":
+            credits += amount
+        else:
+            raise _blackbaud_invalid("type_code must be Debit or Credit.")
+    if debits != credits or credits != Decimal(str(body["amount"])):
+        raise _blackbaud_invalid("Distributions must balance to the invoice amount.")
+    state = _blackbaud_state()
+    state["next_invoice"] += 1
+    invoice_id = state["next_invoice"]
+    state["invoices"][invoice_id] = {
+        "invoice_id": invoice_id,
+        "vendor_id": body["vendor_id"],
+        "invoice_number": body.get("invoice_number"),
+        "description": body.get("description"),
+        "amount": str(body["amount"]),
+        "balance": str(body["amount"]),
+        "status": body.get("approval_status") or "Pending",
+        "post_status": body.get("post_status") or "NotYetPosted",
+    }
+    state["next_job"] += 1
+    state["jobs"][state["next_job"]] = invoice_id
+    return {"process_id": state["next_job"]}
+
+
+@blackbaud.get("/accountspayable/v1/backgroundProcess/{process_id}/status")
+async def blackbaud_job_status(request: Request, process_id: int) -> dict:
+    _require_blackbaud_auth(request)
+    if process_id not in _blackbaud_state()["jobs"]:
+        raise ProviderError(404, {"Error": "The specified record could not be found."})
+    return {"status": 5, "status_message": "Completed", "process_id": process_id}
+
+
+@blackbaud.get("/accountspayable/v1/backgroundProcess/{process_id}/result")
+async def blackbaud_job_result(request: Request, process_id: int) -> dict:
+    _require_blackbaud_auth(request)
+    invoice_id = _blackbaud_state()["jobs"].get(process_id)
+    if invoice_id is None:
+        raise ProviderError(404, {"Error": "The specified record could not be found."})
+    return {"record_id": invoice_id}
+
+
+@blackbaud.get("/accountspayable/v1/invoices/{invoice_id}")
+async def blackbaud_get_invoice(request: Request, invoice_id: int) -> Response:
+    _require_blackbaud_auth(request)
+    invoice = _blackbaud_state()["invoices"].get(invoice_id)
+    if invoice is None:
+        raise ProviderError(404, {"Error": "The specified record could not be found."})
+    return _blackbaud_json(invoice)
+
+
+@blackbaud.post("/__set-status")
+async def blackbaud_set_status(body: dict) -> dict:
+    """Test hook: {"invoice_id": 4971, "status": "Paid", "balance": "0"}."""
+    invoice = _blackbaud_state()["invoices"].get(int(body.get("invoice_id", 0)))
+    if invoice is None:
+        raise ProviderError(404, {"detail": "unknown invoice"})
+    for field in ("status", "balance"):
+        if field in body:
+            invoice[field] = str(body[field])
+    return {"status": "ok"}
+
+
+app.include_router(blackbaud)
+
+
 if __name__ == "__main__":
     import uvicorn
 

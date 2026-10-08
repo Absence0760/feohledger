@@ -222,3 +222,28 @@ bearer plus a non-empty `X-Business`. Collections use Sage's
   draft and voids an unpaid invoice (`void_reason` required).
 - Test hook `POST /sage/v3.1/__set-status {"id", "status",
   "outstanding_amount"?}`. `POST /__reset` clears this state too.
+
+## Blackbaud Financial Edge NXT — SKY API (`/blackbaud`)
+
+Backs `erp_adapters/blackbaud_fe_nxt.py`
+(`FEOH_ERP_BLACKBAUD_API_BASE=http://localhost:12112/blackbaud`,
+`FEOH_ERP_BLACKBAUD_TOKEN_URL=http://localhost:12112/blackbaud/oauth2/token`).
+Every API route requires **both** `Authorization: Bearer fake-blackbaud-token`
+and a non-empty `Bb-Api-Subscription-Key`, as the real gateway does.
+
+- `POST /oauth2/token` — `authorization_code` (with `code` + `redirect_uri`) or
+  `refresh_token` grant → the bearer above plus `environment_id`
+  `p-fake-env-1`, `legal_entity_id`, `refresh_token_expires_in`, the SKY token
+  response shape.
+- `GET /accountspayable/v1/vendors` (`136`, `137`), `/purchaseorders`
+  (`1001` 1250.00 open, `1002` 980.50 closed), `GET /generalledger/v1/accounts`
+  (`01-5000-00`, `01-5100-00`, `01-2000-00`) — `{"count", "value"}` with
+  `limit` / `offset`.
+- `GET /accountspayable/v1/invoices?search_text=` — matches invoice number or
+  description. `POST /accountspayable/v1/invoices/process` → `{"process_id"}`;
+  rejects an unknown vendor or account, a split set not totalling 100%, and
+  distributions whose Debits and Credits don't both equal `amount`. The job is
+  complete at once: `backgroundProcess/{id}/status` → 5,
+  `backgroundProcess/{id}/result` → `{"record_id"}`.
+  `GET /accountspayable/v1/invoices/{id}` returns `status` / `amount` / `balance`.
+- `POST /blackbaud/__set-status` — test hook `{"invoice_id", "status", "balance"}`.
