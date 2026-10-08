@@ -42,7 +42,14 @@
 	} from '#lib/types/vendor.ts';
 	import type { Vendor, VendorBankDetails } from '#lib/types/vendor.ts';
 	import type { ImportResult } from '#lib/types/csvImport.ts';
-	import { getVendorIds, bulkVendorStatus, bulkScreenVendors, exportVendorsCsv } from '#lib/api/vendors.ts';
+	import {
+		getVendorIds,
+		bulkVendorStatus,
+		bulkScreenVendors,
+		exportVendorsCsv,
+		rejectVendor as rejectVendorRequest
+	} from '#lib/api/vendors.ts';
+	import { toastCardRevocations } from '#lib/utils/cardRevocationToast.ts';
 
 	type BankDetails = VendorBankDetails;
 
@@ -436,6 +443,7 @@
 				? m('vendors.bulk.rejected', { n: res.updated }) + m('vendors.bulk.skipped', { n: res.skipped.length })
 				: m('vendors.bulk.rejected', { n: res.updated });
 			toast(msg, res.updated > 0 ? 'success' : 'error');
+			toastCardRevocations(res.card_revocations);
 		} catch (err) {
 			toast(err instanceof Error ? err.message : 'Bulk reject failed', 'error');
 		} finally {
@@ -453,6 +461,7 @@
 				? m('vendors.bulk.screened', { n: res.screened }) + m('vendors.bulk.skipped', { n: res.skipped.length })
 				: m('vendors.bulk.screened', { n: res.screened });
 			toast(msg, res.screened > 0 ? 'success' : 'error');
+			toastCardRevocations(res.card_revocations);
 		} catch (err) {
 			toast(err instanceof Error ? err.message : 'Bulk screen failed', 'error');
 		} finally {
@@ -509,9 +518,10 @@
 
 	async function rejectVendor(id: string) {
 		try {
-			await api.post(`/api/vendors/${id}/reject`, {});
+			const rejected = await rejectVendorRequest(id);
 			await fetchVendors();
 			toast('Vendor rejected', 'success');
+			toastCardRevocations([rejected.card_revocation]);
 		} catch (err) {
 			toast(err instanceof Error ? err.message : 'Reject failed', 'error');
 		}

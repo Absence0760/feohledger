@@ -56,6 +56,7 @@ from app.services.sanctions_categories import (
     has_adverse_media,
     merge_categories_into_raw_response,
 )
+from app.services.vendor_card_revocation import VendorCardRevocation, revoke_vendor_cards
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +79,10 @@ class ScreenOutcome:
     # PII-free taxonomy of WHAT was hit (sanctions / pep / adverse_media /
     # high_risk_country). Defaulted so existing constructions keep working.
     categories: tuple[str, ...] = ()
+    # What a `match` did to the vendor's live virtual cards
+    # (`vendor_card_revocation.revoke_vendor_cards`). `None` when the screen
+    # did not block the vendor.
+    card_revocation: VendorCardRevocation | None = None
 
     @property
     def adverse_media(self) -> bool:
@@ -211,6 +216,21 @@ async def screen_vendor_record(
         },
     )
 
+    # A sanctioned vendor must not keep spending on a card minted before the
+    # match: the payment block only stops the NEXT card. Runs on every match,
+    # not only a new block, so a re-screen of an already-blocked vendor also
+    # retries any card a previous attempt could not close.
+    card_revocation: VendorCardRevocation | None = None
+    if screening.result == "match":
+        card_revocation = await revoke_vendor_cards(
+            db,
+            vendor=vendor,
+            organization_id=organization_id,
+            org_settings=org_settings,
+            actor_id=actor_id,
+            trigger="vendor.sanctions_match",
+        )
+
     if screening.result in ("match", "review_required"):
         logger.info(
             "[vendor-screening] vendor=%s result=%s provider=%s check_type=%s",
@@ -229,6 +249,7 @@ async def screen_vendor_record(
         blocked=vendor.payments_blocked,
         sanctions_check=row,
         categories=screening.categories,
+        card_revocation=card_revocation,
     )
 
 

@@ -689,6 +689,18 @@ abstract class AppLocalizations {
   /// **'Vendor rejected'**
   String get vendorRejected;
 
+  /// No description provided for @vendorCardsNotClosed.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, one {{count} virtual card could not be cancelled at the card provider and is still live. Retry from the web app.} other {{count} virtual cards could not be cancelled at the card provider and are still live. Retry from the web app.}}'**
+  String vendorCardsNotClosed(int count);
+
+  /// No description provided for @vendorCardsRequireVoid.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, one {{count} virtual card backs a scheduled payment and is still live — void that payment to cancel it.} other {{count} virtual cards back scheduled payments and are still live — void those payments to cancel them.}}'**
+  String vendorCardsRequireVoid(int count);
+
   /// No description provided for @vendorActionFailed.
   ///
   /// In en, this message translates to:

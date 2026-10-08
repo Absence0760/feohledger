@@ -97,6 +97,8 @@
   "vendorRejectHint": "Marcar como inválido / duplicado",
   "vendorVerified": "Fornecedor verificado",
   "vendorRejected": "Fornecedor rejeitado",
+  "vendorCardsNotClosed": "{count, plural, one {{count} cartão virtual não pôde ser cancelado no emissor e continua ativo. Tente novamente pelo app web.} other {{count} cartões virtuais não puderam ser cancelados no emissor e continuam ativos. Tente novamente pelo app web.}}",
+  "vendorCardsRequireVoid": "{count, plural, one {{count} cartão virtual cobre um pagamento agendado e continua ativo — estorne esse pagamento para cancelá-lo.} other {{count} cartões virtuais cobrem pagamentos agendados e continuam ativos — estorne esses pagamentos para cancelá-los.}}",
   "vendorActionFailed": "Falha na ação",
   "vendorSyncFailed": "Falha na sincronização com o ERP: {error}",
   "exceptionsTitle": "Exceções",

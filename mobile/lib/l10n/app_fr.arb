@@ -104,6 +104,8 @@
   "vendorRejectHint": "Marquer comme non valide / en double",
   "vendorVerified": "Fournisseur vérifié",
   "vendorRejected": "Fournisseur rejeté",
+  "vendorCardsNotClosed": "{count, plural, one {{count} carte virtuelle n’a pas pu être annulée auprès du fournisseur de cartes et reste active. Réessayez depuis l’application web.} other {{count} cartes virtuelles n’ont pas pu être annulées auprès du fournisseur de cartes et restent actives. Réessayez depuis l’application web.}}",
+  "vendorCardsRequireVoid": "{count, plural, one {{count} carte virtuelle couvre un paiement programmé et reste active — annulez ce paiement pour la clôturer.} other {{count} cartes virtuelles couvrent des paiements programmés et restent actives — annulez ces paiements pour les clôturer.}}",
   "vendorActionFailed": "Échec de l'action",
   "vendorSyncFailed": "Échec de la synchronisation ERP : {error}",
 
