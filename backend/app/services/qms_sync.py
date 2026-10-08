@@ -435,45 +435,24 @@ async def _best_effort_rematch(
 ) -> None:
     """Re-run PO matching for invoices whose PO a synced inspection touched.
 
-    Runs inside a SAVEPOINT so any failure (a matching edge case, or — as seen
-    on a schema-drifted tenant — a query against a column that hasn't been
-    migrated yet) rolls back only the rematch, leaving the already-landed
-    inspections + audit rows intact on the outer transaction. The inspections
-    are the contract; the rematch is a courtesy that the next invoice mutation
-    will redo anyway. Never fails the sync.
+    Best effort (a SAVEPOINT; a failure is logged, never raised): the
+    inspections are the contract, and the rematch is a courtesy the next
+    invoice mutation will redo anyway — a schema-drifted tenant whose matcher
+    query fails must not lose the inspections that already landed. The org's
+    own match rules are threaded through, since without them the refresh may
+    raise a payment hold but never close one
+    (`invoice_warnings._close_cleared_po_exceptions`).
     """
-    po_numbers = {r.po_number for r in records if r.po_number}
-    if not po_numbers:
-        return
-    try:
-        from app.models.invoice import Invoice
-        from app.services.invoice_warnings import refresh_warnings
+    from app.services.invoice_warnings import refresh_invoices_citing_pos
 
-        async with db.begin_nested():
-            invoices = (
-                (
-                    await db.execute(
-                        select(Invoice).where(
-                            Invoice.organization_id == org_id,
-                            Invoice.po_number.in_(po_numbers),
-                        )
-                    )
-                )
-                .scalars()
-                .all()
-            )
-            for inv in invoices:
-                # The org's own match rules: without them the refresh would
-                # judge under the platform defaults, and it may not close a
-                # payment-blocking hold on that basis
-                # (`invoice_warnings._close_cleared_po_exceptions`).
-                await refresh_warnings(db, inv, org_settings=org_settings)
-    except Exception as exc:  # noqa: BLE001 — rematch is advisory, never fatal
-        logger.warning(
-            "[qms-sync] best-effort rematch skipped for org=%s: %s",
-            org_id,
-            exc.__class__.__name__,
-        )
+    await refresh_invoices_citing_pos(
+        db,
+        org_id,
+        {r.po_number for r in records if r.po_number},
+        org_settings=org_settings,
+        caller="qms-sync",
+        best_effort=True,
+    )
 
 
 def resolve_opted_in_qms_config(settings_blob: dict | None) -> dict | None:

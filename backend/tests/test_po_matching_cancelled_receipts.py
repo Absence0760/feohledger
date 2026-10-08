@@ -119,11 +119,17 @@ async def test_cancelled_receipt_does_not_satisfy_the_quantity_match(realdb):
 
         result = await match_invoice_to_po(s, inv)
 
-    # No LIVE receipt exists, so there is no receipt evidence at all — the
-    # honest answer is a 2-way match on the amount, not a satisfied 3-way one.
-    assert result.match_type == "2-way", result.issues
+    # Every receipt was cancelled: the business recorded that nothing arrived.
+    # That is a 3-way match with zero received — partial, and billed beyond
+    # receipt — not a 2-way fallback that would read the full bill as clean
+    # (decisions §253 amends the earlier "no evidence → 2-way" reading).
+    assert result.match_type == "3-way", result.issues
     assert result.gr_id is None
     assert result.details["has_gr"] is False
+    assert result.details["all_receipts_cancelled"] is True
+    assert result.received_quantity == 0
+    assert result.status == "partial"
+    assert result.billed_beyond_receipt is True
 
 
 @pytest.mark.asyncio
@@ -344,11 +350,12 @@ async def test_over_receipt_on_an_invoice_billing_the_po_total_is_a_warning_only
 
 @pytest.mark.asyncio
 async def test_cancelled_receipt_does_not_open_an_over_receipt_exception(realdb):
-    """The two fixes compose: a cancelled over-delivery raises nothing.
+    """A cancelled over-delivery raises no over-receipt — but it is not nothing.
 
-    A cancelled GR of 14 against a 10-unit order would have tripped the new
-    over-receipt branch if the status filter were ever dropped — so this pins
-    the interaction rather than each half alone.
+    A cancelled GR of 14 against a 10-unit order would have tripped the
+    over-receipt branch if the status filter were ever dropped, so this pins
+    that it does not. What it DOES leave is zero received against a full bill,
+    which holds the invoice as billed beyond receipt (decisions §253).
     """
     from app.services.invoice_warnings import refresh_warnings
 
@@ -366,7 +373,8 @@ async def test_cancelled_receipt_does_not_open_an_over_receipt_exception(realdb)
         await s.commit()
 
         assert inv.po_match["over_receipt"] is False
-        assert inv.po_match["match_type"] == "2-way"
+        assert inv.po_match["match_type"] == "3-way"
+        assert inv.po_match["billed_beyond_receipt"] is True
         rows = (
             (
                 await s.execute(
@@ -379,7 +387,7 @@ async def test_cancelled_receipt_does_not_open_an_over_receipt_exception(realdb)
             .scalars()
             .all()
         )
-        assert rows == []
+        assert [r.description_code for r in rows] == ["po_partial_receipt"]
 
 
 def test_cancelled_status_roster_is_lowercase_and_covers_both_spellings():

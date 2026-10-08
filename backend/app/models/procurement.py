@@ -108,8 +108,33 @@ class POLineItem(Base, TimestampMixin):
     purchase_order: Mapped[PurchaseOrder] = relationship(back_populates="line_items")
 
 
+#: ``GoodsReceipt.source`` — how the receipt reached us (migration 0107).
+#: ``manual`` = typed in through ``POST /api/goods-receipts``, recorder stamped.
+#: NULL = written by something other than the API (the seed script, a direct
+#: import) — before 0107 no in-app path could create a receipt at all, so a NULL
+#: row is by construction not one an app user typed in.
+GR_SOURCE_MANUAL = "manual"
+
+#: The status a cancelled hand-entered receipt is moved to. One of
+#: ``po_matching.CANCELLED_GR_STATUSES``, so the matcher stops counting it.
+GR_STATUS_CANCELLED = "cancelled"
+
+
 class GoodsReceipt(Base, EntityMixin, TimestampMixin):
     __tablename__ = "goods_receipts"
+
+    # A retried `POST /api/goods-receipts` replays the receipt it already wrote
+    # rather than booking the delivery twice — a duplicate receipt doubles the
+    # received quantity the 3-way leg reads, which can lift a payment hold.
+    __table_args__ = (
+        Index(
+            "uq_goods_receipts_org_idempotency_key",
+            "organization_id",
+            "idempotency_key",
+            unique=True,
+            postgresql_where=text("idempotency_key IS NOT NULL"),
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     gr_number: Mapped[str] = mapped_column(String(100), nullable=False)
@@ -118,6 +143,16 @@ class GoodsReceipt(Base, EntityMixin, TimestampMixin):
     )
     received_date: Mapped[date | None] = mapped_column(Date)
     status: Mapped[str] = mapped_column(String(30), default="received")
+    # Where the receipt came from and, for one typed in, who typed it
+    # (migration 0107). A receipt is the evidence that lifts a "billed beyond
+    # receipt" `po_mismatch` payment hold on its own
+    # (`invoice_warnings._close_cleared_po_exceptions`), so a receipt recorded by
+    # someone implicated in the invoice must not be what releases it — the
+    # same rule a hand-entered inspection is held to (decisions §249, §253).
+    # Control-plane user id, so no FK.
+    source: Mapped[str | None] = mapped_column(String(20))
+    recorded_by_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    idempotency_key: Mapped[str | None] = mapped_column(String(120))
 
     organization_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), nullable=False, index=True
@@ -134,6 +169,13 @@ class GRLineItem(Base, TimestampMixin):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     gr_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("goods_receipts.id"), nullable=False, index=True
+    )
+    # The PO line this quantity was received against (migration 0107). NULL on
+    # a receipt for a PO that carries no lines, and on rows written before the
+    # column existed. The 3-way leg still sums the receipt as a whole; this is
+    # what lets the entry form show ordered / received / remaining per line.
+    po_line_item_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("po_line_items.id"), index=True
     )
     description: Mapped[str | None] = mapped_column(Text)
     quantity_received: Mapped[Decimal | None] = mapped_column(Numeric(12, 4))

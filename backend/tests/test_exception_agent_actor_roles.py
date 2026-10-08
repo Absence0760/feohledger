@@ -116,9 +116,21 @@ async def test_actor_roles_threaded_into_resolver_apply():
             captured["actor_roles"] = actor_roles
             captured["actor_id"] = actor_id
 
-    with patch(
-        "app.services.exception_agents.coordinator.get_resolver",
-        return_value=_FakeResolver(),
+    # The post-apply receipt-evidence check re-runs the matcher, which this
+    # mock session cannot serve; it has its own realdb coverage
+    # (`test_exception_agent_receipt_segregation.py`). Here it is out of the way.
+    async def _no_implicated_receipts(*_a, **_k):
+        return False
+
+    with (
+        patch(
+            "app.services.exception_agents.coordinator.get_resolver",
+            return_value=_FakeResolver(),
+        ),
+        patch(
+            "app.services.exception_agents.coordinator._receipts_implicated",
+            _no_implicated_receipts,
+        ),
     ):
         actor = uuid.uuid4()
         await run_agent(

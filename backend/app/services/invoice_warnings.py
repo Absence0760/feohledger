@@ -5,6 +5,7 @@ Also creates exception records for issues that need human resolution.
 
 import logging
 import re
+import uuid
 from datetime import datetime, timedelta
 from decimal import Decimal
 
@@ -882,6 +883,67 @@ async def _refresh_reporting_amount(invoice: Invoice, org_settings: dict | None)
         logger.warning("reporting-currency materialization failed for invoice; left NULL")
 
 
+async def refresh_invoices_citing_pos(
+    db: AsyncSession,
+    org_id,
+    po_numbers: set[str],
+    *,
+    org_settings: dict | None,
+    caller: str,
+    best_effort: bool = False,
+) -> None:
+    """Re-run warnings (and so PO matching) on every invoice citing a PO number.
+
+    The receiving side — a goods receipt, a quality inspection — links to a PO,
+    not to an invoice, so its consequence for the 3-/4-way match only reaches
+    the invoices that cite that PO's number. Invoices in another subsidiary that
+    happen to cite the same number are refreshed too; harmless, because the
+    matcher itself is entity-scoped.
+
+    ``org_settings`` should be the org's own: without them a refresh may raise
+    a hold but never clear one (``_close_cleared_po_exceptions``).
+
+    ``best_effort`` is for a batch (the QMS sync) whose rows are the contract
+    and whose rematch the next invoice mutation redoes anyway: it runs in a
+    SAVEPOINT and a failure is logged, not raised. A single interactive write
+    (recording or cancelling a receipt) leaves it off, so the write and the
+    holds it raises or lifts land together or not at all.
+    """
+    po_numbers = {n for n in po_numbers if n}
+    if not po_numbers:
+        return
+
+    async def _run() -> None:
+        invoices = (
+            (
+                await db.execute(
+                    select(Invoice).where(
+                        Invoice.organization_id == org_id,
+                        Invoice.po_number.in_(po_numbers),
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        for inv in invoices:
+            await refresh_warnings(db, inv, org_settings=org_settings)
+
+    if not best_effort:
+        await _run()
+        return
+    try:
+        async with db.begin_nested():
+            await _run()
+    except Exception as exc:  # noqa: BLE001 — a batch's rematch is advisory, never fatal
+        logger.warning(
+            "[%s] best-effort rematch skipped for org=%s: %s",
+            caller,
+            org_id,
+            exc.__class__.__name__,
+        )
+
+
 #: The exception types `_refresh_po_match` owns. Both block payment
 #: (`api/payments.PAYMENT_BLOCKING_EXCEPTION_TYPES`), so an open row whose
 #: finding a refresh no longer reports is closed again by
@@ -1134,6 +1196,7 @@ async def _refresh_po_match(
         found=found,
         po_ref=po_ref,
         inspection_id=match.inspection_id,
+        po_id=match.po_id,
         org_settings=org_settings,
         rule=rule,
     )
@@ -1173,6 +1236,7 @@ async def _reconcile_po_exceptions(
     found: set[str],
     po_ref: str,
     inspection_id: str | None,
+    po_id: str | None = None,
     org_settings: dict | None,
     rule=None,
 ) -> None:
@@ -1219,6 +1283,7 @@ async def _reconcile_po_exceptions(
             rows=cleared_rows,
             po_ref=po_ref,
             inspection_id=inspection_id,
+            po_id=po_id,
             org_settings=org_settings,
             rule=rule,
         )
@@ -1231,6 +1296,7 @@ async def _close_cleared_po_exceptions(
     rows: list,
     po_ref: str,
     inspection_id: str | None,
+    po_id: str | None = None,
     org_settings: dict | None,
     rule=None,
 ) -> None:
@@ -1261,12 +1327,22 @@ async def _close_cleared_po_exceptions(
       not create it still reviews the corrected invoice. Otherwise re-pointing
       ``po_number`` at a PO that happens to match would let whoever edited it
       release the payment. A row with no recorded PO counts as a different one.
-    * **A hand-recorded pass.** Receipts only ever arrive from the ERP sync, but
-      an inspection can be typed in (``POST /api/inspections``). A
-      ``quality_hold`` cleared by a manual inspection whose recorder is unknown,
-      or is implicated in the invoice (``approval_chain.violates_segregation``),
-      stays open. A QMS-synced inspection carries the QMS's verdict; an
-      inspection predating the source column is unknown and stays held.
+    * **A hand-recorded pass.** An inspection can be typed in
+      (``POST /api/inspections``). A ``quality_hold`` cleared by a manual
+      inspection whose recorder is unknown, or is implicated in the invoice
+      (``approval_chain.violates_segregation``), stays open. A QMS-synced
+      inspection carries the QMS's verdict; an inspection predating the source
+      column is unknown and stays held.
+    * **A hand-recorded receipt.** A receipt can be typed in too
+      (``POST /api/goods-receipts``), and it is the evidence that clears a
+      "billed beyond receipt" ``po_mismatch``. While any live manual receipt on
+      the matched PO was recorded by someone implicated in the invoice — or by
+      nobody it can name — a ``po_mismatch`` row stays for a human
+      (``receipts_clear_hold``; decisions §253). Deliberately coarse: it does
+      not try to work out which finding the receipt cleared, because leaving a
+      row for a person is the safe error. Receipts with no ``source`` predate
+      receipt entry, when no app user could type one in, and are trusted as
+      they always were.
     * **A rule the GL code picked, past approval.** The match rule is chosen by
       vendor and by header GL account, and ``gl_account`` stays editable on an
       approved invoice — so re-coding it to a commodity with a looser rule
@@ -1291,6 +1367,7 @@ async def _close_cleared_po_exceptions(
     segregation = exception_segregation_enabled(org_settings)
     relink_allowed = not segregation or await _pre_approval_with_segregation(db, invoice)
     inspection_ok = not segregation or await _inspection_clears_hold(db, invoice, inspection_id)
+    receipts_ok = not segregation or await receipts_clear_hold(db, invoice, po_id)
     still_found: set[str] = set()
     if segregation and _status_str(invoice.status) not in _PRE_APPROVAL_STATUSES:
         strict = strictest_rule_for_any_commodity(org_settings, vendor_id=invoice.vendor_id)
@@ -1316,6 +1393,8 @@ async def _close_cleared_po_exceptions(
         if not same_po and not relink_allowed:
             continue
         if row.exception_type == "quality_hold" and not inspection_ok:
+            continue
+        if row.exception_type == "po_mismatch" and not receipts_ok:
             continue
         if row.exception_type in still_found:
             continue
@@ -1376,6 +1455,46 @@ async def _inspection_clears_hold(
     if recorder is None:
         return False
     return not violates_segregation(invoice, recorder, {})
+
+
+async def receipts_clear_hold(db: AsyncSession, invoice: Invoice, po_id: str | None) -> bool:
+    """Whether the receipts the matcher counts on ``po_id`` may lift a
+    ``po_mismatch`` — False while any live hand-entered receipt on it has an
+    unknown recorder or one implicated in the invoice (decisions §253). Read by
+    ``_close_cleared_po_exceptions`` and by the exception-agent coordinator, so
+    an agent cannot do what the auto-close refuses. No matched PO means no
+    receipt evidence was read at all."""
+    if not po_id:
+        return True
+    from app.models.procurement import GR_SOURCE_MANUAL, GoodsReceipt
+    from app.services.approval_chain import violates_segregation
+    from app.services.po_matching import CANCELLED_GR_STATUSES
+    from app.tenant import apply_entity_scope
+
+    # The same receipt set the matcher sums: live receipts on this PO, in the
+    # invoice's own entity.
+    live = func.lower(func.coalesce(GoodsReceipt.status, "")).notin_(CANCELLED_GR_STATUSES)
+    recorders = (
+        (
+            await db.execute(
+                apply_entity_scope(
+                    select(GoodsReceipt.recorded_by_user_id).where(
+                        GoodsReceipt.po_id == uuid.UUID(po_id),
+                        GoodsReceipt.source == GR_SOURCE_MANUAL,
+                        live,
+                    ),
+                    GoodsReceipt,
+                    invoice.entity_id,
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return all(
+        recorder is not None and not violates_segregation(invoice, recorder, {})
+        for recorder in recorders
+    )
 
 
 async def _refresh_contract_compliance(
