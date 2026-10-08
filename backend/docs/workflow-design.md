@@ -373,7 +373,9 @@ turns it off (`approval_chain.violates_segregation`). When enabled:
   invoice's PO (`approval_chain.receipt_recorders` →
   `check_receiving_segregation`, 403 `approval_segregation_receiver`) —
   receiving and approving are different duties. Checked after any
-  corrections; not part of the implicated set (decisions §267).
+  corrections; not part of the implicated set (decisions §267). The
+  manual-complete amount floor (`POST /invoices/{id}/complete`) honours it too:
+  a receiver completing such an invoice lands it at review, not approved.
 - With `uploaded_by_id` NULL **and** the set empty there is nothing to refuse.
   That combination means the invoice came in through a channel with no employee
   behind it — email intake, inbound PEPPOL, or the supplier portal — not

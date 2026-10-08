@@ -337,3 +337,59 @@ def test_the_predicate_honours_the_opt_out_and_a_null_actor():
     assert not violates_receiving_segregation(actor, recorders, {"require_segregation": False})
     assert not violates_receiving_segregation(None, recorders, {})
     assert not violates_receiving_segregation(uuid.uuid4(), recorders, {})
+
+
+async def test_the_complete_amount_floor_does_not_auto_approve_for_the_receiver(realdb):
+    """`POST /invoices/{id}/complete` auto-approves below the approval step's
+    `auto_approve_below` floor, making the caller the effective approver. A
+    receiver completing an invoice billed against their own receipt must land
+    it at review instead — the floor is not a side door around §267."""
+    async with realdb.client(key=TENANT, role="admin") as c:
+        wfs = (await c.get("/api/workflows")).json()["items"]
+        workflow_id = next(w for w in wfs if w["is_active"])["id"]
+        original = (await c.get(f"/api/workflows/{workflow_id}")).json()["steps_config"]["steps"]
+    steps = [dict(s) for s in original]
+    for step in steps:
+        if step["type"] == "approval":
+            step["enabled"] = True
+            step["config"] = {
+                **step.get("config", {}),
+                "required": True,
+                "auto_approve_below": "5000.00",
+            }
+    try:
+        async with realdb.client(key=TENANT, role="admin") as c:
+            resp = await c.patch(f"/api/workflows/{workflow_id}", json={"steps": steps})
+            assert resp.status_code == 200, resp.text
+
+        po_id, number, li = await _po(realdb)
+        await _receive(realdb, "admin", po_id, li)
+        async with realdb.client(key=TENANT, role="ap_manager") as c:
+            created = await c.post(
+                "/api/invoices",
+                json={
+                    "vendor": "Racket Wholesale Co",
+                    "invoice_number": f"RX-{uuid.uuid4().hex[:8]}",
+                    "amount": "1037.00",
+                    "currency": "USD",
+                    "po_number": number,
+                },
+            )
+        assert created.status_code == 201, created.text
+        inv_id = created.json()["id"]
+        # The create resolved a vendor; the matcher's lookup (and so the
+        # receiver lookup) only reads POs of that vendor.
+        async with realdb.sessionmaker(TENANT)() as s:
+            inv = await s.get(Invoice, uuid.UUID(inv_id))
+            po = await s.get(PurchaseOrder, po_id)
+            po.vendor_id = inv.vendor_id
+            await s.commit()
+
+        async with realdb.client(key=TENANT, role="admin") as c:
+            done = await c.post(f"/api/invoices/{inv_id}/complete")
+        assert done.status_code == 200, done.text
+        assert done.json()["status"] == "ready_for_review"
+        assert await _status(realdb, uuid.UUID(inv_id)) == InvoiceStatus.ready_for_review
+    finally:
+        async with realdb.client(key=TENANT, role="admin") as c:
+            await c.patch(f"/api/workflows/{workflow_id}", json={"steps": original})
