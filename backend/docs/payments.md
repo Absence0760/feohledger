@@ -1068,7 +1068,13 @@ Per-org config lives at `Organization.settings.payments`:
 ```
 
 Only `provider` is read by the dispatcher; the rest are per-adapter, and the
-block above is Modern Treasury's set. **`program_type` and `sandbox` are not
+block above is Modern Treasury's set. **The secret keys — `api_key`,
+`client_secret` (Dwolla) and `webhook_secret`, and the same keys inside a
+`providers[]` multi-route entry — are not stored in this JSONB**: they are
+envelope-encrypted in `provider_credentials`, written only through the audited
+`PUT /api/organization/credentials/payments` and merged back for the adapter by
+`provider_credentials.provider_config` (`backend/docs/erp-integration.md`
+§ Where the credentials live has the mechanism). **`program_type` and `sandbox` are not
 read by any payment adapter** — they belong to the card and extraction
 families. Both appeared here until 2026-09-17 and had propagated into
 `docs/founder-runbooks/payment-rails-onboarding.md` as live settings. Modern

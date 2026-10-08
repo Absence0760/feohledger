@@ -901,8 +901,11 @@ money already moved under a different, voided payment.
 
 Provider charge/settlement callbacks are **unauthenticated** (they come
 from Lithic / Nium, not a logged-in user) and verified by HMAC over the
-raw body against the owning tenant's
-`Organization.settings.cards.webhook_signing_secret`. The handler:
+raw body against the owning tenant's `cards.webhook_signing_secret` — sealed
+in `provider_credentials` with the BYOK `api_key` / `client_secret`, set through
+`PUT /api/organization/credentials/cards` and read through
+`provider_credentials.provider_config` (a secret that cannot be opened is a
+bodyless 503, our failure rather than a verdict on the event). The handler:
 
 0. bounds the body against `card_webhook_max_bytes` (default 4 MiB) BEFORE
    buffering it — a declared `Content-Length` over the cap rejects without

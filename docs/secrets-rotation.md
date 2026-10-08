@@ -25,7 +25,9 @@ This is a SOC 2 prerequisite (`docs/soc2-readiness.md` § Secrets management).
 | AWS SES credentials (transactional email) | IAM role (preferred) or sops — `infra-secrets` | **365 days** if static | Send email from our domain |
 | GitHub Actions OIDC role | AWS IAM role (no static keys) | n/a — short-lived | n/a |
 | Per-tenant SCIM bearer tokens | `Organization.settings.sso.scim_bearer_hash` (sha256) | **On request** by tenant admin via `POST /api/organization/sso/scim-token` | Read/write users on that one tenant |
-| Per-tenant OIDC client secret | `Organization.settings.sso.client_secret` (encrypted at row; write-only, never returned) | **On request** by tenant admin via `PUT /api/organization/sso` | Mint OIDC tokens for that one tenant |
+| Per-tenant OIDC client secret | `Organization.settings.sso.client_secret` (plain JSONB under RDS storage encryption; write-only, never returned) | **On request** by tenant admin via `PUT /api/organization/sso` | Mint OIDC tokens for that one tenant |
+| Per-tenant ERP / payment-rail / card-issuer credentials (BYOK keys, client secrets, webhook signing secrets) | `provider_credentials` (control plane), envelope-encrypted under the app KMS key; write-only, never returned | **On request** by tenant admin via `PUT /api/organization/credentials/{block}` | Act as that one tenant against its ERP, processor or card issuer |
+| App KMS key (`FEOH_CREDENTIAL_KMS_KEY_ID` — wraps the provider-credential data keys; also RDS/S3/SQS at rest) | AWS KMS (`infra/kms.tf`) | **365 days (auto)** | Unwrap every tenant's sealed provider credentials (with database read access) |
 | Per-tenant chat webhook URL (Slack / Teams) | `Organization.settings.chat_notifications.webhook_url` | **On request** by tenant admin via `PUT /api/organization/chat-notifications/webhook` | Post arbitrary content into that tenant's approval channel — a phishing surface aimed at the people who approve payments |
 
 **Triggers for an out-of-band rotation** — do these even if the cadence hasn't fired:
@@ -115,6 +117,27 @@ Tenant admin self-serves rotation by re-calling `POST /api/organization/sso/scim
 ### Per-tenant OIDC client secret
 
 Tenant admin creates the new secret in their Okta/Entra app, then pastes it into **Organization → Single Sign-On → Client secret** and saves (`PUT /api/organization/sso`). Every other field is round-tripped from the panel, so nothing else changes; leaving the field blank on a later save keeps the stored secret. The save is audited as `organization.sso_updated` with `client_secret` in `changed` — the name only, never the value. That row is written first, straight into the tenant DB in every `FEOH_AUDIT_MODE` (lambda included), and if it cannot be written the save answers `503` and the old secret stays in place — so a rotation is never applied unrecorded; retry once the audit path is healthy. A malformed request body is refused with a value-free `422` naming field locations only, so a botched paste never echoes the secret back. No endpoint ever returns the stored secret (`GET /api/organization` drops it for every role). `PATCH /api/organization` refuses an `sso` key, because its per-key merge used to replace the whole block on a secret-only body and switch SSO off unaudited. SSO handshakes after the change use the new secret. **No grace period** — coordinate with the IdP cutover. If the old secret already expired and the tenant is SSO-only, nobody can sign in to paste the new one: run the break-glass procedure (`docs/founder-runbooks/sso-break-glass.md`) first.
+
+### Per-tenant provider credentials (ERP, payments, cards)
+
+Tenant admin mints the new key at the provider, then pastes it into the matching
+secret field on **Organization → ERP Integration / Payments / Virtual cards** and
+saves (`PUT /api/organization/credentials/{block}`). The field is always empty
+on load; a blank field keeps the stored value and "Remove the stored value"
+deletes it. The save is audited as `organization.credentials_updated` with the
+block and the changed path NAMES — written first, and a `503` with nothing
+saved if it cannot be. The value is re-sealed under a fresh data key on every
+write. No endpoint returns it. **No grace period**: revoke the old key at the
+provider after the new one is confirmed (a "Test Connection" with the form
+unchanged uses the stored key).
+
+**The KMS key itself** rotates automatically every year (`enable_key_rotation`
+in `infra/kms.tf`); AWS keeps prior key material for `Decrypt`, so stored rows
+keep opening and nothing needs re-sealing. Moving to a *different* key (a new
+`FEOH_CREDENTIAL_KMS_KEY_ID`) needs both keys usable during the change: each row
+records the key that wrapped it and opens under that one, and is re-sealed under
+the new key on its next write. Never schedule the old key for deletion while a
+row still names it (`SELECT DISTINCT key_id FROM provider_credentials`).
 
 ### Per-subscription outbound-webhook signing secret
 

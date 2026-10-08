@@ -49,7 +49,8 @@ env_value() {
 # (FEOH_ENVIRONMENT=production arms those boot checks) and the two S3 buckets
 # uploads/backups silently need.
 REQUIRED_VARS=(APP_DOMAIN API_DOMAIN ACME_EMAIL AWS_REGION
-	FEOH_SECRET_KEY FEOH_ENVIRONMENT FEOH_S3_BUCKET BACKUP_S3_BUCKET)
+	FEOH_SECRET_KEY FEOH_ENVIRONMENT FEOH_S3_BUCKET BACKUP_S3_BUCKET
+	FEOH_CREDENTIAL_KMS_KEY_ID)
 
 # ── Database mode: the same decision deploy/lib.sh makes for every script ────
 # FEOH_DATABASE_URL set → an external database (RDS): it must parse under the
