@@ -24,7 +24,7 @@ from datetime import date
 from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from app.services.erp_adapters.base import InvoicePayload
+from app.services.erp_adapters.base import InvoicePayload, LineItemPayload
 from app.services.erp_adapters.dynamics_365_bc import BusinessCentralAdapter
 from app.services.erp_adapters.merge_dev import MergeDevAdapter
 from app.services.erp_adapters.netsuite import NetSuiteAdapter
@@ -165,9 +165,12 @@ def test_netsuite_post_invoice_proceeds_to_create_when_no_match():
     assert "item" not in body
 
 
-def test_netsuite_post_invoice_proceeds_when_lookup_fails():
-    """A non-200 on the lookup (e.g. transient error) must fail OPEN to the
-    create path, not silently refuse to post at all."""
+def test_netsuite_post_invoice_fails_retryably_when_lookup_fails():
+    """A non-200 on the lookup is not a miss. Reading it as one re-creates the
+    duplicate bill this lookup exists to prevent: the lookup fails exactly when
+    NetSuite is struggling, which is when the first attempt's response was most
+    likely lost. So the push fails — retryably, with a PII-free message — and
+    the retry looks again (Sage Intacct and SYSPRO behave the same)."""
     adapter = NetSuiteAdapter(
         {
             "account_id": "123456",
@@ -180,14 +183,33 @@ def test_netsuite_post_invoice_proceeds_when_lookup_fails():
     with patch("httpx.AsyncClient") as cm:
         client = cm.return_value.__aenter__.return_value
         client.get = AsyncMock(return_value=_mock_response(500, None))
-        client.post = AsyncMock(
-            return_value=_mock_response(204, None, headers={"Location": "https://x/vendorBill/77"})
-        )
+        client.post = AsyncMock()
         result = _run(adapter.post_invoice(_payload(correlation_id="corr-lookup-fails")))
 
-    assert result.success
-    assert result.erp_document_id == "77"
-    client.post.assert_awaited_once()
+    assert result.success is False
+    assert result.retryable is True
+    assert result.message == "NetSuite post failed: HTTP 500 (provider_error)"
+    client.post.assert_not_awaited()
+
+
+def test_d365_post_invoice_fails_retryably_when_lookup_fails():
+    """Same rule for Business Central's externalDocumentNumber lookup."""
+    adapter = _bc_adapter()
+    with patch("httpx.AsyncClient") as cm:
+        client = cm.return_value.__aenter__.return_value
+        client.post = AsyncMock(
+            side_effect=[
+                _mock_response(200, {"access_token": "tok"}),
+                AssertionError("must not create when the lookup failed"),
+            ]
+        )
+        client.get = AsyncMock(return_value=_mock_response(429, None))
+        result = _run(adapter.post_invoice(_payload(correlation_id="corr-bc-lookup-fails")))
+
+    assert result.success is False
+    assert result.retryable is True
+    assert result.message == "Business Central post failed: HTTP 429 (rate_limited)"
+    assert client.post.await_count == 1  # the token exchange only
 
 
 # ---------------------------------------------------------------------------
@@ -261,3 +283,82 @@ def test_d365_post_invoice_proceeds_to_create_when_no_match():
     body = json.loads(client.post.await_args_list[1].kwargs["content"])
     assert body["vendorId"] == "ERP-V-1"
     assert "vendorNumber" not in body
+    # Each line on the G/L account's id from the chart sync, never its No.
+    assert body["purchaseInvoiceLines"] == [
+        {
+            "lineType": "Account",
+            "accountId": "ERP-6000",
+            "description": "",
+            "quantity": 1,
+            "unitCost": 100.00,
+        }
+    ]
+
+
+# ---------------------------------------------------------------------------
+# dynamics_365_bc — which lines a purchaseInvoice carries
+# ---------------------------------------------------------------------------
+
+
+def _bc_line(**overrides) -> LineItemPayload:
+    base = dict(
+        line_number=1, total=Decimal("60.00"), gl_account="6100", gl_account_erp_id="g-6100"
+    )
+    base.update(overrides)
+    return LineItemPayload(**base)
+
+
+def test_bc_lines_post_per_line_when_they_sum_to_the_amount():
+    from app.services.erp_adapters.dynamics_365_bc import _bc_invoice_lines
+
+    lines = _bc_invoice_lines(
+        _payload(
+            line_items=[
+                _bc_line(description="Paper", quantity=Decimal(3), unit_price=Decimal("20.00")),
+                # Uncoded: takes the header account.
+                _bc_line(total=Decimal("40.00"), gl_account=None, gl_account_erp_id=None),
+            ]
+        )
+    )
+    assert lines == [
+        {
+            "lineType": "Account",
+            "accountId": "g-6100",
+            "description": "Paper",
+            "quantity": Decimal(3),
+            "unitCost": Decimal("20.00"),
+        },
+        {
+            "lineType": "Account",
+            "accountId": "ERP-6000",
+            "description": "",
+            "quantity": Decimal(1),
+            "unitCost": Decimal("40.00"),
+        },
+    ]
+
+
+def test_bc_lines_collapse_to_the_header_when_they_do_not_make_the_amount():
+    """BC totals a bill from its lines, so lines that disagree with the
+    approved amount would post a different figure: one header line instead."""
+    from app.services.erp_adapters.dynamics_365_bc import _bc_invoice_lines
+
+    for items in (
+        [_bc_line(total=Decimal("60.00"))],  # short of 100.00
+        [_bc_line(total=None, unit_price=None), _bc_line(total=Decimal("100.00"))],
+    ):
+        assert _bc_invoice_lines(_payload(description="Bill", line_items=items)) == [
+            {
+                "lineType": "Account",
+                "accountId": "ERP-6000",
+                "description": "Bill",
+                "quantity": Decimal(1),
+                "unitCost": Decimal("100.00"),
+            }
+        ]
+
+
+def test_bc_lines_never_move_a_coded_line_onto_the_header_account():
+    from app.services.erp_adapters.dynamics_365_bc import _bc_invoice_lines
+
+    assert _bc_invoice_lines(_payload(line_items=[_bc_line(gl_account_erp_id=None)])) is None

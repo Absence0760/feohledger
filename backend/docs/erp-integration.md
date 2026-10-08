@@ -318,16 +318,17 @@ Application-level encryption is tracked in `docs/followups.md`.
 ```
 POST /purchaseInvoices
 {
-  "vendorNumber": "V10000",
+  "vendorId": "5d115c9c-44e3-ea11-bb43-000d3a2feca1",
   "invoiceDate": "2026-04-01",
   "dueDate": "2026-05-01",
   "vendorInvoiceNumber": "INV-2024-001",
+  "externalDocumentNumber": "<correlation_id>",
   "purchaseInvoiceLines": [
     {
-      "lineType": "Item",
-      "lineObjectNumber": "1000",
-      "quantity": 10,
-      "unitCost": 25.00
+      "lineType": "Account",
+      "accountId": "a6100000-0000-0000-0000-000000006100",
+      "quantity": 1,
+      "unitCost": 250.00
     }
   ]
 }
@@ -792,7 +793,7 @@ vendor whose number happened to equal it.
 | Adapter | Vendor | Accounts |
 |---|---|---|
 | `netsuite` | `entity: {id}`; refuses `vendor_not_linked` | GL-coded lines go on the **`expense`** sublist (`account: {id}`, `amount` = the line total, or quantity × unit price when it has none), since the `item` sublist needs an item record we never send. An uncoded line takes the header account. A coded line with no id, or a bill with no account at all, refuses `account_not_linked`. A coded line is never moved onto the header account. |
-| `dynamics_365_bc` | `vendorId`; refuses `vendor_not_linked` | Lines stay on `lineObjectNumber` = the G/L account No., BC's primary key for an account and the code our chart holds. This adapter has no chart sync, so `gl_account_erp_id` would be another ERP's id or the code itself. |
+| `dynamics_365_bc` | `vendorId`; refuses `vendor_not_linked` | Every line is an `Account` line on **`accountId`** = the account GUID the BC chart sync stored, never `lineObjectNumber` (the No.). Same rules as NetSuite: an uncoded line takes the header account, a coded line with no id or a bill with no account at all refuses `account_not_linked`. See § Business Central: chart, POs and void. |
 | `merge_dev` | `contact` (Merge object id); refuses `vendor_not_linked` | A line's `account` is the Merge account id. A coded line with no id refuses `account_not_linked`; an uncoded line sends none (Merge allows it). |
 
 **NetSuite chart sync.** `NetSuiteAdapter.list_gl_accounts` pulls the chart
@@ -840,6 +841,13 @@ merge-idempotency-key cache; `q=`/`$filter=` collection queries filtered by
 `pnpm test:erp` without a live ERP account. Unit-level coverage (mocked HTTP,
 no fake-erp container needed) lives in
 `backend/tests/test_erp_adapter_idempotency.py`.
+
+**A failed lookup is a failure, not a miss** — on every direct adapter. A
+non-200 from the NetSuite `externalId` or the BC `externalDocumentNumber`
+lookup returns a retryable `erp_failure_message(...)` result and creates
+nothing; the retry looks again. Reading it as "not posted yet" re-created the
+duplicate the lookup exists to prevent, at exactly the moment the ERP was
+struggling (Sage Intacct and SYSPRO already behaved this way).
 
 ## Retry Logic
 
@@ -925,10 +933,12 @@ pnpm test:erp    # Playwright suite frontend/tests-e2e/erp/ (merge-dev / netsuit
 ```
 
 Coverage per spec: `test_connection`, PO sync (`list_pos`), GL-account sync
-(`list_gl_accounts`), vendor sync (`list_vendors` — Merge.dev only for now,
-asserting the full field mapping — name/email/phone/address/tax id/payment
-terms — not just that the sync call didn't error), and a full send-to-ERP
-round trip to a terminal invoice status.
+(`list_gl_accounts`), vendor sync (`list_vendors` — Merge.dev asserts the
+full field mapping — name/email/phone/address/tax id/payment terms; NetSuite
+and Business Central prove it by posting against the synced vendor id), and a
+full send-to-ERP round trip to a terminal invoice status. The BC and NetSuite
+specs sync PO fixtures numbered `PO-FAKE-BC-4xx` / `PO-FAKE-NS-5xx`, so they
+never collide with Merge's `PO-FAKE-30x`.
 
 The specs skip gracefully when fake-erp isn't reachable, so the normal suite
 stays green without it. CI runs them in the dedicated `erp-e2e` job in
@@ -1407,3 +1417,97 @@ Request rules worth knowing:
 
 Tests: `backend/tests/test_erp_blackbaud_adapter.py`. fake-erp surface:
 `/blackbaud` (`FEOH_ERP_BLACKBAUD_API_BASE`, `FEOH_ERP_BLACKBAUD_TOKEN_URL`).
+
+## Business Central: chart, POs and void
+
+`erp_adapters/dynamics_365_bc.py`, API v2.0
+(https://learn.microsoft.com/en-us/dynamics365/business-central/dev-itpro/api-reference/v2.0/).
+
+| Operation | Call |
+|---|---|
+| `post_invoice` | refuse without `vendor_erp_id` / a line account id → `GET purchaseInvoices?$filter=externalDocumentNumber eq '…'` (a non-200 fails the push) → `POST purchaseInvoices` → `POST purchaseInvoices({id})/Microsoft.NAV.post` |
+| `list_gl_accounts` | `GET accounts` — `number` → code, `displayName` → name, `id` → `erp_account_id`, `category` Assets/Liabilities/Equity/Income/Cost of Goods Sold/Expense → asset/liability/equity/revenue/expense/expense (blank → unclassified). Heading / total accounts and blocked accounts are skipped. |
+| `list_pos` | `GET purchaseOrders?$expand=purchaseOrderLines` — total `totalAmountIncludingTax`; status always `open`; `currencyCode` only when non-blank; `requestedReceiptDate` unless BC's blank `0001-01-01`; comment lines dropped |
+| `list_vendors` | `GET vendors` |
+| `void_invoice` | `GET purchaseInvoices({id})`; a `Draft` is deleted (`DELETE` with `If-Match` = the etag just read); anything else returns `False` |
+
+**Lines post on `accountId`, not the No.** The chart sync is now the writer of
+`gl_accounts.erp_account_id` for BC, and `services/erp._resolve_erp_refs`
+resolves those ids through the invoice entity's chart
+(`gl_chart.resolve_erp_account_ids`). Posting the No. instead would bypass that
+resolution: a code typed locally but never synced, or an entity's own account
+overriding a shared one, would post against whatever BC account happens to hold
+that No. — or fail inside BC instead of refusing up front. The id also survives
+a renumbering in BC. Lines follow NetSuite's account rule (uncoded → header
+account; coded but unlinked → `account_not_linked`) and the amount rule of
+`bill_lines`: per line only when every line has an amount (total, else
+quantity × unit price) and they sum to exactly the approved amount, otherwise
+one line for the amount on the header account — BC totals the bill from its
+lines, so lines that disagree would post a different figure. A line keeps its
+quantity and unit cost only when they multiply to its amount exactly; otherwise
+it goes as 1 × amount.
+
+**POs are always `open`.** The API's statuses are `Draft`, `In Review` and
+`Open`; BC deletes a purchase order once it is fully received and invoiced, so
+a closed or cancelled one never appears in the collection. A blank
+`currencyCode` is BC's local currency and stays NULL rather than a guessed code
+(decisions §197). A PO with no stated total is skipped, never synced at 0.
+
+**Void deletes drafts only.** A purchaseInvoice has `DELETE` and one bound
+action, `Microsoft.NAV.post`
+([resource](https://learn.microsoft.com/en-us/dynamics365/business-central/dev-itpro/api-reference/v2.0/resources/dynamics_purchaseinvoice),
+[delete](https://learn.microsoft.com/en-us/dynamics365/business-central/dev-itpro/api-reference/v2.0/api/dynamics_purchaseinvoice_delete)).
+There is no cancel or corrective-credit-memo action on the purchase side, so a
+posted invoice is reversed in BC by an accountant (corrective credit memo) and
+`void_invoice` returns `False` for it.
+
+**Paging.** Every list sync sends `Prefer: odata.maxpagesize=100` (BC's own
+server page is 20,000 rows), follows `@odata.nextLink`, and stops at 10 pages /
+1,000 rows. Bodies are parsed with `utils/json_money.loads_exact_json`, so a
+total is a `Decimal` from the wire, never a float. Best-effort like the other
+adapters: a token failure, non-200 or network error ends the pull with what it
+read. An admin `base_url` stays behind the SSRF guard on every call, and that
+refusal is raised, not swallowed.
+
+## NetSuite: SuiteQL syncs and void
+
+`erp_adapters/netsuite.py`. Every list sync is one SuiteQL query
+(`POST …/services/rest/query/v1/suiteql`, `Prefer: transient`, `ORDER BY id`
+for stable `offset` paging, 10 pages × 100 rows), parsed exactly like BC's.
+
+| Sync | Query | Notes |
+|---|---|---|
+| `list_vendors` | `SELECT id, entityid, companyname, email, phone, BUILTIN.DF(terms) AS terms, isinactive FROM vendor` | The REST `/vendor` collection returns ids and links only — no names — so the old record-API sync could not have named a vendor. Name = `companyname`, else `entityid` (an individual); code = `entityid`; inactive vendors skipped. |
+| `list_gl_accounts` | `SELECT id, acctnumber, fullname, accttype, isinactive FROM account` | unchanged (§ ERP references) |
+| `list_pos` | `transaction` where `type = 'PurchOrd'`, `foreigntotal`, `currency.symbol`, `TO_CHAR(duedate, 'YYYY-MM-DD')` | Headers only — the PO sync stores no ERP lines. Status letter C → cancelled, G / H → closed, else open. Dates go through `TO_CHAR` because SuiteQL formats them per the user's preference. |
+
+**Void.** The REST record service has no void: its record actions name neither
+`vendorBill` nor a void action
+([supported record actions](https://docs.oracle.com/en/cloud/saas/netsuite/ns-online-help/section_1516982564.html));
+`transaction.void` is SuiteScript only
+([N/transaction](https://docs.oracle.com/en/cloud/saas/netsuite/ns-online-help/section_4413162576.html)),
+reachable through a customer-deployed RESTlet. REST does offer
+[`DELETE /record/v1/vendorBill/{id}`](https://docs.oracle.com/en/cloud/saas/netsuite/ns-online-help/section_1545142287.html).
+`void_invoice` deletes a bill still `Pending Approval` (nothing posted to the
+GL) and returns `False` for any approved bill, whose reversal — void, reversing
+journal, or vendor credit — is the accountant's call.
+
+**Status mapping** reads `status.id` (`paidInFull`) or `status.refName` with
+its spaces removed (`Paid In Full`). It used to lower-case `refName` only, so a
+real paid bill (`"paid in full"`) never matched `paidinfull` and polled as
+`unknown`.
+
+fake-erp serves all of the above: BC `accounts` (three posting accounts plus a
+heading and a blocked one), `purchaseOrders` (`PO-FAKE-BC-401` in local
+currency with a blank date, `PO-FAKE-BC-402` in EUR), `DELETE
+purchaseInvoices({id})` (needs `If-Match`, drafts only), and a 400 for an
+`Account` line whose `accountId` is not a posting account; NetSuite SuiteQL
+`vendor` and `transaction` rows (`PO-FAKE-NS-501` open USD, `PO-FAKE-NS-502`
+closed GBP) and `DELETE vendorBill/{id}` (pending approval only).
+
+Tests: `test_erp_gl_sync.py`, `test_erp_po_sync.py`,
+`test_erp_vendor_sync_adapter.py` (mapping, 1000-row bound, degradation),
+`test_erp_void_invoice.py` (both voids, NetSuite status shapes),
+`test_erp_adapter_idempotency.py` (BC lines, failed lookups),
+`test_erp_adapter_error_pii.py` (BC `account_not_linked`),
+`test_erp_base_url_overrides.py` (SSRF guard on the BC list syncs).

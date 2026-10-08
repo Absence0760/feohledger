@@ -4,7 +4,8 @@ import hashlib
 import hmac
 import time
 import uuid
-from decimal import Decimal
+from datetime import date
+from decimal import Decimal, InvalidOperation
 from urllib.parse import quote
 
 import httpx
@@ -18,12 +19,40 @@ from app.services.erp_adapters.base import (
     ErpPostResult,
     GLAccountPayload,
     InvoicePayload,
+    PoPayload,
     VendorPayload,
     erp_failure_message,
     erp_refusal,
 )
 from app.services.erp_adapters.dispatcher import register_adapter
-from app.utils.json_money import dumps_exact_json
+from app.utils.json_money import dumps_exact_json, loads_exact_json
+
+#: SuiteQL list syncs page at 100 rows and stop after 10 pages — the 1000-row
+#: bound every adapter's list sync keeps.
+_PAGE_SIZE = 100
+_MAX_PAGES = 10
+
+#: Vendor sync. The REST record collection (``GET /vendor``) returns only ids
+#: and links — no names — so it would cost one more request per vendor.
+#: ``BUILTIN.DF(terms)`` is the payment term's display name, not its id.
+_VENDOR_QUERY = (
+    "SELECT id, entityid, companyname, email, phone, BUILTIN.DF(terms) AS terms, isinactive "
+    "FROM vendor ORDER BY id"
+)
+
+#: Chart sync (see ``list_gl_accounts``). ``ORDER BY`` keeps offset paging stable.
+_ACCOUNT_QUERY = "SELECT id, acctnumber, fullname, accttype, isinactive FROM account ORDER BY id"
+
+#: Purchase-order sync. ``foreigntotal`` is the total in the order's own
+#: currency, and ``currency.symbol`` is that currency's ISO code. The date goes
+#: through ``TO_CHAR`` because SuiteQL otherwise renders dates in the user's
+#: date-format preference.
+_PO_QUERY = (
+    "SELECT t.id, t.tranid, t.status, BUILTIN.DF(t.entity) AS vendorname, t.foreigntotal, "
+    "c.symbol AS currency, TO_CHAR(t.duedate, 'YYYY-MM-DD') AS duedate "
+    "FROM transaction t LEFT JOIN currency c ON c.id = t.currency "
+    "WHERE t.type = 'PurchOrd' ORDER BY t.id"
+)
 
 
 @register_adapter("netsuite")
@@ -92,7 +121,7 @@ class NetSuiteAdapter(ErpAdapter):
         ]
         return ", ".join(parts)
 
-    async def _find_by_external_id(self, external_id: str) -> str | None:
+    async def _find_by_external_id(self, external_id: str) -> tuple[int, str | None]:
         """Look up an existing vendorBill by externalId.
 
         NetSuite enforces externalId uniqueness per record type, so this is
@@ -100,6 +129,9 @@ class NetSuiteAdapter(ErpAdapter):
         client-side timeout on the FIRST attempt's response (which may have
         already succeeded server-side) finds the already-created bill here
         instead of blindly POSTing a second one.
+
+        Returns ``(status_code, id)``. A non-200 comes back as-is so the caller
+        fails the push: a lookup that could not be made is not a miss.
         """
         q = f'externalId IS "{external_id}"'
         url = f"{self._base_url()}/vendorBill?q={quote(q, safe='')}"
@@ -107,11 +139,11 @@ class NetSuiteAdapter(ErpAdapter):
         async with httpx.AsyncClient(timeout=15) as client:
             resp = await client.get(url, headers=headers)
         if resp.status_code != 200:
-            return None
+            return resp.status_code, None
         items = resp.json().get("items", [])
         if not items:
-            return None
-        return items[0].get("id")
+            return 200, None
+        return 200, items[0].get("id")
 
     async def post_invoice(self, payload: InvoicePayload) -> ErpPostResult:
         # Refuse before any HTTP call. A vendorBill is posted against the
@@ -124,7 +156,11 @@ class NetSuiteAdapter(ErpAdapter):
         if expense_lines is None:
             return erp_refusal("NetSuite", ACCOUNT_NOT_LINKED)
 
-        existing_id = await self._find_by_external_id(payload.correlation_id)
+        lookup_status, existing_id = await self._find_by_external_id(payload.correlation_id)
+        if lookup_status != 200:
+            return ErpPostResult(
+                success=False, message=erp_failure_message("NetSuite", lookup_status)
+            )
         if existing_id:
             return ErpPostResult(
                 success=True,
@@ -190,9 +226,6 @@ class NetSuiteAdapter(ErpAdapter):
         if resp.status_code != 200:
             return ErpInvoiceStatus.unknown
 
-        data = resp.json()
-        ns_status = data.get("status", {}).get("refName", "").lower()
-
         status_map = {
             "open": ErpInvoiceStatus.open,
             "pendingapproval": ErpInvoiceStatus.draft,
@@ -200,47 +233,38 @@ class NetSuiteAdapter(ErpAdapter):
             "cancelled": ErpInvoiceStatus.cancelled,
             "voided": ErpInvoiceStatus.cancelled,
         }
-        return status_map.get(ns_status, ErpInvoiceStatus.unknown)
+        return status_map.get(_netsuite_bill_status(resp.json()), ErpInvoiceStatus.unknown)
 
     async def void_invoice(self, erp_document_id: str) -> bool:
-        # NetSuite uses a "void" transform
-        return False
+        """Delete the vendorBill while it is pending approval; otherwise False.
 
-    async def list_vendors(self) -> list[VendorPayload]:
-        """Pull vendors via NetSuite's `/vendor` record collection.
+        The REST record service has no void. Its record actions are a fixed
+        list that names neither ``vendorBill`` nor a void action
+        (https://docs.oracle.com/en/cloud/saas/netsuite/ns-online-help/section_1516982564.html);
+        voiding is ``transaction.void`` in SuiteScript's N/transaction module
+        (https://docs.oracle.com/en/cloud/saas/netsuite/ns-online-help/section_4413162576.html),
+        reachable only through a RESTlet the customer deploys. What REST does
+        offer is ``DELETE /record/v1/vendorBill/{id}``
+        (https://docs.oracle.com/en/cloud/saas/netsuite/ns-online-help/section_1545142287.html).
 
-        Best-effort like the Merge.dev adapter's `list_pos`/`list_gl_accounts`:
-        a non-200 response or a network error degrades to an empty list rather
-        than raising, so an unreachable/misconfigured NetSuite account doesn't
-        500 the `/api/vendors/sync-erp` endpoint. NetSuite pages this
-        collection via `offset` + `hasMore`; we follow it capped at 1000
-        vendors (10 pages × 100) to bound memory, matching the PO/GL sync cap.
+        A bill pending approval has posted nothing to the GL, so deleting it is
+        the whole cancellation. An approved bill has: deleting it would erase
+        posted history rather than reverse it, and the right reversal (a void,
+        a reversing journal, a vendor credit) is the accountant's call in
+        NetSuite. So every other status returns False, as does a bill NetSuite
+        no longer has.
         """
-        items: list[VendorPayload] = []
-        offset = 0
-        limit = 100
-
-        async with httpx.AsyncClient(timeout=30) as client:
-            for _ in range(10):  # 10 pages × 100 = 1000 vendor cap
-                url = f"{self._base_url()}/vendor?limit={limit}&offset={offset}"
-                headers = {"Authorization": self._auth_header("GET", url)}
-                try:
-                    resp = await client.get(url, headers=headers)
-                except httpx.HTTPError:
-                    break
-
-                if resp.status_code != 200:
-                    break
-
-                body = resp.json() if resp.content else {}
-                for raw in body.get("items") or []:
-                    items.append(_netsuite_vendor_to_payload(raw))
-
-                if not body.get("hasMore"):
-                    break
-                offset += limit
-
-        return items
+        url = f"{self._base_url()}/vendorBill/{quote(erp_document_id, safe='')}"
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.get(url, headers={"Authorization": self._auth_header("GET", url)})
+            if resp.status_code != 200:
+                return False
+            if _netsuite_bill_status(resp.json()) != "pendingapproval":
+                return False
+            resp = await client.delete(
+                url, headers={"Authorization": self._auth_header("DELETE", url)}
+            )
+        return resp.status_code == 204
 
     def _suiteql_url(self) -> str:
         """SuiteQL lives beside the record API: ``.../services/rest/query/v1``."""
@@ -249,45 +273,85 @@ class NetSuiteAdapter(ErpAdapter):
             base = base[: -len("/record/v1")]
         return f"{base}/query/v1/suiteql"
 
-    async def list_gl_accounts(self) -> list[GLAccountPayload]:
-        """Pull the chart of accounts through SuiteQL.
+    async def _suiteql(self, query: str) -> list[dict]:
+        """Run one SuiteQL query, paged by ``offset`` + ``hasMore``.
 
-        This sync is what fills ``gl_accounts.erp_account_id`` with NetSuite's
-        internal ids, which ``post_invoice`` posts every expense line against.
-        The REST record collection (``GET /account``) returns only ids and
-        links, one fetch per account after that; one SuiteQL query returns the
-        columns we need. Paged by ``offset`` + ``hasMore`` and capped at 1000
-        rows, like ``list_vendors``. Best-effort: a non-200 or a network error
-        ends the pull with what it has, so the sync endpoint reports a count
-        instead of 500ing.
+        Best-effort like every adapter's list sync: a non-200, a network error
+        or an unparseable page ends the pull with what it has, so the sync
+        endpoint reports a count instead of 500ing. Bounded at ``_MAX_PAGES`` x
+        ``_PAGE_SIZE`` rows. Bodies are parsed with ``loads_exact_json`` so a
+        money column is never a float.
         """
-        items: list[GLAccountPayload] = []
+        rows: list[dict] = []
         offset = 0
-        limit = 100
-        query = {"q": "SELECT id, acctnumber, fullname, accttype, isinactive FROM account"}
+        body_text = dumps_exact_json({"q": query})
         async with httpx.AsyncClient(timeout=30) as client:
-            for _ in range(10):  # 10 pages x 100 = 1000 account cap
-                url = f"{self._suiteql_url()}?limit={limit}&offset={offset}"
+            for _ in range(_MAX_PAGES):
+                url = f"{self._suiteql_url()}?limit={_PAGE_SIZE}&offset={offset}"
                 headers = {
                     "Authorization": self._auth_header("POST", url),
                     "Content-Type": "application/json",
                     "Prefer": "transient",
                 }
                 try:
-                    resp = await client.post(url, content=dumps_exact_json(query), headers=headers)
+                    resp = await client.post(url, content=body_text, headers=headers)
                 except httpx.HTTPError:
                     break
                 if resp.status_code != 200:
                     break
-                body = resp.json() if resp.content else {}
-                for raw in body.get("items") or []:
-                    acct = _netsuite_account_to_payload(raw)
-                    if acct is not None:
-                        items.append(acct)
+                try:
+                    body = loads_exact_json(resp.content)
+                except ValueError:
+                    break
+                rows.extend(r for r in body.get("items") or [] if isinstance(r, dict))
                 if not body.get("hasMore"):
                     break
-                offset += limit
-        return items
+                offset += _PAGE_SIZE
+        return rows
+
+    async def list_vendors(self) -> list[VendorPayload]:
+        """Pull vendors through SuiteQL (``_VENDOR_QUERY``).
+
+        The ``id`` is what ``post_invoice`` posts a bill's ``entity`` against.
+        Inactive vendors are skipped: NetSuite will not take a bill for one.
+        """
+        out: list[VendorPayload] = []
+        for raw in await self._suiteql(_VENDOR_QUERY):
+            vendor = _netsuite_vendor_to_payload(raw)
+            if vendor is not None:
+                out.append(vendor)
+        return out
+
+    async def list_gl_accounts(self) -> list[GLAccountPayload]:
+        """Pull the chart of accounts through SuiteQL (``_ACCOUNT_QUERY``).
+
+        This sync is what fills ``gl_accounts.erp_account_id`` with NetSuite's
+        internal ids, which ``post_invoice`` posts every expense line against.
+        The REST record collection (``GET /account``) returns only ids and
+        links, one fetch per account after that; one SuiteQL query returns the
+        columns we need.
+        """
+        out: list[GLAccountPayload] = []
+        for raw in await self._suiteql(_ACCOUNT_QUERY):
+            acct = _netsuite_account_to_payload(raw)
+            if acct is not None:
+                out.append(acct)
+        return out
+
+    async def list_pos(self) -> list[PoPayload]:
+        """Pull purchase orders through SuiteQL (``_PO_QUERY``), headers only.
+
+        The PO sync stores the header (number, vendor, total, status, currency,
+        expected date); it does not persist ERP lines, so no line query is
+        made. A PO with no number or no stated total is skipped, never synced
+        at 0.
+        """
+        out: list[PoPayload] = []
+        for raw in await self._suiteql(_PO_QUERY):
+            po = _netsuite_po_to_payload(raw)
+            if po is not None:
+                out.append(po)
+        return out
 
     async def test_connection(self) -> bool:
         try:
@@ -302,23 +366,81 @@ class NetSuiteAdapter(ErpAdapter):
             return False
 
 
-def _netsuite_vendor_to_payload(raw: dict) -> VendorPayload:
-    """Map a NetSuite vendor record to our normalized VendorPayload.
+def _netsuite_bill_status(record: dict) -> str:
+    """A vendorBill's status, normalised to compare: ``id`` lower-cased
+    (``paidInFull`` -> ``paidinfull``), else ``refName`` with its spaces removed
+    (``Paid In Full`` -> ``paidinfull``)."""
+    status = record.get("status") or {}
+    if not isinstance(status, dict):
+        return ""
+    raw = status.get("id") or status.get("refName") or ""
+    return str(raw).replace(" ", "").lower()
 
-    `entityId` is the vendor record's name/display field (what
-    `test_connection` and the fake-erp fixture both key on); real vendor
-    records may also carry `companyName`, `email`, `phone`. Anything absent
-    maps to None — `sync_vendors_from_erp` never nulls out an existing local
-    value for a missing field.
+
+def _netsuite_vendor_to_payload(raw: dict) -> VendorPayload | None:
+    """Map a SuiteQL ``vendor`` row (lower-case columns) to a VendorPayload.
+
+    The name is ``companyname``, falling back to ``entityid`` (an individual
+    vendor has no company name); ``entityid`` is also the vendor's code. An
+    inactive vendor (``isinactive`` "T") or a row with no id is skipped.
+    Anything absent maps to None — ``sync_vendors_from_erp`` never nulls out an
+    existing local value for a missing field.
     """
     vendor_id = raw.get("id")
-    name = raw.get("entityId") or raw.get("companyName") or (str(vendor_id) if vendor_id else "")
-
+    if vendor_id is None or str(raw.get("isinactive", "F")).upper() == "T":
+        return None
+    entity_id = raw.get("entityid") or None
+    name = raw.get("companyname") or entity_id or str(vendor_id)
     return VendorPayload(
-        erp_vendor_id=str(vendor_id) if vendor_id is not None else name,
-        name=name,
-        email=raw.get("email"),
-        phone=raw.get("phone"),
+        erp_vendor_id=str(vendor_id),
+        name=str(name),
+        code=str(entity_id) if entity_id else None,
+        email=raw.get("email") or None,
+        phone=raw.get("phone") or None,
+        payment_terms=raw.get("terms") or None,
+    )
+
+
+#: Purchase-order status letters (``transaction.status`` for ``PurchOrd``) ->
+#: our PO vocabulary. A Pending Supervisor Approval (A), Pending Receipt (B),
+#: Partially Received (D), Pending Billing/Partially Received (E) or Pending
+#: Bill (F) order is still open.
+_NETSUITE_PO_STATUSES: dict[str, str] = {
+    "C": "cancelled",  # Rejected by Supervisor
+    "G": "closed",  # Fully Billed
+    "H": "closed",  # Closed
+}
+
+
+def _netsuite_po_to_payload(raw: dict) -> PoPayload | None:
+    """Map a SuiteQL purchase-order row to a PoPayload.
+
+    ``currency`` is the currency's ISO symbol only when NetSuite states one —
+    never defaulted (decisions §197); ``expected_delivery_date`` is the
+    "Receive By" date (``duedate``) only when set.
+    """
+    number = raw.get("tranid")
+    total_raw = raw.get("foreigntotal")
+    if not number or total_raw is None or total_raw == "":
+        return None
+    try:
+        total = total_raw if isinstance(total_raw, Decimal) else Decimal(str(total_raw))
+    except (InvalidOperation, ValueError):
+        return None
+    expected: date | None = None
+    if raw.get("duedate"):
+        try:
+            expected = date.fromisoformat(str(raw["duedate"])[:10])
+        except ValueError:
+            expected = None
+    currency = str(raw.get("currency") or "").strip().upper()
+    return PoPayload(
+        po_number=str(number),
+        vendor_name=raw.get("vendorname") or None,
+        total=total,
+        status=_NETSUITE_PO_STATUSES.get(str(raw.get("status") or "").strip().upper(), "open"),
+        expected_delivery_date=expected,
+        currency=currency or None,
     )
 
 

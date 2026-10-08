@@ -7,9 +7,9 @@ a sandbox account, but we can lock the request shape (path, headers,
 pagination cursor) and the response → `PoPayload` mapping that drives
 real customer syncs.
 
-Adapters that don't yet implement PO sync (NetSuite, Business Central)
-inherit the base's `[]` default. We assert that explicitly so a future
-"raise NotImplementedError" doesn't silently 500 the sync endpoint.
+NetSuite (one SuiteQL query) and Business Central (`purchaseOrders` with
+lines expanded) are HTTP-mocked the same way: the mapping, the 1000-row
+bound, and the best-effort degradation the sync endpoint relies on.
 """
 
 from __future__ import annotations
@@ -130,30 +130,195 @@ def test_erp_dispatcher_still_resolves_every_registered_adapter():
 # ---------- Base / unimplemented adapters --------------------------------
 
 
-@pytest.mark.parametrize("erp_type", ["dynamics_365_bc", "netsuite"])
-def test_unimplemented_adapter_list_pos_returns_empty_list(erp_type: str):
-    """Adapters that don't override `list_pos` MUST inherit the base's
-    empty-list default. Anything else (raise / None) breaks the sync
-    endpoint for any tenant pointed at one of these ERPs."""
-    from app.services.erp_adapters.dispatcher import _ADAPTER_REGISTRY
+# ---------- Business Central (`purchaseOrders`) ---------------------------
 
-    cls = _ADAPTER_REGISTRY[erp_type]
-    # Direct integration_method bypasses Merge.dev so we hit the real
-    # adapter class — minimal config is fine since list_pos is a no-op.
-    adapter = cls({"type": erp_type, "integration_method": "direct"})
-    result = _run(adapter.list_pos())
-    assert result == []
+_BC_API = "http://fake-erp:12112/d365"
+
+
+def _bc_adapter(monkeypatch):
+    from app.config import settings
+    from app.services.erp_adapters.dynamics_365_bc import BusinessCentralAdapter
+
+    monkeypatch.setattr(settings, "erp_d365_api_base", _BC_API)
+    monkeypatch.setattr(settings, "erp_d365_token_url", f"{_BC_API}/oauth2/token")
+    return BusinessCentralAdapter(
+        {"client_id": "c", "client_secret": "s", "environment": "sandbox", "company_id": "co"}
+    )
+
+
+def _raw_json_response(status: int, text: str) -> MagicMock:
+    resp = MagicMock()
+    resp.status_code = status
+    resp.content = text.encode()
+    resp.headers = {"content-type": "application/json"}
+    resp.raise_for_status = MagicMock()
+    return resp
+
+
+def test_bc_list_pos_maps_orders_and_lines(monkeypatch):
+    """Totals are read exactly (the body is parsed straight to Decimal); a
+    blank `currencyCode` — BC's local currency — stays None, never a default;
+    BC's blank date `0001-01-01` is no date; comment lines are not lines."""
+    text = """{"value": [
+      {"number": "PO-1", "vendorName": "Acme", "currencyCode": "",
+       "requestedReceiptDate": "0001-01-01", "status": "Open",
+       "totalAmountIncludingTax": 99999999999999.99,
+       "purchaseOrderLines": [
+         {"lineType": "Account", "lineObjectNumber": "6100", "description": "Paper",
+          "quantity": 3, "directUnitCost": 33333333333333.33,
+          "netAmountIncludingTax": 99999999999999.99},
+         {"lineType": "Item", "lineObjectNumber": "1000", "description": "Widget",
+          "quantity": 1, "directUnitCost": 0, "netAmountIncludingTax": 0},
+         {"lineType": "Comment", "description": "Dock 2"}
+       ]},
+      {"number": "PO-2", "vendorName": "", "currencyCode": "eur",
+       "requestedReceiptDate": "2026-05-20", "status": "Draft",
+       "totalAmountIncludingTax": 820.00},
+      {"number": "PO-NO-TOTAL", "status": "Open"},
+      {"number": null, "totalAmountIncludingTax": 5}
+    ]}"""
+    with patch("httpx.AsyncClient") as cm:
+        client = cm.return_value.__aenter__.return_value
+        client.post = AsyncMock(return_value=_make_mock_response(200, {"access_token": "tok"}))
+        client.get = AsyncMock(return_value=_raw_json_response(200, text))
+        pos = _run(_bc_adapter(monkeypatch).list_pos())
+
+    assert [p.po_number for p in pos] == ["PO-1", "PO-2"]
+    first, second = pos
+    assert first.total == Decimal("99999999999999.99")
+    assert first.vendor_name == "Acme"
+    assert first.currency is None
+    assert first.expected_delivery_date is None
+    assert first.status == "open"
+    assert len(first.line_items) == 2
+    line = first.line_items[0]
+    assert line.gl_account == "6100"
+    assert line.quantity == Decimal(3)
+    assert line.unit_price == Decimal("33333333333333.33")
+    assert line.total == Decimal("99999999999999.99")
+    assert first.line_items[1].gl_account is None  # an item line has no G/L account
+
+    assert second.currency == "EUR"
+    assert second.vendor_name is None
+    assert second.expected_delivery_date == date(2026, 5, 20)
+    assert second.status == "open"  # Draft / In Review / Open are all live orders
+    assert second.line_items == []
+
+    url = client.get.await_args.args[0]
+    assert url == (
+        f"{_BC_API}/sandbox/api/v2.0/companies(co)/purchaseOrders?$expand=purchaseOrderLines"
+    )
+
+
+def test_bc_list_pos_is_bounded_and_degrades(monkeypatch):
+    import httpx
+
+    def page(n: int) -> MagicMock:
+        rows = [{"number": f"PO-{n}-{i}", "totalAmountIncludingTax": 1} for i in range(100)]
+        return _make_mock_response(200, {"value": rows, "@odata.nextLink": f"{_BC_API}/n{n}"})
+
+    with patch("httpx.AsyncClient") as cm:
+        client = cm.return_value.__aenter__.return_value
+        client.post = AsyncMock(return_value=_make_mock_response(200, {"access_token": "tok"}))
+        client.get = AsyncMock(side_effect=[page(n) for n in range(12)])
+        assert len(_run(_bc_adapter(monkeypatch).list_pos())) == 1000
+        assert client.get.await_count == 10
+
+        client.get = AsyncMock(return_value=_make_mock_response(503, {"error": "busy"}))
+        assert _run(_bc_adapter(monkeypatch).list_pos()) == []
+        client.get = AsyncMock(side_effect=httpx.ReadTimeout("slow"))
+        assert _run(_bc_adapter(monkeypatch).list_pos()) == []
+
+
+# ---------- NetSuite (SuiteQL over `transaction`) -------------------------
+
+
+def _netsuite_adapter():
+    from app.services.erp_adapters.netsuite import NetSuiteAdapter
+
+    return NetSuiteAdapter(
+        {
+            "account_id": "1234567",
+            "consumer_key": "ck",
+            "consumer_secret": "cs",
+            "token_id": "ti",
+            "token_secret": "ts",
+        }
+    )
+
+
+def test_netsuite_list_pos_maps_suiteql_rows():
+    import json
+
+    text = """{"items": [
+      {"id": "501", "tranid": "PO-501", "status": "B", "vendorname": "Acme",
+       "foreigntotal": 99999999999999.99, "currency": "usd", "duedate": "2026-06-01"},
+      {"id": "502", "tranid": "PO-502", "status": "H", "vendorname": null,
+       "foreigntotal": 640.00, "currency": null, "duedate": null},
+      {"id": "503", "tranid": "PO-503", "status": "C", "foreigntotal": 10},
+      {"id": "504", "tranid": "PO-504", "status": "G", "foreigntotal": 10},
+      {"id": "505", "tranid": "PO-505", "status": "F", "foreigntotal": 10},
+      {"id": "506", "tranid": "PO-NO-TOTAL", "status": "B", "foreigntotal": null},
+      {"id": "507", "tranid": null, "foreigntotal": 1}
+    ], "hasMore": false}"""
+    with patch("httpx.AsyncClient") as cm:
+        client = cm.return_value.__aenter__.return_value
+        client.post = AsyncMock(return_value=_raw_json_response(200, text))
+        pos = _run(_netsuite_adapter().list_pos())
+
+    assert [(p.po_number, p.status) for p in pos] == [
+        ("PO-501", "open"),
+        ("PO-502", "closed"),
+        ("PO-503", "cancelled"),
+        ("PO-504", "closed"),
+        ("PO-505", "open"),
+    ]
+    assert pos[0].total == Decimal("99999999999999.99")
+    assert pos[0].currency == "USD"
+    assert pos[0].vendor_name == "Acme"
+    assert pos[0].expected_delivery_date == date(2026, 6, 1)
+    assert pos[1].currency is None  # never defaulted
+    assert pos[1].expected_delivery_date is None
+    assert pos[1].total == Decimal("640.00")
+
+    query = json.loads(client.post.await_args.kwargs["content"])["q"]
+    assert "FROM transaction" in query and "'PurchOrd'" in query
+    # Dates through TO_CHAR: SuiteQL otherwise formats them per user preference.
+    assert "TO_CHAR(t.duedate, 'YYYY-MM-DD')" in query
+    assert client.post.await_args.kwargs["headers"]["Prefer"] == "transient"
+
+
+def test_netsuite_list_pos_is_bounded_and_degrades():
+    import httpx
+
+    def page(n: int) -> MagicMock:
+        rows = [{"tranid": f"PO-{n}-{i}", "foreigntotal": 1} for i in range(100)]
+        return _make_mock_response(200, {"items": rows, "hasMore": True})
+
+    with patch("httpx.AsyncClient") as cm:
+        client = cm.return_value.__aenter__.return_value
+        client.post = AsyncMock(side_effect=[page(n) for n in range(12)])
+        assert len(_run(_netsuite_adapter().list_pos())) == 1000
+        assert client.post.await_count == 10
+
+        client.post = AsyncMock(return_value=_make_mock_response(400, {"detail": "bad"}))
+        assert _run(_netsuite_adapter().list_pos()) == []
+        client.post = AsyncMock(side_effect=httpx.ConnectError("dns"))
+        assert _run(_netsuite_adapter().list_pos()) == []
 
 
 # ---------- Merge.dev adapter -------------------------------------------
 
 
 def _make_mock_response(status_code: int, json_body: dict | None = None) -> MagicMock:
+    import json
+
     resp = MagicMock()
     resp.status_code = status_code
-    resp.content = b"{}" if json_body is not None else b""
+    resp.content = json.dumps(json_body).encode() if json_body is not None else b""
     resp.json = MagicMock(return_value=json_body or {})
     resp.headers = {"content-type": "application/json"}
+    resp.raise_for_status = MagicMock()
     return resp
 
 

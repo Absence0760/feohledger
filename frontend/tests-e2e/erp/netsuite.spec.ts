@@ -17,6 +17,7 @@ import {
 	sendToErpAndAwaitTerminal,
 	setErpSettings,
 	syncErpGlAccounts,
+	syncErpPurchaseOrders,
 	syncErpVendors,
 	testErpConnection
 } from './helpers';
@@ -43,6 +44,11 @@ import {
  *   3. Fail closed — an invoice whose vendor never synced is refused with the
  *      stable `vendor_not_linked` reason before any request reaches NetSuite;
  *      it is never posted by name.
+ *   4. PO sync — one SuiteQL query over `transaction` (type PurchOrd); the
+ *      status letter maps onto open / closed and the ISO currency is kept.
+ *
+ * The vendor sync is SuiteQL too (`SELECT … FROM vendor`): the REST `/vendor`
+ * collection carries no names. The full send proves it stored the ids.
  */
 
 // The exact settings.erp shape the adapter reads: get_erp_adapter passes the
@@ -138,5 +144,19 @@ test.describe('/erp netsuite adapter against fake-erp', () => {
 		} finally {
 			await deleteInvoice(page, inv.id);
 		}
+	});
+
+	test('PO sync imports purchase orders through SuiteQL', async ({ page }) => {
+		const { adapter, pos } = await syncErpPurchaseOrders(page);
+		expect(adapter).toBe('netsuite');
+		const open = pos.find((p) => p.po_number === 'PO-FAKE-NS-501');
+		const closed = pos.find((p) => p.po_number === 'PO-FAKE-NS-502');
+		expect(open, 'PO-FAKE-NS-501 synced').toBeTruthy();
+		expect(closed, 'PO-FAKE-NS-502 synced').toBeTruthy();
+		expect(Number(open!.total)).toBeCloseTo(2100.5, 2);
+		expect(open!.currency).toBe('USD');
+		expect(open!.status).toBe('open');
+		expect(closed!.status).toBe('closed');
+		expect(closed!.currency).toBe('GBP');
 	});
 });
