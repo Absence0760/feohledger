@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.invoice import Invoice, InvoiceLineItem, InvoiceStatus
 from app.models.vendor import Vendor
+from app.models.workflow import WorkflowInstance
 from app.services.erp_adapters import (
     InvoicePayload,
     LineItemPayload,
@@ -23,6 +24,10 @@ from app.services.workflow_engine import (
 
 MAX_RETRIES = 3
 BASE_DELAY_SECONDS = 2
+
+#: ``WorkflowInstance.state_data`` key holding an ERP background job an earlier
+#: attempt queued but could not confirm (``ErpPostResult.pending_job_id``).
+PENDING_JOB_KEY = "erp_pending_job_id"
 
 
 @dataclass(frozen=True)
@@ -246,7 +251,7 @@ async def send_to_erp_internal(
 
     for attempt in range(retry_count, MAX_RETRIES):
         try:
-            erp_ref = await _call_erp(db, invoice, erp_config)
+            erp_ref = await _call_erp(db, invoice, erp_config, instance=instance)
 
             await transition_invoice(
                 db,
@@ -312,11 +317,23 @@ async def send_to_erp_internal(
                 return
 
 
-async def _call_erp(db: AsyncSession, invoice: Invoice, erp_config: dict | None = None) -> str:
+async def _call_erp(
+    db: AsyncSession,
+    invoice: Invoice,
+    erp_config: dict | None = None,
+    *,
+    instance: WorkflowInstance | None = None,
+) -> str:
     """Send invoice to the configured ERP via the adapter pattern.
 
     Uses the invoice's correlation_id as an idempotency key.
     Returns an ERP reference ID on success, raises on failure.
+
+    An ERP whose create is an asynchronous job (Blackbaud FE NXT) may report a
+    job it queued but could not see finish (``result.pending_job_id``). It is
+    kept on ``instance.state_data`` and handed back on the next attempt — a
+    manual retry included — so the adapter checks that job before queueing a
+    second one. The caller's commit persists it.
     """
     config = erp_config or {"type": "mock", "integration_method": "direct"}
 
@@ -324,7 +341,11 @@ async def _call_erp(db: AsyncSession, invoice: Invoice, erp_config: dict | None 
     line_items = await _fetch_line_items(db, invoice.id)
     refs = await _resolve_erp_refs(db, invoice, line_items)
     payload = _build_payload(invoice, line_items, refs)
+    state = (instance.state_data if instance is not None else None) or {}
+    payload.pending_job_id = state.get(PENDING_JOB_KEY)
     result = await adapter.post_invoice(payload)
+    if instance is not None and result.pending_job_id != payload.pending_job_id:
+        instance.state_data = {**state, PENDING_JOB_KEY: result.pending_job_id}
 
     if not result.success:
         if not result.retryable:

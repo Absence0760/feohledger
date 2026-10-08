@@ -85,8 +85,12 @@ completed, 6 = canceled, 7 = failed) and ``/result`` returns the new
 we cannot confirm (still running, a 429/403 quota or any error while asking) is
 **non-retryable** (``job_unconfirmed``): ``services/erp``'s backoff is seconds,
 a queued job can outlive it, and a re-submit while the first job runs would
-create a second invoice. An operator retries once the job has finished, and the
-pre-create lookup then finds the invoice the job made.
+create a second invoice. The unconfirmed result carries the job's
+``process_id`` (``ErpPostResult.pending_job_id``, persisted by ``services/erp``
+on the workflow instance), and the next attempt — an operator's retry — reads
+that job before anything else: completed → the invoice it made is the result;
+still running or unreadable → ``job_unconfirmed`` again; ended without a record
+(canceled / failed) → the normal lookup-then-post path.
 
 **Idempotency.** Our ``correlation_id`` rides in the invoice ``description`` as
 ``[feoh:<correlation_id>]``. Before creating, :meth:`post_invoice` searches
@@ -250,11 +254,19 @@ def failure_message(step: str, resp: httpx.Response) -> str:
     return f"{PROVIDER} {step} failed: HTTP {resp.status_code} ({failure_reason(resp)})"
 
 
-def _unconfirmed(detail: str) -> ErpPostResult:
+def _unconfirmed(detail: str, process_id: str | None) -> ErpPostResult:
+    """Non-retryable, and carries the job so the next attempt checks it first.
+
+    ``services/erp`` persists ``pending_job_id`` and returns it as
+    ``payload.pending_job_id``; without it a manual retry while the job still
+    ran would find nothing in the idempotency lookup and queue a second invoice.
+    """
     return ErpPostResult(
         success=False,
         message=f"{PROVIDER} post unconfirmed: {JOB_UNCONFIRMED} ({detail})",
+        raw_response={"process_id": process_id} if process_id else None,
         retryable=False,
+        pending_job_id=process_id,
     )
 
 
@@ -459,6 +471,13 @@ class BlackbaudFeNxtAdapter(OAuthErpAdapter):
 
         headers = await self._headers()
         async with httpx.AsyncClient(timeout=30) as client:
+            if payload.pending_job_id:
+                # An earlier attempt queued a job we never saw finish. Its
+                # outcome decides; only a job that ended without creating the
+                # invoice lets this attempt go on to post.
+                earlier = await self._await_job(client, headers, payload.pending_job_id, payload)
+                if earlier.success or not earlier.retryable:
+                    return earlier
             state, detail = await self._find_existing(client, headers, payload)
             if state == "unavailable":
                 return ErpPostResult(success=False, message=detail)
@@ -483,7 +502,7 @@ class BlackbaudFeNxtAdapter(OAuthErpAdapter):
                 return ErpPostResult(success=False, message=failure_message("post", resp))
             process_id = (_json(resp) or {}).get("process_id")
             if process_id is None:
-                return _unconfirmed("no process id returned")
+                return _unconfirmed("no process id returned", None)
             return await self._await_job(client, headers, str(process_id), payload)
 
     async def _await_job(
@@ -500,7 +519,9 @@ class BlackbaudFeNxtAdapter(OAuthErpAdapter):
             resp = await client.get(f"{job}/status", headers=headers)
             if resp.status_code != 200:
                 # Includes 429 / quota 403: stop asking rather than wait it out.
-                return _unconfirmed(f"status HTTP {resp.status_code} ({failure_reason(resp)})")
+                return _unconfirmed(
+                    f"status HTTP {resp.status_code} ({failure_reason(resp)})", process_id
+                )
             status = (_json(resp) or {}).get("status")
             if status in _JOB_ENDED_WITHOUT_RECORD:
                 # The job ended without creating the invoice: a retry is safe,
@@ -512,17 +533,19 @@ class BlackbaudFeNxtAdapter(OAuthErpAdapter):
                 continue
             result = await client.get(f"{job}/result", headers=headers)
             if result.status_code != 200:
-                return _unconfirmed(f"result HTTP {result.status_code} ({failure_reason(result)})")
+                return _unconfirmed(
+                    f"result HTTP {result.status_code} ({failure_reason(result)})", process_id
+                )
             record_id = (_json(result) or {}).get("record_id")
             if record_id is None:
-                return _unconfirmed("no record id returned")
+                return _unconfirmed("no record id returned", process_id)
             return ErpPostResult(
                 success=True,
                 erp_document_id=str(record_id),
                 erp_document_number=payload.invoice_number,
                 message="Posted to Blackbaud FE NXT",
             )
-        return _unconfirmed("background job still running")
+        return _unconfirmed("background job still running", process_id)
 
     # -- the rest of ErpAdapter -------------------------------------------------
 

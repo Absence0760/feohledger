@@ -426,7 +426,7 @@ async def test_send_to_erp_internal_passes_org_erp_config_to_call_erp():
     ):
         await send_to_erp_internal(db, inv, erp_config=cfg)
 
-    call_erp.assert_awaited_once_with(db, inv, cfg)
+    call_erp.assert_awaited_once_with(db, inv, cfg, instance=inst)
 
 
 @pytest.mark.asyncio
@@ -453,6 +453,42 @@ async def test_call_erp_dispatches_via_configured_adapter_not_mock():
     assert ref == "merge-inv-77"
     posted_url = client.post.await_args.args[0]
     assert posted_url.endswith("/invoices")
+
+
+@pytest.mark.asyncio
+async def test_call_erp_carries_an_unconfirmed_erp_job_to_the_next_attempt():
+    """An ERP whose create is a background job (Blackbaud FE NXT) reports a job
+    it queued but could not see finish. `_call_erp` keeps it on the workflow
+    instance and hands it back on the next attempt — a manual retry after a
+    non-retryable `job_unconfirmed` included — so the adapter checks that job
+    instead of queueing a second bill. A later result without one clears it."""
+    from app.services.erp import PENDING_JOB_KEY, ErpPostRefusedError, _call_erp
+    from app.services.erp_adapters.base import ErpPostResult
+
+    seen: list[str | None] = []
+    results = [
+        ErpPostResult(
+            success=False, message="unconfirmed", retryable=False, pending_job_id="job-41"
+        ),
+        ErpPostResult(success=True, erp_document_id="FE-9"),
+    ]
+
+    class _Adapter:
+        async def post_invoice(self, payload):
+            seen.append(payload.pending_job_id)
+            return results.pop(0)
+
+    inst = _instance(state_data={"erp_retries": 0})
+    with patch("app.services.erp.get_erp_adapter", return_value=_Adapter()):
+        with pytest.raises(ErpPostRefusedError):
+            await _call_erp(_line_items_db([]), _invoice(), {"type": "x"}, instance=inst)
+        assert inst.state_data == {"erp_retries": 0, PENDING_JOB_KEY: "job-41"}
+
+        ref = await _call_erp(_line_items_db([]), _invoice(), {"type": "x"}, instance=inst)
+
+    assert ref == "FE-9"
+    assert seen == [None, "job-41"]
+    assert inst.state_data == {"erp_retries": 0, PENDING_JOB_KEY: None}
 
 
 # ---------------------------------------------------------------------------

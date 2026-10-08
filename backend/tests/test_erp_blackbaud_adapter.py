@@ -431,6 +431,45 @@ def test_job_still_running_is_unconfirmed_and_not_retried():
     assert len(fake.of("GET", "/status")) == bb.PROCESS_POLL_ATTEMPTS
 
 
+def test_unconfirmed_job_carries_its_process_id_for_the_next_attempt():
+    fake = FakeSky()
+    fake.job_statuses = [3]
+    result = _post(fake)
+    assert result.pending_job_id == "843"
+    assert result.raw_response == {"process_id": "843"}
+
+
+def test_retry_while_the_earlier_job_still_runs_never_queues_a_second_invoice():
+    """The regression: a manual retry after `job_unconfirmed` used to go
+    straight to the lookup, miss the invoice the still-running job had not yet
+    made, and queue a second one."""
+    fake = FakeSky()
+    fake.job_statuses = [3]
+    result = _post(fake, pending_job_id="843")
+    assert not result.success and not result.retryable
+    assert "job_unconfirmed" in result.message
+    assert result.pending_job_id == "843"
+    assert fake.of("POST", "/invoices/process") == []
+    assert fake.of("GET", "/accountspayable/v1/invoices") == []
+
+
+def test_retry_after_the_earlier_job_completed_reports_its_invoice():
+    fake = FakeSky()
+    result = _post(fake, pending_job_id="843")
+    assert result.success and result.erp_document_id == "4975"
+    assert result.pending_job_id is None  # services/erp clears the stored job
+    assert fake.of("POST", "/invoices/process") == []
+
+
+def test_retry_after_the_earlier_job_failed_posts_again():
+    fake = FakeSky()
+    fake.job_statuses = [7, 5]
+    result = _post(fake, pending_job_id="843")
+    assert result.success, result.message
+    assert len(fake.of("GET", "/accountspayable/v1/invoices")) == 1  # lookup still guards it
+    assert len(fake.of("POST", "/invoices/process")) == 1
+
+
 def test_job_failed_is_retryable():
     fake = FakeSky()
     fake.job_statuses = [7]
