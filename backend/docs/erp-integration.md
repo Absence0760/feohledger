@@ -775,8 +775,12 @@ ids**. The payload carries them (`InvoicePayload.vendor_erp_id`,
   these ids, so a tenant has to run them before its first push.
 
 **Fail closed, before any HTTP call.** An adapter that needs an id the payload
-lacks returns `ErpPostResult(success=False, message=erp_refusal_message(provider,
-reason))`, e.g. `NetSuite post refused: vendor_not_linked`. The reason codes are
+lacks returns `erp_refusal(provider, reason)`: an `ErpPostResult` with
+`success=False`, `retryable=False` and the message
+`erp_refusal_message(provider, reason)`, e.g. `NetSuite post refused:
+vendor_not_linked`. `services/erp` raises `ErpPostRefusedError` for a
+non-retryable result and fails the invoice on the first attempt, with no
+backoff, because the same payload would be refused again. The reason codes are
 stable constants in `erp_adapters/base.py`: `VENDOR_NOT_LINKED` and
 `ACCOUNT_NOT_LINKED`. The message is PII-free for the same reason as
 `erp_failure_message` (it lands on the append-only `invoice.erp_failed` row). A

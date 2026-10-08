@@ -153,6 +153,13 @@ def erp_refusal_message(provider: str, reason: str) -> str:
     return f"{provider} post refused: {reason}"
 
 
+def erp_refusal(provider: str, reason: str) -> ErpPostResult:
+    """The non-retryable :class:`ErpPostResult` for a payload refused pre-flight."""
+    return ErpPostResult(
+        success=False, message=erp_refusal_message(provider, reason), retryable=False
+    )
+
+
 @dataclass
 class ErpPostResult:
     """Outcome of an ``ErpAdapter.post_invoice`` call.
@@ -173,6 +180,11 @@ class ErpPostResult:
     erp_document_number: str | None = None
     message: str | None = None
     raw_response: dict | None = None
+    #: False when retrying cannot change the outcome — the adapter refused the
+    #: payload before calling the ERP (:func:`erp_refusal`). ``services/erp``
+    #: then fails the invoice at once instead of spending its backoff budget
+    #: re-sending the same refused bill.
+    retryable: bool = True
 
 
 @dataclass

@@ -49,7 +49,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from app.models.invoice import InvoiceStatus
-from app.services.erp import retry_erp, send_to_erp_internal
+from app.services.erp import ErpPostRefusedError, retry_erp, send_to_erp_internal
 
 _UNSET = object()
 
@@ -236,6 +236,35 @@ async def test_send_to_erp_retry_attempts_use_exponential_backoff():
     # 3 attempts → 2 sleeps (no sleep after the last attempt).
     delays = [c.args[0] for c in sleep_mock.call_args_list]
     assert delays == [2, 4], f"expected 2s, 4s backoff, got {delays}"
+
+
+@pytest.mark.asyncio
+async def test_send_to_erp_fails_a_refused_payload_at_once_without_backoff():
+    """A pre-flight refusal (vendor or account not linked) can't succeed on a
+    re-send, so it fails the invoice on the first attempt with no backoff
+    sleep, rather than spending the retry budget on the same refused bill."""
+    inv = _invoice(status=InvoiceStatus.sending_to_erp)
+    inst = _instance()
+    recorder = _AuditRecorder()
+    call_erp = AsyncMock(
+        side_effect=ErpPostRefusedError("NetSuite post refused: vendor_not_linked")
+    )
+    sleep_mock = AsyncMock()
+
+    with (
+        patch("app.services.workflow_engine.dispatch_audit", new=recorder),
+        patch("app.services.erp._call_erp", call_erp),
+        patch("app.services.erp.get_workflow_instance", AsyncMock(return_value=inst)),
+        patch("app.services.erp.asyncio.sleep", sleep_mock),
+    ):
+        await send_to_erp_internal(AsyncMock(), inv)
+
+    assert inv.status == InvoiceStatus.failed
+    assert call_erp.await_count == 1
+    sleep_mock.assert_not_called()
+    fail_row = next(r for r in recorder.rows if r["action"] == "invoice.erp_failed")
+    assert fail_row["details"]["error"] == "NetSuite post refused: vendor_not_linked"
+    assert fail_row["details"]["retries"] == 1
 
 
 # ---------------------------------------------------------------------------
@@ -617,6 +646,7 @@ async def test_call_erp_refuses_an_unlinked_vendor_before_any_http_call():
         with pytest.raises(RuntimeError) as exc:
             await _call_erp(_line_items_db(rows, vendor_erp_id=None), _invoice(), _NETSUITE_CFG)
     assert str(exc.value) == "NetSuite post refused: vendor_not_linked"
+    assert isinstance(exc.value, ErpPostRefusedError)
     cm.assert_not_called()
 
 

@@ -20,7 +20,7 @@ from app.services.erp_adapters.base import (
     InvoicePayload,
     VendorPayload,
     erp_failure_message,
-    erp_refusal_message,
+    erp_refusal,
 )
 from app.services.erp_adapters.dispatcher import register_adapter
 from app.utils.json_money import dumps_exact_json
@@ -119,14 +119,10 @@ class NetSuiteAdapter(ErpAdapter):
         # never a stand-in (a name picks the wrong "Acme" the first time two
         # vendors share one).
         if not payload.vendor_erp_id:
-            return ErpPostResult(
-                success=False, message=erp_refusal_message("NetSuite", VENDOR_NOT_LINKED)
-            )
+            return erp_refusal("NetSuite", VENDOR_NOT_LINKED)
         expense_lines = _netsuite_expense_lines(payload)
         if expense_lines is None:
-            return ErpPostResult(
-                success=False, message=erp_refusal_message("NetSuite", ACCOUNT_NOT_LINKED)
-            )
+            return erp_refusal("NetSuite", ACCOUNT_NOT_LINKED)
 
         existing_id = await self._find_by_external_id(payload.correlation_id)
         if existing_id:

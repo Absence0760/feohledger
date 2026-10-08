@@ -195,6 +195,10 @@ async def retry_erp(
     await db.commit()
 
 
+class ErpPostRefusedError(RuntimeError):
+    """The adapter refused the payload before calling the ERP; never retried."""
+
+
 async def send_to_erp_internal(
     db: AsyncSession,
     invoice: Invoice,
@@ -263,7 +267,9 @@ async def send_to_erp_internal(
             return
 
         except Exception as exc:
-            if attempt + 1 < MAX_RETRIES:
+            # A pre-flight refusal (vendor or account not linked to the ERP)
+            # fails at once: re-sending the same payload is refused the same way.
+            if attempt + 1 < MAX_RETRIES and not isinstance(exc, ErpPostRefusedError):
                 if instance:
                     instance.state_data = {
                         **(instance.state_data or {}),
@@ -310,6 +316,8 @@ async def _call_erp(db: AsyncSession, invoice: Invoice, erp_config: dict | None 
     result = await adapter.post_invoice(payload)
 
     if not result.success:
+        if not result.retryable:
+            raise ErpPostRefusedError(result.message or "ERP post refused")
         raise RuntimeError(result.message or "ERP post failed")
 
     return result.erp_document_id or result.erp_document_number or "UNKNOWN"

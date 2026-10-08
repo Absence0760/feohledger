@@ -13,7 +13,7 @@ from app.services.erp_adapters.base import (
     InvoicePayload,
     VendorPayload,
     erp_failure_message,
-    erp_refusal_message,
+    erp_refusal,
 )
 from app.services.erp_adapters.dispatcher import register_adapter
 from app.utils.json_money import dumps_exact_json
@@ -107,10 +107,7 @@ class BusinessCentralAdapter(ErpAdapter):
         # vendor's NUMBER (V00010) — the name we used to send there could only
         # fail, or match another vendor whose number happens to equal it.
         if not payload.vendor_erp_id:
-            return ErpPostResult(
-                success=False,
-                message=erp_refusal_message("Business Central", VENDOR_NOT_LINKED),
-            )
+            return erp_refusal("Business Central", VENDOR_NOT_LINKED)
         token = await self._get_token()
         headers = {
             "Authorization": f"Bearer {token}",

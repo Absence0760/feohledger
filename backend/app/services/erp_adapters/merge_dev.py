@@ -18,7 +18,7 @@ from app.services.erp_adapters.base import (
     PoPayload,
     VendorPayload,
     erp_failure_message,
-    erp_refusal_message,
+    erp_refusal,
 )
 from app.services.erp_adapters.dispatcher import register_adapter
 from app.utils.json_money import dumps_exact_json
@@ -131,13 +131,9 @@ class MergeDevAdapter(ErpAdapter):
         # or a GL code where an id belongs. Refuse before any HTTP call, as
         # the direct adapters do; never fall back to the name or the code.
         if not payload.vendor_erp_id:
-            return ErpPostResult(
-                success=False, message=erp_refusal_message("Merge.dev", VENDOR_NOT_LINKED)
-            )
+            return erp_refusal("Merge.dev", VENDOR_NOT_LINKED)
         if any(li.gl_account and not li.gl_account_erp_id for li in payload.line_items):
-            return ErpPostResult(
-                success=False, message=erp_refusal_message("Merge.dev", ACCOUNT_NOT_LINKED)
-            )
+            return erp_refusal("Merge.dev", ACCOUNT_NOT_LINKED)
         body = {
             "model": {
                 "type": "ACCOUNTS_PAYABLE",
