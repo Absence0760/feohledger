@@ -39,7 +39,16 @@ and an audit that re-derived both found the copy stale at nearly every sync
 transcription was retired rather than corrected again. Add a follow-up here; add
 a GitHub issue only when one warrants its own thread.
 
-**Last reconciled:** 2026-10-07 — binding approval to the version the
+**Last reconciled:** 2026-10-07 — a re-validation pass checked all 82 open
+entries against the code on `main` (`02f7387b`) rather than against their own
+text. One had landed without being pruned — the void reversing a captured
+discount by elimination, fixed by `discount_offers.captured_by_payment_id`
+(migration 0104) — and is removed, taking the file from 81 → 80. Six described
+the code wrongly and are corrected inline (marked *corrected* or *re-measured
+2026-10-07*): the USD-only pricing page, the deploy role's target and sops
+step, the breakpoint count, the `/organization` size, where pre-approval
+cover is computed, and SOC 2's "all engineering prereqs are complete". Every
+other entry was confirmed still open. Before that, 2026-10-07 — binding approval to the version the
 approver saw (decisions §263) closed **three** (c) entries — approval not tied
 to the loaded version (in-app, bulk, and the email / Slack / Teams links),
 `bulk/delete` with no entity scope or row lock, and bulk `new →
@@ -110,7 +119,7 @@ section carried its own `decisions.md` § reference, so nothing was lost by
 deleting it; that cross-reference is what makes the pruning safe, and writing
 one is what earns a future entry the right to be deleted.
 
-**81 open: 66 (c) · 9 (a) · 6 (b)** — re-derived from the file, never carried
+**80 open: 65 (c) · 9 (a) · 6 (b)** — re-derived from the file, never carried
 forward. The section heading is authoritative; where an entry also carries a
 `(c)`/`(a)`/`(b)` marker, the two agree.
 `grep -c '^- \[ \]' docs/followups.md`.
@@ -418,9 +427,14 @@ plus two product-fit gaps in the section below. Both are category **(c)**.
 **Frontend gaps — built on the backend, unreachable in the product:**
 
 - [ ] **[Low] The marketing pricing page (`Pricing.svelte`) is USD-only.**
-      Hardcoded `$` figures; no currency awareness.
+      The figures are no longer hardcoded `$`: `lib/marketing/pricing.ts`
+      formats every one through `formatMoney` with the generated
+      `PLAN_CURRENCY`. But the catalogue carries a single currency
+      (`plans.generated.ts` → `PLAN_CURRENCY = 'USD'`), so the page can
+      only ever show USD. *Corrected 2026-10-07.*
       **Durable fix:** a product call on whether to localise pricing at all, then
-      per-locale figures if yes.
+      per-currency prices in `plan_catalog.py` (the page already renders
+      whatever currency it is handed).
       **Trigger:** an international pricing decision.
 
 **Supplier portal — the loop-closing steps are missing:**
@@ -517,7 +531,11 @@ honestly be folded into the slice that surfaced it.
 - [ ] **(c) The GitHub deploy role exists but can do nothing.** The estate
       account bootstrap created `feohledger-deploy` in the FeohLedger account,
       trusted only from this repo's `production` environment, and attached no
-      policy — on purpose. `aws-deploy.yml` needs ECR push, ECS
+      policy — on purpose. *Corrected 2026-10-07:* `infra/` now defines a
+      single-VM workload (`compute.tf`'s EC2 instance + `database.tf`'s RDS,
+      `docs/minimal-deployment.md`), while `aws-deploy.yml` still targets
+      ECS/Fargate — so the first call is which deploy target the pipeline
+      serves, and the policy is scoped to that. As written, `aws-deploy.yml` needs ECR push, ECS
       register/update + `run-task`/`describe-tasks`, `iam:PassRole` on the task
       and execution roles, `lambda:UpdateFunctionCode`, S3 sync and CloudFront
       invalidation (`docs/production-deployment.md` § Credentials), and every
@@ -527,9 +545,10 @@ honestly be folded into the slice that surfaced it.
       bootstrap role — looked up with `data "aws_iam_role"`, never managed from
       here — in the same change that adds the ECR repository, ECS service,
       frontend bucket + distribution and worker Lambdas, scoped to exactly those
-      ARNs. That change also reads its first real secret (the RDS master
-      password) through the `carlpett/sops` data source `infra/README.md`
-      § Secrets sketches, likewise unwired until something needs it.
+      ARNs. (The RDS master password is already handled — a write-only
+      attribute fed at apply time, `infra/README.md` § Secrets; the
+      `carlpett/sops` data source this entry used to name was dropped because
+      it would put the value in state.)
       `AWS_DEPLOY_ENABLED` stays unset until both land. **Trigger:** the
       workload-stack build-out — step 1 of `docs/production-deployment.md`
       § Arming the AWS pipeline. **See also #449**, which is the same role from
@@ -572,14 +591,16 @@ reliable part of it.
       Round 26 closed #432's two engineering parts (the `/organization` 320px failure and a
       reflow guard widened from 5 routes to 45) and deliberately did **not** make the
       viewport-floor call, which is a product decision. Measured while there, correcting the
-      issue's own premise that there are "zero width breakpoints": **30 width-based `@media`
-      queries across 15 distinct values** (`400, 420, 520, 600, 620, 640, 700, 720, 760,
-      768, 800, 900, 960, 1100px` and `52rem`), zero container queries, zero shared tokens.
+      issue's own premise that there are "zero width breakpoints". *Re-measured 2026-10-07:*
+      **37 width-based `@media` queries across 17 distinct values** (`400, 420, 520, 600,
+      620, 640, 700, 720, 760, 768, 800, 900, 960, 1100px` and `52rem, 60rem, 72rem`), and
+      zero shared tokens. Container queries now exist, on the help centre only
+      (`@container help-main` in `routes/help/` and `help/diagrams/Diagram.svelte`).
       **Product call first:** what viewport floor do we support, and what are the two or
       three named steps? Then: declare them once (CSS custom properties cannot be used in
       `@media`, so this is documented literals plus a stylesheet guard rejecting unlisted
       values — the `targetSizeAudit.test.ts` shape — or a preprocessor), migrate 30 call
-      sites, and decide sidebar behaviour below the floor and whether `/exceptions`' 11
+      sites (37 now), and decide sidebar behaviour below the floor and whether `/exceptions`' 11
       columns drop or keep scrolling.
       Worth weighing: five of round 26's seven reflow fixes needed **no breakpoint at all**
       — `flex-wrap`, `min-width: 0`, a flex basis, an intrinsic scroller. Tokens are for
@@ -731,11 +752,11 @@ or is a sibling of a fix that needs its own pass.
 
 ### Surfaced by panelising the settings pages (2026-09-22, decisions §205)
 
-- [ ] **(c) `/organization` is still one 3,400-line file, now with fifteen
-      `{#if}` blocks in it.** The section rail fixed the *navigation* problem
+- [ ] **(c) `/organization` is still one file, and it is growing — 4,186
+      lines and 145 `$state` declarations (re-measured 2026-10-07; this entry
+      opened at 3,400 / 119).** The section rail fixed the *navigation* problem
       (`docs/decisions.md` §205) without touching the *organisation* one: the
-      panels are conditionals around markup that still shares one `<script>`
-      with 119 `$state` declarations, so guard rail 10 is no better served than
+      panels are conditionals around markup that still shares one `<script>`, so guard rail 10 is no better served than
       before. Extracting them was deliberately not bundled into the navigation
       change, because the two have very different risk: the wrapping is
       mechanical and reviewable with `git diff -w`, while the extraction has to
@@ -749,7 +770,7 @@ or is a sibling of a fix that needs its own pass.
       comment explains that it is the *whole* read-only mode, so a panel outside
       it is silently editable — and field state has to stay above the panel
       boundary, or an unsaved edit stops surviving a panel switch.
-      `tests-e2e/organization/section-nav.spec.ts` asserts the second one, so
+      `frontend/tests-e2e/organization/section-nav.spec.ts` asserts the second one, so
       the refactor has a guard already waiting for it.
       **Trigger:** the next change that touches more than one panel of
       `frontend/src/routes/organization/+page.svelte`.
@@ -795,8 +816,9 @@ or is a sibling of a fix that needs its own pass.
 ### Surfaced by the expense-management bug hunt (2026-10-05, round 2)
 
 - [ ] **(c) An approved pre-approval is never consumed, so one estimate covers
-      unlimited spend.** `_approved_preapproval_amount` returns the largest
-      approved estimate that matches the line, and the engine compares it to
+      unlimited spend.** `_approved_preapproval_amount` (`api/expenses.py`)
+      returns the largest approved estimate that matches the line, and the
+      policy engine (`services/expense_policy.py`) compares it to
       each line *individually* (`covered >= amount`). Now that cover is scoped to
       the requester (`backend/docs/expense-management.md` § Pre-approval cover is
       the requester's own) a colleague's request can no longer be borrowed, but
@@ -881,27 +903,6 @@ or is a sibling of a fix that needs its own pass.
       enough rows for the scan to show on login latency, or the first
       case-variant pair reported in any environment — whichever is first.
 
-### Surfaced by the recurring + discounting bug hunt (2026-10-05, PR #503)
-
-- [ ] **(c) A payment void reverses a captured discount only by elimination.**
-      `DiscountOffer` records no payment id, so
-      `discount_capture.reverse_captures_for_voided_payment` un-captures an
-      invoice's `captured` offer on a void only when the voided payment was
-      `completed` **and** no other `completed` payment remains on the invoice.
-      With two completed payments on one invoice (one matched the discounted
-      payoff, one did not) and the capturing one voided, the offer stays
-      `captured` and the discounting dashboard keeps reporting the savings —
-      deliberately, because guessing which payment realized it could un-realize
-      savings that really happened. Single-payment invoices, the normal case,
-      are fully covered.
-      **Durable fix:** a tenant migration adding a nullable
-      `discount_offers.captured_by_payment_id` FK, stamped by `mark_captured`
-      from `_capture_discount_offers`, and the void reversing exactly the offers
-      whose column names the voided payment (legacy NULL rows keep the
-      elimination rule).
-      **Trigger:** any path that lets one invoice carry more than one
-      `completed` payment at once (partial payments / split settlement), or the
-      next schema change to `discount_offers`.
 ### Surfaced by the report-builder currency pass (2026-10-05, decisions §228)
 
 - [ ] **(c) The cash forecast leaves out every committed invoice that is already past due.**
@@ -1368,8 +1369,11 @@ as oversights.
 - [ ] **SOC 2** — vendor selection (Vanta / Drata / Secureframe / Sprinto),
       policy library, onboarding/offboarding checklist with evidence collection,
       incident-response runbook + on-call rotation, Type I audit, then the Type II
-      observation window. **All engineering prereqs are complete**; this is
-      process work behind a founder decision and a vendor contract.
+      observation window. This is mostly process work behind a founder
+      decision and a vendor contract, but **not all engineering prereqs are
+      complete** (*corrected 2026-10-07*): `soc2-readiness.md` still lists
+      moving the existing S3 buckets onto Object Lock as pending code work,
+      and 5xx/RBAC-denial alerting and uptime monitoring as pending.
       Ref: [soc2-readiness.md](soc2-readiness.md).
 - [ ] **Live government e-invoice clearance** — SdI (IT), SAT-PAC (MX), SEFAZ
       (BR), DIAN (CO). The generators and national validation ship as pure
