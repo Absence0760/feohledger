@@ -18,6 +18,7 @@ from app.api.deps import (
     ROLE_AP_CLERK,
     ROLE_AP_MANAGER,
     ROLE_CFO,
+    ensure_live_erp_entitled,
     get_org_id,
     require_permission,
     require_roles,
@@ -35,6 +36,7 @@ from app.api.permissions import (
     PERM_VENDOR_MANAGE,
 )
 from app.api.sorting import SortParams, resolve_order_by, sort_params
+from app.database import get_control_db
 from app.models.contract import Contract
 from app.models.credit_memo import CreditMemo
 from app.models.discount import DiscountOffer
@@ -1526,6 +1528,7 @@ async def sync_vendors_from_erp_endpoint(
     user: User = Depends(require_permission(PERM_VENDOR_MANAGE)),
     org_id: uuid.UUID = Depends(get_org_id),
     entity_id: uuid.UUID = Depends(get_write_entity_id),
+    control_db: AsyncSession = Depends(get_control_db),
 ):
     """Pull vendors from the connected ERP and sync to local database."""
     erp_config = (org.settings or {}).get("erp")
@@ -1534,6 +1537,8 @@ async def sync_vendors_from_erp_endpoint(
             status_code=400,
             detail="No ERP configured. Set up ERP integration in Organization Settings.",
         )
+    # A sync reaches the live ERP — a Growth feature; `mock` stays open (§258).
+    await ensure_live_erp_entitled(control_db, org.id, erp_config)
 
     # Use ERP adapter to fetch vendors
     import app.services.erp_adapters.dynamics_365_bc  # noqa: F401

@@ -1,8 +1,8 @@
 name: Dependabot auto-merge
 
 # Automatically squash-merges minor + patch Dependabot PRs once CI is
-# green. Saves review burden — `.github/dependabot.yml` configures six
-# ecosystems (github-actions, pip, npm, docker, docker-compose,
+# green. Saves review burden — `.github/dependabot.yml` configures seven
+# ecosystems (github-actions, pip, npm, pub, docker, docker-compose,
 # terraform), each opening 3–5 PRs / week, so without this most of the
 # human review time goes to bumping a patch version of an action or a
 # transitive lodash dep.

@@ -213,7 +213,7 @@ These are areas where we are genuinely ahead of most or all competitors:
 
 10. **AI vendor auto-creation with fuzzy matching** — Vendors are automatically created from invoice extraction with confidence scoring and fuzzy name matching. Most competitors require manual vendor setup before invoice processing.
 
-11. **Production-grade security infrastructure out of the box** — SOPS + AWS KMS for secrets encryption (committed encrypted to git), Dependabot for supply-chain monitoring, hCaptcha on anonymous endpoints, Redis-backed sliding-window rate limiting, JWT with blocklist on logout. Competitors often treat these as enterprise-tier features.
+11. **Production-grade security infrastructure out of the box** — SOPS + AWS KMS for secrets encryption (kept in a private secrets repo, never in this public one), Dependabot for supply-chain monitoring, hCaptcha on anonymous endpoints, Redis-backed sliding-window rate limiting, JWT with blocklist on logout. Competitors often treat these as enterprise-tier features.
 
 ---
 
@@ -283,7 +283,7 @@ These were open gaps in a prior revision of this doc and have since shipped — 
 
 **Where we win:** Multi-provider AI extraction with BYOK, two-layer correction learning, semantic duplicate detection, database-per-tenant isolation, virtual card multi-provider approach, pluggable adapter architecture, self-service signup, modern native mobile app.
 
-**Where they win:** Breadth of international payments (196 countries / 120 currencies vs our core corridors), mature supplier onboarding, Slack approval, SOC 2 attestation. *(International payments, tax compliance, sanctions screening, supplier portal, and advanced approval routing are now at parity — Slack-based approval is the remaining routing gap.)*
+**Where they win:** Breadth of international payments (196 countries / 120 currencies vs our core corridors), mature supplier onboarding, SOC 2 attestation. *(International payments, tax compliance, sanctions screening, supplier portal, advanced approval routing, and Slack/Teams approval are now at parity.)*
 
 ---
 
@@ -307,7 +307,7 @@ These were open gaps in a prior revision of this doc and have since shipped — 
 
 **Where we win:** Multi-provider AI (vs single proprietary), transparent priors UI (reviewer sees exactly which past invoices shaped extraction), semantic duplicate detection, database-per-tenant isolation, virtual card multi-provider, broader ERP coverage via Merge.dev, native mobile with offline + biometric.
 
-**Where they win:** Longer track record with correction-learning (Billy the Bot is mature), Slack approval integration, SOC 2. *(Supplier portal, invoice-collaboration threads (our embedded supplier chat), and approval routing are now at parity.)*
+**Where they win:** Longer track record with correction-learning (Billy the Bot is mature), SOC 2. *(Supplier portal, invoice-collaboration threads (our embedded supplier chat), approval routing, and Slack/Teams approval are now at parity.)*
 
 ---
 
@@ -319,7 +319,7 @@ These were open gaps in a prior revision of this doc and have since shipped — 
 
 **Where we win:** Broader ERP coverage, multi-provider AI extraction, database-per-tenant isolation, virtual card multi-provider.
 
-**Where they win:** Native corporate cards, Slack-native approvals, real-time spend controls, SOC 2. *(Expense management and procurement intake are now at parity.)*
+**Where they win:** Native corporate cards, real-time spend controls, SOC 2. *(Expense management, procurement intake, and Slack/Teams approval are now at parity.)*
 
 ---
 
@@ -353,7 +353,7 @@ These were open gaps in a prior revision of this doc and have since shipped — 
 **SMB-to-mid-market PLG segment (20-1,000 employees)** that wants:
 - AI-first invoice processing with transparent learning (not legacy OCR, not black-box "AI")
 - Strong ERP integration without enterprise pricing or sales cycles
-- Self-service onboarding — spin up a workspace in 30 seconds without talking to sales
+- Self-service onboarding — spin up a workspace in minutes without talking to sales
 - Virtual card rebates that offset or exceed platform cost
 - Tenant-isolated security (database-per-tenant) for compliance without enterprise-tier pricing
 - Native mobile with offline/biometric for approvers

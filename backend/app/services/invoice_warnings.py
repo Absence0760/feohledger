@@ -97,6 +97,9 @@ UPSTREAM_WARNING_TYPES = frozenset(
         "extraction_self_correction",
         "gl_account_invalid",
         "duplicate_similar",
+        # `run_extraction`'s AI-reading pause (decisions §253): written before
+        # the manual-entry fallback, and nothing here could re-derive it.
+        "ai_reading_paused",
     }
 )
 
@@ -1543,18 +1546,16 @@ async def _llm_anomaly_check(
     exception machinery; the actual prompt + LLM I/O is in
     `services.llm_fraud_detection`.
     """
-    from app.config import settings as app_settings
     from app.services.llm_fraud_detection import (
         HISTORY_SIZE,
         detect_anomaly,
         invoice_to_candidate,
         invoice_to_history,
+        resolve_anomaly_llm_config,
     )
 
-    # API key resolution: org BYOK overrides the platform default.
-    api_key = ((org_settings or {}).get("extraction") or {}).get(
-        "api_key"
-    ) or app_settings.anthropic_api_key
+    # Platform key, or a BYOK org's own key only when it IS an Anthropic key.
+    api_key, model = resolve_anomaly_llm_config(org_settings)
     if not api_key:
         return
 
@@ -1587,7 +1588,7 @@ async def _llm_anomaly_check(
     history = [invoice_to_history(h) for h in history_invoices]
     candidate.vendor_name = invoice.vendor_name or vendor.name or "Unknown vendor"
 
-    result = await detect_anomaly(candidate, history, api_key=api_key)
+    result = await detect_anomaly(candidate, history, api_key=api_key, model=model)
     if result.is_anomaly and result.reason:
         flag = warning("llm_anomaly", "warning", reason=result.reason)
         warnings.append(flag)

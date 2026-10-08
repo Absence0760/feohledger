@@ -32,6 +32,12 @@
 		type SsoSettingsStatus
 	} from '#lib/types/ssoSettings.ts';
 	import { formatList } from '#lib/utils/list.ts';
+	import PlanUpgradeNotice from '#lib/components/ui/PlanUpgradeNotice.svelte';
+	import {
+		FEATURE_ERP_INTEGRATIONS,
+		FEATURE_SSO,
+		FEATURE_SSO_ENFORCEMENT
+	} from '#lib/types/planFeatures.ts';
 	import {
 		NACHA_FIELD_LABEL_KEYS,
 		nachaForSave,
@@ -275,6 +281,14 @@
 	// briefly disabled under them.
 	const userLoaded = $derived(auth.user !== null);
 	const readOnly = $derived(userLoaded && !auth.isAdmin);
+	// Plan gates (decisions §253/§258). The server refuses each with a 402
+	// (`plan_feature_required`) whatever this page shows; these only swap a
+	// control that would be refused for the upgrade prompt. What a save would
+	// turn OFF is never gated, so a downgraded tenant can still switch SSO or
+	// "require SSO" off.
+	const ssoEntitled = $derived(auth.hasFeature(FEATURE_SSO));
+	const ssoEnforcementEntitled = $derived(auth.hasFeature(FEATURE_SSO_ENFORCEMENT));
+	const erpEntitled = $derived(auth.hasFeature(FEATURE_ERP_INTEGRATIONS));
 
 	// ── Section navigation ────────────────────────────────────────────────
 	// Fifteen panels' worth of unrelated concerns — company identity, DNS, chat
@@ -2425,6 +2439,10 @@
 							<p class="card-hint" data-testid="erp-admin-only">
 								{m('org.readOnly.sectionAdminOnly')}
 							</p>
+						{:else if userLoaded && !erpEntitled}
+							<!-- Every adapter this form offers is a live ERP; the
+							     local-first `mock` ERP needs no configuration. -->
+							<PlanUpgradeNotice feature={FEATURE_ERP_INTEGRATIONS} testId="erp-plan-upgrade" />
 						{:else}
 							<div class="form-grid">
 								<label>
@@ -2880,9 +2898,19 @@
 								</p>
 							{/if}
 
+							{#if !ssoEntitled}
+								<PlanUpgradeNotice feature={FEATURE_SSO} testId="sso-plan-upgrade" />
+							{/if}
+
 							<div class="form-grid">
 								<label class="switch-row full-width">
-									<input type="checkbox" bind:checked={ssoEnabled} />
+									<!-- Off is always allowed; ON needs the plan. -->
+									<input
+										type="checkbox"
+										bind:checked={ssoEnabled}
+										disabled={!ssoEntitled && !ssoEnabled}
+										data-testid="sso-enabled-toggle"
+									/>
 									<span>{m('orgSso.enabled')}</span>
 								</label>
 								<label>
@@ -3032,12 +3060,19 @@
 									<input
 										type="checkbox"
 										bind:checked={ssoOnly}
+										disabled={!ssoEnforcementEntitled && !ssoOnly}
 										aria-describedby="sso-only-hint"
 										data-testid="sso-only-toggle"
 									/>
 									<span>{m('orgSso.ssoOnly')}</span>
 								</label>
 								<p class="field-hint" id="sso-only-hint">{m('orgSso.ssoOnlyHint')}</p>
+								{#if ssoEntitled && !ssoEnforcementEntitled}
+									<PlanUpgradeNotice
+										feature={FEATURE_SSO_ENFORCEMENT}
+										testId="sso-only-plan-upgrade"
+									/>
+								{/if}
 							</div>
 
 							{#if ssoSaveError}

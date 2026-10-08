@@ -104,7 +104,7 @@ Things an auditor expects to see *in code or config*, not just in a policy doc. 
 
 | Control | Status | Where it lives |
 |---|---|---|
-| Dependabot for Python, npm, Docker, GitHub Actions | Done | `.github/dependabot.yml` |
+| Dependabot for Python, npm, Dart/Flutter (pub), Docker, GitHub Actions, Terraform | Done | `.github/dependabot.yml` |
 | SAST in CI | Done | `.github/workflows/security.yml` (CodeQL — Python + JS) |
 | Container image scanning | Done | `.github/workflows/security.yml` (Trivy on backend Dockerfile) |
 | Secret scanning in repo | Done | GitHub native (free for public + paid tiers) |

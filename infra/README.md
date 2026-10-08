@@ -1,6 +1,6 @@
 # infra/
 
-Infrastructure-as-code for the FeohLedger AWS account. Scoped today to the **security substrate** needed as a SOC 2 engineering prerequisite (see `../docs/soc2-readiness.md`), plus the account-level pieces the workload stack will lean on: the platform domain's registration settings and TLS certificate, its mail DNS (Migadu mailboxes and the SES sending identity), and a monthly cost budget. Real AWS workload resources (ECS, ALB, RDS, CloudFront) are not yet defined here; they live on the roadmap under `docs/production-deployment.md`.
+Infrastructure-as-code for the FeohLedger AWS account: the **security substrate** needed as a SOC 2 engineering prerequisite (see `../docs/soc2-readiness.md`); the platform domain's registration settings and TLS certificate, its mail DNS (Migadu mailboxes and the SES sending identity) and a monthly cost budget; and the **workload stack** the app runs on — one VM plus an RDS database (`../docs/minimal-deployment.md`, `../docs/decisions.md` §254). The scale-up architecture (ECS, ALB, CloudFront) is `../docs/production-deployment.md` and is not built.
 
 ## Layout
 
@@ -17,6 +17,10 @@ infra/
 ├── domain.tf                    # registration settings for the platform domain (renewal, lock, WHOIS privacy, name servers)
 ├── email.tf                     # mail DNS: Migadu mailboxes on the apex, SES identity + DKIM + MAIL FROM on send., DMARC
 ├── budgets.tf                   # account-wide monthly cost budget + email alerts
+├── network.tf                   # workload VPC: 2 public subnets (VM), 2 private (RDS), no NAT, REJECT flow logs
+├── compute.tf                   # app VM (EC2 Graviton, Session Manager, IMDSv2) + instance role + Elastic IP + apex/api/* DNS
+├── database.tf                  # RDS Postgres 16: private, encrypted, TLS-only, point-in-time restore, write-only password
+├── monitoring.tf                # SNS alerts topic + VM recovery/reboot and DB CPU/memory/storage alarms
 ├── outputs.tf                   # exports for downstream modules
 ├── backend.config.example       # state-bucket shape for `terraform init` (real one gitignored)
 ├── terraform.tfvars.example     # committed template
@@ -128,7 +132,7 @@ The VM sends with its instance profile, so grant it `ses:SendEmail` on the `ses_
 
 ## Cost guardrail
 
-`budgets.tf` puts an account-wide monthly budget on the FeohLedger account — `monthly_budget_limit_usd`, default **25 USD**, sized for a pre-launch account whose real spend is a few dollars — with email alerts at 50 % and 100 % of actual spend and at 100 % of forecast. The forecast alert is the early warning; the actual ones only fire after spend lands on the bill.
+`budgets.tf` puts an account-wide monthly budget on the FeohLedger account — `monthly_budget_limit_usd`, default **75 USD**, sized for the single-VM + RDS workload stack's ~$45–55/month — with email alerts at 50 % and 100 % of actual spend and at 100 % of forecast. The forecast alert is the early warning; the actual ones only fire after spend lands on the bill.
 
 `budget_alert_emails` has **no default** and must be set in the operator's tfvars: this repo is public, so the address lives only in the private `infra-secrets` copy (see § Applying). Plan rejects an empty list and the `example.com` placeholder.
 
@@ -168,20 +172,46 @@ AWS_PROFILE=feohledger terraform apply tfplan
 
 The filled tfvars is operator config rather than a secret — bucket names, the budget alert address — but it is not public either, so its canonical copy lives in the private `infra-secrets` repo as `feohledger/prod.tfvars` (plaintext, beside the encrypted secrets) — the estate convention for non-secret env config. Start it from `terraform.tfvars.example`. The path above assumes `infra-secrets` is cloned beside this repo under `~/github/`.
 
+## Workload stack
+
+`network.tf`, `compute.tf`, `database.tf` and `monitoring.tf` are the infrastructure the app runs on: one EC2 VM running the Docker Compose stack in `../deploy/` (Caddy, the API, Redis), and the database on RDS. Why that shape rather than the full ECS build-out, and why RDS rather than Postgres on the VM: `../docs/decisions.md` §254. Roughly **$45–55/month**:
+
+| Resource | Monthly (us-east-1) |
+|---|---|
+| EC2 `t4g.medium` + 30 GB gp3 + public IPv4 | ~$31 |
+| RDS `db.t4g.micro` + 20 GB gp3 + backups inside the free allowance | ~$15 |
+
+Both instances are burstable and run in *unlimited* credit mode (the AWS default): under sustained load they are not throttled, they bill surplus CPU on top of these figures. The `*-cpu-credits-low` alarms are the cue to move up a size instead.
+| KMS, Route 53, S3, flow logs (REJECT only), alarms | a few dollars |
+
+**What it sets up**
+
+- **No SSH.** Port 22 is closed and there is no key pair; you reach the VM with Session Manager: `aws ssm start-session --target <app_instance_id> --profile feohledger` (needs the Session Manager plugin for the AWS CLI installed locally).
+- **The VM holds no AWS keys.** Its instance role can decrypt the sops secrets, read and write the three data buckets under the app key, and send mail as the platform domain — nothing else.
+- **The database is private.** Private subnets with no internet route, reachable only from the VM's security group, encrypted with the app key, TLS forced (`rds.force_ssl`), deletion-protected, and restorable to any point in the last `db_backup_retention_days` (default 7). The nightly logical dumps (`../deploy/backup.sh`) keep 90 days beyond that.
+- **DNS.** The apex, `api.` and `*.` (every tenant) point at the VM's Elastic IP.
+- **Alarms** go to `alert_emails` through SNS — each address must click AWS's confirmation link once. The VM recovers itself onto new hardware on a host failure and reboots on a guest failure.
+
+**The database password never enters Terraform state.** `db_master_password` is an *ephemeral* variable feeding RDS's *write-only* `password_wo`, so it is sent to AWS and stored nowhere else — not in state, not in a plan file. That is why this module does not read it through a `sops_file` data source (§ Secrets): a data source's value is written to state in plaintext. The operator supplies it at apply time from the private `infra-secrets` repo, as an environment variable on the one command.
+
+**First apply — operator steps.** Steps 2–3 touch a secret, so they are yours to run; nothing here prints it.
+
+1. Add `alert_emails = ["…"]` to `prod.tfvars` (it has no default — the repo is public).
+2. Create the password once in `infra-secrets` (a 48-hex-character value is URL-safe, which it must be because it is embedded in `FEOH_DATABASE_URL`): `cd ~/github/infra-secrets && AWS_PROFILE=feohledger sops feohledger/terraform.sops.yaml`, and add a `db_master_password:` key set to the output of `openssl rand -hex 24`.
+3. Plan and apply with the password passed in from sops (one line each):
+   `cd ~/github/feohledger/infra && AWS_PROFILE=feohledger TF_VAR_db_master_password="$(sops -d --extract '["db_master_password"]' ../../infra-secrets/feohledger/terraform.sops.yaml)" terraform plan -var-file=../../infra-secrets/feohledger/prod.tfvars -out=tfplan`
+   then `AWS_PROFILE=feohledger TF_VAR_db_master_password="$(sops -d --extract '["db_master_password"]' ../../infra-secrets/feohledger/terraform.sops.yaml)" terraform apply tfplan`.
+   An ephemeral variable must be supplied again at apply time even from a saved plan — that is the reason it appears twice.
+4. Confirm the SNS subscription email AWS sends to each alert address.
+5. Then the VM side: `../deploy/README.md` (bootstrap, the sops env with `FEOH_DATABASE_URL` pointing at the `db_address` output, first deploy).
+
+**Rotating the database password**: put the new value in `terraform.sops.yaml`, bump `db_master_password_version` in `prod.tfvars`, apply as in step 3, then update the password inside `FEOH_DATABASE_URL` in `prod.sops.yaml` and redeploy. Between the apply and the redeploy the app cannot connect, so do both in one sitting.
+
 ## Secrets
 
 This repo is **public**, so it holds no secret — not even an encrypted one (`../docs/decisions.md` §12, §165). The project's secrets live sops-encrypted in the private `Absence0760/infra-secrets` repo under `feohledger/`, keyed by `alias/feohledger-sops`. The estate account bootstrap (`~/github/templates/scripts/new-project-account.sh`) created that key in the FeohLedger account, alongside the state bucket and the deploy role; this module neither creates nor manages it.
 
-Nothing this module reads is secret today — every variable is operator config, not a credential. When the first real secret lands (the RDS master password, with the workload stack), read it in place with the `carlpett/sops` provider, never through a committed or decrypted tfvars:
-
-```hcl
-data "sops_file" "secrets" {
-  source_file = "${path.module}/../../infra-secrets/feohledger/prod.sops.yaml"
-}
-# ... = data.sops_file.secrets.data["rds_master_password"]
-```
-
-The path assumes `infra-secrets` is cloned beside this repo under `~/github/`. It is deliberately not wired yet: `prod.sops.yaml` is created with the first real secret, and a `sops_file` data source on a missing file fails every plan. Access is IAM — an operator needs `kms:Decrypt` on the key plus read access to the private repo; nothing in this repo changes. Rotation: `../docs/secrets-rotation.md`.
+The one secret this module handles is the RDS master password, and it handles it without storing it: an ephemeral variable feeding a write-only attribute, supplied from `infra-secrets/feohledger/terraform.sops.yaml` at apply time (§ Workload stack). The earlier plan here — a `carlpett/sops` `sops_file` data source — was dropped because a data source's value lands in state in plaintext; the write-only path keeps it out of state and plan files entirely. Every other variable is operator config, not a credential. Access is IAM — an operator needs `kms:Decrypt` on the key plus read access to the private repo; nothing in this repo changes. Rotation: `../docs/secrets-rotation.md`.
 
 ## Tearing everything down
 

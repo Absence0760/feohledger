@@ -17,6 +17,8 @@ import uuid
 from collections import Counter
 from decimal import Decimal
 
+import pytest
+
 from app.services.workflow_experiments import (
     VARIANT_A,
     VARIANT_B,
@@ -685,6 +687,8 @@ async def test_concurrent_assignment_does_not_lose_an_entry(realdb):
         assert str(inv_b_id) in exp.assignments, "invoice B's assignment was lost"
 
 
+# Creates a second entity: multi-entity is plan-gated (docs/decisions.md §258).
+@pytest.mark.plan("scale")
 async def test_list_experiments_scopes_by_entity(realdb):
     mk = realdb.sessionmaker("a")
     org_id = realdb.info("a").org_id

@@ -240,6 +240,10 @@ async def test_dispatch_run_local_logs_class_name_not_raw_message(caplog):
         async def rollback(self):
             return None
 
+        async def close(self):
+            # `_run_local` hands its control connection back before extracting.
+            return None
+
     fake_engine = MagicMock()
     fake_engine.dispose = AsyncMock()
 

@@ -38,6 +38,7 @@ discipline as `test_custom_domains_admin.py` / `test_branding_tenant_url_templat
 
 from __future__ import annotations
 
+import uuid
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from urllib.parse import urlparse
@@ -51,6 +52,11 @@ from app.api import auth_saml, auth_sso
 from app.config import settings as app_settings
 from app.models.organization import Organization
 from app.services import sso as sso_module
+
+# Plan-gated surface (docs/decisions.md §253/§258): realdb tests run with the
+# harness orgs on a plan granting it; DB-free tests answer the plan lookup via
+# the `all_plan_features` fixture.
+pytestmark = pytest.mark.plan("scale")
 
 VANITY_HOST = "sso.acmecorp.test"
 OTHER_HOST = "sso.othercorp.test"
@@ -223,7 +229,7 @@ async def test_unresolvable_host_returns_none(monkeypatch):
 
 
 def _org(slug: str = "acme", *, sso: dict | None = None):
-    return SimpleNamespace(slug=slug, settings={"sso": sso} if sso else {})
+    return SimpleNamespace(id=uuid.uuid4(), slug=slug, settings={"sso": sso} if sso else {})
 
 
 _OIDC = {
@@ -254,6 +260,13 @@ def _patch_oidc(monkeypatch, org, resolved: str | None):
     monkeypatch.setattr(auth_sso, "_fetch_org_by_slug", _fetch)
     monkeypatch.setattr(auth_sso, "fetch_discovery", _discovery)
     monkeypatch.setattr(auth_sso, "create_state", _state)
+
+    # No database here, so the plan lookup sign-in now does (decisions §258)
+    # cannot run: stand in for a Scale tenant, which grants every SSO feature.
+    async def _scale_plan(db, org):
+        return org.settings if org is not None else None
+
+    monkeypatch.setattr(auth_sso, "sign_in_settings", _scale_plan)
 
 
 @pytest.mark.asyncio

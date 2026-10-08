@@ -406,7 +406,15 @@ def test_only_the_builder_module_builds_a_tenant_url():
     """
     offenders: list[str] = []
 
-    for path in sorted(APP_DIR.rglob("*.py")):
+    # `alembic/` and `scripts/` too: alembic's env.py carried its own copy for
+    # FEOH_MIGRATE_TENANT, outside the app-only scan, and that copy dropped the
+    # control URL's query string (a TLS option) on every tenant migration.
+    scanned = [
+        *APP_DIR.rglob("*.py"),
+        *(BACKEND_DIR / "alembic").glob("*.py"),
+        *(BACKEND_DIR / "scripts").rglob("*.py"),
+    ]
+    for path in sorted(scanned):
         if path == URL_BUILDER_MODULE:
             continue
         source = path.read_text()

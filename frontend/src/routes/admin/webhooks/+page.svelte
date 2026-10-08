@@ -5,6 +5,8 @@
 	import { formatDate } from '#lib/utils/time.ts';
 	import { auth } from '#lib/stores/auth.svelte.ts';
 	import PageHeader from '#lib/components/ui/PageHeader.svelte';
+	import PlanUpgradeNotice from '#lib/components/ui/PlanUpgradeNotice.svelte';
+	import { FEATURE_PUBLIC_API } from '#lib/types/planFeatures.ts';
 	import DataTable from '#lib/components/ui/DataTable.svelte';
 	import Modal from '#lib/components/ui/Modal.svelte';
 	import SecretReveal from '#lib/components/ui/SecretReveal.svelte';
@@ -48,6 +50,12 @@
 	$effect(() => {
 		if (userLoaded && !allowed) goto('/');
 	});
+
+	// Plan gate (decisions §258): the server refuses this with a 402 when the
+	// plan lacks it, so the page shows the upgrade prompt instead of the
+	// create control (the notice waits for `auth.user`, so nothing flashes
+	// before /me loads).
+	const canCreateWebhook = $derived(auth.hasFeature(FEATURE_PUBLIC_API));
 
 	// ── Subscriptions ────────────────────────────────────────────────────────
 	// $derived so the column headers re-render when the locale changes.
@@ -457,7 +465,9 @@
 
 <PageHeader title={m('admin.webhooks.title')}>
 	{#snippet actions()}
-		<button class="btn-primary" onclick={openCreate}>{m('admin.webhooks.createWebhook')}</button>
+		{#if canCreateWebhook}
+			<button class="btn-primary" onclick={openCreate}>{m('admin.webhooks.createWebhook')}</button>
+		{/if}
 	{/snippet}
 
 	<p class="page-hint">
@@ -465,6 +475,10 @@
 		<code>X-Webhook-Signature</code> {m('admin.webhooks.hintPost')}
 		<HelpTip term="webhook" />
 	</p>
+
+	{#if auth.user && !canCreateWebhook}
+		<PlanUpgradeNotice feature={FEATURE_PUBLIC_API} testId="webhooks-plan-upgrade" />
+	{/if}
 
 	<section aria-labelledby="subs-heading">
 		<h2 id="subs-heading" class="section-heading">{m('admin.webhooks.subscriptions')}</h2>

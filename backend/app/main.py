@@ -204,6 +204,7 @@ async def lifespan(app: FastAPI):
 
     from app.services.approval_escalation import run_escalation_loop
     from app.services.audit_log_shipper import run_shipper_loop
+    from app.services.billing.ai_overage import run_ai_overage_reconcile_loop
     from app.services.billing.dunning_sweep import run_dunning_loop
     from app.services.cash_flow_alerts import run_shortfall_alerts_loop
     from app.services.contract_renewal import run_renewal_loop
@@ -245,6 +246,7 @@ async def lifespan(app: FastAPI):
     dunning_task: asyncio.Task | None = None
     scheduled_reports_task: asyncio.Task | None = None
     shortfall_alerts_task: asyncio.Task | None = None
+    ai_overage_task: asyncio.Task | None = None
     if settings.extraction_reaper_enabled:
         reaper_task = start_sweep(run_reaper_loop(), name="extraction-reaper")
     # Centralized audit-log shipper (SOC 2). Disabled by default so local
@@ -308,6 +310,12 @@ async def lifespan(app: FastAPI):
         shortfall_alerts_task = start_sweep(
             run_shortfall_alerts_loop(), name="cashflow-shortfall-alerts"
         )
+    # AI-read-invoice overage reconciliation (decisions §253). Disabled by
+    # default; flip FEOH_BILLING_AI_OVERAGE_SWEEP_ENABLED on in deployed envs
+    # with a live billing provider. Reports missed overage usage + re-checks the
+    # usage notices — never charges anything itself (see billing/ai_overage).
+    if settings.billing_ai_overage_sweep_enabled:
+        ai_overage_task = start_sweep(run_ai_overage_reconcile_loop(), name="billing-ai-overage")
 
     try:
         yield
@@ -327,6 +335,7 @@ async def lifespan(app: FastAPI):
             dunning_task,
             scheduled_reports_task,
             shortfall_alerts_task,
+            ai_overage_task,
         ):
             if task is not None:
                 task.cancel()

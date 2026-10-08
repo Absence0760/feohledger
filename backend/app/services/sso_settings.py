@@ -42,6 +42,7 @@ from app.services.sso import (
     saml_acs_url,
     saml_sp_entity_id,
 )
+from app.services.sso_plan import plan_scoped_settings
 
 CLIENT_SECRET_KEY = "client_secret"
 SCIM_BEARER_HASH_KEY = "scim_bearer_hash"
@@ -264,7 +265,12 @@ def idp_config_missing(org_settings: Mapping[str, Any] | None) -> list[str]:
     return []
 
 
-def sso_status(org_settings: Mapping[str, Any] | None, *, tenant_slug: str) -> dict:
+def sso_status(
+    org_settings: Mapping[str, Any] | None,
+    *,
+    tenant_slug: str,
+    entitlements: Mapping[str, Any],
+) -> dict:
     """The secret-free view of the block, for the admin panel.
 
     The client secret is reported as ``client_secret_configured`` only, and the
@@ -306,7 +312,9 @@ def sso_status(org_settings: Mapping[str, Any] | None, *, tenant_slug: str) -> d
         if isinstance(role_map, Mapping)
         else {},
         "scim_token_configured": bool(block.get(SCIM_BEARER_HASH_KEY)),
-        "password_sign_in_closed": is_sso_only(org_settings),
+        # Through the plan, like every sign-in reader (decisions §258): a
+        # stored `sso_only` the plan does not honour closes nothing.
+        "password_sign_in_closed": is_sso_only(plan_scoped_settings(org_settings, entitlements)),
         "idp_config_missing": idp_config_missing(org_settings),
         "oidc_redirect_uri": redirect_uri(tenant_slug, org_settings),
         "saml_acs_url": saml_acs_url(),

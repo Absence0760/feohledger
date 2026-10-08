@@ -26,9 +26,27 @@
 # listed here keeps its safe default (mock adapters, local dispatch modes,
 # background sweeps off).
 
-# ── Deploy-level (consumed by compose interpolation + deploy.sh + backup.sh) ──
-# URL-safe by construction: openssl rand -hex 24 (it is embedded in the DSN).
+# ── Database — pick ONE of the two blocks (docs/minimal-deployment.md § Database) ──
+# Setting FEOH_DATABASE_URL is what selects the RDS path; deploy/lib.sh reads it
+# for every script, and decrypt-env.sh checks whichever block you chose.
+#
+# (a) RDS — the documented path. The URL: the master user, its password
+#     (URL-safe: openssl rand -hex 24, or percent-encode anything else), the
+#     endpoint host name EXACTLY as RDS reports it (verify-full checks the
+#     certificate against it — no IP, no CNAME of your own), the initial
+#     database `feohledger`, and NO query string (TLS is PGSSLMODE's job, which
+#     the app and the backup tools both read). PGSSLMODE must be verify-full
+#     (require / verify-ca warn; anything weaker is refused).
+FEOH_DATABASE_URL: "postgresql+asyncpg://postgres:<password>@<instance>.<id>.<region>.rds.amazonaws.com:5432/feohledger"
+PGSSLMODE: "verify-full"
 POSTGRES_PASSWORD: ""
+#
+# (b) Postgres in a container on the VM — the cheaper alternative. Delete the
+#     two keys above and set this one instead (URL-safe by construction —
+#     compose embeds it in the URL it derives):
+# POSTGRES_PASSWORD: ""
+
+# ── Deploy-level (consumed by compose interpolation + deploy.sh + backup.sh) ──
 # Bare SPA host, API host, and the ACME registration email.
 APP_DOMAIN: "feohledger.com"
 API_DOMAIN: "api.feohledger.com"
@@ -46,10 +64,9 @@ BACKUP_S3_BUCKET: ""
 FEOH_ENVIRONMENT: "production"
 # openssl rand -hex 32
 FEOH_SECRET_KEY: ""
-# FEOH_DATABASE_URL / FEOH_REDIS_URL default to the local containers (derived in
-# compose.prod.yml). Setting either here overrides the default — this is the
-# entire migration path to RDS / ElastiCache later, no compose edit needed.
-# FEOH_DATABASE_URL: "postgresql+asyncpg://user:pass@your-rds-host:5432/feohledger"
+# FEOH_REDIS_URL defaults to the local Redis container (derived in
+# compose.prod.yml). Setting it overrides the default — the whole move to
+# ElastiCache later, no compose edit needed. (FEOH_DATABASE_URL: § Database above.)
 # FEOH_REDIS_URL: "redis://your-elasticache-host:6379"
 
 # ── S3 (real AWS — empty endpoint/keys = instance-profile credentials) ──
@@ -123,3 +140,13 @@ FEOH_APPROVAL_SIGNING_KEY: ""
 FEOH_SIGNUP_ENABLED: "false"
 # FEOH_HCAPTCHA_SECRET: ""
 # FEOH_HCAPTCHA_SITEKEY: ""
+
+# ── Platform billing (our own billing of each tenant) ──
+# The AI-read overage backstop: reports any overage unit the post-read leg
+# missed, and keeps a re-send after a lost marker write inside Stripe's 24 h
+# idempotency window (backend/docs/billing.md § Overage billing). Usage
+# reporting only, never a charge — and with the default `mock` provider it
+# bills nothing — so it stays on in every deployment.
+FEOH_BILLING_AI_OVERAGE_SWEEP_ENABLED: "true"
+# FEOH_BILLING_PROVIDER: "stripe_billing"
+# FEOH_BILLING_STRIPE_API_KEY: ""

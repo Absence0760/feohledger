@@ -669,11 +669,17 @@ async def test_public_api_is_plan_gated(realdb):
 
     org_id = realdb.info("a").org_id
     try:
-        # Mint a read key for tenant A.
+        # Mint a read key for tenant A. Minting is itself plan-gated
+        # (docs/decisions.md §258), so hold Scale just long enough to mint,
+        # then drop the subscription so the key is exercised plan-less.
+        await realdb.subscribe("a", "scale")
         async with realdb.client(key="a", role="admin") as c:
             mint = await c.post("/api/api-keys", json={"name": "billing-test"})
         assert mint.status_code == 201, mint.text
         api_key = mint.json()["key"]
+        async with realdb.control_sessionmaker()() as s:
+            await s.execute(delete(Subscription).where(Subscription.organization_id == org_id))
+            await s.commit()
 
         def _key_client():
             cc = realdb.client(key="a", role=None)

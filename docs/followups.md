@@ -39,7 +39,19 @@ and an audit that re-derived both found the copy stale at nearly every sync
 transcription was retired rather than corrected again. Add a follow-up here; add
 a GitHub issue only when one warrants its own thread.
 
-**Last reconciled:** 2026-10-06 — the no-rail pilot (issue #517, decisions §251)
+**Last reconciled:** 2026-10-07 — enforcing the plan feature gates (decisions
+§258) opened one (c) entry — the per-tenant audit-log SIEM export the Scale plan
+lists but nothing implements. Before that, 2026-10-07 — moving the database onto RDS (docs/minimal-deployment.md
+§ Database) opened two (c) entries — the published sub-processor register and
+DPA still placing the databases on the VM's disk, and the socket-form
+`pg_isready` left in dev and CI — taking the file from
+74 → 76. Before that, 2026-10-07 — the public pricing page now renders the plan
+catalogue it is generated from (`pnpm gen:pricing` / `check:pricing`, decisions
+§253, issue #426) and every remaining public figure has a derivation in
+[marketing-substantiation.md](marketing-substantiation.md), closing **two** (c)
+entries — the pricing page describing a different product than the billing
+code, and the missing substantiation file — taking the file from 76 → 74. Before
+that, 2026-10-06 — the no-rail pilot (issue #517, decisions §251)
 opened three (c) entries — mobile record-only parity, the balanced NACHA file and
 the ERP-reported payment date — taking the file from 72 → 75. Before that, 2026-10-06 — the round-2 issues batch (PR #514) closed
 **twelve** (c) entries and opened five, taking the file from 59 → 52: the unmasked
@@ -93,7 +105,7 @@ section carried its own `decisions.md` § reference, so nothing was lost by
 deleting it; that cross-reference is what makes the pruning safe, and writing
 one is what earns a future entry the right to be deleted.
 
-**76 open: 61 (c) · 9 (a) · 6 (b)** — re-derived from the file, never carried
+**82 open: 67 (c) · 9 (a) · 6 (b)** — re-derived from the file, never carried
 forward. The section heading is authoritative; where an entry also carries a
 `(c)`/`(a)`/`(b)` marker, the two agree.
 `grep -c '^- \[ \]' docs/followups.md`.
@@ -256,52 +268,29 @@ nobody re-reads outlives the thing it describes.
       change.
       **Trigger:** before adding or changing any sub-processor.
 
-### The pricing page and the billing code describe different products
+### Live Stripe billing has no subscription to invoice against
 
-- [ ] **Marketing prices do not match the plan catalogue.** ([#426](https://github.com/Absence0760/feohledger/issues/426))
-      `frontend/src/lib/components/marketing/Pricing.svelte` sells "Pro" at
-      $29/seat/month ($24 annual, 5-seat minimum) with a monthly/annual toggle.
-      `backend/app/services/billing/plan_catalog.py` has flat monthly plans —
-      `free` $0, `growth` $49, `scale` $199 — with no seat pricing and no annual
-      interval (`services/billing/period.py` is months-only). The free tier's
-      advertised "50 invoices/month, 2 seats" caps are not enforced anywhere
-      (`free` carries `entitlements: {}`).
-      The claims that were outright false were corrected in the legal-pages change
-      — a "SOC 2 attestation" and a "99.9% uptime SLA" that do not exist, a
-      `sales@feohledger.example` CTA on the reserved `.example` TLD, a
-      "Start 14-day trial" button that routes to the same signup as the free plan
-      (`tenant_provisioning._provision_into` binds every new org to `free`, and
-      there is no plan selection anywhere in signup), and two fabricated landing
-      statistics ("3.2s avg. extraction time", "97% field accuracy" — the latter
-      traceable to Basware's published *touchless processing rate* quoted in
-      `docs/competitive-analysis.md`, i.e. a competitor's number for a different
-      metric).
-      **What remains is the pricing model itself, which is a product decision.**
-      Two halves: the prices and interval above, and the fact that **no
-      plan-differentiation claim on that page is enforced anywhere in the
-      backend.** `require_entitlement` gates exactly one thing (`public_api`);
-      SSO, SAML and SCIM carry no entitlement check at all, so a Free tenant can
-      turn on the feature the page sells as Enterprise-only, and the advertised
-      "50 invoices / month" and seat counts are not enforced either (`free`
-      carries `entitlements: {}`). Selling a premium feature everyone already has
-      is the sharper half — a paying customer has a claim.
-      **Durable fix:** decide the real pricing, make one of the two sides match
-      (rendering the grid from `plan_catalog` would stop it drifting again), and
-      implement the entitlement checks the page implies — or describe only what
-      `Plan.entitlements` actually gates.
-      **Trigger:** before billing is switched off the `mock` adapter, or before
-      any real traffic reaches the pricing page — whichever is first.
-
-- [ ] **No substantiation file backs the remaining marketing numbers.** The two
-      invented statistics are gone and the rest are now countable from source
-      (7 payment rails, 9 workflow step types, 6 locales, the 1% default rebate
-      rate in `api/cards.py`), with a comment in `Landing.svelte` saying so. But
-      a specific numeric claim is an objectively verifiable factual claim, and
-      the durable habit is a file that records how each was derived, so a
-      challenge is answered from a record rather than a re-derivation.
-      **Durable fix:** a short substantiation note per public number, refreshed
-      whenever the underlying count moves — and a real extraction-accuracy
-      benchmark before any accuracy figure is published again.
+- [ ] **Nothing creates the customer's Stripe subscription, so live AI-read
+      overage has nowhere to be invoiced.** AI-read metering ships end to end
+      against the `mock` adapter (decisions §253, §255): the gate, the pause, the
+      cap, the notices, and overage meter events reported per unit with an
+      idempotent ordinal identifier. `provision_org_billing` also resolves the
+      `ai_invoice_overage` meter and each paid plan's per-unit metered price
+      (`settings.billing.ai_overage_price_ids`). But `StripeBillingAdapter
+      .create_subscription` — which adds that metered price as `items[1]` — has
+      no caller: plan changes repoint our `Subscription` row and never create or
+      amend one at Stripe. Stripe records meter events against the customer
+      either way, but invoices them only for a subscription carrying the
+      metered price, so today the overage would be reported and never billed.
+      **Durable fix:** on a move onto a paid plan, create (or amend) the Stripe
+      subscription with the base price + the metered overage price, billing
+      cycle anchored on the 1st (UTC), and persist
+      `Subscription.external_subscription_id`; a `customer.subscription.*`
+      webhook then keeps the status in sync. Until then an operator does this by
+      hand per paid customer in the Stripe dashboard.
+      **Trigger:** before `FEOH_BILLING_PROVIDER=stripe_billing` is set for any
+      org on a paid tier.
+      Ref: [billing.md](../backend/docs/billing.md) § What the operator configures in Stripe.
 
 ### One adapter family still ships code no caller reaches
 
@@ -1210,6 +1199,109 @@ lands. Pure doc drift was corrected in the same PR. The two diagnosed defects
       the batch to service class 200, with builder tests on the control totals.
       **Trigger:** a pilot customer's bank rejects or asks for a balanced file.
 
+### Surfaced by scoping the QuickBooks Online adapter (2026-10-07)
+
+- [ ] **(c) Build a direct QuickBooks Online adapter.** Merge.dev costs $65 per
+      linked account above a $650/month base (merge.dev/pricing, 2026-10-07),
+      more than the $49 Growth plan that includes ERP integrations, and QuickBooks
+      is the ERP most of the target segment runs. Intuit's API is free at these
+      volumes. **Durable fix:** the five phases in
+      `backend/docs/quickbooks-online-adapter.md`: shared ERP references in the
+      payload (also `known-issues.md`), an OAuth authorization-code connect flow
+      reusable for Xero, the adapter, CloudEvents webhooks plus a CDC
+      reconciliation sweep, and `post_payment` → BillPayment. Three product
+      calls in that doc's open questions come first. **Trigger:** the first pilot
+      customer on QuickBooks, or before Growth is sold with ERP integrations,
+      whichever comes first.
+- [ ] **(c) Merge-routed ERPs need a Scale-only `erp_merge` feature.**
+      Decided in `docs/decisions.md` §256: Growth's `erp_integrations` covers the
+      direct adapters, and Merge (`integration_method: merge_dev`) is Scale-only,
+      because Merge's $65 per connection exceeds Growth's $49. **Durable fix:**
+      add `FEATURE_ERP_MERGE` to `plan_catalog` (Scale), a migration rewriting
+      the catalog rows' `entitlements` (as `0107` did), a gate on saving a
+      `merge_dev` config and on the Merge push, and regenerate the pricing page
+      (`pnpm gen:pricing`). It extends `api/deps.ensure_live_erp_entitled`
+      (decisions §258), which already shares `resolve_adapter_key` with the
+      dispatcher, so the gate itself is one more check. **Trigger:**
+      before the first paid Growth customer, or the fourth Merge connection
+      (the first three are free), whichever comes first.
+- [ ] **(c) ERP credentials are plaintext in `Organization.settings`.** The
+      `erp` block (client secrets, API keys, Merge account tokens) is stored as
+      plain JSONB, protected only by RDS storage encryption, and admins read it
+      back verbatim (`services/org_settings_view`). `erp-integration.md` used to
+      call this "encrypted at rest", which overstated it. A QuickBooks refresh
+      token (five-year lifetime, full read/write on the customer's books) would
+      make it worse. **Durable fix:** hold provider credentials in a tenant table
+      encrypted with the app KMS key (envelope encryption), write-only through
+      audited endpoints like the SSO client secret, and migrate the existing
+      `erp`, `payments.credentials` and `cards.api_key` values. **Trigger:** the
+      QuickBooks connect flow (Phase 1) — its token must not land in plain JSONB.
+
+### Surfaced by moving the database onto RDS (2026-10-07, docs/minimal-deployment.md § Database)
+
+- [ ] **(c) The DPA does not name RDS's own backups.** `/legal/sub-processors`
+      § 2 and `docs/sub-processors.md` § 20 now carry the RDS row (2026-10-07,
+      § 10 change-log row; no customers yet, so no notice was owed). What is
+      left is the recovery wording, which undersells rather than misstates:
+      `/legal/dpa` Annex II *Availability and restoration* and
+      `docs/backup-disaster-recovery.md` § Targets describe nightly dumps and a
+      24-hour RPO (still true, and still the published floor), and DPA § 13
+      covers RDS's 7-day automated backups only through its conditional
+      "volume-level snapshot … coarse fallback" sentence, without naming them
+      or their retention. **Durable fix:** a deliberate call on the published
+      RPO/RTO for the RDS path (counsel / the #428 review), then DPA Annex II
+      and § 13 name RDS automated backups and their retention as a residue that
+      ages out, and `remove-tenant.sh`'s confirmation follows if the wording
+      moves. **Trigger:** the #428 counsel review, or before the first customer
+      signs the DPA, whichever comes first.
+- [ ] **(c) `pg_isready` over the socket reports the initdb server as ready, in
+      dev and CI.** On a fresh data volume the Postgres image runs a temporary
+      socket-only server for its init scripts; a `pg_isready -U postgres`
+      healthcheck (no `-h`) answers "ready" against it, the container goes
+      healthy, and the first client then meets "the database system is
+      shutting down". Reproduced against `deploy/compose.prod.yml`, which now
+      checks over TCP (`-h 127.0.0.1`). `backend/docker-compose.yml`'s
+      `postgres` (and `authentik-postgres`) and the five `--health-cmd` lines
+      in `.github/workflows/ci.yml` / `sso-e2e.yml` keep the socket form, where
+      it can surface as a first-boot migration or seed failure that reads as a
+      flake. **Durable fix:** the same `-h 127.0.0.1` on each, in one change.
+      **Trigger:** the next change to either compose file or CI's service
+      containers, or the first unexplained "shutting down" on a fresh volume.
+
+### Surfaced by enforcing the plan feature gates (2026-10-07, decisions §258)
+
+- [ ] **(c) The Scale plan sells an audit-log SIEM export that does not exist
+      per tenant.** `plan_catalog.FEATURE_AUDIT_SIEM_EXPORT` is granted by
+      `scale` and listed on the pricing page, but there is nothing to gate: the
+      only audit shipping is the platform shipper
+      (`services/audit_log_shipper.py`), configured by the OPERATOR through
+      `FEOH_AUDIT_SHIPPING_PROVIDERS` and shipping every tenant's trail to the
+      operator's WORM sinks. A tenant cannot point its own trail at its own SIEM.
+      The SOX auditor export (`GET /api/audit/export`) is a different, ungated
+      surface and stays that way. **Durable fix:** a per-tenant destination in
+      `Organization.settings` (one audited writer, like `PUT
+      /api/organization/sso`) — e.g. an HTTPS/HEC or syslog-over-TLS target with
+      a write-only token, SSRF-guarded like webhook targets — shipped by a
+      per-tenant leg of the shipper that reuses its poison-row isolation, with
+      `require_entitlement(FEATURE_AUDIT_SIEM_EXPORT)` on the config writer and
+      the leg skipped for an org whose plan lacks it. **Trigger:** the first
+      Scale customer who asks for it, or before the pricing page next lists it
+      — whichever is first; until then the listing should be qualified or
+      dropped (owned by the pricing-page work, issue #426).
+- [ ] **(c) A SCIM deactivation writes no audit row.** `api/scim.py`'s PUT
+      (`active: false`), PATCH (`active` replace / remove) and DELETE all set
+      `User.is_active = False` with no `user.deactivated`-style audit row, where
+      the admin path (`/api/admin/users`) audits the same change. Access is
+      still cut at once — `get_current_user` refuses an inactive user, so the
+      leaver's live JWTs stop working — so this is a SOX trail gap, not an
+      access gap. Pre-existing; the plan-gate review noticed it because §258
+      keeps deprovisioning open on every plan. **Durable fix:** one helper in
+      `api/scim.py` that every deactivating branch calls, writing a PII-free
+      audit row (actor `None`, `details.source: "scim"`) through
+      `dispatch_auth_audit`, plus `revoke_user_sessions` for parity with the
+      admin path; a test per branch. **Trigger:** the next change to
+      `api/scim.py`, or before the first SCIM-provisioned customer.
+
 ## (a) Blocked on external credentials, accounts, or hardware
 
 Categories (a) and (b) are operator work, not engineering work. Both are
@@ -1227,8 +1319,9 @@ reconciled when an item closes.
       models both as pending and the Privacy Policy renders all branches, so
       filling them is a one-line edit per representative.
       **Why blocked:** it needs a paid engagement with a representative firm in
-      each jurisdiction, which needs an entity to contract as.
-      **Durable fix:** incorporate, engage both, then set `euRepresentative` and
+      each jurisdiction. No longer waits on incorporation — the operator
+      contracts as a sole proprietor ([decisions.md](decisions.md) §252).
+      **Durable fix:** engage both, then set `euRepresentative` and
       `ukRepresentative`.
       **Trigger:** before marketing to, or onboarding, an EU or UK customer.
       Ref: [decisions.md](decisions.md) §175.
@@ -1241,9 +1334,9 @@ reconciled when an item closes.
       signing the Clauses with each sub-processor that receives personal data
       outside the EEA/UK (`/legal/sub-processors` is the list) and completing
       their annexes, plus the transfer-impact assessment *Schrems II* requires.
-      **Why blocked:** a contract needs a party, so this waits on incorporation
-      exactly as the representatives above do.
-      **Durable fix:** incorporate, execute the Clauses provider by provider,
+      **Why blocked:** operator work with each provider; no longer waits on
+      incorporation — the sole proprietor is the party ([decisions.md](decisions.md) §252).
+      **Durable fix:** execute the Clauses provider by provider,
       and keep the signed set where the privacy mailbox can answer from it.
       **Trigger:** before the first EEA or UK customer, and before anyone acts
       on the copy offer in §9.
@@ -1311,12 +1404,17 @@ as oversights.
       Ref: [decisions.md](decisions.md) §175. Tracker:
       [#446](https://github.com/Absence0760/feohledger/issues/446) § 3.
 
-- [ ] **Fill the operator facts and get counsel to review the legal set.** ([#428](https://github.com/Absence0760/feohledger/issues/428)) Eight
-      facts in `frontend/src/lib/legal/operator.ts` are `null` and render as
-      `[… to be confirmed]` on every page: the registered legal entity, a postal
-      address, the governing law and venue, the lead supervisory authority, EU
-      and UK Art 27 representatives, whether a DPO is appointed, and the hosting
-      region. The documents are complete and operative as written — these are
+- [ ] **Fill the operator facts and get counsel to review the legal set.** ([#428](https://github.com/Absence0760/feohledger/issues/428)) Two
+      facts in `frontend/src/lib/legal/operator.ts` are still `null` and render
+      as `[… to be confirmed]`: the EU and UK Art 27 representatives (tracked
+      separately above). The rest were set 2026-10-07
+      ([decisions.md](decisions.md) §252): no separate registered entity, no
+      published postal address (location Virginia, contact by email), no DPO,
+      Virginia governing law and courts, hosting in AWS `us-east-1`, and no
+      lead supervisory authority (no EU establishment). Counsel should confirm
+      the email-only contact position. **Before the pages are served
+      publicly, the workload stack must actually run in `us-east-1`** — the
+      pages now say it does. The documents are complete and operative as written — these are
       the facts only the operator can supply.
       **Durable fix:** set each value in that one file (the pending notice and
       every inline marker disappear with no other edit), then have a lawyer read

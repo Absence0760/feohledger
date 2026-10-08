@@ -878,6 +878,8 @@
   "invoiceWarningFutureInvoiceDate": "A data da nota está no futuro",
   "invoiceWarningRushPayment": "Pagamento urgente: vence em {days, plural, one {{days} dia} other {{days} dias}} a partir da data da nota",
   "invoiceWarningPastDue": "A nota está vencida",
+  "invoiceWarningAiAllowanceReached": "Leitura por IA pausada: a cota mensal de {included, plural, one {{included} nota lida por IA} other {{included} notas lidas por IA}} foi usada. Insira os dados manualmente ou faça upgrade do plano na página Faturamento.",
+  "invoiceWarningAiSpendCapReached": "Leitura por IA pausada: o limite de gastos com IA deste mês foi atingido. Insira os dados manualmente ou aumente o limite na página Faturamento.",
   "invoiceWarningUnverifiedVendor": "O fornecedor não está verificado",
   "invoiceWarningPersonalEmailDomain": "O e-mail do fornecedor usa um domínio pessoal: {domain}",
   "invoiceWarningNewVendorLargeAmount": "Fornecedor novo (criado há {days, plural, one {{days} dia} other {{days} dias}}) apresentando uma nota alta de {amount}",

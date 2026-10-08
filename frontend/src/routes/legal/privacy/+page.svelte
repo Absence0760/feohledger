@@ -13,10 +13,12 @@
 	<p>
 		{OPERATOR.serviceName} is a business-to-business accounts-payable platform. Companies use it to
 		receive supplier invoices, code and approve them, and pay them. It is operated by
-		{OPERATOR.controllerDescription}, at
-		<Fact value={OPERATOR.postalAddress} label="a postal address for the controller" />.
+		{OPERATOR.controllerDescription}, based in {OPERATOR.location}{#if OPERATOR.postalAddress !== false},
+			at <Fact value={OPERATOR.postalAddress} label="a postal address for the controller" />{/if}.
 		{#if OPERATOR.legalEntity}
 			The registered legal entity is {OPERATOR.legalEntity}.
+		{:else if OPERATOR.legalEntity === false}
+			There is no separate registered company: the individual named above is the controller.
 		{:else}
 			Once the business has a registered legal entity, it is named here:
 			<Fact value={OPERATOR.legalEntity} label="the registered legal entity" />.
@@ -858,12 +860,18 @@
 		If you think we have handled your personal data unlawfully, you can complain to a data
 		protection supervisory authority. You may complain in the EU Member State of your habitual
 		residence, your place of work, or the place of the alleged infringement (Article 77 GDPR); in
-		the UK the authority is the Information Commissioner's Office, at ico.org.uk. Our lead
-		supervisory authority is
-		<Fact
-			value={OPERATOR.supervisoryAuthority}
-			label="the lead supervisory authority for complaints"
-		/>. You also have a right to an effective judicial remedy (Articles 78 and 79) and to
+		the UK the authority is the Information Commissioner's Office, at ico.org.uk.
+		{#if OPERATOR.supervisoryAuthority === false}
+			We have no establishment in the EU, so no single authority leads on our processing: any
+			of those authorities can hear your complaint.
+		{:else}
+			Our lead supervisory authority is
+			<Fact
+				value={OPERATOR.supervisoryAuthority}
+				label="the lead supervisory authority for complaints"
+			/>.
+		{/if}
+		You also have a right to an effective judicial remedy (Articles 78 and 79) and to
 		compensation for damage caused by an infringement (Article 82).
 	</p>
 
@@ -1044,10 +1052,14 @@
 
 	<p>
 		Write to <a href="mailto:{CONTACT.privacy}">{CONTACT.privacy}</a> for anything in this policy:
-		a question, an access or erasure request, a correction, an objection, or a complaint. Postal
-		mail reaches
-		{OPERATOR.controllerDescription} at
-		<Fact value={OPERATOR.postalAddress} label="a postal address for the controller" />.
+		a question, an access or erasure request, a correction, an objection, or a complaint.
+		{#if OPERATOR.postalAddress === false}
+			We do not publish a postal address; every request this policy describes can be made by
+			email, and it is handled the same way as a letter would be.
+		{:else}
+			Postal mail reaches {OPERATOR.controllerDescription} at
+			<Fact value={OPERATOR.postalAddress} label="a postal address for the controller" />.
+		{/if}
 	</p>
 
 	<p>

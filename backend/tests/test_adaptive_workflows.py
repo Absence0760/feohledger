@@ -19,6 +19,8 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from types import SimpleNamespace
 
+import pytest
+
 from app.services.adaptive_workflows import (
     ApproverOutcome,
     ApproverPattern,
@@ -884,6 +886,8 @@ async def test_suggestions_scoped_to_organization(realdb):
         assert row.status == "open"
 
 
+# Creates a second entity: multi-entity is plan-gated (docs/decisions.md §258).
+@pytest.mark.plan("scale")
 async def test_suggestions_scoped_to_entity(realdb):
     """A WorkflowSuggestion row belonging to a DIFFERENT entity within the
     SAME org must not be marked stale by another entity's recompute, nor

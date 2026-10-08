@@ -21,7 +21,7 @@ from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import ROLE_ADMIN, require_roles
+from app.api.deps import ROLE_ADMIN, ensure_entitlement, require_entitlement, require_roles
 from app.database import get_control_db
 from app.models.organization import Organization
 from app.models.user import User
@@ -34,6 +34,7 @@ from app.models.webhook import (
     WebhookSubscription,
 )
 from app.services.audit_dispatch import dispatch_auth_audit
+from app.services.billing.plan_catalog import FEATURE_PUBLIC_API
 from app.services.webhooks.rotation import (
     DEFAULT_OVERLAP_MINUTES,
     MAX_OVERLAP_MINUTES,
@@ -184,6 +185,7 @@ async def create_subscription(
     body: CreateSubscriptionRequest,
     org: Organization = Depends(get_tenant),
     user: User = Depends(require_roles(ROLE_ADMIN)),
+    _entitled: User = Depends(require_entitlement(FEATURE_PUBLIC_API)),
     db: AsyncSession = Depends(get_control_db),
 ) -> SubscriptionCreatedResponse:
     """Create a webhook subscription. Returns the signing secret ONCE."""
@@ -284,6 +286,11 @@ async def update_subscription(
     user: User = Depends(require_roles(ROLE_ADMIN)),
     db: AsyncSession = Depends(get_control_db),
 ) -> SubscriptionResponse:
+    # Switching a subscription OFF is open on every plan, so a downgraded
+    # tenant can always quiet an integration it no longer pays for; any other
+    # edit configures the outbound-webhook feature and needs the plan (§258).
+    if body.active is not False:
+        await ensure_entitlement(db, org.id, FEATURE_PUBLIC_API)
     if body.target_url is not None:
         await _require_public_target(body.target_url)
     row = await _get_owned_subscription(db, sub_id, org.id)
@@ -347,6 +354,10 @@ async def rotate_subscription_secret(
     db: AsyncSession = Depends(get_control_db),
 ) -> SecretRotatedResponse:
     """Replace a subscription's signing secret, keeping its id and history.
+
+    Open on every plan, like switching a subscription off (decisions §258): a
+    rotation is incident remediation, and a downgraded tenant with a leaked
+    secret must not have to choose between the 402 and deleting the log.
 
     The secret is the customer's verification key, and anyone holding it can
     forge a signed `invoice.approved` / `payment.settled` payload into their
@@ -454,6 +465,7 @@ async def redeliver(
     delivery_id: uuid.UUID,
     org: Organization = Depends(get_tenant),
     user: User = Depends(require_roles(ROLE_ADMIN)),
+    _entitled: User = Depends(require_entitlement(FEATURE_PUBLIC_API)),
     db: AsyncSession = Depends(get_control_db),
 ) -> DeliveryResponse:
     """Re-enqueue a failed / dead delivery and attempt it immediately.

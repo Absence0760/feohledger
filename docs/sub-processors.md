@@ -424,29 +424,31 @@ the adapter rows above, AWS is engaged in every real deployment by design (local
 dev runs entirely on Docker Compose + MinIO + PostgreSQL with no AWS account).
 
 **This section used to describe the reference architecture in
-`docs/production-deployment.md` as though it were built. It is not.** RDS, SQS,
+`docs/production-deployment.md` as though it were built. It is not.** SQS,
 Lambda, CloudFront, ALB, ECS/Fargate and ElastiCache appear nowhere in `infra/`,
 and listing them told a customer's DPO to record managed services that hold none
 of their data. Two things are true instead, and the table below states only
 those:
 
-- **What Terraform actually defines** (`infra/*.tf`, applied 2026-09-15) is a
-  security substrate, not a workload stack: four S3 buckets, one customer-managed
-  KMS key + alias, the Route 53 hosted zone and domain registration, an ACM
-  certificate, and a monthly cost budget. Everything is in **`us-east-1`**
-  (`var.aws_region`). `infra/README.md` says so in its first paragraph: "Real AWS
-  workload resources (ECS, ALB, RDS, CloudFront) are not yet defined here."
-- **The near-term deployment shape** is `docs/minimal-deployment.md`: a single
-  **EC2** instance (t4g.small) running Caddy, the FastAPI container,
-  **PostgreSQL 16 and Redis 7 in Docker Compose**, with S3 for files and backups.
-  There is no managed database, no queue and no CDN in that shape — the control
-  plane and every tenant DB live on the instance's own encrypted disk, and the
-  `local` dispatch mode keeps extraction / ERP / audit work in in-process worker
-  threads (no SQS, no Lambda).
+- **What Terraform actually defines** (`infra/*.tf`): the security substrate
+  applied 2026-09-15 — four S3 buckets, one customer-managed KMS key + alias, the
+  Route 53 hosted zone and domain registration, an ACM certificate, and a
+  monthly cost budget — plus, since 2026-10-07, the single-VM workload stack (one
+  EC2 instance and one RDS instance; `infra/README.md` § Workload stack).
+  Everything is in **`us-east-1`** (`var.aws_region`).
+- **The deployment shape** is `docs/minimal-deployment.md`: a single **EC2**
+  instance (t4g.medium) running Caddy, the FastAPI container and **Redis 7 in
+  Docker Compose**, with the control plane and every tenant DB on one **RDS
+  PostgreSQL 16** instance (`infra/database.tf`, decisions §254/§257) and S3 for
+  files and backups. There is no queue and no CDN — the `local` dispatch mode
+  keeps extraction / ERP / audit work in in-process worker threads (no SQS, no
+  Lambda). The workload stack is defined in `infra/` but applied by the
+  operator; until it is, nothing below the EC2/RDS rows holds customer data.
 
 | AWS service | Role in the platform | Data categories | Processing location | Status | DPA / sub-processing status |
 |-------------|----------------------|-----------------|---------------------|--------|------------------------------|
-| **EC2** | The one VM: API runtime, and the PostgreSQL + Redis containers beside it — so the control-plane and per-tenant databases and the token blocklist all sit on its disk | Everything the service holds: INV, VEND, BANK, TAX, USER, AUTH, AUDIT, COMMS | us-east-1 | Deployed (`docs/minimal-deployment.md`) — **not** Terraform-managed today | Covered by **AWS GDPR DPA** (standard) |
+| **EC2** | The one VM: API runtime and the Redis container beside it — the token blocklist and session records sit on its (encrypted) disk, with the container logs | Everything the service processes, in memory per request; on disk AUTH (session records) and whatever the application logs | us-east-1 | **Defined in `infra/compute.tf`** | Covered by **AWS GDPR DPA** (standard) |
+| **RDS** (PostgreSQL 16) | The control-plane and per-tenant databases | Everything the service holds: INV, VEND, BANK, TAX, USER, AUTH, AUDIT, COMMS | us-east-1 | **Defined in `infra/database.tf`** — storage encrypted under the app KMS key, `verify-full` TLS from the app, not publicly accessible, 7-day automated backups / point-in-time restore | AWS GDPR DPA |
 | **S3** — `invoice-files`, `audit-logs`, `backups`, `access-logs` | Object storage for uploaded documents, the WORM audit archive, database backups, and the S3 server-access-log sink | DOC, BANK (a Positive Pay file carries full account + routing numbers, because matching on those is what the file is for), AUDIT | us-east-1 | **Defined in `infra/s3.tf`** — SSE-KMS, versioning, public-access block, Object Lock on invoice-files (governance 365d) + audit-logs (compliance 7y) | AWS GDPR DPA |
 | **KMS** | One customer-managed key (+ alias) for the buckets and for sops-encrypted deployment secrets; annual rotation on | none (key material + encrypt/decrypt call metadata) | us-east-1 | **Defined in `infra/kms.tf`** | AWS GDPR DPA |
 | **Route 53** | Hosted zone for the platform domain and every tenant subdomain, plus the domain registration itself (auto-renew, transfer lock, WHOIS privacy) | none (DNS query metadata; the subdomain label is the tenant slug) | us-east-1 / global edge | **Zone created by the registration; registration adopted in `infra/domain.tf`** | AWS GDPR DPA |
@@ -455,7 +457,7 @@ those:
 | **CloudWatch Logs** | Application logs, and the audit-event sink when `s3_objectlock` is not the selected shipper | AUDIT, USER (actor id); see § 9 for exactly what an audit row carries | Configured AWS region | **Not in `infra/`** — reachable as an audit-shipping target (§ 9), off by default | AWS GDPR DPA |
 | **SES** | Transactional (§ 7) and inbound intake (§ 8) email | USER, COMMS, DOC | Configured AWS region | **Not in `infra/`** — configured only | AWS GDPR DPA |
 
-> **Not built, and not to be listed until they are:** RDS, SQS, Lambda,
+> **Not built, and not to be listed until they are:** SQS, Lambda,
 > CloudFront, ALB, ECS/Fargate, ElastiCache. They are the scale-up target in
 > `docs/production-deployment.md`. When one lands, it gets a row here **and** on
 > `/legal/sub-processors` in the same commit, with the § Maintenance customer

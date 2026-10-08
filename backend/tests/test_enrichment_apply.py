@@ -14,6 +14,8 @@ from __future__ import annotations
 
 import uuid
 
+import pytest
+
 from app.models.vendor import Vendor
 from app.models.workflow import AuditLog
 
@@ -294,6 +296,8 @@ async def _entities(realdb):
     return next(e["id"] for e in rows if e["is_default"]), sub_id
 
 
+# Creates a second entity: multi-entity is plan-gated (docs/decisions.md §258).
+@pytest.mark.plan("scale")
 async def test_apply_refuses_a_vendor_from_another_entity(realdb):
     """Entity isolation is a data-layer rule. `apply` WRITES onto the vendor
     (and a `name` change re-screens it), so reaching across the entity boundary
@@ -320,6 +324,8 @@ async def test_apply_refuses_a_vendor_from_another_entity(realdb):
     assert await _audit_rows(mk, vid) == []
 
 
+# Creates a second entity: multi-entity is plan-gated (docs/decisions.md §258).
+@pytest.mark.plan("scale")
 async def test_apply_allowed_within_the_vendors_own_entity(realdb):
     mk = realdb.sessionmaker("a")
     org_id = realdb.info("a").org_id
@@ -338,6 +344,8 @@ async def test_apply_allowed_within_the_vendors_own_entity(realdb):
         assert (await s.get(Vendor, vid)).website == "https://sub.example"
 
 
+# Creates a second entity: multi-entity is plan-gated (docs/decisions.md §258).
+@pytest.mark.plan("scale")
 async def test_apply_reaches_an_unstamped_vendor_from_any_entity(realdb):
     """A NULL `entity_id` on `vendors` means *unstamped* (pre-multi-entity, or
     auto-created from an entity-less invoice), NOT "shared" as it does on
@@ -361,6 +369,8 @@ async def test_apply_reaches_an_unstamped_vendor_from_any_entity(realdb):
         assert (await s.get(Vendor, vid)).website == "https://legacy.example"
 
 
+# Creates a second entity: multi-entity is plan-gated (docs/decisions.md §258).
+@pytest.mark.plan("scale")
 async def test_enrich_refuses_a_vendor_from_another_entity(realdb):
     """The read side leaks too: `enrich` echoes the vendor's name and feeds its
     `tax_id` to an external provider as a match key."""

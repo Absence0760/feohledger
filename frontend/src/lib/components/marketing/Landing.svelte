@@ -70,29 +70,22 @@
 		},
 	];
 
-	// Every figure here must be checkable against the product by anyone who
-	// bothers. A specific performance number is an objectively verifiable factual
-	// claim, not puffery, so it needs substantiation we can produce on request.
-	//
-	// Two of these used to be inventions: "3.2s avg. extraction time" and "97%
-	// field accuracy on typed invoices" had no benchmark, eval or fixture behind
-	// them anywhere in the repo — and the only 97% in the tree is Basware's
-	// published *touchless processing rate* quoted in docs/competitive-analysis.md,
-	// a different metric belonging to a competitor. "12 workflow step types" was
-	// 9 counted honestly (4 canonical + 5 builder; reaching 12 needed the three
-	// backwards-compatible aliases counted as types of their own).
-	//
-	// These four are countable from the source: PAYMENT_METHODS, the locale
-	// catalogues, CANONICAL_STEP_TYPES + BUILDER_STEP_TYPES, and the rebate rate
-	// in api/cards.py (1% default, org-negotiated). If a number here stops
-	// matching, change the number.
+	// Every figure on this page must be checkable against the product by anyone
+	// who bothers: a specific number is an objectively verifiable factual claim,
+	// not puffery. How each one is derived — and what has been withdrawn for
+	// want of a derivation (the "3.2s" / "97%" statistics, "12 workflow step
+	// types", "Provision in 30 seconds") — is recorded per figure in
+	// docs/marketing-substantiation.md. Change a number here and that file in
+	// the same commit; if the source count moves, change the number. Prices
+	// and allowances are not typed here or in Pricing.svelte at all: they are
+	// generated from the plan catalogue (`pnpm gen:pricing`).
 	//
 	// `countUp` animates the leading integer and leaves anything else alone, so
 	// `1–2%` is rendered, not counted to. The final value is what is written in
 	// the markup — the animation replaces it and puts it back — so a visitor with
 	// reduced motion, a crawler and a failed bundle all read the real figure.
 	const stats = [
-		{ value: '7', label: 'payment rails, ACH to CHAPS' },
+		{ value: '11', label: 'payment rails, ACH to CHAPS' },
 		{ value: '9', label: 'workflow step types' },
 		{ value: '6', label: 'languages, fully localized' },
 		{ value: '1–2%', label: 'typical rebate on card payments' },
@@ -153,7 +146,7 @@
 					<a href="#how" class="secondary">See how it works</a>
 				</div>
 				<p class="sub-note">
-					Free to start · No credit card · Provision in 30 seconds
+					Free to start · No credit card · Self-service signup
 				</p>
 			</div>
 
@@ -284,9 +277,8 @@
 						back to your budget.
 					</p>
 					<!-- A large, vivid dollar figure reads as a projection unless the
-					     variability sits next to it. Pricing.svelte carries the same
-					     qualifier, but it is a different component and a reader may
-					     never scroll that far. -->
+					     variability sits next to it. Derivation:
+					     docs/marketing-substantiation.md. -->
 					<p class="diff-note">
 						Illustrative. Rebates depend on your negotiated rate, how much spend
 						moves to card, and which vendors accept it.
@@ -307,7 +299,7 @@
 
 		<section class="cta-section" use:reveal>
 			<div class="cta-inner">
-				<h2>Spin up your workspace in 30 seconds.</h2>
+				<h2>Spin up your workspace in minutes.</h2>
 				<p>
 					Pick a slug, verify your email, and you're in. Free plan — no card,
 					no contract, no sales call.

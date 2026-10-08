@@ -27,7 +27,9 @@ from app.models.organization import Organization
 from app.models.user import User
 from app.schemas.scim import SCIMPatchOp, SCIMPatchRequest
 
-pytestmark = pytest.mark.asyncio
+# SCIM provisioning is plan-gated (decisions §258) and the realdb harness orgs hold no
+# subscription (= free), so bind both to Scale.
+pytestmark = [pytest.mark.asyncio, pytest.mark.plan("scale")]
 
 _REQUEST = SimpleNamespace(base_url="http://testserver/")
 

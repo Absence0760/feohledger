@@ -6,6 +6,8 @@ needs an integration harness with a real Redis + a fake IdP, which lives
 separately.
 """
 
+import uuid
+
 import pytest
 
 # ---------- SSO config resolution -----------------------------------------
@@ -208,6 +210,9 @@ def test_sso_config_public_omits_secrets():
 # handshake (OIDC token exchange validates redirect_uri matches authorize).
 
 
+# No database: sign-in reads the org's plan (decisions §258), so stand in for a
+# plan that grants SSO.
+@pytest.mark.usefixtures("all_plan_features")
 async def test_sso_authorize_uses_per_tenant_redirect_uri(monkeypatch):
     """The authorize leg is `api/auth_sso.py::sso_authorize`, not a helper in
     `services/sso` — the helper that used to live there read the discovery
@@ -216,6 +221,7 @@ async def test_sso_authorize_uses_per_tenant_redirect_uri(monkeypatch):
     from app.api import auth_sso
 
     class _Org:
+        id = uuid.uuid4()
         slug = "acme"
         settings = {
             "sso": {
@@ -256,6 +262,9 @@ async def test_sso_authorize_uses_per_tenant_redirect_uri(monkeypatch):
     assert "client_id=client-123" in url
 
 
+# No database: sign-in reads the org's plan (decisions §258), so stand in for a
+# plan that grants SSO.
+@pytest.mark.usefixtures("all_plan_features")
 async def test_sso_authorize_refuses_an_authorize_host_off_the_configured_idp(monkeypatch):
     """The pinning the deleted helper did NOT do: a mis-served discovery
     document cannot pivot the browser redirect to another host."""
@@ -264,6 +273,7 @@ async def test_sso_authorize_refuses_an_authorize_host_off_the_configured_idp(mo
     from app.api import auth_sso
 
     class _Org:
+        id = uuid.uuid4()
         slug = "acme"
         settings = {
             "sso": {

@@ -33,6 +33,7 @@ from sqlalchemy.orm.attributes import flag_modified
 from app.models.organization import Organization
 from app.services.audit_dispatch import record_auth_audit_or_raise
 from app.services.sso import is_sso_only
+from app.services.sso_plan import sign_in_settings
 
 ACTION = "organization.sso_only_lifted"
 MAX_REASON = 500
@@ -52,8 +53,9 @@ class LiftResult:
     organization_id: uuid.UUID
     # False when `sso_only` was not set: nothing changed and nothing was audited.
     lifted: bool
-    # Whether the password was actually closed (`is_sso_only`) before the lift,
-    # as opposed to `sso_only` being set over a block that did not resolve.
+    # Whether the password was actually closed (`is_sso_only` under the org's
+    # plan) before the lift, as opposed to `sso_only` being set over a block
+    # that did not resolve, or on a plan that does not honour it.
     password_was_closed: bool
 
 
@@ -82,7 +84,10 @@ async def lift_sso_only(
         await session.rollback()
         return LiftResult(slug, org_id, lifted=False, password_was_closed=False)
 
-    password_was_closed = is_sso_only(settings)
+    # Through the org's plan (decisions §258): on a plan without
+    # `sso_enforcement` the stored flag closed nothing, and the audit row must
+    # not claim it did.
+    password_was_closed = is_sso_only(await sign_in_settings(session, org))
     details: dict = {
         "source": "operator_break_glass",
         "password_was_closed": password_was_closed,

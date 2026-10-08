@@ -71,6 +71,8 @@ pnpm gen:einvoice-messages    # regenerate the e-invoice rule-code → message-k
 pnpm check:einvoice-messages  # its drift guard (CI's Backend lint job runs this)
 pnpm gen:warning-messages     # regenerate the invoice-warning code → message-key catalogue from the backend catalogue
 pnpm check:warning-messages   # its drift guard (same CI job; see backend/docs/invoice-warnings.md)
+pnpm gen:pricing              # regenerate the public pricing page's plan module from backend plan_catalog.py (decisions §253)
+pnpm check:pricing            # its drift guard (same CI job; see frontend/docs/component-library.md § marketing)
 pnpm gen:icons                # re-render every web + mobile icon from the brand-mark masters (Inkscape + ImageMagick 7; docs/decisions.md §173)
 pnpm check:icons              # its guard: masters match assets/logo-render/gen_svg.py, every raster sized + opaque (CI's Brand assets job)
 pnpm gen:illustrations        # rewrite the empty-state illustration data module from assets/illustrations/gen_empty_states.py (check:illustrations is its CI guard; decisions §181)

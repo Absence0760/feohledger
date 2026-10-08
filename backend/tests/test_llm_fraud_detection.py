@@ -264,6 +264,104 @@ def test_detect_anomaly_uses_org_byok_key_when_present():
     assert captured["x-api-key"] == "org-byok-key"
 
 
+def _capture_body():
+    captured = {}
+
+    async def fake_post(*, json, headers):
+        captured["body"] = json
+        return _http_response(200, content_text='{"is_anomaly": false}')
+
+    return captured, fake_post
+
+
+def test_detect_anomaly_defaults_to_the_platform_model_not_a_retired_id():
+    """It used to hardcode `claude-sonnet-4-20250514`, which Anthropic deprecated."""
+    from app.config import settings
+
+    captured, fake_post = _capture_body()
+    asyncio.run(detect_anomaly(_candidate(), [_history_item()], api_key="k", http_post=fake_post))
+    body = captured["body"]
+    assert body["model"] == settings.extraction_model
+    # Room for adaptive thinking (current models think by default and it counts
+    # toward max_tokens), and nothing a current model rejects.
+    assert body["max_tokens"] >= 4096
+    for field in ("temperature", "top_p", "top_k", "tool_choice", "thinking"):
+        assert field not in body
+
+
+def test_detect_anomaly_honours_an_explicit_model():
+    captured, fake_post = _capture_body()
+    asyncio.run(
+        detect_anomaly(
+            _candidate(),
+            [_history_item()],
+            api_key="k",
+            model="claude-opus-5-5",
+            http_post=fake_post,
+        )
+    )
+    assert captured["body"]["model"] == "claude-opus-5-5"
+
+
+# ---------- Which key + model the anomaly check may use -------------------
+
+
+def test_platform_mode_uses_the_platform_key(monkeypatch):
+    from app.config import settings
+    from app.services.llm_fraud_detection import resolve_anomaly_llm_config
+
+    monkeypatch.setattr(settings, "anthropic_api_key", "platform-key")
+    assert resolve_anomaly_llm_config(None) == ("platform-key", None)
+    assert resolve_anomaly_llm_config({"extraction": {"program_type": "platform"}}) == (
+        "platform-key",
+        None,
+    )
+
+
+def test_a_byok_claude_org_uses_its_own_key_and_model(monkeypatch):
+    from app.config import settings
+    from app.services.llm_fraud_detection import resolve_anomaly_llm_config
+
+    monkeypatch.setattr(settings, "anthropic_api_key", "platform-key")
+    org = {
+        "extraction": {
+            "program_type": "byok",
+            "provider": "claude_vision",
+            "api_key": "org-anthropic-key",
+            "model": "claude-opus-5-5",
+        }
+    }
+    assert resolve_anomaly_llm_config(org) == ("org-anthropic-key", "claude-opus-5-5")
+
+
+def test_a_byok_key_for_another_provider_is_never_sent_to_anthropic(monkeypatch):
+    """An org extracting on OpenAI holds an OpenAI secret in
+    `settings.extraction.api_key`. It used to be posted to api.anthropic.com as
+    `x-api-key`; it must not leave for a provider it does not belong to, and the
+    platform key must not be substituted for an org that chose another vendor."""
+    from app.config import settings
+    from app.services.llm_fraud_detection import resolve_anomaly_llm_config
+
+    monkeypatch.setattr(settings, "anthropic_api_key", "platform-key")
+    org = {
+        "extraction": {
+            "program_type": "byok",
+            "provider": "openai_vision",
+            "api_key": "sk-openai-secret",
+        }
+    }
+    assert resolve_anomaly_llm_config(org) == ("", None)
+
+
+def test_a_byok_claude_org_without_a_key_gets_no_check(monkeypatch):
+    from app.config import settings
+    from app.services.llm_fraud_detection import resolve_anomaly_llm_config
+
+    monkeypatch.setattr(settings, "anthropic_api_key", "platform-key")
+    org = {"extraction": {"program_type": "byok", "provider": "claude_vision"}}
+    assert resolve_anomaly_llm_config(org) == ("", None)
+
+
 # ---------- Invoice → dataclass adapters ---------------------------------
 
 

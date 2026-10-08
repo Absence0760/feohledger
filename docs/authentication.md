@@ -657,6 +657,25 @@ Login's refusal, the step-up's password drop, `/auth/me`'s
 the server refuses the password, and it shows that protocol's SSO button beside
 it. Backend enforcement is the security boundary; the hidden form is UX.
 
+**Every one of those readers passes the org's settings through its PLAN first**
+(`services/sso_plan.plan_scoped_settings`, decisions §253–§258). SSO itself is a
+Growth feature (`sso`) and "require SSO" a Scale one (`sso_enforcement`):
+
+- a plan without `sso` reads the stored block as switched off — no IdP button,
+  and the authorize / callback / SAML login / ACS / metadata handlers answer
+  exactly as for an unconfigured tenant (the callback and ACS re-read it, so a
+  plan lost between the two legs cannot complete a sign-in);
+- a plan without `sso_enforcement` reads `sso_only` as off, so the password
+  stays open.
+
+**A downgrade therefore reopens password sign-in rather than locking the
+tenant out.** That is the same posture as the third condition below: the one
+outcome never allowed is a tenant nobody can sign in to, and honouring
+`sso_only` while the plan removed SSO would be exactly that. The stored block
+is never rewritten — an upgrade resumes it as it was. An account with no
+password (JIT- or SCIM-provisioned) on a downgraded-to-Free tenant signs in by
+setting one through forgot-password, or an admin sets it.
+
 **The third condition is the escape hatch.** A tenant whose IdP block does not
 resolve has no SSO button, because the config endpoints report SSO as off. If
 the password were closed there too, no member could start a session. So an
@@ -792,6 +811,23 @@ Reasoning: [decisions.md](decisions.md) §191, §201, §204. Tests: `backend/tes
 `backend/tests/test_sso_break_glass.py` (the operator lift).
 
 ### SSO configuration — one audited writer
+
+**Plan gates on a save** (decisions §258, each a coded 402
+`plan_feature_required`): a block saved with `enabled: true` needs `sso`
+(Growth), one with `sso_only: true` needs `sso_enforcement` (Scale), and one
+that *changes* a non-empty `scim_group_role_map` needs `scim` (Scale). The gate
+reads the block the save would leave, so switching SSO or `sso_only` off is
+never refused, and IdP fields can be staged while SSO is off on any plan.
+`POST /api/organization/sso/scim-token` needs `scim`.
+
+**SCIM on a plan without `scim`** (`api/scim.py::require_scim_entitlement`)
+answers in the RFC 7644 error shape with status `402` for anything that
+provisions or grants — create a user, a PUT / PATCH that does more than
+deactivate, any group write but delete. Reads, `DELETE /Users/{id}`, a PATCH
+that only sets `active` false (either spelling), a PUT with `active: false`
+(applied as the deactivation ALONE) and `DELETE /Groups/{id}` stay open, so an
+IdP can still shut out a leaver after a downgrade — otherwise the account
+would stay active, and on a plan without SSO its password sign-in is open.
 
 `settings.sso` is written by `PUT /api/organization/sso` (admin) and by nothing
 else a tenant can reach; `GET /api/organization/sso` (admin) serves the

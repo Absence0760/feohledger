@@ -61,3 +61,11 @@ e528965cee45f3b60a1d922de2db051ada7245e3:backend/tests/test_admin_user_managemen
 # only at the commit that introduced it. Deliberately not quoted here — see the
 # NB above; naming it in this file re-trips the same rule against this file.
 d9dc86a970108d5a9ad1238e542c0e36438f9465:backend/tests/test_email_intake_processing.py:generic-api-key:160
+
+# Synthetic RDS master password in the Terraform guardrail test's `variables`
+# block (infra/tests/guardrails.tftest.hcl) — `terraform test` plans against
+# it and nothing is ever created. The original literal was 32 hex characters
+# and tripped generic-api-key on entropy; it has since been replaced with a
+# low-entropy literal that passes the variable's own ≥24-alphanumeric
+# validation, so only the introducing commit still carries the finding.
+09352f52aec7a4e530f08b9dc4ee45890de4ae21:infra/tests/guardrails.tftest.hcl:generic-api-key:118

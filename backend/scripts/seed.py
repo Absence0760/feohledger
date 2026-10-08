@@ -52,7 +52,6 @@ from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.api.deps import ROLE_ADMIN, ROLE_AP_CLERK, ROLE_AP_MANAGER, ROLE_CFO
-from app.config import settings
 from app.database import _make_tenant_url, control_engine, control_session_factory
 from app.models import Base
 from app.models.billing import Plan
@@ -80,7 +79,11 @@ from app.services.billing.plan_catalog import (
     ensure_plan_catalog,
     ensure_subscription,
 )
-from app.services.tenant_provisioning import CONTROL_TABLES
+from app.services.tenant_provisioning import (
+    CONTROL_TABLES,
+    _parse_maintenance_dsn,
+    asyncpg_connect_kwargs,
+)
 from app.utils.passwords import pwd_context
 
 # Canonical role set seeded into every control plane, keyed by the same
@@ -106,35 +109,35 @@ TECH_USER_ID = uuid.UUID("00000000-0000-0000-0000-000000000020")
 # parallelism. Setting it to 0 skips the e2e seed entirely.
 E2E_TENANT_COUNT = int(os.environ.get("FEOH_E2E_TENANT_COUNT", "4"))
 
-# The single entitlement the app actually gates today (`api/v1/*` via
-# `require_api_entitlement`). Named once so the seed's demo policy below and
-# its drift guard in `tests/test_seed_billing_baseline.py` read the same word.
-PUBLIC_API_ENTITLEMENT = "public_api"
-
 # Which plan each seeded tenant lands on. Codes come from
-# `services/billing/plan_catalog.DEFAULT_PLAN_CATALOG`.
+# `services/billing/plan_catalog.DEFAULT_PLAN_CATALOG`; what each plan grants is
+# `plan_catalog.FEATURE_*` (decisions §253), and the gates that read them are
+# listed in `backend/docs/billing.md` § Entitlement gating.
 #
 # `acme` is the tenant `docs/getting-started.md` tells a new contributor to log
-# into, so it lands on a plan whose entitlements include `public_api`.
-# Otherwise every `/api/v1` call made with a freshly minted API key 402s and
-# the public Developer API is unreachable on a fresh clone without hand-editing
-# the control plane — which guard rail 7 (local-first) says it must not be.
+# into, and the one the local IdPs are wired to (`pnpm idp:seed` / `saml:seed` /
+# `scim:seed`), so it lands on `scale` — the plan that grants every feature.
+# Anything less and a fresh clone could not exercise SSO enforcement, SCIM,
+# multiple entities or the public API without hand-editing the control plane,
+# which guard rail 7 (local-first) says it must never need.
 #
 # `techflow` deliberately stays on `free`, so a local stack demonstrates BOTH
-# sides of the entitlement gate: one tenant that reaches `/api/v1` and one that
-# is correctly refused. A seed where every tenant is entitled would make the
-# 402 path unexercisable in exactly the way the 200 path used to be.
-ACME_PLAN_CODE = "growth"
+# sides of every plan gate: one tenant that reaches each feature and one that
+# is correctly refused (and shows the upgrade prompt). A seed where every
+# tenant is entitled would make the 402 path unexercisable locally.
+ACME_PLAN_CODE = "scale"
 TECHFLOW_PLAN_CODE = "free"
 
-# Every e2e worker tenant stays on `free`, and this is load-bearing rather than
-# incidental: `frontend/tests-e2e/billing/billing.spec.ts` parks whatever live
-# subscription the worker's org holds, runs against its own fixture plans, then
-# restores the parked row by id. That works because each worker tenant is
-# interchangeable with the next. Entitling one of them would make which shard
-# drew which tenant observable, so the public-API demo tenant is `acme` — an
-# org the e2e suite only ever uses for cross-tenant isolation, never billing.
-E2E_PLAN_CODE = "free"
+# Every e2e worker tenant lands on `scale` too: the Playwright suite drives SSO
+# settings, SCIM tokens, entity creation, ERP adapters, API keys and webhooks on
+# its worker's tenant, and each of those is now plan-gated (§258). All workers
+# share the one plan, so they stay interchangeable — which shard draws which
+# tenant is still unobservable — and `frontend/tests-e2e/billing/billing.spec.ts`
+# still parks and restores whatever live subscription the worker's org holds.
+# The FREE side of each gate (the upgrade prompt) is covered in e2e by stubbing
+# `/api/auth/me`, never by moving a worker's subscription, which would outlive
+# a crashed test.
+E2E_PLAN_CODE = "scale"
 
 # Control-plane vs tenant table split is owned by
 # `app.services.tenant_provisioning.CONTROL_TABLES` (imported above). Seeding
@@ -176,20 +179,8 @@ def _make_portal_user(vendor: "Vendor") -> "VendorUser":
 
 async def create_database(db_name: str) -> None:
     """Create a PostgreSQL database if it doesn't exist."""
-    # Parse connection info from the async URL
-    url = settings.database_url.replace("postgresql+asyncpg://", "")
-    userpass, hostdb = url.split("@", 1)
-    user, password = userpass.split(":", 1)
-    host_port, _ = hostdb.rsplit("/", 1)
-    if ":" in host_port:
-        host, port = host_port.split(":", 1)
-        port = int(port)
-    else:
-        host, port = host_port, 5432
-
-    conn = await asyncpg.connect(
-        host=host, port=port, user=user, password=password, database="postgres"
-    )
+    # Same parse (and TLS handling) as the production provisioning path.
+    conn = await asyncpg.connect(**_parse_maintenance_dsn())
     try:
         exists = await conn.fetchval("SELECT 1 FROM pg_database WHERE datname = $1", db_name)
         if not exists:
@@ -273,20 +264,8 @@ async def create_tenant_tables(db_name: str):
             await conn.execute(text(stmt))
 
     # ALTER TYPE ... ADD VALUE cannot run inside a transaction, so use a separate connection
-    raw_url = tenant_url.replace("postgresql+asyncpg://", "")
-    userpass, hostdb = raw_url.split("@", 1)
-    pg_user, pg_pass = userpass.split(":", 1)
-    host_port, db_name_parsed = hostdb.rsplit("/", 1)
-    pg_host = host_port.split(":")[0]
-    pg_port = int(host_port.split(":")[1]) if ":" in host_port else 5432
     try:
-        conn = await asyncpg.connect(
-            user=pg_user,
-            password=pg_pass,
-            host=pg_host,
-            port=pg_port,
-            database=db_name_parsed,
-        )
+        conn = await asyncpg.connect(**asyncpg_connect_kwargs(tenant_url))
         try:
             for val in ("done", "posted_in_erp", "payment_scheduled", "paid"):
                 await conn.execute(f"ALTER TYPE invoicestatus ADD VALUE IF NOT EXISTS '{val}'")
@@ -300,27 +279,38 @@ async def create_tenant_tables(db_name: str):
     print(f"  Tenant tables ready in: {db_name}")
 
 
-async def ensure_public_api_entitled(
+def _grants_all_of(plan: Plan, target: Plan) -> bool:
+    """Does ``plan`` grant every feature ``target`` grants?"""
+    have = dict(plan.entitlements or {})
+    return all(
+        has_entitlement(have, feature)
+        for feature in dict(target.entitlements or {})
+        if has_entitlement(dict(target.entitlements or {}), feature)
+    )
+
+
+async def ensure_seed_plan_entitled(
     session: AsyncSession, *, organization_id: uuid.UUID, plan_code: str
 ) -> bool:
-    """Guarantee ``organization_id``'s live subscription grants ``public_api``,
-    moving the EXISTING subscription onto ``plan_code`` when it does not.
+    """Guarantee ``organization_id``'s live subscription grants every feature
+    ``plan_code`` grants, moving the EXISTING subscription onto ``plan_code``
+    when it does not.
 
-    Why the seed can't just call ``ensure_subscription(plan_code="growth")``:
-    that helper deliberately no-ops once the org holds any live subscription,
+    Why the seed can't just call ``ensure_subscription(plan_code=...)``: that
+    helper deliberately no-ops once the org holds any live subscription,
     because a second live row is a state ``uq_subscription_one_live_per_org``
     forbids. A control plane seeded by an older revision of this script
-    therefore pins the demo tenant to whatever it landed on first, and no
-    number of ``pnpm seed`` runs can repair it — ``/api/v1`` stays 402'd on
-    every dev box that was ever seeded before.
+    therefore pins a tenant to whatever it landed on first, and no number of
+    ``pnpm seed`` runs can repair it — every feature that tenant's seeded plan
+    was supposed to unlock stays 402'd on every dev box seeded before.
 
     So repoint the live row's ``plan_id`` in place instead of adding one: one
     live subscription throughout, the unique index never challenged.
 
-    Upgrade-only. An org whose live plan already grants the feature is left
-    byte-identical, so an operator (or a test fixture) that moved the tenant
-    onto a richer plan is never quietly downgraded by a re-seed. Returns
-    ``True`` only when a row was actually moved.
+    Upgrade-only. An org whose live plan already grants everything the target
+    does is left byte-identical, so an operator (or a test fixture) that moved
+    the tenant onto a richer plan is never quietly downgraded by a re-seed.
+    Returns ``True`` only when a row was actually moved.
     """
     active = await get_active_subscription(session, organization_id)
     if active is None:
@@ -328,16 +318,13 @@ async def ensure_public_api_entitled(
         return False
 
     subscription, plan = active
-    if has_entitlement(dict(plan.entitlements or {}), PUBLIC_API_ENTITLEMENT):
-        return False
-
     target = (
         await session.execute(select(Plan).where(Plan.code == plan_code))
     ).scalar_one_or_none()
-    if target is None or target.id == subscription.plan_id:
+    if target is None or target.id == subscription.plan_id or _grants_all_of(plan, target):
         # No catalog plan to move to (a control plane predating the catalog),
-        # or the tenant is already on it and the operator has since stripped
-        # the entitlement. Either way, leave the row alone rather than guess.
+        # the tenant is already on it (an operator may since have edited its
+        # grants), or its plan is already at least as rich. Leave it alone.
         return False
 
     # Free the `(org, plan)` slot before repointing into it —
@@ -365,10 +352,10 @@ async def ensure_demo_billing_baseline(session: AsyncSession) -> None:
     await ensure_plan_catalog(session)
     await ensure_subscription(session, organization_id=ACME_ORG_ID, plan_code=ACME_PLAN_CODE)
     await ensure_subscription(session, organization_id=TECH_ORG_ID, plan_code=TECHFLOW_PLAN_CODE)
-    # Acme is the tenant the public Developer API is demoed from, so its live
-    # subscription has to grant `public_api` even when a previous seed already
-    # parked it on `free`.
-    await ensure_public_api_entitled(session, organization_id=ACME_ORG_ID, plan_code=ACME_PLAN_CODE)
+    # Acme is the tenant every gated feature is demoed from, so its live
+    # subscription has to grant all of them even when a previous seed already
+    # parked it on `free` or `growth`.
+    await ensure_seed_plan_entitled(session, organization_id=ACME_ORG_ID, plan_code=ACME_PLAN_CODE)
 
 
 async def seed_control_plane():
@@ -1931,7 +1918,11 @@ async def seed_e2e_control_plane(roles: dict[str, "Role"]) -> list[tuple[str, uu
         # `continue` above, so a re-seed backfills them too.
         await ensure_plan_catalog(session)
         for _db_name, e2e_org_id, _label in created:
-            await ensure_subscription(session, organization_id=e2e_org_id, plan_code=E2E_PLAN_CODE)
+            # Upgrade-in-place, not just bind: a worker seeded when the e2e
+            # plan was `free` must reach every gated surface its specs drive.
+            await ensure_seed_plan_entitled(
+                session, organization_id=e2e_org_id, plan_code=E2E_PLAN_CODE
+            )
 
         await session.commit()
 

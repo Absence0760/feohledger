@@ -533,6 +533,8 @@ async def _stamp_entity(mk, exc_id, entity_id):
         await s.commit()
 
 
+# Creates a second entity: multi-entity is plan-gated (docs/decisions.md §258).
+@pytest.mark.plan("scale")
 @pytest.mark.asyncio
 async def test_resolve_and_assign_are_entity_scoped(realdb):
     """An exception belonging to another subsidiary must be unreachable by id

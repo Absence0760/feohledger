@@ -498,29 +498,76 @@ def require_api_scope(scope: str):
 # ---------------------------------------------------------------------------
 
 
+#: The coded refusal every plan-feature gate answers with (decisions §253, §258).
+#: ``params.feature`` is the ``plan_catalog.FEATURE_*`` key the plan lacks, so the
+#: SPA can name the tier that grants it instead of showing a bare 402.
+PLAN_FEATURE_REQUIRED = "plan_feature_required"
+
+
+def plan_feature_refusal(feature: str) -> HTTPException:
+    """The 402 a plan-feature gate raises. One builder, so no gate drifts."""
+    from app.api.refusals import coded_refusal
+
+    return HTTPException(
+        status_code=status.HTTP_402_PAYMENT_REQUIRED,
+        detail=coded_refusal(
+            PLAN_FEATURE_REQUIRED,
+            "Your plan does not include this feature.",
+            feature=feature,
+        ),
+    )
+
+
+async def org_has_feature(db: AsyncSession, organization_id, feature: str) -> bool:
+    """Does the org's live plan grant ``feature``? Fail-closed (no plan → no)."""
+    # Local import keeps the billing service out of deps.py's import graph
+    # for every consumer (mirrors the api_keys local import above).
+    from app.services.billing.entitlements import get_entitlements, has_entitlement
+
+    return has_entitlement(await get_entitlements(db, organization_id), feature)
+
+
+async def ensure_entitlement(db: AsyncSession, organization_id, feature: str) -> None:
+    """Raise the 402 unless the org's live plan grants ``feature``.
+
+    The inline form of ``require_entitlement``, for a gate that depends on the
+    request body or the stored config rather than on the route alone — turning
+    SSO *on*, saving a *live* ERP adapter. ``db`` is the control-plane session.
+    """
+    if not await org_has_feature(db, organization_id, feature):
+        raise plan_feature_refusal(feature)
+
+
+async def ensure_live_erp_entitled(db: AsyncSession, organization_id, erp_config) -> None:
+    """``FEATURE_ERP_INTEGRATIONS`` gate for an action that would reach an ERP.
+
+    Only a LIVE adapter is gated. The ``mock`` ERP is the local-first default
+    (guard rail 7) and stays usable on every plan, and an org with no ERP
+    configured at all has nothing to push to — the route's own "not configured"
+    answer is the right one there, not a 402.
+    """
+    from app.services.billing.plan_catalog import FEATURE_ERP_INTEGRATIONS
+    from app.services.erp_adapters.dispatcher import erp_config_is_live
+
+    if erp_config_is_live(erp_config):
+        await ensure_entitlement(db, organization_id, FEATURE_ERP_INTEGRATIONS)
+
+
 def require_entitlement(feature: str):
     """Dependency factory — require the org's active plan to grant ``feature``.
 
     For the JWT (SPA) surface. Reads the org's live subscription → plan
     entitlements from the control plane; 402 when the plan doesn't include the
     feature. Fail-closed: an org with no live subscription has no entitlements.
-    Compose alongside ``require_roles(...)`` on the same route.
+    Compose alongside ``require_roles(...)`` on the same route. Pass a
+    ``plan_catalog.FEATURE_*`` constant, never a string literal.
     """
 
     async def checker(
         user: User = Depends(get_current_user),
         db: AsyncSession = Depends(get_control_db),
     ) -> User:
-        # Local import keeps the billing service out of deps.py's import graph
-        # for every consumer (mirrors the api_keys local import above).
-        from app.services.billing.entitlements import get_entitlements, has_entitlement
-
-        entitlements = await get_entitlements(db, user.organization_id)
-        if not has_entitlement(entitlements, feature):
-            raise HTTPException(
-                status_code=status.HTTP_402_PAYMENT_REQUIRED,
-                detail="Your plan does not include this feature.",
-            )
+        await ensure_entitlement(db, user.organization_id, feature)
         return user
 
     return checker
@@ -537,14 +584,7 @@ def require_api_entitlement(feature: str):
         principal: ApiKeyPrincipal = Depends(get_api_key_principal),
         db: AsyncSession = Depends(get_control_db),
     ) -> ApiKeyPrincipal:
-        from app.services.billing.entitlements import get_entitlements, has_entitlement
-
-        entitlements = await get_entitlements(db, principal.organization_id)
-        if not has_entitlement(entitlements, feature):
-            raise HTTPException(
-                status_code=status.HTTP_402_PAYMENT_REQUIRED,
-                detail="Your plan does not include this feature.",
-            )
+        await ensure_entitlement(db, principal.organization_id, feature)
         return principal
 
     return checker

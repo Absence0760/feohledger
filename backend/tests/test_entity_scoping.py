@@ -91,6 +91,8 @@ async def test_get_entity_id_unknown_uuid_is_400_not_silent_all(realdb):
     assert exc.value.status_code == 400
 
 
+# Creates a second entity: multi-entity is plan-gated (docs/decisions.md §258).
+@pytest.mark.plan("scale")
 async def test_get_entity_id_rejects_other_tenants_entity(realdb):
     """Tenant B's entity id is unknown to tenant A → 400, not a cross-tenant
     read. The entities table is tenant-local, so this falls out naturally."""

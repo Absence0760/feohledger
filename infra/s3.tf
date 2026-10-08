@@ -323,6 +323,10 @@ resource "aws_s3_bucket_versioning" "access_logs" {
   }
 }
 
+# SSE-S3, not the app CMK: S3 server-access-log delivery cannot write to a
+# bucket whose default encryption is SSE-KMS, whatever the key policy grants
+# (docs/decisions.md §166). Access logs are access metadata, not customer data.
+#trivy:ignore:AVD-AWS-0132
 resource "aws_s3_bucket_server_side_encryption_configuration" "access_logs" {
   bucket = aws_s3_bucket.access_logs.id
 

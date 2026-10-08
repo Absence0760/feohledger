@@ -257,7 +257,9 @@ async def _create_sub(c, target_url):
     )
 
 
+# The subscription CRUD is plan-gated (decisions §258); the harness org reads as free.
 @pytest.mark.asyncio
+@pytest.mark.plan("scale")
 async def test_create_rejects_private_targets(realdb):
     async with realdb.client(key="a", role="admin") as c:
         for target in (
@@ -272,7 +274,9 @@ async def test_create_rejects_private_targets(realdb):
             assert resp.json()["detail"] == url_guard.REJECT_DETAIL
 
 
+# The subscription CRUD is plan-gated (decisions §258); the harness org reads as free.
 @pytest.mark.asyncio
+@pytest.mark.plan("scale")
 async def test_create_rejects_hostname_resolving_private(realdb, monkeypatch):
     _stub_resolve(monkeypatch, addresses=["192.168.7.7"])
     async with realdb.client(key="a", role="admin") as c:
@@ -281,7 +285,9 @@ async def test_create_rejects_hostname_resolving_private(realdb, monkeypatch):
         assert resp.json()["detail"] == url_guard.REJECT_DETAIL
 
 
+# The subscription CRUD is plan-gated (decisions §258); the harness org reads as free.
 @pytest.mark.asyncio
+@pytest.mark.plan("scale")
 async def test_create_rejects_unresolvable_hostname(realdb, monkeypatch):
     _stub_resolve(monkeypatch, error=socket.gaierror(-2, "nope"))
     async with realdb.client(key="a", role="admin") as c:
@@ -290,7 +296,9 @@ async def test_create_rejects_unresolvable_hostname(realdb, monkeypatch):
         assert resp.json()["detail"] == url_guard.REJECT_DETAIL
 
 
+# The subscription CRUD is plan-gated (decisions §258); the harness org reads as free.
 @pytest.mark.asyncio
+@pytest.mark.plan("scale")
 async def test_create_allows_public_target_and_update_rejects_private(realdb):
     control_mk = realdb.control_sessionmaker()
     sub_id = None

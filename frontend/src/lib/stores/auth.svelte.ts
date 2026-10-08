@@ -72,6 +72,11 @@ interface User {
 	// GET /api/auth/me. Drives `can(perm)` for the split sensitive controls.
 	// Older tokens / responses may omit it — treated as "no granular perms".
 	permissions?: string[];
+	// The plan features (`#lib/types/planFeatures.ts` keys) the org's live plan
+	// grants, from GET /api/auth/me. Drives `hasFeature(f)`, which a gated
+	// setting reads to show an upgrade prompt instead of a control the server
+	// would refuse with a 402. Advisory — the server enforces every gate.
+	entitlements?: string[];
 }
 
 interface TokenResponse {
@@ -266,6 +271,15 @@ function createAuthStore() {
 		return user?.permissions?.includes(perm) ?? false;
 	}
 
+	/** True if the org's live plan grants plan feature `feature`
+	 * (`#lib/types/planFeatures.ts`). Mirrors the backend's
+	 * `require_entitlement(FEATURE_*)` so a gated control and its API gate
+	 * agree; absent (an older response) reads as "not granted", the
+	 * fail-closed direction the server takes too. */
+	function hasFeature(feature: string): boolean {
+		return user?.entitlements?.includes(feature) ?? false;
+	}
+
 	return {
 		get user() { return user; },
 		get loggedIn() { return loggedIn; },
@@ -289,6 +303,7 @@ function createAuthStore() {
 		hasRole,
 		hasAnyRole,
 		can,
+		hasFeature,
 	};
 }
 

@@ -53,6 +53,8 @@ from app.schemas.auth import (
 )
 from app.services import mfa, password_reset, webauthn, webauthn_rp
 from app.services.audit_dispatch import dispatch_auth_audit, queue_auth_audit
+from app.services.billing.entitlements import get_entitlements, has_entitlement
+from app.services.billing.plan_catalog import ALL_FEATURES
 from app.services.credential_upgrade import upgrade_password_hash
 from app.services.email_adapters import (
     EmailMessage,
@@ -82,6 +84,7 @@ from app.services.session_management import (
     revoke_user_sessions,
 )
 from app.services.sso import is_sso_only, sso_only_requested
+from app.services.sso_plan import plan_scoped_settings
 from app.utils.emails import email_matches, exact_email_first, normalize_email
 from app.utils.passwords import (
     PasswordError,
@@ -284,8 +287,14 @@ async def _verify_presented_assertion(
     return cred
 
 
-def _user_response(user: User, org: Organization | None = None) -> UserResponse:
+async def _user_response(
+    db: AsyncSession, user: User, org: Organization | None = None
+) -> UserResponse:
     org_required = mfa.org_requires_mfa(org.settings if org else None)
+    # The org's plan entitlements (decisions §253/§258): read twice below — the
+    # SSO-only verdict depends on the plan, and the SPA reads the granted
+    # feature keys to show an upgrade prompt instead of a control that 402s.
+    entitlements = await get_entitlements(db, user.organization_id)
     return UserResponse(
         id=str(user.id),
         email=user.email,
@@ -301,13 +310,17 @@ def _user_response(user: User, org: Organization | None = None) -> UserResponse:
         has_password=user.hashed_password is not None,
         # The step-up's own predicate, not a client-side copy of it — see
         # `_org_closes_password_sign_in` and docs/decisions.md §201.
-        password_sign_in_closed=_org_closes_password_sign_in(org),
+        password_sign_in_closed=_org_closes_password_sign_in(org, entitlements),
         roles=[r.name for r in user.roles],
         # Effective granular permissions for the SPA's `can(perm)` gate. Resolved
         # off the user's roles (system via the default map, custom via their
         # stored list) — the same union `require_permission` enforces server-side,
         # so the UI gate and the backend gate can't drift.
         permissions=sorted(effective_permissions(user.roles)),
+        # Only the plan-feature keys (`plan_catalog.ALL_FEATURES`) the live plan
+        # grants — never the raw entitlements JSON, which an operator may have
+        # extended with keys that mean nothing to the client.
+        entitlements=sorted(f for f in ALL_FEATURES if has_entitlement(entitlements, f)),
         locale=user.locale,
     )
 
@@ -469,7 +482,8 @@ async def login(
     # already 401'd above; the login page hides the password form when
     # sso_only, so they use the IdP button.) The same predicate the step-up,
     # `/auth/me` and the public config echo read, so the four cannot disagree.
-    if _org_closes_password_sign_in(org):
+    entitlements = await _sso_only_entitlements(db, org)
+    if _org_closes_password_sign_in(org, entitlements):
         await dispatch_auth_audit(
             organization_id=user.organization_id,
             actor_id=None,
@@ -481,16 +495,16 @@ async def login(
             detail="This workspace requires single sign-on. Sign in with your identity provider.",
         )
     if org is not None and sso_only_requested(org.settings):
-        # The tenant asked for SSO-only, but its IdP block does not resolve, so
-        # its login page offers no SSO button and the password stays open as
-        # the escape hatch (§204). Say so on every such sign-in: an org that
-        # believes it enforces SSO and does not is an operator's problem to fix.
-        # Org id only. The block's contents never reach the log.
-        logger.warning(
-            "[auth] org %s requires SSO but its identity-provider config does not "
-            "resolve; password sign-in stays open until it does",
-            org.id,
-        )
+        if not sso_only_requested(plan_scoped_settings(org.settings, entitlements)):
+            # Requested, but the plan no longer includes "require SSO" (or SSO
+            # itself) — a downgrade reopens the password by design (§258).
+            logger.info(
+                "[auth] org %s requires SSO but its plan does not include it; "
+                "password sign-in stays open",
+                org.id,
+            )
+        else:
+            _warn_unresolvable_sso_only(org)
 
     # A hash still stored under a scheme we no longer write gets replaced with
     # one we do — now, while the plaintext that just verified is in scope, which
@@ -961,7 +975,34 @@ STEP_UP_SSO_ONLY_DETAIL = coded_refusal(
 )
 
 
-def _org_closes_password_sign_in(org: Organization | None) -> bool:
+def _warn_unresolvable_sso_only(org: Organization) -> None:
+    """The tenant asked for SSO-only, but its IdP block does not resolve, so
+    its login page offers no SSO button and the password stays open as the
+    escape hatch (§204). Said on every such sign-in: an org that believes it
+    enforces SSO and does not is an operator's problem to fix. Org id only —
+    the block's contents never reach the log."""
+    logger.warning(
+        "[auth] org %s requires SSO but its identity-provider config does not "
+        "resolve; password sign-in stays open until it does",
+        org.id,
+    )
+
+
+async def _sso_only_entitlements(db: AsyncSession, org: Organization | None) -> dict:
+    """The org's plan entitlements — read only when they can change the answer.
+
+    The plan can only OPEN the password (§258), so an org whose stored block
+    does not ask for SSO-only is decided without it: no extra control-plane
+    query on the password sign-in of the many tenants that never set
+    `sso_only`. Returns ``{}`` there, which `_org_closes_password_sign_in`
+    reads as "not closed" — the right answer for a block that asks nothing.
+    """
+    if org is None or not sso_only_requested(org.settings):
+        return {}
+    return await get_entitlements(db, org.id)
+
+
+def _org_closes_password_sign_in(org: Organization | None, entitlements: dict) -> bool:
     """Has this organization closed password sign-in (`sso_only`)?
 
     The ONE statement of the rule, with three readers that must never disagree:
@@ -977,13 +1018,19 @@ def _org_closes_password_sign_in(org: Organization | None) -> bool:
     while SSO is switched off closes nothing, and neither does an IdP block that
     does not resolve, because that tenant's login page has no SSO button to
     offer instead (§204).
+
+    The org's PLAN is read too (decisions §258): `sso_only` is honoured only
+    while the plan grants `sso_enforcement`, and SSO itself only while it grants
+    `sso`. A downgrade therefore reopens the password rather than leaving a
+    tenant nobody can sign in to (`services/sso_plan.plan_scoped_settings`).
     """
-    return is_sso_only(org.settings if org else None)
+    return is_sso_only(plan_scoped_settings(org.settings if org else None, entitlements))
 
 
 async def _password_sign_in_closed(db: AsyncSession, user: User) -> bool:
     """`_org_closes_password_sign_in` for `user`'s organization, loaded here."""
-    return _org_closes_password_sign_in(await _load_user_org(db, user.organization_id))
+    org = await _load_user_org(db, user.organization_id)
+    return _org_closes_password_sign_in(org, await _sso_only_entitlements(db, org))
 
 
 async def _step_up_satisfied(
@@ -1296,7 +1343,7 @@ async def enroll_mfa_verify(
         user, action="auth.mfa.enrolled", details={"factor": "totp", "replaced": replaced}
     )
     org = await _load_user_org(db, user.organization_id)
-    return _user_response(user, org)
+    return await _user_response(db, user, org)
 
 
 @router.post("/mfa/disable", response_model=UserResponse)
@@ -1336,7 +1383,7 @@ async def disable_mfa(
     # disable can't be promoted afterwards by a later verify call.
     await mfa.clear_pending_totp_secret(user.id)
     await _audit_mfa_event(user, action="auth.mfa.disabled", details={"factor": "totp"})
-    return _user_response(user, org)
+    return await _user_response(db, user, org)
 
 
 # ---------------------------------------------------------------------------
@@ -1849,7 +1896,7 @@ async def get_me(
     db: AsyncSession = Depends(get_control_db),
 ):
     org = await _load_user_org(db, user.organization_id)
-    return _user_response(user, org)
+    return await _user_response(db, user, org)
 
 
 # ---------------------------------------------------------------------------
@@ -1945,7 +1992,7 @@ async def update_me(
     if body.password is not None:
         await _revoke_sessions_after_password_change(user)
     org = await _load_user_org(db, user.organization_id)
-    return _user_response(user, org)
+    return await _user_response(db, user, org)
 
 
 @router.post("/change-password", response_model=UserResponse)
@@ -1970,7 +2017,7 @@ async def change_password(
     await db.commit()
     await _revoke_sessions_after_password_change(user)
     org = await _load_user_org(db, user.organization_id)
-    return _user_response(user, org)
+    return await _user_response(db, user, org)
 
 
 # ---------- Delegation / Out-of-Office ----------

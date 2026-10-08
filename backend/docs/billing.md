@@ -84,7 +84,7 @@ plan must free it first or take an `IntegrityError`.
 `clear_stale_canceled_subscription` is the single owner of that rule; all three
 writers call it — `ensure_subscription` before its INSERT (an org the dunning
 sweep canceled could not otherwise resubscribe to the same plan),
-`plan_change.change_plan` and `seed.py::ensure_public_api_entitled` before
+`plan_change.change_plan` and `seed.py::ensure_seed_plan_entitled` before
 repointing an existing row's `plan_id`. Deleting the canceled row is
 deliberate: it is convenience history of a plan the org is re-adopting, the
 live row is the source of truth, and the durable record of a plan change is
@@ -97,8 +97,24 @@ new-child-tenant provisioning path — all three route through
 of the cosmetic `Organization.plan` display string those callers pass (that
 field predates this billing model and has long carried values like `"pro"`
 that were never a real `Plan.code`). `free` grants no entitlements by design —
-`public_api` is a paid-tier feature; an org reaches it via
-`POST /api/billing/change-plan` to `growth` or `scale`.
+every feature in [Entitlement gating](#entitlement-gating-servicesbillingentitlementspy--apidepspy)
+is a paid-tier feature; an org reaches one via `POST /api/billing/change-plan`
+to `growth` or `scale`.
+
+#### The public pricing page is generated from this catalog
+
+`DEFAULT_PLAN_CATALOG` is also what the marketing site sells. `pnpm gen:pricing`
+(`scripts/gen_pricing_catalog.py`) writes every tier's price, currency
+(`CATALOG_CURRENCY`), AI-read allowance, overage rate and feature keys to
+`frontend/src/lib/marketing/plans.generated.ts`, and `Pricing.svelte` renders
+only that. `pnpm check:pricing` runs in CI's Backend lint job, so **editing a
+catalog entry fails CI until the module is regenerated** — commit both
+together. Generation refuses an entitlement outside `ALL_FEATURES`, a usage
+component other than `ai_invoices`, and a float or malformed price, rather than
+describing them by guess. It reads the catalog constant, not the `plans` table:
+an operator's per-row edit, or a negotiated Enterprise plan, is not a public
+price. Issue #426 / `docs/decisions.md` §253; guard tests in
+`tests/test_pricing_catalog_generation.py`.
 
 #### Which plan the seed lands each tenant on
 
@@ -108,16 +124,18 @@ all on the same plan — the codes are named on `ACME_PLAN_CODE` /
 
 | Seeded tenant | Plan | Why |
 |---|---|---|
-| `acme` | `growth` | The tenant `docs/getting-started.md` logs into. `growth` grants `public_api`, so `GET /api/v1/...` works with a key minted straight after `pnpm seed` — see [public-api.md § Trying it locally](public-api.md#trying-it-locally). Seeding every tenant on `free` made the whole `/api/v1` surface 402 on a fresh clone, which guard rail 7 (local-first) forbids. |
-| `techflow` | `free` | Keeps the **refusal** path exercisable too. A seed where every tenant were entitled would make the 402 unreachable in exactly the way the 200 used to be. |
-| `e2e1..e2eN` | `free` | Load-bearing: `frontend/tests-e2e/billing/billing.spec.ts` parks whatever live subscription its worker's org holds, runs against its own fixture plans, then restores the parked row by id. That works because the worker tenants are interchangeable — entitling one would make which shard drew which tenant observable. The e2e suite only ever touches `acme` for cross-tenant isolation, never for billing. |
+| `acme` | `scale` | The tenant `docs/getting-started.md` logs into, and the one the local IdPs are wired to (`pnpm idp:seed` / `saml:seed` / `scim:seed`). `scale` grants every feature, so SSO enforcement, SCIM, multiple entities, live ERPs and the public API (`GET /api/v1/...` with a key minted straight after `pnpm seed` — see [public-api.md § Trying it locally](public-api.md#trying-it-locally)) all work on a fresh clone. Anything less would make part of the product 402 locally, which guard rail 7 (local-first) forbids. |
+| `techflow` | `free` | Keeps the **refusal** side of every gate — and the upgrade prompt — exercisable too. A seed where every tenant were entitled would make the 402 unreachable in exactly the way the 200 used to be. |
+| `e2e1..e2eN` | `scale` | The Playwright suite drives SSO settings, entity creation, ERP adapters, API keys and webhooks on its worker's tenant, and each is plan-gated (decisions §258). All workers share the one plan, so they stay interchangeable — which shard drew which tenant is unobservable — and `frontend/tests-e2e/billing/billing.spec.ts` still parks whatever live subscription its worker's org holds, runs against its own fixture plans, then restores the parked row by id. The FREE / GROWTH side of each gate is covered in e2e by stubbing `/api/auth/me`'s `entitlements` (`tests-e2e/billing/plan-gates.spec.ts`), never by moving a worker's subscription, which would outlive a crashed test. |
 
 `ensure_subscription` deliberately no-ops once an org holds a live
 subscription, so a plain re-seed could not have repaired a control plane
-already stranded on `free`. `seed.py::ensure_public_api_entitled` closes that:
-it **repoints the existing live row's `plan_id`** rather than adding a second
-(the unique index is never challenged), and only ever upward — an org already
-entitled, or on a richer plan, is left byte-identical. `seed_control_plane`
+already stranded on `free` (or, for acme, on the `growth` an earlier seed
+used). `seed.py::ensure_seed_plan_entitled` closes that: it **repoints the
+existing live row's `plan_id`** rather than adding a second (the unique index
+is never challenged), and only ever upward — an org whose live plan already
+grants every feature the seed's plan does is left byte-identical. It runs for
+acme and for every e2e worker. `seed_control_plane`
 runs that baseline on **both** branches of its already-seeded guard, mirroring
 the backfill `seed_e2e_control_plane` already does past its own `continue`.
 Guarded by `backend/tests/test_seed_billing_baseline.py`.
@@ -167,6 +185,212 @@ Two consequences worth knowing:
   table, different question: that one sits beside entity-scoped outflows an
   operator reconciles it against.
 
+The rollup also carries **`ai_invoices`** — the priced meter below — read
+through `ai_invoice_meter.count_ai_invoices`, never re-derived. It differs from
+`extractions_platform` on purpose: that counts rows (a re-read is two, a failed
+read is one, `mock` and structured e-invoices are in it); `ai_invoices` counts
+what a plan charges for.
+
+## AI-read invoice metering (decisions §253, §255)
+
+The one metered unit is an **AI-read invoice**. Four modules, one job each:
+
+| Module | Owns |
+|--------|------|
+| `services/billing/ai_invoice_meter.py` | The count, the allowance + cap arithmetic, and the gate decision. **The single owner of the unit** — nothing else queries `extraction_usage` for it. |
+| `services/extraction.py` (`run_extraction`) | Calls the gate **before** the model, and lands a paused invoice for manual entry. |
+| `services/billing/ai_overage.py` | Reports overage to the billing provider after commit, plus the reconciliation sweep. |
+| `services/billing/ai_usage_notices.py` | The 80% / 100% / spending-cap notices. |
+
+### The meter
+
+`count_ai_invoices(tenant_db, organization_id, period)` =
+`COUNT(DISTINCT invoice_id)` over `extraction_usage` (a TENANT table, §57) where
+`program_type = 'platform'`, `success = true`, `period = <YYYY-MM>` and
+`provider ∈ BILLABLE_EXTRACTION_PROVIDERS`.
+
+- **The month is UTC.** `run_extraction` stamps `period` as
+  `datetime.now(UTC).strftime("%Y-%m")`; `period_of()` is the same expression.
+- **DISTINCT** makes a re-read in the same month count once; the period key
+  makes the same invoice read again next month count again.
+- **Billable providers** are declared in one place, both ways:
+
+  | Provider | Counts? | Why |
+  |---|---|---|
+  | `claude_vision`, `openai_vision` | yes | a paid vendor call per document |
+  | `aws_textract` | yes | AWS bills per page when an operator points platform mode at it |
+  | `mock` | **no** | the keyless dev / e2e reader returns a fixture — counting it would trip Free on every e2e tenant |
+  | `ollama` | **no** | self-hosted, no per-call cost to pass on |
+  | `einvoice` | **no** | structured e-invoices are parsed, never sent to a model — but they DO write a `platform` usage row, so the exclusion has to be here |
+
+  `tests/test_ai_invoice_meter.py` asserts every registered extraction adapter
+  is in exactly one set, so a new adapter forces the decision. An unlisted
+  provider is not counted (undercount costs us cents; overcount bills a
+  customer for something nobody decided was billable).
+- **BYOK never counts** (`program_type = 'byok'`) — it is the customer's own
+  model bill.
+
+### The allowance and the cap
+
+The allowance comes from the live plan's `usage_components["ai_invoices"]`
+(`{"included": int, "overage_unit_price": decimal-string | null}`):
+
+- **No live subscription** → the Free catalogue allowance (100, pause). `free`
+  is where every tenant lands, so "no plan" is read as the default plan, not as
+  unlimited reading on our key.
+- **A plan with no component** → unmetered (an operator-configured negotiated
+  plan): never paused, never billed overage.
+- **A malformed component** → logged at ERROR and read as unmetered. A typo in
+  a plan row must not pause a paying customer or bill an overage nobody priced.
+
+The customer's **monthly spending cap** is
+`Organization.settings.billing.monthly_spend_cap`, an exact decimal string in
+the plan's currency (no migration). Its one writer is `PUT
+/api/billing/spending-cap`: `PATCH /api/organization` refuses the whole
+`billing` key, because the provider, the cap and the reported-overage markers in
+it all decide what gets charged. It caps **overage** only; `0.00` means "never bill overage" —
+the paid tier then pauses at its allowance exactly like Free. The cap buys
+`floor(cap / overage_unit_price)` overage reads (`cap_units`) — floor, so the
+bill never passes it.
+
+### Enforcement — where and what happens
+
+`run_extraction` calls `check_ai_read` after the structured-e-invoice routing
+and **before** RAG, the GL catalogue or the adapter call, so a paused org never
+spends a read. `decide()` (pure) rules:
+
+| Situation | Result |
+|---|---|
+| the invoice was already counted this month (a re-read) | read — always |
+| BYOK / `mock` / `ollama` / e-invoice | read — the gate never touches the control plane |
+| plan unmetered | read |
+| `used + 1 <= included` | read |
+| past the allowance, no overage price (Free) | **pause**, `allowance_reached` |
+| past the allowance, paid, the next read would pass the cap | **pause**, `spend_cap_reached` |
+| past the allowance, paid, under the cap (or no cap) | read — billed as overage |
+
+**A paused invoice is not failed.** `_pause_ai_reading` does not call the
+model, appends a coded warning — `ai_allowance_reached` (param `included`) or
+`ai_spend_cap_reached`, type `ai_reading_paused`, through
+`invoice_warning_catalog.warning` so every client localizes it — runs the same
+`refresh_warnings` pass an extraction-disabled upload gets, and transitions
+`pending → new` (`invoice.ai_reading_paused` audit row). `new` is the draft
+state inside the entry window, so the invoice is keyed by hand and submitted,
+approved, matched and paid exactly as any other; `failed` would lead only back
+to re-extraction, which would pause again. `pending → new` is a new edge in
+`VALID_TRANSITIONS` for this alone; `POST /api/invoices/bulk/status` refuses it
+for a human (a `pending` invoice is mid-read). The warning is an upstream type
+(`invoice_warnings.UPSTREAM_WARNING_TYPES`), so later refreshes keep it; a read
+that later runs removes it.
+
+**Race, by design not locked.** Two extractions at the boundary can both read
+`used = included - 1` and both proceed. Locking would serialise every read of
+an org behind a 5–30 s model call; a reservation row would need a schema
+change. The overshoot is bounded by concurrent workers, is our cost, and never
+reaches the bill: the overage reporter clamps to the cap on its own
+(`billable_overage_units`). See decisions §255.
+
+### Overage billing
+
+After a billable read commits, `ai_overage.after_ai_read` (best-effort, never
+raises) runs `report_ai_overage` and the notice check. It is called straight
+after `run_extraction`'s `commit()` returns, **not** via
+`post_commit.enqueue_post_commit`: SQLAlchemy's `after_commit` fires before the
+session releases its connection, and an extraction worker's tenant pool is one
+connection, so a job reading the tenant DB from that hook would wait on itself.
+
+`report_ai_overage` computes `target = billable_overage_units(used, allowance,
+cap)` and reports units `reported+1 … target`, one **meter event per overage
+invoice**, value `"1"`, event name `ai_invoice_overage`, identifier
+`ai-overage:<org>:<YYYY-MM>:<n>` — an **ordinal**, not an invoice id, because
+which invoice is "the 501st" is not stable while concurrent extractions commit
+out of order, but how many there are is. Included reads are never reported.
+`settings.billing.ai_overage_reported[period]` is the period's marker
+(`ai_overage.PeriodMarker`, written only under `lock_organization`):
+
+- `units` — the highest unit the provider accepted, max-merged; a failure
+  part-way keeps the progress made.
+- `batches` — `[[to_unit, timestamp], …]`, the timestamp each not-yet-accepted
+  unit is sent with, **written before the first send**. A crash between the
+  provider accepting a unit and `units` being stored re-sends it; Stripe
+  replays the original success only for an *identical* request, so a resend
+  stamped with a fresh timestamp was refused for 24 h and then billed twice.
+  Reusing the stored timestamp makes the resend identical.
+- `terms` — the allowance, unit price, plan and cap the period is priced on,
+  refreshed on every pass while it is open. **A closed period is priced only
+  from these**: a downgrade or a raised cap after the month ends never
+  re-prices a month already used, and a closed period with usage but no
+  recorded terms is refused at ERROR rather than priced on today's plan
+  (decisions §259). A plan change *inside* the month applies from the next
+  pass; units already reported are never withdrawn.
+
+Free (no overage price) reports nothing, ever.
+
+A new batch's timestamp is now while the period is current, else the period's
+last second (so a late report bills into the month it was used in); a period
+whose last second is older than 34 days can no longer be reported and is logged
+at ERROR with the unit count.
+
+**Why per-unit, not graduated.** The Stripe price is a per-unit **metered**
+price at `overage_unit_price` on the `ai_invoice_overage` meter — not a
+graduated "first N free" tier. The allowance is applied by our UTC calendar
+month; Stripe's billing period is anchored on the subscription's start day, so
+a graduated price would apply the allowance a second time over a different
+window. Per-unit, the total is exact whichever Stripe invoice an event lands on.
+See decisions §255.
+
+**Backstop sweep** — `run_ai_overage_reconcile_once` / `_loop`
+(`FEOH_BILLING_AI_OVERAGE_SWEEP_ENABLED`, default **off**, hourly), registered
+with `sweep_health` as `billing-ai-overage`. For every org it reports anything
+the post-read leg missed, for the current period and the previous one while
+still reportable, and re-runs the notice check. Hourly keeps a re-send after a
+lost marker write inside Stripe's 24 h idempotency window, where it replays the
+original success. **A deployment with a live billing provider must turn it
+on** (`deploy/prod.sops.yaml.example` does): without it the only retry is the
+org's next billable read, which can land outside that window. See
+`background-sweeps.md`.
+
+### Spending cap endpoint
+
+`PUT /api/billing/spending-cap` — **admin only** (it decides when AI reading
+pauses for the whole org; a CFO sees the cap read-only). Body
+`{"monthly_spend_cap": "25.00" | null}` as an exact decimal **string** (a JSON
+number is refused — `OptionalExactMoneyInput`); `0.00 … 1000000.00` in whole
+cents, else 422. `null` removes the cap. Written under `lock_organization`,
+audited `billing.spending_cap_updated` with only `previous_cap` / `new_cap`
+(no person, no customer data), and the response re-prices this month's usage
+under the new cap.
+
+### Notices
+
+At **80%** and **100%** of `included`, and when the overage reaches the **cap**,
+the org's admins get one in-app notification + email per threshold per UTC
+month (event `ai_invoice_usage`, entity type `billing`, preference-gated like
+every event). Marker: `settings.billing.ai_usage_notices[period]` (last three
+periods kept). The threshold is **claimed** under `lock_organization` before
+sending — the check runs after every billable read, several at once, so a
+send-then-mark would double-send — and released if `notify_event` reached
+nobody, so a later check retries. A batch of thresholds due together sends ONE
+notice, for the most severe. 80% is integer arithmetic (`used * 5 >= included
+* 4`). Notification text is server-rendered English, like every other event's
+(`notification_templates.render_ai_invoice_usage`); its preference label is
+localized in all six locales.
+
+### What the operator configures in Stripe
+
+1. The overage meter and per-plan overage prices are created by
+   `provision_org_billing` (`StripeBillingAdapter.ensure_overage_price` →
+   resolve-or-create the `ai_invoice_overage` meter, then a per-unit metered
+   price) and persisted on `settings.billing.ai_overage_price_ids[plan_code]`.
+2. **Each paid customer's Stripe subscription must carry that metered price as
+   a second item** — otherwise Stripe records the meter events and invoices
+   none of them. `create_subscription` adds `items[1][price]` when
+   `stripe_overage_price_id` is in its config, but nothing in the app creates
+   Stripe subscriptions yet (`docs/followups.md`).
+3. Anchoring the subscription's billing cycle on the 1st keeps each overage
+   event on the same Stripe invoice as its calendar month (totals are right
+   either way).
+
 ## Billing adapters (`services/billing_adapters/`)
 
 Same registry/decorator/dispatcher pattern as the email / PEPPOL / QMS families.
@@ -206,8 +430,8 @@ real billing back-end degrades gracefully rather than 500ing.
 
 | Adapter | Notes |
 |---------|-------|
-| `mock` (**default**) | In-process, deterministic, no network/credential. Synthetic `mock_sub_<org>` id; `report_usage` is a no-op; `parse_webhook` reads a dev JSON envelope; `list_invoices` fabricates a stable run of monthly `$49.00` receipts (newest `open`, the rest `paid`) keyed off the customer id, or `[]` when there's no customer; `create_setup_intent` returns a deterministic synthetic SetupIntent (`mock_seti_<cus>` + `<…>_secret`, status `requires_payment_method`) and `list_payment_methods` a single deterministic `visa ****4242` (exp 12/2030, default), both `None`/`[]` with no customer. Local-first. |
-| `stripe_billing` | Live key via sops, **fails closed** (`BillingNotConfigured`) without `FEOH_BILLING_STRIPE_API_KEY`. `ensure_customer` / `ensure_price` / `create_subscription` / `get_subscription` / `report_usage` are **implemented** against the Stripe REST API via `httpx` (key as HTTP-Basic username, form-encoded bodies; every create sends an `Idempotency-Key` header so a retry can't duplicate; `report_usage` POSTs one Billing Meter Event per meter with the quantity as an exact decimal **string**, never float). `ensure_customer` resolve-or-creates the per-org Stripe `customer` (idempotency key `ap-customer-<org>`, sends only the org business name + an admin email — never bank/tax/PAN); `ensure_price` resolve-or-creates the per-plan recurring `price` (unit amount = the plan's monthly price in integer **minor units** via exact Decimal math, idempotency key `ap-price-<code>-<cents>-<cur>`). `create_subscription` consumes the resolved `stripe_customer_id` + `stripe_price_id` from config (the provisioning resolver injects them) → `BillingNotConfigured` if absent. A non-2xx raises a PII-free `BillingProviderError` (status + op only, never the response body). `parse_webhook` verifies the `Stripe-Signature` HMAC over the raw body and maps Stripe statuses → our four-state lifecycle. `list_invoices` GETs `/v1/invoices?customer=<id>&limit=` (cap 100), normalizes each to `ProviderInvoice` (amount from the integer-minor-units `total` via exact Decimal → decimal **string**; `created`/`period_start` Unix → ISO/`YYYY-MM`; status map `draft`/`uncollectible`→`open`, `void`→`void`; `hosted_invoice_url` → `invoice_pdf` fallback) — fails closed without a key, returns `[]` for a `None` customer. `create_setup_intent` POSTs `/v1/setup_intents` (`customer`, `payment_method_types[]=card`, `usage=off_session`) → `ProviderSetupIntent`; `list_payment_methods` GETs `/v1/payment_methods?customer=<id>&type=card` and maps each to brand/last4/exp **only** (Stripe never returns a PAN here) — both fail closed without a key, `None`/`[]` for a `None` customer. |
+| `mock` (**default**) | In-process, deterministic, no network/credential. Synthetic `mock_sub_<org>` id; `report_usage` is a no-op; `report_meter_event` **records** each event in the process-wide `mock_adapter.RECORDED_METER_EVENTS` (deduped on `identifier`, like the provider's idempotency) so tests assert exactly what would be billed; `ensure_overage_price` returns `mock_overage_price_<code>`; `parse_webhook` reads a dev JSON envelope; `list_invoices` fabricates a stable run of monthly `$49.00` receipts (newest `open`, the rest `paid`) keyed off the customer id, or `[]` when there's no customer; `create_setup_intent` returns a deterministic synthetic SetupIntent (`mock_seti_<cus>` + `<…>_secret`, status `requires_payment_method`) and `list_payment_methods` a single deterministic `visa ****4242` (exp 12/2030, default), both `None`/`[]` with no customer. Local-first. |
+| `stripe_billing` | Live key via sops, **fails closed** (`BillingNotConfigured`) without `FEOH_BILLING_STRIPE_API_KEY`. `ensure_customer` / `ensure_price` / `create_subscription` / `get_subscription` / `report_usage` are **implemented** against the Stripe REST API via `httpx` (key as HTTP-Basic username, form-encoded bodies; every create sends an `Idempotency-Key` header so a retry can't duplicate; `report_usage` POSTs one Billing Meter Event per meter with the quantity as an exact decimal **string**, never float). `ensure_customer` resolve-or-creates the per-org Stripe `customer` (idempotency key `ap-customer-<org>`, sends only the org business name + an admin email — never bank/tax/PAN); `ensure_price` resolve-or-creates the per-plan recurring `price` (unit amount = the plan's monthly price in integer **minor units** via exact Decimal math, idempotency key `ap-price-<code>-<cents>-<cur>`). `create_subscription` consumes the resolved `stripe_customer_id` + `stripe_price_id` from config (the provisioning resolver injects them) → `BillingNotConfigured` if absent, and adds the plan's metered overage price as `items[1][price]` when `stripe_overage_price_id` is set. `ensure_overage_price` resolves-or-creates the `ai_invoice_overage` Billing Meter (`GET /v1/billing/meters` by `event_name`, else `POST` with `sum` aggregation and a stable `Idempotency-Key`) and a per-unit **metered** price on it (`recurring[usage_type]=metered`, `recurring[meter]`, `unit_amount_decimal` = the unit price in exact minor units, e.g. `0.07` → `"7"`). `report_meter_event` POSTs one Billing Meter Event (`event_name`, `payload[stripe_customer_id]`, `payload[value]` as a decimal string, `identifier`, `timestamp`) with `Idempotency-Key` = the identifier, and fails closed without a customer id. A non-2xx raises a PII-free `BillingProviderError` (status + op only, never the response body). `parse_webhook` verifies the `Stripe-Signature` HMAC over the raw body and maps Stripe statuses → our four-state lifecycle. `list_invoices` GETs `/v1/invoices?customer=<id>&limit=` (cap 100), normalizes each to `ProviderInvoice` (amount from the integer-minor-units `total` via exact Decimal → decimal **string**; `created`/`period_start` Unix → ISO/`YYYY-MM`; status map `draft`/`uncollectible`→`open`, `void`→`void`; `hosted_invoice_url` → `invoice_pdf` fallback) — fails closed without a key, returns `[]` for a `None` customer. `create_setup_intent` POSTs `/v1/setup_intents` (`customer`, `payment_method_types[]=card`, `usage=off_session`) → `ProviderSetupIntent`; `list_payment_methods` GETs `/v1/payment_methods?customer=<id>&type=card` and maps each to brand/last4/exp **only** (Stripe never returns a PAN here) — both fail closed without a key, `None`/`[]` for a `None` customer. |
 
 `get_billing_adapter(provider=None)` resolves: explicit arg → `FEOH_BILLING_PROVIDER`
 → `mock`. An unknown name falls back to `mock` (a bad config can't break read
@@ -571,21 +795,51 @@ leaves it absent so provisioning genuinely commits.
 the org's **live** subscription, or `{}` when there is none (fail-closed — a
 feature is granted only when a plan explicitly includes it).
 
-Two composable FastAPI dependencies in `api/deps.py`, both **on top of** auth —
-they never replace `require_roles` / `require_api_scope`:
+Features are the `plan_catalog.FEATURE_*` constants (decisions §253) — **a gate
+always names the constant, never a string literal**, so a typo cannot fail a
+gate closed. Three forms, all **on top of** auth — they never replace
+`require_roles` / `require_api_scope`:
 
-| Dependency | Surface | On miss |
-|------------|---------|---------|
-| `require_entitlement("feature")` | JWT (SPA) routes | **402 Payment Required** |
-| `require_api_entitlement("feature")` | API-key `/api/v1` routes | **402 Payment Required** |
+| Form | Use | On miss |
+|------|-----|---------|
+| `require_entitlement(FEATURE_X)` | dependency, JWT (SPA) routes gated as a whole | **402** |
+| `require_api_entitlement(FEATURE_X)` | dependency, API-key `/api/v1` routes | **402** |
+| `ensure_entitlement(db, org_id, FEATURE_X)` / `ensure_live_erp_entitled(db, org_id, erp_config)` | inline, when the gate depends on the body or stored config (turning SSO *on*, saving a *live* ERP) | **402** |
 
-402 (upgrade your plan) is deliberately distinct from a 403 role denial.
+Every 402 is the one coded refusal `plan_feature_refusal(feature)`:
+`{"code": "plan_feature_required", "message": "Your plan does not include this
+feature.", "params": {"feature": "<key>"}}`. The SPA localizes it to name the
+feature and the tier that grants it (`frontend/src/lib/api/codedRefusals.ts`).
+402 (upgrade your plan) is deliberately distinct from a 403 role denial. SCIM is
+the one surface that answers in its own shape instead — an IdP parses the
+RFC 7644 error body, not ours.
 
-**Wired demonstration:** the public `/api/v1/invoices` read routes now require
-`require_api_entitlement("public_api")` alongside `require_api_scope("read")` —
-the public API is a paid-plan feature. An org with no plan, or a plan whose
-`entitlements.public_api` is falsy, gets a 402; a plan with `public_api: true`
-passes.
+### What each feature gates (decisions §258)
+
+| Feature (tier) | Gated | Stays open on every plan |
+|---|---|---|
+| `public_api` (Growth) | every `/api/v1` route; `POST /api/api-keys`; `POST /api/webhooks`, `PATCH /api/webhooks/{id}` (unless it switches the subscription off), `POST /api/webhooks/{id}/rotate-secret`, `POST /api/webhooks/deliveries/{id}/redeliver`; `webhooks.dispatch._emit` queues nothing for an org without it | listing and revoking keys, key usage, listing / deleting subscriptions and deliveries, switching a subscription off |
+| `erp_integrations` (Growth) | for a **live** adapter only (`erp_adapters.dispatcher.erp_config_is_live`): a `PATCH /api/organization` carrying `settings.erp`, `POST /api/organization/test-erp`, `POST /api/{vendors,gl-accounts,purchase-orders}/sync-erp`, `POST /api/invoices/{id}/send-to-erp` / `retry-erp`, and the ERP leg of `POST /api/invoices/{id}/complete` (refused before the transition, so the invoice stays `approved`) | the `mock` ERP (guard rail 7); an org with no ERP configured (the route's own "not configured" answer); saving other settings while a stored ERP is live; the ERP webhook and `payment_erp_sync` sync-back of a payment already in flight |
+| `sso` (Growth) | `PUT /api/organization/sso` saving `enabled: true`; **sign-in** — `services/sso_plan.plan_scoped_settings` reads the stored block as switched off, so `/auth/{sso,saml}/config` report no SSO and authorize / callback / login / ACS / metadata answer as for an unconfigured tenant | saving with `enabled: false` (switching SSO off, staging IdP fields); password sign-in |
+| `sso_enforcement` (Scale) | `PUT /api/organization/sso` saving `sso_only: true`; sign-in reads `sso_only` as off without it, so the password reopens | saving `sso_only: false` |
+| `scim` (Scale) | `POST /api/organization/sso/scim-token`; a `PUT /api/organization/sso` that changes a non-empty group → role map; SCIM create user, PUT / PATCH user (anything but deactivation), create / replace / patch group — a SCIM-shaped 402 | SCIM reads, `DELETE /Users/{id}`, a PATCH that only sets `active` false, a PUT with `active: false` (applied as the deactivation alone), `DELETE /Groups/{id}` |
+| `multi_entity` (Scale) | `POST /api/entities` (every tenant already has its one default entity) | reading, scoping by, renaming, deactivating, reactivating and set-default on entities a tenant already has |
+| `audit_siem_export` (Scale) | **nothing yet** — there is no tenant-configurable SIEM destination to gate; the platform shipper (`docs/audit-log-shipping.md`) is operator-configured and ships every tenant's trail to the operator's WORM sinks. Tracked in `docs/followups.md`. | `GET /api/audit/export` (the SOX auditor export) — never gated |
+
+**A downgrade never strands data and never locks anyone out** (decisions §258):
+stored configuration is not rewritten, so an upgrade resumes it as it was; what
+a downgrade removes is the ability to turn a feature ON, and — for SSO — the
+sign-in paths read the plan, reopening password sign-in rather than leaving a
+tenant nobody can enter.
+
+`GET /api/auth/me` carries `entitlements` — the `FEATURE_*` keys the live plan
+grants, never the raw JSON — and the SPA reads it (`auth.hasFeature`) to render
+`ui/PlanUpgradeNotice.svelte` ("Available on Growth / Scale — upgrade", linking
+to `/billing`) in place of a control that would 402: the SSO panel's enable and
+"require SSO" toggles, the ERP section, `/admin/entities`' create, `/admin/api-keys`'
+mint and `/admin/webhooks`' create. Advisory only; the server enforces every
+gate. `frontend/src/lib/types/planFeatures.ts` is the client copy of the
+catalog, drift-guarded against `plan_catalog.py` by its test.
 
 ## Customer endpoint (`app/api/billing.py`)
 
@@ -602,10 +856,23 @@ period:
                    "current_period_end": "...", "trial_end": null,
                    "externally_managed": false},
   "period": "2026-06",
-  "usage": {"extractions": "12", "extractions_platform": "10",
-            "card_rebate_total.USD": "18.40", "card_rebate_total.EUR": "3.10"}
+  "usage": {"extractions": "12", "extractions_platform": "10", "ai_invoices": "9",
+            "card_rebate_total.USD": "18.40", "card_rebate_total.EUR": "3.10"},
+  "ai_usage": {"period": "2026-06", "used": 9, "included": 500,
+               "overage_unit_price": "0.10", "currency": "USD",
+               "overage_units": 0, "overage_amount": "0.00",
+               "projected_overage_amount": "0.00", "spend_cap": null,
+               "paused": false, "pause_reason": null}
 }
 ```
+
+`ai_usage` is this month's AI-read meter priced against the plan (§ AI-read
+invoice metering): `included: null` = unmetered, `overage_unit_price: null` =
+the plan pauses instead of billing, `overage_*` are clamped to the cap,
+`projected_overage_amount` is the overage at the month's daily pace (integer
+count projection, exact money), and `paused` says whether the NEXT new read
+would be refused. It is present for an org with no subscription too (the Free
+allowance).
 
 `plan`/`subscription` are `null` when the org has no live subscription. Money is
 an exact decimal **string** (this is a billing surface — exactness is the point).
@@ -728,6 +995,18 @@ dashboard and never sees the tab.
   re-fetches `GET /api/billing/subscription` so the plan card reflects the
   change without a manual reload. A "contact us" link stays alongside for
   anything outside the self-serve catalog (enterprise/custom plans).
+- **AI-read invoices** (`#lib/components/billing/AiUsagePanel.svelte`, from
+  `ai_usage`): a `role="meter"` bar of used / included (amber from 80%, red at
+  the limit or while paused), the plan's overage price or "pauses at the
+  allowance", `KpiCard`s for overage so far / month-end projection / the cap
+  (paid tiers), and a pause banner naming the remedy (change plan vs raise the
+  cap). An **admin** edits the cap inline (`PUT /api/billing/spending-cap` via
+  `setBillingSpendCap`; the typed string is validated by
+  `types/billing.ts::parseSpendCapInput` — whole cents, `0`–`1,000,000` — and
+  sent unchanged, never through a float); a CFO sees it read-only. e2e:
+  `tests-e2e/billing/ai-usage.spec.ts` — the real Free e2e tenant reads `0 of
+  100` (the canary that `mock` never counts), plus stubbed paid-tier render,
+  cap save (exact string sent) and client-side refusal.
 - `SubscriptionBadge.svelte` (`#lib/components/ui/`) is a new shared status pill
   for the four subscription states (WCAG-1.4.3-calibrated tones, matching
   `StatusBadge`).
@@ -755,9 +1034,34 @@ dashboard and never sees the tab.
 | `FEOH_BILLING_WEBHOOK_ENABLED` | `false` | Master switch for the inbound billing webhook route (`POST /api/billing/webhook/{provider}`). OFF in local dev (no outbound billing integration); flip ON in deployed envs. The route is HMAC-gated regardless; off → silent 204. **Boot guard**: refuses to start when this is `true` and `FEOH_BILLING_PROVIDER` is `mock` **or names no registered adapter** (the mock adapter's `parse_webhook` does no signature verification, and an unregistered name silently falls back to it) — pair with a real, correctly-spelled provider in deployed envs. |
 | `FEOH_BILLING_DUNNING_ENABLED` | `false` | Master switch for the dunning / past-due automation sweep. OFF by default; flip ON in deployed envs. The sweep only cancels subscriptions overdue past the grace window — it NEVER moves money. |
 | `FEOH_BILLING_DUNNING_INTERVAL_SECONDS` | `3600` | Dunning sweep tick interval. |
+| `FEOH_BILLING_AI_OVERAGE_SWEEP_ENABLED` | `false` | Master switch for the AI-read overage reconciliation sweep (`ai_overage.run_ai_overage_reconcile_loop`). The primary report runs after each billable read; this is the backstop, and it re-checks the usage notices. Reports usage only — never charges. Flip ON in deployed envs with a live billing provider. |
+| `FEOH_BILLING_AI_OVERAGE_SWEEP_INTERVAL_SECONDS` | `3600` | Its tick. Keep it well under 24 h — Stripe's idempotency window, inside which a re-sent event replays as the original. |
 | `FEOH_BILLING_DUNNING_GRACE_DAYS` | `14` | Grace window (days from the persisted `current_period_end`) a subscription may sit `past_due` before the dunning sweep cancels it. A row with no period end recorded (one created before `ensure_subscription` stamped one) is overdue by default. |
 
 ## Tests
+
+`backend/tests/test_ai_invoice_meter.py` — the AI-read unit: every registered
+extraction adapter classified billable-or-not, the UTC month boundary, allowance
+parsing (malformed → unmetered, no plan → Free), the pure gate decision (Free
+pause, paid overage, cap pause, zero cap, re-read always allowed), cap floor and
+the bill clamp, notice thresholds, event timestamps + ordinal identifiers, the
+Stripe meter / metered-price / meter-event wire shape against a mocked `httpx`
+transport (idempotency key = identifier, per-unit not graduated), the mock's
+recorded events, and the SQL count on the real-DB harness (distinct, platform +
+successful + billable only, BYOK / `mock` / `ollama` / `einvoice` / failed /
+other-month excluded).
+
+`backend/tests/test_ai_invoice_enforcement.py` — end to end on the real-DB
+harness through `run_extraction` itself: Free at its limit lands at `new` with
+the coded warning and no model call; a counted re-read runs and clears the
+warning; BYOK is never paused; a paid overage read reports one meter event,
+stores the marker and sends ONE notice for 80% + 100%; the cap pauses a paid
+org; the report is idempotent and cap-clamped; Free reports nothing; the sweep
+reports what was missed; each threshold is announced once and a notice that
+reached nobody is not marked; `GET /subscription`'s `ai_usage`; the spending-cap
+endpoint (exact string, audit rows, clear, admin-only, 422 on inexact /
+out-of-range / float); bulk status refusing `pending → new`; and the extraction
+worker releasing its one-connection control pool before the read.
 
 `backend/tests/test_billing.py` — adapter default + fallback, mock determinism,
 Stripe fail-closed + webhook HMAC verify/reject, entitlement allow/deny, rollup
@@ -821,14 +1125,23 @@ frees only its own target — never a canceled row on another plan, never a
 LIVE row.
 
 `backend/tests/test_seed_billing_baseline.py` — which plan `scripts/seed.py`
-lands each tenant on: the cross-module claim that `ACME_PLAN_CODE` names a
-catalog plan actually granting `public_api` (and that `TECHFLOW_PLAN_CODE` /
-`E2E_PLAN_CODE` do not), plus the real-Postgres behaviour of
+lands each tenant on: the cross-module claim that `ACME_PLAN_CODE` and
+`E2E_PLAN_CODE` name a catalog plan actually granting every feature (and that
+`TECHFLOW_PLAN_CODE` grants none), plus the real-Postgres behaviour of
 `ensure_demo_billing_baseline` — a fresh control plane entitles the demo tenant
-and not the other, a control plane already stranded on `free` is repaired by
-repointing the SAME live row (never a second, which
-`uq_subscription_one_live_per_org` forbids), and an already-entitled or richer
-plan is never downgraded by a re-seed.
+and not the other, a control plane already stranded on `free` or `growth` is
+repaired by repointing the SAME live row (never a second, which
+`uq_subscription_one_live_per_org` forbids), and a plan at least as rich (an
+operator's Enterprise plan) is never replaced by a re-seed.
+
+`backend/tests/test_plan_feature_gates.py` — every feature gate in
+[Entitlement gating](#entitlement-gating-servicesbillingentitlementspy--apidepspy):
+the coded 402 when the plan lacks the feature, the allowed path when it has it,
+and what a downgraded tenant keeps (SSO sign-in reopening the password, SCIM
+deprovisioning, existing entities, switching a webhook off). The `realdb`
+harness's orgs hold no subscription by default — which reads exactly like
+`free` — and a test arranges the plan it needs with `realdb.subscribe(key,
+code)` or `@pytest.mark.plan("scale")`.
 
 `backend/tests/test_billing_period.py` — the pure period rules: `add_months`
 day clamping / year crossing / backwards, the window containing `now`, the

@@ -14,11 +14,13 @@ from __future__ import annotations
 
 import uuid
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from sqlalchemy import select
 
-from app.models.invoice import InvoiceStatus
+from app.models.gl_account import GLAccount
+from app.models.invoice import Invoice, InvoiceStatus
 from app.services.gl_recode import (
     RecodeFilter,
     RecodeReport,
@@ -431,7 +433,7 @@ async def test_non_dry_run_invokes_ai_for_no_prior_invoices_only():
     inv_priored = _make_invoice(vendor_id=vendor_with_prior, gl_account=None)
     inv_no_prior = _make_invoice(vendor_id=vendor_without_prior, gl_account=None)
 
-    async def fake_ai_runner(db_, inv, *, actor_id, org_settings, ctrl_db):
+    async def fake_ai_runner(db_, inv, *, actor_id, org_settings):
         inv.gl_account = "6100"
 
     ai_mock = AsyncMock(side_effect=fake_ai_runner)
@@ -457,6 +459,103 @@ async def test_non_dry_run_invokes_ai_for_no_prior_invoices_only():
     assert sources == ["ai", "vendor_prior"]
     assert report.by_source == {"vendor_prior": 1, "ai": 1}
     assert report.ai_candidates == 0  # only populated in dry-run
+
+
+@pytest.mark.asyncio
+async def test_the_default_ai_runner_is_called_the_way_recode_gl_with_ai_accepts():
+    """The injected fakes accepted any kwargs, so nothing noticed the default
+    runner was called with a `ctrl_db=` the real one did not take: every real
+    AI re-code raised TypeError and was reported as `ai_failed`. An autospec
+    of the REAL default refuses a call it could not accept."""
+    from unittest.mock import create_autospec
+
+    from app.services import gl_recode
+
+    vendor_id = uuid.uuid4()
+    inv = _make_invoice(vendor_id=vendor_id, gl_account=None)
+    db = _make_db_for(active_codes=["6100"], eligible_invoices=[inv], priors={})
+    runner = create_autospec(gl_recode.recode_gl_with_ai)
+
+    with patch.object(gl_recode, "recode_gl_with_ai", runner):
+        report = await bulk_recode_gl(
+            db,
+            organization_id=uuid.uuid4(),
+            filt=RecodeFilter(),
+            dry_run=False,
+            include_ai_fallback=True,
+            ctrl_db=AsyncMock(),
+        )
+
+    assert runner.await_count == 1
+    assert report.skipped_ai_failed == 0
+
+
+@pytest.mark.asyncio
+async def test_an_ai_recode_changes_the_gl_code_and_nothing_else(realdb, monkeypatch):
+    """The AI fallback used to run the whole extraction pipeline, which
+    overwrote a hand-keyed draft's amount and vendor with the document's,
+    replaced its line items and transitioned it (possibly to `approved`). A
+    re-code changes the GL code; everything a human keyed stays."""
+    from decimal import Decimal
+
+    from sqlalchemy import func
+
+    from app.models.invoice import InvoiceLineItem
+    from app.models.usage import ExtractionUsage
+
+    async def _pdf(_key):
+        return b"%PDF-1.4 not a real document", "application/pdf"
+
+    monkeypatch.setattr("app.services.storage._get_object", _pdf)
+    org_id = realdb.info("a").org_id
+    inv_id = uuid.uuid4()
+    from app.models.vendor import Vendor
+
+    vendor_id = uuid.uuid4()
+    async with realdb.sessionmaker("a")() as s:
+        s.add(GLAccount(organization_id=org_id, code="6100", name="Services"))
+        s.add(Vendor(id=vendor_id, organization_id=org_id, name="Hand Keyed Ltd"))
+        await s.flush()
+        s.add(
+            Invoice(
+                id=inv_id,
+                organization_id=org_id,
+                invoice_number="HAND-1",
+                vendor_name="Hand Keyed Ltd",
+                vendor_id=vendor_id,
+                amount=Decimal("100.00"),
+                currency="EUR",
+                status=InvoiceStatus.new,
+                file_key=f"{org_id}/invoices/{inv_id}/doc.pdf",
+            )
+        )
+        await s.commit()
+
+    async with realdb.sessionmaker("a")() as s:
+        report = await bulk_recode_gl(
+            s,
+            organization_id=org_id,
+            filt=RecodeFilter(),
+            dry_run=False,
+            include_ai_fallback=True,
+            org_settings={},
+        )
+
+    assert report.by_source.get("ai") == 1, report
+    async with realdb.sessionmaker("a")() as s:
+        inv = await s.get(Invoice, inv_id)
+        lines = (
+            await s.execute(select(func.count()).where(InvoiceLineItem.invoice_id == inv_id))
+        ).scalar_one()
+        usage = (
+            await s.execute(select(func.count()).where(ExtractionUsage.invoice_id == inv_id))
+        ).scalar_one()
+    assert inv.gl_account == "6100"
+    assert (inv.amount, inv.currency) == (Decimal("100.00"), "EUR")
+    assert (inv.vendor_name, inv.vendor_id) == ("Hand Keyed Ltd", vendor_id)
+    assert inv.status == InvoiceStatus.new
+    assert lines == 0
+    assert usage == 1  # still a read, still metered
 
 
 @pytest.mark.asyncio

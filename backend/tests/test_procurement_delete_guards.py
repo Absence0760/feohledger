@@ -33,6 +33,7 @@ from __future__ import annotations
 import uuid
 from decimal import Decimal
 
+import pytest
 from sqlalchemy import select
 
 from app.models.procurement import IntakeRequest, PurchaseOrder, PurchaseRequisition
@@ -205,6 +206,8 @@ async def test_create_intake_with_unknown_vendor_is_404_not_500(realdb):
     assert resp.json()["detail"] == "Vendor not found"
 
 
+# Creates a second entity: multi-entity is plan-gated (docs/decisions.md §258).
+@pytest.mark.plan("scale")
 async def test_create_intake_with_a_cross_entity_vendor_is_refused(realdb):
     """A sibling subsidiary's vendor must not ride onto a requisition and PO.
 
@@ -247,6 +250,8 @@ async def test_create_intake_with_a_cross_entity_vendor_is_refused(realdb):
             assert ok.json()["vendor_id"] == allowed
 
 
+# Creates a second entity: multi-entity is plan-gated (docs/decisions.md §258).
+@pytest.mark.plan("scale")
 async def test_patch_intake_vendor_is_validated_against_the_intakes_entity(realdb):
     """A PATCH can't smuggle in what create refuses.
 

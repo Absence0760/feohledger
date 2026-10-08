@@ -301,7 +301,10 @@ Stored in `Organization.settings` JSONB under the key `erp`:
 }
 ```
 
-The ERP type determines which adapter is used. Auth credentials are encrypted at rest (future: use a secrets manager).
+The ERP type determines which adapter is used. Credentials are stored as plain
+JSONB in `Organization.settings`, protected only by the database's storage
+encryption, and admins read them back verbatim (`services/org_settings_view`).
+Application-level encryption is tracked in `docs/followups.md`.
 
 ## Per-ERP Integration Details
 
@@ -922,12 +925,16 @@ backend/app/api/erp_webhook.py        # POST /api/erp/webhook/{erp_type}
 
 ### Merge.dev Pricing
 
-Merge.dev is **not free**. Pricing is per linked account (per customer ERP connection):
-- **Launch**: Free for first 5 linked accounts (good for development)
-- **Professional**: Starts at $650/month
-- **Enterprise**: Custom pricing
+Merge.dev is **not free**. Pricing is per linked account: one customer
+connected to one integration (merge.dev/pricing, read 2026-10-07):
+- **Launch**: the first 3 production linked accounts free, then $650/month for
+  up to 10, then $65 per additional linked account per month. Up to 3 test
+  linked accounts.
+- **Professional / Enterprise**: contract-based.
 
-For development and testing, the free tier is sufficient. See [merge.dev/pricing](https://merge.dev/pricing).
+$65 a linked account is more than the $49 Growth plan, which includes ERP
+integrations. That is why QuickBooks Online is scoped as a direct adapter
+(`quickbooks-online-adapter.md`) with Merge kept for the long tail.
 
 ## Implementation Status
 
@@ -942,6 +949,7 @@ For development and testing, the free tier is sufficient. See [merge.dev/pricing
 | ERP config UI in org settings | Done |
 | Post-ERP statuses (posted_in_erp, payment_scheduled, paid) | Done |
 | Polling job for status sync | Planned |
+| QuickBooks Online direct adapter | Scoped — `quickbooks-online-adapter.md` |
 | Remaining direct adapters (SAP, Epicor, etc.) | Use Merge.dev |
 | Test connection button in UI | Planned |
 | ERP status display in invoice modal | Planned |

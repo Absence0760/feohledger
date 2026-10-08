@@ -18,11 +18,13 @@ surface where exactness is the point. See ``backend/docs/billing.md``.
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm.attributes import flag_modified
 
 from app.api.deps import ROLE_ADMIN, ROLE_CFO, require_roles
 from app.config import settings
@@ -30,6 +32,8 @@ from app.database import get_control_db
 from app.models.billing import Plan
 from app.models.organization import Organization
 from app.models.user import User
+from app.schemas.money import OptionalExactMoneyInput
+from app.services.audit_dispatch import dispatch_auth_audit
 from app.services.billing import (
     PlanChangeError,
     change_plan,
@@ -37,8 +41,16 @@ from app.services.billing import (
     get_active_subscription,
     rollup_usage,
 )
+from app.services.billing.ai_invoice_meter import (
+    BILLING_SETTINGS_KEY,
+    SPEND_CAP_KEY,
+    AiUsageSummary,
+    allowance_for_plan,
+    parse_spend_cap,
+    summarize,
+)
 from app.services.billing_adapters import get_billing_adapter
-from app.tenant import get_tenant, get_tenant_db
+from app.tenant import get_tenant, get_tenant_db, lock_organization
 
 router = APIRouter(prefix="/billing", tags=["billing"])
 
@@ -62,6 +74,31 @@ class SubscriptionView(BaseModel):
     externally_managed: bool
 
 
+class AiUsageView(BaseModel):
+    """This month's AI-read invoices against the plan allowance (decisions §253).
+
+    Money is an exact decimal STRING in ``currency``; counts are ints. Null
+    ``included`` = the plan does not meter AI reads. Null
+    ``overage_unit_price`` = the plan pauses at the limit instead of billing.
+    """
+
+    period: str
+    used: int
+    included: int | None
+    overage_unit_price: str | None
+    currency: str
+    # Billable overage so far (clamped to the spending cap) and its amount.
+    overage_units: int
+    overage_amount: str
+    # Overage at this month's daily pace, clamped to the cap.
+    projected_overage_amount: str
+    # The customer's monthly overage cap, or None for no cap.
+    spend_cap: str | None
+    # Whether the NEXT new AI read would be refused, and why.
+    paused: bool
+    pause_reason: str | None  # allowance_reached | spend_cap_reached
+
+
 class BillingSummaryResponse(BaseModel):
     # Provider in effect for this org (per-org override → FEOH_BILLING_PROVIDER).
     provider: str
@@ -71,6 +108,26 @@ class BillingSummaryResponse(BaseModel):
     period: str
     # Billable meters for the current period, as exact decimal strings.
     usage: dict[str, str]
+    ai_usage: AiUsageView
+
+
+def _ai_usage_view(summary: AiUsageSummary, *, currency: str) -> AiUsageView:
+    allowance = summary.allowance
+    return AiUsageView(
+        period=summary.period,
+        used=summary.used,
+        included=allowance.included,
+        overage_unit_price=(
+            str(allowance.overage_unit_price) if allowance.overage_unit_price is not None else None
+        ),
+        currency=currency,
+        overage_units=summary.overage_units,
+        overage_amount=str(summary.overage_amount),
+        projected_overage_amount=str(summary.projected_overage_amount),
+        spend_cap=str(summary.cap) if summary.cap is not None else None,
+        paused=summary.paused,
+        pause_reason=summary.pause_reason,
+    )
 
 
 def _current_period() -> str:
@@ -127,6 +184,12 @@ async def get_subscription(
         )
 
     usage = await rollup_usage(tenant_db, organization_id=org.id, period=period)
+    ai_summary = summarize(
+        used=usage.ai_invoices,
+        allowance=allowance_for_plan(active[1] if active else None),
+        cap=parse_spend_cap(org.settings),
+        now=datetime.now(UTC),
+    )
 
     return BillingSummaryResponse(
         provider=_resolve_provider(org),
@@ -134,6 +197,91 @@ async def get_subscription(
         subscription=sub_view,
         period=period,
         usage=usage.as_meters(),
+        ai_usage=_ai_usage_view(ai_summary, currency=plan_view.currency if plan_view else "USD"),
+    )
+
+
+#: The largest cap the endpoint accepts — a guard against a typo'd extra digits,
+#: not a commercial limit (a negotiated plan does not use the self-serve cap).
+MAX_SPEND_CAP = Decimal("1000000.00")
+
+
+class SpendCapRequest(BaseModel):
+    # Exact decimal STRING in the plan's currency; null removes the cap. A JSON
+    # number is refused (it is already a float by the time it arrives). Whole
+    # cents between 0.00 and MAX_SPEND_CAP — an out-of-range value is a 422.
+    monthly_spend_cap: OptionalExactMoneyInput = Field(
+        default=None, ge=0, le=MAX_SPEND_CAP, max_digits=9, decimal_places=2
+    )
+
+
+class SpendCapResponse(BaseModel):
+    monthly_spend_cap: str | None
+    ai_usage: AiUsageView
+
+
+@router.put("/spending-cap", response_model=SpendCapResponse)
+async def set_spending_cap(
+    body: SpendCapRequest,
+    org: Organization = Depends(get_tenant),
+    user: User = Depends(require_roles(ROLE_ADMIN)),
+    control_db: AsyncSession = Depends(get_control_db),
+    tenant_db: AsyncSession = Depends(get_tenant_db),
+) -> SpendCapResponse:
+    """Set or clear the org's monthly AI-read overage spending cap.
+
+    Admin only — the cap decides when AI reading pauses for the whole org.
+    ``0.00`` is a valid cap ("never bill overage": reading pauses at the plan
+    allowance, like Free); ``null`` removes it. Stored on
+    ``Organization.settings.billing.monthly_spend_cap`` as an exact decimal
+    string. Every change writes a ``billing.spending_cap_updated`` audit row
+    carrying only the old and new amounts — no person, no customer data.
+    """
+    cap = body.monthly_spend_cap
+    if cap is not None:
+        cap = cap.quantize(Decimal("0.01"))
+
+    # Serialise with every other settings writer (`lock_organization`).
+    org = await lock_organization(control_db, org)
+    settings_dict = dict(org.settings or {})
+    billing = dict(settings_dict.get(BILLING_SETTINGS_KEY) or {})
+    previous = parse_spend_cap(settings_dict)
+    if cap is None:
+        billing.pop(SPEND_CAP_KEY, None)
+    else:
+        billing[SPEND_CAP_KEY] = str(cap)
+    settings_dict[BILLING_SETTINGS_KEY] = billing
+    org.settings = settings_dict
+    flag_modified(org, "settings")
+
+    if previous != cap:
+        # Audit BEFORE the commit, as `change_plan` does, so the change is
+        # never durable without an audit attempt.
+        await dispatch_auth_audit(
+            organization_id=org.id,
+            actor_id=user.id,
+            action="billing.spending_cap_updated",
+            entity_id=org.id,
+            entity_type="organization",
+            details={
+                "previous_cap": str(previous) if previous is not None else None,
+                "new_cap": str(cap) if cap is not None else None,
+            },
+        )
+    await control_db.commit()
+
+    active = await get_active_subscription(control_db, org.id)
+    plan = active[1] if active else None
+    usage = await rollup_usage(tenant_db, organization_id=org.id, period=_current_period())
+    summary = summarize(
+        used=usage.ai_invoices,
+        allowance=allowance_for_plan(plan),
+        cap=cap,
+        now=datetime.now(UTC),
+    )
+    return SpendCapResponse(
+        monthly_spend_cap=str(cap) if cap is not None else None,
+        ai_usage=_ai_usage_view(summary, currency=plan.currency if plan else "USD"),
     )
 
 

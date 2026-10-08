@@ -53,6 +53,18 @@ RUN uv pip install --system --no-cache --require-hashes -r requirements.lock \
 
 COPY . .
 
+# Postgres TLS trust anchor for Amazon RDS. `COPY . .` above ships the committed
+# AWS RDS global CA bundle (certs/rds-global-bundle.pem — a public file, pinned
+# by sha256 in tests/test_container_supply_chain.py, so a bump is a reviewed
+# diff rather than a build-time download). asyncpg and libpq read PGSSLROOTCERT
+# only when PGSSLMODE is require or stricter, so naming it here changes nothing
+# for the local Postgres container (compose.prod.yml defaults PGSSLMODE to
+# `prefer`); against RDS, `PGSSLMODE=verify-full` checks the server's chain and
+# hostname against it. Deliberately NOT added to the system trust store: these
+# CAs are for the database connection, not for every HTTPS call the app makes.
+# docs/minimal-deployment.md § Database TLS.
+ENV PGSSLROOTCERT=/app/certs/rds-global-bundle.pem
+
 EXPOSE 8000
 
 # Default entrypoint is the ECS/Fargate API (uvicorn). This same image is

@@ -60,6 +60,7 @@ class NotificationPrefs(BaseModel):
     contract_renewal_due: ChannelPrefs = Field(default_factory=ChannelPrefs)
     chat_message: ChannelPrefs = Field(default_factory=ChannelPrefs)
     cash_shortfall_projected: ChannelPrefs = Field(default_factory=ChannelPrefs)
+    ai_invoice_usage: ChannelPrefs = Field(default_factory=ChannelPrefs)
 
 
 class NotificationPrefsUpdate(BaseModel):
@@ -76,6 +77,7 @@ class NotificationPrefsUpdate(BaseModel):
     contract_renewal_due: ChannelPrefs | None = None
     chat_message: ChannelPrefs | None = None
     cash_shortfall_projected: ChannelPrefs | None = None
+    ai_invoice_usage: ChannelPrefs | None = None
 
 
 class DeviceTokenRegister(BaseModel):

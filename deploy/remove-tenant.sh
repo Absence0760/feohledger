@@ -21,7 +21,8 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
-COMPOSE=(docker compose -f compose.prod.yml)
+# shellcheck source=lib.sh
+. ./lib.sh
 
 die() {
 	echo "remove-tenant.sh: $*" >&2
@@ -44,23 +45,22 @@ while [ $# -gt 0 ]; do
 done
 echo "$SLUG" | grep -Eq '^[a-z0-9](-?[a-z0-9])*$' || die "invalid slug '$SLUG'"
 [ -f .env ] || die "deploy/.env missing — run deploy.sh at least once first."
+# Same compose invocation as every other deploy script (deploy/lib.sh) — the
+# api it execs into is the same container in either database mode.
+feoh_load_db_mode || die "could not determine the database mode from deploy/.env."
 
-read_env() {
-	grep -E "^$1=" .env | tail -1 | cut -d= -f2- || true
-}
-
-APP_DOMAIN=$(read_env APP_DOMAIN)
+APP_DOMAIN=$(feoh_env APP_DOMAIN)
 [ -n "$APP_DOMAIN" ] || die "APP_DOMAIN not set in the sops env."
 HOST="${SLUG}.${APP_DOMAIN}"
 DB_NAME="feoh_${SLUG}"
 
 BUCKET="${BACKUP_S3_BUCKET:-}"
-[ -n "$BUCKET" ] || BUCKET=$(read_env BACKUP_S3_BUCKET)
+[ -n "$BUCKET" ] || BUCKET=$(feoh_env BACKUP_S3_BUCKET)
 
 # Same region fallback as backup.sh: on EC2 the CLI infers it from IMDS, off-EC2
 # there is none, so take what the sops env already carries.
 if [ -z "${AWS_DEFAULT_REGION:-}" ] && [ -z "${AWS_REGION:-}" ]; then
-	REGION=$(read_env AWS_REGION)
+	REGION=$(feoh_env AWS_REGION)
 	[ -z "$REGION" ] || export AWS_DEFAULT_REGION="$REGION"
 fi
 
@@ -212,7 +212,7 @@ cat <<-EOF
 	  tenant database:  ${DB_NAME}
 	  backups:          ${BACKUP_RESULT}
 
-	Two residues remain, exactly as /legal/dpa § 13 discloses:
+	These residues remain, as /legal/dpa § 13 discloses:
 
 	  - The nightly CONTROL-PLANE dump (pg/*/feohledger.dump) is shared across
 	    every tenant and is not selectively editable, so this tenant's employee
@@ -220,6 +220,20 @@ cat <<-EOF
 	    retention cycle (90 days by default).
 	  - Any audit event already shipped to write-once archival cannot be deleted
 	    before its retention period expires.
+EOF
+# An external database (RDS) adds the residue the DPA's "volume-level snapshot"
+# sentence covers: its automated backups are whole-instance storage snapshots
+# plus transaction logs, not selectively editable, kept for the instance's
+# backup retention period (the point-in-time restore window).
+if [ "$DB_MODE" = external ]; then
+	cat <<-EOF
+		  - The database server's automated backups (RDS snapshots + the
+		    point-in-time-restore window) hold the whole instance, this tenant's
+		    database included, and are not selectively editable; they expire on
+		    the instance's backup retention period.
+	EOF
+fi
+cat <<-EOF
 
 	Send the customer the confirmation printed above under "Tenant deletion".
 EOF

@@ -344,6 +344,13 @@ def _resolve_summary_config(org_settings: dict | None) -> dict:
     model = settings.audit_summary_model or settings.extraction_model
 
     if program_type == "byok":
+        # Only a `claude_vision` org's key is an Anthropic key. Any other BYOK
+        # provider's secret must never be posted to api.anthropic.com, and the
+        # platform key is no fallback (it would engage Anthropic for an org that
+        # chose another provider) — the template path, as in
+        # `llm_fraud_detection.resolve_anomaly_llm_config`.
+        if extraction.get("provider") != "claude_vision":
+            return {"api_key": "", "model": ""}
         return {
             "api_key": extraction.get("api_key", ""),
             "model": extraction.get("model") or model,
@@ -378,7 +385,10 @@ async def summarize(
     prompt = build_prompt(invoice, events, extraction_meta)
     body = {
         "model": model,
-        "max_tokens": 600,
+        # Sized for adaptive thinking as well as the short summary: current
+        # models think by default and thinking counts toward this cap, so 600
+        # could end the turn before any text and silently drop to the template.
+        "max_tokens": 4096,
         "messages": [{"role": "user", "content": [{"type": "text", "text": prompt}]}],
     }
     headers = {

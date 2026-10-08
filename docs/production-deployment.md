@@ -124,6 +124,10 @@ The FastAPI app uses `pydantic-settings` (`backend/app/config.py`) with the `FEO
 # Database
 FEOH_DATABASE_URL=postgresql+asyncpg://user:pass@rds-host:5432/feohledger
 FEOH_TENANT_DB_PREFIX=feoh_
+# Database TLS — unprefixed, read by asyncpg and libpq alike. The image already
+# sets PGSSLROOTCERT to the RDS CA bundle (backend/Dockerfile); every task and
+# Lambda function sets the mode (docs/minimal-deployment.md § Database TLS).
+PGSSLMODE=verify-full
 
 # Auth — REQUIRED in production
 FEOH_SECRET_KEY=<generate via `openssl rand -hex 32`>

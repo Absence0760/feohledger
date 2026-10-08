@@ -569,10 +569,14 @@ BAD_ERP_TYPE = "netsuite-oauth"
 
 
 @pytest.mark.asyncio
-async def test_test_erp_endpoint_no_longer_confirms_a_typod_adapter():
+async def test_test_erp_endpoint_no_longer_confirms_a_typod_adapter(all_plan_features):
     """It used to answer "Connected to <typo> successfully" — `mock`'s
     `test_connection()` returns True — so the endpoint that exists to catch
-    the misconfiguration confirmed it."""
+    the misconfiguration confirmed it.
+
+    A non-mock type is a live ERP, so the org stands in for a plan that grants
+    ERP integrations (decisions §258) — otherwise this is the 402, not the
+    adapter check."""
     from app.api.organization import test_erp_connection
 
     org = SimpleNamespace(id=uuid.uuid4(), settings={})
@@ -580,6 +584,7 @@ async def test_test_erp_endpoint_no_longer_confirms_a_typod_adapter():
         request={"type": BAD_ERP_TYPE, "integration_method": "direct", "api_key": "SECRET"},
         org=org,
         user=_user(uuid.uuid4()),
+        db=None,  # only the (patched) entitlement lookup would read it
     )
 
     assert res["success"] is False

@@ -16,6 +16,10 @@ from sqlalchemy.exc import IntegrityError
 
 from app.models.entity import Entity
 
+# Multi-entity is a plan-gated feature (docs/decisions.md §258) and every test
+# here stands up a second entity, so the harness orgs run on Scale.
+pytestmark = pytest.mark.plan("scale")
+
 # ---------------------------------------------------------------------------
 # Baseline: every tenant starts with one Default entity
 # ---------------------------------------------------------------------------

@@ -120,7 +120,7 @@ def _msg(**overrides) -> dict:
 
 
 async def test_extraction_lambda_rolls_back_session_on_error():
-    org = SimpleNamespace(id=uuid.uuid4(), db_name="feoh_acme")
+    org = SimpleNamespace(id=uuid.uuid4(), db_name="feoh_acme", settings=None)
     invoice = SimpleNamespace(id=uuid.uuid4())
     boom = AsyncMock(side_effect=RuntimeError("extract failed"))
     with _two_engine_harness(

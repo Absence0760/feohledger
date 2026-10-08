@@ -11,11 +11,13 @@ from sqlalchemy.orm import selectinload
 from app.api.deps import (
     ROLE_ADMIN,
     ROLE_AP_MANAGER,
+    ensure_live_erp_entitled,
     get_current_user,
     get_org_id,
     require_roles,
 )
 from app.api.pagination import PaginationParams, paginated, pagination_params
+from app.database import get_control_db
 from app.models.invoice import Invoice
 from app.models.organization import Organization
 from app.models.procurement import POLineItem, PurchaseOrder, po_currency_code
@@ -315,11 +317,14 @@ async def sync_pos_from_erp(
     user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER)),
     org_id: uuid.UUID = Depends(get_org_id),
     entity_id: uuid.UUID = Depends(get_write_entity_id),
+    control_db: AsyncSession = Depends(get_control_db),
 ):
     """Pull purchase orders from the connected ERP via its adapter."""
     erp_config = (org.settings or {}).get("erp")
     if not erp_config:
         raise HTTPException(status_code=400, detail="No ERP configured")
+    # A sync reaches the live ERP — a Growth feature; `mock` stays open (§258).
+    await ensure_live_erp_entitled(control_db, org.id, erp_config)
 
     # Lazy-import adapter modules so the @register_adapter decorator
     # populates the dispatcher registry. Same pattern as vendors.py.

@@ -42,6 +42,25 @@ export interface LegalRepresentative {
  */
 export type DpoStatus = LegalRepresentative | false | null;
 
+/**
+ * The registered entity follows the same three-state rule as the DPO:
+ *
+ * - a string — the registered company the Service is operated through;
+ * - `false`  — decided: there is no separate registered entity, and the
+ *              individual in `controllerDescription` is the party to every
+ *              agreement (sole proprietor — `docs/decisions.md` §252);
+ * - `null`   — not yet decided. Renders as pending.
+ */
+export type LegalEntityStatus = string | false | null;
+
+/**
+ * A postal address, or `false` when the operator has decided not to publish
+ * one: written contact is by email (`CONTACT`), and the pages say so and name
+ * `location` instead. `false` must never be rendered as an address — "Postal
+ * mail reaches us at Virginia" would be a claim nobody can act on.
+ */
+export type PostalAddressStatus = string | false | null;
+
 export interface OperatorFacts {
 	/** Product name. Never null — the service exists. */
 	serviceName: string;
@@ -51,17 +70,27 @@ export interface OperatorFacts {
 	 * natural person trading as a sole proprietor.
 	 */
 	controllerDescription: string;
-	/** Registered company name, once incorporated. */
-	legalEntity: string | null;
-	/** Controller's postal address (Art 13(1)(a) contact details). */
-	postalAddress: string | null;
+	/** See {@link LegalEntityStatus}. */
+	legalEntity: LegalEntityStatus;
+	/**
+	 * Where the operator is based, as a region a reader can place (state and
+	 * country). Always known, so never pending; published wherever an address
+	 * would otherwise stand when `postalAddress` is `false`.
+	 */
+	location: string;
+	/** Controller's postal address (Art 13(1)(a) contact details). See {@link PostalAddressStatus}. */
+	postalAddress: PostalAddressStatus;
 	/** Governing law + venue for the Terms, e.g. "the State of Delaware, USA". */
 	governingLaw: string | null;
 	/**
-	 * The lead supervisory authority a complaint goes to (Art 13(2)(d)). Only
-	 * meaningful once the establishment is known, hence pending with the entity.
+	 * The lead supervisory authority a complaint goes to (Art 13(2)(d)). `false`
+	 * is decided: with no establishment in the EU there is no lead authority
+	 * under the Art 56 one-stop shop, and the page says so — a data subject
+	 * complains to the authority where they live or work, which it already
+	 * explains. Naming an authority we have no establishment under would be
+	 * the fabricated fact this module exists to prevent.
 	 */
-	supervisoryAuthority: string | null;
+	supervisoryAuthority: string | false | null;
 	/** Art 27 EU representative — required of a non-EU controller serving EU residents. */
 	euRepresentative: LegalRepresentative | null;
 	/** UK GDPR Art 27 representative — the separate UK appointment. */
@@ -70,9 +99,11 @@ export interface OperatorFacts {
 	dataProtectionOfficer: DpoStatus;
 	/**
 	 * Where customer data is physically hosted, named as a region a reader can
-	 * check (e.g. "AWS eu-west-1 (Ireland)"). Pending until the workload stack
-	 * is actually deployed — `infra/` defines the security substrate only, so
-	 * naming a region today would describe infrastructure that does not run.
+	 * check (e.g. "AWS eu-west-1 (Ireland)"). Set 2026-10-07 to `us-east-1`,
+	 * the region `infra/` already deploys to (`aws_region` default) and the one
+	 * the workload stack must use. Before the pages are served publicly the
+	 * stack has to actually run there — if it ever moves, change this in the
+	 * same commit, or the pages state a region the data is not in.
 	 */
 	hostingRegion: string | null;
 }
@@ -110,27 +141,29 @@ export const CONTACT = {
  * commit as any substantive change to the text — a stale effective date on a
  * changed policy defeats the Art 12 transparency the date exists to provide.
  */
-export const LAST_UPDATED = '2026-10-06';
+export const LAST_UPDATED = '2026-10-07';
 
 /**
  * The live operator facts.
  *
  * Pending entries are deliberate, not oversights — see the module docstring.
- * The service name and controller description are known today; everything that
- * depends on incorporation is not.
+ * The operator trades as a sole proprietor (`docs/decisions.md` §252), so there
+ * is deliberately no registered entity, and contact is by email rather than a
+ * published postal address. Both are decided values (`false`), not gaps.
  */
 export const OPERATOR: OperatorFacts = {
 	serviceName: 'FeohLedger',
 	controllerDescription:
 		'Jared Howard, an individual operating as a sole proprietor',
-	legalEntity: null,
-	postalAddress: null,
-	governingLaw: null,
-	supervisoryAuthority: null,
+	legalEntity: false,
+	location: 'Virginia, United States',
+	postalAddress: false,
+	governingLaw: 'the Commonwealth of Virginia, United States',
+	supervisoryAuthority: false,
 	euRepresentative: null,
 	ukRepresentative: null,
-	dataProtectionOfficer: null,
-	hostingRegion: null,
+	dataProtectionOfficer: false,
+	hostingRegion: 'AWS us-east-1 (Northern Virginia, United States)',
 };
 
 /**

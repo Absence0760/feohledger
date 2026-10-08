@@ -141,6 +141,14 @@ Resolve Config
     └── BYOK → use customer's key from org.settings.extraction
     |
     v
+Structured e-invoice? → `einvoice` adapter (no model, never billed)
+    |
+    v
+AI-read allowance gate (billable platform reads only — see below)
+    ├── allowed → continue
+    └── paused  → coded warning, pending → new (manual entry), STOP — no model call
+    |
+    v
 Adapter.extract(file_url, file_key, mime_type)
     |
     v
@@ -359,7 +367,7 @@ The same guard runs again right after `apply_priors_to_invoice` overlays a cache
 `POST /api/invoices/bulk-recode-gl` (admin-only) re-applies GL codes to a date / vendor scoped slice of invoices using two strategies:
 
 1. **Vendor priors** — for each invoice, look up the cached `gl_account` correction for its vendor. Apply when it validates against the active chart. Free, fast, idempotent.
-2. **AI fallback** (opt-in via `include_ai_fallback=true`) — for invoices with no usable prior, re-run `services.extraction.run_extraction` end-to-end. Reuses the chart-of-accounts injection + RAG + post-extraction validation pipeline; produces an `ExtractionUsage` row per invoice.
+2. **AI fallback** (opt-in via `include_ai_fallback=true`) — for invoices with no usable prior, `gl_recode.recode_gl_with_ai` reads the document with the configured adapter against the invoice's own chart (`extraction.load_invoice_gl_chart`, the same chart full extraction injects and judges by) and applies **only** the model's `suggested_gl_account` — when it is confident (≥ 0.7) and the chart admits it. Nothing else moves: amount, currency, vendor, line items, warnings and status stay exactly as keyed. It is still a read, so it passes the AI-read allowance gate (a paused org's re-code counts as `ai_failed`) and writes an `ExtractionUsage` row. It used to run `run_extraction` end-to-end, which overwrote a hand-keyed draft's figures and vendor, replaced its line items and transitioned it — possibly to `approved`; that path had been unreachable only because the runner was called with a `ctrl_db=` it did not take. `tests/test_gl_recode.py` pins both: an autospec of the real runner, and a real-DB re-code that leaves a hand-keyed `new` invoice untouched but for its GL code.
 
 Eligibility: invoices in `IMMUTABLE_STATUSES` (sending_to_erp through paid) are skipped — re-coding a posted invoice would create reconciliation drift with the ERP.
 
@@ -416,13 +424,19 @@ ExtractionResult:
     
     # Debug
     raw_response, provider, error
+
+    # What the provider reported the call consumed (Claude, OpenAI; else None).
+    # Set on FAILED results too whenever the provider answered.
+    usage: ExtractionTokenUsage | None   # input / output / cache-read / cache-write tokens + model
 ```
 
 ## Usage Tracking & Billing
 
-Every extraction (success or failure) creates an `ExtractionUsage` record.
-
-> **Note:** `ExtractionUsage` is a **control-plane model** — it lives in the `feohledger` DB, not in tenant DBs. Because of this, `run_extraction()` accepts an optional `ctrl_db: AsyncSession` parameter for writing usage records to the control-plane database.
+Every extraction that reaches an adapter (success or failure) creates an
+`ExtractionUsage` record, written through the **tenant** session in the same
+commit as the extraction result. `extraction_usage` is a tenant table, not a
+control-plane one (`docs/decisions.md` §57), and `run_extraction` takes no
+control-plane session for it.
 
 | Field | Description |
 |---|---|
@@ -432,19 +446,47 @@ Every extraction (success or failure) creates an `ExtractionUsage` record.
 | period | "2026-04" (for monthly billing) |
 | success | Whether extraction succeeded |
 | organization_id | Tenant |
+| input_tokens | Uncached input tokens the provider billed (nullable — see [Token tracking](#token-tracking-real-cost-per-ai-read-invoice)) |
+| output_tokens | Output tokens, thinking included (nullable) |
+| cache_read_input_tokens | Prompt-cache reads (nullable) |
+| cache_creation_input_tokens | Prompt-cache writes (nullable) |
+| model | Model id the provider reports it served (nullable) |
 
-**Billing logic:**
-- Platform extractions are billable (you charge the customer)
-- BYOK extractions are free (customer pays their own AI provider)
-- Failed extractions are tracked but not billable
+**What is billed is an AI-read invoice, not a row** (decisions §253): a
+distinct invoice read successfully on the platform's key by a paid provider
+(`claude_vision`, `openai_vision`, `aws_textract`) in a UTC month. BYOK, the
+`mock` reader, self-hosted `ollama`, structured e-invoices (`einvoice`) and
+failed reads never count, and a re-read in the same month counts once. Never
+query the table for it — `services/billing/ai_invoice_meter.count_ai_invoices`
+is the one definition. See `billing.md` § AI-read invoice metering.
 
-Query for monthly billing:
-```sql
-SELECT organization_id, period, count(*) as extractions
-FROM extraction_usage
-WHERE program_type = 'platform' AND success = true
-GROUP BY organization_id, period;
-```
+### AI reading pauses at the plan limit
+
+Before the model is called, `run_extraction` asks
+`ai_invoice_meter.check_ai_read` whether this read may run. It is refused only
+for a billable read of an invoice NOT already counted this month, when the plan
+allowance is used and either the plan has no overage price (Free) or the next
+read would take the month's overage past the customer's spending cap
+(`settings.billing.monthly_spend_cap`).
+
+A refused read is **not a failure**. The invoice:
+
+- is not sent to any model, and writes no `ExtractionUsage` row;
+- gets a coded, localizable warning — `ai_allowance_reached` (with the
+  allowance as `included`) or `ai_spend_cap_reached`, type
+  `ai_reading_paused` — telling the user AI reading is paused and how to resume
+  (upgrade the plan / raise the cap on the Billing page);
+- transitions `pending → new` (`invoice.ai_reading_paused` audit row) — the
+  draft state an extraction-disabled upload is left in — so it is keyed by hand
+  and then submitted, approved, matched and paid like any other invoice.
+
+Re-running extraction on it later (next month, or after an upgrade) reads it
+normally and removes the warning. Everything else in accounts payable keeps
+working throughout. A gate failure (control plane unreachable) travels the
+normal failure path to `failed`, so it can be retried.
+
+`mock` is never billable, so local dev and every e2e tenant (all on `free`,
+all extracting through `mock`) can never trip the limit.
 
 ## Organization Settings
 
@@ -470,10 +512,121 @@ BYOK example:
 }
 ```
 
+A BYOK `claude_vision` org may also set `"model"` (any current Claude model id;
+empty → the platform default) and `"effort"` (`output_config.effort`; omitted
+when unset).
+
 Platform mode uses environment variables:
 - `FEOH_ANTHROPIC_API_KEY` — your Anthropic API key
-- `FEOH_EXTRACTION_MODEL` — model to use (default: claude-sonnet-4-20250514)
+- `FEOH_EXTRACTION_MODEL` — model to use (default: `claude-sonnet-5-5`; see [Model choice](#model-choice))
+- `FEOH_EXTRACTION_EFFORT` — `output_config.effort` for platform Claude reads (default: `low`; empty omits it)
 - `FEOH_EXTRACTION_PROVIDER` — operator override for the platform adapter (see next section)
+
+## Model choice
+
+The platform reads invoices on **Claude Sonnet 5.5** (`claude-sonnet-5-5`). The
+operator chose Sonnet over Opus explicitly, **on cost grounds**: the metered unit
+is an AI-read invoice (`docs/decisions.md` §253) and model calls are nearly its
+whole marginal cost, and Sonnet 5.5 lists at $2 / $10 per million input /
+output tokens against Opus 5.5's $4 / $20. Anthropic's own guidance defaults
+new work to Opus; that default is overridden here by that explicit choice, and
+the [token columns](#token-tracking-real-cost-per-ai-read-invoice) exist so the
+choice can be re-checked against real cost rather than estimates.
+
+The previous default, `claude-sonnet-4-20250514`, is **deprecated** by Anthropic.
+It was also hardcoded in three more places — the adapter's own fallback, its
+connection test, and the LLM anomaly check (`services/llm_fraud_detection.py`) —
+all of which now resolve to `FEOH_EXTRACTION_MODEL`, so the next model change is
+one setting. `FEOH_EXTRACTION_MODEL` is also the fallback for the assistant
+(`FEOH_ASSISTANT_MODEL`), the audit summary (`FEOH_AUDIT_SUMMARY_MODEL`) and the
+exception-agent rationale, so those moved to Sonnet 5.5 with it.
+
+**Effort.** `FEOH_EXTRACTION_EFFORT=low` is Anthropic's recommended starting
+point for extraction on Sonnet 5.5: current models run adaptive thinking by
+default, thinking tokens bill as output, and at `low` the model skips or
+shortens it on routine documents. Raise it (`medium`) only if measured
+extraction quality drops; the token columns show what it costs.
+
+### Claude request shape
+
+`claude_vision` is a raw `httpx` POST to the Messages API, written so that
+every current Claude model accepts it — a BYOK org can name any of them:
+
+| | Sent | Why |
+|---|---|---|
+| `thinking` | **never** | Omitted = adaptive on current models. `{"type": "disabled"}` / `budget_tokens` are a 400 on Sonnet 5.5 and Opus 5.5; `between_tools` is a 400 on every other model |
+| `temperature` / `top_p` / `top_k` | **never** | 400 on current models |
+| `tool_choice` any/tool, assistant prefill | **never** | 400 on current models; the JSON comes back as text and is parsed by block `type` (a response may lead with a `thinking` block) |
+| `output_config.effort` | only when configured | Older models (Haiku 4.5, Sonnet 4.5) reject it |
+| `max_tokens` | 16000 | Thinking counts toward it; the old 4096 left little room. A cap, not a charge |
+| timeout | 300 s | A thinking-on read of a multi-page PDF outlasts the old 60 s |
+
+A `stop_reason` of `refusal` or `max_tokens` is reported as such
+(`extraction_failed` with the reason) instead of as a JSON parse failure. The
+connection test pings the **configured** model with `max_tokens: 10` — a reply
+cut off at the cap is still HTTP 200, which is all it checks. Pinned in
+`tests/test_claude_vision_request_shape.py`.
+
+Server-side refusal fallbacks (`fallbacks: "default"`) are deliberately not
+sent: on Sonnet 5.5 they only retry `cyber` / `frontier_llm` declines, which an
+invoice read does not trigger, and the field is not accepted by every model a
+BYOK org may name.
+
+## Token tracking: real cost per AI-read invoice
+
+Every Claude or OpenAI extraction records the provider's own `usage` on its
+`extraction_usage` row (migration `0108_extraction_usage_tokens`): uncached
+input, output (thinking included), cache reads, cache writes, and the model id
+that was served. OpenAI's `prompt_tokens` includes its cached tokens, so they
+are split out to keep `input_tokens` meaning "uncached input" for every
+provider. The **failure** row carries tokens too whenever the provider answered
+— a refused, truncated or unparseable read was still billed. Ollama, Textract,
+Azure, `mock` and `einvoice` leave the columns NULL, as does every row written
+before 0108.
+
+No dollar figure is stored: list prices change, and a stored cost would go
+stale silently. Derive it at read time. List prices for `claude-sonnet-5-5` as
+of **2026-10-07** (Anthropic first-party API): input $2.00, output $10.00,
+cache read $0.20, 5-minute cache write $2.50 — all per million tokens. Check
+the current price list before relying on the result.
+
+Per tenant DB, platform reads only (BYOK is the customer's own bill). The cost
+of failed attempts is included in the numerator, because it is real spend; the
+denominator is the metered unit — distinct invoices successfully read that
+month:
+
+```sql
+SELECT period,
+       model,
+       count(*)                                           AS calls,
+       count(DISTINCT invoice_id) FILTER (WHERE success)  AS ai_read_invoices,
+       sum(input_tokens)                                  AS input_tokens,
+       sum(output_tokens)                                 AS output_tokens,
+       sum(cache_read_input_tokens)                       AS cache_read_tokens,
+       sum(cache_creation_input_tokens)                   AS cache_write_tokens,
+       round((  coalesce(sum(input_tokens), 0)                * 2.00
+              + coalesce(sum(output_tokens), 0)               * 10.00
+              + coalesce(sum(cache_read_input_tokens), 0)     * 0.20
+              + coalesce(sum(cache_creation_input_tokens), 0) * 2.50) / 1e6, 4)
+                                                          AS est_usd,
+       round((  coalesce(sum(input_tokens), 0)                * 2.00
+              + coalesce(sum(output_tokens), 0)               * 10.00
+              + coalesce(sum(cache_read_input_tokens), 0)     * 0.20
+              + coalesce(sum(cache_creation_input_tokens), 0) * 2.50) / 1e6
+             / nullif(count(DISTINCT invoice_id) FILTER (WHERE success), 0), 4)
+                                                          AS est_usd_per_ai_read_invoice
+FROM extraction_usage
+WHERE program_type = 'platform'
+  AND model = 'claude-sonnet-5-5'
+  AND input_tokens IS NOT NULL
+GROUP BY period, model
+ORDER BY period DESC;
+```
+
+The prices in it are for one model; filter `model` to that model (rows from a
+different model need that model's prices). To run it across every tenant, loop
+over `SELECT db_name FROM organizations` in the control plane and run it against
+each `feoh_<slug>` database.
 
 ## Platform provider precedence
 

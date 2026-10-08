@@ -5,6 +5,8 @@
 	import { entityStore } from '#lib/stores/entity.svelte.ts';
 	import Badge from '#lib/components/ui/Badge.svelte';
 	import PageHeader from '#lib/components/ui/PageHeader.svelte';
+	import PlanUpgradeNotice from '#lib/components/ui/PlanUpgradeNotice.svelte';
+	import { FEATURE_MULTI_ENTITY } from '#lib/types/planFeatures.ts';
 	import DataTable from '#lib/components/ui/DataTable.svelte';
 	import Modal from '#lib/components/ui/Modal.svelte';
 	import RowAction from '#lib/components/ui/RowAction.svelte';
@@ -33,6 +35,12 @@
 	$effect(() => {
 		if (userLoaded && !allowed) goto('/');
 	});
+
+	// Plan gate (decisions §258): the server refuses this with a 402 when the
+	// plan lacks it, so the page shows the upgrade prompt instead of the
+	// create control (the notice waits for `auth.user`, so nothing flashes
+	// before /me loads).
+	const canCreateEntity = $derived(auth.hasFeature(FEATURE_MULTI_ENTITY));
 
 	// $derived so the column headers re-render when the locale changes.
 	let COLUMNS = $derived([
@@ -200,7 +208,9 @@
 
 <PageHeader title={m('admin.entities.title')}>
 	{#snippet actions()}
-		<button class="btn-primary" onclick={openCreate}>{m('admin.entities.createEntity')}</button>
+		{#if canCreateEntity}
+			<button class="btn-primary" onclick={openCreate}>{m('admin.entities.createEntity')}</button>
+		{/if}
 	{/snippet}
 
 	<p class="page-hint">
@@ -208,6 +218,10 @@
 		<HelpTip term="entity" />
 		<HelpTip term="intercompany" />
 	</p>
+
+	{#if auth.user && !canCreateEntity}
+		<PlanUpgradeNotice feature={FEATURE_MULTI_ENTITY} testId="entities-plan-upgrade" />
+	{/if}
 
 	{#if loading}
 		<p class="state" data-testid="entities-loading">{m('admin.entities.loading')}</p>

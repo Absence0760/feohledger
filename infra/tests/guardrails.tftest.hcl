@@ -15,6 +15,26 @@ mock_provider "aws" {
       json = "{\"Version\":\"2012-10-17\",\"Statement\":[]}"
     }
   }
+
+  # The VPC takes its two AZs from this list; a mocked empty list would make
+  # the slice in network.tf fail before any assertion runs.
+  mock_data "aws_availability_zones" {
+    defaults = {
+      names = ["us-east-1a", "us-east-1b", "us-east-1c"]
+    }
+  }
+
+  mock_data "aws_kms_alias" {
+    defaults = {
+      target_key_arn = "arn:aws:kms:us-east-1:000000000000:key/00000000-0000-0000-0000-00000000sops"
+    }
+  }
+
+  mock_data "aws_ssm_parameter" {
+    defaults = {
+      value = "ami-0123456789abcdef0"
+    }
+  }
 }
 
 mock_provider "aws" {
@@ -94,14 +114,16 @@ variables {
   access_logs_bucket_name   = "feohledger-access-logs-test"
   backups_bucket_name       = "feohledger-backups-test"
   budget_alert_emails       = ["ops@feohledger.test"]
+  alert_emails              = ["ops@feohledger.test"]
+  db_master_password        = "testonlynotarealdbpassword"
 }
 
 run "budget_alerts_every_address_on_actual_and_forecast" {
   command = plan
 
   assert {
-    condition     = aws_budgets_budget.monthly.limit_amount == "25" && aws_budgets_budget.monthly.time_unit == "MONTHLY"
-    error_message = "The default budget must be 25 USD per month."
+    condition     = aws_budgets_budget.monthly.limit_amount == "75" && aws_budgets_budget.monthly.time_unit == "MONTHLY"
+    error_message = "The default budget must be 75 USD per month (the single-VM + RDS stack runs ~$45–55)."
   }
 
   assert {
@@ -410,4 +432,132 @@ run "rejects_a_dmarc_address_off_the_platform_domain" {
   }
 
   expect_failures = [var.dmarc_report_email]
+}
+
+# ── Workload stack (network.tf, compute.tf, database.tf, monitoring.tf) ──────
+
+run "database_is_private_encrypted_tls_only_and_hard_to_delete" {
+  command = plan
+
+  assert {
+    condition     = aws_db_instance.main.publicly_accessible == false
+    error_message = "RDS must not be publicly accessible; only the app VM reaches it."
+  }
+
+  assert {
+    condition     = aws_db_instance.main.storage_encrypted == true
+    error_message = "RDS storage must be encrypted with the app key."
+  }
+
+  assert {
+    condition     = aws_db_instance.main.deletion_protection == true && aws_db_instance.main.skip_final_snapshot == false
+    error_message = "RDS must have deletion protection on and take a final snapshot if ever deleted."
+  }
+
+  assert {
+    condition     = aws_db_instance.main.backup_retention_period >= 1
+    error_message = "Automated backups (point-in-time restore) are the reason the database is on RDS; retention must be at least a day."
+  }
+
+  assert {
+    condition     = anytrue([for p in aws_db_parameter_group.main.parameter : p.name == "rds.force_ssl" && p.value == "1"])
+    error_message = "The parameter group must force TLS on every connection."
+  }
+
+  assert {
+    condition     = aws_db_instance.main.engine == "postgres" && aws_db_instance.main.engine_version == "16"
+    error_message = "The database must be Postgres 16 — the major version dev, CI and the compose stack run."
+  }
+}
+
+run "database_accepts_connections_from_the_app_vm_only" {
+  command = plan
+
+  assert {
+    condition     = aws_vpc_security_group_ingress_rule.db_from_app.from_port == 5432 && aws_vpc_security_group_ingress_rule.db_from_app.to_port == 5432
+    error_message = "The database security group must open Postgres only."
+  }
+
+  assert {
+    condition     = aws_vpc_security_group_ingress_rule.db_from_app.cidr_ipv4 == null
+    error_message = "The database must be reachable from the app VM's security group, never from a CIDR range."
+  }
+}
+
+run "app_vm_has_no_ssh_and_only_web_ports" {
+  command = plan
+
+  assert {
+    condition = alltrue([
+      for r in [
+        aws_vpc_security_group_ingress_rule.app_http,
+        aws_vpc_security_group_ingress_rule.app_https,
+        aws_vpc_security_group_ingress_rule.app_http3,
+      ] : contains([80, 443], r.from_port) && r.from_port == r.to_port
+    ])
+    error_message = "The app VM may expose only 80 and 443; access is Session Manager, not SSH."
+  }
+}
+
+run "app_vm_requires_imdsv2_with_container_hop_and_encrypted_disk" {
+  command = plan
+
+  assert {
+    condition     = aws_instance.app.metadata_options[0].http_tokens == "required"
+    error_message = "The app VM must require IMDSv2."
+  }
+
+  assert {
+    condition     = aws_instance.app.metadata_options[0].http_put_response_hop_limit == 2
+    error_message = "IMDS hop limit must be 2, or the containers cannot reach the instance-profile credentials."
+  }
+
+  assert {
+    condition     = aws_instance.app.root_block_device[0].encrypted == true
+    error_message = "The app VM's disk must be encrypted."
+  }
+
+  assert {
+    condition     = aws_instance.app.disable_api_termination == true
+    error_message = "The app VM must have termination protection on."
+  }
+}
+
+run "apex_api_and_every_tenant_resolve_to_the_app_vm" {
+  command = plan
+
+  assert {
+    condition     = aws_route53_record.apex.name == "feohledger.com" && aws_route53_record.api.name == "api.feohledger.com" && aws_route53_record.tenants.name == "*.feohledger.com"
+    error_message = "The apex, api. and the tenant wildcard must each have an A record."
+  }
+}
+
+run "rejects_a_weak_database_password" {
+  command = plan
+
+  variables {
+    db_master_password = "short"
+  }
+
+  expect_failures = [var.db_master_password]
+}
+
+run "rejects_a_non_graviton_instance_type" {
+  command = plan
+
+  variables {
+    app_instance_type = "t3.medium"
+  }
+
+  expect_failures = [var.app_instance_type]
+}
+
+run "alarms_need_a_subscriber" {
+  command = plan
+
+  variables {
+    alert_emails = []
+  }
+
+  expect_failures = [var.alert_emails]
 }

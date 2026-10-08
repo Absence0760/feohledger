@@ -23,6 +23,7 @@ import uuid
 from datetime import date
 from decimal import Decimal
 
+import pytest
 from sqlalchemy import select
 
 from app.models.adaptive_suggestion import WorkflowSuggestion
@@ -37,6 +38,10 @@ from app.models.virtual_card import VirtualCard
 from app.models.workflow import WorkflowDefinition
 from app.models.workflow_experiment import WorkflowExperiment
 from tests.entity_scope_probe import assert_out_of_scope_404, two_entities
+
+# Multi-entity is a plan-gated feature (docs/decisions.md §258) and every test
+# here stands up a second entity, so the harness orgs run on Scale.
+pytestmark = pytest.mark.plan("scale")
 
 TENANT = "a"
 PDF = {"file": ("doc.pdf", b"%PDF-1.4\n%%EOF\n", "application/pdf")}

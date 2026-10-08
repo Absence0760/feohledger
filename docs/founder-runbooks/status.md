@@ -12,10 +12,14 @@ each step.
 
 ## Critical path
 
-- [ ] **Legal foundation** — `legal-entity.md`
-  - [ ] Entity incorporated
-  - [ ] EIN + bank account
-  - [ ] 83(b) filed
+- [ ] **Legal foundation** — `legal-entity.md` _(sole proprietor — decisions §252)_
+  - [x] Business form decided: sole proprietor contracting as Jared Howard
+        (2026-10-07). No incorporation, 83(b) or DBA on this path; a company
+        comes back only on a §252 trigger
+  - [x] Legal pages name the operator, location (Virginia) and email-only
+        contact — no postal address published
+  - [ ] Local business licence, if your city/county requires one
+  - _Optional:_ EIN, separate bank account
   - [ ] TOS + Privacy + DPA + MSA templates ready
 - [ ] **Production deployment** — `production-deployment.md`
   - [ ] AWS prod account
@@ -44,16 +48,13 @@ each step.
         payments" clauses) — part of the #428 / #446 §4 pass
   - [ ] E&O / professional liability + cyber cover bound (see **Insurance**) — the
         main protection for a sole proprietor while no entity exists
-  - [ ] Form an entity before signing customer #1, **or** record an explicit
-        decision to sign the pilot as a sole proprietor (personal liability;
-        procurement teams and SOC 2 / insurance contracts expect a company).
-        No longer needed for KYB
+  - [x] Form an entity before signing customer #1, **or** record an explicit
+        decision to sign the pilot as a sole proprietor — **decided 2026-10-07:
+        sole proprietor** (decisions §252), on condition insurance is bound first
 - [ ] **Payment rails** — `payment-rails-onboarding.md` _(deferred: not pilot-blocking under the no-rail model above; comes back when a signed customer wants FeohLedger to send payments)_
-  - [ ] MT intro call done — **the only box here that is startable today**;
-        everything below it needs formation docs, an EIN and beneficial owners,
-        so this section and **Legal foundation** above are one serial chain, not
-        two parallel ones. Book the call anyway: the KYB packet tells you what
-        the incorporation has to produce
+  - If it comes back, KYB needs a business with formation docs and beneficial
+    owners — one of the triggers to form an entity (decisions §252)
+  - [ ] MT intro call done
   - [ ] KYB submitted
   - [ ] Partner bank account open — confirm the bank is *currently* accepting
         fintech programs before investing weeks in its KYB
@@ -80,17 +81,20 @@ each step.
   - [ ] Status page live
   - [ ] Uptime monitoring to phone
   - [ ] Incident runbook written
-- [ ] **Insurance**
+- [ ] **Insurance** — **hard gate before customer #1** for a sole proprietor
+      (decisions §252): with no entity, it is the only cover for personal assets
   - [ ] Cyber liability bound
   - [ ] E&O bound
 
 ## Pilot-customer gate
 
 Before signing with customer #1, all of the above must be checked
-OR explicitly accepted as a pilot-only risk. **Payment rails is accepted
-that way** under the no-rail model (#517): with FeohLedger moving no money,
-KYB, Third-Party Sender registration, the ACH Rules Compliance Audit, ACH
-fraud monitoring and the money-transmitter opinion don't apply.
+OR explicitly accepted as a pilot-only risk. Two are accepted that way
+today: **payment rails**, under the no-rail model (#517 — with FeohLedger
+moving no money, KYB, Third-Party Sender registration, the ACH Rules
+Compliance Audit, ACH fraud monitoring and the money-transmitter opinion
+don't apply), and **signing as a sole proprietor** rather than a company
+(decisions §252) — the latter only on condition that insurance is bound first.
 
 ## First-customer checklist (once the above is done)
 

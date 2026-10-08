@@ -18,6 +18,11 @@ from fastapi import HTTPException
 
 from app.services.sso import is_sso_only, sso_only_requested
 
+# Plan-gated surface (docs/decisions.md §253/§258): realdb tests run with the
+# harness orgs on a plan granting it; DB-free tests answer the plan lookup via
+# the `all_plan_features` fixture.
+pytestmark = [pytest.mark.usefixtures("all_plan_features"), pytest.mark.plan("scale")]
+
 # Complete IdP blocks, one per protocol. Password sign-in is closed only when
 # SSO is on, required, AND the selected protocol's block resolves (§204).
 _OIDC_READY = {

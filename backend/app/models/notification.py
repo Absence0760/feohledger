@@ -35,6 +35,12 @@ EVENT_CHAT_MESSAGE = "chat_message"
 # entity_type on the row is "cash_position" and entity_id is NULL: the alert is
 # about the org's whole projected position, not any one record.
 EVENT_CASH_SHORTFALL_PROJECTED = "cash_shortfall_projected"
+# The org crossed 80% / 100% of its plan's monthly AI-read-invoice allowance, or
+# its AI spending cap (decisions §253) — emitted by
+# services.billing.ai_usage_notices to org admins, once per threshold per month.
+# entity_type on the row is "billing" and entity_id is NULL: it is about the
+# org's plan usage, not any one record.
+EVENT_AI_INVOICE_USAGE = "ai_invoice_usage"
 
 NOTIFICATION_EVENT_TYPES = (
     EVENT_INVOICE_ASSIGNED,
@@ -44,6 +50,7 @@ NOTIFICATION_EVENT_TYPES = (
     EVENT_CONTRACT_RENEWAL_DUE,
     EVENT_CHAT_MESSAGE,
     EVENT_CASH_SHORTFALL_PROJECTED,
+    EVENT_AI_INVOICE_USAGE,
 )
 
 

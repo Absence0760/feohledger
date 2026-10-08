@@ -1,20 +1,19 @@
 """``scripts/seed.py`` — which plan each seeded tenant lands on.
 
 The seed used to put every org on ``free``, whose entitlements are ``{}``. With
-``require_api_entitlement("public_api")`` in front of the whole ``/api/v1``
-surface that meant a freshly minted API key 402'd on every call, so the public
-Developer API could not be exercised at all on a fresh clone without
-hand-editing the control plane — the local-first promise (guard rail 7) broken
-for one whole product surface.
+the public API, and since decisions §258 SSO, SCIM, multiple entities, live
+ERPs and outbound webhooks too, behind a plan gate, that made whole product
+surfaces unreachable on a fresh clone without hand-editing the control plane —
+the local-first promise (guard rail 7) broken.
 
-Two things have to be true for the fix to actually take, and both are guarded
+Two things have to be true for the seed to actually take, and both are guarded
 here:
 
-1. The plan the demo tenant lands on must really grant ``public_api``. That is
-   a cross-module claim — ``seed.ACME_PLAN_CODE`` naming a code, and
-   ``plan_catalog.DEFAULT_PLAN_CATALOG`` deciding what that code grants — so
-   stripping the entitlement (or renaming the plan) has to fail loudly here
-   rather than silently re-close the surface.
+1. The plan the demo tenant (and every e2e worker) lands on must really grant
+   every feature. That is a cross-module claim — ``seed.ACME_PLAN_CODE`` naming
+   a code, and ``plan_catalog.DEFAULT_PLAN_CATALOG`` deciding what that code
+   grants — so stripping a grant (or renaming the plan) has to fail loudly here
+   rather than silently re-close a surface.
 2. Re-running the seed has to REPAIR a control plane seeded before the change.
    ``ensure_subscription`` no-ops once an org holds any live subscription, so
    without the in-place repoint every existing dev box would have stayed 402'd
@@ -23,11 +22,14 @@ here:
 
 from __future__ import annotations
 
+from decimal import Decimal
+
 from sqlalchemy import delete, select
 
 from app.models.billing import Plan, Subscription
 from app.services.billing.entitlements import get_entitlements, has_entitlement
 from app.services.billing.plan_catalog import (
+    ALL_FEATURES,
     DEFAULT_PLAN_CATALOG,
     ensure_plan_catalog,
     ensure_subscription,
@@ -37,35 +39,48 @@ from scripts import seed as seed_script
 _CATALOG_BY_CODE = {spec["code"]: spec for spec in DEFAULT_PLAN_CATALOG}
 
 
-def test_acme_lands_on_a_plan_that_actually_grants_public_api():
-    """The whole point of the fix. ``seed.ACME_PLAN_CODE`` is only a *code*;
-    what it grants lives in the plan catalog, so assert the two agree."""
+def _grants_every_feature(entitlements: dict) -> bool:
+    return all(has_entitlement(entitlements, f) for f in ALL_FEATURES)
+
+
+def _grants_no_feature(entitlements: dict) -> bool:
+    return not any(has_entitlement(entitlements, f) for f in ALL_FEATURES)
+
+
+def test_acme_lands_on_a_plan_that_actually_grants_every_feature():
+    """``seed.ACME_PLAN_CODE`` is only a *code*; what it grants lives in the
+    plan catalog, so assert the two agree. Acme is the tenant the local IdPs
+    are wired to, so SSO enforcement and SCIM have to be in it too."""
     spec = _CATALOG_BY_CODE.get(seed_script.ACME_PLAN_CODE)
     assert spec is not None, (
         f"seed.ACME_PLAN_CODE={seed_script.ACME_PLAN_CODE!r} is not in "
         "DEFAULT_PLAN_CATALOG — ensure_subscription would silently no-op and "
         "the demo tenant would end up with no subscription at all"
     )
-    assert has_entitlement(spec["entitlements"], seed_script.PUBLIC_API_ENTITLEMENT), (
-        f"the {seed_script.ACME_PLAN_CODE!r} plan no longer grants "
-        f"{seed_script.PUBLIC_API_ENTITLEMENT!r}, so GET /api/v1/invoices 402s "
-        "again for every seeded tenant"
+    assert _grants_every_feature(spec["entitlements"]), (
+        f"the {seed_script.ACME_PLAN_CODE!r} plan no longer grants every plan "
+        "feature, so part of the product 402s on a fresh clone"
     )
 
 
-def test_the_other_seeded_tenants_stay_unentitled():
-    """``techflow`` keeps the 402 path exercisable locally, and every e2e
-    worker tenant stays interchangeable — ``frontend/tests-e2e/billing/
-    billing.spec.ts`` parks and restores whatever live subscription its
-    worker's org holds, and entitling one worker would make which shard drew
-    which tenant observable."""
-    for code in (seed_script.TECHFLOW_PLAN_CODE, seed_script.E2E_PLAN_CODE):
-        spec = _CATALOG_BY_CODE.get(code)
-        assert spec is not None, f"{code!r} is not in DEFAULT_PLAN_CATALOG"
-        assert not has_entitlement(spec["entitlements"], seed_script.PUBLIC_API_ENTITLEMENT), (
-            f"{code!r} now grants {seed_script.PUBLIC_API_ENTITLEMENT!r} — the "
-            "seed no longer demonstrates the entitlement gate refusing anyone"
-        )
+def test_e2e_workers_land_on_a_plan_that_grants_every_feature():
+    """The Playwright suite drives every gated surface on its worker's tenant
+    (SSO settings, SCIM token, entities, ERP, API keys, webhooks), and the
+    workers must stay interchangeable — so all of them get the full plan."""
+    spec = _CATALOG_BY_CODE.get(seed_script.E2E_PLAN_CODE)
+    assert spec is not None, f"{seed_script.E2E_PLAN_CODE!r} is not in DEFAULT_PLAN_CATALOG"
+    assert _grants_every_feature(spec["entitlements"])
+
+
+def test_techflow_stays_unentitled():
+    """``techflow`` keeps the refusal side of every gate — and the upgrade
+    prompt — exercisable on a local stack."""
+    spec = _CATALOG_BY_CODE.get(seed_script.TECHFLOW_PLAN_CODE)
+    assert spec is not None, f"{seed_script.TECHFLOW_PLAN_CODE!r} is not in DEFAULT_PLAN_CATALOG"
+    assert _grants_no_feature(spec["entitlements"]), (
+        f"{seed_script.TECHFLOW_PLAN_CODE!r} now grants a plan feature — the seed "
+        "no longer demonstrates every gate refusing someone"
+    )
 
 
 async def _clear_billing(realdb, org_ids) -> None:
@@ -116,8 +131,7 @@ async def _live_subscriptions(realdb, org_id):
 
 async def test_baseline_entitles_the_demo_tenant_and_leaves_the_other_free(realdb, monkeypatch):
     """A fresh control plane: after the seed's billing baseline, the demo
-    tenant's live plan grants ``public_api`` and the second one still
-    doesn't."""
+    tenant's live plan grants every feature and the second one grants none."""
     acme_org, tech_org = realdb.info("a").org_id, realdb.info("b").org_id
     _point_seed_at(monkeypatch, acme_org, tech_org)
     await _clear_billing(realdb, [acme_org, tech_org])
@@ -130,8 +144,8 @@ async def test_baseline_entitles_the_demo_tenant_and_leaves_the_other_free(reald
         async with ctrl_mk() as s:
             acme_ents = await get_entitlements(s, acme_org)
             tech_ents = await get_entitlements(s, tech_org)
-        assert has_entitlement(acme_ents, "public_api") is True
-        assert has_entitlement(tech_ents, "public_api") is False
+        assert _grants_every_feature(acme_ents)
+        assert _grants_no_feature(tech_ents)
     finally:
         await _clear_billing(realdb, [acme_org, tech_org])
 
@@ -139,9 +153,10 @@ async def test_baseline_entitles_the_demo_tenant_and_leaves_the_other_free(reald
 async def test_re_seed_repairs_a_demo_tenant_stranded_on_free(realdb, monkeypatch):
     """The regression that made this unfixable by re-seeding.
 
-    An older seed parked the demo tenant on ``free``. ``ensure_subscription``
-    no-ops once ANY live subscription exists, so a plain re-seed left it there
-    and ``/api/v1`` stayed 402'd. The baseline must repoint the existing row —
+    An older seed parked the demo tenant on ``free`` (and a later one on
+    ``growth``). ``ensure_subscription`` no-ops once ANY live subscription
+    exists, so a plain re-seed left it there and every gated surface stayed
+    402'd. The baseline must repoint the existing row —
     and must still leave exactly one live subscription, because
     ``uq_subscription_one_live_per_org`` forbids a second.
     """
@@ -160,7 +175,7 @@ async def test_re_seed_repairs_a_demo_tenant_stranded_on_free(realdb, monkeypatc
 
         async with ctrl_mk() as s:
             ents = await get_entitlements(s, acme_org)
-        assert has_entitlement(ents, "public_api") is False, "precondition: the 402 state"
+        assert _grants_no_feature(ents), "precondition: the 402 state"
 
         async with ctrl_mk() as s:
             await seed_script.ensure_demo_billing_baseline(s)
@@ -168,7 +183,7 @@ async def test_re_seed_repairs_a_demo_tenant_stranded_on_free(realdb, monkeypatc
 
         async with ctrl_mk() as s:
             ents = await get_entitlements(s, acme_org)
-        assert has_entitlement(ents, "public_api") is True
+        assert _grants_every_feature(ents)
 
         live = await _live_subscriptions(realdb, acme_org)
         assert len(live) == 1, "a repair must repoint the live row, never add a second"
@@ -178,10 +193,11 @@ async def test_re_seed_repairs_a_demo_tenant_stranded_on_free(realdb, monkeypatc
         await _clear_billing(realdb, [acme_org, tech_org])
 
 
-async def test_baseline_never_downgrades_an_already_entitled_tenant(realdb, monkeypatch):
-    """Upgrade-only. An operator who moved the demo tenant onto a richer plan
-    (or a billing fixture that seeded one) must not be quietly walked back by
-    the next ``pnpm seed``."""
+async def test_re_seed_lifts_a_demo_tenant_parked_on_growth(realdb, monkeypatch):
+    """The previous seed put acme on ``growth``. That plan grants SSO but not
+    SCIM, ``sso_only`` or multiple entities, so a box seeded then must be
+    lifted to the full plan by the next ``pnpm seed`` — not left half-entitled
+    because the old upgrade-only check asked about ``public_api`` alone."""
     acme_org, tech_org = realdb.info("a").org_id, realdb.info("b").org_id
     _point_seed_at(monkeypatch, acme_org, tech_org)
     await _clear_billing(realdb, [acme_org, tech_org])
@@ -189,7 +205,7 @@ async def test_baseline_never_downgrades_an_already_entitled_tenant(realdb, monk
     try:
         async with ctrl_mk() as s:
             await ensure_plan_catalog(s)
-            await ensure_subscription(s, organization_id=acme_org, plan_code="scale")
+            await ensure_subscription(s, organization_id=acme_org, plan_code="growth")
             await s.commit()
 
         async with ctrl_mk() as s:
@@ -197,12 +213,57 @@ async def test_baseline_never_downgrades_an_already_entitled_tenant(realdb, monk
             await s.commit()
 
         async with ctrl_mk() as s:
-            scale_id = (await s.execute(select(Plan.id).where(Plan.code == "scale"))).scalar_one()
-        live = await _live_subscriptions(realdb, acme_org)
-        assert len(live) == 1
-        assert live[0].plan_id == scale_id, "the richer plan was downgraded by a re-seed"
+            ents = await get_entitlements(s, acme_org)
+        assert _grants_every_feature(ents)
+        assert len(await _live_subscriptions(realdb, acme_org)) == 1
     finally:
         await _clear_billing(realdb, [acme_org, tech_org])
+
+
+async def test_baseline_never_downgrades_an_already_entitled_tenant(realdb, monkeypatch):
+    """Upgrade-only. An operator who moved the demo tenant onto a plan at least
+    as rich as the seed's (a negotiated Enterprise plan, or a billing fixture)
+    must not be quietly walked back onto the catalog plan by the next
+    ``pnpm seed``."""
+    acme_org, tech_org = realdb.info("a").org_id, realdb.info("b").org_id
+    _point_seed_at(monkeypatch, acme_org, tech_org)
+    await _clear_billing(realdb, [acme_org, tech_org])
+    await realdb.purge_plans("seedtest_", org_ids=[acme_org])
+    ctrl_mk = realdb.control_sessionmaker()
+    try:
+        async with ctrl_mk() as s:
+            await ensure_plan_catalog(s)
+            enterprise = Plan(
+                code="seedtest_enterprise",
+                name="Enterprise (test)",
+                monthly_price=Decimal("999.00"),
+                currency="USD",
+                entitlements={feature: True for feature in ALL_FEATURES},
+                usage_components={},
+                trial_days=0,
+            )
+            s.add(enterprise)
+            await s.flush()
+            s.add(
+                Subscription(
+                    organization_id=acme_org,
+                    plan_id=enterprise.id,
+                    status="active",
+                )
+            )
+            await s.commit()
+            enterprise_id = enterprise.id
+
+        async with ctrl_mk() as s:
+            await seed_script.ensure_demo_billing_baseline(s)
+            await s.commit()
+
+        live = await _live_subscriptions(realdb, acme_org)
+        assert len(live) == 1
+        assert live[0].plan_id == enterprise_id, "the richer plan was replaced by a re-seed"
+    finally:
+        await _clear_billing(realdb, [acme_org, tech_org])
+        await realdb.purge_plans("seedtest_", org_ids=[acme_org])
 
 
 async def test_repair_survives_a_leftover_canceled_row_on_the_target_plan(realdb, monkeypatch):
@@ -239,7 +300,7 @@ async def test_repair_survives_a_leftover_canceled_row_on_the_target_plan(realdb
 
         async with ctrl_mk() as s:
             ents = await get_entitlements(s, acme_org)
-        assert has_entitlement(ents, "public_api") is True
+        assert _grants_every_feature(ents)
 
         live = await _live_subscriptions(realdb, acme_org)
         assert len(live) == 1

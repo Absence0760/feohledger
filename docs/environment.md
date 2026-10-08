@@ -150,7 +150,8 @@ in `frontend/tests-e2e/README.md` § Running from a worktree.
 | `FEOH_AUDIT_SHIPPING_S3_BUCKET` | (empty)                                                         | Object-Lock-enabled S3 bucket. Required when the `s3_objectlock` provider is enabled. |
 | `FEOH_AUDIT_SHIPPING_S3_MIN_RETENTION_DAYS` | `2555`                                            | Floor (in days, ≈ 7 years) the bucket's default Object Lock retention must meet. Boot refuses a bucket under it, in GOVERNANCE mode, or with no default rule at all. |
 | `FEOH_ANTHROPIC_API_KEY` | (empty)                                                                 | Platform Claude Vision key (used when org chooses "Platform" extraction) |
-| `FEOH_EXTRACTION_MODEL` | `claude-sonnet-4-20250514`                                               | Default extraction model for the platform program |
+| `FEOH_EXTRACTION_MODEL` | `claude-sonnet-5-5`                                                      | Default extraction model for the platform program — Sonnet rather than Opus on cost grounds (the old `claude-sonnet-4-20250514` default is deprecated). Also the fallback model for the assistant, audit summary, exception-agent rationale and LLM anomaly check. See `backend/docs/ai-extraction.md` § Model choice. |
+| `FEOH_EXTRACTION_EFFORT` | `low`                                                                   | `output_config.effort` sent with platform-mode Claude extraction (`low`/`medium`/`high`/`xhigh`/`max`). Thinking tokens bill as output, so `low` keeps the cost per AI-read invoice down. Empty → the field is omitted and the model's default applies. Never sent for a BYOK org unless it sets `settings.extraction.effort`, because older models reject the field. |
 | `FEOH_EXTRACTION_PROVIDER` | (empty) / `mock` in `.env.development`                                | Operator override for the adapter **platform**-mode extraction runs on. Empty = derive: a set `FEOH_ANTHROPIC_API_KEY` → `claude_vision`; keyless + non-deployed → the offline `mock` reader (so `pnpm dev` never calls out with an empty key); keyless + **deployed** → still `claude_vision`, which fails loudly, because `mock.extract` returns a fixture and fabricating invoice fields is worse than a provider error. A BYOK org's own `settings.extraction` is unaffected. An unregistered name is refused at boot. Precedence table + rationale: `backend/docs/ai-extraction.md` § Platform provider precedence. |
 | `FEOH_LITHIC_API_KEY`   | (empty)                                                                  | Platform Lithic key for virtual cards |
 | `FEOH_LITHIC_SANDBOX`   | `true`                                                                   | Use Lithic sandbox endpoints |
@@ -195,7 +196,9 @@ All backend variables are prefixed with `FEOH_` and loaded via `pydantic-setting
 
 ### Database URLs
 
-The `FEOH_DATABASE_URL` points to the **control-plane database** (`feohledger`). Tenant database URLs are derived automatically by replacing the database name with `<FEOH_TENANT_DB_PREFIX><slug>` (e.g., `feoh_acme`).
+The `FEOH_DATABASE_URL` points to the **control-plane database** (`feohledger`). Tenant database URLs are derived automatically by replacing the database name with `<FEOH_TENANT_DB_PREFIX><slug>` (e.g., `feoh_acme`) — and only the name: the driver, credentials, host, port and any query string carry over (`app/tenant_url.make_tenant_url`, which Alembic's per-tenant run uses too).
+
+**Database TLS is not a `FEOH_` variable.** asyncpg (every engine, and the raw connections tenant provisioning opens) and libpq (`pg_dump` and friends) both read the standard `PGSSLMODE` / `PGSSLROOTCERT` when the URL names no TLS option, so that is how a deployment sets it: the backend image sets `PGSSLROOTCERT` to the RDS CA bundle it carries, and the deployment sets `PGSSLMODE=verify-full` for RDS. Unset, asyncpg's default is `prefer` — what local dev uses. `docs/minimal-deployment.md` § Database TLS.
 
 ### Alembic
 
@@ -229,7 +232,8 @@ always `backend/app/config.py`.
 | `FEOH_ERP_D365_API_BASE` | (empty) | Dynamics 365 BC OData base override — empty → admin-config `base_url` + SSRF guard; set → used verbatim (operator-trusted). Dev value targets fake-erp |
 | `FEOH_ERP_D365_TOKEN_URL` | (empty) | D365 OAuth token URL override — empty → `https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token`. Dev value targets fake-erp |
 | `FEOH_ANTHROPIC_API_KEY` | (empty) | Claude Vision for platform extraction |
-| `FEOH_EXTRACTION_MODEL` | `claude-sonnet-4-20250514` | AI model for extraction |
+| `FEOH_EXTRACTION_MODEL` | `claude-sonnet-5-5` | AI model for extraction |
+| `FEOH_EXTRACTION_EFFORT` | `low` | `output_config.effort` for platform Claude extraction; empty omits it |
 | `FEOH_ASSISTANT_PROVIDER` | `mock` (code) / `ollama` (`.env.development`) | Conversational assistant adapter — `mock` \| `claude` \| `ollama`. Committed dev default is `ollama` (local model); `claude`/`ollama` fail soft to `mock`. See `backend/docs/conversational-assistant.md`. |
 | `FEOH_ASSISTANT_OLLAMA_MODEL` | `qwen2.5:7b` | Local **tool-capable** Ollama text model for the assistant (NOT the vision model used for extraction). Base URL reuses `FEOH_OLLAMA_BASE_URL`. |
 | `FEOH_CASHFLOW_COPILOT_ENABLED` | `true` | Master switch for the AI Cash-Flow Copilot (Phases 1–2) — gates the five read-only/proposal cash-planning assistant tools + the `/api/cash-flow/copilot(+/stream)` façade routes. Reuses the assistant's provider/budget/key config — no new secret; local-first via mock/ollama. See `docs/cash-flow-copilot.md`. |
@@ -324,3 +328,5 @@ always `backend/app/config.py`.
 | `FEOH_BILLING_DUNNING_ENABLED` | `false` | Master switch for the dunning / past-due automation sweep — cancels subscriptions overdue past the grace window (NEVER moves money). OFF by default; flip on in deployed envs. |
 | `FEOH_BILLING_DUNNING_INTERVAL_SECONDS` | `3600` | Dunning sweep tick interval. |
 | `FEOH_BILLING_DUNNING_GRACE_DAYS` | `14` | Grace window (days from `current_period_end`) a subscription may sit `past_due` before the dunning sweep cancels it. |
+| `FEOH_BILLING_AI_OVERAGE_SWEEP_ENABLED` | `false` | Master switch for the AI-read-invoice overage reconciliation sweep (decisions §253, §255) — reports any overage the post-read leg missed to the billing provider and re-checks the 80% / 100% / spending-cap notices. Usage only, never a charge. OFF by default like every sweep (and the `mock` provider bills nothing); flip on in deployed envs with a live billing provider. See `backend/docs/billing.md` § AI-read invoice metering. |
+| `FEOH_BILLING_AI_OVERAGE_SWEEP_INTERVAL_SECONDS` | `3600` | That sweep's tick. Hourly keeps a re-sent event inside Stripe's 24 h idempotency window. |

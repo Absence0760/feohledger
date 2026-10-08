@@ -16,7 +16,8 @@ Where the linkage lives (NO migration — reuses existing JSONB)
       "billing": {
         "provider": "stripe_billing",
         "stripe_customer_id": "cus_...",          # one per org
-        "plan_price_ids": {"growth": "price_..."} # keyed by Plan.code
+        "plan_price_ids": {"growth": "price_..."}, # keyed by Plan.code
+        "ai_overage_price_ids": {"growth": "price_..."} # metered overage (paid tiers)
       }
     }
 
@@ -44,11 +45,15 @@ from sqlalchemy.orm.attributes import flag_modified
 from app.models.billing import Plan
 from app.models.organization import Organization
 from app.models.user import User
+from app.services.billing.ai_invoice_meter import allowance_for_plan
 from app.services.billing_adapters import get_billing_adapter
 from app.services.billing_adapters.base import BillingAdapter
 from app.tenant import lock_organization
 
 logger = logging.getLogger(__name__)
+
+#: ``settings.billing`` key holding each plan's metered overage price id.
+OVERAGE_PRICE_IDS_KEY = "ai_overage_price_ids"
 
 
 @dataclass(frozen=True)
@@ -57,6 +62,9 @@ class ProvisionedIds:
 
     customer_id: str
     price_id: str
+    #: The plan's metered AI-read OVERAGE price (decisions §253), or ``None`` for
+    #: a plan with no overage (Free pauses instead of billing).
+    overage_price_id: str | None = None
 
 
 def resolve_provider(org: Organization) -> str:
@@ -119,6 +127,21 @@ async def provision_org_billing(
         billing["plan_price_ids"] = price_ids
         mutated = True
 
+    # The metered overage price, for a plan that bills AI-read invoices past its
+    # allowance. Without it on the subscription the provider records the
+    # overage meter events and invoices none of them.
+    allowance = allowance_for_plan(plan)
+    overage_ids = dict(billing.get(OVERAGE_PRICE_IDS_KEY) or {})
+    overage_price_id = overage_ids.get(plan.code)
+    if allowance.bills_overage and not overage_price_id:
+        assert allowance.overage_unit_price is not None
+        overage_price_id = await adapter.ensure_overage_price(
+            plan_code=plan.code, unit_price=allowance.overage_unit_price, currency=plan.currency
+        )
+        overage_ids[plan.code] = overage_price_id
+        billing[OVERAGE_PRICE_IDS_KEY] = overage_ids
+        mutated = True
+
     if mutated:
         # The adapter calls above are network round trips, so the row is locked
         # only now, and the ids are merged into what is stored THEN rather than
@@ -133,6 +156,11 @@ async def provision_org_billing(
         stored_prices = dict(stored.get("plan_price_ids") or {})
         stored_prices.setdefault(plan.code, price_id)
         stored["plan_price_ids"] = stored_prices
+        if overage_price_id:
+            stored_overage = dict(stored.get(OVERAGE_PRICE_IDS_KEY) or {})
+            stored_overage.setdefault(plan.code, overage_price_id)
+            stored[OVERAGE_PRICE_IDS_KEY] = stored_overage
+            overage_price_id = stored_overage[plan.code]
         customer_id = stored["stripe_customer_id"]
         price_id = stored_prices[plan.code]
         settings_dict["billing"] = stored
@@ -141,7 +169,11 @@ async def provision_org_billing(
         await control_db.commit()
         await control_db.refresh(org)
 
-    return ProvisionedIds(customer_id=str(customer_id), price_id=str(price_id))
+    return ProvisionedIds(
+        customer_id=str(customer_id),
+        price_id=str(price_id),
+        overage_price_id=str(overage_price_id) if overage_price_id else None,
+    )
 
 
 async def _first_admin_email(control_db: AsyncSession, organization_id) -> str | None:

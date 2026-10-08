@@ -69,6 +69,22 @@ updates:
           - minor
           - patch
 
+  # Flutter / Dart. Unlike the backend's pyproject, pub has a lockfile it
+  # understands (mobile/pubspec.lock), so the PR carries both files and
+  # CI's `mobile` job (flutter analyze + test, path-filtered on mobile/**)
+  # tests exactly what auto-merge would land.
+  - package-ecosystem: pub
+    directory: /mobile
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      mobile-minor-patch:
+        update-types:
+          - minor
+          - patch
+
   - package-ecosystem: docker
     directory: /backend
     schedule:

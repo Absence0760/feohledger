@@ -82,6 +82,70 @@ async def get_scim_tenant(
     return org
 
 
+async def _org_has_scim(db: AsyncSession, org: Organization) -> bool:
+    from app.services.billing.entitlements import get_entitlements, has_entitlement
+    from app.services.billing.plan_catalog import FEATURE_SCIM
+
+    return has_entitlement(await get_entitlements(db, org.id), FEATURE_SCIM)
+
+
+async def require_scim_entitlement(db: AsyncSession, org: Organization) -> None:
+    """``FEATURE_SCIM`` gate (decisions §253, §258), answered in the SCIM error
+    shape IdPs parse rather than the SPA's coded refusal.
+
+    Applied to every write that PROVISIONS or GRANTS — create, rename,
+    re-activate, group writes. Deliberately NOT applied to reads or to
+    deactivation: a tenant that drops below Scale still holds the users SCIM
+    provisioned, and if the IdP's deprovision of a leaver were refused, that
+    account would stay active — and on a plan without SSO its password sign-in
+    reopens (§258). Okta and Entra look a user up before they deactivate it, so
+    the reads stay open for the same reason. Only an org that once held the
+    feature can reach any of this: minting the bearer token is itself gated.
+    """
+    if not await _org_has_scim(db, org):
+        raise _scim_http_error(
+            402,
+            "SCIM provisioning is not included in this organization's plan. "
+            "Deprovisioning and reads remain available.",
+        )
+
+
+def _reads_as_false(value: object) -> bool:
+    if value is False:
+        return True
+    return isinstance(value, str) and value.strip().lower() == "false"
+
+
+def _is_deactivation_only(body: SCIMPatchRequest) -> bool:
+    """Does this PATCH do nothing but deactivate the user?
+
+    The two spellings Okta and Entra send for a deprovision: ``active`` set to
+    false (or removed), and a root ``replace`` whose value is just
+    ``{"active": false}``. A value that does not plainly read as false is NOT a
+    deactivation, so it falls through to the gate rather than slipping past it.
+    """
+    if not body.Operations:
+        return False
+    for op in body.Operations:
+        action = (op.op or "").lower()
+        path = (op.path or "").strip()
+        value = op.value
+        if path.lower() == "active":
+            if action == "remove" or _reads_as_false(value):
+                continue
+            return False
+        if (
+            path == ""
+            and action == "replace"
+            and isinstance(value, dict)
+            and set(value) == {"active"}
+            and _reads_as_false(value["active"])
+        ):
+            continue
+        return False
+    return True
+
+
 def _scim_http_error(status: int, detail: str, scim_type: str | None = None) -> HTTPException:
     """Build a SCIM-compliant error response. IdPs rely on this shape."""
     body = SCIMError(status=str(status), detail=detail, scimType=scim_type).model_dump()
@@ -295,6 +359,7 @@ async def create_user(
     org: Organization = Depends(get_scim_tenant),
     db: AsyncSession = Depends(get_control_db),
 ):
+    await require_scim_entitlement(db, org)
     email = normalize_email(_extract_primary_email(body.emails, body.userName))
 
     # SCIM requires 409 on duplicate userName. Platform-wide — see `_email_taken`.
@@ -340,6 +405,18 @@ async def replace_user(
     if user is None:
         raise _scim_http_error(404, f"User {user_id} not found.")
 
+    if not await _org_has_scim(db, org):
+        if body.active:
+            await require_scim_entitlement(db, org)  # raises the SCIM-shaped 402
+        # A PUT with `active: false` is how Authentik (and Okta in PUT mode)
+        # deprovisions. Without the feature ONLY that deactivation is applied —
+        # the rest of the resource is not written — so a leaver is still shut
+        # out after a downgrade (see `require_scim_entitlement`).
+        user.is_active = False
+        await db.flush()
+        await db.refresh(user)
+        return _user_to_scim(user, request)
+
     email = normalize_email(_extract_primary_email(body.emails, body.userName))
     # Uniqueness invariant: PUT must not rename this user onto another user's
     # userName. Platform-wide — see `_email_taken`.
@@ -383,6 +460,10 @@ async def patch_user(
     user = result.scalar_one_or_none()
     if user is None:
         raise _scim_http_error(404, f"User {user_id} not found.")
+
+    # Deprovisioning stays open on any plan; everything else needs SCIM.
+    if not _is_deactivation_only(body):
+        await require_scim_entitlement(db, org)
 
     new_email: str | None = None
 
@@ -565,6 +646,7 @@ async def create_group(
     org: Organization = Depends(get_scim_tenant),
     db: AsyncSession = Depends(get_control_db),
 ):
+    await require_scim_entitlement(db, org)
     # Serialise with every other settings writer (`tenant.lock_organization`).
     org = await lock_organization(db, org)
     groups = scim_groups.get_groups(org.settings)
@@ -599,6 +681,7 @@ async def replace_group(
     org: Organization = Depends(get_scim_tenant),
     db: AsyncSession = Depends(get_control_db),
 ):
+    await require_scim_entitlement(db, org)
     # Serialise with every other settings writer (`tenant.lock_organization`).
     org = await lock_organization(db, org)
     groups = scim_groups.get_groups(org.settings)
@@ -630,6 +713,7 @@ async def patch_group(
     org: Organization = Depends(get_scim_tenant),
     db: AsyncSession = Depends(get_control_db),
 ):
+    await require_scim_entitlement(db, org)
     # Serialise with every other settings writer (`tenant.lock_organization`).
     org = await lock_organization(db, org)
     groups = scim_groups.get_groups(org.settings)
@@ -658,6 +742,9 @@ async def delete_group(
     org: Organization = Depends(get_scim_tenant),
     db: AsyncSession = Depends(get_control_db),
 ):
+    # Not plan-gated: deleting a group only REVOKES the roles it mapped, which
+    # a downgraded tenant's IdP must still be able to do (see
+    # `require_scim_entitlement`).
     # Serialise with every other settings writer (`tenant.lock_organization`).
     org = await lock_organization(db, org)
     groups = scim_groups.get_groups(org.settings)

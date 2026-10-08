@@ -1,9 +1,13 @@
 # deploy/ — minimal single-VM production stack
 
-Operational files for the ~$20/month deployment described in
+Operational files for the single-VM deployment described in
 [`docs/minimal-deployment.md`](../docs/minimal-deployment.md) (read that
 first — it holds the architecture, cost model, and the how-to-add-it-later
-paths for everything this footprint leaves out).
+paths for everything this footprint leaves out). The database is Amazon RDS
+(~$45–55/month all in) or, as the cheaper alternative, a Postgres container on
+the VM (~$22/month); one key in the secrets file picks, and `lib.sh` is the
+one place every script reads the choice from
+([§ Database](../docs/minimal-deployment.md#database)).
 
 The whole flow is four commands on a fresh VM:
 
@@ -17,15 +21,17 @@ The whole flow is four commands on a fresh VM:
 | File | Purpose |
 |---|---|
 | `bootstrap-vm.sh` | One-time, idempotent VM setup (Amazon Linux 2023): docker + compose plugin + sops + cronie (AL2023 ships no cron daemon) + AWS CLI, automatic security updates (dnf-automatic; docker/containerd excluded so the stack never bounces at a random hour), 2 GB swap, nightly backup cron, IMDSv2 hop-limit fix. Other distros get the manual list. |
-| `compose.prod.yml` | Postgres (pgvector) + Redis (AOF) + API + Caddy. No DB host ports; S3 is real AWS. API healthcheck lets deploys verify themselves. Container logs capped (json-file, 10 MB × 5 per service) so they can't fill the 30 GB disk. `FEOH_DATABASE_URL`/`FEOH_REDIS_URL` are override seams for RDS/ElastiCache later. Also the one-shot `frontend-build` service (Node image + pnpm-store cache) behind a `build` profile, so `up` never starts it — `deploy.sh` runs it. Every image is `repo:tag@sha256:…`, bumped by Dependabot (`backend/docs/docker.md` § Image pinning). |
+| `compose.prod.yml` | Redis (AOF) + API + Caddy, plus Postgres (pgvector) under the `localdb` profile for container mode only. No DB host ports; S3 is real AWS. API healthcheck lets deploys verify themselves. Container logs capped (json-file, 10 MB × 5 per service) so they can't fill the 30 GB disk. `FEOH_DATABASE_URL` (set → RDS) and `FEOH_REDIS_URL` are override seams; `PGSSLMODE` is passed to the api (default `prefer`). The one-shot `pgtools` service (same Postgres image, RDS CA bundle mounted, `tools` profile) carries the pg client tools for RDS. Also the one-shot `frontend-build` service (Node image + pnpm-store cache) behind a `build` profile, so `up` never starts it — `deploy.sh` runs it. Every image is `repo:tag@sha256:…`, bumped by Dependabot (`backend/docs/docker.md` § Image pinning). |
 | `Caddyfile` | TLS + static SPA + `api.feohledger.com` reverse proxy. Domains via env. |
 | `tenants.caddy.example` | Template for the per-VM tenant host list (`tenants.caddy`, gitignored). `add-tenant.sh` maintains it — manual edits rarely needed. |
+| `lib.sh` | Sourced by every script below, never run: decides the database mode from `deploy/.env` (`FEOH_DATABASE_URL` set → RDS, else the local container), builds the compose command (`--profile localdb` in container mode), and runs pg client tools in that mode (`feoh_pg`: `exec` into `postgres`, or `pgtools` against RDS with the password passed through the environment, never an argv). |
+| `compose.sh` / `psql.sh` | Ad-hoc `docker compose` / `psql` with the database mode applied — use these instead of a bare `docker compose -f compose.prod.yml …`, which in container mode would start the stack without its database. |
 | `deploy.sh` | Preflight → pull → decrypt secrets → frontend build (`docker compose run --rm frontend-build`; no Node/pnpm on the VM) → backend build → migrate (control plane + all tenants) **before** rolling → `up -d --wait` → Caddy reload. Flags: `--no-pull`, `--backend-only`, `--frontend-only`. |
 | `add-tenant.sh` | Tenant DB + org + admin user (same `provision_tenant` path as signup) + Caddy host block + reload, in one shot. Generates a temp password (first-login change forced) unless `--admin-password` given. |
 | `remove-tenant.sh` | The inverse of `add-tenant.sh`, and the deletion `/legal/dpa` § 13 promises within 60 days of termination: removes the Caddy host block and reloads (stop serving first), runs `scripts/delete_tenant.py` in the api container (documents → tenant DB → control-plane rows), then deletes every version of that tenant's nightly dumps from the backup bucket. `--dry-run` prints the inventory and changes nothing; otherwise it makes you type the slug back. Prints the written confirmation to send the customer, including the two residues it does NOT reach. |
-| `backup.sh` | Nightly pg dumps (globals + control plane + every `feoh_*` DB) streamed to S3. Cron installed by bootstrap. Optional `BACKUP_PING_URL` heartbeat (healthchecks.io-style) so silent failures get noticed. |
-| `restore.sh` | The other half of the DR story: streams a night's dumps back from S3 — globals via psql, each DB via `pg_restore --create` (skips existing DBs unless `--force`). Stops the api for the duration, rolls the stack back up after. Test it once against a scratch stack. |
-| `decrypt-env.sh` | Decrypts `prod.sops.yaml` to `.env` and checks it — required keys, JWT key strength, values compose's `env_file` would silently rewrite — before it replaces the current `.env`. `deploy.sh` runs it; run it on its own to check a new secrets file without deploying. |
+| `backup.sh` | Nightly pg dumps (globals + control plane + every `feoh_*` DB) streamed to S3. Cron installed by bootstrap. On RDS these are the long-retention, provider-independent copy beside RDS's automated backups + PITR (globals with `--no-role-passwords`); in container mode they are the whole DR story. Optional `BACKUP_PING_URL` heartbeat (healthchecks.io-style) so silent failures get noticed. |
+| `restore.sh` | Streams a night's dumps back from S3 — each DB via `pg_restore --create` (skips existing DBs unless `--force`). Container mode replays globals first; on RDS it skips them and restores with `--no-owner --no-acl` so everything belongs to the master user. Stops the api for the duration, rolls the stack back up after. Test it once against a scratch stack. On RDS, a point-in-time restore is the first choice (`docs/minimal-deployment.md` § Point-in-time restore). |
+| `decrypt-env.sh` | Decrypts `prod.sops.yaml` to `.env` and checks it — required keys, JWT key strength, values compose's `env_file` would silently rewrite, and the database mode (RDS: a URL `lib.sh` can parse, `PGSSLMODE` `verify-full`; container: `POSTGRES_PASSWORD`, no TLS mode it cannot serve) — before it replaces the current `.env`. `deploy.sh` runs it; run it on its own to check a new secrets file without deploying. |
 | `prod.sops.yaml.example` | Template for the VM's secrets file: flat YAML keyed by env var name, every value quoted. The encrypted original lives in `infra-secrets` (`docs/decisions.md` §171). |
 
 ## Before the VM (once per project)
@@ -45,6 +51,11 @@ The whole flow is four commands on a fresh VM:
   on — full list with reasons: `docs/minimal-deployment.md` § 1); `ses:SendEmail` if using
   SES; ideally `ec2:ModifyInstanceMetadataOptions` so bootstrap can fix the
   IMDS hop limit itself.
+- Database (RDS path): the RDS for PostgreSQL 16 instance from `infra/` —
+  `db.t4g.micro`, `rds.force_ssl = 1`, initial database `feohledger`, 5432
+  open to the VM's security group only. Its endpoint and master password go
+  into `FEOH_DATABASE_URL`, with `PGSSLMODE: "verify-full"`
+  (`docs/minimal-deployment.md` § The RDS instance).
 - DNS: three records → this VM: `feohledger.com`, `api.feohledger.com`, and a
   **wildcard** `*.feohledger.com` (the wildcard makes tenant onboarding
   DNS-free; it needs no wildcard certificate — Caddy issues per-host certs).
@@ -94,6 +105,12 @@ Restore with `./restore.sh <YYYY-MM-DD> [--force] [db ...]` — globals first,
 then each DB via `pg_restore --create`, streamed straight from S3; existing
 DBs are skipped unless `--force` (drop + recreate). A restore that fails
 partway deliberately leaves the api stopped (don't serve a half-restored
-stack) — fix the cause and re-run, or `docker compose -f compose.prod.yml up
--d --wait` to bring it back as-is. **Test a restore once against a scratch
-stack before calling backups done.**
+stack) — fix the cause and re-run, or `./compose.sh up -d --wait` to bring it
+back as-is. **Test a restore once against a scratch stack before calling
+backups done.**
+
+On RDS the dumps are the second line: RDS's automated backups give a
+point-in-time restore to any second in the retention window, into a new
+instance — the commands are in `docs/minimal-deployment.md` § Point-in-time
+restore. The dumps are what survives losing the instance, its snapshots, or
+the account, and what restores into a Postgres anywhere.

@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import base64
 import datetime
+import uuid
 from types import SimpleNamespace
 
 import pytest
@@ -441,6 +442,7 @@ def _broken_saml_org(slug: str = "acme") -> SimpleNamespace:
     """`enabled: true` but missing its required trust anchor — `resolve_saml_config`
     raises `SSOConfigError` for this shape, not `None`."""
     return SimpleNamespace(
+        id=uuid.uuid4(),
         slug=slug,
         settings={
             "sso": {
@@ -477,6 +479,9 @@ def test_resolve_saml_or_none_absorbs_config_error():
     assert auth_saml._resolve_saml_or_none(_broken_saml_org().settings, "acme") is None
 
 
+# No database: sign-in reads the org's plan (decisions §258), so stand in for a
+# plan that grants SSO — the broken block must reach the resolver to be tested.
+@pytest.mark.usefixtures("all_plan_features")
 async def test_saml_login_broken_config_is_400_not_500(monkeypatch):
     async def _resolve_slug(slug, host, db):
         return slug
@@ -495,6 +500,9 @@ async def test_saml_login_broken_config_is_400_not_500(monkeypatch):
     assert "idp_x509_cert" not in exc.value.detail
 
 
+# No database: sign-in reads the org's plan (decisions §258), so stand in for a
+# plan that grants SSO — the broken block must reach the resolver to be tested.
+@pytest.mark.usefixtures("all_plan_features")
 async def test_saml_acs_broken_config_is_400_not_500(monkeypatch):
     async def _consume_relay_state(state):
         return {"tenant": "acme", "request_id": REQUEST_ID}
@@ -512,6 +520,9 @@ async def test_saml_acs_broken_config_is_400_not_500(monkeypatch):
     assert "idp_x509_cert" not in exc.value.detail
 
 
+# No database: sign-in reads the org's plan (decisions §258), so stand in for a
+# plan that grants SSO — the broken block must reach the resolver to be tested.
+@pytest.mark.usefixtures("all_plan_features")
 async def test_saml_metadata_broken_config_is_404_not_500(monkeypatch):
     async def _fetch_org(slug, db):
         return _broken_saml_org()

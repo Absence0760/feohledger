@@ -82,7 +82,12 @@ inside the adapter instead.
   the ten tools as Anthropic tool schemas, and a manual tool-use loop capped at
   `FEOH_ASSISTANT_MAX_TOOL_HOPS`. The model id resolves from config
   (`FEOH_ASSISTANT_MODEL` → falls back to `FEOH_EXTRACTION_MODEL`) — never
-  hardcoded. Real `usage` tokens are summed across hops. **Streaming**: it also
+  hardcoded. `max_tokens` is 16000 per hop, because thinking counts toward it
+  on current models. Every assistant turn is echoed back unchanged on a
+  tool-use hop, thinking blocks included — the streaming path rebuilds each
+  thinking block from its `thinking_delta` / `signature_delta` events, since a
+  replayed block without its signature is rejected. Real `usage` tokens are
+  summed across hops. **Streaming**: it also
   implements `respond_streaming`, a `stream: true` variant of the same tool-use
   loop that forwards the Anthropic Messages SSE `text_delta`s as they arrive
   (true per-token passthrough) — see [Streaming (SSE)](#streaming-sse--post-apiassistantchatstream).
@@ -349,7 +354,7 @@ on the security-critical isolation/audit bits.
 | Variable | Default | Purpose |
 |----------|---------|---------|
 | `FEOH_ASSISTANT_PROVIDER` | `mock` | `mock` (local-first) \| `claude` |
-| `FEOH_ASSISTANT_MODEL` | (empty) | Model id; empty → `FEOH_EXTRACTION_MODEL` (claude-opus-4-8 family) |
+| `FEOH_ASSISTANT_MODEL` | (empty) | Model id; empty → `FEOH_EXTRACTION_MODEL` (`claude-sonnet-5-5`) |
 | `FEOH_ASSISTANT_MONTHLY_TOKEN_BUDGET` | `200000` | Per-org/month token cap; `0` disables |
 | `FEOH_ASSISTANT_MAX_TOOL_HOPS` | `4` | Claude tool-use loop cap (cost bound) |
 | `FEOH_ANTHROPIC_API_KEY` | (empty) | Reused from extraction — **no new secret**. Empty → auto-downgrade `claude`→`mock` |

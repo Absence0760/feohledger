@@ -257,7 +257,9 @@ async def test_management_is_admin_gated(realdb):
         assert (await c.get("/api/api-keys")).status_code == 403
 
 
+# API-key management is plan-gated (decisions §258); the harness org reads as free.
 @pytest.mark.asyncio
+@pytest.mark.plan("scale")
 async def test_list_returns_metadata_only(realdb):
     plaintext, _ = await _mint_key(realdb, "a", name="reporting-bot")
     async with realdb.client(key="a", role="admin") as c:
@@ -313,7 +315,9 @@ async def test_metered_call_increments_usage(realdb):
     assert plaintext not in str(usage)
 
 
+# API-key management is plan-gated (decisions §258); the harness org reads as free.
 @pytest.mark.asyncio
+@pytest.mark.plan("scale")
 async def test_usage_endpoint_is_admin_gated(realdb):
     plaintext, body = await _mint_key(realdb, "a")
     key_id = body["api_key"]["id"]
@@ -322,7 +326,9 @@ async def test_usage_endpoint_is_admin_gated(realdb):
     assert resp.status_code == 403
 
 
+# API-key management is plan-gated (decisions §258); the harness org reads as free.
 @pytest.mark.asyncio
+@pytest.mark.plan("scale")
 async def test_usage_endpoint_other_tenant_key_is_404(realdb):
     # Mint a key in tenant A; tenant B's admin must not read its usage.
     _, body = await _mint_key(realdb, "a")

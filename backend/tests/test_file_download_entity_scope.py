@@ -21,11 +21,17 @@ import uuid
 from datetime import date
 from decimal import Decimal
 
+import pytest
+
 from app.models.contract import Contract, ContractStatus
 from app.models.expense import Expense
 from app.models.invoice import Invoice, InvoiceStatus
 from app.models.vendor import Vendor
 from tests.entity_scope_probe import two_entities
+
+# Multi-entity is a plan-gated feature (docs/decisions.md §258) and every test
+# here stands up a second entity, so the harness orgs run on Scale.
+pytestmark = pytest.mark.plan("scale")
 
 TENANT = "a"
 BYTES = b"%PDF-1.4\n% entity-scope probe\n%%EOF\n"

@@ -57,7 +57,7 @@ fingerprint moves and the summary regenerates naturally.
   "confidence_context": "auto-extracted at 95% confidence with RAG priors applied",
   "source_fingerprint": { "count": 6, "last_at": "2026-05-01T10:09:00+00:00" },
   "generated_at": "2026-06-11T12:00:00+00:00",
-  "model": "claude-sonnet-4-20250514"
+  "model": "claude-sonnet-5-5"
 }
 ```
 

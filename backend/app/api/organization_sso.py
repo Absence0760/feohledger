@@ -27,13 +27,19 @@ from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
 
-from app.api.deps import ROLE_ADMIN, require_roles
+from app.api.deps import ROLE_ADMIN, ensure_entitlement, require_roles
 from app.api.refusals import coded_refusal
 from app.database import get_control_db
 from app.models.organization import Organization
 from app.models.user import Role, User
 from app.schemas.organization import SSOSettingsStatus, UpdateSSOSettingsRequest
 from app.services.audit_dispatch import record_auth_audit_or_raise
+from app.services.billing.entitlements import get_entitlements
+from app.services.billing.plan_catalog import (
+    FEATURE_SCIM,
+    FEATURE_SSO,
+    FEATURE_SSO_ENFORCEMENT,
+)
 from app.services.sso import SSOConfigError, check_sso_idp_config, sso_only_requested
 from app.services.sso_settings import (
     SCIM_GROUP_ROLE_MAP_KEY,
@@ -122,14 +128,44 @@ async def _refuse_unknown_roles(db: AsyncSession, org_id, role_map: dict | None)
         )
 
 
-def _status(org: Organization) -> SSOSettingsStatus:
-    return SSOSettingsStatus(**sso_status(org.settings, tenant_slug=org.slug))
+async def _status(db: AsyncSession, org: Organization) -> SSOSettingsStatus:
+    entitlements = await get_entitlements(db, org.id)
+    return SSOSettingsStatus(
+        **sso_status(org.settings, tenant_slug=org.slug, entitlements=entitlements)
+    )
+
+
+async def refuse_unentitled_sso_block(
+    db: AsyncSession, org_id, block: dict, changed: list[str]
+) -> None:
+    """The plan gates on a save (decisions §253, §258), each a coded 402.
+
+    * ``enabled: true`` needs ``FEATURE_SSO`` (Growth).
+    * ``sso_only: true`` needs ``FEATURE_SSO_ENFORCEMENT`` (Scale).
+    * A changed, non-empty SCIM group → role map needs ``FEATURE_SCIM`` (Scale).
+
+    The gate reads the block the save would LEAVE, so turning a feature off is
+    never refused: a downgraded tenant can always switch SSO off or drop
+    ``sso_only``, and edit the stored IdP fields while SSO is off. Saving a
+    block that keeps a feature on still needs the plan — the save would
+    otherwise be claiming a posture sign-in does not honour. The role
+    map is gated only when this save changes it, because the panel re-sends the
+    stored map on every save and a downgraded tenant would otherwise be unable
+    to touch SSO at all.
+    """
+    if block.get("enabled"):
+        await ensure_entitlement(db, org_id, FEATURE_SSO)
+    if block.get("sso_only"):
+        await ensure_entitlement(db, org_id, FEATURE_SSO_ENFORCEMENT)
+    if SCIM_GROUP_ROLE_MAP_KEY in changed and block.get(SCIM_GROUP_ROLE_MAP_KEY):
+        await ensure_entitlement(db, org_id, FEATURE_SCIM)
 
 
 @router.get("", response_model=SSOSettingsStatus)
 async def get_sso_settings(
     org: Organization = Depends(get_tenant),
     user: User = Depends(require_roles(ROLE_ADMIN)),
+    db: AsyncSession = Depends(get_control_db),
 ):
     """Read the tenant's SSO configuration. Admin only.
 
@@ -137,7 +173,7 @@ async def get_sso_settings(
     `GET /api/organization` drops it for every role too
     (`services/org_settings_view.ALWAYS_REDACTED`).
     """
-    return _status(org)
+    return await _status(db, org)
 
 
 async def _sso_settings_body(request: Request) -> UpdateSSOSettingsRequest:
@@ -229,6 +265,7 @@ async def update_sso_settings(
     refuse_unresolvable_sso_only(merged)
 
     changed = changed_keys(before, block)
+    await refuse_unentitled_sso_block(db, locked.id, block, changed)
 
     # The row FIRST, and no change without it: this is a sign-in policy (and,
     # with `client_secret`, a credential) change, and an unrecorded one is worse
@@ -262,4 +299,4 @@ async def update_sso_settings(
     locked.settings = merged
     flag_modified(locked, "settings")
     await db.commit()
-    return _status(locked)
+    return await _status(db, locked)

@@ -28,8 +28,8 @@ There is already a scheduled `.github/workflows/audit.yml` running `pnpm audit` 
 
 2. **Open audit issue.** `gh issue list --label dependency-audit --state open`. If one exists, surface its title and confirm whether today's findings match — a stale open issue that no longer reproduces is itself a finding.
 
-3. **Dependabot coverage.** Read `.github/dependabot.yml`. Current entries: `github-actions` at `/`, `pip` at `/backend`, `npm` at `/frontend`, `docker` at `/backend` and `/tools/fake-erp`, `pip` at `/tools/fake-erp`, `terraform` at `/infra`.
-   - **Known gap to confirm or close: `mobile/` has no entry.** Dependabot supports `package-ecosystem: pub` for Dart/Flutter; without it the mobile app's dependency tree is never bumped and never scanned. Report it every run until it is either added or a decision entry says why not.
+3. **Dependabot coverage.** Read `.github/dependabot.yml`. Current entries: `github-actions` at `/`, `pip` at `/backend`, `npm` at `/frontend`, `pub` at `/mobile`, `docker` at `/backend` and `/tools/fake-erp`, `docker-compose` at `/backend` + `/deploy`, `pip` at `/tools/fake-erp`, `terraform` at `/infra`.
+   - Confirm every workspace that ships a manifest has an entry; a new workspace without one is a gap.
    - Flag any *new* workspace or ecosystem added since the last run without a matching entry.
    - Confirm grouping still reduces churn rather than hiding a security bump inside a 30-package group.
 

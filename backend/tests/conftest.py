@@ -1109,6 +1109,32 @@ class RealDB:
             await s.execute(delete(Plan).where(Plan.code.startswith(prefix, autoescape=True)))
             await s.commit()
 
+    async def subscribe(self, key: str, plan_code: str) -> None:
+        """Bind tenant ``key``'s org to the catalog plan ``plan_code`` — and only it.
+
+        The harness's orgs hold NO subscription by default, which reads exactly
+        like ``free`` (``get_entitlements`` → ``{}``). A test of a plan-gated
+        feature (decisions §253/§258) arranges the plan it needs here — or via
+        ``@pytest.mark.plan("scale")``, which calls this for both tenants —
+        rather than the harness entitling everyone and hiding an over-broad
+        gate. Any live subscription the org already holds is cleared first
+        (``uq_subscription_one_live_per_org``); teardown clears this one
+        (``_reset_control_billing``).
+        """
+        from sqlalchemy import delete
+
+        from app.models.billing import Subscription
+        from app.services.billing.plan_catalog import ensure_plan_catalog, ensure_subscription
+
+        org_id = self.tenants[key].org_id
+        async with self.control_sessionmaker()() as s:
+            await ensure_plan_catalog(s)
+            await s.execute(delete(Subscription).where(Subscription.organization_id == org_id))
+            sub = await ensure_subscription(s, organization_id=org_id, plan_code=plan_code)
+            if sub is None:
+                raise ValueError(f"subscribe(): {plan_code!r} is not a catalog plan code")
+            await s.commit()
+
     def client(self, *, key: str, role: str | None = "admin"):
         import httpx
         from fastapi import Depends
@@ -1198,9 +1224,60 @@ class RealDB:
             await engine.dispose()
 
 
+#: Every module that binds `get_entitlements` by name, plus the defining module
+#: (which the call-time importers — `api/deps.py`, `api/scim.py` — resolve
+#: through). `all_plan_features` patches each, so a new by-name importer that
+#: is missed here fails its mocked test loudly rather than silently consulting
+#: a mocked session.
+_ENTITLEMENT_LOOKUPS = (
+    "app.services.billing.entitlements.get_entitlements",
+    "app.api.auth.get_entitlements",
+    "app.api.organization_sso.get_entitlements",
+    "app.services.sso_plan.get_entitlements",
+    "app.services.webhooks.dispatch.get_entitlements",
+)
+
+
+@pytest.fixture
+def all_plan_features(monkeypatch, request):
+    """For a DB-FREE test of a plan-gated path (decisions §258): answer every
+    entitlement lookup with the full feature set, as if the org were on Scale.
+
+    A mocked control session cannot answer the plan query — it either runs out
+    of scripted results or hands back a `MagicMock` that reads as "no plan" —
+    so a mocked test of SSO-only sign-in, say, arranges its plan here instead.
+    Opt in per test or per module (`pytestmark =
+    pytest.mark.usefixtures("all_plan_features")`). A test that ALSO uses
+    `realdb` is left alone: it arranges a real plan with `@pytest.mark.plan`
+    / `realdb.subscribe`, so the real lookup stays exercised.
+    """
+    if "realdb" in request.fixturenames:
+        return
+    from app.services.billing.plan_catalog import ALL_FEATURES
+
+    async def _every_feature(db, organization_id):  # noqa: ARG001 - signature parity
+        return {feature: True for feature in ALL_FEATURES}
+
+    for target in _ENTITLEMENT_LOOKUPS:
+        monkeypatch.setattr(target, _every_feature)
+
+
+def pytest_configure(config) -> None:
+    config.addinivalue_line(
+        "markers",
+        "plan(code): bind both realdb harness orgs to this catalog plan for the test "
+        "(e.g. plan('scale')); without it they hold no subscription, i.e. read as free. "
+        "See RealDB.subscribe and docs/decisions.md §258.",
+    )
+
+
 @pytest_asyncio.fixture
-async def realdb():
-    """Function-scoped real-Postgres handle; truncates tenant data per test."""
+async def realdb(request):
+    """Function-scoped real-Postgres handle; truncates tenant data per test.
+
+    A ``@pytest.mark.plan("<code>")`` on the test (or ``pytestmark`` on its
+    module) binds both harness orgs to that catalog plan first — the opt-in a
+    test of a plan-gated surface uses (``RealDB.subscribe``)."""
     import asyncpg
     from sqlalchemy import text
     from sqlalchemy.exc import OperationalError
@@ -1267,7 +1344,11 @@ async def realdb():
             await engine.dispose()
 
     db = RealDB(tenants)
+    plan_marker = request.node.get_closest_marker("plan")
     try:
+        if plan_marker is not None:
+            for key in tenants:
+                await db.subscribe(key, plan_marker.args[0])
         yield db
     finally:
         # Control-plane billing rows first — a failure here must still be loud

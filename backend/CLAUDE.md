@@ -18,6 +18,7 @@ Deep-dive docs live in `backend/docs/`:
 | Conversational AP assistant | `docs/conversational-assistant.md` |
 | AI Cash-Flow Copilot (Phases 1–2 — read-only cash tools + proposed plans + `/api/cash-flow` façade) | `../docs/cash-flow-copilot.md` (repo-root `docs/`) |
 | ERP adapters (Merge.dev + direct) | `docs/erp-integration.md` |
+| QuickBooks Online direct adapter (scope, not built) | `docs/quickbooks-online-adapter.md` |
 | Workflow state machine | `docs/workflow-design.md` |
 | Workflow snapshot semantics | `docs/workflow-snapshots.md` |
 | Payment runs + ERP sync | `docs/payments.md` |
@@ -467,6 +468,14 @@ its seatbelt is derived from `DEFAULT_PLAN_CATALOG` so a free-form WHERE can't
 empty the catalogue every entitlement lookup reads. Guarded by
 `tests/test_realdb_harness.py`.
 
+**The harness's orgs hold no subscription, which reads exactly like `free`.** A
+test of a plan-gated surface (`docs/decisions.md` §258) arranges its own plan —
+`await realdb.subscribe("a", "scale")`, or `@pytest.mark.plan("scale")` on the
+test / `pytestmark` on the module, which subscribes both tenants before the test
+runs. Teardown clears it with the other billing rows. Never default every test
+org onto a paid plan: that would hide a gate accidentally placed on a core AP
+route.
+
 It does **not** delete extra control-plane `users` rows a test creates — those
 accumulate, so a test must not assume a fixed user count for a test org.
 
@@ -586,7 +595,7 @@ relying on it acknowledged writes that weren't durable yet. Consequences:
 ```python
 VALID_TRANSITIONS = {
     new:                {pending, ready_for_review, approved, done},
-    pending:            {ready_for_review, approved, failed},
+    pending:            {ready_for_review, approved, failed, new},  # new = AI reading paused
     ready_for_review:   {approved, rejected},
     approved:           {sending_to_erp, payment_scheduled, done},
     rejected:           {ready_for_review, new},
@@ -602,7 +611,10 @@ VALID_TRANSITIONS = {
 
 `payment_scheduled → approved` and `paid → approved` are back-edges
 used by the void-payment path (`POST /api/payments/{id}/void`) to
-re-enter the payment queue. Everything else is forward-only.
+re-enter the payment queue. `pending → new` is the extraction worker landing an
+invoice for manual entry when AI reading is paused (plan allowance or spending
+cap used — `docs/billing.md` § AI-read invoice metering); `POST /bulk/status`
+refuses it for a human. Everything else is forward-only.
 
 Step types: `extraction` → `approval` → `erp_export` → `done`
 
@@ -614,7 +626,7 @@ Step types: `extraction` → `approval` → `erp_export` → `done`
 
 ## Key background services
 
-Fourteen long-lived asyncio tasks start in `app/main.py`'s lifespan, each behind
+Fifteen long-lived asyncio tasks start in `app/main.py`'s lifespan, each behind
 its own `FEOH_*_ENABLED` gate. **What each one does, plus the shared loop runner,
 health registry and locking rules: `backend/docs/background-sweeps.md`.**
 
@@ -853,6 +865,12 @@ user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER))
   logging). Because it runs on every password sign-in, the resolvers must raise
   `SSOConfigError` and nothing else for any malformed block, and stay local (no
   DNS, no discovery fetch). `docs/decisions.md` §204.
+- **Every sign-in reader passes the settings through the org's PLAN first**
+  (`services/sso_plan.plan_scoped_settings` / `sign_in_settings`): without the
+  `sso` feature the block reads as off, without `sso_enforcement` `sso_only`
+  does — so a downgrade reopens the password, never locks the tenant out
+  (`docs/decisions.md` §258). Never hand `org.settings` straight to a resolver
+  on a sign-in path.
 - **`settings.sso` has one writer: `PUT /api/organization/sso`** (`api/organization_sso.py`
   over the pure `services/sso_settings.py`). `PATCH /api/organization` refuses
   the key. The client secret is write-only (blank keeps it, never returned —

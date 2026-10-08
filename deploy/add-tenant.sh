@@ -12,7 +12,8 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
-COMPOSE=(docker compose -f compose.prod.yml)
+# shellcheck source=lib.sh
+. ./lib.sh
 
 die() {
 	echo "add-tenant.sh: $*" >&2
@@ -37,6 +38,9 @@ done
 { [ -n "$NAME" ] && [ -n "$EMAIL" ]; } || usage
 echo "$SLUG" | grep -Eq '^[a-z0-9](-?[a-z0-9])*$' || die "invalid slug '$SLUG' (lowercase letters, digits, single hyphens)"
 [ -f .env ] || die "deploy/.env missing — run deploy.sh at least once first."
+# Same compose invocation as every other deploy script (deploy/lib.sh) — the
+# api it execs into is the same container in either database mode.
+feoh_load_db_mode || die "could not determine the database mode from deploy/.env."
 
 APP_DOMAIN=$(grep -E '^APP_DOMAIN=' .env | tail -1 | cut -d= -f2- || true)
 [ -n "$APP_DOMAIN" ] || die "APP_DOMAIN not set in the sops env."

@@ -14,11 +14,18 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import ROLE_ADMIN, get_current_user, get_org_id, require_roles
+from app.api.deps import (
+    ROLE_ADMIN,
+    get_current_user,
+    get_org_id,
+    require_entitlement,
+    require_roles,
+)
 from app.models.entity import Entity
 from app.models.user import User
 from app.schemas.entity import EntityCreate, EntityUpdate
 from app.services.audit_dispatch import dispatch_audit
+from app.services.billing.plan_catalog import FEATURE_MULTI_ENTITY
 from app.tenant import get_tenant_db
 
 router = APIRouter(prefix="/entities", tags=["entities"])
@@ -65,6 +72,12 @@ async def create_entity(
     body: EntityCreate,
     db: AsyncSession = Depends(get_tenant_db),
     user: User = Depends(require_roles(ROLE_ADMIN)),
+    # Every tenant is provisioned with its one default entity, so any entity
+    # this route creates is a second one — a Scale feature (decisions §253).
+    # Only CREATION is gated (§258): entities a downgraded tenant already has
+    # keep working — read, scope, rename, deactivate, reactivate, set-default —
+    # because the money rows scoped to them must stay reachable.
+    _entitled: User = Depends(require_entitlement(FEATURE_MULTI_ENTITY)),
     org_id: uuid.UUID = Depends(get_org_id),
 ):
     slug = body.slug.strip().lower()

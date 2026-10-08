@@ -190,6 +190,29 @@ async def test_patch_refuses_the_sso_key_and_names_its_endpoint(realdb, block):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "block",
+    [
+        pytest.param({"ai_overage_reported": {"2026-10": 999999}}, id="overage-marker"),
+        pytest.param({"provider": "mock"}, id="provider"),
+        pytest.param({"monthly_spend_cap": "0.00"}, id="cap-bypassing-its-endpoint"),
+    ],
+)
+async def test_patch_refuses_the_billing_key(realdb, block):
+    """`settings.billing` drives charges (§255); a tenant admin writing it could
+    zero their own overage, re-route it to `mock`, or bypass the audited cap."""
+    async with realdb.client(key="a", role="admin") as c:
+        resp = await c.patch("/api/organization", json={"settings": {"billing": block}})
+    assert resp.status_code == 422, resp.text
+    assert "/api/billing/spending-cap" in resp.json()["detail"]
+    from app.models.organization import Organization
+
+    async with realdb.control_sessionmaker()() as s:
+        org = await s.get(Organization, realdb.info("a").org_id)
+        assert "billing" not in (org.settings or {})
+
+
+@pytest.mark.asyncio
 async def test_a_stored_unresolvable_block_does_not_block_an_unrelated_save(realdb):
     """A block that got into the row some other way (a DB edit) is already
     harmless, because the password stays open over it, and it must not hold

@@ -42,3 +42,23 @@ output "ses_mail_from_domain" {
   description = "The envelope-sender (MAIL FROM) subdomain SES addresses bounces to — its MX and SPF live there, apart from the apex records Migadu owns."
   value       = aws_sesv2_email_identity_mail_from_attributes.platform.mail_from_domain
 }
+
+output "app_instance_id" {
+  description = "Instance ID of the app VM — the target for `aws ssm start-session` (README.md § Workload stack)."
+  value       = aws_instance.app.id
+}
+
+output "app_public_ip" {
+  description = "Elastic IP of the app VM. The apex, api. and *. records all point here."
+  value       = aws_eip.app.public_ip
+}
+
+output "db_address" {
+  description = "RDS endpoint hostname — the host part of FEOH_DATABASE_URL in the sops env (postgresql+asyncpg://postgres:<password>@<db_address>:5432/feohledger)."
+  value       = aws_db_instance.main.address
+}
+
+output "alerts_topic_arn" {
+  description = "SNS topic every infrastructure alarm notifies."
+  value       = aws_sns_topic.alerts.arn
+}

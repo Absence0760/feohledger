@@ -44,7 +44,7 @@ backups_bucket_name       = "feohledger-backups-prod-REPLACE"
 # addresses. Required, with no default, so the real address never lands in this
 # public repo — and the example.com placeholder is rejected on plan.
 budget_alert_emails = ["alerts@example.com"]
-# monthly_budget_limit_usd = 25
+# monthly_budget_limit_usd = 75
 
 # --- Email ------------------------------------------------------------------------
 # Mailboxes on Migadu, app mail through SES (email.tf, README.md § Email). The
@@ -55,8 +55,18 @@ budget_alert_emails = ["alerts@example.com"]
 # dmarc_report_email        = "ops@feohledger.com"
 # dmarc_policy              = "none"   # raise to "quarantine" once reports align
 
+# --- Workload stack ----------------------------------------------------------
+# Infrastructure alarms (VM health, database CPU/memory/storage). Required, no
+# default — the repo is public. Each address confirms an SNS subscription once.
+alert_emails = ["alerts@example.com"]
+# app_instance_type        = "t4g.medium"     # Graviton (arm64) only
+# db_instance_class        = "db.t4g.micro"
+# db_backup_retention_days = 7                # point-in-time-restore window
+# db_multi_az              = false            # true when a customer needs an uptime commitment
+# db_master_password_version = 1              # bump with each password rotation
+
 # --- Secrets ------------------------------------------------------------------
-# None, and a secret never goes in a tfvars. When the ECS/ALB/RDS stack lands,
-# its secrets (rds_master_password, …) are read from the sops-encrypted
-# infra-secrets/feohledger/prod.sops.yaml via the carlpett/sops provider —
-# README.md § Secrets.
+# Never in a tfvars. The one secret, the RDS master password, is an ephemeral
+# variable passed as TF_VAR_db_master_password from
+# infra-secrets/feohledger/terraform.sops.yaml on the plan/apply command line —
+# README.md § Workload stack.

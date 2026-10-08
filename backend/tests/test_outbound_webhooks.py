@@ -46,6 +46,11 @@ from app.services.webhooks.signing import (
     sign_payload,
 )
 
+# Outbound webhooks are plan-gated (decisions §258) — both the subscription CRUD
+# and dispatch, which queues nothing for an org without the feature — and the
+# realdb harness orgs hold no subscription (= free), so bind both to Scale.
+pytestmark = pytest.mark.plan("scale")
+
 
 @pytest.fixture(autouse=True)
 def _allow_test_targets(monkeypatch):

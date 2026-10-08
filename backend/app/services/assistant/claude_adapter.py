@@ -4,8 +4,9 @@ Selected only when an API key is configured. House style: a raw ``httpx`` POST
 to ``https://api.anthropic.com/v1/messages`` (matches
 ``extraction_adapters/claude_vision.py``), not the SDK. The model id resolves
 from config (``FEOH_ASSISTANT_MODEL`` → falls back to ``FEOH_EXTRACTION_MODEL``,
-the claude-opus-4-8 family) — never hardcoded. Adaptive thinking per house
-conventions for the Opus 4.x family.
+``claude-sonnet-5-5``) — never hardcoded. Adaptive thinking, which current
+models run by default; thinking blocks are echoed back UNCHANGED (signature
+included) on every tool-use hop, as the Messages API requires.
 
 The manual tool-use loop is capped at ``FEOH_ASSISTANT_MAX_TOOL_HOPS`` to bound
 cost. Each ``tool_use`` block is executed via the orchestrator's tenant-bound,
@@ -93,7 +94,10 @@ class ClaudeAssistantAdapter(AssistantAdapter):
         """The Messages API body for one hop. ``stream`` is added by the caller."""
         return {
             "model": model,
-            "max_tokens": 4096,
+            # Thinking counts toward this ceiling; 4096 could be spent on
+            # thinking before any answer text on a thinking-on model. A cap,
+            # not a charge — the per-org token budget meters actual usage.
+            "max_tokens": 16000,
             "system": _SYSTEM_PROMPT,
             "thinking": {"type": "adaptive"},
             "tools": tool_specs,
@@ -275,6 +279,22 @@ class ClaudeAssistantAdapter(AssistantAdapter):
                                         tool_json_parts.setdefault(idx, []).append(
                                             delta.get("partial_json", "")
                                         )
+                                    elif dtype in ("thinking_delta", "signature_delta"):
+                                        # Rebuild the thinking block exactly, so
+                                        # the echo on a tool-use hop carries its
+                                        # text and signature. Without the
+                                        # signature the API rejects the replayed
+                                        # block and the second hop fails.
+                                        if 0 <= idx < len(content_blocks):
+                                            blk = content_blocks[idx]
+                                            if dtype == "thinking_delta":
+                                                blk["thinking"] = blk.get(
+                                                    "thinking", ""
+                                                ) + delta.get("thinking", "")
+                                            else:
+                                                blk["signature"] = blk.get(
+                                                    "signature", ""
+                                                ) + delta.get("signature", "")
                                 elif etype == "message_delta":
                                     # message_delta.usage.output_tokens is the running
                                     # total for THIS response; the last seen wins.

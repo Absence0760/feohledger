@@ -28,10 +28,16 @@ from __future__ import annotations
 import base64
 import json
 import time
+import uuid
 
 import pytest
 from joserfc import jwt
 from joserfc.jwk import OctKey, RSAKey
+
+# Plan-gated surface (docs/decisions.md §253/§258): realdb tests run with the
+# harness orgs on a plan granting it; DB-free tests answer the plan lookup via
+# the `all_plan_features` fixture.
+pytestmark = pytest.mark.usefixtures("all_plan_features")
 
 
 class _FakeRedis:
@@ -622,6 +628,7 @@ def _broken_oidc_org(slug: str = "acme"):
     from types import SimpleNamespace
 
     return SimpleNamespace(
+        id=uuid.uuid4(),
         slug=slug,
         settings={
             "sso": {

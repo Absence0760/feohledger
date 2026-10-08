@@ -29,6 +29,7 @@ from decimal import Decimal
 
 import httpx
 
+from app.config import settings
 from app.schemas.money import json_money
 
 logger = logging.getLogger(__name__)
@@ -185,12 +186,32 @@ def parse_response(text: str) -> AnomalyResult:
     )
 
 
+def resolve_anomaly_llm_config(org_settings: dict | None) -> tuple[str, str | None]:
+    """The Anthropic ``(api_key, model)`` the anomaly check may use, or ``("", None)``.
+
+    Platform mode uses the platform key and the platform extraction model. A
+    BYOK org's ``settings.extraction.api_key`` belongs to the provider THAT org
+    chose, and only ``claude_vision``'s is an Anthropic key: it used to be sent
+    to ``api.anthropic.com`` whatever the provider, so an org extracting on
+    OpenAI had its OpenAI secret posted to Anthropic as ``x-api-key``. A BYOK
+    org on another provider, or with no key of its own, gets no check — falling
+    back to the platform key would bill the platform and engage Anthropic as a
+    sub-processor for an org that chose a different one.
+    """
+    extraction = (org_settings or {}).get("extraction") or {}
+    if extraction.get("program_type") == "byok":
+        if extraction.get("provider") != "claude_vision":
+            return "", None
+        return extraction.get("api_key") or "", extraction.get("model") or None
+    return settings.anthropic_api_key, None
+
+
 async def detect_anomaly(
     candidate: CandidateInvoice,
     history: list[HistoricalInvoice],
     *,
     api_key: str | None,
-    model: str = "claude-sonnet-4-20250514",
+    model: str | None = None,
     http_post=None,
 ) -> AnomalyResult:
     """Send the prompt, parse the response, fail soft.
@@ -213,8 +234,11 @@ async def detect_anomaly(
 
     prompt = build_prompt(candidate, history)
     body = {
-        "model": model,
-        "max_tokens": 512,
+        # Was a hardcoded `claude-sonnet-4-20250514`, which Anthropic has
+        # deprecated; the platform's extraction model is the one id kept current.
+        "model": model or settings.extraction_model,
+        # Sized for adaptive thinking as well as the small JSON verdict.
+        "max_tokens": 4096,
         "messages": [{"role": "user", "content": [{"type": "text", "text": prompt}]}],
     }
     headers = {

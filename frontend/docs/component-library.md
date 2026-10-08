@@ -88,6 +88,19 @@ Grouped into subfolders by role. Import with the full path, e.g.
   (transient, on submit) and from the `role="alert"` refusal panels (a request
   the server rejected). First use: the brand strong-accent contrast advisory on
   `/organization` + `/admin/partner`.
+- `PlanUpgradeNotice.svelte` — "Available on Growth / Scale — upgrade",
+  rendered IN PLACE of a setting the org's plan does not include, so an admin
+  is not handed a control the server refuses with `402 plan_feature_required`
+  (`docs/decisions.md` §258). `<PlanUpgradeNotice feature={FEATURE_X} testId? />`
+  with a key from `#lib/types/planFeatures.ts`; the call site decides when,
+  from `auth.hasFeature(FEATURE_X)` (`/auth/me`'s `entitlements`) — and waits
+  for `auth.user` so nothing flashes before it loads. Names the feature and the
+  cheapest tier that grants it, links admin/CFO to `/billing` (the roles that
+  page admits) and tells anyone else to ask an administrator. Localized itself
+  (`planUpgrade.*`) and on `untranslatedCopy.test.ts`'s roster. Used by the SSO
+  panel's enable and "require SSO" toggles, the ERP section, `/admin/entities`,
+  `/admin/api-keys` and `/admin/webhooks`. Turning a feature OFF is never gated,
+  so a toggle a downgraded tenant still has ON stays usable.
 - `MoneyByCurrency.svelte` — several figures that must NOT be added together, one per currency, one per line: `<MoneyByCurrency figures={row.open_po_by_currency} mono />`, where each `{currency, amount}` renders through `Money` in its OWN code and a `currency: null` entry renders bare (`docs/decisions.md` §196, §197). An empty list renders a bare `0` — the rollup ran and found nothing, which is a real zero in no currency. Its `CurrencyFigure` type lives in `moneyByCurrency.ts` beside it (the `badgeTone.ts` rule: e2e fixtures type payloads with it). Used by `/cfo`'s accruals card and by-entity's Open POs column, whose servers group by currency because the legs never convert.
 - `Money.svelte` — locale-aware currency display. `<Money amount={row.amount} currency={row.currency} />`. Opt-in `whole` (no decimals), `accounting` (parenthesised negatives), `mono` (tabular-nums). Over `utils/money.ts::formatMoney`; see *Money formatting* above. Use this (or `formatMoney` in script) for every currency value — don't write `Intl.NumberFormat` inline.
 - `EmptyState.svelte` — the first-run / zero-data affordance: an optional
@@ -185,6 +198,19 @@ The visual styling for all of the above lives **globally in `src/app.css`** (cla
   (`data-testid="usage-meter"`). Budget `0` = unlimited (running total, no bar);
   amber ≥80%, red at/over budget.
 
+**`billing/`** — platform-billing panels for `/billing`.
+
+- `AiUsagePanel.svelte` — this month's AI-read invoices against the plan
+  allowance (decisions §253). `<AiUsagePanel usage={data?.ai_usage ?? null}
+  pending={loading} canEditCap={auth.isAdmin} onUsageChange={…} />`. A
+  `role="meter"` bar (amber ≥80%, red at the limit or while paused — tone from
+  `types/billing.ts::aiUsageTone`), the plan's overage price or "pauses at the
+  allowance", overage / projection / cap `KpiCard`s on a plan that bills
+  overage, a pause banner naming the remedy, and (admin) the spending-cap form
+  — the typed string is checked by `parseSpendCapInput` and sent unchanged,
+  never through a float. Testids: `billing-ai-usage`, `billing-ai-used`,
+  `billing-ai-paused`, `billing-ai-cap-input`, `-save`, `-remove`.
+
 **`workflow-builder/`** — the no-code builder canvas for the
 `/workflows/[id]` editor (step palette, canvas nodes, SVG connectors; no
 svelte-flow). The palette adds a step by click. The canvas reorders by a
@@ -203,8 +229,8 @@ a definition as JSON). All wrap the shared `ui/Modal.svelte` and call the
 `workflowStore` builder methods.
 
 **`marketing/`** — the public no-tenant page. Motion rules for everything here are in `ui-patterns.md` § Motion.
-- `Landing.svelte` — the page. Its first `<span class="eyebrow">` and `<p class="lede">` are read verbatim by `socialPreviewCard.test.ts` against `app.html`'s Open Graph tags, so change them together. Its `stats` are substantiated counts (see the comment above them); `use:countUp` animates them but the markup holds the final figure.
-- `Pricing.svelte` — plan cards + billing toggle.
+- `Landing.svelte` — the page. Its first `<span class="eyebrow">` and `<p class="lede">` are read verbatim by `socialPreviewCard.test.ts` against `app.html`'s Open Graph tags, so change them together. Its `stats` are substantiated counts (derivations in `docs/marketing-substantiation.md`); `use:countUp` animates them but the markup holds the final figure.
+- `Pricing.svelte` — the public pricing grid: one card per plan in the catalogue plus a contact-sales Enterprise card, and the "what counts as an AI-read invoice" explainer. **It types no figure.** Every price, allowance, overage rate and feature comes from `lib/marketing/pricing.ts` over `lib/marketing/plans.generated.ts`, which `pnpm gen:pricing` writes from `backend/app/services/billing/plan_catalog.py`; `pnpm check:pricing` fails CI when the two drift (`docs/decisions.md` §253, issue #426). Change a price in the catalogue, then regenerate — never in the component. `lib/marketing/pricing.test.ts` checks the grid against the module and refuses a digit in the template or in any `marketing.pricing.*` string; `tests-e2e/marketing/pricing.spec.ts` checks the rendered page. A new catalogue feature needs a label in `FEATURE_LABEL_KEYS` (a type error until it has one) and six translations. Every other public figure's derivation: `docs/marketing-substantiation.md`.
 - `Atmosphere.svelte` — `aria-hidden` backdrop layer (named to avoid app.css's global modal `.backdrop` class, which it would otherwise inherit): aurora blobs, ruled grid, generated grain, vignette. `<Atmosphere fixed? dense? still? />`. `fixed` pins it to the viewport (the long landing page); `dense` tightens it for a narrow panel; `still` holds the aurora at rest (the auth pages and the legal frame, which carry no pause control — see Motion). Consumers: `Landing`, `AuthShell`, and `routes/legal/+layout.svelte` — the last brand-NEUTRAL by requirement, since `/legal` publishes the operator's own documents and must not wear a tenant's accent (#433). It reads no `--accent`, which is what makes that true.
 - `HeroPipeline.svelte` — the `aria-hidden` animated hero: one invoice assembling field by field, then matched and paid, over a four-stage rail. A drawing of the workflow, not a screenshot. Two clocks: `--build` (one-shot assembly) and `--loop` (ambient). Every keyframe ends on the finished card.
 - `AdapterRail.svelte` — scrolling rail of **shipped adapters**, as text word marks. Names only providers with a registered adapter; remove an entry in the same change that removes the adapter.

@@ -10145,3 +10145,421 @@ through a few people may still want others to book what they paid.
 The trigger to revisit is a signed customer who wants FeohLedger to send payments.
 Then the entity, KYB, Third-Party Sender registration and the money-transmitter
 opinion return (`docs/founder-runbooks/payment-rails-onboarding.md`).
+## 252. The pilot is signed by a sole proprietor, not a company (2026-10-07)
+
+The operator is trading as a sole proprietor and will sign customer #1 that way.
+This settles the open choice in #517 ("form an entity before customer #1, **or**
+record an explicit decision to sign the pilot as a sole proprietor"); this
+section is the record. `OPERATOR.controllerDescription` in
+`frontend/src/lib/legal/operator.ts` already said so.
+
+What it changes. Incorporation was the keystone of the founder critical path
+(#446 §1) only because a contract needs a party, and a sole proprietor is one:
+Stripe, insurers, the EU/UK Art 27 representatives, the SCCs with each
+sub-processor, a SOC 2 vendor and counsel can all be engaged now, in the
+operator's own name trading as FeohLedger. The C-corp steps — formation, the
+83(b), founder vesting, Delaware franchise tax, a registered agent — leave the
+path. Nothing is required to replace them: the operator contracts and bills in their
+own name, "Jared Howard", with FeohLedger as the product's name, so no trade-name
+(DBA) filing is needed — that is only required to transact *under* a name other
+than your own. A DBA, an EIN (to keep the SSN off customer W-9s and Stripe) and a
+separate bank account are optional conveniences
+(`docs/founder-runbooks/legal-entity.md`).
+
+The legal pages publish no postal address. They state the operator's location
+(Virginia, United States) and make email the contact channel for every request
+and notice. GDPR Art 13(1)(a) asks for "contact details", which an email
+address satisfies; the US state privacy laws that would ask for more (CCPA,
+VCDPA) apply only above size thresholds this pilot is far below. Rendering
+"Virginia" where the pages said "postal mail reaches us at …" would have been
+a claim nobody could act on, so `operator.ts` gained decided states instead:
+`legalEntity: false` (no separate company), `postalAddress: false` (email
+only, `location` stated), and `dataProtectionOfficer: false`. Counsel should
+confirm the email-only position when reviewing the set.
+
+The same day the operator set the remaining domestic facts: the Terms and the
+DPA are governed by the law, and disputes go to the courts, of **the
+Commonwealth of Virginia** (the SCCs keep Irish law, which Clause 17 requires
+to be an EU member state's); customer data is hosted in **AWS `us-east-1`**,
+the region `infra/` already deploys to; and `supervisoryAuthority: false`,
+because a controller with no EU establishment has no lead authority under the
+Art 56 one-stop shop — a data subject complains wherever they live or work,
+which the policy already says. That leaves only the EU and UK Art 27
+representatives pending, and they are owed only once the Service is offered to
+people there.
+
+A foreign customer does not change the governing law: the contract stays under
+Virginia law whoever signs it — that is what choosing one is for. What a
+foreign customer brings is that country's data-protection law, which applies
+by where the people are, not by what the contract says. The EU/UK machinery
+(DPA, SCCs, Art 27 representatives) is already written; any other country is
+assessed when its first customer appears, as a counsel question, not
+pre-built.
+
+What it costs. Liability is personal and unlimited. The Terms' cap binds only
+customers, not suppliers or regulators, and preserves gross negligence, wilful
+misconduct, fraud and confidentiality breach (§13.4) — and the product holds
+supplier bank details. So **E&O and cyber cover become a hard gate before
+customer #1**, not a parallel nice-to-have: for a sole proprietor they are the
+only protection between a claim and personal assets. Some procurement teams
+will not contract with an individual; Terms §1 already permits assignment to a
+company formed later, so that is a migration, not a re-papering.
+
+Triggers to form an entity (a single-member LLC is the cheap step; the C-corp
+path stays documented for fundraising): a customer whose procurement requires
+it, a customer who wants FeohLedger to move money itself (payment-rail KYB needs
+a business — #446 §2, decisions §251), raising money, or revenue or exposure
+that insurance no longer comfortably covers. Rejected: incorporating
+pre-emptively — it costs ~$550+/yr recurring and weeks of calendar time to
+solve problems the no-rail pilot does not have.
+
+## 253. Pricing: three tiers metered on AI-read invoices, unlimited users (2026-10-07)
+
+The operator chose the tiers after a competitor and practice review (Bill.com
+and Ramp price per user; Dext sells ~250 documents for ~$38; usage plans churn
+on bill shock; the "SSO tax" is resented and the top-tier paywall has moved to
+SCIM). Issue #426 — the pricing page selling a product the billing code did not
+model — closes with this.
+
+| | Free | Growth | Scale | Enterprise |
+|---|---|---|---|---|
+| Price | $0 | $49/mo | $199/mo | negotiated contract |
+| Users | unlimited | unlimited | unlimited | unlimited |
+| AI-read invoices included | 100/mo | 500/mo | 3,000/mo | negotiated |
+| Past the allowance | AI reading pauses | $0.10 each | $0.07 each | negotiated |
+| Features | core AP | + ERP integrations, public API + webhooks, SSO (OIDC/SAML) | + SCIM, "require SSO", multiple entities, audit-log SIEM export | — |
+
+**The metered unit is an AI-read invoice**: a distinct invoice whose extraction
+ran on the *platform's* model key and succeeded, counted per calendar month in
+UTC. BYOK extractions are the customer's own model bill and never count;
+structured e-invoices (PEPPOL, UBL/Factur-X, CSV import) use no model and never
+count; re-reading one invoice in the same month counts once. That is the unit
+because model calls are nearly the whole marginal cost (~$0.02–0.08 an invoice);
+users and storage are noise beside it, which is why users are unlimited — a
+direct contrast with per-seat competitors.
+
+**Reaching a limit never blocks accounts payable.** On Free, and on a paid tier
+whose customer-set monthly spending cap is reached, *only AI reading pauses*:
+the invoice is still created and lands for manual entry, and approval, matching
+and payment recording keep working. Hard-stopping a tool a business pays its
+suppliers through is the failure the usage-pricing literature is unanimous on.
+Paid tiers bill overage instead of stopping, with 80% and 100% notices so the
+bill is never a surprise.
+
+**Gating spelling.** Features are `plan_catalog.FEATURE_*` constants, granted by
+a truthy key in `Plan.entitlements`; allowances live in `Plan.usage_components`
+under `plan_catalog.METER_AI_INVOICES` as `{"included": int,
+"overage_unit_price": decimal-string | null}`. `null` overage means "pause at
+the limit". Enterprise is not a catalog plan: an operator configures a
+negotiated plan per customer, and the pricing page shows it as contact-sales.
+
+Migration `0107_plan_catalog_v2` rewrites `entitlements` and
+`usage_components` on the three existing catalog rows from the catalog itself,
+once — `ensure_plan_catalog` deliberately never touches an existing row, so
+without it a control plane provisioned earlier would keep the v1 grants forever.
+Prices and trial days are left alone.
+
+Rejected: per-seat pricing (punishes the AP teams the product is for, and is
+not where the cost is); a hard stop at the paid tiers' allowance (bill shock in
+reverse — an outage the customer did not choose); SSO as Scale-only (an SSO tax
+on a feature that costs little to serve); counting re-reads and failed
+extractions (charging for our own retries).
+
+## 254. The pilot runs on one VM with the database on RDS (2026-10-07)
+
+The workload stack is the single VM of `docs/minimal-deployment.md` — Docker
+Compose running Caddy, the API and Redis — with **one change: the database is
+RDS for PostgreSQL 16, not a container on the VM.** Defined in
+`infra/network.tf`, `compute.tf`, `database.tf` and `monitoring.tf`; roughly
+$45–55 a month against ~$22 for everything on the VM and $120–200+ for the ECS
+build-out in `docs/production-deployment.md`.
+
+Why not the cheaper all-on-the-VM shape: its recovery story is the nightly
+`pg_dump`, so a lost VM loses up to a day of approvals, audit rows and payment
+records. For an accounts-payable system that is the one failure a pilot customer
+does not forgive. RDS gives point-in-time restore to within about five minutes
+for ~$15/month, and makes the VM disposable — replacing it costs a rebuild, not
+data. The compose stack already treated `FEOH_DATABASE_URL` as the override seam
+for exactly this, so the app needed no redesign.
+
+Why not the ECS build-out yet: it buys multi-instance scaling, automatic deploys
+and a CDN — none of which a handful of pilot tenants need — at three to four
+times the monthly cost and several days of build. Each piece graduates on its
+own trigger (`docs/minimal-deployment.md` § What's left out) and the same image,
+env contract, database and S3 layout move across unchanged.
+
+Choices inside the stack:
+
+- **Its own VPC, no NAT gateway.** Public subnets for the VM, private subnets
+  with no internet route for RDS. A NAT gateway would cost ~$33/month to serve
+  subnets that need no outbound traffic.
+- **No SSH.** Session Manager only: no port 22, no key pair, every session an
+  IAM-authorized CloudTrail event.
+- **The RDS master password never enters Terraform state.** It is an ephemeral
+  variable feeding the write-only `password_wo`, supplied from `infra-secrets`
+  at apply time. The previously documented plan — a `carlpett/sops` data
+  source — was rejected because a data source's value is written to state in
+  plaintext.
+- **TLS forced on the database** (`rds.force_ssl`), deletion protection on, a
+  final snapshot on delete, 7 days of point-in-time restore plus the 90-day
+  nightly logical dumps.
+- **t4g.medium, not t4g.small.** AI extraction and PDF rendering now run
+  in-process beside the API, Redis and Caddy; 2 GB leaves no headroom.
+
+Rejected: Multi-AZ RDS (doubles the database cost; a variable flips it on when
+a customer needs an uptime commitment); ElastiCache (Redis holds only
+ephemeral state on this stack); the account's default VPC (all-public subnets,
+and not reproducible from code).
+## 255. AI-read metering: one count, an unlocked gate, per-unit overage billed by ordinal (2026-10-07)
+
+§253 set the unit and the prices. This is how the code enforces and bills them
+(`backend/docs/billing.md` § AI-read invoice metering).
+
+**One owner of the count.** `services/billing/ai_invoice_meter.count_ai_invoices`
+is the only definition: distinct invoices with a successful `platform` usage row
+from a *billable* provider in the UTC month. Billable is "costs the platform a
+per-document charge" — `claude_vision`, `openai_vision`, `aws_textract`. `mock`
+(the keyless dev/e2e reader; counting it would trip Free on every e2e tenant),
+`ollama` (self-hosted, no per-call cost) and `einvoice` (structured e-invoices,
+which still write a `platform` row) are declared non-billable, and a test fails
+until every registered adapter is in one of the two sets. An unlisted provider
+is not counted: undercounting costs us cents, overcounting bills a customer for
+something nobody decided was billable. No live subscription reads as the Free
+allowance; a plan with no component — or a malformed one — reads as unmetered,
+because an operator's typo must not pause a paying customer.
+
+**The gate runs before the model and is deliberately unlocked.** A paused read
+sends the invoice `pending → new` (a new edge, refused to humans by
+`POST /bulk/status`) with a coded `ai_reading_paused` warning — not `failed`,
+which leads only back to re-extraction and would pause again. Two reads at the
+boundary can both pass. Rejected: a per-org lock held across a 5–30 s model call
+(one read at a time per tenant, to protect a few cents) and a reservation row
+(a schema change for the same few cents). The overshoot is bounded by concurrent
+workers, is our cost, and cannot reach the bill — see the cap below.
+
+**Overage is reported per unit, by ordinal, against a per-unit metered price —
+not a graduated "first N free" price.** The task brief suggested a graduated
+Stripe price with one event per newly-counted invoice. Rejected because
+Stripe's billing period is anchored on the subscription's start day while the
+allowance is a UTC calendar month: a graduated price applies the allowance a
+second time over a different window, so the two would disagree about which
+reads were free whenever the anchor is not the 1st. Instead OUR count applies
+the allowance and only overage is reported, one event (value `"1"`) per unit,
+identified `ai-overage:<org>:<month>:<n>`. The identifier is the ordinal, not
+the invoice id: which invoice is "the 501st" can change while concurrent
+extractions commit out of `created_at` order; how many there are cannot, so a
+re-run computes the same identifiers and the provider's idempotency
+(`Idempotency-Key` = identifier, 24 h) absorbs a resend. Progress is a
+max-merged marker on `settings.billing.ai_overage_reported[month]`; the hourly
+backstop sweep stays inside the idempotency window.
+
+**The cap is enforced twice.** The gate pauses at it, and the reporter bills
+`min(overage, floor(cap / price))` on its own — so the customer's bill never
+passes the cap even when the unlocked gate let a read through. A cap of `0.00`
+turns a paid tier into "pause at the allowance".
+
+**Follow-ups run after `commit()` returns, not from `after_commit`.** The
+`post_commit` hook fires before SQLAlchemy releases the session's connection,
+and an extraction worker's tenant pool is a single connection — a job reading
+the tenant DB from it would wait on itself. The same single-connection pools
+exposed a latent defect fixed here: `extraction_dispatch._run_local` held its
+one control connection for the whole extraction, so every control-plane session
+opened underneath (notification and audit hooks, now the gate) waited out the
+30 s pool timeout.
+
+**Notices are claimed, then sent.** A threshold key is added under the org row
+lock before the send and released if nobody was reached; at most once, because
+the check runs after every billable read and a duplicated billing email reads
+as a billing error. (`cash_flow_alerts` sends first and accepts a duplicate; its
+check runs once a day, this one many times a minute.)
+
+## 256. ERP through Merge.dev is a Scale feature; QuickBooks Online and Xero go direct (2026-10-07)
+
+§253 put "ERP integrations" in Growth ($49/mo). Every non-mock ERP config
+routes through Merge.dev by default (`erp_adapters/dispatcher`:
+`integration_method` defaults to `merge_dev`). Merge's Launch plan
+(merge.dev/pricing, read 2026-10-07) is free for the first 3 production linked
+accounts, then $650/month for up to 10, then $65 per linked account. One tenant
+is one linked account, since an org holds one `settings.erp`. Past three
+customers, a Growth tenant on Merge costs at least $65 a month against $49 of
+revenue.
+
+**Decision.** Split the entitlement:
+
+- `erp_integrations` (Growth and Scale) covers the **direct** adapters:
+  QuickBooks Online and Xero once built (`backend/docs/quickbooks-online-adapter.md`),
+  plus the existing NetSuite and Business Central adapters.
+- A new `erp_merge` feature (**Scale only**) covers `integration_method:
+  merge_dev`, the long tail: Sage Intacct, MYOB, SAP and the rest. A customer
+  on one of those systems is usually a Scale-sized company anyway.
+
+**Rejected:**
+- **A $50 Merge add-on on Growth.** It is below Merge's $65 marginal cost, so it
+  loses money on every connection past the free three, before card fees or the
+  support load of a sync we cannot fix ourselves.
+- **A ~$99 add-on.** That price would cover the cost, but the billing model has
+  no add-ons (plans are a flat price plus `entitlements`, §253). Building one
+  means a Stripe price, proration and pricing-page support in money-path code,
+  which isn't worth it before anyone asks. Revisit if Growth customers on
+  long-tail ERPs ask for Merge.
+- **Merge everywhere, absorbing the cost.** Margin goes negative at exactly the
+  scale where the business is supposed to work.
+
+The first three Merge connections are free, so pilot customers on long-tail
+ERPs cost nothing while demand is tested.
+
+**Not yet enforced.** No route checks `erp_integrations` today (see
+`docs/known-issues.md`), and `erp_merge` doesn't exist yet. Both are tracked in
+`docs/followups.md`. Until they land, this records the intended plan shape and
+the pricing page must not advertise Merge-routed ERPs on Growth.
+
+*Update 2026-10-07:* §258 now enforces `erp_integrations`. `erp_merge` is still
+not built, so a Growth tenant can save and push a Merge-routed config; the
+follow-up's trigger (the first paid Growth customer or the fourth Merge
+connection) is unchanged.
+## 257. The single-VM database is RDS, reached over verify-full TLS set by PGSSLMODE (2026-10-07)
+
+The operator chose the single-VM deployment with Postgres on **RDS for
+PostgreSQL 16** (`db.t4g.micro`, PITR, `rds.force_ssl = 1`) from day one, wired
+through the override seam the compose file already had (`FEOH_DATABASE_URL` in
+the sops env). The container stays as the documented cheaper alternative
+(`docs/minimal-deployment.md` § Database). Four calls followed:
+
+- **TLS is set by `PGSSLMODE` / `PGSSLROOTCERT`, not by the URL.** Verified
+  against the pinned asyncpg (0.31.0): with no `ssl` argument it reads
+  `PGSSLMODE`, and nothing in the app passes one — SQLAlchemy forwards only the
+  URL's query, and the raw `asyncpg.connect` calls now parse the URL with the
+  same `make_url` (`tenant_provisioning.asyncpg_connect_kwargs`). libpq reads
+  the same two variables, so one setting covers the app, Alembic, the Lambda
+  handlers and `pg_dump`. A `?ssl=` on the URL would reach asyncpg and not
+  libpq, so the deploy contract refuses a query string outright.
+  (`make_tenant_url` and Alembic's tenant URL still had to stop dropping a query
+  string — a latent bug for any option on the URL, fixed at the builder.)
+- **`verify-full`, against a committed CA bundle.** `require` encrypts but
+  accepts any certificate; verification needs the RDS CA set in the image.
+  It is committed at `backend/certs/rds-global-bundle.pem` and sha256-pinned in
+  `tests/test_container_supply_chain.py` rather than downloaded in the
+  Dockerfile at a pinned checksum: one file serves both the api image
+  (`ENV PGSSLROOTCERT`) and the `pgtools` container (bind mount), the build
+  needs no network for it, and a refresh is a reviewed diff. Not added to the
+  system trust store — these CAs are for the database, not every HTTPS call.
+- **One place decides the mode.** `deploy/lib.sh` reads `FEOH_DATABASE_URL`
+  from `deploy/.env` (shell env first, as compose does) and every script
+  sources it; the `postgres` service sits under a `localdb` profile with the
+  api's dependency `required: false`, so on RDS it never starts. Compose
+  interpolates profiled-out services too, so the old `${POSTGRES_PASSWORD:?}`
+  guard had to go — `decrypt-env.sh` now requires the password in container
+  mode only.
+- **Dumps continue on RDS, through a `pgtools` one-shot of the same image.**
+  PITR is the primary recovery; the nightly dumps stay as the copy that
+  survives losing the instance, its snapshots or the account. The password
+  reaches the container as a bare `docker compose run -e PGPASSWORD` from the
+  script's environment — never an argv `ps` shows. Restores into RDS skip the
+  role globals and use `--no-owner --no-acl`: the app's one role is the master
+  user, which is `rds_superuser`, not a superuser, and cannot recreate a
+  container dump's `postgres` SUPERUSER.
+
+Rejected: `sslmode=require` (no protection against a man-in-the-middle on the
+VPC path, for no saving — the bundle costs nothing); running the dump tools
+from the `postgres` service with `run --no-deps` (it mounts the data volume and
+carries the container's password contract); a second compose file for RDS (two
+files to keep in step, where a profile is one line).
+## 258. The plan feature gates, and what a downgrade keeps (2026-10-07)
+
+§253 named the features; this is how each is enforced and — the real design
+call — what a tenant that drops to a cheaper plan keeps. Every gate answers
+with one coded refusal, `402 plan_feature_required` with `params.feature`
+(`api/deps.py::plan_feature_refusal`), so the SPA can name the tier; SCIM
+alone answers in the RFC 7644 error shape an IdP parses. The full route table
+is `backend/docs/billing.md` § Entitlement gating.
+
+**The rule: a downgrade removes the ability to turn a feature ON, never data,
+and never anyone's way in.** Stored configuration is not rewritten, so an
+upgrade resumes it untouched. Turning a feature OFF is never refused.
+
+- **SSO.** Sign-in reads the org's settings through its plan
+  (`services/sso_plan.plan_scoped_settings`): without `sso` the stored block
+  reads as switched off (no IdP button; the handshake answers as for an
+  unconfigured tenant, re-checked at the callback / ACS), and without
+  `sso_enforcement` `sso_only` reads as off. **Password sign-in reopens**
+  rather than the tenant being locked out. Considered and rejected: honouring
+  `sso_only` after the plan dropped SSO (nobody can sign in — the outcome §204
+  already rules out for an unresolvable IdP block); keeping SSO working on
+  Free until an admin turns it off (a paid feature given away indefinitely,
+  and an admin who never logs in never turns it off); rewriting the stored
+  block on downgrade (destroys configuration the customer paid to set up, and
+  `change_plan` would grow a side effect on tenant settings). Accounts that
+  have no password — JIT- or SCIM-provisioned — set one through the ordinary
+  forgot-password flow, which never required SSO to be off
+  (`tests/test_forgot_reset_password.py` pins it on a plan-less tenant).
+- **SCIM.** Reads and deprovisioning stay open on every plan; provisioning and
+  grants need `scim`. A leaver the IdP cannot deactivate stays active, and on
+  a plan without SSO that account's password sign-in is open — so refusing
+  the deprovision would turn a billing state into a security hole. A PUT with
+  `active: false` applies the deactivation alone.
+- **Entities.** Only creating one is gated; every existing entity keeps
+  working, because invoices, payments and GL rows are scoped to it.
+- **ERP.** Only a LIVE adapter is gated; `mock` stays open on every plan
+  (guard rail 7). A downgraded tenant's stored live ERP refuses new pushes
+  (send / retry / the completion leg, refused before the transition so the
+  invoice stays `approved` and payable) but the ERP webhook and the
+  `payment_erp_sync` sync-back of a payment already in flight are left alone —
+  a downgrade must never strand money mid-path. An invoice whose push had already
+  `failed` is refused a retry too; its way forward is the org's own — upgrade,
+  or clear the live ERP config (switching to `mock` is never refused), after
+  which the retry runs. Nothing is stuck behind the gate that a setting the
+  tenant controls cannot release.
+- **Public API.** Key minting, webhook creation and configuration are gated;
+  revoking keys, switching a webhook off and rotating its signing secret are
+  not — rotation is how a leak is remediated, and a downgraded tenant must
+  not have to delete the delivery log to do it. `_emit` queues nothing
+  for an unentitled org; deliveries already queued finish.
+
+The `realdb` harness's orgs hold no subscription — which reads exactly like
+`free` — and a test of a gated surface arranges its own plan
+(`realdb.subscribe`, `@pytest.mark.plan`). Entitling every test org by default
+was rejected: it would hide a gate accidentally placed on a core AP route,
+which is the failure §253's "never block accounts payable" exists to prevent.
+The seed puts `acme` and every e2e worker on `scale` (all workers alike, so
+they stay interchangeable) and keeps `techflow` on `free`; e2e covers the free
+and growth prompts by stubbing `/api/auth/me`'s `entitlements`, never by moving
+a worker's subscription.
+
+`audit_siem_export` gates nothing yet: there is no tenant-configurable SIEM
+destination, only the operator's platform shipper. Tracked in
+`docs/followups.md`; the SOX auditor export stays ungated regardless.
+
+## 259. A month's AI-read overage is priced on the terms it was used under (2026-10-07)
+
+**Context.** `report_ai_overage` (§255) recomputed every period it touched from
+the org's plan and spending cap *as they stood at report time*, and the
+backstop re-runs the previous month until its last second ages out of the
+provider's window. So a month already used could be re-priced after it ended:
+2,000 reads on Scale (3,000 included, owed nothing) became 1,500 Growth
+overage units after a Nov 2 downgrade, and a cap raised after month end
+billed past the cap that was in force when the reads ran. Separately, a resend
+after a lost marker was stamped with a fresh timestamp, which Stripe treats as
+a *different* request under the same idempotency key — refused for 24 h, then
+accepted as a second event.
+
+**Decision.**
+
+- Each period's marker records its pricing **terms** (allowance, unit price,
+  plan, cap), refreshed on every pass while the period is open. A **closed**
+  period is priced only from its recorded terms. A closed period with usage
+  but no recorded terms is refused and logged, never priced on today's plan.
+- A plan or cap change **inside** the month applies from the next pass. Units
+  already reported are never withdrawn, so an upgrade mid-month stops further
+  overage but does not credit what was already billed. Credits are an
+  operator action at the provider, not something the reporter infers.
+- Every unit's event **timestamp is fixed and stored before the first send**
+  (`batches`), so any resend is byte-identical and the provider replays it.
+- The backstop sweep is turned on in the deploy template; the 24 h window is
+  only a guarantee when something retries inside it.
+
+**Rejected.** *A single timestamp per period* (first-of-month, or the first
+report's instant): stateless, but it shrinks the late-report window from ~34
+days after month end to as little as a few days, and a first-of-month instant
+precedes a subscription that started mid-month. *Pricing a mid-month change
+retroactively from its effective date*: it would need per-read plan
+attribution the meter does not have, for a few cents either way at pilot scale.

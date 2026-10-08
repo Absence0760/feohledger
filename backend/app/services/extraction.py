@@ -6,12 +6,15 @@ Uses the extraction adapter pattern — supports platform (Claude Vision) and BY
 Tracks usage for billing when platform mode is used.
 """
 
+import functools
 import logging
 import uuid
+from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from decimal import Decimal
 
 from sqlalchemy import delete as sa_delete
+from sqlalchemy import select as sa_select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -149,7 +152,81 @@ def _resolve_extraction_config(org_settings: dict | None, *, announce: bool = Tr
         "platform_provider_reason": reason,
         "api_key": settings.anthropic_api_key,
         "model": settings.extraction_model,
+        "effort": settings.extraction_effort,
     }
+
+
+#: `InvoiceWarning.type` of the AI-reading pause notice (decisions §253). Listed
+#: in `invoice_warnings.UPSTREAM_WARNING_TYPES` so a later warning refresh keeps it.
+AI_READING_PAUSED_TYPE = "ai_reading_paused"
+
+
+async def _pause_ai_reading(
+    db: AsyncSession,
+    invoice: Invoice,
+    decision,
+    *,
+    actor_id: uuid.UUID | None,
+    org_settings: dict | None,
+) -> None:
+    """Land an invoice for manual entry because AI reading is paused.
+
+    The model is NOT called. The invoice goes back to ``new`` — the draft state
+    an extraction-disabled upload is left in, inside the entry window — rather
+    than ``failed``: nothing broke, and ``failed`` leads only to re-extraction,
+    which would pause again. It carries a coded, localizable warning saying why
+    and what to do (upgrade the plan, or raise the spending cap). Everything
+    after entry — submit, approval, matching, payment — is untouched, because
+    reaching a limit must never block accounts payable (§253).
+
+    An invoice not in ``pending`` (a re-extraction the GL re-code drives on an
+    already-triaged invoice) keeps its status; only the warning is added.
+    """
+    from app.services.billing.ai_invoice_meter import PAUSE_SPEND_CAP_REACHED
+    from app.services.invoice_warnings import refresh_warnings
+
+    # Read before the commit: a session that expires on commit would make these
+    # an async lazy-load afterwards.
+    invoice_id = invoice.id
+    organization_id = invoice.organization_id
+
+    if decision.reason == PAUSE_SPEND_CAP_REACHED:
+        finding = warning("ai_spend_cap_reached", "warning")
+    else:
+        finding = warning(
+            "ai_allowance_reached", "warning", included=decision.allowance.included or 0
+        )
+    kept = [w for w in (invoice.warnings or []) if w.get("type") != AI_READING_PAUSED_TYPE]
+    invoice.warnings = [*kept, finding]
+    # The same pass an extraction-disabled upload gets, so missing-field and
+    # duplicate warnings are in place for the person keying it.
+    await refresh_warnings(db, invoice, org_settings=org_settings)
+
+    if invoice.status == InvoiceStatus.pending:
+        await transition_invoice(
+            db,
+            invoice,
+            InvoiceStatus.new,
+            actor_id=actor_id,
+            action_name="invoice.ai_reading_paused",
+            details={"reason": decision.reason, "ai_reads_used": decision.used},
+        )
+    logger.info(
+        "[extraction] AI reading paused for invoice %s (%s); left for manual entry",
+        invoice_id,
+        decision.reason,
+    )
+    await db.commit()
+
+    # A pause can be the first time this org has hit the threshold behind it —
+    # an admin lowering the cap below this month's usage, say — so the notice
+    # check runs here too. Best-effort, after the commit.
+    try:
+        from app.services.billing.ai_usage_notices import send_due_ai_usage_notices
+
+        await send_due_ai_usage_notices(db, organization_id=organization_id)
+    except Exception as exc:  # noqa: BLE001 — never fails the pause; class only
+        logger.warning("[extraction] AI usage notice check failed: %s", exc.__class__.__name__)
 
 
 def decide_auto_approve(
@@ -353,6 +430,78 @@ async def resolve_gate_aggregate(
     return amount + recent
 
 
+@dataclass
+class InvoiceGlChart:
+    """The chart of accounts an automated GL code is judged against for one
+    invoice: shared accounts (``entity_id`` NULL) ∪ the invoice's own entity.
+
+    ``catalog`` is the prompt hint (empty when the chart has no active account);
+    :meth:`refused` is the one rule for whether an automated code may land —
+    used by full extraction and by the GL-only AI re-code alike."""
+
+    organization_id: uuid.UUID
+    entity_id: uuid.UUID | None
+    codes: set[str]
+    catalog: str
+    _ownership: object | None = None
+
+    async def refused(self, db: AsyncSession, code: str) -> bool:
+        """Whether an automated GL code may NOT land on this invoice.
+
+        With an active chart, anything outside it (unknown, retired, or
+        another entity's). With none, only a code that belongs to ANOTHER
+        entity's chart — never right for this invoice whether or not its own
+        chart has been synced yet (decisions §194/§199). That branch reads the
+        tenant's whole chart ownership once, lazily: the vendor-prior overlay
+        lands a code only after the document's own codes were judged, so the
+        codes cannot be listed up front.
+        """
+        if self.codes:
+            return code not in self.codes
+        if self._ownership is None:
+            from app.services.gl_chart import load_chart_ownership
+
+            self._ownership = await load_chart_ownership(db, self.organization_id, None)
+        return self._ownership.belongs_elsewhere(code, self.entity_id)
+
+
+async def load_invoice_gl_chart(
+    db: AsyncSession, organization_id: uuid.UUID, entity_id: uuid.UUID | None
+) -> InvoiceGlChart:
+    """Load the invoice's effective chart (see :class:`InvoiceGlChart`). A
+    single-entity tenant has all accounts shared or under the one entity, so
+    the scoping is a no-op there (docs/multi-entity.md § Chart of accounts)."""
+    from sqlalchemy import or_
+
+    from app.models.gl_account import GLAccount
+
+    gl_accounts = (
+        (
+            await db.execute(
+                sa_select(GLAccount)
+                .where(
+                    GLAccount.organization_id == organization_id,
+                    GLAccount.is_active == True,  # noqa: E712
+                    or_(GLAccount.entity_id == entity_id, GLAccount.entity_id.is_(None)),
+                )
+                .order_by(GLAccount.code)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    catalog = "\n".join(
+        f"{gl.code} \u2014 {gl.name}" + (f" [{gl.account_type}]" if gl.account_type else "")
+        for gl in gl_accounts
+    )
+    return InvoiceGlChart(
+        organization_id=organization_id,
+        entity_id=entity_id,
+        codes={gl.code for gl in gl_accounts},
+        catalog=catalog,
+    )
+
+
 async def run_extraction(
     db: AsyncSession,
     invoice: Invoice,
@@ -407,6 +556,10 @@ async def run_extraction(
     # fields land on the row (see `skip_vendor_match` above).
     preserved_vendor_id = invoice.vendor_id
     preserved_vendor_name = invoice.vendor_name
+    # The provider's token usage for this attempt, once the adapter has
+    # answered. Held outside the `try` so the FAILURE meter row can carry it
+    # too: a refused or unparseable read was still billed by the provider.
+    token_usage = None
 
     try:
         config = _resolve_extraction_config(org_settings)
@@ -454,6 +607,26 @@ async def run_extraction(
             )
             logger.info("[extraction] Structured e-invoice detected: %s", structured_format)
 
+        # AI-read allowance gate (decisions §253) — BEFORE the model is called,
+        # so a paused org never spends a read. Only a billable read (platform
+        # key + a paid provider) can be refused: BYOK, a structured e-invoice
+        # (`einvoice` above), `mock` and `ollama` pass straight through, and a
+        # re-read of an invoice already counted this month is always allowed.
+        from app.services.billing.ai_invoice_meter import check_ai_read
+
+        decision = await check_ai_read(
+            db,
+            organization_id=invoice_org_id,
+            invoice_id=invoice_id,
+            program_type=config.get("program_type"),
+            provider=config.get("provider"),
+        )
+        if not decision.allowed:
+            await _pause_ai_reading(
+                db, invoice, decision, actor_id=actor_id, org_settings=org_settings
+            )
+            return
+
         # RAG: embed the invoice text and fetch similar past extractions to
         # prime the adapter. No-op when rag_enabled=False, text layer empty,
         # or the tenant has no embeddings yet.
@@ -472,63 +645,11 @@ async def run_extraction(
 
         # GL catalog: inject org-specific chart of accounts so the AI
         # uses real codes instead of the hardcoded default list.
-        from sqlalchemy import or_
-        from sqlalchemy import select as sa_select
-
-        from app.models.gl_account import GLAccount
-
-        # Scope the catalog hint to the invoice's effective chart: shared
-        # accounts (entity_id NULL, available to every entity) ∪ the invoice's
-        # own entity. A single-entity tenant has all accounts shared or under
-        # the one entity, so this is a no-op there. See docs/multi-entity.md
-        # § Chart of accounts.
-        gl_result = await db.execute(
-            sa_select(GLAccount)
-            .where(
-                GLAccount.organization_id == invoice_org_id,
-                GLAccount.is_active == True,  # noqa: E712
-                or_(
-                    GLAccount.entity_id == invoice_entity_id,
-                    GLAccount.entity_id.is_(None),
-                ),
-            )
-            .order_by(GLAccount.code)
-        )
-        gl_accounts = gl_result.scalars().all()
-        # Set of valid codes used post-extraction to validate AI suggestions
-        # against the invoice's actual chart. Empty when that chart has no
-        # active account yet — in that mode there is no membership to
-        # check, and see `gl_code_refused` below for what is still refused.
-        active_gl_codes: set[str] = {gl.code for gl in gl_accounts}
-        tenant_chart_ownership = None
-
-        async def gl_code_refused(code: str) -> bool:
-            """Whether an automated GL code may NOT land on this invoice.
-
-            With an active chart, anything outside it (unknown, retired, or
-            another entity's). With none, only a code that belongs to ANOTHER
-            entity's chart — never right for this invoice whether or not
-            its own chart has been synced yet (decisions §194/§199).
-            That branch reads the tenant's whole chart ownership once, lazily:
-            the vendor-prior overlay lands a code only after the document's
-            own codes were judged, so the codes cannot be listed up front.
-            """
-            nonlocal tenant_chart_ownership
-            if active_gl_codes:
-                return code not in active_gl_codes
-            if tenant_chart_ownership is None:
-                from app.services.gl_chart import load_chart_ownership
-
-                tenant_chart_ownership = await load_chart_ownership(db, invoice_org_id, None)
-            return tenant_chart_ownership.belongs_elsewhere(code, invoice_entity_id)
-
-        if gl_accounts:
-            gl_lines = [
-                f"{gl.code} \u2014 {gl.name}" + (f" [{gl.account_type}]" if gl.account_type else "")
-                for gl in gl_accounts
-            ]
-            config["gl_account_catalog"] = "\n".join(gl_lines)
-            logger.info("[extraction] GL catalog: %s accounts injected", len(gl_accounts))
+        gl_chart = await load_invoice_gl_chart(db, invoice_org_id, invoice_entity_id)
+        gl_code_refused = functools.partial(gl_chart.refused, db)
+        if gl_chart.catalog:
+            config["gl_account_catalog"] = gl_chart.catalog
+            logger.info("[extraction] GL catalog: %s accounts injected", len(gl_chart.codes))
 
         # Build a fresh adapter now that config is fully populated.
         adapter = get_extraction_adapter(config)
@@ -538,6 +659,7 @@ async def run_extraction(
             file_key=file_key,
             mime_type=extract_mime_type,
         )
+        token_usage = result.usage
 
         if not result.success:
             # Don't log result.error: adapters build it from the raw provider
@@ -560,6 +682,14 @@ async def run_extraction(
 
         # Apply extracted fields to invoice
         _apply_extraction(invoice, result, amount_convention, org_settings=org_settings)
+
+        # A read that ran supersedes an earlier pause notice. `refresh_warnings`
+        # carries `ai_reading_paused` forward as an upstream type, so nothing
+        # else would ever clear it.
+        if invoice.warnings:
+            invoice.warnings = [
+                w for w in invoice.warnings if w.get("type") != AI_READING_PAUSED_TYPE
+            ] or None
 
         if skip_vendor_match:
             # Restore the bound payee's identity immediately: `_apply_extraction`
@@ -832,6 +962,7 @@ async def run_extraction(
                 period=datetime.now(UTC).strftime("%Y-%m"),
                 success=True,
                 organization_id=invoice.organization_id,
+                **(token_usage.as_columns() if token_usage else {}),
             )
         )
 
@@ -912,6 +1043,20 @@ async def run_extraction(
 
         await db.commit()
 
+        # Billing follow-ups for a read that counted (decisions §253): report
+        # any new overage to the billing provider and send a newly reached
+        # 80% / 100% / cap notice. AFTER the commit, so the count includes this
+        # read and no lock is held across the provider round trip; best-effort
+        # (never raises), with the reconciliation sweep as the backstop.
+        from app.services.billing.ai_invoice_meter import is_billable_read
+
+        if is_billable_read(
+            program_type=program_type, provider=result.provider or config.get("provider")
+        ):
+            from app.services.billing.ai_overage import after_ai_read
+
+            await after_ai_read(db, organization_id=invoice_org_id)
+
     except Exception as exc:
         # Log the exception CLASS only, never the raw message: a vision/OCR SDK
         # exception can carry extracted invoice PII (vendor tax id / bank /
@@ -922,8 +1067,6 @@ async def run_extraction(
         await db.rollback()
 
         # Re-fetch invoice after rollback (the old object is expired)
-        from sqlalchemy import select as sa_select
-
         from app.models.invoice import Invoice as InvoiceModel
 
         result = await db.execute(sa_select(InvoiceModel).where(InvoiceModel.id == invoice_id))
@@ -950,6 +1093,7 @@ async def run_extraction(
                     period=datetime.now(UTC).strftime("%Y-%m"),
                     success=False,
                     organization_id=invoice_org_id,
+                    **(token_usage.as_columns() if token_usage else {}),
                 )
             )
         except Exception:

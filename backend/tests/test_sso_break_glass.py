@@ -28,6 +28,11 @@ from app.services.sso_break_glass import (
     lift_sso_only,
 )
 
+# An SSO-only tenant is a Scale tenant: only Scale grants `sso_enforcement`, and
+# without it the stored `sso_only` closes nothing (decisions §258). The one test
+# of a lower plan re-subscribes tenant "a" itself.
+pytestmark = pytest.mark.plan("scale")
+
 SECRET = "break-glass-secret-that-must-not-echo"
 OIDC_SSO_ONLY = {
     "enabled": True,
@@ -154,6 +159,21 @@ async def test_an_unresolvable_block_is_lifted_and_says_the_password_was_open(re
     await _seed(realdb, {"enabled": True, "sso_only": True})
     async with realdb.control_sessionmaker()() as s:
         result = await lift_sso_only(s, realdb.info("a").slug)
+    assert result.lifted is True
+    assert result.password_was_closed is False
+    assert (await _audit_rows(realdb))[0].details["password_was_closed"] is False
+
+
+@pytest.mark.asyncio
+async def test_a_plan_without_sso_enforcement_is_lifted_and_says_the_password_was_open(realdb):
+    """On Growth the stored `sso_only` is ignored at sign-in (§258), so the
+    password was never closed — the audit row must not claim otherwise."""
+    await realdb.subscribe("a", "growth")
+    await _seed(realdb, dict(OIDC_SSO_ONLY))
+
+    async with realdb.control_sessionmaker()() as s:
+        result = await lift_sso_only(s, realdb.info("a").slug)
+
     assert result.lifted is True
     assert result.password_was_closed is False
     assert (await _audit_rows(realdb))[0].details["password_was_closed"] is False

@@ -1,188 +1,157 @@
 <script lang="ts">
 	import IconArrow from '~icons/material-symbols/arrow-forward';
 	import IconCheck from '~icons/material-symbols/check-small';
+	import LinkedMessage from '#lib/components/ui/LinkedMessage.svelte';
 	import { CONTACT } from '#lib/legal/operator.ts';
 	import { reveal } from '#lib/actions/reveal.ts';
+	import { m } from '#lib/i18n/store.svelte.ts';
+	import { PLANS } from '#lib/marketing/plans.generated.ts';
+	import { CORE_FEATURE_KEYS, pricingTiers, topPlanName } from '#lib/marketing/pricing.ts';
 
-	type Billing = 'monthly' | 'annual';
-	let billing = $state<Billing>('annual');
-
-	interface Plan {
-		name: string;
-		tagline: string;
-		priceMonthly: number | null; // null = custom / contact
-		priceAnnual: number | null;
-		unit: string;
-		ctaLabel: string;
-		ctaHref: string;
-		featured?: boolean;
-		features: string[];
-		footnote?: string;
-	}
-
-	const plans: Plan[] = [
-		{
-			name: 'Self-hosted',
-			tagline: 'Run it yourself. Source is open.',
-			priceMonthly: 0,
-			priceAnnual: 0,
-			unit: 'on your infrastructure',
-			ctaLabel: 'View on GitHub',
-			ctaHref: 'https://github.com/Absence0760/feohledger',
-			features: [
-				'Full source — backend, frontend, mobile',
-				'Unlimited invoices + seats',
-				'All extraction + ERP + card adapters',
-				'Your database, your cloud, your keys',
-				'Community support via GitHub issues',
-				'Docker Compose for local, Terraform for AWS',
-			],
-			footnote: 'You bring the infrastructure and operate it yourself.',
-		},
-		{
-			name: 'Free',
-			tagline: 'Hosted. For solo ops and trials.',
-			priceMonthly: 0,
-			priceAnnual: 0,
-			unit: 'forever',
-			ctaLabel: 'Start free',
-			ctaHref: '/signup',
-			features: [
-				'Up to 50 invoices / month',
-				'2 seats',
-				'AI extraction on platform keys',
-				'Standard approval workflow',
-				'CSV export',
-				'Community support',
-			],
-		},
-		{
-			name: 'Pro',
-			tagline: 'For growing teams with real AP volume.',
-			priceMonthly: 29,
-			priceAnnual: 24,
-			unit: 'per seat / month',
-			// Was 'Start 14-day trial'. It routes to the same `/signup` the free
-			// plan uses, and `tenant_provisioning._provision_into` binds EVERY new
-			// org to the `free` plan regardless — there is no plan selection in
-			// signup and no trial-flagged Subscription. The button could not do
-			// what it said, which is a present-tense false statement rather than a
-			// price that might change. Restore the trial wording when signup can
-			// actually provision one.
-			ctaLabel: 'Start free, upgrade any time',
-			ctaHref: '/signup',
-			featured: true,
-			features: [
-				'Unlimited invoices',
-				'Unlimited seats (5-seat minimum)',
-				'All extraction providers + BYOK',
-				'Custom approval workflows + RBAC',
-				'ERP sync (NetSuite, Dynamics, Merge.dev)',
-				'2/3-way PO matching + exception queue',
-				'Virtual card payments with rebates',
-				'Mobile app (iOS + Android)',
-				'Priority email support',
-			],
-			footnote: 'Virtual-card rebates vary by issuer, card spend and vendor acceptance.',
-		},
-		{
-			name: 'Enterprise',
-			tagline: 'For finance orgs at scale.',
-			priceMonthly: null,
-			priceAnnual: null,
-			unit: 'contact sales',
-			ctaLabel: 'Talk to us',
-			ctaHref: `mailto:${CONTACT.sales}`,
-			features: [
-				'Everything in Pro',
-				'SSO (SAML + OIDC) with SCIM provisioning',
-				'BYOK for all providers — your data, your keys',
-				'Dedicated tenant cluster option',
-				'Uptime commitment by agreement',
-				'Named customer success manager',
-				'Support for your security review',
-				'Custom data retention policy',
-			],
-		},
-	];
-
-	function priceFor(p: Plan): string {
-		const v = billing === 'annual' ? p.priceAnnual : p.priceMonthly;
-		if (v === null) return 'Custom';
-		if (v === 0) return '$0';
-		return `$${v}`;
-	}
+	// Every price, allowance, overage rate and feature below comes from the
+	// plan catalogue, via `lib/marketing/pricing.ts` over the GENERATED
+	// `plans.generated.ts` (`pnpm gen:pricing`; `pnpm check:pricing` fails CI
+	// when they drift — docs/decisions.md §253, issue #426). No figure is typed
+	// into this file or its catalogue strings; `pricing.test.ts` enforces both.
+	//
+	// What is deliberately NOT here, each because it was false:
+	//  - per-seat pricing, an annual toggle and a seat minimum — the plans are
+	//    flat monthly per workspace with unlimited users;
+	//  - a trial button — signup binds every new workspace to the first catalog
+	//    plan (`tenant_provisioning`), and nothing grants `trial_days` yet, so
+	//    every call to action is signup and the upgrade happens in /billing;
+	//  - a "Most popular" badge — there is no customer data behind it.
+	// Re-derived with the active locale (`m()` and the format locale are both
+	// reactive), so switching language re-renders every figure.
+	const tiers = $derived(pricingTiers());
+	const firstPlan = PLANS[0].name;
+	const topPlan = topPlanName();
+	const salesHref = `mailto:${CONTACT.sales}`;
 </script>
 
-<section id="pricing" class="pricing">
+<section id="pricing" class="pricing" aria-labelledby="pricing-heading">
 	<div class="section-head" use:reveal>
-		<span class="eyebrow">Pricing</span>
-		<h2>Simple plans. No sales call required.</h2>
-		<p>
-			Start free and upgrade when the volume justifies it. Every plan
-			includes the full AI extraction, approval workflow, and mobile app —
-			you're paying for scale and integrations, not basic features.
-		</p>
-
-		<div class="toggle" role="tablist" aria-label="Billing period">
-			<button
-				class:active={billing === 'monthly'}
-				onclick={() => (billing = 'monthly')}
-				role="tab"
-				aria-selected={billing === 'monthly'}
-			>
-				Monthly
-			</button>
-			<button
-				class:active={billing === 'annual'}
-				onclick={() => (billing = 'annual')}
-				role="tab"
-				aria-selected={billing === 'annual'}
-			>
-				Annual <span class="save">save 17%</span>
-			</button>
-		</div>
+		<span class="eyebrow">{m('marketing.pricing.eyebrow')}</span>
+		<h2 id="pricing-heading">{m('marketing.pricing.heading')}</h2>
+		<p>{m('marketing.pricing.lede')}</p>
 	</div>
 
 	<div class="grid">
-		{#each plans as plan, i}
-			<div class="plan" class:featured={plan.featured} use:reveal={{ delay: i * 70, amount: 0.1 }}>
-				{#if plan.featured}
-					<div class="badge">Most popular</div>
+		{#each tiers as tier, i (tier.code)}
+			<article
+				class="plan"
+				class:featured={tier.featured}
+				data-plan={tier.code}
+				aria-labelledby="plan-{tier.code}-name"
+				use:reveal={{ delay: i * 70, amount: 0.1 }}
+			>
+				<h3 class="plan-name" id="plan-{tier.code}-name">{tier.name}</h3>
+				{#if tier.tagline}
+					<p class="plan-tagline">{m(tier.tagline)}</p>
 				{/if}
-				<div class="plan-name">{plan.name}</div>
-				<div class="plan-tagline">{plan.tagline}</div>
 
-				<div class="plan-price">
-					<span class="amount">{priceFor(plan)}</span>
-					<span class="unit">{plan.unit}</span>
-				</div>
+				<p class="plan-price">
+					<span class="amount" data-testid="plan-price">{tier.price}</span>
+					<span class="unit">{m('marketing.pricing.perMonth')}</span>
+				</p>
 
-				<a class="plan-cta" class:primary={plan.featured} href={plan.ctaHref}>
-					{plan.ctaLabel}
-					<IconArrow />
+				<ul class="plan-allowance">
+					<li class="strong">{m('marketing.pricing.unlimitedUsers')}</li>
+					<li class="strong" data-testid="plan-included">
+						{m('marketing.pricing.included', { n: tier.included, count: tier.includedLabel })}
+					</li>
+					<li class="muted" data-testid="plan-past-limit">
+						{#if tier.overage === null}
+							{m('marketing.pricing.pastLimit.pause')}
+						{:else}
+							{m('marketing.pricing.pastLimit.overage', { price: tier.overage })}
+						{/if}
+					</li>
+				</ul>
+
+				<a class="plan-cta" class:primary={tier.featured} href="/signup">
+					{i === 0
+						? m('marketing.pricing.cta.free')
+						: m('marketing.pricing.cta.upgrade', { plan: tier.name })}
+					<IconArrow aria-hidden="true" />
 				</a>
 
+				<p class="features-lead">
+					{tier.buildsOn
+						? m('marketing.pricing.buildsOn', { plan: tier.buildsOn })
+						: m('marketing.pricing.coreHeading')}
+				</p>
 				<ul class="plan-features">
-					{#each plan.features as feature}
+					{#each tier.buildsOn ? tier.addedFeatures : CORE_FEATURE_KEYS as key (key)}
 						<li>
-							<span class="check"><IconCheck /></span>
-							<span>{feature}</span>
+							<span class="check" aria-hidden="true"><IconCheck /></span>
+							<span>{m(key)}</span>
 						</li>
 					{/each}
 				</ul>
-
-				{#if plan.footnote}
-					<p class="plan-foot">{plan.footnote}</p>
-				{/if}
-			</div>
+			</article>
 		{/each}
+
+		<article
+			class="plan"
+			data-plan="enterprise"
+			aria-labelledby="plan-enterprise-name"
+			use:reveal={{ delay: tiers.length * 70, amount: 0.1 }}
+		>
+			<h3 class="plan-name" id="plan-enterprise-name">{m('marketing.pricing.enterprise.name')}</h3>
+			<p class="plan-tagline">{m('marketing.pricing.tagline.enterprise')}</p>
+
+			<p class="plan-price">
+				<span class="amount">{m('marketing.pricing.enterprise.price')}</span>
+				<span class="unit">{m('marketing.pricing.enterprise.unit')}</span>
+			</p>
+
+			<ul class="plan-allowance">
+				<li class="strong">{m('marketing.pricing.unlimitedUsers')}</li>
+				<li class="strong">{m('marketing.pricing.enterprise.allowance')}</li>
+			</ul>
+
+			<a class="plan-cta" href={salesHref}>
+				{m('marketing.pricing.cta.enterprise')}
+				<IconArrow aria-hidden="true" />
+			</a>
+
+			<p class="features-lead">{m('marketing.pricing.buildsOn', { plan: topPlan })}</p>
+			<ul class="plan-features">
+				{#each ['marketing.pricing.enterprise.terms', 'marketing.pricing.enterprise.security'] as const as key (key)}
+					<li>
+						<span class="check" aria-hidden="true"><IconCheck /></span>
+						<span>{m(key)}</span>
+					</li>
+				{/each}
+			</ul>
+		</article>
+	</div>
+
+	<div class="ai-read" use:reveal>
+		<h3>{m('marketing.pricing.aiRead.heading')}</h3>
+		<p>{m('marketing.pricing.aiRead.body')}</p>
 	</div>
 
 	<div class="compare-note">
-		Need usage-based? Hitting 10k+ invoices a month? <a href="mailto:{CONTACT.sales}"
-			>Ask about volume pricing</a
-		>.
+		<p>{m('marketing.pricing.startsOnFree', { plan: firstPlan })}</p>
+		<p>
+			<LinkedMessage
+				text={m('marketing.pricing.more', { plan: topPlan })}
+				links={{ sales: { href: salesHref, label: m('marketing.pricing.moreLink') } }}
+			/>
+		</p>
+		<p>
+			<LinkedMessage
+				text={m('marketing.pricing.selfHost')}
+				links={{
+					source: {
+						href: 'https://github.com/Absence0760/feohledger',
+						label: m('marketing.pricing.selfHostLink')
+					}
+				}}
+			/>
+		</p>
 	</div>
 </section>
 
@@ -232,53 +201,7 @@
 	.section-head p {
 		color: var(--text-muted);
 		line-height: 1.62;
-		margin: 0 0 30px;
-	}
-
-	/* ------------------------------ toggle ------------------------------ */
-	.toggle {
-		display: inline-flex;
-		padding: 4px;
-		background: rgba(24, 26, 35, 0.7);
-		border: 1px solid var(--border);
-		border-radius: 999px;
-	}
-	.toggle button {
-		background: transparent;
-		border: none;
-		padding: 8px 18px;
-		border-radius: 999px;
-		color: var(--text-muted);
-		font-size: 0.85rem;
-		font-weight: 500;
-		cursor: pointer;
-		font-family: inherit;
-		transition: color 0.2s, background 0.2s, box-shadow 0.2s;
-		display: inline-flex;
-		align-items: center;
-		gap: 6px;
-	}
-	.toggle button:hover:not(.active) {
-		color: var(--text);
-	}
-	.toggle button.active {
-		background: var(--accent-strong);
-		color: #fff;
-		box-shadow: 0 6px 18px -8px rgba(99, 140, 255, 0.9);
-	}
-	/* A DARKENING tint on the selected button, not a lightening one. The chip
-	   was `rgba(255, 255, 255, 0.2)`, which lifts --accent-strong to #657fde and
-	   puts its white label at 3.72:1 — the first axe scan this page ever had
-	   caught it. Black at 0.24 takes the fill to ~#3048a3, where white is ~8.1:1. */
-	.save {
-		font-size: 0.7rem;
-		padding: 2px 6px;
-		border-radius: 4px;
-		background: rgba(0, 0, 0, 0.24);
-	}
-	.toggle button:not(.active) .save {
-		background: var(--accent-tint);
-		color: var(--accent-on-tint);
+		margin: 0;
 	}
 
 	/* ------------------------------ grid -------------------------------- */
@@ -331,22 +254,6 @@
 		mask-composite: exclude;
 		pointer-events: none;
 	}
-	.badge {
-		position: absolute;
-		top: -12px;
-		left: 50%;
-		transform: translateX(-50%);
-		background: var(--accent-strong);
-		color: #fff;
-		font-size: 0.72rem;
-		font-weight: 600;
-		letter-spacing: 0.05em;
-		text-transform: uppercase;
-		padding: 4px 14px;
-		border-radius: 999px;
-		white-space: nowrap;
-		box-shadow: 0 6px 18px -6px rgba(99, 140, 255, 0.8);
-	}
 
 	.plan-name {
 		font-size: 0.86rem;
@@ -354,21 +261,22 @@
 		letter-spacing: 0.08em;
 		text-transform: uppercase;
 		color: var(--text-muted);
-		margin-bottom: 8px;
+		margin: 0 0 8px;
 	}
 	.plan.featured .plan-name { color: var(--accent-on-tint); }
 	.plan-tagline {
 		color: var(--text);
 		font-size: 0.92rem;
-		margin-bottom: 24px;
+		margin: 0 0 24px;
 		line-height: 1.45;
 	}
 
 	.plan-price {
 		display: flex;
 		align-items: baseline;
+		flex-wrap: wrap;
 		gap: 8px;
-		margin-bottom: 24px;
+		margin: 0 0 20px;
 	}
 	.amount {
 		font-size: 2.4rem;
@@ -470,4 +378,53 @@
 		text-underline-offset: 2px;
 	}
 	.compare-note a:hover { color: var(--text); }
+
+	/* ---------------------------- allowance ----------------------------- */
+	.plan-allowance {
+		list-style: none;
+		padding: 0 0 18px;
+		margin: 0 0 18px;
+		border-bottom: 1px solid var(--border);
+		display: flex;
+		flex-direction: column;
+		gap: 6px;
+		font-size: 0.86rem;
+		line-height: 1.45;
+	}
+	.plan-allowance .strong {
+		color: var(--text);
+		font-weight: 600;
+	}
+	.plan-allowance .muted {
+		color: var(--text-muted);
+	}
+	.features-lead {
+		color: var(--text-muted);
+		font-size: 0.8rem;
+		font-weight: 600;
+		margin: 0 0 10px;
+	}
+
+	/* ----------------------------- ai-read ------------------------------ */
+	.ai-read {
+		max-width: 760px;
+		margin: 40px auto 0;
+		padding: 20px 24px;
+		border-radius: 14px;
+		border: 1px solid var(--border);
+		background: rgba(24, 26, 35, 0.62);
+	}
+	.ai-read h3 {
+		font-size: 1rem;
+		margin: 0 0 8px;
+	}
+	.ai-read p {
+		color: var(--text-muted);
+		font-size: 0.88rem;
+		line-height: 1.6;
+		margin: 0;
+	}
+	.compare-note p {
+		margin: 0 0 8px;
+	}
 </style>

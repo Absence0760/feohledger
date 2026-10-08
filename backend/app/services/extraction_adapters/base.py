@@ -111,6 +111,92 @@ class ExtractedLineItem:
     gl_account: ExtractedField = field(default_factory=lambda: ExtractedField(None))
 
 
+def _token_count(raw) -> int | None:
+    """A provider's token count as a non-negative int, or ``None`` if absent."""
+    if isinstance(raw, bool) or not isinstance(raw, int) or raw < 0:
+        return None
+    return raw
+
+
+@dataclass
+class ExtractionTokenUsage:
+    """What one extraction call consumed at the model provider.
+
+    Recorded on the ``ExtractionUsage`` row so the operator can see the real
+    cost of an AI-read invoice (``backend/docs/ai-extraction.md`` § Token
+    tracking). Token counts only — never a dollar figure, because list prices
+    drift and a stored cost would silently go stale.
+
+    The four counts follow the Anthropic Messages API ``usage`` block, which
+    keeps them disjoint: ``input_tokens`` is the UNCACHED input, and cache reads
+    / writes are counted separately (each is priced differently). Thinking
+    tokens are part of ``output_tokens``. ``model`` is the model id the provider
+    reports it SERVED, which is what was billed.
+    """
+
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+    cache_read_input_tokens: int | None = None
+    cache_creation_input_tokens: int | None = None
+    model: str | None = None
+
+    @classmethod
+    def from_anthropic(cls, resp_data: dict, requested_model: str | None) -> ExtractionTokenUsage:
+        usage = resp_data.get("usage") or {}
+        if not isinstance(usage, dict):
+            usage = {}
+        return cls(
+            input_tokens=_token_count(usage.get("input_tokens")),
+            output_tokens=_token_count(usage.get("output_tokens")),
+            cache_read_input_tokens=_token_count(usage.get("cache_read_input_tokens")),
+            cache_creation_input_tokens=_token_count(usage.get("cache_creation_input_tokens")),
+            model=_model_id(resp_data.get("model")) or _model_id(requested_model),
+        )
+
+    @classmethod
+    def from_openai(cls, resp_data: dict, requested_model: str | None) -> ExtractionTokenUsage:
+        """Map an OpenAI chat-completions ``usage`` onto the Anthropic shape.
+
+        OpenAI's ``prompt_tokens`` INCLUDES cached tokens
+        (``prompt_tokens_details.cached_tokens``); they are split out so
+        ``input_tokens`` means "uncached input" for every provider. OpenAI
+        reports no cache-write count.
+        """
+        usage = resp_data.get("usage") or {}
+        if not isinstance(usage, dict):
+            usage = {}
+        prompt = _token_count(usage.get("prompt_tokens"))
+        details = usage.get("prompt_tokens_details") or {}
+        cached = _token_count(details.get("cached_tokens")) if isinstance(details, dict) else None
+        uncached = prompt
+        if prompt is not None and cached is not None:
+            uncached = max(prompt - cached, 0)
+        return cls(
+            input_tokens=uncached,
+            output_tokens=_token_count(usage.get("completion_tokens")),
+            cache_read_input_tokens=cached,
+            cache_creation_input_tokens=None,
+            model=_model_id(resp_data.get("model")) or _model_id(requested_model),
+        )
+
+    def as_columns(self) -> dict:
+        """The ``ExtractionUsage`` column values this usage fills."""
+        return {
+            "input_tokens": self.input_tokens,
+            "output_tokens": self.output_tokens,
+            "cache_read_input_tokens": self.cache_read_input_tokens,
+            "cache_creation_input_tokens": self.cache_creation_input_tokens,
+            "model": self.model,
+        }
+
+
+def _model_id(raw) -> str | None:
+    """A model id fit for the ``VARCHAR(100)`` column, or ``None``."""
+    if not isinstance(raw, str) or not raw.strip():
+        return None
+    return raw.strip()[:100]
+
+
 @dataclass
 class ExtractionResult:
     """Normalized result from any extraction adapter."""
@@ -151,6 +237,13 @@ class ExtractionResult:
     raw_response: dict | None = None
     provider: str = ""
     error: str | None = None
+
+    # Model-provider token usage for this call, when the provider reports it
+    # (Claude, OpenAI). ``None`` for adapters that make no metered model call
+    # (mock, einvoice) or report nothing usable (Ollama, Textract, Azure). Set
+    # on FAILED results too whenever the provider answered: an unparseable or
+    # refused read was still billed.
+    usage: ExtractionTokenUsage | None = None
 
     def to_flat_dict(self) -> dict:
         """Convert to a flat dict of field_name → value (for backward compat)."""

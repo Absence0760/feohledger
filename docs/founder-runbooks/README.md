@@ -14,7 +14,9 @@ on the critical path.
 CRITICAL PATH
 │
 ├── 1. Legal foundation       ← can't invoice without it
-│     └── legal-entity.md
+│     └── legal-entity.md      (sole proprietor in own name —
+│                               insurance required, no incorporation
+│                               or DBA, decisions §252)
 │
 ├── 2. Production deployment  ← can't demo to a buyer without it
 │     └── production-deployment.md
@@ -24,10 +26,9 @@ CRITICAL PATH
 │
 ├── 4. Payment rails          ← can't pay vendors without it (longest lead time)
 │     └── payment-rails-onboarding.md
-│        NOTE: numbered 4, but only its intro call is startable now. KYB
-│        needs formation docs + an EIN, so 1 gates the rest of it. Book
-│        the call in week 1 anyway — the KYB packet tells you what the
-│        incorporation has to produce.
+│        NOTE: deferred for the pilot (#517 — FeohLedger moves no
+│        money). If it comes back, KYB needs a business entity, so it
+│        is also a trigger to form one (decisions §252).
 │
 └── 5. SOC 2 kickoff          ← can't pass security review without it
       └── soc2-vendor.md
@@ -73,10 +74,12 @@ parallel. It is KYB, know-your-*business*, not the KYC this line said
 until 2026-09-17; they are different packets and the bank asks for the
 business one.
 
-"Start it week 1" has a limit worth stating plainly: payment rails
-cannot actually *progress* past the intro call until step 1 produces an
-entity, an EIN and beneficial owners. Steps 1 and 4 are one serial
-chain. Everything else here really is parallel.
+Payment rails are deferred for the pilot (#517), and the operator is
+signing as a sole proprietor (decisions §252). If rails come back they
+cannot progress past the intro call without a business entity, an EIN
+and beneficial owners — forming that entity then becomes the first step.
+Everything else here really is parallel, and none of it waits on
+incorporation.
 
 Don't wait until all five are "done" to talk to prospects. A signed LOI
 from a pilot customer is what calibrates whether you need (say) SAML or
