@@ -300,3 +300,12 @@ a definition as JSON). All wrap the shared `ui/Modal.svelte` and call the
 - `EntitySwitcher.svelte` — multi-entity (subsidiary) selector; hidden for
   single-entity tenants.
 
+### `organization/`
+
+- `ErpConnectionPanel.svelte` — the Organization → ERP panel, rendered entirely from the backend ERP
+  catalogue (`GET /api/organization/erp/providers`). Props: `stored` (`settings.erp` as
+  `GET /api/organization` serves it, secrets masked), `readOnly`, `userLoaded`, `entitled` (the
+  `erp_integrations` plan feature) and `onsaved(org)`. Renders the admin-only hint / `PlanUpgradeNotice`
+  itself; one always-mounted `role="status"` region (`erp-status`) carries test, validation and OAuth
+  results. Pure helpers (grouping, payload, keep-on-blank, OAuth return params) live in
+  `#lib/types/erpConnection.ts` with a vitest.

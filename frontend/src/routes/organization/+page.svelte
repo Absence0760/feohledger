@@ -33,6 +33,8 @@
 	} from '#lib/types/ssoSettings.ts';
 	import { formatList } from '#lib/utils/list.ts';
 	import PlanUpgradeNotice from '#lib/components/ui/PlanUpgradeNotice.svelte';
+	import ErpConnectionPanel from '#lib/components/organization/ErpConnectionPanel.svelte';
+	import type { StoredErpConfig } from '#lib/types/erpConnection.ts';
 	import {
 		FEATURE_ERP_INTEGRATIONS,
 		FEATURE_SSO,
@@ -63,25 +65,6 @@
 		default_cost_center: string;
 	}
 
-	interface ErpConfig {
-		type: string;
-		integration_method: string;
-		api_key: string;
-		account_token: string;
-		// Direct adapter fields
-		base_url: string;
-		tenant_id: string;
-		client_id: string;
-		client_secret: string;
-		environment: string;
-		company_id: string;
-		account_id: string;
-		consumer_key: string;
-		consumer_secret: string;
-		token_id: string;
-		token_secret: string;
-	}
-
 	interface FraudRules {
 		round_amount_enabled: boolean;
 		future_date_enabled: boolean;
@@ -103,22 +86,9 @@
 	interface OrgSettings {
 		company: CompanyProfile;
 		invoice_defaults: InvoiceDefaults;
-		erp?: ErpConfig;
+		erp?: StoredErpConfig;
 		fraud_rules?: Partial<FraudRules>;
 	}
-
-	const ERP_TYPES = [
-		{ value: 'dynamics_365_bc', label: 'Microsoft Dynamics 365 Business Central' },
-		{ value: 'sap_s4hana', label: 'SAP S/4HANA' },
-		{ value: 'netsuite', label: 'Oracle NetSuite' },
-		{ value: 'epicor', label: 'Epicor Kinetic' },
-		{ value: 'acumatica', label: 'Acumatica Cloud ERP' },
-		{ value: 'sage_x3', label: 'Sage X3' },
-		{ value: 'infor', label: 'Infor CloudSuite Industrial' },
-		{ value: 'qad', label: 'QAD Adaptive' },
-		{ value: 'cetec', label: 'Cetec ERP' },
-		{ value: 'delmiaworks', label: 'DELMIAWorks' },
-	];
 
 	interface OrgResponse {
 		id: string;
@@ -149,23 +119,6 @@
 	let numberPrefix = $state('INV-');
 	let defaultGl = $state('');
 	let defaultCostCenter = $state('');
-	// ERP
-	let erpType = $state('dynamics_365_bc');
-	let erpMethod = $state('merge_dev');
-	let erpApiKey = $state('');
-	let erpAccountToken = $state('');
-	let erpBaseUrl = $state('');
-	let erpTenantId = $state('');
-	let erpClientId = $state('');
-	let erpClientSecret = $state('');
-	let erpEnvironment = $state('production');
-	let erpCompanyId = $state('');
-	let erpAccountId = $state('');
-	let erpConsumerKey = $state('');
-	let erpConsumerSecret = $state('');
-	let erpTokenId = $state('');
-	let erpTokenSecret = $state('');
-	let testingConnection = $state(false);
 	// Extraction
 	let extractionProgramType = $state('platform');
 	let extractionProvider = $state('claude_vision');
@@ -238,36 +191,6 @@
 		CARD_REGIONS.find(r => r.value === cardsRegion)?.default_provider ?? 'nium'
 	);
 	let effectiveProvider = $derived(cardsProvider || autoProvider);
-	let connectionResult = $state<{ success: boolean; message: string } | null>(null);
-
-	async function testConnection() {
-		testingConnection = true;
-		connectionResult = null;
-		try {
-			connectionResult = await api.post<{ success: boolean; message: string }>('/api/organization/test-erp', {
-				type: erpType,
-				integration_method: erpMethod,
-				api_key: erpApiKey,
-				account_token: erpAccountToken,
-				base_url: erpBaseUrl,
-				tenant_id: erpTenantId,
-				client_id: erpClientId,
-				client_secret: erpClientSecret,
-				environment: erpEnvironment,
-				company_id: erpCompanyId,
-				account_id: erpAccountId,
-				consumer_key: erpConsumerKey,
-				consumer_secret: erpConsumerSecret,
-				token_id: erpTokenId,
-				token_secret: erpTokenSecret,
-			});
-		} catch (err) {
-			connectionResult = { success: false, message: err instanceof Error ? err.message : m('org.toast.testFailed') };
-		} finally {
-			testingConnection = false;
-		}
-	}
-
 	// ── Read-only mode for non-admins ───────────────────────────────────
 	// Every mutating endpoint behind this page is `require_roles(ROLE_ADMIN)`
 	// — the server is and stays the authority. What was missing was any
@@ -458,25 +381,6 @@
 			numberPrefix = data.settings.invoice_defaults.number_prefix;
 			defaultGl = data.settings.invoice_defaults.default_gl_account;
 			defaultCostCenter = data.settings.invoice_defaults.default_cost_center;
-			// ERP
-			const erp = (data.settings as unknown as Record<string, unknown>).erp as ErpConfig | undefined;
-			if (erp) {
-				erpType = erp.type || 'dynamics_365_bc';
-				erpMethod = erp.integration_method || 'merge_dev';
-				erpApiKey = erp.api_key || '';
-				erpAccountToken = erp.account_token || '';
-				erpBaseUrl = erp.base_url || '';
-				erpTenantId = erp.tenant_id || '';
-				erpClientId = erp.client_id || '';
-				erpClientSecret = erp.client_secret || '';
-				erpEnvironment = erp.environment || 'production';
-				erpCompanyId = erp.company_id || '';
-				erpAccountId = erp.account_id || '';
-				erpConsumerKey = erp.consumer_key || '';
-				erpConsumerSecret = erp.consumer_secret || '';
-				erpTokenId = erp.token_id || '';
-				erpTokenSecret = erp.token_secret || '';
-			}
 			// Cards
 			const cards = (data.settings as unknown as Record<string, unknown>).cards as Record<string, unknown> | undefined;
 			if (cards) {
@@ -555,7 +459,6 @@
 
 	let savingProfile = $state(false);
 	let savingDefaults = $state(false);
-	let savingErp = $state(false);
 
 	// Security
 	let mfaRequired = $state(false);
@@ -751,35 +654,6 @@
 			toast(err instanceof Error ? err.message : m('org.toast.saveFailed'), 'error');
 		} finally {
 			savingDefaults = false;
-		}
-	}
-
-	async function saveErp() {
-		savingErp = true;
-		try {
-			await patchSettings(m('org.section.erpSaved'), {
-				erp: {
-					type: erpType,
-					integration_method: erpMethod,
-					api_key: erpApiKey,
-					account_token: erpAccountToken,
-					base_url: erpBaseUrl,
-					tenant_id: erpTenantId,
-					client_id: erpClientId,
-					client_secret: erpClientSecret,
-					environment: erpEnvironment,
-					company_id: erpCompanyId,
-					account_id: erpAccountId,
-					consumer_key: erpConsumerKey,
-					consumer_secret: erpConsumerSecret,
-					token_id: erpTokenId,
-					token_secret: erpTokenSecret,
-				},
-			});
-		} catch (err) {
-			toast(err instanceof Error ? err.message : m('org.toast.saveFailed'), 'error');
-		} finally {
-			savingErp = false;
 		}
 	}
 
@@ -2429,140 +2303,15 @@
 				{/if}
 
 				{#if section === 'erp'}
-					<section class="card">
-						<div class="help-row">
-							<h2>{m('org.section.erp')}</h2>
-							<HelpTip term="erp-sync" />
-						</div>
-						<p class="card-hint">{m('org.erp.hint')}</p>
-						{#if readOnly}
-							<p class="card-hint" data-testid="erp-admin-only">
-								{m('org.readOnly.sectionAdminOnly')}
-							</p>
-						{:else if userLoaded && !erpEntitled}
-							<!-- Every adapter this form offers is a live ERP; the
-							     local-first `mock` ERP needs no configuration. -->
-							<PlanUpgradeNotice feature={FEATURE_ERP_INTEGRATIONS} testId="erp-plan-upgrade" />
-						{:else}
-							<div class="form-grid">
-								<label>
-									<span>{m('org.erp.system')}</span>
-									<select bind:value={erpType}>
-										{#each ERP_TYPES as erp}
-											<option value={erp.value}>{erp.label}</option>
-										{/each}
-									</select>
-								</label>
-								<label>
-									<span>{m('org.erp.method')}</span>
-									<select bind:value={erpMethod}>
-										<option value="merge_dev">{m('org.erp.methodMergeDev')}</option>
-										<option value="direct">{m('org.erp.methodDirect')}</option>
-									</select>
-								</label>
-							</div>
-
-							{#if erpMethod === 'merge_dev'}
-								<div class="form-grid" style="margin-top: 14px;">
-									<label>
-										<span>{m('org.erp.mergeApiKey')}</span>
-										<input type="password" bind:value={erpApiKey} placeholder="test_..." />
-									</label>
-									<label>
-										<span>{m('org.erp.accountToken')}</span>
-										<input type="password" bind:value={erpAccountToken} placeholder={m('org.erp.accountTokenPlaceholder')} />
-									</label>
-								</div>
-								<p class="card-hint" style="margin-top: 8px;">{m('org.erp.mergeHintPre')} <a href="https://app.merge.dev" target="_blank" rel="noopener">{m('org.erp.mergeDashboard')}</a>{m('org.erp.mergeHintPost')}</p>
-							{:else if erpType === 'dynamics_365_bc'}
-								<div class="form-grid" style="margin-top: 14px;">
-									<label>
-										<span>{m('org.erp.baseUrl')}</span>
-										<input type="url" bind:value={erpBaseUrl} placeholder="https://api.businesscentral.dynamics.com/v2.0" />
-									</label>
-									<label>
-										<span>{m('org.erp.environment')}</span>
-										<input type="text" bind:value={erpEnvironment} placeholder="production" />
-									</label>
-									<label>
-										<span>{m('org.erp.tenantId')}</span>
-										<input type="text" bind:value={erpTenantId} />
-									</label>
-									<label>
-										<span>{m('org.erp.clientId')}</span>
-										<input type="text" bind:value={erpClientId} />
-									</label>
-									<label>
-										<span>{m('org.erp.clientSecret')}</span>
-										<input type="password" bind:value={erpClientSecret} />
-									</label>
-									<label>
-										<span>{m('org.erp.companyId')}</span>
-										<input type="text" bind:value={erpCompanyId} />
-									</label>
-								</div>
-							{:else if erpType === 'netsuite'}
-								<div class="form-grid" style="margin-top: 14px;">
-									<label>
-										<span>{m('org.erp.accountId')}</span>
-										<input type="text" bind:value={erpAccountId} placeholder="1234567" />
-									</label>
-									<label>
-										<span>{m('org.erp.consumerKey')}</span>
-										<input type="text" bind:value={erpConsumerKey} />
-									</label>
-									<label>
-										<span>{m('org.erp.consumerSecret')}</span>
-										<input type="password" bind:value={erpConsumerSecret} />
-									</label>
-									<label>
-										<span>{m('org.erp.tokenId')}</span>
-										<input type="text" bind:value={erpTokenId} />
-									</label>
-									<label>
-										<span>{m('org.erp.tokenSecret')}</span>
-										<input type="password" bind:value={erpTokenSecret} />
-									</label>
-								</div>
-							{:else}
-								<div class="form-grid" style="margin-top: 14px;">
-									<label>
-										<span>{m('org.erp.apiBaseUrl')}</span>
-										<input type="url" bind:value={erpBaseUrl} />
-									</label>
-									<label>
-										<span>{m('org.erp.apiKeyClientId')}</span>
-										<input type="password" bind:value={erpClientId} />
-									</label>
-									<label>
-										<span>{m('org.erp.apiSecretClientSecret')}</span>
-										<input type="password" bind:value={erpClientSecret} />
-									</label>
-								</div>
-								<p class="card-hint" style="margin-top: 8px;">{m('org.erp.directSoonHint', { erp: ERP_TYPES.find(e => e.value === erpType)?.label ?? erpType })}</p>
-							{/if}
-
-							<div class="erp-test-row">
-								<button class="btn-save-section" disabled={savingErp} onclick={saveErp}>
-									{savingErp ? m('org.common.saving') : m('org.erp.save')}
-								</button>
-								<button class="btn-test" disabled={testingConnection} onclick={testConnection}>
-									{testingConnection ? m('org.common.testing') : m('org.common.testConnection')}
-								</button>
-								<!-- Always mounted, so the result is announced when it arrives
-								     (WCAG 4.1.3): a live region inserted together with its text
-								     is not read by every screen reader. -->
-								<span
-									class="test-result"
-									role="status"
-									class:success={connectionResult?.success === true}
-									class:failure={connectionResult?.success === false}
-								>
-									{connectionResult?.message ?? ''}
-								</span>
-							</div>
-						{/if}
-					</section>
+					<ErpConnectionPanel
+						stored={org?.settings.erp}
+						{readOnly}
+						{userLoaded}
+						entitled={erpEntitled}
+						onsaved={(data) => {
+							if (org) org = { ...org, settings: data.settings as unknown as OrgSettings };
+						}}
+					/>
 				{/if}
 
 				{#if section === 'payments'}

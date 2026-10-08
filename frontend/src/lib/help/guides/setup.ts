@@ -337,16 +337,16 @@ export const SETUP_GUIDES: Guide[] = [
 						type: 'steps',
 						items: [
 							'Open [[page:/organization]] and choose {ui:org.section.erp} in the section list.',
-							'Pick your {ui:org.erp.system}, for example Microsoft Dynamics 365 Business Central, Oracle NetSuite or SAP S/4HANA.',
-							'Choose the {ui:org.erp.method}. {ui:org.erp.methodMergeDev} works with every listed ERP. {ui:org.erp.methodDirect} is available for Business Central and NetSuite.',
-							'Enter the credentials your ERP or Merge.dev account gives you.',
-							'Click {ui:org.erp.save}, then {ui:org.common.testConnection} to check that the details work.'
+							'Pick your {ui:org.erp.system}. The list leads with the ERPs most used in the United States and South Africa, such as QuickBooks Online, Xero, Sage, Oracle NetSuite and Business Central. For any other ERP, choose {ui:org.erp.provider.mergeDev} and then pick it from the second list. That route needs the Scale plan.',
+							'Fill in the fields the form shows for that ERP. The form links to the ERP’s own setup guide for where to find each value.',
+							'Click {ui:org.erp.save}, then {ui:org.common.testConnection} to check that the details work.',
+							'For QuickBooks Online, Xero and Sage Business Cloud Accounting there is no password to type: save, then use the connect button and approve access in the ERP. You come back to this section, which then shows the connection.'
 						]
 					},
 					{
 						type: 'note',
 						tone: 'tip',
-						text: 'Ask whoever administers your ERP for the credentials. They are stored with your organization’s settings and are never shown to other roles.'
+						text: 'Ask whoever administers your ERP for the credentials. Once saved, a secret is never shown again, to anyone. Its field reads {ui:org.erp.secretSaved}; type a new value only to replace it.'
 					}
 				]
 			},
