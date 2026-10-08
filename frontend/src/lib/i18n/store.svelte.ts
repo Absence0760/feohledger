@@ -1,9 +1,10 @@
 import { browser } from '$app/env';
 import { en } from './locales/en';
-import { CATALOGUE_LOADERS } from './catalogues';
+import { enHelp } from './locales/help/en';
+import { CATALOGUE_LOADERS, HELP_CATALOGUE_LOADERS } from './catalogues';
 import { interpolate } from './interpolate';
 import { setActiveFormatLocale } from './formatLocale';
-import type { Messages, MessageKey } from './messages';
+import type { AnyMessageKey, HelpMessages, Messages } from './messages';
 import { DEFAULT_LOCALE, dirForLocale, isSupportedLocale, negotiateLocale, type Locale } from './locale';
 
 // localStorage key for the persisted picker choice. Kept distinct from the
@@ -15,6 +16,14 @@ const STORAGE_KEY = 'feoh_locale';
 // setLocale re-renders every call site (template / $derived).
 let locale = $state<Locale>(DEFAULT_LOCALE);
 let dict = $state<Messages>(en);
+// The help-centre slice for `locale` once loaded, English until then — the
+// same English-first degradation the main dict gives a slow chunk. Loaded only
+// after something renders help copy (`ensureHelpCatalogue`), so a page with no
+// /help route and no ⓘ HelpTip never downloads it (decisions §261).
+let helpDict = $state<HelpMessages>(enHelp);
+let helpLocale: Locale = 'en';
+let helpWanted = false;
+let helpLoading: Promise<void> | null = null;
 
 export function currentLocale(): Locale {
 	return locale;
@@ -26,9 +35,55 @@ export function currentLocale(): Locale {
  * back to the English string, then the raw key, so a not-yet-translated key
  * degrades gracefully rather than rendering blank.
  */
-export function m(key: MessageKey, params?: Record<string, string | number>): string {
-	const value: string = dict[key] ?? en[key] ?? key;
+export function m(key: AnyMessageKey, params?: Record<string, string | number>): string {
+	const main = dict as Record<string, string>;
+	const help = helpDict as Record<string, string>;
+	const value: string =
+		main[key] ??
+		help[key] ??
+		(en as Record<string, string>)[key] ??
+		(enHelp as Record<string, string>)[key] ??
+		key;
 	return interpolate(value, params, locale);
+}
+
+/**
+ * Load the help-centre slice for the active locale, once. Called by the /help
+ * layout and by every ⓘ HelpTip on mount; idempotent and cheap after the first
+ * call. Remembers that help was wanted, so a later locale switch loads the new
+ * locale's slice too. Until it lands `m()` answers help keys in English; a
+ * failed load keeps English rather than blanking anything.
+ */
+export function ensureHelpCatalogue(): Promise<void> {
+	helpWanted = true;
+	if (helpLocale === locale) return Promise.resolve();
+	if (helpLoading) return helpLoading;
+	const target = locale;
+	helpLoading = HELP_CATALOGUE_LOADERS[target]()
+		.then((loaded) => {
+			// A locale switch while this was in flight makes it stale.
+			if (locale !== target) return;
+			helpDict = loaded;
+			helpLocale = target;
+		})
+		.catch(() => {
+			/* keep English help copy */
+		})
+		.finally(() => {
+			helpLoading = null;
+			// Settled for a locale that is no longer active: fetch the current one.
+			if (helpWanted && helpLocale !== locale) void ensureHelpCatalogue();
+		});
+	return helpLoading;
+}
+
+/** The help slice follows the main dict: back to English the moment the
+ *  locale changes (never one language's help under another's chrome), then
+ *  the new locale's slice if help copy is on screen. */
+function followLocaleWithHelp(): void {
+	helpDict = enHelp;
+	helpLocale = 'en';
+	if (helpWanted && locale !== 'en') void ensureHelpCatalogue();
 }
 
 /**
@@ -73,12 +128,14 @@ export async function setLocale(next: Locale): Promise<void> {
 	if (next === 'en') {
 		dict = en;
 		locale = 'en';
+		followLocaleWithHelp();
 		applyDocumentLocale('en');
 		return;
 	}
 	try {
 		dict = await CATALOGUE_LOADERS[next]();
 		locale = next;
+		followLocaleWithHelp();
 		applyDocumentLocale(next);
 	} catch {
 		/* keep the current locale + dict */

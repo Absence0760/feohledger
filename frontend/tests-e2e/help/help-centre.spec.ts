@@ -129,6 +129,22 @@ test.describe('help centre in another language', () => {
 		// The chrome around it is German.
 		await expect(page.getByRole('navigation', { name: 'Auf dieser Seite' })).toBeVisible();
 	});
+
+	// The glossary and diagram strings live in a second, lazily loaded
+	// catalogue slice (decisions §261). English shows until it lands, so these
+	// prove it lands — on a /help route and on an ordinary page's ⓘ tip.
+	test('the glossary arrives in German from the help slice', async ({ page }) => {
+		await page.goto('/help/glossary');
+		// `help.term.three-way-match` in `locales/help/de.ts`.
+		await expect(page.getByText('Drei-Wege-Abgleich').first()).toBeVisible();
+	});
+
+	test('an ⓘ tip outside /help names its term in German', async ({ page }) => {
+		await page.goto('/invoices');
+		// `help.tip.about` (main catalogue) around `help.term.approval-chain`
+		// (help slice): both German once the slice has loaded.
+		await expect(page.getByRole('button', { name: 'Über Genehmigungskette' })).toBeVisible();
+	});
 });
 
 test.describe('HelpTip', () => {

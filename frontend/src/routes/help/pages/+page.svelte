@@ -12,7 +12,7 @@
 	 */
 	import { page } from '$app/state';
 	import { tick } from 'svelte';
-	import type { MessageKey } from '#lib/i18n/messages.ts';
+	import type { AnyMessageKey } from '#lib/i18n/messages.ts';
 	import { auth } from '#lib/stores/auth.svelte.ts';
 	import { brand } from '#lib/stores/brand.svelte.ts';
 	import { m, currentLocale } from '#lib/i18n/store.svelte.ts';
@@ -27,10 +27,10 @@
 	const has = (...roles: string[]) => auth.hasAnyRole(...roles);
 	const can = (perm: string) => auth.can(perm);
 
-	type Row = { href: string; labelKey?: MessageKey; label?: string; open: boolean };
-	type Group = { key: MessageKey; rows: Row[] };
+	type Row = { href: string; labelKey?: AnyMessageKey; label?: string; open: boolean };
+	type Group = { key: AnyMessageKey; rows: Row[] };
 
-	const ACCOUNT_PAGES: { href: string; labelKey: MessageKey }[] = [
+	const ACCOUNT_PAGES: { href: string; labelKey: AnyMessageKey }[] = [
 		{ href: '/profile', labelKey: 'shell.profileAndSecurity' },
 		{ href: '/notifications', labelKey: 'help.pages.notifications' }
 	];

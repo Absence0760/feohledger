@@ -10589,3 +10589,29 @@ Rejected: a lightweight on-hand counter here (it would be a second, drifting
 copy of the number the POS owns); waiting for the ERP adapters before receipt
 entry (most of the self-serve segment has no ERP that owns receiving).
 
+## 261. The help centre's strings are a second, lazily loaded catalogue per locale (2026-10-08)
+
+Goods-receipt entry (PR #535) took the Japanese catalogue to 101 KB gzipped,
+over the 100 KB per-chunk budget in `web-bundle-budget.yml`. The follow-up filed
+when the catalogue passed 95 KB had already named the fix: the 334 `help.*`
+keys — glossary term names and one-liners, help-route chrome, diagram labels —
+were ~9 KB of every locale catalogue, and only `/help` and the ⓘ HelpTips read
+them. They now live in `locales/help/<locale>.ts`, one more lazy chunk per
+locale, loaded by `ensureHelpCatalogue()` from the /help layout and each
+HelpTip. `help.pageLink` and `help.tip.*` stay in the main catalogue because
+every page's chrome renders them. Largest catalogue: 92 KB; largest help slice:
+10 KB.
+
+English help is statically bundled, as English main is: it is what `m()` falls
+back to, so a help key never renders as its raw name while a slice loads. On a
+locale switch the help slice drops to English at once — never one language's
+glossary under another's chrome — and reloads for the new locale if help copy
+was on screen. The budget job counts only the largest help slice, the same
+one-per-visitor reading it applies to catalogues; counting all five would have
+charged every visitor for languages they never download.
+
+Rejected: raising the per-chunk ceiling (the follow-up existed to avoid exactly
+that, and the next feature would hit it again); trimming the new receipt copy
+(a worse form to save a kilobyte); per-route catalogues (a reorganisation of
+6,000 keys for a problem one prefix solved).
+

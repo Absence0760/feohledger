@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { en } from '#lib/i18n/locales/en.ts';
-import { CATALOGUE_LOADERS } from '#lib/i18n/catalogues.ts';
+import { enHelp } from '#lib/i18n/locales/help/en.ts';
+import { HELP_CATALOGUE_LOADERS } from '#lib/i18n/catalogues.ts';
 import { SUPPORTED_LOCALES } from '#lib/i18n/locale.ts';
 import { NAV } from '#lib/nav.ts';
 import { INVOICE_STATUSES } from '#lib/types/invoice.ts';
@@ -24,7 +25,7 @@ import {
 import { inline } from './inline.ts';
 import { LIFECYCLE } from './lifecycle.ts';
 import { DIAGRAM_IDS } from './types.ts';
-import type { MessageKey } from '#lib/i18n/messages.ts';
+import type { AnyMessageKey } from '#lib/i18n/messages.ts';
 
 /**
  * The help centre's content is hand-written prose that points at the live app
@@ -34,8 +35,10 @@ import type { MessageKey } from '#lib/i18n/messages.ts';
  * button that no longer exists.
  */
 
-const catalogue = en as Record<string, string>;
-const label: Label = (key: MessageKey) => catalogue[key] ?? key;
+// Both slices: guide prose names chrome keys (main catalogue) and glossary /
+// diagram keys (help slice, decisions §261).
+const catalogue = { ...en, ...enHelp } as Record<string, string>;
+const label: Label = (key: AnyMessageKey) => catalogue[key] ?? key;
 
 const ROUTES = import.meta.glob('/src/routes/**/+page.svelte');
 const LIGHT_MODULES = import.meta.glob(['/src/lib/help/routeHelp.ts', '/src/lib/help/pages.ts', '/src/lib/help/terms.ts'], {
@@ -161,7 +164,7 @@ describe('help content — glossary', () => {
 		expect(new Set(ids).size).toBe(ids.length);
 		for (const t of GLOSSARY) expect(GLOSSARY_CATEGORIES, t.id).toContain(t.category);
 		for (const loc of SUPPORTED_LOCALES) {
-			const dict = (await CATALOGUE_LOADERS[loc]()) as Record<string, string>;
+			const dict = (await HELP_CATALOGUE_LOADERS[loc]()) as Record<string, string>;
 			for (const id of ids) {
 				expect(dict[termKey(id)], `${loc}: ${termKey(id)}`).toBeTruthy();
 				const short = dict[termShortKey(id)];
