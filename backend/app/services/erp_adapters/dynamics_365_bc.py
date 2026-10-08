@@ -6,12 +6,14 @@ import httpx
 
 from app.config import settings
 from app.services.erp_adapters.base import (
+    VENDOR_NOT_LINKED,
     ErpAdapter,
     ErpInvoiceStatus,
     ErpPostResult,
     InvoicePayload,
     VendorPayload,
     erp_failure_message,
+    erp_refusal_message,
 )
 from app.services.erp_adapters.dispatcher import register_adapter
 from app.utils.json_money import dumps_exact_json
@@ -100,6 +102,15 @@ class BusinessCentralAdapter(ErpAdapter):
         return values[0].get("id")
 
     async def post_invoice(self, payload: InvoicePayload) -> ErpPostResult:
+        # Refuse before the token exchange: a purchaseInvoice is posted against
+        # the vendor's id (`vendorId`), never its name. `vendorNumber` holds the
+        # vendor's NUMBER (V00010) — the name we used to send there could only
+        # fail, or match another vendor whose number happens to equal it.
+        if not payload.vendor_erp_id:
+            return ErpPostResult(
+                success=False,
+                message=erp_refusal_message("Business Central", VENDOR_NOT_LINKED),
+            )
         token = await self._get_token()
         headers = {
             "Authorization": f"Bearer {token}",
@@ -118,7 +129,7 @@ class BusinessCentralAdapter(ErpAdapter):
 
         # Step 1: Create purchase invoice
         body = {
-            "vendorNumber": payload.vendor_name,
+            "vendorId": payload.vendor_erp_id,
             "invoiceDate": payload.invoice_date.isoformat() if payload.invoice_date else None,
             "dueDate": payload.due_date.isoformat() if payload.due_date else None,
             "vendorInvoiceNumber": payload.invoice_number,
@@ -129,6 +140,11 @@ class BusinessCentralAdapter(ErpAdapter):
             # `utils/json_money`). BC types `unitCost`/`quantity` as OData
             # Edm.Decimal rendered as JSON numbers, and `dumps_exact_json`
             # still emits numbers, so the wire contract is unchanged.
+            #
+            # Lines stay keyed by `lineObjectNumber`, the G/L account's No. —
+            # BC's primary key for an account, and the code our chart holds —
+            # not by `accountId`: this adapter has no chart sync, so
+            # `gl_account_erp_id` would be another ERP's id or the code itself.
             "purchaseInvoiceLines": [
                 {
                     "lineType": "Account",

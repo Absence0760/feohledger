@@ -344,3 +344,56 @@ async def refuse_gl_codes_outside_chart(
     refusal = chart.judge(wanted)
     if refusal:
         raise HTTPException(status_code=422, detail=refusal.body(on_lines=on_lines))
+
+
+async def resolve_erp_account_ids(
+    db: AsyncSession,
+    organization_id: uuid.UUID,
+    entity_id: uuid.UUID | None,
+    codes: Iterable[str | None],
+) -> dict[str, str]:
+    """Map each of ``codes`` to its account's ERP id (``erp_account_id``) in
+    the invoice's own chart — shared ∪ ``entity_id``'s own. One query.
+
+    Resolution follows the chart rule this module owns: never another entity's
+    account, and where a code exists in BOTH scopes the entity's own row is the
+    account (it OVERRIDES the shared one — the precedence
+    ``api/gl_accounts._sync_match_query`` applies). ``entity_id`` None sees the
+    shared chart alone. Read over every row, active or retired, like
+    :meth:`ChartOwnership.in_own_chart`: the code on the invoice still names
+    that account, and whether the ERP will post to it is the ERP's call.
+
+    A code that resolves to no account, or to one with no ``erp_account_id``
+    (never synced from the ERP), is ABSENT from the result. The ERP push
+    refuses such a line rather than guess.
+    """
+    wanted = sorted({c for c in codes if c})
+    if not wanted:
+        return {}
+    in_chart = (
+        GLAccount.entity_id.is_(None)
+        if entity_id is None
+        else or_(GLAccount.entity_id.is_(None), GLAccount.entity_id == entity_id)
+    )
+    rows = (
+        await db.execute(
+            select(GLAccount.code, GLAccount.entity_id, GLAccount.erp_account_id).where(
+                GLAccount.organization_id == organization_id,
+                GLAccount.code.in_(wanted),
+                in_chart,
+            )
+        )
+    ).all()
+    shared: dict[str, str | None] = {}
+    own: dict[str, str | None] = {}
+    for code, owner, erp_id in rows:
+        (shared if owner is None else own)[code] = erp_id
+    resolved: dict[str, str] = {}
+    for code in wanted:
+        # The entity's own row decides whenever it exists — even when it has
+        # no ERP id — because the shared account is not the one this invoice
+        # is coded to.
+        erp_id = own[code] if code in own else shared.get(code)
+        if erp_id:
+            resolved[code] = erp_id
+    return resolved

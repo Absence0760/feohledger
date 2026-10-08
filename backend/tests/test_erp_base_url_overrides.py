@@ -94,6 +94,7 @@ def test_merge_dev_override_applies_to_posts_too(monkeypatch):
         currency="USD",
         invoice_date=date(2026, 1, 1),
         correlation_id="corr-1",
+        vendor_erp_id="merge-vendor-1",
     )
     with patch("httpx.AsyncClient") as cm:
         client = cm.return_value.__aenter__.return_value

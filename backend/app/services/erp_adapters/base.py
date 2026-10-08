@@ -124,6 +124,35 @@ def erp_failure_message(provider: str, status_code: int) -> str:
     return f"{provider} post failed: HTTP {status_code} ({erp_failure_reason(status_code)})"
 
 
+#: Stable reason code: the payload has no ``vendor_erp_id`` — the invoice's
+#: vendor was never linked to a record in this ERP (run the vendor sync, or the
+#: invoice has no resolved ``vendor_id`` at all). Every direct adapter refuses
+#: such a payload before it makes a single HTTP call, and never falls back to
+#: a name lookup.
+VENDOR_NOT_LINKED = "vendor_not_linked"
+
+#: Stable reason code: a line (or the header, for a header-only bill) is coded
+#: to a GL account that has no ``gl_account_erp_id`` in the invoice's chart, or
+#: — for an ERP whose bill line requires an account — is not coded at all.
+#: Refused rather than posted against the code's text or dropped, since either
+#: books the expense somewhere the approver never saw.
+ACCOUNT_NOT_LINKED = "account_not_linked"
+
+
+def erp_refusal_message(provider: str, reason: str) -> str:
+    """Build the PII-free ``ErpPostResult.message`` for a payload an adapter
+    refused BEFORE calling the ERP.
+
+    The sibling of :func:`erp_failure_message` for the pre-flight case: no HTTP
+    status exists, so the message carries the provider literal and a stable
+    reason code (:data:`VENDOR_NOT_LINKED`, :data:`ACCOUNT_NOT_LINKED`, or an
+    adapter's own) and nothing from the payload — it is persisted on the same
+    append-only ``invoice.erp_failed`` audit row. ``provider`` and ``reason``
+    are fixed literals per call site, never user input.
+    """
+    return f"{provider} post refused: {reason}"
+
+
 @dataclass
 class ErpPostResult:
     """Outcome of an ``ErpAdapter.post_invoice`` call.

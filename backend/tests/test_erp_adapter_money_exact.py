@@ -91,6 +91,8 @@ def _payload(**overrides) -> InvoicePayload:
         tax_amount=Decimal("0.10"),
         discount_amount=Decimal("5.50"),
         gl_account="6000",
+        vendor_erp_id="ERP-V-1",
+        gl_account_erp_id="ERP-6000",
         line_items=[
             LineItemPayload(
                 line_number=1,
@@ -99,6 +101,7 @@ def _payload(**overrides) -> InvoicePayload:
                 unit_price=SCALED_AMOUNT,
                 total=LOSSY_AMOUNT,
                 gl_account="6000",
+                gl_account_erp_id="ERP-6000",
             )
         ],
     )
@@ -253,7 +256,7 @@ def _netsuite_adapter() -> NetSuiteAdapter:
     )
 
 
-def test_netsuite_posts_exact_decimal_rates():
+def _netsuite_post(payload) -> str:
     adapter = _netsuite_adapter()
     with patch("httpx.AsyncClient") as cm:
         client = cm.return_value.__aenter__.return_value
@@ -261,46 +264,41 @@ def test_netsuite_posts_exact_decimal_rates():
         client.post = AsyncMock(
             return_value=_mock_response(204, None, headers={"Location": "https://x/vendorBill/42"})
         )
-        result = _run(adapter.post_invoice(_payload()))
-
-    assert result.success
-    body = _posted_body_text(client)
-    _assert_exact(body, "rate")
-    assert '"quantity":3.5000' in body
+        result = _run(adapter.post_invoice(payload))
+    assert result.success, result.message
     assert client.post.await_args.kwargs["headers"]["Content-Type"] == "application/json"
+    return _posted_body_text(client)
+
+
+def test_netsuite_posts_the_exact_line_total_as_the_expense_amount():
+    """A GL-coded line is an EXPENSE line: its `amount` is the line's own
+    total, exact — the one number that lands in the ledger."""
+    body = _netsuite_post(_payload())
+    _assert_exact(body, "amount")
+    assert '"rate"' not in body
 
 
 def test_netsuite_header_only_invoice_posts_the_exact_amount():
-    """With no line items the header amount becomes the single line's `rate` —
-    the one number that lands in the ledger."""
-    adapter = _netsuite_adapter()
-    with patch("httpx.AsyncClient") as cm:
-        client = cm.return_value.__aenter__.return_value
-        client.get = AsyncMock(return_value=_mock_response(200, {"items": [], "count": 0}))
-        client.post = AsyncMock(
-            return_value=_mock_response(204, None, headers={"Location": "https://x/vendorBill/43"})
-        )
-        _run(adapter.post_invoice(_payload(line_items=[])))
-
-    body = _posted_body_text(client)
-    assert f'"rate":{LOSSY_AMOUNT}' in body
+    """With no line items the header amount becomes the single expense line's
+    `amount`."""
+    body = _netsuite_post(_payload(line_items=[]))
+    assert f'"amount":{LOSSY_AMOUNT}' in body
     assert LOSSY_AMOUNT_AS_FLOAT not in body
 
 
-def test_netsuite_line_without_unit_price_falls_back_to_the_exact_total():
-    adapter = _netsuite_adapter()
+def test_netsuite_line_without_a_total_is_priced_exactly():
+    """Only a line with no total is priced as quantity × unit price — in
+    Decimal, so the product keeps every digit."""
     line = LineItemPayload(
-        line_number=1, quantity=Decimal("1"), unit_price=None, total=SCALED_AMOUNT
+        line_number=1,
+        quantity=Decimal("3.5000"),
+        unit_price=SCALED_AMOUNT,
+        total=None,
+        gl_account="6000",
+        gl_account_erp_id="ERP-6000",
     )
-    with patch("httpx.AsyncClient") as cm:
-        client = cm.return_value.__aenter__.return_value
-        client.get = AsyncMock(return_value=_mock_response(200, {"items": [], "count": 0}))
-        client.post = AsyncMock(
-            return_value=_mock_response(204, None, headers={"Location": "https://x/vendorBill/44"})
-        )
-        _run(adapter.post_invoice(_payload(line_items=[line])))
-
-    assert f'"rate":{SCALED_AMOUNT}' in _posted_body_text(client)
+    body = _netsuite_post(_payload(line_items=[line]))
+    assert f'"amount":{Decimal("3.5000") * SCALED_AMOUNT}' in body
 
 
 # ---------------------------------------------------------------------------

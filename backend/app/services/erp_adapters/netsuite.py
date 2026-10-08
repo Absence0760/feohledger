@@ -11,12 +11,16 @@ import httpx
 
 from app.config import settings
 from app.services.erp_adapters.base import (
+    ACCOUNT_NOT_LINKED,
+    VENDOR_NOT_LINKED,
     ErpAdapter,
     ErpInvoiceStatus,
     ErpPostResult,
+    GLAccountPayload,
     InvoicePayload,
     VendorPayload,
     erp_failure_message,
+    erp_refusal_message,
 )
 from app.services.erp_adapters.dispatcher import register_adapter
 from app.utils.json_money import dumps_exact_json
@@ -110,6 +114,20 @@ class NetSuiteAdapter(ErpAdapter):
         return items[0].get("id")
 
     async def post_invoice(self, payload: InvoicePayload) -> ErpPostResult:
+        # Refuse before any HTTP call. A vendorBill is posted against the
+        # vendor's and each account's internal id; a name or a code's text is
+        # never a stand-in (a name picks the wrong "Acme" the first time two
+        # vendors share one).
+        if not payload.vendor_erp_id:
+            return ErpPostResult(
+                success=False, message=erp_refusal_message("NetSuite", VENDOR_NOT_LINKED)
+            )
+        expense_lines = _netsuite_expense_lines(payload)
+        if expense_lines is None:
+            return ErpPostResult(
+                success=False, message=erp_refusal_message("NetSuite", ACCOUNT_NOT_LINKED)
+            )
+
         existing_id = await self._find_by_external_id(payload.correlation_id)
         if existing_id:
             return ErpPostResult(
@@ -122,37 +140,17 @@ class NetSuiteAdapter(ErpAdapter):
         url = f"{self._base_url()}/vendorBill"
 
         body = {
+            "entity": {"id": payload.vendor_erp_id},
             "tranId": payload.invoice_number,
             "tranDate": payload.invoice_date.isoformat() if payload.invoice_date else None,
             "dueDate": payload.due_date.isoformat() if payload.due_date else None,
             "currency": {"refName": payload.currency},
             "memo": payload.description,
             "externalId": payload.correlation_id,
-            # Money stays Decimal all the way to the encoder — `float()` here
-            # would post a rounded rate into the customer's ledger (see
-            # `utils/json_money`). NetSuite types `rate`/`quantity` as JSON
-            # numbers, and `dumps_exact_json` still emits numbers, so the wire
-            # contract is unchanged.
-            "item": {
-                "items": [
-                    {
-                        "description": li.description or "",
-                        "quantity": li.quantity if li.quantity else 1,
-                        "rate": li.unit_price if li.unit_price else (li.total or Decimal(0)),
-                        "account": {"refName": li.gl_account} if li.gl_account else None,
-                    }
-                    for li in payload.line_items
-                ]
-                if payload.line_items
-                else [
-                    {
-                        "description": payload.description or "",
-                        "quantity": 1,
-                        "rate": payload.amount,
-                        "account": {"refName": payload.gl_account} if payload.gl_account else None,
-                    }
-                ],
-            },
+            # GL-coded lines go on the EXPENSE sublist (account + amount). The
+            # `item` sublist books against an inventory/service ITEM record,
+            # which we don't have, so it cannot carry these lines.
+            "expense": {"items": expense_lines},
         }
 
         headers = {
@@ -248,6 +246,53 @@ class NetSuiteAdapter(ErpAdapter):
 
         return items
 
+    def _suiteql_url(self) -> str:
+        """SuiteQL lives beside the record API: ``.../services/rest/query/v1``."""
+        base = self._base_url()
+        if base.endswith("/record/v1"):
+            base = base[: -len("/record/v1")]
+        return f"{base}/query/v1/suiteql"
+
+    async def list_gl_accounts(self) -> list[GLAccountPayload]:
+        """Pull the chart of accounts through SuiteQL.
+
+        This sync is what fills ``gl_accounts.erp_account_id`` with NetSuite's
+        internal ids, which ``post_invoice`` posts every expense line against.
+        The REST record collection (``GET /account``) returns only ids and
+        links, one fetch per account after that; one SuiteQL query returns the
+        columns we need. Paged by ``offset`` + ``hasMore`` and capped at 1000
+        rows, like ``list_vendors``. Best-effort: a non-200 or a network error
+        ends the pull with what it has, so the sync endpoint reports a count
+        instead of 500ing.
+        """
+        items: list[GLAccountPayload] = []
+        offset = 0
+        limit = 100
+        query = {"q": "SELECT id, acctnumber, fullname, accttype, isinactive FROM account"}
+        async with httpx.AsyncClient(timeout=30) as client:
+            for _ in range(10):  # 10 pages x 100 = 1000 account cap
+                url = f"{self._suiteql_url()}?limit={limit}&offset={offset}"
+                headers = {
+                    "Authorization": self._auth_header("POST", url),
+                    "Content-Type": "application/json",
+                    "Prefer": "transient",
+                }
+                try:
+                    resp = await client.post(url, content=dumps_exact_json(query), headers=headers)
+                except httpx.HTTPError:
+                    break
+                if resp.status_code != 200:
+                    break
+                body = resp.json() if resp.content else {}
+                for raw in body.get("items") or []:
+                    acct = _netsuite_account_to_payload(raw)
+                    if acct is not None:
+                        items.append(acct)
+                if not body.get("hasMore"):
+                    break
+                offset += limit
+        return items
+
     async def test_connection(self) -> bool:
         try:
             url = f"{self._base_url()}/vendor?limit=1"
@@ -278,4 +323,102 @@ def _netsuite_vendor_to_payload(raw: dict) -> VendorPayload:
         name=name,
         email=raw.get("email"),
         phone=raw.get("phone"),
+    )
+
+
+def _netsuite_expense_lines(payload: InvoicePayload) -> list[dict] | None:
+    """The vendorBill ``expense`` sublist, or None when a line cannot be posted
+    by account id (``ACCOUNT_NOT_LINKED``).
+
+    A NetSuite expense line requires an account. A line coded to its own GL
+    account must carry that account's id; an uncoded line falls back to the
+    header's account (``gl_account_erp_id``), the same default the header-only
+    bill uses. A coded line whose account has no id is refused, never posted on
+    the header's account instead: that would book it somewhere the approver
+    never saw.
+
+    Money stays Decimal all the way to the encoder (``utils/json_money``). The
+    line amount is the line's own total; only a line with no total is priced
+    as quantity x unit price. The header ``amount`` is never recomputed from
+    the lines.
+    """
+    if not payload.line_items:
+        if not payload.gl_account_erp_id:
+            return None
+        return [
+            {
+                "account": {"id": payload.gl_account_erp_id},
+                "amount": payload.amount,
+                "memo": payload.description or "",
+            }
+        ]
+    lines: list[dict] = []
+    for li in payload.line_items:
+        account_id = li.gl_account_erp_id if li.gl_account else payload.gl_account_erp_id
+        if not account_id:
+            return None
+        if li.total is not None:
+            amount = li.total
+        elif li.unit_price is not None:
+            amount = (li.quantity if li.quantity else Decimal(1)) * li.unit_price
+        else:
+            amount = Decimal(0)
+        lines.append(
+            {
+                "account": {"id": account_id},
+                "amount": amount,
+                "memo": li.description or "",
+            }
+        )
+    return lines
+
+
+#: NetSuite ``accttype`` -> the vocabulary ``GLAccountPayload.account_type``
+#: uses. Anything unlisted maps to None (the sync accepts an unclassified row).
+_NETSUITE_ACCOUNT_TYPES: dict[str, str] = {
+    "Bank": "asset",
+    "AcctRec": "asset",
+    "OthCurrAsset": "asset",
+    "FixedAsset": "asset",
+    "OthAsset": "asset",
+    "DeferExpense": "asset",
+    "UnbilledRec": "asset",
+    "AcctPay": "liability",
+    "CredCard": "liability",
+    "OthCurrLiab": "liability",
+    "LongTermLiab": "liability",
+    "DeferRevenue": "liability",
+    "Equity": "equity",
+    "Income": "revenue",
+    "OthIncome": "revenue",
+    "COGS": "expense",
+    "Expense": "expense",
+    "OthExpense": "expense",
+}
+
+
+def _netsuite_account_to_payload(raw: dict) -> GLAccountPayload | None:
+    """Map a SuiteQL ``account`` row to a GLAccountPayload.
+
+    SuiteQL returns lower-case column names. Inactive accounts (``isinactive``
+    "T") are skipped: nothing should be newly coded to them. An account with no
+    number (the "Use Account Numbers" preference off) is keyed by its name,
+    since the code is what an AP clerk picks; its internal id is what the bill
+    is posted against either way.
+    """
+    account_id = raw.get("id")
+    if account_id is None or str(raw.get("isinactive", "F")).upper() == "T":
+        return None
+    name = raw.get("fullname") or ""
+    code = str(raw.get("acctnumber") or name)
+    # `gl_accounts.code` is 50 characters. Truncating would let two long names
+    # collapse into one code — the sync would then write the second account's
+    # id onto the first — so an over-long name is skipped instead.
+    if not code or len(code) > 50:
+        return None
+    return GLAccountPayload(
+        code=code,
+        name=str(name or code),
+        account_type=_NETSUITE_ACCOUNT_TYPES.get(str(raw.get("accttype") or "")),
+        erp_account_id=str(account_id),
     )

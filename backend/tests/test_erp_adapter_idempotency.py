@@ -52,6 +52,8 @@ def _payload(**overrides) -> InvoicePayload:
         currency="USD",
         invoice_date=date(2026, 1, 1),
         correlation_id="corr-idem-1",
+        vendor_erp_id="ERP-V-1",
+        gl_account_erp_id="ERP-6000",
     )
     base.update(overrides)
     return InvoicePayload(**base)
@@ -151,6 +153,16 @@ def test_netsuite_post_invoice_proceeds_to_create_when_no_match():
     assert result.erp_document_id == "42"
     client.get.assert_awaited_once()
     client.post.assert_awaited_once()
+    # The bill names its vendor (`entity`) and the expense line's account by
+    # NetSuite internal id — never `refName` text.
+    import json
+
+    body = json.loads(client.post.await_args.kwargs["content"])
+    assert body["entity"] == {"id": "ERP-V-1"}
+    assert body["expense"]["items"] == [
+        {"account": {"id": "ERP-6000"}, "amount": 100.00, "memo": ""}
+    ]
+    assert "item" not in body
 
 
 def test_netsuite_post_invoice_proceeds_when_lookup_fails():
@@ -241,3 +253,11 @@ def test_d365_post_invoice_proceeds_to_create_when_no_match():
     assert result.erp_document_id == "bc-doc-2"
     client.get.assert_awaited_once()
     assert client.post.await_count == 3
+    # The purchase invoice names its vendor by BC id. `vendorNumber` holds a
+    # vendor NUMBER, and the name we used to send there matched nothing — or
+    # another vendor whose number happened to equal it.
+    import json
+
+    body = json.loads(client.post.await_args_list[1].kwargs["content"])
+    assert body["vendorId"] == "ERP-V-1"
+    assert "vendorNumber" not in body

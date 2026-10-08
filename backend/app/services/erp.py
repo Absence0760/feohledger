@@ -2,16 +2,19 @@
 
 import asyncio
 import uuid
+from dataclasses import dataclass, field
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.invoice import Invoice, InvoiceLineItem, InvoiceStatus
+from app.models.vendor import Vendor
 from app.services.erp_adapters import (
     InvoicePayload,
     LineItemPayload,
     get_erp_adapter,
 )
+from app.services.gl_chart import resolve_erp_account_ids
 from app.services.workflow_engine import (
     complete_workflow,
     get_workflow_instance,
@@ -22,8 +25,61 @@ MAX_RETRIES = 3
 BASE_DELAY_SECONDS = 2
 
 
-def _build_payload(invoice: Invoice, line_items: list[InvoiceLineItem]) -> InvoicePayload:
-    """Convert an Invoice ORM object (+ its line items) to a normalized ERP payload."""
+@dataclass(frozen=True)
+class ErpRefs:
+    """The ERP's own ids for what an invoice references, resolved once per push.
+
+    ``vendor_erp_id`` is ``vendors.erp_vendor_id`` of ``invoice.vendor_id``;
+    ``account_erp_ids`` maps a GL code to ``gl_accounts.erp_account_id`` in the
+    invoice's own chart. A missing entry means "not linked" — the payload
+    carries None and a direct adapter refuses it (``erp_adapters.base
+    .VENDOR_NOT_LINKED`` / ``ACCOUNT_NOT_LINKED``). Never filled from a name.
+    """
+
+    vendor_erp_id: str | None = None
+    account_erp_ids: dict[str, str] = field(default_factory=dict)
+
+
+async def _resolve_erp_refs(
+    db: AsyncSession, invoice: Invoice, line_items: list[InvoiceLineItem]
+) -> ErpRefs:
+    """Resolve the ERP ids :func:`_build_payload` puts on the payload.
+
+    At most two queries whatever the line count: one for the vendor, one for
+    every distinct GL code on the header and the lines together. The vendor is
+    read through the invoice's resolved ``vendor_id`` link only — an invoice
+    whose vendor was never matched has no ERP vendor, and the adapter refuses
+    it rather than posting against ``vendor_name``. The accounts resolve
+    against the invoice's own chart (shared ∪ its entity's —
+    ``gl_chart.resolve_erp_account_ids``, the rule the extraction catalogue and
+    the coding guards use).
+    """
+    vendor_erp_id: str | None = None
+    if invoice.vendor_id is not None:
+        vendor_erp_id = (
+            await db.execute(
+                select(Vendor.erp_vendor_id).where(
+                    Vendor.id == invoice.vendor_id,
+                    Vendor.organization_id == invoice.organization_id,
+                )
+            )
+        ).scalar_one_or_none() or None
+    codes = [invoice.gl_account, *(li.gl_account for li in line_items)]
+    account_erp_ids = await resolve_erp_account_ids(
+        db, invoice.organization_id, invoice.entity_id, codes
+    )
+    return ErpRefs(vendor_erp_id=vendor_erp_id, account_erp_ids=account_erp_ids)
+
+
+def _build_payload(
+    invoice: Invoice, line_items: list[InvoiceLineItem], refs: ErpRefs | None = None
+) -> InvoicePayload:
+    """Convert an Invoice ORM object (+ its line items) to a normalized ERP payload.
+
+    ``refs`` carries the ERP ids :func:`_resolve_erp_refs` looked up; without
+    it every ERP reference is None (unlinked), which a direct adapter refuses.
+    """
+    refs = refs or ErpRefs()
     return InvoicePayload(
         correlation_id=str(invoice.correlation_id),
         invoice_number=invoice.invoice_number,
@@ -47,6 +103,8 @@ def _build_payload(invoice: Invoice, line_items: list[InvoiceLineItem]) -> Invoi
         bill_to_address=invoice.bill_to_address,
         remit_to_address=invoice.remit_to_address,
         vendor_address=invoice.vendor_address,
+        vendor_erp_id=refs.vendor_erp_id,
+        gl_account_erp_id=refs.account_erp_ids.get(invoice.gl_account or ""),
         line_items=[
             LineItemPayload(
                 # A hand-keyed / legacy row can have a NULL line_number; fall
@@ -60,6 +118,7 @@ def _build_payload(invoice: Invoice, line_items: list[InvoiceLineItem]) -> Invoi
                 tax=li.tax,
                 total=li.total,
                 gl_account=li.gl_account,
+                gl_account_erp_id=refs.account_erp_ids.get(li.gl_account or ""),
             )
             for idx, li in enumerate(line_items)
         ],
@@ -246,7 +305,8 @@ async def _call_erp(db: AsyncSession, invoice: Invoice, erp_config: dict | None 
 
     adapter = get_erp_adapter(config)
     line_items = await _fetch_line_items(db, invoice.id)
-    payload = _build_payload(invoice, line_items)
+    refs = await _resolve_erp_refs(db, invoice, line_items)
+    payload = _build_payload(invoice, line_items, refs)
     result = await adapter.post_invoice(payload)
 
     if not result.success:

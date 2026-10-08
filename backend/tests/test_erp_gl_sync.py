@@ -67,7 +67,7 @@ def test_mock_adapter_list_gl_accounts_returns_independent_payloads():
 # ---------- Default empty-list inheritance --------------------------------
 
 
-@pytest.mark.parametrize("erp_type", ["dynamics_365_bc", "netsuite"])
+@pytest.mark.parametrize("erp_type", ["dynamics_365_bc"])
 def test_unimplemented_adapter_list_gl_accounts_returns_empty(erp_type: str):
     """Adapters without a `list_gl_accounts` override inherit the
     base's []. Anything else (raise, None) breaks /api/gl-accounts/
@@ -78,6 +78,114 @@ def test_unimplemented_adapter_list_gl_accounts_returns_empty(erp_type: str):
     cls = _ADAPTER_REGISTRY[erp_type]
     adapter = cls({"type": erp_type, "integration_method": "direct"})
     assert _run(adapter.list_gl_accounts()) == []
+
+
+# ---------- NetSuite (SuiteQL) --------------------------------------------
+
+
+def _netsuite_adapter():
+    from app.services.erp_adapters.netsuite import NetSuiteAdapter
+
+    return NetSuiteAdapter(
+        {
+            "account_id": "TSTDRV_SB1",
+            "consumer_key": "ck",
+            "consumer_secret": "cs",
+            "token_id": "ti",
+            "token_secret": "ts",
+        }
+    )
+
+
+def test_netsuite_list_gl_accounts_maps_suiteql_rows_into_payloads():
+    """The chart sync is what gives NetSuite's expense lines their account
+    ids: `erp_account_id` is the internal id, never the number."""
+    import json
+
+    body = {
+        "items": [
+            {
+                "id": "120",
+                "acctnumber": "6100",
+                "fullname": "Office Supplies",
+                "accttype": "Expense",
+                "isinactive": "F",
+            },
+            {
+                "id": "7",
+                "acctnumber": "2000",
+                "fullname": "Accounts Payable",
+                "accttype": "AcctPay",
+                "isinactive": "F",
+            },
+            # No number ("Use Account Numbers" off) — keyed by its name.
+            {
+                "id": "130",
+                "acctnumber": None,
+                "fullname": "Travel",
+                "accttype": "OthExpense",
+                "isinactive": "F",
+            },
+            # Inactive — nothing should be newly coded to it.
+            {
+                "id": "140",
+                "acctnumber": "6900",
+                "fullname": "Old",
+                "accttype": "Expense",
+                "isinactive": "T",
+            },
+            # A name too long to be a code is skipped, never truncated.
+            {
+                "id": "150",
+                "acctnumber": None,
+                "fullname": "x" * 51,
+                "accttype": "Expense",
+                "isinactive": "F",
+            },
+        ],
+        "hasMore": False,
+    }
+    with patch("httpx.AsyncClient") as cm:
+        client = cm.return_value.__aenter__.return_value
+        client.post = AsyncMock(return_value=_mock_response(200, body))
+        out = _run(_netsuite_adapter().list_gl_accounts())
+
+    assert [(a.code, a.erp_account_id, a.account_type) for a in out] == [
+        ("6100", "120", "expense"),
+        ("2000", "7", "liability"),
+        ("Travel", "130", "expense"),
+    ]
+    url = client.post.await_args.args[0]
+    assert url.startswith(
+        "https://tstdrv-sb1.suitetalk.api.netsuite.com/services/rest/query/v1/suiteql?"
+    )
+    headers = client.post.await_args.kwargs["headers"]
+    assert headers["Prefer"] == "transient"
+    assert headers["Authorization"].startswith("OAuth ")
+    assert "FROM account" in json.loads(client.post.await_args.kwargs["content"])["q"]
+
+
+def test_netsuite_list_gl_accounts_follows_has_more_and_degrades_on_error():
+    page1 = {
+        "items": [
+            {
+                "id": "1",
+                "acctnumber": "6100",
+                "fullname": "A",
+                "accttype": "Expense",
+                "isinactive": "F",
+            }
+        ],
+        "hasMore": True,
+    }
+    with patch("httpx.AsyncClient") as cm:
+        client = cm.return_value.__aenter__.return_value
+        client.post = AsyncMock(side_effect=[_mock_response(200, page1), _mock_response(500, {})])
+        out = _run(_netsuite_adapter().list_gl_accounts())
+
+    assert [a.code for a in out] == ["6100"]
+    urls = [c.args[0] for c in client.post.await_args_list]
+    assert "offset=0" in urls[0] and "offset=100" in urls[1]
 
 
 # ---------- Merge.dev mapping --------------------------------------------

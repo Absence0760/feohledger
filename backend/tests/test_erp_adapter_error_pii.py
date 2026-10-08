@@ -26,9 +26,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from app.services.erp_adapters.base import (
+    ACCOUNT_NOT_LINKED,
+    VENDOR_NOT_LINKED,
     InvoicePayload,
+    LineItemPayload,
     erp_failure_message,
     erp_failure_reason,
+    erp_refusal_message,
 )
 from app.services.erp_adapters.dynamics_365_bc import BusinessCentralAdapter
 from app.services.erp_adapters.merge_dev import MergeDevAdapter
@@ -91,8 +95,8 @@ def _ok_response(body: dict) -> MagicMock:
     return resp
 
 
-def _payload() -> InvoicePayload:
-    return InvoicePayload(
+def _payload(**overrides) -> InvoicePayload:
+    base = dict(
         invoice_number="INV-PII-1",
         vendor_name="Acme",
         amount=Decimal("100.00"),
@@ -103,7 +107,11 @@ def _payload() -> InvoicePayload:
         vendor_address="17 Bank Street, Springfield IL 62704",
         remit_to_address="PO Box 9001, Springfield IL 62704",
         bill_to_address="1 Corporate Plaza, Chicago IL 60601",
+        vendor_erp_id="ERP-V-1",
+        gl_account_erp_id="ERP-6000",
     )
+    base.update(overrides)
+    return InvoicePayload(**base)
 
 
 def _assert_pii_free(message: str, *, status: int, provider_hint: str) -> None:
@@ -207,6 +215,105 @@ def test_business_central_failure_message_is_pii_free():
 
     assert result.success is False
     _assert_pii_free(result.message, status=409, provider_hint="Business Central")
+
+
+# ---------------------------------------------------------------------------
+# Pre-flight refusals — an unlinked vendor or account never reaches the ERP
+# ---------------------------------------------------------------------------
+
+
+def test_refusal_message_shape():
+    assert (
+        erp_refusal_message("NetSuite", VENDOR_NOT_LINKED)
+        == "NetSuite post refused: vendor_not_linked"
+    )
+    assert ACCOUNT_NOT_LINKED == "account_not_linked"
+
+
+_BC_CONFIG = {
+    "tenant_id": "t",
+    "client_id": "c",
+    "client_secret": "s",
+    "environment": "sandbox",
+    "company_id": "co",
+    "base_url": "https://api.businesscentral.dynamics.com/v2.0",
+}
+_NS_CONFIG = {
+    "account_id": "TSTDRV",
+    "consumer_key": "ck",
+    "consumer_secret": "cs",
+    "token_id": "ti",
+    "token_secret": "ts",
+}
+_MERGE_CONFIG = {"api_key": "k", "account_token": "tok"}
+
+
+@pytest.mark.parametrize(
+    ("adapter", "provider"),
+    [
+        (lambda: NetSuiteAdapter(_NS_CONFIG), "NetSuite"),
+        (lambda: BusinessCentralAdapter(_BC_CONFIG), "Business Central"),
+        (lambda: MergeDevAdapter(_MERGE_CONFIG), "Merge.dev"),
+    ],
+    ids=["netsuite", "dynamics_365_bc", "merge_dev"],
+)
+def test_unlinked_vendor_is_refused_before_any_http_call(adapter, provider):
+    """No `vendor_erp_id` → a stable, PII-free refusal, and no request at all
+    (not even the token exchange or the idempotency lookup). The vendor's
+    name is right there on the payload and is never used instead."""
+    with patch("httpx.AsyncClient") as cm:
+        result = _run(adapter().post_invoice(_payload(vendor_erp_id=None)))
+
+    assert result.success is False
+    assert result.message == f"{provider} post refused: vendor_not_linked"
+    assert "Acme" not in result.message
+    cm.assert_not_called()
+
+
+def _coded_line(**overrides) -> LineItemPayload:
+    base = dict(line_number=1, total=Decimal("100.00"), gl_account="6000")
+    base.update(overrides)
+    return LineItemPayload(**base)
+
+
+@pytest.mark.parametrize(
+    ("adapter", "provider", "payload"),
+    [
+        # A coded line whose account never synced.
+        (
+            lambda: NetSuiteAdapter(_NS_CONFIG),
+            "NetSuite",
+            _payload(line_items=[_coded_line(gl_account_erp_id=None)]),
+        ),
+        # A header-only bill with no account id: an expense line needs one.
+        (
+            lambda: NetSuiteAdapter(_NS_CONFIG),
+            "NetSuite",
+            _payload(line_items=[], gl_account_erp_id=None),
+        ),
+        # An uncoded line falls back to the header account — which is unlinked.
+        (
+            lambda: NetSuiteAdapter(_NS_CONFIG),
+            "NetSuite",
+            _payload(line_items=[_coded_line(gl_account=None)], gl_account_erp_id=None),
+        ),
+        (
+            lambda: MergeDevAdapter(_MERGE_CONFIG),
+            "Merge.dev",
+            _payload(line_items=[_coded_line(gl_account_erp_id=None)]),
+        ),
+    ],
+    ids=["netsuite-line", "netsuite-header-only", "netsuite-uncoded-line", "merge-line"],
+)
+def test_unlinked_account_is_refused_before_any_http_call(adapter, provider, payload):
+    """A GL code is never posted as text where the ERP wants an account id,
+    and a coded line is never silently re-homed on the header's account."""
+    with patch("httpx.AsyncClient") as cm:
+        result = _run(adapter().post_invoice(payload))
+
+    assert result.success is False
+    assert result.message == f"{provider} post refused: account_not_linked"
+    cm.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
