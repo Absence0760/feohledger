@@ -172,7 +172,7 @@ match on the reading "there is no receipt evidence", but a cancelled receipt
 fallback let cancelling the only receipt turn an over-billed invoice into a
 clean 2-way `matched`, which closed its payment hold. Once receipts could be
 cancelled in the app, by the person who keyed the invoice, that was a
-self-release (decisions §261). The representative `gr_id` and the 4-way
+self-release (decisions §262). The representative `gr_id` and the 4-way
 inspection lookup follow the same filter, so a cancelled receipt's inspection
 can't stand in for a live one either.
 
@@ -264,7 +264,7 @@ reads inspected). Covered by
 
 `POST /api/goods-receipts` (`services/goods_receipts.py`) is the one in-app
 writer of `goods_receipts`; before it, receipts came only from
-`scripts/seed.py`, so the 3-way leg had no real input (decisions §260–§261).
+`scripts/seed.py`, so the 3-way leg had no real input (decisions §260, §262).
 `RECEIPT_ENTRY_ROLES` — admin, AP manager **and AP clerk**, because receiving is
 entry work; the CFO cannot. The web form is `/goods-receipts` → **Record
 receipt**.
@@ -443,7 +443,7 @@ where somebody could:
   links with its own resolution — NULL included — so a typed verdict cannot be
   laundered into a "QMS" pass on a PO the QMS never inspected.
 - **A hand-typed receipt does not lift a `po_mismatch` unless someone else
-  typed it.** The receipt twin of the rule above (decisions §261): a receipt
+  typed it.** The receipt twin of the rule above (decisions §262): a receipt
   is the evidence that clears "billed beyond receipt", and
   `POST /api/goods-receipts` lets a clerk or manager record one. While any
   live `manual` receipt on the matched PO has an unknown recorder or one
@@ -891,7 +891,7 @@ unknown-recorder and cancelled-receipt cases in
 | Tolerance configuration | Done (5% default) |
 | Vendor-aware matching (match PO by vendor_id) | Done |
 | Goods receipt quantity comparison | Done |
-| Goods-receipt **entry** (`POST /api/goods-receipts`, cancel, `/goods-receipts` → Record receipt) | Done (migration 0109, decisions §261) |
+| Goods-receipt **entry** (`POST /api/goods-receipts`, cancel, `/goods-receipts` → Record receipt) | Done (migration 0109, decisions §262) |
 | Goods receipts pulled from an ERP | Planned — roadmap Priority 14, item 2 |
 | Procurement models (PO, GR) | Done (existed) |
 | Wired into extraction + invoice-mutation pipeline (`services.invoice_warnings.refresh_warnings`) | Done |

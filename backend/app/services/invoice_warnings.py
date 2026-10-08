@@ -1338,7 +1338,7 @@ async def _close_cleared_po_exceptions(
       "billed beyond receipt" ``po_mismatch``. While any live manual receipt on
       the matched PO was recorded by someone implicated in the invoice — or by
       nobody it can name — a ``po_mismatch`` row stays for a human
-      (``receipts_clear_hold``; decisions §261). Deliberately coarse: it does
+      (``receipts_clear_hold``; decisions §262). Deliberately coarse: it does
       not try to work out which finding the receipt cleared, because leaving a
       row for a person is the safe error. Receipts with no ``source`` predate
       receipt entry, when no app user could type one in, and are trusted as
@@ -1460,7 +1460,7 @@ async def _inspection_clears_hold(
 async def receipts_clear_hold(db: AsyncSession, invoice: Invoice, po_id: str | None) -> bool:
     """Whether the receipts the matcher counts on ``po_id`` may lift a
     ``po_mismatch`` — False while any live hand-entered receipt on it has an
-    unknown recorder or one implicated in the invoice (decisions §261). Read by
+    unknown recorder or one implicated in the invoice (decisions §262). Read by
     ``_close_cleared_po_exceptions`` and by the exception-agent coordinator, so
     an agent cannot do what the auto-close refuses. No matched PO means no
     receipt evidence was read at all."""

@@ -122,7 +122,7 @@ async def test_cancelled_receipt_does_not_satisfy_the_quantity_match(realdb):
     # Every receipt was cancelled: the business recorded that nothing arrived.
     # That is a 3-way match with zero received — partial, and billed beyond
     # receipt — not a 2-way fallback that would read the full bill as clean
-    # (decisions §261 amends the earlier "no evidence → 2-way" reading).
+    # (decisions §262 amends the earlier "no evidence → 2-way" reading).
     assert result.match_type == "3-way", result.issues
     assert result.gr_id is None
     assert result.details["has_gr"] is False
@@ -355,7 +355,7 @@ async def test_cancelled_receipt_does_not_open_an_over_receipt_exception(realdb)
     A cancelled GR of 14 against a 10-unit order would have tripped the
     over-receipt branch if the status filter were ever dropped, so this pins
     that it does not. What it DOES leave is zero received against a full bill,
-    which holds the invoice as billed beyond receipt (decisions §261).
+    which holds the invoice as billed beyond receipt (decisions §262).
     """
     from app.services.invoice_warnings import refresh_warnings
 

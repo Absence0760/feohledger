@@ -1295,7 +1295,7 @@ Three separate PRs, in this order. Inventory tracking and selling are out of
 scope (§260) — do not fold them into any of these.
 
 - [ ] **(c) Whoever records a goods receipt can still approve the invoice it
-      supports.** Receipt entry (PR 1, decisions §261) stops an implicated
+      supports.** Receipt entry (PR 1, decisions §262) stops an implicated
       person's receipt from *releasing* a payment hold, but the classic
       control — receiving and approving are different people — is not
       enforced: a manager can record the delivery and then approve the

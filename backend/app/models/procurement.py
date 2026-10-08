@@ -148,7 +148,7 @@ class GoodsReceipt(Base, EntityMixin, TimestampMixin):
     # receipt" `po_mismatch` payment hold on its own
     # (`invoice_warnings._close_cleared_po_exceptions`), so a receipt recorded by
     # someone implicated in the invoice must not be what releases it — the
-    # same rule a hand-entered inspection is held to (decisions §249, §261).
+    # same rule a hand-entered inspection is held to (decisions §249, §262).
     # Control-plane user id, so no FK.
     source: Mapped[str | None] = mapped_column(String(20))
     recorded_by_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))

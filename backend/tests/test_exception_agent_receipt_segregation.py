@@ -1,5 +1,5 @@
 """An exception agent cannot clear a `po_mismatch` on a receipt the auto-close
-would refuse (decisions §261).
+would refuse (decisions §262).
 
 The PO-match auto-close leaves a `po_mismatch` for a person while a live
 hand-entered receipt on the matched PO was recorded by someone implicated in

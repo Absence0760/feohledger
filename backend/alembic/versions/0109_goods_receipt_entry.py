@@ -24,7 +24,7 @@ No backfill
 -----------
 Existing rows keep ``source`` NULL. Before this revision no app user could type
 a receipt in, so NULL means "written by something other than the API", which
-the hold's auto-close continues to trust as it always has (decisions §261).
+the hold's auto-close continues to trust as it always has (decisions §262).
 
 Revision ID: 0109_goods_receipt_entry
 Revises: 0108_extraction_usage_tokens

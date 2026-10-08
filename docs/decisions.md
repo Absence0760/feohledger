@@ -10615,7 +10615,7 @@ that, and the next feature would hit it again); trimming the new receipt copy
 (a worse form to save a kilobyte); per-route catalogues (a reorganisation of
 6,000 keys for a problem one prefix solved).
 
-## 261. A goods receipt can be typed in, and the person who typed it cannot release their own invoice with it (migration 0109)
+## 262. A goods receipt can be typed in, and the person who typed it cannot release their own invoice with it (migration 0109)
 
 Nothing in the app could write a goods receipt — `scripts/seed.py` was the only
 writer and no ERP adapter pulls them — so the 3-way leg and the "billed beyond

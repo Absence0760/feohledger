@@ -1143,7 +1143,7 @@ exactly as before.
     ap_clerk) is a role list, not a granular permission — the same reasoning
     as `INVOICE_ENTRY_ROLES`. What stops anyone releasing their own invoice
     with a receipt is the recorder stamp the payment hold's auto-close checks
-    (`docs/decisions.md` §261), not the role list. `src/lib/nav.test.ts`
+    (`docs/decisions.md` §262), not the role list. `src/lib/nav.test.ts`
     now pins the exact link set each system role sees in that group.
   - **Exception: a permission-gated control is unreachable if the nav row
     that leads to it is still role-only.** `NavLink`/`NavChild` take an

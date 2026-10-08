@@ -3,7 +3,7 @@
 A refresh that no longer finds a "billed beyond receipt" `po_mismatch` closes
 it (`invoice_warnings._close_cleared_po_exceptions`), and it refuses to while a
 hand-entered receipt on the PO was recorded by someone implicated in the
-invoice (`_receipts_clear_hold`, decisions §261). That rule keys on
+invoice (`_receipts_clear_hold`, decisions §262). That rule keys on
 `GoodsReceipt.source == "manual"` — and, unlike an inspection, a receipt with
 NO source is trusted, because every such row predates receipt entry. So a new
 in-app creation site that forgot the stamp would not fail closed: its receipts
