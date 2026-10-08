@@ -671,7 +671,13 @@ statuses.
     wire. Every path that books a payment now refuses an invoice holding a live
     card unless the rail is `virtual_card` (which converges on it) — see
     `payments.md` § A live card is a claim on its invoice. Cancelling the card
-    releases the claim.
+    releases the claim. The direct endpoint likewise refuses an invoice that
+    already holds a live payment.
+  - **Serialised and entity-scoped**: the direct endpoint row-locks each
+    invoice and its vendor before any of these checks and commits per invoice.
+    Concurrent requests, or a request racing a payment dispatch, therefore
+    cannot both pass the checks. It only reaches invoices in the selected
+    entity. See *The direct mint locks before it checks* below.
   - **Audit trail** — a successful mint writes a `card.generated` audit row
     (invoice id, last_four, string-Decimal `amount_limit`) via
     `dispatch_audit`, matching every other card-lifecycle event
@@ -794,6 +800,65 @@ transient, so a later `flush`/`commit` cannot re-attempt the failed insert.
 savepoints are deliberately identical in shape.) Regression coverage:
 `tests/test_payment_card_duplicate_recovery.py` (both entry points, against a
 real Postgres so the partial index actually fires).
+
+#### The direct mint locks before it checks
+
+`POST /api/cards/generate` checks several things before it calls the provider:
+payable status, live card, live payment, blocking exception, applied credits,
+vendor status and compliance. Those reads used to be unlocked, and the unique
+index above only refuses **our row**, after the provider has already issued a
+card. Two concurrent requests both passed the checks. The first committed. The
+second then read `reissue_seq = 1`, because the winner's row was now visible, so
+it sent a **fresh** idempotency key. The provider issued a second real card, and
+the index refused to record it: a spendable card that nothing in FeohLedger
+governs. A payment dispatch was no barrier either. Dispatch holds the invoice
+`FOR NO KEY UPDATE`, and a card INSERT takes only `FOR KEY SHARE`, which that
+lock does not block.
+
+The endpoint now handles **one invoice at a time**, in id order: lock, check,
+mint, commit. `card_issuance.lock_invoices_for_mint` takes the locks, and the
+per-invoice commit releases them.
+
+- **The vendor `FOR SHARE`, then the invoice `FOR NO KEY UPDATE`.** The vendor
+  comes first because that is the order `vendor_merge` uses, so the two cannot
+  deadlock. `FOR SHARE` lets two mints for the same vendor run
+  side by side, but a status change (deactivate, reject, block) waits until the
+  card is committed. Whatever that change does about the vendor's live cards
+  then sees this card. `FOR NO KEY UPDATE` is the lock dispatch takes, so a mint
+  and a dispatch on the same invoice run one after the other.
+- **Every check is a fresh statement after the lock.** Under READ COMMITTED, a
+  request that waited sees what the winner committed. It skips the invoice,
+  because it now has a live card or a live payment, and the provider is never
+  called. The loser's response is an ordinary `201` with `total: 0`.
+- **A live payment is now refused too.** `payment_scheduled` counts as payable,
+  so an invoice whose ACH had settled but was not yet `paid` used to get a card
+  on top of the wire. Without this check, waiting out a dispatch's lock would
+  only have made the mint land after the payment it should have deferred to.
+- **The wait is bounded** by `FEOH_PAYMENT_INVOICE_LOCK_TIMEOUT_MS`, in a
+  savepoint (`utils/db_locks`, `docs/decisions.md` §233). The lock is taken
+  before any provider call, so a timeout means nothing was minted for that
+  invoice, and it is skipped. If the whole request minted nothing and at least
+  one invoice timed out, the answer is `409 invoice_locked`. Either way a retry
+  is safe.
+- **The provider call happens while one invoice's locks are held**, as it does
+  in dispatch. Committing per invoice keeps that to one provider call rather
+  than the whole batch. It also makes each card durable as soon as the provider
+  has issued it: before, a failure late in a batch rolled back cards that
+  already existed at the provider.
+- **What is not serialised:** an insert that points at the invoice, such as a
+  newly raised payment-blocking exception, takes only `FOR KEY SHARE`. Dispatch
+  has the same exposure. The main source of a fraud flag, a bank-change
+  approval, does update the vendor row, so the vendor lock holds it off.
+- **Scoped to the selected entity.** The locked SELECT runs through
+  `tenant.apply_entity_scope`, so an invoice outside `X-Entity-ID` is skipped.
+  Before, it selected by id alone, and a caller working in one subsidiary could
+  put a card on another's invoice.
+
+Pinned by the concurrency cases in `tests/test_card_generate_gates.py`, which
+run real concurrent sessions against Postgres: two generates, a generate
+against a held invoice (alone and in a batch), a generate that waits out a
+dispatch committing a payment, and a vendor status change attempted
+mid-mint.
 
 ### Cancel (`POST /{id}/cancel`) — provider-first + idempotent
 

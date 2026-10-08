@@ -528,9 +528,13 @@ async def generate_cards(
     org: Organization = Depends(get_tenant),
     user: User = Depends(require_roles(ROLE_ADMIN, ROLE_AP_MANAGER, ROLE_CFO)),
     org_id: uuid.UUID = Depends(get_org_id),
+    entity_id: uuid.UUID | None = Depends(get_entity_id),
 ):
     """Mint a virtual card directly for one or more invoices (outside a
     payment run).
+
+    Scoped to the selected entity (`X-Entity-ID`) like every other money
+    route: an invoice outside it is skipped, never minted.
 
     This is a second entry point into card issuance — the other is the
     ``virtual_card`` leg of ``execute_payment_run`` in ``api/payments.py``.
@@ -547,6 +551,13 @@ async def generate_cards(
         ``active`` (unverified / inactive / rejected), skips the invoice exactly
         as a run refuses it; so does an applied credit that no longer pairs with
         the invoice, or one covering all of it.
+      - ``card_issuance.lock_invoices_for_mint``: each invoice and its vendor
+        are row-locked before any of these checks, and the mint commits per
+        invoice. Two concurrent requests, or a request and a payment dispatch,
+        therefore cannot both pass the checks. The loser waits, then skips an
+        invoice that now has a live card or a live payment. An invoice whose
+        lock wait passes ``payment_invoice_lock_timeout_ms`` is skipped having
+        minted nothing; if nothing at all was minted, the answer is 409.
       - The card is minted for the invoice net of applied credit memos, never
         the gross, because the card is spendable up to its limit. An accepted
         early-payment discount is NOT taken here — only a booked payment takes
@@ -578,9 +589,6 @@ async def generate_cards(
 
     from app.api.payments import PAYABLE_INVOICE_STATUSES
     from app.config import settings as app_settings
-    from app.services.audit_dispatch import dispatch_audit
-    from app.services.card_issuance import issue_card_for_invoice, persist_card
-    from app.services.compliance import check_payment_compliance
 
     # Refuse the whole batch up front when the configured provider names no
     # registered adapter. `issue_card_for_invoice` would refuse each invoice
@@ -591,52 +599,127 @@ async def generate_cards(
     # config, never a credential.
     _require_card_adapter(org)
 
-    # Load invoices — only ones that have cleared AP approval are eligible.
+    # Only invoices that have cleared AP approval are eligible.
     # PAYABLE_INVOICE_STATUSES is the single source of truth shared with the
-    # payment queue / run builder so a card can't be minted against an
+    # payment queue / run builder, so a card can't be minted against an
     # unapproved invoice on any path.
-    ids = [uuid.UUID(i) for i in body.invoice_ids]
-    result = await db.execute(
-        select(Invoice).where(
-            Invoice.id.in_(ids),
-            Invoice.status.in_(PAYABLE_INVOICE_STATUSES),
-        )
-    )
-    invoices = result.scalars().all()
+    #
+    # Each invoice is locked, checked, minted and COMMITTED on its own. The lock
+    # (its vendor FOR SHARE, then the invoice FOR NO KEY UPDATE) comes before any
+    # check reads the row. Without it, two concurrent generates both saw no live
+    # card; the loser minted a second real card at the provider under a fresh
+    # idempotency key, and the unique index refused to record it. A payment
+    # dispatch holding the invoice could also pay it while this minted a card.
+    # Every check after the lock is a fresh statement, so a request that waited
+    # sees what the winner committed. The wait is bounded (decisions §233) and
+    # comes before any provider call, so a timeout mints nothing. Committing per
+    # invoice holds the locks for one provider call, not the whole batch, and
+    # makes each card durable as soon as the provider has issued it. See
+    # `card_issuance.lock_invoices_for_mint`, decisions §265.
+    from app.api.payments import INVOICE_LOCKED_DETAIL
+    from app.services.card_issuance import lock_invoices_for_mint
+    from app.utils.db_locks import LockWaitTimeout
 
-    # Idempotency: skip invoices that already have a LIVE (non-cancelled) card so
-    # a retried request (network timeout, double-click) doesn't mint a second
-    # provider card. The partial unique index uq_virtual_cards_one_live_per_invoice
-    # is the hard backstop against a concurrent race; this pre-check avoids the
-    # wasted provider call on the common sequential-retry case.
-    already_carded = set(
-        (
-            await db.execute(
-                select(VirtualCard.invoice_id).where(
-                    VirtualCard.invoice_id.in_(ids),
-                    VirtualCard.status != "cancelled",
-                )
+    cards: list[VirtualCard] = []
+    lock_refused = 0
+    for invoice_id in sorted({uuid.UUID(i) for i in body.invoice_ids}):
+        try:
+            locked = await lock_invoices_for_mint(
+                db,
+                [invoice_id],
+                payable_statuses=PAYABLE_INVOICE_STATUSES,
+                timeout_ms=app_settings.payment_invoice_lock_timeout_ms,
+                entity_id=entity_id,
             )
+        except LockWaitTimeout:
+            lock_refused += 1
+            continue
+        if not locked:
+            await db.commit()  # not payable, out of scope, or vendor moved
+            continue
+        card = await _mint_one_locked(
+            db,
+            locked[0],
+            org=org,
+            org_id=org_id,
+            user=user,
+            app_settings=app_settings,
         )
-        .scalars()
-        .all()
+        # Releases this invoice's locks before the next one is taken, and makes
+        # a card the provider already issued durable before anything else runs.
+        await db.commit()
+        if card is not None:
+            cards.append(card)
+
+    # Nothing minted, and at least one invoice could not be locked in time: say
+    # so, rather than report "nothing was eligible". Retry-safe (no provider
+    # call was made for it). When some cards WERE minted they are committed and
+    # returned; a locked invoice is then absent like any other skip, and a retry
+    # picks it up.
+    if not cards and lock_refused:
+        raise HTTPException(status_code=409, detail=INVOICE_LOCKED_DETAIL)
+
+    return CardListResponse(
+        items=[_card_response(c) for c in cards],
+        total=len(cards),
     )
 
-    # The payment gates a run enforces before money moves: an unresolved
-    # payment-blocking exception, or a vendor that is not verified and active.
-    # A minted card is spendable the moment it exists, so it is money moving
-    # and must not slip past what `POST /api/payments/runs` refuses — through
-    # the same shared predicates, so the two entry points can't drift.
+
+async def _mint_one_locked(
+    db: AsyncSession,
+    inv: Invoice,
+    *,
+    org: Organization,
+    org_id: uuid.UUID,
+    user: User,
+    app_settings,
+) -> VirtualCard | None:
+    """Run every gate on one invoice the caller holds locked, then mint.
+
+    Returns the persisted card, or ``None`` when the invoice is skipped. The
+    gates are the ones a payment run enforces, through the same shared
+    predicates, so the two entry points can't drift. Imports are lazy, as in
+    ``generate_cards``, so a test that patches a collaborator at its source
+    module is honoured.
+    """
     from app.services.applied_credit_integrity import applied_credit_conflicts
+    from app.services.audit_dispatch import dispatch_audit
+    from app.services.card_issuance import (
+        issue_card_for_invoice,
+        live_card_invoice_ids,
+        persist_card,
+    )
+    from app.services.compliance import check_payment_compliance
     from app.services.payment_runs import (
         blocked_invoice_ids,
         inactive_vendor_statuses,
+        live_payment_invoices,
         net_payable_amounts,
     )
 
-    blocked = await blocked_invoice_ids(db, [inv.id for inv in invoices])
-    vendor_refused = await inactive_vendor_statuses(db, invoices)
-    # The card is minted for the invoice net of applied credit memos — a card is
+    # Idempotency: an invoice with a LIVE (non-cancelled) card is skipped, so a
+    # retried request (network timeout, double-click) or a concurrent one that
+    # waited on the lock doesn't mint a second provider card. The partial unique
+    # index uq_virtual_cards_one_live_per_invoice stays the backstop for a writer
+    # that does not take the lock.
+    if inv.id in await live_card_invoice_ids(db, [inv.id]):
+        return None
+    # An unresolved payment-blocking exception, or a vendor that is not verified
+    # and active: a minted card is spendable the moment it exists, so it must
+    # not slip past what `POST /api/payments/runs` refuses.
+    if inv.id in await blocked_invoice_ids(db, [inv.id]):
+        return None
+    if inv.id in await inactive_vendor_statuses(db, [inv]):
+        return None
+    # An invoice already being paid on another rail. `payment_scheduled` is a
+    # payable status, so an invoice whose ACH has settled but is not yet `paid`
+    # still passes the status filter. Without this check a card was minted on
+    # top of the wire, and a generate that waited out a dispatch's lock would
+    # have minted onto the payment it just watched land. The run builder refuses
+    # a live payment the same way (`uq_payments_one_live_per_invoice`).
+    if inv.id in await live_payment_invoices(db, [inv.id]):
+        return None
+    # The card is minted for the invoice net of applied credit memos: a card is
     # spendable up to its limit, so one minted at the gross overpays the credit.
     # It deliberately does NOT take an accepted early-payment discount: a card
     # minted here is not a booked payment, so nothing would record the discount
@@ -644,88 +727,75 @@ async def generate_cards(
     # the offer's deadline. Discounts flow only through booked payments; a run
     # that books one refuses to converge on this card
     # (`card_issuance.card_settlement_block` → `card_limit_exceeds_payment`).
-    credit_conflicts = await applied_credit_conflicts(db, invoices)
-    nets = await net_payable_amounts(db, invoices)
+    # A credit that no longer pairs with the invoice makes the net meaningless
+    # (decisions §214); a fully-credited invoice owes nothing.
+    if inv.id in await applied_credit_conflicts(db, [inv]):
+        return None
+    net = (await net_payable_amounts(db, [inv]))[inv.id]
+    if net <= 0:
+        return None
 
-    cards: list[VirtualCard] = []
-    for inv in invoices:
-        if inv.id in already_carded or inv.id in blocked or inv.id in vendor_refused:
-            continue
-        # A credit that no longer pairs with the invoice makes the net
-        # meaningless (decisions §214); a fully-credited invoice owes nothing.
-        if inv.id in credit_conflicts or nets[inv.id] <= 0:
-            continue
-
-        # Compliance gate: mirrors execute_payment_run's virtual_card leg. No
-        # screenable vendor (no vendor_id, or the row was deleted) → skip
-        # rather than mint unscreened; a refuse/hold verdict also skips.
-        if not inv.vendor_id:
-            continue
-        vendor = (
-            await db.execute(select(Vendor).where(Vendor.id == inv.vendor_id))
-        ).scalar_one_or_none()
-        if vendor is None:
-            continue
-        decision = await check_payment_compliance(
-            db,
-            vendor=vendor,
-            # In the invoice's own currency; the KYC threshold is a
-            # home-currency figure, so hand the gate the currency and let it
-            # fail closed when the two can't be compared.
-            payment_amount=nets[inv.id],
-            payment_currency=inv.currency,
-            payment_method="virtual_card",
-            org_settings=org.settings or {},
-            organization_id=org_id,
-            correlation_id=inv.correlation_id,
-        )
-        if decision.verdict != "allow":
-            continue  # blocked/held vendor — skip, don't block the batch
-
-        issue = await issue_card_for_invoice(
-            db=db,
-            invoice=inv,
-            organization_id=org_id,
-            org_settings=org.settings or {},
-            app_settings=app_settings,
-            amount=nets[inv.id],
-        )
-        if not issue.success or issue.card is None:
-            continue  # skip failed cards, don't block the batch
-
-        card = issue.card
-        # Savepoint-guarded flush (shared with the payment-run card leg) so a
-        # concurrent duplicate caught by the partial unique index skips just
-        # that card instead of aborting the whole batch and orphaning the other
-        # freshly-minted provider cards.
-        if not await persist_card(db, card):
-            already_carded.add(inv.id)
-            continue
-
-        # SOX trail: every other card-lifecycle event in this module audits
-        # (cancel, PAN reveal, webhook charge/settle) — a direct mint must too.
-        await dispatch_audit(
-            db,
-            correlation_id=inv.correlation_id or uuid.uuid4(),
-            organization_id=org_id,
-            actor_id=user.id,
-            action="card.generated",
-            entity_type="virtual_card",
-            entity_id=card.id,
-            details={
-                "invoice_id": str(inv.id),
-                "last_four": card.last_four,
-                "amount_limit": str(card.amount_limit),
-            },
-        )
-        cards.append(card)
-
-    await db.commit()
-
-    return CardListResponse(
-        items=[_card_response(c) for c in cards],
-        total=len(cards),
+    # Compliance gate: mirrors execute_payment_run's virtual_card leg. No
+    # screenable vendor (no vendor_id, or the row was deleted) → skip rather
+    # than mint unscreened; a refuse/hold verdict also skips.
+    if not inv.vendor_id:
+        return None
+    vendor = (
+        await db.execute(select(Vendor).where(Vendor.id == inv.vendor_id))
+    ).scalar_one_or_none()
+    if vendor is None:
+        return None
+    decision = await check_payment_compliance(
+        db,
+        vendor=vendor,
+        # In the invoice's own currency; the KYC threshold is a home-currency
+        # figure, so hand the gate the currency and let it fail closed when the
+        # two can't be compared.
+        payment_amount=net,
+        payment_currency=inv.currency,
+        payment_method="virtual_card",
+        org_settings=org.settings or {},
+        organization_id=org_id,
+        correlation_id=inv.correlation_id,
     )
+    if decision.verdict != "allow":
+        return None  # blocked/held vendor: skip, don't block the batch
+
+    issue = await issue_card_for_invoice(
+        db=db,
+        invoice=inv,
+        organization_id=org_id,
+        org_settings=org.settings or {},
+        app_settings=app_settings,
+        amount=net,
+    )
+    if not issue.success or issue.card is None:
+        return None  # skip failed cards, don't block the batch
+
+    card = issue.card
+    # Savepoint-guarded flush (shared with the payment-run card leg), so a
+    # duplicate caught by the partial unique index skips just this card instead
+    # of poisoning the transaction.
+    if not await persist_card(db, card):
+        return None
+
+    # SOX trail: every other card-lifecycle event in this module audits
+    # (cancel, PAN reveal, webhook charge/settle), so a direct mint must too.
+    await dispatch_audit(
+        db,
+        correlation_id=inv.correlation_id or uuid.uuid4(),
+        organization_id=org_id,
+        actor_id=user.id,
+        action="card.generated",
+        entity_type="virtual_card",
+        entity_id=card.id,
+        details={
+            "invoice_id": str(inv.id),
+            "last_four": card.last_four,
+            "amount_limit": str(card.amount_limit),
+        },
+    )
+    return card
 
 
 @router.get("/{card_id}/details", response_model=CardDetailsResponse)

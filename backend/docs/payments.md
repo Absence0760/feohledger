@@ -526,6 +526,9 @@ be another money path sitting on that lock across its own processor call. The
 wait is now bounded: `_lock_payment_invoice` takes the lock through
 `utils/db_locks.bounded_lock_wait` with
 `FEOH_PAYMENT_INVOICE_LOCK_TIMEOUT_MS` (default `5000`; `0` = wait forever).
+The direct card mint (`POST /api/cards/generate`) takes the same lock mode under
+the same bound, so a mint and a dispatch on one invoice run one after the other
+(`virtual-cards.md` § The direct mint locks before it checks).
 
 - **The bound is scoped to the one locking statement.** It runs in a SAVEPOINT,
   sets `lock_timeout` with `SET LOCAL` semantics and restores the previous value
