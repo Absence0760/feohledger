@@ -279,6 +279,9 @@ class Settings(BaseSettings):
     erp_xero_api_base: str = ""
     erp_xero_client_id: str = ""
     erp_xero_client_secret: str = ""
+    erp_sage_accounting_api_base: str = ""
+    erp_sage_accounting_client_id: str = ""
+    erp_sage_accounting_client_secret: str = ""
 
     # Audit
     audit_mode: str = "local"  # "local" = in-process, "lambda" = dispatch to SQS

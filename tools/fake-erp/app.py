@@ -1387,6 +1387,231 @@ async def xero_set_status(body: dict) -> dict:
 app.include_router(xero)
 
 
+# ---------------------------------------------------------------------------
+# Sage Business Cloud Accounting API v3.1  (/sage/v3.1)
+# ---------------------------------------------------------------------------
+# Backs backend/app/services/erp_adapters/sage_accounting.py. Auth is
+# shape-only: any non-empty bearer plus a non-empty X-Business. Collections use
+# Sage's {"$items", "$next", ...} envelope. State lives under STATE["sage"],
+# created lazily so the shared POST /__reset clears it too. Test hook:
+# POST /sage/v3.1/__set-status {"id", "status", "outstanding_amount"?}.
+
+sage = APIRouter(prefix="/sage/v3.1")
+
+SAGE_BUSINESS_ID = "fake-sage-business"
+# FIXED fixtures — e2e tests may assert these literals.
+SAGE_CONTACTS = [
+    {
+        "id": "sage-contact-1",
+        "displayed_as": "Fake Sage Supplier Ltd (FSS01)",
+        "name": "Fake Sage Supplier Ltd",
+        "reference": "FSS01",
+        "email": "ap@fake-sage-supplier.test",
+        "credit_days": 30,
+        "contact_types": [{"id": "VENDOR"}],
+        "system": False,
+    },
+    {
+        "id": "sage-contact-2",
+        "name": "Fake Sage Customer Ltd",
+        "contact_types": [{"id": "CUSTOMER"}],
+        "system": False,
+    },
+]
+SAGE_LEDGERS = [
+    {
+        "id": "sage-ledger-5000",
+        "name": "Fake Cost of Sales",
+        "nominal_code": 5000,
+        "ledger_account_type": {"id": "DIRECT_EXPENSES"},
+        "included_in_chart": True,
+        "tax_rate": {"id": "GB_STANDARD", "displayed_as": "Standard 20.00%"},
+    },
+    {
+        "id": "sage-ledger-7500",
+        "name": "Fake Office Costs",
+        "nominal_code": 7500,
+        "ledger_account_type": {"id": "OVERHEADS"},
+        "included_in_chart": True,
+        "tax_rate": {"id": "GB_STANDARD", "displayed_as": "Standard 20.00%"},
+    },
+    # No default tax rate: a taxed invoice against it is refused unless the org
+    # configures `default_tax_rate_id`.
+    {
+        "id": "sage-ledger-7600",
+        "name": "Fake Consulting",
+        "nominal_code": 7600,
+        "ledger_account_type": {"id": "OVERHEADS"},
+        "included_in_chart": True,
+    },
+]
+
+
+def _sage_state() -> dict[str, Any]:
+    return STATE.setdefault("sage", {"invoices": {}, "counter": 0})
+
+
+def _sage_error(status: int, code: str, message: str) -> ProviderError:
+    return ProviderError(
+        status, [{"$severity": "error", "$dataCode": code, "$message": message}]
+    )
+
+
+def _require_sage_auth(request: Request) -> None:
+    auth = request.headers.get("authorization", "")
+    if not auth.startswith("Bearer ") or not auth[len("Bearer ") :].strip():
+        raise _sage_error(401, "Unauthorised", "Missing bearer token")
+    if not request.headers.get("x-business", "").strip():
+        raise _sage_error(403, "BusinessNotFound", "Missing X-Business")
+
+
+def _sage_page(items: list[dict]) -> JSONResponse:
+    body = {"$total": len(items), "$page": 1, "$next": None, "$back": None, "$items": items}
+    return JSONResponse(_xero_encode(copy.deepcopy(body)))
+
+
+@sage.get("/business_settings")
+async def sage_business_settings(request: Request) -> dict:
+    _require_sage_auth(request)
+    return {"business_name": "Fake Sage Business", "country_of_registration": {"id": "GB"}}
+
+
+@sage.get("/contacts")
+async def sage_contacts(request: Request, page: int = 1) -> JSONResponse:
+    _require_sage_auth(request)
+    type_id = request.query_params.get("contact_type_id")
+    rows = [
+        c
+        for c in SAGE_CONTACTS
+        if not type_id or any(t["id"] == type_id for t in c.get("contact_types", []))
+    ]
+    return _sage_page(rows if page == 1 else [])
+
+
+@sage.get("/ledger_accounts")
+async def sage_ledger_accounts(request: Request, page: int = 1) -> JSONResponse:
+    _require_sage_auth(request)
+    return _sage_page(SAGE_LEDGERS if page == 1 else [])
+
+
+@sage.get("/ledger_accounts/{key}")
+async def sage_ledger_account(request: Request, key: str) -> dict:
+    _require_sage_auth(request)
+    for ledger in SAGE_LEDGERS:
+        if ledger["id"] == key:
+            return copy.deepcopy(ledger)
+    raise _sage_error(404, "RecordNotFound", "Ledger account not found")
+
+
+@sage.get("/purchase_invoices")
+async def sage_list_purchase_invoices(request: Request, page: int = 1) -> JSONResponse:
+    """Supports the contact_id + from_date/to_date filters the adapter's
+    pre-create idempotency lookup sends."""
+    _require_sage_auth(request)
+    q = request.query_params
+    rows = [
+        inv
+        for inv in _sage_state()["invoices"].values()
+        if (not q.get("contact_id") or inv["contact"]["id"] == q["contact_id"])
+        and (not q.get("from_date") or inv["date"] >= q["from_date"])
+        and (not q.get("to_date") or inv["date"] <= q["to_date"])
+        and not inv.get("deleted_at")
+    ]
+    return _sage_page(rows if page == 1 else [])
+
+
+@sage.post("/purchase_invoices")
+async def sage_create_purchase_invoice(request: Request) -> JSONResponse:
+    """Validates what v3.1 validates for us: known contact and ledgers, a tax
+    rate on any taxed line, and net + tax == total per line and overall."""
+    _require_sage_auth(request)
+    body = _xero_json.loads(await request.body(), parse_float=_XeroDecimal)
+    inv = body.get("purchase_invoice") or {}
+    for field in ("contact_id", "date", "due_date", "invoice_lines"):
+        if not inv.get(field):
+            raise _sage_error(422, "RecordInvalid", f"{field} is required")
+    if inv["contact_id"] not in {c["id"] for c in SAGE_CONTACTS}:
+        raise _sage_error(422, "RecordInvalid", "contact not found")
+    ledgers = {ledger["id"] for ledger in SAGE_LEDGERS}
+    total = _XeroDecimal(0)
+    for line in inv["invoice_lines"]:
+        if line.get("ledger_account_id") not in ledgers:
+            raise _sage_error(422, "RecordInvalid", "ledger account not found")
+        tax = _XeroDecimal(str(line.get("tax_amount", 0)))
+        if tax and not line.get("tax_rate_id"):
+            raise _sage_error(422, "RecordInvalid", "tax_rate_id is required")
+        net = _XeroDecimal(str(line["net_amount"]))
+        if net + tax != _XeroDecimal(str(line["total_amount"])):
+            raise _sage_error(422, "RecordInvalid", "line total does not add up")
+        total += net + tax
+    if "total_amount" in inv and total != _XeroDecimal(str(inv["total_amount"])):
+        raise _sage_error(422, "RecordInvalid", "invoice total does not add up")
+    state = _sage_state()
+    state["counter"] += 1
+    record = {
+        "id": f"sage-pi-{state['counter']}",
+        "displayed_as": inv.get("vendor_reference"),
+        "contact": {"id": inv["contact_id"]},
+        "date": inv["date"],
+        "due_date": inv["due_date"],
+        "vendor_reference": inv.get("vendor_reference"),
+        "notes": inv.get("notes"),
+        "currency": {"id": inv.get("currency_id")},
+        "invoice_lines": inv["invoice_lines"],
+        "total_amount": total,
+        "outstanding_amount": total,
+        "status": {"id": "UNPAID"},
+        "void_reason": None,
+        "deleted_at": None,
+    }
+    state["invoices"][record["id"]] = record
+    return JSONResponse(_xero_encode(copy.deepcopy(record)), status_code=201)
+
+
+@sage.get("/purchase_invoices/{key}")
+async def sage_get_purchase_invoice(request: Request, key: str) -> JSONResponse:
+    _require_sage_auth(request)
+    record = _sage_state()["invoices"].get(key)
+    if record is None or record.get("deleted_at"):
+        raise _sage_error(404, "RecordNotFound", "Purchase invoice not found")
+    return JSONResponse(_xero_encode(copy.deepcopy(record)))
+
+
+@sage.delete("/purchase_invoices/{key}")
+async def sage_delete_purchase_invoice(request: Request, key: str) -> Response:
+    """Deletes a draft; voids an unpaid posted invoice (void_reason required)."""
+    _require_sage_auth(request)
+    record = _sage_state()["invoices"].get(key)
+    if record is None or record.get("deleted_at"):
+        raise _sage_error(404, "RecordNotFound", "Purchase invoice not found")
+    status = record["status"]["id"]
+    if status == "DRAFT":
+        record["deleted_at"] = "2026-01-01T00:00:00Z"
+        return Response(status_code=204)
+    if record["outstanding_amount"] != record["total_amount"]:
+        raise _sage_error(422, "RecordInvalid", "invoice has payments allocated")
+    reason = request.query_params.get("void_reason", "").strip()
+    if not reason:
+        raise _sage_error(422, "RecordInvalid", "void_reason is required")
+    record["status"] = {"id": "VOID"}
+    record["void_reason"] = reason
+    return Response(status_code=204)
+
+
+@sage.post("/__set-status")
+async def sage_set_status(body: dict) -> dict:
+    record = _sage_state()["invoices"].get(str(body.get("id", "")))
+    if record is None or not body.get("status"):
+        raise ProviderError(404, {"detail": "unknown id or missing status"})
+    record["status"] = {"id": body["status"]}
+    if body.get("outstanding_amount") is not None:
+        record["outstanding_amount"] = _XeroDecimal(str(body["outstanding_amount"]))
+    return {"status": "ok"}
+
+
+app.include_router(sage)
+
+
 if __name__ == "__main__":
     import uvicorn
 

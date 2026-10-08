@@ -1205,3 +1205,65 @@ which apps created on or after 2026-03-02 must use.
 
 Tests: `backend/tests/test_erp_xero_adapter.py`. Fake surface:
 `tools/fake-erp/README.md` § Xero.
+
+## Sage Business Cloud Accounting (direct, OAuth 2.0)
+
+`erp_adapters/sage_accounting.py`, `@register_adapter("sage_accounting")`,
+`integration_method: "direct"`. Subclasses `OAuthErpAdapter` like Xero: the
+token comes only from `self.access_token()`, and every call sends
+`X-Business: <external_tenant_id>`. API v3.1 at
+`https://api.accounting.sage.com/v3.1` (override
+`FEOH_ERP_SAGE_ACCOUNTING_API_BASE`). OAuth: authorize at
+`https://www.sageone.com/oauth2/auth/central` with `filter=apiv3.1`, token at
+`https://oauth.accounting.sage.com/token`, scope `full_access`. Platform app
+credentials: `FEOH_ERP_SAGE_ACCOUNTING_CLIENT_ID` / `_SECRET` (empty →
+unavailable, no fallback).
+
+**Region coverage: not South Africa.** Every v3.1 operation lists its
+availability as CA, DE, ES, FR, GB, IE and US. Sage Business Cloud Accounting
+**South Africa** (the Pastel successor) runs on a separate codebase with its
+own API (`https://accounting.sageone.co.za/api/2.0.0`, API key + basic auth,
+not OAuth), and Sage's developer community confirms v3.1 does not serve it.
+So this adapter covers the US and the other v3.1 regions; a ZA business cannot
+complete its consent flow. A ZA Sage adapter is separate work.
+
+**`settings.erp` keys:** `oauth` (written by `erp_oauth` only),
+`default_tax_rate_id` (optional fallback), `void_reason` (optional; default
+`Voided from FeohLedger`).
+
+| Method | Sage call | Notes |
+|---|---|---|
+| `test_connection` | `GET business_settings` | |
+| `list_vendors` | `GET contacts?contact_type_id=VENDOR` | 200/page, 10-page cap; system contacts skipped |
+| `list_gl_accounts` | `GET ledger_accounts` | `nominal_code` → code; `ledger_account_type` → account_type; out-of-chart skipped |
+| `list_pos` | — | base default `[]` (no v3.1 PO collection on every plan) |
+| `post_invoice` | `POST purchase_invoices` | below |
+| `get_invoice_status` | `GET purchase_invoices/{id}` | DRAFT → draft; UNPAID/DISPUTED → open; PART_PAID → partially_paid; PAID → paid; VOID → cancelled |
+| `void_invoice` | `DELETE purchase_invoices/{id}` | DRAFT deleted; unpaid UNPAID/DISPUTED voided with `void_reason`; anything with a payment allocated → `False` |
+
+**`post_invoice`:**
+
+- Same refusals and the same exact line split as Xero
+  (`erp_adapters/bill_allocation.py`), plus one: tax-inclusive lines with
+  header-only tax are refused `tax_not_itemised`, because v3.1 never
+  calculates tax and needs every line's `tax_amount`.
+- **Explicit amounts on every line**: `net_amount`, `tax_amount`,
+  `total_amount`, `unit_price_includes_tax: false`, and `quantity` ×
+  `unit_price` only when it reproduces the net (else 1 × net). The header
+  carries `net_amount` / `tax_amount` / `total_amount = amount`. The
+  `tax_rate_id` is the line ledger's own default (`GET
+  ledger_accounts/{id}?attributes=tax_rate`), `default_tax_rate_id` only when
+  it has none, else `tax_rate_unresolved`. An untaxed invoice sends no tax
+  rate.
+- **Idempotency.** Sage has no idempotency key, so every invoice is written
+  with `notes: "FeohLedger <correlation_id>"`, and a pre-create lookup
+  (`contact_id` + `from_date`/`to_date` = the invoice date) looks for a live
+  invoice with the same `vendor_reference`: carrying our marker → adopted;
+  without it → `duplicate_document_number`. A failed lookup fails closed, and a
+  lookup that runs past the page cap is refused
+  `idempotency_lookup_incomplete`.
+- 429 → `rate_limited` (no sleep loop); failures through
+  `erp_failure_message`.
+
+Tests: `backend/tests/test_erp_sage_accounting_adapter.py`. Fake surface:
+`tools/fake-erp/README.md` § Sage Business Cloud Accounting.

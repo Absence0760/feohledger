@@ -199,3 +199,26 @@ otherwise). Point the backend at it with
   from DRAFT/SUBMITTED, VOIDED only from unpaid AUTHORISED).
 - Test hook `POST /xero/api.xro/2.0/__set-status {"id", "status",
   "amount_paid"?}`. `POST /__reset` clears this state too.
+
+## Sage Business Cloud Accounting (`/sage/v3.1`)
+
+Backs `erp_adapters/sage_accounting.py`. Auth is shape-only: any non-empty
+bearer plus a non-empty `X-Business`. Collections use Sage's
+`{"$items", "$next", ...}` envelope. Point the backend at it with
+`FEOH_ERP_SAGE_ACCOUNTING_API_BASE=http://localhost:12112/sage/v3.1`.
+
+- `GET /business_settings` (the connection test).
+- `GET /contacts?contact_type_id=VENDOR` — `sage-contact-1` *Fake Sage
+  Supplier Ltd* (the customer `sage-contact-2` is filtered out).
+- `GET /ledger_accounts`, `GET /ledger_accounts/{id}` — `sage-ledger-5000`,
+  `sage-ledger-7500` (default tax rate `GB_STANDARD`), `sage-ledger-7600` (no
+  default rate: a taxed invoice is refused unless the org sets
+  `default_tax_rate_id`).
+- `GET /purchase_invoices` with `contact_id` / `from_date` / `to_date` (the
+  pre-create idempotency lookup); `POST /purchase_invoices` creates
+  `sage-pi-<n>` as `UNPAID`, and 422s on an unknown contact or ledger, a taxed
+  line with no `tax_rate_id`, or net + tax that does not equal the total;
+  `GET /purchase_invoices/{id}`; `DELETE /purchase_invoices/{id}` deletes a
+  draft and voids an unpaid invoice (`void_reason` required).
+- Test hook `POST /sage/v3.1/__set-status {"id", "status",
+  "outstanding_amount"?}`. `POST /__reset` clears this state too.
