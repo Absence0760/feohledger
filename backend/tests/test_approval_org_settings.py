@@ -287,9 +287,13 @@ async def test_coordinator_threads_org_settings_into_resolver_apply():
     db.begin_nested.return_value.__aenter__ = AsyncMock(return_value=None)
     db.begin_nested.return_value.__aexit__ = AsyncMock(return_value=False)
 
+    # The post-apply receipt-evidence check re-runs the matcher, which this mock
+    # session cannot serve; it has realdb coverage in
+    # `test_exception_agent_receipt_segregation.py`.
     with (
         patch.object(coord, "get_resolver", return_value=_Stub()),
         patch.object(coord, "record_decision", AsyncMock(return_value=None)),
+        patch.object(coord, "_receipts_implicated", AsyncMock(return_value=False)),
     ):
         await coord.run_agent(
             db,
