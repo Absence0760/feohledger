@@ -4876,6 +4876,7 @@ export const messages = {
 	// The coded money-path / MFA refusals (`api/codedRefusals.ts`), stated from
 	// their code + params. Money params arrive formatted with their currency.
 	'refusal.approvalSegregation': "Funktionstrennung: Wer an der Erstellung dieser Rechnung beteiligt war, darf sie nicht auch freigeben.",
+	'refusal.approvalSegregationReceiver': "Funktionstrennung: Wer einen Wareneingang zu dieser Rechnung erfasst hat, darf sie nicht auch freigeben.",
 	'refusal.approvalLevelReuse': "Sie haben bereits eine frühere Stufe dieser Freigabekette freigegeben; eine andere Person muss freigeben.",
 	'refusal.approvalNotNamedApprover': "Sie sind für diesen Schritt nicht als Freigebende(r) berechtigt.",
 	'refusal.approvalMaxExceeded': "Der Rechnungsbetrag {amount} übersteigt den zulässigen Höchstbetrag {limit}.",

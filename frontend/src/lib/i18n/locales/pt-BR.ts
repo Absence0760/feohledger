@@ -4906,6 +4906,7 @@ export const messages = {
 	// The coded money-path / MFA refusals (`api/codedRefusals.ts`), stated from
 	// their code + params. Money params arrive formatted with their currency.
 	'refusal.approvalSegregation': "Segregação de funções: um usuário envolvido na criação desta fatura não pode também aprová-la.",
+	'refusal.approvalSegregationReceiver': "Segregação de funções: um usuário que registrou um recebimento de mercadorias faturado nesta fatura não pode também aprová-la.",
 	'refusal.approvalLevelReuse': "Você já aprovou um nível anterior desta cadeia; é necessário um aprovador diferente.",
 	'refusal.approvalNotNamedApprover': "Você não é um aprovador autorizado para esta etapa.",
 	'refusal.approvalMaxExceeded': "O valor da fatura {amount} excede o máximo permitido de {limit}.",

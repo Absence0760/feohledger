@@ -1133,6 +1133,12 @@ abstract class AppLocalizations {
   /// **'Segregation of duties: a user involved in creating this invoice cannot also approve it.'**
   String get codedRefusalApprovalSegregation;
 
+  /// Coded refusal (lib/l10n/coded_refusal_messages.dart) `approval_segregation_receiver`: the approver recorded a goods receipt the invoice is billed against.
+  ///
+  /// In en, this message translates to:
+  /// **'Segregation of duties: a user who recorded a goods receipt this invoice is billed against cannot also approve it.'**
+  String get codedRefusalApprovalSegregationReceiver;
+
   /// Coded refusal (lib/l10n/coded_refusal_messages.dart) `invoice_stale_approval`: the invoice changed after the approver loaded it, so nothing was approved.
   ///
   /// In en, this message translates to:

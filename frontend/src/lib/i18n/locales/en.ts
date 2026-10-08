@@ -5105,6 +5105,7 @@ export const en = {
 	// The coded money-path / MFA refusals (`api/codedRefusals.ts`), stated from
 	// their code + params. Money params arrive formatted with their currency.
 	'refusal.approvalSegregation': "Segregation of duties: a user involved in creating this invoice cannot also approve it.",
+	'refusal.approvalSegregationReceiver': "Segregation of duties: a user who recorded a goods receipt this invoice is billed against cannot also approve it.",
 	'refusal.approvalLevelReuse': "You already approved an earlier level of this chain; a different approver is required.",
 	'refusal.approvalNotNamedApprover': "You are not an authorized approver for this step.",
 	'refusal.approvalMaxExceeded': "Invoice amount {amount} exceeds the maximum allowed {limit}.",
