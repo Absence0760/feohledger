@@ -15,13 +15,19 @@ def bill_lines(payload: InvoicePayload) -> list[tuple[str, Decimal, str]] | str:
     """The ``(gl_account_id, amount, memo)`` lines to post, or a refusal reason.
 
     Per-line only when every line carries a total, every line resolves an ERP
-    account id (its own, else the header's), and the totals sum to exactly
-    ``payload.amount``. Otherwise one line for ``payload.amount`` against the
+    account id (its own when it is coded, else the header's), and the totals
+    sum to exactly ``payload.amount``. Otherwise one line for ``payload.amount`` against the
     header account. The header amount is never recomputed from lines — a bill
     whose total differs from the approved amount must not be posted.
     """
     header_gl = payload.gl_account_erp_id
     items = payload.line_items
+    # A line coded to its own account must carry that account's ERP id; only
+    # an uncoded line takes the header's. A coded line whose account is not
+    # linked is refused, never posted on another account: that would book the
+    # expense somewhere the approver never saw.
+    if any(li.gl_account and not li.gl_account_erp_id for li in items):
+        return ACCOUNT_NOT_LINKED
     if items and all(li.total is not None for li in items):
         resolved = [(li.gl_account_erp_id or header_gl, li) for li in items]
         if all(gl for gl, _ in resolved) and sum(li.total for li in items) == payload.amount:

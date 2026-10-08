@@ -480,3 +480,37 @@ def test_test_connection():
     assert _run(fake, SageIntacctAdapter(CONFIG).test_connection) is True
     fake.token_status = 401
     assert _run(fake, SageIntacctAdapter(CONFIG).test_connection) is False
+
+
+def test_bill_lines_refuses_a_coded_line_whose_account_is_not_linked():
+    """Shared by Intacct, SYSPRO and Sage SA: a coded line with no ERP id is
+    refused rather than folded into one line on the header's account, even
+    when the line totals would not have been posted per line anyway."""
+    from app.services.erp_adapters.bill_lines import bill_lines
+
+    payload = _payload(
+        line_items=[
+            LineItemPayload(line_number=1, total=Decimal("60.00"), gl_account="6300"),
+            LineItemPayload(
+                line_number=2, total=Decimal("40.00"), gl_account="6100", gl_account_erp_id="6100"
+            ),
+        ]
+    )
+    assert bill_lines(payload) == "account_not_linked"
+
+
+def test_bill_lines_puts_an_uncoded_line_on_the_header_account():
+    from app.services.erp_adapters.bill_lines import bill_lines
+
+    payload = _payload(
+        line_items=[
+            LineItemPayload(
+                line_number=1, total=Decimal("60.00"), gl_account="6200", gl_account_erp_id="6200"
+            ),
+            LineItemPayload(line_number=2, total=Decimal("40.00")),
+        ]
+    )
+    assert [(gl, amt) for gl, amt, _ in bill_lines(payload)] == [
+        ("6200", Decimal("60.00")),
+        ("6100", Decimal("40.00")),
+    ]

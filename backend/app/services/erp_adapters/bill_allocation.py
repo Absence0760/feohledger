@@ -102,7 +102,10 @@ def allocate_bill_lines(payload: InvoicePayload) -> BillAllocation:
             amount = _line_amount(li)
             if amount is None:
                 raise BillRefusal(LINE_AMOUNT_MISSING)
-            account = li.gl_account_erp_id or payload.gl_account_erp_id
+            # A line posts on its own account's ERP id. Only an uncoded line
+            # takes the header's account; a coded line with no id stays None
+            # and is refused below, never moved onto the header's account.
+            account = li.gl_account_erp_id or (None if li.gl_account else payload.gl_account_erp_id)
             description = li.description or payload.description or payload.invoice_number
             raw.append((description, account, amount, li.tax, li))
     else:

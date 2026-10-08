@@ -550,6 +550,22 @@ def test_split_line_level_account_wins_over_the_header():
     assert sum(line.gross for line in allocation.lines) == payload.amount
 
 
+def test_split_refuses_a_coded_line_whose_account_is_not_linked():
+    """A line coded to an account with no ERP id is refused, never posted on
+    the header's account, where the approver never saw the expense."""
+    payload = _payload(
+        amount=Decimal("100.00"),
+        tax_amount=None,
+        line_items=[
+            LineItemPayload(line_number=1, total=Decimal("60.00"), gl_account="6300"),
+            LineItemPayload(line_number=2, total=Decimal("40.00")),
+        ],
+    )
+    with pytest.raises(bill_allocation.BillRefusal) as exc:
+        bill_allocation.allocate_bill_lines(payload)
+    assert exc.value.reason == "account_not_linked"
+
+
 def test_split_derives_line_amount_from_quantity_and_unit_price():
     payload = _payload(
         amount=Decimal("30.00"),
