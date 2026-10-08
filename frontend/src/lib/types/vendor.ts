@@ -64,6 +64,28 @@ export interface Vendor {
 	payments_blocked_reason: string | null;
 	risk_score: string | null;
 	risk_level: RiskLevel;
+	// Set only on the response to a write that left the vendor un-payable
+	// (status off `active`, payment block, sanctions match): what happened to
+	// its live virtual cards. Absent / null on every other read.
+	card_revocation?: VendorCardRevocation | null;
+}
+
+// One card a vendor-ineligibility write could not close (PII-free).
+export interface CardRevocationItem {
+	card_id: string;
+	last_four: string | null;
+	outcome: string;
+	payment_id: string | null;
+}
+
+// `backend/app/services/vendor_card_revocation.py`. `not_closed` cards are
+// STILL LIVE at the provider (retry: `POST /api/vendors/{id}/cancel-cards`);
+// `requires_payment_void` cards back a live payment and close via its void.
+export interface VendorCardRevocation {
+	vendor_id: string;
+	cancelled: number;
+	not_closed: CardRevocationItem[];
+	requires_payment_void: CardRevocationItem[];
 }
 
 // One row of a vendor's sanctions-screening history (newest first).
@@ -271,6 +293,9 @@ export interface VendorMergeResponse {
 	// Duplicate ids THIS call flipped active → inactive (empty on idempotent re-run).
 	deactivated_vendor_ids: string[];
 	merged_at: string;
+	// Live cards the merge left on an un-payable vendor (the canonical inherits
+	// the duplicates' cards). Empty when nothing needed revoking.
+	card_revocations?: VendorCardRevocation[];
 }
 
 import type { BadgeTone } from '#lib/components/ui/badgeTone.ts';

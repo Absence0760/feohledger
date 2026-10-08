@@ -6,6 +6,7 @@ import type { MatchingIdsResponse } from '#lib/utils/pagination.ts';
 import { triggerDownload } from '#lib/utils/download.ts';
 import type {
 	Vendor,
+	VendorCardRevocation,
 	SanctionsCheck,
 	ScreeningReviewQueueResponse,
 	VendorRisk,
@@ -122,6 +123,7 @@ export interface BulkSkip {
 export interface VendorBulkStatusResponse {
 	updated: number;
 	skipped: BulkSkip[];
+	card_revocations?: VendorCardRevocation[];
 }
 
 /** Bulk verify (`status: 'active'`) / reject over a hand-picked set of
@@ -137,6 +139,7 @@ export function bulkVendorStatus(
 export interface VendorBulkScreenResponse {
 	screened: number;
 	skipped: BulkSkip[];
+	card_revocations?: VendorCardRevocation[];
 }
 
 /** Bulk re-screen against the configured sanctions provider. admin / ap_manager. */
@@ -204,6 +207,19 @@ export function blockVendor(id: string, reason?: string): Promise<Vendor> {
 
 export function unblockVendor(id: string): Promise<Vendor> {
 	return api.post<Vendor>(`/api/vendors/${id}/unblock`, {});
+}
+
+// Reject an unverified / active vendor. The response carries what happened to
+// its live virtual cards (`card_revocation`).
+export function rejectVendor(id: string): Promise<Vendor> {
+	return api.post<Vendor>(`/api/vendors/${id}/reject`, {});
+}
+
+// Retry the card leg of a deactivation / block / sanctions match: cancel every
+// live, unbooked card still open on an un-payable vendor. 409 on a payable one.
+// `vendor.manage` or `vendor.block`.
+export function cancelVendorCards(id: string): Promise<VendorCardRevocation> {
+	return api.post<VendorCardRevocation>(`/api/vendors/${id}/cancel-cards`, {});
 }
 
 // Vendor risk detail + recompute. recompute is admin / ap_manager.
