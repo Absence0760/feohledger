@@ -370,6 +370,7 @@ async def test_batch_generate_survives_a_racing_card_insert(realdb):
                 org=_org(org_id),
                 user=_user(info.users["admin"]),
                 org_id=org_id,
+                entity_id=None,
             )
             await db.commit()
 
