@@ -1,6 +1,5 @@
 // ignore: unused_import
 import 'package:intl/intl.dart' as intl;
-
 import 'app_localizations.dart';
 
 // ignore_for_file: type=lint
@@ -349,6 +348,32 @@ class AppLocalizationsPt extends AppLocalizations {
 
   @override
   String get vendorRejected => 'Fornecedor rejeitado';
+
+  @override
+  String vendorCardsNotClosed(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other:
+          '$count cartões virtuais não puderam ser cancelados no emissor e continuam ativos. Tente novamente pelo app web.',
+      one:
+          '$count cartão virtual não pôde ser cancelado no emissor e continua ativo. Tente novamente pelo app web.',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String vendorCardsRequireVoid(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other:
+          '$count cartões virtuais cobrem pagamentos agendados e continuam ativos — estorne esses pagamentos para cancelá-los.',
+      one:
+          '$count cartão virtual cobre um pagamento agendado e continua ativo — estorne esse pagamento para cancelá-lo.',
+    );
+    return '$_temp0';
+  }
 
   @override
   String get vendorActionFailed => 'Falha na ação';
@@ -3432,6 +3457,32 @@ class AppLocalizationsPtBr extends AppLocalizationsPt {
 
   @override
   String get vendorRejected => 'Fornecedor rejeitado';
+
+  @override
+  String vendorCardsNotClosed(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other:
+          '$count cartões virtuais não puderam ser cancelados no emissor e continuam ativos. Tente novamente pelo app web.',
+      one:
+          '$count cartão virtual não pôde ser cancelado no emissor e continua ativo. Tente novamente pelo app web.',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String vendorCardsRequireVoid(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other:
+          '$count cartões virtuais cobrem pagamentos agendados e continuam ativos — estorne esses pagamentos para cancelá-los.',
+      one:
+          '$count cartão virtual cobre um pagamento agendado e continua ativo — estorne esse pagamento para cancelá-lo.',
+    );
+    return '$_temp0';
+  }
 
   @override
   String get vendorActionFailed => 'Falha na ação';

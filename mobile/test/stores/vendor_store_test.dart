@@ -10,26 +10,25 @@ import 'package:feohledger_mobile/services/offline_store.dart';
 import 'package:feohledger_mobile/stores/vendor_store.dart';
 
 http.Response _list(List<Map<String, dynamic>> items) => http.Response(
-      jsonEncode({'items': items, 'total': items.length, 'page': 1}),
-      200,
-      headers: {'content-type': 'application/json'},
-    );
+  jsonEncode({'items': items, 'total': items.length, 'page': 1}),
+  200,
+  headers: {'content-type': 'application/json'},
+);
 
 Map<String, dynamic> _vendorJson(
   String id, {
   String status = 'unverified',
   String source = 'manual',
-}) =>
-    {
-      'id': id,
-      'name': 'Vendor $id',
-      'code': 'V$id',
-      'email': 'v$id@example.com',
-      'status': status,
-      'source': source,
-      'invoice_count': 2,
-      'created_at': '2026-01-01T12:00:00',
-    };
+}) => {
+  'id': id,
+  'name': 'Vendor $id',
+  'code': 'V$id',
+  'email': 'v$id@example.com',
+  'status': status,
+  'source': source,
+  'invoice_count': 2,
+  'created_at': '2026-01-01T12:00:00',
+};
 
 void main() {
   final store = VendorStore.instance;
@@ -45,20 +44,22 @@ void main() {
   });
 
   group('fetch', () {
-    test('success populates vendors and marks them live (not cached)',
-        () async {
-      ApiClient().debugConfigure(
-        client: MockClient((req) async => _list([_vendorJson('1')])),
-      );
+    test(
+      'success populates vendors and marks them live (not cached)',
+      () async {
+        ApiClient().debugConfigure(
+          client: MockClient((req) async => _list([_vendorJson('1')])),
+        );
 
-      await store.fetch();
+        await store.fetch();
 
-      expect(store.vendors, hasLength(1));
-      expect(store.vendors.first.id, '1');
-      expect(store.fromCache, isFalse);
-      expect(store.error, isNull);
-      expect(store.loading, isFalse);
-    });
+        expect(store.vendors, hasLength(1));
+        expect(store.vendors.first.id, '1');
+        expect(store.fromCache, isFalse);
+        expect(store.error, isNull);
+        expect(store.loading, isFalse);
+      },
+    );
 
     test('falls back to the offline cache when the network fails', () async {
       ApiClient().debugConfigure(
@@ -76,17 +77,19 @@ void main() {
       expect(store.fromCache, isTrue);
     });
 
-    test('surfaces an error when the network fails and no cache exists',
-        () async {
-      ApiClient().debugConfigure(
-        client: MockClient((req) async => throw Exception('offline')),
-      );
+    test(
+      'surfaces an error when the network fails and no cache exists',
+      () async {
+        ApiClient().debugConfigure(
+          client: MockClient((req) async => throw Exception('offline')),
+        );
 
-      await store.fetch();
+        await store.fetch();
 
-      expect(store.error, isNotNull);
-      expect(store.fromCache, isFalse);
-    });
+        expect(store.error, isNotNull);
+        expect(store.fromCache, isFalse);
+      },
+    );
   });
 
   group('filters', () {
@@ -123,8 +126,7 @@ void main() {
       expect(await sent.future, 'acme');
     });
 
-    test(
-        'a slow stale search response landing after a faster later one is '
+    test('a slow stale search response landing after a faster later one is '
         'discarded (issue #182 request-sequencing guard)', () async {
       // Same race as InvoiceStore's regression test: an early, slow response
       // must not clobber a later, faster one that already landed.
@@ -156,9 +158,13 @@ void main() {
       await Future<void>.delayed(const Duration(milliseconds: 20));
 
       expect(store.vendors, hasLength(1));
-      expect(store.vendors.first.id, 'fresh',
-          reason: 'the earlier, slower response must not clobber the later, '
-              'faster one that already landed');
+      expect(
+        store.vendors.first.id,
+        'fresh',
+        reason:
+            'the earlier, slower response must not clobber the later, '
+            'faster one that already landed',
+      );
     });
   });
 
@@ -208,7 +214,44 @@ void main() {
 
       expect(ok, isTrue);
       expect(rejectCalls, 1);
+      expect(store.lastRejected?.cardsNotClosed, 0);
     });
+
+    test(
+      'reject keeps the still-live card counts for the screen to surface',
+      () async {
+        ApiClient().debugConfigure(
+          client: MockClient((req) async {
+            if (req.method == 'POST' && req.url.path.endsWith('/reject')) {
+              return http.Response(
+                jsonEncode({
+                  ..._vendorJson('1', status: 'rejected'),
+                  'card_revocation': {
+                    'vendor_id': '1',
+                    'cancelled': 0,
+                    'not_closed': [
+                      {
+                        'card_id': 'c1',
+                        'last_four': '4242',
+                        'outcome': 'card_cancel_rejected',
+                      },
+                    ],
+                    'requires_payment_void': [],
+                  },
+                }),
+                200,
+                headers: {'content-type': 'application/json'},
+              );
+            }
+            return _list([_vendorJson('1', status: 'rejected')]);
+          }),
+        );
+
+        expect(await store.reject('1'), isTrue);
+        expect(store.lastRejected?.cardsNotClosed, 1);
+        expect(store.lastRejected?.cardsRequireVoid, 0);
+      },
+    );
 
     test('verify returns false + records error on failure', () async {
       ApiClient().debugConfigure(
@@ -247,19 +290,21 @@ void main() {
       expect(message, contains('Synced 2 new'));
     });
 
-    test('syncErp returns null + records error when no ERP configured (400)',
-        () async {
-      ApiClient().debugConfigure(
-        client: MockClient(
-          (req) async => http.Response('No ERP configured', 400),
-        ),
-      );
+    test(
+      'syncErp returns null + records error when no ERP configured (400)',
+      () async {
+        ApiClient().debugConfigure(
+          client: MockClient(
+            (req) async => http.Response('No ERP configured', 400),
+          ),
+        );
 
-      final message = await store.syncErp();
+        final message = await store.syncErp();
 
-      expect(message, isNull);
-      expect(store.error, isNotNull);
-    });
+        expect(message, isNull);
+        expect(store.error, isNotNull);
+      },
+    );
   });
 }
 

@@ -1,6 +1,5 @@
 // ignore: unused_import
 import 'package:intl/intl.dart' as intl;
-
 import 'app_localizations.dart';
 
 // ignore_for_file: type=lint
@@ -343,6 +342,32 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get vendorRejected => 'Vendor rejected';
+
+  @override
+  String vendorCardsNotClosed(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other:
+          '$count virtual cards could not be cancelled at the card provider and are still live. Retry from the web app.',
+      one:
+          '$count virtual card could not be cancelled at the card provider and is still live. Retry from the web app.',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String vendorCardsRequireVoid(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other:
+          '$count virtual cards back scheduled payments and are still live — void those payments to cancel them.',
+      one:
+          '$count virtual card backs a scheduled payment and is still live — void that payment to cancel it.',
+    );
+    return '$_temp0';
+  }
 
   @override
   String get vendorActionFailed => 'Action failed';

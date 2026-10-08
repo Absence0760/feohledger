@@ -138,6 +138,18 @@
   "vendorRejectHint": "Mark as invalid / duplicate",
   "vendorVerified": "Vendor verified",
   "vendorRejected": "Vendor rejected",
+  "vendorCardsNotClosed": "{count, plural, one {{count} virtual card could not be cancelled at the card provider and is still live. Retry from the web app.} other {{count} virtual cards could not be cancelled at the card provider and are still live. Retry from the web app.}}",
+  "@vendorCardsNotClosed": {
+    "placeholders": {
+      "count": { "type": "int" }
+    }
+  },
+  "vendorCardsRequireVoid": "{count, plural, one {{count} virtual card backs a scheduled payment and is still live — void that payment to cancel it.} other {{count} virtual cards back scheduled payments and are still live — void those payments to cancel them.}}",
+  "@vendorCardsRequireVoid": {
+    "placeholders": {
+      "count": { "type": "int" }
+    }
+  },
   "vendorActionFailed": "Action failed",
   "vendorSyncFailed": "ERP sync failed: {error}",
   "@vendorSyncFailed": {

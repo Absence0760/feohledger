@@ -104,6 +104,8 @@
   "vendorRejectHint": "Als ungültig / Dublette markieren",
   "vendorVerified": "Lieferant bestätigt",
   "vendorRejected": "Lieferant abgelehnt",
+  "vendorCardsNotClosed": "{count, plural, one {{count} virtuelle Karte konnte beim Kartenanbieter nicht storniert werden und ist weiterhin aktiv. Erneut versuchen in der Web-App.} other {{count} virtuelle Karten konnten beim Kartenanbieter nicht storniert werden und sind weiterhin aktiv. Erneut versuchen in der Web-App.}}",
+  "vendorCardsRequireVoid": "{count, plural, one {{count} virtuelle Karte deckt eine geplante Zahlung und ist weiterhin aktiv – stornieren Sie diese Zahlung, um die Karte zu sperren.} other {{count} virtuelle Karten decken geplante Zahlungen und sind weiterhin aktiv – stornieren Sie diese Zahlungen, um die Karten zu sperren.}}",
   "vendorActionFailed": "Aktion fehlgeschlagen",
   "vendorSyncFailed": "ERP-Synchronisierung fehlgeschlagen: {error}",
 
