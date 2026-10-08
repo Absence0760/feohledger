@@ -92,7 +92,10 @@ is **entry-only**:
   anything not `new` / `rejected`);
 - nothing they do ends in an approval: their `/complete` never fires the
   workflow's `auto_approve_below` floor, and their upload / re-extraction runs
-  with auto-approve suppressed, so the invoice always lands at review;
+  with auto-approve suppressed, so the invoice always lands at review — and
+  so does a manager's later re-extraction of a document a clerk uploaded or
+  swapped in (`run_extraction` reads the uploader and the segregation set off
+  the row and records `auto_approve_suppressed` on the audit row);
 - `import-csv` takes open AP only.
 
 Approve / reject are gated on the `invoice.approve` permission

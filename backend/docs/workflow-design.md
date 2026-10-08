@@ -247,6 +247,17 @@ bind — and have it approved with no second person involved. Their `/complete`
 also takes only `new` → `ready_for_review`, and only where the snapshot has an
 approval step (with none, `/complete` closes a `new` invoice to `done`).
 
+**Nor does extraction for anyone else's read of a document they chose.** The
+read that would approve can be a manager's: re-extracting after a clerk swapped
+the file in. `run_extraction` therefore also suppresses on its own, from the row
+(`extraction.auto_approve_suppression`): whenever `segregation_actor_ids` is
+non-empty, or `uploaded_by_id` names someone other than the reader. The reason
+is recorded as `details.auto_approve_suppressed` on the
+`invoice.extraction_completed` audit row (`backend/docs/ai-extraction.md` §
+Auto-Approve on Confidence). `/complete`'s floor keeps its own rule — refuse
+the floor to an implicated *caller* — because there the caller acts on the
+figures in front of them rather than on a document read after the click.
+
 ### Multi-Level Approval Chains
 
 Strategy `"chain"` with `approval_chain: list[ApprovalLevelConfig]`.
