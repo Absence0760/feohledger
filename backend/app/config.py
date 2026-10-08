@@ -262,6 +262,9 @@ class Settings(BaseSettings):
     # Dynamics 365 BC OAuth2 token URL. Empty = the real
     # login.microsoftonline.com URL built from the config's tenant_id.
     erp_d365_token_url: str = ""
+    # Sage Intacct REST base URL. Empty = the real https://api.intacct.com/ia/api/v1
+    # (token exchange at <base>/oauth2/token).
+    erp_intacct_api_base: str = ""
 
     # Audit
     audit_mode: str = "local"  # "local" = in-process, "lambda" = dispatch to SQS

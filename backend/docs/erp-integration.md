@@ -1018,3 +1018,57 @@ integrations. That is why QuickBooks Online is scoped as a direct adapter
 | Remaining direct adapters (SAP, Epicor, etc.) | Use Merge.dev |
 | Test connection button in UI | Planned |
 | ERP status display in invoice modal | Planned |
+
+## Sage Intacct direct adapter (`sage_intacct`)
+
+`erp_adapters/sage_intacct.py`, selected by `settings.erp = {"type":
+"sage_intacct", "integration_method": "direct", ...}`. Top-5 for US mid-market
+AP; set up by pasting credentials — no OAuth consent screen.
+
+**API choice: the REST API, not the XML gateway.** Intacct has two APIs. The
+XML Web Services gateway (`https://api.intacct.com/ia/xml/xmlgw.phtml`) needs a
+paid Web Services *sender ID* that each customer company must authorize, a
+session per request batch, and XML whose error blocks echo the submitted
+fields. The REST API (`https://api.intacct.com/ia/api/v1`) went generally
+available in 2025, is where Sage points new integrations, and covers every
+object used here. Its OAuth 2.0 **client-credentials** grant authenticates a
+Web Services user directly, so the setup page stays a paste-the-credentials
+form. JSON throughout — no XML parser on this path.
+
+| `settings.erp` key | Secret | Meaning |
+|---|---|---|
+| `client_id` | no | OAuth client id of the registered Sage app |
+| `client_secret` | **yes** | OAuth client secret |
+| `company_id` | no | Intacct company id |
+| `user_id` | no | Web Services user authorized for the app (token `username` is `user_id@company_id`) |
+| `location_id` | no (optional) | Top-level entity of a multi-entity company; sent as `X-IA-API-Param-Entity` on every call |
+| `po_document_type` | no (optional) | Purchasing transaction definition used for POs (default `Purchase Order`) |
+
+| Operation | Call |
+|---|---|
+| token | `POST <base>/oauth2/token` (form: `grant_type=client_credentials`, `client_id`, `client_secret`, `username`) — one per adapter operation |
+| `post_invoice` | refuse without `vendor_erp_id` (`vendor_not_linked`) or any GL account ERP id (`gl_account_not_linked`) → `POST services/core/query` on `accounts-payable/bill` filtered `referenceNumber = correlation_id` → `POST objects/accounts-payable/bill` |
+| `get_invoice_status` | `GET objects/accounts-payable/bill/{key}`, `state` (+ `totalTxnAmountDue = 0` ⇒ paid) |
+| `void_invoice` | deletes a draft / posted-unpaid bill; a bill that is paid, partially paid, selected for payment or reversed returns `False` (reversal with its payment is an accountant's call) |
+| `list_vendors` / `list_gl_accounts` / `list_pos` | `services/core/query` on `accounts-payable/vendor`, `general-ledger/account`, `purchasing/document::<po_document_type>`, 100 rows × 10 pages |
+| `test_connection` | token + a one-row vendor query |
+
+Request rules worth knowing:
+
+- **Lines.** `bill_lines.bill_lines` posts one Intacct line per invoice line
+  only when every line has a total, every line resolves a GL account ERP id
+  (its own, else the header's) and the totals sum to exactly
+  `payload.amount`; otherwise one line for `payload.amount` against the header
+  account. The header amount is never recomputed from lines.
+- **Money** goes as fixed-point decimal strings (`format(d, "f")`): no float,
+  no exponent form, scale preserved.
+- **Idempotency.** The pre-create lookup by `referenceNumber`; a *failed*
+  lookup is a failure, never read as "not posted yet".
+- **Failure messages** come from `erp_failure_message("Sage Intacct", status)`;
+  a token failure raises with the status only.
+- **GL account types.** Intacct classifies only balance sheet vs income
+  statement, so balance-sheet credit accounts (liability or equity) stay
+  unclassified rather than guessed.
+
+Tests: `backend/tests/test_erp_sage_intacct_adapter.py`. fake-erp surface:
+`/intacct/ia/api/v1` (`FEOH_ERP_INTACCT_API_BASE`).

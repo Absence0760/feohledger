@@ -137,3 +137,22 @@ FEOH_ERP_NETSUITE_API_BASE=http://localhost:12112/netsuite/services/rest/record/
 FEOH_ERP_D365_API_BASE=http://localhost:12112/d365
 FEOH_ERP_D365_TOKEN_URL=http://localhost:12112/d365/oauth2/token
 ```
+
+## Sage Intacct (`/intacct/ia/api/v1`)
+
+Backs `erp_adapters/sage_intacct.py` (`FEOH_ERP_INTACCT_API_BASE`).
+
+- `POST /oauth2/token` — `client_credentials` form with non-empty
+  `client_id` / `client_secret` and a `username` containing `@` → bearer
+  `fake-intacct-token`, required on every other call.
+- `POST /services/core/query` — `accounts-payable/vendor` (`V-ACME`,
+  `V-BETA`), `general-ledger/account` (`6100`, `6200`, `2000`),
+  `purchasing/document::Purchase Order` (`PO-INTACCT-401` 1250.00 pending,
+  `PO-INTACCT-402` 980.50 closed) and the created bills; `$eq` filters,
+  `start` / `size` paging with `ia::meta.next`.
+- `POST /objects/accounts-payable/bill` → 201 key `5001`, `5002`, …, state
+  `posted`; rejects an unknown vendor / GL account or a non-string `txnAmount`.
+  `GET` / `DELETE /objects/accounts-payable/bill/{key}` (a paid bill refuses
+  deletion).
+- `POST /intacct/ia/api/v1/__set-state` — test hook
+  `{"key", "state", "totalTxnAmountDue"}`.

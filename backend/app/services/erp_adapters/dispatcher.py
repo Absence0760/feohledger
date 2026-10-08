@@ -50,6 +50,7 @@ BUILTIN_ADAPTER_MODULES: tuple[str, ...] = (
     "app.services.erp_adapters.merge_dev",
     "app.services.erp_adapters.mock_adapter",
     "app.services.erp_adapters.netsuite",
+    "app.services.erp_adapters.sage_intacct",
 )
 
 

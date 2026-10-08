@@ -138,6 +138,7 @@ in `frontend/tests-e2e/README.md` § Running from a worktree.
 | `FEOH_ERP_NETSUITE_API_BASE` | (empty)                                                              | NetSuite SuiteTalk REST base override. Empty → the per-account URL derived from `account_id`; set → used verbatim (operator-trusted). Dev value: `http://localhost:12112/netsuite/services/rest/record/v1`. |
 | `FEOH_ERP_D365_API_BASE` | (empty)                                                                  | Dynamics 365 BC OData base override. Empty → the admin-config `base_url` + SSRF guard; set → used verbatim (operator-trusted). Dev value: `http://localhost:12112/d365`. |
 | `FEOH_ERP_D365_TOKEN_URL` | (empty)                                                                 | D365 OAuth token endpoint override. Empty → `https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token`. Dev value: `http://localhost:12112/d365/oauth2/token`. |
+| `FEOH_ERP_INTACCT_API_BASE` | (empty) | Sage Intacct REST base override (token at `<base>/oauth2/token`). Empty → the real `https://api.intacct.com/ia/api/v1`; set → used verbatim (operator-trusted). Dev value: `http://localhost:12112/intacct/ia/api/v1`. |
 | `FEOH_AUDIT_MODE`       | `local`                                                                  | `local` or `lambda` for audit log writes |
 | `FEOH_SQS_EXTRACTION_QUEUE_URL` | (empty)                                                          | Required when `FEOH_EXTRACTION_MODE=lambda` |
 | `FEOH_SQS_ERP_QUEUE_URL` | (empty)                                                                 | Required when `FEOH_ERP_MODE=lambda` |
@@ -231,6 +232,7 @@ always `backend/app/config.py`.
 | `FEOH_ERP_NETSUITE_API_BASE` | (empty) | NetSuite REST base override — empty derives the per-account URL from `account_id`; set → used verbatim (operator-trusted). Dev value targets fake-erp |
 | `FEOH_ERP_D365_API_BASE` | (empty) | Dynamics 365 BC OData base override — empty → admin-config `base_url` + SSRF guard; set → used verbatim (operator-trusted). Dev value targets fake-erp |
 | `FEOH_ERP_D365_TOKEN_URL` | (empty) | D365 OAuth token URL override — empty → `https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token`. Dev value targets fake-erp |
+| `FEOH_ERP_INTACCT_API_BASE` | (empty) | Sage Intacct REST base override — empty → `https://api.intacct.com/ia/api/v1`; set → used verbatim (operator-trusted). Dev value targets fake-erp |
 | `FEOH_ANTHROPIC_API_KEY` | (empty) | Claude Vision for platform extraction |
 | `FEOH_EXTRACTION_MODEL` | `claude-sonnet-5-5` | AI model for extraction |
 | `FEOH_EXTRACTION_EFFORT` | `low` | `output_config.effort` for platform Claude extraction; empty omits it |

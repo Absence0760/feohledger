@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import copy
 import re
+from decimal import Decimal
 from typing import Any
 from urllib.parse import parse_qs
 
@@ -772,6 +773,200 @@ async def d365_get_purchase_invoice(
 
 
 app.include_router(d365)
+
+
+
+# ---------------------------------------------------------------------------
+# Sage Intacct REST API  (/intacct/ia/api/v1)
+# ---------------------------------------------------------------------------
+#
+# OAuth 2.0 client-credentials token, services/core/query, and the
+# accounts-payable/bill object. State lives under STATE["intacct"], created on
+# first use so POST /__reset clears it without touching _fresh_state.
+
+intacct = APIRouter(prefix="/intacct/ia/api/v1")
+
+INTACCT_TOKEN = "fake-intacct-token"
+
+INTACCT_VENDOR_FIXTURES: list[dict] = [
+    {"key": "11", "id": "V-ACME", "name": "Fake Intacct Vendor A"},
+    {"key": "12", "id": "V-BETA", "name": "Fake Intacct Vendor B"},
+]
+INTACCT_GL_FIXTURES: list[dict] = [
+    {
+        "key": "61",
+        "id": "6100",
+        "name": "Fake Office Supplies",
+        "accountType": "incomeStatement",
+        "normalBalance": "debit",
+    },
+    {
+        "key": "62",
+        "id": "6200",
+        "name": "Fake Software",
+        "accountType": "incomeStatement",
+        "normalBalance": "debit",
+    },
+    {
+        "key": "20",
+        "id": "2000",
+        "name": "Fake Accounts Payable",
+        "accountType": "balanceSheet",
+        "normalBalance": "credit",
+    },
+]
+INTACCT_PO_FIXTURES: list[dict] = [
+    {
+        "key": "401",
+        "documentNumber": "PO-INTACCT-401",
+        "vendor": {"name": "Fake Intacct Vendor A"},
+        "state": "pending",
+        "txnTotal": "1250.00",
+        "currency": {"txnCurrency": "USD"},
+    },
+    {
+        "key": "402",
+        "documentNumber": "PO-INTACCT-402",
+        "vendor": {"name": "Fake Intacct Vendor B"},
+        "state": "closed",
+        "txnTotal": "980.50",
+        "currency": {"txnCurrency": "USD"},
+    },
+]
+
+
+def _intacct_state() -> dict[str, Any]:
+    return STATE.setdefault("intacct", {"bills": {}, "next_key": 5000})
+
+
+def _intacct_error(status: int, code: str, message: str) -> ProviderError:
+    return ProviderError(status, {"ia::result": {"ia::error": {"code": code, "message": message}}})
+
+
+def _require_intacct_auth(request: Request) -> None:
+    if request.headers.get("authorization", "") != f"Bearer {INTACCT_TOKEN}":
+        raise _intacct_error(401, "invalidToken", "Access token is missing or invalid.")
+
+
+@intacct.post("/oauth2/token")
+async def intacct_token(request: Request) -> dict:
+    raw = (await request.body()).decode("utf-8", errors="replace")
+    form = {k: v[0] for k, v in parse_qs(raw).items()}
+    if (
+        form.get("grant_type") != "client_credentials"
+        or not form.get("client_id", "").strip()
+        or not form.get("client_secret", "").strip()
+        or "@" not in form.get("username", "")
+    ):
+        raise ProviderError(400, {"error": "invalid_client"})
+    return {"access_token": INTACCT_TOKEN, "token_type": "Bearer", "expires_in": 21600}
+
+
+def _intacct_rows(obj: str) -> list[dict]:
+    if obj == "accounts-payable/vendor":
+        return INTACCT_VENDOR_FIXTURES
+    if obj == "general-ledger/account":
+        return INTACCT_GL_FIXTURES
+    if obj == "purchasing/document::Purchase Order":
+        return INTACCT_PO_FIXTURES
+    if obj == "accounts-payable/bill":
+        return list(_intacct_state()["bills"].values())
+    raise _intacct_error(400, "invalidObject", "Unknown object.")
+
+
+def _intacct_matches(row: dict, filters: list[dict]) -> bool:
+    for flt in filters:
+        for field, value in (flt.get("$eq") or {}).items():
+            if str(row.get(field)) != str(value):
+                return False
+    return True
+
+
+@intacct.post("/services/core/query")
+async def intacct_query(request: Request) -> dict:
+    _require_intacct_auth(request)
+    body = await request.json()
+    filters = body.get("filters") or []
+    rows = [r for r in _intacct_rows(body.get("object", "")) if _intacct_matches(r, filters)]
+    start = int(body.get("start") or 1)
+    size = int(body.get("size") or 100)
+    page = rows[start - 1 : start - 1 + size]
+    nxt = start + size if start - 1 + size < len(rows) else None
+    return {
+        "ia::result": copy.deepcopy(page),
+        "ia::meta": {"totalCount": len(rows), "start": start, "pageSize": size, "next": nxt},
+    }
+
+
+@intacct.post("/objects/accounts-payable/bill", status_code=201)
+async def intacct_create_bill(request: Request) -> dict:
+    _require_intacct_auth(request)
+    body = await request.json()
+    vendor_id = (body.get("vendor") or {}).get("id")
+    if vendor_id not in {v["id"] for v in INTACCT_VENDOR_FIXTURES}:
+        raise _intacct_error(400, "invalidVendor", "Invalid vendor.")
+    lines = body.get("lines") or []
+    if not lines:
+        raise _intacct_error(422, "noLines", "A bill needs at least one line.")
+    known_gl = {a["id"] for a in INTACCT_GL_FIXTURES}
+    total = Decimal(0)
+    for line in lines:
+        if (line.get("glAccount") or {}).get("id") not in known_gl:
+            raise _intacct_error(400, "invalidGlAccount", "Invalid GL account.")
+        amount = line.get("txnAmount")
+        if not isinstance(amount, str):
+            raise _intacct_error(422, "invalidAmount", "txnAmount must be a decimal string.")
+        total += Decimal(amount)
+    state = _intacct_state()
+    state["next_key"] += 1
+    key = str(state["next_key"])
+    state["bills"][key] = {
+        "key": key,
+        "id": key,
+        "billNumber": body.get("billNumber"),
+        "referenceNumber": body.get("referenceNumber"),
+        "vendor": {"id": vendor_id},
+        "state": "posted",
+        "totalTxnAmount": str(total),
+        "totalTxnAmountDue": str(total),
+    }
+    return {"ia::result": {"key": key, "id": key, "href": f"/objects/accounts-payable/bill/{key}"}}
+
+
+@intacct.get("/objects/accounts-payable/bill/{key}")
+async def intacct_get_bill(request: Request, key: str) -> dict:
+    _require_intacct_auth(request)
+    bill = _intacct_state()["bills"].get(key)
+    if bill is None:
+        raise _intacct_error(404, "notFound", "Bill not found.")
+    return {"ia::result": copy.deepcopy(bill)}
+
+
+@intacct.delete("/objects/accounts-payable/bill/{key}")
+async def intacct_delete_bill(request: Request, key: str) -> Response:
+    _require_intacct_auth(request)
+    bills = _intacct_state()["bills"]
+    if key not in bills:
+        raise _intacct_error(404, "notFound", "Bill not found.")
+    if bills[key]["state"] in {"paid", "partiallyPaid"}:
+        raise _intacct_error(400, "paidBill", "A paid bill cannot be deleted.")
+    del bills[key]
+    return Response(status_code=204)
+
+
+@intacct.post("/__set-state")
+async def intacct_set_state(body: dict) -> dict:
+    """Test hook: {"key": "...", "state": "paid", "totalTxnAmountDue": "0"}."""
+    bill = _intacct_state()["bills"].get(str(body.get("key", "")))
+    if bill is None:
+        raise ProviderError(404, {"detail": "unknown bill"})
+    for field in ("state", "totalTxnAmountDue"):
+        if field in body:
+            bill[field] = body[field]
+    return {"status": "ok"}
+
+
+app.include_router(intacct)
 
 
 if __name__ == "__main__":
