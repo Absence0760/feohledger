@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import copy
 import re
+import xml.etree.ElementTree as ET
 from decimal import Decimal
 from typing import Any
 from urllib.parse import parse_qs
@@ -967,6 +968,171 @@ async def intacct_set_state(body: dict) -> dict:
 
 
 app.include_router(intacct)
+
+
+
+# ---------------------------------------------------------------------------
+# SYSPRO 8 e.net REST  (/syspro/SYSPROWCFService/Rest)
+# ---------------------------------------------------------------------------
+#
+# Logon / Logoff, Query/Query with COMFND, Transaction/Post with APSTIN — all
+# GET with query-string parameters, as the real WCF REST host takes them.
+# Errors come back as HTTP 200 with a body starting "ERROR", like SYSPRO's.
+# State lives under STATE["syspro"], created on first use (reset-safe).
+
+syspro = APIRouter(prefix="/syspro/SYSPROWCFService/Rest")
+
+SYSPRO_SUPPLIERS: list[dict] = [
+    {"Supplier": "0000001", "SupplierName": "Fake SYSPRO Supplier A"},
+    {"Supplier": "0000002", "SupplierName": "Fake SYSPRO Supplier B"},
+]
+SYSPRO_GL: list[dict] = [
+    {"GlCode": "6100", "Description": "Fake Office Supplies", "AccountType": "E"},
+    {"GlCode": "6200", "Description": "Fake Software", "AccountType": "E"},
+    {"GlCode": "2000", "Description": "Fake Creditors Control", "AccountType": "L"},
+]
+SYSPRO_PO_HEADERS: list[dict] = [
+    {"PurchaseOrder": "PO-SYS-501", "Supplier": "0000001", "OrderStatus": "4", "Currency": "ZAR"},
+    {"PurchaseOrder": "PO-SYS-502", "Supplier": "0000002", "OrderStatus": "9", "Currency": "ZAR"},
+]
+SYSPRO_PO_DETAILS: list[dict] = [
+    {"PurchaseOrder": "PO-SYS-501", "MOrderQty": "10.000", "MPrice": "100.00"},
+    {"PurchaseOrder": "PO-SYS-501", "MOrderQty": "1.000", "MPrice": "250.00"},
+    {"PurchaseOrder": "PO-SYS-502", "MOrderQty": "2.000", "MPrice": "490.25"},
+]
+
+
+def _syspro_state() -> dict[str, Any]:
+    return STATE.setdefault("syspro", {"sessions": set(), "invoices": {}, "journal": 0})
+
+
+def _syspro_text(body: str) -> Response:
+    return Response(content=body, media_type="text/plain")
+
+
+@syspro.get("/Logon")
+async def syspro_logon(
+    Operator: str = "", OperatorPassword: str = "", CompanyId: str = "", CompanyPassword: str = ""
+) -> Response:
+    if not Operator or not OperatorPassword or not CompanyId:
+        return _syspro_text("ERROR: Invalid operator, password or company")
+    session = f"{len(_syspro_state()['sessions']) + 1:08d}-FAKE-SYSPRO-SESSION"
+    _syspro_state()["sessions"].add(session)
+    return _syspro_text(session)
+
+
+@syspro.get("/Logoff")
+async def syspro_logoff(UserId: str = "") -> Response:
+    _syspro_state()["sessions"].discard(UserId)
+    return _syspro_text("0")
+
+
+@syspro.get("/__sessions")
+async def syspro_open_sessions() -> dict:
+    """Test hook: how many sessions are still logged on (should be 0)."""
+    return {"open": len(_syspro_state()["sessions"])}
+
+
+def _syspro_table(name: str) -> list[dict]:
+    invoices = list(_syspro_state()["invoices"].values())
+    tables = {
+        "ApSupplier": SYSPRO_SUPPLIERS,
+        "GenMaster": SYSPRO_GL,
+        "PorMasterHdr": SYSPRO_PO_HEADERS,
+        "PorMasterDetail": SYSPRO_PO_DETAILS,
+        "ApInvoice": invoices,
+    }
+    if name not in tables:
+        raise KeyError(name)
+    return tables[name]
+
+
+def _syspro_rows_xml(table: str, rows: list[dict], columns: list[str]) -> str:
+    root = ET.Element("COMFND")
+    header = ET.SubElement(root, "HeaderDetails")
+    ET.SubElement(header, "TableName").text = table
+    for row in rows:
+        row_el = ET.SubElement(root, "Row")
+        for column in columns:
+            ET.SubElement(row_el, column).text = str(row.get(column, ""))
+    ET.SubElement(root, "RowsReturned").text = str(len(rows))
+    return ET.tostring(root, encoding="unicode")
+
+
+@syspro.get("/Query/Query")
+async def syspro_query(UserId: str = "", BusinessObject: str = "", XmlIn: str = "") -> Response:
+    if UserId not in _syspro_state()["sessions"]:
+        return _syspro_text("ERROR: The supplied UserID is invalid, or your session has expired")
+    if BusinessObject != "COMFND":
+        return _syspro_text("ERROR: Business object not supported by fake-erp")
+    query = ET.fromstring(XmlIn)
+    table = query.findtext("TableName", "")
+    columns = [c.text or "" for c in query.findall("Columns/Column")]
+    try:
+        rows = _syspro_table(table)
+    except KeyError:
+        return _syspro_text("ERROR: Table not available to COMFND")
+    for expr in query.findall("Where/Expression"):
+        column, value = expr.findtext("Column", ""), expr.findtext("Value", "")
+        rows = [r for r in rows if str(r.get(column, "")) == value]
+    rows = rows[: int(query.findtext("ReturnRows") or len(rows))]
+    return _syspro_text(_syspro_rows_xml(table, rows, columns))
+
+
+@syspro.get("/Transaction/Post")
+async def syspro_post(
+    UserId: str = "", BusinessObject: str = "", XmlParameters: str = "", XmlIn: str = ""
+) -> Response:
+    state = _syspro_state()
+    if UserId not in state["sessions"]:
+        return _syspro_text("ERROR: The supplied UserID is invalid, or your session has expired")
+    if BusinessObject != "APSTIN":
+        return _syspro_text("ERROR: Business object not supported by fake-erp")
+    ET.fromstring(XmlParameters)  # must be well-formed
+    posting = ET.fromstring(XmlIn).find("Item/Posting")
+    if posting is None:
+        return _syspro_text("ERROR: Posting element missing")
+    supplier = posting.findtext("Supplier", "")
+    invoice = posting.findtext("Invoice", "")
+    if supplier not in {s["Supplier"] for s in SYSPRO_SUPPLIERS}:
+        return _syspro_text(f"ERROR: Supplier '{supplier}' not on file")
+    if (supplier, invoice) in state["invoices"]:
+        return _syspro_text(f"ERROR: Invoice '{invoice}' already on file")
+    amount = Decimal(posting.findtext("InvoiceAmount", "0"))
+    known_gl = {g["GlCode"] for g in SYSPRO_GL}
+    distributed = Decimal(0)
+    for line in ET.fromstring(XmlIn).findall("Item/Distribution/DistributionLine"):
+        if line.findtext("LedgerCode", "") not in known_gl:
+            return _syspro_text("ERROR: Ledger code not on file")
+        distributed += Decimal(line.findtext("DistributionValue", "0"))
+    if distributed != amount:
+        return _syspro_text("ERROR: Distribution does not balance to the invoice amount")
+    state["journal"] += 1
+    state["invoices"][(supplier, invoice)] = {
+        "Supplier": supplier,
+        "Invoice": invoice,
+        "OrigInvValue": str(amount),
+        "MthInvBal1": str(amount),
+    }
+    root = ET.Element("PostApInvoice")
+    item = ET.SubElement(root, "Item")
+    ET.SubElement(item, "Supplier").text = supplier
+    ET.SubElement(item, "Invoice").text = invoice
+    ET.SubElement(item, "Journal").text = str(state["journal"])
+    return _syspro_text(ET.tostring(root, encoding="unicode"))
+
+
+@syspro.post("/__set-balance")
+async def syspro_set_balance(body: dict) -> dict:
+    """Test hook: {"supplier", "invoice", "balance"} — e.g. "0" for paid."""
+    record = _syspro_state()["invoices"].get((body.get("supplier"), body.get("invoice")))
+    if record is None:
+        raise ProviderError(404, {"detail": "unknown invoice"})
+    record["MthInvBal1"] = str(body.get("balance", record["MthInvBal1"]))
+    return {"status": "ok"}
+
+
+app.include_router(syspro)
 
 
 if __name__ == "__main__":

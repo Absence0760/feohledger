@@ -156,3 +156,24 @@ Backs `erp_adapters/sage_intacct.py` (`FEOH_ERP_INTACCT_API_BASE`).
   deletion).
 - `POST /intacct/ia/api/v1/__set-state` — test hook
   `{"key", "state", "totalTxnAmountDue"}`.
+
+## SYSPRO 8 e.net REST (`/syspro/SYSPROWCFService/Rest`)
+
+Backs `erp_adapters/syspro.py` (`FEOH_ERP_SYSPRO_API_BASE=http://localhost:12112/syspro`).
+Every call is `GET` with query-string parameters; errors are HTTP 200 with a
+body starting `ERROR`, as SYSPRO's are.
+
+- `Logon?Operator=&OperatorPassword=&CompanyId=&CompanyPassword=` → a session
+  id (non-empty operator, password and company required); `Logoff?UserId=`.
+  `GET /syspro/SYSPROWCFService/Rest/__sessions` reports how many are still
+  open — the adapter should always leave it at 0.
+- `Query/Query?BusinessObject=COMFND` — tables `ApSupplier` (`0000001`,
+  `0000002`), `GenMaster` (`6100`, `6200` expense, `2000` liability),
+  `PorMasterHdr` / `PorMasterDetail` (`PO-SYS-501` 1250.00 open,
+  `PO-SYS-502` 980.50 complete) and the posted `ApInvoice` rows; `EQ`
+  expressions and `ReturnRows`.
+- `Transaction/Post?BusinessObject=APSTIN` — rejects an unknown supplier or
+  ledger code, a duplicate (supplier, invoice) and a distribution that does not
+  balance to `InvoiceAmount`.
+- `POST /syspro/SYSPROWCFService/Rest/__set-balance` — test hook
+  `{"supplier", "invoice", "balance"}` (`"0"` = paid).

@@ -265,6 +265,9 @@ class Settings(BaseSettings):
     # Sage Intacct REST base URL. Empty = the real https://api.intacct.com/ia/api/v1
     # (token exchange at <base>/oauth2/token).
     erp_intacct_api_base: str = ""
+    # SYSPRO e.net REST base URL. Empty = the admin-supplied config base_url,
+    # https-only and behind the SSRF guard (SYSPRO is customer-hosted).
+    erp_syspro_api_base: str = ""
 
     # Audit
     audit_mode: str = "local"  # "local" = in-process, "lambda" = dispatch to SQS

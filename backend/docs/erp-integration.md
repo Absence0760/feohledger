@@ -1072,3 +1072,72 @@ Request rules worth knowing:
 
 Tests: `backend/tests/test_erp_sage_intacct_adapter.py`. fake-erp surface:
 `/intacct/ia/api/v1` (`FEOH_ERP_INTACCT_API_BASE`).
+
+## SYSPRO direct adapter (`syspro`)
+
+`erp_adapters/syspro.py`, selected by `settings.erp = {"type": "syspro",
+"integration_method": "direct", ...}`. SYSPRO is the South African-built ERP for
+manufacturing and distribution, and it is **customer-hosted**: SYSPRO 8's e.net
+Communications Service exposes the e.net business objects as a REST endpoint on
+the customer's own server.
+
+| `settings.erp` key | Secret | Meaning |
+|---|---|---|
+| `base_url` | no | https URL of the e.net REST endpoint, e.g. `https://syspro.example.co.za:20190` (`/SYSPROWCFService/Rest` is appended when absent) |
+| `operator` | no | SYSPRO operator code |
+| `operator_password` | **yes** | Operator password |
+| `company_id` | no | SYSPRO company id |
+| `company_password` | **yes** (optional) | Company password, when the company has one |
+| `posting_period` | no (optional) | APSTIN `PostingPeriod` (default `C`, current) |
+
+Every operation is `Logon` → work → `Logoff`, with the logoff in a `finally`:
+an orphaned session holds a SYSPRO licence seat. All calls are `GET` with
+query-string parameters, which is how the WCF REST host takes them:
+
+| Operation | Business object |
+|---|---|
+| `post_invoice` | refuse without `vendor_erp_id` / a GL account ERP id → `COMFND` on `ApInvoice` by (`Supplier`, `Invoice`) → `Transaction/Post` `APSTIN` |
+| `get_invoice_status` | `COMFND` on `ApInvoice` — `MthInvBal1` 0 ⇒ paid, below `OrigInvValue` ⇒ partially paid, else open |
+| `void_invoice` | not automated (`False`) — reversing a posted AP invoice is an adjustment / credit in an open period, an accountant's call |
+| `list_vendors` / `list_gl_accounts` | `COMFND` on `ApSupplier` / `GenMaster` (`AccountType` A/L/C/R/E → asset/liability/equity/revenue/expense) |
+| `list_pos` | `COMFND` on `PorMasterHdr` + `PorMasterDetail` (total = Σ qty × price) + `ApSupplier` for names, one session; a PO with no lines returned is skipped, never synced at 0 |
+
+- **`erp_document_id` is `<supplier>|<invoice>`** — SYSPRO keys an AP invoice
+  by that pair, not by a surrogate id.
+- **Idempotency** rests on that same pair, which SYSPRO holds unique: an
+  existing row with the same `OrigInvValue` is the earlier attempt (success,
+  no second post); a different amount is another document holding the number
+  and is refused as `duplicate_invoice_number`. A failed lookup is a failure,
+  never read as "not posted yet".
+- **XML** is built with lxml (text is escaped; characters XML cannot carry are
+  dropped) and parsed with the hardened `e_invoice/_xml.parse_secure` parser
+  (no DTD, no entity resolution, no network) — the same posture as the
+  e-invoice and punch-out paths, so no second XML-hardening dependency.
+- **Credentials in the URL.** SYSPRO takes the operator password, the session
+  id and the business-object XML in the query string, and the app's root logger
+  runs at INFO, where httpx logs every request URL. The module installs a filter
+  on the `httpx` logger that replaces the query of any `SYSPROWCFService` URL
+  with `?[redacted]`, and transport errors are re-raised as
+  `SysproError("SYSPRO <step> failed: <ExceptionClass>")` from `None`, because
+  httpx error strings can carry the URL. The APSTIN document carries no vendor
+  tax id or address.
+- **https only, SSRF-guarded.** An admin `base_url` must be `https` (the
+  password would otherwise travel in clear text) and passes
+  `assert_public_url_async` before any request; `FEOH_ERP_SYSPRO_API_BASE` is
+  the operator override for fake-erp and skips both. A SYSPRO server on a
+  private network therefore has to be published (reverse proxy with TLS) before
+  it can be connected.
+- **Failure messages** never echo the response: SYSPRO's error text quotes the
+  submitted fields back. HTTP failures use `erp_failure_message("SYSPRO",
+  status)`; a business-object rejection is `SYSPRO post failed: invoice
+  rejected by APSTIN`.
+- **Schema provenance.** SYSPRO ships its business-object schemas with each
+  install (`<SYSPRO>\Base\Schemas\APSTIN*.XSD`, `COMFND.XSD`) rather than
+  publishing them. The `COMFND` document matches the published open-source
+  client (wildland/syspro-ruby); the APSTIN element names and the
+  `ApInvoice` / `PorMasterHdr` / `PorMasterDetail` column names follow SYSPRO's
+  field names but have not yet been checked against a live install — see
+  `docs/followups.md`.
+
+Tests: `backend/tests/test_erp_syspro_adapter.py`. fake-erp surface:
+`/syspro/SYSPROWCFService/Rest` (`FEOH_ERP_SYSPRO_API_BASE`).
