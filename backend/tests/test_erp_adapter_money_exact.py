@@ -398,7 +398,10 @@ def test_d365_posts_exact_decimal_unit_costs(monkeypatch):
     assert client.post.await_args_list[1].kwargs["headers"]["Content-Type"] == "application/json"
 
 
-def test_d365_keeps_quantity_and_unit_cost_when_they_make_the_line_total(monkeypatch):
+def test_d365_sends_the_line_gross_at_the_currency_scale(monkeypatch):
+    """Lines come from the shared ``bill_lines`` rule as quantity 1 at the
+    gross, scaled to the currency (4375.000000 -> 4375.00), never through a
+    float and never as quantity x unit price for BC to round its own way."""
     monkeypatch.setattr(settings, "erp_d365_api_base", "http://fake-erp:12112/d365")
     monkeypatch.setattr(settings, "erp_d365_token_url", "http://fake-erp:12112/token")
     line = LineItemPayload(
@@ -431,7 +434,7 @@ def test_d365_keeps_quantity_and_unit_cost_when_they_make_the_line_total(monkeyp
 
     assert result.success
     body = _posted_body_text(client, call_index=1)
-    assert f'"quantity":3.5000,"unitCost":{SCALED_AMOUNT}' in body
+    assert '"quantity":1,"unitCost":4375.00' in body
 
 
 def test_d365_header_only_invoice_posts_the_exact_amount(monkeypatch):

@@ -231,8 +231,12 @@ def _bc_adapter() -> BusinessCentralAdapter:
     return adapter
 
 
-def test_d365_post_invoice_short_circuits_when_external_document_number_already_exists():
-    adapter = _bc_adapter()
+def test_d365_post_invoice_short_circuits_when_external_document_number_already_exists(
+    monkeypatch,
+):
+    """An Open invoice found by the lookup is a success — once BC's own total,
+    re-read exactly, is the approved amount."""
+    adapter = _offline_bc(monkeypatch)
     with patch("httpx.AsyncClient") as cm:
         client = cm.return_value.__aenter__.return_value
         client.post = AsyncMock(
@@ -242,18 +246,22 @@ def test_d365_post_invoice_short_circuits_when_external_document_number_already_
             ]
         )
         client.get = AsyncMock(
-            return_value=_mock_response(200, {"value": [{"id": "bc-doc-1", "status": "Open"}]})
+            side_effect=[
+                _mock_response(200, {"value": [{"id": "bc-doc-1", "status": "Open"}]}),
+                _bc_record("bc-doc-1", "Open", Decimal("100.00")),
+            ]
         )
+        client.delete = AsyncMock(side_effect=AssertionError("a posted invoice is never deleted"))
         result = _run(adapter.post_invoice(_payload(correlation_id="corr-bc-existing")))
 
     assert result.success
     assert result.erp_document_id == "bc-doc-1"
     assert "idempotent" in result.message.lower()
-    client.get.assert_awaited_once()
+    assert client.get.await_count == 2
     # Only the token exchange POST happened — no purchaseInvoices create.
     assert client.post.await_count == 1
 
-    filter_params = client.get.await_args.kwargs["params"]
+    filter_params = client.get.await_args_list[0].kwargs["params"]
     assert "corr-bc-existing" in filter_params["$filter"]
 
 
@@ -323,7 +331,7 @@ def test_d365_post_invoice_proceeds_to_create_when_no_match(monkeypatch):
         {
             "lineType": "Account",
             "accountId": "ERP-6000",
-            "description": "",
+            "description": "INV-1",
             "quantity": 1,
             "unitCost": 100.00,
         }
@@ -387,7 +395,7 @@ def test_d365_refuses_a_draft_with_no_stated_total(monkeypatch):
         result = _run(adapter.post_invoice(_payload()))
 
     assert result.retryable is False
-    assert result.message.endswith("posted_total_mismatch")
+    assert result.message == "Business Central post refused: posted_total_mismatch"
     client.delete.assert_awaited_once()
 
 
@@ -494,6 +502,154 @@ def test_d365_lookup_hit_on_a_mismatched_draft_is_deleted_and_refused(monkeypatc
     client.delete.assert_awaited_once()
 
 
+def _posted_after_a_failed_delete(adapter, *, lookup_status: str, total: Decimal | None):
+    """The retry after a draft taxed above the approved amount could not be
+    deleted and a BC user then posted it: the lookup finds it ``Open``."""
+    with patch("httpx.AsyncClient") as cm:
+        client = cm.return_value.__aenter__.return_value
+        client.post = AsyncMock(
+            side_effect=[
+                _mock_response(200, {"access_token": "tok"}),
+                AssertionError("neither a create nor a post"),
+            ]
+        )
+        client.get = AsyncMock(
+            side_effect=[
+                _mock_response(200, {"value": [{"id": "bc-o", "status": lookup_status}]}),
+                _bc_record("bc-o", "Open", total),
+            ]
+        )
+        client.delete = AsyncMock(side_effect=AssertionError("a posted invoice is never deleted"))
+        result = _run(adapter.post_invoice(_payload(amount=Decimal("1000.00"))))
+    return result, client
+
+
+def test_d365_lookup_hit_on_an_open_invoice_with_the_wrong_total_is_refused(monkeypatch):
+    """1,000 approved; the draft came to 1,150; the DELETE failed; a BC user
+    posted it. The manual retry used to report that as success, and our
+    payment run would then pay 1,000 against a 1,150 bill. Now it is refused,
+    finally, and the posted invoice is left for an accountant in BC."""
+    result, client = _posted_after_a_failed_delete(
+        _offline_bc(monkeypatch), lookup_status="Open", total=Decimal("1150.00")
+    )
+
+    assert result.success is False
+    assert result.retryable is False
+    assert result.erp_document_id == "bc-o"
+    assert result.message == (
+        "Business Central post refused: posted_total_mismatch "
+        "(the invoice is posted in Business Central and was not deleted)"
+    )
+    client.delete.assert_not_awaited()
+
+
+def test_d365_lookup_hit_on_a_paid_invoice_with_the_wrong_total_is_refused(monkeypatch):
+    result, _ = _posted_after_a_failed_delete(
+        _offline_bc(monkeypatch), lookup_status="Paid", total=Decimal("1150.00")
+    )
+    assert result.success is False
+    assert "posted_total_mismatch" in result.message
+
+
+def test_d365_an_open_invoice_with_no_stated_total_is_unconfirmed_not_success(monkeypatch):
+    result, _ = _posted_after_a_failed_delete(
+        _offline_bc(monkeypatch), lookup_status="Open", total=None
+    )
+    assert result.success is False
+    assert result.retryable is False
+    assert result.message.startswith("Business Central post refused: posted_total_unconfirmed")
+
+
+def test_d365_a_draft_posted_between_create_and_read_has_its_total_checked(monkeypatch):
+    """The fresh read finds the new invoice already ``Open`` (a BC user posted
+    it in between): success only at the approved total."""
+    adapter = _offline_bc(monkeypatch)
+    with patch("httpx.AsyncClient") as cm:
+        client = cm.return_value.__aenter__.return_value
+        client.post = AsyncMock(
+            side_effect=[
+                _mock_response(200, {"access_token": "tok"}),
+                _mock_response(201, {"id": "bc-x", "number": "PI-6"}),
+                AssertionError("an Open invoice is never posted again"),
+            ]
+        )
+        client.get = AsyncMock(
+            side_effect=[
+                _mock_response(200, {"value": []}),
+                _bc_record("bc-x", "Open", Decimal("120.00")),
+            ]
+        )
+        client.delete = AsyncMock(side_effect=AssertionError("a posted invoice is never deleted"))
+        result = _run(adapter.post_invoice(_payload()))
+
+    assert result.success is False
+    assert result.retryable is False
+    assert "posted_total_mismatch" in result.message
+    assert "was not deleted" in result.message
+
+
+def _mismatched_new_draft(adapter, *, read_etag, create_body, delete_status=204):
+    with patch("httpx.AsyncClient") as cm:
+        client = cm.return_value.__aenter__.return_value
+        client.post = AsyncMock(
+            side_effect=[
+                _mock_response(200, {"access_token": "tok"}),
+                _mock_response(201, create_body),
+                AssertionError("a mismatched draft must never be posted"),
+            ]
+        )
+        record = _bc_record("bc-e", "Draft", Decimal("120.00"))
+        if read_etag is None:
+            from app.utils.json_money import dumps_exact_json
+
+            body = {"id": "bc-e", "status": "Draft", "totalAmountIncludingTax": Decimal("120.00")}
+            record.content = dumps_exact_json(body).encode()
+        client.get = AsyncMock(side_effect=[_mock_response(200, {"value": []}), record])
+        client.delete = AsyncMock(return_value=_mock_response(delete_status, None))
+        result = _run(adapter.post_invoice(_payload()))
+    return result, client
+
+
+def test_d365_a_failed_draft_delete_is_reported_not_ignored(monkeypatch):
+    """The DELETE's status used to be ignored, so the refusal read the same
+    whether the draft was gone or still sitting in BC for someone to post."""
+    result, client = _mismatched_new_draft(
+        _offline_bc(monkeypatch),
+        read_etag='W/"e1"',
+        create_body={"id": "bc-e", "number": "PI-7"},
+        delete_status=412,
+    )
+    client.delete.assert_awaited_once()
+    assert result.success is False
+    assert result.retryable is False
+    assert result.erp_document_id == "bc-e"
+    assert result.message == (
+        "Business Central post refused: posted_total_mismatch "
+        "(the draft was not deleted in Business Central)"
+    )
+
+
+def test_d365_draft_delete_falls_back_to_the_create_responses_etag(monkeypatch):
+    result, client = _mismatched_new_draft(
+        _offline_bc(monkeypatch),
+        read_etag=None,
+        create_body={"id": "bc-e", "number": "PI-7", "@odata.etag": 'W/"from-create"'},
+    )
+    assert client.delete.await_args.kwargs["headers"]["If-Match"] == 'W/"from-create"'
+    assert result.message == "Business Central post refused: posted_total_mismatch"
+
+
+def test_d365_never_deletes_a_draft_with_a_wildcard_etag(monkeypatch):
+    """``If-Match: *`` deletes whatever is there, posted in between or not. With
+    no real etag the DELETE is not sent, and the refusal says so."""
+    result, client = _mismatched_new_draft(
+        _offline_bc(monkeypatch), read_etag=None, create_body={"id": "bc-e", "number": "PI-7"}
+    )
+    client.delete.assert_not_awaited()
+    assert result.retryable is False
+    assert result.message.endswith("(the draft was not deleted in Business Central)")
+
+
 def test_d365_lookup_hit_on_a_cancelled_invoice_is_refused_not_recreated(monkeypatch):
     adapter = _offline_bc(monkeypatch)
     with patch("httpx.AsyncClient") as cm:
@@ -539,18 +695,20 @@ def test_bc_lines_post_per_line_when_they_sum_to_the_amount():
             ]
         )
     )
+    # Each line is quantity 1 at its gross (bill_lines' amount), and an
+    # undescribed line takes the invoice's number as its memo.
     assert lines == [
         {
             "lineType": "Account",
             "accountId": "g-6100",
             "description": "Paper",
-            "quantity": Decimal(3),
-            "unitCost": Decimal("20.00"),
+            "quantity": Decimal(1),
+            "unitCost": Decimal("60.00"),
         },
         {
             "lineType": "Account",
             "accountId": "ERP-6000",
-            "description": "",
+            "description": "INV-1",
             "quantity": Decimal(1),
             "unitCost": Decimal("40.00"),
         },
@@ -573,6 +731,59 @@ def test_bc_refuses_a_line_with_no_amount():
 
     items = [_bc_line(total=None, unit_price=None), _bc_line(total=Decimal("100.00"))]
     assert _bc_invoice_lines(_payload(line_items=items)) == "line_amount_missing"
+
+
+def test_bc_refuses_a_unit_price_with_no_quantity_like_every_other_adapter():
+    """BC's own copy of the line rule read a missing quantity as 1; the shared
+    rule (``bill_allocation``) refuses it, and BC now uses the shared rule."""
+    from app.services.erp_adapters.dynamics_365_bc import _bc_invoice_lines
+
+    items = [_bc_line(total=None, quantity=None, unit_price=Decimal("100.00"))]
+    assert _bc_invoice_lines(_payload(line_items=items)) == "line_amount_missing"
+
+
+def test_bc_never_sends_an_unrounded_quantity_times_price():
+    """3 x 33.3333 is 99.9999: not the approved 100.00, so refused, never sent
+    as an unrounded amount for BC to round its own way."""
+    from app.services.erp_adapters.dynamics_365_bc import _bc_invoice_lines
+
+    items = [_bc_line(total=None, quantity=Decimal(3), unit_price=Decimal("33.3333"))]
+    assert _bc_invoice_lines(_payload(line_items=items)) == "amount_mismatch"
+
+
+def test_bc_refuses_a_line_finer_than_the_currency_rather_than_rounding_it():
+    """Lines that sum exactly to the amount but carry sub-cent parts cannot be
+    sent at USD's scale without rounding money; they are refused."""
+    from app.services.erp_adapters.dynamics_365_bc import _bc_invoice_lines
+
+    items = [
+        _bc_line(total=Decimal("99.995")),
+        _bc_line(line_number=2, total=Decimal("0.005")),
+    ]
+    assert _bc_invoice_lines(_payload(line_items=items)) == "line_amount_precision"
+
+
+def test_bc_line_amounts_go_at_the_currencys_scale():
+    from app.services.erp_adapters.dynamics_365_bc import _bc_invoice_lines
+
+    usd = _bc_invoice_lines(_payload(line_items=[_bc_line(total=Decimal("100.000000"))]))
+    assert str(usd[0]["unitCost"]) == "100.00"
+    jpy = _bc_invoice_lines(
+        _payload(
+            currency="JPY", amount=Decimal("5000"), line_items=[_bc_line(total=Decimal("5000.00"))]
+        )
+    )
+    assert str(jpy[0]["unitCost"]) == "5000"
+    assert (
+        _bc_invoice_lines(
+            _payload(
+                currency="JPY",
+                amount=Decimal("5000.50"),
+                line_items=[_bc_line(total=Decimal("5000.50"))],
+            )
+        )
+        == "line_amount_precision"
+    )
 
 
 def test_bc_header_only_invoice_posts_one_line_on_the_header_account():

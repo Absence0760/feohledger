@@ -11,24 +11,23 @@ import httpx
 
 from app.config import settings
 from app.services.erp_adapters.base import (
-    ACCOUNT_NOT_LINKED,
-    AMOUNT_MISMATCH,
-    LINE_AMOUNT_MISSING,
     POSTED_TOTAL_MISMATCH,
+    POSTED_TOTAL_UNCONFIRMED,
     VENDOR_NOT_LINKED,
     ErpAdapter,
     ErpInvoiceStatus,
     ErpPostResult,
     GLAccountPayload,
     InvoicePayload,
-    LineItemPayload,
     PoLinePayload,
     PoPayload,
     VendorPayload,
     erp_failure_message,
     erp_refusal,
 )
+from app.services.erp_adapters.bill_lines import bill_lines
 from app.services.erp_adapters.dispatcher import register_adapter
+from app.services.payment_adapters.base import exponent_for
 from app.utils.json_money import dumps_exact_json, loads_exact_json
 
 #: List syncs page at 100 rows (``Prefer: odata.maxpagesize``) and stop after
@@ -50,15 +49,20 @@ _BC_API_HOST = "api.businesscentral.dynamics.com"
 _DEFAULT_BASE_URL = f"https://{_BC_API_HOST}/v2.0"
 
 #: Stable, PII-free refusal reasons beyond the shared ones in ``base``. Each is
-#: non-retryable. (``base.POSTED_TOTAL_MISMATCH`` is BC's other one: the draft's
+#: non-retryable. (``base.POSTED_TOTAL_MISMATCH`` is BC's other one: BC's
 #: computed total differs from the approved amount, e.g. a VAT company adds tax
-#: on top of the lines. The draft is deleted, so nothing reaches the ledger.)
+#: on top of the lines. A draft is deleted where BC allows it; a posted invoice
+#: never is, and the message says which.)
 #:
 #: A purchaseInvoice for this correlation id already exists but is neither a
 #: draft we can finish nor posted (``In Review``, ``Canceled``, ``Corrective``).
 #: Creating another would be a second bill; the accountant decides in BC.
 EXISTING_INVOICE_NOT_OPEN = "existing_invoice_not_open"
-#: A line with no amount, and lines that do not sum to the approved amount.
+#: A line's gross has more decimal places than the invoice currency carries, so
+#: it cannot be sent at the currency's scale without rounding money.
+LINE_AMOUNT_PRECISION = "line_amount_precision"
+
+_PROVIDER = "Business Central"
 
 
 class BusinessCentralConfigError(ValueError):
@@ -199,10 +203,10 @@ class BusinessCentralAdapter(ErpAdapter):
         # vendor's NUMBER (V00010) — the name we used to send there could only
         # fail, or match another vendor whose number happens to equal it.
         if not payload.vendor_erp_id:
-            return erp_refusal("Business Central", VENDOR_NOT_LINKED)
+            return erp_refusal(_PROVIDER, VENDOR_NOT_LINKED)
         lines = _bc_invoice_lines(payload)
         if isinstance(lines, str):
-            return erp_refusal("Business Central", lines)
+            return erp_refusal(_PROVIDER, lines)
         if not settings.erp_d365_api_base:
             try:
                 self._admin_base_url()
@@ -220,25 +224,26 @@ class BusinessCentralAdapter(ErpAdapter):
         )
         if lookup_status != 200:
             return ErpPostResult(
-                success=False, message=erp_failure_message("Business Central", lookup_status)
+                success=False, message=erp_failure_message(_PROVIDER, lookup_status)
             )
         if existing is not None:
-            existing_id = str(existing["id"])
             status = str(existing.get("status") or "").lower()
-            if status in ("open", "paid"):
-                return ErpPostResult(
-                    success=True,
-                    erp_document_id=existing_id,
-                    erp_document_number=existing.get("number") or payload.invoice_number,
-                    message="Already posted to Business Central (idempotent — "
-                    "found by externalDocumentNumber)",
-                )
-            if status == "draft":
-                # An earlier attempt created the draft and never posted it (the
-                # post step failed, or its response was lost). Finish it — after
-                # the same total check a fresh draft gets.
-                return await self._verify_and_post(existing_id, payload, headers)
-            return erp_refusal("Business Central", EXISTING_INVOICE_NOT_OPEN)
+            if status not in ("open", "paid", "draft"):
+                return erp_refusal(_PROVIDER, EXISTING_INVOICE_NOT_OPEN)
+            # An earlier attempt created it. A draft (the post step failed, or
+            # its response was lost) is finished after the same total check a
+            # fresh draft gets; an Open / Paid one counts as posted only when
+            # BC's total is the approved amount — a draft taxed above it that
+            # a BC user posted after our DELETE failed is not a success. Either
+            # way the record is re-read whole, exactly (the lookup's list body
+            # is not parsed for money).
+            return await self._verify_and_post(
+                str(existing["id"]),
+                payload,
+                headers,
+                known_etag=existing.get("@odata.etag"),
+                found_by_lookup=True,
+            )
 
         # Step 1: Create the purchase invoice (a draft)
         body = {
@@ -263,34 +268,52 @@ class BusinessCentralAdapter(ErpAdapter):
         if resp.status_code not in (200, 201):
             return ErpPostResult(
                 success=False,
-                message=erp_failure_message("Business Central", resp.status_code),
+                message=erp_failure_message(_PROVIDER, resp.status_code),
                 raw_response=resp.json()
                 if resp.headers.get("content-type", "").startswith("application/json")
                 else None,
             )
-        doc_id = resp.json().get("id")
+        # Only the id and etag are read from the create response; the total is
+        # checked on a fresh, exactly-parsed read below.
+        created = resp.json()
+        doc_id = created.get("id") if isinstance(created, dict) else None
         if not doc_id:
             # Nothing to check or post. A retry's lookup finds the draft, if BC
             # made one, by externalDocumentNumber.
             return ErpPostResult(
-                success=False, message=erp_failure_message("Business Central", resp.status_code)
+                success=False, message=erp_failure_message(_PROVIDER, resp.status_code)
             )
         # Steps 2-3: check the draft's total, then post (finalize) it.
-        return await self._verify_and_post(str(doc_id), payload, headers)
+        return await self._verify_and_post(
+            str(doc_id), payload, headers, known_etag=created.get("@odata.etag")
+        )
 
     async def _verify_and_post(
-        self, doc_id: str, payload: InvoicePayload, headers: dict
+        self,
+        doc_id: str,
+        payload: InvoicePayload,
+        headers: dict,
+        *,
+        known_etag: object = None,
+        found_by_lookup: bool = False,
     ) -> ErpPostResult:
-        """Read draft ``doc_id`` fresh, refuse it unless BC's total is the
-        approved amount, then run ``Microsoft.NAV.post``.
+        """Read purchaseInvoice ``doc_id`` fresh and report success only for
+        one whose ``totalAmountIncludingTax`` is exactly ``payload.amount``.
 
         * Read fails → retryable; the draft stays and the retry's lookup finds
           it again.
-        * No longer a draft (posted in between) → success for Open / Paid.
-        * Total ≠ ``payload.amount`` (or BC states none) → DELETE the draft,
-          still unposted, with ``If-Match`` = the etag just read, and refuse
-          non-retryably (``posted_total_mismatch``). A failed delete leaves a
-          draft — never a ledger entry — and the refusal stands.
+        * Open / Paid (posted in between, or found by the lookup) → success
+          only when BC's total is the approved amount. Otherwise refused,
+          non-retryably: ``posted_total_mismatch`` (a different total) or
+          ``posted_total_unconfirmed`` (none stated). A posted invoice is never
+          deleted — reversing it is an accountant's corrective credit memo in
+          BC — and the message says so.
+        * Draft with a total ≠ ``payload.amount`` (or none) → DELETE it, still
+          unposted, with ``If-Match`` = its real etag (the one just read, else
+          the create / lookup response's), and refuse non-retryably
+          (``posted_total_mismatch``). With no etag at all the DELETE is not
+          sent (``*`` would drop the guard against a BC user posting it in
+          between). The message says whether the draft was deleted.
         * Post fails → retryable, PII-free. It used to be swallowed, reporting
           success for an invoice BC held only as a draft.
         """
@@ -300,26 +323,35 @@ class BusinessCentralAdapter(ErpAdapter):
             if resp.status_code != 200:
                 return ErpPostResult(
                     success=False,
-                    message=erp_failure_message("Business Central", resp.status_code),
+                    message=erp_failure_message(_PROVIDER, resp.status_code),
                 )
             try:
                 record = loads_exact_json(resp.content)
             except ValueError:
                 record = None
             if not isinstance(record, dict):
-                return ErpPostResult(
-                    success=False, message=erp_failure_message("Business Central", 200)
-                )
+                return ErpPostResult(success=False, message=erp_failure_message(_PROVIDER, 200))
             status = str(record.get("status") or "").lower()
             if status in ("open", "paid"):
-                return _bc_posted(doc_id, record, payload)
+                return _bc_posted(doc_id, record, payload, found_by_lookup=found_by_lookup)
             if status != "draft":
-                return erp_refusal("Business Central", EXISTING_INVOICE_NOT_OPEN)
+                return erp_refusal(_PROVIDER, EXISTING_INVOICE_NOT_OPEN)
 
             if _bc_decimal(record.get("totalAmountIncludingTax")) != payload.amount:
-                etag = record.get("@odata.etag") or "*"
-                await client.delete(url, headers={**headers, "If-Match": etag})
-                return erp_refusal("Business Central", POSTED_TOTAL_MISMATCH)
+                etag = record.get("@odata.etag") or known_etag
+                deleted = False
+                if isinstance(etag, str) and etag:
+                    delete_resp = await client.delete(url, headers={**headers, "If-Match": etag})
+                    deleted = delete_resp.status_code in (200, 204)
+                if deleted:
+                    return erp_refusal(_PROVIDER, POSTED_TOTAL_MISMATCH)
+                return ErpPostResult(
+                    success=False,
+                    erp_document_id=doc_id,
+                    message=f"{_PROVIDER} post refused: {POSTED_TOTAL_MISMATCH} "
+                    f"(the draft was not deleted in {_PROVIDER})",
+                    retryable=False,
+                )
 
             post_resp = await client.post(
                 await self._api_url(f"purchaseInvoices({doc_id})/Microsoft.NAV.post"),
@@ -329,8 +361,10 @@ class BusinessCentralAdapter(ErpAdapter):
             return ErpPostResult(
                 success=False,
                 erp_document_id=doc_id,
-                message=erp_failure_message("Business Central", post_resp.status_code),
+                message=erp_failure_message(_PROVIDER, post_resp.status_code),
             )
+        # Posting a draft does not recompute its total, so the one checked
+        # above is the one BC booked.
         return _bc_posted(doc_id, record, payload)
 
     async def get_invoice_status(self, erp_document_id: str) -> ErpInvoiceStatus:
@@ -377,6 +411,7 @@ class BusinessCentralAdapter(ErpAdapter):
         DELETE requires ``If-Match``; the etag read with the status is sent, so
         an invoice posted between the read and the delete is refused by BC
         rather than deleted.
+        A read with no etag returns False, unsent.
         """
         token = await self._get_token()
         headers = {"Authorization": f"Bearer {token}"}
@@ -388,7 +423,11 @@ class BusinessCentralAdapter(ErpAdapter):
             record = resp.json() or {}
             if str(record.get("status") or "").lower() != "draft":
                 return False
-            etag = record.get("@odata.etag") or "*"
+            etag = record.get("@odata.etag")
+            if not isinstance(etag, str) or not etag:
+                # `*` would delete whatever is there now, posted in between or
+                # not; without the real etag there is no race guard.
+                return False
             resp = await client.delete(url, headers={**headers, "If-Match": etag})
         return resp.status_code in (200, 204)
 
@@ -480,13 +519,38 @@ class BusinessCentralAdapter(ErpAdapter):
             return False
 
 
-def _bc_posted(doc_id: str, record: dict, payload: InvoicePayload) -> ErpPostResult:
-    """The success result for a purchaseInvoice BC has posted."""
+def _bc_posted(
+    doc_id: str, record: dict, payload: InvoicePayload, *, found_by_lookup: bool = False
+) -> ErpPostResult:
+    """The result for a purchaseInvoice whose total is ``record``'s.
+
+    Success only when BC's ``totalAmountIncludingTax`` is exactly
+    ``payload.amount`` — the figure a payment run pays. Otherwise the refusal is
+    non-retryable and the invoice is left as BC holds it: a posted document is
+    never deleted (reversing it is a corrective credit memo, an accountant's
+    call in BC). Messages are PII-free: provider literal and stable reason.
+    """
+    total = _bc_decimal(record.get("totalAmountIncludingTax"))
+    if total is None or total != payload.amount:
+        reason = POSTED_TOTAL_UNCONFIRMED if total is None else POSTED_TOTAL_MISMATCH
+        return ErpPostResult(
+            success=False,
+            erp_document_id=doc_id,
+            erp_document_number=record.get("number") or None,
+            message=f"{_PROVIDER} post refused: {reason} "
+            f"(the invoice is posted in {_PROVIDER} and was not deleted)",
+            retryable=False,
+        )
+    message = (
+        "Already posted to Business Central (idempotent — found by externalDocumentNumber)"
+        if found_by_lookup
+        else "Posted to Business Central"
+    )
     return ErpPostResult(
         success=True,
         erp_document_id=doc_id,
         erp_document_number=record.get("number") or payload.invoice_number,
-        message="Posted to Business Central",
+        message=message,
         raw_response=record,
     )
 
@@ -519,70 +583,40 @@ def _d365_vendor_to_payload(raw: dict) -> VendorPayload:
 def _bc_invoice_lines(payload: InvoicePayload) -> list[dict] | str:
     """The ``purchaseInvoiceLines`` to post, or the stable reason it is refused.
 
-    Every line is an ``Account`` line on ``accountId`` — the G/L account's id
-    that the chart sync stored in ``gl_accounts.erp_account_id`` — never on the
-    code's text. A line coded to its own account must carry that account's id;
-    an uncoded line takes the header's (``gl_account_erp_id``). A coded line
-    whose account has no id refuses the whole bill (``ACCOUNT_NOT_LINKED``):
-    it is never moved onto the header account, which would book it somewhere
-    the approver never saw.
+    The lines are the shared ``bill_lines.bill_lines(payload)`` — one statement
+    of which lines, on which account, for what amount, and every refusal
+    (``account_not_linked``, ``line_amount_missing``, ``amount_mismatch``,
+    ``tax_not_itemised``) — so BC cannot drift from the other adapters. Each
+    becomes an ``Account`` line on ``accountId``, the G/L account's id from the
+    chart sync (``gl_accounts.erp_account_id``), never the code's text.
 
-    BC computes the invoice total from its lines, so they must make exactly the
-    approved ``payload.amount``. A line with no amount (no total, no unit
-    price) refuses (``LINE_AMOUNT_MISSING``); lines that do not sum to the
-    amount refuse (``AMOUNT_MISMATCH``) — they used to collapse onto one header
-    line, which moved coded expense onto the header's account. Only an invoice
-    with no line items posts one line for ``payload.amount`` on the header
-    account. The header amount is never recomputed from the lines. (Tax BC adds
-    on top is caught after the create: ``post_invoice``'s total check.)
-
-    A line keeps its quantity and unit price only when they multiply to its
-    amount exactly; otherwise it goes as quantity 1 at the amount. Money stays
-    Decimal to the encoder (``utils/json_money``).
+    A line goes as quantity 1 at its gross: BC computes the bill from
+    quantity x unitCost, and only that makes the lines sum to exactly the
+    approved ``payload.amount``. The gross is sent as an exact Decimal at the
+    invoice currency's scale (``utils/json_money`` encodes it without a float);
+    one with more decimal places than the currency carries is refused
+    (``line_amount_precision``) rather than rounded. Tax BC adds on top is
+    caught after the create: ``_verify_and_post``'s total check.
     """
-    header_id = payload.gl_account_erp_id
-    if not payload.line_items:
-        if not header_id:
-            return ACCOUNT_NOT_LINKED
-        return [
-            {
-                "lineType": "Account",
-                "accountId": header_id,
-                "description": payload.description or "",
-                "quantity": Decimal(1),
-                "unitCost": payload.amount,
-            }
-        ]
-    resolved: list[tuple[str, Decimal, LineItemPayload]] = []
-    for li in payload.line_items:
-        account_id = li.gl_account_erp_id if li.gl_account else header_id
-        if not account_id:
-            return ACCOUNT_NOT_LINKED
-        if li.total is not None:
-            amount = li.total
-        elif li.unit_price is not None:
-            amount = (li.quantity if li.quantity else Decimal(1)) * li.unit_price
-        else:
-            return LINE_AMOUNT_MISSING
-        resolved.append((account_id, amount, li))
-    if sum((amount for _, amount, _ in resolved), Decimal(0)) != payload.amount:
-        return AMOUNT_MISMATCH
-    lines = []
-    for account_id, amount, li in resolved:
-        if li.quantity and li.unit_price is not None and li.quantity * li.unit_price == amount:
-            quantity, unit_cost = li.quantity, li.unit_price
-        else:
-            quantity, unit_cost = Decimal(1), amount
-        lines.append(
+    lines = bill_lines(payload)
+    if isinstance(lines, str):
+        return lines
+    scale = Decimal(1).scaleb(-exponent_for(payload.currency))
+    out: list[dict] = []
+    for account_id, gross, memo in lines:
+        at_scale = gross.quantize(scale)
+        if at_scale != gross:
+            return LINE_AMOUNT_PRECISION
+        out.append(
             {
                 "lineType": "Account",
                 "accountId": account_id,
-                "description": li.description or "",
-                "quantity": quantity,
-                "unitCost": unit_cost,
+                "description": memo or "",
+                "quantity": Decimal(1),
+                "unitCost": at_scale,
             }
         )
-    return lines
+    return out
 
 
 #: BC ``category`` (NAV.glAccountCategory) -> ``GLAccountPayload.account_type``.

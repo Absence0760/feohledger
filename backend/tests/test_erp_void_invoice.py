@@ -96,12 +96,26 @@ def test_bc_void_leaves_anything_but_a_draft_alone(bc, status):
     assert client.post.await_count == 1  # the token exchange; no bound action
 
 
+def test_bc_void_never_deletes_with_a_wildcard_etag(bc):
+    """With no etag on the read, ``If-Match: *`` would delete the invoice even if
+    a BC user posted it in between. The DELETE is not sent."""
+    with patch("httpx.AsyncClient") as cm:
+        client = cm.return_value.__aenter__.return_value
+        client.post = AsyncMock(return_value=_resp(200, {"access_token": "tok"}))
+        client.get = AsyncMock(return_value=_resp(200, {"id": "pi-1", "status": "Draft"}))
+        client.delete = AsyncMock(return_value=_resp(204))
+        assert _run(bc.void_invoice("pi-1")) is False
+    client.delete.assert_not_awaited()
+
+
 @pytest.mark.parametrize(("get_status", "delete_status"), [(404, None), (200, 400), (200, 412)])
 def test_bc_void_reports_false_when_bc_refuses(bc, get_status, delete_status):
     with patch("httpx.AsyncClient") as cm:
         client = cm.return_value.__aenter__.return_value
         client.post = AsyncMock(return_value=_resp(200, {"access_token": "tok"}))
-        client.get = AsyncMock(return_value=_resp(get_status, {"status": "Draft"}))
+        client.get = AsyncMock(
+            return_value=_resp(get_status, {"status": "Draft", "@odata.etag": 'W/"x1"'})
+        )
         client.delete = AsyncMock(return_value=_resp(delete_status or 500))
         assert _run(bc.void_invoice("pi-1")) is False
     if get_status != 200:
