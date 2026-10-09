@@ -424,6 +424,8 @@ app.include_router(merge)
 # NetSuite SuiteTalk REST  (/netsuite/services/rest/record/v1)
 # ---------------------------------------------------------------------------
 
+import json as _ns_json
+
 netsuite = APIRouter(prefix="/netsuite/services/rest/record/v1")
 
 
@@ -460,7 +462,18 @@ def _require_netsuite_auth(request: Request) -> None:
 NETSUITE_VENDOR_FIXTURES: list[dict] = [
     {"links": [], "id": "25", "entityId": "Fake NetSuite Vendor A"},
     {"links": [], "id": "26", "entityId": "Fake NetSuite Vendor B"},
+    {"links": [], "id": "28", "entityId": "Fake NetSuite Vendor Routed"},
 ]
+
+# A tax-enabled account, modelled statelessly (no shared toggle a parallel e2e
+# worker could trip over): an expense line on one of these account ids gets
+# its tax code's percentage added, rounded to the cent, so the bill's `total`
+# exceeds the lines sent — the case the adapter's total read-back exists for.
+NETSUITE_ACCOUNT_TAX_RATES: dict[str, Decimal] = {"123": Decimal(10)}
+
+# Vendors under approval routing: their bills are created Pending Approval
+# (the only status the adapter may delete) rather than Open.
+NETSUITE_APPROVAL_ROUTED_VENDORS: frozenset[str] = frozenset({"28"})
 
 # SuiteQL `account` rows (lower-case columns, "T"/"F" booleans).
 NETSUITE_ACCOUNT_FIXTURES: list[dict] = [
@@ -485,6 +498,13 @@ NETSUITE_ACCOUNT_FIXTURES: list[dict] = [
         "accttype": "Expense",
         "isinactive": "F",
     },
+    {
+        "id": "123",
+        "acctnumber": "6400",
+        "fullname": "Fake NS Taxed Purchases",
+        "accttype": "Expense",
+        "isinactive": "F",
+    },
 ]
 
 
@@ -498,7 +518,7 @@ async def netsuite_list_vendors(request: Request, limit: int = 1000) -> dict:
         "hasMore": False,
         "items": items,
         "offset": 0,
-        "totalResults": 2,
+        "totalResults": len(NETSUITE_VENDOR_FIXTURES),
     }
 
 
@@ -540,7 +560,8 @@ def _netsuite_invalid_ref(field: str) -> ProviderError:
 @netsuite.post("/vendorBill")
 async def netsuite_create_vendor_bill(request: Request) -> Response:
     _require_netsuite_auth(request)
-    body = await request.json()
+    # Amounts parsed as Decimal, never float: the fake computes the total.
+    body = _ns_json.loads(await request.body(), parse_float=Decimal)
     # `entity` (the vendor) is mandatory and must be a vendor's internal id.
     entity = body.get("entity") or {}
     if entity.get("id") not in {v["id"] for v in NETSUITE_VENDOR_FIXTURES}:
@@ -553,9 +574,16 @@ async def netsuite_create_vendor_bill(request: Request) -> Response:
     if not lines:
         raise _netsuite_error(400, "USER_ERROR", "You must enter at least one line item.")
     account_ids = {a["id"] for a in NETSUITE_ACCOUNT_FIXTURES}
+    total = Decimal(0)
     for line in lines:
-        if (line.get("account") or {}).get("id") not in account_ids:
+        account_id = (line.get("account") or {}).get("id")
+        if account_id not in account_ids:
             raise _netsuite_invalid_ref("account")
+        amount = Decimal(str(line.get("amount", 0)))
+        rate = NETSUITE_ACCOUNT_TAX_RATES.get(account_id, Decimal(0))
+        # Like NetSuite, the bill total is the lines plus their tax codes' tax.
+        total += amount + (amount * rate / 100).quantize(Decimal("0.01"))
+    pending = entity["id"] in NETSUITE_APPROVAL_ROUTED_VENDORS
     STATE["counters"]["netsuite"] += 1
     doc_id = str(STATE["counters"]["netsuite"])  # numeric-string ids, "1001", "1002", ...
     STATE["netsuite_bills"][doc_id] = {
@@ -568,7 +596,12 @@ async def netsuite_create_vendor_bill(request: Request) -> Response:
         "currency": body.get("currency"),
         "entity": body.get("entity"),
         "expense": body.get("expense"),
-        "status": {"id": "open", "refName": "Open"},
+        "total": total,
+        "status": (
+            {"id": "pendingApproval", "refName": "Pending Approval"}
+            if pending
+            else {"id": "open", "refName": "Open"}
+        ),
     }
     # Real NetSuite responds 204 No Content with the new record URL in Location.
     return Response(
@@ -578,12 +611,26 @@ async def netsuite_create_vendor_bill(request: Request) -> Response:
 
 
 @netsuite.get("/vendorBill/{doc_id}")
-async def netsuite_get_vendor_bill(request: Request, doc_id: str) -> dict:
+async def netsuite_get_vendor_bill(request: Request, doc_id: str) -> Response:
+    """The record, ``total`` included. Money goes out as JSON number literals
+    with every digit (``_netsuite_json``), never through a float."""
     _require_netsuite_auth(request)
     record = STATE["netsuite_bills"].get(doc_id)
     if record is None:
         raise _netsuite_error(404, "NONEXISTENT_ID", f"That record does not exist. id: {doc_id}")
-    return copy.deepcopy(record)
+    return Response(content=_netsuite_json(record), media_type="application/json")
+
+
+def _netsuite_json(value: Any) -> str:
+    """JSON with each Decimal written as its exact number literal."""
+    if isinstance(value, Decimal):
+        return format(value, "f")
+    if isinstance(value, dict):
+        items = (f"{_ns_json.dumps(k)}:{_netsuite_json(v)}" for k, v in value.items())
+        return "{" + ",".join(items) + "}"
+    if isinstance(value, list):
+        return "[" + ",".join(_netsuite_json(v) for v in value) + "]"
+    return _ns_json.dumps(value)
 
 
 app.include_router(netsuite)
@@ -2292,6 +2339,16 @@ NETSUITE_SUITEQL_VENDOR_FIXTURES: list[dict] = [
         "phone": None,
         "terms": None,
         "isinactive": "T",
+    },
+    {
+        # Under approval routing (NETSUITE_APPROVAL_ROUTED_VENDORS).
+        "id": "28",
+        "entityid": "Fake NetSuite Vendor Routed",
+        "companyname": "Fake NetSuite Vendor Routed",
+        "email": None,
+        "phone": None,
+        "terms": None,
+        "isinactive": "F",
     },
 ]
 

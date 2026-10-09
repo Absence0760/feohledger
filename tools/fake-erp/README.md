@@ -33,8 +33,11 @@ surfaces:
   cursor-paginated 2 + 1 via `next` / `?cursor=`), `GET /account-details`
   (test_connection).
 - **NetSuite**: `POST /vendorBill` → **204** with the new numeric id (`1001`,
-  `1002`, …) in the `Location` header, status `Open`;
-  `GET /vendorBill/{id}` → `{"status": {"refName": "Open"}}`;
+  `1002`, …) in the `Location` header, status `Open` (`Pending Approval` for
+  vendor `28`, which is under approval routing);
+  `GET /vendorBill/{id}` → the record with its `status` and `total` — the
+  lines plus any tax code's tax (account `123` / `6400` adds 10%, rounded to
+  the cent), written as an exact JSON number;
   `GET /vendor?limit=1` (test_connection);
   `POST /netsuite/services/rest/query/v1/suiteql` (requires
   `Prefer: transient`; answers only `SELECT … FROM account`, paged by
@@ -81,15 +84,18 @@ the e2e suite proves the adapters post the ids the syncs stored
 - **Merge** `POST /invoices`: `contact` must be a fixture vendor id
   (`merge-vendor-701` …); a non-null line `account` must be a fixture account id
   (`merge-acct-6100` …).
-- **NetSuite** `POST /vendorBill`: `entity.id` must be a vendor id (`25`, `26`);
+- **NetSuite** `POST /vendorBill`: `entity.id` must be a vendor id (`25`, `26`,
+  `28`);
   the `expense` sublist must be non-empty with each `account.id` an account id;
   an `item` sublist is refused.
 - **D365** `POST …/purchaseInvoices`: `vendorId` (or `vendorNumber`) must name a
   fixture vendor.
 
 NetSuite vendors (`GET /vendor`): `25` "Fake NetSuite Vendor A", `26` "Fake
-NetSuite Vendor B". NetSuite accounts (SuiteQL): `120` → `6100`, `121` →
-`6200`, `122` → `6300`. D365 vendor (`GET …/vendors`): id
+NetSuite Vendor B", `28` "Fake NetSuite Vendor Routed" (approval routing).
+NetSuite accounts (SuiteQL): `120` → `6100`, `121` → `6200`, `122` → `6300`,
+`123` → `6400` (10% tax code). Both behaviours are fixed fixtures, not a toggle,
+so parallel e2e workers cannot trip over each other. D365 vendor (`GET …/vendors`): id
 `5d115c9c-44e3-ea11-bb43-000d3a2feca1`, number `V0001`, "Fake BC Vendor A".
 Each provider's vendor names are distinct, so one e2e tenant syncing all three
 never links one provider's vendor id onto another's vendor row.
@@ -264,8 +270,8 @@ and a non-empty `Bb-Api-Subscription-Key`, as the real gateway does.
   `Prefer: odata.maxpagesize` and returns `@odata.nextLink` (`$skiptoken`).
   `DELETE …/purchaseInvoices({id})` needs `If-Match` and deletes only a `Draft`.
   A purchaseInvoice `Account` line must carry a posting account's `accountId`.
-- **NetSuite** SuiteQL also answers `SELECT … FROM vendor` (`25`, `26`, and
-  inactive `27`) and `SELECT … FROM transaction … type = 'PurchOrd'`
+- **NetSuite** SuiteQL also answers `SELECT … FROM vendor` (`25`, `26`, `28`,
+  and inactive `27`) and `SELECT … FROM transaction … type = 'PurchOrd'`
   (`PO-FAKE-NS-501` 2100.50 USD open, `PO-FAKE-NS-502` 640.00 GBP closed).
   `DELETE /vendorBill/{id}` → 204 for a `pendingApproval` bill only
   (`/__set-status` with `"pendingApproval"`).

@@ -46,6 +46,10 @@ import {
  *      it is never posted by name.
  *   4. PO sync — one SuiteQL query over `transaction` (type PurchOrd); the
  *      status letter maps onto open / closed and the ISO currency is kept.
+ *   5. Posted total — on the fake's 10%-taxed account 6400 NetSuite books more
+ *      than was approved; the adapter reads the bill's `total` back and fails
+ *      `posted_total_mismatch`, deleting the bill only while it is Pending
+ *      Approval (vendor "Fake NetSuite Vendor Routed").
  *
  * The vendor sync is SuiteQL too (`SELECT … FROM vendor`): the REST `/vendor`
  * collection carries no names. The full send proves it stored the ids.
@@ -140,6 +144,54 @@ test.describe('/erp netsuite adapter against fake-erp', () => {
 			expect(await sendToErpAndAwaitTerminal(page, inv.id)).toBe('failed');
 			expect(await erpFailureFromAudit(page, inv.id)).toBe(
 				'NetSuite post refused: vendor_not_linked'
+			);
+		} finally {
+			await deleteInvoice(page, inv.id);
+		}
+	});
+
+	// The fake's account 6400 carries a 10% tax code (NETSUITE_ACCOUNT_TAX_RATES),
+	// so NetSuite books 2695.83 for an approved 2450.75. The adapter reads the
+	// created bill's `total` back and never reports that as posted.
+	test('a bill NetSuite totals differently is not posted (approved bill left alone)', async ({
+		page
+	}) => {
+		await syncErpVendors(page);
+		await syncErpGlAccounts(page);
+		const inv = await createApprovedInvoice(page, {
+			prefix: 'E2E-NS-TAXED',
+			amount: '2450.75',
+			vendor: 'Fake NetSuite Vendor A',
+			glAccount: '6400'
+		});
+		try {
+			expect(await sendToErpAndAwaitTerminal(page, inv.id)).toBe('failed');
+			// Vendor A's bills are created Open (approved): never deleted.
+			expect(await erpFailureFromAudit(page, inv.id)).toBe(
+				'NetSuite post failed: posted_total_mismatch (the bill could not be deleted in ' +
+					'NetSuite: it is no longer pending approval or NetSuite refused)'
+			);
+		} finally {
+			await deleteInvoice(page, inv.id);
+		}
+	});
+
+	test('a bill NetSuite totals differently is deleted while pending approval', async ({
+		page
+	}) => {
+		await syncErpVendors(page);
+		await syncErpGlAccounts(page);
+		const inv = await createApprovedInvoice(page, {
+			prefix: 'E2E-NS-TAXED-ROUTED',
+			amount: '2450.75',
+			// Under approval routing in the fake: its bills start Pending Approval.
+			vendor: 'Fake NetSuite Vendor Routed',
+			glAccount: '6400'
+		});
+		try {
+			expect(await sendToErpAndAwaitTerminal(page, inv.id)).toBe('failed');
+			expect(await erpFailureFromAudit(page, inv.id)).toBe(
+				'NetSuite post failed: posted_total_mismatch (the bill was deleted)'
 			);
 		} finally {
 			await deleteInvoice(page, inv.id);
