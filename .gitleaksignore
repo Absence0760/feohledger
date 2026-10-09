@@ -69,3 +69,11 @@ d9dc86a970108d5a9ad1238e542c0e36438f9465:backend/tests/test_email_intake_process
 # low-entropy literal that passes the variable's own ≥24-alphanumeric
 # validation, so only the introducing commit still carries the finding.
 09352f52aec7a4e530f08b9dc4ee45890de4ae21:infra/tests/guardrails.tftest.hcl:generic-api-key:118
+
+# Two documentation LINKS, not credentials. The Blackbaud adapter's docstring
+# cited the SKY API reference with each API's id in the URL fragment, and
+# generic-api-key fires on the 24-hex id after the `api=` keyword. The links
+# were rewritten without the id in a later commit, so only the introducing
+# commit still carries them.
+7884d678ae81f5f8470792d5385cfc69994dcfce:backend/app/services/erp_adapters/blackbaud_fe_nxt.py:generic-api-key:32
+7884d678ae81f5f8470792d5385cfc69994dcfce:backend/app/services/erp_adapters/blackbaud_fe_nxt.py:generic-api-key:33

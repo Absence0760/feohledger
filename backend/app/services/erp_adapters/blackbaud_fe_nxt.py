@@ -29,9 +29,9 @@ References (checked 2026-10):
   and https://community.blackbaud.com/blogs/69/3799
 * Accounts Payable API (``/accountspayable/v1``) and General Ledger API
   (``/generalledger/v1``) reference —
-  https://developer.sky.blackbaud.com/api#api=57a342f1d7dcde1c28a749fe and
-  https://developer.sky.blackbaud.com/api#api=56eb17a0a9db9516c46bff6f
-  (operation and schema facts below were read from those definitions).
+  the "Accounts Payable" and "General Ledger" entries of the SKY API reference
+  at https://developer.sky.blackbaud.com/api (operation and schema facts below
+  were read from those definitions).
 
 Required ``settings.erp`` config (``type: "blackbaud_fe_nxt"``,
 ``integration_method: "direct"``), besides the ``oauth`` block only
