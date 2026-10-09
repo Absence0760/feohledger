@@ -902,7 +902,7 @@ vendor whose number happened to equal it.
 | Adapter | Vendor | Accounts |
 |---|---|---|
 | `netsuite` | `entity: {id}`; refuses `vendor_not_linked` | GL-coded lines go on the **`expense`** sublist (`account: {id}`, `amount` = the line total, or quantity × unit price when it has none), since the `item` sublist needs an item record we never send. An uncoded line takes the header account. A coded line with no id, or a bill with no account at all, refuses `account_not_linked`. A coded line is never moved onto the header account. A line with no amount at all refuses `line_amount_missing` (it used to post as 0). NetSuite totals the bill from its lines, so lines that do not sum to exactly the approved amount (tax-exclusive lines, header-only shipping or discount) refuse `amount_mismatch` — never collapsed onto the header account, which would move coded expense there. Only an invoice with no line items posts one line for the amount on the header account. |
-| `dynamics_365_bc` | `vendorId`; refuses `vendor_not_linked` | Every line is an `Account` line on **`accountId`** = the account GUID the BC chart sync stored, never `lineObjectNumber` (the No.). Same rules as NetSuite: an uncoded line takes the header account, a coded line with no id or a bill with no account at all refuses `account_not_linked`. See § Business Central: chart, POs and void. |
+| `dynamics_365_bc` | `vendorId`; refuses `vendor_not_linked` | Every line is an `Account` line on **`accountId`** = the account GUID the BC chart sync stored, never `lineObjectNumber` (the No.). The lines are the shared `bill_lines.bill_lines` rule: an uncoded line takes the header account, a coded line with no id or a bill with no account at all refuses `account_not_linked`. See § Business Central: chart, POs and void. |
 | `merge_dev` | `contact` (Merge object id); refuses `vendor_not_linked` | A line's `account` is the Merge account id. A coded line with no id refuses `account_not_linked`; an uncoded line sends none (Merge allows it). |
 
 **NetSuite chart sync.** `NetSuiteAdapter.list_gl_accounts` pulls the chart
@@ -942,7 +942,7 @@ target ERP actually supports:
 |---|---|
 | `merge_dev` | `X-Idempotency-Key: <correlation_id>` header on `POST /invoices` — Merge's unified API returns the ORIGINAL response for a repeated key instead of creating a second invoice. |
 | `netsuite` | Pre-create lookup: `GET /vendorBill?q=externalId IS "<correlation_id>"` (NetSuite enforces `externalId` uniqueness per record type). A match short-circuits `post_invoice` to a success referencing the existing bill; only a miss proceeds to `POST /vendorBill`. |
-| `dynamics_365_bc` | Pre-create lookup: `GET purchaseInvoices?$filter=externalDocumentNumber eq '<correlation_id>'`. A hit short-circuits only when it is `Open` or `Paid`. A `Draft` (an earlier attempt whose post step failed or whose response was lost) is finished: its total re-checked, then `Microsoft.NAV.post` re-run — never a second create. Any other status (`In Review`, `Canceled`, `Corrective`) refuses `existing_invoice_not_open`. |
+| `dynamics_365_bc` | Pre-create lookup: `GET purchaseInvoices?$filter=externalDocumentNumber eq '<correlation_id>'`. A hit is re-read whole (`GET purchaseInvoices({id})`, parsed exactly) and short-circuits to success only when it is `Open` or `Paid` **and** its `totalAmountIncludingTax` is exactly the approved amount; a different total refuses `posted_total_mismatch`, none refuses `posted_total_unconfirmed` (both final, the posted invoice never deleted). A `Draft` (an earlier attempt whose post step failed or whose response was lost) is finished: its total re-checked, then `Microsoft.NAV.post` re-run — never a second create. Any other status (`In Review`, `Canceled`, `Corrective`) refuses `existing_invoice_not_open`. |
 
 The local `fake-erp` mock implements the matching server-side behavior (a
 merge-idempotency-key cache; `q=`/`$filter=` collection queries filtered by
@@ -1663,7 +1663,7 @@ Tests: `backend/tests/test_erp_blackbaud_adapter.py`. fake-erp surface:
 | `list_gl_accounts` | `GET accounts` — `number` → code, `displayName` → name, `id` → `erp_account_id`, `category` Assets/Liabilities/Equity/Income/Cost of Goods Sold/Expense → asset/liability/equity/revenue/expense/expense (blank → unclassified). Heading / total accounts and blocked accounts are skipped. |
 | `list_pos` | `GET purchaseOrders?$expand=purchaseOrderLines` — total `totalAmountIncludingTax`; status always `open`; `currencyCode` only when non-blank; `requestedReceiptDate` unless BC's blank `0001-01-01`; comment lines dropped |
 | `list_vendors` | `GET vendors` |
-| `void_invoice` | `GET purchaseInvoices({id})`; a `Draft` is deleted (`DELETE` with `If-Match` = the etag just read); anything else returns `False` |
+| `void_invoice` | `GET purchaseInvoices({id})`; a `Draft` is deleted (`DELETE` with `If-Match` = the etag just read — never `*`; a read with no etag returns `False` unsent); anything else returns `False` |
 
 **Lines post on `accountId`, not the No.** The chart sync is now the writer of
 `gl_accounts.erp_account_id` for BC, and `services/erp._resolve_erp_refs`
@@ -1673,15 +1673,21 @@ resolution: a code typed locally but never synced, or an entity's own account
 overriding a shared one, would post against whatever BC account happens to hold
 that No. — or fail inside BC instead of refusing up front. The id also survives
 a renumbering in BC. Lines follow NetSuite's account rule (uncoded → header
-account; coded but unlinked → `account_not_linked`) and its amount rule: every
-line needs an amount (total, else quantity × unit price; none →
-`line_amount_missing`) and the lines must sum to exactly the approved amount
-(else `amount_mismatch`) — BC totals the bill from its lines, so lines that
+account; coded but unlinked → `account_not_linked`) and its amount rule,
+because BC's lines **are** the shared `erp_adapters/bill_lines.bill_lines`
+projection rather than a copy of it: every line needs an amount (total, else
+quantity × unit price; a unit price with no quantity, or neither, →
+`line_amount_missing` — BC's own copy used to read a missing quantity as 1) and
+the gross lines must sum to exactly the approved amount (else `amount_mismatch`
+/ `tax_not_itemised`) — BC totals the bill from its lines, so lines that
 disagree would post a different figure, and collapsing them onto one header
 line would move coded expense onto the header's account. Only an invoice with
-no line items posts one line for the amount on the header account. A line keeps its
-quantity and unit cost only when they multiply to its amount exactly; otherwise
-it goes as 1 × amount.
+no line items posts one line for the amount on the header account. Each line
+goes as quantity 1 at its gross, an exact `Decimal` at the invoice currency's
+scale (`payment_adapters.base.exponent_for`: `100.000000` → `100.00`, JPY →
+whole units); a gross finer than the currency refuses `line_amount_precision`
+rather than being rounded. A line's description is its own, else the invoice's,
+else its number.
 
 **The draft's total is checked before it is posted.** BC computes a
 purchaseInvoice's total itself, and a VAT / sales-tax company adds tax on top
@@ -1689,14 +1695,30 @@ of the lines — 1,200 approved would book 1,440, and BC's own payment run would
 overpay. So after the create the adapter re-reads the draft and runs
 `Microsoft.NAV.post` only when `totalAmountIncludingTax` (parsed exactly, never
 via float) equals `payload.amount`. Otherwise — or when BC states no total — the
-draft, still unposted, is deleted (`If-Match` = the etag just read) and the push
-refused non-retryably: `Business Central post refused: posted_total_mismatch`. A
-failed delete leaves a draft, never a ledger entry, and the refusal stands; a
-later manual retry finds it and checks again. A failed draft read or post step
-is a **retryable** `erp_failure_message` failure. The post step used to be
-`except Exception: pass`, reporting success — and moving the invoice to
-`sent_to_erp` — while BC held only a draft. Success is reported only for an
-invoice BC holds as `Open` or `Paid`.
+draft, still unposted, is deleted and the push refused non-retryably:
+`Business Central post refused: posted_total_mismatch`. The `DELETE` carries
+the draft's real etag (the one just read, else the create / lookup response's)
+and is never sent with `If-Match: *`, which would delete the invoice even if a
+BC user had posted it in between. Its status is checked: when the draft could
+not be deleted (BC refused, or no etag was known) the message says so —
+`… posted_total_mismatch (the draft was not deleted in Business Central)` — so
+the accountant knows a draft above the approved amount is still sitting in BC.
+A failed draft read or post step is a **retryable** `erp_failure_message`
+failure. The post step used to be `except Exception: pass`, reporting success —
+and moving the invoice to `sent_to_erp` — while BC held only a draft.
+
+**Every success is total-checked, including an invoice already posted.** Success
+is reported only for an invoice BC holds as `Open` or `Paid` whose
+`totalAmountIncludingTax` is exactly `payload.amount` — whether it was just
+posted, found posted on the fresh read, or found by the idempotency lookup. The
+case this closes: a draft at 1,150 against an approved 1,000, the `DELETE`
+fails, a BC user posts the draft, and the manual retry's lookup finds it
+`Open`; that used to report success, and our payment run would pay 1,000
+against a 1,150 bill. Now it refuses non-retryably `posted_total_mismatch`
+(`posted_total_unconfirmed` when BC states no total), with
+`… (the invoice is posted in Business Central and was not deleted)`. A posted
+invoice is never deleted — reversing it is a corrective credit memo, the
+accountant's call in BC.
 
 **POs are always `open`.** The API's statuses are `Draft`, `In Review` and
 `Open`; BC deletes a purchase order once it is fully received and invoiced, so
@@ -1751,7 +1773,8 @@ real paid bill (`"paid in full"`) never matched `paidinfull` and polled as
 fake-erp serves all of the above: BC `accounts` (three posting accounts plus a
 heading and a blocked one), `purchaseOrders` (`PO-FAKE-BC-401` in local
 currency with a blank date, `PO-FAKE-BC-402` in EUR), `DELETE
-purchaseInvoices({id})` (needs `If-Match`, drafts only), a 400 for an
+purchaseInvoices({id})` (needs `If-Match` equal to the record's current
+etag or `*`, else 412; drafts only; posting moves the etag), a 400 for an
 `Account` line whose `accountId` is not a posting account, `totalAmount*` on
 every purchaseInvoice (company `fake-vat-co` adds 20% VAT on top of the lines),
 and a 400 for posting a non-draft; NetSuite SuiteQL
