@@ -10789,8 +10789,8 @@ ERPs reject (`known-issues.md`).
   posting it on the header's account books the expense somewhere the approver
   never saw.
 - **The booked total must equal the approved amount.** ERPs that compute a
-  bill's total themselves (Business Central, Xero, Sage, QuickBooks) can add
-  tax on top of the approved figure from default tax codes. The adapter reads
+  bill's total themselves (Business Central, Xero, Sage, QuickBooks, NetSuite)
+  can add tax on top of the approved figure from default tax codes. The adapter reads
   the booked total back. On a mismatch it deletes the draft where the API
   allows, and returns a non-retryable `posted_total_mismatch`. A missing total
   is treated as unconfirmed, never as success.
