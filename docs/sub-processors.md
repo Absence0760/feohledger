@@ -434,6 +434,7 @@ add a provider).
 | Adapter | Processor | Service | Data categories | Processing location | Active when configured | DPA / sub-processing status |
 |---------|-----------|---------|-----------------|---------------------|------------------------|------------------------------|
 | `mock` | — (in-process) | Deterministic local stock book | none leaves process | Local | **Default — local dev and tests** | n/a |
+| `shopify` | **Shopify** (Admin GraphQL API) | Adds received stock to the customer's own shop | INV (SKU, received quantity, location id, an opaque receipt-line reference) — no vendor, bank, tax or user data | Shopify's hosting (Canada / US, global CDN) | Configured only (direct) | The customer's own shop under their Shopify agreement; listed in § 22 as a customer-controlled counterparty |
 | `woocommerce` | **(customer's own WordPress store)** | Stock push to the merchant's self-hosted WooCommerce REST API (`<store_url>/wp-json/wc/v3`) | Product / variation ids, SKUs, absolute stock quantities, and our receipt-line idempotency keys in product meta. No personal data, no supplier, invoice or banking fields | Wherever the merchant hosts WordPress | Configured only (per-org `store_url` + consumer key/secret; https + public host enforced) | Not a sub-processor of ours: the merchant chooses and contracts their own host, and Automattic receives nothing through this path — see § 22 |
 
 ---
@@ -524,6 +525,7 @@ to them, not appointing someone to process it on our behalf. These belong in the
 |---|---|---|---|
 | **The customer's identity provider** — Okta, Microsoft Entra ID, Authentik, Keycloak, or any other OIDC / SAML 2.0 IdP | `/api/auth/sso`, `/api/auth/saml`, `/scim/v2` | Inbound: an authentication assertion plus the user attributes the customer chooses to release (name, email, groups). Outbound SCIM: nothing — SCIM is the IdP pushing to us | **The customer's own controller relationship.** We hold their users' identities; their IdP does not gain ours. Not a sub-processor of ours |
 | **Direct ERP connections** — NetSuite (Oracle), Dynamics 365 Business Central (Microsoft) | § 2 | Invoices posted into the customer's own ERP tenant | Customer's own agreement with Oracle / Microsoft. Listed in § 2 for the data description, not as our sub-processor |
+| **Commerce platforms** — Shopify | § 19.1 | SKU, received quantity and location, added to the customer's own shop's stock | Customer's own agreement with the platform. Listed in § 19.1 for the data description, not as our sub-processor |
 | **Self-hosted commerce platform** — WooCommerce on the customer's own WordPress | § 19.1 | Product ids, SKUs and stock quantities pushed from goods receipts, to the customer's own store | Customer's own site and hosting agreement. Listed in § 19.1 for the data description, not as our sub-processor |
 | **Supplier catalogue punch-out** | § 15 | Buyer session identity + cart contents, to the supplier's own catalogue system | Customer ↔ supplier |
 | **Outbound Developer-API webhooks** | `/api/webhooks` | Event payloads, to a URL the tenant nominates | Customer-directed transfer (see § Maintenance) |

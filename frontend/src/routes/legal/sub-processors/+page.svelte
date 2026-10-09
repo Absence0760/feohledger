@@ -718,6 +718,12 @@
 			does not gain ours.
 		</li>
 		<li>
+			<strong>Commerce platforms</strong> — Shopify. When you connect your shop, each
+			goods receipt adds the received quantity of each item, by SKU, to the stock
+			at the shop location you chose (and a cancelled receipt takes it back off).
+			No supplier, bank, tax or user data is sent.
+		</li>
+		<li>
 			<strong>Your own WooCommerce store</strong> — when you connect it, each goods
 			receipt sends product identifiers, SKUs and stock quantities to the
 			WooCommerce site you run on your own WordPress hosting. Nothing personal
