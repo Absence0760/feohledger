@@ -292,7 +292,10 @@ Registered: `mock` (in-process, the local-first default); `shopify` (real —
 Admin GraphQL `inventoryAdjustQuantities`, `@idempotent`, whole units);
 `woocommerce` (real — REST `/wp-json/wc/v3` on the merchant's own https
 `store_url`, consumer key + secret over Basic, one synthetic `store` location,
-read → write adjust with the idempotency key in product meta). The registry imports
+read → write adjust with the idempotency key in product meta); `square` (real —
+Square REST API v2, access token + sandbox/production environment, fractional
+quantities, native idempotency key plus a `reference_id` lookup before any
+re-send). The registry imports
 every module in the package (`pkgutil`), so **a new provider is one new module**
 — no import list and no shared catalogue: the spec passed to the decorator IS
 its catalogue entry. Selected by `Organization.settings.commerce.provider`; an

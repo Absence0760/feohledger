@@ -160,6 +160,7 @@ Follow exactly. Everything except steps 2 and 7 touches only new files.
 | `mock` | Local mock (in-process) | none | default; SKUs `UNMAPPED*` are unmapped, `TRANSIENT*` fail retryably; locations `mock-main`, `mock-warehouse` |
 | `shopify` | Shopify (Admin GraphQL, pinned `2026-10`) | custom-app Admin API access token per shop | real; whole units only; fake `providers/shopify.py` |
 | `woocommerce` | WooCommerce (merchant's own WordPress, REST `/wp-json/wc/v3`) | consumer key + secret, HTTPS Basic | real; one synthetic location `store`; whole units; § WooCommerce |
+| `square` | Square (REST API v2, `Square-Version` pinned) | access token (Bearer) + `environment` | real; fractional quantities; § Square |
 
 ### Shopify (`commerce_adapters/shopify.py`)
 
@@ -304,3 +305,50 @@ counterparties and on `/legal/sub-processors` § 4.
 /woocommerce/__fail-next {"status": N}` injects one failure (a 3xx carries a
 `Location`); `GET /__state/woocommerce` exposes stock, meta, the request log and
 a count of requests that carried credentials in the query (always 0).
+
+## Square
+
+`app/services/commerce_adapters/square.py`; fake `tools/fake-commerce/providers/square.py`;
+tests `backend/tests/test_commerce_square.py`, `frontend/tests-e2e/commerce/square.spec.ts`.
+
+- **Connection.** `environment` (`sandbox` first, so the form never defaults to
+  the live host) picks `connect.squareupsandbox.com` or `connect.squareup.com`
+  and is a destination key — switching it drops the stored token.
+  `access_token` is a Developer Console access token sent as `Bearer`; it needs
+  `MERCHANT_PROFILE_READ`, `ITEMS_READ`, `INVENTORY_READ` and `INVENTORY_WRITE`.
+  Every request pins `Square-Version` (`SQUARE_VERSION`, `2026-09-16`); bump it
+  deliberately, with the fake.
+- **Calls.** `test_connection` → `GET /v2/merchants/me`; `list_locations` →
+  `GET /v2/locations` (`INACTIVE` → `active=False`); `resolve_sku` →
+  `POST /v2/catalog/search`, `ITEM_VARIATION` by an exact `sku` query, item id =
+  the variation id (Square counts stock per variation); none or more than one →
+  `unmapped_sku`.
+- **Adjustment.** `POST /v2/inventory/changes/batch-create`, one `ADJUSTMENT`
+  at one location (`from_location_id` = `to_location_id`): receive is
+  `NONE → IN_STOCK`, a cancelled receipt `IN_STOCK → NONE` — Square's
+  documented "removed from inventory tracking" transition, not `WASTE`, which
+  would report the stock as damaged or lost. The quantity is the exact decimal
+  string (Square holds up to five places; more is refused, never rounded);
+  `occurred_at` is the push time, since Square refuses one older than 24 hours.
+  `available_after` is the `IN_STOCK` count in the response's `counts`.
+- **Idempotency.** Square's native `idempotency_key` is our key (hashed only if
+  over Square's 128 characters), and `reference_id` carries it too. An
+  identical re-send replays Square's original response. A re-send with a
+  changed body — a retry always has a new `occurred_at` — is refused
+  `IDEMPOTENCY_KEY_REUSED`; the adapter then finds the original adjustment by
+  `reference_id` (`POST /v2/inventory/changes/batch-retrieve`, the item at the
+  location, up to 10 pages of 1000) and returns it as `replayed`. Not finding it
+  is a non-retryable refusal, never an assumed success. Square does not document
+  how long it remembers a key (`docs/followups.md`).
+- **Errors.** `errors[].category` first — `AUTHENTICATION_ERROR` →
+  `auth_failed`, `RATE_LIMIT_ERROR` → `rate_limited`, `API_ERROR` →
+  `transient` — then the status as in `http_failure`; an
+  `INVALID_REQUEST_ERROR` whose `field` names a location → `unknown_location`,
+  anything else → `rejected`. The message carries the step, the status and the
+  category / code only when they are upper-snake constants; `detail` is never
+  copied.
+- **Fake fixtures.** Token `fake-square-token`; locations `L-MAIN`,
+  `L-WAREHOUSE`, `L-CLOSED` (inactive); SKU `SQ-TEE-M` → `VAR-TEE-M`; `SQ-DUP`
+  on two variations; `POST /square/__fail-next {"status": …}`.
+- **Not built:** Square OAuth (app install) — a personal or application access
+  token only; tracked with the other OAuth connections (§ Providers).

@@ -139,7 +139,7 @@ section carried its own `decisions.md` § reference, so nothing was lost by
 deleting it; that cross-reference is what makes the pruning safe, and writing
 one is what earns a future entry the right to be deleted.
 
-**100 open: 83 (c) · 10 (a) · 7 (b)** — re-derived from the file, never carried
+**101 open: 84 (c) · 10 (a) · 7 (b)** — re-derived from the file, never carried
 forward. The section heading is authoritative; where an entry also carries a
 `(c)`/`(a)`/`(b)` marker, the two agree.
 `grep -c '^- \[ \]' docs/followups.md`.
@@ -1306,15 +1306,15 @@ scope (§260) — do not fold them into any of these.
       an e2e spec. **Trigger:** the first customer on one of those ERPs who
       won't use Merge.dev, or the first customer who receives goods in their
       ERP rather than in FeohLedger.
-- [ ] **(c) Three of the five commerce platform adapters are not built.** The
+- [ ] **(c) Two of the five commerce platform adapters are not built.** The
       foundation is in (decisions §273): SKU identity, the `commerce_adapters`
       family with its `mock`, the post-commit push and reversal, retry, the
-      panel and tools/fake-commerce. Shopify and WooCommerce have landed; a
-      tenant on Lightspeed, Square or Cin7 can still connect only `mock`.
-      **Durable fix:** one module per remaining provider — Lightspeed, Square,
-      Cin7 — following `backend/docs/commerce-integration.md` § How to add a
-      provider (adapter, fake-commerce module, contract test, e2e spec,
-      sub-processor registers). **Trigger:** in progress now, one PR each.
+      panel and tools/fake-commerce. Shopify, WooCommerce and Square have
+      landed; a tenant on Lightspeed or Cin7 can still connect only `mock`.
+      **Durable fix:** one module per remaining provider — Lightspeed, Cin7 —
+      following `backend/docs/commerce-integration.md` § How to add a provider
+      (adapter, fake-commerce module, contract test, e2e spec, sub-processor
+      registers). **Trigger:** in progress now, one PR each.
 - [ ] **(c) A WooCommerce stock push can overwrite a concurrent storefront
       sale.** The REST API has no relative stock change and no compare-and-set,
       so the adapter reads `stock_quantity`, adds the receipt's delta and writes
@@ -1339,6 +1339,18 @@ scope (§260) — do not fold them into any of these.
       one callback route. **Trigger:** the first commerce provider shipped
       OAuth-only, or a public Shopify / Square app listing (which requires
       OAuth install).
+- [ ] **(c) Square's idempotency-key retention is undocumented.** The Square
+      adapter sends our `feoh:<line>:<direction>` key as Square's
+      `idempotency_key` and `reference_id`; a re-send Square refuses as
+      `IDEMPOTENCY_KEY_REUSED` is resolved by finding the original adjustment by
+      `reference_id`. If Square forgets a key, a late retry of a push that
+      actually landed (a timeout after Square applied it) would add the stock
+      twice. **Durable fix:** look up `reference_id` via
+      `POST /v2/inventory/changes/batch-retrieve` BEFORE writing on any retry
+      (the adapter would need the row's attempt count, or always check first).
+      **Trigger:** Square documents a retention window shorter than the sync
+      sweep's retry horizon (`FEOH_COMMERCE_SYNC_MAX_ATTEMPTS` with backoff to
+      6 h), or a doubled Square adjustment is observed.
 
 ### Surfaced by the US + South Africa ERP connections (2026-10-08, decisions §269–§272)
 
