@@ -736,12 +736,15 @@ async def d365_create_purchase_invoice(
         raise _d365_error(400, "Internal_RecordNotFound", "The Vendor does not exist.")
     # Lines must name a posting account by id (the BC block at the end).
     _d365_check_invoice_lines(body.get("purchaseInvoiceLines") or [])
+    totals = _d365_invoice_totals(await request.body(), company_id)
     STATE["counters"]["d365"] += 1
     n = STATE["counters"]["d365"]
     record = {
         "id": f"d365-inv-{n}",
+        "@odata.etag": f'W/"fake-etag-{n}"',
         "number": f"PI-{100000 + n}",
         "status": "Draft",
+        **totals,
         "vendorId": vendor["id"],
         "vendorNumber": vendor["number"],
         "vendorInvoiceNumber": body.get("vendorInvoiceNumber"),
@@ -763,6 +766,9 @@ async def d365_post_purchase_invoice(
     record = STATE["d365_invoices"].get(doc_id)
     if record is None:
         raise _d365_error(404, "BadRequest_NotFound", f"No purchaseInvoice with id {doc_id}.")
+    if record.get("status") != "Draft":
+        # Like BC: only an unposted invoice can be posted.
+        raise _d365_error(400, "Application_DialogException", "The invoice is already posted.")
     record["status"] = "Open"  # posted/finalized → Open (unpaid)
     return Response(status_code=204)
 
@@ -2160,6 +2166,38 @@ def _d365_check_invoice_lines(lines: list[dict]) -> None:
     for line in lines:
         if line.get("lineType") == "Account" and line.get("accountId") not in _D365_POSTING_ACCOUNT_IDS:
             raise _d365_error(400, "Internal_RecordNotFound", "The G/L Account does not exist.")
+
+
+# A BC company that charges VAT: BC adds tax ON TOP of the lines' amounts, so a
+# purchaseInvoice whose lines make 1,200 totals 1,440 at 20%. Keyed by the
+# `companies(<id>)` in the URL so a spec opts in by its config's `company_id`,
+# with no shared state another worker could trip over. Every other company is
+# untaxed (total = the lines).
+D365_VAT_COMPANIES: dict[str, Decimal] = {"fake-vat-co": Decimal("20")}
+
+
+def _d365_invoice_totals(raw_body: bytes, company_id: str) -> dict:
+    """`totalAmountExcludingTax` / `totalTaxAmount` / `totalAmountIncludingTax`
+    as BC computes them: the lines' quantity x unitCost, plus the company's VAT.
+    Summed in Decimal (the body is parsed without a float hop), rounded to the
+    cent, and rendered as JSON numbers."""
+    import json
+
+    body = json.loads(raw_body, parse_float=Decimal)
+    net = sum(
+        (
+            Decimal(str(line.get("quantity", 1))) * Decimal(str(line.get("unitCost", 0)))
+            for line in body.get("purchaseInvoiceLines") or []
+        ),
+        Decimal(0),
+    ).quantize(Decimal("0.01"))
+    rate = D365_VAT_COMPANIES.get(company_id, Decimal(0))
+    tax = (net * rate / Decimal(100)).quantize(Decimal("0.01"))
+    return {
+        "totalAmountExcludingTax": float(net),
+        "totalTaxAmount": float(tax),
+        "totalAmountIncludingTax": float(net + tax),
+    }
 
 
 def _d365_page(request: Request, rows: list[dict]) -> dict:

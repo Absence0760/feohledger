@@ -40,8 +40,11 @@ surfaces:
   `Prefer: transient`; answers only `SELECT … FROM account`, paged by
   `limit`/`offset`/`hasMore`) — the chart sync.
 - **D365**: `POST …/companies({id})/purchaseInvoices` → 201 `d365-inv-<n>`
-  status `Draft`; `POST …/purchaseInvoices({id})/Microsoft.NAV.post` → 204,
-  flips status to `Open`; `GET …/purchaseInvoices({id})`;
+  status `Draft`, with `totalAmountExcludingTax` / `totalTaxAmount` /
+  `totalAmountIncludingTax` computed from the lines (company `fake-vat-co`
+  adds 20% VAT on top, like a real BC VAT company; every other company is
+  untaxed); `POST …/purchaseInvoices({id})/Microsoft.NAV.post` → 204,
+  flips a `Draft` to `Open` (400 for anything already posted); `GET …/purchaseInvoices({id})`;
   `GET …/vendors?$top=1` (test_connection). OData base is `/d365`, i.e.
   `/d365/{environment}/api/v2.0/companies({company_id})/<resource>`.
 

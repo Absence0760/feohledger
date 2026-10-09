@@ -11,6 +11,7 @@ import { SERVICES, skipUnlessReachable } from '../fixtures/services';
 import {
 	createApprovedInvoice,
 	deleteInvoice,
+	erpFailureFromAudit,
 	erpReferenceFromAudit,
 	resetFakeErp,
 	sendToErpAndAwaitTerminal,
@@ -150,6 +151,31 @@ test.describe('/erp dynamics_365_bc adapter against fake-erp', () => {
 			// the post, not the mock.
 			const erpRef = await erpReferenceFromAudit(page, inv.id);
 			expect(erpRef).toMatch(/^d365-inv-\d+$/);
+		} finally {
+			await deleteInvoice(page, inv.id);
+		}
+	});
+
+	test('a VAT company that would book more than was approved is refused, not posted', async ({
+		page
+	}) => {
+		// fake-erp's `fake-vat-co` adds 20% VAT on top of the lines, as a real
+		// BC VAT company does: 1,200 approved would become a 1,440 bill. The
+		// adapter reads the draft's total, deletes the draft and refuses.
+		await setErpSettings(page, { ...D365_ERP_CONFIG, company_id: 'fake-vat-co' });
+		await syncErpVendors(page);
+		await syncErpGlAccounts(page);
+		const inv = await createApprovedInvoice(page, {
+			prefix: 'E2E-D365-VAT',
+			amount: '1200.00',
+			vendor: 'Fake BC Vendor A',
+			glAccount: '6100'
+		});
+		try {
+			expect(await sendToErpAndAwaitTerminal(page, inv.id)).toBe('failed');
+			expect(await erpFailureFromAudit(page, inv.id)).toBe(
+				'Business Central post refused: posted_total_mismatch'
+			);
 		} finally {
 			await deleteInvoice(page, inv.id);
 		}
