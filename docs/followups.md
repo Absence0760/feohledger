@@ -1344,12 +1344,14 @@ scope (§260) — do not fold them into any of these.
       **Durable fix:** send net line amounts plus BC tax codes, so BC's computed
       total equals the approved gross. **Trigger:** the first customer on a
       VAT-registered BC company.
-- [ ] **(c) NetSuite does not read back the bill total after posting.** Lines
-      must sum to the approved amount before posting, but a tax-enabled
-      NetSuite account can still add tax codes to expense lines. **Durable
-      fix:** read the created bill's `total` and refuse a mismatch, as the
-      other adapters do (`erp_adapters/posted_total.py`). **Trigger:** before
-      NetSuite goes live on a tax-enabled account.
+- [ ] **(c) A Business Central user can edit a draft between our total check
+      and our post.** The adapter reads the draft's `totalAmountIncludingTax`
+      and then calls `Microsoft.NAV.post`; an edit in that window posts a total
+      nobody approved, and the success path does not read the posted invoice
+      back. **Durable fix:** after the post, read the posted invoice's total and
+      treat a mismatch as `posted_total_mismatch` (an accountant must reverse a
+      posted invoice in BC; we never delete one). **Trigger:** the first BC
+      customer whose staff edit purchase drafts.
 - [ ] **(c) Business Central approval workflows are not handled.** A post step
       that fails after the draft is created is now a retryable failure, and a
       retry finishes the draft. But a BC company with purchase-approval
