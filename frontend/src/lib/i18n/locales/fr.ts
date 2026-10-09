@@ -1795,7 +1795,7 @@ export const messages = {
 	'org.erp.field.currency': 'Devise comptable',
 	'org.erp.field.project_id': 'ID du projet',
 	'org.erp.field.approval_status': 'Statut d’approbation',
-	'org.erp.field.home_currency': 'Devise locale',
+	'org.erp.field.company_currency': 'Devise locale',
 	'org.erp.option.AUTHORISED': 'Approuvée (AUTHORISED)',
 	'org.erp.option.DRAFT': 'Brouillon',
 	'org.erp.help.xeroBillStatus': 'Le statut avec lequel les factures sont créées dans Xero. Une facture brouillon doit être approuvée dans Xero avant de pouvoir être payée.',

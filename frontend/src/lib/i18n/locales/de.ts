@@ -1795,7 +1795,7 @@ export const messages = {
 	'org.erp.field.currency': 'Buchungswährung',
 	'org.erp.field.project_id': 'Projekt-ID',
 	'org.erp.field.approval_status': 'Genehmigungsstatus',
-	'org.erp.field.home_currency': 'Hauswährung',
+	'org.erp.field.company_currency': 'Hauswährung',
 	'org.erp.option.AUTHORISED': 'Genehmigt (AUTHORISED)',
 	'org.erp.option.DRAFT': 'Entwurf',
 	'org.erp.help.xeroBillStatus': 'Der Status, mit dem Rechnungen in Xero angelegt werden. Entwürfe müssen in Xero genehmigt werden, bevor sie bezahlt werden können.',

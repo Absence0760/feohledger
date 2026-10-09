@@ -49,7 +49,7 @@ Optional:
                     admin-supplied, so https-only, on Sage's own API host
                     (``accounting.sageone.co.za``) only, and behind the SSRF
                     guard — it receives the API key and the Sage password
-    home_currency:  ISO 4217 code of the company's home currency (default
+    company_currency: ISO 4217 code of the Sage company's own currency (default
                     ``ZAR``). The API reports currencies only as numeric ids and
                     a display symbol, never an ISO code, so this is the one place
                     the code comes from.
@@ -273,8 +273,8 @@ class SageAccountingZaAdapter(ErpAdapter):
             raise SageZaConfigError(f"{PROVIDER} config 'company_id' must be a numeric id")
         return company
 
-    def _home_currency(self) -> str:
-        return str(self.config.get("home_currency") or DEFAULT_HOME_CURRENCY).upper()
+    def _company_currency(self) -> str:
+        return str(self.config.get("company_currency") or DEFAULT_HOME_CURRENCY).upper()
 
     async def _base(self) -> str:
         if settings.erp_sage_za_api_base:
@@ -451,7 +451,7 @@ class SageAccountingZaAdapter(ErpAdapter):
         account_lines = [(_int_id(gl), amount, memo) for gl, amount, memo in lines]
         if any(account is None for account, _, _ in account_lines):
             return erp_refusal(PROVIDER, ACCOUNT_NOT_LINKED)
-        if (payload.currency or "").upper() != self._home_currency():
+        if (payload.currency or "").upper() != self._company_currency():
             return erp_refusal(PROVIDER, CURRENCY_NOT_SUPPORTED)
 
         base = await self._base()

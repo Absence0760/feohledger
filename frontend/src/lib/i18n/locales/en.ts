@@ -1944,7 +1944,7 @@ export const en = {
 	'org.erp.field.currency': 'Ledger currency',
 	'org.erp.field.project_id': 'Project ID',
 	'org.erp.field.approval_status': 'Approval status',
-	'org.erp.field.home_currency': 'Home currency',
+	'org.erp.field.company_currency': 'Company currency',
 	'org.erp.option.AUTHORISED': 'Approved (AUTHORISED)',
 	'org.erp.option.DRAFT': 'Draft',
 	'org.erp.help.xeroBillStatus': 'The status bills are created with in Xero. Draft bills need approving in Xero before they can be paid.',

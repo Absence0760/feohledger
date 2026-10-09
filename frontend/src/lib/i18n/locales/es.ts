@@ -1793,7 +1793,7 @@ export const messages = {
 	'org.erp.field.currency': 'Moneda contable',
 	'org.erp.field.project_id': 'ID de proyecto',
 	'org.erp.field.approval_status': 'Estado de aprobación',
-	'org.erp.field.home_currency': 'Moneda local',
+	'org.erp.field.company_currency': 'Moneda local',
 	'org.erp.option.AUTHORISED': 'Aprobada (AUTHORISED)',
 	'org.erp.option.DRAFT': 'Borrador',
 	'org.erp.help.xeroBillStatus': 'El estado con el que se crean las facturas en Xero. Las facturas en borrador deben aprobarse en Xero antes de poder pagarse.',

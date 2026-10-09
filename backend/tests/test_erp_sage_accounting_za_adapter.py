@@ -488,7 +488,7 @@ def test_refuses_a_non_home_currency_before_any_http():
     result = _post(fake, _payload(currency="USD"))
     assert result.message.endswith("currency_not_supported") and fake.requests == []
     # A company whose home currency is configured otherwise.
-    assert _post(FakeSage(), _payload(currency="BWP"), {**CONFIG, "home_currency": "BWP"}).success
+    assert _post(FakeSage(), _payload(currency="BWP"), {**CONFIG, "company_currency": "BWP"}).success
 
 
 def test_refuses_a_foreign_currency_supplier():

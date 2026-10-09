@@ -1505,7 +1505,7 @@ separate product with its own API, `https://accounting.sageone.co.za/api/2.0.0`
 | `password` | **yes** | That user's Sage password |
 | `company_id` | no | Numeric Sage company id (`Company/Get` lists them) |
 | `base_url` | no (optional) | API base; default `https://accounting.sageone.co.za/api/2.0.0`. Admin-supplied and handed the API key and the Sage password, so https-only, on `accounting.sageone.co.za` only (any other host or port → `SageZaConfigError`), and SSRF-guarded. The operator override `FEOH_ERP_SAGE_ZA_API_BASE` (fake-erp) skips all three |
-| `home_currency` | no (optional) | ISO code of the company's home currency, default `ZAR` — the API reports currencies only as numeric ids and a symbol |
+| `company_currency` | no (optional) | ISO code of the Sage company's own currency, default `ZAR` — the API reports currencies only as numeric ids and a symbol |
 
 Every call is `<Resource>/<Method>?apikey=…&companyid=…` with the Sage login in
 HTTP basic auth. List methods page with OData `$top` / `$skip` (100 rows, 10

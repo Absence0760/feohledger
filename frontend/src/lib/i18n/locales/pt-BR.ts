@@ -1796,7 +1796,7 @@ export const messages = {
 	'org.erp.field.currency': 'Moeda contábil',
 	'org.erp.field.project_id': 'ID do projeto',
 	'org.erp.field.approval_status': 'Status de aprovação',
-	'org.erp.field.home_currency': 'Moeda local',
+	'org.erp.field.company_currency': 'Moeda local',
 	'org.erp.option.AUTHORISED': 'Aprovada (AUTHORISED)',
 	'org.erp.option.DRAFT': 'Rascunho',
 	'org.erp.help.xeroBillStatus': 'O status com que as faturas são criadas no Xero. Faturas em rascunho precisam ser aprovadas no Xero antes de serem pagas.',

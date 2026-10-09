@@ -1760,7 +1760,7 @@ export const messages = {
 	'org.erp.field.currency': '帳簿通貨',
 	'org.erp.field.project_id': 'プロジェクトID',
 	'org.erp.field.approval_status': '承認ステータス',
-	'org.erp.field.home_currency': '自国通貨',
+	'org.erp.field.company_currency': '自国通貨',
 	'org.erp.option.AUTHORISED': '承認済み（AUTHORISED）',
 	'org.erp.option.DRAFT': '下書き',
 	'org.erp.help.xeroBillStatus': 'Xero で請求書を作成するときのステータスです。下書きの請求書は、支払う前に Xero で承認が必要です。',

