@@ -10,6 +10,7 @@ import {
 	withoutOAuthReturn,
 	type ErpOAuthStatus,
 	OAUTH_ERROR_KEYS,
+	destinationChanged,
 	readOAuthReturn,
 	secretIsSaved,
 	selectedProviderKey,
@@ -26,7 +27,13 @@ const netsuite: ErpProvider = {
 	docs_url: 'https://example.invalid/ns',
 	available: true,
 	fields: [
-		{ name: 'account_id', label_key: 'org.erp.accountId', secret: false, required: true },
+		{
+			name: 'account_id',
+			label_key: 'org.erp.accountId',
+			secret: false,
+			required: true,
+			destination: true
+		},
 		{ name: 'consumer_secret', label_key: 'org.erp.consumerSecret', secret: true, required: true }
 	]
 };
@@ -109,6 +116,26 @@ describe('initialValues / secretIsSaved', () => {
 		expect(secretIsSaved(netsuite, netsuite.fields[0], storedNetsuite, MASK)).toBe(false);
 	});
 
+	it('stops treating a secret as saved once a destination field changes', () => {
+		const same = initialValues(netsuite, storedNetsuite, MASK);
+		const moved = { ...same, account_id: '999' };
+		expect(destinationChanged(netsuite, same, storedNetsuite)).toBe(false);
+		expect(destinationChanged(netsuite, moved, storedNetsuite)).toBe(true);
+		expect(secretIsSaved(netsuite, netsuite.fields[1], storedNetsuite, MASK, same)).toBe(true);
+		// The backend keeps no stored secret across a new destination, so the
+		// form must not say it does: the secret becomes required again.
+		expect(secretIsSaved(netsuite, netsuite.fields[1], storedNetsuite, MASK, moved)).toBe(false);
+		expect(missingRequired(netsuite, moved, storedNetsuite, MASK).map((f) => f.name)).toEqual([
+			'consumer_secret'
+		]);
+	});
+
+	it('reads blank and absent destinations as the same', () => {
+		const stored = { type: 'netsuite', integration_method: 'direct', consumer_secret: MASK };
+		const values = { account_id: '  ', consumer_secret: '' };
+		expect(destinationChanged(netsuite, values, stored)).toBe(false);
+	});
+
 	it('starts blank for a provider other than the one on file', () => {
 		expect(initialValues(syspro, storedNetsuite, MASK)).toEqual({
 			account_id: '',
@@ -151,7 +178,7 @@ describe('buildErpPayload', () => {
 
 describe('missingRequired', () => {
 	it('counts a saved secret as filled', () => {
-		expect(missingRequired(netsuite, { account_id: '1', consumer_secret: '' }, storedNetsuite, MASK)).toEqual([]);
+		expect(missingRequired(netsuite, { account_id: '123', consumer_secret: '' }, storedNetsuite, MASK)).toEqual([]);
 	});
 
 	it('names required fields left empty', () => {

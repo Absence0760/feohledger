@@ -73,6 +73,9 @@ def test_catalogue_entries_are_well_formed():
         for f in entry["fields"]:
             assert f["label_key"].startswith("org.erp."), f
             assert isinstance(f["secret"], bool) and isinstance(f["required"], bool)
+            # The form drops "saved" from secrets when a destination field
+            # changes; it learns which fields those are from this flag only.
+            assert f["destination"] is (f["name"] in catalog.DESTINATION_KEYS), f
         if entry["auth"] == "oauth":
             # OAuth providers: the BYO-app pair is optional, never required.
             assert not any(f["required"] for f in entry["fields"] if f["secret"])

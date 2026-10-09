@@ -130,13 +130,27 @@ test.describe('/organization ERP connection', () => {
 			expect(html).not.toContain(CONSUMER_SECRET);
 			expect(html).not.toContain(TOKEN_SECRET);
 
-			// Saving again with the secrets left blank keeps them stored.
+			// A new Account ID is a new destination: the stored secrets are never
+			// sent to it, so the form asks for them again instead of saying "kept".
 			await card.getByLabel('Account ID', { exact: true }).fill('7654321');
+			await expect(card.getByLabel('Consumer Secret', { exact: true })).not.toHaveAttribute(
+				'data-secret-saved',
+				'true'
+			);
+			await card.getByRole('button', { name: 'Save ERP Settings' }).click();
+			await expect(card.getByLabel('Consumer Secret', { exact: true })).toHaveAttribute(
+				'aria-invalid',
+				'true'
+			);
+			await card.getByLabel('Account ID', { exact: true }).fill('1234567');
+
+			// Saving again with the secrets left blank keeps them stored.
+			await card.getByLabel('Token ID', { exact: true }).fill('tid-e2e-2');
 			const second = saved(page);
 			await card.getByRole('button', { name: 'Save ERP Settings' }).click();
 			const erp = ((await (await second).json()) as { settings: { erp: Record<string, string> } })
 				.settings.erp;
-			expect(erp.account_id).toBe('7654321');
+			expect(erp.token_id).toBe('tid-e2e-2');
 			expect(erp.consumer_secret).toBe('********');
 			expect(erp.token_secret).toBe('********');
 

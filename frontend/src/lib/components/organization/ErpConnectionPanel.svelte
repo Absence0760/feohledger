@@ -157,7 +157,7 @@
 
 	/** A secret is on file and the admin has not chosen to remove it. */
 	function secretKept(p: ErpProvider, f: ErpProviderField): boolean {
-		return secretIsSaved(p, f, stored, mask) && !cleared.has(f.name);
+		return secretIsSaved(p, f, stored, mask, values) && !cleared.has(f.name);
 	}
 
 	/** Show `key`'s values on file (blank for a new choice). */

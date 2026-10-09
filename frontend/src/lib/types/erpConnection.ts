@@ -26,6 +26,12 @@ export interface ErpProviderField {
 	help_key?: MessageKey;
 	/** A fixed choice list (e.g. QuickBooks `environment`). */
 	options?: string[];
+	/**
+	 * Says where the stored secrets are sent (a host, account, tenant,
+	 * company or environment). Changing one starts a new connection: the
+	 * backend keeps no stored secret across it, so neither does the form.
+	 */
+	destination?: boolean;
 }
 
 export interface ErpProvider {
@@ -161,14 +167,37 @@ export function initialValues(
 	return values;
 }
 
-/** Is a secret already stored for this field (for the provider on file)? */
+/**
+ * Has any destination field in `values` moved away from what is stored? Blank
+ * and absent are the same, as on the backend (`catalog.same_connection`).
+ */
+export function destinationChanged(
+	provider: ErpProvider,
+	values: Record<string, string>,
+	stored: StoredErpConfig | undefined | null
+): boolean {
+	if (!stored) return false;
+	return provider.fields.some((f) => {
+		if (!f.destination) return false;
+		const was = typeof stored[f.name] === 'string' ? (stored[f.name] as string).trim() : '';
+		return (values[f.name] ?? '').trim() !== was;
+	});
+}
+
+/**
+ * Is a secret already stored for this field (for the provider on file)? Not
+ * once `values` changes a destination field: a stored secret is never carried
+ * to a new host or account, so the form asks for it again.
+ */
 export function secretIsSaved(
 	provider: ErpProvider,
 	field: ErpProviderField,
 	stored: StoredErpConfig | undefined | null,
-	mask: string
+	mask: string,
+	values?: Record<string, string>
 ): boolean {
 	if (!field.secret || !stored || selectedProviderKey(stored) !== provider.key) return false;
+	if (values && destinationChanged(provider, values, stored)) return false;
 	return stored[field.name] === mask;
 }
 
@@ -239,7 +268,7 @@ export function missingRequired(
 		(f) =>
 			(f.required || (opts.requireByoApp === true && BYO_APP_FIELDS.includes(f.name))) &&
 			!(values[f.name] ?? '').trim() &&
-			!(secretIsSaved(provider, f, stored, mask) && !cleared.has(f.name))
+			!(secretIsSaved(provider, f, stored, mask, values) && !cleared.has(f.name))
 	);
 }
 
