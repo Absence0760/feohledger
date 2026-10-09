@@ -104,6 +104,16 @@ class POLineItem(Base, TimestampMixin):
     quantity: Mapped[Decimal | None] = mapped_column(Numeric(12, 4))
     unit_price: Mapped[Decimal | None] = mapped_column(Numeric(15, 2))
     total: Mapped[Decimal | None] = mapped_column(Numeric(15, 2))
+    # WHAT was ordered, not just how it was described (migration 0111): the
+    # internal catalog item a line was bought from, and the SKU as it stood when
+    # the line was written. `sku` is a SNAPSHOT, not a join — a catalog edit must
+    # not rewrite which item an issued PO named, and a PO from an ERP or a
+    # contract carries an item code with no catalog row behind it. The commerce
+    # sync pushes received quantities by this SKU (decisions §268).
+    catalog_item_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("catalog_items.id"), index=True
+    )
+    sku: Mapped[str | None] = mapped_column(String(100))
 
     purchase_order: Mapped[PurchaseOrder] = relationship(back_populates="line_items")
 
@@ -179,6 +189,13 @@ class GRLineItem(Base, TimestampMixin):
     )
     description: Mapped[str | None] = mapped_column(Text)
     quantity_received: Mapped[Decimal | None] = mapped_column(Numeric(12, 4))
+    # Copied from the PO line it receives against (migration 0111), never typed:
+    # what arrived is what was ordered. NULL on a free-text line (a PO with no
+    # lines) — the commerce sync records such a line as skipped (`no_sku`).
+    catalog_item_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("catalog_items.id"), index=True
+    )
+    sku: Mapped[str | None] = mapped_column(String(100))
 
     goods_receipt: Mapped[GoodsReceipt] = relationship(back_populates="line_items")
 

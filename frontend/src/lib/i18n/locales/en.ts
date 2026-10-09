@@ -3143,6 +3143,7 @@ export const en = {
 	'purchaseOrders.modal.created': 'Created',
 	'purchaseOrders.modal.lineItems': 'Line Items',
 	'purchaseOrders.modal.description': 'Description',
+	'procurement.sku': "SKU {sku}",
 	'purchaseOrders.modal.qty': 'Qty',
 	'purchaseOrders.modal.unitPrice': 'Unit Price',
 	'purchaseOrders.modal.lineTotal': 'Total',

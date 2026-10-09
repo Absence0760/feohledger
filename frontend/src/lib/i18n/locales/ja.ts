@@ -2902,6 +2902,7 @@ export const messages = {
 	'purchaseOrders.modal.created': '作成日',
 	'purchaseOrders.modal.lineItems': '明細',
 	'purchaseOrders.modal.description': '説明',
+	'procurement.sku': "SKU {sku}",
 	'purchaseOrders.modal.qty': '数量',
 	'purchaseOrders.modal.unitPrice': '単価',
 	'purchaseOrders.modal.lineTotal': '合計',

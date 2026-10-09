@@ -2958,6 +2958,7 @@ export const messages = {
 	'purchaseOrders.modal.created': 'Creada',
 	'purchaseOrders.modal.lineItems': 'Líneas',
 	'purchaseOrders.modal.description': 'Descripción',
+	'procurement.sku': "SKU {sku}",
 	'purchaseOrders.modal.qty': 'Cant.',
 	'purchaseOrders.modal.unitPrice': 'Precio unitario',
 	'purchaseOrders.modal.lineTotal': 'Total',

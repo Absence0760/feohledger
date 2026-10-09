@@ -31,6 +31,7 @@
 	import PageHeader from '#lib/components/ui/PageHeader.svelte';
 	import DataTable from '#lib/components/ui/DataTable.svelte';
 	import Modal from '#lib/components/ui/Modal.svelte';
+	import LineDescription from '#lib/components/ui/LineDescription.svelte';
 	import RowLink from '#lib/components/ui/RowLink.svelte';
 	import RowAction from '#lib/components/ui/RowAction.svelte';
 	import Badge from '#lib/components/ui/Badge.svelte';
@@ -84,6 +85,9 @@
 		id: string;
 		po_line_item_id: string | null;
 		description: string | null;
+		/** Copied from the PO line (migration 0111); null on a free-text line. */
+		sku: string | null;
+		catalog_item_id: string | null;
 		quantity_received: number | null;
 	}
 
@@ -771,7 +775,7 @@
 				<tbody>
 					{#each detail.line_items as li (li.id)}
 						<tr>
-							<td>{li.description ?? '—'}</td>
+							<td><LineDescription description={li.description} sku={li.sku} /></td>
 							<td class="right mono">{li.quantity_received ?? '—'}</td>
 						</tr>
 					{:else}

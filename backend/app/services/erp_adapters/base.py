@@ -224,6 +224,9 @@ class PoLinePayload:
     unit_price: Decimal | None = None
     total: Decimal | None = None
     gl_account: str | None = None
+    #: The ERP's item number / SKU for the line, when it has one. Stored as the
+    #: PO line's ``sku`` snapshot (migration 0111) for the commerce sync.
+    item_code: str | None = None
 
 
 @dataclass

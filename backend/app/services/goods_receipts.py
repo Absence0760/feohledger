@@ -336,6 +336,11 @@ async def create_goods_receipt(
                 po_line_item_id=po_line.id if po_line is not None else None,
                 description=po_line.description if po_line is not None else line.description,
                 quantity_received=line.quantity_received,
+                # What arrived is what was ordered: the PO line's item identity,
+                # never the client's (migration 0111). The commerce sync pushes
+                # by this SKU.
+                catalog_item_id=po_line.catalog_item_id if po_line is not None else None,
+                sku=po_line.sku if po_line is not None else None,
             )
         )
     await db.flush()

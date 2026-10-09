@@ -57,6 +57,9 @@ def _line_dict(li) -> dict:
         "id": str(li.id),
         "po_line_item_id": str(li.po_line_item_id) if li.po_line_item_id else None,
         "description": li.description,
+        # Copied from the PO line (migration 0111); null on a free-text line.
+        "sku": li.sku,
+        "catalog_item_id": str(li.catalog_item_id) if li.catalog_item_id else None,
         # `is not None`, not truthiness: a line that received NOTHING (`0`) is a
         # recorded short-shipment, and `null` would read as "not recorded".
         "quantity_received": (

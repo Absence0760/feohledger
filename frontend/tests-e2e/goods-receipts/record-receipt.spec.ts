@@ -46,7 +46,13 @@ test.describe('record a goods receipt', () => {
 		const { poId, poNumber } = createPo({
 			total: 1200,
 			lines: [
-				{ description: 'Wilson Pro Staff racket', quantity: 10, unitPrice: 100, total: 1000 },
+				{
+					description: 'Wilson Pro Staff racket',
+					quantity: 10,
+					unitPrice: 100,
+					total: 1000,
+					sku: 'WPS-97'
+				},
 				{ description: 'Overgrip pack', quantity: 20, unitPrice: 10, total: 200 }
 			]
 		});
@@ -63,6 +69,8 @@ test.describe('record a goods receipt', () => {
 		await expect(qty).toHaveCount(2);
 		await expect(qty.nth(0)).toHaveValue('10');
 		await expect(qty.nth(1)).toHaveValue('20');
+		// Item identity: the SKU the PO line carries, and none on the other.
+		await expect(form.getByTestId('line-sku')).toHaveText(['SKU WPS-97']);
 
 		// Nine rackets and none of the grips.
 		await qty.nth(0).fill('9');
@@ -79,6 +87,8 @@ test.describe('record a goods receipt', () => {
 		await expect(lines).toHaveCount(1);
 		await expect(lines.first()).toContainText('Wilson Pro Staff racket');
 		await expect(lines.first()).toContainText('9');
+		// The receipt line inherited the PO line's SKU.
+		await expect(lines.first().getByTestId('line-sku')).toHaveText('SKU WPS-97');
 
 		// The PO now shows nine received on that line.
 		const po = await page.request.get(`${API_BASE}/api/purchase-orders/${poId}`, {
