@@ -435,9 +435,15 @@ Can be triggered manually by the user or automatically after approval.
 |----------------------|--------------------------------------------------------------------------|
 | Transient failure    | Retry with exponential backoff, up to 3 attempts. Stay in `sending_to_erp`. |
 | Permanent failure    | Transition to `failed`. Record error in WorkflowStep and audit log.     |
-| Success              | Transition to `sent_to_erp`. Store ERP reference ID in `state_data`.    |
+| Failure that left a bill in the ERP | As permanent failure. The bill's ERP ids go on `state_data["erp_orphan_document_id"]` / `["erp_orphan_document_number"]` and on the `invoice.erp_failed` row. |
+| Success              | Transition to `sent_to_erp`. Store ERP reference ID in `state_data` (clears any orphan ids). |
 
-**Manual retry:** `POST /api/invoices/{id}/retry-erp` — only valid when status is `failed` and the invoice was previously approved (i.e., `approved_by` is set).
+**Manual retry:** `POST /api/invoices/{id}/retry-erp` is only valid when status
+is `failed` and the invoice was previously approved (`approved_by` is set). It
+resets `state_data["erp_retries"]` to 0 by assigning a new dict, because the
+JSONB column does not track in-place edits. It keeps `erp_pending_job_id` and
+the orphan ids, so an asynchronous ERP polls its earlier job before posting
+again. Detail: `erp-integration.md` § Retry Logic.
 
 ## Stage 4: Done
 

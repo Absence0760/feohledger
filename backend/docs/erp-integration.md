@@ -960,15 +960,39 @@ struggling (Sage Intacct and SYSPRO already behaved this way).
 
 ## Retry Logic
 
-```
-Attempt 1: immediate
-Attempt 2: wait 30 seconds
-Attempt 3: wait 2 minutes
-Attempt 4: wait 10 minutes
-After 4 failures: mark as failed, require manual retry
-```
+`services/erp.send_to_erp_internal` is the only push path. It makes up to
+`MAX_RETRIES` (3) attempts with exponential backoff (2 s, then 4 s), and keeps
+the attempt count on `WorkflowInstance.state_data["erp_retries"]`, so a
+re-entered push resumes rather than restarts. A **non-retryable** result
+(`ErpPostResult.retryable` False: a pre-flight refusal, `posted_total_*`,
+`job_unconfirmed`) or an OAuth ERP with no usable connection fails the invoice
+on the first attempt. After the last attempt the invoice goes to `failed`, with
+`last_error` on the instance and an `invoice.erp_failed` audit row.
 
-Manual retry available via `POST /api/invoices/{id}/retry-erp` (resets the attempt counter).
+**A failure that left a bill in the ERP names it.** Examples are a
+`posted_total_mismatch` whose void failed ("could not be voided") and a
+`posted_total_unconfirmed` bill. A result like that carries
+`erp_document_id` / `erp_document_number`. `_call_erp` raises
+`ErpPostRefusedError` (or `ErpPostFailedError` on the retryable path) with
+those ids. It keeps them on `state_data["erp_orphan_document_id"]` /
+`["erp_orphan_document_number"]`, the same way it keeps the pending job id. The
+`invoice.erp_failed` row records them as `erp_document_id` /
+`erp_document_number`. Without this, the invoice sat at `failed` while a bill
+with a total nobody approved stayed live in the ERP, and nobody could find it.
+These are the ERP's own ids, not PII. The provider's response body is never
+written. A failure that reports no document leaves earlier ids in place,
+because that bill is still in the ERP. A successful push clears them, because
+its `erp_reference` then names the bill of record.
+
+**Manual retry:** `POST /api/invoices/{id}/retry-erp` resets `erp_retries` to 0
+and moves the invoice to `sending_to_erp`. The route then dispatches the push.
+It assigns a **new** `state_data` dict. The column is plain JSONB with no
+`MutableDict`, so an in-place edit is never saved. That was a real bug: the
+reset was lost, and the retry failed at once on the exhausted counter. Every
+other key is kept. That includes `erp_pending_job_id`: an ERP whose create is a
+background job (Blackbaud) must poll the job an earlier attempt queued before
+it queues another, or the retry posts a second bill. The orphan ids are kept
+too, until a successful push replaces them.
 
 ## Security
 
