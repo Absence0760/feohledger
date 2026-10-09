@@ -49,12 +49,11 @@ _BC_API_HOST = "api.businesscentral.dynamics.com"
 #: ``base_url`` is optional in the provider catalogue; blank means this.
 _DEFAULT_BASE_URL = f"https://{_BC_API_HOST}/v2.0"
 
-#: Stable, PII-free refusal reasons (beyond base.VENDOR_NOT_LINKED /
-#: ACCOUNT_NOT_LINKED). Each is non-retryable.
+#: Stable, PII-free refusal reasons beyond the shared ones in ``base``. Each is
+#: non-retryable. (``base.POSTED_TOTAL_MISMATCH`` is BC's other one: the draft's
+#: computed total differs from the approved amount, e.g. a VAT company adds tax
+#: on top of the lines. The draft is deleted, so nothing reaches the ledger.)
 #:
-#: The draft BC computed totals to something other than the approved amount —
-#: a VAT / sales-tax company adds tax on top of the lines. The draft is deleted
-#: (it was never posted) and nothing reaches the ledger.
 #: A purchaseInvoice for this correlation id already exists but is neither a
 #: draft we can finish nor posted (``In Review``, ``Canceled``, ``Corrective``).
 #: Creating another would be a second bill; the accountant decides in BC.
