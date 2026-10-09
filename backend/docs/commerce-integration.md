@@ -158,8 +158,107 @@ Follow exactly. Everything except steps 2 and 7 touches only new files.
 | Key | Platform | Auth | Status |
 |---|---|---|---|
 | `mock` | Local mock (in-process) | none | default; SKUs `UNMAPPED*` are unmapped, `TRANSIENT*` fail retryably; locations `mock-main`, `mock-warehouse` |
+| `woocommerce` | WooCommerce (merchant's own WordPress, REST `/wp-json/wc/v3`) | consumer key + secret, HTTPS Basic | real; one synthetic location `store`; whole units; § WooCommerce |
 
 OAuth consent connections are not built: the catalogue's `auth: "oauth"` renders
 a Connect button wired to the authorize hook, and `services/erp_oauth` is bound
 to `settings.erp` (`docs/followups.md`). Every planned provider has a key-based
 connection.
+
+## WooCommerce
+
+`app/services/commerce_adapters/woocommerce.py`; fake at
+`tools/fake-commerce/providers/woocommerce.py`; tests
+`backend/tests/test_commerce_woocommerce.py` and
+`frontend/tests-e2e/commerce/woocommerce.spec.ts`.
+
+**Connection.** Fields: `store_url`, `consumer_key`, `consumer_secret` (both
+secret; a REST key from WooCommerce → Settings → Advanced → REST API with
+Read/Write permission). `store_url` is the merchant's own WordPress site, so it
+is a **destination key** (changing it drops the stored secrets, decisions
+§266). It must be `https`, carry a host, and carry no user-info, query or
+fragment; a sub-directory install (`https://example.com/shop`) is fine. Every
+call goes through `api_base`, which runs the SSRF check (the host must resolve
+to a public address). **Redirects are never followed** — a 3xx is a non-retryable
+`rejected`, so the Basic credentials only ever reach the host the admin typed.
+The key and secret ride the `Authorization` header only; WooCommerce's
+query-string auth is never used, because a query string lands in access logs.
+`test_connection` calls `GET /system_status`, which needs a valid key (the
+public `/wp-json/wc/v3` index would answer an anonymous caller).
+
+Not supported: sites without pretty permalinks (`?rest_route=` URLs), and hosts
+that strip the `Authorization` header before PHP sees it (some CGI setups) —
+both answer with an error at Test, and the merchant's fix is on their server.
+
+**Locations.** Core WooCommerce keeps one stock pool per product, so
+`list_locations` returns one synthetic location, `store` ("Store"). Map it as
+the default location. Multi-location inventory plugins (ATUM, Multi Locations
+Inventory and the like) each have their own API and are **out of scope**.
+
+**Items.** `item_id` is `<product id>` for a simple product and
+`<parent id>/<variation id>` for a variation — the same shape an admin types
+into an SKU override. `resolve_sku` calls `GET /products?sku=<sku>` (on current
+WooCommerce this matches variations as well, returning `type: variation` and
+`parent_id`); when that finds nothing it falls back to the variations endpoint,
+which is per parent, by walking the variable products
+(`GET /products?type=variable`, then `GET /products/<id>/variations?sku=`),
+bounded to `MAX_FALLBACK_PARENTS` (100) parents. Past the bound the answer is
+"unmapped" — a skip an admin fixes with an SKU override, never a guess. Matching
+is case-insensitive, like WooCommerce's own SKU uniqueness. Zero matches **and**
+more than one (an import can duplicate an SKU) are `unmapped_sku`. An SKU
+containing a comma is unmapped without a call, because WooCommerce reads `sku=`
+as a comma-separated list.
+
+**Adjusting.** WooCommerce has no relative stock endpoint: `stock_quantity` on
+`PUT /products/<id>` (or `…/variations/<vid>`) is absolute. So the adapter:
+
+1. refuses a fraction (`require_integral`) and any location but `store`;
+2. reads the product — and, for a variation whose `manage_stock` is `"parent"`,
+   its parent, which holds that variation's stock;
+3. refuses with code `stock_not_managed` (non-retryable; the receipt shows the
+   adapter's message: turn on *Manage stock?*) when `manage_stock` is not on;
+4. looks for `adjustment.idempotency_key` in the product's
+   `_feoh_inventory_syncs` meta — found means a replay: return
+   `replayed=True`, write nothing;
+5. writes `stock_quantity = current + delta` **and** the key into that meta in
+   one `PUT`, so a response lost after the write leaves the key recorded and
+   the retry is recognised.
+
+The meta value is a JSON list of `{k, d, a}` (key, delta, quantity after),
+bounded to the newest `MAX_RECORDED_SYNCS` (100) entries per product; a replay
+of a key older than that on the same product would apply twice, which the
+retry sweep's attempt cap and backoff keep far out of reach. Unreadable meta is
+treated as empty. `provider_reference` is `wc:<product id>:<idempotency key>`.
+
+**Decision: the read → write race with storefront sales is accepted, and
+tracked.** Between the read in step 2 and the write in step 5, a sale on the
+storefront can decrement the stock; our absolute write then overwrites it, and
+the shelf count is wrong by that sale (a lost update). There is no
+compare-and-set in the WooCommerce REST API — no `If-Match`, no conditional
+`stock_quantity` — so the adapter cannot detect it. The window is two HTTP
+round trips, once per receipt line, and the alternatives are worse:
+*re-reading after the write* cannot tell a sale from our own change;
+*refusing to sync* leaves the receipt's stock off the shelf entirely; and
+*query-string or plugin-free tricks* do not exist. The durable fix is a
+relative write: WooCommerce's own `wc_update_product_stock($product, $n,
+'increase'|'decrease')` runs an atomic SQL `UPDATE … SET stock = stock + n`, but
+it is reachable only from PHP — so it needs a small companion WordPress plugin
+exposing it as a REST route (with the idempotency check beside it). That is
+tracked in `docs/followups.md` with its trigger.
+
+**Sub-processor status.** The store runs on the merchant's own WordPress host,
+chosen and contracted by them; Automattic (WooCommerce's maker) receives
+nothing through this integration. So WooCommerce is a **customer-controlled
+counterparty, not a sub-processor of ours**: its `docs/sub-processors.md` § 19.1
+row names the processor `(customer's own WordPress store)`, the same shape as
+the customer's QMS, and it is listed with § 22's customer-controlled
+counterparties and on `/legal/sub-processors` § 4.
+
+**Fake.** Fixtures `WOO-SIMPLE-1` (101, 10 in stock), `WOO-UNMANAGED` (102,
+`manage_stock: false`), `WOO-VAR-RED` (variation 201 of 200), `WOO-VAR-BLUE`
+(variation 202, `manage_stock: "parent"`), `WOO-DUP` (two products). Key
+`ck_fake_woocommerce` / `cs_fake_woocommerce`. `LEGACY_SKU_SEARCH` makes
+`/products?sku=` skip variations (the fallback's case); `POST
+/woocommerce/__fail-next {"status": N}` injects one failure (a 3xx carries a
+`Location`); `GET /__state/woocommerce` exposes stock, meta, the request log and
+a count of requests that carried credentials in the query (always 0).

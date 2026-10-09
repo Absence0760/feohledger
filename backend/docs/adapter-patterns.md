@@ -288,7 +288,10 @@ class MyAdapter(CommerceAdapter):
     async def adjust_available(self, adjustment: InventoryAdjustment) -> InventoryAdjustmentResult: ...
 ```
 
-Registered: `mock` (in-process, the local-first default). The registry imports
+Registered: `mock` (in-process, the local-first default); `woocommerce` (real —
+REST `/wp-json/wc/v3` on the merchant's own https `store_url`, consumer key +
+secret over Basic, one synthetic `store` location, read → write adjust with the
+idempotency key in product meta). The registry imports
 every module in the package (`pkgutil`), so **a new provider is one new module**
 — no import list and no shared catalogue: the spec passed to the decorator IS
 its catalogue entry. Selected by `Organization.settings.commerce.provider`; an
