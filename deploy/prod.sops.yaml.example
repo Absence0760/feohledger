@@ -132,9 +132,10 @@ FEOH_APPROVAL_SIGNING_KEY: ""
 # Keyring for the client secrets, API keys, passwords and OAuth tokens stored in
 # organizations.settings.erp (backend/app/utils/credential_crypto.py). Format
 # `<key_id>:<base64 of 32 random bytes>`; the FIRST entry encrypts, every entry
-# decrypts. Generate: echo "k$(date +%Y%m):$(openssl rand -base64 32)". Empty →
-# every ERP credential save is refused, and migration 0110 refuses to run while
-# any plaintext credential is stored. Rotation: docs/secrets-rotation.md.
+# decrypts. Generate: echo "k$(date +%Y%m):$(openssl rand -base64 32)".
+# REQUIRED: a deployed env refuses to boot without it, or with the dev key from
+# backend/.env.development (decrypt-env.sh checks both first). Rotation:
+# docs/secrets-rotation.md.
 FEOH_CREDENTIAL_ENCRYPTION_KEYS: ""
 
 # ── Self-service signup + hCaptcha ──

@@ -8,6 +8,8 @@ envs keep the convenient defaults.
 
 from __future__ import annotations
 
+import base64
+
 import pytest
 from pydantic import ValidationError
 
@@ -15,6 +17,35 @@ from app.config import Settings
 
 # A throwaway 32+ char key for the "good config" cases.
 _GOOD_KEY = "x" * 48
+
+# A deployed env needs a credential keyring that is not the committed dev key.
+_PROD_KEYRING = "k1:" + base64.urlsafe_b64encode(b"p" * 32).decode()
+_DEV_KEYRING = "dev1:ZGV2LW9ubHktY3JlZGVudGlhbC1rZXktbm90LXJlYWw="
+
+
+@pytest.fixture(autouse=True)
+def _real_keyring(monkeypatch):
+    monkeypatch.setenv("FEOH_CREDENTIAL_ENCRYPTION_KEYS", _PROD_KEYRING)
+
+
+def test_deployed_env_refuses_an_empty_credential_keyring(monkeypatch):
+    monkeypatch.setenv("FEOH_CREDENTIAL_ENCRYPTION_KEYS", "")
+    with pytest.raises(ValidationError, match="FEOH_CREDENTIAL_ENCRYPTION_KEYS"):
+        Settings(environment="production", hcaptcha_secret="hc", secret_key=_GOOD_KEY)
+
+
+def test_deployed_env_refuses_the_committed_dev_credential_key(monkeypatch):
+    """A copied .env.development must not encrypt prod credentials under a
+    publicly known key — even alongside a real one."""
+    for keyring in (_DEV_KEYRING, f"{_PROD_KEYRING},{_DEV_KEYRING}"):
+        monkeypatch.setenv("FEOH_CREDENTIAL_ENCRYPTION_KEYS", keyring)
+        with pytest.raises(ValidationError, match="FEOH_CREDENTIAL_ENCRYPTION_KEYS"):
+            Settings(environment="production", hcaptcha_secret="hc", secret_key=_GOOD_KEY)
+
+
+def test_local_dev_keeps_the_committed_dev_credential_key(monkeypatch):
+    monkeypatch.setenv("FEOH_CREDENTIAL_ENCRYPTION_KEYS", _DEV_KEYRING)
+    assert Settings(environment="development").credential_encryption_keys == _DEV_KEYRING
 
 
 def test_deployed_env_refuses_default_secret_key():

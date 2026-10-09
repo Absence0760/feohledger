@@ -52,6 +52,7 @@ REQUIRED = {
     "FEOH_S3_BUCKET": "feohledger-invoice-files",
     "BACKUP_S3_BUCKET": "feohledger-backups",
     "FEOH_HCAPTCHA_SECRET": "dummy-captcha-secret",
+    "FEOH_CREDENTIAL_ENCRYPTION_KEYS": "k1:cHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHA=",
 }
 
 SOPS_STUB = """#!/bin/sh
@@ -165,6 +166,14 @@ def test_refuses_a_missing_required_var(deploy: Deploy, missing: str, shape: str
     result = deploy.run(_dotenv({missing: None if shape == "absent" else ""}))
     _assert_refused_and_kept(deploy, result)
     assert missing in result.stderr
+
+
+def test_refuses_the_committed_dev_credential_key(deploy: Deploy) -> None:
+    deploy.env.write_text(PREVIOUS_ENV)
+    dev = "dev1:ZGV2LW9ubHktY3JlZGVudGlhbC1rZXktbm90LXJlYWw="
+    result = deploy.run(_dotenv({"FEOH_CREDENTIAL_ENCRYPTION_KEYS": dev}))
+    _assert_refused_and_kept(deploy, result)
+    assert "FEOH_CREDENTIAL_ENCRYPTION_KEYS" in result.stderr
 
 
 @pytest.mark.parametrize("spelling", ["false", "False", "0", "no", "off", "f", "n"])

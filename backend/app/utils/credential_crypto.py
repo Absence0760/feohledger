@@ -79,6 +79,11 @@ class CredentialDecryptError(CredentialCryptoError):
     """A ciphertext is malformed, tampered, or under a key id not configured."""
 
 
+#: The key committed in ``backend/.env.development`` (``dev1:``). Public, so a
+#: deployed environment refuses to boot with it (``config``'s keyring guard).
+DEV_ONLY_KEY = b"dev-only-credential-key-not-real"
+
+
 @dataclass(frozen=True)
 class Keyring:
     active_id: str

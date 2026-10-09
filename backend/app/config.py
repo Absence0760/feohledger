@@ -1036,9 +1036,20 @@ class Settings(BaseSettings):
         # only when a customer saves. Empty is allowed here — it fails closed at
         # use, where the error names the setting. Parsing lives in the utils
         # module (no service-layer import; it imports only stdlib + cryptography).
-        from app.utils.credential_crypto import parse_keyring
+        from app.utils.credential_crypto import DEV_ONLY_KEY, parse_keyring
 
-        parse_keyring(self.credential_encryption_keys)
+        keyring = parse_keyring(self.credential_encryption_keys)
+        # Deployed, the keyring is required (a store-time failure would surface
+        # only when a customer saves an ERP), and must not hold the dev key
+        # committed in .env.development: a copied dev env file would encrypt
+        # every ERP credential under a publicly known key, silently.
+        if self.is_deployed and (
+            keyring is None or any(k == DEV_ONLY_KEY for k in keyring.keys.values())
+        ):
+            raise ValueError(
+                "FEOH_CREDENTIAL_ENCRYPTION_KEYS must be set from sops (no committed dev "
+                f"key) when FEOH_ENVIRONMENT is deployed ({self.environment!r})."
+            )
         return self
 
     @model_validator(mode="after")

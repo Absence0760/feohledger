@@ -351,9 +351,13 @@ async def test_slug_check_rate_limited_returns_429(realdb, monkeypatch):
     assert last_resp.status_code == 429
 
 
-def test_config_requires_captcha_in_deployed_env():
+def test_config_requires_captcha_in_deployed_env(monkeypatch):
     """A deployed environment must refuse to boot with captcha disabled —
     guards against a public, tenant-creating endpoint shipping fail-open."""
+    # A deployed env also needs a non-dev credential keyring (config guard).
+    monkeypatch.setenv(
+        "FEOH_CREDENTIAL_ENCRYPTION_KEYS", "k1:cHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHA="
+    )
     import pytest
     from pydantic import ValidationError
 
