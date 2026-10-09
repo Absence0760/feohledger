@@ -562,7 +562,7 @@ async def test_patch_with_a_changed_destination_drops_masked_secrets(realdb):
             json={"settings": {"erp": {**shown, "account_id": "attacker"}}},
         )
     assert resp.status_code == 200, resp.text
-    stored = await _stored_erp(realdb)
+    stored = _plain(await _stored_erp(realdb))
     assert stored["account_id"] == "attacker"
     assert "consumer_secret" not in stored
     assert "token_secret" not in stored
