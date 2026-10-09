@@ -96,7 +96,7 @@ decimal comparison rather than binary drift.
 
 ### Control-Plane Tables
 
-- `organizations` — tenant registry (name, slug, db_name, settings, plan)
+- `organizations` — tenant registry (name, slug, db_name, settings, plan). The secrets inside `settings.erp` (every catalogue secret field and the OAuth tokens) are stored per field as `enc:v1:<key-id>:<b64>` AES-GCM ciphertext; migration 0110 (control-plane only, data only) encrypted the plaintext already there. See `erp-integration.md` § Credentials at rest.
 - `users` — all users across all tenants. Columns: `email`, `full_name`, `hashed_password` (nullable for SSO-only), `organization_id`, `is_active`, `must_change_password`, `sso_provider` + `sso_provider_id` (OIDC linkage), `mfa_secret` + `mfa_enabled` + `mfa_enrolled_at` (TOTP MFA)
 - `roles` — role definitions (admin, ap_manager, ap_clerk, cfo)
 - `user_roles` — many-to-many join table
