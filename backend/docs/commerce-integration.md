@@ -158,7 +158,49 @@ Follow exactly. Everything except steps 2 and 7 touches only new files.
 | Key | Platform | Auth | Status |
 |---|---|---|---|
 | `mock` | Local mock (in-process) | none | default; SKUs `UNMAPPED*` are unmapped, `TRANSIENT*` fail retryably; locations `mock-main`, `mock-warehouse` |
+| `shopify` | Shopify (Admin GraphQL, pinned `2026-10`) | custom-app Admin API access token per shop | real; whole units only; fake `providers/shopify.py` |
 | `woocommerce` | WooCommerce (merchant's own WordPress, REST `/wp-json/wc/v3`) | consumer key + secret, HTTPS Basic | real; one synthetic location `store`; whole units; § WooCommerce |
+
+### Shopify (`commerce_adapters/shopify.py`)
+
+- **Connection** — `shop_domain` (`<handle>.myshopify.com`; a bare handle or a
+  pasted `https://…/` is normalised, anything naming another host is refused —
+  it is a destination key, so changing it drops the stored token),
+  `access_token` (secret; a custom app's Admin API token with `read_locations`,
+  `read_products`, `read_inventory`, `write_inventory`), and optional
+  `api_version` (default `2026-10`; a `YYYY-MM` release from `2026-01`, where
+  `@idempotent` exists).
+- **Calls** — `POST https://<shop>/admin/api/<version>/graphql.json` with
+  `X-Shopify-Access-Token`: `shop { name }` (test), `locations` (active only,
+  paginated), `productVariants(query: "sku:\"…\"")` filtered to an exact SKU
+  (Shopify's search is token-based; none or several → `unmapped_sku`), then per
+  adjustment a precheck of `location` + the item's `inventoryLevel` there, then
+  `inventoryAdjustQuantities` (`name: "available"`, `reason: "received"` or
+  `"correction"` for a cancelled receipt, `referenceDocumentUri:
+  feohledger://inventory-sync/<key>`, `@idempotent(key:)` plus the
+  `Idempotency-Key` header).
+- **Idempotency** — the same key and parameters replay the original
+  adjustment group. The precheck exists so a stale location or an item not
+  stocked there is refused *before* a key is spent. A key whose attempt failed
+  (`IDEMPOTENCY_PREVIOUS_ATTEMPT_FAILED`) cannot be reused, so the adapter walks
+  `<key>`, `<key>#2` … `<key>#5`; a later replay walks the same sequence to the
+  attempt that succeeded. `IDEMPOTENCY_KEY_PARAMETER_MISMATCH` is refused, never
+  re-keyed — an earlier call may have landed elsewhere. Shopify documents no
+  key-retention window. The case that depends on it is a call that landed but
+  whose response was lost (timeout, reclaimed `in_flight` claim): its retry is
+  safe only while Shopify still holds the key, and the sweep's retries fall
+  well inside a day; a manual retry days later would not be protected.
+- **Errors** — HTTP via `http_failure`; GraphQL `THROTTLED` → `rate_limited`,
+  `ACCESS_DENIED` (missing scope) → `auth_failed`, `INTERNAL_SERVER_ERROR` →
+  `transient`, any other code → `rejected` naming the code only. userErrors:
+  `INVALID_LOCATION` → `unknown_location`; `ADJUST_QUANTITIES_FAILED`,
+  `SERVICE_UNAVAILABLE`, `IDEMPOTENCY_CONCURRENT_REQUEST` → `transient`; the rest
+  → `rejected` with our own wording. Shopify's message text is never copied.
+- **Fake** — `shpat_fake_shopify_token` (and `shpat_fake_readonly_token` for
+  `ACCESS_DENIED`); `gid://shopify/Location/1`/`2` (and inactive `/3`); SKUs
+  `SHOP-TEE-M` → `InventoryItem/101`, `SHOP-DUP` (ambiguous), `SHOP-MUG` (not
+  stocked at Location/2). `POST /shopify/__fail-next` queues `throttled`, an
+  `http` status, or a mutation userError code.
 
 OAuth consent connections are not built: the catalogue's `auth: "oauth"` renders
 a Connect button wired to the authorize hook, and `services/erp_oauth` is bound

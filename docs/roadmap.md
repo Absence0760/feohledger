@@ -234,11 +234,14 @@ Each item ships as **its own PR**. Item 1 (goods-receipt entry) has shipped — 
 
 ### 3. Commerce / inventory platform adapter (Shopify first)
 **Status:** Partial. The foundation has landed (decisions §273, `backend/docs/commerce-integration.md`): SKU identity on PO and receipt lines (migration 0111), the `commerce_adapters` family with its `mock` default, the post-commit push on receipt and its reversal on cancel, retry (manual + sweep), Organization → Commerce, the per-receipt sync status, tools/fake-commerce and a provider contract test.
-**Open:** the real provider adapters, and the OAuth consent connection for a platform that has no key-based one. *(c)* Tracked in [followups.md](followups.md).
+**Open:** the remaining provider adapters (Shopify has landed), and the OAuth consent connection for a platform that has no key-based one. *(c)* Tracked in [followups.md](followups.md).
 
 - [x] Item identity on PO and receipt lines — link to `catalog_items` plus a SKU snapshot, copied onto receipt lines
 - [x] `commerce_adapters` family (`mock` default, pkgutil-discovered registry + decorator): on a goods receipt, adjust the mapped SKU's available quantity at the mapped location; idempotent per receipt line and direction; reversal on cancel
-- [ ] Shopify (Admin GraphQL inventory adjust), Lightspeed, Square, Cin7 — one module each, per `commerce-integration.md` § How to add a provider
+- [x] Shopify (Admin GraphQL `inventoryAdjustQuantities`, `@idempotent`) — `commerce_adapters/shopify.py`, fake, contract + realdb tests, `tests-e2e/commerce/shopify.spec.ts`
+- [ ] Lightspeed — one module, per `commerce-integration.md` § How to add a provider
+- [ ] Square — one module, per `commerce-integration.md` § How to add a provider
+- [ ] Cin7 — one module, per `commerce-integration.md` § How to add a provider
 - [x] WooCommerce — REST `/wp-json/wc/v3` on the merchant's own store, one synthetic location, idempotency key in product meta (`commerce-integration.md` § WooCommerce)
 - [x] Per-org (and per-entity) location mapping and a SKU override table; tools/fake-commerce (`pnpm commerce:up`) and `tests-e2e/commerce/`
 - [ ] Sub-processor registers updated as each real provider lands (`pnpm check:subprocessors`)

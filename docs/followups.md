@@ -1306,15 +1306,15 @@ scope (§260) — do not fold them into any of these.
       an e2e spec. **Trigger:** the first customer on one of those ERPs who
       won't use Merge.dev, or the first customer who receives goods in their
       ERP rather than in FeohLedger.
-- [ ] **(c) No real commerce platform adapter yet.** The foundation is in
-      (decisions §273): SKU identity, the `commerce_adapters` family with its
-      `mock`, the post-commit push and reversal, retry, the panel and
-      tools/fake-commerce. WooCommerce has landed; a tenant can otherwise
-      connect only `mock`. **Durable fix:** one module per remaining provider —
-      Shopify, Lightspeed, Square, Cin7 — following
-      `backend/docs/commerce-integration.md` § How to add a provider (adapter,
-      fake-commerce module, contract test, e2e spec, sub-processor registers).
-      **Trigger:** in progress now, one PR each.
+- [ ] **(c) Three of the five commerce platform adapters are not built.** The
+      foundation is in (decisions §273): SKU identity, the `commerce_adapters`
+      family with its `mock`, the post-commit push and reversal, retry, the
+      panel and tools/fake-commerce. Shopify and WooCommerce have landed; a
+      tenant on Lightspeed, Square or Cin7 can still connect only `mock`.
+      **Durable fix:** one module per remaining provider — Lightspeed, Square,
+      Cin7 — following `backend/docs/commerce-integration.md` § How to add a
+      provider (adapter, fake-commerce module, contract test, e2e spec,
+      sub-processor registers). **Trigger:** in progress now, one PR each.
 - [ ] **(c) A WooCommerce stock push can overwrite a concurrent storefront
       sale.** The REST API has no relative stock change and no compare-and-set,
       so the adapter reads `stock_quantity`, adds the receipt's delta and writes
