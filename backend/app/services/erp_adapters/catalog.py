@@ -158,6 +158,14 @@ ERP_PROVIDERS: list[dict[str, Any]] = [
             # The API reports currency only as numeric ids, so this is the one
             # place an ISO code for the company's own currency comes from.
             _field("home_currency", required=False, placeholder="ZAR"),
+            # Only a Sage partner reaches another host; blank uses the adapter's
+            # default, Sage's South African API (``DEFAULT_API_BASE``).
+            _field(
+                "base_url",
+                required=False,
+                placeholder="https://accounting.sageone.co.za/api/2.0.0",
+                help_key="org.erp.help.sageZaBaseUrl",
+            ),
         ],
         "docs_url": "https://accounting.sageone.co.za/api/2.0.0/Help",
     },
@@ -177,8 +185,13 @@ ERP_PROVIDERS: list[dict[str, Any]] = [
             _field("currency", placeholder="USD"),
             _field("project_id", required=False),
             _field("approval_status", required=False, options=["Pending", "Approved"]),
-            # ``transaction_code_values`` (a list of {id, value}) is set through
-            # the API, not this form: it has no single-input shape.
+            # ``transaction_code_values`` (a list of {id, value}) is deliberately
+            # not a form field: it has no single-input shape. An admin sets it
+            # through the API, ``PATCH /api/organization`` with
+            # ``settings.erp.transaction_code_values``. A save replaces the
+            # block (``merge_erp_update``), so the settings form sends back
+            # every stored key it does not render (frontend
+            # ``buildErpPayload``), which is what keeps it across a form save.
         ],
         "docs_url": "https://developer.blackbaud.com/skyapi",
     },
