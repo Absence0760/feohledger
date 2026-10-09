@@ -156,7 +156,10 @@ were retired in August 2025, so earlier versions are served as 75 anyway.
   pre-check with `query: select * from Bill where DocNumber = '…'` filtered to
   the vendor, and accept a hit only if its `PrivateNote` carries the
   correlation id. Every bill is written with
-  `PrivateNote: "FeohLedger <correlation_id>"`.
+  `PrivateNote: "FeohLedger <correlation_id>"`. A replay can name a bill an
+  earlier `posted_total_mismatch` deleted, so the created bill is read back;
+  Fault 610 / `status: Deleted` moves to the next `requestid`
+  (`<correlation_id>#r2`, …) — `erp-integration.md` § Connecting an OAuth ERP.
 - `VendorRef` ← `vendor_erp_id` (Phase 0). Lines are
   `AccountBasedExpenseLineDetail` with `AccountRef` ←
   `gl_account_erp_id`. Money goes through `dumps_exact_json` and never

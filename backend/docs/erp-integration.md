@@ -1384,12 +1384,30 @@ which apps created on or after 2026-03-02 must use.
   `Reference` is ACCREC-only in Xero, so no bill field can carry our
   correlation id; the create also sends `Idempotency-Key: <correlation_id>`
   (Xero replays the original response).
-- **The posted total is checked.** Xero computes `Total` from the lines and
+- **The posted total is checked, on the bill read back.** After the create the
+  adapter `GET`s `Invoices/{id}`. Xero computes `Total` from the lines and
   their tax types; a `Total` other than `amount` voids (AUTHORISED) or deletes
   (DRAFT) the bill just created and fails non-retryable
-  `posted_total_mismatch`, and a create that reports no `Total` fails
+  `posted_total_mismatch`, and a bill that reports no `Total` fails
   non-retryable `posted_total_unconfirmed` — never success
-  (`erp_adapters/posted_total.py`).
+  (`erp_adapters/posted_total.py`). The message says which of three things
+  happened to the bill: `the bill was voided`, `the bill could not be voided in
+  Xero` (money applied, or the call failed), or `the bill was already deleted
+  or voided in Xero`.
+- **A replayed create for a removed bill moves to a fresh key.** Once a
+  mismatch has voided the bill, a manual retry under the same
+  `Idempotency-Key` gets the original "created" response back for a bill that
+  is now `VOIDED` / `DELETED`. The read-back sees that status and creates again
+  under the next key of a deterministic sequence — `<correlation_id>`, then
+  `<correlation_id>#r2`, `#r3`, … (`posted_total.create_attempt_key`). This
+  cannot duplicate: the bill the old key named is confirmed not live, and every
+  retry walks the same sequence, so Xero's key dedupe still collapses
+  concurrent pushes onto one bill. Only a positive `VOIDED` / `DELETED` moves
+  on — a 404 or error on the read-back fails the push retryably, creating
+  nothing more. After ten keys (`MAX_CREATE_ATTEMPTS`) the push fails
+  non-retryable `previous_bill_removed`. Refusing at the first removed bill was
+  rejected: the correlation id is the invoice's for life, so that refusal would
+  leave the invoice unpostable even after the tax type was fixed.
 - **Rate limits** (60/min, 5,000/day per tenant): HTTP 429 →
   `"Xero post failed: HTTP 429 (rate_limited)"`, `Retry-After` kept in the
   in-memory `raw_response`. No sleep loop; `services/erp`'s retry backoff
@@ -1807,12 +1825,25 @@ any post, with `QuickBooks Online post refused: <reason>`: `vendor_not_linked`,
 `bill_lines` — `account_not_linked` (a coded line is never moved onto the
 header's account), `line_amount_missing`, `amount_mismatch` /
 `tax_not_itemised` (the lines must sum to the header amount, because QuickBooks
-re-totals from lines). After the create, QuickBooks' own `TotalAmt` must equal
-the approved amount: a different one deletes the bill just created and fails
-non-retryable `posted_total_mismatch`; a missing one fails non-retryable
+re-totals from lines). After the create the bill is read back by id
+(`GET bill/{id}`), and QuickBooks' own `TotalAmt` on it must equal the approved
+amount: a different one deletes the bill just created and fails non-retryable
+`posted_total_mismatch` (the message says whether the bill was deleted, could
+not be deleted, or was already deleted); a missing one fails non-retryable
 `posted_total_unconfirmed`. The idempotent re-find applies the same check.
 Posting is idempotent through `requestid=<correlation id>` plus a pre-check on
-DocNumber + vendor + `PrivateNote: "FeohLedger <correlation id>"`. A 401
+DocNumber + vendor + `PrivateNote: "FeohLedger <correlation id>"`. Intuit
+replays the original response for a repeated `requestid` even after the bill
+was deleted, so a retry after a mismatch would otherwise re-check (or report as
+posted) a bill that no longer exists. When the read-back answers Fault `610`
+Object Not Found or `status: Deleted`, the push creates again under the next
+`requestid` — `<correlation id>#r2`, `#r3`, … (`posted_total.create_attempt_key`,
+cut to Intuit's 50 characters). The `PrivateNote` stays the bare correlation id,
+so the pre-check finds a bill from any attempt. This cannot duplicate (the old
+bill is confirmed deleted, and every retry walks the same sequence); any other
+read-back failure fails the push retryably. Ten removed bills
+(`MAX_CREATE_ATTEMPTS`) fail non-retryable `previous_bill_removed`; the Xero
+section above explains why refusing at the first one was rejected. A 401
 refreshes once and retries. `void_invoice` deletes only a bill with no payment
 applied. Locally, `pnpm erp:up` starts fake-erp, which serves `/qbo/oauth2/*`
 (with rotating refresh tokens) and `/qbo/v3/company/fake-realm-1/*`;
