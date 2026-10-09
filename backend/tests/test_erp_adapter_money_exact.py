@@ -310,7 +310,7 @@ def test_netsuite_line_without_a_total_is_priced_exactly():
         gl_account="6000",
         gl_account_erp_id="ERP-6000",
     )
-    body = _netsuite_post(_payload(line_items=[line]))
+    body = _netsuite_post(_payload(amount=Decimal("4375.00"), line_items=[line]))
     assert f'"amount":{Decimal("3.5000") * SCALED_AMOUNT}' in body
 
 
@@ -332,6 +332,40 @@ def _bc_adapter() -> BusinessCentralAdapter:
     )
 
 
+def _bc_draft(doc_id: str, total: Decimal) -> MagicMock:
+    """The fresh read of a created draft: BC's own total, on the wire exactly."""
+    resp = _mock_response(200, {})
+    resp.content = dumps_exact_json(
+        {"id": doc_id, "status": "Draft", "totalAmountIncludingTax": total}
+    ).encode()
+    return resp
+
+
+def test_d365_compares_the_drafts_total_exactly(monkeypatch):
+    """BC's `totalAmountIncludingTax` is read without a float hop: a total one
+    double-rounding away from the approved amount is a mismatch, and the
+    approved amount itself is a match — both at 99999999999999.99."""
+    monkeypatch.setattr(settings, "erp_d365_api_base", "http://fake-erp:12112/d365")
+    monkeypatch.setattr(settings, "erp_d365_token_url", "http://fake-erp:12112/token")
+    for total, posted in ((LOSSY_AMOUNT, True), (Decimal(LOSSY_AMOUNT_AS_FLOAT), False)):
+        with patch("httpx.AsyncClient") as cm:
+            client = cm.return_value.__aenter__.return_value
+            client.get = AsyncMock(
+                side_effect=[_mock_response(200, {"value": []}), _bc_draft("bc-9", total)]
+            )
+            client.delete = AsyncMock(return_value=_mock_response(204, None))
+            client.post = AsyncMock(
+                side_effect=[
+                    _mock_response(200, {"access_token": "tok"}),
+                    _mock_response(201, {"id": "bc-9", "number": "PI-9"}),
+                    _mock_response(204, None),
+                ]
+            )
+            result = _run(_bc_adapter().post_invoice(_payload()))
+        assert result.success is posted, result.message
+        assert client.post.await_count == (3 if posted else 2)
+
+
 def test_d365_posts_exact_decimal_unit_costs(monkeypatch):
     # Operator override keeps the SSRF guard (and its DNS lookup) out of a unit
     # test — same technique as test_erp_base_url_overrides.py.
@@ -340,7 +374,9 @@ def test_d365_posts_exact_decimal_unit_costs(monkeypatch):
     adapter = _bc_adapter()
     with patch("httpx.AsyncClient") as cm:
         client = cm.return_value.__aenter__.return_value
-        client.get = AsyncMock(return_value=_mock_response(200, {"value": []}))
+        client.get = AsyncMock(
+            side_effect=[_mock_response(200, {"value": []}), _bc_draft("bc-1", LOSSY_AMOUNT)]
+        )
         client.post = AsyncMock(
             side_effect=[
                 _mock_response(200, {"access_token": "tok"}),  # token exchange
@@ -376,7 +412,12 @@ def test_d365_keeps_quantity_and_unit_cost_when_they_make_the_line_total(monkeyp
     )
     with patch("httpx.AsyncClient") as cm:
         client = cm.return_value.__aenter__.return_value
-        client.get = AsyncMock(return_value=_mock_response(200, {"value": []}))
+        client.get = AsyncMock(
+            side_effect=[
+                _mock_response(200, {"value": []}),
+                _bc_draft("bc-3", Decimal("4375.00")),
+            ]
+        )
         client.post = AsyncMock(
             side_effect=[
                 _mock_response(200, {"access_token": "tok"}),
@@ -399,7 +440,9 @@ def test_d365_header_only_invoice_posts_the_exact_amount(monkeypatch):
     adapter = _bc_adapter()
     with patch("httpx.AsyncClient") as cm:
         client = cm.return_value.__aenter__.return_value
-        client.get = AsyncMock(return_value=_mock_response(200, {"value": []}))
+        client.get = AsyncMock(
+            side_effect=[_mock_response(200, {"value": []}), _bc_draft("bc-2", LOSSY_AMOUNT)]
+        )
         client.post = AsyncMock(
             side_effect=[
                 _mock_response(200, {"access_token": "tok"}),
@@ -407,7 +450,9 @@ def test_d365_header_only_invoice_posts_the_exact_amount(monkeypatch):
                 _mock_response(200, {}),
             ]
         )
-        _run(adapter.post_invoice(_payload(line_items=[])))
+        result = _run(adapter.post_invoice(_payload(line_items=[])))
+
+    assert result.success, result.message
 
     body = _posted_body_text(client, call_index=1)
     assert f'"unitCost":{LOSSY_AMOUNT}' in body

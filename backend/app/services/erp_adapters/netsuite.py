@@ -2,6 +2,7 @@
 
 import hashlib
 import hmac
+import re
 import time
 import uuid
 from datetime import date
@@ -13,6 +14,8 @@ import httpx
 from app.config import settings
 from app.services.erp_adapters.base import (
     ACCOUNT_NOT_LINKED,
+    AMOUNT_MISMATCH,
+    LINE_AMOUNT_MISSING,
     VENDOR_NOT_LINKED,
     ErpAdapter,
     ErpInvoiceStatus,
@@ -54,6 +57,19 @@ _PO_QUERY = (
     "WHERE t.type = 'PurchOrd' ORDER BY t.id"
 )
 
+#: A NetSuite account id: digits for production, ``1234567_SB1`` for a
+#: sandbox, letters for some legacy accounts. It is spliced into the API
+#: HOSTNAME (and the OAuth ``realm``), so anything outside this alphabet —
+#: ``evil.tld/x?``, ``@``, a quote — is refused rather than escaped.
+_ACCOUNT_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
+
+
+#: Stable refusal reasons for lines that cannot be posted as approved.
+
+
+class NetSuiteConfigError(ValueError):
+    """``settings.erp`` has a bad NetSuite field. Names the key, never the value."""
+
 
 @register_adapter("netsuite")
 class NetSuiteAdapter(ErpAdapter):
@@ -69,6 +85,14 @@ class NetSuiteAdapter(ErpAdapter):
 
     erp_type = "netsuite"
 
+    def _account_id(self) -> str:
+        """The configured ``account_id``, validated before it reaches a URL or
+        a header. Admin-supplied, so it is checked, never trusted."""
+        account = str(self.config.get("account_id") or "")
+        if not _ACCOUNT_ID_RE.fullmatch(account):
+            raise NetSuiteConfigError("NetSuite config 'account_id' is invalid")
+        return account
+
     def _base_url(self) -> str:
         # OPERATOR-controlled override (env/process level, not tenant-admin
         # config) so local dev + e2e can point the adapter at the fake ERP
@@ -79,7 +103,7 @@ class NetSuiteAdapter(ErpAdapter):
         # carry a signature computed over the override URL.
         if settings.erp_netsuite_api_base:
             return settings.erp_netsuite_api_base.rstrip("/")
-        account = self.config["account_id"].replace("_", "-").lower()
+        account = self._account_id().replace("_", "-").lower()
         return f"https://{account}.suitetalk.api.netsuite.com/services/rest/record/v1"
 
     def _auth_header(self, method: str, url: str) -> str:
@@ -110,7 +134,7 @@ class NetSuiteAdapter(ErpAdapter):
         sig_b64 = base64.b64encode(signature).decode()
 
         parts = [
-            f'OAuth realm="{self.config["account_id"]}"',
+            f'OAuth realm="{self._account_id()}"',
             f'oauth_consumer_key="{params["oauth_consumer_key"]}"',
             f'oauth_token="{params["oauth_token"]}"',
             f'oauth_nonce="{nonce}"',
@@ -153,8 +177,13 @@ class NetSuiteAdapter(ErpAdapter):
         if not payload.vendor_erp_id:
             return erp_refusal("NetSuite", VENDOR_NOT_LINKED)
         expense_lines = _netsuite_expense_lines(payload)
-        if expense_lines is None:
-            return erp_refusal("NetSuite", ACCOUNT_NOT_LINKED)
+        if isinstance(expense_lines, str):
+            return erp_refusal("NetSuite", expense_lines)
+        try:
+            self._account_id()
+        except NetSuiteConfigError as exc:
+            # Retrying cannot fix the config, and the message names the key only.
+            return ErpPostResult(success=False, message=str(exc), retryable=False)
 
         lookup_status, existing_id = await self._find_by_external_id(payload.correlation_id)
         if lookup_status != 200:
@@ -444,43 +473,53 @@ def _netsuite_po_to_payload(raw: dict) -> PoPayload | None:
     )
 
 
-def _netsuite_expense_lines(payload: InvoicePayload) -> list[dict] | None:
-    """The vendorBill ``expense`` sublist, or None when a line cannot be posted
-    by account id (``ACCOUNT_NOT_LINKED``).
+def _netsuite_expense_lines(payload: InvoicePayload) -> list[dict] | str:
+    """The vendorBill ``expense`` sublist, or the stable reason it is refused.
 
-    A NetSuite expense line requires an account. A line coded to its own GL
-    account must carry that account's id; an uncoded line falls back to the
-    header's account (``gl_account_erp_id``), the same default the header-only
-    bill uses. A coded line whose account has no id is refused, never posted on
-    the header's account instead: that would book it somewhere the approver
-    never saw.
+    NetSuite totals a bill from its lines, so the lines must add up to the
+    approved ``payload.amount`` or the bill books a different figure. The
+    header amount is never recomputed from the lines, and a line is never
+    moved onto another account.
 
-    Money stays Decimal all the way to the encoder (``utils/json_money``). The
-    line amount is the line's own total; only a line with no total is priced
-    as quantity x unit price. The header ``amount`` is never recomputed from
-    the lines.
+    * No line items → one line for ``payload.amount`` on the header account
+      (``ACCOUNT_NOT_LINKED`` without one).
+    * Each line needs an account. A line coded to its own GL account must carry
+      that account's id; an uncoded line takes the header's
+      (``gl_account_erp_id``). A coded line whose account has no id refuses the
+      bill (``ACCOUNT_NOT_LINKED``) — never moved onto the header account.
+    * A line with no amount (no total, and no unit price to price it with)
+      refuses the bill (``LINE_AMOUNT_MISSING``). It used to post as 0.
+    * Lines that do not sum to exactly ``payload.amount`` — tax-exclusive
+      lines, shipping or a discount carried only on the header — refuse the
+      bill (``AMOUNT_MISMATCH``). Collapsing them onto one header line would
+      move coded expense onto the header's account.
+
+    The line amount is the line's own total; only a line with no total is
+    priced as quantity x unit price. Money stays Decimal all the way to the
+    encoder (``utils/json_money``).
     """
+    header_id = payload.gl_account_erp_id
     if not payload.line_items:
-        if not payload.gl_account_erp_id:
-            return None
+        if not header_id:
+            return ACCOUNT_NOT_LINKED
         return [
             {
-                "account": {"id": payload.gl_account_erp_id},
+                "account": {"id": header_id},
                 "amount": payload.amount,
                 "memo": payload.description or "",
             }
         ]
     lines: list[dict] = []
     for li in payload.line_items:
-        account_id = li.gl_account_erp_id if li.gl_account else payload.gl_account_erp_id
+        account_id = li.gl_account_erp_id if li.gl_account else header_id
         if not account_id:
-            return None
+            return ACCOUNT_NOT_LINKED
         if li.total is not None:
             amount = li.total
         elif li.unit_price is not None:
             amount = (li.quantity if li.quantity else Decimal(1)) * li.unit_price
         else:
-            amount = Decimal(0)
+            return LINE_AMOUNT_MISSING
         lines.append(
             {
                 "account": {"id": account_id},
@@ -488,6 +527,8 @@ def _netsuite_expense_lines(payload: InvoicePayload) -> list[dict] | None:
                 "memo": li.description or "",
             }
         )
+    if sum((line["amount"] for line in lines), Decimal(0)) != payload.amount:
+        return AMOUNT_MISMATCH
     return lines
 
 

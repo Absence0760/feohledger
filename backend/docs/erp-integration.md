@@ -364,6 +364,13 @@ pending, if a registered direct adapter has no catalogue entry, or if a
 
 **API:** OData v4 REST API
 **Base URL:** `https://api.businesscentral.dynamics.com/v2.0/{tenant}/{environment}/api/v2.0`
+— an admin `base_url` (optional; blank = `https://api.businesscentral.dynamics.com/v2.0`)
+must be **https on `api.businesscentral.dynamics.com`**, then passes the SSRF guard too. Any
+other scheme, host, userinfo, port or query raises `BusinessCentralConfigError` naming
+`'base_url'` only — the bearer token for the customer's whole BC tenant rides on every
+request, so a public look-alike host the SSRF guard would pass is a credential leak.
+`post_invoice` refuses it non-retryably before the token exchange. The operator override
+`FEOH_ERP_D365_API_BASE` is exempt.
 **Auth:** OAuth 2.0 client credentials
 
 **Create Purchase Invoice:**
@@ -446,6 +453,10 @@ POST /A_SupplierInvoice
 
 **API:** REST API or SuiteTalk SOAP
 **Base URL:** `https://{account_id}.suitetalk.api.netsuite.com/services/rest/record/v1`
+— `account_id` must match `^[A-Za-z0-9_-]+$` (production `1234567`, sandbox `1234567_SB1`)
+before it reaches the hostname or the OAuth `realm`. Before this, `evil.tld/x?` sent every
+signed request to evil.tld. A bad id raises `NetSuiteConfigError` naming `'account_id'` only;
+`post_invoice` turns it into a non-retryable failure before any request.
 **Auth:** Token-Based Authentication (TBA) — OAuth 1.0 style
 
 **Create Vendor Bill:**
@@ -844,7 +855,7 @@ vendor whose number happened to equal it.
 
 | Adapter | Vendor | Accounts |
 |---|---|---|
-| `netsuite` | `entity: {id}`; refuses `vendor_not_linked` | GL-coded lines go on the **`expense`** sublist (`account: {id}`, `amount` = the line total, or quantity × unit price when it has none), since the `item` sublist needs an item record we never send. An uncoded line takes the header account. A coded line with no id, or a bill with no account at all, refuses `account_not_linked`. A coded line is never moved onto the header account. |
+| `netsuite` | `entity: {id}`; refuses `vendor_not_linked` | GL-coded lines go on the **`expense`** sublist (`account: {id}`, `amount` = the line total, or quantity × unit price when it has none), since the `item` sublist needs an item record we never send. An uncoded line takes the header account. A coded line with no id, or a bill with no account at all, refuses `account_not_linked`. A coded line is never moved onto the header account. A line with no amount at all refuses `line_amount_missing` (it used to post as 0). NetSuite totals the bill from its lines, so lines that do not sum to exactly the approved amount (tax-exclusive lines, header-only shipping or discount) refuse `amount_mismatch` — never collapsed onto the header account, which would move coded expense there. Only an invoice with no line items posts one line for the amount on the header account. |
 | `dynamics_365_bc` | `vendorId`; refuses `vendor_not_linked` | Every line is an `Account` line on **`accountId`** = the account GUID the BC chart sync stored, never `lineObjectNumber` (the No.). Same rules as NetSuite: an uncoded line takes the header account, a coded line with no id or a bill with no account at all refuses `account_not_linked`. See § Business Central: chart, POs and void. |
 | `merge_dev` | `contact` (Merge object id); refuses `vendor_not_linked` | A line's `account` is the Merge account id. A coded line with no id refuses `account_not_linked`; an uncoded line sends none (Merge allows it). |
 
@@ -885,7 +896,7 @@ target ERP actually supports:
 |---|---|
 | `merge_dev` | `X-Idempotency-Key: <correlation_id>` header on `POST /invoices` — Merge's unified API returns the ORIGINAL response for a repeated key instead of creating a second invoice. |
 | `netsuite` | Pre-create lookup: `GET /vendorBill?q=externalId IS "<correlation_id>"` (NetSuite enforces `externalId` uniqueness per record type). A match short-circuits `post_invoice` to a success referencing the existing bill; only a miss proceeds to `POST /vendorBill`. |
-| `dynamics_365_bc` | Pre-create lookup: `GET purchaseInvoices?$filter=externalDocumentNumber eq '<correlation_id>'`. Same short-circuit shape as NetSuite. |
+| `dynamics_365_bc` | Pre-create lookup: `GET purchaseInvoices?$filter=externalDocumentNumber eq '<correlation_id>'`. A hit short-circuits only when it is `Open` or `Paid`. A `Draft` (an earlier attempt whose post step failed or whose response was lost) is finished: its total re-checked, then `Microsoft.NAV.post` re-run — never a second create. Any other status (`In Review`, `Canceled`, `Corrective`) refuses `existing_invoice_not_open`. |
 
 The local `fake-erp` mock implements the matching server-side behavior (a
 merge-idempotency-key cache; `q=`/`$filter=` collection queries filtered by
@@ -967,7 +978,7 @@ carry committed, non-secret local-dev values in `backend/.env.development`:
 |---|---|---|
 | `FEOH_ERP_MERGE_API_BASE` | `https://api.merge.dev/api/accounting/v1` | Merge.dev API base. Dev value: `http://localhost:12112/merge/api/accounting/v1`. |
 | `FEOH_ERP_NETSUITE_API_BASE` | (empty) | Empty → the per-account URL derived from `account_id`; set → used verbatim. Dev value: `http://localhost:12112/netsuite/services/rest/record/v1`. |
-| `FEOH_ERP_D365_API_BASE` | (empty) | Empty → the admin-config `base_url` + SSRF guard; set → used verbatim. Dev value: `http://localhost:12112/d365`. |
+| `FEOH_ERP_D365_API_BASE` | (empty) | Empty → the admin-config `base_url` (https on `api.businesscentral.dynamics.com` only) + SSRF guard; set → used verbatim. Dev value: `http://localhost:12112/d365`. |
 | `FEOH_ERP_D365_TOKEN_URL` | (empty) | Empty → `https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token`. Dev value: `http://localhost:12112/d365/oauth2/token`. |
 
 **Trust model:** these vars are process-level and operator-controlled
@@ -1546,7 +1557,7 @@ Tests: `backend/tests/test_erp_blackbaud_adapter.py`. fake-erp surface:
 
 | Operation | Call |
 |---|---|
-| `post_invoice` | refuse without `vendor_erp_id` / a line account id → `GET purchaseInvoices?$filter=externalDocumentNumber eq '…'` (a non-200 fails the push) → `POST purchaseInvoices` → `POST purchaseInvoices({id})/Microsoft.NAV.post` |
+| `post_invoice` | refuse without `vendor_erp_id` / a line account id / a valid `base_url` → `GET purchaseInvoices?$filter=externalDocumentNumber eq '…'` (a non-200 fails the push) → `POST purchaseInvoices` (a draft) → `GET purchaseInvoices({id})` → total check → `POST purchaseInvoices({id})/Microsoft.NAV.post` |
 | `list_gl_accounts` | `GET accounts` — `number` → code, `displayName` → name, `id` → `erp_account_id`, `category` Assets/Liabilities/Equity/Income/Cost of Goods Sold/Expense → asset/liability/equity/revenue/expense/expense (blank → unclassified). Heading / total accounts and blocked accounts are skipped. |
 | `list_pos` | `GET purchaseOrders?$expand=purchaseOrderLines` — total `totalAmountIncludingTax`; status always `open`; `currencyCode` only when non-blank; `requestedReceiptDate` unless BC's blank `0001-01-01`; comment lines dropped |
 | `list_vendors` | `GET vendors` |
@@ -1560,14 +1571,30 @@ resolution: a code typed locally but never synced, or an entity's own account
 overriding a shared one, would post against whatever BC account happens to hold
 that No. — or fail inside BC instead of refusing up front. The id also survives
 a renumbering in BC. Lines follow NetSuite's account rule (uncoded → header
-account; coded but unlinked → `account_not_linked`) and the amount rule of
-its own amount rule (in `dynamics_365_bc.py`, not the shared `bill_lines`): per
-line only when every line has an amount (total, else quantity × unit price) and
-they sum to exactly the approved amount, otherwise one line for the amount on
-the header account — BC totals the bill from its lines, so lines that disagree
-would post a different figure. A line keeps its
+account; coded but unlinked → `account_not_linked`) and its amount rule: every
+line needs an amount (total, else quantity × unit price; none →
+`line_amount_missing`) and the lines must sum to exactly the approved amount
+(else `amount_mismatch`) — BC totals the bill from its lines, so lines that
+disagree would post a different figure, and collapsing them onto one header
+line would move coded expense onto the header's account. Only an invoice with
+no line items posts one line for the amount on the header account. A line keeps its
 quantity and unit cost only when they multiply to its amount exactly; otherwise
 it goes as 1 × amount.
+
+**The draft's total is checked before it is posted.** BC computes a
+purchaseInvoice's total itself, and a VAT / sales-tax company adds tax on top
+of the lines — 1,200 approved would book 1,440, and BC's own payment run would
+overpay. So after the create the adapter re-reads the draft and runs
+`Microsoft.NAV.post` only when `totalAmountIncludingTax` (parsed exactly, never
+via float) equals `payload.amount`. Otherwise — or when BC states no total — the
+draft, still unposted, is deleted (`If-Match` = the etag just read) and the push
+refused non-retryably: `Business Central post refused: posted_total_mismatch`. A
+failed delete leaves a draft, never a ledger entry, and the refusal stands; a
+later manual retry finds it and checks again. A failed draft read or post step
+is a **retryable** `erp_failure_message` failure. The post step used to be
+`except Exception: pass`, reporting success — and moving the invoice to
+`sent_to_erp` — while BC held only a draft. Success is reported only for an
+invoice BC holds as `Open` or `Paid`.
 
 **POs are always `open`.** The API's statuses are `Draft`, `In Review` and
 `Open`; BC deletes a purchase order once it is fully received and invoiced, so
@@ -1622,17 +1649,22 @@ real paid bill (`"paid in full"`) never matched `paidinfull` and polled as
 fake-erp serves all of the above: BC `accounts` (three posting accounts plus a
 heading and a blocked one), `purchaseOrders` (`PO-FAKE-BC-401` in local
 currency with a blank date, `PO-FAKE-BC-402` in EUR), `DELETE
-purchaseInvoices({id})` (needs `If-Match`, drafts only), and a 400 for an
-`Account` line whose `accountId` is not a posting account; NetSuite SuiteQL
+purchaseInvoices({id})` (needs `If-Match`, drafts only), a 400 for an
+`Account` line whose `accountId` is not a posting account, `totalAmount*` on
+every purchaseInvoice (company `fake-vat-co` adds 20% VAT on top of the lines),
+and a 400 for posting a non-draft; NetSuite SuiteQL
 `vendor` and `transaction` rows (`PO-FAKE-NS-501` open USD, `PO-FAKE-NS-502`
 closed GBP) and `DELETE vendorBill/{id}` (pending approval only).
 
 Tests: `test_erp_gl_sync.py`, `test_erp_po_sync.py`,
 `test_erp_vendor_sync_adapter.py` (mapping, 1000-row bound, degradation),
 `test_erp_void_invoice.py` (both voids, NetSuite status shapes),
-`test_erp_adapter_idempotency.py` (BC lines, failed lookups),
+`test_erp_adapter_idempotency.py` (BC lines, failed lookups, the draft total
+check, draft resumption, a failed post step; NetSuite line sums),
 `test_erp_adapter_error_pii.py` (BC `account_not_linked`),
-`test_erp_base_url_overrides.py` (SSRF guard on the BC list syncs).
+`test_erp_base_url_overrides.py` (BC `base_url` host allowlist + SSRF guard,
+NetSuite `account_id` validation), and `frontend/tests-e2e/erp/dynamics.spec.ts`
+(the 1,200 / 20% VAT refusal against fake-erp).
 ## Connecting an OAuth ERP (QuickBooks Online, Xero, Sage Accounting, Blackbaud)
 
 These ERPs have no client-credentials grant: the customer's admin consents in

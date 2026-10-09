@@ -730,7 +730,9 @@ async def test_call_erp_posts_netsuite_by_vendor_and_account_id():
     receives — `entity: {id}` and expense lines on `account: {id}`."""
     from app.services.erp import _call_erp
 
-    rows = [_line_item(gl_account="6000", total=Decimal("21.00"))]
+    # The line makes the approved 100.00, so it posts as its own expense line
+    # (lines that do not add up collapse onto the header account instead).
+    rows = [_line_item(gl_account="6000", total=Decimal("100.00"))]
     lookup = AsyncMock()
     lookup.status_code = 200
     lookup.json = lambda: {"items": []}
@@ -749,7 +751,7 @@ async def test_call_erp_posts_netsuite_by_vendor_and_account_id():
     body = json.loads(client.post.await_args.kwargs["content"])
     assert body["entity"] == {"id": "ERP-V-1"}
     assert body["expense"]["items"] == [
-        {"account": {"id": "ERP-6000"}, "amount": 21.00, "memo": "Widget"}
+        {"account": {"id": "ERP-6000"}, "amount": 100.00, "memo": "Widget"}
     ]
     assert "item" not in body
 
