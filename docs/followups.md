@@ -43,8 +43,9 @@ a GitHub issue only when one warrants its own thread.
 (decisions §264–§266) opened eleven (c) entries, one (a) (sandbox verification)
 and one (b) (registering the platform OAuth apps). They also rewrote two (c)
 entries: QuickBooks Online now tracks only phases 3–5, and the Priority 14
-adapter entry now tracks the receipt pull and the enterprise ERPs. That takes the
-file from 80 → 93. Before that, 2026-10-07 — a re-validation pass checked all 82 open
+adapter entry now tracks the receipt pull and the enterprise ERPs. Encrypting ERP
+credentials (§267) replaced the plaintext-ERP-credentials entry with one for the
+payment and card blocks still in plaintext. That takes the file from 80 → 93. Before that, 2026-10-07 — a re-validation pass checked all 82 open
 entries against the code on `main` (`02f7387b`) rather than against their own
 text. One had landed without being pruned — the void reversing a captured
 discount by elimination, fixed by `discount_offers.captured_by_payment_id`
@@ -1206,18 +1207,15 @@ lands. Pure doc drift was corrected in the same PR. The two diagnosed defects
       dispatcher, so the gate itself is one more check. **Trigger:**
       before the first paid Growth customer, or the fourth Merge connection
       (the first three are free), whichever comes first.
-- [ ] **(c) ERP credentials are plaintext in `Organization.settings`.** The
-      `erp` block (client secrets, API keys, Merge account tokens) is stored as
-      plain JSONB, protected only by RDS storage encryption, and admins read it
-      back verbatim (`services/org_settings_view`). `erp-integration.md` used to
-      call this "encrypted at rest", which overstated it. A QuickBooks refresh
-      token (five-year lifetime, full read/write on the customer's books) would
-      make it worse. **Durable fix:** hold provider credentials in a tenant table
-      encrypted with the app KMS key (envelope encryption), write-only through
-      audited endpoints like the SSO client secret, and migrate the existing
-      `erp`, `payments.credentials` and `cards.api_key` values. **Trigger:** the
-      QuickBooks connect flow (Phase 1) — its token must not land in plain JSONB.
-
+- [ ] **(c) Payment, card and webhook secrets are still plaintext in
+      `Organization.settings`.** The ERP block is encrypted per field (decisions
+      §267, migration 0110), but `payments.credentials`, `cards.api_key`, and
+      the `payments` / `cards` webhook secrets are still plain JSONB, protected
+      only by RDS storage encryption. **Durable fix:** reuse
+      `utils/credential_crypto` with a per-block seam (encrypt on save, decrypt
+      where the adapter is built) and a backfill migration like 0110.
+      **Trigger:** the first tenant with live payment-rail or card-issuer
+      credentials.
 ### Surfaced by moving the database onto RDS (2026-10-07, docs/minimal-deployment.md § Database)
 
 - [ ] **(c) The DPA does not name RDS's own backups.** `/legal/sub-processors`

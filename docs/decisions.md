@@ -10873,3 +10873,41 @@ per-provider catalogue now drives the form
 **Rejected.** *A blanket keep-on-blank:* it would carry one ERP's
 `client_secret` into another's app credentials, and send the stored secret to
 any new host.
+
+## 267. ERP credentials are encrypted per field inside the JSONB (2026-10-08)
+
+**Context.** `settings.erp` held client secrets, API keys, passwords and, since
+§265, OAuth refresh tokens as plain JSONB, protected only by RDS storage
+encryption. A refresh token gives read/write access to a customer's books for
+years. The follow-up's trigger, the QuickBooks connect flow, landed with this work.
+
+**Decision.**
+
+- **Each secret is encrypted on its own, in place:** every catalogue secret
+  field and the OAuth `access_token` / `refresh_token` is stored as
+  `enc:v1:<key-id>:<b64>`, AES-256-GCM with a fresh nonce. The field name is
+  bound in as associated data, so a ciphertext moved to another field fails to
+  decrypt. The settings shape is unchanged.
+- **One keyring from sops:** `FEOH_CREDENTIAL_ENCRYPTION_KEYS`. The first key
+  encrypts and every key decrypts, so rotation needs no cutover
+  (`scripts/reencrypt_erp_credentials.py`, `docs/secrets-rotation.md`).
+- **One seam each way.** `get_erp_adapter` decrypts on the way to an adapter.
+  The settings save, the OAuth callback and the refresher encrypt on the way
+  in. The masked read never decrypts.
+- **Fail closed everywhere.** With no keyring, a save returns 503 and a stored
+  ciphertext is unreadable. A malformed keyring refuses boot. A deployed
+  environment also refuses to boot with no keyring or with the public dev key
+  committed in `.env.development`, and `deploy/decrypt-env.sh` checks both
+  before a deploy starts. Legacy plaintext is read only until migration 0110
+  encrypts it.
+
+**Rejected.**
+- *A KMS envelope per value:* a runtime AWS dependency, plus a LocalStack
+  equivalent for local dev, for no gain over a keyring that sops already
+  protects with KMS.
+- *A separate credentials table:* it rewrites every reader of `settings.erp`.
+- *Binding the org id as well:* moving a ciphertext between orgs already
+  needs database write access.
+
+Payment, card and webhook secrets in other settings blocks are still plaintext
+(`followups.md`).
