@@ -340,7 +340,9 @@ async def sync_pos_from_erp(
     # A sync reaches the live ERP — a Growth feature; `mock` stays open (§258).
     await ensure_live_erp_entitled(control_db, org.id, erp_config)
 
+    from app.services import erp_credentials
     from app.services.erp_adapters import UnknownErpAdapterError, get_erp_adapter
+    from app.utils.credential_crypto import CredentialCryptoError
 
     try:
         adapter = get_erp_adapter(erp_config)
@@ -352,6 +354,10 @@ async def sync_pos_from_erp(
             status_code=400,
             detail=f"'{exc.adapter_key}' is not a supported ERP adapter.",
         ) from exc
+    except CredentialCryptoError:
+        # A stored credential this server cannot decrypt: a configuration
+        # problem the admin or operator fixes, not a gateway failure.
+        raise HTTPException(status_code=409, detail=erp_credentials.UNREADABLE_DETAIL) from None
 
     try:
         erp_pos = await adapter.list_pos()

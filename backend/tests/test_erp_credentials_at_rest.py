@@ -381,11 +381,11 @@ async def test_a_save_that_keeps_secrets_leaves_their_ciphertext_and_audit_alone
         first = await _stored_erp(realdb)
         shown = (await c.get("/api/organization")).json()["settings"]["erp"]
         resp = await c.patch(
-            "/api/organization", json={"settings": {"erp": {**shown, "account_id": "999"}}}
+            "/api/organization", json={"settings": {"erp": {**shown, "token_id": "tid-2"}}}
         )
     assert resp.status_code == 200, resp.text
     second = await _stored_erp(realdb)
-    assert second["account_id"] == "999"
+    assert second["token_id"] == "tid-2"
     for key in ("consumer_secret", "token_secret", "webhook_signing_secret"):
         assert second[key] == first[key]
 
@@ -399,7 +399,7 @@ async def test_a_save_that_keeps_secrets_leaves_their_ciphertext_and_audit_alone
         )
     # Two saves, two rows; the second names only what changed by value.
     assert len(rows) == 2
-    assert ["account_id"] in [r.details["changed"] for r in rows]
+    assert ["token_id"] in [r.details["changed"] for r in rows]
 
 
 @pytest.mark.asyncio
@@ -475,6 +475,22 @@ async def test_test_erp_reports_an_undecryptable_credential(realdb, keyring):
     assert body["success"] is False
     assert "could not be decrypted" in body["message"]
     assert "enc:v1" not in resp.text
+
+
+@pytest.mark.asyncio
+@pytest.mark.plan("scale")
+@pytest.mark.parametrize(
+    "path",
+    ["/api/vendors/sync-erp", "/api/purchase-orders/sync-erp", "/api/gl-accounts/sync-erp"],
+)
+async def test_a_sync_with_an_undecryptable_credential_is_a_clear_409(realdb, keyring, path):
+    await _seed_erp(realdb, erp_credentials.encrypt_erp_config(dict(NETSUITE)))
+    keyring(K2)  # the key that sealed them is gone
+    async with realdb.client(key="a", role="admin") as c:
+        resp = await c.post(path)
+    assert resp.status_code == 409, resp.text
+    assert "could not be decrypted" in resp.json()["detail"]
+    assert "enc:v1" not in resp.text and "PLAIN" not in resp.text
 
 
 # ---------- the inbound ERP webhook -------------------------------------------

@@ -176,3 +176,13 @@ def reencrypt_erp_config(erp: Any) -> Any:
                 )
         out[oauth_key] = block
     return out
+
+
+#: The client-facing message when a stored ERP credential cannot be decrypted
+#: (a key id dropped from the keyring too early, or a tampered row). Names no
+#: value. Shared by every route that builds an adapter from stored settings.
+UNREADABLE_DETAIL = (
+    "The saved ERP credentials could not be decrypted on this server. Re-enter the "
+    "secrets in Organization → ERP, or ask the operator to check "
+    "FEOH_CREDENTIAL_ENCRYPTION_KEYS."
+)

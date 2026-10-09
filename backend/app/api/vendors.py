@@ -1541,7 +1541,9 @@ async def sync_vendors_from_erp_endpoint(
     await ensure_live_erp_entitled(control_db, org.id, erp_config)
 
     # Use ERP adapter to fetch vendors
+    from app.services import erp_credentials
     from app.services.erp_adapters import UnknownErpAdapterError, get_erp_adapter
+    from app.utils.credential_crypto import CredentialCryptoError
 
     try:
         adapter = get_erp_adapter(erp_config)
@@ -1553,6 +1555,10 @@ async def sync_vendors_from_erp_endpoint(
             status_code=400,
             detail=f"'{exc.adapter_key}' is not a supported ERP adapter.",
         ) from exc
+    except CredentialCryptoError:
+        # A stored credential this server cannot decrypt: a configuration
+        # problem the admin or operator fixes, not a gateway failure.
+        raise HTTPException(status_code=409, detail=erp_credentials.UNREADABLE_DETAIL) from None
 
     try:
         erp_vendors = await adapter.list_vendors()
